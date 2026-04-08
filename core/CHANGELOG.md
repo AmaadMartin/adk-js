@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.7.0](https://github.com/google/adk-js/compare/adk-v0.6.1...adk-v0.7.0) (2026-04-08)
+
+
+### Features
+
+* add Agent type alias for LlmAgent to keep parity with Python ADK. ([#242](https://github.com/google/adk-js/issues/242)) ([03da958](https://github.com/google/adk-js/commit/03da95820efb5cdbca045f0621f15c5a60efe2ea))
+* add auth related base classes ([#223](https://github.com/google/adk-js/issues/223)) ([a87ed8e](https://github.com/google/adk-js/commit/a87ed8e0215e4eb654d000cd2ce6b763ab9b7b6b))
+* oauth support: add oauth2 related classes ([#225](https://github.com/google/adk-js/issues/225)) ([d2b7dcb](https://github.com/google/adk-js/commit/d2b7dcb80c9c501a96630582a02191cc55aafcca))
+* RoutedAgent and RoutedLlm ([#215](https://github.com/google/adk-js/issues/215)) ([1083301](https://github.com/google/adk-js/commit/10833019afafa3e0993af3f3f9fe87c3728ac08d))
+
+
+### Bug Fixes
+
+* move otel dependencies from dev deps to deps ([#243](https://github.com/google/adk-js/issues/243)) ([9622da6](https://github.com/google/adk-js/commit/9622da610f394c3cb4a93432ea1d9a9391000947))
+
 ## [0.6.1](https://github.com/google/adk-js/compare/adk-v0.6.0...adk-v0.6.1) (2026-03-30)
 
 

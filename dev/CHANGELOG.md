@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.7.0](https://github.com/google/adk-js/compare/devtools-v0.6.1...devtools-v0.7.0) (2026-04-08)
+
+
+### Miscellaneous Chores
+
+* **devtools:** Synchronize adk versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @google/adk bumped from ^0.6.1 to ^0.7.0
+
 ## [0.6.1](https://github.com/google/adk-js/compare/devtools-v0.6.0...devtools-v0.6.1) (2026-03-30)
 
 
