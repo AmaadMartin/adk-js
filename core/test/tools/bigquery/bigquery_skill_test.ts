@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {getBigQuerySkill} from '@google/adk';
 import {describe, expect, it} from 'vitest';
-import {getBigQuerySkill} from '../../../src/tools/bigquery/bigquery_skill.js';
 
 describe('BigQuery Skill', () => {
   it('should load the bigquery-ai-ml skill', async () => {

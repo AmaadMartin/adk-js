@@ -5,28 +5,25 @@
  */
 
 import {BigQuery} from '@google-cloud/bigquery';
-import {Context} from '@google/adk/agents/context.js';
-import {getBigQueryClient} from '@google/adk/tools/bigquery/client_helper.js';
-import {
-  BigQueryToolConfig,
-  WriteMode,
-} from '@google/adk/tools/bigquery/config.js';
+import {BigQueryToolConfig, WriteMode} from '@google/adk';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {Context} from '../../../src/agents/context.js';
+import {getBigQueryClient} from '../../../src/tools/bigquery/client_helper.js';
 import {
   analyzeContribution,
   detectAnomalies,
   executeSql,
   forecast,
-} from '@google/adk/tools/bigquery/query_tools.js';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
+} from '../../../src/tools/bigquery/query_tools.js';
 
-vi.mock('@google/adk/tools/bigquery/client_helper.js', () => ({
+vi.mock('../../../src/tools/bigquery/client_helper.js', () => ({
   getBigQueryClient: vi.fn(),
 }));
 
-vi.mock('@google/adk/utils/env_aware_utils.js', async () => {
+vi.mock('../../../src/utils/env_aware_utils.js', async () => {
   const actual = await vi.importActual<
-    typeof import('@google/adk/utils/env_aware_utils.js')
-  >('@google/adk/utils/env_aware_utils.js');
+    typeof import('../../../src/utils/env_aware_utils.js')
+  >('../../../src/utils/env_aware_utils.js');
   return {
     ...actual,
     randomUUID: () => '12345678-1234-4123-8123-1234567890ab',
@@ -71,6 +68,7 @@ describe('query_tools', () => {
         query: 'SELECT 1',
         connectionProperties: [],
         labels: {'adk-bigquery-tool': 'execute_sql'},
+        maxResults: 50,
       });
     });
 
@@ -179,6 +177,7 @@ describe('query_tools', () => {
         query: 'CREATE TEMP TABLE t AS SELECT 1',
         connectionProperties: [{key: 'session_id', value: 's1'}],
         labels: {'adk-bigquery-tool': 'execute_sql'},
+        maxResults: 50,
       });
     });
 
@@ -293,6 +292,7 @@ describe('query_tools', () => {
         connectionProperties: [],
         labels: {'adk-bigquery-tool': 'execute_sql'},
         maximumBytesBilled: '20000000',
+        maxResults: 50,
       });
     });
 
@@ -311,6 +311,7 @@ describe('query_tools', () => {
           'adk-bigquery-tool': 'execute_sql',
           'adk-bigquery-application-name': 'my-app',
         },
+        maxResults: 50,
       });
     });
 
@@ -329,6 +330,7 @@ describe('query_tools', () => {
           'adk-bigquery-tool': 'execute_sql',
           'label1': 'val1',
         },
+        maxResults: 50,
       });
     });
 

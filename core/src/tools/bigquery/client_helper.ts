@@ -20,7 +20,7 @@ const DP_USER_AGENT = `adk-dataplex-tool ${USER_AGENT_BASE}`;
 export async function getBigQueryClient(
   projectId: string,
   credentialsConfig?: BigQueryCredentialsConfig,
-  toolConfig?: BigQueryToolConfig,
+  toolConfig?: Partial<BigQueryToolConfig>,
   context?: Context,
 ): Promise<BigQuery> {
   const options: BigQueryOptions = {
@@ -75,10 +75,12 @@ export async function getBigQueryClient(
  */
 export async function getDataplexClient(
   credentialsConfig?: BigQueryCredentialsConfig,
-  toolConfig?: BigQueryToolConfig,
+  toolConfig?: Partial<BigQueryToolConfig>,
   context?: Context,
 ): Promise<CatalogServiceClient> {
-  const options: Record<string, unknown> = {}; // Dataplex options might differ slightly, but inherits from GoogleAuthOptions
+  const options = {} as NonNullable<
+    ConstructorParameters<typeof CatalogServiceClient>[0]
+  >;
 
   const userAgents = [DP_USER_AGENT];
   if (toolConfig?.applicationName) {

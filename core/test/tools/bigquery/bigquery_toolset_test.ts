@@ -6,10 +6,10 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+import {BigQueryToolset, WriteMode} from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
 import {Context} from '../../../src/agents/context.js';
 import {InvocationContext} from '../../../src/agents/invocation_context.js';
-import {BigQueryToolset} from '../../../src/tools/bigquery/bigquery_toolset.js';
 
 const mockListDatasetIds = vi.fn();
 const mockGetDatasetInfo = vi.fn();
@@ -96,7 +96,11 @@ describe('BigQueryToolset', () => {
 
   it('should execute all tools successfully via wrappers', async () => {
     const credentialsConfig = {credentials: {token: 'token'}};
-    const bigqueryToolConfig = {location: 'US'};
+    const bigqueryToolConfig = {
+      location: 'US',
+      writeMode: WriteMode.BLOCKED,
+      maxQueryResultRows: 50,
+    };
     const toolset = new BigQueryToolset({
       credentialsConfig,
       bigqueryToolConfig,
@@ -111,7 +115,7 @@ describe('BigQueryToolset', () => {
 
     for (const tool of tools) {
       const args = getDummyArgsForTool(tool.name);
-      await tool.execute(args, context);
+      await tool.runAsync({args, toolContext: context});
     }
 
     expect(mockListDatasetIds).toHaveBeenCalledWith(

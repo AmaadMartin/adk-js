@@ -5,17 +5,17 @@
  */
 
 import {BigQuery} from '@google-cloud/bigquery';
-import {getBigQueryClient} from '@google/adk/tools/bigquery/client_helper.js';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {getBigQueryClient} from '../../../src/tools/bigquery/client_helper.js';
 import {
   getDatasetInfo,
   getJobInfo,
   getTableInfo,
   listDatasetIds,
   listTableIds,
-} from '@google/adk/tools/bigquery/metadata_tools.js';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
+} from '../../../src/tools/bigquery/metadata_tools.js';
 
-vi.mock('@google/adk/tools/bigquery/client_helper.js', () => ({
+vi.mock('../../../src/tools/bigquery/client_helper.js', () => ({
   getBigQueryClient: vi.fn(),
 }));
 

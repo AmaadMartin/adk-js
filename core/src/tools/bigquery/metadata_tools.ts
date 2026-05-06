@@ -15,7 +15,7 @@ import {BigQueryCredentialsConfig} from './credentials.js';
 export async function listDatasetIds(
   args: {projectId: string},
   credentialsConfig?: BigQueryCredentialsConfig,
-  toolConfig?: BigQueryToolConfig,
+  toolConfig?: Partial<BigQueryToolConfig>,
   context?: Context,
 ): Promise<string[] | {status: string; error_details: string}> {
   try {
@@ -43,7 +43,7 @@ export async function listDatasetIds(
 export async function getDatasetInfo(
   args: {projectId: string; datasetId: string},
   credentialsConfig?: BigQueryCredentialsConfig,
-  toolConfig?: BigQueryToolConfig,
+  toolConfig?: Partial<BigQueryToolConfig>,
   context?: Context,
 ): Promise<unknown> {
   try {
@@ -69,7 +69,7 @@ export async function getDatasetInfo(
 export async function listTableIds(
   args: {projectId: string; datasetId: string},
   credentialsConfig?: BigQueryCredentialsConfig,
-  toolConfig?: BigQueryToolConfig,
+  toolConfig?: Partial<BigQueryToolConfig>,
   context?: Context,
 ): Promise<string[] | {status: string; error_details: string}> {
   try {
@@ -95,7 +95,7 @@ export async function listTableIds(
 export async function getTableInfo(
   args: {projectId: string; datasetId: string; tableId: string},
   credentialsConfig?: BigQueryCredentialsConfig,
-  toolConfig?: BigQueryToolConfig,
+  toolConfig?: Partial<BigQueryToolConfig>,
   context?: Context,
 ): Promise<unknown> {
   try {
@@ -124,7 +124,7 @@ export async function getTableInfo(
 export async function getJobInfo(
   args: {projectId: string; jobId: string},
   credentialsConfig?: BigQueryCredentialsConfig,
-  toolConfig?: BigQueryToolConfig,
+  toolConfig?: Partial<BigQueryToolConfig>,
   context?: Context,
 ): Promise<unknown> {
   try {

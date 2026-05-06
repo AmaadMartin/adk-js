@@ -55,7 +55,7 @@ describe('Search Tool', () => {
 
     mockSearchEntries.mockResolvedValue([mockResponse]);
 
-    const result = await searchTool.searchCatalog(
+    const result: any = await searchTool.searchCatalog(
       {
         prompt: 'search query',
         projectId: 'project',
@@ -86,7 +86,7 @@ describe('Search Tool', () => {
   });
 
   it('should fail if projectId is missing', async () => {
-    const result = await searchTool.searchCatalog(
+    const result: any = await searchTool.searchCatalog(
       {
         prompt: 'search query',
         projectId: '',
@@ -147,7 +147,7 @@ describe('Search Tool', () => {
   it('should handle API errors', async () => {
     mockSearchEntries.mockRejectedValue(new Error('Dataplex Error'));
 
-    const result = await searchTool.searchCatalog(
+    const result: any = await searchTool.searchCatalog(
       {
         prompt: 'query',
         projectId: 'project',
@@ -164,7 +164,7 @@ describe('Search Tool', () => {
   it('should handle API errors with string throw', async () => {
     mockSearchEntries.mockRejectedValue('String Error');
 
-    const result = await searchTool.searchCatalog(
+    const result: any = await searchTool.searchCatalog(
       {
         prompt: 'query',
         projectId: 'project',
@@ -242,7 +242,7 @@ describe('Search Tool', () => {
 
     mockSearchEntries.mockResolvedValue([mockResponse]);
 
-    const result = await searchTool.searchCatalog(
+    const result: any = await searchTool.searchCatalog(
       {
         prompt: 'query',
         projectId: 'project',
@@ -269,7 +269,7 @@ describe('Search Tool', () => {
   it('should handle falsy responseResults and missing dataplexEntry', async () => {
     mockSearchEntries.mockResolvedValueOnce([]);
 
-    let result = await searchTool.searchCatalog(
+    let result: any = await searchTool.searchCatalog(
       {prompt: 'query', projectId: 'project'},
       undefined,
       undefined,

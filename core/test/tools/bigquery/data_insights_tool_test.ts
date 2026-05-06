@@ -275,7 +275,7 @@ describe('Data Insights Tool', () => {
         tableReferences: [],
       },
       {credentials: {token: 'token'}},
-      {maxQueryResultRows: 2},
+      {maxQueryResultRows: 2} as any,
       context,
     );
 
@@ -332,7 +332,7 @@ describe('Data Insights Tool', () => {
     };
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse));
 
-    const result = await dataInsightsTool.askDataInsights(
+    const result: any = await dataInsightsTool.askDataInsights(
       {
         projectId: 'project',
         userQueryWithContext: 'q',
@@ -350,7 +350,7 @@ describe('Data Insights Tool', () => {
   });
 
   it('should fail if token is missing', async () => {
-    const result = await dataInsightsTool.askDataInsights(
+    const result: any = await dataInsightsTool.askDataInsights(
       {
         projectId: 'project',
         userQueryWithContext: 'q',
@@ -435,7 +435,7 @@ describe('Data Insights Tool', () => {
   it('should handle non-Error exceptions in askDataInsights', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue('String Error'));
 
-    const result = await dataInsightsTool.askDataInsights(
+    const result: any = await dataInsightsTool.askDataInsights(
       {
         projectId: 'project',
         userQueryWithContext: 'q',
@@ -539,7 +539,7 @@ describe('Data Insights Tool', () => {
     };
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse));
 
-    const result = await dataInsightsTool.askDataInsights(
+    const result: any = await dataInsightsTool.askDataInsights(
       {
         projectId: 'project',
         userQueryWithContext: 'q',
@@ -747,7 +747,7 @@ describe('Data Insights Tool', () => {
       } as any;
     });
 
-    const result = await dataInsightsTool.askDataInsights(
+    const result: any = await dataInsightsTool.askDataInsights(
       {
         projectId: 'project',
         userQueryWithContext: 'q',

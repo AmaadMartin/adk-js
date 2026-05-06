@@ -23,7 +23,7 @@ export async function searchCatalog(
     typesFilter?: string[];
   },
   credentialsConfig?: BigQueryCredentialsConfig,
-  toolConfig?: BigQueryToolConfig,
+  toolConfig?: Partial<BigQueryToolConfig>,
   context?: Context,
 ): Promise<unknown> {
   const {

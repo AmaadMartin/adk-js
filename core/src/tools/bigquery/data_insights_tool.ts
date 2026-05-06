@@ -5,7 +5,7 @@
  */
 
 import {Context} from '../../agents/context.js';
-import {BigQueryToolConfig} from './config.js';
+import {BigQueryToolConfig, DEFAULT_BIGQUERY_TOOL_CONFIG} from './config.js';
 import {BigQueryCredentialsConfig} from './credentials.js';
 
 const GDA_CLIENT_ID = 'GOOGLE_ADK';
@@ -61,20 +61,24 @@ export async function askDataInsights(
     tableReferences: Array<Record<string, string>>;
   },
   credentialsConfig?: BigQueryCredentialsConfig,
-  toolConfig?: BigQueryToolConfig,
+  toolConfig?: Partial<BigQueryToolConfig>,
   context?: Context,
 ): Promise<
   | {status: string; response: Record<string, unknown>[]}
   | {status: string; error_details: string}
 > {
   const {projectId, userQueryWithContext, tableReferences} = args;
-  const settings = toolConfig || {maxQueryResultRows: 50};
+  const settings = {
+    ...DEFAULT_BIGQUERY_TOOL_CONFIG,
+    ...toolConfig,
+  };
 
   try {
     let token: string | undefined;
 
-    if (credentialsConfig?.credentials?.token) {
-      token = credentialsConfig.credentials.token;
+    const creds = credentialsConfig?.credentials as Record<string, unknown>;
+    if (creds && typeof creds.token === 'string') {
+      token = creds.token;
     } else if (credentialsConfig?.externalAccessTokenKey && context) {
       token = context.state.get<string>(
         credentialsConfig.externalAccessTokenKey,
@@ -175,6 +179,7 @@ export async function askDataInsights(
         }
 
         const dataJson = JSON.parse(accumulator);
+        accumulator = '';
         if (!dataJson.systemMessage) {
           if (dataJson.error) {
             appendMessage(messages, handleError(dataJson.error));
@@ -190,13 +195,9 @@ export async function askDataInsights(
         } else if (systemMessage.data) {
           appendMessage(
             messages,
-            handleDataResponse(
-              systemMessage.data,
-              settings.maxQueryResultRows || 50,
-            ),
+            handleDataResponse(systemMessage.data, settings.maxQueryResultRows),
           );
         }
-        accumulator = '';
       }
     }
 

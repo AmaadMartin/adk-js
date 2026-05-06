@@ -27,13 +27,15 @@ export class BigQueryToolset extends BaseToolset {
     options: {
       toolFilter?: ToolPredicate | string[];
       credentialsConfig?: BigQueryCredentialsConfig;
-      bigqueryToolConfig?: BigQueryToolConfig;
+      bigqueryToolConfig?: Partial<BigQueryToolConfig>;
     } = {},
   ) {
     super(options.toolFilter || (() => true));
     this.credentialsConfig = options.credentialsConfig;
-    this.toolConfig =
-      options.bigqueryToolConfig || DEFAULT_BIGQUERY_TOOL_CONFIG;
+    this.toolConfig = {
+      ...DEFAULT_BIGQUERY_TOOL_CONFIG,
+      ...options.bigqueryToolConfig,
+    };
   }
 
   /**

@@ -57,7 +57,7 @@ describe('Client Helper', () => {
     it('should include location if configured', async () => {
       await clientHelper.getBigQueryClient('project-1', undefined, {
         location: 'US',
-      });
+      } as any);
       expect(BigQuery).toHaveBeenCalledWith(
         expect.objectContaining({
           location: 'US',
@@ -68,7 +68,7 @@ describe('Client Helper', () => {
     it('should include applicationName in userAgent if configured', async () => {
       await clientHelper.getBigQueryClient('project-1', undefined, {
         applicationName: 'my-app',
-      });
+      } as any);
       expect(BigQuery).toHaveBeenCalledWith(
         expect.objectContaining({
           userAgent: 'adk-bigquery-tool google-adk-js my-app',
@@ -167,7 +167,7 @@ describe('Client Helper', () => {
     it('should include applicationName in userAgent if configured', async () => {
       await clientHelper.getDataplexClient(undefined, {
         applicationName: 'my-app',
-      });
+      } as any);
       expect(CatalogServiceClient).toHaveBeenCalledWith(
         expect.objectContaining({
           userAgent: 'adk-dataplex-tool google-adk-js my-app',

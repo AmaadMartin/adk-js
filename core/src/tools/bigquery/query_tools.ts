@@ -16,17 +16,35 @@ import {BigQueryCredentialsConfig} from './credentials.js';
 
 const BIGQUERY_SESSION_INFO_KEY = 'bigquery_session_info';
 
+export type ExecuteSqlResult =
+  | {
+      status: 'SUCCESS';
+      rows: Record<string, unknown>[];
+      result_is_likely_truncated?: boolean;
+    }
+  | {
+      status: 'SUCCESS';
+      dry_run_info: unknown;
+    }
+  | {
+      status: 'ERROR';
+      error_details: string;
+    };
+
 /**
  * Run a BigQuery or BigQuery ML SQL query in the project and return the result.
  */
 export async function executeSql(
   args: {projectId: string; query: string; dryRun?: boolean},
   credentialsConfig?: BigQueryCredentialsConfig,
-  toolConfig?: BigQueryToolConfig,
+  toolConfig?: Partial<BigQueryToolConfig>,
   context?: Context,
-): Promise<unknown> {
+): Promise<ExecuteSqlResult> {
   const {projectId, query, dryRun = false} = args;
-  const settings = toolConfig || DEFAULT_BIGQUERY_TOOL_CONFIG;
+  const settings = {
+    ...DEFAULT_BIGQUERY_TOOL_CONFIG,
+    ...toolConfig,
+  };
 
   try {
     if (settings.computeProjectId && projectId !== settings.computeProjectId) {
@@ -163,7 +181,11 @@ export async function executeSql(
       return formattedRow;
     });
 
-    const result: Record<string, unknown> = {
+    const result: {
+      status: 'SUCCESS';
+      rows: Record<string, unknown>[];
+      result_is_likely_truncated?: boolean;
+    } = {
       status: 'SUCCESS',
       rows: formattedRows,
     };
@@ -197,7 +219,7 @@ export async function forecast(
     idCols?: string[];
   },
   credentialsConfig?: BigQueryCredentialsConfig,
-  toolConfig?: BigQueryToolConfig,
+  toolConfig?: Partial<BigQueryToolConfig>,
   context?: Context,
 ): Promise<unknown> {
   const {
@@ -270,7 +292,7 @@ export async function analyzeContribution(
     pruningMethod?: string;
   },
   credentialsConfig?: BigQueryCredentialsConfig,
-  toolConfig?: BigQueryToolConfig,
+  toolConfig?: Partial<BigQueryToolConfig>,
   context?: Context,
 ): Promise<unknown> {
   const {
@@ -336,9 +358,10 @@ export async function analyzeContribution(
   `;
 
   try {
-    const settings = toolConfig
-      ? {...toolConfig}
-      : {...DEFAULT_BIGQUERY_TOOL_CONFIG};
+    const settings = {
+      ...DEFAULT_BIGQUERY_TOOL_CONFIG,
+      ...toolConfig,
+    };
     if (settings.writeMode === WriteMode.BLOCKED) {
       throw new Error('analyzeContribution is not allowed in this session.');
     } else if (settings.writeMode !== WriteMode.PROTECTED) {
@@ -385,7 +408,7 @@ export async function detectAnomalies(
     anomalyProbThreshold?: number;
   },
   credentialsConfig?: BigQueryCredentialsConfig,
-  toolConfig?: BigQueryToolConfig,
+  toolConfig?: Partial<BigQueryToolConfig>,
   context?: Context,
 ): Promise<unknown> {
   const {
@@ -457,9 +480,10 @@ export async function detectAnomalies(
   }
 
   try {
-    const settings = toolConfig
-      ? {...toolConfig}
-      : {...DEFAULT_BIGQUERY_TOOL_CONFIG};
+    const settings = {
+      ...DEFAULT_BIGQUERY_TOOL_CONFIG,
+      ...toolConfig,
+    };
     if (settings.writeMode === WriteMode.BLOCKED) {
       throw new Error('anomaly detection is not allowed in this session.');
     } else if (settings.writeMode !== WriteMode.PROTECTED) {
