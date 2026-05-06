@@ -155,7 +155,10 @@ describe('AgentLoader', () => {
         name: 'test-agents',
         version: '1.0.0',
         dependencies: {
-          '@google/adk': `file:${path.dirname(require.resolve('@google/adk'))}`,
+          '@google/adk': `file:${path.resolve(
+            path.dirname(require.resolve('@google/adk')),
+            '../..',
+          )}`,
         },
       }),
     );

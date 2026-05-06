@@ -43,6 +43,11 @@ export {RunSkillScriptTool} from './tools/skill/run_skill_script_tool.js';
 
 export * from './telemetry/google_cloud.js';
 export * from './telemetry/setup.js';
+export {getBigQuerySkill} from './tools/bigquery/bigquery_skill.js';
+export {BigQueryToolset} from './tools/bigquery/bigquery_toolset.js';
+export {WriteMode} from './tools/bigquery/config.js';
+export type {BigQueryToolConfig} from './tools/bigquery/config.js';
+export type {BigQueryCredentialsConfig} from './tools/bigquery/credentials.js';
 export * from './tools/mcp/mcp_session_manager.js';
 export * from './tools/mcp/mcp_tool.js';
 export * from './tools/mcp/mcp_toolset.js';
