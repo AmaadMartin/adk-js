@@ -305,4 +305,109 @@ describe('AgentTool', () => {
     // The method should return undefined (void) when aborted during loop
     expect(result).toBeUndefined();
   });
+
+  it('does not propagate grounding metadata by default', async () => {
+    const mockAgent = {
+      name: 'sub-agent',
+    } as unknown as LlmAgent;
+
+    const tool = new AgentTool({agent: mockAgent});
+
+    const mockSessionService = new InMemorySessionService();
+    const session = createSession({
+      id: 'parent-session',
+      appName: 'sub-agent',
+      userId: 'parent-user',
+    });
+
+    const invocationContext = new InvocationContext({
+      invocationId: 'test-invocation',
+      agent: mockAgent,
+      session,
+      pluginManager: new PluginManager([]),
+      sessionService: mockSessionService,
+    });
+
+    const toolContext = new Context({invocationContext});
+
+    const mockGroundingMetadata = {
+      webSearchQueries: ['test query'],
+    };
+
+    const mockRunAsync = async function* () {
+      yield createEvent({
+        author: 'sub-agent',
+        content: {role: 'model', parts: [{text: 'hello'}]},
+        groundingMetadata: mockGroundingMetadata,
+      });
+    };
+
+    vi.mocked(Runner).mockImplementation((config) => {
+      return {
+        appName: config?.appName,
+        sessionService: config?.sessionService,
+        runAsync: mockRunAsync,
+      } as unknown as Runner;
+    });
+
+    await tool.runAsync({args: {request: 'hello'}, toolContext});
+
+    expect(
+      toolContext.state.get('temp:_adk_grounding_metadata'),
+    ).toBeUndefined();
+  });
+
+  it('propagates grounding metadata when propagateGroundingMetadata is true', async () => {
+    const mockAgent = {
+      name: 'sub-agent',
+    } as unknown as LlmAgent;
+
+    const tool = new AgentTool({
+      agent: mockAgent,
+      propagateGroundingMetadata: true,
+    });
+
+    const mockSessionService = new InMemorySessionService();
+    const session = createSession({
+      id: 'parent-session',
+      appName: 'sub-agent',
+      userId: 'parent-user',
+    });
+
+    const invocationContext = new InvocationContext({
+      invocationId: 'test-invocation',
+      agent: mockAgent,
+      session,
+      pluginManager: new PluginManager([]),
+      sessionService: mockSessionService,
+    });
+
+    const toolContext = new Context({invocationContext});
+
+    const mockGroundingMetadata = {
+      webSearchQueries: ['test query'],
+    };
+
+    const mockRunAsync = async function* () {
+      yield createEvent({
+        author: 'sub-agent',
+        content: {role: 'model', parts: [{text: 'hello'}]},
+        groundingMetadata: mockGroundingMetadata,
+      });
+    };
+
+    vi.mocked(Runner).mockImplementation((config) => {
+      return {
+        appName: config?.appName,
+        sessionService: config?.sessionService,
+        runAsync: mockRunAsync,
+      } as unknown as Runner;
+    });
+
+    await tool.runAsync({args: {request: 'hello'}, toolContext});
+
+    expect(toolContext.state.get('temp:_adk_grounding_metadata')).toEqual(
+      mockGroundingMetadata,
+    );
+  });
 });

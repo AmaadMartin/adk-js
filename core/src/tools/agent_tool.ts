@@ -4,7 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content, FunctionDeclaration, Type} from '@google/genai';
+import {
+  Content,
+  FunctionDeclaration,
+  GroundingMetadata,
+  Type,
+} from '@google/genai';
 
 import {BaseAgent} from '../agents/base_agent.js';
 import {isLlmAgent} from '../agents/llm_agent.js';
@@ -30,6 +35,11 @@ export interface AgentToolConfig {
    * Whether to skip summarization of the agent output.
    */
   skipSummarization?: boolean;
+
+  /**
+   * Whether to propagate grounding metadata from the sub-agent.
+   */
+  propagateGroundingMetadata?: boolean;
 }
 
 /**
@@ -69,6 +79,8 @@ export class AgentTool extends BaseTool {
 
   private readonly skipSummarization: boolean;
 
+  private readonly propagateGroundingMetadata: boolean;
+
   constructor(config: AgentToolConfig) {
     super({
       name: config.agent.name,
@@ -76,6 +88,8 @@ export class AgentTool extends BaseTool {
     });
     this.agent = config.agent;
     this.skipSummarization = config.skipSummarization || false;
+    this.propagateGroundingMetadata =
+      config.propagateGroundingMetadata || false;
   }
 
   override _getDeclaration(): FunctionDeclaration {
@@ -163,6 +177,7 @@ export class AgentTool extends BaseTool {
     }
 
     let lastEvent: Event | undefined;
+    let lastGroundingMetadata: GroundingMetadata | undefined;
     for await (const event of runner.runAsync({
       userId: session.userId,
       sessionId: session.id,
@@ -175,6 +190,10 @@ export class AgentTool extends BaseTool {
 
       if (event.actions.stateDelta) {
         toolContext.state.update(event.actions.stateDelta);
+      }
+
+      if (event.groundingMetadata) {
+        lastGroundingMetadata = event.groundingMetadata;
       }
 
       lastEvent = event;
@@ -191,6 +210,13 @@ export class AgentTool extends BaseTool {
       .map((part) => part.text)
       .filter((text) => text)
       .join('\n');
+
+    if (this.propagateGroundingMetadata && lastGroundingMetadata) {
+      toolContext.state.set(
+        'temp:_adk_grounding_metadata',
+        lastGroundingMetadata,
+      );
+    }
 
     // TODO - b/425992518: In case of output schema, the output should be
     // validated. Consider similar logic to one we have in Python ADK.
