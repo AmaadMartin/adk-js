@@ -4,996 +4,1002 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
+import {BigQuery} from '@google-cloud/bigquery';
+import {Context} from '@google/adk/agents/context.js';
+import {getBigQueryClient} from '@google/adk/tools/bigquery/client_helper.js';
+import {
+  BigQueryToolConfig,
+  WriteMode,
+} from '@google/adk/tools/bigquery/config.js';
+import {
+  analyzeContribution,
+  detectAnomalies,
+  executeSql,
+  forecast,
+} from '@google/adk/tools/bigquery/query_tools.js';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
-import {Context} from '../../../src/agents/context.js';
-import {InvocationContext} from '../../../src/agents/invocation_context.js';
-import {WriteMode} from '../../../src/tools/bigquery/config.js';
-import * as queryTools from '../../../src/tools/bigquery/query_tools.js';
 
-const mockCreateQueryJob = vi.fn();
-const mockQuery = vi.fn();
+vi.mock('@google/adk/tools/bigquery/client_helper.js', () => ({
+  getBigQueryClient: vi.fn(),
+}));
 
-vi.mock('@google-cloud/bigquery', () => {
+vi.mock('@google/adk/utils/env_aware_utils.js', async () => {
+  const actual = await vi.importActual<
+    typeof import('@google/adk/utils/env_aware_utils.js')
+  >('@google/adk/utils/env_aware_utils.js');
   return {
-    BigQuery: vi.fn().mockImplementation(() => {
-      return {
-        createQueryJob: mockCreateQueryJob,
-        query: mockQuery,
-      };
-    }),
+    ...actual,
+    randomUUID: () => '12345678-1234-4123-8123-1234567890ab',
   };
 });
 
-vi.mock('../../../src/utils/env_aware_utils.js', () => ({
-  randomUUID: () => 'mocked-uuid-123',
-}));
+function createMockContext(store = new Map<string, unknown>()) {
+  return {
+    state: {
+      get: (key: string) => store.get(key),
+      set: (key: string, val: unknown) => store.set(key, val),
+    },
+  } as unknown as Context;
+}
 
-describe('Query Tools', () => {
-  let context: Context;
+describe('query_tools', () => {
+  const mockClient = {
+    query: vi.fn(),
+    createQueryJob: vi.fn(),
+  };
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockCreateQueryJob.mockReset();
-    mockQuery.mockReset();
-    context = new Context({
-      invocationContext: {
-        session: {id: 'session-1', state: new Map()},
-      } as unknown as InvocationContext,
-      functionCallId: 'test-call-id',
-    });
+    vi.mocked(getBigQueryClient).mockResolvedValue(
+      mockClient as unknown as BigQuery,
+    );
   });
 
-  const setupProtectedModeMocks = () => {
-    mockCreateQueryJob
-      .mockResolvedValueOnce([
-        {
-          metadata: {
-            statistics: {
-              query: {sessionInfo: {sessionId: 'session-id-123'}},
-            },
-            configuration: {
-              query: {destinationTable: {datasetId: 'temp-dataset-123'}},
-            },
-          },
-        },
-      ]) // session creation
-      .mockResolvedValueOnce([
-        {
-          metadata: {
-            statistics: {query: {statementType: 'CREATE_MODEL'}},
-            configuration: {
-              query: {destinationTable: {datasetId: 'temp-dataset-123'}},
-            },
-          },
-        },
-      ]) // dry run 1
-      .mockResolvedValueOnce([
-        {
-          metadata: {
-            statistics: {query: {statementType: 'SELECT'}},
-            configuration: {
-              query: {destinationTable: {datasetId: 'temp-dataset-123'}},
-            },
-          },
-        },
-      ]); // dry run 2
-  };
-
   describe('executeSql', () => {
-    it('should fail if computeProjectId does not match', async () => {
-      const result = await queryTools.executeSql(
+    it('should execute SELECT query successfully in ALLOWED mode', async () => {
+      const mockRows = [{num: 123}];
+      mockClient.query.mockResolvedValue([mockRows]);
+
+      const result = await executeSql(
+        {projectId: 'p', query: 'SELECT 1'},
+        undefined,
+        {writeMode: WriteMode.ALLOWED},
+      );
+
+      expect(result).toEqual({status: 'SUCCESS', rows: mockRows});
+      expect(mockClient.query).toHaveBeenCalledWith({
+        query: 'SELECT 1',
+        connectionProperties: [],
+        labels: {'adk-bigquery-tool': 'execute_sql'},
+      });
+    });
+
+    it('should restrict project if computeProjectId is set', async () => {
+      const result = await executeSql(
         {projectId: 'wrong-project', query: 'SELECT 1'},
         undefined,
-        {
-          writeMode: WriteMode.BLOCKED,
-          computeProjectId: 'allowed-project',
-          maxQueryResultRows: 50,
-        },
+        {writeMode: WriteMode.ALLOWED, computeProjectId: 'right-project'},
       );
-      expect(result.status).toBe('ERROR');
-      expect(result.error_details).toContain(
-        'restricted to execute queries only in the project',
-      );
+
+      expect(result).toEqual({
+        status: 'ERROR',
+        error_details:
+          'Cannot execute query in the project wrong-project, as the tool is restricted to execute queries only in the project right-project.',
+      });
     });
 
-    it('BLOCKED mode should allow SELECT query', async () => {
-      mockCreateQueryJob.mockResolvedValue([
+    it('should block non-SELECT in BLOCKED mode', async () => {
+      mockClient.createQueryJob.mockResolvedValue([
+        {
+          metadata: {
+            statistics: {query: {statementType: 'UPDATE'}},
+          },
+        },
+      ]);
+
+      const result = await executeSql(
+        {projectId: 'p', query: 'UPDATE table SET x = 1'},
+        undefined,
+        {writeMode: WriteMode.BLOCKED},
+      );
+
+      expect(result).toEqual({
+        status: 'ERROR',
+        error_details: 'Read-only mode only supports SELECT statements.',
+      });
+      expect(mockClient.createQueryJob).toHaveBeenCalledWith({
+        query: 'UPDATE table SET x = 1',
+        dryRun: true,
+        labels: {'adk-bigquery-tool': 'execute_sql'},
+      });
+    });
+
+    it('should allow SELECT in BLOCKED mode', async () => {
+      mockClient.createQueryJob.mockResolvedValue([
         {
           metadata: {
             statistics: {query: {statementType: 'SELECT'}},
           },
         },
       ]);
-      mockQuery.mockResolvedValue([[{col: 1}]]);
+      const mockRows = [{num: 123}];
+      mockClient.query.mockResolvedValue([mockRows]);
 
-      const result = await queryTools.executeSql(
-        {projectId: 'project', query: 'SELECT 1'},
+      const result = await executeSql(
+        {projectId: 'p', query: 'SELECT 1'},
         undefined,
-        {writeMode: WriteMode.BLOCKED, maxQueryResultRows: 50},
-        context,
+        undefined,
       );
 
-      expect(result.status).toBe('SUCCESS');
-      expect(result.rows).toEqual([{col: 1}]);
-      expect(mockCreateQueryJob).toHaveBeenCalledWith(
-        expect.objectContaining({
-          query: 'SELECT 1',
-          dryRun: true,
-        }),
-      );
-      expect(mockQuery).toHaveBeenCalled();
+      expect(result).toEqual({status: 'SUCCESS', rows: mockRows});
     });
 
-    it('BLOCKED mode should deny non-SELECT query', async () => {
-      mockCreateQueryJob.mockResolvedValue([
-        {
-          metadata: {
-            statistics: {query: {statementType: 'CREATE_TABLE'}},
-          },
+    it('should handle PROTECTED mode - session creation and validation', async () => {
+      const mockContext = {
+        state: {
+          get: vi.fn().mockReturnValue(undefined), // No session yet
+          set: vi.fn(),
         },
-      ]);
+      } as unknown as Context;
 
-      const result = await queryTools.executeSql(
-        {projectId: 'project', query: 'CREATE TABLE ...'},
-        undefined,
-        {writeMode: WriteMode.BLOCKED, maxQueryResultRows: 50},
-        context,
-      );
-
-      expect(result.status).toBe('ERROR');
-      expect(result.error_details).toContain(
-        'Read-only mode only supports SELECT statements.',
-      );
-      expect(mockQuery).not.toHaveBeenCalled();
-    });
-
-    it('PROTECTED mode should create session and allow temp table writes', async () => {
-      mockCreateQueryJob
+      mockClient.createQueryJob
         .mockResolvedValueOnce([
           {
             metadata: {
-              statistics: {
-                query: {sessionInfo: {sessionId: 'session-id-123'}},
-              },
-              configuration: {
-                query: {destinationTable: {datasetId: 'temp-dataset-123'}},
-              },
+              statistics: {query: {sessionInfo: {sessionId: 's1'}}},
+              configuration: {query: {destinationTable: {datasetId: 'd1'}}},
             },
           },
-        ])
+        ]) // Session creation dry run
         .mockResolvedValueOnce([
           {
             metadata: {
               statistics: {query: {statementType: 'CREATE_TABLE'}},
-              configuration: {
-                query: {destinationTable: {datasetId: 'temp-dataset-123'}},
-              },
+              configuration: {query: {destinationTable: {datasetId: 'd1'}}}, // Writing to anonymous dataset
             },
           },
-        ]);
+        ]); // Query dry run
 
-      mockQuery.mockResolvedValue([[]]);
+      const mockRows: unknown[] = [];
+      mockClient.query.mockResolvedValue([mockRows]);
 
-      const result = await queryTools.executeSql(
-        {projectId: 'project', query: 'CREATE TEMP TABLE ...'},
+      const result = await executeSql(
+        {projectId: 'p', query: 'CREATE TEMP TABLE t AS SELECT 1'},
         undefined,
-        {writeMode: WriteMode.PROTECTED, maxQueryResultRows: 50},
-        context,
+        {writeMode: WriteMode.PROTECTED},
+        mockContext,
       );
 
-      expect(result.status).toBe('SUCCESS');
-      expect(context.state.get('bigquery_session_info')).toEqual([
-        'session-id-123',
-        'temp-dataset-123',
-      ]);
-
-      expect(mockCreateQueryJob).toHaveBeenCalledTimes(2);
-      expect(mockCreateQueryJob).toHaveBeenLastCalledWith(
-        expect.objectContaining({
-          connectionProperties: [{key: 'session_id', value: 'session-id-123'}],
-        }),
+      expect(result).toEqual({status: 'SUCCESS', rows: mockRows});
+      expect(mockContext.state.set).toHaveBeenCalledWith(
+        'bigquery_session_info',
+        ['s1', 'd1'],
       );
-
-      expect(mockQuery).toHaveBeenCalledWith(
-        expect.objectContaining({
-          connectionProperties: [{key: 'session_id', value: 'session-id-123'}],
-        }),
-      );
+      expect(mockClient.query).toHaveBeenCalledWith({
+        query: 'CREATE TEMP TABLE t AS SELECT 1',
+        connectionProperties: [{key: 'session_id', value: 's1'}],
+        labels: {'adk-bigquery-tool': 'execute_sql'},
+      });
     });
 
-    it('PROTECTED mode should deny permanent table writes', async () => {
-      context.state.set('bigquery_session_info', [
-        'session-id-123',
-        'temp-dataset-123',
-      ]);
+    it('should block non-SELECT writing to other datasets in PROTECTED mode', async () => {
+      const mockContext = {
+        state: {
+          get: vi.fn().mockReturnValue(['s1', 'd1']), // Existing session
+          set: vi.fn(),
+        },
+      } as unknown as Context;
 
-      mockCreateQueryJob.mockResolvedValueOnce([
+      mockClient.createQueryJob.mockResolvedValue([
         {
           metadata: {
             statistics: {query: {statementType: 'CREATE_TABLE'}},
             configuration: {
-              query: {destinationTable: {datasetId: 'permanent-dataset'}},
+              query: {destinationTable: {datasetId: 'other_dataset'}},
             },
           },
         },
       ]);
 
-      const result = await queryTools.executeSql(
-        {
-          projectId: 'project',
-          query: 'CREATE TABLE permanent-dataset.table ...',
-        },
-        undefined,
-        {writeMode: WriteMode.PROTECTED, maxQueryResultRows: 50},
-        context,
-      );
-
-      expect(result.status).toBe('ERROR');
-      expect(result.error_details).toContain(
-        'Protected write mode only supports SELECT statements, or write operations in the anonymous dataset',
-      );
-      expect(mockQuery).not.toHaveBeenCalled();
-    });
-
-    it('should handle dryRun: true successfully', async () => {
-      const mockMetadata = {kind: 'bigquery#job', id: 'job-1'};
-      mockCreateQueryJob.mockResolvedValue([{metadata: mockMetadata}]);
-
-      const result = await queryTools.executeSql(
-        {projectId: 'project', query: 'SELECT 1', dryRun: true},
-        undefined,
-        {writeMode: WriteMode.ALLOWED},
-        context,
-      );
-
-      expect(result.status).toBe('SUCCESS');
-      expect(result.dry_run_info).toEqual(mockMetadata);
-      expect(mockQuery).not.toHaveBeenCalled();
-    });
-
-    it('should apply maximumBytesBilled and maxQueryResultRows in query options', async () => {
-      mockQuery.mockResolvedValue([[]]);
-
-      await queryTools.executeSql(
-        {projectId: 'project', query: 'SELECT 1'},
-        undefined,
-        {
-          writeMode: WriteMode.ALLOWED,
-          maximumBytesBilled: 1000,
-          maxQueryResultRows: 10,
-        },
-        context,
-      );
-
-      expect(mockQuery).toHaveBeenCalledWith(
-        expect.objectContaining({
-          maximumBytesBilled: '1000',
-          maxResults: 10,
-        }),
-      );
-    });
-
-    it('should set result_is_likely_truncated if rows count equals maxQueryResultRows', async () => {
-      mockQuery.mockResolvedValue([[{id: 1}, {id: 2}]]);
-
-      const result = await queryTools.executeSql(
-        {projectId: 'project', query: 'SELECT 1'},
-        undefined,
-        {writeMode: WriteMode.ALLOWED, maxQueryResultRows: 2},
-        context,
-      );
-
-      expect(result.status).toBe('SUCCESS');
-      expect(result.result_is_likely_truncated).toBe(true);
-    });
-
-    it('should handle non-serializable values in rows by converting to string', async () => {
-      const circular: any = {};
-      circular.self = circular;
-      mockQuery.mockResolvedValue([[{id: 1, val: circular}]]);
-
-      const result = await queryTools.executeSql(
-        {projectId: 'project', query: 'SELECT 1'},
-        undefined,
-        {writeMode: WriteMode.ALLOWED},
-        context,
-      );
-
-      expect(result.status).toBe('SUCCESS');
-      expect(result.rows[0].val).toBe('[object Object]');
-    });
-
-    it('should handle API errors in executeSql', async () => {
-      mockQuery.mockRejectedValue(new Error('Query Failed'));
-
-      const result = await queryTools.executeSql(
-        {projectId: 'project', query: 'SELECT 1'},
-        undefined,
-        {writeMode: WriteMode.ALLOWED},
-        context,
-      );
-
-      expect(result.status).toBe('ERROR');
-      expect(result.error_details).toBe('Query Failed');
-    });
-
-    it('should apply applicationName in job labels', async () => {
-      mockCreateQueryJob.mockResolvedValue([
-        {
-          metadata: {
-            statistics: {query: {statementType: 'SELECT'}},
-          },
-        },
-      ]);
-      mockQuery.mockResolvedValue([[]]);
-
-      await queryTools.executeSql(
-        {projectId: 'project', query: 'SELECT 1'},
-        undefined,
-        {
-          writeMode: WriteMode.BLOCKED,
-          applicationName: 'my-app',
-        },
-        context,
-      );
-
-      expect(mockCreateQueryJob).toHaveBeenCalledWith(
-        expect.objectContaining({
-          labels: expect.objectContaining({
-            'adk-bigquery-application-name': 'my-app',
-          }),
-        }),
-      );
-    });
-
-    it('should fail in PROTECTED mode if session creation returns missing sessionId or datasetId', async () => {
-      mockCreateQueryJob.mockResolvedValueOnce([
-        {
-          metadata: {
-            statistics: {
-              query: {sessionInfo: {}},
-            },
-            configuration: {
-              query: {},
-            },
-          },
-        },
-      ]);
-
-      const result = await queryTools.executeSql(
-        {projectId: 'project', query: 'CREATE TEMP TABLE ...'},
+      const result = await executeSql(
+        {projectId: 'p', query: 'CREATE TABLE other_dataset.t AS SELECT 1'},
         undefined,
         {writeMode: WriteMode.PROTECTED},
-        context,
+        mockContext,
       );
 
-      expect(result.status).toBe('ERROR');
-      expect(result.error_details).toContain(
-        'Failed to create BigQuery session.',
+      expect(result).toEqual({
+        status: 'ERROR',
+        error_details:
+          'Protected write mode only supports SELECT statements, or write operations in the anonymous dataset of a BigQuery session.',
+      });
+    });
+
+    it('should handle dryRun option', async () => {
+      const mockMetadata = {jobReference: {jobId: 'j1'}};
+      mockClient.createQueryJob.mockResolvedValue([{metadata: mockMetadata}]);
+
+      const result = await executeSql(
+        {projectId: 'p', query: 'SELECT 1', dryRun: true},
+        undefined,
+        {writeMode: WriteMode.ALLOWED},
       );
+
+      expect(result).toEqual({
+        status: 'SUCCESS',
+        dry_run_info: mockMetadata,
+      });
+    });
+
+    it('should handle errors and return error details', async () => {
+      mockClient.query.mockRejectedValue(new Error('Query failed'));
+
+      const result = await executeSql(
+        {projectId: 'p', query: 'SELECT 1'},
+        undefined,
+        {writeMode: WriteMode.ALLOWED},
+      );
+
+      expect(result).toEqual({
+        status: 'ERROR',
+        error_details: 'Query failed',
+      });
+    });
+
+    it('should format rows and handle non-JSON serializable values', async () => {
+      const bigIntVal = BigInt(9007199254740991);
+      const mockRows = [{num: 123, big: bigIntVal}];
+      mockClient.query.mockResolvedValue([mockRows]);
+
+      const result = await executeSql(
+        {projectId: 'p', query: 'SELECT 1'},
+        undefined,
+        {writeMode: WriteMode.ALLOWED},
+      );
+
+      expect(result).toEqual({
+        status: 'SUCCESS',
+        rows: [{num: 123, big: '9007199254740991'}],
+      });
+    });
+
+    it('should indicate likely truncation if maxQueryResultRows is met', async () => {
+      const mockRows = [{num: 1}, {num: 2}];
+      mockClient.query.mockResolvedValue([mockRows]);
+
+      const result = await executeSql(
+        {projectId: 'p', query: 'SELECT 1'},
+        undefined,
+        {writeMode: WriteMode.ALLOWED, maxQueryResultRows: 2},
+      );
+
+      expect(result).toEqual({
+        status: 'SUCCESS',
+        rows: mockRows,
+        result_is_likely_truncated: true,
+      });
+    });
+
+    it('should pass maximumBytesBilled to query options', async () => {
+      mockClient.query.mockResolvedValue([[]]);
+
+      await executeSql({projectId: 'p', query: 'SELECT 1'}, undefined, {
+        writeMode: WriteMode.ALLOWED,
+        maximumBytesBilled: 20000000,
+      });
+
+      expect(mockClient.query).toHaveBeenCalledWith({
+        query: 'SELECT 1',
+        connectionProperties: [],
+        labels: {'adk-bigquery-tool': 'execute_sql'},
+        maximumBytesBilled: '20000000',
+      });
+    });
+
+    it('should pass applicationName to job labels', async () => {
+      mockClient.query.mockResolvedValue([[]]);
+
+      await executeSql({projectId: 'p', query: 'SELECT 1'}, undefined, {
+        writeMode: WriteMode.ALLOWED,
+        applicationName: 'my-app',
+      });
+
+      expect(mockClient.query).toHaveBeenCalledWith({
+        query: 'SELECT 1',
+        connectionProperties: [],
+        labels: {
+          'adk-bigquery-tool': 'execute_sql',
+          'adk-bigquery-application-name': 'my-app',
+        },
+      });
+    });
+
+    it('should pass jobLabels to query options', async () => {
+      mockClient.query.mockResolvedValue([[]]);
+
+      await executeSql({projectId: 'p', query: 'SELECT 1'}, undefined, {
+        writeMode: WriteMode.ALLOWED,
+        jobLabels: {label1: 'val1'},
+      });
+
+      expect(mockClient.query).toHaveBeenCalledWith({
+        query: 'SELECT 1',
+        connectionProperties: [],
+        labels: {
+          'adk-bigquery-tool': 'execute_sql',
+          'label1': 'val1',
+        },
+      });
+    });
+
+    it('should handle non-Error errors in executeSql catch block', async () => {
+      mockClient.query.mockRejectedValue('String Error');
+
+      const result = await executeSql(
+        {projectId: 'p', query: 'SELECT 1'},
+        undefined,
+        {writeMode: WriteMode.ALLOWED},
+      );
+
+      expect(result).toEqual({
+        status: 'ERROR',
+        error_details: 'String Error',
+      });
+    });
+
+    it('should fail if session creation returns missing session info in PROTECTED mode', async () => {
+      const mockContext = {
+        state: {
+          get: vi.fn().mockReturnValue(undefined),
+          set: vi.fn(),
+        },
+      } as unknown as Context;
+
+      mockClient.createQueryJob.mockResolvedValue([
+        {
+          metadata: {
+            statistics: {query: {sessionInfo: {}}},
+            configuration: {query: {destinationTable: {datasetId: 'd1'}}},
+          },
+        },
+      ]);
+
+      const result = await executeSql(
+        {projectId: 'p', query: 'CREATE TEMP TABLE t AS SELECT 1'},
+        undefined,
+        {writeMode: WriteMode.PROTECTED},
+        mockContext,
+      );
+
+      expect(result).toEqual({
+        status: 'ERROR',
+        error_details: 'Failed to create BigQuery session.',
+      });
     });
   });
 
   describe('forecast', () => {
-    it('should construct correct query and execute it', async () => {
-      mockQuery.mockResolvedValue([[{forecast_value: 10}]]);
+    it('should generate correct SQL without idCols', async () => {
+      mockClient.query.mockResolvedValue([[]]);
 
-      const result = await queryTools.forecast(
+      await forecast(
         {
-          projectId: 'project',
-          historyData: 'dataset.table',
-          timestampCol: 'time',
-          dataCol: 'val',
+          projectId: 'p',
+          historyData: 'my_table',
+          timestampCol: 'col_t',
+          dataCol: 'col_d',
           horizon: 5,
         },
         undefined,
-        {writeMode: WriteMode.ALLOWED, maxQueryResultRows: 50},
-        context,
-      );
-
-      expect(result.status).toBe('SUCCESS');
-      expect(mockQuery).toHaveBeenCalledWith(
-        expect.objectContaining({
-          query: expect.stringContaining('AI.FORECAST'),
-        }),
-      );
-      expect(mockQuery).toHaveBeenCalledWith(
-        expect.objectContaining({
-          query: expect.stringContaining('TABLE `dataset.table`'),
-        }),
-      );
-      expect(mockQuery).toHaveBeenCalledWith(
-        expect.objectContaining({
-          query: expect.stringContaining('horizon => 5'),
-        }),
-      );
-    });
-
-    it('should handle historyData as query', async () => {
-      mockQuery.mockResolvedValue([[]]);
-
-      await queryTools.forecast(
-        {
-          projectId: 'project',
-          historyData: 'SELECT time, val FROM t',
-          timestampCol: 'time',
-          dataCol: 'val',
-        },
-        undefined,
         {writeMode: WriteMode.ALLOWED},
-        context,
       );
 
-      expect(mockQuery).toHaveBeenCalledWith(
+      expect(mockClient.query).toHaveBeenCalledWith(
         expect.objectContaining({
-          query: expect.stringContaining('(SELECT time, val FROM t)'),
+          query: expect.any(String),
         }),
       );
+      const calledQuery = mockClient.query.mock.calls[0][0].query;
+      expect(calledQuery).toContain('TABLE `my_table`');
+      expect(calledQuery).toContain("data_col => 'col_d'");
+      expect(calledQuery).toContain("timestamp_col => 'col_t'");
+      expect(calledQuery).toContain("model => 'TimesFM 2.0'");
+      expect(calledQuery).toContain('horizon => 5');
+      expect(calledQuery).toContain('confidence_level => 0.95');
     });
 
-    it('should include idCols if provided', async () => {
-      mockQuery.mockResolvedValue([[]]);
+    it('should generate correct SQL with idCols', async () => {
+      mockClient.query.mockResolvedValue([[]]);
 
-      await queryTools.forecast(
+      await forecast(
         {
-          projectId: 'project',
-          historyData: 't',
-          timestampCol: 'time',
-          dataCol: 'val',
+          projectId: 'p',
+          historyData: 'SELECT * FROM t',
+          timestampCol: 'col_t',
+          dataCol: 'col_d',
           idCols: ['id1', 'id2'],
         },
         undefined,
         {writeMode: WriteMode.ALLOWED},
-        context,
       );
 
-      expect(mockQuery).toHaveBeenCalledWith(
-        expect.objectContaining({
-          query: expect.stringContaining("id_cols => ['id1', 'id2']"),
-        }),
-      );
+      const calledQuery = mockClient.query.mock.calls[0][0].query;
+      expect(calledQuery).toContain('(SELECT * FROM t)');
+      expect(calledQuery).toContain("id_cols => ['id1', 'id2']");
     });
 
-    it('should fail if idCols contains non-strings', async () => {
-      const result = await queryTools.forecast(
-        {
-          projectId: 'project',
-          historyData: 't',
-          timestampCol: 'time',
-          dataCol: 'val',
-          idCols: ['id1', 123 as any],
-        },
-        undefined,
-        {writeMode: WriteMode.ALLOWED},
-        context,
-      );
+    it('should return error if idCols contains non-string', async () => {
+      const result = await forecast({
+        projectId: 'p',
+        historyData: 'my_table',
+        timestampCol: 't',
+        dataCol: 'd',
+        idCols: ['id1', 123 as unknown as string],
+      });
 
-      expect(result.status).toBe('ERROR');
-      expect(result.error_details).toBe(
-        'All elements in idCols must be strings.',
-      );
+      expect(result).toEqual({
+        status: 'ERROR',
+        error_details: 'All elements in idCols must be strings.',
+      });
     });
   });
 
   describe('analyzeContribution', () => {
-    it('should create model and get insights successfully', async () => {
-      setupProtectedModeMocks();
-      mockQuery.mockResolvedValue([[]]);
-
-      const result = await queryTools.analyzeContribution(
-        {
-          projectId: 'project',
-          inputData: 'dataset.table',
-          contributionMetric: 'metric',
-          dimensionIdCols: ['dim1', 'dim2'],
-          isTestCol: 'is_test',
+    it('should generate correct SQL and handle temp model', async () => {
+      mockClient.query.mockResolvedValue([[]]);
+      mockClient.createQueryJob.mockImplementation(
+        async (options: {createSession?: boolean}) => {
+          if (options.createSession) {
+            return [
+              {
+                metadata: {
+                  statistics: {query: {sessionInfo: {sessionId: 's1'}}},
+                  configuration: {query: {destinationTable: {datasetId: 'd1'}}},
+                },
+              },
+            ];
+          }
+          return [
+            {
+              metadata: {
+                statistics: {query: {statementType: 'CREATE_TABLE'}},
+                configuration: {query: {destinationTable: {datasetId: 'd1'}}},
+              },
+            },
+          ];
         },
-        undefined,
-        {writeMode: WriteMode.ALLOWED},
-        context,
       );
 
-      expect(result.status).toBe('SUCCESS');
-      expect(mockQuery).toHaveBeenCalledTimes(2);
-      // Verify create model query
-      expect(mockQuery).toHaveBeenNthCalledWith(
-        1,
-        expect.objectContaining({
-          query: expect.stringContaining(
-            'CREATE TEMP MODEL contribution_analysis_model_mocked_uuid_123',
-          ),
-        }),
-      );
-      expect(mockQuery).toHaveBeenNthCalledWith(
-        1,
-        expect.objectContaining({
-          query: expect.stringContaining(
-            "DIMENSION_ID_COLS = ['dim1', 'dim2']",
-          ),
-        }),
-      );
-      // Verify get insights query
-      expect(mockQuery).toHaveBeenNthCalledWith(
-        2,
-        expect.objectContaining({
-          query: expect.stringContaining(
-            'SELECT * FROM ML.GET_INSIGHTS(MODEL contribution_analysis_model_mocked_uuid_123)',
-          ),
-        }),
-      );
-    });
+      const store = new Map();
+      const mockContext = createMockContext(store);
 
-    it('should fail if dimensionIdCols contains non-strings', async () => {
-      const result = await queryTools.analyzeContribution(
+      await analyzeContribution(
         {
-          projectId: 'project',
-          inputData: 't',
-          contributionMetric: 'm',
-          dimensionIdCols: ['d1', 123 as any],
-          isTestCol: 't',
-        },
-        undefined,
-        {writeMode: WriteMode.ALLOWED},
-        context,
-      );
-
-      expect(result.status).toBe('ERROR');
-      expect(result.error_details).toBe(
-        'All elements in dimensionIdCols must be strings.',
-      );
-    });
-
-    it('should fail if pruningMethod is invalid', async () => {
-      const result = await queryTools.analyzeContribution(
-        {
-          projectId: 'project',
-          inputData: 't',
-          contributionMetric: 'm',
-          dimensionIdCols: ['d1'],
-          isTestCol: 't',
-          pruningMethod: 'INVALID_PRUNING',
-        },
-        undefined,
-        {writeMode: WriteMode.ALLOWED},
-        context,
-      );
-
-      expect(result.status).toBe('ERROR');
-      expect(result.error_details).toBe(
-        'Invalid pruningMethod: INVALID_PRUNING',
-      );
-    });
-
-    it('should fail if writeMode is BLOCKED', async () => {
-      const result = await queryTools.analyzeContribution(
-        {
-          projectId: 'project',
-          inputData: 't',
+          projectId: 'p',
+          inputData: 'my_table',
           contributionMetric: 'm',
           dimensionIdCols: ['d1'],
           isTestCol: 't',
         },
         undefined,
-        {writeMode: WriteMode.BLOCKED},
-        context,
+        {writeMode: WriteMode.ALLOWED}, // Pass ALLOWED so it changes to PROTECTED
+        mockContext,
       );
 
-      expect(result.status).toBe('ERROR');
-      expect(result.error_details).toContain(
-        'analyzeContribution is not allowed in this session.',
+      expect(mockClient.query).toHaveBeenCalledTimes(2);
+      const createModelQuery = mockClient.query.mock.calls[0][0].query;
+      expect(createModelQuery).toContain(
+        'CREATE TEMP MODEL contribution_analysis_model_12345678_1234_4123_8123_1234567890ab',
+      );
+      expect(createModelQuery).toContain(
+        "MODEL_TYPE = 'CONTRIBUTION_ANALYSIS'",
+      );
+      expect(createModelQuery).toContain("CONTRIBUTION_METRIC = 'm'");
+      expect(createModelQuery).toContain("IS_TEST_COL = 't'");
+      expect(createModelQuery).toContain("DIMENSION_ID_COLS = ['d1']");
+      expect(createModelQuery).toContain('SELECT * FROM `my_table`');
+
+      const getInsightsQuery = mockClient.query.mock.calls[1][0].query;
+      expect(getInsightsQuery).toContain(
+        'SELECT * FROM ML.GET_INSIGHTS(MODEL contribution_analysis_model_12345678_1234_4123_8123_1234567890ab)',
       );
     });
 
-    it('should handle inputData as query', async () => {
-      setupProtectedModeMocks();
-      mockQuery.mockResolvedValue([[]]);
+    it('should return error if dimensionIdCols contains non-string', async () => {
+      const result = await analyzeContribution({
+        projectId: 'p',
+        inputData: 'my_table',
+        contributionMetric: 'm',
+        dimensionIdCols: ['d1', 123 as unknown as string],
+        isTestCol: 't',
+      });
 
-      const result = await queryTools.analyzeContribution(
+      expect(result).toEqual({
+        status: 'ERROR',
+        error_details: 'All elements in dimensionIdCols must be strings.',
+      });
+    });
+
+    it('should return error if pruningMethod is invalid', async () => {
+      const result = await analyzeContribution({
+        projectId: 'p',
+        inputData: 'my_table',
+        contributionMetric: 'm',
+        dimensionIdCols: ['d1'],
+        isTestCol: 't',
+        pruningMethod: 'invalid',
+      });
+
+      expect(result).toEqual({
+        status: 'ERROR',
+        error_details: 'Invalid pruningMethod: invalid',
+      });
+    });
+
+    it('should block if writeMode is BLOCKED', async () => {
+      const result = await analyzeContribution(
         {
-          projectId: 'project',
-          inputData: 'SELECT * FROM t',
+          projectId: 'p',
+          inputData: 'my_table',
+          contributionMetric: 'm',
+          dimensionIdCols: ['d1'],
+          isTestCol: 't',
+        },
+        undefined,
+        undefined,
+      );
+
+      expect(result).toEqual({
+        status: 'ERROR',
+        error_details:
+          'Error during analyzeContribution: analyzeContribution is not allowed in this session.',
+      });
+    });
+
+    it('should return error if CREATE TEMP MODEL fails', async () => {
+      mockClient.createQueryJob.mockResolvedValue([
+        {
+          metadata: {
+            statistics: {
+              query: {
+                sessionInfo: {sessionId: 's1'},
+                statementType: 'CREATE_TABLE',
+              },
+            },
+            configuration: {query: {destinationTable: {datasetId: 'd1'}}},
+          },
+        },
+      ]);
+      mockClient.query.mockRejectedValue(new Error('Model creation failed'));
+
+      const store = new Map();
+      const mockContext = createMockContext(store);
+
+      const result = await analyzeContribution(
+        {
+          projectId: 'p',
+          inputData: 'my_table',
           contributionMetric: 'm',
           dimensionIdCols: ['d1'],
           isTestCol: 't',
         },
         undefined,
         {writeMode: WriteMode.ALLOWED},
-        context,
+        mockContext,
       );
 
-      expect(result.status).toBe('SUCCESS');
-      expect(mockQuery).toHaveBeenNthCalledWith(
-        1,
-        expect.objectContaining({
-          query: expect.stringContaining('AS (SELECT * FROM t)'),
-        }),
-      );
+      expect(result).toEqual({
+        status: 'ERROR',
+        error_details: 'Model creation failed',
+      });
     });
 
-    it('should return error if model creation fails', async () => {
-      setupProtectedModeMocks();
-      mockQuery.mockRejectedValueOnce(new Error('Model creation failed'));
-
-      const result = await queryTools.analyzeContribution(
+    it('should generate correct SQL with SELECT query inputData', async () => {
+      mockClient.query.mockResolvedValue([[]]);
+      mockClient.createQueryJob.mockResolvedValue([
         {
-          projectId: 'project',
-          inputData: 'dataset.table',
-          contributionMetric: 'metric',
-          dimensionIdCols: ['dim1'],
-          isTestCol: 'is_test',
+          metadata: {
+            statistics: {
+              query: {
+                sessionInfo: {sessionId: 's1'},
+                statementType: 'CREATE_TABLE',
+              },
+            },
+            configuration: {query: {destinationTable: {datasetId: 'd1'}}},
+          },
+        },
+      ]);
+
+      const store = new Map();
+      const mockContext = createMockContext(store);
+
+      await analyzeContribution(
+        {
+          projectId: 'p',
+          inputData: 'SELECT * FROM input',
+          contributionMetric: 'm',
+          dimensionIdCols: ['d1'],
+          isTestCol: 't',
         },
         undefined,
         {writeMode: WriteMode.ALLOWED},
-        context,
+        mockContext,
       );
 
-      expect(result.status).toBe('ERROR');
-      expect(result.error_details).toContain('Model creation failed');
+      const createModelQuery = mockClient.query.mock.calls[0][0].query;
+      expect(createModelQuery).toContain('AS (SELECT * FROM input)');
     });
 
-    it('should use default config if toolConfig is undefined and fail because BLOCKED', async () => {
-      const result = await queryTools.analyzeContribution(
+    it('should generate correct SQL with WITH query inputData', async () => {
+      mockClient.query.mockResolvedValue([[]]);
+      mockClient.createQueryJob.mockResolvedValue([
         {
-          projectId: 'project',
-          inputData: 'dataset.table',
-          contributionMetric: 'metric',
-          dimensionIdCols: ['dim1'],
-          isTestCol: 'is_test',
+          metadata: {
+            statistics: {
+              query: {
+                sessionInfo: {sessionId: 's1'},
+                statementType: 'CREATE_TABLE',
+              },
+            },
+            configuration: {query: {destinationTable: {datasetId: 'd1'}}},
+          },
+        },
+      ]);
+
+      const store = new Map();
+      const mockContext = createMockContext(store);
+
+      await analyzeContribution(
+        {
+          projectId: 'p',
+          inputData: 'WITH t AS (SELECT 1) SELECT * FROM t',
+          contributionMetric: 'm',
+          dimensionIdCols: ['d1'],
+          isTestCol: 't',
         },
         undefined,
-        undefined, // toolConfig is undefined
-        context,
+        {writeMode: WriteMode.ALLOWED},
+        mockContext,
       );
 
-      expect(result.status).toBe('ERROR');
-      expect(result.error_details).toContain(
-        'analyzeContribution is not allowed in this session.',
+      const createModelQuery = mockClient.query.mock.calls[0][0].query;
+      expect(createModelQuery).toContain(
+        'AS (WITH t AS (SELECT 1) SELECT * FROM t)',
       );
+    });
+
+    it('should handle non-Error errors in analyzeContribution catch block', async () => {
+      const badConfig = {
+        get writeMode() {
+          throw 'String Error';
+        },
+      } as unknown as BigQueryToolConfig;
+
+      const result = await analyzeContribution(
+        {
+          projectId: 'p',
+          inputData: 'my_table',
+          contributionMetric: 'm',
+          dimensionIdCols: ['d1'],
+          isTestCol: 't',
+        },
+        undefined,
+        badConfig,
+      );
+
+      expect(result).toEqual({
+        status: 'ERROR',
+        error_details: 'Error during analyzeContribution: String Error',
+      });
     });
   });
 
   describe('detectAnomalies', () => {
-    it('should create model and detect anomalies successfully', async () => {
-      setupProtectedModeMocks();
-      mockQuery.mockResolvedValue([[]]);
+    it('should generate correct SQL and handle temp model', async () => {
+      mockClient.query.mockResolvedValue([[]]);
+      mockClient.createQueryJob.mockImplementation(
+        async (options: {createSession?: boolean}) => {
+          if (options.createSession) {
+            return [
+              {
+                metadata: {
+                  statistics: {query: {sessionInfo: {sessionId: 's1'}}},
+                  configuration: {query: {destinationTable: {datasetId: 'd1'}}},
+                },
+              },
+            ];
+          }
+          return [
+            {
+              metadata: {
+                statistics: {query: {statementType: 'CREATE_TABLE'}},
+                configuration: {query: {destinationTable: {datasetId: 'd1'}}},
+              },
+            },
+          ];
+        },
+      );
 
-      const result = await queryTools.detectAnomalies(
+      const store = new Map();
+      const mockContext = createMockContext(store);
+
+      await detectAnomalies(
         {
-          projectId: 'project',
-          historyData: 'dataset.table',
-          timesSeriesTimestampCol: 'time',
-          timesSeriesDataCol: 'val',
+          projectId: 'p',
+          historyData: 'my_table',
+          timesSeriesTimestampCol: 't',
+          timesSeriesDataCol: 'd',
         },
         undefined,
         {writeMode: WriteMode.ALLOWED},
-        context,
+        mockContext,
       );
 
-      expect(result.status).toBe('SUCCESS');
-      expect(mockQuery).toHaveBeenCalledTimes(2);
-      expect(mockQuery).toHaveBeenNthCalledWith(
-        1,
-        expect.objectContaining({
-          query: expect.stringContaining(
-            'CREATE TEMP MODEL detect_anomalies_model_mocked_uuid_123',
-          ),
-        }),
+      expect(mockClient.query).toHaveBeenCalledTimes(2);
+      const createModelQuery = mockClient.query.mock.calls[0][0].query;
+      expect(createModelQuery).toContain(
+        'CREATE TEMP MODEL detect_anomalies_model_12345678_1234_4123_8123_1234567890ab',
       );
-      expect(mockQuery).toHaveBeenNthCalledWith(
-        2,
-        expect.objectContaining({
-          query: expect.stringContaining(
-            'SELECT * FROM ML.DETECT_ANOMALIES(MODEL detect_anomalies_model_mocked_uuid_123',
-          ),
-        }),
+      expect(createModelQuery).toContain("MODEL_TYPE = 'ARIMA_PLUS'");
+      expect(createModelQuery).toContain("TIME_SERIES_TIMESTAMP_COL = 't'");
+      expect(createModelQuery).toContain("TIME_SERIES_DATA_COL = 'd'");
+      expect(createModelQuery).toContain('HORIZON = 1000');
+
+      const detectQuery = mockClient.query.mock.calls[1][0].query;
+      expect(detectQuery).toContain(
+        'SELECT * FROM ML.DETECT_ANOMALIES(MODEL detect_anomalies_model_12345678_1234_4123_8123_1234567890ab, STRUCT(0.95 AS anomaly_prob_threshold))',
       );
     });
 
-    it('should include targetData if provided', async () => {
-      setupProtectedModeMocks();
-      mockQuery.mockResolvedValue([[]]);
-
-      const result = await queryTools.detectAnomalies(
-        {
-          projectId: 'project',
-          historyData: 't1',
-          timesSeriesTimestampCol: 'time',
-          timesSeriesDataCol: 'val',
-          targetData: 'dataset.target_table',
+    it('should generate correct SQL with idCols and targetData (TABLE inputs)', async () => {
+      mockClient.query.mockResolvedValue([[]]);
+      mockClient.createQueryJob.mockImplementation(
+        async (options: {createSession?: boolean}) => {
+          if (options.createSession) {
+            return [
+              {
+                metadata: {
+                  statistics: {query: {sessionInfo: {sessionId: 's1'}}},
+                  configuration: {query: {destinationTable: {datasetId: 'd1'}}},
+                },
+              },
+            ];
+          }
+          return [
+            {
+              metadata: {
+                statistics: {query: {statementType: 'CREATE_TABLE'}},
+                configuration: {query: {destinationTable: {datasetId: 'd1'}}},
+              },
+            },
+          ];
         },
-        undefined,
-        {writeMode: WriteMode.ALLOWED},
-        context,
       );
 
-      expect(result.status).toBe('SUCCESS');
-      expect(mockQuery).toHaveBeenNthCalledWith(
-        2,
-        expect.objectContaining({
-          query: expect.stringContaining(
-            '(SELECT * FROM `dataset.target_table`)',
-          ),
-        }),
-      );
-    });
+      const store = new Map();
+      const mockContext = createMockContext(store);
 
-    it('should include timesSeriesIdCols if provided', async () => {
-      setupProtectedModeMocks();
-      mockQuery.mockResolvedValue([[]]);
-
-      const result = await queryTools.detectAnomalies(
+      await detectAnomalies(
         {
-          projectId: 'project',
-          historyData: 't1',
-          timesSeriesTimestampCol: 'time',
-          timesSeriesDataCol: 'val',
+          projectId: 'p',
+          historyData: 'my_table',
+          timesSeriesTimestampCol: 't',
+          timesSeriesDataCol: 'd',
           timesSeriesIdCols: ['id1'],
+          targetData: 'target_table',
         },
         undefined,
         {writeMode: WriteMode.ALLOWED},
-        context,
+        mockContext,
       );
 
-      expect(result.status).toBe('SUCCESS');
-      expect(mockQuery).toHaveBeenNthCalledWith(
-        1,
-        expect.objectContaining({
-          query: expect.stringContaining("TIME_SERIES_ID_COL = ['id1']"),
-        }),
+      const createModelQuery = mockClient.query.mock.calls[0][0].query;
+      expect(createModelQuery).toContain("TIME_SERIES_ID_COL = ['id1']");
+      expect(createModelQuery).toContain('SELECT * FROM `my_table`');
+
+      const detectQuery = mockClient.query.mock.calls[1][0].query;
+      expect(detectQuery).toContain(
+        'SELECT * FROM ML.DETECT_ANOMALIES(MODEL detect_anomalies_model_12345678_1234_4123_8123_1234567890ab, STRUCT(0.95 AS anomaly_prob_threshold), (SELECT * FROM `target_table`)) ORDER BY id1, t',
       );
     });
 
-    it('should fail if timesSeriesIdCols contains non-strings', async () => {
-      const result = await queryTools.detectAnomalies(
+    it('should generate correct SQL with SELECT query inputs', async () => {
+      mockClient.query.mockResolvedValue([[]]);
+      mockClient.createQueryJob.mockImplementation(
+        async (options: {createSession?: boolean}) => {
+          if (options.createSession) {
+            return [
+              {
+                metadata: {
+                  statistics: {query: {sessionInfo: {sessionId: 's1'}}},
+                  configuration: {query: {destinationTable: {datasetId: 'd1'}}},
+                },
+              },
+            ];
+          }
+          return [
+            {
+              metadata: {
+                statistics: {query: {statementType: 'CREATE_TABLE'}},
+                configuration: {query: {destinationTable: {datasetId: 'd1'}}},
+              },
+            },
+          ];
+        },
+      );
+
+      const store = new Map();
+      const mockContext = createMockContext(store);
+
+      await detectAnomalies(
         {
-          projectId: 'project',
-          historyData: 't1',
-          timesSeriesTimestampCol: 'time',
-          timesSeriesDataCol: 'val',
-          timesSeriesIdCols: ['id1', 123 as any],
+          projectId: 'p',
+          historyData: 'SELECT * FROM history',
+          timesSeriesTimestampCol: 't',
+          timesSeriesDataCol: 'd',
+          timesSeriesIdCols: ['id1'],
+          targetData: 'SELECT * FROM target',
         },
         undefined,
         {writeMode: WriteMode.ALLOWED},
-        context,
+        mockContext,
       );
 
-      expect(result.status).toBe('ERROR');
-      expect(result.error_details).toBe(
-        'All elements in timesSeriesIdCols must be strings.',
+      const createModelQuery = mockClient.query.mock.calls[0][0].query;
+      expect(createModelQuery).toContain('AS (SELECT * FROM history)');
+
+      const detectQuery = mockClient.query.mock.calls[1][0].query;
+      expect(detectQuery).toContain(
+        'SELECT * FROM ML.DETECT_ANOMALIES(MODEL detect_anomalies_model_12345678_1234_4123_8123_1234567890ab, STRUCT(0.95 AS anomaly_prob_threshold), (SELECT * FROM target)) ORDER BY id1, t',
       );
     });
 
-    it('should fail if writeMode is BLOCKED', async () => {
-      const result = await queryTools.detectAnomalies(
-        {
-          projectId: 'project',
-          historyData: 't1',
-          timesSeriesTimestampCol: 'time',
-          timesSeriesDataCol: 'val',
+    it('should generate correct SQL with WITH query inputs', async () => {
+      mockClient.query.mockResolvedValue([[]]);
+      mockClient.createQueryJob.mockImplementation(
+        async (options: {createSession?: boolean}) => {
+          if (options.createSession) {
+            return [
+              {
+                metadata: {
+                  statistics: {query: {sessionInfo: {sessionId: 's1'}}},
+                  configuration: {query: {destinationTable: {datasetId: 'd1'}}},
+                },
+              },
+            ];
+          }
+          return [
+            {
+              metadata: {
+                statistics: {query: {statementType: 'CREATE_TABLE'}},
+                configuration: {query: {destinationTable: {datasetId: 'd1'}}},
+              },
+            },
+          ];
         },
-        undefined,
-        {writeMode: WriteMode.BLOCKED},
-        context,
       );
 
-      expect(result.status).toBe('ERROR');
-      expect(result.error_details).toContain(
-        'anomaly detection is not allowed in this session.',
-      );
-    });
+      const store = new Map();
+      const mockContext = createMockContext(store);
 
-    it('should use default config if toolConfig is undefined and fail because BLOCKED', async () => {
-      const result = await queryTools.detectAnomalies(
+      await detectAnomalies(
         {
-          projectId: 'project',
-          historyData: 't1',
-          timesSeriesTimestampCol: 'time',
-          timesSeriesDataCol: 'val',
-        },
-        undefined,
-        undefined, // toolConfig is undefined
-        context,
-      );
-
-      expect(result.status).toBe('ERROR');
-      expect(result.error_details).toContain(
-        'anomaly detection is not allowed in this session.',
-      );
-    });
-
-    it('should return error if model creation fails', async () => {
-      setupProtectedModeMocks();
-      mockQuery.mockRejectedValueOnce(new Error('Model creation failed'));
-
-      const result = await queryTools.detectAnomalies(
-        {
-          projectId: 'project',
-          historyData: 'dataset.table',
-          timesSeriesTimestampCol: 'time',
-          timesSeriesDataCol: 'val',
+          projectId: 'p',
+          historyData: 'WITH h AS (SELECT 1) SELECT * FROM h',
+          timesSeriesTimestampCol: 't',
+          timesSeriesDataCol: 'd',
+          timesSeriesIdCols: ['id1'],
+          targetData: 'WITH t AS (SELECT 1) SELECT * FROM t',
         },
         undefined,
         {writeMode: WriteMode.ALLOWED},
-        context,
+        mockContext,
       );
 
-      expect(result.status).toBe('ERROR');
-      expect(result.error_details).toContain('Model creation failed');
+      const createModelQuery = mockClient.query.mock.calls[0][0].query;
+      expect(createModelQuery).toContain(
+        'AS (WITH h AS (SELECT 1) SELECT * FROM h)',
+      );
+
+      const detectQuery = mockClient.query.mock.calls[1][0].query;
+      expect(detectQuery).toContain(
+        'SELECT * FROM ML.DETECT_ANOMALIES(MODEL detect_anomalies_model_12345678_1234_4123_8123_1234567890ab, STRUCT(0.95 AS anomaly_prob_threshold), (WITH t AS (SELECT 1) SELECT * FROM t)) ORDER BY id1, t',
+      );
     });
 
-    it('should accept credentialsConfig and historyData as query', async () => {
-      setupProtectedModeMocks();
-      mockQuery.mockResolvedValue([[]]);
+    it('should return error if timesSeriesIdCols contains non-string', async () => {
+      const result = await detectAnomalies({
+        projectId: 'p',
+        historyData: 'my_table',
+        timesSeriesTimestampCol: 't',
+        timesSeriesDataCol: 'd',
+        timesSeriesIdCols: ['id1', 123 as unknown as string],
+      });
 
-      const result = await queryTools.detectAnomalies(
+      expect(result).toEqual({
+        status: 'ERROR',
+        error_details: 'All elements in timesSeriesIdCols must be strings.',
+      });
+    });
+
+    it('should block if writeMode is BLOCKED', async () => {
+      const result = await detectAnomalies(
         {
-          projectId: 'project',
-          historyData: 'SELECT time, val FROM t',
-          timesSeriesTimestampCol: 'time',
-          timesSeriesDataCol: 'val',
+          projectId: 'p',
+          historyData: 'my_table',
+          timesSeriesTimestampCol: 't',
+          timesSeriesDataCol: 'd',
         },
-        {credentials: {token: 'token'}},
-        {writeMode: WriteMode.ALLOWED},
-        context,
+        undefined,
+        undefined,
       );
 
-      expect(result.status).toBe('SUCCESS');
-      expect(mockQuery).toHaveBeenNthCalledWith(
-        1,
-        expect.objectContaining({
-          query: expect.stringContaining('(SELECT time, val FROM t)'),
-        }),
-      );
+      expect(result).toEqual({
+        status: 'ERROR',
+        error_details:
+          'Error during anomaly detection: anomaly detection is not allowed in this session.',
+      });
     });
 
-    it('should handle targetData as query', async () => {
-      setupProtectedModeMocks();
-      mockQuery.mockResolvedValue([[]]);
-
-      const result = await queryTools.detectAnomalies(
+    it('should return error if CREATE TEMP MODEL fails', async () => {
+      mockClient.createQueryJob.mockResolvedValue([
         {
-          projectId: 'project',
-          historyData: 't1',
-          timesSeriesTimestampCol: 'time',
-          timesSeriesDataCol: 'val',
-          targetData: 'SELECT time, val FROM t2',
+          metadata: {
+            statistics: {
+              query: {
+                sessionInfo: {sessionId: 's1'},
+                statementType: 'CREATE_TABLE',
+              },
+            },
+            configuration: {query: {destinationTable: {datasetId: 'd1'}}},
+          },
+        },
+      ]);
+      mockClient.query.mockRejectedValue(new Error('Model creation failed'));
+
+      const store = new Map();
+      const mockContext = createMockContext(store);
+
+      const result = await detectAnomalies(
+        {
+          projectId: 'p',
+          historyData: 'my_table',
+          timesSeriesTimestampCol: 't',
+          timesSeriesDataCol: 'd',
         },
         undefined,
         {writeMode: WriteMode.ALLOWED},
-        context,
+        mockContext,
       );
 
-      expect(result.status).toBe('SUCCESS');
-      expect(mockQuery).toHaveBeenNthCalledWith(
-        2,
-        expect.objectContaining({
-          query: expect.stringContaining('(SELECT time, val FROM t2)'),
-        }),
-      );
+      expect(result).toEqual({
+        status: 'ERROR',
+        error_details: 'Model creation failed',
+      });
     });
-  });
 
-  it('should use default config if toolConfig is undefined in executeSql', async () => {
-    mockCreateQueryJob.mockResolvedValue([
-      {
-        metadata: {
-          statistics: {query: {statementType: 'SELECT'}},
+    it('should handle non-Error errors in catch block', async () => {
+      const badConfig = {
+        get writeMode() {
+          throw 'String Error';
         },
-      },
-    ]);
-    mockQuery.mockResolvedValue([[{col: 1}]]);
+      } as unknown as BigQueryToolConfig;
 
-    const result = await queryTools.executeSql(
-      {projectId: 'project', query: 'SELECT 1'},
-      undefined,
-      undefined,
-      context,
-    );
-
-    expect(result.status).toBe('SUCCESS');
-    expect(result.rows).toEqual([{col: 1}]);
-  });
-
-  it('should apply jobLabels from config in executeSql', async () => {
-    mockCreateQueryJob.mockResolvedValue([
-      {
-        metadata: {
-          statistics: {query: {statementType: 'SELECT'}},
+      const result = await detectAnomalies(
+        {
+          projectId: 'p',
+          historyData: 'my_table',
+          timesSeriesTimestampCol: 't',
+          timesSeriesDataCol: 'd',
         },
-      },
-    ]);
-    mockQuery.mockResolvedValue([[]]);
+        undefined,
+        badConfig,
+      );
 
-    await queryTools.executeSql(
-      {projectId: 'project', query: 'SELECT 1'},
-      undefined,
-      {
-        writeMode: WriteMode.BLOCKED,
-        jobLabels: {'my-label': 'my-value'},
-      },
-      context,
-    );
-
-    expect(mockCreateQueryJob).toHaveBeenCalledWith(
-      expect.objectContaining({
-        labels: expect.objectContaining({
-          'my-label': 'my-value',
-          'adk-bigquery-tool': 'execute_sql',
-        }),
-      }),
-    );
-  });
-
-  it('should handle non-Error exceptions in executeSql', async () => {
-    mockQuery.mockRejectedValueOnce('String Query Failed');
-
-    const result = await queryTools.executeSql(
-      {projectId: 'project', query: 'SELECT 1'},
-      undefined,
-      {writeMode: WriteMode.ALLOWED},
-      context,
-    );
-
-    expect(result.status).toBe('ERROR');
-    expect(result.error_details).toBe('String Query Failed');
-  });
-
-  it('should handle string exceptions in analyzeContribution catch block', async () => {
-    const throwingProxy = new Proxy(
-      {},
-      {
-        ownKeys() {
-          throw 'Proxy String Error';
-        },
-      },
-    );
-
-    const result = await queryTools.analyzeContribution(
-      {
-        projectId: 'project',
-        inputData: 't',
-        contributionMetric: 'm',
-        dimensionIdCols: ['d1'],
-        isTestCol: 't',
-      },
-      undefined,
-      throwingProxy as any,
-      context,
-    );
-
-    expect(result.status).toBe('ERROR');
-    expect(result.error_details).toContain(
-      'Error during analyzeContribution: Proxy String Error',
-    );
-  });
-
-  it('should handle string exceptions in detectAnomalies catch block', async () => {
-    const throwingProxy = new Proxy(
-      {},
-      {
-        ownKeys() {
-          throw 'Proxy String Error';
-        },
-      },
-    );
-
-    const result = await queryTools.detectAnomalies(
-      {
-        projectId: 'project',
-        historyData: 't',
-        timesSeriesTimestampCol: 'time',
-        timesSeriesDataCol: 'val',
-      },
-      undefined,
-      throwingProxy as any,
-      context,
-    );
-
-    expect(result.status).toBe('ERROR');
-    expect(result.error_details).toContain(
-      'Error during anomaly detection: Proxy String Error',
-    );
+      expect(result).toEqual({
+        status: 'ERROR',
+        error_details: 'Error during anomaly detection: String Error',
+      });
+    });
   });
 });
