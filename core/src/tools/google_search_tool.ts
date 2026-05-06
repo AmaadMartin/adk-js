@@ -16,9 +16,16 @@ import {BaseTool, ToolProcessLlmRequest} from './base_tool.js';
  * This tool operates internally within the model and does not require or
  * perform local code execution.
  */
+export interface GoogleSearchToolConfig {
+  bypassMultiToolsLimit?: boolean;
+}
+
 export class GoogleSearchTool extends BaseTool {
-  constructor() {
+  readonly bypassMultiToolsLimit: boolean;
+
+  constructor(config?: GoogleSearchToolConfig) {
     super({name: 'google_search', description: 'Google Search Tool'});
+    this.bypassMultiToolsLimit = config?.bypassMultiToolsLimit ?? false;
   }
 
   runAsync(): Promise<unknown> {

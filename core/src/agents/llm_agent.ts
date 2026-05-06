@@ -312,8 +312,20 @@ export interface LlmAgentConfig extends BaseAgentConfig {
 async function convertToolUnionToTools(
   toolUnion: ToolUnion,
   context?: ReadonlyContext,
+  model?: BaseLlm,
+  multipleTools: boolean = false,
 ): Promise<BaseTool[]> {
   if (isBaseTool(toolUnion)) {
+    const {GoogleSearchTool} = await import('../tools/google_search_tool.js');
+    if (multipleTools && toolUnion instanceof GoogleSearchTool) {
+      if (toolUnion.bypassMultiToolsLimit) {
+        const {createGoogleSearchAgent, GoogleSearchAgentTool} =
+          await import('../tools/google_search_agent_tool.js');
+        if (model) {
+          return [new GoogleSearchAgentTool(createGoogleSearchAgent(model))];
+        }
+      }
+    }
     return [toolUnion];
   }
   return await toolUnion.getTools(context);
@@ -539,8 +551,15 @@ export class LlmAgent extends BaseAgent {
    */
   async canonicalTools(context?: ReadonlyContext): Promise<BaseTool[]> {
     const resolvedTools: BaseTool[] = [];
+    const multipleTools = this.tools.length > 1;
+    const model = this.canonicalModel;
     for (const toolUnion of this.tools) {
-      const tools = await convertToolUnionToTools(toolUnion, context);
+      const tools = await convertToolUnionToTools(
+        toolUnion,
+        context,
+        model,
+        multipleTools,
+      );
       resolvedTools.push(...tools);
     }
     return resolvedTools;

@@ -16,6 +16,8 @@ import {
   ContextCompactorRequestProcessor,
   createEvent,
   Event,
+  GoogleSearchAgentTool,
+  GoogleSearchTool,
   InvocationContext,
   LlmAgent,
   LlmRequest,
@@ -782,5 +784,56 @@ describe('LlmAgent Abort Handling', () => {
 
     const secondResult = await generator.next();
     expect(secondResult.done).toBe(true);
+  });
+});
+
+describe('LlmAgent.canonicalTools', () => {
+  it('should wrap GoogleSearchTool into GoogleSearchAgentTool when bypassMultiToolsLimit is true and there are other tools', async () => {
+    const mockModel = new MockLlm(null);
+    const searchTool = new GoogleSearchTool({bypassMultiToolsLimit: true});
+    const regularTool = new MockTool('regular_tool');
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: mockModel,
+      tools: [regularTool, searchTool],
+    });
+
+    const tools = await agent.canonicalTools();
+    expect(tools.length).toBe(2);
+    expect(tools[0].name).toBe('regular_tool');
+    expect(tools[1].name).toBe('google_search_agent');
+    expect(tools[1]).toBeInstanceOf(GoogleSearchAgentTool);
+  });
+
+  it('should NOT wrap GoogleSearchTool when bypassMultiToolsLimit is false and there are other tools', async () => {
+    const mockModel = new MockLlm(null);
+    const searchTool = new GoogleSearchTool({bypassMultiToolsLimit: false});
+    const regularTool = new MockTool('regular_tool');
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: mockModel,
+      tools: [regularTool, searchTool],
+    });
+
+    const tools = await agent.canonicalTools();
+    expect(tools.length).toBe(2);
+    expect(tools[0].name).toBe('regular_tool');
+    expect(tools[1].name).toBe('google_search');
+    expect(tools[1]).toBeInstanceOf(GoogleSearchTool);
+  });
+
+  it('should NOT wrap GoogleSearchTool when it is the only tool', async () => {
+    const mockModel = new MockLlm(null);
+    const searchTool = new GoogleSearchTool({bypassMultiToolsLimit: true});
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: mockModel,
+      tools: [searchTool],
+    });
+
+    const tools = await agent.canonicalTools();
+    expect(tools.length).toBe(1);
+    expect(tools[0].name).toBe('google_search');
+    expect(tools[0]).toBeInstanceOf(GoogleSearchTool);
   });
 });
