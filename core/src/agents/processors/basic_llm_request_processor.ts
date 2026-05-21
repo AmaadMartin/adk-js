@@ -30,6 +30,9 @@ export class BasicLlmRequestProcessor extends BaseLlmRequestProcessor {
     }
 
     if (invocationContext.runConfig) {
+      if (!llmRequest.liveConnectConfig) {
+        llmRequest.liveConnectConfig = {};
+      }
       llmRequest.liveConnectConfig.responseModalities =
         invocationContext.runConfig.responseModalities;
       llmRequest.liveConnectConfig.speechConfig =

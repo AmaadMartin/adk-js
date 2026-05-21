@@ -35,7 +35,7 @@ export interface LlmRequest {
    */
   config?: GenerateContentConfig;
 
-  liveConnectConfig: LiveConnectConfig;
+  liveConnectConfig?: LiveConnectConfig;
 
   /**
    * The tools dictionary. Excluded from JSON serialization.
@@ -46,6 +46,11 @@ export interface LlmRequest {
    * The set of allowed tools, populated by request processors.
    */
   allowedTools?: string[];
+
+  /**
+   * Optional previous interaction ID for stateful interaction requests.
+   */
+  previousInteractionId?: string;
 }
 
 /**

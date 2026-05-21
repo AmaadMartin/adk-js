@@ -20,6 +20,7 @@ import {StreamingResponseAggregator} from '../utils/streaming_utils.js';
 import {BaseLlm} from './base_llm.js';
 import {BaseLlmConnection} from './base_llm_connection.js';
 import {GeminiLlmConnection} from './gemini_llm_connection.js';
+import {generateContentViaInteractions} from './interactions_utils.js';
 import {LlmRequest} from './llm_request.js';
 import {createLlmResponse, LlmResponse} from './llm_response.js';
 
@@ -53,6 +54,10 @@ export interface GeminiParams {
    * Headers to merge with internally crafted headers.
    */
   headers?: Record<string, string>;
+  /**
+   * Whether to use the stateful Interactions API.
+   */
+  useInteractionsApi?: boolean;
 }
 
 /**
@@ -64,6 +69,7 @@ export class Gemini extends BaseLlm {
   private readonly project?: string;
   private readonly location?: string;
   private readonly headers?: Record<string, string>;
+  readonly useInteractionsApi: boolean;
 
   /**
    * @param params The parameters for creating a Gemini instance.
@@ -75,6 +81,7 @@ export class Gemini extends BaseLlm {
     project,
     location,
     headers,
+    useInteractionsApi,
   }: GeminiParams) {
     if (!model) {
       model = 'gemini-2.5-flash';
@@ -99,6 +106,7 @@ export class Gemini extends BaseLlm {
     this.apiKey = params.apiKey;
     this.headers = headers;
     this.vertexai = !!params.vertexai;
+    this.useInteractionsApi = !!useInteractionsApi;
   }
 
   /**
@@ -151,6 +159,11 @@ export class Gemini extends BaseLlm {
 
     if (abortSignal) {
       llmRequest.config.abortSignal = abortSignal;
+    }
+
+    if (this.useInteractionsApi) {
+      yield* generateContentViaInteractions(this.apiClient, llmRequest, stream);
+      return;
     }
 
     if (stream) {
@@ -246,6 +259,9 @@ export class Gemini extends BaseLlm {
    * @returns BaseLlmConnection, the connection to the Gemini model.
    */
   override async connect(llmRequest: LlmRequest): Promise<BaseLlmConnection> {
+    if (!llmRequest.liveConnectConfig) {
+      llmRequest.liveConnectConfig = {};
+    }
     // add tracking headers to custom headers and set api_version given
     // the customized http options will override the one set in the api client
     // constructor
