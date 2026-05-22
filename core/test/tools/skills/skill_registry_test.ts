@@ -45,6 +45,8 @@ Instruction body`;
     zip.addFile('assets/asset1.txt', Buffer.from('asset content', 'utf-8'));
     zip.addFile('scripts/run.sh', Buffer.from('echo hello', 'utf-8'));
     zip.addFile('__pycache__/cache.pyc', Buffer.from('dummy', 'utf-8'));
+    zip.addFile('references/subdir/', Buffer.from(''));
+    zip.addFile('references/', Buffer.from(''));
     return zip.toBuffer();
   }
 
@@ -201,6 +203,25 @@ Instruction body`;
       const results = await reg.searchSkills('find skill');
       expect(results.length).toBe(0);
     });
+    it('searchSkills handles empty skillName and description fallback', async () => {
+      const mockClient = {
+        apiClient: {
+          request: vi.fn().mockResolvedValue({
+            json: vi.fn().mockResolvedValue({
+              retrievedSkills: [{}],
+            }),
+          }),
+        },
+      };
+
+      const reg = new GCPSkillRegistry({
+        client: mockClient as unknown as Client,
+      });
+      const results = await reg.searchSkills('find skill');
+      expect(results.length).toBe(1);
+      expect(results[0].name).toBe('');
+      expect(results[0].description).toBe('');
+    });
   });
 
   describe('SearchSkillsTool', () => {
@@ -277,6 +298,21 @@ Instruction body`;
         toolContext: createMockContext(),
       })) as Record<string, unknown>;
       expect(res.error_code).toBe('REGISTRY_ERROR');
+    });
+
+    it('runAsync returns error on string throw', async () => {
+      const mockRegistry = {
+        getSkill: vi.fn(),
+        searchSkills: vi.fn().mockRejectedValue('String error failure'),
+      };
+      const toolset = new SkillToolset([], {registry: mockRegistry});
+      const tool = new SearchSkillsTool(toolset);
+      const res = (await tool.runAsync({
+        args: {query: 'skills'},
+        toolContext: createMockContext(),
+      })) as Record<string, unknown>;
+      expect(res.error_code).toBe('REGISTRY_ERROR');
+      expect(res.error).toContain('String error failure');
     });
   });
 
