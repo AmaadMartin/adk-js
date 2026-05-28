@@ -11,7 +11,7 @@ import {
   Runner,
   Session,
 } from '@google/adk';
-import {Content} from '@google/genai';
+import {Content, Part} from '@google/genai';
 import {cloneDeep} from 'lodash-es';
 import * as assert from 'node:assert';
 import {AgentRegistry} from './agent_registry.js';
@@ -20,7 +20,6 @@ import {ReplayPlugin} from './replay_plugin.js';
 import {
   FilteredEvent,
   FilteredEventActions,
-  FilteredPart,
   TestInfo,
   UserMessage,
 } from './test_types.js';
@@ -159,7 +158,7 @@ function validateSession(actual: Session, expected: Session) {
 
 function normalizeEvent(event: Event): FilteredEvent {
   const filteredEvent = event as FilteredEvent;
-  filterEventFields(filteredEvent);
+  filterEventFields(event as unknown as Partial<Event>);
   removeEmptyAndUndefinedFields(
     filteredEvent as unknown as Record<string, unknown>,
   );
@@ -203,23 +202,21 @@ function filterEventActionsStateDelta(actions?: FilteredEventActions) {
   delete actions.stateDelta['_adk_replay_config'];
 }
 
-function filterPartFields(part: FilteredPart) {
-  /* eslint-disable @typescript-eslint/no-explicit-any */
-  delete (part as any).thoughtSignature;
-  delete (part as any).functionCall;
-  delete (part as any).functionResponse;
-  /* eslint-enable @typescript-eslint/no-explicit-any */
+function filterPartFields(part: Partial<Part>) {
+  delete part.thoughtSignature;
+  delete part.functionCall;
+  delete part.functionResponse;
 }
 
-function filterEventFields(event: FilteredEvent) {
-  /* eslint-disable @typescript-eslint/no-explicit-any */
-  delete (event as any).id;
-  delete (event as any).timestamp;
-  delete (event as any).invocationId;
-  delete (event as any).longRunningToolIds;
-  /* eslint-enable @typescript-eslint/no-explicit-any */
+function filterEventFields(event: Partial<Event>) {
+  delete event.id;
+  delete event.timestamp;
+  delete event.invocationId;
+  delete event.longRunningToolIds;
 
-  filterEventActionsStateDelta(event.actions);
+  filterEventActionsStateDelta(
+    event.actions as FilteredEventActions | undefined,
+  );
 
   if (event.content) {
     event.content.parts?.forEach(filterPartFields);

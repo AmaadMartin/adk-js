@@ -197,24 +197,41 @@ During auditing, it was discovered that `liveConnectConfig` had been incorrectly
 
 ## 3. Finalized PR Body
 
-# Gemini Interaction API Integration
+Please ensure you have read the contribution guide before creating a pull request.
 
-## Overview
+Link to Issue or Description of Change
 
-This pull request integrates the stateful Gemini Interactions API into `adk-js`, allowing agents to leverage server-side conversational state preservation, SSE event stream parsing, and custom tool mapping for Gemini models.
+1. Link to an existing issue (if applicable):
 
-## Architecture & Design Decisions
+Closes: #issue_number
+Related: #issue_number 2. Or, if no issue exists, describe the change:
 
-- **`useInteractionsApi` Configuration**: Added an explicit configuration option to `GeminiParams` allowing developers to opt into the Interactions API backend.
-- **`InteractionsRequestProcessor`**: Added a dedicated preprocessor to parse past agent events within the active branch and extract the latest `interactionId` to pass along as `previousInteractionId`.
-- **Interactions Mapping Utilities**: Established robust conversion layers (`interactions_utils.ts`) that translate GoogleGenAI SDK format content, function calls, code execution parts, and tools into the structure expected by the Interactions API.
-- **Support for Streaming (SSE) and Non-Streaming**: Implemented asynchronous generators to aggregate stream chunks (`content.delta`, `interaction.status_update`, etc.) and seamlessly convert them into unified `LlmResponse` structures.
-- **Refined LlmRequest Contracts**: Updated `LlmRequest` to correctly handle optional `liveConnectConfig` structures to maintain complete backward compatibility with non-live API invocations across the system.
+If applicable, please follow the issue templates to provide as much detail as possible.
 
-## Verification & Testing
+Problem: The framework lacked support for the stateful Gemini Interaction API, resulting in redundant conversational history payloads and missing server-side state preservation across multi-turn LLM agent sessions. Furthermore, non-live request workflows encountered type incompatibilities due to `liveConnectConfig` being strictly required on LlmRequest.
 
-- Achieved comprehensive line and branch unit testing for `interactions_utils.ts` and `interactions_request_processor.ts`.
-- Verified complete backward compatibility across all core modules.
+Solution: Integrated the stateful Gemini Interactions API backend (`useInteractionsApi` configuration option in `GeminiParams`). Established `InteractionsRequestProcessor` to dynamically extract previous interaction IDs from past events within the active branch and map them to `previousInteractionId`. Constructed a comprehensive utility mapping layer (`interactions_utils.ts`) for multi-modal parts, code execution components, function calls, and Server-Sent Events (SSE) stream deltas. Updated `LlmRequest` contracts by making `liveConnectConfig` optional and initializing it safely across processors.
+
+Testing Plan
+Please describe the tests that you ran to verify your changes. This is required for all PRs that are not small documentation or typo fixes.
+
+Unit Tests:
+[x] I have added or updated unit tests for my change.
+[x] All unit tests pass locally.
+
+Manual End-to-End (E2E) Tests:
+Please provide instructions on how to manually test your changes, including any necessary setup or configuration.
+
+1. Instantiate a `Gemini` model configuration object passing `useInteractionsApi: true`.
+2. Encapsulate the model instance inside a standard `Agent` construction.
+3. Conduct a progressive multi-turn interaction sequence and observe that subsequent server payloads automatically carry `previousInteractionId` and trim redundant conversation history, verifying server-side state preservation.
+
+Checklist
+[x] I have read the CONTRIBUTING.md document.
+[x] I have performed a self-review of my own code.
+[x] I have commented my code, particularly in hard-to-understand areas.
+[x] I have added tests that prove my fix is effective or that my feature works.
+[x] New and existing unit tests pass locally with my changes.
 
 ## 4. Test Coverage Summary
 
