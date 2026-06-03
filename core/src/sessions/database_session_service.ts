@@ -451,7 +451,7 @@ export class DatabaseSessionService extends BaseSessionService {
             appDelta[key.replace(State.APP_PREFIX, '')] = value;
           } else if (key.startsWith(State.USER_PREFIX)) {
             userDelta[key.replace(State.USER_PREFIX, '')] = value;
-          } else if (!key.startsWith(State.TEMP_PREFIX)) {
+          } else {
             sessionDelta[key] = value;
           }
         }

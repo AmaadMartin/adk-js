@@ -201,9 +201,6 @@ export abstract class BaseSessionService {
       return;
     }
     for (const [key, value] of Object.entries(event.actions.stateDelta)) {
-      if (key.startsWith(State.TEMP_PREFIX)) {
-        continue;
-      }
       session.state[key] = value;
     }
   }

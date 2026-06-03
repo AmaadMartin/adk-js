@@ -5,8 +5,14 @@
  */
 
 import {Sessions} from '@google-cloud/vertexai/build/src/genai/sessions.js';
-import {createEvent, State, VertexAiSessionService} from '@google/adk';
-import {Session} from '@google/adk/sessions/session.js';
+import {
+  createEvent,
+  Session,
+  State,
+  VertexAiSessionService,
+  type CompactedEvent,
+  type ListSessionsRequest,
+} from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 
 // Mock the unreleased nodejs-vertexai package so the import resolves
@@ -20,8 +26,8 @@ vi.mock('nodejs-vertexai', () => ({
   },
 }));
 
-import {isVertexAiConnectionString} from '@google/adk/sessions/vertex_ai_session_service.js';
-import {logger} from '@google/adk/utils/logger.js';
+import {isVertexAiConnectionString} from '../../src/sessions/vertex_ai_session_service.js';
+import {logger} from '../../src/utils/logger.js';
 
 describe('isVertexAiConnectionString', () => {
   it('returns true for vertexai://', () => {
@@ -355,7 +361,7 @@ describe('VertexAiSessionService', () => {
 
       expect(session?.events).toHaveLength(1);
       const parsedEvent = session?.events[0];
-      expect(parsedEvent?.isCompacted).toBe(true);
+      expect((parsedEvent as CompactedEvent)?.isCompacted).toBe(true);
       expect(parsedEvent?.usageMetadata).toEqual({promptTokens: 10});
     });
 
@@ -519,7 +525,7 @@ describe('VertexAiSessionService', () => {
     it('lists sessions without filter if userId is missing', async () => {
       await service.listSessions({
         appName: '12345',
-      });
+      } as ListSessionsRequest);
 
       expect(mockClient.listInternal).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -535,7 +541,7 @@ describe('VertexAiSessionService', () => {
 
       const result = await service.listSessions({
         appName: '12345',
-      });
+      } as ListSessionsRequest);
 
       expect(result.sessions[0].state).toEqual({});
       expect(result.sessions[0].lastUpdateTime).toBeGreaterThan(0);
@@ -546,7 +552,7 @@ describe('VertexAiSessionService', () => {
 
       const result = await service.listSessions({
         appName: '12345',
-      });
+      } as ListSessionsRequest);
 
       expect(result.sessions).toEqual([]);
     });
@@ -565,7 +571,7 @@ describe('VertexAiSessionService', () => {
 
       const result = await service.listSessions({
         appName: '12345',
-      });
+      } as ListSessionsRequest);
 
       expect(result.sessions[0].state).toEqual({foo: 'bar'});
       expect(result.sessions[0].lastUpdateTime).toBe(
