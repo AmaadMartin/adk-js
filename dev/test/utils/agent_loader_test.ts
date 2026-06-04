@@ -4,12 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import esbuild from 'esbuild';
-import {exec} from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {pathToFileURL} from 'node:url';
-import {promisify} from 'node:util';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 
 import {
@@ -18,8 +16,6 @@ import {
   replaceDirnamePlugin,
 } from '../../src/utils/agent_loader.js';
 import * as fileUtils from '../../src/utils/file_utils.js';
-
-const execAsync = promisify(exec);
 
 vi.mock('../../src/utils/file_utils.js', () => ({
   getTempDir: vi.fn(),
@@ -37,6 +33,28 @@ vi.mock('esbuild', async (importOriginal) => {
     default: {
       ...(actual as unknown as {default: {build: Mock}}).default,
       build: vi.fn(),
+    },
+  };
+});
+
+vi.mock('@google/adk', () => {
+  const BASE_AGENT_SIGNATURE_SYMBOL = Symbol.for('google.adk.baseAgent');
+  class BaseAgent {
+    name: string;
+    constructor(options: {name: string}) {
+      this.name = options.name;
+      (this as Record<symbol, boolean>)[BASE_AGENT_SIGNATURE_SYMBOL] = true;
+    }
+  }
+  return {
+    BaseAgent,
+    isBaseAgent: (obj: unknown): obj is BaseAgent => {
+      return (
+        typeof obj === 'object' &&
+        obj !== null &&
+        BASE_AGENT_SIGNATURE_SYMBOL in obj &&
+        (obj as Record<symbol, boolean>)[BASE_AGENT_SIGNATURE_SYMBOL] === true
+      );
     },
   };
 });
@@ -154,16 +172,67 @@ describe('AgentLoader', () => {
       JSON.stringify({
         name: 'test-agents',
         version: '1.0.0',
-        dependencies: {
-          '@google/adk': `file:${path.resolve(require.resolve('@google/adk'), '../../..')}`,
+      }),
+    );
+
+    const adkDir = path.join(tempAgentsDir, 'node_modules', '@google', 'adk');
+    await fs.mkdir(adkDir, {recursive: true});
+
+    await fs.writeFile(
+      path.join(adkDir, 'package.json'),
+      JSON.stringify({
+        name: '@google/adk',
+        version: '1.0.0',
+        main: './index.js',
+        type: 'module',
+        exports: {
+          '.': {
+            import: './index.js',
+            require: './index.cjs',
+          },
         },
       }),
     );
 
-    await execAsync(
-      'npm install --no-audit --no-fund --prefer-offline --no-package-lock',
-      {cwd: tempAgentsDir},
-    );
+    const indexJsContent = `
+      const BASE_AGENT_SIGNATURE_SYMBOL = Symbol.for('google.adk.baseAgent');
+      export class BaseAgent {
+        constructor(options) {
+          this.name = options.name;
+          this[BASE_AGENT_SIGNATURE_SYMBOL] = true;
+        }
+      }
+      export function isBaseAgent(obj) {
+        return (
+          typeof obj === 'object' &&
+          obj !== null &&
+          BASE_AGENT_SIGNATURE_SYMBOL in obj &&
+          obj[BASE_AGENT_SIGNATURE_SYMBOL] === true
+        );
+      }
+    `;
+
+    const indexCjsContent = `
+      const BASE_AGENT_SIGNATURE_SYMBOL = Symbol.for('google.adk.baseAgent');
+      class BaseAgent {
+        constructor(options) {
+          this.name = options.name;
+          this[BASE_AGENT_SIGNATURE_SYMBOL] = true;
+        }
+      }
+      function isBaseAgent(obj) {
+        return (
+          typeof obj === 'object' &&
+          obj !== null &&
+          BASE_AGENT_SIGNATURE_SYMBOL in obj &&
+          obj[BASE_AGENT_SIGNATURE_SYMBOL] === true
+        );
+      }
+      module.exports = { BaseAgent, isBaseAgent };
+    `;
+
+    await fs.writeFile(path.join(adkDir, 'index.js'), indexJsContent);
+    await fs.writeFile(path.join(adkDir, 'index.cjs'), indexCjsContent);
   }
 
   describe('AgentFile', () => {

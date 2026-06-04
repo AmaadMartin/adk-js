@@ -49,6 +49,44 @@ describe('GCPSkillRegistry', () => {
         'Project ID and Location must be provided or set in environment variables',
       );
     });
+
+    it('throws error if project is missing but location is present', () => {
+      delete process.env['GOOGLE_CLOUD_PROJECT'];
+      process.env['GOOGLE_CLOUD_LOCATION'] = 'us-central1';
+      expect(() => new GCPSkillRegistry()).toThrow(
+        'Project ID and Location must be provided or set in environment variables',
+      );
+    });
+
+    it('throws error if location is missing but project is present', () => {
+      process.env['GOOGLE_CLOUD_PROJECT'] = 'test-project';
+      delete process.env['GOOGLE_CLOUD_LOCATION'];
+      expect(() => new GCPSkillRegistry()).toThrow(
+        'Project ID and Location must be provided or set in environment variables',
+      );
+    });
+
+    it('initializes if project is explicit and location is env', () => {
+      delete process.env['GOOGLE_CLOUD_PROJECT'];
+      process.env['GOOGLE_CLOUD_LOCATION'] = 'us-central1';
+      const reg = new GCPSkillRegistry({projectId: 'explicit-project'});
+      expect(reg).toBeDefined();
+    });
+
+    it('initializes if location is explicit and project is env', () => {
+      process.env['GOOGLE_CLOUD_PROJECT'] = 'test-project';
+      delete process.env['GOOGLE_CLOUD_LOCATION'];
+      const reg = new GCPSkillRegistry({location: 'explicit-location'});
+      expect(reg).toBeDefined();
+    });
+
+    it('throws error if params is empty and env is missing', () => {
+      delete process.env['GOOGLE_CLOUD_PROJECT'];
+      delete process.env['GOOGLE_CLOUD_LOCATION'];
+      expect(() => new GCPSkillRegistry({})).toThrow(
+        'Project ID and Location must be provided or set in environment variables',
+      );
+    });
   });
 
   describe('getSkill', () => {
