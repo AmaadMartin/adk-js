@@ -140,7 +140,7 @@ describe('AgentLoader', () => {
       async (_sourceFolder, fileName) => path.join(tempAgentsDir, fileName),
     );
     await initNpmProject();
-  });
+  }, 60000);
 
   afterEach(async () => {
     await fs.rm(tempAgentsDir, {recursive: true, force: true});
@@ -155,12 +155,15 @@ describe('AgentLoader', () => {
         name: 'test-agents',
         version: '1.0.0',
         dependencies: {
-          '@google/adk': `file:${path.dirname(require.resolve('@google/adk'))}`,
+          '@google/adk': `file:${path.resolve(require.resolve('@google/adk'), '../../..')}`,
         },
       }),
     );
 
-    await execAsync('npm install', {cwd: tempAgentsDir});
+    await execAsync(
+      'npm install --no-audit --no-fund --prefer-offline --no-package-lock',
+      {cwd: tempAgentsDir},
+    );
   }
 
   describe('AgentFile', () => {

@@ -24,7 +24,6 @@ export default defineConfig({
           environment: 'node',
           alias: {'@google/adk': path.resolve(__dirname, './core/src')},
           include: ['dev/test/**/*_test.ts'],
-          exclude: ['dev/test/utils/agent_loader_test.ts'],
         },
       },
       {
@@ -33,11 +32,6 @@ export default defineConfig({
           environment: 'node',
           alias: {'@google/adk': path.resolve(__dirname, './core/src')},
           include: ['tests/integration/**/*_test.ts'],
-          exclude: [
-            'tests/integration/skills/script_js/agent_test.ts',
-            'tests/integration/build_setup/build_setup_test.ts',
-            'tests/integration/agent_loader/agent_dirname_test.ts',
-          ],
         },
       },
       {

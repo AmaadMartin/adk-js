@@ -10,7 +10,7 @@ import {beforeEach, describe, expect, it, vi} from 'vitest';
 
 const mockRequest = vi.fn();
 
-vi.mock('@google-cloud/vertexai/build/src/genai/client.js', () => {
+vi.mock('@google-cloud/vertexai', () => {
   return {
     Client: vi.fn().mockImplementation(() => {
       return {
