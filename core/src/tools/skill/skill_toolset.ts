@@ -90,7 +90,6 @@ export class SkillToolset extends BaseToolset {
     name: string,
     invocationId?: string,
   ): Promise<Skill | undefined> {
-    console.log('getOrFetchSkill name:', name, 'invocationId:', invocationId);
     const localSkill = this.getSkill(name);
     if (localSkill) {
       return localSkill;
