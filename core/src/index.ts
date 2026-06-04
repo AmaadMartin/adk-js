@@ -44,6 +44,7 @@ export type {VertexAiSessionServiceOptions} from './sessions/vertex_ai_session_s
 export {
   loadAllSkillsInDir,
   loadSkillFromDir,
+  loadSkillFromZipBytes,
   validateSkillDir,
 } from './skills/loader.js';
 export {RunSkillInlineScriptTool} from './tools/skill/run_skill_inline_script_tool.js';

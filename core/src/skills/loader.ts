@@ -5,6 +5,7 @@
  */
 
 import yaml from 'js-yaml';
+import JSZip from 'jszip';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import {logger} from '../utils/logger.js';
@@ -323,4 +324,91 @@ export async function loadAllSkillsInDir(
   }
 
   return skills;
+}
+
+/**
+ * Load a complete skill directly from in-memory zip file bytes.
+ * @param zipBytes The raw bytes of the zip file.
+ */
+export async function loadSkillFromZipBytes(zipBytes: Buffer): Promise<Skill> {
+  const zip = await JSZip.loadAsync(zipBytes);
+
+  // Security check for zip slip
+  for (const relativePath of Object.keys(zip.files)) {
+    const file = zip.files[relativePath];
+    if (file.dir) continue;
+    if (
+      relativePath.startsWith('/') ||
+      relativePath.startsWith('../') ||
+      relativePath.includes('/../')
+    ) {
+      throw new Error(`Dangerous zip entry ignored: ${relativePath}`);
+    }
+  }
+
+  // Find SKILL.md or skill.md
+  const skillMdFile = zip.file('SKILL.md') || zip.file('skill.md');
+  if (!skillMdFile) {
+    throw new Error('SKILL.md not found in zipped filesystem.');
+  }
+
+  const skillMdContent = await skillMdFile.async('string');
+  const {frontmatter: parsed, body} = parseSkillMdContent(skillMdContent);
+  const frontmatter = FrontmatterSchema.parse(parsed);
+
+  const skillName = frontmatter.name;
+  if (!skillName) {
+    throw new Error("SKILL.md frontmatter must contain 'name'");
+  }
+  if (path.basename(skillName) !== skillName) {
+    throw new Error(`Invalid skill name in SKILL.md: ${skillName}`);
+  }
+
+  // Helper to load files under a directory prefix inside the zip
+  async function loadZipDir(
+    prefix: string,
+  ): Promise<Record<string, string | Buffer>> {
+    const result: Record<string, string | Buffer> = {};
+    const normalizedPrefix = prefix.endsWith('/') ? prefix : `${prefix}/`;
+    for (const [relativePath, file] of Object.entries(zip.files)) {
+      if (file.dir) continue;
+      if (relativePath.startsWith(normalizedPrefix)) {
+        if (relativePath.includes('__pycache__')) {
+          continue;
+        }
+        const innerPath = relativePath.slice(normalizedPrefix.length);
+        if (!innerPath) continue;
+
+        const fileBuffer = await file.async('nodebuffer');
+        try {
+          const decoder = new TextDecoder('utf-8', {fatal: true});
+          result[innerPath] = decoder.decode(fileBuffer);
+        } catch {
+          result[innerPath] = fileBuffer;
+        }
+      }
+    }
+    return result;
+  }
+
+  const [references, assets, rawScripts] = await Promise.all([
+    loadZipDir('references'),
+    loadZipDir('assets'),
+    loadZipDir('scripts'),
+  ]);
+
+  const scripts: Record<string, Script> = {};
+  for (const [name, src] of Object.entries(rawScripts)) {
+    if (typeof src === 'string') {
+      scripts[name] = {src};
+    }
+  }
+
+  const resources: Resources = {references, assets, scripts};
+
+  return {
+    frontmatter,
+    instructions: body,
+    resources,
+  };
 }

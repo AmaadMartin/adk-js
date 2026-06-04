@@ -4,13 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import JSZip from 'jszip';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 import {
   loadAllSkillsInDir,
   loadSkillFromDir,
+  loadSkillFromZipBytes,
   parseSkillMdContent,
   validateSkillDir,
 } from '../../src/skills/loader.js';
@@ -490,6 +492,116 @@ Instructions`,
       expect(skills['skill-3']).toBeDefined();
 
       await fs.rm(tempDir, {recursive: true, force: true});
+    });
+  });
+
+  describe('loadSkillFromZipBytes', () => {
+    it('loads a valid skill from zip bytes', async () => {
+      const zip = new JSZip();
+      zip.file(
+        'SKILL.md',
+        `---
+name: test-skill
+description: A test skill
+---
+Instructions content`,
+      );
+
+      const zipBytes = await zip.generateAsync({type: 'nodebuffer'});
+      const skill = await loadSkillFromZipBytes(zipBytes);
+
+      expect(skill.frontmatter.name).toBe('test-skill');
+      expect(skill.instructions).toBe('Instructions content');
+      expect(skill.resources?.references).toEqual({});
+      expect(skill.resources?.assets).toEqual({});
+      expect(skill.resources?.scripts).toEqual({});
+    });
+
+    it('loads resources under correct folders', async () => {
+      const zip = new JSZip();
+      zip.file(
+        'SKILL.md',
+        `---
+name: test-skill
+description: A test skill
+---
+Instructions content`,
+      );
+      zip.file('references/ref.txt', 'reference content');
+      zip.file('assets/logo.png', Buffer.from([0x80, 0x81, 0x82]));
+      zip.file('scripts/run.sh', 'echo hello');
+      zip.file('scripts/invalid.bin', Buffer.from([0x80, 0x81, 0x82]));
+
+      const zipBytes = await zip.generateAsync({type: 'nodebuffer'});
+      const skill = await loadSkillFromZipBytes(zipBytes);
+
+      expect(skill.resources?.references?.['ref.txt']).toBe(
+        'reference content',
+      );
+      expect(skill.resources?.assets?.['logo.png']).toEqual(
+        Buffer.from([0x80, 0x81, 0x82]),
+      );
+      expect(skill.resources?.scripts?.['run.sh']).toEqual({src: 'echo hello'});
+      expect(skill.resources?.scripts?.['invalid.bin']).toBeUndefined();
+    });
+
+    it('throws error if SKILL.md not found in zip', async () => {
+      const zip = new JSZip();
+      zip.file('hello.txt', 'world');
+      const zipBytes = await zip.generateAsync({type: 'nodebuffer'});
+
+      await expect(loadSkillFromZipBytes(zipBytes)).rejects.toThrow(
+        'SKILL.md not found in zipped filesystem.',
+      );
+    });
+
+    it('throws error if zip contains dangerous paths (zip slip)', async () => {
+      const mockZip = {
+        files: {
+          'SKILL.md': {
+            dir: false,
+            async: vi.fn().mockResolvedValue(`---
+name: test-skill
+description: A test skill
+---
+Instructions content`),
+          },
+          '../dangerous.txt': {
+            dir: false,
+            async: vi.fn().mockResolvedValue('dangerous content'),
+          },
+        },
+        file: (name: string) => {
+          return mockZip.files[name as keyof typeof mockZip.files];
+        },
+      };
+
+      const spy = vi
+        .spyOn(JSZip, 'loadAsync')
+        .mockResolvedValue(mockZip as unknown as JSZip);
+
+      try {
+        await expect(loadSkillFromZipBytes(Buffer.alloc(0))).rejects.toThrow(
+          /Dangerous zip entry ignored: \.\.\/dangerous\.txt/,
+        );
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it('throws error if skill name is invalid or contains path components', async () => {
+      const zip = new JSZip();
+      zip.file(
+        'SKILL.md',
+        `---
+name: ../invalid-name
+description: A test skill
+---
+Instructions content`,
+      );
+      const zipBytes = await zip.generateAsync({type: 'nodebuffer'});
+
+      await expect(loadSkillFromZipBytes(zipBytes)).rejects.toThrow();
     });
   });
 });
