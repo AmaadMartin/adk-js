@@ -43,7 +43,9 @@ vi.mock('@google/adk', () => {
     name: string;
     constructor(options: {name: string}) {
       this.name = options.name;
-      (this as Record<symbol, boolean>)[BASE_AGENT_SIGNATURE_SYMBOL] = true;
+      (this as unknown as Record<symbol, boolean>)[
+        BASE_AGENT_SIGNATURE_SYMBOL
+      ] = true;
     }
   }
   return {
@@ -53,7 +55,9 @@ vi.mock('@google/adk', () => {
         typeof obj === 'object' &&
         obj !== null &&
         BASE_AGENT_SIGNATURE_SYMBOL in obj &&
-        (obj as Record<symbol, boolean>)[BASE_AGENT_SIGNATURE_SYMBOL] === true
+        (obj as unknown as Record<symbol, boolean>)[
+          BASE_AGENT_SIGNATURE_SYMBOL
+        ] === true
       );
     },
   };
