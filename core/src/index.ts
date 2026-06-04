@@ -37,6 +37,7 @@ export {
   type UnsafeLocalCodeExecutorOptions,
 } from './code_executors/unsafe_local_code_executor.js';
 export * from './common.js';
+export {GCPSkillRegistry} from './integrations/skill_registry/gcp_skill_registry.js';
 export {DatabaseSessionService} from './sessions/database_session_service.js';
 export {getSessionServiceFromUri} from './sessions/registry.js';
 export {VertexAiSessionService} from './sessions/vertex_ai_session_service.js';
@@ -46,6 +47,9 @@ export {
   loadSkillFromDir,
   validateSkillDir,
 } from './skills/loader.js';
+export type {Frontmatter, Skill} from './skills/skill.js';
+export {SkillRegistry} from './skills/skill_registry.js';
+
 export {RunSkillInlineScriptTool} from './tools/skill/run_skill_inline_script_tool.js';
 export {RunSkillScriptTool} from './tools/skill/run_skill_script_tool.js';
 
