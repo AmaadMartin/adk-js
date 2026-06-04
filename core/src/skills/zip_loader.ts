@@ -84,15 +84,13 @@ export async function loadSkillFromZipBytes(zipBytes: Buffer): Promise<Skill> {
           continue;
         }
         const relativePath = filename.substring(prefix.length);
-        if (!relativePath) {
-          continue;
-        }
-
-        const buffer = await file.async('nodebuffer');
-        if (isUtf8(buffer)) {
-          result[relativePath] = buffer.toString('utf-8');
-        } else {
-          result[relativePath] = buffer;
+        if (relativePath) {
+          const buffer = await file.async('nodebuffer');
+          if (isUtf8(buffer)) {
+            result[relativePath] = buffer.toString('utf-8');
+          } else {
+            result[relativePath] = buffer;
+          }
         }
       }
     }

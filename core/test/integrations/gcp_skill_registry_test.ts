@@ -171,6 +171,14 @@ describe('GCPSkillRegistry', () => {
         "Skill name 'mismatched-name' does not match requested name 'test-skill'.",
       );
     });
+
+    it('throws error when project ID could not be determined', async () => {
+      mockAuth.getProjectId = vi.fn().mockResolvedValue(undefined);
+      const registry = new GCPSkillRegistry();
+      await expect(registry.getSkill('test-skill')).rejects.toThrow(
+        'GCP Project ID could not be determined.',
+      );
+    });
   });
 
   describe('searchSkills', () => {
@@ -190,13 +198,20 @@ describe('GCPSkillRegistry', () => {
                 'projects/test-project/locations/us-central1/skills/skill-b',
               description: 'Description B',
             },
+            {
+              description: 'Description C',
+            },
+            {
+              skillName:
+                'projects/test-project/locations/us-central1/skills/skill-d',
+            },
           ],
         }),
       } as Response);
 
       const results = await registry.searchSkills('query');
 
-      expect(results).toHaveLength(2);
+      expect(results).toHaveLength(4);
       expect(results[0]).toEqual({
         name: 'skill-a',
         description: 'Description A',
@@ -204,6 +219,14 @@ describe('GCPSkillRegistry', () => {
       expect(results[1]).toEqual({
         name: 'skill-b',
         description: 'Description B',
+      });
+      expect(results[2]).toEqual({
+        name: '',
+        description: 'Description C',
+      });
+      expect(results[3]).toEqual({
+        name: 'skill-d',
+        description: '',
       });
 
       expect(fetch).toHaveBeenCalledWith(
@@ -235,6 +258,14 @@ describe('GCPSkillRegistry', () => {
 
       await expect(registry.searchSkills('query')).rejects.toThrow(
         'Failed to retrieve skills from GCP Skill Registry: HTTP 500 - Internal Server Error',
+      );
+    });
+
+    it('throws error when project ID could not be determined', async () => {
+      mockAuth.getProjectId = vi.fn().mockResolvedValue(undefined);
+      const registry = new GCPSkillRegistry();
+      await expect(registry.searchSkills('query')).rejects.toThrow(
+        'GCP Project ID could not be determined.',
       );
     });
   });

@@ -6,7 +6,7 @@
 
 import {loadSkillFromZipBytes} from '@google/adk';
 import JSZip from 'jszip';
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 
 async function createMockZip(
   files: Record<string, string | Buffer>,
@@ -99,19 +99,48 @@ describe('Zip Loader', () => {
   });
 
   it('skips __pycache__ and empty relative path entries', async () => {
-    const zipBytes = await createMockZip({
-      'SKILL.md':
-        '---\nname: my-skill\ndescription: A test skill\n---\nHello Instructions',
-      'references/__pycache__/some_file.pyc': 'compiled py',
-      'references/': '', // empty relative path when prefix is references/
-      'references/valid.md': 'valid reference',
-    });
+    const mockZip = {
+      files: {
+        'SKILL.md': {
+          dir: false,
+          async: async () =>
+            '---\nname: my-skill\ndescription: A test skill\n---\nHello Instructions',
+        },
+        'references/': {
+          dir: false,
+          async: async () => Buffer.from([]),
+        },
+        'references/valid.md': {
+          dir: false,
+          async: async () => Buffer.from('valid reference'),
+        },
+        'references/__pycache__/some_file.pyc': {
+          dir: false,
+          async: async () => Buffer.from('pyc'),
+        },
+      },
+      file: function (name: string) {
+        return this.files[name as keyof typeof this.files] || null;
+      },
+    };
+    const spy = vi
+      .spyOn(JSZip, 'loadAsync')
+      .mockResolvedValue(mockZip as unknown as JSZip);
 
-    const skill = await loadSkillFromZipBytes(zipBytes);
+    const skill = await loadSkillFromZipBytes(Buffer.from([]));
     expect(skill.resources?.references?.['valid.md']).toBe('valid reference');
     expect(
       skill.resources?.references?.['__pycache__/some_file.pyc'],
     ).toBeUndefined();
     expect(skill.resources?.references?.['']).toBeUndefined();
+
+    spy.mockRestore();
+  });
+
+  it('throws error when zip is completely empty', async () => {
+    const zipBytes = await createMockZip({});
+    await expect(loadSkillFromZipBytes(zipBytes)).rejects.toThrow(
+      'SKILL.md not found in zipped filesystem.',
+    );
   });
 });

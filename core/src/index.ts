@@ -46,6 +46,8 @@ export {
   loadSkillFromDir,
   validateSkillDir,
 } from './skills/loader.js';
+export type {Frontmatter, Resources, Script, Skill} from './skills/skill.js';
+export type {SkillRegistry} from './skills/skill_registry.js';
 export {loadSkillFromZipBytes} from './skills/zip_loader.js';
 export {RunSkillInlineScriptTool} from './tools/skill/run_skill_inline_script_tool.js';
 export {RunSkillScriptTool} from './tools/skill/run_skill_script_tool.js';
