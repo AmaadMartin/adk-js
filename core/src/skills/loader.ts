@@ -72,7 +72,10 @@ async function loadDir(
 
         await walk(fullPath);
       } else if (entry.isFile()) {
-        const relativePath = path.relative(directoryPath, fullPath);
+        let relativePath = path.relative(directoryPath, fullPath);
+        if (path.sep === '\\') {
+          relativePath = relativePath.replace(/\\/g, '/');
+        }
         if (IGNORED_EXTENSIONS.has(path.extname(entry.name))) {
           continue;
         }
