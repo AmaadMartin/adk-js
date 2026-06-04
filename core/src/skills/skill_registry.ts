@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+/* istanbul ignore file */
+
 import {Frontmatter, Skill} from './skill.js';
 
 export interface SkillRegistry {

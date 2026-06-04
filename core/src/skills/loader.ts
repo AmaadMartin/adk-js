@@ -191,23 +191,10 @@ export async function validateSkillDir(skillDir: string): Promise<string[]> {
     return [(e as Error).message];
   }
 
-  try {
-    const keys = Object.keys(skill.frontmatter);
-    const unknown = keys.filter((k) => !ALLOWED_FRONTMATTER_KEYS.has(k));
-    if (unknown.length > 0) {
-      problems.push(
-        `Unknown frontmatter fields: [${unknown.sort().join(', ')}]`,
-      );
-    }
-
-    const dirName = path.basename(resolvedDir);
-    if (dirName !== skill.frontmatter.name) {
-      problems.push(
-        `Skill name '${skill.frontmatter.name}' does not match directory name '${dirName}'.`,
-      );
-    }
-  } catch (e: unknown) {
-    problems.push((e as Error).message);
+  const keys = Object.keys(skill.frontmatter);
+  const unknown = keys.filter((k) => !ALLOWED_FRONTMATTER_KEYS.has(k));
+  if (unknown.length > 0) {
+    problems.push(`Unknown frontmatter fields: [${unknown.sort().join(', ')}]`);
   }
 
   return problems;

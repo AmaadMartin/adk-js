@@ -4,16 +4,40 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 import {
   loadAllSkillsInDir,
   loadSkillFromDir,
   parseSkillMdContent,
   validateSkillDir,
 } from '../../src/skills/loader.js';
+
+let mockReadFile: any = null;
+let mockReaddir: any = null;
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  return {
+    ...actual,
+    readFile: vi.fn().mockImplementation((...args: any[]) => {
+      if (mockReadFile) {
+        return mockReadFile(...args);
+      }
+      return (actual as any).readFile(...args);
+    }),
+    readdir: vi.fn().mockImplementation((...args: any[]) => {
+      if (mockReaddir) {
+        return mockReaddir(...args);
+      }
+      return (actual as any).readdir(...args);
+    }),
+  };
+});
 
 describe('loader', () => {
   describe('parseSkillMdContent', () => {
@@ -54,12 +78,11 @@ description: A test skill`;
 
     it('throws error if frontmatter is not a YAML mapping', () => {
       const content = `---
-- item1
-- item2
+"just a string"
 ---
 Body`;
       expect(() => parseSkillMdContent(content)).toThrow(
-        'Invalid YAML in frontmatter:',
+        'SKILL.md frontmatter must be a YAML mapping',
       );
     });
 
@@ -202,12 +225,17 @@ Instructions`,
       );
 
       await fs.mkdir(path.join(skillDir, 'references'));
+      await fs.mkdir(path.join(skillDir, 'references', 'subdir'));
       await fs.mkdir(path.join(skillDir, 'assets'));
       await fs.mkdir(path.join(skillDir, 'scripts'));
 
       await fs.writeFile(
         path.join(skillDir, 'references', 'ref.txt'),
         'reference content',
+      );
+      await fs.writeFile(
+        path.join(skillDir, 'references', 'subdir', 'ref2.txt'),
+        'nested reference content',
       );
       await fs.writeFile(
         path.join(skillDir, 'assets', 'logo.png'),
@@ -222,9 +250,128 @@ Instructions`,
       expect(skill.resources?.references?.['ref.txt']).toBe(
         'reference content',
       );
+      expect(skill.resources?.references?.['subdir/ref2.txt']).toBe(
+        'nested reference content',
+      );
       expect(skill.resources?.assets?.['logo.png']).toBe('binary content');
       expect(skill.resources?.scripts?.['run.sh']).toEqual({src: 'echo hello'});
 
+      await fs.rm(tempDir, {recursive: true, force: true});
+    });
+
+    it('ignores directories in IGNORED_DIRECTORIES and files in IGNORED_EXTENSIONS when loading resources', async () => {
+      tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-skill-test-'));
+      const skillDir = path.join(tempDir, 'test-skill');
+      await fs.mkdir(skillDir);
+
+      await fs.writeFile(
+        path.join(skillDir, 'SKILL.md'),
+        `---
+name: test-skill
+description: A test skill
+---
+Instructions`,
+      );
+
+      await fs.mkdir(path.join(skillDir, 'references'));
+      await fs.mkdir(path.join(skillDir, 'references', 'node_modules'));
+      await fs.writeFile(
+        path.join(skillDir, 'references', 'node_modules', 'ignored.txt'),
+        'ignored content',
+      );
+      await fs.writeFile(
+        path.join(skillDir, 'references', 'test.pyc'),
+        'ignored binary',
+      );
+      await fs.writeFile(
+        path.join(skillDir, 'references', 'normal.txt'),
+        'normal content',
+      );
+
+      const skill = await loadSkillFromDir(skillDir);
+      expect(skill.resources?.references).toEqual({
+        'normal.txt': 'normal content',
+      });
+
+      await fs.rm(tempDir, {recursive: true, force: true});
+    });
+
+    it('falls back to buffer if toString throws when loading file', async () => {
+      tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-skill-test-'));
+      const skillDir = path.join(tempDir, 'test-skill');
+      await fs.mkdir(skillDir);
+      await fs.writeFile(
+        path.join(skillDir, 'SKILL.md'),
+        `---
+name: test-skill
+description: A test skill
+---
+Instructions`,
+      );
+
+      await fs.mkdir(path.join(skillDir, 'references'));
+      await fs.writeFile(
+        path.join(skillDir, 'references', 'test.bin'),
+        'some data',
+      );
+
+      mockReadFile = async (filePath: any, options: any) => {
+        if (filePath.toString().endsWith('test.bin')) {
+          const buf = Buffer.from('some data');
+          Object.defineProperty(buf, 'toString', {
+            value: () => {
+              throw new Error('mock toString error');
+            },
+            configurable: true,
+          });
+          return buf as any;
+        }
+        const currentMock = mockReadFile;
+        mockReadFile = null;
+        try {
+          return await fs.readFile(filePath, options);
+        } finally {
+          mockReadFile = currentMock;
+        }
+      };
+
+      const skill = await loadSkillFromDir(skillDir);
+      expect(skill.resources?.references?.['test.bin']).toBeDefined();
+      expect(typeof skill.resources?.references?.['test.bin']).not.toBe(
+        'string',
+      );
+
+      mockReadFile = null;
+      await fs.rm(tempDir, {recursive: true, force: true});
+    });
+
+    it('skips skill.md if reading it throws error and continues searching', async () => {
+      tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-skill-test-'));
+      const skillDir = path.join(tempDir, 'test-skill');
+      await fs.mkdir(skillDir);
+      await fs.writeFile(
+        path.join(skillDir, 'SKILL.md'),
+        '---name: test-skill---',
+      );
+
+      mockReadFile = async (filePath: any, options: any) => {
+        if (filePath.toString().endsWith('SKILL.md')) {
+          throw new Error('Permission denied');
+        }
+        const currentMock = mockReadFile;
+        mockReadFile = null;
+        try {
+          return await fs.readFile(filePath, options);
+        } finally {
+          mockReadFile = currentMock;
+        }
+      };
+
+      await expect(loadSkillFromDir(skillDir)).rejects.toThrow(
+        /SKILL\.md \(or any case variation like skill\.md\) not found/,
+      );
+
+      mockReadFile = null;
       await fs.rm(tempDir, {recursive: true, force: true});
     });
   });
@@ -488,6 +635,53 @@ Instructions`,
       expect(skills['skill-1']).toBeDefined();
       expect(skills['skill-2']).toBeDefined();
       expect(skills['skill-3']).toBeDefined();
+
+      await fs.rm(tempDir, {recursive: true, force: true});
+    });
+
+    it('skips subdirectory if readdir throws error', async () => {
+      tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-skill-test-'));
+      const subdir = path.join(tempDir, 'unreadable-subdir');
+      await fs.mkdir(subdir);
+
+      mockReaddir = async (dirPath: any, options: any) => {
+        if (dirPath.toString().endsWith('unreadable-subdir')) {
+          throw new Error('Permission denied');
+        }
+        const currentMock = mockReaddir;
+        mockReaddir = null;
+        try {
+          return await fs.readdir(dirPath, options);
+        } finally {
+          mockReaddir = currentMock;
+        }
+      };
+
+      const skills = await loadAllSkillsInDir(tempDir);
+      expect(skills).toEqual({});
+
+      mockReaddir = null;
+      await fs.rm(tempDir, {recursive: true, force: true});
+    });
+
+    it('ignores directories in IGNORED_DIRECTORIES during scan', async () => {
+      tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-skill-test-'));
+
+      const ignoredDir = path.join(tempDir, 'node_modules');
+      await fs.mkdir(ignoredDir);
+      const skillDir = path.join(ignoredDir, 'skill-1');
+      await fs.mkdir(skillDir);
+      await fs.writeFile(
+        path.join(skillDir, 'SKILL.md'),
+        `---
+name: skill-1
+description: Skill 1
+---
+Instructions`,
+      );
+
+      const skills = await loadAllSkillsInDir(tempDir);
+      expect(skills['skill-1']).toBeUndefined();
 
       await fs.rm(tempDir, {recursive: true, force: true});
     });
