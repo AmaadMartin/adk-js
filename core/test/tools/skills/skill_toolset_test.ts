@@ -1172,7 +1172,7 @@ describe('skill_toolset', () => {
         expect.objectContaining({
           codeExecutionInput: expect.objectContaining({
             code: 'call .\\scripts\\run.bat %*',
-            language: 'windows_cmd',
+            language: 'cmd',
           }),
         }),
       );
