@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {GCPSkillRegistry} from '@google/adk/index.js';
 import AdmZip from 'adm-zip';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
-import {GCPSkillRegistry} from '../../src/index.js';
 
 let shouldAuthThrow = false;
 

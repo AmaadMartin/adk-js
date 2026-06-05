@@ -7,7 +7,7 @@
 import {FunctionDeclaration, Type} from '@google/genai';
 import {experimental} from '../../utils/experimental.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
-import {SkillToolset} from './skill_toolset.js';
+import type {SkillToolset} from './skill_toolset.js';
 
 /**
  * Tool to search for relevant skills in the registry.

@@ -4,18 +4,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import AdmZip from 'adm-zip';
-import * as fs from 'node:fs/promises';
-import * as os from 'node:os';
-import * as path from 'node:path';
-import {describe, expect, it} from 'vitest';
 import {
   loadAllSkillsInDir,
   loadSkillFromDir,
   loadSkillFromZipBytes,
   parseSkillMdContent,
   validateSkillDir,
-} from '../../src/skills/loader.js';
+} from '@google/adk/skills/loader.js';
+import AdmZip from 'adm-zip';
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import {describe, expect, it} from 'vitest';
 
 describe('loader', () => {
   describe('parseSkillMdContent', () => {
