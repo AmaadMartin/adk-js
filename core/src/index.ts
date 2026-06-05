@@ -44,12 +44,15 @@ export type {VertexAiSessionServiceOptions} from './sessions/vertex_ai_session_s
 export {
   loadAllSkillsInDir,
   loadSkillFromDir,
+  loadSkillFromZipBytes,
   validateSkillDir,
 } from './skills/loader.js';
+export {SkillRegistry} from './skills/skill_registry.js';
 export {RunSkillInlineScriptTool} from './tools/skill/run_skill_inline_script_tool.js';
 export {RunSkillScriptTool} from './tools/skill/run_skill_script_tool.js';
 
 export * from './integrations/agent_registry/agent_registry.js';
+export * from './integrations/skill_registry/gcp_skill_registry.js';
 export * from './telemetry/google_cloud.js';
 export * from './telemetry/setup.js';
 export * from './tools/mcp/mcp_session_manager.js';

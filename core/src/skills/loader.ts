@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import AdmZip from 'adm-zip';
 import yaml from 'js-yaml';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
@@ -79,10 +80,10 @@ async function loadDir(
 
         const fileData = await fs.readFile(fullPath);
 
-        try {
-          files[relativePath] = fileData.toString('utf-8');
-        } catch (_e: unknown) {
+        if (isBinaryBuffer(fileData)) {
           files[relativePath] = fileData;
+        } else {
+          files[relativePath] = fileData.toString('utf-8');
         }
       }
     }
@@ -191,23 +192,10 @@ export async function validateSkillDir(skillDir: string): Promise<string[]> {
     return [(e as Error).message];
   }
 
-  try {
-    const keys = Object.keys(skill.frontmatter);
-    const unknown = keys.filter((k) => !ALLOWED_FRONTMATTER_KEYS.has(k));
-    if (unknown.length > 0) {
-      problems.push(
-        `Unknown frontmatter fields: [${unknown.sort().join(', ')}]`,
-      );
-    }
-
-    const dirName = path.basename(resolvedDir);
-    if (dirName !== skill.frontmatter.name) {
-      problems.push(
-        `Skill name '${skill.frontmatter.name}' does not match directory name '${dirName}'.`,
-      );
-    }
-  } catch (e: unknown) {
-    problems.push((e as Error).message);
+  const keys = Object.keys(skill.frontmatter);
+  const unknown = keys.filter((k) => !ALLOWED_FRONTMATTER_KEYS.has(k));
+  if (unknown.length > 0) {
+    problems.push(`Unknown frontmatter fields: [${unknown.sort().join(', ')}]`);
   }
 
   return problems;
@@ -323,4 +311,110 @@ export async function loadAllSkillsInDir(
   }
 
   return skills;
+}
+
+function isBinaryBuffer(buffer: Buffer): boolean {
+  for (let i = 0; i < Math.min(buffer.length, 8000); i++) {
+    if (buffer[i] === 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Loads a complete skill directly from in-memory zip file bytes.
+ *
+ * @param zipBytes - The raw bytes of the zip file containing the skill.
+ * @returns The fully loaded Skill object.
+ * @throws {Error} If SKILL.md is not found in the archive or contains dangerous paths.
+ */
+export function loadSkillFromZipBytes(zipBytes: Buffer): Skill {
+  const zip = new AdmZip(zipBytes);
+  const zipEntries = zip.getEntries();
+
+  // 1. Security check for zip slip
+  for (const entry of zipEntries) {
+    const filename = entry.entryName;
+    if (
+      filename.startsWith('/') ||
+      filename.startsWith('../') ||
+      filename.includes('/../') ||
+      filename.includes('\\..\\')
+    ) {
+      throw new Error(`Dangerous zip entry ignored: ${filename}`);
+    }
+  }
+
+  // 2. Find SKILL.md or skill.md
+  let skillMdContent: string | null = null;
+  for (const entry of zipEntries) {
+    const lowerName = entry.entryName.toLowerCase();
+    if (lowerName === 'skill.md') {
+      skillMdContent = entry.getData().toString('utf-8');
+      break;
+    }
+  }
+
+  if (skillMdContent === null) {
+    throw new Error('SKILL.md not found in zipped filesystem.');
+  }
+
+  // 3. Parse frontmatter
+  const {frontmatter, body: instructions} = parseSkillMdContent(skillMdContent);
+
+  // 4. Helper to load files under a directory prefix inside the zip
+  const loadZipDir = (prefix: string): Record<string, string | Buffer> => {
+    const result: Record<string, string | Buffer> = {};
+    const normPrefix = `${prefix}/`;
+    for (const entry of zipEntries) {
+      if (entry.isDirectory) {
+        continue;
+      }
+      if (entry.entryName.startsWith(normPrefix)) {
+        // Skip pycache or similar ignored directories
+        const parts = entry.entryName.split('/');
+        if (parts.some((part) => IGNORED_DIRECTORIES.has(part))) {
+          continue;
+        }
+        const ext = path.extname(entry.entryName);
+        if (IGNORED_EXTENSIONS.has(ext)) {
+          continue;
+        }
+
+        const relativePath = entry.entryName.substring(normPrefix.length);
+
+        const data = entry.getData();
+        if (isBinaryBuffer(data)) {
+          result[relativePath] = data;
+        } else {
+          result[relativePath] = data.toString('utf-8');
+        }
+      }
+    }
+    return result;
+  };
+
+  const references = loadZipDir('references');
+  const assets = loadZipDir('assets');
+  const rawScripts = loadZipDir('scripts');
+
+  const scripts: Record<string, Script> = {};
+  for (const [name, src] of Object.entries(rawScripts)) {
+    if (typeof src === 'string') {
+      scripts[name] = {src};
+    }
+  }
+
+  const resources: Resources = {
+    references,
+    assets,
+    scripts,
+  };
+
+  return {
+    frontmatter,
+    instructions,
+    resources,
+  };
 }
