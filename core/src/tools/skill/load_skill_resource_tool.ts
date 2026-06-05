@@ -159,7 +159,10 @@ export class LoadSkillResourceTool extends BaseTool {
           const skillName = response['skill_name'] as string;
           const resourcePath = response['path'] as string;
 
-          const skill = this.toolset.getSkill(skillName);
+          const skill = await this.toolset.getOrFetchSkill(
+            skillName,
+            request.toolContext.invocationId,
+          );
           if (!skill) continue;
           const skillResources = skill.resources || {};
 
