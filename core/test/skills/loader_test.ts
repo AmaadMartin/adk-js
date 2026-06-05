@@ -286,31 +286,34 @@ Instructions`,
       await fs.rm(tempDir, {recursive: true, force: true});
     });
 
-    it('handles unreadable SKILL.md gracefully', async () => {
-      tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-skill-test-'));
-      const skillDir = path.join(tempDir, 'test-skill');
-      await fs.mkdir(skillDir);
+    it.skipIf(process.platform === 'win32')(
+      'handles unreadable SKILL.md gracefully',
+      async () => {
+        tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-skill-test-'));
+        const skillDir = path.join(tempDir, 'test-skill');
+        await fs.mkdir(skillDir);
 
-      const skillMdPath = path.join(skillDir, 'SKILL.md');
-      await fs.writeFile(
-        skillMdPath,
-        `---
+        const skillMdPath = path.join(skillDir, 'SKILL.md');
+        await fs.writeFile(
+          skillMdPath,
+          `---
 name: test-skill
 description: A test skill
 ---
 Instructions`,
-      );
-      await fs.chmod(skillMdPath, 0o000);
-
-      try {
-        await expect(loadSkillFromDir(skillDir)).rejects.toThrow(
-          /SKILL\.md \(or any case variation like skill\.md\) not found/,
         );
-      } finally {
-        await fs.chmod(skillMdPath, 0o644);
-        await fs.rm(tempDir, {recursive: true, force: true});
-      }
-    });
+        await fs.chmod(skillMdPath, 0o000);
+
+        try {
+          await expect(loadSkillFromDir(skillDir)).rejects.toThrow(
+            /SKILL\.md \(or any case variation like skill\.md\) not found/,
+          );
+        } finally {
+          await fs.chmod(skillMdPath, 0o644);
+          await fs.rm(tempDir, {recursive: true, force: true});
+        }
+      },
+    );
   });
 
   describe('validateSkillDir', () => {
@@ -611,20 +614,23 @@ Instructions`,
       await fs.rm(tempDir, {recursive: true, force: true});
     });
 
-    it('handles unreadable subdirectory inside base directory gracefully', async () => {
-      tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-skill-test-'));
-      const subDir = path.join(tempDir, 'unreadable-sub');
-      await fs.mkdir(subDir);
-      await fs.chmod(subDir, 0o000);
+    it.skipIf(process.platform === 'win32')(
+      'handles unreadable subdirectory inside base directory gracefully',
+      async () => {
+        tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-skill-test-'));
+        const subDir = path.join(tempDir, 'unreadable-sub');
+        await fs.mkdir(subDir);
+        await fs.chmod(subDir, 0o000);
 
-      try {
-        const skills = await loadAllSkillsInDir(tempDir);
-        expect(skills).toEqual({});
-      } finally {
-        await fs.chmod(subDir, 0o755);
-        await fs.rm(tempDir, {recursive: true, force: true});
-      }
-    });
+        try {
+          const skills = await loadAllSkillsInDir(tempDir);
+          expect(skills).toEqual({});
+        } finally {
+          await fs.chmod(subDir, 0o755);
+          await fs.rm(tempDir, {recursive: true, force: true});
+        }
+      },
+    );
   });
 
   describe('loadSkillFromZipBytes', () => {
