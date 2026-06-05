@@ -291,5 +291,275 @@ describe('skill_toolset', () => {
       expect(tools2.map((t) => t.name)).toContain('cached_tool');
       expect(mockInnerGetTools).toHaveBeenCalledTimes(1);
     });
+
+    it('initializes and provides SearchSkillsTool when registry is present', async () => {
+      const mockRegistry = {
+        getSkill: vi.fn(),
+        searchSkills: vi.fn(),
+        searchToolDescription: vi.fn().mockReturnValue('custom description'),
+      };
+      const toolset = new SkillToolset([mockSkill], {
+        registry: mockRegistry,
+      });
+      const tools = await toolset.getTools();
+      expect(tools.map((t) => t.name)).toContain('search_skills');
+      const searchTool = tools.find((t) => t.name === 'search_skills')!;
+      expect(searchTool.description).toBe('custom description');
+    });
+
+    it('appends search registry instructions to LLM request when registry is present', async () => {
+      const mockRegistry = {
+        getSkill: vi.fn(),
+        searchSkills: vi.fn(),
+        searchToolDescription: vi.fn(),
+      };
+      const toolset = new SkillToolset([mockSkill], {
+        registry: mockRegistry,
+      });
+      const llmRequest: LlmRequest = {
+        contents: [],
+        toolsDict: {},
+        liveConnectConfig: {},
+      };
+
+      await toolset.processLlmRequest(createMockContext(), llmRequest);
+
+      expect(llmRequest.config?.systemInstruction).toContain(
+        'use the `search_skills` tool to discover additional skills',
+      );
+    });
+
+    it('resolves remote skills from registry and caches them', async () => {
+      const remoteSkill: Skill = {
+        frontmatter: {
+          name: 'remote-skill',
+          description: 'A remote skill description',
+        },
+        instructions: 'Remote instructions',
+      };
+      const mockRegistry = {
+        getSkill: vi.fn().mockResolvedValue(remoteSkill),
+        searchSkills: vi.fn(),
+        searchToolDescription: vi.fn(),
+      };
+      const toolset = new SkillToolset([], {
+        registry: mockRegistry,
+      });
+
+      const skill1 = await toolset.getOrFetchSkill('remote-skill', 'turn-1');
+      expect(skill1).toEqual(remoteSkill);
+      expect(mockRegistry.getSkill).toHaveBeenCalledTimes(1);
+
+      // Subsequent fetch in same turn uses cache
+      const skill2 = await toolset.getOrFetchSkill('remote-skill', 'turn-1');
+      expect(skill2).toEqual(remoteSkill);
+      expect(mockRegistry.getSkill).toHaveBeenCalledTimes(1);
+
+      // Fetch in different turn queries registry again
+      const skill3 = await toolset.getOrFetchSkill('remote-skill', 'turn-2');
+      expect(skill3).toEqual(remoteSkill);
+      expect(mockRegistry.getSkill).toHaveBeenCalledTimes(2);
+    });
+
+    it('evicts oldest turn cache entry when maxCacheTurns is reached', async () => {
+      const mockRegistry = {
+        getSkill: vi.fn().mockResolvedValue(mockSkill),
+        searchSkills: vi.fn(),
+        searchToolDescription: vi.fn(),
+      };
+      const toolset = new SkillToolset([], {
+        registry: mockRegistry,
+      });
+
+      // Populate cache up to maxCacheTurns (16)
+      for (let i = 0; i < 16; i++) {
+        await toolset.getOrFetchSkill('test-skill', `turn-${i}`);
+      }
+      expect(mockRegistry.getSkill).toHaveBeenCalledTimes(16);
+
+      // Now fetch with turn-16 (should evict turn-0)
+      await toolset.getOrFetchSkill('test-skill', 'turn-16');
+      expect(mockRegistry.getSkill).toHaveBeenCalledTimes(17);
+
+      // Querying turn-0 again should hit the registry instead of cache
+      await toolset.getOrFetchSkill('test-skill', 'turn-0');
+      expect(mockRegistry.getSkill).toHaveBeenCalledTimes(18);
+    });
+  });
+
+  describe('SearchSkillsTool', () => {
+    it('throws if query argument is missing', async () => {
+      const mockRegistry = {
+        getSkill: vi.fn(),
+        searchSkills: vi.fn(),
+        searchToolDescription: vi.fn(),
+      };
+      const toolset = new SkillToolset([], {
+        registry: mockRegistry,
+      });
+      const tools = await toolset.getTools();
+      const searchTool = tools.find((t) => t.name === 'search_skills')!;
+
+      const result = await searchTool.runAsync({
+        args: {},
+        toolContext: createMockContext(),
+      });
+      expect(result).toEqual({
+        error: "Argument 'query' is required.",
+        error_code: 'INVALID_ARGUMENTS',
+      });
+    });
+
+    it('searches remote skills and filters out local duplicates', async () => {
+      const mockRegistry = {
+        getSkill: vi.fn(),
+        searchSkills: vi.fn().mockResolvedValue([
+          {name: 'local-skill', description: 'desc'},
+          {name: 'another-remote-skill', description: 'desc2'},
+        ]),
+        searchToolDescription: vi.fn(),
+      };
+      const localSkill: Skill = {
+        frontmatter: {
+          name: 'local-skill',
+          description: 'Local desc',
+        },
+        instructions: 'Local instructions',
+      };
+      const toolset = new SkillToolset([localSkill], {
+        registry: mockRegistry,
+      });
+      const tools = await toolset.getTools();
+      const searchTool = tools.find((t) => t.name === 'search_skills')!;
+
+      const result = await searchTool.runAsync({
+        args: {query: 'test'},
+        toolContext: createMockContext(),
+      });
+
+      expect(result).toEqual([
+        {name: 'another-remote-skill', description: 'desc2'},
+      ]);
+    });
+
+    it('returns error if search fails', async () => {
+      const mockRegistry = {
+        getSkill: vi.fn(),
+        searchSkills: vi.fn().mockRejectedValue(new Error('API Error')),
+        searchToolDescription: vi.fn(),
+      };
+      const toolset = new SkillToolset([], {
+        registry: mockRegistry,
+      });
+      const tools = await toolset.getTools();
+      const searchTool = tools.find((t) => t.name === 'search_skills')!;
+
+      const result = await searchTool.runAsync({
+        args: {query: 'test'},
+        toolContext: createMockContext(),
+      });
+
+      expect(result).toEqual({
+        error: 'Failed to search skills from registry: Error: API Error',
+        error_code: 'REGISTRY_ERROR',
+      });
+    });
+  });
+
+  describe('tools fetching from registry', () => {
+    it('LoadSkillTool fetches skill from registry if not local', async () => {
+      const remoteSkill: Skill = {
+        frontmatter: {
+          name: 'remote-skill',
+          description: 'A remote skill',
+        },
+        instructions: 'Remote instructions',
+      };
+      const mockRegistry = {
+        getSkill: vi.fn().mockResolvedValue(remoteSkill),
+        searchSkills: vi.fn(),
+        searchToolDescription: vi.fn(),
+      };
+      const toolset = new SkillToolset([], {
+        registry: mockRegistry,
+      });
+      const tools = await toolset.getTools();
+      const loadTool = tools.find((t) => t.name === 'load_skill')!;
+
+      const context = createMockContext();
+      const result = (await loadTool.runAsync({
+        args: {name: 'remote-skill'},
+        toolContext: context,
+      })) as {skill_name: string; instructions: string};
+
+      expect(result.skill_name).toBe('remote-skill');
+      expect(result.instructions).toBe('Remote instructions');
+      expect(mockRegistry.getSkill).toHaveBeenCalledWith({
+        name: 'remote-skill',
+      });
+
+      // Check skill was activated in state
+      const stateKey = `_adk_activated_skill_test-agent`;
+      expect(context.state.get(stateKey)).toContain('remote-skill');
+    });
+
+    it('LoadSkillTool propagates registry errors', async () => {
+      const mockRegistry = {
+        getSkill: vi.fn().mockRejectedValue(new Error('API Failure')),
+        searchSkills: vi.fn(),
+        searchToolDescription: vi.fn(),
+      };
+      const toolset = new SkillToolset([], {
+        registry: mockRegistry,
+      });
+      const tools = await toolset.getTools();
+      const loadTool = tools.find((t) => t.name === 'load_skill')!;
+
+      const result = await loadTool.runAsync({
+        args: {name: 'remote-skill'},
+        toolContext: createMockContext(),
+      });
+      expect(result).toEqual({
+        error:
+          "Failed to fetch skill 'remote-skill' from registry: Error: API Failure",
+        error_code: 'REGISTRY_ERROR',
+      });
+    });
+
+    it('LoadSkillResourceTool loads from registry skill', async () => {
+      const remoteSkill: Skill = {
+        frontmatter: {
+          name: 'remote-skill',
+          description: 'A remote skill',
+        },
+        instructions: 'Remote instructions',
+        resources: {
+          references: {
+            'doc.md': 'Remote doc content',
+          },
+        },
+      };
+      const mockRegistry = {
+        getSkill: vi.fn().mockResolvedValue(remoteSkill),
+        searchSkills: vi.fn(),
+        searchToolDescription: vi.fn(),
+      };
+      const toolset = new SkillToolset([], {
+        registry: mockRegistry,
+      });
+      const tools = await toolset.getTools();
+      const resourceTool = tools.find((t) => t.name === 'load_skill_resource')!;
+
+      const result = await resourceTool.runAsync({
+        args: {skill_name: 'remote-skill', path: 'references/doc.md'},
+        toolContext: createMockContext(),
+      });
+
+      expect(result).toEqual({
+        skill_name: 'remote-skill',
+        path: 'references/doc.md',
+        content: 'Remote doc content',
+      });
+    });
   });
 });

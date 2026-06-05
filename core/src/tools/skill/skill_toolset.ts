@@ -10,6 +10,7 @@ import {BaseCodeExecutor} from '../../code_executors/base_code_executor.js';
 import {appendInstructions, LlmRequest} from '../../models/llm_request.js';
 import {formatSkillsAsXml} from '../../skills/prompt.js';
 import {Skill} from '../../skills/skill.js';
+import {SkillRegistry} from '../../skills/skill_registry.js';
 import {experimental} from '../../utils/experimental.js';
 import {BaseTool} from '../base_tool.js';
 import {BaseToolset} from '../base_toolset.js';
@@ -18,6 +19,7 @@ import {LoadSkillResourceTool} from './load_skill_resource_tool.js';
 import {LoadSkillTool} from './load_skill_tool.js';
 import {RunSkillInlineScriptTool} from './run_skill_inline_script_tool.js';
 import {RunSkillScriptTool} from './run_skill_script_tool.js';
+import {SearchSkillsTool} from './search_skills_tool.js';
 
 const DEFAULT_SKILL_SYSTEM_INSTRUCTION = `You can use specialized 'skills' to help you with complex tasks. You MUST use the skill tools to interact with these skills.
 
@@ -41,11 +43,18 @@ export class SkillToolset extends BaseToolset {
   private tools: BaseTool[];
   public additionalTools: Array<BaseTool | BaseToolset>;
   public codeExecutor?: BaseCodeExecutor;
+  public readonly registry?: SkillRegistry;
+  private readonly fetchedSkillCache = new Map<
+    string,
+    Map<string, Promise<Skill>>
+  >();
+  private readonly maxCacheTurns = 16;
   private toolCache = new Map<string, BaseTool[]>();
 
   constructor(
     skills: Record<string, Skill> | Skill[],
     options: {
+      registry?: SkillRegistry;
       codeExecutor?: BaseCodeExecutor;
       additionalTools?: Array<BaseTool | BaseToolset>;
     } = {},
@@ -54,6 +63,7 @@ export class SkillToolset extends BaseToolset {
     this.skills = Array.isArray(skills)
       ? Object.fromEntries(skills.map((s) => [s.frontmatter.name, s]))
       : skills;
+    this.registry = options.registry;
     this.codeExecutor = options.codeExecutor;
     this.additionalTools = options.additionalTools || [];
 
@@ -64,6 +74,9 @@ export class SkillToolset extends BaseToolset {
       new RunSkillScriptTool(this),
       new RunSkillInlineScriptTool(this),
     ];
+    if (this.registry) {
+      this.tools.push(new SearchSkillsTool(this));
+    }
   }
 
   override async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {
@@ -71,10 +84,58 @@ export class SkillToolset extends BaseToolset {
     return [...this.tools, ...dynamicTools];
   }
 
-  override async close(): Promise<void> {}
+  override async close(): Promise<void> {
+    this.fetchedSkillCache.clear();
+  }
 
   getSkill(name: string): Skill | undefined {
     return this.skills[name];
+  }
+
+  async getOrFetchSkill(
+    skillName: string,
+    invocationId?: string,
+  ): Promise<Skill | undefined> {
+    const skill = this.getSkill(skillName);
+    if (skill) {
+      return skill;
+    }
+
+    if (!this.registry) {
+      return undefined;
+    }
+
+    if (invocationId) {
+      if (!this.fetchedSkillCache.has(invocationId)) {
+        if (this.fetchedSkillCache.size >= this.maxCacheTurns) {
+          const firstKey = this.fetchedSkillCache.keys().next().value;
+          if (firstKey !== undefined) {
+            this.fetchedSkillCache.delete(firstKey);
+          }
+        }
+        this.fetchedSkillCache.set(invocationId, new Map());
+      }
+
+      const turnCache = this.fetchedSkillCache.get(invocationId)!;
+      const cached = turnCache.get(skillName);
+      if (cached) {
+        return cached;
+      }
+
+      const promise = this.registry.getSkill({name: skillName});
+      turnCache.set(skillName, promise);
+
+      try {
+        const fetchedSkill = await promise;
+        turnCache.set(skillName, Promise.resolve(fetchedSkill));
+        return fetchedSkill;
+      } catch (e) {
+        turnCache.delete(skillName);
+        throw e;
+      }
+    }
+
+    return this.registry.getSkill({name: skillName});
   }
 
   override async processLlmRequest(
@@ -86,10 +147,15 @@ export class SkillToolset extends BaseToolset {
     const skills = Object.values(this.skills);
     const skillsXml = formatSkillsAsXml(skills);
 
-    appendInstructions(llmRequest, [
-      DEFAULT_SKILL_SYSTEM_INSTRUCTION,
-      skillsXml,
-    ]);
+    const instructions = [DEFAULT_SKILL_SYSTEM_INSTRUCTION, skillsXml];
+
+    if (this.registry) {
+      instructions.push(
+        '\nIf the locally available skills are not sufficient to complete your task, you can use the `search_skills` tool to discover additional skills from the registry.',
+      );
+    }
+
+    appendInstructions(llmRequest, instructions);
   }
 
   private async resolveAdditionalTools(
@@ -110,7 +176,7 @@ export class SkillToolset extends BaseToolset {
 
     const additionalToolNames = new Set<string>();
     for (const skillName of activatedSkills) {
-      const skill = this.skills[skillName];
+      const skill = await this.getOrFetchSkill(skillName, context.invocationId);
       if (skill && skill.frontmatter.metadata) {
         const tools = skill.frontmatter.metadata[
           'adk_additional_tools'

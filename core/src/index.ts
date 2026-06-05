@@ -50,6 +50,7 @@ export {
 export {SkillRegistry} from './skills/skill_registry.js';
 export {RunSkillInlineScriptTool} from './tools/skill/run_skill_inline_script_tool.js';
 export {RunSkillScriptTool} from './tools/skill/run_skill_script_tool.js';
+export {SearchSkillsTool} from './tools/skill/search_skills_tool.js';
 
 export * from './integrations/agent_registry/agent_registry.js';
 export * from './integrations/skill_registry/gcp_skill_registry.js';
