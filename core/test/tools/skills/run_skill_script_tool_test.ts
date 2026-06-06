@@ -276,4 +276,223 @@ describe('RunSkillScriptTool', () => {
     expect(inputFiles?.length).toBe(1);
     expect(inputFiles?.[0].name).toBe('scripts/setup.js');
   });
+
+  it('executes script successfully via mock executor with TS wrapper', async () => {
+    const tsSkill: Skill = {
+      frontmatter: {name: 'ts-skill', description: 'desc'},
+      instructions: 'inst',
+      resources: {
+        scripts: {
+          'setup.ts': {src: 'console.log("ts setup");'},
+        },
+      },
+    };
+    const mockExecutor = new MockCodeExecutor();
+    const toolset = new SkillToolset([tsSkill], {codeExecutor: mockExecutor});
+    const tool = new RunSkillScriptTool(toolset);
+
+    await tool.runAsync({
+      args: {skill_name: 'ts-skill', script_path: 'scripts/setup.ts'},
+      toolContext: createMockContext(),
+    });
+
+    expect(mockExecutor.executeCodeParams?.codeExecutionInput.code).toBe(
+      "require('ts-node/register');\nrequire('./scripts/setup.ts');",
+    );
+    expect(mockExecutor.executeCodeParams?.codeExecutionInput.language).toBe(
+      CodeExecutionLanguage.TYPESCRIPT,
+    );
+  });
+
+  it('ignores resource files with invalid or undefined content type', async () => {
+    const invalidSkill: Skill = {
+      frontmatter: {name: 'invalid-skill', description: 'desc'},
+      instructions: 'inst',
+      resources: {
+        scripts: {
+          'setup.js': {src: 'console.log("setup");'},
+          'invalid.js': {src: 123 as unknown as string}, // invalid content
+        },
+      },
+    };
+    const mockExecutor = new MockCodeExecutor();
+    const toolset = new SkillToolset([invalidSkill], {
+      codeExecutor: mockExecutor,
+    });
+    const tool = new RunSkillScriptTool(toolset);
+
+    await tool.runAsync({
+      args: {skill_name: 'invalid-skill', script_path: 'scripts/setup.js'},
+      toolContext: createMockContext(),
+    });
+
+    const inputFiles =
+      mockExecutor.executeCodeParams?.codeExecutionInput.inputFiles;
+    expect(inputFiles).toBeDefined();
+    // Only setup.js should be materialized, invalid.js should be skipped because of undefined/invalid content.
+    expect(inputFiles?.length).toBe(1);
+    expect(inputFiles?.[0].name).toBe('scripts/setup.js');
+  });
+
+  it('resolves script path even if it does not start with scripts/', async () => {
+    const mockExecutor = new MockCodeExecutor();
+    const toolset = new SkillToolset([mockSkill], {codeExecutor: mockExecutor});
+    const tool = new RunSkillScriptTool(toolset);
+
+    await tool.runAsync({
+      args: {skill_name: 'test-skill', script_path: 'setup.js'}, // no scripts/ prefix
+      toolContext: createMockContext(),
+    });
+
+    expect(mockExecutor.executeCodeParams?.codeExecutionInput.code).toBe(
+      "require('./setup.js');",
+    );
+  });
+
+  it('falls back to agent code executor if not configured on toolset', async () => {
+    const mockExecutor = new MockCodeExecutor();
+    const toolset = new SkillToolset([mockSkill]); // no executor on toolset
+    const tool = new RunSkillScriptTool(toolset);
+
+    const result = (await tool.runAsync({
+      args: {skill_name: 'test-skill', script_path: 'scripts/setup.js'},
+      toolContext: createMockContext('test-agent', mockExecutor), // executor on agent
+    })) as CodeExecutionResult;
+
+    expect(result.stdout).toBe('');
+    expect(mockExecutor.executeCodeParams).toBeDefined();
+  });
+
+  it('executes python script successfully with python wrapper', async () => {
+    const pySkill: Skill = {
+      frontmatter: {name: 'py-skill', description: 'desc'},
+      instructions: 'inst',
+      resources: {
+        scripts: {
+          'setup.py': {src: 'print("py setup")'},
+        },
+      },
+    };
+    const mockExecutor = new MockCodeExecutor();
+    const toolset = new SkillToolset([pySkill], {codeExecutor: mockExecutor});
+    const tool = new RunSkillScriptTool(toolset);
+
+    await tool.runAsync({
+      args: {skill_name: 'py-skill', script_path: 'scripts/setup.py'},
+      toolContext: createMockContext(),
+    });
+
+    expect(mockExecutor.executeCodeParams?.codeExecutionInput.code).toBe(
+      "import runpy\nrunpy.run_path('./scripts/setup.py', run_name='__main__')",
+    );
+    expect(mockExecutor.executeCodeParams?.codeExecutionInput.language).toBe(
+      CodeExecutionLanguage.PYTHON,
+    );
+  });
+
+  it('executes shell script successfully with shell wrapper', async () => {
+    const shSkill: Skill = {
+      frontmatter: {name: 'sh-skill', description: 'desc'},
+      instructions: 'inst',
+      resources: {
+        scripts: {
+          'setup.sh': {src: 'echo hello'},
+        },
+      },
+    };
+    const mockExecutor = new MockCodeExecutor();
+    const toolset = new SkillToolset([shSkill], {codeExecutor: mockExecutor});
+    const tool = new RunSkillScriptTool(toolset);
+
+    await tool.runAsync({
+      args: {skill_name: 'sh-skill', script_path: 'scripts/setup.sh'},
+      toolContext: createMockContext(),
+    });
+
+    expect(mockExecutor.executeCodeParams?.codeExecutionInput.code).toBe(
+      'source ./scripts/setup.sh "$@"',
+    );
+    expect(mockExecutor.executeCodeParams?.codeExecutionInput.language).toBe(
+      CodeExecutionLanguage.SHELL,
+    );
+  });
+
+  it('executes powershell script successfully with powershell wrapper', async () => {
+    const psSkill: Skill = {
+      frontmatter: {name: 'ps-skill', description: 'desc'},
+      instructions: 'inst',
+      resources: {
+        scripts: {
+          'setup.ps1': {src: 'Write-Output "ps"'},
+        },
+      },
+    };
+    const mockExecutor = new MockCodeExecutor();
+    const toolset = new SkillToolset([psSkill], {codeExecutor: mockExecutor});
+    const tool = new RunSkillScriptTool(toolset);
+
+    await tool.runAsync({
+      args: {skill_name: 'ps-skill', script_path: 'scripts/setup.ps1'},
+      toolContext: createMockContext(),
+    });
+
+    expect(mockExecutor.executeCodeParams?.codeExecutionInput.code).toBe(
+      '& .\\scripts\\setup.ps1 $args',
+    );
+    expect(mockExecutor.executeCodeParams?.codeExecutionInput.language).toBe(
+      CodeExecutionLanguage.POWERSHELL,
+    );
+  });
+
+  it('executes cmd script successfully with cmd wrapper', async () => {
+    const cmdSkill: Skill = {
+      frontmatter: {name: 'cmd-skill', description: 'desc'},
+      instructions: 'inst',
+      resources: {
+        scripts: {
+          'setup.bat': {src: 'echo bat'},
+        },
+      },
+    };
+    const mockExecutor = new MockCodeExecutor();
+    const toolset = new SkillToolset([cmdSkill], {codeExecutor: mockExecutor});
+    const tool = new RunSkillScriptTool(toolset);
+
+    await tool.runAsync({
+      args: {skill_name: 'cmd-skill', script_path: 'scripts/setup.bat'},
+      toolContext: createMockContext(),
+    });
+
+    expect(mockExecutor.executeCodeParams?.codeExecutionInput.code).toBe(
+      'call .\\scripts\\setup.bat %*',
+    );
+    expect(mockExecutor.executeCodeParams?.codeExecutionInput.language).toBe(
+      CodeExecutionLanguage.WINDOWS_CMD,
+    );
+  });
+
+  it('throws execution error for unsupported script language extension', async () => {
+    const unknownSkill: Skill = {
+      frontmatter: {name: 'unknown-skill', description: 'desc'},
+      instructions: 'inst',
+      resources: {
+        scripts: {
+          'setup.unknown': {src: 'unknown script'},
+        },
+      },
+    };
+    const mockExecutor = new MockCodeExecutor();
+    const toolset = new SkillToolset([unknownSkill], {
+      codeExecutor: mockExecutor,
+    });
+    const tool = new RunSkillScriptTool(toolset);
+
+    const result = (await tool.runAsync({
+      args: {skill_name: 'unknown-skill', script_path: 'scripts/setup.unknown'},
+      toolContext: createMockContext(),
+    })) as ToolErrorResponse;
+
+    expect(result.error).toContain('Unsupported wrapper language');
+    expect(result.errorCode).toBe('EXECUTION_ERROR');
+  });
 });

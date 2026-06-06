@@ -289,4 +289,79 @@ describe('LoadSkillResourceTool', () => {
       error_code: 'REGISTRY_ERROR',
     });
   });
+
+  it('skips binary injection in processLlmRequest if skill is not found', async () => {
+    const toolset = new SkillToolset([]);
+    vi.spyOn(toolset, 'getOrFetchSkill').mockResolvedValue(undefined);
+    const tool = new LoadSkillResourceTool(toolset);
+
+    const llmRequest: LlmRequest = {
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            {
+              functionResponse: {
+                name: 'load_skill_resource',
+                response: {
+                  skill_name: 'nonexistent-skill',
+                  path: 'assets/image.png',
+                  status:
+                    'Binary file detected. The content has been injected into the conversation history for you to analyze.',
+                },
+              },
+            },
+          ],
+        },
+      ],
+      toolsDict: {},
+      liveConnectConfig: {},
+    };
+
+    await tool.processLlmRequest({
+      toolContext: createMockContext(),
+      llmRequest,
+    });
+
+    expect(llmRequest.contents.length).toBe(1);
+  });
+
+  it('handles missing resources in processLlmRequest gracefully', async () => {
+    const mockSkillNoResources: Skill = {
+      frontmatter: {name: 'test-skill', description: 'desc'},
+      instructions: 'inst',
+    };
+    const toolset = new SkillToolset([mockSkillNoResources]);
+    const tool = new LoadSkillResourceTool(toolset);
+
+    const llmRequest: LlmRequest = {
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            {
+              functionResponse: {
+                name: 'load_skill_resource',
+                response: {
+                  skill_name: 'test-skill',
+                  path: 'assets/file.png',
+                  status:
+                    'Binary file detected. The content has been injected into the conversation history for you to analyze.',
+                },
+              },
+            },
+          ],
+        },
+      ],
+      toolsDict: {},
+      liveConnectConfig: {},
+    };
+
+    await tool.processLlmRequest({
+      toolContext: createMockContext(),
+      llmRequest,
+    });
+
+    expect(llmRequest.contents.length).toBe(1);
+  });
 });
