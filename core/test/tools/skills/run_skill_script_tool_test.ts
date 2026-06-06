@@ -228,4 +228,52 @@ describe('RunSkillScriptTool', () => {
 
     expect(materializeFiles).toHaveBeenCalledWith([testFile]);
   });
+
+  it('returns error on registry fetch failure', async () => {
+    const toolset = new SkillToolset([]);
+    vi.spyOn(toolset, 'getOrFetchSkill').mockRejectedValue(
+      new Error('Registry connection error'),
+    );
+
+    const tool = new RunSkillScriptTool(toolset);
+    const result = (await tool.runAsync({
+      args: {skill_name: 'test-skill', script_path: 'scripts/setup.js'},
+      toolContext: createMockContext(),
+    })) as ToolErrorResponse;
+
+    expect(result).toEqual({
+      error:
+        "Failed to fetch skill 'test-skill' from registry: Error: Registry connection error",
+      errorCode: 'REGISTRY_ERROR',
+    });
+  });
+
+  it('extracts skill resource files correctly when resources are partially empty', async () => {
+    const mockSkillPartial: Skill = {
+      frontmatter: {name: 'test-skill-partial', description: 'desc'},
+      instructions: 'inst',
+      resources: {
+        scripts: {
+          'setup.js': {src: 'console.log("setup");'},
+        },
+        // references and assets are missing
+      },
+    };
+    const mockExecutor = new MockCodeExecutor();
+    const toolset = new SkillToolset([mockSkillPartial], {
+      codeExecutor: mockExecutor,
+    });
+    const tool = new RunSkillScriptTool(toolset);
+
+    await tool.runAsync({
+      args: {skill_name: 'test-skill-partial', script_path: 'scripts/setup.js'},
+      toolContext: createMockContext(),
+    });
+
+    const inputFiles =
+      mockExecutor.executeCodeParams?.codeExecutionInput.inputFiles;
+    expect(inputFiles).toBeDefined();
+    expect(inputFiles?.length).toBe(1);
+    expect(inputFiles?.[0].name).toBe('scripts/setup.js');
+  });
 });

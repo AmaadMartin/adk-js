@@ -12,7 +12,7 @@ import {
   Skill,
   SkillToolset,
 } from '@google/adk';
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 
 describe('LoadSkillResourceTool', () => {
   const mockSkill: Skill = {
@@ -247,5 +247,46 @@ describe('LoadSkillResourceTool', () => {
     expect(llmRequest.contents[1]?.parts?.[1]?.inlineData?.mimeType).toBe(
       'application/octet-stream',
     );
+  });
+
+  it('returns error if skill_name or path is missing', async () => {
+    const toolset = new SkillToolset([mockSkill]);
+    const tool = new LoadSkillResourceTool(toolset);
+
+    const res1 = await tool.runAsync({
+      args: {skill_name: '', path: 'references/doc.md'},
+      toolContext: createMockContext(),
+    });
+    expect(res1).toEqual({
+      error: 'Skill name is required.',
+      error_code: 'MISSING_SKILL_NAME',
+    });
+
+    const res2 = await tool.runAsync({
+      args: {skill_name: 'test-skill', path: ''},
+      toolContext: createMockContext(),
+    });
+    expect(res2).toEqual({
+      error: 'Resource path is required.',
+      error_code: 'MISSING_RESOURCE_PATH',
+    });
+  });
+
+  it('returns error on registry fetch failure', async () => {
+    const toolset = new SkillToolset([]);
+    vi.spyOn(toolset, 'getOrFetchSkill').mockRejectedValue(
+      new Error('Registry connection error'),
+    );
+
+    const tool = new LoadSkillResourceTool(toolset);
+    const result = await tool.runAsync({
+      args: {skill_name: 'test-skill', path: 'references/doc.md'},
+      toolContext: createMockContext(),
+    });
+    expect(result).toEqual({
+      error:
+        "Failed to fetch skill 'test-skill' from registry: Error: Registry connection error",
+      error_code: 'REGISTRY_ERROR',
+    });
   });
 });
