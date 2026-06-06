@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GCPSkillRegistry} from '@google/adk/index.js';
+import {GCPSkillRegistry} from '@google/adk';
 import AdmZip from 'adm-zip';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 

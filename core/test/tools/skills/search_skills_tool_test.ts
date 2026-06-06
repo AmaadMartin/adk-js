@@ -8,12 +8,12 @@ import {
   Context,
   Frontmatter,
   InvocationContext,
+  SearchSkillsTool,
   Skill,
   SkillRegistry,
   SkillToolset,
 } from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
-import {SearchSkillsTool} from '../../../src/tools/skill/search_skills_tool.js';
 
 class MockSkillRegistry extends SkillRegistry {
   getSkill = vi.fn();
