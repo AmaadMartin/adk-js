@@ -88,6 +88,19 @@ describe('RunSkillScriptTool', () => {
     },
   };
 
+  it('returns declaration parameters matching schema', () => {
+    const toolset = new SkillToolset([mockSkill]);
+    const tool = new RunSkillScriptTool(toolset);
+    expect(tool.name).toBe('run_skill_script');
+    expect(tool.description).toBe(
+      "Executes a script from a skill's scripts/ directory.",
+    );
+    const decl = tool._getDeclaration();
+    expect(decl.name).toBe('run_skill_script');
+    expect(decl.parameters?.required).toContain('skill_name');
+    expect(decl.parameters?.required).toContain('script_path');
+  });
+
   it('returns error if skill name is missing', async () => {
     const toolset = new SkillToolset([mockSkill]);
     const tool = new RunSkillScriptTool(toolset);
@@ -227,6 +240,43 @@ describe('RunSkillScriptTool', () => {
     });
 
     expect(materializeFiles).toHaveBeenCalledWith([testFile]);
+  });
+
+  it('skips undefined skill resources', async () => {
+    const mockExecutor = new MockCodeExecutor();
+    const skillWithUndefinedResource: Skill = {
+      frontmatter: {
+        name: 'undefined-resource-skill',
+        description: 'A skill with undefined resource',
+      },
+      instructions: 'Test instructions',
+      resources: {
+        scripts: {
+          'setup.js': {src: 'console.log("setup");'},
+        },
+        references: {
+          'doc.txt': undefined as unknown as string,
+        },
+      },
+    };
+    const toolset = new SkillToolset([skillWithUndefinedResource], {
+      codeExecutor: mockExecutor,
+    });
+    const tool = new RunSkillScriptTool(toolset);
+
+    await tool.runAsync({
+      args: {
+        skill_name: 'undefined-resource-skill',
+        script_path: 'scripts/setup.js',
+      },
+      toolContext: createMockContext(),
+    });
+
+    const inputFiles =
+      mockExecutor.executeCodeParams?.codeExecutionInput.inputFiles;
+    expect(inputFiles).toBeDefined();
+    expect(inputFiles?.length).toBe(1);
+    expect(inputFiles?.[0].name).toBe('scripts/setup.js');
   });
 
   it('returns error on registry fetch failure', async () => {
