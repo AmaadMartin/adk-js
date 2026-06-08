@@ -26,7 +26,10 @@ describe('Build setup', () => {
     const projectPath = `${dirname}/tests/integration/build_setup/${buildSetup}`;
 
     beforeAll(async () => {
-      await execAsync('npm install', {cwd: projectPath});
+      await execAsync(
+        'npm install --no-audit --no-fund --prefer-offline --no-package-lock',
+        {cwd: projectPath},
+      );
 
       if (buildSetup.startsWith('ts_')) {
         let buildResult;
@@ -43,7 +46,7 @@ describe('Build setup', () => {
         expect(buildResult.stderr).toBe('');
         expect(buildResult.stdout).toContain('\nBuild complete');
       }
-    }, 60000);
+    }, 180000);
 
     it(
       'should build and run agent successfully',
@@ -119,6 +122,6 @@ describe('Build setup', () => {
           .rm(`${projectPath}/dist`, {recursive: true, force: true})
           .catch(() => {});
       }
-    }, 60000);
+    }, 180000);
   });
 });
