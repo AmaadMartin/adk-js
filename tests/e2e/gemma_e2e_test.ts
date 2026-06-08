@@ -29,7 +29,9 @@ describe('E2E Gemma LLM', () => {
   it.skipIf(!hasAKey)(
     'should generate content successfully using Gemma model',
     async () => {
-      const gemma = new Gemma({});
+      const gemma = new Gemma({
+        model: process.env.GEMMA_E2E_MODEL || 'gemma-3-27b-it',
+      });
       const agent = new LlmAgent({
         name: 'gemma_agent',
         description: 'An agent using Gemma.',
