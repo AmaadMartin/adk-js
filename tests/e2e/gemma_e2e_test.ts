@@ -20,7 +20,9 @@ describe('E2E Gemma LLM', () => {
   }
 
   const hasAKey =
-    !!process.env.GEMINI_API_KEY || !!process.env.GOOGLE_GENAI_API_KEY;
+    !!process.env.GEMINI_API_KEY ||
+    !!process.env.GOOGLE_GENAI_API_KEY ||
+    !!process.env.GOOGLE_CLOUD_PROJECT;
 
   it('should always pass (dummy test for vitest)', () => {
     expect(true).toBe(true);
