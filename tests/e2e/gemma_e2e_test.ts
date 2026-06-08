@@ -20,9 +20,7 @@ describe('E2E Gemma LLM', () => {
   }
 
   const hasAKey =
-    !!process.env.GEMINI_API_KEY ||
-    !!process.env.GOOGLE_GENAI_API_KEY ||
-    !!process.env.GOOGLE_CLOUD_PROJECT;
+    !!process.env.GEMINI_API_KEY || !!process.env.GOOGLE_GENAI_API_KEY;
 
   it('should always pass (dummy test for vitest)', () => {
     expect(true).toBe(true);
@@ -55,6 +53,7 @@ describe('E2E Gemma LLM', () => {
         sessionId: session.id,
         newMessage: createUserContent('Say Hello!'),
       })) {
+        console.log('EVENT:', JSON.stringify(event));
         if (event.content?.parts?.[0]?.text) {
           finalResponse += event.content.parts[0].text;
         }
