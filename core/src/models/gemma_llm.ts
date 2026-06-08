@@ -34,7 +34,8 @@ export class Gemma extends Gemini {
   }
 
   static override readonly supportedModels: Array<string | RegExp> = [
-    /gemma-.*/,
+    /gemma.*/,
+    /google\/gemma.*/,
   ];
 
   override get apiBackend(): GoogleLLMVariant {
@@ -46,7 +47,9 @@ export class Gemma extends Gemini {
     stream = false,
     abortSignal?: AbortSignal,
   ): AsyncGenerator<LlmResponse, void> {
-    if (llmRequest.model && !llmRequest.model.startsWith('gemma-')) {
+    const isGemmaModel =
+      llmRequest.model && /^(google\/)?gemma.*/.test(llmRequest.model);
+    if (!isGemmaModel) {
       throw new Error(
         `Requesting a non-Gemma model (${llmRequest.model}) with the Gemma LLM is not supported.`,
       );

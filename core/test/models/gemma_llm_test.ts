@@ -48,6 +48,8 @@ describe('Gemma LLM', () => {
   it('resolves model to Gemma class via the registry', () => {
     expect(LLMRegistry.resolve('gemma-4-31b-it')).toBe(Gemma);
     expect(LLMRegistry.resolve('gemma-3-27b-it')).toBe(Gemma);
+    expect(LLMRegistry.resolve('gemma3@gemma-3-27b-it')).toBe(Gemma);
+    expect(LLMRegistry.resolve('google/gemma3@gemma-3-27b-it')).toBe(Gemma);
   });
 
   it('should default model to gemma-3-27b-it', () => {
@@ -55,7 +57,7 @@ describe('Gemma LLM', () => {
     expect(gemma.model).toBe('gemma-3-27b-it');
   });
 
-  it('should throw error if model does not start with gemma-', async () => {
+  it('should throw error if model is not a Gemma model', async () => {
     const gemma = new Gemma({apiKey: 'test-key'});
     const badRequest: LlmRequest = {
       model: 'not-gemma-model',
