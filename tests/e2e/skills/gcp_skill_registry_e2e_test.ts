@@ -5,7 +5,7 @@
  */
 
 import {GCPSkillRegistry} from '@google/adk';
-import * as dotenv from 'dotenv';
+import {config} from 'dotenv';
 import * as fs from 'fs';
 import * as path from 'path';
 import {describe, expect, it} from 'vitest';
@@ -18,7 +18,7 @@ describe('GCPSkillRegistry E2E', () => {
 
   for (const envPath of envPaths) {
     if (fs.existsSync(envPath)) {
-      dotenv.config({path: envPath});
+      config({path: envPath});
     }
   }
 

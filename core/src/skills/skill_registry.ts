@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Frontmatter, Skill} from './skill.js';
+import {type Frontmatter, type Skill} from './skill.js';
 
 export abstract class SkillRegistry {
   /**
