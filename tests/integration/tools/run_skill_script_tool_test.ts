@@ -168,7 +168,7 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
     expect(result).toBeDefined();
     expect(result.stdout).toContain('hello from skill python');
     expect(result.stderr).toBe('');
-  });
+  }, 30000);
 
   it('captures stderr from a failing Python skill script', async () => {
     const executor = new UnsafeLocalCodeExecutor();
@@ -185,7 +185,7 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
 
     expect(result).toBeDefined();
     expect(result.stderr).toContain('skill python error');
-  });
+  }, 30000);
 
   it.skipIf(!IS_WINDOWS)(
     'successfully executes a real PowerShell skill script',

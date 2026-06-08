@@ -79,7 +79,19 @@ export class RunSkillScriptTool extends BaseTool {
       };
     }
 
-    const skill = this.toolset.getSkill(skillName);
+    let skill;
+    try {
+      skill = await this.toolset.getOrFetchSkill(
+        skillName,
+        toolContext.invocationId,
+      );
+    } catch (e) {
+      return {
+        error: `Failed to fetch skill '${skillName}' from registry: ${e}`,
+        errorCode: 'REGISTRY_ERROR',
+      };
+    }
+
     if (!skill) {
       return {
         error: `Skill '${skillName}' not found.`,
@@ -156,9 +168,9 @@ function buildWrapperCode(
     case CodeExecutionLanguage.SHELL:
       return `source ./${scriptPath} "$@"`;
     case CodeExecutionLanguage.POWERSHELL:
-      return `& .\\${scriptPath.replace(/\//g, '\\\\')} $args`;
+      return '& .\\' + scriptPath.replace(/\//g, '\\') + ' $args';
     case CodeExecutionLanguage.WINDOWS_CMD:
-      return `call .\\${scriptPath.replace(/\//g, '\\\\')} %*`;
+      return 'call .\\' + scriptPath.replace(/\//g, '\\') + ' %*';
     default:
       throw new Error(`Unsupported wrapper language: ${language}`);
   }

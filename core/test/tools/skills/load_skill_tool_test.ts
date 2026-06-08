@@ -11,7 +11,7 @@ import {
   Skill,
   SkillToolset,
 } from '@google/adk';
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 
 describe('LoadSkillTool', () => {
   const mockSkill: Skill = {
@@ -75,6 +75,38 @@ describe('LoadSkillTool', () => {
     expect(result).toEqual({
       error: "Skill 'unknown-skill' not found.",
       error_code: 'SKILL_NOT_FOUND',
+    });
+  });
+
+  it('returns error if skill name is missing', async () => {
+    const toolset = new SkillToolset([mockSkill]);
+    const tool = new LoadSkillTool(toolset);
+    const result = await tool.runAsync({
+      args: {},
+      toolContext: createMockContext(),
+    });
+    expect(result).toEqual({
+      error: 'Skill name is required.',
+      error_code: 'MISSING_SKILL_NAME',
+    });
+  });
+
+  it('returns error on registry fetch failure', async () => {
+    const toolset = new SkillToolset([]);
+    // Mock getOrFetchSkill to throw
+    vi.spyOn(toolset, 'getOrFetchSkill').mockRejectedValue(
+      new Error('Registry connection error'),
+    );
+
+    const tool = new LoadSkillTool(toolset);
+    const result = await tool.runAsync({
+      args: {name: 'test-skill'},
+      toolContext: createMockContext(),
+    });
+    expect(result).toEqual({
+      error:
+        "Failed to fetch skill 'test-skill' from registry: Error: Registry connection error",
+      error_code: 'REGISTRY_ERROR',
     });
   });
 });

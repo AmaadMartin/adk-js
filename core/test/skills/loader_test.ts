@@ -4,16 +4,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {
+  loadAllSkillsInDir,
+  loadSkillFromDir,
+  loadSkillFromZipBytes,
+  parseSkillMdContent,
+  validateSkillDir,
+} from '@google/adk/skills/loader.js';
+import AdmZip from 'adm-zip';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {describe, expect, it} from 'vitest';
-import {
-  loadAllSkillsInDir,
-  loadSkillFromDir,
-  parseSkillMdContent,
-  validateSkillDir,
-} from '../../src/skills/loader.js';
 
 describe('loader', () => {
   describe('parseSkillMdContent', () => {
@@ -60,6 +62,16 @@ description: A test skill`;
 Body`;
       expect(() => parseSkillMdContent(content)).toThrow(
         'Invalid YAML in frontmatter:',
+      );
+    });
+
+    it('throws error if frontmatter is a YAML scalar/string', () => {
+      const content = `---
+just a string
+---
+Body`;
+      expect(() => parseSkillMdContent(content)).toThrow(
+        'Invalid YAML in frontmatter: SKILL.md frontmatter must be a YAML mapping',
       );
     });
 
@@ -202,6 +214,8 @@ Instructions`,
       );
 
       await fs.mkdir(path.join(skillDir, 'references'));
+      await fs.mkdir(path.join(skillDir, 'references', '__pycache__'));
+      await fs.mkdir(path.join(skillDir, 'references', 'subdir'));
       await fs.mkdir(path.join(skillDir, 'assets'));
       await fs.mkdir(path.join(skillDir, 'scripts'));
 
@@ -210,8 +224,20 @@ Instructions`,
         'reference content',
       );
       await fs.writeFile(
+        path.join(skillDir, 'references', 'subdir', 'nested-ref.txt'),
+        'nested reference content',
+      );
+      await fs.writeFile(
+        path.join(skillDir, 'references', 'ignored.pyc'),
+        'ignored binary extension',
+      );
+      await fs.writeFile(
+        path.join(skillDir, 'references', '__pycache__', 'ignored.txt'),
+        'ignored directory content',
+      );
+      await fs.writeFile(
         path.join(skillDir, 'assets', 'logo.png'),
-        'binary content',
+        Buffer.from([0, 1, 2, 3]),
       );
       await fs.writeFile(
         path.join(skillDir, 'scripts', 'run.sh'),
@@ -222,11 +248,72 @@ Instructions`,
       expect(skill.resources?.references?.['ref.txt']).toBe(
         'reference content',
       );
-      expect(skill.resources?.assets?.['logo.png']).toBe('binary content');
+      expect(
+        skill.resources?.references?.[path.join('subdir', 'nested-ref.txt')],
+      ).toBe('nested reference content');
+      expect(skill.resources?.references?.['ignored.pyc']).toBeUndefined();
+      expect(
+        skill.resources?.references?.['__pycache__/ignored.txt'],
+      ).toBeUndefined();
+      expect(skill.resources?.assets?.['logo.png']).toEqual(
+        Buffer.from([0, 1, 2, 3]),
+      );
       expect(skill.resources?.scripts?.['run.sh']).toEqual({src: 'echo hello'});
-
       await fs.rm(tempDir, {recursive: true, force: true});
     });
+
+    it('handles references, assets, or scripts being files instead of directories', async () => {
+      tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-skill-test-'));
+      const skillDir = path.join(tempDir, 'test-skill');
+      await fs.mkdir(skillDir);
+
+      await fs.writeFile(
+        path.join(skillDir, 'SKILL.md'),
+        `---
+name: test-skill
+description: A test skill
+---
+Instructions`,
+      );
+
+      // Create references as a file, not a directory
+      await fs.writeFile(path.join(skillDir, 'references'), 'not a directory');
+
+      const skill = await loadSkillFromDir(skillDir);
+      expect(skill.resources?.references).toEqual({});
+      expect(skill.resources?.assets).toEqual({});
+      expect(skill.resources?.scripts).toEqual({});
+      await fs.rm(tempDir, {recursive: true, force: true});
+    });
+
+    it.skipIf(process.platform === 'win32')(
+      'handles unreadable SKILL.md gracefully',
+      async () => {
+        tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-skill-test-'));
+        const skillDir = path.join(tempDir, 'test-skill');
+        await fs.mkdir(skillDir);
+
+        const skillMdPath = path.join(skillDir, 'SKILL.md');
+        await fs.writeFile(
+          skillMdPath,
+          `---
+name: test-skill
+description: A test skill
+---
+Instructions`,
+        );
+        await fs.chmod(skillMdPath, 0o000);
+
+        try {
+          await expect(loadSkillFromDir(skillDir)).rejects.toThrow(
+            /SKILL\.md \(or any case variation like skill\.md\) not found/,
+          );
+        } finally {
+          await fs.chmod(skillMdPath, 0o644);
+          await fs.rm(tempDir, {recursive: true, force: true});
+        }
+      },
+    );
   });
 
   describe('validateSkillDir', () => {
@@ -490,6 +577,162 @@ Instructions`,
       expect(skills['skill-3']).toBeDefined();
 
       await fs.rm(tempDir, {recursive: true, force: true});
+    });
+
+    it('ignores IGNORED_DIRECTORIES like node_modules', async () => {
+      tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-skill-test-'));
+
+      const skill1Dir = path.join(tempDir, 'skill-1');
+      await fs.mkdir(skill1Dir);
+      await fs.writeFile(
+        path.join(skill1Dir, 'SKILL.md'),
+        `---
+name: skill-1
+description: Skill 1
+---
+Instructions`,
+      );
+
+      // Create node_modules containing a skill.md
+      const nodeModulesDir = path.join(tempDir, 'node_modules');
+      await fs.mkdir(nodeModulesDir);
+      const nestedSkillDir = path.join(nodeModulesDir, 'skill-2');
+      await fs.mkdir(nestedSkillDir);
+      await fs.writeFile(
+        path.join(nestedSkillDir, 'SKILL.md'),
+        `---
+name: skill-2
+description: Skill 2
+---
+Instructions`,
+      );
+
+      const skills = await loadAllSkillsInDir(tempDir);
+      expect(Object.keys(skills).length).toBe(1);
+      expect(skills['skill-1']).toBeDefined();
+      expect(skills['skill-2']).toBeUndefined();
+      await fs.rm(tempDir, {recursive: true, force: true});
+    });
+
+    it.skipIf(process.platform === 'win32')(
+      'handles unreadable subdirectory inside base directory gracefully',
+      async () => {
+        tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-skill-test-'));
+        const subDir = path.join(tempDir, 'unreadable-sub');
+        await fs.mkdir(subDir);
+        await fs.chmod(subDir, 0o000);
+
+        try {
+          const skills = await loadAllSkillsInDir(tempDir);
+          expect(skills).toEqual({});
+        } finally {
+          await fs.chmod(subDir, 0o755);
+          await fs.rm(tempDir, {recursive: true, force: true});
+        }
+      },
+    );
+  });
+
+  describe('loadSkillFromZipBytes', () => {
+    it('successfully loads a skill from valid zip bytes', () => {
+      const zip = new AdmZip();
+      const skillMd = `---
+name: test-skill
+description: A test skill loaded from zip
+---
+Instructions here.`;
+      zip.addFile('SKILL.md', Buffer.from(skillMd, 'utf-8'));
+      zip.addFile('references/doc.md', Buffer.from('Doc content', 'utf-8'));
+      zip.addFile(
+        'references/doc.pyc',
+        Buffer.from('ignored content', 'utf-8'),
+      );
+      zip.addFile(
+        'references/__pycache__/foo.py',
+        Buffer.from('ignored pycache', 'utf-8'),
+      );
+      zip.addFile('references/subdir/', Buffer.alloc(0));
+      zip.addFile('assets/image.png', Buffer.from([0, 1, 2]));
+      zip.addFile('scripts/run.sh', Buffer.from('echo hello', 'utf-8'));
+
+      const zipBytes = zip.toBuffer();
+      const skill = loadSkillFromZipBytes(zipBytes);
+
+      expect(skill.frontmatter).toEqual({
+        name: 'test-skill',
+        description: 'A test skill loaded from zip',
+        metadata: {},
+      });
+      expect(skill.instructions).toBe('Instructions here.');
+      expect(skill.resources).toBeDefined();
+      expect(skill.resources?.references?.['doc.md']).toBe('Doc content');
+      expect(skill.resources?.references?.['doc.pyc']).toBeUndefined();
+      expect(
+        skill.resources?.references?.['__pycache__/foo.py'],
+      ).toBeUndefined();
+      expect(skill.resources?.assets?.['image.png']).toEqual(
+        Buffer.from([0, 1, 2]),
+      );
+      expect(skill.resources?.scripts?.['run.sh']).toEqual({src: 'echo hello'});
+    });
+
+    it('rejects zip files containing dangerous paths (Zip-Slip)', () => {
+      const createDangerousZip = (pathName: string) => {
+        const zip = new AdmZip();
+        zip.addFile('temp.txt', Buffer.from('content'));
+        const entry = zip.getEntries()[0];
+        entry.entryName = pathName;
+        return zip.toBuffer();
+      };
+
+      expect(() =>
+        loadSkillFromZipBytes(createDangerousZip('../outside.txt')),
+      ).toThrow('Dangerous zip entry ignored: ../outside.txt');
+      expect(() =>
+        loadSkillFromZipBytes(createDangerousZip('/absolute.txt')),
+      ).toThrow('Dangerous zip entry ignored: /absolute.txt');
+      expect(() =>
+        loadSkillFromZipBytes(createDangerousZip('foo/../../bar.txt')),
+      ).toThrow('Dangerous zip entry ignored: foo/../../bar.txt');
+    });
+
+    it('rejects zip files with missing SKILL.md', () => {
+      const zip = new AdmZip();
+      zip.addFile('references/doc.md', Buffer.from('Doc content'));
+      const zipBytes = zip.toBuffer();
+
+      expect(() => loadSkillFromZipBytes(zipBytes)).toThrow(
+        'SKILL.md not found in zipped filesystem.',
+      );
+    });
+
+    it('rejects if name inside SKILL.md is invalid or missing', () => {
+      const createZipWithSkillMd = (content: string) => {
+        const zip = new AdmZip();
+        zip.addFile('SKILL.md', Buffer.from(content, 'utf-8'));
+        return zip.toBuffer();
+      };
+
+      // Missing name
+      expect(() =>
+        loadSkillFromZipBytes(
+          createZipWithSkillMd(`---
+description: Missing name
+---
+Instructions`),
+        ),
+      ).toThrow();
+
+      // Invalid name (capital letters)
+      expect(() =>
+        loadSkillFromZipBytes(
+          createZipWithSkillMd(`---
+name: Invalid-Name
+description: Invalid name
+---
+Instructions`),
+        ),
+      ).toThrow();
     });
   });
 });
