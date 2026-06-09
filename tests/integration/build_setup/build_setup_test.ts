@@ -12,7 +12,7 @@ import {getResponse, sendInput} from '../test_case_utils.js';
 const execAsync = promisify(exec);
 const dirname = process.cwd();
 
-const TEST_EXECUTION_TIMEOUT = 20000;
+const TEST_EXECUTION_TIMEOUT = 60000;
 
 describe('Build setup', () => {
   describe.each([
@@ -26,9 +26,14 @@ describe('Build setup', () => {
     const projectPath = `${dirname}/tests/integration/build_setup/${buildSetup}`;
 
     beforeAll(async () => {
+      await fs.rm(`${projectPath}/node_modules`, {
+        recursive: true,
+        force: true,
+      });
+      await fs.rm(`${projectPath}/package-lock.json`, {force: true});
       await execAsync(
         'npm install --no-audit --no-fund --prefer-offline --no-package-lock',
-        {cwd: projectPath},
+        {cwd: projectPath, maxBuffer: 10 * 1024 * 1024},
       );
 
       if (buildSetup.startsWith('ts_')) {
@@ -36,6 +41,7 @@ describe('Build setup', () => {
         try {
           buildResult = await execAsync('npm run build', {
             cwd: projectPath,
+            maxBuffer: 10 * 1024 * 1024,
           });
         } catch (error: unknown) {
           console.error(`Build failed for ${buildSetup}:`);
