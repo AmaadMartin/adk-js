@@ -21,6 +21,7 @@ import {ToolConfirmation} from '../tools/tool_confirmation.js';
 import {logger} from '../utils/logger.js';
 import {Context} from './context.js';
 
+import {recordToolExecutionDuration} from '../telemetry/metrics.js';
 import {
   traceMergedToolCalls,
   tracer,
@@ -175,6 +176,9 @@ async function callToolAsync(
   toolContext: Context,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
 ): Promise<any> {
+  const startTime = performance.now();
+  const agentName = toolContext.invocationContext.agent.name;
+  const toolName = tool.name;
   return tracer.startActiveSpan(`execute_tool ${tool.name}`, async (span) => {
     try {
       logger.debug(`callToolAsync ${tool.name}`);
@@ -189,9 +193,15 @@ async function callToolAsync(
           toolContext.invocationContext,
         ),
       });
-      return result;
-    } finally {
       span.end();
+      const elapsedMs = performance.now() - startTime;
+      recordToolExecutionDuration(toolName, agentName, elapsedMs, undefined);
+      return result;
+    } catch (e) {
+      span.end();
+      const elapsedMs = performance.now() - startTime;
+      recordToolExecutionDuration(toolName, agentName, elapsedMs, e as Error);
+      throw e;
     }
   });
 }

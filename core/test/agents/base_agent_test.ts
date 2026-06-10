@@ -17,7 +17,8 @@ import {
   Session,
   createEvent,
 } from '@google/adk';
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
+import * as metrics from '../../src/telemetry/metrics.js';
 
 class MockAgent extends BaseAgent {
   constructor(config: BaseAgentConfig) {
@@ -312,6 +313,172 @@ describe('BaseAgent', () => {
       // The constructor re-derives routing targets from the already-parented
       // originals, so the rebuilt clone throws. Tracked as a follow-up.
       expect(() => routed.clone()).toThrow('already has a parent agent');
+    });
+  });
+
+  describe('Metrics and Callback Events', () => {
+    it('should handle short-circuiting and metrics in beforeAgentCallback', async () => {
+      const mockBeforeContent = {role: 'model', parts: [{text: 'before'}]};
+
+      const agent = new MockAgent({
+        name: 'test_before_callback_agent',
+        beforeAgentCallback: [async () => mockBeforeContent],
+      });
+
+      const parentContext = new InvocationContext({
+        invocationId: 'test',
+        agent: agent,
+        session: {
+          id: 'test-session',
+          appName: 'test-app',
+          userId: 'test-user',
+          state: {},
+          events: [],
+          lastUpdateTime: Date.now(),
+        } as Session,
+        pluginManager: new PluginManager(),
+      });
+
+      const spyRequestSize = vi.spyOn(metrics, 'recordAgentRequestSize');
+      const spyInvocationDuration = vi.spyOn(
+        metrics,
+        'recordAgentInvocationDuration',
+      );
+      const spyWorkflowSteps = vi.spyOn(metrics, 'recordAgentWorkflowSteps');
+      const spyResponseSize = vi.spyOn(metrics, 'recordAgentResponseSize');
+
+      const generator = agent.runAsync(parentContext);
+      const events: Event[] = [];
+      for await (const event of generator) {
+        events.push(event);
+      }
+
+      expect(events).toHaveLength(1);
+      expect(events[0]).toEqual(
+        expect.objectContaining({
+          author: 'test_before_callback_agent',
+          content: mockBeforeContent,
+        }),
+      );
+
+      expect(spyRequestSize).toHaveBeenCalled();
+      expect(spyInvocationDuration).toHaveBeenCalled();
+      expect(spyWorkflowSteps).toHaveBeenCalledWith(
+        'test_before_callback_agent',
+        expect.arrayContaining([
+          expect.objectContaining({content: mockBeforeContent}),
+        ]),
+      );
+      expect(spyResponseSize).toHaveBeenCalledWith(
+        'test_before_callback_agent',
+        expect.arrayContaining([
+          expect.objectContaining({content: mockBeforeContent}),
+        ]),
+      );
+    });
+
+    it('should push afterAgentCallback events and record metrics when execution succeeds', async () => {
+      const mockAfterContent = {role: 'model', parts: [{text: 'after'}]};
+
+      const agent = new MockAgent({
+        name: 'test_after_callback_agent',
+        afterAgentCallback: [async () => mockAfterContent],
+      });
+
+      const parentContext = new InvocationContext({
+        invocationId: 'test',
+        agent: agent,
+        session: {
+          id: 'test-session',
+          appName: 'test-app',
+          userId: 'test-user',
+          state: {},
+          events: [],
+          lastUpdateTime: Date.now(),
+        } as Session,
+        pluginManager: new PluginManager(),
+      });
+
+      const spyRequestSize = vi.spyOn(metrics, 'recordAgentRequestSize');
+      const spyInvocationDuration = vi.spyOn(
+        metrics,
+        'recordAgentInvocationDuration',
+      );
+      const spyWorkflowSteps = vi.spyOn(metrics, 'recordAgentWorkflowSteps');
+      const spyResponseSize = vi.spyOn(metrics, 'recordAgentResponseSize');
+
+      const generator = agent.runAsync(parentContext);
+      const events: Event[] = [];
+      for await (const event of generator) {
+        events.push(event);
+      }
+
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          author: 'test_after_callback_agent',
+          content: mockAfterContent,
+        }),
+      );
+
+      expect(spyRequestSize).toHaveBeenCalled();
+      expect(spyInvocationDuration).toHaveBeenCalled();
+      expect(spyWorkflowSteps).toHaveBeenCalledWith(
+        'test_after_callback_agent',
+        expect.arrayContaining([
+          expect.objectContaining({content: mockAfterContent}),
+        ]),
+      );
+      expect(spyResponseSize).toHaveBeenCalledWith(
+        'test_after_callback_agent',
+        expect.arrayContaining([
+          expect.objectContaining({content: mockAfterContent}),
+        ]),
+      );
+    });
+
+    it('should record agent invocation duration with error if implementation throws', async () => {
+      class ErrorAgent extends BaseAgent {
+        protected async *runAsyncImpl(): AsyncGenerator<Event, void, void> {
+          yield* [];
+          throw new Error('Agent failed');
+        }
+        protected async *runLiveImpl(): AsyncGenerator<Event, void, void> {
+          yield* [];
+        }
+      }
+
+      const agent = new ErrorAgent({name: 'error_agent'});
+      const parentContext = new InvocationContext({
+        invocationId: 'test',
+        agent: agent,
+        session: {
+          id: 'test-session',
+          appName: 'test-app',
+          userId: 'test-user',
+          state: {},
+          events: [],
+          lastUpdateTime: Date.now(),
+        } as Session,
+        pluginManager: new PluginManager(),
+      });
+
+      const spyInvocationDuration = vi.spyOn(
+        metrics,
+        'recordAgentInvocationDuration',
+      );
+
+      await expect(async () => {
+        const generator = agent.runAsync(parentContext);
+        for await (const _ of generator) {
+          continue;
+        }
+      }).rejects.toThrow('Agent failed');
+
+      expect(spyInvocationDuration).toHaveBeenCalledWith(
+        'error_agent',
+        expect.any(Number),
+        expect.any(Error),
+      );
     });
   });
 });

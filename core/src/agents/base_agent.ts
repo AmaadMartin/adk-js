@@ -10,6 +10,12 @@ import {context, trace} from '@opentelemetry/api';
 import {createEvent, Event} from '../events/event.js';
 
 import {
+  recordAgentInvocationDuration,
+  recordAgentRequestSize,
+  recordAgentResponseSize,
+  recordAgentWorkflowSteps,
+} from '../telemetry/metrics.js';
+import {
   runAsyncGeneratorWithOtelContext,
   traceAgentInvocation,
   tracer,
@@ -243,6 +249,10 @@ export abstract class BaseAgent<
   ): AsyncGenerator<Event, void, void> {
     const span = tracer.startSpan(`invoke_agent ${this.name}`);
     const ctx = trace.setSpan(context.active(), span);
+    const startTime = performance.now();
+    const events: Event[] = [];
+    const agentName = this.name;
+    let error: Error | undefined;
     try {
       yield* runAsyncGeneratorWithOtelContext<BaseAgent, Event>(
         ctx,
@@ -250,9 +260,12 @@ export abstract class BaseAgent<
         async function* () {
           const context = this.createInvocationContext(parentContext);
 
+          recordAgentRequestSize(agentName, context.userContent);
+
           const beforeAgentCallbackEvent =
             await this.handleBeforeAgentCallback(context);
           if (beforeAgentCallbackEvent) {
+            events.push(beforeAgentCallbackEvent);
             yield beforeAgentCallbackEvent;
           }
 
@@ -262,6 +275,7 @@ export abstract class BaseAgent<
 
           traceAgentInvocation({agent: this, invocationContext: context});
           for await (const event of this.runAsyncImpl(context)) {
+            events.push(event);
             yield event;
           }
 
@@ -272,12 +286,20 @@ export abstract class BaseAgent<
           const afterAgentCallbackEvent =
             await this.handleAfterAgentCallback(context);
           if (afterAgentCallbackEvent) {
+            events.push(afterAgentCallbackEvent);
             yield afterAgentCallbackEvent;
           }
         },
       );
+    } catch (e) {
+      error = e as Error;
+      throw e;
     } finally {
       span.end();
+      const elapsedMs = performance.now() - startTime;
+      recordAgentInvocationDuration(agentName, elapsedMs, error);
+      recordAgentWorkflowSteps(agentName, events);
+      recordAgentResponseSize(agentName, events);
     }
   }
 

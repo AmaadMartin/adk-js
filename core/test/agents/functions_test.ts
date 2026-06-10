@@ -29,6 +29,7 @@ import {
   getLongRunningFunctionCalls,
   mergeParallelFunctionResponseEvents,
 } from '../../src/agents/functions.js';
+import * as metrics from '../../src/telemetry/metrics.js';
 
 // Get the test target function
 const {
@@ -118,6 +119,7 @@ describe('handleFunctionCallList', () => {
   });
 
   it('should execute tool with no callbacks or plugins', async () => {
+    const spy = vi.spyOn(metrics, 'recordToolExecutionDuration');
     const event = await handleFunctionCallList({
       invocationContext,
       functionCalls: [functionCall],
@@ -130,6 +132,12 @@ describe('handleFunctionCallList', () => {
     expect(definedEvent.content!.parts![0].functionResponse!.response).toEqual({
       result: 'tool executed',
     });
+    expect(spy).toHaveBeenCalledWith(
+      'testTool',
+      'test_agent',
+      expect.any(Number),
+      undefined,
+    );
   });
 
   it('should wrap array responses into a {results: array} object', async () => {
@@ -307,6 +315,7 @@ describe('handleFunctionCallList', () => {
   });
 
   it('should return error message when error is thrown during tool execution, when no plugin onToolErrorCallback is provided', async () => {
+    const spy = vi.spyOn(metrics, 'recordToolExecutionDuration');
     const errorFunctionCall: FunctionCall = {
       id: randomIdForTestingOnly(),
       name: 'errorTool',
@@ -324,6 +333,12 @@ describe('handleFunctionCallList', () => {
     expect(event!.content!.parts![0].functionResponse!.response).toEqual({
       error: "Error in tool 'errorTool': tool error message content",
     });
+    expect(spy).toHaveBeenCalledWith(
+      'errorTool',
+      'test_agent',
+      expect.any(Number),
+      expect.any(Error),
+    );
   });
 
   it('should pass abortSignal to tool execution', async () => {

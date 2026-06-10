@@ -82,6 +82,11 @@ export interface LlmResponse {
   finishReason?: FinishReason;
 
   /**
+   * The model version of the response.
+   */
+  modelVersion?: string;
+
+  /**
    * The session resumption update of the LlmResponse
    */
   liveSessionResumptionUpdate?: LiveServerSessionResumptionUpdate;
@@ -125,6 +130,7 @@ export function createLlmResponse(
   response: GenerateContentResponse,
 ): LlmResponse {
   const usageMetadata = response.usageMetadata;
+  const modelVersion = response.modelVersion;
 
   if (response.candidates && response.candidates.length > 0) {
     const candidate = response.candidates[0];
@@ -135,6 +141,7 @@ export function createLlmResponse(
         citationMetadata: candidate.citationMetadata,
         usageMetadata: usageMetadata,
         finishReason: candidate.finishReason,
+        modelVersion: modelVersion,
       };
     }
 
@@ -144,6 +151,7 @@ export function createLlmResponse(
       usageMetadata: usageMetadata,
       citationMetadata: candidate.citationMetadata,
       finishReason: candidate.finishReason,
+      modelVersion: modelVersion,
     };
   }
 
@@ -152,6 +160,7 @@ export function createLlmResponse(
       errorCode: response.promptFeedback.blockReason,
       errorMessage: response.promptFeedback.blockReasonMessage,
       usageMetadata: usageMetadata,
+      modelVersion: modelVersion,
     };
   }
 
@@ -160,5 +169,6 @@ export function createLlmResponse(
     errorCode: 'UNKNOWN_ERROR',
     errorMessage: 'Unknown error.',
     usageMetadata: usageMetadata,
+    modelVersion: modelVersion,
   };
 }

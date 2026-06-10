@@ -27,9 +27,10 @@ import {
   ToolProcessLlmRequest,
 } from '@google/adk';
 import {Content, Schema, Type} from '@google/genai';
-import {beforeEach, describe, expect, it} from 'vitest';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
+import * as metrics from '../../src/telemetry/metrics.js';
 
 class MockLlmConnection implements BaseLlmConnection {
   sendHistory(_history: Content[]): Promise<void> {
@@ -326,6 +327,64 @@ describe('LlmAgent.callLlm', () => {
     agent.model = new MockLlm(null, modelError);
     const result = await callLlmUnderTest();
     expect(result).toEqual([{errorCode: '500', errorMessage: 'LLM error'}]);
+  });
+
+  it('stops generation early when abort signal is triggered', async () => {
+    class AbortTestLlm extends BaseLlm {
+      constructor() {
+        super({model: 'abort-test-llm'});
+      }
+      async *generateContentAsync(): AsyncGenerator<LlmResponse, void, void> {
+        yield originalLlmResponse;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        yield {
+          content: {role: 'model', parts: [{text: 'chunk 2'}]},
+        } as LlmResponse;
+      }
+      async connect(): Promise<BaseLlmConnection> {
+        return new MockLlmConnection();
+      }
+    }
+
+    const controller = new AbortController();
+    invocationContext = new InvocationContext({
+      invocationId: 'inv_123',
+      session: {} as Session,
+      agent: agent,
+      pluginManager,
+      abortSignal: controller.signal,
+    });
+
+    agent.model = new AbortTestLlm();
+
+    // Abort after 20ms (between chunk 1 and chunk 2)
+    setTimeout(() => {
+      controller.abort();
+    }, 20);
+
+    const result = await callLlmUnderTest();
+    expect(result).toEqual([originalLlmResponse]);
+  });
+
+  it('records client operation duration and token usage', async () => {
+    const spyDuration = vi.spyOn(metrics, 'recordClientOperationDuration');
+    const spyTokenUsage = vi.spyOn(metrics, 'recordClientTokenUsage');
+
+    agent.model = new MockLlm(originalLlmResponse);
+    await callLlmUnderTest();
+
+    expect(spyDuration).toHaveBeenCalledWith(
+      'test_agent',
+      expect.any(Number),
+      expect.any(Object),
+      expect.any(Array),
+      undefined,
+    );
+    expect(spyTokenUsage).toHaveBeenCalledWith(
+      'test_agent',
+      expect.any(Object),
+      expect.any(Array),
+    );
   });
 });
 
