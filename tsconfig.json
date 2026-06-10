@@ -7,6 +7,11 @@
     "moduleResolution": "nodenext",
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "experimentalDecorators": true
+    "experimentalDecorators": true,
+    "baseUrl": ".",
+    "paths": {
+      "@google/adk": ["./core/src/index.ts"],
+      "@google/adk/*.js": ["./core/src/*.ts"]
+    }
   }
 }
