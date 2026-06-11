@@ -6,6 +6,7 @@
 import {
   BasePlugin,
   BaseTool,
+  Context,
   createEvent,
   createEventActions,
   Event,
@@ -638,6 +639,70 @@ describe('handleFunctionCallList', () => {
         result: 'raw response string',
       });
     });
+  });
+
+  it('should throw error if tool name is not found in toolsDict', async () => {
+    const missingFunctionCall = {
+      id: 'missing-id',
+      name: 'nonExistentTool',
+      args: {},
+    };
+    await expect(
+      handleFunctionCallList({
+        invocationContext,
+        functionCalls: [missingFunctionCall],
+        toolsDict: {},
+        beforeToolCallbacks: [],
+        afterToolCallbacks: [],
+      }),
+    ).rejects.toThrow(
+      'Function nonExistentTool is not found in the toolsDict.',
+    );
+  });
+
+  it('should pass tool confirmation from toolConfirmationDict', async () => {
+    const runAsyncSpy = vi.fn().mockResolvedValue({result: 'executed'});
+    class ConfirmedTool extends BaseTool {
+      override async runAsync(options: {
+        args: Record<string, unknown>;
+        toolContext: Context;
+      }) {
+        return runAsyncSpy(options);
+      }
+    }
+    const myTool = new ConfirmedTool({
+      name: 'confirmedTool',
+      description: 'a confirmed tool',
+    });
+    const confirmation = new ToolConfirmation({
+      hint: 'hint',
+      confirmed: true,
+    });
+    const callId = 'call-id-123';
+    const functionCall = {
+      id: callId,
+      name: 'confirmedTool',
+      args: {},
+    };
+
+    await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [functionCall],
+      toolsDict: {'confirmedTool': myTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+      toolConfirmationDict: {
+        [callId]: confirmation,
+      },
+    });
+
+    expect(runAsyncSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toolContext: expect.objectContaining({
+          toolConfirmation: confirmation,
+        }),
+      }),
+    );
   });
 });
 
