@@ -29,10 +29,20 @@ describe('E2E Telemetry Tool Call Tracing', () => {
     dotenv.config({path: envPath});
   }
 
+  const isPlaceholder = (val: string | undefined) =>
+    !val ||
+    val.trim() === '' ||
+    val.toLowerCase().includes('placeholder') ||
+    val.toLowerCase().includes('todo') ||
+    val.toLowerCase().includes('your-');
+
   const hasAKey =
-    !!process.env.GEMINI_API_KEY ||
-    !!process.env.GOOGLE_GENAI_API_KEY ||
-    !!process.env.GOOGLE_CLOUD_PROJECT;
+    (!!process.env.GEMINI_API_KEY &&
+      !isPlaceholder(process.env.GEMINI_API_KEY)) ||
+    (!!process.env.GOOGLE_GENAI_API_KEY &&
+      !isPlaceholder(process.env.GOOGLE_GENAI_API_KEY)) ||
+    (!!process.env.GOOGLE_CLOUD_PROJECT &&
+      !isPlaceholder(process.env.GOOGLE_CLOUD_PROJECT));
 
   it.skipIf(!hasAKey)(
     'should generate spans with correct attributes for tool calls',
