@@ -20,7 +20,15 @@ import {
   ToolConfirmation,
 } from '@google/adk';
 import {Content, FunctionCall} from '@google/genai';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+  type MockInstance,
+} from 'vitest';
 import {z} from 'zod';
 import {
   generateClientFunctionCallId,
@@ -29,6 +37,21 @@ import {
   populateClientFunctionCallId,
   removeClientFunctionCallId,
 } from '../../src/agents/functions.js';
+import {
+  traceMergedToolCalls,
+  tracer,
+  traceToolCall,
+} from '../../src/telemetry/tracing.js';
+
+vi.mock('../../src/telemetry/tracing.js', async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import('../../src/telemetry/tracing.js')>();
+  return {
+    ...original,
+    traceToolCall: vi.fn(),
+    traceMergedToolCalls: vi.fn(),
+  };
+});
 
 // Get the test target function
 const {
@@ -362,6 +385,259 @@ describe('handleFunctionCallList', () => {
         }),
       }),
     );
+  });
+
+  describe('telemetry and tracing', () => {
+    let startActiveSpanSpy: MockInstance;
+
+    beforeEach(() => {
+      vi.mocked(traceToolCall).mockClear();
+      vi.mocked(traceMergedToolCalls).mockClear();
+      startActiveSpanSpy = vi.spyOn(tracer, 'startActiveSpan');
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('should start active span and record trace for single tool call', async () => {
+      const event = await handleFunctionCallList({
+        invocationContext,
+        functionCalls: [functionCall],
+        toolsDict,
+        beforeToolCallbacks: [],
+        afterToolCallbacks: [],
+      });
+
+      expect(event).not.toBeNull();
+      expect(startActiveSpanSpy).toHaveBeenCalledTimes(1);
+      expect(startActiveSpanSpy).toHaveBeenCalledWith(
+        `execute_tool ${testTool.name}`,
+        expect.any(Function),
+      );
+      expect(traceToolCall).toHaveBeenCalledTimes(1);
+      expect(traceToolCall).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tool: testTool,
+          args: {},
+          functionResponseEvent: event,
+        }),
+      );
+      expect(traceMergedToolCalls).not.toHaveBeenCalled();
+    });
+
+    it('should start active spans and record merged trace for parallel tool calls', async () => {
+      const parallelTool = new FunctionTool({
+        name: 'parallelTool',
+        description: 'another tool',
+        parameters: z.object({}),
+        execute: async () => ({result: 'parallel executed'}),
+      });
+
+      const call1: FunctionCall = {
+        id: 'call-1',
+        name: 'testTool',
+        args: {},
+      };
+      const call2: FunctionCall = {
+        id: 'call-2',
+        name: 'parallelTool',
+        args: {},
+      };
+
+      const event = await handleFunctionCallList({
+        invocationContext,
+        functionCalls: [call1, call2],
+        toolsDict: {
+          'testTool': testTool,
+          'parallelTool': parallelTool,
+        },
+        beforeToolCallbacks: [],
+        afterToolCallbacks: [],
+      });
+
+      expect(event).not.toBeNull();
+      // startActiveSpan should be called for testTool, parallelTool, and the merged span
+      expect(startActiveSpanSpy).toHaveBeenCalledTimes(3);
+      expect(startActiveSpanSpy).toHaveBeenNthCalledWith(
+        1,
+        `execute_tool ${testTool.name}`,
+        expect.any(Function),
+      );
+      expect(startActiveSpanSpy).toHaveBeenNthCalledWith(
+        2,
+        `execute_tool ${parallelTool.name}`,
+        expect.any(Function),
+      );
+      expect(startActiveSpanSpy).toHaveBeenNthCalledWith(
+        3,
+        'execute_tool (merged)',
+        expect.any(Function),
+      );
+
+      // traceToolCall should be called for both individual tool calls
+      expect(traceToolCall).toHaveBeenCalledTimes(2);
+
+      // traceMergedToolCalls should be called for the merged event
+      expect(traceMergedToolCalls).toHaveBeenCalledTimes(1);
+      expect(traceMergedToolCalls).toHaveBeenCalledWith(
+        expect.objectContaining({
+          responseEventId: event!.id,
+          functionResponseEvent: event,
+        }),
+      );
+    });
+
+    it('should return null and trace nothing when long-running tool returns no response', async () => {
+      const longRunningTool = new FunctionTool({
+        name: 'longRunningTool',
+        description: 'a long running tool',
+        parameters: z.object({}),
+        execute: async () => undefined,
+        isLongRunning: true,
+      });
+
+      const call: FunctionCall = {
+        id: 'call-long',
+        name: 'longRunningTool',
+        args: {},
+      };
+
+      const event = await handleFunctionCallList({
+        invocationContext,
+        functionCalls: [call],
+        toolsDict: {
+          'longRunningTool': longRunningTool,
+        },
+        beforeToolCallbacks: [],
+        afterToolCallbacks: [],
+      });
+
+      expect(event).toBeNull();
+      expect(traceToolCall).not.toHaveBeenCalled();
+      expect(traceMergedToolCalls).not.toHaveBeenCalled();
+    });
+
+    it('should start active span and trace tool when tool throws non-Error object', async () => {
+      const nonErrorTool = new FunctionTool({
+        name: 'nonErrorTool',
+        description: 'throws non-error',
+        parameters: z.object({}),
+        execute: async () => {
+          throw 'some non-error string';
+        },
+      });
+
+      const call = {
+        id: 'call-non-error',
+        name: 'nonErrorTool',
+        args: {},
+      };
+
+      const event = await handleFunctionCallList({
+        invocationContext,
+        functionCalls: [call],
+        toolsDict: {
+          'nonErrorTool': nonErrorTool,
+        },
+        beforeToolCallbacks: [],
+        afterToolCallbacks: [],
+      });
+
+      expect(event).not.toBeNull();
+      expect(traceToolCall).toHaveBeenCalledTimes(1);
+      expect(traceToolCall).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tool: nonErrorTool,
+          args: {},
+          functionResponseEvent: event,
+        }),
+      );
+      expect(event!.content!.parts![0].functionResponse!.response).toEqual({
+        error: "Error in tool 'nonErrorTool': some non-error string",
+      });
+    });
+
+    it('should start active span and trace tool when tool throws raw non-Error object directly from BaseTool', async () => {
+      class CustomRawErrorTool extends BaseTool {
+        override async runAsync() {
+          throw 'raw string error';
+        }
+      }
+      const rawErrorTool = new CustomRawErrorTool({
+        name: 'rawErrorTool',
+        description: 'throws raw error',
+      });
+
+      const call = {
+        id: 'call-raw-error',
+        name: 'rawErrorTool',
+        args: {},
+      };
+
+      const event = await handleFunctionCallList({
+        invocationContext,
+        functionCalls: [call],
+        toolsDict: {
+          'rawErrorTool': rawErrorTool,
+        },
+        beforeToolCallbacks: [],
+        afterToolCallbacks: [],
+      });
+
+      expect(event).not.toBeNull();
+      expect(traceToolCall).toHaveBeenCalledTimes(1);
+      expect(traceToolCall).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tool: rawErrorTool,
+          args: {},
+          functionResponseEvent: event,
+        }),
+      );
+      expect(event!.content!.parts![0].functionResponse!.response).toEqual({
+        error: 'raw string error',
+      });
+    });
+
+    it('should start active span and trace tool when tool returns primitive string', async () => {
+      const primitiveTool = new FunctionTool({
+        name: 'primitiveTool',
+        description: 'returns primitive string',
+        parameters: z.object({}),
+        execute: async () => {
+          return 'raw response string';
+        },
+      });
+
+      const call = {
+        id: 'call-primitive',
+        name: 'primitiveTool',
+        args: {},
+      };
+
+      const event = await handleFunctionCallList({
+        invocationContext,
+        functionCalls: [call],
+        toolsDict: {
+          'primitiveTool': primitiveTool,
+        },
+        beforeToolCallbacks: [],
+        afterToolCallbacks: [],
+      });
+
+      expect(event).not.toBeNull();
+      expect(traceToolCall).toHaveBeenCalledTimes(1);
+      expect(traceToolCall).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tool: primitiveTool,
+          args: {},
+          functionResponseEvent: event,
+        }),
+      );
+      expect(event!.content!.parts![0].functionResponse!.response).toEqual({
+        result: 'raw response string',
+      });
+    });
   });
 });
 
