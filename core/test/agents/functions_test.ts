@@ -34,6 +34,7 @@ import {z} from 'zod';
 import {
   generateClientFunctionCallId,
   getLongRunningFunctionCalls,
+  handleFunctionCallsAsync,
   mergeParallelFunctionResponseEvents,
   populateClientFunctionCallId,
   removeClientFunctionCallId,
@@ -703,6 +704,37 @@ describe('handleFunctionCallList', () => {
         }),
       }),
     );
+  });
+
+  describe('handleFunctionCallsAsync', () => {
+    it('should call handleFunctionCallList with function calls extracted from functionCallEvent', async () => {
+      const agent = new LlmAgent({name: 'test_agent', model: 'test_model'});
+      const localContext = new InvocationContext({
+        invocationId: 'inv_123',
+        session: {} as Session,
+        agent,
+        pluginManager: new PluginManager(),
+      });
+      const localToolsDict = {'testTool': testTool};
+
+      const event = createEvent({
+        content: {
+          role: 'user',
+          parts: [{functionCall: {name: 'testTool', args: {}, id: 'id1'}}],
+        },
+      });
+      const result = await handleFunctionCallsAsync({
+        invocationContext: localContext,
+        functionCallEvent: event,
+        toolsDict: localToolsDict,
+        beforeToolCallbacks: [],
+        afterToolCallbacks: [],
+      });
+      expect(result).not.toBeNull();
+      expect(result!.content!.parts![0].functionResponse!.name).toBe(
+        'testTool',
+      );
+    });
   });
 });
 
