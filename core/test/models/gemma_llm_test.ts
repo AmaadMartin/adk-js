@@ -4,7 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Gemini, Gemma, LLMRegistry, LlmRequest, LlmResponse} from '@google/adk';
+import {
+  Gemini,
+  Gemma,
+  GoogleLLMVariant,
+  LLMRegistry,
+  LlmRequest,
+  LlmResponse,
+} from '@google/adk';
 import {
   Content,
   GenerateContentResponse,
@@ -55,6 +62,11 @@ describe('Gemma LLM', () => {
   it('should default model to gemma-3-27b-it', () => {
     const gemma = new Gemma({apiKey: 'test-key'});
     expect(gemma.model).toBe('gemma-3-27b-it');
+  });
+
+  it('should return GEMINI_API for apiBackend', () => {
+    const gemma = new Gemma({apiKey: 'test-key'});
+    expect(gemma.apiBackend).toBe(GoogleLLMVariant.GEMINI_API);
   });
 
   it('should throw error if model is not a Gemma model', async () => {

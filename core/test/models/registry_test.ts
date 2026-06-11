@@ -115,6 +115,9 @@ describe('LLMRegistry', () => {
         }
         static override readonly supportedModels = [`temp-model-${i}`];
         async *generateContentAsync(): AsyncGenerator<LlmResponse, void> {}
+        async connect(): Promise<BaseLlmConnection> {
+          return new TestLlmConnection();
+        }
       }
       LLMRegistry.register(TempModel);
     }
