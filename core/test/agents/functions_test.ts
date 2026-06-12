@@ -829,6 +829,7 @@ describe('generateAuthEvent', () => {
               name: 'api_key',
               in: 'header',
             },
+            credentialKey: 'key_1',
           },
           'call_2': {
             authScheme: {
@@ -836,6 +837,7 @@ describe('generateAuthEvent', () => {
               name: 'api_key',
               in: 'header',
             },
+            credentialKey: 'key_2',
           },
         },
       }),
