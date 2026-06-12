@@ -706,6 +706,54 @@ describe('handleFunctionCallList', () => {
     );
   });
 
+  it('should filter out function calls not included in filters', async () => {
+    const call1 = {id: 'call-1', name: 'testTool', args: {}};
+    const call2 = {id: 'call-2', name: 'testTool', args: {}};
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [call1, call2],
+      toolsDict,
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+      filters: new Set(['call-1']),
+    });
+    expect(event).not.toBeNull();
+    // Only call-1 should be in the response
+    expect(event!.content!.parts!.length).toBe(1);
+    expect(event!.content!.parts![0].functionResponse!.id).toBe('call-1');
+  });
+
+  it('should fallback to empty object if functionCall.args is undefined', async () => {
+    const callWithoutArgs = {
+      id: 'call-no-args',
+      name: 'testTool',
+      args: undefined as unknown as Record<string, unknown>,
+    };
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callWithoutArgs],
+      toolsDict,
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+    expect(event).not.toBeNull();
+    expect(event!.content!.parts![0].functionResponse!.response).toEqual({
+      result: 'tool executed',
+    });
+  });
+
+  it('should handle functionCall without id', async () => {
+    const callWithoutId = {name: 'testTool', args: {}};
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callWithoutId],
+      toolsDict,
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+    expect(event).not.toBeNull();
+  });
+
   describe('handleFunctionCallsAsync', () => {
     it('should call handleFunctionCallList with function calls extracted from functionCallEvent', async () => {
       const agent = new LlmAgent({name: 'test_agent', model: 'test_model'});
@@ -1120,5 +1168,29 @@ describe('mergeParallelFunctionResponseEvents', () => {
     const event = createEvent();
     const merged = mergeParallelFunctionResponseEvents([event]);
     expect(merged).toBe(event);
+  });
+
+  it('should handle events without actions', () => {
+    const event1 = createEvent({
+      content: {
+        role: 'user',
+        parts: [{functionResponse: {name: 't1', response: {}, id: '1'}}],
+      },
+    });
+    delete (event1 as Partial<Event>).actions;
+    const event2 = createEvent({
+      content: {
+        role: 'user',
+        parts: [{functionResponse: {name: 't2', response: {}, id: '2'}}],
+      },
+    });
+    delete (event2 as Partial<Event>).actions;
+    const merged = mergeParallelFunctionResponseEvents([event1, event2]);
+    expect(merged.actions).toEqual({
+      stateDelta: {},
+      artifactDelta: {},
+      requestedAuthConfigs: {},
+      requestedToolConfirmations: {},
+    });
   });
 });

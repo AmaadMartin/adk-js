@@ -51,9 +51,6 @@ export function generateClientFunctionCallId(): string {
 // TODO - b/425992518: consider move into event.ts
 export function populateClientFunctionCallId(modelResponseEvent: Event): void {
   const functionCalls = getFunctionCalls(modelResponseEvent);
-  if (!functionCalls) {
-    return;
-  }
   for (const functionCall of functionCalls) {
     if (!functionCall.id) {
       functionCall.id = generateClientFunctionCallId();
