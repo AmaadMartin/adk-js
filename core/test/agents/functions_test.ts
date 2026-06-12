@@ -862,6 +862,7 @@ describe('generateAuthEvent', () => {
         name: 'api_key',
         in: 'header',
       },
+      credentialKey: 'key_1',
     });
 
     const call2 = parts.find(
@@ -875,6 +876,7 @@ describe('generateAuthEvent', () => {
         name: 'api_key',
         in: 'header',
       },
+      credentialKey: 'key_2',
     });
   });
 });
