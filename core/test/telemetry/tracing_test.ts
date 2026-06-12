@@ -264,7 +264,7 @@ describe('Telemetry Tracing Functions', () => {
             },
           ],
         },
-      } as Event;
+      } as unknown as Event;
 
       traceToolCall({
         tool: mockTool,
@@ -349,12 +349,12 @@ describe('Telemetry Tracing Functions', () => {
       vi.mocked(trace.getActiveSpan).mockReturnValue(mockSpan);
       const circularEvent = {
         id: 'circular-id',
-      } as unknown as Event;
-      (circularEvent as Record<string, unknown>)['self'] = circularEvent;
+      } as Record<string, unknown>;
+      circularEvent['self'] = circularEvent;
 
       traceMergedToolCalls({
         responseEventId: 'merged-event-id',
-        functionResponseEvent: circularEvent,
+        functionResponseEvent: circularEvent as unknown as Event,
       });
 
       expect(mockSpan.setAttribute).toHaveBeenCalledWith(
