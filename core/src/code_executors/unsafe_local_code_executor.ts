@@ -207,7 +207,6 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
 
         let stdout = '';
         let stderr = '';
-
         if (child.stdout) {
           child.stdout.on('data', (data) => {
             stdout += data.toString();
@@ -222,6 +221,7 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
 
         child.on('error', (err) => {
           stderr += `Process error: ${err.message}\n`;
+          resolve({stdout, stderr, exitCode: null});
         });
 
         child.on('close', (exitCode, signal) => {

@@ -15,7 +15,6 @@ const ARTIFACT_PREFIX = 'artifact.';
 async function resolveKey(
   key: string,
   isOptional: boolean,
-  rawMatch: string,
   readonlyContext: ReadonlyContext,
 ): Promise<string> {
   const invocationContext = readonlyContext.invocationContext;
@@ -42,10 +41,6 @@ async function resolveKey(
   }
 
   // Step 3: Handle state variable injection.
-  if (!isValidStateName(key)) {
-    return rawMatch;
-  }
-
   if (key in invocationContext.session.state) {
     return String(invocationContext.session.state[key]);
   }
@@ -112,10 +107,7 @@ export async function injectSessionState(
   });
 
   // Deduplicate only valid keys by base key, merging optionality
-  const uniqueKeys = new Map<
-    string,
-    {key: string; isOptional: boolean; raw: string}
-  >();
+  const uniqueKeys = new Map<string, {key: string; isOptional: boolean}>();
 
   for (const pm of parsedMatches) {
     if (!pm.isValid) {
@@ -130,7 +122,6 @@ export async function injectSessionState(
       uniqueKeys.set(pm.key, {
         key: pm.key,
         isOptional: pm.isOptional,
-        raw: pm.raw,
       });
     }
   }
@@ -140,7 +131,7 @@ export async function injectSessionState(
   for (const info of uniqueKeys.values()) {
     resolutions.set(
       info.key,
-      resolveKey(info.key, info.isOptional, info.raw, readonlyContext),
+      resolveKey(info.key, info.isOptional, readonlyContext),
     );
   }
 
