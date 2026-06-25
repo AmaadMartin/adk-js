@@ -185,31 +185,110 @@ describe('Telemetry Tracing Functions', () => {
           expect.stringContaining('not specified'),
       });
     });
-  });
 
-  describe('traceMergedToolCalls', () => {
-    it('should set correct attributes for merged tool calls', () => {
-      // Arrange
+    it('should return early if active span is not present', () => {
+      vi.mocked(trace.getActiveSpan).mockReturnValue(undefined);
+
+      traceToolCall({
+        tool: mockTool,
+        args: {},
+        functionResponseEvent: mockEvent,
+      });
+
+      expect(mockSpan.setAttributes).not.toHaveBeenCalled();
+    });
+
+    it('should handle circular reference in args serialization', () => {
       vi.mocked(trace.getActiveSpan).mockReturnValue(mockSpan);
-      const mockEventWithJson = {
-        id: 'merged-event-id',
+      const circularArgs: Record<string, unknown> = {};
+      circularArgs['self'] = circularArgs;
+
+      traceToolCall({
+        tool: mockTool,
+        args: circularArgs,
+        functionResponseEvent: mockEvent,
+      });
+
+      expect(mockSpan.setAttributes).toHaveBeenCalledWith(
+        expect.objectContaining({
+          'gcp.vertex.agent.tool_call_args': '<not serializable>',
+        }),
+      );
+    });
+
+    it('should set empty args/response if ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS is false', () => {
+      vi.mocked(trace.getActiveSpan).mockReturnValue(mockSpan);
+      const originalEnv = process.env.ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS;
+      process.env.ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS = 'false';
+
+      try {
+        traceToolCall({
+          tool: mockTool,
+          args: {key: 'val'},
+          functionResponseEvent: mockEvent,
+        });
+
+        expect(mockSpan.setAttributes).toHaveBeenCalledWith(
+          expect.objectContaining({
+            'gcp.vertex.agent.tool_call_args': '{}',
+          }),
+        );
+        expect(mockSpan.setAttributes).toHaveBeenCalledWith(
+          expect.objectContaining({
+            'gcp.vertex.agent.tool_response': '{}',
+          }),
+        );
+      } finally {
+        if (originalEnv === undefined) {
+          delete process.env.ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS;
+        } else {
+          process.env.ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS = originalEnv;
+        }
+      }
+    });
+
+    it('should handle non-object tool response', () => {
+      vi.mocked(trace.getActiveSpan).mockReturnValue(mockSpan);
+      const eventWithNonObjectResponse = {
+        id: 'test-event-id',
         invocationId: 'test-invocation-id',
         actions: createEventActions({skipSummarization: false}),
         timestamp: Date.now(),
         content: {
           parts: [
             {
-              text: 'merged response data',
+              functionResponse: {
+                id: 'test-call-id',
+                response: 'string response',
+              },
             },
           ],
         },
-        model_dumps_json: vi.fn().mockReturnValue('{"merged": "data"}'),
-      };
+      } as unknown as Event;
+
+      traceToolCall({
+        tool: mockTool,
+        args: {},
+        functionResponseEvent: eventWithNonObjectResponse,
+      });
+
+      expect(mockSpan.setAttributes).toHaveBeenCalledWith(
+        expect.objectContaining({
+          'gcp.vertex.agent.tool_response': '{"result":"string response"}',
+        }),
+      );
+    });
+  });
+
+  describe('traceMergedToolCalls', () => {
+    it('should set correct attributes for merged tool calls', () => {
+      // Arrange
+      vi.mocked(trace.getActiveSpan).mockReturnValue(mockSpan);
 
       // Act
       traceMergedToolCalls({
         responseEventId: 'merged-event-id',
-        functionResponseEvent: mockEventWithJson as unknown as Event,
+        functionResponseEvent: mockEvent,
       });
 
       // Assert - setAttributes is called without tool_response
@@ -228,6 +307,59 @@ describe('Telemetry Tracing Functions', () => {
       expect(mockSpan.setAttribute).toHaveBeenCalledWith(
         'gcp.vertex.agent.tool_response',
         expect.any(String),
+      );
+    });
+
+    it('should return early if active span is not present', () => {
+      vi.mocked(trace.getActiveSpan).mockReturnValue(undefined);
+
+      traceMergedToolCalls({
+        responseEventId: 'merged-event-id',
+        functionResponseEvent: mockEvent,
+      });
+
+      expect(mockSpan.setAttributes).not.toHaveBeenCalled();
+    });
+
+    it('should set empty tool response if ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS is false', () => {
+      vi.mocked(trace.getActiveSpan).mockReturnValue(mockSpan);
+      const originalEnv = process.env.ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS;
+      process.env.ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS = 'false';
+
+      try {
+        traceMergedToolCalls({
+          responseEventId: 'merged-event-id',
+          functionResponseEvent: mockEvent,
+        });
+
+        expect(mockSpan.setAttribute).toHaveBeenCalledWith(
+          'gcp.vertex.agent.tool_response',
+          '{}',
+        );
+      } finally {
+        if (originalEnv === undefined) {
+          delete process.env.ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS;
+        } else {
+          process.env.ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS = originalEnv;
+        }
+      }
+    });
+
+    it('should handle circular reference in functionResponseEvent serialization', () => {
+      vi.mocked(trace.getActiveSpan).mockReturnValue(mockSpan);
+      const circularEvent = {
+        id: 'circular-id',
+      } as Record<string, unknown>;
+      circularEvent['self'] = circularEvent;
+
+      traceMergedToolCalls({
+        responseEventId: 'merged-event-id',
+        functionResponseEvent: circularEvent as unknown as Event,
+      });
+
+      expect(mockSpan.setAttribute).toHaveBeenCalledWith(
+        'gcp.vertex.agent.tool_response',
+        '<not serializable>',
       );
     });
   });
