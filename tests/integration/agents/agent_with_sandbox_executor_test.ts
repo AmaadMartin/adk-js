@@ -6,7 +6,6 @@
 
 import {Client} from '@google-cloud/vertexai';
 import {AgentEngineSandboxCodeExecutor, LlmAgent} from '@google/adk';
-import {responseProcessor} from '@google/adk/agents/processors/code_execution_request_processor.js';
 import {FinishReason} from '@google/genai';
 import {describe, expect, it, vi} from 'vitest';
 import {
@@ -92,7 +91,6 @@ describe('Agent with AgentEngineSandboxCodeExecutor', () => {
       description: 'An agent that writes and runs code',
       instruction: 'Write code to solve the user request.',
       codeExecutor: executor,
-      responseProcessors: [responseProcessor],
     });
 
     const {run} = await createRunner(agent);

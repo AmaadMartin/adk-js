@@ -6,17 +6,22 @@
 
 import {
   AUTH_PREPROCESSOR,
+  BaseCodeExecutor,
   BaseLlm,
   BaseLlmConnection,
   BaseLlmRequestProcessor,
   BaseLlmResponseProcessor,
   BasePlugin,
   BaseTool,
+  CODE_EXECUTION_RESPONSE_PROCESSOR,
+  CodeExecutionResult,
   CONTENT_REQUEST_PROCESSOR,
   Context,
   ContextCompactorRequestProcessor,
   createEvent,
   Event,
+  ExecuteCodeParams,
+  InMemoryArtifactService,
   InvocationContext,
   LlmAgent,
   LlmRequest,
@@ -797,5 +802,119 @@ describe('LlmAgent Default Request Processors', () => {
       CONTENT_REQUEST_PROCESSOR,
     );
     expect(authIndex).toBeLessThan(contentIndex);
+  });
+});
+
+class MockCodeExecutor extends BaseCodeExecutor {
+  calledWith: ExecuteCodeParams[] = [];
+  result: CodeExecutionResult = {
+    stdout: 'mock stdout',
+    stderr: '',
+    outputFiles: [],
+  };
+
+  async executeCode(params: ExecuteCodeParams): Promise<CodeExecutionResult> {
+    this.calledWith.push(params);
+    return this.result;
+  }
+}
+
+class DynamicMockLlm extends BaseLlm {
+  responses: LlmResponse[];
+  callCount = 0;
+
+  constructor(responses: LlmResponse[]) {
+    super({model: 'dynamic-mock-llm'});
+    this.responses = responses;
+  }
+
+  async *generateContentAsync(
+    _request: LlmRequest,
+  ): AsyncGenerator<LlmResponse, void, void> {
+    const response = this.responses[this.callCount];
+    if (response) {
+      this.callCount++;
+      yield response;
+    }
+  }
+
+  async connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
+    return new MockLlmConnection();
+  }
+}
+
+describe('LlmAgent Default Response Processors', () => {
+  it('includes CODE_EXECUTION_RESPONSE_PROCESSOR in default responseProcessors', () => {
+    const agent = new LlmAgent({
+      name: 'test_agent',
+    });
+    expect(agent.responseProcessors).toContain(
+      CODE_EXECUTION_RESPONSE_PROCESSOR,
+    );
+  });
+});
+
+describe('LlmAgent Code Execution Integration', () => {
+  it('should execute code when codeExecutor is configured and model returns code', async () => {
+    const mockExecutor = new MockCodeExecutor();
+    const responses = [
+      {
+        content: {
+          parts: [{text: 'Here is some code:\n```python\nprint("hello")\n```'}],
+        },
+      },
+      {
+        content: {
+          parts: [{text: 'Code executed successfully. I am done.'}],
+        },
+      },
+    ];
+    const mockModel = new DynamicMockLlm(responses);
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      codeExecutor: mockExecutor,
+      model: mockModel,
+    });
+
+    const mockState = {
+      hasDelta: () => false,
+      get: () => undefined,
+      set: () => {},
+    };
+
+    const artifactService = new InMemoryArtifactService();
+    const invocationContext = new InvocationContext({
+      invocationId: 'inv_123',
+      session: {
+        id: 'sess_123',
+        state: mockState,
+        events: [],
+      } as unknown as Session,
+      agent: agent,
+      pluginManager: new PluginManager(),
+      artifactService,
+    });
+
+    const generator = agent.runAsync(invocationContext);
+    const events: Event[] = [];
+    for await (const event of generator) {
+      events.push(event);
+    }
+
+    // Verify executor was called
+    expect(mockExecutor.calledWith.length).toBe(1);
+    expect(mockExecutor.calledWith[0].codeExecutionInput.code.trim()).toBe(
+      'print("hello")',
+    );
+
+    // Verify events
+    expect(events.length).toBe(3);
+    expect(events[0].content?.parts?.[0].text).toContain('Here is some code:');
+    expect(events[0].content?.parts?.[1].text).toContain('print("hello")');
+    expect(events[1].content?.parts?.[0].codeExecutionResult).toBeDefined();
+    expect(events[1].content?.parts?.[0].text).toContain('mock stdout');
+    expect(events[2].content?.parts?.[0].text).toBe(
+      'Code executed successfully. I am done.',
+    );
   });
 });
