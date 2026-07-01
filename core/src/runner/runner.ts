@@ -20,7 +20,7 @@ import {
   BuiltInCodeExecutor,
   isBuiltInCodeExecutor,
 } from '../code_executors/built_in_code_executor.js';
-import {createEvent, Event, getFunctionCalls} from '../events/event.js';
+import {createEvent, Event} from '../events/event.js';
 import {createEventActions} from '../events/event_actions.js';
 import {BaseMemoryService} from '../memory/base_memory_service.js';
 import {BasePlugin} from '../plugins/base_plugin.js';
@@ -460,23 +460,29 @@ export class Runner {
     session: Session,
     rootAgent: BaseAgent,
   ): BaseAgent {
+    // Build agent map for O(1) lookups
+    const agentMap = new Map<string, BaseAgent>();
+    const populate = (a: BaseAgent) => {
+      agentMap.set(a.name, a);
+      a.subAgents.forEach(populate);
+    };
+    populate(rootAgent);
+
     // =========================================================================
     // Case 1: If the last event is a function response, this returns the
     // agent that made the original function call.
     // =========================================================================
     const event = findEventByLastFunctionResponseId(session.events);
     if (event && event.author) {
-      return rootAgent.findAgent(event.author) || rootAgent;
+      return agentMap.get(event.author) || rootAgent;
     }
 
     // =========================================================================
     // Case 2: Otherwise, find the last agent that emitted a message and is
     // transferable across the agent tree.
     // =========================================================================
-    // TODO - b/425992518: Optimize this, not going to work for long sessions.
     // TODO - b/425992518: The behavior is dynamic, needs better documentation.
     for (let i = session.events.length - 1; i >= 0; i--) {
-      logger.info('event:', JSON.stringify(session.events[i]));
       const event = session.events[i];
       if (event.author === 'user' || !event.author) {
         continue;
@@ -486,7 +492,7 @@ export class Runner {
         return rootAgent;
       }
 
-      const agent = rootAgent.findSubAgent(event.author!);
+      const agent = agentMap.get(event.author!);
       if (!agent) {
         logger.warn(
           `Event from an unknown agent: ${event.author}, event id: ${event.id}`,
@@ -549,19 +555,12 @@ function findEventByLastFunctionResponseId(events: Event[]): Event | null {
     return null;
   }
 
-  // TODO - b/425992518: inefficient search, fix.
   for (let i = events.length - 2; i >= 0; i--) {
     const event = events[i];
-    // Looking for the system long running request euc function call.
-    const functionCalls = getFunctionCalls(event);
-    if (!functionCalls) {
-      continue;
-    }
-
-    for (const functionCall of functionCalls) {
-      if (functionCall.id === functionCallId) {
-        return event;
-      }
+    if (
+      event.content?.parts?.some((p) => p.functionCall?.id === functionCallId)
+    ) {
+      return event;
     }
   }
   return null;
