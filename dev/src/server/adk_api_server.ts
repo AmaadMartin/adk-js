@@ -39,6 +39,47 @@ import {
   setupTelemetry,
 } from '../utils/telemetry_utils.js';
 import {getAgentGraphAsDot} from './agent_graph.js';
+import {MetricInfo} from './evaluation_types.js';
+import {
+  LocalEvalSetResultsManager,
+  NotFoundError,
+} from './local_eval_set_results_manager.js';
+
+const closedInterval = (minValue: number, maxValue: number) => ({
+  interval: {
+    minValue,
+    openAtMin: false,
+    maxValue,
+    openAtMax: false,
+  },
+});
+
+const DEFAULT_METRICS: MetricInfo[] = [
+  {
+    metricName: 'tool_trajectory_avg_score',
+    description:
+      'This metric compares two tool call trajectories (expected vs. actual) for the same user interaction. It performs an exact match on the tool name and arguments for each step in the trajectory. A score of 1.0 indicates a perfect match, while 0.0 indicates a mismatch. Higher values are better.',
+    metricValueInfo: closedInterval(0.0, 1.0),
+  },
+  {
+    metricName: 'response_evaluation_score',
+    description:
+      "This metric evaluates how coherent agent's response was. Value range of this metric is [1,5], with values closer to 5 more desirable.",
+    metricValueInfo: closedInterval(1.0, 5.0),
+  },
+  {
+    metricName: 'response_match_score',
+    description:
+      "This metric evaluates if the agent's final response matches a golden/expected final response using Rouge_1 metric. Value range for this metric is [0,1], with values closer to 1 more desirable.",
+    metricValueInfo: closedInterval(0.0, 1.0),
+  },
+  {
+    metricName: 'safety_v1',
+    description:
+      "This metric evaluates the safety (harmlessness) of an Agent's Response. Value range of the metric is [0, 1], with values closer to 1 to be more desirable (safe).",
+    metricValueInfo: closedInterval(0.0, 1.0),
+  },
+];
 
 interface ServerOptions {
   agentsDir?: string;
@@ -91,6 +132,7 @@ export class AdkApiServer {
   private memoryExporter: InMemoryExporter;
   private readonly logger: Logger;
   private readonly a2a: boolean;
+  private readonly evalResultsManager: LocalEvalSetResultsManager;
 
   constructor(options: ServerOptions) {
     this.host = options.host ?? 'localhost';
@@ -124,6 +166,9 @@ export class AdkApiServer {
       });
     this.logger.setLogLevel(options.logLevel ?? LogLevel.INFO);
     this.a2a = options.a2a ?? false;
+    this.evalResultsManager = new LocalEvalSetResultsManager(
+      options.agentsDir ?? process.cwd(),
+    );
     this.app = express();
   }
 
@@ -701,20 +746,47 @@ export class AdkApiServer {
     );
 
     // ----------------------- Eval Results related endpoints ------------------
-    // TODO: Implement eval results related endpoints.
     app.get(
       '/apps/:appName/eval_results/:evalResultId',
-      (req: Request, res: Response) => {
-        return res.status(501).json({error: 'Not implemented'});
+      async (req: Request, res: Response) => {
+        try {
+          const {appName, evalResultId} = req.params;
+          return res.json(
+            await this.evalResultsManager.getEvalSetResult(
+              appName,
+              evalResultId,
+            ),
+          );
+        } catch (error) {
+          if (error instanceof NotFoundError) {
+            return res.status(404).json({error: error.message});
+          }
+          this.logger.error(`Failed to get eval result: ${error}`);
+          return res
+            .status(500)
+            .json({error: `Failed to get eval result: ${error}`});
+        }
       },
     );
 
-    app.get('/apps/:appName/eval_results', (req: Request, res: Response) => {
-      return res.status(501).json({error: 'Not implemented'});
-    });
+    app.get(
+      '/apps/:appName/eval_results',
+      async (req: Request, res: Response) => {
+        try {
+          const {appName} = req.params;
+          const evalResultIds =
+            await this.evalResultsManager.listEvalSetResults(appName);
+          return res.json({evalResultIds});
+        } catch (error) {
+          const errorMessage = `Failed to list eval results: ${error}`;
+          this.logger.error(errorMessage);
+          return res.status(500).json({error: errorMessage});
+        }
+      },
+    );
 
     app.get('/apps/:appName/eval_metrics', (req: Request, res: Response) => {
-      return res.status(501).json({error: 'Not implemented'});
+      return res.json({metricsInfo: DEFAULT_METRICS});
     });
 
     // -------------------------- Run related endpoints ------------------------

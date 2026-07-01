@@ -25,8 +25,13 @@ import {ReadableSpan} from '@opentelemetry/sdk-trace-base';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {z} from 'zod';
 
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
+
 import {AdkApiServer} from '../../src/server/adk_api_server.js';
+import {EvalSetResult, MetricInfo} from '../../src/server/evaluation_types.js';
 import {AgentLoader} from '../../src/utils/agent_loader.js';
+import {getTempDir, removeFolder} from '../../src/utils/file_utils.js';
 
 /**
  * Http client for testing the AdkWebServer. It makes real http requests to the
@@ -768,6 +773,91 @@ describe('AdkWebServer', () => {
       } finally {
         agentLoader.listAgents = originalListAgents;
       }
+    });
+  });
+
+  describe('Eval Results', () => {
+    let evalServer: AdkApiServer;
+    let evalClient: HttpClient;
+    let tmpDir: string;
+
+    beforeEach(async () => {
+      tmpDir = getTempDir('integration_eval_test');
+      await fs.mkdir(tmpDir, {recursive: true});
+      evalServer = new AdkApiServer({
+        agentsDir: tmpDir,
+        sessionService,
+        memoryService,
+        artifactService,
+        agentLoader,
+      });
+      await evalServer.start();
+      evalClient = new HttpClient(evalServer.url);
+    });
+
+    afterEach(async () => {
+      await evalServer.stop();
+      await removeFolder(tmpDir);
+    });
+
+    it('should list eval results', async () => {
+      const appName = 'testApp';
+      const historyDir = path.join(tmpDir, appName, '.adk', 'eval_history');
+      await fs.mkdir(historyDir, {recursive: true});
+      await fs.writeFile(
+        path.join(historyDir, 'res1.evalset_result.json'),
+        '{}',
+      );
+
+      const response = await evalClient.get<{evalResultIds: string[]}>(
+        `/apps/${appName}/eval_results`,
+      );
+      expect(response.status).toBe(200);
+      expect(response.data?.evalResultIds).toEqual(['res1']);
+    });
+
+    it('should get eval result details', async () => {
+      const appName = 'testApp';
+      const historyDir = path.join(tmpDir, appName, '.adk', 'eval_history');
+      await fs.mkdir(historyDir, {recursive: true});
+      const mockResult = {
+        evalSetResultId: 'res1',
+        evalSetId: 'set1',
+        evalCaseResults: [],
+        creationTimestamp: 123,
+      };
+      await fs.writeFile(
+        path.join(historyDir, 'res1.evalset_result.json'),
+        JSON.stringify(mockResult),
+      );
+
+      const response = await evalClient.get<EvalSetResult>(
+        `/apps/${appName}/eval_results/res1`,
+      );
+      expect(response.status).toBe(200);
+      expect(response.data).toEqual(mockResult);
+    });
+
+    it('should return 404 if eval result not found', async () => {
+      try {
+        await evalClient.get('/apps/testApp/eval_results/non-existent');
+        expect(true).toBe(false);
+      } catch (e: unknown) {
+        const err = e as {response: {status: number}; message: string};
+        expect(err.response.status).toBe(404);
+        expect(err.message).toContain('Eval result not found');
+      }
+    });
+
+    it('should return default metrics', async () => {
+      const response = await evalClient.get<{metricsInfo: MetricInfo[]}>(
+        '/apps/testApp/eval_metrics',
+      );
+      expect(response.status).toBe(200);
+      expect(response.data?.metricsInfo.length).toBeGreaterThan(0);
+      expect(response.data?.metricsInfo[0].metricName).toBe(
+        'tool_trajectory_avg_score',
+      );
     });
   });
 
