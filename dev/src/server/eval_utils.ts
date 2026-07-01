@@ -60,16 +60,13 @@ export function convertSessionToEvalInvocations(
           finalEvent = event;
         }
 
-        for (const part of event.content.parts) {
-          if (
-            part.functionCall ||
-            part.functionResponse ||
-            part.text ||
-            part.inlineData
-          ) {
-            eventsToAdd.push(event);
-            break;
-          }
+        if (
+          event.content.parts.some(
+            (p) =>
+              p.functionCall || p.functionResponse || p.text || p.inlineData,
+          )
+        ) {
+          eventsToAdd.push(event);
         }
       }
     }

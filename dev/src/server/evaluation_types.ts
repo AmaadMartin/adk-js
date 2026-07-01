@@ -17,12 +17,8 @@ export interface SessionInput {
 export interface EvalCase {
   evalId: string;
   conversation?: Invocation[];
-  // If we support UserSimulator later, we can add conversationScenario.
-  // For now, conversation is required.
   sessionInput?: SessionInput;
   creationTimestamp: number;
-  // rubrics?: any[];
-  // finalSessionState?: Record<string, any>;
 }
 
 export interface EvalSet {

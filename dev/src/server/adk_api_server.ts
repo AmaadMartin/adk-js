@@ -712,21 +712,13 @@ export class AdkApiServer {
             appName: string;
             evalSetId: string;
           };
-          const {userId, user_id, sessionId, session_id, evalId, eval_id} =
-            req.body as {
-              userId?: string;
-              user_id?: string;
-              sessionId?: string;
-              session_id?: string;
-              evalId?: string;
-              eval_id?: string;
-            };
+          const {userId, sessionId, evalId} = req.body as {
+            userId: string;
+            sessionId: string;
+            evalId: string;
+          };
 
-          const resolvedUserId = userId || user_id;
-          const resolvedSessionId = sessionId || session_id;
-          const resolvedEvalId = evalId || eval_id;
-
-          if (!resolvedUserId || !resolvedSessionId || !resolvedEvalId) {
+          if (!userId || !sessionId || !evalId) {
             res.status(400).json({
               error: 'Missing required fields: userId, sessionId, evalId',
             });
@@ -735,27 +727,26 @@ export class AdkApiServer {
 
           const session = await this.sessionService.getSession({
             appName,
-            userId: resolvedUserId,
-            sessionId: resolvedSessionId,
+            userId,
+            sessionId,
           });
 
           if (!session) {
             res.status(404).json({
-              error: `Session not found: ${resolvedSessionId}`,
+              error: `Session not found: ${sessionId}`,
             });
             return;
           }
 
           const invocations = convertSessionToEvalInvocations(session);
-          const initialSessionState = {};
 
           const newEvalCase = {
-            evalId: resolvedEvalId,
+            evalId,
             conversation: invocations,
             sessionInput: {
               appName,
-              userId: resolvedUserId,
-              state: initialSessionState,
+              userId,
+              state: {},
             },
             creationTimestamp: Date.now() / 1000,
           };
@@ -951,15 +942,14 @@ export class AdkApiServer {
             if (evalCase.conversation && evalCase.conversation.length > 0) {
               const abortController = new AbortController();
               for (const expectedInv of evalCase.conversation) {
-                const events: Event[] = [];
                 try {
-                  for await (const event of runner.runAsync({
+                  for await (const _ of runner.runAsync({
                     userId,
                     sessionId,
                     newMessage: expectedInv.userContent,
                     abortSignal: abortController.signal,
                   })) {
-                    events.push(event);
+                    // consume the generator
                   }
                 } catch (runError: unknown) {
                   this.logger.error(

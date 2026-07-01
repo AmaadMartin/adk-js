@@ -160,17 +160,14 @@ function convertOldFormat(
       };
     });
 
-    let sessionInput = undefined;
-    if (
-      oldCase.initial_session &&
-      Object.keys(oldCase.initial_session).length > 0
-    ) {
-      sessionInput = {
-        appName: oldCase.initial_session.app_name || '',
-        userId: oldCase.initial_session.user_id || '',
-        state: oldCase.initial_session.state || {},
-      };
-    }
+    const sessionInput =
+      oldCase.initial_session && Object.keys(oldCase.initial_session).length > 0
+        ? {
+            appName: oldCase.initial_session.app_name || '',
+            userId: oldCase.initial_session.user_id || '',
+            state: oldCase.initial_session.state || {},
+          }
+        : undefined;
 
     return {
       evalId: oldCase.name,

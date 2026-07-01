@@ -12,10 +12,6 @@ import {NotFoundError, validatePathSegment} from './local_eval_sets_manager.js';
 const ADK_EVAL_HISTORY_DIR = '.adk/eval_history';
 const EVAL_SET_RESULT_FILE_EXTENSION = '.evalset_result.json';
 
-function sanitizeEvalSetResultName(name: string): string {
-  return name.replace(/\//g, '_');
-}
-
 function createEvalSetResult(
   appName: string,
   evalSetId: string,
@@ -23,10 +19,9 @@ function createEvalSetResult(
 ): EvalSetResult {
   const timestamp = Date.now() / 1000;
   const evalSetResultId = `${appName}_${evalSetId}_${timestamp}`;
-  const evalSetResultName = sanitizeEvalSetResultName(evalSetResultId);
   return {
     evalSetResultId,
-    evalSetResultName,
+    evalSetResultName: evalSetResultId,
     evalSetId,
     evalCaseResults,
     creationTimestamp: timestamp,
