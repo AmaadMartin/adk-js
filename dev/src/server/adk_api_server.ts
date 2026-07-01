@@ -27,6 +27,7 @@ import {trace, TracerProvider} from '@opentelemetry/api';
 import {SimpleSpanProcessor} from '@opentelemetry/sdk-trace-base';
 import cors from 'cors';
 import express, {Request, Response} from 'express';
+import {randomUUID} from 'node:crypto';
 import * as http from 'node:http';
 import * as path from 'node:path';
 
@@ -40,7 +41,7 @@ import {
 } from '../utils/telemetry_utils.js';
 import {getAgentGraphAsDot} from './agent_graph.js';
 import {convertSessionToEvalInvocations} from './eval_utils.js';
-import {EvalCase} from './evaluation_types.js';
+import {EvalCase, EvalCaseResult} from './evaluation_types.js';
 import {LocalEvalSetResultsManager} from './local_eval_set_results_manager.js';
 import {
   LocalEvalSetsManager,
@@ -909,10 +910,114 @@ export class AdkApiServer {
 
     app.post(
       '/apps/:appName/eval_sets/:evalSetId/run_eval',
-      (req: Request, res: Response) => {
-        return res.status(501).json({
-          error: 'Evaluation runner is not implemented in JS/TS ADK yet.',
-        });
+      async (req: Request, res: Response) => {
+        try {
+          const {appName, evalSetId} = req.params as {
+            appName: string;
+            evalSetId: string;
+          };
+
+          const evalSet = await this.localEvalSetsManager.getEvalSet(
+            appName,
+            evalSetId,
+          );
+
+          if (!evalSet) {
+            res.status(404).json({
+              error: `Eval set "${evalSetId}" not found for app "${appName}".`,
+            });
+            return;
+          }
+
+          await using agentFile = await this.agentLoader.getAgentFile(appName);
+          const agent = await agentFile.load();
+          const runner = await this.getRunner(agent, appName);
+
+          const caseResults: EvalCaseResult[] = [];
+
+          for (const evalCase of evalSet.evalCases) {
+            const sessionId = `___eval___session___${randomUUID()}`;
+            const userId = evalCase.sessionInput?.userId || 'eval_user';
+
+            await this.sessionService.createSession({
+              appName,
+              userId,
+              sessionId,
+              state: evalCase.sessionInput?.state || {},
+            });
+
+            const actualInvocations = [];
+
+            if (evalCase.conversation && evalCase.conversation.length > 0) {
+              const abortController = new AbortController();
+              for (const expectedInv of evalCase.conversation) {
+                const events: Event[] = [];
+                try {
+                  for await (const event of runner.runAsync({
+                    userId,
+                    sessionId,
+                    newMessage: expectedInv.userContent,
+                    abortSignal: abortController.signal,
+                  })) {
+                    events.push(event);
+                  }
+                } catch (runError: unknown) {
+                  this.logger.error(
+                    `Failed to run agent for eval case "${evalCase.evalId}", invocation "${expectedInv.invocationId}": ${runError}`,
+                  );
+                }
+              }
+
+              const finalSession = await this.sessionService.getSession({
+                appName,
+                userId,
+                sessionId,
+              });
+
+              if (finalSession) {
+                actualInvocations.push(
+                  ...convertSessionToEvalInvocations(finalSession),
+                );
+              }
+            }
+
+            const caseResult: EvalCaseResult = {
+              evalSetFile: evalSetId + '.evalset.json',
+              evalSetId: evalSetId,
+              evalId: evalCase.evalId,
+              finalEvalStatus: 'NOT_EVALUATED',
+              overallEvalMetricResults: [],
+              evalMetricResultPerInvocation: actualInvocations.map(
+                (actual, idx) => ({
+                  actualInvocation: actual,
+                  expectedInvocation: evalCase.conversation
+                    ? evalCase.conversation[idx]
+                    : undefined,
+                  evalMetricResults: [],
+                }),
+              ),
+              sessionId,
+              userId,
+            };
+
+            caseResults.push(caseResult);
+          }
+
+          const result =
+            await this.localEvalSetResultsManager.saveEvalSetResult(
+              appName,
+              evalSetId,
+              caseResults,
+            );
+
+          res.json(result);
+        } catch (e: unknown) {
+          res.status(500).json({
+            error: `Failed to run evaluation: ${
+              e instanceof Error ? e.message : String(e)
+            }`,
+          });
+        }
       },
     );
 

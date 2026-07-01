@@ -102,6 +102,10 @@ class TestAgent extends LlmAgent {
   async *runAsyncImpl(
     context: InvocationContext,
   ): AsyncGenerator<Event, void, void> {
+    if (context.userContent?.parts?.[0]?.text === 'throw') {
+      throw new Error('Agent execution failed');
+    }
+
     yield createEvent({
       invocationId: context.invocationId,
       author: this.name,
@@ -194,15 +198,19 @@ describe('AdkWebServer', () => {
     );
     agentLoader = {
       listAgents: () => Promise.resolve(['testApp']),
-      getAgentFile: () =>
-        Promise.resolve({
+      getAgentFile: (appName: string) => {
+        if (appName === 'brokenApp') {
+          return Promise.reject(new Error('Failed to load agent'));
+        }
+        return Promise.resolve({
           load() {
             return Promise.resolve(TEST_AGENT);
           },
           async [Symbol.asyncDispose](): Promise<void> {
             return;
           },
-        }),
+        });
+      },
     } as unknown as AgentLoader;
     sessionService = new InMemorySessionService();
     memoryService = new InMemoryMemoryService();
@@ -1281,13 +1289,118 @@ describe('AdkWebServer', () => {
       expect(getRes.data!.evalCaseResults.length).toBe(1);
     });
 
-    it('should return 501 for run_eval', async () => {
+    it('should run evaluation', async () => {
+      // Create eval set
+      await client.post(`/apps/${appName}/eval_sets/${evalSetId}`);
+
+      // Add a case with a conversation
+      const session = await sessionService.createSession({
+        appName,
+        userId: 'u1',
+        sessionId: 's1',
+      });
+      await sessionService.appendEvent({
+        session,
+        event: createEvent({
+          invocationId: 'inv1',
+          author: 'user',
+          content: {role: 'user', parts: [{text: 'hello'}]},
+        }),
+      });
+      await sessionService.appendEvent({
+        session,
+        event: createEvent({
+          invocationId: 'inv1',
+          author: 'agent',
+          content: {role: 'model', parts: [{text: 'hi'}]},
+        }),
+      });
+
+      await client.post(`/apps/${appName}/eval_sets/${evalSetId}/add_session`, {
+        userId: 'u1',
+        sessionId: 's1',
+        evalId: 'case_1',
+      });
+
+      // Run eval
+      const runRes = await client.post<EvalSetResult>(
+        `/apps/${appName}/eval_sets/${evalSetId}/run_eval`,
+      );
+      expect(runRes.status).toBe(200);
+      expect(runRes.data!.evalSetId).toBe(evalSetId);
+      expect(runRes.data!.evalCaseResults.length).toBe(1);
+
+      const caseResult = runRes.data!.evalCaseResults[0];
+      expect(caseResult.evalId).toBe('case_1');
+      expect(caseResult.finalEvalStatus).toBe('NOT_EVALUATED');
+      expect(caseResult.evalMetricResultPerInvocation.length).toBe(1);
+
+      const invResult = caseResult.evalMetricResultPerInvocation[0];
+      expect(invResult.expectedInvocation).toBeDefined();
+      expect(invResult.expectedInvocation!.userContent.parts[0].text).toBe(
+        'hello',
+      );
+      expect(invResult.actualInvocation).toBeDefined();
+      expect(invResult.actualInvocation.userContent.parts[0].text).toBe(
+        'hello',
+      );
+      expect(invResult.actualInvocation.finalResponse).toBeDefined();
+    });
+
+    it('should return 404 if eval set not found for run_eval', async () => {
       try {
-        await client.post(`/apps/${appName}/eval_sets/${evalSetId}/run_eval`);
-        expect.fail('Should have failed with 501');
+        await client.post(`/apps/${appName}/eval_sets/non_existent/run_eval`);
+        expect.fail('Should have failed with 404');
       } catch (e: unknown) {
-        expect((e as {response: {status: number}}).response.status).toBe(501);
+        expect((e as {response: {status: number}}).response.status).toBe(404);
       }
+    });
+
+    it('should return 500 if agent fails to load in run_eval', async () => {
+      await client.post(`/apps/brokenApp/eval_sets/set1`);
+      try {
+        await client.post(`/apps/brokenApp/eval_sets/set1/run_eval`);
+        expect.fail('Should have failed with 500');
+      } catch (e: unknown) {
+        expect((e as {response: {status: number}}).response.status).toBe(500);
+      }
+    });
+
+    it('should handle agent execution failure in run_eval', async () => {
+      await client.post(`/apps/${appName}/eval_sets/error_set`);
+
+      const session = await sessionService.createSession({
+        appName,
+        userId: 'u1',
+        sessionId: 's1',
+      });
+      await sessionService.appendEvent({
+        session,
+        event: createEvent({
+          invocationId: 'inv1',
+          author: 'user',
+          content: {role: 'user', parts: [{text: 'throw'}]},
+        }),
+      });
+
+      await client.post(`/apps/${appName}/eval_sets/error_set/add_session`, {
+        userId: 'u1',
+        sessionId: 's1',
+        evalId: 'case_error',
+      });
+
+      const runRes = await client.post<EvalSetResult>(
+        `/apps/${appName}/eval_sets/error_set/run_eval`,
+      );
+      expect(runRes.status).toBe(200);
+      expect(runRes.data!.evalCaseResults.length).toBe(1);
+
+      const caseResult = runRes.data!.evalCaseResults[0];
+      expect(caseResult.evalId).toBe('case_error');
+      expect(caseResult.finalEvalStatus).toBe('NOT_EVALUATED');
+      expect(caseResult.evalMetricResultPerInvocation.length).toBe(1);
+      const invResult = caseResult.evalMetricResultPerInvocation[0];
+      expect(invResult.actualInvocation.finalResponse).toBeUndefined();
     });
 
     it('should return empty list for eval_metrics', async () => {

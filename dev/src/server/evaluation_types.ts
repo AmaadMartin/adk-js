@@ -33,13 +33,19 @@ export interface EvalSet {
   description?: string;
 }
 
+export interface EvalMetricResultPerInvocation {
+  actualInvocation: Invocation;
+  expectedInvocation?: Invocation;
+  evalMetricResults: unknown[];
+}
+
 export interface EvalCaseResult {
   evalSetFile: string;
   evalSetId: string;
   evalId: string;
   finalEvalStatus: 'PASSED' | 'FAILED' | 'NOT_EVALUATED';
   overallEvalMetricResults: unknown[];
-  evalMetricResultPerInvocation: unknown[];
+  evalMetricResultPerInvocation: EvalMetricResultPerInvocation[];
   sessionId: string;
   sessionDetails?: Record<string, unknown>;
   userId: string;
