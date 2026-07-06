@@ -17,6 +17,7 @@ import {
   ContextCompactorRequestProcessor,
   createEvent,
   Event,
+  EventActions,
   InvocationContext,
   LlmAgent,
   LlmRequest,
@@ -197,9 +198,12 @@ class TestLlmAgent extends LlmAgent {
   async *testCallLlmAsync(
     invocationContext: InvocationContext,
     llmRequest: LlmRequest,
-    modelResponseEvent: Event,
+    options: {
+      eventId: string;
+      eventActions: EventActions;
+    },
   ): AsyncGenerator<LlmResponse, void, void> {
-    yield* this.callLlmAsync(invocationContext, llmRequest, modelResponseEvent);
+    yield* this.callLlmAsync(invocationContext, llmRequest, options);
   }
 
   /** Publicly expose runAndHandleError for testing. */
@@ -207,13 +211,15 @@ class TestLlmAgent extends LlmAgent {
     responseGenerator: AsyncGenerator<T, void, void>,
     invocationContext: InvocationContext,
     llmRequest: LlmRequest,
-    modelResponseEvent: Event,
+    options?: {
+      eventActions?: EventActions;
+    },
   ): AsyncGenerator<T, void, void> {
     yield* this.runAndHandleError(
       responseGenerator,
       invocationContext,
       llmRequest,
-      modelResponseEvent,
+      options,
     );
   }
 }
@@ -269,17 +275,19 @@ describe('LlmAgent.callLlm', () => {
 
   async function callLlmUnderTest(): Promise<LlmResponse[]> {
     const responses: LlmResponse[] = [];
+    const eventId = modelResponseEvent.id;
+    const eventActions = modelResponseEvent.actions;
     const responseGenerator = agent.testCallLlmAsync(
       invocationContext,
       llmRequest,
-      modelResponseEvent,
+      {eventId, eventActions},
     );
 
     for await (const response of agent.testRunAndHandleError(
       responseGenerator,
       invocationContext,
       llmRequest,
-      modelResponseEvent,
+      {eventActions},
     )) {
       responses.push(response);
     }
