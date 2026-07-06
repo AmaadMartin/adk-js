@@ -46,7 +46,7 @@ describe('ToolAuthHandler', () => {
       }),
     } as unknown as Context;
 
-    const handler = new ToolAuthHandler(mockContext, {type: 'apiKey'});
+    const handler = new ToolAuthHandler(mockContext, {type: 'apiKey'} as any);
 
     const result = await handler.prepareAuthCredentials();
 
@@ -63,7 +63,7 @@ describe('ToolAuthHandler', () => {
       requestCredential: vi.fn(),
     } as unknown as Context;
 
-    const handler = new ToolAuthHandler(mockContext, {type: 'apiKey'});
+    const handler = new ToolAuthHandler(mockContext, {type: 'apiKey'} as any);
 
     const result = await handler.prepareAuthCredentials();
 
@@ -81,7 +81,7 @@ describe('ToolAuthHandler', () => {
       }),
     } as unknown as Context;
 
-    const handler = new ToolAuthHandler(mockContext, {type: 'apiKey'});
+    const handler = new ToolAuthHandler(mockContext, {type: 'apiKey'} as any);
 
     const result = await handler.prepareAuthCredentials();
 
@@ -99,7 +99,7 @@ describe('ToolAuthHandler', () => {
       }),
     } as unknown as Context;
 
-    const handler = new ToolAuthHandler(mockContext, {type: 'apiKey'});
+    const handler = new ToolAuthHandler(mockContext, {type: 'apiKey'} as any);
 
     const result = await handler.prepareAuthCredentials();
 
@@ -126,7 +126,7 @@ describe('ToolAuthHandler', () => {
     } as unknown as Context;
     await new ToolAuthHandler(firstContext, {
       type: 'apiKey',
-    }).prepareAuthCredentials();
+    } as any).prepareAuthCredentials();
 
     // Each tool call gets a fresh Context whose State is rebuilt from the
     // values persisted to the session. Only what was recorded in the state
@@ -138,7 +138,7 @@ describe('ToolAuthHandler', () => {
     } as unknown as Context;
     const result = await new ToolAuthHandler(secondContext, {
       type: 'apiKey',
-    }).prepareAuthCredentials();
+    } as any).prepareAuthCredentials();
 
     expect(result.state).toBe('done');
     expect(result.authCredential?.http?.credentials.token).toBe(

@@ -14,6 +14,17 @@ class DummyAgent extends BaseAgent {
   constructor(name = 'dummy_agent') {
     super({name});
   }
+  protected override async *runAsyncImpl(
+    _context: any,
+  ): AsyncGenerator<any, void, void> {
+    yield {} as any;
+  }
+  protected override async *runLiveImpl(
+    _context: any,
+  ): AsyncGenerator<any, any, any> {
+    yield {} as any;
+    return {} as any;
+  }
 }
 
 class DummyPlugin extends BasePlugin {
@@ -78,11 +89,11 @@ describe('App', () => {
   });
 
   it('throws if rootAgent is missing or not a BaseAgent', () => {
-    expect(() => new App({name: 'test_app', rootAgent: undefined})).toThrow(
-      'rootAgent must be provided.',
-    );
     expect(
-      () => new App({name: 'test_app', rootAgent: {name: 'fake'}}),
+      () => new App({name: 'test_app', rootAgent: undefined as any}),
+    ).toThrow('rootAgent must be provided.');
+    expect(
+      () => new App({name: 'test_app', rootAgent: {name: 'fake'} as any}),
     ).toThrow(/rootAgent must be a BaseAgent instance/);
   });
 

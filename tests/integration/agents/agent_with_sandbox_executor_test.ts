@@ -5,10 +5,13 @@
  */
 
 import {Client} from '@google-cloud/vertexai';
-import {AgentEngineSandboxCodeExecutor, LlmAgent} from '@google/adk';
-import {responseProcessor} from '@google/adk/agents/processors/code_execution_request_processor.js';
 import {FinishReason} from '@google/genai';
 import {describe, expect, it, vi} from 'vitest';
+import {responseProcessor as codeExecutionResponseProcessor} from '../../../core/src/agents/processors/code_execution_request_processor.js';
+import {
+  AgentEngineSandboxCodeExecutor,
+  LlmAgent,
+} from '../../../core/src/index.js';
 import {
   createRunner,
   GeminiWithMockResponses,
@@ -87,17 +90,16 @@ describe('Agent with AgentEngineSandboxCodeExecutor', () => {
 
     const model = new GeminiWithMockResponses(mockResponses);
     const agent = new LlmAgent({
-      model,
+      model: model as any,
       name: 'coderAgent',
       description: 'An agent that writes and runs code',
       instruction: 'Write code to solve the user request.',
       codeExecutor: executor,
-      responseProcessors: [responseProcessor],
+      responseProcessors: [codeExecutionResponseProcessor],
     });
 
-    const {run} = await createRunner(agent);
+    const {run} = await createRunner(agent as any);
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const events: any[] = [];
     for await (const event of run('Print hello')) {
       events.push(event);

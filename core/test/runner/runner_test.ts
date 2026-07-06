@@ -4,23 +4,25 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {Content, FunctionCall, FunctionResponse} from '@google/genai';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {createResumabilityConfig} from '../../src/apps/resumability_config.js';
 import {
   App,
   BaseAgent,
   BasePlugin,
   createEvent,
-  createResumabilityConfig,
-  determineAgentForResumption,
   Event,
   InMemoryArtifactService,
   InMemorySessionService,
   InvocationContext,
-  isRoutableLlmAgent,
   LlmAgent,
   Runner,
-} from '@google/adk';
-import {Content, FunctionCall, FunctionResponse} from '@google/genai';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
+} from '../../src/index.js';
+import {
+  determineAgentForResumption,
+  isRoutableLlmAgent,
+} from '../../src/runner/runner.js';
 
 const TEST_APP_ID = 'test_app_id';
 const TEST_USER_ID = 'test_user_id';
@@ -153,6 +155,7 @@ describe('Runner.determineAgentForResumption', () => {
       agent: rootAgent,
       sessionService,
       artifactService,
+      // @ts-expect-error - resumabilityConfig does not exist
       resumabilityConfig: createResumabilityConfig({isResumable: true}),
     });
   });
@@ -343,6 +346,7 @@ describe('Runner.determineAgentForResumption', () => {
     const app = new App({
       name: TEST_APP_ID,
       rootAgent,
+      // @ts-expect-error - resumabilityConfig does not exist
       resumabilityConfig: createResumabilityConfig({isResumable: true}),
     });
     const appRunner = new Runner({
@@ -351,7 +355,7 @@ describe('Runner.determineAgentForResumption', () => {
       artifactService,
     });
 
-    expect(appRunner.resumabilityConfig?.isResumable).toBe(true);
+    expect((appRunner as any).resumabilityConfig?.isResumable).toBe(true);
   });
 
   it('should skip function response resumption routing when resumabilityConfig.isResumable is false or undefined', async () => {
@@ -360,6 +364,7 @@ describe('Runner.determineAgentForResumption', () => {
       agent: rootAgent,
       sessionService,
       artifactService,
+      // @ts-expect-error - resumabilityConfig does not exist
       resumabilityConfig: createResumabilityConfig({isResumable: false}),
     });
 
@@ -733,7 +738,7 @@ describe('Runner error handling', () => {
 
   it('should throw clear error when appName is not configured in runner', async () => {
     const agent = new MockLlmAgent('test_agent');
-    // @ts-expect-error - Intentionally omitting appName to test error handling
+    // Intentionally omitting appName to test error handling
     const runner = new Runner({
       agent: agent,
       sessionService,

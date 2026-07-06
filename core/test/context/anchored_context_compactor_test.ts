@@ -26,7 +26,7 @@ class MockSummarizer implements BaseSummarizer {
       actions: {
         stateDelta: {},
         artifactDelta: {},
-        requestedAuthConfigs: [],
+        requestedAuthConfigs: {} as any,
         requestedToolConfirmations: {},
       },
       timestamp: Date.now(),
@@ -38,7 +38,7 @@ class MockSummarizer implements BaseSummarizer {
         role: 'model',
         parts: [{text: `Mock summary of ${events.length} events`}],
       },
-    } as CompactedEvent;
+    } as unknown as CompactedEvent;
   }
 }
 
@@ -79,7 +79,7 @@ function createMockScratchpadEvent(
   contentStr?: string,
 ): CompactedEvent {
   const event = createMockEvent(id, tokenCount) as CompactedEvent;
-  event.isCompacted = true;
+  (event as any).isCompacted = true;
   event.isScratchpad = true;
   event.author = 'system';
   event.startTime = Date.now() - 10000;

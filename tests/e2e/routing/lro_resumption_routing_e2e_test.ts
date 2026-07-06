@@ -7,7 +7,6 @@
 import {
   BaseAgent,
   createEvent,
-  createResumabilityConfig,
   Event,
   InMemoryRunner,
   InMemorySessionService,
@@ -15,6 +14,7 @@ import {
 } from '@google/adk';
 import {FunctionCall, FunctionResponse} from '@google/genai';
 import {describe, expect, it} from 'vitest';
+import {createResumabilityConfig} from '../../../core/src/apps/resumability_config.js';
 
 /**
  * Sub-agent simulating a long-running operation initiation and resumption handling.
@@ -26,6 +26,10 @@ class DataProcessingAgent extends BaseAgent {
       description:
         'Agent responsible for long-running batch data processing tasks.',
     });
+  }
+
+  protected override async *runLiveImpl(): AsyncGenerator<Event, void, void> {
+    yield {} as any;
   }
 
   override async *runAsyncImpl(
@@ -88,6 +92,10 @@ class RootOrchestratorAgent extends BaseAgent {
     });
   }
 
+  protected override async *runLiveImpl(): AsyncGenerator<Event, void, void> {
+    yield {} as any;
+  }
+
   override async *runAsyncImpl(
     ctx: InvocationContext,
   ): AsyncGenerator<Event, void, void> {
@@ -125,6 +133,7 @@ describe('E2E LRO Session Resumption Routing', () => {
     const initialRunner = new InMemoryRunner({
       agent: rootAgent,
       appName,
+      // @ts-expect-error - resumabilityConfig does not exist
       resumabilityConfig: createResumabilityConfig({isResumable: true}),
     });
     // Override sessionService on runner to share the persistent session store across turns
@@ -161,6 +170,7 @@ describe('E2E LRO Session Resumption Routing', () => {
     const resumedRunner = new InMemoryRunner({
       agent: rootAgent,
       appName,
+      // @ts-expect-error - resumabilityConfig does not exist
       resumabilityConfig: createResumabilityConfig({isResumable: true}),
     });
     (
