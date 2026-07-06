@@ -21,6 +21,7 @@ import {
   getFunctionResponses,
   isFinalResponse,
 } from '../events/event.js';
+import {createEventActions, EventActions} from '../events/event_actions.js';
 
 import {BaseExampleProvider} from '../examples/base_example_provider.js';
 import {Example} from '../examples/example.js';
@@ -840,12 +841,8 @@ export class LlmAgent extends BaseAgent {
     // =========================================================================
     // Calls the LLM
     // =========================================================================
-    // TODO - b/425992518: misleading, this is passing metadata.
-    const modelResponseEvent = createEvent({
-      invocationId: invocationContext.invocationId,
-      author: this.name,
-      branch: invocationContext.branch,
-    });
+    let eventId = createNewEventId();
+    const eventActions = createEventActions();
     const span = tracer.startSpan('call_llm');
     const ctx = trace.setSpan(context.active(), span);
     yield* runAsyncGeneratorWithOtelContext<LlmAgent, Event>(
@@ -856,7 +853,7 @@ export class LlmAgent extends BaseAgent {
           for await (const llmResponse of this.callLlmAsync(
             invocationContext,
             llmRequest,
-            modelResponseEvent,
+            {eventId, eventActions},
           )) {
             if (invocationContext.abortSignal?.aborted) {
               return;
@@ -869,15 +866,14 @@ export class LlmAgent extends BaseAgent {
               invocationContext,
               llmRequest,
               llmResponse,
-              modelResponseEvent,
+              {eventId, eventActions},
             )) {
               if (invocationContext.abortSignal?.aborted) {
                 return;
               }
 
-              // Update the mutable event id to avoid conflict
-              modelResponseEvent.id = createNewEventId();
-              modelResponseEvent.timestamp = new Date().getTime();
+              // Update the event id to avoid conflict for subsequent yields if any
+              eventId = createNewEventId();
               yield event;
             }
           }
@@ -887,7 +883,7 @@ export class LlmAgent extends BaseAgent {
           responsesGenerator.call(this),
           invocationContext,
           llmRequest,
-          modelResponseEvent,
+          {eventActions},
         );
       },
     );
@@ -898,7 +894,10 @@ export class LlmAgent extends BaseAgent {
     invocationContext: InvocationContext,
     llmRequest: LlmRequest,
     llmResponse: LlmResponse,
-    modelResponseEvent: Event,
+    options: {
+      eventId: string;
+      eventActions: EventActions;
+    },
   ): AsyncGenerator<Event, void, void> {
     // =========================================================================
     // Runs response processors
@@ -930,7 +929,11 @@ export class LlmAgent extends BaseAgent {
 
     // Merge llm response with model response event.
     const mergedEvent = createEvent({
-      ...modelResponseEvent,
+      id: options.eventId,
+      invocationId: invocationContext.invocationId,
+      author: this.name,
+      branch: invocationContext.branch,
+      actions: options.eventActions,
       ...llmResponse,
     });
 
@@ -1047,13 +1050,16 @@ export class LlmAgent extends BaseAgent {
   protected async *callLlmAsync(
     invocationContext: InvocationContext,
     llmRequest: LlmRequest,
-    modelResponseEvent: Event,
+    options: {
+      eventId: string;
+      eventActions: EventActions;
+    },
   ): AsyncGenerator<LlmResponse, void, void> {
     // Runs before_model_callback if it exists.
     const beforeModelResponse = await this.handleBeforeModelCallback(
       invocationContext,
       llmRequest,
-      modelResponseEvent,
+      options.eventActions,
     );
 
     if (invocationContext.abortSignal?.aborted) {
@@ -1093,7 +1099,7 @@ export class LlmAgent extends BaseAgent {
       for await (const llmResponse of responsesGenerator) {
         traceCallLlm({
           invocationContext,
-          eventId: modelResponseEvent.id,
+          eventId: options.eventId,
           llmRequest,
           llmResponse,
         });
@@ -1106,7 +1112,7 @@ export class LlmAgent extends BaseAgent {
         const alteredLlmResponse = await this.handleAfterModelCallback(
           invocationContext,
           llmResponse,
-          modelResponseEvent,
+          options.eventActions,
         );
 
         if (invocationContext.abortSignal?.aborted) {
@@ -1121,13 +1127,13 @@ export class LlmAgent extends BaseAgent {
   private async handleBeforeModelCallback(
     invocationContext: InvocationContext,
     llmRequest: LlmRequest,
-    modelResponseEvent: Event,
+    eventActions: EventActions,
   ): Promise<LlmResponse | undefined> {
     // TODO - b/425992518: Clean up eventActions from Context here as
     // modelResponseEvent.actions is always empty.
     const callbackContext = new Context({
       invocationContext,
-      eventActions: modelResponseEvent.actions,
+      eventActions: eventActions,
     });
 
     // Plugin callbacks before canonical callbacks
@@ -1165,11 +1171,11 @@ export class LlmAgent extends BaseAgent {
   private async handleAfterModelCallback(
     invocationContext: InvocationContext,
     llmResponse: LlmResponse,
-    modelResponseEvent: Event,
+    eventActions: EventActions,
   ): Promise<LlmResponse | undefined> {
     const callbackContext = new Context({
       invocationContext,
-      eventActions: modelResponseEvent.actions,
+      eventActions: eventActions,
     });
 
     // Plugin callbacks before canonical callbacks
@@ -1204,7 +1210,9 @@ export class LlmAgent extends BaseAgent {
     responseGenerator: AsyncGenerator<T, void, void>,
     invocationContext: InvocationContext,
     llmRequest: LlmRequest,
-    modelResponseEvent: Event,
+    options?: {
+      eventActions?: EventActions;
+    },
   ): AsyncGenerator<T, void, void> {
     try {
       for await (const response of responseGenerator) {
@@ -1219,7 +1227,7 @@ export class LlmAgent extends BaseAgent {
       // Note: this will cause agent to work better if there's a loop.
       const callbackContext = new Context({
         invocationContext,
-        eventActions: modelResponseEvent.actions,
+        eventActions: options?.eventActions,
       });
 
       // Wrapped LLM should throw Error-typed errors
@@ -1251,7 +1259,7 @@ export class LlmAgent extends BaseAgent {
             // Ignore JSON parse error, use original message.
           }
 
-          if (modelResponseEvent.actions) {
+          if (options?.eventActions) {
             // We are yielding an Event
             yield createEvent({
               invocationId: invocationContext.invocationId,
