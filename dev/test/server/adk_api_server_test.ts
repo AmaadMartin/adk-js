@@ -22,10 +22,20 @@ import {
   Session,
 } from '@google/adk';
 import {ReadableSpan} from '@opentelemetry/sdk-trace-base';
+import * as fsPromises from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {z} from 'zod';
 
 import {AdkApiServer} from '../../src/server/adk_api_server.js';
+import {
+  EvalCase,
+  EvalSet,
+  EvalSetResult,
+} from '../../src/server/evaluation_types.js';
+import {LocalEvalSetResultsManager} from '../../src/server/local_eval_set_results_manager.js';
+
 import {AgentLoader} from '../../src/utils/agent_loader.js';
 
 /**
@@ -92,6 +102,10 @@ class TestAgent extends LlmAgent {
   async *runAsyncImpl(
     context: InvocationContext,
   ): AsyncGenerator<Event, void, void> {
+    if (context.userContent?.parts?.[0]?.text === 'throw') {
+      throw new Error('Agent execution failed');
+    }
+
     yield createEvent({
       invocationId: context.invocationId,
       author: this.name,
@@ -176,24 +190,33 @@ describe('AdkWebServer', () => {
   let artifactService: BaseArtifactService;
   let server: AdkApiServer;
   let client: HttpClient;
+  let tempAgentsDir: string;
 
   beforeEach(async () => {
+    tempAgentsDir = await fsPromises.mkdtemp(
+      path.join(os.tmpdir(), 'adk-api-server-test-'),
+    );
     agentLoader = {
       listAgents: () => Promise.resolve(['testApp']),
-      getAgentFile: () =>
-        Promise.resolve({
+      getAgentFile: (appName: string) => {
+        if (appName === 'brokenApp') {
+          return Promise.reject(new Error('Failed to load agent'));
+        }
+        return Promise.resolve({
           load() {
             return Promise.resolve(TEST_AGENT);
           },
           async [Symbol.asyncDispose](): Promise<void> {
             return;
           },
-        }),
+        });
+      },
     } as unknown as AgentLoader;
     sessionService = new InMemorySessionService();
     memoryService = new InMemoryMemoryService();
     artifactService = new InMemoryArtifactService();
     server = new AdkApiServer({
+      agentsDir: tempAgentsDir,
       agentLoader,
       sessionService,
       memoryService,
@@ -206,6 +229,7 @@ describe('AdkWebServer', () => {
 
   afterEach(async () => {
     await server.stop();
+    await fsPromises.rm(tempAgentsDir, {recursive: true, force: true});
   });
 
   describe('Sessions', () => {
@@ -1128,6 +1152,261 @@ describe('AdkWebServer', () => {
       } finally {
         await specificServer.stop();
       }
+    });
+  });
+
+  describe('Eval Sets and Results Endpoints', () => {
+    const appName = 'testApp';
+    const evalSetId = 'api_test_set';
+
+    it('should create and list eval sets', async () => {
+      const createRes = await client.post<EvalSet>(
+        `/apps/${appName}/eval_sets/${evalSetId}`,
+      );
+      expect(createRes.status).toBe(200);
+      expect(createRes.data!.evalSetId).toBe(evalSetId);
+
+      const listRes = await client.get<{evalSetIds: string[]}>(
+        `/apps/${appName}/eval_sets`,
+      );
+      expect(listRes.status).toBe(200);
+      expect(listRes.data!.evalSetIds).toContain(evalSetId);
+    });
+
+    it('should manage cases in eval set', async () => {
+      await client.post(`/apps/${appName}/eval_sets/${evalSetId}`);
+
+      const session = await sessionService.createSession({
+        appName,
+        userId: 'u1',
+        sessionId: 's1',
+      });
+      await sessionService.appendEvent({
+        session,
+        event: createEvent({
+          invocationId: 'inv1',
+          author: 'user',
+          content: {role: 'user', parts: [{text: 'test query'}]},
+        }),
+      });
+      await sessionService.appendEvent({
+        session,
+        event: createEvent({
+          invocationId: 'inv1',
+          author: 'agent',
+          content: {role: 'model', parts: [{text: 'test response'}]},
+        }),
+      });
+
+      const addCaseRes = await client.post(
+        `/apps/${appName}/eval_sets/${evalSetId}/add_session`,
+        {userId: 'u1', sessionId: 's1', evalId: 'case_1'},
+      );
+      expect(addCaseRes.status).toBe(204);
+
+      const listEvalsRes = await client.get<string[]>(
+        `/apps/${appName}/eval_sets/${evalSetId}/evals`,
+      );
+      expect(listEvalsRes.status).toBe(200);
+      expect(listEvalsRes.data).toContain('case_1');
+
+      const getCaseRes = await client.get<EvalCase>(
+        `/apps/${appName}/eval_sets/${evalSetId}/evals/case_1`,
+      );
+      expect(getCaseRes.status).toBe(200);
+      expect(getCaseRes.data!.evalId).toBe('case_1');
+      expect(getCaseRes.data!.conversation!.length).toBe(1);
+      expect(getCaseRes.data!.conversation![0].userContent.parts[0].text).toBe(
+        'test query',
+      );
+
+      const updatedCase: EvalCase = {
+        ...getCaseRes.data!,
+        conversation: [
+          {
+            ...getCaseRes.data!.conversation![0],
+            userContent: {role: 'user', parts: [{text: 'updated query'}]},
+          },
+        ],
+      };
+      const updateRes = await client.put(
+        `/apps/${appName}/eval_sets/${evalSetId}/evals/case_1`,
+        updatedCase,
+      );
+      expect(updateRes.status).toBe(204);
+
+      const getCaseRes2 = await client.get<EvalCase>(
+        `/apps/${appName}/eval_sets/${evalSetId}/evals/case_1`,
+      );
+      expect(getCaseRes2.data!.conversation![0].userContent.parts[0].text).toBe(
+        'updated query',
+      );
+
+      const deleteRes = await client.delete(
+        `/apps/${appName}/eval_sets/${evalSetId}/evals/case_1`,
+      );
+      expect(deleteRes.status).toBe(204);
+
+      const listEvalsRes2 = await client.get<string[]>(
+        `/apps/${appName}/eval_sets/${evalSetId}/evals`,
+      );
+      expect(listEvalsRes2.data).not.toContain('case_1');
+    });
+
+    it('should list and get eval results', async () => {
+      const resultsManager = new LocalEvalSetResultsManager(tempAgentsDir);
+      const caseResults = [
+        {
+          evalSetFile: 'test.json',
+          evalSetId: 'set1',
+          evalId: 'c1',
+          finalEvalStatus: 'PASSED' as const,
+          overallEvalMetricResults: [],
+          evalMetricResultPerInvocation: [],
+          sessionId: 's1',
+          userId: 'u1',
+        },
+      ];
+      const savedResult = await resultsManager.saveEvalSetResult(
+        appName,
+        'set1',
+        caseResults,
+      );
+
+      const listRes = await client.get<{evalResultIds: string[]}>(
+        `/apps/${appName}/eval_results`,
+      );
+      expect(listRes.status).toBe(200);
+      expect(listRes.data!.evalResultIds).toContain(
+        savedResult.evalSetResultName,
+      );
+
+      const getRes = await client.get<EvalSetResult>(
+        `/apps/${appName}/eval_results/${savedResult.evalSetResultName}`,
+      );
+      expect(getRes.status).toBe(200);
+      expect(getRes.data!.evalSetResultId).toBe(savedResult.evalSetResultId);
+      expect(getRes.data!.evalCaseResults.length).toBe(1);
+    });
+
+    it('should run evaluation', async () => {
+      // Create eval set
+      await client.post(`/apps/${appName}/eval_sets/${evalSetId}`);
+
+      // Add a case with a conversation
+      const session = await sessionService.createSession({
+        appName,
+        userId: 'u1',
+        sessionId: 's1',
+      });
+      await sessionService.appendEvent({
+        session,
+        event: createEvent({
+          invocationId: 'inv1',
+          author: 'user',
+          content: {role: 'user', parts: [{text: 'hello'}]},
+        }),
+      });
+      await sessionService.appendEvent({
+        session,
+        event: createEvent({
+          invocationId: 'inv1',
+          author: 'agent',
+          content: {role: 'model', parts: [{text: 'hi'}]},
+        }),
+      });
+
+      await client.post(`/apps/${appName}/eval_sets/${evalSetId}/add_session`, {
+        userId: 'u1',
+        sessionId: 's1',
+        evalId: 'case_1',
+      });
+
+      // Run eval
+      const runRes = await client.post<EvalSetResult>(
+        `/apps/${appName}/eval_sets/${evalSetId}/run_eval`,
+      );
+      expect(runRes.status).toBe(200);
+      expect(runRes.data!.evalSetId).toBe(evalSetId);
+      expect(runRes.data!.evalCaseResults.length).toBe(1);
+
+      const caseResult = runRes.data!.evalCaseResults[0];
+      expect(caseResult.evalId).toBe('case_1');
+      expect(caseResult.finalEvalStatus).toBe('NOT_EVALUATED');
+      expect(caseResult.evalMetricResultPerInvocation.length).toBe(1);
+
+      const invResult = caseResult.evalMetricResultPerInvocation[0];
+      expect(invResult.expectedInvocation).toBeDefined();
+      expect(invResult.expectedInvocation!.userContent.parts[0].text).toBe(
+        'hello',
+      );
+      expect(invResult.actualInvocation).toBeDefined();
+      expect(invResult.actualInvocation.userContent.parts[0].text).toBe(
+        'hello',
+      );
+      expect(invResult.actualInvocation.finalResponse).toBeDefined();
+    });
+
+    it('should return 404 if eval set not found for run_eval', async () => {
+      try {
+        await client.post(`/apps/${appName}/eval_sets/non_existent/run_eval`);
+        expect.fail('Should have failed with 404');
+      } catch (e: unknown) {
+        expect((e as {response: {status: number}}).response.status).toBe(404);
+      }
+    });
+
+    it('should return 500 if agent fails to load in run_eval', async () => {
+      await client.post(`/apps/brokenApp/eval_sets/set1`);
+      try {
+        await client.post(`/apps/brokenApp/eval_sets/set1/run_eval`);
+        expect.fail('Should have failed with 500');
+      } catch (e: unknown) {
+        expect((e as {response: {status: number}}).response.status).toBe(500);
+      }
+    });
+
+    it('should handle agent execution failure in run_eval', async () => {
+      await client.post(`/apps/${appName}/eval_sets/error_set`);
+
+      const session = await sessionService.createSession({
+        appName,
+        userId: 'u1',
+        sessionId: 's1',
+      });
+      await sessionService.appendEvent({
+        session,
+        event: createEvent({
+          invocationId: 'inv1',
+          author: 'user',
+          content: {role: 'user', parts: [{text: 'throw'}]},
+        }),
+      });
+
+      await client.post(`/apps/${appName}/eval_sets/error_set/add_session`, {
+        userId: 'u1',
+        sessionId: 's1',
+        evalId: 'case_error',
+      });
+
+      const runRes = await client.post<EvalSetResult>(
+        `/apps/${appName}/eval_sets/error_set/run_eval`,
+      );
+      expect(runRes.status).toBe(200);
+      expect(runRes.data!.evalCaseResults.length).toBe(1);
+
+      const caseResult = runRes.data!.evalCaseResults[0];
+      expect(caseResult.evalId).toBe('case_error');
+      expect(caseResult.finalEvalStatus).toBe('NOT_EVALUATED');
+      expect(caseResult.evalMetricResultPerInvocation.length).toBe(1);
+      const invResult = caseResult.evalMetricResultPerInvocation[0];
+      expect(invResult.actualInvocation.finalResponse).toBeUndefined();
+    });
+
+    it('should return empty list for eval_metrics', async () => {
+      const res = await client.get<unknown[]>(`/apps/${appName}/eval_metrics`);
+      expect(res.status).toBe(200);
+      expect(res.data).toEqual([]);
     });
   });
 });
