@@ -8,12 +8,19 @@ import {
   BaseAgent,
   BasePlugin,
   createEvent,
+  deleteResolvedTransaction,
   Event,
+  findEventByLastFunctionResponseId,
+  getLastFunctionResponseId,
+  getPendingTransactions,
   InMemoryArtifactService,
   InMemorySessionService,
   InvocationContext,
   LlmAgent,
+  recordPendingTransactions,
   Runner,
+  Session,
+  TRANSACTION_STATE_KEY,
 } from '@google/adk';
 import {Content, FunctionCall, FunctionResponse} from '@google/genai';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
@@ -685,5 +692,442 @@ describe('Runner customMetadata support', () => {
     expect(userEventCall![0].event.customMetadata).toEqual(customMetadata);
 
     appendEventSpy.mockRestore();
+  });
+});
+
+class MockToolCallAgent extends LlmAgent {
+  constructor(
+    name: string,
+    private functionCallIds: string[],
+    parentAgent?: BaseAgent,
+  ) {
+    super({
+      name,
+      model: 'gemini-2.5-flash',
+      subAgents: [],
+      parentAgent,
+    });
+  }
+
+  protected override async *runAsyncImpl(
+    context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    const parts = this.functionCallIds.map((id) => ({
+      functionCall: {
+        id,
+        name: 'test_tool',
+        args: {},
+      },
+    }));
+    yield createEvent({
+      invocationId: context.invocationId,
+      author: this.name,
+      content: {
+        role: 'model',
+        parts,
+      },
+    });
+  }
+}
+
+describe('Runner transaction tracking and resumption optimization (b/425992518)', () => {
+  let sessionService: InMemorySessionService;
+  let artifactService: InMemoryArtifactService;
+  let rootAgent: MockLlmAgent;
+  let toolAgent1: MockToolCallAgent;
+  let toolAgent2: MockToolCallAgent;
+  let runner: Runner;
+
+  beforeEach(() => {
+    sessionService = new InMemorySessionService();
+    artifactService = new InMemoryArtifactService();
+    rootAgent = new MockLlmAgent('root_agent');
+    toolAgent1 = new MockToolCallAgent('tool_agent1', ['call_1'], rootAgent);
+    toolAgent2 = new MockToolCallAgent(
+      'tool_agent2',
+      ['call_resumed'],
+      rootAgent,
+    );
+    rootAgent.subAgents.push(toolAgent1, toolAgent2);
+
+    runner = new Runner({
+      appName: TEST_APP_ID,
+      agent: rootAgent,
+      sessionService,
+      artifactService,
+    });
+  });
+
+  it('should record pending transactions in session.state when agent emits function calls during runAsync', async () => {
+    const runnerTool1 = new Runner({
+      appName: TEST_APP_ID,
+      agent: toolAgent1,
+      sessionService,
+      artifactService,
+    });
+
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    for await (const _ of runnerTool1.runAsync({
+      userId: session.userId,
+      sessionId: session.id,
+      newMessage: {role: 'user', parts: [{text: 'run tool'}]},
+    })) {
+      // Consume stream
+    }
+
+    const updatedSession = await sessionService.getSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    const transactions = getPendingTransactions(updatedSession!);
+    expect(transactions).toBeDefined();
+    expect(transactions!['call_1']).toEqual({
+      eventId: expect.any(String),
+      author: 'tool_agent1',
+      timestamp: expect.any(Number),
+    });
+  });
+
+  it('should resolve agent in O(1) time from session.state and clean up resolved transaction upon resumption', async () => {
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      state: {
+        [TRANSACTION_STATE_KEY]: {
+          initial_call_from_agent2: {
+            eventId: 'ev_123',
+            author: 'tool_agent2',
+            timestamp: 1000,
+          },
+        },
+      },
+    });
+
+    const events: Event[] = [];
+    for await (const event of runner.runAsync({
+      userId: session.userId,
+      sessionId: session.id,
+      newMessage: {
+        role: 'user',
+        parts: [
+          {
+            functionResponse: {
+              id: 'initial_call_from_agent2',
+              name: 'test_tool',
+              response: {status: 'ok'},
+            },
+          },
+        ],
+      },
+    })) {
+      events.push(event);
+    }
+
+    expect(events[0].author).toBe('tool_agent2');
+
+    const updatedSession = await sessionService.getSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+    const transactions = getPendingTransactions(updatedSession!);
+    expect(transactions?.['initial_call_from_agent2']).toBeUndefined();
+    expect(transactions?.['call_resumed']).toBeDefined();
+  });
+
+  it('should fall back to findEventByLastFunctionResponseId when _adk_transactions is unpopulated in session.state', async () => {
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    const callEvent = createEvent({
+      invocationId: 'inv_1',
+      author: 'tool_agent1',
+      content: {
+        role: 'model',
+        parts: [
+          {
+            functionCall: {
+              id: 'legacy_call_id',
+              name: 'test_tool',
+              args: {},
+            },
+          },
+        ],
+      },
+    });
+    await sessionService.appendEvent({session, event: callEvent});
+
+    const events: Event[] = [];
+    for await (const event of runner.runAsync({
+      userId: session.userId,
+      sessionId: session.id,
+      newMessage: {
+        role: 'user',
+        parts: [
+          {
+            functionResponse: {
+              id: 'legacy_call_id',
+              name: 'test_tool',
+              response: {status: 'ok'},
+            },
+          },
+        ],
+      },
+    })) {
+      events.push(event);
+    }
+
+    expect(events[0].author).toBe('tool_agent1');
+  });
+
+  it('should guard safely and fall back cleanly when session.state._adk_transactions is malformed or corrupted', async () => {
+    const corruptedValues = [null, 12345, 'invalid_string', ['array']];
+
+    for (let i = 0; i < corruptedValues.length; i++) {
+      const corruptVal = corruptedValues[i];
+      const session = await sessionService.createSession({
+        appName: TEST_APP_ID,
+        userId: TEST_USER_ID,
+        sessionId: `${TEST_SESSION_ID}_corrupt_${i}`,
+        state: {
+          [TRANSACTION_STATE_KEY]: corruptVal as unknown as Record<
+            string,
+            unknown
+          >,
+        },
+      });
+
+      expect(getPendingTransactions(session)).toBeUndefined();
+
+      const callEvent = createEvent({
+        invocationId: `inv_corrupt_${i}`,
+        author: 'tool_agent1',
+        content: {
+          role: 'model',
+          parts: [
+            {
+              functionCall: {
+                id: `corrupt_call_${i}`,
+                name: 'test_tool',
+                args: {},
+              },
+            },
+          ],
+        },
+      });
+      await sessionService.appendEvent({session, event: callEvent});
+
+      const events: Event[] = [];
+      for await (const event of runner.runAsync({
+        userId: session.userId,
+        sessionId: session.id,
+        newMessage: {
+          role: 'user',
+          parts: [
+            {
+              functionResponse: {
+                id: `corrupt_call_${i}`,
+                name: 'test_tool',
+                response: {status: 'ok'},
+              },
+            },
+          ],
+        },
+      })) {
+        events.push(event);
+      }
+
+      expect(events[0].author).toBe('tool_agent1');
+    }
+  });
+
+  it('should log warning and fall back to rootAgent when resolved author from transaction state is unknown', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      state: {
+        [TRANSACTION_STATE_KEY]: {
+          call_ghost: {
+            eventId: 'ev_ghost',
+            author: 'ghost_agent',
+            timestamp: 1000,
+          },
+        },
+      },
+    });
+
+    const events: Event[] = [];
+    for await (const event of runner.runAsync({
+      userId: session.userId,
+      sessionId: session.id,
+      newMessage: {
+        role: 'user',
+        parts: [
+          {
+            functionResponse: {
+              id: 'call_ghost',
+              name: 'test_tool',
+              response: {status: 'ok'},
+            },
+          },
+        ],
+      },
+    })) {
+      events.push(event);
+    }
+
+    expect(events[0].author).toBe('root_agent');
+    warnSpy.mockRestore();
+  });
+
+  it('should handle zero-allocation inline scanning in findEventByLastFunctionResponseId across large event history', () => {
+    const events: Event[] = [];
+    const numEvents = 5000;
+    const targetCallId = 'target_call_999';
+
+    for (let i = 0; i < numEvents; i++) {
+      events.push(
+        createEvent({
+          invocationId: `inv_${i}`,
+          author: `agent_${i % 10}`,
+          content: {
+            role: 'model',
+            parts: [
+              {text: `Message ${i}`},
+              {
+                functionCall: {
+                  id: i === 1234 ? targetCallId : `call_${i}`,
+                  name: 'some_tool',
+                  args: {},
+                },
+              },
+            ],
+          },
+        }),
+      );
+    }
+
+    events.push(
+      createEvent({
+        invocationId: 'inv_last',
+        author: 'user',
+        content: {
+          role: 'user',
+          parts: [
+            {text: 'some text'},
+            {
+              functionResponse: {
+                id: targetCallId,
+                name: 'some_tool',
+                response: {result: 'success'},
+              },
+            },
+          ],
+        },
+      }),
+    );
+
+    const found = findEventByLastFunctionResponseId(events);
+    expect(found).toBeDefined();
+    expect(found!.id).toBe(events[1234].id);
+    expect(found!.author).toBe('agent_4');
+
+    expect(findEventByLastFunctionResponseId([])).toBeNull();
+    expect(
+      findEventByLastFunctionResponseId([
+        createEvent({
+          invocationId: 'inv_no_response',
+          author: 'user',
+          content: {role: 'user', parts: [{text: 'just text'}]},
+        }),
+      ]),
+    ).toBeNull();
+    expect(
+      getLastFunctionResponseId([
+        createEvent({
+          invocationId: 'inv_no_parts',
+          author: 'user',
+          content: undefined as unknown as Content,
+        }),
+      ]),
+    ).toBeUndefined();
+  });
+
+  it('should directly test standalone utilities recordPendingTransactions and deleteResolvedTransaction edge cases', () => {
+    const dummySession: Session = {
+      id: 's1',
+      appName: 'app1',
+      userId: 'u1',
+      state: {},
+      events: [],
+      lastUpdateTime: 0,
+    };
+
+    expect(
+      getPendingTransactions(undefined as unknown as Session),
+    ).toBeUndefined();
+    expect(getPendingTransactions(dummySession)).toBeUndefined();
+
+    recordPendingTransactions(undefined as unknown as Session, {} as Event);
+    recordPendingTransactions(dummySession, {} as Event);
+
+    const eventWithNoParts = createEvent({
+      invocationId: 'inv',
+      author: 'agent1',
+      content: {role: 'model', parts: []},
+    });
+    recordPendingTransactions(dummySession, eventWithNoParts);
+    expect(getPendingTransactions(dummySession)).toBeUndefined();
+
+    const eventWithCall = createEvent({
+      invocationId: 'inv',
+      author: 'agent1',
+      content: {
+        role: 'model',
+        parts: [
+          {functionCall: {id: 'c1', name: 't1', args: {}}},
+          {functionCall: {id: 'c2', name: 't2', args: {}}},
+        ],
+      },
+    });
+    recordPendingTransactions(dummySession, eventWithCall);
+    expect(getPendingTransactions(dummySession)).toEqual({
+      c1: {
+        eventId: eventWithCall.id,
+        author: 'agent1',
+        timestamp: eventWithCall.timestamp,
+      },
+      c2: {
+        eventId: eventWithCall.id,
+        author: 'agent1',
+        timestamp: eventWithCall.timestamp,
+      },
+    });
+
+    expect(
+      deleteResolvedTransaction(dummySession, 'non_existent_call'),
+    ).toBeUndefined();
+
+    const deletedEntry = deleteResolvedTransaction(dummySession, 'c1');
+    expect(deletedEntry).toEqual({
+      eventId: eventWithCall.id,
+      author: 'agent1',
+      timestamp: eventWithCall.timestamp,
+    });
+    expect(getPendingTransactions(dummySession)?.['c1']).toBeUndefined();
+    expect(getPendingTransactions(dummySession)?.['c2']).toBeDefined();
   });
 });

@@ -22,7 +22,7 @@ import {
   BuiltInCodeExecutor,
   isBuiltInCodeExecutor,
 } from '../code_executors/built_in_code_executor.js';
-import {createEvent, Event, getFunctionCalls} from '../events/event.js';
+import {createEvent, Event} from '../events/event.js';
 import {createEventActions} from '../events/event_actions.js';
 import {BaseMemoryService} from '../memory/base_memory_service.js';
 import {BasePlugin} from '../plugins/base_plugin.js';
@@ -364,6 +364,7 @@ export class Runner {
                 author: 'model',
                 content: beforeRunCallbackResponse,
               });
+              recordPendingTransactions(session, earlyExitEvent);
               // TODO: b/447446338 - In the future, do *not* save live call audio
               // content to session This is a feature in Python ADK
               await this.sessionService.appendEvent({
@@ -385,6 +386,7 @@ export class Runner {
                 }
 
                 if (!event.partial) {
+                  recordPendingTransactions(session, event);
                   await this.sessionService.appendEvent({session, event});
                 }
                 // Step 3: Run the on_event callbacks to optionally modify the event.
@@ -473,9 +475,26 @@ export class Runner {
     // Case 1: If the last event is a function response, this returns the
     // agent that made the original function call.
     // =========================================================================
-    const event = findEventByLastFunctionResponseId(session.events);
-    if (event && event.author) {
-      return rootAgent.findAgent(event.author) || rootAgent;
+    const functionCallId = getLastFunctionResponseId(session.events);
+    if (functionCallId) {
+      // O(1) lookup in explicit transaction state
+      const entry = deleteResolvedTransaction(session, functionCallId);
+      const event = !entry?.author
+        ? findEventByLastFunctionResponseId(session.events, functionCallId)
+        : null;
+      const author = entry?.author ?? event?.author;
+      if (author) {
+        const agent = rootAgent.findAgent(author);
+        if (agent) {
+          return agent;
+        }
+        logger.warn(
+          `Event from an unknown agent: ${author}, event id: ${
+            entry?.eventId ?? event?.id
+          }`,
+        );
+        return rootAgent;
+      }
     }
 
     // =========================================================================
@@ -539,36 +558,150 @@ export class Runner {
   // TODO - b/425992518: Implement runLive and related methods.
 }
 
+export const TRANSACTION_STATE_KEY = '_adk_transactions';
+
+export interface PendingTransactionEntry {
+  eventId: string;
+  author: string;
+  timestamp: number;
+}
+
+export type SessionTransactionMap = Record<string, PendingTransactionEntry>;
+
 /**
- * It iterates through the events in reverse order, and returns the event
- * containing a function call with a functionCall.id matching the
+ * Reads pending transactions from session state without throwing on corruption.
+ */
+export function getPendingTransactions(
+  session: Session,
+): SessionTransactionMap | undefined {
+  if (!session || !session.state) {
+    return undefined;
+  }
+  const rawMap = session.state[TRANSACTION_STATE_KEY];
+  if (typeof rawMap !== 'object' || rawMap === null || Array.isArray(rawMap)) {
+    return undefined;
+  }
+  return rawMap as SessionTransactionMap;
+}
+
+function setTransactionsDirty(session: Session, dirty: boolean): void {
+  (
+    session as unknown as {
+      _adkTransactionsDirty?: boolean;
+    }
+  )._adkTransactionsDirty = dirty;
+}
+
+function isTransactionsDirty(session: Session): boolean {
+  return Boolean(
+    (
+      session as unknown as {
+        _adkTransactionsDirty?: boolean;
+      }
+    )._adkTransactionsDirty,
+  );
+}
+
+/**
+ * Records pending function call transactions emitted by an agent into session state.
+ */
+export function recordPendingTransactions(
+  session: Session,
+  event: Event,
+): void {
+  if (!session || !event.author || !event.content?.parts) {
+    return;
+  }
+  let hasNewTransactions = false;
+  let map = getPendingTransactions(session);
+
+  const parts = event.content.parts;
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+    if (part.functionCall?.id) {
+      if (!map) {
+        session.state = session.state || {};
+        map = (session.state[TRANSACTION_STATE_KEY] =
+          {}) as SessionTransactionMap;
+      }
+      map[part.functionCall.id] = {
+        eventId: event.id,
+        author: event.author,
+        timestamp: event.timestamp,
+      };
+      hasNewTransactions = true;
+    }
+  }
+
+  if ((hasNewTransactions || isTransactionsDirty(session)) && map) {
+    event.actions = event.actions || {};
+    event.actions.stateDelta = event.actions.stateDelta || {};
+    event.actions.stateDelta[TRANSACTION_STATE_KEY] = map;
+    setTransactionsDirty(session, false);
+  }
+}
+
+/**
+ * Deletes a resolved transaction from session state when its function response is received.
+ */
+export function deleteResolvedTransaction(
+  session: Session,
+  functionCallId: string,
+): PendingTransactionEntry | undefined {
+  const map = getPendingTransactions(session);
+  if (!map || !map[functionCallId]) {
+    return undefined;
+  }
+  const entry = map[functionCallId];
+  delete map[functionCallId];
+  setTransactionsDirty(session, true);
+  return entry;
+}
+
+/**
+ * Extracts the function response ID from the last event in the session using zero-allocation inline scanning.
+ */
+export function getLastFunctionResponseId(events: Event[]): string | undefined {
+  if (!events || events.length === 0) {
+    return undefined;
+  }
+  const lastEvent = events[events.length - 1];
+  const parts = lastEvent.content?.parts;
+  if (!parts) {
+    return undefined;
+  }
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+    if (part.functionResponse?.id) {
+      return part.functionResponse.id;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * It iterates through the events in reverse order using zero-allocation inline scanning,
+ * and returns the event containing a function call with a functionCall.id matching the
  * functionResponse.id from the last event in the session.
  */
-// TODO - b/425992518: a hack that used event log as transaction log. Fix.
-function findEventByLastFunctionResponseId(events: Event[]): Event | null {
-  if (!events.length) {
+export function findEventByLastFunctionResponseId(
+  events: Event[],
+  functionCallId = getLastFunctionResponseId(events),
+): Event | null {
+  if (!functionCallId || !events || events.length === 0) {
     return null;
   }
 
-  const lastEvent = events[events.length - 1];
-  const functionCallId = lastEvent.content?.parts?.find(
-    (part) => part.functionResponse,
-  )?.functionResponse?.id;
-  if (!functionCallId) {
-    return null;
-  }
-
-  // TODO - b/425992518: inefficient search, fix.
   for (let i = events.length - 2; i >= 0; i--) {
     const event = events[i];
-    // Looking for the system long running request euc function call.
-    const functionCalls = getFunctionCalls(event);
-    if (!functionCalls) {
+    const parts = event.content?.parts;
+    if (!parts) {
       continue;
     }
 
-    for (const functionCall of functionCalls) {
-      if (functionCall.id === functionCallId) {
+    for (let j = 0; j < parts.length; j++) {
+      const part = parts[j];
+      if (part.functionCall?.id === functionCallId) {
         return event;
       }
     }
