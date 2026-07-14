@@ -353,9 +353,11 @@ describe('AdkWebServer', () => {
         sessionId: 'sessionId',
       });
       await artifactService.saveArtifact({
-        appName: 'testApp',
-        userId: 'testUser',
-        sessionId: 'sessionId',
+        key: {
+          appName: 'testApp',
+          userId: 'testUser',
+          sessionId: 'sessionId',
+        },
         filename: 'artifact.txt',
         artifact: {
           text: 'content',
@@ -395,9 +397,11 @@ describe('AdkWebServer', () => {
         sessionId: 'sessionId',
       });
       await artifactService.saveArtifact({
-        appName: 'testApp',
-        userId: 'testUser',
-        sessionId: 'sessionId',
+        key: {
+          appName: 'testApp',
+          userId: 'testUser',
+          sessionId: 'sessionId',
+        },
         filename: 'artifact.txt',
         artifact: {
           text: 'content',
@@ -419,18 +423,22 @@ describe('AdkWebServer', () => {
         sessionId: 'sessionId',
       });
       await artifactService.saveArtifact({
-        appName: 'testApp',
-        userId: 'testUser',
-        sessionId: 'sessionId',
+        key: {
+          appName: 'testApp',
+          userId: 'testUser',
+          sessionId: 'sessionId',
+        },
         filename: 'artifact.txt',
         artifact: {
           text: 'content',
         },
       });
       await artifactService.saveArtifact({
-        appName: 'testApp',
-        userId: 'testUser',
-        sessionId: 'sessionId',
+        key: {
+          appName: 'testApp',
+          userId: 'testUser',
+          sessionId: 'sessionId',
+        },
         filename: 'artifact.txt',
         artifact: {
           text: 'content2',
@@ -452,9 +460,11 @@ describe('AdkWebServer', () => {
         sessionId: 'sessionId',
       });
       await artifactService.saveArtifact({
-        appName: 'testApp',
-        userId: 'testUser',
-        sessionId: 'sessionId',
+        key: {
+          appName: 'testApp',
+          userId: 'testUser',
+          sessionId: 'sessionId',
+        },
         filename: 'artifact.txt',
         artifact: {
           text: 'content',
@@ -468,9 +478,11 @@ describe('AdkWebServer', () => {
       expect(response.status).toBe(204);
       expect(
         await artifactService.loadArtifact({
-          appName: 'testApp',
-          userId: 'testUser',
-          sessionId: 'sessionId',
+          key: {
+            appName: 'testApp',
+            userId: 'testUser',
+            sessionId: 'sessionId',
+          },
           filename: 'artifact.txt',
         }),
       ).toBeUndefined();

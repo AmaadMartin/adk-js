@@ -12,6 +12,7 @@ import {fileURLToPath, pathToFileURL} from 'url';
 import {logger} from '../utils/logger.js';
 
 import {
+  ArtifactKey,
   ArtifactVersion,
   BaseArtifactService,
   DeleteArtifactRequest,
@@ -69,23 +70,12 @@ export class FileArtifactService implements BaseArtifactService {
     }
   }
 
-  async saveArtifact({
-    userId,
-    sessionId,
-    filename,
-    artifact,
-    customMetadata,
-  }: SaveArtifactRequest): Promise<number> {
-    if (!artifact.inlineData && !artifact.text) {
+  async saveArtifact(request: SaveArtifactRequest): Promise<number> {
+    if (!request.artifact.inlineData && !request.artifact.text) {
       throw new Error('Artifact must have either inlineData or text content.');
     }
 
-    const artifactDir = getArtifactDir(
-      this.rootDir,
-      userId,
-      sessionId,
-      filename,
-    );
+    const artifactDir = getArtifactDir(this.rootDir, request);
     await fs.mkdir(artifactDir, {recursive: true});
 
     const versions = await getArtifactVersionsFromDir(artifactDir);
@@ -100,28 +90,27 @@ export class FileArtifactService implements BaseArtifactService {
     const contentPath = path.join(versionDir, storedFilename);
 
     let mimeType: string | undefined;
-    if (artifact.inlineData) {
-      const data = artifact.inlineData.data || '';
+    if (request.artifact.inlineData) {
+      const data = request.artifact.inlineData.data || '';
       // GenAI SDK Part data is in Base64 format. See https://googleapis.github.io/js-genai/release_docs/interfaces/types.Part.html
       await fs.writeFile(contentPath, Buffer.from(data, 'base64'));
-      mimeType = artifact.inlineData.mimeType || 'application/octet-stream';
-    } else if (artifact.text !== undefined) {
-      await fs.writeFile(contentPath, artifact.text, 'utf-8');
+      mimeType =
+        request.artifact.inlineData.mimeType || 'application/octet-stream';
+    } else if (request.artifact.text !== undefined) {
+      await fs.writeFile(contentPath, request.artifact.text, 'utf-8');
     }
 
     const canonicalUri = await getCanonicalUri(
       this.rootDir,
-      userId,
-      sessionId,
-      filename,
+      request,
       nextVersion,
     );
     const metadata: FileArtifactVersion = {
-      fileName: filename,
+      fileName: request.filename,
       mimeType,
       version: nextVersion,
       canonicalUri,
-      customMetadata,
+      customMetadata: request.customMetadata,
     };
 
     await writeMetadata(path.join(versionDir, 'metadata.json'), metadata);
@@ -129,25 +118,15 @@ export class FileArtifactService implements BaseArtifactService {
     return nextVersion;
   }
 
-  async loadArtifact({
-    userId,
-    sessionId,
-    filename,
-    version,
-  }: LoadArtifactRequest): Promise<Part | undefined> {
+  async loadArtifact(request: LoadArtifactRequest): Promise<Part | undefined> {
     try {
-      const artifactDir = getArtifactDir(
-        this.rootDir,
-        userId,
-        sessionId,
-        filename,
-      );
+      const artifactDir = getArtifactDir(this.rootDir, request);
 
       try {
         await fs.access(artifactDir);
       } catch (e: unknown) {
         logger.warn(
-          `[FileArtifactService] loadArtifact: Artifact ${filename} not found`,
+          `[FileArtifactService] loadArtifact: Artifact ${request.filename} not found`,
           e,
         );
         return undefined;
@@ -159,16 +138,16 @@ export class FileArtifactService implements BaseArtifactService {
       }
 
       let versionToLoad: number;
-      if (version === undefined) {
+      if (request.version === undefined) {
         versionToLoad = versions[versions.length - 1];
       } else {
-        if (!versions.includes(version)) {
+        if (!versions.includes(request.version)) {
           logger.warn(
-            `[FileArtifactService] loadArtifact: Artifact ${filename} version ${version} not found`,
+            `[FileArtifactService] loadArtifact: Artifact ${request.filename} version ${request.version} not found`,
           );
           return undefined;
         }
-        versionToLoad = version;
+        versionToLoad = request.version;
       }
 
       const versionDir = path.join(
@@ -189,7 +168,7 @@ export class FileArtifactService implements BaseArtifactService {
             contentPath = uriPath;
           } catch {
             logger.warn(
-              `[FileArtifactService] loadArtifact: Artifact ${filename} missing at ${uriPath}, falling back to content path ${contentPath}`,
+              `[FileArtifactService] loadArtifact: Artifact ${request.filename} missing at ${uriPath}, falling back to content path ${contentPath}`,
             );
           }
         }
@@ -206,7 +185,7 @@ export class FileArtifactService implements BaseArtifactService {
           };
         } catch {
           logger.warn(
-            `[FileArtifactService] loadArtifact: Artifact ${filename} missing at ${contentPath}`,
+            `[FileArtifactService] loadArtifact: Artifact ${request.filename} missing at ${contentPath}`,
           );
           return undefined;
         }
@@ -217,13 +196,13 @@ export class FileArtifactService implements BaseArtifactService {
         return {text};
       } catch {
         logger.warn(
-          `[FileArtifactService] loadArtifact: Text artifact ${filename} missing at ${contentPath}`,
+          `[FileArtifactService] loadArtifact: Text artifact ${request.filename} missing at ${contentPath}`,
         );
         return undefined;
       }
     } catch (e) {
       logger.error(
-        `[FileArtifactService] loadArtifact: Error loading artifact ${filename}`,
+        `[FileArtifactService] loadArtifact: Error loading artifact ${request.filename}`,
         e,
       );
       return undefined;
@@ -231,8 +210,7 @@ export class FileArtifactService implements BaseArtifactService {
   }
 
   async listArtifactKeys({
-    userId,
-    sessionId,
+    key: {userId, sessionId},
   }: ListArtifactKeysRequest): Promise<string[]> {
     const filenames: Set<string> = new Set();
     const userRoot = getUserRoot(this.rootDir, userId);
@@ -264,61 +242,36 @@ export class FileArtifactService implements BaseArtifactService {
     return Array.from(filenames).sort();
   }
 
-  async deleteArtifact({
-    userId,
-    sessionId,
-    filename,
-  }: DeleteArtifactRequest): Promise<void> {
+  async deleteArtifact(request: DeleteArtifactRequest): Promise<void> {
     try {
-      const artifactDir = getArtifactDir(
-        this.rootDir,
-        userId,
-        sessionId,
-        filename,
-      );
+      const artifactDir = getArtifactDir(this.rootDir, request);
       await fs.rm(artifactDir, {recursive: true, force: true});
     } catch (e) {
       logger.warn(
-        `[FileArtifactService] deleteArtifact: Failed to delete artifact ${filename}`,
+        `[FileArtifactService] deleteArtifact: Failed to delete artifact ${request.filename}`,
         e,
       );
     }
   }
 
-  async listVersions({
-    userId,
-    sessionId,
-    filename,
-  }: ListVersionsRequest): Promise<number[]> {
+  async listVersions(request: ListVersionsRequest): Promise<number[]> {
     try {
-      const artifactDir = getArtifactDir(
-        this.rootDir,
-        userId,
-        sessionId,
-        filename,
-      );
+      const artifactDir = getArtifactDir(this.rootDir, request);
       return await getArtifactVersionsFromDir(artifactDir);
     } catch (e) {
       logger.warn(
-        `[FileArtifactService] listVersions: Failed to list versions for artifact ${filename}`,
+        `[FileArtifactService] listVersions: Failed to list versions for artifact ${request.filename}`,
         e,
       );
       return [];
     }
   }
 
-  async listArtifactVersions({
-    userId,
-    sessionId,
-    filename,
-  }: ListVersionsRequest): Promise<ArtifactVersion[]> {
+  async listArtifactVersions(
+    request: ListVersionsRequest,
+  ): Promise<ArtifactVersion[]> {
     try {
-      const artifactDir = getArtifactDir(
-        this.rootDir,
-        userId,
-        sessionId,
-        filename,
-      );
+      const artifactDir = getArtifactDir(this.rootDir, request);
       const versions = await getArtifactVersionsFromDir(artifactDir);
       const artifactVersions: ArtifactVersion[] = [];
 
@@ -341,26 +294,18 @@ export class FileArtifactService implements BaseArtifactService {
       return artifactVersions;
     } catch (e) {
       logger.warn(
-        `[FileArtifactService] listArtifactVersions: Failed to list artifact versions for userId: ${userId} sessionId: ${sessionId} filename: ${filename}`,
+        `[FileArtifactService] listArtifactVersions: Failed to list artifact versions for userId: ${request.key.userId} sessionId: ${request.key.sessionId} filename: ${request.filename}`,
         e,
       );
       return [];
     }
   }
 
-  async getArtifactVersion({
-    userId,
-    sessionId,
-    filename,
-    version,
-  }: LoadArtifactRequest): Promise<ArtifactVersion | undefined> {
+  async getArtifactVersion(
+    request: LoadArtifactRequest,
+  ): Promise<ArtifactVersion | undefined> {
     try {
-      const artifactDir = getArtifactDir(
-        this.rootDir,
-        userId,
-        sessionId,
-        filename,
-      );
+      const artifactDir = getArtifactDir(this.rootDir, request);
 
       const versions = await getArtifactVersionsFromDir(artifactDir);
       if (versions.length === 0) {
@@ -368,13 +313,13 @@ export class FileArtifactService implements BaseArtifactService {
       }
 
       let versionToRead: number;
-      if (version === undefined) {
+      if (request.version === undefined) {
         versionToRead = versions[versions.length - 1];
       } else {
-        if (!versions.includes(version)) {
+        if (!versions.includes(request.version)) {
           return undefined;
         }
-        versionToRead = version;
+        versionToRead = request.version;
       }
 
       const metadataPath = path.join(
@@ -385,7 +330,7 @@ export class FileArtifactService implements BaseArtifactService {
       return await readMetadata(metadataPath);
     } catch (e) {
       logger.warn(
-        `[FileArtifactService] getArtifactVersion: Failed to get artifact version for userId: ${userId} sessionId: ${sessionId} filename: ${filename} version: ${version}`,
+        `[FileArtifactService] getArtifactVersion: Failed to get artifact version for userId: ${request.key.userId} sessionId: ${request.key.sessionId} filename: ${request.filename} version: ${request.version}`,
         e,
       );
       return undefined;
@@ -460,9 +405,7 @@ function getVersionsDir(artifactDir: string): string {
  */
 function getArtifactDir(
   rootDir: string,
-  userId: string,
-  sessionId: string,
-  filename: string,
+  {key: {userId, sessionId}, filename}: {key: ArtifactKey; filename: string},
 ): string {
   const userRoot = getUserRoot(rootDir, userId);
   let scopeRoot: string;
@@ -530,25 +473,16 @@ async function getArtifactVersionsFromDir(
  * Gets the canonical URI for an artifact version.
  *
  * @param rootDir The root directory.
- * @param userId The user ID.
- * @param sessionId The session ID.
- * @param filename The filename.
+ * @param request The request object.
  * @param version The version.
  * @returns A promise that resolves to the canonical URI.
  */
 async function getCanonicalUri(
   rootDir: string,
-  userId: string,
-  sessionId: string,
-  filename: string,
+  request: {key: ArtifactKey; filename: string},
   version: number,
 ): Promise<string> {
-  const artifactDir = await getArtifactDir(
-    rootDir,
-    userId,
-    sessionId,
-    filename,
-  );
+  const artifactDir = getArtifactDir(rootDir, request);
   const storedFilename = path.basename(artifactDir);
   const versionsDir = getVersionsDir(artifactDir);
   const payloadPath = path.join(

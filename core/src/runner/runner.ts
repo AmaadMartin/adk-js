@@ -258,12 +258,11 @@ export class Runner {
 
           const invocationContext = new InvocationContext({
             artifactService: this.artifactService
-              ? new ScopedArtifactService(
-                  this.artifactService,
-                  this.appName,
+              ? new ScopedArtifactService(this.artifactService, {
+                  appName: this.appName,
                   userId,
                   sessionId,
-                )
+                })
               : undefined,
             sessionService: this.sessionService,
             memoryService: this.memoryService,
@@ -444,11 +443,12 @@ export class Runner {
         continue;
       }
       const fileName = `artifact_${invocationId}_${i}`;
-      // TODO - b/425992518: group appname, userId, sessionId as a key.
       await this.artifactService.saveArtifact({
-        appName: this.appName,
-        userId,
-        sessionId,
+        key: {
+          appName: this.appName,
+          userId,
+          sessionId,
+        },
         filename: fileName,
         artifact: part,
       });
