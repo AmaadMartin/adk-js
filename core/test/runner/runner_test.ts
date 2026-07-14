@@ -687,3 +687,189 @@ describe('Runner customMetadata support', () => {
     appendEventSpy.mockRestore();
   });
 });
+
+describe('Runner artifact saving and immutability', () => {
+  let sessionService: InMemorySessionService;
+  let artifactService: InMemoryArtifactService;
+  let agent: MockLlmAgent;
+  let runner: Runner;
+
+  beforeEach(() => {
+    sessionService = new InMemorySessionService();
+    artifactService = new InMemoryArtifactService();
+    agent = new MockLlmAgent('test_agent');
+    runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      artifactService,
+    });
+  });
+
+  it('should save inlineData artifacts with composite key and yield replacement text without mutating original message when saveInputBlobsAsArtifacts is true', async () => {
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    const saveSpy = vi.spyOn(artifactService, 'saveArtifact');
+
+    const originalMessage: Content = {
+      role: 'user',
+      parts: [
+        {text: 'Check this image'},
+        {inlineData: {mimeType: 'image/png', data: 'aW1hZ2VkYXRh'}},
+      ],
+    };
+
+    const events: Event[] = [];
+    for await (const event of runner.runAsync({
+      userId: session.userId,
+      sessionId: session.id,
+      newMessage: originalMessage,
+      runConfig: {saveInputBlobsAsArtifacts: true},
+    })) {
+      events.push(event);
+    }
+
+    // Verify saveArtifact was called with composite key scope
+    expect(saveSpy).toHaveBeenCalledTimes(1);
+    expect(saveSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        appName: TEST_APP_ID,
+        userId: TEST_USER_ID,
+        sessionId: TEST_SESSION_ID,
+        filename: expect.stringMatching(/^artifact_.*_1$/),
+        artifact: {inlineData: {mimeType: 'image/png', data: 'aW1hZ2VkYXRh'}},
+      }),
+    );
+
+    // Verify immutability of caller input message
+    expect(originalMessage.parts).toHaveLength(2);
+    expect(originalMessage.parts![0]).toEqual({text: 'Check this image'});
+    expect(originalMessage.parts![1]).toEqual({
+      inlineData: {mimeType: 'image/png', data: 'aW1hZ2VkYXRh'},
+    });
+
+    // Verify that session user event received replacement placeholder text part
+    const updatedSession = await sessionService.getSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+    expect(updatedSession).not.toBeNull();
+    const userEvent = updatedSession!.events[0];
+    expect(userEvent.author).toBe('user');
+    expect(userEvent.content?.parts).toHaveLength(2);
+    expect(userEvent.content?.parts![0]).toEqual({text: 'Check this image'});
+    expect(userEvent.content?.parts![1].text).toMatch(
+      /^Uploaded file: artifact_.*_1\. It is saved into artifacts$/,
+    );
+    expect(userEvent.content?.parts![1].inlineData).toBeUndefined();
+  });
+
+  it('should not save artifacts or replace inlineData if saveInputBlobsAsArtifacts is false', async () => {
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    const saveSpy = vi.spyOn(artifactService, 'saveArtifact');
+
+    const originalMessage: Content = {
+      role: 'user',
+      parts: [{inlineData: {mimeType: 'image/png', data: 'aW1hZ2VkYXRh'}}],
+    };
+
+    const events: Event[] = [];
+    for await (const event of runner.runAsync({
+      userId: session.userId,
+      sessionId: session.id,
+      newMessage: originalMessage,
+      runConfig: {saveInputBlobsAsArtifacts: false},
+    })) {
+      events.push(event);
+    }
+
+    expect(saveSpy).not.toHaveBeenCalled();
+    const updatedSession = await sessionService.getSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+    const userEvent = updatedSession!.events[0];
+    expect(userEvent.content?.parts![0].inlineData).toBeDefined();
+  });
+
+  it('should return message unchanged when parts is empty or contains no inlineData', async () => {
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    const saveSpy = vi.spyOn(artifactService, 'saveArtifact');
+
+    const originalMessage: Content = {
+      role: 'user',
+      parts: [{text: 'Only text part'}],
+    };
+
+    for await (const _ of runner.runAsync({
+      userId: session.userId,
+      sessionId: session.id,
+      newMessage: originalMessage,
+      runConfig: {saveInputBlobsAsArtifacts: true},
+    })) {
+      // consume generator
+    }
+
+    expect(saveSpy).not.toHaveBeenCalled();
+    const updatedSession = await sessionService.getSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+    const userEvent = updatedSession!.events[0];
+    expect(userEvent.content?.parts![0]).toEqual({text: 'Only text part'});
+  });
+
+  it('should return message unchanged when artifactService is not defined', async () => {
+    const runnerWithoutArtifacts = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      artifactService: undefined,
+    });
+
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    const originalMessage: Content = {
+      role: 'user',
+      parts: [{inlineData: {mimeType: 'image/png', data: 'aW1hZ2VkYXRh'}}],
+    };
+
+    for await (const _ of runnerWithoutArtifacts.runAsync({
+      userId: session.userId,
+      sessionId: session.id,
+      newMessage: originalMessage,
+      runConfig: {saveInputBlobsAsArtifacts: true},
+    })) {
+      // consume generator
+    }
+
+    const updatedSession = await sessionService.getSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+    const userEvent = updatedSession!.events[0];
+    expect(userEvent.content?.parts![0].inlineData).toBeDefined();
+  });
+});

@@ -210,4 +210,67 @@ describe('ScopedArtifactService', () => {
       expect(result).toBe(version);
     });
   });
+
+  describe('constructor overloads and validation', () => {
+    it('accepts an ArtifactScope object directly', async () => {
+      const delegate = makeBaseArtifactServiceStub();
+      vi.mocked(delegate.saveArtifact).mockResolvedValue(100);
+      const service = new ScopedArtifactService(delegate, {
+        appName,
+        userId,
+        sessionId,
+      });
+
+      const result = await service.saveArtifact({
+        filename: 'test.txt',
+        artifact: {text: 'hi'},
+      });
+
+      expect(delegate.saveArtifact).toHaveBeenCalledWith({
+        appName,
+        userId,
+        sessionId,
+        filename: 'test.txt',
+        artifact: {text: 'hi'},
+      });
+      expect(result).toBe(100);
+    });
+
+    it('throws error when appName is a string but userId or sessionId is missing', () => {
+      const delegate = makeBaseArtifactServiceStub();
+      expect(() => new ScopedArtifactService(delegate, appName)).toThrow(
+        'userId and sessionId must be provided when appName is a string.',
+      );
+      expect(
+        () => new ScopedArtifactService(delegate, appName, userId),
+      ).toThrow(
+        'userId and sessionId must be provided when appName is a string.',
+      );
+    });
+
+    it('accepts appName, userId, and sessionId strings directly', async () => {
+      const delegate = makeBaseArtifactServiceStub();
+      vi.mocked(delegate.saveArtifact).mockResolvedValue(200);
+      const service = new ScopedArtifactService(
+        delegate,
+        appName,
+        userId,
+        sessionId,
+      );
+
+      const result = await service.saveArtifact({
+        filename: 'test2.txt',
+        artifact: {text: 'hello'},
+      });
+
+      expect(delegate.saveArtifact).toHaveBeenCalledWith({
+        appName,
+        userId,
+        sessionId,
+        filename: 'test2.txt',
+        artifact: {text: 'hello'},
+      });
+      expect(result).toBe(200);
+    });
+  });
 });

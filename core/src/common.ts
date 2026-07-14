@@ -59,6 +59,7 @@ export type {RunConfig} from './agents/run_config.js';
 export {SequentialAgent, isSequentialAgent} from './agents/sequential_agent.js';
 export type {TranscriptionEntry} from './agents/transcription_entry.js';
 export type {
+  ArtifactScope,
   BaseArtifactService,
   DeleteArtifactRequest,
   ListArtifactKeysRequest,

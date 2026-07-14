@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content, createPartFromText} from '@google/genai';
+import {Content, createPartFromText, Part} from '@google/genai';
 import {context, trace} from '@opentelemetry/api';
 
 import {BaseAgent} from '../agents/base_agent.js';
@@ -14,7 +14,10 @@ import {
 } from '../agents/invocation_context.js';
 import {isLlmAgent} from '../agents/llm_agent.js';
 import {createRunConfig, RunConfig} from '../agents/run_config.js';
-import {BaseArtifactService} from '../artifacts/base_artifact_service.js';
+import {
+  ArtifactScope,
+  BaseArtifactService,
+} from '../artifacts/base_artifact_service.js';
 import {ScopedArtifactService} from '../artifacts/scoped_artifact_service.js';
 
 import {BaseCredentialService} from '../auth/credential_service/base_credential_service.js';
@@ -258,12 +261,11 @@ export class Runner {
 
           const invocationContext = new InvocationContext({
             artifactService: this.artifactService
-              ? new ScopedArtifactService(
-                  this.artifactService,
-                  this.appName,
+              ? new ScopedArtifactService(this.artifactService, {
+                  appName: this.appName,
                   userId,
                   sessionId,
-                )
+                })
               : undefined,
             sessionService: this.sessionService,
             memoryService: this.memoryService,
@@ -306,10 +308,13 @@ export class Runner {
             // replaces the artifact data with a file name placeholder.
             // TODO - b/425992518: fix Runner<>>ArtifactService leaky abstraction.
             if (runConfig.saveInputBlobsAsArtifacts) {
-              await this.saveArtifacts(
+              newMessage = await this.saveArtifacts(
                 invocationContext.invocationId,
-                session.userId,
-                session.id,
+                {
+                  appName: this.appName,
+                  userId: session.userId,
+                  sessionId: session.id,
+                },
                 newMessage,
               );
               if (params.abortSignal?.aborted) {
@@ -424,39 +429,42 @@ export class Runner {
    * a file name placeholder.
    *
    * @param invocationId The current invocation ID.
-   * @param userId The user ID of the session.
-   * @param sessionId The session ID of the session.
+   * @param scope The artifact scope containing appName, userId, and sessionId.
    * @param message The message containing parts to process.
    */
   private async saveArtifacts(
     invocationId: string,
-    userId: string,
-    sessionId: string,
+    scope: ArtifactScope,
     message: Content,
-  ): Promise<void> {
-    if (!this.artifactService || !message.parts?.length) {
-      return;
+  ): Promise<Content> {
+    if (
+      !this.artifactService ||
+      !message.parts?.length ||
+      !message.parts.some((part) => part.inlineData)
+    ) {
+      return message;
     }
 
+    const newParts: Part[] = [];
     for (let i = 0; i < message.parts.length; i++) {
       const part = message.parts[i];
       if (!part.inlineData) {
+        newParts.push(part);
         continue;
       }
       const fileName = `artifact_${invocationId}_${i}`;
-      // TODO - b/425992518: group appname, userId, sessionId as a key.
       await this.artifactService.saveArtifact({
-        appName: this.appName,
-        userId,
-        sessionId,
+        ...scope,
         filename: fileName,
         artifact: part,
       });
-      // TODO - b/425992518: potentially buggy if accidentally exposed to LLM.
-      message.parts[i] = createPartFromText(
-        `Uploaded file: ${fileName}. It is saved into artifacts`,
+      newParts.push(
+        createPartFromText(
+          `Uploaded file: ${fileName}. It is saved into artifacts`,
+        ),
       );
     }
+    return {...message, parts: newParts};
   }
 
   /**

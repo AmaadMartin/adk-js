@@ -7,15 +7,21 @@
 import {Part} from '@google/genai';
 
 /**
- * The parameters for `saveArtifact`.
+ * Represents the composite key scoping an artifact to an application, user, and session.
  */
-export interface SaveArtifactRequest {
+export interface ArtifactScope {
   /** The app name. */
   appName: string;
   /** The user ID. */
   userId: string;
   /** The session ID. */
   sessionId: string;
+}
+
+/**
+ * The parameters for `saveArtifact`.
+ */
+export interface SaveArtifactRequest extends ArtifactScope {
   /** The filename of the artifact. */
   filename: string;
   /** The artifact to save. */
@@ -29,13 +35,7 @@ export interface SaveArtifactRequest {
 /**
  * The parameters for `loadArtifact`.
  */
-export interface LoadArtifactRequest {
-  /** The app name. */
-  appName: string;
-  /** The user ID. */
-  userId: string;
-  /** The session ID. */
-  sessionId: string;
+export interface LoadArtifactRequest extends ArtifactScope {
   /** The filename of the artifact. */
   filename: string;
   /**
@@ -48,25 +48,13 @@ export interface LoadArtifactRequest {
 /**
  * The parameters for `listArtifactKeys`.
  */
-export interface ListArtifactKeysRequest {
-  /** The app name. */
-  appName: string;
-  /** The user ID. */
-  userId: string;
-  /** The session ID. */
-  sessionId: string;
-}
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+export interface ListArtifactKeysRequest extends ArtifactScope {}
 
 /**
  * The parameters for `deleteArtifact`.
  */
-export interface DeleteArtifactRequest {
-  /** The app name. */
-  appName: string;
-  /** The user ID. */
-  userId: string;
-  /** The session ID. */
-  sessionId: string;
+export interface DeleteArtifactRequest extends ArtifactScope {
   /** The filename of the artifact. */
   filename: string;
 }
@@ -74,13 +62,7 @@ export interface DeleteArtifactRequest {
 /**
  * The parameters for `listVersions`.
  */
-export interface ListVersionsRequest {
-  /** The app name. */
-  appName: string;
-  /** The user ID. */
-  userId: string;
-  /** The session ID. */
-  sessionId: string;
+export interface ListVersionsRequest extends ArtifactScope {
   /** The filename of the artifact. */
   filename: string;
 }
