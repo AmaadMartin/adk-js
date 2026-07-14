@@ -25,6 +25,7 @@ import {
 import {BaseExampleProvider} from '../examples/base_example_provider.js';
 import {Example} from '../examples/example.js';
 import {BaseLlm, isBaseLlm} from '../models/base_llm.js';
+import {BaseLlmConnection} from '../models/base_llm_connection.js';
 import {LlmRequest} from '../models/llm_request.js';
 import {LlmResponse} from '../models/llm_response.js';
 import {LLMRegistry} from '../models/registry.js';
@@ -52,6 +53,7 @@ import {
   generateRequestConfirmationEvent,
   getLongRunningFunctionCalls,
   handleFunctionCallsAsync,
+  handleFunctionCallsLiveAsync,
   populateClientFunctionCallId,
 } from './functions.js';
 
@@ -334,6 +336,8 @@ const LLM_AGENT_SIGNATURE_SYMBOL = Symbol.for('google.adk.llmAgent');
  * @param obj The object to check.
  * @returns True if the object is an instance of LlmAgent, false otherwise.
  */
+export const MAX_LIVE_RECONNECT_ATTEMPTS = 5;
+
 export function isLlmAgent(obj: unknown): obj is LlmAgent {
   return (
     typeof obj === 'object' &&
@@ -494,6 +498,50 @@ export class LlmAgent extends BaseAgent {
       ancestorAgent = ancestorAgent.parentAgent;
     }
     throw new Error(`No model found for ${this.name}.`);
+  }
+
+  private static _defaultLiveModel: string | BaseLlm =
+    'gemini-live-2.5-flash-native-audio';
+
+  /**
+   * Overrides the default model used for live mode when an agent has no model set.
+   * @param model The model name or BaseLlm instance to use as default.
+   */
+  static setDefaultLiveModel(model: string | BaseLlm): void {
+    if (typeof model !== 'string' && !isBaseLlm(model)) {
+      throw new TypeError(
+        'Default live model must be a model name or BaseLlm.',
+      );
+    }
+    if (typeof model === 'string' && !model) {
+      throw new Error('Default live model must be a non-empty string.');
+    }
+    LlmAgent._defaultLiveModel = model;
+  }
+
+  /**
+   * Resolves the current default live model to a BaseLlm instance.
+   */
+  static _resolveDefaultLiveModel(): BaseLlm {
+    const defaultModel = LlmAgent._defaultLiveModel;
+    if (isBaseLlm(defaultModel)) {
+      return defaultModel;
+    }
+    return LLMRegistry.newLlm(defaultModel);
+  }
+
+  /**
+   * The resolved BaseLlm instance for live mode.
+   *
+   * When not set, the agent will inherit the live model from its ancestor,
+   * or fall back to the default live model.
+   */
+  get canonicalLiveModel(): BaseLlm {
+    try {
+      return this.canonicalModel;
+    } catch {
+      return LlmAgent._resolveDefaultLiveModel();
+    }
   }
 
   /**
@@ -746,28 +794,10 @@ export class LlmAgent extends BaseAgent {
    * times. Subsequent reconnects skip `sendHistory` because the server
    * already holds the conversation state associated with the handle.
    */
-  // eslint-disable-next-line require-yield
-  private async *runLiveFlow(
-    _invocationContext: InvocationContext,
-  ): AsyncGenerator<Event, void, void> {
-    // TODO - b/425992518: remove dummy logic, implement this.
-    await Promise.resolve();
-    throw new Error('LlmAgent.runLiveFlow not implemented');
-  }
-
-  private async *runOneStepAsync(
+  private async *preprocessAsync(
     invocationContext: InvocationContext,
+    llmRequest: LlmRequest,
   ): AsyncGenerator<Event, void, void> {
-    const llmRequest: LlmRequest = {
-      contents: [],
-      toolsDict: {},
-      liveConnectConfig: {},
-    };
-
-    // =========================================================================
-    // Preprocess before calling the LLM
-    // =========================================================================
-    // Runs request processors.
     for (const processor of this.requestProcessors) {
       for await (const event of processor.runAsync(
         invocationContext,
@@ -776,12 +806,9 @@ export class LlmAgent extends BaseAgent {
         if (invocationContext.abortSignal?.aborted) {
           return;
         }
-
         yield event;
       }
     }
-    // TODO - b/425992518: check if tool preprocessors can be simplified.
-    // Run pre-processors for tools.
     const allTools = [...this.tools];
     if (this.outputSchema && allTools.length > 0) {
       const setModelResponseTool = new FunctionTool({
@@ -800,17 +827,12 @@ export class LlmAgent extends BaseAgent {
     }
     for (const toolUnion of allTools) {
       const toolContext = new Context({invocationContext});
-
-      // process all tools from this tool union
       const tools = (
         await convertToolUnionToTools(
           toolUnion,
           new ReadonlyContext(invocationContext),
         )
       ).filter((tool) => {
-        // If allowedTools is not set, allow all tools. Otherwise, only allow
-        // tools that are in the allowedTools set.
-        // The allowedTools set is populated by request processors.
         return (
           !llmRequest.allowedTools ||
           llmRequest.allowedTools.includes(tool.name) ||
@@ -820,16 +842,225 @@ export class LlmAgent extends BaseAgent {
 
       for (const tool of tools) {
         await tool.processLlmRequest({toolContext, llmRequest});
-
         if (invocationContext.abortSignal?.aborted) {
           return;
         }
       }
     }
-    // =========================================================================
-    // Global runtime interruption
-    // =========================================================================
-    // TODO - b/425992518: global runtime interruption, hacky, fix.
+  }
+
+  private async *runLiveFlow(
+    invocationContext: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    const llmRequest: LlmRequest = {
+      contents: [],
+      toolsDict: {},
+      liveConnectConfig: {},
+    };
+
+    for await (const event of this.preprocessAsync(
+      invocationContext,
+      llmRequest,
+    )) {
+      if (invocationContext.abortSignal?.aborted) {
+        return;
+      }
+      yield event;
+    }
+    if (
+      invocationContext.endInvocation ||
+      invocationContext.abortSignal?.aborted
+    ) {
+      return;
+    }
+
+    llmRequest.model = this.canonicalLiveModel.model;
+    const llm = this.canonicalLiveModel;
+    let attempt = 1;
+
+    while (true) {
+      if (invocationContext.liveSessionResumptionHandle) {
+        if (attempt > 1) {
+          logger.info(`Attempting to reconnect (Attempt ${attempt})...`);
+        }
+        attempt++;
+        llmRequest.liveConnectConfig.sessionResumption ??= {};
+        llmRequest.liveConnectConfig.sessionResumption.handle =
+          invocationContext.liveSessionResumptionHandle;
+      }
+
+      if (
+        llmRequest.contents.length > 0 &&
+        !invocationContext.liveSessionResumptionHandle
+      ) {
+        llmRequest.liveConnectConfig.historyConfig ??= {};
+        llmRequest.liveConnectConfig.historyConfig.initialHistoryInClientContent ??= true;
+      }
+
+      logger.info(`Establishing live connection for agent: ${this.name}`);
+      let llmConnection: BaseLlmConnection;
+      try {
+        llmConnection = await llm.connect(llmRequest);
+      } catch (error) {
+        if (!invocationContext.liveSessionResumptionHandle) {
+          throw error;
+        }
+        if (attempt > MAX_LIVE_RECONNECT_ATTEMPTS) {
+          logger.error(`Max reconnection attempts reached (${error}).`);
+          throw error;
+        }
+        logger.info(`Connection failed (${error}), reconnecting with handle.`);
+        continue;
+      }
+
+      attempt = 1;
+
+      if (
+        llmRequest.contents.length > 0 &&
+        !invocationContext.liveSessionResumptionHandle
+      ) {
+        logger.debug('Sending history to model:', llmRequest.contents);
+        await llmConnection.sendHistory(llmRequest.contents);
+      }
+
+      const sendAbortController = new AbortController();
+      invocationContext.abortSignal?.addEventListener(
+        'abort',
+        () => sendAbortController.abort(),
+        {once: true},
+      );
+
+      const sendPromise = sendToModelAsync(
+        llmConnection,
+        invocationContext,
+        sendAbortController.signal,
+      );
+
+      let shouldReconnect = false;
+      try {
+        for await (const event of receiveFromModelAsync({
+          llmConnection,
+          invocationContext,
+          responseProcessors: this.responseProcessors,
+          agentName: this.name,
+          toolsDict: llmRequest.toolsDict,
+          beforeToolCallbacks: this.canonicalBeforeToolCallbacks,
+          afterToolCallbacks: this.canonicalAfterToolCallbacks,
+        })) {
+          if (invocationContext.abortSignal?.aborted) {
+            break;
+          }
+          if ('reconnect' in event) {
+            shouldReconnect = true;
+            break;
+          }
+          yield event;
+
+          if (getFunctionResponses(event).length > 0 && event.content) {
+            logger.debug('Sending back last function response event:', event);
+            if (invocationContext.liveRequestQueue) {
+              invocationContext.liveRequestQueue.sendContent(event.content);
+            }
+          }
+
+          const firstPart = event.content?.parts?.[0];
+          if (firstPart?.functionResponse?.name === 'transfer_to_agent') {
+            sendAbortController.abort();
+            try {
+              await sendPromise;
+            } catch {
+              /* ignore abort error */
+            }
+            logger.debug('Closing live connection for agent transfer');
+            await llmConnection.close();
+
+            const transferToAgentName = event.actions?.transferToAgent;
+
+            if (transferToAgentName) {
+              logger.debug(`Transferring to agent: ${transferToAgentName}`);
+              const agentToRun: BaseAgent | undefined =
+                this.rootAgent.findAgent(transferToAgentName);
+              if (agentToRun && isLlmAgent(agentToRun)) {
+                const childContext = invocationContext.copy({
+                  liveSessionResumptionHandle: undefined,
+                  runConfig: invocationContext.runConfig
+                    ? {
+                        ...invocationContext.runConfig,
+                        sessionResumption: undefined,
+                      }
+                    : undefined,
+                });
+
+                yield* agentToRun.runLive(childContext);
+              }
+            }
+            return;
+          }
+
+          if (firstPart?.functionResponse?.name === 'task_completed') {
+            await llmConnection.close();
+            return;
+          }
+        }
+      } catch (error: unknown) {
+        const errObj = error as {code?: number; message?: string};
+        const isRecoverableCode =
+          errObj?.code !== undefined &&
+          [1000, 1006, 1011].includes(errObj.code);
+
+        if (!invocationContext.liveSessionResumptionHandle) {
+          throw error;
+        }
+        if (attempt > MAX_LIVE_RECONNECT_ATTEMPTS) {
+          logger.error(`Max reconnection attempts reached (${error}).`);
+          throw error;
+        }
+        if (
+          isRecoverableCode ||
+          (error instanceof Error &&
+            error.message.includes('Connection closed'))
+        ) {
+          logger.info(
+            `Connection lost/closed (${error}), reconnecting with session handle.`,
+          );
+          shouldReconnect = true;
+        } else {
+          throw error;
+        }
+      } finally {
+        sendAbortController.abort();
+        try {
+          await sendPromise;
+        } catch {
+          /* ignore abort error */
+        }
+      }
+
+      if (shouldReconnect) {
+        continue;
+      }
+      break;
+    }
+  }
+
+  private async *runOneStepAsync(
+    invocationContext: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    const llmRequest: LlmRequest = {
+      contents: [],
+      toolsDict: {},
+      liveConnectConfig: {},
+    };
+
+    for await (const event of this.preprocessAsync(
+      invocationContext,
+      llmRequest,
+    )) {
+      if (invocationContext.abortSignal?.aborted) {
+        return;
+      }
+      yield event;
+    }
     if (
       invocationContext.endInvocation ||
       invocationContext.abortSignal?.aborted
@@ -1281,4 +1512,224 @@ export class LlmAgent extends BaseAgent {
   // TODO - b/425992518: omitted Py LlmAgent features.
   // - code_executor
   // - configurable agents by yaml config
+}
+
+async function sendToModelAsync(
+  llmConnection: BaseLlmConnection,
+  invocationContext: InvocationContext,
+  abortSignal?: AbortSignal,
+): Promise<void> {
+  const liveRequestQueue = invocationContext.liveRequestQueue;
+  if (!liveRequestQueue) {
+    return;
+  }
+  while (!abortSignal?.aborted) {
+    let liveRequest;
+    try {
+      liveRequest = await liveRequestQueue.get(abortSignal);
+    } catch {
+      return;
+    }
+    if (abortSignal?.aborted) {
+      return;
+    }
+    if (liveRequest.close) {
+      await llmConnection.close();
+      return;
+    }
+
+    if (invocationContext.activeStreamingTools) {
+      for (const tool of Object.values(
+        invocationContext.activeStreamingTools,
+      )) {
+        if (tool.stream) {
+          tool.stream.send(liveRequest);
+        }
+      }
+    }
+
+    if (liveRequest.activityStart && llmConnection.sendActivityStart) {
+      await llmConnection.sendActivityStart();
+    } else if (liveRequest.activityEnd && llmConnection.sendActivityEnd) {
+      await llmConnection.sendActivityEnd();
+    } else if (liveRequest.blob) {
+      await llmConnection.sendRealtime(liveRequest.blob);
+    }
+
+    if (liveRequest.content) {
+      const content = liveRequest.content;
+      const isFunctionResponse = content.parts?.some(
+        (part) => part.functionResponse,
+      );
+      if (!isFunctionResponse && !content.role) {
+        content.role = 'user';
+      }
+      if (!isFunctionResponse && !liveRequest.partial) {
+        const userContentEvent = createEvent({
+          invocationId: invocationContext.invocationId,
+          author: 'user',
+          content,
+        });
+        if (invocationContext.sessionService && invocationContext.session) {
+          await invocationContext.sessionService.appendEvent({
+            session: invocationContext.session,
+            event: userContentEvent,
+          });
+        }
+      }
+      await llmConnection.sendContent(liveRequest.content);
+    }
+  }
+}
+
+function getAuthorForEvent(
+  llmResponse: LlmResponse,
+  agentName: string,
+): string {
+  return llmResponse?.inputTranscription ||
+    llmResponse?.content?.role === 'user'
+    ? 'user'
+    : agentName;
+}
+
+async function* receiveFromModelAsync({
+  llmConnection,
+  invocationContext,
+  responseProcessors,
+  agentName,
+  toolsDict,
+  beforeToolCallbacks,
+  afterToolCallbacks,
+}: {
+  llmConnection: BaseLlmConnection;
+  invocationContext: InvocationContext;
+  responseProcessors: BaseLlmResponseProcessor[];
+  agentName: string;
+  toolsDict: Record<string, BaseTool>;
+  beforeToolCallbacks?: SingleBeforeToolCallback[];
+  afterToolCallbacks?: SingleAfterToolCallback[];
+}): AsyncGenerator<Event | {reconnect: true}, void, void> {
+  for await (const llmResponse of llmConnection.receive()) {
+    if (llmResponse.liveSessionResumptionUpdate) {
+      logger.info(
+        'Update session resumption handle:',
+        llmResponse.liveSessionResumptionUpdate,
+      );
+      invocationContext.liveSessionResumptionHandle =
+        llmResponse.liveSessionResumptionUpdate.newHandle;
+    }
+    if (llmResponse.goAway) {
+      logger.info('Received go away signal:', llmResponse.goAway);
+      yield {reconnect: true};
+      return;
+    }
+
+    const modelResponseEvent = createEvent({
+      invocationId: invocationContext.invocationId,
+      author: getAuthorForEvent(llmResponse, agentName),
+      branch: invocationContext.branch,
+    });
+
+    for await (const event of postprocessLiveAsync({
+      invocationContext,
+      llmResponse,
+      modelResponseEvent,
+      responseProcessors,
+      toolsDict,
+      beforeToolCallbacks,
+      afterToolCallbacks,
+    })) {
+      yield event;
+    }
+  }
+}
+
+async function* postprocessLiveAsync({
+  invocationContext,
+  llmResponse,
+  modelResponseEvent,
+  responseProcessors,
+  toolsDict,
+  beforeToolCallbacks,
+  afterToolCallbacks,
+}: {
+  invocationContext: InvocationContext;
+  llmResponse: LlmResponse;
+
+  modelResponseEvent: Event;
+  responseProcessors: BaseLlmResponseProcessor[];
+  toolsDict: Record<string, BaseTool>;
+  beforeToolCallbacks?: SingleBeforeToolCallback[];
+  afterToolCallbacks?: SingleAfterToolCallback[];
+}): AsyncGenerator<Event, void, void> {
+  for (const processor of responseProcessors) {
+    for await (const event of processor.runAsync(
+      invocationContext,
+      llmResponse,
+    )) {
+      if (invocationContext.abortSignal?.aborted) {
+        return;
+      }
+      yield event;
+    }
+  }
+
+  if (
+    (!llmResponse.content || !llmResponse.content.parts?.length) &&
+    !llmResponse.errorCode &&
+    !llmResponse.interrupted &&
+    !llmResponse.turnComplete &&
+    !llmResponse.inputTranscription &&
+    !llmResponse.outputTranscription &&
+    !llmResponse.usageMetadata &&
+    !llmResponse.liveSessionResumptionUpdate &&
+    !llmResponse.groundingMetadata
+  ) {
+    return;
+  }
+
+  if (llmResponse.liveSessionResumptionUpdate) {
+    modelResponseEvent.liveSessionResumptionUpdate =
+      llmResponse.liveSessionResumptionUpdate;
+    yield modelResponseEvent;
+    return;
+  }
+
+  if (llmResponse.inputTranscription) {
+    modelResponseEvent.inputTranscription = llmResponse.inputTranscription;
+    modelResponseEvent.partial = llmResponse.partial;
+    yield modelResponseEvent;
+    return;
+  }
+
+  if (llmResponse.outputTranscription) {
+    modelResponseEvent.outputTranscription = llmResponse.outputTranscription;
+    modelResponseEvent.partial = llmResponse.partial;
+    yield modelResponseEvent;
+    return;
+  }
+
+  const finalizedEvent = createEvent({
+    ...modelResponseEvent,
+    ...llmResponse,
+    id: createNewEventId(),
+    timestamp: Date.now(),
+  });
+  yield finalizedEvent;
+
+  if (getFunctionCalls(finalizedEvent).length > 0) {
+    if (finalizedEvent.partial) {
+      return;
+    }
+    const functionResponseEvent = await handleFunctionCallsLiveAsync({
+      invocationContext,
+      functionCallEvent: finalizedEvent,
+      toolsDict,
+      beforeToolCallbacks,
+      afterToolCallbacks,
+    });
+    if (functionResponseEvent) {
+      yield functionResponseEvent;
+    }
+  }
 }

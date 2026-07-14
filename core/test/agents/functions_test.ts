@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
+  ActiveStreamingTool,
   BasePlugin,
   BaseTool,
   createEvent,
@@ -12,6 +13,7 @@ import {
   functionsExportedForTestingOnly,
   FunctionTool,
   InvocationContext,
+  LiveRequestQueue,
   LlmAgent,
   PluginManager,
   Session,
@@ -33,6 +35,7 @@ import {
 // Get the test target function
 const {
   handleFunctionCallList,
+  handleFunctionCallsLiveAsync,
   generateAuthEvent,
   generateRequestConfirmationEvent,
 } = functionsExportedForTestingOnly;
@@ -747,5 +750,124 @@ describe('mergeParallelFunctionResponseEvents', () => {
     const event = createEvent();
     const merged = mergeParallelFunctionResponseEvents([event]);
     expect(merged).toBe(event);
+  });
+});
+
+describe('handleFunctionCallsLiveAsync', () => {
+  let session: Session;
+  let invocationContext: InvocationContext;
+  let agent: LlmAgent;
+  let toolsDict: Record<string, BaseTool>;
+
+  beforeEach(() => {
+    session = {
+      id: 'session_1',
+      events: [],
+      state: {},
+    };
+    agent = new LlmAgent({name: 'testAgent'});
+    invocationContext = new InvocationContext({
+      session,
+      agent,
+      pluginManager: new PluginManager(),
+    });
+    const tool = new FunctionTool({
+      name: 'test_tool',
+      description: 'Test tool',
+      execute: async () => ({success: true}),
+    });
+    toolsDict = {'test_tool': tool};
+  });
+
+  it('should return null if there are no function calls', async () => {
+    const event = createEvent({
+      content: {role: 'model', parts: [{text: 'hello'}]},
+    });
+    const result = await handleFunctionCallsLiveAsync({
+      invocationContext,
+      functionCallEvent: event,
+      toolsDict,
+    });
+    expect(result).toBeNull();
+  });
+
+  it('should execute normal tool and preserve liveSessionId', async () => {
+    const event = createEvent({
+      content: {
+        role: 'model',
+        parts: [
+          {
+            functionCall: {
+              name: 'test_tool',
+              args: {},
+              id: 'call_live_1',
+            },
+          },
+        ],
+      },
+    });
+    // @ts-expect-error adding liveSessionId for testing
+    event.liveSessionId = 'live-session-xyz';
+
+    const result = await handleFunctionCallsLiveAsync({
+      invocationContext,
+      functionCallEvent: event,
+      toolsDict,
+    });
+    expect(result).toBeDefined();
+    expect(result!.content!.parts![0].functionResponse!.name).toBe('test_tool');
+    // @ts-expect-error checking liveSessionId
+    expect(result!.liveSessionId).toBe('live-session-xyz');
+  });
+
+  it('should handle stop_streaming function call cleanly', async () => {
+    const streamQueue = new LiveRequestQueue();
+    const closeSpy = vi.spyOn(streamQueue, 'close');
+    invocationContext.activeStreamingTools = {
+      'my_stream_func': new ActiveStreamingTool({
+        stream: streamQueue,
+        task: Promise.resolve(),
+      }),
+    };
+
+    const stopTool = new FunctionTool({
+      name: 'stop_streaming',
+      description: 'Stop streaming',
+      execute: async () => ({stopped: true}),
+    });
+    toolsDict['stop_streaming'] = stopTool;
+
+    const event = createEvent({
+      content: {
+        role: 'model',
+        parts: [
+          {
+            functionCall: {
+              name: 'stop_streaming',
+              args: {function_name: 'my_stream_func'},
+              id: 'call_stop_1',
+            },
+          },
+        ],
+      },
+    });
+
+    const result = await handleFunctionCallsLiveAsync({
+      invocationContext,
+      functionCallEvent: event,
+      toolsDict,
+    });
+
+    expect(closeSpy).toHaveBeenCalled();
+    expect(
+      invocationContext.activeStreamingTools['my_stream_func'].stream,
+    ).toBeUndefined();
+    expect(
+      invocationContext.activeStreamingTools['my_stream_func'].task,
+    ).toBeUndefined();
+    expect(result).toBeDefined();
+    expect(result!.content!.parts![0].functionResponse!.name).toBe(
+      'stop_streaming',
+    );
   });
 });

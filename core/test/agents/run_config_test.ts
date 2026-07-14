@@ -24,6 +24,7 @@ describe('createRunConfig', () => {
     expect(config.streamingMode).toBe(StreamingMode.NONE);
     expect(config.maxLlmCalls).toBe(500);
     expect(config.pauseOnToolCalls).toBe(false);
+    expect(config.saveLiveBlob).toBe(false);
   });
 
   it('overrides defaults with provided params', () => {
@@ -32,11 +33,13 @@ describe('createRunConfig', () => {
       supportCfc: true,
       streamingMode: StreamingMode.SSE,
       pauseOnToolCalls: true,
+      saveLiveBlob: true,
     });
     expect(config.saveInputBlobsAsArtifacts).toBe(true);
     expect(config.supportCfc).toBe(true);
     expect(config.streamingMode).toBe(StreamingMode.SSE);
     expect(config.pauseOnToolCalls).toBe(true);
+    expect(config.saveLiveBlob).toBe(true);
   });
 
   it('uses provided maxLlmCalls when specified', () => {

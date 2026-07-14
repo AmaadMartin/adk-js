@@ -35,7 +35,13 @@ export interface LlmRequest {
    */
   config?: GenerateContentConfig;
 
-  liveConnectConfig: LiveConnectConfig;
+  liveConnectConfig: LiveConnectConfig & {
+    historyConfig?: {
+      initialHistoryInClientContent?: boolean;
+      [key: string]: unknown;
+    };
+    [key: string]: unknown;
+  };
 
   /**
    * The tools dictionary. Excluded from JSON serialization.

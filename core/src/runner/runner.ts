@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content, createPartFromText} from '@google/genai';
+import {Content, createPartFromText, Modality} from '@google/genai';
 import {context, trace} from '@opentelemetry/api';
 
 import {BaseAgent} from '../agents/base_agent.js';
@@ -12,6 +12,7 @@ import {
   InvocationContext,
   newInvocationContextId,
 } from '../agents/invocation_context.js';
+import {LiveRequestQueue} from '../agents/live_request_queue.js';
 import {isLlmAgent} from '../agents/llm_agent.js';
 import {createRunConfig, RunConfig} from '../agents/run_config.js';
 import {BaseArtifactService} from '../artifacts/base_artifact_service.js';
@@ -22,7 +23,12 @@ import {
   BuiltInCodeExecutor,
   isBuiltInCodeExecutor,
 } from '../code_executors/built_in_code_executor.js';
-import {createEvent, Event, getFunctionCalls} from '../events/event.js';
+import {
+  createEvent,
+  Event,
+  getFunctionCalls,
+  getFunctionResponses,
+} from '../events/event.js';
 import {createEventActions} from '../events/event_actions.js';
 import {BaseMemoryService} from '../memory/base_memory_service.js';
 import {BasePlugin} from '../plugins/base_plugin.js';
@@ -536,7 +542,143 @@ export class Runner {
     }
     return true;
   }
-  // TODO - b/425992518: Implement runLive and related methods.
+  async *runLive(params: {
+    userId: string;
+    sessionId: string;
+    liveRequestQueue: LiveRequestQueue;
+    runConfig?: RunConfig;
+  }): AsyncGenerator<Event, void, void> {
+    const {userId, sessionId, liveRequestQueue} = params;
+
+    if (!userId || !sessionId) {
+      throw new Error('Both userId and sessionId must be provided.');
+    }
+    if (!liveRequestQueue) {
+      throw new Error('liveRequestQueue is required for runLive.');
+    }
+    const runConfig = createRunConfig(params.runConfig);
+    runConfig.responseModalities ??= [Modality.AUDIO];
+
+    let session = await this.sessionService.getSession({
+      appName: this.appName,
+      userId,
+      sessionId,
+    });
+    if (!session) {
+      session = await this.sessionService.createSession({
+        appName: this.appName,
+        userId,
+        sessionId,
+      });
+    }
+
+    if (!session) {
+      throw new Error('Could not resolve or create session for runLive.');
+    }
+
+    const span = tracer.startSpan('live_invocation');
+    const ctx = trace.setSpan(context.active(), span);
+    try {
+      yield* runAsyncGeneratorWithOtelContext<Runner, Event>(
+        ctx,
+        this,
+        async function* () {
+          const invocationContext = new InvocationContext({
+            artifactService: this.artifactService
+              ? new ScopedArtifactService(
+                  this.artifactService,
+                  this.appName,
+                  session.userId,
+                  session.id,
+                )
+              : undefined,
+            sessionService: this.sessionService,
+            memoryService: this.memoryService,
+            credentialService: this.credentialService,
+            invocationId: newInvocationContextId(),
+            agent: this.agent,
+            session,
+            runConfig,
+            pluginManager: this.pluginManager,
+            liveRequestQueue,
+            liveSessionResumptionHandle: runConfig.sessionResumption?.handle,
+          });
+
+          const agentToRun = this.determineAgentForResumption(
+            session,
+            this.agent,
+          );
+          invocationContext.agent = agentToRun;
+
+          const beforeRunCallbackResponse =
+            await this.pluginManager.runBeforeRunCallback({
+              invocationContext,
+            });
+          if (beforeRunCallbackResponse) {
+            const earlyExitEvent = createEvent({
+              invocationId: invocationContext.invocationId,
+              author: 'model',
+              content: beforeRunCallbackResponse,
+            });
+            if (this.shouldSaveLiveEventToSession(earlyExitEvent, runConfig)) {
+              await this.sessionService.appendEvent({
+                session: session!,
+                event: earlyExitEvent,
+              });
+            }
+            yield earlyExitEvent;
+            return;
+          }
+
+          for await (const event of agentToRun.runLive(invocationContext)) {
+            const modifiedEvent = await this.pluginManager.runOnEventCallback({
+              invocationContext,
+              event,
+            });
+
+            const eventToYield = modifiedEvent || event;
+            yield eventToYield;
+
+            if (this.shouldSaveLiveEventToSession(eventToYield, runConfig)) {
+              await this.sessionService.appendEvent({
+                session: session!,
+                event: eventToYield,
+              });
+            }
+          }
+
+          await this.pluginManager.runAfterRunCallback({
+            invocationContext,
+          });
+        },
+      );
+    } finally {
+      span.end();
+    }
+  }
+
+  private shouldSaveLiveEventToSession(
+    event: Event,
+    runConfig: RunConfig,
+  ): boolean {
+    if (event.partial) return false;
+    if (
+      event.usageMetadata ||
+      event.inputTranscription ||
+      event.outputTranscription ||
+      getFunctionCalls(event).length > 0 ||
+      getFunctionResponses(event).length > 0
+    ) {
+      return true;
+    }
+    if (
+      !runConfig.saveLiveBlob &&
+      event.content?.parts?.some((part) => part.inlineData)
+    ) {
+      return false;
+    }
+    return Boolean(event.content?.parts?.length);
+  }
 }
 
 /**
