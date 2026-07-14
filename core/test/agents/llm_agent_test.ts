@@ -537,6 +537,21 @@ describe('LlmAgent Configuration with contextCompactors', () => {
   });
 });
 
+describe('LlmAgent Configuration of includeForeignThoughts', () => {
+  it('should default includeForeignThoughts to false when not provided in LlmAgentConfig', () => {
+    const agent = new LlmAgent({name: 'test_agent'});
+    expect(agent.includeForeignThoughts).toBe(false);
+  });
+
+  it('should set includeForeignThoughts to true when configured in LlmAgentConfig', () => {
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      includeForeignThoughts: true,
+    });
+    expect(agent.includeForeignThoughts).toBe(true);
+  });
+});
+
 describe('LlmAgent Abort Handling', () => {
   it('should stop execution when abortSignal is aborted between steps', async () => {
     const responseChunks: LlmResponse[] = [

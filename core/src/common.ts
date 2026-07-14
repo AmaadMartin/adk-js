@@ -42,6 +42,7 @@ export {
   BaseLlmRequestProcessor,
   BaseLlmResponseProcessor,
 } from './agents/processors/base_llm_processor.js';
+export type {GetContentsOptions} from './agents/processors/content_processor_utils.js';
 export {
   CONTENT_REQUEST_PROCESSOR,
   ContentRequestProcessor,

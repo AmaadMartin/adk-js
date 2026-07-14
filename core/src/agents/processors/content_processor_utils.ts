@@ -24,11 +24,23 @@ import {
 } from '../functions.js';
 
 /**
+ * Options for getting contents.
+ */
+export interface GetContentsOptions {
+  /**
+   * Whether to include reasoning thoughts when converting events from other agents.
+   * Defaults to false.
+   */
+  includeForeignThoughts?: boolean;
+}
+
+/**
  * Get the contents for the LLM request.
  *
  * @param events: A list of all session events.
  * @param agentName: The name of the agent.
  * @param currentBranch: The current branch of the agent.
+ * @param options: Options for processing contents.
  *
  * @returns A list of processed contents.
  */
@@ -36,6 +48,7 @@ export function getContents(
   events: Event[],
   agentName: string,
   currentBranch?: string,
+  options?: GetContentsOptions,
 ): Content[] {
   const filteredEvents: Event[] = [];
 
@@ -71,7 +84,7 @@ export function getContents(
 
     filteredEvents.push(
       isEventFromAnotherAgent(agentName, event)
-        ? convertForeignEvent(event)
+        ? convertForeignEvent(event, options)
         : event,
     );
   }
@@ -110,12 +123,13 @@ export function getCurrentTurnContents(
   events: Event[],
   agentName: string,
   currentBranch?: string,
+  options?: GetContentsOptions,
 ): Content[] {
   // Find the latest event that starts the current turn and process from there.
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i];
     if (event.author === 'user' || isEventFromAnotherAgent(agentName, event)) {
-      return getContents(events.slice(i), agentName, currentBranch);
+      return getContents(events.slice(i), agentName, currentBranch, options);
     }
   }
 
@@ -184,7 +198,10 @@ function isEventFromAnotherAgent(agentName: string, event: Event): boolean {
  *
  * @returns The converted event.
  */
-function convertForeignEvent(event: Event): Event {
+function convertForeignEvent(
+  event: Event,
+  options?: GetContentsOptions,
+): Event {
   if (!event.content?.parts?.length) {
     return event;
   }
@@ -199,9 +216,13 @@ function convertForeignEvent(event: Event): Event {
   };
 
   for (const part of event.content.parts) {
-    // Exclude thoughts from the context.
-    // TODO - b/425992518: filtring should be configurable.
-    if (part.text && !part.thought) {
+    if (part.thought) {
+      if (part.text && options?.includeForeignThoughts) {
+        content.parts?.push({
+          text: `[${event.author}] thought: ${part.text}`,
+        });
+      }
+    } else if (part.text) {
       content.parts?.push({
         text: `[${event.author}] said: ${part.text}`,
       });

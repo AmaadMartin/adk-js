@@ -578,6 +578,91 @@ describe('getContents', () => {
     );
   });
 
+  it('should exclude thought parts in convertForeignEvent by default (when options is undefined)', () => {
+    const event = createEvent({
+      author: 'other_agent',
+      content: {
+        role: 'model',
+        parts: [
+          {
+            text: 'internal thinking...',
+            thought: true,
+          },
+          {
+            text: 'hello from other agent',
+          },
+        ],
+      },
+    });
+
+    const contents = getContents([event], 'current_agent');
+    expect(contents).toHaveLength(1);
+    expect(contents[0].parts).toHaveLength(2);
+    expect(contents[0].parts?.[0].text).toBe('For context:');
+    expect(contents[0].parts?.[1].text).toBe(
+      '[other_agent] said: hello from other agent',
+    );
+  });
+
+  it('should exclude thought parts in convertForeignEvent when includeForeignThoughts is false', () => {
+    const event = createEvent({
+      author: 'other_agent',
+      content: {
+        role: 'model',
+        parts: [
+          {
+            text: 'internal thinking...',
+            thought: true,
+          },
+          {
+            text: 'hello from other agent',
+          },
+        ],
+      },
+    });
+
+    const contents = getContents([event], 'current_agent', undefined, {
+      includeForeignThoughts: false,
+    });
+    expect(contents).toHaveLength(1);
+    expect(contents[0].parts).toHaveLength(2);
+    expect(contents[0].parts?.[0].text).toBe('For context:');
+    expect(contents[0].parts?.[1].text).toBe(
+      '[other_agent] said: hello from other agent',
+    );
+  });
+
+  it("should include thought parts in convertForeignEvent formatted as '[author] thought: ...' when includeForeignThoughts is true", () => {
+    const event = createEvent({
+      author: 'other_agent',
+      content: {
+        role: 'model',
+        parts: [
+          {
+            text: 'internal thinking...',
+            thought: true,
+          },
+          {
+            text: 'hello from other agent',
+          },
+        ],
+      },
+    });
+
+    const contents = getContents([event], 'current_agent', undefined, {
+      includeForeignThoughts: true,
+    });
+    expect(contents).toHaveLength(1);
+    expect(contents[0].parts).toHaveLength(3);
+    expect(contents[0].parts?.[0].text).toBe('For context:');
+    expect(contents[0].parts?.[1].text).toBe(
+      '[other_agent] thought: internal thinking...',
+    );
+    expect(contents[0].parts?.[2].text).toBe(
+      '[other_agent] said: hello from other agent',
+    );
+  });
+
   it('should replace function responses with the same id and append non-function-response parts during merge', () => {
     const e0 = createEvent({
       author: 'my_agent',
@@ -797,6 +882,33 @@ describe('getContents', () => {
       });
       const contents = getCurrentTurnContents([e0], '');
       expect(contents).toEqual([]);
+    });
+
+    it('should verify getContents and getCurrentTurnContents pass options to convertForeignEvent', () => {
+      const event = createEvent({
+        author: 'other_agent',
+        content: {
+          role: 'model',
+          parts: [{text: 'deep thought', thought: true}, {text: 'final reply'}],
+        },
+      });
+
+      const getContentsRes = getContents([event], 'my_agent', undefined, {
+        includeForeignThoughts: true,
+      });
+      expect(getContentsRes[0].parts?.[1].text).toBe(
+        '[other_agent] thought: deep thought',
+      );
+
+      const getCurrentTurnContentsRes = getCurrentTurnContents(
+        [event],
+        'my_agent',
+        undefined,
+        {includeForeignThoughts: true},
+      );
+      expect(getCurrentTurnContentsRes[0].parts?.[1].text).toBe(
+        '[other_agent] thought: deep thought',
+      );
     });
   });
 
