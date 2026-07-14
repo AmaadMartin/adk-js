@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content, createPartFromText} from '@google/genai';
+import {Content, createPartFromText, Modality} from '@google/genai';
 import {context, trace} from '@opentelemetry/api';
 
 import {BaseAgent} from '../agents/base_agent.js';
@@ -12,6 +12,7 @@ import {
   InvocationContext,
   newInvocationContextId,
 } from '../agents/invocation_context.js';
+import {LiveRequestQueue} from '../agents/live_request_queue.js';
 import {isLlmAgent} from '../agents/llm_agent.js';
 import {createRunConfig, RunConfig} from '../agents/run_config.js';
 import {BaseArtifactService} from '../artifacts/base_artifact_service.js';
@@ -384,7 +385,7 @@ export class Runner {
                   return;
                 }
 
-                if (!event.partial) {
+                if (this.shouldAppendEvent(event, false)) {
                   await this.sessionService.appendEvent({session, event});
                 }
                 // Step 3: Run the on_event callbacks to optionally modify the event.
@@ -536,7 +537,209 @@ export class Runner {
     }
     return true;
   }
-  // TODO - b/425992518: Implement runLive and related methods.
+
+  private shouldAppendEvent(event: Event, isLiveCall = false): boolean {
+    if (isLiveCall && isLiveModelMediaEventWithInlineData(event)) {
+      return false;
+    }
+    return !event.partial;
+  }
+
+  private newInvocationContextForLive(
+    session: Session,
+    params: {
+      userId?: string;
+      sessionId?: string;
+      liveRequestQueue: LiveRequestQueue;
+      runConfig?: RunConfig;
+      abortSignal?: AbortSignal;
+      customMetadata?: Record<string, unknown>;
+    },
+  ): InvocationContext {
+    const runConfig = createRunConfig(params.runConfig);
+    if (!runConfig.responseModalities) {
+      runConfig.responseModalities = [Modality.AUDIO];
+    }
+
+    if (this.agent.subAgents && this.agent.subAgents.length > 0) {
+      if (
+        runConfig.responseModalities.includes(Modality.AUDIO) ||
+        runConfig.responseModalities.includes('AUDIO' as unknown as Modality)
+      ) {
+        if (!runConfig.outputAudioTranscription) {
+          runConfig.outputAudioTranscription = {};
+        }
+      }
+      if (!runConfig.inputAudioTranscription) {
+        runConfig.inputAudioTranscription = {};
+      }
+    }
+
+    return new InvocationContext({
+      artifactService: this.artifactService
+        ? new ScopedArtifactService(
+            this.artifactService,
+            this.appName,
+            session.userId,
+            session.id,
+          )
+        : undefined,
+      sessionService: this.sessionService,
+      memoryService: this.memoryService,
+      credentialService: this.credentialService,
+      invocationId: newInvocationContextId(),
+      agent: this.agent,
+      session,
+      runConfig,
+      liveRequestQueue: params.liveRequestQueue,
+      pluginManager: this.pluginManager,
+      abortSignal: params.abortSignal,
+    });
+  }
+
+  async *runLive(params: {
+    userId?: string;
+    sessionId?: string;
+    session?: Session;
+    liveRequestQueue: LiveRequestQueue;
+    runConfig?: RunConfig;
+    abortSignal?: AbortSignal;
+    customMetadata?: Record<string, unknown>;
+  }): AsyncGenerator<Event, void, undefined> {
+    if (!params.liveRequestQueue) {
+      throw new Error('liveRequestQueue is required for runLive.');
+    }
+    let session = params.session;
+    if (!session && (!params.userId || !params.sessionId)) {
+      throw new Error(
+        'Either session or userId and sessionId must be provided.',
+      );
+    }
+
+    const span = tracer.startSpan('invocation');
+    const ctx = trace.setSpan(context.active(), span);
+    try {
+      yield* runAsyncGeneratorWithOtelContext<Runner, Event>(
+        ctx,
+        this,
+        async function* () {
+          if (!session && params.userId && params.sessionId) {
+            session = await this.sessionService.getSession({
+              appName: this.appName,
+              userId: params.userId,
+              sessionId: params.sessionId,
+            });
+            if (!session) {
+              if (!this.appName) {
+                throw new Error(
+                  `Session lookup failed: appName must be provided in runner constructor`,
+                );
+              }
+              throw new Error(`Session not found: ${params.sessionId}`);
+            }
+          }
+          if (!session) {
+            throw new Error('Session could not be resolved.');
+          }
+
+          if (params.abortSignal?.aborted) {
+            return;
+          }
+
+          const invocationContext = this.newInvocationContextForLive(
+            session,
+            params,
+          );
+          invocationContext.agent = this.determineAgentForResumption(
+            session,
+            this.agent,
+          );
+
+          const beforeRunCallbackResponse =
+            await this.pluginManager.runBeforeRunCallback({
+              invocationContext,
+            });
+          if (params.abortSignal?.aborted) {
+            return;
+          }
+
+          if (beforeRunCallbackResponse) {
+            const earlyExitEvent = createEvent({
+              invocationId: invocationContext.invocationId,
+              author: 'model',
+              content: beforeRunCallbackResponse,
+            });
+            if (this.shouldAppendEvent(earlyExitEvent, true)) {
+              await this.sessionService.appendEvent({
+                session,
+                event: earlyExitEvent,
+              });
+            }
+            if (params.abortSignal?.aborted) {
+              return;
+            }
+            yield earlyExitEvent;
+          } else {
+            for await (const event of invocationContext.agent.runLive(
+              invocationContext,
+            )) {
+              if (params.abortSignal?.aborted) {
+                return;
+              }
+
+              if (this.shouldAppendEvent(event, true)) {
+                await this.sessionService.appendEvent({session, event});
+              }
+
+              const modifiedEvent = await this.pluginManager.runOnEventCallback(
+                {
+                  invocationContext,
+                  event,
+                },
+              );
+              if (params.abortSignal?.aborted) {
+                return;
+              }
+
+              if (modifiedEvent) {
+                yield modifiedEvent;
+              } else {
+                yield event;
+              }
+            }
+
+            await this.pluginManager.runAfterRunCallback({invocationContext});
+            if (params.abortSignal?.aborted) {
+              return;
+            }
+          }
+        },
+      );
+    } finally {
+      span.end();
+      const toolsets = getAllToolsets(this.agent);
+      await Promise.allSettled(toolsets.map((t) => t.close()));
+    }
+  }
+}
+
+function isLiveModelMediaEventWithInlineData(event: Event): boolean {
+  if (!event.content || !event.content.parts) {
+    return false;
+  }
+  for (const part of event.content.parts) {
+    if (part.inlineData && part.inlineData.mimeType) {
+      const mime = part.inlineData.mimeType.toLowerCase();
+      if (
+        mime.startsWith('audio/') ||
+        mime.startsWith('video/') ||
+        mime.startsWith('image/')
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 /**
