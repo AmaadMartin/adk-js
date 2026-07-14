@@ -74,6 +74,7 @@ export class ContentRequestProcessor implements BaseLlmRequestProcessor {
       isolationScope: invocationContext.isolationScope,
       includeThoughtsFromOtherAgents:
         invocationContext.runConfig?.includeThoughtsFromOtherAgents ?? false,
+      sourceEvents,
     };
 
     if (agent.includeContents === 'default') {

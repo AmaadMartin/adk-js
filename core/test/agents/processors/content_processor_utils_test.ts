@@ -11,6 +11,7 @@ import {
   getContents,
   getCurrentTurnContents,
   mergeFunctionResponseEvents,
+  recoverCompactedFunctionCalls,
 } from '../../../src/agents/processors/content_processor_utils.js';
 
 describe('getContents', () => {
@@ -1216,5 +1217,133 @@ describe('getContents', () => {
         {text: '[other_agent] thought: Just reasoning 2'},
       ]);
     });
+  });
+});
+
+describe('recoverCompactedFunctionCalls', () => {
+  it('returns events unchanged if there are no orphaned function responses', () => {
+    const callEvent = createEvent({
+      author: 'model',
+      content: {
+        role: 'model',
+        parts: [{functionCall: {id: 'call_1', name: 'tool_a', args: {x: 1}}}],
+      },
+    });
+    const respEvent = createEvent({
+      author: 'user',
+      content: {
+        role: 'user',
+        parts: [
+          {
+            functionResponse: {
+              id: 'call_1',
+              name: 'tool_a',
+              response: {ok: true},
+            },
+          },
+        ],
+      },
+    });
+
+    const recovered = recoverCompactedFunctionCalls(
+      [callEvent, respEvent],
+      [callEvent, respEvent],
+    );
+    expect(recovered).toEqual([callEvent, respEvent]);
+  });
+
+  it('re-injects missing function calls from sourceEvents right before the orphaned function response', () => {
+    const callEvent = createEvent({
+      author: 'model',
+      timestamp: 100,
+      content: {
+        role: 'model',
+        parts: [
+          {
+            functionCall: {
+              id: 'call_long',
+              name: 'long_running_tool',
+              args: {job: '123'},
+            },
+          },
+        ],
+      },
+    });
+    // Imagine compaction happened right after callEvent
+    const respEvent = createEvent({
+      author: 'user',
+      timestamp: 200,
+      content: {
+        role: 'user',
+        parts: [
+          {
+            functionResponse: {
+              id: 'call_long',
+              name: 'long_running_tool',
+              response: {status: 'done'},
+            },
+          },
+        ],
+      },
+    });
+
+    // In post-compaction events, callEvent was compacted away, only respEvent survives
+    const postCompactionEvents = [respEvent];
+    const sourceEvents = [callEvent, respEvent];
+
+    const recovered = recoverCompactedFunctionCalls(
+      postCompactionEvents,
+      sourceEvents,
+    );
+    expect(recovered).toHaveLength(2);
+    expect(recovered[0]).toBe(callEvent);
+    expect(recovered[1]).toBe(respEvent);
+  });
+
+  it('re-injects sibling function responses that were also removed by compaction', () => {
+    const callEvent = createEvent({
+      author: 'model',
+      timestamp: 100,
+      content: {
+        role: 'model',
+        parts: [
+          {functionCall: {id: 'call_1', name: 'tool_1', args: {}}},
+          {functionCall: {id: 'call_2', name: 'tool_2', args: {}}},
+        ],
+      },
+    });
+    const resp1Event = createEvent({
+      author: 'user',
+      timestamp: 110,
+      content: {
+        role: 'user',
+        parts: [
+          {functionResponse: {id: 'call_1', name: 'tool_1', response: {a: 1}}},
+        ],
+      },
+    });
+    const resp2Event = createEvent({
+      author: 'user',
+      timestamp: 200,
+      content: {
+        role: 'user',
+        parts: [
+          {functionResponse: {id: 'call_2', name: 'tool_2', response: {b: 2}}},
+        ],
+      },
+    });
+
+    // Imagine callEvent and resp1Event were compacted, and resp2Event survived
+    const postCompactionEvents = [resp2Event];
+    const sourceEvents = [callEvent, resp1Event, resp2Event];
+
+    const recovered = recoverCompactedFunctionCalls(
+      postCompactionEvents,
+      sourceEvents,
+    );
+    expect(recovered).toHaveLength(3);
+    expect(recovered[0]).toBe(callEvent);
+    expect(recovered[1]).toBe(resp1Event);
+    expect(recovered[2]).toBe(resp2Event);
   });
 });

@@ -51,6 +51,7 @@ export {
   getContents,
   getCurrentTurnContents,
   mergeFunctionResponseEvents,
+  recoverCompactedFunctionCalls,
 } from './agents/processors/content_processor_utils.js';
 export type {ContentProcessorOptions} from './agents/processors/content_processor_utils.js';
 export {
