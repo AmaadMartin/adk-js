@@ -6,6 +6,7 @@
 
 import {
   AUTH_PREPROCESSOR,
+  AuthConfig,
   BaseLlm,
   BaseLlmConnection,
   BaseLlmRequestProcessor,
@@ -22,6 +23,7 @@ import {
   LlmRequest,
   LlmResponse,
   PluginManager,
+  REQUEST_EUC_FUNCTION_CALL_NAME,
   RunAsyncToolRequest,
   Session,
   ToolProcessLlmRequest,
@@ -837,5 +839,190 @@ describe('LlmAgent Default Request Processors', () => {
       CONTENT_REQUEST_PROCESSOR,
     );
     expect(authIndex).toBeLessThan(contentIndex);
+  });
+});
+
+class MockToolWithAuth extends BaseTool {
+  constructor(
+    name: string,
+    private authConfigsToRequest: Record<string, AuthConfig>,
+    private controller?: AbortController,
+  ) {
+    super({name, description: 'mock tool with auth'});
+  }
+  async runAsync(request: RunAsyncToolRequest): Promise<unknown> {
+    if (this.controller) {
+      this.controller.abort();
+    }
+    if (request.toolContext && request.toolContext.functionCallId) {
+      const config =
+        this.authConfigsToRequest[request.toolContext.functionCallId];
+      if (config) {
+        request.toolContext.requestCredential(config);
+      }
+    }
+    return Promise.resolve({result: 'auth_requested'});
+  }
+  override async processLlmRequest(
+    params: ToolProcessLlmRequest,
+  ): Promise<void> {
+    params.llmRequest.toolsDict[this.name] = this;
+  }
+}
+
+describe('LlmAgent generateAuthEvent internalization handling', () => {
+  it('should emit auth request event when tool requests credentials during execution', async () => {
+    const authConfig1: AuthConfig = {
+      authScheme: {type: 'apiKey'},
+    };
+    const authConfig2: AuthConfig = {
+      authScheme: {type: 'apiKey'},
+    };
+
+    const mockTool = new MockToolWithAuth('mock_tool_auth', {
+      'call_1': authConfig1,
+      'call_2': authConfig2,
+    });
+
+    const functionCallResponse: LlmResponse = {
+      content: {
+        role: 'model',
+        parts: [
+          {
+            functionCall: {
+              name: 'mock_tool_auth',
+              args: {arg: 1},
+              id: 'call_1',
+            },
+          },
+          {
+            functionCall: {
+              name: 'mock_tool_auth',
+              args: {arg: 2},
+              id: 'call_2',
+            },
+          },
+        ],
+      },
+    };
+
+    const mockModel = new MockLlm(functionCallResponse);
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      tools: [mockTool],
+      model: mockModel,
+    });
+
+    const mockState = {
+      hasDelta: () => false,
+      get: () => undefined,
+      set: () => {},
+    };
+
+    const invocationContext = new InvocationContext({
+      invocationId: 'inv_123',
+      branch: 'test_branch',
+      session: {
+        id: 'sess_123',
+        state: mockState,
+        events: [],
+      } as unknown as Session,
+      agent: agent,
+      pluginManager: new PluginManager(),
+    });
+
+    const generator = agent.runAsync(invocationContext);
+    const events: Event[] = [];
+    for await (const event of generator) {
+      events.push(event);
+    }
+
+    expect(events.length).toBeGreaterThanOrEqual(2);
+    const authEvent = events.find((e) =>
+      e.content?.parts?.some(
+        (p) => p.functionCall?.name === REQUEST_EUC_FUNCTION_CALL_NAME,
+      ),
+    );
+    expect(authEvent).toBeDefined();
+    expect(authEvent!.invocationId).toBe('inv_123');
+    expect(authEvent!.author).toBe('test_agent');
+    expect(authEvent!.branch).toBe('test_branch');
+    expect(authEvent!.longRunningToolIds).toHaveLength(2);
+    expect(authEvent!.content!.parts!).toHaveLength(2);
+
+    const call1Part = authEvent!.content!.parts!.find(
+      (p) => p.functionCall?.args?.['function_call_id'] === 'call_1',
+    );
+    expect(call1Part).toBeDefined();
+    expect(call1Part!.functionCall!.name).toBe(REQUEST_EUC_FUNCTION_CALL_NAME);
+    expect(call1Part!.functionCall!.args!['auth_config']).toBeDefined();
+
+    const call2Part = authEvent!.content!.parts!.find(
+      (p) => p.functionCall?.args?.['function_call_id'] === 'call_2',
+    );
+    expect(call2Part).toBeDefined();
+    expect(call2Part!.functionCall!.name).toBe(REQUEST_EUC_FUNCTION_CALL_NAME);
+    expect(call2Part!.functionCall!.args!['auth_config']).toBeDefined();
+  });
+
+  it('should not emit auth request event when requestedAuthConfigs is empty', async () => {
+    const abortController = new AbortController();
+    const mockTool = new MockToolWithAuth(
+      'mock_tool_no_auth',
+      {},
+      abortController,
+    );
+
+    const functionCallResponse: LlmResponse = {
+      content: {
+        role: 'model',
+        parts: [
+          {
+            functionCall: {
+              name: 'mock_tool_no_auth',
+              args: {},
+              id: 'call_no_auth',
+            },
+          },
+        ],
+      },
+    };
+
+    const mockModel = new MockLlm(functionCallResponse);
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      tools: [mockTool],
+      model: mockModel,
+    });
+
+    const mockState = {
+      hasDelta: () => false,
+      get: () => undefined,
+      set: () => {},
+    };
+
+    const invocationContext = new InvocationContext({
+      invocationId: 'inv_123',
+      session: {
+        id: 'sess_123',
+        state: mockState,
+        events: [],
+      } as unknown as Session,
+      agent: agent,
+      pluginManager: new PluginManager(),
+      abortSignal: abortController.signal,
+    });
+
+    const events: Event[] = [];
+    for await (const event of agent.runAsync(invocationContext)) {
+      events.push(event);
+    }
+
+    const authEvent = events.find((e) =>
+      e.content?.parts?.some(
+        (p) => p.functionCall?.name === REQUEST_EUC_FUNCTION_CALL_NAME,
+      ),
+    );
+    expect(authEvent).toBeUndefined();
   });
 });

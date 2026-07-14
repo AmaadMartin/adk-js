@@ -31,11 +31,8 @@ import {
 } from '../../src/agents/functions.js';
 
 // Get the test target function
-const {
-  handleFunctionCallList,
-  generateAuthEvent,
-  generateRequestConfirmationEvent,
-} = functionsExportedForTestingOnly;
+const {handleFunctionCallList, generateRequestConfirmationEvent} =
+  functionsExportedForTestingOnly;
 
 // Tool for testing
 const testTool = new FunctionTool({
@@ -362,73 +359,6 @@ describe('handleFunctionCallList', () => {
         }),
       }),
     );
-  });
-});
-
-describe('generateAuthEvent', () => {
-  let invocationContext: InvocationContext;
-  let pluginManager: PluginManager;
-
-  beforeEach(() => {
-    pluginManager = new PluginManager();
-    const agent = new LlmAgent({name: 'test_agent', model: 'test_model'});
-    invocationContext = new InvocationContext({
-      invocationId: 'inv_123',
-      session: {} as Session,
-      agent,
-      pluginManager,
-    });
-  });
-
-  it('should return undefined if no requestedAuthConfigs', () => {
-    const functionResponseEvent = createEvent({
-      content: {role: 'model', parts: []},
-    });
-
-    const event = generateAuthEvent(invocationContext, functionResponseEvent);
-    expect(event).toBeUndefined();
-  });
-
-  it('should return undefined if requestedAuthConfigs is empty', () => {
-    const functionResponseEvent = createEvent({
-      content: {role: 'model', parts: []},
-    });
-
-    const event = generateAuthEvent(invocationContext, functionResponseEvent);
-    expect(event).toBeUndefined();
-  });
-
-  it('should return auth event if requestedAuthConfigs is present', () => {
-    const functionResponseEvent = createEvent({
-      actions: createEventActions({
-        requestedAuthConfigs: {
-          'call_1': 'auth_config_1',
-          'call_2': 'auth_config_2',
-        },
-      }),
-      content: {role: 'model', parts: []},
-    });
-
-    const event = generateAuthEvent(invocationContext, functionResponseEvent);
-    expect(event).toBeDefined();
-    expect(event!.invocationId).toBe('inv_123');
-    expect(event!.author).toBe('test_agent');
-    expect(event!.content!.parts!.length).toBe(2);
-
-    const parts = event!.content!.parts!;
-    const call1 = parts.find(
-      (p) => p.functionCall?.args?.['function_call_id'] === 'call_1',
-    );
-    expect(call1).toBeDefined();
-    expect(call1!.functionCall!.name).toBe('adk_request_credential');
-    expect(call1!.functionCall!.args!['auth_config']).toBe('auth_config_1');
-
-    const call2 = parts.find(
-      (p) => p.functionCall?.args?.['function_call_id'] === 'call_2',
-    );
-    expect(call2).toBeDefined();
-    expect(call2!.functionCall!.name).toBe('adk_request_credential');
-    expect(call2!.functionCall!.args!['auth_config']).toBe('auth_config_2');
   });
 });
 
