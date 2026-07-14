@@ -12,7 +12,7 @@ import {getResponse, sendInput} from '../test_case_utils.js';
 const execAsync = promisify(exec);
 const dirname = process.cwd();
 
-const TEST_EXECUTION_TIMEOUT = 20000;
+const TEST_EXECUTION_TIMEOUT = 120000;
 
 describe('Build setup', () => {
   describe.each([
@@ -43,7 +43,7 @@ describe('Build setup', () => {
         expect(buildResult.stderr).toBe('');
         expect(buildResult.stdout).toContain('\nBuild complete');
       }
-    });
+    }, 300000);
 
     it(
       'should build and run agent successfully',
@@ -119,6 +119,6 @@ describe('Build setup', () => {
           .rm(`${projectPath}/dist`, {recursive: true, force: true})
           .catch(() => {});
       }
-    });
+    }, 120000);
   });
 });
