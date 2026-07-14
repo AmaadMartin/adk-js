@@ -49,6 +49,12 @@ describe('createRunConfig', () => {
     expect(config.streamingMode).toBe(StreamingMode.BIDI);
   });
 
+  it('logs a warning when saveInputBlobsAsArtifacts is true', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    createRunConfig({saveInputBlobsAsArtifacts: true});
+    warnSpy.mockRestore();
+  });
+
   it('logs a warning when maxLlmCalls is 0', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     createRunConfig({maxLlmCalls: 0});

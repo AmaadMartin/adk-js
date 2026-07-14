@@ -39,6 +39,7 @@ export interface RunConfig {
 
   /**
    * Whether or not to save the input blobs as artifacts.
+   * @deprecated Use `SaveFilesAsArtifactsPlugin` instead.
    */
   saveInputBlobsAsArtifacts?: boolean;
 
@@ -117,6 +118,11 @@ export interface RunConfig {
  * @throws {Error} When `params.maxLlmCalls` exceeds `Number.MAX_SAFE_INTEGER`.
  */
 export function createRunConfig(params: Partial<RunConfig> = {}) {
+  if (params.saveInputBlobsAsArtifacts) {
+    logger.warn(
+      'The `saveInputBlobsAsArtifacts` parameter is deprecated. Use `SaveFilesAsArtifactsPlugin` instead for better control and flexibility.',
+    );
+  }
   return {
     saveInputBlobsAsArtifacts: false,
     supportCfc: false,
