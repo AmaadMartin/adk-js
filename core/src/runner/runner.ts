@@ -473,7 +473,7 @@ export class Runner {
     // Case 1: If the last event is a function response, this returns the
     // agent that made the original function call.
     // =========================================================================
-    const event = findEventByLastFunctionResponseId(session.events);
+    const event = findEventByLastFunctionResponseId(session.events, session);
     if (event && event.author) {
       return rootAgent.findAgent(event.author) || rootAgent;
     }
@@ -482,27 +482,19 @@ export class Runner {
     // Case 2: Otherwise, find the last agent that emitted a message and is
     // transferable across the agent tree.
     // =========================================================================
-    // TODO - b/425992518: Optimize this, not going to work for long sessions.
-    // TODO - b/425992518: The behavior is dynamic, needs better documentation.
-    for (let i = session.events.length - 1; i >= 0; i--) {
-      logger.info('event:', JSON.stringify(session.events[i]));
-      const event = session.events[i];
-      if (event.author === 'user' || !event.author) {
-        continue;
-      }
+    const agentIndices = syncSessionResumptionIndex(session).agentEventIndices;
+    for (let idx = agentIndices.length - 1; idx >= 0; idx--) {
+      const event = session.events[agentIndices[idx]];
+      logger.debug('event:', JSON.stringify(event));
 
-      if (event.author === rootAgent.name) {
-        return rootAgent;
-      }
-
-      const agent = rootAgent.findSubAgent(event.author!);
+      const agent = rootAgent.findAgent(event.author!);
       if (!agent) {
         logger.warn(
           `Event from an unknown agent: ${event.author}, event id: ${event.id}`,
         );
         continue;
       }
-      if (this.isRoutableLlmAgent(agent)) {
+      if (agent === rootAgent || this.isRoutableLlmAgent(agent)) {
         return agent;
       }
     }
@@ -540,13 +532,75 @@ export class Runner {
 }
 
 /**
+ * Internal indexing data structure for session resumption.
+ */
+export interface SessionResumptionIndex {
+  /** The length of session.events when this index was last updated. */
+  lastIndexedLength: number;
+  /** Maps functionCall.id to the actual Event object (for findEventByLastFunctionResponseId compatibility). */
+  functionCallEventMap: Map<string, Event>;
+  /** Ordered list of event indices where author is an agent (not 'user' or undefined). */
+  agentEventIndices: number[];
+}
+
+const sessionResumptionIndices = new WeakMap<Session, SessionResumptionIndex>();
+
+const createEmptyIndex = (): SessionResumptionIndex => ({
+  lastIndexedLength: 0,
+  functionCallEventMap: new Map<string, Event>(),
+  agentEventIndices: [],
+});
+
+/**
+ * Incrementally indexes session events for fast O(1)/O(k) resumption routing.
+ * Automatically resets if session events array is truncated or replaced.
+ */
+export function syncSessionResumptionIndex(
+  session: Session,
+): SessionResumptionIndex {
+  if (!session?.events) {
+    return createEmptyIndex();
+  }
+
+  let index = sessionResumptionIndices.get(session);
+  if (!index || session.events.length < index.lastIndexedLength) {
+    index = createEmptyIndex();
+    sessionResumptionIndices.set(session, index);
+  }
+
+  if (index.lastIndexedLength < session.events.length) {
+    const oldLength = index.lastIndexedLength;
+    for (let i = index.lastIndexedLength; i < session.events.length; i++) {
+      const event = session.events[i];
+      if (event.author && event.author !== 'user') {
+        index.agentEventIndices.push(i);
+      }
+
+      for (const functionCall of getFunctionCalls(event)) {
+        if (functionCall.id) {
+          index.functionCallEventMap.set(functionCall.id, event);
+        }
+      }
+    }
+    index.lastIndexedLength = session.events.length;
+    logger.debug(
+      `Updated SessionResumptionIndex for session ${session.id}: indexed ${session.events.length - oldLength} new events (total ${session.events.length})`,
+    );
+  }
+
+  return index;
+}
+
+/**
  * It iterates through the events in reverse order, and returns the event
  * containing a function call with a functionCall.id matching the
  * functionResponse.id from the last event in the session.
  */
-// TODO - b/425992518: a hack that used event log as transaction log. Fix.
-function findEventByLastFunctionResponseId(events: Event[]): Event | null {
-  if (!events.length) {
+export function findEventByLastFunctionResponseId(
+  events: Event[],
+  session?: Session,
+): Event | null {
+  if (!events?.length) {
     return null;
   }
 
@@ -558,16 +612,17 @@ function findEventByLastFunctionResponseId(events: Event[]): Event | null {
     return null;
   }
 
-  // TODO - b/425992518: inefficient search, fix.
+  if (session && session.events === events) {
+    const event =
+      syncSessionResumptionIndex(session).functionCallEventMap.get(
+        functionCallId,
+      );
+    return event && event !== lastEvent ? event : null;
+  }
+
   for (let i = events.length - 2; i >= 0; i--) {
     const event = events[i];
-    // Looking for the system long running request euc function call.
-    const functionCalls = getFunctionCalls(event);
-    if (!functionCalls) {
-      continue;
-    }
-
-    for (const functionCall of functionCalls) {
+    for (const functionCall of getFunctionCalls(event)) {
       if (functionCall.id === functionCallId) {
         return event;
       }

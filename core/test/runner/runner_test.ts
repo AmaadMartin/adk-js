@@ -14,9 +14,14 @@ import {
   InvocationContext,
   LlmAgent,
   Runner,
+  Session,
 } from '@google/adk';
 import {Content, FunctionCall, FunctionResponse} from '@google/genai';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {
+  findEventByLastFunctionResponseId,
+  syncSessionResumptionIndex,
+} from '../../src/runner/runner.js';
 
 const TEST_APP_ID = 'test_app_id';
 const TEST_USER_ID = 'test_user_id';
@@ -332,6 +337,458 @@ describe('Runner.determineAgentForResumption', () => {
     }
 
     expect(events[0].author).toBe('sub_agent2');
+  });
+
+  it('should incrementally update index when determineAgentForResumption is called multiple times as new events are appended', async () => {
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    const event1 = createEvent({
+      invocationId: 'inv1',
+      author: 'sub_agent1',
+      content: {role: 'model', parts: [{text: 'First response'}]},
+    });
+    const event2 = createEvent({
+      invocationId: 'inv2',
+      author: 'user',
+      content: {role: 'user', parts: [{text: 'User follow up'}]},
+    });
+
+    session.events.push(event1, event2);
+
+    const runnerPrivate = runner as unknown as {
+      determineAgentForResumption(
+        session: Session,
+        rootAgent: BaseAgent,
+      ): BaseAgent;
+    };
+    const firstResolved = runnerPrivate.determineAgentForResumption(
+      session,
+      rootAgent,
+    );
+    expect(firstResolved.name).toBe('sub_agent1');
+
+    const indexAfterFirst = syncSessionResumptionIndex(session);
+    expect(indexAfterFirst.lastIndexedLength).toBe(2);
+    expect(indexAfterFirst.agentEventIndices).toEqual([0]);
+
+    const event3 = createEvent({
+      invocationId: 'inv3',
+      author: 'sub_agent2',
+      content: {role: 'model', parts: [{text: 'Second response'}]},
+    });
+    const event4 = createEvent({
+      invocationId: 'inv4',
+      author: 'user',
+      content: {role: 'user', parts: [{text: 'Another user follow up'}]},
+    });
+
+    session.events.push(event3, event4);
+
+    const secondResolved = runnerPrivate.determineAgentForResumption(
+      session,
+      rootAgent,
+    );
+    expect(secondResolved.name).toBe('sub_agent2');
+
+    const indexAfterSecond = syncSessionResumptionIndex(session);
+    expect(indexAfterSecond).toBe(indexAfterFirst);
+    expect(indexAfterSecond.lastIndexedLength).toBe(4);
+    expect(indexAfterSecond.agentEventIndices).toEqual([0, 2]);
+  });
+
+  it('should cleanly reset index when session events array is truncated or replaced', async () => {
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    const event1 = createEvent({
+      invocationId: 'inv1',
+      author: 'sub_agent1',
+      content: {role: 'model', parts: [{text: 'First response'}]},
+    });
+    const event2 = createEvent({
+      invocationId: 'inv2',
+      author: 'user',
+      content: {role: 'user', parts: [{text: 'User message'}]},
+    });
+    const event3 = createEvent({
+      invocationId: 'inv3',
+      author: 'sub_agent2',
+      content: {role: 'model', parts: [{text: 'Second response'}]},
+    });
+
+    session.events.push(event1, event2, event3);
+
+    const runnerPrivate = runner as unknown as {
+      determineAgentForResumption(
+        session: Session,
+        rootAgent: BaseAgent,
+      ): BaseAgent;
+    };
+    const firstResolved = runnerPrivate.determineAgentForResumption(
+      session,
+      rootAgent,
+    );
+    expect(firstResolved.name).toBe('sub_agent2');
+
+    // Truncate events array in place
+    session.events.length = 1;
+    const truncatedResolved = runnerPrivate.determineAgentForResumption(
+      session,
+      rootAgent,
+    );
+    expect(truncatedResolved.name).toBe('sub_agent1');
+    const indexAfterTruncation = syncSessionResumptionIndex(session);
+    expect(indexAfterTruncation.lastIndexedLength).toBe(1);
+    expect(indexAfterTruncation.agentEventIndices).toEqual([0]);
+
+    // Replace events array completely
+    session.events = [
+      createEvent({
+        invocationId: 'inv4',
+        author: 'root_agent',
+        content: {role: 'model', parts: [{text: 'Root replaced'}]},
+      }),
+    ];
+    const replacedResolved = runnerPrivate.determineAgentForResumption(
+      session,
+      rootAgent,
+    );
+    expect(replacedResolved.name).toBe('root_agent');
+    const indexAfterReplacement = syncSessionResumptionIndex(session);
+    expect(indexAfterReplacement.lastIndexedLength).toBe(1);
+    expect(indexAfterReplacement.agentEventIndices).toEqual([0]);
+  });
+
+  it('should perform efficiently and handle long-running sessions with 5,000+ events without memory leaks or stack overflows', async () => {
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    const events: Event[] = [];
+    for (let i = 0; i < 5000; i++) {
+      if (i === 4998) {
+        events.push(
+          createEvent({
+            invocationId: `inv_${i}`,
+            author: 'sub_agent1',
+            content: {role: 'model', parts: [{text: `Event ${i}`}]},
+          }),
+        );
+      } else {
+        events.push(
+          createEvent({
+            invocationId: `inv_${i}`,
+            author: 'user',
+            content: {role: 'user', parts: [{text: `User event ${i}`}]},
+          }),
+        );
+      }
+    }
+    session.events = events;
+
+    const runnerPrivate = runner as unknown as {
+      determineAgentForResumption(
+        session: Session,
+        rootAgent: BaseAgent,
+      ): BaseAgent;
+    };
+
+    const start = performance.now();
+    const resolvedAgent = runnerPrivate.determineAgentForResumption(
+      session,
+      rootAgent,
+    );
+    const duration = performance.now() - start;
+
+    expect(resolvedAgent.name).toBe('sub_agent1');
+    expect(duration).toBeLessThan(500);
+
+    const startSecond = performance.now();
+    const secondResolved = runnerPrivate.determineAgentForResumption(
+      session,
+      rootAgent,
+    );
+    const durationSecond = performance.now() - startSecond;
+
+    expect(secondResolved.name).toBe('sub_agent1');
+    expect(durationSecond).toBeLessThan(20);
+  });
+
+  it('should find matching function call in O(1) using functionCallEventMap when session is provided to findEventByLastFunctionResponseId', async () => {
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    const functionCall: FunctionCall = {
+      id: 'func_999',
+      name: 'long_running_op',
+      args: {},
+    };
+    const functionResponse: FunctionResponse = {
+      id: 'func_999',
+      name: 'long_running_op',
+      response: {status: 'ok'},
+    };
+
+    const callEvent = createEvent({
+      invocationId: 'inv_0',
+      author: 'sub_agent1',
+      content: {role: 'model', parts: [{functionCall}]},
+    });
+    session.events.push(callEvent);
+
+    for (let i = 1; i <= 100; i++) {
+      session.events.push(
+        createEvent({
+          invocationId: `inv_${i}`,
+          author: 'user',
+          content: {role: 'user', parts: [{text: `intervening ${i}`}]},
+        }),
+      );
+    }
+
+    const responseEvent = createEvent({
+      invocationId: 'inv_101',
+      author: 'user',
+      content: {role: 'user', parts: [{functionResponse}]},
+    });
+    session.events.push(responseEvent);
+
+    const foundEvent = findEventByLastFunctionResponseId(
+      session.events,
+      session,
+    );
+    expect(foundEvent).toBe(callEvent);
+
+    const index = syncSessionResumptionIndex(session);
+    expect(index.functionCallEventMap.get('func_999')?.author).toBe(
+      'sub_agent1',
+    );
+  });
+});
+
+describe('Runner resumption indexing edge cases and 100% coverage', () => {
+  let sessionService: InMemorySessionService;
+  let artifactService: InMemoryArtifactService;
+  let rootAgent: LlmAgent;
+  let runner: Runner;
+
+  beforeEach(() => {
+    sessionService = new InMemorySessionService();
+    artifactService = new InMemoryArtifactService();
+    rootAgent = new LlmAgent({
+      name: 'root_agent',
+      model: 'gemini-2.5-flash',
+    });
+    runner = new Runner({
+      appName: TEST_APP_ID,
+      agent: rootAgent,
+      sessionService,
+      artifactService,
+    });
+  });
+
+  it('should handle findEventByLastFunctionResponseId with empty events array and invalid functionResponse structures', () => {
+    expect(findEventByLastFunctionResponseId([])).toBeNull();
+
+    const noContentEvent = createEvent({
+      author: 'user',
+    });
+    expect(findEventByLastFunctionResponseId([noContentEvent])).toBeNull();
+
+    const noResponsePartEvent = createEvent({
+      author: 'user',
+      content: {role: 'user', parts: [{text: 'Just text'}]},
+    });
+    expect(findEventByLastFunctionResponseId([noResponsePartEvent])).toBeNull();
+
+    const noIdResponseEvent = createEvent({
+      author: 'user',
+      content: {
+        role: 'user',
+        parts: [
+          {
+            functionResponse: {name: 'test', response: {}},
+          } as unknown as Content['parts'][0],
+        ],
+      },
+    });
+    expect(findEventByLastFunctionResponseId([noIdResponseEvent])).toBeNull();
+  });
+
+  it('should handle findEventByLastFunctionResponseId with and without session fallback and branch conditions', async () => {
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    const callEvent = createEvent({
+      invocationId: 'inv_call',
+      author: 'root_agent',
+      content: {
+        role: 'model',
+        parts: [{functionCall: {id: 'fc_1', name: 'op', args: {}}}],
+      },
+    });
+    const otherCallEvent = createEvent({
+      invocationId: 'inv_other',
+      author: 'root_agent',
+      content: {
+        role: 'model',
+        parts: [{functionCall: {id: 'fc_2', name: 'op2', args: {}}}],
+      },
+    });
+    const noFuncCallEvent = createEvent({
+      invocationId: 'inv_text',
+      author: 'root_agent',
+      content: {role: 'model', parts: [{text: 'normal text'}]},
+    });
+    const responseEvent = createEvent({
+      invocationId: 'inv_resp',
+      author: 'user',
+      content: {
+        role: 'user',
+        parts: [{functionResponse: {id: 'fc_1', name: 'op', response: {}}}],
+      },
+    });
+
+    session.events.push(
+      callEvent,
+      otherCallEvent,
+      noFuncCallEvent,
+      responseEvent,
+    );
+
+    // With session: match found in index
+    expect(findEventByLastFunctionResponseId(session.events, session)).toBe(
+      callEvent,
+    );
+
+    // With session: functionResponse id not in map
+    const unknownRespEvent = createEvent({
+      invocationId: 'inv_unknown',
+      author: 'user',
+      content: {
+        role: 'user',
+        parts: [
+          {functionResponse: {id: 'fc_missing', name: 'op', response: {}}},
+        ],
+      },
+    });
+    session.events.push(unknownRespEvent);
+    expect(
+      findEventByLastFunctionResponseId(session.events, session),
+    ).toBeNull();
+
+    // With session: event mapped to lastEvent itself
+    const selfRespEvent = createEvent({
+      invocationId: 'inv_self',
+      author: 'user',
+      content: {
+        role: 'user',
+        parts: [
+          {functionCall: {id: 'fc_self', name: 'self_op', args: {}}},
+          {functionResponse: {id: 'fc_self', name: 'self_op', response: {}}},
+        ],
+      },
+    });
+    session.events.push(selfRespEvent);
+    expect(
+      findEventByLastFunctionResponseId(session.events, session),
+    ).toBeNull();
+
+    // Without session (fallback O(N) scan):
+    const eventsWithoutSession = [
+      callEvent,
+      otherCallEvent,
+      noFuncCallEvent,
+      responseEvent,
+    ];
+    expect(findEventByLastFunctionResponseId(eventsWithoutSession)).toBe(
+      callEvent,
+    );
+
+    // Fallback O(N) scan when id not found anywhere:
+    const eventsNoMatch = [otherCallEvent, noFuncCallEvent, unknownRespEvent];
+    expect(findEventByLastFunctionResponseId(eventsNoMatch)).toBeNull();
+
+    // Fallback triggered when session is passed but session.events !== events array instance
+    const clonedEvents = [...session.events];
+    expect(findEventByLastFunctionResponseId(clonedEvents, session)).toBeNull(); // selfRespEvent at end with fc_self only on selfRespEvent
+  });
+
+  it('should cover determineAgentForResumption branch conditions for function response author edge cases', async () => {
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    // Case where findEventByLastFunctionResponseId finds an event with no author
+    const callNoAuthor = createEvent({
+      invocationId: 'inv_no_author',
+      content: {
+        role: 'model',
+        parts: [{functionCall: {id: 'fc_no_auth', name: 'op', args: {}}}],
+      },
+    });
+    delete (callNoAuthor as {author?: string}).author;
+
+    const respEvent = createEvent({
+      invocationId: 'inv_resp',
+      author: 'user',
+      content: {
+        role: 'user',
+        parts: [
+          {functionResponse: {id: 'fc_no_auth', name: 'op', response: {}}},
+        ],
+      },
+    });
+    session.events.push(callNoAuthor, respEvent);
+
+    const runnerPrivate = runner as unknown as {
+      determineAgentForResumption(
+        session: Session,
+        rootAgent: BaseAgent,
+      ): BaseAgent;
+    };
+    expect(runnerPrivate.determineAgentForResumption(session, rootAgent)).toBe(
+      rootAgent,
+    );
+
+    // Case where findEventByLastFunctionResponseId finds an event with an author not in rootAgent
+    const callUnknownAuthor = createEvent({
+      invocationId: 'inv_unknown_auth',
+      author: 'external_agent',
+      content: {
+        role: 'model',
+        parts: [{functionCall: {id: 'fc_ext', name: 'op', args: {}}}],
+      },
+    });
+    const respExtEvent = createEvent({
+      invocationId: 'inv_resp_ext',
+      author: 'user',
+      content: {
+        role: 'user',
+        parts: [{functionResponse: {id: 'fc_ext', name: 'op', response: {}}}],
+      },
+    });
+    session.events.push(callUnknownAuthor, respExtEvent);
+    expect(runnerPrivate.determineAgentForResumption(session, rootAgent)).toBe(
+      rootAgent,
+    );
   });
 });
 
