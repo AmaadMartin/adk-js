@@ -9,6 +9,7 @@ import {
   BasePlugin,
   createEvent,
   Event,
+  getLogger,
   InMemoryArtifactService,
   InMemorySessionService,
   InvocationContext,
@@ -332,6 +333,99 @@ describe('Runner.determineAgentForResumption', () => {
     }
 
     expect(events[0].author).toBe('sub_agent2');
+  });
+
+  it('should resolve agent instantly without info log spam in long sessions (1000+ events)', async () => {
+    const spyInfo = vi.spyOn(getLogger(), 'info');
+    const spyDebug = vi.spyOn(getLogger(), 'debug');
+
+    const syntheticEvents: Event[] = [];
+    for (let i = 0; i < 1000; i++) {
+      syntheticEvents.push(
+        createEvent({
+          invocationId: `inv_synth_${i}`,
+          author: i % 2 === 0 ? 'sub_agent1' : 'user',
+          content: {
+            role: i % 2 === 0 ? 'model' : 'user',
+            parts: [{text: `Message ${i}`}],
+          },
+        }),
+      );
+    }
+    syntheticEvents.push(
+      createEvent({
+        invocationId: 'inv_synth_final',
+        author: 'sub_agent2',
+        content: {role: 'model', parts: [{text: 'Final subagent message'}]},
+      }),
+    );
+
+    const startTime = Date.now();
+    const events = await runTest(syntheticEvents);
+    const duration = Date.now() - startTime;
+
+    expect(events[0].author).toBe('sub_agent2');
+    expect(spyInfo).not.toHaveBeenCalled();
+    expect(spyDebug).toHaveBeenCalled();
+    expect(duration).toBeLessThan(5000);
+
+    spyInfo.mockRestore();
+    spyDebug.mockRestore();
+  });
+
+  it('should correctly resolve deeply nested sub-agents using memoized map lookup', async () => {
+    const level1 = new MockLlmAgent('level_1', false, rootAgent);
+    const level2 = new MockLlmAgent('level_2', false, level1);
+    const level3 = new MockLlmAgent('level_3', false, level2);
+    const deepAgent = new MockLlmAgent('deep_agent', false, level3);
+    level3.subAgents.push(deepAgent);
+    level2.subAgents.push(level3);
+    level1.subAgents.push(level2);
+    rootAgent.subAgents.push(level1);
+
+    const deepEvent = createEvent({
+      invocationId: 'inv_deep',
+      author: 'deep_agent',
+      content: {role: 'model', parts: [{text: 'Deep agent response'}]},
+    });
+
+    const events = await runTest([deepEvent]);
+
+    expect(events[0].author).toBe('deep_agent');
+  });
+
+  it('should skip sub-agents with disallowTransferToParent=true up the ancestor chain during Case 2 scanning', async () => {
+    const parentNoTransfer = new MockLlmAgent(
+      'parent_no_transfer',
+      true,
+      rootAgent,
+    );
+    const childAgent = new MockLlmAgent(
+      'child_of_no_transfer',
+      false,
+      parentNoTransfer,
+    );
+    parentNoTransfer.subAgents.push(childAgent);
+    rootAgent.subAgents.push(parentNoTransfer);
+
+    const childEvent = createEvent({
+      invocationId: 'inv_child',
+      author: 'child_of_no_transfer',
+      content: {
+        role: 'model',
+        parts: [{text: 'Child of non-transferable response'}],
+      },
+    });
+
+    const rootEvent = createEvent({
+      invocationId: 'inv_root_prev',
+      author: 'root_agent',
+      content: {role: 'model', parts: [{text: 'Earlier root response'}]},
+    });
+
+    const events = await runTest([rootEvent, childEvent]);
+
+    expect(events[0].author).toBe('root_agent');
   });
 });
 

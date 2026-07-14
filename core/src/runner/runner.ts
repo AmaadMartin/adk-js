@@ -460,8 +460,35 @@ export class Runner {
   }
 
   /**
-   * Determines the next agent to run to continue the session. This is primarily
-   * used for session resumption.
+   * Determines which agent in the hierarchy should run when continuing or resuming
+   * an existing session.
+   *
+   * This method implements a three-case routing strategy:
+   *
+   * Case 1 (Function Response Matching):
+   *   If the last event in the session is a user `FunctionResponse` corresponding
+   *   to a previous `FunctionCall`, execution must route back to the specific
+   *   agent that authored the original function call so it can process the tool
+   *   output (`findEventByLastFunctionResponseId`). If the authoring agent is not
+   *   found in the current tree, it falls back to `rootAgent`.
+   *
+   * Case 2 (Transferable LLM Agent Scan):
+   *   Otherwise, the runner scans backwards through historical events (`session.events`)
+   *   to find the last non-user agent that emitted a message. When an agent author
+   *   is resolved, `isRoutableLlmAgent` checks whether the agent is transferable across
+   *   the tree. To be transferable, an agent must be an `LlmAgent` (`!isLlmAgent` agents
+   *   or non-LLM workflow agents cannot be resumed directly as conversational endpoints)
+   *   and neither the agent nor any of its ancestors up the chain may have
+   *   `disallowTransferToParent` set to `true`. If an agent is non-transferable, the
+   *   runner skips it and continues scanning backwards.
+   *
+   * Case 3 (Root Agent Fallback):
+   *   If no matching function response is found and no historical event authored by a
+   *   transferable `LlmAgent` is resolved, routing defaults to `rootAgent`.
+   *
+   * @param session The active session containing historical events.
+   * @param rootAgent The root agent of the execution hierarchy.
+   * @returns The resolved `BaseAgent` instance to continue session execution.
    */
   // TODO - b/425992518: This is where LRO integration should happen.
   // Needs clean up before we can generalize it.
@@ -469,33 +496,38 @@ export class Runner {
     session: Session,
     rootAgent: BaseAgent,
   ): BaseAgent {
+    // simplicity: Build agent lookup map once per resumption call (O(M)). Upgrade to memoization/cache on Runner if tree size M becomes extremely large and static.
+    const agentMap = buildAgentLookupMap(rootAgent);
+
     // =========================================================================
     // Case 1: If the last event is a function response, this returns the
     // agent that made the original function call.
     // =========================================================================
     const event = findEventByLastFunctionResponseId(session.events);
     if (event && event.author) {
-      return rootAgent.findAgent(event.author) || rootAgent;
+      const target = agentMap.get(event.author) || rootAgent;
+      logger.debug(
+        `Resuming session from function response with agent: ${target.name}`,
+      );
+      return target;
     }
 
     // =========================================================================
     // Case 2: Otherwise, find the last agent that emitted a message and is
     // transferable across the agent tree.
     // =========================================================================
-    // TODO - b/425992518: Optimize this, not going to work for long sessions.
-    // TODO - b/425992518: The behavior is dynamic, needs better documentation.
     for (let i = session.events.length - 1; i >= 0; i--) {
-      logger.info('event:', JSON.stringify(session.events[i]));
       const event = session.events[i];
       if (event.author === 'user' || !event.author) {
         continue;
       }
 
       if (event.author === rootAgent.name) {
+        logger.debug(`Resuming session with root agent: ${rootAgent.name}`);
         return rootAgent;
       }
 
-      const agent = rootAgent.findSubAgent(event.author!);
+      const agent = agentMap.get(event.author);
       if (!agent) {
         logger.warn(
           `Event from an unknown agent: ${event.author}, event id: ${event.id}`,
@@ -503,25 +535,35 @@ export class Runner {
         continue;
       }
       if (this.isRoutableLlmAgent(agent)) {
+        logger.debug(`Resuming session with transferable agent: ${agent.name}`);
         return agent;
       }
     }
     // =========================================================================
     // Case 3: default to root agent.
     // =========================================================================
+    logger.debug(
+      `Resuming session defaulting to root agent: ${rootAgent.name}`,
+    );
     return rootAgent;
   }
 
   /**
-   * Whether the agent to run can transfer to any other agent in the agent tree.
+   * Determines whether an agent is capable of being routed to and transferred across
+   * the agent tree during session resumption (Case 2 of `determineAgentForResumption`).
    *
-   * An agent is transferable if:
-   *  - It is an instance of `LlmAgent`.
-   *  - All its ancestors are also transferable (i.e., they have
-   *    `disallowTransferToParent` set to false).
+   * An agent is considered routable/transferable if both of the following hold:
+   *  - It is an instance of `LlmAgent` (`isLlmAgent(agent) === true`). Non-LLM agents
+   *    (e.g., specialized workflow or static agents) cannot be resumed directly as the
+   *    active LLM endpoint.
+   *  - It is permitted to transfer control up to its parent hierarchy. Specifically,
+   *    neither the agent itself nor any of its ancestor agents up the `parentAgent`
+   *    chain may have `disallowTransferToParent === true`. If any ancestor forbids
+   *    transferring to parent, the sub-agent is encapsulated and cannot be directly
+   *    resumed from outside its branch during global session scanning.
    *
-   * @param agentToRun The agent to check for transferability.
-   * @returns True if the agent can transfer, False otherwise.
+   * @param agentToRun The agent to evaluate for transferability.
+   * @returns `true` if the agent can be resumed and transferred to, `false` otherwise.
    */
   private isRoutableLlmAgent(agentToRun: BaseAgent): boolean {
     let agent: BaseAgent | undefined = agentToRun;
@@ -599,4 +641,30 @@ function getAllToolsets(agent: BaseAgent): BaseToolset[] {
 
   traverse(agent);
   return toolsets;
+}
+
+/**
+ * Builds a map of agent names to agent instances across the hierarchy
+ * starting from the given root agent and visiting all descendants using
+ * preorder depth-first traversal (matching findAgent/findSubAgent order).
+ */
+function buildAgentLookupMap(rootAgent: BaseAgent): Map<string, BaseAgent> {
+  const map = new Map<string, BaseAgent>();
+  const visited = new Set<BaseAgent>();
+
+  function traverse(curr: BaseAgent) {
+    if (visited.has(curr)) return;
+    visited.add(curr);
+
+    if (!map.has(curr.name)) {
+      map.set(curr.name, curr);
+    }
+
+    for (const sub of curr.subAgents) {
+      traverse(sub);
+    }
+  }
+
+  traverse(rootAgent);
+  return map;
 }
