@@ -687,3 +687,122 @@ describe('Runner customMetadata support', () => {
     appendEventSpy.mockRestore();
   });
 });
+
+describe('Runner saveInputBlobsAsArtifacts support', () => {
+  let sessionService: InMemorySessionService;
+  let artifactService: InMemoryArtifactService;
+  let agent: MockLlmAgent;
+  let runner: Runner;
+
+  beforeEach(() => {
+    sessionService = new InMemorySessionService();
+    artifactService = new InMemoryArtifactService();
+    agent = new MockLlmAgent('test_agent');
+    runner = new Runner({
+      appName: TEST_APP_ID,
+      agent: agent,
+      sessionService,
+      artifactService,
+    });
+  });
+
+  it('should delegate artifact saving and replace inline data when saveInputBlobsAsArtifacts is true', async () => {
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    const saveArtifactSpy = vi.spyOn(artifactService, 'saveArtifact');
+
+    const events: Event[] = [];
+    for await (const event of runner.runAsync({
+      userId: session.userId,
+      sessionId: session.id,
+      newMessage: {
+        role: 'user',
+        parts: [
+          {text: 'Check this image'},
+          {
+            inlineData: {
+              data: 'base64raw',
+              mimeType: 'image/png',
+              displayName: 'test_photo.png',
+            },
+          },
+        ],
+      },
+      runConfig: {
+        saveInputBlobsAsArtifacts: true,
+      },
+    })) {
+      events.push(event);
+    }
+
+    expect(saveArtifactSpy).toHaveBeenCalledTimes(1);
+    const savedReq = saveArtifactSpy.mock.calls[0][0];
+    expect(savedReq.filename).toBe('test_photo.png');
+    expect(savedReq.appName).toBe(TEST_APP_ID);
+
+    const updatedSession = await sessionService.getSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    const userEvent = updatedSession!.events[0];
+    expect(userEvent.author).toBe('user');
+    expect(userEvent.actions?.artifactDelta).toEqual({'test_photo.png': 0});
+    expect(userEvent.content?.parts?.[0]).toEqual({text: 'Check this image'});
+    expect(userEvent.content?.parts?.[1]).toEqual({
+      text: '[Uploaded Artifact: "test_photo.png"]',
+    });
+  });
+
+  it('should not modify inline data or save artifacts when saveInputBlobsAsArtifacts is false', async () => {
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    const saveArtifactSpy = vi.spyOn(artifactService, 'saveArtifact');
+
+    const originalParts = [
+      {text: 'Check this image'},
+      {
+        inlineData: {
+          data: 'base64raw',
+          mimeType: 'image/png',
+          displayName: 'test_photo.png',
+        },
+      },
+    ];
+
+    for await (const _ of runner.runAsync({
+      userId: session.userId,
+      sessionId: session.id,
+      newMessage: {
+        role: 'user',
+        parts: originalParts,
+      },
+      runConfig: {
+        saveInputBlobsAsArtifacts: false,
+      },
+    })) {
+      // Consume stream
+    }
+
+    expect(saveArtifactSpy).not.toHaveBeenCalled();
+
+    const updatedSession = await sessionService.getSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    const userEvent = updatedSession!.events[0];
+    expect(userEvent.actions?.artifactDelta).toEqual({});
+    expect(userEvent.content?.parts).toEqual(originalParts);
+  });
+});
