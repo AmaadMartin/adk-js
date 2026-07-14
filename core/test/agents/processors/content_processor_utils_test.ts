@@ -1089,4 +1089,132 @@ describe('getContents', () => {
     expect(contents).toHaveLength(1);
     expect(contents[0].parts?.[0].text).toBe('hello');
   });
+
+  describe('isolationScope filtering', () => {
+    it('filters out events when isolationScope does not match', () => {
+      const unscopedEvent = createEvent({
+        author: 'user',
+        content: {role: 'user', parts: [{text: 'hello unscoped'}]},
+      });
+      const scopedEvent = createEvent({
+        author: 'user',
+        isolationScope: 'call_123',
+        content: {role: 'user', parts: [{text: 'hello scoped'}]},
+      });
+
+      // Unscoped query (options.isolationScope === undefined) only sees unscopedEvent
+      const unscopedContents = getContents(
+        [unscopedEvent, scopedEvent],
+        'my_agent',
+        undefined,
+        {isolationScope: undefined},
+      );
+      expect(unscopedContents).toHaveLength(1);
+      expect(unscopedContents[0].parts?.[0].text).toBe('hello unscoped');
+
+      // Scoped query (options.isolationScope === 'call_123') only sees scopedEvent
+      const scopedContents = getContents(
+        [unscopedEvent, scopedEvent],
+        'my_agent',
+        undefined,
+        {isolationScope: 'call_123'},
+      );
+      expect(scopedContents).toHaveLength(1);
+      expect(scopedContents[0].parts?.[0].text).toBe('hello scoped');
+    });
+  });
+
+  describe('includeThoughtsFromOtherAgents filtering', () => {
+    it('excludes thoughts from foreign events by default (false)', () => {
+      const foreignEvent = createEvent({
+        author: 'other_agent',
+        content: {
+          role: 'model',
+          parts: [
+            {text: 'Public reply', thought: false},
+            {text: 'Secret thought', thought: true},
+          ],
+        },
+      });
+
+      const contents = getContents([foreignEvent], 'current_agent', undefined, {
+        includeThoughtsFromOtherAgents: false,
+      });
+      expect(contents).toHaveLength(1);
+      expect(contents[0].parts).toEqual([
+        {text: 'For context:'},
+        {text: '[other_agent] said: Public reply'},
+      ]);
+    });
+
+    it('includes thoughts from foreign events when includeThoughtsFromOtherAgents is true', () => {
+      const foreignEvent = createEvent({
+        author: 'other_agent',
+        content: {
+          role: 'model',
+          parts: [
+            {text: 'Public reply', thought: false},
+            {text: 'Secret thought', thought: true},
+          ],
+        },
+      });
+
+      const contents = getContents([foreignEvent], 'current_agent', undefined, {
+        includeThoughtsFromOtherAgents: true,
+      });
+      expect(contents).toHaveLength(1);
+      expect(contents[0].parts).toEqual([
+        {text: 'For context:'},
+        {text: '[other_agent] said: Public reply'},
+        {text: '[other_agent] thought: Secret thought'},
+      ]);
+    });
+
+    it('filters out foreign events that only contain thoughts when includeThoughtsFromOtherAgents is false', () => {
+      const thoughtOnlyEvent = createEvent({
+        author: 'other_agent',
+        content: {
+          role: 'model',
+          parts: [
+            {text: 'Just reasoning 1', thought: true},
+            {text: 'Just reasoning 2', thought: true},
+          ],
+        },
+      });
+
+      const contents = getContents(
+        [thoughtOnlyEvent],
+        'current_agent',
+        undefined,
+        {includeThoughtsFromOtherAgents: false},
+      );
+      expect(contents).toHaveLength(0);
+    });
+
+    it('includes foreign events that only contain thoughts when includeThoughtsFromOtherAgents is true', () => {
+      const thoughtOnlyEvent = createEvent({
+        author: 'other_agent',
+        content: {
+          role: 'model',
+          parts: [
+            {text: 'Just reasoning 1', thought: true},
+            {text: 'Just reasoning 2', thought: true},
+          ],
+        },
+      });
+
+      const contents = getContents(
+        [thoughtOnlyEvent],
+        'current_agent',
+        undefined,
+        {includeThoughtsFromOtherAgents: true},
+      );
+      expect(contents).toHaveLength(1);
+      expect(contents[0].parts).toEqual([
+        {text: 'For context:'},
+        {text: '[other_agent] thought: Just reasoning 1'},
+        {text: '[other_agent] thought: Just reasoning 2'},
+      ]);
+    });
+  });
 });

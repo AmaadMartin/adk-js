@@ -16,6 +16,7 @@ import {randomUUID} from '../utils/env_aware_utils.js';
 
 import {ActiveStreamingTool} from './active_streaming_tool.js';
 import {BaseAgent} from './base_agent.js';
+import {ContextCacheConfig} from './context_cache_config.js';
 import {RunConfig} from './run_config.js';
 import {TranscriptionEntry} from './transcription_entry.js';
 
@@ -38,6 +39,8 @@ export interface InvocationContextParams {
   activeStreamingTools?: Record<string, ActiveStreamingTool>;
   pluginManager: PluginManager;
   abortSignal?: AbortSignal;
+  contextCacheConfig?: ContextCacheConfig;
+  isolationScope?: string;
 }
 
 /**
@@ -164,6 +167,16 @@ export class InvocationContext {
   runConfig?: RunConfig;
 
   /**
+   * Configuration for context caching, if enabled.
+   */
+  readonly contextCacheConfig?: ContextCacheConfig;
+
+  /**
+   * The isolation scope tag of this invocation.
+   */
+  readonly isolationScope?: string;
+
+  /**
    * A container to keep track of different kinds of costs incurred as a part of
    * this invocation.
    */
@@ -196,6 +209,13 @@ export class InvocationContext {
     this.endInvocation = params.endInvocation || false;
     this.transcriptionCache = params.transcriptionCache;
     this.runConfig = params.runConfig;
+    this.contextCacheConfig =
+      params.contextCacheConfig ??
+      ('contextCacheConfig' in params.agent
+        ? (params.agent as {contextCacheConfig?: ContextCacheConfig})
+            .contextCacheConfig
+        : undefined);
+    this.isolationScope = params.isolationScope;
     this.activeStreamingTools = params.activeStreamingTools;
     this.pluginManager = params.pluginManager;
     this.abortSignal = params.abortSignal;
