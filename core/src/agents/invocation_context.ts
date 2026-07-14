@@ -16,6 +16,7 @@ import {randomUUID} from '../utils/env_aware_utils.js';
 
 import {ActiveStreamingTool} from './active_streaming_tool.js';
 import {BaseAgent} from './base_agent.js';
+import {LiveRequestQueue} from './live_request_queue.js';
 import {RunConfig} from './run_config.js';
 import {TranscriptionEntry} from './transcription_entry.js';
 
@@ -38,6 +39,8 @@ export interface InvocationContextParams {
   activeStreamingTools?: Record<string, ActiveStreamingTool>;
   pluginManager: PluginManager;
   abortSignal?: AbortSignal;
+  liveRequestQueue?: LiveRequestQueue;
+  liveSessionResumptionHandle?: string;
 }
 
 /**
@@ -182,6 +185,16 @@ export class InvocationContext {
   readonly abortSignal?: AbortSignal;
 
   /**
+   * The queue for live requests in bidirectional streaming mode.
+   */
+  liveRequestQueue?: LiveRequestQueue;
+
+  /**
+   * The session resumption handle for transparent reconnection.
+   */
+  liveSessionResumptionHandle?: string;
+
+  /**
    * @param params The parameters for creating an invocation context.
    */
   constructor(params: InvocationContextParams) {
@@ -199,6 +212,8 @@ export class InvocationContext {
     this.activeStreamingTools = params.activeStreamingTools;
     this.pluginManager = params.pluginManager;
     this.abortSignal = params.abortSignal;
+    this.liveRequestQueue = params.liveRequestQueue;
+    this.liveSessionResumptionHandle = params.liveSessionResumptionHandle;
   }
 
   /**

@@ -9,6 +9,7 @@ import {
   Modality,
   ProactivityConfig,
   RealtimeInputConfig,
+  SessionResumptionConfig,
   SpeechConfig,
 } from '@google/genai';
 
@@ -99,6 +100,11 @@ export interface RunConfig {
    * to intercept and execute tools (Client-Side Tool Execution).
    */
   pauseOnToolCalls?: boolean;
+
+  /**
+   * Session resumption configuration for live mode.
+   */
+  sessionResumption?: SessionResumptionConfig;
 }
 
 /**

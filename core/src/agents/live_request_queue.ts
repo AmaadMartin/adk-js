@@ -55,17 +55,33 @@ export class LiveRequestQueue {
   /**
    * Retrieves a request from the queue. If the queue is empty, it will
    * wait until a request is available.
+   * @param abortSignal Optional abort signal to cancel waiting without closing the queue.
    * @returns A promise that resolves with the next available request.
    */
-  async get(): Promise<LiveRequest> {
+  async get(abortSignal?: AbortSignal): Promise<LiveRequest> {
     if (this.queue.length > 0) {
       return this.queue.shift()!;
     }
-    if (this.isClosed) {
+    if (this.isClosed || abortSignal?.aborted) {
       return {close: true};
     }
     return new Promise<LiveRequest>((resolve) => {
-      this.resolveFnFifoQueue.push(resolve);
+      const onAbort = () => {
+        const idx = this.resolveFnFifoQueue.indexOf(resolve);
+        if (idx !== -1) {
+          this.resolveFnFifoQueue.splice(idx, 1);
+        }
+        resolve({close: true});
+      };
+      if (abortSignal) {
+        abortSignal.addEventListener('abort', onAbort, {once: true});
+      }
+      this.resolveFnFifoQueue.push((req) => {
+        if (abortSignal) {
+          abortSignal.removeEventListener('abort', onAbort);
+        }
+        resolve(req);
+      });
     });
   }
 
