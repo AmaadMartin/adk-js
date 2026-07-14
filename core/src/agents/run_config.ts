@@ -99,6 +99,11 @@ export interface RunConfig {
    * to intercept and execute tools (Client-Side Tool Execution).
    */
   pauseOnToolCalls?: boolean;
+
+  /**
+   * Whether to include thought parts when formatting events from other agents as user context.
+   */
+  includeThoughtsFromOtherAgents?: boolean;
 }
 
 /**
@@ -111,6 +116,7 @@ export interface RunConfig {
  * - `streamingMode` → {@link StreamingMode.NONE}
  * - `maxLlmCalls` → `500` (validated via `validateMaxLlmCalls`)
  * - `pauseOnToolCalls` → `false`
+ * - `includeThoughtsFromOtherAgents` → `false`
  *
  * @param params - Optional partial {@link RunConfig} overriding defaults.
  * @returns A merged {@link RunConfig} object.
@@ -124,6 +130,7 @@ export function createRunConfig(params: Partial<RunConfig> = {}) {
     streamingMode: StreamingMode.NONE,
     maxLlmCalls: validateMaxLlmCalls(params.maxLlmCalls || 500),
     pauseOnToolCalls: false,
+    includeThoughtsFromOtherAgents: false,
     ...params,
   };
 }

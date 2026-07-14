@@ -3,7 +3,7 @@
  * Copyright 2025 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
-import {Content, createUserContent} from '@google/genai';
+import {Content, createUserContent, Part} from '@google/genai';
 import {cloneDeep} from 'lodash-es';
 
 import {
@@ -24,11 +24,32 @@ import {
 } from '../functions.js';
 
 /**
+ * Options for configuring content processing when building model requests.
+ */
+export interface ContentProcessorOptions {
+  /**
+   * Only include events matching this isolation scope, or unscoped events if undefined.
+   */
+  isolationScope?: string;
+
+  /**
+   * Whether to include thought parts from other agents when presenting their messages.
+   */
+  includeThoughtsFromOtherAgents?: boolean;
+
+  /**
+   * Pre-compaction source events used to recover function calls removed by compaction.
+   */
+  sourceEvents?: Event[];
+}
+
+/**
  * Get the contents for the LLM request.
  *
  * @param events: A list of all session events.
  * @param agentName: The name of the agent.
  * @param currentBranch: The current branch of the agent.
+ * @param options: Additional filtering and processing options.
  *
  * @returns A list of processed contents.
  */
@@ -36,18 +57,27 @@ export function getContents(
   events: Event[],
   agentName: string,
   currentBranch?: string,
+  options: ContentProcessorOptions = {},
 ): Content[] {
   const filteredEvents: Event[] = [];
 
   for (const event of events) {
+    if (event.isolationScope !== options.isolationScope) {
+      continue;
+    }
+
     if (isCompactedEvent(event)) {
       filteredEvents.push(convertCompactedEvent(event));
       continue;
     }
 
+    const includeThoughts =
+      (options.includeThoughtsFromOtherAgents ?? false) &&
+      isEventFromAnotherAgent(agentName, event);
+
     // Skip events without content, or generated neither by user nor by model.
     // E.g. events purely for mutating session states.
-    if (!event.content?.role || event.content.parts?.[0]?.text === '') {
+    if (containsEmptyContent(event, includeThoughts)) {
       continue;
     }
 
@@ -71,7 +101,10 @@ export function getContents(
 
     filteredEvents.push(
       isEventFromAnotherAgent(agentName, event)
-        ? convertForeignEvent(event)
+        ? convertForeignEvent(
+            event,
+            options.includeThoughtsFromOtherAgents ?? false,
+          )
         : event,
     );
   }
@@ -102,6 +135,7 @@ export function getContents(
  * @param events: A list of all session events.
  * @param agentName: The name of the agent.
  * @param currentBranch: The current branch of the agent.
+ * @param options: Additional filtering and processing options.
  *
  * @returns A list of contents for the current turn only, preserving context
  *     needed for proper tool execution while excluding conversation history.
@@ -110,12 +144,13 @@ export function getCurrentTurnContents(
   events: Event[],
   agentName: string,
   currentBranch?: string,
+  options: ContentProcessorOptions = {},
 ): Content[] {
   // Find the latest event that starts the current turn and process from there.
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i];
     if (event.author === 'user' || isEventFromAnotherAgent(agentName, event)) {
-      return getContents(events.slice(i), agentName, currentBranch);
+      return getContents(events.slice(i), agentName, currentBranch, options);
     }
   }
 
@@ -184,7 +219,10 @@ function isEventFromAnotherAgent(agentName: string, event: Event): boolean {
  *
  * @returns The converted event.
  */
-function convertForeignEvent(event: Event): Event {
+function convertForeignEvent(
+  event: Event,
+  includeThoughtsFromOtherAgents = false,
+): Event {
   if (!event.content?.parts?.length) {
     return event;
   }
@@ -199,11 +237,13 @@ function convertForeignEvent(event: Event): Event {
   };
 
   for (const part of event.content.parts) {
-    // Exclude thoughts from the context.
-    // TODO - b/425992518: filtring should be configurable.
     if (part.text && !part.thought) {
       content.parts?.push({
         text: `[${event.author}] said: ${part.text}`,
+      });
+    } else if (part.text && part.thought && includeThoughtsFromOtherAgents) {
+      content.parts?.push({
+        text: `[${event.author}] thought: ${part.text}`,
       });
     } else if (part.functionCall) {
       content.parts?.push({
@@ -217,7 +257,7 @@ function convertForeignEvent(event: Event): Event {
           part.functionResponse.response,
         )}`,
       });
-    } else {
+    } else if (!part.thought || includeThoughtsFromOtherAgents) {
       content.parts?.push(cloneDeep(part));
     }
   }
@@ -527,4 +567,43 @@ function convertCompactedEvent(event: CompactedEvent): Event {
     branch: event.branch,
     timestamp: event.timestamp,
   });
+}
+
+/**
+ * Returns whether a part is invisible for LLM context.
+ */
+function isPartInvisible(part: Part, includeThoughts = false): boolean {
+  if (part.functionCall || part.functionResponse) {
+    return false;
+  }
+  return (
+    (Boolean(part.thought) && !includeThoughts) ||
+    (!part.text &&
+      !part.inlineData &&
+      !part.fileData &&
+      !part.executableCode &&
+      !part.codeExecutionResult)
+  );
+}
+
+/**
+ * Check if an event should be skipped due to missing or empty content.
+ */
+function containsEmptyContent(event: Event, includeThoughts = false): boolean {
+  if (isCompactedEvent(event)) {
+    return false;
+  }
+  if (!event.content || !event.content.role) {
+    return true;
+  }
+  if (
+    event.content.parts &&
+    event.content.parts.length > 0 &&
+    event.content.parts.every((p) => isPartInvisible(p, includeThoughts)) &&
+    !event.outputTranscription &&
+    !event.inputTranscription
+  ) {
+    return true;
+  }
+  return false;
 }

@@ -42,9 +42,8 @@ export class ContentRequestProcessor implements BaseLlmRequestProcessor {
       return;
     }
 
-    // The assumption is there's one CompactedEvent considered in any given call to the LLM
-    // since it should be a summary of all previous event history.
-    let events = invocationContext.session.events;
+    const sourceEvents = invocationContext.session.events;
+    let events = sourceEvents;
     const compactedEvents = events.filter(isCompactedEvent);
     const latestCompactedEvent =
       compactedEvents.length > 0
@@ -71,12 +70,19 @@ export class ContentRequestProcessor implements BaseLlmRequestProcessor {
       events = [latestCompactedEvent, ...remainingEvents];
     }
 
+    const options = {
+      isolationScope: invocationContext.isolationScope,
+      includeThoughtsFromOtherAgents:
+        invocationContext.runConfig?.includeThoughtsFromOtherAgents ?? false,
+    };
+
     if (agent.includeContents === 'default') {
       // Include full conversation history
       llmRequest.contents = getContents(
         events,
         agent.name,
         invocationContext.branch,
+        options,
       );
     } else {
       // Include current turn context only (no conversation history).
@@ -84,6 +90,7 @@ export class ContentRequestProcessor implements BaseLlmRequestProcessor {
         events,
         agent.name,
         invocationContext.branch,
+        options,
       );
     }
 

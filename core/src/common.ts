@@ -14,6 +14,11 @@ export type {
   SingleAgentCallback,
 } from './agents/base_agent.js';
 export {Context} from './agents/context.js';
+export {
+  createContextCacheConfig,
+  getTtlString,
+} from './agents/context_cache_config.js';
+export type {ContextCacheConfig} from './agents/context_cache_config.js';
 export {functionsExportedForTestingOnly} from './agents/functions.js';
 export {InvocationContext} from './agents/invocation_context.js';
 export type {InvocationContextParams} from './agents/invocation_context.js';
@@ -42,6 +47,12 @@ export {
   BaseLlmRequestProcessor,
   BaseLlmResponseProcessor,
 } from './agents/processors/base_llm_processor.js';
+export {
+  getContents,
+  getCurrentTurnContents,
+  mergeFunctionResponseEvents,
+} from './agents/processors/content_processor_utils.js';
+export type {ContentProcessorOptions} from './agents/processors/content_processor_utils.js';
 export {
   CONTENT_REQUEST_PROCESSOR,
   ContentRequestProcessor,
@@ -165,6 +176,8 @@ export {ApigeeLlm} from './models/apigee_llm.js';
 export type {ApigeeLlmParams} from './models/apigee_llm.js';
 export {BaseLlm, isBaseLlm} from './models/base_llm.js';
 export type {BaseLlmConnection} from './models/base_llm_connection.js';
+export {createCacheMetadata} from './models/cache_metadata.js';
+export type {CacheMetadata} from './models/cache_metadata.js';
 export {Gemini, geminiInitParams} from './models/google_llm.js';
 export type {GeminiParams} from './models/google_llm.js';
 export type {LlmRequest} from './models/llm_request.js';
