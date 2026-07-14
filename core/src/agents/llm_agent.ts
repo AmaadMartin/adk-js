@@ -25,12 +25,19 @@ import {
 import {BaseExampleProvider} from '../examples/base_example_provider.js';
 import {Example} from '../examples/example.js';
 import {BaseLlm, isBaseLlm} from '../models/base_llm.js';
+import {BaseLlmConnection} from '../models/base_llm_connection.js';
+import {Gemini} from '../models/google_llm.js';
 import {LlmRequest} from '../models/llm_request.js';
 import {LlmResponse} from '../models/llm_response.js';
 import {LLMRegistry} from '../models/registry.js';
+import {GoogleLLMVariant} from '../utils/variant_utils.js';
 
 import {BaseTool, isBaseTool} from '../tools/base_tool.js';
 import {BaseToolset} from '../tools/base_toolset.js';
+
+const MAX_LIVE_RECONNECT_ATTEMPTS = 3;
+const DEFAULT_TRANSFER_AGENT_DELAY = 1000;
+const DEFAULT_TASK_COMPLETION_DELAY = 1000;
 
 import {logger} from '../utils/logger.js';
 import {Context} from './context.js';
@@ -746,16 +753,7 @@ export class LlmAgent extends BaseAgent {
    * times. Subsequent reconnects skip `sendHistory` because the server
    * already holds the conversation state associated with the handle.
    */
-  // eslint-disable-next-line require-yield
   private async *runLiveFlow(
-    _invocationContext: InvocationContext,
-  ): AsyncGenerator<Event, void, void> {
-    // TODO - b/425992518: remove dummy logic, implement this.
-    await Promise.resolve();
-    throw new Error('LlmAgent.runLiveFlow not implemented');
-  }
-
-  private async *runOneStepAsync(
     invocationContext: InvocationContext,
   ): AsyncGenerator<Event, void, void> {
     const llmRequest: LlmRequest = {
@@ -764,10 +762,190 @@ export class LlmAgent extends BaseAgent {
       liveConnectConfig: {},
     };
 
-    // =========================================================================
-    // Preprocess before calling the LLM
-    // =========================================================================
-    // Runs request processors.
+    yield* this.preprocessAsync(invocationContext, llmRequest);
+    if (
+      invocationContext.endInvocation ||
+      invocationContext.abortSignal?.aborted
+    ) {
+      return;
+    }
+
+    const llm = this.canonicalModel;
+    let attempt = 1;
+
+    while (true) {
+      try {
+        if (invocationContext.liveSessionResumptionHandle) {
+          logger.info(`Attempting to reconnect (Attempt ${attempt})...`);
+          attempt += 1;
+          llmRequest.liveConnectConfig ??= {};
+          llmRequest.liveConnectConfig.sessionResumption ??= {};
+          llmRequest.liveConnectConfig.sessionResumption.handle =
+            invocationContext.liveSessionResumptionHandle;
+
+          if (
+            llm instanceof Gemini &&
+            llm.apiBackend === GoogleLLMVariant.VERTEX_AI
+          ) {
+            const sessionResumption = llmRequest.liveConnectConfig
+              .sessionResumption as Record<string, unknown>;
+            if (sessionResumption.transparent === undefined) {
+              sessionResumption.transparent = true;
+            }
+          }
+        }
+
+        if (
+          llmRequest.contents &&
+          llmRequest.contents.length > 0 &&
+          !invocationContext.liveSessionResumptionHandle
+        ) {
+          llmRequest.liveConnectConfig ??= {};
+          const liveCfg = llmRequest.liveConnectConfig as Record<
+            string,
+            unknown
+          >;
+          const historyCfg = (liveCfg.historyConfig ??= {}) as Record<
+            string,
+            unknown
+          >;
+          if (historyCfg.initialHistoryInClientContent === undefined) {
+            historyCfg.initialHistoryInClientContent = true;
+          }
+        }
+
+        logger.info(`Establishing live connection for agent: ${this.name}`);
+        const llmConnection = await llm.connect(llmRequest);
+        attempt = 1;
+
+        if (
+          llmRequest.contents &&
+          llmRequest.contents.length > 0 &&
+          !invocationContext.liveSessionResumptionHandle
+        ) {
+          await llmConnection.sendHistory(llmRequest.contents);
+        }
+
+        const sendAbortController = new AbortController();
+        const sendPromise = this.sendToModelAsync(
+          llmConnection,
+          invocationContext,
+          sendAbortController,
+        );
+
+        let shouldReconnect = false;
+        try {
+          for await (const event of this.receiveFromModelAsync(
+            llmConnection,
+            invocationContext,
+            llmRequest,
+          )) {
+            if ('_reconnectSentinel' in event && event._reconnectSentinel) {
+              shouldReconnect = true;
+              break;
+            }
+            if (invocationContext.abortSignal?.aborted) {
+              break;
+            }
+
+            yield event;
+
+            if (getFunctionResponses(event).length > 0 && event.content) {
+              invocationContext.liveRequestQueue?.sendContent(event.content);
+            }
+
+            if (event.actions.transferToAgent) {
+              await new Promise((resolve) =>
+                setTimeout(resolve, DEFAULT_TRANSFER_AGENT_DELAY),
+              );
+              sendAbortController.abort();
+              await llmConnection.close();
+
+              const nextAgentName = event.actions.transferToAgent;
+              const nextAgent = this.getAgentByName(
+                invocationContext,
+                nextAgentName,
+              );
+              const childCtx = new InvocationContext({
+                ...invocationContext,
+                agent: nextAgent,
+                liveSessionResumptionHandle: undefined,
+              });
+              if (childCtx.runConfig) {
+                childCtx.runConfig = {
+                  ...childCtx.runConfig,
+                };
+                if (childCtx.runConfig.sessionResumption) {
+                  childCtx.runConfig.sessionResumption.handle = undefined;
+                }
+              }
+
+              for await (const item of nextAgent.runLive(childCtx)) {
+                if (invocationContext.abortSignal?.aborted) {
+                  return;
+                }
+                yield item;
+              }
+              break;
+            }
+
+            const funcResponses = getFunctionResponses(event);
+            if (funcResponses.some((fr) => fr.name === 'task_completed')) {
+              await new Promise((resolve) =>
+                setTimeout(resolve, DEFAULT_TASK_COMPLETION_DELAY),
+              );
+              sendAbortController.abort();
+              return;
+            }
+          }
+        } finally {
+          sendAbortController.abort();
+          try {
+            await sendPromise;
+          } catch {
+            // ignore error in cancelled send task
+          }
+        }
+
+        if (shouldReconnect) {
+          continue;
+        }
+        break;
+      } catch (e: unknown) {
+        if (invocationContext.liveSessionResumptionHandle) {
+          if (attempt > MAX_LIVE_RECONNECT_ATTEMPTS) {
+            logger.error(`Max reconnection attempts reached (${e}).`);
+            throw e;
+          }
+          const err = e as
+            | {code?: number; message?: string; name?: string}
+            | undefined;
+          const isRecoverableError =
+            err?.code === 1000 ||
+            err?.code === 1006 ||
+            err?.code === 1011 ||
+            err?.message?.includes('closed') ||
+            err?.message?.includes('1000') ||
+            err?.message?.includes('1006') ||
+            err?.message?.includes('1011');
+
+          if (isRecoverableError || err?.name === 'ConnectionClosed') {
+            logger.info(
+              `Connection lost (${e}), reconnecting with session handle.`,
+            );
+            continue;
+          }
+        }
+        logger.error(`An unexpected error occurred in live flow: ${e}`);
+        throw e;
+      }
+    }
+  }
+
+  private async *preprocessAsync(
+    invocationContext: InvocationContext,
+    llmRequest: LlmRequest,
+  ): AsyncGenerator<Event, void, void> {
     for (const processor of this.requestProcessors) {
       for await (const event of processor.runAsync(
         invocationContext,
@@ -776,12 +954,10 @@ export class LlmAgent extends BaseAgent {
         if (invocationContext.abortSignal?.aborted) {
           return;
         }
-
         yield event;
       }
     }
-    // TODO - b/425992518: check if tool preprocessors can be simplified.
-    // Run pre-processors for tools.
+
     const allTools = [...this.tools];
     if (this.outputSchema && allTools.length > 0) {
       const setModelResponseTool = new FunctionTool({
@@ -801,16 +977,12 @@ export class LlmAgent extends BaseAgent {
     for (const toolUnion of allTools) {
       const toolContext = new Context({invocationContext});
 
-      // process all tools from this tool union
       const tools = (
         await convertToolUnionToTools(
           toolUnion,
           new ReadonlyContext(invocationContext),
         )
       ).filter((tool) => {
-        // If allowedTools is not set, allow all tools. Otherwise, only allow
-        // tools that are in the allowedTools set.
-        // The allowedTools set is populated by request processors.
         return (
           !llmRequest.allowedTools ||
           llmRequest.allowedTools.includes(tool.name) ||
@@ -826,10 +998,255 @@ export class LlmAgent extends BaseAgent {
         }
       }
     }
-    // =========================================================================
-    // Global runtime interruption
-    // =========================================================================
-    // TODO - b/425992518: global runtime interruption, hacky, fix.
+  }
+
+  private async sendToModelAsync(
+    llmConnection: BaseLlmConnection,
+    invocationContext: InvocationContext,
+    sendAbortController: AbortController,
+  ): Promise<void> {
+    const liveRequestQueue = invocationContext.liveRequestQueue;
+    if (!liveRequestQueue) {
+      return;
+    }
+    while (!sendAbortController.signal.aborted) {
+      const liveRequest = await liveRequestQueue.get(
+        sendAbortController.signal,
+      );
+      if (sendAbortController.signal.aborted || liveRequest.close) {
+        if (liveRequest.close && !sendAbortController.signal.aborted) {
+          await llmConnection.close();
+        }
+        return;
+      }
+
+      if (invocationContext.activeStreamingTools) {
+        for (const activeStreamingTool of Object.values(
+          invocationContext.activeStreamingTools,
+        )) {
+          if (activeStreamingTool.stream) {
+            activeStreamingTool.stream.send(liveRequest);
+          }
+        }
+      }
+
+      if (liveRequest.activityStart) {
+        if (llmConnection.sendActivityStart) {
+          await llmConnection.sendActivityStart();
+        }
+      } else if (liveRequest.activityEnd) {
+        if (llmConnection.sendActivityEnd) {
+          await llmConnection.sendActivityEnd();
+        }
+      } else if (liveRequest.blob) {
+        await llmConnection.sendRealtime(liveRequest.blob);
+      }
+
+      if (liveRequest.content) {
+        const content = liveRequest.content;
+        const isFunctionResponse = content.parts?.some(
+          (part) => part.functionResponse,
+        );
+        if (!isFunctionResponse && !content.role) {
+          content.role = 'user';
+        }
+        if (!isFunctionResponse && invocationContext.sessionService) {
+          const userContentEvent = createEvent({
+            invocationId: invocationContext.invocationId,
+            author: 'user',
+            content: content,
+          });
+          await invocationContext.sessionService.appendEvent({
+            session: invocationContext.session,
+            event: userContentEvent,
+          });
+        }
+        await llmConnection.sendContent(content);
+      }
+    }
+  }
+
+  private async *receiveFromModelAsync(
+    llmConnection: BaseLlmConnection,
+    invocationContext: InvocationContext,
+    llmRequest: LlmRequest,
+  ): AsyncGenerator<Event, void, void> {
+    const getAuthorForEvent = (llmResponse: LlmResponse): string => {
+      if (
+        llmResponse &&
+        (llmResponse.inputTranscription ||
+          (llmResponse.content && llmResponse.content.role === 'user'))
+      ) {
+        return 'user';
+      }
+      return invocationContext.agent.name;
+    };
+
+    for await (const llmResponse of llmConnection.receive()) {
+      if (invocationContext.abortSignal?.aborted) {
+        break;
+      }
+      if (llmResponse.liveSessionResumptionUpdate) {
+        logger.info(
+          `Update session resumption handle: ${JSON.stringify(
+            llmResponse.liveSessionResumptionUpdate,
+          )}`,
+        );
+        invocationContext.liveSessionResumptionHandle =
+          llmResponse.liveSessionResumptionUpdate.newHandle;
+      }
+      if (llmResponse.goAway) {
+        logger.info(
+          `Received go away signal: ${JSON.stringify(llmResponse.goAway)}`,
+        );
+        yield {
+          id: '',
+          invocationId: '',
+          author: '',
+          actions: {},
+          timestamp: 0,
+          _reconnectSentinel: true,
+        } as unknown as Event;
+        return;
+      }
+
+      const modelResponseEvent = createEvent({
+        invocationId: invocationContext.invocationId,
+        author: getAuthorForEvent(llmResponse),
+      });
+
+      for await (const event of this.postprocessLiveAsync(
+        invocationContext,
+        llmRequest,
+        llmResponse,
+        modelResponseEvent,
+      )) {
+        if (invocationContext.abortSignal?.aborted) {
+          break;
+        }
+        yield event;
+      }
+    }
+  }
+
+  private async *postprocessLiveAsync(
+    invocationContext: InvocationContext,
+    llmRequest: LlmRequest,
+    llmResponse: LlmResponse,
+    modelResponseEvent: Event,
+  ): AsyncGenerator<Event, void, void> {
+    for (const processor of this.responseProcessors) {
+      for await (const event of processor.runAsync(
+        invocationContext,
+        llmResponse,
+      )) {
+        if (invocationContext.abortSignal?.aborted) {
+          return;
+        }
+        yield event;
+      }
+    }
+
+    if (
+      (!llmResponse.content || !llmResponse.content.parts?.length) &&
+      !llmResponse.errorCode &&
+      !llmResponse.interrupted &&
+      !llmResponse.turnComplete &&
+      !llmResponse.inputTranscription &&
+      !llmResponse.outputTranscription &&
+      !llmResponse.usageMetadata &&
+      !llmResponse.liveSessionResumptionUpdate &&
+      !llmResponse.groundingMetadata
+    ) {
+      return;
+    }
+
+    if (llmResponse.liveSessionResumptionUpdate) {
+      modelResponseEvent.liveSessionResumptionUpdate =
+        llmResponse.liveSessionResumptionUpdate;
+      yield modelResponseEvent;
+      return;
+    }
+
+    if (llmResponse.inputTranscription) {
+      modelResponseEvent.inputTranscription = llmResponse.inputTranscription;
+      modelResponseEvent.partial = llmResponse.partial;
+      yield modelResponseEvent;
+      return;
+    }
+
+    if (llmResponse.outputTranscription) {
+      modelResponseEvent.outputTranscription = llmResponse.outputTranscription;
+      modelResponseEvent.partial = llmResponse.partial;
+      yield modelResponseEvent;
+      return;
+    }
+
+    const mergedEvent = createEvent({
+      ...modelResponseEvent,
+      ...llmResponse,
+    });
+
+    if (mergedEvent.content) {
+      const functionCalls = getFunctionCalls(mergedEvent);
+      const setModelResponseCall = functionCalls.find(
+        (call) => call.name === 'set_model_response',
+      );
+      if (setModelResponseCall) {
+        const args = setModelResponseCall.args;
+        mergedEvent.content.parts = [{text: JSON.stringify(args)}];
+        mergedEvent.actions.skipSummarization = true;
+      }
+    }
+
+    yield mergedEvent;
+
+    if (getFunctionCalls(mergedEvent).length > 0) {
+      const functionResponseEvent = await handleFunctionCallsAsync({
+        invocationContext: invocationContext,
+        functionCallEvent: mergedEvent,
+        toolsDict: llmRequest.toolsDict,
+        beforeToolCallbacks: this.canonicalBeforeToolCallbacks,
+        afterToolCallbacks: this.canonicalAfterToolCallbacks,
+      });
+
+      if (!functionResponseEvent || invocationContext.abortSignal?.aborted) {
+        return;
+      }
+
+      const authEvent = generateAuthEvent(
+        invocationContext,
+        functionResponseEvent,
+      );
+      if (authEvent) {
+        yield authEvent;
+      }
+
+      const toolConfirmationEvent = generateRequestConfirmationEvent({
+        invocationContext: invocationContext,
+        functionCallEvent: mergedEvent,
+        functionResponseEvent: functionResponseEvent,
+      });
+      if (toolConfirmationEvent) {
+        yield toolConfirmationEvent;
+        invocationContext.endInvocation = true;
+        return;
+      }
+
+      yield functionResponseEvent;
+    }
+  }
+
+  private async *runOneStepAsync(
+    invocationContext: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    const llmRequest: LlmRequest = {
+      contents: [],
+      toolsDict: {},
+      liveConnectConfig: {},
+    };
+
+    yield* this.preprocessAsync(invocationContext, llmRequest);
     if (
       invocationContext.endInvocation ||
       invocationContext.abortSignal?.aborted
