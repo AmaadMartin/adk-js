@@ -22,7 +22,7 @@ import {
   BuiltInCodeExecutor,
   isBuiltInCodeExecutor,
 } from '../code_executors/built_in_code_executor.js';
-import {createEvent, Event, getFunctionCalls} from '../events/event.js';
+import {createEvent, Event} from '../events/event.js';
 import {createEventActions} from '../events/event_actions.js';
 import {BaseMemoryService} from '../memory/base_memory_service.js';
 import {BasePlugin} from '../plugins/base_plugin.js';
@@ -460,11 +460,32 @@ export class Runner {
   }
 
   /**
-   * Determines the next agent to run to continue the session. This is primarily
-   * used for session resumption.
+   * Determines the next agent to run to continue the session during session
+   * resumption or turn transitions.
+   *
+   * Dynamic resolution behavior is evaluated across three cases:
+   *
+   * - Case 1 (LRO / Function Response Resumption): If the last event contains a
+   *   `FunctionResponse` (such as returning completion from a Long Running
+   *   Operation tool, EUC credential request, or confirmation prompt), the
+   *   runner locates the historical event containing the matching `FunctionCall`
+   *   and routes execution directly back to the agent that authored that call.
+   *   If that author cannot be found in the current agent hierarchy (e.g., a
+   *   stale or ephemeral subagent), resolution falls through to Case 2.
+   * - Case 2 (History Scan & Transferability Check): Scans recent events in
+   *   reverse order to find the last active agent that emitted a message. If
+   *   that agent is the `rootAgent`, it is returned. If it is a subagent, it
+   *   must be transferable across the agent tree (`isRoutableLlmAgent` returns
+   *   true, meaning it is an `LlmAgent` and neither it nor any of its ancestors
+   *   disallow transfer to parent). If the subagent is non-transferable or
+   *   unknown, evaluation continues backward through the session events.
+   * - Case 3 (Fallback to Root): Defaults to the `rootAgent` if no matching
+   *   function call author or transferable subagent is found.
+   *
+   * @param session The active conversation session containing event history.
+   * @param rootAgent The root agent of the runner's agent hierarchy.
+   * @returns The resolved agent responsible for handling the current turn.
    */
-  // TODO - b/425992518: This is where LRO integration should happen.
-  // Needs clean up before we can generalize it.
   private determineAgentForResumption(
     session: Session,
     rootAgent: BaseAgent,
@@ -473,29 +494,32 @@ export class Runner {
     // Case 1: If the last event is a function response, this returns the
     // agent that made the original function call.
     // =========================================================================
-    const event = findEventByLastFunctionResponseId(session.events);
-    if (event && event.author) {
-      return rootAgent.findAgent(event.author) || rootAgent;
+    const matchingEvent = findEventByLastFunctionResponseId(session.events);
+    const resumedAgent =
+      matchingEvent?.author && rootAgent.findAgent(matchingEvent.author);
+    if (resumedAgent) {
+      return resumedAgent;
     }
 
     // =========================================================================
     // Case 2: Otherwise, find the last agent that emitted a message and is
     // transferable across the agent tree.
     // =========================================================================
-    // TODO - b/425992518: Optimize this, not going to work for long sessions.
-    // TODO - b/425992518: The behavior is dynamic, needs better documentation.
     for (let i = session.events.length - 1; i >= 0; i--) {
-      logger.info('event:', JSON.stringify(session.events[i]));
       const event = session.events[i];
       if (event.author === 'user' || !event.author) {
         continue;
       }
 
+      logger.debug(
+        `Evaluating candidate agent ${event.author} from event ${event.id}`,
+      );
+
       if (event.author === rootAgent.name) {
         return rootAgent;
       }
 
-      const agent = rootAgent.findSubAgent(event.author!);
+      const agent = rootAgent.findSubAgent(event.author);
       if (!agent) {
         logger.warn(
           `Event from an unknown agent: ${event.author}, event id: ${event.id}`,
@@ -541,36 +565,37 @@ export class Runner {
 
 /**
  * It iterates through the events in reverse order, and returns the event
- * containing a function call with a functionCall.id matching the
- * functionResponse.id from the last event in the session.
+ * containing a function call with a `functionCall.id` matching the
+ * `functionResponse.id` from the last event in the session.
+ *
+ * @param events The array of historical session events.
+ * @returns The matching function call event, or null if none found.
  */
-// TODO - b/425992518: a hack that used event log as transaction log. Fix.
 function findEventByLastFunctionResponseId(events: Event[]): Event | null {
-  if (!events.length) {
+  const lastEvent = events[events.length - 1];
+  if (!lastEvent?.content?.parts?.length) {
     return null;
   }
 
-  const lastEvent = events[events.length - 1];
-  const functionCallId = lastEvent.content?.parts?.find(
-    (part) => part.functionResponse,
+  const functionCallId = lastEvent.content.parts.find(
+    (part) => part.functionResponse?.id,
   )?.functionResponse?.id;
   if (!functionCallId) {
     return null;
   }
 
-  // TODO - b/425992518: inefficient search, fix.
   for (let i = events.length - 2; i >= 0; i--) {
     const event = events[i];
-    // Looking for the system long running request euc function call.
-    const functionCalls = getFunctionCalls(event);
-    if (!functionCalls) {
+    if (event.author === 'user' || !event.content?.parts?.length) {
       continue;
     }
 
-    for (const functionCall of functionCalls) {
-      if (functionCall.id === functionCallId) {
-        return event;
-      }
+    if (
+      event.content.parts.some(
+        (part) => part.functionCall?.id === functionCallId,
+      )
+    ) {
+      return event;
     }
   }
   return null;
