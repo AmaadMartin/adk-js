@@ -35,7 +35,7 @@ import {BaseMemoryService} from '../memory/base_memory_service.js';
 import {BasePlugin} from '../plugins/base_plugin.js';
 import {PluginManager} from '../plugins/plugin_manager.js';
 import {BaseSessionService} from '../sessions/base_session_service.js';
-import {CompositeSessionKey, Session} from '../sessions/session.js';
+import {Session} from '../sessions/session.js';
 import {
   runAsyncGeneratorWithOtelContext,
   tracer,
@@ -468,12 +468,6 @@ export class Runner {
     if (!artifactService || !message.parts?.length) {
       return;
     }
-
-    const sessionKey: CompositeSessionKey = {
-      appName: this.appName,
-      userId,
-      sessionId,
-    };
 
     for (let i = 0; i < message.parts.length; i++) {
       const part = message.parts[i];
