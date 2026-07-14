@@ -58,6 +58,10 @@ export {
   CONTENT_REQUEST_PROCESSOR,
   ContentRequestProcessor,
 } from './agents/processors/content_request_processor.js';
+export {
+  CONTEXT_CACHE_REQUEST_PROCESSOR,
+  ContextCacheRequestProcessor,
+} from './agents/processors/context_cache_request_processor.js';
 export {ContextCompactorRequestProcessor} from './agents/processors/context_compactor_request_processor.js';
 export {
   INTERACTIONS_REQUEST_PROCESSOR,
