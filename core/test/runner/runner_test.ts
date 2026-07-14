@@ -687,3 +687,79 @@ describe('Runner customMetadata support', () => {
     appendEventSpy.mockRestore();
   });
 });
+
+describe('Runner saveInputBlobsAsArtifacts deprecation and fallback', () => {
+  let sessionService: InMemorySessionService;
+  let artifactService: InMemoryArtifactService;
+  let agent: MockLlmAgent;
+  let runner: Runner;
+
+  beforeEach(() => {
+    sessionService = new InMemorySessionService();
+    artifactService = new InMemoryArtifactService();
+    agent = new MockLlmAgent('test_agent');
+    runner = new Runner({
+      appName: TEST_APP_ID,
+      agent: agent,
+      sessionService,
+      artifactService,
+    });
+  });
+
+  it('should emit deprecation warning and execute artifact saving via plugin when saveInputBlobsAsArtifacts is true', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    const events: Event[] = [];
+    for await (const event of runner.runAsync({
+      userId: session.userId,
+      sessionId: session.id,
+      newMessage: {
+        role: 'user',
+        parts: [
+          {
+            inlineData: {
+              displayName: 'fallback_doc.pdf',
+              data: 'test data',
+              mimeType: 'application/pdf',
+            },
+          },
+        ],
+      },
+      runConfig: {
+        saveInputBlobsAsArtifacts: true,
+      },
+    })) {
+      events.push(event);
+    }
+
+    expect(
+      runner.pluginManager.getPlugin('save_files_as_artifacts_plugin'),
+    ).toBeDefined();
+
+    const updatedSession = await sessionService.getSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    expect(updatedSession).not.toBeNull();
+    const userEvent = updatedSession!.events[0];
+    expect(userEvent.content?.parts?.[0].text).toBe(
+      '[Uploaded Artifact: "fallback_doc.pdf"]',
+    );
+
+    const keys = await artifactService.listArtifactKeys({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+    expect(keys).toContain('fallback_doc.pdf');
+
+    warnSpy.mockRestore();
+  });
+});

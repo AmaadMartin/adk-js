@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content, createPartFromText} from '@google/genai';
+import {Content} from '@google/genai';
 import {context, trace} from '@opentelemetry/api';
 
 import {BaseAgent} from '../agents/base_agent.js';
@@ -27,6 +27,7 @@ import {createEventActions} from '../events/event_actions.js';
 import {BaseMemoryService} from '../memory/base_memory_service.js';
 import {BasePlugin} from '../plugins/base_plugin.js';
 import {PluginManager} from '../plugins/plugin_manager.js';
+import {SaveFilesAsArtifactsPlugin} from '../plugins/save_files_as_artifacts_plugin.js';
 import {BaseSessionService} from '../sessions/base_session_service.js';
 import {Session} from '../sessions/session.js';
 import {
@@ -277,6 +278,13 @@ export class Runner {
             abortSignal: params.abortSignal,
           });
 
+          if (
+            runConfig.saveInputBlobsAsArtifacts &&
+            !this.pluginManager.getPlugin('save_files_as_artifacts_plugin')
+          ) {
+            this.pluginManager.registerPlugin(new SaveFilesAsArtifactsPlugin());
+          }
+
           // =========================================================================
           // Preprocess plugins on user message
           // =========================================================================
@@ -302,20 +310,6 @@ export class Runner {
               throw new Error('No parts in the newMessage.');
             }
 
-            // Directly saves the artifacts (if applicable) in the user message and
-            // replaces the artifact data with a file name placeholder.
-            // TODO - b/425992518: fix Runner<>>ArtifactService leaky abstraction.
-            if (runConfig.saveInputBlobsAsArtifacts) {
-              await this.saveArtifacts(
-                invocationContext.invocationId,
-                session.userId,
-                session.id,
-                newMessage,
-              );
-              if (params.abortSignal?.aborted) {
-                return;
-              }
-            }
             // Append the user message to the session with optional state delta.
             await this.sessionService.appendEvent({
               session,
@@ -416,46 +410,6 @@ export class Runner {
       span.end();
       const toolsets = getAllToolsets(this.agent);
       await Promise.allSettled(toolsets.map((t) => t.close()));
-    }
-  }
-
-  /**
-   * Saves artifacts from the message parts and replaces the inline data with
-   * a file name placeholder.
-   *
-   * @param invocationId The current invocation ID.
-   * @param userId The user ID of the session.
-   * @param sessionId The session ID of the session.
-   * @param message The message containing parts to process.
-   */
-  private async saveArtifacts(
-    invocationId: string,
-    userId: string,
-    sessionId: string,
-    message: Content,
-  ): Promise<void> {
-    if (!this.artifactService || !message.parts?.length) {
-      return;
-    }
-
-    for (let i = 0; i < message.parts.length; i++) {
-      const part = message.parts[i];
-      if (!part.inlineData) {
-        continue;
-      }
-      const fileName = `artifact_${invocationId}_${i}`;
-      // TODO - b/425992518: group appname, userId, sessionId as a key.
-      await this.artifactService.saveArtifact({
-        appName: this.appName,
-        userId,
-        sessionId,
-        filename: fileName,
-        artifact: part,
-      });
-      // TODO - b/425992518: potentially buggy if accidentally exposed to LLM.
-      message.parts[i] = createPartFromText(
-        `Uploaded file: ${fileName}. It is saved into artifacts`,
-      );
     }
   }
 
