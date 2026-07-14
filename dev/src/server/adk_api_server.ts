@@ -511,9 +511,7 @@ export class AdkApiServer {
           const artifactName = req.params['artifactName'];
 
           const artifact = await this.artifactService.loadArtifact({
-            appName,
-            userId,
-            sessionId,
+            scope: {appName, userId, sessionId},
             filename: artifactName,
           });
 
@@ -545,9 +543,7 @@ export class AdkApiServer {
           const versionId = req.params['versionId'];
 
           const artifact = await this.artifactService.loadArtifact({
-            appName,
-            userId,
-            sessionId,
+            scope: {appName, userId, sessionId},
             filename: artifactName,
             version: parseInt(versionId, 10),
           });
@@ -578,9 +574,7 @@ export class AdkApiServer {
           const sessionId = req.params['sessionId'];
 
           const artifactKeys = await this.artifactService.listArtifactKeys({
-            appName,
-            userId,
-            sessionId,
+            scope: {appName, userId, sessionId},
           });
 
           res.json(artifactKeys);
@@ -603,9 +597,7 @@ export class AdkApiServer {
           const artifactName = req.params['artifactName'];
 
           const artifactVersions = await this.artifactService.listVersions({
-            appName,
-            userId,
-            sessionId,
+            scope: {appName, userId, sessionId},
             filename: artifactName,
           });
 
@@ -629,9 +621,7 @@ export class AdkApiServer {
           const artifactName = req.params['artifactName'];
 
           await this.artifactService.deleteArtifact({
-            appName,
-            userId,
-            sessionId,
+            scope: {appName, userId, sessionId},
             filename: artifactName,
           });
 

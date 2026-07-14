@@ -70,8 +70,7 @@ export class FileArtifactService implements BaseArtifactService {
   }
 
   async saveArtifact({
-    userId,
-    sessionId,
+    scope: {userId, sessionId},
     filename,
     artifact,
     customMetadata,
@@ -130,8 +129,7 @@ export class FileArtifactService implements BaseArtifactService {
   }
 
   async loadArtifact({
-    userId,
-    sessionId,
+    scope: {userId, sessionId},
     filename,
     version,
   }: LoadArtifactRequest): Promise<Part | undefined> {
@@ -231,8 +229,7 @@ export class FileArtifactService implements BaseArtifactService {
   }
 
   async listArtifactKeys({
-    userId,
-    sessionId,
+    scope: {userId, sessionId},
   }: ListArtifactKeysRequest): Promise<string[]> {
     const filenames: Set<string> = new Set();
     const userRoot = getUserRoot(this.rootDir, userId);
@@ -265,8 +262,7 @@ export class FileArtifactService implements BaseArtifactService {
   }
 
   async deleteArtifact({
-    userId,
-    sessionId,
+    scope: {userId, sessionId},
     filename,
   }: DeleteArtifactRequest): Promise<void> {
     try {
@@ -286,8 +282,7 @@ export class FileArtifactService implements BaseArtifactService {
   }
 
   async listVersions({
-    userId,
-    sessionId,
+    scope: {userId, sessionId},
     filename,
   }: ListVersionsRequest): Promise<number[]> {
     try {
@@ -308,8 +303,7 @@ export class FileArtifactService implements BaseArtifactService {
   }
 
   async listArtifactVersions({
-    userId,
-    sessionId,
+    scope: {userId, sessionId},
     filename,
   }: ListVersionsRequest): Promise<ArtifactVersion[]> {
     try {
@@ -349,8 +343,7 @@ export class FileArtifactService implements BaseArtifactService {
   }
 
   async getArtifactVersion({
-    userId,
-    sessionId,
+    scope: {userId, sessionId},
     filename,
     version,
   }: LoadArtifactRequest): Promise<ArtifactVersion | undefined> {
