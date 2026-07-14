@@ -11,6 +11,7 @@ import {InvocationContext} from '../agents/invocation_context.js';
 import {createEvent, Event, getFunctionCalls} from '../events/event.js';
 import {mergeEventActions} from '../events/event_actions.js';
 import {BaseTool} from '../tools/base_tool.js';
+import {FunctionTool} from '../tools/function_tool.js';
 import {ToolConfirmation} from '../tools/tool_confirmation.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
 import {logger} from '../utils/logger.js';
@@ -502,24 +503,7 @@ export async function handleFunctionCallList({
     functionResponseEvents,
   );
 
-  if (functionResponseEvents.length > 1) {
-    tracer.startActiveSpan('execute_tool (merged)', (span) => {
-      try {
-        logger.debug('execute_tool (merged)');
-        // TODO - b/436079721: implement [traceMergedToolCalls]
-        logger.debug('traceMergedToolCalls', {
-          responseEventId: mergedEvent.id,
-          functionResponseEvent: mergedEvent.id,
-        });
-        traceMergedToolCalls({
-          responseEventId: mergedEvent.id,
-          functionResponseEvent: mergedEvent,
-        });
-      } finally {
-        span.end();
-      }
-    });
-  }
+  traceMergedEvent(mergedEvent, functionResponseEvents.length);
   return mergedEvent;
 }
 
@@ -590,4 +574,299 @@ export function mergeParallelFunctionResponseEvents(
   });
 }
 
-// TODO - b/425992518: support function call in live connection.
+function traceMergedEvent(mergedEvent: Event, count: number): void {
+  if (count <= 1) return;
+  tracer.startActiveSpan('execute_tool (merged)', (span) => {
+    try {
+      logger.debug('execute_tool (merged)');
+      // TODO - b/436079721: implement [traceMergedToolCalls]
+      logger.debug('traceMergedToolCalls', {
+        responseEventId: mergedEvent.id,
+        functionResponseEvent: mergedEvent.id,
+      });
+      traceMergedToolCalls({
+        responseEventId: mergedEvent.id,
+        functionResponseEvent: mergedEvent,
+      });
+    } finally {
+      span.end();
+    }
+  });
+}
+
+function createAndTraceResponseEvent({
+  invocationContext,
+  toolContext,
+  tool,
+  response,
+  args,
+  shouldTrace,
+}: {
+  invocationContext: InvocationContext;
+  toolContext: Context;
+  tool: BaseTool;
+  response: unknown;
+  args: Record<string, unknown>;
+  shouldTrace: boolean;
+}): Event {
+  const functionResponseEvent = createEvent({
+    invocationId: invocationContext.invocationId,
+    author: invocationContext.agent.name,
+    content: createUserContent({
+      functionResponse: {
+        id: toolContext.functionCallId,
+        name: tool.name,
+        response: response as Record<string, unknown>,
+      },
+    }),
+    actions: toolContext.actions,
+    branch: invocationContext.branch,
+  });
+
+  if (shouldTrace) {
+    logger.debug('traceToolCall', {
+      tool: tool.name,
+      args,
+      functionResponseEvent: functionResponseEvent.id,
+    });
+    traceToolCall({
+      tool,
+      args,
+      functionResponseEvent,
+    });
+  }
+
+  return functionResponseEvent;
+}
+
+/**
+ * Execute a single function call for live mode.
+ * Catches errors and routes to onToolErrorCallback without bubbling up to terminate the live session.
+ */
+export async function executeSingleFunctionCallLive({
+  invocationContext,
+  functionCall,
+  toolsDict,
+  beforeToolCallbacks,
+  afterToolCallbacks,
+  toolConfirmation,
+}: {
+  invocationContext: InvocationContext;
+  functionCall: FunctionCall;
+  toolsDict: Record<string, BaseTool>;
+  beforeToolCallbacks: SingleBeforeToolCallback[];
+  afterToolCallbacks: SingleAfterToolCallback[];
+  toolConfirmation?: ToolConfirmation;
+}): Promise<Event | null> {
+  const functionArgs = functionCall.args ?? {};
+  let tool: BaseTool;
+  let toolContext: Context;
+
+  try {
+    const res = getToolAndContext({
+      invocationContext,
+      functionCall,
+      toolsDict,
+      toolConfirmation,
+    });
+    tool = res.tool;
+    toolContext = res.toolContext;
+  } catch (e: unknown) {
+    const dummyTool = new FunctionTool({
+      name: functionCall.name || 'unknown',
+      description: 'Tool not found',
+      execute: async () => {},
+    });
+    const dummyContext = new Context({
+      invocationContext,
+      functionCallId: functionCall.id,
+      toolConfirmation,
+    });
+    const err = e instanceof Error ? e : new Error(String(e));
+    const onToolErrorResponse =
+      await invocationContext.pluginManager.runOnToolErrorCallback({
+        tool: dummyTool,
+        toolArgs: functionArgs,
+        toolContext: dummyContext,
+        error: err,
+      });
+    const functionResponse = onToolErrorResponse ?? {error: err.message};
+    return createAndTraceResponseEvent({
+      invocationContext,
+      toolContext: dummyContext,
+      tool: dummyTool,
+      response: functionResponse,
+      args: functionArgs,
+      shouldTrace: true,
+    });
+  }
+
+  logger.debug(`execute_tool ${tool.name}`);
+
+  // Step 1: Check if plugin before_tool_callback overrides the function response.
+  let functionResponse: unknown =
+    await invocationContext.pluginManager.runBeforeToolCallback({
+      tool,
+      toolArgs: functionArgs,
+      toolContext,
+    });
+  let functionResponseError: string | unknown | undefined;
+  let didCallToolAsync = false;
+
+  // Step 2: If no overrides are provided from the plugins, further run the canonical callback.
+  if (functionResponse == null) {
+    // Cover both null and undefined
+    for (const callback of beforeToolCallbacks) {
+      functionResponse = await callback({
+        tool: tool,
+        args: functionArgs,
+        context: toolContext,
+      });
+      if (functionResponse != null) {
+        break;
+      }
+    }
+  }
+
+  // Step 3: Otherwise, proceed calling the tool normally.
+  if (functionResponse == null) {
+    didCallToolAsync = true;
+    try {
+      functionResponse = await callToolAsync(tool, functionArgs, toolContext);
+    } catch (e: unknown) {
+      const err = e instanceof Error ? e : new Error(String(e));
+      const onToolErrorResponse =
+        await invocationContext.pluginManager.runOnToolErrorCallback({
+          tool,
+          toolArgs: functionArgs,
+          toolContext,
+          error: err,
+        });
+
+      if (onToolErrorResponse != null) {
+        functionResponse = onToolErrorResponse;
+      } else {
+        functionResponseError = err.message;
+      }
+    }
+  }
+
+  const responseDict = (functionResponse ?? {}) as Record<string, unknown>;
+
+  // Step 4: Check if plugin after_tool_callback overrides the function response.
+  let alteredFunctionResponse =
+    await invocationContext.pluginManager.runAfterToolCallback({
+      tool,
+      toolArgs: functionArgs,
+      toolContext,
+      result: responseDict,
+    });
+
+  // Step 5: If no overrides are provided from the plugins, further run the canonical after_tool_callbacks.
+  if (alteredFunctionResponse == null) {
+    // Cover both null and undefined
+    for (const callback of afterToolCallbacks) {
+      alteredFunctionResponse = await callback({
+        tool,
+        args: functionArgs,
+        context: toolContext,
+        response: responseDict,
+      });
+      if (alteredFunctionResponse != null) {
+        break;
+      }
+    }
+  }
+
+  // Step 6: If alternative response exists from after_tool_callback, use it instead of original function response.
+  functionResponse = alteredFunctionResponse ?? functionResponse;
+
+  // Allow long running function to return null or undefined as response.
+  if (tool.isLongRunning && functionResponse == null) {
+    return null;
+  }
+
+  if (functionResponseError) {
+    functionResponse = {error: functionResponseError};
+  } else if (typeof functionResponse !== 'object' || functionResponse == null) {
+    functionResponse = {result: functionResponse};
+  } else if (Array.isArray(functionResponse)) {
+    functionResponse = {results: functionResponse};
+  }
+
+  return createAndTraceResponseEvent({
+    invocationContext,
+    toolContext,
+    tool,
+    response: functionResponse,
+    args: functionArgs,
+    shouldTrace:
+      !didCallToolAsync ||
+      functionResponseError != null ||
+      alteredFunctionResponse != null,
+  });
+}
+
+/**
+ * Handles function calls in live streaming mode.
+ * Executes requested tools concurrently, merges responses into a unified event,
+ * preserves liveSessionId, and returns null if no tools executed.
+ */
+export async function handleFunctionCallsLive({
+  invocationContext,
+  functionCallEvent,
+  toolsDict,
+  beforeToolCallbacks,
+  afterToolCallbacks,
+  filters,
+  toolConfirmationDict,
+}: {
+  invocationContext: InvocationContext;
+  functionCallEvent: Event;
+  toolsDict: Record<string, BaseTool>;
+  beforeToolCallbacks: SingleBeforeToolCallback[];
+  afterToolCallbacks: SingleAfterToolCallback[];
+  filters?: Set<string>;
+  toolConfirmationDict?: Record<string, ToolConfirmation>;
+}): Promise<Event | null> {
+  const functionCalls = getFunctionCalls(functionCallEvent);
+  const filteredFunctionCalls = (functionCalls ?? []).filter((functionCall) => {
+    return !filters || (functionCall.id && filters.has(functionCall.id));
+  });
+
+  if (!filteredFunctionCalls.length) {
+    return null;
+  }
+
+  const functionResponseEventsNullable = await Promise.all(
+    filteredFunctionCalls.map((functionCall) =>
+      executeSingleFunctionCallLive({
+        invocationContext,
+        functionCall,
+        toolsDict,
+        beforeToolCallbacks,
+        afterToolCallbacks,
+        toolConfirmation: toolConfirmationDict?.[functionCall.id ?? ''],
+      }),
+    ),
+  );
+
+  const functionResponseEvents = functionResponseEventsNullable.filter(
+    (event): event is Event => event != null,
+  );
+
+  if (!functionResponseEvents.length) {
+    return null;
+  }
+
+  const mergedEvent = mergeParallelFunctionResponseEvents(
+    functionResponseEvents,
+  );
+
+  if (functionCallEvent.liveSessionId !== undefined) {
+    mergedEvent.liveSessionId = functionCallEvent.liveSessionId;
+  }
+
+  traceMergedEvent(mergedEvent, functionResponseEvents.length);
+  return mergedEvent;
+}
