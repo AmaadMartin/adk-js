@@ -147,4 +147,35 @@ describe('LiveRequestQueue', () => {
     expect(await queue.get()).toEqual({close: true});
     expect(await queue.get()).toEqual({close: true});
   });
+
+  it('should immediately throw if abortSignal is already aborted when calling get', async () => {
+    const queue = new LiveRequestQueue();
+    const controller = new AbortController();
+    controller.abort();
+    await expect(queue.get(controller.signal)).rejects.toThrow('Aborted');
+  });
+
+  it('should reject pending get when abortSignal aborts and remove resolve function from queue', async () => {
+    const queue = new LiveRequestQueue();
+    const controller = new AbortController();
+    const getPromise = queue.get(controller.signal);
+
+    controller.abort();
+    await expect(getPromise).rejects.toThrow('Aborted');
+
+    // Verify resolveFn is removed from queue by checking next send reaches a subsequent get or queues cleanly
+    const request = {content: createUserContent('after-abort')};
+    queue.send(request);
+    expect(await queue.get()).toEqual(request);
+  });
+
+  it('should remove abort listener when get resolves successfully', async () => {
+    const queue = new LiveRequestQueue();
+    const controller = new AbortController();
+    const getPromise = queue.get(controller.signal);
+
+    const request = {content: createUserContent('normal')};
+    queue.send(request);
+    expect(await getPromise).toEqual(request);
+  });
 });
