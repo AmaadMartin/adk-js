@@ -7,15 +7,23 @@
 import {Part} from '@google/genai';
 
 /**
- * The parameters for `saveArtifact`.
+ * A composite key representing the scoping context (app, user, session) for an artifact.
  */
-export interface SaveArtifactRequest {
+export interface ArtifactKey {
   /** The app name. */
   appName: string;
   /** The user ID. */
   userId: string;
   /** The session ID. */
   sessionId: string;
+}
+
+/**
+ * The parameters for `saveArtifact`.
+ */
+export interface SaveArtifactRequest {
+  /** The composite key identifying the artifact scope. */
+  key: ArtifactKey;
   /** The filename of the artifact. */
   filename: string;
   /** The artifact to save. */
@@ -30,12 +38,8 @@ export interface SaveArtifactRequest {
  * The parameters for `loadArtifact`.
  */
 export interface LoadArtifactRequest {
-  /** The app name. */
-  appName: string;
-  /** The user ID. */
-  userId: string;
-  /** The session ID. */
-  sessionId: string;
+  /** The composite key identifying the artifact scope. */
+  key: ArtifactKey;
   /** The filename of the artifact. */
   filename: string;
   /**
@@ -49,24 +53,16 @@ export interface LoadArtifactRequest {
  * The parameters for `listArtifactKeys`.
  */
 export interface ListArtifactKeysRequest {
-  /** The app name. */
-  appName: string;
-  /** The user ID. */
-  userId: string;
-  /** The session ID. */
-  sessionId: string;
+  /** The composite key identifying the artifact scope. */
+  key: ArtifactKey;
 }
 
 /**
  * The parameters for `deleteArtifact`.
  */
 export interface DeleteArtifactRequest {
-  /** The app name. */
-  appName: string;
-  /** The user ID. */
-  userId: string;
-  /** The session ID. */
-  sessionId: string;
+  /** The composite key identifying the artifact scope. */
+  key: ArtifactKey;
   /** The filename of the artifact. */
   filename: string;
 }
@@ -75,12 +71,8 @@ export interface DeleteArtifactRequest {
  * The parameters for `listVersions`.
  */
 export interface ListVersionsRequest {
-  /** The app name. */
-  appName: string;
-  /** The user ID. */
-  userId: string;
-  /** The session ID. */
-  sessionId: string;
+  /** The composite key identifying the artifact scope. */
+  key: ArtifactKey;
   /** The filename of the artifact. */
   filename: string;
 }

@@ -34,12 +34,11 @@ describe('ScopedArtifactService', () => {
     it('delegates with scoped context', async () => {
       const delegate = makeBaseArtifactServiceStub();
       vi.mocked(delegate.saveArtifact).mockResolvedValue(42);
-      const service = new ScopedArtifactService(
-        delegate,
+      const service = new ScopedArtifactService(delegate, {
         appName,
         userId,
         sessionId,
-      );
+      });
 
       const request: SessionSaveArtifactRequest = {
         filename: 'file.txt',
@@ -50,9 +49,11 @@ describe('ScopedArtifactService', () => {
       const result = await service.saveArtifact(request);
 
       expect(delegate.saveArtifact).toHaveBeenCalledWith({
-        appName,
-        userId,
-        sessionId,
+        key: {
+          appName,
+          userId,
+          sessionId,
+        },
         filename: 'file.txt',
         artifact: {text: 'hello'},
         customMetadata: {foo: 'bar'},
@@ -66,12 +67,11 @@ describe('ScopedArtifactService', () => {
       const delegate = makeBaseArtifactServiceStub();
       const part: Part = {text: 'content'};
       vi.mocked(delegate.loadArtifact).mockResolvedValue(part);
-      const service = new ScopedArtifactService(
-        delegate,
+      const service = new ScopedArtifactService(delegate, {
         appName,
         userId,
         sessionId,
-      );
+      });
 
       const request: SessionLoadArtifactRequest = {
         filename: 'file.txt',
@@ -81,9 +81,11 @@ describe('ScopedArtifactService', () => {
       const result = await service.loadArtifact(request);
 
       expect(delegate.loadArtifact).toHaveBeenCalledWith({
-        appName,
-        userId,
-        sessionId,
+        key: {
+          appName,
+          userId,
+          sessionId,
+        },
         filename: 'file.txt',
         version: 2,
       });
@@ -95,19 +97,20 @@ describe('ScopedArtifactService', () => {
     it('delegates with scoped context', async () => {
       const delegate = makeBaseArtifactServiceStub();
       vi.mocked(delegate.listArtifactKeys).mockResolvedValue(['a', 'b']);
-      const service = new ScopedArtifactService(
-        delegate,
+      const service = new ScopedArtifactService(delegate, {
         appName,
         userId,
         sessionId,
-      );
+      });
 
       const result = await service.listArtifactKeys();
 
       expect(delegate.listArtifactKeys).toHaveBeenCalledWith({
-        appName,
-        userId,
-        sessionId,
+        key: {
+          appName,
+          userId,
+          sessionId,
+        },
       });
       expect(result).toEqual(['a', 'b']);
     });
@@ -116,19 +119,20 @@ describe('ScopedArtifactService', () => {
   describe('deleteArtifact', () => {
     it('delegates with scoped context', async () => {
       const delegate = makeBaseArtifactServiceStub();
-      const service = new ScopedArtifactService(
-        delegate,
+      const service = new ScopedArtifactService(delegate, {
         appName,
         userId,
         sessionId,
-      );
+      });
 
       await service.deleteArtifact('file.txt');
 
       expect(delegate.deleteArtifact).toHaveBeenCalledWith({
-        appName,
-        userId,
-        sessionId,
+        key: {
+          appName,
+          userId,
+          sessionId,
+        },
         filename: 'file.txt',
       });
     });
@@ -138,19 +142,20 @@ describe('ScopedArtifactService', () => {
     it('delegates with scoped context', async () => {
       const delegate = makeBaseArtifactServiceStub();
       vi.mocked(delegate.listVersions).mockResolvedValue([1, 2]);
-      const service = new ScopedArtifactService(
-        delegate,
+      const service = new ScopedArtifactService(delegate, {
         appName,
         userId,
         sessionId,
-      );
+      });
 
       const result = await service.listVersions('file.txt');
 
       expect(delegate.listVersions).toHaveBeenCalledWith({
-        appName,
-        userId,
-        sessionId,
+        key: {
+          appName,
+          userId,
+          sessionId,
+        },
         filename: 'file.txt',
       });
       expect(result).toEqual([1, 2]);
@@ -162,19 +167,20 @@ describe('ScopedArtifactService', () => {
       const delegate = makeBaseArtifactServiceStub();
       const versions = [{version: 1}];
       vi.mocked(delegate.listArtifactVersions).mockResolvedValue(versions);
-      const service = new ScopedArtifactService(
-        delegate,
+      const service = new ScopedArtifactService(delegate, {
         appName,
         userId,
         sessionId,
-      );
+      });
 
       const result = await service.listArtifactVersions('file.txt');
 
       expect(delegate.listArtifactVersions).toHaveBeenCalledWith({
-        appName,
-        userId,
-        sessionId,
+        key: {
+          appName,
+          userId,
+          sessionId,
+        },
         filename: 'file.txt',
       });
       expect(result).toEqual(versions);
@@ -186,12 +192,11 @@ describe('ScopedArtifactService', () => {
       const delegate = makeBaseArtifactServiceStub();
       const version = {version: 1};
       vi.mocked(delegate.getArtifactVersion).mockResolvedValue(version);
-      const service = new ScopedArtifactService(
-        delegate,
+      const service = new ScopedArtifactService(delegate, {
         appName,
         userId,
         sessionId,
-      );
+      });
 
       const request: SessionLoadArtifactRequest = {
         filename: 'file.txt',
@@ -201,9 +206,11 @@ describe('ScopedArtifactService', () => {
       const result = await service.getArtifactVersion(request);
 
       expect(delegate.getArtifactVersion).toHaveBeenCalledWith({
-        appName,
-        userId,
-        sessionId,
+        key: {
+          appName,
+          userId,
+          sessionId,
+        },
         filename: 'file.txt',
         version: 1,
       });
