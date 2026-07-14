@@ -6,6 +6,7 @@
 
 import {
   AUTH_PREPROCESSOR,
+  AuthConfig,
   BaseLlm,
   BaseLlmConnection,
   BaseLlmRequestProcessor,
@@ -16,9 +17,12 @@ import {
   Context,
   ContextCompactorRequestProcessor,
   createEvent,
+  createEventActions,
   Event,
+  FunctionTool,
   InvocationContext,
   LlmAgent,
+  llmAgentFunctionsExportedForTestingOnly,
   LlmRequest,
   LlmResponse,
   PluginManager,
@@ -30,6 +34,9 @@ import {Content, Schema, Type} from '@google/genai';
 import {beforeEach, describe, expect, it} from 'vitest';
 import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
+
+const {generateAuthEvent, getLongRunningFunctionCalls} =
+  llmAgentFunctionsExportedForTestingOnly;
 
 class MockLlmConnection implements BaseLlmConnection {
   sendHistory(_history: Content[]): Promise<void> {
@@ -837,5 +844,98 @@ describe('LlmAgent Default Request Processors', () => {
       CONTENT_REQUEST_PROCESSOR,
     );
     expect(authIndex).toBeLessThan(contentIndex);
+  });
+});
+
+describe('generateAuthEvent', () => {
+  let invocationContext: InvocationContext;
+  let pluginManager: PluginManager;
+
+  beforeEach(() => {
+    pluginManager = new PluginManager();
+    const agent = new LlmAgent({name: 'test_agent', model: 'test_model'});
+    invocationContext = new InvocationContext({
+      invocationId: 'inv_123',
+      session: {} as Session,
+      agent,
+      pluginManager,
+    });
+  });
+
+  it('should return undefined if no requestedAuthConfigs', () => {
+    const functionResponseEvent = createEvent({
+      content: {role: 'model', parts: []},
+    });
+
+    const event = generateAuthEvent(invocationContext, functionResponseEvent);
+    expect(event).toBeUndefined();
+  });
+
+  it('should return undefined if requestedAuthConfigs is empty', () => {
+    const functionResponseEvent = createEvent({
+      content: {role: 'model', parts: []},
+    });
+
+    const event = generateAuthEvent(invocationContext, functionResponseEvent);
+    expect(event).toBeUndefined();
+  });
+
+  it('should return auth event if requestedAuthConfigs is present', () => {
+    const functionResponseEvent = createEvent({
+      actions: createEventActions({
+        requestedAuthConfigs: {
+          'call_1': 'auth_config_1' as unknown as AuthConfig,
+          'call_2': 'auth_config_2' as unknown as AuthConfig,
+        },
+      }),
+      content: {role: 'model', parts: []},
+    });
+
+    const event = generateAuthEvent(invocationContext, functionResponseEvent);
+    expect(event).toBeDefined();
+    expect(event!.invocationId).toBe('inv_123');
+    expect(event!.author).toBe('test_agent');
+    expect(event!.content!.parts!.length).toBe(2);
+
+    const parts = event!.content!.parts!;
+    const call1 = parts.find(
+      (p) => p.functionCall?.args?.['function_call_id'] === 'call_1',
+    );
+    expect(call1).toBeDefined();
+    expect(call1!.functionCall!.name).toBe('adk_request_credential');
+    expect(call1!.functionCall!.args!['auth_config']).toBe('auth_config_1');
+
+    const call2 = parts.find(
+      (p) => p.functionCall?.args?.['function_call_id'] === 'call_2',
+    );
+    expect(call2).toBeDefined();
+    expect(call2!.functionCall!.name).toBe('adk_request_credential');
+    expect(call2!.functionCall!.args!['auth_config']).toBe('auth_config_2');
+  });
+});
+
+describe('getLongRunningFunctionCalls', () => {
+  it('should return IDs of long running function calls', () => {
+    const functionCalls = [
+      {name: 'longTool', id: 'call-1'},
+      {name: 'shortTool', id: 'call-2'},
+    ];
+    const toolsDict: Record<string, BaseTool> = {
+      'longTool': new FunctionTool({
+        name: 'longTool',
+        description: 'long',
+        execute: async () => ({}),
+        isLongRunning: true,
+      }),
+      'shortTool': new FunctionTool({
+        name: 'shortTool',
+        description: 'short',
+        execute: async () => ({}),
+        isLongRunning: false,
+      }),
+    };
+    const result = getLongRunningFunctionCalls(functionCalls, toolsDict);
+    expect(result.has('call-1')).toBe(true);
+    expect(result.has('call-2')).toBe(false);
   });
 });
