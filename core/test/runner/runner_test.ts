@@ -333,6 +333,164 @@ describe('Runner.determineAgentForResumption', () => {
 
     expect(events[0].author).toBe('sub_agent2');
   });
+
+  it('should return root agent when function call author is not found in agent tree', async () => {
+    const functionCall: FunctionCall = {
+      id: 'func_999',
+      name: 'test_func',
+      args: {},
+    };
+    const functionResponse: FunctionResponse = {
+      id: 'func_999',
+      name: 'test_func',
+      response: {},
+    };
+
+    const callEvent = createEvent({
+      invocationId: 'inv1',
+      author: 'removed_sub_agent',
+      content: {role: 'model', parts: [{functionCall}]},
+    });
+
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    await sessionService.appendEvent({session: session, event: callEvent});
+
+    const events: Event[] = [];
+    for await (const event of runner.runAsync({
+      userId: session.userId,
+      sessionId: session.id,
+      newMessage: {role: 'user', parts: [{functionResponse}]},
+    })) {
+      events.push(event);
+    }
+
+    expect(events[0].author).toBe('root_agent');
+  });
+
+  it('should fall back to Case 2 when function call event author is undefined', async () => {
+    const functionCall: FunctionCall = {
+      id: 'func_777',
+      name: 'test_func',
+      args: {},
+    };
+    const functionResponse: FunctionResponse = {
+      id: 'func_777',
+      name: 'test_func',
+      response: {},
+    };
+
+    const callEvent = createEvent({
+      invocationId: 'inv1',
+      author: undefined,
+      content: {role: 'model', parts: [{functionCall}]},
+    });
+
+    const subEvent = createEvent({
+      invocationId: 'inv2',
+      author: 'sub_agent1',
+      content: {role: 'model', parts: [{text: 'Hello from sub1'}]},
+    });
+
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    await sessionService.appendEvent({session: session, event: callEvent});
+    await sessionService.appendEvent({session: session, event: subEvent});
+
+    const events: Event[] = [];
+    for await (const event of runner.runAsync({
+      userId: session.userId,
+      sessionId: session.id,
+      newMessage: {role: 'user', parts: [{functionResponse}]},
+    })) {
+      events.push(event);
+    }
+
+    expect(events[0].author).toBe('sub_agent1');
+  });
+
+  it('should memoize visited authors during backward scan so findSubAgent is called exactly once per unique author', async () => {
+    const spy = vi.spyOn(rootAgent, 'findSubAgent');
+    const inputEvents: Event[] = [];
+    for (let i = 0; i < 100; i++) {
+      inputEvents.push(
+        createEvent({
+          invocationId: `inv-sub1-${i}`,
+          author: 'sub_agent1',
+          content: {role: 'model', parts: [{text: `Response ${i}`}]},
+        }),
+      );
+    }
+    for (let i = 0; i < 100; i++) {
+      inputEvents.push(
+        createEvent({
+          invocationId: `inv-non-${i}`,
+          author: 'non_transferable',
+          content: {role: 'model', parts: [{text: `Response ${i}`}]},
+        }),
+      );
+    }
+    for (let i = 0; i < 100; i++) {
+      inputEvents.push(
+        createEvent({
+          invocationId: `inv-unk-${i}`,
+          author: 'unknown_agent',
+          content: {role: 'model', parts: [{text: `Response ${i}`}]},
+        }),
+      );
+    }
+
+    const events = await runTest(inputEvents);
+    expect(events[0].author).toBe('sub_agent1');
+    expect(spy).toHaveBeenCalledTimes(3);
+    expect(spy).toHaveBeenCalledWith('unknown_agent');
+    expect(spy).toHaveBeenCalledWith('non_transferable');
+    expect(spy).toHaveBeenCalledWith('sub_agent1');
+  });
+
+  it('should efficiently determine resumption agent in long sessions with 5,000+ events without performance lag', async () => {
+    const inputEvents: Event[] = [];
+    inputEvents.push(
+      createEvent({
+        invocationId: 'inv-early',
+        author: 'sub_agent1',
+        content: {role: 'model', parts: [{text: 'Early sub agent response'}]},
+      }),
+    );
+    for (let i = 0; i < 5000; i++) {
+      const author =
+        i % 3 === 0
+          ? 'non_transferable'
+          : i % 3 === 1
+            ? 'unknown_agent'
+            : 'user';
+      inputEvents.push(
+        createEvent({
+          invocationId: `inv-long-${i}`,
+          author,
+          content: {
+            role: author === 'user' ? 'user' : 'model',
+            parts: [{text: `Event ${i}`}],
+          },
+        }),
+      );
+    }
+
+    const startTime = Date.now();
+    const events = await runTest(inputEvents);
+    const durationMs = Date.now() - startTime;
+
+    expect(events[0].author).toBe('sub_agent1');
+    expect(durationMs).toBeLessThan(6500);
+  });
 });
 
 describe('Runner with plugins', () => {
