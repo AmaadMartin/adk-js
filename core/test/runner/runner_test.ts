@@ -8,7 +8,7 @@ import {
   BaseAgent,
   BasePlugin,
   createEvent,
-  Event,
+  getLogger,
   InMemoryArtifactService,
   InMemorySessionService,
   InvocationContext,
@@ -685,5 +685,89 @@ describe('Runner customMetadata support', () => {
     expect(userEventCall![0].event.customMetadata).toEqual(customMetadata);
 
     appendEventSpy.mockRestore();
+  });
+
+  describe('Runner saveInputBlobsAsArtifacts deprecation', () => {
+    let sessionService: InMemorySessionService;
+    let artifactService: InMemoryArtifactService;
+    let agent: MockLlmAgent;
+    let runner: Runner;
+
+    beforeEach(async () => {
+      sessionService = new InMemorySessionService();
+      artifactService = new InMemoryArtifactService();
+      agent = new MockLlmAgent('test_agent');
+      runner = new Runner({
+        appName: TEST_APP_ID,
+        agent: agent,
+        sessionService,
+        artifactService,
+      });
+      await sessionService.createSession({
+        appName: TEST_APP_ID,
+        userId: TEST_USER_ID,
+        sessionId: TEST_SESSION_ID,
+      });
+    });
+
+    it('should log warning and save inline data when saveInputBlobsAsArtifacts is true', async () => {
+      const warnSpy = vi.spyOn(getLogger(), 'warn');
+      const saveSpy = vi.spyOn(artifactService, 'saveArtifact');
+
+      const inlinePart = {
+        inlineData: {
+          displayName: 'test.png',
+          data: 'aW1n',
+          mimeType: 'image/png',
+        },
+      };
+
+      for await (const _ of runner.runAsync({
+        userId: TEST_USER_ID,
+        sessionId: TEST_SESSION_ID,
+        newMessage: {role: 'user', parts: [inlinePart]},
+        runConfig: {saveInputBlobsAsArtifacts: true},
+      })) {
+        // consume stream
+      }
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        "The 'saveInputBlobsAsArtifacts' parameter is deprecated. Use SaveFilesAsArtifactsPlugin instead for better control and flexibility.",
+      );
+      expect(saveSpy).toHaveBeenCalled();
+
+      warnSpy.mockRestore();
+      saveSpy.mockRestore();
+    });
+
+    it('should not log deprecation warning or call saveArtifact directly when saveInputBlobsAsArtifacts is false', async () => {
+      const warnSpy = vi.spyOn(getLogger(), 'warn');
+      const saveSpy = vi.spyOn(artifactService, 'saveArtifact');
+
+      const inlinePart = {
+        inlineData: {
+          displayName: 'test.png',
+          data: 'aW1n',
+          mimeType: 'image/png',
+        },
+      };
+
+      for await (const _ of runner.runAsync({
+        userId: TEST_USER_ID,
+        sessionId: TEST_SESSION_ID,
+        newMessage: {role: 'user', parts: [inlinePart]},
+        runConfig: {saveInputBlobsAsArtifacts: false},
+      })) {
+        // consume stream
+      }
+
+      expect(warnSpy).not.toHaveBeenCalledWith(
+        "The 'saveInputBlobsAsArtifacts' parameter is deprecated. Use SaveFilesAsArtifactsPlugin instead for better control and flexibility.",
+      );
+      expect(saveSpy).not.toHaveBeenCalled();
+
+      warnSpy.mockRestore();
+      saveSpy.mockRestore();
+    });
   });
 });
