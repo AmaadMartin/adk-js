@@ -461,7 +461,24 @@ export class Runner {
 
   /**
    * Determines the next agent to run to continue the session. This is primarily
-   * used for session resumption.
+   * used for session resumption across multi-turn agent conversations.
+   *
+   * Dynamic routing invariants and precedence rules:
+   * 1. **Function Response Precedence**: If the last event in the session contains
+   *    a function response matching a prior function call (`functionResponse.id`),
+   *    resumption prioritizes the agent that made the original function call so
+   *    it can process tool outputs.
+   * 2. **Transferable LLM Agent Fallback**: Otherwise, scans backward through the
+   *    session event history to find the most recent agent that emitted an event
+   *    and is transferable (`isRoutableLlmAgent(agent)`). To optimize performance
+   *    in long-running sessions, evaluated author names are memoized so tree
+   *    lookups and routability checks occur at most once per unique author.
+   * 3. **Root Agent Default**: If no suitable transferable agent is found in the
+   *    event history, defaults to `rootAgent`.
+   *
+   * @param session The active session containing historical events.
+   * @param rootAgent The root agent of the execution tree.
+   * @returns The `BaseAgent` responsible for handling the next turn.
    */
   // TODO - b/425992518: This is where LRO integration should happen.
   // Needs clean up before we can generalize it.
@@ -482,10 +499,8 @@ export class Runner {
     // Case 2: Otherwise, find the last agent that emitted a message and is
     // transferable across the agent tree.
     // =========================================================================
-    // TODO - b/425992518: Optimize this, not going to work for long sessions.
-    // TODO - b/425992518: The behavior is dynamic, needs better documentation.
+    const visitedAuthors = new Set<string>();
     for (let i = session.events.length - 1; i >= 0; i--) {
-      logger.info('event:', JSON.stringify(session.events[i]));
       const event = session.events[i];
       if (event.author === 'user' || !event.author) {
         continue;
@@ -495,7 +510,12 @@ export class Runner {
         return rootAgent;
       }
 
-      const agent = rootAgent.findSubAgent(event.author!);
+      if (visitedAuthors.has(event.author)) {
+        continue;
+      }
+      visitedAuthors.add(event.author);
+
+      const agent = rootAgent.findSubAgent(event.author);
       if (!agent) {
         logger.warn(
           `Event from an unknown agent: ${event.author}, event id: ${event.id}`,
