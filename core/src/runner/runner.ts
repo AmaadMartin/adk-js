@@ -132,6 +132,10 @@ export class Runner {
   readonly memoryService?: BaseMemoryService;
   readonly credentialService?: BaseCredentialService;
 
+  // simplicity: In-memory Map<string, Event> index per session ID for O(1) function call lookups.
+  // Upgrade to persistent transaction log service if cross-runner persistence is required.
+  private readonly sessionIndexMap = new Map<string, FunctionCallIndex>();
+
   /**
    * Creates a new Runner instance.
    *
@@ -473,7 +477,12 @@ export class Runner {
     // Case 1: If the last event is a function response, this returns the
     // agent that made the original function call.
     // =========================================================================
-    const event = findEventByLastFunctionResponseId(session.events);
+    const index = updateFunctionCallIndex(
+      session.events,
+      this.sessionIndexMap.get(session.id),
+    );
+    this.sessionIndexMap.set(session.id, index);
+    const event = findEventByLastFunctionResponseId(session.events, index);
     if (event && event.author) {
       return rootAgent.findAgent(event.author) || rootAgent;
     }
@@ -540,40 +549,59 @@ export class Runner {
 }
 
 /**
- * It iterates through the events in reverse order, and returns the event
- * containing a function call with a functionCall.id matching the
- * functionResponse.id from the last event in the session.
+ * Index structure mapping function call IDs to their originating events.
  */
-// TODO - b/425992518: a hack that used event log as transaction log. Fix.
-function findEventByLastFunctionResponseId(events: Event[]): Event | null {
-  if (!events.length) {
-    return null;
-  }
+export interface FunctionCallIndex {
+  /** Map from functionCall.id to the originating Event */
+  readonly callIdToEventMap: Map<string, Event>;
+  /** The number of events indexed so far from session.events */
+  lastIndexedLength: number;
+}
 
-  const lastEvent = events[events.length - 1];
-  const functionCallId = lastEvent.content?.parts?.find(
-    (part) => part.functionResponse,
+/**
+ * Incrementally builds or updates a FunctionCallIndex from an array of events.
+ *
+ * @param events The session events array.
+ * @param index Optional existing index to update incrementally.
+ * @returns The updated or newly created FunctionCallIndex.
+ */
+export function updateFunctionCallIndex(
+  events: Event[],
+  index?: FunctionCallIndex,
+): FunctionCallIndex {
+  index =
+    !index || index.lastIndexedLength > events.length
+      ? {callIdToEventMap: new Map(), lastIndexedLength: 0}
+      : index;
+  for (let i = index.lastIndexedLength; i < events.length; i++) {
+    for (const call of getFunctionCalls(events[i])) {
+      if (call?.id) index.callIdToEventMap.set(call.id, events[i]);
+    }
+  }
+  index.lastIndexedLength = events.length;
+  return index;
+}
+
+/**
+ * Returns the event containing a function call with a functionCall.id matching
+ * the functionResponse.id from the last event in the session using an O(1) indexed lookup.
+ *
+ * @param events The session events array.
+ * @param index Optional FunctionCallIndex for O(1) correlation.
+ * @returns The originating Event or null if not found.
+ */
+export function findEventByLastFunctionResponseId(
+  events: Event[],
+  index?: FunctionCallIndex,
+): Event | null {
+  const targetId = events[events.length - 1]?.content?.parts?.find(
+    (p) => p.functionResponse,
   )?.functionResponse?.id;
-  if (!functionCallId) {
-    return null;
-  }
-
-  // TODO - b/425992518: inefficient search, fix.
-  for (let i = events.length - 2; i >= 0; i--) {
-    const event = events[i];
-    // Looking for the system long running request euc function call.
-    const functionCalls = getFunctionCalls(event);
-    if (!functionCalls) {
-      continue;
-    }
-
-    for (const functionCall of functionCalls) {
-      if (functionCall.id === functionCallId) {
-        return event;
-      }
-    }
-  }
-  return null;
+  if (!targetId || typeof targetId !== 'string') return null;
+  return (
+    (index ?? updateFunctionCallIndex(events)).callIdToEventMap.get(targetId) ||
+    null
+  );
 }
 
 function getAllToolsets(agent: BaseAgent): BaseToolset[] {
