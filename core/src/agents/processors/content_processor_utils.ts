@@ -6,6 +6,7 @@
 import {Content, createUserContent} from '@google/genai';
 import {cloneDeep} from 'lodash-es';
 
+import {filterEventsByBranch} from '../../events/branch_trie.js';
 import {
   CompactedEvent,
   isCompactedEvent,
@@ -38,6 +39,7 @@ export function getContents(
   currentBranch?: string,
 ): Content[] {
   const filteredEvents: Event[] = [];
+  const validEventsForBranchFiltering: Event[] = [];
 
   for (const event of events) {
     if (isCompactedEvent(event)) {
@@ -47,28 +49,23 @@ export function getContents(
 
     // Skip events without content, or generated neither by user nor by model.
     // E.g. events purely for mutating session states.
-    if (!event.content?.role || event.content.parts?.[0]?.text === '') {
-      continue;
-    }
-
-    // Skip events not in the current branch.
-    // TODO - b/425992518: inefficient, a tire search is better.
     if (
-      currentBranch &&
-      event.branch &&
-      !currentBranch.startsWith(event.branch)
+      !event.content?.role ||
+      event.content.parts?.[0]?.text === '' ||
+      isAuthEvent(event) ||
+      isToolConfirmationEvent(event)
     ) {
       continue;
     }
 
-    if (isAuthEvent(event)) {
-      continue;
-    }
+    validEventsForBranchFiltering.push(event);
+  }
 
-    if (isToolConfirmationEvent(event)) {
-      continue;
-    }
+  const branchFilteredEvents = currentBranch
+    ? filterEventsByBranch(validEventsForBranchFiltering, currentBranch)
+    : validEventsForBranchFiltering;
 
+  for (const event of branchFilteredEvents) {
     filteredEvents.push(
       isEventFromAnotherAgent(agentName, event)
         ? convertForeignEvent(event)
