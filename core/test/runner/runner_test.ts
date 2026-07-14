@@ -18,6 +18,8 @@ import {
   isRoutableLlmAgent,
   LlmAgent,
   Runner,
+  ScopedArtifactService,
+  SessionArtifactService,
 } from '@google/adk';
 import {Content, FunctionCall, FunctionResponse} from '@google/genai';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
@@ -885,5 +887,100 @@ describe('Runner customMetadata support', () => {
     const userEvent = updatedSession!.events[0];
     expect(userEvent.author).toBe('user');
     expect(userEvent.content?.role).toBe('user');
+  });
+});
+
+describe('Runner artifactService handling', () => {
+  it('should wrap BaseArtifactService in ScopedArtifactService when constructing InvocationContext', async () => {
+    const baseArtifactService = new InMemoryArtifactService();
+    const agent = new MockLlmAgent('agent_base_artifact');
+    const sessionService = new InMemorySessionService();
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      artifactService: baseArtifactService,
+    });
+
+    let capturedInvocationContext: InvocationContext | undefined;
+    const plugin = new (class extends BasePlugin {
+      constructor() {
+        super('capture_context_plugin');
+      }
+      override async onUserMessageCallback({
+        invocationContext,
+      }: {
+        invocationContext: InvocationContext;
+        userMessage: Content;
+      }) {
+        capturedInvocationContext = invocationContext;
+        return undefined;
+      }
+    })();
+    runner.pluginManager.registerPlugin(plugin);
+
+    for await (const _ of runner.runEphemeral({
+      userId: TEST_USER_ID,
+      newMessage: {role: 'user', parts: [{text: 'Hello'}]},
+    })) {
+      // iterate
+    }
+
+    expect(capturedInvocationContext).toBeDefined();
+    expect(capturedInvocationContext!.artifactService).toBeInstanceOf(
+      ScopedArtifactService,
+    );
+  });
+
+  it('should pass SessionArtifactService directly to InvocationContext without wrapping in ScopedArtifactService', async () => {
+    const sessionArtifactService: SessionArtifactService = {
+      saveArtifact: vi.fn().mockResolvedValue(1),
+      loadArtifact: vi.fn().mockResolvedValue(undefined),
+      listArtifactKeys: vi.fn().mockResolvedValue([]),
+      deleteArtifact: vi.fn().mockResolvedValue(undefined),
+      listVersions: vi.fn().mockResolvedValue([]),
+      listArtifactVersions: vi.fn().mockResolvedValue([]),
+      getArtifactVersion: vi.fn().mockResolvedValue(undefined),
+    };
+    const agent = new MockLlmAgent('agent_session_artifact');
+    const sessionService = new InMemorySessionService();
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      artifactService: sessionArtifactService,
+    });
+
+    let capturedInvocationContext: InvocationContext | undefined;
+    const plugin = new (class extends BasePlugin {
+      constructor() {
+        super('capture_context_plugin_session');
+      }
+      override async onUserMessageCallback({
+        invocationContext,
+      }: {
+        invocationContext: InvocationContext;
+        userMessage: Content;
+      }) {
+        capturedInvocationContext = invocationContext;
+        return undefined;
+      }
+    })();
+    runner.pluginManager.registerPlugin(plugin);
+
+    for await (const _ of runner.runEphemeral({
+      userId: TEST_USER_ID,
+      newMessage: {role: 'user', parts: [{text: 'Hello'}]},
+    })) {
+      // iterate
+    }
+
+    expect(capturedInvocationContext).toBeDefined();
+    expect(capturedInvocationContext!.artifactService).toBe(
+      sessionArtifactService,
+    );
+    expect(capturedInvocationContext!.artifactService).not.toBeInstanceOf(
+      ScopedArtifactService,
+    );
   });
 });
