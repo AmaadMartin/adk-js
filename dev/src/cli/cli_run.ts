@@ -65,8 +65,7 @@ async function runFromInputFile(
   fileContent.state['_time'] = new Date().toISOString();
 
   const session = await options.sessionService.createSession({
-    appName: options.appName,
-    userId: options.userId,
+    scope: {appName: options.appName, userId: options.userId},
     state: fileContent.state,
   });
 
@@ -187,8 +186,7 @@ export async function runAgent(options: RunAgentOptions): Promise<void> {
     const rootAgent = await agentFile.load();
 
     let session = await sessionService.createSession({
-      appName: rootAgent.name,
-      userId,
+      scope: {appName: rootAgent.name, userId},
     });
 
     const reloadSubscribers: Array<(agent: BaseAgent) => void> = [];
@@ -282,9 +280,11 @@ export async function runAgent(options: RunAgentOptions): Promise<void> {
         `${sessionId}.session.json`,
       );
       const sessionToStore = await sessionService.getSession({
-        appName: session.appName,
-        userId: session.userId,
-        sessionId: session.id,
+        scope: {
+          appName: session.appName,
+          userId: session.userId,
+          sessionId: session.id,
+        },
       });
       await saveToFile(path.join(dirname, sessionPath), sessionToStore);
 

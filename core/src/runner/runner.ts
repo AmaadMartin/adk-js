@@ -164,8 +164,10 @@ export class Runner {
     customMetadata?: Record<string, unknown>;
   }): AsyncGenerator<Event, void, undefined> {
     const session = await this.sessionService.createSession({
-      appName: this.appName,
-      userId: params.userId,
+      scope: {
+        appName: this.appName,
+        userId: params.userId,
+      },
     });
     const sessionId = session.id;
 
@@ -180,9 +182,11 @@ export class Runner {
       });
     } finally {
       await this.sessionService.deleteSession({
-        appName: this.appName,
-        userId: params.userId,
-        sessionId,
+        scope: {
+          appName: this.appName,
+          userId: params.userId,
+          sessionId,
+        },
       });
     }
   }
@@ -222,11 +226,12 @@ export class Runner {
         ctx,
         this,
         async function* () {
-          const session = await this.sessionService.getSession({
+          const scope = {
             appName: this.appName,
             userId,
             sessionId,
-          });
+          };
+          const session = await this.sessionService.getSession({scope});
 
           if (params.abortSignal?.aborted) {
             return;
@@ -258,11 +263,7 @@ export class Runner {
 
           const invocationContext = new InvocationContext({
             artifactService: this.artifactService
-              ? new ScopedArtifactService(this.artifactService, {
-                  appName: this.appName,
-                  userId,
-                  sessionId,
-                })
+              ? new ScopedArtifactService(this.artifactService, scope)
               : undefined,
             sessionService: this.sessionService,
             memoryService: this.memoryService,

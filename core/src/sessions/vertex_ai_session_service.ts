@@ -117,10 +117,8 @@ export class VertexAiSessionService extends BaseSessionService {
   }
 
   async createSession({
-    appName,
-    userId,
+    scope: {appName, userId, sessionId},
     state,
-    sessionId,
   }: CreateSessionRequest): Promise<Session> {
     const reasoningEngineId = this.getReasoningEngineId(appName);
     const filteredState = state ? trimTempState(state) : undefined;
@@ -169,9 +167,7 @@ export class VertexAiSessionService extends BaseSessionService {
   }
 
   async getSession({
-    appName,
-    userId,
-    sessionId,
+    scope: {appName, userId, sessionId},
     config,
   }: GetSessionRequest): Promise<Session | undefined> {
     const reasoningEngineId = this.getReasoningEngineId(appName);
@@ -245,8 +241,7 @@ export class VertexAiSessionService extends BaseSessionService {
   }
 
   async listSessions({
-    appName,
-    userId,
+    scope: {appName, userId},
     limit,
     offset,
     page,
@@ -332,9 +327,7 @@ export class VertexAiSessionService extends BaseSessionService {
   }
 
   async deleteSession({
-    appName,
-    userId: _userId,
-    sessionId,
+    scope: {appName, userId: _userId, sessionId},
   }: DeleteSessionRequest): Promise<void> {
     const reasoningEngineId = this.getReasoningEngineId(appName);
     await this.sessions.delete({

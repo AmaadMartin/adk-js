@@ -282,9 +282,7 @@ export class AdkApiServer {
           const eventId = req.params['eventId'];
 
           const session = await this.sessionService.getSession({
-            appName,
-            userId,
-            sessionId,
+            scope: {appName, userId, sessionId},
           });
 
           if (!session) {
@@ -360,9 +358,7 @@ export class AdkApiServer {
           const sessionId = req.params['sessionId'];
 
           const session = await this.sessionService.getSession({
-            appName,
-            userId,
-            sessionId,
+            scope: {appName, userId, sessionId},
           });
 
           if (!session) {
@@ -388,8 +384,7 @@ export class AdkApiServer {
           const userId = req.params['userId'];
 
           const sessions = await this.sessionService.listSessions({
-            appName,
-            userId,
+            scope: {appName, userId},
           });
 
           res.json(sessions);
@@ -412,9 +407,7 @@ export class AdkApiServer {
           const state = req.body['state'] || {};
 
           const existingSession = await this.sessionService.getSession({
-            appName,
-            userId,
-            sessionId,
+            scope: {appName, userId, sessionId},
           });
 
           if (existingSession) {
@@ -425,10 +418,8 @@ export class AdkApiServer {
           }
 
           const createdSession = await this.sessionService.createSession({
-            appName,
-            userId,
+            scope: {appName, userId, sessionId},
             state,
-            sessionId,
           });
 
           res.json(createdSession);
@@ -450,8 +441,7 @@ export class AdkApiServer {
           const state = req.body['state'] || {};
 
           const createdSession = await this.sessionService.createSession({
-            appName,
-            userId,
+            scope: {appName, userId},
             state,
           });
 
@@ -474,9 +464,7 @@ export class AdkApiServer {
           const sessionId = req.params['sessionId'];
 
           const session = await this.sessionService.getSession({
-            appName,
-            userId,
-            sessionId,
+            scope: {appName, userId, sessionId},
           });
 
           if (!session) {
@@ -485,9 +473,7 @@ export class AdkApiServer {
           }
 
           await this.sessionService.deleteSession({
-            appName,
-            userId,
-            sessionId,
+            scope: {appName, userId, sessionId},
           });
 
           res.status(204).json({});
@@ -711,9 +697,7 @@ export class AdkApiServer {
     app.post('/run', async (req: Request, res: Response) => {
       const {appName, userId, sessionId, newMessage, stateDelta} = req.body;
       const session = await this.sessionService.getSession({
-        appName,
-        userId,
-        sessionId,
+        scope: {appName, userId, sessionId},
       });
 
       if (!session) {
@@ -776,9 +760,7 @@ export class AdkApiServer {
         }
         try {
           await this.sessionService.getOrCreateSession({
-            appName,
-            userId,
-            sessionId,
+            scope: {appName, userId, sessionId},
             state: {},
           });
           const events: Event[] = [];
@@ -837,9 +819,7 @@ export class AdkApiServer {
         req.body;
 
       const session = await this.sessionService.getSession({
-        appName,
-        userId,
-        sessionId,
+        scope: {appName, userId, sessionId},
       });
 
       if (!session) {

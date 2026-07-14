@@ -113,8 +113,7 @@ describe('VertexAiSessionService', () => {
     });
 
     await serviceWithEngineId.createSession({
-      appName: '12345',
-      userId: 'testUser',
+      scope: {appName: '12345', userId: 'testUser'},
     });
 
     expect(mockClient.createInternal).toHaveBeenCalledWith(
@@ -127,8 +126,7 @@ describe('VertexAiSessionService', () => {
   it('throws error if appName is invalid', async () => {
     await expect(
       service.createSession({
-        appName: 'invalid-app-name',
-        userId: 'testUser',
+        scope: {appName: 'invalid-app-name', userId: 'testUser'},
       }),
     ).rejects.toThrow('App name invalid-app-name is not valid');
   });
@@ -144,8 +142,11 @@ describe('VertexAiSessionService', () => {
     });
 
     await service.createSession({
-      appName: 'projects/my-project/locations/us-central1/reasoningEngines/999',
-      userId: 'testUser',
+      scope: {
+        appName:
+          'projects/my-project/locations/us-central1/reasoningEngines/999',
+        userId: 'testUser',
+      },
     });
 
     expect(mockClient.createInternal).toHaveBeenCalledWith(
@@ -158,8 +159,7 @@ describe('VertexAiSessionService', () => {
   describe('createSession', () => {
     it('creates a new session generating a random id', async () => {
       const session = await service.createSession({
-        appName: '12345', // Must be digits or resource name
-        userId: 'testUser',
+        scope: {appName: '12345', userId: 'testUser'},
         state: {foo: 'bar'},
       });
 
@@ -174,8 +174,7 @@ describe('VertexAiSessionService', () => {
 
     it('filters out temporary state keys prefixed with temp:', async () => {
       const session = await service.createSession({
-        appName: '12345',
-        userId: 'testUser',
+        scope: {appName: '12345', userId: 'testUser'},
         state: {
           foo: 'bar',
           [`${State.TEMP_PREFIX}tempKey`]: 'tempValue',
@@ -193,9 +192,11 @@ describe('VertexAiSessionService', () => {
 
     it('passes sessionId in config if provided', async () => {
       await service.createSession({
-        appName: '12345',
-        userId: 'testUser',
-        sessionId: 'user-provided-id',
+        scope: {
+          appName: '12345',
+          userId: 'testUser',
+          sessionId: 'user-provided-id',
+        },
       });
 
       expect(mockClient.createInternal).toHaveBeenCalledWith(
@@ -220,8 +221,7 @@ describe('VertexAiSessionService', () => {
       vi.useFakeTimers();
 
       const createPromise = service.createSession({
-        appName: '12345',
-        userId: 'testUser',
+        scope: {appName: '12345', userId: 'testUser'},
       });
 
       await Promise.all([
@@ -245,8 +245,7 @@ describe('VertexAiSessionService', () => {
       });
 
       const session = await service.createSession({
-        appName: '12345',
-        userId: 'testUser',
+        scope: {appName: '12345', userId: 'testUser'},
       });
 
       expect(session.lastUpdateTime).toBeGreaterThan(0);
@@ -256,9 +255,11 @@ describe('VertexAiSessionService', () => {
   describe('getSession', () => {
     it('returns the session if it exists', async () => {
       const session = await service.getSession({
-        appName: '12345',
-        userId: 'testUser',
-        sessionId: 'my-session-id',
+        scope: {
+          appName: '12345',
+          userId: 'testUser',
+          sessionId: 'my-session-id',
+        },
       });
 
       expect(session).toBeDefined();
@@ -275,9 +276,11 @@ describe('VertexAiSessionService', () => {
 
     it('calls get without listing events when numRecentEvents is 0', async () => {
       await service.getSession({
-        appName: '12345',
-        userId: 'testUser',
-        sessionId: 'my-session-id',
+        scope: {
+          appName: '12345',
+          userId: 'testUser',
+          sessionId: 'my-session-id',
+        },
         config: {numRecentEvents: 0},
       });
 
@@ -288,9 +291,11 @@ describe('VertexAiSessionService', () => {
     it('applies afterTimestamp filter when listing events', async () => {
       const afterTimestamp = 1600000000000;
       await service.getSession({
-        appName: '12345',
-        userId: 'testUser',
-        sessionId: 'my-session-id',
+        scope: {
+          appName: '12345',
+          userId: 'testUser',
+          sessionId: 'my-session-id',
+        },
         config: {afterTimestamp},
       });
 
@@ -313,9 +318,11 @@ describe('VertexAiSessionService', () => {
 
       await expect(
         service.getSession({
-          appName: '12345',
-          userId: 'testUser',
-          sessionId: 'my-session-id',
+          scope: {
+            appName: '12345',
+            userId: 'testUser',
+            sessionId: 'my-session-id',
+          },
         }),
       ).rejects.toThrow(
         'Session my-session-id does not belong to user testUser',
@@ -348,9 +355,11 @@ describe('VertexAiSessionService', () => {
       });
 
       const session = await service.getSession({
-        appName: '12345',
-        userId: 'testUser',
-        sessionId: 'my-session-id',
+        scope: {
+          appName: '12345',
+          userId: 'testUser',
+          sessionId: 'my-session-id',
+        },
       });
 
       expect(session?.events).toHaveLength(1);
@@ -368,9 +377,11 @@ describe('VertexAiSessionService', () => {
       });
 
       const session = await service.getSession({
-        appName: '12345',
-        userId: 'testUser',
-        sessionId: 'my-session-id',
+        scope: {
+          appName: '12345',
+          userId: 'testUser',
+          sessionId: 'my-session-id',
+        },
         config: {numRecentEvents: 1},
       });
 
@@ -382,9 +393,11 @@ describe('VertexAiSessionService', () => {
       mockClient.get.mockRejectedValueOnce({code: 5, message: 'Not found'});
 
       const session = await service.getSession({
-        appName: '12345',
-        userId: 'testUser',
-        sessionId: 'my-session-id',
+        scope: {
+          appName: '12345',
+          userId: 'testUser',
+          sessionId: 'my-session-id',
+        },
       });
 
       expect(session).toBeUndefined();
@@ -394,9 +407,11 @@ describe('VertexAiSessionService', () => {
       mockClient.get.mockRejectedValueOnce({code: 404, message: 'Not found'});
 
       const session = await service.getSession({
-        appName: '12345',
-        userId: 'testUser',
-        sessionId: 'my-session-id',
+        scope: {
+          appName: '12345',
+          userId: 'testUser',
+          sessionId: 'my-session-id',
+        },
       });
 
       expect(session).toBeUndefined();
@@ -410,9 +425,11 @@ describe('VertexAiSessionService', () => {
       mockClient.events.listInternal.mockResolvedValue({}); // No sessionEvents!
 
       const session = await service.getSession({
-        appName: '12345',
-        userId: 'testUser',
-        sessionId: 'my-session-id',
+        scope: {
+          appName: '12345',
+          userId: 'testUser',
+          sessionId: 'my-session-id',
+        },
       });
 
       expect(session?.events).toEqual([]);
@@ -426,9 +443,11 @@ describe('VertexAiSessionService', () => {
       });
 
       const session = await service.getSession({
-        appName: '12345',
-        userId: 'testUser',
-        sessionId: 'my-session-id',
+        scope: {
+          appName: '12345',
+          userId: 'testUser',
+          sessionId: 'my-session-id',
+        },
       });
 
       expect(session?.state).toEqual({});
@@ -452,9 +471,11 @@ describe('VertexAiSessionService', () => {
       });
 
       const session = await service.getSession({
-        appName: '12345',
-        userId: 'testUser',
-        sessionId: 'my-session-id',
+        scope: {
+          appName: '12345',
+          userId: 'testUser',
+          sessionId: 'my-session-id',
+        },
       });
 
       expect(session?.events[0].actions).toEqual({
@@ -481,9 +502,11 @@ describe('VertexAiSessionService', () => {
 
       await expect(
         service.getSession({
-          appName: '12345',
-          userId: 'testUser',
-          sessionId: 'my-session-id',
+          scope: {
+            appName: '12345',
+            userId: 'testUser',
+            sessionId: 'my-session-id',
+          },
         }),
       ).rejects.toThrow('Permission Denied');
       expect(loggerSpy).toHaveBeenCalled();
@@ -503,8 +526,7 @@ describe('VertexAiSessionService', () => {
       });
 
       const response = await service.listSessions({
-        appName: '12345',
-        userId: 'testUser',
+        scope: {appName: '12345', userId: 'testUser'},
       });
 
       expect(mockClient.listInternal).toHaveBeenCalledWith({
@@ -518,7 +540,7 @@ describe('VertexAiSessionService', () => {
 
     it('lists sessions without filter if userId is missing', async () => {
       await service.listSessions({
-        appName: '12345',
+        scope: {appName: '12345'},
       });
 
       expect(mockClient.listInternal).toHaveBeenCalledWith(
@@ -534,7 +556,7 @@ describe('VertexAiSessionService', () => {
       });
 
       const result = await service.listSessions({
-        appName: '12345',
+        scope: {appName: '12345'},
       });
 
       expect(result.sessions[0].state).toEqual({});
@@ -545,7 +567,7 @@ describe('VertexAiSessionService', () => {
       mockClient.listInternal.mockResolvedValue({}); // No sessions!
 
       const result = await service.listSessions({
-        appName: '12345',
+        scope: {appName: '12345'},
       });
 
       expect(result.sessions).toEqual([]);
@@ -564,7 +586,7 @@ describe('VertexAiSessionService', () => {
       });
 
       const result = await service.listSessions({
-        appName: '12345',
+        scope: {appName: '12345'},
       });
 
       expect(result.sessions[0].state).toEqual({foo: 'bar'});
@@ -582,8 +604,7 @@ describe('VertexAiSessionService', () => {
       });
 
       const result = await service.listSessions({
-        appName: '12345',
-        userId: 'testUser',
+        scope: {appName: '12345', userId: 'testUser'},
       });
 
       expect(result.page).toBe(1);
@@ -596,8 +617,7 @@ describe('VertexAiSessionService', () => {
       mockClient.listInternal.mockResolvedValue({});
 
       const result = await service.listSessions({
-        appName: '12345',
-        userId: 'testUser',
+        scope: {appName: '12345', userId: 'testUser'},
       });
 
       expect(result.sessions).toEqual([]);
@@ -623,8 +643,7 @@ describe('VertexAiSessionService', () => {
         });
 
       const result = await service.listSessions({
-        appName: '12345',
-        userId: 'testUser',
+        scope: {appName: '12345', userId: 'testUser'},
       });
 
       expect(result.sessions).toHaveLength(3);
@@ -656,8 +675,7 @@ describe('VertexAiSessionService', () => {
       });
 
       const result = await service.listSessions({
-        appName: '12345',
-        userId: 'testUser',
+        scope: {appName: '12345', userId: 'testUser'},
         order: 'asc',
       });
 
@@ -686,8 +704,7 @@ describe('VertexAiSessionService', () => {
       });
 
       const result = await service.listSessions({
-        appName: '12345',
-        userId: 'testUser',
+        scope: {appName: '12345', userId: 'testUser'},
         order: 'desc',
       });
 
@@ -716,8 +733,7 @@ describe('VertexAiSessionService', () => {
       });
 
       const result = await service.listSessions({
-        appName: '12345',
-        userId: 'testUser',
+        scope: {appName: '12345', userId: 'testUser'},
         limit: 2,
         order: 'asc',
       });
@@ -761,8 +777,7 @@ describe('VertexAiSessionService', () => {
       });
 
       const result = await service.listSessions({
-        appName: '12345',
-        userId: 'testUser',
+        scope: {appName: '12345', userId: 'testUser'},
         page: 2,
         limit: 2,
         order: 'asc',
@@ -797,8 +812,7 @@ describe('VertexAiSessionService', () => {
       });
 
       const result = await service.listSessions({
-        appName: '12345',
-        userId: 'testUser',
+        scope: {appName: '12345', userId: 'testUser'},
         limit: 2,
         offset: 1,
         order: 'asc',
@@ -811,9 +825,11 @@ describe('VertexAiSessionService', () => {
   describe('deleteSession', () => {
     it('deletes an existing session', async () => {
       await service.deleteSession({
-        appName: '12345',
-        userId: 'testUser',
-        sessionId: 'delete-session',
+        scope: {
+          appName: '12345',
+          userId: 'testUser',
+          sessionId: 'delete-session',
+        },
       });
 
       expect(mockClient.delete).toHaveBeenCalledWith({
