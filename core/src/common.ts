@@ -126,8 +126,11 @@ export {
   createEvent,
   getFunctionCalls,
   getFunctionResponses,
+  hasThoughts,
   hasTrailingCodeExecutionResult,
   isFinalResponse,
+  mergeParallelFunctionResponseEvents,
+  pruneThoughts,
   stringifyContent,
 } from './events/event.js';
 export type {Event} from './events/event.js';

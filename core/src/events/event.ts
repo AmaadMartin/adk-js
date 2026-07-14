@@ -4,12 +4,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {FunctionCall, FunctionResponse} from '@google/genai';
+import {FunctionCall, FunctionResponse, Part} from '@google/genai';
 
 import {LlmResponse} from '../models/llm_response.js';
 
 import {toCamelCase, toSnakeCase} from '../utils/object_notation_utils.js';
-import {createEventActions, EventActions} from './event_actions.js';
+import {
+  createEventActions,
+  EventActions,
+  mergeEventActions,
+} from './event_actions.js';
 
 /**
  * Represents an event in a conversation between agents and users.
@@ -275,4 +279,41 @@ export function transformToSnakeCaseEvent(
     string,
     unknown
   >;
+}
+
+/**
+ * Merges a list of function response events into a single event.
+ */
+export function mergeParallelFunctionResponseEvents(
+  functionResponseEvents: Event[],
+): Event {
+  if (!functionResponseEvents.length) {
+    throw new Error('No function response events provided.');
+  }
+
+  if (functionResponseEvents.length === 1) {
+    return functionResponseEvents[0];
+  }
+  const mergedParts: Part[] = [];
+  for (const event of functionResponseEvents) {
+    if (event.content && event.content.parts) {
+      mergedParts.push(...event.content.parts);
+    }
+  }
+
+  const baseEvent = functionResponseEvents[0];
+
+  const actionsList = functionResponseEvents.map(
+    (event) => event.actions || {},
+  );
+  const mergedActions = mergeEventActions(actionsList);
+
+  return createEvent({
+    invocationId: baseEvent.invocationId,
+    author: baseEvent.author,
+    branch: baseEvent.branch,
+    content: {role: 'user', parts: mergedParts},
+    actions: mergedActions,
+    timestamp: baseEvent.timestamp!,
+  });
 }
