@@ -42,9 +42,7 @@ describe('FileArtifactService', () => {
 
       try {
         await service.saveArtifact({
-          appName,
-          userId,
-          sessionId,
+          scope: {appName, userId, sessionId},
           filename: '../../secret.txt',
           artifact: {text: '.'},
         });
