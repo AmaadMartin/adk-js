@@ -19,6 +19,10 @@ import {App} from '../apps/app.js';
 import {ResumabilityConfig} from '../apps/resumability_config.js';
 import {BaseArtifactService} from '../artifacts/base_artifact_service.js';
 import {ScopedArtifactService} from '../artifacts/scoped_artifact_service.js';
+import {
+  isSessionArtifactService,
+  SessionArtifactService,
+} from '../artifacts/session_artifact_service.js';
 
 import {BaseCredentialService} from '../auth/credential_service/base_credential_service.js';
 import {
@@ -67,7 +71,7 @@ export interface RunnerConfig {
   /**
    * An optional service for storing and retrieving artifacts.
    */
-  artifactService?: BaseArtifactService;
+  artifactService?: BaseArtifactService | SessionArtifactService;
 
   /**
    * The service for managing sessions.
@@ -140,7 +144,7 @@ export class Runner {
   readonly appName: string;
   readonly agent: BaseAgent;
   readonly pluginManager: PluginManager;
-  readonly artifactService?: BaseArtifactService;
+  readonly artifactService?: BaseArtifactService | SessionArtifactService;
   readonly sessionService: BaseSessionService;
   readonly memoryService?: BaseMemoryService;
   readonly credentialService?: BaseCredentialService;
@@ -286,12 +290,14 @@ export class Runner {
 
           const invocationContext = new InvocationContext({
             artifactService: this.artifactService
-              ? new ScopedArtifactService(
-                  this.artifactService,
-                  this.appName,
-                  userId,
-                  sessionId,
-                )
+              ? isSessionArtifactService(this.artifactService)
+                ? this.artifactService
+                : new ScopedArtifactService(
+                    this.artifactService,
+                    this.appName,
+                    userId,
+                    sessionId,
+                  )
               : undefined,
             sessionService: this.sessionService,
             memoryService: this.memoryService,
@@ -332,12 +338,10 @@ export class Runner {
 
             // Directly saves the artifacts (if applicable) in the user message and
             // replaces the artifact data with a file name placeholder.
-            // TODO - b/425992518: fix Runner<>>ArtifactService leaky abstraction.
             if (runConfig.saveInputBlobsAsArtifacts) {
               await this.saveArtifacts(
+                invocationContext.artifactService,
                 invocationContext.invocationId,
-                session.userId,
-                session.id,
                 newMessage,
               );
               if (params.abortSignal?.aborted) {
@@ -457,12 +461,11 @@ export class Runner {
    * @param message The message containing parts to process.
    */
   private async saveArtifacts(
+    artifactService: SessionArtifactService | undefined,
     invocationId: string,
-    userId: string,
-    sessionId: string,
     message: Content,
   ): Promise<void> {
-    if (!this.artifactService || !message.parts?.length) {
+    if (!artifactService || !message.parts?.length) {
       return;
     }
 
@@ -478,8 +481,7 @@ export class Runner {
         continue;
       }
       const fileName = `artifact_${invocationId}_${i}`;
-      await this.artifactService.saveArtifact({
-        ...sessionKey,
+      await artifactService.saveArtifact({
         filename: fileName,
         artifact: part,
       });
