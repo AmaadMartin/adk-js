@@ -127,4 +127,111 @@ describe('AgentTool', () => {
     expect(session!.state['initialStateKey']).toBe('contexto inicial');
     expect(session!.state['subAgentOutput']).toBe('Today is Tuesday');
   });
+
+  it('supports internalized session parameters when executing agent tool workflows', async () => {
+    const mockSubAgentResponses: RawGenerateContentResponse[] = [
+      {
+        candidates: [
+          {
+            content: {
+              parts: [{text: 'SubAgent done'}],
+              role: 'model',
+            },
+            finishReason: FinishReason.STOP,
+          },
+        ],
+      },
+    ];
+
+    const mockParentAgentResponses: RawGenerateContentResponse[] = [
+      {
+        candidates: [
+          {
+            content: {
+              parts: [
+                {
+                  functionCall: {
+                    name: 'subAgent',
+                    args: {request: 'do work'},
+                    id: 'adk-mock-call-2',
+                  },
+                },
+              ],
+              role: 'model',
+            },
+            finishReason: FinishReason.STOP,
+          },
+        ],
+      },
+      {
+        candidates: [
+          {
+            content: {
+              parts: [{text: 'Parent done'}],
+              role: 'model',
+            },
+            finishReason: FinishReason.STOP,
+          },
+        ],
+      },
+    ];
+
+    const subAgentModel = new GeminiWithMockResponses(mockSubAgentResponses);
+    const subAgent = new LlmAgent({
+      model: subAgentModel,
+      name: 'subAgent',
+      description: 'subAgent',
+      instruction: 'sub agent instruction',
+      outputKey: 'subAgentOutputResult',
+    });
+
+    const mainAgentModel = new GeminiWithMockResponses(
+      mockParentAgentResponses,
+    );
+    const mainAgent = new LlmAgent({
+      model: mainAgentModel,
+      name: 'mainAgent',
+      description: 'MainAgent',
+      instruction: 'main agent instruction',
+      tools: [new AgentTool({agent: subAgent})],
+    });
+
+    const sessionService = new InMemorySessionService();
+    const memoryService = new InMemoryMemoryService();
+
+    await sessionService.createSession({
+      appName: 'ADKTestInternalized',
+      userId: 'InternalizedUser',
+      sessionId: 'session_int_1',
+      state: {initial: true},
+    });
+
+    const runner = new Runner({
+      appName: 'ADKTestInternalized',
+      agent: mainAgent,
+      sessionService,
+      memoryService,
+      userId: 'InternalizedUser',
+      sessionId: 'session_int_1',
+    });
+
+    for await (const _event of runner.runAsync({
+      newMessage: {
+        role: 'user',
+        parts: [{text: 'Start workflow'}],
+      },
+    })) {
+      // Consume the events.
+    }
+
+    const session = await sessionService.getSession({
+      appName: 'ADKTestInternalized',
+      userId: 'InternalizedUser',
+      sessionId: 'session_int_1',
+    });
+
+    expect(session).toBeDefined();
+    expect(session!.state['initial']).toBe(true);
+    expect(session!.state['subAgentOutputResult']).toBe('SubAgent done');
+  });
 });

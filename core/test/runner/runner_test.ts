@@ -10,6 +10,7 @@ import {
   createEvent,
   Event,
   InMemoryArtifactService,
+  InMemoryRunner,
   InMemorySessionService,
   InvocationContext,
   LlmAgent,
@@ -685,5 +686,237 @@ describe('Runner customMetadata support', () => {
     expect(userEventCall![0].event.customMetadata).toEqual(customMetadata);
 
     appendEventSpy.mockRestore();
+  });
+});
+
+describe('Runner internalized session parameters', () => {
+  let sessionService: InMemorySessionService;
+  let artifactService: InMemoryArtifactService;
+  let agent: MockLlmAgent;
+
+  beforeEach(() => {
+    sessionService = new InMemorySessionService();
+    artifactService = new InMemoryArtifactService();
+    agent = new MockLlmAgent('test_agent');
+  });
+
+  it('should use internalized userId, sessionId, and runConfig in runAsync', async () => {
+    await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: 'default_u',
+      sessionId: 'default_s',
+    });
+
+    const getSessionSpy = vi.spyOn(sessionService, 'getSession');
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      artifactService,
+      userId: 'default_u',
+      sessionId: 'default_s',
+      runConfig: {saveInputBlobsAsArtifacts: false},
+    });
+
+    const events: Event[] = [];
+    for await (const event of runner.runAsync({
+      newMessage: {role: 'user', parts: [{text: 'Hello'}]},
+    })) {
+      events.push(event);
+    }
+
+    expect(getSessionSpy).toHaveBeenCalledWith({
+      appName: TEST_APP_ID,
+      userId: 'default_u',
+      sessionId: 'default_s',
+    });
+    expect(events.length).toBeGreaterThan(0);
+    getSessionSpy.mockRestore();
+  });
+
+  it('should throw error in runAsync when userId is missing from both constructor and params', async () => {
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+    });
+
+    await expect(async () => {
+      for await (const _ of runner.runAsync({
+        sessionId: 's1',
+        newMessage: {role: 'user', parts: [{text: 'Hello'}]},
+      })) {
+        // iterate
+      }
+    }).rejects.toThrow(
+      'userId must be provided either in Runner constructor or in runAsync params',
+    );
+  });
+
+  it('should throw error in runAsync when sessionId is missing from both constructor and params', async () => {
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      userId: 'u1',
+    });
+
+    await expect(async () => {
+      for await (const _ of runner.runAsync({
+        newMessage: {role: 'user', parts: [{text: 'Hello'}]},
+      })) {
+        // iterate
+      }
+    }).rejects.toThrow(
+      'sessionId must be provided either in Runner constructor or in runAsync params',
+    );
+  });
+
+  it('should allow explicit runAsync params to override constructor default session parameters', async () => {
+    await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: 'override_u',
+      sessionId: 'override_s',
+    });
+
+    const getSessionSpy = vi.spyOn(sessionService, 'getSession');
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      userId: 'constructor_u',
+      sessionId: 'constructor_s',
+      runConfig: {saveInputBlobsAsArtifacts: false},
+    });
+
+    const events: Event[] = [];
+    for await (const event of runner.runAsync({
+      userId: 'override_u',
+      sessionId: 'override_s',
+      runConfig: {saveInputBlobsAsArtifacts: true},
+      newMessage: {role: 'user', parts: [{text: 'Hello'}]},
+    })) {
+      events.push(event);
+    }
+
+    expect(getSessionSpy).toHaveBeenCalledWith({
+      appName: TEST_APP_ID,
+      userId: 'override_u',
+      sessionId: 'override_s',
+    });
+    expect(events.length).toBeGreaterThan(0);
+    getSessionSpy.mockRestore();
+  });
+
+  it('should use internalized userId and runConfig in runEphemeral', async () => {
+    const createSessionSpy = vi.spyOn(sessionService, 'createSession');
+    const deleteSessionSpy = vi.spyOn(sessionService, 'deleteSession');
+
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      userId: 'eph_user',
+      runConfig: {supportCfc: false},
+    });
+
+    const events: Event[] = [];
+    for await (const event of runner.runEphemeral({
+      newMessage: {role: 'user', parts: [{text: 'Hello'}]},
+    })) {
+      events.push(event);
+    }
+
+    expect(createSessionSpy).toHaveBeenCalledWith({
+      appName: TEST_APP_ID,
+      userId: 'eph_user',
+    });
+    const createdSession = await createSessionSpy.mock.results[0].value;
+    expect(deleteSessionSpy).toHaveBeenCalledWith({
+      appName: TEST_APP_ID,
+      userId: 'eph_user',
+      sessionId: createdSession.id,
+    });
+    expect(events.length).toBeGreaterThan(0);
+    createSessionSpy.mockRestore();
+    deleteSessionSpy.mockRestore();
+  });
+
+  it('should throw error in runEphemeral when userId is missing from both constructor and params', async () => {
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+    });
+
+    await expect(async () => {
+      for await (const _ of runner.runEphemeral({
+        newMessage: {role: 'user', parts: [{text: 'Hello'}]},
+      })) {
+        // iterate
+      }
+    }).rejects.toThrow(
+      'userId must be provided either in Runner constructor or in runEphemeral params',
+    );
+  });
+
+  it('should allow explicit runEphemeral params to override constructor userId and runConfig', async () => {
+    const createSessionSpy = vi.spyOn(sessionService, 'createSession');
+    const deleteSessionSpy = vi.spyOn(sessionService, 'deleteSession');
+
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      userId: 'eph_constructor_user',
+      runConfig: {supportCfc: false},
+    });
+
+    const events: Event[] = [];
+    for await (const event of runner.runEphemeral({
+      userId: 'eph_override_user',
+      runConfig: {supportCfc: false},
+      newMessage: {role: 'user', parts: [{text: 'Hello'}]},
+    })) {
+      events.push(event);
+    }
+
+    expect(createSessionSpy).toHaveBeenCalledWith({
+      appName: TEST_APP_ID,
+      userId: 'eph_override_user',
+    });
+    const createdSession = await createSessionSpy.mock.results[0].value;
+    expect(deleteSessionSpy).toHaveBeenCalledWith({
+      appName: TEST_APP_ID,
+      userId: 'eph_override_user',
+      sessionId: createdSession.id,
+    });
+    createSessionSpy.mockRestore();
+    deleteSessionSpy.mockRestore();
+  });
+
+  it('should support InMemoryRunner with internalized session parameters', async () => {
+    const runner = new InMemoryRunner({
+      agent,
+      userId: 'mem_u',
+      sessionId: 'mem_s',
+    });
+
+    await runner.sessionService.createSession({
+      appName: runner.appName,
+      userId: 'mem_u',
+      sessionId: 'mem_s',
+    });
+
+    const events: Event[] = [];
+    for await (const event of runner.runAsync({
+      newMessage: {role: 'user', parts: [{text: 'Hello'}]},
+    })) {
+      events.push(event);
+    }
+
+    expect(runner.userId).toBe('mem_u');
+    expect(runner.sessionId).toBe('mem_s');
+    expect(events.length).toBeGreaterThan(0);
   });
 });
