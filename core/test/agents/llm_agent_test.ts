@@ -16,6 +16,9 @@ import {
   Context,
   ContextCompactorRequestProcessor,
   createEvent,
+  createSetModelResponseTool,
+  DEFAULT_REQUEST_PROCESSORS,
+  DEFAULT_RESPONSE_PROCESSORS,
   Event,
   InvocationContext,
   LlmAgent,
@@ -837,5 +840,74 @@ describe('LlmAgent Default Request Processors', () => {
       CONTENT_REQUEST_PROCESSOR,
     );
     expect(authIndex).toBeLessThan(contentIndex);
+  });
+
+  it('assigns isolated copies of DEFAULT_REQUEST_PROCESSORS and DEFAULT_RESPONSE_PROCESSORS', () => {
+    const agent = new LlmAgent({
+      name: 'test_agent',
+    });
+    expect(agent.requestProcessors).not.toBe(DEFAULT_REQUEST_PROCESSORS);
+    expect(agent.responseProcessors).not.toBe(DEFAULT_RESPONSE_PROCESSORS);
+
+    const initialReqLength = DEFAULT_REQUEST_PROCESSORS.length;
+    const initialRespLength = DEFAULT_RESPONSE_PROCESSORS.length;
+
+    agent.requestProcessors.pop();
+    agent.responseProcessors.push({} as BaseLlmResponseProcessor);
+
+    expect(DEFAULT_REQUEST_PROCESSORS.length).toBe(initialReqLength);
+    expect(DEFAULT_RESPONSE_PROCESSORS.length).toBe(initialRespLength);
+  });
+
+  it('copies caller-supplied requestProcessors and responseProcessors', () => {
+    const customReq = [CONTENT_REQUEST_PROCESSOR];
+    const customResp: BaseLlmResponseProcessor[] = [];
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      requestProcessors: customReq,
+      responseProcessors: customResp,
+      disallowTransferToParent: true,
+      disallowTransferToPeers: true,
+    });
+
+    expect(agent.requestProcessors).not.toBe(customReq);
+    expect(agent.responseProcessors).not.toBe(customResp);
+    expect(agent.requestProcessors).toEqual([CONTENT_REQUEST_PROCESSOR]);
+  });
+});
+
+describe('createSetModelResponseTool', () => {
+  it('creates a function tool that sets skipSummarization and returns JSON string', async () => {
+    const schema: Schema = {
+      type: Type.OBJECT,
+      properties: {result: {type: Type.STRING}},
+    };
+    const tool = createSetModelResponseTool(schema);
+    expect(tool.name).toBe('set_model_response');
+    expect(tool.description).toContain(
+      'Call this tool to submit your final response',
+    );
+
+    const mockInvocationContext = new InvocationContext({
+      invocationId: 'test_inv',
+      session: {} as Session,
+      agent: new LlmAgent({name: 'test_agent'}),
+      pluginManager: new PluginManager(),
+    });
+    const toolContext = new Context({
+      invocationContext: mockInvocationContext,
+    });
+
+    const args = {result: 'success'};
+    const output = await tool.runAsync({
+      args,
+      toolContext,
+    });
+    expect(toolContext.actions.skipSummarization).toBe(true);
+    expect(output).toBe(JSON.stringify(args));
+
+    // Verify branch when toolContext is undefined
+    const outputWithoutContext = await tool.runAsync({args});
+    expect(outputWithoutContext).toBe(JSON.stringify(args));
   });
 });

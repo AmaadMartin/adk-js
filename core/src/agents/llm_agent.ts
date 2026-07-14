@@ -324,6 +324,50 @@ async function convertToolUnionToTools(
 }
 
 /**
+ * Default request processors for LlmAgent, in precise execution order.
+ */
+export const DEFAULT_REQUEST_PROCESSORS: readonly BaseLlmRequestProcessor[] = [
+  BASIC_LLM_REQUEST_PROCESSOR,
+  AUTH_PREPROCESSOR,
+  IDENTITY_LLM_REQUEST_PROCESSOR,
+  INSTRUCTIONS_LLM_REQUEST_PROCESSOR,
+  REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR,
+  CONTENT_REQUEST_PROCESSOR,
+  INTERACTIONS_REQUEST_PROCESSOR,
+  CODE_EXECUTION_REQUEST_PROCESSOR,
+  TOOL_FILTER_REQUEST_PROCESSOR,
+];
+
+/**
+ * Default response processors for LlmAgent.
+ */
+export const DEFAULT_RESPONSE_PROCESSORS: readonly BaseLlmResponseProcessor[] =
+  [];
+
+/**
+ * Creates a standalone 'set_model_response' function tool for structured outputs.
+ *
+ * @param schema The output schema conforming to LlmAgentSchema.
+ * @returns A FunctionTool instance configured to handle final structured responses.
+ */
+export function createSetModelResponseTool(
+  schema: LlmAgentSchema,
+): FunctionTool<LlmAgentSchema> {
+  return new FunctionTool({
+    name: 'set_model_response',
+    description:
+      'Call this tool to submit your final response conforming to the output schema. Use this tool only when you have collected all the information and are ready to return the final answer.',
+    parameters: schema,
+    execute: async (args, toolContext) => {
+      if (toolContext) {
+        toolContext.actions.skipSummarization = true;
+      }
+      return JSON.stringify(args);
+    },
+  });
+}
+
+/**
  * A unique symbol to identify ADK agent classes.
  * Defined once and shared by all LlmAgent instances.
  */
@@ -392,19 +436,10 @@ export class LlmAgent extends BaseAgent {
     this.afterToolCallback = config.afterToolCallback;
     this.codeExecutor = config.codeExecutor;
 
-    // TODO - b/425992518: Define these processor arrays.
     // Orders matter, don't change. Append new processors to the end
-    this.requestProcessors = config.requestProcessors ?? [
-      BASIC_LLM_REQUEST_PROCESSOR,
-      AUTH_PREPROCESSOR,
-      IDENTITY_LLM_REQUEST_PROCESSOR,
-      INSTRUCTIONS_LLM_REQUEST_PROCESSOR,
-      REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR,
-      CONTENT_REQUEST_PROCESSOR,
-      INTERACTIONS_REQUEST_PROCESSOR,
-      CODE_EXECUTION_REQUEST_PROCESSOR,
-      TOOL_FILTER_REQUEST_PROCESSOR,
-    ];
+    this.requestProcessors = config.requestProcessors
+      ? [...config.requestProcessors]
+      : [...DEFAULT_REQUEST_PROCESSORS];
 
     if (
       !config.requestProcessors &&
@@ -428,7 +463,9 @@ export class LlmAgent extends BaseAgent {
       }
     }
 
-    this.responseProcessors = config.responseProcessors ?? [];
+    this.responseProcessors = config.responseProcessors
+      ? [...config.responseProcessors]
+      : [...DEFAULT_RESPONSE_PROCESSORS];
 
     // Preserve the agent transfer behavior.
     const agentTransferDisabled =
@@ -780,50 +817,31 @@ export class LlmAgent extends BaseAgent {
         yield event;
       }
     }
-    // TODO - b/425992518: check if tool preprocessors can be simplified.
     // Run pre-processors for tools.
-    const allTools = [...this.tools];
-    if (this.outputSchema && allTools.length > 0) {
-      const setModelResponseTool = new FunctionTool({
-        name: 'set_model_response',
-        description:
-          'Call this tool to submit your final response conforming to the output schema. Use this tool only when you have collected all the information and are ready to return the final answer.',
-        parameters: this.outputSchema,
-        execute: async (args, toolContext) => {
-          if (toolContext) {
-            toolContext.actions.skipSummarization = true;
-          }
-          return JSON.stringify(args);
-        },
-      });
-      allTools.push(setModelResponseTool);
+    const resolvedTools = await this.canonicalTools(
+      new ReadonlyContext(invocationContext),
+    );
+    if (this.outputSchema && resolvedTools.length > 0) {
+      resolvedTools.push(createSetModelResponseTool(this.outputSchema));
     }
-    for (const toolUnion of allTools) {
-      const toolContext = new Context({invocationContext});
 
-      // process all tools from this tool union
-      const tools = (
-        await convertToolUnionToTools(
-          toolUnion,
-          new ReadonlyContext(invocationContext),
-        )
-      ).filter((tool) => {
-        // If allowedTools is not set, allow all tools. Otherwise, only allow
-        // tools that are in the allowedTools set.
-        // The allowedTools set is populated by request processors.
-        return (
-          !llmRequest.allowedTools ||
-          llmRequest.allowedTools.includes(tool.name) ||
-          tool.name === 'set_model_response'
-        );
-      });
+    const toolContext = new Context({invocationContext});
+    for (const tool of resolvedTools) {
+      // If allowedTools is not set, allow all tools. Otherwise, only allow
+      // tools that are in the allowedTools set.
+      // The allowedTools set is populated by request processors.
+      if (
+        llmRequest.allowedTools &&
+        !llmRequest.allowedTools.includes(tool.name) &&
+        tool.name !== 'set_model_response'
+      ) {
+        continue;
+      }
 
-      for (const tool of tools) {
-        await tool.processLlmRequest({toolContext, llmRequest});
+      await tool.processLlmRequest({toolContext, llmRequest});
 
-        if (invocationContext.abortSignal?.aborted) {
-          return;
-        }
+      if (invocationContext.abortSignal?.aborted) {
+        return;
       }
     }
     // =========================================================================
