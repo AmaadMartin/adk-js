@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
+  BaseLlm,
+  BaseLlmConnection,
   BasePlugin,
   BaseTool,
   createEvent,
@@ -13,6 +15,8 @@ import {
   FunctionTool,
   InvocationContext,
   LlmAgent,
+  LlmRequest,
+  LlmResponse,
   PluginManager,
   Session,
   SingleAfterToolCallback,
@@ -35,6 +39,7 @@ const {
   handleFunctionCallList,
   generateAuthEvent,
   generateRequestConfirmationEvent,
+  normalizeCallbackResponse,
 } = functionsExportedForTestingOnly;
 
 // Tool for testing
@@ -93,6 +98,33 @@ class TestPlugin extends BasePlugin {
 function randomIdForTestingOnly(): string {
   return (Math.random() * 100).toString();
 }
+
+describe('normalizeCallbackResponse', () => {
+  it('should return undefined when input is null or undefined', () => {
+    expect(normalizeCallbackResponse(null)).toBeUndefined();
+    expect(normalizeCallbackResponse(undefined)).toBeUndefined();
+  });
+
+  it('should wrap primitive values into a {result: value} object', () => {
+    expect(normalizeCallbackResponse('primitive string')).toEqual({
+      result: 'primitive string',
+    });
+    expect(normalizeCallbackResponse(123)).toEqual({result: 123});
+    expect(normalizeCallbackResponse(true)).toEqual({result: true});
+  });
+
+  it('should wrap arrays into a {results: array} object', () => {
+    expect(normalizeCallbackResponse(['a', 'b'])).toEqual({
+      results: ['a', 'b'],
+    });
+  });
+
+  it('should return object records unchanged', () => {
+    expect(normalizeCallbackResponse({custom: 'record'})).toEqual({
+      custom: 'record',
+    });
+  });
+});
 
 describe('handleFunctionCallList', () => {
   let invocationContext: InvocationContext;
@@ -362,6 +394,190 @@ describe('handleFunctionCallList', () => {
         }),
       }),
     );
+  });
+
+  it('should normalize primitive string returned by beforeToolCallback', async () => {
+    const beforeToolCallback: SingleBeforeToolCallback = async () => {
+      return 'primitive before response' as unknown as Record<string, unknown>;
+    };
+    let passedResponseToAfterCallback: unknown;
+    const afterToolCallback: SingleAfterToolCallback = async ({response}) => {
+      passedResponseToAfterCallback = response;
+      return undefined;
+    };
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [functionCall],
+      toolsDict,
+      beforeToolCallbacks: [beforeToolCallback],
+      afterToolCallbacks: [afterToolCallback],
+    });
+    expect(passedResponseToAfterCallback).toEqual({
+      result: 'primitive before response',
+    });
+    expect(event).not.toBeNull();
+    const definedEvent = event as Event;
+    expect(definedEvent.content!.parts![0].functionResponse!.response).toEqual({
+      result: 'primitive before response',
+    });
+  });
+
+  it('should normalize array returned by afterToolCallback', async () => {
+    const afterToolCallback: SingleAfterToolCallback = async () => {
+      return ['item1', 'item2'] as unknown as Record<string, unknown>;
+    };
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [functionCall],
+      toolsDict,
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [afterToolCallback],
+    });
+    expect(event).not.toBeNull();
+    const definedEvent = event as Event;
+    expect(definedEvent.content!.parts![0].functionResponse!.response).toEqual({
+      results: ['item1', 'item2'],
+    });
+  });
+
+  it('should cleanly return null and emit no event when long-running tool returns null or undefined', async () => {
+    const longRunningTool = new FunctionTool({
+      name: 'longRunningTool',
+      description: 'long running tool returning nullish',
+      parameters: z.object({}),
+      execute: async () => null,
+      isLongRunning: true,
+    });
+    const longRunningCall: FunctionCall = {
+      id: randomIdForTestingOnly(),
+      name: 'longRunningTool',
+      args: {},
+    };
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [longRunningCall],
+      toolsDict: {'longRunningTool': longRunningTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+    expect(event).toBeNull();
+  });
+
+  it('should create and return FunctionResponseEvent when long-running tool explicitly returns a response record', async () => {
+    const longRunningToolWithResponse = new FunctionTool({
+      name: 'longRunningToolWithResponse',
+      description: 'long running tool with response',
+      parameters: z.object({}),
+      execute: async () => ({status: 'initiated', jobId: '123'}),
+      isLongRunning: true,
+    });
+    const longRunningCall: FunctionCall = {
+      id: randomIdForTestingOnly(),
+      name: 'longRunningToolWithResponse',
+      args: {},
+    };
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [longRunningCall],
+      toolsDict: {'longRunningToolWithResponse': longRunningToolWithResponse},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+    expect(event).not.toBeNull();
+    const definedEvent = event as Event;
+    expect(definedEvent.content!.parts![0].functionResponse!.response).toEqual({
+      status: 'initiated',
+      jobId: '123',
+    });
+  });
+});
+
+describe('LlmAgent long-running tool integration', () => {
+  it('should complete turn cleanly without emitting empty function response parts when long-running tool returns nullish', async () => {
+    const longRunningTool = new FunctionTool({
+      name: 'longRunningIntegrationTool',
+      description: 'long running integration tool',
+      parameters: z.object({}),
+      execute: async () => null,
+      isLongRunning: true,
+    });
+
+    const functionCallResponse: LlmResponse = {
+      content: {
+        role: 'model',
+        parts: [
+          {
+            functionCall: {
+              name: 'longRunningIntegrationTool',
+              args: {},
+            },
+          },
+        ],
+      },
+    };
+
+    class MockConnection implements BaseLlmConnection {
+      sendHistory(_history: Content[]): Promise<void> {
+        return Promise.resolve();
+      }
+      sendContent(_content: Content): Promise<void> {
+        return Promise.resolve();
+      }
+      sendRealtime(_blob: {data: string; mimeType: string}): Promise<void> {
+        return Promise.resolve();
+      }
+      async *receive(): AsyncGenerator<LlmResponse, void, void> {}
+      async close(): Promise<void> {
+        return Promise.resolve();
+      }
+    }
+
+    class MockIntegrationLlm extends BaseLlm {
+      async *generateContentAsync(
+        _request: LlmRequest,
+      ): AsyncGenerator<LlmResponse, void, void> {
+        yield functionCallResponse;
+      }
+      async connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
+        return new MockConnection();
+      }
+    }
+
+    const agent = new LlmAgent({
+      name: 'test_agent_long_running',
+      tools: [longRunningTool],
+      model: new MockIntegrationLlm({model: 'mock-model'}),
+    });
+
+    const mockState = {
+      hasDelta: () => false,
+      get: () => undefined,
+      set: () => {},
+    };
+
+    const invocationContext = new InvocationContext({
+      invocationId: 'inv_integration_123',
+      session: {
+        id: 'sess_123',
+        state: mockState,
+        events: [],
+      } as unknown as Session,
+      agent,
+      pluginManager: new PluginManager(),
+    });
+
+    const events: Event[] = [];
+    for await (const event of agent.runAsync(invocationContext)) {
+      events.push(event);
+    }
+
+    expect(events.length).toBe(1);
+    expect(events[0].content?.parts?.[0].functionCall?.name).toBe(
+      'longRunningIntegrationTool',
+    );
+    expect(
+      events.some((e) => e.content?.parts?.some((p) => p.functionResponse)),
+    ).toBe(false);
   });
 });
 
