@@ -128,6 +128,7 @@ export {
   getFunctionResponses,
   hasTrailingCodeExecutionResult,
   isFinalResponse,
+  mergeParallelFunctionResponseEvents,
   stringifyContent,
 } from './events/event.js';
 export type {Event} from './events/event.js';

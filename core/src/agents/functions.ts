@@ -8,8 +8,12 @@ import {Content, createUserContent, FunctionCall, Part} from '@google/genai';
 import {isEmpty} from 'lodash-es';
 
 import {InvocationContext} from '../agents/invocation_context.js';
-import {createEvent, Event, getFunctionCalls} from '../events/event.js';
-import {mergeEventActions} from '../events/event_actions.js';
+import {
+  createEvent,
+  Event,
+  getFunctionCalls,
+  mergeParallelFunctionResponseEvents,
+} from '../events/event.js';
 import {BaseTool} from '../tools/base_tool.js';
 import {ToolConfirmation} from '../tools/tool_confirmation.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
@@ -550,44 +554,6 @@ function getToolAndContext({
   const tool = toolsDict[functionCall.name];
 
   return {tool, toolContext};
-}
-
-/**
- * Merges a list of function response events into a single event.
- */
-// TODO - b/425992518: may not need export. Can be conslidated into Event.
-export function mergeParallelFunctionResponseEvents(
-  functionResponseEvents: Event[],
-): Event {
-  if (!functionResponseEvents.length) {
-    throw new Error('No function response events provided.');
-  }
-
-  if (functionResponseEvents.length === 1) {
-    return functionResponseEvents[0];
-  }
-  const mergedParts: Part[] = [];
-  for (const event of functionResponseEvents) {
-    if (event.content && event.content.parts) {
-      mergedParts.push(...event.content.parts);
-    }
-  }
-
-  const baseEvent = functionResponseEvents[0];
-
-  const actionsList = functionResponseEvents.map(
-    (event) => event.actions || {},
-  );
-  const mergedActions = mergeEventActions(actionsList);
-
-  return createEvent({
-    invocationId: baseEvent.invocationId,
-    author: baseEvent.author,
-    branch: baseEvent.branch,
-    content: {role: 'user', parts: mergedParts},
-    actions: mergedActions,
-    timestamp: baseEvent.timestamp!,
-  });
 }
 
 // TODO - b/425992518: support function call in live connection.
