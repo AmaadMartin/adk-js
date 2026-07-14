@@ -687,3 +687,117 @@ describe('Runner customMetadata support', () => {
     appendEventSpy.mockRestore();
   });
 });
+
+describe('Runner internalization and saveInputBlobsAsArtifacts', () => {
+  let sessionService: InMemorySessionService;
+  let artifactService: InMemoryArtifactService;
+  let runner: Runner;
+
+  beforeEach(async () => {
+    sessionService = new InMemorySessionService();
+    artifactService = new InMemoryArtifactService();
+    const rootAgent = new MockLlmAgent('root_agent');
+    runner = new Runner({
+      appName: TEST_APP_ID,
+      agent: rootAgent,
+      sessionService,
+      artifactService,
+    });
+    await sessionService.createSession({
+      sessionId: TEST_SESSION_ID,
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+    });
+  });
+
+  it('should internalize runConfig and save inline data blobs via invocationContext.artifactService', async () => {
+    const newMessage: Content = {
+      role: 'user',
+      parts: [
+        {
+          inlineData: {
+            mimeType: 'text/plain',
+            data: 'SGVsbG8gV29ybGQ=',
+          },
+        },
+        {
+          text: 'Regular text part',
+        },
+      ],
+    };
+
+    const events: Event[] = [];
+    for await (const event of runner.runAsync({
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      newMessage,
+      runConfig: {
+        saveInputBlobsAsArtifacts: true,
+      },
+    })) {
+      events.push(event);
+    }
+
+    expect(events.length).toBeGreaterThan(0);
+
+    const session = await sessionService.getSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    expect(session).toBeDefined();
+    const userEvent = session!.events[0];
+    expect(userEvent.author).toBe('user');
+    expect(userEvent.content?.parts?.[0].text).toMatch(
+      /^Uploaded file: artifact_e-[a-z0-9-]+_0\. It is saved into artifacts$/,
+    );
+    expect(userEvent.content?.parts?.[1].text).toBe('Regular text part');
+
+    const keys = await artifactService.listArtifactKeys({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+    expect(keys.length).toBe(1);
+    expect(keys[0]).toMatch(/^artifact_e-[a-z0-9-]+_0$/);
+  });
+
+  it('should skip saving artifacts if artifactService is undefined', async () => {
+    const runnerWithoutArtifacts = new Runner({
+      appName: TEST_APP_ID,
+      agent: new MockLlmAgent('root_agent'),
+      sessionService,
+    });
+
+    const newMessage: Content = {
+      role: 'user',
+      parts: [
+        {
+          inlineData: {
+            mimeType: 'text/plain',
+            data: 'SGVsbG8=',
+          },
+        },
+      ],
+    };
+
+    for await (const _ of runnerWithoutArtifacts.runAsync({
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      newMessage,
+      runConfig: {
+        saveInputBlobsAsArtifacts: true,
+      },
+    })) {
+      // Consume stream
+    }
+
+    const session = await sessionService.getSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+    expect(session!.events[0].content?.parts?.[0].inlineData).toBeDefined();
+  });
+});
