@@ -4,8 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GenerateContentConfig, Schema} from '@google/genai';
+import {FunctionCall, GenerateContentConfig, Part, Schema} from '@google/genai';
 import {context, trace} from '@opentelemetry/api';
+import {isEmpty} from 'lodash-es';
 import {FunctionTool} from '../tools/function_tool.js';
 
 import {z as z3} from 'zod/v3';
@@ -48,11 +49,12 @@ import {
 } from './processors/base_llm_processor.js';
 
 import {
-  generateAuthEvent,
+  generateClientFunctionCallId,
   generateRequestConfirmationEvent,
   getLongRunningFunctionCalls,
   handleFunctionCallsAsync,
   populateClientFunctionCallId,
+  REQUEST_EUC_FUNCTION_CALL_NAME,
 } from './functions.js';
 
 import {AUTH_PREPROCESSOR} from '../auth/auth_preprocessor.js';
@@ -321,6 +323,52 @@ async function convertToolUnionToTools(
     return [toolUnion];
   }
   return await toolUnion.getTools(context);
+}
+
+// The auth part of function calling is a bit hacky, need to to clarify.
+/**
+ * Generates an authentication event.
+ *
+ * It iterates through requested auth configurations in a function response
+ * event and creates a new function call for each.
+ */
+function generateAuthEvent(
+  invocationContext: InvocationContext,
+  functionResponseEvent: Event,
+): Event | undefined {
+  if (
+    !functionResponseEvent.actions?.requestedAuthConfigs ||
+    isEmpty(functionResponseEvent.actions.requestedAuthConfigs)
+  ) {
+    return undefined;
+  }
+  const parts: Part[] = [];
+  const longRunningToolIds = new Set<string>();
+  for (const [functionCallId, authConfig] of Object.entries(
+    functionResponseEvent.actions.requestedAuthConfigs,
+  )) {
+    const requestEucFunctionCall: FunctionCall = {
+      name: REQUEST_EUC_FUNCTION_CALL_NAME,
+      args: {
+        'function_call_id': functionCallId,
+        'auth_config': authConfig,
+      },
+      id: generateClientFunctionCallId(),
+    };
+    longRunningToolIds.add(requestEucFunctionCall.id!);
+    parts.push({functionCall: requestEucFunctionCall});
+  }
+
+  return createEvent({
+    invocationId: invocationContext.invocationId,
+    author: invocationContext.agent.name,
+    branch: invocationContext.branch,
+    content: {
+      parts: parts,
+      role: functionResponseEvent.content!.role,
+    },
+    longRunningToolIds: Array.from(longRunningToolIds),
+  });
 }
 
 /**

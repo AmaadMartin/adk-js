@@ -34,7 +34,6 @@ export const REQUEST_CONFIRMATION_FUNCTION_CALL_NAME =
 // Export these items for testing purposes only
 export const functionsExportedForTestingOnly = {
   handleFunctionCallList,
-  generateAuthEvent,
   generateRequestConfirmationEvent,
 };
 
@@ -108,53 +107,6 @@ export function getLongRunningFunctionCalls(
     }
   }
   return longRunningToolIds;
-}
-
-// TODO - b/425992518: consider internalize as part of llm_agent's runtime.
-// The auth part of function calling is a bit hacky, need to to clarify.
-/**
- * Generates an authentication event.
- *
- * It iterates through requested auth configurations in a function response
- * event and creates a new function call for each.
- */
-export function generateAuthEvent(
-  invocationContext: InvocationContext,
-  functionResponseEvent: Event,
-): Event | undefined {
-  if (
-    !functionResponseEvent.actions?.requestedAuthConfigs ||
-    isEmpty(functionResponseEvent.actions.requestedAuthConfigs)
-  ) {
-    return undefined;
-  }
-  const parts: Part[] = [];
-  const longRunningToolIds = new Set<string>();
-  for (const [functionCallId, authConfig] of Object.entries(
-    functionResponseEvent.actions.requestedAuthConfigs,
-  )) {
-    const requestEucFunctionCall: FunctionCall = {
-      name: REQUEST_EUC_FUNCTION_CALL_NAME,
-      args: {
-        'function_call_id': functionCallId,
-        'auth_config': authConfig,
-      },
-      id: generateClientFunctionCallId(),
-    };
-    longRunningToolIds.add(requestEucFunctionCall.id!);
-    parts.push({functionCall: requestEucFunctionCall});
-  }
-
-  return createEvent({
-    invocationId: invocationContext.invocationId,
-    author: invocationContext.agent.name,
-    branch: invocationContext.branch,
-    content: {
-      parts: parts,
-      role: functionResponseEvent.content!.role,
-    },
-    longRunningToolIds: Array.from(longRunningToolIds),
-  });
 }
 
 /**
