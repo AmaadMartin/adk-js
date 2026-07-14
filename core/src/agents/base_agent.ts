@@ -54,6 +54,16 @@ export interface BaseAgentConfig {
  */
 const BASE_AGENT_SIGNATURE_SYMBOL = Symbol.for('google.adk.baseAgent');
 
+function hasEventDelta(callbackContext: Context): boolean {
+  return (
+    callbackContext.state.hasDelta() ||
+    Object.keys(callbackContext.eventActions.artifactDelta).length > 0 ||
+    Object.keys(callbackContext.eventActions.requestedAuthConfigs).length > 0 ||
+    Object.keys(callbackContext.eventActions.requestedToolConfirmations)
+      .length > 0
+  );
+}
+
 /**
  * Type guard to check if an object is an instance of BaseAgent.
  * @param obj The object to check.
@@ -336,11 +346,39 @@ export abstract class BaseAgent {
   protected async handleBeforeAgentCallback(
     invocationContext: InvocationContext,
   ): Promise<Event | undefined> {
-    if (this.beforeAgentCallback.length === 0) {
+    if (
+      this.beforeAgentCallback.length === 0 &&
+      !invocationContext.pluginManager
+    ) {
       return undefined;
     }
 
     const callbackContext = new Context({invocationContext});
+
+    if (invocationContext.pluginManager) {
+      const content =
+        await invocationContext.pluginManager.runBeforeAgentCallback({
+          agent: this,
+          callbackContext,
+        });
+
+      if (invocationContext.abortSignal?.aborted) {
+        return;
+      }
+
+      if (content) {
+        invocationContext.endInvocation = true;
+
+        return createEvent({
+          invocationId: invocationContext.invocationId,
+          author: this.name,
+          branch: invocationContext.branch,
+          content,
+          actions: callbackContext.eventActions,
+        });
+      }
+    }
+
     for (const callback of this.beforeAgentCallback) {
       const content = await callback(callbackContext);
 
@@ -361,7 +399,7 @@ export abstract class BaseAgent {
       }
     }
 
-    if (callbackContext.state.hasDelta()) {
+    if (hasEventDelta(callbackContext)) {
       return createEvent({
         invocationId: invocationContext.invocationId,
         author: this.name,
@@ -383,11 +421,37 @@ export abstract class BaseAgent {
   protected async handleAfterAgentCallback(
     invocationContext: InvocationContext,
   ): Promise<Event | undefined> {
-    if (this.afterAgentCallback.length === 0) {
+    if (
+      this.afterAgentCallback.length === 0 &&
+      !invocationContext.pluginManager
+    ) {
       return undefined;
     }
 
     const callbackContext = new Context({invocationContext});
+
+    if (invocationContext.pluginManager) {
+      const content =
+        await invocationContext.pluginManager.runAfterAgentCallback({
+          agent: this,
+          callbackContext,
+        });
+
+      if (invocationContext.abortSignal?.aborted) {
+        return;
+      }
+
+      if (content) {
+        return createEvent({
+          invocationId: invocationContext.invocationId,
+          author: this.name,
+          branch: invocationContext.branch,
+          content,
+          actions: callbackContext.eventActions,
+        });
+      }
+    }
+
     for (const callback of this.afterAgentCallback) {
       const content = await callback(callbackContext);
 
@@ -406,7 +470,7 @@ export abstract class BaseAgent {
       }
     }
 
-    if (callbackContext.state.hasDelta()) {
+    if (hasEventDelta(callbackContext)) {
       return createEvent({
         invocationId: invocationContext.invocationId,
         author: this.name,
