@@ -32,10 +32,6 @@ describe('E2E Merge Parallel Function Response Events', () => {
     !!process.env.GOOGLE_GENAI_API_KEY ||
     !!process.env.GOOGLE_CLOUD_PROJECT;
 
-  it('should always pass (dummy test for vitest)', () => {
-    expect(true).toBe(true);
-  });
-
   it('should cleanly merge parallel function response events in standalone e2e verification without mocks', () => {
     const event1 = createEvent({
       invocationId: 'inv-parallel-e2e',

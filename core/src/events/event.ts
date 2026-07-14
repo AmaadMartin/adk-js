@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {FunctionCall, FunctionResponse, Part} from '@google/genai';
+import {FunctionCall, FunctionResponse} from '@google/genai';
 
 import {LlmResponse} from '../models/llm_response.js';
 
@@ -294,19 +294,14 @@ export function mergeParallelFunctionResponseEvents(
   if (functionResponseEvents.length === 1) {
     return functionResponseEvents[0];
   }
-  const mergedParts: Part[] = [];
-  for (const event of functionResponseEvents) {
-    if (event.content && event.content.parts) {
-      mergedParts.push(...event.content.parts);
-    }
-  }
+  const mergedParts = functionResponseEvents.flatMap(
+    (event) => event.content?.parts ?? [],
+  );
 
   const baseEvent = functionResponseEvents[0];
-
-  const actionsList = functionResponseEvents.map(
-    (event) => event.actions || {},
+  const mergedActions = mergeEventActions(
+    functionResponseEvents.map((event) => event.actions),
   );
-  const mergedActions = mergeEventActions(actionsList);
 
   return createEvent({
     invocationId: baseEvent.invocationId,
@@ -314,6 +309,6 @@ export function mergeParallelFunctionResponseEvents(
     branch: baseEvent.branch,
     content: {role: 'user', parts: mergedParts},
     actions: mergedActions,
-    timestamp: baseEvent.timestamp!,
+    timestamp: baseEvent.timestamp,
   });
 }
