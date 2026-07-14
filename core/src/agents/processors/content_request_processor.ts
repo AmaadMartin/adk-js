@@ -77,6 +77,7 @@ export class ContentRequestProcessor implements BaseLlmRequestProcessor {
         events,
         agent.name,
         invocationContext.branch,
+        {includeForeignThoughts: agent.includeForeignThoughts},
       );
     } else {
       // Include current turn context only (no conversation history).
@@ -84,6 +85,7 @@ export class ContentRequestProcessor implements BaseLlmRequestProcessor {
         events,
         agent.name,
         invocationContext.branch,
+        {includeForeignThoughts: agent.includeForeignThoughts},
       );
     }
 
