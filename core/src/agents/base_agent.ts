@@ -336,11 +336,30 @@ export abstract class BaseAgent {
   protected async handleBeforeAgentCallback(
     invocationContext: InvocationContext,
   ): Promise<Event | undefined> {
-    if (this.beforeAgentCallback.length === 0) {
-      return undefined;
+    const callbackContext = new Context({invocationContext});
+
+    const pluginContent =
+      await invocationContext.pluginManager?.runBeforeAgentCallback({
+        agent: this,
+        callbackContext,
+      });
+
+    if (invocationContext.abortSignal?.aborted) {
+      return;
     }
 
-    const callbackContext = new Context({invocationContext});
+    if (pluginContent) {
+      invocationContext.endInvocation = true;
+
+      return createEvent({
+        invocationId: invocationContext.invocationId,
+        author: this.name,
+        branch: invocationContext.branch,
+        content: pluginContent,
+        actions: callbackContext.eventActions,
+      });
+    }
+
     for (const callback of this.beforeAgentCallback) {
       const content = await callback(callbackContext);
 
@@ -361,7 +380,7 @@ export abstract class BaseAgent {
       }
     }
 
-    if (callbackContext.state.hasDelta()) {
+    if (this.hasEventActions(callbackContext)) {
       return createEvent({
         invocationId: invocationContext.invocationId,
         author: this.name,
@@ -383,11 +402,28 @@ export abstract class BaseAgent {
   protected async handleAfterAgentCallback(
     invocationContext: InvocationContext,
   ): Promise<Event | undefined> {
-    if (this.afterAgentCallback.length === 0) {
-      return undefined;
+    const callbackContext = new Context({invocationContext});
+
+    const pluginContent =
+      await invocationContext.pluginManager?.runAfterAgentCallback({
+        agent: this,
+        callbackContext,
+      });
+
+    if (invocationContext.abortSignal?.aborted) {
+      return;
     }
 
-    const callbackContext = new Context({invocationContext});
+    if (pluginContent) {
+      return createEvent({
+        invocationId: invocationContext.invocationId,
+        author: this.name,
+        branch: invocationContext.branch,
+        content: pluginContent,
+        actions: callbackContext.eventActions,
+      });
+    }
+
     for (const callback of this.afterAgentCallback) {
       const content = await callback(callbackContext);
 
@@ -406,7 +442,7 @@ export abstract class BaseAgent {
       }
     }
 
-    if (callbackContext.state.hasDelta()) {
+    if (this.hasEventActions(callbackContext)) {
       return createEvent({
         invocationId: invocationContext.invocationId,
         author: this.name,
@@ -416,6 +452,17 @@ export abstract class BaseAgent {
     }
 
     return undefined;
+  }
+
+  private hasEventActions({
+    actions: {stateDelta, artifactDelta, transferToAgent, escalate},
+  }: Context): boolean {
+    return (
+      Object.keys(stateDelta).length > 0 ||
+      Object.keys(artifactDelta).length > 0 ||
+      transferToAgent !== undefined ||
+      escalate !== undefined
+    );
   }
 
   private setParentAgentForSubAgents(): void {

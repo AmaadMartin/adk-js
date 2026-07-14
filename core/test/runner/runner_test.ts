@@ -17,6 +17,7 @@ import {
 } from '@google/adk';
 import {Content, FunctionCall, FunctionResponse} from '@google/genai';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {logger} from '../../src/utils/logger.js';
 
 const TEST_APP_ID = 'test_app_id';
 const TEST_USER_ID = 'test_user_id';
@@ -685,5 +686,69 @@ describe('Runner customMetadata support', () => {
     expect(userEventCall![0].event.customMetadata).toEqual(customMetadata);
 
     appendEventSpy.mockRestore();
+  });
+});
+
+describe('Runner saveInputBlobsAsArtifacts deprecation', () => {
+  let sessionService: InMemorySessionService;
+  let artifactService: InMemoryArtifactService;
+  let agent: MockLlmAgent;
+  let runner: Runner;
+
+  beforeEach(() => {
+    sessionService = new InMemorySessionService();
+    artifactService = new InMemoryArtifactService();
+    agent = new MockLlmAgent('test_agent');
+    runner = new Runner({
+      appName: TEST_APP_ID,
+      agent: agent,
+      sessionService,
+      artifactService,
+    });
+  });
+
+  it('should emit deprecation warning when saveInputBlobsAsArtifacts is true and artifactService is present', async () => {
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    const warnSpy = vi.spyOn(logger, 'warn');
+
+    for await (const _ of runner.runAsync({
+      userId: session.userId,
+      sessionId: session.id,
+      newMessage: {
+        role: 'user',
+        parts: [
+          {
+            inlineData: {
+              data: 'dGVzdCBkYXRh',
+              mimeType: 'application/pdf',
+            },
+          },
+        ],
+      },
+      runConfig: {
+        saveInputBlobsAsArtifacts: true,
+      },
+    })) {
+      // Consume stream
+    }
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      "The 'saveInputBlobsAsArtifacts' parameter is deprecated. Use SaveFilesAsArtifactsPlugin instead for better control and flexibility. See SaveFilesAsArtifactsPlugin for more details.",
+    );
+
+    const artifactKeys = await artifactService.listArtifactKeys({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+    expect(artifactKeys).toHaveLength(1);
+    expect(artifactKeys[0]).toMatch(/^artifact_e-[0-9a-f-]+_0$/);
+
+    warnSpy.mockRestore();
   });
 });
