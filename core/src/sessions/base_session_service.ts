@@ -114,7 +114,6 @@ export interface ListSessionsResponse {
  *
  * The service provides a set of methods for managing sessions and events.
  */
-// TODO - b/425992518: can held session internally to make the API simpler.
 export abstract class BaseSessionService {
   /**
    * Creates a new session.
@@ -152,6 +151,29 @@ export abstract class BaseSessionService {
       return session;
     }
     return this.createSession(request);
+  }
+
+  /**
+   * Returns a BoundSessionService bound to the provided session.
+   *
+   * @param session The session to bind to.
+   * @return A BoundSessionService instance.
+   */
+  bind(session: Session): BoundSessionService {
+    return new BoundSessionService(this, session);
+  }
+
+  /**
+   * Gets a session or creates one if it doesn't exist, returning a bound service.
+   *
+   * @param request The request to get or create a session.
+   * @return A promise that resolves to a BoundSessionService instance.
+   */
+  async getOrBindSession(
+    request: CreateSessionRequest,
+  ): Promise<BoundSessionService> {
+    const session = await this.getOrCreateSession(request);
+    return this.bind(session);
   }
 
   /**
@@ -211,6 +233,68 @@ export abstract class BaseSessionService {
       }
       session.state[key] = value;
     }
+  }
+}
+
+/**
+ * A stateful wrapper around a BaseSessionService and a specific Session.
+ */
+export class BoundSessionService {
+  constructor(
+    private readonly service: BaseSessionService,
+    private sessionRef: Session,
+  ) {}
+
+  get session(): Session {
+    return this.sessionRef;
+  }
+
+  get appName(): string {
+    return this.sessionRef.appName;
+  }
+
+  get userId(): string {
+    return this.sessionRef.userId;
+  }
+
+  get sessionId(): string {
+    return this.sessionRef.id;
+  }
+
+  get state(): Record<string, unknown> {
+    return this.sessionRef.state;
+  }
+
+  get events(): Event[] {
+    return this.sessionRef.events;
+  }
+
+  async getSession(config?: GetSessionConfig): Promise<Session | undefined> {
+    const latest = await this.service.getSession({
+      appName: this.appName,
+      userId: this.userId,
+      sessionId: this.sessionId,
+      config,
+    });
+    if (latest) {
+      this.sessionRef = latest;
+    }
+    return latest;
+  }
+
+  async appendEvent(event: Event): Promise<Event> {
+    return this.service.appendEvent({
+      session: this.sessionRef,
+      event,
+    });
+  }
+
+  async deleteSession(): Promise<void> {
+    return this.service.deleteSession({
+      appName: this.appName,
+      userId: this.userId,
+      sessionId: this.sessionId,
+    });
   }
 }
 

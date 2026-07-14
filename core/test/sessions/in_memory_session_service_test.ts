@@ -5,6 +5,7 @@
  */
 
 import {
+  BoundSessionService,
   InMemorySessionService,
   Session,
   State,
@@ -655,6 +656,137 @@ describe('InMemorySessionService', () => {
       // Should just log warnings and return event
       const returnedEvent = await service.appendEvent({session, event});
       expect(returnedEvent).toBe(event);
+    });
+  });
+
+  describe('bind and getOrBindSession (BoundSessionService)', () => {
+    it('bind returns a BoundSessionService whose getters reflect the bound session', async () => {
+      const session = await service.createSession({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 'session-123',
+        state: {foo: 'bar'},
+      });
+
+      const bound = service.bind(session);
+      expect(bound).toBeInstanceOf(BoundSessionService);
+      expect(bound.session).toBe(session);
+      expect(bound.appName).toBe('test-app');
+      expect(bound.userId).toBe('test-user');
+      expect(bound.sessionId).toBe('session-123');
+      expect(bound.state).toEqual({foo: 'bar'});
+      expect(bound.events).toEqual([]);
+    });
+
+    it('getOrBindSession creates a new session when not provided or not existing', async () => {
+      const bound = await service.getOrBindSession({
+        appName: 'new-app',
+        userId: 'new-user',
+        state: {init: true},
+      });
+
+      expect(bound).toBeInstanceOf(BoundSessionService);
+      expect(bound.appName).toBe('new-app');
+      expect(bound.userId).toBe('new-user');
+      expect(bound.state).toEqual({init: true});
+
+      const fetched = await service.getSession({
+        appName: 'new-app',
+        userId: 'new-user',
+        sessionId: bound.sessionId,
+      });
+      expect(fetched).toBeDefined();
+    });
+
+    it('getOrBindSession retrieves an existing session if sessionId exists', async () => {
+      const created = await service.createSession({
+        appName: 'existing-app',
+        userId: 'existing-user',
+        sessionId: 'existing-id',
+        state: {count: 1},
+      });
+
+      const bound = await service.getOrBindSession({
+        appName: 'existing-app',
+        userId: 'existing-user',
+        sessionId: 'existing-id',
+      });
+
+      expect(bound.session).toEqual(created);
+      expect(bound.sessionId).toBe('existing-id');
+      expect(bound.state).toEqual({count: 1});
+    });
+
+    it('appendEvent appends event to the bound session directly', async () => {
+      const bound = await service.getOrBindSession({
+        appName: 'app',
+        userId: 'user',
+      });
+
+      const event = createEvent({
+        timestamp: Date.now(),
+        actions: createEventActions({
+          stateDelta: {key: 'updated'},
+        }),
+      });
+
+      const result = await bound.appendEvent(event);
+      expect(result).toBe(event);
+      expect(bound.events).toContain(event);
+      expect(bound.state).toHaveProperty('key', 'updated');
+    });
+
+    it('getSession re-fetches session and updates internal reference when found', async () => {
+      const bound = await service.getOrBindSession({
+        appName: 'app',
+        userId: 'user',
+      });
+
+      // Append an event directly via the underlying service to simulate concurrent or external update
+      const event1 = createEvent({timestamp: 100});
+      const event2 = createEvent({timestamp: 200});
+      await service.appendEvent({session: bound.session, event: event1});
+      await service.appendEvent({session: bound.session, event: event2});
+
+      const latest = await bound.getSession({numRecentEvents: 1});
+      expect(latest).toBeDefined();
+      expect(latest?.events).toHaveLength(1);
+      expect(latest?.events[0].timestamp).toBe(200);
+      expect(bound.session).toBe(latest);
+    });
+
+    it('getSession retains previous reference and returns undefined when session is deleted', async () => {
+      const bound = await service.getOrBindSession({
+        appName: 'app',
+        userId: 'user',
+      });
+
+      const originalRef = bound.session;
+      await service.deleteSession({
+        appName: bound.appName,
+        userId: bound.userId,
+        sessionId: bound.sessionId,
+      });
+
+      const result = await bound.getSession();
+      expect(result).toBeUndefined();
+      expect(bound.session).toBe(originalRef);
+    });
+
+    it('deleteSession deletes the bound session from the underlying service', async () => {
+      const bound = await service.getOrBindSession({
+        appName: 'app',
+        userId: 'user',
+      });
+
+      await bound.deleteSession();
+
+      const check = await service.getSession({
+        appName: bound.appName,
+        userId: bound.userId,
+        sessionId: bound.sessionId,
+      });
+      expect(check).toBeUndefined();
     });
   });
 });
