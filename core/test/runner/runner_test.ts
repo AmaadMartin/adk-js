@@ -17,6 +17,11 @@ import {
 } from '@google/adk';
 import {Content, FunctionCall, FunctionResponse} from '@google/genai';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {
+  findEventByLastFunctionResponseId,
+  FunctionCallIndex,
+  updateFunctionCallIndex,
+} from '../../src/runner/runner.js';
 
 const TEST_APP_ID = 'test_app_id';
 const TEST_USER_ID = 'test_user_id';
@@ -685,5 +690,198 @@ describe('Runner customMetadata support', () => {
     expect(userEventCall![0].event.customMetadata).toEqual(customMetadata);
 
     appendEventSpy.mockRestore();
+  });
+});
+
+describe('findEventByLastFunctionResponseId and updateFunctionCallIndex', () => {
+  it('should return null when events array is empty', () => {
+    const result = findEventByLastFunctionResponseId([]);
+    expect(result).toBeNull();
+  });
+
+  it('should return null when last event has no function response', () => {
+    const event = createEvent({
+      invocationId: 'inv1',
+      author: 'user',
+      content: {role: 'user', parts: [{text: 'Just text'}]},
+    });
+    const result = findEventByLastFunctionResponseId([event]);
+    expect(result).toBeNull();
+  });
+
+  it('should correctly identify and return matching event in O(1) time via index when there are multiple function calls and responses', () => {
+    const call1: FunctionCall = {id: 'call_1', name: 'func1', args: {}};
+    const call2: FunctionCall = {id: 'call_2', name: 'func2', args: {}};
+    const resp2: FunctionResponse = {
+      id: 'call_2',
+      name: 'func2',
+      response: {ok: true},
+    };
+
+    const eventCall1 = createEvent({
+      invocationId: 'inv1',
+      author: 'agent1',
+      content: {role: 'model', parts: [{functionCall: call1}]},
+    });
+    const eventCall2 = createEvent({
+      invocationId: 'inv2',
+      author: 'agent2',
+      content: {role: 'model', parts: [{functionCall: call2}]},
+    });
+    const eventResp2 = createEvent({
+      invocationId: 'inv3',
+      author: 'user',
+      content: {role: 'user', parts: [{functionResponse: resp2}]},
+    });
+
+    const events = [eventCall1, eventCall2, eventResp2];
+    const index = updateFunctionCallIndex(events);
+
+    const found = findEventByLastFunctionResponseId(events, index);
+    expect(found).toBe(eventCall2);
+    expect(index.lastIndexedLength).toBe(3);
+    expect(index.callIdToEventMap.get('call_2')).toBe(eventCall2);
+    expect(index.callIdToEventMap.get('call_1')).toBe(eventCall1);
+
+    // Second lookup should use O(1) index without re-indexing
+    const foundAgain = findEventByLastFunctionResponseId(events, index);
+    expect(foundAgain).toBe(eventCall2);
+    expect(index.lastIndexedLength).toBe(3);
+  });
+
+  it('should incrementally index new events without re-indexing older events', () => {
+    const call1: FunctionCall = {id: 'call_1', name: 'func1', args: {}};
+    const eventCall1 = createEvent({
+      invocationId: 'inv1',
+      author: 'agent1',
+      content: {role: 'model', parts: [{functionCall: call1}]},
+    });
+
+    const index = updateFunctionCallIndex([eventCall1]);
+    expect(index.lastIndexedLength).toBe(1);
+    expect(index.callIdToEventMap.get('call_1')).toBe(eventCall1);
+
+    const call2: FunctionCall = {id: 'call_2', name: 'func2', args: {}};
+    const resp2: FunctionResponse = {
+      id: 'call_2',
+      name: 'func2',
+      response: {ok: true},
+    };
+    const eventCall2 = createEvent({
+      invocationId: 'inv2',
+      author: 'agent2',
+      content: {role: 'model', parts: [{functionCall: call2}]},
+    });
+    const eventResp2 = createEvent({
+      invocationId: 'inv3',
+      author: 'user',
+      content: {role: 'user', parts: [{functionResponse: resp2}]},
+    });
+
+    const events = [eventCall1, eventCall2, eventResp2];
+    updateFunctionCallIndex(events, index);
+    const found = findEventByLastFunctionResponseId(events, index);
+    expect(found).toBe(eventCall2);
+    expect(index.lastIndexedLength).toBe(3);
+    expect(index.callIdToEventMap.get('call_2')).toBe(eventCall2);
+  });
+
+  it('should handle malformed or missing function call IDs gracefully without throwing', () => {
+    const malformedCall1 = {name: 'func_missing_id'} as unknown as FunctionCall;
+    const malformedCall2 = {
+      id: '',
+      name: 'func_empty_id',
+    } as unknown as FunctionCall;
+    const validCall: FunctionCall = {
+      id: 'valid_id',
+      name: 'func_valid',
+      args: {},
+    };
+    const resp: FunctionResponse = {
+      id: 'valid_id',
+      name: 'func_valid',
+      response: {},
+    };
+
+    const eventMalformed = createEvent({
+      invocationId: 'inv1',
+      author: 'agent1',
+      content: {
+        role: 'model',
+        parts: [
+          {functionCall: malformedCall1},
+          {functionCall: malformedCall2},
+          {functionCall: validCall},
+        ],
+      },
+    });
+    const eventResp = createEvent({
+      invocationId: 'inv2',
+      author: 'user',
+      content: {role: 'user', parts: [{functionResponse: resp}]},
+    });
+
+    const events = [eventMalformed, eventResp];
+    expect(() => findEventByLastFunctionResponseId(events)).not.toThrow();
+    const found = findEventByLastFunctionResponseId(events);
+    expect(found).toBe(eventMalformed);
+  });
+
+  it('should reset index when index.lastIndexedLength > events.length and handle null functionCall in parts', () => {
+    const call1: FunctionCall = {id: 'call_1', name: 'func1', args: {}};
+    const eventCall1 = createEvent({
+      invocationId: 'inv1',
+      author: 'agent1',
+      content: {
+        role: 'model',
+        parts: [
+          {functionCall: call1},
+          {functionCall: null as unknown as FunctionCall},
+        ],
+      },
+    });
+
+    const index: FunctionCallIndex = {
+      callIdToEventMap: new Map([['old_id', eventCall1]]),
+      lastIndexedLength: 10, // Greater than events.length (1)
+    };
+
+    const updatedIndex = updateFunctionCallIndex([eventCall1], index);
+    expect(updatedIndex.lastIndexedLength).toBe(1);
+    expect(updatedIndex.callIdToEventMap.has('old_id')).toBe(false);
+    expect(updatedIndex.callIdToEventMap.get('call_1')).toBe(eventCall1);
+  });
+
+  it('should return null when last event has no content, no functionResponse id, or when targetId is not a string or not found', () => {
+    const eventNoContent = createEvent({
+      invocationId: 'inv1',
+      author: 'user',
+    });
+    delete (eventNoContent as {content?: unknown}).content;
+    expect(findEventByLastFunctionResponseId([eventNoContent])).toBeNull();
+
+    const respNonString = {
+      id: 123 as unknown as string,
+      name: 'func',
+      response: {},
+    };
+    const eventNonStringId = createEvent({
+      invocationId: 'inv2',
+      author: 'user',
+      content: {role: 'user', parts: [{functionResponse: respNonString}]},
+    });
+    expect(findEventByLastFunctionResponseId([eventNonStringId])).toBeNull();
+
+    const respNotFound: FunctionResponse = {
+      id: 'missing_call_id',
+      name: 'func',
+      response: {},
+    };
+    const eventNotFound = createEvent({
+      invocationId: 'inv3',
+      author: 'user',
+      content: {role: 'user', parts: [{functionResponse: respNotFound}]},
+    });
+    expect(findEventByLastFunctionResponseId([eventNotFound])).toBeNull();
   });
 });
