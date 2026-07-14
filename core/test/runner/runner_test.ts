@@ -9,6 +9,7 @@ import {
   BasePlugin,
   createEvent,
   Event,
+  getLogger,
   InMemoryArtifactService,
   InMemorySessionService,
   InvocationContext,
@@ -47,6 +48,26 @@ class MockLlmAgent extends LlmAgent {
       content: {role: 'model', parts: [{text: 'Test LLM response'}]},
     });
   }
+}
+
+class MockNonLlmAgent extends BaseAgent {
+  constructor(name: string, parentAgent?: BaseAgent) {
+    super({name, subAgents: [], parentAgent});
+  }
+
+  protected override async *runAsyncImpl(
+    context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    yield createEvent({
+      invocationId: context.invocationId,
+      author: this.name,
+      content: {role: 'model', parts: [{text: 'Non LLM response'}]},
+    });
+  }
+
+  protected override async *runLiveImpl(
+    _context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {}
 }
 
 class MockPlugin extends BasePlugin {
@@ -331,6 +352,241 @@ describe('Runner.determineAgentForResumption', () => {
       events.push(event);
     }
 
+    expect(events[0].author).toBe('sub_agent2');
+  });
+
+  it('should fall through to Case 2 when the author of a matching FunctionCall is not found in rootAgent.findAgent', async () => {
+    const functionCall: FunctionCall = {
+      id: 'func_fallthrough',
+      name: 'test_func',
+      args: {},
+    };
+    const functionResponse: FunctionResponse = {
+      id: 'func_fallthrough',
+      name: 'test_func',
+      response: {},
+    };
+
+    const subAgent1Event = createEvent({
+      invocationId: 'inv1',
+      author: 'sub_agent1',
+      content: {role: 'model', parts: [{text: 'Prior sub agent response'}]},
+    });
+
+    const callEvent = createEvent({
+      invocationId: 'inv2',
+      author: 'stale_ephemeral_agent',
+      content: {role: 'model', parts: [{functionCall}]},
+    });
+
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    await sessionService.appendEvent({session, event: subAgent1Event});
+    await sessionService.appendEvent({session, event: callEvent});
+
+    const events: Event[] = [];
+    for await (const event of runner.runAsync({
+      userId: session.userId,
+      sessionId: session.id,
+      newMessage: {role: 'user', parts: [{functionResponse}]},
+    })) {
+      events.push(event);
+    }
+
+    expect(events[0].author).toBe('sub_agent1');
+  });
+
+  it('should execute efficiently without calling logger.info with stringified event payloads in long sessions', async () => {
+    const loggerInstance = getLogger();
+    const infoSpy = vi.spyOn(loggerInstance, 'info');
+    const debugSpy = vi.spyOn(loggerInstance, 'debug');
+
+    const inputEvents: Event[] = [];
+    for (let i = 0; i < 5000; i++) {
+      inputEvents.push(
+        createEvent({
+          id: `evt_${i}`,
+          invocationId: `inv_${i}`,
+          author: i % 2 === 0 ? 'user' : 'sub_agent1',
+          content: {
+            role: i % 2 === 0 ? 'user' : 'model',
+            parts: [{text: `Message ${i}`}],
+          },
+        }),
+      );
+    }
+
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    for (const event of inputEvents) {
+      await sessionService.appendEvent({session, event});
+    }
+
+    const startTime = performance.now();
+    const events: Event[] = [];
+    for await (const event of runner.runAsync({
+      userId: session.userId,
+      sessionId: session.id,
+      newMessage: {role: 'user', parts: [{text: 'Trigger check'}]},
+    })) {
+      events.push(event);
+    }
+    const duration = performance.now() - startTime;
+
+    expect(events[0].author).toBe('sub_agent1');
+    expect(infoSpy).not.toHaveBeenCalledWith(expect.stringContaining('event:'));
+    expect(debugSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Evaluating candidate agent'),
+    );
+    expect(duration).toBeLessThan(2000);
+  });
+
+  it('should skip non-LlmAgent during Case 2 scanning and return root agent', async () => {
+    const nonLlm = new MockNonLlmAgent('non_llm_agent', rootAgent);
+    rootAgent.subAgents.push(nonLlm);
+
+    const nonLlmEvent = createEvent({
+      invocationId: 'inv1',
+      author: 'non_llm_agent',
+      content: {role: 'model', parts: [{text: 'Non-LLM response'}]},
+    });
+
+    const events = await runTest([nonLlmEvent]);
+    expect(events[0].author).toBe('root_agent');
+  });
+
+  it('should return root agent when determineAgentForResumption is invoked on empty session events', async () => {
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: 'empty_session',
+    });
+
+    const resumedAgent = (
+      runner as unknown as {
+        determineAgentForResumption(
+          session: unknown,
+          rootAgent: BaseAgent,
+        ): BaseAgent;
+      }
+    ).determineAgentForResumption(session, rootAgent);
+    expect(resumedAgent).toBe(rootAgent);
+  });
+
+  it('should handle last event having no content parts in findEventByLastFunctionResponseId', async () => {
+    const emptyContentEvent = createEvent({
+      invocationId: 'inv1',
+      author: 'user',
+      content: {role: 'user', parts: []},
+    });
+
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: 'empty_parts_session',
+    });
+
+    await sessionService.appendEvent({session, event: emptyContentEvent});
+
+    const resumedAgent = (
+      runner as unknown as {
+        determineAgentForResumption(
+          session: unknown,
+          rootAgent: BaseAgent,
+        ): BaseAgent;
+      }
+    ).determineAgentForResumption(session, rootAgent);
+    expect(resumedAgent).toBe(rootAgent);
+  });
+
+  it('should skip user events and events with empty parts during reverse scan in findEventByLastFunctionResponseId', async () => {
+    const functionCall: FunctionCall = {
+      id: 'func_skip_check',
+      name: 'test_func',
+      args: {},
+    };
+    const functionResponse: FunctionResponse = {
+      id: 'func_skip_check',
+      name: 'test_func',
+      response: {},
+    };
+
+    const callEvent = createEvent({
+      invocationId: 'inv1',
+      author: 'sub_agent1',
+      content: {role: 'model', parts: [{functionCall}]},
+    });
+
+    const middleUserEvent = createEvent({
+      invocationId: 'inv2',
+      author: 'user',
+      content: {role: 'user', parts: [{text: 'middle user comment'}]},
+    });
+
+    const middleEmptyEvent = createEvent({
+      invocationId: 'inv3',
+      author: 'sub_agent2',
+      content: {role: 'model', parts: []},
+    });
+
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    await sessionService.appendEvent({session, event: callEvent});
+    await sessionService.appendEvent({session, event: middleUserEvent});
+    await sessionService.appendEvent({session, event: middleEmptyEvent});
+
+    const events: Event[] = [];
+    for await (const event of runner.runAsync({
+      userId: session.userId,
+      sessionId: session.id,
+      newMessage: {role: 'user', parts: [{functionResponse}]},
+    })) {
+      events.push(event);
+    }
+    expect(events[0].author).toBe('sub_agent1');
+  });
+
+  it('should fall back when last event has functionResponse but no matching functionCall exists in session events', async () => {
+    const functionResponse: FunctionResponse = {
+      id: 'unmatched_func_id',
+      name: 'test_func',
+      response: {},
+    };
+
+    const priorAgentEvent = createEvent({
+      invocationId: 'inv1',
+      author: 'sub_agent2',
+      content: {role: 'model', parts: [{text: 'Some previous response'}]},
+    });
+
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    await sessionService.appendEvent({session, event: priorAgentEvent});
+
+    const events: Event[] = [];
+    for await (const event of runner.runAsync({
+      userId: session.userId,
+      sessionId: session.id,
+      newMessage: {role: 'user', parts: [{functionResponse}]},
+    })) {
+      events.push(event);
+    }
     expect(events[0].author).toBe('sub_agent2');
   });
 });
