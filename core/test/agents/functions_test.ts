@@ -25,7 +25,6 @@ import {z} from 'zod';
 import {
   generateClientFunctionCallId,
   getLongRunningFunctionCalls,
-  mergeParallelFunctionResponseEvents,
   populateClientFunctionCallId,
   removeClientFunctionCallId,
 } from '../../src/agents/functions.js';
@@ -706,46 +705,5 @@ describe('getLongRunningFunctionCalls', () => {
     const result = getLongRunningFunctionCalls(functionCalls, toolsDict);
     expect(result.has('call-1')).toBe(true);
     expect(result.has('call-2')).toBe(false);
-  });
-});
-
-describe('mergeParallelFunctionResponseEvents', () => {
-  it('should merge multiple events into one', () => {
-    const event1 = createEvent({
-      invocationId: 'inv-1',
-      author: 'agent-1',
-      content: {
-        role: 'user',
-        parts: [
-          {functionResponse: {name: 'tool1', response: {result: 1}, id: 'id1'}},
-        ],
-      },
-    });
-    const event2 = createEvent({
-      invocationId: 'inv-1',
-      author: 'agent-1',
-      content: {
-        role: 'user',
-        parts: [
-          {functionResponse: {name: 'tool2', response: {result: 2}, id: 'id2'}},
-        ],
-      },
-    });
-    const merged = mergeParallelFunctionResponseEvents([event1, event2]);
-    expect(merged.content!.parts!.length).toBe(2);
-    expect(merged.content!.parts![0].functionResponse!.name).toBe('tool1');
-    expect(merged.content!.parts![1].functionResponse!.name).toBe('tool2');
-  });
-
-  it('should throw if no events provided', () => {
-    expect(() => mergeParallelFunctionResponseEvents([])).toThrow(
-      'No function response events provided.',
-    );
-  });
-
-  it('should return the same event if only one provided', () => {
-    const event = createEvent();
-    const merged = mergeParallelFunctionResponseEvents([event]);
-    expect(merged).toBe(event);
   });
 });

@@ -8,10 +8,14 @@ import {
   AuthConfig,
   createEvent,
   createEventActions,
+  EventActions,
   getFunctionCalls,
   getFunctionResponses,
+  hasThoughts,
   hasTrailingCodeExecutionResult,
   isFinalResponse,
+  mergeParallelFunctionResponseEvents,
+  pruneThoughts,
   stringifyContent,
 } from '@google/adk';
 import {Outcome} from '@google/genai';
@@ -250,6 +254,41 @@ describe('Event Utils', () => {
     });
   });
 
+  describe('hasThoughts', () => {
+    it('returns false if event has no content or parts', () => {
+      expect(hasThoughts(createEvent())).toBe(false);
+    });
+
+    it('returns true if any part is marked as thought', () => {
+      const event = createEvent({
+        content: {parts: [{text: 'think', thought: true}, {text: 'hello'}]},
+      });
+      expect(hasThoughts(event)).toBe(true);
+    });
+
+    it('returns false if no part is marked as thought', () => {
+      const event = createEvent({
+        content: {parts: [{text: 'hello'}]},
+      });
+      expect(hasThoughts(event)).toBe(false);
+    });
+  });
+
+  describe('pruneThoughts', () => {
+    it('returns original event if it has no content or parts', () => {
+      const event = createEvent();
+      expect(pruneThoughts(event)).toBe(event);
+    });
+
+    it('removes thought parts from the event', () => {
+      const event = createEvent({
+        content: {parts: [{text: 'think', thought: true}, {text: 'hello'}]},
+      });
+      const pruned = pruneThoughts(event);
+      expect(pruned.content?.parts).toEqual([{text: 'hello'}]);
+    });
+  });
+
   describe('createNewEventId', () => {
     it('generates an 8-character string', () => {
       const id = createNewEventId();
@@ -321,6 +360,146 @@ describe('Event Utils', () => {
         'preserve-my-key': 'value',
         NestedKey: 'value2',
       });
+    });
+  });
+
+  describe('mergeParallelFunctionResponseEvents', () => {
+    it('should merge multiple events into one', () => {
+      const event1 = createEvent({
+        invocationId: 'inv-1',
+        author: 'agent-1',
+        content: {
+          role: 'user',
+          parts: [
+            {
+              functionResponse: {
+                name: 'tool1',
+                response: {result: 1},
+                id: 'id1',
+              },
+            },
+          ],
+        },
+      });
+      const event2 = createEvent({
+        invocationId: 'inv-1',
+        author: 'agent-1',
+        content: {
+          role: 'user',
+          parts: [
+            {
+              functionResponse: {
+                name: 'tool2',
+                response: {result: 2},
+                id: 'id2',
+              },
+            },
+          ],
+        },
+      });
+      const merged = mergeParallelFunctionResponseEvents([event1, event2]);
+      expect(merged.content!.parts!.length).toBe(2);
+      expect(merged.content!.parts![0].functionResponse!.name).toBe('tool1');
+      expect(merged.content!.parts![1].functionResponse!.name).toBe('tool2');
+    });
+
+    it('should throw if no events provided', () => {
+      expect(() => mergeParallelFunctionResponseEvents([])).toThrow(
+        'No function response events provided.',
+      );
+    });
+
+    it('should return the same event if only one provided', () => {
+      const event = createEvent();
+      const merged = mergeParallelFunctionResponseEvents([event]);
+      expect(merged).toBe(event);
+    });
+
+    it('should handle events without content or parts when merging multiple events', () => {
+      const event1 = createEvent({
+        invocationId: 'inv-1',
+        author: 'agent-1',
+        content: {
+          role: 'user',
+          parts: [
+            {
+              functionResponse: {
+                name: 'tool1',
+                response: {result: 1},
+                id: 'id1',
+              },
+            },
+          ],
+        },
+      });
+      const event2 = createEvent({
+        invocationId: 'inv-1',
+        author: 'agent-1',
+      });
+      const event3 = createEvent({
+        invocationId: 'inv-1',
+        author: 'agent-1',
+        content: {role: 'user'},
+      });
+      const merged = mergeParallelFunctionResponseEvents([
+        event1,
+        event2,
+        event3,
+      ]);
+      expect(merged.content!.parts!.length).toBe(1);
+      expect(merged.content!.parts![0].functionResponse!.name).toBe('tool1');
+    });
+
+    it('should merge actions from multiple events', () => {
+      const event1 = createEvent({
+        invocationId: 'inv-1',
+        author: 'agent-1',
+        actions: createEventActions({skipSummarization: true}),
+        content: {
+          role: 'user',
+          parts: [
+            {
+              functionResponse: {
+                name: 'tool1',
+                response: {result: 1},
+                id: 'id1',
+              },
+            },
+          ],
+        },
+      });
+      const event2 = createEvent({
+        invocationId: 'inv-1',
+        author: 'agent-1',
+        actions: createEventActions({stateDelta: {key: 'val'}}),
+        content: {
+          role: 'user',
+          parts: [
+            {
+              functionResponse: {
+                name: 'tool2',
+                response: {result: 2},
+                id: 'id2',
+              },
+            },
+          ],
+        },
+      });
+      const merged = mergeParallelFunctionResponseEvents([event1, event2]);
+      expect(merged.actions.skipSummarization).toBe(true);
+      expect(merged.actions.stateDelta).toEqual({key: 'val'});
+    });
+
+    it('should handle events with undefined actions when merging multiple events', () => {
+      const event1 = {
+        ...createEvent(),
+        actions: undefined as unknown as EventActions,
+      };
+      const event2 = createEvent({
+        actions: createEventActions({skipSummarization: true}),
+      });
+      const merged = mergeParallelFunctionResponseEvents([event1, event2]);
+      expect(merged.actions.skipSummarization).toBe(true);
     });
   });
 });
