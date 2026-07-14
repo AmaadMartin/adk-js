@@ -87,4 +87,58 @@ describe('E2E AgentTool State Filtering', () => {
     },
     30000,
   );
+
+  it.skipIf(!hasAKey)(
+    'should execute end-to-end when session parameters are internalized in InMemoryRunner constructor',
+    async () => {
+      const subAgent = new LlmAgent({
+        name: 'sub_agent_internalized',
+        description: 'A sub-agent helper.',
+        instruction: 'You are a helpful assistant. Just say hello.',
+        model: 'gemini-2.5-flash',
+      });
+
+      const parentAgent = new LlmAgent({
+        name: 'parent_agent_internalized',
+        description: 'A parent agent.',
+        instruction: 'Use your sub_agent_internalized tool to greet the user.',
+        model: 'gemini-2.5-flash',
+        tools: [new AgentTool({agent: subAgent})],
+      });
+
+      const runner = new InMemoryRunner({
+        agent: parentAgent,
+        appName: 'e2e_internalized_test',
+        userId: 'internalized_e2e_user',
+        sessionId: 'internalized_e2e_session',
+      });
+
+      await runner.sessionService.createSession({
+        appName: 'e2e_internalized_test',
+        userId: 'internalized_e2e_user',
+        sessionId: 'internalized_e2e_session',
+        state: {
+          testData: 'initial',
+        },
+      });
+
+      for await (const _event of runner.runAsync({
+        newMessage: createUserContent(
+          'Call your sub_agent_internalized to say hello.',
+        ),
+      })) {
+        // Let it run using internalized userId and sessionId
+      }
+
+      const parentSession = await runner.sessionService.getSession({
+        appName: 'e2e_internalized_test',
+        userId: 'internalized_e2e_user',
+        sessionId: 'internalized_e2e_session',
+      });
+
+      expect(parentSession).toBeDefined();
+      expect(parentSession?.events.length).toBeGreaterThan(1);
+    },
+    30000,
+  );
 });

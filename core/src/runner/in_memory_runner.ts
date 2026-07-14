@@ -5,6 +5,7 @@
  */
 
 import {BaseAgent} from '../agents/base_agent.js';
+import {RunConfig} from '../agents/run_config.js';
 import {InMemoryArtifactService} from '../artifacts/in_memory_artifact_service.js';
 import {InMemoryMemoryService} from '../memory/in_memory_memory_service.js';
 import {BasePlugin} from '../plugins/base_plugin.js';
@@ -44,8 +45,18 @@ export class InMemoryRunner extends Runner {
     agent: BaseAgent;
     appName?: string;
     plugins?: BasePlugin[];
+    userId?: string;
+    sessionId?: string;
+    runConfig?: RunConfig;
   }) {
-    const {agent, appName = 'InMemoryRunner', plugins = []} = params;
+    const {
+      agent,
+      appName = 'InMemoryRunner',
+      plugins = [],
+      userId,
+      sessionId,
+      runConfig,
+    } = params;
     super({
       appName,
       agent,
@@ -53,6 +64,9 @@ export class InMemoryRunner extends Runner {
       artifactService: new InMemoryArtifactService(),
       sessionService: new InMemorySessionService(),
       memoryService: new InMemoryMemoryService(),
+      userId,
+      sessionId,
+      runConfig,
     });
   }
 }
