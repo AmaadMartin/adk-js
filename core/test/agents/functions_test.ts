@@ -9,7 +9,6 @@ import {
   createEvent,
   createEventActions,
   Event,
-  functionsExportedForTestingOnly,
   FunctionTool,
   InvocationContext,
   LlmAgent,
@@ -23,6 +22,7 @@ import {Content, FunctionCall} from '@google/genai';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {z} from 'zod';
 import {
+  functionsExportedForTestingOnly,
   generateClientFunctionCallId,
   getLongRunningFunctionCalls,
   mergeParallelFunctionResponseEvents,
