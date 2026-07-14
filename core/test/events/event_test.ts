@@ -12,6 +12,7 @@ import {
   getFunctionResponses,
   hasTrailingCodeExecutionResult,
   isFinalResponse,
+  mergeParallelFunctionResponseEvents,
   stringifyContent,
 } from '@google/adk';
 import {Outcome} from '@google/genai';
@@ -321,6 +322,75 @@ describe('Event Utils', () => {
         'preserve-my-key': 'value',
         NestedKey: 'value2',
       });
+    });
+  });
+
+  describe('mergeParallelFunctionResponseEvents', () => {
+    it('should merge multiple events into one concatenating parts, merging actions, and preserving base metadata', () => {
+      const timestamp1 = 1234567890;
+      const event1 = createEvent({
+        invocationId: 'inv-1',
+        author: 'agent-1',
+        branch: 'main',
+        timestamp: timestamp1,
+        content: {
+          role: 'user',
+          parts: [
+            {
+              functionResponse: {
+                name: 'tool1',
+                response: {result: 1},
+                id: 'id1',
+              },
+            },
+          ],
+        },
+        actions: createEventActions({
+          stateDelta: {key1: 'val1'},
+        }),
+      });
+      const event2 = createEvent({
+        invocationId: 'inv-2',
+        author: 'agent-2',
+        branch: 'other',
+        timestamp: 9999999999,
+        content: {
+          role: 'user',
+          parts: [
+            {
+              functionResponse: {
+                name: 'tool2',
+                response: {result: 2},
+                id: 'id2',
+              },
+            },
+          ],
+        },
+        actions: createEventActions({
+          stateDelta: {key2: 'val2'},
+        }),
+      });
+      const merged = mergeParallelFunctionResponseEvents([event1, event2]);
+      expect(merged.content!.parts!.length).toBe(2);
+      expect(merged.content!.parts![0].functionResponse!.name).toBe('tool1');
+      expect(merged.content!.parts![1].functionResponse!.name).toBe('tool2');
+      expect(merged.actions.stateDelta).toEqual({key1: 'val1', key2: 'val2'});
+      expect(merged.invocationId).toBe('inv-1');
+      expect(merged.author).toBe('agent-1');
+      expect(merged.branch).toBe('main');
+      expect(merged.timestamp).toBe(timestamp1);
+    });
+
+    it('should throw if no events provided', () => {
+      expect(() => mergeParallelFunctionResponseEvents([])).toThrow(
+        'No function response events provided.',
+      );
+    });
+
+    it('should return the same event if only one provided', () => {
+      const event = createEvent();
+      const merged = mergeParallelFunctionResponseEvents([event]);
+      expect(merged).toBe(event);
     });
   });
 });
