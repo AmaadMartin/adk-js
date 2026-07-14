@@ -109,7 +109,12 @@ export function getContents(
     );
   }
 
-  let resultEvents = rearrangeEventsForLatestFunctionResponse(filteredEvents);
+  const recoveredEvents = recoverCompactedFunctionCalls(
+    filteredEvents,
+    options.sourceEvents ?? events,
+  );
+
+  let resultEvents = rearrangeEventsForLatestFunctionResponse(recoveredEvents);
   resultEvents =
     rearrangeEventsForAsyncFunctionResponsesInHistory(resultEvents);
   const contents = [];
@@ -606,4 +611,109 @@ function containsEmptyContent(event: Event, includeThoughts = false): boolean {
     return true;
   }
   return false;
+}
+
+/**
+ * Re-injects function-call events that compaction removed when their corresponding
+ * function-response events survive outside the compacted range.
+ *
+ * @param events The post-compaction events being assembled into request contents.
+ * @param sourceEvents The pre-compaction events to recover missing calls from.
+ * @returns The event list with any recoverable missing function-call events and their
+ *     compacted sibling responses re-injected.
+ */
+export function recoverCompactedFunctionCalls(
+  events: Event[],
+  sourceEvents: Event[],
+): Event[] {
+  const callIdsPresent = new Set<string>();
+  const responseIdsPresent = new Set<string>();
+
+  for (const event of events) {
+    for (const functionCall of getFunctionCalls(event)) {
+      if (functionCall.id) {
+        callIdsPresent.add(functionCall.id);
+      }
+    }
+    for (const functionResponse of getFunctionResponses(event)) {
+      if (functionResponse.id) {
+        responseIdsPresent.add(functionResponse.id);
+      }
+    }
+  }
+
+  const orphanedIds = new Set<string>();
+  for (const responseId of responseIdsPresent) {
+    if (!callIdsPresent.has(responseId)) {
+      orphanedIds.add(responseId);
+    }
+  }
+
+  if (orphanedIds.size === 0) {
+    return events;
+  }
+
+  const callEventById = new Map<string, Event>();
+  for (const event of sourceEvents) {
+    for (const functionCall of getFunctionCalls(event)) {
+      if (
+        functionCall.id &&
+        orphanedIds.has(functionCall.id) &&
+        !callEventById.has(functionCall.id)
+      ) {
+        callEventById.set(functionCall.id, event);
+      }
+    }
+  }
+
+  if (callEventById.size === 0) {
+    return events;
+  }
+
+  const responseEventById = new Map<string, Event>();
+  for (const event of sourceEvents) {
+    for (const functionResponse of getFunctionResponses(event)) {
+      if (functionResponse.id && !responseEventById.has(functionResponse.id)) {
+        responseEventById.set(functionResponse.id, event);
+      }
+    }
+  }
+
+  const result: Event[] = [];
+  const reinjectedIds = new Set<string>();
+
+  for (const event of events) {
+    for (const functionResponse of getFunctionResponses(event)) {
+      if (!functionResponse.id) {
+        continue;
+      }
+      const callEvent = callEventById.get(functionResponse.id);
+      if (!callEvent || reinjectedIds.has(functionResponse.id)) {
+        continue;
+      }
+
+      result.push(callEvent);
+      const siblingIds: string[] = [];
+      for (const functionCall of getFunctionCalls(callEvent)) {
+        if (functionCall.id) {
+          siblingIds.push(functionCall.id);
+        }
+      }
+      for (const siblingId of siblingIds) {
+        reinjectedIds.add(siblingId);
+      }
+
+      for (const siblingId of siblingIds) {
+        if (!responseIdsPresent.has(siblingId)) {
+          const siblingResponse = responseEventById.get(siblingId);
+          if (siblingResponse) {
+            result.push(siblingResponse);
+          }
+        }
+      }
+    }
+    result.push(event);
+  }
+
+  return result;
 }
