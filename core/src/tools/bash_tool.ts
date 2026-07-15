@@ -1,4 +1,4 @@
-import {FunctionDeclaration} from '@google/genai';
+import {FunctionDeclaration, Type} from '@google/genai';
 import {spawn} from 'child_process';
 import {BaseTool, RunAsyncToolRequest} from './base_tool.js';
 
@@ -27,15 +27,8 @@ export function validateCommand(
   }
 
   const allowedPrefixes = policy.allowedCommandPrefixes ?? ['*'];
-  if (allowedPrefixes.includes('*')) {
+  if (allowedPrefixes.some((p) => p === '*' || stripped.startsWith(p)))
     return null;
-  }
-
-  for (const prefix of allowedPrefixes) {
-    if (stripped.startsWith(prefix)) {
-      return null;
-    }
-  }
 
   return `Command blocked. Permitted prefixes are: ${allowedPrefixes.join(', ')}`;
 }
@@ -50,22 +43,21 @@ export class ExecuteBashTool extends BaseTool {
   private policy: BashToolPolicy;
 
   constructor(params?: ExecuteBashToolParams) {
-    const policy = params?.policy ?? {};
-    const allowedPrefixes = policy.allowedCommandPrefixes ?? ['*'];
-    const allowedHint = allowedPrefixes.includes('*')
+    const policy = {
+      allowedCommandPrefixes: ['*'],
+      blockedOperators: [],
+      timeoutSeconds: 30,
+      ...params?.policy,
+    };
+    const allowedHint = policy.allowedCommandPrefixes.includes('*')
       ? 'any command'
-      : `commands matching prefixes: ${allowedPrefixes.join(', ')}`;
+      : `commands matching prefixes: ${policy.allowedCommandPrefixes.join(', ')}`;
     super({
       name: 'execute_bash',
       description: `Executes a bash command with the working directory set to the workspace. Allowed: ${allowedHint}. All commands require user confirmation.`,
     });
     this.workspace = params?.workspace ?? process.cwd();
-    this.policy = {
-      allowedCommandPrefixes: ['*'],
-      blockedOperators: [],
-      timeoutSeconds: 30,
-      ...policy,
-    };
+    this.policy = policy;
   }
 
   override _getDeclaration(): FunctionDeclaration | undefined {
@@ -73,23 +65,20 @@ export class ExecuteBashTool extends BaseTool {
       name: this.name,
       description: this.description,
       parameters: {
-        type: 'object',
+        type: Type.OBJECT,
         properties: {
           command: {
-            type: 'string',
+            type: Type.STRING,
             description: 'The bash command to execute.',
           },
         },
         required: ['command'],
       },
-    } as unknown as FunctionDeclaration;
+    };
   }
 
   override async runAsync(request: RunAsyncToolRequest): Promise<unknown> {
-    const command = request.args.command as string | undefined;
-    if (!command) {
-      return {error: 'Command is required.'};
-    }
+    const command = (request.args.command as string) ?? '';
 
     const validationError = validateCommand(command, this.policy);
     if (validationError) {
@@ -131,8 +120,7 @@ export class ExecuteBashTool extends BaseTool {
     }
 
     // In node, to mimic start_new_session=True from python and allow killpg, we use detached: true
-    const ulimitStr = limitCmds.length > 0 ? `${limitCmds.join(' ; ')} ; ` : '';
-    const fullCommand = `${ulimitStr}${command}`;
+    const fullCommand = [...limitCmds, command].join(' ; ');
 
     return new Promise((resolve) => {
       let isSettled = false;
@@ -154,20 +142,15 @@ export class ExecuteBashTool extends BaseTool {
         const stdoutTrimmed = stdoutData || '<no stdout captured>';
         const stderrTrimmed = stderrData || '<no stderr captured>';
 
-        if (errorMessage) {
-          resolve({
+        resolve({
+          ...(!errorMessage && {returncode: returncode ?? -1}),
+          ...(errorMessage && {
             error: errorMessage,
-            stdout: stdoutTrimmed,
-            stderr: stderrTrimmed,
-            ...(returncode !== null ? {returncode} : {}),
-          });
-        } else {
-          resolve({
-            stdout: stdoutTrimmed,
-            stderr: stderrTrimmed,
-            returncode: returncode ?? -1, // Fallback return code if null
-          });
-        }
+            ...(returncode !== null && {returncode}),
+          }),
+          stdout: stdoutTrimmed,
+          stderr: stderrTrimmed,
+        });
       };
 
       child.stdout?.on('data', (data) => {
@@ -204,17 +187,5 @@ export class ExecuteBashTool extends BaseTool {
         }, timeoutSeconds * 1000);
       }
     });
-  }
-
-  _detectErrorInResponse(response: unknown): string | null {
-    if (
-      typeof response === 'object' &&
-      response !== null &&
-      'error' in response &&
-      (response as Record<string, unknown>).error
-    ) {
-      return 'TOOL_ERROR';
-    }
-    return null;
   }
 }
