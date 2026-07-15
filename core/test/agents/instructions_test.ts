@@ -147,6 +147,27 @@ describe('injectSessionState', () => {
     );
   });
 
+  it('serializes objects to JSON strings', async () => {
+    const ctx = makeContext({my_obj: {a: 1, b: 'test'}});
+    expect(await injectSessionState('data={my_obj}', ctx)).toBe(
+      'data={"a":1,"b":"test"}',
+    );
+  });
+
+  it('serializes arrays to JSON strings', async () => {
+    const ctx = makeContext({my_arr: [1, 2, 3]});
+    expect(await injectSessionState('data={my_arr}', ctx)).toBe('data=[1,2,3]');
+  });
+
+  it('throws custom error when object cannot be serialized', async () => {
+    const circularObj: Record<string, unknown> = {};
+    circularObj.self = circularObj;
+    const ctx = makeContext({circular: circularObj});
+    await expect(injectSessionState('data={circular}', ctx)).rejects.toThrow(
+      /Failed to serialize context variable `circular`:/,
+    );
+  });
+
   describe('artifact injection', () => {
     it('loads artifact when {artifact.filename} pattern used', async () => {
       const fakeArtifact = 'artifact content here';

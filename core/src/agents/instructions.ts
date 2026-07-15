@@ -44,7 +44,18 @@ async function resolveKey(
   }
 
   if (key in invocationContext.session.state) {
-    return String(invocationContext.session.state[key]);
+    const value = invocationContext.session.state[key];
+    if (typeof value === 'object' && value !== null) {
+      try {
+        return JSON.stringify(value);
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        throw new Error(
+          `Failed to serialize context variable \`${key}\`: ${errorMsg}`,
+        );
+      }
+    }
+    return String(value);
   }
 
   if (isOptional) {
