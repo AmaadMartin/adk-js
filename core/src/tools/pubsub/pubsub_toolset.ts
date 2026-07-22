@@ -68,7 +68,8 @@ export class PubSubToolset extends BaseToolset {
           },
           required: ['topicName', 'message'],
         },
-        execute: async (input: Record<string, unknown>) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        execute: async (input: any) => {
           return publishMessage(
             input.topicName as string,
             input.message as string,
@@ -103,7 +104,8 @@ export class PubSubToolset extends BaseToolset {
           },
           required: ['subscriptionName'],
         },
-        execute: async (input: Record<string, unknown>) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        execute: async (input: any) => {
           return pullMessages(
             input.subscriptionName as string,
             this.credentialsConfig,
@@ -132,7 +134,8 @@ export class PubSubToolset extends BaseToolset {
           },
           required: ['subscriptionName', 'ackIds'],
         },
-        execute: async (input: Record<string, unknown>) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        execute: async (input: any) => {
           return acknowledgeMessages(
             input.subscriptionName as string,
             input.ackIds as string[],

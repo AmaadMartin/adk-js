@@ -12,8 +12,10 @@ let sharedSubscriberClient: v1.SubscriberClient | null = null;
 
 function createClientOptions(
   credentialsConfig?: PubSubCredentialsConfig,
-): Record<string, unknown> {
-  const options: Record<string, unknown> = {};
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+): any {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const options: any = {};
   if (credentialsConfig?.projectId) {
     options.projectId = credentialsConfig.projectId;
   }
