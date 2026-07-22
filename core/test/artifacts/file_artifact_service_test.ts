@@ -42,9 +42,7 @@ describe('FileArtifactService', () => {
 
       try {
         await service.saveArtifact({
-          appName,
-          userId,
-          sessionId,
+          scope: {appName, userId, sessionId},
           filename: 'report.pdf',
           artifact: {
             fileData: {
@@ -65,9 +63,7 @@ describe('FileArtifactService', () => {
         expect(entries).toEqual(['metadata.json']);
 
         const loaded = await service.loadArtifact({
-          appName,
-          userId,
-          sessionId,
+          scope: {appName, userId, sessionId},
           filename: 'report.pdf',
         });
         expect(loaded?.fileData?.fileUri).toBe('gs://my-bucket/report.pdf');

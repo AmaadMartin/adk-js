@@ -391,9 +391,11 @@ describe('Runner.determineAgentForResumption', () => {
     });
 
     const session = await sessionService.createSession({
-      appName: TEST_APP_ID,
-      userId: TEST_USER_ID,
-      sessionId: 'session_non_resumable',
+      scope: {
+        appName: TEST_APP_ID,
+        userId: TEST_USER_ID,
+        sessionId: 'session_non_resumable',
+      },
     });
 
     await sessionService.appendEvent({session, event: callEvent});
@@ -464,9 +466,11 @@ describe('Runner.determineAgentForResumption', () => {
     });
 
     const session = await sessionService.createSession({
-      appName: TEST_APP_ID,
-      userId: TEST_USER_ID,
-      sessionId: 'session_stale',
+      scope: {
+        appName: TEST_APP_ID,
+        userId: TEST_USER_ID,
+        sessionId: 'session_stale',
+      },
     });
 
     await sessionService.appendEvent({session, event: callEvent});
@@ -489,9 +493,11 @@ describe('Runner.determineAgentForResumption', () => {
     expect(isRoutableLlmAgent(nonTransferableAgent)).toBe(false);
 
     const session = await sessionService.createSession({
-      appName: TEST_APP_ID,
-      userId: TEST_USER_ID,
-      sessionId: 'session_standalone',
+      scope: {
+        appName: TEST_APP_ID,
+        userId: TEST_USER_ID,
+        sessionId: 'session_standalone',
+      },
     });
     const subAgent1Event = createEvent({
       invocationId: 'inv1',
@@ -885,9 +891,11 @@ describe('Runner customMetadata support', () => {
 
   it('should default newMessage role to "user" when role is omitted (issue #475)', async () => {
     const session = await sessionService.createSession({
-      appName: TEST_APP_ID,
-      userId: TEST_USER_ID,
-      sessionId: 'test_session_475',
+      scope: {
+        appName: TEST_APP_ID,
+        userId: TEST_USER_ID,
+        sessionId: 'test_session_475',
+      },
     });
 
     const events: Event[] = [];
@@ -900,9 +908,11 @@ describe('Runner customMetadata support', () => {
     }
 
     const updatedSession = await sessionService.getSession({
-      appName: TEST_APP_ID,
-      userId: TEST_USER_ID,
-      sessionId: 'test_session_475',
+      scope: {
+        appName: TEST_APP_ID,
+        userId: TEST_USER_ID,
+        sessionId: 'test_session_475',
+      },
     });
 
     expect(updatedSession).not.toBeNull();

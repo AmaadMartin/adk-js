@@ -122,9 +122,11 @@ describe('GcsArtifactService', () => {
       const service = new GcsArtifactService(bucketName);
 
       await service.saveArtifact({
-        appName: 'test-app',
-        userId: 'test-user',
-        sessionId: 'test-session',
+        scope: {
+          appName: 'test-app',
+          userId: 'test-user',
+          sessionId: 'test-session',
+        },
         filename: 'meta.txt',
         artifact: {text: 'hello'},
         customMetadata: {foo: 'bar'},
@@ -144,9 +146,11 @@ describe('GcsArtifactService', () => {
       const sharedMetadata = {env: 'prod'};
 
       await service.saveArtifact({
-        appName: 'test-app',
-        userId: 'test-user',
-        sessionId: 'test-session',
+        scope: {
+          appName: 'test-app',
+          userId: 'test-user',
+          sessionId: 'test-session',
+        },
         filename: 'pointer.pdf',
         artifact: {fileData: {fileUri: 'gs://my-bucket/pointer.pdf'}},
         customMetadata: sharedMetadata,
@@ -155,18 +159,22 @@ describe('GcsArtifactService', () => {
       expect(sharedMetadata).toEqual({env: 'prod'});
 
       await service.saveArtifact({
-        appName: 'test-app',
-        userId: 'test-user',
-        sessionId: 'test-session',
+        scope: {
+          appName: 'test-app',
+          userId: 'test-user',
+          sessionId: 'test-session',
+        },
         filename: 'note.txt',
         artifact: {text: 'actual note content'},
         customMetadata: sharedMetadata,
       });
 
       const loaded = await service.loadArtifact({
-        appName: 'test-app',
-        userId: 'test-user',
-        sessionId: 'test-session',
+        scope: {
+          appName: 'test-app',
+          userId: 'test-user',
+          sessionId: 'test-session',
+        },
         filename: 'note.txt',
       });
       expect(loaded?.fileData).toBeUndefined();
@@ -180,9 +188,11 @@ describe('GcsArtifactService', () => {
       const service = new GcsArtifactService(bucketName);
 
       await service.saveArtifact({
-        appName: 'test-app',
-        userId: 'test-user',
-        sessionId: 'test-session',
+        scope: {
+          appName: 'test-app',
+          userId: 'test-user',
+          sessionId: 'test-session',
+        },
         filename: 'report.pdf',
         artifact: {
           fileData: {
@@ -215,9 +225,11 @@ describe('GcsArtifactService', () => {
         });
 
       const loaded = await service.loadArtifact({
-        appName: 'test-app',
-        userId: 'test-user',
-        sessionId: 'test-session',
+        scope: {
+          appName: 'test-app',
+          userId: 'test-user',
+          sessionId: 'test-session',
+        },
         filename: 'no_mime.pdf',
         version: 0,
       });
@@ -233,9 +245,11 @@ describe('GcsArtifactService', () => {
       const service = new GcsArtifactService(bucketName);
 
       await service.saveArtifact({
-        appName: 'test-app',
-        userId: 'test-user',
-        sessionId: 'test-session',
+        scope: {
+          appName: 'test-app',
+          userId: 'test-user',
+          sessionId: 'test-session',
+        },
         filename: 'note.txt',
         artifact: {text: 'hello world'},
       });
@@ -246,9 +260,11 @@ describe('GcsArtifactService', () => {
       expect(entry?.metadata['adkIsText']).toBe('true');
 
       const loaded = await service.loadArtifact({
-        appName: 'test-app',
-        userId: 'test-user',
-        sessionId: 'test-session',
+        scope: {
+          appName: 'test-app',
+          userId: 'test-user',
+          sessionId: 'test-session',
+        },
         filename: 'note.txt',
       });
       expect(loaded?.text).toBe('hello world');
@@ -267,9 +283,11 @@ describe('GcsArtifactService', () => {
         });
 
       const loaded = await service.loadArtifact({
-        appName: 'test-app',
-        userId: 'test-user',
-        sessionId: 'test-session',
+        scope: {
+          appName: 'test-app',
+          userId: 'test-user',
+          sessionId: 'test-session',
+        },
         filename: 'old-note.txt',
         version: 0,
       });
@@ -283,9 +301,11 @@ describe('GcsArtifactService', () => {
       const data = Buffer.from('not a Part.text artifact').toString('base64');
 
       await service.saveArtifact({
-        appName: 'test-app',
-        userId: 'test-user',
-        sessionId: 'test-session',
+        scope: {
+          appName: 'test-app',
+          userId: 'test-user',
+          sessionId: 'test-session',
+        },
         filename: 'plain.txt',
         artifact: {
           inlineData: {data, mimeType: 'text/plain', displayName: 'plain.txt'},
@@ -298,9 +318,11 @@ describe('GcsArtifactService', () => {
       expect(entry?.metadata['adkIsText']).toBeUndefined();
 
       const loaded = await service.loadArtifact({
-        appName: 'test-app',
-        userId: 'test-user',
-        sessionId: 'test-session',
+        scope: {
+          appName: 'test-app',
+          userId: 'test-user',
+          sessionId: 'test-session',
+        },
         filename: 'plain.txt',
       });
       expect(loaded?.text).toBeUndefined();
@@ -315,17 +337,21 @@ describe('GcsArtifactService', () => {
       const data = Buffer.from('ambiguous content').toString('base64');
 
       await service.saveArtifact({
-        appName: 'test-app',
-        userId: 'test-user',
-        sessionId: 'test-session',
+        scope: {
+          appName: 'test-app',
+          userId: 'test-user',
+          sessionId: 'test-session',
+        },
         filename: 'ambiguous.txt',
         artifact: {inlineData: {data, mimeType: 'text/plain'}},
       });
 
       const loaded = await service.loadArtifact({
-        appName: 'test-app',
-        userId: 'test-user',
-        sessionId: 'test-session',
+        scope: {
+          appName: 'test-app',
+          userId: 'test-user',
+          sessionId: 'test-session',
+        },
         filename: 'ambiguous.txt',
       });
 
@@ -338,9 +364,11 @@ describe('GcsArtifactService', () => {
       const data = Buffer.from('some bytes').toString('base64');
 
       await service.saveArtifact({
-        appName: 'test-app',
-        userId: 'test-user',
-        sessionId: 'test-session',
+        scope: {
+          appName: 'test-app',
+          userId: 'test-user',
+          sessionId: 'test-session',
+        },
         filename: 'photo.png',
         artifact: {
           inlineData: {data, mimeType: 'image/png', displayName: 'photo.png'},
@@ -353,9 +381,11 @@ describe('GcsArtifactService', () => {
       expect(entry?.metadata['adkDisplayName']).toBe('photo.png');
 
       const loaded = await service.loadArtifact({
-        appName: 'test-app',
-        userId: 'test-user',
-        sessionId: 'test-session',
+        scope: {
+          appName: 'test-app',
+          userId: 'test-user',
+          sessionId: 'test-session',
+        },
         filename: 'photo.png',
       });
       expect(loaded?.inlineData?.data).toBe(data);

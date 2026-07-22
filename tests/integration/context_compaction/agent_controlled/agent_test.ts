@@ -71,8 +71,10 @@ describe('Context Compaction Agent-Controlled', () => {
       appName: 'agent_controlled_compaction_agent',
     });
     const session = await runner.sessionService.createSession({
-      appName: 'agent_controlled_compaction_agent',
-      userId: 'test_user',
+      scope: {
+        appName: 'agent_controlled_compaction_agent',
+        userId: 'test_user',
+      },
     });
 
     // Turn 1
@@ -95,9 +97,11 @@ describe('Context Compaction Agent-Controlled', () => {
 
     // Assert that compaction occurred
     const updatedSession = await runner.sessionService.getSession({
-      sessionId: session.id,
-      userId: 'test_user',
-      appName: 'agent_controlled_compaction_agent',
+      scope: {
+        sessionId: session.id,
+        userId: 'test_user',
+        appName: 'agent_controlled_compaction_agent',
+      },
     });
 
     const hasCompactedEvent = updatedSession!.events.some(isCompactedEvent);

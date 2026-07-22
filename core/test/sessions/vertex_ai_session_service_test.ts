@@ -570,8 +570,7 @@ describe('VertexAiSessionService', () => {
       mockClient.listInternal.mockResolvedValue({sessions: []});
 
       await service.listSessions({
-        appName: '12345',
-        userId: 'attacker" OR user_id!="',
+        scope: {appName: '12345', userId: 'attacker" OR user_id!="'},
       });
 
       expect(mockClient.listInternal).toHaveBeenCalledWith({
@@ -890,9 +889,11 @@ describe('VertexAiSessionService', () => {
 
       await expect(
         service.deleteSession({
-          appName: '12345',
-          userId: 'attackerUser',
-          sessionId: 'victim-session',
+          scope: {
+            appName: '12345',
+            userId: 'attackerUser',
+            sessionId: 'victim-session',
+          },
         }),
       ).rejects.toThrow(
         'Session victim-session does not belong to user attackerUser',
@@ -913,9 +914,11 @@ describe('VertexAiSessionService', () => {
 
       await expect(
         service.deleteSession({
-          appName: '12345',
-          userId: undefined as unknown as string,
-          sessionId: 'victim-session',
+          scope: {
+            appName: '12345',
+            userId: undefined as unknown as string,
+            sessionId: 'victim-session',
+          },
         }),
       ).rejects.toThrow('does not belong to user');
 
@@ -927,9 +930,11 @@ describe('VertexAiSessionService', () => {
       mockClient.get.mockRejectedValue({code: 5});
 
       await service.deleteSession({
-        appName: '12345',
-        userId: 'testUser',
-        sessionId: 'missing-session',
+        scope: {
+          appName: '12345',
+          userId: 'testUser',
+          sessionId: 'missing-session',
+        },
       });
 
       expect(mockClient.delete).not.toHaveBeenCalled();

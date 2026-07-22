@@ -116,8 +116,7 @@ describe('Anchored Context Compaction', () => {
       appName: 'anchored_compaction_agent',
     });
     const session = await runner.sessionService.createSession({
-      appName: 'anchored_compaction_agent',
-      userId: 'test_user',
+      scope: {appName: 'anchored_compaction_agent', userId: 'test_user'},
     });
 
     // Turn 1
@@ -151,9 +150,11 @@ describe('Anchored Context Compaction', () => {
 
     // Assert first compaction results
     let updatedSession = await runner.sessionService.getSession({
-      sessionId: session.id,
-      userId: 'test_user',
-      appName: 'anchored_compaction_agent',
+      scope: {
+        sessionId: session.id,
+        userId: 'test_user',
+        appName: 'anchored_compaction_agent',
+      },
     });
     let activeEvents = getActiveEvents(updatedSession!.events);
 
@@ -184,9 +185,11 @@ describe('Anchored Context Compaction', () => {
 
     // Assert second compaction results
     updatedSession = await runner.sessionService.getSession({
-      sessionId: session.id,
-      userId: 'test_user',
-      appName: 'anchored_compaction_agent',
+      scope: {
+        sessionId: session.id,
+        userId: 'test_user',
+        appName: 'anchored_compaction_agent',
+      },
     });
     activeEvents = getActiveEvents(updatedSession!.events);
 
