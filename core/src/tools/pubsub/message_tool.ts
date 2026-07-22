@@ -7,7 +7,10 @@
 import {getPublisherClient, getSubscriberClient} from './client.js';
 import {PubSubCredentialsConfig, PubSubToolConfig} from './config.js';
 
-function toRFC3339(timestamp?: {seconds?: number | string; nanos?: number | string}): string {
+function toRFC3339(timestamp?: {
+  seconds?: number | string;
+  nanos?: number | string;
+}): string {
   if (!timestamp || !timestamp.seconds) {
     return new Date().toISOString();
   }
@@ -31,7 +34,7 @@ function decodeMessageData(data?: Uint8Array | string | null): string {
     if (Buffer.from(utf8Str, 'utf8').equals(buffer)) {
       return utf8Str;
     }
-  } catch (e) {
+  } catch (_e) {
     // Fall back to base64 below
   }
   return buffer.toString('base64');
@@ -44,7 +47,7 @@ export async function publishMessage(
   topicName: string,
   message: string,
   credentialsConfig?: PubSubCredentialsConfig,
-  settings?: PubSubToolConfig, // eslint-disable-line @typescript-eslint/no-unused-vars
+  settings?: PubSubToolConfig,
   attributes?: Record<string, string>,
   orderingKey?: string,
 ): Promise<{messageId?: string; status?: string; error_details?: string}> {
@@ -82,10 +85,14 @@ export async function publishMessage(
 export async function pullMessages(
   subscriptionName: string,
   credentialsConfig?: PubSubCredentialsConfig,
-  settings?: PubSubToolConfig, // eslint-disable-line @typescript-eslint/no-unused-vars
+  settings?: PubSubToolConfig,
   maxMessages = 1,
   autoAck = false,
-): Promise<{messages?: Array<any>; status?: string; error_details?: string}> {
+): Promise<{
+  messages?: Array<unknown>;
+  status?: string;
+  error_details?: string;
+}> {
   try {
     const subscriberClient = getSubscriberClient(credentialsConfig);
 
@@ -108,7 +115,12 @@ export async function pullMessages(
           data: messageData,
           attributes: msg.attributes || {},
           orderingKey: msg.orderingKey || '',
-          publishTime: toRFC3339(msg.publishTime as {seconds?: number | string; nanos?: number | string}),
+          publishTime: toRFC3339(
+            msg.publishTime as {
+              seconds?: number | string;
+              nanos?: number | string;
+            },
+          ),
           ackId: receivedMessage.ackId,
         });
 

@@ -49,7 +49,8 @@ export class PubSubToolset extends BaseToolset {
           properties: {
             topicName: {
               type: Type.STRING,
-              description: 'The Pub/Sub topic name (e.g. projects/my-project/topics/my-topic).',
+              description:
+                'The Pub/Sub topic name (e.g. projects/my-project/topics/my-topic).',
             },
             message: {
               type: Type.STRING,
@@ -67,14 +68,14 @@ export class PubSubToolset extends BaseToolset {
           },
           required: ['topicName', 'message'],
         },
-        execute: async (input: any) => {
+        execute: async (input: Record<string, unknown>) => {
           return publishMessage(
-            input.topicName,
-            input.message,
+            input.topicName as string,
+            input.message as string,
             this.credentialsConfig,
             this.toolSettings,
-            input.attributes,
-            input.orderingKey,
+            input.attributes as Record<string, string>,
+            input.orderingKey as string,
           );
         },
       }),
@@ -86,26 +87,29 @@ export class PubSubToolset extends BaseToolset {
           properties: {
             subscriptionName: {
               type: Type.STRING,
-              description: 'The Pub/Sub subscription name (e.g. projects/my-project/subscriptions/my-sub).',
+              description:
+                'The Pub/Sub subscription name (e.g. projects/my-project/subscriptions/my-sub).',
             },
             maxMessages: {
               type: Type.INTEGER,
-              description: 'The maximum number of messages to pull. Defaults to 1.',
+              description:
+                'The maximum number of messages to pull. Defaults to 1.',
             },
             autoAck: {
               type: Type.BOOLEAN,
-              description: 'Whether to automatically acknowledge the messages. Defaults to false.',
+              description:
+                'Whether to automatically acknowledge the messages. Defaults to false.',
             },
           },
           required: ['subscriptionName'],
         },
-        execute: async (input: any) => {
+        execute: async (input: Record<string, unknown>) => {
           return pullMessages(
-            input.subscriptionName,
+            input.subscriptionName as string,
             this.credentialsConfig,
             this.toolSettings,
-            input.maxMessages,
-            input.autoAck,
+            input.maxMessages as number,
+            input.autoAck as boolean,
           );
         },
       }),
@@ -117,7 +121,8 @@ export class PubSubToolset extends BaseToolset {
           properties: {
             subscriptionName: {
               type: Type.STRING,
-              description: 'The Pub/Sub subscription name (e.g. projects/my-project/subscriptions/my-sub).',
+              description:
+                'The Pub/Sub subscription name (e.g. projects/my-project/subscriptions/my-sub).',
             },
             ackIds: {
               type: Type.ARRAY,
@@ -127,10 +132,10 @@ export class PubSubToolset extends BaseToolset {
           },
           required: ['subscriptionName', 'ackIds'],
         },
-        execute: async (input: any) => {
+        execute: async (input: Record<string, unknown>) => {
           return acknowledgeMessages(
-            input.subscriptionName,
-            input.ackIds,
+            input.subscriptionName as string,
+            input.ackIds as string[],
             this.credentialsConfig,
             this.toolSettings,
           );
@@ -138,20 +143,26 @@ export class PubSubToolset extends BaseToolset {
       }),
     ];
 
-    if (!this.toolFilter || (Array.isArray(this.toolFilter) && this.toolFilter.length === 0)) {
+    if (
+      !this.toolFilter ||
+      (Array.isArray(this.toolFilter) && this.toolFilter.length === 0)
+    ) {
       return allTools;
     }
 
-    // `isToolSelected` from BaseToolset uses `readonlyContext` but since we passed an effective 
-    // default (empty array) `super(options?.toolFilter || [])`, the fallback might fail. 
+    // `isToolSelected` from BaseToolset uses `readonlyContext` but since we passed an effective
+    // default (empty array) `super(options?.toolFilter || [])`, the fallback might fail.
     // Wait, the base class checks if `this.toolFilter` is array and empty.
-    
+
     // Create a dummy context if undefined for the predicate since `isToolSelected` requires one if `toolFilter` is a function.
-    const ctx = readonlyContext || { _id: 'dummy' } as any;
-    
+    const ctx =
+      readonlyContext || ({_id: 'dummy'} as unknown as ReadonlyContext);
+
     // Oh wait, `isToolSelected` is protected, we can just map and filter using it.
     // wait, JS allows accessing protected via `this.isToolSelected(tool, ctx)`
-    return allTools.filter((tool) => this.isToolSelected(tool as any, ctx as any));
+    return allTools.filter((tool) =>
+      this.isToolSelected(tool as BaseTool, ctx as ReadonlyContext),
+    );
   }
 
   /**

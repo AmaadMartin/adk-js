@@ -10,8 +10,10 @@ import {PubSubCredentialsConfig} from './config.js';
 let sharedPublisherClient: v1.PublisherClient | null = null;
 let sharedSubscriberClient: v1.SubscriberClient | null = null;
 
-function createClientOptions(credentialsConfig?: PubSubCredentialsConfig): any {
-  const options: any = {};
+function createClientOptions(
+  credentialsConfig?: PubSubCredentialsConfig,
+): Record<string, unknown> {
+  const options: Record<string, unknown> = {};
   if (credentialsConfig?.projectId) {
     options.projectId = credentialsConfig.projectId;
   }
