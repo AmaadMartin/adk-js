@@ -58,3 +58,4 @@ export * from './telemetry/setup.js';
 export * from './tools/mcp/mcp_session_manager.js';
 export * from './tools/mcp/mcp_tool.js';
 export * from './tools/mcp/mcp_toolset.js';
+export * from './tools/bigtable/index.js';
