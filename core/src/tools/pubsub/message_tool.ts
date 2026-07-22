@@ -4,8 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {getPublisherClient, getSubscriberClient} from './client.js';
-import {PubSubCredentialsConfig, PubSubToolConfig} from './config.js';
+import {v1} from '@google-cloud/pubsub';
 
 function toRFC3339(timestamp?: {
   seconds?: number | string;
@@ -27,32 +26,20 @@ function decodeMessageData(data?: Uint8Array | string | null): string {
       ? Buffer.from(data)
       : Buffer.from(data as string, 'base64');
 
-  try {
-    const utf8Str = buffer.toString('utf8');
-    // Basic heuristics to check if the data wasn't successfully decoded as utf8:
-    // If re-encoded utf8 matches the original buffer, it's valid utf8.
-    if (Buffer.from(utf8Str, 'utf8').equals(buffer)) {
-      return utf8Str;
-    }
-  } catch (_e) {
-    // Fall back to base64 below
-  }
-  return buffer.toString('base64');
+  return buffer.toString('utf8');
 }
 
 /**
  * Publish a message to a Pub/Sub topic.
  */
 export async function publishMessage(
+  publisherClient: v1.PublisherClient,
   topicName: string,
   message: string,
-  credentialsConfig?: PubSubCredentialsConfig,
-  settings?: PubSubToolConfig,
   attributes?: Record<string, string>,
   orderingKey?: string,
 ): Promise<{messageId?: string; status?: string; error_details?: string}> {
   try {
-    const publisherClient = getPublisherClient(credentialsConfig);
     const messageBytes = Buffer.from(message, 'utf8');
 
     const [response] = await publisherClient.publish({
@@ -83,9 +70,8 @@ export async function publishMessage(
  * Pull messages from a Pub/Sub subscription.
  */
 export async function pullMessages(
+  subscriberClient: v1.SubscriberClient,
   subscriptionName: string,
-  credentialsConfig?: PubSubCredentialsConfig,
-  settings?: PubSubToolConfig,
   maxMessages = 1,
   autoAck = false,
 ): Promise<{
@@ -94,8 +80,6 @@ export async function pullMessages(
   error_details?: string;
 }> {
   try {
-    const subscriberClient = getSubscriberClient(credentialsConfig);
-
     const [response] = await subscriberClient.pull({
       subscription: subscriptionName,
       maxMessages,
@@ -151,14 +135,11 @@ export async function pullMessages(
  * Acknowledge messages on a Pub/Sub subscription.
  */
 export async function acknowledgeMessages(
+  subscriberClient: v1.SubscriberClient,
   subscriptionName: string,
   ackIds: string[],
-  credentialsConfig?: PubSubCredentialsConfig,
-  settings?: PubSubToolConfig, // eslint-disable-line @typescript-eslint/no-unused-vars
 ): Promise<{status?: string; error_details?: string}> {
   try {
-    const subscriberClient = getSubscriberClient(credentialsConfig);
-
     await subscriberClient.acknowledge({
       subscription: subscriptionName,
       ackIds,

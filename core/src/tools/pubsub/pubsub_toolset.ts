@@ -4,12 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {v1} from '@google-cloud/pubsub';
 import {Type} from '@google/genai';
 import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {BaseTool} from '../base_tool.js';
 import {BaseToolset, ToolPredicate} from '../base_toolset.js';
 import {FunctionTool} from '../function_tool.js';
-import {cleanupClients} from './client.js';
+import {createClientOptions} from './client.js';
 import {PubSubCredentialsConfig, PubSubToolConfig} from './config.js';
 import {
   acknowledgeMessages,
@@ -23,6 +24,8 @@ import {
 export class PubSubToolset extends BaseToolset {
   private readonly credentialsConfig?: PubSubCredentialsConfig;
   private readonly toolSettings: PubSubToolConfig;
+  private publisherClient?: v1.PublisherClient;
+  private subscriberClient?: v1.SubscriberClient;
 
   constructor(options?: {
     toolFilter?: ToolPredicate | string[];
@@ -32,6 +35,24 @@ export class PubSubToolset extends BaseToolset {
     super(options?.toolFilter || []);
     this.credentialsConfig = options?.credentialsConfig;
     this.toolSettings = options?.pubsubToolConfig || {};
+  }
+
+  private getPublisherClient(): v1.PublisherClient {
+    if (!this.publisherClient) {
+      this.publisherClient = new v1.PublisherClient(
+        createClientOptions(this.credentialsConfig),
+      );
+    }
+    return this.publisherClient;
+  }
+
+  private getSubscriberClient(): v1.SubscriberClient {
+    if (!this.subscriberClient) {
+      this.subscriberClient = new v1.SubscriberClient(
+        createClientOptions(this.credentialsConfig),
+      );
+    }
+    return this.subscriberClient;
   }
 
   /**
@@ -71,12 +92,11 @@ export class PubSubToolset extends BaseToolset {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         execute: async (input: any) => {
           return publishMessage(
-            input.topicName as string,
-            input.message as string,
-            this.credentialsConfig,
-            this.toolSettings,
-            input.attributes as Record<string, string>,
-            input.orderingKey as string,
+            this.getPublisherClient(),
+            String(input.topicName),
+            String(input.message),
+            input.attributes as Record<string, string> | undefined,
+            input.orderingKey ? String(input.orderingKey) : undefined,
           );
         },
       }),
@@ -107,11 +127,12 @@ export class PubSubToolset extends BaseToolset {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         execute: async (input: any) => {
           return pullMessages(
-            input.subscriptionName as string,
-            this.credentialsConfig,
-            this.toolSettings,
-            input.maxMessages as number,
-            input.autoAck as boolean,
+            this.getSubscriberClient(),
+            String(input.subscriptionName),
+            input.maxMessages !== undefined
+              ? Number(input.maxMessages)
+              : undefined,
+            input.autoAck !== undefined ? Boolean(input.autoAck) : undefined,
           );
         },
       }),
@@ -137,10 +158,9 @@ export class PubSubToolset extends BaseToolset {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         execute: async (input: any) => {
           return acknowledgeMessages(
-            input.subscriptionName as string,
+            this.getSubscriberClient(),
+            String(input.subscriptionName),
             input.ackIds as string[],
-            this.credentialsConfig,
-            this.toolSettings,
           );
         },
       }),
@@ -153,18 +173,8 @@ export class PubSubToolset extends BaseToolset {
       return allTools;
     }
 
-    // `isToolSelected` from BaseToolset uses `readonlyContext` but since we passed an effective
-    // default (empty array) `super(options?.toolFilter || [])`, the fallback might fail.
-    // Wait, the base class checks if `this.toolFilter` is array and empty.
-
-    // Create a dummy context if undefined for the predicate since `isToolSelected` requires one if `toolFilter` is a function.
-    const ctx =
-      readonlyContext || ({_id: 'dummy'} as unknown as ReadonlyContext);
-
-    // Oh wait, `isToolSelected` is protected, we can just map and filter using it.
-    // wait, JS allows accessing protected via `this.isToolSelected(tool, ctx)`
     return allTools.filter((tool) =>
-      this.isToolSelected(tool as BaseTool, ctx as ReadonlyContext),
+      this.isToolSelected(tool as BaseTool, readonlyContext),
     );
   }
 
@@ -172,6 +182,13 @@ export class PubSubToolset extends BaseToolset {
    * Clean up resources used by the toolset.
    */
   override async close(): Promise<void> {
-    await cleanupClients();
+    const closures: Array<Promise<void>> = [];
+    if (this.publisherClient) {
+      closures.push(this.publisherClient.close());
+    }
+    if (this.subscriberClient) {
+      closures.push(this.subscriberClient.close());
+    }
+    await Promise.all(closures);
   }
 }

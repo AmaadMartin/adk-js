@@ -4,33 +4,28 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
+import {v1} from '@google-cloud/pubsub';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-import {
-  cleanupClients,
-  getPublisherClient,
-  getSubscriberClient,
-} from '../../../src/tools/pubsub/client.js';
 import {PubSubToolset} from '../../../src/tools/pubsub/pubsub_toolset.js';
 
 // Mock the pubsub v1 clients
 vi.mock('@google-cloud/pubsub', () => {
-  const PublisherClient = vi.fn().mockImplementation(() => {
-    return {
-      publish: vi.fn(),
-      close: vi.fn(),
-    };
-  });
-  const SubscriberClient = vi.fn().mockImplementation(() => {
-    return {
-      pull: vi.fn(),
-      acknowledge: vi.fn(),
-      close: vi.fn(),
-    };
-  });
+  const publisherInstance = {
+    publish: vi.fn(),
+    close: vi.fn(),
+  };
+  const subscriberInstance = {
+    pull: vi.fn(),
+    acknowledge: vi.fn(),
+    close: vi.fn(),
+  };
+
   return {
     v1: {
-      PublisherClient,
-      SubscriberClient,
+      PublisherClient: vi.fn(() => publisherInstance),
+      SubscriberClient: vi.fn(() => subscriberInstance),
     },
   };
 });
@@ -39,7 +34,9 @@ describe('PubSubToolset', () => {
   let toolset: PubSubToolset;
 
   beforeEach(async () => {
-    await cleanupClients();
+    // Clear mock histories to ensure tests don't overlap singleton logic counts
+    vi.clearAllMocks();
+
     toolset = new PubSubToolset({
       pubsubToolConfig: {projectId: 'test-project'},
       credentialsConfig: {projectId: 'test-project-auth'},
@@ -68,10 +65,10 @@ describe('PubSubToolset', () => {
         ) => Promise<Record<string, unknown>>;
       };
 
-      const pubClient = getPublisherClient();
+      const pubClient = new v1.PublisherClient();
       vi.mocked(pubClient.publish).mockResolvedValue([
         {messageIds: ['msg-123']},
-      ]);
+      ] as any);
 
       const result = await publishTool.execute({
         topicName: 'test-topic',
@@ -94,7 +91,7 @@ describe('PubSubToolset', () => {
         ) => Promise<Record<string, unknown>>;
       };
 
-      const pubClient = getPublisherClient();
+      const pubClient = new v1.PublisherClient();
       vi.mocked(pubClient.publish).mockRejectedValue(
         new Error('Publish timeout'),
       );
@@ -118,7 +115,7 @@ describe('PubSubToolset', () => {
         ) => Promise<Record<string, unknown>>;
       };
 
-      const subClient = getSubscriberClient();
+      const subClient = new v1.SubscriberClient();
       vi.mocked(subClient.pull).mockResolvedValue([
         {
           receivedMessages: [
@@ -133,7 +130,7 @@ describe('PubSubToolset', () => {
             },
           ],
         },
-      ]);
+      ] as any);
 
       const result = await pullTool.execute({
         subscriptionName: 'test-sub',
@@ -141,9 +138,9 @@ describe('PubSubToolset', () => {
         autoAck: false,
       });
 
-      expect(result.messages).toHaveLength(1);
-      expect(result.messages[0].data).toEqual('hello from sub');
-      expect(result.messages[0].attributes).toEqual({key: 'val'});
+      expect(result.messages as any[]).toHaveLength(1);
+      expect((result.messages as any[])[0].data).toEqual('hello from sub');
+      expect((result.messages as any[])[0].attributes).toEqual({key: 'val'});
     });
 
     it('should autoAck messages if autoAck is true', async () => {
@@ -154,7 +151,7 @@ describe('PubSubToolset', () => {
         ) => Promise<Record<string, unknown>>;
       };
 
-      const subClient = getSubscriberClient();
+      const subClient = new v1.SubscriberClient();
       vi.mocked(subClient.pull).mockResolvedValue([
         {
           receivedMessages: [
@@ -167,7 +164,7 @@ describe('PubSubToolset', () => {
             },
           ],
         },
-      ]);
+      ] as any);
 
       await pullTool.execute({
         subscriptionName: 'test-sub',
@@ -189,7 +186,7 @@ describe('PubSubToolset', () => {
         ) => Promise<Record<string, unknown>>;
       };
 
-      const subClient = getSubscriberClient();
+      const subClient = new v1.SubscriberClient();
       vi.mocked(subClient.pull).mockRejectedValue(new Error('Pull timeout'));
 
       const result = await pullTool.execute({
@@ -210,8 +207,8 @@ describe('PubSubToolset', () => {
         ) => Promise<Record<string, unknown>>;
       };
 
-      const subClient = getSubscriberClient();
-      vi.mocked(subClient.acknowledge).mockResolvedValue([{}]);
+      const subClient = new v1.SubscriberClient();
+      vi.mocked(subClient.acknowledge).mockResolvedValue([{} as any]);
 
       const result = await ackTool.execute({
         subscriptionName: 'test-sub',
@@ -233,7 +230,7 @@ describe('PubSubToolset', () => {
         ) => Promise<Record<string, unknown>>;
       };
 
-      const subClient = getSubscriberClient();
+      const subClient = new v1.SubscriberClient();
       vi.mocked(subClient.acknowledge).mockRejectedValue(
         new Error('Ack timeout'),
       );
