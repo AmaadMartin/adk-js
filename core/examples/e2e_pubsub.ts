@@ -11,7 +11,7 @@ import {PubSubToolset} from '../src/tools/pubsub/index.js';
  * Validates the E2E flow for the Pub/Sub messaging toolset.
  * Note: You must have an active GCP project with Pub/Sub API enabled,
  * and sufficient IAM roles (e.g., Pub/Sub Editor) to publish/pull.
- * 
+ *
  * Set GCP_PROJECT_ID, PUBSUB_TOPIC, PUBSUB_SUBSCRIPTION in your environment.
  */
 async function runE2e() {
@@ -20,7 +20,9 @@ async function runE2e() {
   const subscriptionName = process.env.PUBSUB_SUBSCRIPTION;
 
   if (!projectId || !topicName || !subscriptionName) {
-    console.warn('Skipping E2E PubSub test. Missing env vars: GCP_PROJECT_ID, PUBSUB_TOPIC, PUBSUB_SUBSCRIPTION.');
+    console.warn(
+      'Skipping E2E PubSub test. Missing env vars: GCP_PROJECT_ID, PUBSUB_TOPIC, PUBSUB_SUBSCRIPTION.',
+    );
     return;
   }
 
@@ -46,7 +48,7 @@ async function runE2e() {
 
   console.log('Agent Response:');
   console.log(result.text);
-  
+
   await pubsubToolset.close();
   console.log('E2E PubSub test finished successfully.');
 }
