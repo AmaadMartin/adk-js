@@ -132,7 +132,9 @@ describe('E2E LRO Session Resumption Routing', () => {
       initialRunner as unknown as {sessionService: InMemorySessionService}
     ).sessionService = sessionService;
 
-    const session = await sessionService.createSession({appName, userId});
+    const session = await sessionService.createSession({
+      scope: {appName, userId},
+    });
 
     const initialEvents: Event[] = [];
     for await (const ev of initialRunner.runAsync({
@@ -151,9 +153,11 @@ describe('E2E LRO Session Resumption Routing', () => {
     // 3. Session is serialized/paused while external LRO runs asynchronously...
     // Verify stored events in session contain the tool call from DataProcessingAgent
     const storedSession = await sessionService.getSession({
-      appName,
-      userId,
-      sessionId: session.id,
+      scope: {
+        appName,
+        userId,
+        sessionId: session.id,
+      },
     });
     expect(storedSession?.events.length).toBeGreaterThan(0);
 

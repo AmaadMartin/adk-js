@@ -372,18 +372,14 @@ export function runArtifactServiceTests(
       const mimeType = 'application/pdf';
 
       const version = await service.saveArtifact({
-        appName,
-        userId,
-        sessionId,
+        scope,
         filename,
         artifact: {fileData: {fileUri, mimeType}},
       });
       expect(version).toBe(0);
 
       const loaded = await service.loadArtifact({
-        appName,
-        userId,
-        sessionId,
+        scope,
         filename,
       });
       expect(loaded?.fileData?.fileUri).toBe(fileUri);
@@ -395,18 +391,14 @@ export function runArtifactServiceTests(
       const fileUri = 'gs://my-bucket/data.bin';
 
       const version = await service.saveArtifact({
-        appName,
-        userId,
-        sessionId,
+        scope,
         filename,
         artifact: {fileData: {fileUri}},
       });
       expect(version).toBe(0);
 
       const loaded = await service.loadArtifact({
-        appName,
-        userId,
-        sessionId,
+        scope,
         filename,
       });
       expect(loaded?.fileData?.fileUri).toBe(fileUri);
@@ -419,18 +411,14 @@ export function runArtifactServiceTests(
       const mimeType = 'image/png';
 
       const version = await service.saveArtifact({
-        appName,
-        userId,
-        sessionId,
+        scope,
         filename,
         artifact: {inlineData: {data, mimeType}, fileData: {}},
       });
       expect(version).toBe(0);
 
       const loaded = await service.loadArtifact({
-        appName,
-        userId,
-        sessionId,
+        scope,
         filename,
       });
       expect(loaded?.inlineData?.data).toBe(data);
@@ -441,9 +429,7 @@ export function runArtifactServiceTests(
       const filename = 'both.txt';
 
       const version = await service.saveArtifact({
-        appName,
-        userId,
-        sessionId,
+        scope,
         filename,
         artifact: {
           text: 'hello world',
@@ -455,17 +441,13 @@ export function runArtifactServiceTests(
       });
 
       const loaded = await service.loadArtifact({
-        appName,
-        userId,
-        sessionId,
+        scope,
         filename,
       });
       expect(loaded?.text).toBe('hello world');
 
       const versionMetadata = await service.getArtifactVersion({
-        appName,
-        userId,
-        sessionId,
+        scope,
         filename,
         version,
       });
@@ -484,33 +466,35 @@ export function runArtifactServiceTests(
       const text = 'testing composite key';
 
       const version = await service.saveArtifact({
-        ...sessionKey,
+        scope: sessionKey,
         filename,
         artifact: {text},
       });
       expect(version).toBe(0);
 
       const loaded = await service.loadArtifact({
-        ...sessionKey,
+        scope: sessionKey,
         filename,
         version: 0,
       });
       expect(loaded?.text).toBe(text);
 
-      const keys = await service.listArtifactKeys(sessionKey);
+      const keys = await service.listArtifactKeys({scope: sessionKey});
       expect(keys).toContain(filename);
 
       const versions = await service.listVersions({
-        ...sessionKey,
+        scope: sessionKey,
         filename,
       });
       expect(versions).toEqual([0]);
 
       await service.deleteArtifact({
-        ...sessionKey,
+        scope: sessionKey,
         filename,
       });
-      const keysAfterDelete = await service.listArtifactKeys(sessionKey);
+      const keysAfterDelete = await service.listArtifactKeys({
+        scope: sessionKey,
+      });
       expect(keysAfterDelete).not.toContain(filename);
     });
   });
