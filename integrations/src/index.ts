@@ -5,3 +5,4 @@
  */
 
 export {version} from './version.js';
+export * from './bigquery/index.js';
