@@ -169,7 +169,13 @@ export class AgentFile {
       const moduleType =
         this.options.moduleType || (await getFileModuleType(filePath));
       const parsedPath = path.parse(filePath);
-      const outputDir = getTempDir('adk_agent_loader');
+      // Emit the bundle inside the agent project (rather than the OS temp
+      // directory) so that dependencies hoisted above the agent directory
+      // still resolve from the compiled output.
+      const outputDir = getTempDir(
+        path.join('.adk_build_cache', 'adk_agent_loader'),
+        parsedPath.dir,
+      );
       const compiledFilePath = path.join(
         outputDir,
         parsedPath.name + FILE_MODULE_TYPE_EXTENSION_MAP[moduleType],
