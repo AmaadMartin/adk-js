@@ -57,6 +57,8 @@ import {
 
 import {AUTH_PREPROCESSOR} from '../auth/auth_preprocessor.js';
 import {BaseContextCompactor} from '../context/base_context_compactor.js';
+import {BasePlanner} from '../planners/base_planner.js';
+import {BuiltInPlanner} from '../planners/built_in_planner.js';
 import {InvocationContext} from './invocation_context.js';
 import {AGENT_TRANSFER_LLM_REQUEST_PROCESSOR} from './processors/agent_transfer_llm_request_processor.js';
 import {BASIC_LLM_REQUEST_PROCESSOR} from './processors/basic_llm_request_processor.js';
@@ -66,6 +68,10 @@ import {ContextCompactorRequestProcessor} from './processors/context_compactor_r
 import {IDENTITY_LLM_REQUEST_PROCESSOR} from './processors/identity_llm_request_processor.js';
 import {INSTRUCTIONS_LLM_REQUEST_PROCESSOR} from './processors/instructions_llm_request_processor.js';
 import {INTERACTIONS_REQUEST_PROCESSOR} from './processors/interactions_request_processor.js';
+import {
+  NL_PLANNING_REQUEST_PROCESSOR,
+  NL_PLANNING_RESPONSE_PROCESSOR,
+} from './processors/nl_planning_processor.js';
 import {REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR} from './processors/request_confirmation_llm_request_processor.js';
 import {TOOL_FILTER_REQUEST_PROCESSOR} from './processors/tool_filter_request_processor.js';
 import {ReadonlyContext} from './readonly_context.js';
@@ -312,6 +318,11 @@ export interface LlmAgentConfig extends BaseAgentConfig {
   /**
    * Instructs the agent to make a plan and execute it step by step.
    */
+  planner?: BasePlanner;
+
+  /**
+   * Allow agent to execute code blocks from model responses.
+   */
   codeExecutor?: BaseCodeExecutor;
 }
 
@@ -370,6 +381,7 @@ export class LlmAgent extends BaseAgent {
   afterToolCallback?: AfterToolCallback;
   requestProcessors: BaseLlmRequestProcessor[];
   responseProcessors: BaseLlmResponseProcessor[];
+  planner?: BasePlanner;
   codeExecutor?: BaseCodeExecutor;
 
   constructor(config: LlmAgentConfig) {
@@ -393,6 +405,7 @@ export class LlmAgent extends BaseAgent {
     this.afterModelCallback = config.afterModelCallback;
     this.beforeToolCallback = config.beforeToolCallback;
     this.afterToolCallback = config.afterToolCallback;
+    this.planner = config.planner;
     this.codeExecutor = config.codeExecutor;
 
     // TODO - b/425992518: Define these processor arrays.
@@ -405,6 +418,7 @@ export class LlmAgent extends BaseAgent {
       REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR,
       CONTENT_REQUEST_PROCESSOR,
       INTERACTIONS_REQUEST_PROCESSOR,
+      NL_PLANNING_REQUEST_PROCESSOR,
       CODE_EXECUTION_REQUEST_PROCESSOR,
       TOOL_FILTER_REQUEST_PROCESSOR,
     ];
@@ -431,7 +445,9 @@ export class LlmAgent extends BaseAgent {
       }
     }
 
-    this.responseProcessors = config.responseProcessors ?? [];
+    this.responseProcessors = config.responseProcessors ?? [
+      NL_PLANNING_RESPONSE_PROCESSOR,
+    ];
 
     // Preserve the agent transfer behavior.
     const agentTransferDisabled =
@@ -459,6 +475,18 @@ export class LlmAgent extends BaseAgent {
       }
     } else {
       this.generateContentConfig = {};
+    }
+
+    // Warn when thinkingConfig is provided both directly and via a
+    // BuiltInPlanner; the planner's configuration takes precedence.
+    if (
+      config.generateContentConfig?.thinkingConfig &&
+      this.planner instanceof BuiltInPlanner &&
+      this.planner.thinkingConfig
+    ) {
+      logger.warn(
+        "Both `thinkingConfig` in `generateContentConfig` and a planner with `thinkingConfig` are provided. The planner's configuration will take precedence.",
+      );
     }
 
     // Validate output schema related configurations.

@@ -55,6 +55,12 @@ export {
   INTERACTIONS_REQUEST_PROCESSOR,
   InteractionsRequestProcessor,
 } from './agents/processors/interactions_request_processor.js';
+export {
+  NL_PLANNING_REQUEST_PROCESSOR,
+  NL_PLANNING_RESPONSE_PROCESSOR,
+  NlPlanningRequestProcessor,
+  NlPlanningResponseProcessor,
+} from './agents/processors/nl_planning_processor.js';
 export {ReadonlyContext} from './agents/readonly_context.js';
 export {RoutedAgent, isRoutedAgent} from './agents/routed_agent.js';
 export type {AgentRouter, RoutedAgentConfig} from './agents/routed_agent.js';
@@ -182,6 +188,9 @@ export {LLMRegistry} from './models/registry.js';
 export type {BaseLlmType} from './models/registry.js';
 export {RoutedLlm} from './models/routed_llm.js';
 export type {LlmRouter} from './models/routed_llm.js';
+export {BasePlanner} from './planners/base_planner.js';
+export {BuiltInPlanner} from './planners/built_in_planner.js';
+export {PlanReActPlanner} from './planners/plan_re_act_planner.js';
 export {BasePlugin, ContextCompactionTrigger} from './plugins/base_plugin.js';
 export {GlobalInstructionPlugin} from './plugins/global_instruction_plugin.js';
 export {LoggingPlugin} from './plugins/logging_plugin.js';
