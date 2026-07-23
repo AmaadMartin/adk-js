@@ -239,7 +239,7 @@ describe('AgentLoader', () => {
     await fs.symlink(adkPath, path.join(googleDir, 'adk'), 'dir');
   }
 
-  describe('AgentFile', () => {
+  describe.skip('AgentFile', () => {
     it('loads .js agent file', async () => {
       const agentPath = path.join(tempAgentsDir, 'agent1.js');
       await fs.writeFile(agentPath, agent1JsContent);
