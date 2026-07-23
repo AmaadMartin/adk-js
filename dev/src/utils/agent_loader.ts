@@ -16,7 +16,6 @@ import * as path from 'node:path';
 import {pathToFileURL} from 'node:url';
 
 import {
-  getTempDir,
   isFile,
   isFileExists,
   isFolderExists,
@@ -169,7 +168,12 @@ export class AgentFile {
       const moduleType =
         this.options.moduleType || (await getFileModuleType(filePath));
       const parsedPath = path.parse(filePath);
-      const outputDir = getTempDir('adk_agent_loader');
+      const outputDir = path.join(
+        parsedPath.dir,
+        '.adk_build_cache',
+        'adk_agent_loader',
+        Math.random().toString(36).slice(2),
+      );
       const compiledFilePath = path.join(
         outputDir,
         parsedPath.name + FILE_MODULE_TYPE_EXTENSION_MAP[moduleType],
