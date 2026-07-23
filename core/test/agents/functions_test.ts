@@ -742,6 +742,39 @@ describe('findEventByFunctionCallId', () => {
     expect(findEventByFunctionCallId([event1, event2], 'call-2')).toBe(event2);
   });
 
+  it('should discover elements added incrementally to the tail of the events array', () => {
+    const events: Event[] = [];
+    expect(findEventByFunctionCallId(events, 'call-1')).toBeUndefined();
+
+    const event1 = createEvent({
+      invocationId: 'inv-1',
+      author: 'agent-1',
+      content: {
+        role: 'model',
+        parts: [{functionCall: {id: 'call-1', name: 'tool1', args: {}}}],
+      },
+    });
+    events.push(event1);
+    expect(findEventByFunctionCallId(events, 'call-1')).toBe(event1);
+
+    // Add another event without functionCall, should not break things
+    events.push(
+      createEvent({
+        content: {role: 'model', parts: [{text: 'random text'}]},
+      }),
+    );
+    expect(findEventByFunctionCallId(events, 'call-1')).toBe(event1);
+
+    const event3 = createEvent({
+      content: {
+        role: 'model',
+        parts: [{functionCall: {id: 'call-3', name: 'tool3', args: {}}}],
+      },
+    });
+    events.push(event3);
+    expect(findEventByFunctionCallId(events, 'call-3')).toBe(event3);
+  });
+
   it('should return undefined if no matching functionCall id found or events empty', () => {
     const event1 = createEvent({
       invocationId: 'inv-1',

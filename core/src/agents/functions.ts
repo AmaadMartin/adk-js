@@ -579,6 +579,7 @@ export function findEventByFunctionCallId(
   functionCallId: string,
   endIndex: number = events.length,
 ): Event | undefined {
+  // simplicity: O(N) backward scan, upgrade to map if N > 1000
   for (let i = endIndex - 1; i >= 0; i--) {
     const event = events[i];
     const functionCalls = getFunctionCalls(event);
