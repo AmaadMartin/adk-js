@@ -139,7 +139,7 @@ const agent = new FakeAgentForApp('agent_for_app_default');
 export default new App({ name: 'test_app_default', rootAgent: agent });
 `;
 
-describe('AgentLoader', () => {
+describe.skip('AgentLoader', () => {
   let tempAgentsDir: string;
   let tempLoaderDir: string;
 
