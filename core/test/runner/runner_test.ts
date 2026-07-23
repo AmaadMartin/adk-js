@@ -503,6 +503,82 @@ describe('Runner.determineAgentForResumption', () => {
     );
     expect(result.name).toBe('sub_agent1');
   });
+
+  it('should efficiently resolve routable agent with >1000 events', async () => {
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: 'session_large',
+    });
+
+    // Add 1500 noise events
+    for (let i = 0; i < 1500; i++) {
+      await sessionService.appendEvent({
+        session,
+        event: createEvent({
+          invocationId: `noise_${i}`,
+          author: 'user',
+          content: {role: 'user', parts: [{text: 'noise'}]},
+        }),
+      });
+    }
+
+    // Add a routable agent event
+    const routableEvent = createEvent({
+      invocationId: 'inv_target',
+      author: 'sub_agent2',
+      content: {role: 'model', parts: [{text: 'Target agent'}]},
+    });
+    await sessionService.appendEvent({session, event: routableEvent});
+
+    // Add 10 more noise events after
+    for (let i = 0; i < 10; i++) {
+      await sessionService.appendEvent({
+        session,
+        event: createEvent({
+          invocationId: `noise_end_${i}`,
+          author: 'user',
+          content: {role: 'user', parts: [{text: 'noise end'}]},
+        }),
+      });
+    }
+
+    // Call it first time (builds cache scanning backward 10 events)
+    let result = determineAgentForResumption(
+      session,
+      rootAgent,
+      createResumabilityConfig({isResumable: true}),
+    );
+    expect(result.name).toBe('sub_agent2');
+
+    // Call it second time (O(1) via cache)
+    result = determineAgentForResumption(
+      session,
+      rootAgent,
+      createResumabilityConfig({isResumable: true}),
+    );
+    expect(result.name).toBe('sub_agent2');
+
+    // Append 10 more noise events
+    for (let i = 0; i < 10; i++) {
+      await sessionService.appendEvent({
+        session,
+        event: createEvent({
+          invocationId: `noise_new_${i}`,
+          author: 'user',
+          content: {role: 'user', parts: [{text: 'more noise'}]},
+        }),
+      });
+    }
+
+    // Call it third time (should still efficiently resolve via cache without full scan)
+    result = determineAgentForResumption(
+      session,
+      rootAgent,
+      createResumabilityConfig({isResumable: true}),
+    );
+    expect(result.name).toBe('sub_agent2');
+  });
 });
 
 describe('Runner with plugins', () => {

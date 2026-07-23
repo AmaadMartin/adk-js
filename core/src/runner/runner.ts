@@ -521,6 +521,24 @@ export class Runner {
   // TODO - b/425992518: Implement runLive and related methods.
 }
 
+function updateResolutionCache(
+  sessionObj: Session & {
+    _resolutionCache?: {
+      scannedEventCount: number;
+      agentName: string | null;
+    };
+  },
+  scannedEventCount: number,
+  agentName: string | null,
+) {
+  Object.defineProperty(sessionObj, '_resolutionCache', {
+    value: {scannedEventCount, agentName},
+    enumerable: false,
+    writable: true,
+    configurable: true, // Allow redefining if needed
+  });
+}
+
 /**
  * Determines the next agent to run to continue the session. This is primarily
  * used for session resumption across tool and LRO boundaries.
@@ -550,8 +568,28 @@ export function determineAgentForResumption(
   // Case 2: Otherwise, find the last agent that emitted a message and is
   // transferable across the agent tree.
   // =========================================================================
-  // simplicity: O(N) backward event scan, upgrade to indexed lookups or map if N > 1000.
-  for (let i = session.events.length - 1; i >= 0; i--) {
+  // simplicity: O(1) amortized via transient cached index lookup.
+  const sessionObj = session as Session & {
+    _resolutionCache?: {
+      scannedEventCount: number;
+      agentName: string | null;
+    };
+  };
+  const cache = sessionObj._resolutionCache;
+
+  const startIdx = session.events.length - 1;
+  let stopIdx = 0;
+  let cachedAgentName: string | null = null;
+  let hasValidCache = false;
+
+  // Utilize cache if events array has only grown or stayed the same
+  if (cache && cache.scannedEventCount <= session.events.length) {
+    stopIdx = cache.scannedEventCount;
+    cachedAgentName = cache.agentName;
+    hasValidCache = true;
+  }
+
+  for (let i = startIdx; i >= stopIdx; i--) {
     logger.debug('event:', JSON.stringify(session.events[i]));
     const event = session.events[i];
     if (event.author === 'user' || !event.author) {
@@ -559,6 +597,7 @@ export function determineAgentForResumption(
     }
 
     if (event.author === rootAgent.name) {
+      updateResolutionCache(sessionObj, session.events.length, rootAgent.name);
       return rootAgent;
     }
 
@@ -570,9 +609,28 @@ export function determineAgentForResumption(
       continue;
     }
     if (isRoutableLlmAgent(agent)) {
+      updateResolutionCache(sessionObj, session.events.length, agent.name);
       return agent;
     }
   }
+
+  // If no new transferable agent was found in the newly added events,
+  // rely on the cached agent if it's still valid.
+  if (hasValidCache && cachedAgentName) {
+    // Double check it still exists in the current graph.
+    if (cachedAgentName === rootAgent.name) {
+      updateResolutionCache(sessionObj, session.events.length, rootAgent.name);
+      return rootAgent;
+    }
+    const agent = rootAgent.findSubAgent(cachedAgentName);
+    if (agent && isRoutableLlmAgent(agent)) {
+      updateResolutionCache(sessionObj, session.events.length, agent.name);
+      return agent;
+    }
+  }
+
+  updateResolutionCache(sessionObj, session.events.length, null);
+
   // =========================================================================
   // Case 3: default to root agent.
   // =========================================================================
