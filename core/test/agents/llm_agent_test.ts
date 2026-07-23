@@ -12,22 +12,27 @@ import {
   BaseLlmResponseProcessor,
   BasePlugin,
   BaseTool,
+  BuiltInPlanner,
   CONTENT_REQUEST_PROCESSOR,
   Context,
   ContextCompactorRequestProcessor,
   createEvent,
   Event,
+  getLogger,
   InvocationContext,
   LlmAgent,
   LlmRequest,
   LlmResponse,
+  NL_PLANNING_REQUEST_PROCESSOR,
+  NL_PLANNING_RESPONSE_PROCESSOR,
+  PlanReActPlanner,
   PluginManager,
   RunAsyncToolRequest,
   Session,
   ToolProcessLlmRequest,
 } from '@google/adk';
 import {Content, Schema, Type} from '@google/genai';
-import {beforeEach, describe, expect, it} from 'vitest';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
 
@@ -837,5 +842,78 @@ describe('LlmAgent Default Request Processors', () => {
       CONTENT_REQUEST_PROCESSOR,
     );
     expect(authIndex).toBeLessThan(contentIndex);
+  });
+});
+
+describe('LlmAgent planner wiring', () => {
+  it('exposes the planner passed via config', () => {
+    const planner = new PlanReActPlanner();
+    const agent = new LlmAgent({name: 'test_agent', planner});
+    expect(agent.planner).toBe(planner);
+  });
+
+  it('leaves planner undefined when not configured', () => {
+    const agent = new LlmAgent({name: 'test_agent'});
+    expect(agent.planner).toBeUndefined();
+  });
+
+  it('includes NL_PLANNING_REQUEST_PROCESSOR immediately before the code execution processor', () => {
+    const agent = new LlmAgent({name: 'test_agent'});
+    const nlIndex = agent.requestProcessors.indexOf(
+      NL_PLANNING_REQUEST_PROCESSOR,
+    );
+    expect(nlIndex).toBeGreaterThanOrEqual(0);
+    expect(agent.requestProcessors[nlIndex + 1].constructor.name).toBe(
+      'CodeExecutionRequestProcessor',
+    );
+  });
+
+  it('includes NL_PLANNING_RESPONSE_PROCESSOR in the default responseProcessors', () => {
+    const agent = new LlmAgent({name: 'test_agent'});
+    expect(agent.responseProcessors).toContain(NL_PLANNING_RESPONSE_PROCESSOR);
+  });
+
+  it('does not add planner processors when custom processors are provided', () => {
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      requestProcessors: [],
+      responseProcessors: [],
+    });
+    expect(agent.requestProcessors).not.toContain(
+      NL_PLANNING_REQUEST_PROCESSOR,
+    );
+    expect(agent.responseProcessors).not.toContain(
+      NL_PLANNING_RESPONSE_PROCESSOR,
+    );
+  });
+
+  it('warns when both a BuiltInPlanner thinkingConfig and generateContentConfig.thinkingConfig are provided', () => {
+    const warnSpy = vi.spyOn(getLogger(), 'warn');
+    new LlmAgent({
+      name: 'test_agent',
+      planner: new BuiltInPlanner({thinkingConfig: {includeThoughts: true}}),
+      generateContentConfig: {thinkingConfig: {includeThoughts: false}},
+    });
+    expect(warnSpy).toHaveBeenCalledWith(
+      "Both `thinkingConfig` in `generateContentConfig` and a planner with `thinkingConfig` are provided. The planner's configuration will take precedence.",
+    );
+  });
+
+  it('does not warn when only generateContentConfig.thinkingConfig is provided', () => {
+    const warnSpy = vi.spyOn(getLogger(), 'warn');
+    new LlmAgent({
+      name: 'test_agent',
+      generateContentConfig: {thinkingConfig: {includeThoughts: true}},
+    });
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it('does not warn when only a BuiltInPlanner is provided', () => {
+    const warnSpy = vi.spyOn(getLogger(), 'warn');
+    new LlmAgent({
+      name: 'test_agent',
+      planner: new BuiltInPlanner({thinkingConfig: {includeThoughts: true}}),
+    });
+    expect(warnSpy).not.toHaveBeenCalled();
   });
 });
