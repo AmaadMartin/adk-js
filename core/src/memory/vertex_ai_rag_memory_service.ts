@@ -231,11 +231,6 @@ function mergeEventLists(eventLists: StoredEvent[][]): StoredEvent[][] {
   return merged;
 }
 
-/** Formats a millisecond timestamp as an ISO-8601 string. */
-function formatTimestamp(timestamp: number): string {
-  return new Date(timestamp).toISOString();
-}
-
 /**
  * Options for constructing a {@link VertexAiRagMemoryService}.
  */
@@ -300,8 +295,6 @@ export interface VertexAiRagMemoryServiceOptions {
  * ```
  */
 export class VertexAiRagMemoryService implements BaseMemoryService {
-  private readonly projectId?: string;
-  private readonly location?: string;
   private readonly ragResources: VertexRagStoreRagResource[];
   private readonly vertexRagStore: VertexRagStore;
   private readonly client: RagClient;
@@ -324,9 +317,6 @@ export class VertexAiRagMemoryService implements BaseMemoryService {
       }
     }
 
-    this.projectId = projectId;
-    this.location = location;
-
     this.ragResources = options.ragCorpus
       ? [{ragCorpus: options.ragCorpus}]
       : [];
@@ -337,10 +327,8 @@ export class VertexAiRagMemoryService implements BaseMemoryService {
         options.vectorDistanceThreshold ?? DEFAULT_VECTOR_DISTANCE_THRESHOLD,
     };
 
-    const client =
-      options.client ??
-      new Client({project: this.projectId, location: this.location});
-    this.client = client as unknown as RagClient;
+    this.client = (options.client ??
+      new Client({project: projectId, location})) as unknown as RagClient;
   }
 
   async addSessionToMemory(session: Session): Promise<void> {
@@ -448,7 +436,7 @@ export class VertexAiRagMemoryService implements BaseMemoryService {
           memories.push({
             author: event.author,
             content: event.content,
-            timestamp: formatTimestamp(event.timestamp),
+            timestamp: new Date(event.timestamp).toISOString(),
           });
         }
       }
