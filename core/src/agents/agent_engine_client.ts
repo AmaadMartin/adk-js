@@ -200,18 +200,6 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function encodeMessage(
-  message: Content | string,
-): string | Record<string, unknown> {
-  if (typeof message === 'string') {
-    return message;
-  }
-  // Serialize to the genai JSON wire shape, dropping undefined fields (parity
-  // with the Python reference's `model_dump(exclude_none=True)`), since the
-  // Struct encoder cannot represent `undefined`.
-  return JSON.parse(JSON.stringify(message)) as Record<string, unknown>;
-}
-
 /**
  * An ergonomic, consumer-side client for a deployed Vertex AI Agent Engine
  * (reasoning engine). It mirrors the Python `vertexai` remote surface, hiding
@@ -316,13 +304,24 @@ export class AgentEngineClient {
   ): AsyncGenerator<Event, void, unknown> {
     let stream: AsyncIterable<unknown>;
     try {
+      // A string prompt is passed through; a Content message is serialized to
+      // the genai JSON wire shape, dropping undefined fields (parity with the
+      // Python reference's model_dump(exclude_none=True)) since the Struct
+      // encoder cannot represent `undefined`.
+      const message =
+        typeof config.message === 'string'
+          ? config.message
+          : (JSON.parse(JSON.stringify(config.message)) as Record<
+              string,
+              unknown
+            >);
       stream = this.client.streamQueryReasoningEngine({
         name: this.reasoningEnginePath,
         classMethod: STREAM_QUERY_METHOD,
         input: buildInputStruct({
           user_id: config.userId,
           session_id: config.sessionId,
-          message: encodeMessage(config.message),
+          message,
         }),
       });
     } catch (error) {
