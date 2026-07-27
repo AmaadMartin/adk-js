@@ -275,12 +275,8 @@ function mapTools(
 function functionDeclarationToTool(
   func: FunctionDeclaration,
 ): Record<string, unknown> {
-  let parameters: unknown = {};
-  if (func.parametersJsonSchema) {
-    parameters = func.parametersJsonSchema;
-  } else if (func.parameters) {
-    parameters = func.parameters;
-  }
+  const parameters: unknown =
+    func.parametersJsonSchema ?? func.parameters ?? {};
   return {
     type: 'function',
     function: {
@@ -322,10 +318,7 @@ function contentToMessages(
   content: Content,
   provider?: string,
 ): Array<Record<string, unknown>> {
-  let role = content.role;
-  if (role === 'model') {
-    role = 'assistant';
-  }
+  const role = content.role === 'model' ? 'assistant' : content.role;
 
   const toolCalls: Array<Record<string, unknown>> = [];
   const contentParts: Array<Record<string, unknown>> = [];
@@ -638,12 +631,7 @@ class ChatCompletionsResponseHandler {
     if (chunk['usage']) {
       Object.assign(this.usage, chunk['usage']);
     }
-    for (const key of CUSTOM_METADATA_FIELDS) {
-      const value = chunk[key];
-      if (value !== undefined && value !== null) {
-        this.customMetadata[key] = value;
-      }
-    }
+    Object.assign(this.customMetadata, pickCustomMetadata(chunk));
 
     const usageMetadata = Object.keys(this.usage).length
       ? buildUsageMetadata(this.usage)
@@ -699,7 +687,7 @@ class ChatCompletionsResponseHandler {
       this.upsertToolCall({type: 'function', function: functionCall});
     }
     this.accumulateContent(message);
-    this.getOrCreateRole((message['role'] as string) ?? 'model');
+    this.setRoleOnce((message['role'] as string) ?? 'model');
   }
 
   private addChatCompletionChunkDelta(delta: Record<string, unknown>): Part[] {
@@ -714,7 +702,7 @@ class ChatCompletionsResponseHandler {
     if (text) {
       parts.push(createPartFromText(text));
     }
-    this.getOrCreateRole((delta['role'] as string) ?? 'model');
+    this.setRoleOnce((delta['role'] as string) ?? 'model');
     return parts;
   }
 
@@ -804,12 +792,7 @@ class ChatCompletionsResponseHandler {
         throw new Error(`Failed to parse arguments: ${argsDelta}`);
       }
       deltaPart.functionCall!.args = args;
-      const accumulated = part.functionCall!.args;
-      if (!accumulated || Object.keys(accumulated).length === 0) {
-        part.functionCall!.args = {...args};
-      } else {
-        Object.assign(accumulated, args);
-      }
+      part.functionCall!.args = {...(part.functionCall!.args ?? {}), ...args};
     }
 
     const name = func['name'] as string | undefined;
@@ -835,12 +818,11 @@ class ChatCompletionsResponseHandler {
     return deltaPart;
   }
 
-  private getOrCreateRole(role = ''): string {
-    if (this.role) {
-      return this.role;
+  /** Sets the response role on the first message/delta seen; later calls are ignored. */
+  private setRoleOnce(role: string): void {
+    if (!this.role) {
+      this.role = role === 'assistant' ? 'model' : role;
     }
-    this.role = role === 'assistant' ? 'model' : role;
-    return this.role;
   }
 }
 
