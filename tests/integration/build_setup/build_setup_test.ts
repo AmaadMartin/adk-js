@@ -13,6 +13,10 @@ const execAsync = promisify(exec);
 const dirname = process.cwd();
 
 const TEST_EXECUTION_TIMEOUT = 20000;
+// Installing and building each sample project (which pulls in the full
+// @google/adk dependency tree) can take well over the default 10s hook timeout
+// on slower CI runners, so give the setup hook plenty of headroom.
+const SETUP_TIMEOUT = 180000;
 
 describe('Build setup', () => {
   describe.each([
@@ -43,7 +47,7 @@ describe('Build setup', () => {
         expect(buildResult.stderr).toBe('');
         expect(buildResult.stdout).toContain('\nBuild complete');
       }
-    });
+    }, SETUP_TIMEOUT);
 
     it(
       'should build and run agent successfully',
@@ -119,6 +123,6 @@ describe('Build setup', () => {
           .rm(`${projectPath}/dist`, {recursive: true, force: true})
           .catch(() => {});
       }
-    });
+    }, SETUP_TIMEOUT);
   });
 });

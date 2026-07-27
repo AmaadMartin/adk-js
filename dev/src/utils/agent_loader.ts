@@ -208,6 +208,11 @@ export class AgentFile {
           'lightningcss',
           'jiti',
           'jiti/package.json',
+          // @google-cloud/aiplatform is a large, lazily-loaded dependency of
+          // AgentEngineClient; keep it external so esbuild does not pull it
+          // (and its transitive transport deps) into every agent bundle. It is
+          // only required at runtime when AgentEngineClient is actually used.
+          '@google-cloud/aiplatform',
         ],
       });
 
