@@ -4,13 +4,29 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {helpers, protos, v1} from '@google-cloud/aiplatform';
+import type {protos, v1} from '@google-cloud/aiplatform';
 import {Content} from '@google/genai';
 
 import {Event, transformToCamelCaseEvent} from '../events/event.js';
 import {experimental} from '../utils/experimental.js';
 
 const AI_PLATFORM_ENDPOINT_SUFFIX = 'aiplatform.googleapis.com';
+
+/**
+ * `@google-cloud/aiplatform` ships heavy native gRPC bindings, so it is loaded
+ * lazily (on first use) rather than at import time. This keeps `import
+ * '@google/adk'` cheap for consumers that never touch the Agent Engine client,
+ * mirroring how the DB session service dynamically imports its drivers.
+ */
+type AiPlatformModule = typeof import('@google-cloud/aiplatform');
+type AiPlatformHelpers = AiPlatformModule['helpers'];
+
+let aiPlatformPromise: Promise<AiPlatformModule> | undefined;
+
+function loadAiPlatform(): Promise<AiPlatformModule> {
+  aiPlatformPromise ??= import('@google-cloud/aiplatform');
+  return aiPlatformPromise;
+}
 
 /** Class method invoked on the deployed engine to create/reuse a session. */
 const CREATE_SESSION_METHOD = 'async_create_session';
@@ -94,6 +110,7 @@ export function parseEngineName(name: string): AgentEngineConfig {
  * expected by the reasoning-engine RPCs. Callers never construct a Struct.
  */
 export function buildInputStruct(
+  helpers: AiPlatformHelpers,
   input: Record<string, unknown> | undefined,
 ): protos.google.protobuf.IStruct | undefined {
   if (!input) {
@@ -226,20 +243,19 @@ function errorMessage(error: unknown): string {
  * }
  * ```
  */
+interface Transport {
+  client: v1.ReasoningEngineExecutionServiceClient;
+  path: string;
+  helpers: AiPlatformHelpers;
+}
+
 @experimental
 export class AgentEngineClient {
-  private readonly client: v1.ReasoningEngineExecutionServiceClient;
-  private readonly reasoningEnginePath: string;
+  private readonly config: AgentEngineConfig;
+  private transport?: Transport;
 
   constructor(config: AgentEngineConfig) {
-    this.client = new v1.ReasoningEngineExecutionServiceClient({
-      apiEndpoint: `${config.location}-${AI_PLATFORM_ENDPOINT_SUFFIX}`,
-    });
-    this.reasoningEnginePath = this.client.reasoningEnginePath(
-      config.project,
-      config.location,
-      config.reasoningEngineId,
-    );
+    this.config = config;
   }
 
   /**
@@ -253,6 +269,26 @@ export class AgentEngineClient {
   }
 
   /**
+   * Lazily loads `@google-cloud/aiplatform` and creates (once) the transport
+   * client and derived resource path.
+   */
+  private async init(): Promise<Transport> {
+    if (!this.transport) {
+      const {v1, helpers} = await loadAiPlatform();
+      const client = new v1.ReasoningEngineExecutionServiceClient({
+        apiEndpoint: `${this.config.location}-${AI_PLATFORM_ENDPOINT_SUFFIX}`,
+      });
+      const path = client.reasoningEnginePath(
+        this.config.project,
+        this.config.location,
+        this.config.reasoningEngineId,
+      );
+      this.transport = {client, path, helpers};
+    }
+    return this.transport;
+  }
+
+  /**
    * Creates a session (or reuses one when `sessionId` is supplied) on the
    * remote engine.
    *
@@ -263,14 +299,15 @@ export class AgentEngineClient {
     config: CreateSessionConfig,
   ): Promise<AgentEngineSession> {
     try {
+      const {client, path, helpers} = await this.init();
       const input: Record<string, unknown> = {
         user_id: config.userId,
         ...(config.sessionId ? {session_id: config.sessionId} : {}),
       };
-      const [response] = await this.client.queryReasoningEngine({
-        name: this.reasoningEnginePath,
+      const [response] = await client.queryReasoningEngine({
+        name: path,
         classMethod: CREATE_SESSION_METHOD,
-        input: buildInputStruct(input),
+        input: buildInputStruct(helpers, input),
       });
       if (!response.output) {
         throw new Error('the response did not contain a session output.');
@@ -304,6 +341,7 @@ export class AgentEngineClient {
   ): AsyncGenerator<Event, void, unknown> {
     let stream: AsyncIterable<unknown>;
     try {
+      const {client, path, helpers} = await this.init();
       // A string prompt is passed through; a Content message is serialized to
       // the genai JSON wire shape, dropping undefined fields (parity with the
       // Python reference's model_dump(exclude_none=True)) since the Struct
@@ -315,10 +353,10 @@ export class AgentEngineClient {
               string,
               unknown
             >);
-      stream = this.client.streamQueryReasoningEngine({
-        name: this.reasoningEnginePath,
+      stream = client.streamQueryReasoningEngine({
+        name: path,
         classMethod: STREAM_QUERY_METHOD,
-        input: buildInputStruct({
+        input: buildInputStruct(helpers, {
           user_id: config.userId,
           session_id: config.sessionId,
           message,

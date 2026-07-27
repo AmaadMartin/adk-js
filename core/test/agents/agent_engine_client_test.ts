@@ -98,11 +98,11 @@ describe('parseEngineName', () => {
 
 describe('buildInputStruct', () => {
   it('returns undefined for undefined input', () => {
-    expect(buildInputStruct(undefined)).toBeUndefined();
+    expect(buildInputStruct(helpers, undefined)).toBeUndefined();
   });
 
   it('encodes an object as a snake_case Struct', () => {
-    const struct = buildInputStruct({user_id: 'u1'});
+    const struct = buildInputStruct(helpers, {user_id: 'u1'});
     expect(struct?.fields?.['user_id']?.stringValue).toBe('u1');
   });
 });
@@ -130,14 +130,22 @@ describe('toSessionResult', () => {
 });
 
 describe('AgentEngineClient constructor / get', () => {
-  it('builds the transport with the regional endpoint and derives the path', () => {
+  it('lazily builds the transport with the regional endpoint and derives the path', async () => {
     const client = new AgentEngineClient({
       project: 'test-project',
       location: 'us-central1',
       reasoningEngineId: '12345',
     });
 
+    // The heavy transport is not constructed until the client is first used.
     expect(client).toBeInstanceOf(AgentEngineClient);
+    expect(mocks.clientCtor).not.toHaveBeenCalled();
+
+    mocks.queryReasoningEngine.mockResolvedValue([
+      {output: helpers.toValue({id: 'sess-1'})},
+    ]);
+    await client.createSession({userId: 'u1'});
+
     expect(mocks.clientCtor).toHaveBeenCalledWith({
       apiEndpoint: 'us-central1-aiplatform.googleapis.com',
     });
@@ -148,8 +156,12 @@ describe('AgentEngineClient constructor / get', () => {
     );
   });
 
-  it('get() parses a full resource name into a bound client', () => {
-    AgentEngineClient.get(ENGINE_NAME);
+  it('get() parses a full resource name into a bound client', async () => {
+    const client = AgentEngineClient.get(ENGINE_NAME);
+    mocks.queryReasoningEngine.mockResolvedValue([
+      {output: helpers.toValue({id: 'sess-1'})},
+    ]);
+    await client.createSession({userId: 'u1'});
     expect(mocks.reasoningEnginePath).toHaveBeenCalledWith(
       'test-project',
       'us-central1',
