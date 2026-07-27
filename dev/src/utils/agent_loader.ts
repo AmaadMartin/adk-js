@@ -208,6 +208,13 @@ export class AgentFile {
           'lightningcss',
           'jiti',
           'jiti/package.json',
+          // @google-cloud/aiplatform ships native gRPC bindings that esbuild
+          // cannot bundle; keep it and its transport deps external.
+          '@google-cloud/aiplatform',
+          '@google-cloud/vertexai',
+          'google-gax',
+          '@grpc/grpc-js',
+          '@grpc/proto-loader',
         ],
       });
 
