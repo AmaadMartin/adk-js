@@ -23,6 +23,16 @@ export type {
 export {toA2a} from './a2a/agent_to_a2a.js';
 export type {ToA2aOptions} from './a2a/agent_to_a2a.js';
 export type {ExecutorContext} from './a2a/executor_context.js';
+export {
+  AgentEngineClient,
+  AgentExecutionError,
+} from './agents/agent_engine_client.js';
+export type {
+  AgentEngineConfig,
+  AgentEngineSession,
+  CreateSessionConfig,
+  StreamQueryConfig,
+} from './agents/agent_engine_client.js';
 export {InvocationContext} from './agents/invocation_context.js';
 export {FileArtifactService} from './artifacts/file_artifact_service.js';
 export {GcsArtifactService} from './artifacts/gcs_artifact_service.js';
