@@ -321,17 +321,10 @@ export async function handleFunctionCallList({
   });
 
   // Execute the filtered calls concurrently (parity with adk-python's
-  // asyncio.gather). Promise.all preserves input order in its resolved array,
-  // so results map back to the original call order regardless of which tool
-  // finishes first; null results (long-running / no-response skips) are then
-  // filtered out, which preserves the relative order of the remaining events.
-  //
-  // Divergence from adk-python: when one call fails, Python cancels the sibling
-  // tasks before re-raising. JavaScript promises are not cancellable, so there
-  // is no equivalent cancel step. Promise.all is still fail-fast (it rejects as
-  // soon as the first call rejects), but the remaining tool promises run to
-  // completion and their results are discarded. Promise.all attaches a rejection
-  // handler to every input promise, so no unhandled rejection is produced.
+  // asyncio.gather). Promise.all preserves input order, so null results
+  // (long-running / no-response skips) filter out with order intact, and it is
+  // fail-fast. Unlike adk-python, JS promises are not cancellable, so on failure
+  // the sibling tools run to completion and their results are discarded.
   const results = await Promise.all(
     filteredFunctionCalls.map((functionCall) =>
       executeSingleFunctionCall({
