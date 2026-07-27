@@ -887,3 +887,71 @@ describe('Runner customMetadata support', () => {
     expect(userEvent.content?.role).toBe('user');
   });
 });
+
+class TempStateCapturingAgent extends LlmAgent {
+  observed: {temp?: unknown; persist?: unknown} = {};
+
+  constructor(name: string) {
+    super({name, model: 'gemini-2.5-flash', subAgents: []});
+  }
+
+  protected override async *runAsyncImpl(
+    context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    this.observed = {
+      temp: context.session.state['temp:foo'],
+      persist: context.session.state['persistKey'],
+    };
+    yield createEvent({
+      invocationId: context.invocationId,
+      author: this.name,
+      content: {role: 'model', parts: [{text: 'ok'}]},
+    });
+  }
+}
+
+describe('Runner temp state (issue #260)', () => {
+  let sessionService: InMemorySessionService;
+
+  beforeEach(() => {
+    sessionService = new InMemorySessionService();
+  });
+
+  it('runAsync applies temp: keys from stateDelta so they are readable during the invocation and are not persisted', async () => {
+    const agent = new TempStateCapturingAgent('temp_reader');
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      artifactService: new InMemoryArtifactService(),
+    });
+
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    const events: Event[] = [];
+    for await (const event of runner.runAsync({
+      userId: session.userId,
+      sessionId: session.id,
+      newMessage: {role: 'user', parts: [{text: 'hi'}]},
+      stateDelta: {'temp:foo': 'bar', 'persistKey': 'baz'},
+    })) {
+      events.push(event);
+    }
+
+    // The agent observed both the temp: and the persistent state during the run.
+    expect(agent.observed).toEqual({temp: 'bar', persist: 'baz'});
+
+    // After the run: the temp: key is not persisted, the normal key is.
+    const updatedSession = await sessionService.getSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+    expect(updatedSession?.state).toHaveProperty('persistKey', 'baz');
+    expect(updatedSession?.state).not.toHaveProperty('temp:foo');
+  });
+});

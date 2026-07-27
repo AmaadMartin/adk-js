@@ -5,7 +5,12 @@
  */
 
 import {Sessions} from '@google-cloud/vertexai/build/src/genai/sessions.js';
-import {createEvent, State, VertexAiSessionService} from '@google/adk';
+import {
+  createEvent,
+  createEventActions,
+  State,
+  VertexAiSessionService,
+} from '@google/adk';
 import {Session} from '@google/adk/sessions/session.js';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 
@@ -1089,6 +1094,50 @@ describe('VertexAiSessionService', () => {
             actions: undefined,
           }),
         }),
+      );
+    });
+
+    it('applies temp: state to the in-memory session and does not send temp keys to the backend', async () => {
+      const session = {
+        id: 'append-session',
+        appName: '12345',
+        userId: 'testUser',
+        state: {},
+        events: [],
+        lastUpdateTime: Date.now(),
+      } as unknown as Session;
+
+      const event = createEvent({
+        timestamp: 1620000000000,
+        content: {role: 'model', parts: [{text: 'hi'}]},
+        actions: createEventActions({
+          stateDelta: {
+            [`${State.TEMP_PREFIX}secret`]: 's',
+            keep: 'k',
+          },
+        }),
+      });
+
+      await service.appendEvent({session, event});
+
+      // Temp state is readable on the in-memory session during the invocation.
+      expect(session.state[`${State.TEMP_PREFIX}secret`]).toBe('s');
+      expect(session.state['keep']).toBe('k');
+
+      // The backend never receives temp: keys, in either the actions delta or
+      // the rawEvent payload.
+      const appendArg = mockClient.events.append.mock.calls[0][0] as {
+        config: {
+          actions: {stateDelta: Record<string, unknown>};
+          rawEvent: {actions: {stateDelta: Record<string, unknown>}};
+        };
+      };
+      expect(appendArg.config.actions.stateDelta).toHaveProperty('keep', 'k');
+      expect(appendArg.config.actions.stateDelta).not.toHaveProperty(
+        `${State.TEMP_PREFIX}secret`,
+      );
+      expect(appendArg.config.rawEvent.actions.stateDelta).not.toHaveProperty(
+        `${State.TEMP_PREFIX}secret`,
       );
     });
   });

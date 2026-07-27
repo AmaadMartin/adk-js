@@ -8,6 +8,7 @@ import {
   InMemorySessionService,
   Session,
   State,
+  applyTempState,
   createEvent,
   createEventActions,
 } from '@google/adk';
@@ -655,6 +656,130 @@ describe('InMemorySessionService', () => {
       // Should just log warnings and return event
       const returnedEvent = await service.appendEvent({session, event});
       expect(returnedEvent).toBe(event);
+    });
+
+    it('applies temp: state to the in-memory session during the invocation and does not persist it', async () => {
+      const appName = 'app';
+      const userId = 'user';
+      const session = await service.createSession({appName, userId});
+      const event = createEvent({
+        timestamp: Date.now(),
+        actions: createEventActions({
+          stateDelta: {
+            [`${State.TEMP_PREFIX}k1`]: 'v1',
+            sk: 'v2',
+          },
+        }),
+      });
+
+      const returnedEvent = await service.appendEvent({session, event});
+
+      // Temp state is readable on the in-memory session during the invocation.
+      expect(session.state[`${State.TEMP_PREFIX}k1`]).toBe('v1');
+      expect(session.state['sk']).toBe('v2');
+
+      // Temp keys are stripped from the appended/returned event delta.
+      expect(returnedEvent.actions?.stateDelta).not.toHaveProperty(
+        `${State.TEMP_PREFIX}k1`,
+      );
+      expect(returnedEvent.actions?.stateDelta?.['sk']).toBe('v2');
+
+      // Temp state is never persisted.
+      const fetched = await service.getSession({
+        appName,
+        userId,
+        sessionId: session.id,
+      });
+      expect(fetched?.state).toHaveProperty('sk', 'v2');
+      expect(fetched?.state).not.toHaveProperty(`${State.TEMP_PREFIX}k1`);
+      expect(fetched?.events[0].actions?.stateDelta).not.toHaveProperty(
+        `${State.TEMP_PREFIX}k1`,
+      );
+    });
+
+    it('keeps temp: state from an earlier event readable when a later event is appended to the same session', async () => {
+      const session = await service.createSession({
+        appName: 'app',
+        userId: 'user',
+      });
+      const event1 = createEvent({
+        timestamp: Date.now(),
+        actions: createEventActions({
+          stateDelta: {[`${State.TEMP_PREFIX}output`]: 'result_from_a1'},
+        }),
+      });
+      await service.appendEvent({session, event: event1});
+
+      // A later event on the same session object still sees the first event's
+      // temp: value (the SequentialAgent sub-agent scenario).
+      const event2 = createEvent({
+        timestamp: Date.now() + 1,
+        actions: createEventActions({
+          stateDelta: {[`${State.TEMP_PREFIX}output2`]: 'result_from_a2'},
+        }),
+      });
+      await service.appendEvent({session, event: event2});
+
+      expect(session.state[`${State.TEMP_PREFIX}output`]).toBe(
+        'result_from_a1',
+      );
+      expect(session.state[`${State.TEMP_PREFIX}output2`]).toBe(
+        'result_from_a2',
+      );
+
+      // Neither temp: key is persisted.
+      const fetched = await service.getSession({
+        appName: 'app',
+        userId: 'user',
+        sessionId: session.id,
+      });
+      expect(fetched?.state).not.toHaveProperty(`${State.TEMP_PREFIX}output`);
+      expect(fetched?.state).not.toHaveProperty(`${State.TEMP_PREFIX}output2`);
+    });
+  });
+
+  describe('applyTempState (helper)', () => {
+    const makeSession = (state: Record<string, unknown> = {}): Session => ({
+      id: 's',
+      appName: 'a',
+      userId: 'u',
+      state,
+      events: [],
+      lastUpdateTime: 0,
+    });
+
+    it('copies only temp: keys into the session state', () => {
+      const session = makeSession();
+      const event = createEvent({
+        timestamp: Date.now(),
+        actions: createEventActions({
+          stateDelta: {
+            [`${State.TEMP_PREFIX}t`]: 1,
+            normal: 2,
+            [`${State.APP_PREFIX}a`]: 3,
+          },
+        }),
+      });
+
+      applyTempState(session, event);
+
+      expect(session.state[`${State.TEMP_PREFIX}t`]).toBe(1);
+      expect(session.state).not.toHaveProperty('normal');
+      expect(session.state).not.toHaveProperty(`${State.APP_PREFIX}a`);
+    });
+
+    it('is a no-op (no throw, no mutation) when the event has no actions or no stateDelta', () => {
+      const noActions = createEvent({timestamp: Date.now()});
+      delete (noActions as unknown as {actions?: unknown}).actions;
+      const noStateDelta = createEvent({timestamp: Date.now()});
+      (noStateDelta.actions as unknown as {stateDelta?: unknown}).stateDelta =
+        undefined;
+      const session = makeSession({existing: 1});
+
+      expect(() => applyTempState(session, noActions)).not.toThrow();
+      applyTempState(session, noStateDelta);
+
+      expect(session.state).toEqual({existing: 1});
     });
   });
 });

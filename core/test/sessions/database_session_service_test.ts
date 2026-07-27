@@ -680,6 +680,68 @@ describe('DatabaseSessionService', () => {
       ).toBeUndefined();
     });
 
+    it('applies temp: state to the in-memory session but does not persist it', async () => {
+      const session = await service.createSession({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 's-temp-apply',
+      });
+
+      const event = createEvent({
+        id: 'evt-temp',
+        timestamp: Date.now(),
+        actions: createEventActions({
+          stateDelta: {
+            [State.TEMP_PREFIX + 'hide']: 'me',
+            'keep': 'me',
+          },
+        }),
+      });
+
+      const returnedEvent = await service.appendEvent({session, event});
+
+      // Temp state is readable on the passed in-memory session.
+      expect(session.state[State.TEMP_PREFIX + 'hide']).toBe('me');
+      expect(session.state['keep']).toBe('me');
+
+      // The returned event and in-memory events entry are temp-free.
+      expect(returnedEvent.actions?.stateDelta).not.toHaveProperty(
+        State.TEMP_PREFIX + 'hide',
+      );
+      expect(
+        session.events[session.events.length - 1].actions?.stateDelta,
+      ).not.toHaveProperty(State.TEMP_PREFIX + 'hide');
+
+      // Re-appending the same event id updates it in place (still temp-free)
+      // instead of duplicating it.
+      const reappended = await service.appendEvent({session, event});
+      expect(session.events).toHaveLength(1);
+      expect(reappended.actions?.stateDelta).not.toHaveProperty(
+        State.TEMP_PREFIX + 'hide',
+      );
+
+      // Temp state is never persisted.
+      const fetched = await service.getSession({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 's-temp-apply',
+      });
+      expect(fetched?.state).toHaveProperty('keep', 'me');
+      expect(fetched?.state).not.toHaveProperty(State.TEMP_PREFIX + 'hide');
+
+      // The persisted event data is a single, temp-free StorageEvent row.
+      const em = (service as unknown as {orm: MikroORM}).orm.em.fork();
+      const storedEvents = (await em.find('StorageEvent', {
+        sessionId: 's-temp-apply',
+      })) as {sessionId: string; eventData: Event}[];
+      expect(storedEvents).toHaveLength(1);
+      const eventData = storedEvents[0].eventData;
+      expect(eventData.actions?.stateDelta?.['keep']).toBe('me');
+      expect(
+        eventData.actions?.stateDelta?.[State.TEMP_PREFIX + 'hide'],
+      ).toBeUndefined();
+    });
+
     it('should align session updateTime with event timestamp', async () => {
       const session = await service.createSession({
         appName: 'test-app',

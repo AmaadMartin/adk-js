@@ -170,6 +170,10 @@ export abstract class BaseSessionService {
       return event;
     }
 
+    // Apply temp-scoped state to the in-memory session BEFORE trimming the event
+    // delta, so temp: values are readable during the current invocation but are
+    // never persisted (temp: keys are stripped from the persisted delta below).
+    applyTempState(session, event);
     event = trimTempDeltaState(event);
 
     this.updateSessionState({session, event});
@@ -196,6 +200,27 @@ export abstract class BaseSessionService {
       if (key.startsWith(State.TEMP_PREFIX)) {
         continue;
       }
+      session.state[key] = value;
+    }
+  }
+}
+
+/**
+ * Applies temporary (temp:-scoped) state delta keys to the in-memory session
+ * state.
+ *
+ * Temp state is ephemeral: it is kept in the session's in-memory state for the
+ * duration of the current invocation so subsequent agents/tools can read it
+ * (e.g. output_key='temp:my_key' across sub-agents in a SequentialAgent), but
+ * it is NOT persisted (the event delta is trimmed separately by
+ * {@link trimTempDeltaState}).
+ */
+export function applyTempState(session: Session, event: Event): void {
+  if (!event.actions || !event.actions.stateDelta) {
+    return;
+  }
+  for (const [key, value] of Object.entries(event.actions.stateDelta)) {
+    if (key.startsWith(State.TEMP_PREFIX)) {
       session.state[key] = value;
     }
   }
