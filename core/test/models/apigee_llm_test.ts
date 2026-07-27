@@ -136,6 +136,19 @@ describe('ApigeeLlm', () => {
       ] as HttpOptions;
       expect(httpOptions.baseUrl).toBe('https://proxy.example.com');
     });
+
+    it('should forward retryOptions to the apiClient while keeping proxyUrl', () => {
+      const llm = new ApigeeLlm({
+        model: geminiModelString,
+        proxyUrl: defaultProxyUrl,
+        retryOptions: {attempts: 4},
+      });
+      const httpOptions = llm.apiClient['apiClient']['clientOptions'][
+        'httpOptions'
+      ] as HttpOptions;
+      expect(httpOptions.retryOptions).toEqual({attempts: 4});
+      expect(httpOptions.baseUrl).toBe('https://proxy.example.com');
+    });
   });
 
   describe('liveApiClient', () => {

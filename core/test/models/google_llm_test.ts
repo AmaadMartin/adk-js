@@ -12,7 +12,12 @@ import {
   geminiInitParams,
   version,
 } from '@google/adk';
-import {GenerateContentResponse, GoogleGenAI, HttpOptions} from '@google/genai';
+import {
+  GenerateContentResponse,
+  GoogleGenAI,
+  HttpOptions,
+  HttpRetryOptions,
+} from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 vi.mock('@google/genai', async (importOriginal) => {
@@ -137,6 +142,57 @@ describe('GoogleLlm', () => {
         location: 'us-central1',
       }),
     );
+  });
+
+  describe('retryOptions', () => {
+    it('should forward retryOptions to the apiClient httpOptions', () => {
+      const retryOptions: HttpRetryOptions = {attempts: 3};
+      const llm = new TestGemini({apiKey: 'test-key', retryOptions});
+      const options = llm.apiClient['apiClient']['clientOptions'][
+        'httpOptions'
+      ] as HttpOptions;
+      expect(options.retryOptions).toEqual(retryOptions);
+      expect(options.headers!['x-goog-api-client']).toContain('google-adk/');
+    });
+
+    it('should forward retryOptions to the liveApiClient and keep apiVersion', () => {
+      const retryOptions: HttpRetryOptions = {attempts: 3};
+      const llm = new TestGemini({apiKey: 'test-key', retryOptions});
+      const liveOptions = llm.liveApiClient['apiClient']['clientOptions'][
+        'httpOptions'
+      ] as HttpOptions;
+      expect(liveOptions.retryOptions).toEqual(retryOptions);
+      expect(liveOptions.apiVersion).toBeDefined();
+      expect(liveOptions.headers!['x-goog-api-client']).toContain(
+        'google-adk/',
+      );
+    });
+
+    it('should forward retryOptions to GoogleGenAI construction for Vertex AI', () => {
+      const retryOptions: HttpRetryOptions = {attempts: 2};
+      const llm = new TestGemini({
+        vertexai: true,
+        project: 'p',
+        location: 'us-central1',
+        retryOptions,
+      });
+      const spy = vi.mocked(GoogleGenAI);
+      spy.mockClear();
+      void llm.apiClient;
+      expect(spy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          httpOptions: expect.objectContaining({retryOptions}),
+        }),
+      );
+    });
+
+    it('should leave retryOptions undefined when not provided', () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+      const options = llm.apiClient['apiClient']['clientOptions'][
+        'httpOptions'
+      ] as HttpOptions;
+      expect(options.retryOptions).toBeUndefined();
+    });
   });
 
   describe('generateContentAsync streaming thoughtSignature propagation', () => {
