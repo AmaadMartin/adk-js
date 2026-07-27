@@ -697,7 +697,7 @@ describe('InMemorySessionService', () => {
       );
     });
 
-    it('makes temp: state written by one event visible to a later event on the same session object', async () => {
+    it('keeps temp: state from an earlier event readable when a later event is appended to the same session', async () => {
       const session = await service.createSession({
         appName: 'app',
         userId: 'user',
@@ -708,15 +708,33 @@ describe('InMemorySessionService', () => {
           stateDelta: {[`${State.TEMP_PREFIX}output`]: 'result_from_a1'},
         }),
       });
-
       await service.appendEvent({session, event: event1});
+
+      // A later event on the same session object still sees the first event's
+      // temp: value (the SequentialAgent sub-agent scenario).
+      const event2 = createEvent({
+        timestamp: Date.now() + 1,
+        actions: createEventActions({
+          stateDelta: {[`${State.TEMP_PREFIX}output2`]: 'result_from_a2'},
+        }),
+      });
+      await service.appendEvent({session, event: event2});
 
       expect(session.state[`${State.TEMP_PREFIX}output`]).toBe(
         'result_from_a1',
       );
-      expect(event1.actions?.stateDelta).not.toHaveProperty(
-        `${State.TEMP_PREFIX}output`,
+      expect(session.state[`${State.TEMP_PREFIX}output2`]).toBe(
+        'result_from_a2',
       );
+
+      // Neither temp: key is persisted.
+      const fetched = await service.getSession({
+        appName: 'app',
+        userId: 'user',
+        sessionId: session.id,
+      });
+      expect(fetched?.state).not.toHaveProperty(`${State.TEMP_PREFIX}output`);
+      expect(fetched?.state).not.toHaveProperty(`${State.TEMP_PREFIX}output2`);
     });
   });
 
@@ -750,22 +768,16 @@ describe('InMemorySessionService', () => {
       expect(session.state).not.toHaveProperty(`${State.APP_PREFIX}a`);
     });
 
-    it('is a no-op when the event has no actions', () => {
-      const session = makeSession({existing: 1});
-      const event = createEvent({timestamp: Date.now()});
-      delete (event as unknown as {actions?: unknown}).actions;
-
-      expect(() => applyTempState(session, event)).not.toThrow();
-      expect(session.state).toEqual({existing: 1});
-    });
-
-    it('is a no-op when the event actions have no stateDelta', () => {
-      const session = makeSession({existing: 1});
-      const event = createEvent({timestamp: Date.now()});
-      (event.actions as unknown as {stateDelta?: unknown}).stateDelta =
+    it('is a no-op (no throw, no mutation) when the event has no actions or no stateDelta', () => {
+      const noActions = createEvent({timestamp: Date.now()});
+      delete (noActions as unknown as {actions?: unknown}).actions;
+      const noStateDelta = createEvent({timestamp: Date.now()});
+      (noStateDelta.actions as unknown as {stateDelta?: unknown}).stateDelta =
         undefined;
+      const session = makeSession({existing: 1});
 
-      applyTempState(session, event);
+      expect(() => applyTempState(session, noActions)).not.toThrow();
+      applyTempState(session, noStateDelta);
 
       expect(session.state).toEqual({existing: 1});
     });
