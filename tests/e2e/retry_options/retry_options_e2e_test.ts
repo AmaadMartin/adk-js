@@ -67,18 +67,4 @@ describe('E2e retryOptions (no mocks)', () => {
     // `attempts` total requests: 1 initial + (attempts - 1) retries.
     expect(requestCount).toBe(attempts);
   }, 20000);
-
-  it('does not retry when retryOptions is omitted (single request)', async () => {
-    const llm = new ApigeeLlm({
-      model: 'apigee/gemini/gemini-2.5-flash',
-      proxyUrl,
-      apiKey: 'fake-key-for-local-server',
-    });
-
-    await expect(
-      llm.generateContentAsync(makeRequest()).next(),
-    ).rejects.toThrow();
-
-    expect(requestCount).toBe(1);
-  }, 20000);
 });

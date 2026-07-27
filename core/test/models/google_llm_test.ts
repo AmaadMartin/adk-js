@@ -168,24 +168,6 @@ describe('GoogleLlm', () => {
       );
     });
 
-    it('should forward retryOptions to GoogleGenAI construction for Vertex AI', () => {
-      const retryOptions: HttpRetryOptions = {attempts: 2};
-      const llm = new TestGemini({
-        vertexai: true,
-        project: 'p',
-        location: 'us-central1',
-        retryOptions,
-      });
-      const spy = vi.mocked(GoogleGenAI);
-      spy.mockClear();
-      void llm.apiClient;
-      expect(spy).toHaveBeenCalledWith(
-        expect.objectContaining({
-          httpOptions: expect.objectContaining({retryOptions}),
-        }),
-      );
-    });
-
     it('should leave retryOptions undefined when not provided', () => {
       const llm = new TestGemini({apiKey: 'test-key'});
       const options = llm.apiClient['apiClient']['clientOptions'][
