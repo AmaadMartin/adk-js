@@ -10,11 +10,13 @@ import {
   Options as MikroDBOptions,
   MikroORM,
 } from '@mikro-orm/core';
+import {cloneDeep} from 'lodash-es';
 
 import {Event} from '../events/event.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
 import {
   AppendEventRequest,
+  applyTempState,
   BaseSessionService,
   CreateSessionRequest,
   DeleteSessionRequest,
@@ -377,7 +379,10 @@ export class DatabaseSessionService extends BaseSessionService {
       return event;
     }
 
-    const trimmedEvent = trimTempDeltaState(event);
+    // trimTempDeltaState mutates its argument, so trim a clone for persistence
+    // while keeping the original event (and its temp: keys) intact for
+    // applyTempState after session.state is rebuilt below.
+    const trimmedEvent = trimTempDeltaState(cloneDeep(event));
 
     await em.transactional(async (txEm) => {
       const storageSession = await txEm.findOne(
@@ -502,15 +507,21 @@ export class DatabaseSessionService extends BaseSessionService {
       );
       session.state = newMergedState;
 
-      const index = session.events.findIndex((e) => e.id === event.id);
+      // Apply temp-scoped state to the in-memory session so it is readable for
+      // the remainder of the current invocation. Never persisted:
+      // storageSession.state and the persisted event were built from the
+      // trimmed delta above.
+      applyTempState(session, event);
+
+      const index = session.events.findIndex((e) => e.id === trimmedEvent.id);
       if (index >= 0) {
-        session.events[index] = event;
+        session.events[index] = trimmedEvent;
       } else {
-        session.events.push(event);
+        session.events.push(trimmedEvent);
       }
       session.lastUpdateTime = storageSession.updateTime.getTime();
     });
 
-    return event;
+    return trimmedEvent;
   }
 }
