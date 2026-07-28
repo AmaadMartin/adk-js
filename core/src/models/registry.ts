@@ -6,6 +6,7 @@
 
 import {logger} from '../utils/logger.js';
 
+import {Claude} from './anthropic_llm.js';
 import {ApigeeLlm} from './apigee_llm.js';
 import {BaseLlm} from './base_llm.js';
 import {Gemini} from './google_llm.js';
@@ -131,3 +132,7 @@ export class LLMRegistry {
 /** Registers default LLM factories, e.g. for Gemini models. */
 LLMRegistry.register(Gemini);
 LLMRegistry.register(ApigeeLlm);
+// Mirror adk-python: the `claude-*` patterns resolve to the Vertex-served
+// `Claude` variant. The direct Anthropic API remains available by instantiating
+// `AnthropicLlm` explicitly.
+LLMRegistry.register(Claude);
