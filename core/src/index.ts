@@ -37,6 +37,24 @@ export {
   type UnsafeLocalCodeExecutorOptions,
 } from './code_executors/unsafe_local_code_executor.js';
 export * from './common.js';
+export {
+  ADK_EVAL_HISTORY_DIR,
+  EVAL_SET_RESULT_FILE_EXTENSION,
+  LocalEvalSetResultsManager,
+} from './evaluation/local_eval_set_results_manager.js';
+export {
+  EVAL_SET_FILE_EXTENSION,
+  LocalEvalSetsManager,
+  convertEvalSetToSchema,
+  loadEvalSetFromFile,
+} from './evaluation/local_eval_sets_manager.js';
+export type {
+  LegacyEvalCase,
+  LegacyInitialSession,
+  LegacyIntermediateResponse,
+  LegacyInvocation,
+  LegacyToolUse,
+} from './evaluation/local_eval_sets_manager.js';
 export {DatabaseSessionService} from './sessions/database_session_service.js';
 export {getSessionServiceFromUri} from './sessions/registry.js';
 export {VertexAiSessionService} from './sessions/vertex_ai_session_service.js';
