@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GenerateContentConfig} from '@google/genai';
-
 import {LlmAgent as Agent} from '../agents/llm_agent.js';
 import {BaseLlmType, LLMRegistry} from '../models/registry.js';
 import {Skill} from '../skills/skill.js';
@@ -14,19 +12,20 @@ import {experimental} from '../utils/experimental.js';
 import {logger} from '../utils/logger.js';
 
 import {AgentOptimizer} from './agent_optimizer.js';
-import {
-  AgentWithScores,
-  OptimizerResult,
-  UnstructuredSamplingResult,
-} from './data_types.js';
-import {EvaluationBatch, GepaAdapter} from './gepa/adapter.js';
+import {AgentWithScores, UnstructuredSamplingResult} from './data_types.js';
+import {EvaluationBatch} from './gepa/adapter.js';
 import {optimize as gepaOptimize, ReflectionLm} from './gepa/engine.js';
 import {
   extractProposedInstruction,
   renderInstructionProposal,
 } from './gepa/instruction_proposal.js';
-import {buildReflectionLm} from './gepa_root_agent_prompt_optimizer.js';
-import {ExampleSet, Sampler} from './sampler.js';
+import {
+  AgentGepaAdapter,
+  buildReflectionLm,
+  GEPARootAgentPromptOptimizerConfig,
+  GEPARootAgentPromptOptimizerResult,
+} from './gepa_root_agent_prompt_optimizer.js';
+import {Sampler} from './sampler.js';
 
 /** The GEPA component key for the root agent's core instruction. */
 const AGENT_PROMPT_KEY = 'agent_prompt';
@@ -101,46 +100,21 @@ Provide the new instructions within \`\`\` blocks.`;
 
 /**
  * Configuration options for {@link GEPARootAgentOptimizer}.
+ *
+ * Shares the field set of {@link GEPARootAgentPromptOptimizerConfig}; only the
+ * default optimizer model differs (mirroring the adk-python reference).
  */
-export class GEPARootAgentOptimizerConfig {
-  /** The model used to analyze eval results and optimize the agent. */
-  optimizerModel: string;
-
-  /** The generation configuration for the optimizer model. */
-  modelConfiguration: GenerateContentConfig;
-
-  /** The maximum number of metric calls (evaluations) to make. */
-  maxMetricCalls: number;
-
-  /** The number of examples to use for reflection. */
-  reflectionMinibatchSize: number;
-
-  /**
-   * The directory to save intermediate/final optimization results.
-   *
-   * Accepted for API parity with adk-python; it is a no-op in this
-   * implementation (no filesystem writes) so that `core` stays browser-safe.
-   */
-  runDir?: string | null;
-
-  constructor(init?: Partial<GEPARootAgentOptimizerConfig>) {
-    this.optimizerModel = init?.optimizerModel ?? 'gemini-3.5-flash';
-    this.modelConfiguration = init?.modelConfiguration ?? {
-      thinkingConfig: {includeThoughts: true, thinkingBudget: 10240},
-    };
-    this.maxMetricCalls = init?.maxMetricCalls ?? 100;
-    this.reflectionMinibatchSize = init?.reflectionMinibatchSize ?? 3;
-    this.runDir = init?.runDir ?? null;
+export class GEPARootAgentOptimizerConfig extends GEPARootAgentPromptOptimizerConfig {
+  constructor(init?: Partial<GEPARootAgentPromptOptimizerConfig>) {
+    super({optimizerModel: 'gemini-3.5-flash', ...init});
   }
 }
 
 /**
- * The final result of a {@link GEPARootAgentOptimizer} run.
+ * The final result of a {@link GEPARootAgentOptimizer} run: the optimized agents
+ * and the raw, JSON-serializable GEPA engine result.
  */
-export interface GEPARootAgentOptimizerResult extends OptimizerResult<AgentWithScores> {
-  /** The raw, JSON-serializable result dictionary from the GEPA engine. */
-  gepaResult?: Record<string, unknown>;
-}
+export type GEPARootAgentOptimizerResult = GEPARootAgentPromptOptimizerResult;
 
 /**
  * Clones a {@link SkillToolset}, replacing each skill's instructions with the
@@ -193,62 +167,28 @@ export function createAgentFromCandidate(
  * instruction together with the instructions of every skill exposed through an
  * attached {@link SkillToolset}.
  *
- * It rebuilds a candidate agent with {@link createAgentFromCandidate}, delegates
- * scoring to the developer-provided {@link Sampler}, filters reflection examples
- * per skill, and proposes new component texts with per-component meta-prompts.
+ * It reuses {@link AgentGepaAdapter}'s evaluation loop, rebuilding the candidate
+ * agent with {@link createAgentFromCandidate}, filters reflection examples per
+ * skill, and proposes new component texts with per-component meta-prompts.
  */
-export class RootAgentGepaAdapter implements GepaAdapter<
-  string,
-  Record<string, unknown>,
-  Record<string, unknown>
-> {
+export class RootAgentGepaAdapter extends AgentGepaAdapter {
   constructor(
-    private readonly initialAgent: Agent,
-    private readonly sampler: Sampler<UnstructuredSamplingResult>,
-    private readonly trainExampleIds: Set<string>,
-    private readonly validationExampleIds: Set<string>,
+    initialAgent: Agent,
+    sampler: Sampler<UnstructuredSamplingResult>,
+    trainExampleIds: Set<string>,
+    validationExampleIds: Set<string>,
     private readonly reflectionLm: ReflectionLm,
-  ) {}
-
-  async evaluate(
-    batch: string[],
-    candidate: Record<string, string>,
-    captureTraces = false,
-  ): Promise<
-    EvaluationBatch<Record<string, unknown>, Record<string, unknown>>
-  > {
-    const newAgent = createAgentFromCandidate(this.initialAgent, candidate);
-
-    let exampleSet: ExampleSet;
-    if (batch.every((id) => this.trainExampleIds.has(id))) {
-      exampleSet = 'train';
-    } else if (batch.every((id) => this.validationExampleIds.has(id))) {
-      exampleSet = 'validation';
-    } else {
-      throw new Error(`Invalid batch composition: ${batch}`);
-    }
-
-    const result = await this.sampler.sampleAndScore(
-      newAgent,
-      exampleSet,
-      batch,
-      captureTraces,
-    );
-
-    const outputs: Record<string, unknown>[] = [];
-    const scores: number[] = [];
-    const trajectories: Record<string, unknown>[] = [];
-    for (const exampleId of batch) {
-      scores.push(result.scores[exampleId]);
-      const evalData = result.data?.[exampleId] ?? {};
-      outputs.push(evalData);
-      trajectories.push(evalData);
-    }
-
-    return {outputs, scores, trajectories};
+  ) {
+    super(initialAgent, sampler, trainExampleIds, validationExampleIds);
   }
 
-  makeReflectiveDataset(
+  protected override buildCandidateAgent(
+    candidate: Record<string, string>,
+  ): Agent {
+    return createAgentFromCandidate(this.initialAgent, candidate);
+  }
+
+  override makeReflectiveDataset(
     candidate: Record<string, string>,
     evalBatch: EvaluationBatch<
       Record<string, unknown>,

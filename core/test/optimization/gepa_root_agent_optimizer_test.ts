@@ -135,25 +135,6 @@ describe('createAgentFromCandidate', () => {
 describe('RootAgentGepaAdapter', () => {
   const reflectionLm = vi.fn(async () => 'lm output');
 
-  it('stores the agent, sampler, id sets and reflection LM', () => {
-    const agent = new LlmAgent({name: 'agent', instruction: 'Initial'});
-    const sampler = makeSampler(['train1', 'train2'], ['val1', 'val2']);
-
-    const adapter = new RootAgentGepaAdapter(
-      agent,
-      sampler,
-      new Set(['train1', 'train2']),
-      new Set(['val1', 'val2']),
-      reflectionLm,
-    );
-
-    expect(adapter['initialAgent']).toBe(agent);
-    expect(adapter['sampler']).toBe(sampler);
-    expect(adapter['trainExampleIds']).toEqual(new Set(['train1', 'train2']));
-    expect(adapter['validationExampleIds']).toEqual(new Set(['val1', 'val2']));
-    expect(adapter['reflectionLm']).toBe(reflectionLm);
-  });
-
   it('evaluate scores a train batch and captures traces', async () => {
     const agent = new LlmAgent({name: 'agent', instruction: 'Initial'});
     const cloneSpy = vi.spyOn(agent, 'clone').mockReturnValue(agent);
