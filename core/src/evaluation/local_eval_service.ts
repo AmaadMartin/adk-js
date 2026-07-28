@@ -26,7 +26,6 @@ import {
   InferenceResult,
   InferenceStatus,
 } from './base_eval_service.js';
-import {ConversationScenario} from './conversation_scenarios.js';
 import {EvalCase, Invocation} from './eval_case.js';
 import {
   EvalMetric,
@@ -440,13 +439,16 @@ export class LocalEvalService extends BaseEvalService {
   ): Promise<void> {
     let evaluationResult: EvaluationResult;
     try {
+      // `await` handles both sync and async evaluators, so no reflection is
+      // needed (unlike adk-python's `inspect.iscoroutinefunction` branch).
       evaluationResult = await runWithClientLabel(EVAL_CLIENT_LABEL, () =>
-        this.evaluateMetric({
-          evalMetric,
-          actualInvocations,
-          expectedInvocations: evalCase.conversation,
-          conversationScenario: evalCase.conversationScenario,
-        }),
+        this.metricEvaluatorRegistry
+          .getEvaluator(evalMetric)
+          .evaluateInvocations(
+            actualInvocations,
+            evalCase.conversation,
+            evalCase.conversationScenario,
+          ),
       );
     } catch (error) {
       // A single metric failure must not abort other metrics or eval cases.
@@ -495,26 +497,6 @@ export class LocalEvalService extends BaseEvalService {
         details: {rubricScores: invocationResult.rubricScores},
       });
     });
-  }
-
-  private async evaluateMetric({
-    evalMetric,
-    actualInvocations,
-    expectedInvocations,
-    conversationScenario,
-  }: {
-    evalMetric: EvalMetric;
-    actualInvocations: Invocation[];
-    expectedInvocations?: Invocation[];
-    conversationScenario?: ConversationScenario;
-  }): Promise<EvaluationResult> {
-    const metricEvaluator =
-      this.metricEvaluatorRegistry.getEvaluator(evalMetric);
-    return await metricEvaluator.evaluateInvocations(
-      actualInvocations,
-      expectedInvocations,
-      conversationScenario,
-    );
   }
 
   private async performInferenceSingleEvalItem({
