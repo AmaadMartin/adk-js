@@ -84,12 +84,6 @@ export interface GkeCodeExecutorOptions {
 }
 
 /**
- * Sentinel error thrown when a Job does not reach a terminal state within the
- * configured timeout. Used to distinguish timeouts from other failures.
- */
-class JobTimeoutError extends Error {}
-
-/**
  * Sleeps for the given number of milliseconds.
  */
 function sleep(ms: number): Promise<void> {
@@ -311,12 +305,6 @@ export class GkeCodeExecutor extends BaseCodeExecutor {
           `Kubernetes API error: ${getApiErrorReason(err)}`,
         );
       }
-      if (err instanceof JobTimeoutError) {
-        const logs = await this.getPodLogs(jobName);
-        return this.errorResult(
-          `Executor timed out: ${err.message}\n\nPod Logs:\n${logs}`,
-        );
-      }
       const message = err instanceof Error ? err.message : String(err);
       return this.errorResult(
         `An unexpected executor error occurred: ${message}`,
@@ -326,8 +314,7 @@ export class GkeCodeExecutor extends BaseCodeExecutor {
 
   /**
    * Polls the Job until it reaches a terminal state, returning its Pod logs as
-   * `stdout` (success) or `stderr` (failure). Throws {@link JobTimeoutError} if
-   * the Job never completes within `timeoutSeconds`.
+   * `stdout` (success) or `stderr` (failure/timeout).
    */
   private async waitForJobCompletion(
     jobName: string,
@@ -358,8 +345,11 @@ export class GkeCodeExecutor extends BaseCodeExecutor {
       await sleep(POLL_INTERVAL_MS);
     }
 
-    throw new JobTimeoutError(
-      `Job '${jobName}' did not complete within ${this.timeoutSeconds}s.`,
+    logger.debug(`Job '${jobName}' timed out.`);
+    const logs = await this.getPodLogs(jobName);
+    return this.errorResult(
+      `Executor timed out: Job '${jobName}' did not complete within ` +
+        `${this.timeoutSeconds}s.\n\nPod Logs:\n${logs}`,
     );
   }
 
