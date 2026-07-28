@@ -32,7 +32,7 @@ export const EVAL_SET_RESULT_PRESERVE_KEYS_CAMEL_CASE = [
  * The snake_case counterparts of {@link EVAL_SET_RESULT_PRESERVE_KEYS_CAMEL_CASE},
  * used when reading an EvalSetResult from disk.
  */
-export const EVAL_SET_RESULT_PRESERVE_KEYS_SNAKE_CASE = [
+const EVAL_SET_RESULT_PRESERVE_KEYS_SNAKE_CASE = [
   'eval_case_results.session_details.state',
   'eval_case_results.session_details.events.content.parts.function_call.args',
   'eval_case_results.session_details.events.content.parts.function_response.response',

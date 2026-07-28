@@ -16,6 +16,7 @@ import {
   createEvalSetResult,
   parseEvalSetResultJson,
 } from './eval_set_results_manager_utils.js';
+import {isFileNotFoundError} from './fs_utils.js';
 import {validatePathSegment} from './path_validation.js';
 
 /**
@@ -27,10 +28,6 @@ export const ADK_EVAL_HISTORY_DIR = '.adk/eval_history';
  * File extension used for locally-stored eval set results.
  */
 export const EVAL_SET_RESULT_FILE_EXTENSION = '.evalset_result.json';
-
-function isFileNotFoundError(error: unknown): boolean {
-  return (error as {code?: string})?.code === 'ENOENT';
-}
 
 /**
  * An {@link EvalSetResultsManager} that stores eval set results locally on disk.

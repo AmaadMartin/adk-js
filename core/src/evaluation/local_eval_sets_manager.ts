@@ -20,6 +20,7 @@ import {
   getEvalSetFromAppAndId,
   updateEvalCaseInEvalSet,
 } from './eval_sets_manager_utils.js';
+import {isFileNotFoundError} from './fs_utils.js';
 import {validatePathSegment} from './path_validation.js';
 
 /**
@@ -97,10 +98,6 @@ export interface LegacyEvalCase {
   name: string;
   data: LegacyInvocation[];
   initial_session?: LegacyInitialSession;
-}
-
-function isFileNotFoundError(error: unknown): boolean {
-  return (error as {code?: string})?.code === 'ENOENT';
 }
 
 function convertInvocationToSchema(
