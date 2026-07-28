@@ -1,6 +1,16 @@
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 import {FunctionDeclaration, Type} from '@google/genai';
 import {spawn} from 'child_process';
 import {BaseTool, RunAsyncToolRequest} from './base_tool.js';
+import {
+  ResourceMonitorHandle,
+  startResourceMonitor,
+} from './bash_resource_monitor.js';
 
 export interface BashToolPolicy {
   allowedCommandPrefixes?: string[];
@@ -9,6 +19,10 @@ export interface BashToolPolicy {
   maxMemoryBytes?: number;
   maxFileSizeBytes?: number;
   maxChildProcesses?: number;
+  /** Opt-in: enable active best-effort resource monitoring (POSIX only). */
+  enableResourceMonitoring?: boolean;
+  /** Optional poll interval override for the monitor, in ms. */
+  resourceMonitorIntervalMs?: number;
 }
 
 export function validateCommand(
@@ -130,6 +144,7 @@ export class ExecuteBashTool extends BaseTool {
       });
 
       let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
+      let monitor: ResourceMonitorHandle = {stop() {}, breach: null};
 
       const finishProcess = (
         returncode: number | null,
@@ -138,6 +153,7 @@ export class ExecuteBashTool extends BaseTool {
         if (isSettled) return;
         isSettled = true;
         if (timeoutTimer) clearTimeout(timeoutTimer);
+        monitor.stop();
 
         const stdoutTrimmed = stdoutData || '<no stdout captured>';
         const stderrTrimmed = stderrData || '<no stderr captured>';
@@ -168,6 +184,25 @@ export class ExecuteBashTool extends BaseTool {
       child.on('close', (code) => {
         finishProcess(code);
       });
+
+      if (this.policy.enableResourceMonitoring && child.pid) {
+        monitor = startResourceMonitor(
+          child.pid,
+          {
+            maxMemoryBytes: this.policy.maxMemoryBytes,
+            maxChildProcesses: this.policy.maxChildProcesses,
+            intervalMs: this.policy.resourceMonitorIntervalMs,
+          },
+          (breach) => {
+            const unit = breach.reason === 'memory' ? 'bytes' : 'processes';
+            finishProcess(
+              null,
+              `Command killed: resource limit exceeded (${breach.reason}: ` +
+                `observed ${breach.observed} > limit ${breach.limit} ${unit}).`,
+            );
+          },
+        );
+      }
 
       if (timeoutSeconds > 0) {
         timeoutTimer = setTimeout(() => {
