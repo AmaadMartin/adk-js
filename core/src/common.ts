@@ -187,6 +187,11 @@ export {
   createCacheMetadata,
 } from './models/cache_metadata.js';
 export type {CacheMetadata} from './models/cache_metadata.js';
+export {
+  GEMINI_2_5_MIN_CACHE_TOKENS,
+  GEMINI_3_MIN_CACHE_TOKENS,
+  GeminiContextCacheManager,
+} from './models/gemini_context_cache_manager.js';
 export {Gemini, geminiInitParams} from './models/google_llm.js';
 export type {GeminiParams} from './models/google_llm.js';
 export type {LlmRequest} from './models/llm_request.js';
