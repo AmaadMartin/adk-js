@@ -9,6 +9,7 @@ import {
   GeminiParams,
   LlmRequest,
   LlmResponse,
+  createContextCacheConfig,
   geminiInitParams,
   version,
 } from '@google/adk';
@@ -28,6 +29,10 @@ vi.mock('@google/genai', async (importOriginal) => {
       models: {
         generateContentStream: vi.fn(),
         generateContent: vi.fn(),
+      },
+      caches: {
+        create: vi.fn(),
+        delete: vi.fn(),
       },
       live: {
         connect: vi.fn().mockResolvedValue({
@@ -651,6 +656,93 @@ describe('GoogleLlm', () => {
           }),
         }),
       );
+    });
+  });
+
+  describe('context caching wiring', () => {
+    function cacheableRequest(): LlmRequest {
+      return {
+        contents: [{role: 'user', parts: [{text: 'hello'}]}],
+        config: {systemInstruction: 'You are a helpful assistant.'},
+        liveConnectConfig: {},
+        toolsDict: {},
+        cacheConfig: createContextCacheConfig(),
+      };
+    }
+
+    it('populates cacheMetadata on the non-stream response when cacheConfig is set', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+      llm.apiClient.models.generateContent = vi.fn().mockResolvedValue({
+        candidates: [{content: {role: 'model', parts: [{text: 'hi'}]}}],
+      });
+
+      const responses: LlmResponse[] = [];
+      for await (const response of llm.generateContentAsync(
+        cacheableRequest(),
+        false,
+      )) {
+        responses.push(response);
+      }
+
+      const finalResponse = responses[responses.length - 1];
+      expect(finalResponse.cacheMetadata).toBeDefined();
+      expect(finalResponse.cacheMetadata!.fingerprint).toBeTruthy();
+    });
+
+    it('populates cacheMetadata on the final streamed response when cacheConfig is set', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+      llm.apiClient.models.generateContentStream = vi.fn().mockResolvedValue(
+        (async function* () {
+          yield {
+            candidates: [
+              {
+                content: {role: 'model', parts: [{text: 'hi'}]},
+                finishReason: 'STOP',
+              },
+            ],
+          };
+        })(),
+      );
+
+      const responses: LlmResponse[] = [];
+      for await (const response of llm.generateContentAsync(
+        cacheableRequest(),
+        true,
+      )) {
+        responses.push(response);
+      }
+
+      const finalResponse = responses[responses.length - 1];
+      expect(finalResponse.cacheMetadata).toBeDefined();
+      expect(finalResponse.cacheMetadata!.fingerprint).toBeTruthy();
+    });
+
+    it('does not touch caches or mutate the request when cacheConfig is absent', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+      llm.apiClient.models.generateContent = vi.fn().mockResolvedValue({
+        candidates: [{content: {role: 'model', parts: [{text: 'hi'}]}}],
+      });
+
+      const request: LlmRequest = {
+        contents: [{role: 'user', parts: [{text: 'hello'}]}],
+        config: {systemInstruction: 'You are a helpful assistant.'},
+        liveConnectConfig: {},
+        toolsDict: {},
+      };
+
+      const responses: LlmResponse[] = [];
+      for await (const response of llm.generateContentAsync(request, false)) {
+        responses.push(response);
+      }
+
+      expect(llm.apiClient.caches.create).not.toHaveBeenCalled();
+      expect(llm.apiClient.caches.delete).not.toHaveBeenCalled();
+      expect(responses[responses.length - 1].cacheMetadata).toBeUndefined();
+      // The request config is left untouched.
+      expect(request.config!.systemInstruction).toBe(
+        'You are a helpful assistant.',
+      );
+      expect(request.config!.cachedContent).toBeUndefined();
     });
   });
 });
