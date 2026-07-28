@@ -63,6 +63,65 @@ export function quoteFilterLiteral(value: string): string {
   return `"${escaped}"`;
 }
 
+/**
+ * Session IDs that are safe to interpolate into a Vertex resource name.
+ */
+const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
+
+/**
+ * Extracts the short session ID when a full session resource name is given.
+ *
+ * Agent Engine returns session resource names of the form
+ * `projects/{project}/locations/{location}/reasoningEngines/{engine}/sessions/{session}`,
+ * and callers routinely hand those straight back to the session service. Values
+ * that are not a session resource name are returned unchanged so that
+ * {@link validateSessionId} still sees the caller's original input.
+ *
+ * @param sessionId The session ID or full session resource name.
+ * @param expectedEngineId The reasoning engine the call resolved to, if known.
+ * @returns The short session ID.
+ * @throws If the resource name names a different reasoning engine.
+ */
+export function extractShortSessionId(
+  sessionId: string,
+  expectedEngineId?: string,
+): string {
+  const parts = sessionId.split('/');
+  if (parts.at(-2) !== 'sessions') {
+    return sessionId;
+  }
+  const passedEngineId = parts.at(-3);
+  if (
+    parts.length >= 4 &&
+    parts.at(-4) === 'reasoningEngines' &&
+    expectedEngineId &&
+    passedEngineId !== expectedEngineId
+  ) {
+    throw new Error(
+      `Session resource name mismatch: session belongs to reasoningEngine '${passedEngineId}', but service is configured for '${expectedEngineId}'.`,
+    );
+  }
+  return parts[parts.length - 1];
+}
+
+/**
+ * Rejects session IDs that could escape their URL path segment.
+ *
+ * A session ID is interpolated directly into a Vertex resource name, so values
+ * containing `/`, `..` or a query separator would address a different resource
+ * and side-step the ownership checks that resource carries.
+ *
+ * @param sessionId The short session ID to check.
+ * @throws If the session ID does not match `SESSION_ID_PATTERN`.
+ */
+export function validateSessionId(sessionId: string): void {
+  if (!SESSION_ID_PATTERN.test(sessionId)) {
+    throw new Error(
+      `Invalid session ID '${sessionId}': must match ${SESSION_ID_PATTERN.source}.`,
+    );
+  }
+}
+
 export interface VertexAiSessionServiceOptions {
   projectId?: string;
   location?: string;
@@ -166,12 +225,17 @@ export class VertexAiSessionService extends BaseSessionService {
 
     const reasoningEngineId = this.getReasoningEngineId(appName);
     const filteredState = state ? trimTempState(state) : undefined;
+    let shortSessionId: string | undefined;
+    if (sessionId) {
+      shortSessionId = extractShortSessionId(sessionId, reasoningEngineId);
+      validateSessionId(shortSessionId);
+    }
     let apiResponse = await this.sessions.createInternal({
       name: `reasoningEngines/${reasoningEngineId}`,
       userId: userId,
       config: {
         ...(filteredState ? {sessionState: filteredState} : {}),
-        ...(sessionId ? {sessionId} : {}),
+        ...(shortSessionId ? {sessionId: shortSessionId} : {}),
         ...(ttl != null ? {ttl} : {}),
         ...(expireTime != null ? {expireTime} : {}),
       },
@@ -219,7 +283,12 @@ export class VertexAiSessionService extends BaseSessionService {
     config,
   }: GetSessionRequest): Promise<Session | undefined> {
     const reasoningEngineId = this.getReasoningEngineId(appName);
-    const sessionResourceName = `reasoningEngines/${reasoningEngineId}/sessions/${sessionId}`;
+    // Normalize and validate outside the try block: a malformed session ID is a
+    // caller error and must surface as a throw, never as the `undefined` the
+    // NOT_FOUND handler below returns for a session that does not exist.
+    const shortSessionId = extractShortSessionId(sessionId, reasoningEngineId);
+    validateSessionId(shortSessionId);
+    const sessionResourceName = `reasoningEngines/${reasoningEngineId}/sessions/${shortSessionId}`;
 
     try {
       let getSessionResponse: VertexAiSession | undefined;
@@ -254,12 +323,12 @@ export class VertexAiSessionService extends BaseSessionService {
 
       if (sessionObj.userId !== userId) {
         throw new Error(
-          `Session ${sessionId} does not belong to user ${userId}.`,
+          `Session ${shortSessionId} does not belong to user ${userId}.`,
         );
       }
 
       const session = createSession({
-        id: sessionId,
+        id: shortSessionId,
         appName,
         userId,
         state: sessionObj.sessionState,
@@ -390,6 +459,8 @@ export class VertexAiSessionService extends BaseSessionService {
     sessionId,
   }: DeleteSessionRequest): Promise<void> {
     const reasoningEngineId = this.getReasoningEngineId(appName);
+    const shortSessionId = extractShortSessionId(sessionId, reasoningEngineId);
+    validateSessionId(shortSessionId);
 
     // A session may only be deleted by the user it belongs to. getSession
     // already enforces this and throws when the stored session's userId does
@@ -399,7 +470,7 @@ export class VertexAiSessionService extends BaseSessionService {
     const session = await this.getSession({
       appName,
       userId,
-      sessionId,
+      sessionId: shortSessionId,
       config: {numRecentEvents: 0},
     });
     if (!session) {
@@ -407,7 +478,7 @@ export class VertexAiSessionService extends BaseSessionService {
     }
 
     await this.sessions.delete({
-      name: `reasoningEngines/${reasoningEngineId}/sessions/${sessionId}`,
+      name: `reasoningEngines/${reasoningEngineId}/sessions/${shortSessionId}`,
     });
   }
 
@@ -418,6 +489,8 @@ export class VertexAiSessionService extends BaseSessionService {
     await super.appendEvent({session, event});
     session.lastUpdateTime = event.timestamp;
 
+    // session.id is ADK-owned and already short, so it only needs validating.
+    validateSessionId(session.id);
     const reasoningEngineId = this.getReasoningEngineId(session.appName);
 
     const customMetadata: Record<string, unknown> = {...event.customMetadata};
