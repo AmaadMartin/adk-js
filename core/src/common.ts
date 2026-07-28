@@ -195,6 +195,10 @@ export type {
 } from './optimization/gepa/adapter.js';
 export type {ReflectionLm} from './optimization/gepa/engine.js';
 export {
+  GEPARootAgentOptimizer,
+  GEPARootAgentOptimizerConfig,
+} from './optimization/gepa_root_agent_optimizer.js';
+export {
   AgentGepaAdapter,
   GEPARootAgentPromptOptimizer,
   GEPARootAgentPromptOptimizerConfig,

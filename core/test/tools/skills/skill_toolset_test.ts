@@ -5,6 +5,7 @@
  */
 
 import {
+  BaseCodeExecutor,
   BaseTool,
   BaseToolset,
   Context,
@@ -12,6 +13,7 @@ import {
   LlmRequest,
   ReadonlyContext,
   Skill,
+  SkillRegistry,
   SkillToolset,
 } from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
@@ -312,6 +314,82 @@ describe('skill_toolset', () => {
       const tools2 = await toolset.getTools(context);
       expect(tools2.map((t) => t.name)).toContain('cached_tool');
       expect(mockInnerGetTools).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('cloneWithUpdatedSkills', () => {
+    it('returns a new toolset reflecting the updated skills (array input)', () => {
+      const original = new SkillToolset([mockSkill]);
+      const updated: Skill = {
+        ...mockSkill,
+        instructions: 'Updated instructions',
+      };
+
+      const clone = original.cloneWithUpdatedSkills([updated]);
+
+      expect(clone).toBeInstanceOf(SkillToolset);
+      expect(clone).not.toBe(original);
+      expect(clone.skills['test-skill'].instructions).toBe(
+        'Updated instructions',
+      );
+      // The original toolset is left untouched.
+      expect(original.skills['test-skill'].instructions).toBe(
+        'Test instructions',
+      );
+    });
+
+    it('accepts a name-keyed record of skills', () => {
+      const original = new SkillToolset([mockSkill]);
+      const updated: Skill = {...mockSkill, instructions: 'Record update'};
+
+      const clone = original.cloneWithUpdatedSkills({'test-skill': updated});
+
+      expect(clone.skills['test-skill'].instructions).toBe('Record update');
+    });
+
+    it('preserves codeExecutor, additionalTools, and registry', async () => {
+      const codeExecutor = {} as unknown as BaseCodeExecutor;
+      const registry = {} as unknown as SkillRegistry;
+      const additionalTools: BaseTool[] = [];
+      const original = new SkillToolset([mockSkill], {
+        codeExecutor,
+        additionalTools,
+        registry,
+      });
+
+      const clone = original.cloneWithUpdatedSkills([mockSkill]);
+
+      expect(clone.codeExecutor).toBe(codeExecutor);
+      expect(clone.additionalTools).toBe(additionalTools);
+      expect(clone.registry).toBe(registry);
+      // A registry-backed toolset exposes the search tool; the clone keeps it.
+      const toolNames = (await clone.getTools()).map((t) => t.name);
+      expect(toolNames).toContain('search_skills');
+    });
+
+    it('produces an independent, fully functional toolset', async () => {
+      const clone = new SkillToolset([mockSkill]).cloneWithUpdatedSkills([
+        mockSkill,
+      ]);
+
+      const toolNames = (await clone.getTools()).map((t) => t.name);
+      expect(toolNames).toEqual([
+        'list_skills',
+        'load_skill',
+        'load_skill_resource',
+        'run_skill_script',
+      ]);
+    });
+
+    it('preserves the opt-in allowInlineScripts capability', async () => {
+      const original = new SkillToolset([mockSkill], {
+        allowInlineScripts: true,
+      });
+
+      const clone = original.cloneWithUpdatedSkills([mockSkill]);
+
+      const toolNames = (await clone.getTools()).map((t) => t.name);
+      expect(toolNames).toContain('run_skill_inline_script');
     });
   });
 });
