@@ -189,6 +189,17 @@ export type {
   SamplingResult,
   UnstructuredSamplingResult,
 } from './optimization/data_types.js';
+export type {
+  EvaluationBatch,
+  GepaAdapter,
+} from './optimization/gepa/adapter.js';
+export type {ReflectionLm} from './optimization/gepa/engine.js';
+export {
+  AgentGepaAdapter,
+  GEPARootAgentPromptOptimizer,
+  GEPARootAgentPromptOptimizerConfig,
+} from './optimization/gepa_root_agent_prompt_optimizer.js';
+export type {GEPARootAgentPromptOptimizerResult} from './optimization/gepa_root_agent_prompt_optimizer.js';
 export {Sampler} from './optimization/sampler.js';
 export type {ExampleSet} from './optimization/sampler.js';
 export {SimplePromptOptimizer} from './optimization/simple_prompt_optimizer.js';
