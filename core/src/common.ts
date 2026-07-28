@@ -137,6 +137,7 @@ export {
   getFunctionResponses,
   hasTrailingCodeExecutionResult,
   isFinalResponse,
+  isLiveModelMediaEventWithInlineData,
   stringifyContent,
 } from './events/event.js';
 export type {Event} from './events/event.js';
@@ -200,10 +201,12 @@ export type {
 export {InMemoryRunner} from './runner/in_memory_runner.js';
 export {
   Runner,
+  applyLiveMultiAgentTranscriptionDefaults,
   determineAgentForResumption,
   findEventByLastFunctionResponseId,
   isRoutableLlmAgent,
   isRunner,
+  shouldAppendEvent,
 } from './runner/runner.js';
 export type {RunnerConfig} from './runner/runner.js';
 export {BaseSessionService} from './sessions/base_session_service.js';
