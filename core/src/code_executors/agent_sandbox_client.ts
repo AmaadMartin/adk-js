@@ -304,11 +304,11 @@ export class AgentSandboxClient implements SandboxClient {
     );
   }
 
-  private resolveBaseUrl(
+  private async resolveBaseUrl(
     api: CustomObjectsApi,
     sandboxName: string,
     deadline: number,
-  ): Promise<string> | string {
+  ): Promise<string> {
     if (this.apiUrl) {
       return this.apiUrl;
     }
@@ -544,7 +544,7 @@ function buildRouterHeaders(
     [HEADER_SANDBOX_NAMESPACE]: connection.namespace,
     [HEADER_SANDBOX_PORT]: String(serverPort),
     [HEADER_SANDBOX_TIMEOUT]: (remainingMs / 1000).toString(),
-    [HEADER_REQUEST_ID]: generateRequestId(),
+    [HEADER_REQUEST_ID]: crypto.randomUUID(),
   };
   if (connection.podIp) {
     headers[HEADER_SANDBOX_POD_IP] = connection.podIp;
@@ -553,11 +553,6 @@ function buildRouterHeaders(
     headers['Content-Type'] = contentType;
   }
   return headers;
-}
-
-/** Generates a unique per-request id for the `X-Request-ID` header. */
-function generateRequestId(): string {
-  return crypto.randomUUID();
 }
 
 /** Exponential backoff with jitter (base 500ms, cap 8s); attempt 0 has no delay. */
