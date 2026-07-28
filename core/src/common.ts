@@ -174,6 +174,7 @@ export {ApigeeLlm} from './models/apigee_llm.js';
 export type {ApigeeLlmParams} from './models/apigee_llm.js';
 export {BaseLlm, isBaseLlm} from './models/base_llm.js';
 export type {BaseLlmConnection} from './models/base_llm_connection.js';
+export type {CacheMetadata} from './models/cache_metadata.js';
 export {Gemini, geminiInitParams} from './models/google_llm.js';
 export type {GeminiParams} from './models/google_llm.js';
 export type {LlmRequest} from './models/llm_request.js';
@@ -265,6 +266,12 @@ export type {
   VertexAiSearchToolParams,
 } from './tools/vertex_ai_search_tool.js';
 export {VertexRagRetrievalTool} from './tools/vertex_rag_retrieval_tool.js';
+export {CachePerformanceAnalyzer} from './utils/cache_performance_analyzer.js';
+export type {
+  CachePerformanceActiveReport,
+  CachePerformanceNoDataReport,
+  CachePerformanceReport,
+} from './utils/cache_performance_analyzer.js';
 export {getClientLabels, runWithClientLabel} from './utils/client_labels.js';
 export {LogLevel, getLogger, setLogLevel, setLogger} from './utils/logger.js';
 export type {Logger} from './utils/logger.js';
