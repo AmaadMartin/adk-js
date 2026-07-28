@@ -39,8 +39,22 @@ export interface RunConfig {
 
   /**
    * Whether or not to save the input blobs as artifacts.
+   *
+   * For live audio/video blob persistence, prefer {@link RunConfig.saveLiveBlob}
+   * (the dedicated gate). When `saveLiveBlob` is not explicitly set, this flag
+   * is used as a backward-compatible fallback gate for live blobs.
    */
   saveInputBlobsAsArtifacts?: boolean;
+
+  /**
+   * Saves live video and audio data to session and artifact service.
+   *
+   * This is the dedicated gate for live blob persistence. It supersedes the
+   * reuse of {@link RunConfig.saveInputBlobsAsArtifacts} as the live-blob gate;
+   * when this field is not explicitly set, `saveInputBlobsAsArtifacts` is used
+   * as a backward-compatible fallback (resolved in `createRunConfig`).
+   */
+  saveLiveBlob?: boolean;
 
   /**
    * Whether to support CFC (Compositional Function Calling). Only applicable
@@ -111,6 +125,7 @@ export interface RunConfig {
  * - `streamingMode` → {@link StreamingMode.NONE}
  * - `maxLlmCalls` → `500` (validated via `validateMaxLlmCalls`)
  * - `pauseOnToolCalls` → `false`
+ * - `saveLiveBlob` → `false` (falls back to `saveInputBlobsAsArtifacts` when unset)
  *
  * @param params - Optional partial {@link RunConfig} overriding defaults.
  * @returns A merged {@link RunConfig} object.
@@ -125,6 +140,8 @@ export function createRunConfig(params: Partial<RunConfig> = {}) {
     maxLlmCalls: validateMaxLlmCalls(params.maxLlmCalls || 500),
     pauseOnToolCalls: false,
     ...params,
+    saveLiveBlob:
+      params.saveLiveBlob ?? params.saveInputBlobsAsArtifacts ?? false,
   };
 }
 

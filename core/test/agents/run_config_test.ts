@@ -24,6 +24,7 @@ describe('createRunConfig', () => {
     expect(config.streamingMode).toBe(StreamingMode.NONE);
     expect(config.maxLlmCalls).toBe(500);
     expect(config.pauseOnToolCalls).toBe(false);
+    expect(config.saveLiveBlob).toBe(false);
   });
 
   it('overrides defaults with provided params', () => {
@@ -67,5 +68,45 @@ describe('createRunConfig', () => {
     expect(() =>
       createRunConfig({maxLlmCalls: Number.MAX_SAFE_INTEGER + 1}),
     ).toThrow();
+  });
+
+  describe('saveLiveBlob resolution', () => {
+    it('defaults saveLiveBlob to false', () => {
+      expect(createRunConfig().saveLiveBlob).toBe(false);
+    });
+
+    it('honors an explicit saveLiveBlob of true', () => {
+      expect(createRunConfig({saveLiveBlob: true}).saveLiveBlob).toBe(true);
+    });
+
+    it('honors an explicit saveLiveBlob of false over the legacy fallback', () => {
+      expect(
+        createRunConfig({
+          saveLiveBlob: false,
+          saveInputBlobsAsArtifacts: true,
+        }).saveLiveBlob,
+      ).toBe(false);
+    });
+
+    it('falls back to saveInputBlobsAsArtifacts when saveLiveBlob is unset', () => {
+      expect(
+        createRunConfig({saveInputBlobsAsArtifacts: true}).saveLiveBlob,
+      ).toBe(true);
+    });
+
+    it('resolves to false when the fallback is explicitly false', () => {
+      expect(
+        createRunConfig({saveInputBlobsAsArtifacts: false}).saveLiveBlob,
+      ).toBe(false);
+    });
+
+    it('prefers saveLiveBlob true over a legacy false', () => {
+      expect(
+        createRunConfig({
+          saveLiveBlob: true,
+          saveInputBlobsAsArtifacts: false,
+        }).saveLiveBlob,
+      ).toBe(true);
+    });
   });
 });
