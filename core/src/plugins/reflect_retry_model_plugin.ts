@@ -145,7 +145,7 @@ export class ReflectAndRetryModelPlugin extends BasePlugin {
 
     const scopeKey = this.getModelScopeKey(callbackContext);
     const modelName = this.getModelNameFromContext(callbackContext);
-    await this.resetModelFailureCount(scopeKey, modelName);
+    await this.tracker.reset(scopeKey, modelName);
     return undefined;
   }
 
@@ -320,10 +320,7 @@ Formulate a new plan based on your analysis and try a corrected or different app
   }): Promise<LlmResponse | undefined> {
     const scopeKey = this.getModelScopeKey(callbackContext);
     const modelName = this.getModelNameFromContext(callbackContext);
-    const currentRetries = await this.incrementModelFailureCount(
-      scopeKey,
-      modelName,
-    );
+    const currentRetries = await this.tracker.increment(scopeKey, modelName);
 
     if (currentRetries <= this.maxRetries) {
       return {
@@ -389,19 +386,5 @@ Formulate a new plan based on your analysis and try a corrected or different app
       this.scope,
       callbackContext.invocationContext.invocationId,
     );
-  }
-
-  private incrementModelFailureCount(
-    scopeKey: string,
-    itemName: string,
-  ): Promise<number> {
-    return this.tracker.increment(scopeKey, itemName);
-  }
-
-  private resetModelFailureCount(
-    scopeKey: string,
-    itemName: string,
-  ): Promise<void> {
-    return this.tracker.reset(scopeKey, itemName);
   }
 }
