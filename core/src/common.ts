@@ -222,7 +222,6 @@ export {
 } from './tools/bash_resource_monitor.js';
 export type {
   ResourceBreach,
-  ResourceBreachReason,
   ResourceMonitorDeps,
   ResourceMonitorHandle,
   ResourceMonitorPolicy,

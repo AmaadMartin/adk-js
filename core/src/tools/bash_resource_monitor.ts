@@ -12,12 +12,9 @@ import {logger} from '../utils/logger.js';
 /** Default polling interval, in milliseconds. */
 export const DEFAULT_MONITOR_INTERVAL_MS = 250;
 
-/** Which resource limit was breached. */
-export type ResourceBreachReason = 'memory' | 'children';
-
 /** Details of a detected breach (observed value vs. configured limit). */
 export interface ResourceBreach {
-  reason: ResourceBreachReason;
+  reason: 'memory' | 'children';
   /** Configured limit: bytes for memory, process count for children. */
   limit: number;
   /** Observed value at breach time. */
@@ -53,10 +50,6 @@ export interface ResourceMonitorDeps {
 /** Returns whether active resource monitoring is supported (POSIX only). */
 export function isResourceMonitoringSupported(): boolean {
   return os.platform() !== 'win32';
-}
-
-function defaultKillGroup(pid: number): void {
-  process.kill(-pid, 'SIGKILL');
 }
 
 /**
@@ -125,7 +118,7 @@ export function startResourceMonitor(
 
   const listProcessTree = deps.listProcessTree ?? ((p) => pidtree(p));
   const sampleUsage = deps.sampleUsage ?? ((pids) => pidusage(pids));
-  const killGroup = deps.killGroup ?? defaultKillGroup;
+  const killGroup = deps.killGroup ?? ((p) => process.kill(-p, 'SIGKILL'));
 
   let stopped = false;
   let ticking = false;
