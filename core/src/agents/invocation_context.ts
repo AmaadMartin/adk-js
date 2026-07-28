@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content} from '@google/genai';
+import {Blob, Content} from '@google/genai';
 
 import {SessionArtifactService} from '../artifacts/session_artifact_service.js';
 import {BaseCredentialService} from '../auth/credential_service/base_credential_service.js';
@@ -18,6 +18,18 @@ import {ActiveStreamingTool} from './active_streaming_tool.js';
 import {BaseAgent} from './base_agent.js';
 import {RunConfig} from './run_config.js';
 import {TranscriptionEntry} from './transcription_entry.js';
+
+/**
+ * Stores an audio data chunk cached before flushing to the artifact service.
+ */
+export interface RealtimeCacheEntry {
+  /** The role that created this audio data, typically 'user' or 'model'. */
+  role: string;
+  /** The audio data chunk. */
+  data: Blob;
+  /** Epoch seconds when the audio chunk was received. */
+  timestamp: number;
+}
 
 /**
  * The parameters for creating an invocation context.
@@ -36,6 +48,8 @@ export interface InvocationContextParams {
   transcriptionCache?: TranscriptionEntry[];
   runConfig?: RunConfig;
   activeStreamingTools?: Record<string, ActiveStreamingTool>;
+  inputRealtimeCache?: RealtimeCacheEntry[];
+  outputRealtimeCache?: RealtimeCacheEntry[];
   pluginManager: PluginManager;
   abortSignal?: AbortSignal;
 }
@@ -179,6 +193,16 @@ export class InvocationContext {
   activeStreamingTools?: Record<string, ActiveStreamingTool>;
 
   /**
+   * Cached input (user) audio chunks awaiting flush to the artifact service.
+   */
+  inputRealtimeCache?: RealtimeCacheEntry[];
+
+  /**
+   * Cached output (model) audio chunks awaiting flush to the artifact service.
+   */
+  outputRealtimeCache?: RealtimeCacheEntry[];
+
+  /**
    * The manager for keeping track of plugins in this invocation.
    */
   pluginManager: PluginManager;
@@ -201,6 +225,8 @@ export class InvocationContext {
     this.transcriptionCache = params.transcriptionCache;
     this.runConfig = params.runConfig;
     this.activeStreamingTools = params.activeStreamingTools;
+    this.inputRealtimeCache = params.inputRealtimeCache;
+    this.outputRealtimeCache = params.outputRealtimeCache;
     this.pluginManager = params.pluginManager;
     this.abortSignal = params.abortSignal;
     // Inherit the parent invocation's cost manager when one is available.

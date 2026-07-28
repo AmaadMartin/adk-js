@@ -14,6 +14,7 @@ import {
   LiveServerGoAway,
   LiveServerSessionResumptionUpdate,
   Transcription,
+  VoiceActivity,
 } from '@google/genai';
 
 /**
@@ -112,6 +113,9 @@ export interface LlmResponse {
 
   /** The session ID of the Live session. */
   liveSessionId?: string;
+
+  /** Voice-activity-detection signal surfaced from the live stream. */
+  voiceActivity?: VoiceActivity;
 }
 
 /**
