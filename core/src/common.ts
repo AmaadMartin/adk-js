@@ -186,6 +186,13 @@ export {BasePlugin, ContextCompactionTrigger} from './plugins/base_plugin.js';
 export {LoggingPlugin} from './plugins/logging_plugin.js';
 export {PluginManager} from './plugins/plugin_manager.js';
 export {
+  REFLECT_AND_RETRY_RESPONSE_TYPE,
+  RESERVED_TOOL_CALL_ERROR_TYPE,
+  ReflectAndRetryModelPlugin,
+  TrackingScope,
+} from './plugins/reflect_retry_model_plugin.js';
+export type {ReflectAndRetryModelPluginOptions} from './plugins/reflect_retry_model_plugin.js';
+export {
   InMemoryPolicyEngine,
   PolicyOutcome,
   REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
