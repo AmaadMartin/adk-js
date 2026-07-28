@@ -31,6 +31,9 @@ export type {
   AgentEngineConfig,
   AgentEngineSession,
   CreateSessionConfig,
+  DeleteSessionOptions,
+  GetSessionOptions,
+  ListSessionsOptions,
   StreamQueryConfig,
 } from './agents/agent_engine_client.js';
 export {InvocationContext} from './agents/invocation_context.js';

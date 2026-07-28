@@ -34,6 +34,15 @@ const CREATE_SESSION_METHOD = 'async_create_session';
 /** Class method invoked on the deployed engine to stream a query. */
 const STREAM_QUERY_METHOD = 'async_stream_query';
 
+/** Class method invoked on the deployed engine to get a session. */
+const GET_SESSION_METHOD = 'async_get_session';
+
+/** Class method invoked on the deployed engine to list sessions. */
+const LIST_SESSIONS_METHOD = 'async_list_sessions';
+
+/** Class method invoked on the deployed engine to delete a session. */
+const DELETE_SESSION_METHOD = 'async_delete_session';
+
 /**
  * Full reasoning-engine resource name, e.g.
  * `projects/{project}/locations/{location}/reasoningEngines/{id}`.
@@ -65,6 +74,23 @@ export interface StreamQueryConfig {
   sessionId: string;
   /** A plain text prompt or a structured `Content` message. */
   message: Content | string;
+}
+
+/** Parameters for {@link AgentEngineClient.getSession}. */
+export interface GetSessionOptions {
+  userId: string;
+  sessionId: string;
+}
+
+/** Parameters for {@link AgentEngineClient.listSessions}. */
+export interface ListSessionsOptions {
+  userId: string;
+}
+
+/** Parameters for {@link AgentEngineClient.deleteSession}. */
+export interface DeleteSessionOptions {
+  userId: string;
+  sessionId: string;
 }
 
 /**
@@ -133,6 +159,26 @@ export function toSessionResult(
     state: raw['state'] as Record<string, unknown> | undefined,
     lastUpdateTime: raw['last_update_time'] as number | undefined,
   };
+}
+
+/**
+ * Decodes a reasoning-engine `response.output` Value to a plain object, treating
+ * an absent or non-struct output (e.g. a null Value the engine returns for a
+ * missing session or empty result) as "no value" rather than an error. The
+ * shared `helpers.fromValue` only accepts struct Values and throws otherwise, so
+ * this guards the struct shape before delegating the decode to it.
+ */
+function decodeOutput(
+  helpers: AiPlatformHelpers,
+  output: unknown,
+): Record<string, unknown> | undefined {
+  const value = output as {structValue?: {fields?: unknown}} | null | undefined;
+  if (!value?.structValue?.fields) {
+    return undefined;
+  }
+  return helpers.fromValue(
+    output as Parameters<typeof helpers.fromValue>[0],
+  ) as Record<string, unknown>;
 }
 
 /**
@@ -324,6 +370,86 @@ export class AgentEngineClient {
     } catch (error) {
       throw new AgentExecutionError(
         `Failed to create session: ${errorMessage(error)}`,
+        error,
+      );
+    }
+  }
+
+  /**
+   * Fetches a session for the given user.
+   *
+   * @returns the session, or `undefined` when the engine reports no session.
+   * @throws {AgentExecutionError} when the underlying call fails.
+   */
+  async getSession(
+    config: GetSessionOptions,
+  ): Promise<AgentEngineSession | undefined> {
+    try {
+      const {client, path, helpers} = await this.init();
+      const [response] = await client.queryReasoningEngine({
+        name: path,
+        classMethod: GET_SESSION_METHOD,
+        input: buildInputStruct(helpers, {
+          user_id: config.userId,
+          session_id: config.sessionId,
+        }),
+      });
+      const decoded = decodeOutput(helpers, response.output);
+      return decoded ? toSessionResult(decoded) : undefined;
+    } catch (error) {
+      throw new AgentExecutionError(
+        `Failed to get session: ${errorMessage(error)}`,
+        error,
+      );
+    }
+  }
+
+  /**
+   * Lists the sessions for the given user.
+   *
+   * @throws {AgentExecutionError} when the underlying call fails.
+   */
+  async listSessions(
+    config: ListSessionsOptions,
+  ): Promise<AgentEngineSession[]> {
+    try {
+      const {client, path, helpers} = await this.init();
+      const [response] = await client.queryReasoningEngine({
+        name: path,
+        classMethod: LIST_SESSIONS_METHOD,
+        input: buildInputStruct(helpers, {user_id: config.userId}),
+      });
+      const decoded = decodeOutput(helpers, response.output) as
+        | {sessions?: Array<Record<string, unknown>>}
+        | undefined;
+      return (decoded?.sessions ?? []).map(toSessionResult);
+    } catch (error) {
+      throw new AgentExecutionError(
+        `Failed to list sessions: ${errorMessage(error)}`,
+        error,
+      );
+    }
+  }
+
+  /**
+   * Deletes a session for the given user.
+   *
+   * @throws {AgentExecutionError} when the underlying call fails.
+   */
+  async deleteSession(config: DeleteSessionOptions): Promise<void> {
+    try {
+      const {client, path, helpers} = await this.init();
+      await client.queryReasoningEngine({
+        name: path,
+        classMethod: DELETE_SESSION_METHOD,
+        input: buildInputStruct(helpers, {
+          user_id: config.userId,
+          session_id: config.sessionId,
+        }),
+      });
+    } catch (error) {
+      throw new AgentExecutionError(
+        `Failed to delete session: ${errorMessage(error)}`,
         error,
       );
     }
