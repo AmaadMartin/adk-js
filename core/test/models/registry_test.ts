@@ -5,6 +5,7 @@
  */
 
 import {
+  AnthropicLlm,
   BaseLlm,
   BaseLlmConnection,
   LlmAgent,
@@ -88,5 +89,22 @@ describe('LLMRegistry', () => {
     });
 
     expect(agent.canonicalModel).toBeInstanceOf(TestLlmModel);
+  });
+
+  it('resolves a claude-3 model string to the AnthropicLlm class', () => {
+    expect(LLMRegistry.resolve('claude-3-5-sonnet-20241022')).toBe(
+      AnthropicLlm,
+    );
+  });
+
+  it('resolves a claude 4 model string to the AnthropicLlm class', () => {
+    expect(LLMRegistry.resolve('claude-sonnet-4-20250514')).toBe(AnthropicLlm);
+  });
+
+  it('exposes supportedModels matching the adk-python patterns', () => {
+    expect(AnthropicLlm.supportedModels).toEqual([
+      /claude-3-.*/,
+      /claude-.*-4.*/,
+    ]);
   });
 });
