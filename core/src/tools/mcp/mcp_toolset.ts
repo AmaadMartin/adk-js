@@ -18,6 +18,7 @@ import {logger} from '../../utils/logger.js';
 import {BaseTool} from '../base_tool.js';
 import {BaseToolset, ToolPredicate} from '../base_toolset.js';
 
+import {LoadMcpResourceTool} from './load_mcp_resource_tool.js';
 import {MCPConnectionParams, MCPSessionManager} from './mcp_session_manager.js';
 import {MCPTool} from './mcp_tool.js';
 
@@ -49,17 +50,36 @@ import {MCPTool} from './mcp_tool.js';
  *   const mcpToolset = new MCPToolset(connectionParams);
  *   const tools = await mcpToolset.getTools();
  *
+ * To also let the agent load MCP resources, opt in with `useMcpResources`; the
+ * array returned by `getTools()` then ends with a `load_mcp_resource` tool:
+ *
+ *   const mcpToolset = new MCPToolset(connectionParams, [], undefined, true);
+ *   const tools = await mcpToolset.getTools();
+ *
  */
 export class MCPToolset extends BaseToolset {
   private readonly mcpSessionManager: MCPSessionManager;
+  private readonly useMcpResources: boolean;
 
+  /**
+   * @param connectionParams Parameters for connecting to the MCP server.
+   * @param toolFilter Filters which discovered tools are exposed. Defaults to
+   *     `[]` (no filter). Never applies to the appended `load_mcp_resource`
+   *     tool (see `useMcpResources`).
+   * @param prefix Optional prefix applied to every discovered tool name.
+   * @param useMcpResources When `true`, `getTools()` appends a single
+   *     {@link LoadMcpResourceTool} as the final element so the agent can
+   *     discover and load MCP resources. Defaults to `false`.
+   */
   constructor(
     connectionParams: MCPConnectionParams,
     toolFilter: ToolPredicate | string[] = [],
     prefix?: string,
+    useMcpResources = false,
   ) {
     super(toolFilter, prefix);
     this.mcpSessionManager = new MCPSessionManager(connectionParams);
+    this.useMcpResources = useMcpResources;
   }
 
   async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {
@@ -88,27 +108,34 @@ export class MCPToolset extends BaseToolset {
     // Apply toolFilter when specified.
     // An empty array (the default) means no filter — all tools are returned.
     const filter = this.toolFilter;
+    let selected: BaseTool[];
     if (!filter || (Array.isArray(filter) && filter.length === 0)) {
-      return tools;
-    }
-
-    if (Array.isArray(filter)) {
+      selected = tools;
+    } else if (Array.isArray(filter)) {
       // String-array filter: match against the (possibly-prefixed) tool name.
-      return tools.filter((tool) => (filter as string[]).includes(tool.name));
-    }
-
-    if (context) {
+      selected = tools.filter((tool) =>
+        (filter as string[]).includes(tool.name),
+      );
+    } else if (context) {
       // Predicate filter: requires a ReadonlyContext to evaluate.
-      return tools.filter((tool) => filter(tool, context));
+      selected = tools.filter((tool) => filter(tool, context));
+    } else {
+      // Predicate filter requested but no context provided — return all tools
+      // and log a warning so callers are aware the filter was not applied.
+      logger.warn(
+        'MCPToolset: a ToolPredicate toolFilter was provided but getTools() ' +
+          'was called without a ReadonlyContext. The filter will not be applied.',
+      );
+      selected = tools;
     }
 
-    // Predicate filter requested but no context provided — return all tools
-    // and log a warning so callers are aware the filter was not applied.
-    logger.warn(
-      'MCPToolset: a ToolPredicate toolFilter was provided but getTools() ' +
-        'was called without a ReadonlyContext. The filter will not be applied.',
-    );
-    return tools;
+    // Appended after filtering so toolFilter never drops it (matches
+    // adk-python). Constructed lazily, never at module scope, to keep the
+    // mcp_toolset ↔ load_mcp_resource_tool import cycle runtime-safe.
+    if (this.useMcpResources) {
+      selected.push(new LoadMcpResourceTool(this));
+    }
+    return selected;
   }
 
   /**
