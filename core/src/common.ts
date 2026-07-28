@@ -129,6 +129,34 @@ export {TrajectoryThoughtPruningCompactor} from './context/trajectory_thought_pr
 export type {TrajectoryThoughtPruningCompactorOptions} from './context/trajectory_thought_pruning_compactor.js';
 export {TruncatingContextCompactor} from './context/truncating_context_compactor.js';
 export type {TruncatingContextCompactorOptions} from './context/truncating_context_compactor.js';
+export type {AgentDetails, AppDetails} from './evaluation/app_details.js';
+export type {
+  Invocation,
+  InvocationEvent,
+  InvocationEvents,
+} from './evaluation/eval_case.js';
+export {EvalStatus} from './evaluation/eval_metrics.js';
+export {Evaluator, validateInvocationLengths} from './evaluation/evaluator.js';
+export type {
+  EvaluationResult,
+  PerInvocationResult,
+} from './evaluation/evaluator.js';
+export {
+  MultiTurnVertexAiEvalFacade,
+  RubricMetric,
+  evalFacadeExportedForTestingOnly,
+} from './evaluation/vertex_ai_eval_facade.js';
+export type {
+  AgentConfig,
+  AgentData,
+  AgentEvent,
+  AggregatedMetricResult,
+  ConversationTurn,
+  EvalCaseRequest,
+  EvaluationDataset,
+  Metric,
+  VertexEvaluationResult,
+} from './evaluation/vertex_ai_eval_facade.js';
 export {isCompactedEvent, isScratchpadEvent} from './events/compacted_event.js';
 export type {CompactedEvent} from './events/compacted_event.js';
 export {
