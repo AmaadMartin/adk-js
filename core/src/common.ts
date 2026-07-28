@@ -169,6 +169,7 @@ export {
   JudgeModelOptionsSchema,
   LlmAsAJudgeCriterionSchema,
   PrebuiltMetrics,
+  RubricsBasedCriterionSchema,
 } from './evaluation/eval_metrics.js';
 export type {
   BaseCriterion,
@@ -176,6 +177,7 @@ export type {
   HallucinationsCriterion,
   JudgeModelOptions,
   LlmAsAJudgeCriterion,
+  RubricsBasedCriterion,
 } from './evaluation/eval_metrics.js';
 export {
   RubricContentSchema,
@@ -214,6 +216,21 @@ export {
   getToolCallsAndResponsesAsJsonStr,
   getToolDeclarationsAsJsonStr,
 } from './evaluation/llm_as_judge_utils.js';
+export {
+  DefaultAutoRaterResponseParser,
+  MajorityVotePerInvocationResultsAggregator,
+  MeanInvocationResultsSummarizer,
+  RubricBasedEvaluator,
+} from './evaluation/rubric_based_evaluator.js';
+export type {
+  AutoRaterResponseParser,
+  InvocationResultsSummarizer,
+  PerInvocationResultsAggregator,
+  RubricResponse,
+} from './evaluation/rubric_based_evaluator.js';
+export {RubricBasedFinalResponseQualityV1Evaluator} from './evaluation/rubric_based_final_response_quality_v1.js';
+export {RubricBasedMultiTurnTrajectoryEvaluator} from './evaluation/rubric_based_multi_turn_trajectory_evaluator.js';
+export {RubricBasedToolUseV1Evaluator} from './evaluation/rubric_based_tool_use_quality_v1.js';
 export {isCompactedEvent, isScratchpadEvent} from './events/compacted_event.js';
 export type {CompactedEvent} from './events/compacted_event.js';
 export {
