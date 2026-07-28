@@ -189,7 +189,6 @@ export class AgentRegistry {
 
           return this.findToolOrThrow(toolConfig.name);
         })
-        // remove entries for skipped built-in tools
         .filter((tool) => tool !== undefined);
 
       const options = {
