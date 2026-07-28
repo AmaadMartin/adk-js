@@ -5,7 +5,11 @@
  */
 
 import {FunctionDeclaration, Type} from '@google/genai';
-import {ChildProcess, spawn} from 'node:child_process';
+import {
+  ChildProcess,
+  ChildProcessWithoutNullStreams,
+  spawn,
+} from 'node:child_process';
 
 import {Context} from '../agents/context.js';
 import {experimental} from '../utils/experimental.js';
@@ -87,9 +91,6 @@ interface BashErrorResult {
 interface BashPendingResult {
   partial: string;
 }
-
-/** Union of every response {@link ExecuteBashTool.runAsync} can produce. */
-type BashToolResult = BashExecutionResult | BashErrorResult | BashPendingResult;
 
 /**
  * Validates a bash command against a policy.
@@ -190,12 +191,17 @@ export function splitCommand(command: string): string[] {
   return tokens;
 }
 
+/** Returns the captured stream, or a placeholder when it is empty. */
+function orPlaceholder(output: string, placeholder: string): string {
+  return output || placeholder;
+}
+
 /**
  * Kills a detached child's whole process group (POSIX), falling back to killing
  * just the child where process groups are unavailable (e.g. Windows) or already
  * gone.
  */
-function killProcessTree(child: ChildProcess): void {
+export function killProcessTree(child: Pick<ChildProcess, 'pid' | 'kill'>) {
   if (child.pid === undefined) {
     return;
   }
@@ -249,11 +255,12 @@ export class ExecuteBashTool extends BaseTool {
     this.workspace = workspace ?? process.cwd();
     this.policy = policy;
 
-    if (
-      policy.maxMemoryBytes !== undefined ||
-      policy.maxFileSizeBytes !== undefined ||
-      policy.maxChildProcesses !== undefined
-    ) {
+    const rlimitFields = [
+      policy.maxMemoryBytes,
+      policy.maxFileSizeBytes,
+      policy.maxChildProcesses,
+    ];
+    if (rlimitFields.some((value) => value !== undefined)) {
       logger.warn(
         'ExecuteBashTool: maxMemoryBytes, maxFileSizeBytes and ' +
           'maxChildProcesses are not enforced in the JS port (Node has no ' +
@@ -282,7 +289,7 @@ export class ExecuteBashTool extends BaseTool {
   override async runAsync({
     args,
     toolContext,
-  }: RunAsyncToolRequest): Promise<BashToolResult> {
+  }: RunAsyncToolRequest): Promise<unknown> {
     const command = args['command'] as string | undefined;
     if (!command) {
       return {error: 'Command is required.'};
@@ -315,7 +322,6 @@ export class ExecuteBashTool extends BaseTool {
     if (!toolContext.toolConfirmation) {
       toolContext.requestConfirmation({
         hint: `Please approve or reject the bash command: ${command}`,
-        payload: {command},
       });
       toolContext.actions.skipSummarization = true;
       return {partial: REQUIRES_CONFIRMATION_MESSAGE};
@@ -328,7 +334,8 @@ export class ExecuteBashTool extends BaseTool {
 
   /**
    * Spawns the command (without a shell) in the workspace, capturing output and
-   * enforcing the policy timeout.
+   * enforcing the policy timeout. Never rejects: failures resolve to an error
+   * result so they surface across the tool boundary.
    */
   private execute(
     command: string,
@@ -338,7 +345,7 @@ export class ExecuteBashTool extends BaseTool {
       this.policy.timeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS;
 
     return new Promise((resolve) => {
-      let child: ChildProcess;
+      let child: ChildProcessWithoutNullStreams;
       try {
         child = spawn(program, programArgs, {
           cwd: this.workspace,
@@ -356,51 +363,43 @@ export class ExecuteBashTool extends BaseTool {
       let stdout = '';
       let stderr = '';
       let timedOut = false;
-      let settled = false;
-
       const timer = setTimeout(() => {
         timedOut = true;
         killProcessTree(child);
       }, timeoutSeconds * 1000);
 
-      child.stdout?.on('data', (data) => {
+      child.stdout.on('data', (data) => {
         stdout += data.toString();
       });
-      child.stderr?.on('data', (data) => {
+      child.stderr.on('data', (data) => {
         stderr += data.toString();
       });
 
+      // spawn emits 'error' (e.g. ENOENT) before 'close'; resolving in both is
+      // safe because the first settle wins and later resolves are ignored.
       child.on('error', (err) => {
-        if (settled) {
-          return;
-        }
-        settled = true;
         clearTimeout(timer);
         resolve({
           error: `Execution failed: ${err.message}`,
-          stdout: stdout || NO_STDOUT_CAPTURED,
-          stderr: stderr || NO_STDERR_CAPTURED,
+          stdout: orPlaceholder(stdout, NO_STDOUT_CAPTURED),
+          stderr: orPlaceholder(stderr, NO_STDERR_CAPTURED),
         });
       });
 
       child.on('close', (code) => {
-        if (settled) {
-          return;
-        }
-        settled = true;
         clearTimeout(timer);
         if (timedOut) {
           resolve({
             error: `Command timed out after ${timeoutSeconds} seconds.`,
-            stdout: stdout || NO_STDOUT_CAPTURED,
-            stderr: stderr || NO_STDERR_CAPTURED,
+            stdout: orPlaceholder(stdout, NO_STDOUT_CAPTURED),
+            stderr: orPlaceholder(stderr, NO_STDERR_CAPTURED),
             returncode: code,
           });
           return;
         }
         resolve({
-          stdout: stdout || NO_STDOUT_CAPTURED,
-          stderr: stderr || NO_STDERR_CAPTURED,
+          stdout: orPlaceholder(stdout, NO_STDOUT_CAPTURED),
+          stderr: orPlaceholder(stderr, NO_STDERR_CAPTURED),
           returncode: code,
         });
       });
