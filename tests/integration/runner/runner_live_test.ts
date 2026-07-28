@@ -11,9 +11,7 @@ import {
   InvocationContext,
   LiveRequestQueue,
   LlmAgent,
-  StreamingMode,
 } from '@google/adk';
-import {Modality} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
 const APP_NAME = 'InMemoryRunner';
@@ -25,11 +23,10 @@ const SESSION_ID = 'live_session';
  * each content request back as a model event, terminating when the queue closes.
  *
  * It overrides `runLiveImpl` directly and never contacts a real model, so the
- * test exercises the full `Runner.runLive` lifecycle with no external services.
+ * test exercises the full `Runner.runLive` lifecycle through the public
+ * `InMemoryRunner` API with no external services.
  */
 class EchoLiveAgent extends LlmAgent {
-  capturedContext?: InvocationContext;
-
   constructor() {
     super({name: 'echo_live_agent', model: 'gemini-2.5-flash'});
   }
@@ -37,7 +34,6 @@ class EchoLiveAgent extends LlmAgent {
   protected override async *runLiveImpl(
     context: InvocationContext,
   ): AsyncGenerator<Event, void, void> {
-    this.capturedContext = context;
     const queue = context.liveRequestQueue;
     if (!queue) {
       throw new Error('Expected a liveRequestQueue on the invocation context.');
@@ -58,8 +54,7 @@ class EchoLiveAgent extends LlmAgent {
 
 describe('Runner.runLive integration', () => {
   it('streams and persists echoed events driven by the live queue', async () => {
-    const agent = new EchoLiveAgent();
-    const runner = new InMemoryRunner({agent});
+    const runner = new InMemoryRunner({agent: new EchoLiveAgent()});
     await runner.sessionService.createSession({
       appName: APP_NAME,
       userId: USER_ID,
@@ -105,15 +100,5 @@ describe('Runner.runLive integration', () => {
     expect(session!.events.every((e) => e.author === 'echo_live_agent')).toBe(
       true,
     );
-
-    // The live invocation context carries the caller's queue and is forced into
-    // BIDI streaming with the default audio response modality.
-    expect(agent.capturedContext?.liveRequestQueue).toBe(liveRequestQueue);
-    expect(agent.capturedContext?.runConfig?.streamingMode).toBe(
-      StreamingMode.BIDI,
-    );
-    expect(agent.capturedContext?.runConfig?.responseModalities).toEqual([
-      Modality.AUDIO,
-    ]);
   });
 });

@@ -15,7 +15,6 @@ import {
   determineAgentForResumption,
   Event,
   InMemoryArtifactService,
-  InMemoryRunner,
   InMemorySessionService,
   InvocationContext,
   isRoutableLlmAgent,
@@ -142,18 +141,8 @@ class MockLiveAgent extends LlmAgent {
   liveEvents: Event[] = [];
   liveImpl?: (context: InvocationContext) => AsyncGenerator<Event, void, void>;
 
-  constructor(
-    name: string,
-    disallowTransferToParent = false,
-    parentAgent?: BaseAgent,
-  ) {
-    super({
-      name,
-      model: 'gemini-2.5-flash',
-      subAgents: [],
-      parentAgent,
-      disallowTransferToParent,
-    });
+  constructor(name: string, parentAgent?: BaseAgent) {
+    super({name, model: 'gemini-2.5-flash', subAgents: [], parentAgent});
   }
 
   protected override async *runLiveImpl(
@@ -1060,7 +1049,7 @@ describe('Runner.runLive', () => {
     expect(session!.events[0].content?.parts?.[0].text).toBe('final');
   });
 
-  it('attaches the live queue and forces BIDI streaming on the context', async () => {
+  it('builds a BIDI context with the live queue and default AUDIO modality', async () => {
     await createSession();
     agent.liveEvents = [liveEvent('live-1')];
 
@@ -1076,20 +1065,6 @@ describe('Runner.runLive', () => {
     expect(agent.capturedContext?.runConfig?.streamingMode).toBe(
       StreamingMode.BIDI,
     );
-  });
-
-  it('defaults responseModalities to [AUDIO] when unset', async () => {
-    await createSession();
-    agent.liveEvents = [liveEvent('live-1')];
-
-    await collect(
-      runner.runLive({
-        userId: TEST_USER_ID,
-        sessionId: TEST_SESSION_ID,
-        liveRequestQueue,
-      }),
-    );
-
     expect(agent.capturedContext?.runConfig?.responseModalities).toEqual([
       Modality.AUDIO,
     ]);
@@ -1165,7 +1140,7 @@ describe('Runner.runLive', () => {
 
   it('resolves the agent to run via determineAgentForResumption', async () => {
     const root = new MockLiveAgent('root_agent');
-    const sub = new MockLiveAgent('sub_agent1', false, root);
+    const sub = new MockLiveAgent('sub_agent1', root);
     root.subAgents.push(sub);
     sub.liveEvents = [
       createEvent({
@@ -1266,29 +1241,6 @@ describe('Runner.runLive', () => {
     expect(session!.events[0].content?.parts?.[0].text).toBe(
       MockPlugin.BEFORE_RUN_CALLBACK_MSG,
     );
-  });
-
-  it('invokes the afterRun plugin callback after a normal run', async () => {
-    const plugin = new MockPlugin();
-    const pluginRunner = new Runner({
-      appName: TEST_APP_ID,
-      agent,
-      sessionService,
-      artifactService,
-      plugins: [plugin],
-    });
-    await createSession();
-    agent.liveEvents = [liveEvent('live-1')];
-
-    await collect(
-      pluginRunner.runLive({
-        userId: TEST_USER_ID,
-        sessionId: TEST_SESSION_ID,
-        liveRequestQueue,
-      }),
-    );
-
-    expect(plugin.afterRunCallbackCalled).toBe(true);
   });
 
   it('returns immediately when the abort signal is already aborted', async () => {
@@ -1466,43 +1418,6 @@ describe('Runner.runLive', () => {
     expect(plugin.afterRunCallbackCalled).toBe(true);
   });
 
-  it('drives the agent from the live request queue end-to-end', async () => {
-    await createSession();
-    agent.liveImpl = async function* (context) {
-      for await (const request of context.liveRequestQueue!) {
-        if (request.close) {
-          break;
-        }
-        if (request.content) {
-          yield createEvent({
-            invocationId: context.invocationId,
-            author: 'live_agent',
-            content: {
-              role: 'model',
-              parts: [{text: `echo: ${request.content.parts?.[0].text}`}],
-            },
-          });
-        }
-      }
-    };
-
-    const generator = runner.runLive({
-      userId: TEST_USER_ID,
-      sessionId: TEST_SESSION_ID,
-      liveRequestQueue,
-    });
-    liveRequestQueue.sendContent({role: 'user', parts: [{text: 'hello'}]});
-    liveRequestQueue.close();
-
-    const events = await collect(generator);
-
-    expect(events).toHaveLength(1);
-    expect(events[0].content?.parts?.[0].text).toBe('echo: hello');
-    const session = await getStoredSession();
-    expect(session!.events).toHaveLength(1);
-    expect(session!.events[0].content?.parts?.[0].text).toBe('echo: hello');
-  });
-
   it('closes toolsets after the live run completes', async () => {
     const toolset = new MockLiveToolset();
     const closeSpy = vi.spyOn(toolset, 'close');
@@ -1553,37 +1468,5 @@ describe('Runner.runLive', () => {
 
     expect(events).toHaveLength(1);
     expect(agent.capturedContext?.artifactService).toBeUndefined();
-  });
-
-  it('works through the InMemoryRunner public API', async () => {
-    const liveAgent = new MockLiveAgent('live_agent');
-    liveAgent.liveEvents = [
-      createEvent({
-        invocationId: 'live_inv',
-        author: 'live_agent',
-        content: {role: 'model', parts: [{text: 'live-1'}]},
-      }),
-    ];
-    const inMemoryRunner = new InMemoryRunner({agent: liveAgent});
-    await inMemoryRunner.sessionService.createSession({
-      appName: 'InMemoryRunner',
-      userId: TEST_USER_ID,
-      sessionId: TEST_SESSION_ID,
-    });
-    const queue = new LiveRequestQueue();
-
-    const events = await collect(
-      inMemoryRunner.runLive({
-        userId: TEST_USER_ID,
-        sessionId: TEST_SESSION_ID,
-        liveRequestQueue: queue,
-      }),
-    );
-
-    expect(events).toHaveLength(1);
-    expect(events[0].content?.parts?.[0].text).toBe('live-1');
-    expect(liveAgent.capturedContext?.runConfig?.streamingMode).toBe(
-      StreamingMode.BIDI,
-    );
   });
 });
