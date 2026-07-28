@@ -175,7 +175,7 @@ export class AgentGepaAdapter implements GepaAdapter<
  * `optimize()` only requires model credentials once the engine actually invokes
  * reflection (not, for example, when the engine is stubbed out).
  */
-function buildReflectionLm(
+export function buildReflectionLm(
   llmClass: BaseLlmType,
   model: string,
   modelConfiguration: GenerateContentConfig,
