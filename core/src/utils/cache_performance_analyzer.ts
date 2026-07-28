@@ -76,8 +76,8 @@ export class CachePerformanceAnalyzer {
   /**
    * Gets the cache usage history for an agent from a session's events.
    *
-   * Primarily an internal helper, exposed publicly so callers can inspect the
-   * raw per-event cache metadata in chronological order.
+   * Public so the raw per-event cache metadata can be inspected (and
+   * unit-tested) directly, mirroring the reference analyzer's history accessor.
    *
    * @param params.agentName Agent to get history for. When omitted, cache
    *     metadata for all agents is returned.
@@ -140,8 +140,8 @@ export class CachePerformanceAnalyzer {
       return {status: 'no_cache_data'};
     }
 
-    // Fetch the session again for token analysis, mirroring the reference
-    // implementation's second lookup.
+    // Re-fetch for token analysis: getAgentCacheHistory returns only cache
+    // metadata, so the events carrying usageMetadata are read here.
     const session = await this.sessionService.getSession({
       appName,
       userId,
