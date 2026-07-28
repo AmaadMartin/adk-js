@@ -147,4 +147,54 @@ describe('LiveRequestQueue', () => {
     expect(await queue.get()).toEqual({close: true});
     expect(await queue.get()).toEqual({close: true});
   });
+
+  it('should return a queued item even when an AbortSignal is provided', async () => {
+    const queue = new LiveRequestQueue();
+    const request: LiveRequest = {content: createUserContent('fast path')};
+    queue.send(request);
+
+    const controller = new AbortController();
+    // Fast path: the item is already queued, so the signal is irrelevant.
+    expect(await queue.get(controller.signal)).toEqual(request);
+  });
+
+  it('should reject immediately when get() is called with an already-aborted signal', async () => {
+    const queue = new LiveRequestQueue();
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(queue.get(controller.signal)).rejects.toMatchObject({
+      name: 'AbortError',
+    });
+  });
+
+  it('should reject a pending get() with AbortError and not lose a later request', async () => {
+    const queue = new LiveRequestQueue();
+    const controller = new AbortController();
+
+    const abortedGet = queue.get(controller.signal);
+    controller.abort();
+    await expect(abortedGet).rejects.toMatchObject({name: 'AbortError'});
+
+    // The aborted waiter must be removed, so a subsequently sent request is
+    // delivered to the next get() instead of being handed to a dead waiter.
+    const request: LiveRequest = {content: createUserContent('not lost')};
+    queue.send(request);
+    expect(await queue.get()).toEqual(request);
+  });
+
+  it('should not reject a get() when its signal aborts after it resolved', async () => {
+    const queue = new LiveRequestQueue();
+    const controller = new AbortController();
+
+    const pending = queue.get(controller.signal);
+    const request: LiveRequest = {content: createUserContent('resolved first')};
+    queue.send(request);
+    expect(await pending).toEqual(request);
+
+    // Aborting after resolution must be a no-op (listener already removed).
+    expect(() => {
+      controller.abort();
+    }).not.toThrow();
+  });
 });
