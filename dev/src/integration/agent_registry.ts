@@ -144,7 +144,6 @@ export class AgentRegistry {
 
       const tools = config.tools
         ?.map((toolConfig) => {
-          // Built in tools handled by the model are skipped.
           if (SKIPPED_BUILTIN_TOOLS.includes(toolConfig.name)) {
             return undefined;
           }
