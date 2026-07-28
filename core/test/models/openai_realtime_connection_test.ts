@@ -467,15 +467,14 @@ describe('OpenAiRealtimeConnection', () => {
       expect((await generator.next()).done).toBe(true);
     });
 
-    it('maps a flat error event and defaults a missing code', async () => {
+    it('defaults the error code when the error payload is missing', async () => {
       const generator = newConnection().receive();
 
-      messageQueue.push({type: 'error', message: 'oops'});
+      messageQueue.push({type: 'error'});
       messageQueue.close();
 
       expect((await generator.next()).value).toEqual({
         errorCode: 'UNKNOWN',
-        errorMessage: 'oops',
         modelVersion: MODEL,
       });
       expect((await generator.next()).done).toBe(true);

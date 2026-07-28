@@ -45,10 +45,12 @@ const CLIENT_EVENT_CONVERSATION_ITEM_CREATE = 'conversation.item.create';
 const CLIENT_EVENT_INPUT_AUDIO_BUFFER_APPEND = 'input_audio_buffer.append';
 const CLIENT_EVENT_RESPONSE_CREATE = 'response.create';
 
-/** Realtime conversation item `type` strings. */
-const ITEM_TYPE_MESSAGE = 'message';
+/**
+ * The Realtime `function_call` item `type`. Named because it is both produced
+ * (outbound function calls) and matched (in `response.done`), so the two must
+ * stay in sync.
+ */
 const ITEM_TYPE_FUNCTION_CALL = 'function_call';
-const ITEM_TYPE_FUNCTION_CALL_OUTPUT = 'function_call_output';
 
 /**
  * MIME type reported for model output audio chunks. The Realtime API streams
@@ -200,7 +202,7 @@ export function contentToRealtimeItems(
 
   if (messageContent.length > 0) {
     items.push({
-      type: ITEM_TYPE_MESSAGE,
+      type: 'message',
       role: toRealtimeRole(content.role),
       content: messageContent,
     });
@@ -240,7 +242,7 @@ function functionResponseToItem(
   functionResponse: FunctionResponse,
 ): Record<string, unknown> {
   return {
-    type: ITEM_TYPE_FUNCTION_CALL_OUTPUT,
+    type: 'function_call_output',
     call_id: functionResponse.id,
     output: JSON.stringify(functionResponse.response ?? {}),
   };
@@ -427,9 +429,9 @@ function parseFunctionArguments(
   }
 }
 
-/** Maps a Realtime `error` event to an error {@link LlmResponse}. */
+/** Maps a Realtime `error` event (payload nested under `error`) to a response. */
 function errorResponse(event: OpenAiRealtimeServerEvent): LlmResponse {
-  const error = (event['error'] as Record<string, unknown>) ?? event;
+  const error = (event['error'] as Record<string, unknown>) ?? {};
   return {
     errorCode: String(error['code'] ?? 'UNKNOWN'),
     errorMessage: error['message'] as string | undefined,
