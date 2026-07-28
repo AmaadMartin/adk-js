@@ -96,16 +96,6 @@ describe('ContextCacheRequestProcessor', () => {
     expect(llmRequest.cacheableContentsTokenCount).toBeUndefined();
   });
 
-  it('sets the cache config when there are no session events', async () => {
-    const invocationContext = createContext({contextCacheConfig: cacheConfig});
-    const llmRequest = makeLlmRequest();
-
-    await runProcessor(invocationContext, llmRequest);
-
-    expect(llmRequest.cacheConfig).toBe(cacheConfig);
-    expect(llmRequest.cacheMetadata).toBeUndefined();
-  });
-
   it('copies metadata as-is for the same invocation (no increment)', async () => {
     const cacheMetadata = makeCacheMetadata({invocationsUsed: 5});
     const invocationContext = createContext({

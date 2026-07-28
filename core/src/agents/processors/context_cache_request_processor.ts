@@ -40,21 +40,14 @@ export class ContextCacheRequestProcessor extends BaseLlmRequestProcessor {
 
     llmRequest.cacheConfig = contextCacheConfig;
 
-    const agentName = invocationContext.agent.name;
-    const {cacheMetadata, previousTokenCount} = findCacheInfoFromEvents(
-      invocationContext,
-      agentName,
-      invocationContext.invocationId,
+    const {cacheMetadata, previousTokenCount} =
+      findCacheInfoFromEvents(invocationContext);
+    llmRequest.cacheMetadata = cacheMetadata;
+    llmRequest.cacheableContentsTokenCount = previousTokenCount;
+
+    logger.debug(
+      `Context caching enabled for agent ${invocationContext.agent.name}`,
     );
-
-    if (cacheMetadata) {
-      llmRequest.cacheMetadata = cacheMetadata;
-    }
-    if (previousTokenCount !== undefined) {
-      llmRequest.cacheableContentsTokenCount = previousTokenCount;
-    }
-
-    logger.debug(`Context caching enabled for agent ${agentName}`);
   }
 }
 
@@ -62,22 +55,21 @@ export class ContextCacheRequestProcessor extends BaseLlmRequestProcessor {
  * Scans the session's events, most-recent-first, for the current agent's latest
  * cache metadata and previous prompt token count.
  *
- * The metadata is copied (never mutated in place); its `invocationsUsed` count
- * is incremented by one only when the source event comes from a different,
- * completed invocation that has an active cache. The scan stops as soon as both
- * pieces of information are found.
+ * Only events authored by the current agent are considered. The metadata is
+ * copied (never mutated in place); its `invocationsUsed` count is incremented by
+ * one only when the source event comes from a different, completed invocation
+ * that has an active cache. The scan stops as soon as both pieces of information
+ * are found.
  *
  * @param invocationContext - The context whose session events are scanned.
- * @param agentName - Only events authored by this agent are considered.
- * @param currentInvocationId - The current invocation id, compared against each
- *     event's invocation id to decide whether to increment `invocationsUsed`.
  * @returns The recovered cache metadata and previous token count, if any.
  */
-export function findCacheInfoFromEvents(
-  invocationContext: InvocationContext,
-  agentName: string,
-  currentInvocationId: string,
-): {cacheMetadata?: CacheMetadata; previousTokenCount?: number} {
+function findCacheInfoFromEvents(invocationContext: InvocationContext): {
+  cacheMetadata?: CacheMetadata;
+  previousTokenCount?: number;
+} {
+  const agentName = invocationContext.agent.name;
+  const currentInvocationId = invocationContext.invocationId;
   const events = invocationContext.session.events;
 
   let cacheMetadata: CacheMetadata | undefined;
