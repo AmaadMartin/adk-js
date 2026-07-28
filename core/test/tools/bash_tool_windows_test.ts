@@ -25,9 +25,9 @@ describe('ExecuteBashTool platform guard', () => {
     vi.mocked(os.platform).mockReturnValue('win32');
 
     const tool = new ExecuteBashTool({workspace: '/tmp'});
+    // The win32 guard is reached only after the confirmation checks pass, so a
+    // confirmed toolConfirmation is the only context field runAsync reads here.
     const toolContext = {
-      actions: {skipSummarization: false},
-      requestConfirmation: vi.fn(),
       toolConfirmation: {confirmed: true} as ToolConfirmation,
     } as unknown as Context;
 
