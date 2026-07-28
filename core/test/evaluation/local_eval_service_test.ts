@@ -153,9 +153,6 @@ interface LocalEvalServicePrivates {
     appName: string;
     evalSetId: string;
     evalCase: EvalCase;
-    rootAgent: BaseAgent;
-    useLive: boolean;
-    liveTimeoutSeconds: number;
   }): Promise<InferenceResult>;
 }
 
@@ -274,7 +271,7 @@ describe('LocalEvalService.performInference', () => {
   });
 
   it('filters eval cases by evalCaseIds', async () => {
-    const {service, privates, evalSetsManager, rootAgent} = makeService();
+    const {service, privates, evalSetsManager} = makeService();
     const evalSet = {
       evalSetId: 'test_eval_set',
       evalCases: [
@@ -307,17 +304,11 @@ describe('LocalEvalService.performInference', () => {
       appName: 'test_app',
       evalSetId: 'test_eval_set',
       evalCase: evalSet.evalCases[0],
-      rootAgent,
-      useLive: false,
-      liveTimeoutSeconds: 300,
     });
     expect(spy).toHaveBeenCalledWith({
       appName: 'test_app',
       evalSetId: 'test_eval_set',
       evalCase: evalSet.evalCases[2],
-      rootAgent,
-      useLive: false,
-      liveTimeoutSeconds: 300,
     });
   });
 
@@ -764,9 +755,6 @@ describe('LocalEvalService.performInferenceSingleEvalItem', () => {
       appName: 'test_app',
       evalSetId: 'test_eval_set',
       evalCase,
-      rootAgent,
-      useLive: false,
-      liveTimeoutSeconds: 300,
     });
 
     expect(generateSpy).toHaveBeenCalledWith(
@@ -783,7 +771,7 @@ describe('LocalEvalService.performInferenceSingleEvalItem', () => {
   });
 
   it('reports failure when inference throws', async () => {
-    const {privates, rootAgent} = makeService({
+    const {privates} = makeService({
       userSimulatorProvider: {
         provide: () => ({}) as unknown as UserSimulator,
       } as unknown as UserSimulatorProvider,
@@ -797,29 +785,10 @@ describe('LocalEvalService.performInferenceSingleEvalItem', () => {
       appName: 'test_app',
       evalSetId: 'test_eval_set',
       evalCase: makeEvalCase({conversation: []}),
-      rootAgent,
-      useLive: false,
-      liveTimeoutSeconds: 300,
     });
 
     expect(result.status).toBe(InferenceStatus.FAILURE);
     expect(result.errorMessage).toContain('boom');
-  });
-
-  it('reports failure (defensively) when live inference is requested', async () => {
-    const {privates, rootAgent} = makeService();
-
-    const result = await privates.performInferenceSingleEvalItem({
-      appName: 'test_app',
-      evalSetId: 'test_eval_set',
-      evalCase: makeEvalCase({conversation: []}),
-      rootAgent,
-      useLive: true,
-      liveTimeoutSeconds: 300,
-    });
-
-    expect(result.status).toBe(InferenceStatus.FAILURE);
-    expect(result.errorMessage).toMatch(/not yet supported/i);
   });
 });
 

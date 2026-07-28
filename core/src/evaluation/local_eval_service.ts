@@ -280,14 +280,7 @@ export class LocalEvalService extends BaseEvalService {
       evalCases,
       inferenceConfig.parallelism,
       (evalCase) =>
-        this.performInferenceSingleEvalItem({
-          appName,
-          evalSetId,
-          evalCase,
-          rootAgent: this.rootAgent,
-          useLive: inferenceConfig.useLive,
-          liveTimeoutSeconds: inferenceConfig.liveTimeoutSeconds,
-        }),
+        this.performInferenceSingleEvalItem({appName, evalSetId, evalCase}),
     );
   }
 
@@ -528,15 +521,10 @@ export class LocalEvalService extends BaseEvalService {
     appName,
     evalSetId,
     evalCase,
-    rootAgent,
-    useLive,
   }: {
     appName: string;
     evalSetId: string;
     evalCase: EvalCase;
-    rootAgent: BaseAgent;
-    useLive: boolean;
-    liveTimeoutSeconds: number;
   }): Promise<InferenceResult> {
     const initialSession = evalCase.sessionInput;
     const sessionId = this.sessionIdSupplier();
@@ -549,13 +537,9 @@ export class LocalEvalService extends BaseEvalService {
     };
 
     try {
-      if (useLive) {
-        // Defensive: live inference is guarded upstream in performInference.
-        throw new Error(LIVE_INFERENCE_NOT_SUPPORTED_MESSAGE);
-      }
       const inferences = await runWithClientLabel(EVAL_CLIENT_LABEL, () =>
         EvaluationGenerator.generateInferencesFromRootAgent({
-          rootAgent,
+          rootAgent: this.rootAgent,
           userSimulator: this.userSimulatorProvider.provide(evalCase),
           initialSession,
           sessionId,

@@ -141,9 +141,10 @@ export class EvaluationGenerator {
 
     const events: Event[] = [];
     for (;;) {
-      const nextUserMessage = await userSimulator.getNextUserMessage(
-        structuredClone(events),
-      );
+      // simplicity: pass the live event history directly. The only shipped
+      // simulator (static) ignores it; a history-reading simulator would add
+      // its own defensive copy when that path lands.
+      const nextUserMessage = await userSimulator.getNextUserMessage(events);
       if (
         nextUserMessage.status !== Status.SUCCESS ||
         nextUserMessage.userMessage === undefined
