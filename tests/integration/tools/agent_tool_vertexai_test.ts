@@ -91,7 +91,7 @@ describe('AgentTool (Vertex AI)', () => {
 
     const sessionStateStore: Record<string, Record<string, unknown>> = {};
     const eventsStore: unknown[] = [];
-    const getRequestNames: string[] = [];
+    let lastGetName = '';
 
     const mockClient = {
       createInternal: async (req: {
@@ -115,7 +115,7 @@ describe('AgentTool (Vertex AI)', () => {
         };
       },
       get: async (req: {name: string}) => {
-        getRequestNames.push(req.name);
+        lastGetName = req.name;
         const id = req.name.split('/').pop() ?? '';
         return {
           userId: 'TestUser',
@@ -215,7 +215,7 @@ describe('AgentTool (Vertex AI)', () => {
     });
 
     expect(reloaded?.id).toBe(createdSession.id);
-    expect(getRequestNames.at(-1)).toBe(
+    expect(lastGetName).toBe(
       `reasoningEngines/9208858483368132608/sessions/${createdSession.id}`,
     );
   });

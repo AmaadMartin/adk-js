@@ -69,57 +69,46 @@ export function quoteFilterLiteral(value: string): string {
 const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
 
 /**
- * Extracts the short session ID when a full session resource name is given.
+ * Reduces a session identifier to a short ID that is safe to interpolate into
+ * a Vertex resource name.
  *
  * Agent Engine returns session resource names of the form
  * `projects/{project}/locations/{location}/reasoningEngines/{engine}/sessions/{session}`,
- * and callers routinely hand those straight back to the session service. Values
- * that are not a session resource name are returned unchanged so that
- * {@link validateSessionId} still sees the caller's original input.
+ * and callers routinely hand those straight back to the session service, so a
+ * trailing `sessions/{session}` suffix is stripped. Anything else is checked
+ * as-is: a session ID containing `/`, `..` or a query separator would escape
+ * its path segment and address a different resource, side-stepping the
+ * ownership checks that resource carries.
  *
- * @param sessionId The session ID or full session resource name.
- * @param expectedEngineId The reasoning engine the call resolved to, if known.
+ * @param sessionId The session ID or session resource name.
+ * @param engineId The reasoning engine the call resolved to.
  * @returns The short session ID.
- * @throws If the resource name names a different reasoning engine.
+ * @throws If the resource name belongs to a different reasoning engine, or if
+ *   the resulting ID does not match `SESSION_ID_PATTERN`.
  */
-export function extractShortSessionId(
+export function normalizeSessionId(
   sessionId: string,
-  expectedEngineId?: string,
+  engineId: string,
 ): string {
   const parts = sessionId.split('/');
-  if (parts.at(-2) !== 'sessions') {
-    return sessionId;
-  }
-  const passedEngineId = parts.at(-3);
+  const isResourceName = parts.at(-2) === 'sessions';
   if (
-    parts.length >= 4 &&
+    isResourceName &&
     parts.at(-4) === 'reasoningEngines' &&
-    expectedEngineId &&
-    passedEngineId !== expectedEngineId
+    parts.at(-3) !== engineId
   ) {
     throw new Error(
-      `Session resource name mismatch: session belongs to reasoningEngine '${passedEngineId}', but service is configured for '${expectedEngineId}'.`,
+      `Session resource name mismatch: session belongs to reasoningEngine '${parts.at(-3)}', but service is configured for '${engineId}'.`,
     );
   }
-  return parts[parts.length - 1];
-}
 
-/**
- * Rejects session IDs that could escape their URL path segment.
- *
- * A session ID is interpolated directly into a Vertex resource name, so values
- * containing `/`, `..` or a query separator would address a different resource
- * and side-step the ownership checks that resource carries.
- *
- * @param sessionId The short session ID to check.
- * @throws If the session ID does not match `SESSION_ID_PATTERN`.
- */
-export function validateSessionId(sessionId: string): void {
-  if (!SESSION_ID_PATTERN.test(sessionId)) {
+  const shortSessionId = isResourceName ? parts[parts.length - 1] : sessionId;
+  if (!SESSION_ID_PATTERN.test(shortSessionId)) {
     throw new Error(
-      `Invalid session ID '${sessionId}': must match ${SESSION_ID_PATTERN.source}.`,
+      `Invalid session ID '${shortSessionId}': must match ${SESSION_ID_PATTERN.source}.`,
     );
   }
+  return shortSessionId;
 }
 
 export interface VertexAiSessionServiceOptions {
@@ -225,11 +214,9 @@ export class VertexAiSessionService extends BaseSessionService {
 
     const reasoningEngineId = this.getReasoningEngineId(appName);
     const filteredState = state ? trimTempState(state) : undefined;
-    let shortSessionId: string | undefined;
-    if (sessionId) {
-      shortSessionId = extractShortSessionId(sessionId, reasoningEngineId);
-      validateSessionId(shortSessionId);
-    }
+    const shortSessionId = sessionId
+      ? normalizeSessionId(sessionId, reasoningEngineId)
+      : undefined;
     let apiResponse = await this.sessions.createInternal({
       name: `reasoningEngines/${reasoningEngineId}`,
       userId: userId,
@@ -283,11 +270,10 @@ export class VertexAiSessionService extends BaseSessionService {
     config,
   }: GetSessionRequest): Promise<Session | undefined> {
     const reasoningEngineId = this.getReasoningEngineId(appName);
-    // Normalize and validate outside the try block: a malformed session ID is a
-    // caller error and must surface as a throw, never as the `undefined` the
-    // NOT_FOUND handler below returns for a session that does not exist.
-    const shortSessionId = extractShortSessionId(sessionId, reasoningEngineId);
-    validateSessionId(shortSessionId);
+    // Normalize outside the try block: a malformed session ID is a caller error
+    // and must surface as a throw, never as the `undefined` the NOT_FOUND
+    // handler below returns for a session that does not exist.
+    const shortSessionId = normalizeSessionId(sessionId, reasoningEngineId);
     const sessionResourceName = `reasoningEngines/${reasoningEngineId}/sessions/${shortSessionId}`;
 
     try {
@@ -459,18 +445,17 @@ export class VertexAiSessionService extends BaseSessionService {
     sessionId,
   }: DeleteSessionRequest): Promise<void> {
     const reasoningEngineId = this.getReasoningEngineId(appName);
-    const shortSessionId = extractShortSessionId(sessionId, reasoningEngineId);
-    validateSessionId(shortSessionId);
 
     // A session may only be deleted by the user it belongs to. getSession
     // already enforces this and throws when the stored session's userId does
     // not match, so load the session first and stop if it is missing or not
     // owned by this user. This keeps deleteSession consistent with getSession
-    // and with InMemorySessionService.deleteSession.
+    // and with InMemorySessionService.deleteSession. It also normalizes the
+    // session ID, so session.id is the short ID this delete may address.
     const session = await this.getSession({
       appName,
       userId,
-      sessionId: shortSessionId,
+      sessionId,
       config: {numRecentEvents: 0},
     });
     if (!session) {
@@ -478,7 +463,7 @@ export class VertexAiSessionService extends BaseSessionService {
     }
 
     await this.sessions.delete({
-      name: `reasoningEngines/${reasoningEngineId}/sessions/${shortSessionId}`,
+      name: `reasoningEngines/${reasoningEngineId}/sessions/${session.id}`,
     });
   }
 
@@ -486,12 +471,13 @@ export class VertexAiSessionService extends BaseSessionService {
     session,
     event,
   }: AppendEventRequest): Promise<Event> {
+    // Resolve the target resource before mutating the caller's session, so a
+    // rejected session ID leaves it untouched.
+    const reasoningEngineId = this.getReasoningEngineId(session.appName);
+    const shortSessionId = normalizeSessionId(session.id, reasoningEngineId);
+
     await super.appendEvent({session, event});
     session.lastUpdateTime = event.timestamp;
-
-    // session.id is ADK-owned and already short, so it only needs validating.
-    validateSessionId(session.id);
-    const reasoningEngineId = this.getReasoningEngineId(session.appName);
 
     const customMetadata: Record<string, unknown> = {...event.customMetadata};
     if (isCompactedEvent(event)) {
@@ -531,7 +517,7 @@ export class VertexAiSessionService extends BaseSessionService {
     >;
 
     const params: AppendAgentEngineSessionEventRequestParameters = {
-      name: `reasoningEngines/${reasoningEngineId}/sessions/${session.id}`,
+      name: `reasoningEngines/${reasoningEngineId}/sessions/${shortSessionId}`,
       author: event.author || 'user',
       invocationId: event.invocationId || `inv-${Date.now()}`,
       timestamp: new Date(event.timestamp).toISOString(),
@@ -547,7 +533,7 @@ export class VertexAiSessionService extends BaseSessionService {
       );
       delete config.rawEvent;
       await this.sessions.events.append({
-        name: `reasoningEngines/${reasoningEngineId}/sessions/${session.id}`,
+        name: `reasoningEngines/${reasoningEngineId}/sessions/${shortSessionId}`,
         author: event.author || 'user',
         invocationId: event.invocationId || `inv-${Date.now()}`,
         timestamp: new Date(event.timestamp).toISOString(),
