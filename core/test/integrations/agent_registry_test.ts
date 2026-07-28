@@ -6,6 +6,7 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+import {Client, ClientFactory, JsonRpcTransport} from '@a2a-js/sdk/client';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   AgentRegistry,
@@ -557,6 +558,9 @@ describe('AgentRegistry', () => {
             url: 'https://agent.com',
             preferredTransport: 'JSONRPC',
             protocolVersion: '0.3.0',
+            capabilities: {},
+            defaultInputModes: [],
+            defaultOutputModes: [],
             skills: [],
           },
         },
@@ -693,16 +697,23 @@ describe('AgentRegistry', () => {
           content: {
             name: 'CustomAgentWithOptions',
             description: 'Desc',
+            version: '1.0.0',
             url: 'https://agent.com',
             preferredTransport: 'JSONRPC',
             protocolVersion: '0.3.0',
+            capabilities: {},
+            defaultInputModes: [],
+            defaultOutputModes: [],
             skills: [],
           },
         },
       };
 
-      const dummyClient = {};
-      const dummyClientFactory = () => {};
+      const dummyClient = new Client(
+        new JsonRpcTransport({endpoint: 'https://agent.com'}),
+        agentInfo.card.content,
+      );
+      const dummyClientFactory = new ClientFactory();
 
       vi.spyOn(registry, 'getAgentInfo').mockResolvedValue(agentInfo);
       const agent = await registry.getRemoteA2AAgent('agents/agent-1', {

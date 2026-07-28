@@ -270,10 +270,7 @@ describe('SecurityPlugin', () => {
   describe('InMemoryPolicyEngine', () => {
     it('should always return ALLOW', async () => {
       const engine = new InMemoryPolicyEngine();
-      const result: PolicyCheckResult = await engine.evaluate({
-        tool: mockTool,
-        toolArgs: {},
-      });
+      const result: PolicyCheckResult = await engine.evaluate();
 
       expect(result.outcome).toBe(PolicyOutcome.ALLOW);
     });

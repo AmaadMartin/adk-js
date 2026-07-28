@@ -75,6 +75,10 @@ class DataProcessingAgent extends BaseAgent {
       longRunningToolIds: ['lro-call-id-999'],
     });
   }
+
+  override async *runLiveImpl(
+    _ctx: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {}
 }
 
 /**
@@ -110,6 +114,10 @@ class RootOrchestratorAgent extends BaseAgent {
       },
     });
   }
+
+  override async *runLiveImpl(
+    _ctx: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {}
 }
 
 describe('E2E LRO Session Resumption Routing', () => {

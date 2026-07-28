@@ -8,12 +8,16 @@ import {describe, expect, it} from 'vitest';
 import {BaseAgent} from '../../src/agents/base_agent.js';
 import {App, isApp, validateAppName} from '../../src/apps/app.js';
 import {createResumabilityConfig} from '../../src/apps/resumability_config.js';
+import {Event} from '../../src/events/event.js';
 import {BasePlugin} from '../../src/plugins/base_plugin.js';
 
 class DummyAgent extends BaseAgent {
   constructor(name = 'dummy_agent') {
     super({name});
   }
+
+  protected async *runAsyncImpl(): AsyncGenerator<Event, void, void> {}
+  protected async *runLiveImpl(): AsyncGenerator<Event, void, void> {}
 }
 
 class DummyPlugin extends BasePlugin {
@@ -78,11 +82,13 @@ describe('App', () => {
   });
 
   it('throws if rootAgent is missing or not a BaseAgent', () => {
-    expect(() => new App({name: 'test_app', rootAgent: undefined})).toThrow(
-      'rootAgent must be provided.',
-    );
+    // `rootAgent` is a required BaseAgent, so invalid values are cast to
+    // exercise the constructor's runtime validation from untyped callers.
     expect(
-      () => new App({name: 'test_app', rootAgent: {name: 'fake'}}),
+      () => new App({name: 'test_app', rootAgent: undefined as never}),
+    ).toThrow('rootAgent must be provided.');
+    expect(
+      () => new App({name: 'test_app', rootAgent: {name: 'fake'} as never}),
     ).toThrow(/rootAgent must be a BaseAgent instance/);
   });
 

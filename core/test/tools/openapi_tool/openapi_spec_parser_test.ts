@@ -133,7 +133,10 @@ describe('OpenApiSpecParser', () => {
   });
 
   it('should sanitize schema types', () => {
-    const spec: OpenAPIV3.Document = {
+    // The spec intentionally carries invalid/uppercase types to exercise the
+    // parser's normalization and stripping, so it is cast from a malformed
+    // literal (mirroring the invalid-spec fixtures in openapi_toolset_test.ts).
+    const spec = {
       openapi: '3.0.0',
       info: {title: 'Sanitize API', version: '1.0.0'},
       paths: {
@@ -157,7 +160,7 @@ describe('OpenApiSpecParser', () => {
           },
         },
       },
-    };
+    } as unknown as OpenAPIV3.Document;
 
     const parser = new OpenApiSpecParser();
     const parsed = parser.parse(spec);
@@ -168,7 +171,11 @@ describe('OpenApiSpecParser', () => {
     const schema = body.content['application/json']
       .schema as OpenAPIV3.SchemaObject;
     expect(schema.type).toBe('object');
-    expect(schema.properties?.age?.type).toBe('integer');
+    const ageSchema = schema.properties?.age;
+    if (!ageSchema || '$ref' in ageSchema) {
+      throw new Error('Expected age property to be a schema object');
+    }
+    expect(ageSchema.type).toBe('integer');
     expect(
       (schema.properties?.invalid as OpenAPIV3.SchemaObject).type,
     ).toBeUndefined();

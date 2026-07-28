@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
+  AuthConfig,
   BasePlugin,
   BaseTool,
   createEvent,
@@ -400,11 +401,19 @@ describe('generateAuthEvent', () => {
   });
 
   it('should return auth event if requestedAuthConfigs is present', () => {
+    const authConfig1: AuthConfig = {
+      credentialKey: 'call_1',
+      authScheme: {type: 'apiKey', name: 'testKey', in: 'header'},
+    };
+    const authConfig2: AuthConfig = {
+      credentialKey: 'call_2',
+      authScheme: {type: 'apiKey', name: 'testKey', in: 'header'},
+    };
     const functionResponseEvent = createEvent({
       actions: createEventActions({
         requestedAuthConfigs: {
-          'call_1': 'auth_config_1',
-          'call_2': 'auth_config_2',
+          'call_1': authConfig1,
+          'call_2': authConfig2,
         },
       }),
       content: {role: 'model', parts: []},
@@ -422,14 +431,14 @@ describe('generateAuthEvent', () => {
     );
     expect(call1).toBeDefined();
     expect(call1!.functionCall!.name).toBe('adk_request_credential');
-    expect(call1!.functionCall!.args!['auth_config']).toBe('auth_config_1');
+    expect(call1!.functionCall!.args!['auth_config']).toBe(authConfig1);
 
     const call2 = parts.find(
       (p) => p.functionCall?.args?.['function_call_id'] === 'call_2',
     );
     expect(call2).toBeDefined();
     expect(call2!.functionCall!.name).toBe('adk_request_credential');
-    expect(call2!.functionCall!.args!['auth_config']).toBe('auth_config_2');
+    expect(call2!.functionCall!.args!['auth_config']).toBe(authConfig2);
   });
 });
 
@@ -672,7 +681,6 @@ describe('getLongRunningFunctionCalls', () => {
         isLongRunning: false,
       }),
     };
-    // @ts-expect-error ts will argue about toolsDict because getLongRunningFunctionCalls is improted from the source and BaseTool is imported from '@google/adk'.
     const result = getLongRunningFunctionCalls(functionCalls, toolsDict);
     expect(result.has('call-1')).toBe(true);
     expect(result.has('call-2')).toBe(false);
