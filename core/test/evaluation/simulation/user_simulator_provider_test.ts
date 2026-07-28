@@ -4,12 +4,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+// Type-only symbols are imported via `import type` so esbuild's per-file TS
+// transform classifies them correctly; mixing them into the value import below
+// makes esbuild mis-elide adjacent value imports (dropping them at runtime).
+import type {BaseLlm, Invocation, UserSimulator} from '@google/adk';
 import {
-  BaseLlm,
   BaseUserSimulatorConfig,
   ConversationScenario,
   EvalCase,
-  Invocation,
+  LlmAudioUserSimulator,
+  LlmAudioUserSimulatorConfig,
   LlmBackedUserSimulator,
   LlmBackedUserSimulatorConfig,
   LLMRegistry,
@@ -18,6 +22,11 @@ import {
   UserSimulatorProvider,
 } from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+
+/** Reads the audio decorator's private inner text simulator for assertions. */
+function wrappedTextSimulator(simulator: UserSimulator): UserSimulator {
+  return (simulator as unknown as {textSimulator: UserSimulator}).textSimulator;
+}
 
 const TEST_CONVERSATION: Invocation[] = [
   {invocationId: 'inv1', userContent: {parts: [{text: 'Hello!'}]}},
@@ -119,6 +128,47 @@ describe('UserSimulatorProvider', () => {
   it('registers the built-in LlmBackedUserSimulator on import', () => {
     expect(SIMULATOR_BY_CONFIG_TYPE.get(LlmBackedUserSimulatorConfig)).toBe(
       LlmBackedUserSimulator,
+    );
+  });
+
+  it('registers the built-in LlmAudioUserSimulator on import', () => {
+    expect(SIMULATOR_BY_CONFIG_TYPE.get(LlmAudioUserSimulatorConfig)).toBe(
+      LlmAudioUserSimulator,
+    );
+  });
+
+  it('wraps a scenario simulator in the audio decorator for an audio config', () => {
+    const scenario = makeScenario();
+    const provider = new UserSimulatorProvider(
+      new LlmAudioUserSimulatorConfig(),
+    );
+    const evalCase = new EvalCase({
+      evalId: 'test_eval_id',
+      conversationScenario: scenario,
+    });
+    const simulator = provider.provide(evalCase);
+    expect(simulator).toBeInstanceOf(LlmAudioUserSimulator);
+    const inner = wrappedTextSimulator(simulator);
+    expect(inner).toBeInstanceOf(LlmBackedUserSimulator);
+    expect((inner as LlmBackedUserSimulator).conversationScenario).toBe(
+      scenario,
+    );
+  });
+
+  it('wraps a static conversation in the audio decorator for an audio config', () => {
+    const provider = new UserSimulatorProvider(
+      new LlmAudioUserSimulatorConfig(),
+    );
+    const evalCase = new EvalCase({
+      evalId: 'test_eval_id',
+      conversation: TEST_CONVERSATION,
+    });
+    const simulator = provider.provide(evalCase);
+    expect(simulator).toBeInstanceOf(LlmAudioUserSimulator);
+    const inner = wrappedTextSimulator(simulator);
+    expect(inner).toBeInstanceOf(StaticUserSimulator);
+    expect((inner as StaticUserSimulator).staticConversation).toBe(
+      TEST_CONVERSATION,
     );
   });
 
