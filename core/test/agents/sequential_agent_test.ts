@@ -129,7 +129,7 @@ describe('SequentialAgent', () => {
 
     const authors: string[] = [];
     for await (const event of seq.runAsync(context)) {
-      authors.push(event.author);
+      authors.push(event.author!);
     }
 
     expect(authors).toEqual(['sub1', 'sub1', 'sub2']);

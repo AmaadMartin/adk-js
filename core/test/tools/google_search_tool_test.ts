@@ -5,9 +5,10 @@
  */
 
 import {GOOGLE_SEARCH, GoogleSearchTool, LlmRequest} from '@google/adk';
+import {Tool} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
-function makeRequest(model?: string, tools = []): LlmRequest {
+function makeRequest(model?: string, tools: Tool[] = []): LlmRequest {
   return {
     model,
     config: {tools},

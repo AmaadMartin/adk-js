@@ -23,7 +23,7 @@ interface TestTool {
 
 describe('VertexAiSearchTool', () => {
   it('should throw error if neither dataStoreId nor searchEngineId is specified', () => {
-    expect(() => new VertexAiSearchTool({})).toThrowError(
+    expect(() => new VertexAiSearchTool({} as never)).toThrowError(
       'Either dataStoreId or searchEngineId must be specified.',
     );
   });
@@ -34,7 +34,7 @@ describe('VertexAiSearchTool', () => {
         new VertexAiSearchTool({
           dataStoreId: 'ds',
           searchEngineId: 'se',
-        }),
+        } as never),
     ).toThrowError('Either dataStoreId or searchEngineId must be specified.');
   });
 
@@ -44,7 +44,7 @@ describe('VertexAiSearchTool', () => {
         new VertexAiSearchTool({
           dataStoreId: 'ds',
           dataStoreSpecs: [{dataStore: 'ds1'}],
-        }),
+        } as never),
     ).toThrowError(
       'searchEngineId must be specified if dataStoreSpecs is specified.',
     );
@@ -71,6 +71,8 @@ describe('VertexAiSearchTool', () => {
     const llmRequest: LlmRequest = {
       model: 'gemini-2.0-flash',
       toolsDict: {},
+      contents: [],
+      liveConnectConfig: {},
     };
     const toolContext = {} as Context;
 
@@ -94,6 +96,8 @@ describe('VertexAiSearchTool', () => {
     const llmRequest: LlmRequest = {
       model: 'gemini-1.5-pro',
       toolsDict: {},
+      contents: [],
+      liveConnectConfig: {},
       config: {
         tools: [{functionDeclarations: []}],
       },
@@ -115,6 +119,8 @@ describe('VertexAiSearchTool', () => {
     const llmRequest: LlmRequest = {
       model: 'gemini-1.5-pro',
       toolsDict: {},
+      contents: [],
+      liveConnectConfig: {},
       config: {
         tools: [{functionDeclarations: []}],
       },
@@ -131,6 +137,8 @@ describe('VertexAiSearchTool', () => {
     const llmRequest: LlmRequest = {
       model: 'claude-3',
       toolsDict: {},
+      contents: [],
+      liveConnectConfig: {},
     };
     const toolContext = {} as Context;
 
@@ -158,6 +166,8 @@ describe('VertexAiSearchTool', () => {
       const llmRequest: LlmRequest = {
         model: 'claude-3',
         toolsDict: {},
+        contents: [],
+        liveConnectConfig: {},
       };
       const toolContext = {} as Context;
 

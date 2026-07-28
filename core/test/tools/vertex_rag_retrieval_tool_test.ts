@@ -5,15 +5,17 @@
  */
 
 import {VertexRagRetrievalTool} from '@google/adk';
+import {Tool} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
 const RAG_CORPUS =
   'projects/my-project/locations/us-central1/ragCorpora/my-corpus';
 
 function makeLlmRequest(model = 'gemini-2.0-flash') {
+  const config: {tools?: Tool[]} = {};
   return {
     model,
-    config: {},
+    config,
     contents: [],
     systemInstruction: undefined,
   };
@@ -101,7 +103,7 @@ describe('VertexRagRetrievalTool', () => {
         ragResources: [{ragCorpus: RAG_CORPUS}],
       });
       const llmRequest = makeLlmRequest();
-      llmRequest.config.tools = [{googleSearch: {}}] as never;
+      llmRequest.config.tools = [{googleSearch: {}}];
 
       await tool.processLlmRequest({llmRequest} as never);
 
@@ -115,7 +117,7 @@ describe('VertexRagRetrievalTool', () => {
       const tool = new VertexRagRetrievalTool({
         ragResources: [{ragCorpus: RAG_CORPUS}],
       });
-      const result = await tool.runAsync({} as never);
+      const result = await tool.runAsync();
       expect(result).toBeUndefined();
     });
   });
