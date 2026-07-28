@@ -8,6 +8,10 @@ import {experimental} from '../../utils/experimental.js';
 import {ConversationScenario} from '../conversation_scenarios.js';
 import {EvalCase} from '../eval_case.js';
 import {
+  LlmAudioUserSimulator,
+  LlmAudioUserSimulatorConfig,
+} from './llm_audio_user_simulator.js';
+import {
   LlmBackedUserSimulator,
   LlmBackedUserSimulatorConfig,
 } from './llm_backed_user_simulator.js';
@@ -22,8 +26,8 @@ import {
 
 // Built-in user-simulator registrations. Importing this module wires up ADK's
 // built-in simulators to the shared dispatch registry ("batteries included").
-// (Audio registration is intentionally absent -- it is a separate port.)
 registerUserSimulator(LlmBackedUserSimulatorConfig, LlmBackedUserSimulator);
+registerUserSimulator(LlmAudioUserSimulatorConfig, LlmAudioUserSimulator);
 
 type ScenarioSimulatorClass = new (args: {
   config: BaseUserSimulatorConfig;
@@ -62,23 +66,39 @@ export class UserSimulatorProvider {
   /**
    * Provides an appropriate user simulator based on the eval case and config.
    *
-   * A static `conversation` yields a {@link StaticUserSimulator}
-   * (config-agnostic); otherwise the simulator registered for the config's
-   * runtime type is instantiated with the case's scenario.
+   * Routing:
+   * - A static `conversation` yields a {@link StaticUserSimulator}, wrapped in an
+   *   {@link LlmAudioUserSimulator} when the config selects the audio decorator.
+   * - Otherwise the simulator registered for the config's runtime type is
+   *   instantiated with the case's scenario. When that is
+   *   {@link LlmAudioUserSimulator}, an inner {@link LlmBackedUserSimulator} is
+   *   built from a text config derived from the audio config and injected as the
+   *   decorator's text simulator.
    *
    * @param evalCase The eval case (carries a conversation xor a scenario).
    * @returns The provided user simulator.
    * @throws {Error} If no simulator is registered for the config type.
    */
   provide(evalCase: EvalCase): UserSimulator {
-    if (evalCase.conversation !== undefined) {
-      return new StaticUserSimulator({
-        staticConversation: evalCase.conversation,
-      });
-    }
-
     const configType = this.userSimulatorConfig
       .constructor as BaseUserSimulatorConfigClass;
+
+    if (evalCase.conversation !== undefined) {
+      // Static conversations replay pre-authored turns.
+      const staticSimulator = new StaticUserSimulator({
+        staticConversation: evalCase.conversation,
+      });
+      // When an audio config is set, route the static turns through the audio
+      // decorator so they are synthesized to audio, just like the scenario case.
+      if (SIMULATOR_BY_CONFIG_TYPE.get(configType) === LlmAudioUserSimulator) {
+        return new LlmAudioUserSimulator({
+          config: this.userSimulatorConfig,
+          textSimulator: staticSimulator,
+        });
+      }
+      return staticSimulator;
+    }
+
     const simulatorClass = SIMULATOR_BY_CONFIG_TYPE.get(configType);
     if (simulatorClass === undefined) {
       const registered = [...SIMULATOR_BY_CONFIG_TYPE.keys()]
@@ -91,10 +111,31 @@ export class UserSimulatorProvider {
       );
     }
 
+    const conversationScenario =
+      evalCase.conversationScenario as ConversationScenario;
+
+    // When the config resolves to the audio decorator, build the inner
+    // LlmBackedUserSimulator first and inject it as the text simulator.
+    if (simulatorClass === LlmAudioUserSimulator) {
+      const audioConfig = this
+        .userSimulatorConfig as LlmAudioUserSimulatorConfig;
+      const textConfig = new LlmBackedUserSimulatorConfig({
+        model: audioConfig.model,
+        modelConfiguration: audioConfig.modelConfiguration,
+        maxAllowedInvocations: audioConfig.maxAllowedInvocations,
+        customInstructions: audioConfig.customInstructions,
+        includeFunctionCalls: audioConfig.includeFunctionCalls,
+      });
+      const textSimulator = new LlmBackedUserSimulator({
+        config: textConfig,
+        conversationScenario,
+      });
+      return new LlmAudioUserSimulator({config: audioConfig, textSimulator});
+    }
+
     return new (simulatorClass as unknown as ScenarioSimulatorClass)({
       config: this.userSimulatorConfig,
-      conversationScenario:
-        evalCase.conversationScenario as ConversationScenario,
+      conversationScenario,
     });
   }
 }

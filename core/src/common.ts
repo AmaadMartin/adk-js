@@ -140,6 +140,13 @@ export type {
   Invocation,
   StaticConversation,
 } from './evaluation/eval_case.js';
+export {CloudTtsLlm} from './evaluation/simulation/cloud_tts_llm.js';
+export type {CloudTtsLlmParams} from './evaluation/simulation/cloud_tts_llm.js';
+export {
+  LlmAudioUserSimulator,
+  LlmAudioUserSimulatorConfig,
+} from './evaluation/simulation/llm_audio_user_simulator.js';
+export type {LlmAudioUserSimulatorConfigInit} from './evaluation/simulation/llm_audio_user_simulator.js';
 export {
   LlmBackedUserSimulator,
   LlmBackedUserSimulatorConfig,
