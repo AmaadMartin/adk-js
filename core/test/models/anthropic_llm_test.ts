@@ -53,15 +53,12 @@ function makeRequest(overrides: Record<string, unknown> = {}): LlmRequest {
   } as LlmRequest;
 }
 
-function textMessage(
-  text: string,
-  stopReason: string | null = 'end_turn',
-): AnthropicMessage {
+function textMessage(text: string): AnthropicMessage {
   return {
     id: 'msg_test',
     model: 'claude-sonnet-4-20250514',
     role: 'assistant',
-    stop_reason: stopReason,
+    stop_reason: 'end_turn',
     stop_sequence: null,
     type: 'message',
     content: [{type: 'text', text}],
@@ -69,10 +66,10 @@ function textMessage(
   };
 }
 
-function mockFetchJson(message: AnthropicMessage, ok = true, status = 200) {
+function mockFetchJson(message: AnthropicMessage) {
   globalThis.fetch = vi.fn().mockResolvedValue({
-    ok,
-    status,
+    ok: true,
+    status: 200,
     json: async () => message,
     text: async () => JSON.stringify(message),
   });
@@ -1415,7 +1412,6 @@ describe('AnthropicLlm', () => {
     });
 
     it('throws on a non-2xx response including status and body', async () => {
-      mockFetchJson(textMessage('ignored'), false, 400);
       globalThis.fetch = vi.fn().mockResolvedValue({
         ok: false,
         status: 400,
