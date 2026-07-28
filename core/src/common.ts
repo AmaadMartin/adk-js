@@ -136,11 +136,15 @@ export type {
   InvocationEvents,
 } from './evaluation/eval_case.js';
 export {EvalStatus} from './evaluation/eval_metrics.js';
+export type {EvalMetric} from './evaluation/eval_metrics.js';
 export {Evaluator, validateInvocationLengths} from './evaluation/evaluator.js';
 export type {
   EvaluationResult,
   PerInvocationResult,
 } from './evaluation/evaluator.js';
+export {MultiTurnTaskSuccessV1Evaluator} from './evaluation/multi_turn_task_success_evaluator.js';
+export {MultiTurnToolUseQualityV1Evaluator} from './evaluation/multi_turn_tool_use_quality_evaluator.js';
+export {MultiTurnTrajectoryQualityV1Evaluator} from './evaluation/multi_turn_trajectory_quality_evaluator.js';
 export {
   MultiTurnVertexAiEvalFacade,
   RubricMetric,
