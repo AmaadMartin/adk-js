@@ -21,6 +21,12 @@ import {describe, expect, it} from 'vitest';
 const IS_WINDOWS = os.platform() === 'win32';
 const IS_UNIX = os.platform() === 'linux' || os.platform() === 'darwin';
 
+// Python interpreter cold-start on the windows-latest CI runner can exceed
+// vitest's default 5s testTimeout for these real-subprocess tests, causing
+// nondeterministic 'Test timed out in 5000ms.' failures. Give the Python cases
+// extra headroom on Windows; other platforms keep the strict default.
+const PYTHON_TEST_TIMEOUT_MS = IS_WINDOWS ? 30_000 : 5_000;
+
 describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
   function createMockContext(agentName = 'test-agent') {
     return new Context({
@@ -152,40 +158,48 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
     },
   );
 
-  it('successfully executes a real Python skill script', async () => {
-    const executor = new UnsafeLocalCodeExecutor();
-    const toolset = new SkillToolset([testSkill], {codeExecutor: executor});
-    const tool = new RunSkillScriptTool(toolset);
+  it(
+    'successfully executes a real Python skill script',
+    async () => {
+      const executor = new UnsafeLocalCodeExecutor();
+      const toolset = new SkillToolset([testSkill], {codeExecutor: executor});
+      const tool = new RunSkillScriptTool(toolset);
 
-    const result = (await tool.runAsync({
-      args: {
-        skill_name: 'test-skill',
-        script_path: 'scripts/hello.py',
-      },
-      toolContext: createMockContext(),
-    })) as CodeExecutionResult;
+      const result = (await tool.runAsync({
+        args: {
+          skill_name: 'test-skill',
+          script_path: 'scripts/hello.py',
+        },
+        toolContext: createMockContext(),
+      })) as CodeExecutionResult;
 
-    expect(result).toBeDefined();
-    expect(result.stdout).toContain('hello from skill python');
-    expect(result.stderr).toBe('');
-  });
+      expect(result).toBeDefined();
+      expect(result.stdout).toContain('hello from skill python');
+      expect(result.stderr).toBe('');
+    },
+    PYTHON_TEST_TIMEOUT_MS,
+  );
 
-  it('captures stderr from a failing Python skill script', async () => {
-    const executor = new UnsafeLocalCodeExecutor();
-    const toolset = new SkillToolset([testSkill], {codeExecutor: executor});
-    const tool = new RunSkillScriptTool(toolset);
+  it(
+    'captures stderr from a failing Python skill script',
+    async () => {
+      const executor = new UnsafeLocalCodeExecutor();
+      const toolset = new SkillToolset([testSkill], {codeExecutor: executor});
+      const tool = new RunSkillScriptTool(toolset);
 
-    const result = (await tool.runAsync({
-      args: {
-        skill_name: 'test-skill',
-        script_path: 'scripts/fail.py',
-      },
-      toolContext: createMockContext(),
-    })) as CodeExecutionResult;
+      const result = (await tool.runAsync({
+        args: {
+          skill_name: 'test-skill',
+          script_path: 'scripts/fail.py',
+        },
+        toolContext: createMockContext(),
+      })) as CodeExecutionResult;
 
-    expect(result).toBeDefined();
-    expect(result.stderr).toContain('skill python error');
-  });
+      expect(result).toBeDefined();
+      expect(result.stderr).toContain('skill python error');
+    },
+    PYTHON_TEST_TIMEOUT_MS,
+  );
 
   it.skipIf(!IS_WINDOWS)(
     'successfully executes a real PowerShell skill script',
