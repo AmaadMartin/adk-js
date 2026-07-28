@@ -21,11 +21,6 @@ import {
   TrackingScope,
 } from './reflect_retry_utils.js';
 
-export {
-  REFLECT_AND_RETRY_RESPONSE_TYPE,
-  TrackingScope,
-} from './reflect_retry_utils.js';
-
 /**
  * Error type used when the model directly calls the reserved reflection tool.
  */
@@ -36,13 +31,6 @@ export const RESERVED_TOOL_CALL_ERROR_TYPE = 'RESERVED_TOOL_CALL';
  * feed reflection guidance back to the model.
  */
 const ADK_HANDLE_MODEL_ERROR = 'adk_handle_model_error';
-
-/**
- * Arguments accepted by the reserved reflection tool's `execute` callback.
- */
-interface ReflectionToolArgs {
-  retry_count?: number;
-}
 
 /**
  * Configuration options for {@link ReflectAndRetryModelPlugin}.
@@ -166,7 +154,7 @@ export class ReflectAndRetryModelPlugin extends BasePlugin {
    * instructing the model to reflect on the failure and try a different
    * approach.
    */
-  private adkHandleModelError(args: ReflectionToolArgs): {
+  private adkHandleModelError(args: {retry_count?: number}): {
     reflection_guidance: string;
   } {
     const reflectionGuidance = `The call to the model failed.
@@ -248,7 +236,8 @@ Formulate a new plan based on your analysis and try a corrected or different app
         'A tool that triggers reflection. Reserved for internal framework ' +
         'use only. Do not call directly.',
       parameters,
-      execute: (args) => this.adkHandleModelError(args as ReflectionToolArgs),
+      execute: (args) =>
+        this.adkHandleModelError(args as {retry_count?: number}),
     });
   }
 
