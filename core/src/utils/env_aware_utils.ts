@@ -38,6 +38,16 @@ export function randomUUID(): string {
 }
 
 /**
+ * Returns the current time as fractional seconds since the Unix epoch.
+ *
+ * Mirrors Python's `time.time()` so serialized eval timestamps stay
+ * interoperable with adk-python.
+ */
+export function nowSeconds(): number {
+  return Date.now() / 1000;
+}
+
+/**
  * Encodes the given string or Uint8Array to base64.
  *
  * @param data The data to encode.
