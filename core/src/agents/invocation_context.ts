@@ -16,6 +16,7 @@ import {randomUUID} from '../utils/env_aware_utils.js';
 
 import {ActiveStreamingTool} from './active_streaming_tool.js';
 import {BaseAgent} from './base_agent.js';
+import {LiveRequestQueue} from './live_request_queue.js';
 import {RunConfig} from './run_config.js';
 import {TranscriptionEntry} from './transcription_entry.js';
 
@@ -35,6 +36,7 @@ export interface InvocationContextParams {
   endInvocation?: boolean;
   transcriptionCache?: TranscriptionEntry[];
   runConfig?: RunConfig;
+  liveRequestQueue?: LiveRequestQueue;
   activeStreamingTools?: Record<string, ActiveStreamingTool>;
   pluginManager: PluginManager;
   abortSignal?: AbortSignal;
@@ -164,6 +166,11 @@ export class InvocationContext {
   runConfig?: RunConfig;
 
   /**
+   * The queue that feeds live requests for a BIDI invocation.
+   */
+  readonly liveRequestQueue?: LiveRequestQueue;
+
+  /**
    * A container to keep track of different kinds of costs incurred as a part of
    * this invocation.
    *
@@ -200,6 +207,7 @@ export class InvocationContext {
     this.endInvocation = params.endInvocation || false;
     this.transcriptionCache = params.transcriptionCache;
     this.runConfig = params.runConfig;
+    this.liveRequestQueue = params.liveRequestQueue;
     this.activeStreamingTools = params.activeStreamingTools;
     this.pluginManager = params.pluginManager;
     this.abortSignal = params.abortSignal;
