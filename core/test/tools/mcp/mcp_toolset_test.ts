@@ -7,6 +7,7 @@
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {describe, expect, it, vi} from 'vitest';
 import {ReadonlyContext} from '../../../src/agents/readonly_context.js';
+import {LoadMcpResourceTool} from '../../../src/tools/mcp/load_mcp_resource_tool.js';
 import {MCPConnectionParams} from '../../../src/tools/mcp/mcp_session_manager.js';
 import {MCPToolset} from '../../../src/tools/mcp/mcp_toolset.js';
 
@@ -128,6 +129,79 @@ describe('MCPToolset', () => {
       const tools = await toolset.getTools();
 
       expect(tools).toHaveLength(2);
+    });
+  });
+
+  describe('useMcpResources', () => {
+    it('does not append the resource tool by default', async () => {
+      const toolset = new MCPToolset(stdioParams);
+
+      const tools = await toolset.getTools();
+
+      expect(tools).toHaveLength(2);
+      expect(tools.some((tool) => tool.name === 'load_mcp_resource')).toBe(
+        false,
+      );
+    });
+
+    it('appends load_mcp_resource as the last tool when enabled', async () => {
+      const toolset = new MCPToolset(stdioParams, [], undefined, true);
+
+      const tools = await toolset.getTools();
+
+      expect(tools).toHaveLength(3);
+      expect(tools.map((tool) => tool.name)).toEqual([
+        'test-tool',
+        'other-tool',
+        'load_mcp_resource',
+      ]);
+      expect(tools.at(-1)).toBeInstanceOf(LoadMcpResourceTool);
+    });
+
+    it('appends the resource tool after a string-array filter, bypassing it', async () => {
+      const toolset = new MCPToolset(
+        stdioParams,
+        ['test-tool'],
+        undefined,
+        true,
+      );
+
+      const tools = await toolset.getTools();
+
+      expect(tools.map((tool) => tool.name)).toEqual([
+        'test-tool',
+        'load_mcp_resource',
+      ]);
+      expect(tools.at(-1)).toBeInstanceOf(LoadMcpResourceTool);
+    });
+
+    it('appends the resource tool after a predicate filter with context', async () => {
+      const toolset = new MCPToolset(
+        stdioParams,
+        (tool) => tool.name === 'other-tool',
+        undefined,
+        true,
+      );
+
+      const tools = await toolset.getTools({} as ReadonlyContext);
+
+      expect(tools.map((tool) => tool.name)).toEqual([
+        'other-tool',
+        'load_mcp_resource',
+      ]);
+      expect(tools.at(-1)).toBeInstanceOf(LoadMcpResourceTool);
+    });
+
+    it('does not prefix the appended resource tool', async () => {
+      const toolset = new MCPToolset(stdioParams, [], 'myprefix', true);
+
+      const tools = await toolset.getTools();
+
+      expect(tools.map((tool) => tool.name)).toEqual([
+        'myprefix_test-tool',
+        'myprefix_other-tool',
+        'load_mcp_resource',
+      ]);
     });
   });
 
