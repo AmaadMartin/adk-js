@@ -83,7 +83,7 @@ export class ResponseEvaluator extends Evaluator {
     actualInvocations: Invocation[],
     expectedInvocations?: Invocation[],
     conversationScenario?: ConversationScenario,
-  ): EvaluationResult {
+  ): EvaluationResult | Promise<EvaluationResult> {
     const metricName = this.metricName;
     // For response_match_score, delegate to the deterministic RougeEvaluator.
     if (metricName === PrebuiltMetrics.RESPONSE_MATCH_SCORE) {

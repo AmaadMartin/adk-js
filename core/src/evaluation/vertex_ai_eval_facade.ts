@@ -5,7 +5,10 @@
  */
 
 import {Content} from '@google/genai';
+import {GoogleAuth} from 'google-auth-library';
 
+import {getGoogleCloudAuthHeaders} from '../utils/google_cloud_auth.js';
+import {logger} from '../utils/logger.js';
 import {ConversationScenario} from './conversation_scenarios.js';
 import {Invocation} from './eval_case.js';
 import {
@@ -23,6 +26,46 @@ import {
 export enum PrebuiltMetric {
   COHERENCE = 'coherence',
   SAFETY = 'safety',
+}
+
+/** OAuth scope required to call the Vertex AI prediction/eval endpoints. */
+const CLOUD_PLATFORM_SCOPE = 'https://www.googleapis.com/auth/cloud-platform';
+
+/**
+ * Guidance shown when the real single-turn eval path is reached without a
+ * resolvable Google Cloud project and location. The regional
+ * `:evaluateInstances` URL cannot be built without both.
+ */
+const CREDENTIALS_ERROR_MESSAGE =
+  'The single-turn Vertex AI eval metrics require Google Cloud credentials.' +
+  ' Set both GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION (for example in a' +
+  ' .env file, or via process.env) so the regional :evaluateInstances endpoint' +
+  ' can be reached.';
+
+/**
+ * Maps each supported prebuilt metric to the metric-specific
+ * `:evaluateInstances` request-input key and response-result key.
+ */
+const METRIC_ENDPOINT_MAP: Record<
+  PrebuiltMetric,
+  {inputKey: string; resultKey: string}
+> = {
+  [PrebuiltMetric.COHERENCE]: {
+    inputKey: 'coherenceInput',
+    resultKey: 'coherenceResult',
+  },
+  [PrebuiltMetric.SAFETY]: {
+    inputKey: 'safetyInput',
+    resultKey: 'safetyResult',
+  },
+};
+
+/** Builds the regional Vertex AI `:evaluateInstances` REST URL. */
+function evaluateInstancesUrl(project: string, location: string): string {
+  return (
+    `https://${location}-aiplatform.googleapis.com/v1/projects/` +
+    `${project}/locations/${location}:evaluateInstances`
+  );
 }
 
 /**
@@ -85,17 +128,21 @@ export interface VertexAiEvalFacadeOptions {
 }
 
 /**
- * A minimal facade over the Vertex Gen AI Eval SDK.
+ * A facade over the documented Vertex AI `:evaluateInstances` REST method.
  *
  * `@google/genai` exposes no Gen AI Eval API, so {@link performEval} is a
- * mockable seam that throws by default. Unit tests mock it; the surrounding
- * aggregation logic (score/status/per-invocation) is fully exercised via the
- * mock. Wiring in the real SDK is a queued follow-up.
+ * single, mockable transport seam: it issues one authenticated pointwise
+ * evaluation request per invocation and maps the metric-specific result into
+ * the internal score shape the surrounding aggregation logic
+ * (score/status/per-invocation) consumes. Unit tests mock either
+ * {@link performEval} (to exercise aggregation) or `fetch`/auth (to exercise
+ * the transport).
  */
 export abstract class VertexAiEvalFacade extends Evaluator {
   protected readonly threshold?: number;
   protected readonly metricName: PrebuiltMetric;
   protected readonly expectedInvocationsRequired: boolean;
+  private readonly auth = new GoogleAuth({scopes: [CLOUD_PLATFORM_SCOPE]});
 
   constructor({
     threshold,
@@ -112,7 +159,7 @@ export abstract class VertexAiEvalFacade extends Evaluator {
     actualInvocations: Invocation[],
     expectedInvocations?: Invocation[],
     conversationScenario?: ConversationScenario,
-  ): EvaluationResult;
+  ): Promise<EvaluationResult>;
 
   protected getText(content?: Content): string {
     if (content?.parts) {
@@ -142,16 +189,51 @@ export abstract class VertexAiEvalFacade extends Evaluator {
   }
 
   /**
-   * Calls the external Vertex Gen AI Eval service. This is a mockable seam;
-   * the real SDK is not available in adk-js, so it throws by default.
+   * Scores a single invocation against the Vertex AI `:evaluateInstances`
+   * endpoint. This is the sole network entry point (a mockable seam).
+   *
+   * @throws {Error} If the project/location cannot be resolved, if the auth
+   *     credentials cannot be refreshed, or if the request returns a non-2xx
+   *     status. A missing or non-finite score is not an error: it maps to "no
+   *     score" so the caller records `NOT_EVALUATED`.
    */
-  performEval(request: PerformEvalRequest): VertexEvalResult {
-    void request;
-    throw new Error(
-      'Vertex Gen AI Eval SDK is not available in adk-js; this metric requires' +
-        ' a service-backed implementation. See the queued follow-up to wire in' +
-        ' the real Vertex Gen AI Eval SDK.',
-    );
+  async performEval(request: PerformEvalRequest): Promise<VertexEvalResult> {
+    const project = process.env.GOOGLE_CLOUD_PROJECT;
+    const location = process.env.GOOGLE_CLOUD_LOCATION;
+    if (!project || !location) {
+      throw new Error(CREDENTIALS_ERROR_MESSAGE);
+    }
+
+    const metric = request.metrics[0];
+    const {inputKey, resultKey} = METRIC_ENDPOINT_MAP[metric];
+    const evalCase = request.dataset.evalCases[0];
+    const url = evaluateInstancesUrl(project, location);
+    const body = JSON.stringify({
+      [inputKey]: {
+        metricSpec: {},
+        instance: {prediction: evalCase.response},
+      },
+    });
+
+    const headers = await getGoogleCloudAuthHeaders(this.auth, url);
+    logger.debug(`Evaluating ${metric} against ${url}`);
+    const res = await fetch(url, {method: 'POST', headers, body});
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(
+        `:evaluateInstances request failed with status ${res.status}: ${text}`,
+      );
+    }
+
+    const json = (await res.json()) as Record<
+      string,
+      {score?: number | null} | undefined
+    >;
+    const score = json[resultKey]?.score;
+    if (typeof score === 'number' && Number.isFinite(score)) {
+      return {summaryMetrics: [{meanScore: score}]};
+    }
+    return {summaryMetrics: []};
   }
 }
 
@@ -159,11 +241,11 @@ export abstract class VertexAiEvalFacade extends Evaluator {
  * A facade for single-turn metrics exposed in the Vertex Gen AI Eval SDK.
  */
 export class SingleTurnVertexAiEvalFacade extends VertexAiEvalFacade {
-  evaluateInvocations(
+  async evaluateInvocations(
     actualInvocations: Invocation[],
     expectedInvocations?: Invocation[],
     conversationScenario?: ConversationScenario,
-  ): EvaluationResult {
+  ): Promise<EvaluationResult> {
     if (this.expectedInvocationsRequired && expectedInvocations === undefined) {
       throw new Error('expected_invocations is needed by this metric.');
     }
@@ -192,7 +274,7 @@ export class SingleTurnVertexAiEvalFacade extends VertexAiEvalFacade {
           },
         ],
       };
-      const evalCaseResult = this.performEval({
+      const evalCaseResult = await this.performEval({
         dataset,
         metrics: [this.metricName],
       });

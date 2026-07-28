@@ -38,7 +38,7 @@ describe('evaluation/response_evaluator', () => {
     vi.restoreAllMocks();
   });
 
-  it('uses the RougeEvaluator for response_match_score', () => {
+  it('uses the RougeEvaluator for response_match_score', async () => {
     const performEval = vi.spyOn(VertexAiEvalFacade.prototype, 'performEval');
     const [actual, expected] = testInvocations();
     const evaluator = new ResponseEvaluator({
@@ -46,24 +46,24 @@ describe('evaluation/response_evaluator', () => {
       metricName: PrebuiltMetrics.RESPONSE_MATCH_SCORE,
     });
 
-    const result = evaluator.evaluateInvocations(actual, expected);
+    const result = await evaluator.evaluateInvocations(actual, expected);
 
     expect(result.overallScore).toBeCloseTo(8 / 11, 10);
     expect(result.overallEvalStatus).toBe(EvalStatus.FAILED);
     expect(performEval).not.toHaveBeenCalled();
   });
 
-  it('delegates response_evaluation_score to the COHERENCE facade metric', () => {
+  it('delegates response_evaluation_score to the COHERENCE facade metric', async () => {
     const performEval = vi
       .spyOn(VertexAiEvalFacade.prototype, 'performEval')
-      .mockReturnValue({summaryMetrics: [{meanScore: 0.9}]});
+      .mockResolvedValue({summaryMetrics: [{meanScore: 0.9}]});
     const [actual, expected] = testInvocations();
     const evaluator = new ResponseEvaluator({
       threshold: 0.8,
       metricName: PrebuiltMetrics.RESPONSE_EVALUATION_SCORE,
     });
 
-    const result = evaluator.evaluateInvocations(actual, expected);
+    const result = await evaluator.evaluateInvocations(actual, expected);
 
     expect(result.overallScore).toBe(0.9);
     expect(result.overallEvalStatus).toBe(EvalStatus.PASSED);
@@ -73,7 +73,7 @@ describe('evaluation/response_evaluator', () => {
     ]);
   });
 
-  it('resolves threshold and metric name from an eval metric', () => {
+  it('resolves threshold and metric name from an eval metric', async () => {
     vi.spyOn(VertexAiEvalFacade.prototype, 'performEval');
     const [actual, expected] = testInvocations();
     const evaluator = new ResponseEvaluator({
@@ -83,7 +83,7 @@ describe('evaluation/response_evaluator', () => {
       },
     });
 
-    const result = evaluator.evaluateInvocations(actual, expected);
+    const result = await evaluator.evaluateInvocations(actual, expected);
 
     expect(result.overallScore).toBeCloseTo(8 / 11, 10);
   });

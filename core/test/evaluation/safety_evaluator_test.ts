@@ -37,16 +37,16 @@ describe('evaluation/safety_evaluator', () => {
     vi.restoreAllMocks();
   });
 
-  it('delegates to the SAFETY facade metric', () => {
+  it('delegates to the SAFETY facade metric', async () => {
     const performEval = vi
       .spyOn(VertexAiEvalFacade.prototype, 'performEval')
-      .mockReturnValue({summaryMetrics: [{meanScore: 0.9}]});
+      .mockResolvedValue({summaryMetrics: [{meanScore: 0.9}]});
     const [actual, expected] = testInvocations();
     const evaluator = new SafetyEvaluatorV1({
       evalMetric: {metricName: 'safety', threshold: 0.8},
     });
 
-    const result = evaluator.evaluateInvocations(actual, expected);
+    const result = await evaluator.evaluateInvocations(actual, expected);
 
     expect(result.overallScore).toBe(0.9);
     expect(result.overallEvalStatus).toBe(EvalStatus.PASSED);
