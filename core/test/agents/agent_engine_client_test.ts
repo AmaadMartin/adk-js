@@ -59,6 +59,13 @@ function decodeStruct(input: unknown): Record<string, unknown> {
   } as Parameters<typeof helpers.fromValue>[0]) as Record<string, unknown>;
 }
 
+/**
+ * A `google.protobuf.Value` wrapping null, as the engine returns for a missing
+ * session or an empty result. Its lack of a `structValue` is what the client
+ * treats as "no value".
+ */
+const NULL_OUTPUT = {nullValue: 0};
+
 /** Yields the given chunks as an async stream, like the transport does. */
 async function* asStream(chunks: unknown[]): AsyncGenerator<unknown> {
   for (const chunk of chunks) {
@@ -260,6 +267,195 @@ describe('AgentEngineClient.createSession', () => {
     await expect(client.createSession({userId: 'u1'})).rejects.toThrow(
       'Failed to create session: kaboom',
     );
+  });
+});
+
+describe('AgentEngineClient.getSession', () => {
+  let client: AgentEngineClient;
+
+  beforeEach(() => {
+    client = AgentEngineClient.get(ENGINE_NAME);
+  });
+
+  it('calls async_get_session with snake_case input and returns the mapped session', async () => {
+    mocks.queryReasoningEngine.mockResolvedValue([
+      {
+        output: helpers.toValue({
+          id: 'sess-1',
+          user_id: 'u1',
+          state: {k: 1},
+          last_update_time: 42,
+        }),
+      },
+    ]);
+
+    const session = await client.getSession({userId: 'u1', sessionId: 's1'});
+
+    expect(session).toEqual({
+      id: 'sess-1',
+      userId: 'u1',
+      state: {k: 1},
+      lastUpdateTime: 42,
+    });
+
+    const req = mocks.queryReasoningEngine.mock.calls[0][0];
+    expect(req.name).toBe(ENGINE_NAME);
+    expect(req.classMethod).toBe('async_get_session');
+    expect(decodeStruct(req.input)).toEqual({user_id: 'u1', session_id: 's1'});
+  });
+
+  it('returns undefined when the response has no output', async () => {
+    mocks.queryReasoningEngine.mockResolvedValue([{}]);
+
+    expect(
+      await client.getSession({userId: 'u1', sessionId: 's1'}),
+    ).toBeUndefined();
+  });
+
+  it('returns undefined when the output is a null Value', async () => {
+    mocks.queryReasoningEngine.mockResolvedValue([{output: NULL_OUTPUT}]);
+
+    expect(
+      await client.getSession({userId: 'u1', sessionId: 's1'}),
+    ).toBeUndefined();
+  });
+
+  it('wraps a rejected Error call in AgentExecutionError with the cause', async () => {
+    const cause = new Error('boom');
+    mocks.queryReasoningEngine.mockRejectedValue(cause);
+
+    const error = await captureError(
+      client.getSession({userId: 'u1', sessionId: 's1'}),
+    );
+    expect(error).toBeInstanceOf(AgentExecutionError);
+    expect((error as AgentExecutionError).message).toBe(
+      'Failed to get session: boom',
+    );
+    expect((error as AgentExecutionError).cause).toBe(cause);
+  });
+
+  it('wraps a rejected non-Error throwable in AgentExecutionError', async () => {
+    mocks.queryReasoningEngine.mockRejectedValue('kaboom');
+
+    await expect(
+      client.getSession({userId: 'u1', sessionId: 's1'}),
+    ).rejects.toThrow('Failed to get session: kaboom');
+  });
+});
+
+describe('AgentEngineClient.listSessions', () => {
+  let client: AgentEngineClient;
+
+  beforeEach(() => {
+    client = AgentEngineClient.get(ENGINE_NAME);
+  });
+
+  it('calls async_list_sessions with snake_case input and maps every session', async () => {
+    mocks.queryReasoningEngine.mockResolvedValue([
+      {
+        output: helpers.toValue({
+          sessions: [
+            {id: 's1', user_id: 'u1'},
+            {id: 's2', user_id: 'u1', state: {a: 1}, last_update_time: 9},
+          ],
+        }),
+      },
+    ]);
+
+    const sessions = await client.listSessions({userId: 'u1'});
+
+    expect(sessions).toEqual([
+      {id: 's1', userId: 'u1', state: undefined, lastUpdateTime: undefined},
+      {id: 's2', userId: 'u1', state: {a: 1}, lastUpdateTime: 9},
+    ]);
+
+    const req = mocks.queryReasoningEngine.mock.calls[0][0];
+    expect(req.name).toBe(ENGINE_NAME);
+    expect(req.classMethod).toBe('async_list_sessions');
+    expect(decodeStruct(req.input)).toEqual({user_id: 'u1'});
+  });
+
+  it('returns an empty array when the response has no output', async () => {
+    mocks.queryReasoningEngine.mockResolvedValue([{}]);
+
+    expect(await client.listSessions({userId: 'u1'})).toEqual([]);
+  });
+
+  it('returns an empty array when the decoded object has no sessions field', async () => {
+    mocks.queryReasoningEngine.mockResolvedValue([
+      {output: helpers.toValue({})},
+    ]);
+
+    expect(await client.listSessions({userId: 'u1'})).toEqual([]);
+  });
+
+  it('returns an empty array when the output is a null Value', async () => {
+    mocks.queryReasoningEngine.mockResolvedValue([{output: NULL_OUTPUT}]);
+
+    expect(await client.listSessions({userId: 'u1'})).toEqual([]);
+  });
+
+  it('wraps a rejected Error call in AgentExecutionError with the cause', async () => {
+    const cause = new Error('boom');
+    mocks.queryReasoningEngine.mockRejectedValue(cause);
+
+    const error = await captureError(client.listSessions({userId: 'u1'}));
+    expect(error).toBeInstanceOf(AgentExecutionError);
+    expect((error as AgentExecutionError).message).toBe(
+      'Failed to list sessions: boom',
+    );
+    expect((error as AgentExecutionError).cause).toBe(cause);
+  });
+
+  it('wraps a rejected non-Error throwable in AgentExecutionError', async () => {
+    mocks.queryReasoningEngine.mockRejectedValue('kaboom');
+
+    await expect(client.listSessions({userId: 'u1'})).rejects.toThrow(
+      'Failed to list sessions: kaboom',
+    );
+  });
+});
+
+describe('AgentEngineClient.deleteSession', () => {
+  let client: AgentEngineClient;
+
+  beforeEach(() => {
+    client = AgentEngineClient.get(ENGINE_NAME);
+  });
+
+  it('calls async_delete_session with snake_case input and resolves undefined', async () => {
+    mocks.queryReasoningEngine.mockResolvedValue([{}]);
+
+    expect(
+      await client.deleteSession({userId: 'u1', sessionId: 's1'}),
+    ).toBeUndefined();
+
+    const req = mocks.queryReasoningEngine.mock.calls[0][0];
+    expect(req.name).toBe(ENGINE_NAME);
+    expect(req.classMethod).toBe('async_delete_session');
+    expect(decodeStruct(req.input)).toEqual({user_id: 'u1', session_id: 's1'});
+  });
+
+  it('wraps a rejected Error call in AgentExecutionError with the cause', async () => {
+    const cause = new Error('boom');
+    mocks.queryReasoningEngine.mockRejectedValue(cause);
+
+    const error = await captureError(
+      client.deleteSession({userId: 'u1', sessionId: 's1'}),
+    );
+    expect(error).toBeInstanceOf(AgentExecutionError);
+    expect((error as AgentExecutionError).message).toBe(
+      'Failed to delete session: boom',
+    );
+    expect((error as AgentExecutionError).cause).toBe(cause);
+  });
+
+  it('wraps a rejected non-Error throwable in AgentExecutionError', async () => {
+    mocks.queryReasoningEngine.mockRejectedValue('kaboom');
+
+    await expect(
+      client.deleteSession({userId: 'u1', sessionId: 's1'}),
+    ).rejects.toThrow('Failed to delete session: kaboom');
   });
 });
 

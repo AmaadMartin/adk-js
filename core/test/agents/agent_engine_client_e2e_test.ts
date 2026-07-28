@@ -55,4 +55,36 @@ describe('AgentEngineClient (live E2E)', () => {
     },
     60_000,
   );
+
+  it.skipIf(!AGENT_ENGINE_ID)(
+    'round-trips a session through get, list, and delete',
+    async () => {
+      expect(PROJECT, 'GOOGLE_CLOUD_PROJECT must be set').toBeTruthy();
+
+      const engine = AgentEngineClient.get(
+        `projects/${PROJECT}/locations/${LOCATION}/reasoningEngines/${AGENT_ENGINE_ID}`,
+      );
+
+      const created = await engine.createSession({userId: USER_ID});
+      expect(created.id).toBeTruthy();
+
+      const fetched = await engine.getSession({
+        userId: USER_ID,
+        sessionId: created.id,
+      });
+      expect(fetched?.id).toBe(created.id);
+
+      const sessions = await engine.listSessions({userId: USER_ID});
+      expect(sessions.some((session) => session.id === created.id)).toBe(true);
+
+      await engine.deleteSession({userId: USER_ID, sessionId: created.id});
+
+      const afterDelete = await engine.getSession({
+        userId: USER_ID,
+        sessionId: created.id,
+      });
+      expect(afterDelete).toBeUndefined();
+    },
+    60_000,
+  );
 });
