@@ -31,6 +31,11 @@ export {
   AgentEngineSandboxCodeExecutor,
   type AgentEngineSandboxCodeExecutorOptions,
 } from './code_executors/agent_engine_sandbox_code_executor.js';
+export {
+  AgentSandboxClient,
+  defaultSandboxClientFactory,
+  type AgentSandboxClientOptions,
+} from './code_executors/agent_sandbox_client.js';
 export {CodeExecutionLanguage} from './code_executors/code_execution_utils.js';
 export {
   GkeCodeExecutor,
