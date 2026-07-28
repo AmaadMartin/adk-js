@@ -87,11 +87,6 @@ interface BashErrorResult {
   returncode?: number | null;
 }
 
-/** Intermediate result returned while a confirmation is pending. */
-interface BashPendingResult {
-  partial: string;
-}
-
 /**
  * Validates a bash command against a policy.
  *
@@ -191,11 +186,6 @@ export function splitCommand(command: string): string[] {
   return tokens;
 }
 
-/** Returns the captured stream, or a placeholder when it is empty. */
-function orPlaceholder(output: string, placeholder: string): string {
-  return output || placeholder;
-}
-
 /**
  * Kills a detached child's whole process group (POSIX), falling back to killing
  * just the child where process groups are unavailable (e.g. Windows) or already
@@ -290,13 +280,11 @@ export class ExecuteBashTool extends BaseTool {
     args,
     toolContext,
   }: RunAsyncToolRequest): Promise<unknown> {
-    const command = args['command'] as string | undefined;
-    if (!command) {
-      return {error: 'Command is required.'};
-    }
+    const command = (args['command'] as string | undefined) ?? '';
 
     // Static validation runs before confirmation and before execution, so a
-    // policy-violating command is rejected without prompting the user.
+    // policy-violating command is rejected without prompting the user. It also
+    // rejects a missing/empty command with "Command is required.".
     const error = validateCommand(command, this.policy);
     if (error) {
       return {error};
@@ -318,7 +306,7 @@ export class ExecuteBashTool extends BaseTool {
   private enforceConfirmation(
     command: string,
     toolContext: Context,
-  ): BashPendingResult | BashErrorResult | undefined {
+  ): {partial: string} | BashErrorResult | undefined {
     if (!toolContext.toolConfirmation) {
       toolContext.requestConfirmation({
         hint: `Please approve or reject the bash command: ${command}`,
@@ -376,30 +364,33 @@ export class ExecuteBashTool extends BaseTool {
       });
 
       // spawn emits 'error' (e.g. ENOENT) before 'close'; resolving in both is
-      // safe because the first settle wins and later resolves are ignored.
+      // safe because the first settle wins and later resolves are ignored. A
+      // spawn error means the process never ran, so no output was captured.
       child.on('error', (err) => {
         clearTimeout(timer);
         resolve({
           error: `Execution failed: ${err.message}`,
-          stdout: orPlaceholder(stdout, NO_STDOUT_CAPTURED),
-          stderr: orPlaceholder(stderr, NO_STDERR_CAPTURED),
+          stdout: NO_STDOUT_CAPTURED,
+          stderr: NO_STDERR_CAPTURED,
         });
       });
 
       child.on('close', (code) => {
         clearTimeout(timer);
+        const capturedStdout = stdout || NO_STDOUT_CAPTURED;
+        const capturedStderr = stderr || NO_STDERR_CAPTURED;
         if (timedOut) {
           resolve({
             error: `Command timed out after ${timeoutSeconds} seconds.`,
-            stdout: orPlaceholder(stdout, NO_STDOUT_CAPTURED),
-            stderr: orPlaceholder(stderr, NO_STDERR_CAPTURED),
+            stdout: capturedStdout,
+            stderr: capturedStderr,
             returncode: code,
           });
           return;
         }
         resolve({
-          stdout: orPlaceholder(stdout, NO_STDOUT_CAPTURED),
-          stderr: orPlaceholder(stderr, NO_STDERR_CAPTURED),
+          stdout: capturedStdout,
+          stderr: capturedStderr,
           returncode: code,
         });
       });
