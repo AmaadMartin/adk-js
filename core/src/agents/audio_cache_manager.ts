@@ -282,7 +282,7 @@ export class AudioCacheManager {
  * @param cache - The cache entries whose audio bytes are joined.
  * @returns The base64-encoded concatenation of all chunk bytes.
  */
-export function concatBase64Chunks(cache: RealtimeCacheEntry[]): string {
+function concatBase64Chunks(cache: RealtimeCacheEntry[]): string {
   const combined = Buffer.concat(
     cache.map((entry) => Buffer.from(entry.data.data ?? '', 'base64')),
   );
@@ -298,7 +298,7 @@ export function concatBase64Chunks(cache: RealtimeCacheEntry[]): string {
  * @param mimeType - The artifact MIME type; its subtype becomes the extension.
  * @returns The artifact filename, e.g. `adk_live_audio_storage_input_audio_<ts>.pcm`.
  */
-export function buildArtifactFilename(
+function buildArtifactFilename(
   cacheType: string,
   timestamp: number,
   mimeType: string,
@@ -317,7 +317,7 @@ export function buildArtifactFilename(
  * @param revisionId - The revision returned by `saveArtifact`.
  * @returns The fully-qualified `artifact://` URI including the revision suffix.
  */
-export function buildArtifactUri(
+function buildArtifactUri(
   appName: string,
   userId: string,
   sessionId: string,
