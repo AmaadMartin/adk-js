@@ -7,11 +7,15 @@
 import {
   AgentTool,
   BaseAgent,
+  BaseTool,
   FunctionTool,
   LlmAgent,
+  LOAD_ARTIFACTS,
+  LOAD_MEMORY,
   LoopAgent,
   MCPToolset,
   ParallelAgent,
+  PRELOAD_MEMORY,
   SequentialAgent,
 } from '@google/adk';
 import * as path from 'node:path';
@@ -23,12 +27,28 @@ import {
 } from './agent_types.js';
 import {IntegrationRegistry} from './integration_registry.js';
 
-const BUILTIN_TOOLS = [
+/**
+ * Built-in tools that the model executes server-side (or that are not wired up
+ * in this harness yet). They are dropped from the agent's tool list because the
+ * replay harness swaps in a DummyLlm and their processLlmRequest() rejects a
+ * non-Gemini model name.
+ */
+const SKIPPED_BUILTIN_TOOLS = [
   'exit_loop',
   'google_search',
   'url_context',
   'google_maps_grounding',
 ];
+
+/**
+ * Built-in tools that run client-side and can be attached to the agent
+ * directly, keyed by the name used in YAML agent configs.
+ */
+const BUILTIN_TOOL_INSTANCES = new Map<string, BaseTool>([
+  ['load_memory', LOAD_MEMORY],
+  ['preload_memory', PRELOAD_MEMORY],
+  ['load_artifacts', LOAD_ARTIFACTS],
+]);
 
 export class AgentRegistry {
   private agents = new Map<string, BaseAgent>();
@@ -136,9 +156,14 @@ export class AgentRegistry {
 
       const tools = config.tools
         ?.map((toolConfig) => {
-          // Built in tools are skipped
-          if (BUILTIN_TOOLS.includes(toolConfig.name)) {
+          // Built in tools handled by the model are skipped.
+          if (SKIPPED_BUILTIN_TOOLS.includes(toolConfig.name)) {
             return undefined;
+          }
+
+          const builtinTool = BUILTIN_TOOL_INSTANCES.get(toolConfig.name);
+          if (builtinTool) {
+            return builtinTool;
           }
 
           if (toolConfig.name == 'LongRunningFunctionTool') {
@@ -175,7 +200,7 @@ export class AgentRegistry {
 
           return this.findToolOrThrow(toolConfig.name);
         })
-        // remove entries for built-in tools
+        // remove entries for skipped built-in tools
         .filter((tool) => tool !== undefined);
 
       const options = {
