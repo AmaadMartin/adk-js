@@ -7,7 +7,6 @@
 import {
   AgentTool,
   BaseAgent,
-  BaseTool,
   FunctionTool,
   LlmAgent,
   LOAD_ARTIFACTS,
@@ -27,12 +26,8 @@ import {
 } from './agent_types.js';
 import {IntegrationRegistry} from './integration_registry.js';
 
-/**
- * Built-in tools that the model executes server-side (or that are not wired up
- * in this harness yet). They are dropped from the agent's tool list because the
- * replay harness swaps in a DummyLlm and their processLlmRequest() rejects a
- * non-Gemini model name.
- */
+// Names dropped from the tool list: tools whose processLlmRequest() rejects the
+// replay harness's DummyLlm model name, plus exit_loop.
 const SKIPPED_BUILTIN_TOOLS = [
   'exit_loop',
   'google_search',
@@ -40,15 +35,8 @@ const SKIPPED_BUILTIN_TOOLS = [
   'google_maps_grounding',
 ];
 
-/**
- * Built-in tools that run client-side and can be attached to the agent
- * directly, keyed by the name used in YAML agent configs.
- */
-const BUILTIN_TOOL_INSTANCES = new Map<string, BaseTool>([
-  ['load_memory', LOAD_MEMORY],
-  ['preload_memory', PRELOAD_MEMORY],
-  ['load_artifacts', LOAD_ARTIFACTS],
-]);
+// Built-in tools that run client-side, resolved by their canonical tool name.
+const BUILTIN_TOOL_INSTANCES = [LOAD_MEMORY, PRELOAD_MEMORY, LOAD_ARTIFACTS];
 
 export class AgentRegistry {
   private agents = new Map<string, BaseAgent>();
@@ -161,7 +149,9 @@ export class AgentRegistry {
             return undefined;
           }
 
-          const builtinTool = BUILTIN_TOOL_INSTANCES.get(toolConfig.name);
+          const builtinTool = BUILTIN_TOOL_INSTANCES.find(
+            (tool) => tool.name === toolConfig.name,
+          );
           if (builtinTool) {
             return builtinTool;
           }
