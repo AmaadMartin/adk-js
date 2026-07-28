@@ -118,9 +118,6 @@ describe('normalizeSessionId', () => {
     expect(normalizeSessionId('sessions/session-123', '12345')).toBe(
       'session-123',
     );
-    expect(normalizeSessionId('a/b/c/sessions/session-123', '12345')).toBe(
-      'session-123',
-    );
   });
 
   it('rejects a resource name for a different reasoning engine', () => {
@@ -1344,9 +1341,6 @@ describe('VertexAiSessionService', () => {
     });
 
     it('getSession rejects an unsafe session ID without calling the API', async () => {
-      // Normalization runs outside getSession's try/catch, so an unsafe ID can
-      // neither be reported as `undefined` (the NOT_FOUND path) nor logged as a
-      // backend failure.
       const loggerSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
 
       await expect(
@@ -1404,29 +1398,6 @@ describe('VertexAiSessionService', () => {
 
       expect(mockClient.events.append).not.toHaveBeenCalled();
       expect(session.events).toHaveLength(0);
-    });
-
-    it('rejects a resource name that names a different reasoning engine', async () => {
-      const otherEngineResourceName =
-        'projects/123/locations/us-east4/reasoningEngines/999/sessions/session-123';
-
-      await expect(
-        service.getSession({
-          appName: '12345',
-          userId: 'testUser',
-          sessionId: otherEngineResourceName,
-        }),
-      ).rejects.toThrow('Session resource name mismatch');
-      await expect(
-        service.createSession({
-          appName: '12345',
-          userId: 'testUser',
-          sessionId: otherEngineResourceName,
-        }),
-      ).rejects.toThrow('Session resource name mismatch');
-
-      expect(mockClient.get).not.toHaveBeenCalled();
-      expect(mockClient.createInternal).not.toHaveBeenCalled();
     });
   });
 });

@@ -63,28 +63,17 @@ export function quoteFilterLiteral(value: string): string {
   return `"${escaped}"`;
 }
 
-/**
- * Session IDs that are safe to interpolate into a Vertex resource name.
- */
 const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
 
 /**
  * Reduces a session identifier to a short ID that is safe to interpolate into
  * a Vertex resource name.
  *
- * Agent Engine returns session resource names of the form
- * `projects/{project}/locations/{location}/reasoningEngines/{engine}/sessions/{session}`,
- * and callers routinely hand those straight back to the session service, so a
- * trailing `sessions/{session}` suffix is stripped. Anything else is checked
- * as-is: a session ID containing `/`, `..` or a query separator would escape
- * its path segment and address a different resource, side-stepping the
- * ownership checks that resource carries.
- *
- * @param sessionId The session ID or session resource name.
- * @param engineId The reasoning engine the call resolved to.
- * @returns The short session ID.
- * @throws If the resource name belongs to a different reasoning engine, or if
- *   the resulting ID does not match `SESSION_ID_PATTERN`.
+ * Agent Engine returns `.../reasoningEngines/{engine}/sessions/{session}` and
+ * callers hand those straight back, so that suffix is stripped. Anything else
+ * is checked as-is: a session ID containing `/`, `..` or a query separator
+ * would address a different resource, side-stepping the ownership checks that
+ * resource carries.
  */
 export function normalizeSessionId(
   sessionId: string,
@@ -450,8 +439,8 @@ export class VertexAiSessionService extends BaseSessionService {
     // already enforces this and throws when the stored session's userId does
     // not match, so load the session first and stop if it is missing or not
     // owned by this user. This keeps deleteSession consistent with getSession
-    // and with InMemorySessionService.deleteSession. It also normalizes the
-    // session ID, so session.id is the short ID this delete may address.
+    // and with InMemorySessionService.deleteSession. getSession also
+    // normalizes, so session.id is the short ID to delete.
     const session = await this.getSession({
       appName,
       userId,
