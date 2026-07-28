@@ -129,6 +129,23 @@ export {TrajectoryThoughtPruningCompactor} from './context/trajectory_thought_pr
 export type {TrajectoryThoughtPruningCompactorOptions} from './context/trajectory_thought_pruning_compactor.js';
 export {TruncatingContextCompactor} from './context/truncating_context_compactor.js';
 export type {TruncatingContextCompactorOptions} from './context/truncating_context_compactor.js';
+export {NotFoundError} from './errors/not_found_error.js';
+export {ConversationScenario} from './evaluation/conversation_scenarios.js';
+export type {ConversationScenarioInit} from './evaluation/conversation_scenarios.js';
+export {
+  PRE_BUILT_BEHAVIORS,
+  PRE_BUILT_PERSONAS,
+  getDefaultPersonaRegistry,
+} from './evaluation/simulation/pre_built_personas.js';
+export {
+  UserPersonaRegistry,
+  getBehaviorInstructionsStr,
+  getViolationRubricsStr,
+} from './evaluation/simulation/user_simulator_personas.js';
+export type {
+  UserBehavior,
+  UserPersona,
+} from './evaluation/simulation/user_simulator_personas.js';
 export {isCompactedEvent, isScratchpadEvent} from './events/compacted_event.js';
 export type {CompactedEvent} from './events/compacted_event.js';
 export {
