@@ -291,6 +291,7 @@ export {LoadSkillTool} from './tools/skill/load_skill_tool.js';
 export {SearchSkillsTool} from './tools/skill/search_skills_tool.js';
 export {SkillToolset} from './tools/skill/skill_toolset.js';
 
+export {NotFoundError} from './errors/not_found_error.js';
 export {
   AgentDetailsSchema,
   AppDetailsSchema,
@@ -391,6 +392,22 @@ export type {
 } from './evaluation/eval_rubrics.js';
 export {EvalSetSchema} from './evaluation/eval_set.js';
 export type {EvalSet} from './evaluation/eval_set.js';
+export {EvalSetResultsManager} from './evaluation/eval_set_results_manager.js';
+export {
+  createEvalSetResult,
+  parseEvalSetResultJson,
+  sanitizeEvalSetResultName,
+} from './evaluation/eval_set_results_manager_utils.js';
+export {EvalSetsManager} from './evaluation/eval_sets_manager.js';
+export {
+  addEvalCaseToEvalSet,
+  deleteEvalCaseFromEvalSet,
+  getEvalCaseFromEvalSet,
+  getEvalSetFromAppAndId,
+  updateEvalCaseInEvalSet,
+} from './evaluation/eval_sets_manager_utils.js';
+export {InMemoryEvalSetsManager} from './evaluation/in_memory_eval_sets_manager.js';
+export {validatePathSegment} from './evaluation/path_validation.js';
 export {
   UserBehaviorSchema,
   UserPersonaSchema,
