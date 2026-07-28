@@ -27,8 +27,7 @@ tests, it is still part of the spec.
 | `tests/integration/…`                   | `tests/integration/…`             |
 
 Most area directories line up 1:1 and file names stay `snake_case` in both
-repos; only the test naming flips, from a `test_` prefix to a `_test.ts`
-suffix. Not every area has a counterpart, though: Python's `cli/` is solved
+repos. Not every area has a counterpart, though: Python's `cli/` is solved
 differently by `dev/`, and `core/src` adds directories Python keeps elsewhere.
 When an area does not map, say so in the PR rather than inventing a directory.
 
@@ -44,13 +43,11 @@ When an area does not map, say so in the PR rather than inventing a directory.
 | `Optional[X]`                   | `X \| undefined` or an optional property — never `any`   |
 | a custom exception class        | an `Error` subclass                                      |
 
-Add a zod schema only when the value is parsed from untrusted input at
-runtime; the repo depends on zod `^4.2.1` and `core/src/skills/skill.ts` is the
-in-repo example of an interface paired with a zod schema. Prefer `yield*` over
-a callback parameter so callers can consume the stream with a plain
-`for await`. Python-only dependencies have no automatic TypeScript equivalent:
-find the idiomatic Node package or reimplement the behaviour, and say which you
-did in the PR.
+`core/src/skills/skill.ts` is the in-repo example of an interface paired with a
+zod schema. Prefer `yield*` over a callback parameter so callers can consume
+the stream with a plain `for await`. Python-only dependencies have no automatic
+TypeScript equivalent: find the idiomatic Node package or reimplement the
+behaviour, and say which you did in the PR.
 
 ## 4. Export wiring
 
@@ -72,9 +69,7 @@ not apply, delete it deliberately and note why in the PR.
 
 Where the TypeScript version cannot or should not mirror Python, document the
 difference in TSDoc on the exported symbol and call it out in the PR
-description. Do not port private or internal Python modules, and do not port
-Python-only surfaces such as the `cli/` tree that `dev/` already solves
-differently.
+description. Do not port private or internal Python modules.
 
 ## 7. Verify before sending
 

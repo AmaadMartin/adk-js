@@ -23,7 +23,9 @@ borrows the file format and the validator.
    trigger sentence saying what the skill does **and when to use it**, under
    1024 characters.
 3. Only these frontmatter keys are accepted: `name`, `description`, `license`,
-   `metadata`, `compatibility`. `allowed-tools` is rejected by the loader.
+   `metadata`, `compatibility`. Avoid `allowed-tools`: the loader derives an
+   `allowedTools` key from it that then fails the unknown-field check, so the
+   error names a key you never wrote.
 4. Keep `SKILL.md` short (roughly under 200 lines). Move long material into
    `references/*.md` and link it from `SKILL.md`.
 5. Helper programs go in `scripts/`, static files in `assets/`.
