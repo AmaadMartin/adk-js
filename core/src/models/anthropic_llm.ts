@@ -133,8 +133,8 @@ export type AnthropicThinkingParam =
   | {type: 'disabled'}
   | {type: 'adaptive'};
 
-/** The Anthropic Messages API `POST /v1/messages` request body. */
-export interface AnthropicMessagesRequest {
+/** The Anthropic Messages API `POST /v1/messages` request body (internal). */
+interface AnthropicMessagesRequest {
   model: string;
   max_tokens: number;
   messages: AnthropicMessageParam[];
@@ -207,15 +207,15 @@ export interface AnthropicMessage {
 
 // --- Anthropic Messages API streaming (SSE) event types ---
 
-/** Delta payloads carried by `content_block_delta` events. */
-export type AnthropicStreamDelta =
+/** Delta payloads carried by `content_block_delta` events (internal). */
+type AnthropicStreamDelta =
   | {type: 'text_delta'; text: string}
   | {type: 'thinking_delta'; thinking: string}
   | {type: 'signature_delta'; signature: string}
   | {type: 'input_json_delta'; partial_json: string};
 
-/** Discriminated union of Anthropic streaming SSE events. */
-export type AnthropicStreamEvent =
+/** Discriminated union of Anthropic streaming SSE events (internal). */
+type AnthropicStreamEvent =
   | {type: 'message_start'; message: {usage: AnthropicUsage}}
   | {
       type: 'content_block_start';
@@ -381,10 +381,15 @@ function functionResponseToContent(
   return '';
 }
 
-/** Converts a single genai `Part` to an Anthropic content block. */
-function partToMessageBlockInternal(
+/**
+ * Converts a single genai `Part` to an Anthropic content block.
+ *
+ * Pass a shared {@link ToolUseIdSanitizer} to keep `tool_use`/`tool_result` IDs
+ * paired across a conversation; when omitted, each call uses a fresh one.
+ */
+export function partToMessageBlock(
   part: Part,
-  sanitizer: ToolUseIdSanitizer,
+  sanitizer: ToolUseIdSanitizer = new ToolUseIdSanitizer(),
 ): AnthropicContentBlockParam {
   if (part.thought && part.text) {
     return {
@@ -457,10 +462,15 @@ function partToMessageBlockInternal(
   throw new Error(`Not supported yet: ${JSON.stringify(part)}`);
 }
 
-/** Converts a genai `Content` to an Anthropic message. */
-function contentToMessageParamInternal(
+/**
+ * Converts a genai `Content` to an Anthropic message.
+ *
+ * Pass a shared {@link ToolUseIdSanitizer} to keep tool IDs paired across a
+ * conversation; when omitted, each call uses a fresh one.
+ */
+export function contentToMessageParam(
   content: Content,
-  sanitizer: ToolUseIdSanitizer,
+  sanitizer: ToolUseIdSanitizer = new ToolUseIdSanitizer(),
 ): AnthropicMessageParam {
   const messageBlock: AnthropicContentBlockParam[] = [];
   for (const part of content.parts ?? []) {
@@ -473,20 +483,10 @@ function contentToMessageParamInternal(
       logger.warn('PDF data is not supported in Claude for assistant turns.');
       continue;
     }
-    messageBlock.push(partToMessageBlockInternal(part, sanitizer));
+    messageBlock.push(partToMessageBlock(part, sanitizer));
   }
 
   return {role: toClaudeRole(content.role), content: messageBlock};
-}
-
-/** Converts a genai `Part` to an Anthropic content block (fresh sanitizer). */
-export function partToMessageBlock(part: Part): AnthropicContentBlockParam {
-  return partToMessageBlockInternal(part, new ToolUseIdSanitizer());
-}
-
-/** Converts a genai `Content` to an Anthropic message (fresh sanitizer). */
-export function contentToMessageParam(content: Content): AnthropicMessageParam {
-  return contentToMessageParamInternal(content, new ToolUseIdSanitizer());
 }
 
 /** Converts an Anthropic response content block to a genai `Part`. */
@@ -841,7 +841,7 @@ export class AnthropicLlm extends BaseLlm {
   ): AsyncGenerator<LlmResponse, void> {
     const sanitizer = new ToolUseIdSanitizer();
     const messages = (llmRequest.contents ?? []).map((content) =>
-      contentToMessageParamInternal(content, sanitizer),
+      contentToMessageParam(content, sanitizer),
     );
 
     let tools: AnthropicToolParam[] | undefined;

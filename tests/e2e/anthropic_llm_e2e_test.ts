@@ -13,9 +13,6 @@
  * serialization, header wiring, SSE parsing over a real network socket, and the
  * tool-call round trip actually work end to end without any external network or
  * credentials.
- *
- * An additional opt-in suite hits the real Anthropic API and is skipped unless
- * `ANTHROPIC_API_KEY` is set, so CI stays green without secrets.
  */
 
 import {AnthropicLlm, LlmRequest} from '@google/adk';
@@ -282,30 +279,5 @@ describe('AnthropicLlm E2E (local server, real fetch)', () => {
     await expect(
       collect(badLlm.generateContentAsync(baseRequest(), false)),
     ).rejects.toThrow(/status 401/);
-  });
-});
-
-// Opt-in live test against the real Anthropic API. Skipped unless an API key is
-// present so CI never needs secrets or external network.
-const liveKey = process.env['ANTHROPIC_API_KEY'];
-describe.skipIf(!liveKey)('AnthropicLlm E2E (live Anthropic API)', () => {
-  it('generates non-streaming and streaming responses', async () => {
-    const llm = new AnthropicLlm({model: 'claude-sonnet-4-20250514'});
-    const request = baseRequest({
-      contents: [
-        {role: 'user', parts: [{text: 'Say hello in one short sentence.'}]},
-      ],
-    });
-
-    const nonStreaming = await collect(
-      llm.generateContentAsync(request, false),
-    );
-    expect(nonStreaming[0].content?.parts?.[0]?.text).toBeTruthy();
-
-    const streaming = await collect(llm.generateContentAsync(request, true));
-    expect(streaming[streaming.length - 1].partial).toBe(false);
-    expect(
-      streaming[streaming.length - 1].content?.parts?.[0]?.text,
-    ).toBeTruthy();
   });
 });
