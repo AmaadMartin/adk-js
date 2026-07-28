@@ -61,8 +61,8 @@ export interface SandboxClient {
   /** Runs `command` inside the sandbox and returns its output. */
   run(command: string): Promise<SandboxRunResult>;
   /**
-   * Releases the remote sandbox. Called in a `finally` block; implementations
-   * should not throw fatal errors from here.
+   * Releases the remote sandbox. Called after execution on both the success and
+   * error paths; implementations should not throw fatal errors from here.
    */
   close(): Promise<void>;
 }
