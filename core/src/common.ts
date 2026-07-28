@@ -132,11 +132,43 @@ export type {TruncatingContextCompactorOptions} from './context/truncating_conte
 export {NotFoundError} from './errors/not_found_error.js';
 export {ConversationScenario} from './evaluation/conversation_scenarios.js';
 export type {ConversationScenarioInit} from './evaluation/conversation_scenarios.js';
+export {EvalCase} from './evaluation/eval_case.js';
+export type {
+  EvalCaseInit,
+  EvaluationResult,
+  Evaluator,
+  Invocation,
+  StaticConversation,
+} from './evaluation/eval_case.js';
+export {
+  LlmBackedUserSimulator,
+  LlmBackedUserSimulatorConfig,
+} from './evaluation/simulation/llm_backed_user_simulator.js';
+export type {LlmBackedUserSimulatorConfigInit} from './evaluation/simulation/llm_backed_user_simulator.js';
+export {
+  getLlmBackedUserSimulatorPrompt,
+  isValidUserSimulatorTemplate,
+} from './evaluation/simulation/llm_backed_user_simulator_prompts.js';
+export type {UserSimulatorTemplates} from './evaluation/simulation/llm_backed_user_simulator_prompts.js';
 export {
   PRE_BUILT_BEHAVIORS,
   PRE_BUILT_PERSONAS,
   getDefaultPersonaRegistry,
 } from './evaluation/simulation/pre_built_personas.js';
+export {StaticUserSimulator} from './evaluation/simulation/static_user_simulator.js';
+export {
+  BaseUserSimulatorConfig,
+  NextUserMessage,
+  SIMULATOR_BY_CONFIG_TYPE,
+  Status,
+  UserSimulator,
+  registerUserSimulator,
+} from './evaluation/simulation/user_simulator.js';
+export type {
+  BaseUserSimulatorConfigClass,
+  NextUserMessageInit,
+  UserSimulatorClass,
+} from './evaluation/simulation/user_simulator.js';
 export {
   UserPersonaRegistry,
   getBehaviorInstructionsStr,
@@ -146,6 +178,7 @@ export type {
   UserBehavior,
   UserPersona,
 } from './evaluation/simulation/user_simulator_personas.js';
+export {UserSimulatorProvider} from './evaluation/simulation/user_simulator_provider.js';
 export {isCompactedEvent, isScratchpadEvent} from './events/compacted_event.js';
 export type {CompactedEvent} from './events/compacted_event.js';
 export {
