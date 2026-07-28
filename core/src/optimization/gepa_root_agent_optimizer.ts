@@ -182,9 +182,7 @@ export class RootAgentGepaAdapter extends AgentGepaAdapter {
     super(initialAgent, sampler, trainExampleIds, validationExampleIds);
   }
 
-  protected override buildCandidateAgent(
-    candidate: Record<string, string>,
-  ): Agent {
+  override buildCandidateAgent(candidate: Record<string, string>): Agent {
     return createAgentFromCandidate(this.initialAgent, candidate);
   }
 
@@ -269,78 +267,39 @@ export class RootAgentGepaAdapter extends AgentGepaAdapter {
  * using the GEPA framework (reflective prompt evolution).
  */
 @experimental
-export class GEPARootAgentOptimizer extends AgentOptimizer<
-  UnstructuredSamplingResult,
-  AgentWithScores
-> {
-  private readonly config: GEPARootAgentOptimizerConfig;
-  private readonly llmClass: BaseLlmType;
+export class GEPARootAgentOptimizer extends GEPARootAgentPromptOptimizer {
+  protected override readonly optimizerName = 'GEPARootAgentOptimizer';
 
   constructor(config: GEPARootAgentOptimizerConfig) {
-    super();
-    this.config = config;
-    this.llmClass = LLMRegistry.resolve(config.optimizerModel);
+    super(config);
+  }
+
+  /** Uses an adapter that also rewrites each skill's instructions. */
+  protected override createAdapter(
+    initialAgent: Agent,
+    sampler: Sampler<UnstructuredSamplingResult>,
+    trainExampleIds: Set<string>,
+    validationExampleIds: Set<string>,
+    reflectionLm: ReflectionLm,
+  ): AgentGepaAdapter {
+    return new RootAgentGepaAdapter(
+      initialAgent,
+      sampler,
+      trainExampleIds,
+      validationExampleIds,
+      reflectionLm,
+    );
   }
 
   /**
-   * Runs the optimizer.
-   *
-   * @param initialAgent The initial agent to optimize. Only the root agent's
-   *   core instruction and the skill instructions of its attached
-   *   {@link SkillToolset} tools are optimized; sub-agents are left untouched.
-   * @param sampler The interface used to get training/validation example UIDs,
-   *   request agent evaluations, and get data for optimizing the agent.
-   * @returns The optimization result, containing the optimized agents with
-   *   their validation scores and the raw engine result.
+   * Seeds the search with every skill instruction first, then the core prompt.
+   * The ordering is intentional (object insertion order): skills are placed
+   * before `agent_prompt` so they are optimized before the core instruction.
    */
-  async optimize(
+  protected override buildSeedCandidate(
     initialAgent: Agent,
-    sampler: Sampler<UnstructuredSamplingResult>,
-  ): Promise<GEPARootAgentOptimizerResult> {
-    if (initialAgent.subAgents?.length) {
-      logger.warn(
-        'The GEPARootAgentOptimizer will not optimize prompts for sub-agents.',
-      );
-    }
-
-    logger.info('Setting up the GEPA optimizer...');
-
-    const instruction = initialAgent.instruction;
-    if (typeof instruction !== 'string') {
-      throw new Error(
-        'GEPARootAgentOptimizer requires a string instruction;' +
-          ' InstructionProvider functions are not supported.',
-      );
-    }
-
-    const reflectionLm = buildReflectionLm(
-      this.llmClass,
-      this.config.optimizerModel,
-      this.config.modelConfiguration,
-    );
-
-    const trainIds = sampler.getTrainExampleIds();
-    const valIds = sampler.getValidationExampleIds();
-    const valIdSet = new Set(valIds);
-    if (trainIds.some((id) => valIdSet.has(id))) {
-      logger.warn(
-        'The training and validation example UIDs overlap. This WILL cause' +
-          ' aliasing issues unless each common UID refers to the same example' +
-          ' in both sets.',
-      );
-    }
-
-    const adapter = new RootAgentGepaAdapter(
-      initialAgent,
-      sampler,
-      new Set(trainIds),
-      valIdSet,
-      reflectionLm,
-    );
-
-    // Seed the search with every skill instruction first, then the core prompt.
-    // The ordering is intentional (object insertion order): skills are placed
-    // before `agent_prompt` so they are optimized before the core instruction.
+    instruction: string,
+  ): Record<string, string> {
     const seedCandidate: Record<string, string> = {};
     for (const tool of initialAgent.tools) {
       if (tool instanceof SkillToolset) {
@@ -350,29 +309,7 @@ export class GEPARootAgentOptimizer extends AgentOptimizer<
         }
       }
     }
-    seedCandidate[AGENT_PROMPT_KEY] = instruction;
-
-    logger.info('Running the GEPA optimizer...');
-
-    const gepaResults = await gepaOptimize<string>({
-      seedCandidate,
-      trainset: trainIds,
-      valset: valIds,
-      adapter,
-      reflectionLm,
-      maxMetricCalls: this.config.maxMetricCalls,
-      reflectionMinibatchSize: this.config.reflectionMinibatchSize,
-    });
-
-    logger.info('GEPA optimization finished. Preparing final results...');
-
-    const optimizedAgents: AgentWithScores[] = gepaResults.candidates.map(
-      (candidate, i) => ({
-        optimizedAgent: createAgentFromCandidate(initialAgent, candidate),
-        overallScore: gepaResults.valAggregateScores[i],
-      }),
-    );
-
-    return {optimizedAgents, gepaResult: gepaResults.toJSON()};
+    seedCandidate[AGENT_PROMPT_NAME] = instruction;
+    return seedCandidate;
   }
 }
