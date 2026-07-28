@@ -104,6 +104,28 @@ export class SkillToolset extends BaseToolset {
     return this.skills[name];
   }
 
+  /**
+   * Creates an independent copy of this toolset with a new set of skills.
+   *
+   * The clone preserves the original's `codeExecutor`, `additionalTools`, and
+   * `registry` so its behaviour matches the original except for the swapped-in
+   * skills. Used by agent optimizers to rebuild a toolset with updated skill
+   * instructions without mutating the original.
+   *
+   * @param skills The skills for the new toolset, as an array or a
+   *   name-keyed record.
+   * @return A new, independent {@link SkillToolset}.
+   */
+  cloneWithUpdatedSkills(
+    skills: Skill[] | Record<string, Skill>,
+  ): SkillToolset {
+    return new SkillToolset(skills, {
+      codeExecutor: this.codeExecutor,
+      additionalTools: this.additionalTools,
+      registry: this.registry,
+    });
+  }
+
   async getOrFetchSkill(
     name: string,
     invocationId?: string,
