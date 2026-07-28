@@ -5,7 +5,9 @@ repository**. Each skill is a directory containing a `SKILL.md` in the portable
 Agent Skills format, so any coding agent that reads a skills directory can pick
 one up. An agent selects a skill by matching the task at hand against the
 `description` in the skill's frontmatter, then follows the instructions in the
-body.
+body. This is developer tooling and ships no runtime behaviour — it is
+unrelated to the runtime Skills feature in `core/src/skills/`, from which it
+borrows the file format and the validator.
 
 ## Index
 
@@ -21,9 +23,7 @@ body.
    trigger sentence saying what the skill does **and when to use it**, under
    1024 characters.
 3. Only these frontmatter keys are accepted: `name`, `description`, `license`,
-   `metadata`, `compatibility`. Do not use `allowed-tools` — the loader
-   currently derives an extra `allowedTools` key from it, which
-   `validateSkillDir` then reports as an unknown field, failing validation.
+   `metadata`, `compatibility`. `allowed-tools` is rejected by the loader.
 4. Keep `SKILL.md` short (roughly under 200 lines). Move long material into
    `references/*.md` and link it from `SKILL.md`.
 5. Helper programs go in `scripts/`, static files in `assets/`.
@@ -37,11 +37,3 @@ body.
 
    The test loads every directory here with ADK's own skill loader and fails if
    a skill is malformed or missing from the index.
-
-## Not to be confused with the runtime Skills feature
-
-ADK also ships a runtime Skills feature in `core/src/skills/` that lets an ADK
-**agent** load skills while it runs. This directory is **developer tooling** for
-contributors working on the repo — it ships no runtime behaviour. The two share
-a file format, and the test above deliberately reuses the runtime loader as its
-validator, but they are different things.

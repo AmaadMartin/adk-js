@@ -26,20 +26,11 @@ tests, it is still part of the spec.
 | `src/google/adk/cli/…`                  | `dev/src/cli/…`                   |
 | `tests/integration/…`                   | `tests/integration/…`             |
 
-The area directories line up almost 1:1 — `a2a`, `agents`, `apps`,
-`artifacts`, `auth`, `code_executors`, `events`, `examples`, `features`,
-`memory`, `models`, `plugins`, `sessions`, `skills`, `telemetry`, `tools` all
-exist in both repos. File names stay `snake_case` in both; only the test
-naming flips, from a `test_` prefix to a `_test.ts` suffix. Worked example:
-
-- `src/google/adk/tools/agent_tool.py` → `core/src/tools/agent_tool.ts`
-- `tests/unittests/tools/test_agent_tool.py` →
-  `core/test/tools/agent_tool_test.ts`
-
-Not every area has a counterpart. Python's `cli/` is solved differently by
-`dev/`, and `core/src` adds `context/` and `runner/` that Python keeps
-elsewhere. When an area does not map, say so in the PR rather than inventing a
-directory.
+Most area directories line up 1:1 and file names stay `snake_case` in both
+repos; only the test naming flips, from a `test_` prefix to a `_test.ts`
+suffix. Not every area has a counterpart, though: Python's `cli/` is solved
+differently by `dev/`, and `core/src` adds directories Python keeps elsewhere.
+When an area does not map, say so in the PR rather than inventing a directory.
 
 ## 3. Idiom mapping
 
@@ -112,19 +103,3 @@ the standard header, whose exact shape `scripts/check_license.sh` enforces:
  * SPDX-License-Identifier: Apache-2.0
  */
 ```
-
-## 9. Checklist
-
-- [ ] Read the Python module and its unit tests.
-- [ ] Placed the source at `core/src/<area>/<name>.ts` (or `dev/src/…`).
-- [ ] Applied the idiom mapping — `camelCase` members, options object,
-      `async *` + `yield*`, no `any`.
-- [ ] Exported the value and its referenced types from `core/src/common.ts`
-      (browser-safe) or `core/src/index.ts` (Node-only).
-- [ ] Translated every Python test case into
-      `core/test/<area>/<name>_test.ts`, importing from `@google/adk`.
-- [ ] Documented any deliberate divergence in TSDoc and in the PR.
-- [ ] Ran build, the targeted test, lint, format, `docs:check` and
-      `check_license.sh`.
-- [ ] Titled the PR as parity work and named the Python source path in the
-      body.

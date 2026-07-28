@@ -56,10 +56,8 @@ your changes before each commit.
 ### Agent skills
 
 Reusable skills for AI coding assistants working on this repository live in
-`.agents/skills/`, and compatible tools pick them up automatically.
-[`AGENTS.md`](AGENTS.md) is the entry point that points an agent at the
-library, and [`.agents/skills/README.md`](.agents/skills/README.md) indexes the
-available skills and explains how to add one.
+[`.agents/skills/`](.agents/skills/README.md), which indexes them and explains
+how to add one. [`AGENTS.md`](AGENTS.md) points agents at them.
 
 ### Sign our Contributor License Agreement
 
