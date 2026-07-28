@@ -14,7 +14,6 @@ import {logger} from '../utils/logger.js';
 import {BasePlugin} from './base_plugin.js';
 
 const DEFAULT_PLUGIN_NAME = 'context_filter_plugin';
-const MIN_REMOVE_AMOUNT = 1;
 
 /**
  * Moves `splitIndex` left until function calls/responses stay paired.
@@ -120,8 +119,8 @@ export class ContextFilterPlugin extends BasePlugin {
    * @throws {Error} If `removeAmount` is less than 1.
    */
   constructor(options: ContextFilterPluginOptions = {}) {
-    const removeAmount = options.removeAmount ?? MIN_REMOVE_AMOUNT;
-    if (removeAmount < MIN_REMOVE_AMOUNT) {
+    const removeAmount = options.removeAmount ?? 1;
+    if (removeAmount < 1) {
       throw new Error('removeAmount must be at least 1');
     }
     super(options.name ?? DEFAULT_PLUGIN_NAME);
