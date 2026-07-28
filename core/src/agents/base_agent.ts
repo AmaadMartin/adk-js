@@ -16,6 +16,7 @@ import {
 } from '../telemetry/tracing.js';
 import {Context} from './context.js';
 import {InvocationContext} from './invocation_context.js';
+import type {LlmAgentConfig} from './llm_agent.js';
 
 /**
  * A single callback function for an agent.
@@ -309,6 +310,51 @@ export abstract class BaseAgent {
     }
 
     return undefined;
+  }
+
+  /**
+   * Creates a copy of this agent with the given fields overridden.
+   *
+   * The clone is detached from the original agent tree: it has no parent and
+   * owns freshly, recursively cloned sub-agents so it never shares mutable
+   * agent state with the original.
+   *
+   * simplicity: minimal fallback for the `clone()` introduced by
+   * google/adk-js#534 — a shallow copy plus recursive sub-agent cloning, which
+   * covers the overrides the agent optimizers need. When #534 lands, reconcile
+   * with its richer field-level copy semantics.
+   *
+   * @param overrides Optional map of fields to override on the cloned agent.
+   *   The `parentAgent` field cannot be overridden.
+   * @return A new agent instance with identical configuration as the original
+   *   except for the overridden fields.
+   */
+  clone(overrides?: Partial<LlmAgentConfig>): this {
+    if (overrides && 'parentAgent' in overrides) {
+      throw new Error(
+        'Cannot update `parentAgent` field in clone. Parent agent is set only ' +
+          'when the parent agent is instantiated with the sub-agents.',
+      );
+    }
+
+    const cloned = Object.assign(
+      Object.create(Object.getPrototypeOf(this) as object),
+      this,
+      overrides,
+    ) as this;
+
+    const mutableClone = cloned as {
+      parentAgent?: BaseAgent;
+      subAgents: BaseAgent[];
+    };
+    mutableClone.parentAgent = undefined;
+    mutableClone.subAgents = this.subAgents.map((subAgent) => {
+      const clonedSubAgent = subAgent.clone();
+      (clonedSubAgent as {parentAgent?: BaseAgent}).parentAgent = cloned;
+      return clonedSubAgent;
+    });
+
+    return cloned;
   }
 
   /**
