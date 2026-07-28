@@ -17,6 +17,22 @@ import {
 } from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 
+// Mock the lazily-imported default client so we can assert the executor wires
+// it up when no factory is injected, without touching a real cluster.
+const defaultClientMocks = vi.hoisted(() => {
+  const sandbox = {
+    write: vi.fn().mockResolvedValue(undefined),
+    run: vi.fn().mockResolvedValue({stdout: 'default stdout', stderr: ''}),
+    close: vi.fn().mockResolvedValue(undefined),
+  };
+  return {sandbox, factory: vi.fn(() => sandbox)};
+});
+
+vi.mock('../../src/code_executors/agent_sandbox_client.js', () => ({
+  defaultSandboxClientFactory: defaultClientMocks.factory,
+  AgentSandboxClient: class {},
+}));
+
 /** A mock {@link SandboxClient} whose methods are vitest spies. */
 interface MockSandbox {
   write: ReturnType<typeof vi.fn>;
@@ -61,6 +77,10 @@ describe('GkeCodeExecutor', () => {
   beforeEach(() => {
     sandbox = createMockSandbox();
     factory = vi.fn((_options: SandboxClientOptions) => sandbox);
+    defaultClientMocks.factory.mockClear();
+    defaultClientMocks.sandbox.write.mockClear();
+    defaultClientMocks.sandbox.run.mockClear();
+    defaultClientMocks.sandbox.close.mockClear();
   });
 
   describe('constructor', () => {
@@ -94,10 +114,36 @@ describe('GkeCodeExecutor', () => {
       expect(executor.sandboxGatewayName).toBe('my-gateway');
     });
 
-    it('throws when sandbox mode selected without a client factory', () => {
-      expect(() => new GkeCodeExecutor({executorType: 'sandbox'})).toThrow(
-        'Agent Sandbox client not available',
+    it('does not throw in sandbox mode without an injected factory', () => {
+      expect(
+        () => new GkeCodeExecutor({executorType: 'sandbox'}),
+      ).not.toThrow();
+    });
+  });
+
+  describe('default sandbox client wiring', () => {
+    it('uses the bundled default factory when none is injected', async () => {
+      const executor = new GkeCodeExecutor({
+        executorType: 'sandbox',
+        namespace: 'agents',
+      });
+
+      const result = await executor.executeCode(makeParams('print("hi")'));
+
+      expect(defaultClientMocks.factory).toHaveBeenCalledWith({
+        namespace: 'agents',
+        templateName: 'python-sandbox-template',
+        gatewayName: undefined,
+      });
+      expect(defaultClientMocks.sandbox.write).toHaveBeenCalledWith(
+        'script.py',
+        'print("hi")',
       );
+      expect(defaultClientMocks.sandbox.run).toHaveBeenCalledWith(
+        'python3 script.py',
+      );
+      expect(defaultClientMocks.sandbox.close).toHaveBeenCalledTimes(1);
+      expect(result.stdout).toBe('default stdout');
     });
   });
 
