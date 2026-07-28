@@ -5,30 +5,24 @@
  */
 
 import {LlmAgent as Agent} from '../agents/llm_agent.js';
-import {BaseLlmType, LLMRegistry} from '../models/registry.js';
 import {Skill} from '../skills/skill.js';
 import {SkillToolset} from '../tools/skill/skill_toolset.js';
 import {experimental} from '../utils/experimental.js';
-import {logger} from '../utils/logger.js';
 
-import {AgentOptimizer} from './agent_optimizer.js';
-import {AgentWithScores, UnstructuredSamplingResult} from './data_types.js';
+import {UnstructuredSamplingResult} from './data_types.js';
 import {EvaluationBatch} from './gepa/adapter.js';
-import {optimize as gepaOptimize, ReflectionLm} from './gepa/engine.js';
+import {ReflectionLm} from './gepa/engine.js';
 import {
   extractProposedInstruction,
   renderInstructionProposal,
 } from './gepa/instruction_proposal.js';
 import {
+  AGENT_PROMPT_NAME,
   AgentGepaAdapter,
-  buildReflectionLm,
+  GEPARootAgentPromptOptimizer,
   GEPARootAgentPromptOptimizerConfig,
-  GEPARootAgentPromptOptimizerResult,
 } from './gepa_root_agent_prompt_optimizer.js';
 import {Sampler} from './sampler.js';
-
-/** The GEPA component key for the root agent's core instruction. */
-const AGENT_PROMPT_KEY = 'agent_prompt';
 
 /** The prefix for GEPA component keys that target a skill's instructions. */
 const SKILL_KEY_PREFIX = 'skill_instructions:';
@@ -111,12 +105,6 @@ export class GEPARootAgentOptimizerConfig extends GEPARootAgentPromptOptimizerCo
 }
 
 /**
- * The final result of a {@link GEPARootAgentOptimizer} run: the optimized agents
- * and the raw, JSON-serializable GEPA engine result.
- */
-export type GEPARootAgentOptimizerResult = GEPARootAgentPromptOptimizerResult;
-
-/**
  * Clones a {@link SkillToolset}, replacing each skill's instructions with the
  * matching candidate component when present.
  *
@@ -154,7 +142,7 @@ export function createAgentFromCandidate(
   initialAgent: Agent,
   candidate: Record<string, string>,
 ): Agent {
-  const prompt = candidate[AGENT_PROMPT_KEY] ?? initialAgent.instruction;
+  const prompt = candidate[AGENT_PROMPT_NAME] ?? initialAgent.instruction;
   const newAgent = initialAgent.clone({instruction: prompt});
   newAgent.tools = initialAgent.tools.map((tool) =>
     tool instanceof SkillToolset ? updateSkillToolset(tool, candidate) : tool,
@@ -237,7 +225,7 @@ export class RootAgentGepaAdapter extends AgentGepaAdapter {
     const newTexts: Record<string, string> = {};
     for (const component of componentsToUpdate) {
       let promptTemplate: string;
-      if (component === AGENT_PROMPT_KEY) {
+      if (component === AGENT_PROMPT_NAME) {
         promptTemplate = AGENT_PROMPT_UPDATOR_INST_TEMPLATE;
       } else if (component.startsWith(SKILL_KEY_PREFIX)) {
         const skillName = component.slice(SKILL_KEY_PREFIX.length);

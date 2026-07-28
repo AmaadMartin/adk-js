@@ -198,7 +198,6 @@ export {
   GEPARootAgentOptimizer,
   GEPARootAgentOptimizerConfig,
 } from './optimization/gepa_root_agent_optimizer.js';
-export type {GEPARootAgentOptimizerResult} from './optimization/gepa_root_agent_optimizer.js';
 export {
   AgentGepaAdapter,
   GEPARootAgentPromptOptimizer,
