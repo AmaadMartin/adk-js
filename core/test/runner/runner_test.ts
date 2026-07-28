@@ -1662,14 +1662,6 @@ describe('Runner.runLive live-media persistence', () => {
     return 'unknown';
   }
 
-  function hasInlineAudio(event: Event): boolean {
-    return (
-      event.content?.parts?.some((p) =>
-        p.inlineData?.mimeType?.startsWith('audio/'),
-      ) ?? false
-    );
-  }
-
   it('yields raw inline live-media events but does not persist them', async () => {
     await createSession();
     const agent = new MockLiveAgent('live_agent');
@@ -1729,7 +1721,6 @@ describe('Runner.runLive live-media persistence', () => {
       userId: USER,
       sessionId: SESSION,
     });
-    expect(session!.events.some(hasInlineAudio)).toBe(false);
     expect(session!.events.map(label)).toEqual([
       'transcribed turn',
       'gs://b/clip',
