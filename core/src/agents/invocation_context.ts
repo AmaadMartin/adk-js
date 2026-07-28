@@ -16,6 +16,7 @@ import {randomUUID} from '../utils/env_aware_utils.js';
 
 import {ActiveStreamingTool} from './active_streaming_tool.js';
 import {BaseAgent} from './base_agent.js';
+import {ContextCacheConfig} from './context_cache_config.js';
 import {RunConfig} from './run_config.js';
 import {TranscriptionEntry} from './transcription_entry.js';
 
@@ -38,6 +39,7 @@ export interface InvocationContextParams {
   activeStreamingTools?: Record<string, ActiveStreamingTool>;
   pluginManager: PluginManager;
   abortSignal?: AbortSignal;
+  contextCacheConfig?: ContextCacheConfig;
 }
 
 /**
@@ -186,6 +188,14 @@ export class InvocationContext {
   readonly abortSignal?: AbortSignal;
 
   /**
+   * The app-level context cache configuration for this invocation. Threaded
+   * from the {@link App}/`Runner` and inherited by sub-agent contexts (which are
+   * created by spreading the parent context), so it applies to the whole
+   * invocation tree.
+   */
+  contextCacheConfig?: ContextCacheConfig;
+
+  /**
    * @param params The parameters for creating an invocation context.
    */
   constructor(params: InvocationContextParams) {
@@ -203,6 +213,7 @@ export class InvocationContext {
     this.activeStreamingTools = params.activeStreamingTools;
     this.pluginManager = params.pluginManager;
     this.abortSignal = params.abortSignal;
+    this.contextCacheConfig = params.contextCacheConfig;
     // Inherit the parent invocation's cost manager when one is available.
     // Child contexts created for sub-agents, agent transfers and loop
     // iterations (via createInvocationContext / createBranchCtxForSubAgent)

@@ -5,6 +5,7 @@
  */
 
 import {BaseAgent, isBaseAgent} from '../agents/base_agent.js';
+import {ContextCacheConfig} from '../agents/context_cache_config.js';
 import {BasePlugin} from '../plugins/base_plugin.js';
 import {ResumabilityConfig} from './resumability_config.js';
 
@@ -52,6 +53,12 @@ export interface AppOptions {
   rootAgent: BaseAgent;
   plugins?: BasePlugin[];
   resumabilityConfig?: ResumabilityConfig;
+
+  /**
+   * Optional context cache configuration. When set, context caching is enabled
+   * for all LLM agents in the app; when absent, caching is disabled.
+   */
+  contextCacheConfig?: ContextCacheConfig;
 }
 
 /**
@@ -73,6 +80,7 @@ export class App {
   readonly rootAgent: BaseAgent | any;
   readonly plugins: BasePlugin[];
   readonly resumabilityConfig?: ResumabilityConfig;
+  readonly contextCacheConfig?: ContextCacheConfig;
 
   constructor(options: AppOptions) {
     validateAppName(options.name);
@@ -94,5 +102,6 @@ export class App {
     this.rootAgent = options.rootAgent;
     this.plugins = options.plugins ?? [];
     this.resumabilityConfig = options.resumabilityConfig;
+    this.contextCacheConfig = options.contextCacheConfig;
   }
 }
