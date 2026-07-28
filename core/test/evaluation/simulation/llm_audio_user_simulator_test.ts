@@ -263,23 +263,6 @@ describe('LlmAudioUserSimulator', () => {
       expect(audioLlm.generateContentAsync).not.toHaveBeenCalled();
     });
 
-    it('passes through a SUCCESS result with empty parts unchanged', async () => {
-      const simulator = makeSimulator();
-      const textResult = new NextUserMessage({
-        status: Status.SUCCESS,
-        userMessage: {parts: [], role: 'user'},
-      });
-      vi.spyOn(
-        internals(simulator).textSimulator,
-        'getNextUserMessage',
-      ).mockResolvedValue(textResult);
-
-      const result = await simulator.getNextUserMessage([]);
-
-      expect(result).toBe(textResult);
-      expect(audioLlm.generateContentAsync).not.toHaveBeenCalled();
-    });
-
     it('passes through a SUCCESS result whose message has no parts', async () => {
       const simulator = makeSimulator();
       const textResult = new NextUserMessage({

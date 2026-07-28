@@ -173,20 +173,6 @@ interface GeneratedAudio {
 }
 
 /**
- * Resolves an audio model name to a {@link BaseLlm} instance via the registry.
- *
- * Ported as a standalone module function (the adk-python `_resolve_audio_llm`
- * staticmethod uses no instance identity).
- *
- * @param audioModel The audio model name to resolve.
- * @returns A new `BaseLlm` for the resolved model.
- */
-function resolveAudioLlm(audioModel: string): BaseLlm {
-  const audioLlmClass = LLMRegistry.resolve(audioModel);
-  return new audioLlmClass({model: audioModel});
-}
-
-/**
  * A {@link UserSimulator} that generates *audio* user messages.
  *
  * Acts as a decorator over a text-producing `UserSimulator` (the
@@ -225,7 +211,7 @@ export class LlmAudioUserSimulator extends UserSimulator {
     super();
     this.config = new LlmAudioUserSimulatorConfig(config);
     this.textSimulator = textSimulator;
-    this.audioLlm = resolveAudioLlm(this.config.audioModel);
+    this.audioLlm = LLMRegistry.newLlm(this.config.audioModel);
   }
 
   /**
