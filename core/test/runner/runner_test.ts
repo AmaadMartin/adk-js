@@ -8,6 +8,8 @@ import {
   App,
   BaseAgent,
   BasePlugin,
+  BaseTool,
+  BaseToolset,
   createEvent,
   createResumabilityConfig,
   determineAgentForResumption,
@@ -16,10 +18,12 @@ import {
   InMemorySessionService,
   InvocationContext,
   isRoutableLlmAgent,
+  LiveRequestQueue,
   LlmAgent,
   Runner,
+  StreamingMode,
 } from '@google/adk';
-import {Content, FunctionCall, FunctionResponse} from '@google/genai';
+import {Content, FunctionCall, FunctionResponse, Modality} from '@google/genai';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 
 const TEST_APP_ID = 'test_app_id';
@@ -122,6 +126,52 @@ class MockPlugin extends BasePlugin {
     invocationContext: InvocationContext;
   }): Promise<void> {
     this.afterRunCallbackCalled = true;
+    return Promise.resolve();
+  }
+}
+
+/**
+ * A mock live agent that overrides `runLiveImpl` directly (bypassing the
+ * unimplemented `runLiveFlow`). It captures the received `InvocationContext` and
+ * yields either a configurable list of events or a custom generator, so tests
+ * can exercise `Runner.runLive` without a real model or live connection.
+ */
+class MockLiveAgent extends LlmAgent {
+  capturedContext?: InvocationContext;
+  liveEvents: Event[] = [];
+  liveImpl?: (context: InvocationContext) => AsyncGenerator<Event, void, void>;
+
+  constructor(name: string, parentAgent?: BaseAgent) {
+    super({name, model: 'gemini-2.5-flash', subAgents: [], parentAgent});
+  }
+
+  protected override async *runLiveImpl(
+    context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    this.capturedContext = context;
+    if (this.liveImpl) {
+      yield* this.liveImpl(context);
+      return;
+    }
+    for (const event of this.liveEvents) {
+      yield event;
+    }
+  }
+}
+
+/**
+ * A minimal toolset whose `close` can be spied on to assert cleanup.
+ */
+class MockLiveToolset extends BaseToolset {
+  constructor() {
+    super([]);
+  }
+
+  override async getTools(): Promise<BaseTool[]> {
+    return [];
+  }
+
+  override async close(): Promise<void> {
     return Promise.resolve();
   }
 }
@@ -885,5 +935,538 @@ describe('Runner customMetadata support', () => {
     const userEvent = updatedSession!.events[0];
     expect(userEvent.author).toBe('user');
     expect(userEvent.content?.role).toBe('user');
+  });
+});
+
+describe('Runner.runLive', () => {
+  let sessionService: InMemorySessionService;
+  let artifactService: InMemoryArtifactService;
+  let agent: MockLiveAgent;
+  let runner: Runner;
+  let liveRequestQueue: LiveRequestQueue;
+
+  beforeEach(() => {
+    sessionService = new InMemorySessionService();
+    artifactService = new InMemoryArtifactService();
+    agent = new MockLiveAgent('live_agent');
+    runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      artifactService,
+    });
+    liveRequestQueue = new LiveRequestQueue();
+  });
+
+  function createSession(sessionId = TEST_SESSION_ID) {
+    return sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId,
+    });
+  }
+
+  function getStoredSession(sessionId = TEST_SESSION_ID) {
+    return sessionService.getSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId,
+    });
+  }
+
+  function liveEvent(text: string, partial?: boolean): Event {
+    return createEvent({
+      invocationId: 'live_inv',
+      author: 'live_agent',
+      content: {role: 'model', parts: [{text}]},
+      partial,
+    });
+  }
+
+  async function collect(
+    generator: AsyncGenerator<Event, void, undefined>,
+  ): Promise<Event[]> {
+    const events: Event[] = [];
+    for await (const event of generator) {
+      events.push(event);
+    }
+    return events;
+  }
+
+  it('yields the events produced by the agent live loop', async () => {
+    await createSession();
+    agent.liveEvents = [liveEvent('live-1'), liveEvent('live-2')];
+
+    const events = await collect(
+      runner.runLive({
+        userId: TEST_USER_ID,
+        sessionId: TEST_SESSION_ID,
+        liveRequestQueue,
+      }),
+    );
+
+    expect(events.map((e) => e.content?.parts?.[0].text)).toEqual([
+      'live-1',
+      'live-2',
+    ]);
+  });
+
+  it('persists non-partial live events to the session', async () => {
+    await createSession();
+    agent.liveEvents = [liveEvent('live-1'), liveEvent('live-2')];
+
+    await collect(
+      runner.runLive({
+        userId: TEST_USER_ID,
+        sessionId: TEST_SESSION_ID,
+        liveRequestQueue,
+      }),
+    );
+
+    const session = await getStoredSession();
+    expect(session!.events.map((e) => e.content?.parts?.[0].text)).toEqual([
+      'live-1',
+      'live-2',
+    ]);
+    expect(session!.events.every((e) => e.author === 'live_agent')).toBe(true);
+  });
+
+  it('yields but does not persist partial events', async () => {
+    await createSession();
+    agent.liveEvents = [liveEvent('partial', true), liveEvent('final')];
+
+    const events = await collect(
+      runner.runLive({
+        userId: TEST_USER_ID,
+        sessionId: TEST_SESSION_ID,
+        liveRequestQueue,
+      }),
+    );
+
+    expect(events).toHaveLength(2);
+    const session = await getStoredSession();
+    expect(session!.events).toHaveLength(1);
+    expect(session!.events[0].content?.parts?.[0].text).toBe('final');
+  });
+
+  it('builds a BIDI context with the live queue and default AUDIO modality', async () => {
+    await createSession();
+    agent.liveEvents = [liveEvent('live-1')];
+
+    await collect(
+      runner.runLive({
+        userId: TEST_USER_ID,
+        sessionId: TEST_SESSION_ID,
+        liveRequestQueue,
+      }),
+    );
+
+    expect(agent.capturedContext?.liveRequestQueue).toBe(liveRequestQueue);
+    expect(agent.capturedContext?.runConfig?.streamingMode).toBe(
+      StreamingMode.BIDI,
+    );
+    expect(agent.capturedContext?.runConfig?.responseModalities).toEqual([
+      Modality.AUDIO,
+    ]);
+  });
+
+  it('preserves caller-provided responseModalities', async () => {
+    await createSession();
+    agent.liveEvents = [liveEvent('live-1')];
+
+    await collect(
+      runner.runLive({
+        userId: TEST_USER_ID,
+        sessionId: TEST_SESSION_ID,
+        liveRequestQueue,
+        runConfig: {responseModalities: [Modality.TEXT]},
+      }),
+    );
+
+    expect(agent.capturedContext?.runConfig?.responseModalities).toEqual([
+      Modality.TEXT,
+    ]);
+    expect(agent.capturedContext?.runConfig?.streamingMode).toBe(
+      StreamingMode.BIDI,
+    );
+  });
+
+  it('throws when the session does not exist', async () => {
+    await expect(
+      collect(
+        runner.runLive({
+          userId: TEST_USER_ID,
+          sessionId: 'missing_session',
+          liveRequestQueue,
+        }),
+      ),
+    ).rejects.toThrow('Session not found: missing_session');
+  });
+
+  it('throws a clear error when appName is not configured', async () => {
+    const noAppRunner = new Runner({
+      agent: new MockLiveAgent('live_agent'),
+      sessionService,
+      artifactService,
+    });
+    await createSession();
+
+    await expect(
+      collect(
+        noAppRunner.runLive({
+          userId: TEST_USER_ID,
+          sessionId: TEST_SESSION_ID,
+          liveRequestQueue,
+        }),
+      ),
+    ).rejects.toThrow('appName must be provided in runner constructor');
+  });
+
+  it('throws when liveRequestQueue is missing', async () => {
+    await createSession();
+    const params = {
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    } as unknown as {
+      userId: string;
+      sessionId: string;
+      liveRequestQueue: LiveRequestQueue;
+    };
+
+    await expect(collect(runner.runLive(params))).rejects.toThrow(
+      'liveRequestQueue is required for runLive.',
+    );
+  });
+
+  it('resolves the agent to run via determineAgentForResumption', async () => {
+    const root = new MockLiveAgent('root_agent');
+    const sub = new MockLiveAgent('sub_agent1', root);
+    root.subAgents.push(sub);
+    sub.liveEvents = [
+      createEvent({
+        invocationId: 'live_inv',
+        author: 'sub_agent1',
+        content: {role: 'model', parts: [{text: 'sub-response'}]},
+      }),
+    ];
+
+    const resolutionRunner = new Runner({
+      appName: TEST_APP_ID,
+      agent: root,
+      sessionService,
+      artifactService,
+    });
+    const session = await createSession('session_resolution');
+    await sessionService.appendEvent({
+      session,
+      event: createEvent({
+        invocationId: 'prev',
+        author: 'sub_agent1',
+        content: {role: 'model', parts: [{text: 'earlier'}]},
+      }),
+    });
+
+    await collect(
+      resolutionRunner.runLive({
+        userId: TEST_USER_ID,
+        sessionId: 'session_resolution',
+        liveRequestQueue,
+      }),
+    );
+
+    expect(sub.capturedContext?.agent.name).toBe('sub_agent1');
+    expect(root.capturedContext).toBeUndefined();
+  });
+
+  it('applies the onEvent plugin callback while persisting the original event', async () => {
+    const plugin = new MockPlugin();
+    plugin.enableEventCallback = true;
+    const pluginRunner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      artifactService,
+      plugins: [plugin],
+    });
+    await createSession();
+    agent.liveEvents = [liveEvent('original')];
+
+    const events = await collect(
+      pluginRunner.runLive({
+        userId: TEST_USER_ID,
+        sessionId: TEST_SESSION_ID,
+        liveRequestQueue,
+      }),
+    );
+
+    expect(events[0].content?.parts?.[0].text).toBe(
+      MockPlugin.ON_EVENT_CALLBACK_MSG,
+    );
+    const session = await getStoredSession();
+    expect(session!.events).toHaveLength(1);
+    expect(session!.events[0].content?.parts?.[0].text).toBe('original');
+  });
+
+  it('early-exits when a beforeRun plugin returns content', async () => {
+    const plugin = new MockPlugin();
+    plugin.enableBeforeRunCallback = true;
+    const pluginRunner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      artifactService,
+      plugins: [plugin],
+    });
+    await createSession();
+    agent.liveEvents = [liveEvent('should-not-run')];
+
+    const events = await collect(
+      pluginRunner.runLive({
+        userId: TEST_USER_ID,
+        sessionId: TEST_SESSION_ID,
+        liveRequestQueue,
+      }),
+    );
+
+    expect(events).toHaveLength(1);
+    expect(events[0].author).toBe('model');
+    expect(events[0].content?.parts?.[0].text).toBe(
+      MockPlugin.BEFORE_RUN_CALLBACK_MSG,
+    );
+    expect(agent.capturedContext).toBeUndefined();
+    expect(plugin.afterRunCallbackCalled).toBe(false);
+
+    const session = await getStoredSession();
+    expect(session!.events).toHaveLength(1);
+    expect(session!.events[0].content?.parts?.[0].text).toBe(
+      MockPlugin.BEFORE_RUN_CALLBACK_MSG,
+    );
+  });
+
+  it('returns immediately when the abort signal is already aborted', async () => {
+    await createSession();
+    agent.liveEvents = [liveEvent('live-1')];
+    const controller = new AbortController();
+    controller.abort();
+
+    const events = await collect(
+      runner.runLive({
+        userId: TEST_USER_ID,
+        sessionId: TEST_SESSION_ID,
+        liveRequestQueue,
+        abortSignal: controller.signal,
+      }),
+    );
+
+    expect(events).toHaveLength(0);
+    expect(agent.capturedContext).toBeUndefined();
+    const session = await getStoredSession();
+    expect(session!.events).toHaveLength(0);
+  });
+
+  it('stops after the beforeRun callback when aborted', async () => {
+    const controller = new AbortController();
+    const plugin = new MockPlugin();
+    plugin.beforeRunCallback = async () => {
+      controller.abort();
+      return undefined;
+    };
+    const pluginRunner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      artifactService,
+      plugins: [plugin],
+    });
+    await createSession();
+    agent.liveEvents = [liveEvent('live-1')];
+
+    const events = await collect(
+      pluginRunner.runLive({
+        userId: TEST_USER_ID,
+        sessionId: TEST_SESSION_ID,
+        liveRequestQueue,
+        abortSignal: controller.signal,
+      }),
+    );
+
+    expect(events).toHaveLength(0);
+    expect(agent.capturedContext).toBeUndefined();
+  });
+
+  it('stops after persisting the early-exit event when aborted', async () => {
+    const controller = new AbortController();
+    const plugin = new MockPlugin();
+    plugin.enableBeforeRunCallback = true;
+    const pluginRunner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      artifactService,
+      plugins: [plugin],
+    });
+    await createSession();
+    const originalAppend = sessionService.appendEvent.bind(sessionService);
+    vi.spyOn(sessionService, 'appendEvent').mockImplementation(async (args) => {
+      const result = await originalAppend(args);
+      controller.abort();
+      return result;
+    });
+
+    const events = await collect(
+      pluginRunner.runLive({
+        userId: TEST_USER_ID,
+        sessionId: TEST_SESSION_ID,
+        liveRequestQueue,
+        abortSignal: controller.signal,
+      }),
+    );
+
+    expect(events).toHaveLength(0);
+    const session = await getStoredSession();
+    expect(session!.events).toHaveLength(1);
+    expect(session!.events[0].content?.parts?.[0].text).toBe(
+      MockPlugin.BEFORE_RUN_CALLBACK_MSG,
+    );
+  });
+
+  it('stops at the top of the live loop when aborted before an event is processed', async () => {
+    const controller = new AbortController();
+    await createSession();
+    agent.liveImpl = async function* () {
+      controller.abort();
+      yield liveEvent('after-abort');
+    };
+
+    const events = await collect(
+      runner.runLive({
+        userId: TEST_USER_ID,
+        sessionId: TEST_SESSION_ID,
+        liveRequestQueue,
+        abortSignal: controller.signal,
+      }),
+    );
+
+    expect(events).toHaveLength(0);
+    const session = await getStoredSession();
+    expect(session!.events).toHaveLength(0);
+  });
+
+  it('stops after the onEvent callback when aborted', async () => {
+    const controller = new AbortController();
+    const plugin = new MockPlugin();
+    plugin.enableEventCallback = true;
+    const originalOnEvent = plugin.onEventCallback.bind(plugin);
+    plugin.onEventCallback = async (params) => {
+      const result = await originalOnEvent(params);
+      controller.abort();
+      return result;
+    };
+    const pluginRunner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      artifactService,
+      plugins: [plugin],
+    });
+    await createSession();
+    agent.liveEvents = [liveEvent('live-1'), liveEvent('live-2')];
+
+    const events = await collect(
+      pluginRunner.runLive({
+        userId: TEST_USER_ID,
+        sessionId: TEST_SESSION_ID,
+        liveRequestQueue,
+        abortSignal: controller.signal,
+      }),
+    );
+
+    expect(events).toHaveLength(0);
+    const session = await getStoredSession();
+    expect(session!.events).toHaveLength(1);
+    expect(session!.events[0].content?.parts?.[0].text).toBe('live-1');
+  });
+
+  it('completes the run even when aborted during the afterRun callback', async () => {
+    const controller = new AbortController();
+    const plugin = new MockPlugin();
+    const originalAfterRun = plugin.afterRunCallback.bind(plugin);
+    plugin.afterRunCallback = async (params) => {
+      await originalAfterRun(params);
+      controller.abort();
+    };
+    const pluginRunner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      artifactService,
+      plugins: [plugin],
+    });
+    await createSession();
+    agent.liveEvents = [liveEvent('live-1')];
+
+    const events = await collect(
+      pluginRunner.runLive({
+        userId: TEST_USER_ID,
+        sessionId: TEST_SESSION_ID,
+        liveRequestQueue,
+        abortSignal: controller.signal,
+      }),
+    );
+
+    expect(events).toHaveLength(1);
+    expect(plugin.afterRunCallbackCalled).toBe(true);
+  });
+
+  it('closes toolsets after the live run completes', async () => {
+    const toolset = new MockLiveToolset();
+    const closeSpy = vi.spyOn(toolset, 'close');
+    const toolAgent = new MockLiveAgent('tool_agent');
+    toolAgent.tools.push(toolset);
+    toolAgent.liveEvents = [
+      createEvent({
+        invocationId: 'live_inv',
+        author: 'tool_agent',
+        content: {role: 'model', parts: [{text: 'live-1'}]},
+      }),
+    ];
+    const toolRunner = new Runner({
+      appName: TEST_APP_ID,
+      agent: toolAgent,
+      sessionService,
+      artifactService,
+    });
+    await createSession();
+
+    await collect(
+      toolRunner.runLive({
+        userId: TEST_USER_ID,
+        sessionId: TEST_SESSION_ID,
+        liveRequestQueue,
+      }),
+    );
+
+    expect(closeSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('runs without an artifact service configured', async () => {
+    const noArtifactRunner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+    });
+    await createSession();
+    agent.liveEvents = [liveEvent('live-1')];
+
+    const events = await collect(
+      noArtifactRunner.runLive({
+        userId: TEST_USER_ID,
+        sessionId: TEST_SESSION_ID,
+        liveRequestQueue,
+      }),
+    );
+
+    expect(events).toHaveLength(1);
+    expect(agent.capturedContext?.artifactService).toBeUndefined();
   });
 });
