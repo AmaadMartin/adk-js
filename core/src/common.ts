@@ -215,6 +215,18 @@ export type {
 } from './tools/base_tool.js';
 export {BaseToolset, isBaseToolset} from './tools/base_toolset.js';
 export type {ToolPredicate} from './tools/base_toolset.js';
+export {
+  DEFAULT_MONITOR_INTERVAL_MS,
+  isResourceMonitoringSupported,
+  startResourceMonitor,
+} from './tools/bash_resource_monitor.js';
+export type {
+  ResourceBreach,
+  ResourceBreachReason,
+  ResourceMonitorDeps,
+  ResourceMonitorHandle,
+  ResourceMonitorPolicy,
+} from './tools/bash_resource_monitor.js';
 export {ExecuteBashTool} from './tools/bash_tool.js';
 export type {BashToolPolicy, ExecuteBashToolParams} from './tools/bash_tool.js';
 export {EXIT_LOOP, ExitLoopTool} from './tools/exit_loop_tool.js';
