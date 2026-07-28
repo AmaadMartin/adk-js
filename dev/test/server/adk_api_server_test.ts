@@ -169,6 +169,25 @@ const TEST_AGENT = new TestAgent({
   ],
 });
 
+const FOREIGN_ORIGIN = 'http://example.invalid';
+const TRUSTED_ORIGIN = 'http://trusted.example';
+
+const RUN_SSE_PAYLOAD = {
+  appName: 'testApp',
+  userId: 'testUser',
+  sessionId: 'sessionId',
+  newMessage: {parts: [{text: 'Hello test agent!'}], role: 'user'},
+};
+
+/** Posts a valid JSON /run_sse request, optionally from a given origin. */
+function postSse(serverUrl: string, origin?: string) {
+  return fetch(`${serverUrl}/run_sse`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json', ...(origin ? {origin} : {})},
+    body: JSON.stringify(RUN_SSE_PAYLOAD),
+  });
+}
+
 describe('AdkWebServer', () => {
   let agentLoader: AgentLoader;
   let sessionService: BaseSessionService;
@@ -1128,6 +1147,112 @@ describe('AdkWebServer', () => {
       } finally {
         await specificServer.stop();
       }
+    });
+  });
+
+  describe('Cross-origin protection', () => {
+    beforeEach(async () => {
+      await sessionService.createSession({
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: 'sessionId',
+      });
+    });
+
+    it('should refuse /run_sse from a foreign origin', async () => {
+      const spy = vi.spyOn(Runner.prototype, 'runAsync');
+
+      const response = await postSse(server.url, FOREIGN_ORIGIN);
+
+      expect(response.status).toBe(403);
+      expect(spy).not.toHaveBeenCalled();
+
+      spy.mockRestore();
+    });
+
+    it('should serve /run_sse to the origin the server was reached on without an allow-origin header', async () => {
+      // The header assertion locks the fix from google/adk-js#360, which
+      // removed a hard-coded Access-Control-Allow-Origin: * from this route
+      // with no test of its own. Only cors() may set that header.
+      const response = await postSse(server.url, server.url);
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get('access-control-allow-origin')).toBeNull();
+    });
+
+    it('should refuse a body-less session creation from a foreign origin', async () => {
+      const response = await fetch(
+        `${server.url}/apps/testApp/users/f10/sessions/f10_sid`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Origin': FOREIGN_ORIGIN,
+          },
+          body: '',
+        },
+      );
+
+      expect(response.status).toBe(403);
+      await expect(
+        sessionService.getSession({
+          appName: 'testApp',
+          userId: 'f10',
+          sessionId: 'f10_sid',
+        }),
+      ).resolves.toBeUndefined();
+    });
+
+    it('should let a safe method through without exposing the response', async () => {
+      const response = await fetch(
+        `${server.url}/apps/testApp/users/testUser/sessions`,
+        {headers: {'Origin': FOREIGN_ORIGIN}},
+      );
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get('access-control-allow-origin')).toBeNull();
+    });
+
+    it('should allow the configured origin when allowOrigins is set', async () => {
+      const trustedServer = new AdkApiServer({
+        agentLoader,
+        sessionService,
+        memoryService,
+        artifactService,
+        allowOrigins: TRUSTED_ORIGIN,
+      });
+      await trustedServer.start();
+
+      try {
+        const allowed = await postSse(trustedServer.url, TRUSTED_ORIGIN);
+
+        expect(allowed.status).toBe(200);
+        // The SSE route itself never sets the header; cors() governs it.
+        expect(allowed.headers.get('access-control-allow-origin')).toBe(
+          TRUSTED_ORIGIN,
+        );
+      } finally {
+        await trustedServer.stop();
+      }
+    });
+
+    it('should not parse a form-encoded /run_sse body', async () => {
+      // Locks the fix from google/adk-js#378, a one-line removal of
+      // express.urlencoded() with no test of its own. Remounting any form or
+      // multipart parser turns this preflight-free request into an agent run.
+      // The session exists, so a 404 cannot satisfy the assertions for free.
+      const spy = vi.spyOn(Runner.prototype, 'runAsync');
+
+      const response = await fetch(`${server.url}/run_sse`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: 'appName=testApp&userId=testUser&sessionId=sessionId&newMessage[role]=user&newMessage[parts][0][text]=hi',
+      });
+
+      expect(response.status).toBe(404);
+      expect(spy).not.toHaveBeenCalled();
+
+      spy.mockRestore();
     });
   });
 });

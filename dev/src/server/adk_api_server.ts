@@ -41,6 +41,7 @@ import {
   setupTelemetry,
 } from '../utils/telemetry_utils.js';
 import {getAgentGraphAsDot} from './agent_graph.js';
+import {crossOriginGuard} from './csrf.js';
 
 interface ServerOptions {
   agentsDir?: string;
@@ -170,6 +171,10 @@ export class AdkApiServer {
   private async init() {
     const app = this.app;
     await this.setupTelemetry();
+
+    // Registered first so that no route, including the A2A routes mounted later
+    // by initA2A(), can escape the check.
+    app.use(crossOriginGuard(this.logger, this.allowOrigins));
 
     if (this.serveDebugUI) {
       app.get('/', (req: Request, res: Response) => {
