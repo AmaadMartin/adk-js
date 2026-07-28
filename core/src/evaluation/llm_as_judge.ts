@@ -58,7 +58,6 @@ export interface AutoRaterScore {
 export abstract class LlmAsJudge<
   C extends LlmAsAJudgeCriterion = LlmAsAJudgeCriterion,
 > extends Evaluator {
-  protected readonly evalMetric: EvalMetric;
   protected readonly criterion: C;
   protected readonly judgeModelOptions: JudgeModelOptions;
   protected readonly judgeModel: BaseLlm;
@@ -73,7 +72,6 @@ export abstract class LlmAsJudge<
     expectedInvocationsRequired = false,
   ) {
     super();
-    this.evalMetric = evalMetric;
     this.expectedInvocationsRequired = expectedInvocationsRequired;
 
     const expectedCriterionTypeError = new Error(

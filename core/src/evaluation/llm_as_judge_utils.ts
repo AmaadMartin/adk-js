@@ -39,7 +39,7 @@ export const PARTIALLY_VALID_VALUES = [
 ];
 
 /** Returns the arithmetic mean of a non-empty list of numbers. */
-function mean(numbers: number[]): number {
+export function mean(numbers: number[]): number {
   return numbers.reduce((total, value) => total + value, 0) / numbers.length;
 }
 

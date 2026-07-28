@@ -36,6 +36,7 @@ import {
   getEvalStatus,
   getTextFromContent,
   getToolDeclarationsAsJsonStr,
+  mean,
 } from './llm_as_judge_utils.js';
 import {addDefaultRetryOptionsIfNotPresent} from './retry_options_utils.js';
 
@@ -199,11 +200,6 @@ contradicting_excerpt: null
 const POSITIVE_LABELS = new Set(['supported', 'not_applicable']);
 const NEGATIVE_LABELS = new Set(['unsupported', 'contradictory', 'disputed']);
 
-/** Returns the arithmetic mean of a non-empty list of numbers. */
-function mean(numbers: number[]): number {
-  return numbers.reduce((total, value) => total + value, 0) / numbers.length;
-}
-
 /**
  * The context and natural language response to be evaluated at a single step.
  */
@@ -341,7 +337,6 @@ function errorMessage(error: unknown): string {
  */
 @experimental
 export class HallucinationsV1Evaluator extends Evaluator {
-  protected readonly evalMetric: EvalMetric;
   protected readonly criterion: HallucinationsCriterion;
   protected readonly judgeModel: BaseLlm;
   protected readonly threshold: number;
@@ -350,7 +345,6 @@ export class HallucinationsV1Evaluator extends Evaluator {
 
   constructor(evalMetric: EvalMetric) {
     super();
-    this.evalMetric = evalMetric;
 
     const expectedCriterionTypeError = new Error(
       `\`${evalMetric.metricName}\` metric expects a criterion of type ` +
@@ -595,12 +589,8 @@ export class HallucinationsV1Evaluator extends Evaluator {
       });
     }
 
-    if (perInvocationResults.length > 0) {
-      return this.aggregateInvocationResults(perInvocationResults);
-    }
-    return {
-      overallEvalStatus: EvalStatus.NOT_EVALUATED,
-      perInvocationResults: [],
-    };
+    // aggregateInvocationResults already yields NOT_EVALUATED with an empty
+    // result list when there are no per-invocation results.
+    return this.aggregateInvocationResults(perInvocationResults);
   }
 }
