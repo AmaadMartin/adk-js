@@ -16,7 +16,10 @@ import {
 } from '@google/adk';
 import {beforeEach, describe, expect, it} from 'vitest';
 import {AgentRegistry} from '../../src/integration/agent_registry.js';
-import {YamlAgentConfig} from '../../src/integration/agent_types.js';
+import {
+  AgentClass,
+  YamlAgentConfig,
+} from '../../src/integration/agent_types.js';
 import {IntegrationRegistry} from '../../src/integration/integration_registry.js';
 
 describe('AgentRegistry', () => {
@@ -290,19 +293,20 @@ describe('AgentRegistry', () => {
     });
     integrationRegistry.registerTool('custom_tool', tool);
 
-    const config = {
+    const config: YamlAgentConfig = {
       name: 'builtin_tools_agent',
       model: 'model',
       description: 'desc',
       instruction: 'inst',
-      agentClass: 'LlmAgent',
+      agentClass: AgentClass.LlmAgent,
+      isRootAgent: false,
       tools: [
         {name: 'preload_memory'},
         {name: 'load_memory'},
         {name: 'load_artifacts'},
         {name: 'custom_tool'},
       ],
-    } as unknown as YamlAgentConfig;
+    };
 
     agentRegistry.registerAgentConfig('builtin_tools_agent', config);
     const retrieved = agentRegistry.getAgent('builtin_tools_agent') as LlmAgent;
