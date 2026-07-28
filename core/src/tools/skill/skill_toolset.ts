@@ -45,6 +45,7 @@ export class SkillToolset extends BaseToolset {
   public additionalTools: Array<BaseTool | BaseToolset>;
   public codeExecutor?: BaseCodeExecutor;
   public registry?: SkillRegistry;
+  private readonly allowInlineScripts: boolean;
   private toolCache = new Map<string, BaseTool[]>();
   private fetchedSkillCache = new Map<string, Map<string, Skill>>();
 
@@ -72,6 +73,7 @@ export class SkillToolset extends BaseToolset {
     this.codeExecutor = options.codeExecutor;
     this.additionalTools = options.additionalTools || [];
     this.registry = options.registry;
+    this.allowInlineScripts = options.allowInlineScripts ?? false;
 
     this.tools = [
       new ListSkillsTool(this),
@@ -82,7 +84,7 @@ export class SkillToolset extends BaseToolset {
 
     // Inline-script execution is opt-in: only expose the tool when explicitly
     // enabled, so agents are secure-by-default.
-    if (options.allowInlineScripts) {
+    if (this.allowInlineScripts) {
       this.tools.push(new RunSkillInlineScriptTool(this));
     }
 
@@ -107,10 +109,11 @@ export class SkillToolset extends BaseToolset {
   /**
    * Creates an independent copy of this toolset with a new set of skills.
    *
-   * The clone preserves the original's `codeExecutor`, `additionalTools`, and
-   * `registry` so its behaviour matches the original except for the swapped-in
-   * skills. Used by agent optimizers to rebuild a toolset with updated skill
-   * instructions without mutating the original.
+   * The clone preserves the original's `codeExecutor`, `additionalTools`,
+   * `registry`, and `allowInlineScripts` setting so its behaviour matches the
+   * original except for the swapped-in skills. Used by agent optimizers to
+   * rebuild a toolset with updated skill instructions without mutating the
+   * original.
    *
    * @param skills The skills for the new toolset, as an array or a
    *   name-keyed record.
@@ -123,6 +126,7 @@ export class SkillToolset extends BaseToolset {
       codeExecutor: this.codeExecutor,
       additionalTools: this.additionalTools,
       registry: this.registry,
+      allowInlineScripts: this.allowInlineScripts,
     });
   }
 

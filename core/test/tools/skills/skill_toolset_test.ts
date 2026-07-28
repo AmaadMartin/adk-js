@@ -378,8 +378,18 @@ describe('skill_toolset', () => {
         'load_skill',
         'load_skill_resource',
         'run_skill_script',
-        'run_skill_inline_script',
       ]);
+    });
+
+    it('preserves the opt-in allowInlineScripts capability', async () => {
+      const original = new SkillToolset([mockSkill], {
+        allowInlineScripts: true,
+      });
+
+      const clone = original.cloneWithUpdatedSkills([mockSkill]);
+
+      const toolNames = (await clone.getTools()).map((t) => t.name);
+      expect(toolNames).toContain('run_skill_inline_script');
     });
   });
 });
