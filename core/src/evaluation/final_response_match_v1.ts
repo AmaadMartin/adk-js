@@ -72,12 +72,7 @@ export function isWordChar(char: string): boolean {
 }
 
 function isAscii(word: string): boolean {
-  for (const char of word) {
-    if (char.codePointAt(0)! >= 128) {
-      return false;
-    }
-  }
-  return true;
+  return [...word].every((char) => char.codePointAt(0)! <= 0x7f);
 }
 
 /**

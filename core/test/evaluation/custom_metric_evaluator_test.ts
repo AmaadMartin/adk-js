@@ -71,18 +71,18 @@ describe('evaluation/custom_metric_evaluator', () => {
     });
 
     it('passes the eval metric with a cleared threshold', async () => {
-      const capturePath = `${FIXTURE_MODULE}.mySyncMetricFunction`;
-      const evaluator = new CustomMetricEvaluator({
-        evalMetric: {metricName: 'custom_metric', threshold: 0.9},
-        customFunctionPath: capturePath,
-      });
-      // The sync fixture ignores its arguments; this simply exercises the
-      // threshold-clearing copy path without mutating the original metric.
       const original: EvalMetric = {
         metricName: 'custom_metric',
         threshold: 0.9,
       };
-      await evaluator.evaluateInvocations([], undefined);
+      const evaluator = new CustomMetricEvaluator({
+        evalMetric: original,
+        customFunctionPath: `${FIXTURE_MODULE}.reportsClearedThresholdMetricFunction`,
+      });
+      // The fixture reports score 1.0 iff it received an undefined threshold.
+      const result = await evaluator.evaluateInvocations([], undefined);
+      expect(result.overallScore).toBe(1.0);
+      // The original metric is left untouched (a copy is passed to the function).
       expect(original.threshold).toBe(0.9);
     });
   });

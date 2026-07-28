@@ -34,6 +34,27 @@ export function mySyncMetricFunction(
 }
 
 /**
+ * A custom metric function that reports, via its score, whether the evaluator
+ * cleared the metric's threshold before invoking it: overall score 1.0 when the
+ * received threshold is undefined, otherwise 0.0.
+ */
+export function reportsClearedThresholdMetricFunction(
+  evalMetric: EvalMetric,
+  actualInvocations: Invocation[],
+  expectedInvocations?: Invocation[],
+  conversationScenario?: ConversationScenario,
+): EvaluationResult {
+  void actualInvocations;
+  void expectedInvocations;
+  void conversationScenario;
+  return {
+    overallScore: evalMetric.threshold === undefined ? 1.0 : 0.0,
+    overallEvalStatus: EvalStatus.PASSED,
+    perInvocationResults: [],
+  };
+}
+
+/**
  * An asynchronous custom metric function used by the custom-metric-evaluator
  * tests. Returns a fixed overall score of 0.5.
  */

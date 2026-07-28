@@ -26,13 +26,11 @@ export * from './metric_info_providers.js';
 
 /**
  * The options an evaluator constructor may receive from the registry. The
- * registry always supplies `evalMetric`; each concrete evaluator reads the
- * subset of fields it needs.
+ * registry always supplies `evalMetric`, plus `customFunctionPath` for custom
+ * metrics; each concrete evaluator reads the subset of fields it needs.
  */
 export interface EvaluatorConstructorOptions {
   evalMetric: EvalMetric;
-  threshold?: number;
-  metricName?: string;
   customFunctionPath?: string;
 }
 
