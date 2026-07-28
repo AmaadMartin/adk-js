@@ -83,8 +83,8 @@ export interface VertexAiCodeExecutorOptions {
 
   /**
    * Optional pre-constructed Code Interpreter extension handle. Primarily for
-   * testing (mocked-client pattern). When omitted, the executor lazily obtains
-   * one via the production factory on first use.
+   * testing (mocked-client pattern). When omitted, `executeCode` throws, since
+   * no SDK-backed loader exists yet in the installed dependencies.
    */
   codeInterpreterExtension?: CodeInterpreterExtension;
 }

@@ -187,7 +187,7 @@ describe('VertexAiCodeExecutor', () => {
     ]);
   });
 
-  describe('production extension factory (no injected handle)', () => {
+  describe('missing extension handle (no injected handle)', () => {
     it('throws a clear error when nothing is provided', async () => {
       const bare = new VertexAiCodeExecutor();
       await expect(run(bare)).rejects.toThrow(
