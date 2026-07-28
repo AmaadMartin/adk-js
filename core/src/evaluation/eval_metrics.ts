@@ -16,3 +16,12 @@ export enum EvalStatus {
   FAILED = 'FAILED',
   NOT_EVALUATED = 'NOT_EVALUATED',
 }
+
+/** A metric used to evaluate a particular aspect of an eval case. */
+export interface EvalMetric {
+  /** The name of the metric. */
+  metricName: string;
+
+  /** A threshold value. Each metric decides how to interpret this threshold. */
+  threshold?: number;
+}
