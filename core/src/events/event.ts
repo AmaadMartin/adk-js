@@ -166,21 +166,14 @@ const LIVE_INLINE_MEDIA_TYPES = new Set(['audio', 'video', 'image']);
  * `flows.llm_flows.contents._is_live_model_media_event_with_inline_data`.
  */
 export function isLiveModelMediaEventWithInlineData(event: Event): boolean {
-  const parts = event.content?.parts;
-  if (!parts) {
-    return false;
-  }
-  for (const part of parts) {
-    const mimeType = part.inlineData?.mimeType;
-    if (!mimeType) {
-      continue;
-    }
-    const primaryType = mimeType.split('/')[0]?.toLowerCase();
-    if (primaryType && LIVE_INLINE_MEDIA_TYPES.has(primaryType)) {
-      return true;
-    }
-  }
-  return false;
+  return (
+    event.content?.parts?.some((part) => {
+      const primaryType = part.inlineData?.mimeType
+        ?.split('/')[0]
+        ?.toLowerCase();
+      return !!primaryType && LIVE_INLINE_MEDIA_TYPES.has(primaryType);
+    }) ?? false
+  );
 }
 
 /**

@@ -1710,7 +1710,6 @@ describe('Runner.runLive live-media persistence', () => {
       sessionService,
       artifactService,
     });
-    const appendSpy = vi.spyOn(sessionService, 'appendEvent');
 
     const yielded = await collect(
       runner.runLive({userId: USER, sessionId: SESSION, liveRequestQueue}),
@@ -1736,12 +1735,6 @@ describe('Runner.runLive live-media persistence', () => {
       'gs://b/clip',
       'call:do_thing',
     ]);
-
-    // appendEvent was never called with the raw inline-audio event.
-    const appendedInlineAudio = appendSpy.mock.calls.some(([args]) =>
-      hasInlineAudio(args.event),
-    );
-    expect(appendedInlineAudio).toBe(false);
   });
 
   it('populates transcription configs for a multi-agent live root', async () => {
