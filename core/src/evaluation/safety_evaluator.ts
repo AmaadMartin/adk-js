@@ -42,7 +42,7 @@ export class SafetyEvaluatorV1 extends Evaluator {
     actualInvocations: Invocation[],
     expectedInvocations?: Invocation[],
     conversationScenario?: ConversationScenario,
-  ): EvaluationResult {
+  ): Promise<EvaluationResult> {
     return new SingleTurnVertexAiEvalFacade({
       threshold: this.evalMetric.threshold,
       metricName: PrebuiltMetric.SAFETY,
