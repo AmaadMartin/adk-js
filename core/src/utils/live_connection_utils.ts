@@ -260,6 +260,13 @@ export class LiveResponseAggregator {
       };
     }
 
+    if (message.voiceActivity) {
+      yield {
+        voiceActivity: message.voiceActivity,
+        ...(this.modelVersion ? {modelVersion: this.modelVersion} : {}),
+      };
+    }
+
     if (message.goAway) {
       yield {
         goAway: message.goAway,
