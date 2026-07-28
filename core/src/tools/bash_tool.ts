@@ -1,5 +1,12 @@
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 import {FunctionDeclaration, Type} from '@google/genai';
 import {spawn} from 'child_process';
+import * as os from 'os';
 import {BaseTool, RunAsyncToolRequest} from './base_tool.js';
 
 export interface BashToolPolicy {
@@ -97,6 +104,12 @@ export class ExecuteBashTool extends BaseTool {
       };
     } else if (!toolContext.toolConfirmation.confirmed) {
       return {error: 'This tool call is rejected.'};
+    }
+
+    if (os.platform() === 'win32') {
+      return {
+        error: 'ExecuteBashTool is only supported on POSIX systems.',
+      };
     }
 
     const timeoutSeconds = this.policy.timeoutSeconds ?? 30;
