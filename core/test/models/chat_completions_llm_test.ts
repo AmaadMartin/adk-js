@@ -9,6 +9,7 @@ import {
   FinishReason,
   FunctionCallingConfigMode,
   Language,
+  Modality,
   Outcome,
   Type,
 } from '@google/genai';
@@ -17,6 +18,61 @@ import {ChatCompletionsLlm, LlmRequest, LlmResponse} from '@google/adk';
 
 const BASE_URL = 'http://localhost:11434/v1';
 const MODEL = 'llama3.1';
+
+/**
+ * A fake `WebSocket` used to exercise `connect()` without a network. It records
+ * the constructor arguments, exposes settable event handlers, and spies on
+ * `send`/`close`. It opens (or errors) on a microtask so `connect()` has a
+ * chance to install its `onopen`/`onerror` handlers first.
+ */
+class FakeWebSocket {
+  static instances: FakeWebSocket[] = [];
+  static failNextOpen = false;
+
+  readonly url: string;
+  readonly protocols?: string | string[];
+  onopen: ((ev: unknown) => void) | null = null;
+  onmessage: ((ev: {data: string}) => void) | null = null;
+  onerror: ((ev: unknown) => void) | null = null;
+  onclose: ((ev: unknown) => void) | null = null;
+  send = vi.fn();
+  close = vi.fn();
+
+  constructor(url: string, protocols?: string | string[]) {
+    this.url = url;
+    this.protocols = protocols;
+    FakeWebSocket.instances.push(this);
+    queueMicrotask(() => {
+      if (FakeWebSocket.failNextOpen) {
+        this.onerror?.({});
+      } else {
+        this.onopen?.({});
+      }
+    });
+  }
+
+  static last(): FakeWebSocket {
+    return FakeWebSocket.instances[FakeWebSocket.instances.length - 1];
+  }
+
+  static reset(): void {
+    FakeWebSocket.instances = [];
+    FakeWebSocket.failNextOpen = false;
+  }
+}
+
+/** Installs {@link FakeWebSocket} as the global `WebSocket`. */
+function stubWebSocket(): void {
+  FakeWebSocket.reset();
+  vi.stubGlobal('WebSocket', FakeWebSocket);
+}
+
+/** Parses the JSON frames sent over the fake socket, in order. */
+function socketFrames(ws: FakeWebSocket): Array<Record<string, unknown>> {
+  return ws.send.mock.calls.map(
+    (call) => JSON.parse(call[0] as string) as Record<string, unknown>,
+  );
+}
 
 /** Builds a minimal LlmRequest with the required bookkeeping fields. */
 function makeRequest(overrides: Partial<LlmRequest> = {}): LlmRequest {
@@ -94,13 +150,6 @@ describe('ChatCompletionsLlm', () => {
       expect(llm).toBeInstanceOf(ChatCompletionsLlm);
       expect(llm.model).toBe(MODEL);
       expect(ChatCompletionsLlm.supportedModels).toEqual([]);
-    });
-
-    it('connect() rejects because live connections are unsupported', async () => {
-      const llm = new ChatCompletionsLlm({baseURL: BASE_URL, model: MODEL});
-      await expect(llm.connect(makeRequest())).rejects.toThrowError(
-        /does not support live connections/,
-      );
     });
 
     it.each([
@@ -1438,6 +1487,246 @@ describe('ChatCompletionsLlm', () => {
         llm.generateContentAsync(makeRequest(), true),
       );
       expect(responses).toEqual([]);
+    });
+  });
+
+  describe('connect (OpenAI Realtime live connection)', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+      FakeWebSocket.reset();
+    });
+
+    it('opens the derived wss URL, authenticates, and sends session.update', async () => {
+      stubWebSocket();
+      const llm = new ChatCompletionsLlm({
+        baseURL: 'https://api.openai.com/v1',
+        model: 'gpt-realtime',
+        apiKey: 'sk-test',
+      });
+
+      await llm.connect(
+        makeRequest({
+          config: {
+            systemInstruction: 'You are a helpful voice assistant.',
+            tools: [
+              {
+                functionDeclarations: [
+                  {
+                    name: 'get_weather',
+                    description: 'Get the weather.',
+                    parametersJsonSchema: {
+                      type: 'object',
+                      properties: {location: {type: 'string'}},
+                      required: ['location'],
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+      );
+
+      const ws = FakeWebSocket.last();
+      expect(ws.url).toBe(
+        'wss://api.openai.com/v1/realtime?model=gpt-realtime',
+      );
+      expect(ws.protocols).toEqual([
+        'realtime',
+        'openai-insecure-api-key.sk-test',
+      ]);
+      expect(socketFrames(ws)).toEqual([
+        {
+          type: 'session.update',
+          session: {
+            type: 'realtime',
+            model: 'gpt-realtime',
+            instructions: 'You are a helpful voice assistant.',
+            output_modalities: ['audio', 'text'],
+            tools: [
+              {
+                type: 'function',
+                name: 'get_weather',
+                description: 'Get the weather.',
+                parameters: {
+                  type: 'object',
+                  properties: {location: {type: 'string'}},
+                  required: ['location'],
+                },
+              },
+            ],
+          },
+        },
+      ]);
+    });
+
+    it('honors an explicit realtimeUrl override', async () => {
+      stubWebSocket();
+      const llm = new ChatCompletionsLlm({
+        baseURL: BASE_URL,
+        model: MODEL,
+        realtimeUrl: 'wss://self-hosted.example/rt',
+      });
+
+      await llm.connect(makeRequest());
+
+      expect(FakeWebSocket.last().url).toBe('wss://self-hosted.example/rt');
+    });
+
+    it.each([
+      [
+        'https://api.openai.com/v1',
+        'wss://api.openai.com/v1/realtime?model=gpt-realtime',
+      ],
+      [
+        'http://localhost:8000/v1/',
+        'ws://localhost:8000/v1/realtime?model=gpt-realtime',
+      ],
+      [
+        'http://localhost:8000/v1/chat/completions',
+        'ws://localhost:8000/v1/realtime?model=gpt-realtime',
+      ],
+    ])(
+      'derives the realtime URL from baseURL %s',
+      async (baseURL, expected) => {
+        stubWebSocket();
+        const llm = new ChatCompletionsLlm({baseURL, model: 'gpt-realtime'});
+        await llm.connect(makeRequest());
+        expect(FakeWebSocket.last().url).toBe(expected);
+      },
+    );
+
+    it('omits the api-key subprotocol when no apiKey is set', async () => {
+      stubWebSocket();
+      const llm = new ChatCompletionsLlm({
+        baseURL: 'https://api.openai.com/v1',
+        model: 'gpt-realtime',
+      });
+      await llm.connect(makeRequest());
+      expect(FakeWebSocket.last().protocols).toEqual(['realtime']);
+    });
+
+    it('maps requested response modalities to lowercase output_modalities', async () => {
+      stubWebSocket();
+      const llm = new ChatCompletionsLlm({
+        baseURL: 'https://api.openai.com/v1',
+        model: 'gpt-realtime',
+      });
+
+      await llm.connect(
+        makeRequest({liveConnectConfig: {responseModalities: [Modality.TEXT]}}),
+      );
+
+      const [sessionUpdate] = socketFrames(FakeWebSocket.last());
+      expect(
+        (sessionUpdate['session'] as Record<string, unknown>)[
+          'output_modalities'
+        ],
+      ).toEqual(['text']);
+    });
+
+    it('rejects when the socket errors before opening', async () => {
+      stubWebSocket();
+      FakeWebSocket.failNextOpen = true;
+      const llm = new ChatCompletionsLlm({
+        baseURL: 'https://api.openai.com/v1',
+        model: 'gpt-realtime',
+      });
+
+      await expect(llm.connect(makeRequest())).rejects.toThrow(
+        /failed to open a Realtime connection to gpt-realtime/,
+      );
+    });
+
+    it('returns a connection that drives the socket and receives responses', async () => {
+      stubWebSocket();
+      const llm = new ChatCompletionsLlm({
+        baseURL: 'https://api.openai.com/v1',
+        model: 'gpt-realtime',
+        apiKey: 'sk-test',
+      });
+
+      const connection = await llm.connect(makeRequest());
+      const ws = FakeWebSocket.last();
+
+      // Outbound: sendContent produces item.create + response.create frames.
+      await connection.sendContent({role: 'user', parts: [{text: 'hello'}]});
+      const frames = socketFrames(ws);
+      expect(frames[frames.length - 2]).toEqual({
+        type: 'conversation.item.create',
+        item: {
+          type: 'message',
+          role: 'user',
+          content: [{type: 'input_text', text: 'hello'}],
+        },
+      });
+      expect(frames[frames.length - 1]).toEqual({type: 'response.create'});
+
+      // Inbound: server events pushed through onmessage reach receive().
+      const generator = connection.receive();
+      ws.onmessage!({
+        data: JSON.stringify({
+          type: 'response.output_text.delta',
+          delta: 'hi',
+        }),
+      });
+      ws.onmessage!({data: JSON.stringify({type: 'response.done'})});
+      ws.onclose!({});
+
+      expect((await generator.next()).value).toEqual({
+        partial: true,
+        content: {role: 'model', parts: [{text: 'hi'}]},
+        modelVersion: 'gpt-realtime',
+      });
+      expect((await generator.next()).value).toEqual({
+        turnComplete: true,
+        modelVersion: 'gpt-realtime',
+      });
+      expect((await generator.next()).done).toBe(true);
+
+      await connection.close();
+      expect(ws.close).toHaveBeenCalledTimes(1);
+    });
+
+    it('ignores malformed non-JSON server frames', async () => {
+      stubWebSocket();
+      const llm = new ChatCompletionsLlm({
+        baseURL: 'https://api.openai.com/v1',
+        model: 'gpt-realtime',
+      });
+
+      const connection = await llm.connect(makeRequest());
+      const ws = FakeWebSocket.last();
+      const generator = connection.receive();
+
+      ws.onmessage!({data: 'not json'});
+      ws.onmessage!({data: JSON.stringify({type: 'response.done'})});
+      ws.onclose!({});
+
+      // The malformed frame is dropped; the valid one still arrives.
+      expect((await generator.next()).value).toEqual({
+        turnComplete: true,
+        modelVersion: 'gpt-realtime',
+      });
+      expect((await generator.next()).done).toBe(true);
+    });
+
+    it('surfaces a post-open socket error through receive()', async () => {
+      stubWebSocket();
+      const llm = new ChatCompletionsLlm({
+        baseURL: 'https://api.openai.com/v1',
+        model: 'gpt-realtime',
+      });
+
+      const connection = await llm.connect(makeRequest());
+      const ws = FakeWebSocket.last();
+      const generator = connection.receive();
+
+      ws.onerror!({});
+
+      await expect(generator.next()).rejects.toThrow(
+        /Realtime connection to gpt-realtime errored/,
+      );
     });
   });
 });
