@@ -100,12 +100,10 @@ Run the test target for the file you added, not the whole suite.
 
 ## 8. PR conventions
 
-Follow the repo's commit style — `feat(<area>): …` / `fix(<area>): …`, or the
-capitalised `Feat: …` / `Fix: …` form — and say in the title that the change is
-parity work, as in `Feat: scope global instructions using
-GlobalInstructionPlugin (parity with adk-python)`. Name the Python source path
-you ported in the PR body. Every new `.ts` file starts with the standard
-header, whose exact shape `scripts/check_license.sh` enforces:
+Mark the title as parity work using the established convention, as in
+`Feat: Add ExampleTool for few-shot examples (adk-python parity)`, and name the
+Python source path you ported in the PR body. Every new `.ts` file starts with
+the standard header, whose exact shape `scripts/check_license.sh` enforces:
 
 ```ts
 /**
