@@ -12,6 +12,7 @@ import {
   getFunctionResponses,
   hasTrailingCodeExecutionResult,
   isFinalResponse,
+  isLiveModelMediaEventWithInlineData,
   stringifyContent,
 } from '@google/adk';
 import {Outcome} from '@google/genai';
@@ -321,6 +322,160 @@ describe('Event Utils', () => {
         'preserve-my-key': 'value',
         NestedKey: 'value2',
       });
+    });
+  });
+
+  describe('isLiveModelMediaEventWithInlineData', () => {
+    it('returns true for an inline audio part', () => {
+      const event = createEvent({
+        content: {
+          role: 'model',
+          parts: [{inlineData: {mimeType: 'audio/pcm', data: 'AAAA'}}],
+        },
+      });
+      expect(isLiveModelMediaEventWithInlineData(event)).toBe(true);
+    });
+
+    it('returns true for an inline video part', () => {
+      const event = createEvent({
+        content: {
+          role: 'model',
+          parts: [{inlineData: {mimeType: 'video/mp4', data: 'AAAA'}}],
+        },
+      });
+      expect(isLiveModelMediaEventWithInlineData(event)).toBe(true);
+    });
+
+    it('returns true for an inline image part', () => {
+      const event = createEvent({
+        content: {
+          role: 'model',
+          parts: [{inlineData: {mimeType: 'image/png', data: 'AAAA'}}],
+        },
+      });
+      expect(isLiveModelMediaEventWithInlineData(event)).toBe(true);
+    });
+
+    it('is case-insensitive on the MIME primary type', () => {
+      const event = createEvent({
+        content: {
+          role: 'model',
+          parts: [{inlineData: {mimeType: 'AUDIO/PCM', data: 'AAAA'}}],
+        },
+      });
+      expect(isLiveModelMediaEventWithInlineData(event)).toBe(true);
+    });
+
+    it('handles a MIME type with parameters', () => {
+      const event = createEvent({
+        content: {
+          role: 'model',
+          parts: [
+            {inlineData: {mimeType: 'audio/pcm;rate=24000', data: 'AAAA'}},
+          ],
+        },
+      });
+      expect(isLiveModelMediaEventWithInlineData(event)).toBe(true);
+    });
+
+    it('returns true when at least one of several parts is inline media', () => {
+      const event = createEvent({
+        content: {
+          role: 'model',
+          parts: [
+            {text: 'hello'},
+            {inlineData: {mimeType: 'audio/pcm', data: 'AAAA'}},
+          ],
+        },
+      });
+      expect(isLiveModelMediaEventWithInlineData(event)).toBe(true);
+    });
+
+    it('returns false for a fileData reference (artifact)', () => {
+      const event = createEvent({
+        content: {
+          role: 'model',
+          parts: [
+            {fileData: {fileUri: 'gs://bucket/audio', mimeType: 'audio/pcm'}},
+          ],
+        },
+      });
+      expect(isLiveModelMediaEventWithInlineData(event)).toBe(false);
+    });
+
+    it('returns false for a text-only part', () => {
+      const event = createEvent({
+        content: {role: 'model', parts: [{text: 'hello'}]},
+      });
+      expect(isLiveModelMediaEventWithInlineData(event)).toBe(false);
+    });
+
+    it('returns false for a function-call part', () => {
+      const event = createEvent({
+        content: {
+          role: 'model',
+          parts: [{functionCall: {name: 'do_thing', args: {}}}],
+        },
+      });
+      expect(isLiveModelMediaEventWithInlineData(event)).toBe(false);
+    });
+
+    it('returns false for a function-response part', () => {
+      const event = createEvent({
+        content: {
+          role: 'model',
+          parts: [{functionResponse: {name: 'do_thing', response: {}}}],
+        },
+      });
+      expect(isLiveModelMediaEventWithInlineData(event)).toBe(false);
+    });
+
+    it('returns false for a usage-metadata event with no media content', () => {
+      const event = createEvent({
+        usageMetadata: {promptTokenCount: 10, candidatesTokenCount: 5},
+      });
+      expect(isLiveModelMediaEventWithInlineData(event)).toBe(false);
+    });
+
+    it('returns false for a transcription event with no media content', () => {
+      const event = createEvent({
+        inputTranscription: {text: 'hi there'},
+        outputTranscription: {text: 'hello back'},
+      });
+      expect(isLiveModelMediaEventWithInlineData(event)).toBe(false);
+    });
+
+    it('returns false when the event has no content', () => {
+      expect(isLiveModelMediaEventWithInlineData(createEvent())).toBe(false);
+    });
+
+    it('returns false when content has an empty parts array', () => {
+      const event = createEvent({content: {role: 'model', parts: []}});
+      expect(isLiveModelMediaEventWithInlineData(event)).toBe(false);
+    });
+
+    it('returns false when content has undefined parts', () => {
+      const event = createEvent({content: {role: 'model'}});
+      expect(isLiveModelMediaEventWithInlineData(event)).toBe(false);
+    });
+
+    it('returns false for inline data with a non-media MIME type', () => {
+      const event = createEvent({
+        content: {
+          role: 'model',
+          parts: [
+            {inlineData: {mimeType: 'application/octet-stream', data: 'AAAA'}},
+          ],
+        },
+      });
+      expect(isLiveModelMediaEventWithInlineData(event)).toBe(false);
+    });
+
+    it('returns false for an inline data part missing a mimeType', () => {
+      const event = createEvent({
+        content: {role: 'model', parts: [{inlineData: {data: 'AAAA'}}]},
+      });
+      expect(isLiveModelMediaEventWithInlineData(event)).toBe(false);
     });
   });
 });

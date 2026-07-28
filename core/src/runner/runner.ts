@@ -30,7 +30,11 @@ import {
   BuiltInCodeExecutor,
   isBuiltInCodeExecutor,
 } from '../code_executors/built_in_code_executor.js';
-import {createEvent, Event} from '../events/event.js';
+import {
+  createEvent,
+  Event,
+  isLiveModelMediaEventWithInlineData,
+} from '../events/event.js';
 import {createEventActions} from '../events/event_actions.js';
 import {BaseMemoryService} from '../memory/base_memory_service.js';
 import {BasePlugin} from '../plugins/base_plugin.js';
@@ -397,8 +401,9 @@ export class Runner {
                 author: 'model',
                 content: beforeRunCallbackResponse,
               });
-              // TODO: b/447446338 - In the future, do *not* save live call audio
-              // content to session This is a feature in Python ADK
+              // runAsync is the non-live path, so every non-partial event is
+              // persisted. Raw inline live-media gating is handled separately in
+              // runLive via shouldAppendEvent.
               await this.sessionService.appendEvent({
                 session,
                 event: earlyExitEvent,
@@ -565,6 +570,7 @@ export class Runner {
     if (!runConfig.responseModalities) {
       runConfig.responseModalities = [Modality.AUDIO];
     }
+    applyLiveMultiAgentTranscriptionDefaults(this.agent, runConfig);
 
     const span = tracer.startSpan('invocation');
     const ctx = trace.setSpan(context.active(), span);
@@ -639,10 +645,14 @@ export class Runner {
               author: 'model',
               content: beforeRunCallbackResponse,
             });
-            await this.sessionService.appendEvent({
-              session,
-              event: earlyExitEvent,
-            });
+            // Persist unless this is a raw inline live-media event, which is
+            // streamed to the caller but not saved to the session.
+            if (shouldAppendEvent(earlyExitEvent, /* isLiveCall= */ true)) {
+              await this.sessionService.appendEvent({
+                session,
+                event: earlyExitEvent,
+              });
+            }
             if (params.abortSignal?.aborted) {
               return;
             }
@@ -657,7 +667,13 @@ export class Runner {
                 return;
               }
 
-              if (!event.partial) {
+              // Persist non-partial events, except raw inline live-media events
+              // (audio/video/image Blobs), which are streamed to the caller but
+              // not saved to the session.
+              if (
+                !event.partial &&
+                shouldAppendEvent(event, /* isLiveCall= */ true)
+              ) {
                 await this.sessionService.appendEvent({session, event});
               }
               // Step 3: Run the on_event callbacks to optionally modify the event.
@@ -686,6 +702,62 @@ export class Runner {
       const toolsets = getAllToolsets(this.agent);
       await Promise.allSettled(toolsets.map((t) => t.close()));
     }
+  }
+}
+
+/**
+ * Whether an event should be persisted to the session.
+ *
+ * Mirrors adk-python `Runner._should_append_event`: in a live call, raw inline
+ * live-media events (audio/video/image Blobs) are streamed to the caller but
+ * dropped from the session; everything else — `fileData` references, usage
+ * metadata, transcriptions, function calls/responses, control events — is
+ * persisted. In a non-live call this always returns `true`, so `runAsync`
+ * persistence behavior is unchanged.
+ *
+ * @param event The event to evaluate.
+ * @param isLiveCall Whether the event originates from a live (bidi) run.
+ * @returns `true` if the event should be appended to the session.
+ */
+export function shouldAppendEvent(event: Event, isLiveCall: boolean): boolean {
+  if (isLiveCall && isLiveModelMediaEventWithInlineData(event)) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Defaults the live audio-transcription configs when the root agent has
+ * sub-agents, so live sub-agents that get transferred to receive the model's
+ * text transcription as conversational context.
+ *
+ * Mirrors adk-python `Runner._new_invocation_context_for_live`:
+ * - `outputAudioTranscription` is defaulted only when `AUDIO` is a response
+ *   modality (and it is not already set);
+ * - `inputAudioTranscription` is defaulted whenever the root has sub-agents
+ *   (and it is not already set), regardless of modality.
+ *
+ * Caller-provided configs are never overwritten, and nothing is mutated when the
+ * root agent has no sub-agents. Mutates the run-scoped `runConfig` in place.
+ *
+ * @param rootAgent The root agent of the live run.
+ * @param runConfig The run-scoped run config to default in place.
+ */
+export function applyLiveMultiAgentTranscriptionDefaults(
+  rootAgent: BaseAgent,
+  runConfig: RunConfig,
+): void {
+  if (rootAgent.subAgents.length === 0) {
+    return;
+  }
+  if (
+    runConfig.responseModalities?.includes(Modality.AUDIO) &&
+    !runConfig.outputAudioTranscription
+  ) {
+    runConfig.outputAudioTranscription = {};
+  }
+  if (!runConfig.inputAudioTranscription) {
+    runConfig.inputAudioTranscription = {};
   }
 }
 

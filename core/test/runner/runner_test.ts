@@ -6,6 +6,7 @@
 
 import {
   App,
+  applyLiveMultiAgentTranscriptionDefaults,
   BaseAgent,
   BasePlugin,
   BaseTool,
@@ -20,10 +21,18 @@ import {
   isRoutableLlmAgent,
   LiveRequestQueue,
   LlmAgent,
+  RunConfig,
   Runner,
+  shouldAppendEvent,
   StreamingMode,
 } from '@google/adk';
-import {Content, FunctionCall, FunctionResponse, Modality} from '@google/genai';
+import {
+  AudioTranscriptionConfig,
+  Content,
+  FunctionCall,
+  FunctionResponse,
+  Modality,
+} from '@google/genai';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 
 const TEST_APP_ID = 'test_app_id';
@@ -1468,5 +1477,290 @@ describe('Runner.runLive', () => {
 
     expect(events).toHaveLength(1);
     expect(agent.capturedContext?.artifactService).toBeUndefined();
+  });
+});
+
+describe('shouldAppendEvent', () => {
+  function transcriptionEvent(
+    kind: 'input' | 'output',
+    finished: boolean,
+  ): Event {
+    const transcription = {text: 'transcribed', finished};
+    return createEvent({
+      invocationId: 'inv',
+      author: 'live_agent',
+      ...(kind === 'input'
+        ? {inputTranscription: transcription}
+        : {outputTranscription: transcription}),
+    });
+  }
+
+  function inlineMediaEvent(mimeType: string): Event {
+    return createEvent({
+      invocationId: 'inv',
+      author: 'live_agent',
+      content: {role: 'model', parts: [{inlineData: {mimeType, data: 'AAAA'}}]},
+    });
+  }
+
+  it('appends a finished input transcription in a live call', () => {
+    expect(shouldAppendEvent(transcriptionEvent('input', true), true)).toBe(
+      true,
+    );
+  });
+
+  it('appends an unfinished input transcription in a live call', () => {
+    expect(shouldAppendEvent(transcriptionEvent('input', false), true)).toBe(
+      true,
+    );
+  });
+
+  it('appends a finished output transcription in a live call', () => {
+    expect(shouldAppendEvent(transcriptionEvent('output', true), true)).toBe(
+      true,
+    );
+  });
+
+  it('appends an unfinished output transcription in a live call', () => {
+    expect(shouldAppendEvent(transcriptionEvent('output', false), true)).toBe(
+      true,
+    );
+  });
+
+  it('drops an inline audio event in a live call', () => {
+    expect(shouldAppendEvent(inlineMediaEvent('audio/pcm'), true)).toBe(false);
+  });
+
+  it('appends an inline audio event in a non-live call', () => {
+    expect(shouldAppendEvent(inlineMediaEvent('audio/pcm'), false)).toBe(true);
+  });
+
+  it('drops an inline video event in a live call', () => {
+    expect(shouldAppendEvent(inlineMediaEvent('video/mp4'), true)).toBe(false);
+  });
+
+  it('appends an inline video event in a non-live call', () => {
+    expect(shouldAppendEvent(inlineMediaEvent('video/mp4'), false)).toBe(true);
+  });
+
+  it('appends text-only content in a live call', () => {
+    const event = createEvent({
+      invocationId: 'inv',
+      author: 'live_agent',
+      content: {role: 'model', parts: [{text: 'hello'}]},
+    });
+    expect(shouldAppendEvent(event, true)).toBe(true);
+  });
+
+  it('appends a fileData reference event in a live call', () => {
+    const event = createEvent({
+      invocationId: 'inv',
+      author: 'live_agent',
+      content: {
+        role: 'model',
+        parts: [{fileData: {fileUri: 'gs://b/audio', mimeType: 'audio/pcm'}}],
+      },
+    });
+    expect(shouldAppendEvent(event, true)).toBe(true);
+  });
+});
+
+describe('applyLiveMultiAgentTranscriptionDefaults', () => {
+  function rootWithSubAgents(): LlmAgent {
+    return new LlmAgent({
+      name: 'root_agent',
+      model: 'gemini-2.5-flash',
+      subAgents: [new LlmAgent({name: 'sub_agent', model: 'gemini-2.5-flash'})],
+    });
+  }
+
+  it('defaults both transcription configs when AUDIO is a modality', () => {
+    const runConfig: RunConfig = {responseModalities: [Modality.AUDIO]};
+    applyLiveMultiAgentTranscriptionDefaults(rootWithSubAgents(), runConfig);
+    expect(runConfig.inputAudioTranscription).toEqual({});
+    expect(runConfig.outputAudioTranscription).toEqual({});
+  });
+
+  it('defaults only input transcription when AUDIO is not a modality', () => {
+    const runConfig: RunConfig = {responseModalities: [Modality.TEXT]};
+    applyLiveMultiAgentTranscriptionDefaults(rootWithSubAgents(), runConfig);
+    expect(runConfig.inputAudioTranscription).toEqual({});
+    expect(runConfig.outputAudioTranscription).toBeUndefined();
+  });
+
+  it('defaults only input transcription when modalities are undefined', () => {
+    const runConfig: RunConfig = {};
+    applyLiveMultiAgentTranscriptionDefaults(rootWithSubAgents(), runConfig);
+    expect(runConfig.inputAudioTranscription).toEqual({});
+    expect(runConfig.outputAudioTranscription).toBeUndefined();
+  });
+
+  it('never overwrites caller-provided transcription configs', () => {
+    const inputConfig: AudioTranscriptionConfig = {languageCodes: ['en-US']};
+    const outputConfig: AudioTranscriptionConfig = {languageCodes: ['fr-FR']};
+    const runConfig: RunConfig = {
+      responseModalities: [Modality.AUDIO],
+      inputAudioTranscription: inputConfig,
+      outputAudioTranscription: outputConfig,
+    };
+    applyLiveMultiAgentTranscriptionDefaults(rootWithSubAgents(), runConfig);
+    expect(runConfig.inputAudioTranscription).toBe(inputConfig);
+    expect(runConfig.outputAudioTranscription).toBe(outputConfig);
+  });
+
+  it('leaves the run config untouched when the root has no sub-agents', () => {
+    const runConfig: RunConfig = {responseModalities: [Modality.AUDIO]};
+    const rootWithoutSubAgents = new LlmAgent({
+      name: 'solo_agent',
+      model: 'gemini-2.5-flash',
+    });
+    applyLiveMultiAgentTranscriptionDefaults(rootWithoutSubAgents, runConfig);
+    expect(runConfig.inputAudioTranscription).toBeUndefined();
+    expect(runConfig.outputAudioTranscription).toBeUndefined();
+  });
+});
+
+describe('Runner.runLive live-media persistence', () => {
+  const APP = 'test_app_id';
+  const USER = 'test_user_id';
+  const SESSION = 'test_session_id';
+
+  let sessionService: InMemorySessionService;
+  let artifactService: InMemoryArtifactService;
+  let liveRequestQueue: LiveRequestQueue;
+
+  beforeEach(() => {
+    sessionService = new InMemorySessionService();
+    artifactService = new InMemoryArtifactService();
+    liveRequestQueue = new LiveRequestQueue();
+  });
+
+  function createSession() {
+    return sessionService.createSession({
+      appName: APP,
+      userId: USER,
+      sessionId: SESSION,
+    });
+  }
+
+  async function collect(
+    generator: AsyncGenerator<Event, void, undefined>,
+  ): Promise<Event[]> {
+    const events: Event[] = [];
+    for await (const event of generator) {
+      events.push(event);
+    }
+    return events;
+  }
+
+  function label(event: Event): string {
+    const part = event.content?.parts?.[0];
+    if (part?.text) return part.text;
+    if (part?.inlineData?.mimeType) return part.inlineData.mimeType;
+    if (part?.fileData?.fileUri) return part.fileData.fileUri;
+    if (part?.functionCall?.name) return `call:${part.functionCall.name}`;
+    return 'unknown';
+  }
+
+  it('yields raw inline live-media events but does not persist them', async () => {
+    await createSession();
+    const agent = new MockLiveAgent('live_agent');
+    agent.liveEvents = [
+      createEvent({
+        invocationId: 'live_inv',
+        author: 'live_agent',
+        content: {
+          role: 'model',
+          parts: [{inlineData: {mimeType: 'audio/pcm', data: 'AAAA'}}],
+        },
+      }),
+      createEvent({
+        invocationId: 'live_inv',
+        author: 'live_agent',
+        content: {role: 'model', parts: [{text: 'transcribed turn'}]},
+      }),
+      createEvent({
+        invocationId: 'live_inv',
+        author: 'live_agent',
+        content: {
+          role: 'model',
+          parts: [{fileData: {fileUri: 'gs://b/clip', mimeType: 'audio/pcm'}}],
+        },
+      }),
+      createEvent({
+        invocationId: 'live_inv',
+        author: 'live_agent',
+        content: {
+          role: 'model',
+          parts: [{functionCall: {name: 'do_thing', args: {}}}],
+        },
+      }),
+    ];
+    const runner = new Runner({
+      appName: APP,
+      agent,
+      sessionService,
+      artifactService,
+    });
+
+    const yielded = await collect(
+      runner.runLive({userId: USER, sessionId: SESSION, liveRequestQueue}),
+    );
+
+    // Every event is streamed to the caller, including the raw inline audio.
+    expect(yielded.map(label)).toEqual([
+      'audio/pcm',
+      'transcribed turn',
+      'gs://b/clip',
+      'call:do_thing',
+    ]);
+
+    // The session excludes the raw inline-audio event but keeps the rest.
+    const session = await sessionService.getSession({
+      appName: APP,
+      userId: USER,
+      sessionId: SESSION,
+    });
+    expect(session!.events.map(label)).toEqual([
+      'transcribed turn',
+      'gs://b/clip',
+      'call:do_thing',
+    ]);
+  });
+
+  it('populates transcription configs for a multi-agent live root', async () => {
+    await createSession();
+    const root = new MockLiveAgent('root_agent');
+    const sub = new MockLiveAgent('sub_agent', root);
+    root.subAgents.push(sub);
+    root.liveEvents = [
+      createEvent({
+        invocationId: 'live_inv',
+        author: 'root_agent',
+        content: {role: 'model', parts: [{text: 'live-1'}]},
+      }),
+    ];
+    const runner = new Runner({
+      appName: APP,
+      agent: root,
+      sessionService,
+      artifactService,
+    });
+
+    await collect(
+      runner.runLive({
+        userId: USER,
+        sessionId: SESSION,
+        liveRequestQueue,
+        runConfig: {responseModalities: [Modality.AUDIO]},
+      }),
+    );
+
+    expect(root.capturedContext?.runConfig?.inputAudioTranscription).toEqual(
+      {},
+    );
+    expect(root.capturedContext?.runConfig?.outputAudioTranscription).toEqual(
+      {},
+    );
   });
 });

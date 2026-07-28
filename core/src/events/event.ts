@@ -149,6 +149,34 @@ export function hasTrailingCodeExecutionResult(event: Event): boolean {
 }
 
 /**
+ * Primary MIME types (the segment before `/`) treated as raw live media.
+ */
+const LIVE_INLINE_MEDIA_TYPES = new Set(['audio', 'video', 'image']);
+
+/**
+ * Returns whether the event is a live/bidi model media event whose content
+ * carries raw inline data (a Blob) with an audio, video, or image MIME type.
+ *
+ * Such events stream raw media back to the caller for playback but are not
+ * persisted to the session, to avoid bloating session storage with large
+ * binary blobs. Events carrying only `fileData` references, text, function
+ * calls/responses, usage metadata, or transcriptions return `false`.
+ *
+ * Mirrors adk-python
+ * `flows.llm_flows.contents._is_live_model_media_event_with_inline_data`.
+ */
+export function isLiveModelMediaEventWithInlineData(event: Event): boolean {
+  return (
+    event.content?.parts?.some((part) => {
+      const primaryType = part.inlineData?.mimeType
+        ?.split('/')[0]
+        ?.toLowerCase();
+      return !!primaryType && LIVE_INLINE_MEDIA_TYPES.has(primaryType);
+    }) ?? false
+  );
+}
+
+/**
  * Extracts and concatenates all text from the parts of a `Event` object.
  * @param event The `Event` object to process.
  *
