@@ -60,7 +60,7 @@ import {
 import {AUTH_PREPROCESSOR} from '../auth/auth_preprocessor.js';
 import {BaseContextCompactor} from '../context/base_context_compactor.js';
 import {InvocationContext} from './invocation_context.js';
-import {LiveRequest} from './live_request_queue.js';
+import {LiveRequest, LiveRequestQueue} from './live_request_queue.js';
 import {AGENT_TRANSFER_LLM_REQUEST_PROCESSOR} from './processors/agent_transfer_llm_request_processor.js';
 import {BASIC_LLM_REQUEST_PROCESSOR} from './processors/basic_llm_request_processor.js';
 import {CODE_EXECUTION_REQUEST_PROCESSOR} from './processors/code_execution_request_processor.js';
@@ -207,29 +207,10 @@ const ADK_AGENT_NAME_LABEL_KEY = 'adk_agent_name';
 const MAX_LIVE_RECONNECT_ATTEMPTS = 5;
 
 /**
- * Sentinel event used purely for identity comparison inside
- * {@link LlmAgent.runLiveFlow} to signal that the receive step wants a
- * reconnect. `Event` is an interface, so an `instanceof` check is unavailable;
- * a single module-const object compared by reference fills that role. It is
- * consumed inside the flow and never yielded to callers.
+ * Sentinel event compared by reference inside {@link LlmAgent.runLiveFlow} to
+ * signal that the receive step wants a reconnect. It is never yielded to callers.
  */
 const LIVE_RECONNECT_SENTINEL: Event = createEvent();
-
-/**
- * Determines the author of a live event.
- *
- * Input transcriptions and user-role content are attributed to the user;
- * everything else is attributed to the agent.
- */
-function getAuthorForEvent(
-  llmResponse: LlmResponse,
-  agentName: string,
-): string {
-  if (llmResponse.inputTranscription || llmResponse.content?.role === 'user') {
-    return 'user';
-  }
-  return agentName;
-}
 
 /**
  * Returns whether an error is an `AbortError`, i.e. a wait cancelled via an
@@ -237,6 +218,38 @@ function getAuthorForEvent(
  */
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError';
+}
+
+/**
+ * Builds the merged model-response event from a mutable base event and an LLM
+ * response, applying structured-output (`set_model_response`) rewriting and
+ * function-call id / long-running bookkeeping. Shared by the live and non-live
+ * postprocess paths so they cannot drift.
+ */
+function buildMergedModelResponseEvent(
+  modelResponseEvent: Event,
+  llmResponse: LlmResponse,
+  llmRequest: LlmRequest,
+): Event {
+  const mergedEvent = createEvent({...modelResponseEvent, ...llmResponse});
+  if (mergedEvent.content) {
+    const functionCalls = getFunctionCalls(mergedEvent);
+    const setModelResponseCall = functionCalls.find(
+      (call) => call.name === 'set_model_response',
+    );
+    if (setModelResponseCall) {
+      mergedEvent.content.parts = [
+        {text: JSON.stringify(setModelResponseCall.args)},
+      ];
+      mergedEvent.actions.skipSummarization = true;
+    } else if (functionCalls.length) {
+      populateClientFunctionCallId(mergedEvent);
+      mergedEvent.longRunningToolIds = Array.from(
+        getLongRunningFunctionCalls(functionCalls, llmRequest.toolsDict),
+      );
+    }
+  }
+  return mergedEvent;
 }
 
 /**
@@ -797,7 +810,6 @@ export class LlmAgent extends BaseAgent {
       toolsDict: {},
       liveConnectConfig: {},
     };
-    const eventId = createNewEventId();
 
     // Preprocess the request and register tools, reusing the non-live path.
     yield* this.preprocess(invocationContext, llmRequest);
@@ -856,7 +868,7 @@ export class LlmAgent extends BaseAgent {
             await historyConnection.sendHistory(llmRequest.contents);
             traceSendData({
               invocationContext,
-              eventId,
+              eventId: createNewEventId(),
               data: llmRequest.contents,
             });
             span.end();
@@ -869,7 +881,7 @@ export class LlmAgent extends BaseAgent {
         const sendConnection = connection;
         sendTask = this.sendToModel(
           sendConnection,
-          invocationContext,
+          queue,
           sendAbort.signal,
         ).catch(async (error: unknown) => {
           if (!isAbortError(error)) {
@@ -900,7 +912,15 @@ export class LlmAgent extends BaseAgent {
         receiveError = error;
       }
 
-      await this.teardownLiveConnection(sendAbort, sendTask, connection);
+      // Tear down: abort the send task, then close the connection. Both are
+      // awaited and their errors swallowed; close() tolerates a double close.
+      sendAbort.abort();
+      if (sendTask) {
+        await sendTask.catch(() => {});
+      }
+      if (connection) {
+        await connection.close().catch(() => {});
+      }
 
       // A send failure is treated like a connection drop (parity with Python,
       // where the send task's error surfaces when it is awaited on teardown).
@@ -932,34 +952,14 @@ export class LlmAgent extends BaseAgent {
   }
 
   /**
-   * Aborts the send task and closes the connection, swallowing teardown
-   * errors. `close()` may run after the connection already closed, so it is
-   * wrapped defensively.
-   */
-  private async teardownLiveConnection(
-    sendAbort: AbortController,
-    sendTask: Promise<void> | undefined,
-    connection: BaseLlmConnection | undefined,
-  ): Promise<void> {
-    sendAbort.abort();
-    if (sendTask) {
-      await sendTask.catch(() => {});
-    }
-    if (connection) {
-      await connection.close().catch(() => {});
-    }
-  }
-
-  /**
-   * Drains the invocation's live request queue into the connection until a
+   * Drains the given live request queue into the connection until a
    * `{close: true}` request is received or the wait is aborted.
    */
   private async sendToModel(
     connection: BaseLlmConnection,
-    invocationContext: InvocationContext,
+    queue: LiveRequestQueue,
     abortSignal: AbortSignal,
   ): Promise<void> {
-    const queue = invocationContext.liveRequestQueue!;
     while (true) {
       let request: LiveRequest;
       try {
@@ -1016,9 +1016,15 @@ export class LlmAgent extends BaseAgent {
         yield LIVE_RECONNECT_SENTINEL;
         return;
       }
+      // Input transcriptions and user-role content are authored by the user;
+      // everything else by the agent.
+      const author =
+        llmResponse.inputTranscription || llmResponse.content?.role === 'user'
+          ? 'user'
+          : invocationContext.agent.name;
       const modelResponseEvent = createEvent({
         invocationId: invocationContext.invocationId,
-        author: getAuthorForEvent(llmResponse, invocationContext.agent.name),
+        author,
         branch: invocationContext.branch,
       });
       yield* this.postprocessLive(
@@ -1092,28 +1098,11 @@ export class LlmAgent extends BaseAgent {
     }
 
     // Builds the merged model response event.
-    const mergedEvent = createEvent({
-      ...modelResponseEvent,
-      ...llmResponse,
-    });
-
-    if (mergedEvent.content) {
-      const functionCalls = getFunctionCalls(mergedEvent);
-      const setModelResponseCall = functionCalls.find(
-        (call) => call.name === 'set_model_response',
-      );
-      if (setModelResponseCall) {
-        mergedEvent.content.parts = [
-          {text: JSON.stringify(setModelResponseCall.args)},
-        ];
-        mergedEvent.actions.skipSummarization = true;
-      } else if (functionCalls.length) {
-        populateClientFunctionCallId(mergedEvent);
-        mergedEvent.longRunningToolIds = Array.from(
-          getLongRunningFunctionCalls(functionCalls, llmRequest.toolsDict),
-        );
-      }
-    }
+    const mergedEvent = buildMergedModelResponseEvent(
+      modelResponseEvent,
+      llmResponse,
+      llmRequest,
+    );
     yield mergedEvent;
 
     // Handles function calls, including tool execution.
@@ -1328,29 +1317,11 @@ export class LlmAgent extends BaseAgent {
     }
 
     // Merge llm response with model response event.
-    const mergedEvent = createEvent({
-      ...modelResponseEvent,
-      ...llmResponse,
-    });
-
-    if (mergedEvent.content) {
-      const functionCalls = getFunctionCalls(mergedEvent);
-      const setModelResponseCall = functionCalls.find(
-        (call) => call.name === 'set_model_response',
-      );
-      if (setModelResponseCall) {
-        const args = setModelResponseCall.args;
-        mergedEvent.content.parts = [{text: JSON.stringify(args)}];
-        mergedEvent.actions.skipSummarization = true;
-      } else if (functionCalls && functionCalls.length) {
-        populateClientFunctionCallId(mergedEvent);
-        // TODO - b/425992518: hacky, transaction log, simplify.
-        // Long running is a property of tool in registry.
-        mergedEvent.longRunningToolIds = Array.from(
-          getLongRunningFunctionCalls(functionCalls, llmRequest.toolsDict),
-        );
-      }
-    }
+    const mergedEvent = buildMergedModelResponseEvent(
+      modelResponseEvent,
+      llmResponse,
+      llmRequest,
+    );
     yield mergedEvent;
 
     // =========================================================================
