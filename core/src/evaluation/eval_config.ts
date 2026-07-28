@@ -132,26 +132,23 @@ export function getEvalMetricsFromConfig(evalConfig: EvalConfig): EvalMetric[] {
     const customFunctionPath =
       evalConfig.customMetrics?.[metricName]?.codeConfig.name;
 
+    let resolvedCriterion: BaseCriterion;
     if (typeof criterion === 'number') {
-      evalMetricList.push({
-        metricName,
-        threshold: criterion,
-        criterion: BaseCriterionSchema.parse({threshold: criterion}),
-        customFunctionPath,
-      });
+      resolvedCriterion = BaseCriterionSchema.parse({threshold: criterion});
     } else if (typeof criterion === 'object' && criterion !== null) {
-      const baseCriterion: BaseCriterion = criterion;
-      evalMetricList.push({
-        metricName,
-        threshold: baseCriterion.threshold,
-        criterion: baseCriterion,
-        customFunctionPath,
-      });
+      resolvedCriterion = criterion;
     } else {
       throw new Error(
         `Unexpected criterion type. ${typeof criterion} not supported.`,
       );
     }
+
+    evalMetricList.push({
+      metricName,
+      threshold: resolvedCriterion.threshold,
+      criterion: resolvedCriterion,
+      customFunctionPath,
+    });
   }
   return evalMetricList;
 }
