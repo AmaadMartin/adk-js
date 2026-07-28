@@ -1212,15 +1212,12 @@ const GOOGLE_CLOUD_PROJECT_ENV = 'GOOGLE_CLOUD_PROJECT';
 /** Environment variable holding the Google Cloud location. */
 const GOOGLE_CLOUD_LOCATION_ENV = 'GOOGLE_CLOUD_LOCATION';
 
-/** Prefix identifying a full Vertex resource name model string. */
-const VERTEX_RESOURCE_NAME_PREFIX = 'projects/';
-
 /** Extracts `project` and `location` from a full Vertex resource name. */
 const VERTEX_PROJECT_LOCATION_REGEX = /projects\/([^/]+)\/locations\/([^/]+)\//;
 
 /** Extracts the bare model id from a full Vertex resource name. */
 const VERTEX_MODEL_ID_REGEX =
-  /projects\/[^/]+\/locations\/[^/]+\/(?:publishers\/anthropic\/models|endpoints)\/([^/:]+)/;
+  /projects\/[^/]+\/locations\/[^/]+\/publishers\/anthropic\/models\/([^/:]+)/;
 
 /** Resolved Vertex targeting for a {@link Claude} request. */
 export interface VertexConfig {
@@ -1251,7 +1248,7 @@ export interface ClaudeParams extends AnthropicLlmParams {
  * adk-python `_resolve_model_name`. Returns `model` unchanged when it is not a
  * resource name.
  */
-export function resolveVertexModelId(model: string): string {
+function resolveVertexModelId(model: string): string {
   const match = VERTEX_MODEL_ID_REGEX.exec(model);
   return match ? match[1] : model;
 }
@@ -1275,12 +1272,10 @@ export function resolveVertexConfig(
   let resolvedProject = project;
   let resolvedLocation = location;
 
-  if (model.startsWith(VERTEX_RESOURCE_NAME_PREFIX)) {
-    const match = VERTEX_PROJECT_LOCATION_REGEX.exec(model);
-    if (match) {
-      resolvedProject = match[1];
-      resolvedLocation = match[2];
-    }
+  const match = VERTEX_PROJECT_LOCATION_REGEX.exec(model);
+  if (match) {
+    resolvedProject = match[1];
+    resolvedLocation = match[2];
   }
 
   if (!isBrowser()) {
@@ -1318,7 +1313,7 @@ export function buildVertexHost(location: string): string {
 }
 
 /** Builds the Vertex `rawPredict` / `streamRawPredict` endpoint URL. */
-export function buildVertexEndpoint(
+function buildVertexEndpoint(
   host: string,
   project: string,
   location: string,
@@ -1333,7 +1328,7 @@ export function buildVertexEndpoint(
  * Rewrites a direct-API request body for the Vertex contract: `model` moves to
  * the endpoint URL (dropped here) and `anthropic_version` is added to the body.
  */
-export function toVertexRequestBody(
+function toVertexRequestBody(
   body: AnthropicMessagesRequest,
 ): Record<string, unknown> {
   const {model: _model, ...rest} = body;

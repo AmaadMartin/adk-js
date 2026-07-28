@@ -24,11 +24,8 @@ import {
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   AnthropicMessage,
-  buildVertexEndpoint,
   buildVertexHost,
   resolveVertexConfig,
-  resolveVertexModelId,
-  toVertexRequestBody,
 } from '../../src/models/anthropic_llm.js';
 import {version} from '../../src/version.js';
 
@@ -147,24 +144,6 @@ function restoreEnv(key: string, value: string | undefined): void {
   }
 }
 
-describe('resolveVertexModelId', () => {
-  it('extracts the bare model id from a publisher resource name', () => {
-    expect(resolveVertexModelId(RESOURCE_NAME)).toBe(CLAUDE_DEFAULT_MODEL);
-  });
-
-  it('extracts the model id from an endpoint resource name', () => {
-    expect(
-      resolveVertexModelId('projects/p/locations/l/endpoints/my-endpoint'),
-    ).toBe('my-endpoint');
-  });
-
-  it('passes a plain model id through unchanged', () => {
-    expect(resolveVertexModelId('claude-sonnet-4-20250514')).toBe(
-      'claude-sonnet-4-20250514',
-    );
-  });
-});
-
 describe('buildVertexHost', () => {
   it('resolves the global host', () => {
     expect(buildVertexHost('global')).toBe('https://aiplatform.googleapis.com');
@@ -183,35 +162,6 @@ describe('buildVertexHost', () => {
     expect(buildVertexHost('us-east5')).toBe(
       'https://us-east5-aiplatform.googleapis.com',
     );
-  });
-});
-
-describe('buildVertexEndpoint', () => {
-  it('builds the rawPredict URL for non-streaming', () => {
-    expect(buildVertexEndpoint('https://h', 'p', 'l', 'm', false)).toBe(
-      'https://h/v1/projects/p/locations/l/publishers/anthropic/models/m:rawPredict',
-    );
-  });
-
-  it('builds the streamRawPredict URL for streaming', () => {
-    expect(buildVertexEndpoint('https://h', 'p', 'l', 'm', true)).toBe(
-      'https://h/v1/projects/p/locations/l/publishers/anthropic/models/m:streamRawPredict',
-    );
-  });
-});
-
-describe('toVertexRequestBody', () => {
-  it('drops the model field and adds anthropic_version', () => {
-    const result = toVertexRequestBody({
-      model: 'claude-x',
-      max_tokens: 10,
-      messages: [],
-      stream: true,
-    });
-    expect(result).not.toHaveProperty('model');
-    expect(result['anthropic_version']).toBe('vertex-2023-10-16');
-    expect(result['max_tokens']).toBe(10);
-    expect(result['stream']).toBe(true);
   });
 });
 
