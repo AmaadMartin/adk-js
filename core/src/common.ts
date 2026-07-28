@@ -184,6 +184,10 @@ export {RoutedLlm} from './models/routed_llm.js';
 export type {LlmRouter} from './models/routed_llm.js';
 export {BasePlugin, ContextCompactionTrigger} from './plugins/base_plugin.js';
 export {LoggingPlugin} from './plugins/logging_plugin.js';
+export {
+  MultimodalToolResultsPlugin,
+  PARTS_RETURNED_BY_TOOLS_ID,
+} from './plugins/multimodal_tool_results_plugin.js';
 export {PluginManager} from './plugins/plugin_manager.js';
 export {
   InMemoryPolicyEngine,
