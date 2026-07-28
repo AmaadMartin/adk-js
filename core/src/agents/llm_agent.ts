@@ -25,6 +25,7 @@ import {
 import {BaseExampleProvider} from '../examples/base_example_provider.js';
 import {Example} from '../examples/example.js';
 import {BaseLlm, isBaseLlm} from '../models/base_llm.js';
+import {BaseLlmConnection} from '../models/base_llm_connection.js';
 import {LlmRequest} from '../models/llm_request.js';
 import {LlmResponse} from '../models/llm_response.js';
 import {LLMRegistry} from '../models/registry.js';
@@ -39,6 +40,7 @@ import {
   runAsyncGeneratorWithOtelContext,
   traceCallLlm,
   tracer,
+  traceSendData,
 } from '../telemetry/tracing.js';
 import {isZodObject, zodObjectToSchema} from '../utils/simple_zod_to_json.js';
 import {BaseAgent, BaseAgentConfig} from './base_agent.js';
@@ -58,6 +60,7 @@ import {
 import {AUTH_PREPROCESSOR} from '../auth/auth_preprocessor.js';
 import {BaseContextCompactor} from '../context/base_context_compactor.js';
 import {InvocationContext} from './invocation_context.js';
+import {LiveRequest} from './live_request_queue.js';
 import {AGENT_TRANSFER_LLM_REQUEST_PROCESSOR} from './processors/agent_transfer_llm_request_processor.js';
 import {BASIC_LLM_REQUEST_PROCESSOR} from './processors/basic_llm_request_processor.js';
 import {CODE_EXECUTION_REQUEST_PROCESSOR} from './processors/code_execution_request_processor.js';
@@ -195,6 +198,46 @@ export type ExamplesUnion = Example[] | BaseExampleProvider;
 export type ToolUnion = BaseTool | BaseToolset;
 
 const ADK_AGENT_NAME_LABEL_KEY = 'adk_agent_name';
+
+/**
+ * Maximum number of times the live flow transparently reconnects a dropped
+ * connection before giving up. Parity with the reference implementation's
+ * `DEFAULT_MAX_RECONNECT_ATTEMPTS`.
+ */
+const MAX_LIVE_RECONNECT_ATTEMPTS = 5;
+
+/**
+ * Sentinel event used purely for identity comparison inside
+ * {@link LlmAgent.runLiveFlow} to signal that the receive step wants a
+ * reconnect. `Event` is an interface, so an `instanceof` check is unavailable;
+ * a single module-const object compared by reference fills that role. It is
+ * consumed inside the flow and never yielded to callers.
+ */
+const LIVE_RECONNECT_SENTINEL: Event = createEvent();
+
+/**
+ * Determines the author of a live event.
+ *
+ * Input transcriptions and user-role content are attributed to the user;
+ * everything else is attributed to the agent.
+ */
+function getAuthorForEvent(
+  llmResponse: LlmResponse,
+  agentName: string,
+): string {
+  if (llmResponse.inputTranscription || llmResponse.content?.role === 'user') {
+    return 'user';
+  }
+  return agentName;
+}
+
+/**
+ * Returns whether an error is an `AbortError`, i.e. a wait cancelled via an
+ * `AbortSignal` rather than a genuine failure.
+ */
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
+}
 
 /**
  * The configuration options for creating an LLM-based agent.
@@ -746,16 +789,7 @@ export class LlmAgent extends BaseAgent {
    * times. Subsequent reconnects skip `sendHistory` because the server
    * already holds the conversation state associated with the handle.
    */
-  // eslint-disable-next-line require-yield
   private async *runLiveFlow(
-    _invocationContext: InvocationContext,
-  ): AsyncGenerator<Event, void, void> {
-    // TODO - b/425992518: remove dummy logic, implement this.
-    await Promise.resolve();
-    throw new Error('LlmAgent.runLiveFlow not implemented');
-  }
-
-  private async *runOneStepAsync(
     invocationContext: InvocationContext,
   ): AsyncGenerator<Event, void, void> {
     const llmRequest: LlmRequest = {
@@ -763,10 +797,359 @@ export class LlmAgent extends BaseAgent {
       toolsDict: {},
       liveConnectConfig: {},
     };
+    const eventId = createNewEventId();
 
-    // =========================================================================
-    // Preprocess before calling the LLM
-    // =========================================================================
+    // Preprocess the request and register tools, reusing the non-live path.
+    yield* this.preprocess(invocationContext, llmRequest);
+    if (
+      invocationContext.endInvocation ||
+      invocationContext.abortSignal?.aborted
+    ) {
+      return;
+    }
+
+    const queue = invocationContext.liveRequestQueue;
+    if (!queue) {
+      throw new Error(
+        'runLiveFlow requires invocationContext.liveRequestQueue to be set.',
+      );
+    }
+
+    const llm = this.canonicalModel;
+    llmRequest.model = llm.model;
+
+    // Unlike the Python transport, the genai JS live transport does not expose
+    // reliable numeric close codes (1000/1006/1011). Recovery is therefore
+    // gated on the presence of a session resumption handle plus an attempt cap
+    // rather than on error-code inspection.
+    let attempt = 1;
+    while (true) {
+      const sendAbort = new AbortController();
+      let connection: BaseLlmConnection | undefined;
+      let sendTask: Promise<void> | undefined;
+      let sendError: unknown;
+      let shouldReconnect = false;
+      let receiveError: unknown;
+      const resuming = !!invocationContext.liveSessionResumptionHandle;
+
+      try {
+        if (resuming) {
+          llmRequest.liveConnectConfig.sessionResumption = {
+            ...(llmRequest.liveConnectConfig.sessionResumption ?? {}),
+            handle: invocationContext.liveSessionResumptionHandle,
+          };
+          logger.info(
+            `Reconnecting live connection for agent ${this.name} (attempt ${attempt}).`,
+          );
+        }
+
+        connection = await llm.connect(llmRequest);
+        // Reset after a successful connect so every healthy connection gets the
+        // full reconnect budget for its own subsequent drops.
+        attempt = 1;
+
+        // Skip history on a resumed reconnect: the server already holds the
+        // conversation state associated with the resumption handle.
+        if (llmRequest.contents.length > 0 && !resuming) {
+          const historyConnection = connection;
+          await tracer.startActiveSpan('send_data', async (span) => {
+            await historyConnection.sendHistory(llmRequest.contents);
+            traceSendData({
+              invocationContext,
+              eventId,
+              data: llmRequest.contents,
+            });
+            span.end();
+          });
+        }
+
+        // Drain the client queue into the connection on a parallel task. A
+        // non-abort failure is captured and the connection is closed so the
+        // receive loop below unblocks and the error surfaces as a drop.
+        const sendConnection = connection;
+        sendTask = this.sendToModel(
+          sendConnection,
+          invocationContext,
+          sendAbort.signal,
+        ).catch(async (error: unknown) => {
+          if (!isAbortError(error)) {
+            sendError = error;
+            await sendConnection.close().catch(() => {});
+          }
+        });
+
+        for await (const event of this.receiveFromModel(
+          connection,
+          invocationContext,
+          llmRequest,
+        )) {
+          if (invocationContext.abortSignal?.aborted) {
+            break;
+          }
+          if (event === LIVE_RECONNECT_SENTINEL) {
+            shouldReconnect = true;
+            break;
+          }
+          yield event;
+          // Echo tool results back to the live model so it can continue.
+          if (event.content && getFunctionResponses(event).length > 0) {
+            queue.sendContent(event.content);
+          }
+        }
+      } catch (error: unknown) {
+        receiveError = error;
+      }
+
+      await this.teardownLiveConnection(sendAbort, sendTask, connection);
+
+      // A send failure is treated like a connection drop (parity with Python,
+      // where the send task's error surfaces when it is awaited on teardown).
+      const error = receiveError ?? sendError;
+      if (error) {
+        if (
+          invocationContext.liveSessionResumptionHandle &&
+          attempt <= MAX_LIVE_RECONNECT_ATTEMPTS
+        ) {
+          attempt++;
+          shouldReconnect = true;
+          logger.info(
+            `Live connection dropped for agent ${this.name}; reconnecting with session handle.`,
+          );
+        } else {
+          logger.error(
+            `Unrecoverable error in live flow for agent ${this.name}.`,
+            error,
+          );
+          throw error;
+        }
+      }
+
+      if (shouldReconnect && !invocationContext.abortSignal?.aborted) {
+        continue;
+      }
+      return;
+    }
+  }
+
+  /**
+   * Aborts the send task and closes the connection, swallowing teardown
+   * errors. `close()` may run after the connection already closed, so it is
+   * wrapped defensively.
+   */
+  private async teardownLiveConnection(
+    sendAbort: AbortController,
+    sendTask: Promise<void> | undefined,
+    connection: BaseLlmConnection | undefined,
+  ): Promise<void> {
+    sendAbort.abort();
+    if (sendTask) {
+      await sendTask.catch(() => {});
+    }
+    if (connection) {
+      await connection.close().catch(() => {});
+    }
+  }
+
+  /**
+   * Drains the invocation's live request queue into the connection until a
+   * `{close: true}` request is received or the wait is aborted.
+   */
+  private async sendToModel(
+    connection: BaseLlmConnection,
+    invocationContext: InvocationContext,
+    abortSignal: AbortSignal,
+  ): Promise<void> {
+    const queue = invocationContext.liveRequestQueue!;
+    while (true) {
+      let request: LiveRequest;
+      try {
+        request = await queue.get(abortSignal);
+      } catch (error: unknown) {
+        if (isAbortError(error)) {
+          return;
+        }
+        throw error;
+      }
+      if (abortSignal.aborted) {
+        return;
+      }
+      if (request.close) {
+        await connection.close();
+        return;
+      }
+      if (request.blob) {
+        await connection.sendRealtime(request.blob);
+      } else if (request.activityStart) {
+        await connection.sendActivityStart?.();
+      } else if (request.activityEnd) {
+        await connection.sendActivityEnd?.();
+      } else if (request.content) {
+        if (request.content.parts?.some((part) => part.functionCall)) {
+          throw new Error('User message cannot contain function calls.');
+        }
+        await connection.sendContent(request.content);
+      }
+    }
+  }
+
+  /**
+   * Receives model responses from the connection and converts them into events.
+   *
+   * Yields {@link LIVE_RECONNECT_SENTINEL} (never surfaced to callers) when the
+   * server signals `goAway`, so the caller can reconnect.
+   */
+  private async *receiveFromModel(
+    connection: BaseLlmConnection,
+    invocationContext: InvocationContext,
+    llmRequest: LlmRequest,
+  ): AsyncGenerator<Event, void, void> {
+    for await (const llmResponse of connection.receive()) {
+      if (invocationContext.abortSignal?.aborted) {
+        return;
+      }
+      if (llmResponse.liveSessionResumptionUpdate?.newHandle) {
+        invocationContext.liveSessionResumptionHandle =
+          llmResponse.liveSessionResumptionUpdate.newHandle;
+      }
+      if (llmResponse.goAway) {
+        logger.info(`Received go away signal for agent ${this.name}.`);
+        yield LIVE_RECONNECT_SENTINEL;
+        return;
+      }
+      const modelResponseEvent = createEvent({
+        invocationId: invocationContext.invocationId,
+        author: getAuthorForEvent(llmResponse, invocationContext.agent.name),
+        branch: invocationContext.branch,
+      });
+      yield* this.postprocessLive(
+        invocationContext,
+        llmRequest,
+        llmResponse,
+        modelResponseEvent,
+      );
+    }
+  }
+
+  /**
+   * Postprocesses a single live `LlmResponse` into one or more events. Mirrors
+   * {@link LlmAgent.postprocess} but preserves live-only control signals
+   * (transcriptions, turn/interrupt markers, session resumption updates).
+   */
+  private async *postprocessLive(
+    invocationContext: InvocationContext,
+    llmRequest: LlmRequest,
+    llmResponse: LlmResponse,
+    modelResponseEvent: Event,
+  ): AsyncGenerator<Event, void, void> {
+    // Runs response processors.
+    for (const processor of this.responseProcessors) {
+      for await (const event of processor.runAsync(
+        invocationContext,
+        llmResponse,
+      )) {
+        if (invocationContext.abortSignal?.aborted) {
+          return;
+        }
+        yield event;
+      }
+    }
+
+    // Skip empty responses, but keep live control events (turn complete,
+    // interruptions, transcriptions, resumption updates, usage, grounding).
+    if (
+      !llmResponse.content &&
+      !llmResponse.errorCode &&
+      !llmResponse.interrupted &&
+      !llmResponse.turnComplete &&
+      !llmResponse.inputTranscription &&
+      !llmResponse.outputTranscription &&
+      !llmResponse.usageMetadata &&
+      !llmResponse.liveSessionResumptionUpdate &&
+      !llmResponse.groundingMetadata
+    ) {
+      return;
+    }
+
+    if (llmResponse.liveSessionResumptionUpdate) {
+      modelResponseEvent.liveSessionResumptionUpdate =
+        llmResponse.liveSessionResumptionUpdate;
+      yield modelResponseEvent;
+      return;
+    }
+
+    if (llmResponse.inputTranscription) {
+      modelResponseEvent.inputTranscription = llmResponse.inputTranscription;
+      modelResponseEvent.partial = llmResponse.partial;
+      yield modelResponseEvent;
+      return;
+    }
+
+    if (llmResponse.outputTranscription) {
+      modelResponseEvent.outputTranscription = llmResponse.outputTranscription;
+      modelResponseEvent.partial = llmResponse.partial;
+      yield modelResponseEvent;
+      return;
+    }
+
+    // Builds the merged model response event.
+    const mergedEvent = createEvent({
+      ...modelResponseEvent,
+      ...llmResponse,
+    });
+
+    if (mergedEvent.content) {
+      const functionCalls = getFunctionCalls(mergedEvent);
+      const setModelResponseCall = functionCalls.find(
+        (call) => call.name === 'set_model_response',
+      );
+      if (setModelResponseCall) {
+        mergedEvent.content.parts = [
+          {text: JSON.stringify(setModelResponseCall.args)},
+        ];
+        mergedEvent.actions.skipSummarization = true;
+      } else if (functionCalls.length) {
+        populateClientFunctionCallId(mergedEvent);
+        mergedEvent.longRunningToolIds = Array.from(
+          getLongRunningFunctionCalls(functionCalls, llmRequest.toolsDict),
+        );
+      }
+    }
+    yield mergedEvent;
+
+    // Handles function calls, including tool execution.
+    if (!getFunctionCalls(mergedEvent).length) {
+      return;
+    }
+    const functionResponseEvent = await handleFunctionCallsAsync({
+      invocationContext,
+      functionCallEvent: mergedEvent,
+      toolsDict: llmRequest.toolsDict,
+      beforeToolCallbacks: this.canonicalBeforeToolCallbacks,
+      afterToolCallbacks: this.canonicalAfterToolCallbacks,
+    });
+    if (!functionResponseEvent || invocationContext.abortSignal?.aborted) {
+      return;
+    }
+    const authEvent = generateAuthEvent(
+      invocationContext,
+      functionResponseEvent,
+    );
+    if (authEvent) {
+      yield authEvent;
+    }
+    yield functionResponseEvent;
+  }
+
+  /**
+   * Runs the request processors and tool preprocessors that build the outgoing
+   * `LlmRequest`. Shared by the non-live ({@link LlmAgent.runOneStepAsync}) and
+   * live ({@link LlmAgent.runLiveFlow}) flows so their preprocessing cannot
+   * drift apart.
+   */
+  private async *preprocess(
+    invocationContext: InvocationContext,
+    llmRequest: LlmRequest,
+  ): AsyncGenerator<Event, void, void> {
     // Runs request processors.
     for (const processor of this.requestProcessors) {
       for await (const event of processor.runAsync(
@@ -826,6 +1209,22 @@ export class LlmAgent extends BaseAgent {
         }
       }
     }
+  }
+
+  private async *runOneStepAsync(
+    invocationContext: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    const llmRequest: LlmRequest = {
+      contents: [],
+      toolsDict: {},
+      liveConnectConfig: {},
+    };
+
+    // =========================================================================
+    // Preprocess before calling the LLM
+    // =========================================================================
+    yield* this.preprocess(invocationContext, llmRequest);
+
     // =========================================================================
     // Global runtime interruption
     // =========================================================================
