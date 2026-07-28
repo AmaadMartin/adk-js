@@ -16,12 +16,17 @@ import {
   Tool,
 } from '@google/genai';
 
+import {AsyncQueue} from '../utils/async_queue.js';
 import {logger} from '../utils/logger.js';
 
 import {BaseLlm} from './base_llm.js';
 import {BaseLlmConnection} from './base_llm_connection.js';
 import {LlmRequest} from './llm_request.js';
 import {LlmResponse} from './llm_response.js';
+import {
+  OpenAiRealtimeConnection,
+  OpenAiRealtimeServerEvent,
+} from './openai_realtime_connection.js';
 
 /**
  * Prefix used to mark model refusals within accumulated text content. Mirrors
@@ -40,6 +45,15 @@ const CUSTOM_METADATA_FIELDS = [
   'service_tier',
   'object',
 ] as const;
+
+/** WebSocket subprotocol that selects the OpenAI Realtime protocol. */
+const REALTIME_SUBPROTOCOL = 'realtime';
+/**
+ * Subprotocol prefix carrying the API key, per the OpenAI Realtime WebSocket
+ * guide. Native `WebSocket` cannot set request headers, so auth is passed as a
+ * subprotocol token instead (works in browsers, Deno, and Node).
+ */
+const REALTIME_API_KEY_SUBPROTOCOL_PREFIX = 'openai-insecure-api-key.';
 
 /**
  * Parameters for constructing a {@link ChatCompletionsLlm}.
@@ -64,6 +78,12 @@ export interface ChatCompletionsLlmParams {
    * arrays for text-only `content`.
    */
   provider?: string;
+  /**
+   * Optional explicit OpenAI Realtime WebSocket URL used by `connect()`. When
+   * omitted, the URL is derived from `baseURL`. Set this for servers whose
+   * Realtime endpoint is not `{baseURL}/realtime` (e.g. a self-hosted server).
+   */
+  realtimeUrl?: string;
 }
 
 /**
@@ -83,6 +103,7 @@ export class ChatCompletionsLlm extends BaseLlm {
   private readonly apiKey?: string;
   private readonly headers: Record<string, string>;
   private readonly provider?: string;
+  private readonly realtimeUrl?: string;
 
   constructor(params: ChatCompletionsLlmParams) {
     super({model: params.model});
@@ -90,6 +111,7 @@ export class ChatCompletionsLlm extends BaseLlm {
     this.apiKey = params.apiKey;
     this.headers = params.headers ?? {};
     this.provider = params.provider;
+    this.realtimeUrl = params.realtimeUrl;
   }
 
   override async *generateContentAsync(
@@ -136,12 +158,141 @@ export class ChatCompletionsLlm extends BaseLlm {
     );
   }
 
-  override async connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
-    throw new Error(
-      'ChatCompletionsLlm does not support live connections (connect). Use ' +
-        'generateContentAsync.',
-    );
+  /**
+   * Opens a live, bidirectional connection using the OpenAI Realtime WebSocket
+   * protocol and returns it. The socket is opened, the initial `session.update`
+   * is sent, and its `message`/`error`/`close` events are wired into an
+   * `AsyncQueue` that backs the connection's `receive()` generator.
+   *
+   * The target server must actually speak the OpenAI Realtime protocol; a
+   * failed upgrade surfaces as a rejected promise. Uses the platform-global
+   * `WebSocket` (the same approach `generateContentAsync` takes with `fetch`),
+   * so no extra dependency is required.
+   *
+   * @param llmRequest The request whose model, instructions, tools, and
+   *   response modalities configure the session.
+   * @returns A live {@link BaseLlmConnection} to the model.
+   */
+  override async connect(llmRequest: LlmRequest): Promise<BaseLlmConnection> {
+    const model = llmRequest.model ?? this.model;
+    const url = buildRealtimeUrl(this.baseURL, model, this.realtimeUrl);
+    const subprotocols = this.apiKey
+      ? [
+          REALTIME_SUBPROTOCOL,
+          REALTIME_API_KEY_SUBPROTOCOL_PREFIX + this.apiKey,
+        ]
+      : [REALTIME_SUBPROTOCOL];
+
+    const ws = new WebSocket(url, subprotocols);
+    const messageQueue = new AsyncQueue<OpenAiRealtimeServerEvent>();
+
+    await new Promise<void>((resolve, reject) => {
+      ws.onopen = () => resolve();
+      ws.onerror = () =>
+        reject(
+          new Error(
+            `ChatCompletionsLlm failed to open a Realtime connection to ` +
+              `${model} at ${url}.`,
+          ),
+        );
+    });
+
+    ws.onmessage = (event: MessageEvent) => {
+      try {
+        messageQueue.push(
+          JSON.parse(event.data as string) as OpenAiRealtimeServerEvent,
+        );
+      } catch {
+        logger.warn(`Ignoring non-JSON Realtime server event: ${event.data}`);
+      }
+    };
+    ws.onerror = () => {
+      messageQueue.error(
+        new Error(
+          `ChatCompletionsLlm Realtime connection to ${model} errored.`,
+        ),
+      );
+    };
+    ws.onclose = () => messageQueue.close();
+
+    ws.send(JSON.stringify(sessionUpdateFrom(llmRequest, model)));
+
+    return new OpenAiRealtimeConnection(ws, model, messageQueue);
   }
+}
+
+/**
+ * Derives the OpenAI Realtime WebSocket URL. Honors an explicit `realtimeUrl`
+ * override; otherwise transforms `baseURL` by switching the scheme to
+ * `ws`/`wss`, stripping a trailing `/chat/completions` or slash, appending
+ * `/realtime`, and adding the `model` query parameter.
+ */
+function buildRealtimeUrl(
+  baseURL: string,
+  model: string,
+  realtimeUrl?: string,
+): string {
+  if (realtimeUrl) {
+    return realtimeUrl;
+  }
+  const wsBase = baseURL
+    .replace(/^http/, 'ws')
+    .replace(/\/chat\/completions\/?$/, '')
+    .replace(/\/+$/, '');
+  return `${wsBase}/realtime?model=${encodeURIComponent(model)}`;
+}
+
+/**
+ * Builds the initial `session.update` client event from an `LlmRequest`,
+ * mapping the system instruction, response modalities, and tool declarations
+ * onto the Realtime session object.
+ */
+function sessionUpdateFrom(
+  llmRequest: LlmRequest,
+  model: string,
+): Record<string, unknown> {
+  const session: Record<string, unknown> = {type: 'realtime', model};
+
+  const instruction = llmRequest.config?.systemInstruction;
+  if (instruction) {
+    const instructions = serializeSystemInstruction(instruction);
+    if (instructions) {
+      session['instructions'] = instructions;
+    }
+  }
+
+  const modalities = llmRequest.liveConnectConfig?.responseModalities;
+  session['output_modalities'] = modalities?.length
+    ? modalities.map((modality) => String(modality).toLowerCase())
+    : ['audio', 'text'];
+
+  const tools = realtimeToolsFrom(llmRequest.config);
+  if (tools.length) {
+    session['tools'] = tools;
+  }
+
+  return {type: 'session.update', session};
+}
+
+/**
+ * Extracts function declarations from the request config into flat Realtime
+ * tool objects (`{type:'function', name, description, parameters}`).
+ */
+function realtimeToolsFrom(
+  config?: GenerateContentConfig,
+): Array<Record<string, unknown>> {
+  const tools: Array<Record<string, unknown>> = [];
+  for (const tool of config?.tools ?? []) {
+    for (const func of (tool as Tool).functionDeclarations ?? []) {
+      tools.push({
+        type: 'function',
+        name: func.name,
+        description: func.description,
+        parameters: func.parametersJsonSchema ?? func.parameters ?? {},
+      });
+    }
+  }
+  return tools;
 }
 
 /**
