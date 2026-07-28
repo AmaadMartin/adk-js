@@ -21,6 +21,8 @@ import {AsyncQueue} from '../utils/async_queue.js';
 import {StreamingResponseAggregator} from '../utils/streaming_utils.js';
 import {BaseLlm} from './base_llm.js';
 import {BaseLlmConnection} from './base_llm_connection.js';
+import {CacheMetadata} from './cache_metadata.js';
+import {GeminiContextCacheManager} from './gemini_context_cache_manager.js';
 import {GeminiLlmConnection} from './gemini_llm_connection.js';
 import {generateContentViaInteractions} from './interactions_utils.js';
 import {LlmRequest} from './llm_request.js';
@@ -169,6 +171,13 @@ export class Gemini extends BaseLlm {
       `Sending out request, model: ${llmRequest.model ?? this.model}, backend: ${this.apiBackend}, stream: ${stream}`,
     );
 
+    let cacheManager: GeminiContextCacheManager | undefined;
+    let cacheMetadata: CacheMetadata | undefined;
+    if (llmRequest.cacheConfig) {
+      cacheManager = new GeminiContextCacheManager(this.apiClient);
+      cacheMetadata = await cacheManager.handleContextCaching(llmRequest);
+    }
+
     if (!llmRequest.config) {
       llmRequest.config = {};
     }
@@ -199,6 +208,12 @@ export class Gemini extends BaseLlm {
       }
       const finalResponse = aggregator.close();
       if (finalResponse) {
+        if (cacheMetadata) {
+          cacheManager!.populateCacheMetadataInResponse(
+            finalResponse,
+            cacheMetadata,
+          );
+        }
         yield finalResponse;
       }
     } else {
@@ -207,7 +222,14 @@ export class Gemini extends BaseLlm {
         contents: llmRequest.contents,
         config: llmRequest.config,
       });
-      yield createLlmResponse(response);
+      const llmResponse = createLlmResponse(response);
+      if (cacheMetadata) {
+        cacheManager!.populateCacheMetadataInResponse(
+          llmResponse,
+          cacheMetadata,
+        );
+      }
+      yield llmResponse;
     }
   }
 
