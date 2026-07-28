@@ -132,6 +132,23 @@ function isTimeoutError(error: unknown): error is Error {
 }
 
 /**
+ * Releases `sandbox` if it was opened, swallowing (and logging) any error so
+ * cleanup never masks the primary result or error.
+ */
+async function closeSandboxQuietly(
+  sandbox: SandboxClient | undefined,
+): Promise<void> {
+  if (!sandbox) {
+    return;
+  }
+  try {
+    await sandbox.close();
+  } catch (closeErr) {
+    logger.error('Failed to close sandbox', closeErr);
+  }
+}
+
+/**
  * Executes code on GKE, either via a per-execution Kubernetes Job (`'job'`, the
  * default) or via the GKE Agent Sandbox infrastructure (`'sandbox'`).
  *
@@ -184,12 +201,14 @@ export class GkeCodeExecutor extends BaseCodeExecutor {
       });
       await sandbox.write(SCRIPT_FILENAME, code);
       const result = await sandbox.run(RUN_COMMAND);
+      await closeSandboxQuietly(sandbox);
       return {
-        stdout: result.stdout ?? '',
+        stdout: result.stdout,
         stderr: result.stderr ?? '',
         outputFiles: [],
       };
     } catch (e) {
+      await closeSandboxQuietly(sandbox);
       if (isTimeoutError(e)) {
         logger.error('Sandbox timed out', e);
         // Returning a result instead of throwing lets the agent process the
@@ -208,14 +227,6 @@ export class GkeCodeExecutor extends BaseCodeExecutor {
       }
       logger.error('Sandbox execution failed', e);
       throw e;
-    } finally {
-      if (sandbox) {
-        try {
-          await sandbox.close();
-        } catch (closeErr) {
-          logger.error('Failed to close sandbox', closeErr);
-        }
-      }
     }
   }
 
