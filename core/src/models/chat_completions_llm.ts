@@ -54,12 +54,6 @@ const REALTIME_SUBPROTOCOL = 'realtime';
  * subprotocol token instead (works in browsers, Deno, and Node).
  */
 const REALTIME_API_KEY_SUBPROTOCOL_PREFIX = 'openai-insecure-api-key.';
-/** Client event `type` that configures the Realtime session after connecting. */
-const REALTIME_SESSION_UPDATE = 'session.update';
-/** Session object discriminator required by the Realtime API. */
-const REALTIME_SESSION_TYPE = 'realtime';
-/** Output modalities requested when the caller does not specify any. */
-const DEFAULT_OUTPUT_MODALITIES = ['audio', 'text'];
 
 /**
  * Parameters for constructing a {@link ChatCompletionsLlm}.
@@ -257,10 +251,7 @@ function sessionUpdateFrom(
   llmRequest: LlmRequest,
   model: string,
 ): Record<string, unknown> {
-  const session: Record<string, unknown> = {
-    type: REALTIME_SESSION_TYPE,
-    model,
-  };
+  const session: Record<string, unknown> = {type: 'realtime', model};
 
   const instruction = llmRequest.config?.systemInstruction;
   if (instruction) {
@@ -273,14 +264,14 @@ function sessionUpdateFrom(
   const modalities = llmRequest.liveConnectConfig?.responseModalities;
   session['output_modalities'] = modalities?.length
     ? modalities.map((modality) => String(modality).toLowerCase())
-    : DEFAULT_OUTPUT_MODALITIES;
+    : ['audio', 'text'];
 
   const tools = realtimeToolsFrom(llmRequest.config);
   if (tools.length) {
     session['tools'] = tools;
   }
 
-  return {type: REALTIME_SESSION_UPDATE, session};
+  return {type: 'session.update', session};
 }
 
 /**
