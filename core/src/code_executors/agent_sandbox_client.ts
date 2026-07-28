@@ -47,7 +47,7 @@ const READY_CONDITION_TYPE = 'Ready';
 const READY_CONDITION_STATUS = 'True';
 const SANDBOX_NAME_PREFIX = 'adk-sandbox-';
 
-// Router HTTP contract (github.com/kubernetes-sigs/agent-sandbox clients/go/sandbox).
+// Router HTTP contract, per the public kubernetes-sigs/agent-sandbox client.
 const EXECUTE_ENDPOINT = 'execute';
 const UPLOAD_ENDPOINT = 'upload';
 const UPLOAD_FIELD_NAME = 'file';
