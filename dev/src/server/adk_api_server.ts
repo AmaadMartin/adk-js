@@ -41,7 +41,7 @@ import {
   setupTelemetry,
 } from '../utils/telemetry_utils.js';
 import {getAgentGraphAsDot} from './agent_graph.js';
-import {crossOriginGuard} from './csrf.js';
+import {crossOriginGuard, declaresJsonBody} from './csrf.js';
 
 interface ServerOptions {
   agentsDir?: string;
@@ -833,6 +833,10 @@ export class AdkApiServer {
           `Using already parsed body: ${JSON.stringify(req.body)}`,
         );
         await executeQuery(req.body);
+      } else if (!declaresJsonBody(req.headers['content-type'])) {
+        res.status(415).json({
+          error: 'Unsupported content type, application/json is required',
+        });
       } else {
         let rawBody = '';
         req.on('data', (chunk) => {

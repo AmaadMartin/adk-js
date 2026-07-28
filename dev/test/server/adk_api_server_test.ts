@@ -1046,6 +1046,21 @@ describe('AdkWebServer', () => {
       );
     });
 
+    it('should refuse a text/plain body on /api/reasoning_engine', async () => {
+      const spy = vi.spyOn(Runner.prototype, 'runAsync');
+
+      const response = await fetch(`${server.url}/api/reasoning_engine`, {
+        method: 'POST',
+        headers: {'Content-Type': 'text/plain;charset=UTF-8'},
+        body: JSON.stringify({input: RUN_SSE_PAYLOAD}),
+      });
+
+      expect(response.status).toBe(415);
+      expect(spy).not.toHaveBeenCalled();
+
+      spy.mockRestore();
+    });
+
     it('should return 400 if appName is missing', async () => {
       try {
         await client.post('/api/reasoning_engine', {

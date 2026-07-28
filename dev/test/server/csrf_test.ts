@@ -6,7 +6,10 @@
 
 import {describe, expect, it} from 'vitest';
 
-import {isForbiddenCrossOrigin} from '../../src/server/csrf.js';
+import {
+  declaresJsonBody,
+  isForbiddenCrossOrigin,
+} from '../../src/server/csrf.js';
 
 const SERVER_HOST = 'localhost:8000';
 const FOREIGN_ORIGIN = 'http://example.invalid';
@@ -45,4 +48,26 @@ describe('isForbiddenCrossOrigin', () => {
       );
     },
   );
+});
+
+describe('declaresJsonBody', () => {
+  it.each([
+    'application/json; charset=utf-8',
+    'application/json,application/json',
+    '  APPLICATION/JSON',
+  ])('accepts %s', (contentType) => {
+    expect(declaresJsonBody(contentType)).toBe(true);
+  });
+
+  it.each([
+    'text/plain;charset=UTF-8',
+    'application/x-www-form-urlencoded',
+    '',
+  ])('rejects %s', (contentType) => {
+    expect(declaresJsonBody(contentType)).toBe(false);
+  });
+
+  it('rejects a missing content type', () => {
+    expect(declaresJsonBody(undefined)).toBe(false);
+  });
 });

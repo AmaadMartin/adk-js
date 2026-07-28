@@ -74,3 +74,20 @@ export function crossOriginGuard(
     });
   };
 }
+
+/**
+ * True when the request explicitly declares a JSON body, i.e. the raw-body
+ * fallback may safely consume it.
+ *
+ * Requiring the declaration keeps that fallback out of reach of a browser,
+ * which cannot name a JSON media type cross-origin without triggering a
+ * preflight. The prefix match deliberately accepts the malformed
+ * `application/json,application/json` header sent by the deployed Agent Engine
+ * caller — `express.json()` rejects it, which is the whole reason the raw-body
+ * fallback exists.
+ */
+export function declaresJsonBody(contentType: string | undefined): boolean {
+  return (
+    contentType?.trim().toLowerCase().startsWith('application/json') ?? false
+  );
+}
