@@ -6,7 +6,6 @@
 
 import {
   calculateRouge1Scores,
-  defaultTokenize,
   EvalStatus,
   type Invocation,
   InvocationSchema,
@@ -18,6 +17,10 @@ import {
   UnicodeAwareTokenizer,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
+
+// defaultTokenize is an internal ROUGE helper (not part of the public API);
+// import it from source for the ASCII-parity test.
+import {defaultTokenize} from '../../src/evaluation/final_response_match_v1.js';
 
 const QUERY = {parts: [{text: 'This is a test query.'}]};
 

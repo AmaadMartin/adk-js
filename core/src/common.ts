@@ -446,7 +446,6 @@ export {
   RougeEvaluator,
   UnicodeAwareTokenizer,
   calculateRouge1Scores,
-  defaultTokenize,
   isCjk,
   isNonSpacedScript,
   isWordChar,
