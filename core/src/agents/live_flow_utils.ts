@@ -11,9 +11,6 @@ import {AudioCacheManager} from './audio_cache_manager.js';
 import {InvocationContext} from './invocation_context.js';
 import {LiveRequest} from './live_request_queue.js';
 
-/** Author used for persisted user-originated live events. */
-const USER_AUTHOR = 'user';
-
 /**
  * Forwards a drained {@link LiveRequest} to every active streaming tool so that
  * streaming tools observe the user's live input.
@@ -74,7 +71,7 @@ export async function persistLiveRequest(
       session: invocationContext.session,
       event: createEvent({
         invocationId: invocationContext.invocationId,
-        author: USER_AUTHOR,
+        author: 'user',
         actions: createEventActions({stateDelta: liveRequest.stateDelta}),
       }),
     });
@@ -89,7 +86,7 @@ export async function persistLiveRequest(
   }
 
   if (!isFunctionResponse && !content.role) {
-    content.role = USER_AUTHOR;
+    content.role = 'user';
   }
 
   if (contentEventCreated) {
@@ -97,7 +94,7 @@ export async function persistLiveRequest(
       session: invocationContext.session,
       event: createEvent({
         invocationId: invocationContext.invocationId,
-        author: USER_AUTHOR,
+        author: 'user',
         content,
         actions: liveRequest.stateDelta
           ? createEventActions({stateDelta: liveRequest.stateDelta})
@@ -137,24 +134,4 @@ export async function handleControlEventFlush(
     });
   }
   return [];
-}
-
-/**
- * Copies a voice-activity signal from the response onto the model response
- * event so it can be yielded from the live post-processor.
- *
- * @param llmResponse The response from the live stream.
- * @param modelResponseEvent The event being built for this response.
- * @returns The event with `voiceActivity` set when a signal is present, or
- *     `undefined` when the response carries no voice activity.
- */
-export function applyVoiceActivity(
-  llmResponse: LlmResponse,
-  modelResponseEvent: Event,
-): Event | undefined {
-  if (!llmResponse.voiceActivity) {
-    return undefined;
-  }
-  modelResponseEvent.voiceActivity = llmResponse.voiceActivity;
-  return modelResponseEvent;
 }

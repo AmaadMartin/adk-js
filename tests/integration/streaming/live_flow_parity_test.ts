@@ -26,7 +26,6 @@ import {
   PluginManager,
   RunConfig,
   Session,
-  applyVoiceActivity,
   createEvent,
   fanOutLiveRequest,
   handleControlEventFlush,
@@ -194,17 +193,15 @@ describe('Live-flow parity features (end-to-end, no mocks)', () => {
 
     const events: Event[] = [];
     for (const response of aggregator.processMessage(voiceMessage)) {
+      if (!response.voiceActivity) {
+        continue;
+      }
       const modelResponseEvent = createEvent({
         invocationId: context.invocationId,
         author: context.agent.name,
       });
-      const withVoiceActivity = applyVoiceActivity(
-        response,
-        modelResponseEvent,
-      );
-      if (withVoiceActivity) {
-        events.push(withVoiceActivity);
-      }
+      modelResponseEvent.voiceActivity = response.voiceActivity;
+      events.push(modelResponseEvent);
     }
 
     expect(events).toHaveLength(1);

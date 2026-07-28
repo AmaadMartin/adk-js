@@ -7,7 +7,6 @@
 import {
   ActiveStreamingTool,
   AudioCacheManager,
-  Event,
   InMemorySessionService,
   InvocationContext,
   LiveRequest,
@@ -15,13 +14,12 @@ import {
   LlmAgent,
   PluginManager,
   Session,
-  applyVoiceActivity,
   createEvent,
   fanOutLiveRequest,
   handleControlEventFlush,
   persistLiveRequest,
 } from '@google/adk';
-import {Content, VoiceActivityType} from '@google/genai';
+import {Content} from '@google/genai';
 import {describe, expect, it, vi} from 'vitest';
 
 const APP_NAME = 'test-app';
@@ -231,27 +229,5 @@ describe('handleControlEventFlush', () => {
 
     expect(result).toEqual([]);
     expect(flushSpy).not.toHaveBeenCalled();
-  });
-});
-
-describe('applyVoiceActivity', () => {
-  it('copies the voice activity signal onto the event', () => {
-    const event: Event = createEvent({author: 'test_agent'});
-    const voiceActivity = {
-      voiceActivityType: VoiceActivityType.ACTIVITY_START,
-      audioOffset: '1.5s',
-    };
-
-    const result = applyVoiceActivity({voiceActivity}, event);
-
-    expect(result).toBe(event);
-    expect(result?.voiceActivity).toEqual(voiceActivity);
-  });
-
-  it('returns undefined when the response carries no voice activity', () => {
-    const event: Event = createEvent({author: 'test_agent'});
-
-    expect(applyVoiceActivity({}, event)).toBeUndefined();
-    expect(event.voiceActivity).toBeUndefined();
   });
 });

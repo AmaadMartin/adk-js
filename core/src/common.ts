@@ -30,7 +30,6 @@ export type {
   RealtimeCacheEntry,
 } from './agents/invocation_context.js';
 export {
-  applyVoiceActivity,
   fanOutLiveRequest,
   handleControlEventFlush,
   persistLiveRequest,
