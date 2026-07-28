@@ -170,28 +170,6 @@ function toOutputFile(outputFile: {name: string; contents: string}): File {
 }
 
 /**
- * Obtains a Code Interpreter Extension handle for production use.
- *
- * The reference Python loads/creates the extension via
- * `vertexai.preview.extensions.Extension`, but that surface has no equivalent
- * in the `@google/genai` / `@google-cloud/vertexai` SDKs this package depends
- * on, so a handle cannot be created automatically. Callers must inject one via
- * the `codeInterpreterExtension` option; this throws a clear, actionable error
- * rather than silently failing.
- */
-function getCodeInterpreterExtension(
-  resourceName?: string,
-): CodeInterpreterExtension {
-  throw new Error(
-    'VertexAiCodeExecutor could not load a Code Interpreter Extension' +
-      (resourceName ? ` (resourceName: ${resourceName})` : '') +
-      '. The Vertex AI Code Interpreter Extension API is not available in the ' +
-      'installed SDK; provide a handle via the `codeInterpreterExtension` ' +
-      'option.',
-  );
-}
-
-/**
  * A code executor that uses the Vertex AI Code Interpreter Extension to execute
  * model-generated Python code.
  */
@@ -215,10 +193,24 @@ export class VertexAiCodeExecutor extends BaseCodeExecutor {
     params: ExecuteCodeParams,
   ): Promise<CodeExecutionResult> {
     const {codeExecutionInput} = params;
-    const extension = this.getExtension();
+    // The reference Python loads/creates the extension via
+    // `vertexai.preview.extensions.Extension`, but that surface has no
+    // equivalent in the `@google/genai` / `@google-cloud/vertexai` SDKs this
+    // package depends on, so a handle cannot be created automatically. Callers
+    // must inject one via the `codeInterpreterExtension` option. This is the
+    // seam where a future SDK-backed loader would go.
+    if (!this.extension) {
+      throw new Error(
+        'VertexAiCodeExecutor could not load a Code Interpreter Extension' +
+          (this.resourceName ? ` (resourceName: ${this.resourceName})` : '') +
+          '. The Vertex AI Code Interpreter Extension API is not available in ' +
+          'the installed SDK; provide a handle via the ' +
+          '`codeInterpreterExtension` option.',
+      );
+    }
 
     const response = await executeCodeInterpreter(
-      extension,
+      this.extension,
       buildCodeWithImports(codeExecutionInput.code),
       codeExecutionInput.inputFiles,
       codeExecutionInput.executionId,
@@ -232,12 +224,5 @@ export class VertexAiCodeExecutor extends BaseCodeExecutor {
     };
     logger.debug('Code execution result: ' + JSON.stringify(result));
     return result;
-  }
-
-  private getExtension(): CodeInterpreterExtension {
-    if (!this.extension) {
-      this.extension = getCodeInterpreterExtension(this.resourceName);
-    }
-    return this.extension;
   }
 }
