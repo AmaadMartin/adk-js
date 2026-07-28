@@ -21,7 +21,9 @@ import {
   Part,
   Tool,
 } from '@google/genai';
+import {GoogleAuth} from 'google-auth-library';
 
+import {isBrowser} from '../utils/env_aware_utils.js';
 import {logger} from '../utils/logger.js';
 
 import {BaseLlm} from './base_llm.js';
@@ -822,16 +824,28 @@ export class AnthropicLlm extends BaseLlm {
   constructor(params: AnthropicLlmParams = {}) {
     super({model: params.model ?? DEFAULT_MODEL});
 
-    const apiKey = params.apiKey ?? process.env[API_KEY_ENV_VARIABLE_NAME];
-    if (!apiKey) {
+    this.apiKey = this.resolveApiKey(params.apiKey);
+    this.maxTokens = params.maxTokens ?? DEFAULT_MAX_TOKENS;
+    this.baseUrl = params.baseUrl ?? DEFAULT_BASE_URL;
+  }
+
+  /**
+   * Resolves the API key for the direct Anthropic Messages API transport,
+   * falling back to the `ANTHROPIC_API_KEY` environment variable.
+   *
+   * Subclasses targeting a different transport (e.g. Vertex AI, which
+   * authenticates with a Google Cloud bearer token) override this to bypass the
+   * Anthropic API-key requirement.
+   */
+  protected resolveApiKey(apiKey?: string): string {
+    const key = apiKey ?? process.env[API_KEY_ENV_VARIABLE_NAME];
+    if (!key) {
       throw new Error(
         'API key must be provided via the constructor or the' +
           ` ${API_KEY_ENV_VARIABLE_NAME} environment variable.`,
       );
     }
-    this.apiKey = apiKey;
-    this.maxTokens = params.maxTokens ?? DEFAULT_MAX_TOKENS;
-    this.baseUrl = params.baseUrl ?? DEFAULT_BASE_URL;
+    return key;
   }
 
   override async *generateContentAsync(
@@ -950,19 +964,13 @@ export class AnthropicLlm extends BaseLlm {
 
   private async postMessages(
     body: AnthropicMessagesRequest,
+    stream: boolean,
     abortSignal?: AbortSignal,
   ): Promise<Response> {
-    const headers: Record<string, string> = {
-      'x-api-key': this.apiKey,
-      'anthropic-version': ANTHROPIC_VERSION,
-      'content-type': 'application/json',
-      ...this.trackingHeaders,
-    };
-
-    const response = await globalThis.fetch(`${this.baseUrl}${MESSAGES_PATH}`, {
+    const response = await globalThis.fetch(this.buildRequestUrl(stream), {
       method: 'POST',
-      headers,
-      body: JSON.stringify(body),
+      headers: await this.buildRequestHeaders(),
+      body: JSON.stringify(this.finalizeRequestBody(body)),
       signal: abortSignal,
     });
     if (!response.ok) {
@@ -974,11 +982,44 @@ export class AnthropicLlm extends BaseLlm {
     return response;
   }
 
+  /**
+   * Builds the request URL. The direct Anthropic API uses a single Messages
+   * endpoint for both modes; subclasses (e.g. Vertex) switch on `stream`.
+   */
+  protected buildRequestUrl(_stream: boolean): string {
+    return `${this.baseUrl}${MESSAGES_PATH}`;
+  }
+
+  /**
+   * Builds the outbound HTTP headers (authentication, content type and ADK
+   * tracking headers). Subclasses override this to change the authentication
+   * scheme (e.g. a Google Cloud bearer token for Vertex).
+   */
+  protected async buildRequestHeaders(): Promise<Record<string, string>> {
+    return {
+      'x-api-key': this.apiKey,
+      'anthropic-version': ANTHROPIC_VERSION,
+      'content-type': 'application/json',
+      ...this.trackingHeaders,
+    };
+  }
+
+  /**
+   * Adapts the request body to the target transport before serialization. The
+   * direct Anthropic API sends it unchanged; subclasses (e.g. Vertex) override
+   * this to match their request contract.
+   *
+   * @internal
+   */
+  protected finalizeRequestBody(body: AnthropicMessagesRequest): object {
+    return body;
+  }
+
   private async *generateNonStreaming(
     body: AnthropicMessagesRequest,
     abortSignal?: AbortSignal,
   ): AsyncGenerator<LlmResponse, void> {
-    const response = await this.postMessages(body, abortSignal);
+    const response = await this.postMessages(body, false, abortSignal);
     const message = (await response.json()) as AnthropicMessage;
     yield messageToGenerateContentResponse(message);
   }
@@ -989,6 +1030,7 @@ export class AnthropicLlm extends BaseLlm {
   ): AsyncGenerator<LlmResponse, void> {
     const response = await this.postMessages(
       {...body, stream: true},
+      true,
       abortSignal,
     );
 
@@ -1149,5 +1191,237 @@ export class AnthropicLlm extends BaseLlm {
       finishReason: toGoogleGenAIFinishReason(usage.stopReason),
       partial: false,
     };
+  }
+}
+
+// --- Vertex AI (Claude) transport ---
+
+/** Default Claude model on Vertex AI, matching the adk-python `Claude`. */
+const CLAUDE_VERTEX_DEFAULT_MODEL = 'claude-3-5-sonnet-v2@20241022';
+
+/** Value of the body `anthropic_version` field required by the Vertex contract. */
+const VERTEX_ANTHROPIC_VERSION = 'vertex-2023-10-16';
+
+/** OAuth scope requested for Vertex AI via Application Default Credentials. */
+const VERTEX_CLOUD_PLATFORM_SCOPE =
+  'https://www.googleapis.com/auth/cloud-platform';
+
+/** Environment variable holding the Google Cloud project id. */
+const GOOGLE_CLOUD_PROJECT_ENV = 'GOOGLE_CLOUD_PROJECT';
+
+/** Environment variable holding the Google Cloud location. */
+const GOOGLE_CLOUD_LOCATION_ENV = 'GOOGLE_CLOUD_LOCATION';
+
+/** Extracts `project` and `location` from a full Vertex resource name. */
+const VERTEX_PROJECT_LOCATION_REGEX = /projects\/([^/]+)\/locations\/([^/]+)\//;
+
+/** Extracts the bare model id from a full Vertex resource name. */
+const VERTEX_MODEL_ID_REGEX =
+  /projects\/[^/]+\/locations\/[^/]+\/publishers\/anthropic\/models\/([^/:]+)/;
+
+/** Resolved Vertex targeting for a {@link Claude} request. */
+export interface VertexConfig {
+  project: string;
+  location: string;
+  modelId: string;
+}
+
+/** Constructor parameters for {@link Claude}. */
+export interface ClaudeParams extends AnthropicLlmParams {
+  /**
+   * The Google Cloud project id. Falls back to the `GOOGLE_CLOUD_PROJECT`
+   * environment variable, or to the project encoded in a full Vertex resource
+   * name model string (which takes precedence over both).
+   */
+  project?: string;
+  /**
+   * The Google Cloud location (a region, a multi-region, or `global`). Falls
+   * back to the `GOOGLE_CLOUD_LOCATION` environment variable, or to the location
+   * encoded in a full Vertex resource name model string (which takes precedence
+   * over both).
+   */
+  location?: string;
+}
+
+/**
+ * Strips a full Vertex resource name down to the bare model id, mirroring the
+ * adk-python `_resolve_model_name`. Returns `model` unchanged when it is not a
+ * resource name.
+ */
+function resolveVertexModelId(model: string): string {
+  const match = VERTEX_MODEL_ID_REGEX.exec(model);
+  return match ? match[1] : model;
+}
+
+/**
+ * Resolves the Vertex `project`, `location` and bare `modelId` for a Claude
+ * request.
+ *
+ * A full Vertex resource name model string
+ * (`projects/{project}/locations/{location}/...`) takes precedence; otherwise
+ * the explicit `project` / `location` are used, then the `GOOGLE_CLOUD_PROJECT`
+ * / `GOOGLE_CLOUD_LOCATION` environment variables.
+ *
+ * @throws If the project or location cannot be resolved.
+ */
+export function resolveVertexConfig(
+  model: string,
+  project?: string,
+  location?: string,
+): VertexConfig {
+  let resolvedProject = project;
+  let resolvedLocation = location;
+
+  const match = VERTEX_PROJECT_LOCATION_REGEX.exec(model);
+  if (match) {
+    resolvedProject = match[1];
+    resolvedLocation = match[2];
+  }
+
+  if (!isBrowser()) {
+    resolvedProject ??= process.env[GOOGLE_CLOUD_PROJECT_ENV];
+    resolvedLocation ??= process.env[GOOGLE_CLOUD_LOCATION_ENV];
+  }
+
+  if (!resolvedProject || !resolvedLocation) {
+    throw new Error(
+      'GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION must be set for using' +
+        ' Anthropic on Vertex.',
+    );
+  }
+
+  return {
+    project: resolvedProject,
+    location: resolvedLocation,
+    modelId: resolveVertexModelId(model),
+  };
+}
+
+/**
+ * Builds the Vertex AI host for a location, per Anthropic's "Claude on Google
+ * Cloud" contract: `global` uses the global host, `us` / `eu` use the
+ * multi-region hosts, and any other value is treated as a specific region.
+ */
+export function buildVertexHost(location: string): string {
+  if (location === 'global') {
+    return 'https://aiplatform.googleapis.com';
+  }
+  if (location === 'us' || location === 'eu') {
+    return `https://aiplatform.${location}.rep.googleapis.com`;
+  }
+  return `https://${location}-aiplatform.googleapis.com`;
+}
+
+/** Builds the Vertex `rawPredict` / `streamRawPredict` endpoint URL. */
+function buildVertexEndpoint(
+  host: string,
+  project: string,
+  location: string,
+  modelId: string,
+  stream: boolean,
+): string {
+  const method = stream ? 'streamRawPredict' : 'rawPredict';
+  return `${host}/v1/projects/${project}/locations/${location}/publishers/anthropic/models/${modelId}:${method}`;
+}
+
+/**
+ * Rewrites a direct-API request body for the Vertex contract: `model` moves to
+ * the endpoint URL (dropped here) and `anthropic_version` is added to the body.
+ */
+function toVertexRequestBody(
+  body: AnthropicMessagesRequest,
+): Record<string, unknown> {
+  const {model: _model, ...rest} = body;
+  return {...rest, anthropic_version: VERTEX_ANTHROPIC_VERSION};
+}
+
+/**
+ * Integration with Claude models served from Vertex AI (Google Cloud).
+ *
+ * `Claude` extends {@link AnthropicLlm} and changes only the transport and
+ * authentication: it targets the Vertex `rawPredict` / `streamRawPredict`
+ * endpoints, authenticates with a Google Cloud bearer token obtained via
+ * Application Default Credentials, and emits the Vertex request-body contract
+ * (`anthropic_version` in the body, `model` in the URL). All request building
+ * and response parsing are inherited unchanged from {@link AnthropicLlm}.
+ *
+ * Project and location are resolved from the `GOOGLE_CLOUD_PROJECT` /
+ * `GOOGLE_CLOUD_LOCATION` environment variables, from explicit constructor
+ * options, or from a full Vertex resource name passed as the model string
+ * (which takes precedence).
+ *
+ * Registry note: `Claude` is intentionally NOT auto-registered in
+ * {@link LLMRegistry}. The base `AnthropicLlm` owns the `claude-*` registration,
+ * so a bare model name resolves to the direct Anthropic API. Use the Vertex
+ * transport by instantiating this class directly (`new Claude({ model })`).
+ */
+export class Claude extends AnthropicLlm {
+  private readonly project?: string;
+  private readonly location?: string;
+  private readonly hostOverride?: string;
+  private vertexConfig?: VertexConfig;
+  private auth?: GoogleAuth;
+
+  constructor(params: ClaudeParams = {}) {
+    super({...params, model: params.model ?? CLAUDE_VERTEX_DEFAULT_MODEL});
+    this.project = params.project;
+    this.location = params.location;
+    // The inherited `baseUrl` overrides the derived Vertex host (for proxies or
+    // local testing); the endpoint path is still appended to it.
+    this.hostOverride = params.baseUrl;
+  }
+
+  /** Vertex uses a Google Cloud bearer token; no Anthropic API key is needed. */
+  protected override resolveApiKey(): string {
+    return '';
+  }
+
+  protected override buildRequestUrl(stream: boolean): string {
+    const {project, location, modelId} = this.getVertexConfig();
+    const host = this.hostOverride ?? buildVertexHost(location);
+    return buildVertexEndpoint(host, project, location, modelId, stream);
+  }
+
+  protected override async buildRequestHeaders(): Promise<
+    Record<string, string>
+  > {
+    return {
+      Authorization: await this.getAuthorization(),
+      'content-type': 'application/json',
+      ...this.trackingHeaders,
+    };
+  }
+
+  /** @internal */
+  protected override finalizeRequestBody(
+    body: AnthropicMessagesRequest,
+  ): Record<string, unknown> {
+    return toVertexRequestBody(body);
+  }
+
+  private getVertexConfig(): VertexConfig {
+    this.vertexConfig ??= resolveVertexConfig(
+      this.model,
+      this.project,
+      this.location,
+    );
+    return this.vertexConfig;
+  }
+
+  /**
+   * Obtains the `Authorization` header value from Application Default
+   * Credentials via `google-auth-library`.
+   */
+  private async getAuthorization(): Promise<string> {
+    this.auth ??= new GoogleAuth({scopes: [VERTEX_CLOUD_PLATFORM_SCOPE]});
+    const client = await this.auth.getClient();
+    const headers = await client.getRequestHeaders(this.buildRequestUrl(false));
+    const authorization = headers.get('authorization');
+    if (!authorization) {
+      throw new Error(
+        'Failed to obtain Google Cloud credentials for Vertex AI.',
+      );
+    }
+    return authorization;
   }
 }

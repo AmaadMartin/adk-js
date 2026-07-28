@@ -6,6 +6,7 @@
   "name": "ADK for TypeScript: API Reference",
   "readme": "none",
   "excludePrivate": true,
+  "excludeInternal": true,
   "tsconfig": "./core/tsconfig.json",
   "plugin": ["typedoc-theme-fresh"],
   "theme": "fresh",
