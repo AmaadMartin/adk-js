@@ -1,3 +1,9 @@
+/**
+ * @license
+ * Copyright 2025 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -5,7 +11,10 @@ import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {Context} from '../../src/agents/context.js';
 import {
   BashToolPolicy,
+  buildResourceLimitCommands,
   ExecuteBashTool,
+  isPosixPlatform,
+  UNSUPPORTED_PLATFORM_ERROR,
   validateCommand,
 } from '../../src/tools/bash_tool.js';
 import {ToolConfirmation} from '../../src/tools/tool_confirmation.js';
@@ -50,6 +59,61 @@ describe('validateCommand', () => {
     expect(validateCommand('ls ; rm -rf /', policy)).toBe(
       'Command contains blocked operator: ;',
     );
+  });
+});
+
+describe('buildResourceLimitCommands', () => {
+  it('always disables core dumps and adds nothing else for an empty policy', () => {
+    expect(buildResourceLimitCommands({})).toEqual(['ulimit -c 0 2>/dev/null']);
+  });
+
+  it('converts maxMemoryBytes to KiB via ulimit -v', () => {
+    // 100 MiB / 1024 = 102400 KiB (RLIMIT_AS parity).
+    expect(buildResourceLimitCommands({maxMemoryBytes: 104857600})).toContain(
+      'ulimit -v 102400 2>/dev/null',
+    );
+  });
+
+  it('converts maxFileSizeBytes to KiB via ulimit -f', () => {
+    // 50 MiB / 1024 = 51200 KiB (RLIMIT_FSIZE parity).
+    expect(buildResourceLimitCommands({maxFileSizeBytes: 52428800})).toContain(
+      'ulimit -f 51200 2>/dev/null',
+    );
+  });
+
+  it('passes maxChildProcesses through as a raw count via ulimit -u', () => {
+    expect(buildResourceLimitCommands({maxChildProcesses: 10})).toContain(
+      'ulimit -u 10 2>/dev/null',
+    );
+  });
+
+  it('emits fragments in order [core, memory, file, procs] when all are set', () => {
+    const commands = buildResourceLimitCommands({
+      maxMemoryBytes: 104857600,
+      maxFileSizeBytes: 52428800,
+      maxChildProcesses: 10,
+    });
+    expect(commands).toEqual([
+      'ulimit -c 0 2>/dev/null',
+      'ulimit -v 102400 2>/dev/null',
+      'ulimit -f 51200 2>/dev/null',
+      'ulimit -u 10 2>/dev/null',
+    ]);
+  });
+});
+
+describe('isPosixPlatform', () => {
+  it('treats linux and darwin as POSIX', () => {
+    expect(isPosixPlatform('linux')).toBe(true);
+    expect(isPosixPlatform('darwin')).toBe(true);
+  });
+
+  it('treats win32 as non-POSIX', () => {
+    expect(isPosixPlatform('win32')).toBe(false);
+  });
+
+  it('defaults to the current process platform', () => {
+    expect(isPosixPlatform()).toBe(process.platform !== 'win32');
   });
 });
 
@@ -176,8 +240,43 @@ describe('ExecuteBashTool', () => {
     })) as Record<string, unknown>;
 
     expect(result.error).toBeUndefined();
-    // Memory limit (virtual memory) is passed as kb: 104857600 / 1024 = 102400
-    expect(result.stdout).toContain('102400');
+    const stdout = result.stdout as string;
+    // Memory limit (virtual memory) is passed as KiB: 104857600 / 1024 = 102400.
+    expect(stdout).toContain('102400');
+    // File-size limit is passed as KiB: 52428800 / 1024 = 51200.
+    expect(stdout).toContain('51200');
+  });
+
+  it('disables core dumps in the spawned subprocess', async () => {
+    const tool = new ExecuteBashTool({workspace});
+    const ctx = createMockContext(true);
+    const result = (await tool.runAsync({
+      args: {command: 'ulimit -c'},
+      toolContext: ctx,
+    })) as Record<string, unknown>;
+
+    expect(result.error).toBeUndefined();
+    expect((result.stdout as string).trim()).toBe('0');
+  });
+
+  it('applies limits best-effort: an extreme request never aborts the command or leaks ulimit errors', async () => {
+    // A memory limit beyond any finite hard limit is rejected by `ulimit`; the
+    // `;`-join keeps the user's command running and `2>/dev/null` keeps the
+    // rejection out of captured stderr (parity with adk-python's caught,
+    // logged-only failure). On hosts with unlimited hard limits the request is
+    // simply accepted; either way the observable contract below must hold.
+    const policy: BashToolPolicy = {maxMemoryBytes: Number.MAX_SAFE_INTEGER};
+    const tool = new ExecuteBashTool({workspace, policy});
+    const ctx = createMockContext(true);
+    const result = (await tool.runAsync({
+      args: {command: 'echo ok'},
+      toolContext: ctx,
+    })) as Record<string, unknown>;
+
+    expect(result.error).toBeUndefined();
+    expect(result.returncode).toBe(0);
+    expect(result.stdout as string).toContain('ok');
+    expect(result.stderr as string).not.toContain('ulimit');
   });
 
   it('empty command returns error', async () => {
@@ -189,5 +288,44 @@ describe('ExecuteBashTool', () => {
     })) as Record<string, unknown>;
 
     expect(result.error).toContain('required');
+  });
+});
+
+describe('ExecuteBashTool on non-POSIX platforms', () => {
+  const originalPlatform = process.platform;
+
+  beforeEach(() => {
+    Object.defineProperty(process, 'platform', {
+      value: 'win32',
+      configurable: true,
+    });
+  });
+
+  afterEach(() => {
+    Object.defineProperty(process, 'platform', {
+      value: originalPlatform,
+      configurable: true,
+    });
+  });
+
+  function createConfirmedContext(): Context {
+    return {
+      actions: {skipSummarization: false},
+      requestConfirmation: vi.fn(),
+      toolConfirmation: {confirmed: true} as ToolConfirmation,
+    } as unknown as Context;
+  }
+
+  it('returns the unsupported-platform error without spawning a process', async () => {
+    const tool = new ExecuteBashTool();
+    const result = (await tool.runAsync({
+      args: {command: 'echo hello'},
+      toolContext: createConfirmedContext(),
+    })) as Record<string, unknown>;
+
+    expect(result).toEqual({error: UNSUPPORTED_PLATFORM_ERROR});
+    // No subprocess was spawned, so no execution fields are present.
+    expect(result.stdout).toBeUndefined();
+    expect(result.returncode).toBeUndefined();
   });
 });
