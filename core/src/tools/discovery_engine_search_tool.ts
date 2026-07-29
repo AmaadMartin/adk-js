@@ -118,27 +118,24 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/**
- * Normalizes and validates a location value, mirroring the Python reference.
- *
- * @param location The raw location string.
- * @param locationType A label (`location` / `resource location`) used to build
- *   the error message so it matches the reference wording.
- */
-function normalizeLocation(location: string, locationType: string): string {
+/** Normalizes and validates a caller-supplied `location` override. */
+function normalizeLocation(location: string): string {
   const normalized = location.trim().toLowerCase();
   if (!normalized) {
-    throw new Error(`${locationType} must not be empty if specified.`);
+    throw new Error('location must not be empty if specified.');
   }
   if (!VALID_LOCATION_PATTERN.test(normalized)) {
-    throw new Error(
-      `${locationType} must contain only letters, digits, and hyphens.`,
-    );
+    throw new Error('location must contain only letters, digits, and hyphens.');
   }
   return normalized;
 }
 
-/** Extracts and validates the location embedded in a resource id, if any. */
+/**
+ * Extracts the location embedded in a resource id, if any.
+ *
+ * `LOCATION_PATTERN` only captures `[a-z0-9-]+`, so a match is already a valid
+ * location and needs no further validation before it reaches the endpoint.
+ */
 function extractResourceLocation(resourceId: string): string | undefined {
   if (!resourceId.toLowerCase().includes('/locations/')) {
     return undefined;
@@ -147,7 +144,7 @@ function extractResourceLocation(resourceId: string): string | undefined {
   if (!match) {
     throw new Error('Invalid location in dataStoreId or searchEngineId.');
   }
-  return normalizeLocation(match[1], 'resource location');
+  return match[1].toLowerCase();
 }
 
 /** Resolves the Discovery Engine location to use for the endpoint. */
@@ -158,7 +155,7 @@ function resolveLocation(
   const inferredLocation = extractResourceLocation(resourceId);
 
   if (location !== undefined) {
-    const normalizedLocation = normalizeLocation(location, 'location');
+    const normalizedLocation = normalizeLocation(location);
     if (inferredLocation && normalizedLocation !== inferredLocation) {
       throw new Error(
         'location must match the location in dataStoreId or searchEngineId.',
@@ -283,9 +280,7 @@ export class DiscoveryEngineSearchTool extends BaseTool {
       }
 
       try {
-        const result = await this.doSearch(query, SearchResultMode.CHUNKS);
-        this.searchResultMode = SearchResultMode.CHUNKS;
-        return result;
+        return await this.doSearch(query, SearchResultMode.CHUNKS);
       } catch (error) {
         if (!STRUCTURED_STORE_ERROR_PATTERN.test(messageOf(error))) {
           throw error;
@@ -309,7 +304,13 @@ export class DiscoveryEngineSearchTool extends BaseTool {
   ): Promise<DiscoveryEngineSearchToolResult> {
     const body: Record<string, unknown> = {
       query,
-      contentSearchSpec: buildContentSearchSpec(mode),
+      contentSearchSpec:
+        mode === SearchResultMode.DOCUMENTS
+          ? {searchResultMode: mode}
+          : {
+              searchResultMode: mode,
+              chunkSpec: {numPreviousChunks: 0, numNextChunks: 0},
+            },
     };
     if (this.dataStoreSpecs) {
       body['dataStoreSpecs'] = this.dataStoreSpecs;
@@ -354,36 +355,15 @@ export class DiscoveryEngineSearchTool extends BaseTool {
   }
 
   /** Resolves ADC and builds the request headers for a search call. */
-  private async getAuthHeaders(): Promise<Record<string, string>> {
+  private async getAuthHeaders(): Promise<Headers> {
     const client = await this.auth.getClient();
-    const rawHeaders = await client.getRequestHeaders(
-      `https://${this.endpoint}`,
-    );
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    };
-    const authorization = rawHeaders.get('authorization');
-    if (authorization) {
-      headers['Authorization'] = authorization;
-    }
+    const headers = await client.getRequestHeaders(`https://${this.endpoint}`);
+    headers.set('Content-Type', 'application/json');
     if (client.quotaProjectId) {
-      headers['x-goog-user-project'] = client.quotaProjectId;
+      headers.set('x-goog-user-project', client.quotaProjectId);
     }
     return headers;
   }
-}
-
-/** Builds the `contentSearchSpec` for a given mode. */
-function buildContentSearchSpec(
-  mode: SearchResultMode,
-): Record<string, unknown> {
-  if (mode === SearchResultMode.DOCUMENTS) {
-    return {searchResultMode: SearchResultMode.DOCUMENTS};
-  }
-  return {
-    searchResultMode: SearchResultMode.CHUNKS,
-    chunkSpec: {numPreviousChunks: 0, numNextChunks: 0},
-  };
 }
 
 /** Parses a CHUNKS search result into a `{title, url, content}` record. */
@@ -408,46 +388,38 @@ function parseChunkResult(
 function parseDocumentResult(
   doc: DiscoveryEngineDocument,
 ): DiscoveryEngineSearchResult {
-  let title = '';
-  let url = '';
-  let content = '';
-
+  // Structured data: title/uri live in structData; the rest becomes content.
   if (doc.structData) {
-    // Structured data: title/uri live in structData; the rest becomes content.
-    const data: Record<string, unknown> = {...doc.structData};
-    title = asString(data['title']);
-    delete data['title'];
-    const link = asString(data['link']);
-    delete data['link'];
-    if ('uri' in data) {
-      url = asString(data['uri']);
-      delete data['uri'];
-    } else {
-      url = link;
-    }
-    content = JSON.stringify(data);
-  } else if (doc.derivedStructData) {
-    // Unstructured data: fields live in derivedStructData.
+    const {title, uri, link, ...rest} = doc.structData;
+    return {
+      title: asString(title),
+      url: asString(uri ?? link),
+      content: JSON.stringify(rest),
+    };
+  }
+
+  // Unstructured data: fields live in derivedStructData.
+  if (doc.derivedStructData) {
     const data = doc.derivedStructData;
-    title = asString(data['title']);
-    url = asString(data['link']);
     const snippets = data['snippets'];
+    // `derivedStructData` is a `google.protobuf.Struct`, so its keys are data
+    // rather than proto fields and are NOT camelCased by JSON transcoding.
+    const answers = data['extractive_answers'];
+    let content = '';
     if (Array.isArray(snippets) && snippets.length > 0) {
       content = renderEntries(snippets, 'snippet');
     }
-    // `derivedStructData` is a `google.protobuf.Struct`, so its keys are data
-    // rather than proto fields and are NOT camelCased by JSON transcoding.
-    const extractiveAnswers = data['extractive_answers'];
-    if (
-      !content &&
-      Array.isArray(extractiveAnswers) &&
-      extractiveAnswers.length > 0
-    ) {
-      content = renderEntries(extractiveAnswers, 'content');
+    if (!content && Array.isArray(answers) && answers.length > 0) {
+      content = renderEntries(answers, 'content');
     }
+    return {
+      title: asString(data['title']),
+      url: asString(data['link']),
+      content,
+    };
   }
 
-  return {title, url, content};
+  return {title: '', url: '', content: ''};
 }
 
 /**

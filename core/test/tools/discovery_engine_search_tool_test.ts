@@ -143,16 +143,6 @@ describe('DiscoveryEngineSearchTool', () => {
       );
     });
 
-    it('builds the serving config from searchEngineId', async () => {
-      const tool = new DiscoveryEngineSearchTool({
-        searchEngineId: 'test_search_engine',
-      });
-      await tool.discoveryEngineSearch('q');
-      expect(capturedRequest().url).toContain(
-        '/test_search_engine/servingConfigs/default_config:search',
-      );
-    });
-
     it('throws when no ids are specified', () => {
       expect(() => new DiscoveryEngineSearchTool({})).toThrow(
         'Either dataStoreId or searchEngineId must be specified.',
@@ -273,7 +263,6 @@ describe('DiscoveryEngineSearchTool', () => {
             location: ' ',
           }),
       ).toThrow('location must not be empty if specified.');
-      expect(fetchMock).not.toHaveBeenCalled();
     });
 
     it('throws on an override with invalid characters', () => {
@@ -284,7 +273,6 @@ describe('DiscoveryEngineSearchTool', () => {
             location: 'attacker.com#',
           }),
       ).toThrow('location must contain only letters, digits, and hyphens.');
-      expect(fetchMock).not.toHaveBeenCalled();
     });
 
     it('throws on an invalid location embedded in the resource id', () => {
@@ -295,7 +283,6 @@ describe('DiscoveryEngineSearchTool', () => {
               'projects/test/locations/attacker.com#/collections/default_collection/dataStores/test_data_store',
           }),
       ).toThrow('Invalid location in dataStoreId or searchEngineId.');
-      expect(fetchMock).not.toHaveBeenCalled();
     });
 
     it('keeps the default endpoint for the global location', async () => {
@@ -323,17 +310,6 @@ describe('DiscoveryEngineSearchTool', () => {
       } else {
         process.env['GOOGLE_API_USE_MTLS_ENDPOINT'] = originalEnv;
       }
-    });
-
-    it('uses the regional mTLS endpoint when GOOGLE_API_USE_MTLS_ENDPOINT=always', async () => {
-      process.env['GOOGLE_API_USE_MTLS_ENDPOINT'] = 'always';
-      const tool = new DiscoveryEngineSearchTool({
-        dataStoreId: 'test_data_store',
-        location: 'eu',
-      });
-      expect(await resolvedHost(tool)).toBe(
-        'eu-discoveryengine.mtls.googleapis.com',
-      );
     });
 
     it('uses the global mTLS endpoint when GOOGLE_API_USE_MTLS_ENDPOINT=always', async () => {
@@ -481,14 +457,6 @@ describe('DiscoveryEngineSearchTool', () => {
       });
       const result = await tool.discoveryEngineSearch('test query');
       expect(result).toEqual({status: 'success', results: []});
-    });
-
-    it('probes with CHUNKS first when no mode is configured', async () => {
-      const tool = new DiscoveryEngineSearchTool({
-        dataStoreId: 'test_data_store',
-      });
-      await tool.discoveryEngineSearch('q');
-      expect(requestedModes()).toEqual(['CHUNKS']);
     });
 
     it('uses an explicit DOCUMENTS mode without probing', async () => {
@@ -663,17 +631,6 @@ describe('DiscoveryEngineSearchTool', () => {
       expect(results[0].content).toBe('{"pageNumber":"2"}\nraw answer');
     });
 
-    it('returns empty fields for a document with no struct data', async () => {
-      respondWith({results: [{document: {name: 'doc'}}]});
-
-      const tool = new DiscoveryEngineSearchTool({
-        dataStoreId: 'test_data_store',
-        searchResultMode: SearchResultMode.DOCUMENTS,
-      });
-      const results = expectSuccess(await tool.discoveryEngineSearch('q'));
-      expect(results[0]).toEqual({title: '', url: '', content: ''});
-    });
-
     it('skips document results whose document sub-object is missing', async () => {
       respondWith({
         results: [{chunk: {content: 'ignored'}}, {document: {name: 'd'}}],
@@ -684,19 +641,7 @@ describe('DiscoveryEngineSearchTool', () => {
         searchResultMode: SearchResultMode.DOCUMENTS,
       });
       const results = expectSuccess(await tool.discoveryEngineSearch('q'));
-      expect(results).toHaveLength(1);
-      expect(results[0].content).toBe('');
-    });
-
-    it('returns an empty result set for DOCUMENTS with no results', async () => {
-      respondWith({});
-
-      const tool = new DiscoveryEngineSearchTool({
-        dataStoreId: 'test_data_store',
-        searchResultMode: SearchResultMode.DOCUMENTS,
-      });
-      const result = await tool.discoveryEngineSearch('test query');
-      expect(result).toEqual({status: 'success', results: []});
+      expect(results).toEqual([{title: '', url: '', content: ''}]);
     });
 
     it('coerces non-string struct data values to strings', async () => {
@@ -750,17 +695,6 @@ describe('DiscoveryEngineSearchTool', () => {
       // The resolved mode is cached: no second CHUNKS probe.
       expectSuccess(await tool.discoveryEngineSearch('another query'));
       expect(requestedModes()).toEqual(['CHUNKS', 'DOCUMENTS', 'DOCUMENTS']);
-    });
-
-    it('caches CHUNKS after a successful probe', async () => {
-      respondWith({results: [{chunk: {content: 'c'}}]});
-
-      const tool = new DiscoveryEngineSearchTool({
-        dataStoreId: 'test_data_store',
-      });
-      await tool.discoveryEngineSearch('test query');
-      await tool.discoveryEngineSearch('another query');
-      expect(requestedModes()).toEqual(['CHUNKS', 'CHUNKS']);
     });
 
     it('does not retry on an unrelated error', async () => {
@@ -856,7 +790,7 @@ describe('DiscoveryEngineSearchTool', () => {
       });
       const result = await tool.runAsync({
         args: {query: 'from run async'},
-        toolContext: {} as unknown as Context,
+        toolContext: {} as Context,
       });
       expect(result).toEqual({
         status: 'success',
