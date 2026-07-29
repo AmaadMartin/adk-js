@@ -165,7 +165,7 @@ function apigeeToGeminiInitParams({
 }: GeminiParams) {
   const params = geminiInitParams({model, vertexai, project, location, apiKey});
   params.vertexai =
-    params.vertexai || !!params.model?.startsWith('apigee/vertex_ai/');
+    params.vertexai || params.model?.startsWith('apigee/vertex_ai/');
   if (params.vertexai) {
     return params;
   }

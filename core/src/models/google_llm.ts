@@ -40,12 +40,9 @@ export interface GeminiParams {
    */
   apiKey?: string;
   /**
-   * Whether to use Vertex AI. An explicitly passed value always wins, so
-   * `false` opts out of Vertex AI even when the environment asks for it. When
-   * omitted, ADK falls back to the `GOOGLE_GENAI_USE_VERTEXAI` environment
-   * variable on Node; environment variables are never read in a browser, where
-   * an omitted value means the Gemini API. If the resolved value is true,
-   * `project` and `location` should be provided.
+   * Whether to use Vertex AI. An explicit value always wins; when omitted, ADK
+   * reads `GOOGLE_GENAI_USE_VERTEXAI` on Node and defaults to false in a
+   * browser. If the resolved value is true, provide `project` and `location`.
    */
   vertexai?: boolean;
   /**

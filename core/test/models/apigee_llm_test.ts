@@ -12,6 +12,7 @@ import {
   ApigeeLlmParams,
   BaseLlmConnection,
   Gemini,
+  GoogleLLMVariant,
   LLMRegistry,
   LlmRequest,
 } from '@google/adk';
@@ -88,7 +89,7 @@ describe('ApigeeLlm', () => {
         vertexai: false,
         proxyUrl: defaultProxyUrl,
       });
-      expect(llm['vertexai']).toBe(false);
+      expect(llm.apiBackend).toBe(GoogleLLMVariant.GEMINI_API);
       expect(llm.liveApiVersion).toBe('v1alpha');
     });
 
@@ -100,7 +101,7 @@ describe('ApigeeLlm', () => {
         vertexai: false,
         proxyUrl: defaultProxyUrl,
       });
-      expect(llm['vertexai']).toBe(true);
+      expect(llm.apiBackend).toBe(GoogleLLMVariant.VERTEX_AI);
     });
 
     interface EnvVarTestCase {

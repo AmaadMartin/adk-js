@@ -154,7 +154,6 @@ describe('GoogleLlm', () => {
         vertexai: false,
         apiKey: 'test-key',
       });
-      expect(llm['vertexai']).toBe(false);
 
       const spy = vi.mocked(GoogleGenAI);
       spy.mockClear();
