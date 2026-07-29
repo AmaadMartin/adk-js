@@ -123,14 +123,9 @@ function isTimeoutError(error: unknown): error is Error {
  * Releases `sandbox` if it was opened, swallowing (and logging) any error so
  * cleanup never masks the primary result or error.
  */
-async function closeSandboxQuietly(
-  sandbox: SandboxClient | undefined,
-): Promise<void> {
-  if (!sandbox) {
-    return;
-  }
+async function closeSandboxQuietly(sandbox?: SandboxClient): Promise<void> {
   try {
-    await sandbox.close();
+    await sandbox?.close();
   } catch (closeErr) {
     logger.error('Failed to close sandbox', closeErr);
   }

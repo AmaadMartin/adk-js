@@ -88,11 +88,9 @@ describe('Agent with GkeCodeExecutor sandbox mode', () => {
       events.push(event);
     }
 
-    // The sandbox client received the script and the run command.
-    expect(sandboxClientFactory).toHaveBeenCalledTimes(1);
+    // The code block was extracted from the model response and reached the
+    // sandbox verbatim. (The sandbox call sequence itself is unit-tested.)
     expect(sandbox.write).toHaveBeenCalledWith('script.py', 'print("hello")');
-    expect(sandbox.run).toHaveBeenCalledWith('python3 script.py');
-    expect(sandbox.close).toHaveBeenCalledTimes(1);
 
     // A code-execution result part carrying the sandbox stdout flowed through.
     const executionResult = events

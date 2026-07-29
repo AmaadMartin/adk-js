@@ -51,37 +51,25 @@ describe('GkeCodeExecutor', () => {
       expect(executor.sandboxTemplate).toBe('python-sandbox-template');
       expect(executor.sandboxGatewayName).toBeUndefined();
     });
-
-    it('honors overrides', () => {
-      const executor = new GkeCodeExecutor({
-        namespace: 'test-ns',
-        sandboxTemplate: 'custom-template',
-        sandboxGatewayName: 'my-gateway',
-        sandboxClientFactory: factory,
-      });
-      expect(executor.namespace).toBe('test-ns');
-      expect(executor.sandboxTemplate).toBe('custom-template');
-      expect(executor.sandboxGatewayName).toBe('my-gateway');
-    });
   });
 
   describe('executeCode', () => {
     function sandboxExecutor(): GkeCodeExecutor {
       return new GkeCodeExecutor({
         namespace: 'agents',
-        sandboxTemplate: 'python-sandbox-template',
+        sandboxTemplate: 'custom-template',
         sandboxGatewayName: 'my-gateway',
         sandboxClientFactory: factory,
       });
     }
 
-    it('opens one sandbox with the configured options', async () => {
+    it('opens one sandbox with the overridden options', async () => {
       await sandboxExecutor().executeCode(makeParams('print("hi")'));
 
       expect(factory).toHaveBeenCalledTimes(1);
       expect(factory).toHaveBeenCalledWith({
         namespace: 'agents',
-        templateName: 'python-sandbox-template',
+        templateName: 'custom-template',
         gatewayName: 'my-gateway',
       });
     });
@@ -161,11 +149,6 @@ describe('GkeCodeExecutor', () => {
       expect(result.stderr).toContain('Sandbox timed out: Execution timed out');
     });
 
-    it('closes the sandbox after a successful run', async () => {
-      await sandboxExecutor().executeCode(makeParams('x'));
-      expect(sandbox.close).toHaveBeenCalledTimes(1);
-    });
-
     it('closes the sandbox when the run throws', async () => {
       sandbox.run.mockRejectedValue(new Error('run failed'));
 
@@ -175,7 +158,7 @@ describe('GkeCodeExecutor', () => {
       expect(sandbox.close).toHaveBeenCalledTimes(1);
     });
 
-    it('swallows errors thrown while closing the sandbox', async () => {
+    it('closes the sandbox after a successful run, swallowing close errors', async () => {
       sandbox.run.mockResolvedValue({stdout: 'still ok', stderr: ''});
       sandbox.close.mockRejectedValue(new Error('close failed'));
 
