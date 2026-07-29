@@ -12,6 +12,7 @@ import {experimental} from '../utils/experimental.js';
 import {logger} from '../utils/logger.js';
 
 import {
+  DEFAULT_SANDBOX_TEMPLATE,
   SandboxClient,
   SandboxClientFactory,
   SandboxClientOptions,
@@ -20,8 +21,6 @@ import {
   SandboxTimeoutError,
 } from './gke_code_executor.js';
 
-/** Default sandbox template, mirroring {@link GkeCodeExecutor}. */
-const DEFAULT_SANDBOX_TEMPLATE = 'python-sandbox-template';
 /** Default router container port (from the public `python-sandbox-template`). */
 const DEFAULT_SERVER_PORT = 8888;
 /** Default provisioning / per-request budget in seconds. */
@@ -323,6 +322,7 @@ export class AgentSandboxClient implements SandboxClient {
     deadline: number,
   ): Promise<string> {
     let seenGateway = false;
+    let lastError: unknown;
     while (Date.now() < deadline) {
       let gateway: GatewayResource;
       try {
@@ -333,25 +333,26 @@ export class AgentSandboxClient implements SandboxClient {
           plural: GATEWAY_PLURAL,
           name: this.gatewayName!,
         });
-      } catch {
+      } catch (error) {
+        lastError = error;
         await sleep(POLL_INTERVAL_MS);
         continue;
       }
       seenGateway = true;
-      const {value, rejected} = extractGatewayAddress(gateway);
-      if (value) {
-        return formatBaseUrl(value);
-      }
-      if (rejected) {
+      const address = gateway.status?.addresses?.[0]?.value;
+      if (address) {
+        if (isGatewayAddressValid(address)) {
+          return formatBaseUrl(address);
+        }
         logger.warn(
-          `Rejected address "${rejected}" for Gateway "${this.gatewayName}"`,
+          `Rejected address "${address}" for Gateway "${this.gatewayName}"`,
         );
       }
       await sleep(POLL_INTERVAL_MS);
     }
     if (!seenGateway) {
       throw new SandboxInfrastructureError(
-        `Gateway "${this.gatewayName}" not found in namespace "${this.namespace}"`,
+        `Gateway "${this.gatewayName}" not found in namespace "${this.namespace}": ${errorMessage(lastError)}`,
       );
     }
     throw new SandboxTimeoutError(
@@ -492,21 +493,6 @@ function isSandboxReady(sandbox: SandboxResource): boolean {
 function extractPodIp(sandbox: SandboxResource): string | undefined {
   const podIp = sandbox.status?.podIPs?.[0];
   return podIp && isIP(podIp) !== 0 ? podIp : undefined;
-}
-
-/**
- * Reads and validates the gateway's external address. Returns the address in
- * `value`, or the raw string in `rejected` when present but SSRF-unsafe.
- */
-function extractGatewayAddress(gateway: GatewayResource): {
-  value?: string;
-  rejected?: string;
-} {
-  const value = gateway.status?.addresses?.[0]?.value;
-  if (!value) {
-    return {};
-  }
-  return isGatewayAddressValid(value) ? {value} : {rejected: value};
 }
 
 /** Rejects addresses with URL metacharacters or non-IP/non-hostname values. */

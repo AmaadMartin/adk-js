@@ -7,13 +7,18 @@
 import {InvocationContext} from '../agents/invocation_context.js';
 import {logger} from '../utils/logger.js';
 
+// This forms an import cycle with agent_sandbox_client.js, which imports the
+// sandbox types and errors back from here. It is safe because neither module
+// reads the other's bindings during module evaluation, only inside function
+// bodies -- keep it that way.
+import {defaultSandboxClientFactory} from './agent_sandbox_client.js';
 import {BaseCodeExecutor, ExecuteCodeParams} from './base_code_executor.js';
 import {CodeExecutionResult} from './code_execution_utils.js';
 
 /** Default Kubernetes namespace, mirroring the adk-python GkeCodeExecutor. */
 const DEFAULT_NAMESPACE = 'default';
 /** Default Agent Sandbox template, mirroring the adk-python GkeCodeExecutor. */
-const DEFAULT_SANDBOX_TEMPLATE = 'python-sandbox-template';
+export const DEFAULT_SANDBOX_TEMPLATE = 'python-sandbox-template';
 /** File the generated code is written to inside the sandbox. */
 const SCRIPT_FILENAME = 'script.py';
 /** Command run inside the sandbox to execute the script. */
@@ -132,17 +137,6 @@ function isTimeoutError(error: unknown): error is Error {
 }
 
 /**
- * Lazily loads the bundled default {@link SandboxClientFactory}. The dynamic
- * import keeps the `@kubernetes/client-node` dependency (and its transitive
- * load cost) off the path for callers that never use sandbox mode.
- */
-async function resolveDefaultSandboxClientFactory(): Promise<SandboxClientFactory> {
-  const {defaultSandboxClientFactory} =
-    await import('./agent_sandbox_client.js');
-  return defaultSandboxClientFactory;
-}
-
-/**
  * Releases `sandbox` if it was opened, swallowing (and logging) any error so
  * cleanup never masks the primary result or error.
  */
@@ -197,9 +191,7 @@ export class GkeCodeExecutor extends BaseCodeExecutor {
   private async executeInSandbox(code: string): Promise<CodeExecutionResult> {
     let sandbox: SandboxClient | undefined;
     try {
-      const factory =
-        this.sandboxClientFactory ??
-        (await resolveDefaultSandboxClientFactory());
+      const factory = this.sandboxClientFactory ?? defaultSandboxClientFactory;
       sandbox = await factory({
         namespace: this.namespace,
         templateName: this.sandboxTemplate,

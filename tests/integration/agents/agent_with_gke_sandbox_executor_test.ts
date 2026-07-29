@@ -6,6 +6,7 @@
 
 import {
   AgentSandboxClient,
+  type Event,
   GkeCodeExecutor,
   LlmAgent,
   type SandboxClient,
@@ -112,8 +113,7 @@ describe('Agent with GkeCodeExecutor sandbox mode', () => {
 
     const {run} = await createRunner(agent);
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const events: any[] = [];
+    const events: Event[] = [];
     for await (const event of run('Print hello')) {
       events.push(event);
     }
@@ -128,15 +128,15 @@ describe('Agent with GkeCodeExecutor sandbox mode', () => {
     expect(sandbox.close).toHaveBeenCalledTimes(1);
 
     // A code-execution result event carrying the sandbox stdout flowed through.
-    const hasExecutionResult = events.some(
-      (e) =>
-        e.content?.parts?.some(
-          (p: {text?: string}) => p.text && p.text.includes('hello'),
-        ) ||
-        (e.content?.parts?.[0]?.inlineData?.data &&
-          Buffer.from(e.content.parts[0].inlineData.data, 'base64')
-            .toString('utf-8')
-            .includes('hello')),
+    const hasExecutionResult = events.some((e) =>
+      e.content?.parts?.some(
+        (p) =>
+          p.text?.includes('hello') ||
+          (p.inlineData?.data !== undefined &&
+            Buffer.from(p.inlineData.data, 'base64')
+              .toString('utf-8')
+              .includes('hello')),
+      ),
     );
 
     expect(hasExecutionResult).toBe(true);
@@ -211,8 +211,7 @@ describe('Agent with GkeCodeExecutor sandbox mode', () => {
     });
 
     const {run} = await createRunner(agent);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const events: any[] = [];
+    const events: Event[] = [];
     for await (const event of run('Print hello')) {
       events.push(event);
     }
@@ -226,9 +225,7 @@ describe('Agent with GkeCodeExecutor sandbox mode', () => {
     expect(api.deleteNamespacedCustomObject).toHaveBeenCalledTimes(1);
 
     const hasExecutionResult = events.some((e) =>
-      e.content?.parts?.some(
-        (p: {text?: string}) => p.text && p.text.includes('hello'),
-      ),
+      e.content?.parts?.some((p) => p.text?.includes('hello')),
     );
     expect(hasExecutionResult).toBe(true);
   });
