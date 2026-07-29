@@ -542,6 +542,22 @@ export class Runner {
     }
     return true;
   }
+
+  /**
+   * Runs the agent in live (bidirectional streaming) mode.
+   *
+   * Resolves or creates the session, then streams events from the agent while
+   * draining `liveRequestQueue` into the model connection. Events are
+   * persisted to the session before being yielded, so a consumer that stops
+   * iterating (the normal way a client hangs up) does not drop the last event.
+   *
+   * @param params.userId The user ID owning the session.
+   * @param params.sessionId The session to run in; created if absent.
+   * @param params.liveRequestQueue The queue carrying client audio, video and
+   *     content into the live connection.
+   * @param params.runConfig Run configuration; `responseModalities` defaults
+   *     to `[Modality.AUDIO]`.
+   */
   async *runLive(params: {
     userId: string;
     sessionId: string;
@@ -620,7 +636,7 @@ export class Runner {
               author: 'model',
               content: beforeRunCallbackResponse,
             });
-            if (this.shouldSaveLiveEventToSession(earlyExitEvent, runConfig)) {
+            if (shouldSaveLiveEventToSession(earlyExitEvent, runConfig)) {
               await this.sessionService.appendEvent({
                 session: session!,
                 event: earlyExitEvent,
@@ -630,55 +646,72 @@ export class Runner {
             return;
           }
 
-          for await (const event of agentToRun.runLive(invocationContext)) {
-            const modifiedEvent = await this.pluginManager.runOnEventCallback({
-              invocationContext,
-              event,
-            });
+          try {
+            for await (const event of agentToRun.runLive(invocationContext)) {
+              const modifiedEvent = await this.pluginManager.runOnEventCallback(
+                {
+                  invocationContext,
+                  event,
+                },
+              );
 
-            const eventToYield = modifiedEvent || event;
-            yield eventToYield;
-
-            if (this.shouldSaveLiveEventToSession(eventToYield, runConfig)) {
-              await this.sessionService.appendEvent({
-                session: session!,
-                event: eventToYield,
-              });
+              const eventToYield = modifiedEvent || event;
+              // Persist before yielding: a consumer that stops iterating
+              // resumes this generator with a return completion at the
+              // `yield`, so anything after it never runs.
+              if (shouldSaveLiveEventToSession(eventToYield, runConfig)) {
+                await this.sessionService.appendEvent({
+                  session: session!,
+                  event: eventToYield,
+                });
+              }
+              yield eventToYield;
             }
+          } finally {
+            // Live streams normally end with the consumer breaking out of the
+            // loop, so this has to run on the return completion too.
+            await this.pluginManager.runAfterRunCallback({
+              invocationContext,
+            });
           }
-
-          await this.pluginManager.runAfterRunCallback({
-            invocationContext,
-          });
         },
       );
     } finally {
       span.end();
+      const toolsets = getAllToolsets(this.agent);
+      await Promise.allSettled(toolsets.map((t) => t.close()));
     }
   }
+}
 
-  private shouldSaveLiveEventToSession(
-    event: Event,
-    runConfig: RunConfig,
-  ): boolean {
-    if (event.partial) return false;
-    if (
-      event.usageMetadata ||
-      event.inputTranscription ||
-      event.outputTranscription ||
-      getFunctionCalls(event).length > 0 ||
-      getFunctionResponses(event).length > 0
-    ) {
-      return true;
-    }
-    if (
-      !runConfig.saveLiveBlob &&
-      event.content?.parts?.some((part) => part.inlineData)
-    ) {
-      return false;
-    }
-    return Boolean(event.content?.parts?.length);
+/**
+ * Decides whether a live-mode event should be written to session storage.
+ *
+ * Partial events are never saved. Metadata, transcription and tool-call events
+ * always are. Raw audio/video blobs are saved only when
+ * `runConfig.saveLiveBlob` is set, to avoid bloating the session.
+ */
+function shouldSaveLiveEventToSession(
+  event: Event,
+  runConfig: RunConfig,
+): boolean {
+  if (event.partial) return false;
+  if (
+    event.usageMetadata ||
+    event.inputTranscription ||
+    event.outputTranscription ||
+    getFunctionCalls(event).length > 0 ||
+    getFunctionResponses(event).length > 0
+  ) {
+    return true;
   }
+  if (
+    !runConfig.saveLiveBlob &&
+    event.content?.parts?.some((part) => part.inlineData)
+  ) {
+    return false;
+  }
+  return Boolean(event.content?.parts?.length);
 }
 
 /**

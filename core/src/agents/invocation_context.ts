@@ -169,8 +169,11 @@ export class InvocationContext {
   /**
    * A container to keep track of different kinds of costs incurred as a part of
    * this invocation.
+   *
+   * Shared with every context produced by {@link copy}, so the `maxLlmCalls`
+   * budget is enforced across the whole invocation.
    */
-  private readonly invocationCostManager = new InvocationCostManager();
+  private invocationCostManager = new InvocationCostManager();
 
   /**
    * The running streaming tools of this invocation.
@@ -212,9 +215,18 @@ export class InvocationContext {
 
   /**
    * Creates a copy of this invocation context with optional overrides.
+   *
+   * The copy shares this context's LLM-call budget, so `maxLlmCalls` still
+   * bounds the invocation as a whole (an agent transfer, for instance, cannot
+   * reset the counter). It also shares `liveRequestQueue`, so the agent using
+   * the copy keeps draining the same client queue.
    */
   copy(overrides?: Partial<InvocationContextParams>): InvocationContext {
-    return new InvocationContext({...this, ...overrides});
+    const copied = new InvocationContext({...this, ...overrides});
+    // `invocationCostManager` is a field initializer rather than a constructor
+    // parameter, so the new instance starts with a fresh counter.
+    copied.invocationCostManager = this.invocationCostManager;
+    return copied;
   }
 
   /**

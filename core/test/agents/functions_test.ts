@@ -9,6 +9,7 @@ import {
   BaseTool,
   createEvent,
   createEventActions,
+  createSession,
   Event,
   functionsExportedForTestingOnly,
   FunctionTool,
@@ -760,13 +761,10 @@ describe('handleFunctionCallsLiveAsync', () => {
   let toolsDict: Record<string, BaseTool>;
 
   beforeEach(() => {
-    session = {
-      id: 'session_1',
-      events: [],
-      state: {},
-    };
+    session = createSession({id: 'session_1', appName: 'testApp'});
     agent = new LlmAgent({name: 'testAgent'});
     invocationContext = new InvocationContext({
+      invocationId: 'inv_live_1',
       session,
       agent,
       pluginManager: new PluginManager(),
@@ -806,7 +804,6 @@ describe('handleFunctionCallsLiveAsync', () => {
         ],
       },
     });
-    // @ts-expect-error adding liveSessionId for testing
     event.liveSessionId = 'live-session-xyz';
 
     const result = await handleFunctionCallsLiveAsync({
@@ -816,7 +813,6 @@ describe('handleFunctionCallsLiveAsync', () => {
     });
     expect(result).toBeDefined();
     expect(result!.content!.parts![0].functionResponse!.name).toBe('test_tool');
-    // @ts-expect-error checking liveSessionId
     expect(result!.liveSessionId).toBe('live-session-xyz');
   });
 

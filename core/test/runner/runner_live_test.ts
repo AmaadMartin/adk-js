@@ -6,10 +6,13 @@
 
 import {
   BaseAgent,
+  BaseTool,
+  BaseToolset,
   createEvent,
   Event,
   InvocationContext,
   LiveRequestQueue,
+  LlmAgent,
   Runner,
 } from '@google/adk';
 
@@ -36,6 +39,27 @@ class MockLiveAgent extends BaseAgent {
     for (const event of this.eventsToYield) {
       yield event;
     }
+  }
+}
+
+/** An LlmAgent whose live run yields nothing, to exercise Runner cleanup. */
+class MockLiveLlmAgent extends LlmAgent {
+  protected override async *runLiveImpl(): AsyncGenerator<Event, void, void> {}
+}
+
+class MockToolset extends BaseToolset {
+  closed = false;
+
+  constructor() {
+    super([]);
+  }
+
+  async getTools(): Promise<BaseTool[]> {
+    return [];
+  }
+
+  async close(): Promise<void> {
+    this.closed = true;
   }
 }
 
@@ -410,6 +434,87 @@ describe('Runner.runLive and Event Persistence Rules', () => {
         sessionId: 's1',
       });
       expect(session?.events.length).toBe(1);
+    });
+
+    it('should persist the last event when the consumer stops iterating early', async () => {
+      const firstEvent = createEvent({
+        author: 'testAgent',
+        content: createUserContent('first'),
+      });
+      const secondEvent = createEvent({
+        author: 'testAgent',
+        content: createUserContent('second'),
+      });
+      const agent = new MockLiveAgent('testAgent', [firstEvent, secondEvent]);
+      const runner = new Runner({agent, appName: 'testApp', sessionService});
+
+      for await (const _ of runner.runLive({
+        userId: 'u1',
+        sessionId: 's1',
+        liveRequestQueue,
+      })) {
+        // Hang up after the first event, as a live client would.
+        break;
+      }
+
+      const session = await sessionService.getSession({
+        appName: 'testApp',
+        userId: 'u1',
+        sessionId: 's1',
+      });
+      expect(session?.events.length).toBe(1);
+      expect(session?.events[0].content?.parts?.[0].text).toBe('first');
+    });
+  });
+
+  describe('Cleanup', () => {
+    it('should close agent toolsets when the live session ends', async () => {
+      const toolset = new MockToolset();
+      const agent = new MockLiveLlmAgent({
+        name: 'testAgent',
+        tools: [toolset],
+      });
+      const runner = new Runner({agent, appName: 'testApp', sessionService});
+
+      for await (const _ of runner.runLive({
+        userId: 'u1',
+        sessionId: 's1',
+        liveRequestQueue,
+      })) {
+        /* consume generator */
+      }
+
+      expect(toolset.closed).toBe(true);
+    });
+
+    it('should run afterRun callbacks when the consumer stops iterating early', async () => {
+      const agent = new MockLiveAgent('testAgent', [
+        createEvent({
+          author: 'testAgent',
+          content: createUserContent('first'),
+        }),
+        createEvent({
+          author: 'testAgent',
+          content: createUserContent('second'),
+        }),
+      ]);
+      const plugin = new MockPlugin('livePlugin');
+      const runner = new Runner({
+        agent,
+        appName: 'testApp',
+        sessionService,
+        plugins: [plugin],
+      });
+
+      for await (const _ of runner.runLive({
+        userId: 'u1',
+        sessionId: 's1',
+        liveRequestQueue,
+      })) {
+        break;
+      }
+
+      expect(plugin.afterRunCalled).toBe(true);
     });
   });
 });

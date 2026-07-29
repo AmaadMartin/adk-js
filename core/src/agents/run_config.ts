@@ -9,6 +9,7 @@ import {
   Modality,
   ProactivityConfig,
   RealtimeInputConfig,
+  SessionResumptionConfig,
   SpeechConfig,
 } from '@google/genai';
 
@@ -109,10 +110,7 @@ export interface RunConfig {
   /**
    * Session resumption configuration for live mode.
    */
-
-  sessionResumption?: {
-    handle?: string;
-  };
+  sessionResumption?: SessionResumptionConfig;
 }
 
 /**

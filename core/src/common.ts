@@ -22,6 +22,7 @@ export {LiveRequestQueue} from './agents/live_request_queue.js';
 export type {LiveRequest} from './agents/live_request_queue.js';
 export {
   LlmAgent as Agent,
+  DEFAULT_LIVE_MODEL,
   LlmAgent,
   MAX_LIVE_RECONNECT_ATTEMPTS,
   isLlmAgent,

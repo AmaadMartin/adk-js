@@ -8,6 +8,7 @@ import {
   BaseLlm,
   BaseLlmConnection,
   createEvent,
+  DEFAULT_LIVE_MODEL,
   Event,
   FunctionTool,
   InvocationContext,
@@ -15,6 +16,7 @@ import {
   LlmAgent,
   LlmRequest,
   LlmResponse,
+  MAX_LIVE_RECONNECT_ATTEMPTS,
   PluginManager,
   Session,
 } from '@google/adk';
@@ -131,7 +133,7 @@ describe('LlmAgent Live Mode (runLiveFlow & canonicalLiveModel)', () => {
     it('should resolve default live model when neither instance nor ancestor has a model', () => {
       const agent = new LlmAgent({name: 'noModelAgent'});
       const defaultModel = agent.canonicalLiveModel;
-      expect(defaultModel.model).toBe('gemini-live-2.5-flash-native-audio');
+      expect(defaultModel.model).toBe(DEFAULT_LIVE_MODEL);
     });
 
     it('should allow overriding default live model via setDefaultLiveModel', () => {
@@ -141,7 +143,7 @@ describe('LlmAgent Live Mode (runLiveFlow & canonicalLiveModel)', () => {
         const agent = new LlmAgent({name: 'testAgent'});
         expect(agent.canonicalLiveModel).toBe(customDefault);
       } finally {
-        LlmAgent.setDefaultLiveModel('gemini-live-2.5-flash-native-audio');
+        LlmAgent.setDefaultLiveModel(DEFAULT_LIVE_MODEL);
       }
     });
 
@@ -438,6 +440,64 @@ describe('LlmAgent Live Mode (runLiveFlow & canonicalLiveModel)', () => {
           (e) => e.content?.parts?.[0].text === 'Reconnected response',
         ),
       ).toBe(true);
+      // The connection that went away must not be left open.
+      expect(mockLlm.connections[0].closed).toBe(true);
+    });
+
+    it('should close the connection when the model stream ends normally', async () => {
+      const mockLlm = new MockLlm('test-live-llm', [
+        [{content: {role: 'model', parts: [{text: 'done'}]}}],
+      ]);
+      const agent = new LlmAgent({name: 'closingAgent', model: mockLlm});
+
+      const ctx = new InvocationContext({
+        session,
+        sessionService,
+        agent,
+        liveRequestQueue,
+        pluginManager: new PluginManager(),
+      });
+
+      for await (const _ of agent.runLive(ctx)) {
+        /* drain */
+      }
+
+      expect(mockLlm.connections[0].closed).toBe(true);
+    });
+
+    it('should stop reconnecting after MAX_LIVE_RECONNECT_ATTEMPTS consecutive failures', async () => {
+      // A server that accepts the connection and immediately goes away is the
+      // pathological case: every attempt "succeeds" at connect time.
+      const alwaysGoAway: LlmResponse[][] = Array.from(
+        {length: MAX_LIVE_RECONNECT_ATTEMPTS + 5},
+        () => [{goAway: {}}],
+      );
+      const mockLlm = new MockLlm('test-live-llm', alwaysGoAway);
+      const agent = new LlmAgent({name: 'goAwayAgent', model: mockLlm});
+
+      const ctx = new InvocationContext({
+        session,
+        sessionService,
+        agent,
+        liveRequestQueue,
+        pluginManager: new PluginManager(),
+        liveSessionResumptionHandle: 'handle_stuck',
+      });
+
+      await expect(async () => {
+        for await (const _ of agent.runLive(ctx)) {
+          /* drain */
+        }
+      }).rejects.toThrow(/max reconnection attempts/i);
+
+      // The initial connection plus one per allowed reconnect.
+      expect(mockLlm.connectCalls.length).toBe(MAX_LIVE_RECONNECT_ATTEMPTS + 1);
+      expect(mockLlm.connections.every((conn) => conn.closed)).toBe(true);
+    });
+
+    it('should surface a misconfigured model instead of silently using the default live model', () => {
+      const agent = new LlmAgent({name: 'badModelAgent', model: 'not-a-model'});
+      expect(() => agent.canonicalLiveModel).toThrow();
     });
   });
 });

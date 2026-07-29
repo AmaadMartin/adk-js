@@ -332,12 +332,22 @@ async function convertToolUnionToTools(
 const LLM_AGENT_SIGNATURE_SYMBOL = Symbol.for('google.adk.llmAgent');
 
 /**
+ * The maximum number of consecutive reconnect attempts a live flow makes
+ * before giving up and surfacing the connection error.
+ */
+export const MAX_LIVE_RECONNECT_ATTEMPTS = 5;
+
+/** How long to wait before each live connection reconnect attempt. */
+const RECONNECT_DELAY_MS = 200;
+
+/** The model used for live mode when no agent in the chain declares one. */
+export const DEFAULT_LIVE_MODEL = 'gemini-live-2.5-flash-native-audio';
+
+/**
  * Type guard to check if an object is an instance of LlmAgent.
  * @param obj The object to check.
  * @returns True if the object is an instance of LlmAgent, false otherwise.
  */
-export const MAX_LIVE_RECONNECT_ATTEMPTS = 5;
-
 export function isLlmAgent(obj: unknown): obj is LlmAgent {
   return (
     typeof obj === 'object' &&
@@ -482,6 +492,20 @@ export class LlmAgent extends BaseAgent {
    * When not set, the agent will inherit the model from its ancestor.
    */
   get canonicalModel(): BaseLlm {
+    const model = this.findCanonicalModel();
+    if (!model) {
+      throw new Error(`No model found for ${this.name}.`);
+    }
+    return model;
+  }
+
+  /**
+   * Resolves this agent's model, or the nearest ancestor's, if any.
+   *
+   * Returns `undefined` when no agent in the chain declares a model. Errors
+   * from resolving a declared-but-invalid model name still propagate.
+   */
+  private findCanonicalModel(): BaseLlm | undefined {
     if (isBaseLlm(this.model)) {
       return this.model;
     }
@@ -493,15 +517,14 @@ export class LlmAgent extends BaseAgent {
     let ancestorAgent = this.parentAgent;
     while (ancestorAgent) {
       if (isLlmAgent(ancestorAgent)) {
-        return ancestorAgent.canonicalModel;
+        return ancestorAgent.findCanonicalModel();
       }
       ancestorAgent = ancestorAgent.parentAgent;
     }
-    throw new Error(`No model found for ${this.name}.`);
+    return undefined;
   }
 
-  private static _defaultLiveModel: string | BaseLlm =
-    'gemini-live-2.5-flash-native-audio';
+  private static defaultLiveModel: string | BaseLlm = DEFAULT_LIVE_MODEL;
 
   /**
    * Overrides the default model used for live mode when an agent has no model set.
@@ -516,14 +539,14 @@ export class LlmAgent extends BaseAgent {
     if (typeof model === 'string' && !model) {
       throw new Error('Default live model must be a non-empty string.');
     }
-    LlmAgent._defaultLiveModel = model;
+    LlmAgent.defaultLiveModel = model;
   }
 
   /**
    * Resolves the current default live model to a BaseLlm instance.
    */
-  static _resolveDefaultLiveModel(): BaseLlm {
-    const defaultModel = LlmAgent._defaultLiveModel;
+  private static resolveDefaultLiveModel(): BaseLlm {
+    const defaultModel = LlmAgent.defaultLiveModel;
     if (isBaseLlm(defaultModel)) {
       return defaultModel;
     }
@@ -537,11 +560,7 @@ export class LlmAgent extends BaseAgent {
    * or fall back to the default live model.
    */
   get canonicalLiveModel(): BaseLlm {
-    try {
-      return this.canonicalModel;
-    } catch {
-      return LlmAgent._resolveDefaultLiveModel();
-    }
+    return this.findCanonicalModel() ?? LlmAgent.resolveDefaultLiveModel();
   }
 
   /**
@@ -781,18 +800,8 @@ export class LlmAgent extends BaseAgent {
   // #START LlmFlow Logic
   // --------------------------------------------------------------------------
   /**
-   * Runs the bidirectional (live) flow for this agent.
-   *
-   * Establishes a live connection to the model, drains the invocation's
-   * `liveRequestQueue` into the connection on a parallel task, and yields
-   * events derived from server messages until the queue closes, the model
-   * finishes, or an agent transfer occurs.
-   *
-   * If the live connection drops (network failure, server `goAway`) and a
-   * session resumption handle has been observed, the flow transparently
-   * reconnects using that handle up to {@link MAX_LIVE_RECONNECT_ATTEMPTS}
-   * times. Subsequent reconnects skip `sendHistory` because the server
-   * already holds the conversation state associated with the handle.
+   * Runs the request processors and the tools' `processLlmRequest` hooks
+   * against `llmRequest`, yielding any events they emit.
    */
   private async *preprocessAsync(
     invocationContext: InvocationContext,
@@ -849,6 +858,22 @@ export class LlmAgent extends BaseAgent {
     }
   }
 
+  /**
+   * Runs the bidirectional (live) flow for this agent.
+   *
+   * Establishes a live connection to the model, drains the invocation's
+   * `liveRequestQueue` into the connection on a parallel task, and yields
+   * events derived from server messages until the queue closes, the model
+   * finishes, or an agent transfer occurs.
+   *
+   * If the live connection drops (network failure, server `goAway`) and a
+   * session resumption handle has been observed, the flow transparently
+   * reconnects using that handle up to {@link MAX_LIVE_RECONNECT_ATTEMPTS}
+   * consecutive times. The budget is restored once a connection delivers a
+   * server message, so it bounds a failing endpoint rather than the lifetime
+   * of a healthy session. Subsequent reconnects skip `sendHistory` because the
+   * server already holds the conversation state associated with the handle.
+   */
   private async *runLiveFlow(
     invocationContext: InvocationContext,
   ): AsyncGenerator<Event, void, void> {
@@ -874,27 +899,18 @@ export class LlmAgent extends BaseAgent {
       return;
     }
 
-    llmRequest.model = this.canonicalLiveModel.model;
     const llm = this.canonicalLiveModel;
-    let attempt = 1;
+    llmRequest.model = llm.model;
+    // Counts reconnects since the last connection that delivered a server
+    // message. Reconnecting only bounds a failing endpoint, so a healthy
+    // session that reconnects occasionally never exhausts the budget.
+    let reconnectAttempts = 0;
 
     while (true) {
       if (invocationContext.liveSessionResumptionHandle) {
-        if (attempt > 1) {
-          logger.info(`Attempting to reconnect (Attempt ${attempt})...`);
-        }
-        attempt++;
         llmRequest.liveConnectConfig.sessionResumption ??= {};
         llmRequest.liveConnectConfig.sessionResumption.handle =
           invocationContext.liveSessionResumptionHandle;
-      }
-
-      if (
-        llmRequest.contents.length > 0 &&
-        !invocationContext.liveSessionResumptionHandle
-      ) {
-        llmRequest.liveConnectConfig.historyConfig ??= {};
-        llmRequest.liveConnectConfig.historyConfig.initialHistoryInClientContent ??= true;
       }
 
       logger.info(`Establishing live connection for agent: ${this.name}`);
@@ -905,15 +921,17 @@ export class LlmAgent extends BaseAgent {
         if (!invocationContext.liveSessionResumptionHandle) {
           throw error;
         }
-        if (attempt > MAX_LIVE_RECONNECT_ATTEMPTS) {
+        reconnectAttempts++;
+        if (reconnectAttempts > MAX_LIVE_RECONNECT_ATTEMPTS) {
           logger.error(`Max reconnection attempts reached (${error}).`);
           throw error;
         }
-        logger.info(`Connection failed (${error}), reconnecting with handle.`);
+        logger.info(
+          `Connection failed (${error}), reconnecting with handle (attempt ${reconnectAttempts}).`,
+        );
+        await sleep(RECONNECT_DELAY_MS);
         continue;
       }
-
-      attempt = 1;
 
       if (
         llmRequest.contents.length > 0 &&
@@ -923,20 +941,34 @@ export class LlmAgent extends BaseAgent {
         await llmConnection.sendHistory(llmRequest.contents);
       }
 
+      // Composed rather than subscribed to, so a reconnect does not leave a
+      // listener behind on the caller-owned `invocationContext.abortSignal`.
       const sendAbortController = new AbortController();
-      invocationContext.abortSignal?.addEventListener(
-        'abort',
-        () => sendAbortController.abort(),
-        {once: true},
-      );
+      const sendSignal = invocationContext.abortSignal
+        ? AbortSignal.any([
+            invocationContext.abortSignal,
+            sendAbortController.signal,
+          ])
+        : sendAbortController.signal;
 
+      // The receive loop below can block on the server for minutes, so the
+      // rejection handler has to be attached now: an unguarded send failure
+      // would otherwise be reported as an unhandled rejection.
+      let sendError: unknown;
       const sendPromise = sendToModelAsync(
         llmConnection,
         invocationContext,
-        sendAbortController.signal,
-      );
+        sendSignal,
+      ).catch((error: unknown) => {
+        if (!sendSignal.aborted) {
+          sendError = error;
+        }
+      });
 
       let shouldReconnect = false;
+      let reconnectError: unknown;
+      let transferRequested = false;
+      let transferToAgentName: string | undefined;
       try {
         for await (const event of receiveFromModelAsync({
           llmConnection,
@@ -954,52 +986,29 @@ export class LlmAgent extends BaseAgent {
             shouldReconnect = true;
             break;
           }
+          // Server traffic proves the session is healthy, so the reconnect
+          // budget applies to consecutive failures only.
+          reconnectAttempts = 0;
+          const functionResponseNames = new Set(
+            getFunctionResponses(event).map((response) => response.name),
+          );
           yield event;
 
-          if (getFunctionResponses(event).length > 0 && event.content) {
+          if (functionResponseNames.size > 0 && event.content) {
             logger.debug('Sending back last function response event:', event);
             if (invocationContext.liveRequestQueue) {
               invocationContext.liveRequestQueue.sendContent(event.content);
             }
           }
 
-          const firstPart = event.content?.parts?.[0];
-          if (firstPart?.functionResponse?.name === 'transfer_to_agent') {
-            sendAbortController.abort();
-            try {
-              await sendPromise;
-            } catch {
-              /* ignore abort error */
-            }
-            logger.debug('Closing live connection for agent transfer');
-            await llmConnection.close();
-
-            const transferToAgentName = event.actions?.transferToAgent;
-
-            if (transferToAgentName) {
-              logger.debug(`Transferring to agent: ${transferToAgentName}`);
-              const agentToRun: BaseAgent | undefined =
-                this.rootAgent.findAgent(transferToAgentName);
-              if (agentToRun && isLlmAgent(agentToRun)) {
-                const childContext = invocationContext.copy({
-                  liveSessionResumptionHandle: undefined,
-                  runConfig: invocationContext.runConfig
-                    ? {
-                        ...invocationContext.runConfig,
-                        sessionResumption: undefined,
-                      }
-                    : undefined,
-                });
-
-                yield* agentToRun.runLive(childContext);
-              }
-            }
-            return;
+          if (functionResponseNames.has('transfer_to_agent')) {
+            transferRequested = true;
+            transferToAgentName = event.actions?.transferToAgent;
+            break;
           }
 
-          if (firstPart?.functionResponse?.name === 'task_completed') {
-            await llmConnection.close();
-            return;
+          if (functionResponseNames.has('task_completed')) {
+            break;
           }
         }
       } catch (error: unknown) {
@@ -1011,10 +1020,6 @@ export class LlmAgent extends BaseAgent {
         if (!invocationContext.liveSessionResumptionHandle) {
           throw error;
         }
-        if (attempt > MAX_LIVE_RECONNECT_ATTEMPTS) {
-          logger.error(`Max reconnection attempts reached (${error}).`);
-          throw error;
-        }
         if (
           isRecoverableCode ||
           (error instanceof Error &&
@@ -1024,19 +1029,67 @@ export class LlmAgent extends BaseAgent {
             `Connection lost/closed (${error}), reconnecting with session handle.`,
           );
           shouldReconnect = true;
+          reconnectError = error;
         } else {
           throw error;
         }
       } finally {
+        // Covers reconnect, transfer, normal exit and the throwing paths
+        // alike: nothing below this point may reach the old connection.
         sendAbortController.abort();
-        try {
-          await sendPromise;
-        } catch {
-          /* ignore abort error */
+        await sendPromise;
+        await llmConnection.close();
+      }
+
+      if (sendError) {
+        if (shouldReconnect) {
+          // Sends fail as a matter of course while the connection is dropping;
+          // the reconnect below re-establishes the session.
+          logger.warn('Send failed on a dropped live connection:', sendError);
+        } else {
+          throw sendError;
         }
       }
 
+      if (transferRequested) {
+        if (transferToAgentName) {
+          logger.debug(`Transferring to agent: ${transferToAgentName}`);
+          const agentToRun: BaseAgent | undefined =
+            this.rootAgent.findAgent(transferToAgentName);
+          if (agentToRun && isLlmAgent(agentToRun)) {
+            const childContext = invocationContext.copy({
+              liveSessionResumptionHandle: undefined,
+              runConfig: invocationContext.runConfig
+                ? {
+                    ...invocationContext.runConfig,
+                    sessionResumption: undefined,
+                  }
+                : undefined,
+            });
+
+            yield* agentToRun.runLive(childContext);
+          }
+        }
+        return;
+      }
+
       if (shouldReconnect) {
+        reconnectAttempts++;
+        if (reconnectAttempts > MAX_LIVE_RECONNECT_ATTEMPTS) {
+          logger.error(
+            `Max reconnection attempts reached (${MAX_LIVE_RECONNECT_ATTEMPTS}).`,
+          );
+          throw (
+            reconnectError ??
+            new Error(
+              `Live connection lost and max reconnection attempts (${MAX_LIVE_RECONNECT_ATTEMPTS}) reached.`,
+            )
+          );
+        }
+        logger.info(
+          `Reconnecting with session handle (attempt ${reconnectAttempts}).`,
+        );
+        await sleep(RECONNECT_DELAY_MS);
         continue;
       }
       break;
@@ -1514,6 +1567,10 @@ export class LlmAgent extends BaseAgent {
   // - configurable agents by yaml config
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function sendToModelAsync(
   llmConnection: BaseLlmConnection,
   invocationContext: InvocationContext,
@@ -1524,12 +1581,8 @@ async function sendToModelAsync(
     return;
   }
   while (!abortSignal?.aborted) {
-    let liveRequest;
-    try {
-      liveRequest = await liveRequestQueue.get(abortSignal);
-    } catch {
-      return;
-    }
+    // `get` resolves with `{close: true}` rather than rejecting when aborted.
+    const liveRequest = await liveRequestQueue.get(abortSignal);
     if (abortSignal?.aborted) {
       return;
     }
