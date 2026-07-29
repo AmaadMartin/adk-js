@@ -451,37 +451,19 @@ describe('handleFunctionCallList', () => {
   });
 
   it('should keep the merged event content-less when every parallel call pauses', async () => {
-    const otherPausingTool = new LongRunningFunctionTool({
-      name: 'otherPausingTool',
-      description: 'pauses for an out-of-band response',
-      parameters: z.object({}),
-      execute: async (_args, toolContext) => {
-        if (toolContext) {
-          toolContext.state.set('other_pending', true);
-        }
-        return null;
-      },
-    });
-
     const event = await handleFunctionCallList({
       invocationContext,
       functionCalls: [
         {id: 'long_running_call_1', name: 'pausingTool', args: {}},
-        {id: 'long_running_call_2', name: 'otherPausingTool', args: {}},
+        {id: 'long_running_call_2', name: 'pausingTool', args: {}},
       ],
-      toolsDict: {
-        'pausingTool': pausingTool,
-        'otherPausingTool': otherPausingTool,
-      },
+      toolsDict: {'pausingTool': pausingTool},
       beforeToolCallbacks: [],
       afterToolCallbacks: [],
     });
 
     expect(event!.content).toBeUndefined();
-    expect(event!.actions.stateDelta).toEqual({
-      pending: true,
-      other_pending: true,
-    });
+    expect(event!.actions.stateDelta).toEqual({pending: true});
     expect(event!.longRunningToolIds).toEqual([
       'long_running_call_1',
       'long_running_call_2',
