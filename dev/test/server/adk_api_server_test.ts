@@ -17,6 +17,7 @@ import {
   InMemoryMemoryService,
   InMemorySessionService,
   InvocationContext,
+  LAST_ROUTABLE_AGENT_KEY,
   LlmAgent,
   Runner,
   Session,
@@ -538,7 +539,15 @@ describe('AdkWebServer', () => {
       });
       // The state should be merged or updated. Assuming deep merge or at least key addition.
       // If Runner does shallow merge of stateDelta:
-      expect(session?.state).toEqual({foo: 'bar', baz: 'qux'});
+      expect(session?.state).toEqual({
+        foo: 'bar',
+        baz: 'qux',
+        // Recorded by the runner so the next turn resumes without scanning.
+        [LAST_ROUTABLE_AGENT_KEY]: {
+          agentName: 'testAgent',
+          eventId: expect.any(String),
+        },
+      });
     });
 
     it('should return 404 if session not found', async () => {
@@ -678,7 +687,15 @@ describe('AdkWebServer', () => {
         userId: 'testUser',
         sessionId: 'sessionId',
       });
-      expect(session?.state).toEqual({foo: 'bar', baz: 'qux'});
+      expect(session?.state).toEqual({
+        foo: 'bar',
+        baz: 'qux',
+        // Recorded by the runner so the next turn resumes without scanning.
+        [LAST_ROUTABLE_AGENT_KEY]: {
+          agentName: 'testAgent',
+          eventId: expect.any(String),
+        },
+      });
     });
 
     it('should return 404 if session not found', async () => {
