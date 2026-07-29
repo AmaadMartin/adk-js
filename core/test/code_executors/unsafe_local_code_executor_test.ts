@@ -6,14 +6,44 @@
 
 import {
   CodeExecutionLanguage,
+  createSession,
   ExecuteCodeParams,
   InvocationContext,
   LlmAgent,
   PluginManager,
   UnsafeLocalCodeExecutor,
-  createSession,
 } from '@google/adk';
-import {beforeEach, describe, expect, it} from 'vitest';
+import {ChildProcess, spawn} from 'node:child_process';
+import {EventEmitter} from 'node:events';
+import {beforeEach, describe, expect, it, Mock, vi} from 'vitest';
+
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:child_process')>();
+  // Default to the real implementation so the tests that actually execute
+  // scripts keep working; tests that assert the argument vector override it.
+  return {...actual, spawn: vi.fn(actual.spawn)};
+});
+
+// `spawn` is overloaded, so treat the mock as a plain `Mock` to keep per-test
+// implementations and call inspection readable.
+const spawnMock = spawn as unknown as Mock;
+
+const POWERSHELL_FLAGS = [
+  '-NoProfile',
+  '-NoLogo',
+  '-ExecutionPolicy',
+  'Bypass',
+  '-File',
+];
+
+/** A `ChildProcess` stub that exits successfully without running anything. */
+function stubChildProcess(): ChildProcess {
+  const child = new EventEmitter() as unknown as ChildProcess;
+  child.stdout = null;
+  child.stderr = null;
+  setImmediate(() => child.emit('close', 0, null));
+  return child;
+}
 
 function createMockInvocationContext(): InvocationContext {
   const agent = new LlmAgent({
@@ -40,6 +70,8 @@ describe('UnsafeLocalCodeExecutor', () => {
 
   beforeEach(() => {
     executor = new UnsafeLocalCodeExecutor();
+    // `mockClear` keeps the real-`spawn` delegate installed by the factory.
+    spawnMock.mockClear();
   });
 
   it('should execute code and return stdout', async () => {
@@ -307,5 +339,87 @@ describe('UnsafeLocalCodeExecutor', () => {
     expect(result.outputFiles![0].content).toBe('{"hello":"world"}');
     expect(result.outputFiles![0].contentEncoding).toBe('utf-8');
     expect(result.outputFiles![0].mimeType).toBe('application/json');
+  });
+
+  it('should pass -NoProfile when the shell command is PowerShell', async () => {
+    const customExecutor = new UnsafeLocalCodeExecutor({
+      shellCommandPath: 'non-existent-powershell-999',
+    });
+    spawnMock.mockImplementationOnce(() => stubChildProcess());
+
+    await customExecutor.executeCode({
+      invocationContext,
+      codeExecutionInput: {
+        code: 'Write-Output "test"',
+        language: CodeExecutionLanguage.SHELL,
+        inputFiles: [],
+      },
+    });
+
+    const [command, args] = spawnMock.mock.calls[0];
+    expect(command).toBe('non-existent-powershell-999');
+    expect(args.slice(0, 5)).toEqual(POWERSHELL_FLAGS);
+    expect(args).toHaveLength(6);
+  });
+
+  it('should pass -NoProfile for the powershell language', async () => {
+    spawnMock.mockImplementationOnce(() => stubChildProcess());
+
+    await executor.executeCode({
+      invocationContext,
+      codeExecutionInput: {
+        code: 'Write-Output "test"',
+        language: CodeExecutionLanguage.POWERSHELL,
+        inputFiles: [],
+      },
+    });
+
+    const [command, args] = spawnMock.mock.calls[0];
+    expect(command).toBe(process.platform === 'win32' ? 'powershell' : 'pwsh');
+    expect(args.slice(0, 5)).toEqual(POWERSHELL_FLAGS);
+    expect(args[5]).toMatch(/script\.ps1$/);
+    expect(args).toHaveLength(6);
+  });
+
+  it('should append user args after the script path without mutating the shared flags', async () => {
+    for (const arg of ['first', 'second']) {
+      spawnMock.mockImplementationOnce(() => stubChildProcess());
+      await executor.executeCode({
+        invocationContext,
+        codeExecutionInput: {
+          code: 'Write-Output "test"',
+          language: CodeExecutionLanguage.POWERSHELL,
+          inputFiles: [],
+          args: [arg],
+        },
+      });
+    }
+
+    for (const [index, arg] of ['first', 'second'].entries()) {
+      const args = spawnMock.mock.calls[index][1];
+      expect(args.slice(0, 5)).toEqual(POWERSHELL_FLAGS);
+      expect(args[6]).toBe(arg);
+      expect(args).toHaveLength(7);
+    }
+  });
+
+  it('should not pass PowerShell flags to cmd', async () => {
+    const customExecutor = new UnsafeLocalCodeExecutor({
+      shellCommandPath: 'cmd',
+    });
+    spawnMock.mockImplementationOnce(() => stubChildProcess());
+
+    await customExecutor.executeCode({
+      invocationContext,
+      codeExecutionInput: {
+        code: 'echo test',
+        language: CodeExecutionLanguage.SHELL,
+        inputFiles: [],
+      },
+    });
+
+    const args = spawnMock.mock.calls[0][1];
+    expect(args[0]).toBe('/c');
+    expect(args).toHaveLength(2);
   });
 });
