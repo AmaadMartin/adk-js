@@ -7,6 +7,7 @@
 import {Client} from '@google-cloud/vertexai/build/src/genai/client.js';
 import {Sessions} from '@google-cloud/vertexai/build/src/genai/sessions.js';
 import {
+  EventActions as ApiEventActionsBase,
   AppendAgentEngineSessionEventConfig,
   AppendAgentEngineSessionEventRequestParameters,
   EventMetadata,
@@ -40,6 +41,8 @@ import {createSession, Session} from './session.js';
 const DEFAULT_MAX_ATTEMPTS = 30;
 const GRPC_NOT_FOUND = 5;
 const HTTP_NOT_FOUND = 404;
+const GRPC_INVALID_ARGUMENT = 3;
+const HTTP_BAD_REQUEST = 400;
 
 /**
  * Checks if the given URI is a Vertex AI session service URI.
@@ -392,11 +395,17 @@ export class VertexAiSessionService extends BaseSessionService {
     }
 
     const config = partialCopy<AppendAgentEngineSessionEventConfig>(event, [
-      'content',
-      'actions',
       'errorCode',
       'errorMessage',
     ]);
+
+    const content = event.content
+      ? dropUnsupportedPartFields(event.content)
+      : undefined;
+    config.content = content;
+    config.actions = event.actions
+      ? toApiEventActions(event.actions)
+      : undefined;
 
     config.eventMetadata = {
       ...partialCopy<EventMetadata>(event, [
@@ -411,7 +420,7 @@ export class VertexAiSessionService extends BaseSessionService {
         Object.keys(customMetadata).length > 0 ? customMetadata : undefined,
     };
 
-    config.rawEvent = JSON.parse(JSON.stringify(event)) as Record<
+    config.rawEvent = JSON.parse(JSON.stringify({...event, content})) as Record<
       string,
       unknown
     >;
@@ -427,22 +436,79 @@ export class VertexAiSessionService extends BaseSessionService {
     try {
       await this.sessions.events.append(params);
     } catch (error) {
+      if (!isInvalidArgumentError(error)) {
+        throw error;
+      }
       logger.warn(
-        'Failed to append event with rawEvent, falling back...',
+        'appendEvent was rejected with rawEvent; retrying without it.',
         error,
       );
       delete config.rawEvent;
-      await this.sessions.events.append({
-        name: `reasoningEngines/${reasoningEngineId}/sessions/${session.id}`,
-        author: event.author || 'user',
-        invocationId: event.invocationId || `inv-${Date.now()}`,
-        timestamp: new Date(event.timestamp).toISOString(),
-        config,
-      });
+      await this.sessions.events.append(params);
     }
 
     return event;
   }
+}
+
+/**
+ * Wire shape of `actions` for the Agent Engine Sessions API.
+ *
+ * The SDK's `EventActions` does not declare `requestedToolConfirmations`, which
+ * adk-js has always sent and reads back on the legacy path.
+ */
+interface ApiEventActions extends ApiEventActionsBase {
+  requestedToolConfirmations?: Record<string, ToolConfirmation>;
+}
+
+/**
+ * Returns a copy of `content` without Part fields the Agent Engine Sessions
+ * API rejects.
+ *
+ * `partMetadata` is a Gemini Developer API-only field; the Sessions API fails
+ * appendEvent with 400 INVALID_ARGUMENT ("Unknown name \"part_metadata\"").
+ * The input is never mutated, so the caller's event keeps its metadata.
+ */
+function dropUnsupportedPartFields(content: Content): Content {
+  if (!content.parts) {
+    return content;
+  }
+  return {
+    ...content,
+    parts: content.parts.map((part) => {
+      const copy = {...part};
+      delete copy.partMetadata;
+      return copy;
+    }),
+  };
+}
+
+/**
+ * Maps ADK `EventActions` onto the Sessions API wire shape. ADK's
+ * `transferToAgent` is the API's `transferAgent` (adk-python writes the same
+ * field as `transfer_agent`); every other field keeps its name.
+ */
+function toApiEventActions(actions: EventActions): ApiEventActions {
+  const {transferToAgent, ...rest} = actions;
+  return {...rest, transferAgent: transferToAgent};
+}
+
+/**
+ * True when the service rejected the request payload itself.
+ *
+ * The Vertex SDK does no client-side validation, so the equivalent of
+ * adk-python's ValidationError guard is a 400 INVALID_ARGUMENT — which is what
+ * an API that does not know `rawEvent` returns. Transient failures (5xx, 429,
+ * timeouts, network errors) must propagate: the event may already be persisted
+ * and retrying would append it twice.
+ */
+function isInvalidArgumentError(error: unknown): boolean {
+  const err = error as {status?: number; code?: number} | null;
+  return (
+    err?.status === HTTP_BAD_REQUEST ||
+    err?.code === HTTP_BAD_REQUEST ||
+    err?.code === GRPC_INVALID_ARGUMENT
+  );
 }
 
 interface ExtendedEventActions extends EventActions {
@@ -515,7 +581,12 @@ function _fromApiEvent(apiEventObj: VertexAiSessionEvent): Event {
         'requestedToolConfirmations'
       ] as Record<string, ToolConfirmation>) || {},
     skipSummarization: actions['skipSummarization'] as boolean | undefined,
-    transferToAgent: actions['transferAgent'] as string | undefined,
+    // Sessions written by earlier adk-js versions stored ADK's own
+    // `transferToAgent` key, so accept it as a fallback.
+    transferToAgent: (actions['transferAgent'] ??
+      (actions as Record<string, unknown>)['transferToAgent']) as
+      | string
+      | undefined,
     escalate: actions['escalate'] as boolean | undefined,
     compaction: compactionData || undefined,
   };
@@ -535,6 +606,7 @@ function _fromApiEvent(apiEventObj: VertexAiSessionEvent): Event {
     turnComplete: eventMetadata['turnComplete'] as boolean | undefined,
     interrupted: eventMetadata['interrupted'] as boolean | undefined,
     branch: eventMetadata['branch'] as string | undefined,
+    groundingMetadata: eventMetadata.groundingMetadata,
     customMetadata,
     longRunningToolIds: eventMetadata['longRunningToolIds'] as
       | string[]
