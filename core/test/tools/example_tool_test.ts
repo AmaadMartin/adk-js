@@ -146,6 +146,13 @@ describe('ExampleTool', () => {
     expect(llmRequest.config?.systemInstruction).toBeUndefined();
   });
 
+  it('keeps the internal name and description of the adk-python reference', () => {
+    const tool = new ExampleTool([SIMPLE_EXAMPLE]);
+
+    expect(tool.name).toBe('example_tool');
+    expect(tool.description).toBe('example tool');
+  });
+
   it('throws in runAsync because it is not meant to be called by the model', async () => {
     const tool = new ExampleTool([SIMPLE_EXAMPLE]);
     const toolContext = makeContext(undefined);

@@ -29,6 +29,8 @@ const MOCK_RESPONSE = {
   candidates: [{content: {role: 'model', parts: [{text: '4'}]}}],
 };
 
+const AGENT_INSTRUCTION = 'Answer the user question.';
+
 /**
  * Runs an agent that has `examples` attached via {@link ExampleTool} and
  * returns the system instruction the model actually received.
@@ -41,8 +43,7 @@ async function captureSystemInstruction(
 
   const agent = new LlmAgent({
     name: 'example_agent',
-    description: 'Answers questions using few-shot examples.',
-    instruction: 'Answer the user question.',
+    instruction: AGENT_INSTRUCTION,
     tools: [new ExampleTool(examples)],
     beforeModelCallback: async ({request}) => {
       capturedInstruction +=
@@ -68,6 +69,8 @@ describe('ExampleTool Integration', () => {
     expect(instruction).toContain('End few-shot');
     expect(instruction).toContain('What is 2+2?');
     expect(instruction).toContain('4');
+    // The block is appended, so the agent's own instruction must survive.
+    expect(instruction).toContain(AGENT_INSTRUCTION);
   });
 
   it('renders examples with the fence style of the request model', async () => {
