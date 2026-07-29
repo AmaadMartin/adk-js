@@ -40,8 +40,12 @@ export interface GeminiParams {
    */
   apiKey?: string;
   /**
-   * Whether to use Vertex AI. If true, `project`, `location`
-   * should be provided.
+   * Whether to use Vertex AI. An explicitly passed value always wins, so
+   * `false` opts out of Vertex AI even when the environment asks for it. When
+   * omitted, ADK falls back to the `GOOGLE_GENAI_USE_VERTEXAI` environment
+   * variable on Node; environment variables are never read in a browser, where
+   * an omitted value means the Gemini API. If the resolved value is true,
+   * `project` and `location` should be provided.
    */
   vertexai?: boolean;
   /**
@@ -229,6 +233,7 @@ export class Gemini extends BaseLlm {
       });
     } else {
       this._apiClient = new GoogleGenAI({
+        vertexai: this.vertexai,
         apiKey: this.apiKey,
         httpOptions: this.getHttpOptions(),
       });
@@ -271,6 +276,7 @@ export class Gemini extends BaseLlm {
         });
       } else {
         this._liveApiClient = new GoogleGenAI({
+          vertexai: this.vertexai,
           apiKey: this.apiKey,
           httpOptions: this.getLiveHttpOptions(),
         });
@@ -371,10 +377,8 @@ export function geminiInitParams({
 }: GeminiParams) {
   const params: GeminiParams = {model, vertexai, project, location, apiKey};
 
-  params.vertexai = !!vertexai;
-  if (!params.vertexai && !isBrowser()) {
-    params.vertexai = getBooleanEnvVar('GOOGLE_GENAI_USE_VERTEXAI');
-  }
+  params.vertexai =
+    vertexai ?? (!isBrowser() && getBooleanEnvVar('GOOGLE_GENAI_USE_VERTEXAI'));
 
   if (params.vertexai) {
     if (!isBrowser() && !params.project) {
