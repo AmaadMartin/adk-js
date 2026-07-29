@@ -3,16 +3,19 @@
  * Copyright 2026 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
-import {exec, spawn} from 'node:child_process';
+import {spawn} from 'node:child_process';
 import * as fs from 'node:fs/promises';
-import {promisify} from 'node:util';
 import {afterAll, beforeAll, describe, expect, it} from 'vitest';
+import {
+  cleanupFixtureProject,
+  FIXTURE_HOOK_TIMEOUT_MS,
+  FIXTURE_RUN_TIMEOUT_MS,
+  installFixtureProject,
+} from '../../fixture_project.js';
 import {normalizeLineEndings, sendInput} from '../../test_case_utils.js';
 
-const execAsync = promisify(exec);
 const dirname = process.cwd();
 const PROJECT_PATH = `${dirname}/tests/integration/skills/script_js`;
-const TEST_EXECUTION_TIMEOUT = 60000;
 
 /**
  * This integration test verifies that an agent equipped with script execution skills
@@ -30,8 +33,8 @@ const TEST_EXECUTION_TIMEOUT = 60000;
  */
 describe('Agent with skills that generates JS script and runs it locally', () => {
   beforeAll(async () => {
-    await execAsync('npm install', {cwd: PROJECT_PATH});
-  }, TEST_EXECUTION_TIMEOUT);
+    await installFixtureProject(PROJECT_PATH);
+  }, FIXTURE_HOOK_TIMEOUT_MS);
 
   it(
     'should run agent with skills successfully',
@@ -89,7 +92,7 @@ describe('Agent with skills that generates JS script and runs it locally', () =>
         (normalizeLineEndings(expectedHtmlFile) as string).trim(),
       );
     },
-    TEST_EXECUTION_TIMEOUT,
+    FIXTURE_RUN_TIMEOUT_MS,
   );
 
   afterAll(async () => {
@@ -100,9 +103,6 @@ describe('Agent with skills that generates JS script and runs it locally', () =>
     await fs.rm(`${PROJECT_PATH}/index.html`, {force: true}).catch(() => {});
     await fs.rm(`${PROJECT_PATH}/sketch.js`, {force: true}).catch(() => {});
 
-    await fs
-      .rm(`${PROJECT_PATH}/node_modules`, {recursive: true, force: true})
-      .catch(() => {});
-    await fs.unlink(`${PROJECT_PATH}/package-lock.json`).catch(() => {});
-  });
+    await cleanupFixtureProject(PROJECT_PATH);
+  }, FIXTURE_HOOK_TIMEOUT_MS);
 });

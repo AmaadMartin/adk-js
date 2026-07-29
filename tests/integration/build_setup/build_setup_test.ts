@@ -4,15 +4,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {exec, spawn} from 'node:child_process';
-import * as fs from 'node:fs/promises';
 import {promisify} from 'node:util';
 import {afterAll, beforeAll, describe, expect, it} from 'vitest';
+import {
+  cleanupFixtureProject,
+  FIXTURE_HOOK_TIMEOUT_MS,
+  FIXTURE_RUN_TIMEOUT_MS,
+  installFixtureProject,
+} from '../fixture_project.js';
 import {getResponse, sendInput} from '../test_case_utils.js';
 
 const execAsync = promisify(exec);
 const dirname = process.cwd();
-
-const TEST_EXECUTION_TIMEOUT = 20000;
 
 describe('Build setup', () => {
   describe.each([
@@ -26,24 +29,16 @@ describe('Build setup', () => {
     const projectPath = `${dirname}/tests/integration/build_setup/${buildSetup}`;
 
     beforeAll(async () => {
-      await execAsync('npm install', {cwd: projectPath});
+      await installFixtureProject(projectPath);
 
       if (buildSetup.startsWith('ts_')) {
-        let buildResult;
-        try {
-          buildResult = await execAsync('npm run build', {
-            cwd: projectPath,
-          });
-        } catch (error: unknown) {
-          console.error(`Build failed for ${buildSetup}:`);
-          console.error(`stdout:\n${(error as {stdout: string}).stdout}`);
-          console.error(`stderr:\n${(error as {stderr: string}).stderr}`);
-          throw error;
-        }
+        const buildResult = await execAsync('npm run build', {
+          cwd: projectPath,
+        });
         expect(buildResult.stderr).toBe('');
         expect(buildResult.stdout).toContain('\nBuild complete');
       }
-    });
+    }, FIXTURE_HOOK_TIMEOUT_MS);
 
     it(
       'should build and run agent successfully',
@@ -59,7 +54,7 @@ describe('Build setup', () => {
         response = await sendInput(childProcess, 'exit\n');
         expect(response.toString()).toContain('');
       },
-      TEST_EXECUTION_TIMEOUT,
+      FIXTURE_RUN_TIMEOUT_MS,
     );
 
     it.skipIf(
@@ -75,7 +70,7 @@ describe('Build setup', () => {
         const response = await getResponse(childProcess);
         expect(response.toString()).toContain('DYNAMIC_IMPORT_SUCCESS');
       },
-      TEST_EXECUTION_TIMEOUT,
+      FIXTURE_RUN_TIMEOUT_MS,
     );
 
     it.skipIf(
@@ -93,7 +88,7 @@ describe('Build setup', () => {
           'Devtools verification successful',
         );
       },
-      TEST_EXECUTION_TIMEOUT,
+      FIXTURE_RUN_TIMEOUT_MS,
     );
 
     it(
@@ -105,20 +100,11 @@ describe('Build setup', () => {
 
         expect(stdout).toBeTruthy();
       },
-      TEST_EXECUTION_TIMEOUT,
+      FIXTURE_RUN_TIMEOUT_MS,
     );
 
     afterAll(async () => {
-      await fs
-        .rm(`${projectPath}/node_modules`, {recursive: true, force: true})
-        .catch(() => {});
-      await fs.unlink(`${projectPath}/package-lock.json`).catch(() => {});
-
-      if (buildSetup.startsWith('ts_')) {
-        await fs
-          .rm(`${projectPath}/dist`, {recursive: true, force: true})
-          .catch(() => {});
-      }
-    });
+      await cleanupFixtureProject(projectPath);
+    }, FIXTURE_HOOK_TIMEOUT_MS);
   });
 });
