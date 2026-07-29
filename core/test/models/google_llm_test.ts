@@ -350,34 +350,31 @@ describe('GoogleLlm', () => {
     });
   });
 
-  describe('backend resolution', () => {
-    it('should route to Vertex AI without an API key when only GOOGLE_GENAI_USE_ENTERPRISE is set', () => {
-      process.env['GOOGLE_GENAI_USE_ENTERPRISE'] = 'true';
-      process.env['GOOGLE_CLOUD_PROJECT'] = 'env-project';
-      process.env['GOOGLE_CLOUD_LOCATION'] = 'env-location';
+  it('should route to Vertex AI without an API key when only GOOGLE_GENAI_USE_ENTERPRISE is set', () => {
+    process.env['GOOGLE_GENAI_USE_ENTERPRISE'] = 'true';
+    process.env['GOOGLE_CLOUD_PROJECT'] = 'env-project';
+    process.env['GOOGLE_CLOUD_LOCATION'] = 'env-location';
 
-      const llm = new TestGemini({model: 'gemini-1.5-flash'});
+    const llm = new TestGemini({model: 'gemini-1.5-flash'});
 
-      expect(llm['vertexai']).toBe(true);
-      expect(llm.apiBackend).toBe(GoogleLLMVariant.VERTEX_AI);
-    });
+    expect(llm.apiBackend).toBe(GoogleLLMVariant.VERTEX_AI);
+  });
 
-    it('should pin the SDK to vertexai=false when building a Gemini API client', () => {
-      const llm = new TestGemini({apiKey: 'test-key'});
-      const spy = vi.mocked(GoogleGenAI);
-      spy.mockClear();
+  it('should pin the SDK to vertexai=false when building a Gemini API client', () => {
+    const llm = new TestGemini({apiKey: 'test-key'});
+    const spy = vi.mocked(GoogleGenAI);
+    spy.mockClear();
 
-      expect(llm.apiClient).toBeDefined();
-      expect(spy).toHaveBeenCalledWith(
-        expect.objectContaining({vertexai: false}),
-      );
+    expect(llm.apiClient).toBeDefined();
+    expect(spy).toHaveBeenCalledWith(
+      expect.objectContaining({vertexai: false}),
+    );
 
-      spy.mockClear();
-      expect(llm.liveApiClient).toBeDefined();
-      expect(spy).toHaveBeenCalledWith(
-        expect.objectContaining({vertexai: false}),
-      );
-    });
+    spy.mockClear();
+    expect(llm.liveApiClient).toBeDefined();
+    expect(spy).toHaveBeenCalledWith(
+      expect.objectContaining({vertexai: false}),
+    );
   });
 
   describe('generateContentAsync', () => {
