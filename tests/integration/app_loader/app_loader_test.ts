@@ -16,6 +16,15 @@ import {sendInput} from '../test_case_utils.js';
 const execAsync = promisify(exec);
 const dirname = process.cwd();
 const TEST_EXECUTION_TIMEOUT = 40000;
+/**
+ * Budget for fixture hooks rather than assertions. These hooks shell out to
+ * `npm install`, warm the AgentLoader (which esbuild-bundles and minifies every
+ * fixture entrypoint against the whole ADK dependency graph), and recursively
+ * delete a fixture `node_modules` tree. That work is install- and IO-bound and
+ * is several times slower on a cold macOS CI runner than the assertions it sets
+ * up, so it gets its own ceiling.
+ */
+const FIXTURE_SETUP_TIMEOUT = 180000;
 
 describe('App loader CLI integration', () => {
   describe.each(['app_ts', 'app_js', 'app_default'])(
@@ -29,7 +38,7 @@ describe('App loader CLI integration', () => {
 
       beforeAll(async () => {
         await execAsync('npm install', {cwd: projectPath});
-      }, TEST_EXECUTION_TIMEOUT);
+      }, FIXTURE_SETUP_TIMEOUT);
 
       it(
         'should run app via package.json start script and get responses',
@@ -62,7 +71,7 @@ describe('App loader CLI integration', () => {
         await fs
           .unlink(path.join(projectPath, 'package-lock.json'))
           .catch(() => {});
-      }, TEST_EXECUTION_TIMEOUT);
+      }, FIXTURE_SETUP_TIMEOUT);
     },
   );
 });
@@ -77,7 +86,11 @@ describe('AgentLoader discovery and loading integration', () => {
   beforeAll(async () => {
     await execAsync('npm install', {cwd: projectPath});
     loader = new AgentLoader(projectPath);
-  }, TEST_EXECUTION_TIMEOUT);
+    // Discovery is lazy: the first listApps()/listAgents() call esbuild-bundles
+    // every fixture entrypoint. Warm it here so that one-time cost is charged
+    // to setup instead of to whichever test happens to run first.
+    await loader.preloadAgents();
+  }, FIXTURE_SETUP_TIMEOUT);
 
   it(
     'should discover apps vs agents across directories and standalone files',
@@ -138,5 +151,5 @@ describe('AgentLoader discovery and loading integration', () => {
     await fs
       .unlink(path.join(projectPath, 'package-lock.json'))
       .catch(() => {});
-  }, TEST_EXECUTION_TIMEOUT);
+  }, FIXTURE_SETUP_TIMEOUT);
 });
