@@ -212,57 +212,29 @@ const authConfig: AuthConfig = {
 };
 
 describe('hasEventActions', () => {
-  const cases: Array<{
-    description: string;
-    overrides: Partial<EventActions>;
-    expected: boolean;
-  }> = [
-    {description: 'a pristine actions object', overrides: {}, expected: false},
-    {
-      description: 'a non-empty stateDelta',
-      overrides: {stateDelta: {key: 'val'}},
-      expected: true,
-    },
-    {
-      description: 'a non-empty artifactDelta',
-      overrides: {artifactDelta: {'file.txt': 1}},
-      expected: true,
-    },
-    {
-      description: 'a non-empty requestedAuthConfigs',
-      overrides: {requestedAuthConfigs: {'call-1': authConfig}},
-      expected: true,
-    },
-    {
-      description: 'a non-empty requestedToolConfirmations',
-      overrides: {
+  it('returns false for a pristine actions object', () => {
+    expect(hasEventActions(createEventActions())).toBe(false);
+  });
+
+  it.each<[string, Partial<EventActions>]>([
+    ['a non-empty stateDelta', {stateDelta: {key: 'val'}}],
+    ['a non-empty artifactDelta', {artifactDelta: {'file.txt': 1}}],
+    [
+      'a non-empty requestedAuthConfigs',
+      {requestedAuthConfigs: {'call-1': authConfig}},
+    ],
+    [
+      'a non-empty requestedToolConfirmations',
+      {
         requestedToolConfirmations: {
           'call-1': new ToolConfirmation({hint: 'confirm', confirmed: false}),
         },
       },
-      expected: true,
-    },
-    {
-      description: 'skipSummarization set to false',
-      overrides: {skipSummarization: false},
-      expected: true,
-    },
-    {
-      description: 'escalate set to false',
-      overrides: {escalate: false},
-      expected: true,
-    },
-    {
-      description: 'transferToAgent',
-      overrides: {transferToAgent: 'other'},
-      expected: true,
-    },
-  ];
-
-  it.each(cases)(
-    'returns $expected for $description',
-    ({overrides, expected}) => {
-      expect(hasEventActions(createEventActions(overrides))).toBe(expected);
-    },
-  );
+    ],
+    ['skipSummarization set to false', {skipSummarization: false}],
+    ['escalate set to false', {escalate: false}],
+    ['transferToAgent', {transferToAgent: 'other'}],
+  ])('returns true for %s', (_, overrides) => {
+    expect(hasEventActions(createEventActions(overrides))).toBe(true);
+  });
 });

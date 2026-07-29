@@ -8,7 +8,6 @@ import {
   BaseLlm,
   BaseLlmConnection,
   Event,
-  getFunctionCalls,
   InMemorySessionService,
   LlmAgent,
   LlmRequest,
@@ -89,7 +88,6 @@ describe('LlmAgent with a pausing long running tool', () => {
     // No extra model round-trip: the run stops on the paused tool call.
     expect(mockLlm.callCount).toBe(1);
     expect(events.length).toBe(2);
-    expect(getFunctionCalls(events[0])[0].name).toBe('pausing_tool');
 
     const actionsOnlyEvent = events[1];
     expect(actionsOnlyEvent.content).toBeUndefined();

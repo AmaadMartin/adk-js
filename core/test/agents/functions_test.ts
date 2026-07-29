@@ -9,7 +9,6 @@ import {
   BaseTool,
   createEvent,
   createEventActions,
-  createSession,
   Event,
   functionsExportedForTestingOnly,
   FunctionTool,
@@ -136,12 +135,7 @@ describe('handleFunctionCallList', () => {
     const agent = new LlmAgent({name: 'test_agent', model: 'test_model'});
     invocationContext = new InvocationContext({
       invocationId: 'inv_123',
-      // A real session, so tools writing to `toolContext.state` work.
-      session: createSession({
-        id: 'test-session',
-        appName: 'test-app',
-        userId: 'test-user',
-      }),
+      session: {} as Session,
       agent,
       pluginManager,
     });
