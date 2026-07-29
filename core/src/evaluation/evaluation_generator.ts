@@ -236,16 +236,15 @@ export class EvaluationGenerator {
             finalEvent = event;
           }
 
-          for (const part of event.content.parts) {
-            if (
+          const carriesContent = event.content.parts.some(
+            (part) =>
               part.functionCall ||
               part.functionResponse ||
               part.text ||
-              part.inlineData
-            ) {
-              eventsToAdd.push(event);
-              break;
-            }
+              part.inlineData,
+          );
+          if (carriesContent) {
+            eventsToAdd.push(event);
           }
         }
       }
@@ -254,10 +253,7 @@ export class EvaluationGenerator {
       // carries tool calls (e.g. skip-summarization tool-call events).
       const invocationEventsList: InvocationEvent[] = eventsToAdd
         .filter(
-          (event) =>
-            finalEvent === undefined ||
-            event !== finalEvent ||
-            getFunctionCalls(event).length > 0,
+          (event) => event !== finalEvent || getFunctionCalls(event).length > 0,
         )
         .map((event) => ({
           author: event.author ?? DEFAULT_AUTHOR,
