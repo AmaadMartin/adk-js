@@ -22,6 +22,9 @@ const ALLOWED_FRONTMATTER_KEYS = new Set([
   'description',
   'license',
   'allowed-tools',
+  // FrontmatterSchema derives this from 'allowed-tools', and its loose schema
+  // also passes it through when written directly.
+  'allowedTools',
   'metadata',
   'compatibility',
 ]);
