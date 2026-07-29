@@ -14,6 +14,7 @@ import {
   InvocationContext,
   LlmAgent,
   PluginManager,
+  RunAsyncToolRequest,
   Session,
   SingleAfterToolCallback,
   SingleBeforeToolCallback,
@@ -362,6 +363,430 @@ describe('handleFunctionCallList', () => {
         }),
       }),
     );
+  });
+});
+
+interface Deferred<T> {
+  promise: Promise<T>;
+  resolve: (value: T | PromiseLike<T>) => void;
+}
+
+/** Creates an externally-resolvable promise for deterministic concurrency tests. */
+function deferred<T = void>(): Deferred<T> {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return {promise, resolve};
+}
+
+/**
+ * A tool that throws a non-`Error` value, exercising the branch that stores the
+ * raw thrown value as the function response error. `FunctionTool` always wraps
+ * thrown values in an `Error`, so a custom tool is required to reach it.
+ */
+class NonErrorThrowingTool extends BaseTool {
+  constructor() {
+    super({name: 'nonErrorTool', description: 'throws a non-Error value'});
+  }
+
+  override async runAsync(_request: RunAsyncToolRequest): Promise<unknown> {
+    const nonError = {reason: 'non-error failure'};
+    throw nonError;
+  }
+}
+
+describe('handleFunctionCallList - parallel execution', () => {
+  let invocationContext: InvocationContext;
+  let pluginManager: PluginManager;
+
+  beforeEach(() => {
+    pluginManager = new PluginManager();
+    const agent = new LlmAgent({name: 'test_agent', model: 'test_model'});
+    invocationContext = new InvocationContext({
+      invocationId: 'inv_123',
+      session: {} as Session,
+      agent,
+      pluginManager,
+    });
+  });
+
+  it('should execute multiple tool calls concurrently', async () => {
+    const releaseGate = deferred<void>();
+    const startedA = deferred<void>();
+    const startedB = deferred<void>();
+
+    const toolA = new FunctionTool({
+      name: 'toolA',
+      description: 'tool a',
+      parameters: z.object({}),
+      execute: async () => {
+        startedA.resolve();
+        await releaseGate.promise;
+        return {result: 'a'};
+      },
+    });
+    const toolB = new FunctionTool({
+      name: 'toolB',
+      description: 'tool b',
+      parameters: z.object({}),
+      execute: async () => {
+        startedB.resolve();
+        await releaseGate.promise;
+        return {result: 'b'};
+      },
+    });
+
+    const resultPromise = handleFunctionCallList({
+      invocationContext,
+      functionCalls: [
+        {id: 'a', name: 'toolA', args: {}},
+        {id: 'b', name: 'toolB', args: {}},
+      ],
+      toolsDict: {toolA, toolB},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    // Both tools must reach execution before either is allowed to finish. Under
+    // sequential execution the second tool could not start until the first
+    // returned, so awaiting both "started" gates would deadlock (and time out).
+    await Promise.all([startedA.promise, startedB.promise]);
+    releaseGate.resolve();
+
+    const event = await resultPromise;
+    expect(event).not.toBeNull();
+    expect(event!.content!.parts!.length).toBe(2);
+  });
+
+  it('should preserve input order regardless of completion order', async () => {
+    const slowGate = deferred<void>();
+    const fastStarted = deferred<void>();
+
+    const slowTool = new FunctionTool({
+      name: 'slow',
+      description: 'slow tool',
+      parameters: z.object({}),
+      execute: async () => {
+        await slowGate.promise;
+        return {result: 'slow'};
+      },
+    });
+    const fastTool = new FunctionTool({
+      name: 'fast',
+      description: 'fast tool',
+      parameters: z.object({}),
+      execute: async () => {
+        fastStarted.resolve();
+        return {result: 'fast'};
+      },
+    });
+
+    const resultPromise = handleFunctionCallList({
+      invocationContext,
+      functionCalls: [
+        {id: 'slow-id', name: 'slow', args: {}},
+        {id: 'fast-id', name: 'fast', args: {}},
+      ],
+      toolsDict: {slow: slowTool, fast: fastTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    // Let the fast tool (call index 1) run before releasing the slow tool
+    // (call index 0), so completion order is the reverse of input order.
+    await fastStarted.promise;
+    slowGate.resolve();
+
+    const event = await resultPromise;
+    const parts = event!.content!.parts!;
+    expect(parts[0].functionResponse!.name).toBe('slow');
+    expect(parts[0].functionResponse!.id).toBe('slow-id');
+    expect(parts[1].functionResponse!.name).toBe('fast');
+    expect(parts[1].functionResponse!.id).toBe('fast-id');
+  });
+
+  it('should merge stateDelta and transferToAgent actions across concurrent calls', async () => {
+    const stateToolA = new FunctionTool({
+      name: 'stateA',
+      description: 'writes state key a',
+      parameters: z.object({}),
+      execute: async (_args, toolContext) => {
+        toolContext!.actions.stateDelta['keyA'] = 'valueA';
+        return {result: 'a'};
+      },
+    });
+    const stateToolB = new FunctionTool({
+      name: 'stateB',
+      description: 'writes state key b',
+      parameters: z.object({}),
+      execute: async (_args, toolContext) => {
+        toolContext!.actions.stateDelta['keyB'] = 'valueB';
+        return {result: 'b'};
+      },
+    });
+    const transferTool = new FunctionTool({
+      name: 'transfer',
+      description: 'requests agent transfer',
+      parameters: z.object({}),
+      execute: async (_args, toolContext) => {
+        toolContext!.actions.transferToAgent = 'other_agent';
+        return {result: 't'};
+      },
+    });
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [
+        {id: '1', name: 'stateA', args: {}},
+        {id: '2', name: 'stateB', args: {}},
+        {id: '3', name: 'transfer', args: {}},
+      ],
+      toolsDict: {
+        stateA: stateToolA,
+        stateB: stateToolB,
+        transfer: transferTool,
+      },
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event!.content!.parts!.length).toBe(3);
+    expect(event!.actions!.stateDelta).toMatchObject({
+      keyA: 'valueA',
+      keyB: 'valueB',
+    });
+    expect(event!.actions!.transferToAgent).toBe('other_agent');
+  });
+
+  it('should reject (fail-fast) when one call targets a missing tool while a sibling is mid-flight', async () => {
+    const slowStarted = deferred<void>();
+    const slowGate = deferred<void>();
+
+    const slowTool = new FunctionTool({
+      name: 'slow',
+      description: 'slow tool',
+      parameters: z.object({}),
+      execute: async () => {
+        slowStarted.resolve();
+        await slowGate.promise;
+        return {result: 'slow'};
+      },
+    });
+
+    const resultPromise = handleFunctionCallList({
+      invocationContext,
+      functionCalls: [
+        {id: 'missing-id', name: 'missingTool', args: {}},
+        {id: 'slow-id', name: 'slow', args: {}},
+      ],
+      toolsDict: {slow: slowTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    // Attach the rejection handler up front so no unhandled rejection is emitted
+    // while we wait for the sibling to start.
+    const rejection = expect(resultPromise).rejects.toThrow(
+      'Function missingTool is not found in the toolsDict.',
+    );
+
+    // The sibling was dispatched concurrently and keeps running even though the
+    // aggregate promise rejects. Unlike adk-python, JavaScript cannot cancel it,
+    // so we assert it started rather than that it was cancelled.
+    await slowStarted.promise;
+    slowGate.resolve();
+
+    await rejection;
+  });
+
+  it('should turn a tool-execution error into an error response without rejecting sibling successes', async () => {
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [
+        {id: '1', name: 'errorTool', args: {}},
+        {id: '2', name: 'testTool', args: {}},
+      ],
+      toolsDict: {errorTool, testTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    const parts = event!.content!.parts!;
+    expect(parts.length).toBe(2);
+    expect(parts[0].functionResponse!.response).toEqual({
+      error: "Error in tool 'errorTool': tool error message content",
+    });
+    expect(parts[1].functionResponse!.response).toEqual({
+      result: 'tool executed',
+    });
+  });
+
+  it('should store a raw non-Error thrown value as the function response error', async () => {
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [{id: '1', name: 'nonErrorTool', args: {}}],
+      toolsDict: {nonErrorTool: new NonErrorThrowingTool()},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event!.content!.parts![0].functionResponse!.response).toEqual({
+      error: {reason: 'non-error failure'},
+    });
+  });
+
+  it('should skip a long-running tool that returns no response', async () => {
+    const longRunningTool = new FunctionTool({
+      name: 'longRunning',
+      description: 'long running tool with no response',
+      parameters: z.object({}),
+      isLongRunning: true,
+      execute: async () => undefined,
+    });
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [
+        {id: 'lro', name: 'longRunning', args: {}},
+        {id: 'normal', name: 'testTool', args: {}},
+      ],
+      toolsDict: {longRunning: longRunningTool, testTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    const parts = event!.content!.parts!;
+    expect(parts.length).toBe(1);
+    expect(parts[0].functionResponse!.name).toBe('testTool');
+  });
+
+  it('should only execute calls whose id is included in filters', async () => {
+    const executed: string[] = [];
+    const makeTool = (name: string) =>
+      new FunctionTool({
+        name,
+        description: name,
+        parameters: z.object({}),
+        execute: async () => {
+          executed.push(name);
+          return {result: name};
+        },
+      });
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [
+        {id: 'keep', name: 'toolKeep', args: {}},
+        {id: 'drop', name: 'toolDrop', args: {}},
+        {name: 'toolNoId', args: {}},
+      ],
+      toolsDict: {
+        toolKeep: makeTool('toolKeep'),
+        toolDrop: makeTool('toolDrop'),
+        toolNoId: makeTool('toolNoId'),
+      },
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+      filters: new Set(['keep']),
+    });
+
+    expect(executed).toEqual(['toolKeep']);
+    expect(event!.content!.parts!.length).toBe(1);
+    expect(event!.content!.parts![0].functionResponse!.name).toBe('toolKeep');
+  });
+
+  it('should propagate toolConfirmation from toolConfirmationDict to the tool context', async () => {
+    const confirmation = new ToolConfirmation({
+      hint: 'confirm',
+      confirmed: true,
+    });
+    let seenConfirmation: ToolConfirmation | undefined;
+    const confirmTool = new FunctionTool({
+      name: 'confirmTool',
+      description: 'reads its tool confirmation',
+      parameters: z.object({}),
+      execute: async (_args, toolContext) => {
+        seenConfirmation = toolContext!.toolConfirmation;
+        return {result: 'ok'};
+      },
+    });
+
+    await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [{id: 'call-x', name: 'confirmTool', args: {}}],
+      toolsDict: {confirmTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+      toolConfirmationDict: {'call-x': confirmation},
+    });
+
+    expect(seenConfirmation).toBe(confirmation);
+  });
+
+  it('should wrap a primitive tool result into a {result} object', async () => {
+    const primitiveTool = new FunctionTool({
+      name: 'primitive',
+      description: 'returns a primitive',
+      parameters: z.object({}),
+      execute: async () => 'hello',
+    });
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [{id: '1', name: 'primitive', args: {}}],
+      toolsDict: {primitive: primitiveTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event!.content!.parts![0].functionResponse!.response).toEqual({
+      result: 'hello',
+    });
+  });
+
+  it('should wrap a null tool result into a {result: null} object', async () => {
+    const nullTool = new FunctionTool({
+      name: 'nullTool',
+      description: 'returns null',
+      parameters: z.object({}),
+      execute: async () => null,
+    });
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [{id: '1', name: 'nullTool', args: {}}],
+      toolsDict: {nullTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event!.content!.parts![0].functionResponse!.response).toEqual({
+      result: null,
+    });
+  });
+
+  it('should return null for empty functionCalls', async () => {
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [],
+      toolsDict: {},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+    expect(event).toBeNull();
+  });
+
+  it('should return null when filters exclude every call', async () => {
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [{id: 'a', name: 'testTool', args: {}}],
+      toolsDict: {testTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+      filters: new Set(['nonexistent']),
+    });
+    expect(event).toBeNull();
   });
 });
 
