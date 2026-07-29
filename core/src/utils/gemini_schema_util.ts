@@ -39,8 +39,8 @@ function toSchemaNode(value: unknown): McpSchemaNode {
   return {};
 }
 
-function toGeminiType(mcpType: string | undefined): Type {
-  if (!mcpType) return Type.TYPE_UNSPECIFIED;
+function toGeminiType(mcpType: McpSchemaNode['type']): Type {
+  if (typeof mcpType !== 'string') return Type.TYPE_UNSPECIFIED;
 
   switch (mcpType.toLowerCase()) {
     case 'text':
@@ -129,9 +129,7 @@ export function toGeminiSchema(mcpSchema?: MCPToolSchema): Schema | undefined {
       }
     }
 
-    const geminiType = toGeminiType(
-      typeof mcp.type === 'string' ? mcp.type : undefined,
-    );
+    const geminiType = toGeminiType(mcp.type);
     const geminiSchema: Schema = {};
 
     if (mcp.anyOf) {

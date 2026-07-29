@@ -419,9 +419,7 @@ export async function handleFunctionCallList({
     // precedence over the alternative.
     if (alteredFunctionResponse != null) {
       functionResponse = alteredFunctionResponse;
-      if (!functionResponseError) {
-        responseRecord = alteredFunctionResponse;
-      }
+      if (!functionResponseError) responseRecord = alteredFunctionResponse;
     }
 
     // TODO - b/425992518: state event polluting runtime, consider fix.

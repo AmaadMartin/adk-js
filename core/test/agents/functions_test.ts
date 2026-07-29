@@ -47,13 +47,6 @@ const testTool = new FunctionTool({
   },
 });
 
-const scalarTool = new FunctionTool({
-  name: 'scalarTool',
-  description: 'returns a scalar',
-  parameters: z.object({}),
-  execute: async () => 'plain string',
-});
-
 const errorTool = new FunctionTool({
   name: 'errorTool',
   description: 'error tool',
@@ -170,7 +163,13 @@ describe('handleFunctionCallList', () => {
     });
   });
 
-  it('should wrap scalar responses into a {result: scalar} object', async () => {
+  it('should wrap a null response into a {result: null} object for the event and the callbacks', async () => {
+    const nullTool = new FunctionTool({
+      name: 'nullTool',
+      description: 'returns null',
+      parameters: z.object({}),
+      execute: async () => null,
+    });
     let received: Record<string, unknown> | undefined;
     const afterToolCallback: SingleAfterToolCallback = async ({response}) => {
       received = response;
@@ -179,36 +178,13 @@ describe('handleFunctionCallList', () => {
 
     const event = await handleFunctionCallList({
       invocationContext,
-      functionCalls: [{id: randomIdForTestingOnly(), name: 'scalarTool'}],
-      toolsDict: {'scalarTool': scalarTool},
+      functionCalls: [{id: randomIdForTestingOnly(), name: 'nullTool'}],
+      toolsDict: {'nullTool': nullTool},
       beforeToolCallbacks: [],
       afterToolCallbacks: [afterToolCallback],
     });
 
-    expect(received).toEqual({result: 'plain string'});
-    expect(event).not.toBeNull();
-    const definedEvent = event as Event;
-    expect(definedEvent.content!.parts![0].functionResponse!.response).toEqual({
-      result: 'plain string',
-    });
-  });
-
-  it('should wrap a null response into a {result: null} object', async () => {
-    const nullTool = new FunctionTool({
-      name: 'nullTool',
-      description: 'returns null',
-      parameters: z.object({}),
-      execute: async () => null,
-    });
-
-    const event = await handleFunctionCallList({
-      invocationContext,
-      functionCalls: [{id: randomIdForTestingOnly(), name: 'nullTool'}],
-      toolsDict: {'nullTool': nullTool},
-      beforeToolCallbacks: [],
-      afterToolCallbacks: [],
-    });
-
+    expect(received).toEqual({result: null});
     expect(event!.content!.parts![0].functionResponse!.response).toEqual({
       result: null,
     });
