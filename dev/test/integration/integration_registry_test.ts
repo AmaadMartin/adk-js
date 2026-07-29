@@ -17,9 +17,6 @@ describe('IntegrationRegistry', () => {
   });
 
   it('should register and retrieve tools', () => {
-    // Declaring parameters makes this a `FunctionTool<ZodObject<...>>`, which
-    // is not assignable to `FunctionTool<undefined>`; the registry has to be
-    // typed as `BaseTool` to hold it, as every conformance tool requires.
     const tool = new FunctionTool({
       name: 'test_tool',
       description: 'A test tool',
