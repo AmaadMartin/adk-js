@@ -6,6 +6,5 @@
       "@google/adk-integrations": ["../src/index.ts"],
       "@google/adk-integrations/*": ["../src/*"]
     }
-  },
-  "include": ["**/*.ts"]
+  }
 }

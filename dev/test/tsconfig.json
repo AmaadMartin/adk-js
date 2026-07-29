@@ -6,6 +6,5 @@
       "@google/adk": ["../../core/src/index.ts"],
       "@google/adk/*": ["../../core/src/*"]
     }
-  },
-  "include": ["**/*.ts"]
+  }
 }
