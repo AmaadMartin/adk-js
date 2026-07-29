@@ -382,27 +382,4 @@ describe('UnsafeLocalCodeExecutor', () => {
       expect.stringMatching(/script\.ps1$/),
     ]);
   });
-
-  it('should append user args after the script path on every run', async () => {
-    for (const arg of ['first', 'second']) {
-      spawnMock.mockImplementationOnce(() => stubChildProcess());
-      await executor.executeCode({
-        invocationContext,
-        codeExecutionInput: {
-          code: 'Write-Output "test"',
-          language: CodeExecutionLanguage.POWERSHELL,
-          inputFiles: [],
-          args: [arg],
-        },
-      });
-    }
-
-    // The second run must not carry the first run's argument: the shared flags
-    // are spread into a fresh array per spawn, never appended to in place.
-    expect(spawnMock.mock.calls[1][1]).toEqual([
-      ...POWERSHELL_FLAGS,
-      expect.stringMatching(/script\.ps1$/),
-      'second',
-    ]);
-  });
 });

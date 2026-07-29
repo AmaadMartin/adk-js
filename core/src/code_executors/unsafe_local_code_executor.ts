@@ -31,7 +31,7 @@ const POWERSHELL_ARGS = [
   '-ExecutionPolicy',
   'Bypass',
   '-File',
-];
+] as const;
 
 /**
  * Options for UnsafeLocalCodeExecutor.
