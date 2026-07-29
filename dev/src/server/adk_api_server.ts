@@ -41,6 +41,7 @@ import {
   setupTelemetry,
 } from '../utils/telemetry_utils.js';
 import {getAgentGraphAsDot} from './agent_graph.js';
+import {parseReasoningEngineQuery} from './reasoning_engine_request.js';
 
 interface ServerOptions {
   agentsDir?: string;
@@ -783,17 +784,15 @@ export class AdkApiServer {
         `Received Reasoning Engine query headers: ${JSON.stringify(req.headers)}`,
       );
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const executeQuery = async (body: any) => {
-        const input = body.input || {};
-        const appName = input.appName || body.appName;
-        const userId = input.userId || body.userId || 'default-user';
-        const sessionId =
-          input.sessionId || body.sessionId || 'default-session';
-        const newMessage = input.newMessage || body.newMessage;
-        const stateDelta = input.stateDelta || body.stateDelta;
+      const executeQuery = async (rawBody: unknown) => {
+        const {appName, userId, sessionId, newMessage, stateDelta} =
+          parseReasoningEngineQuery(rawBody);
         if (!appName) {
           res.status(400).json({error: 'appName is required in input'});
+          return;
+        }
+        if (!newMessage) {
+          res.status(400).json({error: 'newMessage is required in input'});
           return;
         }
         try {
@@ -840,8 +839,7 @@ export class AdkApiServer {
         });
         req.on('end', async () => {
           this.logger.info(`Received Reasoning Engine raw body: ${rawBody}`);
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          let body: any = {};
+          let body: unknown = {};
           if (rawBody) {
             try {
               body = JSON.parse(rawBody);

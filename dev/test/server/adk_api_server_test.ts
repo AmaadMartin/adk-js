@@ -1044,6 +1044,24 @@ describe('AdkWebServer', () => {
       }
     });
 
+    it('should return 400 if newMessage is missing', async () => {
+      try {
+        await client.post('/api/reasoning_engine', {
+          input: {
+            appName: 'testApp',
+            userId: 'testUser',
+            sessionId: 'sessionId',
+          },
+        });
+        expect.fail('Should fail with 400');
+      } catch (e: unknown) {
+        expect((e as {response: {status: number}}).response.status).toBe(400);
+        expect((e as {message: string}).message).toContain(
+          'newMessage is required',
+        );
+      }
+    });
+
     it('should return 500 if execution fails', async () => {
       const originalGetAgentFile = agentLoader.getAgentFile;
       agentLoader.getAgentFile = () => Promise.reject(new Error('Load failed'));
@@ -1054,6 +1072,7 @@ describe('AdkWebServer', () => {
             appName: 'testApp',
             userId: 'testUser',
             sessionId: 'sessionId',
+            newMessage: {parts: [{text: 'Hello'}], role: 'user'},
           },
         });
         expect.fail('Should fail with 500');
