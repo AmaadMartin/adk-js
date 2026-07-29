@@ -4,54 +4,119 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {v1} from '@google-cloud/pubsub';
-import {Type} from '@google/genai';
+import type {v1} from '@google-cloud/pubsub';
+import {z} from 'zod';
+
 import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {BaseTool} from '../base_tool.js';
 import {BaseToolset, ToolPredicate} from '../base_toolset.js';
 import {FunctionTool} from '../function_tool.js';
 import {createClientOptions} from './client.js';
-import {PubSubCredentialsConfig, PubSubToolConfig} from './config.js';
+import {PubSubCredentialsConfig} from './config.js';
 import {
   acknowledgeMessages,
   publishMessage,
   pullMessages,
 } from './message_tool.js';
 
+const publishMessageParameters = z.object({
+  topicName: z
+    .string()
+    .describe(
+      'The Pub/Sub topic name (e.g. projects/my-project/topics/my-topic).',
+    ),
+  message: z.string().describe('The message content to publish.'),
+  attributes: z
+    .record(z.string(), z.string())
+    .optional()
+    .describe('Attributes to attach to the message.'),
+  orderingKey: z.string().optional().describe('Ordering key for the message.'),
+});
+
+const pullMessagesParameters = z.object({
+  subscriptionName: z
+    .string()
+    .describe(
+      'The Pub/Sub subscription name (e.g. projects/my-project/subscriptions/my-sub).',
+    ),
+  maxMessages: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe('The maximum number of messages to pull. Defaults to 1.'),
+  autoAck: z
+    .boolean()
+    .optional()
+    .describe(
+      'Whether to automatically acknowledge the messages. Defaults to false.',
+    ),
+});
+
+const acknowledgeMessagesParameters = z.object({
+  subscriptionName: z
+    .string()
+    .describe(
+      'The Pub/Sub subscription name (e.g. projects/my-project/subscriptions/my-sub).',
+    ),
+  ackIds: z
+    .array(z.string())
+    .describe('List of acknowledgment IDs to acknowledge.'),
+});
+
 /**
- * Pub/Sub Toolset contains tools for interacting with Pub/Sub topics and subscriptions.
+ * Loads `@google-cloud/pubsub` on first use. The Pub/Sub gRPC stack costs
+ * hundreds of milliseconds to import, so it is kept out of the module graph of
+ * `@google/adk` until a Pub/Sub tool is actually invoked.
+ */
+async function createPublisherClient(
+  credentialsConfig?: PubSubCredentialsConfig,
+): Promise<v1.PublisherClient> {
+  const {v1: pubsubV1} = await import('@google-cloud/pubsub');
+  return new pubsubV1.PublisherClient(createClientOptions(credentialsConfig));
+}
+
+async function createSubscriberClient(
+  credentialsConfig?: PubSubCredentialsConfig,
+): Promise<v1.SubscriberClient> {
+  const {v1: pubsubV1} = await import('@google-cloud/pubsub');
+  return new pubsubV1.SubscriberClient(createClientOptions(credentialsConfig));
+}
+
+/**
+ * Pub/Sub Toolset contains tools for interacting with Pub/Sub topics and
+ * subscriptions.
+ *
+ * The toolset exposes three tools:
+ * - `publish_message`: publishes a message to a topic and returns its
+ *   `messageId`.
+ * - `pull_messages`: pulls up to `maxMessages` messages from a subscription,
+ *   optionally acknowledging them, and returns them as {@link PulledMessage}s.
+ * - `acknowledge_messages`: acknowledges previously pulled messages by ack ID.
+ *
+ * Each tool returns `{status: 'ERROR', error_details}` instead of throwing when
+ * the Pub/Sub API call fails, so the model can report or retry.
  */
 export class PubSubToolset extends BaseToolset {
   private readonly credentialsConfig?: PubSubCredentialsConfig;
-  private readonly toolSettings: PubSubToolConfig;
-  private publisherClient?: v1.PublisherClient;
-  private subscriberClient?: v1.SubscriberClient;
+  private publisherClient?: Promise<v1.PublisherClient>;
+  private subscriberClient?: Promise<v1.SubscriberClient>;
 
   constructor(options?: {
     toolFilter?: ToolPredicate | string[];
     credentialsConfig?: PubSubCredentialsConfig;
-    pubsubToolConfig?: PubSubToolConfig;
   }) {
     super(options?.toolFilter || []);
     this.credentialsConfig = options?.credentialsConfig;
-    this.toolSettings = options?.pubsubToolConfig || {};
   }
 
-  private getPublisherClient(): v1.PublisherClient {
-    if (!this.publisherClient) {
-      this.publisherClient = new v1.PublisherClient(
-        createClientOptions(this.credentialsConfig),
-      );
-    }
+  private getPublisherClient(): Promise<v1.PublisherClient> {
+    this.publisherClient ??= createPublisherClient(this.credentialsConfig);
     return this.publisherClient;
   }
 
-  private getSubscriberClient(): v1.SubscriberClient {
-    if (!this.subscriberClient) {
-      this.subscriberClient = new v1.SubscriberClient(
-        createClientOptions(this.credentialsConfig),
-      );
-    }
+  private getSubscriberClient(): Promise<v1.SubscriberClient> {
+    this.subscriberClient ??= createSubscriberClient(this.credentialsConfig);
     return this.subscriberClient;
   }
 
@@ -65,116 +130,43 @@ export class PubSubToolset extends BaseToolset {
       new FunctionTool({
         name: 'publish_message',
         description: 'Publish a message to a Pub/Sub topic.',
-        parameters: {
-          type: Type.OBJECT,
-          properties: {
-            topicName: {
-              type: Type.STRING,
-              description:
-                'The Pub/Sub topic name (e.g. projects/my-project/topics/my-topic).',
-            },
-            message: {
-              type: Type.STRING,
-              description: 'The message content to publish.',
-            },
-            attributes: {
-              type: Type.OBJECT,
-              additionalProperties: {type: Type.STRING},
-              description: 'Attributes to attach to the message.',
-            },
-            orderingKey: {
-              type: Type.STRING,
-              description: 'Ordering key for the message.',
-            },
-          },
-          required: ['topicName', 'message'],
-        },
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        execute: async (input: any) => {
-          return publishMessage(
-            this.getPublisherClient(),
-            String(input.topicName),
-            String(input.message),
-            input.attributes as Record<string, string> | undefined,
-            input.orderingKey ? String(input.orderingKey) : undefined,
-          );
-        },
+        parameters: publishMessageParameters,
+        execute: async (input) =>
+          publishMessage(
+            await this.getPublisherClient(),
+            input.topicName,
+            input.message,
+            input.attributes,
+            input.orderingKey,
+          ),
       }),
       new FunctionTool({
         name: 'pull_messages',
         description: 'Pull messages from a Pub/Sub subscription.',
-        parameters: {
-          type: Type.OBJECT,
-          properties: {
-            subscriptionName: {
-              type: Type.STRING,
-              description:
-                'The Pub/Sub subscription name (e.g. projects/my-project/subscriptions/my-sub).',
-            },
-            maxMessages: {
-              type: Type.INTEGER,
-              description:
-                'The maximum number of messages to pull. Defaults to 1.',
-            },
-            autoAck: {
-              type: Type.BOOLEAN,
-              description:
-                'Whether to automatically acknowledge the messages. Defaults to false.',
-            },
-          },
-          required: ['subscriptionName'],
-        },
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        execute: async (input: any) => {
-          return pullMessages(
-            this.getSubscriberClient(),
-            String(input.subscriptionName),
-            input.maxMessages !== undefined
-              ? Number(input.maxMessages)
-              : undefined,
-            input.autoAck !== undefined ? Boolean(input.autoAck) : undefined,
-          );
-        },
+        parameters: pullMessagesParameters,
+        execute: async (input) =>
+          pullMessages(
+            await this.getSubscriberClient(),
+            input.subscriptionName,
+            input.maxMessages,
+            input.autoAck,
+          ),
       }),
       new FunctionTool({
         name: 'acknowledge_messages',
         description: 'Acknowledge messages on a Pub/Sub subscription.',
-        parameters: {
-          type: Type.OBJECT,
-          properties: {
-            subscriptionName: {
-              type: Type.STRING,
-              description:
-                'The Pub/Sub subscription name (e.g. projects/my-project/subscriptions/my-sub).',
-            },
-            ackIds: {
-              type: Type.ARRAY,
-              items: {type: Type.STRING},
-              description: 'List of acknowledgment IDs to acknowledge.',
-            },
-          },
-          required: ['subscriptionName', 'ackIds'],
-        },
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        execute: async (input: any) => {
-          return acknowledgeMessages(
-            this.getSubscriberClient(),
-            String(input.subscriptionName),
-            input.ackIds as string[],
-          );
-        },
+        parameters: acknowledgeMessagesParameters,
+        execute: async (input) =>
+          acknowledgeMessages(
+            await this.getSubscriberClient(),
+            input.subscriptionName,
+            input.ackIds,
+          ),
       }),
     ];
 
-    if (
-      !this.toolFilter ||
-      (Array.isArray(this.toolFilter) && this.toolFilter.length === 0)
-    ) {
-      return allTools;
-    }
-
     return allTools.filter((tool) =>
-      this.isToolSelected(tool as BaseTool, readonlyContext),
+      this.isToolSelected(tool, readonlyContext),
     );
   }
 
@@ -182,13 +174,10 @@ export class PubSubToolset extends BaseToolset {
    * Clean up resources used by the toolset.
    */
   override async close(): Promise<void> {
-    const closures: Array<Promise<void>> = [];
-    if (this.publisherClient) {
-      closures.push(this.publisherClient.close());
-    }
-    if (this.subscriberClient) {
-      closures.push(this.subscriberClient.close());
-    }
-    await Promise.all(closures);
+    const pending = [this.publisherClient, this.subscriberClient].filter(
+      (client) => client !== undefined,
+    );
+    const clients = await Promise.all(pending);
+    await Promise.all(clients.map((client) => client.close()));
   }
 }

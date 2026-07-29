@@ -5,25 +5,28 @@
  */
 
 /**
- * Configuration for Pub/Sub tools.
- */
-export interface PubSubToolConfig {
-  /**
-   * The Google Cloud project ID.
-   */
-  projectId?: string;
-}
-
-/**
- * Configuration for Pub/Sub credentials.
+ * Credentials used to build the Pub/Sub clients.
+ *
+ * Every field is optional: when nothing is supplied the clients fall back to
+ * Application Default Credentials, which is the expected setup on GCP. Supply
+ * `projectId` to pin the client to a specific project, and supply both
+ * `clientEmail` and `privateKey` to authenticate with a service account key
+ * instead of ADC.
  */
 export interface PubSubCredentialsConfig {
   /**
-   * Application Default Credentials are used by default.
-   * You can override these by specifying configurations here,
-   * though typical usage defers to ADC.
+   * The Google Cloud project ID. Defaults to the project discovered by
+   * Application Default Credentials.
    */
   projectId?: string;
+
+  /**
+   * Service account email. Must be supplied together with `privateKey`.
+   */
   clientEmail?: string;
+
+  /**
+   * Service account private key. Must be supplied together with `clientEmail`.
+   */
   privateKey?: string;
 }

@@ -4,21 +4,26 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {ClientOptions} from 'google-gax';
+
 import {PubSubCredentialsConfig} from './config.js';
+
+/**
+ * Builds the options passed to the Pub/Sub `v1.PublisherClient` and
+ * `v1.SubscriberClient` constructors, both of which accept `ClientOptions`
+ * from `google-gax`.
+ *
+ * Omitted fields are left absent so the clients fall back to Application
+ * Default Credentials.
+ */
 export function createClientOptions(
   credentialsConfig?: PubSubCredentialsConfig,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-): any {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const options: any = {};
-  if (credentialsConfig?.projectId) {
-    options.projectId = credentialsConfig.projectId;
-  }
-  if (credentialsConfig?.clientEmail && credentialsConfig?.privateKey) {
-    options.credentials = {
-      client_email: credentialsConfig.clientEmail,
-      private_key: credentialsConfig.privateKey,
-    };
-  }
-  return options;
+): ClientOptions {
+  const {projectId, clientEmail, privateKey} = credentialsConfig ?? {};
+  return {
+    ...(projectId ? {projectId} : {}),
+    ...(clientEmail && privateKey
+      ? {credentials: {client_email: clientEmail, private_key: privateKey}}
+      : {}),
+  };
 }
