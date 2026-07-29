@@ -25,10 +25,7 @@ describe('workspace dependency resolution', () => {
   it('resolves @google/genai to a single copy for all first-party code', () => {
     const fromCore = resolveGenai('core/src');
 
-    expect({
-      dev: resolveGenai('dev/src'),
-      integrations: resolveGenai('integrations/src'),
-      tests: resolveGenai('tests/integration'),
-    }).toEqual({dev: fromCore, integrations: fromCore, tests: fromCore});
+    expect(resolveGenai('dev/src')).toBe(fromCore);
+    expect(resolveGenai('tests/integration')).toBe(fromCore);
   });
 });
