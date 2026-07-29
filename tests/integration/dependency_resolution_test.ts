@@ -9,27 +9,26 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {describe, expect, it} from 'vitest';
 
-const testsDir = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(testsDir, '../..');
+const repoRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '../..',
+);
 
-/** Resolves `specifier` the way Node would for a module living in `dir`. */
-function resolveFrom(dir: string, specifier: string): string {
-  return createRequire(path.join(dir, 'resolver.js')).resolve(specifier);
+/** Resolves `@google/genai` the way Node would for a module in `repoRoot/dir`. */
+function resolveGenai(dir: string): string {
+  return createRequire(path.join(repoRoot, dir, 'resolver.js')).resolve(
+    '@google/genai',
+  );
 }
 
 describe('workspace dependency resolution', () => {
   it('resolves @google/genai to a single copy for all first-party code', () => {
-    const fromCore = resolveFrom(
-      path.join(repoRoot, 'core/src'),
-      '@google/genai',
-    );
+    const fromCore = resolveGenai('core/src');
 
-    expect(resolveFrom(testsDir, '@google/genai')).toBe(fromCore);
-    expect(resolveFrom(path.join(repoRoot, 'dev/src'), '@google/genai')).toBe(
-      fromCore,
-    );
-    expect(
-      resolveFrom(path.join(repoRoot, 'integrations/src'), '@google/genai'),
-    ).toBe(fromCore);
+    expect({
+      dev: resolveGenai('dev/src'),
+      integrations: resolveGenai('integrations/src'),
+      tests: resolveGenai('tests/integration'),
+    }).toEqual({dev: fromCore, integrations: fromCore, tests: fromCore});
   });
 });
