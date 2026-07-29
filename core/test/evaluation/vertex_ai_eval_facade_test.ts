@@ -50,13 +50,16 @@ function invocation(overrides: Partial<Invocation> = {}): Invocation {
 class TestableFacade extends MultiTurnVertexAiEvalFacade {
   readonly performEvalMock =
     vi.fn<
-      (dataset: EvaluationDataset, metrics: Metric[]) => VertexEvaluationResult
+      (
+        dataset: EvaluationDataset,
+        metrics: Metric[],
+      ) => Promise<VertexEvaluationResult>
     >();
 
   protected override performEval(
     dataset: EvaluationDataset,
     metrics: Metric[],
-  ): VertexEvaluationResult {
+  ): Promise<VertexEvaluationResult> {
     return this.performEvalMock(dataset, metrics);
   }
 }
@@ -301,14 +304,14 @@ describe('MultiTurnVertexAiEvalFacade.evaluateInvocations', () => {
     }),
   ];
 
-  it('scores only the last turn and maps the request (passed)', () => {
+  it('scores only the last turn and maps the request (passed)', async () => {
     const facade = new TestableFacade(
       0.8,
       RubricMetric.MULTI_TURN_TASK_SUCCESS,
     );
-    facade.performEvalMock.mockReturnValue(evalResult(0.9));
+    facade.performEvalMock.mockResolvedValue(evalResult(0.9));
 
-    const result = facade.evaluateInvocations(twoInvocations);
+    const result = await facade.evaluateInvocations(twoInvocations);
 
     expect(result.overallScore).toBe(0.9);
     expect(result.overallEvalStatus).toBe(EvalStatus.PASSED);
@@ -335,14 +338,14 @@ describe('MultiTurnVertexAiEvalFacade.evaluateInvocations', () => {
     expect(agentData.turns[1].events).toHaveLength(3);
   });
 
-  it('reports FAILED when the last-turn score is below the threshold', () => {
+  it('reports FAILED when the last-turn score is below the threshold', async () => {
     const facade = new TestableFacade(
       0.8,
       RubricMetric.MULTI_TURN_TASK_SUCCESS,
     );
-    facade.performEvalMock.mockReturnValue(evalResult(0.7));
+    facade.performEvalMock.mockResolvedValue(evalResult(0.7));
 
-    const result = facade.evaluateInvocations(twoInvocations);
+    const result = await facade.evaluateInvocations(twoInvocations);
 
     expect(result.overallScore).toBe(0.7);
     expect(result.overallEvalStatus).toBe(EvalStatus.FAILED);
@@ -353,14 +356,14 @@ describe('MultiTurnVertexAiEvalFacade.evaluateInvocations', () => {
     ['empty summary metrics', undefined],
     ['a null mean score', null],
     ['a NaN mean score', Number.NaN],
-  ])('returns an empty result given %s', (_label, meanScore) => {
+  ])('returns an empty result given %s', async (_label, meanScore) => {
     const facade = new TestableFacade(
       0.8,
       RubricMetric.MULTI_TURN_TASK_SUCCESS,
     );
-    facade.performEvalMock.mockReturnValue(evalResult(meanScore));
+    facade.performEvalMock.mockResolvedValue(evalResult(meanScore));
 
-    const result = facade.evaluateInvocations(twoInvocations);
+    const result = await facade.evaluateInvocations(twoInvocations);
 
     expect(result.overallScore).toBeNull();
     expect(result.overallEvalStatus).toBe(EvalStatus.NOT_EVALUATED);
@@ -368,13 +371,13 @@ describe('MultiTurnVertexAiEvalFacade.evaluateInvocations', () => {
     expect(facade.performEvalMock).toHaveBeenCalledOnce();
   });
 
-  it('returns an empty result and skips eval for empty invocations', () => {
+  it('returns an empty result and skips eval for empty invocations', async () => {
     const facade = new TestableFacade(
       0.8,
       RubricMetric.MULTI_TURN_TASK_SUCCESS,
     );
 
-    const result = facade.evaluateInvocations([]);
+    const result = await facade.evaluateInvocations([]);
 
     expect(result.overallScore).toBeNull();
     expect(result.overallEvalStatus).toBe(EvalStatus.NOT_EVALUATED);
@@ -382,14 +385,14 @@ describe('MultiTurnVertexAiEvalFacade.evaluateInvocations', () => {
     expect(facade.performEvalMock).not.toHaveBeenCalled();
   });
 
-  it('scores the only turn for a single invocation', () => {
+  it('scores the only turn for a single invocation', async () => {
     const facade = new TestableFacade(
       0.8,
       RubricMetric.MULTI_TURN_TASK_SUCCESS,
     );
-    facade.performEvalMock.mockReturnValue(evalResult(0.95));
+    facade.performEvalMock.mockResolvedValue(evalResult(0.95));
 
-    const result = facade.evaluateInvocations([
+    const result = await facade.evaluateInvocations([
       invocation({invocationId: 'only'}),
     ]);
 
@@ -398,43 +401,62 @@ describe('MultiTurnVertexAiEvalFacade.evaluateInvocations', () => {
     expect(result.perInvocationResults[0].score).toBe(0.95);
   });
 
-  it('throws when expected invocations have a mismatched length', () => {
+  it('throws when expected invocations have a mismatched length', async () => {
     const facade = new TestableFacade(
       0.8,
       RubricMetric.MULTI_TURN_TASK_SUCCESS,
     );
 
-    expect(() =>
+    await expect(
       facade.evaluateInvocations(twoInvocations, [invocation()]),
-    ).toThrowError(/got 2 and 1/);
+    ).rejects.toThrowError(/got 2 and 1/);
     expect(facade.performEvalMock).not.toHaveBeenCalled();
   });
 
-  it('carries expected invocations onto the per-invocation results', () => {
+  it('carries expected invocations onto the per-invocation results', async () => {
     const facade = new TestableFacade(
       0.8,
       RubricMetric.MULTI_TURN_TASK_SUCCESS,
     );
-    facade.performEvalMock.mockReturnValue(evalResult(0.9));
+    facade.performEvalMock.mockResolvedValue(evalResult(0.9));
     const expected: Invocation[] = [
       invocation({invocationId: 'exp1'}),
       invocation({invocationId: 'exp2'}),
     ];
 
-    const result = facade.evaluateInvocations(twoInvocations, expected);
+    const result = await facade.evaluateInvocations(twoInvocations, expected);
 
     expect(result.perInvocationResults[0].expectedInvocation).toBe(expected[0]);
     expect(result.perInvocationResults[1].expectedInvocation).toBe(expected[1]);
   });
 
-  it('throws a clear error when the eval SDK seam is not implemented', () => {
+  it('supports a seam implementation that resolves asynchronously', async () => {
+    // Proves the seam is implementable against a real eval service, whose call
+    // is necessarily an async round-trip.
+    class AsyncFacade extends MultiTurnVertexAiEvalFacade {
+      protected override async performEval(): Promise<VertexEvaluationResult> {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        return evalResult(0.9);
+      }
+    }
+
+    const result = await new AsyncFacade(
+      0.8,
+      RubricMetric.MULTI_TURN_TASK_SUCCESS,
+    ).evaluateInvocations(twoInvocations);
+
+    expect(result.overallScore).toBe(0.9);
+    expect(result.overallEvalStatus).toBe(EvalStatus.PASSED);
+  });
+
+  it('throws a clear error when the eval SDK seam is not implemented', async () => {
     const facade = new MultiTurnVertexAiEvalFacade(
       0.8,
       RubricMetric.MULTI_TURN_TASK_SUCCESS,
     );
 
-    expect(() => facade.evaluateInvocations([invocation()])).toThrowError(
-      /Vertex Gen AI Eval SDK/,
-    );
+    await expect(
+      facade.evaluateInvocations([invocation()]),
+    ).rejects.toThrowError(/Vertex Gen AI Eval SDK/);
   });
 });

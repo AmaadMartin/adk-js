@@ -45,7 +45,7 @@ export interface PerInvocationResult {
   expectedInvocation?: Invocation;
 
   /** Score obtained after evaluating the metric, or `null` if not evaluated. */
-  score?: number | null;
+  score: number | null;
 
   /** The status of this evaluation. */
   evalStatus: EvalStatus;
@@ -53,8 +53,8 @@ export interface PerInvocationResult {
 
 /** The result of evaluating a metric over a sequence of invocations. */
 export interface EvaluationResult {
-  /** Overall score, based on each invocation. */
-  overallScore?: number | null;
+  /** Overall score, based on each invocation, or `null` if not evaluated. */
+  overallScore: number | null;
 
   /** Overall status, based on each invocation. */
   overallEvalStatus: EvalStatus;
@@ -69,6 +69,9 @@ export abstract class Evaluator {
    * Returns an `EvaluationResult` after evaluating actual (and optionally
    * expected) invocations.
    *
+   * This is asynchronous because evaluating a metric typically requires I/O
+   * (an eval service or a judge model round-trip).
+   *
    * @param actualInvocations The invocations obtained from the agent under
    *   test.
    * @param expectedInvocations An optional list of golden invocations. When
@@ -80,5 +83,5 @@ export abstract class Evaluator {
     actualInvocations: Invocation[],
     expectedInvocations?: Invocation[],
     conversationScenario?: unknown,
-  ): EvaluationResult;
+  ): Promise<EvaluationResult>;
 }

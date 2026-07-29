@@ -34,7 +34,15 @@ export const RubricMetric = {
   MULTI_TURN_TRAJECTORY_QUALITY: {name: 'MULTI_TURN_TRAJECTORY_QUALITY'},
 } as const satisfies Record<string, Metric>;
 
-/** A single event within a conversation turn. */
+/**
+ * A single event within a conversation turn.
+ *
+ * Deliberately kept distinct from `InvocationEvent` even though the two are
+ * structurally identical today: this is the eval SDK's wire shape, whereas
+ * `InvocationEvent` is ADK's own. `mapInvocationEventToAgentEvent` is the seam
+ * where they are expected to diverge once a real SDK type replaces this
+ * stand-in, so please do not collapse them into an alias.
+ */
 export interface AgentEvent {
   author: string;
   content?: Content;
@@ -199,7 +207,7 @@ function createEmptyResult(): EvaluationResult {
 export class MultiTurnVertexAiEvalFacade extends Evaluator {
   constructor(
     private readonly threshold: number,
-    private readonly metricName: Metric,
+    private readonly metric: Metric,
   ) {
     super();
   }
@@ -207,14 +215,15 @@ export class MultiTurnVertexAiEvalFacade extends Evaluator {
   /**
    * The single external boundary of this facade.
    *
-   * The default implementation throws, because the Vertex Gen AI Eval SDK is
-   * not available in adk-js. Override it (by subclassing or stubbing) to wire
-   * in a real implementation.
+   * Asynchronous because a real implementation is an HTTP round-trip to the
+   * eval service. The default implementation rejects, because the Vertex Gen AI
+   * Eval SDK is not available in adk-js. Override it (by subclassing or
+   * stubbing) to wire in a real implementation.
    */
-  protected performEval(
+  protected async performEval(
     _dataset: EvaluationDataset,
     _metrics: Metric[],
-  ): VertexEvaluationResult {
+  ): Promise<VertexEvaluationResult> {
     throw new Error(
       'This metric requires the Vertex Gen AI Eval SDK, which is not available' +
         ' in adk-js. Provide an implementation of performEval() (e.g. by' +
@@ -222,13 +231,13 @@ export class MultiTurnVertexAiEvalFacade extends Evaluator {
     );
   }
 
-  override evaluateInvocations(
+  override async evaluateInvocations(
     actualInvocations: Invocation[],
     expectedInvocations?: Invocation[],
     // Accepted for interface parity but ignored, matching the reference (which
     // does `del conversation_scenario`).
     _conversationScenario?: unknown,
-  ): EvaluationResult {
+  ): Promise<EvaluationResult> {
     validateInvocationLengths(actualInvocations, expectedInvocations);
     if (actualInvocations.length === 0) {
       return createEmptyResult();
@@ -250,7 +259,7 @@ export class MultiTurnVertexAiEvalFacade extends Evaluator {
     const dataset: EvaluationDataset = {
       evalCases: [{agentData: getAgentData(actualInvocations)}],
     };
-    const result = this.performEval(dataset, [this.metricName]);
+    const result = await this.performEval(dataset, [this.metric]);
     const score = getScore(result);
     perInvocationResults.push({
       actualInvocation: actualInvocations[lastIndex],
