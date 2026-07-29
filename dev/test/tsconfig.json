@@ -4,9 +4,7 @@
     "noEmit": true,
     "paths": {
       "@google/adk": ["../../core/src/index.ts"],
-      "@google/adk/*": ["../../core/src/*"],
-      "@google/adk-integrations": ["../../integrations/src/index.ts"],
-      "@google/adk-integrations/*": ["../../integrations/src/*"]
+      "@google/adk/*": ["../../core/src/*"]
     }
   },
   "include": ["**/*.ts"]

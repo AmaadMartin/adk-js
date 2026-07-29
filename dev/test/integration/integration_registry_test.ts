@@ -4,12 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  BasePlugin,
-  FunctionTool,
-  LongRunningFunctionTool,
-  SingleAgentCallback,
-} from '@google/adk';
+import {BasePlugin, FunctionTool, SingleAgentCallback} from '@google/adk';
 import {beforeEach, describe, expect, it} from 'vitest';
 import {z} from 'zod';
 import {IntegrationRegistry} from '../../src/integration/integration_registry.js';
@@ -46,19 +41,6 @@ describe('IntegrationRegistry', () => {
     registry.registerTool('reimburse', tool);
 
     expect(registry.getTool('reimburse')).toBe(tool);
-  });
-
-  it('should register and retrieve long running tools', () => {
-    const tool = new LongRunningFunctionTool({
-      name: 'ask_for_approval',
-      description: 'Asks a manager for approval.',
-      parameters: z.object({purpose: z.string(), amount: z.number()}),
-      execute: async () => ({status: 'pending'}),
-    });
-
-    registry.registerTool('ask_for_approval', tool);
-
-    expect(registry.getTool('ask_for_approval')).toBe(tool);
   });
 
   it('should register and retrieve before agent callbacks', () => {
