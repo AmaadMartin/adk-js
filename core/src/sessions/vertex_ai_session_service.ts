@@ -48,6 +48,18 @@ export function isVertexAiConnectionString(uri?: string): boolean {
   return uri?.startsWith('vertexai://') || false;
 }
 
+/**
+ * Quotes a value for safe use as a Google AIP-160 filter string literal.
+ *
+ * Backslashes are escaped first, then double quotes, so that caller-controlled
+ * input stays inside the quoted value and cannot break out to inject additional
+ * filter predicates. See https://google.aip.dev/160.
+ */
+export function quoteFilterLiteral(value: string): string {
+  const escaped = value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  return `"${escaped}"`;
+}
+
 export interface VertexAiSessionServiceOptions {
   projectId?: string;
   location?: string;
@@ -260,7 +272,7 @@ export class VertexAiSessionService extends BaseSessionService {
       const response = await this.sessions.listInternal({
         name: `reasoningEngines/${reasoningEngineId}`,
         config: {
-          ...(userId ? {filter: `user_id="${userId}"`} : {}),
+          ...(userId ? {filter: `user_id=${quoteFilterLiteral(userId)}`} : {}),
           ...(pageToken ? {pageToken} : {}),
         },
       });
@@ -333,10 +345,26 @@ export class VertexAiSessionService extends BaseSessionService {
 
   async deleteSession({
     appName,
-    userId: _userId,
+    userId,
     sessionId,
   }: DeleteSessionRequest): Promise<void> {
     const reasoningEngineId = this.getReasoningEngineId(appName);
+
+    // A session may only be deleted by the user it belongs to. getSession
+    // already enforces this and throws when the stored session's userId does
+    // not match, so load the session first and stop if it is missing or not
+    // owned by this user. This keeps deleteSession consistent with getSession
+    // and with InMemorySessionService.deleteSession.
+    const session = await this.getSession({
+      appName,
+      userId,
+      sessionId,
+      config: {numRecentEvents: 0},
+    });
+    if (!session) {
+      return;
+    }
+
     await this.sessions.delete({
       name: `reasoningEngines/${reasoningEngineId}/sessions/${sessionId}`,
     });

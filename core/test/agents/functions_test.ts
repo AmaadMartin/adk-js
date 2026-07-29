@@ -19,15 +19,15 @@ import {
   SingleBeforeToolCallback,
   ToolConfirmation,
 } from '@google/adk';
-import {Content, FunctionCall} from '@google/genai';
+import {FunctionCall} from '@google/genai';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {z} from 'zod';
 import {
+  findEventByFunctionCallId,
+  findMatchingFunctionCall,
   generateClientFunctionCallId,
   getLongRunningFunctionCalls,
   mergeParallelFunctionResponseEvents,
-  populateClientFunctionCallId,
-  removeClientFunctionCallId,
 } from '../../src/agents/functions.js';
 
 // Get the test target function
@@ -402,7 +402,9 @@ describe('generateAuthEvent', () => {
     const functionResponseEvent = createEvent({
       actions: createEventActions({
         requestedAuthConfigs: {
+          // @ts-expect-error - testing string assignments
           'call_1': 'auth_config_1',
+          // @ts-expect-error - testing string assignments
           'call_2': 'auth_config_2',
         },
       }),
@@ -613,75 +615,6 @@ describe('generateClientFunctionCallId', () => {
   });
 });
 
-describe('populateClientFunctionCallId', () => {
-  it('should populate ID if missing', () => {
-    const event = createEvent({
-      content: {
-        role: 'model',
-        parts: [{functionCall: {name: 'testTool', args: {}}}],
-      },
-    });
-    populateClientFunctionCallId(event);
-    expect(event.content!.parts![0].functionCall!.id).toBeDefined();
-    expect(event.content!.parts![0].functionCall!.id).toMatch(/^adk-/);
-  });
-
-  it('should not overwrite existing ID', () => {
-    const event = createEvent({
-      content: {
-        role: 'model',
-        parts: [
-          {functionCall: {name: 'testTool', args: {}, id: 'existing-id'}},
-        ],
-      },
-    });
-    populateClientFunctionCallId(event);
-    expect(event.content!.parts![0].functionCall!.id).toBe('existing-id');
-  });
-
-  it('should handle event with no function calls', () => {
-    const event = createEvent({
-      content: {
-        role: 'model',
-        parts: [{text: 'hello'}],
-      },
-    });
-    populateClientFunctionCallId(event);
-    expect(event.content!.parts![0].text).toBe('hello');
-  });
-});
-
-describe('removeClientFunctionCallId', () => {
-  it('should remove client generated ID from functionCall', () => {
-    const content: Content = {
-      role: 'model',
-      parts: [{functionCall: {name: 'testTool', args: {}, id: 'adk-test-id'}}],
-    };
-    removeClientFunctionCallId(content);
-    expect(content.parts![0].functionCall!.id).toBeUndefined();
-  });
-
-  it('should remove client generated ID from functionResponse', () => {
-    const content: Content = {
-      role: 'user',
-      parts: [
-        {functionResponse: {name: 'testTool', response: {}, id: 'adk-test-id'}},
-      ],
-    };
-    removeClientFunctionCallId(content);
-    expect(content.parts![0].functionResponse!.id).toBeUndefined();
-  });
-
-  it('should not remove non-client generated ID', () => {
-    const content: Content = {
-      role: 'model',
-      parts: [{functionCall: {name: 'testTool', args: {}, id: 'server-id'}}],
-    };
-    removeClientFunctionCallId(content);
-    expect(content.parts![0].functionCall!.id).toBe('server-id');
-  });
-});
-
 describe('getLongRunningFunctionCalls', () => {
   it('should return IDs of long running function calls', () => {
     const functionCalls = [
@@ -747,5 +680,90 @@ describe('mergeParallelFunctionResponseEvents', () => {
     const event = createEvent();
     const merged = mergeParallelFunctionResponseEvents([event]);
     expect(merged).toBe(event);
+  });
+});
+
+describe('findEventByFunctionCallId', () => {
+  it('should find event with matching functionCall id', () => {
+    const event1 = createEvent({
+      invocationId: 'inv-1',
+      author: 'agent-1',
+      content: {
+        role: 'model',
+        parts: [{functionCall: {id: 'call-1', name: 'tool1', args: {}}}],
+      },
+    });
+    const event2 = createEvent({
+      invocationId: 'inv-2',
+      author: 'agent-2',
+      content: {
+        role: 'model',
+        parts: [{functionCall: {id: 'call-2', name: 'tool2', args: {}}}],
+      },
+    });
+    expect(findEventByFunctionCallId([event1, event2], 'call-1')).toBe(event1);
+    expect(findEventByFunctionCallId([event1, event2], 'call-2')).toBe(event2);
+  });
+
+  it('should return undefined if no matching functionCall id found or events empty', () => {
+    const event1 = createEvent({
+      invocationId: 'inv-1',
+      author: 'agent-1',
+      content: {
+        role: 'model',
+        parts: [{functionCall: {id: 'call-1', name: 'tool1', args: {}}}],
+      },
+    });
+    expect(findEventByFunctionCallId([event1], 'non-existent')).toBeUndefined();
+    expect(findEventByFunctionCallId([], 'call-1')).toBeUndefined();
+  });
+});
+
+describe('findMatchingFunctionCall', () => {
+  it('should find matching function call for last event function response', () => {
+    const callEvent = createEvent({
+      invocationId: 'inv-1',
+      author: 'sub-agent',
+      content: {
+        role: 'model',
+        parts: [
+          {functionCall: {id: 'lro-id-123', name: 'longRunningOp', args: {}}},
+        ],
+      },
+    });
+    const responseEvent = createEvent({
+      invocationId: 'inv-2',
+      author: 'user',
+      content: {
+        role: 'user',
+        parts: [
+          {
+            functionResponse: {
+              id: 'lro-id-123',
+              name: 'longRunningOp',
+              response: {status: 'DONE'},
+            },
+          },
+        ],
+      },
+    });
+    expect(findMatchingFunctionCall([callEvent, responseEvent])).toBe(
+      callEvent,
+    );
+  });
+
+  it('should return undefined if last event is not function response or events empty', () => {
+    const callEvent = createEvent({
+      invocationId: 'inv-1',
+      author: 'sub-agent',
+      content: {
+        role: 'model',
+        parts: [
+          {functionCall: {id: 'lro-id-123', name: 'longRunningOp', args: {}}},
+        ],
+      },
+    });
+    expect(findMatchingFunctionCall([callEvent])).toBeUndefined();
+    expect(findMatchingFunctionCall([])).toBeUndefined();
   });
 });

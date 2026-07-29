@@ -5,7 +5,6 @@
  */
 
 import {Part} from '@google/genai';
-
 import {CompositeSessionKey} from '../sessions/session.js';
 
 /**
