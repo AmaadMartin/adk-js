@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {afterEach, beforeEach, describe, expect, it} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {logger} from '../../src/utils/logger.js';
 import {getExpressModeApiKey} from '../../src/utils/vertex_ai_utils.js';
 
 describe('vertex_ai_utils', () => {
@@ -13,10 +14,14 @@ describe('vertex_ai_utils', () => {
 
     beforeEach(() => {
       process.env = {...originalEnv};
+      delete process.env['GOOGLE_GENAI_USE_ENTERPRISE'];
+      delete process.env['GOOGLE_GENAI_USE_VERTEXAI'];
+      vi.spyOn(logger, 'warn').mockImplementation(() => {});
     });
 
     afterEach(() => {
       process.env = originalEnv;
+      vi.restoreAllMocks();
     });
 
     it('should throw when both project and expressModeApiKey are provided', () => {
@@ -67,6 +72,34 @@ describe('vertex_ai_utils', () => {
       delete process.env['GOOGLE_API_KEY'];
       const result = getExpressModeApiKey();
       expect(result).toBeUndefined();
+    });
+
+    it('should return expressModeApiKey when GOOGLE_GENAI_USE_ENTERPRISE is true', () => {
+      process.env['GOOGLE_GENAI_USE_ENTERPRISE'] = 'true';
+      const result = getExpressModeApiKey(undefined, undefined, 'my-api-key');
+      expect(result).toBe('my-api-key');
+    });
+
+    it('should return GOOGLE_API_KEY from env when GOOGLE_GENAI_USE_ENTERPRISE is true and no key provided', () => {
+      process.env['GOOGLE_GENAI_USE_ENTERPRISE'] = 'true';
+      process.env['GOOGLE_API_KEY'] = 'env-api-key';
+      const result = getExpressModeApiKey();
+      expect(result).toBe('env-api-key');
+    });
+
+    it('should return undefined when GOOGLE_GENAI_USE_ENTERPRISE is false even if GOOGLE_GENAI_USE_VERTEXAI is true', () => {
+      process.env['GOOGLE_GENAI_USE_ENTERPRISE'] = 'false';
+      process.env['GOOGLE_GENAI_USE_VERTEXAI'] = 'true';
+      process.env['GOOGLE_API_KEY'] = 'env-api-key';
+      const result = getExpressModeApiKey();
+      expect(result).toBeUndefined();
+    });
+
+    it('should throw before reading the environment when GOOGLE_GENAI_USE_ENTERPRISE is true', () => {
+      process.env['GOOGLE_GENAI_USE_ENTERPRISE'] = 'true';
+      expect(() =>
+        getExpressModeApiKey('my-project', undefined, 'my-api-key'),
+      ).toThrow('Cannot specify project or location and expressModeApiKey.');
     });
   });
 });

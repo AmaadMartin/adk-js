@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {getBooleanEnvVar} from './env_aware_utils.js';
+import {isEnterpriseModeEnabled} from './env_aware_utils.js';
 
 /**
  * Validates and returns the API key for Express Mode.
@@ -26,7 +26,7 @@ export function getExpressModeApiKey(
     );
   }
 
-  if (getBooleanEnvVar('GOOGLE_GENAI_USE_VERTEXAI')) {
+  if (isEnterpriseModeEnabled()) {
     return expressModeApiKey || process.env.GOOGLE_API_KEY;
   }
 
