@@ -26,12 +26,15 @@ const INVOCATION_ID = 'inv-1';
 type Dict = Record<string, unknown>;
 
 function makeMockLogger() {
+  const debugCalls: string[] = [];
   const warnCalls: string[] = [];
   const errorCalls: string[] = [];
   const mockLogger = {
     setLogLevel: () => {},
     log: () => {},
-    debug: () => {},
+    debug: (...args: unknown[]) => {
+      debugCalls.push(args.map((a) => String(a)).join(' '));
+    },
     info: () => {},
     warn: (...args: unknown[]) => {
       warnCalls.push(args.map((a) => String(a)).join(' '));
@@ -40,7 +43,7 @@ function makeMockLogger() {
       errorCalls.push(args.map((a) => String(a)).join(' '));
     },
   };
-  return {mockLogger, warnCalls, errorCalls};
+  return {mockLogger, debugCalls, warnCalls, errorCalls};
 }
 
 function makeInvocationContext(overrides: Dict = {}): InvocationContext {
@@ -106,11 +109,13 @@ function dataOf(trace: Dict, type: string): Dict {
 describe('DebugLoggingPlugin', () => {
   let tempDir: string;
   let outputPath: string;
+  let debugCalls: string[];
   let warnCalls: string[];
   let errorCalls: string[];
 
   beforeEach(async () => {
     const mock = makeMockLogger();
+    debugCalls = mock.debugCalls;
     warnCalls = mock.warnCalls;
     errorCalls = mock.errorCalls;
     setLogger(mock.mockLogger);
@@ -585,7 +590,10 @@ describe('DebugLoggingPlugin', () => {
       }),
     ).resolves.toBeUndefined();
 
-    expect(warnCalls.some((m) => m.includes('skipping entry'))).toBe(true);
+    // The plugin's own bookkeeping is logged at debug level, not warn: it must
+    // not spam an application's logs.
+    expect(debugCalls.some((m) => m.includes('skipping entry'))).toBe(true);
+    expect(warnCalls.some((m) => m.includes('skipping entry'))).toBe(false);
     // afterRunCallback with no state warns and writes nothing.
     await plugin.afterRunCallback({invocationContext: makeInvocationContext()});
     expect(warnCalls.some((m) => m.includes('skipping write'))).toBe(true);
@@ -720,5 +728,510 @@ describe('DebugLoggingPlugin', () => {
     // State was cleaned up in `finally`, so a second call hits the no-state path.
     await plugin.afterRunCallback({invocationContext});
     expect(warnCalls.some((m) => m.includes('skipping write'))).toBe(true);
+  });
+
+  describe('callback ordering', () => {
+    it('captures the user message when onUserMessageCallback runs first', async () => {
+      // `Runner.runAsync` fires onUserMessageCallback *before* beforeRunCallback,
+      // which is the reverse of the order the other tests use. The plugin has to
+      // create its state lazily so the user message is still recorded, and
+      // beforeRunCallback must not then discard it.
+      const plugin = new DebugLoggingPlugin({outputPath});
+      const invocationContext = makeInvocationContext();
+
+      await plugin.onUserMessageCallback({
+        invocationContext,
+        userMessage: {role: 'user', parts: [{text: 'hi there'}]},
+      });
+      await plugin.beforeRunCallback({invocationContext});
+      await plugin.afterRunCallback({invocationContext});
+
+      const [trace] = await readTraces(outputPath);
+      expect(entryTypes(trace)).toEqual([
+        'user_message',
+        'invocation_start',
+        'session_state_snapshot',
+        'invocation_end',
+      ]);
+      const content = dataOf(trace, 'user_message')['content'] as Dict;
+      expect((content['parts'] as Dict[])[0]['text']).toBe('hi there');
+      // No warning is emitted on the normal runner path.
+      expect(warnCalls).toEqual([]);
+    });
+
+    it('keeps a single state when beforeRunCallback is called twice', async () => {
+      const plugin = new DebugLoggingPlugin({outputPath});
+      const invocationContext = makeInvocationContext();
+
+      await plugin.beforeRunCallback({invocationContext});
+      await plugin.beforeRunCallback({invocationContext});
+      await plugin.afterRunCallback({invocationContext});
+
+      const traces = await readTraces(outputPath);
+      expect(traces).toHaveLength(1);
+      expect(
+        entryTypes(traces[0]).filter((t) => t === 'invocation_start'),
+      ).toHaveLength(2);
+    });
+  });
+
+  describe('redaction', () => {
+    it('applies the redact hook to every captured payload', async () => {
+      const seenEntryTypes: string[] = [];
+      const plugin = new DebugLoggingPlugin({
+        outputPath,
+        redact: (entryType, data) => {
+          seenEntryTypes.push(entryType);
+          if (entryType === 'tool_call') {
+            return {...data, args: '<redacted>'};
+          }
+          if (entryType === 'session_state_snapshot') {
+            return {...data, state: '<redacted>'};
+          }
+          return data;
+        },
+      });
+      const invocationContext = makeInvocationContext({
+        session: {
+          id: 'session-1',
+          appName: 'test-app',
+          userId: 'user-1',
+          state: {apiCredential: 'CREDENTIAL-DO-NOT-LOG'},
+          events: [],
+        },
+      });
+      const toolContext = makeToolContext();
+      const tool = {name: 'my_tool'} as BaseTool;
+
+      await plugin.beforeRunCallback({invocationContext});
+      await plugin.beforeToolCallback({
+        tool,
+        toolArgs: {authToken: 'TOKEN-DO-NOT-LOG'},
+        toolContext,
+      });
+      await plugin.afterRunCallback({invocationContext});
+
+      const raw = await fs.readFile(outputPath, 'utf-8');
+      expect(raw).not.toContain('TOKEN-DO-NOT-LOG');
+      expect(raw).not.toContain('CREDENTIAL-DO-NOT-LOG');
+
+      const [trace] = await readTraces(outputPath);
+      expect(dataOf(trace, 'tool_call')['args']).toBe('<redacted>');
+      expect(dataOf(trace, 'session_state_snapshot')['state']).toBe(
+        '<redacted>',
+      );
+      expect(seenEntryTypes).toEqual([
+        'invocation_start',
+        'tool_call',
+        'session_state_snapshot',
+        'invocation_end',
+      ]);
+    });
+
+    it('hands redact the raw, unserialized payload', async () => {
+      let observed: unknown;
+      const plugin = new DebugLoggingPlugin({
+        outputPath,
+        redact: (entryType, data) => {
+          if (entryType === 'tool_call') {
+            observed = data['args'];
+          }
+          return data;
+        },
+      });
+      const invocationContext = makeInvocationContext();
+      const bytes = new Uint8Array([1, 2, 3]);
+
+      await plugin.beforeRunCallback({invocationContext});
+      await plugin.beforeToolCallback({
+        tool: {name: 'my_tool'} as BaseTool,
+        toolArgs: {blob: bytes},
+        toolContext: makeToolContext(),
+      });
+      await plugin.afterRunCallback({invocationContext});
+
+      // The hook sees the real Uint8Array, not the '<bytes: 3 bytes>' marker,
+      // so it can make decisions on the actual runtime types.
+      expect((observed as Dict)['blob']).toBe(bytes);
+      const [trace] = await readTraces(outputPath);
+      expect((dataOf(trace, 'tool_call')['args'] as Dict)['blob']).toBe(
+        '<bytes: 3 bytes>',
+      );
+    });
+
+    it('fails closed and drops the payload when redact throws', async () => {
+      const plugin = new DebugLoggingPlugin({
+        outputPath,
+        redact: (entryType, data) => {
+          if (entryType === 'tool_call') {
+            throw new Error('redactor exploded');
+          }
+          return data;
+        },
+      });
+      const invocationContext = makeInvocationContext();
+
+      await plugin.beforeRunCallback({invocationContext});
+      await plugin.beforeToolCallback({
+        tool: {name: 'my_tool'} as BaseTool,
+        toolArgs: {authToken: 'TOKEN-DO-NOT-LOG'},
+        toolContext: makeToolContext(),
+      });
+      await plugin.afterRunCallback({invocationContext});
+
+      const raw = await fs.readFile(outputPath, 'utf-8');
+      expect(raw).not.toContain('TOKEN-DO-NOT-LOG');
+
+      const [trace] = await readTraces(outputPath);
+      expect(dataOf(trace, 'tool_call')).toEqual({_redactionFailed: true});
+      expect(errorCalls.some((m) => m.includes('redactor exploded'))).toBe(
+        true,
+      );
+    });
+
+    it('marks the entry when redact returns something that cannot be walked', async () => {
+      // A Record whose own enumerable getter throws: `Object.entries` on it
+      // fails, so the payload degrades to a placeholder instead of the write
+      // blowing up and losing the whole trace.
+      const hostile: Dict = {};
+      Object.defineProperty(hostile, 'bad', {
+        enumerable: true,
+        get() {
+          throw new Error('nope');
+        },
+      });
+      const plugin = new DebugLoggingPlugin({
+        outputPath,
+        redact: (entryType, data) =>
+          entryType === 'tool_call' ? hostile : data,
+      });
+      const invocationContext = makeInvocationContext();
+
+      await plugin.beforeRunCallback({invocationContext});
+      await plugin.beforeToolCallback({
+        tool: {name: 'my_tool'} as BaseTool,
+        toolArgs: {authToken: 'TOKEN-DO-NOT-LOG'},
+        toolContext: makeToolContext(),
+      });
+      await plugin.afterRunCallback({invocationContext});
+
+      const raw = await fs.readFile(outputPath, 'utf-8');
+      expect(raw).not.toContain('TOKEN-DO-NOT-LOG');
+      const [trace] = await readTraces(outputPath);
+      expect(dataOf(trace, 'tool_call')).toEqual({
+        _unserializable: '<unserializable>',
+      });
+    });
+
+    it('records payloads unchanged when no redact hook is supplied', async () => {
+      const plugin = new DebugLoggingPlugin({outputPath});
+      const invocationContext = makeInvocationContext();
+
+      await plugin.beforeRunCallback({invocationContext});
+      await plugin.beforeToolCallback({
+        tool: {name: 'my_tool'} as BaseTool,
+        toolArgs: {query: 'plain'},
+        toolContext: makeToolContext(),
+      });
+      await plugin.afterRunCallback({invocationContext});
+
+      const [trace] = await readTraces(outputPath);
+      expect((dataOf(trace, 'tool_call')['args'] as Dict)['query']).toBe(
+        'plain',
+      );
+    });
+  });
+
+  describe('output file safety', () => {
+    // Windows does not implement POSIX permission bits, so `fs.stat().mode`
+    // there does not reflect the 0600 requested at creation.
+    it.skipIf(process.platform === 'win32')(
+      'creates the trace file and its directory without group or world access',
+      async () => {
+        const nestedPath = path.join(tempDir, 'nested', 'debug.jsonl');
+        const plugin = new DebugLoggingPlugin({outputPath: nestedPath});
+        const invocationContext = makeInvocationContext();
+
+        await plugin.beforeRunCallback({invocationContext});
+        await plugin.afterRunCallback({invocationContext});
+
+        const fileMode = (await fs.stat(nestedPath)).mode;
+        expect(fileMode & 0o077).toBe(0);
+        const dirMode = (await fs.stat(path.dirname(nestedPath))).mode;
+        expect(dirMode & 0o077).toBe(0);
+      },
+    );
+
+    it('defaults the output path to the temp dir, not the working directory', async () => {
+      const plugin = new DebugLoggingPlugin();
+      // `outputPath` is private, so assert on the observable behaviour: the
+      // default must not resolve next to the caller's package.json.
+      const defaultPath = path.join(os.tmpdir(), 'adk_debug.jsonl');
+      expect(path.isAbsolute(defaultPath)).toBe(true);
+      expect(defaultPath.startsWith(process.cwd())).toBe(false);
+      expect(plugin.name).toBe('debug_logging_plugin');
+    });
+  });
+
+  describe('bounded output size', () => {
+    it('rotates the output file once it would exceed maxOutputBytes', async () => {
+      const plugin = new DebugLoggingPlugin({
+        outputPath,
+        maxOutputBytes: 1000,
+        includeSessionState: false,
+      });
+      const padding = 'p'.repeat(2000);
+
+      for (const id of ['inv-a', 'inv-b']) {
+        const invocationContext = makeInvocationContext({invocationId: id});
+        await plugin.beforeRunCallback({invocationContext});
+        await plugin.beforeToolCallback({
+          tool: {name: 'my_tool'} as BaseTool,
+          toolArgs: {padding},
+          toolContext: makeToolContext({invocationId: id}),
+        });
+        await plugin.afterRunCallback({invocationContext});
+      }
+
+      // The first line pushed the file past the cap, so the second write
+      // rotated it away: one invocation per file, and nothing lost.
+      const current = await readTraces(outputPath);
+      expect(current).toHaveLength(1);
+      expect(current[0]['invocationId']).toBe('inv-b');
+
+      const rotated = await readTraces(`${outputPath}.1`);
+      expect(rotated).toHaveLength(1);
+      expect(rotated[0]['invocationId']).toBe('inv-a');
+    });
+
+    it('never rotates when maxOutputBytes is non-positive', async () => {
+      const plugin = new DebugLoggingPlugin({
+        outputPath,
+        maxOutputBytes: 0,
+        includeSessionState: false,
+      });
+
+      for (const id of ['inv-a', 'inv-b', 'inv-c']) {
+        const invocationContext = makeInvocationContext({invocationId: id});
+        await plugin.beforeRunCallback({invocationContext});
+        await plugin.afterRunCallback({invocationContext});
+      }
+
+      expect(await readTraces(outputPath)).toHaveLength(3);
+      await expect(fs.access(`${outputPath}.1`)).rejects.toBeDefined();
+    });
+
+    it('truncates a single oversized captured string', async () => {
+      const plugin = new DebugLoggingPlugin({outputPath});
+      const invocationContext = makeInvocationContext();
+      const huge = 'x'.repeat(150_000);
+
+      await plugin.beforeRunCallback({invocationContext});
+      await plugin.beforeToolCallback({
+        tool: {name: 'my_tool'} as BaseTool,
+        toolArgs: {huge},
+        toolContext: makeToolContext(),
+      });
+      await plugin.afterRunCallback({invocationContext});
+
+      const [trace] = await readTraces(outputPath);
+      const captured = (dataOf(trace, 'tool_call')['args'] as Dict)[
+        'huge'
+      ] as string;
+      expect(captured.startsWith('x'.repeat(100_000))).toBe(true);
+      expect(captured.endsWith('...<truncated 50000 chars>')).toBe(true);
+    });
+  });
+
+  describe('defensive serialization', () => {
+    it('records <circular> and still writes the trace for a cyclic payload', async () => {
+      const plugin = new DebugLoggingPlugin({outputPath});
+      const invocationContext = makeInvocationContext();
+      const cyclic: Dict = {name: 'parent'};
+      cyclic['self'] = cyclic;
+
+      await plugin.beforeRunCallback({invocationContext});
+      await plugin.beforeToolCallback({
+        tool: {name: 'my_tool'} as BaseTool,
+        toolArgs: {node: cyclic},
+        toolContext: makeToolContext(),
+      });
+      await plugin.afterRunCallback({invocationContext});
+
+      // Before cycle detection this recursed until the stack died and the whole
+      // invocation trace was dropped; the trace must survive intact.
+      const [trace] = await readTraces(outputPath);
+      const node = (dataOf(trace, 'tool_call')['args'] as Dict)['node'] as Dict;
+      expect(node['name']).toBe('parent');
+      expect(node['self']).toBe('<circular>');
+      expect(errorCalls).toEqual([]);
+    });
+
+    it('serializes a value shared between siblings rather than calling it circular', async () => {
+      const plugin = new DebugLoggingPlugin({outputPath});
+      const invocationContext = makeInvocationContext();
+      const shared = {id: 'shared'};
+
+      await plugin.beforeRunCallback({invocationContext});
+      await plugin.beforeToolCallback({
+        tool: {name: 'my_tool'} as BaseTool,
+        toolArgs: {left: shared, right: shared},
+        toolContext: makeToolContext(),
+      });
+      await plugin.afterRunCallback({invocationContext});
+
+      const [trace] = await readTraces(outputPath);
+      const args = dataOf(trace, 'tool_call')['args'] as Dict;
+      expect(args['left']).toEqual({id: 'shared'});
+      expect(args['right']).toEqual({id: 'shared'});
+    });
+
+    it('degrades a value whose toString throws to the placeholder', async () => {
+      const plugin = new DebugLoggingPlugin({outputPath});
+      const invocationContext = makeInvocationContext();
+      const hostile = () => 42;
+      hostile.toString = () => {
+        throw new Error('no string for you');
+      };
+
+      await plugin.beforeRunCallback({invocationContext});
+      await plugin.beforeToolCallback({
+        tool: {name: 'my_tool'} as BaseTool,
+        toolArgs: {hostile},
+        toolContext: makeToolContext(),
+      });
+      await plugin.afterRunCallback({invocationContext});
+
+      const [trace] = await readTraces(outputPath);
+      expect((dataOf(trace, 'tool_call')['args'] as Dict)['hostile']).toBe(
+        '<unserializable>',
+      );
+    });
+
+    it('stops at <max depth> for a pathologically nested payload', async () => {
+      const plugin = new DebugLoggingPlugin({outputPath});
+      const invocationContext = makeInvocationContext();
+      const deep: Dict = {};
+      let cursor = deep;
+      for (let i = 0; i < 40; i++) {
+        const next: Dict = {};
+        cursor['next'] = next;
+        cursor = next;
+      }
+
+      await plugin.beforeRunCallback({invocationContext});
+      await plugin.beforeToolCallback({
+        tool: {name: 'my_tool'} as BaseTool,
+        toolArgs: {deep},
+        toolContext: makeToolContext(),
+      });
+      await plugin.afterRunCallback({invocationContext});
+
+      const [trace] = await readTraces(outputPath);
+      let value: unknown = (dataOf(trace, 'tool_call')['args'] as Dict)['deep'];
+      let levels = 0;
+      while (typeof value === 'object' && value !== null) {
+        value = (value as Dict)['next'];
+        levels++;
+        expect(levels).toBeLessThan(40);
+      }
+      expect(value).toBe('<max depth>');
+    });
+  });
+
+  describe('bounded memory', () => {
+    it('flushes the oldest invocation as incomplete when the buffer is full', async () => {
+      const plugin = new DebugLoggingPlugin({
+        outputPath,
+        maxBufferedInvocations: 2,
+        includeSessionState: false,
+      });
+
+      // Two invocations that never reach afterRunCallback, exactly as an
+      // aborted or failed run leaves them behind.
+      for (const id of ['inv-a', 'inv-b']) {
+        await plugin.beforeRunCallback({
+          invocationContext: makeInvocationContext({invocationId: id}),
+        });
+      }
+      // Starting a third evicts the oldest instead of growing forever.
+      await plugin.beforeRunCallback({
+        invocationContext: makeInvocationContext({invocationId: 'inv-c'}),
+      });
+
+      const traces = await readTraces(outputPath);
+      expect(traces).toHaveLength(1);
+      expect(traces[0]['invocationId']).toBe('inv-a');
+      // The abandoned run still reaches disk, flagged so a consumer can tell.
+      expect(traces[0]['incomplete']).toBe(true);
+      expect(entryTypes(traces[0])).toContain('invocation_start');
+      expect(warnCalls.some((m) => m.includes('never reached'))).toBe(true);
+
+      // The evicted invocation is gone from memory: a later afterRunCallback
+      // for it finds no state.
+      await plugin.afterRunCallback({
+        invocationContext: makeInvocationContext({invocationId: 'inv-a'}),
+      });
+      expect(warnCalls.some((m) => m.includes('skipping write'))).toBe(true);
+      expect(await readTraces(outputPath)).toHaveLength(1);
+    });
+
+    it('still evicts when flushing the incomplete trace fails', async () => {
+      const blocker = path.join(tempDir, 'blocker');
+      await fs.writeFile(blocker, 'x');
+      const plugin = new DebugLoggingPlugin({
+        outputPath: path.join(blocker, 'debug.jsonl'),
+        maxBufferedInvocations: 1,
+      });
+
+      await plugin.beforeRunCallback({
+        invocationContext: makeInvocationContext({invocationId: 'inv-a'}),
+      });
+      // Evicting inv-a cannot write it out, but must not throw or keep it.
+      await expect(
+        plugin.beforeRunCallback({
+          invocationContext: makeInvocationContext({invocationId: 'inv-b'}),
+        }),
+      ).resolves.toBeUndefined();
+
+      expect(
+        errorCalls.some((m) =>
+          m.includes('Failed to write incomplete debug data'),
+        ),
+      ).toBe(true);
+    });
+
+    it('tolerates a non-positive maxBufferedInvocations without hanging', async () => {
+      const plugin = new DebugLoggingPlugin({
+        outputPath,
+        maxBufferedInvocations: 0,
+        includeSessionState: false,
+      });
+      const invocationContext = makeInvocationContext();
+
+      await expect(
+        plugin.beforeRunCallback({invocationContext}),
+      ).resolves.toBeUndefined();
+      await plugin.afterRunCallback({invocationContext});
+
+      expect(await readTraces(outputPath)).toHaveLength(1);
+    });
+
+    it('does not evict while invocations complete normally', async () => {
+      const plugin = new DebugLoggingPlugin({
+        outputPath,
+        maxBufferedInvocations: 2,
+        includeSessionState: false,
+      });
+
+      for (const id of ['inv-a', 'inv-b', 'inv-c', 'inv-d']) {
+        const invocationContext = makeInvocationContext({invocationId: id});
+        await plugin.beforeRunCallback({invocationContext});
+        await plugin.afterRunCallback({invocationContext});
+      }
+
+      expect(await readTraces(outputPath)).toHaveLength(4);
+      expect(warnCalls).toEqual([]);
+    });
   });
 });

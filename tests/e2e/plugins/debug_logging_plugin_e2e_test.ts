@@ -126,12 +126,12 @@ describe('E2E DebugLoggingPlugin', () => {
 
     const entries = trace['entries'] as Array<Record<string, unknown>>;
     const types = entries.map((e) => e['entryType']);
-    // Note: the Runner fires onUserMessageCallback *before* beforeRunCallback
-    // creates the per-invocation state, so (as in adk-python) the user message
-    // is not part of the durable trace under a real run. See the direct-callback
-    // unit test for the user_message path.
+    // The Runner fires onUserMessageCallback *before* beforeRunCallback, so
+    // `user_message` being present here is what proves the per-invocation state
+    // is created lazily by whichever callback runs first.
     expect(types).toEqual(
       expect.arrayContaining([
+        'user_message',
         'invocation_start',
         'llm_request',
         'llm_response',
@@ -142,6 +142,16 @@ describe('E2E DebugLoggingPlugin', () => {
         'invocation_end',
       ]),
     );
+    expect(types.indexOf('user_message')).toBeLessThan(
+      types.indexOf('invocation_start'),
+    );
+
+    const userMessage = entries.find((e) => e['entryType'] === 'user_message')![
+      'data'
+    ] as Record<string, unknown>;
+    const userContent = userMessage['content'] as Record<string, unknown>;
+    const userParts = userContent['parts'] as Array<Record<string, unknown>>;
+    expect(userParts[0]['text']).toBe('Please echo hello');
 
     const toolCall = entries.find((e) => e['entryType'] === 'tool_call')![
       'data'
