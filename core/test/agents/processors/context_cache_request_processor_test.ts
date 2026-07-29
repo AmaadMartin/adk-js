@@ -31,13 +31,8 @@ function makeActiveCacheMetadata(
     fingerprint: 'test_fingerprint',
     invocationsUsed: 1,
     contentsCount: 3,
-    createdAt: Date.now() / 1000 - 600,
     ...overrides,
   };
-}
-
-function makeFingerprintCacheMetadata(): FingerprintCacheMetadata {
-  return {fingerprint: 'test_fingerprint', contentsCount: 3};
 }
 
 function createContext(options: {
@@ -182,27 +177,6 @@ describe('ContextCacheRequestProcessor', () => {
     expect(llmRequest.cacheMetadata?.invocationsUsed).toBe(11);
   });
 
-  it('extracts the previous prompt token count', async () => {
-    const invocationContext = createContext({
-      contextCacheConfig: cacheConfig,
-      events: [
-        createEvent({
-          author: 'test_agent',
-          usageMetadata: {
-            promptTokenCount: 1024,
-            candidatesTokenCount: 256,
-            totalTokenCount: 1280,
-          },
-        }),
-      ],
-    });
-    const llmRequest = makeLlmRequest();
-
-    await runProcessor(invocationContext, llmRequest);
-
-    expect(llmRequest.cacheableContentsTokenCount).toBe(1024);
-  });
-
   it('leaves metadata and token count unset when events carry neither', async () => {
     const invocationContext = createContext({
       contextCacheConfig: cacheConfig,
@@ -249,16 +223,18 @@ describe('ContextCacheRequestProcessor', () => {
     expect(llmRequest.cacheableContentsTokenCount).toBe(1024);
   });
 
-  // Only test where one event supplies both values, so it is the only one that
-  // reaches the scan's early exit.
-  it('finds both metadata and token count in a single pass', async () => {
+  // The only event supplying both values, so this is the only test that reaches
+  // the scan's early exit. It also pins the immutability invariant: the source
+  // metadata must be copied, never incremented in place.
+  it('finds both metadata and token count in a single pass, without mutating the source', async () => {
+    const cacheMetadata = makeActiveCacheMetadata({invocationsUsed: 5});
     const invocationContext = createContext({
       contextCacheConfig: cacheConfig,
       invocationId: 'current_invocation',
       events: [
         createEvent({
           author: 'test_agent',
-          cacheMetadata: makeActiveCacheMetadata({invocationsUsed: 5}),
+          cacheMetadata,
           usageMetadata: {promptTokenCount: 1024},
           invocationId: 'previous_invocation',
         }),
@@ -270,10 +246,14 @@ describe('ContextCacheRequestProcessor', () => {
 
     expect(llmRequest.cacheMetadata?.invocationsUsed).toBe(6);
     expect(llmRequest.cacheableContentsTokenCount).toBe(1024);
+    expect(cacheMetadata.invocationsUsed).toBe(5);
   });
 
   it('copies fingerprint-only metadata as-is (no increment)', async () => {
-    const fingerprintOnly = makeFingerprintCacheMetadata();
+    const fingerprintOnly: FingerprintCacheMetadata = {
+      fingerprint: 'test_fingerprint',
+      contentsCount: 3,
+    };
     const invocationContext = createContext({
       contextCacheConfig: cacheConfig,
       invocationId: 'current_invocation',
@@ -306,26 +286,5 @@ describe('ContextCacheRequestProcessor', () => {
     await runProcessor(invocationContext, llmRequest);
 
     expect(llmRequest.cacheMetadata?.invocationsUsed).toBe(4);
-  });
-
-  it('does not mutate the source event cache metadata', async () => {
-    const cacheMetadata = makeActiveCacheMetadata({invocationsUsed: 5});
-    const event = createEvent({
-      author: 'test_agent',
-      cacheMetadata,
-      invocationId: 'previous_invocation',
-    });
-    const invocationContext = createContext({
-      contextCacheConfig: cacheConfig,
-      invocationId: 'current_invocation',
-      events: [event],
-    });
-    const llmRequest = makeLlmRequest();
-
-    await runProcessor(invocationContext, llmRequest);
-
-    expect(llmRequest.cacheMetadata?.invocationsUsed).toBe(6);
-    expect(cacheMetadata.invocationsUsed).toBe(5);
-    expect(event.cacheMetadata?.invocationsUsed).toBe(5);
   });
 });

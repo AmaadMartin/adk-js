@@ -35,9 +35,6 @@ export interface ActiveCacheMetadata extends CacheMetadataBase {
 
   /** Number of invocations this cache has been used for. */
   readonly invocationsUsed: number;
-
-  /** Unix timestamp (seconds) when the cache was created. */
-  readonly createdAt?: number;
 }
 
 /**
@@ -48,7 +45,6 @@ export interface FingerprintCacheMetadata extends CacheMetadataBase {
   readonly cacheName?: undefined;
   readonly expireTime?: undefined;
   readonly invocationsUsed?: undefined;
-  readonly createdAt?: undefined;
 }
 
 /**

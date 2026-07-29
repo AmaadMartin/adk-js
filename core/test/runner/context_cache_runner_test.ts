@@ -9,7 +9,6 @@ import {
   BaseAgent,
   BaseLlm,
   BaseLlmConnection,
-  CacheMetadata,
   ContextCacheConfig,
   createContextCacheConfig,
   Event,
@@ -24,11 +23,10 @@ import {describe, expect, it} from 'vitest';
 
 const PROMPT_TOKEN_COUNT = 4096;
 
-interface CapturedRequest {
-  cacheConfig?: ContextCacheConfig;
-  cacheMetadata?: CacheMetadata;
-  cacheableContentsTokenCount?: number;
-}
+type CapturedRequest = Pick<
+  LlmRequest,
+  'cacheConfig' | 'cacheMetadata' | 'cacheableContentsTokenCount'
+>;
 
 /**
  * A mock model that records the cache-relevant fields of each request and, when
@@ -65,7 +63,6 @@ class RecordingLlm extends BaseLlm {
         fingerprint: 'fingerprint',
         invocationsUsed: 1,
         contentsCount: 2,
-        createdAt: Date.now() / 1000,
       };
     }
 
@@ -118,7 +115,8 @@ async function send(
 describe('Context cache orchestration through the Runner', () => {
   it('recovers metadata and token count across turns and increments invocationsUsed', async () => {
     const cacheConfig = createContextCacheConfig({minTokens: 2048});
-    const {model, runner, session} = await setup(cacheConfig);
+    const {model, app, runner, sessionService, session} =
+      await setup(cacheConfig);
 
     for (let turn = 0; turn < 3; turn++) {
       await send(runner, session.id, `turn ${turn}`);
@@ -139,22 +137,20 @@ describe('Context cache orchestration through the Runner', () => {
     // Turn 3: recovers turn 2's metadata (incremented again).
     expect(third.cacheMetadata?.invocationsUsed).toBe(3);
     expect(third.cacheableContentsTokenCount).toBe(PROMPT_TOKEN_COUNT);
-  });
 
-  it('persists cacheMetadata onto the emitted model-response events', async () => {
-    const {app, runner, sessionService, session} = await setup(
-      createContextCacheConfig({minTokens: 2048}),
-    );
-
-    await send(runner, session.id, 'hello');
-
+    // The recovery above is only possible because each response's metadata is
+    // copied onto the emitted event and persisted with the session.
     const persisted = await sessionService.getSession({
       appName: app.name,
       userId: 'user',
       sessionId: session.id,
     });
-    const modelEvent = persisted!.events.find((e) => e.author === 'assistant');
-    expect(modelEvent?.cacheMetadata?.invocationsUsed).toBe(1);
+    const modelEvents = persisted!.events.filter(
+      (e) => e.author === 'assistant',
+    );
+    expect(modelEvents.map((e) => e.cacheMetadata?.invocationsUsed)).toEqual([
+      1, 2, 3,
+    ]);
   });
 
   it('propagates the config to a sub-agent invocation context', async () => {
