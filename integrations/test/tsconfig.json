@@ -3,8 +3,7 @@
   "compilerOptions": {
     "noEmit": true,
     "paths": {
-      "@google/adk-integrations": ["../src/index.ts"],
-      "@google/adk-integrations/*": ["../src/*"]
+      "@google/adk-integrations": ["../src/index.ts"]
     }
   }
 }
