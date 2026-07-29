@@ -1,0 +1,16 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "include": ["unlisted"],
+  // Scoped to the published surface: each workspace builds with packages:
+  // 'external', so an undeclared import under src/ ships verbatim to dist/ and
+  // resolves from the consumer's node_modules. Test trees are excluded from
+  // every workspace's "files" and never ship, so they stay out of scope --
+  // "vitest": false is what stops knip's vitest plugin from re-adding tests/**
+  // as root entry points.
+  "workspaces": {
+    ".": {"entry": [], "project": [], "vitest": false},
+    "core": {"entry": ["src/**/*.ts"], "project": ["src/**/*.ts"]},
+    "dev": {"entry": ["src/**/*.ts"], "project": ["src/**/*.ts"]},
+    "integrations": {"entry": ["src/**/*.ts"], "project": ["src/**/*.ts"]}
+  }
+}
