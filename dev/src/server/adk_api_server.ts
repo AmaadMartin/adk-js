@@ -61,6 +61,158 @@ interface ServerOptions {
   registerProcessors?: (tracerProvider: TracerProvider) => void;
 }
 
+/** Default ids applied by the Reasoning Engine surface only. */
+const DEFAULT_USER_ID = 'default-user';
+const DEFAULT_SESSION_ID = 'default-session';
+
+/**
+ * A normalised run request. Missing ids are normalised to '' so each endpoint
+ * can apply its own required-field policy: `/api/reasoning_engine` rejects an
+ * empty `appName` with 400, `/run` and `/run_sse` let the session lookup fail
+ * with 404. `newMessage` stays optional, matching the Python dev server.
+ */
+interface AgentRunRequest {
+  appName: string;
+  userId: string;
+  sessionId: string;
+  newMessage?: Content;
+  stateDelta?: Record<string, unknown>;
+  streaming?: boolean;
+}
+
+/** Run fields as they arrive on the wire, before normalisation. */
+type AgentRunRequestBody = Partial<AgentRunRequest>;
+
+/**
+ * Body accepted by `/api/reasoning_engine`, which nests the run fields in an
+ * `input` envelope. Fields present in `input` win over top-level fields.
+ */
+interface ReasoningEngineRequestBody extends AgentRunRequestBody {
+  input?: AgentRunRequestBody;
+}
+
+/** Options accepted by `AdkApiServer.executeAgentRun`. */
+interface ExecuteAgentRunOptions {
+  appName: string;
+  userId: string;
+  sessionId: string;
+  newMessage?: Content;
+  stateDelta?: Record<string, unknown>;
+  runConfig?: RunConfig;
+  abortSignal: AbortSignal;
+}
+
+/** The agent-execution seam injected into `runAgentEvents`. */
+type ExecuteAgentRun = (
+  options: ExecuteAgentRunOptions,
+) => AsyncGenerator<Event>;
+
+/** Normalises a plain run body. Used by `/run` and `/run_sse`. */
+function parseAgentRunRequest(body: AgentRunRequestBody): AgentRunRequest {
+  return {
+    appName: body.appName ?? '',
+    userId: body.userId ?? '',
+    sessionId: body.sessionId ?? '',
+    newMessage: body.newMessage,
+    stateDelta: body.stateDelta,
+    streaming: body.streaming,
+  };
+}
+
+/**
+ * Normalises a Reasoning Engine body, layering the `input` envelope and the
+ * default ids over the shared parse. An empty string in `input` falls through
+ * to the top-level field, and a missing `appName` still yields the 400.
+ */
+function parseReasoningEngineRequest(
+  body: ReasoningEngineRequestBody,
+): AgentRunRequest {
+  const input = body.input ?? {};
+  return parseAgentRunRequest({
+    appName: input.appName || body.appName,
+    userId: input.userId || body.userId || DEFAULT_USER_ID,
+    sessionId: input.sessionId || body.sessionId || DEFAULT_SESSION_ID,
+    newMessage: input.newMessage ?? body.newMessage,
+    stateDelta: input.stateDelta ?? body.stateDelta,
+    streaming: input.streaming ?? body.streaming,
+  });
+}
+
+/**
+ * Reads the Reasoning Engine body, falling back to the raw stream for clients
+ * that send a content type `express.json()` does not recognise. A malformed or
+ * empty raw body is logged and reported as `{}`, which the handler then
+ * rejects with a 400.
+ */
+async function readReasoningEngineBody(
+  req: Request,
+  logger: Logger,
+): Promise<ReasoningEngineRequestBody> {
+  if (req.body && (Object.keys(req.body).length > 0 || !req.readable)) {
+    logger.info(`Using already parsed body: ${JSON.stringify(req.body)}`);
+    return req.body;
+  }
+
+  return new Promise((resolve) => {
+    let rawBody = '';
+    req.on('data', (chunk: Buffer) => {
+      rawBody += chunk;
+    });
+    req.on('end', () => {
+      logger.info(`Received Reasoning Engine raw body: ${rawBody}`);
+      let body: ReasoningEngineRequestBody = {};
+      if (rawBody) {
+        try {
+          body = JSON.parse(rawBody);
+        } catch (e) {
+          logger.error(`Failed to parse raw body as JSON: ${e}`);
+        }
+      }
+      resolve(body);
+    });
+  });
+}
+
+/**
+ * Runs an agent for a single HTTP request and yields its events.
+ *
+ * Aborts the run if the client disconnects while the run is in flight, and
+ * detaches the listener once the generator finishes so that the `close` event
+ * emitted at the end of a normal response can no longer abort anything.
+ */
+async function* runAgentEvents(options: {
+  req: Request;
+  logger: Logger;
+  request: AgentRunRequest;
+  execute: ExecuteAgentRun;
+  runConfig?: RunConfig;
+}): AsyncGenerator<Event> {
+  const {req, logger, request, execute, runConfig} = options;
+  const abortController = new AbortController();
+  const onClose = () => {
+    logger.info(
+      `HTTP connection closed. Aborting agent execution for session ` +
+        `${request.sessionId}`,
+    );
+    abortController.abort();
+  };
+  req.on('close', onClose);
+
+  try {
+    yield* execute({
+      appName: request.appName,
+      userId: request.userId,
+      sessionId: request.sessionId,
+      newMessage: request.newMessage,
+      stateDelta: request.stateDelta,
+      runConfig,
+      abortSignal: abortController.signal,
+    });
+  } finally {
+    req.off('close', onClose);
+  }
+}
+
 export class AdkApiServer {
   private readonly host: string;
   private readonly port: number;
@@ -731,44 +883,34 @@ export class AdkApiServer {
 
     // -------------------------- Run related endpoints ------------------------
     app.post('/run', async (req: Request, res: Response) => {
-      const {appName, userId, sessionId, newMessage, stateDelta} = req.body;
+      const request = parseAgentRunRequest(req.body);
+      // `/run` requires a pre-existing session; only `/api/reasoning_engine`
+      // creates one on demand. The 404 is not logged here, unlike `/run_sse`;
+      // that difference is pre-existing and out of scope for this refactor.
       const session = await this.sessionService.getSession({
-        appName,
-        userId,
-        sessionId,
+        appName: request.appName,
+        userId: request.userId,
+        sessionId: request.sessionId,
       });
 
       if (!session) {
-        res.status(404).json({error: `Session not found: ${sessionId}`});
+        res
+          .status(404)
+          .json({error: `Session not found: ${request.sessionId}`});
         return;
       }
 
-      const abortController = new AbortController();
-      let responseCompleted = false;
-
-      req.on('close', () => {
-        if (!responseCompleted) {
-          this.logger.info(
-            `HTTP connection closed. Aborting agent execution for session ${sessionId}`,
-          );
-          abortController.abort();
-        }
-      });
-
       try {
         const events: Event[] = [];
-        for await (const e of this.executeAgentRun({
-          appName,
-          userId,
-          sessionId,
-          newMessage,
-          stateDelta,
-          abortSignal: abortController.signal,
+        for await (const event of runAgentEvents({
+          req,
+          logger: this.logger,
+          request,
+          execute: (options) => this.executeAgentRun(options),
         })) {
-          events.push(e);
+          events.push(event);
         }
 
-        responseCompleted = true;
         res.json(events);
       } catch (e: unknown) {
         const error = `Failed to run agent: ${e}`;
@@ -783,106 +925,65 @@ export class AdkApiServer {
         `Received Reasoning Engine query headers: ${JSON.stringify(req.headers)}`,
       );
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const executeQuery = async (body: any) => {
-        const input = body.input || {};
-        const appName = input.appName || body.appName;
-        const userId = input.userId || body.userId || 'default-user';
-        const sessionId =
-          input.sessionId || body.sessionId || 'default-session';
-        const newMessage = input.newMessage || body.newMessage;
-        const stateDelta = input.stateDelta || body.stateDelta;
-        if (!appName) {
-          res.status(400).json({error: 'appName is required in input'});
-          return;
-        }
-        try {
-          await this.sessionService.getOrCreateSession({
-            appName,
-            userId,
-            sessionId,
-            state: {},
-          });
-          const events: Event[] = [];
-          const abortController = new AbortController();
-          req.on('close', () => {
-            abortController.abort();
-          });
-          for await (const e of this.executeAgentRun({
-            appName,
-            userId,
-            sessionId,
-            newMessage,
-            stateDelta,
-            abortSignal: abortController.signal,
-          })) {
-            events.push(e);
-          }
-          res.json({output: events});
-        } catch (e: unknown) {
-          const error = `Failed to run agent via Reasoning Engine API: ${e}`;
-          res.status(500).json({error});
-          this.logger.error(error);
-        }
-      };
+      const request = parseReasoningEngineRequest(
+        await readReasoningEngineBody(req, this.logger),
+      );
+      if (!request.appName) {
+        res.status(400).json({error: 'appName is required in input'});
+        return;
+      }
 
-      const isParsed =
-        req.body && (Object.keys(req.body).length > 0 || !req.readable);
-      if (isParsed) {
-        this.logger.info(
-          `Using already parsed body: ${JSON.stringify(req.body)}`,
-        );
-        await executeQuery(req.body);
-      } else {
-        let rawBody = '';
-        req.on('data', (chunk) => {
-          rawBody += chunk;
+      try {
+        // Unlike `/run` and `/run_sse`, the Reasoning Engine surface is called
+        // by clients that do not manage sessions, so it creates one on demand
+        // instead of returning 404.
+        await this.sessionService.getOrCreateSession({
+          appName: request.appName,
+          userId: request.userId,
+          sessionId: request.sessionId,
+          state: {},
         });
-        req.on('end', async () => {
-          this.logger.info(`Received Reasoning Engine raw body: ${rawBody}`);
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          let body: any = {};
-          if (rawBody) {
-            try {
-              body = JSON.parse(rawBody);
-            } catch (e) {
-              this.logger.error(`Failed to parse raw body as JSON: ${e}`);
-            }
-          }
-          await executeQuery(body);
-        });
+
+        const events: Event[] = [];
+        for await (const event of runAgentEvents({
+          req,
+          logger: this.logger,
+          request,
+          execute: (options) => this.executeAgentRun(options),
+        })) {
+          events.push(event);
+        }
+
+        res.json({output: events});
+      } catch (e: unknown) {
+        const error = `Failed to run agent via Reasoning Engine API: ${e}`;
+        res.status(500).json({error});
+        this.logger.error(error);
       }
     });
 
     app.post('/run_sse', async (req: Request, res: Response) => {
-      const {appName, userId, sessionId, newMessage, streaming, stateDelta} =
-        req.body;
-
+      const request = parseAgentRunRequest(req.body);
+      // Validate the session before any header is flushed: once the SSE stream
+      // is open the only way to report an error is an in-band `data:` frame.
       const session = await this.sessionService.getSession({
-        appName,
-        userId,
-        sessionId,
+        appName: request.appName,
+        userId: request.userId,
+        sessionId: request.sessionId,
       });
 
       if (!session) {
-        const error = `Session not found: ${sessionId}`;
+        const error = `Session not found: ${request.sessionId}`;
 
         res.status(404).json({error});
         this.logger.error(error);
         return;
       }
 
-      const abortController = new AbortController();
+      // `responseCompleted` only decides whether the catch block may still
+      // emit an in-band error frame; the abort listener is owned by
+      // `runAgentEvents`.
       let responseCompleted = false;
-
-      req.on('close', () => {
-        if (!responseCompleted) {
-          this.logger.info(
-            `HTTP connection closed. Aborting agent SSE execution for session ${sessionId}`,
-          );
-          abortController.abort();
-        }
-      });
 
       try {
         res.setHeader('Cache-Control', 'no-cache');
@@ -890,16 +991,16 @@ export class AdkApiServer {
         res.setHeader('Connection', 'keep-alive');
         res.flushHeaders();
 
-        for await (const event of this.executeAgentRun({
-          appName,
-          userId,
-          sessionId,
-          newMessage,
-          stateDelta,
+        for await (const event of runAgentEvents({
+          req,
+          logger: this.logger,
+          request,
+          execute: (options) => this.executeAgentRun(options),
           runConfig: {
-            streamingMode: streaming ? StreamingMode.SSE : StreamingMode.NONE,
+            streamingMode: request.streaming
+              ? StreamingMode.SSE
+              : StreamingMode.NONE,
           },
-          abortSignal: abortController.signal,
         })) {
           res.write(`data: ${JSON.stringify(event)}\n\n`);
         }
@@ -1004,15 +1105,9 @@ export class AdkApiServer {
     return this.runnerCache[appName];
   }
 
-  private async *executeAgentRun(options: {
-    appName: string;
-    userId: string;
-    sessionId: string;
-    newMessage: Content;
-    stateDelta?: Record<string, unknown>;
-    runConfig?: RunConfig;
-    abortSignal: AbortSignal;
-  }): AsyncGenerator<Event> {
+  private async *executeAgentRun(
+    options: ExecuteAgentRunOptions,
+  ): AsyncGenerator<Event> {
     await using agentFile = await this.agentLoader.getAgentFile(
       options.appName,
     );
@@ -1022,7 +1117,11 @@ export class AdkApiServer {
     yield* runner.runAsync({
       userId: options.userId,
       sessionId: options.sessionId,
-      newMessage: options.newMessage,
+      // `Runner.runAsync` types `newMessage` as required but tolerates a
+      // missing message at runtime (it only rejects a message with no parts);
+      // the dev server forwards the request as sent, and the Python dev server
+      // models `new_message` as optional too.
+      newMessage: options.newMessage!,
       runConfig: options.runConfig,
       stateDelta: options.stateDelta,
       abortSignal: options.abortSignal,
