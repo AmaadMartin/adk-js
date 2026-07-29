@@ -64,7 +64,9 @@ export class BigtableToolset extends BaseToolset {
         description: 'List Bigtable instance ids in a Google Cloud project.',
         parameters: metadataTool.ListInstancesArgsSchema,
         execute: async (args) =>
-          metadataTool.listInstances(this.clients.forProject(args.projectId)),
+          metadataTool.listInstances(
+            await this.clients.forProject(args.projectId),
+          ),
       }),
       new FunctionTool({
         name: this.toolName('get_instance_info'),
@@ -72,7 +74,7 @@ export class BigtableToolset extends BaseToolset {
         parameters: metadataTool.GetInstanceInfoArgsSchema,
         execute: async (args) =>
           metadataTool.getInstanceInfo(
-            this.clients.forProject(args.projectId),
+            await this.clients.forProject(args.projectId),
             args.instanceId,
           ),
       }),
@@ -82,7 +84,7 @@ export class BigtableToolset extends BaseToolset {
         parameters: metadataTool.ListTablesArgsSchema,
         execute: async (args) =>
           metadataTool.listTables(
-            this.clients.forProject(args.projectId),
+            await this.clients.forProject(args.projectId),
             args.instanceId,
           ),
       }),
@@ -92,7 +94,7 @@ export class BigtableToolset extends BaseToolset {
         parameters: metadataTool.GetTableInfoArgsSchema,
         execute: async (args) =>
           metadataTool.getTableInfo(
-            this.clients.forProject(args.projectId),
+            await this.clients.forProject(args.projectId),
             args.instanceId,
             args.tableId,
           ),
@@ -103,7 +105,7 @@ export class BigtableToolset extends BaseToolset {
         parameters: metadataTool.ListClustersArgsSchema,
         execute: async (args) =>
           metadataTool.listClusters(
-            this.clients.forProject(args.projectId),
+            await this.clients.forProject(args.projectId),
             args.instanceId,
           ),
       }),
@@ -114,7 +116,7 @@ export class BigtableToolset extends BaseToolset {
         parameters: metadataTool.GetClusterInfoArgsSchema,
         execute: async (args) =>
           metadataTool.getClusterInfo(
-            this.clients.forProject(args.projectId),
+            await this.clients.forProject(args.projectId),
             args.instanceId,
             args.clusterId,
           ),
@@ -124,7 +126,7 @@ export class BigtableToolset extends BaseToolset {
         description: 'Execute a GoogleSQL query from a Bigtable table.',
         parameters: queryTool.ExecuteSqlArgsSchema,
         execute: async (args) =>
-          queryTool.executeSql(this.clients.forProject(args.projectId), {
+          queryTool.executeSql(await this.clients.forProject(args.projectId), {
             instanceId: args.instanceId,
             query: args.query,
             parameters: args.parameters,
@@ -145,14 +147,17 @@ export class BigtableToolset extends BaseToolset {
             'Declare their types in parameterTypes like any other parameter.',
           parameters: queryTool.ExecuteSqlArgsSchema,
           execute: async (args, toolContext) =>
-            queryTool.executeSql(this.clients.forProject(args.projectId), {
-              instanceId: args.instanceId,
-              query: args.query,
-              parameters: args.parameters,
-              parameterTypes: args.parameterTypes,
-              viewParameters: this.resolveViewParameters(toolContext),
-              settings: this.toolSettings,
-            }),
+            queryTool.executeSql(
+              await this.clients.forProject(args.projectId),
+              {
+                instanceId: args.instanceId,
+                query: args.query,
+                parameters: args.parameters,
+                parameterTypes: args.parameterTypes,
+                viewParameters: this.resolveViewParameters(toolContext),
+                settings: this.toolSettings,
+              },
+            ),
         }),
       );
     }

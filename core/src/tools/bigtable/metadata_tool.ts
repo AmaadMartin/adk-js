@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Bigtable} from '@google-cloud/bigtable';
+import type {Bigtable} from '@google-cloud/bigtable';
 import {z} from 'zod';
 
 import {runBigtableTool} from './tool_result.js';

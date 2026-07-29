@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Bigtable, Instance, SqlTypes} from '@google-cloud/bigtable';
+import type {Bigtable, Instance, SqlTypes} from '@google-cloud/bigtable';
 import type {NamedList} from '@google-cloud/bigtable/build/src/execute-query/namedlist.js';
 import type {SqlValue} from '@google-cloud/bigtable/build/src/execute-query/values.js';
 import {z} from 'zod';
@@ -43,18 +43,22 @@ export const SQL_PARAMETER_TYPE_NAMES = [
 export type BigtableSqlParameterType =
   (typeof SQL_PARAMETER_TYPE_NAMES)[number];
 
-const SQL_PARAMETER_TYPE_FACTORIES: Record<
-  BigtableSqlParameterType,
-  () => SqlTypes.Type
-> = {
-  bool: SqlTypes.Bool,
-  bytes: SqlTypes.Bytes,
-  date: SqlTypes.Date,
-  float32: SqlTypes.Float32,
-  float64: SqlTypes.Float64,
-  int64: SqlTypes.Int64,
-  string: SqlTypes.String,
-  timestamp: SqlTypes.Timestamp,
+/**
+ * The SDK's own type descriptors, written as literals rather than built with
+ * the `SqlTypes.Bool()` factories so that this module stays type-only against
+ * `@google-cloud/bigtable` (see the note in `client.ts`). The
+ * `Record<..., SqlTypes.Type>` annotation still checks every literal against
+ * the SDK union, so a renamed tag fails the build.
+ */
+const SQL_PARAMETER_TYPES: Record<BigtableSqlParameterType, SqlTypes.Type> = {
+  bool: {type: 'bool'},
+  bytes: {type: 'bytes'},
+  date: {type: 'date'},
+  float32: {type: 'float32'},
+  float64: {type: 'float64'},
+  int64: {type: 'int64'},
+  string: {type: 'string'},
+  timestamp: {type: 'timestamp'},
 };
 
 /** A value that survives `JSON.stringify` on its way to the model. */
@@ -148,7 +152,7 @@ export function executeSql(client: Bigtable, options: ExecuteSqlOptions) {
   });
 }
 
-/** Instantiates the SDK type object for each declared parameter type. */
+/** Resolves the SDK type descriptor for each declared parameter type. */
 function toSqlTypes(
   parameterTypes?: Record<string, BigtableSqlParameterType>,
 ): Record<string, SqlTypes.Type> | undefined {
@@ -158,7 +162,7 @@ function toSqlTypes(
   return Object.fromEntries(
     Object.entries(parameterTypes).map(([name, type]) => [
       name,
-      SQL_PARAMETER_TYPE_FACTORIES[type](),
+      SQL_PARAMETER_TYPES[type],
     ]),
   );
 }
