@@ -28,15 +28,15 @@ export interface RequestInfo {
 export interface OriginPolicy {
   /** Literal origins from `--allow_origins` ('*' allows any origin). */
   allowedOrigins: string[];
-  /** Lower-cased `host[:port]` authorities accepted in the `Host` header. */
-  allowedHosts: Set<string>;
-  /** Whether the `Host` allowlist is enforced at all. */
-  enforceHostCheck: boolean;
+  /**
+   * Lower-cased `host[:port]` authorities accepted in the `Host` header, or
+   * undefined when the `Host` allowlist does not apply.
+   */
+  allowedHosts?: Set<string>;
 }
 
 /** Inputs to {@link buildOriginPolicy}. */
 export interface OriginPolicyOptions {
-  /** Literal origins parsed from `--allow_origins`. */
   allowedOrigins: string[];
   /** Address the server is bound to (`server.address().address`). */
   serverHost: string;
@@ -54,36 +54,18 @@ export function parseAllowedOrigins(value?: string): string[] {
     .filter((origin) => origin.length > 0);
 }
 
-/**
- * Returns true if `host` (with or without a port) refers to a loopback address.
- *
- * Accepts every form browsers and Node produce: `127.0.0.1`, `127.0.0.1:8000`,
- * any other `127.x.x.x`, `localhost[:port]`, `::1`, `[::1]` and `[::1]:8000`.
- */
+/** Returns true if the bare address `host` (no port) is a loopback address. */
 export function isLoopbackAddress(host: string): boolean {
-  const bare = stripPort(host);
-  if (bare === 'localhost') {
+  if (host === 'localhost') {
     return true;
   }
   // The `isIPv4` guard matters: `127.evil.com` is a hostname, not a loopback IP.
-  if (net.isIPv4(bare)) {
-    return bare.startsWith('127.');
+  if (net.isIPv4(host)) {
+    return host.startsWith('127.');
   }
   // The URL parser canonicalizes every IPv6 spelling (`0:0:0:0:0:0:0:1`,
   // `::0001`, ...) to its compressed form, so one comparison covers them all.
-  return net.isIPv6(bare) && parseUrlHost(`http://[${bare}]`) === '[::1]';
-}
-
-/** Strips an optional `:port` suffix, handling bracketed IPv6 literals. */
-function stripPort(host: string): string {
-  if (host.startsWith('[')) {
-    const end = host.indexOf(']');
-    return end === -1 ? host : host.slice(1, end);
-  }
-  // An IPv6 literal without brackets has more than one colon and no port.
-  return host.split(':').length === 2
-    ? host.slice(0, host.lastIndexOf(':'))
-    : host;
+  return net.isIPv6(host) && parseUrlHost(`http://[${host}]`) === '[::1]';
 }
 
 /** Returns the lower-cased `host[:port]` of a URL, or undefined if unparseable. */
@@ -124,7 +106,7 @@ export function isRequestHostAllowed(
   headers: http.IncomingHttpHeaders,
   policy: OriginPolicy,
 ): boolean {
-  if (!policy.enforceHostCheck) {
+  if (!policy.allowedHosts) {
     return true;
   }
   // Fail closed: every HTTP/1.1 client sends a Host header.
@@ -137,16 +119,16 @@ export function isRequestHostAllowed(
 /** Builds the per-server policy from the bound address and the CLI options. */
 export function buildOriginPolicy(options: OriginPolicyOptions): OriginPolicy {
   const {allowedOrigins, serverHost, configuredHost, port} = options;
-  const isLoopbackBind = isLoopbackAddress(serverHost);
-  const hostnames = new Set([serverHost, configuredHost]);
-  if (isLoopbackBind) {
-    for (const hostname of LOOPBACK_HOSTS) {
-      hostnames.add(hostname);
-    }
+  // A static Host allowlist is only derivable for a loopback bind: a wildcard
+  // (0.0.0.0) or public bind is legitimately reachable under any number of LAN
+  // addresses, and the DNS-rebinding threat model is the loopback dev server
+  // specifically.
+  if (!isLoopbackAddress(serverHost)) {
+    return {allowedOrigins};
   }
 
   const allowedHosts = new Set<string>();
-  for (const hostname of hostnames) {
+  for (const hostname of [serverHost, configuredHost, ...LOOPBACK_HOSTS]) {
     const authority = net.isIPv6(hostname) ? `[${hostname}]` : hostname;
     allowedHosts.add(`${authority}:${port}`.toLowerCase());
   }
@@ -158,15 +140,7 @@ export function buildOriginPolicy(options: OriginPolicyOptions): OriginPolicy {
     }
   }
 
-  return {
-    allowedOrigins,
-    allowedHosts,
-    // A static Host allowlist is only derivable for a loopback bind: a wildcard
-    // (0.0.0.0) or public bind is legitimately reachable under any number of
-    // LAN addresses, and the DNS-rebinding threat model is the loopback dev
-    // server specifically.
-    enforceHostCheck: isLoopbackBind,
-  };
+  return {allowedOrigins, allowedHosts};
 }
 
 /** Returns why the request must be rejected, or undefined to let it through. */

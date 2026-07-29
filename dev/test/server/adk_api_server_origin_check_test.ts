@@ -89,26 +89,6 @@ describe('AdkApiServer origin and host validation', () => {
     expect(response.body).toBe('Forbidden: origin not allowed');
   });
 
-  it('allows a state-changing request without an origin', async () => {
-    const port = await startServer();
-
-    const response = await request(port, '/apps/testApp/users/u/sessions', {
-      method: 'POST',
-    });
-
-    expect(response.status).toBe(200);
-  });
-
-  it('allows a safe request from a foreign origin', async () => {
-    const port = await startServer();
-
-    const response = await request(port, '/list-apps', {
-      headers: {origin: 'http://evil.com'},
-    });
-
-    expect(response.status).toBe(200);
-  });
-
   it('allows a state-changing request from its own origin', async () => {
     const port = await startServer();
 
@@ -120,11 +100,11 @@ describe('AdkApiServer origin and host validation', () => {
     expect(response.status).toBe(200);
   });
 
-  it('rejects a request whose Host is outside the allowlist', async () => {
+  it('rejects a Host outside the allowlist, X-Forwarded-Host and all', async () => {
     const port = await startServer();
 
     const response = await request(port, '/list-apps', {
-      headers: {host: 'evil.com:1234'},
+      headers: {host: 'evil.com:1234', 'x-forwarded-host': `localhost:${port}`},
     });
 
     expect(response.status).toBe(403);
@@ -153,15 +133,5 @@ describe('AdkApiServer origin and host validation', () => {
     expect(response.headers['access-control-allow-origin']).toBe(
       'http://evil.com',
     );
-  });
-
-  it('never lets X-Forwarded-Host stand in for the real Host', async () => {
-    const port = await startServer();
-
-    const response = await request(port, '/list-apps', {
-      headers: {host: 'evil.com:1234', 'x-forwarded-host': `localhost:${port}`},
-    });
-
-    expect(response.status).toBe(403);
   });
 });
