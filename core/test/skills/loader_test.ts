@@ -243,6 +243,27 @@ Instructions`,
 
       await fs.rm(tempDir, {recursive: true, force: true});
     });
+
+    it('normalizes allowed-tools to allowedTools with a single validation pass', async () => {
+      tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-skill-test-'));
+      const skillDir = path.join(tempDir, 'test-skill');
+      await fs.mkdir(skillDir);
+
+      await fs.writeFile(
+        path.join(skillDir, 'SKILL.md'),
+        `---
+name: test-skill
+description: A test skill
+allowed-tools: tool1,tool2
+---
+Instructions`,
+      );
+
+      const skill = await loadSkillFromDir(skillDir);
+      expect(skill.frontmatter.allowedTools).toBe('tool1,tool2');
+
+      await fs.rm(tempDir, {recursive: true, force: true});
+    });
   });
 
   describe('validateSkillDir', () => {
