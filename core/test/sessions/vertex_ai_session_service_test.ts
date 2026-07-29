@@ -105,11 +105,13 @@ describe('isRawEventRejection', () => {
     ).toBe(true);
   });
 
-  it('matches a status-less client-side validation error naming the field', () => {
-    // The adk-python analogue: a pydantic ValidationError has no HTTP status.
+  it('rejects a status-less error naming the field', () => {
+    // Only the server refuses rawEvent: the SDK converter copies the field
+    // through without validating it, so a status-less error naming it is
+    // something else and must not trigger a lossy re-append.
     expect(
       isRawEventRejection(new Error('rawEvent is not a supported field')),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it('rejects a 400 that names a different field', () => {
