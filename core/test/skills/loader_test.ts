@@ -243,6 +243,28 @@ Instructions`,
 
       await fs.rm(tempDir, {recursive: true, force: true});
     });
+
+    it('normalizes allowed-tools and defaults metadata', async () => {
+      tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-skill-test-'));
+      const skillDir = path.join(tempDir, 'test-skill');
+      await fs.mkdir(skillDir);
+
+      await fs.writeFile(
+        path.join(skillDir, 'SKILL.md'),
+        `---
+name: test-skill
+description: A test skill
+allowed-tools: tool1,tool2
+---
+Instructions`,
+      );
+
+      const skill = await loadSkillFromDir(skillDir);
+      expect(skill.frontmatter.allowedTools).toBe('tool1,tool2');
+      expect(skill.frontmatter.metadata).toEqual({});
+
+      await fs.rm(tempDir, {recursive: true, force: true});
+    });
   });
 
   describe('validateSkillDir', () => {
@@ -375,8 +397,35 @@ Instructions`,
       );
 
       const problems = await validateSkillDir(skillDir);
-      expect(problems.length).toBe(1);
-      expect(problems[0]).toContain('does not match directory name');
+      expect(problems).toEqual([
+        "Skill name 'test-skill' does not match directory name 'wrong-name'.",
+      ]);
+
+      await fs.rm(tempDir, {recursive: true, force: true});
+    });
+
+    it('reports only the name mismatch when the skill also has unknown frontmatter fields', async () => {
+      tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-skill-test-'));
+      const skillDir = path.join(tempDir, 'wrong-name');
+      await fs.mkdir(skillDir);
+
+      await fs.writeFile(
+        path.join(skillDir, 'SKILL.md'),
+        `---
+name: test-skill
+description: A test skill
+unknown_field: value
+---
+Instructions`,
+      );
+
+      const problems = await validateSkillDir(skillDir);
+      expect(problems).toEqual([
+        "Skill name 'test-skill' does not match directory name 'wrong-name'.",
+      ]);
+      expect(
+        problems.some((p) => p.includes('Unknown frontmatter fields')),
+      ).toBe(false);
 
       await fs.rm(tempDir, {recursive: true, force: true});
     });

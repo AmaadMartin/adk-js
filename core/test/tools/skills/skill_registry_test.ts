@@ -62,6 +62,27 @@ Instruction body`;
       expect(skill.resources?.scripts?.['run.sh']?.src).toBe('echo hello');
     });
 
+    it('normalizes allowed-tools and defaults metadata', () => {
+      const zip = new AdmZip();
+      zip.addFile(
+        'SKILL.md',
+        Buffer.from(
+          `---
+name: test-remote-skill
+description: A test remote skill
+allowed-tools: tool1,tool2
+---
+Instruction body`,
+          'utf-8',
+        ),
+      );
+
+      const skill = loadSkillFromZipBuffer(zip.toBuffer());
+
+      expect(skill.frontmatter.allowedTools).toBe('tool1,tool2');
+      expect(skill.frontmatter.metadata).toEqual({});
+    });
+
     it('throws error if SKILL.md is missing', () => {
       const zip = new AdmZip();
       zip.addFile('dummy.txt', Buffer.from('hello'));
