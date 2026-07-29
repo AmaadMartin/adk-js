@@ -179,15 +179,20 @@ async function readReasoningEngineBody(
  * Aborts the run if the client disconnects while the run is in flight, and
  * detaches the listener once the generator finishes so that the `close` event
  * emitted at the end of a normal response can no longer abort anything.
+ *
+ * The listener is on the response, not the request: since Node 16 a request
+ * emits `close` as soon as its message is complete, which for a body small
+ * enough to be buffered by `express.json()` happens before the run even
+ * starts. Only the response stays open for the lifetime of the run.
  */
 async function* runAgentEvents(options: {
-  req: Request;
+  res: Response;
   logger: Logger;
   request: AgentRunRequest;
   execute: ExecuteAgentRun;
   runConfig?: RunConfig;
 }): AsyncGenerator<Event> {
-  const {req, logger, request, execute, runConfig} = options;
+  const {res, logger, request, execute, runConfig} = options;
   const abortController = new AbortController();
   const onClose = () => {
     logger.info(
@@ -196,7 +201,7 @@ async function* runAgentEvents(options: {
     );
     abortController.abort();
   };
-  req.on('close', onClose);
+  res.on('close', onClose);
 
   try {
     yield* execute({
@@ -209,7 +214,7 @@ async function* runAgentEvents(options: {
       abortSignal: abortController.signal,
     });
   } finally {
-    req.off('close', onClose);
+    res.off('close', onClose);
   }
 }
 
@@ -903,7 +908,7 @@ export class AdkApiServer {
       try {
         const events: Event[] = [];
         for await (const event of runAgentEvents({
-          req,
+          res,
           logger: this.logger,
           request,
           execute: (options) => this.executeAgentRun(options),
@@ -946,7 +951,7 @@ export class AdkApiServer {
 
         const events: Event[] = [];
         for await (const event of runAgentEvents({
-          req,
+          res,
           logger: this.logger,
           request,
           execute: (options) => this.executeAgentRun(options),
@@ -992,7 +997,7 @@ export class AdkApiServer {
         res.flushHeaders();
 
         for await (const event of runAgentEvents({
-          req,
+          res,
           logger: this.logger,
           request,
           execute: (options) => this.executeAgentRun(options),
