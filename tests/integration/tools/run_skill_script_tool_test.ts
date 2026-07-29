@@ -16,10 +16,17 @@ import {
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 
 const IS_WINDOWS = os.platform() === 'win32';
 const IS_UNIX = os.platform() === 'linux' || os.platform() === 'darwin';
+
+/**
+ * Every case here shells out to a real `python3` / `sh` / `pwsh` subprocess,
+ * which on a cold CI runner regularly exceeds vitest's 5s default and flakes.
+ */
+const SKILL_SCRIPT_TIMEOUT_MS = 20_000;
+vi.setConfig({testTimeout: SKILL_SCRIPT_TIMEOUT_MS});
 
 describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
   function createMockContext(agentName = 'test-agent') {
