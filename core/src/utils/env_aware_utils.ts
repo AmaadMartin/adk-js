@@ -121,18 +121,13 @@ export function getBooleanEnvVar(envVar: string): boolean {
  * @return True if enterprise mode is enabled, false otherwise.
  */
 export function isEnterpriseModeEnabled(): boolean {
-  if (!process.env) {
-    return false;
-  }
-
-  if (process.env[GOOGLE_GENAI_USE_ENTERPRISE_ENV_VAR] !== undefined) {
+  if (process.env?.[GOOGLE_GENAI_USE_ENTERPRISE_ENV_VAR] !== undefined) {
     return getBooleanEnvVar(GOOGLE_GENAI_USE_ENTERPRISE_ENV_VAR);
   }
 
-  if (process.env[GOOGLE_GENAI_USE_VERTEXAI_ENV_VAR] !== undefined) {
+  if (process.env?.[GOOGLE_GENAI_USE_VERTEXAI_ENV_VAR] !== undefined) {
     logger.warn(
-      `${GOOGLE_GENAI_USE_VERTEXAI_ENV_VAR} is deprecated, please use ` +
-        `${GOOGLE_GENAI_USE_ENTERPRISE_ENV_VAR} instead`,
+      'GOOGLE_GENAI_USE_VERTEXAI is deprecated, please use GOOGLE_GENAI_USE_ENTERPRISE instead',
     );
     return getBooleanEnvVar(GOOGLE_GENAI_USE_VERTEXAI_ENV_VAR);
   }

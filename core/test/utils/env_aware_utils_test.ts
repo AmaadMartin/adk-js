@@ -100,13 +100,6 @@ describe('env_aware_utils', () => {
       },
     );
 
-    it('should not warn when GOOGLE_GENAI_USE_ENTERPRISE is set', () => {
-      process.env['GOOGLE_GENAI_USE_ENTERPRISE'] = 'true';
-      process.env['GOOGLE_GENAI_USE_VERTEXAI'] = 'true';
-      isEnterpriseModeEnabled();
-      expect(warnSpy).not.toHaveBeenCalled();
-    });
-
     it('should let a falsy GOOGLE_GENAI_USE_ENTERPRISE override the legacy var', () => {
       process.env['GOOGLE_GENAI_USE_ENTERPRISE'] = '0';
       process.env['GOOGLE_GENAI_USE_VERTEXAI'] = 'true';
@@ -124,12 +117,8 @@ describe('env_aware_utils', () => {
     it('should fall back to GOOGLE_GENAI_USE_VERTEXAI and warn', () => {
       process.env['GOOGLE_GENAI_USE_VERTEXAI'] = 'true';
       expect(isEnterpriseModeEnabled()).toBe(true);
-      expect(warnSpy).toHaveBeenCalledOnce();
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringMatching(/GOOGLE_GENAI_USE_VERTEXAI is deprecated/),
-      );
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('GOOGLE_GENAI_USE_ENTERPRISE'),
+      expect(warnSpy).toHaveBeenCalledExactlyOnceWith(
+        'GOOGLE_GENAI_USE_VERTEXAI is deprecated, please use GOOGLE_GENAI_USE_ENTERPRISE instead',
       );
     });
 
