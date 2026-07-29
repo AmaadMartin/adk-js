@@ -19,11 +19,10 @@ import {beforeEach, describe, expect, it} from 'vitest';
 const IS_WINDOWS = os.platform() === 'win32';
 const IS_UNIX = os.platform() === 'linux' || os.platform() === 'darwin';
 
-// Cases that spawn a real shell interpreter need a budget larger than vitest's
-// 5000ms default (PowerShell start-up on a cold CI runner alone can exceed it)
-// and larger than UnsafeLocalCodeExecutor's own 30s `timeoutSeconds` default,
-// so a hung child surfaces as the executor's timeout error rather than an
-// opaque vitest timeout.
+// Cases that spawn a real shell interpreter need a budget above vitest's 5000ms
+// default (PowerShell start-up on a cold CI runner alone can exceed it) and
+// above UnsafeLocalCodeExecutor's own 30s `timeoutSeconds` default, so a hung
+// child reports the executor's timeout error, not an opaque vitest timeout.
 const TEST_EXECUTION_TIMEOUT = 60000;
 
 function createMockInvocationContext(): InvocationContext {
@@ -277,29 +276,25 @@ describe('UnsafeLocalCodeExecutor', () => {
     expect(result.stderr).toContain('non-existent-python-executable-123');
   });
 
-  it(
-    'should respect shellCommandPath',
-    async () => {
-      const customExecutor = new UnsafeLocalCodeExecutor({
-        shellCommandPath: 'non-existent-shell-executable-456',
-      });
+  it('should respect shellCommandPath', async () => {
+    const customExecutor = new UnsafeLocalCodeExecutor({
+      shellCommandPath: 'non-existent-shell-executable-456',
+    });
 
-      const params: ExecuteCodeParams = {
-        invocationContext,
-        codeExecutionInput: {
-          code: 'echo "test"',
-          language: CodeExecutionLanguage.SHELL,
-          inputFiles: [],
-        },
-      };
+    const params: ExecuteCodeParams = {
+      invocationContext,
+      codeExecutionInput: {
+        code: 'echo "test"',
+        language: CodeExecutionLanguage.SHELL,
+        inputFiles: [],
+      },
+    };
 
-      const result = await customExecutor.executeCode(params);
+    const result = await customExecutor.executeCode(params);
 
-      expect(result.stderr).toContain('Process error:');
-      expect(result.stderr).toContain('non-existent-shell-executable-456');
-    },
-    TEST_EXECUTION_TIMEOUT,
-  );
+    expect(result.stderr).toContain('Process error:');
+    expect(result.stderr).toContain('non-existent-shell-executable-456');
+  });
 
   it('should pass array arguments to the script', async () => {
     const params: ExecuteCodeParams = {
