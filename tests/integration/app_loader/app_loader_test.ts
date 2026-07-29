@@ -68,10 +68,14 @@ describe('AgentLoader discovery and loading integration', () => {
   );
   let loader: AgentLoader;
 
-  beforeAll(async () => {
-    await installFixtureProject(projectPath);
+  // This fixture is loaded in-process, so it deliberately has no package.json
+  // and needs no npm install: esbuild and Node both resolve @google/adk from
+  // the workspace-root node_modules, which points at the same core/ and dev/
+  // the fixture's file: deps used to. Without a package.json the fixture
+  // inherits "type": "module" from the repository root and compiles to ESM.
+  beforeAll(() => {
     loader = new AgentLoader(projectPath);
-  }, FIXTURE_HOOK_TIMEOUT_MS);
+  });
 
   it(
     'should discover apps vs agents across directories and standalone files',
@@ -96,6 +100,9 @@ describe('AgentLoader discovery and loading integration', () => {
     async () => {
       const appFile = await loader.getAppFile('service_alpha');
       const loaded = await appFile.load();
+      // Pins the module type the fixture resolves to now that it has no
+      // package.json of its own: ESM, inherited from the repository root.
+      expect(path.extname(appFile.getFilePath())).toBe('.mjs');
       expect(isApp(loaded)).toBe(true);
       expect((loaded as App).name).toBe('alpha_app');
 
@@ -123,6 +130,5 @@ describe('AgentLoader discovery and loading integration', () => {
 
   afterAll(async () => {
     await loader.disposeAll();
-    await cleanupFixtureProject(projectPath);
   }, FIXTURE_HOOK_TIMEOUT_MS);
 });
