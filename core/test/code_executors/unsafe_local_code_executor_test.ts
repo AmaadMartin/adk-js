@@ -13,7 +13,17 @@ import {
   UnsafeLocalCodeExecutor,
   createSession,
 } from '@google/adk';
+import * as os from 'node:os';
 import {beforeEach, describe, expect, it} from 'vitest';
+
+const IS_WINDOWS = os.platform() === 'win32';
+const IS_UNIX = os.platform() === 'linux' || os.platform() === 'darwin';
+
+// Cases that spawn a real shell interpreter need a budget above vitest's 5000ms
+// default (PowerShell start-up on a cold CI runner alone can exceed it) and
+// above UnsafeLocalCodeExecutor's own 30s `timeoutSeconds` default, so a hung
+// child reports the executor's timeout error, not an opaque vitest timeout.
+const TEST_EXECUTION_TIMEOUT = 60000;
 
 function createMockInvocationContext(): InvocationContext {
   const agent = new LlmAgent({
@@ -126,21 +136,109 @@ describe('UnsafeLocalCodeExecutor', () => {
     expect(result.stderr).toBe('');
   });
 
-  it('should execute shell code and return stdout', async () => {
-    const params: ExecuteCodeParams = {
-      invocationContext,
-      codeExecutionInput: {
-        code: 'echo "Hello, Shell!"',
-        language: CodeExecutionLanguage.SHELL,
-        inputFiles: [],
-      },
-    };
+  it.skipIf(!IS_UNIX)(
+    'should execute shell code and return stdout',
+    async () => {
+      const params: ExecuteCodeParams = {
+        invocationContext,
+        codeExecutionInput: {
+          code: 'echo "Hello, Shell!"',
+          language: CodeExecutionLanguage.SHELL,
+          inputFiles: [],
+        },
+      };
 
-    const result = await executor.executeCode(params);
+      const result = await executor.executeCode(params);
 
-    expect(result.stdout).toContain('Hello, Shell!');
-    expect(result.stderr).toBe('');
-  });
+      expect(result.stdout).toContain('Hello, Shell!');
+      expect(result.stderr).toBe('');
+    },
+    TEST_EXECUTION_TIMEOUT,
+  );
+
+  it.skipIf(!IS_WINDOWS)(
+    'should execute shell code via PowerShell and return stdout',
+    async () => {
+      const params: ExecuteCodeParams = {
+        invocationContext,
+        codeExecutionInput: {
+          code: 'Write-Host "Hello, Shell!"',
+          language: CodeExecutionLanguage.SHELL,
+          inputFiles: [],
+        },
+      };
+
+      const result = await executor.executeCode(params);
+
+      expect(result.stdout).toContain('Hello, Shell!');
+      expect(result.stderr).toBe('');
+    },
+    TEST_EXECUTION_TIMEOUT,
+  );
+
+  it.skipIf(!IS_WINDOWS)(
+    'should execute shell code via cmd.exe when shellCommandPath is cmd',
+    async () => {
+      const cmdExecutor = new UnsafeLocalCodeExecutor({
+        shellCommandPath: 'cmd.exe',
+      });
+
+      const params: ExecuteCodeParams = {
+        invocationContext,
+        codeExecutionInput: {
+          code: '@echo off\necho Hello, CMD!',
+          language: CodeExecutionLanguage.SHELL,
+          inputFiles: [],
+        },
+      };
+
+      const result = await cmdExecutor.executeCode(params);
+
+      expect(result.stdout).toContain('Hello, CMD!');
+      expect(result.stderr).toBe('');
+    },
+    TEST_EXECUTION_TIMEOUT,
+  );
+
+  it.skipIf(!IS_WINDOWS)(
+    'should execute PowerShell code and return stdout',
+    async () => {
+      const params: ExecuteCodeParams = {
+        invocationContext,
+        codeExecutionInput: {
+          code: 'Write-Host "Hello, PowerShell!"',
+          language: CodeExecutionLanguage.POWERSHELL,
+          inputFiles: [],
+        },
+      };
+
+      const result = await executor.executeCode(params);
+
+      expect(result.stdout).toContain('Hello, PowerShell!');
+      expect(result.stderr).toBe('');
+    },
+    TEST_EXECUTION_TIMEOUT,
+  );
+
+  it.skipIf(!IS_WINDOWS)(
+    'should execute Windows CMD code and return stdout',
+    async () => {
+      const params: ExecuteCodeParams = {
+        invocationContext,
+        codeExecutionInput: {
+          code: '@echo off\necho Hello, Windows CMD!',
+          language: CodeExecutionLanguage.WINDOWS_CMD,
+          inputFiles: [],
+        },
+      };
+
+      const result = await executor.executeCode(params);
+
+      expect(result.stdout).toContain('Hello, Windows CMD!');
+      expect(result.stderr).toBe('');
+    },
+    TEST_EXECUTION_TIMEOUT,
+  );
 
   it('should return error for unsupported language', async () => {
     const params: ExecuteCodeParams = {
