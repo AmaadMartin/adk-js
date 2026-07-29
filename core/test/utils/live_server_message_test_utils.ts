@@ -7,7 +7,7 @@
 import {LiveServerMessage} from '@google/genai';
 
 /** The assignable fields of {@link LiveServerMessage}. */
-type LiveServerMessageFields = Omit<LiveServerMessage, 'text' | 'data'>;
+export type LiveServerMessageFields = Omit<LiveServerMessage, 'text' | 'data'>;
 
 /**
  * Builds a real {@link LiveServerMessage} from the given wire fields.
