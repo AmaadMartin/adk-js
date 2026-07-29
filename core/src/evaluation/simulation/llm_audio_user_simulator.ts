@@ -24,9 +24,10 @@ import {LLMRegistry} from '../../models/registry.js';
 import {experimental} from '../../utils/experimental.js';
 import {addDefaultRetryOptionsIfNotPresent} from '../_retry_options_utils.js';
 import {Evaluator} from '../eval_case.js';
-// Side-effect import: registers `CloudTtsLlm` under the `cloud_tts` registry key
-// so the default `audioModel` resolves without the caller importing it.
-import './cloud_tts_llm.js';
+// Importing this module also registers `CloudTtsLlm` under the `cloud_tts`
+// registry key, so the default `audioModel` resolves without the caller
+// importing it.
+import {DEFAULT_LANGUAGE_CODE, DEFAULT_VOICE_NAME} from './cloud_tts_llm.js';
 import {isValidUserSimulatorTemplate} from './llm_backed_user_simulator_prompts.js';
 import {
   BaseUserSimulatorConfig,
@@ -156,8 +157,8 @@ export class LlmAudioUserSimulatorConfig extends BaseUserSimulatorConfig {
     this.audioModel = input.audioModel ?? DEFAULT_AUDIO_MODEL;
     this.audioModelConfiguration = input.audioModelConfiguration ?? {
       speechConfig: {
-        voiceConfig: {prebuiltVoiceConfig: {voiceName: 'en-US-Studio-O'}},
-        languageCode: 'en-US',
+        voiceConfig: {prebuiltVoiceConfig: {voiceName: DEFAULT_VOICE_NAME}},
+        languageCode: DEFAULT_LANGUAGE_CODE,
       },
     };
     this.includeTextWithAudio = input.includeTextWithAudio ?? true;

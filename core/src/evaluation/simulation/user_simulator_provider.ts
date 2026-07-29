@@ -82,6 +82,7 @@ export class UserSimulatorProvider {
   provide(evalCase: EvalCase): UserSimulator {
     const configType = this.userSimulatorConfig
       .constructor as BaseUserSimulatorConfigClass;
+    const simulatorClass = SIMULATOR_BY_CONFIG_TYPE.get(configType);
 
     if (evalCase.conversation !== undefined) {
       // Static conversations replay pre-authored turns.
@@ -90,7 +91,10 @@ export class UserSimulatorProvider {
       });
       // When an audio config is set, route the static turns through the audio
       // decorator so they are synthesized to audio, just like the scenario case.
-      if (SIMULATOR_BY_CONFIG_TYPE.get(configType) === LlmAudioUserSimulator) {
+      // An unregistered config is treated as "no audio" here (rather than
+      // throwing as the scenario branch does), preserving the pre-existing
+      // behavior of the static path ignoring the config entirely.
+      if (simulatorClass === LlmAudioUserSimulator) {
         return new LlmAudioUserSimulator({
           config: this.userSimulatorConfig,
           textSimulator: staticSimulator,
@@ -99,7 +103,6 @@ export class UserSimulatorProvider {
       return staticSimulator;
     }
 
-    const simulatorClass = SIMULATOR_BY_CONFIG_TYPE.get(configType);
     if (simulatorClass === undefined) {
       const registered = [...SIMULATOR_BY_CONFIG_TYPE.keys()]
         .map((configClass) => configClass.name)

@@ -178,6 +178,46 @@ describe('CloudTtsLlm', () => {
       expect(client.synthesizeSpeech).toHaveBeenCalledTimes(1);
     });
 
+    it('decodes base64 audioContent returned by the REST fallback', async () => {
+      // Under the client's REST fallback the proto `bytes` field arrives as a
+      // base64 string; it must be decoded as base64, not UTF-8.
+      const llm = new CloudTtsLlm({model: 'cloud_tts'});
+      withClient(llm, {
+        synthesizeSpeech: vi
+          .fn()
+          .mockResolvedValue([
+            {audioContent: Buffer.from('AUDIO_BYTES').toString('base64')},
+          ]),
+      });
+
+      const responses = await collect(
+        llm.generateContentAsync(textRequest('hello')),
+      );
+
+      expect(
+        Buffer.from(
+          responses[0].content?.parts?.[0].inlineData?.data ?? '',
+          'base64',
+        ),
+      ).toEqual(Buffer.from('AUDIO_BYTES'));
+    });
+
+    it('yields an error response when the API returns no audio content', async () => {
+      const llm = new CloudTtsLlm({model: 'cloud_tts'});
+      withClient(llm, {
+        synthesizeSpeech: vi.fn().mockResolvedValue([{audioContent: null}]),
+      });
+
+      const responses = await collect(
+        llm.generateContentAsync(textRequest('hi')),
+      );
+
+      expect(responses).toHaveLength(1);
+      expect(responses[0].errorCode).toBe('TTS_SYNTHESIS_FAILED');
+      expect(responses[0].errorMessage).toContain('no audio content');
+      expect(responses[0].content).toBeUndefined();
+    });
+
     it('maps the MP3 encoding to audio/mpeg', async () => {
       const llm = new CloudTtsLlm({model: 'cloud_tts', audioEncoding: 'MP3'});
       withClient(llm, {

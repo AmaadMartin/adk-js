@@ -17,7 +17,16 @@ import {
   Status,
   UserSimulator,
 } from '@google/adk';
+import type {SpeechConfig} from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+
+// The default voice constants are shared with the Cloud TTS module; they port
+// adk-python module privates and so are deliberately not in the public API
+// (same convention as `summarizeConversation` in the user-simulator subsystem).
+import {
+  DEFAULT_LANGUAGE_CODE,
+  DEFAULT_VOICE_NAME,
+} from '../../../src/evaluation/simulation/cloud_tts_llm.js';
 
 /** Yields each item from `items` as an async generator. */
 async function* toAsyncIter(items: LlmResponse[]): AsyncGenerator<LlmResponse> {
@@ -67,6 +76,17 @@ describe('LlmAudioUserSimulatorConfig', () => {
     expect(config.model).toBe('gemini-2.5-flash');
     expect(config.audioModel).toBe('cloud_tts');
     expect(config.includeTextWithAudio).toBe(true);
+  });
+
+  it('defaults the voice to the Cloud TTS module constants', () => {
+    // Locks the two files together: the default speech config must stay in
+    // sync with the fallback `extractVoiceConfig` applies when none is set.
+    const speechConfig = new LlmAudioUserSimulatorConfig()
+      .audioModelConfiguration.speechConfig as SpeechConfig;
+    expect(speechConfig.voiceConfig?.prebuiltVoiceConfig?.voiceName).toBe(
+      DEFAULT_VOICE_NAME,
+    );
+    expect(speechConfig.languageCode).toBe(DEFAULT_LANGUAGE_CODE);
   });
 
   it('validates custom instructions against the required placeholders', () => {

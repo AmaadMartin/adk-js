@@ -29,8 +29,12 @@ import {logger} from '../../utils/logger.js';
 /** The npm package that provides the Cloud TTS client. */
 const TTS_PACKAGE = '@google-cloud/text-to-speech';
 
-const DEFAULT_VOICE_NAME = 'en-US-Studio-O';
-const DEFAULT_LANGUAGE_CODE = 'en-US';
+/** The Cloud TTS voice used when a request selects none. */
+export const DEFAULT_VOICE_NAME = 'en-US-Studio-O';
+
+/** The BCP-47 language code used when a request selects none. */
+export const DEFAULT_LANGUAGE_CODE = 'en-US';
+
 const DEFAULT_AUDIO_ENCODING = 'LINEAR16';
 
 /** Maps Cloud TTS `AudioEncoding` names to the MIME types ADK emits. */
@@ -70,7 +74,7 @@ export function extractText(llmRequest: LlmRequest): string {
 }
 
 /** A resolved Cloud TTS voice selection. */
-interface VoiceConfig {
+export interface VoiceConfig {
   /** The Cloud TTS voice name (e.g. `en-US-Studio-O`). */
   voiceName: string;
   /** The BCP-47 language code (e.g. `en-US`). */
@@ -117,7 +121,13 @@ interface SynthesizeSpeechRequest {
 
 /** The Cloud TTS `synthesizeSpeech` response shape ADK relies on. */
 interface SynthesizeSpeechResponse {
-  audioContent: Uint8Array;
+  /**
+   * Mirrors the SDK's `ISynthesizeSpeechResponse.audioContent`, which is
+   * `Uint8Array | Buffer | string | null` (`Buffer` is a `Uint8Array`, so the
+   * two collapse here). The client's REST fallback mode returns the proto
+   * `bytes` field base64-encoded as a string, and a response can omit it.
+   */
+  audioContent?: Uint8Array | string | null;
 }
 
 /** The subset of the Cloud TTS client ADK relies on. */
@@ -242,7 +252,7 @@ export class CloudTtsLlm extends BaseLlm {
       this.ttsClient = await createTtsClient();
     }
 
-    let audioContent: Uint8Array;
+    let audioContent: Buffer;
     try {
       const [response] = await this.ttsClient.synthesizeSpeech({
         input: {text},
@@ -253,7 +263,15 @@ export class CloudTtsLlm extends BaseLlm {
           pitch: this.pitch,
         },
       });
-      audioContent = response.audioContent;
+      if (!response.audioContent) {
+        throw new Error('Cloud TTS returned no audio content.');
+      }
+      // Under REST fallback the proto `bytes` field arrives base64-encoded, so
+      // a string must be decoded as base64 rather than UTF-8.
+      audioContent =
+        typeof response.audioContent === 'string'
+          ? Buffer.from(response.audioContent, 'base64')
+          : Buffer.from(response.audioContent);
     } catch (e) {
       logger.error(`Cloud TTS synthesis failed: ${e}`);
       yield {errorCode: 'TTS_SYNTHESIS_FAILED', errorMessage: String(e)};
@@ -272,7 +290,7 @@ export class CloudTtsLlm extends BaseLlm {
           {
             inlineData: {
               mimeType,
-              data: Buffer.from(audioContent).toString('base64'),
+              data: audioContent.toString('base64'),
             },
           },
         ],
