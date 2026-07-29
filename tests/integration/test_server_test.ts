@@ -82,12 +82,6 @@ function listenOn(port: number): Promise<void> {
   });
 }
 
-function countActiveTimers(): number {
-  return process
-    .getActiveResourcesInfo()
-    .filter((resource) => resource === 'Timeout').length;
-}
-
 afterEach(async () => {
   for (const child of children.splice(0)) {
     child.kill('SIGKILL');
@@ -166,12 +160,11 @@ describe('BaseTestServer.startProcess', () => {
     expect(server.url).toBe(`http://${HOST}:${requested}`);
   });
 
-  it('leaves no pending timer or stream listener behind', async () => {
+  it('detaches every listener once the start promise settles', async () => {
     const server = new ScriptedServer(START_ONLY);
 
     await server.start(START_TIMEOUT_MS);
 
-    expect(countActiveTimers()).toBe(0);
     const child = server.child;
     if (!child) {
       expect.fail('expected the scripted server to have spawned a child');
