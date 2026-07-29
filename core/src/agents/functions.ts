@@ -557,8 +557,15 @@ export function mergeParallelFunctionResponseEvents(
     invocationId: baseEvent.invocationId,
     author: baseEvent.author,
     branch: baseEvent.branch,
-    content: {role: 'user', parts: mergedParts},
+    // A batch of long-running calls that all paused contributes no parts; the
+    // merged event must stay content-less rather than carry an empty turn.
+    content: mergedParts.length
+      ? {role: 'user', parts: mergedParts}
+      : undefined,
     actions: mergedActions,
+    longRunningToolIds: functionResponseEvents.flatMap(
+      (event) => event.longRunningToolIds ?? [],
+    ),
     timestamp: baseEvent.timestamp!,
   });
 }
