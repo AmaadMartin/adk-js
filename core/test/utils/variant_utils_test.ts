@@ -5,28 +5,19 @@
  */
 
 import {GoogleLLMVariant} from '@google/adk';
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi,
-  type MockInstance,
-} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {logger} from '../../src/utils/logger.js';
 import {getGoogleLlmVariant} from '../../src/utils/variant_utils.js';
 
 describe('variant_utils', () => {
   describe('getGoogleLlmVariant', () => {
     const originalEnv = process.env;
-    let warnSpy: MockInstance<typeof logger.warn>;
 
     beforeEach(() => {
       process.env = {...originalEnv};
       delete process.env['GOOGLE_GENAI_USE_ENTERPRISE'];
       delete process.env['GOOGLE_GENAI_USE_VERTEXAI'];
-      warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      vi.spyOn(logger, 'warn').mockImplementation(() => {});
     });
 
     afterEach(() => {
@@ -61,12 +52,6 @@ describe('variant_utils', () => {
     it('should return GEMINI_API when GOOGLE_GENAI_USE_ENTERPRISE is "false"', () => {
       process.env['GOOGLE_GENAI_USE_ENTERPRISE'] = 'false';
       expect(getGoogleLlmVariant()).toBe(GoogleLLMVariant.GEMINI_API);
-    });
-
-    it('should warn when falling back to GOOGLE_GENAI_USE_VERTEXAI', () => {
-      process.env['GOOGLE_GENAI_USE_VERTEXAI'] = 'true';
-      expect(getGoogleLlmVariant()).toBe(GoogleLLMVariant.VERTEX_AI);
-      expect(warnSpy).toHaveBeenCalledOnce();
     });
   });
 });

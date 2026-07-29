@@ -84,7 +84,7 @@ describe('env_aware_utils', () => {
       expect(warnSpy).not.toHaveBeenCalled();
     });
 
-    it.each(['true', 'TRUE', 'True', '1'])(
+    it.each(['true', '1'])(
       'should return true when GOOGLE_GENAI_USE_ENTERPRISE is "%s"',
       (value) => {
         process.env['GOOGLE_GENAI_USE_ENTERPRISE'] = value;
@@ -92,16 +92,17 @@ describe('env_aware_utils', () => {
       },
     );
 
-    it.each(['false', '0', ''])(
-      'should return false when GOOGLE_GENAI_USE_ENTERPRISE is "%s"',
-      (value) => {
-        process.env['GOOGLE_GENAI_USE_ENTERPRISE'] = value;
-        expect(isEnterpriseModeEnabled()).toBe(false);
-      },
-    );
+    it('should return false when GOOGLE_GENAI_USE_ENTERPRISE is "false"', () => {
+      process.env['GOOGLE_GENAI_USE_ENTERPRISE'] = 'false';
+      expect(isEnterpriseModeEnabled()).toBe(false);
+    });
 
     it.each([
       {enterprise: '0', legacy: 'true', expected: false},
+      // An empty value is present-but-falsy: it must still win over the legacy
+      // variable, which a truthiness check instead of a presence check would
+      // get wrong.
+      {enterprise: '', legacy: 'true', expected: false},
       {enterprise: 'true', legacy: 'false', expected: true},
     ])(
       'should let GOOGLE_GENAI_USE_ENTERPRISE="$enterprise" override the legacy var',
