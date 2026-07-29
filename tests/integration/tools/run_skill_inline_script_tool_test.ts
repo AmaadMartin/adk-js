@@ -50,6 +50,8 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
     expect(result.stderr).toBe('');
   });
 
+  // 60s: PowerShell cold start on Windows CI exceeds vitest's 5s default; also
+  // above the executor's own 30s budget so a real hang reports its own error.
   it('successfully executes a real Shell inline script', async () => {
     const executor = new UnsafeLocalCodeExecutor();
     const toolset = new SkillToolset([], {codeExecutor: executor});
@@ -66,7 +68,7 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
     expect(result).toBeDefined();
     expect(result.stdout).toContain('hello from real sh');
     expect(result.stderr).toBe('');
-  });
+  }, 60000);
 
   it('captures stderr from a real JavaScript inline script', async () => {
     const executor = new UnsafeLocalCodeExecutor();
@@ -100,7 +102,7 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
 
     expect(result).toBeDefined();
     expect(result.stderr).toContain('some sh error');
-  });
+  }, 60000);
 
   it('successfully executes a real Python inline script', async () => {
     const executor = new UnsafeLocalCodeExecutor();

@@ -187,6 +187,8 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
     expect(result.stderr).toContain('skill python error');
   });
 
+  // 60s: PowerShell cold start on Windows CI exceeds vitest's 5s default; also
+  // above the executor's own 30s budget so a real hang reports its own error.
   it.skipIf(!IS_WINDOWS)(
     'successfully executes a real PowerShell skill script',
     async () => {
@@ -206,6 +208,7 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
       expect(result.stdout).toContain('hello from skill powershell');
       expect(result.stderr).toBe('');
     },
+    60000,
   );
 
   it.skipIf(!IS_WINDOWS)(
@@ -227,6 +230,7 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
       expect(result.stderr).toContain('skill');
       expect(result.stderr).toContain('powershell error');
     },
+    60000,
   );
 
   it.skipIf(!IS_WINDOWS)(
