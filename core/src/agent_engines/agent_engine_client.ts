@@ -246,7 +246,7 @@ export async function* parseSseStream(
  *   sessionId: session.id,
  *   message: 'Hello',
  * })) {
- *   logger.info(event.author);
+ *   console.log(event.author);
  * }
  * ```
  */
