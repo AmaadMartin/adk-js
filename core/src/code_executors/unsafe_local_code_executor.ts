@@ -22,8 +22,7 @@ const IS_WINDOWS = os.platform() === 'win32';
 
 /**
  * Flags for every spawned PowerShell process. `-NoProfile` keeps execution
- * hermetic: host profile scripts must not run before the executed script, so
- * they cannot pollute its output, mutate its environment, or spend its timeout.
+ * hermetic: host profile scripts must not run before the executed script.
  */
 const POWERSHELL_ARGS = [
   '-NoProfile',

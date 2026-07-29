@@ -34,11 +34,12 @@ const POWERSHELL_FLAGS = [
   '-File',
 ];
 
-/** A `ChildProcess` stub that exits successfully without running anything. */
+/**
+ * A `ChildProcess` stub that exits successfully without running anything. It
+ * has no stdout/stderr streams, which `executeCode` already handles.
+ */
 function stubChildProcess(): ChildProcess {
   const child = new EventEmitter() as unknown as ChildProcess;
-  child.stdout = null;
-  child.stderr = null;
   setImmediate(() => child.emit('close', 0, null));
   return child;
 }
