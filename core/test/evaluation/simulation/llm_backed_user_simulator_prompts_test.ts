@@ -257,6 +257,43 @@ test stop`,
     expect(pythonAttack).toContain('## \n');
   });
 
+  // The nunjucks environment and its `render_string_filter` are module-level
+  // and therefore shared by every call; the filter reads its variables from the
+  // render context, so consecutive renders must not bleed into each other.
+  it('keeps per-render context isolated across successive renders', () => {
+    const makePersona = (): UserPersona => ({
+      id: 'test_persona',
+      description: 'Test persona description',
+      behaviors: [
+        {
+          name: 'Behavior {{ stop_signal }}',
+          description: 'Plan {{ conversation_plan }}',
+          behaviorInstructions: ['instruction 1'],
+          violationRubrics: ['rubric 1'],
+        },
+      ],
+    });
+
+    const first = getLlmBackedUserSimulatorPrompt({
+      conversationPlan: 'first plan',
+      conversationHistory: 'first history',
+      stopSignal: 'first stop',
+      userPersona: makePersona(),
+    });
+    const second = getLlmBackedUserSimulatorPrompt({
+      conversationPlan: 'second plan',
+      conversationHistory: 'second history',
+      stopSignal: 'second stop',
+      userPersona: makePersona(),
+    });
+
+    expect(first).toContain('## Behavior first stop');
+    expect(first).toContain('Plan first plan');
+    expect(second).toContain('## Behavior second stop');
+    expect(second).toContain('Plan second plan');
+    expect(second).not.toContain('first');
+  });
+
   it('resolves only simple own-property context variables', () => {
     const userPersona: UserPersona = {
       id: 'test_persona',

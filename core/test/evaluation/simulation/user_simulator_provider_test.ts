@@ -6,6 +6,7 @@
 
 import {
   BaseLlm,
+  BaseLlmConnection,
   BaseUserSimulatorConfig,
   ConversationScenario,
   EvalCase,
@@ -13,6 +14,7 @@ import {
   LlmBackedUserSimulator,
   LlmBackedUserSimulatorConfig,
   LLMRegistry,
+  LlmResponse,
   SIMULATOR_BY_CONFIG_TYPE,
   StaticUserSimulator,
   UserSimulatorProvider,
@@ -22,6 +24,24 @@ import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 const TEST_CONVERSATION: Invocation[] = [
   {invocationId: 'inv1', userContent: {parts: [{text: 'Hello!'}]}},
 ];
+
+/**
+ * A `BaseLlm` that is never driven: the provider only has to resolve a model
+ * while constructing the simulator, it never generates.
+ */
+class UnusedLlm extends BaseLlm {
+  constructor() {
+    super({model: 'test-model'});
+  }
+
+  override generateContentAsync(): AsyncGenerator<LlmResponse, void> {
+    throw new Error('The provider never generates content.');
+  }
+
+  override connect(): Promise<BaseLlmConnection> {
+    throw new Error('The provider never opens a live connection.');
+  }
+}
 
 function makeScenario(): ConversationScenario {
   return new ConversationScenario({
@@ -33,7 +53,7 @@ function makeScenario(): ConversationScenario {
 describe('UserSimulatorProvider', () => {
   beforeEach(() => {
     // The LLM-backed simulator resolves a model in its constructor.
-    vi.spyOn(LLMRegistry, 'newLlm').mockReturnValue({} as unknown as BaseLlm);
+    vi.spyOn(LLMRegistry, 'newLlm').mockReturnValue(new UnusedLlm());
   });
 
   afterEach(() => {

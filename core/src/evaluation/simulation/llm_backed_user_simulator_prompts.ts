@@ -245,6 +245,41 @@ function toTemplatePersona(persona: UserPersona): Record<string, unknown> {
 }
 
 /**
+ * The nunjucks render context bound as `this` inside a filter.
+ *
+ * `@types/nunjucks` (3.2.6) does not export the runtime `Context` class, so the
+ * single member the filter needs is declared locally rather than cast away.
+ */
+interface FilterContext {
+  getVariables(): Record<string, unknown>;
+}
+
+/**
+ * Re-renders a persona sub-field against the *enclosing render's* variables.
+ *
+ * Reads its context from `this` at render time rather than from the
+ * environment, so it holds no per-render state and is safe to register once on
+ * a shared environment.
+ */
+function renderStringFilter(this: FilterContext, str: string): string {
+  if (!str) return '';
+  return safeInterpolate(str, this.getVariables());
+}
+
+/**
+ * The shared nunjucks environment used to render simulator prompts.
+ *
+ * Static configuration -- neither the options nor the filter depend on the
+ * per-call arguments -- so it is built once at module load instead of once per
+ * simulated turn.
+ */
+const SIMULATOR_ENV = new nunjucks.Environment(null, {
+  autoescape: false,
+  throwOnUndefined: false,
+});
+SIMULATOR_ENV.addFilter('render_string_filter', renderStringFilter);
+
+/**
  * Formats the prompt for the LLM-backed user simulator.
  *
  * @param params.conversationPlan The conversation plan.
@@ -272,20 +307,6 @@ export function getLlmBackedUserSimulatorPrompt(params: {
     templates = DEFAULT_TEMPLATES,
   } = params;
 
-  const env = new nunjucks.Environment(null, {
-    autoescape: false,
-    throwOnUndefined: false,
-  });
-
-  env.addFilter(
-    'render_string_filter',
-    function (this: unknown, str: string): string {
-      if (!str) return '';
-      const context = this as {getVariables(): Record<string, unknown>};
-      return safeInterpolate(str, context.getVariables());
-    },
-  );
-
   const templateStr = getUserSimulatorInstructionsTemplate(
     customInstructions,
     userPersona,
@@ -301,5 +322,5 @@ export function getLlmBackedUserSimulatorPrompt(params: {
     templateParameters.persona = toTemplatePersona(userPersona);
   }
 
-  return env.renderString(templateStr, templateParameters);
+  return SIMULATOR_ENV.renderString(templateStr, templateParameters);
 }

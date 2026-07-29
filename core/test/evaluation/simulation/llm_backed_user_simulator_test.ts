@@ -6,6 +6,7 @@
 
 import {
   BaseLlm,
+  BaseLlmConnection,
   ConversationScenario,
   createEvent,
   Event,
@@ -16,7 +17,7 @@ import {
   Status,
   UserPersona,
 } from '@google/adk';
-import {afterEach, describe, expect, it, vi} from 'vitest';
+import {afterEach, describe, expect, it, Mock, vi} from 'vitest';
 
 // summarizeConversation ports an adk-python private and is intentionally
 // internal, so it is imported via a relative path.
@@ -74,19 +75,30 @@ const EXPECTED_REWRITTEN_DIALOGUE_LONG =
   '\n\nuser: I need to book a flight.\n\n' +
   'helpful_assistant: Sure, what is your departure date and destination?';
 
-function fakeLlm(responses: LlmResponse[]): {
-  llm: BaseLlm;
-  generate: ReturnType<typeof vi.fn>;
-} {
-  const generate = vi.fn(async function* (): AsyncGenerator<LlmResponse> {
-    for (const response of responses) {
-      yield response;
-    }
-  });
-  return {
-    llm: {generateContentAsync: generate} as unknown as BaseLlm,
-    generate,
-  };
+/** A `BaseLlm` that replays a fixed list of responses. */
+class FakeLlm extends BaseLlm {
+  /** Spy over `generateContentAsync`, for call assertions. */
+  readonly generate: Mock<() => AsyncGenerator<LlmResponse, void>>;
+
+  constructor(responses: LlmResponse[]) {
+    super({model: 'test-model'});
+    this.generate = vi.fn(async function* (): AsyncGenerator<
+      LlmResponse,
+      void
+    > {
+      for (const response of responses) {
+        yield response;
+      }
+    });
+  }
+
+  override generateContentAsync(): AsyncGenerator<LlmResponse, void> {
+    return this.generate();
+  }
+
+  override connect(): Promise<BaseLlmConnection> {
+    throw new Error('The user simulator never opens a live connection.');
+  }
 }
 
 function makeScenario(userPersona?: UserPersona): ConversationScenario {
@@ -104,14 +116,14 @@ function setup(
     config?: LlmBackedUserSimulatorConfig;
   } = {},
 ) {
-  const {llm, generate} = fakeLlm(responses);
+  const llm = new FakeLlm(responses);
   vi.spyOn(LLMRegistry, 'newLlm').mockReturnValue(llm);
   const simulator = new LlmBackedUserSimulator({
     config:
       options.config ?? new LlmBackedUserSimulatorConfig({model: 'test-model'}),
     conversationScenario: options.scenario ?? makeScenario(),
   });
-  return {simulator, generate};
+  return {simulator, generate: llm.generate};
 }
 
 // Advances past the fixed starting prompt (turn 0) so the next call uses the
@@ -166,6 +178,17 @@ describe('LlmBackedUserSimulatorConfig', () => {
     expect(custom.modelConfiguration).toEqual({temperature: 0.5});
     expect(custom.maxAllowedInvocations).toBe(5);
     expect(custom.includeFunctionCalls).toBe(true);
+  });
+
+  it('gives each defaulted config its own modelConfiguration object', () => {
+    // The default config object becomes `llmRequest.config`, which
+    // `addDefaultRetryOptionsIfNotPresent` mutates in place; sharing one
+    // instance across configs would leak `httpOptions` between simulators.
+    const first = new LlmBackedUserSimulatorConfig();
+    const second = new LlmBackedUserSimulatorConfig();
+    expect(first.modelConfiguration).not.toBe(second.modelConfiguration);
+    first.modelConfiguration.httpOptions = {retryOptions: {attempts: 3}};
+    expect(second.modelConfiguration.httpOptions).toBeUndefined();
   });
 
   it('rejects a non-llm_backed type', () => {

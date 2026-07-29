@@ -12,9 +12,9 @@ import {LlmRequest} from '../../models/llm_request.js';
 import {LLMRegistry} from '../../models/registry.js';
 import {experimental} from '../../utils/experimental.js';
 import {logger} from '../../utils/logger.js';
-import {addDefaultRetryOptionsIfNotPresent} from '../_retry_options_utils.js';
 import {ConversationScenario} from '../conversation_scenarios.js';
 import {Evaluator} from '../eval_case.js';
+import {addDefaultRetryOptionsIfNotPresent} from '../retry_options_utils.js';
 import {
   getLlmBackedUserSimulatorPrompt,
   isValidUserSimulatorTemplate,
@@ -31,6 +31,24 @@ const AUTHOR_USER = 'user';
 const STOP_SIGNAL = '</finished>';
 const DEFAULT_MODEL = 'gemini-2.5-flash';
 const DEFAULT_MAX_ALLOWED_INVOCATIONS = 20;
+const DEFAULT_THINKING_BUDGET = 10240;
+
+/**
+ * Returns the default model configuration for a user simulator.
+ *
+ * A factory rather than a shared constant: `addDefaultRetryOptionsIfNotPresent`
+ * mutates `llmRequest.config` in place to attach `httpOptions.retryOptions`,
+ * and that object is exactly this one, so a single shared literal would leak
+ * retry options across every config that took the default.
+ */
+function defaultModelConfiguration(): GenerateContentConfig {
+  return {
+    thinkingConfig: {
+      includeThoughts: true,
+      thinkingBudget: DEFAULT_THINKING_BUDGET,
+    },
+  };
+}
 
 /** Initializer for an {@link LlmBackedUserSimulatorConfig}. */
 export interface LlmBackedUserSimulatorConfigInit {
@@ -112,9 +130,8 @@ export class LlmBackedUserSimulatorConfig extends BaseUserSimulatorConfig {
     }
     this.type = 'llm_backed';
     this.model = input.model ?? DEFAULT_MODEL;
-    this.modelConfiguration = input.modelConfiguration ?? {
-      thinkingConfig: {includeThoughts: true, thinkingBudget: 10240},
-    };
+    this.modelConfiguration =
+      input.modelConfiguration ?? defaultModelConfiguration();
     this.maxAllowedInvocations =
       input.maxAllowedInvocations ?? DEFAULT_MAX_ALLOWED_INVOCATIONS;
     this.customInstructions = input.customInstructions;
@@ -329,6 +346,11 @@ export class LlmBackedUserSimulator extends UserSimulator {
       });
     }
 
+    // Deliberately an error rather than `Status.NO_MESSAGE_GENERATED`: for an
+    // LLM-backed simulator, producing nothing is a broken run (empty stream,
+    // safety block, thoughts only), not a clean end of conversation. Parity
+    // with adk-python, whose docstring calls the raise out as "different from
+    // the NO_MESSAGE_GENERATED status".
     throw new Error(`Failed to generate a user message: ${errorReason}`);
   }
 

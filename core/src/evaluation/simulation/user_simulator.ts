@@ -8,6 +8,7 @@ import {Content} from '@google/genai';
 
 import {Event} from '../../events/event.js';
 import {experimental} from '../../utils/experimental.js';
+import {ConversationScenario} from '../conversation_scenarios.js';
 import {Evaluator} from '../eval_case.js';
 
 /**
@@ -43,7 +44,16 @@ export enum Status {
   TURN_LIMIT_REACHED = 'turn_limit_reached',
   /** The simulator emitted its stop signal. */
   STOP_SIGNAL_DETECTED = 'stop_signal_detected',
-  /** No message could be generated. */
+  /**
+   * No message could be generated, and the conversation should end cleanly.
+   *
+   * Part of the base contract for simulator implementations, not a state any
+   * built-in simulator reaches: `LlmBackedUserSimulator` treats a failure to
+   * generate as an error and throws (parity with adk-python, which documents
+   * the raise as "different from the NO_MESSAGE_GENERATED status"), and
+   * `StaticUserSimulator` returns `STOP_SIGNAL_DETECTED` when its replay is
+   * exhausted.
+   */
   NO_MESSAGE_GENERATED = 'no_message_generated',
 }
 
@@ -123,8 +133,19 @@ export type BaseUserSimulatorConfigClass = new (
   ...args: never[]
 ) => BaseUserSimulatorConfig;
 
-/** A constructor for a {@link UserSimulator} subclass. */
-export type UserSimulatorClass = new (...args: never[]) => UserSimulator;
+/**
+ * A constructor for a {@link UserSimulator} subclass, as invoked by
+ * `UserSimulatorProvider`.
+ *
+ * The provider mixes the shared config with the eval case's scenario, so a
+ * registered simulator is always constructed with both. Simulators that ignore
+ * one or both may declare a narrower constructor (or none at all) -- a
+ * constructor taking fewer parameters stays assignable to this type.
+ */
+export type UserSimulatorClass = new (args: {
+  config: BaseUserSimulatorConfig;
+  conversationScenario: ConversationScenario;
+}) => UserSimulator;
 
 /**
  * Maps a concrete `BaseUserSimulatorConfig` subclass to the `UserSimulator`

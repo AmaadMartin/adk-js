@@ -5,7 +5,6 @@
  */
 
 import {experimental} from '../../utils/experimental.js';
-import {ConversationScenario} from '../conversation_scenarios.js';
 import {EvalCase} from '../eval_case.js';
 import {
   LlmBackedUserSimulator,
@@ -24,11 +23,6 @@ import {
 // built-in simulators to the shared dispatch registry ("batteries included").
 // (Audio registration is intentionally absent -- it is a separate port.)
 registerUserSimulator(LlmBackedUserSimulatorConfig, LlmBackedUserSimulator);
-
-type ScenarioSimulatorClass = new (args: {
-  config: BaseUserSimulatorConfig;
-  conversationScenario: ConversationScenario;
-}) => UserSimulator;
 
 /**
  * Provides a {@link UserSimulator} per {@link EvalCase}, mixing configuration
@@ -91,10 +85,11 @@ export class UserSimulatorProvider {
       );
     }
 
-    return new (simulatorClass as unknown as ScenarioSimulatorClass)({
+    return new simulatorClass({
       config: this.userSimulatorConfig,
-      conversationScenario:
-        evalCase.conversationScenario as ConversationScenario,
+      // Guaranteed by the `EvalCase` xor-invariant: no static `conversation`
+      // (handled above) means a `conversationScenario` is present.
+      conversationScenario: evalCase.conversationScenario!,
     });
   }
 }
