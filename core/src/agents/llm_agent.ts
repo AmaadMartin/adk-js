@@ -20,6 +20,7 @@ import {
   getFunctionCalls,
   getFunctionResponses,
   isFinalResponse,
+  populateClientFunctionCallId,
 } from '../events/event.js';
 
 import {BaseExampleProvider} from '../examples/base_example_provider.js';
@@ -52,7 +53,6 @@ import {
   generateRequestConfirmationEvent,
   getLongRunningFunctionCalls,
   handleFunctionCallsAsync,
-  populateClientFunctionCallId,
 } from './functions.js';
 
 import {AUTH_PREPROCESSOR} from '../auth/auth_preprocessor.js';
@@ -215,6 +215,8 @@ export interface LlmAgentConfig extends BaseAgentConfig {
    *
    * For example: use globalInstruction to make all agents have a stable
    * identity or personality.
+   *
+   * @deprecated Use GlobalInstructionPlugin instead.
    */
   globalInstruction?: string | InstructionProvider;
 
@@ -346,12 +348,13 @@ export function isLlmAgent(obj: unknown): obj is LlmAgent {
 /**
  * An agent that uses a large language model to generate responses.
  */
-export class LlmAgent extends BaseAgent {
+export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   /** A unique symbol to identify ADK LLM agent class. */
   readonly [LLM_AGENT_SIGNATURE_SYMBOL] = true;
 
   model?: string | BaseLlm;
   instruction: string | InstructionProvider;
+  /** @deprecated Use GlobalInstructionPlugin instead. */
   globalInstruction: string | InstructionProvider;
   tools: ToolUnion[];
   generateContentConfig?: GenerateContentConfig;
@@ -522,6 +525,7 @@ export class LlmAgent extends BaseAgent {
    * This method is only for use by Agent Development Kit.
    * @param context The context to retrieve the session state.
    * @returns The resolved globalInstruction field.
+   * @deprecated Use GlobalInstructionPlugin instead.
    */
   async canonicalGlobalInstruction(
     context: ReadonlyContext,
