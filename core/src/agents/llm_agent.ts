@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GenerateContentConfig, Schema} from '@google/genai';
+import {FunctionCall, GenerateContentConfig, Part, Schema} from '@google/genai';
 import {context, trace} from '@opentelemetry/api';
 import {FunctionTool} from '../tools/function_tool.js';
 
@@ -17,6 +17,7 @@ import {
   createEvent,
   createNewEventId,
   Event,
+  generateClientFunctionCallId,
   getFunctionCalls,
   getFunctionResponses,
   isFinalResponse,
@@ -49,10 +50,9 @@ import {
 } from './processors/base_llm_processor.js';
 
 import {
-  generateAuthEvent,
   generateRequestConfirmationEvent,
-  getLongRunningFunctionCalls,
   handleFunctionCallsAsync,
+  REQUEST_EUC_FUNCTION_CALL_NAME,
 } from './functions.js';
 
 import {AUTH_PREPROCESSOR} from '../auth/auth_preprocessor.js';
@@ -1286,3 +1286,55 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   // - code_executor
   // - configurable agents by yaml config
 }
+
+/**
+ * Returns a set of function call ids of the long running tools.
+ */
+function getLongRunningFunctionCalls(
+  functionCalls: FunctionCall[],
+  toolsDict: Record<string, BaseTool>,
+): Set<string> {
+  return new Set(
+    functionCalls
+      .filter((fc) => fc.name && toolsDict[fc.name]?.isLongRunning && fc.id)
+      .map((fc) => fc.id!),
+  );
+}
+
+/**
+ * Generates an authentication event.
+ *
+ * It iterates through requested auth configurations in a function response
+ * event and creates a new function call for each.
+ */
+function generateAuthEvent(
+  invocationContext: InvocationContext,
+  functionResponseEvent: Event,
+): Event | undefined {
+  const authConfigs = Object.entries(
+    functionResponseEvent.actions?.requestedAuthConfigs ?? {},
+  );
+  if (authConfigs.length === 0) {
+    return undefined;
+  }
+  const parts: Part[] = authConfigs.map(([functionCallId, authConfig]) => ({
+    functionCall: {
+      name: REQUEST_EUC_FUNCTION_CALL_NAME,
+      args: {'function_call_id': functionCallId, 'auth_config': authConfig},
+      id: generateClientFunctionCallId(),
+    },
+  }));
+  return createEvent({
+    invocationId: invocationContext.invocationId,
+    author: invocationContext.agent.name,
+    branch: invocationContext.branch,
+    content: {parts, role: functionResponseEvent.content!.role},
+    longRunningToolIds: parts.map((p) => p.functionCall!.id!),
+  });
+}
+
+// Export these items for testing purposes only
+export const llmAgentExportedForTestingOnly = {
+  getLongRunningFunctionCalls,
+  generateAuthEvent,
+};

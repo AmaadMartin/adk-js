@@ -6,6 +6,7 @@
 
 import {
   AUTH_PREPROCESSOR,
+  AuthConfig,
   BaseLlm,
   BaseLlmConnection,
   BaseLlmRequestProcessor,
@@ -16,9 +17,12 @@ import {
   Context,
   ContextCompactorRequestProcessor,
   createEvent,
+  createEventActions,
   Event,
+  FunctionTool,
   InvocationContext,
   LlmAgent,
+  llmAgentExportedForTestingOnly,
   LlmRequest,
   LlmResponse,
   PluginManager,
@@ -26,7 +30,7 @@ import {
   Session,
   ToolProcessLlmRequest,
 } from '@google/adk';
-import {Content, Schema, Type} from '@google/genai';
+import {Content, FunctionCall, Schema, Type} from '@google/genai';
 import {beforeEach, describe, expect, it} from 'vitest';
 import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
@@ -837,5 +841,137 @@ describe('LlmAgent Default Request Processors', () => {
       CONTENT_REQUEST_PROCESSOR,
     );
     expect(authIndex).toBeLessThan(contentIndex);
+  });
+});
+
+const {getLongRunningFunctionCalls, generateAuthEvent} =
+  llmAgentExportedForTestingOnly;
+
+describe('llmAgentExportedForTestingOnly.getLongRunningFunctionCalls', () => {
+  it('should return IDs of long running function calls', () => {
+    const functionCalls = [
+      {name: 'longTool', id: 'call-1'},
+      {name: 'shortTool', id: 'call-2'},
+    ];
+    const toolsDict: Record<string, BaseTool> = {
+      'longTool': new FunctionTool({
+        name: 'longTool',
+        description: 'long',
+        execute: async () => ({}),
+        isLongRunning: true,
+      }),
+      'shortTool': new FunctionTool({
+        name: 'shortTool',
+        description: 'short',
+        execute: async () => ({}),
+        isLongRunning: false,
+      }),
+    };
+    const result = getLongRunningFunctionCalls(functionCalls, toolsDict);
+    expect(result.has('call-1')).toBe(true);
+    expect(result.has('call-2')).toBe(false);
+  });
+
+  it('should handle empty functionCalls, missing names, names not in toolsDict, and missing id branches', () => {
+    const toolsDict: Record<string, BaseTool> = {
+      'longTool': new FunctionTool({
+        name: 'longTool',
+        description: 'long',
+        execute: async () => ({}),
+        isLongRunning: true,
+      }),
+    };
+
+    expect(getLongRunningFunctionCalls([], toolsDict).size).toBe(0);
+
+    const calls: FunctionCall[] = [
+      {id: 'no-name'}, // missing name
+      {name: 'unknownTool', id: 'unknown-id'}, // not in toolsDict
+      {name: 'longTool'}, // in toolsDict and isLongRunning, but missing id
+    ];
+    const result = getLongRunningFunctionCalls(calls, toolsDict);
+    expect(result.size).toBe(0);
+  });
+});
+
+describe('llmAgentExportedForTestingOnly.generateAuthEvent', () => {
+  let invocationContext: InvocationContext;
+  let pluginManager: PluginManager;
+
+  const authConfig1: AuthConfig = {
+    authScheme: {type: 'apiKey', name: 'X-API-Key-1', in: 'header'},
+    credentialKey: 'auth_config_1',
+  };
+  const authConfig2: AuthConfig = {
+    authScheme: {type: 'apiKey', name: 'X-API-Key-2', in: 'header'},
+    credentialKey: 'auth_config_2',
+  };
+
+  beforeEach(() => {
+    pluginManager = new PluginManager();
+    const agent = new LlmAgent({name: 'test_agent', model: 'test_model'});
+    invocationContext = new InvocationContext({
+      invocationId: 'inv_123',
+      session: {} as Session,
+      agent,
+      pluginManager,
+    });
+  });
+
+  it('should return undefined if no requestedAuthConfigs', () => {
+    const functionResponseEvent = createEvent({
+      content: {role: 'model', parts: []},
+    });
+
+    const event = generateAuthEvent(invocationContext, functionResponseEvent);
+    expect(event).toBeUndefined();
+  });
+
+  it('should return undefined if requestedAuthConfigs is empty', () => {
+    const functionResponseEvent = createEvent({
+      actions: createEventActions({requestedAuthConfigs: {}}),
+      content: {role: 'model', parts: []},
+    });
+
+    const event = generateAuthEvent(invocationContext, functionResponseEvent);
+    expect(event).toBeUndefined();
+  });
+
+  it('should return auth event if requestedAuthConfigs is present', () => {
+    const functionResponseEvent = createEvent({
+      actions: createEventActions({
+        requestedAuthConfigs: {
+          'call_1': authConfig1,
+          'call_2': authConfig2,
+        },
+      }),
+      content: {role: 'model', parts: []},
+    });
+
+    const event = generateAuthEvent(invocationContext, functionResponseEvent);
+    expect(event).toBeDefined();
+    expect(event!.invocationId).toBe('inv_123');
+    expect(event!.author).toBe('test_agent');
+    expect(event!.content!.parts!.length).toBe(2);
+
+    const parts = event!.content!.parts!;
+    const call1 = parts.find(
+      (p) => p.functionCall?.args?.['function_call_id'] === 'call_1',
+    );
+    expect(call1).toBeDefined();
+    expect(call1!.functionCall!.name).toBe('adk_request_credential');
+    expect(call1!.functionCall!.args!['auth_config']).toEqual(authConfig1);
+
+    const call2 = parts.find(
+      (p) => p.functionCall?.args?.['function_call_id'] === 'call_2',
+    );
+    expect(call2).toBeDefined();
+    expect(call2!.functionCall!.name).toBe('adk_request_credential');
+    expect(call2!.functionCall!.args!['auth_config']).toEqual(authConfig2);
+
+    // Every generated credential request is itself a long-running call.
+    expect(event!.longRunningToolIds).toEqual(
+      parts.map((p) => p.functionCall!.id),
+    );
   });
 });
