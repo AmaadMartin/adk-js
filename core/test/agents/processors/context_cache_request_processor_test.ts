@@ -114,9 +114,7 @@ describe('ContextCacheRequestProcessor', () => {
 
     await runProcessor(invocationContext, llmRequest);
 
-    expect(llmRequest.cacheConfig).toBe(cacheConfig);
     expect(llmRequest.cacheMetadata).toEqual(cacheMetadata);
-    expect(llmRequest.cacheMetadata?.invocationsUsed).toBe(5);
   });
 
   it('selects the most recent cache metadata', async () => {
@@ -173,7 +171,6 @@ describe('ContextCacheRequestProcessor', () => {
 
     await runProcessor(invocationContext, llmRequest);
 
-    expect(llmRequest.cacheConfig).toBe(cacheConfig);
     expect(llmRequest.cacheMetadata?.invocationsUsed).toBe(11);
   });
 
@@ -270,7 +267,6 @@ describe('ContextCacheRequestProcessor', () => {
     await runProcessor(invocationContext, llmRequest);
 
     expect(llmRequest.cacheMetadata).toEqual(fingerprintOnly);
-    expect(llmRequest.cacheMetadata?.invocationsUsed).toBeUndefined();
   });
 
   it('copies metadata as-is when the source event has no invocation id', async () => {

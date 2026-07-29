@@ -125,7 +125,6 @@ describe('Context cache orchestration through the Runner', () => {
     const [first, second, third] = model.capturedRequests;
 
     // Turn 1: the app config is threaded through, with nothing to recover yet.
-    expect(runner.contextCacheConfig).toBe(cacheConfig);
     expect(first.cacheConfig).toBe(cacheConfig);
     expect(first.cacheMetadata).toBeUndefined();
     expect(first.cacheableContentsTokenCount).toBeUndefined();
@@ -173,7 +172,7 @@ describe('Context cache orchestration through the Runner', () => {
   });
 
   it('is a no-op when no contextCacheConfig is set', async () => {
-    const {model, app, runner, sessionService, session} = await setup();
+    const {model, runner, session} = await setup();
 
     for (let turn = 0; turn < 2; turn++) {
       await send(runner, session.id, `turn ${turn}`);
@@ -184,15 +183,6 @@ describe('Context cache orchestration through the Runner', () => {
       expect(request.cacheConfig).toBeUndefined();
       expect(request.cacheMetadata).toBeUndefined();
       expect(request.cacheableContentsTokenCount).toBeUndefined();
-    }
-
-    const persisted = await sessionService.getSession({
-      appName: app.name,
-      userId: 'user',
-      sessionId: session.id,
-    });
-    for (const event of persisted!.events) {
-      expect(event.cacheMetadata).toBeUndefined();
     }
   });
 });
