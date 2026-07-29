@@ -77,9 +77,7 @@ import {StreamingMode} from './run_config.js';
  * Input/output schema type for agent.
  */
 export type LlmAgentSchema =
-  | z3.ZodObject<z3.ZodRawShape>
-  | z4.ZodObject<z4.ZodRawShape>
-  | Schema;
+  z3.ZodObject<z3.ZodRawShape> | z4.ZodObject<z4.ZodRawShape> | Schema;
 
 /** An object that can provide an instruction string. */
 export type InstructionProvider = (
@@ -106,8 +104,7 @@ export type SingleBeforeModelCallback = (params: {
  * order they are listed until a callback does not return None.
  */
 export type BeforeModelCallback =
-  | SingleBeforeModelCallback
-  | SingleBeforeModelCallback[];
+  SingleBeforeModelCallback | SingleBeforeModelCallback[];
 
 /**
  * A callback that runs after a response is received from the model.
@@ -130,8 +127,7 @@ export type SingleAfterModelCallback = (params: {
  order they are listed until a callback does not return None.
  */
 export type AfterModelCallback =
-  | SingleAfterModelCallback
-  | SingleAfterModelCallback[];
+  SingleAfterModelCallback | SingleAfterModelCallback[];
 
 /**
  * A callback that runs before a tool is called.
@@ -158,8 +154,7 @@ export type SingleBeforeToolCallback = (params: {
  * order they are listed until a callback does not return None.
  */
 export type BeforeToolCallback =
-  | SingleBeforeToolCallback
-  | SingleBeforeToolCallback[];
+  SingleBeforeToolCallback | SingleBeforeToolCallback[];
 
 /**
  * A callback that runs after a tool is called.
@@ -187,8 +182,7 @@ export type SingleAfterToolCallback = (params: {
  * order they are listed until acallback does not return None.
  */
 export type AfterToolCallback =
-  | SingleAfterToolCallback
-  | SingleAfterToolCallback[];
+  SingleAfterToolCallback | SingleAfterToolCallback[];
 
 /** A list of examples or an example provider. */
 export type ExamplesUnion = Example[] | BaseExampleProvider;
@@ -409,8 +403,10 @@ export class LlmAgent extends BaseAgent {
       IDENTITY_LLM_REQUEST_PROCESSOR,
       INSTRUCTIONS_LLM_REQUEST_PROCESSOR,
       REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR,
-      CONTEXT_CACHE_REQUEST_PROCESSOR,
       CONTENT_REQUEST_PROCESSOR,
+      // Matches adk-python single_flow.py: the cache processor runs after
+      // contents so it observes the fully assembled request.
+      CONTEXT_CACHE_REQUEST_PROCESSOR,
       INTERACTIONS_REQUEST_PROCESSOR,
       CODE_EXECUTION_REQUEST_PROCESSOR,
       TOOL_FILTER_REQUEST_PROCESSOR,

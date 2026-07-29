@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {UsageMetadata} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {ContextCacheConfig} from '../../../src/agents/context_cache_config.js';
 import {InvocationContext} from '../../../src/agents/invocation_context.js';
@@ -31,12 +30,11 @@ describe('ContextCacheRequestProcessor', () => {
     });
 
     const session = createSession({
+      id: 'test_session',
       appName: 'test_app',
       userId: 'test_user',
+      events: params.events,
     });
-    if (params.events) {
-      session.events = params.events;
-    }
 
     return new InvocationContext({
       agent,
@@ -53,7 +51,7 @@ describe('ContextCacheRequestProcessor', () => {
     });
     const request: LlmRequest = {
       contents: [],
-      liveConnectConfig: {} as unknown as LlmRequest['liveConnectConfig'],
+      liveConnectConfig: {},
       toolsDict: {},
     };
 
@@ -74,7 +72,7 @@ describe('ContextCacheRequestProcessor', () => {
     });
     const request: LlmRequest = {
       contents: [],
-      liveConnectConfig: {} as unknown as LlmRequest['liveConnectConfig'],
+      liveConnectConfig: {},
       toolsDict: {},
     };
 
@@ -99,9 +97,7 @@ describe('ContextCacheRequestProcessor', () => {
         invocationsUsed: 2,
         contentsCount: 10,
       },
-      usageMetadata: {
-        promptTokenCount: 5120,
-      } as unknown as UsageMetadata,
+      usageMetadata: {promptTokenCount: 5120},
     });
 
     const ic = createTestInvocationContext({
@@ -111,7 +107,7 @@ describe('ContextCacheRequestProcessor', () => {
     });
     const request: LlmRequest = {
       contents: [],
-      liveConnectConfig: {} as unknown as LlmRequest['liveConnectConfig'],
+      liveConnectConfig: {},
       toolsDict: {},
     };
 
@@ -144,9 +140,7 @@ describe('ContextCacheRequestProcessor', () => {
         invocationsUsed: 2,
         contentsCount: 10,
       },
-      usageMetadata: {
-        promptTokenCount: 6000,
-      } as unknown as UsageMetadata,
+      usageMetadata: {promptTokenCount: 6000},
     });
 
     const ic = createTestInvocationContext({
@@ -156,7 +150,7 @@ describe('ContextCacheRequestProcessor', () => {
     });
     const request: LlmRequest = {
       contents: [],
-      liveConnectConfig: {} as unknown as LlmRequest['liveConnectConfig'],
+      liveConnectConfig: {},
       toolsDict: {},
     };
 
@@ -186,7 +180,7 @@ describe('ContextCacheRequestProcessor', () => {
     });
     const request: LlmRequest = {
       contents: [],
-      liveConnectConfig: {} as unknown as LlmRequest['liveConnectConfig'],
+      liveConnectConfig: {},
       toolsDict: {},
     };
 
@@ -213,9 +207,7 @@ describe('ContextCacheRequestProcessor', () => {
         invocationsUsed: 5,
         contentsCount: 20,
       },
-      usageMetadata: {
-        promptTokenCount: 9999,
-      } as unknown as UsageMetadata,
+      usageMetadata: {promptTokenCount: 9999},
     });
 
     const ourAgentEvent = createEvent({
@@ -228,9 +220,7 @@ describe('ContextCacheRequestProcessor', () => {
         invocationsUsed: 1,
         contentsCount: 5,
       },
-      usageMetadata: {
-        promptTokenCount: 4500,
-      } as unknown as UsageMetadata,
+      usageMetadata: {promptTokenCount: 4500},
     });
 
     const ic = createTestInvocationContext({
@@ -240,7 +230,7 @@ describe('ContextCacheRequestProcessor', () => {
     });
     const request: LlmRequest = {
       contents: [],
-      liveConnectConfig: {} as unknown as LlmRequest['liveConnectConfig'],
+      liveConnectConfig: {},
       toolsDict: {},
     };
 

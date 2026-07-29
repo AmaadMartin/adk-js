@@ -99,6 +99,14 @@ describe('E2E Context Caching and Content Assembly (Vertex AI)', () => {
         ttlSeconds: 1800,
         minTokens: 32768,
       });
+
+      // The only thing the second live turn can establish that the unit tests
+      // cannot: turn 1's real promptTokenCount was persisted on the session and
+      // resolved back onto turn 2's request.
+      expect(capturedRequests[0].cacheableContentsTokenCount).toBeUndefined();
+      expect(capturedRequests[1].cacheableContentsTokenCount).toBeGreaterThan(
+        0,
+      );
     },
     60000,
   );

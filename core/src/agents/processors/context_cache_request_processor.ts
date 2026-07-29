@@ -12,6 +12,85 @@ import {InvocationContext} from '../invocation_context.js';
 import {BaseLlmRequestProcessor} from './base_llm_processor.js';
 
 /**
+ * Cache information recovered from the events already stored on the session.
+ */
+interface CacheInfo {
+  /**
+   * Metadata of the most recent cache produced by this agent, with
+   * `invocationsUsed` advanced when the cache is being reused in a new
+   * invocation.
+   */
+  cacheMetadata?: CacheMetadata;
+
+  /**
+   * Prompt token count reported by this agent's most recent response, used to
+   * decide whether the request is large enough to be worth caching.
+   */
+  previousTokenCount?: number;
+}
+
+/**
+ * Scans the session backwards for the newest cache metadata and prompt token
+ * count produced by the agent that owns `invocationContext`.
+ *
+ * @param invocationContext The current invocation context.
+ * @returns The recovered {@link CacheInfo}; fields are undefined when the
+ *     session holds nothing usable.
+ */
+function findCacheInfoFromEvents(
+  invocationContext: InvocationContext,
+): CacheInfo {
+  const agentName = invocationContext.agent.name;
+  const currentInvocationId = invocationContext.invocationId;
+  const events = invocationContext.session?.events;
+  if (!events || events.length === 0) {
+    return {};
+  }
+
+  const info: CacheInfo = {};
+
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i];
+    if (event.author !== agentName) {
+      continue;
+    }
+
+    if (info.cacheMetadata === undefined && event.cacheMetadata !== undefined) {
+      if (
+        event.invocationId &&
+        event.invocationId !== currentInvocationId &&
+        event.cacheMetadata.cacheName !== undefined
+      ) {
+        // An active cache (cacheName set) always carries invocationsUsed:
+        // createCacheMetadata rejects any other combination.
+        info.cacheMetadata = {
+          ...event.cacheMetadata,
+          invocationsUsed: event.cacheMetadata.invocationsUsed! + 1,
+        };
+      } else {
+        info.cacheMetadata = {...event.cacheMetadata};
+      }
+    }
+
+    if (
+      info.previousTokenCount === undefined &&
+      event.usageMetadata?.promptTokenCount !== undefined
+    ) {
+      info.previousTokenCount = event.usageMetadata.promptTokenCount;
+    }
+
+    if (
+      info.cacheMetadata !== undefined &&
+      info.previousTokenCount !== undefined
+    ) {
+      break;
+    }
+  }
+
+  return info;
+}
+
+/**
  * Request processor that enables context caching for LLM requests.
  *
  * This processor sets up context caching configuration for agents that have
@@ -19,7 +98,13 @@ import {BaseLlmRequestProcessor} from './base_llm_processor.js';
  * events.
  */
 export class ContextCacheRequestProcessor implements BaseLlmRequestProcessor {
-  // eslint-disable-next-line require-yield
+  /**
+   * Applies the agent's context cache configuration to the outgoing request.
+   *
+   * @param invocationContext The current invocation context.
+   * @param llmRequest The request to populate, mutated in place.
+   */
+  // eslint-disable-next-line require-yield -- BaseLlmRequestProcessor.runAsync is an AsyncGenerator so processors may emit events; this one only mutates llmRequest and has nothing to emit.
   async *runAsync(
     invocationContext: InvocationContext,
     llmRequest: LlmRequest,
@@ -31,17 +116,13 @@ export class ContextCacheRequestProcessor implements BaseLlmRequestProcessor {
 
     llmRequest.cacheConfig = cacheConfig;
 
-    const [latestCacheMetadata, previousTokenCount] =
-      this.findCacheInfoFromEvents(
-        invocationContext,
-        invocationContext.agent.name,
-        invocationContext.invocationId,
-      );
+    const {cacheMetadata, previousTokenCount} =
+      findCacheInfoFromEvents(invocationContext);
 
-    if (latestCacheMetadata) {
-      llmRequest.cacheMetadata = latestCacheMetadata;
+    if (cacheMetadata) {
+      llmRequest.cacheMetadata = cacheMetadata;
       logger.debug(
-        `Found cache metadata for agent ${invocationContext.agent.name}: ${JSON.stringify(latestCacheMetadata)}`,
+        `Found cache metadata for agent ${invocationContext.agent.name}: ${JSON.stringify(cacheMetadata)}`,
       );
     }
 
@@ -55,55 +136,6 @@ export class ContextCacheRequestProcessor implements BaseLlmRequestProcessor {
     logger.debug(
       `Context caching enabled for agent ${invocationContext.agent.name}`,
     );
-  }
-
-  private findCacheInfoFromEvents(
-    invocationContext: InvocationContext,
-    agentName: string,
-    currentInvocationId: string,
-  ): [CacheMetadata | undefined, number | undefined] {
-    const events = invocationContext.session?.events;
-    if (!events || events.length === 0) {
-      return [undefined, undefined];
-    }
-
-    let cacheMetadata: CacheMetadata | undefined;
-    let previousTokenCount: number | undefined;
-
-    for (let i = events.length - 1; i >= 0; i--) {
-      const event = events[i];
-      if (event.author !== agentName) {
-        continue;
-      }
-
-      if (cacheMetadata === undefined && event.cacheMetadata !== undefined) {
-        if (
-          event.invocationId &&
-          event.invocationId !== currentInvocationId &&
-          event.cacheMetadata.cacheName !== undefined
-        ) {
-          cacheMetadata = {
-            ...event.cacheMetadata,
-            invocationsUsed: (event.cacheMetadata.invocationsUsed ?? 0) + 1,
-          };
-        } else {
-          cacheMetadata = {...event.cacheMetadata};
-        }
-      }
-
-      if (
-        previousTokenCount === undefined &&
-        event.usageMetadata?.promptTokenCount !== undefined
-      ) {
-        previousTokenCount = event.usageMetadata.promptTokenCount;
-      }
-
-      if (cacheMetadata !== undefined && previousTokenCount !== undefined) {
-        break;
-      }
-    }
-
-    return [cacheMetadata, previousTokenCount];
   }
 }
 

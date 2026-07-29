@@ -10,13 +10,22 @@ import {
   InMemoryRunner,
   LlmRequest,
 } from '@google/adk';
-import {createUserContent, UsageMetadata} from '@google/genai';
+import {createUserContent} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {GeminiWithMockResponses} from '../test_case_utils.js';
+
+const TURN_1_CACHE_METADATA = {
+  cacheName: 'projects/123/locations/us-central1/cachedContents/test_cache_001',
+  expireTime: 1700000000,
+  fingerprint: 'hash_abc123',
+  invocationsUsed: 1,
+  contentsCount: 12,
+};
 
 describe('Context Engineering Integration', () => {
   it('should enable context caching and resolve cache metadata and token counts across multiple turns', async () => {
     const capturedRequests: LlmRequest[] = [];
+    let modelResponseCount = 0;
 
     const agent = new Agent({
       name: 'caching-agent',
@@ -38,10 +47,21 @@ describe('Context Engineering Integration', () => {
         });
         return undefined;
       },
+      // Stands in for the cache manager that will stamp metadata onto the
+      // model response. Attaching it here exercises the real persistence hop:
+      // LlmAgent merges the LlmResponse into the model response event, and the
+      // session service appends that event to the session.
+      afterModelCallback: ({response}) => {
+        modelResponseCount++;
+        if (modelResponseCount > 1) {
+          return undefined;
+        }
+        return {...response, cacheMetadata: TURN_1_CACHE_METADATA};
+      },
     });
 
     const mockResponses = [
-      // Turn 1 response: returns promptTokenCount 4500 and cache metadata
+      // Turn 1 response: returns promptTokenCount 4500.
       {
         candidates: [
           {
@@ -55,7 +75,7 @@ describe('Context Engineering Integration', () => {
           promptTokenCount: 4500,
           candidatesTokenCount: 15,
           totalTokenCount: 4515,
-        } as unknown as UsageMetadata,
+        },
       },
       // Turn 2 response
       {
@@ -71,7 +91,7 @@ describe('Context Engineering Integration', () => {
           promptTokenCount: 4600,
           candidatesTokenCount: 20,
           totalTokenCount: 4620,
-        } as unknown as UsageMetadata,
+        },
       },
     ];
 
@@ -86,22 +106,12 @@ describe('Context Engineering Integration', () => {
     });
 
     // --- Turn 1 ---
-    for await (const event of runner.runAsync({
+    for await (const _event of runner.runAsync({
       userId,
       sessionId: session.id,
       newMessage: createUserContent('Hello there'),
     })) {
-      // In Turn 1 response event, simulate attaching cacheMetadata from live model creation
-      if (!event.partial && event.content?.role === 'model') {
-        event.cacheMetadata = {
-          cacheName:
-            'projects/123/locations/us-central1/cachedContents/test_cache_001',
-          expireTime: 1700000000,
-          fingerprint: 'hash_abc123',
-          invocationsUsed: 1,
-          contentsCount: 12,
-        };
-      }
+      // consume
     }
 
     expect(capturedRequests).toHaveLength(1);
@@ -113,6 +123,18 @@ describe('Context Engineering Integration', () => {
     });
     expect(capturedRequests[0].cacheMetadata).toBeUndefined();
     expect(capturedRequests[0].cacheableContentsTokenCount).toBeUndefined();
+
+    // The cache metadata carried on the model response must have been
+    // persisted by the session service, not merely observed in the stream.
+    const persisted = await runner.sessionService.getSession({
+      appName,
+      userId,
+      sessionId: session.id,
+    });
+    expect(
+      persisted?.events.find((event) => event.cacheMetadata !== undefined)
+        ?.cacheMetadata,
+    ).toEqual(TURN_1_CACHE_METADATA);
 
     // --- Turn 2 ---
     for await (const _event of runner.runAsync({
@@ -131,12 +153,8 @@ describe('Context Engineering Integration', () => {
       minTokens: 4096,
     });
     expect(capturedRequests[1].cacheMetadata).toEqual({
-      cacheName:
-        'projects/123/locations/us-central1/cachedContents/test_cache_001',
-      expireTime: 1700000000,
-      fingerprint: 'hash_abc123',
+      ...TURN_1_CACHE_METADATA,
       invocationsUsed: 2, // incremented across turn/invocation boundary
-      contentsCount: 12,
     });
     expect(capturedRequests[1].cacheableContentsTokenCount).toBe(4500);
   });

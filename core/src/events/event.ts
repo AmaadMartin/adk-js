@@ -6,7 +6,6 @@
 
 import {FunctionCall, FunctionResponse} from '@google/genai';
 
-import {CacheMetadata} from '../models/cache_metadata.js';
 import {LlmResponse} from '../models/llm_response.js';
 
 import {toCamelCase, toSnakeCase} from '../utils/object_notation_utils.js';
@@ -69,11 +68,6 @@ export interface Event extends LlmResponse {
    * with matching isolation scope or unscoped coordinators.
    */
   isolationScope?: string;
-
-  /**
-   * Metadata of the context cache associated with this event, if any.
-   */
-  cacheMetadata?: CacheMetadata;
 }
 
 /**
@@ -93,7 +87,6 @@ export function createEvent(params: Partial<Event> = {}): Event {
     branch: params.branch,
     timestamp: params.timestamp || Date.now(),
     isolationScope: params.isolationScope,
-    cacheMetadata: params.cacheMetadata,
   };
 }
 
