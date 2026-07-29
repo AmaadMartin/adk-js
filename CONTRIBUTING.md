@@ -53,6 +53,21 @@ To maintain high code quality and consistency:
 The project uses `husky` and `lint-staged` to automatically lint and format
 your changes before each commit.
 
+### Public export surface
+
+`core/test/public_api/public_exports.golden.json` records every name exported
+by `@google/adk`, so that adding or removing a public export shows up as a
+reviewable diff instead of shipping silently. The same test also fails if one
+of the barrel files (`core/src/common.ts`, `core/src/index.ts`,
+`core/src/index_web.ts`) star re-exports the same module more than once.
+
+When you intentionally add or remove a public export, refresh the golden and
+commit it alongside your change:
+
+```bash
+npx vitest run -u --project unit:core core/test/public_api/public_api_test.ts
+```
+
 ### Sign our Contributor License Agreement
 
 Contributions to this project must be accompanied by a
