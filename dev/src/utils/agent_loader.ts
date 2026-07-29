@@ -208,6 +208,9 @@ export class AgentFile {
           'lightningcss',
           'jiti',
           'jiti/package.json',
+          // Reads `protos/**/*.proto` relative to `__dirname`, which does not
+          // survive being bundled into the temp output directory.
+          '@google-cloud/bigtable',
         ],
       });
 
