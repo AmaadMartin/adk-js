@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Client} from '@google-cloud/vertexai/build/src/genai/client.js';
 import {Sessions} from '@google-cloud/vertexai/build/src/genai/sessions.js';
 import {
   AppendAgentEngineSessionEventConfig,
@@ -22,7 +21,10 @@ import {Event} from '../events/event.js';
 import {EventActions} from '../events/event_actions.js';
 import {ToolConfirmation} from '../tools/tool_confirmation.js';
 import {logger} from '../utils/logger.js';
-import {getExpressModeApiKey} from '../utils/vertex_ai_utils.js';
+import {
+  createAgentEnginesClient,
+  getExpressModeApiKey,
+} from '../utils/vertex_ai_utils.js';
 
 import {partialCopy} from '../utils/partial_copy.js';
 import {
@@ -102,11 +104,11 @@ export class VertexAiSessionService extends BaseSessionService {
     if (options.sessions) {
       this.sessions = options.sessions;
     } else {
-      const client = new Client({
-        project: this.projectId,
+      this.sessions = createAgentEnginesClient({
+        projectId: this.projectId,
         location: this.location,
-      });
-      this.sessions = client.agentEnginesInternal.sessions;
+        expressModeApiKey: this.expressModeApiKey,
+      }).sessions;
     }
   }
 

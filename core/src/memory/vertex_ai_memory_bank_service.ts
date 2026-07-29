@@ -16,7 +16,10 @@ import {Content, createUserContent} from '@google/genai';
 import {Event} from '../events/event.js';
 import {Session} from '../sessions/session.js';
 import {logger} from '../utils/logger.js';
-import {getExpressModeApiKey} from '../utils/vertex_ai_utils.js';
+import {
+  createAgentEnginesClient,
+  getExpressModeApiKey,
+} from '../utils/vertex_ai_utils.js';
 import {
   BaseMemoryService,
   SearchMemoryRequest,
@@ -143,11 +146,11 @@ export class VertexAiMemoryBankService implements BaseMemoryService {
     if (options.client) {
       this.memories = options.client.agentEnginesInternal.memories;
     } else {
-      const client = new Client({
-        project: this.projectId,
+      this.memories = createAgentEnginesClient({
+        projectId: this.projectId,
         location: this.location,
-      });
-      this.memories = client.agentEnginesInternal.memories;
+        expressModeApiKey: this.expressModeApiKey,
+      }).memories;
     }
   }
 

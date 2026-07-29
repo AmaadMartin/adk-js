@@ -7,7 +7,7 @@
 import {Sessions} from '@google-cloud/vertexai/build/src/genai/sessions.js';
 import {createEvent, State, VertexAiSessionService} from '@google/adk';
 import {Session} from '@google/adk/sessions/session.js';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 // Mock the unreleased nodejs-vertexai package so the import resolves
 vi.mock('nodejs-vertexai', () => ({
@@ -1091,5 +1091,65 @@ describe('VertexAiSessionService', () => {
         }),
       );
     });
+  });
+});
+
+describe('VertexAiSessionService express mode', () => {
+  const FAKE_API_KEY = 'fake-express-key';
+  const originalEnv = process.env;
+
+  beforeEach(() => {
+    process.env = {...originalEnv, GOOGLE_GENAI_USE_VERTEXAI: 'true'};
+    delete process.env['GOOGLE_API_KEY'];
+  });
+
+  afterEach(() => {
+    process.env = originalEnv;
+    vi.restoreAllMocks();
+  });
+
+  it('initializes from GOOGLE_API_KEY without a project or location', () => {
+    process.env['GOOGLE_API_KEY'] = FAKE_API_KEY;
+
+    expect(new VertexAiSessionService({})).toBeDefined();
+  });
+
+  it('initializes from an explicit expressModeApiKey', () => {
+    expect(
+      new VertexAiSessionService({expressModeApiKey: FAKE_API_KEY}),
+    ).toBeDefined();
+  });
+
+  it('authenticates with the key and omits the project path prefix', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          name: 'operations/test-operation-id',
+          done: true,
+          response: {
+            name: 'reasoningEngines/12345/sessions/test-session-id',
+            sessionState: {},
+            updateTime: '2026-04-21T12:00:00Z',
+          },
+        }),
+        {status: 200, headers: {'content-type': 'application/json'}},
+      ),
+    );
+    const service = new VertexAiSessionService({
+      expressModeApiKey: FAKE_API_KEY,
+    });
+
+    const session = await service.createSession({
+      appName: '12345',
+      userId: 'testUser',
+    });
+
+    expect(session.id).toBe('test-session-id');
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchSpy.mock.calls[0];
+    expect(String(url)).toBe(
+      'https://aiplatform.googleapis.com/v1beta1/reasoningEngines/12345/sessions',
+    );
+    expect(new Headers(init?.headers).get('x-goog-api-key')).toBe(FAKE_API_KEY);
   });
 });

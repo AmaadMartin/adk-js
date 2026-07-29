@@ -4,8 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {SDK_VERSION} from '@google-cloud/vertexai/build/src/genai/client.js';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
-import {getExpressModeApiKey} from '../../src/utils/vertex_ai_utils.js';
+import {
+  createAgentEnginesClient,
+  createExpressModeApiClient,
+  getExpressModeApiKey,
+} from '../../src/utils/vertex_ai_utils.js';
+
+const FAKE_API_KEY = 'fake-express-key';
 
 describe('vertex_ai_utils', () => {
   describe('getExpressModeApiKey', () => {
@@ -67,6 +74,59 @@ describe('vertex_ai_utils', () => {
       delete process.env['GOOGLE_API_KEY'];
       const result = getExpressModeApiKey();
       expect(result).toBeUndefined();
+    });
+  });
+
+  describe('createExpressModeApiClient', () => {
+    it('should authenticate with the key instead of a project and location', () => {
+      const client = createExpressModeApiClient(FAKE_API_KEY);
+
+      expect(client.getApiKey()).toBe(FAKE_API_KEY);
+      expect(client.getProject()).toBeUndefined();
+      expect(client.getLocation()).toBeUndefined();
+      expect(client.isVertexAI()).toBe(true);
+    });
+
+    it('should send the key as the x-goog-api-key header', async () => {
+      const headers =
+        await createExpressModeApiClient(FAKE_API_KEY).getAuthHeaders();
+
+      expect(headers.get('x-goog-api-key')).toBe(FAKE_API_KEY);
+    });
+
+    it('should report the same user agent as the vendor client', () => {
+      const client = createExpressModeApiClient(FAKE_API_KEY);
+
+      expect(client.clientOptions.userAgentExtra).toBe(
+        `vertex-genai-modules/${SDK_VERSION}`,
+      );
+    });
+  });
+
+  describe('createAgentEnginesClient', () => {
+    it('should build a client from an express mode key alone', () => {
+      const client = createAgentEnginesClient({
+        expressModeApiKey: FAKE_API_KEY,
+      });
+
+      expect(client.sessions).toBeDefined();
+      expect(client.memories).toBeDefined();
+    });
+
+    it('should build a client from a project and location', () => {
+      const client = createAgentEnginesClient({
+        projectId: 'test-project',
+        location: 'us-central1',
+      });
+
+      expect(client.sessions).toBeDefined();
+      expect(client.memories).toBeDefined();
+    });
+
+    it('should throw when given neither a key nor a project and location', () => {
+      expect(() => createAgentEnginesClient({})).toThrow(
+        'Authentication is not set up.',
+      );
     });
   });
 });

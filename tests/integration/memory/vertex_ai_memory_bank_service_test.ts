@@ -14,7 +14,7 @@ import {
   VertexAiMemoryBankService,
 } from '@google/adk';
 import {createUserContent} from '@google/genai';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {GeminiWithMockResponses} from '../test_case_utils.js';
 
 describe('VertexAiMemoryBankService Integration', () => {
@@ -159,5 +159,59 @@ describe('VertexAiMemoryBankService Integration', () => {
         },
       }),
     );
+  });
+});
+
+describe('VertexAiMemoryBankService Express Mode Integration', () => {
+  const FAKE_API_KEY = 'fake-express-key';
+  const originalEnv = process.env;
+
+  beforeEach(() => {
+    process.env = {...originalEnv, GOOGLE_GENAI_USE_VERTEXAI: 'true'};
+    delete process.env['GOOGLE_API_KEY'];
+  });
+
+  afterEach(() => {
+    process.env = originalEnv;
+    vi.restoreAllMocks();
+  });
+
+  it('should search memory over a real express mode client', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          retrievedMemories: [
+            {
+              memory: {
+                fact: 'Your favorite color is green.',
+                updateTime: '2026-04-21T12:00:00Z',
+              },
+              distance: 0.1,
+            },
+          ],
+        }),
+        {status: 200, headers: {'content-type': 'application/json'}},
+      ),
+    );
+    const service = new VertexAiMemoryBankService({
+      agentEngineId: 'test-engine-id',
+      expressModeApiKey: FAKE_API_KEY,
+    });
+
+    const response = await service.searchMemory({
+      appName: 'test_memory_app',
+      userId: 'test_user',
+      query: 'favorite color',
+    });
+
+    expect(response.memories[0].content?.parts?.[0]?.text).toBe(
+      'Your favorite color is green.',
+    );
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchSpy.mock.calls[0];
+    expect(String(url)).toBe(
+      'https://aiplatform.googleapis.com/v1beta1/reasoningEngines/test-engine-id/memories:retrieve',
+    );
+    expect(new Headers(init?.headers).get('x-goog-api-key')).toBe(FAKE_API_KEY);
   });
 });
