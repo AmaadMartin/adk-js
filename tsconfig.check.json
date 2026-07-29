@@ -12,6 +12,11 @@
       "@google/adk-devtools/*": ["./dev/src/*"]
     }
   },
+  // This program checks sources only. Consumers are type-checked against the
+  // emitted declarations by tests/integration/build_setup/build_setup_test.ts,
+  // which runs `tsc` inside each ts_* fixture below (they depend on the built
+  // packages via `file:` links) and runs in CI as part of `npm run
+  // test:coverage`. Aliasing those fixtures to src would defeat their purpose.
   "exclude": [
     "node_modules",
     "**/dist",
