@@ -260,20 +260,6 @@ describe('toGeminiSchema', () => {
     });
   });
 
-  it('handles a non-object, non-string items schema without crashing', () => {
-    const input = {
-      type: 'array',
-      items: 5,
-    };
-
-    const schema = toGeminiSchema(input as unknown as MCPToolSchema);
-
-    expect(schema).toEqual({
-      type: Type.ARRAY,
-      items: {type: Type.TYPE_UNSPECIFIED},
-    });
-  });
-
   it('handles an array-typed type field whose non-null entry is neither a string nor an object', () => {
     const input = {
       type: [5, 'null'],

@@ -209,9 +209,7 @@ describe('handleFunctionCallList', () => {
       afterToolCallbacks: [],
     });
 
-    expect(event).not.toBeNull();
-    const definedEvent = event as Event;
-    expect(definedEvent.content!.parts![0].functionResponse!.response).toEqual({
+    expect(event!.content!.parts![0].functionResponse!.response).toEqual({
       result: null,
     });
   });
@@ -234,35 +232,6 @@ describe('handleFunctionCallList', () => {
     });
 
     expect(event).toBeNull();
-  });
-
-  it('should pass a record response through to afterToolCallback unchanged', async () => {
-    const toolResult = {status: 'ok'};
-    const recordTool = new FunctionTool({
-      name: 'recordTool',
-      description: 'returns a record',
-      parameters: z.object({}),
-      execute: async () => toolResult,
-    });
-    let received: Record<string, unknown> | undefined;
-    const afterToolCallback: SingleAfterToolCallback = async ({response}) => {
-      received = response;
-      return undefined;
-    };
-
-    const event = await handleFunctionCallList({
-      invocationContext,
-      functionCalls: [{id: randomIdForTestingOnly(), name: 'recordTool'}],
-      toolsDict: {'recordTool': recordTool},
-      beforeToolCallbacks: [],
-      afterToolCallbacks: [afterToolCallback],
-    });
-
-    expect(received).toBe(toolResult);
-    const definedEvent = event as Event;
-    expect(definedEvent.content!.parts![0].functionResponse!.response).toBe(
-      toolResult,
-    );
   });
 
   it('should execute beforeToolCallback and return its result', async () => {

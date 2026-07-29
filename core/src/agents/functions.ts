@@ -174,11 +174,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/**
- * Normalizes a tool result into the record shape `FunctionResponse.response`
- * requires. Tools may return any JSON value, so arrays are wrapped in
- * `results` and everything else that is not already a record in `result`.
- */
+/** Normalizes a tool result into the shape `FunctionResponse.response` needs. */
 function toResponseRecord(functionResult: unknown): Record<string, unknown> {
   if (isRecord(functionResult)) return functionResult;
   if (Array.isArray(functionResult)) return {results: functionResult};

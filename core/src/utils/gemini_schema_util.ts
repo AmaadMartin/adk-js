@@ -64,13 +64,8 @@ function toGeminiType(mcpType: string | undefined): Type {
 }
 
 const getTypeFromArrayItem = (item: unknown): string | undefined => {
-  if (typeof item === 'string') {
-    return item.toLowerCase();
-  }
-  if (isMcpSchemaNode(item) && typeof item.type === 'string') {
-    return item.type.toLowerCase();
-  }
-  return undefined;
+  const {type} = toSchemaNode(item);
+  return typeof type === 'string' ? type.toLowerCase() : undefined;
 };
 
 export function toGeminiSchema(mcpSchema?: MCPToolSchema): Schema | undefined {
