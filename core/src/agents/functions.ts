@@ -169,17 +169,15 @@ export function generateRequestConfirmationEvent({
   });
 }
 
-/**
- * Narrows an unknown value to a plain record (a non-null, non-array object).
- */
+/** Narrows a value to a plain record (a non-null, non-array object). */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /**
- * Normalizes a raw tool result into the record shape required by
- * `FunctionResponse.response` and by the tool callbacks. Tools may return any
- * JSON value, so scalars are wrapped in `result` and arrays in `results`.
+ * Normalizes a tool result into the record shape `FunctionResponse.response`
+ * and the tool callbacks require. Tools may return any JSON value, so scalars
+ * are wrapped in `result` and arrays in `results`.
  */
 function toResponseRecord(functionResult: unknown): Record<string, unknown> {
   if (isRecord(functionResult)) {
@@ -391,9 +389,11 @@ export async function handleFunctionCallList({
       }
     }
 
-    // The tool callbacks are typed to receive the response as a record, so the
-    // raw tool result is normalized the same way the response event is.
-    const callbackResponse = toResponseRecord(functionResponse);
+    // The response the tool callbacks and the response event both receive. A
+    // tool error replaces the result entirely.
+    let responseRecord: Record<string, unknown> = functionResponseError
+      ? {error: functionResponseError}
+      : toResponseRecord(functionResponse);
 
     // Step 4: Check if plugin after_tool_callback overrides the function
     // response.
@@ -402,7 +402,7 @@ export async function handleFunctionCallList({
         tool: tool,
         toolArgs: functionArgs,
         toolContext: toolContext,
-        result: callbackResponse,
+        result: responseRecord,
       });
 
     // Step 5: If no overrides are provided from the plugins, further run the
@@ -414,7 +414,7 @@ export async function handleFunctionCallList({
           tool: tool,
           args: functionArgs,
           context: toolContext,
-          response: callbackResponse,
+          response: responseRecord,
         });
         if (alteredFunctionResponse) {
           break;
@@ -423,9 +423,13 @@ export async function handleFunctionCallList({
     }
 
     // Step 6: If alternative response exists from after_tool_callback, use it
-    // instead of the original function response.
+    // instead of the original function response. A tool error still takes
+    // precedence over the alternative.
     if (alteredFunctionResponse != null) {
       functionResponse = alteredFunctionResponse;
+      if (!functionResponseError) {
+        responseRecord = alteredFunctionResponse;
+      }
     }
 
     // TODO - b/425992518: state event polluting runtime, consider fix.
@@ -433,10 +437,6 @@ export async function handleFunctionCallList({
     if (tool.isLongRunning && !functionResponse) {
       continue;
     }
-
-    const responseRecord: Record<string, unknown> = functionResponseError
-      ? {error: functionResponseError}
-      : toResponseRecord(functionResponse);
 
     // Builds the function response event.
     const functionResponseEvent = createEvent({

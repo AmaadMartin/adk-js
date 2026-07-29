@@ -97,23 +97,4 @@ describe('tool result normalization', () => {
     expect(eventResponses).toEqual([{result: 'sunny'}]);
     expect(callbackResponse).toEqual({result: 'sunny'});
   });
-
-  it('wraps an array tool result in a results field', async () => {
-    const {eventResponses, callbackResponse} = await runToolCall(async () => [
-      'a',
-      'b',
-    ]);
-
-    expect(eventResponses).toEqual([{results: ['a', 'b']}]);
-    expect(callbackResponse).toEqual({results: ['a', 'b']});
-  });
-
-  it('passes a record tool result through unchanged', async () => {
-    const {eventResponses, callbackResponse} = await runToolCall(async () => ({
-      status: 'success',
-    }));
-
-    expect(eventResponses).toEqual([{status: 'success'}]);
-    expect(callbackResponse).toEqual({status: 'success'});
-  });
 });

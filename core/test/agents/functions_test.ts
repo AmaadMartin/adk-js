@@ -457,6 +457,30 @@ describe('handleFunctionCallList', () => {
     });
   });
 
+  it('should pass the error response to afterToolCallback and keep it over the alternative', async () => {
+    const errorResponse = {
+      error: "Error in tool 'errorTool': tool error message content",
+    };
+    let received: Record<string, unknown> | undefined;
+    const afterToolCallback: SingleAfterToolCallback = async ({response}) => {
+      received = response;
+      return {result: 'alternative'};
+    };
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [{id: randomIdForTestingOnly(), name: 'errorTool'}],
+      toolsDict: {'errorTool': errorTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [afterToolCallback],
+    });
+
+    expect(received).toEqual(errorResponse);
+    expect(event!.content!.parts![0].functionResponse!.response).toEqual(
+      errorResponse,
+    );
+  });
+
   it('should pass abortSignal to tool execution', async () => {
     const abortController = new AbortController();
     const signal = abortController.signal;
