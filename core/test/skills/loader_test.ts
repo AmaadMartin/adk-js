@@ -244,7 +244,7 @@ Instructions`,
       await fs.rm(tempDir, {recursive: true, force: true});
     });
 
-    it('normalizes allowed-tools to allowedTools with a single validation pass', async () => {
+    it('normalizes allowed-tools to allowedTools', async () => {
       tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-skill-test-'));
       const skillDir = path.join(tempDir, 'test-skill');
       await fs.mkdir(skillDir);

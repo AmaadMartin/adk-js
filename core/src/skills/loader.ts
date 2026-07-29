@@ -106,9 +106,8 @@ async function loadDir(
 /**
  * Parses SKILL.md from a raw content string, extracting the YAML frontmatter and the body.
  *
- * The frontmatter is validated and normalized against `FrontmatterSchema` here,
- * and this is the only place skill frontmatter is validated. Callers receive an
- * already-validated `Frontmatter` and must not re-validate it.
+ * This is the only place skill frontmatter is validated: callers receive a
+ * `Frontmatter` already validated and normalized against `FrontmatterSchema`.
  *
  * @param content - The raw content of the SKILL.md file.
  * @returns An object containing the validated frontmatter and the remaining markdown body.
