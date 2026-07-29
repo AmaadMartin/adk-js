@@ -433,6 +433,12 @@ export type {EvalSet} from './evaluation/eval_set.js';
 export type {EvalSetResultsManager} from './evaluation/eval_set_results_manager.js';
 export type {EvalSetsManager} from './evaluation/eval_sets_manager.js';
 export {
+  DEFAULT_EVAL_APP_NAME,
+  DEFAULT_EVAL_USER_ID,
+  EvaluationGenerator,
+} from './evaluation/evaluation_generator.js';
+export type {GenerateInferencesFromRootAgentParams} from './evaluation/evaluation_generator.js';
+export {
   EvaluationResultSchema,
   Evaluator,
   PerInvocationResultSchema,
@@ -451,6 +457,16 @@ export {
   isWordChar,
 } from './evaluation/final_response_match_v1.js';
 export type {Rouge1Score} from './evaluation/final_response_match_v1.js';
+export {
+  EVAL_SESSION_ID_PREFIX,
+  LocalEvalService,
+  addRubricsToInvocation,
+  copyEvalCaseRubricsToActualInvocations,
+  copyInvocationRubricsToActualInvocations,
+  generateFinalEvalStatus,
+  getSessionId,
+} from './evaluation/local_eval_service.js';
+export type {LocalEvalServiceOptions} from './evaluation/local_eval_service.js';
 export {
   DEFAULT_METRIC_EVALUATOR_REGISTRY,
   MetricEvaluatorRegistry,
@@ -476,8 +492,16 @@ export {
 } from './evaluation/metric_info_providers.js';
 export {ResponseEvaluator} from './evaluation/response_evaluator.js';
 export type {ResponseEvaluatorOptions} from './evaluation/response_evaluator.js';
+export {
+  DEFAULT_HTTP_RETRY_OPTIONS,
+  EnsureRetryOptionsPlugin,
+  addDefaultRetryOptionsIfNotPresent,
+} from './evaluation/retry_options_utils.js';
 export {SafetyEvaluatorV1} from './evaluation/safety_evaluator.js';
 export type {SafetyEvaluatorV1Options} from './evaluation/safety_evaluator.js';
+export {StaticUserSimulator} from './evaluation/simulation/static_user_simulator.js';
+export {Status, UserSimulator} from './evaluation/simulation/user_simulator.js';
+export type {NextUserMessage} from './evaluation/simulation/user_simulator.js';
 export {
   UserBehaviorSchema,
   UserPersonaSchema,
@@ -488,6 +512,7 @@ export type {
   UserBehavior,
   UserPersona,
 } from './evaluation/simulation/user_simulator_personas.js';
+export {UserSimulatorProvider} from './evaluation/simulation/user_simulator_provider.js';
 export {TrajectoryEvaluator} from './evaluation/trajectory_evaluator.js';
 export type {TrajectoryEvaluatorOptions} from './evaluation/trajectory_evaluator.js';
 export {
