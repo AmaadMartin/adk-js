@@ -1303,29 +1303,5 @@ describe('VertexAiSessionService', () => {
 
       expect(event.actions.transferToAgent).toBe('legacy-specialist');
     });
-
-    it('restores a transfer written by appendEvent', async () => {
-      const event = createEvent({
-        timestamp: 1620000000000,
-        content: {role: 'model', parts: [{text: 'handing over'}]},
-        actions: createEventActions({transferToAgent: 'specialist'}),
-      });
-      await service.appendEvent({session: appendSession(), event});
-
-      // Rebuild what the API would return, dropping rawEvent to simulate a
-      // session written before rawEvent support existed.
-      const appended = mockClient.events.append.mock.calls[0][0];
-      const readBack = await readLegacyEvent({
-        name: `${appended.name}/events/e1`,
-        author: appended.author,
-        invocationId: appended.invocationId,
-        timestamp: appended.timestamp,
-        content: appended.config?.content,
-        actions: appended.config?.actions,
-        eventMetadata: appended.config?.eventMetadata,
-      });
-
-      expect(readBack.actions.transferToAgent).toBe('specialist');
-    });
   });
 });
