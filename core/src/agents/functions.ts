@@ -415,12 +415,10 @@ export async function handleFunctionCallList({
     // TODO - b/425992518: state event polluting runtime, consider fix.
     // Allow long running function to return None as response.
     if (tool.isLongRunning && !functionResponse) {
-      // The function response arrives out of band later, but anything the tool
-      // already recorded on its context (state/artifact deltas, auth or
-      // confirmation requests, escalate/transferToAgent/skipSummarization)
-      // would otherwise be dropped, because the function response event built
-      // below is the only place toolContext.actions is attached to an event.
-      // Emit a content-less, actions-only event so the runtime still sees them.
+      // The function response event built below is the only place
+      // toolContext.actions is attached to an event, so anything the tool
+      // already recorded would be dropped here. Emit a content-less,
+      // actions-only event instead so the runtime still sees it.
       if (hasEventActions(toolContext.actions)) {
         functionResponseEvents.push(
           createEvent({
@@ -428,7 +426,7 @@ export async function handleFunctionCallList({
             author: invocationContext.agent.name,
             branch: invocationContext.branch,
             actions: toolContext.actions,
-            longRunningToolIds: functionCall.id ? [functionCall.id] : [],
+            longRunningToolIds: [functionCall.id!],
           }),
         );
       }

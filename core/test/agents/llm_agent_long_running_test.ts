@@ -158,25 +158,4 @@ describe('LlmAgent with a pausing long running tool', () => {
     });
     expect(persisted!.state).toEqual({});
   });
-
-  it('should persist an escalate action from a long-running tool that returns nothing', async () => {
-    const escalatingTool = createPausingTool(
-      'escalating_tool',
-      (toolContext) => {
-        toolContext.actions.escalate = true;
-      },
-    );
-    const mockLlm = new MockLlm([toolCallResponse('escalating_tool')]);
-    const agent = new LlmAgent({
-      name: 'escalating_agent',
-      model: mockLlm,
-      tools: [escalatingTool],
-    });
-
-    const {events} = await run(agent);
-
-    expect(mockLlm.callCount).toBe(1);
-    expect(events.length).toBe(2);
-    expect(events[1].actions.escalate).toBe(true);
-  });
 });

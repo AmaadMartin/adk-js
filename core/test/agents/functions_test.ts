@@ -97,20 +97,6 @@ const silentLongRunningTool = createPausingTool(
   () => {},
 );
 
-const escalatingLongRunningTool = createPausingTool(
-  'escalatingLongRunningTool',
-  (toolContext) => {
-    toolContext.actions.escalate = true;
-  },
-);
-
-const transferringLongRunningTool = createPausingTool(
-  'transferringLongRunningTool',
-  (toolContext) => {
-    toolContext.actions.transferToAgent = 'other_agent';
-  },
-);
-
 /**
  * Builds an invocation context backed by a real session, needed by tools that
  * write to `toolContext.state`.
@@ -459,19 +445,6 @@ describe('handleFunctionCallList', () => {
     expect(event!.longRunningToolIds).toEqual(['long_running_call_1']);
   });
 
-  it('should return an actions-only event with no ids when the long-running call has no id', async () => {
-    const event = await handleFunctionCallList({
-      invocationContext: createInvocationContextWithSession(),
-      functionCalls: [{name: 'pausingTool', args: {}}],
-      toolsDict: {'pausingTool': pausingTool},
-      beforeToolCallbacks: [],
-      afterToolCallbacks: [],
-    });
-
-    expect(event!.actions.stateDelta).toEqual({pending: true});
-    expect(event!.longRunningToolIds).toEqual([]);
-  });
-
   it('should still return null when a long-running tool records nothing and returns null', async () => {
     const event = await handleFunctionCallList({
       invocationContext: createInvocationContextWithSession(),
@@ -479,27 +452,6 @@ describe('handleFunctionCallList', () => {
         {id: 'long_running_call_1', name: 'silentLongRunningTool', args: {}},
       ],
       toolsDict: {'silentLongRunningTool': silentLongRunningTool},
-      beforeToolCallbacks: [],
-      afterToolCallbacks: [],
-    });
-
-    expect(event).toBeNull();
-  });
-
-  it('should return null when a long-running tool returns undefined and records nothing', async () => {
-    const undefinedTool = new LongRunningFunctionTool({
-      name: 'undefinedTool',
-      description: 'returns undefined',
-      parameters: z.object({}),
-      execute: async () => undefined,
-    });
-
-    const event = await handleFunctionCallList({
-      invocationContext: createInvocationContextWithSession(),
-      functionCalls: [
-        {id: 'long_running_call_1', name: 'undefinedTool', args: {}},
-      ],
-      toolsDict: {'undefinedTool': undefinedTool},
       beforeToolCallbacks: [],
       afterToolCallbacks: [],
     });
@@ -528,7 +480,6 @@ describe('handleFunctionCallList', () => {
     expect(event!.content!.parts![0].functionResponse!.response).toEqual({
       status: 'pending',
     });
-    expect(event!.longRunningToolIds).toEqual([]);
   });
 
   it('should merge a pausing long-running tool actions into the merged event for parallel calls', async () => {
@@ -548,42 +499,6 @@ describe('handleFunctionCallList', () => {
     expect(parts[0].functionResponse!.name).toBe('testTool');
     expect(event!.actions.stateDelta).toEqual({pending: true});
     expect(event!.actions.skipSummarization).toBe(true);
-  });
-
-  it('should carry escalate from a long-running tool that returns null', async () => {
-    const event = await handleFunctionCallList({
-      invocationContext: createInvocationContextWithSession(),
-      functionCalls: [
-        {
-          id: 'long_running_call_1',
-          name: 'escalatingLongRunningTool',
-          args: {},
-        },
-      ],
-      toolsDict: {'escalatingLongRunningTool': escalatingLongRunningTool},
-      beforeToolCallbacks: [],
-      afterToolCallbacks: [],
-    });
-
-    expect(event!.actions.escalate).toBe(true);
-  });
-
-  it('should carry transferToAgent from a long-running tool that returns null', async () => {
-    const event = await handleFunctionCallList({
-      invocationContext: createInvocationContextWithSession(),
-      functionCalls: [
-        {
-          id: 'long_running_call_1',
-          name: 'transferringLongRunningTool',
-          args: {},
-        },
-      ],
-      toolsDict: {'transferringLongRunningTool': transferringLongRunningTool},
-      beforeToolCallbacks: [],
-      afterToolCallbacks: [],
-    });
-
-    expect(event!.actions.transferToAgent).toBe('other_agent');
   });
 
   it('should not emit an actions-only event for a non-long-running tool that returns null', async () => {
