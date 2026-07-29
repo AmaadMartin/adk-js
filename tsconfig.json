@@ -1,20 +1,18 @@
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
+    // Keeps a bare `tsc -p .` from scattering output across the repo.
     "noEmit": true,
-    // Resolve the workspace packages to source, exactly like the `alias` block
-    // vitest.config.ts already applies. Without this, a class imported via the
+    // Resolve the workspace packages to source, so a class imported via the
     // package barrel and the same class imported via a relative `../src/...`
-    // path are two unrelated nominal types. This mapping must stay in this
-    // typecheck-only project: the emitting configs use `rootDir: "src"`, and
-    // inheriting it there would pull sibling sources outside their rootDir.
+    // path are one type rather than two. Must not move into
+    // tsconfig.base.json: the emitting configs set `rootDir: "src"` and would
+    // reject these cross-package paths.
     "paths": {
       "@google/adk": ["./core/src/index.ts"],
       "@google/adk/*": ["./core/src/*"],
       "@google/adk-devtools": ["./dev/src/index.ts"],
-      "@google/adk-devtools/*": ["./dev/src/*"],
-      "@google/adk-integrations": ["./integrations/src/index.ts"],
-      "@google/adk-integrations/*": ["./integrations/src/*"]
+      "@google/adk-integrations": ["./integrations/src/index.ts"]
     }
   },
   "include": [
@@ -28,11 +26,9 @@
     "tests/**/*.ts",
     "vitest.config.ts"
   ],
-  // `tests/integration/build_setup/**` is a set of standalone fixture projects
-  // with their own tsconfigs; they are npm-installed and built at test time.
-  // Everything after it is a legacy test file whose type errors predate this
-  // check being enforced in CI. Do not add new entries -- fix the types
-  // instead. Delete an entry once its file typechecks.
+  // `build_setup` holds standalone fixture projects with their own tsconfigs.
+  // Every entry after it is a legacy test file with pre-existing type errors;
+  // that list may only shrink -- see "Type checking" in CONTRIBUTING.md.
   "exclude": [
     "node_modules",
     "**/dist/**",

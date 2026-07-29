@@ -17,10 +17,14 @@ describe('IntegrationRegistry', () => {
   });
 
   it('should register and retrieve tools', () => {
+    // Declaring parameters makes this a `FunctionTool<ZodObject<...>>`, which
+    // is not assignable to `FunctionTool<undefined>`; the registry has to be
+    // typed as `BaseTool` to hold it, as every conformance tool requires.
     const tool = new FunctionTool({
       name: 'test_tool',
       description: 'A test tool',
-      execute: async () => ({result: 'success'}),
+      parameters: z.object({name: z.string()}),
+      execute: async ({name}) => ({result: `success ${name}`}),
     });
 
     registry.registerTool('test_tool', tool);
@@ -28,22 +32,6 @@ describe('IntegrationRegistry', () => {
 
     expect(retrieved).toBe(tool);
     expect(registry.getTool('non_existent')).toBeUndefined();
-  });
-
-  // A tool declaring parameters is a `FunctionTool<ZodObject<...>>`, which is
-  // not assignable to `FunctionTool<undefined>` -- the registry has to be typed
-  // as `BaseTool` to hold one. Every conformance tool has parameters.
-  it('should register and retrieve tools that declare parameters', () => {
-    const tool = new FunctionTool({
-      name: 'greet',
-      description: 'Greets someone',
-      parameters: z.object({name: z.string()}),
-      execute: async ({name}) => ({greeting: `hello ${name}`}),
-    });
-
-    registry.registerTool('greet', tool);
-
-    expect(registry.getTool('greet')).toBe(tool);
   });
 
   it('should register and retrieve before agent callbacks', () => {
