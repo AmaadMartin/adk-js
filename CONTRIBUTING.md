@@ -64,13 +64,7 @@ When you intentionally add or remove a public export, refresh the golden and
 commit it alongside your change:
 
 ```bash
-UPDATE_GOLDEN=1 npx vitest run --project unit:core core/test/public_api/public_api_test.ts
-```
-
-On Windows PowerShell, set the variable first:
-
-```powershell
-$env:UPDATE_GOLDEN=1; npx vitest run --project unit:core core/test/public_api/public_api_test.ts
+npx vitest run -u --project unit:core core/test/public_api/public_api_test.ts
 ```
 
 ### Sign our Contributor License Agreement

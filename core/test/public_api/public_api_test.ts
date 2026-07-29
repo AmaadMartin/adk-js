@@ -12,16 +12,16 @@ import {describe, expect, it} from 'vitest';
 const SRC_DIR = path.resolve(__dirname, '../../src');
 const GOLDEN_PATH = path.resolve(__dirname, 'public_exports.golden.json');
 
-/** Entry points whose star re-exports must each name a distinct module. */
-const ENTRY_POINTS = ['common.ts', 'index.ts', 'index_web.ts'];
+/** Barrel files whose star re-exports must each name a distinct module. */
+const BARREL_FILES = ['common.ts', 'index.ts', 'index_web.ts'];
 
-const REFRESH_INSTRUCTIONS =
-  'Public export surface of @google/adk changed. If this is intended, ' +
-  'refresh the golden with: UPDATE_GOLDEN=1 npx vitest run ' +
-  '--project unit:core core/test/public_api/public_api_test.ts';
+const REFRESH_HINT =
+  'public export surface of @google/adk changed; if intended, refresh with ' +
+  'npx vitest run -u --project unit:core ' +
+  'core/test/public_api/public_api_test.ts';
 
 /** What a single source file contributes to the export graph. */
-export interface FileExports {
+interface FileExports {
   /**
    * Module specifiers of `export * from '...'` in source order. Duplicates are
    * preserved — the duplicate guard depends on that.
@@ -32,7 +32,11 @@ export interface FileExports {
 }
 
 function unsupportedExport(fileName: string, construct: string): Error {
-  return new Error(`Unsupported export syntax in ${fileName}: ${construct}`);
+  return new Error(
+    `Unsupported export syntax in ${fileName}: ${construct}. Teach scanSource ` +
+      'in core/test/public_api/public_api_test.ts about it, so that the public ' +
+      'export golden stays complete.',
+  );
 }
 
 function isExported(node: ts.Node): boolean {
@@ -49,7 +53,7 @@ function isExported(node: ts.Node): boolean {
  * not understand, so an unhandled form can never be silently dropped from the
  * golden.
  */
-export function scanSource(fileName: string, text: string): FileExports {
+function scanSource(fileName: string, text: string): FileExports {
   const source = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest);
   const starSpecifiers: string[] = [];
   const ownNames: string[] = [];
@@ -127,7 +131,7 @@ function resolveStarSpecifier(fromFile: string, specifier: string): string {
  * de-duplicated set of public export names. `readSource` is injectable so the
  * unit tests can supply a virtual file map.
  */
-export function collectPublicNames(
+function collectPublicNames(
   entryFile: string,
   readSource: (file: string) => string = (file) =>
     fs.readFileSync(file, 'utf8'),
@@ -354,8 +358,8 @@ describe('collectPublicNames', () => {
   });
 });
 
-describe('entry point star re-exports', () => {
-  it.each(ENTRY_POINTS)('%s re-exports each module at most once', (name) => {
+describe('barrel star re-exports', () => {
+  it.each(BARREL_FILES)('%s re-exports each module at most once', (name) => {
     const file = path.resolve(SRC_DIR, name);
     const {starSpecifiers} = scanSource(file, fs.readFileSync(file, 'utf8'));
 
@@ -376,11 +380,11 @@ describe('entry point star re-exports', () => {
 });
 
 describe('public export surface', () => {
-  it('matches the checked-in golden', () => {
+  it('matches the checked-in golden', async () => {
     const names = collectPublicNames(path.resolve(SRC_DIR, 'index.ts'));
 
-    // Guards against blessing a golden produced by a walker that silently
-    // stopped following the graph.
+    // Asserted before the snapshot below, so that `vitest -u` cannot bless a
+    // golden produced by a walker that silently stopped following the graph.
     expect(names.length).toBeGreaterThan(100);
     expect(names).toEqual(
       expect.arrayContaining([
@@ -392,12 +396,9 @@ describe('public export surface', () => {
       ]),
     );
 
-    if (process.env.UPDATE_GOLDEN) {
-      fs.writeFileSync(GOLDEN_PATH, `${JSON.stringify(names, null, 2)}\n`);
-    }
-
-    expect(names, REFRESH_INSTRUCTIONS).toEqual(
-      JSON.parse(fs.readFileSync(GOLDEN_PATH, 'utf8')),
+    await expect(`${JSON.stringify(names, null, 2)}\n`).toMatchFileSnapshot(
+      GOLDEN_PATH,
+      REFRESH_HINT,
     );
   });
 });
