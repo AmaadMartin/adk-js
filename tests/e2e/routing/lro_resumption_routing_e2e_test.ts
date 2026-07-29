@@ -76,10 +76,8 @@ class DataProcessingAgent extends BaseAgent {
     });
   }
 
-  override runLiveImpl(
-    _ctx: InvocationContext,
-  ): AsyncGenerator<Event, void, void> {
-    throw new Error('Live mode is not supported in this test agent.');
+  protected runLiveImpl(): AsyncGenerator<Event, void, void> {
+    throw new Error('Not supported');
   }
 }
 
@@ -117,10 +115,8 @@ class RootOrchestratorAgent extends BaseAgent {
     });
   }
 
-  override runLiveImpl(
-    _ctx: InvocationContext,
-  ): AsyncGenerator<Event, void, void> {
-    throw new Error('Live mode is not supported in this test agent.');
+  protected runLiveImpl(): AsyncGenerator<Event, void, void> {
+    throw new Error('Not supported');
   }
 }
 

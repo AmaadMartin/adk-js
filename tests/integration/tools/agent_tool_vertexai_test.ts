@@ -114,8 +114,7 @@ describe('AgentTool (Vertex AI)', () => {
         };
       },
       get: async (req: {name: string}) => {
-        const segments = req.name.split('/');
-        const id = segments[segments.length - 1];
+        const id = req.name.slice(req.name.lastIndexOf('/') + 1);
         return {
           userId: 'TestUser',
           sessionState: {
@@ -130,8 +129,7 @@ describe('AgentTool (Vertex AI)', () => {
           name: string;
           config?: {actions?: {stateDelta?: Record<string, unknown>}};
         }) => {
-          const segments = req.name.split('/');
-          const id = segments[segments.length - 1];
+          const id = req.name.slice(req.name.lastIndexOf('/') + 1);
           eventsStore.push(req);
           if (req.config?.actions?.stateDelta) {
             sessionStateStore[id] = {
