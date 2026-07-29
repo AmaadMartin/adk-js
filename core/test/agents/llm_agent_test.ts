@@ -6,6 +6,9 @@
 
 import {
   AUTH_PREPROCESSOR,
+  ArtifactVersion,
+  BaseArtifactService,
+  BaseCodeExecutor,
   BaseLlm,
   BaseLlmConnection,
   BaseLlmRequestProcessor,
@@ -13,10 +16,12 @@ import {
   BasePlugin,
   BaseTool,
   CONTENT_REQUEST_PROCESSOR,
+  CodeExecutionInput,
+  CodeExecutionResult,
   Context,
   ContextCompactorRequestProcessor,
-  createEvent,
   Event,
+  ExecuteCodeParams,
   InvocationContext,
   LlmAgent,
   LlmRequest,
@@ -25,8 +30,9 @@ import {
   RunAsyncToolRequest,
   Session,
   ToolProcessLlmRequest,
+  createEvent,
 } from '@google/adk';
-import {Content, Schema, Type} from '@google/genai';
+import {Content, Part, Schema, Type} from '@google/genai';
 import {beforeEach, describe, expect, it} from 'vitest';
 import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
@@ -837,5 +843,175 @@ describe('LlmAgent Default Request Processors', () => {
       CONTENT_REQUEST_PROCESSOR,
     );
     expect(authIndex).toBeLessThan(contentIndex);
+  });
+});
+
+class MockArtifactService implements BaseArtifactService {
+  async saveArtifact(): Promise<number> {
+    return 0;
+  }
+  async loadArtifact(): Promise<Part | undefined> {
+    return undefined;
+  }
+  async listArtifactKeys(): Promise<string[]> {
+    return [];
+  }
+  async deleteArtifact(): Promise<void> {}
+  async listVersions(): Promise<number[]> {
+    return [];
+  }
+  async listArtifactVersions(): Promise<ArtifactVersion[]> {
+    return [];
+  }
+  async getArtifactVersion(): Promise<ArtifactVersion | undefined> {
+    return undefined;
+  }
+}
+
+class MockCodeExecutor extends BaseCodeExecutor {
+  executeCalled = false;
+  executeCodeInput?: CodeExecutionInput;
+
+  async executeCode(params: ExecuteCodeParams): Promise<CodeExecutionResult> {
+    this.executeCalled = true;
+    this.executeCodeInput = params.codeExecutionInput;
+    return {
+      stdout: 'result from code execution\n',
+      stderr: '',
+      outputFiles: [],
+    };
+  }
+}
+
+class MultiResponseMockLlm extends BaseLlm {
+  private responseIndex = 0;
+  constructor(private responses: LlmResponse[]) {
+    super({model: 'multi-response-mock-llm'});
+  }
+
+  async *generateContentAsync(
+    _request: LlmRequest,
+  ): AsyncGenerator<LlmResponse, void, void> {
+    const response = this.responses[this.responseIndex];
+    if (response) {
+      this.responseIndex = Math.min(
+        this.responseIndex + 1,
+        this.responses.length - 1,
+      );
+      yield response;
+    }
+  }
+
+  async connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
+    return new MockLlmConnection();
+  }
+}
+
+describe('LlmAgent with CodeExecutor', () => {
+  it('should execute code and continue loop when codeExecutor is present', async () => {
+    const executor = new MockCodeExecutor();
+    const responses: LlmResponse[] = [
+      {
+        content: {
+          parts: [
+            {
+              text: 'Here is some code:\n```javascript\nconsole.log("hello");\n```',
+            },
+          ],
+        },
+      },
+      {
+        content: {
+          parts: [
+            {text: 'The code output is indeed result from code execution.'},
+          ],
+        },
+      },
+    ];
+    const mockModel = new MultiResponseMockLlm(responses);
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: mockModel,
+      codeExecutor: executor,
+    });
+
+    const mockState = {
+      hasDelta: () => false,
+      get: () => undefined,
+      set: () => {},
+    };
+    const invocationContext = new InvocationContext({
+      invocationId: 'inv_123',
+      session: {
+        id: 'sess_123',
+        state: mockState,
+        events: [],
+      } as unknown as Session,
+      agent: agent,
+      pluginManager: new PluginManager(),
+      artifactService: new MockArtifactService(),
+    });
+
+    const generator = agent.runAsync(invocationContext);
+    const events: Event[] = [];
+    for await (const event of generator) {
+      events.push(event);
+    }
+
+    expect(executor.executeCalled).toBe(true);
+    expect(executor.executeCodeInput?.code).toBe('console.log("hello");');
+
+    expect(events).toHaveLength(3);
+    expect(events[0].content?.parts?.[0].text).toContain('Here is some code');
+    expect(events[1].content?.parts?.[0].text).toContain(
+      'result from code execution',
+    );
+    expect(events[2].content?.parts?.[0].text).toContain(
+      'The code output is indeed',
+    );
+  }, 10000);
+
+  it('should not execute code when codeExecutor is absent', async () => {
+    const responses: LlmResponse[] = [
+      {
+        content: {
+          parts: [
+            {
+              text: 'Here is some code:\n```javascript\nconsole.log("hello");\n```',
+            },
+          ],
+        },
+      },
+    ];
+    const mockModel = new MultiResponseMockLlm(responses);
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: mockModel,
+    });
+
+    const mockState = {
+      hasDelta: () => false,
+      get: () => undefined,
+      set: () => {},
+    };
+    const invocationContext = new InvocationContext({
+      invocationId: 'inv_123',
+      session: {
+        id: 'sess_123',
+        state: mockState,
+        events: [],
+      } as unknown as Session,
+      agent: agent,
+      pluginManager: new PluginManager(),
+    });
+
+    const generator = agent.runAsync(invocationContext);
+    const events: Event[] = [];
+    for await (const event of generator) {
+      events.push(event);
+    }
+
+    expect(events).toHaveLength(1);
+    expect(events[0].content?.parts?.[0].text).toContain('Here is some code');
   });
 });
