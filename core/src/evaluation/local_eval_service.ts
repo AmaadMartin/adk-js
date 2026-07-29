@@ -11,7 +11,6 @@ import {NotFoundError} from '../errors/not_found_error.js';
 import {BaseMemoryService} from '../memory/base_memory_service.js';
 import {BaseSessionService} from '../sessions/base_session_service.js';
 import {InMemorySessionService} from '../sessions/in_memory_session_service.js';
-import {Session} from '../sessions/session.js';
 import {runWithClientLabel} from '../utils/client_labels.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
 import {experimental} from '../utils/experimental.js';
@@ -58,9 +57,6 @@ const EVAL_CLIENT_LABEL = `google-adk-eval/${version}`;
 const LIVE_INFERENCE_NOT_SUPPORTED_MESSAGE =
   'Live (bidi-streaming) inference is not yet supported in adk-js; use' +
   ' non-live inference by setting inferenceConfig.useLive to false.';
-
-// The default user id is owned by `evaluation_generator.ts`, which creates the
-// eval session; the session lookup below only succeeds while both agree.
 
 /** Returns a fresh eval session id. */
 export function getSessionId(): string {
@@ -180,12 +176,9 @@ async function* mapWithConcurrency<T, R>(
   // limit NaN and silently starve the pool; treat any non-positive or
   // non-numeric limit as 1.
   const effectiveLimit = limit >= 1 ? Math.floor(limit) : 1;
-  interface Settled {
-    index: number;
-    ok: boolean;
-    result?: R;
-    error?: unknown;
-  }
+  type Settled =
+    | {index: number; ok: true; result: R}
+    | {index: number; ok: false; error: unknown};
   const executing = new Map<number, Promise<Settled>>();
   let nextIndex = 0;
 
@@ -211,7 +204,7 @@ async function* mapWithConcurrency<T, R>(
     if (nextIndex < items.length) {
       startNext();
     }
-    yield settled.result as R;
+    yield settled.result;
   }
 }
 
@@ -322,16 +315,13 @@ export class LocalEvalService extends BaseEvalService {
     try {
       for await (const [inferenceResult, evalCaseResult] of stream) {
         const {appName, evalSetId} = inferenceResult;
-        const group = resultsBySet.get(resultGroupKey(appName, evalSetId));
+        const key = resultGroupKey(appName, evalSetId);
+        let group = resultsBySet.get(key);
         if (group === undefined) {
-          resultsBySet.set(resultGroupKey(appName, evalSetId), {
-            appName,
-            evalSetId,
-            cases: [evalCaseResult],
-          });
-        } else {
-          group.cases.push(evalCaseResult);
+          group = {appName, evalSetId, cases: []};
+          resultsBySet.set(key, group);
         }
+        group.cases.push(evalCaseResult);
         yield evalCaseResult;
       }
     } catch (error) {
@@ -394,14 +384,11 @@ export class LocalEvalService extends BaseEvalService {
     const userId = evalCase.sessionInput?.userId ?? DEFAULT_EVAL_USER_ID;
 
     if (inferenceResult.inferences == null) {
-      let sessionDetails: Session | undefined;
-      if (inferenceResult.sessionId != null) {
-        sessionDetails = await this.sessionService.getSession({
-          appName,
-          userId,
-          sessionId: inferenceResult.sessionId,
-        });
-      }
+      const sessionId = inferenceResult.sessionId;
+      const sessionDetails =
+        sessionId != null
+          ? await this.sessionService.getSession({appName, userId, sessionId})
+          : undefined;
       return [
         inferenceResult,
         {
@@ -411,7 +398,7 @@ export class LocalEvalService extends BaseEvalService {
           finalEvalStatus: EvalStatus.FAILED,
           overallEvalMetricResults: [],
           evalMetricResultPerInvocation: [],
-          sessionId: inferenceResult.sessionId ?? '',
+          sessionId: sessionId ?? '',
           sessionDetails,
           userId,
         },

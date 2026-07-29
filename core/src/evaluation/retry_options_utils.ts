@@ -35,7 +35,8 @@ export const DEFAULT_HTTP_RETRY_OPTIONS: HttpRetryOptions = {
  * then sets `retryOptions` only when it is falsy, never overriding
  * caller-supplied retry options.
  *
- * NOTE: This is intended for internal eval usage; do not depend on it directly.
+ * NOTE: Exported for assembling custom eval pipelines. The defaults it applies
+ * are tuned for eval runs and may change.
  */
 export function addDefaultRetryOptionsIfNotPresent(
   llmRequest: LlmRequest,
@@ -49,7 +50,8 @@ export function addDefaultRetryOptionsIfNotPresent(
  * A plugin that injects default HTTP retry options into every `LlmRequest`, so
  * that transient model-provider outages do not fail eval runs.
  *
- * NOTE: This is intended for internal eval usage; do not depend on it directly.
+ * NOTE: Exported for assembling custom eval pipelines. The defaults it applies
+ * are tuned for eval runs and may change.
  */
 export class EnsureRetryOptionsPlugin extends BasePlugin {
   override async beforeModelCallback({
