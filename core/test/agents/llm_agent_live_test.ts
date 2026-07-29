@@ -17,7 +17,7 @@ import {
   LlmResponse,
   MAX_LIVE_RECONNECT_ATTEMPTS,
   PluginManager,
-  Session,
+  createSession,
 } from '@google/adk';
 import {Blob, Content, createUserContent} from '@google/genai';
 import {describe, expect, it, vi} from 'vitest';
@@ -120,13 +120,11 @@ describe('LlmAgent runLiveFlow', () => {
     agent: BaseAgent,
     liveRequestQueue = new LiveRequestQueue(),
   ): InvocationContext {
-    const session = {
+    const session = createSession({
       id: 'test-session',
       appName: 'test-app',
       userId: 'test-user',
-      state: {},
-      events: [],
-    } as unknown as Session;
+    });
 
     const pluginManager = new PluginManager();
 
@@ -167,14 +165,38 @@ describe('LlmAgent runLiveFlow', () => {
     expect(events[1].author).toBe('user');
     expect(events[1].inputTranscription?.text).toBe('user speech');
     expect(events[2].outputTranscription?.text).toBe('model speech');
+    // The connection must be released once the server stream ends.
+    expect(conn.closeCalls).toBe(1);
+  });
+
+  it('should throw when the invocation has no live request queue', async () => {
+    const conn = new MockLiveLlmConnection([]);
+    const llm = new MockLiveLlm([conn]);
+    const agent = new LlmAgent({name: 'live_agent', model: llm});
+
+    const context = new InvocationContext({
+      invocationId: 'test-invocation',
+      agent,
+      session: createSession({id: 'test-session', appName: 'test-app'}),
+      pluginManager: new PluginManager(),
+    });
+
+    await expect(async () => {
+      for await (const _event of agent.runLive(context)) {
+        // Should never yield.
+      }
+    }).rejects.toThrow('requires invocationContext.liveRequestQueue');
+    expect(llm.connectCalls.length).toBe(0);
   });
 
   it('should verify parallel queue draining: forwarding content, blob, activity boundaries and close', async () => {
-    // eslint-disable-next-line require-yield
     const conn = new MockLiveLlmConnection(async function* () {
       while (!conn.isClosed) {
         await new Promise((resolve) => setTimeout(resolve, 10));
       }
+      // The connection produces no server messages; delegating to an empty
+      // iterable yields nothing while still being a yield expression.
+      yield* [];
     });
     const llm = new MockLiveLlm([conn]);
     const agent = new LlmAgent({name: 'live_agent', model: llm});
@@ -182,13 +204,10 @@ describe('LlmAgent runLiveFlow', () => {
     const queue = new LiveRequestQueue();
     const context = createTestContext(agent, queue);
 
-    const activeStreamMock = {
-      stream: {
-        send: vi.fn(),
-      },
-    };
+    const toolStream = new LiveRequestQueue();
+    const toolStreamSend = vi.spyOn(toolStream, 'send');
     context.activeStreamingTools = {
-      tool1: activeStreamMock as unknown as ActiveStreamingTool,
+      tool1: new ActiveStreamingTool({stream: toolStream}),
     };
 
     const runPromise = (async () => {
@@ -212,7 +231,7 @@ describe('LlmAgent runLiveFlow', () => {
     expect(conn.sendActivityStartCalls).toBe(1);
     expect(conn.sendActivityEndCalls).toBe(1);
     expect(conn.closeCalls).toBe(1);
-    expect(activeStreamMock.stream.send).toHaveBeenCalled();
+    expect(toolStreamSend).toHaveBeenCalled();
   });
 
   it('should verify reconnection logic on goAway when resumption handle is present and skip sendHistory on retries', async () => {
@@ -233,9 +252,10 @@ describe('LlmAgent runLiveFlow', () => {
     const agent = new LlmAgent({name: 'live_agent', model: llm});
 
     agent.requestProcessors.push({
-      // eslint-disable-next-line require-yield
       runAsync: async function* (_ctx, req) {
         req.contents.push(createUserContent('initial history'));
+        // The processor only mutates the request and emits no events.
+        yield* [];
       },
     });
 
@@ -247,6 +267,8 @@ describe('LlmAgent runLiveFlow', () => {
     }
 
     expect(llm.connectCalls.length).toBe(2);
+    // The dropped connection must not be left open across the reconnect.
+    expect(conn1.closeCalls).toBe(1);
     expect(conn1.sendHistoryCalls.length).toBe(1);
     expect(conn1.sendHistoryCalls[0][0].parts?.[0].text).toBe(
       'initial history',
@@ -313,6 +335,47 @@ describe('LlmAgent runLiveFlow', () => {
         e.errorMessage?.includes('Server unavailable during reconnect'),
       ),
     ).toBe(true);
+  });
+
+  it('should not retry agent-side failures even when a resumption handle is present', async () => {
+    const conn = new MockLiveLlmConnection([
+      {liveSessionResumptionUpdate: {newHandle: 'handle-present'}},
+      {
+        content: {
+          role: 'model',
+          parts: [
+            {
+              functionCall: {
+                name: 'transfer_to_agent',
+                args: {agentName: 'ghost_agent'},
+              },
+            },
+          ],
+        },
+      },
+    ]);
+    const llm = new MockLiveLlm([conn]);
+    const subAgent = new LlmAgent({name: 'sub_agent', model: llm});
+    const agent = new LlmAgent({
+      name: 'live_agent',
+      model: llm,
+      subAgents: [subAgent],
+    });
+
+    const context = createTestContext(agent);
+
+    const events: Event[] = [];
+    for await (const event of agent.runLive(context)) {
+      events.push(event);
+    }
+
+    // A transfer to an unknown agent is a deterministic bug, not a dropped
+    // connection: it must surface on the first throw rather than burn the
+    // reconnect budget.
+    expect(llm.connectCalls.length).toBe(1);
+    expect(events.some((e) => e.errorMessage?.includes('ghost_agent'))).toBe(
+      true,
+    );
   });
 
   it('should verify tool execution and sending function response back to queue in live mode', async () => {

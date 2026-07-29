@@ -13,7 +13,14 @@ describe('LiveRequestQueue', () => {
     const queue = new LiveRequestQueue();
     const content = createUserContent('content test');
     queue.sendContent(content);
-    expect(await queue.get()).toEqual({content});
+    expect(await queue.get()).toEqual({content, partial: false});
+  });
+
+  it('should mark the request partial when sendContent is given partial', async () => {
+    const queue = new LiveRequestQueue();
+    const content = createUserContent('partial chunk');
+    queue.sendContent(content, /* partial= */ true);
+    expect(await queue.get()).toEqual({content, partial: true});
   });
 
   it('should handle sendRealtime', async () => {

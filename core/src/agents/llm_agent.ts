@@ -60,6 +60,7 @@ import {
 import {AUTH_PREPROCESSOR} from '../auth/auth_preprocessor.js';
 import {BaseContextCompactor} from '../context/base_context_compactor.js';
 import {InvocationContext} from './invocation_context.js';
+import type {LiveRequestQueue} from './live_request_queue.js';
 import {AGENT_TRANSFER_LLM_REQUEST_PROCESSOR} from './processors/agent_transfer_llm_request_processor.js';
 import {BASIC_LLM_REQUEST_PROCESSOR} from './processors/basic_llm_request_processor.js';
 import {CODE_EXECUTION_REQUEST_PROCESSOR} from './processors/code_execution_request_processor.js';
@@ -84,6 +85,30 @@ export type LlmAgentSchema =
 export const MAX_LIVE_RECONNECT_ATTEMPTS = 5;
 const DEFAULT_TRANSFER_AGENT_DELAY = 1000;
 const DEFAULT_TASK_COMPLETION_DELAY = 1000;
+/**
+ * Pause before re-establishing a dropped live connection.
+ *
+ * Keeps a server that accepts a connection and immediately drops it (or
+ * immediately sends `goAway`) from turning into a tight reconnect loop.
+ */
+const LIVE_RECONNECT_BACKOFF_MS = 250;
+
+/**
+ * Wraps an error raised while handling a live server message.
+ *
+ * The live flow only retries transport failures. Errors thrown by agent-side
+ * handling of a server message - response postprocessing, tool execution,
+ * sending a function response back to the request queue, or an agent transfer
+ * - are deterministic bugs: retrying them just delays the failure and
+ * misreports it as a connection drop. Wrapping them lets the reconnect loop
+ * tell the two apart by origin instead of by guessing at error shapes.
+ */
+class LiveMessageHandlingError extends Error {
+  constructor(readonly reason: unknown) {
+    super(reason instanceof Error ? reason.message : String(reason));
+    this.name = 'LiveMessageHandlingError';
+  }
+}
 
 /** An object that can provide an instruction string. */
 export type InstructionProvider = (
@@ -752,13 +777,29 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
    *
    * If the live connection drops (network failure, server `goAway`) and a
    * session resumption handle has been observed, the flow transparently
-   * reconnects using that handle up to {@link MAX_LIVE_RECONNECT_ATTEMPTS}
-   * times. Subsequent reconnects skip `sendHistory` because the server
-   * already holds the conversation state associated with the handle.
+   * reconnects using that handle, pausing
+   * {@link LIVE_RECONNECT_BACKOFF_MS} between attempts. Subsequent reconnects
+   * skip `sendHistory` because the server already holds the conversation
+   * state associated with the handle.
+   *
+   * {@link MAX_LIVE_RECONNECT_ATTEMPTS} bounds *consecutive* failures to
+   * re-establish the connection; the counter resets once a connection is
+   * established, so a session that keeps connecting successfully can
+   * reconnect any number of times over its lifetime.
+   *
+   * @throws If `invocationContext.liveRequestQueue` is not set - the live flow
+   *     has no way to reach the model without it.
    */
   private async *runLiveFlow(
     invocationContext: InvocationContext,
   ): AsyncGenerator<Event, void, void> {
+    const liveRequestQueue = invocationContext.liveRequestQueue;
+    if (!liveRequestQueue) {
+      throw new Error(
+        'runLiveFlow requires invocationContext.liveRequestQueue to be set.',
+      );
+    }
+
     const llmRequest: LlmRequest = {
       contents: [],
       toolsDict: {},
@@ -797,30 +838,43 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
           while (true) {
             try {
               if (invocationContext.liveSessionResumptionHandle) {
-                logger.info(`Attempting to reconnect (Attempt ${attempt})...`);
+                logger.debug(`Attempting to reconnect (Attempt ${attempt})...`);
                 attempt++;
-                (llmRequest.liveConnectConfig ??= {}).sessionResumption = {
-                  handle: invocationContext.liveSessionResumptionHandle,
-                };
+                const liveConnectConfig = (llmRequest.liveConnectConfig ??= {});
+                liveConnectConfig.sessionResumption ??= {};
+                liveConnectConfig.sessionResumption.handle =
+                  invocationContext.liveSessionResumptionHandle;
               }
 
-              if (
-                llmRequest.contents.length > 0 &&
-                !invocationContext.liveSessionResumptionHandle
-              ) {
-                const config = (llmRequest.liveConnectConfig ??= {}) as {
-                  historyConfig?: {initial_history_in_client_content?: boolean};
-                } & Record<string, unknown>;
-                config.historyConfig ??= {};
-                config.historyConfig.initial_history_in_client_content ??= true;
-              }
+              // TODO: opt the initial history into
+              // `client_content` once @google/genai exposes `historyConfig` on
+              // `LiveConnectConfig`. As of 2.13.0 it only exists on
+              // `LiveClientSetup`, and `liveConnectConfigTo{Mldev,Vertex}`
+              // allowlist known fields, so setting it here never reaches the
+              // wire.
 
-              logger.info(
+              logger.debug(
                 `Establishing live connection for agent: ${this.name}`,
               );
               const llmConnection =
                 await this.canonicalModel.connect(llmRequest);
               attempt = 1;
+
+              // The live connection must be closed on every exit from this
+              // block - normal end of `receive()`, `goAway` reconnect,
+              // `task_completed`, agent transfer or a thrown error - otherwise
+              // each attempt leaks a websocket. Closing is idempotent so the
+              // transfer branch and the uplink task can close eagerly.
+              let connectionClosed = false;
+              const closeConnection = async () => {
+                if (connectionClosed) {
+                  return;
+                }
+                connectionClosed = true;
+                logger.debug('Closing live connection');
+                await llmConnection.close();
+                logger.debug('Live connection closed.');
+              };
 
               if (
                 llmRequest.contents.length > 0 &&
@@ -845,8 +899,18 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
               const sendTask = sendToModelAsync(
                 llmConnection,
                 invocationContext,
+                liveRequestQueue,
+                closeConnection,
                 sendTaskAbortController.signal,
-              ).catch(() => {});
+              ).catch((error: unknown) => {
+                // Aborting the uplink rejects the pending `get()` with
+                // `Aborted`; that is expected teardown, anything else is a
+                // real failure that would otherwise stall the session
+                // silently.
+                if (!sendTaskAbortController.signal.aborted) {
+                  logger.error('Live uplink failed:', error);
+                }
+              });
 
               let shouldReconnect = false;
               try {
@@ -856,7 +920,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
                   }
 
                   if (llmResponse.liveSessionResumptionUpdate) {
-                    logger.info(
+                    logger.debug(
                       'Update session resumption handle:',
                       llmResponse.liveSessionResumptionUpdate,
                     );
@@ -865,7 +929,10 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
                   }
 
                   if (llmResponse.goAway) {
-                    logger.info('Received go away signal:', llmResponse.goAway);
+                    logger.debug(
+                      'Received go away signal:',
+                      llmResponse.goAway,
+                    );
                     shouldReconnect = true;
                     break;
                   }
@@ -882,96 +949,108 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
                     branch: invocationContext.branch,
                   });
 
-                  for await (const event of this.postprocess(
-                    invocationContext,
-                    llmRequest,
-                    llmResponse,
-                    responseEvent,
-                    /* isLive= */ true,
-                  )) {
-                    if (invocationContext.abortSignal?.aborted) {
-                      return;
-                    }
-
-                    if (getFunctionResponses(event)?.length) {
-                      logger.debug(
-                        'Sending back last function response event:',
-                        event,
-                      );
-                      invocationContext.liveRequestQueue?.sendContent(
-                        event.content!,
-                      );
-                    }
-
-                    yield event;
-
-                    const transferToAgentName = event.actions.transferToAgent;
-                    if (
-                      transferToAgentName ||
-                      event.content?.parts?.some(
-                        (p) => p.functionResponse?.name === 'transfer_to_agent',
-                      )
-                    ) {
-                      await delay(DEFAULT_TRANSFER_AGENT_DELAY);
-                      sendTaskAbortController.abort();
-                      logger.debug('Closing live connection');
-                      await llmConnection.close();
-                      logger.debug('Live connection closed.');
-
-                      if (transferToAgentName) {
-                        logger.debug(
-                          'Transferring to agent:',
-                          transferToAgentName,
-                        );
-                        const agentToRun = this.getAgentByName(
-                          invocationContext,
-                          transferToAgentName,
-                        );
-                        const childContext = new InvocationContext({
-                          ...invocationContext,
-                          liveSessionResumptionHandle: undefined,
-                          runConfig: invocationContext.runConfig,
-                        });
-                        for await (const childEvent of agentToRun.runLive(
-                          childContext,
-                        )) {
-                          if (invocationContext.abortSignal?.aborted) {
-                            return;
-                          }
-                          yield childEvent;
-                        }
+                  // Everything below is agent-side handling of the message.
+                  // Its failures are bugs, not connection drops, so they are
+                  // tagged to bypass the reconnect loop.
+                  try {
+                    for await (const event of this.postprocess(
+                      invocationContext,
+                      llmRequest,
+                      llmResponse,
+                      responseEvent,
+                      /* isLive= */ true,
+                    )) {
+                      if (invocationContext.abortSignal?.aborted) {
+                        return;
                       }
-                      return;
-                    }
 
-                    if (
-                      event.content?.parts?.some(
-                        (p) => p.functionResponse?.name === 'task_completed',
-                      )
-                    ) {
-                      await delay(DEFAULT_TASK_COMPLETION_DELAY);
-                      sendTaskAbortController.abort();
-                      return;
+                      if (getFunctionResponses(event)?.length) {
+                        logger.debug(
+                          'Sending back last function response event:',
+                          event,
+                        );
+                        liveRequestQueue.sendContent(event.content!);
+                      }
+
+                      yield event;
+
+                      const transferToAgentName = event.actions.transferToAgent;
+                      if (
+                        transferToAgentName ||
+                        event.content?.parts?.some(
+                          (p) =>
+                            p.functionResponse?.name === 'transfer_to_agent',
+                        )
+                      ) {
+                        await delay(DEFAULT_TRANSFER_AGENT_DELAY);
+                        sendTaskAbortController.abort();
+                        await closeConnection();
+
+                        if (transferToAgentName) {
+                          logger.debug(
+                            'Transferring to agent:',
+                            transferToAgentName,
+                          );
+                          const agentToRun = this.getAgentByName(
+                            invocationContext,
+                            transferToAgentName,
+                          );
+                          const childContext = new InvocationContext({
+                            ...invocationContext,
+                            liveSessionResumptionHandle: undefined,
+                          });
+                          for await (const childEvent of agentToRun.runLive(
+                            childContext,
+                          )) {
+                            if (invocationContext.abortSignal?.aborted) {
+                              return;
+                            }
+                            yield childEvent;
+                          }
+                        }
+                        return;
+                      }
+
+                      if (
+                        event.content?.parts?.some(
+                          (p) => p.functionResponse?.name === 'task_completed',
+                        )
+                      ) {
+                        await delay(DEFAULT_TASK_COMPLETION_DELAY);
+                        sendTaskAbortController.abort();
+                        return;
+                      }
                     }
+                  } catch (error) {
+                    throw error instanceof LiveMessageHandlingError
+                      ? error
+                      : new LiveMessageHandlingError(error);
                   }
                 }
               } finally {
                 sendTaskAbortController.abort();
-                await sendTask.catch(() => {});
+                await sendTask;
+                await closeConnection();
               }
 
               if (shouldReconnect) {
+                await delay(LIVE_RECONNECT_BACKOFF_MS);
                 continue;
               }
               break;
             } catch (error) {
+              if (error instanceof LiveMessageHandlingError) {
+                logger.error(`Error in live flow: ${error.reason}`);
+                throw error.reason;
+              }
               if (
                 invocationContext.liveSessionResumptionHandle &&
                 attempt <= MAX_LIVE_RECONNECT_ATTEMPTS
               ) {
-                logger.info(
+                logger.debug(
                   `Connection closed/lost (${error}), reconnecting with session handle.`,
                 );
+                await delay(LIVE_RECONNECT_BACKOFF_MS);
                 continue;
               }
               if (invocationContext.liveSessionResumptionHandle) {
@@ -1534,9 +1613,22 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   // - configurable agents by yaml config
 }
 
+/**
+ * Drains the invocation's live request queue into the live connection.
+ *
+ * @param llmConnection The live connection to send to.
+ * @param invocationContext The invocation this uplink belongs to.
+ * @param liveRequestQueue The queue to drain. Required: the live flow has no
+ *     way to reach the model without it, so it is passed explicitly rather
+ *     than read off the optional field on `invocationContext`.
+ * @param closeConnection Closes `llmConnection`, idempotently.
+ * @param abortSignal Signal used to tear the uplink down.
+ */
 async function sendToModelAsync(
   llmConnection: BaseLlmConnection,
   invocationContext: InvocationContext,
+  liveRequestQueue: LiveRequestQueue,
+  closeConnection: () => Promise<void>,
   abortSignal?: AbortSignal,
 ): Promise<void> {
   const isAborted = () =>
@@ -1548,9 +1640,8 @@ async function sendToModelAsync(
       break;
     }
 
-    const liveRequest =
-      await invocationContext.liveRequestQueue?.get(abortSignal);
-    if (!liveRequest || isAborted()) {
+    const liveRequest = await liveRequestQueue.get(abortSignal);
+    if (isAborted()) {
       break;
     }
 
@@ -1561,7 +1652,7 @@ async function sendToModelAsync(
     }
 
     if (liveRequest.close) {
-      await llmConnection.close();
+      await closeConnection();
       return;
     }
 
