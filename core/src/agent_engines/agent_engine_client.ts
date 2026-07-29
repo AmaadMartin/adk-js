@@ -107,7 +107,7 @@ export interface ListAgentEngineSessionsRequest {
 }
 
 /** Arguments for {@link AgentEngineClient.streamQuery}. */
-export interface StreamQueryRequest {
+export interface AgentEngineStreamQueryRequest {
   /** A plain string is wrapped as `{role: 'user', parts: [{text}]}`. */
   message: string | Content;
   userId: string;
@@ -117,7 +117,7 @@ export interface StreamQueryRequest {
 }
 
 /** Arguments for {@link AgentEngineClient.query}. */
-export interface QueryRequest {
+export interface AgentEngineQueryRequest {
   /** A class method registered on the deployed app. */
   classMethod: string;
   /**
@@ -126,15 +126,6 @@ export interface QueryRequest {
    * optional remote parameters are left unset.
    */
   input?: Record<string, unknown>;
-}
-
-/** Builds the full resource name of a deployed Agent Engine. */
-export function buildReasoningEngineName(
-  projectId: string,
-  location: string,
-  reasoningEngineId: string,
-): string {
-  return `projects/${projectId}/locations/${location}/reasoningEngines/${reasoningEngineId}`;
 }
 
 /** Splits a full Agent Engine resource name into its parts. */
@@ -173,11 +164,7 @@ function buildNameFromOptions(options: AgentEngineClientOptions): string {
   }
   const location =
     options.location || process.env.GOOGLE_CLOUD_LOCATION || DEFAULT_LOCATION;
-  return buildReasoningEngineName(
-    projectId,
-    location,
-    options.reasoningEngineId,
-  );
+  return `projects/${projectId}/locations/${location}/reasoningEngines/${options.reasoningEngineId}`;
 }
 
 function parseSsePayload(payload: string): AgentEngineEvent | undefined {
@@ -305,7 +292,7 @@ export class AgentEngineClient {
    * Invokes any class method registered on the deployed app and returns its
    * output, e.g. `async_search_memory` or an app-specific method.
    */
-  async query<T = unknown>(request: QueryRequest): Promise<T> {
+  async query<T = unknown>(request: AgentEngineQueryRequest): Promise<T> {
     const response = await this.request('POST', `${this.name}:query`, {
       classMethod: request.classMethod,
       input: request.input ?? {},
@@ -366,7 +353,7 @@ export class AgentEngineClient {
    * yielded value really is an {@link AgentEngineEvent}.
    */
   async *streamQuery(
-    request: StreamQueryRequest,
+    request: AgentEngineStreamQueryRequest,
   ): AsyncGenerator<AgentEngineEvent> {
     const response = await this.request(
       'POST',

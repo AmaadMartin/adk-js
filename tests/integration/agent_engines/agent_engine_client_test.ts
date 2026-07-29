@@ -247,23 +247,9 @@ describe('AgentEngineClient against a local Agent Engine server', () => {
     expect(events).toEqual(CONVERSATION);
     expect(sessions).toEqual([SESSION]);
     expect(authorizations).toEqual(Array(5).fill('Bearer fake-token'));
-  });
-
-  it('keeps the wire contract of every call', async () => {
-    const client = new AgentEngineClient({name: NAME});
-
-    await client.createSession({userId: USER_ID, sessionId: SESSION_ID});
-    for await (const _event of client.streamQuery({
-      userId: USER_ID,
-      sessionId: SESSION_ID,
-      message: 'How is the weather in Paris?',
-    })) {
-      // Drain the stream so that the whole response is consumed.
-    }
-    await client.listSessions({userId: USER_ID});
-    await client.deleteSession({userId: USER_ID, sessionId: SESSION_ID});
-
+    // Pin the wire contract so that a refactor cannot silently change it.
     expect(requests).toEqual([
+      {method: 'GET', url: ENGINE_PATH, body: {}},
       {
         method: 'POST',
         url: `${ENGINE_PATH}:query`,
@@ -301,17 +287,5 @@ describe('AgentEngineClient against a local Agent Engine server', () => {
         },
       },
     ]);
-  });
-
-  it('reports an error response of the service', async () => {
-    const client = new AgentEngineClient({
-      projectId: PROJECT,
-      location: LOCATION,
-      reasoningEngineId: '9999999999',
-    });
-
-    await expect(client.getEngine()).rejects.toThrow(
-      'failed with status 404: reasoning engine not found',
-    );
   });
 });

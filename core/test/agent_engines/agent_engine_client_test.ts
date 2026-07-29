@@ -7,15 +7,18 @@
 import {
   AgentEngineClient,
   AgentEngineEvent,
-  agentEngineApiEndpoint,
-  buildReasoningEngineName,
   getClientLabels,
   getLogger,
-  parseReasoningEngineName,
-  parseSseStream,
 } from '@google/adk';
 import {GoogleAuth} from 'google-auth-library';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+// These helpers are deliberately not part of the package surface, so the unit
+// test reaches into the module that owns them.
+import {
+  agentEngineApiEndpoint,
+  parseReasoningEngineName,
+  parseSseStream,
+} from '../../src/agent_engines/agent_engine_client.js';
 
 vi.mock('google-auth-library', () => ({
   GoogleAuth: vi.fn(() => ({
@@ -88,11 +91,7 @@ async function collect(
   return collected;
 }
 
-describe('resource names', () => {
-  it('builds a full resource name', () => {
-    expect(buildReasoningEngineName(PROJECT, LOCATION, ENGINE_ID)).toBe(NAME);
-  });
-
+describe('parseReasoningEngineName', () => {
   it('parses a full resource name', () => {
     expect(parseReasoningEngineName(NAME)).toEqual({
       projectId: PROJECT,
