@@ -10,3 +10,4 @@ coverage/
 .env
 go.sum
 dev/.cache/
+.adk_build_cache/
