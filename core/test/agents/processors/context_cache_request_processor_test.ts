@@ -249,6 +249,8 @@ describe('ContextCacheRequestProcessor', () => {
     expect(llmRequest.cacheableContentsTokenCount).toBe(1024);
   });
 
+  // Only test where one event supplies both values, so it is the only one that
+  // reaches the scan's early exit.
   it('finds both metadata and token count in a single pass', async () => {
     const invocationContext = createContext({
       contextCacheConfig: cacheConfig,

@@ -116,23 +116,9 @@ async function send(
 }
 
 describe('Context cache orchestration through the Runner', () => {
-  it('threads App.contextCacheConfig onto the first LLM request', async () => {
+  it('recovers metadata and token count across turns and increments invocationsUsed', async () => {
     const cacheConfig = createContextCacheConfig({minTokens: 2048});
     const {model, runner, session} = await setup(cacheConfig);
-
-    await send(runner, session.id, 'hello');
-
-    const [first] = model.capturedRequests;
-    expect(runner.contextCacheConfig).toBe(cacheConfig);
-    expect(first.cacheConfig).toBe(cacheConfig);
-    expect(first.cacheMetadata).toBeUndefined();
-    expect(first.cacheableContentsTokenCount).toBeUndefined();
-  });
-
-  it('recovers metadata and token count across turns and increments invocationsUsed', async () => {
-    const {model, runner, session} = await setup(
-      createContextCacheConfig({minTokens: 2048}),
-    );
 
     for (let turn = 0; turn < 3; turn++) {
       await send(runner, session.id, `turn ${turn}`);
@@ -140,7 +126,9 @@ describe('Context cache orchestration through the Runner', () => {
 
     const [first, second, third] = model.capturedRequests;
 
-    // Turn 1: no prior metadata or token count.
+    // Turn 1: the app config is threaded through, with nothing to recover yet.
+    expect(runner.contextCacheConfig).toBe(cacheConfig);
+    expect(first.cacheConfig).toBe(cacheConfig);
     expect(first.cacheMetadata).toBeUndefined();
     expect(first.cacheableContentsTokenCount).toBeUndefined();
 
