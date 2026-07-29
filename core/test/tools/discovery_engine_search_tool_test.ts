@@ -133,6 +133,26 @@ describe('DiscoveryEngineSearchTool', () => {
   });
 
   describe('constructor / validation', () => {
+    it('builds the serving config from dataStoreId', async () => {
+      const tool = new DiscoveryEngineSearchTool({
+        dataStoreId: 'test_data_store',
+      });
+      await tool.discoveryEngineSearch('q');
+      expect(capturedRequest().url).toContain(
+        '/test_data_store/servingConfigs/default_config:search',
+      );
+    });
+
+    it('builds the serving config from searchEngineId', async () => {
+      const tool = new DiscoveryEngineSearchTool({
+        searchEngineId: 'test_search_engine',
+      });
+      await tool.discoveryEngineSearch('q');
+      expect(capturedRequest().url).toContain(
+        '/test_search_engine/servingConfigs/default_config:search',
+      );
+    });
+
     it('throws when no ids are specified', () => {
       expect(() => new DiscoveryEngineSearchTool({})).toThrow(
         'Either dataStoreId or searchEngineId must be specified.',
@@ -199,6 +219,16 @@ describe('DiscoveryEngineSearchTool', () => {
       },
     );
 
+    it('resolves the regional endpoint from a searchEngineId', async () => {
+      const tool = new DiscoveryEngineSearchTool({
+        searchEngineId:
+          'projects/test/locations/us/collections/default_collection/engines/test_search_engine',
+      });
+      expect(await resolvedHost(tool)).toBe(
+        'us-discoveryengine.googleapis.com',
+      );
+    });
+
     it('uses an explicit location override on a bare id', async () => {
       const tool = new DiscoveryEngineSearchTool({
         dataStoreId: 'test_data_store',
@@ -243,6 +273,7 @@ describe('DiscoveryEngineSearchTool', () => {
             location: ' ',
           }),
       ).toThrow('location must not be empty if specified.');
+      expect(fetchMock).not.toHaveBeenCalled();
     });
 
     it('throws on an override with invalid characters', () => {
@@ -253,6 +284,7 @@ describe('DiscoveryEngineSearchTool', () => {
             location: 'attacker.com#',
           }),
       ).toThrow('location must contain only letters, digits, and hyphens.');
+      expect(fetchMock).not.toHaveBeenCalled();
     });
 
     it('throws on an invalid location embedded in the resource id', () => {
@@ -263,6 +295,7 @@ describe('DiscoveryEngineSearchTool', () => {
               'projects/test/locations/attacker.com#/collections/default_collection/dataStores/test_data_store',
           }),
       ).toThrow('Invalid location in dataStoreId or searchEngineId.');
+      expect(fetchMock).not.toHaveBeenCalled();
     });
 
     it('keeps the default endpoint for the global location', async () => {
@@ -290,6 +323,17 @@ describe('DiscoveryEngineSearchTool', () => {
       } else {
         process.env['GOOGLE_API_USE_MTLS_ENDPOINT'] = originalEnv;
       }
+    });
+
+    it('uses the regional mTLS endpoint when GOOGLE_API_USE_MTLS_ENDPOINT=always', async () => {
+      process.env['GOOGLE_API_USE_MTLS_ENDPOINT'] = 'always';
+      const tool = new DiscoveryEngineSearchTool({
+        dataStoreId: 'test_data_store',
+        location: 'eu',
+      });
+      expect(await resolvedHost(tool)).toBe(
+        'eu-discoveryengine.mtls.googleapis.com',
+      );
     });
 
     it('uses the global mTLS endpoint when GOOGLE_API_USE_MTLS_ENDPOINT=always', async () => {
@@ -439,6 +483,23 @@ describe('DiscoveryEngineSearchTool', () => {
       expect(result).toEqual({status: 'success', results: []});
     });
 
+    it('probes with CHUNKS first when no mode is configured', async () => {
+      const tool = new DiscoveryEngineSearchTool({
+        dataStoreId: 'test_data_store',
+      });
+      await tool.discoveryEngineSearch('q');
+      expect(requestedModes()).toEqual(['CHUNKS']);
+    });
+
+    it('uses an explicit DOCUMENTS mode without probing', async () => {
+      const tool = new DiscoveryEngineSearchTool({
+        dataStoreId: 'test_data_store',
+        searchResultMode: SearchResultMode.DOCUMENTS,
+      });
+      await tool.discoveryEngineSearch('q');
+      expect(requestedModes()).toEqual(['DOCUMENTS']);
+    });
+
     it('parses DOCUMENTS structured data', async () => {
       respondWith({
         results: [
@@ -581,6 +642,38 @@ describe('DiscoveryEngineSearchTool', () => {
       expect(results[0].content).toBe('answer one\nanswer two');
     });
 
+    it('renders extractive answers that carry no content field', async () => {
+      respondWith({
+        results: [
+          {
+            document: {
+              derivedStructData: {
+                extractive_answers: [{pageNumber: '2'}, 'raw answer'],
+              },
+            },
+          },
+        ],
+      });
+
+      const tool = new DiscoveryEngineSearchTool({
+        dataStoreId: 'test_data_store',
+        searchResultMode: SearchResultMode.DOCUMENTS,
+      });
+      const results = expectSuccess(await tool.discoveryEngineSearch('q'));
+      expect(results[0].content).toBe('{"pageNumber":"2"}\nraw answer');
+    });
+
+    it('returns empty fields for a document with no struct data', async () => {
+      respondWith({results: [{document: {name: 'doc'}}]});
+
+      const tool = new DiscoveryEngineSearchTool({
+        dataStoreId: 'test_data_store',
+        searchResultMode: SearchResultMode.DOCUMENTS,
+      });
+      const results = expectSuccess(await tool.discoveryEngineSearch('q'));
+      expect(results[0]).toEqual({title: '', url: '', content: ''});
+    });
+
     it('skips document results whose document sub-object is missing', async () => {
       respondWith({
         results: [{chunk: {content: 'ignored'}}, {document: {name: 'd'}}],
@@ -592,6 +685,17 @@ describe('DiscoveryEngineSearchTool', () => {
       });
       const results = expectSuccess(await tool.discoveryEngineSearch('q'));
       expect(results).toEqual([{title: '', url: '', content: ''}]);
+    });
+
+    it('returns an empty result set for DOCUMENTS with no results', async () => {
+      respondWith({});
+
+      const tool = new DiscoveryEngineSearchTool({
+        dataStoreId: 'test_data_store',
+        searchResultMode: SearchResultMode.DOCUMENTS,
+      });
+      const result = await tool.discoveryEngineSearch('test query');
+      expect(result).toEqual({status: 'success', results: []});
     });
 
     it('coerces non-string struct data values to strings', async () => {
@@ -645,6 +749,17 @@ describe('DiscoveryEngineSearchTool', () => {
       // The resolved mode is cached: no second CHUNKS probe.
       expectSuccess(await tool.discoveryEngineSearch('another query'));
       expect(requestedModes()).toEqual(['CHUNKS', 'DOCUMENTS', 'DOCUMENTS']);
+    });
+
+    it('keeps using CHUNKS across repeated auto-mode calls', async () => {
+      respondWith({results: [{chunk: {content: 'c'}}]});
+
+      const tool = new DiscoveryEngineSearchTool({
+        dataStoreId: 'test_data_store',
+      });
+      await tool.discoveryEngineSearch('test query');
+      await tool.discoveryEngineSearch('another query');
+      expect(requestedModes()).toEqual(['CHUNKS', 'CHUNKS']);
     });
 
     it('does not retry on an unrelated error', async () => {
@@ -709,8 +824,6 @@ describe('DiscoveryEngineSearchTool', () => {
         query: 'q',
         contentSearchSpec: {searchResultMode: 'DOCUMENTS'},
       });
-      // An explicit mode skips the CHUNKS probe entirely.
-      expect(requestedModes()).toEqual(['DOCUMENTS']);
     });
 
     it('omits optional headers/body fields when unset', async () => {
