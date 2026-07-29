@@ -15,7 +15,19 @@ import {sendInput} from '../test_case_utils.js';
 
 const execAsync = promisify(exec);
 const dirname = process.cwd();
-const TEST_EXECUTION_TIMEOUT = 40000;
+
+// Hooks install a fixture project, or remove the resulting node_modules tree
+// (slow on Windows).
+const INSTALL_TIMEOUT = 180_000;
+
+// Loading an app esbuild-bundles and minifies the whole @google/adk graph, once
+// per discovered entrypoint.
+const TEST_EXECUTION_TIMEOUT = 120_000;
+
+// Fixture deps are file: links to core/dev, already in ~/.npm from the
+// repo-level install, so --prefer-offline resolves from cache instead of
+// revalidating against the registry.
+const NPM_INSTALL = 'npm install --prefer-offline --no-audit --no-fund';
 
 describe('App loader CLI integration', () => {
   describe.each(['app_ts', 'app_js', 'app_default'])(
@@ -28,8 +40,8 @@ describe('App loader CLI integration', () => {
       );
 
       beforeAll(async () => {
-        await execAsync('npm install', {cwd: projectPath});
-      }, TEST_EXECUTION_TIMEOUT);
+        await execAsync(NPM_INSTALL, {cwd: projectPath});
+      }, INSTALL_TIMEOUT);
 
       it(
         'should run app via package.json start script and get responses',
@@ -62,7 +74,7 @@ describe('App loader CLI integration', () => {
         await fs
           .unlink(path.join(projectPath, 'package-lock.json'))
           .catch(() => {});
-      }, TEST_EXECUTION_TIMEOUT);
+      }, INSTALL_TIMEOUT);
     },
   );
 });
@@ -75,9 +87,9 @@ describe('AgentLoader discovery and loading integration', () => {
   let loader: AgentLoader;
 
   beforeAll(async () => {
-    await execAsync('npm install', {cwd: projectPath});
+    await execAsync(NPM_INSTALL, {cwd: projectPath});
     loader = new AgentLoader(projectPath);
-  }, TEST_EXECUTION_TIMEOUT);
+  }, INSTALL_TIMEOUT);
 
   it(
     'should discover apps vs agents across directories and standalone files',
@@ -138,5 +150,5 @@ describe('AgentLoader discovery and loading integration', () => {
     await fs
       .unlink(path.join(projectPath, 'package-lock.json'))
       .catch(() => {});
-  }, TEST_EXECUTION_TIMEOUT);
+  }, INSTALL_TIMEOUT);
 });
