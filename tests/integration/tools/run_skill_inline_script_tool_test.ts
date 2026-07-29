@@ -22,9 +22,11 @@ import {describe, expect, it} from 'vitest';
 const IS_WINDOWS = os.platform() === 'win32';
 const IS_UNIX = os.platform() === 'linux' || os.platform() === 'darwin';
 
-// PowerShell/cmd cold-start on the windows-latest CI runner can exceed vitest's
-// 5000ms default. Must also exceed UnsafeLocalCodeExecutor's default
-// timeoutSeconds (30) so the executor's own timeout error surfaces first; see
+// Cold-starting a separate interpreter on the windows-latest CI runner can
+// exceed vitest's 5000ms default; the Python cases below have timed out there.
+// Applied to every case that leaves the already-resident node binary. Must also
+// exceed UnsafeLocalCodeExecutor's default timeoutSeconds (30) so the executor's
+// own timeout error surfaces first; see
 // core/src/code_executors/unsafe_local_code_executor.ts
 const TEST_EXECUTION_TIMEOUT = 40000;
 
@@ -207,41 +209,49 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
     TEST_EXECUTION_TIMEOUT,
   );
 
-  it('successfully executes a real Python inline script', async () => {
-    const executor = new UnsafeLocalCodeExecutor();
-    const toolset = new SkillToolset([], {codeExecutor: executor});
-    const tool = new RunSkillInlineScriptTool(toolset);
+  it(
+    'successfully executes a real Python inline script',
+    async () => {
+      const executor = new UnsafeLocalCodeExecutor();
+      const toolset = new SkillToolset([], {codeExecutor: executor});
+      const tool = new RunSkillInlineScriptTool(toolset);
 
-    const result = (await tool.runAsync({
-      args: {
-        script_content: 'print("hello from real python")',
-        language: CodeExecutionLanguage.PYTHON,
-      },
-      toolContext: createMockContext(),
-    })) as CodeExecutionResult;
+      const result = (await tool.runAsync({
+        args: {
+          script_content: 'print("hello from real python")',
+          language: CodeExecutionLanguage.PYTHON,
+        },
+        toolContext: createMockContext(),
+      })) as CodeExecutionResult;
 
-    expect(result).toBeDefined();
-    expect(result.stdout).toContain('hello from real python');
-    expect(result.stderr).toBe('');
-  });
+      expect(result).toBeDefined();
+      expect(result.stdout).toContain('hello from real python');
+      expect(result.stderr).toBe('');
+    },
+    TEST_EXECUTION_TIMEOUT,
+  );
 
-  it('captures stderr from a real Python inline script', async () => {
-    const executor = new UnsafeLocalCodeExecutor();
-    const toolset = new SkillToolset([], {codeExecutor: executor});
-    const tool = new RunSkillInlineScriptTool(toolset);
+  it(
+    'captures stderr from a real Python inline script',
+    async () => {
+      const executor = new UnsafeLocalCodeExecutor();
+      const toolset = new SkillToolset([], {codeExecutor: executor});
+      const tool = new RunSkillInlineScriptTool(toolset);
 
-    const result = (await tool.runAsync({
-      args: {
-        script_content:
-          'import sys; sys.stderr.write("some python error\\n"); sys.exit(1)',
-        language: CodeExecutionLanguage.PYTHON,
-      },
-      toolContext: createMockContext(),
-    })) as CodeExecutionResult;
+      const result = (await tool.runAsync({
+        args: {
+          script_content:
+            'import sys; sys.stderr.write("some python error\\n"); sys.exit(1)',
+          language: CodeExecutionLanguage.PYTHON,
+        },
+        toolContext: createMockContext(),
+      })) as CodeExecutionResult;
 
-    expect(result).toBeDefined();
-    expect(result.stderr).toContain('some python error');
-  });
+      expect(result).toBeDefined();
+      expect(result.stderr).toContain('some python error');
+    },
+    TEST_EXECUTION_TIMEOUT,
+  );
 
   it('creates files in process.cwd returned from execution', async () => {
     const executor = new UnsafeLocalCodeExecutor();
