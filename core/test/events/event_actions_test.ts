@@ -8,6 +8,7 @@ import {AuthConfig, ToolConfirmation} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 import {
   createEventActions,
+  EventActions,
   hasEventActions,
   mergeEventActions,
 } from '../../src/events/event_actions.js';
@@ -205,65 +206,68 @@ describe('mergeEventActions', () => {
   });
 });
 
+const authConfig: AuthConfig = {
+  credentialKey: 'testKey',
+  authScheme: {type: 'apiKey', name: 'testKey', in: 'header'},
+};
+
 describe('hasEventActions', () => {
-  it('returns false for a pristine EventActions', () => {
-    expect(hasEventActions(createEventActions())).toBe(false);
-  });
+  const cases: Array<{
+    description: string;
+    overrides: Partial<EventActions>;
+    expected: boolean;
+  }> = [
+    {description: 'a pristine actions object', overrides: {}, expected: false},
+    {
+      description: 'a non-empty stateDelta',
+      overrides: {stateDelta: {key: 'val'}},
+      expected: true,
+    },
+    {
+      description: 'a non-empty artifactDelta',
+      overrides: {artifactDelta: {'file.txt': 1}},
+      expected: true,
+    },
+    {
+      description: 'a non-empty requestedAuthConfigs',
+      overrides: {requestedAuthConfigs: {'call-1': authConfig}},
+      expected: true,
+    },
+    {
+      description: 'a non-empty requestedToolConfirmations',
+      overrides: {
+        requestedToolConfirmations: {
+          'call-1': new ToolConfirmation({hint: 'confirm', confirmed: false}),
+        },
+      },
+      expected: true,
+    },
+    {
+      description: 'skipSummarization set to true',
+      overrides: {skipSummarization: true},
+      expected: true,
+    },
+    {
+      description: 'skipSummarization set to false',
+      overrides: {skipSummarization: false},
+      expected: true,
+    },
+    {
+      description: 'escalate set to false',
+      overrides: {escalate: false},
+      expected: true,
+    },
+    {
+      description: 'transferToAgent',
+      overrides: {transferToAgent: 'other'},
+      expected: true,
+    },
+  ];
 
-  it('returns true for a non-empty stateDelta', () => {
-    expect(
-      hasEventActions(createEventActions({stateDelta: {key: 'val'}})),
-    ).toBe(true);
-  });
-
-  it('returns true for a non-empty artifactDelta', () => {
-    expect(
-      hasEventActions(createEventActions({artifactDelta: {'file.txt': 1}})),
-    ).toBe(true);
-  });
-
-  it('returns true for a non-empty requestedAuthConfigs', () => {
-    const authConfig: AuthConfig = {
-      credentialKey: 'testKey',
-      authScheme: {type: 'apiKey', name: 'testKey', in: 'header'},
-    };
-    expect(
-      hasEventActions(
-        createEventActions({requestedAuthConfigs: {'call-1': authConfig}}),
-      ),
-    ).toBe(true);
-  });
-
-  it('returns true for a non-empty requestedToolConfirmations', () => {
-    const confirmation = new ToolConfirmation({
-      hint: 'confirm',
-      confirmed: false,
-    });
-    expect(
-      hasEventActions(
-        createEventActions({
-          requestedToolConfirmations: {'call-1': confirmation},
-        }),
-      ),
-    ).toBe(true);
-  });
-
-  it('returns true for skipSummarization set to true or false', () => {
-    expect(hasEventActions(createEventActions({skipSummarization: true}))).toBe(
-      true,
-    );
-    expect(
-      hasEventActions(createEventActions({skipSummarization: false})),
-    ).toBe(true);
-  });
-
-  it('returns true for escalate set to false', () => {
-    expect(hasEventActions(createEventActions({escalate: false}))).toBe(true);
-  });
-
-  it('returns true for transferToAgent', () => {
-    expect(
-      hasEventActions(createEventActions({transferToAgent: 'other'})),
-    ).toBe(true);
-  });
+  it.each(cases)(
+    'returns $expected for $description',
+    ({overrides, expected}) => {
+      expect(hasEventActions(createEventActions(overrides))).toBe(expected);
+    },
+  );
 });

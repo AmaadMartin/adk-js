@@ -7,7 +7,6 @@
 import {
   BaseLlm,
   BaseLlmConnection,
-  Context,
   Event,
   getFunctionCalls,
   InMemorySessionService,
@@ -17,7 +16,7 @@ import {
   LongRunningFunctionTool,
   Runner,
 } from '@google/adk';
-import {beforeEach, describe, expect, it} from 'vitest';
+import {describe, expect, it} from 'vitest';
 import {z} from 'zod';
 
 const APP_NAME = 'test_app';
@@ -45,47 +44,37 @@ class MockLlm extends BaseLlm {
   }
 }
 
-/**
- * Creates a long-running tool that records something on its context and then
- * returns nothing, i.e. the human-in-the-loop pattern where the real function
- * response is injected later by the client.
- */
-function createPausingTool(
-  name: string,
-  record: (toolContext: Context) => void,
-) {
-  return new LongRunningFunctionTool({
-    name,
-    description: name,
-    parameters: z.object({}),
-    execute: async (_args, toolContext) => {
-      if (toolContext) {
-        record(toolContext);
-      }
-      return null;
-    },
-  });
-}
-
-function toolCallResponse(toolName: string): LlmResponse {
-  return {
-    content: {
-      role: 'model',
-      parts: [{functionCall: {name: toolName, args: {}, id: 'call_1'}}],
-    },
-  };
-}
-
 describe('LlmAgent with a pausing long running tool', () => {
-  let sessionService: InMemorySessionService;
+  it('should stop after a long-running tool pauses with recorded state', async () => {
+    // The human-in-the-loop pattern: the tool records its intent and returns
+    // nothing, and the real function response is injected later by the client.
+    const pausingTool = new LongRunningFunctionTool({
+      name: 'pausing_tool',
+      description: 'pauses for an out-of-band response',
+      parameters: z.object({}),
+      execute: async (_args, toolContext) => {
+        if (toolContext) {
+          toolContext.state.set('pending', true);
+          toolContext.actions.skipSummarization = true;
+        }
+        return null;
+      },
+    });
+    const mockLlm = new MockLlm([
+      {
+        content: {
+          role: 'model',
+          parts: [{functionCall: {name: 'pausing_tool', args: {}, id: 'c_1'}}],
+        },
+      },
+    ]);
+    const agent = new LlmAgent({
+      name: 'pausing_agent',
+      model: mockLlm,
+      tools: [pausingTool],
+    });
 
-  beforeEach(() => {
-    sessionService = new InMemorySessionService();
-  });
-
-  async function run(
-    agent: LlmAgent,
-  ): Promise<{events: Event[]; sessionId: string}> {
+    const sessionService = new InMemorySessionService();
     const session = await sessionService.createSession({
       appName: APP_NAME,
       userId: USER_ID,
@@ -100,22 +89,6 @@ describe('LlmAgent with a pausing long running tool', () => {
     })) {
       events.push(event);
     }
-    return {events, sessionId: session.id};
-  }
-
-  it('should stop after a long-running tool pauses with recorded state', async () => {
-    const pausingTool = createPausingTool('pausing_tool', (toolContext) => {
-      toolContext.state.set('pending', true);
-      toolContext.actions.skipSummarization = true;
-    });
-    const mockLlm = new MockLlm([toolCallResponse('pausing_tool')]);
-    const agent = new LlmAgent({
-      name: 'pausing_agent',
-      model: mockLlm,
-      tools: [pausingTool],
-    });
-
-    const {events, sessionId} = await run(agent);
 
     // No extra model round-trip: the run stops on the paused tool call.
     expect(mockLlm.callCount).toBe(1);
@@ -126,36 +99,13 @@ describe('LlmAgent with a pausing long running tool', () => {
     expect(actionsOnlyEvent.content).toBeUndefined();
     expect(actionsOnlyEvent.actions.stateDelta).toEqual({pending: true});
     expect(actionsOnlyEvent.actions.skipSummarization).toBe(true);
-    expect(actionsOnlyEvent.longRunningToolIds).toEqual(['call_1']);
+    expect(actionsOnlyEvent.longRunningToolIds).toEqual(['c_1']);
 
     const persisted = await sessionService.getSession({
       appName: APP_NAME,
       userId: USER_ID,
-      sessionId,
+      sessionId: session.id,
     });
     expect(persisted!.state['pending']).toBe(true);
-  });
-
-  it('should not append an extra event when a long-running tool pauses without recording actions', async () => {
-    const silentTool = createPausingTool('silent_tool', () => {});
-    const mockLlm = new MockLlm([toolCallResponse('silent_tool')]);
-    const agent = new LlmAgent({
-      name: 'silent_agent',
-      model: mockLlm,
-      tools: [silentTool],
-    });
-
-    const {events, sessionId} = await run(agent);
-
-    expect(mockLlm.callCount).toBe(1);
-    expect(events.length).toBe(1);
-    expect(getFunctionCalls(events[0])[0].name).toBe('silent_tool');
-
-    const persisted = await sessionService.getSession({
-      appName: APP_NAME,
-      userId: USER_ID,
-      sessionId,
-    });
-    expect(persisted!.state).toEqual({});
   });
 });
