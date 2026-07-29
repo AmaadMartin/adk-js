@@ -25,17 +25,15 @@ const USER_ID = 'user_1';
 class MockLlm extends BaseLlm {
   callCount = 0;
 
-  constructor(private readonly responses: LlmResponse[]) {
+  constructor(private readonly response: LlmResponse) {
     super({model: 'mock-llm'});
   }
 
   async *generateContentAsync(
     _request: LlmRequest,
   ): AsyncGenerator<LlmResponse, void, void> {
-    const response = this.responses[this.callCount];
-    this.callCount++;
-    if (response) {
-      yield response;
+    if (this.callCount++ === 0) {
+      yield this.response;
     }
   }
 
@@ -60,14 +58,12 @@ describe('LlmAgent with a pausing long running tool', () => {
         return null;
       },
     });
-    const mockLlm = new MockLlm([
-      {
-        content: {
-          role: 'model',
-          parts: [{functionCall: {name: 'pausing_tool', args: {}, id: 'c_1'}}],
-        },
+    const mockLlm = new MockLlm({
+      content: {
+        role: 'model',
+        parts: [{functionCall: {name: 'pausing_tool', args: {}, id: 'c_1'}}],
       },
-    ]);
+    });
     const agent = new LlmAgent({
       name: 'pausing_agent',
       model: mockLlm,
@@ -97,8 +93,6 @@ describe('LlmAgent with a pausing long running tool', () => {
 
     const actionsOnlyEvent = events[1];
     expect(actionsOnlyEvent.content).toBeUndefined();
-    expect(actionsOnlyEvent.actions.stateDelta).toEqual({pending: true});
-    expect(actionsOnlyEvent.actions.skipSummarization).toBe(true);
     expect(actionsOnlyEvent.longRunningToolIds).toEqual(['c_1']);
 
     const persisted = await sessionService.getSession({

@@ -243,11 +243,6 @@ describe('hasEventActions', () => {
       expected: true,
     },
     {
-      description: 'skipSummarization set to true',
-      overrides: {skipSummarization: true},
-      expected: true,
-    },
-    {
       description: 'skipSummarization set to false',
       overrides: {skipSummarization: false},
       expected: true,

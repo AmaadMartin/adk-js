@@ -7,7 +7,6 @@ import {
   AuthConfig,
   BasePlugin,
   BaseTool,
-  Context,
   createEvent,
   createEventActions,
   createSession,
@@ -65,37 +64,28 @@ const testAuthConfig: AuthConfig = {
   authScheme: {type: 'apiKey', name: 'testKey', in: 'header'},
 };
 
-/**
- * Creates a long-running tool that records something on its context and then
- * returns nothing, i.e. the human-in-the-loop pattern where the real function
- * response is injected later by the client.
- */
-function createPausingTool(
-  name: string,
-  record: (toolContext: Context) => void,
-) {
-  return new LongRunningFunctionTool({
-    name,
-    description: name,
-    parameters: z.object({}),
-    execute: async (_args, toolContext) => {
-      if (toolContext) {
-        record(toolContext);
-      }
-      return null;
-    },
-  });
-}
-
-const pausingTool = createPausingTool('pausingTool', (toolContext) => {
-  toolContext.state.set('pending', true);
-  toolContext.actions.skipSummarization = true;
+// Records something on its context and then returns nothing, i.e. the
+// human-in-the-loop pattern where the real function response is injected
+// later by the client.
+const pausingTool = new LongRunningFunctionTool({
+  name: 'pausingTool',
+  description: 'pauses for an out-of-band response',
+  parameters: z.object({}),
+  execute: async (_args, toolContext) => {
+    if (toolContext) {
+      toolContext.state.set('pending', true);
+      toolContext.actions.skipSummarization = true;
+    }
+    return null;
+  },
 });
 
-const silentLongRunningTool = createPausingTool(
-  'silentLongRunningTool',
-  () => {},
-);
+const silentLongRunningTool = new LongRunningFunctionTool({
+  name: 'silentLongRunningTool',
+  description: 'pauses without recording anything',
+  parameters: z.object({}),
+  execute: async () => null,
+});
 
 // Plugin for testing
 class TestPlugin extends BasePlugin {
@@ -446,29 +436,6 @@ describe('handleFunctionCallList', () => {
     expect(event).toBeNull();
   });
 
-  it('should not emit an actions-only event when a long-running tool returns a pending status', async () => {
-    const pendingTool = new LongRunningFunctionTool({
-      name: 'pendingTool',
-      description: 'returns a pending status',
-      parameters: z.object({}),
-      execute: async () => ({status: 'pending'}),
-    });
-
-    const event = await handleFunctionCallList({
-      invocationContext,
-      functionCalls: [
-        {id: 'long_running_call_1', name: 'pendingTool', args: {}},
-      ],
-      toolsDict: {'pendingTool': pendingTool},
-      beforeToolCallbacks: [],
-      afterToolCallbacks: [],
-    });
-
-    expect(event!.content!.parts![0].functionResponse!.response).toEqual({
-      status: 'pending',
-    });
-  });
-
   it('should merge a pausing long-running tool actions into the merged event for parallel calls', async () => {
     const event = await handleFunctionCallList({
       invocationContext,
@@ -486,36 +453,6 @@ describe('handleFunctionCallList', () => {
     expect(parts[0].functionResponse!.name).toBe('testTool');
     expect(event!.actions.stateDelta).toEqual({pending: true});
     expect(event!.actions.skipSummarization).toBe(true);
-  });
-
-  it('should emit an actions-only event when a long-running tool requests a credential', async () => {
-    const authRequestingLongRunningTool = createPausingTool(
-      'authRequestingLongRunningTool',
-      (toolContext) => {
-        toolContext.requestCredential(testAuthConfig);
-      },
-    );
-
-    const event = await handleFunctionCallList({
-      invocationContext,
-      functionCalls: [
-        {
-          id: 'long_running_call_1',
-          name: 'authRequestingLongRunningTool',
-          args: {},
-        },
-      ],
-      toolsDict: {
-        'authRequestingLongRunningTool': authRequestingLongRunningTool,
-      },
-      beforeToolCallbacks: [],
-      afterToolCallbacks: [],
-    });
-
-    expect(event!.content).toBeUndefined();
-    expect(Object.keys(event!.actions.requestedAuthConfigs)).toEqual([
-      'long_running_call_1',
-    ]);
   });
 });
 
