@@ -432,7 +432,11 @@ export {EvalSetSchema} from './evaluation/eval_set.js';
 export type {EvalSet} from './evaluation/eval_set.js';
 export type {EvalSetResultsManager} from './evaluation/eval_set_results_manager.js';
 export type {EvalSetsManager} from './evaluation/eval_sets_manager.js';
-export {EvaluationGenerator} from './evaluation/evaluation_generator.js';
+export {
+  DEFAULT_EVAL_APP_NAME,
+  DEFAULT_EVAL_USER_ID,
+  EvaluationGenerator,
+} from './evaluation/evaluation_generator.js';
 export type {GenerateInferencesFromRootAgentParams} from './evaluation/evaluation_generator.js';
 export {
   EvaluationResultSchema,

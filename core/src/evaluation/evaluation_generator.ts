@@ -34,6 +34,21 @@ const USER_AUTHOR = 'user';
 const DEFAULT_AUTHOR = 'agent';
 
 /**
+ * App name used for the eval session when neither the caller nor the eval
+ * case's session input supplies one.
+ */
+export const DEFAULT_EVAL_APP_NAME = 'EvaluationGenerator';
+
+/**
+ * User id used for the eval session when the eval case's session input does
+ * not supply one.
+ *
+ * Shared with `local_eval_service.ts`, which reads the session back with the
+ * same default; the lookup only succeeds while the two agree.
+ */
+export const DEFAULT_EVAL_USER_ID = 'test_user_id';
+
+/**
  * Options for {@link EvaluationGenerator.generateInferencesFromRootAgent}.
  */
 export interface GenerateInferencesFromRootAgentParams {
@@ -41,6 +56,13 @@ export interface GenerateInferencesFromRootAgentParams {
   rootAgent: BaseAgent;
   /** Produces the user messages that drive the conversation. */
   userSimulator: UserSimulator;
+  /**
+   * App name to create the eval session under. Takes precedence over
+   * `initialSession.appName`, and must match the app name the caller later
+   * reads the session back with. Defaults to
+   * {@link DEFAULT_EVAL_APP_NAME}.
+   */
+  appName?: string;
   /** Values that help initialize the session (app name, user id, state). */
   initialSession?: SessionInput;
   /** The session id to use. A random one is generated when omitted. */
@@ -98,6 +120,7 @@ export class EvaluationGenerator {
   static async generateInferencesFromRootAgent({
     rootAgent,
     userSimulator,
+    appName,
     initialSession,
     sessionId,
     sessionService,
@@ -107,12 +130,13 @@ export class EvaluationGenerator {
     const resolvedSessionService =
       sessionService ?? new InMemorySessionService();
     const resolvedMemoryService = memoryService ?? new InMemoryMemoryService();
-    const appName = initialSession?.appName ?? 'EvaluationGenerator';
-    const userId = initialSession?.userId ?? 'test_user_id';
+    const resolvedAppName =
+      appName ?? initialSession?.appName ?? DEFAULT_EVAL_APP_NAME;
+    const userId = initialSession?.userId ?? DEFAULT_EVAL_USER_ID;
     const resolvedSessionId = sessionId ?? randomUUID();
 
     await resolvedSessionService.createSession({
-      appName,
+      appName: resolvedAppName,
       userId,
       state: initialSession?.state ?? {},
       sessionId: resolvedSessionId,
@@ -131,7 +155,7 @@ export class EvaluationGenerator {
     );
 
     const runner = new Runner({
-      appName,
+      appName: resolvedAppName,
       agent: rootAgent,
       artifactService: resolvedArtifactService,
       sessionService: resolvedSessionService,

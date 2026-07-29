@@ -37,7 +37,10 @@ import {EvalCaseResult} from './eval_result.js';
 import {Rubric} from './eval_rubrics.js';
 import {EvalSetResultsManager} from './eval_set_results_manager.js';
 import {EvalSetsManager} from './eval_sets_manager.js';
-import {EvaluationGenerator} from './evaluation_generator.js';
+import {
+  DEFAULT_EVAL_USER_ID,
+  EvaluationGenerator,
+} from './evaluation_generator.js';
 import {EvaluationResult, PerInvocationResult} from './evaluator.js';
 import {
   DEFAULT_METRIC_EVALUATOR_REGISTRY,
@@ -56,8 +59,8 @@ const LIVE_INFERENCE_NOT_SUPPORTED_MESSAGE =
   'Live (bidi-streaming) inference is not yet supported in adk-js; use' +
   ' non-live inference by setting inferenceConfig.useLive to false.';
 
-/** Default user id used when an eval case does not specify one. */
-const DEFAULT_USER_ID = 'test_user_id';
+// The default user id is owned by `evaluation_generator.ts`, which creates the
+// eval session; the session lookup below only succeeds while both agree.
 
 /** Returns a fresh eval session id. */
 export function getSessionId(): string {
@@ -145,6 +148,22 @@ export function generateFinalEvalStatus(
   return finalEvalStatus;
 }
 
+/** Case results accumulated for a single (app, eval set) pair. */
+interface EvalSetResultGroup {
+  appName: string;
+  evalSetId: string;
+  cases: EvalCaseResult[];
+}
+
+/**
+ * Returns the grouping key for an (app, eval set) pair. Results are saved per
+ * pair, so two apps that share an eval set id stay separate. NUL cannot appear
+ * in either id, so the key is unambiguous.
+ */
+function resultGroupKey(appName: string, evalSetId: string): string {
+  return `${appName}\u0000${evalSetId}`;
+}
+
 /**
  * Runs `fn` over `items` with at most `limit` concurrent executions, yielding
  * each result as soon as it settles (completion order, not input order).
@@ -157,7 +176,10 @@ async function* mapWithConcurrency<T, R>(
   limit: number,
   fn: (item: T) => Promise<R>,
 ): AsyncGenerator<R> {
-  const effectiveLimit = Math.max(1, limit);
+  // A comparison against NaN is always false, so `Math.max` would leave the
+  // limit NaN and silently starve the pool; treat any non-positive or
+  // non-numeric limit as 1.
+  const effectiveLimit = limit >= 1 ? Math.floor(limit) : 1;
   interface Settled {
     index: number;
     ok: boolean;
@@ -288,7 +310,7 @@ export class LocalEvalService extends BaseEvalService {
   ): AsyncGenerator<EvalCaseResult> {
     const {inferenceResults, evaluateConfig} = evaluateRequest;
 
-    const resultsBySet = new Map<string, Array<[string, EvalCaseResult]>>();
+    const resultsBySet = new Map<string, EvalSetResultGroup>();
 
     const stream = mapWithConcurrency(
       inferenceResults,
@@ -297,28 +319,49 @@ export class LocalEvalService extends BaseEvalService {
         this.evaluateSingleInferenceResult(inferenceResult, evaluateConfig),
     );
 
-    for await (const [inferenceResult, evalCaseResult] of stream) {
-      const existing = resultsBySet.get(inferenceResult.evalSetId);
-      if (existing === undefined) {
-        resultsBySet.set(inferenceResult.evalSetId, [
-          [inferenceResult.appName, evalCaseResult],
-        ]);
-      } else {
-        existing.push([inferenceResult.appName, evalCaseResult]);
+    try {
+      for await (const [inferenceResult, evalCaseResult] of stream) {
+        const {appName, evalSetId} = inferenceResult;
+        const group = resultsBySet.get(resultGroupKey(appName, evalSetId));
+        if (group === undefined) {
+          resultsBySet.set(resultGroupKey(appName, evalSetId), {
+            appName,
+            evalSetId,
+            cases: [evalCaseResult],
+          });
+        } else {
+          group.cases.push(evalCaseResult);
+        }
+        yield evalCaseResult;
       }
-      yield evalCaseResult;
+    } catch (error) {
+      // Persist what already scored before surfacing the failure; otherwise a
+      // single failing eval case discards every result computed so far.
+      await this.saveEvalSetResults(resultsBySet);
+      throw error;
     }
 
-    if (this.evalSetResultsManager) {
-      for (const [evalSetId, results] of resultsBySet) {
-        const appName = results[0][0];
-        const cases = results.map(([, result]) => result);
-        await this.evalSetResultsManager.saveEvalSetResult(
-          appName,
-          evalSetId,
-          cases,
-        );
-      }
+    await this.saveEvalSetResults(resultsBySet);
+  }
+
+  /**
+   * Saves the accumulated case results, one call per (app, eval set) pair.
+   *
+   * Only reached on normal completion or on a failure of the stream; a
+   * consumer that abandons the generator early saves nothing.
+   */
+  private async saveEvalSetResults(
+    resultsBySet: Map<string, EvalSetResultGroup>,
+  ): Promise<void> {
+    if (!this.evalSetResultsManager) {
+      return;
+    }
+    for (const {appName, evalSetId, cases} of resultsBySet.values()) {
+      await this.evalSetResultsManager.saveEvalSetResult(
+        appName,
+        evalSetId,
+        cases,
+      );
     }
   }
 
@@ -333,6 +376,14 @@ export class LocalEvalService extends BaseEvalService {
       evalSetId,
       evalCaseId,
     );
+    // Data-consistency problems (a missing eval case, or inferences that do not
+    // line up with the recorded conversation below) fail fast rather than
+    // degrade to a FAILED result: they mean the eval set itself is inconsistent
+    // with the inferences it is being scored against, and reporting them as
+    // ordinary failed cases would hide that behind what looks like a bad model
+    // run. Runtime failures — a flaky inference or a throwing metric — stay
+    // isolated per item, as the sibling paths below do. Results already scored
+    // are still persisted; see `evaluate`.
     if (evalCase == null) {
       throw new NotFoundError(
         `Eval case with id ${evalCaseId} not found for app ${appName} and` +
@@ -340,7 +391,7 @@ export class LocalEvalService extends BaseEvalService {
       );
     }
 
-    const userId = evalCase.sessionInput?.userId ?? DEFAULT_USER_ID;
+    const userId = evalCase.sessionInput?.userId ?? DEFAULT_EVAL_USER_ID;
 
     if (inferenceResult.inferences == null) {
       let sessionDetails: Session | undefined;
@@ -373,8 +424,8 @@ export class LocalEvalService extends BaseEvalService {
       inferences.length !== (evalCase.conversation?.length ?? 0)
     ) {
       throw new Error(
-        'Inferences should match conversations in eval case. Found' +
-          `${inferences.length} inferences ` +
+        'Inferences should match conversations in eval case. Found ' +
+          `${inferences.length} inferences and ` +
           `${evalCase.conversation?.length ?? 0} conversations in eval cases.`,
       );
     }
@@ -523,6 +574,10 @@ export class LocalEvalService extends BaseEvalService {
         EvaluationGenerator.generateInferencesFromRootAgent({
           rootAgent: this.rootAgent,
           userSimulator: this.userSimulatorProvider.provide(evalCase),
+          // The session must be created under the app name the evaluation
+          // stage reads it back with, otherwise `sessionDetails` silently
+          // resolves to undefined.
+          appName,
           initialSession,
           sessionId,
           sessionService: this.sessionService,

@@ -14,7 +14,11 @@ import {
   getAllToolCalls,
   InvocationEvents,
 } from '../../src/evaluation/eval_case.js';
-import {EvaluationGenerator} from '../../src/evaluation/evaluation_generator.js';
+import {
+  DEFAULT_EVAL_APP_NAME,
+  DEFAULT_EVAL_USER_ID,
+  EvaluationGenerator,
+} from '../../src/evaluation/evaluation_generator.js';
 import {RequestIntercepterPlugin} from '../../src/evaluation/request_intercepter_plugin.js';
 import {
   NextUserMessage,
@@ -41,6 +45,17 @@ function invocationEventsOf(event: {
   intermediateData?: unknown;
 }): InvocationEvents {
   return event.intermediateData as InvocationEvents;
+}
+
+/** A simulator that immediately stops, so the drive loop runs zero turns. */
+function stoppedUserSimulator(): UserSimulator {
+  return {
+    getNextUserMessage: vi.fn(
+      async (): Promise<NextUserMessage> => ({
+        status: Status.STOP_SIGNAL_DETECTED,
+      }),
+    ),
+  } as unknown as UserSimulator;
 }
 
 // `getAppDetailsByInvocationId` is a package-private static (it takes the
@@ -631,5 +646,55 @@ describe('EvaluationGenerator.generateInferencesFromRootAgent', () => {
         state: {k: 'v'},
       }),
     );
+  });
+
+  it('creates the session under the caller-supplied app name', async () => {
+    const sessionService = new InMemorySessionService();
+    const createSpy = vi.spyOn(sessionService, 'createSession');
+
+    await EvaluationGenerator.generateInferencesFromRootAgent({
+      rootAgent: {name: 'mock_agent'} as unknown as BaseAgent,
+      userSimulator: stoppedUserSimulator(),
+      // The caller's app name wins over the eval case's session input, so the
+      // session can be read back with the app name of the eval request.
+      appName: 'request_app',
+      initialSession: {
+        appName: 'session_input_app',
+        userId: 'my_user',
+        state: {},
+      },
+      sessionId: 'sess-2',
+      sessionService,
+    });
+
+    expect(createSpy).toHaveBeenCalledWith(
+      expect.objectContaining({appName: 'request_app', sessionId: 'sess-2'}),
+    );
+    await expect(
+      sessionService.getSession({
+        appName: 'request_app',
+        userId: 'my_user',
+        sessionId: 'sess-2',
+      }),
+    ).resolves.toBeDefined();
+  });
+
+  it('falls back to the default app name and user id', async () => {
+    const sessionService = new InMemorySessionService();
+
+    await EvaluationGenerator.generateInferencesFromRootAgent({
+      rootAgent: {name: 'mock_agent'} as unknown as BaseAgent,
+      userSimulator: stoppedUserSimulator(),
+      sessionId: 'sess-3',
+      sessionService,
+    });
+
+    await expect(
+      sessionService.getSession({
+        appName: DEFAULT_EVAL_APP_NAME,
+        userId: DEFAULT_EVAL_USER_ID,
+        sessionId: 'sess-3',
+      }),
+    ).resolves.toBeDefined();
   });
 });

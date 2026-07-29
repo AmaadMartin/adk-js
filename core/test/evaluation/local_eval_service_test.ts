@@ -420,6 +420,150 @@ describe('LocalEvalService.evaluate', () => {
     expect(evalSetsManager.getEvalCase).toHaveBeenCalledTimes(1);
   });
 
+  it('persists results already scored when a later case fails', async () => {
+    const {service, evalSetsManager, evalSetResultsManager} = makeService();
+    // Sequential (parallelism 1): case1 scores, then case2 is missing.
+    vi.mocked(evalSetsManager.getEvalCase).mockImplementation(
+      async (_appName, _evalSetId, evalCaseId) =>
+        evalCaseId === 'case1'
+          ? makeEvalCase({conversation: [makeInvocation('user', 'final')]})
+          : undefined,
+    );
+
+    const streamed: EvalCaseResult[] = [];
+    await expect(
+      (async () => {
+        for await (const result of service.evaluate({
+          inferenceResults: [
+            makeInferenceResult({
+              evalCaseId: 'case1',
+              inferences: [makeInvocation('user', 'final')],
+            }),
+            makeInferenceResult({
+              evalCaseId: 'case2',
+              inferences: [makeInvocation('user', 'final')],
+            }),
+          ],
+          evaluateConfig: {
+            evalMetrics: [{metricName: 'fake_metric', threshold: 0.5}],
+            parallelism: 1,
+          },
+        })) {
+          streamed.push(result);
+        }
+      })(),
+    ).rejects.toThrow(NotFoundError);
+
+    expect(streamed).toHaveLength(1);
+    // The result computed before the failure is not discarded.
+    expect(evalSetResultsManager.saveEvalSetResult).toHaveBeenCalledTimes(1);
+    expect(evalSetResultsManager.saveEvalSetResult).toHaveBeenCalledWith(
+      'test_app',
+      'test_eval_set',
+      [expect.objectContaining({evalId: 'case1'})],
+    );
+  });
+
+  it('saves nothing when the consumer abandons the stream early', async () => {
+    const {service, evalSetsManager, evalSetResultsManager} = makeService();
+    vi.mocked(evalSetsManager.getEvalCase).mockResolvedValue(
+      makeEvalCase({conversation: [makeInvocation('user', 'final')]}),
+    );
+
+    for await (const _ of service.evaluate({
+      inferenceResults: [
+        makeInferenceResult({
+          evalCaseId: 'case1',
+          inferences: [makeInvocation('user', 'final')],
+        }),
+        makeInferenceResult({
+          evalCaseId: 'case2',
+          inferences: [makeInvocation('user', 'final')],
+        }),
+      ],
+      evaluateConfig: {
+        evalMetrics: [{metricName: 'fake_metric', threshold: 0.5}],
+        parallelism: 1,
+      },
+    })) {
+      break;
+    }
+
+    // An abandoned run must not persist a partial eval set result.
+    expect(evalSetResultsManager.saveEvalSetResult).not.toHaveBeenCalled();
+  });
+
+  it('saves separately for two apps sharing an eval set id', async () => {
+    const {service, evalSetsManager, evalSetResultsManager} = makeService();
+    vi.mocked(evalSetsManager.getEvalCase).mockResolvedValue(
+      makeEvalCase({conversation: [makeInvocation('user', 'final')]}),
+    );
+
+    for await (const _ of service.evaluate({
+      inferenceResults: [
+        makeInferenceResult({
+          appName: 'app_a',
+          evalCaseId: 'case1',
+          inferences: [makeInvocation('user', 'final')],
+        }),
+        makeInferenceResult({
+          appName: 'app_b',
+          evalCaseId: 'case2',
+          inferences: [makeInvocation('user', 'final')],
+        }),
+      ],
+      evaluateConfig: {
+        evalMetrics: [{metricName: 'fake_metric', threshold: 0.5}],
+        parallelism: 1,
+      },
+    })) {
+      // drain
+    }
+
+    expect(evalSetResultsManager.saveEvalSetResult).toHaveBeenCalledTimes(2);
+    expect(evalSetResultsManager.saveEvalSetResult).toHaveBeenCalledWith(
+      'app_a',
+      'test_eval_set',
+      [expect.objectContaining({evalId: 'case1'})],
+    );
+    expect(evalSetResultsManager.saveEvalSetResult).toHaveBeenCalledWith(
+      'app_b',
+      'test_eval_set',
+      [expect.objectContaining({evalId: 'case2'})],
+    );
+  });
+
+  it('streams every result when parallelism is not a usable number', async () => {
+    const {service, evalSetsManager} = makeService();
+    vi.mocked(evalSetsManager.getEvalCase).mockResolvedValue(
+      makeEvalCase({conversation: [makeInvocation('user', 'final')]}),
+    );
+
+    const results: EvalCaseResult[] = [];
+    for await (const result of service.evaluate({
+      inferenceResults: [
+        makeInferenceResult({
+          evalCaseId: 'case1',
+          inferences: [makeInvocation('user', 'final')],
+        }),
+        makeInferenceResult({
+          evalCaseId: 'case2',
+          inferences: [makeInvocation('user', 'final')],
+        }),
+      ],
+      // A hand-built config that bypasses the schema default must not
+      // silently produce an empty run.
+      evaluateConfig: {
+        evalMetrics: [{metricName: 'fake_metric', threshold: 0.5}],
+        parallelism: Number.NaN,
+      },
+    })) {
+      results.push(result);
+    }
+
+    expect(results).toHaveLength(2);
+  });
+
   it('streams results without a results manager', async () => {
     const {service, evalSetsManager} = makeService({
       evalSetResultsManager: undefined,
@@ -690,7 +834,10 @@ describe('LocalEvalService.evaluateSingleInferenceResult', () => {
           parallelism: 1,
         },
       ),
-    ).rejects.toThrow(/Inferences should match conversations/);
+    ).rejects.toThrow(
+      'Inferences should match conversations in eval case. Found 2 inferences' +
+        ' and 1 conversations in eval cases.',
+    );
   });
 
   it('handles a null session id', async () => {

@@ -197,5 +197,13 @@ describe('LocalEvalService (end-to-end)', () => {
       'e2e_trivial_metric',
     );
     expect(evalResults[0].overallEvalMetricResults[0].score).toBe(1.0);
+
+    // The inference session is created under the request's app name, so the
+    // evaluation stage reads it back even though this eval case carries no
+    // `sessionInput`.
+    expect(evalResults[0].sessionDetails).toBeDefined();
+    expect(evalResults[0].sessionDetails?.id).toBe(
+      inferenceResults[0].sessionId,
+    );
   });
 });
