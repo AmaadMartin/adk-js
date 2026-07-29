@@ -1,12 +1,81 @@
 {
-  "extends": "./node_modules/gts/tsconfig-google.json",
+  "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "target": "ES2020",
-    "module": "nodenext",
-    "lib": ["ES2022", "DOM"],
-    "moduleResolution": "nodenext",
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "experimentalDecorators": true
-  }
+    "noEmit": true,
+    // Resolve the workspace packages to source, exactly like the `alias` block
+    // vitest.config.ts already applies. Without this, a class imported via the
+    // package barrel and the same class imported via a relative `../src/...`
+    // path are two unrelated nominal types. This mapping must stay in this
+    // typecheck-only project: the emitting configs use `rootDir: "src"`, and
+    // inheriting it there would pull sibling sources outside their rootDir.
+    "paths": {
+      "@google/adk": ["./core/src/index.ts"],
+      "@google/adk/*": ["./core/src/*"],
+      "@google/adk-devtools": ["./dev/src/index.ts"],
+      "@google/adk-devtools/*": ["./dev/src/*"],
+      "@google/adk-integrations": ["./integrations/src/index.ts"],
+      "@google/adk-integrations/*": ["./integrations/src/*"]
+    }
+  },
+  "include": [
+    "core/src/**/*.ts",
+    "core/test/**/*.ts",
+    "dev/samples/**/*.ts",
+    "dev/src/**/*.ts",
+    "dev/test/**/*.ts",
+    "integrations/src/**/*.ts",
+    "integrations/test/**/*.ts",
+    "tests/**/*.ts",
+    "vitest.config.ts"
+  ],
+  // `tests/integration/build_setup/**` is a set of standalone fixture projects
+  // with their own tsconfigs; they are npm-installed and built at test time.
+  // Everything after it is a legacy test file whose type errors predate this
+  // check being enforced in CI. Do not add new entries -- fix the types
+  // instead. Delete an entry once its file typechecks.
+  "exclude": [
+    "node_modules",
+    "**/dist/**",
+    "tests/integration/build_setup/**",
+    "core/test/agents/functions_test.ts",
+    "core/test/agents/processors/basic_llm_request_processor_test.ts",
+    "core/test/agents/processors/instructions_llm_request_processor_test.ts",
+    "core/test/agents/processors/request_confirmation_llm_request_processor_test.ts",
+    "core/test/agents/sequential_agent_test.ts",
+    "core/test/apps/app_test.ts",
+    "core/test/auth/exchanger/credential_exchanger_test.ts",
+    "core/test/code_executors/code_execution_utils_test.ts",
+    "core/test/code_executors/code_executor_context_test.ts",
+    "core/test/code_executors/unsafe_local_code_executor_test.ts",
+    "core/test/context/anchored_context_compactor_test.ts",
+    "core/test/context/token_based_context_compactor_test.ts",
+    "core/test/events/event_actions_test.ts",
+    "core/test/events/structured_events_test.ts",
+    "core/test/integrations/agent_registry_test.ts",
+    "core/test/memory/vertex_ai_memory_bank_service_test.ts",
+    "core/test/models/gemini_llm_connection_test.ts",
+    "core/test/models/google_llm_test.ts",
+    "core/test/models/llm_response_test.ts",
+    "core/test/plugins/global_instruction_plugin_test.ts",
+    "core/test/plugins/security_plugin_test.ts",
+    "core/test/runner/runner_test.ts",
+    "core/test/sessions/vertex_ai_session_service_test.ts",
+    "core/test/tools/google_search_tool_test.ts",
+    "core/test/tools/openapi_tool/auth_helpers_test.ts",
+    "core/test/tools/openapi_tool/openapi_spec_parser_test.ts",
+    "core/test/tools/openapi_tool/openapi_toolset_integration_test.ts",
+    "core/test/tools/openapi_tool/openapi_toolset_test.ts",
+    "core/test/tools/openapi_tool/tool_auth_handler_test.ts",
+    "core/test/tools/skills/run_skill_script_tool_test.ts",
+    "core/test/tools/vertex_ai_search_tool_test.ts",
+    "core/test/tools/vertex_rag_retrieval_tool_test.ts",
+    "core/test/utils/live_connection_utils_test.ts",
+    "tests/e2e/custom_metadata/custom_metadata_test.ts",
+    "tests/e2e/routing/lro_resumption_routing_e2e_test.ts",
+    "tests/integration/context_compaction/trajectory_thought_pruning_test.ts",
+    "tests/integration/tools/agent_tool_vertexai_test.ts",
+    "tests/integration/tools/google_maps_grounding_tool_test.ts",
+    "tests/integration/tools/skills_registry_integration_test.ts",
+    "tests/integration/tools/vertex_ai_search_tool_test.ts"
+  ]
 }
