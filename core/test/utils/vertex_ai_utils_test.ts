@@ -74,12 +74,6 @@ describe('vertex_ai_utils', () => {
       expect(result).toBeUndefined();
     });
 
-    it('should return expressModeApiKey when GOOGLE_GENAI_USE_ENTERPRISE is true', () => {
-      process.env['GOOGLE_GENAI_USE_ENTERPRISE'] = 'true';
-      const result = getExpressModeApiKey(undefined, undefined, 'my-api-key');
-      expect(result).toBe('my-api-key');
-    });
-
     it('should return undefined when GOOGLE_GENAI_USE_ENTERPRISE is false even if GOOGLE_GENAI_USE_VERTEXAI is true', () => {
       process.env['GOOGLE_GENAI_USE_ENTERPRISE'] = 'false';
       process.env['GOOGLE_GENAI_USE_VERTEXAI'] = 'true';

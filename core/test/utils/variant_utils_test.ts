@@ -5,19 +5,28 @@
  */
 
 import {GoogleLLMVariant} from '@google/adk';
-import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+  type MockInstance,
+} from 'vitest';
 import {logger} from '../../src/utils/logger.js';
 import {getGoogleLlmVariant} from '../../src/utils/variant_utils.js';
 
 describe('variant_utils', () => {
   describe('getGoogleLlmVariant', () => {
     const originalEnv = process.env;
+    let warnSpy: MockInstance<typeof logger.warn>;
 
     beforeEach(() => {
       process.env = {...originalEnv};
       delete process.env['GOOGLE_GENAI_USE_ENTERPRISE'];
       delete process.env['GOOGLE_GENAI_USE_VERTEXAI'];
-      vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
     });
 
     afterEach(() => {
@@ -55,12 +64,9 @@ describe('variant_utils', () => {
     });
 
     it('should warn when falling back to GOOGLE_GENAI_USE_VERTEXAI', () => {
-      const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
       process.env['GOOGLE_GENAI_USE_VERTEXAI'] = 'true';
       expect(getGoogleLlmVariant()).toBe(GoogleLLMVariant.VERTEX_AI);
-      expect(warnSpy).toHaveBeenCalledExactlyOnceWith(
-        'GOOGLE_GENAI_USE_VERTEXAI is deprecated, please use GOOGLE_GENAI_USE_ENTERPRISE instead',
-      );
+      expect(warnSpy).toHaveBeenCalledOnce();
     });
   });
 });

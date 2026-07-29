@@ -100,19 +100,18 @@ describe('env_aware_utils', () => {
       },
     );
 
-    it('should let a falsy GOOGLE_GENAI_USE_ENTERPRISE override the legacy var', () => {
-      process.env['GOOGLE_GENAI_USE_ENTERPRISE'] = '0';
-      process.env['GOOGLE_GENAI_USE_VERTEXAI'] = 'true';
-      expect(isEnterpriseModeEnabled()).toBe(false);
-      expect(warnSpy).not.toHaveBeenCalled();
-    });
-
-    it('should let a truthy GOOGLE_GENAI_USE_ENTERPRISE override the legacy var', () => {
-      process.env['GOOGLE_GENAI_USE_ENTERPRISE'] = 'true';
-      process.env['GOOGLE_GENAI_USE_VERTEXAI'] = 'false';
-      expect(isEnterpriseModeEnabled()).toBe(true);
-      expect(warnSpy).not.toHaveBeenCalled();
-    });
+    it.each([
+      {enterprise: '0', legacy: 'true', expected: false},
+      {enterprise: 'true', legacy: 'false', expected: true},
+    ])(
+      'should let GOOGLE_GENAI_USE_ENTERPRISE="$enterprise" override the legacy var',
+      ({enterprise, legacy, expected}) => {
+        process.env['GOOGLE_GENAI_USE_ENTERPRISE'] = enterprise;
+        process.env['GOOGLE_GENAI_USE_VERTEXAI'] = legacy;
+        expect(isEnterpriseModeEnabled()).toBe(expected);
+        expect(warnSpy).not.toHaveBeenCalled();
+      },
+    );
 
     it('should fall back to GOOGLE_GENAI_USE_VERTEXAI and warn', () => {
       process.env['GOOGLE_GENAI_USE_VERTEXAI'] = 'true';
