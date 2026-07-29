@@ -184,7 +184,10 @@ export {RoutedLlm} from './models/routed_llm.js';
 export type {LlmRouter} from './models/routed_llm.js';
 export {BasePlugin, ContextCompactionTrigger} from './plugins/base_plugin.js';
 export {DebugLoggingPlugin} from './plugins/debug_logging_plugin.js';
-export type {DebugLoggingPluginOptions} from './plugins/debug_logging_plugin.js';
+export type {
+  DebugLoggingPluginOptions,
+  DebugRedactor,
+} from './plugins/debug_logging_plugin.js';
 export {LoggingPlugin} from './plugins/logging_plugin.js';
 export {PluginManager} from './plugins/plugin_manager.js';
 export {
