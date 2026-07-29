@@ -7,6 +7,15 @@
 import path from 'path';
 import {defineConfig} from 'vitest/config';
 
+/**
+ * Lets test files import the workspace packages by name and resolve to their
+ * TypeScript sources rather than built output. Shared by every test project.
+ */
+const TEST_ALIAS = {
+  '@google/adk': path.resolve(__dirname, './core/src'),
+  '@google/adk-integrations': path.resolve(__dirname, './integrations/src'),
+};
+
 export default defineConfig({
   test: {
     poolOptions: {
@@ -22,13 +31,7 @@ export default defineConfig({
         test: {
           name: 'unit:core',
           environment: 'node',
-          alias: {
-            '@google/adk': path.resolve(__dirname, './core/src'),
-            '@google/adk-integrations': path.resolve(
-              __dirname,
-              './integrations/src',
-            ),
-          },
+          alias: TEST_ALIAS,
           include: ['core/test/**/*_test.ts'],
         },
       },
@@ -36,13 +39,7 @@ export default defineConfig({
         test: {
           name: 'unit:dev',
           environment: 'node',
-          alias: {
-            '@google/adk': path.resolve(__dirname, './core/src'),
-            '@google/adk-integrations': path.resolve(
-              __dirname,
-              './integrations/src',
-            ),
-          },
+          alias: TEST_ALIAS,
           include: ['dev/test/**/*_test.ts'],
         },
       },
@@ -50,13 +47,7 @@ export default defineConfig({
         test: {
           name: 'unit:integrations',
           environment: 'node',
-          alias: {
-            '@google/adk': path.resolve(__dirname, './core/src'),
-            '@google/adk-integrations': path.resolve(
-              __dirname,
-              './integrations/src',
-            ),
-          },
+          alias: TEST_ALIAS,
           include: ['integrations/test/**/*_test.ts'],
         },
       },
@@ -64,13 +55,7 @@ export default defineConfig({
         test: {
           name: 'integration',
           environment: 'node',
-          alias: {
-            '@google/adk': path.resolve(__dirname, './core/src'),
-            '@google/adk-integrations': path.resolve(
-              __dirname,
-              './integrations/src',
-            ),
-          },
+          alias: TEST_ALIAS,
           include: ['tests/integration/**/*_test.ts'],
         },
       },
@@ -78,13 +63,7 @@ export default defineConfig({
         test: {
           name: 'e2e',
           environment: 'node',
-          alias: {
-            '@google/adk': path.resolve(__dirname, './core/src'),
-            '@google/adk-integrations': path.resolve(
-              __dirname,
-              './integrations/src',
-            ),
-          },
+          alias: TEST_ALIAS,
           include: ['tests/e2e/**/*_test.ts'],
         },
       },
@@ -92,13 +71,7 @@ export default defineConfig({
         test: {
           name: 'cross-language',
           environment: 'node',
-          alias: {
-            '@google/adk': path.resolve(__dirname, './core/src'),
-            '@google/adk-integrations': path.resolve(
-              __dirname,
-              './integrations/src',
-            ),
-          },
+          alias: TEST_ALIAS,
           include: ['tests/cross_language/**/*_test.ts'],
         },
       },
