@@ -6,6 +6,7 @@
 
 import {BasePlugin, FunctionTool, SingleAgentCallback} from '@google/adk';
 import {beforeEach, describe, expect, it} from 'vitest';
+import {z} from 'zod';
 import {IntegrationRegistry} from '../../src/integration/integration_registry.js';
 
 describe('IntegrationRegistry', () => {
@@ -27,6 +28,22 @@ describe('IntegrationRegistry', () => {
 
     expect(retrieved).toBe(tool);
     expect(registry.getTool('non_existent')).toBeUndefined();
+  });
+
+  // A tool declaring parameters is a `FunctionTool<ZodObject<...>>`, which is
+  // not assignable to `FunctionTool<undefined>` -- the registry has to be typed
+  // as `BaseTool` to hold one. Every conformance tool has parameters.
+  it('should register and retrieve tools that declare parameters', () => {
+    const tool = new FunctionTool({
+      name: 'greet',
+      description: 'Greets someone',
+      parameters: z.object({name: z.string()}),
+      execute: async ({name}) => ({greeting: `hello ${name}`}),
+    });
+
+    registry.registerTool('greet', tool);
+
+    expect(registry.getTool('greet')).toBe(tool);
   });
 
   it('should register and retrieve before agent callbacks', () => {
