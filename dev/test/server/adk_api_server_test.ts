@@ -646,7 +646,12 @@ describe('AdkWebServer', () => {
           appName: 'testApp',
           newMessage: {parts: [{text: 'Hello'}], role: 'user'},
         }),
-      ).rejects.toMatchObject({response: {status: 404}});
+        // Missing ids are normalised to '', so they reach the session lookup
+        // as empty strings rather than as `undefined`.
+      ).rejects.toMatchObject({
+        response: {status: 404},
+        message: 'Session not found: ',
+      });
     });
   });
 

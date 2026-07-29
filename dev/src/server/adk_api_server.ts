@@ -90,17 +90,6 @@ interface ReasoningEngineRequestBody extends AgentRunRequestBody {
   input?: AgentRunRequestBody;
 }
 
-/** Options accepted by `AdkApiServer.executeAgentRun`. */
-interface ExecuteAgentRunOptions {
-  appName: string;
-  userId: string;
-  sessionId: string;
-  newMessage?: Content;
-  stateDelta?: Record<string, unknown>;
-  runConfig?: RunConfig;
-  abortSignal: AbortSignal;
-}
-
 /** Normalises a plain run body. Used by `/run` and `/run_sse`. */
 function parseAgentRunRequest(body: AgentRunRequestBody): AgentRunRequest {
   return {
@@ -1060,40 +1049,26 @@ export class AdkApiServer {
     res.on('close', onClose);
 
     try {
-      yield* this.executeAgentRun({
-        appName: request.appName,
+      await using agentFile = await this.agentLoader.getAgentFile(
+        request.appName,
+      );
+      const loaded = await agentFile.load();
+      const runner = await this.getRunner(loaded, request.appName);
+
+      yield* runner.runAsync({
         userId: request.userId,
         sessionId: request.sessionId,
-        newMessage: request.newMessage,
-        stateDelta: request.stateDelta,
+        // `Runner.runAsync` types `newMessage` as required but tolerates a
+        // missing message at runtime (it only rejects a message with no
+        // parts); the dev server forwards the request as sent, and the Python
+        // dev server models `new_message` as optional too.
+        newMessage: request.newMessage!,
         runConfig,
+        stateDelta: request.stateDelta,
         abortSignal: abortController.signal,
       });
     } finally {
       res.off('close', onClose);
     }
-  }
-
-  private async *executeAgentRun(
-    options: ExecuteAgentRunOptions,
-  ): AsyncGenerator<Event> {
-    await using agentFile = await this.agentLoader.getAgentFile(
-      options.appName,
-    );
-    const loaded = await agentFile.load();
-    const runner = await this.getRunner(loaded, options.appName);
-
-    yield* runner.runAsync({
-      userId: options.userId,
-      sessionId: options.sessionId,
-      // `Runner.runAsync` types `newMessage` as required but tolerates a
-      // missing message at runtime (it only rejects a message with no parts);
-      // the dev server forwards the request as sent, and the Python dev server
-      // models `new_message` as optional too.
-      newMessage: options.newMessage!,
-      runConfig: options.runConfig,
-      stateDelta: options.stateDelta,
-      abortSignal: options.abortSignal,
-    });
   }
 }
