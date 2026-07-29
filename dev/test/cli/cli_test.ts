@@ -147,6 +147,20 @@ describe('CLI Entrypoint', () => {
       const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
       expect(args.a2a).toBe(true);
     });
+
+    it('should not trust proxy headers by default', async () => {
+      await parse(['web']);
+
+      const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
+      expect(args.trustProxyHeaders).toBe(false);
+    });
+
+    it('should trust proxy headers when --trust_proxy_headers is set', async () => {
+      await parse(['web', '--trust_proxy_headers']);
+
+      const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
+      expect(args.trustProxyHeaders).toBe(true);
+    });
   });
 
   describe('command: api_server', () => {
@@ -166,6 +180,20 @@ describe('CLI Entrypoint', () => {
 
       const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
       expect(args.a2a).toBe(true);
+    });
+
+    it('should not trust proxy headers by default', async () => {
+      await parse(['api_server']);
+
+      const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
+      expect(args.trustProxyHeaders).toBe(false);
+    });
+
+    it('should trust proxy headers when --trust_proxy_headers is set', async () => {
+      await parse(['api_server', '--trust_proxy_headers']);
+
+      const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
+      expect(args.trustProxyHeaders).toBe(true);
     });
   });
 

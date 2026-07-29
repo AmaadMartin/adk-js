@@ -256,6 +256,10 @@ export function isRequestOriginAllowed(
 /**
  * Validates the `Host` header against the static allowlist derived from the
  * bind address, which is what stops a DNS-rebound page that sends no `Origin`.
+ *
+ * `X-Forwarded-Host` is never consulted: trusting a proxy turns the check off
+ * altogether (see {@link buildOriginPolicy}), so the real `Host` is the only
+ * value that can be judged here.
  */
 export function isRequestHostAllowed(
   req: RequestInfo,
@@ -335,7 +339,7 @@ export function requestRejectionReason(
   return undefined;
 }
 
-function formatRequest(req: RequestInfo, path: string): string {
+function formatRequest(req: RequestInfo, path?: string): string {
   return `${req.method} ${path} (host: ${req.headers.host}, origin: ${req.headers.origin})`;
 }
 
@@ -389,7 +393,7 @@ export function createUpgradeGuard(
       };
       const reason = requestRejectionReason(info, policy, true);
       if (reason !== undefined) {
-        logger.warn(`${reason}: ${formatRequest(info, req.url ?? '')}`);
+        logger.warn(`${reason}: ${formatRequest(info, req.url)}`);
         socket.write(
           'HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n',
         );
