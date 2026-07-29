@@ -21,15 +21,9 @@ import {
 const IS_WINDOWS = os.platform() === 'win32';
 
 /**
- * Flags applied to every spawned PowerShell process, before the script path.
- *
- * `-NoProfile` keeps execution hermetic and fast: profile scripts must not
- * mutate the environment of executed code, must not pollute the captured
- * stdout/stderr, and their load time must not be charged against the execution
- * timeout.
- *
- * Spread this constant into a fresh array per spawn; the argument list is
- * mutated afterwards to append user-supplied arguments.
+ * Flags for every spawned PowerShell process. `-NoProfile` keeps execution
+ * hermetic: host profile scripts must not run before the executed script, so
+ * they cannot pollute its output, mutate its environment, or spend its timeout.
  */
 const POWERSHELL_ARGS = [
   '-NoProfile',
