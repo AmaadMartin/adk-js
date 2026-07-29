@@ -4,9 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {AuthConfig, ToolConfirmation} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 import {
   createEventActions,
+  hasEventActions,
   mergeEventActions,
 } from '../../src/events/event_actions.js';
 
@@ -200,5 +202,68 @@ describe('mergeEventActions', () => {
       createEventActions({stateDelta: {x: 1}}),
     ]);
     expect(result.stateDelta).toEqual({x: 1});
+  });
+});
+
+describe('hasEventActions', () => {
+  it('returns false for a pristine EventActions', () => {
+    expect(hasEventActions(createEventActions())).toBe(false);
+  });
+
+  it('returns true for a non-empty stateDelta', () => {
+    expect(
+      hasEventActions(createEventActions({stateDelta: {key: 'val'}})),
+    ).toBe(true);
+  });
+
+  it('returns true for a non-empty artifactDelta', () => {
+    expect(
+      hasEventActions(createEventActions({artifactDelta: {'file.txt': 1}})),
+    ).toBe(true);
+  });
+
+  it('returns true for a non-empty requestedAuthConfigs', () => {
+    const authConfig: AuthConfig = {
+      credentialKey: 'testKey',
+      authScheme: {type: 'apiKey', name: 'testKey', in: 'header'},
+    };
+    expect(
+      hasEventActions(
+        createEventActions({requestedAuthConfigs: {'call-1': authConfig}}),
+      ),
+    ).toBe(true);
+  });
+
+  it('returns true for a non-empty requestedToolConfirmations', () => {
+    const confirmation = new ToolConfirmation({
+      hint: 'confirm',
+      confirmed: false,
+    });
+    expect(
+      hasEventActions(
+        createEventActions({
+          requestedToolConfirmations: {'call-1': confirmation},
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it('returns true for skipSummarization set to true or false', () => {
+    expect(hasEventActions(createEventActions({skipSummarization: true}))).toBe(
+      true,
+    );
+    expect(
+      hasEventActions(createEventActions({skipSummarization: false})),
+    ).toBe(true);
+  });
+
+  it('returns true for escalate set to false', () => {
+    expect(hasEventActions(createEventActions({escalate: false}))).toBe(true);
+  });
+
+  it('returns true for transferToAgent', () => {
+    expect(
+      hasEventActions(createEventActions({transferToAgent: 'other'})),
+    ).toBe(true);
   });
 });
