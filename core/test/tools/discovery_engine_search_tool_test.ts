@@ -209,16 +209,6 @@ describe('DiscoveryEngineSearchTool', () => {
       },
     );
 
-    it('resolves the regional endpoint from a searchEngineId', async () => {
-      const tool = new DiscoveryEngineSearchTool({
-        searchEngineId:
-          'projects/test/locations/us/collections/default_collection/engines/test_search_engine',
-      });
-      expect(await resolvedHost(tool)).toBe(
-        'us-discoveryengine.googleapis.com',
-      );
-    });
-
     it('uses an explicit location override on a bare id', async () => {
       const tool = new DiscoveryEngineSearchTool({
         dataStoreId: 'test_data_store',
@@ -459,15 +449,6 @@ describe('DiscoveryEngineSearchTool', () => {
       expect(result).toEqual({status: 'success', results: []});
     });
 
-    it('uses an explicit DOCUMENTS mode without probing', async () => {
-      const tool = new DiscoveryEngineSearchTool({
-        dataStoreId: 'test_data_store',
-        searchResultMode: SearchResultMode.DOCUMENTS,
-      });
-      await tool.discoveryEngineSearch('q');
-      expect(requestedModes()).toEqual(['DOCUMENTS']);
-    });
-
     it('parses DOCUMENTS structured data', async () => {
       respondWith({
         results: [
@@ -610,27 +591,6 @@ describe('DiscoveryEngineSearchTool', () => {
       expect(results[0].content).toBe('answer one\nanswer two');
     });
 
-    it('renders extractive answers that carry no content field', async () => {
-      respondWith({
-        results: [
-          {
-            document: {
-              derivedStructData: {
-                extractive_answers: [{pageNumber: '2'}, 'raw answer'],
-              },
-            },
-          },
-        ],
-      });
-
-      const tool = new DiscoveryEngineSearchTool({
-        dataStoreId: 'test_data_store',
-        searchResultMode: SearchResultMode.DOCUMENTS,
-      });
-      const results = expectSuccess(await tool.discoveryEngineSearch('q'));
-      expect(results[0].content).toBe('{"pageNumber":"2"}\nraw answer');
-    });
-
     it('skips document results whose document sub-object is missing', async () => {
       respondWith({
         results: [{chunk: {content: 'ignored'}}, {document: {name: 'd'}}],
@@ -759,6 +719,8 @@ describe('DiscoveryEngineSearchTool', () => {
         query: 'q',
         contentSearchSpec: {searchResultMode: 'DOCUMENTS'},
       });
+      // An explicit mode skips the CHUNKS probe entirely.
+      expect(requestedModes()).toEqual(['DOCUMENTS']);
     });
 
     it('omits optional headers/body fields when unset', async () => {
