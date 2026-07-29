@@ -1267,20 +1267,15 @@ class MockToolCallingAgent extends LlmAgent {
     });
   }
 
-  /** The id of the function call the next run will emit. */
-  nextFunctionCallId(): string {
-    return `${this.name}_call_${this.runCount + 1}`;
-  }
-
   protected override async *runAsyncImpl(
     context: InvocationContext,
   ): AsyncGenerator<Event, void, void> {
+    this.runCount++;
     const functionCall: FunctionCall = {
-      id: this.nextFunctionCallId(),
+      id: `${this.name}_call_${this.runCount}`,
       name: 'get_weather',
       args: {location: 'NYC'},
     };
-    this.runCount++;
     yield createEvent({
       invocationId: context.invocationId,
       author: this.name,
