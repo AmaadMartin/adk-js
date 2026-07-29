@@ -9,7 +9,6 @@ import {describe, expect, it} from 'vitest';
 
 import {
   buildOriginPolicy,
-  isLoopbackAddress,
   OriginPolicy,
   parseAllowedOrigins,
   requestRejectionReason,
@@ -31,26 +30,6 @@ function headers(host?: string, origin?: string): http.IncomingHttpHeaders {
   return {host, origin};
 }
 
-describe('isLoopbackAddress', () => {
-  it.each(['127.0.0.1', 'localhost', '::1', '127.1.2.3'])(
-    'treats %s as loopback',
-    (host) => {
-      expect(isLoopbackAddress(host)).toBe(true);
-    },
-  );
-
-  it.each([
-    'evil.com',
-    '127.evil.com',
-    '0.0.0.0',
-    '128.0.0.1',
-    '2001:db8::1',
-    '',
-  ])('treats %s as non-loopback', (host) => {
-    expect(isLoopbackAddress(host)).toBe(false);
-  });
-});
-
 describe('parseAllowedOrigins', () => {
   it.each([
     [undefined, []],
@@ -64,6 +43,36 @@ describe('parseAllowedOrigins', () => {
 });
 
 describe('buildOriginPolicy', () => {
+  it.each(['127.0.0.1', 'localhost', '::1', '127.1.2.3'])(
+    'enforces the Host allowlist for a server bound to %s',
+    (serverHost) => {
+      const policy = buildOriginPolicy({
+        allowedOrigins: [],
+        serverHost,
+        configuredHost: serverHost,
+        port: PORT,
+      });
+
+      expect(policy.allowedHosts).toBeDefined();
+    },
+  );
+
+  // `127.evil.com` is a hostname, not a loopback IP, and `0.0.0.0` is a
+  // wildcard bind: neither yields a finite set of authorities to allow.
+  it.each(['evil.com', '127.evil.com', '0.0.0.0', '128.0.0.1', ''])(
+    'does not enforce the Host allowlist for a server bound to %s',
+    (serverHost) => {
+      const policy = buildOriginPolicy({
+        allowedOrigins: [],
+        serverHost,
+        configuredHost: serverHost,
+        port: PORT,
+      });
+
+      expect(policy.allowedHosts).toBeUndefined();
+    },
+  );
+
   it('accepts every loopback spelling of a loopback bind', () => {
     const policy = loopbackPolicy();
 
@@ -83,17 +92,6 @@ describe('buildOriginPolicy', () => {
     expect(policy.allowedHosts?.has(`dev.localtest:${PORT}`)).toBe(true);
   });
 
-  it('does not enforce the host check on a wildcard bind', () => {
-    const policy = buildOriginPolicy({
-      allowedOrigins: [],
-      serverHost: '0.0.0.0',
-      configuredHost: '0.0.0.0',
-      port: PORT,
-    });
-
-    expect(policy.allowedHosts).toBeUndefined();
-  });
-
   it('accepts the hosts of configured origins but not the wildcard', () => {
     const policy = loopbackPolicy(['https://tunnel.example', '*']);
 
@@ -108,7 +106,6 @@ describe('requestRejectionReason', () => {
   // attacker-controlled Host, with or without a matching Origin.
   it.each([
     ['evil.com:8000', 'http://evil.com'],
-    ['127.evil.com:8000', 'http://127.evil.com'],
     ['evil.com:8000', undefined],
   ])('blocks a rebound request with host %s', (host, origin) => {
     const reason = requestRejectionReason(

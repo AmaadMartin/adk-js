@@ -124,4 +124,16 @@ describe('AdkApiServer origin and host validation', () => {
       'http://evil.com',
     );
   });
+
+  it('keeps the wildcard CORS header for --allow_origins *', async () => {
+    const port = await startServer({allowOrigins: '*'});
+
+    const response = await request(port, '/apps/testApp/users/u/sessions', {
+      method: 'POST',
+      headers: {origin: 'http://evil.com'},
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers['access-control-allow-origin']).toBe('*');
+  });
 });

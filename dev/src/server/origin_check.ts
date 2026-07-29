@@ -5,7 +5,7 @@
  */
 
 import {Logger} from '@google/adk';
-import express, {NextFunction, Request, Response} from 'express';
+import {NextFunction, Request, RequestHandler, Response} from 'express';
 import * as http from 'node:http';
 import * as net from 'node:net';
 
@@ -49,21 +49,12 @@ export function parseAllowedOrigins(value?: string): string[] {
  * Returns true if `host` is a loopback address, as Node reports a bound one:
  * a bare address, canonicalized (`::1`, never `0:0:0:0:0:0:0:1`) and port-less.
  */
-export function isLoopbackAddress(host: string): boolean {
+function isLoopbackAddress(host: string): boolean {
   // The `isIPv4` guard matters: `127.evil.com` is a hostname, not a loopback IP.
   return (
     LOOPBACK_HOSTS.includes(host) ||
     (net.isIPv4(host) && host.startsWith('127.'))
   );
-}
-
-/** Returns the lower-cased `host[:port]` of a URL, or undefined if unparseable. */
-function parseUrlHost(url: string): string | undefined {
-  try {
-    return new URL(url).host;
-  } catch {
-    return undefined;
-  }
 }
 
 /** Validates an `Origin` header against the allowlist, then against same-origin. */
@@ -123,9 +114,10 @@ export function buildOriginPolicy(options: OriginPolicyOptions): OriginPolicy {
   }
   // Keep tunnelled or proxied setups declared via --allow_origins working.
   for (const origin of allowedOrigins) {
-    const host = parseUrlHost(origin);
-    if (host !== undefined) {
-      allowedHosts.add(host);
+    try {
+      allowedHosts.add(new URL(origin).host);
+    } catch {
+      // Not a URL, e.g. the '*' wildcard: it contributes no Host authority.
     }
   }
 
@@ -163,7 +155,7 @@ export function requestRejectionReason(
 export function createOriginCheckMiddleware(
   getPolicy: () => OriginPolicy,
   logger: Logger,
-): express.RequestHandler {
+): RequestHandler {
   return (req: Request, res: Response, next: NextFunction) => {
     const reason = requestRejectionReason(req, getPolicy());
     if (reason === undefined) {

@@ -89,7 +89,6 @@ export class AdkApiServer {
   private readonly artifactService: BaseArtifactService;
   private readonly serveDebugUI: boolean;
   private readonly allowedOrigins: string[];
-  private originPolicy?: OriginPolicy;
   private readonly otelToCloud: boolean;
   private readonly registerProcessors?: (
     tracerProvider: TracerProvider,
@@ -940,20 +939,21 @@ export class AdkApiServer {
   }
 
   /**
-   * The request-gate policy, derived on first use from the address the server
-   * actually bound to (`port: 0` picks a free port, so it is only known once
-   * the server is listening -- which it always is by the time a request runs).
+   * The request-gate policy, derived from the address the server actually bound
+   * to: `port: 0` picks a free port, so it is only known once it is listening --
+   * which it always is by the time a request reaches the middleware.
    */
   private policy(): OriginPolicy {
     const address = this.server?.address();
-    const bound = typeof address === 'object' && address ? address : undefined;
+    // A string address means a pipe or socket, which has no host or port.
+    const bound = typeof address === 'string' ? null : address;
 
-    return (this.originPolicy ??= buildOriginPolicy({
+    return buildOriginPolicy({
       allowedOrigins: this.allowedOrigins,
       serverHost: bound?.address ?? this.host,
       configuredHost: this.host,
       port: bound?.port ?? this.port,
-    }));
+    });
   }
 
   async start(): Promise<void> {
