@@ -62,7 +62,10 @@ export {StreamingMode} from './agents/run_config.js';
 export type {RunConfig} from './agents/run_config.js';
 export {SequentialAgent, isSequentialAgent} from './agents/sequential_agent.js';
 export type {TranscriptionEntry} from './agents/transcription_entry.js';
-export {createResumabilityConfig} from './apps/resumability_config.js';
+export {
+  DEFAULT_IS_RESUMABLE,
+  createResumabilityConfig,
+} from './apps/resumability_config.js';
 export type {ResumabilityConfig} from './apps/resumability_config.js';
 export type {
   BaseArtifactService,
@@ -206,7 +209,6 @@ export {InMemoryRunner} from './runner/in_memory_runner.js';
 export {
   Runner,
   determineAgentForResumption,
-  findEventByLastFunctionResponseId,
   isRoutableLlmAgent,
   isRunner,
 } from './runner/runner.js';
