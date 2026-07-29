@@ -108,15 +108,12 @@ async function loadDir(
  *
  * @param content - The raw content of the SKILL.md file.
  * @returns An object containing the parsed frontmatter, the frontmatter keys as
- * written in the YAML, and the remaining markdown body.
+ * written in the YAML (before alias derivation and defaults), and the remaining
+ * markdown body.
  * @throws {Error} If the content is not properly formatted with YAML frontmatter.
  */
 export function parseSkillMdContent(content: string): {
   frontmatter: Frontmatter;
-  /**
-   * Frontmatter keys exactly as written in the SKILL.md YAML, before schema
-   * preprocessing (alias derivation) and defaults are applied.
-   */
   declaredKeys: string[];
   body: string;
 } {
@@ -265,12 +262,7 @@ async function loadSkillFile(
     );
   }
 
-  const {
-    frontmatter: parsed,
-    declaredKeys,
-    body,
-  } = parseSkillMdContent(content);
-  const frontmatter = FrontmatterSchema.parse(parsed);
+  const {frontmatter, declaredKeys, body} = parseSkillMdContent(content);
   const dirName = path.basename(resolvedDir);
   if (dirName !== frontmatter.name) {
     throw new Error(
@@ -278,13 +270,7 @@ async function loadSkillFile(
     );
   }
 
-  return {
-    skill: {
-      frontmatter,
-      instructions: body,
-    },
-    declaredKeys,
-  };
+  return {skill: {frontmatter, instructions: body}, declaredKeys};
 }
 
 /**

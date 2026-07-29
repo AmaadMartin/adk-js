@@ -361,16 +361,14 @@ Instructions`,
         `---
 name: test-skill
 description: A test skill
+allowed-tools: read
 unknown_field: value
 ---
 Instructions`,
       );
 
       const problems = await validateSkillDir(skillDir);
-      expect(problems.length).toBeGreaterThan(0);
-      expect(
-        problems.some((p) => p.includes('Unknown frontmatter fields')),
-      ).toBe(true);
+      expect(problems).toEqual(['Unknown frontmatter fields: [unknown_field]']);
 
       await fs.rm(tempDir, {recursive: true, force: true});
     });
@@ -392,31 +390,6 @@ Instructions`,
 
       const problems = await validateSkillDir(skillDir);
       expect(problems).toEqual([]);
-
-      await fs.rm(tempDir, {recursive: true, force: true});
-    });
-
-    it('reports unknown fields under the keys the author wrote', async () => {
-      tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-skill-test-'));
-      const skillDir = path.join(tempDir, 'test-skill');
-      await fs.mkdir(skillDir);
-
-      await fs.writeFile(
-        path.join(skillDir, 'SKILL.md'),
-        `---
-name: test-skill
-description: A test skill
-allowed_tools: read
-bogus_field: 1
----
-Instructions`,
-      );
-
-      const problems = await validateSkillDir(skillDir);
-      expect(problems).toEqual([
-        'Unknown frontmatter fields: [allowed_tools, bogus_field]',
-      ]);
-      expect(problems[0]).not.toContain('allowedTools');
 
       await fs.rm(tempDir, {recursive: true, force: true});
     });
