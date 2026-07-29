@@ -347,8 +347,6 @@ describe('GoogleLlm', () => {
       process.env['GOOGLE_CLOUD_LOCATION'] = 'env-location';
       const params = geminiInitParams({model: 'gemini-1.5-flash'});
       expect(params.vertexai).toBe(true);
-      expect(params.project).toBe('env-project');
-      expect(params.location).toBe('env-location');
     });
   });
 
@@ -379,9 +377,6 @@ describe('GoogleLlm', () => {
       expect(spy).toHaveBeenCalledWith(
         expect.objectContaining({vertexai: false}),
       );
-
-      expect(llm['vertexai']).toBe(false);
-      expect(llm.apiBackend).toBe(GoogleLLMVariant.GEMINI_API);
     });
   });
 

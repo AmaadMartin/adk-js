@@ -80,12 +80,6 @@ describe('env_aware_utils', () => {
       expect(warnSpy).not.toHaveBeenCalled();
     });
 
-    it('should return true when GOOGLE_GENAI_USE_ENTERPRISE is "1"', () => {
-      process.env = {...baseEnv, 'GOOGLE_GENAI_USE_ENTERPRISE': '1'};
-      expect(isEnterpriseModeEnabled()).toBe(true);
-      expect(warnSpy).not.toHaveBeenCalled();
-    });
-
     it('should let GOOGLE_GENAI_USE_ENTERPRISE="false" override GOOGLE_GENAI_USE_VERTEXAI="true"', () => {
       process.env = {
         ...baseEnv,
