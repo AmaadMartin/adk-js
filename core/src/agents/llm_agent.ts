@@ -345,6 +345,15 @@ export const DEFAULT_RESPONSE_PROCESSORS: readonly BaseLlmResponseProcessor[] =
   [];
 
 /**
+ * Name of the synthetic function tool used to collect a structured final
+ * response when an agent declares an `outputSchema` alongside tools.
+ *
+ * Registration, the allow-list exemption, and the response-parsing check must
+ * all agree on this name, so it is defined once here.
+ */
+export const SET_MODEL_RESPONSE_TOOL_NAME = 'set_model_response';
+
+/**
  * Creates a standalone 'set_model_response' function tool for structured outputs.
  *
  * @param schema The output schema conforming to LlmAgentSchema.
@@ -354,7 +363,7 @@ export function createSetModelResponseTool(
   schema: LlmAgentSchema,
 ): FunctionTool<LlmAgentSchema> {
   return new FunctionTool({
-    name: 'set_model_response',
+    name: SET_MODEL_RESPONSE_TOOL_NAME,
     description:
       'Call this tool to submit your final response conforming to the output schema. Use this tool only when you have collected all the information and are ready to return the final answer.',
     parameters: schema,
@@ -437,9 +446,9 @@ export class LlmAgent extends BaseAgent {
     this.codeExecutor = config.codeExecutor;
 
     // Orders matter, don't change. Append new processors to the end
-    this.requestProcessors = config.requestProcessors
-      ? [...config.requestProcessors]
-      : [...DEFAULT_REQUEST_PROCESSORS];
+    this.requestProcessors = [
+      ...(config.requestProcessors ?? DEFAULT_REQUEST_PROCESSORS),
+    ];
 
     if (
       !config.requestProcessors &&
@@ -463,9 +472,9 @@ export class LlmAgent extends BaseAgent {
       }
     }
 
-    this.responseProcessors = config.responseProcessors
-      ? [...config.responseProcessors]
-      : [...DEFAULT_RESPONSE_PROCESSORS];
+    this.responseProcessors = [
+      ...(config.responseProcessors ?? DEFAULT_RESPONSE_PROCESSORS),
+    ];
 
     // Preserve the agent transfer behavior.
     const agentTransferDisabled =
@@ -821,7 +830,12 @@ export class LlmAgent extends BaseAgent {
     const resolvedTools = await this.canonicalTools(
       new ReadonlyContext(invocationContext),
     );
-    if (this.outputSchema && resolvedTools.length > 0) {
+    // Gate on the unresolved `tools` array: BASIC_LLM_REQUEST_PROCESSOR and
+    // INSTRUCTIONS_LLM_REQUEST_PROCESSOR key off `agent.tools.length`, so a
+    // toolset that resolves to nothing for this context must not desync the
+    // three (no responseSchema, an instruction naming the function, but no
+    // function registered).
+    if (this.outputSchema && this.tools.length > 0) {
       resolvedTools.push(createSetModelResponseTool(this.outputSchema));
     }
 
@@ -833,7 +847,7 @@ export class LlmAgent extends BaseAgent {
       if (
         llmRequest.allowedTools &&
         !llmRequest.allowedTools.includes(tool.name) &&
-        tool.name !== 'set_model_response'
+        tool.name !== SET_MODEL_RESPONSE_TOOL_NAME
       ) {
         continue;
       }
@@ -955,7 +969,7 @@ export class LlmAgent extends BaseAgent {
     if (mergedEvent.content) {
       const functionCalls = getFunctionCalls(mergedEvent);
       const setModelResponseCall = functionCalls.find(
-        (call) => call.name === 'set_model_response',
+        (call) => call.name === SET_MODEL_RESPONSE_TOOL_NAME,
       );
       if (setModelResponseCall) {
         const args = setModelResponseCall.args;

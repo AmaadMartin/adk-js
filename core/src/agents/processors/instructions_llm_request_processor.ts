@@ -8,7 +8,7 @@ import {Event} from '../../events/event.js';
 import {appendInstructions, LlmRequest} from '../../models/llm_request.js';
 import {injectSessionState} from '../instructions.js';
 import {InvocationContext} from '../invocation_context.js';
-import {isLlmAgent} from '../llm_agent.js';
+import {isLlmAgent, SET_MODEL_RESPONSE_TOOL_NAME} from '../llm_agent.js';
 import {ReadonlyContext} from '../readonly_context.js';
 import {BaseLlmRequestProcessor} from './base_llm_processor.js';
 
@@ -64,7 +64,7 @@ export class InstructionsLlmRequestProcessor extends BaseLlmRequestProcessor {
 
     if (agent.outputSchema && agent.tools && agent.tools.length > 0) {
       appendInstructions(llmRequest, [
-        'To output the final result, you must call the "set_model_response" function with the appropriate values. Do not output anything else.',
+        `To output the final result, you must call the "${SET_MODEL_RESPONSE_TOOL_NAME}" function with the appropriate values. Do not output anything else.`,
       ]);
     }
   }

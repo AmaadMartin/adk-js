@@ -1,12 +1,12 @@
 /**
  * @license
- * Copyright 2025 Google LLC
+ * Copyright 2026 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
 
 import {
   BaseLlm,
-  createSetModelResponseTool,
+  BaseLlmConnection,
   DEFAULT_REQUEST_PROCESSORS,
   DEFAULT_RESPONSE_PROCESSORS,
   Event,
@@ -18,8 +18,17 @@ import {
   LlmResponse,
   PluginManager,
 } from '@google/adk';
+import {Content, Blob as GenaiBlob} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {z as z3} from 'zod/v3';
+
+class MockE2eLlmConnection implements BaseLlmConnection {
+  async sendHistory(_history: Content[]): Promise<void> {}
+  async sendContent(_content: Content): Promise<void> {}
+  async sendRealtime(_blob: GenaiBlob): Promise<void> {}
+  async *receive(): AsyncGenerator<LlmResponse, void, void> {}
+  async close(): Promise<void> {}
+}
 
 class MockE2eLlm extends BaseLlm {
   constructor() {
@@ -43,6 +52,10 @@ class MockE2eLlm extends BaseLlm {
         ],
       },
     };
+  }
+
+  override async connect(_request: LlmRequest): Promise<BaseLlmConnection> {
+    return new MockE2eLlmConnection();
   }
 }
 
@@ -82,11 +95,7 @@ describe('Manual E2E Test: LlmAgent Processor Arrays & Tool Preprocessors', () =
       DEFAULT_REQUEST_PROCESSORS.length,
     );
 
-    // 2. Verify standalone createSetModelResponseTool
-    const standaloneTool = createSetModelResponseTool(outputSchema);
-    expect(standaloneTool.name).toBe('set_model_response');
-
-    // 3. Verify canonicalTools pre-resolving both add_numbers and set_model_response during run
+    // 2. Verify canonicalTools pre-resolving both add_numbers and set_model_response during run
     const sessionService = new InMemorySessionService();
     const session = await sessionService.createSession({
       appName: 'e2e_app',

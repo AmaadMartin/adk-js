@@ -24,6 +24,7 @@ export {
   DEFAULT_REQUEST_PROCESSORS,
   DEFAULT_RESPONSE_PROCESSORS,
   LlmAgent,
+  SET_MODEL_RESPONSE_TOOL_NAME,
   createSetModelResponseTool,
   isLlmAgent,
 } from './agents/llm_agent.js';
