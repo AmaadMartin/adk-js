@@ -286,9 +286,6 @@ describe('AgentLoader', () => {
         minify: true,
         external: expect.arrayContaining(['onnxruntime-node']),
       });
-      expect((esbuild.build as Mock).mock.calls[0][0]).toHaveProperty(
-        'external',
-      );
 
       await agentFile.dispose();
       await expect(fs.access(compiledAgentPath)).rejects.toThrow();
@@ -549,7 +546,7 @@ describe('AgentLoader', () => {
     it('compiles and loads a .ts agent with real esbuild when bundle is disabled', async () => {
       const {build: realEsbuildBuild} =
         await vi.importActual<typeof import('esbuild')>('esbuild');
-      (esbuild.build as Mock).mockImplementation(realEsbuildBuild);
+      (esbuild.build as Mock).mockImplementationOnce(realEsbuildBuild);
 
       const agentPath = path.join(tempAgentsDir, 'agent2.ts');
       await fs.writeFile(agentPath, agent2TsContent);
