@@ -12,16 +12,22 @@ import {
   BaseLlmResponseProcessor,
   BasePlugin,
   BaseTool,
+  BaseToolset,
   CONTENT_REQUEST_PROCESSOR,
   Context,
   ContextCompactorRequestProcessor,
   createEvent,
+  createSession,
+  createSetModelResponseTool,
+  DEFAULT_REQUEST_PROCESSORS,
+  DEFAULT_RESPONSE_PROCESSORS,
   Event,
   InvocationContext,
   LlmAgent,
   LlmRequest,
   LlmResponse,
   PluginManager,
+  ReadonlyContext,
   RunAsyncToolRequest,
   Session,
   ToolProcessLlmRequest,
@@ -837,5 +843,172 @@ describe('LlmAgent Default Request Processors', () => {
       CONTENT_REQUEST_PROCESSOR,
     );
     expect(authIndex).toBeLessThan(contentIndex);
+  });
+
+  it('assigns isolated copies of DEFAULT_REQUEST_PROCESSORS and DEFAULT_RESPONSE_PROCESSORS', () => {
+    const agent = new LlmAgent({
+      name: 'test_agent',
+    });
+    expect(agent.requestProcessors).not.toBe(DEFAULT_REQUEST_PROCESSORS);
+    expect(agent.responseProcessors).not.toBe(DEFAULT_RESPONSE_PROCESSORS);
+
+    const initialReqLength = DEFAULT_REQUEST_PROCESSORS.length;
+    const initialRespLength = DEFAULT_RESPONSE_PROCESSORS.length;
+
+    agent.requestProcessors.pop();
+    agent.responseProcessors.push(new MockResponseProcessor());
+
+    expect(DEFAULT_REQUEST_PROCESSORS.length).toBe(initialReqLength);
+    expect(DEFAULT_RESPONSE_PROCESSORS.length).toBe(initialRespLength);
+  });
+
+  it('copies caller-supplied requestProcessors and responseProcessors', () => {
+    const customReq = [CONTENT_REQUEST_PROCESSOR];
+    const customResp: BaseLlmResponseProcessor[] = [];
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      requestProcessors: customReq,
+      responseProcessors: customResp,
+      disallowTransferToParent: true,
+      disallowTransferToPeers: true,
+    });
+
+    expect(agent.requestProcessors).not.toBe(customReq);
+    expect(agent.responseProcessors).not.toBe(customResp);
+    expect(agent.requestProcessors).toEqual([CONTENT_REQUEST_PROCESSOR]);
+  });
+});
+
+/** A toolset that contributes no tools for the given context. */
+class EmptyToolset extends BaseToolset {
+  constructor() {
+    super([]);
+  }
+  async getTools(_context?: ReadonlyContext): Promise<BaseTool[]> {
+    return [];
+  }
+  async close(): Promise<void> {}
+}
+
+/** A model that records the request it was called with and yields nothing. */
+class RequestCapturingLlm extends BaseLlm {
+  capturedRequest?: LlmRequest;
+
+  constructor() {
+    super({model: 'request-capturing-llm'});
+  }
+
+  async *generateContentAsync(
+    request: LlmRequest,
+  ): AsyncGenerator<LlmResponse, void, void> {
+    this.capturedRequest = request;
+    // Content-free response: these tests assert on the request only, and an
+    // empty response is dropped by postprocess so no event is emitted.
+    yield {};
+  }
+
+  async connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
+    return new MockLlmConnection();
+  }
+}
+
+async function captureLlmRequest(agent: LlmAgent, llm: RequestCapturingLlm) {
+  const invocationContext = new InvocationContext({
+    invocationId: 'inv_structured_output',
+    session: createSession({id: 'sess_structured_output', appName: 'test_app'}),
+    agent,
+    pluginManager: new PluginManager(),
+  });
+  for await (const _event of agent.runAsync(invocationContext)) {
+    // Drain the run so request processors and tool preprocessors complete.
+  }
+  const {capturedRequest} = llm;
+  if (!capturedRequest) {
+    throw new Error('Expected the model to be called with a request.');
+  }
+  return capturedRequest;
+}
+
+describe('LlmAgent structured output tool registration', () => {
+  it('registers set_model_response when tools resolve to nothing for the context', async () => {
+    const llm = new RequestCapturingLlm();
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: llm,
+      instruction: 'Answer the question.',
+      tools: [new EmptyToolset()],
+      outputSchema: z3.object({answer: z3.number()}),
+    });
+
+    const request = await captureLlmRequest(agent, llm);
+
+    // `tools` is non-empty, so BASIC_LLM_REQUEST_PROCESSOR leaves
+    // responseSchema unset and INSTRUCTIONS_LLM_REQUEST_PROCESSOR tells the
+    // model to call set_model_response. The tool must therefore be registered
+    // even though the toolset itself resolved to nothing.
+    expect(request.config?.responseSchema).toBeUndefined();
+    expect(JSON.stringify(request.config?.systemInstruction)).toContain(
+      'set_model_response',
+    );
+    expect(Object.keys(request.toolsDict)).toEqual(['set_model_response']);
+  });
+
+  it('uses responseSchema instead of set_model_response when tools is empty', async () => {
+    const llm = new RequestCapturingLlm();
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: llm,
+      instruction: 'Answer the question.',
+      outputSchema: z3.object({answer: z3.number()}),
+    });
+
+    const request = await captureLlmRequest(agent, llm);
+
+    expect(request.config?.responseSchema).toBeDefined();
+    expect(JSON.stringify(request.config?.systemInstruction)).not.toContain(
+      'set_model_response',
+    );
+    expect(Object.keys(request.toolsDict)).toEqual([]);
+  });
+});
+
+describe('createSetModelResponseTool', () => {
+  it('creates a function tool that sets skipSummarization and returns JSON string', async () => {
+    const schema: Schema = {
+      type: Type.OBJECT,
+      properties: {result: {type: Type.STRING}},
+    };
+    const tool = createSetModelResponseTool(schema);
+    expect(tool.name).toBe('set_model_response');
+    expect(tool.description).toContain(
+      'Call this tool to submit your final response',
+    );
+
+    const mockInvocationContext = new InvocationContext({
+      invocationId: 'test_inv',
+      session: createSession({id: 'sess_123', appName: 'test_app'}),
+      agent: new LlmAgent({name: 'test_agent'}),
+      pluginManager: new PluginManager(),
+    });
+    const toolContext = new Context({
+      invocationContext: mockInvocationContext,
+    });
+
+    const args = {result: 'success'};
+    const output = await tool.runAsync({
+      args,
+      toolContext,
+    });
+    expect(toolContext.actions.skipSummarization).toBe(true);
+    expect(output).toBe(JSON.stringify(args));
+  });
+
+  it('exposes the schema it was built with as its parameters declaration', () => {
+    const schema: Schema = {
+      type: Type.OBJECT,
+      properties: {result: {type: Type.STRING}},
+    };
+    const tool = createSetModelResponseTool(schema);
+    expect(tool._getDeclaration().parameters).toEqual(schema);
   });
 });
