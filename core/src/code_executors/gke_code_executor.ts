@@ -16,7 +16,7 @@ const DEFAULT_SANDBOX_TEMPLATE = 'python-sandbox-template';
 /** File the generated code is written to inside the sandbox. */
 const SCRIPT_FILENAME = 'script.py';
 /** Command run inside the sandbox to execute the script. */
-const RUN_COMMAND = 'python3 script.py';
+const RUN_COMMAND = `python3 ${SCRIPT_FILENAME}`;
 
 /**
  * Result of a single command run inside an Agent Sandbox. Mirrors the shape of
@@ -34,7 +34,7 @@ export interface SandboxClientOptions {
   /** The Kubernetes namespace the sandbox is created in. */
   namespace: string;
   /** The sandbox template name, e.g. `'python-sandbox-template'`. */
-  templateName?: string;
+  templateName: string;
   /** The name of the sandbox router/gateway to connect through. */
   gatewayName?: string;
 }
@@ -151,12 +151,6 @@ export class GkeCodeExecutor extends BaseCodeExecutor {
 
   constructor(options: GkeCodeExecutorOptions) {
     super();
-    if (!options?.sandboxClientFactory) {
-      throw new Error(
-        'A sandboxClientFactory is required: no concrete JS Agent Sandbox ' +
-          'client is bundled yet.',
-      );
-    }
     this.sandboxClientFactory = options.sandboxClientFactory;
     this.namespace = options.namespace ?? DEFAULT_NAMESPACE;
     this.sandboxTemplate = options.sandboxTemplate ?? DEFAULT_SANDBOX_TEMPLATE;
@@ -166,11 +160,7 @@ export class GkeCodeExecutor extends BaseCodeExecutor {
   override async executeCode(
     params: ExecuteCodeParams,
   ): Promise<CodeExecutionResult> {
-    return this.executeInSandbox(params.codeExecutionInput.code);
-  }
-
-  /** Executes `code` through the injected Agent Sandbox client. */
-  private async executeInSandbox(code: string): Promise<CodeExecutionResult> {
+    const code = params.codeExecutionInput.code;
     let sandbox: SandboxClient | undefined;
     try {
       sandbox = await this.sandboxClientFactory({

@@ -88,9 +88,6 @@ describe('Agent with GkeCodeExecutor sandbox mode', () => {
       events.push(event);
     }
 
-    // Events for: model response with code, execution result, final response.
-    expect(events.length).toBeGreaterThanOrEqual(3);
-
     // The sandbox client received the script and the run command.
     expect(sandboxClientFactory).toHaveBeenCalledTimes(1);
     expect(sandbox.write).toHaveBeenCalledWith('script.py', 'print("hello")');

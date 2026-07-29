@@ -8,28 +8,17 @@ import {
   CodeExecutionLanguage,
   type ExecuteCodeParams,
   GkeCodeExecutor,
-  type GkeCodeExecutorOptions,
   InvocationContext,
-  type SandboxClientOptions,
   SandboxInfrastructureError,
-  type SandboxRunResult,
   SandboxTimeoutError,
 } from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 
 /** A mock {@link SandboxClient} whose methods are vitest spies. */
-interface MockSandbox {
-  write: ReturnType<typeof vi.fn>;
-  run: ReturnType<typeof vi.fn>;
-  close: ReturnType<typeof vi.fn>;
-}
-
-function createMockSandbox(
-  runResult: SandboxRunResult = {stdout: '', stderr: ''},
-): MockSandbox {
+function createMockSandbox() {
   return {
     write: vi.fn().mockResolvedValue(undefined),
-    run: vi.fn().mockResolvedValue(runResult),
+    run: vi.fn().mockResolvedValue({stdout: '', stderr: ''}),
     close: vi.fn().mockResolvedValue(undefined),
   };
 }
@@ -47,12 +36,12 @@ function makeParams(code: string): ExecuteCodeParams {
 }
 
 describe('GkeCodeExecutor', () => {
-  let sandbox: MockSandbox;
+  let sandbox: ReturnType<typeof createMockSandbox>;
   let factory: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     sandbox = createMockSandbox();
-    factory = vi.fn((_options: SandboxClientOptions) => sandbox);
+    factory = vi.fn(() => sandbox);
   });
 
   describe('constructor', () => {
@@ -74,34 +63,9 @@ describe('GkeCodeExecutor', () => {
       expect(executor.sandboxTemplate).toBe('custom-template');
       expect(executor.sandboxGatewayName).toBe('my-gateway');
     });
-
-    it('throws without a client factory', () => {
-      // The type marks sandboxClientFactory required, so this cast simulates an
-      // untyped JavaScript caller reaching the runtime guard.
-      const noFactory = {} as GkeCodeExecutorOptions;
-      expect(() => new GkeCodeExecutor(noFactory)).toThrow(
-        'A sandboxClientFactory is required',
-      );
-    });
   });
 
   describe('executeCode', () => {
-    it('runs the code in the sandbox', async () => {
-      sandbox.run.mockResolvedValue({
-        stdout: 'sandbox stdout',
-        stderr: undefined,
-      });
-      const executor = new GkeCodeExecutor({sandboxClientFactory: factory});
-
-      const result = await executor.executeCode(makeParams('print("sandbox")'));
-
-      expect(result.stdout).toBe('sandbox stdout');
-      expect(factory).toHaveBeenCalledTimes(1);
-      expect(sandbox.run).toHaveBeenCalledTimes(1);
-    });
-  });
-
-  describe('executeInSandbox', () => {
     function sandboxExecutor(): GkeCodeExecutor {
       return new GkeCodeExecutor({
         namespace: 'agents',
@@ -111,9 +75,10 @@ describe('GkeCodeExecutor', () => {
       });
     }
 
-    it('opens the sandbox with the configured options', async () => {
+    it('opens one sandbox with the configured options', async () => {
       await sandboxExecutor().executeCode(makeParams('print("hi")'));
 
+      expect(factory).toHaveBeenCalledTimes(1);
       expect(factory).toHaveBeenCalledWith({
         namespace: 'agents',
         templateName: 'python-sandbox-template',
