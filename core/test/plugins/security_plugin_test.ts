@@ -4,7 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {BaseTool, createEvent} from '@google/adk';
+import {
+  BaseTool,
+  createEvent,
+  REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
+} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 import {Context} from '../../src/agents/context.js';
 import {
@@ -13,7 +17,6 @@ import {
   InMemoryPolicyEngine,
   PolicyCheckResult,
   PolicyOutcome,
-  REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
   SecurityPlugin,
 } from '../../src/plugins/security_plugin.js';
 import {ToolConfirmation} from '../../src/tools/tool_confirmation.js';
