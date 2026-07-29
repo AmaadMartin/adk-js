@@ -43,7 +43,6 @@ describe('vertex_ai_utils', () => {
     });
 
     it('should return undefined when GOOGLE_GENAI_USE_VERTEXAI is not set', () => {
-      delete process.env['GOOGLE_GENAI_USE_VERTEXAI'];
       const result = getExpressModeApiKey();
       expect(result).toBeUndefined();
     });
