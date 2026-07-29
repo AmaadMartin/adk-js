@@ -6,6 +6,7 @@
 
 import {
   App,
+  BaseAgent,
   BaseLlm,
   BaseLlmConnection,
   CacheMetadata,
@@ -90,63 +91,55 @@ async function drain(gen: AsyncGenerator<Event, void, void>): Promise<Event[]> {
   return events;
 }
 
+/** Builds an app, runner and session wired to a fresh recording model. */
+async function setup(
+  contextCacheConfig?: ContextCacheConfig,
+  makeRoot: (model: RecordingLlm) => BaseAgent = (model) =>
+    new LlmAgent({name: 'assistant', model}),
+) {
+  const model = new RecordingLlm();
+  const app = new App({
+    name: 'cache_app',
+    rootAgent: makeRoot(model),
+    contextCacheConfig,
+  });
+  const sessionService = new InMemorySessionService();
+  const runner = new Runner({app, sessionService});
+  const session = await sessionService.createSession({
+    appName: app.name,
+    userId: 'user',
+  });
+  return {model, app, runner, sessionService, session};
+}
+
+/** Runs one turn and returns the events it produced. */
+function send(runner: Runner, sessionId: string, text: string) {
+  return drain(
+    runner.runAsync({userId: 'user', sessionId, newMessage: userMessage(text)}),
+  );
+}
+
 describe('Context cache orchestration through the Runner', () => {
   it('threads App.contextCacheConfig onto the first LLM request', async () => {
-    const model = new RecordingLlm();
-    const agent = new LlmAgent({name: 'assistant', model});
     const cacheConfig = createContextCacheConfig({minTokens: 2048});
-    const app = new App({
-      name: 'cache_app',
-      rootAgent: agent,
-      contextCacheConfig: cacheConfig,
-    });
-    const sessionService = new InMemorySessionService();
-    const runner = new Runner({app, sessionService});
-    const session = await sessionService.createSession({
-      appName: app.name,
-      userId: 'user',
-    });
+    const {model, runner, session} = await setup(cacheConfig);
 
-    await drain(
-      runner.runAsync({
-        userId: 'user',
-        sessionId: session.id,
-        newMessage: userMessage('hello'),
-      }),
-    );
+    await send(runner, session.id, 'hello');
 
+    const [first] = model.capturedRequests;
     expect(runner.contextCacheConfig).toBe(cacheConfig);
-    expect(model.capturedRequests[0].cacheConfig).toBe(cacheConfig);
-    expect(model.capturedRequests[0].cacheMetadata).toBeUndefined();
-    expect(
-      model.capturedRequests[0].cacheableContentsTokenCount,
-    ).toBeUndefined();
+    expect(first.cacheConfig).toBe(cacheConfig);
+    expect(first.cacheMetadata).toBeUndefined();
+    expect(first.cacheableContentsTokenCount).toBeUndefined();
   });
 
   it('recovers metadata and token count across turns and increments invocationsUsed', async () => {
-    const model = new RecordingLlm();
-    const agent = new LlmAgent({name: 'assistant', model});
-    const cacheConfig = createContextCacheConfig({minTokens: 2048});
-    const app = new App({
-      name: 'cache_app',
-      rootAgent: agent,
-      contextCacheConfig: cacheConfig,
-    });
-    const sessionService = new InMemorySessionService();
-    const runner = new Runner({app, sessionService});
-    const session = await sessionService.createSession({
-      appName: app.name,
-      userId: 'user',
-    });
+    const {model, runner, session} = await setup(
+      createContextCacheConfig({minTokens: 2048}),
+    );
 
     for (let turn = 0; turn < 3; turn++) {
-      await drain(
-        runner.runAsync({
-          userId: 'user',
-          sessionId: session.id,
-          newMessage: userMessage(`turn ${turn}`),
-        }),
-      );
+      await send(runner, session.id, `turn ${turn}`);
     }
 
     const [first, second, third] = model.capturedRequests;
@@ -165,28 +158,11 @@ describe('Context cache orchestration through the Runner', () => {
   });
 
   it('persists cacheMetadata onto the emitted model-response events', async () => {
-    const model = new RecordingLlm();
-    const agent = new LlmAgent({name: 'assistant', model});
-    const cacheConfig = createContextCacheConfig({minTokens: 2048});
-    const app = new App({
-      name: 'cache_app',
-      rootAgent: agent,
-      contextCacheConfig: cacheConfig,
-    });
-    const sessionService = new InMemorySessionService();
-    const runner = new Runner({app, sessionService});
-    const session = await sessionService.createSession({
-      appName: app.name,
-      userId: 'user',
-    });
-
-    await drain(
-      runner.runAsync({
-        userId: 'user',
-        sessionId: session.id,
-        newMessage: userMessage('hello'),
-      }),
+    const {app, runner, sessionService, session} = await setup(
+      createContextCacheConfig({minTokens: 2048}),
     );
+
+    await send(runner, session.id, 'hello');
 
     const persisted = await sessionService.getSession({
       appName: app.name,
@@ -198,31 +174,17 @@ describe('Context cache orchestration through the Runner', () => {
   });
 
   it('propagates the config to a sub-agent invocation context', async () => {
-    const model = new RecordingLlm();
-    const rootAgent = new SequentialAgent({
-      name: 'root',
-      subAgents: [new LlmAgent({name: 'sub', model})],
-    });
     const cacheConfig = createContextCacheConfig({minTokens: 2048});
-    const app = new App({
-      name: 'cache_app',
-      rootAgent,
-      contextCacheConfig: cacheConfig,
-    });
-    const sessionService = new InMemorySessionService();
-    const runner = new Runner({app, sessionService});
-    const session = await sessionService.createSession({
-      appName: app.name,
-      userId: 'user',
-    });
-
-    const events = await drain(
-      runner.runAsync({
-        userId: 'user',
-        sessionId: session.id,
-        newMessage: userMessage('hello'),
-      }),
+    const {model, runner, session} = await setup(
+      cacheConfig,
+      (model) =>
+        new SequentialAgent({
+          name: 'root',
+          subAgents: [new LlmAgent({name: 'sub', model})],
+        }),
     );
+
+    const events = await send(runner, session.id, 'hello');
 
     // The only LLM call comes from the sub-agent, so seeing the app config on
     // its request proves the config reached the sub-agent's invocation context.
@@ -231,24 +193,10 @@ describe('Context cache orchestration through the Runner', () => {
   });
 
   it('is a no-op when no contextCacheConfig is set', async () => {
-    const model = new RecordingLlm();
-    const agent = new LlmAgent({name: 'assistant', model});
-    const app = new App({name: 'cache_app', rootAgent: agent});
-    const sessionService = new InMemorySessionService();
-    const runner = new Runner({app, sessionService});
-    const session = await sessionService.createSession({
-      appName: app.name,
-      userId: 'user',
-    });
+    const {model, app, runner, sessionService, session} = await setup();
 
     for (let turn = 0; turn < 2; turn++) {
-      await drain(
-        runner.runAsync({
-          userId: 'user',
-          sessionId: session.id,
-          newMessage: userMessage(`turn ${turn}`),
-        }),
-      );
+      await send(runner, session.id, `turn ${turn}`);
     }
 
     expect(runner.contextCacheConfig).toBeUndefined();

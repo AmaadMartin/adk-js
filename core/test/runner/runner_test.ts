@@ -355,14 +355,6 @@ describe('Runner.determineAgentForResumption', () => {
     expect(appRunner.resumabilityConfig?.isResumable).toBe(true);
   });
 
-  it('should inherit contextCacheConfig from app when constructed with an App', () => {
-    const contextCacheConfig = createContextCacheConfig({minTokens: 2048});
-    const app = new App({name: TEST_APP_ID, rootAgent, contextCacheConfig});
-    const appRunner = new Runner({app, sessionService, artifactService});
-
-    expect(appRunner.contextCacheConfig).toBe(contextCacheConfig);
-  });
-
   it('should derive contextCacheConfig from direct runner config', () => {
     const contextCacheConfig = createContextCacheConfig({minTokens: 2048});
     const directRunner = new Runner({

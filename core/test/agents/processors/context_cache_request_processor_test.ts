@@ -208,43 +208,19 @@ describe('ContextCacheRequestProcessor', () => {
     expect(llmRequest.cacheMetadata?.invocationsUsed).toBe(6);
   });
 
-  it('leaves metadata unset when events have none', async () => {
-    const invocationContext = createContext({
-      contextCacheConfig: cacheConfig,
-      events: [
-        createEvent({author: 'test_agent'}),
-        createEvent({author: 'other_agent'}),
-      ],
-    });
-    const llmRequest = makeLlmRequest();
-
-    await runProcessor(invocationContext, llmRequest);
-
-    expect(llmRequest.cacheConfig).toBe(cacheConfig);
-    expect(llmRequest.cacheMetadata).toBeUndefined();
-  });
-
-  it('sets only the cache config for an empty session', async () => {
+  it('sets only the cache config for an empty session, yielding no events', async () => {
     const invocationContext = createContext({
       contextCacheConfig: cacheConfig,
       events: [],
     });
     const llmRequest = makeLlmRequest();
 
-    await runProcessor(invocationContext, llmRequest);
-
-    expect(llmRequest.cacheConfig).toBe(cacheConfig);
-    expect(llmRequest.cacheMetadata).toBeUndefined();
-    expect(llmRequest.cacheableContentsTokenCount).toBeUndefined();
-  });
-
-  it('yields no events', async () => {
-    const invocationContext = createContext({contextCacheConfig: cacheConfig});
-    const llmRequest = makeLlmRequest();
-
     const events = await runProcessor(invocationContext, llmRequest);
 
     expect(events).toHaveLength(0);
+    expect(llmRequest.cacheConfig).toBe(cacheConfig);
+    expect(llmRequest.cacheMetadata).toBeUndefined();
+    expect(llmRequest.cacheableContentsTokenCount).toBeUndefined();
   });
 
   it('skips wrong-agent and metadata-less events, then increments', async () => {
@@ -292,7 +268,7 @@ describe('ContextCacheRequestProcessor', () => {
     expect(llmRequest.cacheableContentsTokenCount).toBe(1024);
   });
 
-  it('leaves the token count unset when usage metadata is missing or empty', async () => {
+  it('leaves metadata and token count unset when events carry neither', async () => {
     const invocationContext = createContext({
       contextCacheConfig: cacheConfig,
       events: [
@@ -305,6 +281,8 @@ describe('ContextCacheRequestProcessor', () => {
 
     await runProcessor(invocationContext, llmRequest);
 
+    expect(llmRequest.cacheConfig).toBe(cacheConfig);
+    expect(llmRequest.cacheMetadata).toBeUndefined();
     expect(llmRequest.cacheableContentsTokenCount).toBeUndefined();
   });
 

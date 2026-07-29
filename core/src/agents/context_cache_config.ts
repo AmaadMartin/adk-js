@@ -6,12 +6,6 @@
 
 import {HttpOptions} from '@google/genai';
 
-/** Default maximum number of invocations to reuse a cache before refreshing. */
-const DEFAULT_CACHE_INTERVALS = 10;
-/** Default cache time-to-live, in seconds (30 minutes). */
-const DEFAULT_TTL_SECONDS = 1800;
-/** Default minimum prior-request token count required to enable caching. */
-const DEFAULT_MIN_TOKENS = 0;
 /** Upper bound on {@link ContextCacheConfig.cacheIntervals}. */
 const MAX_CACHE_INTERVALS = 100;
 
@@ -64,9 +58,9 @@ export function createContextCacheConfig(
 ): ContextCacheConfig {
   const config: ContextCacheConfig = {
     ...params,
-    cacheIntervals: params.cacheIntervals ?? DEFAULT_CACHE_INTERVALS,
-    ttlSeconds: params.ttlSeconds ?? DEFAULT_TTL_SECONDS,
-    minTokens: params.minTokens ?? DEFAULT_MIN_TOKENS,
+    cacheIntervals: params.cacheIntervals ?? 10,
+    ttlSeconds: params.ttlSeconds ?? 1800,
+    minTokens: params.minTokens ?? 0,
   };
   validateContextCacheConfig(config);
   return config;

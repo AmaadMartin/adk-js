@@ -7,7 +7,6 @@
 import {Event} from '../../events/event.js';
 import {CacheMetadata} from '../../models/cache_metadata.js';
 import {LlmRequest} from '../../models/llm_request.js';
-import {logger} from '../../utils/logger.js';
 import {InvocationContext} from '../invocation_context.js';
 import {BaseLlmRequestProcessor} from './base_llm_processor.js';
 
@@ -44,10 +43,6 @@ export class ContextCacheRequestProcessor extends BaseLlmRequestProcessor {
       findCacheInfoFromEvents(invocationContext);
     llmRequest.cacheMetadata = cacheMetadata;
     llmRequest.cacheableContentsTokenCount = previousTokenCount;
-
-    logger.debug(
-      `Context caching enabled for agent ${invocationContext.agent.name}`,
-    );
   }
 }
 
@@ -83,18 +78,12 @@ function findCacheInfoFromEvents(invocationContext: InvocationContext): {
 
     if (cacheMetadata === undefined && event.cacheMetadata !== undefined) {
       const source = event.cacheMetadata;
-      if (
+      cacheMetadata =
+        source.cacheName != null &&
         event.invocationId &&
-        event.invocationId !== currentInvocationId &&
-        source.cacheName != null
-      ) {
-        cacheMetadata = {
-          ...source,
-          invocationsUsed: source.invocationsUsed + 1,
-        };
-      } else {
-        cacheMetadata = {...source};
-      }
+        event.invocationId !== currentInvocationId
+          ? {...source, invocationsUsed: source.invocationsUsed + 1}
+          : {...source};
     }
 
     if (
