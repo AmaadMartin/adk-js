@@ -39,9 +39,8 @@ function createContext(options: {
   contextCacheConfig?: ContextCacheConfig;
   events?: Event[];
   invocationId?: string;
-  agentName?: string;
 }): InvocationContext {
-  const agent = new LlmAgent({name: options.agentName ?? 'test_agent'});
+  const agent = new LlmAgent({name: 'test_agent'});
   return new InvocationContext({
     invocationId: options.invocationId ?? 'test_invocation',
     agent,
