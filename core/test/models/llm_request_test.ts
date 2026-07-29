@@ -100,6 +100,26 @@ describe('appendTools', () => {
     expect(req.toolsDict).toEqual({});
   });
 
+  it('skips non-declaring tools and keeps processing later ones', () => {
+    const req = makeRequest();
+    const declaring = new FakeTool('yes');
+    appendTools(req, [new FakeTool('no', false), declaring]);
+    const tools = req.config!.tools as Tool[];
+    expect(tools[0].functionDeclarations!.map((d) => d.name)).toEqual(['yes']);
+    expect(req.toolsDict).toEqual({yes: declaring});
+  });
+
+  it('initializes tools on an existing config that has none', () => {
+    const req = makeRequest({config: {systemInstruction: 'keep me'}});
+    const cfg = req.config;
+    appendTools(req, [new FakeTool('a')]);
+    expect(req.config).toBe(cfg);
+    expect(req.config!.systemInstruction).toBe('keep me');
+    const tools = req.config!.tools as Tool[];
+    expect(tools).toHaveLength(1);
+    expect(tools[0].functionDeclarations![0].name).toBe('a');
+  });
+
   it('appends a new group without merging into existing tools', () => {
     const existingGroup: Tool = {functionDeclarations: [{name: 'existing'}]};
     const req = makeRequest({config: {tools: [existingGroup]}});
