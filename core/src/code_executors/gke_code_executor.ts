@@ -7,13 +7,18 @@
 import {InvocationContext} from '../agents/invocation_context.js';
 import {logger} from '../utils/logger.js';
 
+// This forms an import cycle with agent_sandbox_client.js, which imports the
+// sandbox types and errors back from here. It is safe because neither module
+// reads the other's bindings during module evaluation, only inside function
+// bodies -- keep it that way.
+import {defaultSandboxClientFactory} from './agent_sandbox_client.js';
 import {BaseCodeExecutor, ExecuteCodeParams} from './base_code_executor.js';
 import {CodeExecutionResult} from './code_execution_utils.js';
 
 /** Default Kubernetes namespace, mirroring the adk-python GkeCodeExecutor. */
 const DEFAULT_NAMESPACE = 'default';
 /** Default Agent Sandbox template, mirroring the adk-python GkeCodeExecutor. */
-const DEFAULT_SANDBOX_TEMPLATE = 'python-sandbox-template';
+export const DEFAULT_SANDBOX_TEMPLATE = 'python-sandbox-template';
 /** File the generated code is written to inside the sandbox. */
 const SCRIPT_FILENAME = 'script.py';
 /** Command run inside the sandbox to execute the script. */
@@ -52,8 +57,8 @@ export interface SandboxClientOptions {
  * Minimal client contract for the GKE Agent Sandbox: write a file, run a
  * command, then release the sandbox.
  *
- * This is the *agreed interface* — no concrete JS implementation ships in ADK
- * yet, so callers must inject one via {@link GkeCodeExecutorOptions.sandboxClientFactory}.
+ * ADK ships a concrete implementation ({@link AgentSandboxClient}); callers may
+ * still inject their own via {@link GkeCodeExecutorOptions.sandboxClientFactory}.
  */
 export interface SandboxClient {
   /** Writes `content` to `path` inside the sandbox. */
@@ -111,9 +116,9 @@ export interface GkeCodeExecutorOptions {
   /** The Agent Sandbox router/gateway name. */
   sandboxGatewayName?: string;
   /**
-   * Opens a connection to an Agent Sandbox. Required when
-   * `executorType === 'sandbox'`, because no concrete JS Agent Sandbox client
-   * is bundled yet.
+   * Opens a connection to an Agent Sandbox. Defaults to the bundled
+   * {@link AgentSandboxClient} when `executorType === 'sandbox'`; inject a custom
+   * factory to override it (e.g. in tests).
    */
   sandboxClientFactory?: SandboxClientFactory;
 }
@@ -170,14 +175,6 @@ export class GkeCodeExecutor extends BaseCodeExecutor {
     this.sandboxTemplate = options.sandboxTemplate ?? DEFAULT_SANDBOX_TEMPLATE;
     this.sandboxGatewayName = options.sandboxGatewayName;
     this.sandboxClientFactory = options.sandboxClientFactory;
-
-    if (this.executorType === 'sandbox' && !this.sandboxClientFactory) {
-      throw new Error(
-        'Agent Sandbox client not available. To use executorType="sandbox", ' +
-          'provide a sandboxClientFactory (a concrete JS Agent Sandbox client ' +
-          'is not yet bundled).',
-      );
-    }
   }
 
   override async executeCode(
@@ -190,11 +187,12 @@ export class GkeCodeExecutor extends BaseCodeExecutor {
     return this.executeAsJob(code, params.invocationContext);
   }
 
-  /** Executes `code` through the injected Agent Sandbox client. */
+  /** Executes `code` through the Agent Sandbox client. */
   private async executeInSandbox(code: string): Promise<CodeExecutionResult> {
     let sandbox: SandboxClient | undefined;
     try {
-      sandbox = await this.sandboxClientFactory!({
+      const factory = this.sandboxClientFactory ?? defaultSandboxClientFactory;
+      sandbox = await factory({
         namespace: this.namespace,
         templateName: this.sandboxTemplate,
         gatewayName: this.sandboxGatewayName,
