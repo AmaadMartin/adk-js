@@ -789,6 +789,46 @@ describe('AdkWebServer', () => {
       spy.mockRestore();
     });
 
+    it('should report a mid-stream failure as an in-band error frame', async () => {
+      await sessionService.createSession({
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: 'sessionId',
+      });
+
+      const spy = vi
+        .spyOn(Runner.prototype, 'runAsync')
+        .mockImplementation(async function* (): AsyncGenerator<
+          Event,
+          void,
+          undefined
+        > {
+          yield createEvent({
+            invocationId: 'invocationId',
+            author: 'testAgent',
+            content: {parts: [{text: 'Event 1'}], role: 'model'},
+          });
+          throw new Error('agent exploded');
+        });
+
+      try {
+        const response = await client.post('/run_sse', {
+          appName: 'testApp',
+          userId: 'testUser',
+          sessionId: 'sessionId',
+          newMessage: {parts: [{text: 'Hello test agent!'}], role: 'user'},
+        });
+
+        // The headers are already flushed, so the failure can only be
+        // reported in-band.
+        expect(response.status).toBe(200);
+        expect(response.text).toContain('"text":"Event 1"');
+        expect(response.text).toContain('data: {"error":"agent exploded"}');
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
     it('should request SSE streaming mode when streaming is enabled', async () => {
       await sessionService.createSession({
         appName: 'testApp',
@@ -1201,29 +1241,20 @@ describe('AdkWebServer', () => {
       ).resolves.toBeUndefined();
     });
 
-    it('should return 400 when the raw body is not valid JSON', async () => {
-      const res = await fetch(`${server.url}/api/reasoning_engine`, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json,application/json'},
-        body: 'not json',
-      });
+    it.each(['not json', ''])(
+      'should return 400 for the unparseable raw body %j',
+      async (body) => {
+        const res = await fetch(`${server.url}/api/reasoning_engine`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json,application/json'},
+          body,
+        });
 
-      expect(res.status).toBe(400);
-      const data = (await res.json()) as {error: string};
-      expect(data.error).toBe('appName is required in input');
-    });
-
-    it('should return 400 when the raw body is empty', async () => {
-      const res = await fetch(`${server.url}/api/reasoning_engine`, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json,application/json'},
-        body: '',
-      });
-
-      expect(res.status).toBe(400);
-      const data = (await res.json()) as {error: string};
-      expect(data.error).toBe('appName is required in input');
-    });
+        expect(res.status).toBe(400);
+        const data = (await res.json()) as {error: string};
+        expect(data.error).toBe('appName is required in input');
+      },
+    );
 
     it('should return 400 if appName is missing', async () => {
       try {

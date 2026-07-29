@@ -66,10 +66,9 @@ const DEFAULT_USER_ID = 'default-user';
 const DEFAULT_SESSION_ID = 'default-session';
 
 /**
- * A normalised run request. Missing ids are normalised to '' so each endpoint
- * can apply its own required-field policy: `/api/reasoning_engine` rejects an
- * empty `appName` with 400, `/run` and `/run_sse` let the session lookup fail
- * with 404. `newMessage` stays optional, matching the Python dev server.
+ * A normalised run request. Missing ids become '' so each endpoint can apply
+ * its own policy: a 400 on `/api/reasoning_engine`, a failed session lookup on
+ * `/run` and `/run_sse`. `newMessage` stays optional, as in the Python server.
  */
 interface AgentRunRequest {
   appName: string;
@@ -102,27 +101,20 @@ interface ExecuteAgentRunOptions {
   abortSignal: AbortSignal;
 }
 
-/** The agent-execution seam injected into `runAgentEvents`. */
-type ExecuteAgentRun = (
-  options: ExecuteAgentRunOptions,
-) => AsyncGenerator<Event>;
-
 /** Normalises a plain run body. Used by `/run` and `/run_sse`. */
 function parseAgentRunRequest(body: AgentRunRequestBody): AgentRunRequest {
   return {
+    ...body,
     appName: body.appName ?? '',
     userId: body.userId ?? '',
     sessionId: body.sessionId ?? '',
-    newMessage: body.newMessage,
-    stateDelta: body.stateDelta,
-    streaming: body.streaming,
   };
 }
 
 /**
- * Normalises a Reasoning Engine body, layering the `input` envelope and the
- * default ids over the shared parse. An empty string in `input` falls through
- * to the top-level field, and a missing `appName` still yields the 400.
+ * Normalises a Reasoning Engine body: `input` fields win over top-level ones,
+ * an empty string falls through to the top-level field, and a missing
+ * `appName` still yields the 400.
  */
 function parseReasoningEngineRequest(
   body: ReasoningEngineRequestBody,
@@ -134,15 +126,13 @@ function parseReasoningEngineRequest(
     sessionId: input.sessionId || body.sessionId || DEFAULT_SESSION_ID,
     newMessage: input.newMessage ?? body.newMessage,
     stateDelta: input.stateDelta ?? body.stateDelta,
-    streaming: input.streaming ?? body.streaming,
   });
 }
 
 /**
  * Reads the Reasoning Engine body, falling back to the raw stream for clients
  * that send a content type `express.json()` does not recognise. A malformed or
- * empty raw body is logged and reported as `{}`, which the handler then
- * rejects with a 400.
+ * empty raw body is logged and read as `{}`, which yields the 400.
  */
 async function readReasoningEngineBody(
   req: Request,
@@ -171,51 +161,6 @@ async function readReasoningEngineBody(
       resolve(body);
     });
   });
-}
-
-/**
- * Runs an agent for a single HTTP request and yields its events.
- *
- * Aborts the run if the client disconnects while the run is in flight, and
- * detaches the listener once the generator finishes so that the `close` event
- * emitted at the end of a normal response can no longer abort anything.
- *
- * The listener is on the response, not the request: since Node 16 a request
- * emits `close` as soon as its message is complete, which for a body small
- * enough to be buffered by `express.json()` happens before the run even
- * starts. Only the response stays open for the lifetime of the run.
- */
-async function* runAgentEvents(options: {
-  res: Response;
-  logger: Logger;
-  request: AgentRunRequest;
-  execute: ExecuteAgentRun;
-  runConfig?: RunConfig;
-}): AsyncGenerator<Event> {
-  const {res, logger, request, execute, runConfig} = options;
-  const abortController = new AbortController();
-  const onClose = () => {
-    logger.info(
-      `HTTP connection closed. Aborting agent execution for session ` +
-        `${request.sessionId}`,
-    );
-    abortController.abort();
-  };
-  res.on('close', onClose);
-
-  try {
-    yield* execute({
-      appName: request.appName,
-      userId: request.userId,
-      sessionId: request.sessionId,
-      newMessage: request.newMessage,
-      stateDelta: request.stateDelta,
-      runConfig,
-      abortSignal: abortController.signal,
-    });
-  } finally {
-    res.off('close', onClose);
-  }
 }
 
 export class AdkApiServer {
@@ -890,8 +835,7 @@ export class AdkApiServer {
     app.post('/run', async (req: Request, res: Response) => {
       const request = parseAgentRunRequest(req.body);
       // `/run` requires a pre-existing session; only `/api/reasoning_engine`
-      // creates one on demand. The 404 is not logged here, unlike `/run_sse`;
-      // that difference is pre-existing and out of scope for this refactor.
+      // creates one on demand.
       const session = await this.sessionService.getSession({
         appName: request.appName,
         userId: request.userId,
@@ -907,12 +851,7 @@ export class AdkApiServer {
 
       try {
         const events: Event[] = [];
-        for await (const event of runAgentEvents({
-          res,
-          logger: this.logger,
-          request,
-          execute: (options) => this.executeAgentRun(options),
-        })) {
+        for await (const event of this.runAgentEvents(res, request)) {
           events.push(event);
         }
 
@@ -950,12 +889,7 @@ export class AdkApiServer {
         });
 
         const events: Event[] = [];
-        for await (const event of runAgentEvents({
-          res,
-          logger: this.logger,
-          request,
-          execute: (options) => this.executeAgentRun(options),
-        })) {
+        for await (const event of this.runAgentEvents(res, request)) {
           events.push(event);
         }
 
@@ -985,43 +919,31 @@ export class AdkApiServer {
         return;
       }
 
-      // `responseCompleted` only decides whether the catch block may still
-      // emit an in-band error frame; the abort listener is owned by
-      // `runAgentEvents`.
-      let responseCompleted = false;
-
       try {
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Content-Type', 'text/event-stream');
         res.setHeader('Connection', 'keep-alive');
         res.flushHeaders();
 
-        for await (const event of runAgentEvents({
-          res,
-          logger: this.logger,
-          request,
-          execute: (options) => this.executeAgentRun(options),
-          runConfig: {
-            streamingMode: request.streaming
-              ? StreamingMode.SSE
-              : StreamingMode.NONE,
-          },
+        for await (const event of this.runAgentEvents(res, request, {
+          streamingMode: request.streaming
+            ? StreamingMode.SSE
+            : StreamingMode.NONE,
         })) {
           res.write(`data: ${JSON.stringify(event)}\n\n`);
         }
 
-        responseCompleted = true;
         res.end();
       } catch (e: unknown) {
         if (res.headersSent) {
-          if (!responseCompleted) {
-            const error = (e as Error).message;
-            this.logger.error(error);
-            try {
-              res.end(`data: ${JSON.stringify({error})}\n\n`);
-            } catch {
-              // Ignore errors from res.end when the response has already been sent.
-            }
+          // The stream is already open, so the error can only be reported
+          // in-band.
+          const error = (e as Error).message;
+          this.logger.error(error);
+          try {
+            res.end(`data: ${JSON.stringify({error})}\n\n`);
+          } catch {
+            // Ignore errors from res.end when the response has already been sent.
           }
         } else {
           const error = `Failed to run agent: ${e}`;
@@ -1108,6 +1030,48 @@ export class AdkApiServer {
     }
 
     return this.runnerCache[appName];
+  }
+
+  /**
+   * Runs an agent for a single HTTP request and yields its events.
+   *
+   * Aborts the run if the client disconnects while it is in flight, and
+   * detaches the listener once the generator finishes so that the `close`
+   * event of a completed response can no longer abort anything.
+   *
+   * The listener is on the response, not the request: since Node 16 a request
+   * emits `close` as soon as its message is complete, which for a body small
+   * enough for `express.json()` to buffer happens before the run even starts.
+   * Only the response stays open for the lifetime of the run.
+   */
+  private async *runAgentEvents(
+    res: Response,
+    request: AgentRunRequest,
+    runConfig?: RunConfig,
+  ): AsyncGenerator<Event> {
+    const abortController = new AbortController();
+    const onClose = () => {
+      this.logger.info(
+        `HTTP connection closed. Aborting agent execution for session ` +
+          `${request.sessionId}`,
+      );
+      abortController.abort();
+    };
+    res.on('close', onClose);
+
+    try {
+      yield* this.executeAgentRun({
+        appName: request.appName,
+        userId: request.userId,
+        sessionId: request.sessionId,
+        newMessage: request.newMessage,
+        stateDelta: request.stateDelta,
+        runConfig,
+        abortSignal: abortController.signal,
+      });
+    } finally {
+      res.off('close', onClose);
+    }
   }
 
   private async *executeAgentRun(
