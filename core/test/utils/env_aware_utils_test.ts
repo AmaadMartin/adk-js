@@ -4,8 +4,20 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {afterEach, describe, expect, it} from 'vitest';
-import {getBooleanEnvVar} from '../../src/utils/env_aware_utils.js';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+  type MockInstance,
+} from 'vitest';
+import {
+  getBooleanEnvVar,
+  isEnterpriseModeEnabled,
+} from '../../src/utils/env_aware_utils.js';
+import {logger} from '../../src/utils/logger.js';
 
 describe('env_aware_utils', () => {
   describe('getBooleanEnvVar', () => {
@@ -48,6 +60,96 @@ describe('env_aware_utils', () => {
 
     it('should return false for undefined', () => {
       expect(getBooleanEnvVar('NON_EXISTENT_VAR')).toBe(false);
+    });
+  });
+
+  describe('isEnterpriseModeEnabled', () => {
+    const originalEnv = process.env;
+    let warnSpy: MockInstance<typeof logger.warn>;
+
+    beforeEach(() => {
+      process.env = {...originalEnv};
+      delete process.env['GOOGLE_GENAI_USE_ENTERPRISE'];
+      delete process.env['GOOGLE_GENAI_USE_VERTEXAI'];
+      warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+      process.env = originalEnv;
+      vi.restoreAllMocks();
+    });
+
+    it('should return false and not warn when neither env var is set', () => {
+      expect(isEnterpriseModeEnabled()).toBe(false);
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it.each(['true', 'TRUE', 'True', '1'])(
+      'should return true when GOOGLE_GENAI_USE_ENTERPRISE is "%s"',
+      (value) => {
+        process.env['GOOGLE_GENAI_USE_ENTERPRISE'] = value;
+        expect(isEnterpriseModeEnabled()).toBe(true);
+      },
+    );
+
+    it.each(['false', '0', ''])(
+      'should return false when GOOGLE_GENAI_USE_ENTERPRISE is "%s"',
+      (value) => {
+        process.env['GOOGLE_GENAI_USE_ENTERPRISE'] = value;
+        expect(isEnterpriseModeEnabled()).toBe(false);
+      },
+    );
+
+    it('should not warn when GOOGLE_GENAI_USE_ENTERPRISE is set', () => {
+      process.env['GOOGLE_GENAI_USE_ENTERPRISE'] = 'true';
+      process.env['GOOGLE_GENAI_USE_VERTEXAI'] = 'true';
+      isEnterpriseModeEnabled();
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it('should let a falsy GOOGLE_GENAI_USE_ENTERPRISE override the legacy var', () => {
+      process.env['GOOGLE_GENAI_USE_ENTERPRISE'] = '0';
+      process.env['GOOGLE_GENAI_USE_VERTEXAI'] = 'true';
+      expect(isEnterpriseModeEnabled()).toBe(false);
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it('should let a truthy GOOGLE_GENAI_USE_ENTERPRISE override the legacy var', () => {
+      process.env['GOOGLE_GENAI_USE_ENTERPRISE'] = 'true';
+      process.env['GOOGLE_GENAI_USE_VERTEXAI'] = 'false';
+      expect(isEnterpriseModeEnabled()).toBe(true);
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it('should fall back to GOOGLE_GENAI_USE_VERTEXAI and warn', () => {
+      process.env['GOOGLE_GENAI_USE_VERTEXAI'] = 'true';
+      expect(isEnterpriseModeEnabled()).toBe(true);
+      expect(warnSpy).toHaveBeenCalledOnce();
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringMatching(/GOOGLE_GENAI_USE_VERTEXAI is deprecated/),
+      );
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('GOOGLE_GENAI_USE_ENTERPRISE'),
+      );
+    });
+
+    it('should warn on the fallback path even when the legacy value is falsy', () => {
+      process.env['GOOGLE_GENAI_USE_VERTEXAI'] = 'false';
+      expect(isEnterpriseModeEnabled()).toBe(false);
+      expect(warnSpy).toHaveBeenCalledOnce();
+    });
+
+    it('should return false when process.env is unavailable (browser/shim builds)', () => {
+      Reflect.deleteProperty(process, 'env');
+      expect(isEnterpriseModeEnabled()).toBe(false);
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it('should warn once per call on the fallback path', () => {
+      process.env['GOOGLE_GENAI_USE_VERTEXAI'] = 'true';
+      isEnterpriseModeEnabled();
+      isEnterpriseModeEnabled();
+      expect(warnSpy).toHaveBeenCalledTimes(2);
     });
   });
 });
