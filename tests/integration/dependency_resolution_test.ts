@@ -5,20 +5,13 @@
  */
 
 import {createRequire} from 'node:module';
-import path from 'node:path';
-import {fileURLToPath} from 'node:url';
 import {describe, expect, it} from 'vitest';
 
-const repoRoot = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  '../..',
-);
-
-/** Resolves `@google/genai` the way Node would for a module in `repoRoot/dir`. */
+/** Resolves `@google/genai` the way Node would for a module in `<repo>/dir`. */
 function resolveGenai(dir: string): string {
-  return createRequire(path.join(repoRoot, dir, 'resolver.js')).resolve(
-    '@google/genai',
-  );
+  return createRequire(
+    new URL(`../../${dir}/resolver.js`, import.meta.url),
+  ).resolve('@google/genai');
 }
 
 describe('workspace dependency resolution', () => {
