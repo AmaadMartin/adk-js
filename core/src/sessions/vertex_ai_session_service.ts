@@ -41,7 +41,6 @@ import {createSession, Session} from './session.js';
 const DEFAULT_MAX_ATTEMPTS = 30;
 const GRPC_NOT_FOUND = 5;
 const HTTP_NOT_FOUND = 404;
-const GRPC_INVALID_ARGUMENT = 3;
 const HTTP_BAD_REQUEST = 400;
 
 /**
@@ -452,16 +451,6 @@ export class VertexAiSessionService extends BaseSessionService {
 }
 
 /**
- * Wire shape of `actions` for the Agent Engine Sessions API.
- *
- * The SDK's `EventActions` does not declare `requestedToolConfirmations`, which
- * adk-js has always sent and reads back on the legacy path.
- */
-interface ApiEventActions extends ApiEventActionsBase {
-  requestedToolConfirmations?: Record<string, ToolConfirmation>;
-}
-
-/**
  * Returns a copy of `content` without Part fields the Agent Engine Sessions
  * API rejects.
  *
@@ -486,9 +475,11 @@ function dropUnsupportedPartFields(content: Content): Content {
 /**
  * Maps ADK `EventActions` onto the Sessions API wire shape. ADK's
  * `transferToAgent` is the API's `transferAgent` (adk-python writes the same
- * field as `transfer_agent`); every other field keeps its name.
+ * field as `transfer_agent`); every other field keeps its name, including
+ * `requestedToolConfirmations`, which the SDK type omits but `_fromApiEvent`
+ * reads back.
  */
-function toApiEventActions(actions: EventActions): ApiEventActions {
+function toApiEventActions(actions: EventActions): ApiEventActionsBase {
   const {transferToAgent, ...rest} = actions;
   return {...rest, transferAgent: transferToAgent};
 }
@@ -497,18 +488,15 @@ function toApiEventActions(actions: EventActions): ApiEventActions {
  * True when the service rejected the request payload itself.
  *
  * The Vertex SDK does no client-side validation, so the equivalent of
- * adk-python's ValidationError guard is a 400 INVALID_ARGUMENT — which is what
- * an API that does not know `rawEvent` returns. Transient failures (5xx, 429,
- * timeouts, network errors) must propagate: the event may already be persisted
- * and retrying would append it twice.
+ * adk-python's ValidationError guard is the 400 INVALID_ARGUMENT an API that
+ * does not know `rawEvent` returns. Transient failures (5xx, 429, timeouts,
+ * network errors) must propagate: the event may already be persisted and
+ * retrying would append it twice. The SDK reports HTTP failures as an
+ * `ApiError` carrying `status`; it is not matched with `instanceof` because
+ * `core` and `@google-cloud/vertexai` resolve separate `@google/genai` copies.
  */
 function isInvalidArgumentError(error: unknown): boolean {
-  const err = error as {status?: number; code?: number} | null;
-  return (
-    err?.status === HTTP_BAD_REQUEST ||
-    err?.code === HTTP_BAD_REQUEST ||
-    err?.code === GRPC_INVALID_ARGUMENT
-  );
+  return (error as {status?: number} | null)?.status === HTTP_BAD_REQUEST;
 }
 
 interface ExtendedEventActions extends EventActions {

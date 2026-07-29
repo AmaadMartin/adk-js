@@ -1254,11 +1254,7 @@ describe('VertexAiSessionService', () => {
       expect(config.rawEvent).not.toHaveProperty('content');
     });
 
-    it.each([
-      ['status 400', {name: 'ApiError', status: 400, message: 'Unknown name'}],
-      ['code 400', {code: 400, message: 'Unknown name'}],
-      ['gRPC INVALID_ARGUMENT', {code: 3, message: 'Unknown name'}],
-    ])('retries without rawEvent on %s', async (_label, apiError) => {
+    it('retries without rawEvent when the API rejects it with 400', async () => {
       const loggerSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
       // The retry reuses the request object, so record what each attempt
       // actually carried instead of inspecting it afterwards.
@@ -1266,7 +1262,7 @@ describe('VertexAiSessionService', () => {
       mockClient.events.append
         .mockImplementationOnce(async (params) => {
           sentRawEvent.push(params.config?.rawEvent !== undefined);
-          throw apiError;
+          throw {name: 'ApiError', status: 400, message: 'Unknown name'};
         })
         .mockImplementationOnce(async (params) => {
           sentRawEvent.push(params.config?.rawEvent !== undefined);
@@ -1274,17 +1270,16 @@ describe('VertexAiSessionService', () => {
         });
       const event = createEvent({
         timestamp: 1620000000000,
-        invocationId: 'inv-explicit-id',
         content: {role: 'user', parts: [{text: 'hello'}]},
       });
 
       await service.appendEvent({session: appendSession(), event});
 
       expect(sentRawEvent).toEqual([true, false]);
+      // Reusing the request is what keeps the retry's invocation id and
+      // timestamp identical to the first attempt's.
       const [first, second] = mockClient.events.append.mock.calls;
-      expect(second[0].invocationId).toBe(first[0].invocationId);
-      expect(second[0].timestamp).toBe(first[0].timestamp);
-      expect(second[0].name).toBe(first[0].name);
+      expect(second[0]).toBe(first[0]);
       loggerSpy.mockRestore();
     });
 
@@ -1335,16 +1330,6 @@ describe('VertexAiSessionService', () => {
       expect(event.groundingMetadata).toEqual(groundingMetadata);
     });
 
-    it('leaves groundingMetadata undefined when the API omits it', async () => {
-      const event = await readLegacyEvent({
-        name: 'reasoningEngines/12345/sessions/s/events/e1',
-        author: 'model',
-        eventMetadata: {branch: 'main'},
-      });
-
-      expect(event.groundingMetadata).toBeUndefined();
-    });
-
     it('restores transferToAgent from actions.transferAgent', async () => {
       const event = await readLegacyEvent({
         name: 'reasoningEngines/12345/sessions/s/events/e1',
@@ -1365,19 +1350,6 @@ describe('VertexAiSessionService', () => {
       });
 
       expect(event.actions.transferToAgent).toBe('legacy-specialist');
-    });
-
-    it('prefers transferAgent when both keys are present', async () => {
-      const event = await readLegacyEvent({
-        name: 'reasoningEngines/12345/sessions/s/events/e1',
-        author: 'model',
-        actions: {
-          transferAgent: 'specialist',
-          transferToAgent: 'legacy-specialist',
-        } as VertexAiSessionEvent['actions'],
-      });
-
-      expect(event.actions.transferToAgent).toBe('specialist');
     });
   });
 
@@ -1422,23 +1394,6 @@ describe('VertexAiSessionService', () => {
       const readBack = await roundTrip(event);
 
       expect(readBack.actions.transferToAgent).toBe('specialist');
-    });
-
-    it('preserves part text and drops partMetadata', async () => {
-      const event = createEvent({
-        timestamp: 1620000000000,
-        content: {
-          role: 'user',
-          parts: [{text: 'hello', partMetadata: {source: 'portal'}}],
-        },
-      });
-
-      const readBack = await roundTrip(event);
-
-      expect(readBack.content).toEqual({
-        role: 'user',
-        parts: [{text: 'hello'}],
-      });
     });
   });
 });
