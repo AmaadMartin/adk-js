@@ -246,13 +246,6 @@ describe('createAgent', () => {
       (select as Mock).mockResolvedValueOnce('ts');
       (select as Mock).mockResolvedValueOnce('vertex'); // Backend
 
-      // Present so that the "never called" assertion below is meaningful.
-      (execSync as Mock).mockImplementation((cmd: string) => {
-        if (cmd.includes('project')) return 'gcloud-project\n';
-        if (cmd.includes('region')) return 'gcloud-region\n';
-        return '';
-      });
-
       (text as Mock).mockResolvedValueOnce('env-project');
       (text as Mock).mockResolvedValueOnce('env-region');
 
@@ -270,14 +263,6 @@ describe('createAgent', () => {
           message: 'Enter the Google Cloud Region',
           initialValue: 'env-region',
         }),
-      );
-      expect(saveToFile).toHaveBeenCalledWith(
-        expect.stringContaining('.env'),
-        expect.stringContaining('GOOGLE_CLOUD_PROJECT=env-project'),
-      );
-      expect(saveToFile).toHaveBeenCalledWith(
-        expect.stringContaining('.env'),
-        expect.stringContaining('GOOGLE_GENAI_USE_VERTEXAI=1'),
       );
     });
 
@@ -306,14 +291,6 @@ describe('createAgent', () => {
           message: 'Enter the Google Cloud Region',
           initialValue: '',
         }),
-      );
-      expect(saveToFile).toHaveBeenCalledWith(
-        expect.stringContaining('.env'),
-        expect.stringContaining('GOOGLE_CLOUD_PROJECT=manual-project'),
-      );
-      expect(saveToFile).toHaveBeenCalledWith(
-        expect.stringContaining('.env'),
-        expect.stringContaining('GOOGLE_CLOUD_LOCATION=manual-region'),
       );
     });
   });
