@@ -114,8 +114,8 @@ class MockGenAIClient {
 export class GeminiWithMockResponses extends Gemini {
   private readonly _mockClient: MockGenAIClient;
 
-  constructor(responses: RawGenerateContentResponse[]) {
-    super({apiKey: 'test-key'});
+  constructor(responses: RawGenerateContentResponse[], model?: string) {
+    super({apiKey: 'test-key', model});
     this._mockClient = new MockGenAIClient(
       responses.map(toGenerateContentResponse),
     );
