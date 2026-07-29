@@ -607,35 +607,10 @@ describe('AdkWebServer', () => {
       expect(runAsyncParams.abortSignal).toBeDefined();
       expect(runAsyncParams.abortSignal).toBeInstanceOf(AbortSignal);
 
-      spy.mockRestore();
-    });
-
-    it('should not abort the run after the response completes', async () => {
-      await sessionService.createSession({
-        appName: 'testApp',
-        userId: 'testUser',
-        sessionId: 'sessionId',
-      });
-
-      const spy = vi.spyOn(Runner.prototype, 'runAsync');
-
-      const response = await client.post<Event[]>('/run', {
-        appName: 'testApp',
-        userId: 'testUser',
-        sessionId: 'sessionId',
-        newMessage: {
-          parts: [{text: 'Hello test agent!'}],
-          role: 'user',
-        },
-      });
-
-      expect(response.status).toBe(200);
-      const {abortSignal} = spy.mock.calls[0][0];
-
-      // Node emits `close` on the request once the exchange finishes, so the
-      // listener must already be detached by then.
+      // The response has completed, so the disconnect listener must already be
+      // detached and the run can no longer be aborted.
       await new Promise((resolve) => setTimeout(resolve, 50));
-      expect(abortSignal?.aborted).toBe(false);
+      expect(runAsyncParams.abortSignal?.aborted).toBe(false);
 
       spy.mockRestore();
     });
