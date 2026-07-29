@@ -35,6 +35,7 @@ describe('skill_registry', () => {
   const validSkillMd = `---
 name: test-remote-skill
 description: A test remote skill
+allowed-tools: tool1,tool2
 ---
 Instruction body`;
 
@@ -56,31 +57,12 @@ Instruction body`;
       const skill = loadSkillFromZipBuffer(zipBuffer);
 
       expect(skill.frontmatter.name).toBe('test-remote-skill');
+      expect(skill.frontmatter.allowedTools).toBe('tool1,tool2');
+      expect(skill.frontmatter.metadata).toEqual({});
       expect(skill.instructions).toBe('Instruction body');
       expect(skill.resources?.references?.['ref1.md']).toBe('ref content');
       expect(skill.resources?.assets?.['asset1.txt']).toBe('asset content');
       expect(skill.resources?.scripts?.['run.sh']?.src).toBe('echo hello');
-    });
-
-    it('normalizes allowed-tools and defaults metadata', () => {
-      const zip = new AdmZip();
-      zip.addFile(
-        'SKILL.md',
-        Buffer.from(
-          `---
-name: test-remote-skill
-description: A test remote skill
-allowed-tools: tool1,tool2
----
-Instruction body`,
-          'utf-8',
-        ),
-      );
-
-      const skill = loadSkillFromZipBuffer(zip.toBuffer());
-
-      expect(skill.frontmatter.allowedTools).toBe('tool1,tool2');
-      expect(skill.frontmatter.metadata).toEqual({});
     });
 
     it('throws error if SKILL.md is missing', () => {
