@@ -10,6 +10,7 @@ import {BaseAgent} from '../agents/base_agent.js';
 import {Context} from '../agents/context.js';
 import {InvocationContext} from '../agents/invocation_context.js';
 import {SessionArtifactService} from '../artifacts/session_artifact_service.js';
+import {State} from '../sessions/state.js';
 import {logger} from '../utils/logger.js';
 
 import {BasePlugin} from './base_plugin.js';
@@ -20,6 +21,18 @@ import {BasePlugin} from './base_plugin.js';
  * provider capabilities are surfaced.
  */
 const MODEL_ACCESSIBLE_URI_SCHEMES = new Set(['gs', 'https', 'http']);
+
+/**
+ * The session-state key holding the pending `filename -> version` map handed
+ * off from `onUserMessageCallback` to the next `beforeAgentCallback`.
+ *
+ * The `temp:` prefix keeps this bookkeeping out of durable session state: it is
+ * only needed within a single invocation, and session services skip persisting
+ * `temp:`-prefixed keys.
+ */
+function pendingDeltaKey(pluginName: string): string {
+  return `${State.TEMP_PREFIX}${pluginName}:pending_delta`;
+}
 
 /**
  * Options for {@link SaveFilesAsArtifactsPlugin}.
@@ -84,7 +97,7 @@ export class SaveFilesAsArtifactsPlugin extends BasePlugin {
       logger.warn(
         'Artifact service is not set. SaveFilesAsArtifactsPlugin will not be enabled.',
       );
-      return userMessage;
+      return undefined;
     }
 
     if (!userMessage.parts || userMessage.parts.length === 0) {
@@ -111,23 +124,21 @@ export class SaveFilesAsArtifactsPlugin extends BasePlugin {
             `No displayName found, using generated filename: ${fileName}`,
           );
         }
-        const displayName = fileName;
-
-        // Copy the part so mutating the original later does not affect the
-        // saved artifact.
+        // Shallow copy (mirrors adk-python's `copy.copy`): the artifact service
+        // may retain this reference, so detach the part's own fields from the
+        // caller's object. The `inlineData` payload itself is still shared.
         const version = await artifactService.saveArtifact({
           filename: fileName,
           artifact: {...part},
         });
 
-        newParts.push({text: `[Uploaded Artifact: "${displayName}"]`});
+        newParts.push({text: `[Uploaded Artifact: "${fileName}"]`});
 
         if (this.attachFileReference) {
           const filePart = await buildFileReferencePart(artifactService, {
             filename: fileName,
             version,
             mimeType: inlineData.mimeType,
-            displayName,
           });
           if (filePart) {
             newParts.push(filePart);
@@ -147,7 +158,7 @@ export class SaveFilesAsArtifactsPlugin extends BasePlugin {
       return undefined;
     }
 
-    const key = `${this.name}:pending_delta`;
+    const key = pendingDeltaKey(this.name);
     const existing =
       (invocationContext.session.state[key] as Record<string, number>) ?? {};
     invocationContext.session.state[key] = {...existing, ...pendingDelta};
@@ -161,7 +172,7 @@ export class SaveFilesAsArtifactsPlugin extends BasePlugin {
     agent: BaseAgent;
     callbackContext: Context;
   }): Promise<Content | undefined> {
-    const key = `${this.name}:pending_delta`;
+    const key = pendingDeltaKey(this.name);
     const pendingDelta = callbackContext.state.get<Record<string, number>>(key);
     if (pendingDelta && Object.keys(pendingDelta).length > 0) {
       Object.assign(callbackContext.actions.artifactDelta, pendingDelta);
@@ -182,24 +193,18 @@ async function buildFileReferencePart(
     filename,
     version,
     mimeType,
-    displayName,
   }: {
     filename: string;
     version: number;
     mimeType?: string;
-    displayName: string;
   },
 ): Promise<Part | undefined> {
-  let artifactVersion;
-  try {
-    artifactVersion = await artifactService.getArtifactVersion({
-      filename,
-      version,
+  const artifactVersion = await artifactService
+    .getArtifactVersion({filename, version})
+    .catch((exc) => {
+      logger.warn(`Failed to resolve artifact version for ${filename}: ${exc}`);
+      return undefined;
     });
-  } catch (exc) {
-    logger.warn(`Failed to resolve artifact version for ${filename}: ${exc}`);
-    return undefined;
-  }
 
   if (
     !artifactVersion?.canonicalUri ||
@@ -212,7 +217,7 @@ async function buildFileReferencePart(
     fileData: {
       fileUri: artifactVersion.canonicalUri,
       mimeType: mimeType ?? artifactVersion.mimeType,
-      displayName,
+      displayName: filename,
     },
   };
 }

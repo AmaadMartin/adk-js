@@ -49,19 +49,24 @@ class EchoUserContentAgent extends BaseAgent {
   ): AsyncGenerator<Event, void, void> {}
 }
 
+/** Builds a real runner (in-memory services, no mocks) with the plugin installed. */
+async function createRunner() {
+  const agent = new EchoUserContentAgent();
+  const runner = new InMemoryRunner({
+    agent,
+    appName: APP_NAME,
+    plugins: [new SaveFilesAsArtifactsPlugin()],
+  });
+  const session = await runner.sessionService.createSession({
+    appName: APP_NAME,
+    userId: USER_ID,
+  });
+  return {agent, runner, session};
+}
+
 describe('E2E SaveFilesAsArtifactsPlugin', () => {
   it('persists an uploaded blob and swaps it for a placeholder end-to-end', async () => {
-    const agent = new EchoUserContentAgent();
-    const runner = new InMemoryRunner({
-      agent,
-      appName: APP_NAME,
-      plugins: [new SaveFilesAsArtifactsPlugin()],
-    });
-
-    const session = await runner.sessionService.createSession({
-      appName: APP_NAME,
-      userId: USER_ID,
-    });
+    const {agent, runner, session} = await createRunner();
 
     const pdfBytes = Buffer.from('%PDF-1.4 fake report', 'utf8').toString(
       'base64',
@@ -123,18 +128,10 @@ describe('E2E SaveFilesAsArtifactsPlugin', () => {
     expect(saved?.inlineData?.data).toBe(pdfBytes);
   });
 
+  // Complements the unit test for this branch by proving the fallback name is
+  // built from a real runner-generated invocation id, not a fixture string.
   it('generates a filename when the uploaded blob has no displayName', async () => {
-    const agent = new EchoUserContentAgent();
-    const runner = new InMemoryRunner({
-      agent,
-      appName: APP_NAME,
-      plugins: [new SaveFilesAsArtifactsPlugin()],
-    });
-
-    const session = await runner.sessionService.createSession({
-      appName: APP_NAME,
-      userId: USER_ID,
-    });
+    const {agent, runner, session} = await createRunner();
 
     const bytes = Buffer.from('hello world', 'utf8').toString('base64');
     const newMessage: Content = {
