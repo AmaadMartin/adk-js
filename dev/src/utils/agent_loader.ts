@@ -50,6 +50,31 @@ const FILE_MODULE_TYPE_EXTENSION_MAP = {
 };
 
 /**
+ * Packages that must never be inlined into the bundled agent file.
+ *
+ * See http://mikro-orm.io/docs/deployment#deploy-a-bundle-of-entities-and-dependencies-with-esbuild for more details
+ */
+const EXTERNAL_PACKAGES = [
+  'sqlite3',
+  'better-sqlite3',
+  'mysql',
+  'mysql2',
+  // Native addons must remain external so Node can resolve their
+  // platform-specific assets at runtime.
+  'onnxruntime-node',
+  'oracledb',
+  'pg-native',
+  'pg-query-stream',
+  'tedious',
+  'libsql',
+  // Optional peer dependencies of vite and eslint that are not
+  // installed and MUST NOT be bundled.
+  'lightningcss',
+  'jiti',
+  'jiti/package.json',
+];
+
+/**
  * Metadata for a file.
  */
 interface FileMetadata {
@@ -187,26 +212,9 @@ export class AgentFile {
         bundle: this.options.bundle,
         minify: this.options.bundle,
         plugins: [replaceDirnamePlugin(filePath, originalDir), shimPlugin()],
-        // See http://mikro-orm.io/docs/deployment#deploy-a-bundle-of-entities-and-dependencies-with-esbuild for more details
-        external: [
-          'sqlite3',
-          'better-sqlite3',
-          'mysql',
-          'mysql2',
-          // Native addons must remain external so Node can resolve their
-          // platform-specific assets at runtime.
-          'onnxruntime-node',
-          'oracledb',
-          'pg-native',
-          'pg-query-stream',
-          'tedious',
-          'libsql',
-          // Optional peer dependencies of vite and eslint that are not
-          // installed and MUST NOT be bundled.
-          'lightningcss',
-          'jiti',
-          'jiti/package.json',
-        ],
+        // esbuild rejects `external` unless `bundle` is enabled, so the
+        // allowlist is only passed when the agent file is actually bundled.
+        ...(this.options.bundle ? {external: EXTERNAL_PACKAGES} : {}),
       });
 
       this.cleanupDirPath = outputDir;
