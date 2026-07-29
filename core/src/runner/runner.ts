@@ -8,7 +8,10 @@ import {Content, createPartFromText, Part} from '@google/genai';
 import {context, trace} from '@opentelemetry/api';
 
 import {BaseAgent} from '../agents/base_agent.js';
-import {findMatchingFunctionCall} from '../agents/functions.js';
+import {
+  findEventByFunctionCallId,
+  findMatchingFunctionCall,
+} from '../agents/functions.js';
 import {
   InvocationContext,
   newInvocationContextId,
@@ -25,7 +28,12 @@ import {
   BuiltInCodeExecutor,
   isBuiltInCodeExecutor,
 } from '../code_executors/built_in_code_executor.js';
-import {createEvent, Event} from '../events/event.js';
+import {
+  createEvent,
+  Event,
+  getFunctionCalls,
+  getFunctionResponses,
+} from '../events/event.js';
 import {createEventActions} from '../events/event_actions.js';
 import {BaseMemoryService} from '../memory/base_memory_service.js';
 import {BasePlugin} from '../plugins/base_plugin.js';
@@ -88,6 +96,89 @@ export interface RunnerConfig {
    * An optional resumability configuration applied to the runner.
    */
   resumabilityConfig?: ResumabilityConfig;
+}
+
+/**
+ * Session state key holding the transaction index, a map from
+ * `functionCall.id` to the {@link TransactionIndexEntry} of the event that
+ * issued the call.
+ *
+ * The spelling is a persisted contract: sessions written by one version have
+ * to stay readable by the next, so always reference this constant instead of
+ * repeating the literal.
+ */
+export const TRANSACTION_INDEX_KEY = '_adk_transactions';
+
+/**
+ * Session state key holding the {@link RoutableAgentMarker} for the session.
+ *
+ * The spelling is a persisted contract; see {@link TRANSACTION_INDEX_KEY}.
+ */
+export const LAST_ROUTABLE_AGENT_KEY = '_adk_last_routable_agent';
+
+/**
+ * Upper bound on the number of function calls kept in the transaction index.
+ *
+ * The index is a cache in front of the reverse event scan, so it only has to
+ * cover the calls that can still be answered - normally the outstanding ones
+ * of the current turn. Bounding it keeps both the persisted session state and
+ * the per-event state delta constant-sized instead of growing with the
+ * session; evicted calls fall back to the scan.
+ */
+export const MAX_TRACKED_TRANSACTIONS = 100;
+
+/**
+ * The author of events appended on behalf of the end user.
+ */
+const USER_AUTHOR = 'user';
+
+/**
+ * State keys owned by the runner. Resumption routing is derived from them, so
+ * they are stripped from caller-supplied state deltas.
+ */
+const RESERVED_STATE_KEYS: readonly string[] = [
+  TRANSACTION_INDEX_KEY,
+  LAST_ROUTABLE_AGENT_KEY,
+];
+
+/**
+ * Identifies the event that issued a function call, so that the matching
+ * function response can be routed back to its author without scanning the
+ * event log.
+ */
+export interface TransactionIndexEntry {
+  /** The author of the event that issued the function call. */
+  author: string;
+  /** The id of the event that issued the function call. */
+  eventId: string;
+  /** The timestamp of that event, used to evict the oldest entries. */
+  timestamp: number;
+}
+
+/**
+ * Records the last agent that was routable across the agent tree, together
+ * with the newest agent-authored event it was derived from.
+ *
+ * The event id is what makes the marker safe to trust: it is only used when it
+ * still matches the newest agent-authored event of the session, so a stale
+ * marker - or one written by a client - can never disagree with the event log.
+ */
+export interface RoutableAgentMarker {
+  /** The name of the last routable agent. */
+  agentName: string;
+  /** The id of the newest agent-authored event when this was recorded. */
+  eventId: string;
+}
+
+/**
+ * The resolved resumption target, plus the state updates that were derived
+ * while resolving it and that the caller is expected to persist.
+ */
+interface ResumptionResult {
+  /** The agent that should handle the invocation. */
+  agent: BaseAgent;
+  /** State delta to attach to the next event appended to the session. */
+  stateDelta: Record<string, unknown>;
 }
 
 /**
@@ -323,8 +414,9 @@ export class Runner {
           }
 
           // =========================================================================
-          // Append user message to session
+          // Build the user message event
           // =========================================================================
+          let userEvent: Event | undefined;
           if (newMessage) {
             if (!newMessage.parts?.length) {
               throw new Error('No parts in the newMessage.');
@@ -344,31 +436,42 @@ export class Runner {
                 return;
               }
             }
-            // Append the user message to the session with optional state delta.
-            await this.sessionService.appendEvent({
-              session,
-              event: createEvent({
-                invocationId: invocationContext.invocationId,
-                author: 'user',
-                actions: stateDelta
-                  ? createEventActions({stateDelta})
-                  : undefined,
-                content: newMessage,
-                customMetadata: params.customMetadata,
-              }),
+            userEvent = createEvent({
+              invocationId: invocationContext.invocationId,
+              author: USER_AUTHOR,
+              actions: stateDelta
+                ? createEventActions({
+                    stateDelta: stripReservedStateKeys(stateDelta),
+                  })
+                : undefined,
+              content: newMessage,
+              customMetadata: params.customMetadata,
             });
-            if (params.abortSignal?.aborted) {
-              return;
-            }
           }
 
           // =========================================================================
           // Determine which agent should handle the workflow resumption.
           // =========================================================================
-          invocationContext.agent = this.determineAgentForResumption(
+          // Resolved before the user message is appended, so that index repairs
+          // discovered while resolving can be persisted by its state delta.
+          const resumption = resolveResumption(
             session,
             this.agent,
+            this.resumabilityConfig,
+            userEvent,
           );
+          invocationContext.agent = resumption.agent;
+
+          // =========================================================================
+          // Append user message to session
+          // =========================================================================
+          if (userEvent) {
+            Object.assign(userEvent.actions.stateDelta, resumption.stateDelta);
+            await this.sessionService.appendEvent({session, event: userEvent});
+            if (params.abortSignal?.aborted) {
+              return;
+            }
+          }
 
           // =========================================================================
           // Run the agent with the plugins (aka hooks to apply in the lifecycle)
@@ -392,6 +495,7 @@ export class Runner {
                 author: 'model',
                 content: beforeRunCallbackResponse,
               });
+              this.recordResumptionIndexes(session, earlyExitEvent);
               // TODO: b/447446338 - In the future, do *not* save live call audio
               // content to session This is a feature in Python ADK
               await this.sessionService.appendEvent({
@@ -413,6 +517,7 @@ export class Runner {
                 }
 
                 if (!event.partial) {
+                  this.recordResumptionIndexes(session, event);
                   await this.sessionService.appendEvent({session, event});
                 }
                 // Step 3: Run the on_event callbacks to optionally modify the event.
@@ -567,6 +672,50 @@ export class Runner {
   private isRoutableLlmAgent(agentToRun: BaseAgent): boolean {
     return isRoutableLlmAgent(agentToRun);
   }
+
+  /**
+   * Records the resumption indexes for an event on the event's own state
+   * delta, so that they are persisted by the session service together with the
+   * event rather than only in the in-memory session.
+   *
+   * Must be called before the event is appended: it reads the state the
+   * previous events left behind and writes the next value of each index.
+   *
+   * @param session The session the event is about to be appended to.
+   * @param event The event being appended.
+   */
+  private recordResumptionIndexes(session: Session, event: Event): void {
+    if (event.partial || !event.author || event.author === USER_AUTHOR) {
+      return;
+    }
+
+    // The transaction index is only read when resuming on a function response,
+    // so there is nothing to gain from maintaining it otherwise.
+    if (this.resumabilityConfig?.isResumable) {
+      const index = readTransactionIndex(session.state);
+      let changed = false;
+      for (const functionCall of getFunctionCalls(event)) {
+        if (functionCall.id) {
+          index[functionCall.id] = toTransactionIndexEntry(event);
+          changed = true;
+        }
+      }
+      if (changed) {
+        // A pruned copy, never the object held by `session.state`: an aliased
+        // map would keep mutating the state delta of already-appended events.
+        event.actions.stateDelta[TRANSACTION_INDEX_KEY] =
+          pruneTransactionIndex(index);
+      }
+    }
+
+    const agentName = resolveRoutableAgent(this.agent, event.author)
+      ? event.author
+      : readRoutableAgentMarker(session.state)?.agentName;
+    if (agentName) {
+      const marker: RoutableAgentMarker = {agentName, eventId: event.id};
+      event.actions.stateDelta[LAST_ROUTABLE_AGENT_KEY] = marker;
+    }
+  }
   // TODO - b/425992518: Implement runLive and related methods.
 }
 
@@ -579,53 +728,270 @@ export function determineAgentForResumption(
   rootAgent: BaseAgent,
   resumabilityConfig?: ResumabilityConfig,
 ): BaseAgent {
+  return resolveResumption(session, rootAgent, resumabilityConfig).agent;
+}
+
+/**
+ * Determines the next agent to run, and the state updates that resolving it
+ * produced.
+ *
+ * The session state indexes maintained by {@link Runner} turn both cases below
+ * into O(1) lookups. Both are treated as caches: when an index is absent,
+ * stale or malformed, the reverse event scan still decides, so the answer can
+ * never disagree with the event log.
+ *
+ * @param session The session being resumed.
+ * @param rootAgent The root agent of the agent tree.
+ * @param resumabilityConfig The resumability configuration of the runner.
+ * @param pendingEvent The event that is about to be appended to the session,
+ *     if any. It is treated as the last event of the session.
+ * @returns The agent to run, and a state delta the caller must persist.
+ */
+function resolveResumption(
+  session: Session,
+  rootAgent: BaseAgent,
+  resumabilityConfig?: ResumabilityConfig,
+  pendingEvent?: Event,
+): ResumptionResult {
+  const events = session.events;
+  const stateDelta: Record<string, unknown> = {};
+
   // =========================================================================
   // Case 1: If the last event is a function response and resumability is enabled,
   // this returns the agent that made the original function call.
   // =========================================================================
-  const event = findEventByLastFunctionResponseId(session.events);
-  const isResumable = Boolean(resumabilityConfig?.isResumable);
-  if (event && event.author && isResumable) {
-    const resumedAgent = rootAgent.findAgent(event.author);
-    if (resumedAgent) {
-      return resumedAgent;
+  if (resumabilityConfig?.isResumable) {
+    const lastEvent = pendingEvent ?? events[events.length - 1];
+    const functionCallId = lastEvent
+      ? getFunctionResponses(lastEvent)[0]?.id
+      : undefined;
+    if (functionCallId) {
+      const index = readTransactionIndex(session.state);
+      const indexed = index[functionCallId];
+      // The scan may not look at the pending event: it holds the response, not
+      // the call.
+      const callEvent = indexed
+        ? undefined
+        : findEventByFunctionCallId(
+            events,
+            functionCallId,
+            pendingEvent ? events.length : events.length - 1,
+          );
+      if (callEvent?.author) {
+        // Back-fill for sessions written before the index existed, so that
+        // later turns take the O(1) path.
+        index[functionCallId] = toTransactionIndexEntry(callEvent);
+        stateDelta[TRANSACTION_INDEX_KEY] = pruneTransactionIndex(index);
+      }
+      const author = indexed?.author ?? callEvent?.author;
+      if (author) {
+        const resumedAgent = rootAgent.findAgent(author);
+        if (resumedAgent) {
+          return {agent: resumedAgent, stateDelta};
+        }
+        logger.warn(
+          `Function response from an unknown agent: ${author}, event id: ${
+            indexed?.eventId ?? callEvent?.id
+          }`,
+        );
+      }
     }
-    logger.warn(
-      `Function response from an unknown agent: ${event.author}, event id: ${event.id}`,
-    );
   }
 
   // =========================================================================
   // Case 2: Otherwise, find the last agent that emitted a message and is
   // transferable across the agent tree.
   // =========================================================================
-  // simplicity: O(N) backward event scan, upgrade to indexed lookups or map if N > 1000.
-  for (let i = session.events.length - 1; i >= 0; i--) {
-    logger.debug('event:', JSON.stringify(session.events[i]));
-    const event = session.events[i];
-    if (event.author === 'user' || !event.author) {
+  const lastAgentEvent = findLastAgentEvent(events);
+  if (!lastAgentEvent) {
+    // Nothing the backward scan below could match.
+    return {agent: rootAgent, stateDelta};
+  }
+
+  const marker = readRoutableAgentMarker(session.state);
+  if (marker?.eventId === lastAgentEvent.id) {
+    const markedAgent = resolveRoutableAgent(rootAgent, marker.agentName);
+    if (markedAgent) {
+      return {agent: markedAgent, stateDelta};
+    }
+  }
+
+  for (let i = events.length - 1; i >= 0; i--) {
+    logger.debug('event:', JSON.stringify(events[i]));
+    const event = events[i];
+    if (event.author === USER_AUTHOR || !event.author) {
       continue;
     }
 
-    if (event.author === rootAgent.name) {
-      return rootAgent;
+    const agent = resolveRoutableAgent(rootAgent, event.author);
+    if (agent) {
+      const nextMarker: RoutableAgentMarker = {
+        agentName: agent.name,
+        eventId: lastAgentEvent.id,
+      };
+      stateDelta[LAST_ROUTABLE_AGENT_KEY] = nextMarker;
+      return {agent, stateDelta};
     }
-
-    const agent = rootAgent.findSubAgent(event.author);
-    if (!agent) {
+    if (!rootAgent.findSubAgent(event.author)) {
       logger.warn(
         `Event from an unknown agent: ${event.author}, event id: ${event.id}`,
       );
-      continue;
-    }
-    if (isRoutableLlmAgent(agent)) {
-      return agent;
     }
   }
   // =========================================================================
   // Case 3: default to root agent.
   // =========================================================================
-  return rootAgent;
+  return {agent: rootAgent, stateDelta};
+}
+
+/**
+ * Resolves an agent name to the agent that may resume the session: the root
+ * agent, or a sub-agent that is routable across the agent tree.
+ *
+ * @param rootAgent The root agent of the agent tree.
+ * @param name The name of the agent to resolve.
+ * @returns The agent, or undefined if it cannot resume the session.
+ */
+function resolveRoutableAgent(
+  rootAgent: BaseAgent,
+  name: string,
+): BaseAgent | undefined {
+  if (name === rootAgent.name) {
+    return rootAgent;
+  }
+  const agent = rootAgent.findSubAgent(name);
+  return agent && isRoutableLlmAgent(agent) ? agent : undefined;
+}
+
+/**
+ * Returns the newest event authored by an agent rather than by the user, which
+ * is the newest event the resumption scan can match.
+ *
+ * @param events The events of the session, oldest first.
+ * @returns The newest agent-authored event, or undefined if there is none.
+ */
+function findLastAgentEvent(events: Event[]): Event | undefined {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i];
+    if (event.author && event.author !== USER_AUTHOR) {
+      return event;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Reads the transaction index from session state, dropping anything that is
+ * not a well-formed entry. Session state is client-writable and may have been
+ * written by an older version, so it is validated rather than trusted.
+ *
+ * @param state The session state to read.
+ * @returns A fresh index the caller owns and may mutate.
+ */
+function readTransactionIndex(
+  state: Record<string, unknown>,
+): Record<string, TransactionIndexEntry> {
+  const index: Record<string, TransactionIndexEntry> = {};
+  const stored = state[TRANSACTION_INDEX_KEY];
+  if (!stored || typeof stored !== 'object' || Array.isArray(stored)) {
+    return index;
+  }
+  for (const [functionCallId, entry] of Object.entries(stored)) {
+    if (isTransactionIndexEntry(entry)) {
+      index[functionCallId] = entry;
+    }
+  }
+  return index;
+}
+
+/**
+ * Whether a value read back from session state is a transaction index entry.
+ */
+function isTransactionIndexEntry(
+  value: unknown,
+): value is TransactionIndexEntry {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  const entry = value as Partial<TransactionIndexEntry>;
+  return (
+    typeof entry.author === 'string' &&
+    typeof entry.eventId === 'string' &&
+    typeof entry.timestamp === 'number'
+  );
+}
+
+/**
+ * Reads the routable agent marker from session state, returning undefined when
+ * it is absent or malformed.
+ */
+function readRoutableAgentMarker(
+  state: Record<string, unknown>,
+): RoutableAgentMarker | undefined {
+  const stored = state[LAST_ROUTABLE_AGENT_KEY];
+  if (!stored || typeof stored !== 'object') {
+    return undefined;
+  }
+  const marker = stored as Partial<RoutableAgentMarker>;
+  if (!marker.agentName || typeof marker.eventId !== 'string') {
+    return undefined;
+  }
+  return {agentName: marker.agentName, eventId: marker.eventId};
+}
+
+/**
+ * Describes the event that issued a function call.
+ */
+function toTransactionIndexEntry(event: Event): TransactionIndexEntry {
+  return {
+    author: event.author ?? '',
+    eventId: event.id,
+    timestamp: event.timestamp,
+  };
+}
+
+/**
+ * Evicts the oldest entries until the index fits in
+ * {@link MAX_TRACKED_TRANSACTIONS}.
+ *
+ * @param index An index owned by the caller; it is mutated in place.
+ * @returns The same index, for chaining.
+ */
+function pruneTransactionIndex(
+  index: Record<string, TransactionIndexEntry>,
+): Record<string, TransactionIndexEntry> {
+  const functionCallIds = Object.keys(index);
+  const excess = functionCallIds.length - MAX_TRACKED_TRANSACTIONS;
+  if (excess <= 0) {
+    return index;
+  }
+  functionCallIds.sort((a, b) => index[a].timestamp - index[b].timestamp);
+  for (let i = 0; i < excess; i++) {
+    delete index[functionCallIds[i]];
+  }
+  return index;
+}
+
+/**
+ * Removes the runner-owned keys from a caller-supplied state delta.
+ *
+ * Resumption routing reads these keys, so honoring them from a client would
+ * let it pick the agent that handles the next turn.
+ *
+ * @param stateDelta The caller-supplied state delta.
+ * @returns A copy without the reserved keys.
+ */
+function stripReservedStateKeys(
+  stateDelta: Record<string, unknown>,
+): Record<string, unknown> {
+  const sanitized = {...stateDelta};
+  for (const key of RESERVED_STATE_KEYS) {
+    if (key in sanitized) {
+      delete sanitized[key];
+      logger.warn(`Ignoring reserved key in the provided state delta: ${key}`);
+    }
+  }
+  return sanitized;
 }
 
 /**

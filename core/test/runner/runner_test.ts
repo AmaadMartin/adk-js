@@ -9,6 +9,7 @@ import {
   BaseAgent,
   BasePlugin,
   createEvent,
+  createEventActions,
   createResumabilityConfig,
   determineAgentForResumption,
   Event,
@@ -16,8 +17,13 @@ import {
   InMemorySessionService,
   InvocationContext,
   isRoutableLlmAgent,
+  LAST_ROUTABLE_AGENT_KEY,
   LlmAgent,
+  MAX_TRACKED_TRANSACTIONS,
+  RoutableAgentMarker,
   Runner,
+  TRANSACTION_INDEX_KEY,
+  TransactionIndexEntry,
 } from '@google/adk';
 import {Content, FunctionCall, FunctionResponse} from '@google/genai';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
@@ -1239,5 +1245,469 @@ describe('Runner artifact saving (`saveInputBlobsAsArtifacts`)', () => {
     expect(userEvents[1].content!.parts).toEqual([
       {text: '[Uploaded Artifact: "file2.pdf"]'},
     ]);
+  });
+});
+
+/** The transaction index as it is stored in session state. */
+type TransactionIndex = Record<string, TransactionIndexEntry>;
+
+/**
+ * An agent that yields a single event carrying one function call, with a new
+ * call id on every run.
+ */
+class MockToolCallingAgent extends LlmAgent {
+  runCount = 0;
+
+  constructor(name: string, parentAgent?: BaseAgent) {
+    super({
+      name,
+      model: 'gemini-2.5-flash',
+      subAgents: [],
+      parentAgent,
+    });
+  }
+
+  /** The id of the function call the next run will emit. */
+  nextFunctionCallId(): string {
+    return `${this.name}_call_${this.runCount + 1}`;
+  }
+
+  protected override async *runAsyncImpl(
+    context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    const functionCall: FunctionCall = {
+      id: this.nextFunctionCallId(),
+      name: 'get_weather',
+      args: {location: 'NYC'},
+    };
+    this.runCount++;
+    yield createEvent({
+      invocationId: context.invocationId,
+      author: this.name,
+      content: {role: 'model', parts: [{functionCall}]},
+    });
+  }
+}
+
+describe('Runner resumption indexes', () => {
+  let sessionService: InMemorySessionService;
+  let rootAgent: MockLlmAgent;
+  let toolCallingAgent: MockToolCallingAgent;
+  let nonTransferableAgent: MockLlmAgent;
+  let runner: Runner;
+
+  beforeEach(() => {
+    sessionService = new InMemorySessionService();
+    rootAgent = new MockLlmAgent('root_agent');
+    toolCallingAgent = new MockToolCallingAgent('sub_agent', rootAgent);
+    nonTransferableAgent = new MockLlmAgent(
+      'non_transferable',
+      true,
+      rootAgent,
+    );
+    rootAgent.subAgents.push(toolCallingAgent, nonTransferableAgent);
+    runner = new Runner({
+      appName: TEST_APP_ID,
+      agent: rootAgent,
+      sessionService,
+      resumabilityConfig: createResumabilityConfig({isResumable: true}),
+    });
+  });
+
+  function createSession(state?: Record<string, unknown>) {
+    return sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      state,
+    });
+  }
+
+  function readSession() {
+    return sessionService.getSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+  }
+
+  function functionResponseMessage(id: string): Content {
+    return {
+      role: 'user',
+      parts: [{functionResponse: {id, name: 'get_weather', response: {}}}],
+    };
+  }
+
+  function transactionIndexOf(
+    state: Record<string, unknown> | undefined,
+  ): TransactionIndex | undefined {
+    return state?.[TRANSACTION_INDEX_KEY] as TransactionIndex | undefined;
+  }
+
+  function routableMarkerOf(
+    state: Record<string, unknown> | undefined,
+  ): RoutableAgentMarker | undefined {
+    return state?.[LAST_ROUTABLE_AGENT_KEY] as RoutableAgentMarker | undefined;
+  }
+
+  async function run(
+    newMessage: Content,
+    stateDelta?: Record<string, unknown>,
+  ): Promise<Event[]> {
+    const events: Event[] = [];
+    for await (const event of runner.runAsync({
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      newMessage,
+      stateDelta,
+    })) {
+      events.push(event);
+    }
+    return events;
+  }
+
+  describe('determineAgentForResumption', () => {
+    it('should resolve the function call author from the transaction index', async () => {
+      const session = await createSession({
+        [TRANSACTION_INDEX_KEY]: {
+          call_indexed: {
+            author: 'sub_agent',
+            eventId: 'evt_indexed',
+            timestamp: 1000,
+          },
+        },
+      });
+      // The event log holds the response but not the call it answers, so only
+      // the index can supply the author.
+      await sessionService.appendEvent({
+        session,
+        event: createEvent({
+          author: 'user',
+          content: functionResponseMessage('call_indexed'),
+        }),
+      });
+
+      const agent = determineAgentForResumption(
+        session,
+        rootAgent,
+        createResumabilityConfig({isResumable: true}),
+      );
+
+      expect(agent.name).toBe('sub_agent');
+    });
+
+    it('should fall back to the reverse scan when the transaction index has no entry', async () => {
+      const session = await createSession();
+      await sessionService.appendEvent({
+        session,
+        event: createEvent({
+          author: 'sub_agent',
+          content: {
+            role: 'model',
+            parts: [{functionCall: {id: 'call_legacy', name: 'get_weather'}}],
+          },
+        }),
+      });
+      await sessionService.appendEvent({
+        session,
+        event: createEvent({
+          author: 'user',
+          content: functionResponseMessage('call_legacy'),
+        }),
+      });
+
+      const agent = determineAgentForResumption(
+        session,
+        rootAgent,
+        createResumabilityConfig({isResumable: true}),
+      );
+
+      expect(agent.name).toBe('sub_agent');
+    });
+
+    it('should ignore a malformed transaction index and fall back to the reverse scan', async () => {
+      const session = await createSession({
+        [TRANSACTION_INDEX_KEY]: 'not_an_index',
+      });
+      await sessionService.appendEvent({
+        session,
+        event: createEvent({
+          author: 'sub_agent',
+          content: {
+            role: 'model',
+            parts: [{functionCall: {id: 'call_legacy', name: 'get_weather'}}],
+          },
+        }),
+      });
+      await sessionService.appendEvent({
+        session,
+        event: createEvent({
+          author: 'user',
+          content: functionResponseMessage('call_legacy'),
+        }),
+      });
+
+      const agent = determineAgentForResumption(
+        session,
+        rootAgent,
+        createResumabilityConfig({isResumable: true}),
+      );
+
+      expect(agent.name).toBe('sub_agent');
+    });
+  });
+
+  describe('resumption', () => {
+    it('should resume at the indexed author when the call event is no longer in the session', async () => {
+      await createSession({
+        [TRANSACTION_INDEX_KEY]: {
+          call_indexed: {
+            author: 'sub_agent',
+            eventId: 'evt_indexed',
+            timestamp: 1000,
+          },
+        },
+      });
+
+      const events = await run(functionResponseMessage('call_indexed'));
+
+      expect(events[0].author).toBe('sub_agent');
+      expect(toolCallingAgent.runCount).toBe(1);
+    });
+
+    it('should back-fill the transaction index for sessions written before it existed', async () => {
+      const session = await createSession();
+      const callEvent = createEvent({
+        author: 'sub_agent',
+        content: {
+          role: 'model',
+          parts: [{functionCall: {id: 'call_legacy', name: 'get_weather'}}],
+        },
+      });
+      await sessionService.appendEvent({session, event: callEvent});
+
+      const events = await run(functionResponseMessage('call_legacy'));
+
+      expect(events[0].author).toBe('sub_agent');
+      // The back-fill must reach storage, not just the in-memory session.
+      const stored = await readSession();
+      expect(transactionIndexOf(stored?.state)?.['call_legacy']).toEqual({
+        author: 'sub_agent',
+        eventId: callEvent.id,
+        timestamp: callEvent.timestamp,
+      });
+    });
+
+    it('should use the routable agent marker instead of scanning the events', async () => {
+      const session = await createSession();
+      // The newest agent event is from an agent that cannot be routed to, so
+      // the reverse scan would fall through to the root agent.
+      const lastAgentEvent = createEvent({
+        author: 'non_transferable',
+        content: {role: 'model', parts: [{text: 'Handing back'}]},
+      });
+      await sessionService.appendEvent({session, event: lastAgentEvent});
+      await sessionService.appendEvent({
+        session,
+        event: createEvent({
+          author: 'user',
+          actions: createEventActions({
+            stateDelta: {
+              [LAST_ROUTABLE_AGENT_KEY]: {
+                agentName: 'sub_agent',
+                eventId: lastAgentEvent.id,
+              },
+            },
+          }),
+          content: {role: 'user', parts: [{text: 'marker'}]},
+        }),
+      });
+
+      const events = await run({role: 'user', parts: [{text: 'continue'}]});
+
+      expect(events[0].author).toBe('sub_agent');
+    });
+
+    it('should ignore a routable agent marker that does not match the newest agent event', async () => {
+      const session = await createSession({
+        // A marker a client could have written: it names a routable agent but
+        // does not correspond to any event in the session.
+        [LAST_ROUTABLE_AGENT_KEY]: {
+          agentName: 'sub_agent',
+          eventId: 'evt_never_appended',
+        },
+      });
+      await sessionService.appendEvent({
+        session,
+        event: createEvent({
+          author: 'non_transferable',
+          content: {role: 'model', parts: [{text: 'Handing back'}]},
+        }),
+      });
+
+      const events = await run({role: 'user', parts: [{text: 'continue'}]});
+
+      expect(events[0].author).toBe('root_agent');
+      expect(toolCallingAgent.runCount).toBe(0);
+    });
+
+    it('should fall back to the reverse scan when both indexes are malformed', async () => {
+      const session = await createSession({
+        [TRANSACTION_INDEX_KEY]: 'malformed',
+        [LAST_ROUTABLE_AGENT_KEY]: null,
+      });
+      await sessionService.appendEvent({
+        session,
+        event: createEvent({
+          author: 'sub_agent',
+          content: {role: 'model', parts: [{text: 'previous output'}]},
+        }),
+      });
+
+      const events = await run({role: 'user', parts: [{text: 'next'}]});
+
+      expect(events[0].author).toBe('sub_agent');
+    });
+  });
+
+  describe('recording', () => {
+    it('should record the transaction index and the routable marker while running', async () => {
+      const session = await createSession();
+      await sessionService.appendEvent({
+        session,
+        event: createEvent({
+          author: 'sub_agent',
+          content: {role: 'model', parts: [{text: 'previous output'}]},
+        }),
+      });
+
+      const events = await run({role: 'user', parts: [{text: 'trigger tool'}]});
+
+      const stored = await readSession();
+      expect(transactionIndexOf(stored?.state)).toEqual({
+        sub_agent_call_1: {
+          author: 'sub_agent',
+          eventId: events[0].id,
+          timestamp: events[0].timestamp,
+        },
+      });
+      expect(routableMarkerOf(stored?.state)).toEqual({
+        agentName: 'sub_agent',
+        eventId: events[0].id,
+      });
+    });
+
+    it('should write a copy of the transaction index into each state delta', async () => {
+      const session = await createSession();
+      await sessionService.appendEvent({
+        session,
+        event: createEvent({
+          author: 'sub_agent',
+          content: {role: 'model', parts: [{text: 'previous output'}]},
+        }),
+      });
+
+      const firstTurn = await run({role: 'user', parts: [{text: 'one'}]});
+      const secondTurn = await run({role: 'user', parts: [{text: 'two'}]});
+
+      const stored = await readSession();
+      const deltaOf = (eventId: string) =>
+        transactionIndexOf(
+          stored?.events.find((event) => event.id === eventId)?.actions
+            .stateDelta,
+        );
+
+      // The first event's delta must still describe the first turn only: a
+      // delta that aliased the live index would have grown with the session.
+      expect(Object.keys(deltaOf(firstTurn[0].id) ?? {})).toEqual([
+        'sub_agent_call_1',
+      ]);
+      expect(Object.keys(deltaOf(secondTurn[0].id) ?? {})).toEqual([
+        'sub_agent_call_1',
+        'sub_agent_call_2',
+      ]);
+    });
+
+    it('should evict the oldest entries once the transaction index is full', async () => {
+      const seeded: TransactionIndex = {};
+      const seedCount = MAX_TRACKED_TRANSACTIONS + 20;
+      for (let i = 0; i < seedCount; i++) {
+        seeded[`call_seed_${i}`] = {
+          author: 'sub_agent',
+          eventId: `evt_seed_${i}`,
+          timestamp: i + 1,
+        };
+      }
+      const session = await createSession({[TRANSACTION_INDEX_KEY]: seeded});
+      await sessionService.appendEvent({
+        session,
+        event: createEvent({
+          author: 'sub_agent',
+          content: {role: 'model', parts: [{text: 'previous output'}]},
+        }),
+      });
+
+      await run({role: 'user', parts: [{text: 'trigger tool'}]});
+
+      const index = transactionIndexOf((await readSession())?.state) ?? {};
+      expect(Object.keys(index)).toHaveLength(MAX_TRACKED_TRANSACTIONS);
+      expect(index['sub_agent_call_1']).toBeDefined();
+      // 121 entries minus the cap leaves the 21 oldest evicted.
+      expect(index['call_seed_20']).toBeUndefined();
+      expect(index['call_seed_21']).toBeDefined();
+      expect(index[`call_seed_${seedCount - 1}`]).toBeDefined();
+    });
+
+    it('should not maintain the transaction index when the runner is not resumable', async () => {
+      runner = new Runner({
+        appName: TEST_APP_ID,
+        agent: rootAgent,
+        sessionService,
+      });
+      const session = await createSession();
+      await sessionService.appendEvent({
+        session,
+        event: createEvent({
+          author: 'sub_agent',
+          content: {role: 'model', parts: [{text: 'previous output'}]},
+        }),
+      });
+
+      await run({role: 'user', parts: [{text: 'trigger tool'}]});
+
+      const stored = await readSession();
+      expect(transactionIndexOf(stored?.state)).toBeUndefined();
+      expect(routableMarkerOf(stored?.state)?.agentName).toBe('sub_agent');
+    });
+
+    it('should strip runner owned keys from a caller supplied state delta', async () => {
+      await createSession();
+
+      const clientStateDelta = {
+        foo: 'bar',
+        [TRANSACTION_INDEX_KEY]: {
+          call_forged: {
+            author: 'sub_agent',
+            eventId: 'evt_forged',
+            timestamp: 1,
+          },
+        },
+        [LAST_ROUTABLE_AGENT_KEY]: {
+          agentName: 'sub_agent',
+          eventId: 'evt_forged',
+        },
+      };
+      const message: Content = {role: 'user', parts: [{text: 'hello'}]};
+
+      const events = await run(message, clientStateDelta);
+
+      const stored = await readSession();
+      expect(stored?.state['foo']).toBe('bar');
+      expect(transactionIndexOf(stored?.state)).toBeUndefined();
+      expect(routableMarkerOf(stored?.state)).toEqual({
+        agentName: 'root_agent',
+        eventId: events[0].id,
+      });
+    });
   });
 });

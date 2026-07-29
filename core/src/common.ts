@@ -204,13 +204,20 @@ export type {
 } from './plugins/security_plugin.js';
 export {InMemoryRunner} from './runner/in_memory_runner.js';
 export {
+  LAST_ROUTABLE_AGENT_KEY,
+  MAX_TRACKED_TRANSACTIONS,
   Runner,
+  TRANSACTION_INDEX_KEY,
   determineAgentForResumption,
   findEventByLastFunctionResponseId,
   isRoutableLlmAgent,
   isRunner,
 } from './runner/runner.js';
-export type {RunnerConfig} from './runner/runner.js';
+export type {
+  RoutableAgentMarker,
+  RunnerConfig,
+  TransactionIndexEntry,
+} from './runner/runner.js';
 export {BaseSessionService} from './sessions/base_session_service.js';
 export type {
   AppendEventRequest,
