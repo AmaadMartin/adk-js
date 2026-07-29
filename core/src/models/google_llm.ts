@@ -13,7 +13,7 @@ import {
   LiveServerMessage,
 } from '@google/genai';
 
-import {getBooleanEnvVar, isBrowser} from '../utils/env_aware_utils.js';
+import {isBrowser, isEnterpriseModeEnabled} from '../utils/env_aware_utils.js';
 import {logger} from '../utils/logger.js';
 import {GoogleLLMVariant} from '../utils/variant_utils.js';
 
@@ -41,7 +41,9 @@ export interface GeminiParams {
   apiKey?: string;
   /**
    * Whether to use Vertex AI. If true, `project`, `location`
-   * should be provided.
+   * should be provided. If not set, it is resolved from
+   * `GOOGLE_GENAI_USE_ENTERPRISE`, falling back to the deprecated
+   * `GOOGLE_GENAI_USE_VERTEXAI`.
    */
   vertexai?: boolean;
   /**
@@ -229,6 +231,9 @@ export class Gemini extends BaseLlm {
       });
     } else {
       this._apiClient = new GoogleGenAI({
+        // Always false here; pins the SDK to ADK's backend decision so it
+        // cannot re-resolve it from the environment.
+        vertexai: this.vertexai,
         apiKey: this.apiKey,
         httpOptions: this.getHttpOptions(),
       });
@@ -271,6 +276,9 @@ export class Gemini extends BaseLlm {
         });
       } else {
         this._liveApiClient = new GoogleGenAI({
+          // Always false here; pins the SDK to ADK's backend decision so it
+          // cannot re-resolve it from the environment.
+          vertexai: this.vertexai,
           apiKey: this.apiKey,
           httpOptions: this.getLiveHttpOptions(),
         });
@@ -373,7 +381,7 @@ export function geminiInitParams({
 
   params.vertexai = !!vertexai;
   if (!params.vertexai && !isBrowser()) {
-    params.vertexai = getBooleanEnvVar('GOOGLE_GENAI_USE_VERTEXAI');
+    params.vertexai = isEnterpriseModeEnabled();
   }
 
   if (params.vertexai) {
