@@ -24,6 +24,9 @@ const TEST_SESSION_ID = 'test_session_id';
 const TEST_MESSAGE = 'test_message';
 
 class MockLlmAgent extends LlmAgent {
+  /** The context this agent was last run with, recorded for assertions. */
+  lastInvocationContext?: InvocationContext;
+
   constructor(
     name: string,
     disallowTransferToParent = false,
@@ -41,6 +44,7 @@ class MockLlmAgent extends LlmAgent {
   protected override async *runAsyncImpl(
     context: InvocationContext,
   ): AsyncGenerator<Event, void, void> {
+    this.lastInvocationContext = context;
     yield createEvent({
       invocationId: context.invocationId,
       author: this.name,
@@ -769,6 +773,40 @@ describe('Runner artifact saving and immutability', () => {
     expect(userEvent.content?.parts![1].inlineData).toBeUndefined();
   });
 
+  it('should expose the placeholder message, not the raw blob, as invocation userContent', async () => {
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    const originalMessage: Content = {
+      role: 'user',
+      parts: [
+        {text: 'Check this image'},
+        {inlineData: {mimeType: 'image/png', data: 'aW1hZ2VkYXRh'}},
+      ],
+    };
+
+    for await (const _ of runner.runAsync({
+      userId: session.userId,
+      sessionId: session.id,
+      newMessage: originalMessage,
+      runConfig: {saveInputBlobsAsArtifacts: true},
+    })) {
+      // consume generator
+    }
+
+    // The context the agent (and anything reading ReadonlyContext.userContent)
+    // sees must not still hold the base64 payload.
+    const userContent = agent.lastInvocationContext?.userContent;
+    expect(userContent).toBeDefined();
+    expect(userContent!.parts![1].inlineData).toBeUndefined();
+    expect(userContent!.parts![1].text).toMatch(
+      /^Uploaded file: artifact_.*_1\. It is saved into artifacts$/,
+    );
+  });
+
   it('should not save artifacts or replace inlineData if saveInputBlobsAsArtifacts is false', async () => {
     const session = await sessionService.createSession({
       appName: TEST_APP_ID,
@@ -834,6 +872,9 @@ describe('Runner artifact saving and immutability', () => {
     });
     const userEvent = updatedSession!.events[0];
     expect(userEvent.content?.parts![0]).toEqual({text: 'Only text part'});
+    // Nothing was replaced, so the very same object is handed back - no
+    // needless Content/parts allocation on the blob-free path.
+    expect(agent.lastInvocationContext?.userContent).toBe(originalMessage);
   });
 
   it('should return message unchanged when artifactService is not defined', async () => {

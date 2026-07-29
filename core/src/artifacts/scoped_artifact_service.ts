@@ -5,11 +5,10 @@
  */
 
 import {Part} from '@google/genai';
-import {
-  ArtifactScope,
-  ArtifactVersion,
-  BaseArtifactService,
-} from './base_artifact_service.js';
+
+import {CompositeSessionKey} from '../sessions/session.js';
+
+import {ArtifactVersion, BaseArtifactService} from './base_artifact_service.js';
 import {
   SessionArtifactService,
   SessionLoadArtifactRequest,
@@ -20,32 +19,10 @@ import {
  * A wrapper that scopes a BaseArtifactService to a specific session.
  */
 export class ScopedArtifactService implements SessionArtifactService {
-  private readonly scope: ArtifactScope;
-
-  constructor(delegate: BaseArtifactService, scope: ArtifactScope);
-  constructor(
-    delegate: BaseArtifactService,
-    appName: string,
-    userId: string,
-    sessionId: string,
-  );
   constructor(
     private readonly delegate: BaseArtifactService,
-    scopeOrAppName: ArtifactScope | string,
-    userId?: string,
-    sessionId?: string,
-  ) {
-    if (typeof scopeOrAppName === 'string') {
-      if (!userId || !sessionId) {
-        throw new Error(
-          'userId and sessionId must be provided when appName is a string.',
-        );
-      }
-      this.scope = {appName: scopeOrAppName, userId, sessionId};
-    } else {
-      this.scope = scopeOrAppName;
-    }
-  }
+    private readonly scope: CompositeSessionKey,
+  ) {}
 
   async saveArtifact(request: SessionSaveArtifactRequest): Promise<number> {
     return this.delegate.saveArtifact({

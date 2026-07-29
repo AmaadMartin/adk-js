@@ -6,22 +6,12 @@
 
 import {Part} from '@google/genai';
 
-/**
- * Represents the composite key scoping an artifact to an application, user, and session.
- */
-export interface ArtifactScope {
-  /** The app name. */
-  appName: string;
-  /** The user ID. */
-  userId: string;
-  /** The session ID. */
-  sessionId: string;
-}
+import {CompositeSessionKey} from '../sessions/session.js';
 
 /**
  * The parameters for `saveArtifact`.
  */
-export interface SaveArtifactRequest extends ArtifactScope {
+export interface SaveArtifactRequest extends CompositeSessionKey {
   /** The filename of the artifact. */
   filename: string;
   /** The artifact to save. */
@@ -35,7 +25,7 @@ export interface SaveArtifactRequest extends ArtifactScope {
 /**
  * The parameters for `loadArtifact`.
  */
-export interface LoadArtifactRequest extends ArtifactScope {
+export interface LoadArtifactRequest extends CompositeSessionKey {
   /** The filename of the artifact. */
   filename: string;
   /**
@@ -48,13 +38,12 @@ export interface LoadArtifactRequest extends ArtifactScope {
 /**
  * The parameters for `listArtifactKeys`.
  */
-// eslint-disable-next-line @typescript-eslint/no-empty-object-type
-export interface ListArtifactKeysRequest extends ArtifactScope {}
+export type ListArtifactKeysRequest = CompositeSessionKey;
 
 /**
  * The parameters for `deleteArtifact`.
  */
-export interface DeleteArtifactRequest extends ArtifactScope {
+export interface DeleteArtifactRequest extends CompositeSessionKey {
   /** The filename of the artifact. */
   filename: string;
 }
@@ -62,7 +51,7 @@ export interface DeleteArtifactRequest extends ArtifactScope {
 /**
  * The parameters for `listVersions`.
  */
-export interface ListVersionsRequest extends ArtifactScope {
+export interface ListVersionsRequest extends CompositeSessionKey {
   /** The filename of the artifact. */
   filename: string;
 }

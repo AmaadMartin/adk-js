@@ -139,8 +139,13 @@ export class InvocationContext {
 
   /**
    * The user content that started this invocation.
+   *
+   * The `Runner` re-points this while it finalizes the user message (for
+   * example after input blobs are swapped for artifact placeholders) so that
+   * it always matches the content appended to the session. Agent and tool code
+   * should treat it as read-only; `ReadonlyContext` exposes it as a getter.
    */
-  readonly userContent?: Content;
+  userContent?: Content;
 
   /**
    * The current session of this invocation context.

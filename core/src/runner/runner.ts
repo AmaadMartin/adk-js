@@ -14,10 +14,7 @@ import {
 } from '../agents/invocation_context.js';
 import {isLlmAgent} from '../agents/llm_agent.js';
 import {createRunConfig, RunConfig} from '../agents/run_config.js';
-import {
-  ArtifactScope,
-  BaseArtifactService,
-} from '../artifacts/base_artifact_service.js';
+import {BaseArtifactService} from '../artifacts/base_artifact_service.js';
 import {ScopedArtifactService} from '../artifacts/scoped_artifact_service.js';
 
 import {BaseCredentialService} from '../auth/credential_service/base_credential_service.js';
@@ -31,7 +28,7 @@ import {BaseMemoryService} from '../memory/base_memory_service.js';
 import {BasePlugin} from '../plugins/base_plugin.js';
 import {PluginManager} from '../plugins/plugin_manager.js';
 import {BaseSessionService} from '../sessions/base_session_service.js';
-import {Session} from '../sessions/session.js';
+import {CompositeSessionKey, Session} from '../sessions/session.js';
 import {
   runAsyncGeneratorWithOtelContext,
   tracer,
@@ -317,6 +314,13 @@ export class Runner {
                 },
                 newMessage,
               );
+              // `saveArtifacts` no longer edits the message in place, so the
+              // context built above still points at the pre-replacement
+              // message. Re-point it, otherwise the raw inline blob stays
+              // visible to everything reading `userContent` (tools,
+              // instruction providers) even though the session only ever sees
+              // the placeholder.
+              invocationContext.userContent = newMessage;
               if (params.abortSignal?.aborted) {
                 return;
               }
@@ -428,13 +432,17 @@ export class Runner {
    * Saves artifacts from the message parts and replaces the inline data with
    * a file name placeholder.
    *
+   * The input message is never mutated. When no part carries `inlineData`
+   * there is nothing to replace, so the original message is returned by
+   * reference and no new object is allocated.
+   *
    * @param invocationId The current invocation ID.
-   * @param scope The artifact scope containing appName, userId, and sessionId.
+   * @param sessionKey The composite key of the session owning the artifacts.
    * @param message The message containing parts to process.
    */
   private async saveArtifacts(
     invocationId: string,
-    scope: ArtifactScope,
+    sessionKey: CompositeSessionKey,
     message: Content,
   ): Promise<Content> {
     if (
@@ -454,7 +462,7 @@ export class Runner {
       }
       const fileName = `artifact_${invocationId}_${i}`;
       await this.artifactService.saveArtifact({
-        ...scope,
+        ...sessionKey,
         filename: fileName,
         artifact: part,
       });
