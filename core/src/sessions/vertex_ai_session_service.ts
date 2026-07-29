@@ -40,6 +40,39 @@ import {createSession, Session} from './session.js';
 const DEFAULT_MAX_ATTEMPTS = 30;
 const GRPC_NOT_FOUND = 5;
 const HTTP_NOT_FOUND = 404;
+const HTTP_BAD_REQUEST = 400;
+
+/**
+ * Matches the field name in an "unknown field" rejection, in either the wire
+ * (`raw_event`) or camelCase (`rawEvent`) spelling.
+ */
+const RAW_EVENT_FIELD_PATTERN = /raw_?event/i;
+
+/**
+ * Returns true when `error` is the Agent Engine Sessions API refusing the
+ * `rawEvent` field, which is the only case where appending again without it is
+ * correct.
+ *
+ * Matched structurally rather than with `instanceof ApiError`: the error is
+ * raised by the `@google/genai` copy bundled inside `@google-cloud/vertexai`,
+ * which is a different module instance from this package's own `@google/genai`,
+ * so constructor identity is unreliable. That error carries a numeric `status`
+ * (the HTTP status) and no `code`.
+ *
+ * An error with no `status` stays eligible so that a client-side validation
+ * failure naming the field — the adk-python `pydantic.ValidationError` case —
+ * still falls back. Transport failures are excluded by the message clause.
+ */
+export function isRawEventRejection(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) {
+    return false;
+  }
+  const {status, message} = error as {status?: unknown; message?: unknown};
+  if (typeof status === 'number' && status !== HTTP_BAD_REQUEST) {
+    return false;
+  }
+  return typeof message === 'string' && RAW_EVENT_FIELD_PATTERN.test(message);
+}
 
 /**
  * Checks if the given URI is a Vertex AI session service URI.
@@ -427,18 +460,18 @@ export class VertexAiSessionService extends BaseSessionService {
     try {
       await this.sessions.events.append(params);
     } catch (error) {
+      if (!isRawEventRejection(error)) {
+        throw error;
+      }
       logger.warn(
-        'Failed to append event with rawEvent, falling back...',
+        'Agent Engine rejected the rawEvent field; retrying append without it.',
         error,
       );
+      // Retry with the same `params` so the request differs only by the
+      // dropped field: rebuilding it would re-evaluate `inv-${Date.now()}`
+      // and send a different synthesized invocationId.
       delete config.rawEvent;
-      await this.sessions.events.append({
-        name: `reasoningEngines/${reasoningEngineId}/sessions/${session.id}`,
-        author: event.author || 'user',
-        invocationId: event.invocationId || `inv-${Date.now()}`,
-        timestamp: new Date(event.timestamp).toISOString(),
-        config,
-      });
+      await this.sessions.events.append(params);
     }
 
     return event;
