@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {InvocationContext} from '../agents/invocation_context.js';
 import {logger} from '../utils/logger.js';
 
 import {BaseCodeExecutor, ExecuteCodeParams} from './base_code_executor.js';
@@ -18,14 +17,6 @@ const DEFAULT_SANDBOX_TEMPLATE = 'python-sandbox-template';
 const SCRIPT_FILENAME = 'script.py';
 /** Command run inside the sandbox to execute the script. */
 const RUN_COMMAND = 'python3 script.py';
-
-/**
- * The execution backend used by {@link GkeCodeExecutor}.
- *
- * - `'job'`: run code in a per-execution Kubernetes Job (default).
- * - `'sandbox'`: run code through the GKE Agent Sandbox infrastructure.
- */
-export type GkeExecutorType = 'job' | 'sandbox';
 
 /**
  * Result of a single command run inside an Agent Sandbox. Mirrors the shape of
@@ -83,8 +74,8 @@ export type SandboxClientFactory = (
  * path in the adk-python GkeCodeExecutor.
  */
 export class SandboxInfrastructureError extends Error {
-  constructor(message: string) {
-    super(message);
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
     this.name = 'SandboxInfrastructureError';
   }
 }
@@ -102,20 +93,17 @@ export class SandboxTimeoutError extends Error {
 
 /** Options for {@link GkeCodeExecutor}. */
 export interface GkeCodeExecutorOptions {
+  /**
+   * Opens a connection to an Agent Sandbox. Required, because no concrete JS
+   * Agent Sandbox client is bundled yet.
+   */
+  sandboxClientFactory: SandboxClientFactory;
   /** The Kubernetes namespace to run in. Defaults to `'default'`. */
   namespace?: string;
-  /** The execution backend to use. Defaults to `'job'`. */
-  executorType?: GkeExecutorType;
   /** The Agent Sandbox template. Defaults to `'python-sandbox-template'`. */
   sandboxTemplate?: string;
   /** The Agent Sandbox router/gateway name. */
   sandboxGatewayName?: string;
-  /**
-   * Opens a connection to an Agent Sandbox. Required when
-   * `executorType === 'sandbox'`, because no concrete JS Agent Sandbox client
-   * is bundled yet.
-   */
-  sandboxClientFactory?: SandboxClientFactory;
 }
 
 /**
@@ -149,52 +137,43 @@ async function closeSandboxQuietly(
 }
 
 /**
- * Executes code on GKE, either via a per-execution Kubernetes Job (`'job'`, the
- * default) or via the GKE Agent Sandbox infrastructure (`'sandbox'`).
+ * Executes code on GKE through the Agent Sandbox infrastructure.
  *
- * Sandbox mode requires additional infrastructure in the cluster (agent-sandbox
- * controller, sandbox templates, and a router/gateway) and executes code
- * through an injected {@link SandboxClient}.
+ * This requires additional infrastructure in the cluster (agent-sandbox
+ * controller, sandbox templates, and a router/gateway), and runs code through
+ * an injected {@link SandboxClient}.
  */
 export class GkeCodeExecutor extends BaseCodeExecutor {
   readonly namespace: string;
-  readonly executorType: GkeExecutorType;
   readonly sandboxTemplate: string;
   readonly sandboxGatewayName?: string;
-  private readonly sandboxClientFactory?: SandboxClientFactory;
+  private readonly sandboxClientFactory: SandboxClientFactory;
 
-  constructor(options: GkeCodeExecutorOptions = {}) {
+  constructor(options: GkeCodeExecutorOptions) {
     super();
-    this.namespace = options.namespace ?? DEFAULT_NAMESPACE;
-    this.executorType = options.executorType ?? 'job';
-    this.sandboxTemplate = options.sandboxTemplate ?? DEFAULT_SANDBOX_TEMPLATE;
-    this.sandboxGatewayName = options.sandboxGatewayName;
-    this.sandboxClientFactory = options.sandboxClientFactory;
-
-    if (this.executorType === 'sandbox' && !this.sandboxClientFactory) {
+    if (!options?.sandboxClientFactory) {
       throw new Error(
-        'Agent Sandbox client not available. To use executorType="sandbox", ' +
-          'provide a sandboxClientFactory (a concrete JS Agent Sandbox client ' +
-          'is not yet bundled).',
+        'A sandboxClientFactory is required: no concrete JS Agent Sandbox ' +
+          'client is bundled yet.',
       );
     }
+    this.sandboxClientFactory = options.sandboxClientFactory;
+    this.namespace = options.namespace ?? DEFAULT_NAMESPACE;
+    this.sandboxTemplate = options.sandboxTemplate ?? DEFAULT_SANDBOX_TEMPLATE;
+    this.sandboxGatewayName = options.sandboxGatewayName;
   }
 
   override async executeCode(
     params: ExecuteCodeParams,
   ): Promise<CodeExecutionResult> {
-    const code = params.codeExecutionInput.code;
-    if (this.executorType === 'sandbox') {
-      return this.executeInSandbox(code);
-    }
-    return this.executeAsJob(code, params.invocationContext);
+    return this.executeInSandbox(params.codeExecutionInput.code);
   }
 
   /** Executes `code` through the injected Agent Sandbox client. */
   private async executeInSandbox(code: string): Promise<CodeExecutionResult> {
     let sandbox: SandboxClient | undefined;
     try {
-      sandbox = await this.sandboxClientFactory!({
+      sandbox = await this.sandboxClientFactory({
         namespace: this.namespace,
         templateName: this.sandboxTemplate,
         gatewayName: this.sandboxGatewayName,
@@ -223,28 +202,11 @@ export class GkeCodeExecutor extends BaseCodeExecutor {
         logger.error('SandboxClient failed to initialize or find gateway', e);
         throw new SandboxInfrastructureError(
           `Sandbox infrastructure error: ${e.message}`,
+          {cause: e},
         );
       }
       logger.error('Sandbox execution failed', e);
       throw e;
     }
-  }
-
-  /**
-   * Executes `code` as a Kubernetes Job.
-   *
-   * simplicity: placeholder seam. The Job-mode backend (ConfigMap + V1Job +
-   * watch, requiring `@kubernetes/client-node`) is delivered by the separate
-   * GkeCodeExecutor Job-mode port, which replaces this method. It is not part
-   * of the sandbox-mode change and throws until that port lands.
-   */
-  private async executeAsJob(
-    _code: string,
-    _invocationContext: InvocationContext,
-  ): Promise<CodeExecutionResult> {
-    throw new Error(
-      'Job mode is provided by the GkeCodeExecutor Job-mode port and is not ' +
-        'available in this build.',
-    );
   }
 }

@@ -6,9 +6,9 @@
 
 import {
   CodeExecutionLanguage,
-  type CodeExecutionResult,
   type ExecuteCodeParams,
   GkeCodeExecutor,
+  type GkeCodeExecutorOptions,
   InvocationContext,
   type SandboxClientOptions,
   SandboxInfrastructureError,
@@ -46,14 +46,6 @@ function makeParams(code: string): ExecuteCodeParams {
   };
 }
 
-/** Exposes the private `executeAsJob` method for spying. */
-interface WithExecuteAsJob {
-  executeAsJob: (
-    code: string,
-    invocationContext: InvocationContext,
-  ) => Promise<CodeExecutionResult>;
-}
-
 describe('GkeCodeExecutor', () => {
   let sandbox: MockSandbox;
   let factory: ReturnType<typeof vi.fn>;
@@ -65,95 +57,53 @@ describe('GkeCodeExecutor', () => {
 
   describe('constructor', () => {
     it('applies defaults', () => {
-      const executor = new GkeCodeExecutor();
-      expect(executor.executorType).toBe('job');
+      const executor = new GkeCodeExecutor({sandboxClientFactory: factory});
       expect(executor.namespace).toBe('default');
       expect(executor.sandboxTemplate).toBe('python-sandbox-template');
       expect(executor.sandboxGatewayName).toBeUndefined();
     });
 
-    it('constructs in sandbox mode with overrides', () => {
+    it('honors overrides', () => {
       const executor = new GkeCodeExecutor({
-        executorType: 'sandbox',
         namespace: 'test-ns',
-        sandboxClientFactory: factory,
-      });
-      expect(executor.executorType).toBe('sandbox');
-      expect(executor.namespace).toBe('test-ns');
-      expect(executor.sandboxTemplate).toBe('python-sandbox-template');
-    });
-
-    it('honors a custom sandbox template and gateway name', () => {
-      const executor = new GkeCodeExecutor({
-        executorType: 'sandbox',
         sandboxTemplate: 'custom-template',
         sandboxGatewayName: 'my-gateway',
         sandboxClientFactory: factory,
       });
+      expect(executor.namespace).toBe('test-ns');
       expect(executor.sandboxTemplate).toBe('custom-template');
       expect(executor.sandboxGatewayName).toBe('my-gateway');
     });
 
-    it('throws when sandbox mode selected without a client factory', () => {
-      expect(() => new GkeCodeExecutor({executorType: 'sandbox'})).toThrow(
-        'Agent Sandbox client not available',
+    it('throws without a client factory', () => {
+      // The type marks sandboxClientFactory required, so this cast simulates an
+      // untyped JavaScript caller reaching the runtime guard.
+      const noFactory = {} as GkeCodeExecutorOptions;
+      expect(() => new GkeCodeExecutor(noFactory)).toThrow(
+        'A sandboxClientFactory is required',
       );
     });
   });
 
-  describe('executeCode routing', () => {
-    it('forks to sandbox', async () => {
+  describe('executeCode', () => {
+    it('runs the code in the sandbox', async () => {
       sandbox.run.mockResolvedValue({
         stdout: 'sandbox stdout',
         stderr: undefined,
       });
-      const executor = new GkeCodeExecutor({
-        executorType: 'sandbox',
-        sandboxClientFactory: factory,
-      });
-      const jobSpy = vi.spyOn(
-        executor as unknown as WithExecuteAsJob,
-        'executeAsJob',
-      );
+      const executor = new GkeCodeExecutor({sandboxClientFactory: factory});
 
       const result = await executor.executeCode(makeParams('print("sandbox")'));
 
       expect(result.stdout).toBe('sandbox stdout');
       expect(factory).toHaveBeenCalledTimes(1);
       expect(sandbox.run).toHaveBeenCalledTimes(1);
-      expect(jobSpy).not.toHaveBeenCalled();
-    });
-
-    it('forks to job', async () => {
-      const executor = new GkeCodeExecutor({
-        executorType: 'job',
-        sandboxClientFactory: factory,
-      });
-      const jobSpy = vi
-        .spyOn(executor as unknown as WithExecuteAsJob, 'executeAsJob')
-        .mockResolvedValue({stdout: 'job stdout', stderr: '', outputFiles: []});
-
-      const result = await executor.executeCode(makeParams('print("job")'));
-
-      expect(result.stdout).toBe('job stdout');
-      expect(jobSpy).toHaveBeenCalledTimes(1);
-      expect(factory).not.toHaveBeenCalled();
-    });
-
-    it('throws from the placeholder job backend until the port lands', async () => {
-      const executor = new GkeCodeExecutor();
-      await expect(
-        executor.executeCode(makeParams('print("job")')),
-      ).rejects.toThrow(
-        'Job mode is provided by the GkeCodeExecutor Job-mode port',
-      );
     });
   });
 
   describe('executeInSandbox', () => {
     function sandboxExecutor(): GkeCodeExecutor {
       return new GkeCodeExecutor({
-        executorType: 'sandbox',
         namespace: 'agents',
         sandboxTemplate: 'python-sandbox-template',
         sandboxGatewayName: 'my-gateway',
@@ -212,10 +162,9 @@ describe('GkeCodeExecutor', () => {
       );
     });
 
-    it('wraps infrastructure errors', async () => {
-      factory.mockRejectedValue(
-        new SandboxInfrastructureError('Gateway not found'),
-      );
+    it('wraps infrastructure errors, preserving the original as cause', async () => {
+      const original = new SandboxInfrastructureError('Gateway not found');
+      factory.mockRejectedValue(original);
 
       const promise = sandboxExecutor().executeCode(makeParams('x'));
 
@@ -223,6 +172,7 @@ describe('GkeCodeExecutor', () => {
         'Sandbox infrastructure error: Gateway not found',
       );
       await expect(promise).rejects.toBeInstanceOf(SandboxInfrastructureError);
+      await expect(promise).rejects.toHaveProperty('cause', original);
     });
 
     it('returns a result on a SandboxTimeoutError', async () => {

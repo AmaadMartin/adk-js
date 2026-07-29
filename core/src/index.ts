@@ -37,7 +37,6 @@ export {
   SandboxInfrastructureError,
   SandboxTimeoutError,
   type GkeCodeExecutorOptions,
-  type GkeExecutorType,
   type SandboxClient,
   type SandboxClientFactory,
   type SandboxClientOptions,
