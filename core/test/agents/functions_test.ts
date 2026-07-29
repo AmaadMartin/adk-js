@@ -47,6 +47,13 @@ const testTool = new FunctionTool({
   },
 });
 
+const scalarTool = new FunctionTool({
+  name: 'scalarTool',
+  description: 'returns a scalar',
+  parameters: z.object({}),
+  execute: async () => 'plain string',
+});
+
 const errorTool = new FunctionTool({
   name: 'errorTool',
   description: 'error tool',
@@ -161,6 +168,130 @@ describe('handleFunctionCallList', () => {
     expect(definedEvent.content!.parts![0].functionResponse!.response).toEqual({
       results: ['item1', 'item2'],
     });
+  });
+
+  it('should wrap scalar responses into a {result: scalar} object', async () => {
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [{id: randomIdForTestingOnly(), name: 'scalarTool'}],
+      toolsDict: {'scalarTool': scalarTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event).not.toBeNull();
+    const definedEvent = event as Event;
+    expect(definedEvent.content!.parts![0].functionResponse!.response).toEqual({
+      result: 'plain string',
+    });
+  });
+
+  it('should wrap a null response into a {result: null} object', async () => {
+    const nullTool = new FunctionTool({
+      name: 'nullTool',
+      description: 'returns null',
+      parameters: z.object({}),
+      execute: async () => null,
+    });
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [{id: randomIdForTestingOnly(), name: 'nullTool'}],
+      toolsDict: {'nullTool': nullTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event).not.toBeNull();
+    const definedEvent = event as Event;
+    expect(definedEvent.content!.parts![0].functionResponse!.response).toEqual({
+      result: null,
+    });
+  });
+
+  it('should emit no event for a long running tool returning undefined', async () => {
+    const longRunningTool = new FunctionTool({
+      name: 'longRunningTool',
+      description: 'returns nothing',
+      parameters: z.object({}),
+      execute: async () => undefined,
+      isLongRunning: true,
+    });
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [{id: randomIdForTestingOnly(), name: 'longRunningTool'}],
+      toolsDict: {'longRunningTool': longRunningTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event).toBeNull();
+  });
+
+  it('should pass the normalized record of a scalar response to afterToolCallback', async () => {
+    let received: Record<string, unknown> | undefined;
+    const afterToolCallback: SingleAfterToolCallback = async ({response}) => {
+      received = response;
+      return undefined;
+    };
+
+    await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [{id: randomIdForTestingOnly(), name: 'scalarTool'}],
+      toolsDict: {'scalarTool': scalarTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [afterToolCallback],
+    });
+
+    expect(received).toEqual({result: 'plain string'});
+  });
+
+  it('should pass the normalized record of a scalar response to plugin afterToolCallback', async () => {
+    const plugin = new TestPlugin('testPlugin');
+    const afterToolCallback = vi.spyOn(plugin, 'afterToolCallback');
+    pluginManager.registerPlugin(plugin);
+
+    await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [{id: randomIdForTestingOnly(), name: 'scalarTool'}],
+      toolsDict: {'scalarTool': scalarTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(afterToolCallback).toHaveBeenCalledWith(
+      expect.objectContaining({result: {result: 'plain string'}}),
+    );
+  });
+
+  it('should pass a record response through to afterToolCallback unchanged', async () => {
+    const toolResult = {status: 'ok'};
+    const recordTool = new FunctionTool({
+      name: 'recordTool',
+      description: 'returns a record',
+      parameters: z.object({}),
+      execute: async () => toolResult,
+    });
+    let received: Record<string, unknown> | undefined;
+    const afterToolCallback: SingleAfterToolCallback = async ({response}) => {
+      received = response;
+      return undefined;
+    };
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [{id: randomIdForTestingOnly(), name: 'recordTool'}],
+      toolsDict: {'recordTool': recordTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [afterToolCallback],
+    });
+
+    expect(received).toBe(toolResult);
+    const definedEvent = event as Event;
+    expect(definedEvent.content!.parts![0].functionResponse!.response).toBe(
+      toolResult,
+    );
   });
 
   it('should execute beforeToolCallback and return its result', async () => {
