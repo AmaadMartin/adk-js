@@ -195,11 +195,10 @@ export async function validateSkillDir(skillDir: string): Promise<string[]> {
   const unknown = Object.keys(skill.frontmatter)
     .filter((k) => !ALLOWED_FRONTMATTER_KEYS.has(k))
     .sort();
-  if (unknown.length === 0) {
-    return [];
-  }
 
-  return [`Unknown frontmatter fields: [${unknown.join(', ')}]`];
+  return unknown.length > 0
+    ? [`Unknown frontmatter fields: [${unknown.join(', ')}]`]
+    : [];
 }
 
 /**
