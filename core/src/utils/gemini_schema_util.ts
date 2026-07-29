@@ -14,10 +14,33 @@ const MCPToolSchemaObject = z.object({
   required: z.string().array().optional(),
 });
 type MCPToolSchema = z.infer<typeof MCPToolSchemaObject>;
-type MCPTypeArrayItem = string | {type: string};
 
-function toGeminiType(mcpType: string | undefined): Type {
-  if (!mcpType) return Type.TYPE_UNSPECIFIED;
+/** A JSON-Schema-like node as it appears in an MCP tool declaration. */
+interface McpSchemaNode {
+  type?: string | unknown[];
+  anyOf?: unknown[];
+  properties?: Record<string, unknown>;
+  items?: unknown;
+  required?: string[];
+  description?: string;
+  enum?: unknown[];
+  const?: unknown;
+  $ref?: string;
+}
+
+function isMcpSchemaNode(value: unknown): value is McpSchemaNode {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** Coerces an untyped JSON-Schema fragment into a schema node. */
+function toSchemaNode(value: unknown): McpSchemaNode {
+  if (isMcpSchemaNode(value)) return value;
+  if (typeof value === 'string') return {type: value};
+  return {};
+}
+
+function toGeminiType(mcpType: McpSchemaNode['type']): Type {
+  if (typeof mcpType !== 'string') return Type.TYPE_UNSPECIFIED;
 
   switch (mcpType.toLowerCase()) {
     case 'text':
@@ -40,13 +63,9 @@ function toGeminiType(mcpType: string | undefined): Type {
   }
 }
 
-const getTypeFromArrayItem = (
-  mcpType: MCPTypeArrayItem,
-): string | undefined => {
-  if (typeof mcpType === 'string') {
-    return mcpType.toLowerCase();
-  }
-  return mcpType?.type?.toLowerCase?.();
+const getTypeFromArrayItem = (item: unknown): string | undefined => {
+  const {type} = toSchemaNode(item);
+  return typeof type === 'string' ? type.toLowerCase() : undefined;
 };
 
 export function toGeminiSchema(mcpSchema?: MCPToolSchema): Schema | undefined {
@@ -54,34 +73,29 @@ export function toGeminiSchema(mcpSchema?: MCPToolSchema): Schema | undefined {
     return undefined;
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  function recursiveConvert(mcp: any): Schema {
+  function recursiveConvert(mcp: McpSchemaNode): Schema {
     const sourceType = mcp.anyOf ?? mcp.type;
     let isNullable = false;
-    let nonNullTypes;
     if (Array.isArray(sourceType)) {
-      nonNullTypes = sourceType.filter(
-        (t: MCPTypeArrayItem) => getTypeFromArrayItem(t) !== 'null',
+      const nonNullTypes = sourceType.filter(
+        (t) => getTypeFromArrayItem(t) !== 'null',
       );
-      isNullable = sourceType.some(
-        (t: MCPTypeArrayItem) => getTypeFromArrayItem(t) === 'null',
-      );
+      isNullable = sourceType.some((t) => getTypeFromArrayItem(t) === 'null');
 
       if (nonNullTypes.length === 1) {
         const nonNullType = nonNullTypes[0];
-        if (typeof nonNullType === 'object') {
+        if (isMcpSchemaNode(nonNullType)) {
           mcp = nonNullType;
         } else {
           const {type: _removed, anyOf: _removedAnyOf, ...rest} = mcp;
-          mcp = {...rest, type: nonNullType};
+          mcp = {...rest, type: getTypeFromArrayItem(nonNullType)};
         }
       } else if (nonNullTypes.length === 0 && isNullable) {
         const {type: _removed, anyOf: _removedAnyOf, ...rest} = mcp;
         mcp = {...rest, type: 'null'};
       } else if (typeof mcp.anyOf === 'undefined') {
-        const anyOfItems = mcp.type.map((t: MCPTypeArrayItem) => ({type: t}));
         const {type: _removed, ...rest} = mcp;
-        mcp = {...rest, anyOf: anyOfItems};
+        mcp = {...rest, anyOf: sourceType};
       }
     }
 
@@ -96,7 +110,7 @@ export function toGeminiSchema(mcpSchema?: MCPToolSchema): Schema | undefined {
       } else if (mcp.enum) {
         // enum-only schema: infer type from enum values if all are the same
         // primitive type, otherwise leave type undefined (TYPE_UNSPECIFIED)
-        const enumTypes = new Set((mcp.enum as unknown[]).map((v) => typeof v));
+        const enumTypes = new Set(mcp.enum.map((v) => typeof v));
         if (enumTypes.size === 1) {
           const jsType = [...enumTypes][0];
           if (jsType === 'string') mcp.type = 'string';
@@ -119,8 +133,8 @@ export function toGeminiSchema(mcpSchema?: MCPToolSchema): Schema | undefined {
     const geminiSchema: Schema = {};
 
     if (mcp.anyOf) {
-      geminiSchema.anyOf = mcp.anyOf.map((item: Record<string, unknown>) =>
-        recursiveConvert(item),
+      geminiSchema.anyOf = mcp.anyOf.map((item) =>
+        recursiveConvert(toSchemaNode(item)),
       );
     } else {
       geminiSchema.type = geminiType;
@@ -131,7 +145,7 @@ export function toGeminiSchema(mcpSchema?: MCPToolSchema): Schema | undefined {
     }
 
     if (mcp.enum) {
-      geminiSchema.enum = (mcp.enum as unknown[]).map(String);
+      geminiSchema.enum = mcp.enum.map(String);
     }
 
     if (isNullable && mcp.type !== 'null') {
@@ -143,7 +157,7 @@ export function toGeminiSchema(mcpSchema?: MCPToolSchema): Schema | undefined {
       if (mcp.properties) {
         for (const name in mcp.properties) {
           geminiSchema.properties[name] = recursiveConvert(
-            mcp.properties[name],
+            toSchemaNode(mcp.properties[name]),
           );
         }
       }
@@ -152,7 +166,7 @@ export function toGeminiSchema(mcpSchema?: MCPToolSchema): Schema | undefined {
       }
     } else if (geminiType === Type.ARRAY) {
       if (mcp.items) {
-        geminiSchema.items = recursiveConvert(mcp.items);
+        geminiSchema.items = recursiveConvert(toSchemaNode(mcp.items));
       }
     }
     return geminiSchema;

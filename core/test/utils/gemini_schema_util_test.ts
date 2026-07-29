@@ -260,6 +260,18 @@ describe('toGeminiSchema', () => {
     });
   });
 
+  it('handles an array-typed type field whose non-null entry is neither a string nor an object', () => {
+    const input = {
+      type: [5, 'null'],
+    };
+
+    const schema = toGeminiSchema(input as unknown as MCPToolSchema);
+
+    // The unusable entry leaves no type to pick, so only the nullability of
+    // the declaration survives.
+    expect(schema).toEqual({type: Type.NULL});
+  });
+
   it('handles TYPE_UNSPECIFIED when without type and without anyOf', () => {
     const input = {
       description: 'only description',

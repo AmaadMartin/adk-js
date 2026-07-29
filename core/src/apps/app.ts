@@ -69,8 +69,7 @@ export class App {
   readonly [APP_SIGNATURE_SYMBOL] = true;
 
   readonly name: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  readonly rootAgent: BaseAgent | any;
+  readonly rootAgent: BaseAgent;
   readonly plugins: BasePlugin[];
   readonly resumabilityConfig?: ResumabilityConfig;
 

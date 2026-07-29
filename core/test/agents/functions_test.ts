@@ -163,6 +163,53 @@ describe('handleFunctionCallList', () => {
     });
   });
 
+  it('should wrap a null response into a {result: null} object for the event and the callbacks', async () => {
+    const nullTool = new FunctionTool({
+      name: 'nullTool',
+      description: 'returns null',
+      parameters: z.object({}),
+      execute: async () => null,
+    });
+    let received: Record<string, unknown> | undefined;
+    const afterToolCallback: SingleAfterToolCallback = async ({response}) => {
+      received = response;
+      return undefined;
+    };
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [{id: randomIdForTestingOnly(), name: 'nullTool'}],
+      toolsDict: {'nullTool': nullTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [afterToolCallback],
+    });
+
+    expect(received).toEqual({result: null});
+    expect(event!.content!.parts![0].functionResponse!.response).toEqual({
+      result: null,
+    });
+  });
+
+  it('should emit no event for a long running tool returning undefined', async () => {
+    const longRunningTool = new FunctionTool({
+      name: 'longRunningTool',
+      description: 'returns nothing',
+      parameters: z.object({}),
+      execute: async () => undefined,
+      isLongRunning: true,
+    });
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [{id: randomIdForTestingOnly(), name: 'longRunningTool'}],
+      toolsDict: {'longRunningTool': longRunningTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event).toBeNull();
+  });
+
   it('should execute beforeToolCallback and return its result', async () => {
     const beforeToolCallback: SingleBeforeToolCallback = async () => {
       return {result: 'beforeToolCallback executed'};
@@ -324,6 +371,30 @@ describe('handleFunctionCallList', () => {
     expect(event!.content!.parts![0].functionResponse!.response).toEqual({
       error: "Error in tool 'errorTool': tool error message content",
     });
+  });
+
+  it('should pass the error response to afterToolCallback and keep it over the alternative', async () => {
+    const errorResponse = {
+      error: "Error in tool 'errorTool': tool error message content",
+    };
+    let received: Record<string, unknown> | undefined;
+    const afterToolCallback: SingleAfterToolCallback = async ({response}) => {
+      received = response;
+      return {result: 'alternative'};
+    };
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [{id: randomIdForTestingOnly(), name: 'errorTool'}],
+      toolsDict: {'errorTool': errorTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [afterToolCallback],
+    });
+
+    expect(received).toEqual(errorResponse);
+    expect(event!.content!.parts![0].functionResponse!.response).toEqual(
+      errorResponse,
+    );
   });
 
   it('should pass abortSignal to tool execution', async () => {
