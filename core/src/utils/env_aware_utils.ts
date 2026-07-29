@@ -4,6 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {logger} from './logger.js';
+
+const GOOGLE_GENAI_USE_ENTERPRISE_ENV_VAR = 'GOOGLE_GENAI_USE_ENTERPRISE';
+const GOOGLE_GENAI_USE_VERTEXAI_ENV_VAR = 'GOOGLE_GENAI_USE_VERTEXAI';
+
 /**
  * Returns true if the environment is a browser.
  */
@@ -104,4 +109,28 @@ export function getBooleanEnvVar(envVar: string): boolean {
   const envVarValue = (process.env[envVar] || '').toLowerCase();
 
   return ['true', '1'].includes(envVarValue);
+}
+
+/**
+ * Returns whether Google GenAI Enterprise mode (Vertex AI) is enabled.
+ *
+ * `GOOGLE_GENAI_USE_ENTERPRISE` takes precedence whenever it is set, even when
+ * it is set to a falsy value. `GOOGLE_GENAI_USE_VERTEXAI` is the deprecated
+ * fallback and logs a warning when it is used.
+ *
+ * @return True if enterprise mode is enabled, false otherwise.
+ */
+export function isEnterpriseModeEnabled(): boolean {
+  if (process.env?.[GOOGLE_GENAI_USE_ENTERPRISE_ENV_VAR] !== undefined) {
+    return getBooleanEnvVar(GOOGLE_GENAI_USE_ENTERPRISE_ENV_VAR);
+  }
+
+  if (process.env?.[GOOGLE_GENAI_USE_VERTEXAI_ENV_VAR] !== undefined) {
+    logger.warn(
+      'GOOGLE_GENAI_USE_VERTEXAI is deprecated, please use GOOGLE_GENAI_USE_ENTERPRISE instead',
+    );
+    return getBooleanEnvVar(GOOGLE_GENAI_USE_VERTEXAI_ENV_VAR);
+  }
+
+  return false;
 }
