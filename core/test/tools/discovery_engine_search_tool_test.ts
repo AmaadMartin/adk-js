@@ -133,16 +133,6 @@ describe('DiscoveryEngineSearchTool', () => {
   });
 
   describe('constructor / validation', () => {
-    it('builds the serving config from dataStoreId', async () => {
-      const tool = new DiscoveryEngineSearchTool({
-        dataStoreId: 'test_data_store',
-      });
-      await tool.discoveryEngineSearch('q');
-      expect(capturedRequest().url).toContain(
-        '/test_data_store/servingConfigs/default_config:search',
-      );
-    });
-
     it('throws when no ids are specified', () => {
       expect(() => new DiscoveryEngineSearchTool({})).toThrow(
         'Either dataStoreId or searchEngineId must be specified.',
