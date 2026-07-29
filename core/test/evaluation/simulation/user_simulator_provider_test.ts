@@ -114,6 +114,8 @@ describe('UserSimulatorProvider', () => {
   });
 
   it('rejects a non-config argument', () => {
+    // The cast is the subject of the test: it stages the wrong-typed value a
+    // JS caller can pass, so the constructor's runtime guard can be exercised.
     expect(
       () =>
         new UserSimulatorProvider(
