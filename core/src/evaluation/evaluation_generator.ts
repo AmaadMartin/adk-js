@@ -210,7 +210,6 @@ export class EvaluationGenerator {
 
     const invocations: Invocation[] = [];
     for (const [invocationId, invocationEvents] of eventsByInvocationId) {
-      let finalResponse: Content | undefined;
       let finalEvent: Event | undefined;
       let userContent: Content = {parts: []};
       let invocationTimestamp = 0;
@@ -232,7 +231,6 @@ export class EvaluationGenerator {
 
         if (event.content && event.content.parts) {
           if (isFinalResponse(event)) {
-            finalResponse = event.content;
             finalEvent = event;
           }
 
@@ -263,7 +261,7 @@ export class EvaluationGenerator {
       invocations.push({
         invocationId,
         userContent,
-        finalResponse,
+        finalResponse: finalEvent?.content,
         intermediateData: {invocationEvents: invocationEventsList},
         creationTimestamp: invocationTimestamp,
         appDetails,

@@ -616,13 +616,7 @@ describe('EvaluationGenerator.generateInferencesFromRootAgent', () => {
 
   it('uses the provided session, ids, and services', async () => {
     const rootAgent = {name: 'mock_agent'} as unknown as BaseAgent;
-    const userSimulator = {
-      getNextUserMessage: vi.fn(
-        async (): Promise<NextUserMessage> => ({
-          status: Status.STOP_SIGNAL_DETECTED,
-        }),
-      ),
-    } as unknown as UserSimulator;
+    const userSimulator = stoppedUserSimulator();
     const sessionService = new InMemorySessionService();
     const createSpy = vi.spyOn(sessionService, 'createSession');
 
