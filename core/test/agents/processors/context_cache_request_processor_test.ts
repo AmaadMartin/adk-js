@@ -5,12 +5,14 @@
  */
 
 import {
-  CacheMetadata,
+  ActiveCacheMetadata,
   CONTEXT_CACHE_REQUEST_PROCESSOR,
   ContextCacheConfig,
+  createContextCacheConfig,
   createEvent,
   createSession,
   Event,
+  FingerprintCacheMetadata,
   InvocationContext,
   LlmAgent,
   LlmRequest,
@@ -20,9 +22,9 @@ import {beforeEach, describe, expect, it} from 'vitest';
 
 const CACHE_NAME_PREFIX = 'projects/test/locations/us-central1/cachedContents/';
 
-function makeCacheMetadata(
-  overrides: Partial<CacheMetadata> = {},
-): CacheMetadata {
+function makeActiveCacheMetadata(
+  overrides: Partial<ActiveCacheMetadata> = {},
+): ActiveCacheMetadata {
   return {
     cacheName: `${CACHE_NAME_PREFIX}test-cache`,
     expireTime: Date.now() / 1000 + 1800,
@@ -32,6 +34,10 @@ function makeCacheMetadata(
     createdAt: Date.now() / 1000 - 600,
     ...overrides,
   };
+}
+
+function makeFingerprintCacheMetadata(): FingerprintCacheMetadata {
+  return {fingerprint: 'test_fingerprint', contentsCount: 3};
 }
 
 function createContext(options: {
@@ -77,7 +83,7 @@ describe('ContextCacheRequestProcessor', () => {
   let cacheConfig: ContextCacheConfig;
 
   beforeEach(() => {
-    cacheConfig = new ContextCacheConfig({
+    cacheConfig = createContextCacheConfig({
       cacheIntervals: 10,
       ttlSeconds: 1800,
       minTokens: 1024,
@@ -97,7 +103,7 @@ describe('ContextCacheRequestProcessor', () => {
   });
 
   it('copies metadata as-is for the same invocation (no increment)', async () => {
-    const cacheMetadata = makeCacheMetadata({invocationsUsed: 5});
+    const cacheMetadata = makeActiveCacheMetadata({invocationsUsed: 5});
     const invocationContext = createContext({
       contextCacheConfig: cacheConfig,
       invocationId: 'test_invocation',
@@ -125,7 +131,7 @@ describe('ContextCacheRequestProcessor', () => {
       events: [
         createEvent({
           author: 'test_agent',
-          cacheMetadata: makeCacheMetadata({invocationsUsed: 5}),
+          cacheMetadata: makeActiveCacheMetadata({invocationsUsed: 5}),
           invocationId: 'previous_invocation',
         }),
       ],
@@ -138,7 +144,7 @@ describe('ContextCacheRequestProcessor', () => {
   });
 
   it('filters cache metadata by agent name', async () => {
-    const targetCache = makeCacheMetadata({
+    const targetCache = makeActiveCacheMetadata({
       invocationsUsed: 3,
       cacheName: `${CACHE_NAME_PREFIX}target`,
     });
@@ -149,7 +155,7 @@ describe('ContextCacheRequestProcessor', () => {
       events: [
         createEvent({
           author: 'other_agent',
-          cacheMetadata: makeCacheMetadata({
+          cacheMetadata: makeActiveCacheMetadata({
             invocationsUsed: 7,
             cacheName: `${CACHE_NAME_PREFIX}other`,
           }),
@@ -171,7 +177,7 @@ describe('ContextCacheRequestProcessor', () => {
   });
 
   it('selects the most recent cache metadata', async () => {
-    const newerCache = makeCacheMetadata({
+    const newerCache = makeActiveCacheMetadata({
       invocationsUsed: 5,
       cacheName: `${CACHE_NAME_PREFIX}newer`,
     });
@@ -181,7 +187,7 @@ describe('ContextCacheRequestProcessor', () => {
       events: [
         createEvent({
           author: 'test_agent',
-          cacheMetadata: makeCacheMetadata({
+          cacheMetadata: makeActiveCacheMetadata({
             invocationsUsed: 2,
             cacheName: `${CACHE_NAME_PREFIX}older`,
           }),
@@ -242,7 +248,7 @@ describe('ContextCacheRequestProcessor', () => {
   });
 
   it('skips wrong-agent and metadata-less events, then increments', async () => {
-    const cacheMetadata = makeCacheMetadata({invocationsUsed: 10});
+    const cacheMetadata = makeActiveCacheMetadata({invocationsUsed: 10});
     const invocationContext = createContext({
       contextCacheConfig: cacheConfig,
       invocationId: 'current',
@@ -352,7 +358,7 @@ describe('ContextCacheRequestProcessor', () => {
       events: [
         createEvent({
           author: 'test_agent',
-          cacheMetadata: makeCacheMetadata({invocationsUsed: 5}),
+          cacheMetadata: makeActiveCacheMetadata({invocationsUsed: 5}),
           usageMetadata: {promptTokenCount: 1024},
           invocationId: 'previous_invocation',
         }),
@@ -367,12 +373,7 @@ describe('ContextCacheRequestProcessor', () => {
   });
 
   it('copies fingerprint-only metadata as-is (no increment)', async () => {
-    const fingerprintOnly = makeCacheMetadata({
-      cacheName: undefined,
-      expireTime: undefined,
-      invocationsUsed: undefined,
-      createdAt: undefined,
-    });
+    const fingerprintOnly = makeFingerprintCacheMetadata();
     const invocationContext = createContext({
       contextCacheConfig: cacheConfig,
       invocationId: 'current_invocation',
@@ -393,7 +394,7 @@ describe('ContextCacheRequestProcessor', () => {
   });
 
   it('copies metadata as-is when the source event has no invocation id', async () => {
-    const cacheMetadata = makeCacheMetadata({invocationsUsed: 4});
+    const cacheMetadata = makeActiveCacheMetadata({invocationsUsed: 4});
     const invocationContext = createContext({
       contextCacheConfig: cacheConfig,
       invocationId: 'current_invocation',
@@ -408,7 +409,7 @@ describe('ContextCacheRequestProcessor', () => {
   });
 
   it('does not mutate the source event cache metadata', async () => {
-    const cacheMetadata = makeCacheMetadata({invocationsUsed: 5});
+    const cacheMetadata = makeActiveCacheMetadata({invocationsUsed: 5});
     const event = createEvent({
       author: 'test_agent',
       cacheMetadata,

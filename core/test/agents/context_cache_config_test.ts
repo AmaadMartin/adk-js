@@ -4,12 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {ContextCacheConfig} from '@google/adk';
+import {createContextCacheConfig} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
 describe('ContextCacheConfig', () => {
   it('applies defaults when no options are provided', () => {
-    const config = new ContextCacheConfig();
+    const config = createContextCacheConfig();
 
     expect(config.cacheIntervals).toBe(10);
     expect(config.ttlSeconds).toBe(1800);
@@ -19,7 +19,7 @@ describe('ContextCacheConfig', () => {
 
   it('uses provided option values', () => {
     const createHttpOptions = {timeout: 10000};
-    const config = new ContextCacheConfig({
+    const config = createContextCacheConfig({
       cacheIntervals: 5,
       ttlSeconds: 600,
       minTokens: 2048,
@@ -33,32 +33,32 @@ describe('ContextCacheConfig', () => {
   });
 
   it('accepts the boundary values', () => {
-    expect(() => new ContextCacheConfig({cacheIntervals: 1})).not.toThrow();
-    expect(() => new ContextCacheConfig({cacheIntervals: 100})).not.toThrow();
-    expect(() => new ContextCacheConfig({ttlSeconds: 1})).not.toThrow();
-    expect(() => new ContextCacheConfig({minTokens: 0})).not.toThrow();
+    expect(() => createContextCacheConfig({cacheIntervals: 1})).not.toThrow();
+    expect(() => createContextCacheConfig({cacheIntervals: 100})).not.toThrow();
+    expect(() => createContextCacheConfig({ttlSeconds: 1})).not.toThrow();
+    expect(() => createContextCacheConfig({minTokens: 0})).not.toThrow();
   });
 
   it('rejects cacheIntervals below 1', () => {
-    expect(() => new ContextCacheConfig({cacheIntervals: 0})).toThrow(
+    expect(() => createContextCacheConfig({cacheIntervals: 0})).toThrow(
       /cacheIntervals must be between 1 and 100/,
     );
   });
 
   it('rejects cacheIntervals above 100', () => {
-    expect(() => new ContextCacheConfig({cacheIntervals: 101})).toThrow(
+    expect(() => createContextCacheConfig({cacheIntervals: 101})).toThrow(
       /cacheIntervals must be between 1 and 100/,
     );
   });
 
   it('rejects a non-positive ttlSeconds', () => {
-    expect(() => new ContextCacheConfig({ttlSeconds: 0})).toThrow(
+    expect(() => createContextCacheConfig({ttlSeconds: 0})).toThrow(
       /ttlSeconds must be greater than 0/,
     );
   });
 
   it('rejects a negative minTokens', () => {
-    expect(() => new ContextCacheConfig({minTokens: -1})).toThrow(
+    expect(() => createContextCacheConfig({minTokens: -1})).toThrow(
       /minTokens must be at least 0/,
     );
   });

@@ -6,14 +6,13 @@
 
 import {
   App,
-  BaseAgent,
   BaseLlm,
   BaseLlmConnection,
   CacheMetadata,
   ContextCacheConfig,
+  createContextCacheConfig,
   Event,
   InMemorySessionService,
-  InvocationContext,
   LlmAgent,
   LlmRequest,
   LlmResponse,
@@ -79,26 +78,6 @@ class RecordingLlm extends BaseLlm {
   }
 }
 
-/** Captures the invocation context's cache config when run as a sub-agent. */
-class ConfigCapturingAgent extends BaseAgent {
-  capturedConfig?: ContextCacheConfig;
-  wasRun = false;
-
-  constructor(name: string) {
-    super({name});
-  }
-
-  // eslint-disable-next-line require-yield
-  protected override async *runAsyncImpl(
-    context: InvocationContext,
-  ): AsyncGenerator<Event, void, void> {
-    this.capturedConfig = context.contextCacheConfig;
-    this.wasRun = true;
-  }
-
-  protected override async *runLiveImpl(): AsyncGenerator<Event, void, void> {}
-}
-
 function userMessage(text: string): Content {
   return {role: 'user', parts: [{text}]};
 }
@@ -115,7 +94,7 @@ describe('Context cache orchestration through the Runner', () => {
   it('threads App.contextCacheConfig onto the first LLM request', async () => {
     const model = new RecordingLlm();
     const agent = new LlmAgent({name: 'assistant', model});
-    const cacheConfig = new ContextCacheConfig({minTokens: 2048});
+    const cacheConfig = createContextCacheConfig({minTokens: 2048});
     const app = new App({
       name: 'cache_app',
       rootAgent: agent,
@@ -147,7 +126,7 @@ describe('Context cache orchestration through the Runner', () => {
   it('recovers metadata and token count across turns and increments invocationsUsed', async () => {
     const model = new RecordingLlm();
     const agent = new LlmAgent({name: 'assistant', model});
-    const cacheConfig = new ContextCacheConfig({minTokens: 2048});
+    const cacheConfig = createContextCacheConfig({minTokens: 2048});
     const app = new App({
       name: 'cache_app',
       rootAgent: agent,
@@ -188,7 +167,7 @@ describe('Context cache orchestration through the Runner', () => {
   it('persists cacheMetadata onto the emitted model-response events', async () => {
     const model = new RecordingLlm();
     const agent = new LlmAgent({name: 'assistant', model});
-    const cacheConfig = new ContextCacheConfig({minTokens: 2048});
+    const cacheConfig = createContextCacheConfig({minTokens: 2048});
     const app = new App({
       name: 'cache_app',
       rootAgent: agent,
@@ -219,12 +198,12 @@ describe('Context cache orchestration through the Runner', () => {
   });
 
   it('propagates the config to a sub-agent invocation context', async () => {
-    const subAgent = new ConfigCapturingAgent('sub');
+    const model = new RecordingLlm();
     const rootAgent = new SequentialAgent({
       name: 'root',
-      subAgents: [subAgent],
+      subAgents: [new LlmAgent({name: 'sub', model})],
     });
-    const cacheConfig = new ContextCacheConfig({minTokens: 2048});
+    const cacheConfig = createContextCacheConfig({minTokens: 2048});
     const app = new App({
       name: 'cache_app',
       rootAgent,
@@ -237,7 +216,7 @@ describe('Context cache orchestration through the Runner', () => {
       userId: 'user',
     });
 
-    await drain(
+    const events = await drain(
       runner.runAsync({
         userId: 'user',
         sessionId: session.id,
@@ -245,8 +224,10 @@ describe('Context cache orchestration through the Runner', () => {
       }),
     );
 
-    expect(subAgent.wasRun).toBe(true);
-    expect(subAgent.capturedConfig).toBe(cacheConfig);
+    // The only LLM call comes from the sub-agent, so seeing the app config on
+    // its request proves the config reached the sub-agent's invocation context.
+    expect(events.some((e) => e.author === 'sub')).toBe(true);
+    expect(model.capturedRequests[0].cacheConfig).toBe(cacheConfig);
   });
 
   it('is a no-op when no contextCacheConfig is set', async () => {

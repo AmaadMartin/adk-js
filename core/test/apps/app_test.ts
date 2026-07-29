@@ -6,7 +6,7 @@
 
 import {describe, expect, it} from 'vitest';
 import {BaseAgent} from '../../src/agents/base_agent.js';
-import {ContextCacheConfig} from '../../src/agents/context_cache_config.js';
+import {createContextCacheConfig} from '../../src/agents/context_cache_config.js';
 import {App, isApp, validateAppName} from '../../src/apps/app.js';
 import {createResumabilityConfig} from '../../src/apps/resumability_config.js';
 import {BasePlugin} from '../../src/plugins/base_plugin.js';
@@ -102,7 +102,7 @@ describe('App', () => {
 
   it('stores contextCacheConfig', () => {
     const rootAgent = new DummyAgent('root');
-    const contextCacheConfig = new ContextCacheConfig({minTokens: 2048});
+    const contextCacheConfig = createContextCacheConfig({minTokens: 2048});
     const app = new App({
       name: 'cached_app',
       rootAgent,

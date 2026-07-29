@@ -8,7 +8,7 @@ import {
   App,
   BaseAgent,
   BasePlugin,
-  ContextCacheConfig,
+  createContextCacheConfig,
   createEvent,
   createResumabilityConfig,
   determineAgentForResumption,
@@ -356,7 +356,7 @@ describe('Runner.determineAgentForResumption', () => {
   });
 
   it('should inherit contextCacheConfig from app when constructed with an App', () => {
-    const contextCacheConfig = new ContextCacheConfig({minTokens: 2048});
+    const contextCacheConfig = createContextCacheConfig({minTokens: 2048});
     const app = new App({name: TEST_APP_ID, rootAgent, contextCacheConfig});
     const appRunner = new Runner({app, sessionService, artifactService});
 
@@ -364,7 +364,7 @@ describe('Runner.determineAgentForResumption', () => {
   });
 
   it('should derive contextCacheConfig from direct runner config', () => {
-    const contextCacheConfig = new ContextCacheConfig({minTokens: 2048});
+    const contextCacheConfig = createContextCacheConfig({minTokens: 2048});
     const directRunner = new Runner({
       appName: TEST_APP_ID,
       agent: rootAgent,
@@ -377,8 +377,8 @@ describe('Runner.determineAgentForResumption', () => {
   });
 
   it('should prefer the app contextCacheConfig over the direct runner config', () => {
-    const appConfig = new ContextCacheConfig({minTokens: 2048});
-    const directConfig = new ContextCacheConfig({minTokens: 4096});
+    const appConfig = createContextCacheConfig({minTokens: 2048});
+    const directConfig = createContextCacheConfig({minTokens: 4096});
     const app = new App({
       name: TEST_APP_ID,
       rootAgent,

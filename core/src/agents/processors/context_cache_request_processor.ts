@@ -90,7 +90,7 @@ function findCacheInfoFromEvents(invocationContext: InvocationContext): {
       ) {
         cacheMetadata = {
           ...source,
-          invocationsUsed: source.invocationsUsed! + 1,
+          invocationsUsed: source.invocationsUsed + 1,
         };
       } else {
         cacheMetadata = {...source};

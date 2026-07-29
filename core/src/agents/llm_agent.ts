@@ -402,8 +402,9 @@ export class LlmAgent extends BaseAgent {
       INSTRUCTIONS_LLM_REQUEST_PROCESSOR,
       REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR,
       CONTENT_REQUEST_PROCESSOR,
-      // Context cache runs immediately after contents so it can set up cache
-      // config and recover metadata from the assembled request/session.
+      // Mirrors the Python flow, which places the context cache processor after
+      // contents. This processor reads only the invocation context, so the
+      // position is not load-bearing.
       CONTEXT_CACHE_REQUEST_PROCESSOR,
       INTERACTIONS_REQUEST_PROCESSOR,
       CODE_EXECUTION_REQUEST_PROCESSOR,
