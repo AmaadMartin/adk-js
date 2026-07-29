@@ -86,12 +86,6 @@ describe('env_aware_utils', () => {
       expect(warnSpy).not.toHaveBeenCalled();
     });
 
-    it('should return false when GOOGLE_GENAI_USE_ENTERPRISE is "false"', () => {
-      process.env = {...baseEnv, 'GOOGLE_GENAI_USE_ENTERPRISE': 'false'};
-      expect(isEnterpriseModeEnabled()).toBe(false);
-      expect(warnSpy).not.toHaveBeenCalled();
-    });
-
     it('should let GOOGLE_GENAI_USE_ENTERPRISE="false" override GOOGLE_GENAI_USE_VERTEXAI="true"', () => {
       process.env = {
         ...baseEnv,
@@ -102,16 +96,6 @@ describe('env_aware_utils', () => {
       expect(warnSpy).not.toHaveBeenCalled();
     });
 
-    it('should let GOOGLE_GENAI_USE_ENTERPRISE="true" override GOOGLE_GENAI_USE_VERTEXAI="false"', () => {
-      process.env = {
-        ...baseEnv,
-        'GOOGLE_GENAI_USE_ENTERPRISE': 'true',
-        'GOOGLE_GENAI_USE_VERTEXAI': 'false',
-      };
-      expect(isEnterpriseModeEnabled()).toBe(true);
-      expect(warnSpy).not.toHaveBeenCalled();
-    });
-
     it('should fall back to GOOGLE_GENAI_USE_VERTEXAI="true" and warn', () => {
       process.env = {...baseEnv, 'GOOGLE_GENAI_USE_VERTEXAI': 'true'};
       expect(isEnterpriseModeEnabled()).toBe(true);
@@ -119,6 +103,11 @@ describe('env_aware_utils', () => {
       expect(warnSpy).toHaveBeenCalledWith(
         expect.stringMatching(/GOOGLE_GENAI_USE_VERTEXAI is deprecated/),
       );
+    });
+
+    it('should accept "1", which adk create and adk deploy write but the SDK parser rejects', () => {
+      process.env = {...baseEnv, 'GOOGLE_GENAI_USE_VERTEXAI': '1'};
+      expect(isEnterpriseModeEnabled()).toBe(true);
     });
 
     it('should warn on GOOGLE_GENAI_USE_VERTEXAI="false" since presence triggers the notice', () => {

@@ -231,8 +231,7 @@ export class Gemini extends BaseLlm {
       });
     } else {
       this._apiClient = new GoogleGenAI({
-        // Always false here; pins the SDK to ADK's backend decision so it
-        // cannot re-resolve it from the environment.
+        // Always false here; pins the SDK to ADK's backend decision.
         vertexai: this.vertexai,
         apiKey: this.apiKey,
         httpOptions: this.getHttpOptions(),
@@ -276,8 +275,7 @@ export class Gemini extends BaseLlm {
         });
       } else {
         this._liveApiClient = new GoogleGenAI({
-          // Always false here; pins the SDK to ADK's backend decision so it
-          // cannot re-resolve it from the environment.
+          // Always false here; pins the SDK to ADK's backend decision.
           vertexai: this.vertexai,
           apiKey: this.apiKey,
           httpOptions: this.getLiveHttpOptions(),
