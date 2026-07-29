@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {spawn} from 'child_process';
+import {spawn} from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -19,6 +19,18 @@ import {
 } from './code_execution_utils.js';
 
 const IS_WINDOWS = os.platform() === 'win32';
+
+/**
+ * Flags for every spawned PowerShell process. `-NoProfile` keeps execution
+ * hermetic: host profile scripts must not run before the executed script.
+ */
+const POWERSHELL_ARGS = [
+  '-NoProfile',
+  '-NoLogo',
+  '-ExecutionPolicy',
+  'Bypass',
+  '-File',
+] as const;
 
 /**
  * Options for UnsafeLocalCodeExecutor.
@@ -101,7 +113,7 @@ function getExtensionForLanguage(
  * **Execution Details**:
  * - **JavaScript**: Executed via `node` (defaults to `process.execPath`).
  * - **Python**: Executed via `python3` on Unix, and `python` on Windows.
- * - **Shell**: Executed via `bash` on Unix, and defaults to `powershell` (injecting ExecutionPolicy Bypass) or `cmd.exe` on Windows.
+ * - **Shell**: Executed via `bash` on Unix, and defaults to `powershell` (invoked with `-NoProfile` and `-ExecutionPolicy Bypass`) or `cmd.exe` on Windows.
  *
  * WARNING: This executor runs code in the local environment without sandboxing or security restrictions.
  * Use with caution and only for trusted code.
@@ -172,13 +184,13 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
       } else if (language === CodeExecutionLanguage.SHELL) {
         command = this.shellCommandPath;
         if (this.shellCommandPath.toLowerCase().includes('powershell')) {
-          args = ['-NoLogo', '-ExecutionPolicy', 'Bypass', '-File', filePath];
+          args = [...POWERSHELL_ARGS, filePath];
         } else if (this.shellCommandPath.toLowerCase().includes('cmd')) {
           args = ['/c', filePath];
         }
       } else if (language === CodeExecutionLanguage.POWERSHELL) {
         command = IS_WINDOWS ? 'powershell' : 'pwsh';
-        args = ['-NoLogo', '-ExecutionPolicy', 'Bypass', '-File', filePath];
+        args = [...POWERSHELL_ARGS, filePath];
       } else if (language === CodeExecutionLanguage.WINDOWS_CMD) {
         command = 'cmd.exe';
         args = ['/c', filePath];

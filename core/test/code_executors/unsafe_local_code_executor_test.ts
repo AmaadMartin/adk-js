@@ -13,7 +13,36 @@ import {
   UnsafeLocalCodeExecutor,
   createSession,
 } from '@google/adk';
-import {beforeEach, describe, expect, it} from 'vitest';
+import {ChildProcess, spawn} from 'node:child_process';
+import {EventEmitter} from 'node:events';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
+
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:child_process')>();
+  // Default to the real implementation so the tests that actually execute
+  // scripts keep working; tests that assert the argument vector override it.
+  return {...actual, spawn: vi.fn(actual.spawn)};
+});
+
+const spawnMock = vi.mocked(spawn);
+
+const POWERSHELL_FLAGS = [
+  '-NoProfile',
+  '-NoLogo',
+  '-ExecutionPolicy',
+  'Bypass',
+  '-File',
+];
+
+/**
+ * A `ChildProcess` stub that exits successfully without running anything. It
+ * has no stdout/stderr streams, which `executeCode` already handles.
+ */
+function stubChildProcess(): ChildProcess {
+  const child = new EventEmitter() as unknown as ChildProcess;
+  setImmediate(() => child.emit('close', 0, null));
+  return child;
+}
 
 function createMockInvocationContext(): InvocationContext {
   const agent = new LlmAgent({
@@ -40,6 +69,8 @@ describe('UnsafeLocalCodeExecutor', () => {
 
   beforeEach(() => {
     executor = new UnsafeLocalCodeExecutor();
+    // `mockClear` keeps the real-`spawn` delegate installed by the factory.
+    spawnMock.mockClear();
   });
 
   it('should execute code and return stdout', async () => {
@@ -307,5 +338,49 @@ describe('UnsafeLocalCodeExecutor', () => {
     expect(result.outputFiles![0].content).toBe('{"hello":"world"}');
     expect(result.outputFiles![0].contentEncoding).toBe('utf-8');
     expect(result.outputFiles![0].mimeType).toBe('application/json');
+  });
+
+  it('should pass -NoProfile when the shell command is PowerShell', async () => {
+    const customExecutor = new UnsafeLocalCodeExecutor({
+      shellCommandPath: 'non-existent-powershell-999',
+    });
+    spawnMock.mockImplementationOnce(() => stubChildProcess());
+
+    await customExecutor.executeCode({
+      invocationContext,
+      codeExecutionInput: {
+        code: 'Write-Output "test"',
+        language: CodeExecutionLanguage.SHELL,
+        inputFiles: [],
+      },
+    });
+
+    const [command, args] = spawnMock.mock.calls[0];
+    expect(command).toBe('non-existent-powershell-999');
+    // The script extension is `.ps1` on Windows but `.sh` elsewhere.
+    expect(args).toEqual([
+      ...POWERSHELL_FLAGS,
+      expect.stringMatching(/script\.(ps1|sh)$/),
+    ]);
+  });
+
+  it('should pass -NoProfile for the powershell language', async () => {
+    spawnMock.mockImplementationOnce(() => stubChildProcess());
+
+    await executor.executeCode({
+      invocationContext,
+      codeExecutionInput: {
+        code: 'Write-Output "test"',
+        language: CodeExecutionLanguage.POWERSHELL,
+        inputFiles: [],
+      },
+    });
+
+    const [command, args] = spawnMock.mock.calls[0];
+    expect(command).toBe(process.platform === 'win32' ? 'powershell' : 'pwsh');
+    expect(args).toEqual([
+      ...POWERSHELL_FLAGS,
+      expect.stringMatching(/script\.ps1$/),
+    ]);
   });
 });
