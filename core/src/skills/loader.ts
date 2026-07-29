@@ -106,9 +106,13 @@ async function loadDir(
 /**
  * Parses SKILL.md from a raw content string, extracting the YAML frontmatter and the body.
  *
+ * This is the only place skill frontmatter is validated: callers receive a
+ * `Frontmatter` already validated and normalized against `FrontmatterSchema`.
+ *
  * @param content - The raw content of the SKILL.md file.
- * @returns An object containing the parsed frontmatter and the remaining markdown body.
- * @throws {Error} If the content is not properly formatted with YAML frontmatter.
+ * @returns An object containing the validated frontmatter and the remaining markdown body.
+ * @throws {Error} If the content is not properly formatted with YAML frontmatter,
+ * or if the frontmatter fails schema validation.
  */
 export function parseSkillMdContent(content: string): {
   frontmatter: Frontmatter;
@@ -255,8 +259,7 @@ async function loadSkillFile(skillDir: string): Promise<Skill> {
     );
   }
 
-  const {frontmatter: parsed, body} = parseSkillMdContent(content);
-  const frontmatter = FrontmatterSchema.parse(parsed);
+  const {frontmatter, body} = parseSkillMdContent(content);
   const dirName = path.basename(resolvedDir);
   if (dirName !== frontmatter.name) {
     throw new Error(
@@ -352,8 +355,7 @@ export function loadSkillFromZipBuffer(zipBuffer: Buffer): Skill {
     throw new Error('SKILL.md not found in zipped filesystem.');
   }
 
-  const {frontmatter: parsed, body} = parseSkillMdContent(skillMdContent);
-  const frontmatter = FrontmatterSchema.parse(parsed);
+  const {frontmatter, body} = parseSkillMdContent(skillMdContent);
 
   const references: Record<string, string | Buffer> = {};
   const assets: Record<string, string | Buffer> = {};
