@@ -5,7 +5,6 @@
  */
 import {
   BaseAgent,
-  Event,
   InMemorySessionService,
   isLlmAgent,
   Runner,
@@ -16,14 +15,9 @@ import {cloneDeep} from 'lodash-es';
 import * as assert from 'node:assert';
 import {AgentRegistry} from './agent_registry.js';
 import {DummyLlm} from './dummy_llm.js';
+import {normalizeEvent} from './event_filter.js';
 import {ReplayPlugin} from './replay_plugin.js';
-import {
-  FilteredEvent,
-  FilteredEventActions,
-  FilteredPart,
-  TestInfo,
-  UserMessage,
-} from './test_types.js';
+import {TestInfo, UserMessage} from './test_types.js';
 
 const SKIPPED_TESTS = [
   {
@@ -155,73 +149,4 @@ function validateSession(actual: Session, expected: Session) {
   const expectedEvents = expected.events.map(normalizeEvent);
 
   assert.deepStrictEqual(actualEvents, expectedEvents);
-}
-
-function normalizeEvent(event: Event): FilteredEvent {
-  const filteredEvent = event as FilteredEvent;
-  filterEventFields(filteredEvent);
-  removeEmptyAndUndefinedFields(
-    filteredEvent as unknown as Record<string, unknown>,
-  );
-  return filteredEvent;
-}
-
-function removeEmptyAndUndefinedFields(obj: Record<string, unknown>) {
-  for (const key in obj) {
-    if (Object.hasOwn(obj, key)) {
-      if (obj[key] === undefined || obj[key] === null) {
-        delete obj[key];
-      } else if (Array.isArray(obj[key])) {
-        for (let i = 0; i < obj[key].length; i++) {
-          removeEmptyAndUndefinedFields(obj[key][i] as Record<string, unknown>);
-        }
-
-        // Remove fields that are just an empty array
-        if (obj[key].length === 0) {
-          delete obj[key];
-          continue;
-        }
-      } else if (typeof obj[key] === 'object') {
-        removeEmptyAndUndefinedFields(obj[key] as Record<string, unknown>);
-
-        // Remove fields that are just an empty object
-        if (Object.keys(obj[key] as Record<string, unknown>).length === 0) {
-          delete obj[key];
-          continue;
-        }
-      }
-    }
-  }
-}
-
-function filterEventActionsStateDelta(actions?: FilteredEventActions) {
-  if (!actions?.stateDelta) {
-    return;
-  }
-
-  delete actions.stateDelta['_adk_recordings_config'];
-  delete actions.stateDelta['_adk_replay_config'];
-}
-
-function filterPartFields(part: FilteredPart) {
-  /* eslint-disable @typescript-eslint/no-explicit-any */
-  delete (part as any).thoughtSignature;
-  delete (part as any).functionCall;
-  delete (part as any).functionResponse;
-  /* eslint-enable @typescript-eslint/no-explicit-any */
-}
-
-function filterEventFields(event: FilteredEvent) {
-  /* eslint-disable @typescript-eslint/no-explicit-any */
-  delete (event as any).id;
-  delete (event as any).timestamp;
-  delete (event as any).invocationId;
-  delete (event as any).longRunningToolIds;
-  /* eslint-enable @typescript-eslint/no-explicit-any */
-
-  filterEventActionsStateDelta(event.actions);
-
-  if (event.content) {
-    event.content.parts?.forEach(filterPartFields);
-  }
 }
