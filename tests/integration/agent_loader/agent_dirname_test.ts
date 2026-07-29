@@ -4,16 +4,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {exec, spawn} from 'node:child_process';
-import * as fs from 'node:fs/promises';
+import {spawn} from 'node:child_process';
 import * as path from 'node:path';
-import {promisify} from 'node:util';
 import {afterAll, beforeAll, describe, expect, it} from 'vitest';
+import {
+  cleanupFixtureProject,
+  FIXTURE_HOOK_TIMEOUT_MS,
+  FIXTURE_RUN_TIMEOUT_MS,
+  installFixtureProject,
+} from '../fixture_project.js';
 import {sendInput} from '../test_case_utils.js';
 
-const execAsync = promisify(exec);
 const dirname = process.cwd();
-const TEST_EXECUTION_TIMEOUT = 40000;
 
 describe.each(['__dirname', '__filename', 'import_meta_url'])(
   'Agent with %s',
@@ -25,8 +27,8 @@ describe.each(['__dirname', '__filename', 'import_meta_url'])(
     );
 
     beforeAll(async () => {
-      await execAsync('npm install', {cwd: projectPath});
-    }, TEST_EXECUTION_TIMEOUT);
+      await installFixtureProject(projectPath);
+    }, FIXTURE_HOOK_TIMEOUT_MS);
 
     it(
       'should run agent and load params from file nearby via package.json script',
@@ -43,19 +45,11 @@ describe.each(['__dirname', '__filename', 'import_meta_url'])(
         response = await sendInput(childProcess, 'exit\n');
         expect(response.toString()).toContain('');
       },
-      TEST_EXECUTION_TIMEOUT,
+      FIXTURE_RUN_TIMEOUT_MS,
     );
 
     afterAll(async () => {
-      await fs
-        .rm(path.join(projectPath, 'node_modules'), {
-          recursive: true,
-          force: true,
-        })
-        .catch(() => {});
-      await fs
-        .unlink(path.join(projectPath, 'package-lock.json'))
-        .catch(() => {});
-    }, TEST_EXECUTION_TIMEOUT);
+      await cleanupFixtureProject(projectPath);
+    }, FIXTURE_HOOK_TIMEOUT_MS);
   },
 );
