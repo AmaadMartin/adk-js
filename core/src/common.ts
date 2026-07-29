@@ -15,6 +15,7 @@ export type {
 } from './agents/base_agent.js';
 export {Context} from './agents/context.js';
 export {
+  REQUEST_EUC_FUNCTION_CALL_NAME,
   findEventByFunctionCallId,
   findMatchingFunctionCall,
   functionsExportedForTestingOnly,

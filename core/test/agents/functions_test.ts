@@ -14,6 +14,8 @@ import {
   InvocationContext,
   LlmAgent,
   PluginManager,
+  REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
+  REQUEST_EUC_FUNCTION_CALL_NAME,
   Session,
   SingleAfterToolCallback,
   SingleBeforeToolCallback,
@@ -765,5 +767,14 @@ describe('findMatchingFunctionCall', () => {
     });
     expect(findMatchingFunctionCall([callEvent])).toBeUndefined();
     expect(findMatchingFunctionCall([])).toBeUndefined();
+  });
+});
+
+describe('reserved HITL function call names', () => {
+  it('are exported from the public package entry point', () => {
+    expect(REQUEST_EUC_FUNCTION_CALL_NAME).toBe('adk_request_credential');
+    expect(REQUEST_CONFIRMATION_FUNCTION_CALL_NAME).toBe(
+      'adk_request_confirmation',
+    );
   });
 });
