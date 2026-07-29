@@ -37,14 +37,6 @@ interface OriginPolicyOptions {
   port: number;
 }
 
-/** Splits a comma-separated `--allow_origins` value into literal origins. */
-export function parseAllowedOrigins(value?: string): string[] {
-  return (value ?? '')
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter((origin) => origin.length > 0);
-}
-
 /**
  * Returns true if `host` is a loopback address, as Node reports a bound one:
  * a bare address, canonicalized (`::1`, never `0:0:0:0:0:0:0:1`) and port-less.

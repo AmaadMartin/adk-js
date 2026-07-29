@@ -45,7 +45,6 @@ import {
   buildOriginPolicy,
   createOriginCheckMiddleware,
   OriginPolicy,
-  parseAllowedOrigins,
 } from './origin_check.js';
 
 interface ServerOptions {
@@ -116,7 +115,10 @@ export class AdkApiServer {
         options.reloadAgents ?? false,
       );
     this.serveDebugUI = options.serveDebugUI ?? false;
-    this.allowedOrigins = parseAllowedOrigins(options.allowOrigins);
+    this.allowedOrigins = (options.allowOrigins ?? '')
+      .split(',')
+      .map((origin) => origin.trim())
+      .filter((origin) => origin.length > 0);
     this.otelToCloud = options.otelToCloud ?? false;
     this.registerProcessors = options.registerProcessors;
     this.memoryExporter = new InMemoryExporter(this.sessionTraceDict);

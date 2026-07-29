@@ -114,6 +114,8 @@ describe('AdkApiServer origin and host validation', () => {
   it.each([
     ['http://evil.com', 'http://evil.com'],
     ['*', '*'],
+    // A comma-separated list used to reach `cors` as one unmatchable string.
+    ['http://other.example, http://evil.com', 'http://evil.com'],
   ])(
     'lets a configured origin through and echoes the CORS header for %s',
     async (allowOrigins, expected) => {

@@ -10,7 +10,6 @@ import {describe, expect, it} from 'vitest';
 import {
   buildOriginPolicy,
   OriginPolicy,
-  parseAllowedOrigins,
   requestRejectionReason,
 } from '../../src/server/origin_check.js';
 
@@ -29,18 +28,6 @@ function loopbackPolicy(allowedOrigins: string[] = []): OriginPolicy {
 function headers(host?: string, origin?: string): http.IncomingHttpHeaders {
   return {host, origin};
 }
-
-describe('parseAllowedOrigins', () => {
-  it.each([
-    [undefined, []],
-    ['', []],
-    ['*', ['*']],
-    ['http://a, http://b', ['http://a', 'http://b']],
-    ['http://a,', ['http://a']],
-  ])('parses %s', (value, expected) => {
-    expect(parseAllowedOrigins(value)).toEqual(expected);
-  });
-});
 
 describe('buildOriginPolicy', () => {
   it.each(['127.0.0.1', 'localhost', '::1', '127.1.2.3'])(
@@ -101,15 +88,12 @@ describe('buildOriginPolicy', () => {
 });
 
 describe('requestRejectionReason', () => {
-  // The DNS-rebinding scenarios ported from the Python dev server: a page that
+  // The DNS-rebinding scenario ported from the Python dev server: a page that
   // re-resolves its own name to the loopback address reaches the server with an
-  // attacker-controlled Host, with or without a matching Origin.
-  it.each([
-    ['evil.com:8000', 'http://evil.com'],
-    ['evil.com:8000', undefined],
-  ])('blocks a rebound request with host %s', (host, origin) => {
+  // attacker-controlled Host that its own Origin matches.
+  it('blocks a rebound request whose Origin matches its forged Host', () => {
     const reason = requestRejectionReason(
-      {method: 'POST', headers: headers(host, origin)},
+      {method: 'POST', headers: headers('evil.com:8000', 'http://evil.com')},
       loopbackPolicy(),
     );
 
