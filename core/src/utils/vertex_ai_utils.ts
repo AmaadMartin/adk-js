@@ -45,18 +45,6 @@ export function getExpressModeApiKey(
 }
 
 /**
- * The credentials used to reach the Vertex AI Agent Engines API.
- *
- * An express mode API key and a project/location pair are mutually exclusive;
- * see {@link getExpressModeApiKey}.
- */
-export interface AgentEnginesClientOptions {
-  projectId?: string;
-  location?: string;
-  expressModeApiKey?: string;
-}
-
-/**
  * Builds the genai API client used for Vertex AI express mode.
  *
  * `@google-cloud/vertexai`'s `Client` has no API key option: it always
@@ -84,11 +72,14 @@ type AgentEnginesApiClient = ConstructorParameters<typeof AgentEngines>[0];
  * Creates the Agent Engines client for the given credentials.
  *
  * An express mode API key wins over a project/location pair, matching
- * `_get_api_client` in the Python ADK.
+ * `_get_api_client` in the Python ADK. The two are mutually exclusive; see
+ * {@link getExpressModeApiKey}.
  */
-export function createAgentEnginesClient(
-  options: AgentEnginesClientOptions,
-): AgentEngines {
+export function createAgentEnginesClient(options: {
+  projectId?: string;
+  location?: string;
+  expressModeApiKey?: string;
+}): AgentEngines {
   if (options.expressModeApiKey) {
     const apiClient = createExpressModeApiClient(options.expressModeApiKey);
     // `AgentEngines` is compiled against the `@google/genai` copy that
