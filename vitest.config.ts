@@ -5,7 +5,24 @@
  */
 
 import path from 'path';
-import {defineConfig} from 'vitest/config';
+import {configDefaults, defineConfig} from 'vitest/config';
+
+/**
+ * Integration suites that install fixture npm projects, run `tsc` builds, or
+ * spawn the built ADK CLI. They dominate CI wall-clock, so they live in the
+ * dedicated `integration:slow` project and run in their own CI job.
+ *
+ * Directory globs rather than file paths: the reason each directory is slow is
+ * structural, so new test files added there are classified slow automatically.
+ */
+const SLOW_INTEGRATION_TESTS = [
+  'tests/integration/build_setup/**/*_test.ts',
+  'tests/integration/app_loader/**/*_test.ts',
+  'tests/integration/agent_loader/**/*_test.ts',
+  'tests/integration/skills/script_js/**/*_test.ts',
+  'tests/integration/a2a/**/*_test.ts',
+  'tests/integration/adk_web/**/*_test.ts',
+];
 
 export default defineConfig({
   test: {
@@ -72,6 +89,24 @@ export default defineConfig({
             ),
           },
           include: ['tests/integration/**/*_test.ts'],
+          // `configDefaults.exclude` must be spread: supplying `exclude`
+          // replaces the defaults, and the slow suites leave `node_modules/`
+          // inside the fixture directories.
+          exclude: [...configDefaults.exclude, ...SLOW_INTEGRATION_TESTS],
+        },
+      },
+      {
+        test: {
+          name: 'integration:slow',
+          environment: 'node',
+          alias: {
+            '@google/adk': path.resolve(__dirname, './core/src'),
+            '@google/adk-integrations': path.resolve(
+              __dirname,
+              './integrations/src',
+            ),
+          },
+          include: SLOW_INTEGRATION_TESTS,
         },
       },
       {
