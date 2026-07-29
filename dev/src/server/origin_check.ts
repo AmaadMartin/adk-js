@@ -15,15 +15,6 @@ const SAFE_HTTP_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 /** Every spelling of the loopback interface a browser may put in `Host`. */
 const LOOPBACK_HOSTS = ['localhost', '127.0.0.1', '::1'];
 
-const FORBIDDEN_ORIGIN_MESSAGE = 'Forbidden: origin not allowed';
-const FORBIDDEN_HOST_MESSAGE = 'Forbidden: host not allowed';
-
-/** The parts of an inbound request the gate inspects. */
-export interface RequestInfo {
-  method: string;
-  headers: http.IncomingHttpHeaders;
-}
-
 /** Immutable policy computed once per server, from the bound host and port. */
 export interface OriginPolicy {
   /** Literal origins from `--allow_origins` ('*' allows any origin). */
@@ -36,7 +27,7 @@ export interface OriginPolicy {
 }
 
 /** Inputs to {@link buildOriginPolicy}. */
-export interface OriginPolicyOptions {
+interface OriginPolicyOptions {
   allowedOrigins: string[];
   /** Address the server is bound to (`server.address().address`). */
   serverHost: string;
@@ -54,18 +45,16 @@ export function parseAllowedOrigins(value?: string): string[] {
     .filter((origin) => origin.length > 0);
 }
 
-/** Returns true if the bare address `host` (no port) is a loopback address. */
+/**
+ * Returns true if `host` is a loopback address, as Node reports a bound one:
+ * a bare address, canonicalized (`::1`, never `0:0:0:0:0:0:0:1`) and port-less.
+ */
 export function isLoopbackAddress(host: string): boolean {
-  if (host === 'localhost') {
-    return true;
-  }
   // The `isIPv4` guard matters: `127.evil.com` is a hostname, not a loopback IP.
-  if (net.isIPv4(host)) {
-    return host.startsWith('127.');
-  }
-  // The URL parser canonicalizes every IPv6 spelling (`0:0:0:0:0:0:0:1`,
-  // `::0001`, ...) to its compressed form, so one comparison covers them all.
-  return net.isIPv6(host) && parseUrlHost(`http://[${host}]`) === '[::1]';
+  return (
+    LOOPBACK_HOSTS.includes(host) ||
+    (net.isIPv4(host) && host.startsWith('127.'))
+  );
 }
 
 /** Returns the lower-cased `host[:port]` of a URL, or undefined if unparseable. */
@@ -78,7 +67,7 @@ function parseUrlHost(url: string): string | undefined {
 }
 
 /** Validates an `Origin` header against the allowlist, then against same-origin. */
-export function isRequestOriginAllowed(
+function isRequestOriginAllowed(
   origin: string,
   headers: http.IncomingHttpHeaders,
   policy: OriginPolicy,
@@ -102,7 +91,7 @@ export function isRequestOriginAllowed(
  * re-resolves to 127.0.0.1 reaches the server with `Host: evil.com:8000` and,
  * being same-origin as far as the browser knows, no `Origin` header at all.
  */
-export function isRequestHostAllowed(
+function isRequestHostAllowed(
   headers: http.IncomingHttpHeaders,
   policy: OriginPolicy,
 ): boolean {
@@ -145,11 +134,11 @@ export function buildOriginPolicy(options: OriginPolicyOptions): OriginPolicy {
 
 /** Returns why the request must be rejected, or undefined to let it through. */
 export function requestRejectionReason(
-  req: RequestInfo,
+  req: {method: string; headers: http.IncomingHttpHeaders},
   policy: OriginPolicy,
 ): string | undefined {
   if (!isRequestHostAllowed(req.headers, policy)) {
-    return FORBIDDEN_HOST_MESSAGE;
+    return 'Forbidden: host not allowed';
   }
   const origin = req.headers.origin;
   // Requests without an Origin (curl, the ADK CLI) are covered by the Host
@@ -159,7 +148,7 @@ export function requestRejectionReason(
     origin !== undefined &&
     !isRequestOriginAllowed(origin, req.headers, policy)
   ) {
-    return FORBIDDEN_ORIGIN_MESSAGE;
+    return 'Forbidden: origin not allowed';
   }
   return undefined;
 }

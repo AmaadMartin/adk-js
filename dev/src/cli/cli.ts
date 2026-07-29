@@ -109,7 +109,7 @@ const PORT_OPTION = new Option(
 ).default('8000');
 const ORIGINS_OPTION = new Option(
   '--allow_origins <string>',
-  'Optional. Comma-separated list of origins allowed to send cross-origin requests to the server',
+  'Optional. Comma-separated list of origins allowed to send cross-origin requests to the server. Their hosts are also accepted in the Host header',
 ).default('');
 const VERBOSE_OPTION = new Option(
   '-v, --verbose [boolean]',

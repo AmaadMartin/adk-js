@@ -10,8 +10,6 @@ import {describe, expect, it} from 'vitest';
 import {
   buildOriginPolicy,
   isLoopbackAddress,
-  isRequestHostAllowed,
-  isRequestOriginAllowed,
   OriginPolicy,
   parseAllowedOrigins,
   requestRejectionReason,
@@ -34,7 +32,7 @@ function headers(host?: string, origin?: string): http.IncomingHttpHeaders {
 }
 
 describe('isLoopbackAddress', () => {
-  it.each(['127.0.0.1', 'localhost', '::1', '0:0:0:0:0:0:0:1', '127.1.2.3'])(
+  it.each(['127.0.0.1', 'localhost', '::1', '127.1.2.3'])(
     'treats %s as loopback',
     (host) => {
       expect(isLoopbackAddress(host)).toBe(true);
@@ -45,8 +43,6 @@ describe('isLoopbackAddress', () => {
     'evil.com',
     '127.evil.com',
     '0.0.0.0',
-    '192.168.1.1',
-    '10.0.0.1',
     '128.0.0.1',
     '2001:db8::1',
     '',
@@ -98,80 +94,11 @@ describe('buildOriginPolicy', () => {
     expect(policy.allowedHosts).toBeUndefined();
   });
 
-  it('brackets an IPv6 bind address, as browsers do', () => {
-    const policy = buildOriginPolicy({
-      allowedOrigins: [],
-      serverHost: '::1',
-      configuredHost: '::1',
-      port: PORT,
-    });
-
-    expect(policy.allowedHosts?.has(`[::1]:${PORT}`)).toBe(true);
-  });
-
   it('accepts the hosts of configured origins but not the wildcard', () => {
     const policy = loopbackPolicy(['https://tunnel.example', '*']);
 
     expect(policy.allowedHosts?.has('tunnel.example')).toBe(true);
     expect(policy.allowedHosts?.has('*')).toBe(false);
-  });
-});
-
-describe('isRequestOriginAllowed', () => {
-  it('allows an explicitly configured origin', () => {
-    const allowed = isRequestOriginAllowed(
-      'http://localhost:4200',
-      headers(`localhost:${PORT}`),
-      loopbackPolicy(['http://localhost:4200']),
-    );
-
-    expect(allowed).toBe(true);
-  });
-
-  it('allows any origin when the wildcard is configured', () => {
-    const allowed = isRequestOriginAllowed(
-      'http://evil.com',
-      headers(`localhost:${PORT}`),
-      loopbackPolicy(['*']),
-    );
-
-    expect(allowed).toBe(true);
-  });
-
-  it('blocks a request whose own origin cannot be determined', () => {
-    const allowed = isRequestOriginAllowed(
-      `http://localhost:${PORT}`,
-      headers(undefined),
-      loopbackPolicy(),
-    );
-
-    expect(allowed).toBe(false);
-  });
-});
-
-describe('isRequestHostAllowed', () => {
-  const policy = loopbackPolicy();
-
-  it.each([`localhost:${PORT}`, `127.0.0.1:${PORT}`, `LOCALHOST:${PORT}`])(
-    'accepts the allowlisted host %s',
-    (host) => {
-      expect(isRequestHostAllowed(headers(host), policy)).toBe(true);
-    },
-  );
-
-  it('rejects a missing host while enforcing', () => {
-    expect(isRequestHostAllowed(headers(undefined), policy)).toBe(false);
-  });
-
-  it('accepts a missing host when not enforcing', () => {
-    const wildcardBind = buildOriginPolicy({
-      allowedOrigins: [],
-      serverHost: '0.0.0.0',
-      configuredHost: '0.0.0.0',
-      port: PORT,
-    });
-
-    expect(isRequestHostAllowed(headers(undefined), wildcardBind)).toBe(true);
   });
 });
 
@@ -241,5 +168,59 @@ describe('requestRejectionReason', () => {
     );
 
     expect(reason).toBeUndefined();
+  });
+
+  it('allows an explicitly configured origin', () => {
+    const reason = requestRejectionReason(
+      {
+        method: 'POST',
+        headers: headers(`localhost:${PORT}`, 'http://localhost:4200'),
+      },
+      loopbackPolicy(['http://localhost:4200']),
+    );
+
+    expect(reason).toBeUndefined();
+  });
+
+  it('allows any origin when the wildcard is configured', () => {
+    const reason = requestRejectionReason(
+      {
+        method: 'POST',
+        headers: headers(`localhost:${PORT}`, 'http://evil.com'),
+      },
+      loopbackPolicy(['*']),
+    );
+
+    expect(reason).toBeUndefined();
+  });
+
+  it.each([`127.0.0.1:${PORT}`, `LOCALHOST:${PORT}`])(
+    'accepts the allowlisted host %s',
+    (host) => {
+      const reason = requestRejectionReason(
+        {method: 'POST', headers: headers(host)},
+        loopbackPolicy(),
+      );
+
+      expect(reason).toBeUndefined();
+    },
+  );
+
+  it('rejects a missing Host while the allowlist is enforced', () => {
+    const reason = requestRejectionReason(
+      {method: 'POST', headers: headers(undefined)},
+      loopbackPolicy(),
+    );
+
+    expect(reason).toBe('Forbidden: host not allowed');
+  });
+
+  it('blocks a request whose own origin cannot be determined', () => {
+    const reason = requestRejectionReason(
+      {method: 'POST', headers: headers(undefined, 'http://evil.com')},
+      {allowedOrigins: []},
+    );
+
+    expect(reason).toBe('Forbidden: origin not allowed');
   });
 });

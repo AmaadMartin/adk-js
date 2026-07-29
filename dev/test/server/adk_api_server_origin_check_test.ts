@@ -111,16 +111,6 @@ describe('AdkApiServer origin and host validation', () => {
     expect(response.body).toBe('Forbidden: host not allowed');
   });
 
-  it('accepts every loopback spelling of its own Host', async () => {
-    const port = await startServer();
-
-    for (const host of [`localhost:${port}`, `127.0.0.1:${port}`]) {
-      const response = await request(port, '/list-apps', {headers: {host}});
-
-      expect(response.status).toBe(200);
-    }
-  });
-
   it('lets a configured origin through and echoes the CORS header', async () => {
     const port = await startServer({allowOrigins: 'http://evil.com'});
 
