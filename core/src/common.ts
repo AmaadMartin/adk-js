@@ -13,6 +13,8 @@ export type {
   BeforeAgentCallback,
   SingleAgentCallback,
 } from './agents/base_agent.js';
+export {CodeConfigSchema} from './agents/common_configs.js';
+export type {CodeConfig} from './agents/common_configs.js';
 export {Context} from './agents/context.js';
 export {
   findEventByFunctionCallId,
@@ -299,6 +301,22 @@ export {
 } from './evaluation/app_details.js';
 export type {AgentDetails, AppDetails} from './evaluation/app_details.js';
 export {
+  BaseEvalService,
+  EvaluateConfigSchema,
+  EvaluateRequestSchema,
+  InferenceConfigSchema,
+  InferenceRequestSchema,
+  InferenceResultSchema,
+  InferenceStatus,
+} from './evaluation/base_eval_service.js';
+export type {
+  EvaluateConfig,
+  EvaluateRequest,
+  InferenceConfig,
+  InferenceRequest,
+  InferenceResult,
+} from './evaluation/base_eval_service.js';
+export {
   DEFAULT_LIVE_TIMEOUT_SECONDS,
   MISSING_EVAL_DEPENDENCIES_MESSAGE,
 } from './evaluation/constants.js';
@@ -336,6 +354,18 @@ export type {
   StaticConversation,
   ToolCallAndResponse,
 } from './evaluation/eval_case.js';
+export {
+  CustomMetricConfigSchema,
+  EvalConfigSchema,
+  LiveModelConfigSchema,
+  getEvalMetricsFromConfig,
+  getEvaluationCriteriaOrDefault,
+} from './evaluation/eval_config.js';
+export type {
+  CustomMetricConfig,
+  EvalConfig,
+  LiveModelConfig,
+} from './evaluation/eval_config.js';
 export {
   BaseCriterionSchema,
   EvalMetricResultDetailsSchema,
@@ -391,6 +421,8 @@ export type {
 } from './evaluation/eval_rubrics.js';
 export {EvalSetSchema} from './evaluation/eval_set.js';
 export type {EvalSet} from './evaluation/eval_set.js';
+export type {EvalSetResultsManager} from './evaluation/eval_set_results_manager.js';
+export type {EvalSetsManager} from './evaluation/eval_sets_manager.js';
 export {
   UserBehaviorSchema,
   UserPersonaSchema,
