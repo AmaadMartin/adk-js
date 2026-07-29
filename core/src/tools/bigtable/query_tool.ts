@@ -4,90 +4,238 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {getBigtableClient} from './client.js';
-import {getLogger} from '../../utils/logger.js';
+import {Bigtable, Instance, SqlTypes} from '@google-cloud/bigtable';
+import type {NamedList} from '@google-cloud/bigtable/build/src/execute-query/namedlist.js';
+import type {SqlValue} from '@google-cloud/bigtable/build/src/execute-query/values.js';
 import {z} from 'zod';
-import {BigtableToolSettings} from './settings.js';
-import {BigtableCredentialsConfig} from './bigtable_credentials.js';
 
-const logger = getLogger();
+import {BigtableToolSettings} from './settings.js';
+import {runBigtableTool} from './tool_result.js';
+
 const DEFAULT_MAX_EXECUTED_QUERY_RESULT_ROWS = 50;
 
+/**
+ * The values the Bigtable SDK accepts for a GoogleSQL query parameter.
+ *
+ * Read off `ExecuteQueryOptions`, which `@google-cloud/bigtable@6.5.1` does
+ * not re-export from the package root.
+ */
+export type BigtableQueryParameters = NonNullable<
+  Parameters<Instance['createExecuteQueryStream']>[0]['parameters']
+>;
+
+/** A single value of {@link BigtableQueryParameters}. */
+export type BigtableQueryParameterValue = BigtableQueryParameters[string];
+
+/** The GoogleSQL scalar types a query parameter can be declared as. */
+export const SQL_PARAMETER_TYPE_NAMES = [
+  'bool',
+  'bytes',
+  'date',
+  'float32',
+  'float64',
+  'int64',
+  'string',
+  'timestamp',
+] as const;
+
+/** The name of a GoogleSQL scalar type, as the model spells it. */
+export type BigtableSqlParameterType =
+  (typeof SQL_PARAMETER_TYPE_NAMES)[number];
+
+const SQL_PARAMETER_TYPE_FACTORIES: Record<
+  BigtableSqlParameterType,
+  () => SqlTypes.Type
+> = {
+  bool: SqlTypes.Bool,
+  bytes: SqlTypes.Bytes,
+  date: SqlTypes.Date,
+  float32: SqlTypes.Float32,
+  float64: SqlTypes.Float64,
+  int64: SqlTypes.Int64,
+  string: SqlTypes.String,
+  timestamp: SqlTypes.Timestamp,
+};
+
+/** A value that survives `JSON.stringify` on its way to the model. */
+export type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | JsonValue[]
+  | {[key: string]: JsonValue};
+
 export const ExecuteSqlArgsSchema = z.object({
-  projectId: z.string().describe('The GCP project id in which the query should be executed.'),
+  projectId: z
+    .string()
+    .describe('The GCP project id in which the query should be executed.'),
   instanceId: z.string().describe('The instance id of the Bigtable database.'),
   query: z.string().describe('The Bigtable SQL query to be executed.'),
-  parameters: z.record(z.string(), z.any()).optional().describe('properties for parameter replacement. Keys must match the names used in query.'),
-  parameterTypes: z.record(z.string(), z.any()).optional().describe('maps explicit types for one or more param values.'),
-  _viewParameters: z.record(z.string(), z.any()).optional().describe('maps properties for parameterized views.'),
-
+  parameters: z
+    .record(
+      z.string(),
+      z.union([z.string(), z.number(), z.boolean(), z.null()]),
+    )
+    .optional()
+    .describe(
+      'Values for the query parameters. Keys must match the `@name` placeholders used in query.',
+    ),
+  parameterTypes: z
+    .record(z.string(), z.enum(SQL_PARAMETER_TYPE_NAMES))
+    .optional()
+    .describe(
+      'The GoogleSQL type of each parameter used in query, keyed by parameter name.',
+    ),
 });
 
-export async function executeSql(
-  projectId: string,
-  instanceId: string,
-  query: string,
-  config?: BigtableCredentialsConfig,
-  settings?: BigtableToolSettings,
-  parameters?: Record<string, any>,
-  parameterTypes?: Record<string, any>,
-  _viewParameters?: Record<string, any>
-): Promise<Record<string, any>> {
-  try {
-    const client = getBigtableClient(projectId, config);
-    const instance = client.instance(instanceId);
-    
-    // Create the executeQuery stream
-    // Using any for the options parameter to bypass missing typescript definitions depending on the sdk version.
-    const queryOptions: any = {
-      query,
-      params: parameters,
-    };
-    if (parameterTypes) queryOptions.parameterTypes = parameterTypes;
-    if (_viewParameters) queryOptions.viewParameters = _viewParameters;
+/** Options for {@link executeSql}. */
+export interface ExecuteSqlOptions {
+  instanceId: string;
+  query: string;
+  /** Values for the `@name` placeholders in the query. */
+  parameters?: BigtableQueryParameters;
+  /** The declared GoogleSQL type of each parameter used in the query. */
+  parameterTypes?: Record<string, BigtableSqlParameterType>;
+  /**
+   * Parameter values resolved from trusted session state rather than supplied
+   * by the model. They take precedence over same-named `parameters`, so the
+   * model cannot forge the values a parameterized view filters on.
+   */
+  viewParameters?: BigtableQueryParameters;
+  settings?: BigtableToolSettings;
+}
 
-    const stream = instance.createExecuteQueryStream(queryOptions);
+/**
+ * Runs a GoogleSQL query against a Bigtable instance and returns the rows,
+ * capped at {@link BigtableToolSettings.maxQueryResultRows}.
+ */
+export function executeSql(client: Bigtable, options: ExecuteSqlOptions) {
+  return runBigtableTool('execute_sql', async () => {
+    const instance = client.instance(options.instanceId);
+    const [preparedStatement] = await instance.prepareStatement({
+      query: options.query,
+      parameterTypes: toSqlTypes(options.parameterTypes),
+    });
 
-    const rows: Record<string, any>[] = [];
-    const maxRows = (settings?.maxQueryResultRows && settings.maxQueryResultRows > 0) 
-        ? settings.maxQueryResultRows 
+    const stream: AsyncIterable<unknown> = instance.createExecuteQueryStream({
+      preparedStatement,
+      parameters: {...options.parameters, ...options.viewParameters},
+    });
+
+    const maxRows =
+      options.settings?.maxQueryResultRows &&
+      options.settings.maxQueryResultRows > 0
+        ? options.settings.maxQueryResultRows
         : DEFAULT_MAX_EXECUTED_QUERY_RESULT_ROWS;
 
-    let counter = maxRows;
-    let truncated = false;
-    
+    const rows: Array<{[key: string]: JsonValue}> = [];
+    let resultIsLikelyTruncated = false;
     for await (const row of stream) {
-      if (counter <= 0) {
-        truncated = true;
+      if (rows.length >= maxRows) {
+        resultIsLikelyTruncated = true;
         break;
       }
-      
-      const rowValues: Record<string, any> = {};
-      const entries = (row instanceof Map) ? Array.from(row.entries()) : Object.entries(row);
-      for (const [key, val] of entries) {
-         let safeVal = val;
-         try {
-            JSON.stringify(val);
-         } catch {
-            safeVal = String(val);
-         }
-         rowValues[key as string] = safeVal;
+      if (!isNamedList(row)) {
+        throw new Error(
+          'createExecuteQueryStream yielded a row that is not a QueryResultRow.',
+        );
       }
-      rows.push(rowValues);
-      counter--;
+      rows.push(namedListToJson(row));
     }
-    
-    const result: Record<string, any> = { status: 'SUCCESS', rows };
-    if (truncated) {
-      result.result_is_likely_truncated = true;
-    }
-    return result;
 
-  } catch (ex: any) {
-    logger.error(`Bigtable query failed: ${ex}`);
-    return {
-      status: 'ERROR',
-      error_details: String(ex),
-    };
+    return {rows, result_is_likely_truncated: resultIsLikelyTruncated};
+  });
+}
+
+/** Instantiates the SDK type object for each declared parameter type. */
+function toSqlTypes(
+  parameterTypes?: Record<string, BigtableSqlParameterType>,
+): Record<string, SqlTypes.Type> | undefined {
+  if (!parameterTypes) {
+    return undefined;
   }
+  return Object.fromEntries(
+    Object.entries(parameterTypes).map(([name, type]) => [
+      name,
+      SQL_PARAMETER_TYPE_FACTORIES[type](),
+    ]),
+  );
+}
+
+/**
+ * `QueryResultRow` and `Struct` both extend `NamedList`, which stores cells
+ * positionally and resolves column names by index.
+ */
+function isNamedList(value: unknown): value is NamedList<SqlValue> {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'values' in value &&
+    'getFieldNameAtIndex' in value
+  );
+}
+
+/** `EncodedKeyMap` implements `Map` rather than extending it. */
+function isMapLike(value: object): value is Map<unknown, unknown> {
+  return 'entries' in value && Symbol.iterator in value;
+}
+
+/** Reads a row or struct column-wise into a plain JSON object. */
+function namedListToJson(list: NamedList<SqlValue>): {
+  [key: string]: JsonValue;
+} {
+  const result: {[key: string]: JsonValue} = {};
+  list.values.forEach((value, index) => {
+    result[list.getFieldNameAtIndex(index) ?? String(index)] =
+      toJsonValue(value);
+  });
+  return result;
+}
+
+/**
+ * Converts a Bigtable cell to something `JSON.stringify` can carry to the
+ * model: `INT64` arrives as a `bigint`, `BYTES` as a `Uint8Array` and `STRUCT`
+ * as a positional `NamedList`, none of which serialize usefully on their own.
+ */
+function toJsonValue(value: unknown): JsonValue {
+  switch (typeof value) {
+    case 'string':
+    case 'number':
+    case 'boolean':
+      return value;
+    case 'bigint':
+      return value.toString();
+    case 'object':
+      break;
+    default:
+      return null;
+  }
+
+  if (value === null) {
+    return null;
+  }
+  if (value instanceof Uint8Array) {
+    return Buffer.from(value).toString('base64');
+  }
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+  if (Array.isArray(value)) {
+    return value.map(toJsonValue);
+  }
+  if (isNamedList(value)) {
+    return namedListToJson(value);
+  }
+  if (isMapLike(value)) {
+    return Object.fromEntries(
+      [...value.entries()].map(([key, entry]) => [
+        String(key),
+        toJsonValue(entry),
+      ]),
+    );
+  }
+  return Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => [key, toJsonValue(entry)]),
+  );
 }
