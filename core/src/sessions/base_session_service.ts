@@ -8,7 +8,8 @@ import {cloneDeep} from 'lodash-es';
 
 import {Event} from '../events/event.js';
 
-import {CompositeSessionKey, Session} from './session.js';
+import {Session} from './session.js';
+import {CreateSessionScope, SessionScope, UserScope} from './session_scope.js';
 import {State} from './state.js';
 
 /**
@@ -24,21 +25,15 @@ export interface GetSessionConfig {
 /**
  * The parameters for `createSession`.
  */
-export interface CreateSessionRequest {
-  /** The name of the application. */
-  appName: string;
-  /** The ID of the user. */
-  userId: string;
+export interface CreateSessionRequest extends CreateSessionScope {
   /** The initial state of the session. */
   state?: Record<string, unknown>;
-  /** The ID of the session. A new ID will be generated if not provided. */
-  sessionId?: string;
 }
 
 /**
  * The parameters for `getSession`.
  */
-export interface GetSessionRequest extends CompositeSessionKey {
+export interface GetSessionRequest extends SessionScope {
   /** The configurations for getting the session. */
   config?: GetSessionConfig;
 }
@@ -46,11 +41,7 @@ export interface GetSessionRequest extends CompositeSessionKey {
 /**
  * The parameters for `listSessions`.
  */
-export interface ListSessionsRequest {
-  /** The name of the application. */
-  appName: string;
-  /** The ID of the user. */
-  userId: string;
+export interface ListSessionsRequest extends UserScope {
   /** Maximum number of sessions to return. */
   limit?: number;
   /** Zero-based index of the first session to return. Ignored if `page` is set. */
@@ -64,7 +55,7 @@ export interface ListSessionsRequest {
 /**
  * The parameters for `deleteSession`.
  */
-export type DeleteSessionRequest = CompositeSessionKey;
+export type DeleteSessionRequest = SessionScope;
 
 /**
  * The parameters for `appendEvent`.
