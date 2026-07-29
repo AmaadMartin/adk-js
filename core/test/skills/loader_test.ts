@@ -338,6 +338,52 @@ Instructions`,
       await fs.rm(tempDir, {recursive: true, force: true});
     });
 
+    it.each(['allowed-tools', 'allowedTools'])(
+      'returns no problems for a skill using the %s key',
+      async (key) => {
+        tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-skill-test-'));
+        const skillDir = path.join(tempDir, 'test-skill');
+        await fs.mkdir(skillDir);
+
+        await fs.writeFile(
+          path.join(skillDir, 'SKILL.md'),
+          `---
+name: test-skill
+description: A test skill
+${key}: 'Bash(git status:*), Read'
+---
+Instructions`,
+        );
+
+        const problems = await validateSkillDir(skillDir);
+        expect(problems).toEqual([]);
+
+        await fs.rm(tempDir, {recursive: true, force: true});
+      },
+    );
+
+    it('does not report the derived allowedTools key alongside real unknown fields', async () => {
+      tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-skill-test-'));
+      const skillDir = path.join(tempDir, 'test-skill');
+      await fs.mkdir(skillDir);
+
+      await fs.writeFile(
+        path.join(skillDir, 'SKILL.md'),
+        `---
+name: test-skill
+description: A test skill
+allowed-tools: 'Read'
+unknown_field: value
+---
+Instructions`,
+      );
+
+      const problems = await validateSkillDir(skillDir);
+      expect(problems).toEqual(['Unknown frontmatter fields: [unknown_field]']);
+
+      await fs.rm(tempDir, {recursive: true, force: true});
+    });
+
     it('returns problem for invalid frontmatter', async () => {
       tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-skill-test-'));
       const skillDir = path.join(tempDir, 'test-skill');
