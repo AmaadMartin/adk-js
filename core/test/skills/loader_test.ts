@@ -132,12 +132,15 @@ ${body}
         `---
 name: test-skill
 description: A test skill
+allowed-tools: tool1,tool2
 ---
 Instructions content`,
       );
 
       const skill = await loadSkillFromDir(skillDir);
       expect(skill.frontmatter.name).toBe('test-skill');
+      expect(skill.frontmatter.allowedTools).toBe('tool1,tool2');
+      expect(skill.frontmatter.metadata).toEqual({});
       expect(skill.instructions).toBe('Instructions content');
       expect(skill.resources?.references).toEqual({});
       expect(skill.resources?.assets).toEqual({});
@@ -240,28 +243,6 @@ Instructions`,
       );
       expect(skill.resources?.assets?.['logo.png']).toBe('binary content');
       expect(skill.resources?.scripts?.['run.sh']).toEqual({src: 'echo hello'});
-
-      await fs.rm(tempDir, {recursive: true, force: true});
-    });
-
-    it('normalizes allowed-tools and defaults metadata', async () => {
-      tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-skill-test-'));
-      const skillDir = path.join(tempDir, 'test-skill');
-      await fs.mkdir(skillDir);
-
-      await fs.writeFile(
-        path.join(skillDir, 'SKILL.md'),
-        `---
-name: test-skill
-description: A test skill
-allowed-tools: tool1,tool2
----
-Instructions`,
-      );
-
-      const skill = await loadSkillFromDir(skillDir);
-      expect(skill.frontmatter.allowedTools).toBe('tool1,tool2');
-      expect(skill.frontmatter.metadata).toEqual({});
 
       await fs.rm(tempDir, {recursive: true, force: true});
     });
@@ -382,29 +363,7 @@ Instructions`,
       await fs.rm(tempDir, {recursive: true, force: true});
     });
 
-    it('returns problem if name does not match directory name', async () => {
-      tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-skill-test-'));
-      const skillDir = path.join(tempDir, 'wrong-name');
-      await fs.mkdir(skillDir);
-
-      await fs.writeFile(
-        path.join(skillDir, 'SKILL.md'),
-        `---
-name: test-skill
-description: A test skill
----
-Instructions`,
-      );
-
-      const problems = await validateSkillDir(skillDir);
-      expect(problems).toEqual([
-        "Skill name 'test-skill' does not match directory name 'wrong-name'.",
-      ]);
-
-      await fs.rm(tempDir, {recursive: true, force: true});
-    });
-
-    it('reports only the name mismatch when the skill also has unknown frontmatter fields', async () => {
+    it('returns only the name mismatch, even with unknown frontmatter fields', async () => {
       tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-skill-test-'));
       const skillDir = path.join(tempDir, 'wrong-name');
       await fs.mkdir(skillDir);
@@ -423,9 +382,6 @@ Instructions`,
       expect(problems).toEqual([
         "Skill name 'test-skill' does not match directory name 'wrong-name'.",
       ]);
-      expect(
-        problems.some((p) => p.includes('Unknown frontmatter fields')),
-      ).toBe(false);
 
       await fs.rm(tempDir, {recursive: true, force: true});
     });
