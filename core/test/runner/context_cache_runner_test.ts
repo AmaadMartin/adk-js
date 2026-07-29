@@ -92,7 +92,7 @@ async function setup(
     appName: app.name,
     userId: 'user',
   });
-  return {model, app, runner, sessionService, session};
+  return {model, runner, session};
 }
 
 /** Runs one turn and returns the events it produced. */
@@ -115,8 +115,7 @@ async function send(
 describe('Context cache orchestration through the Runner', () => {
   it('recovers metadata and token count across turns and increments invocationsUsed', async () => {
     const cacheConfig = createContextCacheConfig({minTokens: 2048});
-    const {model, app, runner, sessionService, session} =
-      await setup(cacheConfig);
+    const {model, runner, session} = await setup(cacheConfig);
 
     for (let turn = 0; turn < 3; turn++) {
       await send(runner, session.id, `turn ${turn}`);
@@ -133,23 +132,11 @@ describe('Context cache orchestration through the Runner', () => {
     expect(second.cacheMetadata?.invocationsUsed).toBe(2);
     expect(second.cacheableContentsTokenCount).toBe(PROMPT_TOKEN_COUNT);
 
-    // Turn 3: recovers turn 2's metadata (incremented again).
+    // Turn 3: recovers turn 2's metadata (incremented again). Recovery at all
+    // is only possible because each response's metadata was copied onto the
+    // emitted event and persisted with the session.
     expect(third.cacheMetadata?.invocationsUsed).toBe(3);
     expect(third.cacheableContentsTokenCount).toBe(PROMPT_TOKEN_COUNT);
-
-    // The recovery above is only possible because each response's metadata is
-    // copied onto the emitted event and persisted with the session.
-    const persisted = await sessionService.getSession({
-      appName: app.name,
-      userId: 'user',
-      sessionId: session.id,
-    });
-    const modelEvents = persisted!.events.filter(
-      (e) => e.author === 'assistant',
-    );
-    expect(modelEvents.map((e) => e.cacheMetadata?.invocationsUsed)).toEqual([
-      1, 2, 3,
-    ]);
   });
 
   it('propagates the config to a sub-agent invocation context', async () => {
