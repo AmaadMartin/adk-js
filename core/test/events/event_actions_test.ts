@@ -4,9 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {AuthConfig, ToolConfirmation} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 import {
   createEventActions,
+  EventActions,
+  hasEventActions,
   mergeEventActions,
 } from '../../src/events/event_actions.js';
 
@@ -200,5 +203,38 @@ describe('mergeEventActions', () => {
       createEventActions({stateDelta: {x: 1}}),
     ]);
     expect(result.stateDelta).toEqual({x: 1});
+  });
+});
+
+const authConfig: AuthConfig = {
+  credentialKey: 'testKey',
+  authScheme: {type: 'apiKey', name: 'testKey', in: 'header'},
+};
+
+describe('hasEventActions', () => {
+  it('returns false for a pristine actions object', () => {
+    expect(hasEventActions(createEventActions())).toBe(false);
+  });
+
+  it.each<[string, Partial<EventActions>]>([
+    ['a non-empty stateDelta', {stateDelta: {key: 'val'}}],
+    ['a non-empty artifactDelta', {artifactDelta: {'file.txt': 1}}],
+    [
+      'a non-empty requestedAuthConfigs',
+      {requestedAuthConfigs: {'call-1': authConfig}},
+    ],
+    [
+      'a non-empty requestedToolConfirmations',
+      {
+        requestedToolConfirmations: {
+          'call-1': new ToolConfirmation({hint: 'confirm', confirmed: false}),
+        },
+      },
+    ],
+    ['skipSummarization set to false', {skipSummarization: false}],
+    ['escalate set to false', {escalate: false}],
+    ['transferToAgent', {transferToAgent: 'other'}],
+  ])('returns true for %s', (_, overrides) => {
+    expect(hasEventActions(createEventActions(overrides))).toBe(true);
   });
 });

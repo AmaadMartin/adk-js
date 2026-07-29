@@ -15,7 +15,7 @@ import {
   getFunctionCalls,
   getFunctionResponses,
 } from '../events/event.js';
-import {mergeEventActions} from '../events/event_actions.js';
+import {hasEventActions, mergeEventActions} from '../events/event_actions.js';
 import {BaseTool} from '../tools/base_tool.js';
 import {ToolConfirmation} from '../tools/tool_confirmation.js';
 import {logger} from '../utils/logger.js';
@@ -109,7 +109,7 @@ export function generateAuthEvent(
     branch: invocationContext.branch,
     content: {
       parts: parts,
-      role: functionResponseEvent.content!.role,
+      role: functionResponseEvent.content?.role ?? 'user',
     },
     longRunningToolIds: Array.from(longRunningToolIds),
   });
@@ -162,7 +162,7 @@ export function generateRequestConfirmationEvent({
     branch: invocationContext.branch,
     content: {
       parts: parts,
-      role: functionResponseEvent.content!.role,
+      role: functionResponseEvent.content?.role ?? 'user',
     },
     actions: functionResponseEvent.actions,
     longRunningToolIds: Array.from(longRunningToolIds),
@@ -415,6 +415,21 @@ export async function handleFunctionCallList({
     // TODO - b/425992518: state event polluting runtime, consider fix.
     // Allow long running function to return None as response.
     if (tool.isLongRunning && !functionResponse) {
+      // The function response event built below is the only place
+      // toolContext.actions is attached to an event, so anything the tool
+      // already recorded would be dropped here. Emit a content-less,
+      // actions-only event instead so the runtime still sees it.
+      if (hasEventActions(toolContext.actions)) {
+        functionResponseEvents.push(
+          createEvent({
+            invocationId: invocationContext.invocationId,
+            author: invocationContext.agent.name,
+            branch: invocationContext.branch,
+            actions: toolContext.actions,
+            longRunningToolIds: [functionCall.id!],
+          }),
+        );
+      }
       continue;
     }
 
@@ -542,8 +557,15 @@ export function mergeParallelFunctionResponseEvents(
     invocationId: baseEvent.invocationId,
     author: baseEvent.author,
     branch: baseEvent.branch,
-    content: {role: 'user', parts: mergedParts},
+    // A batch of long-running calls that all paused contributes no parts; the
+    // merged event must stay content-less rather than carry an empty turn.
+    content: mergedParts.length
+      ? {role: 'user', parts: mergedParts}
+      : undefined,
     actions: mergedActions,
+    longRunningToolIds: functionResponseEvents.flatMap(
+      (event) => event.longRunningToolIds ?? [],
+    ),
     timestamp: baseEvent.timestamp!,
   });
 }

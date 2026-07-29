@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
+  AuthConfig,
   BasePlugin,
   BaseTool,
   createEvent,
@@ -13,6 +14,7 @@ import {
   FunctionTool,
   InvocationContext,
   LlmAgent,
+  LongRunningFunctionTool,
   PluginManager,
   Session,
   SingleAfterToolCallback,
@@ -54,6 +56,34 @@ const errorTool = new FunctionTool({
   execute: async () => {
     throw new Error('tool error message content');
   },
+});
+
+const testAuthConfig: AuthConfig = {
+  credentialKey: 'testKey',
+  authScheme: {type: 'apiKey', name: 'testKey', in: 'header'},
+};
+
+// Records something on its context and then returns nothing, i.e. the
+// human-in-the-loop pattern where the real function response is injected
+// later by the client.
+const pausingTool = new LongRunningFunctionTool({
+  name: 'pausingTool',
+  description: 'pauses for an out-of-band response',
+  parameters: z.object({}),
+  execute: async (_args, toolContext) => {
+    if (toolContext) {
+      toolContext.state.set('pending', true);
+      toolContext.actions.skipSummarization = true;
+    }
+    return null;
+  },
+});
+
+const silentLongRunningTool = new LongRunningFunctionTool({
+  name: 'silentLongRunningTool',
+  description: 'pauses without recording anything',
+  parameters: z.object({}),
+  execute: async () => null,
 });
 
 // Plugin for testing
@@ -363,6 +393,82 @@ describe('handleFunctionCallList', () => {
       }),
     );
   });
+
+  it('should return an actions-only event when a long-running tool records actions and returns null', async () => {
+    const longRunningCall: FunctionCall = {
+      id: 'long_running_call_1',
+      name: 'pausingTool',
+      args: {},
+    };
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [longRunningCall],
+      toolsDict: {'pausingTool': pausingTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event).not.toBeNull();
+    expect(event!.content).toBeUndefined();
+    expect(event!.actions.stateDelta).toEqual({pending: true});
+    expect(event!.actions.skipSummarization).toBe(true);
+    expect(event!.longRunningToolIds).toEqual(['long_running_call_1']);
+  });
+
+  it('should still return null when a long-running tool records nothing and returns null', async () => {
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [
+        {id: 'long_running_call_1', name: 'silentLongRunningTool', args: {}},
+      ],
+      toolsDict: {'silentLongRunningTool': silentLongRunningTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event).toBeNull();
+  });
+
+  it('should merge a pausing long-running tool actions into the merged event for parallel calls', async () => {
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [
+        {id: 'long_running_call_1', name: 'pausingTool', args: {}},
+        {id: 'call_2', name: 'testTool', args: {}},
+      ],
+      toolsDict: {'pausingTool': pausingTool, 'testTool': testTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    const parts = event!.content!.parts!;
+    expect(parts.length).toBe(1);
+    expect(parts[0].functionResponse!.name).toBe('testTool');
+    expect(event!.actions.stateDelta).toEqual({pending: true});
+    expect(event!.actions.skipSummarization).toBe(true);
+    expect(event!.longRunningToolIds).toEqual(['long_running_call_1']);
+  });
+
+  it('should keep the merged event content-less when every parallel call pauses', async () => {
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [
+        {id: 'long_running_call_1', name: 'pausingTool', args: {}},
+        {id: 'long_running_call_2', name: 'pausingTool', args: {}},
+      ],
+      toolsDict: {'pausingTool': pausingTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event!.content).toBeUndefined();
+    expect(event!.actions.stateDelta).toEqual({pending: true});
+    expect(event!.longRunningToolIds).toEqual([
+      'long_running_call_1',
+      'long_running_call_2',
+    ]);
+  });
 });
 
 describe('generateAuthEvent', () => {
@@ -431,6 +537,23 @@ describe('generateAuthEvent', () => {
     expect(call2).toBeDefined();
     expect(call2!.functionCall!.name).toBe('adk_request_credential');
     expect(call2!.functionCall!.args!['auth_config']).toBe('auth_config_2');
+  });
+
+  it('should build an auth event from a content-less function response event', () => {
+    const functionResponseEvent = createEvent({
+      actions: createEventActions({
+        requestedAuthConfigs: {'call_1': testAuthConfig},
+      }),
+    });
+
+    const event = generateAuthEvent(invocationContext, functionResponseEvent);
+
+    expect(event).toBeDefined();
+    expect(event!.content!.role).toBe('user');
+    const parts = event!.content!.parts!;
+    expect(parts.length).toBe(1);
+    expect(parts[0].functionCall!.name).toBe('adk_request_credential');
+    expect(parts[0].functionCall!.args!['function_call_id']).toBe('call_1');
   });
 });
 
@@ -605,6 +728,39 @@ describe('generateRequestConfirmationEvent', () => {
         'call_1',
     );
     expect(call1).toBeDefined();
+  });
+
+  it('should build a confirmation event from a content-less function response event', () => {
+    const functionCallEvent = createEvent({
+      content: {
+        role: 'user',
+        parts: [{functionCall: {name: 'tool_1', args: {}, id: 'call_1'}}],
+      },
+    });
+
+    const functionResponseEvent = createEvent({
+      actions: createEventActions({
+        requestedToolConfirmations: {
+          'call_1': new ToolConfirmation({
+            hint: 'confirm tool 1',
+            confirmed: false,
+          }),
+        },
+      }),
+    });
+
+    const event = generateRequestConfirmationEvent({
+      invocationContext,
+      functionCallEvent,
+      functionResponseEvent,
+    });
+
+    expect(event).toBeDefined();
+    expect(event!.content!.role).toBe('user');
+    expect(event!.content!.parts!.length).toBe(1);
+    expect(event!.content!.parts![0].functionCall!.name).toBe(
+      'adk_request_confirmation',
+    );
   });
 });
 

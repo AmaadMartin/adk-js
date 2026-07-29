@@ -82,6 +82,24 @@ export function createEventActions(
 }
 
 /**
+ * Returns whether the given {@link EventActions} carries any mutation, i.e.
+ * whether it is worth attaching to an event. Empty means every dictionary is
+ * empty and every scalar is `undefined`; an explicit `false` (e.g.
+ * `escalate: false`) is a mutation and counts as present.
+ */
+export function hasEventActions(actions: EventActions): boolean {
+  return (
+    Object.keys(actions.stateDelta).length > 0 ||
+    Object.keys(actions.artifactDelta).length > 0 ||
+    Object.keys(actions.requestedAuthConfigs).length > 0 ||
+    Object.keys(actions.requestedToolConfirmations).length > 0 ||
+    actions.skipSummarization !== undefined ||
+    actions.transferToAgent !== undefined ||
+    actions.escalate !== undefined
+  );
+}
+
+/**
  * Merges a list of {@link EventActions} objects into a single
  * {@link EventActions} object.
  *
