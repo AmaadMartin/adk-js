@@ -111,29 +111,21 @@ describe('AdkApiServer origin and host validation', () => {
     expect(response.body).toBe('Forbidden: host not allowed');
   });
 
-  it('lets a configured origin through and echoes the CORS header', async () => {
-    const port = await startServer({allowOrigins: 'http://evil.com'});
+  it.each([
+    ['http://evil.com', 'http://evil.com'],
+    ['*', '*'],
+  ])(
+    'lets a configured origin through and echoes the CORS header for %s',
+    async (allowOrigins, expected) => {
+      const port = await startServer({allowOrigins});
 
-    const response = await request(port, '/apps/testApp/users/u/sessions', {
-      method: 'POST',
-      headers: {origin: 'http://evil.com'},
-    });
+      const response = await request(port, '/apps/testApp/users/u/sessions', {
+        method: 'POST',
+        headers: {origin: 'http://evil.com'},
+      });
 
-    expect(response.status).toBe(200);
-    expect(response.headers['access-control-allow-origin']).toBe(
-      'http://evil.com',
-    );
-  });
-
-  it('keeps the wildcard CORS header for --allow_origins *', async () => {
-    const port = await startServer({allowOrigins: '*'});
-
-    const response = await request(port, '/apps/testApp/users/u/sessions', {
-      method: 'POST',
-      headers: {origin: 'http://evil.com'},
-    });
-
-    expect(response.status).toBe(200);
-    expect(response.headers['access-control-allow-origin']).toBe('*');
-  });
+      expect(response.status).toBe(200);
+      expect(response.headers['access-control-allow-origin']).toBe(expected);
+    },
+  );
 });

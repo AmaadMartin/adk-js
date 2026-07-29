@@ -15,7 +15,7 @@ const SAFE_HTTP_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 /** Every spelling of the loopback interface a browser may put in `Host`. */
 const LOOPBACK_HOSTS = ['localhost', '127.0.0.1', '::1'];
 
-/** Immutable policy computed once per server, from the bound host and port. */
+/** Policy for the request gate, derived from the bound host and port. */
 export interface OriginPolicy {
   /** Literal origins from `--allow_origins` ('*' allows any origin). */
   allowedOrigins: string[];
