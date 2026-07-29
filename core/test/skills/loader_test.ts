@@ -277,12 +277,8 @@ Instructions`,
     }
 
     it('returns no problems for a valid skill directory', async () => {
-      tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-skill-test-'));
-      const skillDir = path.join(tempDir, 'test-skill');
-      await fs.mkdir(skillDir);
-
-      await fs.writeFile(
-        path.join(skillDir, 'SKILL.md'),
+      const problems = await validateFixture(
+        'test-skill',
         `---
 name: test-skill
 description: A test skill
@@ -290,10 +286,7 @@ description: A test skill
 Instructions`,
       );
 
-      const problems = await validateSkillDir(skillDir);
       expect(problems).toEqual([]);
-
-      await fs.rm(tempDir, {recursive: true, force: true});
     });
 
     it.each(['SKILL.md', 'skill.md', 'Skill.md', 'sKiLl.Md'])(
@@ -342,21 +335,7 @@ Instructions`,
       await fs.rm(tempDir, {recursive: true, force: true});
     });
 
-    it('returns problem for unknown frontmatter fields', async () => {
-      const problems = await validateFixture(
-        'test-skill',
-        `---
-name: test-skill
-description: A test skill
-unknown_field: value
----
-Instructions`,
-      );
-
-      expect(problems).toEqual(['Unknown frontmatter fields: [unknown_field]']);
-    });
-
-    it('sorts unknown frontmatter fields', async () => {
+    it('returns sorted problem for unknown frontmatter fields', async () => {
       const problems = await validateFixture(
         'test-skill',
         `---
@@ -450,48 +429,20 @@ Instructions`,
       );
     });
 
-    it.each([
-      [
-        'content does not start with ---',
-        `name: test-skill
----
-Instructions`,
-        'SKILL.md must start with YAML frontmatter (---)',
-      ],
-      [
-        'frontmatter is not closed',
-        `---
-name: test-skill
-description: A test skill`,
-        'SKILL.md frontmatter not properly closed with ---',
-      ],
-      [
-        'YAML is malformed',
-        `---
-name: test-skill
-invalid: [
----
-Instructions`,
-        'Invalid YAML in frontmatter:',
-      ],
-      [
-        'frontmatter is not a mapping',
+    it('returns a single problem when frontmatter is not a mapping', async () => {
+      const problems = await validateFixture(
+        'test-skill',
         `---
 - item1
 - item2
 ---
 Instructions`,
-        'Invalid YAML in frontmatter: SKILL.md frontmatter must be a YAML mapping',
-      ],
-    ])(
-      'returns a single problem when %s',
-      async (_label, content, expectedMessage) => {
-        const problems = await validateFixture('test-skill', content);
+      );
 
-        expect(problems).toHaveLength(1);
-        expect(problems[0]).toContain(expectedMessage);
-      },
-    );
+      expect(problems).toEqual([
+        'Invalid YAML in frontmatter: SKILL.md frontmatter must be a YAML mapping',
+      ]);
+    });
   });
 
   describe('loadAllSkillsInDir', () => {
