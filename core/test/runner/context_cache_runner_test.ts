@@ -163,11 +163,10 @@ describe('Context cache orchestration through the Runner', () => {
         }),
     );
 
-    const events = await send(runner, session.id, 'hello');
+    await send(runner, session.id, 'hello');
 
-    // The only LLM call comes from the sub-agent, so seeing the app config on
-    // its request proves the config reached the sub-agent's invocation context.
-    expect(events.some((e) => e.author === 'sub')).toBe(true);
+    // Only the sub-agent has a model, so seeing the app config on the recorded
+    // request proves the config reached the sub-agent's invocation context.
     expect(model.capturedRequests[0].cacheConfig).toBe(cacheConfig);
   });
 

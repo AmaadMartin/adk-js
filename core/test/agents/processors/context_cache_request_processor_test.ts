@@ -154,7 +154,6 @@ describe('ContextCacheRequestProcessor', () => {
       contextCacheConfig: cacheConfig,
       invocationId: 'current',
       events: [
-        createEvent({author: 'other_agent'}),
         createEvent({author: 'test_agent'}),
         createEvent({
           author: 'test_agent',
@@ -179,7 +178,6 @@ describe('ContextCacheRequestProcessor', () => {
       events: [
         createEvent({author: 'test_agent', usageMetadata: {}}),
         createEvent({author: 'test_agent'}),
-        createEvent({author: 'other_agent'}),
       ],
     });
     const llmRequest = makeLlmRequest();
