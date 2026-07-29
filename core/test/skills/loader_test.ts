@@ -102,6 +102,22 @@ Body with newlines
       expect(result.body).toBe('Body with newlines');
     });
 
+    it('returns the frontmatter keys as written', () => {
+      const content = `---
+name: test-skill
+description: A test skill
+allowed-tools: read
+---
+Body`;
+
+      const result = parseSkillMdContent(content);
+      expect(result.declaredKeys).toEqual([
+        'name',
+        'description',
+        'allowed-tools',
+      ]);
+    });
+
     it('handles tables in body', () => {
       const body = `Body with table
 
@@ -132,12 +148,14 @@ ${body}
         `---
 name: test-skill
 description: A test skill
+allowed-tools: read
 ---
 Instructions content`,
       );
 
       const skill = await loadSkillFromDir(skillDir);
       expect(skill.frontmatter.name).toBe('test-skill');
+      expect(skill.frontmatter.allowedTools).toBe('read');
       expect(skill.instructions).toBe('Instructions content');
       expect(skill.resources?.references).toEqual({});
       expect(skill.resources?.assets).toEqual({});
@@ -330,10 +348,28 @@ Instructions`,
       );
 
       const problems = await validateSkillDir(skillDir);
-      expect(problems.length).toBeGreaterThan(0);
-      expect(
-        problems.some((p) => p.includes('Unknown frontmatter fields')),
-      ).toBe(true);
+      expect(problems).toEqual(['Unknown frontmatter fields: [unknown_field]']);
+
+      await fs.rm(tempDir, {recursive: true, force: true});
+    });
+
+    it('returns no problems for a skill that declares allowed-tools', async () => {
+      tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-skill-test-'));
+      const skillDir = path.join(tempDir, 'test-skill');
+      await fs.mkdir(skillDir);
+
+      await fs.writeFile(
+        path.join(skillDir, 'SKILL.md'),
+        `---
+name: test-skill
+description: A test skill
+allowed-tools: read
+---
+Instructions`,
+      );
+
+      const problems = await validateSkillDir(skillDir);
+      expect(problems).toEqual([]);
 
       await fs.rm(tempDir, {recursive: true, force: true});
     });
