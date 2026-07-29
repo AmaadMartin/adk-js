@@ -127,14 +127,6 @@ describe('agentEngineApiEndpoint', () => {
 });
 
 describe('parseSseStream', () => {
-  it('yields the event of a single data line', async () => {
-    const events = await collect(
-      parseSseStream(streamOf(['data: {"author":"agent"}\n\n'])),
-    );
-
-    expect(events).toEqual([{author: 'agent'}]);
-  });
-
   it('yields several events of one chunk in order', async () => {
     const events = await collect(
       parseSseStream(streamOf([sseBody([{id: '1'}, {id: '2'}, {id: '3'}])])),

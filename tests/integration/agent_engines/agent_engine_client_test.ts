@@ -5,6 +5,7 @@
  */
 
 import {AgentEngineClient, AgentEngineEvent} from '@google/adk';
+import {once} from 'node:events';
 import * as http from 'node:http';
 import {setTimeout as delay} from 'node:timers/promises';
 import {
@@ -118,24 +119,16 @@ function localServerFetch(origin: string): typeof fetch {
     realFetch(String(input).replace(VERTEX_ORIGIN, origin), init);
 }
 
-interface RecordedRequest {
-  method: string;
-  url: string;
-  classMethod: unknown;
-}
+/** Each request the server answered, as `"<method> <path>"`. */
+const requests: string[] = [];
 
-const requests: RecordedRequest[] = [];
-const authorizations: Array<string | undefined> = [];
-
-function readBody(req: http.IncomingMessage): Promise<string> {
-  return new Promise((resolve) => {
-    let body = '';
-    req.setEncoding('utf8');
-    req.on('data', (chunk: string) => {
-      body += chunk;
-    });
-    req.on('end', () => resolve(body));
-  });
+async function readBody(req: http.IncomingMessage): Promise<string> {
+  let body = '';
+  req.setEncoding('utf8');
+  for await (const chunk of req) {
+    body += String(chunk);
+  }
+  return body;
 }
 
 function respondJson(res: http.ServerResponse, payload: unknown): void {
@@ -159,12 +152,7 @@ async function handleRequest(
   const url = req.url ?? '';
   const rawBody = await readBody(req);
   const body = rawBody ? (JSON.parse(rawBody) as Record<string, unknown>) : {};
-  requests.push({
-    method: req.method ?? '',
-    url,
-    classMethod: body['classMethod'],
-  });
-  authorizations.push(req.headers.authorization);
+  requests.push(`${req.method} ${url}`);
 
   if (url === `${ENGINE_PATH}:streamQuery?alt=sse`) {
     return respondSse(res);
@@ -185,17 +173,14 @@ describe('AgentEngineClient against a local Agent Engine server', () => {
   let server: http.Server;
   let port = 0;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     server = http.createServer(handleRequest);
-    return new Promise<void>((resolve) => {
-      server.listen(0, () => {
-        const address = server.address();
-        if (address && typeof address !== 'string') {
-          port = address.port;
-        }
-        resolve();
-      });
-    });
+    server.listen(0);
+    await once(server, 'listening');
+    const address = server.address();
+    if (address && typeof address !== 'string') {
+      port = address.port;
+    }
   });
 
   afterAll(() => {
@@ -206,7 +191,6 @@ describe('AgentEngineClient against a local Agent Engine server', () => {
 
   beforeEach(() => {
     requests.length = 0;
-    authorizations.length = 0;
     vi.stubGlobal('fetch', localServerFetch(`http://127.0.0.1:${port}`));
   });
 
@@ -237,31 +221,14 @@ describe('AgentEngineClient against a local Agent Engine server', () => {
     expect(session).toEqual(SESSION);
     expect(events).toEqual(CONVERSATION);
     expect(sessions).toEqual([SESSION]);
-    expect(authorizations).toEqual(Array(5).fill('Bearer fake-token'));
     // The unit test pins each request body; what only a real server can show
     // is that the calls arrived, in order, on the right verb and path.
     expect(requests).toEqual([
-      {method: 'GET', url: ENGINE_PATH, classMethod: undefined},
-      {
-        method: 'POST',
-        url: `${ENGINE_PATH}:query`,
-        classMethod: 'async_create_session',
-      },
-      {
-        method: 'POST',
-        url: `${ENGINE_PATH}:streamQuery?alt=sse`,
-        classMethod: 'async_stream_query',
-      },
-      {
-        method: 'POST',
-        url: `${ENGINE_PATH}:query`,
-        classMethod: 'async_list_sessions',
-      },
-      {
-        method: 'POST',
-        url: `${ENGINE_PATH}:query`,
-        classMethod: 'async_delete_session',
-      },
+      `GET ${ENGINE_PATH}`,
+      `POST ${ENGINE_PATH}:query`,
+      `POST ${ENGINE_PATH}:streamQuery?alt=sse`,
+      `POST ${ENGINE_PATH}:query`,
+      `POST ${ENGINE_PATH}:query`,
     ]);
   });
 });

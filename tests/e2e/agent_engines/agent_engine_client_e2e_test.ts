@@ -23,44 +23,39 @@ const hasLiveEngine =
   !!process.env.GOOGLE_CLOUD_PROJECT &&
   process.env.CI !== 'true';
 const USER_ID = 'adk-js-e2e-user';
-const TIMEOUT_MS = 120_000;
 
 describe.skipIf(!hasLiveEngine)('E2E Live Agent Engine', () => {
-  it(
-    'creates a session, streams a turn, then lists and deletes the session',
-    async () => {
-      const client = new AgentEngineClient({reasoningEngineId});
+  it('creates a session, streams a turn, then lists and deletes the session', async () => {
+    const client = new AgentEngineClient({reasoningEngineId});
 
-      const engine = await client.getEngine();
-      expect(engine['name']).toBe(client.name);
+    const engine = await client.getEngine();
+    expect(engine['name']).toBe(client.name);
 
-      const session = await client.createSession({userId: USER_ID});
-      expect(session.id).toBeTruthy();
+    const session = await client.createSession({userId: USER_ID});
+    expect(session.id).toBeTruthy();
 
-      const events: AgentEngineEvent[] = [];
-      for await (const event of client.streamQuery({
-        userId: USER_ID,
-        sessionId: session.id,
-        message: 'Hello, who are you?',
-      })) {
-        events.push(event);
-      }
-      expect(events.some((event) => !!event.author)).toBe(true);
+    const events: AgentEngineEvent[] = [];
+    for await (const event of client.streamQuery({
+      userId: USER_ID,
+      sessionId: session.id,
+      message: 'Hello, who are you?',
+    })) {
+      events.push(event);
+    }
+    expect(events.some((event) => !!event.author)).toBe(true);
 
-      const fetched = await client.getSession({
-        userId: USER_ID,
-        sessionId: session.id,
-      });
-      expect(fetched?.id).toBe(session.id);
+    const fetched = await client.getSession({
+      userId: USER_ID,
+      sessionId: session.id,
+    });
+    expect(fetched?.id).toBe(session.id);
 
-      const sessions = await client.listSessions({userId: USER_ID});
-      expect(sessions.map((item) => item.id)).toContain(session.id);
+    const sessions = await client.listSessions({userId: USER_ID});
+    expect(sessions.map((item) => item.id)).toContain(session.id);
 
-      await client.deleteSession({userId: USER_ID, sessionId: session.id});
-      expect(
-        await client.getSession({userId: USER_ID, sessionId: session.id}),
-      ).toBeUndefined();
-    },
-    TIMEOUT_MS,
-  );
+    await client.deleteSession({userId: USER_ID, sessionId: session.id});
+    expect(
+      await client.getSession({userId: USER_ID, sessionId: session.id}),
+    ).toBeUndefined();
+  }, 120_000);
 });

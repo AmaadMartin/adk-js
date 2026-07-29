@@ -10,10 +10,6 @@ import {getClientLabels} from '../utils/client_labels.js';
 import {experimental} from '../utils/experimental.js';
 import {logger} from '../utils/logger.js';
 
-const API_VERSION = 'v1beta1';
-const GLOBAL_LOCATION = 'global';
-const DEFAULT_LOCATION = 'us-central1';
-const CLOUD_PLATFORM_SCOPE = 'https://www.googleapis.com/auth/cloud-platform';
 const REASONING_ENGINE_NAME_PATTERN =
   /^projects\/([a-zA-Z0-9-_]+)\/locations\/([a-zA-Z0-9-_]+)\/reasoningEngines\/(\d+)$/;
 const SSE_DATA_PREFIX = 'data: ';
@@ -141,7 +137,7 @@ export function parseReasoningEngineName(name: string): {
 
 /** Returns the Vertex AI endpoint serving the given location. */
 export function agentEngineApiEndpoint(location: string): string {
-  return location === GLOBAL_LOCATION
+  return location === 'global'
     ? 'https://aiplatform.googleapis.com'
     : `https://${location}-aiplatform.googleapis.com`;
 }
@@ -158,7 +154,7 @@ function buildNameFromOptions(options: AgentEngineClientOptions): string {
     throw new Error('reasoningEngineId is required when name is not provided.');
   }
   const location =
-    options.location || process.env.GOOGLE_CLOUD_LOCATION || DEFAULT_LOCATION;
+    options.location || process.env.GOOGLE_CLOUD_LOCATION || 'us-central1';
   return `projects/${projectId}/locations/${location}/reasoningEngines/${options.reasoningEngineId}`;
 }
 
@@ -273,8 +269,13 @@ export class AgentEngineClient {
     this.location = location;
     this.reasoningEngineId = reasoningEngineId;
     this.auth =
-      options.auth ?? new GoogleAuth({scopes: [CLOUD_PLATFORM_SCOPE]});
-    this.baseUrl = `${agentEngineApiEndpoint(location)}/${API_VERSION}`;
+      options.auth ??
+      new GoogleAuth({
+        scopes: ['https://www.googleapis.com/auth/cloud-platform'],
+      });
+    // v1beta1 is the version `vertexai.Client()` targets, and it carries the
+    // same :query and :streamQuery bindings as v1.
+    this.baseUrl = `${agentEngineApiEndpoint(location)}/v1beta1`;
   }
 
   /** Returns the deployed `ReasoningEngine` resource. */
