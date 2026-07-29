@@ -701,7 +701,11 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       const isEmptyMetadataEvent =
         lastEvent.author === this.name &&
         !lastEvent.partial &&
-        (!lastEvent.content?.parts || lastEvent.content.parts.length === 0);
+        (!lastEvent.content?.parts || lastEvent.content.parts.length === 0) &&
+        // An event carrying pending long running tool ids is not a bare
+        // metadata carrier: it is the runtime pausing for an out-of-band
+        // response, so the loop must still terminate.
+        !lastEvent.longRunningToolIds?.length;
 
       if (
         isFinalResponse(lastEvent) &&
