@@ -17,8 +17,8 @@ import {
 } from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 
-// Mock the lazily-imported default client so we can assert the executor wires
-// it up when no factory is injected, without touching a real cluster.
+// Mock the default client module so we can assert the executor wires it up
+// when no factory is injected, without touching a real cluster.
 const defaultClientMocks = vi.hoisted(() => {
   const sandbox = {
     write: vi.fn().mockResolvedValue(undefined),

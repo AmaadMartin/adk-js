@@ -153,7 +153,6 @@ export class AgentSandboxClient implements SandboxClient {
       connection,
       UPLOAD_ENDPOINT,
       form,
-      undefined,
       WRITE_MAX_ATTEMPTS,
     );
   }
@@ -165,7 +164,6 @@ export class AgentSandboxClient implements SandboxClient {
       connection,
       EXECUTE_ENDPOINT,
       JSON.stringify({command}),
-      'application/json',
       RUN_MAX_ATTEMPTS,
     );
     const result = (await response.json()) as {
@@ -312,13 +310,14 @@ export class AgentSandboxClient implements SandboxClient {
       return this.apiUrl;
     }
     if (this.gatewayName) {
-      return this.discoverGatewayUrl(api, deadline);
+      return this.discoverGatewayUrl(api, this.gatewayName, deadline);
     }
     return `${DEFAULT_SCHEME}://${sandboxName}.${this.namespace}.svc.cluster.local:${this.serverPort}`;
   }
 
   private async discoverGatewayUrl(
     api: CustomObjectsApi,
+    gatewayName: string,
     deadline: number,
   ): Promise<string> {
     let seenGateway = false;
@@ -331,7 +330,7 @@ export class AgentSandboxClient implements SandboxClient {
           version: GATEWAY_VERSION,
           namespace: this.namespace,
           plural: GATEWAY_PLURAL,
-          name: this.gatewayName!,
+          name: gatewayName,
         });
       } catch (error) {
         lastError = error;
@@ -345,18 +344,18 @@ export class AgentSandboxClient implements SandboxClient {
           return formatBaseUrl(address);
         }
         logger.warn(
-          `Rejected address "${address}" for Gateway "${this.gatewayName}"`,
+          `Rejected address "${address}" for Gateway "${gatewayName}"`,
         );
       }
       await sleep(POLL_INTERVAL_MS);
     }
     if (!seenGateway) {
       throw new SandboxInfrastructureError(
-        `Gateway "${this.gatewayName}" not found in namespace "${this.namespace}": ${errorMessage(lastError)}`,
+        `Gateway "${gatewayName}" not found in namespace "${this.namespace}": ${errorMessage(lastError)}`,
       );
     }
     throw new SandboxTimeoutError(
-      `Gateway "${this.gatewayName}" did not report a valid address within ${this.timeoutSeconds}s`,
+      `Gateway "${gatewayName}" did not report a valid address within ${this.timeoutSeconds}s`,
     );
   }
 
@@ -364,11 +363,11 @@ export class AgentSandboxClient implements SandboxClient {
     connection: Connection,
     endpoint: string,
     body: FormData | string,
-    contentType: string | undefined,
     maxAttempts: number,
   ): Promise<Response> {
     const url = `${connection.baseUrl}/${endpoint}`;
     const deadline = Date.now() + this.timeoutSeconds * 1000;
+    const timedOut = `Sandbox request to "${endpoint}" timed out after ${this.timeoutSeconds}s`;
     let lastError: unknown;
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -377,9 +376,7 @@ export class AgentSandboxClient implements SandboxClient {
       }
       const remainingMs = deadline - Date.now();
       if (remainingMs <= 0) {
-        throw new SandboxTimeoutError(
-          `Sandbox request to "${endpoint}" timed out after ${this.timeoutSeconds}s`,
-        );
+        throw new SandboxTimeoutError(timedOut);
       }
 
       let response: Response;
@@ -391,16 +388,14 @@ export class AgentSandboxClient implements SandboxClient {
             connection,
             this.serverPort,
             remainingMs,
-            contentType,
+            body,
           ),
           redirect: 'manual',
           signal: AbortSignal.timeout(remainingMs),
         });
       } catch (error) {
         if (isAbortTimeout(error)) {
-          throw new SandboxTimeoutError(
-            `Sandbox request to "${endpoint}" timed out after ${this.timeoutSeconds}s`,
-          );
+          throw new SandboxTimeoutError(timedOut);
         }
         lastError = error;
         continue;
@@ -518,12 +513,16 @@ function formatBaseUrl(address: string): string {
     : `${DEFAULT_SCHEME}://${address}`;
 }
 
-/** Builds the router routing headers required for every request. */
+/**
+ * Builds the router routing headers required for every request. A `FormData`
+ * body is left without a `Content-Type` so `fetch` can add the multipart
+ * boundary itself.
+ */
 function buildRouterHeaders(
   connection: Connection,
   serverPort: number,
   remainingMs: number,
-  contentType: string | undefined,
+  body: FormData | string,
 ): Record<string, string> {
   const headers: Record<string, string> = {
     [HEADER_SANDBOX_ID]: connection.sandboxName,
@@ -535,8 +534,8 @@ function buildRouterHeaders(
   if (connection.podIp) {
     headers[HEADER_SANDBOX_POD_IP] = connection.podIp;
   }
-  if (contentType) {
-    headers['Content-Type'] = contentType;
+  if (typeof body === 'string') {
+    headers['Content-Type'] = 'application/json';
   }
   return headers;
 }

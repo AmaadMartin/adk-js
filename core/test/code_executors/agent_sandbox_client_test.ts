@@ -175,8 +175,7 @@ describe('AgentSandboxClient.write', () => {
 
     // Upload request targets the gateway URL with a multipart body.
     expect(fetchFn).toHaveBeenCalledTimes(1);
-    const [url, init] = (fetchFn as unknown as ReturnType<typeof vi.fn>).mock
-      .calls[0];
+    const [url, init] = fetchFn.mock.calls[0];
     expect(url).toBe('http://10.0.0.1/upload');
     expect(init.method).toBe('POST');
     expect(init.redirect).toBe('manual');
