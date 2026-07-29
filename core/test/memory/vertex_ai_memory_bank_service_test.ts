@@ -15,7 +15,7 @@ import {
   VertexAiMemoryBankServiceOptions,
 } from '@google/adk';
 import {Content, Part} from '@google/genai';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 describe('VertexAiMemoryBankService', () => {
   let service: VertexAiMemoryBankService;
@@ -611,5 +611,36 @@ describe('VertexAiMemoryBankService', () => {
         }),
       );
     });
+  });
+});
+
+describe('VertexAiMemoryBankService express mode', () => {
+  const FAKE_API_KEY = 'fake-express-key';
+  const originalEnv = process.env;
+
+  beforeEach(() => {
+    process.env = {...originalEnv, GOOGLE_GENAI_USE_VERTEXAI: 'true'};
+    delete process.env['GOOGLE_API_KEY'];
+  });
+
+  afterEach(() => {
+    process.env = originalEnv;
+  });
+
+  it('initializes from GOOGLE_API_KEY without a project or location', () => {
+    process.env['GOOGLE_API_KEY'] = FAKE_API_KEY;
+
+    expect(
+      new VertexAiMemoryBankService({agentEngineId: 'test-engine-id'}),
+    ).toBeDefined();
+  });
+
+  it('initializes from an explicit expressModeApiKey', () => {
+    expect(
+      new VertexAiMemoryBankService({
+        agentEngineId: 'test-engine-id',
+        expressModeApiKey: FAKE_API_KEY,
+      }),
+    ).toBeDefined();
   });
 });
