@@ -57,11 +57,13 @@ import {
 
 import {AUTH_PREPROCESSOR} from '../auth/auth_preprocessor.js';
 import {BaseContextCompactor} from '../context/base_context_compactor.js';
+import {ContextCacheConfig} from './context_cache_config.js';
 import {InvocationContext} from './invocation_context.js';
 import {AGENT_TRANSFER_LLM_REQUEST_PROCESSOR} from './processors/agent_transfer_llm_request_processor.js';
 import {BASIC_LLM_REQUEST_PROCESSOR} from './processors/basic_llm_request_processor.js';
 import {CODE_EXECUTION_REQUEST_PROCESSOR} from './processors/code_execution_request_processor.js';
 import {CONTENT_REQUEST_PROCESSOR} from './processors/content_request_processor.js';
+import {CONTEXT_CACHE_REQUEST_PROCESSOR} from './processors/context_cache_request_processor.js';
 import {ContextCompactorRequestProcessor} from './processors/context_compactor_request_processor.js';
 import {IDENTITY_LLM_REQUEST_PROCESSOR} from './processors/identity_llm_request_processor.js';
 import {INSTRUCTIONS_LLM_REQUEST_PROCESSOR} from './processors/instructions_llm_request_processor.js';
@@ -75,9 +77,7 @@ import {StreamingMode} from './run_config.js';
  * Input/output schema type for agent.
  */
 export type LlmAgentSchema =
-  | z3.ZodObject<z3.ZodRawShape>
-  | z4.ZodObject<z4.ZodRawShape>
-  | Schema;
+  z3.ZodObject<z3.ZodRawShape> | z4.ZodObject<z4.ZodRawShape> | Schema;
 
 /** An object that can provide an instruction string. */
 export type InstructionProvider = (
@@ -104,8 +104,7 @@ export type SingleBeforeModelCallback = (params: {
  * order they are listed until a callback does not return None.
  */
 export type BeforeModelCallback =
-  | SingleBeforeModelCallback
-  | SingleBeforeModelCallback[];
+  SingleBeforeModelCallback | SingleBeforeModelCallback[];
 
 /**
  * A callback that runs after a response is received from the model.
@@ -128,8 +127,7 @@ export type SingleAfterModelCallback = (params: {
  order they are listed until a callback does not return None.
  */
 export type AfterModelCallback =
-  | SingleAfterModelCallback
-  | SingleAfterModelCallback[];
+  SingleAfterModelCallback | SingleAfterModelCallback[];
 
 /**
  * A callback that runs before a tool is called.
@@ -156,8 +154,7 @@ export type SingleBeforeToolCallback = (params: {
  * order they are listed until a callback does not return None.
  */
 export type BeforeToolCallback =
-  | SingleBeforeToolCallback
-  | SingleBeforeToolCallback[];
+  SingleBeforeToolCallback | SingleBeforeToolCallback[];
 
 /**
  * A callback that runs after a tool is called.
@@ -185,8 +182,7 @@ export type SingleAfterToolCallback = (params: {
  * order they are listed until acallback does not return None.
  */
 export type AfterToolCallback =
-  | SingleAfterToolCallback
-  | SingleAfterToolCallback[];
+  SingleAfterToolCallback | SingleAfterToolCallback[];
 
 /** A list of examples or an example provider. */
 export type ExamplesUnion = Example[] | BaseExampleProvider;
@@ -311,6 +307,11 @@ export interface LlmAgentConfig extends BaseAgentConfig {
    * Instructs the agent to make a plan and execute it step by step.
    */
   codeExecutor?: BaseCodeExecutor;
+
+  /**
+   * Configuration for context caching.
+   */
+  contextCacheConfig?: ContextCacheConfig;
 }
 
 async function convertToolUnionToTools(
@@ -368,6 +369,7 @@ export class LlmAgent extends BaseAgent {
   requestProcessors: BaseLlmRequestProcessor[];
   responseProcessors: BaseLlmResponseProcessor[];
   codeExecutor?: BaseCodeExecutor;
+  contextCacheConfig?: ContextCacheConfig;
 
   constructor(config: LlmAgentConfig) {
     super(config);
@@ -391,6 +393,7 @@ export class LlmAgent extends BaseAgent {
     this.beforeToolCallback = config.beforeToolCallback;
     this.afterToolCallback = config.afterToolCallback;
     this.codeExecutor = config.codeExecutor;
+    this.contextCacheConfig = config.contextCacheConfig;
 
     // TODO - b/425992518: Define these processor arrays.
     // Orders matter, don't change. Append new processors to the end
@@ -401,6 +404,9 @@ export class LlmAgent extends BaseAgent {
       INSTRUCTIONS_LLM_REQUEST_PROCESSOR,
       REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR,
       CONTENT_REQUEST_PROCESSOR,
+      // Matches adk-python single_flow.py: the cache processor runs after
+      // contents so it observes the fully assembled request.
+      CONTEXT_CACHE_REQUEST_PROCESSOR,
       INTERACTIONS_REQUEST_PROCESSOR,
       CODE_EXECUTION_REQUEST_PROCESSOR,
       TOOL_FILTER_REQUEST_PROCESSOR,
