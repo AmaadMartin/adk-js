@@ -5,7 +5,10 @@
  */
 
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
-import {getExpressModeApiKey} from '../../src/utils/vertex_ai_utils.js';
+import {
+  getExpressModeApiKey,
+  parseReasoningEngineName,
+} from '../../src/utils/vertex_ai_utils.js';
 
 describe('vertex_ai_utils', () => {
   describe('getExpressModeApiKey', () => {
@@ -67,6 +70,60 @@ describe('vertex_ai_utils', () => {
       delete process.env['GOOGLE_API_KEY'];
       const result = getExpressModeApiKey();
       expect(result).toBeUndefined();
+    });
+  });
+
+  describe('parseReasoningEngineName', () => {
+    it('should parse a fully-qualified resource name', () => {
+      expect(
+        parseReasoningEngineName(
+          'projects/my-project/locations/us-central1/reasoningEngines/999',
+        ),
+      ).toEqual({
+        projectId: 'my-project',
+        location: 'us-central1',
+        reasoningEngineId: '999',
+      });
+    });
+
+    it('should allow underscores and hyphens in the project id', () => {
+      expect(
+        parseReasoningEngineName(
+          'projects/my_project-1/locations/us-central1/reasoningEngines/12345',
+        ),
+      ).toEqual({
+        projectId: 'my_project-1',
+        location: 'us-central1',
+        reasoningEngineId: '12345',
+      });
+    });
+
+    it.each([
+      ['a bare reasoning engine id', '12345'],
+      ['an arbitrary string', 'invalid'],
+      ['an empty string', ''],
+      [
+        'a non-numeric engine id',
+        'projects/p/locations/l/reasoningEngines/abc',
+      ],
+      [
+        'a sandbox environment resource name',
+        'projects/p/locations/l/reasoningEngines/123/sandboxEnvironments/456',
+      ],
+      [
+        'a name with a leading prefix',
+        'prefix/projects/p/locations/l/reasoningEngines/123',
+      ],
+      [
+        'a name with a trailing slash',
+        'projects/p/locations/l/reasoningEngines/123/',
+      ],
+      [
+        'a name with an empty project',
+        'projects//locations/l/reasoningEngines/123',
+      ],
+    ])('should return undefined for %s', (_description, name) => {
+      expect(parseReasoningEngineName(name)).toBeUndefined();
     });
   });
 });
