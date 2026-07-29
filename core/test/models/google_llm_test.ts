@@ -7,6 +7,7 @@
 import {
   Gemini,
   GeminiParams,
+  GoogleLLMVariant,
   LlmRequest,
   LlmResponse,
   geminiInitParams,
@@ -58,6 +59,7 @@ describe('GoogleLlm', () => {
     delete process.env['GOOGLE_GENAI_API_KEY'];
     delete process.env['GEMINI_API_KEY'];
     delete process.env['GOOGLE_GENAI_USE_VERTEXAI'];
+    delete process.env['GOOGLE_GENAI_USE_ENTERPRISE'];
     delete process.env['GOOGLE_CLOUD_AGENT_ENGINE_ID'];
   };
 
@@ -337,6 +339,89 @@ describe('GoogleLlm', () => {
         location: 'us-central1',
       };
       expect(() => geminiInitParams(input)).toThrow(/VertexAI project/);
+    });
+
+    it('should detect Vertex AI from GOOGLE_GENAI_USE_ENTERPRISE', () => {
+      process.env['GOOGLE_GENAI_USE_ENTERPRISE'] = 'true';
+      process.env['GOOGLE_CLOUD_PROJECT'] = 'env-project';
+      process.env['GOOGLE_CLOUD_LOCATION'] = 'env-location';
+      const params = geminiInitParams({model: 'gemini-1.5-flash'});
+      expect(params.vertexai).toBe(true);
+      expect(params.project).toBe('env-project');
+      expect(params.location).toBe('env-location');
+    });
+
+    it('should let GOOGLE_GENAI_USE_ENTERPRISE="false" opt out of a stale GOOGLE_GENAI_USE_VERTEXAI', () => {
+      process.env['GOOGLE_GENAI_USE_ENTERPRISE'] = 'false';
+      process.env['GOOGLE_GENAI_USE_VERTEXAI'] = 'true';
+      const params = geminiInitParams({
+        model: 'gemini-1.5-flash',
+        apiKey: 'test-key',
+      });
+      expect(params.vertexai).toBe(false);
+      expect(params.apiKey).toBe('test-key');
+    });
+
+    it('should accept "1" for GOOGLE_GENAI_USE_VERTEXAI, as written by adk create and adk deploy', () => {
+      process.env['GOOGLE_GENAI_USE_VERTEXAI'] = '1';
+      process.env['GOOGLE_CLOUD_PROJECT'] = 'env-project';
+      process.env['GOOGLE_CLOUD_LOCATION'] = 'env-location';
+      const params = geminiInitParams({model: 'gemini-1.5-flash'});
+      expect(params.vertexai).toBe(true);
+    });
+
+    it('should honor an explicit vertexai flag with no env vars set', () => {
+      const params = geminiInitParams({
+        model: 'gemini-1.5-flash',
+        vertexai: true,
+        project: 'test-project',
+        location: 'us-central1',
+      });
+      expect(params.vertexai).toBe(true);
+    });
+  });
+
+  describe('backend resolution', () => {
+    it('should not throw the API key error when only GOOGLE_GENAI_USE_ENTERPRISE is set', () => {
+      process.env['GOOGLE_GENAI_USE_ENTERPRISE'] = 'true';
+      process.env['GOOGLE_CLOUD_PROJECT'] = 'env-project';
+      process.env['GOOGLE_CLOUD_LOCATION'] = 'env-location';
+
+      const llm = new TestGemini({model: 'gemini-1.5-flash'});
+
+      expect(llm['vertexai']).toBe(true);
+      expect(llm.apiBackend).toBe(GoogleLLMVariant.VERTEX_AI);
+    });
+
+    it('should pin the SDK to vertexai=false when building a Gemini API client', () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+      const spy = vi.mocked(GoogleGenAI);
+      spy.mockClear();
+
+      expect(llm.apiClient).toBeDefined();
+      expect(spy).toHaveBeenCalledWith(
+        expect.objectContaining({vertexai: false}),
+      );
+
+      spy.mockClear();
+      expect(llm.liveApiClient).toBeDefined();
+      expect(spy).toHaveBeenCalledWith(
+        expect.objectContaining({vertexai: false}),
+      );
+    });
+
+    it('should keep apiBackend in agreement with vertexai in both modes', () => {
+      const geminiApiLlm = new TestGemini({apiKey: 'test-key'});
+      expect(geminiApiLlm['vertexai']).toBe(false);
+      expect(geminiApiLlm.apiBackend).toBe(GoogleLLMVariant.GEMINI_API);
+
+      process.env['GOOGLE_GENAI_USE_ENTERPRISE'] = 'true';
+      process.env['GOOGLE_CLOUD_PROJECT'] = 'env-project';
+      process.env['GOOGLE_CLOUD_LOCATION'] = 'env-location';
+
+      const vertexLlm = new TestGemini({apiKey: 'test-key'});
+      expect(vertexLlm['vertexai']).toBe(true);
+      expect(vertexLlm.apiBackend).toBe(GoogleLLMVariant.VERTEX_AI);
     });
   });
 

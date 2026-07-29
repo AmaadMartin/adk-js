@@ -25,6 +25,7 @@ describe('ApigeeLlm', () => {
     delete process.env['APIGEE_PROXY_URL'];
     delete process.env['GOOGLE_GENAI_API_KEY'];
     delete process.env['GOOGLE_GENAI_USE_VERTEXAI'];
+    delete process.env['GOOGLE_GENAI_USE_ENTERPRISE'];
     delete process.env['GOOGLE_CLOUD_PROJECT'];
     delete process.env['GOOGLE_CLOUD_LOCATION'];
   });
@@ -70,6 +71,17 @@ describe('ApigeeLlm', () => {
 
     it('vertexai is used if GOOGLE_GENAI_USE_VERTEXAI is true', () => {
       process.env['GOOGLE_GENAI_USE_VERTEXAI'] = 'true';
+      process.env['GOOGLE_CLOUD_PROJECT'] = 'test-project';
+      process.env['GOOGLE_CLOUD_LOCATION'] = 'us-central1';
+      const llm = new ApigeeLlm({
+        model: 'apigee/unknown-model',
+        proxyUrl: defaultProxyUrl,
+      });
+      expect(llm['vertexai']).toBe(true);
+    });
+
+    it('vertexai is used if GOOGLE_GENAI_USE_ENTERPRISE is true', () => {
+      process.env['GOOGLE_GENAI_USE_ENTERPRISE'] = 'true';
       process.env['GOOGLE_CLOUD_PROJECT'] = 'test-project';
       process.env['GOOGLE_CLOUD_LOCATION'] = 'us-central1';
       const llm = new ApigeeLlm({
