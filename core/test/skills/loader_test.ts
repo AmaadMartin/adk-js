@@ -75,6 +75,16 @@ Body`;
       );
     });
 
+    it('throws error if frontmatter fails schema validation', () => {
+      const content = `---
+name: test-skill
+---
+Body`;
+      expect(() => parseSkillMdContent(content)).toThrow(
+        'Invalid YAML in frontmatter:',
+      );
+    });
+
     it('handles empty body', () => {
       const content = `---
 name: test-skill
@@ -248,13 +258,27 @@ Instructions`,
   describe('validateSkillDir', () => {
     let tempDir: string;
 
-    it('returns no problems for a valid skill directory', async () => {
-      tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-skill-test-'));
-      const skillDir = path.join(tempDir, 'test-skill');
+    async function validateFixture(
+      dirName: string,
+      content: string,
+    ): Promise<string[]> {
+      const fixtureDir = await fs.mkdtemp(
+        path.join(os.tmpdir(), 'adk-skill-test-'),
+      );
+      const skillDir = path.join(fixtureDir, dirName);
       await fs.mkdir(skillDir);
+      await fs.writeFile(path.join(skillDir, 'SKILL.md'), content);
 
-      await fs.writeFile(
-        path.join(skillDir, 'SKILL.md'),
+      try {
+        return await validateSkillDir(skillDir);
+      } finally {
+        await fs.rm(fixtureDir, {recursive: true, force: true});
+      }
+    }
+
+    it('returns no problems for a valid skill directory', async () => {
+      const problems = await validateFixture(
+        'test-skill',
         `---
 name: test-skill
 description: A test skill
@@ -262,10 +286,7 @@ description: A test skill
 Instructions`,
       );
 
-      const problems = await validateSkillDir(skillDir);
       expect(problems).toEqual([]);
-
-      await fs.rm(tempDir, {recursive: true, force: true});
     });
 
     it.each(['SKILL.md', 'skill.md', 'Skill.md', 'sKiLl.Md'])(
@@ -314,13 +335,69 @@ Instructions`,
       await fs.rm(tempDir, {recursive: true, force: true});
     });
 
-    it('returns problem for unknown frontmatter fields', async () => {
-      tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-skill-test-'));
-      const skillDir = path.join(tempDir, 'test-skill');
-      await fs.mkdir(skillDir);
+    it('returns sorted problem for unknown frontmatter fields', async () => {
+      const problems = await validateFixture(
+        'test-skill',
+        `---
+name: test-skill
+description: A test skill
+zeta: 1
+alpha: 2
+---
+Instructions`,
+      );
 
-      await fs.writeFile(
-        path.join(skillDir, 'SKILL.md'),
+      expect(problems).toEqual(['Unknown frontmatter fields: [alpha, zeta]']);
+    });
+
+    it('accepts the allowed-tools frontmatter field', async () => {
+      const problems = await validateFixture(
+        'test-skill',
+        `---
+name: test-skill
+description: A test skill
+allowed-tools: tool1,tool2
+---
+Instructions`,
+      );
+
+      expect(problems).toEqual([]);
+    });
+
+    it('returns problem for invalid frontmatter', async () => {
+      const problems = await validateFixture(
+        'test-skill',
+        `---
+name: test-skill
+---
+Instructions`,
+      );
+
+      expect(problems).toHaveLength(1);
+      expect(problems[0]).toMatch(
+        /^Frontmatter validation error: description: /,
+      );
+      expect(problems[0]).not.toContain('Invalid YAML in frontmatter:');
+    });
+
+    it('returns problem if name does not match directory name', async () => {
+      const problems = await validateFixture(
+        'wrong-name',
+        `---
+name: test-skill
+description: A test skill
+---
+Instructions`,
+      );
+
+      expect(problems).toEqual([
+        "Skill name 'test-skill' does not match directory name 'wrong-name'.",
+      ]);
+    });
+
+    it('reports unknown fields and name mismatch together', async () => {
+      const problems = await validateFixture(
+        'wrong-name',
         `---
 name: test-skill
 description: A test skill
@@ -329,56 +406,42 @@ unknown_field: value
 Instructions`,
       );
 
-      const problems = await validateSkillDir(skillDir);
-      expect(problems.length).toBeGreaterThan(0);
-      expect(
-        problems.some((p) => p.includes('Unknown frontmatter fields')),
-      ).toBe(true);
-
-      await fs.rm(tempDir, {recursive: true, force: true});
+      expect(problems).toEqual([
+        'Unknown frontmatter fields: [unknown_field]',
+        "Skill name 'test-skill' does not match directory name 'wrong-name'.",
+      ]);
     });
 
-    it('returns problem for invalid frontmatter', async () => {
-      tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-skill-test-'));
-      const skillDir = path.join(tempDir, 'test-skill');
-      await fs.mkdir(skillDir);
-
-      await fs.writeFile(
-        path.join(skillDir, 'SKILL.md'),
+    it('skips the name check when the frontmatter fails validation', async () => {
+      const problems = await validateFixture(
+        'wrong-name',
         `---
 name: test-skill
+unknown_field: value
 ---
 Instructions`,
       );
 
-      const problems = await validateSkillDir(skillDir);
-      expect(problems.length).toBeGreaterThan(0);
-      expect(
-        problems.some((p) => p.includes('Invalid YAML in frontmatter:')),
-      ).toBe(true);
-
-      await fs.rm(tempDir, {recursive: true, force: true});
+      expect(problems).toHaveLength(2);
+      expect(problems[0]).toBe('Unknown frontmatter fields: [unknown_field]');
+      expect(problems[1]).toMatch(
+        /^Frontmatter validation error: description: /,
+      );
     });
 
-    it('returns problem if name does not match directory name', async () => {
-      tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-skill-test-'));
-      const skillDir = path.join(tempDir, 'wrong-name');
-      await fs.mkdir(skillDir);
-
-      await fs.writeFile(
-        path.join(skillDir, 'SKILL.md'),
+    it('returns a single problem when frontmatter is not a mapping', async () => {
+      const problems = await validateFixture(
+        'test-skill',
         `---
-name: test-skill
-description: A test skill
+- item1
+- item2
 ---
 Instructions`,
       );
 
-      const problems = await validateSkillDir(skillDir);
-      expect(problems.length).toBe(1);
-      expect(problems[0]).toContain('does not match directory name');
-
-      await fs.rm(tempDir, {recursive: true, force: true});
+      expect(problems).toEqual([
+        'Invalid YAML in frontmatter: SKILL.md frontmatter must be a YAML mapping',
+      ]);
     });
   });
 

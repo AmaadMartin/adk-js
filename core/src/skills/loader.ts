@@ -104,14 +104,44 @@ async function loadDir(
 }
 
 /**
- * Parses SKILL.md from a raw content string, extracting the YAML frontmatter and the body.
+ * Reads SKILL.md (in any case variation) from a resolved skill directory.
+ *
+ * @param resolvedDir - Resolved path to the skill directory.
+ * @returns The file contents, or undefined if the directory or file is unreadable.
+ */
+async function readSkillMd(resolvedDir: string): Promise<string | undefined> {
+  let entries;
+  try {
+    entries = await fs.readdir(resolvedDir, {withFileTypes: true});
+  } catch (e: unknown) {
+    logger.warn(
+      `Failed to load directory '${resolvedDir}': ${(e as Error).message}`,
+    );
+    return undefined;
+  }
+
+  for (const entry of entries) {
+    if (entry.isFile() && entry.name.toLowerCase() === 'skill.md') {
+      try {
+        return await fs.readFile(path.join(resolvedDir, entry.name), 'utf-8');
+      } catch (_e: unknown) {
+        // Unreadable candidate; keep scanning for another case variation.
+      }
+    }
+  }
+
+  return undefined;
+}
+
+/**
+ * Splits SKILL.md into its raw YAML frontmatter mapping and its markdown body.
  *
  * @param content - The raw content of the SKILL.md file.
- * @returns An object containing the parsed frontmatter and the remaining markdown body.
+ * @returns The unvalidated frontmatter mapping and the remaining markdown body.
  * @throws {Error} If the content is not properly formatted with YAML frontmatter.
  */
-export function parseSkillMdContent(content: string): {
-  frontmatter: Frontmatter;
+function parseSkillMdRaw(content: string): {
+  raw: Record<string, unknown>;
   body: string;
 } {
   if (!content.startsWith('---')) {
@@ -132,13 +162,38 @@ export function parseSkillMdContent(content: string): {
 
   try {
     const parsed = yaml.load(frontmatterStr);
-    if (typeof parsed !== 'object' || parsed === null) {
+    if (
+      typeof parsed !== 'object' ||
+      parsed === null ||
+      Array.isArray(parsed)
+    ) {
       throw new Error('SKILL.md frontmatter must be a YAML mapping');
     }
-    const frontmatter = FrontmatterSchema.parse(parsed);
 
-    return {frontmatter, body};
+    return {raw: parsed as Record<string, unknown>, body};
   } catch (e: unknown) {
+    throw new Error(`Invalid YAML in frontmatter: ${(e as Error).message}`);
+  }
+}
+
+/**
+ * Parses SKILL.md from a raw content string, extracting the YAML frontmatter and the body.
+ *
+ * @param content - The raw content of the SKILL.md file.
+ * @returns An object containing the parsed frontmatter and the remaining markdown body.
+ * @throws {Error} If the content is not properly formatted with YAML frontmatter.
+ */
+export function parseSkillMdContent(content: string): {
+  frontmatter: Frontmatter;
+  body: string;
+} {
+  const {raw, body} = parseSkillMdRaw(content);
+
+  try {
+    return {frontmatter: FrontmatterSchema.parse(raw), body};
+  } catch (e: unknown) {
+    // The prefix is kept even for schema failures: it is part of the thrown
+    // message contract of loadSkillFromDir and loadSkillFromZipBuffer.
     throw new Error(`Invalid YAML in frontmatter: ${(e as Error).message}`);
   }
 }
@@ -181,37 +236,56 @@ export async function loadSkillFromDir(skillDir: string): Promise<Skill> {
 /**
  * Validates a skill directory structure and frontmatter without fully loading all resources.
  *
+ * Reports every problem found rather than stopping at the first one, so a skill
+ * author can fix them all in one pass. A structural failure (no readable
+ * SKILL.md, or frontmatter that cannot be parsed into a YAML mapping) yields a
+ * single problem, since nothing further can be checked.
+ *
  * @param skillDir - The path to the skill directory to validate.
  * @returns A promise that resolves to an array of validation error messages, or an empty array if valid.
  */
 export async function validateSkillDir(skillDir: string): Promise<string[]> {
-  const problems: string[] = [];
   const resolvedDir = path.resolve(skillDir);
+  const content = await readSkillMd(resolvedDir);
 
-  let skill;
+  if (content === undefined) {
+    return [
+      `SKILL.md (or any case variation like skill.md) not found in '${resolvedDir}'.`,
+    ];
+  }
+
+  let raw: Record<string, unknown>;
   try {
-    skill = await loadSkillFile(resolvedDir);
+    ({raw} = parseSkillMdRaw(content));
   } catch (e: unknown) {
     return [(e as Error).message];
   }
 
-  try {
-    const keys = Object.keys(skill.frontmatter);
-    const unknown = keys.filter((k) => !ALLOWED_FRONTMATTER_KEYS.has(k));
-    if (unknown.length > 0) {
-      problems.push(
-        `Unknown frontmatter fields: [${unknown.sort().join(', ')}]`,
-      );
-    }
+  const problems: string[] = [];
 
-    const dirName = path.basename(resolvedDir);
-    if (dirName !== skill.frontmatter.name) {
-      problems.push(
-        `Skill name '${skill.frontmatter.name}' does not match directory name '${dirName}'.`,
-      );
-    }
-  } catch (e: unknown) {
-    problems.push((e as Error).message);
+  // The raw mapping is checked, not the parsed frontmatter: the schema derives
+  // an `allowedTools` key from `allowed-tools`, which the author never wrote.
+  const unknown = Object.keys(raw).filter(
+    (k) => !ALLOWED_FRONTMATTER_KEYS.has(k),
+  );
+  if (unknown.length > 0) {
+    problems.push(`Unknown frontmatter fields: [${unknown.sort().join(', ')}]`);
+  }
+
+  const result = FrontmatterSchema.safeParse(raw);
+  if (!result.success) {
+    const detail = result.error.issues
+      .map((issue) => `${issue.path.join('.')}: ${issue.message}`)
+      .join('; ');
+    problems.push(`Frontmatter validation error: ${detail}`);
+    return problems;
+  }
+
+  const dirName = path.basename(resolvedDir);
+  if (dirName !== result.data.name) {
+    problems.push(
+      `Skill name '${result.data.name}' does not match directory name '${dirName}'.`,
+    );
   }
 
   return problems;
@@ -226,30 +300,9 @@ export async function validateSkillDir(skillDir: string): Promise<string[]> {
  */
 async function loadSkillFile(skillDir: string): Promise<Skill> {
   const resolvedDir = path.resolve(skillDir);
-  let skillMdPath = '';
-  let content = '';
+  const content = await readSkillMd(resolvedDir);
 
-  try {
-    const entries = await fs.readdir(resolvedDir, {withFileTypes: true});
-    for (const entry of entries) {
-      if (entry.isFile() && entry.name.toLowerCase() === 'skill.md') {
-        const p = path.join(resolvedDir, entry.name);
-        try {
-          content = await fs.readFile(p, 'utf-8');
-          skillMdPath = p;
-          break;
-        } catch (_e: unknown) {
-          // continue
-        }
-      }
-    }
-  } catch (e: unknown) {
-    logger.warn(
-      `Failed to load directory '${skillDir}': ${(e as Error).message}`,
-    );
-  }
-
-  if (!skillMdPath) {
+  if (content === undefined) {
     throw new Error(
       `SKILL.md (or any case variation like skill.md) not found in '${skillDir}'.`,
     );
