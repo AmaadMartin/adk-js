@@ -12,8 +12,7 @@ const warnedItems = new Set<string>();
  * Decorator to mark classes and methods as experimental.
  * Logs a warning once per item when the class is instantiated or the method is called.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- must return any, unknown does not work.
-export type Constructor = new (...args: unknown[]) => any;
+export type Constructor = new (...args: unknown[]) => object;
 
 export function experimental<
   T extends Constructor | object,

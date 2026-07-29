@@ -99,7 +99,7 @@ async function runFromInputFile(
 }
 
 interface RunInteractivelyOptions {
-  rootAgent?: BaseAgent;
+  rootAgent: BaseAgent;
   app?: App;
   session: Session;
   artifactService: BaseArtifactService;
@@ -110,7 +110,7 @@ interface RunInteractivelyOptions {
 async function runInteractively(
   options: RunInteractivelyOptions,
 ): Promise<void> {
-  let currentAgent = options.rootAgent || options.app?.rootAgent;
+  let currentAgent = options.rootAgent;
   let runner = new Runner({
     app: options.app,
     appName: options.app?.name ?? currentAgent.name,

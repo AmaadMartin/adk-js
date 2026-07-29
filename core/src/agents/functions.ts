@@ -169,12 +169,33 @@ export function generateRequestConfirmationEvent({
   });
 }
 
+/**
+ * Narrows an unknown value to a plain record (a non-null, non-array object).
+ */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Normalizes a raw tool result into the record shape required by
+ * `FunctionResponse.response` and by the tool callbacks. Tools may return any
+ * JSON value, so scalars are wrapped in `result` and arrays in `results`.
+ */
+function toResponseRecord(functionResult: unknown): Record<string, unknown> {
+  if (isRecord(functionResult)) {
+    return functionResult;
+  }
+  if (Array.isArray(functionResult)) {
+    return {results: functionResult};
+  }
+  return {result: functionResult};
+}
+
 async function callToolAsync(
   tool: BaseTool,
-  args: Record<string, any>, // eslint-disable-line @typescript-eslint/no-explicit-any
+  args: Record<string, unknown>,
   toolContext: Context,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-): Promise<any> {
+): Promise<unknown> {
   return tracer.startActiveSpan(`execute_tool ${tool.name}`, async (span) => {
     try {
       logger.debug(`callToolAsync ${tool.name}`);
@@ -202,19 +223,10 @@ function buildResponseEvent(
   toolContext: Context,
   invocationContext: InvocationContext,
 ): Event {
-  let responseResult: Record<string, unknown>;
-  if (typeof functionResult !== 'object' || functionResult == null) {
-    responseResult = {result: functionResult};
-  } else if (Array.isArray(functionResult)) {
-    responseResult = {results: functionResult};
-  } else {
-    responseResult = functionResult as Record<string, unknown>;
-  }
-
   const partFunctionResponse: Part = {
     functionResponse: {
       name: tool.name,
-      response: responseResult,
+      response: toResponseRecord(functionResult),
       id: toolContext.functionCallId,
     },
   };
@@ -321,7 +333,7 @@ export async function handleFunctionCallList({
 
     // Step 1: Check if plugin before_tool_callback overrides the function
     // response.
-    let functionResponse = null;
+    let functionResponse: unknown = null;
     let functionResponseError: string | unknown | undefined;
     functionResponse =
       await invocationContext.pluginManager.runBeforeToolCallback({
@@ -379,6 +391,10 @@ export async function handleFunctionCallList({
       }
     }
 
+    // The tool callbacks are typed to receive the response as a record, so the
+    // raw tool result is normalized the same way the response event is.
+    const callbackResponse = toResponseRecord(functionResponse);
+
     // Step 4: Check if plugin after_tool_callback overrides the function
     // response.
     let alteredFunctionResponse =
@@ -386,7 +402,7 @@ export async function handleFunctionCallList({
         tool: tool,
         toolArgs: functionArgs,
         toolContext: toolContext,
-        result: functionResponse,
+        result: callbackResponse,
       });
 
     // Step 5: If no overrides are provided from the plugins, further run the
@@ -398,7 +414,7 @@ export async function handleFunctionCallList({
           tool: tool,
           args: functionArgs,
           context: toolContext,
-          response: functionResponse,
+          response: callbackResponse,
         });
         if (alteredFunctionResponse) {
           break;
@@ -418,16 +434,9 @@ export async function handleFunctionCallList({
       continue;
     }
 
-    if (functionResponseError) {
-      functionResponse = {error: functionResponseError};
-    } else if (
-      typeof functionResponse !== 'object' ||
-      functionResponse == null
-    ) {
-      functionResponse = {result: functionResponse};
-    } else if (Array.isArray(functionResponse)) {
-      functionResponse = {results: functionResponse};
-    }
+    const responseRecord: Record<string, unknown> = functionResponseError
+      ? {error: functionResponseError}
+      : toResponseRecord(functionResponse);
 
     // Builds the function response event.
     const functionResponseEvent = createEvent({
@@ -437,7 +446,7 @@ export async function handleFunctionCallList({
         functionResponse: {
           id: toolContext.functionCallId,
           name: tool.name,
-          response: functionResponse,
+          response: responseRecord,
         },
       }),
       actions: toolContext.actions,
