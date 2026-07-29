@@ -7,7 +7,7 @@
 import {
   AgentTool,
   BaseAgent,
-  FunctionTool,
+  BaseTool,
   LlmAgent,
   LoopAgent,
   MCPToolset,
@@ -73,7 +73,7 @@ export class AgentRegistry {
     this.configs.set(name, config);
   }
 
-  private findToolOrThrow(name: string): FunctionTool<undefined> {
+  private findToolOrThrow(name: string): BaseTool {
     const tool = this.integrationRegistry.getTool(name);
     if (!tool) {
       console.log('Tool not found in registry', name);
