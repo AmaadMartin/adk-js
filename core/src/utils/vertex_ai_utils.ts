@@ -51,8 +51,7 @@ export interface ReasoningEngineName {
  * @param name A resource name of the form
  *     `projects/{project}/locations/{location}/reasoningEngines/{id}`.
  * @return The parsed components, or undefined if `name` is not a
- *     fully-qualified reasoning engine resource name. Callers are responsible
- *     for raising their own error on undefined.
+ *     fully-qualified reasoning engine resource name.
  */
 export function parseReasoningEngineName(
   name: string,

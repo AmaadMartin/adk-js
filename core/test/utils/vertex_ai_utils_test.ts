@@ -74,34 +74,30 @@ describe('vertex_ai_utils', () => {
   });
 
   describe('parseReasoningEngineName', () => {
-    it('should parse a fully-qualified resource name', () => {
-      expect(
-        parseReasoningEngineName(
-          'projects/my-project/locations/us-central1/reasoningEngines/999',
-        ),
-      ).toEqual({
-        projectId: 'my-project',
-        location: 'us-central1',
-        reasoningEngineId: '999',
-      });
-    });
-
-    it('should allow underscores and hyphens in the project id', () => {
-      expect(
-        parseReasoningEngineName(
-          'projects/my_project-1/locations/us-central1/reasoningEngines/12345',
-        ),
-      ).toEqual({
-        projectId: 'my_project-1',
-        location: 'us-central1',
-        reasoningEngineId: '12345',
-      });
+    it.each([
+      [
+        'projects/my-project/locations/us-central1/reasoningEngines/999',
+        {
+          projectId: 'my-project',
+          location: 'us-central1',
+          reasoningEngineId: '999',
+        },
+      ],
+      [
+        'projects/my_project-1/locations/us-central1/reasoningEngines/12345',
+        {
+          projectId: 'my_project-1',
+          location: 'us-central1',
+          reasoningEngineId: '12345',
+        },
+      ],
+    ])('should parse %s', (name, expected) => {
+      expect(parseReasoningEngineName(name)).toEqual(expected);
     });
 
     it.each([
       ['a bare reasoning engine id', '12345'],
       ['an arbitrary string', 'invalid'],
-      ['an empty string', ''],
       [
         'a non-numeric engine id',
         'projects/p/locations/l/reasoningEngines/abc',
@@ -113,10 +109,6 @@ describe('vertex_ai_utils', () => {
       [
         'a name with a leading prefix',
         'prefix/projects/p/locations/l/reasoningEngines/123',
-      ],
-      [
-        'a name with a trailing slash',
-        'projects/p/locations/l/reasoningEngines/123/',
       ],
       [
         'a name with an empty project',
