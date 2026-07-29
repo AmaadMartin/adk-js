@@ -17,6 +17,13 @@ import {
   MetricInfoSchema,
 } from './eval_metrics.js';
 
+// The config schemas below deliberately accept and drop unknown keys, rather
+// than using `.strict()` like the eval data models. Their adk-python
+// counterparts derive from plain `BaseModel` (pydantic's default
+// `extra="ignore"`), whereas the data models derive from `EvalBaseModel`
+// (`extra="forbid"`). Keeping these loose means an eval config file that
+// adk-python accepts also parses here.
+
 /**
  * Configuration for a custom metric.
  */
@@ -86,14 +93,15 @@ export const EvalConfigSchema = z.object({
 export type EvalConfig = z.infer<typeof EvalConfigSchema>;
 
 /**
- * Default criteria used when no eval config file is supplied.
+ * Default criteria used when no eval config file is supplied. Re-parsed on
+ * every use so callers cannot mutate the defaults handed to later calls.
  */
-const DEFAULT_EVAL_CONFIG: EvalConfig = EvalConfigSchema.parse({
+const DEFAULT_EVAL_CONFIG = {
   criteria: {
     tool_trajectory_avg_score: 1.0,
     response_match_score: 0.8,
   },
-});
+};
 
 /**
  * Returns the `EvalConfig` read from the config file, if present. Otherwise a
@@ -113,10 +121,10 @@ export function getEvaluationCriteriaOrDefault(
     return EvalConfigSchema.parse(JSON.parse(content));
   }
 
-  logger.info(
+  logger.debug(
     'No config file supplied or file not found. Using default criteria.',
   );
-  return DEFAULT_EVAL_CONFIG;
+  return EvalConfigSchema.parse(DEFAULT_EVAL_CONFIG);
 }
 
 /**

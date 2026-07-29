@@ -16,6 +16,12 @@ import {EvalCaseResult} from './eval_result.js';
  */
 const DEFAULT_PARALLELISM = 4;
 
+// The schemas below deliberately accept and drop unknown keys, rather than
+// using `.strict()` like the eval data models. Their adk-python counterparts in
+// `base_eval_service.py` derive from plain `BaseModel` (pydantic's default
+// `extra="ignore"`), whereas the data models derive from `EvalBaseModel`
+// (`extra="forbid"`).
+
 /**
  * Contains configurations needed to run evaluations.
  */

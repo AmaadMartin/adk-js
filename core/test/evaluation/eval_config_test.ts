@@ -78,6 +78,16 @@ describe('evaluation/eval_config', () => {
 
       expect(getEvaluationCriteriaOrDefault(missing)).toEqual(DEFAULT_CONFIG);
     });
+
+    it('returns a fresh default so callers cannot poison later calls', () => {
+      const first = getEvaluationCriteriaOrDefault('');
+      first.criteria['injected_metric'] = 0.1;
+
+      const second = getEvaluationCriteriaOrDefault('');
+
+      expect(second.criteria['injected_metric']).toBeUndefined();
+      expect(second).toEqual(DEFAULT_CONFIG);
+    });
   });
 
   describe('getEvalMetricsFromConfig', () => {
