@@ -22,7 +22,10 @@ import {Event} from '../events/event.js';
 import {EventActions} from '../events/event_actions.js';
 import {ToolConfirmation} from '../tools/tool_confirmation.js';
 import {logger} from '../utils/logger.js';
-import {getExpressModeApiKey} from '../utils/vertex_ai_utils.js';
+import {
+  getExpressModeApiKey,
+  parseReasoningEngineName,
+} from '../utils/vertex_ai_utils.js';
 
 import {partialCopy} from '../utils/partial_copy.js';
 import {
@@ -117,15 +120,13 @@ export class VertexAiSessionService extends BaseSessionService {
     if (/^\d+$/.test(appName)) {
       return appName;
     }
-    const pattern =
-      /^projects\/([a-zA-Z0-9-_]+)\/locations\/([a-zA-Z0-9-_]+)\/reasoningEngines\/(\d+)$/;
-    const match = appName.match(pattern);
-    if (!match) {
+    const parsed = parseReasoningEngineName(appName);
+    if (!parsed) {
       throw new Error(
         `App name ${appName} is not valid. It should either be the full ReasoningEngine resource name, or the reasoning engine id.`,
       );
     }
-    return match[3];
+    return parsed.reasoningEngineId;
   }
 
   async createSession({

@@ -32,3 +32,37 @@ export function getExpressModeApiKey(
 
   return undefined;
 }
+
+const REASONING_ENGINE_NAME_PATTERN =
+  /^projects\/([a-zA-Z0-9-_]+)\/locations\/([a-zA-Z0-9-_]+)\/reasoningEngines\/(\d+)$/;
+
+/**
+ * The parsed components of a Vertex AI reasoning engine resource name.
+ */
+export interface ReasoningEngineName {
+  projectId: string;
+  location: string;
+  reasoningEngineId: string;
+}
+
+/**
+ * Parses a fully-qualified Vertex AI reasoning engine resource name.
+ *
+ * @param name A resource name of the form
+ *     `projects/{project}/locations/{location}/reasoningEngines/{id}`.
+ * @return The parsed components, or undefined if `name` is not a
+ *     fully-qualified reasoning engine resource name.
+ */
+export function parseReasoningEngineName(
+  name: string,
+): ReasoningEngineName | undefined {
+  const match = name.match(REASONING_ENGINE_NAME_PATTERN);
+  if (!match) {
+    return undefined;
+  }
+  return {
+    projectId: match[1],
+    location: match[2],
+    reasoningEngineId: match[3],
+  };
+}
