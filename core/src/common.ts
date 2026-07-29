@@ -321,14 +321,5 @@ export * from './artifacts/base_artifact_service.js';
 export * from './features/feature_registry.js';
 export * from './memory/base_memory_service.js';
 export * from './sessions/base_session_service.js';
+export * from './telemetry/metrics.js';
 export * from './tools/base_tool.js';
-
-export {
-  recordAgentInvocationDuration,
-  recordAgentRequestSize,
-  recordAgentResponseSize,
-  recordAgentWorkflowSteps,
-  recordClientOperationDuration,
-  recordClientTokenUsage,
-  recordToolExecutionDuration,
-} from './telemetry/metrics.js';

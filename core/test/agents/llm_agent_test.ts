@@ -376,14 +376,14 @@ describe('LlmAgent.callLlm', () => {
     expect(spyDuration).toHaveBeenCalledWith(
       'test_agent',
       expect.any(Number),
-      expect.any(Object),
-      expect.any(Array),
+      llmRequest,
+      originalLlmResponse,
       undefined,
     );
     expect(spyTokenUsage).toHaveBeenCalledWith(
       'test_agent',
-      expect.any(Object),
-      expect.any(Array),
+      llmRequest,
+      originalLlmResponse,
     );
   });
 });

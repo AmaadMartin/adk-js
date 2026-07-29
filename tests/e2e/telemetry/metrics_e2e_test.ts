@@ -16,7 +16,13 @@ import {
 } from '@google/adk';
 import {createUserContent} from '@google/genai';
 import {metrics, trace} from '@opentelemetry/api';
-import {MetricReader} from '@opentelemetry/sdk-metrics';
+import {
+  DataPoint,
+  DataPointType,
+  Histogram,
+  HistogramMetricData,
+  MetricReader,
+} from '@opentelemetry/sdk-metrics';
 import {afterAll, describe, expect, it} from 'vitest';
 import {z} from 'zod';
 
@@ -49,9 +55,17 @@ class FakeLlm extends BaseLlm {
   }
 }
 
-interface MetricDataPoint {
-  attributes: Record<string, unknown>;
-  value: unknown;
+/**
+ * Returns the data points recorded for `name`, failing the test if the
+ * instrument was never recorded.
+ */
+function dataPointsOf(
+  metricMap: Map<string, HistogramMetricData>,
+  name: string,
+): DataPoint<Histogram>[] {
+  const metric = metricMap.get(name);
+  expect(metric, `no data recorded for ${name}`).toBeDefined();
+  return metric!.dataPoints;
 }
 
 describe('E2E Telemetry Metrics Integration', () => {
@@ -148,54 +162,85 @@ describe('E2E Telemetry Metrics Integration', () => {
 
     // Collect metrics
     const metricsCollection = await inMemoryMetricReader.collect();
-    const metricMap = new Map();
+    const metricMap = new Map<string, HistogramMetricData>();
 
     for (const scopeMetric of metricsCollection.resourceMetrics.scopeMetrics) {
       for (const metric of scopeMetric.metrics) {
-        metricMap.set(metric.descriptor.name, metric);
+        if (metric.dataPointType === DataPointType.HISTOGRAM) {
+          metricMap.set(metric.descriptor.name, metric);
+        }
       }
     }
 
     // Verify gen_ai.agent.invocation.duration
-    expect(metricMap.has('gen_ai.agent.invocation.duration')).toBe(true);
-    const durationMetric = metricMap.get('gen_ai.agent.invocation.duration');
-    expect(durationMetric.dataPoints.length).toBeGreaterThan(0);
-    const durationDataPoint = durationMetric.dataPoints[0] as MetricDataPoint;
-    expect(durationDataPoint.attributes).toEqual({
+    const durationPoints = dataPointsOf(
+      metricMap,
+      'gen_ai.agent.invocation.duration',
+    );
+    expect(durationPoints.length).toBe(1);
+    expect(durationPoints[0].attributes).toEqual({
       'gen_ai.agent.name': 'metrics_e2e_agent',
     });
 
     // Verify gen_ai.agent.request.size
-    expect(metricMap.has('gen_ai.agent.request.size')).toBe(true);
-    const requestSizeMetric = metricMap.get('gen_ai.agent.request.size');
-    expect(requestSizeMetric.dataPoints.length).toBeGreaterThan(0);
-    const requestSizeDataPoint = requestSizeMetric
-      .dataPoints[0] as MetricDataPoint;
-    expect(requestSizeDataPoint.attributes).toEqual({
+    const requestSizePoints = dataPointsOf(
+      metricMap,
+      'gen_ai.agent.request.size',
+    );
+    expect(requestSizePoints.length).toBe(1);
+    expect(requestSizePoints[0].attributes).toEqual({
       'gen_ai.agent.name': 'metrics_e2e_agent',
     });
+    // 'Hi there!' is 9 bytes of UTF-8 text.
+    expect(requestSizePoints[0].value.sum).toBe(9);
 
     // Verify gen_ai.agent.response.size
-    expect(metricMap.has('gen_ai.agent.response.size')).toBe(true);
-    const responseSizeMetric = metricMap.get('gen_ai.agent.response.size');
-    expect(responseSizeMetric.dataPoints.length).toBeGreaterThan(0);
-    const responseSizeDataPoint = responseSizeMetric
-      .dataPoints[0] as MetricDataPoint;
-    expect(responseSizeDataPoint.attributes).toEqual({
+    const responseSizePoints = dataPointsOf(
+      metricMap,
+      'gen_ai.agent.response.size',
+    );
+    expect(responseSizePoints.length).toBe(1);
+    expect(responseSizePoints[0].attributes).toEqual({
       'gen_ai.agent.name': 'metrics_e2e_agent',
     });
+    // 'Hello! I executed the tool.' is 27 bytes of UTF-8 text.
+    expect(responseSizePoints[0].value.sum).toBe(27);
+
+    // Verify gen_ai.agent.workflow.steps
+    const stepsPoints = dataPointsOf(metricMap, 'gen_ai.agent.workflow.steps');
+    expect(stepsPoints.length).toBe(1);
+    expect(stepsPoints[0].attributes).toEqual({
+      'gen_ai.agent.name': 'metrics_e2e_agent',
+    });
+    // The run is deterministic: the agent authors the function call event, the
+    // function response event and the final text event.
+    expect(stepsPoints[0].value.sum).toBe(3);
+
+    // Verify gen_ai.client.operation.duration
+    const operationPoints = dataPointsOf(
+      metricMap,
+      'gen_ai.client.operation.duration',
+    );
+    expect(operationPoints.length).toBe(1);
+    expect(operationPoints[0].attributes).toEqual({
+      'gen_ai.agent.name': 'metrics_e2e_agent',
+      'gen_ai.operation.name': 'generate_content',
+      'gen_ai.provider.name': 'gemini',
+      'gen_ai.request.model': 'fake-model',
+      'gen_ai.response.model': 'fake-model-v2',
+    });
+    // One call for the tool request and one for the final text response.
+    expect(operationPoints[0].value.count).toBe(2);
 
     // Verify gen_ai.client.token.usage
-    expect(metricMap.has('gen_ai.client.token.usage')).toBe(true);
-    const tokenUsageMetric = metricMap.get('gen_ai.client.token.usage');
-    expect(tokenUsageMetric.dataPoints.length).toBe(2); // input and output token types
+    const tokenPoints = dataPointsOf(metricMap, 'gen_ai.client.token.usage');
+    expect(tokenPoints.length).toBe(2); // input and output token types
 
-    const dataPoints = tokenUsageMetric.dataPoints as MetricDataPoint[];
-    const inputTokenPoint = dataPoints.find(
+    const inputTokenPoint = tokenPoints.find(
       (dp) => dp.attributes['gen_ai.token.type'] === 'input',
     );
     expect(inputTokenPoint).toBeDefined();
-    expect((inputTokenPoint!.value as {sum: number}).sum).toBe(30);
+    expect(inputTokenPoint!.value.sum).toBe(30);
     expect(inputTokenPoint!.attributes).toEqual({
       'gen_ai.agent.name': 'metrics_e2e_agent',
       'gen_ai.operation.name': 'generate_content',
@@ -205,11 +250,11 @@ describe('E2E Telemetry Metrics Integration', () => {
       'gen_ai.token.type': 'input',
     });
 
-    const outputTokenPoint = dataPoints.find(
+    const outputTokenPoint = tokenPoints.find(
       (dp) => dp.attributes['gen_ai.token.type'] === 'output',
     );
     expect(outputTokenPoint).toBeDefined();
-    expect((outputTokenPoint!.value as {sum: number}).sum).toBe(50);
+    expect(outputTokenPoint!.value.sum).toBe(50);
     expect(outputTokenPoint!.attributes).toEqual({
       'gen_ai.agent.name': 'metrics_e2e_agent',
       'gen_ai.operation.name': 'generate_content',
@@ -220,12 +265,12 @@ describe('E2E Telemetry Metrics Integration', () => {
     });
 
     // Verify gen_ai.tool.execution.duration
-    expect(metricMap.has('gen_ai.tool.execution.duration')).toBe(true);
-    const toolDurationMetric = metricMap.get('gen_ai.tool.execution.duration');
-    expect(toolDurationMetric.dataPoints.length).toBeGreaterThan(0);
-    const toolDurationDataPoint = toolDurationMetric
-      .dataPoints[0] as MetricDataPoint;
-    expect(toolDurationDataPoint.attributes).toEqual({
+    const toolDurationPoints = dataPointsOf(
+      metricMap,
+      'gen_ai.tool.execution.duration',
+    );
+    expect(toolDurationPoints.length).toBe(1);
+    expect(toolDurationPoints[0].attributes).toEqual({
       'gen_ai.agent.name': 'metrics_e2e_agent',
       'gen_ai.tool.name': 'fake_tool',
     });

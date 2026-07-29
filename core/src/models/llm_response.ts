@@ -82,11 +82,6 @@ export interface LlmResponse {
   finishReason?: FinishReason;
 
   /**
-   * The model version of the response.
-   */
-  modelVersion?: string;
-
-  /**
    * The session resumption update of the LlmResponse
    */
   liveSessionResumptionUpdate?: LiveServerSessionResumptionUpdate;

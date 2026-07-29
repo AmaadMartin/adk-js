@@ -365,15 +365,11 @@ describe('BaseAgent', () => {
       expect(spyInvocationDuration).toHaveBeenCalled();
       expect(spyWorkflowSteps).toHaveBeenCalledWith(
         'test_before_callback_agent',
-        expect.arrayContaining([
-          expect.objectContaining({content: mockBeforeContent}),
-        ]),
+        1,
       );
       expect(spyResponseSize).toHaveBeenCalledWith(
         'test_before_callback_agent',
-        expect.arrayContaining([
-          expect.objectContaining({content: mockBeforeContent}),
-        ]),
+        mockBeforeContent,
       );
     });
 
@@ -422,17 +418,121 @@ describe('BaseAgent', () => {
 
       expect(spyRequestSize).toHaveBeenCalled();
       expect(spyInvocationDuration).toHaveBeenCalled();
+      // One event from runAsyncImpl plus the afterAgentCallback event.
       expect(spyWorkflowSteps).toHaveBeenCalledWith(
         'test_after_callback_agent',
-        expect.arrayContaining([
-          expect.objectContaining({content: mockAfterContent}),
-        ]),
+        2,
       );
       expect(spyResponseSize).toHaveBeenCalledWith(
         'test_after_callback_agent',
-        expect.arrayContaining([
-          expect.objectContaining({content: mockAfterContent}),
-        ]),
+        mockAfterContent,
+      );
+    });
+
+    it('should count only its own events and report its last own content', async () => {
+      const ownFirstContent = {role: 'model', parts: [{text: 'first'}]};
+      const ownLastContent = {role: 'model', parts: [{text: 'last own'}]};
+
+      class MixedAuthorAgent extends BaseAgent {
+        protected async *runAsyncImpl(
+          context: InvocationContext,
+        ): AsyncGenerator<Event, void, void> {
+          const emitted = [
+            {author: this.name, content: ownFirstContent},
+            {author: 'sub_agent', content: {parts: [{text: 'sub 1'}]}},
+            {author: this.name, content: ownLastContent},
+            // A trailing sub-agent event must not become this agent's
+            // response, and must not count towards its workflow steps.
+            {author: 'sub_agent', content: {parts: [{text: 'sub 2'}]}},
+          ];
+          for (const {author, content} of emitted) {
+            yield createEvent({
+              invocationId: context.invocationId,
+              author,
+              content,
+            });
+          }
+        }
+
+        protected async *runLiveImpl(): AsyncGenerator<Event, void, void> {
+          // Not needed for this test.
+        }
+      }
+
+      const agent = new MixedAuthorAgent({name: 'mixed_author_agent'});
+      const parentContext = new InvocationContext({
+        invocationId: 'test',
+        agent: agent,
+        session: {
+          id: 'test-session',
+          appName: 'test-app',
+          userId: 'test-user',
+          state: {},
+          events: [],
+          lastUpdateTime: Date.now(),
+        } as Session,
+        pluginManager: new PluginManager(),
+      });
+
+      const spyWorkflowSteps = vi.spyOn(metrics, 'recordAgentWorkflowSteps');
+      const spyResponseSize = vi.spyOn(metrics, 'recordAgentResponseSize');
+
+      const events: Event[] = [];
+      for await (const event of agent.runAsync(parentContext)) {
+        events.push(event);
+      }
+
+      expect(events).toHaveLength(4);
+      expect(spyWorkflowSteps).toHaveBeenCalledWith('mixed_author_agent', 2);
+      expect(spyResponseSize).toHaveBeenCalledWith(
+        'mixed_author_agent',
+        ownLastContent,
+      );
+    });
+
+    it('should record no steps and no content when it authors nothing', async () => {
+      class SubAgentOnlyAgent extends BaseAgent {
+        protected async *runAsyncImpl(
+          context: InvocationContext,
+        ): AsyncGenerator<Event, void, void> {
+          yield createEvent({
+            invocationId: context.invocationId,
+            author: 'sub_agent',
+            content: {parts: [{text: 'only from the sub agent'}]},
+          });
+        }
+
+        protected async *runLiveImpl(): AsyncGenerator<Event, void, void> {
+          // Not needed for this test.
+        }
+      }
+
+      const agent = new SubAgentOnlyAgent({name: 'sub_agent_only_agent'});
+      const parentContext = new InvocationContext({
+        invocationId: 'test',
+        agent: agent,
+        session: {
+          id: 'test-session',
+          appName: 'test-app',
+          userId: 'test-user',
+          state: {},
+          events: [],
+          lastUpdateTime: Date.now(),
+        } as Session,
+        pluginManager: new PluginManager(),
+      });
+
+      const spyWorkflowSteps = vi.spyOn(metrics, 'recordAgentWorkflowSteps');
+      const spyResponseSize = vi.spyOn(metrics, 'recordAgentResponseSize');
+
+      for await (const _ of agent.runAsync(parentContext)) {
+        continue;
+      }
+
+      expect(spyWorkflowSteps).toHaveBeenCalledWith('sub_agent_only_agent', 0);
+      expect(spyResponseSize).toHaveBeenCalledWith(
+        'sub_agent_only_agent',
+        undefined,
       );
     });
 

@@ -6,7 +6,6 @@
 
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
-import {createEvent} from '../../src/events/event.js';
 import {LlmRequest} from '../../src/models/llm_request.js';
 import {LlmResponse} from '../../src/models/llm_response.js';
 import {
@@ -238,14 +237,8 @@ describe('Telemetry Metrics Functions', () => {
   });
 
   describe('recordAgentResponseSize', () => {
-    it('should record 0 size if no matching event found with content', () => {
-      const events = [
-        createEvent({
-          author: 'other-agent',
-          content: {parts: [{text: 'Hello'}]},
-        }),
-      ];
-      recordAgentResponseSize('my-agent', events);
+    it('should record 0 size if the agent produced no content', () => {
+      recordAgentResponseSize('my-agent', undefined);
       expect(
         mockHistograms['gen_ai.agent.response.size'].record,
       ).toHaveBeenCalledWith(0, {
@@ -253,22 +246,40 @@ describe('Telemetry Metrics Functions', () => {
       });
     });
 
-    it('should record correct size from the last matching event content', () => {
-      const events = [
-        createEvent({author: 'my-agent', content: {parts: [{text: 'First'}]}}),
-        createEvent({
-          author: 'my-agent',
-          content: {parts: [{text: 'Second Response'}]},
-        }), // 15 bytes
-        createEvent({
-          author: 'other-agent',
-          content: {parts: [{text: 'Third'}]},
-        }),
-      ];
-      recordAgentResponseSize('my-agent', events);
+    it('should record correct byte size for the response content', () => {
+      recordAgentResponseSize('my-agent', {
+        parts: [{text: 'Second Response'}], // 15 bytes
+      });
       expect(
         mockHistograms['gen_ai.agent.response.size'].record,
       ).toHaveBeenCalledWith(15, {
+        'gen_ai.agent.name': 'my-agent',
+      });
+    });
+
+    it('should record the JSON byte size of a function call part', () => {
+      recordAgentResponseSize('my-agent', {
+        // {"name":"fake_tool","args":{}} -> 30 bytes
+        parts: [{functionCall: {name: 'fake_tool', args: {}}}],
+      });
+      expect(
+        mockHistograms['gen_ai.agent.response.size'].record,
+      ).toHaveBeenCalledWith(30, {
+        'gen_ai.agent.name': 'my-agent',
+      });
+    });
+
+    it('should sum text and structured parts of the same content', () => {
+      recordAgentResponseSize('my-agent', {
+        parts: [
+          {text: 'Hello'}, // 5 bytes
+          // {"name":"t","response":{}} -> 26 bytes
+          {functionResponse: {name: 't', response: {}}},
+        ],
+      });
+      expect(
+        mockHistograms['gen_ai.agent.response.size'].record,
+      ).toHaveBeenCalledWith(31, {
         'gen_ai.agent.name': 'my-agent',
       });
     });
@@ -280,20 +291,14 @@ describe('Telemetry Metrics Functions', () => {
         throw new Error('Recording failed');
       });
       expect(() => {
-        recordAgentResponseSize('my-agent', []);
+        recordAgentResponseSize('my-agent', {parts: [{text: 'Hello'}]});
       }).not.toThrow();
     });
   });
 
   describe('recordAgentWorkflowSteps', () => {
-    it('should record correct workflow step count', () => {
-      const events = [
-        createEvent({author: 'my-agent'}),
-        createEvent({author: 'other-agent'}),
-        createEvent({author: 'my-agent'}),
-        createEvent({author: 'my-agent'}),
-      ];
-      recordAgentWorkflowSteps('my-agent', events);
+    it('should record the given workflow step count', () => {
+      recordAgentWorkflowSteps('my-agent', 3);
       expect(
         mockHistograms['gen_ai.agent.workflow.steps'].record,
       ).toHaveBeenCalledWith(3, {
@@ -308,7 +313,7 @@ describe('Telemetry Metrics Functions', () => {
         throw new Error('Recording failed');
       });
       expect(() => {
-        recordAgentWorkflowSteps('my-agent', []);
+        recordAgentWorkflowSteps('my-agent', 0);
       }).not.toThrow();
     });
   });
@@ -316,10 +321,8 @@ describe('Telemetry Metrics Functions', () => {
   describe('recordClientOperationDuration', () => {
     it('should record client operation duration converted to seconds with Gemini provider', () => {
       const llmRequest: LlmRequest = {model: 'model-a'} as LlmRequest;
-      const responses: LlmResponse[] = [
-        {modelVersion: 'model-a-v1'} as LlmResponse,
-      ];
-      recordClientOperationDuration('my-agent', 1500, llmRequest, responses);
+      const lastResponse: LlmResponse = {modelVersion: 'model-a-v1'};
+      recordClientOperationDuration('my-agent', 1500, llmRequest, lastResponse);
       expect(
         mockHistograms['gen_ai.client.operation.duration'].record,
       ).toHaveBeenCalledWith(1.5, {
@@ -336,10 +339,8 @@ describe('Telemetry Metrics Functions', () => {
         GoogleLLMVariant.VERTEX_AI,
       );
       const llmRequest: LlmRequest = {model: 'model-a'} as LlmRequest;
-      const responses: LlmResponse[] = [
-        {modelVersion: 'model-a-v1'} as LlmResponse,
-      ];
-      recordClientOperationDuration('my-agent', 1500, llmRequest, responses);
+      const lastResponse: LlmResponse = {modelVersion: 'model-a-v1'};
+      recordClientOperationDuration('my-agent', 1500, llmRequest, lastResponse);
       expect(
         mockHistograms['gen_ai.client.operation.duration'].record,
       ).toHaveBeenCalledWith(1.5, {
@@ -353,8 +354,8 @@ describe('Telemetry Metrics Functions', () => {
 
     it('should fall back to llmRequest.model if lastResponse.modelVersion is missing', () => {
       const llmRequest: LlmRequest = {model: 'model-a'} as LlmRequest;
-      const responses: LlmResponse[] = [{} as LlmResponse];
-      recordClientOperationDuration('my-agent', 1500, llmRequest, responses);
+      const lastResponse: LlmResponse = {};
+      recordClientOperationDuration('my-agent', 1500, llmRequest, lastResponse);
       expect(
         mockHistograms['gen_ai.client.operation.duration'].record,
       ).toHaveBeenCalledWith(1.5, {
@@ -371,10 +372,8 @@ describe('Telemetry Metrics Functions', () => {
         throw new Error('Variant error');
       });
       const llmRequest: LlmRequest = {model: 'model-a'} as LlmRequest;
-      const responses: LlmResponse[] = [
-        {modelVersion: 'model-a-v1'} as LlmResponse,
-      ];
-      recordClientOperationDuration('my-agent', 1500, llmRequest, responses);
+      const lastResponse: LlmResponse = {modelVersion: 'model-a-v1'};
+      recordClientOperationDuration('my-agent', 1500, llmRequest, lastResponse);
       expect(
         mockHistograms['gen_ai.client.operation.duration'].record,
       ).toHaveBeenCalledWith(1.5, {
@@ -386,9 +385,9 @@ describe('Telemetry Metrics Functions', () => {
       });
     });
 
-    it('should handle empty responses array and no models', () => {
+    it('should handle a missing response and no models', () => {
       const llmRequest: LlmRequest = {} as LlmRequest;
-      recordClientOperationDuration('my-agent', 1500, llmRequest, []);
+      recordClientOperationDuration('my-agent', 1500, llmRequest, undefined);
       expect(
         mockHistograms['gen_ai.client.operation.duration'].record,
       ).toHaveBeenCalledWith(1.5, {
@@ -401,7 +400,13 @@ describe('Telemetry Metrics Functions', () => {
     it('should record client operation duration with error', () => {
       const llmRequest: LlmRequest = {model: 'model-a'} as LlmRequest;
       const err = new Error('LLM Error');
-      recordClientOperationDuration('my-agent', 2000, llmRequest, [], err);
+      recordClientOperationDuration(
+        'my-agent',
+        2000,
+        llmRequest,
+        undefined,
+        err,
+      );
       expect(
         mockHistograms['gen_ai.client.operation.duration'].record,
       ).toHaveBeenCalledWith(2.0, {
@@ -417,7 +422,13 @@ describe('Telemetry Metrics Functions', () => {
       const llmRequest: LlmRequest = {model: 'model-a'} as LlmRequest;
       const err = new Error('LLM Error');
       err.name = '';
-      recordClientOperationDuration('my-agent', 2000, llmRequest, [], err);
+      recordClientOperationDuration(
+        'my-agent',
+        2000,
+        llmRequest,
+        undefined,
+        err,
+      );
       expect(
         mockHistograms['gen_ai.client.operation.duration'].record,
       ).toHaveBeenCalledWith(2.0, {
@@ -436,24 +447,23 @@ describe('Telemetry Metrics Functions', () => {
         throw new Error('Recording failed');
       });
       expect(() => {
-        recordClientOperationDuration('my-agent', 1500, {} as LlmRequest, []);
+        recordClientOperationDuration('my-agent', 1500, {} as LlmRequest, {});
       }).not.toThrow();
     });
   });
 
   describe('recordClientTokenUsage', () => {
-    it('should skip if no responses provided', () => {
+    it('should skip if no response is provided', () => {
       const llmRequest: LlmRequest = {model: 'model-a'} as LlmRequest;
-      recordClientTokenUsage('my-agent', llmRequest, []);
+      recordClientTokenUsage('my-agent', llmRequest, undefined);
       expect(
         mockHistograms['gen_ai.client.token.usage'].record,
       ).not.toHaveBeenCalled();
     });
 
-    it('should skip if usageMetadata is missing in last response', () => {
+    it('should skip if usageMetadata is missing in the last response', () => {
       const llmRequest: LlmRequest = {model: 'model-a'} as LlmRequest;
-      const responses: LlmResponse[] = [{} as LlmResponse];
-      recordClientTokenUsage('my-agent', llmRequest, responses);
+      recordClientTokenUsage('my-agent', llmRequest, {});
       expect(
         mockHistograms['gen_ai.client.token.usage'].record,
       ).not.toHaveBeenCalled();
@@ -461,18 +471,16 @@ describe('Telemetry Metrics Functions', () => {
 
     it('should record input and output token usage correctly', () => {
       const llmRequest: LlmRequest = {model: 'model-a'} as LlmRequest;
-      const responses: LlmResponse[] = [
-        {
-          modelVersion: 'model-a-v1',
-          usageMetadata: {
-            promptTokenCount: 10,
-            toolUsePromptTokenCount: 5,
-            candidatesTokenCount: 20,
-            thoughtsTokenCount: 3,
-          },
-        } as LlmResponse,
-      ];
-      recordClientTokenUsage('my-agent', llmRequest, responses);
+      const lastResponse: LlmResponse = {
+        modelVersion: 'model-a-v1',
+        usageMetadata: {
+          promptTokenCount: 10,
+          toolUsePromptTokenCount: 5,
+          candidatesTokenCount: 20,
+          thoughtsTokenCount: 3,
+        },
+      };
+      recordClientTokenUsage('my-agent', llmRequest, lastResponse);
 
       // Input usage = promptTokenCount (10) + toolUsePromptTokenCount (5) = 15
       expect(
@@ -499,16 +507,12 @@ describe('Telemetry Metrics Functions', () => {
       });
     });
 
-    it('should fall back to llmRequest.model if responses has no modelVersion', () => {
+    it('should fall back to llmRequest.model if the response has no modelVersion', () => {
       const llmRequest: LlmRequest = {model: 'model-a'} as LlmRequest;
-      const responses: LlmResponse[] = [
-        {
-          usageMetadata: {
-            promptTokenCount: 10,
-          },
-        } as LlmResponse,
-      ];
-      recordClientTokenUsage('my-agent', llmRequest, responses);
+      const lastResponse: LlmResponse = {
+        usageMetadata: {promptTokenCount: 10},
+      };
+      recordClientTokenUsage('my-agent', llmRequest, lastResponse);
       expect(
         mockHistograms['gen_ai.client.token.usage'].record,
       ).toHaveBeenCalledWith(10, {
@@ -523,17 +527,15 @@ describe('Telemetry Metrics Functions', () => {
 
     it('should not record if input or output token count is zero', () => {
       const llmRequest: LlmRequest = {model: 'model-a'} as LlmRequest;
-      const responses: LlmResponse[] = [
-        {
-          usageMetadata: {
-            promptTokenCount: 0,
-            toolUsePromptTokenCount: 0,
-            candidatesTokenCount: 0,
-            thoughtsTokenCount: 0,
-          },
-        } as LlmResponse,
-      ];
-      recordClientTokenUsage('my-agent', llmRequest, responses);
+      const lastResponse: LlmResponse = {
+        usageMetadata: {
+          promptTokenCount: 0,
+          toolUsePromptTokenCount: 0,
+          candidatesTokenCount: 0,
+          thoughtsTokenCount: 0,
+        },
+      };
+      recordClientTokenUsage('my-agent', llmRequest, lastResponse);
       expect(
         mockHistograms['gen_ai.client.token.usage'].record,
       ).not.toHaveBeenCalled();
@@ -546,15 +548,11 @@ describe('Telemetry Metrics Functions', () => {
         },
       );
       const llmRequest: LlmRequest = {model: 'model-a'} as LlmRequest;
-      const responses: LlmResponse[] = [
-        {
-          usageMetadata: {
-            promptTokenCount: 10,
-          },
-        } as LlmResponse,
-      ];
+      const lastResponse: LlmResponse = {
+        usageMetadata: {promptTokenCount: 10},
+      };
       expect(() => {
-        recordClientTokenUsage('my-agent', llmRequest, responses);
+        recordClientTokenUsage('my-agent', llmRequest, lastResponse);
       }).not.toThrow();
     });
   });

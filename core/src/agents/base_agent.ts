@@ -55,6 +55,37 @@ export interface BaseAgentConfig {
 }
 
 /**
+ * The two scalars the agent-level metrics need from an invocation's event
+ * stream. Accumulating them as the stream is yielded keeps `runAsync` from
+ * retaining the events themselves, which for a streaming or long-running agent
+ * would grow without bound.
+ */
+interface AgentEventTally {
+  /** Number of events authored by the agent so far. */
+  stepCount: number;
+  /** Content of the most recent event authored by the agent, if any. */
+  lastContent?: Content;
+}
+
+/**
+ * Folds one event into `tally`. Events authored by another agent (for example
+ * a sub-agent) are not part of this agent's workflow and are ignored.
+ */
+function tallyAgentEvent(
+  tally: AgentEventTally,
+  event: Event,
+  agentName: string,
+): void {
+  if (event.author !== agentName) {
+    return;
+  }
+  tally.stepCount++;
+  if (event.content) {
+    tally.lastContent = event.content;
+  }
+}
+
+/**
  * A unique symbol to identify ADK agent classes.
  * Defined once and shared by all BaseAgent instances.
  */
@@ -250,8 +281,8 @@ export abstract class BaseAgent<
     const span = tracer.startSpan(`invoke_agent ${this.name}`);
     const ctx = trace.setSpan(context.active(), span);
     const startTime = performance.now();
-    const events: Event[] = [];
     const agentName = this.name;
+    const tally: AgentEventTally = {stepCount: 0};
     let error: Error | undefined;
     try {
       yield* runAsyncGeneratorWithOtelContext<BaseAgent, Event>(
@@ -265,7 +296,7 @@ export abstract class BaseAgent<
           const beforeAgentCallbackEvent =
             await this.handleBeforeAgentCallback(context);
           if (beforeAgentCallbackEvent) {
-            events.push(beforeAgentCallbackEvent);
+            tallyAgentEvent(tally, beforeAgentCallbackEvent, agentName);
             yield beforeAgentCallbackEvent;
           }
 
@@ -275,7 +306,7 @@ export abstract class BaseAgent<
 
           traceAgentInvocation({agent: this, invocationContext: context});
           for await (const event of this.runAsyncImpl(context)) {
-            events.push(event);
+            tallyAgentEvent(tally, event, agentName);
             yield event;
           }
 
@@ -286,7 +317,7 @@ export abstract class BaseAgent<
           const afterAgentCallbackEvent =
             await this.handleAfterAgentCallback(context);
           if (afterAgentCallbackEvent) {
-            events.push(afterAgentCallbackEvent);
+            tallyAgentEvent(tally, afterAgentCallbackEvent, agentName);
             yield afterAgentCallbackEvent;
           }
         },
@@ -298,8 +329,8 @@ export abstract class BaseAgent<
       span.end();
       const elapsedMs = performance.now() - startTime;
       recordAgentInvocationDuration(agentName, elapsedMs, error);
-      recordAgentWorkflowSteps(agentName, events);
-      recordAgentResponseSize(agentName, events);
+      recordAgentWorkflowSteps(agentName, tally.stepCount);
+      recordAgentResponseSize(agentName, tally.lastContent);
     }
   }
 

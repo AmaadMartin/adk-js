@@ -1092,7 +1092,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     } else {
       invocationContext.incrementLlmCallCount();
       const startTime = performance.now();
-      const responses: LlmResponse[] = [];
+      let lastResponse: LlmResponse | undefined;
       let error: Error | undefined;
       try {
         const responsesGenerator = llm.generateContentAsync(
@@ -1103,7 +1103,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         );
 
         for await (const llmResponse of responsesGenerator) {
-          responses.push(llmResponse);
+          lastResponse = llmResponse;
           traceCallLlm({
             invocationContext,
             eventId: modelResponseEvent.id,
@@ -1137,10 +1137,10 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
           this.name,
           elapsedMs,
           llmRequest,
-          responses,
+          lastResponse,
           error,
         );
-        recordClientTokenUsage(this.name, llmRequest, responses);
+        recordClientTokenUsage(this.name, llmRequest, lastResponse);
       }
     }
   }

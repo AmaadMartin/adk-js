@@ -180,6 +180,7 @@ async function callToolAsync(
   const agentName = toolContext.invocationContext.agent.name;
   const toolName = tool.name;
   return tracer.startActiveSpan(`execute_tool ${tool.name}`, async (span) => {
+    let error: Error | undefined;
     try {
       logger.debug(`callToolAsync ${tool.name}`);
       const result = await tool.runAsync({args, toolContext});
@@ -193,15 +194,18 @@ async function callToolAsync(
           toolContext.invocationContext,
         ),
       });
-      span.end();
-      const elapsedMs = performance.now() - startTime;
-      recordToolExecutionDuration(toolName, agentName, elapsedMs, undefined);
       return result;
     } catch (e) {
-      span.end();
-      const elapsedMs = performance.now() - startTime;
-      recordToolExecutionDuration(toolName, agentName, elapsedMs, e as Error);
+      error = e as Error;
       throw e;
+    } finally {
+      span.end();
+      recordToolExecutionDuration(
+        toolName,
+        agentName,
+        performance.now() - startTime,
+        error,
+      );
     }
   });
 }
