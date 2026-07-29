@@ -9,7 +9,6 @@ import {
   GkeCodeExecutor,
   LlmAgent,
   type SandboxClient,
-  type SandboxClientOptions,
 } from '@google/adk';
 import {responseProcessor} from '@google/adk/agents/processors/code_execution_request_processor.js';
 import {FinishReason} from '@google/genai';
@@ -62,9 +61,7 @@ describe('Agent with GkeCodeExecutor sandbox mode', () => {
       run: vi.fn().mockResolvedValue({stdout: SANDBOX_STDOUT, stderr: ''}),
       close: vi.fn().mockResolvedValue(undefined),
     };
-    const sandboxClientFactory = vi.fn(
-      (_options: SandboxClientOptions) => sandbox,
-    );
+    const sandboxClientFactory = vi.fn(() => sandbox);
 
     const executor = new GkeCodeExecutor({
       namespace: 'agents',
