@@ -175,9 +175,11 @@ export class RequestConfirmationLlmRequestProcessor extends BaseLlmRequestProces
       const functionResponseEvent = await handleFunctionCallList({
         invocationContext: invocationContext,
         functionCalls: Object.values(toolsToResumeWithArgs),
-        toolsDict: toolsDict,
-        beforeToolCallbacks: agent.canonicalBeforeToolCallbacks,
-        afterToolCallbacks: agent.canonicalAfterToolCallbacks,
+        toolExecutionConfig: {
+          toolsDict: toolsDict,
+          beforeToolCallbacks: agent.canonicalBeforeToolCallbacks,
+          afterToolCallbacks: agent.canonicalAfterToolCallbacks,
+        },
         filters: new Set(Object.keys(toolsToResumeWithConfirmation)),
         toolConfirmationDict: toolsToResumeWithConfirmation,
       });

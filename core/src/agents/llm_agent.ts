@@ -32,6 +32,12 @@ import {LLMRegistry} from '../models/registry.js';
 
 import {BaseTool, isBaseTool} from '../tools/base_tool.js';
 import {BaseToolset} from '../tools/base_toolset.js';
+import {
+  AfterToolCallback,
+  BeforeToolCallback,
+  SingleAfterToolCallback,
+  SingleBeforeToolCallback,
+} from '../tools/tool_callback.js';
 
 import {logger} from '../utils/logger.js';
 import {Context} from './context.js';
@@ -70,6 +76,16 @@ import {REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR} from './processors/request_c
 import {TOOL_FILTER_REQUEST_PROCESSOR} from './processors/tool_filter_request_processor.js';
 import {ReadonlyContext} from './readonly_context.js';
 import {StreamingMode} from './run_config.js';
+
+// These tool callback types were declared in this module before they moved to
+// `tools/tool_callback.ts`. They are re-exported here so existing deep imports
+// from `agents/llm_agent.js` keep working.
+export type {
+  AfterToolCallback,
+  BeforeToolCallback,
+  SingleAfterToolCallback,
+  SingleBeforeToolCallback,
+};
 
 /**
  * Input/output schema type for agent.
@@ -130,63 +146,6 @@ export type SingleAfterModelCallback = (params: {
 export type AfterModelCallback =
   | SingleAfterModelCallback
   | SingleAfterModelCallback[];
-
-/**
- * A callback that runs before a tool is called.
- *
- * @param params.tool The tool to be called.
- * @param params.args The arguments to the tool.
- * @param params.context Context for the tool call.
- * @returns The tool response. When present, the returned tool response will
- *     be used and the framework will skip calling the actual tool.
- */
-export type SingleBeforeToolCallback = (params: {
-  tool: BaseTool;
-  args: Record<string, unknown>;
-  context: Context;
-}) =>
-  | Record<string, unknown>
-  | undefined
-  | Promise<Record<string, unknown> | undefined>;
-
-/**
- * A single callback or a list of callbacks.
- *
- * When a list of callbacks is provided, the callbacks will be called in the
- * order they are listed until a callback does not return None.
- */
-export type BeforeToolCallback =
-  | SingleBeforeToolCallback
-  | SingleBeforeToolCallback[];
-
-/**
- * A callback that runs after a tool is called.
- *
- * @param params.tool The tool to be called.
- * @param params.args The arguments to the tool.
- * @param params.context Context for the tool call.
- * @param params.response The response from the tool.
- * @returns When present, the returned record will be used as tool result.
- */
-export type SingleAfterToolCallback = (params: {
-  tool: BaseTool;
-  args: Record<string, unknown>;
-  context: Context;
-  response: Record<string, unknown>;
-}) =>
-  | Record<string, unknown>
-  | undefined
-  | Promise<Record<string, unknown> | undefined>;
-
-/**
- * A single callback or a list of callbacks.
- *
- * When a list of callbacks is provided, the callbacks will be called in the
- * order they are listed until acallback does not return None.
- */
-export type AfterToolCallback =
-  | SingleAfterToolCallback
-  | SingleAfterToolCallback[];
 
 /** A list of examples or an example provider. */
 export type ExamplesUnion = Example[] | BaseExampleProvider;
@@ -971,14 +930,14 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     }
 
     // Call functions
-    // TODO - b/425992518: bloated funciton input, fix.
-    // Tool callback passed to get rid of cyclic dependency.
     const functionResponseEvent = await handleFunctionCallsAsync({
       invocationContext: invocationContext,
       functionCallEvent: mergedEvent,
-      toolsDict: llmRequest.toolsDict,
-      beforeToolCallbacks: this.canonicalBeforeToolCallbacks,
-      afterToolCallbacks: this.canonicalAfterToolCallbacks,
+      toolExecutionConfig: {
+        toolsDict: llmRequest.toolsDict,
+        beforeToolCallbacks: this.canonicalBeforeToolCallbacks,
+        afterToolCallbacks: this.canonicalAfterToolCallbacks,
+      },
     });
 
     if (!functionResponseEvent || invocationContext.abortSignal?.aborted) {

@@ -13,7 +13,14 @@ import {
   UnsafeLocalCodeExecutor,
   createSession,
 } from '@google/adk';
-import {beforeEach, describe, expect, it} from 'vitest';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
+
+/**
+ * Every case here shells out to a real `python3` / `sh` / `node` subprocess,
+ * which on a cold CI runner regularly exceeds vitest's 5s default and flakes.
+ */
+const CODE_EXEC_TIMEOUT_MS = 20_000;
+vi.setConfig({testTimeout: CODE_EXEC_TIMEOUT_MS});
 
 function createMockInvocationContext(): InvocationContext {
   const agent = new LlmAgent({

@@ -216,9 +216,11 @@ describe('ToolFilterRequestProcessor', () => {
       handleFunctionCallsAsync({
         invocationContext,
         functionCallEvent,
-        toolsDict: llmRequest.toolsDict,
-        beforeToolCallbacks: [],
-        afterToolCallbacks: [],
+        toolExecutionConfig: {
+          toolsDict: llmRequest.toolsDict,
+          beforeToolCallbacks: [],
+          afterToolCallbacks: [],
+        },
       }),
     ).rejects.toThrow('Function tool1 is not found in the toolsDict.');
   });
