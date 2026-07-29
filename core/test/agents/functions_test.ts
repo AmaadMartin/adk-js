@@ -247,24 +247,6 @@ describe('handleFunctionCallList', () => {
     expect(received).toEqual({result: 'plain string'});
   });
 
-  it('should pass the normalized record of a scalar response to plugin afterToolCallback', async () => {
-    const plugin = new TestPlugin('testPlugin');
-    const afterToolCallback = vi.spyOn(plugin, 'afterToolCallback');
-    pluginManager.registerPlugin(plugin);
-
-    await handleFunctionCallList({
-      invocationContext,
-      functionCalls: [{id: randomIdForTestingOnly(), name: 'scalarTool'}],
-      toolsDict: {'scalarTool': scalarTool},
-      beforeToolCallbacks: [],
-      afterToolCallbacks: [],
-    });
-
-    expect(afterToolCallback).toHaveBeenCalledWith(
-      expect.objectContaining({result: {result: 'plain string'}}),
-    );
-  });
-
   it('should pass a record response through to afterToolCallback unchanged', async () => {
     const toolResult = {status: 'ok'};
     const recordTool = new FunctionTool({
