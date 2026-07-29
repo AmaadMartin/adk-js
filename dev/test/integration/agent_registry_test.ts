@@ -8,13 +8,35 @@ import {
   AgentTool,
   FunctionTool,
   LlmAgent,
+  LOAD_ARTIFACTS,
+  LOAD_MEMORY,
   MCPToolset,
+  PRELOAD_MEMORY,
   SingleAgentCallback,
 } from '@google/adk';
 import {beforeEach, describe, expect, it} from 'vitest';
 import {AgentRegistry} from '../../src/integration/agent_registry.js';
-import {YamlAgentConfig} from '../../src/integration/agent_types.js';
+import {
+  AgentClass,
+  YamlAgentConfig,
+} from '../../src/integration/agent_types.js';
 import {IntegrationRegistry} from '../../src/integration/integration_registry.js';
+
+function registerAgentWithTools(
+  registry: AgentRegistry,
+  name: string,
+  toolNames: string[],
+) {
+  registry.registerAgentConfig(name, {
+    name,
+    model: 'model',
+    description: 'desc',
+    instruction: 'inst',
+    agentClass: AgentClass.LlmAgent,
+    isRootAgent: false,
+    tools: toolNames.map((toolName) => ({name: toolName})),
+  });
+}
 
 describe('AgentRegistry', () => {
   let integrationRegistry: IntegrationRegistry;
@@ -258,19 +280,48 @@ describe('AgentRegistry', () => {
   });
 
   it('should skip built-in tools', () => {
-    const config = {
-      name: 'builtin_agent',
-      model: 'model',
-      description: 'desc',
-      instruction: 'inst',
-      agentClass: 'LlmAgent',
-      tools: [{name: 'exit_loop'}],
-    } as unknown as YamlAgentConfig;
-
-    agentRegistry.registerAgentConfig('builtin_agent', config);
+    registerAgentWithTools(agentRegistry, 'builtin_agent', [
+      'exit_loop',
+      'google_search',
+      'url_context',
+      'google_maps_grounding',
+    ]);
     const retrieved = agentRegistry.getAgent('builtin_agent') as LlmAgent;
 
-    expect(retrieved).toBeDefined();
     expect(retrieved.tools.length).toBe(0);
+  });
+
+  it('should attach mapped built-in tools', () => {
+    registerAgentWithTools(agentRegistry, 'builtin_agent', [
+      'load_memory',
+      'preload_memory',
+      'load_artifacts',
+    ]);
+    const retrieved = agentRegistry.getAgent('builtin_agent') as LlmAgent;
+
+    expect(retrieved.tools.length).toBe(3);
+    expect(retrieved.tools[0]).toBe(LOAD_MEMORY);
+    expect(retrieved.tools[1]).toBe(PRELOAD_MEMORY);
+    expect(retrieved.tools[2]).toBe(LOAD_ARTIFACTS);
+  });
+
+  it('should attach built-in and registered tools together', () => {
+    const customTool = new FunctionTool({
+      name: 'custom_tool',
+      description: 'desc',
+      execute: async () => ({}),
+    });
+    integrationRegistry.registerTool('custom_tool', customTool);
+
+    registerAgentWithTools(agentRegistry, 'mixed_agent', [
+      'load_memory',
+      'exit_loop',
+      'custom_tool',
+    ]);
+    const retrieved = agentRegistry.getAgent('mixed_agent') as LlmAgent;
+
+    expect(retrieved.tools.length).toBe(2);
+    expect(retrieved.tools[0]).toBe(LOAD_MEMORY);
+    expect(retrieved.tools[1]).toBe(customTool);
   });
 });

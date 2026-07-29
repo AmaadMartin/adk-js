@@ -7,11 +7,15 @@
 import {
   AgentTool,
   BaseAgent,
+  BaseTool,
   FunctionTool,
   LlmAgent,
+  LOAD_ARTIFACTS,
+  LOAD_MEMORY,
   LoopAgent,
   MCPToolset,
   ParallelAgent,
+  PRELOAD_MEMORY,
   SequentialAgent,
 } from '@google/adk';
 import * as path from 'node:path';
@@ -23,7 +27,23 @@ import {
 } from './agent_types.js';
 import {IntegrationRegistry} from './integration_registry.js';
 
-const BUILTIN_TOOLS = [
+/**
+ * YAML tool names that resolve to a shared ADK core tool singleton.
+ *
+ * Mirrors adk-python, where an undotted tool name in an agent config is looked
+ * up in `google.adk.tools` and the resolved instance is attached to the agent.
+ */
+const BUILTIN_TOOLS = new Map<string, BaseTool>([
+  ['load_memory', LOAD_MEMORY],
+  ['preload_memory', PRELOAD_MEMORY],
+  ['load_artifacts', LOAD_ARTIFACTS],
+]);
+
+/**
+ * Recognized YAML tool names that are not yet mapped to a tool instance and
+ * are skipped for backward compatibility.
+ */
+const SKIPPED_BUILTIN_TOOLS: readonly string[] = [
   'exit_loop',
   'google_search',
   'url_context',
@@ -136,8 +156,12 @@ export class AgentRegistry {
 
       const tools = config.tools
         ?.map((toolConfig) => {
-          // Built in tools are skipped
-          if (BUILTIN_TOOLS.includes(toolConfig.name)) {
+          const builtinTool = BUILTIN_TOOLS.get(toolConfig.name);
+          if (builtinTool) {
+            return builtinTool;
+          }
+
+          if (SKIPPED_BUILTIN_TOOLS.includes(toolConfig.name)) {
             return undefined;
           }
 
@@ -175,7 +199,7 @@ export class AgentRegistry {
 
           return this.findToolOrThrow(toolConfig.name);
         })
-        // remove entries for built-in tools
+        // remove entries for skipped built-in tools
         .filter((tool) => tool !== undefined);
 
       const options = {
