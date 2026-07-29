@@ -109,8 +109,12 @@ const PORT_OPTION = new Option(
 ).default('8000');
 const ORIGINS_OPTION = new Option(
   '--allow_origins <string>',
-  'Optional. The allow origins of the server',
+  'Optional. Comma-separated list of origins allowed to send cross-origin requests to the server',
 ).default('');
+const TRUST_PROXY_HEADERS_OPTION = new Option(
+  '--trust_proxy_headers [boolean]',
+  'Optional. Trust X-Forwarded-Host/X-Forwarded-Proto/Forwarded headers when validating request origin. Only enable when the server sits behind a trusted reverse proxy. Default: false',
+).default(false);
 const VERBOSE_OPTION = new Option(
   '-v, --verbose [boolean]',
   'Optional. The verbose level of the server',
@@ -209,6 +213,7 @@ export function createProgram(): Command {
     .addOption(HOST_OPTION)
     .addOption(PORT_OPTION)
     .addOption(ORIGINS_OPTION)
+    .addOption(TRUST_PROXY_HEADERS_OPTION)
     .addOption(VERBOSE_OPTION)
     .addOption(LOG_LEVEL_OPTION)
     .addOption(SESSION_SERVICE_URI_OPTION)
@@ -231,6 +236,7 @@ export function createProgram(): Command {
           port: parseInt(options['port'], 10),
           serveDebugUI: true,
           allowOrigins: options['allow_origins'],
+          trustProxyHeaders: getBoolean(options['trust_proxy_headers']),
           sessionService: getSessionServiceFromOptions(options),
           artifactService: getArtifactServiceFromOptions(options),
           otelToCloud: options['otel_to_cloud'] ? true : false,
@@ -253,6 +259,7 @@ export function createProgram(): Command {
     .addOption(HOST_OPTION)
     .addOption(PORT_OPTION)
     .addOption(ORIGINS_OPTION)
+    .addOption(TRUST_PROXY_HEADERS_OPTION)
     .addOption(VERBOSE_OPTION)
     .addOption(LOG_LEVEL_OPTION)
     .addOption(SESSION_SERVICE_URI_OPTION)
@@ -275,6 +282,7 @@ export function createProgram(): Command {
           port: parseInt(options['port'], 10),
           serveDebugUI: false,
           allowOrigins: options['allow_origins'],
+          trustProxyHeaders: getBoolean(options['trust_proxy_headers']),
           sessionService: getSessionServiceFromOptions(options),
           artifactService: getArtifactServiceFromOptions(options),
           otelToCloud: options['otel_to_cloud'] ? true : false,

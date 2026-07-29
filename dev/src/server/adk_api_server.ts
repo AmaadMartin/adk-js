@@ -41,6 +41,14 @@ import {
   setupTelemetry,
 } from '../utils/telemetry_utils.js';
 import {getAgentGraphAsDot} from './agent_graph.js';
+import {
+  buildOriginPolicy,
+  createOriginCheckMiddleware,
+  createUpgradeGuard,
+  OriginPolicy,
+  parseAllowedOrigins,
+  WILDCARD_ORIGIN,
+} from './origin_check.js';
 
 interface ServerOptions {
   agentsDir?: string;
@@ -53,6 +61,7 @@ interface ServerOptions {
   agentFileLoadOptions?: AgentFileOptions;
   serveDebugUI?: boolean;
   allowOrigins?: string;
+  trustProxyHeaders?: boolean;
   otelToCloud?: boolean;
   logger?: Logger;
   logLevel?: LogLevel;
@@ -82,7 +91,9 @@ export class AdkApiServer {
   private readonly memoryService: BaseMemoryService;
   private readonly artifactService: BaseArtifactService;
   private readonly serveDebugUI: boolean;
-  private readonly allowOrigins?: string;
+  private readonly allowedOrigins: string[];
+  private readonly trustProxyHeaders: boolean;
+  private originPolicy?: OriginPolicy;
   private readonly otelToCloud: boolean;
   private readonly registerProcessors?: (
     tracerProvider: TracerProvider,
@@ -110,7 +121,8 @@ export class AdkApiServer {
         options.reloadAgents ?? false,
       );
     this.serveDebugUI = options.serveDebugUI ?? false;
-    this.allowOrigins = options.allowOrigins;
+    this.allowedOrigins = parseAllowedOrigins(options.allowOrigins);
+    this.trustProxyHeaders = options.trustProxyHeaders ?? false;
     this.otelToCloud = options.otelToCloud ?? false;
     this.registerProcessors = options.registerProcessors;
     this.memoryExporter = new InMemoryExporter(this.sessionTraceDict);
@@ -176,6 +188,10 @@ export class AdkApiServer {
     const app = this.app;
     await this.setupTelemetry();
 
+    // Registered first so that every route below, plus the A2A routes mounted
+    // later by initA2A(), is behind the gate.
+    app.use(createOriginCheckMiddleware(() => this.originPolicy, this.logger));
+
     if (this.serveDebugUI) {
       app.get('/', (req: Request, res: Response) => {
         res.redirect('/dev-ui');
@@ -199,10 +215,13 @@ export class AdkApiServer {
       });
     }
 
-    if (this.allowOrigins) {
+    if (this.allowedOrigins.length > 0) {
       app.use(
         cors({
-          origin: this.allowOrigins!,
+          // `cors` only emits the wildcard header for the literal '*' string.
+          origin: this.allowedOrigins.includes(WILDCARD_ORIGIN)
+            ? WILDCARD_ORIGIN
+            : this.allowedOrigins,
         }),
       );
     }
@@ -927,12 +946,36 @@ export class AdkApiServer {
     });
   }
 
+  /**
+   * Builds the request-gate policy from the address the server actually bound
+   * to, which is only known once it is listening (`port: 0` picks a free port).
+   */
+  private buildPolicy(): OriginPolicy {
+    const address = this.server?.address();
+    const bound = typeof address === 'object' && address ? address : undefined;
+
+    return buildOriginPolicy({
+      allowedOrigins: this.allowedOrigins,
+      serverHost: bound?.address ?? this.host,
+      configuredHost: this.host,
+      port: bound?.port ?? this.port,
+      trustProxyHeaders: this.trustProxyHeaders,
+    });
+  }
+
   async start(): Promise<void> {
     await this.init();
 
     return new Promise((resolve, reject) => {
       this.server = this.app.listen(this.port, this.host, async () => {
         try {
+          this.originPolicy = this.buildPolicy();
+          createUpgradeGuard(
+            this.server!,
+            () => this.originPolicy,
+            this.logger,
+          );
+
           if (this.a2a) {
             await this.initA2A();
           }
