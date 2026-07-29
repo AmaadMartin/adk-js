@@ -57,8 +57,9 @@ your changes before each commit.
 
 `core/test/public_api/public_exports.golden.json` records every name exported
 by `@google/adk`, so that adding or removing a public export shows up as a
-reviewable diff instead of shipping silently. The same test also fails if an
-entry point star re-exports the same module more than once.
+reviewable diff instead of shipping silently. The same test also fails if one
+of the barrel files (`core/src/common.ts`, `core/src/index.ts`,
+`core/src/index_web.ts`) star re-exports the same module more than once.
 
 When you intentionally add or remove a public export, refresh the golden and
 commit it alongside your change:
