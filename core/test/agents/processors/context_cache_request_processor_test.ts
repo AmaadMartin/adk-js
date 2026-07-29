@@ -124,58 +124,6 @@ describe('ContextCacheRequestProcessor', () => {
     expect(llmRequest.cacheMetadata?.invocationsUsed).toBe(5);
   });
 
-  it('increments invocationsUsed for a different invocation with an active cache', async () => {
-    const invocationContext = createContext({
-      contextCacheConfig: cacheConfig,
-      invocationId: 'current_invocation',
-      events: [
-        createEvent({
-          author: 'test_agent',
-          cacheMetadata: makeActiveCacheMetadata({invocationsUsed: 5}),
-          invocationId: 'previous_invocation',
-        }),
-      ],
-    });
-    const llmRequest = makeLlmRequest();
-
-    await runProcessor(invocationContext, llmRequest);
-
-    expect(llmRequest.cacheMetadata?.invocationsUsed).toBe(6);
-  });
-
-  it('filters cache metadata by agent name', async () => {
-    const targetCache = makeActiveCacheMetadata({
-      invocationsUsed: 3,
-      cacheName: `${CACHE_NAME_PREFIX}target`,
-    });
-    const invocationContext = createContext({
-      contextCacheConfig: cacheConfig,
-      agentName: 'target_agent',
-      invocationId: 'current_invocation',
-      events: [
-        createEvent({
-          author: 'other_agent',
-          cacheMetadata: makeActiveCacheMetadata({
-            invocationsUsed: 7,
-            cacheName: `${CACHE_NAME_PREFIX}other`,
-          }),
-          invocationId: 'other_invocation',
-        }),
-        createEvent({
-          author: 'target_agent',
-          cacheMetadata: targetCache,
-          invocationId: 'target_invocation',
-        }),
-      ],
-    });
-    const llmRequest = makeLlmRequest();
-
-    await runProcessor(invocationContext, llmRequest);
-
-    expect(llmRequest.cacheMetadata?.cacheName).toBe(targetCache.cacheName);
-    expect(llmRequest.cacheMetadata?.invocationsUsed).toBe(4);
-  });
-
   it('selects the most recent cache metadata', async () => {
     const newerCache = makeActiveCacheMetadata({
       invocationsUsed: 5,
@@ -208,21 +156,6 @@ describe('ContextCacheRequestProcessor', () => {
     expect(llmRequest.cacheMetadata?.invocationsUsed).toBe(6);
   });
 
-  it('sets only the cache config for an empty session, yielding no events', async () => {
-    const invocationContext = createContext({
-      contextCacheConfig: cacheConfig,
-      events: [],
-    });
-    const llmRequest = makeLlmRequest();
-
-    const events = await runProcessor(invocationContext, llmRequest);
-
-    expect(events).toHaveLength(0);
-    expect(llmRequest.cacheConfig).toBe(cacheConfig);
-    expect(llmRequest.cacheMetadata).toBeUndefined();
-    expect(llmRequest.cacheableContentsTokenCount).toBeUndefined();
-  });
-
   it('skips wrong-agent and metadata-less events, then increments', async () => {
     const cacheMetadata = makeActiveCacheMetadata({invocationsUsed: 10});
     const invocationContext = createContext({
@@ -231,12 +164,14 @@ describe('ContextCacheRequestProcessor', () => {
       events: [
         createEvent({author: 'other_agent'}),
         createEvent({author: 'test_agent'}),
-        createEvent({author: 'different_agent', cacheMetadata}),
         createEvent({
           author: 'test_agent',
           cacheMetadata,
           invocationId: 'prev',
         }),
+        // Newest, so it is visited first: only the author filter keeps this
+        // foreign agent's metadata (which would yield 10, not 11) from winning.
+        createEvent({author: 'different_agent', cacheMetadata}),
       ],
     });
     const llmRequest = makeLlmRequest();
@@ -279,36 +214,15 @@ describe('ContextCacheRequestProcessor', () => {
     });
     const llmRequest = makeLlmRequest();
 
-    await runProcessor(invocationContext, llmRequest);
+    const events = await runProcessor(invocationContext, llmRequest);
 
+    expect(events).toHaveLength(0);
     expect(llmRequest.cacheConfig).toBe(cacheConfig);
     expect(llmRequest.cacheMetadata).toBeUndefined();
     expect(llmRequest.cacheableContentsTokenCount).toBeUndefined();
   });
 
-  it('filters the token count by agent name', async () => {
-    const invocationContext = createContext({
-      contextCacheConfig: cacheConfig,
-      agentName: 'target_agent',
-      events: [
-        createEvent({
-          author: 'other_agent',
-          usageMetadata: {promptTokenCount: 2048},
-        }),
-        createEvent({
-          author: 'target_agent',
-          usageMetadata: {promptTokenCount: 1024},
-        }),
-      ],
-    });
-    const llmRequest = makeLlmRequest();
-
-    await runProcessor(invocationContext, llmRequest);
-
-    expect(llmRequest.cacheableContentsTokenCount).toBe(1024);
-  });
-
-  it('selects the most recent token count', async () => {
+  it('selects the most recent token count, ignoring other agents', async () => {
     const invocationContext = createContext({
       contextCacheConfig: cacheConfig,
       events: [
@@ -319,6 +233,12 @@ describe('ContextCacheRequestProcessor', () => {
         createEvent({
           author: 'test_agent',
           usageMetadata: {promptTokenCount: 1024},
+        }),
+        // Newest, so it is visited first: only the author filter keeps this
+        // foreign agent's token count from winning.
+        createEvent({
+          author: 'other_agent',
+          usageMetadata: {promptTokenCount: 2048},
         }),
       ],
     });

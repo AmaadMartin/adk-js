@@ -111,10 +111,4 @@ describe('App', () => {
 
     expect(app.contextCacheConfig).toBe(contextCacheConfig);
   });
-
-  it('leaves contextCacheConfig undefined by default', () => {
-    const app = new App({name: 'plain_app', rootAgent: new DummyAgent('root')});
-
-    expect(app.contextCacheConfig).toBeUndefined();
-  });
 });

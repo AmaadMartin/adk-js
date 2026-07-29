@@ -20,7 +20,6 @@ import {
   Runner,
   SequentialAgent,
 } from '@google/adk';
-import {Content} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
 const PROMPT_TOKEN_COUNT = 4096;
@@ -39,7 +38,6 @@ interface CapturedRequest {
  * cache on the first cached turn.
  */
 class RecordingLlm extends BaseLlm {
-  static override readonly supportedModels: string[] = [];
   readonly capturedRequests: CapturedRequest[] = [];
 
   constructor() {
@@ -79,18 +77,6 @@ class RecordingLlm extends BaseLlm {
   }
 }
 
-function userMessage(text: string): Content {
-  return {role: 'user', parts: [{text}]};
-}
-
-async function drain(gen: AsyncGenerator<Event, void, void>): Promise<Event[]> {
-  const events: Event[] = [];
-  for await (const event of gen) {
-    events.push(event);
-  }
-  return events;
-}
-
 /** Builds an app, runner and session wired to a fresh recording model. */
 async function setup(
   contextCacheConfig?: ContextCacheConfig,
@@ -113,10 +99,20 @@ async function setup(
 }
 
 /** Runs one turn and returns the events it produced. */
-function send(runner: Runner, sessionId: string, text: string) {
-  return drain(
-    runner.runAsync({userId: 'user', sessionId, newMessage: userMessage(text)}),
-  );
+async function send(
+  runner: Runner,
+  sessionId: string,
+  text: string,
+): Promise<Event[]> {
+  const events: Event[] = [];
+  for await (const event of runner.runAsync({
+    userId: 'user',
+    sessionId,
+    newMessage: {role: 'user', parts: [{text}]},
+  })) {
+    events.push(event);
+  }
+  return events;
 }
 
 describe('Context cache orchestration through the Runner', () => {

@@ -39,13 +39,10 @@ describe('ContextCacheConfig', () => {
     expect(() => createContextCacheConfig({minTokens: 0})).not.toThrow();
   });
 
-  it('rejects cacheIntervals below 1', () => {
+  it('rejects out-of-range cacheIntervals', () => {
     expect(() => createContextCacheConfig({cacheIntervals: 0})).toThrow(
       /cacheIntervals must be between 1 and 100/,
     );
-  });
-
-  it('rejects cacheIntervals above 100', () => {
     expect(() => createContextCacheConfig({cacheIntervals: 101})).toThrow(
       /cacheIntervals must be between 1 and 100/,
     );
