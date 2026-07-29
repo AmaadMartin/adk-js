@@ -4,15 +4,19 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
+  AuthConfig,
   BasePlugin,
   BaseTool,
+  Context,
   createEvent,
   createEventActions,
+  createSession,
   Event,
   functionsExportedForTestingOnly,
   FunctionTool,
   InvocationContext,
   LlmAgent,
+  LongRunningFunctionTool,
   PluginManager,
   Session,
   SingleAfterToolCallback,
@@ -55,6 +59,75 @@ const errorTool = new FunctionTool({
     throw new Error('tool error message content');
   },
 });
+
+const testAuthConfig: AuthConfig = {
+  credentialKey: 'testKey',
+  authScheme: {type: 'apiKey', name: 'testKey', in: 'header'},
+};
+
+/**
+ * Creates a long-running tool that records something on its context and then
+ * returns nothing, i.e. the human-in-the-loop pattern where the real function
+ * response is injected later by the client.
+ */
+function createPausingTool(
+  name: string,
+  record: (toolContext: Context) => void,
+) {
+  return new LongRunningFunctionTool({
+    name,
+    description: name,
+    parameters: z.object({}),
+    execute: async (_args, toolContext) => {
+      if (toolContext) {
+        record(toolContext);
+      }
+      return null;
+    },
+  });
+}
+
+const pausingTool = createPausingTool('pausingTool', (toolContext) => {
+  toolContext.state.set('pending', true);
+  toolContext.actions.skipSummarization = true;
+});
+
+const silentLongRunningTool = createPausingTool(
+  'silentLongRunningTool',
+  () => {},
+);
+
+const escalatingLongRunningTool = createPausingTool(
+  'escalatingLongRunningTool',
+  (toolContext) => {
+    toolContext.actions.escalate = true;
+  },
+);
+
+const transferringLongRunningTool = createPausingTool(
+  'transferringLongRunningTool',
+  (toolContext) => {
+    toolContext.actions.transferToAgent = 'other_agent';
+  },
+);
+
+/**
+ * Builds an invocation context backed by a real session, needed by tools that
+ * write to `toolContext.state`.
+ */
+function createInvocationContextWithSession(): InvocationContext {
+  return new InvocationContext({
+    invocationId: 'inv_123',
+    session: createSession({
+      id: 'test-session',
+      appName: 'test-app',
+      userId: 'test-user',
+      events: [],
+    }),
+    agent: new LlmAgent({name: 'test_agent', model: 'test_model'}),
+    pluginManager: new PluginManager(),
+  });
+}
 
 // Plugin for testing
 class TestPlugin extends BasePlugin {
@@ -363,6 +436,206 @@ describe('handleFunctionCallList', () => {
       }),
     );
   });
+
+  it('should return an actions-only event when a long-running tool records actions and returns null', async () => {
+    const longRunningCall: FunctionCall = {
+      id: 'long_running_call_1',
+      name: 'pausingTool',
+      args: {},
+    };
+
+    const event = await handleFunctionCallList({
+      invocationContext: createInvocationContextWithSession(),
+      functionCalls: [longRunningCall],
+      toolsDict: {'pausingTool': pausingTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event).not.toBeNull();
+    expect(event!.content).toBeUndefined();
+    expect(event!.actions.stateDelta).toEqual({pending: true});
+    expect(event!.actions.skipSummarization).toBe(true);
+    expect(event!.longRunningToolIds).toEqual(['long_running_call_1']);
+  });
+
+  it('should return an actions-only event with no ids when the long-running call has no id', async () => {
+    const event = await handleFunctionCallList({
+      invocationContext: createInvocationContextWithSession(),
+      functionCalls: [{name: 'pausingTool', args: {}}],
+      toolsDict: {'pausingTool': pausingTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event!.actions.stateDelta).toEqual({pending: true});
+    expect(event!.longRunningToolIds).toEqual([]);
+  });
+
+  it('should still return null when a long-running tool records nothing and returns null', async () => {
+    const event = await handleFunctionCallList({
+      invocationContext: createInvocationContextWithSession(),
+      functionCalls: [
+        {id: 'long_running_call_1', name: 'silentLongRunningTool', args: {}},
+      ],
+      toolsDict: {'silentLongRunningTool': silentLongRunningTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event).toBeNull();
+  });
+
+  it('should return null when a long-running tool returns undefined and records nothing', async () => {
+    const undefinedTool = new LongRunningFunctionTool({
+      name: 'undefinedTool',
+      description: 'returns undefined',
+      parameters: z.object({}),
+      execute: async () => undefined,
+    });
+
+    const event = await handleFunctionCallList({
+      invocationContext: createInvocationContextWithSession(),
+      functionCalls: [
+        {id: 'long_running_call_1', name: 'undefinedTool', args: {}},
+      ],
+      toolsDict: {'undefinedTool': undefinedTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event).toBeNull();
+  });
+
+  it('should not emit an actions-only event when a long-running tool returns a pending status', async () => {
+    const pendingTool = new LongRunningFunctionTool({
+      name: 'pendingTool',
+      description: 'returns a pending status',
+      parameters: z.object({}),
+      execute: async () => ({status: 'pending'}),
+    });
+
+    const event = await handleFunctionCallList({
+      invocationContext: createInvocationContextWithSession(),
+      functionCalls: [
+        {id: 'long_running_call_1', name: 'pendingTool', args: {}},
+      ],
+      toolsDict: {'pendingTool': pendingTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event!.content!.parts![0].functionResponse!.response).toEqual({
+      status: 'pending',
+    });
+    expect(event!.longRunningToolIds).toEqual([]);
+  });
+
+  it('should merge a pausing long-running tool actions into the merged event for parallel calls', async () => {
+    const event = await handleFunctionCallList({
+      invocationContext: createInvocationContextWithSession(),
+      functionCalls: [
+        {id: 'long_running_call_1', name: 'pausingTool', args: {}},
+        {id: 'call_2', name: 'testTool', args: {}},
+      ],
+      toolsDict: {'pausingTool': pausingTool, 'testTool': testTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    const parts = event!.content!.parts!;
+    expect(parts.length).toBe(1);
+    expect(parts[0].functionResponse!.name).toBe('testTool');
+    expect(event!.actions.stateDelta).toEqual({pending: true});
+    expect(event!.actions.skipSummarization).toBe(true);
+  });
+
+  it('should carry escalate from a long-running tool that returns null', async () => {
+    const event = await handleFunctionCallList({
+      invocationContext: createInvocationContextWithSession(),
+      functionCalls: [
+        {
+          id: 'long_running_call_1',
+          name: 'escalatingLongRunningTool',
+          args: {},
+        },
+      ],
+      toolsDict: {'escalatingLongRunningTool': escalatingLongRunningTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event!.actions.escalate).toBe(true);
+  });
+
+  it('should carry transferToAgent from a long-running tool that returns null', async () => {
+    const event = await handleFunctionCallList({
+      invocationContext: createInvocationContextWithSession(),
+      functionCalls: [
+        {
+          id: 'long_running_call_1',
+          name: 'transferringLongRunningTool',
+          args: {},
+        },
+      ],
+      toolsDict: {'transferringLongRunningTool': transferringLongRunningTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event!.actions.transferToAgent).toBe('other_agent');
+  });
+
+  it('should not emit an actions-only event for a non-long-running tool that returns null', async () => {
+    const nullTool = new FunctionTool({
+      name: 'nullTool',
+      description: 'returns null',
+      parameters: z.object({}),
+      execute: async () => null,
+    });
+
+    const event = await handleFunctionCallList({
+      invocationContext: createInvocationContextWithSession(),
+      functionCalls: [{id: 'call_1', name: 'nullTool', args: {}}],
+      toolsDict: {'nullTool': nullTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event!.content!.parts![0].functionResponse!.response).toEqual({
+      result: null,
+    });
+  });
+
+  it('should emit an actions-only event when a long-running tool requests a credential', async () => {
+    const authRequestingLongRunningTool = createPausingTool(
+      'authRequestingLongRunningTool',
+      (toolContext) => {
+        toolContext.requestCredential(testAuthConfig);
+      },
+    );
+
+    const event = await handleFunctionCallList({
+      invocationContext: createInvocationContextWithSession(),
+      functionCalls: [
+        {
+          id: 'long_running_call_1',
+          name: 'authRequestingLongRunningTool',
+          args: {},
+        },
+      ],
+      toolsDict: {
+        'authRequestingLongRunningTool': authRequestingLongRunningTool,
+      },
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event!.content).toBeUndefined();
+    expect(Object.keys(event!.actions.requestedAuthConfigs)).toEqual([
+      'long_running_call_1',
+    ]);
+  });
 });
 
 describe('generateAuthEvent', () => {
@@ -431,6 +704,23 @@ describe('generateAuthEvent', () => {
     expect(call2).toBeDefined();
     expect(call2!.functionCall!.name).toBe('adk_request_credential');
     expect(call2!.functionCall!.args!['auth_config']).toBe('auth_config_2');
+  });
+
+  it('should build an auth event from a content-less function response event', () => {
+    const functionResponseEvent = createEvent({
+      actions: createEventActions({
+        requestedAuthConfigs: {'call_1': testAuthConfig},
+      }),
+    });
+
+    const event = generateAuthEvent(invocationContext, functionResponseEvent);
+
+    expect(event).toBeDefined();
+    expect(event!.content!.role).toBe('user');
+    const parts = event!.content!.parts!;
+    expect(parts.length).toBe(1);
+    expect(parts[0].functionCall!.name).toBe('adk_request_credential');
+    expect(parts[0].functionCall!.args!['function_call_id']).toBe('call_1');
   });
 });
 
@@ -605,6 +895,39 @@ describe('generateRequestConfirmationEvent', () => {
         'call_1',
     );
     expect(call1).toBeDefined();
+  });
+
+  it('should build a confirmation event from a content-less function response event', () => {
+    const functionCallEvent = createEvent({
+      content: {
+        role: 'user',
+        parts: [{functionCall: {name: 'tool_1', args: {}, id: 'call_1'}}],
+      },
+    });
+
+    const functionResponseEvent = createEvent({
+      actions: createEventActions({
+        requestedToolConfirmations: {
+          'call_1': new ToolConfirmation({
+            hint: 'confirm tool 1',
+            confirmed: false,
+          }),
+        },
+      }),
+    });
+
+    const event = generateRequestConfirmationEvent({
+      invocationContext,
+      functionCallEvent,
+      functionResponseEvent,
+    });
+
+    expect(event).toBeDefined();
+    expect(event!.content!.role).toBe('user');
+    expect(event!.content!.parts!.length).toBe(1);
+    expect(event!.content!.parts![0].functionCall!.name).toBe(
+      'adk_request_confirmation',
+    );
   });
 });
 
