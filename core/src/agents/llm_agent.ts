@@ -6,6 +6,7 @@
 
 import {GenerateContentConfig, Schema} from '@google/genai';
 import {context, trace} from '@opentelemetry/api';
+import {setTimeout as delay} from 'node:timers/promises';
 import {FunctionTool} from '../tools/function_tool.js';
 
 import {z as z3} from 'zod/v3';
@@ -26,6 +27,7 @@ import {
 import {BaseExampleProvider} from '../examples/base_example_provider.js';
 import {Example} from '../examples/example.js';
 import {BaseLlm, isBaseLlm} from '../models/base_llm.js';
+import {BaseLlmConnection} from '../models/base_llm_connection.js';
 import {LlmRequest} from '../models/llm_request.js';
 import {LlmResponse} from '../models/llm_response.js';
 import {LLMRegistry} from '../models/registry.js';
@@ -58,6 +60,7 @@ import {
 import {AUTH_PREPROCESSOR} from '../auth/auth_preprocessor.js';
 import {BaseContextCompactor} from '../context/base_context_compactor.js';
 import {InvocationContext} from './invocation_context.js';
+import type {LiveRequestQueue} from './live_request_queue.js';
 import {AGENT_TRANSFER_LLM_REQUEST_PROCESSOR} from './processors/agent_transfer_llm_request_processor.js';
 import {BASIC_LLM_REQUEST_PROCESSOR} from './processors/basic_llm_request_processor.js';
 import {CODE_EXECUTION_REQUEST_PROCESSOR} from './processors/code_execution_request_processor.js';
@@ -78,6 +81,34 @@ export type LlmAgentSchema =
   | z3.ZodObject<z3.ZodRawShape>
   | z4.ZodObject<z4.ZodRawShape>
   | Schema;
+
+export const MAX_LIVE_RECONNECT_ATTEMPTS = 5;
+const DEFAULT_TRANSFER_AGENT_DELAY = 1000;
+const DEFAULT_TASK_COMPLETION_DELAY = 1000;
+/**
+ * Pause before re-establishing a dropped live connection.
+ *
+ * Keeps a server that accepts a connection and immediately drops it (or
+ * immediately sends `goAway`) from turning into a tight reconnect loop.
+ */
+const LIVE_RECONNECT_BACKOFF_MS = 250;
+
+/**
+ * Wraps an error raised while handling a live server message.
+ *
+ * The live flow only retries transport failures. Errors thrown by agent-side
+ * handling of a server message - response postprocessing, tool execution,
+ * sending a function response back to the request queue, or an agent transfer
+ * - are deterministic bugs: retrying them just delays the failure and
+ * misreports it as a connection drop. Wrapping them lets the reconnect loop
+ * tell the two apart by origin instead of by guessing at error shapes.
+ */
+class LiveMessageHandlingError extends Error {
+  constructor(readonly reason: unknown) {
+    super(reason instanceof Error ? reason.message : String(reason));
+    this.name = 'LiveMessageHandlingError';
+  }
+}
 
 /** An object that can provide an instruction string. */
 export type InstructionProvider = (
@@ -746,17 +777,303 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
    *
    * If the live connection drops (network failure, server `goAway`) and a
    * session resumption handle has been observed, the flow transparently
-   * reconnects using that handle up to {@link MAX_LIVE_RECONNECT_ATTEMPTS}
-   * times. Subsequent reconnects skip `sendHistory` because the server
-   * already holds the conversation state associated with the handle.
+   * reconnects using that handle, pausing
+   * {@link LIVE_RECONNECT_BACKOFF_MS} between attempts. Subsequent reconnects
+   * skip `sendHistory` because the server already holds the conversation
+   * state associated with the handle.
+   *
+   * {@link MAX_LIVE_RECONNECT_ATTEMPTS} bounds *consecutive* failures to
+   * re-establish the connection; the counter resets once a connection is
+   * established, so a session that keeps connecting successfully can
+   * reconnect any number of times over its lifetime.
+   *
+   * @throws If `invocationContext.liveRequestQueue` is not set - the live flow
+   *     has no way to reach the model without it.
    */
-  // eslint-disable-next-line require-yield
   private async *runLiveFlow(
-    _invocationContext: InvocationContext,
+    invocationContext: InvocationContext,
   ): AsyncGenerator<Event, void, void> {
-    // TODO - b/425992518: remove dummy logic, implement this.
-    await Promise.resolve();
-    throw new Error('LlmAgent.runLiveFlow not implemented');
+    const liveRequestQueue = invocationContext.liveRequestQueue;
+    if (!liveRequestQueue) {
+      throw new Error(
+        'runLiveFlow requires invocationContext.liveRequestQueue to be set.',
+      );
+    }
+
+    const llmRequest: LlmRequest = {
+      contents: [],
+      toolsDict: {},
+      liveConnectConfig: {},
+    };
+
+    // =========================================================================
+    // Preprocess before calling the LLM
+    // =========================================================================
+    yield* this.preprocessRequest(invocationContext, llmRequest);
+
+    // =========================================================================
+    // Global runtime interruption
+    // =========================================================================
+    if (
+      invocationContext.endInvocation ||
+      invocationContext.abortSignal?.aborted
+    ) {
+      return;
+    }
+
+    const modelResponseEvent = createEvent({
+      invocationId: invocationContext.invocationId,
+      author: this.name,
+      branch: invocationContext.branch,
+    });
+
+    const span = tracer.startSpan('run_live_flow');
+    const ctx = trace.setSpan(context.active(), span);
+    yield* runAsyncGeneratorWithOtelContext<LlmAgent, Event>(
+      ctx,
+      this,
+      async function* () {
+        const responsesGenerator = async function* (this: LlmAgent) {
+          let attempt = 1;
+          while (true) {
+            try {
+              if (invocationContext.liveSessionResumptionHandle) {
+                logger.debug(`Attempting to reconnect (Attempt ${attempt})...`);
+                attempt++;
+                const liveConnectConfig = (llmRequest.liveConnectConfig ??= {});
+                liveConnectConfig.sessionResumption ??= {};
+                liveConnectConfig.sessionResumption.handle =
+                  invocationContext.liveSessionResumptionHandle;
+              }
+
+              // TODO: opt the initial history into
+              // `client_content` once @google/genai exposes `historyConfig` on
+              // `LiveConnectConfig`. As of 2.13.0 it only exists on
+              // `LiveClientSetup`, and `liveConnectConfigTo{Mldev,Vertex}`
+              // allowlist known fields, so setting it here never reaches the
+              // wire.
+
+              logger.debug(
+                `Establishing live connection for agent: ${this.name}`,
+              );
+              const llmConnection =
+                await this.canonicalModel.connect(llmRequest);
+              attempt = 1;
+
+              // The live connection must be closed on every exit from this
+              // block - normal end of `receive()`, `goAway` reconnect,
+              // `task_completed`, agent transfer or a thrown error - otherwise
+              // each attempt leaks a websocket. Closing is idempotent so the
+              // transfer branch and the uplink task can close eagerly.
+              let connectionClosed = false;
+              const closeConnection = async () => {
+                if (connectionClosed) {
+                  return;
+                }
+                connectionClosed = true;
+                logger.debug('Closing live connection');
+                await llmConnection.close();
+                logger.debug('Live connection closed.');
+              };
+
+              if (
+                llmRequest.contents.length > 0 &&
+                !invocationContext.liveSessionResumptionHandle
+              ) {
+                const sendDataSpan = tracer.startSpan('send_data');
+                const sendDataCtx = trace.setSpan(
+                  context.active(),
+                  sendDataSpan,
+                );
+                await context.with(sendDataCtx, async () => {
+                  logger.debug(
+                    'Sending history to model:',
+                    llmRequest.contents,
+                  );
+                  await llmConnection.sendHistory(llmRequest.contents);
+                });
+                sendDataSpan.end();
+              }
+
+              const sendTaskAbortController = new AbortController();
+              const sendTask = sendToModelAsync(
+                llmConnection,
+                invocationContext,
+                liveRequestQueue,
+                closeConnection,
+                sendTaskAbortController.signal,
+              ).catch((error: unknown) => {
+                // Aborting the uplink rejects the pending `get()` with
+                // `Aborted`; that is expected teardown, anything else is a
+                // real failure that would otherwise stall the session
+                // silently.
+                if (!sendTaskAbortController.signal.aborted) {
+                  logger.error('Live uplink failed:', error);
+                }
+              });
+
+              let shouldReconnect = false;
+              try {
+                for await (const llmResponse of llmConnection.receive()) {
+                  if (invocationContext.abortSignal?.aborted) {
+                    break;
+                  }
+
+                  if (llmResponse.liveSessionResumptionUpdate) {
+                    logger.debug(
+                      'Update session resumption handle:',
+                      llmResponse.liveSessionResumptionUpdate,
+                    );
+                    invocationContext.liveSessionResumptionHandle =
+                      llmResponse.liveSessionResumptionUpdate.newHandle;
+                  }
+
+                  if (llmResponse.goAway) {
+                    logger.debug(
+                      'Received go away signal:',
+                      llmResponse.goAway,
+                    );
+                    shouldReconnect = true;
+                    break;
+                  }
+
+                  const author =
+                    llmResponse.inputTranscription ||
+                    (llmResponse.content && llmResponse.content.role === 'user')
+                      ? 'user'
+                      : this.name;
+                  const responseEvent = createEvent({
+                    id: createNewEventId(),
+                    invocationId: invocationContext.invocationId,
+                    author,
+                    branch: invocationContext.branch,
+                  });
+
+                  // Everything below is agent-side handling of the message.
+                  // Its failures are bugs, not connection drops, so they are
+                  // tagged to bypass the reconnect loop.
+                  try {
+                    for await (const event of this.postprocess(
+                      invocationContext,
+                      llmRequest,
+                      llmResponse,
+                      responseEvent,
+                      /* isLive= */ true,
+                    )) {
+                      if (invocationContext.abortSignal?.aborted) {
+                        return;
+                      }
+
+                      if (getFunctionResponses(event)?.length) {
+                        logger.debug(
+                          'Sending back last function response event:',
+                          event,
+                        );
+                        liveRequestQueue.sendContent(event.content!);
+                      }
+
+                      yield event;
+
+                      const transferToAgentName = event.actions.transferToAgent;
+                      if (
+                        transferToAgentName ||
+                        event.content?.parts?.some(
+                          (p) =>
+                            p.functionResponse?.name === 'transfer_to_agent',
+                        )
+                      ) {
+                        await delay(DEFAULT_TRANSFER_AGENT_DELAY);
+                        sendTaskAbortController.abort();
+                        await closeConnection();
+
+                        if (transferToAgentName) {
+                          logger.debug(
+                            'Transferring to agent:',
+                            transferToAgentName,
+                          );
+                          const agentToRun = this.getAgentByName(
+                            invocationContext,
+                            transferToAgentName,
+                          );
+                          const childContext = new InvocationContext({
+                            ...invocationContext,
+                            liveSessionResumptionHandle: undefined,
+                          });
+                          for await (const childEvent of agentToRun.runLive(
+                            childContext,
+                          )) {
+                            if (invocationContext.abortSignal?.aborted) {
+                              return;
+                            }
+                            yield childEvent;
+                          }
+                        }
+                        return;
+                      }
+
+                      if (
+                        event.content?.parts?.some(
+                          (p) => p.functionResponse?.name === 'task_completed',
+                        )
+                      ) {
+                        await delay(DEFAULT_TASK_COMPLETION_DELAY);
+                        sendTaskAbortController.abort();
+                        return;
+                      }
+                    }
+                  } catch (error) {
+                    throw error instanceof LiveMessageHandlingError
+                      ? error
+                      : new LiveMessageHandlingError(error);
+                  }
+                }
+              } finally {
+                sendTaskAbortController.abort();
+                await sendTask;
+                await closeConnection();
+              }
+
+              if (shouldReconnect) {
+                await delay(LIVE_RECONNECT_BACKOFF_MS);
+                continue;
+              }
+              break;
+            } catch (error) {
+              if (error instanceof LiveMessageHandlingError) {
+                logger.error(`Error in live flow: ${error.reason}`);
+                throw error.reason;
+              }
+              if (
+                invocationContext.liveSessionResumptionHandle &&
+                attempt <= MAX_LIVE_RECONNECT_ATTEMPTS
+              ) {
+                logger.debug(
+                  `Connection closed/lost (${error}), reconnecting with session handle.`,
+                );
+                await delay(LIVE_RECONNECT_BACKOFF_MS);
+                continue;
+              }
+              if (invocationContext.liveSessionResumptionHandle) {
+                logger.error(
+                  `Max reconnection attempts reached (${MAX_LIVE_RECONNECT_ATTEMPTS}): ${error}`,
+                );
+              } else {
+                logger.error(`Error in live flow: ${error}`);
+              }
+              throw error;
+            }
+          }
+        };
+
+        yield* this.runAndHandleError(
+          responsesGenerator.call(this),
+          invocationContext,
+          llmRequest,
+          modelResponseEvent,
+        );
+      },
+    );
+    span.end();
   }
 
   private async *runOneStepAsync(
@@ -771,65 +1088,8 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     // =========================================================================
     // Preprocess before calling the LLM
     // =========================================================================
-    // Runs request processors.
-    for (const processor of this.requestProcessors) {
-      for await (const event of processor.runAsync(
-        invocationContext,
-        llmRequest,
-      )) {
-        if (invocationContext.abortSignal?.aborted) {
-          return;
-        }
+    yield* this.preprocessRequest(invocationContext, llmRequest);
 
-        yield event;
-      }
-    }
-    // TODO - b/425992518: check if tool preprocessors can be simplified.
-    // Run pre-processors for tools.
-    const allTools = [...this.tools];
-    if (this.outputSchema && allTools.length > 0) {
-      const setModelResponseTool = new FunctionTool({
-        name: 'set_model_response',
-        description:
-          'Call this tool to submit your final response conforming to the output schema. Use this tool only when you have collected all the information and are ready to return the final answer.',
-        parameters: this.outputSchema,
-        execute: async (args, toolContext) => {
-          if (toolContext) {
-            toolContext.actions.skipSummarization = true;
-          }
-          return JSON.stringify(args);
-        },
-      });
-      allTools.push(setModelResponseTool);
-    }
-    for (const toolUnion of allTools) {
-      const toolContext = new Context({invocationContext});
-
-      // process all tools from this tool union
-      const tools = (
-        await convertToolUnionToTools(
-          toolUnion,
-          new ReadonlyContext(invocationContext),
-        )
-      ).filter((tool) => {
-        // If allowedTools is not set, allow all tools. Otherwise, only allow
-        // tools that are in the allowedTools set.
-        // The allowedTools set is populated by request processors.
-        return (
-          !llmRequest.allowedTools ||
-          llmRequest.allowedTools.includes(tool.name) ||
-          tool.name === 'set_model_response'
-        );
-      });
-
-      for (const tool of tools) {
-        await tool.processLlmRequest({toolContext, llmRequest});
-
-        if (invocationContext.abortSignal?.aborted) {
-          return;
-        }
-      }
-    }
     // =========================================================================
     // Global runtime interruption
     // =========================================================================
@@ -903,6 +1163,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     llmRequest: LlmRequest,
     llmResponse: LlmResponse,
     modelResponseEvent: Event,
+    isLive = false,
   ): AsyncGenerator<Event, void, void> {
     // =========================================================================
     // Runs response processors
@@ -927,7 +1188,9 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     if (
       (!llmResponse.content || llmResponse.content.parts?.length === 0) &&
       !llmResponse.errorCode &&
-      !llmResponse.interrupted
+      !llmResponse.interrupted &&
+      !llmResponse.inputTranscription &&
+      !llmResponse.outputTranscription
     ) {
       return;
     }
@@ -1010,6 +1273,10 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     // Yields the function response event.
     yield functionResponseEvent;
 
+    if (isLive) {
+      return;
+    }
+
     // If model instruct to transfer to an agent, run the transferred agent.
     const nextAgentName = functionResponseEvent.actions.transferToAgent;
     if (nextAgentName) {
@@ -1020,6 +1287,65 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         }
 
         yield event;
+      }
+    }
+  }
+
+  private async *preprocessRequest(
+    invocationContext: InvocationContext,
+    llmRequest: LlmRequest,
+  ): AsyncGenerator<Event, void, void> {
+    for (const processor of this.requestProcessors) {
+      for await (const event of processor.runAsync(
+        invocationContext,
+        llmRequest,
+      )) {
+        if (invocationContext.abortSignal?.aborted) {
+          return;
+        }
+
+        yield event;
+      }
+    }
+
+    const allTools = [...this.tools];
+    if (this.outputSchema && allTools.length > 0) {
+      const setModelResponseTool = new FunctionTool({
+        name: 'set_model_response',
+        description:
+          'Call this tool to submit your final response conforming to the output schema. Use this tool only when you have collected all the information and are ready to return the final answer.',
+        parameters: this.outputSchema,
+        execute: async (args, toolContext) => {
+          if (toolContext) {
+            toolContext.actions.skipSummarization = true;
+          }
+          return JSON.stringify(args);
+        },
+      });
+      allTools.push(setModelResponseTool);
+    }
+    for (const toolUnion of allTools) {
+      const toolContext = new Context({invocationContext});
+
+      const tools = (
+        await convertToolUnionToTools(
+          toolUnion,
+          new ReadonlyContext(invocationContext),
+        )
+      ).filter((tool) => {
+        return (
+          !llmRequest.allowedTools ||
+          llmRequest.allowedTools.includes(tool.name) ||
+          tool.name === 'set_model_response'
+        );
+      });
+
+      for (const tool of tools) {
+        await tool.processLlmRequest({toolContext, llmRequest});
+
+        if (invocationContext.abortSignal?.aborted) {
+          return;
+        }
       }
     }
   }
@@ -1285,4 +1611,79 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   // TODO - b/425992518: omitted Py LlmAgent features.
   // - code_executor
   // - configurable agents by yaml config
+}
+
+/**
+ * Drains the invocation's live request queue into the live connection.
+ *
+ * @param llmConnection The live connection to send to.
+ * @param invocationContext The invocation this uplink belongs to.
+ * @param liveRequestQueue The queue to drain. Required: the live flow has no
+ *     way to reach the model without it, so it is passed explicitly rather
+ *     than read off the optional field on `invocationContext`.
+ * @param closeConnection Closes `llmConnection`, idempotently.
+ * @param abortSignal Signal used to tear the uplink down.
+ */
+async function sendToModelAsync(
+  llmConnection: BaseLlmConnection,
+  invocationContext: InvocationContext,
+  liveRequestQueue: LiveRequestQueue,
+  closeConnection: () => Promise<void>,
+  abortSignal?: AbortSignal,
+): Promise<void> {
+  const isAborted = () =>
+    invocationContext.abortSignal?.aborted ||
+    invocationContext.endInvocation ||
+    abortSignal?.aborted;
+  while (true) {
+    if (isAborted()) {
+      break;
+    }
+
+    const liveRequest = await liveRequestQueue.get(abortSignal);
+    if (isAborted()) {
+      break;
+    }
+
+    for (const tool of Object.values(
+      invocationContext.activeStreamingTools ?? {},
+    )) {
+      tool.stream?.send(liveRequest);
+    }
+
+    if (liveRequest.close) {
+      await closeConnection();
+      return;
+    }
+
+    if (liveRequest.activityStart) {
+      await llmConnection.sendActivityStart?.();
+    } else if (liveRequest.activityEnd) {
+      await llmConnection.sendActivityEnd?.();
+    } else if (liveRequest.blob) {
+      await llmConnection.sendRealtime(liveRequest.blob);
+    }
+
+    if (liveRequest.content) {
+      const content = liveRequest.content;
+      const isFunctionResponse = content.parts?.some(
+        (part) => part.functionResponse,
+      );
+      if (!isFunctionResponse && !content.role) {
+        content.role = 'user';
+      }
+      if (!isFunctionResponse && !liveRequest.partial) {
+        const userContentEvent = createEvent({
+          invocationId: invocationContext.invocationId,
+          author: 'user',
+          content,
+        });
+        await invocationContext.sessionService?.appendEvent({
+          session: invocationContext.session,
+          event: userContentEvent,
+        });
+      }
+      await llmConnection.sendContent(content);
+    }
+  }
 }

@@ -20,6 +20,8 @@ export interface LiveRequest {
   activityEnd?: ActivityEnd;
   /** If set, close the queue. */
   close?: boolean;
+  /** Whether this content chunk is partial. */
+  partial?: boolean;
 }
 
 /** Function type for resolving a Promise with a LiveRequest. */
@@ -54,18 +56,34 @@ export class LiveRequestQueue {
 
   /**
    * Retrieves a request from the queue. If the queue is empty, it will
-   * wait until a request is available.
+   * wait until a request is available or the abortSignal is aborted.
+   * @param abortSignal Optional signal to abort waiting for a request.
    * @returns A promise that resolves with the next available request.
    */
-  async get(): Promise<LiveRequest> {
+  async get(abortSignal?: AbortSignal): Promise<LiveRequest> {
+    if (abortSignal?.aborted) {
+      throw new Error('Aborted');
+    }
     if (this.queue.length > 0) {
       return this.queue.shift()!;
     }
     if (this.isClosed) {
       return {close: true};
     }
-    return new Promise<LiveRequest>((resolve) => {
-      this.resolveFnFifoQueue.push(resolve);
+    return new Promise<LiveRequest>((resolve, reject) => {
+      const resolveFn: PromiseResolveFn = (req: LiveRequest) => {
+        abortSignal?.removeEventListener('abort', onAbort);
+        resolve(req);
+      };
+      const onAbort = () => {
+        const index = this.resolveFnFifoQueue.indexOf(resolveFn);
+        if (index !== -1) {
+          this.resolveFnFifoQueue.splice(index, 1);
+        }
+        reject(new Error('Aborted'));
+      };
+      abortSignal?.addEventListener('abort', onAbort);
+      this.resolveFnFifoQueue.push(resolveFn);
     });
   }
 
@@ -98,9 +116,12 @@ export class LiveRequestQueue {
   /**
    * Sends a content object to the queue.
    * @param content The content to send.
+   * @param partial Whether `content` is a partial chunk of a larger message.
+   *     Partial chunks are forwarded to the model but not persisted as user
+   *     events in the session.
    */
-  sendContent(content: Content) {
-    this.send({content});
+  sendContent(content: Content, partial = false) {
+    this.send({content, partial});
   }
 
   /**
