@@ -1,3 +1,9 @@
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 export enum WriteMode {
   /*
    * Indicates that no data manipulation is allowed. Only SELECT queries are

@@ -4,5 +4,5 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export {version} from './version.js';
 export * from './bigquery/index.js';
+export {version} from './version.js';
