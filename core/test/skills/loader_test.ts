@@ -148,12 +148,14 @@ ${body}
         `---
 name: test-skill
 description: A test skill
+allowed-tools: read
 ---
 Instructions content`,
       );
 
       const skill = await loadSkillFromDir(skillDir);
       expect(skill.frontmatter.name).toBe('test-skill');
+      expect(skill.frontmatter.allowedTools).toBe('read');
       expect(skill.instructions).toBe('Instructions content');
       expect(skill.resources?.references).toEqual({});
       expect(skill.resources?.assets).toEqual({});
@@ -185,27 +187,6 @@ Instructions content`,
         await fs.rm(tempDir, {recursive: true, force: true});
       },
     );
-
-    it('exposes allowed-tools as frontmatter.allowedTools', async () => {
-      tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-skill-test-'));
-      const skillDir = path.join(tempDir, 'test-skill');
-      await fs.mkdir(skillDir);
-
-      await fs.writeFile(
-        path.join(skillDir, 'SKILL.md'),
-        `---
-name: test-skill
-description: A test skill
-allowed-tools: read
----
-Instructions`,
-      );
-
-      const skill = await loadSkillFromDir(skillDir);
-      expect(skill.frontmatter.allowedTools).toBe('read');
-
-      await fs.rm(tempDir, {recursive: true, force: true});
-    });
 
     it('throws error if SKILL.md not found', async () => {
       tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-skill-test-'));
@@ -361,7 +342,6 @@ Instructions`,
         `---
 name: test-skill
 description: A test skill
-allowed-tools: read
 unknown_field: value
 ---
 Instructions`,
