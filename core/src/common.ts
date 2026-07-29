@@ -22,16 +22,12 @@ export type {LiveRequest} from './agents/live_request_queue.js';
 export {LlmAgent as Agent, LlmAgent, isLlmAgent} from './agents/llm_agent.js';
 export type {
   AfterModelCallback,
-  AfterToolCallback,
   BeforeModelCallback,
-  BeforeToolCallback,
   InstructionProvider,
   LlmAgentConfig,
   LlmAgentSchema,
   SingleAfterModelCallback,
-  SingleAfterToolCallback,
   SingleBeforeModelCallback,
-  SingleBeforeToolCallback,
   ToolUnion,
 } from './agents/llm_agent.js';
 export {LoopAgent, isLoopAgent} from './agents/loop_agent.js';
@@ -238,6 +234,13 @@ export {
   PRELOAD_MEMORY,
   PreloadMemoryTool,
 } from './tools/preload_memory_tool.js';
+export type {
+  AfterToolCallback,
+  BeforeToolCallback,
+  SingleAfterToolCallback,
+  SingleBeforeToolCallback,
+  ToolExecutionConfig,
+} from './tools/tool_callback.js';
 export {ToolConfirmation} from './tools/tool_confirmation.js';
 export {URL_CONTEXT, UrlContextTool} from './tools/url_context_tool.js';
 export {VertexAiSearchTool} from './tools/vertex_ai_search_tool.js';

@@ -11,6 +11,7 @@ import {InvocationContext} from '../agents/invocation_context.js';
 import {createEvent, Event, getFunctionCalls} from '../events/event.js';
 import {mergeEventActions} from '../events/event_actions.js';
 import {BaseTool} from '../tools/base_tool.js';
+import {ToolExecutionConfig} from '../tools/tool_callback.js';
 import {ToolConfirmation} from '../tools/tool_confirmation.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
 import {logger} from '../utils/logger.js';
@@ -21,10 +22,6 @@ import {
   tracer,
   traceToolCall,
 } from '../telemetry/tracing.js';
-import {
-  SingleAfterToolCallback,
-  SingleBeforeToolCallback,
-} from './llm_agent.js';
 
 const AF_FUNCTION_CALL_ID_PREFIX = 'adk-';
 export const REQUEST_EUC_FUNCTION_CALL_NAME = 'adk_request_credential';
@@ -289,17 +286,13 @@ function buildResponseEvent(
 export async function handleFunctionCallsAsync({
   invocationContext,
   functionCallEvent,
-  toolsDict,
-  beforeToolCallbacks,
-  afterToolCallbacks,
+  toolExecutionConfig,
   filters,
   toolConfirmationDict,
 }: {
   invocationContext: InvocationContext;
   functionCallEvent: Event;
-  toolsDict: Record<string, BaseTool>;
-  beforeToolCallbacks: SingleBeforeToolCallback[];
-  afterToolCallbacks: SingleAfterToolCallback[];
+  toolExecutionConfig: ToolExecutionConfig;
   filters?: Set<string>;
   toolConfirmationDict?: Record<string, ToolConfirmation>;
 }): Promise<Event | null> {
@@ -307,9 +300,7 @@ export async function handleFunctionCallsAsync({
   return await handleFunctionCallList({
     invocationContext: invocationContext,
     functionCalls: functionCalls,
-    toolsDict: toolsDict,
-    beforeToolCallbacks: beforeToolCallbacks,
-    afterToolCallbacks: afterToolCallbacks,
+    toolExecutionConfig: toolExecutionConfig,
     filters: filters,
     toolConfirmationDict: toolConfirmationDict,
   });
@@ -323,20 +314,22 @@ export async function handleFunctionCallsAsync({
 export async function handleFunctionCallList({
   invocationContext,
   functionCalls,
-  toolsDict,
-  beforeToolCallbacks,
-  afterToolCallbacks,
+  toolExecutionConfig,
   filters,
   toolConfirmationDict,
 }: {
   invocationContext: InvocationContext;
   functionCalls: FunctionCall[];
-  toolsDict: Record<string, BaseTool>;
-  beforeToolCallbacks: SingleBeforeToolCallback[];
-  afterToolCallbacks: SingleAfterToolCallback[];
+  toolExecutionConfig: ToolExecutionConfig;
   filters?: Set<string>;
   toolConfirmationDict?: Record<string, ToolConfirmation>;
 }): Promise<Event | null> {
+  const {
+    toolsDict,
+    beforeToolCallbacks = [],
+    afterToolCallbacks = [],
+  } = toolExecutionConfig;
+
   const functionResponseEvents: Event[] = [];
 
   // Note: only function ids INCLUDED in the filters will be executed.

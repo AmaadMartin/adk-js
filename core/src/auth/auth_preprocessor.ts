@@ -178,9 +178,11 @@ export class AuthPreprocessor extends BaseLlmRequestProcessor {
         const functionResponseEvent = await handleFunctionCallsAsync({
           invocationContext,
           functionCallEvent: event,
-          toolsDict,
-          beforeToolCallbacks: agent.canonicalBeforeToolCallbacks,
-          afterToolCallbacks: agent.canonicalAfterToolCallbacks,
+          toolExecutionConfig: {
+            toolsDict,
+            beforeToolCallbacks: agent.canonicalBeforeToolCallbacks,
+            afterToolCallbacks: agent.canonicalAfterToolCallbacks,
+          },
           filters: toolsToResume,
         });
 

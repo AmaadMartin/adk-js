@@ -25,6 +25,7 @@ import {z} from 'zod';
 import {
   generateClientFunctionCallId,
   getLongRunningFunctionCalls,
+  handleFunctionCallsAsync,
   mergeParallelFunctionResponseEvents,
   populateClientFunctionCallId,
   removeClientFunctionCallId,
@@ -121,9 +122,11 @@ describe('handleFunctionCallList', () => {
     const event = await handleFunctionCallList({
       invocationContext,
       functionCalls: [functionCall],
-      toolsDict,
-      beforeToolCallbacks: [],
-      afterToolCallbacks: [],
+      toolExecutionConfig: {
+        toolsDict,
+        beforeToolCallbacks: [],
+        afterToolCallbacks: [],
+      },
     });
     expect(event).not.toBeNull();
     const definedEvent = event as Event;
@@ -151,9 +154,11 @@ describe('handleFunctionCallList', () => {
     const event = await handleFunctionCallList({
       invocationContext,
       functionCalls: [arrayFunctionCall],
-      toolsDict: {'arrayTool': arrayTool},
-      beforeToolCallbacks: [],
-      afterToolCallbacks: [],
+      toolExecutionConfig: {
+        toolsDict: {'arrayTool': arrayTool},
+        beforeToolCallbacks: [],
+        afterToolCallbacks: [],
+      },
     });
 
     expect(event).not.toBeNull();
@@ -170,9 +175,11 @@ describe('handleFunctionCallList', () => {
     const event = await handleFunctionCallList({
       invocationContext,
       functionCalls: [functionCall],
-      toolsDict,
-      beforeToolCallbacks: [beforeToolCallback],
-      afterToolCallbacks: [],
+      toolExecutionConfig: {
+        toolsDict,
+        beforeToolCallbacks: [beforeToolCallback],
+        afterToolCallbacks: [],
+      },
     });
     expect(event).not.toBeNull();
     const definedEvent = event as Event;
@@ -191,9 +198,11 @@ describe('handleFunctionCallList', () => {
     const event = await handleFunctionCallList({
       invocationContext,
       functionCalls: [functionCall],
-      toolsDict,
-      beforeToolCallbacks: [beforeToolCallback1, beforeToolCallback2],
-      afterToolCallbacks: [],
+      toolExecutionConfig: {
+        toolsDict,
+        beforeToolCallbacks: [beforeToolCallback1, beforeToolCallback2],
+        afterToolCallbacks: [],
+      },
     });
     expect(event).not.toBeNull();
     const definedEvent = event as Event;
@@ -209,9 +218,11 @@ describe('handleFunctionCallList', () => {
     const event = await handleFunctionCallList({
       invocationContext,
       functionCalls: [functionCall],
-      toolsDict,
-      beforeToolCallbacks: [],
-      afterToolCallbacks: [afterToolCallback],
+      toolExecutionConfig: {
+        toolsDict,
+        beforeToolCallbacks: [],
+        afterToolCallbacks: [afterToolCallback],
+      },
     });
     expect(event).not.toBeNull();
     const definedEvent = event as Event;
@@ -230,9 +241,11 @@ describe('handleFunctionCallList', () => {
     const event = await handleFunctionCallList({
       invocationContext,
       functionCalls: [functionCall],
-      toolsDict,
-      beforeToolCallbacks: [],
-      afterToolCallbacks: [afterToolCallback1, afterToolCallback2],
+      toolExecutionConfig: {
+        toolsDict,
+        beforeToolCallbacks: [],
+        afterToolCallbacks: [afterToolCallback1, afterToolCallback2],
+      },
     });
     expect(event).not.toBeNull();
     const definedEvent = event as Event;
@@ -250,9 +263,11 @@ describe('handleFunctionCallList', () => {
     const event = await handleFunctionCallList({
       invocationContext,
       functionCalls: [functionCall],
-      toolsDict,
-      beforeToolCallbacks: [],
-      afterToolCallbacks: [],
+      toolExecutionConfig: {
+        toolsDict,
+        beforeToolCallbacks: [],
+        afterToolCallbacks: [],
+      },
     });
     expect(event).not.toBeNull();
     const definedEvent = event as Event;
@@ -270,9 +285,11 @@ describe('handleFunctionCallList', () => {
     const event = await handleFunctionCallList({
       invocationContext,
       functionCalls: [functionCall],
-      toolsDict,
-      beforeToolCallbacks: [],
-      afterToolCallbacks: [],
+      toolExecutionConfig: {
+        toolsDict,
+        beforeToolCallbacks: [],
+        afterToolCallbacks: [],
+      },
     });
     expect(event).not.toBeNull();
     const definedEvent = event as Event;
@@ -295,9 +312,11 @@ describe('handleFunctionCallList', () => {
     const event = await handleFunctionCallList({
       invocationContext,
       functionCalls: [errorFunctionCall],
-      toolsDict: {'errorTool': errorTool},
-      beforeToolCallbacks: [],
-      afterToolCallbacks: [],
+      toolExecutionConfig: {
+        toolsDict: {'errorTool': errorTool},
+        beforeToolCallbacks: [],
+        afterToolCallbacks: [],
+      },
     });
     expect(event).not.toBeNull();
     const definedEvent = event as Event;
@@ -316,9 +335,11 @@ describe('handleFunctionCallList', () => {
     const event = await handleFunctionCallList({
       invocationContext,
       functionCalls: [errorFunctionCall],
-      toolsDict: {'errorTool': errorTool},
-      beforeToolCallbacks: [],
-      afterToolCallbacks: [],
+      toolExecutionConfig: {
+        toolsDict: {'errorTool': errorTool},
+        beforeToolCallbacks: [],
+        afterToolCallbacks: [],
+      },
     });
 
     expect(event!.content!.parts![0].functionResponse!.response).toEqual({
@@ -349,9 +370,11 @@ describe('handleFunctionCallList', () => {
     await handleFunctionCallList({
       invocationContext,
       functionCalls: [{id: '1', name: 'mockTool', args: {}}],
-      toolsDict: {'mockTool': mockTool},
-      beforeToolCallbacks: [],
-      afterToolCallbacks: [],
+      toolExecutionConfig: {
+        toolsDict: {'mockTool': mockTool},
+        beforeToolCallbacks: [],
+        afterToolCallbacks: [],
+      },
     });
 
     expect(runAsyncSpy).toHaveBeenCalledWith(
@@ -362,6 +385,64 @@ describe('handleFunctionCallList', () => {
         }),
       }),
     );
+  });
+});
+
+describe('handleFunctionCallsAsync', () => {
+  it('should delegate to handleFunctionCallList using toolExecutionConfig', async () => {
+    const pluginManager = new PluginManager();
+    const agent = new LlmAgent({name: 'test_agent', model: 'test_model'});
+    const invocationContext = new InvocationContext({
+      invocationId: 'inv_123',
+      session: {} as Session,
+      agent,
+      pluginManager,
+    });
+    const functionCallEvent = createEvent({
+      invocationId: 'inv_123',
+      author: 'model',
+      content: {
+        role: 'model',
+        parts: [
+          {
+            functionCall: {
+              id: 'fc_1',
+              name: 'testTool',
+              args: {},
+            },
+          },
+        ],
+      },
+    });
+    const event = await handleFunctionCallsAsync({
+      invocationContext,
+      functionCallEvent,
+      toolExecutionConfig: {
+        toolsDict: {'testTool': testTool},
+      },
+    });
+    expect(event).not.toBeNull();
+    expect(
+      (event as Event).content!.parts![0].functionResponse!.response,
+    ).toEqual({
+      result: 'tool executed',
+    });
+  });
+});
+
+describe('Module dependency check', () => {
+  it('functions.ts does not import llm_agent', async () => {
+    const fs = await import('fs');
+    const functionsFilePath = new URL(
+      '../../src/agents/functions.ts',
+      import.meta.url,
+    );
+    const content = fs.readFileSync(functionsFilePath, 'utf-8');
+    // Matches any specifier resolving to llm_agent, with or without an
+    // extension, regardless of how the path is spelled. This is a source-text
+    // check on purpose: the import that caused the original cycle was
+    // type-only, so it is erased before the module graph exists at runtime.
+    expect(content).not.toMatch(/from\s+['"][^'"]*llm_agent(\.[jt]s)?['"]/);
   });
 });
 
