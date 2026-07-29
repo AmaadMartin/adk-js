@@ -195,23 +195,10 @@ export async function validateSkillDir(skillDir: string): Promise<string[]> {
     return [(e as Error).message];
   }
 
-  try {
-    const keys = Object.keys(skill.frontmatter);
-    const unknown = keys.filter((k) => !ALLOWED_FRONTMATTER_KEYS.has(k));
-    if (unknown.length > 0) {
-      problems.push(
-        `Unknown frontmatter fields: [${unknown.sort().join(', ')}]`,
-      );
-    }
-
-    const dirName = path.basename(resolvedDir);
-    if (dirName !== skill.frontmatter.name) {
-      problems.push(
-        `Skill name '${skill.frontmatter.name}' does not match directory name '${dirName}'.`,
-      );
-    }
-  } catch (e: unknown) {
-    problems.push((e as Error).message);
+  const keys = Object.keys(skill.frontmatter);
+  const unknown = keys.filter((k) => !ALLOWED_FRONTMATTER_KEYS.has(k));
+  if (unknown.length > 0) {
+    problems.push(`Unknown frontmatter fields: [${unknown.sort().join(', ')}]`);
   }
 
   return problems;
@@ -255,8 +242,7 @@ async function loadSkillFile(skillDir: string): Promise<Skill> {
     );
   }
 
-  const {frontmatter: parsed, body} = parseSkillMdContent(content);
-  const frontmatter = FrontmatterSchema.parse(parsed);
+  const {frontmatter, body} = parseSkillMdContent(content);
   const dirName = path.basename(resolvedDir);
   if (dirName !== frontmatter.name) {
     throw new Error(
@@ -352,8 +338,7 @@ export function loadSkillFromZipBuffer(zipBuffer: Buffer): Skill {
     throw new Error('SKILL.md not found in zipped filesystem.');
   }
 
-  const {frontmatter: parsed, body} = parseSkillMdContent(skillMdContent);
-  const frontmatter = FrontmatterSchema.parse(parsed);
+  const {frontmatter, body} = parseSkillMdContent(skillMdContent);
 
   const references: Record<string, string | Buffer> = {};
   const assets: Record<string, string | Buffer> = {};

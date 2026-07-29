@@ -35,6 +35,7 @@ describe('skill_registry', () => {
   const validSkillMd = `---
 name: test-remote-skill
 description: A test remote skill
+allowed-tools: tool1,tool2
 ---
 Instruction body`;
 
@@ -56,6 +57,8 @@ Instruction body`;
       const skill = loadSkillFromZipBuffer(zipBuffer);
 
       expect(skill.frontmatter.name).toBe('test-remote-skill');
+      expect(skill.frontmatter.allowedTools).toBe('tool1,tool2');
+      expect(skill.frontmatter.metadata).toEqual({});
       expect(skill.instructions).toBe('Instruction body');
       expect(skill.resources?.references?.['ref1.md']).toBe('ref content');
       expect(skill.resources?.assets?.['asset1.txt']).toBe('asset content');
