@@ -641,13 +641,13 @@ describe('AdkWebServer', () => {
     });
 
     it('should return 404 when the session ids are missing', async () => {
+      // Missing ids are normalised to '', so they reach the session lookup as
+      // empty strings rather than as `undefined`.
       await expect(
         client.post('/run', {
           appName: 'testApp',
           newMessage: {parts: [{text: 'Hello'}], role: 'user'},
         }),
-        // Missing ids are normalised to '', so they reach the session lookup
-        // as empty strings rather than as `undefined`.
       ).rejects.toMatchObject({
         response: {status: 404},
         message: 'Session not found: ',

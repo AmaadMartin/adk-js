@@ -823,8 +823,6 @@ export class AdkApiServer {
     // -------------------------- Run related endpoints ------------------------
     app.post('/run', async (req: Request, res: Response) => {
       const request = parseAgentRunRequest(req.body);
-      // `/run` requires a pre-existing session; only `/api/reasoning_engine`
-      // creates one on demand.
       const session = await this.sessionService.getSession({
         appName: request.appName,
         userId: request.userId,
@@ -867,9 +865,8 @@ export class AdkApiServer {
       }
 
       try {
-        // Unlike `/run` and `/run_sse`, the Reasoning Engine surface is called
-        // by clients that do not manage sessions, so it creates one on demand
-        // instead of returning 404.
+        // Reasoning Engine clients do not manage sessions, so this endpoint
+        // creates one on demand instead of returning the 404 the others do.
         await this.sessionService.getOrCreateSession({
           appName: request.appName,
           userId: request.userId,
@@ -925,8 +922,6 @@ export class AdkApiServer {
         res.end();
       } catch (e: unknown) {
         if (res.headersSent) {
-          // The stream is already open, so the error can only be reported
-          // in-band.
           const error = (e as Error).message;
           this.logger.error(error);
           try {
@@ -1022,16 +1017,13 @@ export class AdkApiServer {
   }
 
   /**
-   * Runs an agent for a single HTTP request and yields its events.
+   * Runs an agent for a single HTTP request, yielding its events and aborting
+   * it if the client disconnects first.
    *
-   * Aborts the run if the client disconnects while it is in flight, and
-   * detaches the listener once the generator finishes so that the `close`
-   * event of a completed response can no longer abort anything.
-   *
-   * The listener is on the response, not the request: since Node 16 a request
-   * emits `close` as soon as its message is complete, which for a body small
-   * enough for `express.json()` to buffer happens before the run even starts.
-   * Only the response stays open for the lifetime of the run.
+   * The disconnect listener is on the response, not the request: since Node 16
+   * a request emits `close` as soon as its message is complete, which for a
+   * body small enough for `express.json()` to buffer happens before the run
+   * even starts. Only the response stays open for the lifetime of the run.
    */
   private async *runAgentEvents(
     res: Response,
