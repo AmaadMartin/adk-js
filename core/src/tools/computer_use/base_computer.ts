@@ -3,16 +3,16 @@
  * Copyright 2026 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
-/* eslint-disable @typescript-eslint/no-unused-vars */
+
+import {Environment} from '@google/genai';
 
 import {Context} from '../../agents/context.js';
 import {experimental} from '../../utils/experimental.js';
 
-export enum ComputerEnvironment {
-  ENVIRONMENT_UNSPECIFIED = 'ENVIRONMENT_UNSPECIFIED',
-  ENVIRONMENT_BROWSER = 'ENVIRONMENT_BROWSER',
-}
+/**
+ * The direction of a scroll action.
+ */
+export type ComputerScrollDirection = 'up' | 'down' | 'left' | 'right';
 
 export interface ComputerState {
   screenshot?: Uint8Array;
@@ -31,12 +31,12 @@ export interface ComputerTypeArgs {
   clear_before_typing?: boolean;
 }
 export interface ComputerScrollDocumentArgs {
-  direction: 'up' | 'down' | 'left' | 'right';
+  direction: ComputerScrollDirection;
 }
 export interface ComputerScrollAtArgs {
   x: number;
   y: number;
-  direction: 'up' | 'down' | 'left' | 'right';
+  direction: ComputerScrollDirection;
   magnitude: number;
 }
 export interface ComputerWaitArgs {
@@ -63,9 +63,9 @@ export abstract class BaseComputer {
    * Override this to set up session-level resources (sandbox, tokens, etc.)
    * using toolContext.state for persistence across invocations.
    *
-   * @param toolContext The tool context with session state access.
+   * @param _toolContext The tool context with session state access.
    */
-  async prepare(toolContext: Context): Promise<void> {}
+  async prepare(_toolContext: Context): Promise<void> {}
 
   /**
    * Returns the screen size of the environment.
@@ -79,7 +79,7 @@ export abstract class BaseComputer {
    *
    * @returns The current state after opening the browser.
    */
-  abstract openWebBrowser(args?: Record<string, any>): Promise<ComputerState>;
+  abstract openWebBrowser(): Promise<ComputerState>;
 
   /**
    * Clicks at a specific x, y coordinate on the webpage.
@@ -130,21 +130,21 @@ export abstract class BaseComputer {
    *
    * @returns The current state.
    */
-  abstract goBack(args?: Record<string, any>): Promise<ComputerState>;
+  abstract goBack(): Promise<ComputerState>;
 
   /**
    * Navigates forward.
    *
    * @returns The current state.
    */
-  abstract goForward(args?: Record<string, any>): Promise<ComputerState>;
+  abstract goForward(): Promise<ComputerState>;
 
   /**
    * Directly jumps to search.
    *
    * @returns The current state.
    */
-  abstract search(args?: Record<string, any>): Promise<ComputerState>;
+  abstract search(): Promise<ComputerState>;
 
   /**
    * Navigates directly to a URL.
@@ -172,7 +172,7 @@ export abstract class BaseComputer {
    *
    * @returns The current environment state.
    */
-  abstract currentState(args?: Record<string, any>): Promise<ComputerState>;
+  abstract currentState(): Promise<ComputerState>;
 
   /**
    * Initialize the computer.
@@ -187,5 +187,19 @@ export abstract class BaseComputer {
   /**
    * Returns the environment of the computer.
    */
-  abstract environment(): Promise<ComputerEnvironment>;
+  abstract environment(): Promise<Environment>;
 }
+
+/**
+ * The names of the predefined computer-use actions declared by
+ * {@link BaseComputer}, i.e. every member except the lifecycle hooks, which
+ * are part of the toolset contract rather than the model-facing action space.
+ *
+ * `ComputerUseToolset` keys its action table by this type, so adding an
+ * abstract action to `BaseComputer` is a compile error until the toolset knows
+ * how to invoke it.
+ */
+export type ComputerActionName = Exclude<
+  keyof BaseComputer,
+  'prepare' | 'initialize' | 'close' | 'screenSize' | 'environment'
+>;

@@ -14,7 +14,7 @@ import {AdkTsApiServer as AdkCliApiServer} from '../test_api_server.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-describe.skip('WebUI Integration Test', () => {
+describe('WebUI Integration Test', () => {
   describe.each([
     {
       name: 'Run from ADK CLI',

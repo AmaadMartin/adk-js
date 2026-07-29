@@ -3,73 +3,132 @@
  * Copyright 2026 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
 
-import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-import {Context} from '../../../src/agents/context.js';
-import {LlmRequest} from '../../../src/models/llm_request.js';
-import {createSession} from '../../../src/sessions/session.js';
 import {
   BaseComputer,
-  ComputerEnvironment,
+  ComputerClickArgs,
+  ComputerDragArgs,
+  ComputerKeyArgs,
+  ComputerNavigateArgs,
+  ComputerScrollAtArgs,
+  ComputerScrollDocumentArgs,
   ComputerState,
-} from '../../../src/tools/computer_use/base_computer.js';
-import {ComputerUseTool} from '../../../src/tools/computer_use/computer_use_tool.js';
-import {ComputerUseToolset} from '../../../src/tools/computer_use/computer_use_toolset.js';
+  ComputerTypeArgs,
+  ComputerUseToolset,
+  ComputerWaitArgs,
+  Context,
+  createSession,
+  InvocationContext,
+  LlmAgent,
+  LlmRequest,
+  PluginManager,
+} from '@google/adk';
+import {Environment} from '@google/genai';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 class MockComputer extends BaseComputer {
+  readonly calls: Array<[string, unknown]> = [];
+
   async screenSize(): Promise<[number, number]> {
     return [1920, 1080];
   }
-  async environment(): Promise<ComputerEnvironment> {
-    return ComputerEnvironment.ENVIRONMENT_BROWSER;
+  async environment(): Promise<Environment> {
+    return Environment.ENVIRONMENT_BROWSER;
   }
   async openWebBrowser(): Promise<ComputerState> {
+    this.calls.push(['openWebBrowser', undefined]);
     return {};
   }
-  async clickAt(): Promise<ComputerState> {
+  async clickAt(args: ComputerClickArgs): Promise<ComputerState> {
+    this.calls.push(['clickAt', args]);
     return {url: 'clicked'};
   }
-  async hoverAt(): Promise<ComputerState> {
+  async hoverAt(args: ComputerClickArgs): Promise<ComputerState> {
+    this.calls.push(['hoverAt', args]);
     return {};
   }
-  async typeTextAt(): Promise<ComputerState> {
+  async typeTextAt(args: ComputerTypeArgs): Promise<ComputerState> {
+    this.calls.push(['typeTextAt', args]);
     return {};
   }
-  async scrollDocument(): Promise<ComputerState> {
+  async scrollDocument(
+    args: ComputerScrollDocumentArgs,
+  ): Promise<ComputerState> {
+    this.calls.push(['scrollDocument', args]);
     return {};
   }
-  async scrollAt(): Promise<ComputerState> {
+  async scrollAt(args: ComputerScrollAtArgs): Promise<ComputerState> {
+    this.calls.push(['scrollAt', args]);
     return {};
   }
-  async wait(): Promise<ComputerState> {
+  async wait(args: ComputerWaitArgs): Promise<ComputerState> {
+    this.calls.push(['wait', args]);
     return {};
   }
   async goBack(): Promise<ComputerState> {
+    this.calls.push(['goBack', undefined]);
     return {};
   }
   async goForward(): Promise<ComputerState> {
+    this.calls.push(['goForward', undefined]);
     return {};
   }
   async search(): Promise<ComputerState> {
+    this.calls.push(['search', undefined]);
     return {};
   }
-  async navigate(): Promise<ComputerState> {
+  async navigate(args: ComputerNavigateArgs): Promise<ComputerState> {
+    this.calls.push(['navigate', args]);
     return {};
   }
-  async keyCombination(): Promise<ComputerState> {
+  async keyCombination(args: ComputerKeyArgs): Promise<ComputerState> {
+    this.calls.push(['keyCombination', args]);
     return {};
   }
-  async dragAndDrop(): Promise<ComputerState> {
+  async dragAndDrop(args: ComputerDragArgs): Promise<ComputerState> {
+    this.calls.push(['dragAndDrop', args]);
     return {};
   }
   async currentState(): Promise<ComputerState> {
+    this.calls.push(['currentState', undefined]);
     return {};
   }
 
-  async customMethod(): Promise<ComputerState> {
-    return {};
-  }
+  /** A helper a real implementation might add; never a model-facing tool. */
+  async authenticate(): Promise<void> {}
+}
+
+/** Valid model arguments for every predefined action, keyed by tool name. */
+const ARGS_BY_TOOL_NAME: Readonly<Record<string, Record<string, unknown>>> = {
+  open_web_browser: {},
+  click_at: {x: 500, y: 500},
+  hover_at: {x: 500, y: 500},
+  type_text_at: {x: 500, y: 500, text: 'hello'},
+  scroll_document: {direction: 'down'},
+  scroll_at: {x: 500, y: 500, direction: 'up', magnitude: 3},
+  wait: {seconds: 1},
+  go_back: {},
+  go_forward: {},
+  search: {},
+  navigate: {url: 'https://example.com'},
+  key_combination: {keys: ['ctrl', 'c']},
+  drag_and_drop: {x: 100, y: 100, destination_x: 200, destination_y: 200},
+  current_state: {},
+};
+
+function createToolContext(): Context {
+  const invocationContext = new InvocationContext({
+    invocationId: 'test-invocation',
+    agent: new LlmAgent({name: 'computer_use_test_agent'}),
+    session: createSession({id: 'test', appName: 'computer-use-test'}),
+    pluginManager: new PluginManager([]),
+  });
+
+  return new Context({invocationContext, functionCallId: 'test-call'});
+}
+
+function createLlmRequest(): LlmRequest {
+  return {contents: [], toolsDict: {}, liveConnectConfig: {}};
 }
 
 describe('ComputerUseToolset', () => {
@@ -83,24 +142,20 @@ describe('ComputerUseToolset', () => {
       computer,
       excludedPredefinedFunctions: ['hoverAt'],
     });
-    context = new Context({
-      invocationContext: {
-        session: createSession('test'),
-      } as any,
-    });
+    context = createToolContext();
   });
 
   afterEach(async () => {
     await toolset.close();
   });
 
-  it('generates tools dynamically based on BaseComputer methods, excluding specified ones', async () => {
+  it('generates a tool per predefined computer action, excluding specified ones', async () => {
     const tools = await toolset.getTools();
-    const toolNames = tools.map((t: ComputerUseTool) => t.name);
+    const toolNames = tools.map((tool) => tool.name);
 
     expect(toolNames).toContain('click_at');
     expect(toolNames).toContain('type_text_at');
-    expect(toolNames).toContain('custom_method');
+    expect(toolNames).toContain('drag_and_drop');
 
     // hoverAt excluded
     expect(toolNames).not.toContain('hover_at');
@@ -111,57 +166,122 @@ describe('ComputerUseToolset', () => {
     expect(toolNames).not.toContain('initialize');
   });
 
+  it('routes every generated tool to its computer method', async () => {
+    const fullToolset = new ComputerUseToolset({computer});
+    const tools = await fullToolset.getTools();
+
+    expect(tools.map((tool) => tool.name).sort()).toEqual(
+      Object.keys(ARGS_BY_TOOL_NAME).sort(),
+    );
+
+    for (const tool of tools) {
+      await tool.runAsync({
+        args: {...ARGS_BY_TOOL_NAME[tool.name]},
+        toolContext: context,
+      });
+    }
+
+    expect(computer.calls).toHaveLength(tools.length);
+  });
+
+  it('does not expose helper methods a subclass happens to define', async () => {
+    const toolNames = (await toolset.getTools()).map((tool) => tool.name);
+
+    expect(toolNames).not.toContain('authenticate');
+  });
+
   it('wraps execution by calling prepare and then the instance method', async () => {
     vi.spyOn(computer, 'prepare');
-    vi.spyOn(computer, 'clickAt');
 
     const tools = await toolset.getTools();
-    const clickTool = tools.find((t) => t.name === 'click_at')!;
+    const clickTool = tools.find((tool) => tool.name === 'click_at');
 
     expect(clickTool).toBeDefined();
 
-    const response = await clickTool.runAsync({
+    const response = await clickTool!.runAsync({
       args: {x: 1000, y: 1000},
       toolContext: context,
     });
 
     expect(computer.prepare).toHaveBeenCalledWith(context);
-    expect(computer.clickAt).toHaveBeenCalledWith(
-      expect.objectContaining({x: 1919, y: 1079}),
-    );
-    expect((response as any).url).toBe('clicked');
+    expect(computer.calls).toEqual([['clickAt', {x: 1919, y: 1079}]]);
+    expect(response).toEqual({url: 'clicked'});
+  });
+
+  it('passes only the declared arguments to the computer method', async () => {
+    const tools = await toolset.getTools();
+    const typeTool = tools.find((tool) => tool.name === 'type_text_at');
+
+    await typeTool!.runAsync({
+      args: {
+        x: 500,
+        y: 500,
+        text: 'hello',
+        press_enter: true,
+        safety_decision: {decision: 'allow'},
+      },
+      toolContext: context,
+    });
+
+    expect(computer.calls).toEqual([
+      [
+        'typeTextAt',
+        {
+          x: 960,
+          y: 540,
+          text: 'hello',
+          press_enter: true,
+          clear_before_typing: undefined,
+        },
+      ],
+    ]);
+  });
+
+  it('rejects arguments that do not match the action signature', async () => {
+    const tools = await toolset.getTools();
+    const scrollTool = tools.find((tool) => tool.name === 'scroll_document');
+    const keysTool = tools.find((tool) => tool.name === 'key_combination');
+    const waitTool = tools.find((tool) => tool.name === 'wait');
+
+    await expect(
+      scrollTool!.runAsync({
+        args: {direction: 'sideways'},
+        toolContext: context,
+      }),
+    ).rejects.toThrowError(/"direction" must be one of/);
+
+    await expect(
+      keysTool!.runAsync({args: {keys: ['ctrl', 3]}, toolContext: context}),
+    ).rejects.toThrowError(/"keys\[1\]" must be a string/);
+
+    await expect(
+      waitTool!.runAsync({args: {}, toolContext: context}),
+    ).rejects.toThrowError(/"seconds" must be a number/);
   });
 
   it('modifies llmRequest config with computerUse natively', async () => {
-    const llmRequest: LlmRequest = {
-      contents: [],
-      toolsDict: {},
-      liveConnectConfig: {},
-    };
+    const llmRequest = createLlmRequest();
 
     await toolset.processLlmRequest(context, llmRequest);
 
     expect(llmRequest.toolsDict['click_at']).toBeDefined();
     expect(llmRequest.toolsDict['type_text_at']).toBeDefined();
 
-    expect(llmRequest.config?.tools?.length).toBeGreaterThan(0);
-    const computerUseConfig = (llmRequest.config!.tools![0] as any).computerUse;
-    expect(computerUseConfig).toBeDefined();
-    expect(computerUseConfig.environment).toBe(
-      ComputerEnvironment.ENVIRONMENT_BROWSER,
-    );
-    expect(computerUseConfig.excludedPredefinedFunctions).toEqual(['hoverAt']);
+    expect(llmRequest.config?.tools).toEqual([
+      {
+        computerUse: {
+          environment: Environment.ENVIRONMENT_BROWSER,
+          excludedPredefinedFunctions: ['hoverAt'],
+        },
+      },
+    ]);
   });
 
   it('skips modifying config if computerUse is already present', async () => {
     const llmRequest: LlmRequest = {
-      contents: [],
-      toolsDict: {},
-      liveConnectConfig: {},
-      config: {
-        tools: [{computerUse: {}} as any],
-      },
-    } as LlmRequest;
+      ...createLlmRequest(),
+      config: {tools: [{computerUse: {}}]},
+    };
 
     await toolset.processLlmRequest(context, llmRequest);
     expect(llmRequest.config?.tools?.length).toBe(1);
@@ -169,7 +289,7 @@ describe('ComputerUseToolset', () => {
   });
 
   it('rejects processLlmRequest if computer environment throws', async () => {
-    const llmRequest: LlmRequest = {contents: [], toolsDict: {}} as any;
+    const llmRequest = createLlmRequest();
     vi.spyOn(computer, 'environment').mockRejectedValue(new Error('env error'));
 
     await expect(
@@ -183,14 +303,9 @@ describe('ComputerUseToolset', () => {
     expect(tools1).toBe(tools2);
   });
 
-  it('scans BaseComputer prototype for additional methods', async () => {
-    try {
-      (BaseComputer.prototype as any).aNewBaseMethod = function () {};
-
-      const tl = await toolset.getTools();
-      expect(tl.find((t) => t.name === 'a_new_base_method')).toBeDefined();
-    } finally {
-      delete (BaseComputer.prototype as any).aNewBaseMethod;
-    }
+  it('closes the underlying computer', async () => {
+    vi.spyOn(computer, 'close');
+    await toolset.close();
+    expect(computer.close).toHaveBeenCalled();
   });
 });

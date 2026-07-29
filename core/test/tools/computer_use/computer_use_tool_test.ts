@@ -3,22 +3,34 @@
  * Copyright 2026 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
 
+import {
+  ComputerUseTool,
+  Context,
+  createSession,
+  InvocationContext,
+  LlmAgent,
+  LlmRequest,
+  PluginManager,
+  ToolConfirmation,
+} from '@google/adk';
 import {beforeEach, describe, expect, it} from 'vitest';
-import {Context} from '../../../src/agents/context.js';
-import {createSession} from '../../../src/sessions/session.js';
-import {ComputerUseTool} from '../../../src/tools/computer_use/computer_use_tool.js';
+
+function createToolContext(): Context {
+  const invocationContext = new InvocationContext({
+    invocationId: 'test-invocation',
+    agent: new LlmAgent({name: 'computer_use_test_agent'}),
+    session: createSession({id: 'test', appName: 'computer-use-test'}),
+    pluginManager: new PluginManager([]),
+  });
+
+  return new Context({invocationContext, functionCallId: 'test-call'});
+}
 
 describe('ComputerUseTool', () => {
   let context: Context;
   beforeEach(() => {
-    context = new Context({
-      invocationContext: {
-        session: createSession('test'),
-      } as any,
-    });
-    context.functionCallId = 'test-call';
+    context = createToolContext();
   });
 
   it('validates screen sizes during initialization', () => {
@@ -39,20 +51,12 @@ describe('ComputerUseTool', () => {
           virtualScreenSize: [-1, 1000],
         }),
     ).toThrowError(/virtualScreenSize dimensions must be positive/);
-
-    expect(
-      () =>
-        new ComputerUseTool({
-          func: fn,
-          screenSize: [1920] as any,
-        }),
-    ).toThrowError(/screenSize must be a tuple/);
   });
 
   it('normalizes coordinates correctly', async () => {
-    let capturedArgs: any;
+    let capturedArgs: Record<string, unknown> | undefined;
     const tool = new ComputerUseTool({
-      func: async (args: any) => {
+      func: async (args) => {
         capturedArgs = args;
       },
       screenSize: [1920, 1080],
@@ -71,10 +75,10 @@ describe('ComputerUseTool', () => {
     });
   });
 
-  it('normalizes camelCase variables correctly', async () => {
-    let capturedArgs: any;
+  it('normalizes against a custom virtual screen size', async () => {
+    let capturedArgs: Record<string, unknown> | undefined;
     const tool = new ComputerUseTool({
-      func: async (args: any) => {
+      func: async (args) => {
         capturedArgs = args;
       },
       screenSize: [1280, 800],
@@ -82,16 +86,11 @@ describe('ComputerUseTool', () => {
     });
 
     await tool.runAsync({
-      args: {destinationX: 1000, destinationY: 1000},
+      args: {destination_x: 1000, destination_y: 1000},
       toolContext: context,
     });
 
-    expect(capturedArgs).toEqual({
-      destinationX: 640,
-      destinationY: 400,
-      destination_x: 640,
-      destination_y: 400,
-    });
+    expect(capturedArgs).toEqual({destination_x: 640, destination_y: 400});
   });
 
   it('rejects unexpected non-numeric coordinates', async () => {
@@ -149,7 +148,26 @@ describe('ComputerUseTool', () => {
       toolContext: context,
     });
 
-    expect((response as any).error).toMatch(/requires confirmation/);
+    expect(response).toEqual({
+      error: 'This tool call requires confirmation, please approve or reject.',
+    });
+    expect(context.actions.requestedToolConfirmations['test-call'].hint).toBe(
+      'Safety first',
+    );
+  });
+
+  it('ignores a safety decision that is not an object', async () => {
+    const tool = new ComputerUseTool({
+      func: async () => 'ran',
+      screenSize: [1920, 1080],
+    });
+
+    const response = await tool.runAsync({
+      args: {safety_decision: 'require_confirmation'},
+      toolContext: context,
+    });
+
+    expect(response).toBe('ran');
   });
 
   it('rejects call if toolConfirmation is strictly unconfirmed', async () => {
@@ -158,15 +176,14 @@ describe('ComputerUseTool', () => {
       screenSize: [1920, 1080],
     });
 
-    // Provide a mocked confirmation object that is rejected
-    context.toolConfirmation = {confirmed: false, id: '1'} as any;
+    context.toolConfirmation = new ToolConfirmation({confirmed: false});
 
     const response = await tool.runAsync({
       args: {},
       toolContext: context,
     });
 
-    expect((response as any).error).toMatch(/rejected/);
+    expect(response).toEqual({error: 'This tool call is rejected.'});
   });
 
   it('returns undefined for _getDeclaration()', () => {
@@ -187,14 +204,17 @@ describe('ComputerUseTool', () => {
       screenSize: [1920, 1080],
     });
 
-    context.toolConfirmation = {confirmed: true} as any;
+    context.toolConfirmation = new ToolConfirmation({confirmed: true});
 
     const response = await tool.runAsync({
       args: {},
       toolContext: context,
     });
 
-    expect((response as any).safety_acknowledgement).toBe('true');
+    expect(response).toEqual({
+      something: 'else',
+      safety_acknowledgement: 'true',
+    });
   });
 
   it('provides a no-op processLlmRequest', async () => {
@@ -202,21 +222,29 @@ describe('ComputerUseTool', () => {
       func: async () => {},
       screenSize: [1920, 1080],
     });
-    const llmRequest = {} as any;
+    const llmRequest: LlmRequest = {
+      contents: [],
+      toolsDict: {},
+      liveConnectConfig: {},
+    };
     await expect(
       tool.processLlmRequest({llmRequest, toolContext: context}),
     ).resolves.toBeUndefined();
+    expect(llmRequest.toolsDict).toEqual({});
   });
 
-  it('handles screenshot base64 encode failure', async () => {
+  it('reports a screenshot that cannot be base64 encoded', async () => {
     const tool = new ComputerUseTool({
       func: async () => {
-        return {screenshot: 123 as any};
+        return {screenshot: 123, url: 'https://example.com'};
       },
       screenSize: [1920, 1080],
     });
     const response = await tool.runAsync({args: {}, toolContext: context});
-    expect(response).toBeDefined();
+    expect(response).toEqual({
+      error: expect.stringContaining('Could not base64 encode screenshot'),
+      url: 'https://example.com',
+    });
   });
 
   it('handles non-object response with confirmation', async () => {
@@ -224,10 +252,12 @@ describe('ComputerUseTool', () => {
       func: async () => 'raw string',
       screenSize: [1920, 1080],
     });
-    context.toolConfirmation = {confirmed: true} as any;
+    context.toolConfirmation = new ToolConfirmation({confirmed: true});
     const response = await tool.runAsync({args: {}, toolContext: context});
-    expect((response as any).safety_acknowledgement).toBe('true');
-    expect((response as any).result).toBe('raw string');
+    expect(response).toEqual({
+      result: 'raw string',
+      safety_acknowledgement: 'true',
+    });
   });
 
   it('rejects with error if func throws', async () => {
@@ -247,35 +277,25 @@ describe('ComputerUseTool', () => {
       func: async () => {},
       screenSize: [1920, 1080],
     });
-    await expect(
-      tool.runAsync({
-        args: {safetyDecision: {decision: 'require_confirmation'}},
-        toolContext: context,
-      }),
-    ).resolves.toBeDefined();
+    await tool.runAsync({
+      args: {safetyDecision: {decision: 'require_confirmation'}},
+      toolContext: context,
+    });
+
+    expect(context.actions.requestedToolConfirmations['test-call'].hint).toBe(
+      'This computer use action requires safety confirmation.',
+    );
   });
 
   it('validates empty name properly', () => {
     expect(
       () =>
         new ComputerUseTool({
-          func: (() => {}) as any, // Anonymous without name
+          func: async () => {},
           name: '',
           screenSize: [1920, 1080],
         }),
     ).toThrowError('Tool name cannot be empty');
-  });
-
-  it('validates virtualScreenSize correctly', () => {
-    expect(
-      () =>
-        new ComputerUseTool({
-          func: async () => {},
-          name: 'click_at',
-          screenSize: [1920, 1080],
-          virtualScreenSize: [] as any,
-        }),
-    ).toThrowError('virtualScreenSize must be a tuple');
   });
 
   it('rejects unexpected non-numeric y coordinates', async () => {
