@@ -107,11 +107,17 @@ async function loadDir(
  * Parses SKILL.md from a raw content string, extracting the YAML frontmatter and the body.
  *
  * @param content - The raw content of the SKILL.md file.
- * @returns An object containing the parsed frontmatter and the remaining markdown body.
+ * @returns An object containing the parsed frontmatter, the frontmatter keys as
+ * written in the YAML, and the remaining markdown body.
  * @throws {Error} If the content is not properly formatted with YAML frontmatter.
  */
 export function parseSkillMdContent(content: string): {
   frontmatter: Frontmatter;
+  /**
+   * Frontmatter keys exactly as written in the SKILL.md YAML, before schema
+   * preprocessing (alias derivation) and defaults are applied.
+   */
+  declaredKeys: string[];
   body: string;
 } {
   if (!content.startsWith('---')) {
@@ -137,7 +143,7 @@ export function parseSkillMdContent(content: string): {
     }
     const frontmatter = FrontmatterSchema.parse(parsed);
 
-    return {frontmatter, body};
+    return {frontmatter, declaredKeys: Object.keys(parsed), body};
   } catch (e: unknown) {
     throw new Error(`Invalid YAML in frontmatter: ${(e as Error).message}`);
   }
@@ -151,7 +157,7 @@ export function parseSkillMdContent(content: string): {
  */
 export async function loadSkillFromDir(skillDir: string): Promise<Skill> {
   const resolvedDir = path.resolve(skillDir);
-  const skill = await loadSkillFile(skillDir);
+  const {skill} = await loadSkillFile(skillDir);
 
   const referencesDir = path.join(resolvedDir, 'references');
   const assetsDir = path.join(resolvedDir, 'assets');
@@ -188,16 +194,17 @@ export async function validateSkillDir(skillDir: string): Promise<string[]> {
   const problems: string[] = [];
   const resolvedDir = path.resolve(skillDir);
 
-  let skill;
+  let loaded;
   try {
-    skill = await loadSkillFile(resolvedDir);
+    loaded = await loadSkillFile(resolvedDir);
   } catch (e: unknown) {
     return [(e as Error).message];
   }
 
   try {
-    const keys = Object.keys(skill.frontmatter);
-    const unknown = keys.filter((k) => !ALLOWED_FRONTMATTER_KEYS.has(k));
+    const unknown = loaded.declaredKeys.filter(
+      (k) => !ALLOWED_FRONTMATTER_KEYS.has(k),
+    );
     if (unknown.length > 0) {
       problems.push(
         `Unknown frontmatter fields: [${unknown.sort().join(', ')}]`,
@@ -205,9 +212,9 @@ export async function validateSkillDir(skillDir: string): Promise<string[]> {
     }
 
     const dirName = path.basename(resolvedDir);
-    if (dirName !== skill.frontmatter.name) {
+    if (dirName !== loaded.skill.frontmatter.name) {
       problems.push(
-        `Skill name '${skill.frontmatter.name}' does not match directory name '${dirName}'.`,
+        `Skill name '${loaded.skill.frontmatter.name}' does not match directory name '${dirName}'.`,
       );
     }
   } catch (e: unknown) {
@@ -221,10 +228,13 @@ export async function validateSkillDir(skillDir: string): Promise<string[]> {
  * Internal helper to load just the core skill definition (SKILL.md) from a directory.
  *
  * @param skillDir - The path to the skill directory.
- * @returns A promise that resolves to a Skill object containing only frontmatter and instructions.
+ * @returns A promise that resolves to a Skill object containing only frontmatter
+ * and instructions, alongside the frontmatter keys as written in the YAML.
  * @throws {Error} If the skill file cannot be found or parsed.
  */
-async function loadSkillFile(skillDir: string): Promise<Skill> {
+async function loadSkillFile(
+  skillDir: string,
+): Promise<{skill: Skill; declaredKeys: string[]}> {
   const resolvedDir = path.resolve(skillDir);
   let skillMdPath = '';
   let content = '';
@@ -255,7 +265,11 @@ async function loadSkillFile(skillDir: string): Promise<Skill> {
     );
   }
 
-  const {frontmatter: parsed, body} = parseSkillMdContent(content);
+  const {
+    frontmatter: parsed,
+    declaredKeys,
+    body,
+  } = parseSkillMdContent(content);
   const frontmatter = FrontmatterSchema.parse(parsed);
   const dirName = path.basename(resolvedDir);
   if (dirName !== frontmatter.name) {
@@ -265,8 +279,11 @@ async function loadSkillFile(skillDir: string): Promise<Skill> {
   }
 
   return {
-    frontmatter,
-    instructions: body,
+    skill: {
+      frontmatter,
+      instructions: body,
+    },
+    declaredKeys,
   };
 }
 
