@@ -176,16 +176,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /**
  * Normalizes a tool result into the record shape `FunctionResponse.response`
- * and the tool callbacks require. Tools may return any JSON value, so scalars
- * are wrapped in `result` and arrays in `results`.
+ * requires. Tools may return any JSON value, so arrays are wrapped in
+ * `results` and everything else that is not already a record in `result`.
  */
 function toResponseRecord(functionResult: unknown): Record<string, unknown> {
-  if (isRecord(functionResult)) {
-    return functionResult;
-  }
-  if (Array.isArray(functionResult)) {
-    return {results: functionResult};
-  }
+  if (isRecord(functionResult)) return functionResult;
+  if (Array.isArray(functionResult)) return {results: functionResult};
   return {result: functionResult};
 }
 

@@ -171,14 +171,21 @@ describe('handleFunctionCallList', () => {
   });
 
   it('should wrap scalar responses into a {result: scalar} object', async () => {
+    let received: Record<string, unknown> | undefined;
+    const afterToolCallback: SingleAfterToolCallback = async ({response}) => {
+      received = response;
+      return undefined;
+    };
+
     const event = await handleFunctionCallList({
       invocationContext,
       functionCalls: [{id: randomIdForTestingOnly(), name: 'scalarTool'}],
       toolsDict: {'scalarTool': scalarTool},
       beforeToolCallbacks: [],
-      afterToolCallbacks: [],
+      afterToolCallbacks: [afterToolCallback],
     });
 
+    expect(received).toEqual({result: 'plain string'});
     expect(event).not.toBeNull();
     const definedEvent = event as Event;
     expect(definedEvent.content!.parts![0].functionResponse!.response).toEqual({
@@ -227,24 +234,6 @@ describe('handleFunctionCallList', () => {
     });
 
     expect(event).toBeNull();
-  });
-
-  it('should pass the normalized record of a scalar response to afterToolCallback', async () => {
-    let received: Record<string, unknown> | undefined;
-    const afterToolCallback: SingleAfterToolCallback = async ({response}) => {
-      received = response;
-      return undefined;
-    };
-
-    await handleFunctionCallList({
-      invocationContext,
-      functionCalls: [{id: randomIdForTestingOnly(), name: 'scalarTool'}],
-      toolsDict: {'scalarTool': scalarTool},
-      beforeToolCallbacks: [],
-      afterToolCallbacks: [afterToolCallback],
-    });
-
-    expect(received).toEqual({result: 'plain string'});
   });
 
   it('should pass a record response through to afterToolCallback unchanged', async () => {

@@ -15,12 +15,7 @@ const MCPToolSchemaObject = z.object({
 });
 type MCPToolSchema = z.infer<typeof MCPToolSchemaObject>;
 
-/**
- * A JSON-Schema-like node as it appears in an MCP tool declaration.
- *
- * MCP declarations are plain JSON, so every field is optional and the values
- * are only as trustworthy as the tool that produced them.
- */
+/** A JSON-Schema-like node as it appears in an MCP tool declaration. */
 interface McpSchemaNode {
   type?: string | unknown[];
   anyOf?: unknown[];
@@ -98,10 +93,7 @@ export function toGeminiSchema(mcpSchema?: MCPToolSchema): Schema | undefined {
           mcp = nonNullType;
         } else {
           const {type: _removed, anyOf: _removedAnyOf, ...rest} = mcp;
-          mcp = {
-            ...rest,
-            type: typeof nonNullType === 'string' ? nonNullType : undefined,
-          };
+          mcp = {...rest, type: getTypeFromArrayItem(nonNullType)};
         }
       } else if (nonNullTypes.length === 0 && isNullable) {
         const {type: _removed, anyOf: _removedAnyOf, ...rest} = mcp;
