@@ -44,10 +44,8 @@ import {getAgentGraphAsDot} from './agent_graph.js';
 import {
   buildOriginPolicy,
   createOriginCheckMiddleware,
-  createUpgradeGuard,
   OriginPolicy,
   parseAllowedOrigins,
-  WILDCARD_ORIGIN,
 } from './origin_check.js';
 
 interface ServerOptions {
@@ -61,7 +59,6 @@ interface ServerOptions {
   agentFileLoadOptions?: AgentFileOptions;
   serveDebugUI?: boolean;
   allowOrigins?: string;
-  trustProxyHeaders?: boolean;
   otelToCloud?: boolean;
   logger?: Logger;
   logLevel?: LogLevel;
@@ -92,7 +89,6 @@ export class AdkApiServer {
   private readonly artifactService: BaseArtifactService;
   private readonly serveDebugUI: boolean;
   private readonly allowedOrigins: string[];
-  private readonly trustProxyHeaders: boolean;
   private originPolicy?: OriginPolicy;
   private readonly otelToCloud: boolean;
   private readonly registerProcessors?: (
@@ -122,7 +118,6 @@ export class AdkApiServer {
       );
     this.serveDebugUI = options.serveDebugUI ?? false;
     this.allowedOrigins = parseAllowedOrigins(options.allowOrigins);
-    this.trustProxyHeaders = options.trustProxyHeaders ?? false;
     this.otelToCloud = options.otelToCloud ?? false;
     this.registerProcessors = options.registerProcessors;
     this.memoryExporter = new InMemoryExporter(this.sessionTraceDict);
@@ -190,7 +185,7 @@ export class AdkApiServer {
 
     // Registered first so that every route below, plus the A2A routes mounted
     // later by initA2A(), is behind the gate.
-    app.use(createOriginCheckMiddleware(() => this.originPolicy, this.logger));
+    app.use(createOriginCheckMiddleware(() => this.policy(), this.logger));
 
     if (this.serveDebugUI) {
       app.get('/', (req: Request, res: Response) => {
@@ -219,9 +214,7 @@ export class AdkApiServer {
       app.use(
         cors({
           // `cors` only emits the wildcard header for the literal '*' string.
-          origin: this.allowedOrigins.includes(WILDCARD_ORIGIN)
-            ? WILDCARD_ORIGIN
-            : this.allowedOrigins,
+          origin: this.allowedOrigins.includes('*') ? '*' : this.allowedOrigins,
         }),
       );
     }
@@ -947,20 +940,20 @@ export class AdkApiServer {
   }
 
   /**
-   * Builds the request-gate policy from the address the server actually bound
-   * to, which is only known once it is listening (`port: 0` picks a free port).
+   * The request-gate policy, derived on first use from the address the server
+   * actually bound to (`port: 0` picks a free port, so it is only known once
+   * the server is listening -- which it always is by the time a request runs).
    */
-  private buildPolicy(): OriginPolicy {
+  private policy(): OriginPolicy {
     const address = this.server?.address();
     const bound = typeof address === 'object' && address ? address : undefined;
 
-    return buildOriginPolicy({
+    return (this.originPolicy ??= buildOriginPolicy({
       allowedOrigins: this.allowedOrigins,
       serverHost: bound?.address ?? this.host,
       configuredHost: this.host,
       port: bound?.port ?? this.port,
-      trustProxyHeaders: this.trustProxyHeaders,
-    });
+    }));
   }
 
   async start(): Promise<void> {
@@ -969,13 +962,6 @@ export class AdkApiServer {
     return new Promise((resolve, reject) => {
       this.server = this.app.listen(this.port, this.host, async () => {
         try {
-          this.originPolicy = this.buildPolicy();
-          createUpgradeGuard(
-            this.server!,
-            () => this.originPolicy,
-            this.logger,
-          );
-
           if (this.a2a) {
             await this.initA2A();
           }
