@@ -4,7 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Event as AdkEvent, InMemoryRunner, RemoteA2AAgent} from '@google/adk';
+import {
+  Event as AdkEvent,
+  InMemoryRunner,
+  REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
+  RemoteA2AAgent,
+} from '@google/adk';
 import {createUserContent} from '@google/genai';
 import * as path from 'node:path';
 import {afterAll, beforeAll, describe, expect, it} from 'vitest';
@@ -95,7 +100,7 @@ describe('A2A: RemoteAgent InputRequired', () => {
   });
 
   it('Tool confirmation', async () => {
-    const confirmationCallName = 'adk_request_confirmation';
+    const confirmationCallName = REQUEST_CONFIRMATION_FUNCTION_CALL_NAME;
     const confirmationCallId = 'confirm-xyz';
     const modelTextTaskComplete = 'Ticket created!';
     const remoteAgent = new RemoteA2AAgent({

@@ -4,7 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {BaseAgent, createEvent, Event, InvocationContext} from '@google/adk';
+import {
+  BaseAgent,
+  createEvent,
+  Event,
+  InvocationContext,
+  REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
+} from '@google/adk';
 
 class ToolConfirmationAgent extends BaseAgent {
   constructor() {
@@ -17,7 +23,7 @@ class ToolConfirmationAgent extends BaseAgent {
     const userMsg = ctx.session.events[ctx.session.events.length - 1];
     const hasConfirmation = userMsg?.content?.parts?.some(
       (p) =>
-        p.functionResponse?.name === 'adk_request_confirmation' &&
+        p.functionResponse?.name === REQUEST_CONFIRMATION_FUNCTION_CALL_NAME &&
         p.functionResponse.response?.confirmed === true,
     );
     if (!hasConfirmation) {
@@ -29,7 +35,7 @@ class ToolConfirmationAgent extends BaseAgent {
             {text: 'creating ticket...'},
             {
               functionCall: {
-                name: 'adk_request_confirmation',
+                name: REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
                 args: {
                   originalFunctionCall: {
                     name: 'create_ticket',

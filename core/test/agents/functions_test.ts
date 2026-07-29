@@ -14,6 +14,7 @@ import {
   InvocationContext,
   LlmAgent,
   PluginManager,
+  REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
   REQUEST_EUC_FUNCTION_CALL_NAME,
   Session,
   SingleAfterToolCallback,
@@ -536,7 +537,9 @@ describe('generateRequestConfirmationEvent', () => {
         'call_1',
     );
     expect(call1).toBeDefined();
-    expect(call1!.functionCall!.name).toBe('adk_request_confirmation');
+    expect(call1!.functionCall!.name).toBe(
+      REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
+    );
     expect(call1!.functionCall!.args!['toolConfirmation']).toEqual(
       new ToolConfirmation({
         hint: 'confirm tool 1',
@@ -550,7 +553,9 @@ describe('generateRequestConfirmationEvent', () => {
         'call_2',
     );
     expect(call2).toBeDefined();
-    expect(call2!.functionCall!.name).toBe('adk_request_confirmation');
+    expect(call2!.functionCall!.name).toBe(
+      REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
+    );
     expect(call2!.functionCall!.args!['toolConfirmation']).toEqual(
       new ToolConfirmation({
         hint: 'confirm tool 2',

@@ -4,7 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {CompactedEvent, createEvent} from '@google/adk';
+import {
+  CompactedEvent,
+  createEvent,
+  REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
+} from '@google/adk';
 import {Content} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {
@@ -974,7 +978,7 @@ describe('getContents', () => {
         parts: [
           {
             functionCall: {
-              name: 'adk_request_confirmation',
+              name: REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
               args: {},
             },
           },
