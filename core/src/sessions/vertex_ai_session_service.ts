@@ -398,9 +398,7 @@ export class VertexAiSessionService extends BaseSessionService {
       'errorMessage',
     ]);
 
-    const content = event.content
-      ? dropUnsupportedPartFields(event.content)
-      : undefined;
+    const content = event.content && dropUnsupportedPartFields(event.content);
     config.content = content;
     config.actions = event.actions
       ? toApiEventActions(event.actions)
@@ -484,15 +482,13 @@ function toApiEventActions(actions: EventActions): ApiEventActions {
 }
 
 /**
- * True when the service rejected the request payload itself.
+ * True when the service rejected the request payload itself, which is what an
+ * API that does not know `rawEvent` returns. Any other failure must propagate:
+ * the event may already be persisted, so retrying would append it twice.
  *
- * The Vertex SDK does no client-side validation, so the equivalent of
- * adk-python's ValidationError guard is the 400 INVALID_ARGUMENT an API that
- * does not know `rawEvent` returns. Transient failures (5xx, 429, timeouts,
- * network errors) must propagate: the event may already be persisted and
- * retrying would append it twice. The SDK reports HTTP failures as an
- * `ApiError` carrying `status`; it is not matched with `instanceof` because
- * `core` and `@google-cloud/vertexai` resolve separate `@google/genai` copies.
+ * The SDK reports HTTP failures as an `ApiError` carrying `status`, matched
+ * structurally because `core` and `@google-cloud/vertexai` resolve separate
+ * `@google/genai` copies, making `instanceof` false at runtime.
  */
 function isInvalidArgumentError(error: unknown): boolean {
   return (error as {status?: number} | null)?.status === HTTP_BAD_REQUEST;
@@ -568,8 +564,8 @@ function _fromApiEvent(apiEventObj: VertexAiSessionEvent): Event {
         'requestedToolConfirmations'
       ] as Record<string, ToolConfirmation>) || {},
     skipSummarization: actions['skipSummarization'] as boolean | undefined,
-    // Sessions written by earlier adk-js versions stored ADK's own
-    // `transferToAgent` key, so accept it as a fallback.
+    // Earlier adk-js versions copied `event.actions` onto the request
+    // verbatim, so sessions they wrote store ADK's own `transferToAgent` key.
     transferToAgent: (actions['transferAgent'] ??
       (actions as Record<string, unknown>)['transferToAgent']) as
       | string

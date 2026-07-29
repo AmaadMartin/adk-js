@@ -77,25 +77,6 @@ type AppendFn = (
   params: AppendAgentEngineSessionEventRequestParameters,
 ) => Promise<unknown>;
 
-/**
- * Rebuilds the `SessionEvent` the API would return for an appended event,
- * deliberately dropping `rawEvent` to simulate a session written before
- * `rawEvent` support existed.
- */
-function toLegacySessionEvent(
-  params: AppendAgentEngineSessionEventRequestParameters,
-): VertexAiSessionEvent {
-  return {
-    name: `${params.name}/events/e1`,
-    author: params.author,
-    invocationId: params.invocationId,
-    timestamp: params.timestamp,
-    content: params.config?.content,
-    actions: params.config?.actions,
-    eventMetadata: params.config?.eventMetadata,
-  };
-}
-
 describe('VertexAiSessionService', () => {
   let service: VertexAiSessionService;
   interface MockSessions {
@@ -1142,21 +1123,7 @@ describe('VertexAiSessionService', () => {
       );
     });
 
-    it('emits the transfer action as transferAgent', async () => {
-      const event = createEvent({
-        timestamp: 1620000000000,
-        content: {role: 'model', parts: [{text: 'handing over'}]},
-        actions: createEventActions({transferToAgent: 'specialist'}),
-      });
-
-      await service.appendEvent({session: appendSession(), event});
-
-      const actions = appendedConfig().actions;
-      expect(actions?.transferAgent).toBe('specialist');
-      expect('transferToAgent' in actions!).toBe(false);
-    });
-
-    it('preserves the other action fields', async () => {
+    it('sends transferToAgent as transferAgent and keeps every other action', async () => {
       const authConfig = {
         authScheme: {type: 'apiKey', name: 'x-api-key', in: 'header'},
         credentialKey: 'key1',
@@ -1189,7 +1156,7 @@ describe('VertexAiSessionService', () => {
       });
     });
 
-    it('strips partMetadata from content and rawEvent', async () => {
+    it('strips partMetadata from content and rawEvent without mutating the event', async () => {
       const event = createEvent({
         timestamp: 1620000000000,
         content: {
@@ -1212,23 +1179,9 @@ describe('VertexAiSessionService', () => {
         role: 'user',
         parts: [{text: 'hello'}, {text: 'world'}],
       });
-    });
-
-    it('does not mutate the caller event when stripping partMetadata', async () => {
-      const event = createEvent({
-        timestamp: 1620000000000,
-        content: {
-          role: 'user',
-          parts: [{text: 'hello', partMetadata: {source: 'portal'}}],
-        },
-      });
-
-      await service.appendEvent({session: appendSession(), event});
-
       expect(event.content?.parts?.[0].partMetadata).toEqual({
         source: 'portal',
       });
-      expect(appendedConfig().content).not.toBe(event.content);
     });
 
     it('handles content without parts', async () => {
@@ -1359,9 +1312,18 @@ describe('VertexAiSessionService', () => {
       });
       await service.appendEvent({session: appendSession(), event});
 
-      const readBack = await readLegacyEvent(
-        toLegacySessionEvent(mockClient.events.append.mock.calls[0][0]),
-      );
+      // Rebuild what the API would return, dropping rawEvent to simulate a
+      // session written before rawEvent support existed.
+      const appended = mockClient.events.append.mock.calls[0][0];
+      const readBack = await readLegacyEvent({
+        name: `${appended.name}/events/e1`,
+        author: appended.author,
+        invocationId: appended.invocationId,
+        timestamp: appended.timestamp,
+        content: appended.config?.content,
+        actions: appended.config?.actions,
+        eventMetadata: appended.config?.eventMetadata,
+      });
 
       expect(readBack.actions.transferToAgent).toBe('specialist');
     });
