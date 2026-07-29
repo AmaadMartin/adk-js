@@ -5,9 +5,24 @@
  */
 
 import {Sessions} from '@google-cloud/vertexai/build/src/genai/sessions.js';
-import {createEvent, State, VertexAiSessionService} from '@google/adk';
+import {AppendAgentEngineSessionEventRequestParameters} from '@google-cloud/vertexai/build/src/genai/types.js';
+import {
+  createEvent,
+  createSession,
+  State,
+  VertexAiSessionService,
+  type Event,
+} from '@google/adk';
 import {Session} from '@google/adk/sessions/session.js';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+  type MockInstance,
+} from 'vitest';
 
 // Mock the unreleased nodejs-vertexai package so the import resolves
 vi.mock('nodejs-vertexai', () => ({
@@ -21,10 +36,26 @@ vi.mock('nodejs-vertexai', () => ({
 }));
 
 import {
+  isRawEventRejection,
   isVertexAiConnectionString,
   quoteFilterLiteral,
 } from '@google/adk/sessions/vertex_ai_session_service.js';
 import {logger} from '@google/adk/utils/logger.js';
+
+/** Builds a value shaped like the `ApiError` the Vertex AI SDK throws. */
+function apiError(status: number, message: string): Error & {status: number} {
+  return Object.assign(new Error(message), {name: 'ApiError', status});
+}
+
+/** Builds the `INVALID_ARGUMENT` body the API returns for an unknown field. */
+function unknownFieldBody(field: string, at: string): string {
+  return `{"error":{"code":400,"message":"Invalid JSON payload received. Unknown name \\"${field}\\" at '${at}': Cannot find field.","status":"INVALID_ARGUMENT"}}`;
+}
+
+const RAW_EVENT_REJECTION = apiError(
+  400,
+  unknownFieldBody('rawEvent', 'event'),
+);
 
 describe('isVertexAiConnectionString', () => {
   it('returns true for vertexai://', () => {
@@ -58,6 +89,65 @@ describe('quoteFilterLiteral', () => {
 
   it('quotes an empty string', () => {
     expect(quoteFilterLiteral('')).toBe('""');
+  });
+});
+
+describe('isRawEventRejection', () => {
+  it('matches the API refusing rawEvent', () => {
+    expect(isRawEventRejection(RAW_EVENT_REJECTION)).toBe(true);
+  });
+
+  it('matches the snake_case spelling of the field', () => {
+    expect(
+      isRawEventRejection(
+        apiError(400, unknownFieldBody('raw_event', 'event')),
+      ),
+    ).toBe(true);
+  });
+
+  it('rejects a status-less error naming the field', () => {
+    // Only the server refuses rawEvent: the SDK converter copies the field
+    // through without validating it, so a status-less error naming it is
+    // something else and must not trigger a lossy re-append.
+    expect(
+      isRawEventRejection(new Error('rawEvent is not a supported field')),
+    ).toBe(false);
+  });
+
+  it('rejects a 400 that names a different field', () => {
+    expect(
+      isRawEventRejection(
+        apiError(
+          400,
+          unknownFieldBody('part_metadata', 'event.content.parts[0]'),
+        ),
+      ),
+    ).toBe(false);
+  });
+
+  it('rejects a non-400 status even when the message names the field', () => {
+    expect(isRawEventRejection(apiError(500, 'raw_event'))).toBe(false);
+  });
+
+  it('rejects auth and quota failures', () => {
+    expect(isRawEventRejection(apiError(403, 'PERMISSION_DENIED'))).toBe(false);
+    expect(isRawEventRejection(apiError(429, 'RESOURCE_EXHAUSTED'))).toBe(
+      false,
+    );
+  });
+
+  it('rejects a transport failure', () => {
+    expect(isRawEventRejection(new Error('fetch failed'))).toBe(false);
+  });
+
+  it('rejects non-objects', () => {
+    expect(isRawEventRejection(null)).toBe(false);
+    expect(isRawEventRejection(undefined)).toBe(false);
+    expect(isRawEventRejection('rawEvent')).toBe(false);
+  });
+
+  it('rejects an object whose message is not a string', () => {
+    expect(isRawEventRejection({status: 400, message: 42})).toBe(false);
   });
 });
 
@@ -1090,6 +1180,98 @@ describe('VertexAiSessionService', () => {
           }),
         }),
       );
+    });
+
+    describe('rawEvent fallback', () => {
+      let warnSpy: MockInstance<typeof logger.warn>;
+      let session: Session;
+      let event: Event;
+
+      beforeEach(() => {
+        warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+        session = createSession({
+          id: 'append-session',
+          appName: '12345',
+          userId: 'testUser',
+        });
+        event = createEvent({
+          timestamp: 1620000000000,
+          invocationId: '',
+          content: {role: 'model', parts: [{text: 'hello'}]},
+        });
+      });
+
+      afterEach(() => {
+        warnSpy.mockRestore();
+      });
+
+      it('retries without rawEvent when the API refuses the field', async () => {
+        // Snapshot each request as it is sent: the retry re-sends the same
+        // object, so `mock.calls` alone cannot show that rawEvent was present
+        // on the first attempt and gone on the second.
+        const sent: AppendAgentEngineSessionEventRequestParameters[] = [];
+        mockClient.events.append.mockImplementation(
+          (params: AppendAgentEngineSessionEventRequestParameters) => {
+            sent.push({...params, config: {...params.config}});
+            return sent.length === 1
+              ? Promise.reject(RAW_EVENT_REJECTION)
+              : Promise.resolve({});
+          },
+        );
+        // Distinct values so a retry that rebuilt `inv-${Date.now()}` instead
+        // of re-sending the original request would be visible below.
+        const dateSpy = vi
+          .spyOn(Date, 'now')
+          .mockReturnValueOnce(1700000000000)
+          .mockReturnValue(1700000009999);
+
+        await expect(service.appendEvent({session, event})).resolves.toBe(
+          event,
+        );
+        dateSpy.mockRestore();
+
+        expect(mockClient.events.append).toHaveBeenCalledTimes(2);
+        expect(sent[0].config).toHaveProperty('rawEvent');
+        expect(sent[1].config).not.toHaveProperty('rawEvent');
+        expect(sent[1].name).toBe(sent[0].name);
+        expect(sent[1].author).toBe(sent[0].author);
+        expect(sent[1].invocationId).toBe('inv-1700000000000');
+        expect(sent[1].timestamp).toBe(sent[0].timestamp);
+        expect(warnSpy).toHaveBeenCalledTimes(1);
+      });
+
+      it.each([
+        {label: 'a 500', error: apiError(500, 'INTERNAL')},
+        {label: 'a 403', error: apiError(403, 'PERMISSION_DENIED')},
+        {
+          label: 'a 400 naming a different field',
+          error: apiError(
+            400,
+            unknownFieldBody('part_metadata', 'event.content.parts[0]'),
+          ),
+        },
+        {label: 'a transport failure', error: new Error('fetch failed')},
+      ])('rethrows $label without a second append', async ({error}) => {
+        mockClient.events.append.mockRejectedValueOnce(error);
+
+        await expect(service.appendEvent({session, event})).rejects.toBe(error);
+
+        expect(mockClient.events.append).toHaveBeenCalledTimes(1);
+        expect(warnSpy).not.toHaveBeenCalled();
+      });
+
+      it('propagates a failure of the retry without appending again', async () => {
+        const retryError = apiError(500, 'INTERNAL');
+        mockClient.events.append
+          .mockRejectedValueOnce(RAW_EVENT_REJECTION)
+          .mockRejectedValueOnce(retryError);
+
+        await expect(service.appendEvent({session, event})).rejects.toBe(
+          retryError,
+        );
+
+        expect(mockClient.events.append).toHaveBeenCalledTimes(2);
+      });
     });
   });
 });
