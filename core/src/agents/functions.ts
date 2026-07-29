@@ -322,9 +322,15 @@ export async function handleFunctionCallList({
 
   // Execute the filtered calls concurrently (parity with adk-python's
   // asyncio.gather). Promise.all preserves input order, so null results
-  // (long-running / no-response skips) filter out with order intact, and it is
-  // fail-fast. Unlike adk-python, JS promises are not cancellable, so on failure
-  // the sibling tools run to completion and their results are discarded.
+  // (long-running / no-response skips) filter out with order intact.
+  //
+  // Fail-fast is intentional: only an unknown tool name or a throwing callback
+  // rejects here, and both already propagated out of the sequential loop, so the
+  // caller contract is unchanged. A failing tool itself never takes its siblings
+  // down -- executeSingleFunctionCall turns that into an {error: ...} response.
+  // JS promises are not cancellable, so unlike adk-python's cancel-and-raise the
+  // in-flight siblings run to completion on rejection: their side effects land
+  // but they contribute no response part.
   const results = await Promise.all(
     filteredFunctionCalls.map((functionCall) =>
       executeSingleFunctionCall({
@@ -377,8 +383,11 @@ export async function handleFunctionCallList({
  * builds the function-response event.
  *
  * Returns `null` when a long-running tool produces no response, so the call
- * contributes no response part. Each call receives its own `Context`, so calls
- * hold no shared mutable state and are safe to run concurrently.
+ * contributes no response part. Each call receives its own `Context` and its
+ * own `actions.stateDelta`, so response order and delta merging stay
+ * deterministic. Note that `State` writes are also visible through the shared
+ * session state map, so tools that read-modify-write the same key are no longer
+ * serialized against each other.
  */
 async function executeSingleFunctionCall({
   invocationContext,
