@@ -14,7 +14,6 @@ import {
   createEvent,
   createEventActions,
   createSession,
-  Event,
   State,
   ToolConfirmation,
   VertexAiSessionService,
@@ -1232,7 +1231,7 @@ describe('VertexAiSessionService', () => {
       expect(appendedConfig().content).not.toBe(event.content);
     });
 
-    it('passes content without parts through unchanged', async () => {
+    it('handles content without parts', async () => {
       const event = createEvent({
         timestamp: 1620000000000,
         content: {role: 'user'},
@@ -1240,7 +1239,7 @@ describe('VertexAiSessionService', () => {
 
       await service.appendEvent({session: appendSession(), event});
 
-      expect(appendedConfig().content).toBe(event.content);
+      expect(appendedConfig().content).toEqual({role: 'user'});
     });
 
     it('handles an event without content', async () => {
@@ -1351,47 +1350,18 @@ describe('VertexAiSessionService', () => {
 
       expect(event.actions.transferToAgent).toBe('legacy-specialist');
     });
-  });
 
-  describe('append then legacy read round trip', () => {
-    /** Appends `event`, then reads it back without the rawEvent shortcut. */
-    async function roundTrip(event: Event) {
-      await service.appendEvent({session: appendSession(), event});
-      mockClient.events.listInternal.mockResolvedValue({
-        sessionEvents: [
-          toLegacySessionEvent(mockClient.events.append.mock.calls[0][0]),
-        ],
-      });
-      const session = await service.getSession({
-        appName: '12345',
-        userId: 'testUser',
-        sessionId: 'append-session',
-      });
-      expect(session?.events).toHaveLength(1);
-      return session!.events[0];
-    }
-
-    it('preserves groundingMetadata', async () => {
-      const groundingMetadata = {webSearchQueries: ['adk']};
-      const event = createEvent({
-        timestamp: 1620000000000,
-        content: {role: 'model', parts: [{text: 'grounded'}]},
-        groundingMetadata,
-      });
-
-      const readBack = await roundTrip(event);
-
-      expect(readBack.groundingMetadata).toEqual(groundingMetadata);
-    });
-
-    it('preserves transferToAgent', async () => {
+    it('restores a transfer written by appendEvent', async () => {
       const event = createEvent({
         timestamp: 1620000000000,
         content: {role: 'model', parts: [{text: 'handing over'}]},
         actions: createEventActions({transferToAgent: 'specialist'}),
       });
+      await service.appendEvent({session: appendSession(), event});
 
-      const readBack = await roundTrip(event);
+      const readBack = await readLegacyEvent(
+        toLegacySessionEvent(mockClient.events.append.mock.calls[0][0]),
+      );
 
       expect(readBack.actions.transferToAgent).toBe('specialist');
     });

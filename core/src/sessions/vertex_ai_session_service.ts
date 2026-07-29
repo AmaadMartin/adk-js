@@ -7,7 +7,7 @@
 import {Client} from '@google-cloud/vertexai/build/src/genai/client.js';
 import {Sessions} from '@google-cloud/vertexai/build/src/genai/sessions.js';
 import {
-  EventActions as ApiEventActionsBase,
+  EventActions as ApiEventActions,
   AppendAgentEngineSessionEventConfig,
   AppendAgentEngineSessionEventRequestParameters,
   EventMetadata,
@@ -456,7 +456,6 @@ export class VertexAiSessionService extends BaseSessionService {
  *
  * `partMetadata` is a Gemini Developer API-only field; the Sessions API fails
  * appendEvent with 400 INVALID_ARGUMENT ("Unknown name \"part_metadata\"").
- * The input is never mutated, so the caller's event keeps its metadata.
  */
 function dropUnsupportedPartFields(content: Content): Content {
   if (!content.parts) {
@@ -479,7 +478,7 @@ function dropUnsupportedPartFields(content: Content): Content {
  * `requestedToolConfirmations`, which the SDK type omits but `_fromApiEvent`
  * reads back.
  */
-function toApiEventActions(actions: EventActions): ApiEventActionsBase {
+function toApiEventActions(actions: EventActions): ApiEventActions {
   const {transferToAgent, ...rest} = actions;
   return {...rest, transferAgent: transferToAgent};
 }
