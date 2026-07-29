@@ -16,11 +16,6 @@ const DEFAULT_LOCATION = 'us-central1';
 const CLOUD_PLATFORM_SCOPE = 'https://www.googleapis.com/auth/cloud-platform';
 const REASONING_ENGINE_NAME_PATTERN =
   /^projects\/([a-zA-Z0-9-_]+)\/locations\/([a-zA-Z0-9-_]+)\/reasoningEngines\/(\d+)$/;
-const CREATE_SESSION_METHOD = 'async_create_session';
-const GET_SESSION_METHOD = 'async_get_session';
-const LIST_SESSIONS_METHOD = 'async_list_sessions';
-const DELETE_SESSION_METHOD = 'async_delete_session';
-const STREAM_QUERY_METHOD = 'async_stream_query';
 const SSE_DATA_PREFIX = 'data: ';
 
 /** Options identifying a deployed Agent Engine. */
@@ -306,7 +301,7 @@ export class AgentEngineClient {
     request: CreateAgentEngineSessionRequest,
   ): Promise<AgentEngineSession> {
     return this.query<AgentEngineSession>({
-      classMethod: CREATE_SESSION_METHOD,
+      classMethod: 'async_create_session',
       input: {
         user_id: request.userId,
         session_id: request.sessionId,
@@ -320,7 +315,7 @@ export class AgentEngineClient {
     request: AgentEngineSessionRequest,
   ): Promise<AgentEngineSession | undefined> {
     const session = await this.query<AgentEngineSession | null>({
-      classMethod: GET_SESSION_METHOD,
+      classMethod: 'async_get_session',
       input: {user_id: request.userId, session_id: request.sessionId},
     });
     return session ?? undefined;
@@ -331,7 +326,7 @@ export class AgentEngineClient {
     request: ListAgentEngineSessionsRequest,
   ): Promise<AgentEngineSession[]> {
     const output = await this.query<{sessions?: AgentEngineSession[]} | null>({
-      classMethod: LIST_SESSIONS_METHOD,
+      classMethod: 'async_list_sessions',
       input: {user_id: request.userId},
     });
     return output?.sessions ?? [];
@@ -340,7 +335,7 @@ export class AgentEngineClient {
   /** Deletes a session from the deployed app. */
   async deleteSession(request: AgentEngineSessionRequest): Promise<void> {
     await this.query({
-      classMethod: DELETE_SESSION_METHOD,
+      classMethod: 'async_delete_session',
       input: {user_id: request.userId, session_id: request.sessionId},
     });
   }
@@ -359,7 +354,7 @@ export class AgentEngineClient {
       'POST',
       `${this.name}:streamQuery?alt=sse`,
       {
-        classMethod: STREAM_QUERY_METHOD,
+        classMethod: 'async_stream_query',
         input: {
           message:
             typeof request.message === 'string'

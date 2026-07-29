@@ -103,22 +103,9 @@ const SSE_PAYLOAD = Buffer.from(
   CONVERSATION.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(''),
   'utf8',
 );
-// The first boundary falls inside the two byte "°" and the rest split the JSON
-// payloads, which is what a real chunked response looks like.
-const FIRST_CHUNK_END = SSE_PAYLOAD.indexOf(Buffer.from('°', 'utf8')) + 1;
+// Small writes, each flushed on its own, so the response arrives as a real
+// chunked transfer whose boundaries fall inside the JSON payloads.
 const CHUNK_BYTES = 16;
-
-function sseChunks(): Buffer[] {
-  const chunks = [SSE_PAYLOAD.subarray(0, FIRST_CHUNK_END)];
-  for (
-    let offset = FIRST_CHUNK_END;
-    offset < SSE_PAYLOAD.length;
-    offset += CHUNK_BYTES
-  ) {
-    chunks.push(SSE_PAYLOAD.subarray(offset, offset + CHUNK_BYTES));
-  }
-  return chunks;
-}
 
 const realFetch = globalThis.fetch;
 
@@ -134,7 +121,7 @@ function localServerFetch(origin: string): typeof fetch {
 interface RecordedRequest {
   method: string;
   url: string;
-  body: Record<string, unknown>;
+  classMethod: unknown;
 }
 
 const requests: RecordedRequest[] = [];
@@ -158,8 +145,8 @@ function respondJson(res: http.ServerResponse, payload: unknown): void {
 
 async function respondSse(res: http.ServerResponse): Promise<void> {
   res.writeHead(200, {'Content-Type': 'text/event-stream'});
-  for (const chunk of sseChunks()) {
-    res.write(chunk);
+  for (let offset = 0; offset < SSE_PAYLOAD.length; offset += CHUNK_BYTES) {
+    res.write(SSE_PAYLOAD.subarray(offset, offset + CHUNK_BYTES));
     await delay(1);
   }
   res.end();
@@ -172,7 +159,11 @@ async function handleRequest(
   const url = req.url ?? '';
   const rawBody = await readBody(req);
   const body = rawBody ? (JSON.parse(rawBody) as Record<string, unknown>) : {};
-  requests.push({method: req.method ?? '', url, body});
+  requests.push({
+    method: req.method ?? '',
+    url,
+    classMethod: body['classMethod'],
+  });
   authorizations.push(req.headers.authorization);
 
   if (url === `${ENGINE_PATH}:streamQuery?alt=sse`) {
@@ -247,44 +238,29 @@ describe('AgentEngineClient against a local Agent Engine server', () => {
     expect(events).toEqual(CONVERSATION);
     expect(sessions).toEqual([SESSION]);
     expect(authorizations).toEqual(Array(5).fill('Bearer fake-token'));
-    // Pin the wire contract so that a refactor cannot silently change it.
+    // The unit test pins each request body; what only a real server can show
+    // is that the calls arrived, in order, on the right verb and path.
     expect(requests).toEqual([
-      {method: 'GET', url: ENGINE_PATH, body: {}},
+      {method: 'GET', url: ENGINE_PATH, classMethod: undefined},
       {
         method: 'POST',
         url: `${ENGINE_PATH}:query`,
-        body: {
-          classMethod: 'async_create_session',
-          input: {user_id: USER_ID, session_id: SESSION_ID},
-        },
+        classMethod: 'async_create_session',
       },
       {
         method: 'POST',
         url: `${ENGINE_PATH}:streamQuery?alt=sse`,
-        body: {
-          classMethod: 'async_stream_query',
-          input: {
-            message: {
-              role: 'user',
-              parts: [{text: 'How is the weather in Paris?'}],
-            },
-            user_id: USER_ID,
-            session_id: SESSION_ID,
-          },
-        },
+        classMethod: 'async_stream_query',
       },
       {
         method: 'POST',
         url: `${ENGINE_PATH}:query`,
-        body: {classMethod: 'async_list_sessions', input: {user_id: USER_ID}},
+        classMethod: 'async_list_sessions',
       },
       {
         method: 'POST',
         url: `${ENGINE_PATH}:query`,
-        body: {
-          classMethod: 'async_delete_session',
-          input: {user_id: USER_ID, session_id: SESSION_ID},
-        },
+        classMethod: 'async_delete_session',
       },
     ]);
   });

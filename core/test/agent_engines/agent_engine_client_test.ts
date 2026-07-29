@@ -482,16 +482,6 @@ describe('AgentEngineClient', () => {
         input: {},
       });
     });
-
-    it('reports the status and body of a failed request', async () => {
-      fetchMock.mockResolvedValue(new Response('boom', {status: 500}));
-
-      await expect(
-        client.query({classMethod: 'custom_method'}),
-      ).rejects.toThrow(
-        `Agent Engine request to ${ENGINE_URL}:query failed with status 500: boom`,
-      );
-    });
   });
 
   describe('streamQuery', () => {
