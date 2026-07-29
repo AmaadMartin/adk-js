@@ -136,7 +136,7 @@ export type {
   InvocationEvents,
 } from './evaluation/eval_case.js';
 export {EvalStatus} from './evaluation/eval_metrics.js';
-export {Evaluator, validateInvocationLengths} from './evaluation/evaluator.js';
+export {Evaluator} from './evaluation/evaluator.js';
 export type {
   EvaluationResult,
   PerInvocationResult,
