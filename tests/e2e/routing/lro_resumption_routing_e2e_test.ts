@@ -75,6 +75,12 @@ class DataProcessingAgent extends BaseAgent {
       longRunningToolIds: ['lro-call-id-999'],
     });
   }
+
+  override runLiveImpl(
+    _ctx: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    throw new Error('Live mode is not supported in this test agent.');
+  }
 }
 
 /**
@@ -109,6 +115,12 @@ class RootOrchestratorAgent extends BaseAgent {
         parts: [{text: 'Hello from root orchestrator.'}],
       },
     });
+  }
+
+  override runLiveImpl(
+    _ctx: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    throw new Error('Live mode is not supported in this test agent.');
   }
 }
 
