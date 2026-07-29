@@ -6,6 +6,7 @@
 
 import {
   AUTH_PREPROCESSOR,
+  AuthConfig,
   BaseLlm,
   BaseLlmConnection,
   BaseLlmRequestProcessor,
@@ -16,6 +17,7 @@ import {
   Context,
   ContextCompactorRequestProcessor,
   createEvent,
+  createEventActions,
   Event,
   FunctionTool,
   InvocationContext,
@@ -896,6 +898,15 @@ describe('llmAgentExportedForTestingOnly.generateAuthEvent', () => {
   let invocationContext: InvocationContext;
   let pluginManager: PluginManager;
 
+  const authConfig1: AuthConfig = {
+    authScheme: {type: 'apiKey', name: 'X-API-Key-1', in: 'header'},
+    credentialKey: 'auth_config_1',
+  };
+  const authConfig2: AuthConfig = {
+    authScheme: {type: 'apiKey', name: 'X-API-Key-2', in: 'header'},
+    credentialKey: 'auth_config_2',
+  };
+
   beforeEach(() => {
     pluginManager = new PluginManager();
     const agent = new LlmAgent({name: 'test_agent', model: 'test_model'});
@@ -916,17 +927,9 @@ describe('llmAgentExportedForTestingOnly.generateAuthEvent', () => {
     expect(event).toBeUndefined();
   });
 
-  it('should return undefined if actions property is explicitly undefined', () => {
-    const functionResponseEvent = {
-      content: {role: 'model', parts: []},
-    } as unknown as Event;
-
-    const event = generateAuthEvent(invocationContext, functionResponseEvent);
-    expect(event).toBeUndefined();
-  });
-
   it('should return undefined if requestedAuthConfigs is empty', () => {
     const functionResponseEvent = createEvent({
+      actions: createEventActions({requestedAuthConfigs: {}}),
       content: {role: 'model', parts: []},
     });
 
@@ -936,12 +939,12 @@ describe('llmAgentExportedForTestingOnly.generateAuthEvent', () => {
 
   it('should return auth event if requestedAuthConfigs is present', () => {
     const functionResponseEvent = createEvent({
-      actions: {
+      actions: createEventActions({
         requestedAuthConfigs: {
-          'call_1': 'auth_config_1',
-          'call_2': 'auth_config_2',
+          'call_1': authConfig1,
+          'call_2': authConfig2,
         },
-      },
+      }),
       content: {role: 'model', parts: []},
     });
 
@@ -957,13 +960,18 @@ describe('llmAgentExportedForTestingOnly.generateAuthEvent', () => {
     );
     expect(call1).toBeDefined();
     expect(call1!.functionCall!.name).toBe('adk_request_credential');
-    expect(call1!.functionCall!.args!['auth_config']).toBe('auth_config_1');
+    expect(call1!.functionCall!.args!['auth_config']).toEqual(authConfig1);
 
     const call2 = parts.find(
       (p) => p.functionCall?.args?.['function_call_id'] === 'call_2',
     );
     expect(call2).toBeDefined();
     expect(call2!.functionCall!.name).toBe('adk_request_credential');
-    expect(call2!.functionCall!.args!['auth_config']).toBe('auth_config_2');
+    expect(call2!.functionCall!.args!['auth_config']).toEqual(authConfig2);
+
+    // Every generated credential request is itself a long-running call.
+    expect(event!.longRunningToolIds).toEqual(
+      parts.map((p) => p.functionCall!.id),
+    );
   });
 });
