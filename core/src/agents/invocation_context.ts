@@ -170,10 +170,11 @@ export class InvocationContext {
    * A container to keep track of different kinds of costs incurred as a part of
    * this invocation.
    *
-   * Shared with every context produced by {@link copy}, so the `maxLlmCalls`
-   * budget is enforced across the whole invocation.
+   * This is shared across every agent context of the same invocation (see the
+   * constructor) so run-wide limits such as `maxLlmCalls` are enforced for the
+   * whole invocation rather than resetting for each agent/sub-agent.
    */
-  private invocationCostManager = new InvocationCostManager();
+  private readonly invocationCostManager: InvocationCostManager;
 
   /**
    * The running streaming tools of this invocation.
@@ -211,6 +212,15 @@ export class InvocationContext {
     this.abortSignal = params.abortSignal;
     this.liveRequestQueue = params.liveRequestQueue;
     this.liveSessionResumptionHandle = params.liveSessionResumptionHandle;
+    // Inherit the parent invocation's cost manager when one is available.
+    // Child contexts created for sub-agents, agent transfers and loop
+    // iterations (via createInvocationContext / createBranchCtxForSubAgent)
+    // carry the parent context's fields over, so reusing its cost manager
+    // keeps a single, shared LLM-call counter for the entire invocation.
+    // Only a brand-new invocation (e.g. from the Runner) starts a fresh one.
+    this.invocationCostManager =
+      (params as {invocationCostManager?: InvocationCostManager})
+        .invocationCostManager ?? new InvocationCostManager();
   }
 
   /**
@@ -222,11 +232,7 @@ export class InvocationContext {
    * the copy keeps draining the same client queue.
    */
   copy(overrides?: Partial<InvocationContextParams>): InvocationContext {
-    const copied = new InvocationContext({...this, ...overrides});
-    // `invocationCostManager` is a field initializer rather than a constructor
-    // parameter, so the new instance starts with a fresh counter.
-    copied.invocationCostManager = this.invocationCostManager;
-    return copied;
+    return new InvocationContext({...this, ...overrides});
   }
 
   /**

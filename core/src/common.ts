@@ -14,8 +14,11 @@ export type {
   SingleAgentCallback,
 } from './agents/base_agent.js';
 export {Context} from './agents/context.js';
-export {functionsExportedForTestingOnly} from './agents/functions.js';
-
+export {
+  findEventByFunctionCallId,
+  findMatchingFunctionCall,
+  functionsExportedForTestingOnly,
+} from './agents/functions.js';
 export {InvocationContext} from './agents/invocation_context.js';
 export type {InvocationContextParams} from './agents/invocation_context.js';
 export {LiveRequestQueue} from './agents/live_request_queue.js';
@@ -66,6 +69,8 @@ export {StreamingMode} from './agents/run_config.js';
 export type {RunConfig} from './agents/run_config.js';
 export {SequentialAgent, isSequentialAgent} from './agents/sequential_agent.js';
 export type {TranscriptionEntry} from './agents/transcription_entry.js';
+export {createResumabilityConfig} from './apps/resumability_config.js';
+export type {ResumabilityConfig} from './apps/resumability_config.js';
 export type {
   BaseArtifactService,
   DeleteArtifactRequest,
@@ -118,6 +123,9 @@ export {
   type CodeExecutionResult,
   type File,
 } from './code_executors/code_execution_utils.js';
+export {AgentControlledContextCompactor} from './context/agent_controlled_context_compactor.js';
+export {AnchoredContextCompactor} from './context/anchored_context_compactor.js';
+export type {AnchoredContextCompactorOptions} from './context/anchored_context_compactor.js';
 export type {BaseContextCompactor} from './context/base_context_compactor.js';
 export type {BaseSummarizer} from './context/summarizers/base_summarizer.js';
 export {LlmSummarizer} from './context/summarizers/llm_summarizer.js';
@@ -128,14 +136,18 @@ export {TrajectoryThoughtPruningCompactor} from './context/trajectory_thought_pr
 export type {TrajectoryThoughtPruningCompactorOptions} from './context/trajectory_thought_pruning_compactor.js';
 export {TruncatingContextCompactor} from './context/truncating_context_compactor.js';
 export type {TruncatingContextCompactorOptions} from './context/truncating_context_compactor.js';
-export {isCompactedEvent} from './events/compacted_event.js';
+export {isCompactedEvent, isScratchpadEvent} from './events/compacted_event.js';
 export type {CompactedEvent} from './events/compacted_event.js';
 export {
   createEvent,
+  generateClientFunctionCallId,
   getFunctionCalls,
   getFunctionResponses,
+  hasThoughts,
   hasTrailingCodeExecutionResult,
   isFinalResponse,
+  populateClientFunctionCallId,
+  pruneThoughts,
   stringifyContent,
 } from './events/event.js';
 export type {Event} from './events/event.js';
@@ -182,6 +194,7 @@ export type {BaseLlmType} from './models/registry.js';
 export {RoutedLlm} from './models/routed_llm.js';
 export type {LlmRouter} from './models/routed_llm.js';
 export {BasePlugin, ContextCompactionTrigger} from './plugins/base_plugin.js';
+export {GlobalInstructionPlugin} from './plugins/global_instruction_plugin.js';
 export {LoggingPlugin} from './plugins/logging_plugin.js';
 export {PluginManager} from './plugins/plugin_manager.js';
 export {
@@ -197,7 +210,13 @@ export type {
   ToolCallPolicyContext,
 } from './plugins/security_plugin.js';
 export {InMemoryRunner} from './runner/in_memory_runner.js';
-export {Runner, isRunner} from './runner/runner.js';
+export {
+  Runner,
+  determineAgentForResumption,
+  findEventByLastFunctionResponseId,
+  isRoutableLlmAgent,
+  isRunner,
+} from './runner/runner.js';
 export type {RunnerConfig} from './runner/runner.js';
 export {BaseSessionService} from './sessions/base_session_service.js';
 export type {
@@ -211,7 +230,7 @@ export type {
 } from './sessions/base_session_service.js';
 export {InMemorySessionService} from './sessions/in_memory_session_service.js';
 export {createSession} from './sessions/session.js';
-export type {Session} from './sessions/session.js';
+export type {CompositeSessionKey, Session} from './sessions/session.js';
 export {State} from './sessions/state.js';
 export {AgentTool, isAgentTool} from './tools/agent_tool.js';
 export type {AgentToolConfig} from './tools/agent_tool.js';
@@ -223,6 +242,7 @@ export type {
 } from './tools/base_tool.js';
 export {BaseToolset, isBaseToolset} from './tools/base_toolset.js';
 export type {ToolPredicate} from './tools/base_toolset.js';
+export {ConsolidateContextTool} from './tools/consolidate_context_tool.js';
 export {EXIT_LOOP, ExitLoopTool} from './tools/exit_loop_tool.js';
 export {FunctionTool, isFunctionTool} from './tools/function_tool.js';
 export type {
@@ -257,10 +277,13 @@ export type {
   VertexAiSearchToolParams,
 } from './tools/vertex_ai_search_tool.js';
 export {VertexRagRetrievalTool} from './tools/vertex_rag_retrieval_tool.js';
+export {getClientLabels, runWithClientLabel} from './utils/client_labels.js';
 export {LogLevel, getLogger, setLogLevel, setLogger} from './utils/logger.js';
 export type {Logger} from './utils/logger.js';
 export {isGemini2OrAbove, isGemini3xFlashLive} from './utils/model_name.js';
 export {zodObjectToSchema} from './utils/simple_zod_to_json.js';
+export {Task} from './utils/task.js';
+export type {TaskExecutable} from './utils/task.js';
 export {GoogleLLMVariant} from './utils/variant_utils.js';
 export {version} from './version.js';
 
@@ -280,6 +303,11 @@ export {LoadSkillTool} from './tools/skill/load_skill_tool.js';
 export {SearchSkillsTool} from './tools/skill/search_skills_tool.js';
 export {SkillToolset} from './tools/skill/skill_toolset.js';
 
+export * from './artifacts/base_artifact_service.js';
+export * from './features/feature_registry.js';
+export * from './memory/base_memory_service.js';
+export * from './sessions/base_session_service.js';
+export * from './tools/base_tool.js';
 export {OpenApiSpecParser} from './tools/openapi_tool/openapi_spec_parser/openapi_spec_parser.js';
 export type {
   OperationEndpoint,
@@ -295,6 +323,7 @@ export {
   createRestApiTool,
 } from './tools/openapi_tool/rest_api_tool.js';
 
+export * from './apps/app.js';
 export * from './artifacts/base_artifact_service.js';
 export * from './features/feature_registry.js';
 export * from './memory/base_memory_service.js';

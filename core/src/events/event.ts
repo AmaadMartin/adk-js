@@ -8,6 +8,7 @@ import {FunctionCall, FunctionResponse} from '@google/genai';
 
 import {LlmResponse} from '../models/llm_response.js';
 
+import {randomUUID} from '../utils/env_aware_utils.js';
 import {toCamelCase, toSnakeCase} from '../utils/object_notation_utils.js';
 import {createEventActions, EventActions} from './event_actions.js';
 
@@ -120,6 +121,26 @@ export function getFunctionCalls(event: Event): FunctionCall[] {
   return funcCalls;
 }
 
+export const AF_FUNCTION_CALL_ID_PREFIX = 'adk-';
+
+export function generateClientFunctionCallId(): string {
+  return `${AF_FUNCTION_CALL_ID_PREFIX}${randomUUID()}`;
+}
+
+/**
+ * Populates client-side function call IDs.
+ *
+ * It iterates through all function calls in the event and assigns a
+ * unique client-side ID to each one that doesn't already have an ID.
+ */
+export function populateClientFunctionCallId(modelResponseEvent: Event): void {
+  for (const functionCall of getFunctionCalls(modelResponseEvent)) {
+    if (!functionCall.id) {
+      functionCall.id = generateClientFunctionCallId();
+    }
+  }
+}
+
 /**
  * Returns the function responses in the event.
  */
@@ -164,6 +185,18 @@ export function stringifyContent(event: Event): string {
     .filter((part) => !part.thought)
     .map((part) => part.text ?? '')
     .join('');
+}
+
+/**
+ * Estimates the number of tokens in the event based on usage metadata or characters.
+ */
+export function getEventTokens(event: Event): number {
+  if (event.usageMetadata?.promptTokenCount !== undefined) {
+    return event.usageMetadata.promptTokenCount;
+  }
+  // Estimate: 4 chars per token.
+  const contentStr = stringifyContent(event);
+  return Math.ceil(contentStr.length / 4);
 }
 
 /**

@@ -20,6 +20,7 @@ import {
   getFunctionCalls,
   getFunctionResponses,
   isFinalResponse,
+  populateClientFunctionCallId,
 } from '../events/event.js';
 
 import {BaseExampleProvider} from '../examples/base_example_provider.js';
@@ -54,7 +55,6 @@ import {
   getLongRunningFunctionCalls,
   handleFunctionCallsAsync,
   handleFunctionCallsLiveAsync,
-  populateClientFunctionCallId,
 } from './functions.js';
 
 import {AUTH_PREPROCESSOR} from '../auth/auth_preprocessor.js';
@@ -217,6 +217,8 @@ export interface LlmAgentConfig extends BaseAgentConfig {
    *
    * For example: use globalInstruction to make all agents have a stable
    * identity or personality.
+   *
+   * @deprecated Use GlobalInstructionPlugin instead.
    */
   globalInstruction?: string | InstructionProvider;
 
@@ -360,12 +362,13 @@ export function isLlmAgent(obj: unknown): obj is LlmAgent {
 /**
  * An agent that uses a large language model to generate responses.
  */
-export class LlmAgent extends BaseAgent {
+export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   /** A unique symbol to identify ADK LLM agent class. */
   readonly [LLM_AGENT_SIGNATURE_SYMBOL] = true;
 
   model?: string | BaseLlm;
   instruction: string | InstructionProvider;
+  /** @deprecated Use GlobalInstructionPlugin instead. */
   globalInstruction: string | InstructionProvider;
   tools: ToolUnion[];
   generateContentConfig?: GenerateContentConfig;
@@ -589,6 +592,7 @@ export class LlmAgent extends BaseAgent {
    * This method is only for use by Agent Development Kit.
    * @param context The context to retrieve the session state.
    * @returns The resolved globalInstruction field.
+   * @deprecated Use GlobalInstructionPlugin instead.
    */
   async canonicalGlobalInstruction(
     context: ReadonlyContext,
@@ -815,9 +819,12 @@ export class LlmAgent extends BaseAgent {
         if (invocationContext.abortSignal?.aborted) {
           return;
         }
+
         yield event;
       }
     }
+    // TODO - b/425992518: check if tool preprocessors can be simplified.
+    // Run pre-processors for tools.
     const allTools = [...this.tools];
     if (this.outputSchema && allTools.length > 0) {
       const setModelResponseTool = new FunctionTool({
@@ -836,12 +843,17 @@ export class LlmAgent extends BaseAgent {
     }
     for (const toolUnion of allTools) {
       const toolContext = new Context({invocationContext});
+
+      // process all tools from this tool union
       const tools = (
         await convertToolUnionToTools(
           toolUnion,
           new ReadonlyContext(invocationContext),
         )
       ).filter((tool) => {
+        // If allowedTools is not set, allow all tools. Otherwise, only allow
+        // tools that are in the allowedTools set.
+        // The allowedTools set is populated by request processors.
         return (
           !llmRequest.allowedTools ||
           llmRequest.allowedTools.includes(tool.name) ||
@@ -851,6 +863,7 @@ export class LlmAgent extends BaseAgent {
 
       for (const tool of tools) {
         await tool.processLlmRequest({toolContext, llmRequest});
+
         if (invocationContext.abortSignal?.aborted) {
           return;
         }

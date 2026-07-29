@@ -8,11 +8,16 @@ import {Content, createUserContent, FunctionCall, Part} from '@google/genai';
 import {isEmpty} from 'lodash-es';
 
 import {InvocationContext} from '../agents/invocation_context.js';
-import {createEvent, Event, getFunctionCalls} from '../events/event.js';
+import {
+  createEvent,
+  Event,
+  generateClientFunctionCallId,
+  getFunctionCalls,
+  getFunctionResponses,
+} from '../events/event.js';
 import {mergeEventActions} from '../events/event_actions.js';
 import {BaseTool} from '../tools/base_tool.js';
 import {ToolConfirmation} from '../tools/tool_confirmation.js';
-import {randomUUID} from '../utils/env_aware_utils.js';
 import {logger} from '../utils/logger.js';
 import {Context} from './context.js';
 
@@ -26,7 +31,11 @@ import {
   SingleBeforeToolCallback,
 } from './llm_agent.js';
 
-const AF_FUNCTION_CALL_ID_PREFIX = 'adk-';
+export {
+  AF_FUNCTION_CALL_ID_PREFIX,
+  generateClientFunctionCallId,
+  populateClientFunctionCallId,
+} from '../events/event.js';
 export const REQUEST_EUC_FUNCTION_CALL_NAME = 'adk_request_credential';
 export const REQUEST_CONFIRMATION_FUNCTION_CALL_NAME =
   'adk_request_confirmation';
@@ -38,57 +47,6 @@ export const functionsExportedForTestingOnly = {
   generateAuthEvent,
   generateRequestConfirmationEvent,
 };
-
-export function generateClientFunctionCallId(): string {
-  return `${AF_FUNCTION_CALL_ID_PREFIX}${randomUUID()}`;
-}
-
-/**
- * Populates client-side function call IDs.
- *
- * It iterates through all function calls in the event and assigns a
- * unique client-side ID to each one that doesn't already have an ID.
- */
-// TODO - b/425992518: consider move into event.ts
-export function populateClientFunctionCallId(modelResponseEvent: Event): void {
-  const functionCalls = getFunctionCalls(modelResponseEvent);
-  if (!functionCalls) {
-    return;
-  }
-  for (const functionCall of functionCalls) {
-    if (!functionCall.id) {
-      functionCall.id = generateClientFunctionCallId();
-    }
-  }
-}
-// TODO - b/425992518: consider internalize in content_[processor].ts
-/**
- * Removes the client-generated function call IDs from a given content object.
- *
- * When sending content back to the server, these IDs are
- * specific to the client-side and should not be included in requests to the
- * model.
- */
-export function removeClientFunctionCallId(content: Content): void {
-  if (content && content.parts) {
-    for (const part of content.parts) {
-      if (
-        part.functionCall &&
-        part.functionCall.id &&
-        part.functionCall.id.startsWith(AF_FUNCTION_CALL_ID_PREFIX)
-      ) {
-        part.functionCall.id = undefined;
-      }
-      if (
-        part.functionResponse &&
-        part.functionResponse.id &&
-        part.functionResponse.id.startsWith(AF_FUNCTION_CALL_ID_PREFIX)
-      ) {
-        part.functionResponse.id = undefined;
-      }
-    }
-  }
-}
 // TODO - b/425992518: consider internalize as part of llm_agent's runtime.
 /**
  * Returns a set of function call ids of the long running tools.
@@ -644,4 +602,45 @@ export async function handleFunctionCallsLiveAsync({
   }
 
   return resultEvent;
+}
+
+/**
+ * Finds the function call event that matches the function call ID.
+ * Mirrors Python ADK's `find_event_by_function_call_id`.
+ */
+export function findEventByFunctionCallId(
+  events: Event[],
+  functionCallId: string,
+  endIndex: number = events.length,
+): Event | undefined {
+  for (let i = endIndex - 1; i >= 0; i--) {
+    const event = events[i];
+    const functionCalls = getFunctionCalls(event);
+    for (const functionCall of functionCalls) {
+      if (functionCall.id === functionCallId) {
+        return event;
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Finds the function call event that matches the function response ID of the last event.
+ * Mirrors Python ADK's `find_matching_function_call`.
+ */
+export function findMatchingFunctionCall(events: Event[]): Event | undefined {
+  if (!events.length) {
+    return undefined;
+  }
+  const lastEvent = events[events.length - 1];
+  const functionResponses = getFunctionResponses(lastEvent);
+  if (!functionResponses.length || !functionResponses[0].id) {
+    return undefined;
+  }
+  return findEventByFunctionCallId(
+    events,
+    functionResponses[0].id,
+    events.length - 1,
+  );
 }

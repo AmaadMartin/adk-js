@@ -21,7 +21,7 @@ export type {
   RunnerOrRunnerConfig,
 } from './a2a/agent_executor.js';
 export {toA2a} from './a2a/agent_to_a2a.js';
-export type {ToA2aOptions} from './a2a/agent_to_a2a.js';
+export type {A2aUserBuilder, ToA2aOptions} from './a2a/agent_to_a2a.js';
 export type {ExecutorContext} from './a2a/executor_context.js';
 export {InvocationContext} from './agents/invocation_context.js';
 export {FileArtifactService} from './artifacts/file_artifact_service.js';
@@ -46,7 +46,10 @@ export {
   loadSkillFromDir,
   validateSkillDir,
 } from './skills/loader.js';
-export {RunSkillInlineScriptTool} from './tools/skill/run_skill_inline_script_tool.js';
+export {
+  RunSkillInlineScriptErrorCode,
+  RunSkillInlineScriptTool,
+} from './tools/skill/run_skill_inline_script_tool.js';
 export {RunSkillScriptTool} from './tools/skill/run_skill_script_tool.js';
 
 export * from './integrations/agent_registry/agent_registry.js';

@@ -20,7 +20,10 @@ vi.mock('nodejs-vertexai', () => ({
   },
 }));
 
-import {isVertexAiConnectionString} from '@google/adk/sessions/vertex_ai_session_service.js';
+import {
+  isVertexAiConnectionString,
+  quoteFilterLiteral,
+} from '@google/adk/sessions/vertex_ai_session_service.js';
 import {logger} from '@google/adk/utils/logger.js';
 
 describe('isVertexAiConnectionString', () => {
@@ -33,6 +36,28 @@ describe('isVertexAiConnectionString', () => {
     expect(isVertexAiConnectionString('memory:/')).toBe(false);
     expect(isVertexAiConnectionString('')).toBe(false);
     expect(isVertexAiConnectionString(undefined)).toBe(false);
+  });
+});
+
+describe('quoteFilterLiteral', () => {
+  it('quotes a plain value', () => {
+    expect(quoteFilterLiteral('alice')).toBe('"alice"');
+  });
+
+  it('neutralizes quote injection', () => {
+    // Must not break out of the literal and append an OR predicate that would
+    // return every user's sessions.
+    expect(quoteFilterLiteral('attacker" OR user_id!="')).toBe(
+      '"attacker\\" OR user_id!=\\""',
+    );
+  });
+
+  it('escapes a lone backslash', () => {
+    expect(quoteFilterLiteral('\\')).toBe('"\\\\"');
+  });
+
+  it('quotes an empty string', () => {
+    expect(quoteFilterLiteral('')).toBe('""');
   });
 });
 
@@ -516,6 +541,23 @@ describe('VertexAiSessionService', () => {
       expect(response.sessions[1].id).toBe('malformed_name');
     });
 
+    it('escapes double quotes in userId to prevent AIP-160 filter injection', async () => {
+      // A double quote in userId must not break out of the quoted filter
+      // literal and append an `OR user_id!=""` predicate that would return
+      // every user's sessions (cross-user session enumeration).
+      mockClient.listInternal.mockResolvedValue({sessions: []});
+
+      await service.listSessions({
+        appName: '12345',
+        userId: 'attacker" OR user_id!="',
+      });
+
+      expect(mockClient.listInternal).toHaveBeenCalledWith({
+        name: 'reasoningEngines/12345',
+        config: {filter: 'user_id="attacker\\" OR user_id!=\\""'},
+      });
+    });
+
     it('lists sessions without filter if userId is missing', async () => {
       await service.listSessions({
         appName: '12345',
@@ -819,6 +861,62 @@ describe('VertexAiSessionService', () => {
       expect(mockClient.delete).toHaveBeenCalledWith({
         name: `reasoningEngines/12345/sessions/delete-session`,
       });
+    });
+
+    it('does not delete a session that belongs to another user', async () => {
+      mockClient.get.mockResolvedValue({
+        name: 'reasoningEngines/12345/sessions/victim-session',
+        userId: 'victimUser',
+        sessionState: {},
+        updateTime: new Date().toISOString(),
+      });
+      const loggerSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
+
+      await expect(
+        service.deleteSession({
+          appName: '12345',
+          userId: 'attackerUser',
+          sessionId: 'victim-session',
+        }),
+      ).rejects.toThrow(
+        'Session victim-session does not belong to user attackerUser',
+      );
+
+      expect(mockClient.delete).not.toHaveBeenCalled();
+      loggerSpy.mockRestore();
+    });
+
+    it("does not delete another user's session when userId is omitted", async () => {
+      mockClient.get.mockResolvedValue({
+        name: 'reasoningEngines/12345/sessions/victim-session',
+        userId: 'victimUser',
+        sessionState: {},
+        updateTime: new Date().toISOString(),
+      });
+      const loggerSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
+
+      await expect(
+        service.deleteSession({
+          appName: '12345',
+          userId: undefined as unknown as string,
+          sessionId: 'victim-session',
+        }),
+      ).rejects.toThrow('does not belong to user');
+
+      expect(mockClient.delete).not.toHaveBeenCalled();
+      loggerSpy.mockRestore();
+    });
+
+    it('does not call delete when the session does not exist', async () => {
+      mockClient.get.mockRejectedValue({code: 5});
+
+      await service.deleteSession({
+        appName: '12345',
+        userId: 'testUser',
+        sessionId: 'missing-session',
+      });
+
+      expect(mockClient.delete).not.toHaveBeenCalled();
     });
   });
 
