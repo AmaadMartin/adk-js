@@ -110,9 +110,6 @@ interface DiscoveryEngineSearchResponse {
 
 /** Coerces an unknown struct-data value to a string, defaulting to empty. */
 function asString(value: unknown): string {
-  if (typeof value === 'string') {
-    return value;
-  }
   return value == null ? '' : String(value);
 }
 
@@ -148,7 +145,7 @@ function extractResourceLocation(resourceId: string): string | undefined {
   }
   const match = LOCATION_PATTERN.exec(resourceId);
   if (!match) {
-    throw new Error('Invalid location in data_store_id or search_engine_id.');
+    throw new Error('Invalid location in dataStoreId or searchEngineId.');
   }
   return normalizeLocation(match[1], 'resource location');
 }
@@ -164,8 +161,7 @@ function resolveLocation(
     const normalizedLocation = normalizeLocation(location, 'location');
     if (inferredLocation && normalizedLocation !== inferredLocation) {
       throw new Error(
-        'location must match the location in data_store_id or ' +
-          'search_engine_id.',
+        'location must match the location in dataStoreId or searchEngineId.',
       );
     }
     return normalizedLocation;
@@ -175,31 +171,21 @@ function resolveLocation(
 }
 
 /**
- * Returns the regional API endpoint honoring the `GOOGLE_API_USE_MTLS_ENDPOINT`
- * setting.
+ * Resolves the API host for a location, honoring `GOOGLE_API_USE_MTLS_ENDPOINT`.
  *
- * `always` selects the mTLS endpoint. `auto` (the default), `never`, or an
- * unset value select the plain endpoint: unlike the Python reference,
+ * `always` selects the mTLS host. `auto` (the default), `never`, or an unset
+ * value select the plain host: unlike the Python reference,
  * `google-auth-library` does not expose client-certificate detection, so `auto`
- * resolves to the non-mTLS endpoint — the same observable result in a standard
+ * resolves to the non-mTLS host — the same observable result in a standard
  * server environment.
  */
-function getApiEndpoint(location: string): string {
-  const setting = (
-    process.env['GOOGLE_API_USE_MTLS_ENDPOINT'] ?? 'auto'
-  ).toLowerCase();
-  if (setting === 'always') {
-    return `${location}-${DEFAULT_MTLS_ENDPOINT}`;
-  }
-  return `${location}-${DEFAULT_ENDPOINT}`;
-}
-
-/** Resolves the host endpoint for the resolved location. */
 function buildEndpoint(resolvedLocation: string): string {
-  if (resolvedLocation === GLOBAL_LOCATION) {
-    return DEFAULT_ENDPOINT;
-  }
-  return getApiEndpoint(resolvedLocation);
+  const useMtls =
+    process.env['GOOGLE_API_USE_MTLS_ENDPOINT']?.toLowerCase() === 'always';
+  const host = useMtls ? DEFAULT_MTLS_ENDPOINT : DEFAULT_ENDPOINT;
+  return resolvedLocation === GLOBAL_LOCATION
+    ? host
+    : `${resolvedLocation}-${host}`;
 }
 
 /**
@@ -234,22 +220,21 @@ export class DiscoveryEngineSearchTool extends BaseTool {
       location,
     } = params;
 
+    const resourceId = dataStoreId ?? searchEngineId;
     if (
-      (dataStoreId === undefined && searchEngineId === undefined) ||
+      resourceId === undefined ||
       (dataStoreId !== undefined && searchEngineId !== undefined)
     ) {
       throw new Error(
-        'Either data_store_id or search_engine_id must be specified.',
+        'Either dataStoreId or searchEngineId must be specified.',
       );
     }
     if (dataStoreSpecs !== undefined && searchEngineId === undefined) {
       throw new Error(
-        'search_engine_id must be specified if data_store_specs is specified.',
+        'searchEngineId must be specified if dataStoreSpecs is specified.',
       );
     }
 
-    // Exactly one id is set (validated above), so this is always defined.
-    const resourceId = (dataStoreId ?? searchEngineId) as string;
     this.servingConfig = `${resourceId}/servingConfigs/default_config`;
     this.dataStoreSpecs = dataStoreSpecs;
     this.filter = filter;
@@ -305,7 +290,7 @@ export class DiscoveryEngineSearchTool extends BaseTool {
         if (!STRUCTURED_STORE_ERROR_PATTERN.test(messageOf(error))) {
           throw error;
         }
-        logger.info(
+        logger.debug(
           'CHUNKS mode failed for structured datastore, retrying with ' +
             'DOCUMENTS mode.',
         );
@@ -448,26 +433,37 @@ function parseDocumentResult(
     url = asString(data['link']);
     const snippets = data['snippets'];
     if (Array.isArray(snippets) && snippets.length > 0) {
-      content = snippets.map(parseSnippet).join('\n');
+      content = renderEntries(snippets, 'snippet');
     }
-    const extractiveAnswers = data['extractiveAnswers'];
+    // `derivedStructData` is a `google.protobuf.Struct`, so its keys are data
+    // rather than proto fields and are NOT camelCased by JSON transcoding.
+    const extractiveAnswers = data['extractive_answers'];
     if (
       !content &&
       Array.isArray(extractiveAnswers) &&
       extractiveAnswers.length > 0
     ) {
-      content = extractiveAnswers.map((answer) => asString(answer)).join('\n');
+      content = renderEntries(extractiveAnswers, 'content');
     }
   }
 
   return {title, url, content};
 }
 
-/** Renders a single `derivedStructData.snippets` entry to text. */
-function parseSnippet(snippet: unknown): string {
-  if (snippet && typeof snippet === 'object' && !Array.isArray(snippet)) {
-    const text = (snippet as {snippet?: unknown}).snippet;
-    return text ? asString(text) : JSON.stringify(snippet);
-  }
-  return asString(snippet);
+/**
+ * Renders `derivedStructData` list entries to text.
+ *
+ * Entries are objects carrying the text under `textKey` (`snippet` for
+ * snippets, `content` for extractive answers); anything else is stringified.
+ */
+function renderEntries(entries: unknown[], textKey: string): string {
+  return entries
+    .map((entry) => {
+      if (entry && typeof entry === 'object' && !Array.isArray(entry)) {
+        const text = (entry as Record<string, unknown>)[textKey];
+        return text ? asString(text) : JSON.stringify(entry);
+      }
+      return asString(entry);
+    })
+    .join('\n');
 }

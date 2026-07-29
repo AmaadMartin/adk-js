@@ -100,13 +100,10 @@ describe('DiscoveryEngineSearchTool E2E (real HTTP server)', () => {
     });
 
     // Redirect only Discovery Engine hosts to the local server; the real fetch
-    // performs the request over a real socket.
-    globalThis.fetch = ((
-      input: Parameters<typeof originalFetch>[0],
-      init?: Parameters<typeof originalFetch>[1],
-    ) => {
-      const urlStr = input instanceof URL ? input.toString() : String(input);
-      const url = new URL(urlStr);
+    // performs the request over a real socket. Parameter types are inferred
+    // from `typeof fetch` by the assignment.
+    globalThis.fetch = (input, init) => {
+      const url = new URL(input instanceof URL ? input.href : String(input));
       if (url.hostname.endsWith('discoveryengine.googleapis.com')) {
         return originalFetch(
           `http://localhost:${port}${url.pathname}${url.search}`,
@@ -114,7 +111,7 @@ describe('DiscoveryEngineSearchTool E2E (real HTTP server)', () => {
         );
       }
       return originalFetch(input, init);
-    }) as typeof fetch;
+    };
   });
 
   afterAll(async () => {
