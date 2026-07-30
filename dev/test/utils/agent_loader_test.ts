@@ -663,6 +663,25 @@ describe('AgentLoader', () => {
       await agentFile.dispose();
     });
 
+    it('inlines dependencies when bundling is disabled', async () => {
+      const agentPath = await setUpAgent(
+        'agent_nobundle',
+        agent2CjsContentMocked,
+      );
+
+      const agentFile = new AgentFile(agentPath, {
+        compile: true,
+        bundle: false,
+      });
+
+      expect((await agentFile.load()).name).toEqual('agent2');
+      // esbuild ignores `packages` when it is not bundling, so asking for
+      // 'external' would only mislead the retry into a duplicate build.
+      expect(packagesOf(0)).toEqual('bundle');
+
+      await agentFile.dispose();
+    });
+
     it('inlines dependencies when inlineDependencies is requested', async () => {
       const agentPath = await setUpAgent(
         'agent_inline',

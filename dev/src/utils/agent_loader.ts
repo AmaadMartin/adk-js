@@ -50,9 +50,7 @@ const FILE_MODULE_TYPE_EXTENSION_MAP = {
 };
 
 /**
- * Packages that must never be inlined into the compiled agent file: optional
- * native database drivers, and optional peer dependencies of vite and eslint
- * that are frequently not installed.
+ * Packages that must never be inlined into the compiled agent file.
  *
  * See http://mikro-orm.io/docs/deployment#deploy-a-bundle-of-entities-and-dependencies-with-esbuild for more details
  */
@@ -103,10 +101,7 @@ export interface AgentFileOptions {
    * When true, third-party packages are inlined into the compiled artifact
    * (esbuild `packages: 'bundle'`), making it runnable without the project's
    * `node_modules`. Deployment uses this so the copied artifact still works
-   * inside the container image.
-   *
-   * Defaults to false, which leaves third-party packages as runtime imports
-   * resolved through the `node_modules` symlink in the output directory.
+   * inside the container image. Defaults to false.
    */
   inlineDependencies?: boolean;
 }
@@ -197,20 +192,14 @@ export function replaceDirnamePlugin(filePath: string, originalDir: string) {
 interface BuildAgentFileOptions {
   entryPoint: string;
   outfile: string;
-  originalDir: string;
   format: FileModuleType;
   bundle: boolean;
-  /**
-   * `'external'` leaves bare specifiers as runtime imports resolved from the
-   * project's `node_modules`; `'bundle'` inlines the whole dependency graph.
-   */
   packages: 'bundle' | 'external';
 }
 
 async function buildAgentFile({
   entryPoint,
   outfile,
-  originalDir,
   format,
   bundle,
   packages,
@@ -225,7 +214,10 @@ async function buildAgentFile({
     bundle,
     minify: bundle,
     allowOverwrite: true,
-    plugins: [replaceDirnamePlugin(entryPoint, originalDir), shimPlugin()],
+    plugins: [
+      replaceDirnamePlugin(entryPoint, path.dirname(entryPoint)),
+      shimPlugin(),
+    ],
     // esbuild rejects `external` unless `bundle` is enabled, so the
     // allowlist is only passed when the agent file is actually bundled.
     ...(bundle ? {external: NEVER_INLINED_PACKAGES} : {}),
@@ -331,7 +323,6 @@ export class AgentFile {
         outputDir,
         parsedPath.name + FILE_MODULE_TYPE_EXTENSION_MAP[moduleType],
       );
-      const originalDir = path.dirname(filePath);
       await fsPromises.mkdir(outputDir, {recursive: true});
 
       // Third-party packages can only be left external if the compiled
@@ -341,14 +332,17 @@ export class AgentFile {
         parsedPath.dir,
       );
 
+      // `packages` only has an effect while bundling, so gating on `bundle`
+      // keeps `--bundle false` on exactly its previous behaviour and stops the
+      // fallback from running a second, byte-identical build.
+      const bundle = Boolean(this.options.bundle);
       buildOptions = {
         entryPoint: filePath,
         outfile: compiledFilePath,
-        originalDir,
         format: moduleType,
-        bundle: Boolean(this.options.bundle),
+        bundle,
         packages:
-          nodeModulesLinked && !this.options.inlineDependencies
+          bundle && nodeModulesLinked && !this.options.inlineDependencies
             ? 'external'
             : 'bundle',
       };
