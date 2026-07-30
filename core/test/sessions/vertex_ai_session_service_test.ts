@@ -22,6 +22,7 @@ vi.mock('nodejs-vertexai', () => ({
 
 import {
   isVertexAiConnectionString,
+  parseVertexAiConnectionString,
   quoteFilterLiteral,
 } from '@google/adk/sessions/vertex_ai_session_service.js';
 import {logger} from '@google/adk/utils/logger.js';
@@ -36,6 +37,79 @@ describe('isVertexAiConnectionString', () => {
     expect(isVertexAiConnectionString('memory:/')).toBe(false);
     expect(isVertexAiConnectionString('')).toBe(false);
     expect(isVertexAiConnectionString(undefined)).toBe(false);
+  });
+});
+
+describe('parseVertexAiConnectionString', () => {
+  it('parses the project and location form', () => {
+    expect(
+      parseVertexAiConnectionString(
+        'vertexai://projects/my-project/locations/us-central1',
+      ),
+    ).toEqual({projectId: 'my-project', location: 'us-central1'});
+  });
+
+  it('parses the full resource form, keeping the engine id a string', () => {
+    expect(
+      parseVertexAiConnectionString(
+        'vertexai://projects/my-project/locations/us-central1/reasoningEngines/1234567890',
+      ),
+    ).toEqual({
+      projectId: 'my-project',
+      location: 'us-central1',
+      agentEngineId: '1234567890',
+    });
+  });
+
+  it('accepts hyphens and underscores in the project and location', () => {
+    expect(
+      parseVertexAiConnectionString(
+        'vertexai://projects/my_project-1/locations/us-central_1',
+      ),
+    ).toEqual({projectId: 'my_project-1', location: 'us-central_1'});
+  });
+
+  it('returns no options for the bare scheme, preserving the ambient fallback', () => {
+    expect(parseVertexAiConnectionString('vertexai://')).toEqual({});
+  });
+
+  it.each([
+    ['an empty project segment', 'vertexai://projects//locations/us-central1'],
+    ['an empty location segment', 'vertexai://projects/p/locations/'],
+    ['a missing locations collection', 'vertexai://projects/p'],
+    [
+      'a non-numeric engine id',
+      'vertexai://projects/p/locations/l/reasoningEngines/abc',
+    ],
+    ['a trailing slash', 'vertexai://projects/p/locations/l/'],
+    [
+      'extra trailing segments',
+      'vertexai://projects/p/locations/l/reasoningEngines/1/sessions/2',
+    ],
+    // Both carry an otherwise-valid resource path, so they only throw if the
+    // scheme is anchored in the pattern rather than sliced off the front.
+    [
+      'a valid resource path under another scheme',
+      'memory://projects/p/locations/us-central1',
+    ],
+    [
+      'a scheme that merely ends in vertexai://',
+      'notvertexai://projects/p/locations/us-central1',
+    ],
+  ])('throws for %s', (_description, uri) => {
+    expect(() => parseVertexAiConnectionString(uri)).toThrow(
+      `Invalid Vertex AI session service URI: ${uri}`,
+    );
+  });
+
+  it('names both accepted formats in the error message', () => {
+    // Literal braces: an accidental ${projectId} would interpolate instead.
+    expect(() =>
+      parseVertexAiConnectionString('vertexai://projects/p'),
+    ).toThrow(
+      'vertexai://projects/{projectId}/locations/{location} or ' +
+        'vertexai://projects/{projectId}/locations/{location}/reasoningEngines/{agentEngineId}.',
+    );
   });
 });
 

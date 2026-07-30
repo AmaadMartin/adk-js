@@ -41,6 +41,9 @@ const DEFAULT_MAX_ATTEMPTS = 30;
 const GRPC_NOT_FOUND = 5;
 const HTTP_NOT_FOUND = 404;
 
+const VERTEX_AI_URI_PATTERN =
+  /^vertexai:\/\/projects\/([a-zA-Z0-9-_]+)\/locations\/([a-zA-Z0-9-_]+)(?:\/reasoningEngines\/(\d+))?$/;
+
 /**
  * Checks if the given URI is a Vertex AI session service URI.
  */
@@ -66,6 +69,35 @@ export interface VertexAiSessionServiceOptions {
   agentEngineId?: string;
   expressModeApiKey?: string;
   sessions?: Sessions;
+}
+
+/**
+ * Parses a Vertex AI session service URI into `VertexAiSessionService` options.
+ *
+ * Accepted forms:
+ * - `vertexai://projects/{projectId}/locations/{location}`
+ * - `vertexai://projects/{projectId}/locations/{location}/reasoningEngines/{agentEngineId}`
+ * - `vertexai://`, which carries no configuration and so leaves the service to
+ *   fall back to ambient / express-mode configuration.
+ *
+ * @throws Error if the URI is none of the accepted forms, so that a malformed
+ *     URI fails loudly instead of silently degrading to ambient configuration.
+ */
+export function parseVertexAiConnectionString(
+  uri: string,
+): VertexAiSessionServiceOptions {
+  if (uri === 'vertexai://') {
+    return {};
+  }
+  const match = uri.match(VERTEX_AI_URI_PATTERN);
+  if (!match) {
+    throw new Error(
+      `Invalid Vertex AI session service URI: ${uri}. Expected ` +
+        'vertexai://projects/{projectId}/locations/{location} or ' +
+        'vertexai://projects/{projectId}/locations/{location}/reasoningEngines/{agentEngineId}.',
+    );
+  }
+  return {projectId: match[1], location: match[2], agentEngineId: match[3]};
 }
 
 /**
