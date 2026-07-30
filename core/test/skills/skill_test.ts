@@ -95,6 +95,49 @@ describe('skill', () => {
       }
     });
 
+    it('maps allowed_tools to allowedTools', () => {
+      const result = FrontmatterSchema.safeParse({
+        ...validFrontmatter,
+        allowed_tools: 'tool1,tool2',
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.allowedTools).toBe('tool1,tool2');
+      }
+    });
+
+    it('prefers allowed-tools over allowed_tools', () => {
+      const result = FrontmatterSchema.safeParse({
+        ...validFrontmatter,
+        'allowed-tools': 'kebab',
+        allowed_tools: 'snake',
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.allowedTools).toBe('kebab');
+      }
+    });
+
+    it('prefers an explicit allowedTools over allowed_tools', () => {
+      const result = FrontmatterSchema.safeParse({
+        ...validFrontmatter,
+        allowedTools: 'explicit',
+        allowed_tools: 'snake',
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.allowedTools).toBe('explicit');
+      }
+    });
+
+    it('fails on a non-string allowed_tools', () => {
+      const result = FrontmatterSchema.safeParse({
+        ...validFrontmatter,
+        allowed_tools: 123,
+      });
+      expect(result.success).toBe(false);
+    });
+
     it('fails on invalid name', () => {
       const result = FrontmatterSchema.safeParse({
         ...validFrontmatter,
