@@ -32,4 +32,5 @@ async function testInit() {
     console.error('DYNAMIC_IMPORT_FAILED', e);
   }
 }
-testInit();
+// Not awaited: this fixture is CommonJS, so top-level await is unavailable.
+void testInit();
