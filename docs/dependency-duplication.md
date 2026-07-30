@@ -17,7 +17,7 @@ is the only workspace that declares the package, and it uses it in
 `core/src/telemetry/google_cloud.ts`,
 `core/src/integrations/agent_registry/agent_registry.ts` and
 `core/src/tools/openapi_tool/auth/credential_exchangers/service_account_exchanger.ts`.
-Five transitive dependents still declare a `^9.x` range, so npm nests a v9 copy
+Six transitive dependents still declare a `^9.x` range, so npm nests a v9 copy
 under each of them:
 
 ```
@@ -43,18 +43,15 @@ adk@1.4.0
   └── google-auth-library@10.7.0
 ```
 
-Note that `googleapis` and `googleapis-common` are not direct dependencies. The
-edge chain is `@google/adk` ->
-`@google-cloud/opentelemetry-cloud-monitoring-exporter` -> `googleapis`
-(`^137.0.0`) -> `googleapis-common` (`^7.0.0`), so those two rows cannot be
-decided independently of the monitoring exporter.
+As the indentation shows, `googleapis` and `googleapis-common` are reached only
+through `@google-cloud/opentelemetry-cloud-monitoring-exporter` (`googleapis
+^137.0.0` -> `googleapis-common ^7.0.0`), so those two cannot be decided
+independently of it.
 
-Keeping the v9 line resident also keeps its transitive stack resident:
-`gaxios@6.7.1`, `gcp-metadata@6.1.1`, `gtoken@7.1.0`,
-`google-logging-utils@0.0.2` and `node-fetch@2.7.0`. v10 uses `gaxios@7`,
-`gcp-metadata@8` and `google-logging-utils@1.x`, and vendors `gtoken`. The v9
-stack disappears on its own once the last v9 consumer is gone; it needs no
-separate action.
+Keeping the v9 line resident also keeps `gaxios@6.7.1`, `gcp-metadata@6.1.1`,
+`gtoken@7.1.0`, `google-logging-utils@0.0.2` and `node-fetch@2.7.0` resident
+(v10 uses `gaxios@7`, `gcp-metadata@8`, `google-logging-utils@1.x` and vendors
+`gtoken`). That stack clears itself once the last v9 consumer is gone.
 
 ## The v9 -> v10 changes that matter
 
@@ -78,7 +75,6 @@ runtime behaviour does not:
    ```
    const h = new Headers({authorization: 'Bearer TOKEN'});
    Object.keys(h)         -> []
-   {...h}                 -> {}
    Object.assign({}, h)   -> {}
    h['authorization']     -> undefined
    h.get('authorization') -> 'Bearer TOKEN'
@@ -96,17 +92,18 @@ runtime behaviour does not:
 
 ## Per-dependent verdict
 
-| Dependent                                               | Declared range | Latest published | Verdict | Reason                                                                                 |
-| ------------------------------------------------------- | -------------- | ---------------- | ------- | -------------------------------------------------------------------------------------- |
-| `@google-cloud/opentelemetry-cloud-trace-exporter`      | `^9.0.0`       | `3.0.0`          | Keep    | gRPC reads the auth headers as a plain object; v10 would drop `Authorization`.         |
-| `@google-cloud/opentelemetry-cloud-monitoring-exporter` | `^9.0.0`       | `0.21.0`         | Keep    | Hands its auth client to `googleapis-common`, which expects the v9 contract.           |
-| `googleapis`                                            | `^9.0.0`       | `173.0.0`        | Keep    | Not a direct dependency; the v10-era releases nest a copy through `googleapis-common`. |
-| `googleapis-common`                                     | `^9.7.0`       | `9.0.0`          | Keep    | Constructs `DefaultTransporter`, which v10 removed.                                    |
-| `@google-cloud/storage`                                 | `^9.6.3`       | `7.21.0`         | Keep    | Sends `uri`, which v10's `authorizeRequest()` ignores; headers become inextensible.    |
+| Dependent                                               | Declares `google-auth-library` | Dependent's latest release | Verdict         | Why                                                                                    |
+| ------------------------------------------------------- | ------------------------------ | -------------------------- | --------------- | -------------------------------------------------------------------------------------- |
+| `@google-cloud/opentelemetry-cloud-trace-exporter`      | `^9.0.0`                       | `3.0.0`                    | Keep            | gRPC reads the auth headers as a plain object; v10 would drop `Authorization`.         |
+| `@google-cloud/opentelemetry-cloud-monitoring-exporter` | `^9.0.0`                       | `0.21.0`                   | Keep            | Hands its auth client to `googleapis-common`, which expects the v9 contract.           |
+| `googleapis`                                            | `^9.0.0`                       | `173.0.0`                  | Keep            | Not a direct dependency; the v10-era releases nest a copy through `googleapis-common`. |
+| `googleapis-common`                                     | `^9.7.0`                       | `9.0.0`                    | Keep            | Constructs `DefaultTransporter`, which v10 removed.                                    |
+| `@google-cloud/storage`                                 | `^9.6.3`                       | `7.21.0`                   | Keep            | Sends `uri`, which v10's `authorizeRequest()` ignores; headers become inextensible.    |
+| `@google-cloud/vertexai`                                | `^9.1.0`                       | `1.12.0`                   | Separate change | Handled by a dependent-scoped override outside this analysis.                          |
 
-"Latest published" is the version `npm view <dependent> version` reported when
-this file was written. Four of the five dependents are already at their latest
-release, so upgrading is not an option for them.
+The "latest release" column is what `npm view <dependent> version` reported when
+this file was written. Four of the five kept dependents are already at their
+latest release, so upgrading is not available to them.
 
 ## Per-dependent detail
 
@@ -186,14 +183,14 @@ usable route, for three independent reasons:
 - The exporter deep-imports an unpublished path: `monitoring.js:20` does
   `require("googleapis/build/src/apis/monitoring")`. `googleapis` declares no
   `exports` map, so nothing constrains that path across releases.
-- The upgrade would not remove the duplicate. `googleapis@173.0.0` depends on
-  `googleapis-common ^8.0.0`, and `googleapis-common@8.0.3` pins
-  `google-auth-library: 10.5.0` exactly. Against a hoisted `10.7.0` that pin
-  nests a new copy, renumbering the duplicate rather than removing it.
+- The upgrade would not remove the duplicate, because of the exact pin described
+  under `googleapis-common` below. `googleapis@173.0.0` depends on
+  `googleapis-common ^8.0.0`, so the nested copy would be renumbered from
+  `9.15.1` to `10.5.0`, not removed.
 
-The size is worth recording as well: `googleapis@137.1.0` unpacks to 110.6 MB
-(`173.0.0` unpacks to 207.5 MB), pulled in by a 53 KB exporter that calls a
-handful of Cloud Monitoring v3 endpoints.
+Worth recording while here: `googleapis@137.1.0` unpacks to 110.6 MB
+(`173.0.0` to 207.5 MB), pulled in by a 53 KB exporter that calls a handful of
+Cloud Monitoring v3 endpoints.
 
 ### `googleapis-common@7.2.0`
 
@@ -215,9 +212,19 @@ the monitoring exporter always supplies `auth`, so `apirequest.js` takes the
 would knowingly ship a dependency graph containing a latent `TypeError` on a
 branch the application does not control.
 
-Upgrading fails for the same reason as `googleapis`: `googleapis-common@8.0.3`
-and `@9.0.0` both pin `google-auth-library: 10.5.0` exactly, so the upgrade
-trades one nested copy for another. `9.0.0` additionally requires Node `>=22`.
+Upgrading does not help either: `googleapis-common@8.0.3` and `@9.0.0` both pin
+`google-auth-library: 10.5.0` exactly, so against a hoisted `10.7.0` the
+upgrade trades one nested copy for another. `9.0.0` additionally requires Node
+`>=22`. This pin is what also blocks the `googleapis` upgrade above.
+
+### `@google-cloud/vertexai@1.12.0`
+
+Listed for completeness because it still declares `google-auth-library ^9.1.0`
+and appears in the tree above. A separate change deduplicates it with a
+dependent-scoped override, so it carries no verdict here and is marked
+`required: false` in the test's allowlist: the assertion has to hold whether or
+not that change has landed. If you are retiring that row, delete this section
+with it.
 
 ### `@google-cloud/storage@7.21.0`
 
@@ -254,44 +261,35 @@ a different copy takes the other branch. `adk-js` does not hit that today —
 Follow this before changing any row above, and before adding a row for a new
 nested copy.
 
-1. `npm view <dependent> versions --json`. If a newer release declares
-   `google-auth-library ^10`, prefer upgrading over adding an override. Check
-   what that release does to the rest of the graph: an upgrade that swaps a
-   nested v9 for a nested v10 is not progress.
-2. `npm pack <dependent>@<version>`, then grep the emitted `build/` or `dist/`
-   for every `google-auth-library` symbol it references.
-3. Diff those symbols against the v9 and v10 `build/src/index.d.ts`. This step
-   is necessary but not sufficient: the trace exporter and `@google-cloud/storage`
-   both pass it and still break. Also trace where the package hands its
-   `AuthClient`, or the result of `getRequestHeaders()`, to another package.
-4. Exercise the real code path at runtime, and run `tsc --noEmit` with this
+1. Prefer an upgrade over an override: `npm view <dependent> versions --json`,
+   and check what a v10-declaring release does to the rest of the graph. An
+   upgrade that swaps a nested v9 for a nested v10 is not progress.
+2. `npm pack <dependent>@<version>` and diff the `google-auth-library` symbols
+   the emitted `build/`/`dist/` references against the v9 and v10
+   `build/src/index.d.ts`. **Necessary but not sufficient** — the trace exporter
+   and `@google-cloud/storage` both pass this step and still break. Also trace
+   where the package hands its `AuthClient`, or the result of
+   `getRequestHeaders()`, to another package, and read what the receiver does
+   with it.
+3. Exercise the real code path at runtime, and run `tsc --noEmit` with this
    repo's compiler options.
-5. Only then add the override, delete the nested
-   `node_modules/<dependent>/node_modules/...` entries from
-   `package-lock.json` by hand, run `npm install`, and confirm with
-   `npm ls google-auth-library --all` (exit code `0`).
-6. Update the allowlist in
+4. Only then add the override, and update both the allowlist in
    `tests/integration/dependencies/google_auth_library_duplication_test.ts` and
-   the corresponding section here, in the same change.
+   the matching section here, in the same change.
 
-## npm procedural notes
-
-These were observed with npm 9.2.0 and cost time if you meet them cold.
+Three npm behaviours (seen with npm 9.2.0) make step 4 slower than it looks:
 
 - Adding an `overrides` entry and running `npm install` reports `up to date` and
-  changes nothing, because a lockfile that satisfies the tree already exists.
-  `npm ls <pkg> --all` then fails with `ELSPROBLEMS` and
-  `invalid: "..." from node_modules/<dependent> overridden` — npm knows the tree
-  violates the override and still will not fix it. Delete the nested lockfile
-  entries by hand first.
-- Do not `rm package-lock.json` and reinstall. A from-scratch resolve churns
-  hoisting across hundreds of unrelated packages and makes the diff
-  unreviewable.
-- `npm install --package-lock-only` is not a valid verification mode. It has
-  been observed to accept a hand-edited lockfile in which
-  `@google-cloud/storage@7.21.0` (declaring `^9.6.3`) resolved to `10.7.0` with
-  no override present, reporting `up to date`. Verify with a real `npm install`
-  followed by `npm ls <pkg> --all`.
+  changes nothing, because a satisfying lockfile already exists; `npm ls <pkg>
+--all` then fails with `ELSPROBLEMS ... overridden`. Delete the nested
+  `node_modules/<dependent>/node_modules/...` entries from `package-lock.json`
+  by hand first, then reinstall.
+- Do not `rm package-lock.json` and reinstall instead. A from-scratch resolve
+  churns hoisting across hundreds of unrelated packages.
+- Verify with a real `npm install` plus `npm ls <pkg> --all` (exit code `0`).
+  `npm install --package-lock-only` accepts hand-edited lockfiles that no real
+  install would produce, and npm 9.x does not write `overrides` into the
+  lockfile, so its absence there proves nothing.
 - npm 9.x does not write the `overrides` object into `package-lock.json`'s
   `packages[""]`, so its absence there does not mean the override is missing.
   Use `npm ls <pkg> --all` and its exit code instead.

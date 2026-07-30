@@ -78,39 +78,36 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-/** Reads `packages[path].version` from a parsed lockfile. */
-function packageVersions(lock: unknown): ReadonlyMap<string, string> {
-  const versions = new Map<string, string>();
-  if (!isRecord(lock) || !isRecord(lock.packages)) {
-    return versions;
-  }
-  for (const [lockPath, entry] of Object.entries(lock.packages)) {
-    if (isRecord(entry) && typeof entry.version === 'string') {
-      versions.set(lockPath, entry.version);
-    }
-  }
-  return versions;
+/** The `packages` map of a parsed lockfile; empty for a malformed one. */
+function lockPackages(lock: unknown): Readonly<Record<string, unknown>> {
+  return isRecord(lock) && isRecord(lock.packages) ? lock.packages : {};
+}
+
+function entryVersion(entry: unknown): string | undefined {
+  return isRecord(entry) && typeof entry.version === 'string'
+    ? entry.version
+    : undefined;
 }
 
 /** The nested (non-hoisted) `google-auth-library` copies, keyed by lock path. */
 function nestedCopies(lock: unknown): ReadonlyMap<string, string> {
-  return new Map(
-    [...packageVersions(lock)].filter(([lockPath]) =>
-      lockPath.endsWith(NESTED_SUFFIX),
-    ),
-  );
+  const copies = new Map<string, string>();
+  for (const [lockPath, entry] of Object.entries(lockPackages(lock))) {
+    const version = entryVersion(entry);
+    if (version !== undefined && lockPath.endsWith(NESTED_SUFFIX)) {
+      copies.set(lockPath, version);
+    }
+  }
+  return copies;
 }
 
 function hoistedVersion(lock: unknown): string | undefined {
-  return packageVersions(lock).get(HOISTED_PATH);
+  return entryVersion(lockPackages(lock)[HOISTED_PATH]);
 }
 
 /** The range `dependent` declares for `google-auth-library`, per the lockfile. */
 function declaredRange(lock: unknown, dependent: string): string | undefined {
-  if (!isRecord(lock) || !isRecord(lock.packages)) {
-    return undefined;
-  }
-  const entry = lock.packages[`node_modules/${dependent}`];
+  const entry = lockPackages(lock)[`node_modules/${dependent}`];
   if (!isRecord(entry) || !isRecord(entry.dependencies)) {
     return undefined;
   }
@@ -173,7 +170,7 @@ describe(`${PKG} duplication`, () => {
   );
 
   describe('lockfile helpers', () => {
-    it('reports a nested copy the allowlist does not cover', () => {
+    it('reports a nested copy', () => {
       const lock = {
         packages: {
           [HOISTED_PATH]: {version: '10.7.0'},
