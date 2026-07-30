@@ -6,6 +6,8 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+import {AgentCard} from '@a2a-js/sdk';
+import {ClientFactory} from '@a2a-js/sdk/client';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   AgentRegistry,
@@ -18,6 +20,7 @@ import {
   RemoteA2AAgent,
   StreamableHTTPConnectionParams,
 } from '../../src/index.js';
+import {AgentInfo} from '../../src/integrations/agent_registry/types.js';
 
 // Mock google-auth-library
 let shouldAuthThrow = false;
@@ -548,7 +551,7 @@ describe('AgentRegistry', () => {
     });
 
     it('should construct RemoteA2AAgent from agent card content directly', async () => {
-      const agentInfo = {
+      const agentInfo: AgentInfo = {
         card: {
           type: 'A2A_AGENT_CARD',
           content: {
@@ -559,6 +562,9 @@ describe('AgentRegistry', () => {
             preferredTransport: 'JSONRPC',
             protocolVersion: '0.3.0',
             skills: [],
+            capabilities: {},
+            defaultInputModes: ['text/plain'],
+            defaultOutputModes: ['text/plain'],
           },
         },
       };
@@ -688,22 +694,25 @@ describe('AgentRegistry', () => {
     });
 
     it('should pass client and clientFactory when card type matches and options are provided', async () => {
-      const agentInfo = {
-        card: {
-          type: 'A2A_AGENT_CARD',
-          content: {
-            name: 'CustomAgentWithOptions',
-            description: 'Desc',
-            url: 'https://agent.com',
-            preferredTransport: 'JSONRPC',
-            protocolVersion: '0.3.0',
-            skills: [],
-          },
-        },
+      const agentCard: AgentCard = {
+        name: 'CustomAgentWithOptions',
+        description: 'Desc',
+        version: '1.0.0',
+        url: 'https://agent.com',
+        preferredTransport: 'JSONRPC',
+        protocolVersion: '0.3.0',
+        skills: [],
+        capabilities: {},
+        defaultInputModes: ['text/plain'],
+        defaultOutputModes: ['text/plain'],
+      };
+      const agentInfo: AgentInfo = {
+        card: {type: 'A2A_AGENT_CARD', content: agentCard},
       };
 
-      const dummyClient = {};
-      const dummyClientFactory = () => {};
+      const dummyClientFactory = new ClientFactory();
+      const dummyClient =
+        await dummyClientFactory.createFromAgentCard(agentCard);
 
       vi.spyOn(registry, 'getAgentInfo').mockResolvedValue(agentInfo);
       const agent = await registry.getRemoteA2AAgent('agents/agent-1', {

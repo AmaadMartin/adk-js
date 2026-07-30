@@ -18,7 +18,13 @@ import {
   PluginManager,
   RunConfig,
 } from '@google/adk';
-import {Content, Blob as GenaiBlob, Modality} from '@google/genai';
+import {
+  Content,
+  Blob as GenaiBlob,
+  Modality,
+  Schema,
+  Type,
+} from '@google/genai';
 import {beforeAll, describe, expect, it} from 'vitest';
 import {BASIC_LLM_REQUEST_PROCESSOR} from '../../../src/agents/processors/basic_llm_request_processor.js';
 
@@ -149,10 +155,10 @@ describe('BasicLlmRequestProcessor', () => {
   });
 
   it('should set outputSchema in config when agent has outputSchema', async () => {
-    const outputSchema = {
-      type: 'object' as const,
+    const outputSchema: Schema = {
+      type: Type.OBJECT,
       properties: {
-        answer: {type: 'string' as const},
+        answer: {type: Type.STRING},
       },
     };
     const agent = new LlmAgent({
@@ -170,10 +176,10 @@ describe('BasicLlmRequestProcessor', () => {
   });
 
   it('should not set outputSchema in config when agent has outputSchema and tools', async () => {
-    const outputSchema = {
-      type: 'object' as const,
+    const outputSchema: Schema = {
+      type: Type.OBJECT,
       properties: {
-        answer: {type: 'string' as const},
+        answer: {type: Type.STRING},
       },
     };
     const agent = new LlmAgent({

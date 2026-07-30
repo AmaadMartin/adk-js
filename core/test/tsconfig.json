@@ -9,14 +9,7 @@
     "paths": {
       "@google/adk": ["../src/index.ts"]
     }
-  },
-  // Narrowed while the type errors in the remaining subdirectories are fixed;
-  // dropping this key checks all of core/test.
-  "include": [
-    "models/**/*",
-    "runner/**/*",
-    "sessions/**/*",
-    "tools/**/*",
-    "utils/**/*"
-  ]
+  }
+  // No `include`/`exclude`: a project with neither picks up every `.ts` file
+  // under its own directory, i.e. exactly `core/test/**`.
 }

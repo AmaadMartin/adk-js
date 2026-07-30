@@ -14,12 +14,26 @@ class DummyAgent extends BaseAgent {
   constructor(name = 'dummy_agent') {
     super({name});
   }
+
+  protected async *runAsyncImpl() {
+    yield* [];
+  }
+
+  protected async *runLiveImpl() {
+    yield* [];
+  }
 }
 
 class DummyPlugin extends BasePlugin {
   constructor(name = 'dummy_plugin') {
     super(name);
   }
+}
+
+/** Constructs an {@link App} from a `rootAgent` `AppOptions` cannot spell. */
+function newAppWithUnvalidatedRootAgent(rootAgent: unknown): App {
+  // @ts-expect-error exercising App's runtime rootAgent guard with a value AppOptions.rootAgent (typed BaseAgent) cannot express.
+  return new App({name: 'test_app', rootAgent});
 }
 
 describe('validateAppName', () => {
@@ -78,12 +92,12 @@ describe('App', () => {
   });
 
   it('throws if rootAgent is missing or not a BaseAgent', () => {
-    expect(() => new App({name: 'test_app', rootAgent: undefined})).toThrow(
+    expect(() => newAppWithUnvalidatedRootAgent(undefined)).toThrow(
       'rootAgent must be provided.',
     );
-    expect(
-      () => new App({name: 'test_app', rootAgent: {name: 'fake'}}),
-    ).toThrow(/rootAgent must be a BaseAgent instance/);
+    expect(() => newAppWithUnvalidatedRootAgent({name: 'fake'})).toThrow(
+      /rootAgent must be a BaseAgent instance/,
+    );
   });
 
   it('creates an App with resumabilityConfig', () => {
