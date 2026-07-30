@@ -135,17 +135,9 @@ Body`;
 name: Invalid Name!
 ---
 Body`;
-      let message = '';
-      try {
-        parseSkillMdContent(content);
-        expect.fail('parseSkillMdContent should have thrown');
-      } catch (e: unknown) {
-        message = (e as Error).message;
-      }
-      expect(message).toMatch(/^Invalid frontmatter: /);
-      expect(message).toContain('name: ');
-      expect(message).toContain('description: ');
-      expect(message).toContain('; ');
+      expect(() => parseSkillMdContent(content)).toThrow(
+        /^Invalid frontmatter: name: .+; description: .+/,
+      );
     });
 
     it('handles empty body', () => {
