@@ -102,8 +102,10 @@ runtime behaviour does not:
 | `@google-cloud/vertexai`                                | `^9.1.0`                       | `1.12.0`                   | Separate change | Handled by a dependent-scoped override outside this analysis.                          |
 
 The "latest release" column is what `npm view <dependent> version` reported when
-this file was written. Four of the five kept dependents are already at their
-latest release, so upgrading is not available to them.
+this file was written. Three of the five kept dependents are already at their
+latest release, so upgrading is not available to them at all. The other two,
+`googleapis` and `googleapis-common`, do have newer releases; the sections below
+explain why those are not a route out either.
 
 ## Per-dependent detail
 
@@ -187,10 +189,6 @@ usable route, for three independent reasons:
   under `googleapis-common` below. `googleapis@173.0.0` depends on
   `googleapis-common ^8.0.0`, so the nested copy would be renumbered from
   `9.15.1` to `10.5.0`, not removed.
-
-Worth recording while here: `googleapis@137.1.0` unpacks to 110.6 MB
-(`173.0.0` to 207.5 MB), pulled in by a 53 KB exporter that calls a handful of
-Cloud Monitoring v3 endpoints.
 
 ### `googleapis-common@7.2.0`
 
@@ -280,8 +278,8 @@ nested copy.
 Three npm behaviours (seen with npm 9.2.0) make step 4 slower than it looks:
 
 - Adding an `overrides` entry and running `npm install` reports `up to date` and
-  changes nothing, because a satisfying lockfile already exists; `npm ls <pkg>
---all` then fails with `ELSPROBLEMS ... overridden`. Delete the nested
+  changes nothing, because a satisfying lockfile already exists; the subsequent
+  `npm ls` then fails with `ELSPROBLEMS ... overridden`. Delete the nested
   `node_modules/<dependent>/node_modules/...` entries from `package-lock.json`
   by hand first, then reinstall.
 - Do not `rm package-lock.json` and reinstall instead. A from-scratch resolve
@@ -290,6 +288,3 @@ Three npm behaviours (seen with npm 9.2.0) make step 4 slower than it looks:
   `npm install --package-lock-only` accepts hand-edited lockfiles that no real
   install would produce, and npm 9.x does not write `overrides` into the
   lockfile, so its absence there proves nothing.
-- npm 9.x does not write the `overrides` object into `package-lock.json`'s
-  `packages[""]`, so its absence there does not mean the override is missing.
-  Use `npm ls <pkg> --all` and its exit code instead.
