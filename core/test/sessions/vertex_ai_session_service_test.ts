@@ -501,11 +501,12 @@ describe('VertexAiSessionService', () => {
       expect(session).toBeUndefined();
     });
 
-    it('returns undefined without logging when the API raises a 404 ApiError', async () => {
+    it('returns undefined and logs at debug level for a 404 ApiError', async () => {
       // A real missing session 404s both concurrent requests.
       mockClient.get.mockRejectedValue(apiError(404));
       mockClient.events.listInternal.mockRejectedValue(apiError(404));
       const loggerSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
+      const debugSpy = vi.spyOn(logger, 'debug').mockImplementation(() => {});
 
       const session = await service.getSession({
         appName: '12345',
@@ -515,7 +516,11 @@ describe('VertexAiSessionService', () => {
 
       expect(session).toBeUndefined();
       expect(loggerSpy).not.toHaveBeenCalled();
+      expect(debugSpy).toHaveBeenCalledWith(
+        'Session missing-session not found in Vertex AI Agent Engine.',
+      );
       loggerSpy.mockRestore();
+      debugSpy.mockRestore();
     });
 
     it('returns undefined for a 404 ApiError on the numRecentEvents=0 path', async () => {
@@ -1072,6 +1077,7 @@ describe('VertexAiSessionService', () => {
       ).rejects.toBe(error);
 
       expect(mockClient.delete).not.toHaveBeenCalled();
+      expect(loggerSpy).toHaveBeenCalledTimes(1);
       loggerSpy.mockRestore();
     });
   });
