@@ -16,6 +16,7 @@ import {
   isFile,
   isFolderExists,
   loadFileData,
+  saveToFile,
   tryToFindFileRecursively,
 } from '../../src/utils/file_utils.js';
 
@@ -54,6 +55,7 @@ vi.mock('../../src/utils/agent_loader.js', () => ({
 
 vi.mock('../../src/utils/file_utils.js', () => ({
   isFile: vi.fn(),
+  isFileExists: vi.fn(),
   isFolderExists: vi.fn(),
   loadFileData: vi.fn(),
   saveToFile: vi.fn(),
@@ -107,6 +109,46 @@ describe('createDockerFileContent', () => {
     });
     expect(content).toContain('--allow_origins=http://example.com');
     expect(content).toContain('--otel_to_cloud');
+  });
+
+  it('should leave the environment block untouched when apiKey is omitted', () => {
+    const content = createDockerFileContent(defaultOptions);
+
+    expect(content).not.toContain('GOOGLE_API_KEY');
+    expect(content).not.toContain('GOOGLE_GENAI_USE_ENTERPRISE');
+    expect(content).toContain(
+      'ENV GOOGLE_CLOUD_LOCATION=us-central1\n# Set up environment variables - End',
+    );
+  });
+
+  it('should emit the express mode env vars when apiKey is set', () => {
+    const content = createDockerFileContent({
+      ...defaultOptions,
+      apiKey: 'test-api-key',
+    });
+
+    expect(content).toContain('ENV GOOGLE_GENAI_USE_ENTERPRISE=1');
+    expect(content).toContain('ENV GOOGLE_API_KEY=test-api-key');
+  });
+
+  it('should emit the express mode env vars inside the environment block', () => {
+    const content = createDockerFileContent({
+      ...defaultOptions,
+      apiKey: 'test-api-key',
+    });
+
+    const enterpriseIndex = content.indexOf(
+      'ENV GOOGLE_GENAI_USE_ENTERPRISE=1',
+    );
+    const apiKeyIndex = content.indexOf('ENV GOOGLE_API_KEY=test-api-key');
+    const blockEndIndex = content.indexOf(
+      '# Set up environment variables - End',
+    );
+
+    expect(enterpriseIndex).toBeGreaterThan(-1);
+    expect(apiKeyIndex).toBeGreaterThan(-1);
+    expect(enterpriseIndex).toBeLessThan(blockEndIndex);
+    expect(apiKeyIndex).toBeLessThan(blockEndIndex);
   });
 });
 
@@ -282,6 +324,24 @@ describe('deployToCloudRun', () => {
         'Package "@google/adk" is required but not found',
       ),
       expect.stringContaining('\x1b[0m'),
+    );
+  });
+
+  it('should write the api key into the generated Dockerfile', async () => {
+    await deployToCloudRun({...defaultOptions, apiKey: 'test-api-key'});
+
+    expect(saveToFile).toHaveBeenCalledWith(
+      expect.stringContaining('Dockerfile'),
+      expect.stringContaining('ENV GOOGLE_API_KEY=test-api-key'),
+    );
+  });
+
+  it('should not write an api key into the Dockerfile by default', async () => {
+    await deployToCloudRun(defaultOptions);
+
+    expect(saveToFile).toHaveBeenCalledWith(
+      expect.stringContaining('Dockerfile'),
+      expect.not.stringContaining('GOOGLE_API_KEY'),
     );
   });
 

@@ -17,6 +17,7 @@ import {
   isFile,
   isFolderExists,
   loadFileData,
+  saveToFile,
   tryToFindFileRecursively,
 } from '../../src/utils/file_utils.js';
 declare global {
@@ -131,6 +132,7 @@ vi.mock('../../src/utils/agent_loader.js', () => ({
 
 vi.mock('../../src/utils/file_utils.js', () => ({
   isFile: vi.fn(),
+  isFileExists: vi.fn(),
   isFolderExists: vi.fn(),
   loadFileData: vi.fn(),
   saveToFile: vi.fn(),
@@ -351,6 +353,15 @@ describe('deployToAgentEngine', () => {
         },
       },
     });
+  });
+
+  it('should write the api key into the generated Dockerfile', async () => {
+    await deployToAgentEngine({...defaultOptions, apiKey: 'test-api-key'});
+
+    expect(saveToFile).toHaveBeenCalledWith(
+      expect.stringContaining('Dockerfile'),
+      expect.stringContaining('ENV GOOGLE_API_KEY=test-api-key'),
+    );
   });
 
   it('should resolve default project and region from gcloud if not provided', async () => {

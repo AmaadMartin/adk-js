@@ -303,6 +303,39 @@ describe('CLI Entrypoint', () => {
         a2a: true,
       });
     });
+
+    it('should pass apiKey to deployToCloudRun when --api_key is set', async () => {
+      await parse(['deploy', 'cloud_run', '--api_key=test-api-key']);
+
+      expect(deployToCloudRun).toHaveBeenCalledWith(
+        expect.objectContaining({apiKey: 'test-api-key'}),
+      );
+    });
+
+    it('should not forward --api_key to gcloud as an extra argument', async () => {
+      await parse([
+        'deploy',
+        'cloud_run',
+        './my-agent-path',
+        '--project=my-proj',
+        '--region=us-west1',
+        '--api_key=test-api-key',
+        '--extra-arg=foo',
+      ]);
+
+      expect((deployToCloudRun as Mock).mock.calls[0][0]).toMatchObject({
+        apiKey: 'test-api-key',
+        extraGcloudArgs: ['--extra-arg=foo'],
+      });
+    });
+
+    it('should pass an undefined apiKey when --api_key is not set', async () => {
+      await parse(['deploy', 'cloud_run']);
+
+      expect(
+        (deployToCloudRun as Mock).mock.calls[0][0].apiKey,
+      ).toBeUndefined();
+    });
   });
 
   describe('command: deploy agent_engine', () => {
@@ -360,6 +393,14 @@ describe('CLI Entrypoint', () => {
         agentEngineId: '12345',
       });
     });
+
+    it('should pass apiKey to deployToAgentEngine when --api_key is set', async () => {
+      await parse(['deploy', 'agent_engine', '--api_key=test-api-key']);
+
+      expect(deployToAgentEngine).toHaveBeenCalledWith(
+        expect.objectContaining({apiKey: 'test-api-key'}),
+      );
+    });
   });
 
   describe('command: deploy reasoning_engine', () => {
@@ -381,6 +422,14 @@ describe('CLI Entrypoint', () => {
       expect((deployToAgentEngine as Mock).mock.calls[0][0]).toMatchObject({
         agentEngineId: '12345',
       });
+    });
+
+    it('should pass apiKey to deployToAgentEngine when --api_key is set', async () => {
+      await parse(['deploy', 'reasoning_engine', '--api_key=test-api-key']);
+
+      expect(deployToAgentEngine).toHaveBeenCalledWith(
+        expect.objectContaining({apiKey: 'test-api-key'}),
+      );
     });
   });
 });
