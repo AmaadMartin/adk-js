@@ -99,6 +99,12 @@ describe('createDockerFileContent', () => {
     expect(content).toContain('npx adk api_server');
   });
 
+  it('should set the enterprise backend env var, not the deprecated one', () => {
+    const content = createDockerFileContent(defaultOptions);
+    expect(content).toContain('ENV GOOGLE_GENAI_USE_ENTERPRISE=1');
+    expect(content).not.toContain('GOOGLE_GENAI_USE_VERTEXAI');
+  });
+
   it('should include other options in adkServerOptions', () => {
     const content = createDockerFileContent({
       ...defaultOptions,
