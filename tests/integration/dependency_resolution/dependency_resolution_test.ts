@@ -27,11 +27,42 @@ const BUILTIN_MODULES = new Set(builtinModules);
  */
 const SCAN_TIMEOUT = 30000;
 
+/**
+ * The `@types/*` packages whose types are reachable from
+ * `core/dist/types/**`, and which therefore have to reach consumers through
+ * `dependencies`.
+ *
+ * `@types/express` is on the list because `ToA2aOptions.app` and the `toA2a`
+ * return type are `express.Application` and express@4 bundles no declarations
+ * of its own. `@types/adm-zip` and `@types/lodash-es` are deliberately absent:
+ * `AdmZip` is only ever a local inside `core/src/skills/loader.ts`, and the
+ * `cloneDeep`/`isEmpty` helpers return generic or primitive types, so neither
+ * package is named anywhere in the emitted declarations.
+ */
+const PUBLICLY_REACHABLE_TYPE_PACKAGES = new Set(['@types/express']);
+
 function readCoreManifest(): Manifest {
   const manifest: Manifest = JSON.parse(
     readFileSync(path.join(CORE_DIR, 'package.json'), 'utf8'),
   );
   return manifest;
+}
+
+/** Lists the manifest blocks that declare `packageName`. */
+function blocksDeclaring(manifest: Manifest, packageName: string): string[] {
+  const blocks: string[] = [];
+  if (manifest.dependencies?.[packageName] !== undefined) {
+    blocks.push('dependencies');
+  }
+  if (manifest.devDependencies?.[packageName] !== undefined) {
+    blocks.push('devDependencies');
+  }
+  return blocks;
+}
+
+/** Returns the semver major an npm range such as `^4.17.25` resolves against. */
+function majorOf(range: string): string {
+  return range.replace(/^\D+/, '').split('.')[0];
 }
 
 /** Recursively collects every `.ts` file under `dir`. */
@@ -154,6 +185,62 @@ describe('Dependency resolution', () => {
       'core/package.json must not also list "openapi-types" in ' +
         '"devDependencies"; it is a runtime dependency of the published package.',
     ).toBeUndefined();
+  });
+
+  it('declares each @types/* package in the block its reachability demands', () => {
+    const manifest = readCoreManifest();
+    const typePackages = [
+      ...new Set(
+        [
+          ...Object.keys(manifest.dependencies ?? {}),
+          ...Object.keys(manifest.devDependencies ?? {}),
+        ].filter((packageName) => packageName.startsWith('@types/')),
+      ),
+    ].sort();
+
+    const declared = Object.fromEntries(
+      typePackages.map((name) => [name, blocksDeclaring(manifest, name)]),
+    );
+    const required = Object.fromEntries(
+      typePackages.map((name) => [
+        name,
+        PUBLICLY_REACHABLE_TYPE_PACKAGES.has(name)
+          ? ['dependencies']
+          : ['devDependencies'],
+      ]),
+    );
+
+    expect(
+      declared,
+      'A @types/* package whose types survive into core/dist/types/**/*.d.ts ' +
+        'must be declared in "dependencies", because consumers of ' +
+        '@google/adk never install devDependencies; one whose types stay ' +
+        'internal must stay in "devDependencies" so consumers do not carry ' +
+        'it. Update PUBLICLY_REACHABLE_TYPE_PACKAGES alongside the manifest ' +
+        'when a change alters which type packages the public API exposes.',
+    ).toEqual(required);
+  });
+
+  it('keeps express and @types/express on the same semver major', () => {
+    const manifest = readCoreManifest();
+    const expressRange = manifest.dependencies?.['express'];
+    const typesRange = manifest.dependencies?.['@types/express'];
+
+    if (expressRange === undefined || typesRange === undefined) {
+      expect.fail(
+        'core/package.json must declare both "express" and "@types/express" ' +
+          'in "dependencies".',
+      );
+    }
+
+    expect(
+      majorOf(typesRange),
+      `"@types/express": "${typesRange}" describes express ` +
+        `${majorOf(typesRange)}.x, but "express": "${expressRange}" resolves ` +
+        `express ${majorOf(expressRange)}.x. The two must be upgraded ` +
+        `together, or the shipped declarations describe an express a ` +
+        `consumer does not have.`,
+    ).toBe(majorOf(expressRange));
   });
 
   it(
