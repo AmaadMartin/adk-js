@@ -17,6 +17,7 @@ import {
   createPackageJson,
   resolveDefaultFromGcloudConfig,
   spawnAsync,
+  warnOnApiKeyPrecedence,
 } from './deploy_utils.js';
 
 export {createDockerFileContent, type CreateDockerFileContentOptions};
@@ -163,6 +164,8 @@ export async function deployToCloudRun(options: DeployToCloudRunOptions) {
     console.info('Creating package.json...');
     await createPackageJson(agentDir, options.tempFolder);
 
+    await warnOnApiKeyPrecedence(agentDir, options.apiKey);
+
     console.info('Creating Dockerfile...');
     await createDockerFile(options.tempFolder, {
       appName,
@@ -174,6 +177,7 @@ export async function deployToCloudRun(options: DeployToCloudRunOptions) {
       allowOrigins: options.allowOrigins,
       otelToCloud: options.otelToCloud,
       a2a: options.a2a,
+      apiKey: options.apiKey,
     });
 
     console.info('Deploying to Cloud Run...');

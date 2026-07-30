@@ -3,12 +3,14 @@
  * Copyright 2026 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
+import dotenv from 'dotenv';
 import {exec, spawn, SpawnOptions} from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import {promisify} from 'node:util';
 import {AgentFileOptions, AgentLoader} from '../../utils/agent_loader.js';
 import {
+  isFileExists,
   loadFileData,
   saveToFile,
   tryToFindFileRecursively,
@@ -47,6 +49,12 @@ export interface CreateDockerFileContentOptions {
   artifactServiceUri?: string;
   otelToCloud?: boolean;
   a2a?: boolean;
+  /**
+   * Optional. API key for Express Mode. When set, `GOOGLE_API_KEY` and
+   * `GOOGLE_GENAI_USE_ENTERPRISE=1` are written into the generated Dockerfile,
+   * which means the key becomes part of the built image layer.
+   */
+  apiKey?: string;
 }
 
 export interface BaseDeployOptions extends CreateDockerFileContentOptions {
@@ -88,6 +96,10 @@ export function createDockerFileContent(
     adkServerOptions.push('--a2a');
   }
 
+  const apiKeyEnv = options.apiKey
+    ? `ENV GOOGLE_GENAI_USE_ENTERPRISE=1\nENV GOOGLE_API_KEY=${options.apiKey}\n`
+    : '';
+
   return `
 FROM node:lts-alpine
 WORKDIR /app
@@ -103,7 +115,7 @@ ENV PATH="/home/myuser/.local/bin:$PATH"
 ENV GOOGLE_GENAI_USE_VERTEXAI=1
 ENV GOOGLE_CLOUD_PROJECT=${options.project}
 ENV GOOGLE_CLOUD_LOCATION=${options.region}
-# Set up environment variables - End
+${apiKeyEnv}# Set up environment variables - End
 
 # Copy application files
 COPY --chown=myuser:myuser "agents/${options.appName}/" "/app/agents/${
@@ -124,6 +136,34 @@ EXPOSE ${options.port}
 CMD npx adk ${adkCommand} /app/agents/${options.appName} ${adkServerOptions.join(
     ' ',
   )}`;
+}
+
+/**
+ * Warns when an explicitly passed `--api_key` shadows a `GOOGLE_API_KEY` entry
+ * in the agent's `.env` file. The CLI value always wins: the `.env` file is not
+ * forwarded to the deployment, only the CLI value is written to the Dockerfile.
+ *
+ * @param agentDir The agent folder that may contain a `.env` file.
+ * @param apiKey The API key passed on the command line, if any.
+ */
+export async function warnOnApiKeyPrecedence(
+  agentDir: string,
+  apiKey?: string,
+): Promise<void> {
+  if (!apiKey) {
+    return;
+  }
+
+  const envFilePath = path.join(agentDir, '.env');
+  if (!(await isFileExists(envFilePath))) {
+    return;
+  }
+
+  if ('GOOGLE_API_KEY' in dotenv.parse(await fs.readFile(envFilePath))) {
+    console.warn(
+      '\x1b[33mIgnoring GOOGLE_API_KEY in .env as `--api_key` was explicitly passed and takes precedence\x1b[0m',
+    );
+  }
 }
 
 export async function createDockerFile(

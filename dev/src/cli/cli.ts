@@ -179,6 +179,10 @@ export const REPOSITORY_DEPLOY_OPTION = new Option(
   '--repository [string]',
   'Optional. Artifact Registry repository name to push docker images. Required for agent_engine deploy.',
 );
+export const API_KEY_DEPLOY_OPTION = new Option(
+  '--api_key <string>',
+  'Optional. The API key to use for Express Mode. It is forwarded to the deployed container as GOOGLE_API_KEY together with GOOGLE_GENAI_USE_ENTERPRISE=1, and takes precedence over GOOGLE_API_KEY in the agent .env file.',
+);
 export const AGENT_ENGINE_ID_OPTION = new Option(
   '--agent_engine_id [id]',
   'Optional. ID of the Agent Engine instance to update if it exists (default: undefined, which means a new instance will be created). If project and region are set, this should be the resource ID or the full resource name (projects/.../locations/.../reasoningEngines/...).',
@@ -412,6 +416,7 @@ export function createProgram(): Command {
     .addOption(BUNDLE_AGENT_FILE)
     .addOption(AGENT_FILE_MODULE_TYPE)
     .addOption(A2A_OPTION)
+    .addOption(API_KEY_DEPLOY_OPTION)
     .action(async (agentPath: string, options: Record<string, string>) => {
       const extraGcloudArgs = [];
       for (const arg of process.argv.slice(5)) {
@@ -442,6 +447,7 @@ export function createProgram(): Command {
           artifactServiceUri: options['artifact_service_uri'],
           agentFileLoadOptions: getAgentFileOptions(options),
           a2a: getBoolean(options['a2a']),
+          apiKey: options['api_key'],
           extraGcloudArgs,
         });
       } catch (error) {
@@ -475,6 +481,7 @@ export function createProgram(): Command {
       .addOption(BUNDLE_AGENT_FILE)
       .addOption(AGENT_FILE_MODULE_TYPE)
       .addOption(A2A_OPTION)
+      .addOption(API_KEY_DEPLOY_OPTION)
       .addOption(AGENT_ENGINE_ID_OPTION)
       .action(async (agentPath: string, options: Record<string, string>) => {
         try {
@@ -495,6 +502,7 @@ export function createProgram(): Command {
             artifactServiceUri: options['artifact_service_uri'],
             agentFileLoadOptions: getAgentFileOptions(options),
             a2a: getBoolean(options['a2a']),
+            apiKey: options['api_key'],
             agentEngineId: options['agent_engine_id'],
           });
         } catch (error) {

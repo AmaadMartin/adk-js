@@ -18,6 +18,7 @@ import {
   createPackageJson,
   resolveDefaultFromGcloudConfig,
   spawnAsync,
+  warnOnApiKeyPrecedence,
 } from './deploy_utils.js';
 
 const DEFAULT_MAX_ATTEMPTS = 30;
@@ -95,6 +96,8 @@ export async function deployToAgentEngine(options: DeployToAgentEngineOptions) {
     console.info('Creating package.json...');
     await createPackageJson(agentDir, options.tempFolder);
 
+    await warnOnApiKeyPrecedence(agentDir, options.apiKey);
+
     console.info('Creating Dockerfile...');
     await createDockerFile(options.tempFolder, {
       appName,
@@ -107,6 +110,7 @@ export async function deployToAgentEngine(options: DeployToAgentEngineOptions) {
       sessionServiceUri: options.sessionServiceUri,
       artifactServiceUri: options.artifactServiceUri,
       a2a: options.a2a,
+      apiKey: options.apiKey,
     });
 
     const imageTag = `${options.region}-docker.pkg.dev/${options.project}/${options.repository}/agent-engine-${appName}:latest`;
