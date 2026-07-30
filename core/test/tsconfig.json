@@ -2,16 +2,21 @@
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "noEmit": true,
-    // Mirrors the vitest `unit:core` aliases. Those are prefix aliases, so
-    // each one needs a bare and a wildcard entry here to resolve the same way.
+    // Mirrors the vitest `unit:core` alias for `@google/adk`. No wildcard
+    // entry: `core/package.json` declares only the `"."` export, so
+    // `@google/adk/<subpath>` does not resolve for a real consumer and must not
+    // be type-blessed here; internals are imported relatively instead.
     "paths": {
-      "@google/adk": ["../src/index.ts"],
-      "@google/adk/*": ["../src/*"],
-      "@google/adk-integrations": ["../../integrations/src/index.ts"],
-      "@google/adk-integrations/*": ["../../integrations/src/*"]
+      "@google/adk": ["../src/index.ts"]
     }
   },
   // Narrowed while the type errors in the remaining subdirectories are fixed;
   // dropping this key checks all of core/test.
-  "include": ["models/**/*", "runner/**/*", "utils/**/*"]
+  "include": [
+    "models/**/*",
+    "runner/**/*",
+    "sessions/**/*",
+    "tools/**/*",
+    "utils/**/*"
+  ]
 }
