@@ -530,8 +530,8 @@ Instruction body`;
         toolContext: createMockContext(),
         llmRequest: req,
       });
-      expect(req.contents!.length).toBe(2);
-      expect(req.contents![1].parts![1].inlineData?.data).toBe(
+      expect(req.contents.length).toBe(2);
+      expect(req.contents[1].parts![1].inlineData?.data).toBe(
         Buffer.from('img data').toString('base64'),
       );
     });
@@ -567,7 +567,7 @@ Instruction body`;
         toolContext: createMockContext(),
         llmRequest: req,
       });
-      expect(req.contents!.length).toBe(1);
+      expect(req.contents.length).toBe(1);
     });
 
     it('RunSkillScriptTool checks remote skill script on demand', async () => {

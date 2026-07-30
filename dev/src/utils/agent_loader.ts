@@ -245,10 +245,10 @@ export class AgentFile {
       if (defaultApp) {
         this.app = defaultApp;
         this.agent = defaultApp.rootAgent;
-        return this.app!;
+        return this.app;
       }
 
-      const rootApps = Object.values(jsModule).filter(isApp) as App[];
+      const rootApps = Object.values(jsModule).filter(isApp);
 
       if (rootApps.length > 1) {
         console.warn(
@@ -259,7 +259,7 @@ export class AgentFile {
       if (rootApps.length > 0) {
         this.app = rootApps[0];
         this.agent = rootApps[0].rootAgent;
-        return this.app!;
+        return this.app;
       }
 
       if (isBaseAgent(jsModule.rootAgent)) {
@@ -273,9 +273,7 @@ export class AgentFile {
         return (this.agent = defaultAgent);
       }
 
-      const rootAgents = Object.values(jsModule).filter(
-        isBaseAgent,
-      ) as BaseAgent[];
+      const rootAgents = Object.values(jsModule).filter(isBaseAgent);
 
       if (rootAgents.length > 1) {
         console.warn(

@@ -54,7 +54,7 @@ describe('LlmSummarizer', () => {
       },
     ]);
 
-    const summarizer = new LlmSummarizer({llm: mockLlm as unknown as BaseLlm});
+    const summarizer = new LlmSummarizer({llm: mockLlm});
 
     const events: Event[] = [
       createEvent({
@@ -96,7 +96,7 @@ describe('LlmSummarizer', () => {
       },
     ]);
 
-    const summarizer = new LlmSummarizer({llm: mockLlm as unknown as BaseLlm});
+    const summarizer = new LlmSummarizer({llm: mockLlm});
 
     const events: Event[] = [
       createEvent({
@@ -113,7 +113,7 @@ describe('LlmSummarizer', () => {
 
   it('should throw an error when called with empty events list', async () => {
     const mockLlm = new MockLlm([]);
-    const summarizer = new LlmSummarizer({llm: mockLlm as unknown as BaseLlm});
+    const summarizer = new LlmSummarizer({llm: mockLlm});
 
     await expect(summarizer.summarize([])).rejects.toThrow(
       'Cannot summarize an empty list of events.',

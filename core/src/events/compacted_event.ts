@@ -50,9 +50,7 @@ export function isCompactedEvent(event: Event): event is CompactedEvent {
 export function isScratchpadEvent(
   event: Event,
 ): event is CompactedEvent & {isScratchpad: true} {
-  return (
-    isCompactedEvent(event) && (event as CompactedEvent).isScratchpad === true
-  );
+  return isCompactedEvent(event) && event.isScratchpad === true;
 }
 
 export function createCompactedEvent(

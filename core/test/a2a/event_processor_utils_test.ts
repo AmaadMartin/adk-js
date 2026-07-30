@@ -177,7 +177,7 @@ describe('event_processor_utils', () => {
   describe('getTaskInputRequiredEvent', () => {
     it('returns undefined if task is falsy', () => {
       expect(
-        getTaskInputRequiredEvent(null as unknown as Task, {} as GenAIContent),
+        getTaskInputRequiredEvent(null as unknown as Task, {}),
       ).toBeUndefined();
     });
 
@@ -186,9 +186,7 @@ describe('event_processor_utils', () => {
         kind: 'task',
         status: {state: 'working'},
       } as Task;
-      expect(
-        getTaskInputRequiredEvent(task, {} as GenAIContent),
-      ).toBeUndefined();
+      expect(getTaskInputRequiredEvent(task, {})).toBeUndefined();
     });
 
     it('returns undefined if task does not have a status message', () => {
@@ -196,9 +194,7 @@ describe('event_processor_utils', () => {
         kind: 'task',
         status: {state: 'input-required'},
       } as Task;
-      expect(
-        getTaskInputRequiredEvent(task, {} as GenAIContent),
-      ).toBeUndefined();
+      expect(getTaskInputRequiredEvent(task, {})).toBeUndefined();
     });
 
     it('returns undefined if matching response exists in genAIContent', () => {

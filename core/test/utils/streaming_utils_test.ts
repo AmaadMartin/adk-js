@@ -19,9 +19,9 @@ import {
 
 // Mock generateClientFunctionCallId to return a fixed ID for testing
 vi.mock('../../src/events/event.js', async () => {
-  const actual = (await vi.importActual(
-    '../../src/events/event.js',
-  )) as typeof import('../../src/events/event.js');
+  const actual = await vi.importActual<
+    typeof import('../../src/events/event.js')
+  >('../../src/events/event.js');
   return {
     ...actual,
     generateClientFunctionCallId: () => 'mocked-fc-id',
@@ -72,12 +72,12 @@ describe('StreamingResponseAggregator', () => {
       const aggregator = new StreamingResponseAggregator(true);
 
       const response1 = createResponse({
-        content: {parts: [{text: 'Thinking ', thought: true} as Part]},
+        content: {parts: [{text: 'Thinking ', thought: true}]},
         finishReason: FinishReason.STOP,
       });
 
       const response2 = createResponse({
-        content: {parts: [{text: 'hard...', thought: true} as Part]},
+        content: {parts: [{text: 'hard...', thought: true}]},
         finishReason: FinishReason.STOP,
       });
 
@@ -100,7 +100,7 @@ describe('StreamingResponseAggregator', () => {
       const aggregator = new StreamingResponseAggregator(true);
 
       const response1 = createResponse({
-        content: {parts: [{text: 'Thinking...', thought: true} as Part]},
+        content: {parts: [{text: 'Thinking...', thought: true}]},
         finishReason: FinishReason.STOP,
       });
 
@@ -137,7 +137,7 @@ describe('StreamingResponseAggregator', () => {
                   {jsonPath: '$.location', stringValue: 'San Fran'},
                 ],
                 willContinue: true,
-              } as unknown as FunctionCall,
+              },
             },
           ],
         },
@@ -151,7 +151,7 @@ describe('StreamingResponseAggregator', () => {
               functionCall: {
                 partialArgs: [{jsonPath: '$.location', stringValue: 'cisco'}],
                 willContinue: false,
-              } as unknown as FunctionCall,
+              },
             },
           ],
         },
@@ -243,7 +243,7 @@ describe('StreamingResponseAggregator', () => {
       const aggregator = new StreamingResponseAggregator(false);
 
       const response1 = createResponse({
-        content: {parts: [{text: 'Thinking...', thought: true} as Part]},
+        content: {parts: [{text: 'Thinking...', thought: true}]},
         finishReason: FinishReason.STOP,
       });
 
@@ -289,7 +289,7 @@ describe('StreamingResponseAggregator', () => {
       const aggregator = new StreamingResponseAggregator(false);
 
       const response1 = createResponse({
-        content: {parts: [{text: 'Thinking...', thought: true} as Part]},
+        content: {parts: [{text: 'Thinking...', thought: true}]},
         finishReason: FinishReason.STOP,
       });
 
@@ -468,7 +468,7 @@ describe('StreamingResponseAggregator', () => {
                   {jsonPath: "$['user']['name']", stringValue: 'Alice'},
                 ],
                 willContinue: false,
-              } as unknown as FunctionCall,
+              },
             },
           ],
         },
@@ -507,7 +507,7 @@ describe('StreamingResponseAggregator', () => {
                   },
                 ],
                 willContinue: false,
-              } as unknown as FunctionCall,
+              },
             },
           ],
         },
@@ -585,7 +585,7 @@ describe('StreamingResponseAggregator', () => {
                   {jsonPath: '$.message.text', stringValue: 'Hello '},
                 ],
                 willContinue: true,
-              } as unknown as FunctionCall,
+              },
             },
           ],
         },
@@ -601,7 +601,7 @@ describe('StreamingResponseAggregator', () => {
                   {jsonPath: '$.message.text', stringValue: 'World!'},
                 ],
                 willContinue: false,
-              } as unknown as FunctionCall,
+              },
             },
           ],
         },
@@ -642,7 +642,7 @@ describe('StreamingResponseAggregator', () => {
               functionCall: {
                 name: 'get_weather',
                 args: {city: 'Seattle'},
-              } as FunctionCall,
+              },
             },
           ],
         },

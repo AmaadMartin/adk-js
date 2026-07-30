@@ -84,7 +84,7 @@ describe('Telemetry Tracing Functions', () => {
           },
         ],
       },
-    } as Event;
+    };
 
     mockLlmRequest = {
       model: 'test-model',
@@ -95,11 +95,11 @@ describe('Telemetry Tracing Functions', () => {
       },
       liveConnectConfig: {},
       toolsDict: {},
-    } as LlmRequest;
+    };
 
     mockLlmResponse = {
       content: {parts: [{text: 'test-response'}]},
-    } as LlmResponse;
+    };
   });
 
   afterEach(() => {
@@ -209,7 +209,7 @@ describe('Telemetry Tracing Functions', () => {
       // Act
       traceMergedToolCalls({
         responseEventId: 'merged-event-id',
-        functionResponseEvent: mockEventWithJson as unknown as Event,
+        functionResponseEvent: mockEventWithJson,
       });
 
       // Assert - setAttributes is called without tool_response

@@ -13,7 +13,7 @@ import {
   Session as VertexAiSession,
   SessionEvent as VertexAiSessionEvent,
 } from '@google-cloud/vertexai/build/src/genai/types.js';
-import {Content, GenerateContentResponseUsageMetadata} from '@google/genai';
+import {GenerateContentResponseUsageMetadata} from '@google/genai';
 import {isCompactedEvent} from '../events/compacted_event.js';
 import {experimental} from '../utils/experimental.js';
 
@@ -194,9 +194,9 @@ export class VertexAiSessionService extends BaseSessionService {
       let eventsIterator: VertexAiSessionEvent[] = [];
 
       if (config && config.numRecentEvents === 0) {
-        getSessionResponse = (await this.sessions.get({
+        getSessionResponse = await this.sessions.get({
           name: sessionResourceName,
-        })) as VertexAiSession;
+        });
       } else {
         const listConfig: Record<string, string> = {};
         if (config && config.afterTimestamp) {
@@ -212,13 +212,13 @@ export class VertexAiSessionService extends BaseSessionService {
             config: listConfig,
           }),
         ]);
-        getSessionResponse = sessionRes as VertexAiSession;
+        getSessionResponse = sessionRes;
         eventsIterator =
           (eventsRes as {sessionEvents?: VertexAiSessionEvent[]})
             .sessionEvents || [];
       }
 
-      const sessionObj = getSessionResponse!;
+      const sessionObj = getSessionResponse;
 
       if (sessionObj.userId !== userId) {
         throw new Error(
@@ -477,9 +477,7 @@ function _fromApiEvent(apiEventObj: VertexAiSessionEvent): Event {
   const actions = apiEventObj.actions || {};
   const eventMetadata = apiEventObj.eventMetadata || {};
 
-  let customMetadata = eventMetadata.customMetadata as
-    | Record<string, unknown>
-    | undefined;
+  let customMetadata = eventMetadata.customMetadata;
   let compactionData: {
     startTime: number;
     endTime: number;
@@ -514,9 +512,9 @@ function _fromApiEvent(apiEventObj: VertexAiSessionEvent): Event {
       ((actions as Record<string, unknown>)[
         'requestedToolConfirmations'
       ] as Record<string, ToolConfirmation>) || {},
-    skipSummarization: actions['skipSummarization'] as boolean | undefined,
-    transferToAgent: actions['transferAgent'] as string | undefined,
-    escalate: actions['escalate'] as boolean | undefined,
+    skipSummarization: actions['skipSummarization'],
+    transferToAgent: actions['transferAgent'],
+    escalate: actions['escalate'],
     compaction: compactionData || undefined,
   };
 
@@ -525,20 +523,18 @@ function _fromApiEvent(apiEventObj: VertexAiSessionEvent): Event {
     invocationId: apiEventObj.invocationId || '',
     author: apiEventObj.author,
     actions: eventActions,
-    content: apiEventObj.content as unknown as Content,
+    content: apiEventObj.content,
     timestamp: apiEventObj.timestamp
       ? new Date(apiEventObj.timestamp).getTime()
       : Date.now(),
     errorCode: apiEventObj.errorCode?.toString(),
     errorMessage: apiEventObj.errorMessage,
-    partial: eventMetadata['partial'] as boolean | undefined,
-    turnComplete: eventMetadata['turnComplete'] as boolean | undefined,
-    interrupted: eventMetadata['interrupted'] as boolean | undefined,
-    branch: eventMetadata['branch'] as string | undefined,
+    partial: eventMetadata['partial'],
+    turnComplete: eventMetadata['turnComplete'],
+    interrupted: eventMetadata['interrupted'],
+    branch: eventMetadata['branch'],
     customMetadata,
-    longRunningToolIds: eventMetadata['longRunningToolIds'] as
-      | string[]
-      | undefined,
+    longRunningToolIds: eventMetadata['longRunningToolIds'],
     usageMetadata:
       usageMetadataData as unknown as GenerateContentResponseUsageMetadata,
   };

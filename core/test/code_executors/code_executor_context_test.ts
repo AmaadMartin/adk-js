@@ -226,7 +226,7 @@ describe('CodeExecutorContext', () => {
       const state = new State({'_code_execution_context': contextObj});
       const ctx = new CodeExecutorContext(state);
       ctx.setExecutionId('s-42');
-      const result = ctx.getCodeExecutionContext() as Record<string, unknown>;
+      const result = ctx.getCodeExecutionContext();
       expect(result['execution_session_id']).toBe('s-42');
     });
   });

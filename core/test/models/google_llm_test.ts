@@ -148,8 +148,7 @@ describe('GoogleLlm', () => {
         {
           content: {
             role: 'model',
-            parts:
-              parts as GenerateContentResponse['candidates'][0]['content']['parts'],
+            parts,
           },
         },
       ];
@@ -427,8 +426,7 @@ describe('GoogleLlm', () => {
         const response = new GenerateContentResponse();
         response.candidates =
           raw.candidates as GenerateContentResponse['candidates'];
-        response.usageMetadata =
-          raw.usageMetadata as GenerateContentResponse['usageMetadata'];
+        response.usageMetadata = raw.usageMetadata;
         return response;
       });
 

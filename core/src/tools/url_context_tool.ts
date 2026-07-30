@@ -3,7 +3,6 @@
  * Copyright 2026 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
-import {GenerateContentConfig} from '@google/genai';
 
 import {isGemini2OrAbove, isGeminiModel} from '../utils/model_name.js';
 
@@ -46,7 +45,7 @@ export class UrlContextTool extends BaseTool {
       );
     }
 
-    llmRequest.config = llmRequest.config || ({} as GenerateContentConfig);
+    llmRequest.config = llmRequest.config || {};
     llmRequest.config.tools = llmRequest.config.tools || [];
     llmRequest.config.tools.push({
       urlContext: {},

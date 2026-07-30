@@ -37,7 +37,7 @@ class MockSummarizer implements BaseSummarizer {
         role: 'model',
         parts: [{text: `Mock summary of ${events.length} events`}],
       },
-    } as CompactedEvent;
+    };
   }
 }
 

@@ -9,7 +9,6 @@ import {
   Event,
   InvocationContext,
   PluginManager,
-  Session,
   TruncatingContextCompactor,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
@@ -37,7 +36,7 @@ function createDummyContext(events: Event[]): InvocationContext {
     state: {},
     events,
     lastUpdateTime: Date.now(),
-  } as Session;
+  };
 
   const agent = {} as BaseAgent;
   return new InvocationContext({

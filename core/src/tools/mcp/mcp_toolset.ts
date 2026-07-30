@@ -60,7 +60,7 @@ export class MCPToolset extends BaseToolset {
 
     let listResult: ListToolsResult;
     try {
-      listResult = (await session.listTools()) as ListToolsResult;
+      listResult = await session.listTools();
     } finally {
       await this.mcpSessionManager.closeSession(session);
     }
@@ -87,7 +87,7 @@ export class MCPToolset extends BaseToolset {
 
     if (Array.isArray(filter)) {
       // String-array filter: match against the (possibly-prefixed) tool name.
-      return tools.filter((tool) => (filter as string[]).includes(tool.name));
+      return tools.filter((tool) => filter.includes(tool.name));
     }
 
     if (context) {

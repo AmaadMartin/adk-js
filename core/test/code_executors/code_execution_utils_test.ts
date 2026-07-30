@@ -186,7 +186,7 @@ describe('extractCodeAndTruncateContent', () => {
     const textParts = content.parts.filter(
       (p) => p.text && !('executableCode' in p),
     );
-    expect(textParts.some((p) => p.text!.includes('Here is the code:'))).toBe(
+    expect(textParts.some((p) => p.text.includes('Here is the code:'))).toBe(
       true,
     );
   });

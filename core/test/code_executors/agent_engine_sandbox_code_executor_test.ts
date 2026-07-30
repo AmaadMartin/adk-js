@@ -179,7 +179,7 @@ describe('AgentEngineSandboxCodeExecutor', () => {
     });
 
     it('reuses existing sandbox from session state', async () => {
-      invocationContext.session!.state!['sandbox_name_language_python'] =
+      invocationContext.session.state['sandbox_name_language_python'] =
         'projects/test-project/locations/us-central1/reasoningEngines/123/sandboxEnvironments/456';
 
       await executor.executeCode({
@@ -198,7 +198,7 @@ describe('AgentEngineSandboxCodeExecutor', () => {
     });
 
     it('creates new sandbox if existing one is not running', async () => {
-      invocationContext.session!.state!['sandbox_name_language_python'] =
+      invocationContext.session.state['sandbox_name_language_python'] =
         'projects/test-project/locations/us-central1/reasoningEngines/123/sandboxEnvironments/456';
       mockClient.agentEnginesInternal.sandboxes.getInternal.mockResolvedValue({
         state: 'STATE_EXPIRED',
@@ -538,7 +538,7 @@ describe('AgentEngineSandboxCodeExecutor', () => {
     });
 
     it('creates new sandbox if getInternal throws error', async () => {
-      invocationContext.session!.state!['sandbox_name_language_python'] =
+      invocationContext.session.state['sandbox_name_language_python'] =
         'projects/test-project/locations/us-central1/reasoningEngines/123/sandboxEnvironments/456';
       mockClient.agentEnginesInternal.sandboxes.getInternal.mockRejectedValue(
         new Error('API Error'),

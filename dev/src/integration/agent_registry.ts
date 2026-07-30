@@ -143,7 +143,7 @@ export class AgentRegistry {
 
           if (toolConfig.name == 'LongRunningFunctionTool') {
             const args = toolConfig.args as LongRunningFunctionToolArgs;
-            const subTool = this.findToolOrThrow(args!.func);
+            const subTool = this.findToolOrThrow(args.func);
             return subTool;
           }
 
@@ -167,7 +167,7 @@ export class AgentRegistry {
             }
 
             const toolset = new MCPToolset(
-              args.stdioConnectionParams!,
+              args.stdioConnectionParams,
               args.toolFilter,
             );
             return toolset;

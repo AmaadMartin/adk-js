@@ -724,7 +724,7 @@ describe('AgentRegistry', () => {
       };
       const toolset = new AgentRegistrySingleMCPToolset({
         connectionParams,
-      } as any);
+      });
       await expect(toolset.close()).resolves.toBeUndefined();
     });
 

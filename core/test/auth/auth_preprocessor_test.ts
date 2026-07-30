@@ -10,19 +10,18 @@ import {
   InvocationContext,
   createEvent,
 } from '@google/adk';
-import {Mock, describe, expect, it, vi} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 import {REQUEST_EUC_FUNCTION_CALL_NAME} from '../../src/agents/functions.js';
 
 vi.mock('../../src/agents/functions.js', async (importOriginal) => {
-  const actual = (await importOriginal()) as {
-    handleFunctionCallsAsync: Mock;
-  };
+  const actual =
+    await importOriginal<typeof import('../../src/agents/functions.js')>();
   return {
     ...actual,
     handleFunctionCallsAsync: vi.fn().mockResolvedValue({
       id: 'mockResponseEvent',
       author: 'system',
-    } as Event),
+    }),
   };
 });
 

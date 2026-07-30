@@ -146,9 +146,9 @@ export class CodeExecutorContext {
     }
 
     return (
-      ((this.sessionState.get(ERROR_COUNT_KEY) as Record<string, number>)[
+      (this.sessionState.get(ERROR_COUNT_KEY) as Record<string, number>)[
         invocationId
-      ] as number) || 0
+      ] || 0
     );
   }
 

@@ -21,7 +21,6 @@ import {
   createEvent,
   InvocationContext,
   RemoteA2AAgent,
-  RemoteA2AAgentConfig,
   Session,
 } from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
@@ -93,10 +92,9 @@ describe('A2ARemoteAgent', () => {
   };
 
   it('should throw if neither agentCard nor client are provided', () => {
-    expect(
-      () =>
-        new RemoteA2AAgent({name: 'test'} as unknown as RemoteA2AAgentConfig),
-    ).toThrow('Either AgentCard or Client must be provided');
+    expect(() => new RemoteA2AAgent({name: 'test'})).toThrow(
+      'Either AgentCard or Client must be provided',
+    );
   });
 
   it('should resolve card from URL and send message streaming', async () => {

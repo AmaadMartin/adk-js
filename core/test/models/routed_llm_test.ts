@@ -31,7 +31,7 @@ class MockLlm extends BaseLlm {
         role: 'model',
         parts: [{text: `Response from ${this.model}`}],
       },
-    } as LlmResponse;
+    };
   }
 
   async connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
@@ -226,7 +226,7 @@ describe('RoutedLlm', () => {
             role: 'model',
             parts: [{text: 'Partial response'}],
           },
-        } as LlmResponse;
+        };
         throw new Error('Mid-stream failure');
       }
 
@@ -278,7 +278,7 @@ describe('RoutedLlm', () => {
         _llmRequest: LlmRequest,
         _stream?: boolean,
       ): AsyncGenerator<LlmResponse, void> {
-        yield {} as LlmResponse;
+        yield {};
       }
 
       async connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {

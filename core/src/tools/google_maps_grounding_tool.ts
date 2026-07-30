@@ -3,7 +3,6 @@
  * Copyright 2026 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
-import {GenerateContentConfig} from '@google/genai';
 
 import {LlmRequest} from '../models/llm_request.js';
 import {
@@ -23,7 +22,7 @@ export function applyGoogleMapsGrounding(llmRequest: LlmRequest): void {
   }
 
   const modelCheckDisabled = isGeminiModelIdCheckDisabled();
-  llmRequest.config = llmRequest.config || ({} as GenerateContentConfig);
+  llmRequest.config = llmRequest.config || {};
   llmRequest.config.tools = llmRequest.config.tools || [];
 
   if (isGemini1Model(llmRequest.model)) {

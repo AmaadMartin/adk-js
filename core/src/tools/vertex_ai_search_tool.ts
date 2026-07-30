@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GenerateContentConfig, Tool} from '@google/genai';
 import {ReadonlyContext} from '../agents/readonly_context.js';
 import {getLogger} from '../utils/logger.js';
 import {
@@ -129,7 +128,7 @@ export class VertexAiSearchTool extends BaseTool {
     }
 
     const modelCheckDisabled = isGeminiModelIdCheckDisabled();
-    llmRequest.config = llmRequest.config || ({} as GenerateContentConfig);
+    llmRequest.config = llmRequest.config || {};
     llmRequest.config.tools = llmRequest.config.tools || [];
 
     // Guard against unsupported models unless check is disabled.
@@ -175,6 +174,6 @@ export class VertexAiSearchTool extends BaseTool {
       retrieval: {
         vertexAiSearch: vertexAiSearchConfig,
       },
-    } as unknown as Tool);
+    });
   }
 }

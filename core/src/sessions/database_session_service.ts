@@ -94,9 +94,9 @@ export class DatabaseSessionService extends BaseSessionService {
       this.options = await getConnectionOptionsFromUri(this.connectionString);
     }
 
-    this.orm = await MikroORM.init(this.options!);
-    await ensureDatabaseCreated(this.orm!);
-    await validateDatabaseSchemaVersion(this.orm!);
+    this.orm = await MikroORM.init(this.options);
+    await ensureDatabaseCreated(this.orm);
+    await validateDatabaseSchemaVersion(this.orm);
     this.initialized = true;
   }
 

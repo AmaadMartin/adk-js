@@ -244,7 +244,7 @@ async function* runPreProcessor(
       ],
     };
 
-    llmRequest.contents.push(cloneDeep(codeContent)!);
+    llmRequest.contents.push(cloneDeep(codeContent));
 
     yield createEvent({
       invocationId: invocationContext.invocationId,
@@ -410,7 +410,7 @@ function extractAndReplaceInlineFiles(
     }
 
     for (let j = 0; j < content.parts.length; j++) {
-      const part = content.parts[j] as Part;
+      const part: Part = content.parts[j];
       const mimeType = part.inlineData?.mimeType;
 
       // Skip if the inline data is not supported

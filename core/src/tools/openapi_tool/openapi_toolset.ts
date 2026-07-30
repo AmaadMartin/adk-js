@@ -93,7 +93,7 @@ export class OpenAPIToolset extends BaseToolset {
   override async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {
     return this.tools.filter((tool) => {
       if (Array.isArray(this.toolFilter) && this.toolFilter.length > 0) {
-        return (this.toolFilter as string[]).includes(tool.name);
+        return this.toolFilter.includes(tool.name);
       }
       if (context) {
         return this.isToolSelected(tool, context);

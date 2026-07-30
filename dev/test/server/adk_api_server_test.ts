@@ -642,11 +642,11 @@ describe('AdkWebServer', () => {
 
       expect(response.status).toBe(200);
       expect(events.length).toBe(3);
-      expect(events[0]!.content?.parts?.[0].text).toBe(
+      expect(events[0].content?.parts?.[0].text).toBe(
         "Hello user! I'm streaming you events now!",
       );
-      expect(events[1]!.content?.parts?.[0].text).toBe('Event 1');
-      expect(events[2]!.content?.parts?.[0].text).toBe('Event 2');
+      expect(events[1].content?.parts?.[0].text).toBe('Event 1');
+      expect(events[2].content?.parts?.[0].text).toBe('Event 2');
     });
 
     it('should update session state if stateDelta is provided', async () => {

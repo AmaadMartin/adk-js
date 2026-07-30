@@ -11,7 +11,6 @@ import {
   InvocationContext,
   LoopAgent,
   PluginManager,
-  Session,
   createEvent,
   createEventActions,
   isLoopAgent,
@@ -83,7 +82,7 @@ describe('LoopAgent', () => {
         state: {},
         events: [],
         lastUpdateTime: Date.now(),
-      } as unknown as Session,
+      },
       pluginManager: new PluginManager(),
     });
 
@@ -121,7 +120,7 @@ describe('LoopAgent', () => {
         state: {},
         events: [],
         lastUpdateTime: Date.now(),
-      } as unknown as Session,
+      },
       pluginManager: new PluginManager(),
     });
 
@@ -167,7 +166,7 @@ describe('LoopAgent', () => {
         state: {},
         events: [],
         lastUpdateTime: Date.now(),
-      } as unknown as Session,
+      },
       pluginManager: new PluginManager(),
     });
 
@@ -206,7 +205,7 @@ describe('LoopAgent', () => {
         state: {},
         events: [],
         lastUpdateTime: Date.now(),
-      } as unknown as Session,
+      },
       pluginManager: new PluginManager(),
       abortSignal: controller.signal,
     });
@@ -250,7 +249,7 @@ describe('LoopAgent', () => {
         state: {},
         events: [],
         lastUpdateTime: Date.now(),
-      } as unknown as Session,
+      },
       pluginManager: new PluginManager(),
     });
 
@@ -288,7 +287,7 @@ describe('LoopAgent', () => {
         state: {},
         events: [],
         lastUpdateTime: Date.now(),
-      } as unknown as Session,
+      },
       pluginManager: new PluginManager(),
     });
 
@@ -334,7 +333,7 @@ describe('LoopAgent', () => {
         state: {},
         events: [],
         lastUpdateTime: Date.now(),
-      } as unknown as Session,
+      },
       pluginManager: new PluginManager(),
     });
 
@@ -373,7 +372,7 @@ describe('LoopAgent', () => {
         state: {},
         events: [],
         lastUpdateTime: Date.now(),
-      } as unknown as Session,
+      },
       pluginManager: new PluginManager(),
       abortSignal: controller.signal,
     });

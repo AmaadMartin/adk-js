@@ -14,7 +14,7 @@ import {
   VertexAiMemoryBankService,
   VertexAiMemoryBankServiceOptions,
 } from '@google/adk';
-import {Content, Part} from '@google/genai';
+import {Content} from '@google/genai';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 
 describe('VertexAiMemoryBankService', () => {
@@ -145,7 +145,7 @@ describe('VertexAiMemoryBankService', () => {
     it('calls generateInternal with provided events and metadata', async () => {
       const events = [
         {
-          content: {parts: [{text: 'event 1'}]} as Content,
+          content: {parts: [{text: 'event 1'}]},
         } as Event,
       ];
 
@@ -226,7 +226,7 @@ describe('VertexAiMemoryBankService', () => {
         service.addMemory({
           appName: 'test-app',
           userId: 'test-user',
-          memories: [{content: {parts: []} as unknown as Content}],
+          memories: [{content: {parts: []}}],
         }),
       ).rejects.toThrow('memories[0] must include non-whitespace text.');
     });
@@ -239,8 +239,8 @@ describe('VertexAiMemoryBankService', () => {
           memories: [
             {
               content: {
-                parts: [{inlineData: {data: '...'}}] as unknown as Part[],
-              } as Content,
+                parts: [{inlineData: {data: '...'}}],
+              },
             },
           ],
         }),
@@ -254,7 +254,7 @@ describe('VertexAiMemoryBankService', () => {
         service.addMemory({
           appName: 'test-app',
           userId: 'test-user',
-          memories: [{content: {parts: [{text: '   '}]} as Content}],
+          memories: [{content: {parts: [{text: '   '}]}}],
         }),
       ).rejects.toThrow('must include non-whitespace text.');
     });
@@ -287,7 +287,7 @@ describe('VertexAiMemoryBankService', () => {
     it('converts various types in customMetadata', async () => {
       const events = [
         {
-          content: {parts: [{text: 'event 1'}]} as Content,
+          content: {parts: [{text: 'event 1'}]},
         } as Event,
       ];
 
@@ -325,7 +325,7 @@ describe('VertexAiMemoryBankService', () => {
         service.addMemory({
           appName: 'test-app',
           userId: 'test-user',
-          memories: [{content: {parts: [{text: 'fact'}]} as Content}],
+          memories: [{content: {parts: [{text: 'fact'}]}}],
           customMetadata: {enable_consolidation: 'true'}, // string instead of boolean
         }),
       ).rejects.toThrow(
@@ -336,7 +336,7 @@ describe('VertexAiMemoryBankService', () => {
     it('passes through pre-formatted metadata values', async () => {
       const events = [
         {
-          content: {parts: [{text: 'event 1'}]} as Content,
+          content: {parts: [{text: 'event 1'}]},
         } as Event,
       ];
 
@@ -373,9 +373,7 @@ describe('VertexAiMemoryBankService', () => {
     });
 
     it('fallback to string conversion for unhandled types', async () => {
-      const events = [
-        {content: {parts: [{text: 'event 1'}]} as Content} as Event,
-      ];
+      const events = [{content: {parts: [{text: 'event 1'}]}} as Event];
       const mySymbol = Symbol('test');
 
       await service.addEventsToMemory({

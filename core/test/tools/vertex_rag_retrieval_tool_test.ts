@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {VertexRagRetrievalTool} from '@google/adk';
+import {LlmRequest, VertexRagRetrievalTool} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
 const RAG_CORPUS =
@@ -87,13 +87,16 @@ describe('VertexRagRetrievalTool', () => {
       const tool = new VertexRagRetrievalTool({
         ragResources: [{ragCorpus: RAG_CORPUS}],
       });
-      const llmRequest = {model: 'gemini-2.0-flash', contents: []} as never;
+      const llmRequest: LlmRequest = {
+        model: 'gemini-2.0-flash',
+        contents: [],
+        liveConnectConfig: {},
+        toolsDict: {},
+      };
 
       await tool.processLlmRequest({llmRequest} as never);
 
-      expect(
-        (llmRequest as never as {config: {tools: unknown[]}}).config.tools,
-      ).toHaveLength(1);
+      expect(llmRequest.config?.tools).toHaveLength(1);
     });
 
     it('appends to existing tools without removing them', async () => {
@@ -115,7 +118,7 @@ describe('VertexRagRetrievalTool', () => {
       const tool = new VertexRagRetrievalTool({
         ragResources: [{ragCorpus: RAG_CORPUS}],
       });
-      const result = await tool.runAsync({} as never);
+      const result = await tool.runAsync();
       expect(result).toBeUndefined();
     });
   });

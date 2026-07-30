@@ -9,8 +9,6 @@
 import {
   Content,
   FinishReason,
-  FunctionCall,
-  FunctionResponse,
   GenerateContentConfig,
   Interactions,
   Language,
@@ -62,7 +60,7 @@ describe('interactions_utils', () => {
                 name: 'my_tool',
                 args: {arg1: 'val1'},
                 id: 'call-1',
-              } as FunctionCall,
+              },
             },
           ],
         },
@@ -74,7 +72,7 @@ describe('interactions_utils', () => {
                 name: 'my_tool',
                 response: {result: 'success'},
                 id: 'call-1',
-              } as FunctionResponse,
+              },
             },
           ],
         },
@@ -99,7 +97,7 @@ describe('interactions_utils', () => {
                 name: 'my_tool',
                 response: {result: 'success'},
                 id: 'call-1',
-              } as FunctionResponse,
+              },
             },
           ],
         },
@@ -132,7 +130,7 @@ describe('interactions_utils', () => {
               name: 'test_tool',
               args: {a: 1},
               id: 'call-123',
-            } as FunctionCall,
+            },
           },
         ],
       };
@@ -153,7 +151,7 @@ describe('interactions_utils', () => {
           {
             functionCall: {
               name: 'test_tool',
-            } as FunctionCall,
+            },
           },
         ],
       };
@@ -176,7 +174,7 @@ describe('interactions_utils', () => {
               name: 'test_tool',
               args: {a: 1},
               id: 'call-123',
-            } as FunctionCall,
+            },
             thoughtSignature: 'sig-data-string',
           },
         ],
@@ -201,7 +199,7 @@ describe('interactions_utils', () => {
               name: 'test_tool',
               response: {result: 'ok'},
               id: 'call-123',
-            } as FunctionResponse,
+            },
           },
         ],
       };
@@ -222,7 +220,7 @@ describe('interactions_utils', () => {
           {
             functionResponse: {
               response: {result: 'ok'},
-            } as FunctionResponse,
+            },
           },
         ],
       };
@@ -341,7 +339,7 @@ describe('interactions_utils', () => {
           {
             thought: true,
             thoughtSignature: 'sig-data-string',
-          } as any,
+          },
         ],
       };
       expect(convertContentToSteps(content)).toEqual([
@@ -728,7 +726,7 @@ describe('interactions_utils', () => {
         },
       };
 
-      const response = convertInteractionToLlmResponse(interaction as any);
+      const response = convertInteractionToLlmResponse(interaction);
 
       expect(response.interactionId).toBe('int-123');
       expect(response.turnComplete).toBe(true);
@@ -752,7 +750,7 @@ describe('interactions_utils', () => {
         },
       };
 
-      const response = convertInteractionToLlmResponse(interaction as any);
+      const response = convertInteractionToLlmResponse(interaction);
 
       expect(response.interactionId).toBe('int-123');
       expect(response.errorCode).toBe('RESOURCE_EXHAUSTED');
@@ -776,7 +774,7 @@ describe('interactions_utils', () => {
         status: 'completed',
         usage: {},
       };
-      const response = convertInteractionToLlmResponse(interaction as any);
+      const response = convertInteractionToLlmResponse(interaction);
       expect(response.usageMetadata).toEqual({
         promptTokenCount: 0,
         candidatesTokenCount: 0,
@@ -789,7 +787,7 @@ describe('interactions_utils', () => {
         id: 'int-123',
         status: 'requires_action',
       };
-      const response = convertInteractionToLlmResponse(interaction as any);
+      const response = convertInteractionToLlmResponse(interaction);
       expect(response.turnComplete).toBe(true);
       expect(response.finishReason).toBe('STOP');
     });
@@ -833,7 +831,7 @@ describe('interactions_utils', () => {
         },
       };
       let response = convertInteractionEventToLlmResponse(
-        startEvent as any,
+        startEvent,
         aggregatedParts,
         'int-1',
       );
@@ -886,7 +884,7 @@ describe('interactions_utils', () => {
         event_type: 'step.stop',
       };
       response = convertInteractionEventToLlmResponse(
-        stopEvent as any,
+        stopEvent,
         aggregatedParts,
         'int-1',
       );
@@ -922,7 +920,7 @@ describe('interactions_utils', () => {
         },
       };
       const response = convertInteractionEventToLlmResponse(
-        event as any,
+        event,
         aggregatedParts,
         'int-1',
       );
@@ -945,7 +943,7 @@ describe('interactions_utils', () => {
       };
       const aggregatedParts: Part[] = [{text: 'final text'}];
       const response = convertInteractionEventToLlmResponse(
-        event as any,
+        event,
         aggregatedParts,
         'int-1',
       );
@@ -1651,7 +1649,7 @@ describe('interactions_utils', () => {
       };
       const aggregatedParts: Part[] = [];
       const response = convertInteractionEventToLlmResponse(
-        event as any,
+        event,
         aggregatedParts,
         'int-1',
       );
@@ -1684,7 +1682,7 @@ describe('interactions_utils', () => {
       };
       const aggregatedParts: Part[] = [];
       const response = convertInteractionEventToLlmResponse(
-        event as any,
+        event,
         aggregatedParts,
         'int-1',
       );
@@ -1715,11 +1713,7 @@ describe('interactions_utils', () => {
           message: 'user cancelled',
         },
       };
-      const response = convertInteractionEventToLlmResponse(
-        event as any,
-        [],
-        'int-1',
-      );
+      const response = convertInteractionEventToLlmResponse(event, [], 'int-1');
       expect(response).toEqual({
         errorCode: 'CANCELLED',
         errorMessage: 'user cancelled',
@@ -1733,11 +1727,7 @@ describe('interactions_utils', () => {
         event_type: 'interaction.status_update',
         status: 'failed',
       };
-      const response = convertInteractionEventToLlmResponse(
-        event as any,
-        [],
-        'int-1',
-      );
+      const response = convertInteractionEventToLlmResponse(event, [], 'int-1');
       expect(response).toEqual({
         errorCode: 'UNKNOWN_ERROR',
         errorMessage: 'Unknown error',
@@ -1753,7 +1743,7 @@ describe('interactions_utils', () => {
       };
       const parts = [{text: 'part 1'}];
       const response = convertInteractionEventToLlmResponse(
-        event as any,
+        event,
         parts,
         'int-1',
       );
@@ -1772,11 +1762,7 @@ describe('interactions_utils', () => {
         code: 'INTERNAL',
         message: 'internal error',
       };
-      const response = convertInteractionEventToLlmResponse(
-        event as any,
-        [],
-        'int-1',
-      );
+      const response = convertInteractionEventToLlmResponse(event, [], 'int-1');
       expect(response).toEqual({
         errorCode: 'INTERNAL',
         errorMessage: 'internal error',
@@ -1789,11 +1775,7 @@ describe('interactions_utils', () => {
       const event = {
         event_type: 'error',
       };
-      const response = convertInteractionEventToLlmResponse(
-        event as any,
-        [],
-        'int-1',
-      );
+      const response = convertInteractionEventToLlmResponse(event, [], 'int-1');
       expect(response).toEqual({
         errorCode: 'UNKNOWN_ERROR',
         errorMessage: 'Unknown error',
@@ -1820,7 +1802,7 @@ describe('interactions_utils', () => {
         },
       };
       const aggregatedParts: Part[] = [];
-      convertInteractionEventToLlmResponse(startEvent as any, aggregatedParts);
+      convertInteractionEventToLlmResponse(startEvent, aggregatedParts);
 
       expect(aggregatedParts.length).toBe(1);
       expect(aggregatedParts[0].functionCall).toBeDefined();
@@ -1882,11 +1864,7 @@ describe('interactions_utils', () => {
         event_type: 'interaction.status_update',
         status: 'requires_action',
       };
-      const response = convertInteractionEventToLlmResponse(
-        event as any,
-        [],
-        'int-1',
-      );
+      const response = convertInteractionEventToLlmResponse(event, [], 'int-1');
       expect(response).toEqual({
         content: undefined,
         partial: false,
@@ -2033,7 +2011,7 @@ describe('interactions_utils', () => {
           {
             thought: true,
             thoughtSignature: 'sig-123',
-          } as any,
+          },
         ],
       };
       expect(convertContentToSteps(content)).toEqual([

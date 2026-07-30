@@ -185,7 +185,7 @@ function removeEmptyAndUndefinedFields(obj: Record<string, unknown>) {
         removeEmptyAndUndefinedFields(obj[key] as Record<string, unknown>);
 
         // Remove fields that are just an empty object
-        if (Object.keys(obj[key] as Record<string, unknown>).length === 0) {
+        if (Object.keys(obj[key]).length === 0) {
           delete obj[key];
           continue;
         }

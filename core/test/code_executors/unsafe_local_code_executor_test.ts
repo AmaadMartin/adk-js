@@ -282,11 +282,11 @@ describe('UnsafeLocalCodeExecutor', () => {
     const result = await executor.executeCode(params);
 
     expect(result.outputFiles).toBeDefined();
-    expect(result.outputFiles!.length).toBe(1);
-    expect(result.outputFiles![0].name).toBe('new_output.txt');
-    expect(result.outputFiles![0].content).toBe('hello from script');
-    expect(result.outputFiles![0].contentEncoding).toBe('utf-8');
-    expect(result.outputFiles![0].mimeType).toBe('text/plain');
+    expect(result.outputFiles.length).toBe(1);
+    expect(result.outputFiles[0].name).toBe('new_output.txt');
+    expect(result.outputFiles[0].content).toBe('hello from script');
+    expect(result.outputFiles[0].contentEncoding).toBe('utf-8');
+    expect(result.outputFiles[0].mimeType).toBe('text/plain');
   });
 
   it('should infer correct mimeType for generated JSON files', async () => {
@@ -302,10 +302,10 @@ describe('UnsafeLocalCodeExecutor', () => {
     const result = await executor.executeCode(params);
 
     expect(result.outputFiles).toBeDefined();
-    expect(result.outputFiles!.length).toBe(1);
-    expect(result.outputFiles![0].name).toBe('output.json');
-    expect(result.outputFiles![0].content).toBe('{"hello":"world"}');
-    expect(result.outputFiles![0].contentEncoding).toBe('utf-8');
-    expect(result.outputFiles![0].mimeType).toBe('application/json');
+    expect(result.outputFiles.length).toBe(1);
+    expect(result.outputFiles[0].name).toBe('output.json');
+    expect(result.outputFiles[0].content).toBe('{"hello":"world"}');
+    expect(result.outputFiles[0].contentEncoding).toBe('utf-8');
+    expect(result.outputFiles[0].mimeType).toBe('application/json');
   });
 });

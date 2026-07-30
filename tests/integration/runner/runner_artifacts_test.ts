@@ -13,7 +13,7 @@ import {
   LlmAgent,
   Runner,
 } from '@google/adk';
-import {Content, Part} from '@google/genai';
+import {Content} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
 class SimulatedGcsArtifactService extends InMemoryArtifactService {
@@ -90,7 +90,7 @@ describe('Integration: Runner Artifact Saving & LLM Exposure', () => {
             data: 'JVBERi0xLjQ...',
             displayName: 'quarterly_report.pdf',
           },
-        } as unknown as Part,
+        },
       ],
     };
 

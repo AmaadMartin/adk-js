@@ -5,11 +5,7 @@
  */
 
 import {FunctionDeclaration} from '@google/genai';
-import {
-  CallToolRequest,
-  CallToolResult,
-  Tool,
-} from '@modelcontextprotocol/sdk/types.js';
+import {CallToolRequest, Tool} from '@modelcontextprotocol/sdk/types.js';
 
 import {toGeminiSchema} from '../../utils/gemini_schema_util.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
@@ -71,7 +67,7 @@ export class MCPTool extends BaseTool {
       const result = await session.callTool(callRequest.params, undefined, {
         signal: request.toolContext.abortSignal,
       });
-      return result as CallToolResult;
+      return result;
     } finally {
       await this.mcpSessionManager.closeSession(session);
     }

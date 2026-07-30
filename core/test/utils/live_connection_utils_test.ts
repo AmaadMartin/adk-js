@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GroundingMetadata, LiveServerGoAway} from '@google/genai';
+import {LiveServerGoAway} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {LiveResponseAggregator} from '../../src/utils/live_connection_utils.js';
 
@@ -56,7 +56,7 @@ describe('LiveResponseAggregator', () => {
         },
         turnComplete: true,
         interrupted: false,
-        groundingMetadata: {groundingChunks: []} as GroundingMetadata,
+        groundingMetadata: {groundingChunks: []},
       },
     });
     const res2 = Array.from(gen2);
@@ -243,7 +243,7 @@ describe('LiveResponseAggregator', () => {
             groundingChunks: [
               {web: {uri: 'https://google.com', title: 'Google'}},
             ],
-          } as GroundingMetadata,
+          },
         },
       }),
     );

@@ -1233,7 +1233,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
           await invocationContext.pluginManager.runOnModelErrorCallback({
             callbackContext: callbackContext,
             llmRequest: llmRequest,
-            error: modelError as Error,
+            error: modelError,
           });
 
         if (onModelErrorCallbackResponse) {

@@ -31,7 +31,7 @@ export async function resolveAgentCard(
     return agentCard;
   }
 
-  const source = agentCard as string;
+  const source = agentCard;
   if (source.startsWith('http://') || source.startsWith('https://')) {
     const resolver = new DefaultAgentCardResolver();
     return await resolver.resolve(source);

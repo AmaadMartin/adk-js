@@ -24,7 +24,7 @@ function makeSession(): Session {
     state: {},
     events: [],
     lastUpdateTime: Date.now(),
-  } as unknown as Session;
+  };
 }
 
 /**

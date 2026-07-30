@@ -193,10 +193,7 @@ export function toStructuredEvents(event: Event): StructuredEvent[] {
   ) {
     structuredEvents.push({
       type: EventType.TOOL_CONFIRMATION,
-      confirmations: event.actions.requestedToolConfirmations as Record<
-        string,
-        unknown
-      >,
+      confirmations: event.actions.requestedToolConfirmations,
     });
   }
 

@@ -152,7 +152,7 @@ describe('A2A Agent Executor', () => {
 
     const artifacts = gotEvents.filter(
       (e: A2AEvent) => e.kind === 'artifact-update',
-    ) as TaskArtifactUpdateEvent[];
+    );
 
     const workingEvent = gotEvents.find(
       (e: A2AEvent) =>
@@ -194,7 +194,7 @@ describe('A2A Agent Executor', () => {
 
     const artifacts = gotEvents.filter(
       (e: A2AEvent) => e.kind === 'artifact-update',
-    ) as TaskArtifactUpdateEvent[];
+    );
 
     expect(artifacts).toHaveLength(1);
     expect(artifacts[0].artifact.parts).toEqual([
@@ -242,7 +242,7 @@ describe('A2A Agent Executor', () => {
 
     const artifacts = gotEvents.filter(
       (e: A2AEvent) => e.kind === 'artifact-update',
-    ) as TaskArtifactUpdateEvent[];
+    );
 
     expect(artifacts).toHaveLength(2);
     expect(artifacts[0].artifact.parts).toEqual([
@@ -289,7 +289,7 @@ describe('A2A Agent Executor', () => {
 
     const artifacts = gotEvents.filter(
       (e: A2AEvent) => e.kind === 'artifact-update',
-    ) as TaskArtifactUpdateEvent[];
+    );
 
     expect(artifacts).toHaveLength(2);
     expect(artifacts[0].artifact.parts).toEqual([
@@ -339,7 +339,7 @@ describe('A2A Agent Executor', () => {
 
     const artifacts = gotEvents.filter(
       (e: A2AEvent) => e.kind === 'artifact-update',
-    ) as TaskArtifactUpdateEvent[];
+    );
 
     expect(artifacts).toHaveLength(2);
     expect(artifacts[0].artifact.parts).toEqual([
@@ -451,7 +451,7 @@ describe('A2A Agent Executor', () => {
 
     const artifacts = gotEvents.filter(
       (e: A2AEvent) => e.kind === 'artifact-update',
-    ) as TaskArtifactUpdateEvent[];
+    );
 
     expect(artifacts).toHaveLength(1);
     expect(artifacts[0].metadata?.adk_citation_metadata).toEqual({
@@ -505,7 +505,7 @@ describe('A2A Agent Executor', () => {
 
     const artifacts = gotEvents.filter(
       (e: A2AEvent) => e.kind === 'artifact-update',
-    ) as TaskArtifactUpdateEvent[];
+    );
     expect(artifacts).toHaveLength(1);
     expect(artifacts[0].artifact.parts).toEqual([
       {kind: 'text', text: 'hello'},
@@ -545,7 +545,7 @@ describe('A2A Agent Executor', () => {
 
     const artifacts = gotEvents.filter(
       (e: A2AEvent) => e.kind === 'artifact-update',
-    ) as TaskArtifactUpdateEvent[];
+    );
     expect(artifacts).toHaveLength(1);
     expect(artifacts[0].artifact.parts).toEqual([
       {kind: 'text', text: 'hello'},
@@ -568,7 +568,7 @@ describe('A2A Agent Executor', () => {
 
     const artifacts = gotEvents.filter(
       (e: A2AEvent) => e.kind === 'artifact-update',
-    ) as TaskArtifactUpdateEvent[];
+    );
     expect(artifacts).toHaveLength(1);
     expect(artifacts[0].artifact.parts).toEqual([
       {kind: 'text', text: 'hello'},
@@ -594,7 +594,7 @@ describe('A2A Agent Executor', () => {
 
     const artifacts = gotEvents.filter(
       (e: A2AEvent) => e.kind === 'artifact-update',
-    ) as TaskArtifactUpdateEvent[];
+    );
     expect(artifacts).toHaveLength(2);
     expect(artifacts[0].artifact.parts).toEqual([
       {kind: 'text', text: 'hello'},
@@ -626,7 +626,7 @@ describe('A2A Agent Executor', () => {
     const gotEvents = await runTest(remoteEvents);
     const artifacts = gotEvents.filter(
       (e: A2AEvent) => e.kind === 'artifact-update',
-    ) as TaskArtifactUpdateEvent[];
+    );
     expect(artifacts).toHaveLength(0);
 
     const finalEvent = gotEvents.find(
@@ -670,7 +670,7 @@ describe('A2A Agent Executor', () => {
 
     const artifacts = gotEvents.filter(
       (e: A2AEvent) => e.kind === 'artifact-update',
-    ) as TaskArtifactUpdateEvent[];
+    );
 
     // According to AgentExecutor, each adkEvent generates an artifact-update
     // partial=true means append=true, lastChunk=false

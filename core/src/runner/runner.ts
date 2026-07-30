@@ -319,7 +319,7 @@ export class Runner {
           }
 
           if (pluginUserMessage) {
-            newMessage = pluginUserMessage as Content;
+            newMessage = pluginUserMessage;
           }
 
           // =========================================================================

@@ -67,7 +67,7 @@ describe('A2AAgentExecutor', () => {
       runner: {
         appName: 'test-app',
         sessionService: mockSessionService,
-      } as unknown as RunnerConfig,
+      },
     });
 
     const ctx = createRequestContext({userMessage: undefined});
@@ -109,13 +109,13 @@ describe('A2AAgentExecutor', () => {
       }
     }
 
-    vi.mocked(Runner).mockImplementation(((config: RunnerConfig) => {
+    vi.mocked(Runner).mockImplementation((config: RunnerConfig) => {
       return {
         appName: config?.appName,
         sessionService: config?.sessionService,
         runAsync: mockRunAsync,
       } as unknown as Runner;
-    }) as unknown as () => Runner);
+    });
 
     let beforeExecutedCalled = false;
     let afterEventCount = 0;
@@ -125,7 +125,7 @@ describe('A2AAgentExecutor', () => {
       runner: {
         appName: 'test-app',
         sessionService: mockSessionService,
-      } as unknown as RunnerConfig,
+      },
       beforeExecuteCallback: async () => {
         beforeExecutedCalled = true;
       },
@@ -178,7 +178,7 @@ describe('A2AAgentExecutor', () => {
       runner: {
         appName: 'test-app',
         sessionService: mockSessionService,
-      } as unknown as RunnerConfig,
+      },
     });
 
     const ctx = createRequestContext({
@@ -232,19 +232,19 @@ describe('A2AAgentExecutor', () => {
       throw new Error('LLM failed');
     }
 
-    vi.mocked(Runner).mockImplementation(((config: RunnerConfig) => {
+    vi.mocked(Runner).mockImplementation((config: RunnerConfig) => {
       return {
         appName: config?.appName,
         sessionService: config?.sessionService,
         runAsync: mockRunAsyncWithError,
       } as unknown as Runner;
-    }) as unknown as () => Runner);
+    });
 
     const executor = new A2AAgentExecutor({
       runner: {
         appName: 'test-app',
         sessionService: mockSessionService,
-      } as unknown as RunnerConfig,
+      },
     });
 
     const ctx = createRequestContext();
@@ -272,7 +272,7 @@ describe('A2AAgentExecutor', () => {
       runner: {
         appName: 'test-app',
         sessionService: mockSessionService,
-      } as unknown as RunnerConfig,
+      },
     });
 
     await expect(executor.cancelTask('any-task-id')).rejects.toThrow(

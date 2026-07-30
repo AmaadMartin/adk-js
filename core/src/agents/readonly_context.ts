@@ -55,9 +55,6 @@ export class ReadonlyContext {
    * The state of the current session.
    */
   get state(): Readonly<State> {
-    return new State(
-      this.invocationContext.session.state,
-      {},
-    ) as Readonly<State>;
+    return new State(this.invocationContext.session.state, {});
   }
 }

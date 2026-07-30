@@ -371,7 +371,7 @@ describe('DatabaseSessionService', () => {
       allowGlobalContext: true,
     });
     await internalService.init();
-    const orm = (internalService as unknown as {orm: MikroORM}).orm as MikroORM;
+    const orm = (internalService as unknown as {orm: MikroORM}).orm;
 
     // Manually insert bad version
     const em = orm.em.fork();
