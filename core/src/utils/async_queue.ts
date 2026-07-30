@@ -10,7 +10,7 @@
 export class AsyncQueue<T> implements AsyncIterable<T> {
   private queue: T[] = [];
   private resolvers: Array<{
-    resolve: (value: IteratorResult<T>) => void;
+    resolve: (value: IteratorResult<T, void>) => void;
     reject: (reason?: unknown) => void;
   }> = [];
   private closed = false;
@@ -38,11 +38,11 @@ export class AsyncQueue<T> implements AsyncIterable<T> {
     this.closed = true;
     while (this.resolvers.length > 0) {
       const {resolve} = this.resolvers.shift()!;
-      resolve({value: undefined as never, done: true});
+      resolve({value: undefined, done: true});
     }
   }
 
-  [Symbol.asyncIterator](): AsyncIterator<T> {
+  [Symbol.asyncIterator](): AsyncIterator<T, void> {
     return {
       next: () => {
         if (this.errorVal) {
@@ -54,9 +54,9 @@ export class AsyncQueue<T> implements AsyncIterable<T> {
           return Promise.resolve({value: this.queue.shift()!, done: false});
         }
         if (this.closed) {
-          return Promise.resolve({value: undefined as never, done: true});
+          return Promise.resolve({value: undefined, done: true});
         }
-        return new Promise<IteratorResult<T>>((resolve, reject) => {
+        return new Promise<IteratorResult<T, void>>((resolve, reject) => {
           this.resolvers.push({resolve, reject});
         });
       },
