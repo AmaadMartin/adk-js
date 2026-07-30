@@ -77,6 +77,11 @@ describe('VertexAiSessionService', () => {
   let mockClient: MockSessions;
 
   beforeEach(() => {
+    // Express mode resolves a key from the ambient environment, which would
+    // stop the constructor throwing on a machine that exports these.
+    vi.stubEnv('GOOGLE_GENAI_USE_VERTEXAI', undefined);
+    vi.stubEnv('GOOGLE_API_KEY', undefined);
+
     mockClient = {
       createInternal: vi.fn().mockResolvedValue({
         name: 'operations/test-operation-id',

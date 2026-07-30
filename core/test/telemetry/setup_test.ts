@@ -24,10 +24,21 @@ vi.mock('@opentelemetry/api');
 vi.mock('@opentelemetry/api-logs');
 vi.mock('../../src/utils/logger.js');
 
+const OTEL_ENDPOINT_ENV_VARS = [
+  'OTEL_EXPORTER_OTLP_ENDPOINT',
+  'OTEL_EXPORTER_OTLP_TRACES_ENDPOINT',
+  'OTEL_EXPORTER_OTLP_METRICS_ENDPOINT',
+  'OTEL_EXPORTER_OTLP_LOGS_ENDPOINT',
+] as const;
+
 describe('maybeSetOtelProviders', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.unstubAllEnvs();
+    // The negative assertions below only hold if no endpoint variable is
+    // inherited from the ambient environment.
+    for (const name of OTEL_ENDPOINT_ENV_VARS) {
+      vi.stubEnv(name, undefined);
+    }
   });
 
   afterEach(() => {
