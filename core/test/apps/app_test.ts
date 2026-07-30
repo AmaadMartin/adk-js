@@ -6,7 +6,12 @@
 
 import {describe, expect, it} from 'vitest';
 import {BaseAgent} from '../../src/agents/base_agent.js';
-import {App, isApp, validateAppName} from '../../src/apps/app.js';
+import {
+  App,
+  isApp,
+  validateAppName,
+  validateRootAgent,
+} from '../../src/apps/app.js';
 import {createResumabilityConfig} from '../../src/apps/resumability_config.js';
 import {BasePlugin} from '../../src/plugins/base_plugin.js';
 
@@ -49,6 +54,43 @@ describe('validateAppName', () => {
   });
 });
 
+describe('validateRootAgent', () => {
+  it('accepts a BaseAgent instance', () => {
+    expect(() => validateRootAgent(new DummyAgent('root'))).not.toThrow();
+  });
+
+  it('rejects undefined', () => {
+    expect(() => validateRootAgent(undefined)).toThrow(
+      'rootAgent must be provided.',
+    );
+  });
+
+  it('rejects null', () => {
+    expect(() => validateRootAgent(null)).toThrow(
+      'rootAgent must be provided.',
+    );
+  });
+
+  it('rejects a plain object', () => {
+    expect(() => validateRootAgent({name: 'fake'})).toThrow(TypeError);
+    expect(() => validateRootAgent({name: 'fake'})).toThrow(
+      /rootAgent must be a BaseAgent instance, got Object/,
+    );
+  });
+
+  it('rejects a primitive', () => {
+    expect(() => validateRootAgent('agent')).toThrow(
+      /rootAgent must be a BaseAgent instance, got String/,
+    );
+  });
+
+  it('falls back to typeof for prototype-less values', () => {
+    expect(() => validateRootAgent(Object.create(null))).toThrow(
+      /rootAgent must be a BaseAgent instance, got object/,
+    );
+  });
+});
+
 describe('App', () => {
   it('creates an App with required options and checks isApp', () => {
     const rootAgent = new DummyAgent('root');
@@ -77,13 +119,15 @@ describe('App', () => {
     expect(app.plugins).toEqual([plugin]);
   });
 
-  it('throws if rootAgent is missing or not a BaseAgent', () => {
-    expect(() => new App({name: 'test_app', rootAgent: undefined})).toThrow(
-      'rootAgent must be provided.',
+  it('rejects a rootAgent that is not a BaseAgent', () => {
+    // Statically a BaseAgent, but stripped of the brand isBaseAgent looks for,
+    // so the constructor's guard is reachable without a type suppression.
+    const unbranded = new DummyAgent('root');
+    Reflect.deleteProperty(unbranded, Symbol.for('google.adk.baseAgent'));
+
+    expect(() => new App({name: 'test_app', rootAgent: unbranded})).toThrow(
+      /rootAgent must be a BaseAgent instance/,
     );
-    expect(
-      () => new App({name: 'test_app', rootAgent: {name: 'fake'}}),
-    ).toThrow(/rootAgent must be a BaseAgent instance/);
   });
 
   it('creates an App with resumabilityConfig', () => {
