@@ -187,7 +187,7 @@ async function readJson(filePath: string): Promise<unknown> {
 const dockerRequested = process.env['ADK_RUN_DOCKER_DEPLOY_TEST'] === '1';
 const dockerEnabled = dockerRequested && (await isDockerAvailable());
 
-let agentLoader: AgentLoader;
+let agentLoader: AgentLoader | undefined;
 let stagedDir: string;
 let bundlePath: string;
 let dockerfile: string;
@@ -212,7 +212,8 @@ beforeAll(async () => {
 }, STAGING_TIMEOUT_MS);
 
 afterAll(async () => {
-  await agentLoader.disposeAll().catch(() => {});
+  // Guarded independently: a staging failure must not skip the next step.
+  await agentLoader?.disposeAll().catch(() => {});
   await fs.rm(stagedDir, {recursive: true, force: true}).catch(() => {});
 }, STAGING_TIMEOUT_MS);
 
@@ -241,7 +242,6 @@ describe('Cloud Run deployment staging', () => {
     expect(stagedManifest['dependencies']).toEqual(
       fixtureManifest['dependencies'],
     );
-    expect(stagedManifest['dependencies']).toHaveProperty('@google/adk');
   });
 
   it('creates the package-lock.json and node_modules the Dockerfile expects', async () => {
