@@ -4,21 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Sessions} from '@google-cloud/vertexai/build/src/genai/sessions.js';
 import {createEvent, State, VertexAiSessionService} from '@google/adk';
 import {Session} from '@google/adk/sessions/session.js';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
-
-// Mock the unreleased nodejs-vertexai package so the import resolves
-vi.mock('nodejs-vertexai', () => ({
-  SessionsClient: class {
-    create = vi.fn();
-    get = vi.fn();
-    list = vi.fn();
-    delete = vi.fn();
-    events = {append: vi.fn()};
-  },
-}));
+import {Sessions} from '../../src/utils/vertex_ai_internal.js';
 
 import {
   isVertexAiConnectionString,
