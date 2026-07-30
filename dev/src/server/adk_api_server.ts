@@ -42,7 +42,7 @@ import {
 } from '../utils/telemetry_utils.js';
 import {getAgentGraphAsDot} from './agent_graph.js';
 
-interface ServerOptions {
+export interface AdkApiServerOptions {
   agentsDir?: string;
   host?: string;
   port?: number;
@@ -94,7 +94,7 @@ export class AdkApiServer {
   private readonly logger: Logger;
   private readonly a2a: boolean;
 
-  constructor(options: ServerOptions) {
+  constructor(options: AdkApiServerOptions) {
     this.host = options.host ?? 'localhost';
     this.port = options.port ?? 0; // 0 means random free port
     this.sessionService =
