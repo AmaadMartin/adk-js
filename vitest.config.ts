@@ -22,6 +22,8 @@ export default defineConfig({
         test: {
           name: 'unit:core',
           environment: 'node',
+          unstubEnvs: true,
+          unstubGlobals: true,
           alias: {
             '@google/adk': path.resolve(__dirname, './core/src'),
             '@google/adk-integrations': path.resolve(
@@ -36,6 +38,8 @@ export default defineConfig({
         test: {
           name: 'unit:dev',
           environment: 'node',
+          unstubEnvs: true,
+          unstubGlobals: true,
           alias: {
             '@google/adk': path.resolve(__dirname, './core/src'),
             '@google/adk-integrations': path.resolve(
@@ -50,6 +54,8 @@ export default defineConfig({
         test: {
           name: 'unit:integrations',
           environment: 'node',
+          unstubEnvs: true,
+          unstubGlobals: true,
           alias: {
             '@google/adk': path.resolve(__dirname, './core/src'),
             '@google/adk-integrations': path.resolve(
@@ -64,6 +70,8 @@ export default defineConfig({
         test: {
           name: 'integration',
           environment: 'node',
+          unstubEnvs: true,
+          unstubGlobals: true,
           alias: {
             '@google/adk': path.resolve(__dirname, './core/src'),
             '@google/adk-integrations': path.resolve(
@@ -78,6 +86,8 @@ export default defineConfig({
         test: {
           name: 'e2e',
           environment: 'node',
+          unstubEnvs: true,
+          unstubGlobals: true,
           alias: {
             '@google/adk': path.resolve(__dirname, './core/src'),
             '@google/adk-integrations': path.resolve(
@@ -92,6 +102,8 @@ export default defineConfig({
         test: {
           name: 'cross-language',
           environment: 'node',
+          unstubEnvs: true,
+          unstubGlobals: true,
           alias: {
             '@google/adk': path.resolve(__dirname, './core/src'),
             '@google/adk-integrations': path.resolve(
