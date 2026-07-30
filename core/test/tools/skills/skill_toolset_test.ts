@@ -99,27 +99,16 @@ describe('skill_toolset', () => {
     });
 
     describe('outputDir', () => {
-      it('defaults to the current working directory', () => {
-        const toolset = new SkillToolset([mockSkill]);
-        expect(toolset.outputDir).toBe(process.cwd());
+      it('is undefined when no directory is configured', () => {
+        // The toolset deliberately resolves no default of its own, so the cwd
+        // default stays where it was: resolved per call by materializeFiles.
+        expect(new SkillToolset([mockSkill]).outputDir).toBeUndefined();
       });
 
-      it('returns the configured directory', () => {
+      it('exposes the configured directory', () => {
         const outputDir = path.join(os.tmpdir(), 'skill-output');
         const toolset = new SkillToolset([mockSkill], {outputDir});
         expect(toolset.outputDir).toBe(outputDir);
-      });
-
-      it('resolves the default lazily rather than snapshotting it', () => {
-        const toolset = new SkillToolset([mockSkill]);
-        const relocated = path.join(os.tmpdir(), 'relocated-cwd');
-        const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(relocated);
-
-        try {
-          expect(toolset.outputDir).toBe(relocated);
-        } finally {
-          cwdSpy.mockRestore();
-        }
       });
     });
 

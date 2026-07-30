@@ -47,7 +47,11 @@ export class SkillToolset extends BaseToolset {
   public registry?: SkillRegistry;
   private toolCache = new Map<string, BaseTool[]>();
   private fetchedSkillCache = new Map<string, Map<string, Skill>>();
-  private readonly configuredOutputDir?: string;
+  /**
+   * Directory that skill script output files are materialized into. Undefined
+   * when unconfigured, which leaves the default to `materializeFiles`.
+   */
+  public readonly outputDir?: string;
 
   constructor(
     skills: Record<string, Skill> | Skill[],
@@ -82,7 +86,7 @@ export class SkillToolset extends BaseToolset {
     this.codeExecutor = options.codeExecutor;
     this.additionalTools = options.additionalTools || [];
     this.registry = options.registry;
-    this.configuredOutputDir = options.outputDir;
+    this.outputDir = options.outputDir;
 
     this.tools = [
       new ListSkillsTool(this),
@@ -100,17 +104,6 @@ export class SkillToolset extends BaseToolset {
     if (this.registry) {
       this.tools.push(new SearchSkillsTool(this));
     }
-  }
-
-  /**
-   * Directory that skill script output files are materialized into,
-   * defaulting to the host process's current working directory.
-   *
-   * Resolved per read rather than at construction time, so the default keeps
-   * tracking `process.cwd()` exactly as it did before this option existed.
-   */
-  get outputDir(): string {
-    return this.configuredOutputDir ?? process.cwd();
   }
 
   override async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {

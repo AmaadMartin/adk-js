@@ -54,8 +54,14 @@ describe('file_utils', () => {
       expect(content2).toBe('world');
     });
 
-    it('should default the base directory to the current working directory', async () => {
-      const files = [
+    it('should default the base directory to the working directory of each call', async () => {
+      // Callers that omit `dir` — the skill script tools when no output
+      // directory is configured — follow process.cwd() as of the call, not as
+      // of module load, so a process that chdir()s is tracked.
+      const secondDir = await fs.mkdtemp(
+        path.join(os.tmpdir(), 'file_utils_test_second_'),
+      );
+      const newFile = () => [
         {
           name: 'default_dir.txt',
           content: 'hello',
@@ -66,17 +72,24 @@ describe('file_utils', () => {
       const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(tempDir);
 
       try {
-        const created = await materializeFiles(files);
-        expect(created[0].name).toBe('default_dir.txt');
+        const first = await materializeFiles(newFile());
+        expect(first[0].name).toBe('default_dir.txt');
+
+        cwdSpy.mockReturnValue(secondDir);
+        await materializeFiles(newFile());
+
+        // Written under the cwd in effect at each call, not a single snapshot
+        // (a snapshot would have collided and produced default_dir_2.txt).
+        expect(
+          await fs.readFile(path.join(tempDir, 'default_dir.txt'), 'utf8'),
+        ).toBe('hello');
+        expect(
+          await fs.readFile(path.join(secondDir, 'default_dir.txt'), 'utf8'),
+        ).toBe('hello');
       } finally {
         cwdSpy.mockRestore();
+        await fs.rm(secondDir, {recursive: true, force: true});
       }
-
-      const content = await fs.readFile(
-        path.join(tempDir, 'default_dir.txt'),
-        'utf8',
-      );
-      expect(content).toBe('hello');
     });
 
     it('should throw an error if file attempts to escape target directory via relative path', async () => {
