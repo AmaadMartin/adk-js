@@ -17,17 +17,9 @@ export const FrontmatterSchema = z.preprocess(
     if (typeof data === 'object' && data !== null) {
       const obj = data as Record<string, unknown>;
       if (!('allowedTools' in obj)) {
-        if ('allowed-tools' in obj) {
-          return {
-            ...obj,
-            allowedTools: obj['allowed-tools'],
-          };
-        }
-        if ('allowed_tools' in obj) {
-          return {
-            ...obj,
-            allowedTools: obj['allowed_tools'],
-          };
+        const alias = obj['allowed-tools'] ?? obj['allowed_tools'];
+        if (alias !== undefined) {
+          return {...obj, allowedTools: alias};
         }
       }
     }
