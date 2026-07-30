@@ -4,18 +4,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Client} from '@google-cloud/vertexai/build/src/genai/client.js';
-import {Sessions} from '@google-cloud/vertexai/build/src/genai/sessions.js';
-import {
-  AppendAgentEngineSessionEventConfig,
-  AppendAgentEngineSessionEventRequestParameters,
-  EventMetadata,
-  Session as VertexAiSession,
-  SessionEvent as VertexAiSessionEvent,
-} from '@google-cloud/vertexai/build/src/genai/types.js';
+import {Client} from '@google-cloud/vertexai';
 import {Content, GenerateContentResponseUsageMetadata} from '@google/genai';
 import {isCompactedEvent} from '../events/compacted_event.js';
 import {experimental} from '../utils/experimental.js';
+import {
+  AppendAgentEngineSessionEventConfig,
+  AppendAgentEngineSessionEventRequestParameters,
+  Sessions,
+  VertexAiEventMetadata,
+  VertexAiSession,
+  VertexAiSessionEvent,
+} from '../utils/vertex_ai_internal.js';
 
 import {AuthConfig} from '../auth/auth_tool.js';
 import {Event} from '../events/event.js';
@@ -399,7 +399,7 @@ export class VertexAiSessionService extends BaseSessionService {
     ]);
 
     config.eventMetadata = {
-      ...partialCopy<EventMetadata>(event, [
+      ...partialCopy<VertexAiEventMetadata>(event, [
         'partial',
         'turnComplete',
         'interrupted',

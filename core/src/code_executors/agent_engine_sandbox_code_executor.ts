@@ -5,9 +5,9 @@
  */
 
 import {Client} from '@google-cloud/vertexai';
-import {Language} from '@google-cloud/vertexai/build/src/genai/types.js';
 import {experimental} from '../utils/experimental.js';
 import {guessMimeType} from '../utils/file_utils.js';
+import {VertexAiLanguage} from '../utils/vertex_ai_internal.js';
 
 interface LocalChunk {
   data?: string;
@@ -73,12 +73,12 @@ export interface AgentEngineSandboxCodeExecutorOptions {
 /**
  * A code executor that uses Agent Engine Code Execution Sandbox to execute code.
  */
-function mapLanguage(lang: CodeExecutionLanguage): Language {
+function mapLanguage(lang: CodeExecutionLanguage): VertexAiLanguage {
   switch (lang) {
     case CodeExecutionLanguage.PYTHON:
-      return Language.LANGUAGE_PYTHON;
+      return VertexAiLanguage.LANGUAGE_PYTHON;
     case CodeExecutionLanguage.JAVASCRIPT:
-      return Language.LANGUAGE_JAVASCRIPT;
+      return VertexAiLanguage.LANGUAGE_JAVASCRIPT;
     default:
       throw new Error(`Unsupported language for Agent Engine Sandbox: ${lang}`);
   }
@@ -287,7 +287,7 @@ export class AgentEngineSandboxCodeExecutor extends BaseCodeExecutor {
   private async getOrCreateSandbox(
     invocationContext: InvocationContext,
     agentEngineName: string,
-    language: Language,
+    language: VertexAiLanguage,
   ): Promise<string> {
     if (this.sandboxResourceName) {
       return this.sandboxResourceName;

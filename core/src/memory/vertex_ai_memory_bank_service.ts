@@ -5,17 +5,17 @@
  */
 
 import {Client} from '@google-cloud/vertexai';
-import {Memories} from '@google-cloud/vertexai/build/src/genai/memories.js';
-import {
-  AgentEngineMemoryConfig,
-  GenerateAgentEngineMemoriesConfig,
-  GenerateMemoriesRequestDirectContentsSourceEvent,
-  MemoryMetadataValue,
-} from '@google-cloud/vertexai/build/src/genai/types.js';
 import {Content, createUserContent} from '@google/genai';
 import {Event} from '../events/event.js';
 import {Session} from '../sessions/session.js';
 import {logger} from '../utils/logger.js';
+import {
+  AgentEngineMemoryConfig,
+  GenerateAgentEngineMemoriesConfig,
+  GenerateMemoriesRequestDirectContentsSourceEvent,
+  Memories,
+  MemoryMetadataValue,
+} from '../utils/vertex_ai_internal.js';
 import {getExpressModeApiKey} from '../utils/vertex_ai_utils.js';
 import {
   BaseMemoryService,
