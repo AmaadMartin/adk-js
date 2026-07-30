@@ -23,7 +23,7 @@ jobs:
           go-version: '1.25'
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       - name: Install Go dependencies
         shell: bash
