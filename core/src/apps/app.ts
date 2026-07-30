@@ -30,7 +30,6 @@ export function validateAppName(name: string): void {
  * `AppOptions.rootAgent` is typed, so this only rejects values that reach the
  * constructor from untyped JavaScript callers.
  *
- * @param rootAgent The candidate root agent.
  * @throws {Error} If `rootAgent` is `undefined` or `null`.
  * @throws {TypeError} If `rootAgent` is not a `BaseAgent` instance.
  */

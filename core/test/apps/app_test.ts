@@ -119,10 +119,15 @@ describe('App', () => {
     expect(app.plugins).toEqual([plugin]);
   });
 
-  it('rejects an invalid app name', () => {
-    expect(
-      () => new App({name: 'user', rootAgent: new DummyAgent('root')}),
-    ).toThrow(/reserved for end-user input/);
+  it('rejects a rootAgent that is not a BaseAgent', () => {
+    // Statically a BaseAgent, but stripped of the brand isBaseAgent looks for,
+    // so the constructor's guard is reachable without a type suppression.
+    const unbranded = new DummyAgent('root');
+    Reflect.deleteProperty(unbranded, Symbol.for('google.adk.baseAgent'));
+
+    expect(() => new App({name: 'test_app', rootAgent: unbranded})).toThrow(
+      /rootAgent must be a BaseAgent instance/,
+    );
   });
 
   it('creates an App with resumabilityConfig', () => {
