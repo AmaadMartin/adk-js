@@ -16,12 +16,35 @@ import {
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {describe, expect, it} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 
 const IS_WINDOWS = os.platform() === 'win32';
 const IS_UNIX = os.platform() === 'linux' || os.platform() === 'darwin';
 
 describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
+  // RunSkillScriptTool materializes a script's output files into process.cwd()
+  // (see materializeFiles in core/src/utils/file_utils.ts), which is the repo
+  // root when the suite runs. Run every test from a throwaway directory so that
+  // a failed assertion can never leave a generated file in the working tree,
+  // and so the deterministic filename the collision test relies on cannot be
+  // poisoned by a previous run.
+  let originalCwd: string;
+  let workDir: string;
+
+  beforeEach(async () => {
+    originalCwd = process.cwd();
+    workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-run-skill-script-'));
+    process.chdir(workDir);
+  });
+
+  afterEach(async () => {
+    // Restore the cwd first so a removal failure cannot strand the worker in a
+    // deleted directory, and so Windows does not refuse to remove a directory
+    // that is a live process's cwd.
+    process.chdir(originalCwd);
+    await fs.rm(workDir, {recursive: true, force: true});
+  });
+
   function createMockContext(agentName = 'test-agent') {
     return new Context({
       invocationContext: {
@@ -302,9 +325,6 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
 
     const content = await fs.readFile(fullPath, 'utf-8');
     expect(content).toBe('hello from script file');
-
-    // Clean up
-    await fs.unlink(fullPath);
   });
 
   it('handles file collisions by appending a numeric suffix', async () => {
@@ -342,9 +362,5 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
 
     const content = await fs.readFile(fullPath, 'utf-8');
     expect(content).toBe('hello from script file');
-
-    // Clean up both files
-    await fs.unlink(targetFile);
-    await fs.unlink(fullPath);
   });
 });
