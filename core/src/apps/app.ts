@@ -25,6 +25,33 @@ export function validateAppName(name: string): void {
 }
 
 /**
+ * Ensures the provided root agent is a usable {@link BaseAgent} instance.
+ *
+ * `AppOptions.rootAgent` is typed, so this only rejects values that reach the
+ * constructor from untyped JavaScript callers.
+ *
+ * @param rootAgent The candidate root agent.
+ * @throws {Error} If `rootAgent` is `undefined` or `null`.
+ * @throws {TypeError} If `rootAgent` is not a `BaseAgent` instance.
+ */
+export function validateRootAgent(
+  rootAgent: unknown,
+): asserts rootAgent is BaseAgent {
+  if (rootAgent === undefined || rootAgent === null) {
+    throw new Error('rootAgent must be provided.');
+  }
+
+  if (!isBaseAgent(rootAgent)) {
+    throw new TypeError(
+      `rootAgent must be a BaseAgent instance, got ${
+        (rootAgent as {constructor?: {name?: string}})?.constructor?.name ??
+        typeof rootAgent
+      }`,
+    );
+  }
+}
+
+/**
  * A unique symbol to identify ADK App classes.
  * Defined once and shared by all App instances.
  */
@@ -75,19 +102,7 @@ export class App {
 
   constructor(options: AppOptions) {
     validateAppName(options.name);
-
-    if (options.rootAgent === undefined || options.rootAgent === null) {
-      throw new Error('rootAgent must be provided.');
-    }
-
-    if (!isBaseAgent(options.rootAgent)) {
-      throw new TypeError(
-        `rootAgent must be a BaseAgent instance, got ${
-          (options.rootAgent as {constructor?: {name?: string}})?.constructor
-            ?.name ?? typeof options.rootAgent
-        }`,
-      );
-    }
+    validateRootAgent(options.rootAgent);
 
     this.name = options.name;
     this.rootAgent = options.rootAgent;
