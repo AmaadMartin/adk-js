@@ -31,6 +31,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Lock content is OS-independent, so one leg is enough coverage.
+      - name: Check package-lock.json is up to date
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          npm install --package-lock-only
+          git diff --exit-code package-lock.json
+
       - name: Check for secrets leaks
         run: npx secretlint "**/*"
 
