@@ -8,6 +8,7 @@ import {readdirSync, readFileSync} from 'node:fs';
 import {builtinModules} from 'node:module';
 import * as path from 'node:path';
 import {fileURLToPath} from 'node:url';
+import ts from 'typescript';
 import {describe, expect, it} from 'vitest';
 
 /** An external module specifier found in a source file. */
@@ -28,44 +29,9 @@ interface PackageManifest {
   optionalDependencies?: Record<string, string>;
 }
 
-/**
- * Package names that appear in `core/src` only inside source text this package
- * *emits* for a code executor to run. They are resolved by the executor's
- * runtime in a separate module root, never by `@google/adk`, so declaring them
- * here would be a false dependency. `run_skill_script_tool.ts` emits
- * `require('ts-node/register')` into the TypeScript wrapper it builds.
- */
-const GUEST_RUNTIME_PACKAGES = new Set(['ts-node']);
-
-const SPECIFIER_PATTERN = /(?:from|import|require)\s*\(?\s*['"]([^'"]+)['"]/g;
-
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const coreRoot = path.resolve(testDir, '..');
 const builtins = new Set(builtinModules);
-
-function listTypeScriptFiles(dir: string): string[] {
-  const files: string[] = [];
-  for (const entry of readdirSync(dir, {withFileTypes: true})) {
-    const entryPath = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      files.push(...listTypeScriptFiles(entryPath));
-    } else if (entry.name.endsWith('.ts')) {
-      files.push(entryPath);
-    }
-  }
-  return files;
-}
-
-/**
- * TSDoc examples in `core/src` contain `import` statements of their own (e.g.
- * `mcp_toolset.ts` documents `import {MCPToolset} from '@google/adk';`), so
- * comments must be removed before specifiers are matched.
- */
-function stripComments(source: string): string {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/(^|[^:])\/\/[^\n]*/g, '$1');
-}
 
 function toPackageName(specifier: string): string {
   const segments = specifier.split('/');
@@ -74,11 +40,29 @@ function toPackageName(specifier: string): string {
     : segments[0];
 }
 
+/**
+ * Collects the external module specifiers of every `.ts` file under `srcDir`.
+ *
+ * Specifiers are read with the TypeScript compiler rather than a regular
+ * expression: `core/src` embeds import-like text both in TSDoc examples
+ * (`mcp_toolset.ts`) and in template literals that this package emits as guest
+ * source (`skill_toolset.ts`, `run_skill_script_tool.ts`), none of which are
+ * imports of `@google/adk`.
+ */
 function collectExternalSpecifiers(srcDir: string): ExternalSpecifier[] {
   const collected: ExternalSpecifier[] = [];
-  for (const file of listTypeScriptFiles(srcDir)) {
-    const source = stripComments(readFileSync(file, 'utf8'));
-    for (const [, specifier] of source.matchAll(SPECIFIER_PATTERN)) {
+  const entries = readdirSync(srcDir, {recursive: true, withFileTypes: true});
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith('.ts')) {
+      continue;
+    }
+    const file = path.join(entry.parentPath, entry.name);
+    const source = readFileSync(file, 'utf8');
+
+    for (const imported of ts.preProcessFile(source, true, true)
+      .importedFiles) {
+      const specifier = imported.fileName;
       if (
         specifier.startsWith('.') ||
         specifier.startsWith('/') ||
@@ -98,6 +82,10 @@ function collectExternalSpecifiers(srcDir: string): ExternalSpecifier[] {
 
 describe('core package dependencies', () => {
   const collected = collectExternalSpecifiers(path.join(coreRoot, 'src'));
+
+  it('finds the imports of core/src', () => {
+    expect(collected.map((s) => s.packageName)).toContain('@google/genai');
+  });
 
   it('imports Node built-ins with the node: prefix', () => {
     const offenders = collected
@@ -120,14 +108,10 @@ describe('core package dependencies', () => {
 
     const undeclared = collected
       .filter(
-        (s) =>
-          !builtins.has(s.packageName) &&
-          !GUEST_RUNTIME_PACKAGES.has(s.packageName) &&
-          !declared.has(s.packageName),
+        (s) => !builtins.has(s.packageName) && !declared.has(s.packageName),
       )
       .map((s) => `${s.file}: '${s.packageName}'`);
 
     expect(undeclared).toEqual([]);
-    expect(collected.map((s) => s.packageName)).toContain('@google/genai');
   });
 });
