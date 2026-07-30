@@ -6,21 +6,17 @@
 
 /**
  * Deep imports for the `@google-cloud/vertexai` Agent Engine symbols missing
- * from its root entry point: v1.12.0 ships no `exports` map, and `main`
+ * from its root entry point: v1.12.0 ships no `exports` map and `main`
  * re-exports only `Client`, `VertexAI`, `./types` and `./models`. Confining
- * the `build/src/**` specifiers here gives that upstream gap a single blast
- * radius; delete this module and repoint its consumers once the package
- * root-exports the `genai` surface. `Client` is root-exported already and does
- * not belong here.
+ * the `build/src/**` specifiers here keeps the upstream gap in one place for
+ * `core`; delete this module once the package root-exports the `genai`
+ * surface. (`dev` still deep-imports: it consumes `@google/adk` as a package,
+ * whose `exports` map publishes only `'.'`, so it cannot reach this module.)
  *
- * A symbol keeps its upstream name unless that name is ambiguous with another
- * type in scope at a use site, in which case it takes a `VertexAi` prefix:
- * `Session`, `SessionEvent` and `EventMetadata` against ADK's own `Session`
- * and `Event`, and `Language` against the same-named `@google/genai` enum,
- * whose Python member is `PYTHON` rather than `LANGUAGE_PYTHON`.
- *
- * `Language` is a runtime enum, so it must stay a value re-export; as
- * `export type` it still compiles but resolves to `undefined` at run time.
+ * `VertexAi`-prefixed names disambiguate against ADK's own `Session` and
+ * `Event`, and against `@google/genai`'s `Language`, whose Python member is
+ * `PYTHON` rather than `LANGUAGE_PYTHON`. `Language` is also the one runtime
+ * enum here, so it must stay a value re-export.
  */
 
 export type {Memories} from '@google-cloud/vertexai/build/src/genai/memories.js';
