@@ -18,12 +18,37 @@ import {
 } from './skill.js';
 
 const ALLOWED_FRONTMATTER_KEYS = new Set([
+  // Fields defined by the Agent Skills specification.
+  // https://agentskills.io/specification
+  // `allowed_tools` is ADK's snake_case spelling of `allowed-tools`, and
+  // `allowedTools` is the camelCase field FrontmatterSchema normalizes both
+  // into. Validation reads the parsed frontmatter, so it sees all three.
   'name',
   'description',
   'license',
   'allowed-tools',
+  'allowed_tools',
+  'allowedTools',
   'metadata',
   'compatibility',
+  // Client-side directives harnesses read from the same frontmatter block.
+  // ADK takes no action on them, but a skill carrying them is well-formed
+  // and must not be reported as a problem. Snapshot of the fields
+  // documented at https://code.claude.com/docs/en/skills
+  'agent',
+  'argument-hint',
+  'arguments',
+  'background',
+  'context',
+  'disable-model-invocation',
+  'disallowed-tools',
+  'effort',
+  'hooks',
+  'model',
+  'paths',
+  'shell',
+  'user-invocable',
+  'when_to_use',
 ]);
 
 const IGNORED_DIRECTORIES = new Set([
