@@ -22,6 +22,7 @@ export default defineConfig({
         test: {
           name: 'unit:core',
           environment: 'node',
+          setupFiles: ['./tests/hermetic_env_setup.ts'],
           alias: {
             '@google/adk': path.resolve(__dirname, './core/src'),
             '@google/adk-integrations': path.resolve(
@@ -36,6 +37,7 @@ export default defineConfig({
         test: {
           name: 'unit:dev',
           environment: 'node',
+          setupFiles: ['./tests/hermetic_env_setup.ts'],
           alias: {
             '@google/adk': path.resolve(__dirname, './core/src'),
             '@google/adk-integrations': path.resolve(
@@ -50,6 +52,7 @@ export default defineConfig({
         test: {
           name: 'unit:integrations',
           environment: 'node',
+          setupFiles: ['./tests/hermetic_env_setup.ts'],
           alias: {
             '@google/adk': path.resolve(__dirname, './core/src'),
             '@google/adk-integrations': path.resolve(
