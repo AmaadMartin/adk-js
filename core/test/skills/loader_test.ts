@@ -52,14 +52,17 @@ description: A test skill`;
       );
     });
 
-    it('throws error if frontmatter is not a YAML mapping', () => {
+    it.each([
+      ['a YAML sequence', '- item1\n- item2'],
+      ['a YAML scalar', 'just a string'],
+      ['empty', ''],
+    ])('throws an unwrapped mapping error if frontmatter is %s', (_, front) => {
       const content = `---
-- item1
-- item2
+${front}
 ---
 Body`;
       expect(() => parseSkillMdContent(content)).toThrow(
-        'Invalid YAML in frontmatter:',
+        new Error('SKILL.md frontmatter must be a YAML mapping'),
       );
     });
 
@@ -73,6 +76,76 @@ Body`;
       expect(() => parseSkillMdContent(content)).toThrow(
         'Invalid YAML in frontmatter:',
       );
+    });
+
+    it('throws a frontmatter error naming a missing required field', () => {
+      const content = `---
+name: test-skill
+---
+Body`;
+      expect(() => parseSkillMdContent(content)).toThrow(
+        /Invalid frontmatter: description/,
+      );
+      expect(() => parseSkillMdContent(content)).not.toThrow(
+        'Invalid YAML in frontmatter',
+      );
+    });
+
+    it('throws a frontmatter error naming an invalid name', () => {
+      const content = `---
+name: Invalid Name!
+description: A test skill
+---
+Body`;
+      expect(() => parseSkillMdContent(content)).toThrow(
+        /Invalid frontmatter: name/,
+      );
+      expect(() => parseSkillMdContent(content)).toThrow('kebab-case');
+    });
+
+    it('throws a frontmatter error for an over-long description', () => {
+      const content = `---
+name: test-skill
+description: ${'x'.repeat(1025)}
+---
+Body`;
+      expect(() => parseSkillMdContent(content)).toThrow(
+        /Invalid frontmatter: description/,
+      );
+    });
+
+    it('throws a frontmatter error for non-list adk_additional_tools', () => {
+      const content = `---
+name: test-skill
+description: A test skill
+metadata:
+  adk_additional_tools: not-a-list
+---
+Body`;
+      expect(() => parseSkillMdContent(content)).toThrow(
+        /Invalid frontmatter: metadata/,
+      );
+      expect(() => parseSkillMdContent(content)).toThrow(
+        'adk_additional_tools must be a list of strings',
+      );
+    });
+
+    it('joins multiple frontmatter issues with a semicolon', () => {
+      const content = `---
+name: Invalid Name!
+---
+Body`;
+      let message = '';
+      try {
+        parseSkillMdContent(content);
+        expect.fail('parseSkillMdContent should have thrown');
+      } catch (e: unknown) {
+        message = (e as Error).message;
+      }
+      expect(message).toMatch(/^Invalid frontmatter: /);
+      expect(message).toContain('name: ');
+      expect(message).toContain('description: ');
+      expect(message).toContain('; ');
     });
 
     it('handles empty body', () => {
@@ -352,10 +425,32 @@ Instructions`,
       );
 
       const problems = await validateSkillDir(skillDir);
-      expect(problems.length).toBeGreaterThan(0);
-      expect(
-        problems.some((p) => p.includes('Invalid YAML in frontmatter:')),
-      ).toBe(true);
+      expect(problems.length).toBe(1);
+      expect(problems[0]).toContain('Invalid frontmatter:');
+      expect(problems[0]).toContain('description');
+      expect(problems[0]).not.toContain('Invalid YAML in frontmatter');
+
+      await fs.rm(tempDir, {recursive: true, force: true});
+    });
+
+    it('still reports a genuine YAML syntax error as a YAML problem', async () => {
+      tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-skill-test-'));
+      const skillDir = path.join(tempDir, 'test-skill');
+      await fs.mkdir(skillDir);
+
+      await fs.writeFile(
+        path.join(skillDir, 'SKILL.md'),
+        `---
+name: test-skill
+description: A test skill
+invalid: [
+---
+Instructions`,
+      );
+
+      const problems = await validateSkillDir(skillDir);
+      expect(problems.length).toBe(1);
+      expect(problems[0]).toContain('Invalid YAML in frontmatter:');
 
       await fs.rm(tempDir, {recursive: true, force: true});
     });

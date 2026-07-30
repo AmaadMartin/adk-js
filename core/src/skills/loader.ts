@@ -8,6 +8,7 @@ import AdmZip from 'adm-zip';
 import yaml from 'js-yaml';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import type {ZodError} from 'zod';
 import {logger} from '../utils/logger.js';
 import {
   Frontmatter,
@@ -104,11 +105,26 @@ async function loadDir(
 }
 
 /**
+ * Formats schema validation issues into a compact single-line summary that
+ * names each offending frontmatter field.
+ *
+ * @param error - The validation error produced by `FrontmatterSchema`.
+ * @returns A `field: message` summary, with multiple issues joined by `'; '`.
+ */
+function formatFrontmatterIssues(error: ZodError): string {
+  return error.issues
+    .map((issue) => `${issue.path.map(String).join('.')}: ${issue.message}`)
+    .join('; ');
+}
+
+/**
  * Parses SKILL.md from a raw content string, extracting the YAML frontmatter and the body.
  *
  * @param content - The raw content of the SKILL.md file.
  * @returns An object containing the parsed frontmatter and the remaining markdown body.
- * @throws {Error} If the content is not properly formatted with YAML frontmatter.
+ * @throws {Error} If the content is not properly formatted with YAML frontmatter,
+ * if the frontmatter is not a YAML mapping, or if it fails schema validation.
+ * Each of those three failures carries a distinct message.
  */
 export function parseSkillMdContent(content: string): {
   frontmatter: Frontmatter;
@@ -130,17 +146,25 @@ export function parseSkillMdContent(content: string): {
     .join('---')
     .trim();
 
+  let parsed: unknown;
   try {
-    const parsed = yaml.load(frontmatterStr);
-    if (typeof parsed !== 'object' || parsed === null) {
-      throw new Error('SKILL.md frontmatter must be a YAML mapping');
-    }
-    const frontmatter = FrontmatterSchema.parse(parsed);
-
-    return {frontmatter, body};
+    parsed = yaml.load(frontmatterStr);
   } catch (e: unknown) {
     throw new Error(`Invalid YAML in frontmatter: ${(e as Error).message}`);
   }
+
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error('SKILL.md frontmatter must be a YAML mapping');
+  }
+
+  const result = FrontmatterSchema.safeParse(parsed);
+  if (!result.success) {
+    throw new Error(
+      `Invalid frontmatter: ${formatFrontmatterIssues(result.error)}`,
+    );
+  }
+
+  return {frontmatter: result.data, body};
 }
 
 /**
