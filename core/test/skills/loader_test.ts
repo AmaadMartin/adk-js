@@ -15,6 +15,25 @@ import {
   validateSkillDir,
 } from '../../src/skills/loader.js';
 
+/**
+ * Writes a throwaway skill directory whose name matches the `test-skill`
+ * frontmatter name, validates it, and removes it again.
+ */
+async function validateFrontmatter(frontmatter: string): Promise<string[]> {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-skill-test-'));
+  try {
+    const skillDir = path.join(tempDir, 'test-skill');
+    await fs.mkdir(skillDir);
+    await fs.writeFile(
+      path.join(skillDir, 'SKILL.md'),
+      `---\n${frontmatter}\n---\nInstructions`,
+    );
+    return await validateSkillDir(skillDir);
+  } finally {
+    await fs.rm(tempDir, {recursive: true, force: true});
+  }
+}
+
 describe('loader', () => {
   describe('parseSkillMdContent', () => {
     it('parses valid skill content', () => {
@@ -336,6 +355,83 @@ Instructions`,
       ).toBe(true);
 
       await fs.rm(tempDir, {recursive: true, force: true});
+    });
+
+    it.each([
+      ['agent', 'Explore'],
+      ['argument-hint', "'[issue-number]'"],
+      ['arguments', 'issue branch'],
+      ['background', 'false'],
+      ['context', 'fork'],
+      ['disable-model-invocation', 'true'],
+      ['disallowed-tools', 'AskUserQuestion'],
+      ['effort', 'high'],
+      ['hooks', '{}'],
+      ['model', 'inherit'],
+      ['paths', "'src/**/*.ts'"],
+      ['shell', 'bash'],
+      ['user-invocable', 'false'],
+      ['when_to_use', 'When the user asks to deploy'],
+    ])('accepts the %s client directive', async (key, value) => {
+      const problems = await validateFrontmatter(
+        `name: test-skill\ndescription: A test skill\n${key}: ${value}`,
+      );
+      expect(problems).toEqual([]);
+    });
+
+    it('accepts a skill combining client directives with allowed-tools', async () => {
+      const problems = await validateFrontmatter(
+        [
+          'name: test-skill',
+          'description: Deploy the application to production.',
+          'disable-model-invocation: true',
+          'context: fork',
+          'allowed-tools: Bash(git:*) Read',
+        ].join('\n'),
+      );
+      expect(problems).toEqual([]);
+    });
+
+    it('still reports near-miss typos of known frontmatter fields', async () => {
+      const problems = await validateFrontmatter(
+        [
+          'name: test-skill',
+          'description: A test skill',
+          'disable_model_invocation: true',
+          'descriptoin: oops',
+        ].join('\n'),
+      );
+      expect(problems).toEqual([
+        'Unknown frontmatter fields: [descriptoin, disable_model_invocation]',
+      ]);
+    });
+
+    it('accepts the spec allowed-tools key despite its allowedTools alias', async () => {
+      const problems = await validateFrontmatter(
+        'name: test-skill\ndescription: A test skill\nallowed-tools: Read Grep',
+      );
+      expect(problems).toEqual([]);
+    });
+
+    it('accepts the snake_case allowed_tools spelling', async () => {
+      const problems = await validateFrontmatter(
+        'name: test-skill\ndescription: A test skill\nallowed_tools: Read Grep',
+      );
+      expect(problems).toEqual([]);
+    });
+
+    it('accepts every Agent Skills specification key', async () => {
+      const problems = await validateFrontmatter(
+        [
+          'name: test-skill',
+          'description: A test skill',
+          'license: Apache-2.0',
+          'compatibility: Requires git',
+          'metadata:',
+          '  author: example-org',
+        ].join('\n'),
+      );
+      expect(problems).toEqual([]);
     });
 
     it('returns problem for invalid frontmatter', async () => {

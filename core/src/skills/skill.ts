@@ -16,11 +16,11 @@ export const FrontmatterSchema = z.preprocess(
   (data) => {
     if (typeof data === 'object' && data !== null) {
       const obj = data as Record<string, unknown>;
-      if ('allowed-tools' in obj && !('allowedTools' in obj)) {
-        return {
-          ...obj,
-          allowedTools: obj['allowed-tools'],
-        };
+      if (!('allowedTools' in obj)) {
+        const alias = obj['allowed-tools'] ?? obj['allowed_tools'];
+        if (alias !== undefined) {
+          return {...obj, allowedTools: alias};
+        }
       }
     }
     return data;
@@ -38,6 +38,7 @@ export const FrontmatterSchema = z.preprocess(
       license: z.string().optional(),
       compatibility: z.string().max(500).optional(),
       'allowed-tools': z.string().optional(),
+      allowed_tools: z.string().optional(),
       metadata: z
         .record(z.string(), z.any())
         .default({})
