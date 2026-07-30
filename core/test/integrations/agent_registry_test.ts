@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
 import {AgentCard} from '@a2a-js/sdk';
 import {ClientFactory} from '@a2a-js/sdk/client';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
@@ -18,6 +16,7 @@ import {
   ProtocolType,
   ReadonlyContext,
   RemoteA2AAgent,
+  RemoteA2AAgentConfig,
   StreamableHTTPConnectionParams,
 } from '../../src/index.js';
 import {AgentInfo} from '../../src/integrations/agent_registry/types.js';
@@ -67,6 +66,31 @@ vi.mock('@modelcontextprotocol/sdk/client/index.js', () => {
     Client: vi.fn().mockImplementation(() => mockMcpClient),
   };
 });
+
+const BASE_CONNECTION_PARAMS: StreamableHTTPConnectionParams = {
+  type: 'StreamableHTTPConnectionParams',
+  url: 'https://example.com',
+};
+
+/**
+ * Reads back the config a {@link RemoteA2AAgent} was constructed with.
+ *
+ * `RemoteA2AAgent` keeps its config private, so the assertions below pin what
+ * `AgentRegistry` passed to the constructor through the declared
+ * `RemoteA2AAgentConfig` shape.
+ */
+function a2aConfigOf(agent: RemoteA2AAgent): RemoteA2AAgentConfig {
+  return (agent as unknown as {a2aConfig: RemoteA2AAgentConfig}).a2aConfig;
+}
+
+/** Returns the inline agent card a {@link RemoteA2AAgent} was built from. */
+function agentCardOf(agent: RemoteA2AAgent): AgentCard {
+  const {agentCard} = a2aConfigOf(agent);
+  if (!agentCard || typeof agentCard === 'string') {
+    return expect.fail('Expected an inline AgentCard on the constructed agent');
+  }
+  return agentCard;
+}
 
 describe('AgentRegistry Helpers', () => {
   describe('isGoogleApi', () => {
@@ -155,10 +179,9 @@ describe('AgentRegistry', () => {
   describe('makeRequest', () => {
     it('should fetch and return JSON data', async () => {
       const mockResponse = {data: 'test'};
-      (global.fetch as any).mockResolvedValue({
-        ok: true,
-        json: vi.fn().mockResolvedValue(mockResponse),
-      });
+      vi.mocked(global.fetch).mockResolvedValue(
+        new Response(JSON.stringify(mockResponse), {status: 200}),
+      );
 
       const res = await registry.makeRequest('mcpServers', {filter: 'name'});
       expect(res).toEqual(mockResponse);
@@ -174,10 +197,9 @@ describe('AgentRegistry', () => {
     });
 
     it('should use full project path if starting with projects/', async () => {
-      (global.fetch as any).mockResolvedValue({
-        ok: true,
-        json: vi.fn().mockResolvedValue({}),
-      });
+      vi.mocked(global.fetch).mockResolvedValue(
+        new Response('{}', {status: 200}),
+      );
 
       await registry.makeRequest(
         'projects/other-p/locations/other-l/endpoints/e',
@@ -189,11 +211,9 @@ describe('AgentRegistry', () => {
     });
 
     it('should throw error if response is not ok', async () => {
-      (global.fetch as any).mockResolvedValue({
-        ok: false,
-        status: 404,
-        text: vi.fn().mockResolvedValue('Not Found'),
-      });
+      vi.mocked(global.fetch).mockResolvedValue(
+        new Response('Not Found', {status: 404}),
+      );
 
       await expect(registry.makeRequest('mcpServers')).rejects.toThrow(
         'API request failed with status 404: Not Found',
@@ -201,7 +221,7 @@ describe('AgentRegistry', () => {
     });
 
     it('should throw wrapped error on fetch error', async () => {
-      (global.fetch as any).mockRejectedValue(new Error('Network Error'));
+      vi.mocked(global.fetch).mockRejectedValue(new Error('Network Error'));
       await expect(registry.makeRequest('mcpServers')).rejects.toThrow(
         'API request failed: Network Error',
       );
@@ -312,9 +332,12 @@ describe('AgentRegistry', () => {
 
       const tools = await toolset.getTools({} as ReadonlyContext);
       expect(tools.length).toBe(2);
-      expect(
-        (tools[0] as any).customMetadata[GCP_MCP_SERVER_DESTINATION_ID],
-      ).toBe('urn:mcp:1234:bigquery');
+      const meta = (
+        tools[0] as unknown as {customMetadata?: Record<string, string>}
+      ).customMetadata;
+      expect(meta?.[GCP_MCP_SERVER_DESTINATION_ID]).toBe(
+        'urn:mcp:1234:bigquery',
+      );
     });
 
     it('should throw if connection URI not found', async () => {
@@ -605,7 +628,7 @@ describe('AgentRegistry', () => {
       const agent = await registry.getRemoteA2AAgent('agents/agent-1');
       expect(agent).toBeInstanceOf(RemoteA2AAgent);
       expect(agent.name).toBe('DynamicAgent');
-      expect((agent as any).a2aConfig.agentCard.skills[1]).toEqual({
+      expect(agentCardOf(agent).skills[1]).toEqual({
         id: 's-2',
         name: 'NoDescTagsExamples',
         description: '',
@@ -634,8 +657,8 @@ describe('AgentRegistry', () => {
       vi.spyOn(registry, 'getAgentInfo').mockResolvedValue(agentInfo);
       const agent = await registry.getRemoteA2AAgent('agents/agent-1', {});
       expect(agent).toBeInstanceOf(RemoteA2AAgent);
-      expect((agent as any).a2aConfig.client).toBeUndefined();
-      expect((agent as any).a2aConfig.clientFactory).toBeUndefined();
+      expect(a2aConfigOf(agent).client).toBeUndefined();
+      expect(a2aConfigOf(agent).clientFactory).toBeUndefined();
     });
 
     it('should get agent info directly', async () => {
@@ -687,10 +710,8 @@ describe('AgentRegistry', () => {
       const agent = await registry.getRemoteA2AAgent('agents/agent-1');
       expect(agent).toBeInstanceOf(RemoteA2AAgent);
       expect(agent.name).toBe('DynamicAgentNoSkills');
-      expect((agent as any).a2aConfig.agentCard.preferredTransport).toBe(
-        'HTTP+JSON',
-      );
-      expect((agent as any).a2aConfig.agentCard.skills).toEqual([]);
+      expect(agentCardOf(agent).preferredTransport).toBe('HTTP+JSON');
+      expect(agentCardOf(agent).skills).toEqual([]);
     });
 
     it('should pass client and clientFactory when card type matches and options are provided', async () => {
@@ -720,20 +741,16 @@ describe('AgentRegistry', () => {
         clientFactory: dummyClientFactory,
       });
       expect(agent).toBeInstanceOf(RemoteA2AAgent);
-      expect((agent as any).a2aConfig.client).toBe(dummyClient);
-      expect((agent as any).a2aConfig.clientFactory).toBe(dummyClientFactory);
+      expect(a2aConfigOf(agent).client).toBe(dummyClient);
+      expect(a2aConfigOf(agent).clientFactory).toBe(dummyClientFactory);
     });
   });
 
   describe('AgentRegistrySingleMCPToolset Lifecycle', () => {
     it('should support closing the toolset', async () => {
-      const connectionParams: any = {
-        type: 'StreamableHTTPConnectionParams',
-        url: 'https://example.com',
-      };
       const toolset = new AgentRegistrySingleMCPToolset({
-        connectionParams,
-      } as any);
+        connectionParams: BASE_CONNECTION_PARAMS,
+      });
       await expect(toolset.close()).resolves.toBeUndefined();
     });
 
@@ -790,12 +807,8 @@ describe('AgentRegistry', () => {
     });
 
     it('should filter tools if toolFilter option is provided', async () => {
-      const connectionParams: any = {
-        type: 'StreamableHTTPConnectionParams',
-        url: 'https://example.com',
-      };
       const toolset = new AgentRegistrySingleMCPToolset({
-        connectionParams,
+        connectionParams: BASE_CONNECTION_PARAMS,
         toolFilter: ['tool1'],
       });
 
