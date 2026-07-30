@@ -290,8 +290,7 @@ async function importAgentModuleWithInlineFallback(
 
     logger.warn(
       `Failed to load ${buildOptions.entryPoint} with its dependencies left ` +
-        `external, retrying with them inlined: ` +
-        `${error instanceof Error ? error.message : String(error)}`,
+        `external, retrying with them inlined: ${String(error)}`,
     );
     await buildAgentFile({...buildOptions, packages: 'bundle'});
     return importAgentModule(buildOptions.outfile);

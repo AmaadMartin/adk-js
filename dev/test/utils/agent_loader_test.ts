@@ -104,6 +104,20 @@ class FakeAgentDefault extends BaseAgent {
 export default new FakeAgentDefault('agentDefault');
 `;
 
+// An ESM default export re-exported through a CommonJS interop namespace, so
+// the agent sits at `module.default.default`.
+const agentNestedDefaultExportContent = `
+const {BaseAgent} = require('@google/adk');
+
+class FakeAgentNestedDefault extends BaseAgent {
+  constructor(name) {
+    super({name});
+  }
+}
+
+exports.default = {default: new FakeAgentNestedDefault('agentNestedDefault')};
+`;
+
 const agentMultipleExportsContent = `;
 import {BaseAgent} from '@google/adk';
 
@@ -218,6 +232,9 @@ describe('AgentLoader', () => {
       // ignore
     }
 
+    // Reset rather than clear: a test that queues mockImplementationOnce
+    // builds it never consumes would otherwise leak them into the next test.
+    (esbuild.build as Mock).mockReset();
     vi.clearAllMocks();
   });
 
@@ -383,6 +400,24 @@ describe('AgentLoader', () => {
       expect(agent.name).toEqual('agentDefault');
       await agentFile.dispose();
       await expect(fs.access(compiledAgentPath)).rejects.toThrow();
+    });
+
+    it('loads agent from a doubly-nested default export', async () => {
+      const agentPath = path.join(tempAgentsDir, 'agent_nested_default.js');
+      await fs.writeFile(agentPath, agentNestedDefaultExportContent);
+
+      (esbuild.build as Mock).mockImplementationOnce(async () =>
+        fs.writeFile(
+          compiledPath('agent_nested_default.cjs'),
+          agentNestedDefaultExportContent,
+        ),
+      );
+
+      const agentFile = new AgentFile(agentPath);
+
+      expect((await agentFile.load()).name).toEqual('agentNestedDefault');
+
+      await agentFile.dispose();
     });
 
     it('loads an app file and returns the app via load()', async () => {
@@ -607,6 +642,23 @@ describe('AgentLoader', () => {
 
       expect((await agentFile.load()).name).toEqual('agent2');
       expect(packagesOf(0)).toEqual('bundle');
+
+      await agentFile.dispose();
+    });
+
+    it('keeps externalizing when the output directory is already linked', async () => {
+      const agentPath = await setUpAgent(
+        'agent_relink',
+        agent2CjsContentMocked,
+      );
+      // Both the project's node_modules and the output directory's link to it
+      // already exist, so no new symlink is created.
+      (fileUtils.isFolderExists as Mock).mockResolvedValue(true);
+
+      const agentFile = new AgentFile(agentPath);
+
+      expect((await agentFile.load()).name).toEqual('agent2');
+      expect(packagesOf(0)).toEqual('external');
 
       await agentFile.dispose();
     });
