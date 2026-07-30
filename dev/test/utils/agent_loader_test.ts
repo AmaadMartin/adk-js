@@ -749,18 +749,22 @@ describe('AgentLoader', () => {
   });
 
   describe('isModuleResolutionError', () => {
-    it.each([
-      'ERR_MODULE_NOT_FOUND',
-      'MODULE_NOT_FOUND',
-      'ERR_PACKAGE_PATH_NOT_EXPORTED',
-      'ERR_REQUIRE_ESM',
-    ])('is true for %s', (code) => {
-      expect(
-        isModuleResolutionError(Object.assign(new Error('x'), {code})),
-      ).toBe(true);
-    });
+    it.each(['ERR_MODULE_NOT_FOUND', 'MODULE_NOT_FOUND', 'ERR_REQUIRE_ESM'])(
+      'is true for %s',
+      (code) => {
+        expect(
+          isModuleResolutionError(Object.assign(new Error('x'), {code})),
+        ).toBe(true);
+      },
+    );
 
     it.each([
+      // Inlining cannot repair an exports-map violation: esbuild honours
+      // `exports` too, so retrying would only turn it into a build error.
+      {
+        name: 'a non-exported subpath',
+        error: {code: 'ERR_PACKAGE_PATH_NOT_EXPORTED'},
+      },
       {name: 'an unrelated code', error: {code: 'EACCES'}},
       {name: 'a codeless error', error: new Error('x')},
       {name: 'a non-string code', error: {code: 42}},

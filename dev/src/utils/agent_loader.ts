@@ -54,10 +54,6 @@ const FILE_MODULE_TYPE_EXTENSION_MAP = {
  * native database drivers, and optional peer dependencies of vite and eslint
  * that are frequently not installed.
  *
- * Only load-bearing while the dependency graph is inlined (esbuild
- * `packages: 'bundle'`) — with `packages: 'external'` every bare specifier
- * stays external anyway.
- *
  * See http://mikro-orm.io/docs/deployment#deploy-a-bundle-of-entities-and-dependencies-with-esbuild for more details
  */
 const NEVER_INLINED_PACKAGES = [
@@ -125,14 +121,18 @@ export const DEFAULT_AGENT_FILE_OPTIONS: AgentFileOptions = {
   bundle: true,
 };
 
-/** Node error codes that mean a bare specifier could not be loaded. */
+/**
+ * Node error codes for an external package that inlining would have avoided.
+ *
+ * `ERR_PACKAGE_PATH_NOT_EXPORTED` is deliberately absent: esbuild honours
+ * `exports` maps too, so inlining turns that runtime error into a less
+ * informative build error rather than fixing it.
+ */
 const MODULE_RESOLUTION_ERROR_CODES = new Set([
   // ESM: bare specifier not resolvable.
   'ERR_MODULE_NOT_FOUND',
   // CJS: require() of a missing package.
   'MODULE_NOT_FOUND',
-  // Package resolved, but the requested subpath is not exported.
-  'ERR_PACKAGE_PATH_NOT_EXPORTED',
   // CJS output requiring an ESM-only package on a Node without require(esm).
   'ERR_REQUIRE_ESM',
 ]);
@@ -194,7 +194,6 @@ export function replaceDirnamePlugin(filePath: string, originalDir: string) {
   };
 }
 
-/** Options for compiling an agent entrypoint into a single loadable file. */
 interface BuildAgentFileOptions {
   entryPoint: string;
   outfile: string;
@@ -208,10 +207,6 @@ interface BuildAgentFileOptions {
   packages: 'bundle' | 'external';
 }
 
-/**
- * Compiles an agent entrypoint with esbuild. Minification follows `bundle`,
- * so it only ever processes the agent's own source.
- */
 async function buildAgentFile({
   entryPoint,
   outfile,
@@ -237,10 +232,7 @@ async function buildAgentFile({
   });
 }
 
-/**
- * Unwraps a doubly-nested default export (`module.default.default`), which is
- * how an ESM default export surfaces through a CommonJS interop namespace.
- */
+/** Unwraps `module.default.default`, an ESM default seen through CJS interop. */
 function nestedDefaultExport(moduleDefault: unknown): unknown {
   return typeof moduleDefault === 'object' &&
     moduleDefault !== null &&
@@ -249,10 +241,7 @@ function nestedDefaultExport(moduleDefault: unknown): unknown {
     : undefined;
 }
 
-/**
- * Imports a compiled agent module, evicting it from the require cache and
- * busting the ESM cache so a reloaded agent file is re-evaluated.
- */
+/** Imports a compiled agent module, bypassing both module caches. */
 async function importAgentModule(
   filePath: string,
 ): Promise<Record<string, unknown>> {
@@ -268,15 +257,12 @@ async function importAgentModule(
 }
 
 /**
- * Imports a freshly built agent module, rebuilding it once with third-party
- * packages inlined if one of them cannot be resolved at runtime.
- *
  * A `node_modules` directory existing is not proof that a specific package
  * resolves from it — pnpm's strict layout and undeclared transitive
- * dependencies are the common counter-examples — so the externalized artifact
- * falls back to today's self-contained build instead of failing. esbuild
- * hoists every external import above the agent's own code, so a resolution
- * failure happens before any agent side effect runs and re-importing is safe.
+ * dependencies are the common counter-examples — so an externalized artifact
+ * that fails to resolve one falls back to a self-contained build rather than
+ * failing. esbuild hoists every external import above the agent's own code, so
+ * the failure happens before any agent side effect runs and retrying is safe.
  */
 async function importAgentModuleWithInlineFallback(
   buildOptions: BuildAgentFileOptions,
@@ -763,12 +749,7 @@ async function getTypeFromPackageJson(dir: string): Promise<FileModuleType> {
   return getTypeFromPackageJson(parentDir);
 }
 
-/**
- * Symlinks the project's `node_modules` into the compiler output directory so
- * the compiled artifact can resolve packages that were left external.
- *
- * @returns Whether the output directory has a usable `node_modules` link.
- */
+/** @returns Whether the output directory has a usable `node_modules` link. */
 async function linkProjectNodeModules(
   outputDir: string,
   sourceDir: string,

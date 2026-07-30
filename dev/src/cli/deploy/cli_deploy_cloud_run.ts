@@ -133,9 +133,7 @@ export async function deployToCloudRun(options: DeployToCloudRunOptions) {
 
   const gcloudCommands = prepareGCloudArguments(options);
 
-  // Deployment copies the compiled artifact into the container image, so its
-  // third-party dependencies must be inlined rather than resolved from the
-  // project's node_modules.
+  // The artifact is copied into the container image, so it must be self-contained.
   const agentLoader = new AgentLoader(options.agentPath, {
     ...(options.agentFileLoadOptions ?? DEFAULT_AGENT_FILE_OPTIONS),
     inlineDependencies: true,
