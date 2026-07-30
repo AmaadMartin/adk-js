@@ -143,14 +143,14 @@ export async function runAndCapture(
 
     for (const plugin of plugins) {
       if (plugin instanceof AgentEventCapturePlugin) {
-        plugin.dump(
+        await plugin.dump(
           typeof events === 'boolean'
             ? `events_turn_${i}.json`
             : (events as string),
         );
       }
       if (plugin instanceof ModelEventCapturePlugin) {
-        plugin.dump(
+        await plugin.dump(
           typeof modelResponses === 'boolean'
             ? `model_responses_turn_${i}.json`
             : (modelResponses as string),

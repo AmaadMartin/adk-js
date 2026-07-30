@@ -33,4 +33,4 @@ async function testInit() {
     console.error('DYNAMIC_IMPORT_FAILED', e);
   }
 }
-testInit();
+await testInit();
