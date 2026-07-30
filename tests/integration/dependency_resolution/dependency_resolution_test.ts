@@ -27,11 +27,55 @@ const BUILTIN_MODULES = new Set(builtinModules);
  */
 const SCAN_TIMEOUT = 30000;
 
+/** A dependency block of an npm manifest. */
+type ManifestBlock = 'dependencies' | 'devDependencies';
+
+/**
+ * The audited block of every `@types/*` package in `core/package.json`.
+ *
+ * This is a hand-maintained ledger, not a measurement: each verdict came from
+ * grepping the emitted `core/dist/types/**` for the package. `@types/express`
+ * is a runtime dependency because `ToA2aOptions.app` and the `toA2a` return
+ * type are `express.Application` and express@4 bundles no declarations of its
+ * own, so a consumer cannot resolve those types without it. The other two stay
+ * dev-only because neither is named anywhere in the emitted declarations:
+ * `AdmZip` is only ever a local inside `core/src/skills/loader.ts`, and the
+ * `cloneDeep`/`isEmpty` helpers return generic or primitive types.
+ *
+ * Adding, removing, or re-classifying a `@types/*` package fails the test
+ * below until that audit is re-run and this ledger updated to match.
+ */
+const AUDITED_TYPE_PACKAGE_BLOCKS: Record<string, ManifestBlock> = {
+  '@types/adm-zip': 'devDependencies',
+  '@types/express': 'dependencies',
+  '@types/lodash-es': 'devDependencies',
+};
+
 function readCoreManifest(): Manifest {
   const manifest: Manifest = JSON.parse(
     readFileSync(path.join(CORE_DIR, 'package.json'), 'utf8'),
   );
   return manifest;
+}
+
+/** Lists the manifest blocks that declare `packageName`. */
+function blocksDeclaring(
+  manifest: Manifest,
+  packageName: string,
+): ManifestBlock[] {
+  const blocks: ManifestBlock[] = [];
+  if (manifest.dependencies?.[packageName] !== undefined) {
+    blocks.push('dependencies');
+  }
+  if (manifest.devDependencies?.[packageName] !== undefined) {
+    blocks.push('devDependencies');
+  }
+  return blocks;
+}
+
+/** Returns the semver major an npm range such as `^4.17.25` resolves against. */
+function majorOf(range: string): string {
+  return range.replace(/^\D+/, '').split('.')[0];
 }
 
 /** Recursively collects every `.ts` file under `dir`. */
@@ -154,6 +198,59 @@ describe('Dependency resolution', () => {
       'core/package.json must not also list "openapi-types" in ' +
         '"devDependencies"; it is a runtime dependency of the published package.',
     ).toBeUndefined();
+  });
+
+  it('declares each @types/* package in its audited block', () => {
+    const manifest = readCoreManifest();
+    const typePackages = new Set(
+      [
+        ...Object.keys(manifest.dependencies ?? {}),
+        ...Object.keys(manifest.devDependencies ?? {}),
+      ].filter((packageName) => packageName.startsWith('@types/')),
+    );
+
+    const declared = Object.fromEntries(
+      [...typePackages].map((name) => [name, blocksDeclaring(manifest, name)]),
+    );
+    const audited = Object.fromEntries(
+      Object.entries(AUDITED_TYPE_PACKAGE_BLOCKS).map(([name, block]) => [
+        name,
+        [block],
+      ]),
+    );
+
+    expect(
+      declared,
+      "core/package.json's @types/* packages must match the audited ledger " +
+        'in AUDITED_TYPE_PACKAGE_BLOCKS. A type package whose types are ' +
+        'reachable from core/dist/types/**/*.d.ts belongs in "dependencies", ' +
+        'because consumers of @google/adk never install devDependencies; one ' +
+        'whose types stay internal belongs in "devDependencies" so consumers ' +
+        'do not carry it. Re-run that audit and update the ledger in the same ' +
+        'commit that changes the manifest.',
+    ).toEqual(audited);
+  });
+
+  it('keeps express and @types/express on the same semver major', () => {
+    const manifest = readCoreManifest();
+    const expressRange = manifest.dependencies?.['express'];
+    const typesRange = manifest.dependencies?.['@types/express'];
+
+    if (expressRange === undefined || typesRange === undefined) {
+      expect.fail(
+        'core/package.json must declare both "express" and "@types/express" ' +
+          'in "dependencies".',
+      );
+    }
+
+    expect(
+      majorOf(typesRange),
+      `"@types/express": "${typesRange}" describes express ` +
+        `${majorOf(typesRange)}.x, but "express": "${expressRange}" resolves ` +
+        `express ${majorOf(expressRange)}.x. The two must be upgraded ` +
+        `together, or the shipped declarations describe an express a ` +
+        `consumer does not have.`,
+    ).toBe(majorOf(expressRange));
   });
 
   it(
