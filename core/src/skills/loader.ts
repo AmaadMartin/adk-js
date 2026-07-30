@@ -108,7 +108,8 @@ async function loadDir(
  *
  * @param content - The raw content of the SKILL.md file.
  * @returns An object containing the parsed frontmatter and the remaining markdown body.
- * @throws {Error} If the content is not properly formatted with YAML frontmatter.
+ * @throws {Error} If the content is not properly formatted with YAML frontmatter,
+ * if the frontmatter is not a YAML mapping, or if it fails schema validation.
  */
 export function parseSkillMdContent(content: string): {
   frontmatter: Frontmatter;
@@ -130,17 +131,26 @@ export function parseSkillMdContent(content: string): {
     .join('---')
     .trim();
 
+  let parsed: unknown;
   try {
-    const parsed = yaml.load(frontmatterStr);
-    if (typeof parsed !== 'object' || parsed === null) {
-      throw new Error('SKILL.md frontmatter must be a YAML mapping');
-    }
-    const frontmatter = FrontmatterSchema.parse(parsed);
-
-    return {frontmatter, body};
+    parsed = yaml.load(frontmatterStr);
   } catch (e: unknown) {
     throw new Error(`Invalid YAML in frontmatter: ${(e as Error).message}`);
   }
+
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error('SKILL.md frontmatter must be a YAML mapping');
+  }
+
+  const result = FrontmatterSchema.safeParse(parsed);
+  if (!result.success) {
+    const issues = result.error.issues
+      .map((issue) => `${issue.path.join('.')}: ${issue.message}`)
+      .join('; ');
+    throw new Error(`Invalid frontmatter: ${issues}`);
+  }
+
+  return {frontmatter: result.data, body};
 }
 
 /**
