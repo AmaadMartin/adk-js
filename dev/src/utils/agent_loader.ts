@@ -71,17 +71,27 @@ class AgentFileLoadingError extends Error {}
 export interface AgentFileOptions {
   compile?: boolean;
   bundle?: boolean;
+  /**
+   * Whether to minify the compiled agent artifact.
+   *
+   * Off by default: the compiled artifact is what runtime stack traces from the
+   * agent point at, and minified output makes them unreadable. Independent of
+   * `bundle` — opt in only when artifact size matters more than debuggability.
+   */
+  minify?: boolean;
   moduleType?: FileModuleType;
 }
 
 /**
  * Default options for loading an agent file.
  *
- * Compile and bundle only .ts files.
+ * Compile and bundle only .ts files. Minification is off by default so that
+ * runtime stack traces from the agent stay readable.
  */
 const DEFAULT_AGENT_FILE_OPTIONS: AgentFileOptions = {
   compile: true,
   bundle: true,
+  minify: false,
 };
 
 /**
@@ -186,7 +196,7 @@ export class AgentFile {
         format: moduleType,
         packages: 'bundle',
         bundle: this.options.bundle,
-        minify: this.options.bundle,
+        minify: this.options.minify ?? false,
         allowOverwrite: true,
         plugins: [replaceDirnamePlugin(filePath, originalDir), shimPlugin()],
         // See http://mikro-orm.io/docs/deployment#deploy-a-bundle-of-entities-and-dependencies-with-esbuild for more details

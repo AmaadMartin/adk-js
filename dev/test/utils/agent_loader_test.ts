@@ -280,13 +280,108 @@ describe('AgentLoader', () => {
         format: 'cjs',
         packages: 'bundle',
         bundle: true,
-        minify: true,
+        minify: false,
         allowOverwrite: true,
         external: expect.arrayContaining(['onnxruntime-node']),
       });
 
       await agentFile.dispose();
       await expect(fs.access(compiledAgentPath)).rejects.toThrow();
+    });
+
+    it('does not minify by default even though bundling is enabled', async () => {
+      const agentPath = path.join(tempAgentsDir, 'agent2.ts');
+      await fs.writeFile(agentPath, agent2TsContent);
+
+      const compiledAgentPath = compiledPath('agent2.cjs');
+      (esbuild.build as Mock).mockImplementation(async () => {
+        await fs.writeFile(compiledAgentPath, agent2CjsContentMocked);
+        return Promise.resolve();
+      });
+
+      const agentFile = new AgentFile(agentPath);
+      await agentFile.load();
+
+      expect((esbuild.build as Mock).mock.calls[0][0]).toMatchObject({
+        bundle: true,
+        minify: false,
+      });
+
+      await agentFile.dispose();
+    });
+
+    it('minifies when the minify option is explicitly enabled', async () => {
+      const agentPath = path.join(tempAgentsDir, 'agent2.ts');
+      await fs.writeFile(agentPath, agent2TsContent);
+
+      const compiledAgentPath = compiledPath('agent2.cjs');
+      (esbuild.build as Mock).mockImplementation(async () => {
+        await fs.writeFile(compiledAgentPath, agent2CjsContentMocked);
+        return Promise.resolve();
+      });
+
+      const agentFile = new AgentFile(agentPath, {
+        compile: true,
+        bundle: true,
+        minify: true,
+      });
+      await agentFile.load();
+
+      expect((esbuild.build as Mock).mock.calls[0][0]).toMatchObject({
+        bundle: true,
+        minify: true,
+      });
+
+      await agentFile.dispose();
+    });
+
+    it('does not minify when bundling is enabled but minify is explicitly false', async () => {
+      const agentPath = path.join(tempAgentsDir, 'agent2.ts');
+      await fs.writeFile(agentPath, agent2TsContent);
+
+      const compiledAgentPath = compiledPath('agent2.cjs');
+      (esbuild.build as Mock).mockImplementation(async () => {
+        await fs.writeFile(compiledAgentPath, agent2CjsContentMocked);
+        return Promise.resolve();
+      });
+
+      const agentFile = new AgentFile(agentPath, {
+        compile: true,
+        bundle: true,
+        minify: false,
+      });
+      await agentFile.load();
+
+      expect((esbuild.build as Mock).mock.calls[0][0]).toMatchObject({
+        bundle: true,
+        minify: false,
+      });
+
+      await agentFile.dispose();
+    });
+
+    it('does not minify when compiling without bundling', async () => {
+      const agentPath = path.join(tempAgentsDir, 'agent2.ts');
+      await fs.writeFile(agentPath, agent2TsContent);
+
+      const compiledAgentPath = compiledPath('agent2.cjs');
+      (esbuild.build as Mock).mockImplementation(async () => {
+        await fs.writeFile(compiledAgentPath, agent2CjsContentMocked);
+        return Promise.resolve();
+      });
+
+      const agentFile = new AgentFile(agentPath, {
+        compile: true,
+        bundle: false,
+      });
+      await agentFile.load();
+
+      expect((esbuild.build as Mock).mock.calls[0][0]).toMatchObject({
+        bundle: false,
+        minify: false,
+      });
+
+      await agentFile.dispose();
     });
 
     it('throws if rootAgent is not found', async () => {
