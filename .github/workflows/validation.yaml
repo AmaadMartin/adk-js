@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 env:
-  NODE_OPTIONS: "--max-old-space-size=8192"
+  NODE_OPTIONS: '--max-old-space-size=8192'
 
 jobs:
   run-tests:
@@ -36,6 +36,9 @@ jobs:
 
       - name: Build packages
         run: npm run build
+
+      - name: Check published type surface
+        run: npm run ts:check:published
 
       - name: Run tests and check code coverage
         run: npm run test:coverage
