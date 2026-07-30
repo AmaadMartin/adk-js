@@ -42,6 +42,7 @@
   "devDependencies": {
     "@types/cors": "^2.8.19",
     "@types/express": "^4.17.21",
+    "@types/lodash-es": "^4.17.12",
     "@types/node": "^20.12.7",
     "@typescript-eslint/eslint-plugin": "^7.7.1",
     "@typescript-eslint/parser": "^7.7.1",
@@ -55,12 +56,16 @@
   },
   "dependencies": {
     "@clack/prompts": "^0.11.0",
+    "@google-cloud/vertexai": "^1.12.0",
     "@google/adk": "^1.4.0",
+    "@google/genai": "^2.9.0",
     "@mikro-orm/mariadb": "^6.6.6",
     "@mikro-orm/mssql": "^6.6.6",
     "@mikro-orm/mysql": "^6.6.6",
     "@mikro-orm/postgresql": "^6.6.6",
     "@mikro-orm/sqlite": "^6.6.6",
+    "@opentelemetry/api": "1.9.0",
+    "@opentelemetry/sdk-trace-base": "^2.1.0",
     "camelcase-keys": "^6.2.2",
     "commander": "^14.0.0",
     "cors": "^2.8.5",
@@ -70,6 +75,7 @@
     "express": "^4.21.2",
     "fast-glob": "^3.3.3",
     "js-yaml": "^4.1.1",
+    "lodash-es": "^4.18.1",
     "ts-graphviz": "^1.0.1",
     "winston": "^3.19.0",
     "zod": "^4.2.1"
