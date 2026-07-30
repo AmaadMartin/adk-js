@@ -38,7 +38,6 @@ export default defineConfig([
     },
   },
   {
-    files: ['**/*.{ts,js}'],
     plugins: {n: nodePlugin},
     rules: {
       'n/prefer-node-protocol': 'error',
