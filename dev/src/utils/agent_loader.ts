@@ -50,11 +50,11 @@ const FILE_MODULE_TYPE_EXTENSION_MAP = {
 };
 
 /**
- * Packages that must never be inlined into the bundled agent file.
+ * Packages that must never be inlined into the compiled agent file.
  *
  * See http://mikro-orm.io/docs/deployment#deploy-a-bundle-of-entities-and-dependencies-with-esbuild for more details
  */
-const EXTERNAL_PACKAGES = [
+const NEVER_INLINED_PACKAGES = [
   'sqlite3',
   'better-sqlite3',
   'mysql',
@@ -97,6 +97,13 @@ export interface AgentFileOptions {
   compile?: boolean;
   bundle?: boolean;
   moduleType?: FileModuleType;
+  /**
+   * When true, third-party packages are inlined into the compiled artifact
+   * (esbuild `packages: 'bundle'`), making it runnable without the project's
+   * `node_modules`. Deployment uses this so the copied artifact still works
+   * inside the container image. Defaults to false.
+   */
+  inlineDependencies?: boolean;
 }
 
 /**
@@ -104,10 +111,40 @@ export interface AgentFileOptions {
  *
  * Compile and bundle only .ts files.
  */
-const DEFAULT_AGENT_FILE_OPTIONS: AgentFileOptions = {
+export const DEFAULT_AGENT_FILE_OPTIONS: AgentFileOptions = {
   compile: true,
   bundle: true,
 };
+
+/**
+ * Node error codes for an external package that inlining would have avoided.
+ *
+ * `ERR_PACKAGE_PATH_NOT_EXPORTED` is deliberately absent: esbuild honours
+ * `exports` maps too, so inlining turns that runtime error into a less
+ * informative build error rather than fixing it.
+ */
+const MODULE_RESOLUTION_ERROR_CODES = new Set([
+  // ESM: bare specifier not resolvable.
+  'ERR_MODULE_NOT_FOUND',
+  // CJS: require() of a missing package.
+  'MODULE_NOT_FOUND',
+  // CJS output requiring an ESM-only package on a Node without require(esm).
+  'ERR_REQUIRE_ESM',
+]);
+
+/**
+ * Returns whether an error thrown while importing a compiled agent means one of
+ * its external packages could not be resolved at runtime.
+ */
+export function isModuleResolutionError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    typeof error.code === 'string' &&
+    MODULE_RESOLUTION_ERROR_CODES.has(error.code)
+  );
+}
 
 /**
  * Returns an esbuild plugin that replaces `__dirname`, `__filename`, and `import.meta.url`
@@ -152,6 +189,92 @@ export function replaceDirnamePlugin(filePath: string, originalDir: string) {
   };
 }
 
+interface BuildAgentFileOptions {
+  entryPoint: string;
+  outfile: string;
+  format: FileModuleType;
+  bundle: boolean;
+  packages: 'bundle' | 'external';
+}
+
+async function buildAgentFile({
+  entryPoint,
+  outfile,
+  format,
+  bundle,
+  packages,
+}: BuildAgentFileOptions): Promise<void> {
+  await esbuild.build({
+    entryPoints: [entryPoint],
+    outfile,
+    target: 'node16',
+    platform: 'node',
+    format,
+    packages,
+    bundle,
+    minify: bundle,
+    allowOverwrite: true,
+    plugins: [
+      replaceDirnamePlugin(entryPoint, path.dirname(entryPoint)),
+      shimPlugin(),
+    ],
+    // esbuild rejects `external` unless `bundle` is enabled, so the
+    // allowlist is only passed when the agent file is actually bundled.
+    ...(bundle ? {external: NEVER_INLINED_PACKAGES} : {}),
+  });
+}
+
+/** Unwraps `module.default.default`, an ESM default seen through CJS interop. */
+function nestedDefaultExport(moduleDefault: unknown): unknown {
+  return typeof moduleDefault === 'object' &&
+    moduleDefault !== null &&
+    'default' in moduleDefault
+    ? moduleDefault.default
+    : undefined;
+}
+
+/** Imports a compiled agent module, bypassing both module caches. */
+async function importAgentModule(
+  filePath: string,
+): Promise<Record<string, unknown>> {
+  const require = createRequire(import.meta.url);
+  try {
+    delete require.cache[require.resolve(filePath)];
+  } catch {
+    logger.warn(`Failed to delete require cache for ${filePath}`);
+  }
+
+  const importUrl = `${pathToFileURL(filePath).href}?t=${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  return import(importUrl);
+}
+
+/**
+ * A `node_modules` directory existing is not proof that a specific package
+ * resolves from it — pnpm's strict layout and undeclared transitive
+ * dependencies are the common counter-examples — so an externalized artifact
+ * that fails to resolve one falls back to a self-contained build rather than
+ * failing. esbuild hoists every external import above the agent's own code, so
+ * the failure happens before any agent side effect runs and retrying is safe.
+ */
+async function importAgentModuleWithInlineFallback(
+  buildOptions: BuildAgentFileOptions,
+): Promise<Record<string, unknown>> {
+  try {
+    return await importAgentModule(buildOptions.outfile);
+  } catch (error: unknown) {
+    if (buildOptions.packages === 'bundle' || !isModuleResolutionError(error)) {
+      throw error;
+    }
+
+    logger.warn(
+      `Failed to load ${buildOptions.entryPoint} with its dependencies left ` +
+        `external, retrying with them inlined: ${String(error)}`,
+    );
+    await buildAgentFile({...buildOptions, packages: 'bundle'});
+    return importAgentModule(buildOptions.outfile);
+  }
+}
+
 /**
  * Wrapper class which loads file that contains base agent or app (support both .js and
  * .ts) and has a dispose function to cleanup the compiled artifact after file
@@ -189,6 +312,7 @@ export class AgentFile {
 
     let filePath = this.filePath;
     const shouldCompile = this.options.compile || this.options.bundle;
+    let buildOptions: BuildAgentFileOptions | undefined;
 
     if (shouldCompile) {
       const moduleType =
@@ -199,40 +323,39 @@ export class AgentFile {
         outputDir,
         parsedPath.name + FILE_MODULE_TYPE_EXTENSION_MAP[moduleType],
       );
-      const originalDir = path.dirname(filePath);
       await fsPromises.mkdir(outputDir, {recursive: true});
-      await linkProjectNodeModules(outputDir, parsedPath.dir);
 
-      await esbuild.build({
-        entryPoints: [filePath],
+      // Third-party packages can only be left external if the compiled
+      // artifact can resolve them from the project's node_modules at runtime.
+      const nodeModulesLinked = await linkProjectNodeModules(
+        outputDir,
+        parsedPath.dir,
+      );
+
+      // `packages` only has an effect while bundling, so gating on `bundle`
+      // keeps `--bundle false` on exactly its previous behaviour and stops the
+      // fallback from running a second, byte-identical build.
+      const bundle = Boolean(this.options.bundle);
+      buildOptions = {
+        entryPoint: filePath,
         outfile: compiledFilePath,
-        target: 'node16',
-        platform: 'node',
         format: moduleType,
-        packages: 'bundle',
-        bundle: this.options.bundle,
-        minify: this.options.bundle,
-        allowOverwrite: true,
-        plugins: [replaceDirnamePlugin(filePath, originalDir), shimPlugin()],
-        // esbuild rejects `external` unless `bundle` is enabled, so the
-        // allowlist is only passed when the agent file is actually bundled.
-        ...(this.options.bundle ? {external: EXTERNAL_PACKAGES} : {}),
-      });
+        bundle,
+        packages:
+          bundle && nodeModulesLinked && !this.options.inlineDependencies
+            ? 'external'
+            : 'bundle',
+      };
+      await buildAgentFile(buildOptions);
 
       this.cleanupDirPath = outputDir;
       this.cleanupFilePath = compiledFilePath;
       filePath = compiledFilePath;
     }
 
-    const require = createRequire(import.meta.url);
-    try {
-      delete require.cache[require.resolve(filePath)];
-    } catch {
-      logger.warn(`Failed to delete require cache for ${filePath}`);
-    }
-
-    const importUrl = `${pathToFileURL(filePath).href}?t=${Date.now()}_${Math.random().toString(36).slice(2)}`;
-    const jsModule = await import(importUrl);
+    const jsModule = buildOptions
+      ? await importAgentModuleWithInlineFallback(buildOptions)
+      : await importAgentModule(filePath);
 
     if (jsModule) {
       if (isApp(jsModule.app)) {
@@ -247,16 +370,19 @@ export class AgentFile {
         return this.app!;
       }
 
-      const defaultApp = [jsModule.default, jsModule.default?.default].find(
-        isApp,
-      );
+      const defaultExports = [
+        jsModule.default,
+        nestedDefaultExport(jsModule.default),
+      ];
+
+      const defaultApp = defaultExports.find(isApp);
       if (defaultApp) {
         this.app = defaultApp;
         this.agent = defaultApp.rootAgent;
         return this.app!;
       }
 
-      const rootApps = Object.values(jsModule).filter(isApp) as App[];
+      const rootApps = Object.values(jsModule).filter(isApp);
 
       if (rootApps.length > 1) {
         console.warn(
@@ -274,16 +400,12 @@ export class AgentFile {
         return (this.agent = jsModule.rootAgent);
       }
 
-      const defaultAgent = [jsModule.default, jsModule.default?.default].find(
-        isBaseAgent,
-      );
+      const defaultAgent = defaultExports.find(isBaseAgent);
       if (defaultAgent) {
         return (this.agent = defaultAgent);
       }
 
-      const rootAgents = Object.values(jsModule).filter(
-        isBaseAgent,
-      ) as BaseAgent[];
+      const rootAgents = Object.values(jsModule).filter(isBaseAgent);
 
       if (rootAgents.length > 1) {
         console.warn(
@@ -621,18 +743,19 @@ async function getTypeFromPackageJson(dir: string): Promise<FileModuleType> {
   return getTypeFromPackageJson(parentDir);
 }
 
+/** @returns Whether the output directory has a usable `node_modules` link. */
 async function linkProjectNodeModules(
   outputDir: string,
   sourceDir: string,
-): Promise<void> {
+): Promise<boolean> {
   const nodeModulesDir = await getProjectNodeModulesDir(sourceDir);
   if (!nodeModulesDir) {
-    return;
+    return false;
   }
 
   const linkPath = path.join(outputDir, 'node_modules');
   if (await isFolderExists(linkPath)) {
-    return;
+    return true;
   }
 
   try {
@@ -646,6 +769,8 @@ async function linkProjectNodeModules(
       throw error;
     }
   }
+
+  return true;
 }
 
 async function getProjectNodeModulesDir(

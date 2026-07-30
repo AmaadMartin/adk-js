@@ -42,7 +42,10 @@ vi.mock('node:fs/promises', () => {
   };
 });
 
-vi.mock('../../src/utils/agent_loader.js', () => ({
+// Only AgentLoader is stubbed: DEFAULT_AGENT_FILE_OPTIONS must stay the real
+// constant, since deployment falls back to it when no load options are given.
+vi.mock('../../src/utils/agent_loader.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/utils/agent_loader.js')>()),
   AgentLoader: vi.fn().mockImplementation(() => ({
     listAgents: vi.fn().mockResolvedValue(['agent1']),
     getAgentFile: vi.fn().mockResolvedValue({
@@ -169,6 +172,29 @@ describe('deployToCloudRun', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it('inlines the agent dependencies so the copied artifact is self-contained', async () => {
+    await deployToCloudRun({
+      ...defaultOptions,
+      agentFileLoadOptions: {compile: true, bundle: false},
+    });
+
+    expect(AgentLoader).toHaveBeenCalledWith('path/to/agent', {
+      compile: true,
+      bundle: false,
+      inlineDependencies: true,
+    });
+  });
+
+  it('keeps compiling and bundling when no agent file load options are given', async () => {
+    await deployToCloudRun(defaultOptions);
+
+    expect(AgentLoader).toHaveBeenCalledWith('path/to/agent', {
+      compile: true,
+      bundle: true,
+      inlineDependencies: true,
+    });
   });
 
   it('should deploy successfully with explicit options', async () => {
