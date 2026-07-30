@@ -5,8 +5,13 @@
  */
 
 import {Sessions} from '@google-cloud/vertexai/build/src/genai/sessions.js';
-import {createEvent, State, VertexAiSessionService} from '@google/adk';
-import {Session} from '@google/adk/sessions/session.js';
+import {
+  createEvent,
+  isCompactedEvent,
+  Session,
+  State,
+  VertexAiSessionService,
+} from '@google/adk';
 import {ApiError} from '@google/genai';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 
@@ -24,8 +29,8 @@ vi.mock('nodejs-vertexai', () => ({
 import {
   isVertexAiConnectionString,
   quoteFilterLiteral,
-} from '@google/adk/sessions/vertex_ai_session_service.js';
-import {logger} from '@google/adk/utils/logger.js';
+} from '../../src/sessions/vertex_ai_session_service.js';
+import {logger} from '../../src/utils/logger.js';
 
 describe('isVertexAiConnectionString', () => {
   it('returns true for vertexai://', () => {
@@ -423,8 +428,11 @@ describe('VertexAiSessionService', () => {
 
       expect(session?.events).toHaveLength(1);
       const parsedEvent = session?.events[0];
-      expect(parsedEvent?.isCompacted).toBe(true);
-      expect(parsedEvent?.usageMetadata).toEqual({promptTokens: 10});
+      if (!parsedEvent) {
+        expect.fail('expected the session to carry the compacted event');
+      }
+      expect(isCompactedEvent(parsedEvent)).toBe(true);
+      expect(parsedEvent.usageMetadata).toEqual({promptTokens: 10});
     });
 
     it('slices events based on numRecentEvents', async () => {
@@ -649,9 +657,10 @@ describe('VertexAiSessionService', () => {
       });
     });
 
-    it('lists sessions without filter if userId is missing', async () => {
+    it('lists sessions without filter if userId is empty', async () => {
       await service.listSessions({
         appName: '12345',
+        userId: '',
       });
 
       expect(mockClient.listInternal).toHaveBeenCalledWith(
@@ -668,6 +677,7 @@ describe('VertexAiSessionService', () => {
 
       const result = await service.listSessions({
         appName: '12345',
+        userId: '',
       });
 
       expect(result.sessions[0].state).toEqual({});
@@ -679,6 +689,7 @@ describe('VertexAiSessionService', () => {
 
       const result = await service.listSessions({
         appName: '12345',
+        userId: '',
       });
 
       expect(result.sessions).toEqual([]);
@@ -698,6 +709,7 @@ describe('VertexAiSessionService', () => {
 
       const result = await service.listSessions({
         appName: '12345',
+        userId: '',
       });
 
       expect(result.sessions[0].state).toEqual({foo: 'bar'});
