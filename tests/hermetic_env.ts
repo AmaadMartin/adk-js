@@ -6,8 +6,13 @@
 
 /**
  * Cloud configuration and credential variables that a developer machine is
- * likely to export (via `gcloud`, a shell profile, or a sourced `.env`) and
- * that ADK source code reads directly from `process.env`.
+ * likely to export (via `gcloud`, a shell profile, or a sourced `.env`).
+ *
+ * All but one are read straight from `process.env` by ADK source.
+ * `GOOGLE_APPLICATION_CREDENTIALS` is the exception: it is consumed by
+ * `google-auth-library` beneath the genai SDK, so grepping ADK for it finds
+ * nothing. Keep it in the list -- it is the entry that points at real
+ * credentials.
  */
 export const AMBIENT_CLOUD_ENV_VARS = [
   'GEMINI_API_KEY',
