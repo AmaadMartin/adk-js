@@ -14,6 +14,8 @@ import {
 } from '@google/adk';
 import {FinishReason} from '@google/genai';
 import {describe, expect, it, vi} from 'vitest';
+// Relative rather than '@google/adk/...': core's exports map publishes only
+// '.', and this adapter is deliberately not on the public barrel.
 import {Sessions} from '../../../core/src/utils/vertex_ai_internal.js';
 import {
   GeminiWithMockResponses,

@@ -5,26 +5,22 @@
  */
 
 /**
- * The single choke point for `@google-cloud/vertexai` symbols that the package
- * does not expose from its root entry point.
+ * Deep imports for the `@google-cloud/vertexai` Agent Engine symbols missing
+ * from its root entry point: v1.12.0 ships no `exports` map, and `main`
+ * re-exports only `Client`, `VertexAI`, `./types` and `./models`. Confining
+ * the `build/src/**` specifiers here gives that upstream gap a single blast
+ * radius; delete this module and repoint its consumers once the package
+ * root-exports the `genai` surface. `Client` is root-exported already and does
+ * not belong here.
  *
- * As of `@google-cloud/vertexai@1.12.0` the published package declares no
- * `exports` map and only `main: build/src/index.js`, and that entry point
- * re-exports just `Client`, `VertexAI`, `./types` and `./models`. The Agent
- * Engine surface under `build/src/genai/**` — the `Sessions` and `Memories`
- * modules and every symbol in `genai/types.js` — is therefore reachable only
- * through a compiled build-output path, which upstream is free to reorganise
- * in any release.
+ * A symbol keeps its upstream name unless that name is ambiguous with another
+ * type in scope at a use site, in which case it takes a `VertexAi` prefix:
+ * `Session`, `SessionEvent` and `EventMetadata` against ADK's own `Session`
+ * and `Event`, and `Language` against the same-named `@google/genai` enum,
+ * whose Python member is `PYTHON` rather than `LANGUAGE_PYTHON`.
  *
- * Keeping every such specifier in this one module bounds the blast radius of
- * that upstream gap to a single file. `Client` is root-exported and must be
- * imported from `'@google-cloud/vertexai'` directly — it does not belong here.
- * When the package ships an `exports` map, or re-exports the `genai` surface
- * from its root entry point, delete this module and repoint its consumers.
- *
- * `Language` is a runtime enum and must stay a value re-export; everything
- * else is only ever used in type position here, so `export type` keeps the
- * extra CommonJS modules out of the runtime graph.
+ * `Language` is a runtime enum, so it must stay a value re-export; as
+ * `export type` it still compiles but resolves to `undefined` at run time.
  */
 
 export type {Memories} from '@google-cloud/vertexai/build/src/genai/memories.js';
