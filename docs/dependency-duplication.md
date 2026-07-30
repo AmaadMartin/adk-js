@@ -5,9 +5,10 @@
 `adk-js` knowingly ships more than one copy of `google-auth-library`. The
 duplication is not an oversight, and it cannot be removed by forcing every
 dependent onto the hoisted version:
-`@google-cloud/opentelemetry-cloud-trace-exporter` and `@google-cloud/storage`
-would keep compiling and keep running, but would stop sending credentials. This
-file records the
+`@google-cloud/opentelemetry-cloud-trace-exporter` would keep compiling and keep
+running while sending no credentials at all, and `@google-cloud/storage` would
+break for one credential type and silently drop a request header. This file
+records the
 per-dependent analysis so it does not have to be redone, and
 `tests/integration/dependencies/google_auth_library_duplication_test.ts` turns
 the conclusions into an assertion that fails when the set of copies changes.
@@ -50,10 +51,11 @@ through `@google-cloud/opentelemetry-cloud-monitoring-exporter` (`googleapis
 ^137.0.0` -> `googleapis-common ^7.0.0`), so those two cannot be decided
 independently of it.
 
-The cost is not only the second copy. v9 pulls `gaxios@6.7.1` (and through it
-`node-fetch@2.7.0`), `gcp-metadata@6.1.1`, `gtoken@7.1.0` and
-`google-logging-utils@0.0.2`, none of which v10 needs: it uses `gaxios@7`,
-`gcp-metadata@8` and `google-logging-utils@1.x`, and vendors `gtoken`.
+The cost is not only the second copy. v9's `gaxios@6.7.1`, `gcp-metadata@6.1.1`,
+`gtoken@7.1.0` and `google-logging-utils@0.0.2` sit alongside v10's
+`gaxios@7.1.5`, `gcp-metadata@8.1.2` and `google-logging-utils@1.1.3` (v10
+vendors `gtoken`), and each `gaxios` brings its own `node-fetch`, `2.7.0` and
+`3.3.2` respectively.
 
 ## The v9 -> v10 changes that matter
 
@@ -179,22 +181,23 @@ v9-era code.
 
 ### `googleapis@137.1.0`
 
-An upgrade exists: `googleapis@152.0.0` is the first release to declare
-`google-auth-library ^10.1.0` (`149.0.0` still declares `^9.0.0`, and there is
-no `150.x` or `151.x`), and `173.0.0` declares `^10.2.0`. It is still not a
-usable route, for three independent reasons:
+An upgrade exists: `149.0.0` still declares `google-auth-library ^9.0.0`, while
+`150.0.1` declares `^10.0.0-rc.1`, `152.0.0` declares `^10.1.0` and `173.0.0`
+(the current latest) declares `^10.2.0`. It is still not a usable route, for
+three independent reasons:
 
 - It is not a direct dependency. The monitoring exporter declares
-  `googleapis: ^137.0.0`, so even the nearest v10-declaring release means
-  overriding it 15 majors past its declared range (`152.0.0`), and the latest
+  `googleapis: ^137.0.0`, so even the earliest v10-declaring release means
+  overriding it 13 majors past its declared range (`150.0.1`), and the latest
   36 (`173.0.0`).
 - The exporter deep-imports an unpublished path: `monitoring.js:20` does
   `require("googleapis/build/src/apis/monitoring")`. `googleapis` declares no
   `exports` map, so nothing constrains that path across releases.
 - The upgrade would not remove the duplicate, because of the exact pin described
-  under `googleapis-common` below. Both `152.0.0` and `173.0.0` depend on
-  `googleapis-common ^8.0.0`, so either way the nested copy is renumbered from
-  `9.15.1` to `10.5.0`, not removed.
+  under `googleapis-common` below. Every v10-declaring release resolves
+  `googleapis-common` to the `8.x` line, so the two nested v9 copies in this
+  subtree become one nested `10.5.0` — an improvement, but still a duplicate,
+  and one that a further override would have to chase.
 
 ### `googleapis-common@7.2.0`
 
@@ -221,15 +224,6 @@ Upgrading does not help either: `googleapis-common@8.0.3` and `@9.0.0` both pin
 upgrade trades one nested copy for another. `9.0.0` additionally requires Node
 `>=22`. This pin is what also blocks the `googleapis` upgrade above.
 
-### `@google-cloud/vertexai@1.12.0`
-
-Listed for completeness because it still declares `google-auth-library ^9.1.0`
-and appears in the tree above. A separate change deduplicates it with a
-dependent-scoped override, so it carries no verdict here and is marked
-`required: false` in the test's allowlist: the assertion has to hold whether or
-not that change has landed. If you are retiring that row, delete this section
-with it.
-
 ### `@google-cloud/storage@7.21.0`
 
 Symbol usage is narrow (`DEFAULT_UNIVERSE`, `GoogleAuth`) and both exist in v10,
@@ -250,8 +244,9 @@ and `nodejs-common/service.js:138-165`, which assembles the request URL into
   makes this a credential-type-dependent auth failure rather than a uniform one.
 - The returned `opts.headers` is a `Headers` instance, which flows into
   `teeny-request@9.0.0`. Its `build/src/index.js:44` does
-  `reqOpts.headers['Content-Type'] = 'application/json'`, an own-property write
-  that a `Headers` instance ignores, so the content type is dropped.
+  `reqOpts.headers['Content-Type'] = 'application/json'`. On a `Headers`
+  instance that lands as an ordinary own property and never reaches the header
+  list, so the content type is dropped.
 
 `util.js:387` also branches on
 `googleAutoAuthConfig.authClient instanceof google_auth_library_1.GoogleAuth`,

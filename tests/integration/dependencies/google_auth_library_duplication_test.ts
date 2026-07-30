@@ -34,7 +34,7 @@ const ALLOWED_DUPLICATES: readonly AllowedDuplicate[] = [
     declaredRange: '^9.6.3',
     required: true,
     reason:
-      'v10 authorizeRequest() ignores the `uri` this package sends, and its Headers result is not extensible by teeny-request.',
+      'v10 authorizeRequest() ignores the `uri` this package sends, and teeny-request writes to its Headers result never reach the header list.',
   },
   {
     dependent: '@google-cloud/opentelemetry-cloud-monitoring-exporter',
