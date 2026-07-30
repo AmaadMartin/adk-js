@@ -27,19 +27,29 @@ const BUILTIN_MODULES = new Set(builtinModules);
  */
 const SCAN_TIMEOUT = 30000;
 
+/** A dependency block of an npm manifest. */
+type ManifestBlock = 'dependencies' | 'devDependencies';
+
 /**
- * The `@types/*` packages whose types are reachable from
- * `core/dist/types/**`, and which therefore have to reach consumers through
- * `dependencies`.
+ * The audited block of every `@types/*` package in `core/package.json`.
  *
- * `@types/express` is on the list because `ToA2aOptions.app` and the `toA2a`
- * return type are `express.Application` and express@4 bundles no declarations
- * of its own. `@types/adm-zip` and `@types/lodash-es` are deliberately absent:
+ * This is a hand-maintained ledger, not a measurement: each verdict came from
+ * grepping the emitted `core/dist/types/**` for the package. `@types/express`
+ * is a runtime dependency because `ToA2aOptions.app` and the `toA2a` return
+ * type are `express.Application` and express@4 bundles no declarations of its
+ * own, so a consumer cannot resolve those types without it. The other two stay
+ * dev-only because neither is named anywhere in the emitted declarations:
  * `AdmZip` is only ever a local inside `core/src/skills/loader.ts`, and the
- * `cloneDeep`/`isEmpty` helpers return generic or primitive types, so neither
- * package is named anywhere in the emitted declarations.
+ * `cloneDeep`/`isEmpty` helpers return generic or primitive types.
+ *
+ * Adding, removing, or re-classifying a `@types/*` package fails the test
+ * below until that audit is re-run and this ledger updated to match.
  */
-const PUBLICLY_REACHABLE_TYPE_PACKAGES = new Set(['@types/express']);
+const AUDITED_TYPE_PACKAGE_BLOCKS: Record<string, ManifestBlock> = {
+  '@types/adm-zip': 'devDependencies',
+  '@types/express': 'dependencies',
+  '@types/lodash-es': 'devDependencies',
+};
 
 function readCoreManifest(): Manifest {
   const manifest: Manifest = JSON.parse(
@@ -49,8 +59,11 @@ function readCoreManifest(): Manifest {
 }
 
 /** Lists the manifest blocks that declare `packageName`. */
-function blocksDeclaring(manifest: Manifest, packageName: string): string[] {
-  const blocks: string[] = [];
+function blocksDeclaring(
+  manifest: Manifest,
+  packageName: string,
+): ManifestBlock[] {
+  const blocks: ManifestBlock[] = [];
   if (manifest.dependencies?.[packageName] !== undefined) {
     blocks.push('dependencies');
   }
@@ -187,38 +200,35 @@ describe('Dependency resolution', () => {
     ).toBeUndefined();
   });
 
-  it('declares each @types/* package in the block its reachability demands', () => {
+  it('declares each @types/* package in its audited block', () => {
     const manifest = readCoreManifest();
-    const typePackages = [
-      ...new Set(
-        [
-          ...Object.keys(manifest.dependencies ?? {}),
-          ...Object.keys(manifest.devDependencies ?? {}),
-        ].filter((packageName) => packageName.startsWith('@types/')),
-      ),
-    ].sort();
+    const typePackages = new Set(
+      [
+        ...Object.keys(manifest.dependencies ?? {}),
+        ...Object.keys(manifest.devDependencies ?? {}),
+      ].filter((packageName) => packageName.startsWith('@types/')),
+    );
 
     const declared = Object.fromEntries(
-      typePackages.map((name) => [name, blocksDeclaring(manifest, name)]),
+      [...typePackages].map((name) => [name, blocksDeclaring(manifest, name)]),
     );
-    const required = Object.fromEntries(
-      typePackages.map((name) => [
+    const audited = Object.fromEntries(
+      Object.entries(AUDITED_TYPE_PACKAGE_BLOCKS).map(([name, block]) => [
         name,
-        PUBLICLY_REACHABLE_TYPE_PACKAGES.has(name)
-          ? ['dependencies']
-          : ['devDependencies'],
+        [block],
       ]),
     );
 
     expect(
       declared,
-      'A @types/* package whose types survive into core/dist/types/**/*.d.ts ' +
-        'must be declared in "dependencies", because consumers of ' +
-        '@google/adk never install devDependencies; one whose types stay ' +
-        'internal must stay in "devDependencies" so consumers do not carry ' +
-        'it. Update PUBLICLY_REACHABLE_TYPE_PACKAGES alongside the manifest ' +
-        'when a change alters which type packages the public API exposes.',
-    ).toEqual(required);
+      "core/package.json's @types/* packages must match the audited ledger " +
+        'in AUDITED_TYPE_PACKAGE_BLOCKS. A type package whose types are ' +
+        'reachable from core/dist/types/**/*.d.ts belongs in "dependencies", ' +
+        'because consumers of @google/adk never install devDependencies; one ' +
+        'whose types stay internal belongs in "devDependencies" so consumers ' +
+        'do not carry it. Re-run that audit and update the ledger in the same ' +
+        'commit that changes the manifest.',
+    ).toEqual(audited);
   });
 
   it('keeps express and @types/express on the same semver major', () => {
