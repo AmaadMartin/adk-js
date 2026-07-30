@@ -65,16 +65,12 @@ export class SkillToolset extends BaseToolset {
        */
       allowInlineScripts?: boolean;
       /**
-       * Directory that files produced by skill script execution are written
-       * into. Both `run_skill_script` and `run_skill_inline_script`
-       * materialize the code executor's output files here, and the file names
-       * they report back to the model are relative to it.
+       * Directory that skill script output files are written into. The names
+       * the tools report back to the model are relative to it.
        *
-       * Defaults to the host process's current working directory, i.e. the
-       * directory the agent process was launched from. Scripts choose their
-       * own file names, so an agent launched from a source checkout will write
-       * model-named files into that checkout; set this to a dedicated
-       * directory to keep skill output out of the working tree.
+       * Defaults to the host process's current working directory, so an agent
+       * launched from a source checkout writes model-named files into that
+       * checkout; set this to keep skill output out of the working tree.
        */
       outputDir?: string;
     } = {},
@@ -110,9 +106,8 @@ export class SkillToolset extends BaseToolset {
    * Directory that skill script output files are materialized into,
    * defaulting to the host process's current working directory.
    *
-   * Resolved on each read rather than snapshotted at construction time, so a
-   * process that calls `process.chdir()` after building the toolset keeps the
-   * documented default.
+   * Resolved per read rather than at construction time, so the default keeps
+   * tracking `process.cwd()` exactly as it did before this option existed.
    */
   get outputDir(): string {
     return this.configuredOutputDir ?? process.cwd();

@@ -9,25 +9,20 @@ import * as path from 'node:path';
 import {File} from '../code_executors/code_execution_utils.js';
 
 /**
- * Writes the given in-memory files to disk, relative to a base directory.
+ * Writes the given in-memory files to disk under a base directory, appending a
+ * numeric suffix (`report.txt` -> `report_2.txt`) rather than overwriting an
+ * existing file.
  *
- * When a name is already taken, a numeric suffix is appended to the base name
- * (`report.txt` -> `report_2.txt` -> `report_3.txt`, ...) until a free name is
- * found, so an existing file is never overwritten.
- *
- * Names that resolve outside `dir` are rejected with a `Path traversal
- * detected` error. That is a lexical check on the resolved path, not a
- * sandbox: it does not account for symlinks, hard links, bind mounts, or a
- * concurrent rename between the check and the write.
+ * Names resolving outside `dir` are rejected with a `Path traversal detected`
+ * error. That is a lexical check on the resolved path, not a sandbox: it does
+ * not survive symlinks or a concurrent rename.
  *
  * @param files The files to materialize.
- * @param dir Base directory the files are written under. Defaults to the host
- *     process's current working directory, i.e. the directory the process was
- *     launched from — callers that do not want files there must pass an
- *     explicit directory.
- * @returns The written files, each with `name` rewritten to the final path
- *     relative to `dir` (which differs from the requested name whenever a
- *     collision suffix was applied).
+ * @param dir Base directory to write under. Defaults to the host process's
+ *     current working directory; callers that do not want files there must
+ *     pass an explicit directory.
+ * @returns The written files, with `name` rewritten to the final path relative
+ *     to `dir`.
  */
 export async function materializeFiles(
   files: File[],
