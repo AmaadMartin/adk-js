@@ -24,9 +24,11 @@ import {App, isApp} from '@google/adk';
 import {
   AgentFile,
   AgentLoader,
+  isModuleResolutionError,
   replaceDirnamePlugin,
 } from '../../src/utils/agent_loader.js';
 import * as fileUtils from '../../src/utils/file_utils.js';
+import {AdkLogger} from '../../src/utils/logger.js';
 
 vi.mock('../../src/utils/file_utils.js', () => ({
   getTempDir: vi.fn(),
@@ -272,13 +274,16 @@ describe('AgentLoader', () => {
       const agent = await agentFile.load();
 
       expect(agent.name).toEqual('agent2');
+      expect(esbuild.build as Mock).toHaveBeenCalledTimes(1);
       expect((esbuild.build as Mock).mock.calls[0][0]).toMatchObject({
         entryPoints: [agentPath],
         outfile: compiledAgentPath,
         target: 'node16',
         platform: 'node',
         format: 'cjs',
-        packages: 'bundle',
+        // The project's node_modules is linked into the output directory, so
+        // third-party packages are left external instead of being inlined.
+        packages: 'external',
         bundle: true,
         minify: true,
         allowOverwrite: true,
@@ -548,6 +553,170 @@ describe('AgentLoader', () => {
       await expect(agentFile.load()).rejects.toThrow(
         `Agent file ${agentPath} does not exists`,
       );
+    });
+  });
+
+  // Every test here needs its own agent name: vitest's module runner caches a
+  // dynamic import by file path and ignores the cache-busting query, so two
+  // tests compiling to the same artifact path would share the first module.
+  describe('AgentFile dependency externalization', () => {
+    const UNRESOLVABLE_REQUIRE = `require('adk-definitely-not-installed');`;
+    const packagesOf = (callIndex: number) =>
+      (esbuild.build as Mock).mock.calls[callIndex][0].packages;
+
+    /**
+     * Writes an agent source file and queues one mocked build per artifact
+     * body, in the order the builds are expected to happen.
+     */
+    async function setUpAgent(name: string, ...artifactBodies: string[]) {
+      const agentPath = path.join(tempAgentsDir, `${name}.ts`);
+      await fs.writeFile(agentPath, agent2TsContent);
+
+      for (const body of artifactBodies) {
+        (esbuild.build as Mock).mockImplementationOnce(async () =>
+          fs.writeFile(compiledPath(`${name}.cjs`), body),
+        );
+      }
+      return agentPath;
+    }
+
+    it('inlines dependencies when the project has no package.json', async () => {
+      const agentPath = await setUpAgent(
+        'agent_no_pkg',
+        agent2CjsContentMocked,
+      );
+      (fileUtils.tryToFindFileRecursively as Mock).mockRejectedValue(
+        new Error('package.json not found'),
+      );
+
+      const agentFile = new AgentFile(agentPath);
+
+      expect((await agentFile.load()).name).toEqual('agent2');
+      expect(packagesOf(0)).toEqual('bundle');
+
+      await agentFile.dispose();
+    });
+
+    it('inlines dependencies when the project has no node_modules', async () => {
+      const agentPath = await setUpAgent('agent_no_nm', agent2CjsContentMocked);
+      (fileUtils.isFolderExists as Mock).mockImplementation(
+        async (folderPath) => !(folderPath as string).endsWith('node_modules'),
+      );
+
+      const agentFile = new AgentFile(agentPath);
+
+      expect((await agentFile.load()).name).toEqual('agent2');
+      expect(packagesOf(0)).toEqual('bundle');
+
+      await agentFile.dispose();
+    });
+
+    it('inlines dependencies when inlineDependencies is requested', async () => {
+      const agentPath = await setUpAgent(
+        'agent_inline',
+        agent2CjsContentMocked,
+      );
+
+      const agentFile = new AgentFile(agentPath, {
+        compile: true,
+        bundle: true,
+        inlineDependencies: true,
+      });
+
+      expect((await agentFile.load()).name).toEqual('agent2');
+      expect(packagesOf(0)).toEqual('bundle');
+
+      await agentFile.dispose();
+    });
+
+    it('rebuilds with dependencies inlined when an external package does not resolve', async () => {
+      const agentPath = await setUpAgent(
+        'agent_retry',
+        UNRESOLVABLE_REQUIRE,
+        agent2CjsContentMocked,
+      );
+      const warnSpy = vi
+        .spyOn(AdkLogger.prototype, 'warn')
+        .mockImplementation(() => {});
+
+      const agentFile = new AgentFile(agentPath);
+
+      // The retry replays the first failure here rather than picking up the
+      // rebuilt artifact, because vitest's module runner has already cached
+      // this artifact path. What this test pins is the rebuild decision; that
+      // the retry then loads the agent is covered by the end-to-end run
+      // against real Node described in the pull request.
+      await expect(agentFile.load()).rejects.toThrow(
+        "Cannot find module 'adk-definitely-not-installed'",
+      );
+      expect(esbuild.build as Mock).toHaveBeenCalledTimes(2);
+      expect(packagesOf(0)).toEqual('external');
+      expect(packagesOf(1)).toEqual('bundle');
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining(
+          "Cannot find module 'adk-definitely-not-installed'",
+        ),
+      );
+
+      await agentFile.dispose();
+    });
+
+    it('does not rebuild when the agent fails for an unrelated reason', async () => {
+      const agentPath = await setUpAgent(
+        'agent_boom',
+        `throw new Error('boom');`,
+      );
+
+      const agentFile = new AgentFile(agentPath);
+
+      await expect(agentFile.load()).rejects.toThrow('boom');
+      expect(esbuild.build as Mock).toHaveBeenCalledTimes(1);
+
+      await agentFile.dispose();
+    });
+
+    it('does not rebuild when dependencies were already inlined', async () => {
+      const agentPath = await setUpAgent(
+        'agent_inline_fail',
+        UNRESOLVABLE_REQUIRE,
+      );
+
+      const agentFile = new AgentFile(agentPath, {
+        compile: true,
+        bundle: true,
+        inlineDependencies: true,
+      });
+
+      await expect(agentFile.load()).rejects.toThrow(
+        "Cannot find module 'adk-definitely-not-installed'",
+      );
+      expect(esbuild.build as Mock).toHaveBeenCalledTimes(1);
+
+      await agentFile.dispose();
+    });
+  });
+
+  describe('isModuleResolutionError', () => {
+    it.each([
+      'ERR_MODULE_NOT_FOUND',
+      'MODULE_NOT_FOUND',
+      'ERR_PACKAGE_PATH_NOT_EXPORTED',
+      'ERR_REQUIRE_ESM',
+    ])('is true for %s', (code) => {
+      expect(
+        isModuleResolutionError(Object.assign(new Error('x'), {code})),
+      ).toBe(true);
+    });
+
+    it.each([
+      {name: 'an unrelated code', error: {code: 'EACCES'}},
+      {name: 'a codeless error', error: new Error('x')},
+      {name: 'a non-string code', error: {code: 42}},
+      {name: 'undefined', error: undefined},
+      {name: 'null', error: null},
+      {name: 'a string', error: 'ERR_MODULE_NOT_FOUND'},
+    ])('is false for $name', ({error}) => {
+      expect(isModuleResolutionError(error)).toBe(false);
     });
   });
 
