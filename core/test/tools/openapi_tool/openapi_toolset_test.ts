@@ -5,13 +5,15 @@
  */
 
 import {
+  AuthCredential,
   AuthCredentialTypes,
   OpenApiSpecParser,
   OpenAPIToolset,
   ReadonlyContext,
+  RestApiTool,
 } from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 
 /** Returns the resolved `application/json` schema of the `200` response. */
 function jsonResponseSchema(
@@ -133,23 +135,43 @@ describe('OpenAPIToolset', () => {
   });
 
   it('should apply global auth overrides', async () => {
-    const toolset = new OpenAPIToolset({
-      specDict: mockSpec,
-      authScheme: {type: 'apiKey', name: 'key', in: 'header'},
-      authCredential: {
-        authType: AuthCredentialTypes.API_KEY,
-        apiKey: 'my-key',
-      },
-    });
-    const tools = await toolset.getTools();
-
-    expect(tools.length).toBe(2);
-    expect((tools[0] as unknown as Record<string, unknown>).authScheme).toEqual(
-      {type: 'apiKey', name: 'key', in: 'header'},
+    const authScheme: OpenAPIV3.SecuritySchemeObject = {
+      type: 'apiKey',
+      name: 'key',
+      in: 'header',
+    };
+    const authCredential: AuthCredential = {
+      authType: AuthCredentialTypes.API_KEY,
+      apiKey: 'my-key',
+    };
+    // `authScheme` and `authCredential` are private on RestApiTool, so the
+    // override is observed through the setters the toolset drives instead.
+    const configureAuthScheme = vi.spyOn(
+      RestApiTool.prototype,
+      'configureAuthScheme',
     );
-    expect(
-      (tools[0] as unknown as Record<string, unknown>).authCredential,
-    ).toEqual({authType: AuthCredentialTypes.API_KEY, apiKey: 'my-key'});
+    const configureAuthCredential = vi.spyOn(
+      RestApiTool.prototype,
+      'configureAuthCredential',
+    );
+
+    try {
+      const toolset = new OpenAPIToolset({
+        specDict: mockSpec,
+        authScheme,
+        authCredential,
+      });
+      const tools = await toolset.getTools();
+
+      expect(tools.length).toBe(2);
+      expect(configureAuthScheme).toHaveBeenCalledTimes(2);
+      expect(configureAuthScheme).toHaveBeenCalledWith(authScheme);
+      expect(configureAuthCredential).toHaveBeenCalledTimes(2);
+      expect(configureAuthCredential).toHaveBeenCalledWith(authCredential);
+    } finally {
+      configureAuthScheme.mockRestore();
+      configureAuthCredential.mockRestore();
+    }
   });
 
   it('should return all tools when no toolFilter is set and a context is provided', async () => {
@@ -226,7 +248,7 @@ describe('OpenApiSpecParser', () => {
   });
 
   it('should resolve references', () => {
-    const specWithRef = {
+    const specWithRef: OpenAPIV3.Document = {
       openapi: '3.0.0',
       info: {title: 'Test', version: '1.0'},
       paths: {
@@ -247,7 +269,7 @@ describe('OpenApiSpecParser', () => {
           },
         },
       },
-    } as unknown as OpenAPIV3.Document;
+    };
 
     const parser = new OpenApiSpecParser();
     const operations = parser.parse(specWithRef);
@@ -261,7 +283,7 @@ describe('OpenApiSpecParser', () => {
   });
 
   it('should generate operationId if missing', () => {
-    const specMissingId = {
+    const specMissingId: OpenAPIV3.Document = {
       openapi: '3.0.0',
       info: {title: 'Test', version: '1.0'},
       paths: {
@@ -271,7 +293,7 @@ describe('OpenApiSpecParser', () => {
           },
         },
       },
-    } as unknown as OpenAPIV3.Document;
+    };
 
     const parser = new OpenApiSpecParser();
     const operations = parser.parse(specMissingId);
@@ -281,7 +303,7 @@ describe('OpenApiSpecParser', () => {
   });
 
   it('should extract specific security scheme', () => {
-    const specWithSecurity = {
+    const specWithSecurity: OpenAPIV3.Document = {
       openapi: '3.0.0',
       info: {title: 'Test', version: '1.0'},
       paths: {
@@ -302,7 +324,7 @@ describe('OpenApiSpecParser', () => {
           },
         },
       },
-    } as unknown as OpenAPIV3.Document;
+    };
 
     const parser = new OpenApiSpecParser();
     const operations = parser.parse(specWithSecurity);
@@ -316,7 +338,7 @@ describe('OpenApiSpecParser', () => {
   });
 
   it('should handle broken reference', () => {
-    const specWithBrokenRef = {
+    const specWithBrokenRef: OpenAPIV3.Document = {
       openapi: '3.0.0',
       info: {title: 'Test', version: '1.0'},
       paths: {
@@ -331,7 +353,7 @@ describe('OpenApiSpecParser', () => {
       components: {
         parameters: {},
       },
-    } as unknown as OpenAPIV3.Document;
+    };
 
     const parser = new OpenApiSpecParser();
     const operations = parser.parse(specWithBrokenRef);
@@ -343,7 +365,7 @@ describe('OpenApiSpecParser', () => {
   });
 
   it('should handle global security', () => {
-    const specWithGlobalSecurity = {
+    const specWithGlobalSecurity: OpenAPIV3.Document = {
       openapi: '3.0.0',
       info: {title: 'Test', version: '1.0'},
       security: [{global_auth: []}],
@@ -363,7 +385,7 @@ describe('OpenApiSpecParser', () => {
           },
         },
       },
-    } as unknown as OpenAPIV3.Document;
+    };
 
     const parser = new OpenApiSpecParser();
     const operations = parser.parse(specWithGlobalSecurity);
@@ -376,7 +398,7 @@ describe('OpenApiSpecParser', () => {
   });
 
   it('should sanitize invalid schema types', () => {
-    const specWithInvalidType = {
+    const specWithInvalidType: OpenAPIV3.Document = {
       openapi: '3.0.0',
       info: {title: 'Test', version: '1.0'},
       paths: {
@@ -391,7 +413,11 @@ describe('OpenApiSpecParser', () => {
                     schema: {
                       type: 'object',
                       properties: {
-                        invalidProp: {type: 'Any'},
+                        // 'Any' is not an OpenAPI V3 type; the parser is
+                        // expected to strip it.
+                        invalidProp: {
+                          type: 'Any' as OpenAPIV3.NonArraySchemaObjectType,
+                        },
                         validProp: {type: 'string'},
                       },
                     },
@@ -402,7 +428,7 @@ describe('OpenApiSpecParser', () => {
           },
         },
       },
-    } as unknown as OpenAPIV3.Document;
+    };
 
     const parser = new OpenApiSpecParser();
     const operations = parser.parse(specWithInvalidType);
@@ -420,7 +446,7 @@ describe('OpenApiSpecParser', () => {
   });
 
   it('should sanitize invalid schema types in array', () => {
-    const specWithInvalidArrayType = {
+    const specWithInvalidArrayType: OpenAPIV3.Document = {
       openapi: '3.0.0',
       info: {title: 'Test', version: '1.0'},
       paths: {
@@ -435,7 +461,12 @@ describe('OpenApiSpecParser', () => {
                     schema: {
                       type: 'object',
                       properties: {
-                        multiProp: {type: ['string', 'Any', 'integer']},
+                        // A list-valued `type` is OpenAPI 3.1 syntax and has
+                        // no OpenAPI 3.0 typing; the parser is expected to
+                        // drop the invalid 'Any' member.
+                        multiProp: {
+                          type: ['string', 'Any', 'integer'],
+                        } as unknown as OpenAPIV3.SchemaObject,
                       },
                     },
                   },
@@ -445,7 +476,7 @@ describe('OpenApiSpecParser', () => {
           },
         },
       },
-    } as unknown as OpenAPIV3.Document;
+    };
 
     const parser = new OpenApiSpecParser();
     const operations = parser.parse(specWithInvalidArrayType);
