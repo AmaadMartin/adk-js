@@ -37,6 +37,11 @@
     "dev",
     "integrations"
   ],
+  "overrides": {
+    "@google-cloud/vertexai": {
+      "google-auth-library": "^10.3.0"
+    }
+  },
   "devDependencies": {
     "@eslint/js": "^9.37.0",
     "@secretlint/secretlint-rule-pattern": "^11.3.1",
