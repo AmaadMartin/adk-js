@@ -32,10 +32,6 @@ class CustomAgent extends BaseAgent {
   protected async *runAsyncImpl() {
     yield* [];
   }
-
-  protected async *runLiveImpl() {
-    yield* [];
-  }
 }
 
 class MockToolset extends BaseToolset {

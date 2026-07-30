@@ -49,12 +49,6 @@ class LlmCallingAgent extends BaseAgent {
       content: {role: 'model', parts: [{text: 'ok'}]},
     });
   }
-
-  protected async *runLiveImpl(
-    _context: InvocationContext,
-  ): AsyncGenerator<Event, void, void> {
-    // Not needed for this test.
-  }
 }
 
 describe('InvocationContext LLM-call cost tracking', () => {

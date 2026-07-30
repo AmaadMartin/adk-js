@@ -47,10 +47,6 @@ class LongRunningToolAgent extends BaseAgent {
       });
     }
   }
-
-  protected runLiveImpl(): AsyncGenerator<Event, void, void> {
-    throw new Error('Not supported');
-  }
 }
 
 export const rootAgent = new LongRunningToolAgent();

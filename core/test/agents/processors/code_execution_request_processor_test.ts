@@ -28,7 +28,6 @@ class MockBaseAgent extends BaseAgent {
     super({name});
   }
   protected async *runAsyncImpl(_context: InvocationContext) {}
-  protected async *runLiveImpl(_context: InvocationContext) {}
 }
 
 class TestCodeExecutor extends BaseCodeExecutor {
