@@ -47,6 +47,7 @@ export class SkillToolset extends BaseToolset {
   public registry?: SkillRegistry;
   private toolCache = new Map<string, BaseTool[]>();
   private fetchedSkillCache = new Map<string, Map<string, Skill>>();
+  private readonly configuredOutputDir?: string;
 
   constructor(
     skills: Record<string, Skill> | Skill[],
@@ -63,6 +64,19 @@ export class SkillToolset extends BaseToolset {
        * confirmation.
        */
       allowInlineScripts?: boolean;
+      /**
+       * Directory that files produced by skill script execution are written
+       * into. Both `run_skill_script` and `run_skill_inline_script`
+       * materialize the code executor's output files here, and the file names
+       * they report back to the model are relative to it.
+       *
+       * Defaults to the host process's current working directory, i.e. the
+       * directory the agent process was launched from. Scripts choose their
+       * own file names, so an agent launched from a source checkout will write
+       * model-named files into that checkout; set this to a dedicated
+       * directory to keep skill output out of the working tree.
+       */
+      outputDir?: string;
     } = {},
   ) {
     super([], 'adk_skill_toolset');
@@ -72,6 +86,7 @@ export class SkillToolset extends BaseToolset {
     this.codeExecutor = options.codeExecutor;
     this.additionalTools = options.additionalTools || [];
     this.registry = options.registry;
+    this.configuredOutputDir = options.outputDir;
 
     this.tools = [
       new ListSkillsTool(this),
@@ -89,6 +104,18 @@ export class SkillToolset extends BaseToolset {
     if (this.registry) {
       this.tools.push(new SearchSkillsTool(this));
     }
+  }
+
+  /**
+   * Directory that skill script output files are materialized into,
+   * defaulting to the host process's current working directory.
+   *
+   * Resolved on each read rather than snapshotted at construction time, so a
+   * process that calls `process.chdir()` after building the toolset keeps the
+   * documented default.
+   */
+  get outputDir(): string {
+    return this.configuredOutputDir ?? process.cwd();
   }
 
   override async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {

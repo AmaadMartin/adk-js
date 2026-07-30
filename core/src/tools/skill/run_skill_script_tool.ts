@@ -142,7 +142,10 @@ export class RunSkillScriptTool extends BaseTool {
       });
 
       // Final filename could be different if there was a collision, so update the result.
-      result.outputFiles = await materializeFiles(result.outputFiles);
+      result.outputFiles = await materializeFiles(
+        result.outputFiles,
+        this.toolset.outputDir,
+      );
 
       return result;
     } catch (e: unknown) {
