@@ -17,6 +17,7 @@ import {
   Skill,
   SkillToolset,
 } from '@google/adk';
+import {runInNewContext} from 'node:vm';
 import {describe, expect, it, vi} from 'vitest';
 import {materializeFiles} from '../../../src/utils/file_utils.js';
 
@@ -175,6 +176,104 @@ describe('RunSkillScriptTool', () => {
     expect(mockExecutor.executeCodeParams?.codeExecutionInput.language).toBe(
       CodeExecutionLanguage.JAVASCRIPT,
     );
+  });
+
+  describe('TypeScript wrapper', () => {
+    const tsSkill: Skill = {
+      frontmatter: {
+        name: 'ts-skill',
+        description: 'A TypeScript test skill',
+      },
+      instructions: 'Test instructions',
+      resources: {
+        scripts: {
+          'setup.ts': {src: 'console.log("setup");'},
+        },
+      },
+    };
+
+    /** Runs the tool over a .ts script and returns the wrapper it emitted. */
+    async function emitWrapper(): Promise<{
+      code: string;
+      language: CodeExecutionLanguage | undefined;
+    }> {
+      const mockExecutor = new MockCodeExecutor();
+      const toolset = new SkillToolset([tsSkill], {codeExecutor: mockExecutor});
+      const tool = new RunSkillScriptTool(toolset);
+
+      await tool.runAsync({
+        args: {skill_name: 'ts-skill', script_path: 'scripts/setup.ts'},
+        toolContext: createMockContext(),
+      });
+
+      const input = mockExecutor.executeCodeParams?.codeExecutionInput;
+      if (!input?.code) {
+        expect.fail('the executor received no code to run');
+      }
+      return {code: input.code, language: input.language};
+    }
+
+    /** Executes emitted guest source with `require` under the test's control. */
+    function runGuest(
+      code: string,
+      requireImpl: (id: string) => unknown,
+    ): void {
+      runInNewContext(code, {require: requireImpl});
+    }
+
+    function moduleNotFound(id: string): Error {
+      return Object.assign(new Error(`Cannot find module '${id}'`), {
+        code: 'MODULE_NOT_FOUND',
+      });
+    }
+
+    it('registers ts-node and then loads the script', async () => {
+      const {code, language} = await emitWrapper();
+      const required: string[] = [];
+
+      runGuest(code, (id) => {
+        required.push(id);
+        return {};
+      });
+
+      expect(required).toEqual(['ts-node/register', './scripts/setup.ts']);
+      expect(language).toBe(CodeExecutionLanguage.TYPESCRIPT);
+    });
+
+    it('reports an actionable error when ts-node is not installed', async () => {
+      const {code} = await emitWrapper();
+
+      expect(() =>
+        runGuest(code, (id) => {
+          throw moduleNotFound(id);
+        }),
+      ).toThrow(
+        "Cannot run a TypeScript skill script: 'ts-node' is not installed in the code execution environment. Install ts-node there, or provide the script as JavaScript.",
+      );
+    });
+
+    it('rethrows a ts-node failure that is not a missing module', async () => {
+      const {code} = await emitWrapper();
+
+      expect(() =>
+        runGuest(code, () => {
+          throw new Error('tsconfig.json is invalid');
+        }),
+      ).toThrow('tsconfig.json is invalid');
+    });
+
+    it('does not load the script when ts-node is missing', async () => {
+      const {code} = await emitWrapper();
+      const required: string[] = [];
+
+      expect(() =>
+        runGuest(code, (id) => {
+          required.push(id);
+          throw moduleNotFound(id);
+        }),
+      ).toThrow();
+      expect(required).toEqual(['ts-node/register']);
+    });
   });
 
   it('extracts skill resource files correctly', async () => {

@@ -154,6 +154,22 @@ export class RunSkillScriptTool extends BaseTool {
   }
 }
 
+/**
+ * Preamble for TypeScript skill scripts. `ts-node` is resolved by the code
+ * executor's runtime, not by this package, so it may legitimately be absent;
+ * report that as an actionable error instead of a bare module-resolution
+ * failure.
+ */
+const TYPESCRIPT_REGISTER_PREAMBLE = `try {
+  require('ts-node/register');
+} catch (e) {
+  if (e.code !== 'MODULE_NOT_FOUND') throw e;
+  throw new Error(
+    "Cannot run a TypeScript skill script: 'ts-node' is not installed in the code execution environment. Install ts-node there, or provide the script as JavaScript.",
+    {cause: e},
+  );
+}`;
+
 function buildWrapperCode(
   scriptPath: string,
   language: CodeExecutionLanguage,
@@ -162,7 +178,7 @@ function buildWrapperCode(
     case CodeExecutionLanguage.JAVASCRIPT:
       return `require('./${scriptPath}');`;
     case CodeExecutionLanguage.TYPESCRIPT:
-      return `require('ts-node/register');\nrequire('./${scriptPath}');`;
+      return `${TYPESCRIPT_REGISTER_PREAMBLE}\nrequire('./${scriptPath}');`;
     case CodeExecutionLanguage.PYTHON:
       return `import runpy\nrunpy.run_path('./${scriptPath}', run_name='__main__')`;
     case CodeExecutionLanguage.SHELL:
