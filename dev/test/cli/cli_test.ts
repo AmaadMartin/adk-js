@@ -151,7 +151,7 @@ describe('CLI Entrypoint', () => {
     it('should default agentFileLoadOptions.minify to false', async () => {
       await parse(['web']);
 
-      const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
       expect(args.agentFileLoadOptions).toMatchObject({
         compile: true,
         bundle: true,
@@ -162,15 +162,15 @@ describe('CLI Entrypoint', () => {
     it('should pass minify: true when --minify is set', async () => {
       await parse(['web', '--minify']);
 
-      const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
-      expect(args.agentFileLoadOptions.minify).toBe(true);
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.agentFileLoadOptions?.minify).toBe(true);
     });
 
     it('should pass minify: true when --minify true is set', async () => {
       await parse(['web', '--minify', 'true']);
 
-      const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
-      expect(args.agentFileLoadOptions.minify).toBe(true);
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.agentFileLoadOptions?.minify).toBe(true);
     });
   });
 
