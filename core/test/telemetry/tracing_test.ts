@@ -30,6 +30,8 @@ vi.hoisted(() => {
 // Mock OpenTelemetry API
 vi.mock('@opentelemetry/api');
 
+const CAPTURE_ENV_VAR = 'ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS';
+
 describe('Telemetry Tracing Functions', () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let mockSpan: any;
@@ -42,6 +44,9 @@ describe('Telemetry Tracing Functions', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Pin the capture gate to its default so the suite does not depend on the
+    // ambient environment of the machine running it.
+    vi.stubEnv(CAPTURE_ENV_VAR, undefined);
 
     mockSpan = {
       setAttributes: vi.fn(),
@@ -104,6 +109,7 @@ describe('Telemetry Tracing Functions', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs(); // restoreAllMocks() does not unstub envs.
   });
 
   describe('traceAgentInvocation', () => {
