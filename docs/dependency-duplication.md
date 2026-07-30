@@ -1,0 +1,297 @@
+# Dependency duplication: `google-auth-library`
+
+## Why this file exists
+
+`adk-js` knowingly ships more than one copy of `google-auth-library`. The
+duplication is not an oversight, and it cannot be removed by forcing every
+dependent onto the hoisted version: two of the dependents would keep compiling
+and keep running, but would stop sending credentials. This file records the
+per-dependent analysis so it does not have to be redone, and
+`tests/integration/dependencies/google_auth_library_duplication_test.ts` turns
+the conclusions into an assertion that fails when the set of copies changes.
+
+## Current state
+
+`@google/adk` (`core/package.json`) declares `google-auth-library: ^10.3.0`. It
+is the only workspace that declares the package, and it uses it in
+`core/src/telemetry/google_cloud.ts`,
+`core/src/integrations/agent_registry/agent_registry.ts` and
+`core/src/tools/openapi_tool/auth/credential_exchangers/service_account_exchanger.ts`.
+Five transitive dependents still declare a `^9.x` range, so npm nests a v9 copy
+under each of them:
+
+```
+$ npm ls google-auth-library --all
+adk@1.4.0
+└─┬ @google/adk@1.4.0 -> ./core
+  ├─┬ @google-cloud/opentelemetry-cloud-monitoring-exporter@0.21.0
+  │ ├── google-auth-library@9.15.1
+  │ └─┬ googleapis@137.1.0
+  │   ├── google-auth-library@9.15.1
+  │   └─┬ googleapis-common@7.2.0
+  │     └── google-auth-library@9.15.1
+  ├─┬ @google-cloud/opentelemetry-cloud-trace-exporter@3.0.0
+  │ └── google-auth-library@9.15.1
+  ├─┬ @google-cloud/storage@7.21.0
+  │ └── google-auth-library@9.15.1
+  ├─┬ @google-cloud/vertexai@1.12.0
+  │ ├─┬ @google/genai@1.52.0
+  │ │ └── google-auth-library@10.7.0 deduped
+  │ └── google-auth-library@9.15.1
+  ├─┬ @google/genai@2.9.0
+  │ └── google-auth-library@10.7.0 deduped
+  └── google-auth-library@10.7.0
+```
+
+Note that `googleapis` and `googleapis-common` are not direct dependencies. The
+edge chain is `@google/adk` ->
+`@google-cloud/opentelemetry-cloud-monitoring-exporter` -> `googleapis`
+(`^137.0.0`) -> `googleapis-common` (`^7.0.0`), so those two rows cannot be
+decided independently of the monitoring exporter.
+
+Keeping the v9 line resident also keeps its transitive stack resident:
+`gaxios@6.7.1`, `gcp-metadata@6.1.1`, `gtoken@7.1.0`,
+`google-logging-utils@0.0.2` and `node-fetch@2.7.0`. v10 uses `gaxios@7`,
+`gcp-metadata@8` and `google-logging-utils@1.x`, and vendors `gtoken`. The v9
+stack disappears on its own once the last v9 consumer is gone; it needs no
+separate action.
+
+## The v9 -> v10 changes that matter
+
+Diffing `build/src/index.d.ts` between `google-auth-library@9.15.1` and
+`@10.7.0`, the only removed top-level export is `DefaultTransporter` (v10
+deletes `build/src/transporters.*`). v10 adds `GdchClient`,
+`ExternalAccountAuthorizedUserClient` and their option types. `GoogleAuth`,
+`OAuth2Client`, `JWT`, `Compute` and `DEFAULT_UNIVERSE` are unchanged.
+
+The export list is not where the risk is. Two behavioural changes keep the same
+name in both majors, so a symbol-level compatibility check passes while the
+runtime behaviour does not:
+
+1. `getRequestHeaders()` changed its return value from a plain object to a
+   WHATWG `Headers` instance. In v9,
+   `build/src/auth/authclient.d.ts` types it `Promise<Headers>` where `Headers`
+   is v9's own `interface Headers { [index: string]: string }` from
+   `build/src/auth/oauth2client.d.ts`. In v10 the same name resolves to the
+   global `Headers` class, which exposes nothing as an own property:
+
+   ```
+   const h = new Headers({authorization: 'Bearer TOKEN'});
+   Object.keys(h)         -> []
+   {...h}                 -> {}
+   Object.assign({}, h)   -> {}
+   h['authorization']     -> undefined
+   h.get('authorization') -> 'Bearer TOKEN'
+   ```
+
+   Any consumer that reads the result as a plain object therefore sees no
+   headers at all, with no error.
+
+2. `GoogleAuth#authorizeRequest()` stopped honouring `opts.uri`. v9
+   (`build/src/auth/googleauth.js:740`) reads `opts.url || opts.uri` and merges
+   with `Object.assign(opts.headers || {}, headers)`; v10
+   (`build/src/auth/googleauth.js:819`) reads `opts.url` only and merges with
+   `Gaxios.mergeHeaders(opts.headers, headers)`. A caller that passes `{uri}`
+   loses the URL and receives a `Headers` instance back.
+
+## Per-dependent verdict
+
+| Dependent                                               | Declared range | Latest published | Verdict | Reason                                                                                 |
+| ------------------------------------------------------- | -------------- | ---------------- | ------- | -------------------------------------------------------------------------------------- |
+| `@google-cloud/opentelemetry-cloud-trace-exporter`      | `^9.0.0`       | `3.0.0`          | Keep    | gRPC reads the auth headers as a plain object; v10 would drop `Authorization`.         |
+| `@google-cloud/opentelemetry-cloud-monitoring-exporter` | `^9.0.0`       | `0.21.0`         | Keep    | Hands its auth client to `googleapis-common`, which expects the v9 contract.           |
+| `googleapis`                                            | `^9.0.0`       | `173.0.0`        | Keep    | Not a direct dependency; the v10-era releases nest a copy through `googleapis-common`. |
+| `googleapis-common`                                     | `^9.7.0`       | `9.0.0`          | Keep    | Constructs `DefaultTransporter`, which v10 removed.                                    |
+| `@google-cloud/storage`                                 | `^9.6.3`       | `7.21.0`         | Keep    | Sends `uri`, which v10's `authorizeRequest()` ignores; headers become inextensible.    |
+
+"Latest published" is the version `npm view <dependent> version` reported when
+this file was written. Four of the five dependents are already at their latest
+release, so upgrading is not an option for them.
+
+## Per-dependent detail
+
+### `@google-cloud/opentelemetry-cloud-trace-exporter@3.0.0`
+
+`build/src/trace.js` uses only `new GoogleAuth({...})`, `getProjectId()` and
+`getClient()`, all of which exist unchanged in v10. The problem is what it does
+with the client at `trace.js:124-131`:
+
+```js
+const creds = await this._auth.getClient();
+...
+const callCreds = grpc.credentials.createFromGoogleCredential(creds);
+```
+
+`@grpc/grpc-js` (resolved at `1.14.4` here) implements that in
+`build/src/call-credentials.js:66-70` by iterating the result of
+`getRequestHeaders()` as a plain object:
+
+```js
+getHeaders.then(headers => {
+  const metadata = new metadata_1.Metadata();
+  for (const key of Object.keys(headers)) {
+    metadata.add(key, headers[key]);
+  }
+  callback(null, metadata);
+}, ...)
+```
+
+Driving that code path against the installed `@grpc/grpc-js@1.14.4` with each
+header shape:
+
+| `getRequestHeaders()` returns                              | resulting gRPC metadata              |
+| ---------------------------------------------------------- | ------------------------------------ |
+| `{authorization: 'Bearer TOKEN'}` (v9 shape)               | `{"authorization":["Bearer TOKEN"]}` |
+| `new Headers({authorization: 'Bearer TOKEN'})` (v10 shape) | `{}`                                 |
+
+Forcing this exporter onto v10 would strip the `Authorization` header from
+every Cloud Trace export. There is no compile error and no exception; the only
+symptom is server-side `UNAUTHENTICATED` and dropped spans. This is why a
+blanket `google-auth-library` override is not an acceptable fix.
+
+### `@google-cloud/opentelemetry-cloud-monitoring-exporter@0.21.0`
+
+`build/src/monitoring.js` builds its own `GoogleAuth`, then passes the resulting
+client out of its own copy and into another package:
+
+```js
+async _authorize() { return (await this._auth.getClient()); }
+...
+await this._monitoring.projects.timeSeries.create({
+  name: ..., requestBody: {timeSeries}, auth: authClient,
+});
+```
+
+`googleapis-common@7.2.0` consumes that `auth` value in
+`build/src/apirequest.js:289-303`, written against the v9 client contract: it
+calls `authClient.getUniverseDomain()`, then either
+`Object.assign(mooOpts.headers, await authClient.getRequestHeaders(options.url))`
+on the http2 path (which collapses to `{}` for a v10 client, per the table
+above) or `authClient.request(options)` with a `gaxios@6`-shaped options object.
+
+Because the auth client crosses a package boundary, this row is coupled to
+`googleapis` and `googleapis-common`. It cannot move to v10 while they stay on
+v9-era code.
+
+### `googleapis@137.1.0`
+
+An upgrade exists: `googleapis@152.0.0` is the first release to declare
+`google-auth-library ^10.1.0` (`149.0.0` still declares `^9.0.0`, and there is
+no `150.x` or `151.x`), and `173.0.0` declares `^10.2.0`. It is still not a
+usable route, for three independent reasons:
+
+- It is not a direct dependency. The monitoring exporter declares
+  `googleapis: ^137.0.0`, so reaching a v10-era release means overriding a
+  dependency 36 majors past its declared range.
+- The exporter deep-imports an unpublished path: `monitoring.js:20` does
+  `require("googleapis/build/src/apis/monitoring")`. `googleapis` declares no
+  `exports` map, so nothing constrains that path across releases.
+- The upgrade would not remove the duplicate. `googleapis@173.0.0` depends on
+  `googleapis-common ^8.0.0`, and `googleapis-common@8.0.3` pins
+  `google-auth-library: 10.5.0` exactly. Against a hoisted `10.7.0` that pin
+  nests a new copy, renumbering the duplicate rather than removing it.
+
+The size is worth recording as well: `googleapis@137.1.0` unpacks to 110.6 MB
+(`173.0.0` unpacks to 207.5 MB), pulled in by a 53 KB exporter that calls a
+handful of Cloud Monitoring v3 endpoints.
+
+### `googleapis-common@7.2.0`
+
+This is the only row that is statically incompatible with v10. It references
+`DefaultTransporter`, the export v10 removed, in its public type surface and at
+two constructor sites:
+
+```
+build/src/index.d.ts:1      export { ..., DefaultTransporter, ... } from 'google-auth-library';
+build/src/discovery.js:30       this.transporter = new google_auth_library_1.DefaultTransporter();
+build/src/apirequest.js:307     return new google_auth_library_1.DefaultTransporter().request(options);
+```
+
+Be precise about reachability. `build/src/index.js:21` re-exports
+`DefaultTransporter` through a lazy getter, so a v10 override would not crash at
+import time, and neither call site is on a path `adk-js` currently exercises:
+the monitoring exporter always supplies `auth`, so `apirequest.js` takes the
+`authClient` branch, and discovery is unused. The objection is that an override
+would knowingly ship a dependency graph containing a latent `TypeError` on a
+branch the application does not control.
+
+Upgrading fails for the same reason as `googleapis`: `googleapis-common@8.0.3`
+and `@9.0.0` both pin `google-auth-library: 10.5.0` exactly, so the upgrade
+trades one nested copy for another. `9.0.0` additionally requires Node `>=22`.
+
+### `@google-cloud/storage@7.21.0`
+
+Symbol usage is narrow (`DEFAULT_UNIVERSE`, `GoogleAuth`) and both exist in v10,
+so a symbol-level check passes. The behaviour does not.
+`build/cjs/src/nodejs-common/util.js:501` calls:
+
+```js
+return authClient.authorizeRequest(reqOpts);
+```
+
+`reqOpts` in this package is `request`-style and carries `uri`, not `url` — see
+`nodejs-common/util.js:643` (`reqOpts.uri = replaceProjectIdToken(reqOpts.uri, projectId)`)
+and `nodejs-common/service.js:138-165`, which assembles the request URL into
+`reqOpts.uri`. Under v10 that has two consequences:
+
+- `authorizeRequest()` reads only `opts.url`, so the URL is `undefined`. For a
+  self-signed-JWT service-account credential the URL is the JWT audience, which
+  makes this a credential-type-dependent auth failure rather than a uniform one.
+- The returned `opts.headers` is a `Headers` instance, which flows into
+  `teeny-request@9.0.0`. Its `build/src/index.js:44` does
+  `reqOpts.headers['Content-Type'] = 'application/json'`, an own-property write
+  that a `Headers` instance ignores, so the content type is dropped.
+
+`util.js:387` also branches on
+`googleAutoAuthConfig.authClient instanceof google_auth_library_1.GoogleAuth`,
+resolved against this package's own copy, so a caller-supplied `GoogleAuth` from
+a different copy takes the other branch. `adk-js` does not hit that today —
+`core/src/artifacts/gcs_artifact_service.ts` forwards only `StorageOptions` to
+`new Storage(...)` — but the branch exists.
+
+## Re-check protocol
+
+Follow this before changing any row above, and before adding a row for a new
+nested copy.
+
+1. `npm view <dependent> versions --json`. If a newer release declares
+   `google-auth-library ^10`, prefer upgrading over adding an override. Check
+   what that release does to the rest of the graph: an upgrade that swaps a
+   nested v9 for a nested v10 is not progress.
+2. `npm pack <dependent>@<version>`, then grep the emitted `build/` or `dist/`
+   for every `google-auth-library` symbol it references.
+3. Diff those symbols against the v9 and v10 `build/src/index.d.ts`. This step
+   is necessary but not sufficient: the trace exporter and `@google-cloud/storage`
+   both pass it and still break. Also trace where the package hands its
+   `AuthClient`, or the result of `getRequestHeaders()`, to another package.
+4. Exercise the real code path at runtime, and run `tsc --noEmit` with this
+   repo's compiler options.
+5. Only then add the override, delete the nested
+   `node_modules/<dependent>/node_modules/...` entries from
+   `package-lock.json` by hand, run `npm install`, and confirm with
+   `npm ls google-auth-library --all` (exit code `0`).
+6. Update the allowlist in
+   `tests/integration/dependencies/google_auth_library_duplication_test.ts` and
+   the corresponding section here, in the same change.
+
+## npm procedural notes
+
+These were observed with npm 9.2.0 and cost time if you meet them cold.
+
+- Adding an `overrides` entry and running `npm install` reports `up to date` and
+  changes nothing, because a lockfile that satisfies the tree already exists.
+  `npm ls <pkg> --all` then fails with `ELSPROBLEMS` and
+  `invalid: "..." from node_modules/<dependent> overridden` — npm knows the tree
+  violates the override and still will not fix it. Delete the nested lockfile
+  entries by hand first.
+- Do not `rm package-lock.json` and reinstall. A from-scratch resolve churns
+  hoisting across hundreds of unrelated packages and makes the diff
+  unreviewable.
+- `npm install --package-lock-only` is not a valid verification mode. It has
+  been observed to accept a hand-edited lockfile in which
+  `@google-cloud/storage@7.21.0` (declaring `^9.6.3`) resolved to `10.7.0` with
+  no override present, reporting `up to date`. Verify with a real `npm install`
+  followed by `npm ls <pkg> --all`.
+- npm 9.x does not write the `overrides` object into `package-lock.json`'s
+  `packages[""]`, so its absence there does not mean the override is missing.
+  Use `npm ls <pkg> --all` and its exit code instead.
