@@ -14,7 +14,6 @@ import {
   LlmAgent,
   PluginManager,
   RoutedAgent,
-  Session,
   createEvent,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
@@ -106,7 +105,7 @@ describe('BaseAgent', () => {
           state: {},
           events: [],
           lastUpdateTime: Date.now(),
-        } as Session,
+        },
         pluginManager: new PluginManager(),
         abortSignal: controller.signal,
       });
@@ -149,7 +148,7 @@ describe('BaseAgent', () => {
           state: {},
           events: [],
           lastUpdateTime: Date.now(),
-        } as Session,
+        },
         pluginManager: new PluginManager(),
         abortSignal: controller.signal,
       });

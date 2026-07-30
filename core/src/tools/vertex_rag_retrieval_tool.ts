@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GenerateContentConfig, VertexRagStore} from '@google/genai';
+import {VertexRagStore} from '@google/genai';
 
 import {BaseTool, ToolProcessLlmRequest} from './base_tool.js';
 
@@ -55,7 +55,7 @@ export class VertexRagRetrievalTool extends BaseTool {
   override async processLlmRequest({
     llmRequest,
   }: ToolProcessLlmRequest): Promise<void> {
-    llmRequest.config = llmRequest.config || ({} as GenerateContentConfig);
+    llmRequest.config = llmRequest.config || {};
     llmRequest.config.tools = llmRequest.config.tools || [];
 
     llmRequest.config.tools.push({

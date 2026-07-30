@@ -50,10 +50,7 @@ export class ConsolidateContextTool extends BaseTool {
   }: RunAsyncToolRequest): Promise<unknown> {
     toolContext.state.set('temp:consolidate_context', true);
     if (args['detail'] !== undefined) {
-      toolContext.state.set(
-        'temp:consolidate_context_detail',
-        args['detail'] as string,
-      );
+      toolContext.state.set('temp:consolidate_context_detail', args['detail']);
     }
     return {
       status: 'success',

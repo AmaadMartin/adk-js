@@ -152,7 +152,7 @@ class ProgressiveStrategy implements StreamingStrategy {
           name: this.currentFcName,
           args: JSON.parse(JSON.stringify(this.currentFcArgs)),
           id: this.currentFcId ?? generateClientFunctionCallId(),
-        } as FunctionCall,
+        },
       };
 
       if (this.currentThoughtSignature) {

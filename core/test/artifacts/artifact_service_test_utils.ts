@@ -5,7 +5,6 @@
  */
 
 import {BaseArtifactService, CompositeSessionKey} from '@google/adk';
-import {Part} from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 
 /**
@@ -108,7 +107,7 @@ export function runArtifactServiceTests(
           userId,
           sessionId,
           filename: 'test.txt',
-          artifact: {} as unknown as Part,
+          artifact: {},
         }),
       ).rejects.toThrow('Artifact must have either inlineData or text');
     });

@@ -18,7 +18,7 @@ function makeRequest(model?: string, tools = []): LlmRequest {
     contents: [],
     toolsDict: {},
     liveConnectConfig: {},
-  } as unknown as LlmRequest;
+  };
 }
 
 describe('GoogleMapsGroundingTool', () => {
@@ -76,7 +76,7 @@ describe('GoogleMapsGroundingTool', () => {
         contents: [],
         toolsDict: {},
         liveConnectConfig: {},
-      } as unknown as LlmRequest;
+      };
       await tool.processLlmRequest({
         llmRequest: req,
         toolContext: {} as never,

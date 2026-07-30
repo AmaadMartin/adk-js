@@ -57,7 +57,7 @@ export class AnchoredContextCompactor implements BaseContextCompactor {
     }
 
     const activeRawEvents = events.filter(
-      (e) => e.timestamp > latestScratchpad!.endTime && !isScratchpadEvent(e),
+      (e) => e.timestamp > latestScratchpad.endTime && !isScratchpadEvent(e),
     );
 
     return [latestScratchpad, ...activeRawEvents];

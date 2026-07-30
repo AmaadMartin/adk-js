@@ -168,7 +168,7 @@ function convertPartToMediaContent(part: Part): Interactions.Content | null {
       type: getInteractionMediaType(mimeType),
       data: part.inlineData.data,
       mime_type: mimeType,
-    } as Interactions.Content;
+    };
   }
 
   if (part.fileData !== undefined && part.fileData !== null) {
@@ -177,7 +177,7 @@ function convertPartToMediaContent(part: Part): Interactions.Content | null {
       type: getInteractionMediaType(mimeType),
       uri: part.fileData.fileUri,
       mime_type: mimeType,
-    } as Interactions.Content;
+    };
   }
 
   return null;
@@ -211,7 +211,7 @@ export function convertContentToSteps(content: Content): Interactions.Step[] {
             call_id: '',
             result: part.codeExecutionResult.output || '',
             is_error: isError,
-          } as Interactions.CodeExecutionResultStep);
+          });
         } else {
           const mediaContent = convertPartToMediaContent(part);
           if (mediaContent) {
@@ -224,7 +224,7 @@ export function convertContentToSteps(content: Content): Interactions.Step[] {
       steps.push({
         type: 'user_input',
         content: mediaContents,
-      } as Interactions.UserInputStep);
+      });
     }
   } else if (role === 'model') {
     const mediaContents: Interactions.Content[] = [];
@@ -250,7 +250,7 @@ export function convertContentToSteps(content: Content): Interactions.Step[] {
               code: part.executableCode.code || '',
               language: 'python',
             },
-          } as Interactions.CodeExecutionCallStep);
+          });
         } else if (part.thought) {
           const step: Interactions.ThoughtStep = {
             type: 'thought',
@@ -271,7 +271,7 @@ export function convertContentToSteps(content: Content): Interactions.Step[] {
       steps.push({
         type: 'model_output',
         content: mediaContents,
-      } as Interactions.ModelOutputStep);
+      });
     }
   }
 
@@ -326,10 +326,9 @@ export function convertStepToParts(step: Interactions.Step): Part[] {
 
   switch (step.type) {
     case 'model_output': {
-      const modelOutputStep = step as Interactions.ModelOutputStep;
       const parts: Part[] = [];
-      if (modelOutputStep.content) {
-        for (const content of modelOutputStep.content) {
+      if (step.content) {
+        for (const content of step.content) {
           const part = convertMediaContentToPart(content);
           if (part) {
             parts.push(part);
@@ -339,10 +338,9 @@ export function convertStepToParts(step: Interactions.Step): Part[] {
       return parts;
     }
     case 'user_input': {
-      const userInputStep = step as Interactions.UserInputStep;
       const parts: Part[] = [];
-      if (userInputStep.content) {
-        for (const content of userInputStep.content) {
+      if (step.content) {
+        for (const content of step.content) {
           const part = convertMediaContentToPart(content);
           if (part) {
             parts.push(part);
@@ -366,13 +364,12 @@ export function convertStepToParts(step: Interactions.Step): Part[] {
       return [part];
     }
     case 'function_result': {
-      const functionResultStep = step as Interactions.FunctionResultStep;
-      const result = functionResultStep.result;
+      const result = step.result;
       return [
         {
           functionResponse: {
-            id: functionResultStep.call_id,
-            name: functionResultStep.name || '',
+            id: step.call_id,
+            name: step.name || '',
             response:
               typeof result === 'object' && result !== null
                 ? (result as Record<string, unknown>)
@@ -382,8 +379,7 @@ export function convertStepToParts(step: Interactions.Step): Part[] {
       ];
     }
     case 'code_execution_call': {
-      const codeExecutionCallStep = step as Interactions.CodeExecutionCallStep;
-      const args = codeExecutionCallStep.arguments || {};
+      const args = step.arguments || {};
       return [
         {
           executableCode: {
@@ -394,13 +390,11 @@ export function convertStepToParts(step: Interactions.Step): Part[] {
       ];
     }
     case 'code_execution_result': {
-      const codeExecutionResultStep =
-        step as Interactions.CodeExecutionResultStep;
       return [
         {
           codeExecutionResult: {
-            output: codeExecutionResultStep.result || '',
-            outcome: codeExecutionResultStep.is_error
+            output: step.result || '',
+            outcome: step.is_error
               ? Outcome.OUTCOME_FAILED
               : Outcome.OUTCOME_OK,
           },
@@ -408,12 +402,11 @@ export function convertStepToParts(step: Interactions.Step): Part[] {
       ];
     }
     case 'thought': {
-      const thoughtStep = step as Interactions.ThoughtStep;
       const part: Part = {
         thought: true,
       };
-      if (thoughtStep.signature) {
-        part.thoughtSignature = thoughtStep.signature;
+      if (step.signature) {
+        part.thoughtSignature = step.signature;
       }
       return [part];
     }
@@ -468,20 +461,20 @@ export function convertToolsConfigToInteractionsFormat(
         } else if (funcDecl.parametersJsonSchema) {
           funcTool.parameters = funcDecl.parametersJsonSchema;
         }
-        interactionTools.push(funcTool as Interactions.Tool);
+        interactionTools.push(funcTool);
       }
     }
 
     if (t.googleSearch) {
-      interactionTools.push({type: 'google_search'} as Interactions.Tool);
+      interactionTools.push({type: 'google_search'});
     }
 
     if (t.codeExecution) {
-      interactionTools.push({type: 'code_execution'} as Interactions.Tool);
+      interactionTools.push({type: 'code_execution'});
     }
 
     if (t.urlContext) {
-      interactionTools.push({type: 'url_context'} as Interactions.Tool);
+      interactionTools.push({type: 'url_context'});
     }
   }
 
@@ -679,7 +672,7 @@ export function convertInteractionEventToLlmResponse(
       delta.type === 'video' ||
       delta.type === 'document'
     ) {
-      const part = convertMediaContentToPart(delta as Interactions.Content);
+      const part = convertMediaContentToPart(delta);
       if (part) {
         aggregatedParts.push(part);
         return {
@@ -827,9 +820,8 @@ export function extractSystemInstruction(
   ) {
     const texts: string[] = [];
     for (const part of systemInstruction.parts) {
-      const p = part as Part;
-      if (p.text) {
-        texts.push(p.text);
+      if (part.text) {
+        texts.push(part.text);
       }
     }
     return texts.length > 0 ? texts.join('\n') : undefined;
@@ -893,7 +885,7 @@ export async function* generateContentViaInteractions(
 
   if (stream) {
     const responses = (await apiClient.interactions.create({
-      model: (llmRequest.model || 'gemini-2.5-flash') as 'gemini-2.5-flash',
+      model: llmRequest.model || 'gemini-2.5-flash',
       input: inputSteps,
       stream: true,
       system_instruction: systemInstruction,
@@ -905,13 +897,12 @@ export async function* generateContentViaInteractions(
 
     const aggregatedParts: Part[] = [];
     for await (const event of responses) {
-      const sseEvent = event as ExtendedInteractionSSEEvent;
-      const interactionId = extractStreamInteractionId(sseEvent);
+      const interactionId = extractStreamInteractionId(event);
       if (interactionId) {
         currentInteractionId = interactionId;
       }
       const llmResponse = convertInteractionEventToLlmResponse(
-        sseEvent,
+        event,
         aggregatedParts,
         currentInteractionId,
       );
@@ -931,7 +922,7 @@ export async function* generateContentViaInteractions(
     }
   } else {
     const interaction = (await apiClient.interactions.create({
-      model: (llmRequest.model || 'gemini-2.5-flash') as 'gemini-2.5-flash',
+      model: llmRequest.model || 'gemini-2.5-flash',
       input: inputSteps,
       stream: false,
       system_instruction: systemInstruction,

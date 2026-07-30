@@ -4,12 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  AgentCapabilities,
-  AgentCard,
-  AgentSkill,
-  TransportProtocol,
-} from '@a2a-js/sdk';
+import {AgentCard, AgentSkill, TransportProtocol} from '@a2a-js/sdk';
 import {Client, ClientFactory} from '@a2a-js/sdk/client';
 import {GoogleAuth} from 'google-auth-library';
 import {RemoteA2AAgent} from '../../a2a/a2a_remote_agent.js';
@@ -313,11 +308,7 @@ export class AgentRegistry {
 
     const combinedHeaderProvider = async (context?: ReadonlyContext) => {
       const headers: Record<string, string> = {};
-      if (
-        !authScheme &&
-        !options?.authCredential &&
-        isGoogleApi(endpointUri!)
-      ) {
+      if (!authScheme && !options?.authCredential && isGoogleApi(endpointUri)) {
         Object.assign(headers, await this.getAuthHeaders());
       }
       if (this.headerProvider && context) {
@@ -463,7 +454,7 @@ export class AgentRegistry {
       skills,
       capabilities: {
         streaming: false,
-      } as AgentCapabilities,
+      },
       defaultInputModes: ['text'],
       defaultOutputModes: ['text'],
     };

@@ -55,7 +55,7 @@ export class TokenBasedContextCompactor implements BaseContextCompactor {
       const e = events[i];
       if (isCompactedEvent(e)) {
         if (!latestCompactedEvent || e.endTime > latestCompactedEvent.endTime) {
-          latestCompactedEvent = e as CompactedEvent;
+          latestCompactedEvent = e;
         }
       }
     }
@@ -65,8 +65,7 @@ export class TokenBasedContextCompactor implements BaseContextCompactor {
     }
 
     const activeRawEvents = events.filter(
-      (e) =>
-        !isCompactedEvent(e) && e.timestamp > latestCompactedEvent!.endTime,
+      (e) => !isCompactedEvent(e) && e.timestamp > latestCompactedEvent.endTime,
     );
 
     return [latestCompactedEvent, ...activeRawEvents];

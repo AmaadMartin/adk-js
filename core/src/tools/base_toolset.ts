@@ -90,7 +90,7 @@ export abstract class BaseToolset {
     }
 
     if (Array.isArray(this.toolFilter)) {
-      return (this.toolFilter as string[]).includes(tool.name);
+      return this.toolFilter.includes(tool.name);
     }
 
     return false;

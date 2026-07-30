@@ -4,12 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  Content,
-  GroundingMetadata,
-  LiveServerMessage,
-  Part,
-} from '@google/genai';
+import {GroundingMetadata, LiveServerMessage, Part} from '@google/genai';
 import {LlmResponse} from '../models/llm_response.js';
 import {isGemini3xFlashLive} from './model_name.js';
 
@@ -65,7 +60,7 @@ export class LiveResponseAggregator {
 
       if (content && content.parts) {
         const llmResponse: LlmResponse = {
-          content: content as Content,
+          content,
           ...(serverContent.interrupted !== undefined
             ? {interrupted: serverContent.interrupted}
             : {}),

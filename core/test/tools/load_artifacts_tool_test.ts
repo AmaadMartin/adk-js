@@ -10,7 +10,7 @@ import {
   LlmRequest,
   LoadArtifactsTool,
 } from '@google/adk';
-import {Blob, Part, Type} from '@google/genai';
+import {Part, Type} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
 class StubToolContext {
@@ -375,7 +375,7 @@ describe('LoadArtifactsTool', () => {
   it('handles parts with inlineData but no data', async () => {
     const artifactName = 'test.txt';
     const artifact: Part = {
-      inlineData: {mimeType: 'text/plain'} as unknown as Blob, // missing data field
+      inlineData: {mimeType: 'text/plain'}, // missing data field
     };
 
     const toolContext = new StubToolContext({
@@ -412,7 +412,7 @@ describe('LoadArtifactsTool', () => {
   it('handles parts with inlineData but no mimeType', async () => {
     const artifactName = 'test.dat';
     const artifact: Part = {
-      inlineData: {data: 'YmFzZTY0'} as unknown as Blob, // missing mimeType field
+      inlineData: {data: 'YmFzZTY0'}, // missing mimeType field
     };
 
     const toolContext = new StubToolContext({

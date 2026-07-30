@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {FunctionCall, Part} from '@google/genai';
+import {Part} from '@google/genai';
 
 import {
   BaseExampleProvider,
@@ -66,7 +66,7 @@ export function convertExamplesToText(
       for (const part of content.parts || []) {
         if (part.functionCall) {
           const prefix = gemini2 ? FUNCTION_PREFIX : FUNCTION_CALL_PREFIX;
-          const functionCall = part.functionCall as FunctionCall;
+          const functionCall = part.functionCall;
           const args: string[] = [];
           if (functionCall.args) {
             for (const [k, v] of Object.entries(functionCall.args)) {

@@ -3,7 +3,6 @@
  * Copyright 2025 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
-import {GenerateContentConfig} from '@google/genai';
 
 import {isGemini1Model, isGeminiModel} from '../utils/model_name.js';
 
@@ -34,7 +33,7 @@ export class GoogleSearchTool extends BaseTool {
       return;
     }
 
-    llmRequest.config = llmRequest.config || ({} as GenerateContentConfig);
+    llmRequest.config = llmRequest.config || {};
     llmRequest.config.tools = llmRequest.config.tools || [];
 
     if (isGemini1Model(llmRequest.model)) {

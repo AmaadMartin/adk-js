@@ -48,7 +48,7 @@ describe('AutoAuthCredentialExchanger', () => {
     };
 
     const result = await exchanger.exchange({
-      authCredential: credential as unknown as AuthCredential,
+      authCredential: credential,
     });
 
     expect(result.wasExchanged).toBe(true);
@@ -63,7 +63,7 @@ describe('ServiceAccountCredentialExchanger', () => {
 
     await expect(
       exchanger.exchange({
-        authCredential: credential as unknown as AuthCredential,
+        authCredential: credential,
       }),
     ).rejects.toThrow(
       'Invalid credential type for ServiceAccountCredentialExchanger',
@@ -100,7 +100,7 @@ describe('ServiceAccountCredentialExchanger', () => {
     };
 
     const result = await exchanger.exchange({
-      authCredential: credential as unknown as AuthCredential,
+      authCredential: credential,
     });
 
     expect(result.wasExchanged).toBe(true);
@@ -118,7 +118,7 @@ describe('ServiceAccountCredentialExchanger', () => {
 
     await expect(
       exchanger.exchange({
-        authCredential: credential as unknown as AuthCredential,
+        authCredential: credential,
       }),
     ).rejects.toThrow('Service account credentials are missing.');
   });

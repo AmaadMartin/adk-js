@@ -5,7 +5,7 @@
  */
 
 import {InvocationContext} from '../agents/invocation_context.js';
-import {CompactedEvent, isCompactedEvent} from '../events/compacted_event.js';
+import {isCompactedEvent} from '../events/compacted_event.js';
 import {createEvent, Event} from '../events/event.js';
 import {ContextCompactionTrigger} from '../plugins/base_plugin.js';
 import {BaseContextCompactor} from './base_context_compactor.js';
@@ -91,9 +91,7 @@ export class AgentControlledContextCompactor implements BaseContextCompactor {
   }
 
   private getActiveEvents(events: Event[]): Event[] {
-    const latest = events.filter(isCompactedEvent).pop() as
-      | CompactedEvent
-      | undefined;
+    const latest = events.filter(isCompactedEvent).pop();
     return latest
       ? [
           latest,

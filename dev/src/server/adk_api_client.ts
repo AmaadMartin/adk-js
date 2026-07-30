@@ -252,7 +252,6 @@ export class AdkApiClient {
 
   private async fetch<T = unknown>(
     url: string,
-    // eslint-disable-next-line no-undef
     options?: RequestInit,
   ): Promise<T> {
     const response = await fetch(url, options);

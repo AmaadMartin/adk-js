@@ -136,7 +136,7 @@ export async function injectSessionState(
       key,
       isOptional,
       isValid,
-      index: match.index!,
+      index: match.index,
     };
   });
 

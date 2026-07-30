@@ -468,7 +468,7 @@ describe('LoggingPlugin', () => {
 
     await plugin.onUserMessageCallback({
       invocationContext: mockInvocationContext,
-      userMessage: {} as Content,
+      userMessage: {},
     });
 
     expect(infoCalls.some((m) => m.includes('None'))).toBe(true);

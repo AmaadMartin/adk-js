@@ -7,7 +7,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import {
-  BaseAgent,
   BaseLlm,
   Event,
   EventActions,
@@ -72,7 +71,7 @@ function createMockInvocationContext(
 
   return new InvocationContext({
     invocationId: 'test-invocation',
-    agent: agent as BaseAgent,
+    agent,
     session,
     pluginManager: new PluginManager([]),
   });

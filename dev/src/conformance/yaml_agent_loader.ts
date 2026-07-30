@@ -30,7 +30,7 @@ export async function batchLoadYamlAgentConfig(
     const content = await fs.readFile(filePath, 'utf-8');
     const agentConfig = camelcaseKeys(yaml.load(content) as YamlAgentConfig, {
       deep: true,
-    }) as YamlAgentConfig;
+    });
 
     // Allow retrieval of root agents based on filename
     agentConfig.isRootAgent =

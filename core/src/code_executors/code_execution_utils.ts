@@ -158,7 +158,7 @@ export function extractCodeAndTruncateContent(
     return '';
   }
 
-  const firstTextPart = cloneDeep(textParts[0])!;
+  const firstTextPart = cloneDeep(textParts[0]);
   const responseText = textParts.map((part) => part.text!).join('\n');
 
   // Find the first code block.

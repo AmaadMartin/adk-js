@@ -27,7 +27,7 @@ function getActiveEvents(events: Event[]): Event[] {
   return [
     scratchpad,
     ...events.filter(
-      (e) => !isScratchpadEvent(e) && e.timestamp > scratchpad!.endTime,
+      (e) => !isScratchpadEvent(e) && e.timestamp > scratchpad.endTime,
     ),
   ];
 }

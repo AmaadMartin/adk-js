@@ -202,7 +202,7 @@ export class AdkApiServer {
     if (this.allowOrigins) {
       app.use(
         cors({
-          origin: this.allowOrigins!,
+          origin: this.allowOrigins,
         }),
       );
     }
@@ -343,14 +343,14 @@ export class AdkApiServer {
 
             return res.send({
               dotSrc: await getAgentGraphAsDot(
-                rootAgent!,
+                rootAgent,
                 functionCallHighlights,
               ),
             });
           }
 
           return res.send({
-            dotSrc: await getAgentGraphAsDot(rootAgent!, [[event.author!, '']]),
+            dotSrc: await getAgentGraphAsDot(rootAgent, [[event.author!, '']]),
           });
         } catch (e) {
           const error = `Failed to get agent graph: ${e}`;

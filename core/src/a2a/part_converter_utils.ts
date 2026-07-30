@@ -20,7 +20,6 @@ import {
   FunctionCall as GenAIFunctionCall,
   FunctionResponse as GenAIFunctionResponse,
   Part as GenAIPart,
-  VideoMetadata,
 } from '@google/genai';
 import {A2AMetadataKeys} from './metadata_converter_utils.js';
 
@@ -262,9 +261,7 @@ export function toGenAIPartText(a2aPart: A2ATextPart): GenAIPart {
 export function toGenAIPartFile(a2aPart: A2AFilePart): GenAIPart {
   const part: GenAIPart = {};
   if (a2aPart.metadata?.[A2AMetadataKeys.VIDEO_METADATA]) {
-    part.videoMetadata = a2aPart.metadata[
-      A2AMetadataKeys.VIDEO_METADATA
-    ] as VideoMetadata;
+    part.videoMetadata = a2aPart.metadata[A2AMetadataKeys.VIDEO_METADATA];
   }
 
   if ('bytes' in a2aPart.file) {

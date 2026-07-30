@@ -24,9 +24,9 @@ function isZodSchema(obj: unknown): obj is ZodSchema {
     obj !== null &&
     typeof obj === 'object' &&
     'parse' in obj &&
-    typeof (obj as {parse: unknown}).parse === 'function' &&
+    typeof obj.parse === 'function' &&
     'safeParse' in obj &&
-    typeof (obj as {safeParse: unknown}).safeParse === 'function'
+    typeof obj.safeParse === 'function'
   );
 }
 

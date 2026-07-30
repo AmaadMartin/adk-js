@@ -257,7 +257,7 @@ describe('oauth2_utils', () => {
 
   describe('isTokenExpired', () => {
     it('returns false if expiresAt is not a number', () => {
-      expect(isTokenExpired({} as unknown as OAuth2Auth)).toBe(false);
+      expect(isTokenExpired({})).toBe(false);
       expect(
         isTokenExpired({expiresAt: 'not-a-number'} as unknown as OAuth2Auth),
       ).toBe(false);
@@ -265,22 +265,18 @@ describe('oauth2_utils', () => {
 
     it('returns false if token is not expired (future expiresAt in milliseconds)', () => {
       const futureTimeMs = Date.now() + 3600 * 1000; // 1 hour in future
-      expect(isTokenExpired({expiresAt: futureTimeMs} as OAuth2Auth)).toBe(
-        false,
-      );
+      expect(isTokenExpired({expiresAt: futureTimeMs})).toBe(false);
     });
 
     it('returns true if token is expired (past expiresAt in milliseconds)', () => {
       const pastTimeMs = Date.now() - 3600 * 1000; // 1 hour in past
-      expect(isTokenExpired({expiresAt: pastTimeMs} as OAuth2Auth)).toBe(true);
+      expect(isTokenExpired({expiresAt: pastTimeMs})).toBe(true);
     });
 
     it('uses leeway (default 60s)', () => {
       const nearFutureTimeMs = Date.now() + 30 * 1000; // 30s in future
       // With 60s leeway, 30s should be considered expired
-      expect(isTokenExpired({expiresAt: nearFutureTimeMs} as OAuth2Auth)).toBe(
-        true,
-      );
+      expect(isTokenExpired({expiresAt: nearFutureTimeMs})).toBe(true);
     });
   });
 });

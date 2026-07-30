@@ -544,7 +544,7 @@ export function mergeParallelFunctionResponseEvents(
     branch: baseEvent.branch,
     content: {role: 'user', parts: mergedParts},
     actions: mergedActions,
-    timestamp: baseEvent.timestamp!,
+    timestamp: baseEvent.timestamp,
   });
 }
 

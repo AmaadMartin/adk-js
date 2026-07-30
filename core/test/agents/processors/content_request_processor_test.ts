@@ -5,7 +5,6 @@
  */
 
 import {
-  BaseAgent,
   CompactedEvent,
   CONTENT_REQUEST_PROCESSOR,
   Event,
@@ -67,7 +66,7 @@ function createMockInvocationContext(events: Event[]): InvocationContext {
 
   return new InvocationContext({
     invocationId: 'test-invocation',
-    agent: agent as BaseAgent,
+    agent,
     session,
     pluginManager: new PluginManager([]),
   });

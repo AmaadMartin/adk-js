@@ -85,7 +85,7 @@ function toVertexMetadataValue(
       v.stringValue !== undefined ||
       v.timestampValue !== undefined
     ) {
-      return v as MemoryMetadataValue;
+      return v;
     }
     return {stringValue: JSON.stringify(value)};
   }
@@ -415,7 +415,7 @@ function buildCreateMemoryConfig(params: {
     config['revisionLabels'] = revisionLabels;
   }
 
-  return config as AgentEngineMemoryConfig;
+  return config;
 }
 
 function extractRevisionLabels(
@@ -476,7 +476,7 @@ function buildGenerateMemoriesConfig(
     if (key === 'ttl') {
       if (value === null || value === undefined) continue;
       if (customMetadata['revisionTtl'] === undefined) {
-        config['revisionTtl'] = value as string;
+        config['revisionTtl'] = value;
       }
       continue;
     }
@@ -517,7 +517,7 @@ function buildGenerateMemoriesConfig(
     }
   }
 
-  return config as GenerateAgentEngineMemoriesConfig;
+  return config;
 }
 
 function normalizeMemoriesForCreate(memories: MemoryEntry[]): MemoryEntry[] {

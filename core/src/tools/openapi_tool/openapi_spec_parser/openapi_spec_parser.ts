@@ -80,7 +80,7 @@ function resolveReferences(spec: OpenAPIV3.Document): OpenAPIV3.Document {
 
     const objRecord = obj as Record<string, unknown>;
     if ('$ref' in objRecord && typeof objRecord['$ref'] === 'string') {
-      const refString = objRecord['$ref'] as string;
+      const refString = objRecord['$ref'];
 
       if (seenRefs.has(refString) && !resolvedCache.has(refString)) {
         // Circular reference detected. Break cycle.

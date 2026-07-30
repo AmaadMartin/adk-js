@@ -29,9 +29,8 @@ export function applyCredential(
     let name = 'key';
 
     if (authScheme && authScheme.type === 'apiKey') {
-      const apiKeyScheme = authScheme as OpenAPIV3.ApiKeySecurityScheme;
-      inLocation = apiKeyScheme.in;
-      name = apiKeyScheme.name;
+      inLocation = authScheme.in;
+      name = authScheme.name;
     }
 
     if (inLocation === 'header') {
