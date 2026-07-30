@@ -10,10 +10,9 @@ import {
   OpenApiSpecParser,
   OpenAPIToolset,
   ReadonlyContext,
-  RestApiTool,
 } from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
-import {describe, expect, it, vi} from 'vitest';
+import {describe, expect, it} from 'vitest';
 
 /** Returns the resolved `application/json` schema of the `200` response. */
 function jsonResponseSchema(
@@ -144,34 +143,16 @@ describe('OpenAPIToolset', () => {
       authType: AuthCredentialTypes.API_KEY,
       apiKey: 'my-key',
     };
-    // `authScheme` and `authCredential` are private on RestApiTool, so the
-    // override is observed through the setters the toolset drives instead.
-    const configureAuthScheme = vi.spyOn(
-      RestApiTool.prototype,
-      'configureAuthScheme',
-    );
-    const configureAuthCredential = vi.spyOn(
-      RestApiTool.prototype,
-      'configureAuthCredential',
-    );
+    const toolset = new OpenAPIToolset({
+      specDict: mockSpec,
+      authScheme,
+      authCredential,
+    });
+    const tools = await toolset.getTools();
 
-    try {
-      const toolset = new OpenAPIToolset({
-        specDict: mockSpec,
-        authScheme,
-        authCredential,
-      });
-      const tools = await toolset.getTools();
-
-      expect(tools.length).toBe(2);
-      expect(configureAuthScheme).toHaveBeenCalledTimes(2);
-      expect(configureAuthScheme).toHaveBeenCalledWith(authScheme);
-      expect(configureAuthCredential).toHaveBeenCalledTimes(2);
-      expect(configureAuthCredential).toHaveBeenCalledWith(authCredential);
-    } finally {
-      configureAuthScheme.mockRestore();
-      configureAuthCredential.mockRestore();
-    }
+    expect(tools.length).toBe(2);
+    expect(tools[0]).toMatchObject({authScheme, authCredential});
+    expect(tools[1]).toMatchObject({authScheme, authCredential});
   });
 
   it('should return all tools when no toolFilter is set and a context is provided', async () => {
@@ -413,8 +394,9 @@ describe('OpenApiSpecParser', () => {
                     schema: {
                       type: 'object',
                       properties: {
-                        // 'Any' is not an OpenAPI V3 type; the parser is
-                        // expected to strip it.
+                        // 'Any' is not an OpenAPI 3.0 schema type; the
+                        // parser is expected to strip it. The assertion is
+                        // scoped to the type literal alone.
                         invalidProp: {
                           type: 'Any' as OpenAPIV3.NonArraySchemaObjectType,
                         },
@@ -461,8 +443,9 @@ describe('OpenApiSpecParser', () => {
                     schema: {
                       type: 'object',
                       properties: {
-                        // A list-valued `type` is OpenAPI 3.1 syntax and has
-                        // no OpenAPI 3.0 typing; the parser is expected to
+                        // A list-valued `type` is OpenAPI 3.1 syntax with no
+                        // OpenAPI 3.0 typing at all, so the assertion has to
+                        // cover the whole property; the parser is expected to
                         // drop the invalid 'Any' member.
                         multiProp: {
                           type: ['string', 'Any', 'integer'],
