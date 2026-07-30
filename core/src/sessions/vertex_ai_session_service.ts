@@ -60,6 +60,29 @@ export function quoteFilterLiteral(value: string): string {
   return `"${escaped}"`;
 }
 
+/**
+ * Returns true when `error` reports a NOT_FOUND from the Agent Engine Sessions
+ * API.
+ *
+ * The check is structural on purpose. The Sessions client raises
+ * `@google/genai`'s `ApiError`, which carries a numeric `status` and no `code`,
+ * and `@google-cloud/vertexai` bundles its own copy of `@google/genai`, so an
+ * `instanceof ApiError` check against the copy this package resolves would be
+ * false for the very errors it needs to match. Non-HTTP transports report
+ * NOT_FOUND as the gRPC status code instead, so both fields are accepted.
+ */
+export function isNotFoundError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) {
+    return false;
+  }
+  const {code, status} = error as {code?: unknown; status?: unknown};
+  return (
+    status === HTTP_NOT_FOUND ||
+    code === HTTP_NOT_FOUND ||
+    code === GRPC_NOT_FOUND
+  );
+}
+
 export interface VertexAiSessionServiceOptions {
   projectId?: string;
   location?: string;
@@ -247,10 +270,13 @@ export class VertexAiSessionService extends BaseSessionService {
 
       return session;
     } catch (error: unknown) {
-      const err = error as {code?: number; message?: string};
-      if (err.code === GRPC_NOT_FOUND || err.code === HTTP_NOT_FOUND) {
+      if (isNotFoundError(error)) {
+        logger.debug(
+          `Session ${sessionId} not found in Vertex AI Agent Engine.`,
+        );
         return undefined;
       }
+      const err = error as {message?: string};
       logger.error(`Error getting session from Vertex AI: ${err.message}`);
       throw error;
     }

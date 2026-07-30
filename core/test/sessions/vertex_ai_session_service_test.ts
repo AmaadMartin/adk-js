@@ -7,6 +7,7 @@
 import {Sessions} from '@google-cloud/vertexai/build/src/genai/sessions.js';
 import {createEvent, State, VertexAiSessionService} from '@google/adk';
 import {Session} from '@google/adk/sessions/session.js';
+import {ApiError} from '@google/genai';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 
 // Mock the unreleased nodejs-vertexai package so the import resolves
@@ -21,10 +22,36 @@ vi.mock('nodejs-vertexai', () => ({
 }));
 
 import {
+  isNotFoundError,
   isVertexAiConnectionString,
   quoteFilterLiteral,
 } from '@google/adk/sessions/vertex_ai_session_service.js';
 import {logger} from '@google/adk/utils/logger.js';
+
+/**
+ * Builds the error the Agent Engine Sessions client really throws. Uses the
+ * SDK's own class rather than a hand-shaped stand-in so these tests fail if
+ * `ApiError` stops reporting the HTTP status the way the fix relies on.
+ */
+function apiError(status: number, message = 'Session not found'): ApiError {
+  return new ApiError({message, status});
+}
+
+/**
+ * An `ApiError` look-alike declared here rather than imported. The client
+ * throws the class from the `@google/genai` copy bundled inside
+ * `@google-cloud/vertexai`, a different constructor from the one this package
+ * resolves, so NOT_FOUND detection must not depend on constructor identity.
+ */
+class LocalApiError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
 
 describe('isVertexAiConnectionString', () => {
   it('returns true for vertexai://', () => {
@@ -36,6 +63,53 @@ describe('isVertexAiConnectionString', () => {
     expect(isVertexAiConnectionString('memory:/')).toBe(false);
     expect(isVertexAiConnectionString('')).toBe(false);
     expect(isVertexAiConnectionString(undefined)).toBe(false);
+  });
+});
+
+describe('isNotFoundError', () => {
+  it('matches the ApiError the Sessions client throws for a missing session', () => {
+    expect(isNotFoundError(apiError(404))).toBe(true);
+  });
+
+  it('matches an ApiError from a foreign copy of the SDK', () => {
+    expect(isNotFoundError(new LocalApiError(404, 'nope'))).toBe(true);
+  });
+
+  it('matches the HTTP code shape', () => {
+    expect(isNotFoundError({code: 404})).toBe(true);
+  });
+
+  it('matches the gRPC code shape', () => {
+    expect(isNotFoundError({code: 5})).toBe(true);
+  });
+
+  it('rejects other HTTP statuses', () => {
+    expect(isNotFoundError(apiError(500, 'Internal'))).toBe(false);
+    expect(isNotFoundError({status: 500})).toBe(false);
+  });
+
+  it('rejects other gRPC codes', () => {
+    expect(isNotFoundError({code: 9})).toBe(false);
+  });
+
+  it('rejects stringified codes', () => {
+    expect(isNotFoundError({status: '404'})).toBe(false);
+    expect(isNotFoundError({code: '404'})).toBe(false);
+  });
+
+  it('does not accept a gRPC code in the HTTP status field', () => {
+    expect(isNotFoundError({status: 5})).toBe(false);
+  });
+
+  it('rejects an error carrying neither field', () => {
+    expect(isNotFoundError(new Error('boom'))).toBe(false);
+  });
+
+  it('rejects non-object values', () => {
+    expect(isNotFoundError(null)).toBe(false);
+    expect(isNotFoundError(undefined)).toBe(false);
+    expect(isNotFoundError('not found')).toBe(false);
+    expect(isNotFoundError(404)).toBe(false);
   });
 });
 
@@ -425,6 +499,54 @@ describe('VertexAiSessionService', () => {
       });
 
       expect(session).toBeUndefined();
+    });
+
+    it('returns undefined without logging when the API raises a 404 ApiError', async () => {
+      // A real missing session 404s both concurrent requests.
+      mockClient.get.mockRejectedValue(apiError(404));
+      mockClient.events.listInternal.mockRejectedValue(apiError(404));
+      const loggerSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
+
+      const session = await service.getSession({
+        appName: '12345',
+        userId: 'testUser',
+        sessionId: 'missing-session',
+      });
+
+      expect(session).toBeUndefined();
+      expect(loggerSpy).not.toHaveBeenCalled();
+      loggerSpy.mockRestore();
+    });
+
+    it('returns undefined for a 404 ApiError on the numRecentEvents=0 path', async () => {
+      mockClient.get.mockRejectedValue(apiError(404));
+
+      const session = await service.getSession({
+        appName: '12345',
+        userId: 'testUser',
+        sessionId: 'missing-session',
+        config: {numRecentEvents: 0},
+      });
+
+      expect(session).toBeUndefined();
+      expect(mockClient.events.listInternal).not.toHaveBeenCalled();
+    });
+
+    it('rethrows and logs a non-404 ApiError', async () => {
+      const error = apiError(500, 'Internal');
+      mockClient.get.mockRejectedValue(error);
+      const loggerSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
+
+      await expect(
+        service.getSession({
+          appName: '12345',
+          userId: 'testUser',
+          sessionId: 'my-session-id',
+          config: {numRecentEvents: 0},
+        }),
+      ).rejects.toBe(error);
+      expect(loggerSpy).toHaveBeenCalledTimes(1);
+      loggerSpy.mockRestore();
     });
 
     it('falls back to empty array if sessionEvents is missing in getSession', async () => {
@@ -917,6 +1039,40 @@ describe('VertexAiSessionService', () => {
       });
 
       expect(mockClient.delete).not.toHaveBeenCalled();
+    });
+
+    it('is a silent no-op when the API raises a 404 ApiError', async () => {
+      mockClient.get.mockRejectedValue(apiError(404));
+      const loggerSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
+
+      await expect(
+        service.deleteSession({
+          appName: '12345',
+          userId: 'testUser',
+          sessionId: 'missing-session',
+        }),
+      ).resolves.toBeUndefined();
+
+      expect(mockClient.delete).not.toHaveBeenCalled();
+      expect(loggerSpy).not.toHaveBeenCalled();
+      loggerSpy.mockRestore();
+    });
+
+    it('propagates a non-404 ApiError without deleting', async () => {
+      const error = apiError(500, 'Internal');
+      mockClient.get.mockRejectedValue(error);
+      const loggerSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
+
+      await expect(
+        service.deleteSession({
+          appName: '12345',
+          userId: 'testUser',
+          sessionId: 'my-session-id',
+        }),
+      ).rejects.toBe(error);
+
+      expect(mockClient.delete).not.toHaveBeenCalled();
+      loggerSpy.mockRestore();
     });
   });
 
