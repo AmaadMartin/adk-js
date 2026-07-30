@@ -11,13 +11,16 @@ import {
   Context,
   ExecuteCodeParams,
   File,
+  FileContentEncoding,
   InvocationContext,
   LlmAgent,
   RunSkillScriptTool,
   Skill,
   SkillToolset,
 } from '@google/adk';
-import {describe, expect, it, vi} from 'vitest';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {materializeFiles} from '../../../src/utils/file_utils.js';
 
 vi.mock('../../../src/utils/file_utils.js', () => ({
@@ -50,6 +53,12 @@ interface ToolErrorResponse {
 }
 
 describe('RunSkillScriptTool', () => {
+  beforeEach(() => {
+    // Keep the mock factory's implementation, drop recorded calls so each
+    // assertion pins its own call rather than a historical one.
+    vi.mocked(materializeFiles).mockClear();
+  });
+
   function createMockContext(
     agentName = 'test-agent',
     agentExecutor?: BaseCodeExecutor,
@@ -204,19 +213,16 @@ describe('RunSkillScriptTool', () => {
     expect(binaryFile?.contentEncoding).toBe('base64');
   });
 
+  const testFile: File = {
+    name: 'output.txt',
+    content: 'hello',
+    contentEncoding: FileContentEncoding.UTF8,
+    mimeType: 'text/plain',
+  };
+
   it('calls materializeFiles with output files from executor', async () => {
     const mockExecutor = new MockCodeExecutor();
-    const testFile = {
-      name: 'output.txt',
-      content: 'hello',
-      contentEncoding: 'utf8',
-      mimeType: 'text/plain',
-    } as File;
-    mockExecutor.mockResult = {
-      stdout: '',
-      stderr: '',
-      outputFiles: [testFile],
-    };
+    mockExecutor.mockResult = {stdout: '', stderr: '', outputFiles: [testFile]};
 
     const toolset = new SkillToolset([mockSkill], {codeExecutor: mockExecutor});
     const tool = new RunSkillScriptTool(toolset);
@@ -226,6 +232,25 @@ describe('RunSkillScriptTool', () => {
       toolContext: createMockContext(),
     });
 
-    expect(materializeFiles).toHaveBeenCalledWith([testFile]);
+    expect(materializeFiles).toHaveBeenCalledWith([testFile], process.cwd());
+  });
+
+  it('materializes output files into the configured output directory', async () => {
+    const outputDir = path.join(os.tmpdir(), 'skill-output');
+    const mockExecutor = new MockCodeExecutor();
+    mockExecutor.mockResult = {stdout: '', stderr: '', outputFiles: [testFile]};
+
+    const toolset = new SkillToolset([mockSkill], {
+      codeExecutor: mockExecutor,
+      outputDir,
+    });
+    const tool = new RunSkillScriptTool(toolset);
+
+    await tool.runAsync({
+      args: {skill_name: 'test-skill', script_path: 'scripts/setup.js'},
+      toolContext: createMockContext(),
+    });
+
+    expect(materializeFiles).toHaveBeenCalledWith([testFile], outputDir);
   });
 });

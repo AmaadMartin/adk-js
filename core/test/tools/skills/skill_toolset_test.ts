@@ -14,6 +14,8 @@ import {
   Skill,
   SkillToolset,
 } from '@google/adk';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import {describe, expect, it, vi} from 'vitest';
 
 describe('skill_toolset', () => {
@@ -94,6 +96,31 @@ describe('skill_toolset', () => {
       const tools = await toolset.getTools();
       expect(tools.map((t) => t.name)).toContain('run_skill_inline_script');
       expect(tools.length).toBe(5);
+    });
+
+    describe('outputDir', () => {
+      it('defaults to the current working directory', () => {
+        const toolset = new SkillToolset([mockSkill]);
+        expect(toolset.outputDir).toBe(process.cwd());
+      });
+
+      it('returns the configured directory', () => {
+        const outputDir = path.join(os.tmpdir(), 'skill-output');
+        const toolset = new SkillToolset([mockSkill], {outputDir});
+        expect(toolset.outputDir).toBe(outputDir);
+      });
+
+      it('resolves the default lazily rather than snapshotting it', () => {
+        const toolset = new SkillToolset([mockSkill]);
+        const relocated = path.join(os.tmpdir(), 'relocated-cwd');
+        const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(relocated);
+
+        try {
+          expect(toolset.outputDir).toBe(relocated);
+        } finally {
+          cwdSpy.mockRestore();
+        }
+      });
     });
 
     it('appends instructions to LLM request', async () => {

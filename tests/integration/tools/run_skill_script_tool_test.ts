@@ -307,6 +307,48 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
     await fs.unlink(fullPath);
   });
 
+  it('creates files in the configured output directory', async () => {
+    const outputDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'adk-skill-output-'),
+    );
+    const executor = new UnsafeLocalCodeExecutor();
+    const toolset = new SkillToolset([testSkill], {
+      codeExecutor: executor,
+      outputDir,
+    });
+    const tool = new RunSkillScriptTool(toolset);
+
+    try {
+      const result = (await tool.runAsync({
+        args: {
+          skill_name: 'test-skill',
+          script_path: 'scripts/create_file.js',
+        },
+        toolContext: createMockContext(),
+      })) as CodeExecutionResult;
+
+      const outputFile = result.outputFiles?.find(
+        (f) => f.name === 'output_from_script.txt',
+      );
+      expect(outputFile).toBeDefined();
+
+      const content = await fs.readFile(
+        path.join(outputDir, 'output_from_script.txt'),
+        'utf-8',
+      );
+      expect(content).toBe('hello from script file');
+
+      // The launch directory must stay clean.
+      const inCwd = await fs
+        .access(path.join(process.cwd(), 'output_from_script.txt'))
+        .then(() => true)
+        .catch(() => false);
+      expect(inCwd).toBe(false);
+    } finally {
+      await fs.rm(outputDir, {recursive: true, force: true});
+    }
+  });
+
   it('handles file collisions by appending a numeric suffix', async () => {
     const executor = new UnsafeLocalCodeExecutor();
     const toolset = new SkillToolset([testSkill], {codeExecutor: executor});

@@ -8,7 +8,7 @@ import {FileContentEncoding} from '@google/adk';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {afterEach, beforeEach, describe, expect, it} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {materializeFiles} from '../../src/utils/file_utils.js';
 
 describe('file_utils', () => {
@@ -52,6 +52,31 @@ describe('file_utils', () => {
         'utf8',
       );
       expect(content2).toBe('world');
+    });
+
+    it('should default the base directory to the current working directory', async () => {
+      const files = [
+        {
+          name: 'default_dir.txt',
+          content: 'hello',
+          contentEncoding: FileContentEncoding.UTF8,
+          mimeType: 'text/plain',
+        },
+      ];
+      const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(tempDir);
+
+      try {
+        const created = await materializeFiles(files);
+        expect(created[0].name).toBe('default_dir.txt');
+      } finally {
+        cwdSpy.mockRestore();
+      }
+
+      const content = await fs.readFile(
+        path.join(tempDir, 'default_dir.txt'),
+        'utf8',
+      );
+      expect(content).toBe('hello');
     });
 
     it('should throw an error if file attempts to escape target directory via relative path', async () => {

@@ -18,7 +18,9 @@ import {
   RunSkillInlineScriptTool,
   SkillToolset,
 } from '@google/adk';
-import {describe, expect, it, vi} from 'vitest';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {ToolConfirmation} from '../../../src/tools/tool_confirmation.js';
 import {materializeFiles} from '../../../src/utils/file_utils.js';
 
@@ -52,6 +54,12 @@ interface ToolErrorResponse {
 }
 
 describe('RunSkillInlineScriptTool', () => {
+  beforeEach(() => {
+    // Keep the mock factory's implementation, drop recorded calls so each
+    // assertion pins its own call rather than a historical one.
+    vi.mocked(materializeFiles).mockClear();
+  });
+
   function createMockContext(
     agentName = 'test-agent',
     agentExecutor?: BaseCodeExecutor,
@@ -220,19 +228,16 @@ describe('RunSkillInlineScriptTool', () => {
     });
   });
 
+  const testFile: File = {
+    name: 'output.txt',
+    content: 'hello',
+    contentEncoding: FileContentEncoding.UTF8,
+    mimeType: 'text/plain',
+  };
+
   it('calls materializeFiles with output files from executor', async () => {
     const mockExecutor = new MockCodeExecutor();
-    const testFile: File = {
-      name: 'output.txt',
-      content: 'hello',
-      contentEncoding: FileContentEncoding.UTF8,
-      mimeType: 'text/plain',
-    };
-    mockExecutor.mockResult = {
-      stdout: '',
-      stderr: '',
-      outputFiles: [testFile],
-    };
+    mockExecutor.mockResult = {stdout: '', stderr: '', outputFiles: [testFile]};
 
     const toolset = new SkillToolset([], {codeExecutor: mockExecutor});
     const tool = new RunSkillInlineScriptTool(toolset);
@@ -247,7 +252,31 @@ describe('RunSkillInlineScriptTool', () => {
       }),
     });
 
-    expect(materializeFiles).toHaveBeenCalledWith([testFile]);
+    expect(materializeFiles).toHaveBeenCalledWith([testFile], process.cwd());
+  });
+
+  it('materializes output files into the configured output directory', async () => {
+    const outputDir = path.join(os.tmpdir(), 'skill-inline-output');
+    const mockExecutor = new MockCodeExecutor();
+    mockExecutor.mockResult = {stdout: '', stderr: '', outputFiles: [testFile]};
+
+    const toolset = new SkillToolset([], {
+      codeExecutor: mockExecutor,
+      outputDir,
+    });
+    const tool = new RunSkillInlineScriptTool(toolset);
+
+    await tool.runAsync({
+      args: {
+        script_content: 'console.log("test");',
+        language: CodeExecutionLanguage.JAVASCRIPT,
+      },
+      toolContext: createMockContext('test-agent', undefined, {
+        toolConfirmation: confirmed(),
+      }),
+    });
+
+    expect(materializeFiles).toHaveBeenCalledWith([testFile], outputDir);
   });
 
   it('successfully passes array arguments to code executor', async () => {
