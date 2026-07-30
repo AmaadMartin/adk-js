@@ -177,6 +177,39 @@ describe('RunSkillScriptTool', () => {
     );
   });
 
+  it('wraps TypeScript scripts with a guarded ts-node register', async () => {
+    const tsSkill: Skill = {
+      frontmatter: {
+        name: 'ts-skill',
+        description: 'A TypeScript test skill',
+      },
+      instructions: 'Test instructions',
+      resources: {
+        scripts: {
+          'setup.ts': {src: 'console.log("setup");'},
+        },
+      },
+    };
+    const mockExecutor = new MockCodeExecutor();
+    const toolset = new SkillToolset([tsSkill], {codeExecutor: mockExecutor});
+    const tool = new RunSkillScriptTool(toolset);
+
+    await tool.runAsync({
+      args: {skill_name: 'ts-skill', script_path: 'scripts/setup.ts'},
+      toolContext: createMockContext(),
+    });
+
+    const code = mockExecutor.executeCodeParams?.codeExecutionInput.code;
+    expect(code).toContain("require('./scripts/setup.ts');");
+    expect(code).toContain("try {\n  require('ts-node/register');\n} catch {");
+    expect(code).toContain(
+      "'ts-node' is not installed in the code execution environment",
+    );
+    expect(mockExecutor.executeCodeParams?.codeExecutionInput.language).toBe(
+      CodeExecutionLanguage.TYPESCRIPT,
+    );
+  });
+
   it('extracts skill resource files correctly', async () => {
     const mockExecutor = new MockCodeExecutor();
     const toolset = new SkillToolset([mockSkill], {codeExecutor: mockExecutor});
