@@ -423,14 +423,14 @@ describe('generateAuthEvent', () => {
       (p) => p.functionCall?.args?.['function_call_id'] === 'call_1',
     );
     expect(call1).toBeDefined();
-    expect(call1!.functionCall!.name).toBe('adk_request_credential');
+    expect(call1!.functionCall!.name).toBe(REQUEST_EUC_FUNCTION_CALL_NAME);
     expect(call1!.functionCall!.args!['auth_config']).toBe('auth_config_1');
 
     const call2 = parts.find(
       (p) => p.functionCall?.args?.['function_call_id'] === 'call_2',
     );
     expect(call2).toBeDefined();
-    expect(call2!.functionCall!.name).toBe('adk_request_credential');
+    expect(call2!.functionCall!.name).toBe(REQUEST_EUC_FUNCTION_CALL_NAME);
     expect(call2!.functionCall!.args!['auth_config']).toBe('auth_config_2');
   });
 });

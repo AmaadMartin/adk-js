@@ -4,7 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {InMemoryRunner, LlmAgent, RestApiTool} from '@google/adk';
+import {
+  InMemoryRunner,
+  LlmAgent,
+  REQUEST_EUC_FUNCTION_CALL_NAME,
+  RestApiTool,
+} from '@google/adk';
 import {createUserContent} from '@google/genai';
 import * as dotenv from 'dotenv';
 import * as fs from 'fs';
@@ -122,12 +127,12 @@ describe('RestApiTool Auth E2E', () => {
       // and yielded an auth request.
       const authRequests = eventsTurn1.filter((e) =>
         e.content?.parts?.some(
-          (p) => p.functionCall?.name === 'adk_request_credential',
+          (p) => p.functionCall?.name === REQUEST_EUC_FUNCTION_CALL_NAME,
         ),
       );
       expect(authRequests.length).toBeGreaterThan(0);
       const authCall = authRequests[0].content?.parts?.find(
-        (p) => p.functionCall?.name === 'adk_request_credential',
+        (p) => p.functionCall?.name === REQUEST_EUC_FUNCTION_CALL_NAME,
       )?.functionCall;
       expect(authCall).toBeDefined();
       authCallId = authCall!.id!;
@@ -138,7 +143,7 @@ describe('RestApiTool Auth E2E', () => {
         parts: [
           {
             functionResponse: {
-              name: 'adk_request_credential',
+              name: REQUEST_EUC_FUNCTION_CALL_NAME,
               id: authCallId,
               response: {
                 authScheme,

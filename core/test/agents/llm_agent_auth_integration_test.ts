@@ -14,6 +14,7 @@ import {
   LlmAgent,
   LlmRequest,
   LlmResponse,
+  REQUEST_EUC_FUNCTION_CALL_NAME,
   RestApiTool,
   Runner,
 } from '@google/adk';
@@ -197,7 +198,7 @@ describe('LlmAgent Auth Integration', () => {
 
     const authCalls = getFunctionCalls(authEvent);
     expect(authCalls.length).toBe(1);
-    expect(authCalls[0].name).toBe('adk_request_credential');
+    expect(authCalls[0].name).toBe(REQUEST_EUC_FUNCTION_CALL_NAME);
     const authCallId = authCalls[0].id;
 
     const funcResponses = getFunctionResponses(functionResponseEvent);
@@ -214,7 +215,7 @@ describe('LlmAgent Auth Integration', () => {
       parts: [
         {
           functionResponse: {
-            name: 'adk_request_credential',
+            name: REQUEST_EUC_FUNCTION_CALL_NAME,
             id: authCallId,
             response: {
               authScheme,
