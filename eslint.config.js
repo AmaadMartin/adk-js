@@ -30,30 +30,22 @@ export default defineConfig([
       '@typescript-eslint/no-unused-vars': [
         'error',
         {
-          argsIgnorePattern: '^_',
-          varsIgnorePattern: '^_',
-          caughtErrorsIgnorePattern: '^_',
+          'argsIgnorePattern': '^_',
+          'varsIgnorePattern': '^_',
+          'caughtErrorsIgnorePattern': '^_',
         },
       ],
     },
   },
   {
-    // Forbids a published `src/` tree from importing a package its own
-    // workspace does not declare ("phantom" dependencies, which resolve today
-    // only because npm hoists every workspace's deps into the root
-    // `node_modules` and so are missing from a consumer's install).
-    //
-    // With no `packageDir`, the rule checks each file against the closest
-    // parent `package.json`, i.e. the owning workspace's manifest -- which is
-    // what keeps `dev/src` from reaching `core`'s dependencies. Do not add a
-    // `packageDir` listing several workspaces: that unions their manifests into
-    // one allowed set and silently removes the isolation.
-    //
-    // `devDependencies: false` is the point of the rule; `includeTypes: true`
-    // extends it to `import type`, since a devDependency reached by a published
-    // `.d.ts` breaks consumers the same way. Every other option keeps its
-    // permissive default, notably `peerDependencies`, because `core/src`
-    // legitimately imports the `@mikro-orm/*` drivers it declares as peers.
+    // A published `src/` tree may only import packages its own workspace
+    // declares. These "phantom" dependencies resolve here only because npm
+    // hoists every workspace into the root `node_modules`; they are absent from
+    // a consumer's install. With no `packageDir` each file is checked against
+    // its nearest manifest, i.e. its own workspace's -- adding a `packageDir`
+    // that lists several workspaces would union them and silently drop that
+    // isolation. `includeTypes` extends the check to `import type`, which
+    // reaches consumers through the published `.d.ts`.
     files: ['core/src/**/*.ts', 'dev/src/**/*.ts', 'integrations/src/**/*.ts'],
     plugins: {import: importPlugin},
     rules: {
