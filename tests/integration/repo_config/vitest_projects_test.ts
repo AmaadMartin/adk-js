@@ -4,31 +4,21 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {readFileSync} from 'node:fs';
+import {parseArgs} from 'node:util';
 import {describe, expect, it} from 'vitest';
 import type {TestProjectConfiguration} from 'vitest/config';
+import rootPackage from '../../../package.json' with {type: 'json'};
 import vitestConfig from '../../../vitest.config.js';
 
-/**
- * The root npm scripts select vitest projects with hand-written `--project`
- * flags, so a project declared in vitest.config.ts is not executed until some
- * script names it. Drift in either direction is silent — the affected tests
- * simply stop running — so these assertions turn it into a build failure.
- */
-
-const PROJECT_FLAG = '--project';
-const PROJECT_FLAG_EQ = `${PROJECT_FLAG}=`;
-
-const rootScripts = (
-  JSON.parse(
-    readFileSync(new URL('../../../package.json', import.meta.url), 'utf8'),
-  ) as {scripts: Record<string, string>}
-).scripts;
+// The root npm scripts select vitest projects with hand-written `--project`
+// flags, so a project declared in vitest.config.ts is not executed until some
+// script names it. Drift in either direction is silent — the affected tests
+// just stop running — so these assertions turn it into a build failure.
 
 /**
  * Names of the projects declared in vitest.config.ts. Throws on a project this
- * guard cannot read, because a shape it silently skipped would be exactly the
- * drift it exists to catch.
+ * guard cannot read: a shape it silently skipped would be exactly the drift it
+ * exists to catch.
  */
 function declaredProjects(
   projects: TestProjectConfiguration[] | undefined,
@@ -59,13 +49,22 @@ function declaredProjects(
 function referencedProjects(scripts: Record<string, string>): string[] {
   const names = new Set<string>();
   for (const script of Object.values(scripts)) {
-    const tokens = script.split(/\s+/);
-    for (const [index, token] of tokens.entries()) {
-      if (token === PROJECT_FLAG) {
-        names.add(tokens[index + 1]);
-      } else if (token.startsWith(PROJECT_FLAG_EQ)) {
-        names.add(token.slice(PROJECT_FLAG_EQ.length));
+    const {values} = parseArgs({
+      args: script.split(/\s+/),
+      // The non-test scripts carry flags this guard does not model, and
+      // parseArgs rejects flags it was not told about when strict.
+      strict: false,
+      options: {project: {type: 'string', multiple: true}},
+    });
+    // parseArgs yields `true` rather than a name for a valueless `--project`.
+    for (const name of values.project ?? []) {
+      if (typeof name !== 'string') {
+        throw new Error(
+          `The root package.json script \`${script}\` passes --project with ` +
+            `no project name.`,
+        );
       }
+      names.add(name);
     }
   }
   return [...names];
@@ -73,7 +72,7 @@ function referencedProjects(scripts: Record<string, string>): string[] {
 
 describe('vitest projects', () => {
   it('every project declared in vitest.config.ts is run by a root npm script', () => {
-    const referenced = new Set(referencedProjects(rootScripts));
+    const referenced = new Set(referencedProjects(rootPackage.scripts));
 
     expect(
       declaredProjects(vitestConfig.test?.projects).filter(
@@ -89,7 +88,9 @@ describe('vitest projects', () => {
     const declared = new Set(declaredProjects(vitestConfig.test?.projects));
 
     expect(
-      referencedProjects(rootScripts).filter((name) => !declared.has(name)),
+      referencedProjects(rootPackage.scripts).filter(
+        (name) => !declared.has(name),
+      ),
       'These root package.json scripts select vitest projects that ' +
         'vitest.config.ts does not declare, so they match nothing. Drop the ' +
         'stale `--project <name>` flag, or declare the project.',
@@ -119,5 +120,11 @@ describe('vitest project parsing', () => {
         c: 'tsc --noEmit',
       }),
     ).toEqual(['unit:core', 'e2e']);
+  });
+
+  it('rejects a script that passes --project with no name', () => {
+    expect(() => referencedProjects({a: 'vitest --project'})).toThrow(
+      /no project name/,
+    );
   });
 });
