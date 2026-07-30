@@ -9,13 +9,8 @@ import * as path from 'node:path';
 import {File} from '../code_executors/code_execution_utils.js';
 
 /**
- * Reports whether `targetPath` is a strict descendant of `baseDir`.
- *
- * Both arguments must already be resolved absolute paths. This is a purely
- * lexical check: it is a reasonable guard against `..` segments and absolute
- * paths in untrusted file names, but it is not a sandbox and does not survive
- * symlinks, hardlinks, bind mounts, or a TOCTOU race between this check and the
- * subsequent write.
+ * Reports whether `targetPath` is a strict descendant of `baseDir`. Both
+ * arguments must already be resolved absolute paths; the check is lexical.
  */
 function isWithinDir(baseDir: string, targetPath: string): boolean {
   const rel = path.relative(baseDir, targetPath);
