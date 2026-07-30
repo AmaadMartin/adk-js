@@ -137,7 +137,7 @@ const COMPILE_AGENT_FILE = new Option(
 ).default(true);
 const BUNDLE_AGENT_FILE = new Option(
   '--bundle [boolean]',
-  'Optional. Whether to compile ts agent file to js before execution',
+  "Optional. Whether to bundle the agent's own imported modules into a single compiled file before execution",
 ).default(true);
 const A2A_OPTION = new Option(
   '--a2a [boolean]',

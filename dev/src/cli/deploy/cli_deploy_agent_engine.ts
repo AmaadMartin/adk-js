@@ -9,7 +9,10 @@ import * as path from 'node:path';
 import {Client} from '@google-cloud/vertexai/build/src/genai/client.js';
 import {ReasoningEngine as VertexReasoningEngine} from '@google-cloud/vertexai/build/src/genai/types.js';
 
-import {AgentLoader} from '../../utils/agent_loader.js';
+import {
+  AgentLoader,
+  DEFAULT_AGENT_FILE_OPTIONS,
+} from '../../utils/agent_loader.js';
 import {isFile, isFolderExists} from '../../utils/file_utils.js';
 import {
   BaseDeployOptions,
@@ -62,10 +65,13 @@ export async function deployToAgentEngine(options: DeployToAgentEngineOptions) {
     );
   }
 
-  const agentLoader = new AgentLoader(
-    options.agentPath,
-    options.agentFileLoadOptions,
-  );
+  // Deployment copies the compiled artifact into the container image, so its
+  // third-party dependencies must be inlined rather than resolved from the
+  // project's node_modules.
+  const agentLoader = new AgentLoader(options.agentPath, {
+    ...(options.agentFileLoadOptions ?? DEFAULT_AGENT_FILE_OPTIONS),
+    inlineDependencies: true,
+  });
 
   const isFileProvided = await isFile(options.agentPath);
   const agentDir = isFileProvided
