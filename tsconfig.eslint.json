@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@google/adk": ["./core/src/index.ts"],
+      "@google/adk/*": ["./core/src/*"],
+      "@google/adk-integrations": ["./integrations/src/index.ts"]
+    }
+  },
+  "include": [
+    "*.ts",
+    "core/**/*.ts",
+    "dev/**/*.ts",
+    "integrations/**/*.ts",
+    "tests/**/*.ts"
+  ],
+  "exclude": ["**/dist/**", "tests/integration/build_setup/*/**/*"]
+}
