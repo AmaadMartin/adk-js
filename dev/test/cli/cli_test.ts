@@ -147,6 +147,31 @@ describe('CLI Entrypoint', () => {
       const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
       expect(args.a2a).toBe(true);
     });
+
+    it('should default agentFileLoadOptions.minify to false', async () => {
+      await parse(['web']);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.agentFileLoadOptions).toMatchObject({
+        compile: true,
+        bundle: true,
+        minify: false,
+      });
+    });
+
+    it('should pass minify: true when --minify is set', async () => {
+      await parse(['web', '--minify']);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.agentFileLoadOptions?.minify).toBe(true);
+    });
+
+    it('should pass minify: true when --minify true is set', async () => {
+      await parse(['web', '--minify', 'true']);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.agentFileLoadOptions?.minify).toBe(true);
+    });
   });
 
   describe('command: api_server', () => {
@@ -245,6 +270,16 @@ describe('CLI Entrypoint', () => {
           inputFile: 'replay.json',
           savedSessionFile: 'resume.json',
           otelToCloud: true,
+        }),
+      );
+    });
+
+    it('should pass minify: true to runAgent when --minify is set', async () => {
+      await parse(['run', 'agent.ts', '--minify']);
+
+      expect(runAgent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agentFileLoadOptions: expect.objectContaining({minify: true}),
         }),
       );
     });

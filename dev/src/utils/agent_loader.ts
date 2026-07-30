@@ -71,6 +71,8 @@ class AgentFileLoadingError extends Error {}
 export interface AgentFileOptions {
   compile?: boolean;
   bundle?: boolean;
+  /** Off by default: minified output makes runtime stack traces unreadable. */
+  minify?: boolean;
   moduleType?: FileModuleType;
 }
 
@@ -186,7 +188,7 @@ export class AgentFile {
         format: moduleType,
         packages: 'bundle',
         bundle: this.options.bundle,
-        minify: this.options.bundle,
+        minify: this.options.minify ?? false,
         allowOverwrite: true,
         plugins: [replaceDirnamePlugin(filePath, originalDir), shimPlugin()],
         // See http://mikro-orm.io/docs/deployment#deploy-a-bundle-of-entities-and-dependencies-with-esbuild for more details

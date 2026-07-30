@@ -74,11 +74,13 @@ function getArtifactServiceFromOptions(options: {
 function getAgentFileOptions(options: {
   compile?: boolean;
   bundle?: boolean;
+  minify?: boolean;
   file_type?: string;
 }) {
   return {
     compile: getBoolean(options['compile']),
     bundle: getBoolean(options['bundle']),
+    minify: getBoolean(options['minify']),
     moduleType: options['file_type'] as FileModuleType | undefined,
   };
 }
@@ -139,6 +141,10 @@ const BUNDLE_AGENT_FILE = new Option(
   '--bundle [boolean]',
   'Optional. Whether to compile ts agent file to js before execution',
 ).default(true);
+const MINIFY_AGENT_FILE = new Option(
+  '--minify [boolean]',
+  'Optional. Whether to minify the compiled agent file. Default: false. Minified output makes runtime stack traces from your agent unreadable, so leave this off during development.',
+).default(false);
 const A2A_OPTION = new Option(
   '--a2a [boolean]',
   'Optional. Whether to enable A2A for web/api server. Default: false',
@@ -216,6 +222,7 @@ export function createProgram(): Command {
     .addOption(OTEL_TO_CLOUD_OPTION)
     .addOption(COMPILE_AGENT_FILE)
     .addOption(BUNDLE_AGENT_FILE)
+    .addOption(MINIFY_AGENT_FILE)
     .addOption(AGENT_FILE_MODULE_TYPE)
     .addOption(A2A_OPTION)
     .addOption(RELOAD_AGENTS_OPTION)
@@ -260,6 +267,7 @@ export function createProgram(): Command {
     .addOption(OTEL_TO_CLOUD_OPTION)
     .addOption(COMPILE_AGENT_FILE)
     .addOption(BUNDLE_AGENT_FILE)
+    .addOption(MINIFY_AGENT_FILE)
     .addOption(AGENT_FILE_MODULE_TYPE)
     .addOption(A2A_OPTION)
     .addOption(RELOAD_AGENTS_OPTION)
@@ -355,6 +363,7 @@ export function createProgram(): Command {
     .addOption(OTEL_TO_CLOUD_OPTION)
     .addOption(COMPILE_AGENT_FILE)
     .addOption(BUNDLE_AGENT_FILE)
+    .addOption(MINIFY_AGENT_FILE)
     .addOption(AGENT_FILE_MODULE_TYPE)
     .addOption(RELOAD_AGENTS_OPTION)
     .action(async (agentPath: string, options: Record<string, string>) => {
@@ -410,6 +419,7 @@ export function createProgram(): Command {
     .addOption(ARTIFACT_SERVICE_URI_OPTION)
     .addOption(COMPILE_AGENT_FILE)
     .addOption(BUNDLE_AGENT_FILE)
+    .addOption(MINIFY_AGENT_FILE)
     .addOption(AGENT_FILE_MODULE_TYPE)
     .addOption(A2A_OPTION)
     .action(async (agentPath: string, options: Record<string, string>) => {
@@ -473,6 +483,7 @@ export function createProgram(): Command {
       .addOption(ARTIFACT_SERVICE_URI_OPTION)
       .addOption(COMPILE_AGENT_FILE)
       .addOption(BUNDLE_AGENT_FILE)
+      .addOption(MINIFY_AGENT_FILE)
       .addOption(AGENT_FILE_MODULE_TYPE)
       .addOption(A2A_OPTION)
       .addOption(AGENT_ENGINE_ID_OPTION)
