@@ -4,7 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {LogLevel, setLogLevel} from '@google/adk';
+import {
+  DatabaseSessionService,
+  InMemorySessionService,
+  LogLevel,
+  setLogLevel,
+} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {createProgram} from '../../src/cli/cli.js';
 import {createAgent} from '../../src/cli/cli_create.js';
@@ -166,6 +171,57 @@ describe('CLI Entrypoint', () => {
 
       const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
       expect(args.a2a).toBe(true);
+    });
+  });
+
+  describe('session service resolution', () => {
+    const DATABASE_URI = 'postgresql://user:pass@localhost:5432/adk';
+
+    // Stubbing DATABASE_URL in every case (including to `undefined`) is what
+    // keeps these assertions true on a machine that exports it.
+    it('should default to an in-memory session service when DATABASE_URL is unset', async () => {
+      vi.stubEnv('DATABASE_URL', undefined);
+
+      await parse(['web']);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.sessionService).toBeInstanceOf(InMemorySessionService);
+    });
+
+    it('should fall back to DATABASE_URL when --session_service_uri is absent', async () => {
+      vi.stubEnv('DATABASE_URL', DATABASE_URI);
+
+      await parse(['web']);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.sessionService).toBeInstanceOf(DatabaseSessionService);
+    });
+
+    it('should prefer --session_service_uri over DATABASE_URL', async () => {
+      vi.stubEnv('DATABASE_URL', DATABASE_URI);
+
+      await parse(['web', '--session_service_uri', 'memory://']);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.sessionService).toBeInstanceOf(InMemorySessionService);
+    });
+
+    it('should fall back to DATABASE_URL for api_server', async () => {
+      vi.stubEnv('DATABASE_URL', DATABASE_URI);
+
+      await parse(['api_server']);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.sessionService).toBeInstanceOf(DatabaseSessionService);
+    });
+
+    it('should fall back to DATABASE_URL for run', async () => {
+      vi.stubEnv('DATABASE_URL', DATABASE_URI);
+
+      await parse(['run', 'agent.ts']);
+
+      const args = vi.mocked(runAgent).mock.calls[0][0];
+      expect(args.sessionService).toBeInstanceOf(DatabaseSessionService);
     });
   });
 
