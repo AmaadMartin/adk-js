@@ -4,7 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {CompactedEvent, createEvent} from '@google/adk';
+import {
+  CompactedEvent,
+  createEvent,
+  REQUEST_EUC_FUNCTION_CALL_NAME,
+} from '@google/adk';
 import {Content} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {
@@ -993,7 +997,7 @@ describe('getContents', () => {
         parts: [
           {
             functionCall: {
-              name: 'adk_request_credential',
+              name: REQUEST_EUC_FUNCTION_CALL_NAME,
               args: {},
             },
           },
