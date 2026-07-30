@@ -181,7 +181,7 @@ export const REPOSITORY_DEPLOY_OPTION = new Option(
 );
 export const API_KEY_DEPLOY_OPTION = new Option(
   '--api_key <string>',
-  'Optional. The API key to use for Express Mode. It is forwarded to the deployed container as GOOGLE_API_KEY together with GOOGLE_GENAI_USE_ENTERPRISE=1, and takes precedence over GOOGLE_API_KEY in the agent .env file.',
+  'Optional. The API key to use for Express Mode. It is written into the generated Dockerfile as GOOGLE_API_KEY together with GOOGLE_GENAI_USE_ENTERPRISE=1. The agent .env file is not forwarded to the deployment, so this flag is the only way to set the key.',
 );
 export const AGENT_ENGINE_ID_OPTION = new Option(
   '--agent_engine_id [id]',

@@ -50,9 +50,8 @@ export interface CreateDockerFileContentOptions {
   otelToCloud?: boolean;
   a2a?: boolean;
   /**
-   * Optional. API key for Express Mode. When set, `GOOGLE_API_KEY` and
-   * `GOOGLE_GENAI_USE_ENTERPRISE=1` are written into the generated Dockerfile,
-   * which means the key becomes part of the built image layer.
+   * Optional. Express Mode API key. Written into the Dockerfile, so it becomes
+   * part of the built image layer.
    */
   apiKey?: string;
 }
