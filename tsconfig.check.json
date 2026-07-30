@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@google/adk": ["./core/src/index.ts"],
+      "@google/adk/*": ["./core/src/*"],
+      "@google/adk-integrations": ["./integrations/src/index.ts"],
+      "@google/adk-integrations/*": ["./integrations/src/*"]
+    }
+  },
+  "exclude": ["node_modules", "**/dist"]
+}
