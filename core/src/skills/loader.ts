@@ -194,9 +194,7 @@ export async function validateSkillDir(skillDir: string): Promise<string[]> {
       return [`'${resolvedDir}' is not a directory.`];
     }
   } catch {
-    // simplicity: every stat failure reports "does not exist", as adk-python's
-    // Path.exists() does. Upgrade path: branch on the errno if a permission
-    // error ever needs its own diagnostic.
+    // Any stat failure reports "does not exist", matching adk-python Path.exists().
     return [`Directory '${resolvedDir}' does not exist.`];
   }
 
