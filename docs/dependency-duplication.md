@@ -4,8 +4,10 @@
 
 `adk-js` knowingly ships more than one copy of `google-auth-library`. The
 duplication is not an oversight, and it cannot be removed by forcing every
-dependent onto the hoisted version: two of the dependents would keep compiling
-and keep running, but would stop sending credentials. This file records the
+dependent onto the hoisted version:
+`@google-cloud/opentelemetry-cloud-trace-exporter` and `@google-cloud/storage`
+would keep compiling and keep running, but would stop sending credentials. This
+file records the
 per-dependent analysis so it does not have to be redone, and
 `tests/integration/dependencies/google_auth_library_duplication_test.ts` turns
 the conclusions into an assertion that fails when the set of copies changes.
@@ -48,10 +50,10 @@ through `@google-cloud/opentelemetry-cloud-monitoring-exporter` (`googleapis
 ^137.0.0` -> `googleapis-common ^7.0.0`), so those two cannot be decided
 independently of it.
 
-Keeping the v9 line resident also keeps `gaxios@6.7.1`, `gcp-metadata@6.1.1`,
-`gtoken@7.1.0`, `google-logging-utils@0.0.2` and `node-fetch@2.7.0` resident
-(v10 uses `gaxios@7`, `gcp-metadata@8`, `google-logging-utils@1.x` and vendors
-`gtoken`). That stack clears itself once the last v9 consumer is gone.
+The cost is not only the second copy. v9 pulls `gaxios@6.7.1` (and through it
+`node-fetch@2.7.0`), `gcp-metadata@6.1.1`, `gtoken@7.1.0` and
+`google-logging-utils@0.0.2`, none of which v10 needs: it uses `gaxios@7`,
+`gcp-metadata@8` and `google-logging-utils@1.x`, and vendors `gtoken`.
 
 ## The v9 -> v10 changes that matter
 
@@ -92,14 +94,14 @@ runtime behaviour does not:
 
 ## Per-dependent verdict
 
-| Dependent                                               | Declares `google-auth-library` | Dependent's latest release | Verdict         | Why                                                                                    |
-| ------------------------------------------------------- | ------------------------------ | -------------------------- | --------------- | -------------------------------------------------------------------------------------- |
-| `@google-cloud/opentelemetry-cloud-trace-exporter`      | `^9.0.0`                       | `3.0.0`                    | Keep            | gRPC reads the auth headers as a plain object; v10 would drop `Authorization`.         |
-| `@google-cloud/opentelemetry-cloud-monitoring-exporter` | `^9.0.0`                       | `0.21.0`                   | Keep            | Hands its auth client to `googleapis-common`, which expects the v9 contract.           |
-| `googleapis`                                            | `^9.0.0`                       | `173.0.0`                  | Keep            | Not a direct dependency; the v10-era releases nest a copy through `googleapis-common`. |
-| `googleapis-common`                                     | `^9.7.0`                       | `9.0.0`                    | Keep            | Constructs `DefaultTransporter`, which v10 removed.                                    |
-| `@google-cloud/storage`                                 | `^9.6.3`                       | `7.21.0`                   | Keep            | Sends `uri`, which v10's `authorizeRequest()` ignores; headers become inextensible.    |
-| `@google-cloud/vertexai`                                | `^9.1.0`                       | `1.12.0`                   | Separate change | Handled by a dependent-scoped override outside this analysis.                          |
+| Dependent                                               | Declares `google-auth-library` | Dependent's latest release | Verdict         | Why                                                                                                      |
+| ------------------------------------------------------- | ------------------------------ | -------------------------- | --------------- | -------------------------------------------------------------------------------------------------------- |
+| `@google-cloud/opentelemetry-cloud-trace-exporter`      | `^9.0.0`                       | `3.0.0`                    | Keep            | gRPC reads the auth headers as a plain object; v10 would drop `Authorization`.                           |
+| `@google-cloud/opentelemetry-cloud-monitoring-exporter` | `^9.0.0`                       | `0.21.0`                   | Keep            | Hands its auth client to `googleapis-common`, which expects the v9 contract.                             |
+| `googleapis`                                            | `^9.0.0`                       | `173.0.0`                  | Keep            | Not a direct dependency; the v10-era releases nest a copy through `googleapis-common`.                   |
+| `googleapis-common`                                     | `^9.7.0`                       | `9.0.0`                    | Keep            | Constructs `DefaultTransporter`, which v10 removed.                                                      |
+| `@google-cloud/storage`                                 | `^9.6.3`                       | `7.21.0`                   | Keep            | Sends `uri`, which v10's `authorizeRequest()` ignores, and then writes to the headers as a plain object. |
+| `@google-cloud/vertexai`                                | `^9.1.0`                       | `1.12.0`                   | Separate change | Handled by a dependent-scoped override outside this analysis.                                            |
 
 The "latest release" column is what `npm view <dependent> version` reported when
 this file was written. Three of the five kept dependents are already at their
@@ -162,11 +164,14 @@ await this._monitoring.projects.timeSeries.create({
 ```
 
 `googleapis-common@7.2.0` consumes that `auth` value in
-`build/src/apirequest.js:289-303`, written against the v9 client contract: it
-calls `authClient.getUniverseDomain()`, then either
-`Object.assign(mooOpts.headers, await authClient.getRequestHeaders(options.url))`
-on the http2 path (which collapses to `{}` for a v10 client, per the table
-above) or `authClient.request(options)` with a `gaxios@6`-shaped options object.
+`build/src/apirequest.js:289-303`, written against the v9 client contract. It
+calls `authClient.getUniverseDomain()`, then branches on `options.http2`. The
+exporter never sets `http2`, so the branch taken here is
+`authClient.request(options)` — a v10 client handed a `gaxios@6`-shaped options
+object. The other branch,
+`Object.assign(mooOpts.headers, await authClient.getRequestHeaders(options.url))`,
+is the silent-header-drop shape from the table above; it is unreachable from
+this exporter today, but nothing prevents a caller from enabling it.
 
 Because the auth client crosses a package boundary, this row is coupled to
 `googleapis` and `googleapis-common`. It cannot move to v10 while they stay on
@@ -180,14 +185,15 @@ no `150.x` or `151.x`), and `173.0.0` declares `^10.2.0`. It is still not a
 usable route, for three independent reasons:
 
 - It is not a direct dependency. The monitoring exporter declares
-  `googleapis: ^137.0.0`, so reaching a v10-era release means overriding a
-  dependency 36 majors past its declared range.
+  `googleapis: ^137.0.0`, so even the nearest v10-declaring release means
+  overriding it 15 majors past its declared range (`152.0.0`), and the latest
+  36 (`173.0.0`).
 - The exporter deep-imports an unpublished path: `monitoring.js:20` does
   `require("googleapis/build/src/apis/monitoring")`. `googleapis` declares no
   `exports` map, so nothing constrains that path across releases.
 - The upgrade would not remove the duplicate, because of the exact pin described
-  under `googleapis-common` below. `googleapis@173.0.0` depends on
-  `googleapis-common ^8.0.0`, so the nested copy would be renumbered from
+  under `googleapis-common` below. Both `152.0.0` and `173.0.0` depend on
+  `googleapis-common ^8.0.0`, so either way the nested copy is renumbered from
   `9.15.1` to `10.5.0`, not removed.
 
 ### `googleapis-common@7.2.0`
