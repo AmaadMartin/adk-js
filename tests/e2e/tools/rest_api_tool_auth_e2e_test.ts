@@ -12,6 +12,7 @@ import * as http from 'http';
 import {OpenAPIV3} from 'openapi-types';
 import * as path from 'path';
 import {afterAll, beforeAll, describe, expect, it} from 'vitest';
+import {hasModelCredentials} from '../utils/model_credentials.js';
 
 describe('RestApiTool Auth E2E', () => {
   const envPath = path.resolve(__dirname, '../../../.env');
@@ -21,10 +22,7 @@ describe('RestApiTool Auth E2E', () => {
     dotenv.config({path: envPath});
   }
 
-  const hasAKey =
-    !!process.env.GEMINI_API_KEY ||
-    !!process.env.GOOGLE_GENAI_API_KEY ||
-    !!process.env.GOOGLE_CLOUD_PROJECT;
+  const hasAKey = hasModelCredentials();
 
   let server: http.Server;
   let port: number;
