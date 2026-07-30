@@ -34,12 +34,17 @@ type ManifestBlock = 'dependencies' | 'devDependencies';
  * The audited block of every `@types/*` package in `core/package.json`.
  *
  * This is a hand-maintained ledger, not a measurement: each verdict came from
- * grepping the emitted `core/dist/types/**` for the package. `@types/express`
- * is a runtime dependency because `ToA2aOptions.app` and the `toA2a` return
- * type are `express.Application` and express@4 bundles no declarations of its
- * own, so a consumer cannot resolve those types without it. The other two stay
- * dev-only because neither is named anywhere in the emitted declarations:
- * `AdmZip` is only ever a local inside `core/src/skills/loader.ts`, and the
+ * grepping the emitted `core/dist/types/**` for the types the package
+ * provides. `@types/express` is a runtime dependency because
+ * `ToA2aOptions.app` and the `toA2a` return type are `express.Application` and
+ * express@4 bundles no declarations of its own, so a consumer cannot resolve
+ * those types without it. `@types/node` is a runtime dependency because it is
+ * the only source of the `Buffer` global, which the declarations name in
+ * `loadSkillFromZipBuffer`'s parameter and in `Resources.references` and
+ * `Resources.assets`; a consumer type-checking without it gets "Cannot find
+ * name 'Buffer'" from inside the shipped `.d.ts`. The other two stay dev-only
+ * because neither is named anywhere in the emitted declarations: `AdmZip` is
+ * only ever a local inside `core/src/skills/loader.ts`, and the
  * `cloneDeep`/`isEmpty` helpers return generic or primitive types.
  *
  * Adding, removing, or re-classifying a `@types/*` package fails the test
@@ -49,6 +54,7 @@ const AUDITED_TYPE_PACKAGE_BLOCKS: Record<string, ManifestBlock> = {
   '@types/adm-zip': 'devDependencies',
   '@types/express': 'dependencies',
   '@types/lodash-es': 'devDependencies',
+  '@types/node': 'dependencies',
 };
 
 function readCoreManifest(): Manifest {
