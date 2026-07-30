@@ -68,10 +68,8 @@ class AgentFileLoadingError extends Error {}
 /**
  * Options for loading an agent file.
  *
- * `AgentFile` and `AgentLoader` merge the supplied options over
- * {@link DEFAULT_AGENT_FILE_OPTIONS} field by field, so omitting a field yields
- * its default. Plain spread semantics apply: passing a field explicitly as
- * `undefined` yields `undefined`, not the default.
+ * Omitted fields fall back to the compile/bundle defaults; a field passed
+ * explicitly as `undefined` does not (plain spread merge).
  */
 export interface AgentFileOptions {
   compile?: boolean;
@@ -369,15 +367,13 @@ export class AgentLoader {
   private agentsAlreadyPreloaded = false;
   private readonly preloadedAgents: Record<string, AgentFile> = {};
   private watcher?: fs.FSWatcher;
-  private readonly options: AgentFileOptions;
 
   constructor(
     private readonly agentsDirPath: string = process.cwd(),
-    options: AgentFileOptions = {},
+    // Defaulted per field by the AgentFile these are forwarded to.
+    private readonly options: AgentFileOptions = {},
     private readonly watchForChanges = false,
   ) {
-    this.options = {...DEFAULT_AGENT_FILE_OPTIONS, ...options};
-
     // Do cleanups on exit
     const exitHandler = async ({
       exit,
