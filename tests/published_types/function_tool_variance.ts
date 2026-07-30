@@ -6,14 +6,13 @@
 
 /**
  * Type-level conformance checks for the *published* type surface of
- * `@google/adk`.
+ * `@google/adk`, typechecked against `core/dist/types` (the declarations that
+ * ship to npm) rather than `core/src`.
  *
- * This file is deliberately typechecked against `core/dist/types` (the
- * declarations that ship to npm), not against `core/src`. TypeScript erases
- * the declared type of `private` class members during declaration emit, so a
- * generic that is only referenced by private members disappears from the
- * shipped `.d.ts` and stops constraining consumers. These assertions pin the
- * published behaviour so that divergence fails the build instead of shipping.
+ * Declaration emit erases the types of `private` members, so a generic that
+ * only private members reference disappears from the shipped `.d.ts` and stops
+ * constraining consumers. These assertions must hold identically against both
+ * resolution targets.
  */
 
 import {

@@ -140,14 +140,11 @@ export class FunctionTool<
   // User defined function.
   private readonly execute: ToolExecuteFunction<TParameters>;
   /**
-   * The declared input schema for this tool, exactly as supplied via
-   * {@link ToolOptions.parameters}.
+   * The declared input schema, as supplied via {@link ToolOptions.parameters}.
    *
-   * This is intentionally public: it is part of the tool's declared contract
-   * (it is what `_getDeclaration()` converts), and it is the member that keeps
-   * `TParameters` observable in the emitted declaration file. Declaration emit
-   * erases the types of `private` members, which would make the generic
-   * unenforceable for consumers of the published package.
+   * Public on purpose: declaration emit erases the types of `private` members,
+   * so `TParameters` would vanish from the published `.d.ts` if this were
+   * private.
    */
   readonly parameters?: TParameters;
   // Whether the tool requires user confirmation before running.
