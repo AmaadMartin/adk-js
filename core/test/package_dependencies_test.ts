@@ -26,7 +26,6 @@ interface PackageManifest {
   dependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
   peerDependencies?: Record<string, string>;
-  optionalDependencies?: Record<string, string>;
 }
 
 const testDir = path.dirname(fileURLToPath(import.meta.url));
@@ -103,7 +102,6 @@ describe('core package dependencies', () => {
       ...Object.keys(manifest.dependencies ?? {}),
       ...Object.keys(manifest.devDependencies ?? {}),
       ...Object.keys(manifest.peerDependencies ?? {}),
-      ...Object.keys(manifest.optionalDependencies ?? {}),
     ]);
 
     const undeclared = collected

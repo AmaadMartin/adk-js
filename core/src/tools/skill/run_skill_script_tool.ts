@@ -158,8 +158,7 @@ export class RunSkillScriptTool extends BaseTool {
  * Preamble for TypeScript skill scripts. `ts-node` is resolved by the code
  * executor's runtime, not by this package, so it may legitimately be absent;
  * report that as an actionable error instead of a bare module-resolution
- * failure. Any other failure means `ts-node` is present but broken, so it is
- * rethrown untouched rather than mislabelled as a missing install.
+ * failure.
  */
 const TYPESCRIPT_REGISTER_PREAMBLE = `try {
   require('ts-node/register');
