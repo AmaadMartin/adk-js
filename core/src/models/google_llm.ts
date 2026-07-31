@@ -9,6 +9,7 @@ import {
   createPartFromText,
   FileData,
   GoogleGenAI,
+  GoogleGenAIOptions,
   HttpOptions,
   LiveServerMessage,
 } from '@google/genai';
@@ -37,19 +38,25 @@ export interface GeminiParams {
   /**
    * The API key to use for the Gemini API. If not provided, it will look for
    * the GOOGLE_GENAI_API_KEY or GEMINI_API_KEY environment variable.
+   *
+   * When `vertexai` is true this is a Vertex AI Express Mode key, resolved from
+   * GOOGLE_API_KEY when not provided. It is mutually exclusive with `project`
+   * and `location`.
    */
   apiKey?: string;
   /**
-   * Whether to use Vertex AI. If true, `project`, `location`
-   * should be provided.
+   * Whether to use Vertex AI. If true, either `project` and `location` or an
+   * Express Mode `apiKey` should be provided.
    */
   vertexai?: boolean;
   /**
-   * The Vertex AI project ID. Required if `vertexai` is true.
+   * The Vertex AI project ID. Required if `vertexai` is true and no Express
+   * Mode `apiKey` is used.
    */
   project?: string;
   /**
-   * The Vertex AI location. Required if `vertexai` is true.
+   * The Vertex AI location. Required if `vertexai` is true and no Express Mode
+   * `apiKey` is used.
    */
   location?: string;
   /**
@@ -223,8 +230,7 @@ export class Gemini extends BaseLlm {
     if (this.vertexai) {
       this._apiClient = new GoogleGenAI({
         vertexai: this.vertexai,
-        project: this.project,
-        location: this.location,
+        ...vertexAuthOptions(this.apiKey, this.project, this.location),
         httpOptions: this.getHttpOptions(),
       });
     } else {
@@ -265,8 +271,11 @@ export class Gemini extends BaseLlm {
       if (this.vertexai) {
         this._liveApiClient = new GoogleGenAI({
           vertexai: this.vertexai,
-          project: this.project,
-          location: this.location || 'global',
+          ...vertexAuthOptions(
+            this.apiKey,
+            this.project,
+            this.location || 'global',
+          ),
           httpOptions: this.getLiveHttpOptions(),
         });
       } else {
@@ -353,6 +362,63 @@ export class Gemini extends BaseLlm {
   }
 }
 
+/**
+ * Resolves the Vertex AI Express Mode API key, falling back to GOOGLE_API_KEY.
+ *
+ * An ambient key outranks an ambient GOOGLE_CLOUD_PROJECT /
+ * GOOGLE_CLOUD_LOCATION because a deployed container always sets those, so a
+ * key-based deployment could otherwise never drive the model. Explicit
+ * project/location still win, and combining them with an explicit key throws.
+ *
+ * @returns The Express Mode key, or undefined for classic Vertex AI.
+ */
+function resolveExpressModeApiKey(
+  apiKey: string | undefined,
+  project: string | undefined,
+  location: string | undefined,
+): string | undefined {
+  if (project || location) {
+    if (apiKey) {
+      throw new Error(
+        'Cannot specify project or location and an Express Mode API key. ' +
+          'Either use project and location, or just the API key.',
+      );
+    }
+    return undefined;
+  }
+  if (apiKey || isBrowser()) {
+    return apiKey;
+  }
+
+  const envApiKey = process.env['GOOGLE_API_KEY'];
+  if (
+    envApiKey &&
+    (process.env['GOOGLE_CLOUD_PROJECT'] ||
+      process.env['GOOGLE_CLOUD_LOCATION'])
+  ) {
+    logger.info(
+      'Using Vertex AI Express Mode with GOOGLE_API_KEY; ignoring ' +
+        'GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION.',
+    );
+  }
+  return envApiKey;
+}
+
+/**
+ * Builds the credential half of the Vertex AI client options.
+ *
+ * `@google/genai` throws 'Project/location and API key are mutually exclusive
+ * in the client initializer.' when both are supplied, so an Express Mode key
+ * replaces the project/location pair rather than accompanying it.
+ */
+function vertexAuthOptions(
+  apiKey: string | undefined,
+  project: string | undefined,
+  location: string | undefined,
+): Pick<GoogleGenAIOptions, 'apiKey' | 'project' | 'location'> {
+  return apiKey ? {apiKey} : {project, location};
+}
+
 function removeDisplayNameIfPresent(
   dataObj: Blob | FileData | undefined,
 ): void {
@@ -377,21 +443,28 @@ export function geminiInitParams({
   }
 
   if (params.vertexai) {
-    if (!isBrowser() && !params.project) {
-      params.project = process.env['GOOGLE_CLOUD_PROJECT'];
-    }
-    if (!isBrowser() && !params.location) {
-      params.location = process.env['GOOGLE_CLOUD_LOCATION'];
-    }
-    if (!params.project) {
-      throw new Error(
-        'VertexAI project must be provided via constructor or GOOGLE_CLOUD_PROJECT environment variable.',
-      );
-    }
-    if (!params.location) {
-      throw new Error(
-        'VertexAI location must be provided via constructor or GOOGLE_CLOUD_LOCATION environment variable.',
-      );
+    params.apiKey = resolveExpressModeApiKey(
+      params.apiKey,
+      params.project,
+      params.location,
+    );
+    if (!params.apiKey) {
+      if (!isBrowser() && !params.project) {
+        params.project = process.env['GOOGLE_CLOUD_PROJECT'];
+      }
+      if (!isBrowser() && !params.location) {
+        params.location = process.env['GOOGLE_CLOUD_LOCATION'];
+      }
+      if (!params.project) {
+        throw new Error(
+          'VertexAI project must be provided via constructor or GOOGLE_CLOUD_PROJECT environment variable.',
+        );
+      }
+      if (!params.location) {
+        throw new Error(
+          'VertexAI location must be provided via constructor or GOOGLE_CLOUD_LOCATION environment variable.',
+        );
+      }
     }
   } else {
     if (!params.apiKey && !isBrowser()) {
