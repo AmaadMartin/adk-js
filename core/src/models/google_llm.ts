@@ -385,14 +385,13 @@ export function geminiInitParams({
   }
 
   if (params.vertexai) {
-    if (params.project || params.location) {
-      if (params.apiKey) {
-        throw new Error(
-          'Cannot specify project or location and an Express Mode API key. ' +
-            'Either use project and location, or just the API key.',
-        );
-      }
-    } else if (!params.apiKey && !isBrowser()) {
+    if (params.apiKey && (params.project || params.location)) {
+      throw new Error(
+        'Cannot specify project or location and an Express Mode API key. ' +
+          'Either use project and location, or just the API key.',
+      );
+    }
+    if (!params.apiKey && !params.project && !params.location && !isBrowser()) {
       // An ambient express key outranks an ambient project/location, inverting
       // the tiebreak @google/genai applies: `adk deploy` always writes
       // GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION, so the key could
