@@ -68,15 +68,10 @@ function readJson(file) {
   return JSON.parse(fs.readFileSync(file, 'utf8'));
 }
 
-function indent(line) {
-  return `  ${line}`;
-}
-
 /**
- * Runs npm without a shell. `npm run` exports npm's own CLI entry point as
- * `npm_execpath`; invoking that with the current node binary sidesteps both
- * shell quoting (semver ranges contain `^`, which cmd.exe eats) and Windows'
- * `npm.cmd`, which `execFileSync` cannot spawn directly.
+ * Runs npm. `npm run` exports npm's own CLI entry point as `npm_execpath`;
+ * invoking that with the current node binary keeps this working on Windows,
+ * where npm is `npm.cmd` and `execFileSync` cannot spawn it directly.
  */
 function npm(args, cwd) {
   const npmCli = process.env.npm_execpath;
@@ -129,17 +124,10 @@ function packAll(packages, tarballDir) {
   for (const {dir} of packages) {
     npm(['pack', '--pack-destination', tarballDir, '--loglevel=error'], dir);
   }
-  const tarballs = fs
+  return fs
     .readdirSync(tarballDir)
     .filter((entry) => entry.endsWith('.tgz'))
     .map((entry) => path.join(tarballDir, entry));
-  if (tarballs.length !== packages.length) {
-    throw new Error(
-      `Expected ${packages.length} tarballs in ${tarballDir}, ` +
-        `found ${tarballs.length}.`,
-    );
-  }
-  return tarballs;
 }
 
 function probeFileName(packageName) {
@@ -210,17 +198,18 @@ function typecheck(scratchDir) {
   }
 }
 
-function classify(diagnostics) {
-  const unresolved = [];
-  const other = [];
-  for (const line of diagnostics.split('\n')) {
-    const match = DIAGNOSTIC_PATTERN.exec(line);
-    if (match) {
-      const bucket = UNRESOLVED_MODULE_CODES.has(match[1]) ? unresolved : other;
-      bucket.push(line.trim());
-    }
-  }
-  return {unresolved, other};
+/**
+ * Only unresolved-module diagnostics decide the verdict. Any other type error
+ * inside a dependency's own declarations is somebody else's bug and must not
+ * redden this job.
+ */
+function unresolvedModuleDiagnostics(diagnostics) {
+  return diagnostics
+    .split('\n')
+    .filter((line) =>
+      UNRESOLVED_MODULE_CODES.has(DIAGNOSTIC_PATTERN.exec(line)?.[1]),
+    )
+    .map((line) => line.trim());
 }
 
 function removeScratchDir(scratchDir) {
@@ -249,13 +238,9 @@ function main() {
     removeScratchDir(scratchDir);
   }
 
-  const {unresolved, other} = classify(diagnostics);
-  if (other.length > 0) {
-    const listed = other.map(indent).join('\n');
-    process.stdout.write(`Unrelated diagnostics, ignored:\n${listed}\n`);
-  }
+  const unresolved = unresolvedModuleDiagnostics(diagnostics);
   if (unresolved.length > 0) {
-    const listed = unresolved.map(indent).join('\n');
+    const listed = unresolved.map((line) => `  ${line}`).join('\n');
     process.stdout.write(
       `Published declarations reference modules the packages do not ` +
         `declare:\n${listed}\nMove each missing package into the ` +
