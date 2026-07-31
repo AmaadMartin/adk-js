@@ -6,9 +6,9 @@
 
 import {Client} from '@google-cloud/vertexai';
 import {AgentEngineSandboxCodeExecutor, LlmAgent} from '@google/adk';
-import {responseProcessor} from '@google/adk/agents/processors/code_execution_request_processor.js';
 import {FinishReason} from '@google/genai';
 import {describe, expect, it, vi} from 'vitest';
+import {responseProcessor} from '../../../core/src/agents/processors/code_execution_request_processor.js';
 import {
   createRunner,
   GeminiWithMockResponses,
