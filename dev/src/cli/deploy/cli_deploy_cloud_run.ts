@@ -15,6 +15,8 @@ import {
   createDockerFile,
   createDockerFileContent,
   createPackageJson,
+  formatGcloudEnvVarsArg,
+  loadAgentEnvConfig,
   resolveDefaultFromGcloudConfig,
   spawnAsync,
 } from './deploy_utils.js';
@@ -50,13 +52,28 @@ function validateGcloudExtraArgs(
   }
 }
 
-function prepareGCloudArguments(options: DeployToCloudRunOptions): string[] {
+function prepareGCloudArguments(
+  options: DeployToCloudRunOptions,
+  envVars: Record<string, string>,
+): string[] {
+  const forwardsEnvVars = Object.keys(envVars).length > 0;
   const regionOptions: string[] = options.region
     ? ['--region', options.region]
     : [];
   const adkManagedArgs = ['--source', '--project', '--port', '--verbosity'];
   if (options.region) {
     adkManagedArgs.push('--region');
+  }
+  if (forwardsEnvVars) {
+    // Any gcloud env-var flag can drop the forwarded variables, so claim them
+    // all.
+    adkManagedArgs.push(
+      '--update-env-vars',
+      '--set-env-vars',
+      '--remove-env-vars',
+      '--clear-env-vars',
+      '--env-vars-file',
+    );
   }
 
   if (options.extraGcloudArgs) {
@@ -78,6 +95,10 @@ function prepareGCloudArguments(options: DeployToCloudRunOptions): string[] {
     options.logLevel.toLowerCase(),
   ];
 
+  if (forwardsEnvVars) {
+    gcloudCommands.push('--update-env-vars', formatGcloudEnvVarsArg(envVars));
+  }
+
   const userLabels = [];
   const extraArgsWithoutLabels = [];
   if (options.extraGcloudArgs?.length) {
@@ -98,45 +119,6 @@ function prepareGCloudArguments(options: DeployToCloudRunOptions): string[] {
 }
 
 export async function deployToCloudRun(options: DeployToCloudRunOptions) {
-  const project =
-    options.project || (await resolveDefaultFromGcloudConfig('project'));
-  if (!project || project === '(unset)') {
-    throw new Error(
-      'Project is not specified and default value for "project" is not set in gcloud config. Please specify region with --project option or set default value running "gcloud config set project YOUR_PROJECT".',
-    );
-  }
-  if (!options.project) {
-    options.project = project;
-    console.info(
-      '--project option is not provided, using default project from gcloud config:',
-      project,
-    );
-  }
-
-  const region =
-    options.region || (await resolveDefaultFromGcloudConfig('run/region'));
-  if (!region) {
-    throw new Error(
-      'Region is not specified and default value for "run/region" is not set in gcloud config. Please specify region with --region option or set default value running "gcloud config set run/region YOUR_REGION".',
-    );
-  }
-  if (!options.region) {
-    options.region = region;
-    console.info(
-      '--region option is not provided, using default region from gcloud config:',
-      region,
-    );
-  }
-
-  const gcloudCommands = prepareGCloudArguments(options);
-
-  // Request to bundle any js or ts file into a single cjs file to be able to
-  // copy file with all it's dependencies correctly.
-  const agentLoader = new AgentLoader(
-    options.agentPath,
-    options.agentFileLoadOptions,
-  );
-
   const isFileProvided = await isFile(options.agentPath);
   const agentDir = isFileProvided
     ? path.dirname(options.agentPath)
@@ -145,6 +127,51 @@ export async function deployToCloudRun(options: DeployToCloudRunOptions) {
     options.appName || isFileProvided
       ? path.parse(options.agentPath).name
       : path.basename(options.agentPath);
+
+  const envConfig = await loadAgentEnvConfig(agentDir, options);
+
+  const project =
+    envConfig.project || (await resolveDefaultFromGcloudConfig('project'));
+  if (!project || project === '(unset)') {
+    throw new Error(
+      'Project is not specified and default value for "project" is not set in gcloud config. Please specify region with --project option or set default value running "gcloud config set project YOUR_PROJECT".',
+    );
+  }
+  if (!options.project) {
+    options.project = project;
+    if (!envConfig.project) {
+      console.info(
+        '--project option is not provided, using default project from gcloud config:',
+        project,
+      );
+    }
+  }
+
+  const region =
+    envConfig.region || (await resolveDefaultFromGcloudConfig('run/region'));
+  if (!region) {
+    throw new Error(
+      'Region is not specified and default value for "run/region" is not set in gcloud config. Please specify region with --region option or set default value running "gcloud config set run/region YOUR_REGION".',
+    );
+  }
+  if (!options.region) {
+    options.region = region;
+    if (!envConfig.region) {
+      console.info(
+        '--region option is not provided, using default region from gcloud config:',
+        region,
+      );
+    }
+  }
+
+  const gcloudCommands = prepareGCloudArguments(options, envConfig.envVars);
+
+  // Request to bundle any js or ts file into a single cjs file to be able to
+  // copy file with all it's dependencies correctly.
+  const agentLoader = new AgentLoader(
+    options.agentPath,
+    options.agentFileLoadOptions,
+  );
 
   console.info('Starting deployment to Cloud Run...');
 

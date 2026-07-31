@@ -5,6 +5,7 @@
  */
 
 import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {
   createDockerFileContent,
@@ -14,6 +15,7 @@ import {
 import {AgentLoader} from '../../src/utils/agent_loader.js';
 import {
   isFile,
+  isFileExists,
   isFolderExists,
   loadFileData,
   tryToFindFileRecursively,
@@ -34,6 +36,7 @@ vi.mock('node:fs/promises', () => {
   const mockFs = {
     cp: vi.fn().mockResolvedValue(undefined),
     mkdir: vi.fn().mockResolvedValue(undefined),
+    readFile: vi.fn(),
     rm: vi.fn().mockResolvedValue(undefined),
   };
   return {
@@ -54,6 +57,7 @@ vi.mock('../../src/utils/agent_loader.js', () => ({
 
 vi.mock('../../src/utils/file_utils.js', () => ({
   isFile: vi.fn(),
+  isFileExists: vi.fn(),
   isFolderExists: vi.fn(),
   loadFileData: vi.fn(),
   saveToFile: vi.fn(),
@@ -302,5 +306,110 @@ describe('deployToCloudRun', () => {
       expect.stringContaining('Command failed with exit code 1'),
       expect.stringContaining('\x1b[0m'),
     );
+  });
+
+  describe('.env forwarding', () => {
+    /** Makes `path/to/agent/.env` readable with the given contents. */
+    function givenEnvFile(contents: string) {
+      (isFileExists as Mock).mockResolvedValue(true);
+      (fs.readFile as Mock).mockResolvedValue(contents);
+    }
+
+    /** The argument list the deploy passed to `gcloud`. */
+    function gcloudArgs(): string[] {
+      const call = spawnMock.mock.calls.find(
+        ([command]) => command === 'gcloud',
+      );
+      if (!call) {
+        expect.fail('gcloud was never spawned');
+      }
+      const args: unknown = call[1];
+      if (!Array.isArray(args)) {
+        expect.fail('gcloud was spawned without an argument list');
+      }
+      return args.map(String);
+    }
+
+    /** The value of the single `--update-env-vars` argument. */
+    function updateEnvVarsValue(): string | undefined {
+      const args = gcloudArgs();
+      expect(args.filter((arg) => arg === '--update-env-vars')).toHaveLength(1);
+      return args[args.indexOf('--update-env-vars') + 1];
+    }
+
+    it('should read the .env next to the agent and forward its variables', async () => {
+      givenEnvFile('A=1\nB=2\n');
+
+      await deployToCloudRun(defaultOptions);
+
+      expect(fs.readFile).toHaveBeenCalledWith(
+        path.join('path/to/agent', '.env'),
+        {encoding: 'utf-8'},
+      );
+      expect(updateEnvVarsValue()).toBe('A=1,B=2');
+    });
+
+    it('should escape the gcloud delimiter when a value contains a comma', async () => {
+      givenEnvFile('FEATURE_FLAGS=alpha,beta\n');
+
+      await deployToCloudRun(defaultOptions);
+
+      expect(updateEnvVarsValue()).toBe('^@^FEATURE_FLAGS=alpha,beta');
+    });
+
+    it('should use project and region from .env when no flags are passed', async () => {
+      givenEnvFile(
+        'GOOGLE_CLOUD_PROJECT=env-project\nGOOGLE_CLOUD_LOCATION=env-region\nA=1\n',
+      );
+
+      await deployToCloudRun({...defaultOptions, project: '', region: ''});
+
+      const args = gcloudArgs();
+      expect(args[args.indexOf('--project') + 1]).toBe('env-project');
+      expect(args[args.indexOf('--region') + 1]).toBe('env-region');
+      expect(execMock).not.toHaveBeenCalled();
+      expect(updateEnvVarsValue()).toBe('A=1');
+      expect(console.info).not.toHaveBeenCalledWith(
+        '--project option is not provided, using default project from gcloud config:',
+        expect.anything(),
+      );
+      expect(console.info).not.toHaveBeenCalledWith(
+        '--region option is not provided, using default region from gcloud config:',
+        expect.anything(),
+      );
+    });
+
+    it('should keep the CLI project and region and warn when .env also sets them', async () => {
+      const consoleWarnSpy = vi
+        .spyOn(console, 'warn')
+        .mockImplementation(() => {});
+      givenEnvFile(
+        'GOOGLE_CLOUD_PROJECT=env-project\nGOOGLE_CLOUD_LOCATION=env-region\n',
+      );
+
+      await deployToCloudRun(defaultOptions);
+
+      const args = gcloudArgs();
+      expect(args[args.indexOf('--project') + 1]).toBe('test-project');
+      expect(args[args.indexOf('--region') + 1]).toBe('us-central1');
+      expect(args).not.toContain('--update-env-vars');
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Ignoring GOOGLE_CLOUD_PROJECT in .env'),
+      );
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Ignoring GOOGLE_CLOUD_LOCATION in .env'),
+      );
+    });
+
+    it('should reject a passthrough env-var argument that would clobber the .env', async () => {
+      givenEnvFile('A=1\n');
+
+      await expect(
+        deployToCloudRun({
+          ...defaultOptions,
+          extraGcloudArgs: ['--set-env-vars=FOO=bar'],
+        }),
+      ).rejects.toThrow(/conflict with ADK's automatic configuration/);
+    });
   });
 });
