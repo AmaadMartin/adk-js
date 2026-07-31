@@ -178,9 +178,8 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
       const filePath = res.filePath;
       tempDir = res.tempDir;
 
-      // materializeFiles renames on collision and reports the final names only
-      // through its return value, so the output scan below has to match
-      // against that rather than against the request.
+      // materializeFiles renames on collision, so the output scan below must
+      // match its returned names, not the requested ones.
       const materializedInputFiles = params.codeExecutionInput.inputFiles
         ? await materializeFiles(params.codeExecutionInput.inputFiles, tempDir)
         : [];

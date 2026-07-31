@@ -265,18 +265,16 @@ describe('file_utils', () => {
       ).toBe('hello');
     });
 
-    it('should throw when the collision rename escapes the target directory', async () => {
-      // '.' resolves onto the base directory itself, so the suffixed candidate
-      // is a sibling of that directory rather than a child of it.
-      const baseDir = path.join(tempDir, 'nested.txt');
-      await fs.mkdir(baseDir);
+    it('should throw when the parent of the resolved name is outside the target directory', async () => {
+      // '.' resolves onto the base directory itself, so its parent -- and
+      // therefore every collision candidate -- sits outside the base directory.
+      const baseDir = path.join(tempDir, 'inner', 'nested.txt');
 
       await expect(
         materializeFiles([textFile('.', 'dangerous')], baseDir),
       ).rejects.toThrow(/Path traversal detected/);
-      await expect(
-        fs.access(path.join(tempDir, 'nested_2.txt')),
-      ).rejects.toThrow();
+      // Nothing was created outside the base directory before the throw.
+      await expect(fs.access(path.join(tempDir, 'inner'))).rejects.toThrow();
     });
 
     it('should propagate a write failure that is not a name collision', async () => {

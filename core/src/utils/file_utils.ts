@@ -23,12 +23,10 @@ function isFileExistsError(e: unknown): boolean {
 }
 
 /**
- * Creates files with the given paths in the current working directory.
+ * Creates files with the given paths in `dir`.
  *
- * The input `files` are never modified; the name each file was actually
- * written under is reported only through the returned array.
- *
- * @param files The files to materialize.
+ * @param files The files to materialize. Never modified: the name each file
+ *     was actually written under is reported only through the return value.
  * @returns Copies of `files` with `name` set to the path actually written,
  *     relative to `dir`.
  * @throws If a name resolves outside `dir`, or if every one of the
@@ -44,16 +42,21 @@ export async function materializeFiles(
   const createdFiles: File[] = [];
   for (const file of files) {
     const fullPath = path.resolve(dir, file.name);
+    const ext = path.extname(fullPath);
+    const dirName = path.dirname(fullPath);
+    const base = path.basename(fullPath, ext);
 
-    if (!fullPath.startsWith(resolvedBaseDir)) {
+    // Every collision candidate is joined onto dirName, so checking dirName
+    // covers the whole loop. Both checks run before anything touches disk.
+    if (
+      !fullPath.startsWith(resolvedBaseDir) ||
+      !dirName.startsWith(resolvedBaseDir)
+    ) {
       throw new Error(
         `Path traversal detected: ${file.name} resolves outside of ${dir}`,
       );
     }
 
-    const ext = path.extname(fullPath);
-    const dirName = path.dirname(fullPath);
-    const base = path.basename(fullPath, ext);
     const content = Buffer.from(file.content, file.contentEncoding);
 
     await fs.mkdir(dirName, {recursive: true});
@@ -65,12 +68,6 @@ export async function materializeFiles(
         attempt === 0
           ? fullPath
           : path.join(dirName, `${base}_${attempt + 1}${ext}`);
-
-      if (!candidatePath.startsWith(resolvedBaseDir)) {
-        throw new Error(
-          `Path traversal detected: ${file.name} resolves outside of ${dir}`,
-        );
-      }
 
       try {
         // 'wx' claims the name atomically, so a writer that lost the race gets
