@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import AdmZip from 'adm-zip';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -11,9 +12,48 @@ import {describe, expect, it} from 'vitest';
 import {
   loadAllSkillsInDir,
   loadSkillFromDir,
+  loadSkillFromZipBuffer,
   parseSkillMdContent,
   validateSkillDir,
 } from '../../src/skills/loader.js';
+
+const SKILL_MD = `---
+name: test-skill
+description: A test skill
+---
+Instructions`;
+
+/** Bytes that are not a valid UTF-8 sequence. */
+const INVALID_UTF8 = Buffer.from([0xff, 0xfe, 0xfd]);
+
+/** The first two bytes of '€', a valid prefix with a missing continuation. */
+const TRUNCATED_UTF8 = Buffer.from([0xe2, 0x82]);
+
+/** Creates a temp skill directory holding SKILL.md plus `files`. */
+async function createSkillDir(
+  files: Record<string, string | Buffer>,
+): Promise<{tempDir: string; skillDir: string}> {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-skill-test-'));
+  const skillDir = path.join(tempDir, 'test-skill');
+  await fs.mkdir(skillDir);
+  await fs.writeFile(path.join(skillDir, 'SKILL.md'), SKILL_MD);
+  for (const [relativePath, content] of Object.entries(files)) {
+    const target = path.join(skillDir, relativePath);
+    await fs.mkdir(path.dirname(target), {recursive: true});
+    await fs.writeFile(target, content);
+  }
+  return {tempDir, skillDir};
+}
+
+/** Builds a zip buffer holding SKILL.md plus `files`. */
+function createSkillZip(files: Record<string, Buffer>): Buffer {
+  const zip = new AdmZip();
+  zip.addFile('SKILL.md', Buffer.from(SKILL_MD, 'utf-8'));
+  for (const [entryName, content] of Object.entries(files)) {
+    zip.addFile(entryName, content);
+  }
+  return zip.toBuffer();
+}
 
 describe('loader', () => {
   describe('parseSkillMdContent', () => {
@@ -242,6 +282,124 @@ Instructions`,
       expect(skill.resources?.scripts?.['run.sh']).toEqual({src: 'echo hello'});
 
       await fs.rm(tempDir, {recursive: true, force: true});
+    });
+
+    it('keeps an invalid UTF-8 asset as a Buffer', async () => {
+      const {tempDir, skillDir} = await createSkillDir({
+        'assets/logo.png': INVALID_UTF8,
+      });
+
+      const skill = await loadSkillFromDir(skillDir);
+      const asset = skill.resources?.assets?.['logo.png'];
+      expect(Buffer.isBuffer(asset)).toBe(true);
+      expect(asset).toEqual(INVALID_UTF8);
+
+      await fs.rm(tempDir, {recursive: true, force: true});
+    });
+
+    it('keeps an invalid UTF-8 reference as a Buffer', async () => {
+      const {tempDir, skillDir} = await createSkillDir({
+        'references/data.bin': INVALID_UTF8,
+      });
+
+      const skill = await loadSkillFromDir(skillDir);
+      const reference = skill.resources?.references?.['data.bin'];
+      expect(Buffer.isBuffer(reference)).toBe(true);
+      expect(reference).toEqual(INVALID_UTF8);
+
+      await fs.rm(tempDir, {recursive: true, force: true});
+    });
+
+    it('keeps a truncated multi-byte sequence as a Buffer', async () => {
+      const {tempDir, skillDir} = await createSkillDir({
+        'assets/partial.bin': TRUNCATED_UTF8,
+      });
+
+      const skill = await loadSkillFromDir(skillDir);
+      const asset = skill.resources?.assets?.['partial.bin'];
+      expect(Buffer.isBuffer(asset)).toBe(true);
+      expect(asset).toEqual(TRUNCATED_UTF8);
+
+      await fs.rm(tempDir, {recursive: true, force: true});
+    });
+
+    it('drops an invalid UTF-8 script', async () => {
+      const {tempDir, skillDir} = await createSkillDir({
+        'scripts/run.bin': INVALID_UTF8,
+        'scripts/ok.sh': 'echo hello',
+      });
+
+      const skill = await loadSkillFromDir(skillDir);
+      expect(skill.resources?.scripts?.['run.bin']).toBeUndefined();
+      expect(skill.resources?.scripts?.['ok.sh']).toEqual({src: 'echo hello'});
+
+      await fs.rm(tempDir, {recursive: true, force: true});
+    });
+
+    it('decodes multi-byte UTF-8 content as a string', async () => {
+      const {tempDir, skillDir} = await createSkillDir({
+        'references/utf8.md': 'héllo — ✓ 🎉',
+      });
+
+      const skill = await loadSkillFromDir(skillDir);
+      expect(skill.resources?.references?.['utf8.md']).toBe('héllo — ✓ 🎉');
+
+      await fs.rm(tempDir, {recursive: true, force: true});
+    });
+
+    it('preserves a leading UTF-8 BOM in text content', async () => {
+      const {tempDir, skillDir} = await createSkillDir({
+        'references/bom.md': '\uFEFFhello',
+      });
+
+      const skill = await loadSkillFromDir(skillDir);
+      expect(skill.resources?.references?.['bom.md']).toBe('\uFEFFhello');
+
+      await fs.rm(tempDir, {recursive: true, force: true});
+    });
+  });
+
+  describe('loadSkillFromZipBuffer', () => {
+    it('keeps an invalid UTF-8 asset as a Buffer', () => {
+      const skill = loadSkillFromZipBuffer(
+        createSkillZip({'assets/logo.png': INVALID_UTF8}),
+      );
+
+      const asset = skill.resources?.assets?.['logo.png'];
+      expect(Buffer.isBuffer(asset)).toBe(true);
+      expect(asset).toEqual(INVALID_UTF8);
+    });
+
+    it('keeps an invalid UTF-8 reference as a Buffer', () => {
+      const skill = loadSkillFromZipBuffer(
+        createSkillZip({'references/data.bin': INVALID_UTF8}),
+      );
+
+      const reference = skill.resources?.references?.['data.bin'];
+      expect(Buffer.isBuffer(reference)).toBe(true);
+      expect(reference).toEqual(INVALID_UTF8);
+    });
+
+    it('drops an invalid UTF-8 script', () => {
+      const skill = loadSkillFromZipBuffer(
+        createSkillZip({
+          'scripts/run.bin': INVALID_UTF8,
+          'scripts/run.sh': Buffer.from('echo hello', 'utf-8'),
+        }),
+      );
+
+      expect(skill.resources?.scripts?.['run.bin']).toBeUndefined();
+      expect(skill.resources?.scripts?.['run.sh']).toEqual({src: 'echo hello'});
+    });
+
+    it('decodes multi-byte UTF-8 content as a string', () => {
+      const skill = loadSkillFromZipBuffer(
+        createSkillZip({
+          'references/utf8.md': Buffer.from('héllo — ✓ 🎉', 'utf-8'),
+        }),
+      );
+
+      expect(skill.resources?.references?.['utf8.md']).toBe('héllo — ✓ 🎉');
     });
   });
 
