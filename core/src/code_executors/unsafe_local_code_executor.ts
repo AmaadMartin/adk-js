@@ -226,15 +226,20 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
         let stdout = '';
         let stderr = '';
 
+        // Decode through the stream's StringDecoder: a multi-byte UTF-8
+        // sequence straddling two pipe reads would otherwise become
+        // replacement characters on both sides of the boundary.
         if (child.stdout) {
-          child.stdout.on('data', (data) => {
-            stdout += data.toString();
+          child.stdout.setEncoding('utf-8');
+          child.stdout.on('data', (chunk: string) => {
+            stdout += chunk;
           });
         }
 
         if (child.stderr) {
-          child.stderr.on('data', (data) => {
-            stderr += data.toString();
+          child.stderr.setEncoding('utf-8');
+          child.stderr.on('data', (chunk: string) => {
+            stderr += chunk;
           });
         }
 

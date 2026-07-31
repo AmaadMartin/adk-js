@@ -15,6 +15,7 @@ import {
 } from '@google/adk';
 import {EventEmitter} from 'node:events';
 import * as os from 'node:os';
+import {Readable} from 'node:stream';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 
 // Only `spawn` is mocked; it defaults to the real implementation (see
@@ -44,6 +45,83 @@ const EXPECTED_POWERSHELL_ARGS = [
   ...POWERSHELL_FLAGS,
   expect.stringMatching(/script\.ps1$/),
 ];
+
+/**
+ * Fixture text whose characters are 3 and 4 bytes wide. The unit is 25 bytes
+ * and `PIPE_CHUNK_BYTES` is not a multiple of it, so pipe read boundaries land
+ * inside a UTF-8 sequence rather than between two of them.
+ */
+const MULTI_BYTE_UNIT = '日本語テキスト🙂';
+const MULTI_BYTE_REPEATS = 32768;
+const MULTI_BYTE_TEXT = MULTI_BYTE_UNIT.repeat(MULTI_BYTE_REPEATS);
+const REPLACEMENT_CHARACTER = '\uFFFD';
+
+/**
+ * Bytes per simulated pipe read, matching the 64 KiB a real pipe hands over
+ * at once.
+ */
+const PIPE_CHUNK_BYTES = 65536;
+
+/**
+ * Headroom for the real-subprocess cases: spawning `node` and moving 800 KiB
+ * through a pipe can outrun Vitest's 5s default on a loaded machine.
+ */
+const REAL_SUBPROCESS_TIMEOUT_MS = 20000;
+
+/** A child process whose stdio pipes are real `Readable`s. */
+type ChunkedChildProcess = EventEmitter & {stdout: Readable; stderr: Readable};
+
+/** Splits `text` into the byte-sized reads a pipe would deliver. */
+function pipeChunks(text: string): Buffer[] {
+  const bytes = Buffer.from(text, 'utf-8');
+  const chunks: Buffer[] = [];
+  for (let offset = 0; offset < bytes.length; offset += PIPE_CHUNK_BYTES) {
+    chunks.push(bytes.subarray(offset, offset + PIPE_CHUNK_BYTES));
+  }
+  return chunks;
+}
+
+/** A readable that emits exactly one of `chunks` per 'data' event. */
+function chunkedStream(chunks: readonly Buffer[]): Readable {
+  let next = 0;
+  return new Readable({
+    read() {
+      // Pushed asynchronously: chunks pushed synchronously during the first
+      // read stay in the internal buffer, which Readable.read() then hands
+      // over as one concatenated 'data' event, hiding the boundary under test.
+      setImmediate(() => {
+        this.push(next < chunks.length ? chunks[next++] : null);
+      });
+    },
+  });
+}
+
+/**
+ * A child that delivers `stdoutText` and `stderrText` one pipe read at a time,
+ * closing only once both streams have ended so no output can be missed.
+ */
+function createChunkedChild(
+  stdoutText: string,
+  stderrText: string,
+): ChunkedChildProcess {
+  const stdout = chunkedStream(pipeChunks(stdoutText));
+  const stderr = chunkedStream(pipeChunks(stderrText));
+  const child: ChunkedChildProcess = Object.assign(new EventEmitter(), {
+    stdout,
+    stderr,
+  });
+
+  let endedStreams = 0;
+  const onEnd = () => {
+    if (++endedStreams === 2) {
+      child.emit('close', 0, null);
+    }
+  };
+  stdout.on('end', onEnd);
+  stderr.on('end', onEnd);
+
+  return child;
+}
 
 function createMockInvocationContext(): InvocationContext {
   const agent = new LlmAgent({
@@ -445,5 +523,84 @@ describe('UnsafeLocalCodeExecutor', () => {
         expect.anything(),
       );
     });
+  });
+
+  describe('multi-byte output', () => {
+    it('should not corrupt multi-byte stdout split across pipe read boundaries', async () => {
+      spawnMock.mockImplementation(() =>
+        createChunkedChild(MULTI_BYTE_TEXT, ''),
+      );
+
+      const result = await executor.executeCode({
+        invocationContext,
+        codeExecutionInput: {
+          // The child is faked, so the script itself is never run.
+          code: '',
+          language: CodeExecutionLanguage.JAVASCRIPT,
+          inputFiles: [],
+        },
+      });
+
+      expect(result.stdout.indexOf(REPLACEMENT_CHARACTER)).toBe(-1);
+      expect(result.stdout).toBe(MULTI_BYTE_TEXT);
+    });
+
+    it('should not corrupt multi-byte stderr split across pipe read boundaries', async () => {
+      spawnMock.mockImplementation(() =>
+        createChunkedChild('', MULTI_BYTE_TEXT),
+      );
+
+      const result = await executor.executeCode({
+        invocationContext,
+        codeExecutionInput: {
+          // The child is faked, so the script itself is never run.
+          code: '',
+          language: CodeExecutionLanguage.JAVASCRIPT,
+          inputFiles: [],
+        },
+      });
+
+      expect(result.stderr.indexOf(REPLACEMENT_CHARACTER)).toBe(-1);
+      expect(result.stderr).toBe(MULTI_BYTE_TEXT);
+      expect(result.stdout).toBe('');
+    });
+
+    it(
+      'should round-trip a large multi-byte stdout from a real subprocess',
+      async () => {
+        const result = await executor.executeCode({
+          invocationContext,
+          codeExecutionInput: {
+            code: `process.stdout.write(${JSON.stringify(MULTI_BYTE_UNIT)}.repeat(${MULTI_BYTE_REPEATS}));`,
+            language: CodeExecutionLanguage.JAVASCRIPT,
+            inputFiles: [],
+          },
+        });
+
+        expect(result.stdout.indexOf(REPLACEMENT_CHARACTER)).toBe(-1);
+        expect(result.stdout).toBe(MULTI_BYTE_TEXT);
+        expect(result.stderr).toBe('');
+      },
+      REAL_SUBPROCESS_TIMEOUT_MS,
+    );
+
+    it(
+      'should round-trip a large multi-byte stderr from a real subprocess',
+      async () => {
+        const result = await executor.executeCode({
+          invocationContext,
+          codeExecutionInput: {
+            code: `process.stderr.write(${JSON.stringify(MULTI_BYTE_UNIT)}.repeat(${MULTI_BYTE_REPEATS}));`,
+            language: CodeExecutionLanguage.JAVASCRIPT,
+            inputFiles: [],
+          },
+        });
+
+        expect(result.stderr.indexOf(REPLACEMENT_CHARACTER)).toBe(-1);
+        expect(result.stderr).toBe(MULTI_BYTE_TEXT);
+        expect(result.stdout).toBe('');
+      },
+      REAL_SUBPROCESS_TIMEOUT_MS,
+    );
   });
 });
