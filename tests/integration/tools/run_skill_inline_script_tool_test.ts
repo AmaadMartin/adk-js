@@ -9,6 +9,7 @@ import {
   CodeExecutionResult,
   Context,
   InvocationContext,
+  MaterializedCodeExecutionResult,
   RunSkillInlineScriptTool,
   SkillToolset,
   ToolConfirmation,
@@ -18,7 +19,6 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {describe, expect, it} from 'vitest';
-import {MaterializedCodeExecutionResult} from '../../../core/src/tools/skill/skill_output_files.js';
 
 describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', () => {
   // These integration tests exercise real code execution, which is gated behind

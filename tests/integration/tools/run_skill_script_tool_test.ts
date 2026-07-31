@@ -8,6 +8,7 @@ import {
   CodeExecutionResult,
   Context,
   InvocationContext,
+  MaterializedCodeExecutionResult,
   RunSkillScriptTool,
   Skill,
   SkillToolset,
@@ -17,7 +18,6 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {describe, expect, it} from 'vitest';
-import {MaterializedCodeExecutionResult} from '../../../core/src/tools/skill/skill_output_files.js';
 
 const IS_WINDOWS = os.platform() === 'win32';
 const IS_UNIX = os.platform() === 'linux' || os.platform() === 'darwin';

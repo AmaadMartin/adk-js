@@ -29,20 +29,6 @@ export interface MaterializedCodeExecutionResult extends CodeExecutionResult {
 }
 
 /**
- * Returns the directory skill-script output files are written to, creating it
- * if necessary: the operator-declared `declaredDir` when one is configured,
- * otherwise a fresh temp directory unique to this call.
- */
-async function createOutputDir(declaredDir?: string): Promise<string> {
-  if (declaredDir) {
-    const resolved = path.resolve(declaredDir);
-    await fs.mkdir(resolved, {recursive: true});
-    return resolved;
-  }
-  return fs.mkdtemp(path.join(os.tmpdir(), SKILL_OUTPUT_DIR_PREFIX));
-}
-
-/**
  * Writes `result.outputFiles` into a directory owned by the caller and returns
  * the result annotated with that directory. Anchoring materialization to a
  * declared directory keeps script-chosen file names from resolving against the
@@ -56,7 +42,10 @@ export async function materializeSkillOutputFiles(
     return result;
   }
 
-  const outputDir = await createOutputDir(declaredDir);
+  const outputDir = declaredDir
+    ? path.resolve(declaredDir)
+    : await fs.mkdtemp(path.join(os.tmpdir(), SKILL_OUTPUT_DIR_PREFIX));
+  await fs.mkdir(outputDir, {recursive: true});
   const outputFiles = await materializeFiles(result.outputFiles, outputDir);
   return {...result, outputFiles, outputDir};
 }

@@ -68,17 +68,8 @@ export class SkillToolset extends BaseToolset {
       /**
        * Directory that files produced by skill scripts are written to. When
        * unset, each `run_skill_script` / `run_skill_inline_script` call writes
-       * into a fresh temporary directory. Set this to direct output into a
-       * workspace directory you own; it is operator configuration and is never
-       * supplied by the model.
-       *
-       * This is not a way to opt out of the containment check applied to
-       * script-chosen file names — it declares the directory that check is
-       * anchored to.
-       *
-       * ADK never deletes these directories. A default temporary directory is
-       * left to the reaping policy of the OS temp directory; declare
-       * `outputDir` to get a location you can clean up on your own schedule.
+       * into a fresh temporary directory that ADK never reaps. Operator
+       * configuration; the model cannot supply it.
        */
       outputDir?: string;
     } = {},

@@ -14,6 +14,7 @@ import {
   FileContentEncoding,
   InvocationContext,
   LlmAgent,
+  MaterializedCodeExecutionResult,
   RunSkillInlineScriptErrorCode,
   RunSkillInlineScriptTool,
   SkillToolset,
@@ -22,7 +23,6 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-import {MaterializedCodeExecutionResult} from '../../../src/tools/skill/skill_output_files.js';
 import {ToolConfirmation} from '../../../src/tools/tool_confirmation.js';
 import {materializeFiles} from '../../../src/utils/file_utils.js';
 
