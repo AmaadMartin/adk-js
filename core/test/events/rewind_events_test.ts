@@ -163,6 +163,17 @@ describe('applyRewinds', () => {
     expect(ids(result)).toEqual(ids([events[0], events[5]]));
   });
 
+  it('ignores a marker whose target invocation only appears after it', () => {
+    const events = [
+      rewindMarker('rewind_inv', 'inv_later'),
+      userEvent('inv_later', 'later'),
+    ];
+
+    const result = applyRewinds(events);
+
+    expect(ids(result)).toEqual(ids([events[1]]));
+  });
+
   it('drops a marker sitting at index 0 without failing', () => {
     const events = [
       rewindMarker('rewind_inv', 'never_happened'),
