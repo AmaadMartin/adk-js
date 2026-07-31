@@ -13,9 +13,13 @@ import {defineConfig} from 'vitest/config';
  * matching `afterAll` hooks recursively remove the resulting `node_modules`.
  * That exceeds Vitest's 10s default on a slow or loaded machine.
  *
- * The twelve `build_setup` hook runs take ~16s combined warm on ubuntu-latest,
- * but a cold, network-bound install has been measured at ~70s, so 120s covers
- * the worst case. Trade-off: a genuinely stuck hook takes this long to surface.
+ * The install itself is no longer the dominant cost, nor network-bound:
+ * `installFixtureDeps` pins `--install-links=false`, so a fixture install links
+ * the `core`/`dev` workspaces in well under a second instead of packing their
+ * transitive graph (~70s per fixture when it does). What is left in these hooks
+ * is `npm run build` for the `ts_*` fixtures, so 120s keeps ample headroom on a
+ * slow or loaded machine. Trade-off: a genuinely stuck hook takes this long to
+ * surface.
  *
  * This is the only definition of that budget. Suites must not pass a timeout
  * argument to an install or teardown hook: it shadows this floor rather than

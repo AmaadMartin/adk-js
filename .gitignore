@@ -5,6 +5,11 @@ node_modules/
 .idea/
 .vscode/*
 !.vscode/settings.json
+# Regenerated per test run and deliberately not committed: integration fixtures
+# link the core/dev workspaces, so their lockfiles carry no resolved versions
+# and no integrity hashes -- only the ranges already declared in
+# core/package.json and dev/package.json. The root package-lock.json is what
+# pins the transitive graph those fixtures resolve against.
 tests/**/package-lock.json
 coverage/
 .env
