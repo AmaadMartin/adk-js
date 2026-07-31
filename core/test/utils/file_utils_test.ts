@@ -223,12 +223,13 @@ describe('file_utils', () => {
       await Promise.all(
         taken.map((name) => fs.writeFile(path.join(tempDir, name), 'taken')),
       );
+      const files = [textFile('cap.txt', 'overflow')];
+      const snapshot = structuredClone(files);
 
-      await expect(
-        materializeFiles([textFile('cap.txt', 'overflow')], tempDir),
-      ).rejects.toThrow(
+      await expect(materializeFiles(files, tempDir)).rejects.toThrow(
         new RegExp(`cap\\.txt.*${MAX_COLLISION_ATTEMPTS} candidate names`),
       );
+      expect(files).toEqual(snapshot);
       await expect(
         fs.access(path.join(tempDir, `cap_${MAX_COLLISION_ATTEMPTS + 1}.txt`)),
       ).rejects.toThrow();
@@ -262,6 +263,20 @@ describe('file_utils', () => {
       expect(
         await fs.readFile(path.join(tempDir, 'collision_2.txt'), 'utf8'),
       ).toBe('hello');
+    });
+
+    it('should throw when the collision rename escapes the target directory', async () => {
+      // '.' resolves onto the base directory itself, so the suffixed candidate
+      // is a sibling of that directory rather than a child of it.
+      const baseDir = path.join(tempDir, 'nested.txt');
+      await fs.mkdir(baseDir);
+
+      await expect(
+        materializeFiles([textFile('.', 'dangerous')], baseDir),
+      ).rejects.toThrow(/Path traversal detected/);
+      await expect(
+        fs.access(path.join(tempDir, 'nested_2.txt')),
+      ).rejects.toThrow();
     });
 
     it('should propagate a write failure that is not a name collision', async () => {
