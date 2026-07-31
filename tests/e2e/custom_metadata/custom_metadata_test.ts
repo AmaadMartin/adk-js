@@ -6,29 +6,8 @@
 
 import {Agent, Gemini, InMemoryRunner} from '@google/adk';
 import {createUserContent} from '@google/genai';
-import * as dotenv from 'dotenv';
-import * as fs from 'fs';
-import * as path from 'path';
-import {fileURLToPath} from 'url';
 import {describe, expect, it} from 'vitest';
 import {hasModelCredentials} from '../utils/model_credentials.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// Try to load .env from tests/e2e or root
-const envPaths = [
-  path.resolve(__dirname, '../.env'),
-  path.resolve(__dirname, '../../.env'),
-  path.resolve(__dirname, '.env'),
-];
-
-for (const envPath of envPaths) {
-  if (fs.existsSync(envPath)) {
-    dotenv.config({path: envPath});
-    break;
-  }
-}
 
 const hasAKey = hasModelCredentials();
 

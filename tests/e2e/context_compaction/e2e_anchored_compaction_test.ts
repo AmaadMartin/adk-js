@@ -18,9 +18,6 @@ import {
   LlmSummarizer,
 } from '@google/adk';
 import {createUserContent} from '@google/genai';
-import * as dotenv from 'dotenv';
-import * as fs from 'fs';
-import * as path from 'path';
 import {describe, expect, it} from 'vitest';
 import {hasModelCredentials} from '../utils/model_credentials.js';
 
@@ -70,13 +67,6 @@ function createAnchoredCompactionAgent(): LlmAgent {
 }
 
 describe('E2e Anchored Context Compaction', () => {
-  const envPath = path.resolve(__dirname, '.env');
-  const envExists = fs.existsSync(envPath);
-
-  if (envExists) {
-    dotenv.config({path: envPath});
-  }
-
   const hasAKey = hasModelCredentials();
 
   it.skipIf(!hasAKey)(

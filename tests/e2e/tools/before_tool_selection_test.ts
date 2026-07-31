@@ -13,9 +13,6 @@ import {
   LOAD_ARTIFACTS,
 } from '@google/adk';
 import {createUserContent} from '@google/genai';
-import * as dotenv from 'dotenv';
-import * as fs from 'fs';
-import * as path from 'path';
 import {describe, expect, it} from 'vitest';
 import {hasModelCredentials} from '../utils/model_credentials.js';
 
@@ -39,13 +36,6 @@ class FilterPlugin extends BasePlugin {
 }
 
 describe('E2E beforeToolSelection', () => {
-  const envPath = path.resolve(__dirname, '.env');
-  const envExists = fs.existsSync(envPath);
-
-  if (envExists) {
-    dotenv.config({path: envPath});
-  }
-
   const hasAKey = hasModelCredentials();
 
   it.skipIf(!hasAKey)(

@@ -5,19 +5,10 @@
  */
 
 import {FunctionTool, InMemoryRunner, LlmAgent, RoutedAgent} from '@google/adk';
-import * as dotenv from 'dotenv';
 import * as fs from 'fs';
-import * as path from 'path';
 import {describe, expect, it} from 'vitest';
 import {z} from 'zod';
 import {hasModelCredentials} from '../utils/model_credentials.js';
-
-const envPath = path.resolve(__dirname, '.env');
-const envExists = fs.existsSync(envPath);
-
-if (envExists) {
-  dotenv.config({path: envPath});
-}
 
 const hasAKey = hasModelCredentials();
 

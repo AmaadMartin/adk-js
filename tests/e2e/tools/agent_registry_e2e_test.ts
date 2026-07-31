@@ -6,17 +6,9 @@
 
 import {AgentRegistry, InMemoryRunner, LlmAgent} from '@google/adk';
 import {createUserContent} from '@google/genai';
-import * as dotenv from 'dotenv';
-import * as fs from 'fs';
-import * as path from 'path';
 import {describe, expect, it} from 'vitest';
 
 describe('E2E Live Agent Registry', () => {
-  const envPath = path.resolve(__dirname, '.env');
-  if (fs.existsSync(envPath)) {
-    dotenv.config({path: envPath});
-  }
-
   // A true live, unmocked run requires an actual GCP project and active MCP Server resource ID
   const hasLiveCredentials =
     !!process.env.GOOGLE_CLOUD_PROJECT &&

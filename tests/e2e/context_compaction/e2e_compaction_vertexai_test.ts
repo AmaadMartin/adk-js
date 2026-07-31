@@ -15,9 +15,6 @@ import {
   VertexAiSessionService,
 } from '@google/adk';
 import {createUserContent} from '@google/genai';
-import * as dotenv from 'dotenv';
-import * as fs from 'fs';
-import * as path from 'path';
 import {describe, expect, it} from 'vitest';
 
 function createVertexAICompactionAgent(): LlmAgent {
@@ -41,13 +38,6 @@ function createVertexAICompactionAgent(): LlmAgent {
 }
 
 describe('E2e Context Compaction (Vertex AI)', () => {
-  const envPath = path.resolve(__dirname, '.env');
-  const envExists = fs.existsSync(envPath);
-
-  if (envExists) {
-    dotenv.config({path: envPath});
-  }
-
   const hasRequiredEnv =
     !!process.env.GOOGLE_CLOUD_PROJECT && !!process.env.REASONING_ENGINE_ID;
 
