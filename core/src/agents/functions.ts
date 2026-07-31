@@ -413,8 +413,10 @@ export async function handleFunctionCallList({
     }
 
     // TODO - b/425992518: state event polluting runtime, consider fix.
-    // Allow long running function to return None as response.
-    if (tool.isLongRunning && !functionResponse) {
+    // Allow long running function to return None as response. A tool that
+    // defers its response supplies the matching FunctionResponse later by
+    // design, so it skips the same way without being marked long running.
+    if ((tool.isLongRunning || tool.defersResponse) && !functionResponse) {
       continue;
     }
 

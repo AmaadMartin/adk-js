@@ -56,6 +56,36 @@ const errorTool = new FunctionTool({
   },
 });
 
+const DEFERRING_TOOL_NAME = 'deferringTool';
+
+/**
+ * A tool whose matching `FunctionResponse` is supplied elsewhere. Only
+ * `BaseTool` carries `defersResponse`, so the fixture cannot be a
+ * `FunctionTool`.
+ */
+class DeferringTool extends BaseTool {
+  override readonly defersResponse = true;
+
+  private readonly response: unknown;
+
+  constructor(response: unknown) {
+    super({name: DEFERRING_TOOL_NAME, description: 'defers its response'});
+    this.response = response;
+  }
+
+  override async runAsync(): Promise<unknown> {
+    return this.response;
+  }
+}
+
+function deferringCall(): FunctionCall {
+  return {
+    id: randomIdForTestingOnly(),
+    name: DEFERRING_TOOL_NAME,
+    args: {},
+  };
+}
+
 // Plugin for testing
 class TestPlugin extends BasePlugin {
   beforeToolCallbackResponse?: Record<string, unknown>;
@@ -361,6 +391,96 @@ describe('handleFunctionCallList', () => {
           abortSignal: signal,
         }),
       }),
+    );
+  });
+
+  it('should emit no event when a deferring tool returns null', async () => {
+    const deferringTool = new DeferringTool(null);
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [deferringCall()],
+      toolsDict: {[DEFERRING_TOOL_NAME]: deferringTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event).toBeNull();
+  });
+
+  it('should emit no event when a deferring tool returns undefined', async () => {
+    const deferringTool = new DeferringTool(undefined);
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [deferringCall()],
+      toolsDict: {[DEFERRING_TOOL_NAME]: deferringTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event).toBeNull();
+  });
+
+  it('should emit an event when a deferring tool returns a response', async () => {
+    const deferringTool = new DeferringTool({status: 'ok'});
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [deferringCall()],
+      toolsDict: {[DEFERRING_TOOL_NAME]: deferringTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event).not.toBeNull();
+    const definedEvent = event as Event;
+    expect(definedEvent.content!.parts![0].functionResponse!.response).toEqual({
+      status: 'ok',
+    });
+  });
+
+  it('should emit an event for a tool that returns nothing without deferring', async () => {
+    const quietTool = new FunctionTool({
+      name: 'quietTool',
+      description: 'returns nothing',
+      parameters: z.object({}),
+      execute: async () => null,
+    });
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [
+        {id: randomIdForTestingOnly(), name: 'quietTool', args: {}},
+      ],
+      toolsDict: {'quietTool': quietTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event).not.toBeNull();
+    const definedEvent = event as Event;
+    expect(definedEvent.content!.parts![0].functionResponse!.response).toEqual({
+      result: null,
+    });
+  });
+
+  it('should drop only the deferred call when merging parallel calls', async () => {
+    const deferringTool = new DeferringTool(null);
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [deferringCall(), functionCall],
+      toolsDict: {[DEFERRING_TOOL_NAME]: deferringTool, ...toolsDict},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event).not.toBeNull();
+    const definedEvent = event as Event;
+    expect(definedEvent.content!.parts).toHaveLength(1);
+    expect(definedEvent.content!.parts![0].functionResponse!.name).toBe(
+      'testTool',
     );
   });
 });
