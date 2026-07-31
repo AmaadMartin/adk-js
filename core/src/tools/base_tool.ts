@@ -68,20 +68,17 @@ export abstract class BaseTool {
   readonly isLongRunning: boolean;
 
   /**
-   * Whether this tool produces its `FunctionResponse` elsewhere.
+   * Whether this tool produces its `FunctionResponse` elsewhere: when true, the
+   * automatic function-response event is skipped if the resolved tool response
+   * is falsy, because some other orchestrator supplies the matching response
+   * later in the conversation.
    *
-   * When true, the automatic function-response event is skipped if `runAsync`
-   * resolves to an empty response; some other orchestrator (a wrapper agent, or
-   * an external system for webhook-style callbacks) supplies the matching
-   * response later in the conversation. A non-empty return is treated as a real
-   * result and emits an event as usual.
-   *
-   * Distinct from {@link BaseTool.isLongRunning}, which skips the same way but
+   * Distinct from {@link BaseTool.isLongRunning}, which skips identically but
    * also records the call in `event.longRunningToolIds`, affecting A2A task
    * state, plugin logging and session metadata.
    *
-   * Subclasses opt in by redeclaring the field:
-   * `override readonly defersResponse = true;`
+   * Subclasses opt in with `override readonly defersResponse = true;`, which
+   * only compiles because of the explicit `boolean` annotation below.
    */
   readonly defersResponse: boolean = false;
 
