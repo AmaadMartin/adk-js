@@ -5,9 +5,11 @@
  */
 
 import {
+  Context,
   createSession,
   InvocationContext,
   LlmAgent,
+  LlmRequest,
   PluginManager,
   ReadonlyContext,
 } from '@google/adk';
@@ -22,6 +24,24 @@ interface ReadonlyContextOptions {
   state?: Record<string, unknown>;
 }
 
+/** Builds the invocation that backs the context factories below. */
+function createInvocationContext(
+  options: ReadonlyContextOptions = {},
+): InvocationContext {
+  const {agentName = 'test-agent', state = {}} = options;
+  return new InvocationContext({
+    invocationId: 'test-invocation',
+    agent: new LlmAgent({name: agentName}),
+    session: createSession({
+      id: 'test-session',
+      appName: 'test-app',
+      userId: 'test-user',
+      state,
+    }),
+    pluginManager: new PluginManager([]),
+  });
+}
+
 /**
  * Creates a real {@link ReadonlyContext} backed by a real
  * {@link InvocationContext}, for tests that need to pass a context to an API
@@ -30,18 +50,23 @@ interface ReadonlyContextOptions {
 export function createReadonlyContext(
   options: ReadonlyContextOptions = {},
 ): ReadonlyContext {
-  const {agentName = 'test-agent', state = {}} = options;
-  return new ReadonlyContext(
-    new InvocationContext({
-      invocationId: 'test-invocation',
-      agent: new LlmAgent({name: agentName}),
-      session: createSession({
-        id: 'test-session',
-        appName: 'test-app',
-        userId: 'test-user',
-        state,
-      }),
-      pluginManager: new PluginManager([]),
-    }),
-  );
+  return new ReadonlyContext(createInvocationContext(options));
+}
+
+/**
+ * Creates a real {@link Context} for tests that invoke a tool directly, so the
+ * tool runs against the same plumbing the agent request loop hands it.
+ */
+export function createToolContext(): Context {
+  return new Context({invocationContext: createInvocationContext()});
+}
+
+/**
+ * Creates a minimal, fully typed {@link LlmRequest}. Any field may be replaced
+ * through `overrides`.
+ */
+export function createLlmRequest(
+  overrides: Partial<LlmRequest> = {},
+): LlmRequest {
+  return {contents: [], toolsDict: {}, liveConnectConfig: {}, ...overrides};
 }
