@@ -9,12 +9,15 @@ import * as path from 'node:path';
 import {File} from '../code_executors/code_execution_utils.js';
 
 /**
- * Creates files with the given paths in the current working directory.
+ * Creates files with the given paths under `dir`.
  * @param files The files to materialize.
+ * @param dir The directory to create the files in. Required: an implicit
+ *     default would write to whichever directory the host process happens to
+ *     be running in.
  */
 export async function materializeFiles(
   files: File[],
-  dir = process.cwd(),
+  dir: string,
 ): Promise<File[]> {
   const resolvedBaseDir = path.resolve(dir);
   const createdFiles: File[] = [];
