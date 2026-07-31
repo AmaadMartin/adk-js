@@ -6,6 +6,7 @@
 
 import {
   getGcpExporters,
+  getGcpProjectId,
   getGcpResource,
   OtelExportersConfig,
 } from '@google/adk';
@@ -305,8 +306,35 @@ describe('getGcpResource', () => {
     const result = await getGcpResource();
 
     expect(detectResources).toHaveBeenCalledWith({
-      detectors: [expect.any(Object)],
+      detectors: [expect.any(Object), expect.any(Object), expect.any(Object)],
     });
     expect(result).toEqual(mockDetectedResource);
+  });
+});
+
+describe('getGcpProjectId', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(GoogleAuth).mockReset();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('resolves the project from Application Default Credentials', async () => {
+    vi.mocked(GoogleAuth.prototype.getProjectId).mockImplementation(() =>
+      Promise.resolve('adc-project'),
+    );
+
+    await expect(getGcpProjectId()).resolves.toBe('adc-project');
+  });
+
+  it('resolves undefined when the project cannot be determined', async () => {
+    vi.mocked(GoogleAuth.prototype.getProjectId).mockImplementation(() =>
+      Promise.reject(new Error('no ADC')),
+    );
+
+    await expect(getGcpProjectId()).resolves.toBeUndefined();
   });
 });

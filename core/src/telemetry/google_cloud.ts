@@ -12,7 +12,13 @@ import {
 } from '@grpc/grpc-js';
 import {OTLPMetricExporter} from '@opentelemetry/exporter-metrics-otlp-grpc';
 import {gcpDetector} from '@opentelemetry/resource-detector-gcp';
-import {detectResources, Resource} from '@opentelemetry/resources';
+import {
+  detectResources,
+  envDetector,
+  Resource,
+  resourceFromAttributes,
+  serviceInstanceIdDetector,
+} from '@opentelemetry/resources';
 import {
   MetricReader,
   PeriodicExportingMetricReader,
@@ -36,16 +42,32 @@ const GCP_CREDENTIALS_ERROR_MESSAGE =
 /** OTLP endpoint of the Google Cloud Telemetry API. */
 const TELEMETRY_ENDPOINT = 'https://telemetry.googleapis.com';
 
+/** Resource attribute the Telemetry API routes ingested metrics on. */
+const GCP_PROJECT_ID_ATTRIBUTE = 'gcp.project_id';
+
 /** Cloud Monitoring rejects sample periods below five seconds. */
 const METRIC_EXPORT_INTERVAL_MS = 5000;
 
-async function getGcpProjectId(auth: GoogleAuth): Promise<string | undefined> {
+async function resolveProjectId(auth: GoogleAuth): Promise<string | undefined> {
   try {
     const projectId = await auth.getProjectId();
     return projectId || undefined;
   } catch (_e: unknown) {
     return undefined;
   }
+}
+
+/**
+ * Resolves the GCP project from Application Default Credentials.
+ *
+ * Callers that assemble the telemetry pipeline themselves need this to build
+ * the resource, because the Telemetry API takes the destination project as a
+ * resource attribute rather than an exporter argument.
+ *
+ * @returns the project id, or undefined when it cannot be determined.
+ */
+export function getGcpProjectId(): Promise<string | undefined> {
+  return resolveProjectId(new GoogleAuth());
 }
 
 async function getGcpAuthClient(
@@ -108,7 +130,7 @@ export async function getGcpExporters(
   } = config;
 
   const auth = new GoogleAuth();
-  const projectId = await getGcpProjectId(auth);
+  const projectId = await resolveProjectId(auth);
   if (!projectId) {
     logger.warn(GCP_PROJECT_ERROR_MESSAGE);
     return {};
@@ -133,6 +155,30 @@ export async function getGcpExporters(
   };
 }
 
-export function getGcpResource(): Resource {
-  return detectResources({detectors: [gcpDetector]});
+/**
+ * Returns the OTel resource to install alongside the GCP exporters.
+ *
+ * Attributes detected later override those detected earlier:
+ * 1. `gcp.project_id` from `projectId`. The Telemetry API routes ingested
+ *    metrics on this attribute; without it the export has no destination
+ *    project, so pass the value {@link getGcpProjectId} resolves.
+ * 2. A generated `service.instance.id`, which supplies the `instance` label
+ *    Managed Service for Prometheus requires and rejects points without.
+ * 3. `OTEL_SERVICE_NAME` / `OTEL_RESOURCE_ATTRIBUTES`. This is the only way to
+ *    supply `location` off Google Cloud, where no detector can infer it.
+ * 4. The GCP detector, which fills in the platform, region and zone when ADK
+ *    runs on GCE, GKE or Cloud Run.
+ *
+ * @param projectId project to attribute the telemetry to.
+ */
+export function getGcpResource(projectId?: string): Resource {
+  const detected = detectResources({
+    detectors: [serviceInstanceIdDetector, envDetector, gcpDetector],
+  });
+  if (!projectId) {
+    return detected;
+  }
+  return resourceFromAttributes({
+    [GCP_PROJECT_ID_ATTRIBUTE]: projectId,
+  }).merge(detected);
 }
