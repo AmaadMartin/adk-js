@@ -94,6 +94,10 @@ function randomIdForTestingOnly(): string {
   return (Math.random() * 100).toString();
 }
 
+function callFor(tool: BaseTool): FunctionCall {
+  return {id: randomIdForTestingOnly(), name: tool.name, args: {}};
+}
+
 describe('handleFunctionCallList', () => {
   let invocationContext: InvocationContext;
   let pluginManager: PluginManager;
@@ -161,6 +165,106 @@ describe('handleFunctionCallList', () => {
     expect(definedEvent.content!.parts![0].functionResponse!.response).toEqual({
       results: ['item1', 'item2'],
     });
+  });
+
+  it('should emit no event when a long running tool returns nullish', async () => {
+    const silentLongRunningTool = new FunctionTool({
+      name: 'silentLongRunningTool',
+      description: 'long running tool returning nullish',
+      parameters: z.object({}),
+      execute: async () => null,
+      isLongRunning: true,
+    });
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(silentLongRunningTool)],
+      toolsDict: {silentLongRunningTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event).toBeNull();
+  });
+
+  it('should emit a response part only for the long running tool that returned a non-empty object', async () => {
+    const emptyObjectLongRunningTool = new FunctionTool({
+      name: 'emptyObjectLongRunningTool',
+      description: 'long running tool returning an empty object',
+      parameters: z.object({}),
+      execute: async () => ({}),
+      isLongRunning: true,
+    });
+    const pendingLongRunningTool = new FunctionTool({
+      name: 'pendingLongRunningTool',
+      description: 'long running tool returning a pending status',
+      parameters: z.object({}),
+      execute: async () => ({status: 'pending'}),
+      isLongRunning: true,
+    });
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [
+        callFor(emptyObjectLongRunningTool),
+        callFor(pendingLongRunningTool),
+      ],
+      toolsDict: {emptyObjectLongRunningTool, pendingLongRunningTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event?.content?.parts).toEqual([
+      expect.objectContaining({
+        functionResponse: expect.objectContaining({
+          name: 'pendingLongRunningTool',
+          response: {status: 'pending'},
+        }),
+      }),
+    ]);
+  });
+
+  it('should still emit an event when a regular tool returns an empty object', async () => {
+    const emptyObjectTool = new FunctionTool({
+      name: 'emptyObjectTool',
+      description: 'tool returning an empty object',
+      parameters: z.object({}),
+      execute: async () => ({}),
+    });
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(emptyObjectTool)],
+      toolsDict: {emptyObjectTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event?.content?.parts?.[0].functionResponse?.response).toStrictEqual(
+      {},
+    );
+  });
+
+  it('should still emit an event when a long running tool returns an empty array', async () => {
+    const emptyArrayLongRunningTool = new FunctionTool({
+      name: 'emptyArrayLongRunningTool',
+      description: 'long running tool returning an empty array',
+      parameters: z.object({}),
+      execute: async () => [],
+      isLongRunning: true,
+    });
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(emptyArrayLongRunningTool)],
+      toolsDict: {emptyArrayLongRunningTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event?.content?.parts?.[0].functionResponse?.response).toStrictEqual(
+      {results: []},
+    );
   });
 
   it('should execute beforeToolCallback and return its result', async () => {

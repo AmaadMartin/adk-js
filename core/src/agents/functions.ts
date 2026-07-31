@@ -5,7 +5,7 @@
  */
 
 import {Content, createUserContent, FunctionCall, Part} from '@google/genai';
-import {isEmpty} from 'lodash-es';
+import {isEmpty, isPlainObject} from 'lodash-es';
 
 import {InvocationContext} from '../agents/invocation_context.js';
 import {
@@ -274,6 +274,19 @@ export async function handleFunctionCallsAsync({
 }
 
 /**
+ * Whether a value is a plain object carrying no entries.
+ *
+ * Mirrors the object half of adk-python's `not function_response` check in
+ * `src/google/adk/flows/llm_flows/functions.py`, where an empty dict defers the
+ * function response event of a long running tool. The plain-object test keeps
+ * an empty array out, because an array is a result here and is wrapped as
+ * `{results: []}`.
+ */
+function isEmptyPlainObject(value: unknown): boolean {
+  return isPlainObject(value) && isEmpty(value);
+}
+
+/**
  * The underlying implementation of handleFunctionCalls, but takes a list of
  * function calls instead of an event.
  * This is also used by llm_agent execution flow in preprocessing.
@@ -413,8 +426,12 @@ export async function handleFunctionCallList({
     }
 
     // TODO - b/425992518: state event polluting runtime, consider fix.
-    // Allow long running function to return None as response.
-    if (tool.isLongRunning && !functionResponse) {
+    // Allow long running function to return None as response. An empty object
+    // counts as no response too, matching adk-python.
+    if (
+      tool.isLongRunning &&
+      (!functionResponse || isEmptyPlainObject(functionResponse))
+    ) {
       continue;
     }
 
