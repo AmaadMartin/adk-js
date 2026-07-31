@@ -409,7 +409,7 @@ describe('DatabaseSessionService', () => {
       await dbService.close();
     });
 
-    it('closes the connection and is safe to call twice', async () => {
+    it('is safe to call twice', async () => {
       await dbService.init();
       await dbService.close();
 
