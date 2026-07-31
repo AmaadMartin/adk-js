@@ -17,17 +17,15 @@ import {defineConfig} from 'vitest/config';
  * but a cold, network-bound install has been measured at ~70s, so 120s covers
  * the worst case. Trade-off: a genuinely stuck hook takes this long to surface.
  *
- * This is the only definition of that budget. Suites must not pass a timeout
- * argument to an install or teardown hook: it shadows this floor rather than
- * raising it, and a per-test `it()` budget is not a hook budget.
+ * An install or teardown hook must not pass its own timeout argument, which
+ * shadows this floor rather than raising it.
  */
 const INTEGRATION_HOOK_TIMEOUT_MS = 120000;
 
 /**
  * Test budget (ms) for the `integration` project: matches the largest per-file
- * timeout in the repo. A per-test `it()` timeout still overrides this, and
- * unlike the hook budget above it is expected to: how long a given assertion
- * may take is a property of that test, not repo-wide policy.
+ * timeout in the repo. A per-test `it()` timeout may still override this; a
+ * hook timeout must not (see above).
  */
 const INTEGRATION_TEST_TIMEOUT_MS = 60000;
 
