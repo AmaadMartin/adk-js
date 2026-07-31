@@ -344,4 +344,16 @@ describe('getGcpProjectId', () => {
 
     await expect(getGcpProjectId()).resolves.toBeUndefined();
   });
+
+  it('prefers injected credentials over the ambient default', async () => {
+    vi.mocked(GoogleAuth.prototype.getProjectId).mockImplementation(() =>
+      Promise.resolve('ambient-project'),
+    );
+    const injected = new GoogleAuth();
+    vi.spyOn(injected, 'getProjectId').mockImplementation(() =>
+      Promise.resolve('injected-project'),
+    );
+
+    await expect(getGcpProjectId(injected)).resolves.toBe('injected-project');
+  });
 });
