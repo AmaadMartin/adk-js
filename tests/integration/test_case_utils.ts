@@ -13,11 +13,7 @@ import {
   isLlmAgent,
 } from '@google/adk';
 import type {Candidate, UsageMetadata} from '@google/genai';
-import {
-  createUserContent,
-  GenerateContentResponse,
-  GoogleGenAI,
-} from '@google/genai';
+import {createUserContent, GenerateContentResponse} from '@google/genai';
 import {ChildProcessWithoutNullStreams} from 'node:child_process';
 import {expect} from 'vitest';
 
@@ -121,8 +117,8 @@ export class GeminiWithMockResponses extends Gemini {
     );
   }
 
-  override get apiClient(): GoogleGenAI {
-    return this._mockClient as unknown as GoogleGenAI;
+  override get apiClient(): Gemini['apiClient'] {
+    return this._mockClient as unknown as Gemini['apiClient'];
   }
 }
 
