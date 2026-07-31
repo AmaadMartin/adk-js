@@ -4,14 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {exec, spawn} from 'node:child_process';
-import * as fs from 'node:fs/promises';
+import {spawn} from 'node:child_process';
 import * as path from 'node:path';
-import {promisify} from 'node:util';
 import {afterAll, beforeAll, describe, expect, it} from 'vitest';
-import {sendInput} from '../test_case_utils.js';
+import {
+  cleanupFixtureDeps,
+  installFixtureDeps,
+  sendInput,
+} from '../test_case_utils.js';
 
-const execAsync = promisify(exec);
 const dirname = process.cwd();
 const TEST_EXECUTION_TIMEOUT = 40000;
 
@@ -25,7 +26,7 @@ describe.each(['__dirname', '__filename', 'import_meta_url'])(
     );
 
     beforeAll(async () => {
-      await execAsync('npm install', {cwd: projectPath});
+      await installFixtureDeps(projectPath);
     });
 
     it(
@@ -47,15 +48,7 @@ describe.each(['__dirname', '__filename', 'import_meta_url'])(
     );
 
     afterAll(async () => {
-      await fs
-        .rm(path.join(projectPath, 'node_modules'), {
-          recursive: true,
-          force: true,
-        })
-        .catch(() => {});
-      await fs
-        .unlink(path.join(projectPath, 'package-lock.json'))
-        .catch(() => {});
+      await cleanupFixtureDeps(projectPath);
     });
   },
 );
