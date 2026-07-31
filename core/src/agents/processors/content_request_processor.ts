@@ -21,7 +21,7 @@ import {
  *
  * Events annulled by a rewind are dropped first, so rewound history is never
  * sent to the model. This is the same filter the context compactors apply,
- * which keeps the two in agreement (see {@link applyRewinds}).
+ * which keeps the two in agreement.
  *
  * When a {@link CompactedEvent} exists in the session, only the most recent
  * compacted event and the raw events that follow it are included, eliding

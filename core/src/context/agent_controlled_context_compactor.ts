@@ -16,9 +16,9 @@ import {BaseSummarizer} from './summarizers/base_summarizer.js';
  * A context compactor that triggers compaction when the agent explicitly
  * requests it via the `ConsolidateContextTool`.
  *
- * Events annulled by a rewind are excluded from the summarizer input (see
- * {@link applyRewinds}); otherwise rewound content would leak back into future
- * prompts through the summary.
+ * Events annulled by a rewind are excluded from the summarizer input;
+ * otherwise rewound content would leak back into future prompts through the
+ * summary.
  */
 export class AgentControlledContextCompactor implements BaseContextCompactor {
   readonly trigger = ContextCompactionTrigger.AgentControlled;

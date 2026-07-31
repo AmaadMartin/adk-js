@@ -42,8 +42,8 @@ export interface TokenBasedContextCompactorOptions {
  * history exceeds the token threshold.
  *
  * Events annulled by a rewind are excluded from both the threshold decision
- * and the summarizer input (see {@link applyRewinds}); otherwise rewound
- * content would leak back into future prompts through the summary.
+ * and the summarizer input; otherwise rewound content would leak back into
+ * future prompts through the summary.
  */
 export class TokenBasedContextCompactor implements BaseContextCompactor {
   private readonly tokenThreshold: number;
