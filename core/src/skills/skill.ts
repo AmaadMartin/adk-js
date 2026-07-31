@@ -18,14 +18,12 @@ export const FrontmatterSchema = z.preprocess(
   (data) => {
     if (typeof data === 'object' && data !== null) {
       const obj = data as Record<string, unknown>;
-      if (!('allowedTools' in obj)) {
-        const alias = ALLOWED_TOOLS_ALIASES.find((key) => key in obj);
-        if (alias) {
-          return {
-            ...obj,
-            allowedTools: obj[alias],
-          };
-        }
+      const alias = ALLOWED_TOOLS_ALIASES.find((key) => key in obj);
+      if (alias && !('allowedTools' in obj)) {
+        return {
+          ...obj,
+          allowedTools: obj[alias],
+        };
       }
     }
     return data;
@@ -43,6 +41,9 @@ export const FrontmatterSchema = z.preprocess(
       license: z.string().optional(),
       compatibility: z.string().max(500).optional(),
       'allowed-tools': z.string().optional(),
+      // Every accepted spelling is funnelled here by the preprocessor, so this
+      // is what type-checks them all.
+      allowedTools: z.string().optional(),
       metadata: z
         .record(z.string(), z.any())
         .default({})

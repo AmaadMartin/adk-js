@@ -22,9 +22,7 @@ import {
  * and camelCase spellings of a field all compare equal.
  */
 function normalizeKey(key: string): string {
-  return key.replace(/[-_]([a-z0-9])/g, (_match, char: string) =>
-    char.toUpperCase(),
-  );
+  return key.replace(/[-_][a-z0-9]/g, (m) => m[1].toUpperCase());
 }
 
 const ALLOWED_FRONTMATTER_KEYS = new Set(

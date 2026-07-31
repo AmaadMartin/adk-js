@@ -95,6 +95,17 @@ describe('skill', () => {
       }
     });
 
+    it.each(['allowed-tools', 'allowed_tools', 'allowedTools'])(
+      'fails on non-string %s',
+      (key) => {
+        const result = FrontmatterSchema.safeParse({
+          ...validFrontmatter,
+          [key]: ['tool1', 'tool2'],
+        });
+        expect(result.success).toBe(false);
+      },
+    );
+
     it('preserves allowedTools if provided directly', () => {
       const result = FrontmatterSchema.safeParse({
         ...validFrontmatter,
