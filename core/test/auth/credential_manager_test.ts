@@ -327,10 +327,12 @@ describe('CredentialManager', () => {
       };
       const credentialService = new InMemoryCredentialService();
       const context = createToolContext(credentialService);
-      // `expires_in: 1` makes the exchanged token immediately due for refresh,
-      // so a second fetch would happen if the refresher were consulted.
+      // `expires_in: 1` makes the exchanged token immediately due for refresh
+      // and the refresh token makes a refresh possible, so a second fetch
+      // would happen if the refresher were consulted after an exchange.
       const fetchSpy = stubTokenEndpoint({
         access_token: 'exchanged-access-token',
+        refresh_token: 'test-refresh-token',
         expires_in: 1,
       });
 
