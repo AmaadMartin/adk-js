@@ -8,6 +8,7 @@ import {InvocationContext} from '../agents/invocation_context.js';
 import {getContents} from '../agents/processors/content_processor_utils.js';
 import {isCompactedEvent} from '../events/compacted_event.js';
 import {Event} from '../events/event.js';
+import {applyRewinds} from '../events/rewind_events.js';
 import {BaseContextCompactor} from './base_context_compactor.js';
 import {
   calculateRetainStartIndex,
@@ -39,6 +40,10 @@ export interface TokenBasedContextCompactorOptions {
  * A context compactor that uses token count to determine when to compact events.
  * Oldest events are summarized into a CompactedEvent when the session
  * history exceeds the token threshold.
+ *
+ * Events annulled by a rewind are excluded from both the threshold decision
+ * and the summarizer input (see {@link applyRewinds}); otherwise rewound
+ * content would leak back into future prompts through the summary.
  */
 export class TokenBasedContextCompactor implements BaseContextCompactor {
   private readonly tokenThreshold: number;
@@ -54,7 +59,7 @@ export class TokenBasedContextCompactor implements BaseContextCompactor {
   shouldCompact(
     invocationContext: InvocationContext,
   ): boolean | Promise<boolean> {
-    const events = invocationContext.session.events;
+    const events = applyRewinds(invocationContext.session.events);
     const activeEvents = getActiveEvents(events);
     const rawEvents = activeEvents.filter((e) => !isCompactedEvent(e));
 
@@ -82,7 +87,7 @@ export class TokenBasedContextCompactor implements BaseContextCompactor {
   }
 
   async compact(invocationContext: InvocationContext): Promise<void> {
-    const events = invocationContext.session.events;
+    const events = applyRewinds(invocationContext.session.events);
     const activeEvents = getActiveEvents(events);
     const rawEvents = activeEvents.filter((e) => !isCompactedEvent(e));
 

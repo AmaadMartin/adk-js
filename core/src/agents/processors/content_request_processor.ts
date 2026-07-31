@@ -6,6 +6,7 @@
 
 import {getActiveEvents} from '../../context/compaction_utils.js';
 import {Event} from '../../events/event.js';
+import {applyRewinds} from '../../events/rewind_events.js';
 import {LlmRequest} from '../../models/llm_request.js';
 import {InvocationContext} from '../invocation_context.js';
 import {isLlmAgent} from '../llm_agent.js';
@@ -17,6 +18,10 @@ import {
 
 /**
  * Populates {@link LlmRequest.contents} from the session event history.
+ *
+ * Events annulled by a rewind are dropped first, so rewound history is never
+ * sent to the model. This is the same filter the context compactors apply,
+ * which keeps the two in agreement (see {@link applyRewinds}).
  *
  * When a {@link CompactedEvent} exists in the session, only the most recent
  * compacted event and the raw events that follow it are included, eliding
@@ -42,7 +47,11 @@ export class ContentRequestProcessor implements BaseLlmRequestProcessor {
       return;
     }
 
-    const events = getActiveEvents(invocationContext.session.events);
+    // Rewinds are resolved against the raw history: a marker sitting behind a
+    // compaction boundary would otherwise be elided and the rewind forgotten.
+    const events = getActiveEvents(
+      applyRewinds(invocationContext.session.events),
+    );
 
     if (agent.includeContents === 'default') {
       // Include full conversation history

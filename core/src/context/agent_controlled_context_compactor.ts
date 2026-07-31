@@ -6,6 +6,7 @@
 
 import {InvocationContext} from '../agents/invocation_context.js';
 import {createEvent} from '../events/event.js';
+import {applyRewinds} from '../events/rewind_events.js';
 import {ContextCompactionTrigger} from '../plugins/base_plugin.js';
 import {BaseContextCompactor} from './base_context_compactor.js';
 import {getActiveEvents} from './compaction_utils.js';
@@ -14,6 +15,10 @@ import {BaseSummarizer} from './summarizers/base_summarizer.js';
 /**
  * A context compactor that triggers compaction when the agent explicitly
  * requests it via the `ConsolidateContextTool`.
+ *
+ * Events annulled by a rewind are excluded from the summarizer input (see
+ * {@link applyRewinds}); otherwise rewound content would leak back into future
+ * prompts through the summary.
  */
 export class AgentControlledContextCompactor implements BaseContextCompactor {
   readonly trigger = ContextCompactionTrigger.AgentControlled;
@@ -28,7 +33,7 @@ export class AgentControlledContextCompactor implements BaseContextCompactor {
   }
 
   async compact(invocationContext: InvocationContext): Promise<void> {
-    const events = invocationContext.session.events;
+    const events = applyRewinds(invocationContext.session.events);
     const activeEvents = getActiveEvents(events);
 
     // Find the consolidate_context tool call.
