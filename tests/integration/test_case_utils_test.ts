@@ -153,6 +153,8 @@ describe('BaseTestServer.startProcess', () => {
 
     const logged = consoleErrorSpy.mock.calls.flat().join('\n');
     expect(logged).not.toMatch(/exited with code/);
+    // A clean shutdown must not reach the premature-exit diagnostic either.
+    expect(logged).toBe('');
   });
 
   it('ignores URLs printed after start-up', async () => {
