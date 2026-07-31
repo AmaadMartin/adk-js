@@ -4,8 +4,22 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {readFileSync} from 'node:fs';
 import path from 'path';
 import {defineConfig} from 'vitest/config';
+
+const {workspaces} = JSON.parse(
+  readFileSync(path.resolve(__dirname, 'package.json'), 'utf8'),
+) as {workspaces: string[]};
+
+/**
+ * Coverage denominator, derived from the npm `workspaces` declaration so that a
+ * newly declared workspace cannot silently escape coverage measurement the way
+ * a hand-maintained list allows.
+ */
+const coverageInclude = workspaces.map(
+  (workspace) => `${workspace}/src/**/*.ts`,
+);
 
 export default defineConfig({
   test: {
@@ -106,11 +120,7 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json'],
-      include: [
-        'core/src/**/*.ts',
-        'dev/src/**/*.ts',
-        'integrations/src/**/*.ts',
-      ],
+      include: coverageInclude,
       // Those values are from the npm run test:coverage command run on 2026-02-06
       // and are used to ensure that the test coverage does not decrease.
       // Once the test coverage increases, these values should be updated (manually).
