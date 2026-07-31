@@ -34,15 +34,18 @@ export class OpenAPIToolset extends BaseToolset {
   ) {
     super(options.toolFilter || [], options.prefix);
 
-    let spec = options.specDict;
+    let spec: OpenAPIV3.Document | Record<string, unknown> | undefined =
+      options.specDict;
     if (!spec && options.specStr) {
       if (
         options.specType === 'yaml' ||
         (!options.specType && options.specStr.trim().startsWith('---'))
       ) {
-        spec = yaml.load(options.specStr) as OpenAPIV3.Document;
+        // `js-yaml` types `load()` as `unknown`; a parsed spec is unvalidated,
+        // which is exactly what `OpenApiSpecParser.parse()` accepts.
+        spec = yaml.load(options.specStr) as Record<string, unknown>;
       } else {
-        spec = JSON.parse(options.specStr) as OpenAPIV3.Document;
+        spec = JSON.parse(options.specStr);
       }
     }
 

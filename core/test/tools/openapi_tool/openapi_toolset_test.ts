@@ -110,6 +110,87 @@ describe('OpenAPIToolset', () => {
     expect(tools[1].name).toBe('create_user');
   });
 
+  // A spec whose schema `type` values OpenAPI 3.0 does not admit, as emitted by
+  // Integration Connectors and similar producers. `specDict` is typed
+  // `OpenAPIV3.Document`, so such a spec can only reach the toolset as a
+  // string; these two tests cover the JSON and YAML branches that hand the
+  // parsed result to OpenApiSpecParser.parse().
+  const nonConformingPaths = {
+    '/items': {
+      post: {
+        operationId: 'createItem',
+        requestBody: {
+          content: {
+            'application/json': {
+              schema: {
+                type: 'OBJECT',
+                properties: {name: {type: 'STRING'}, weird: {type: 'Any'}},
+              },
+            },
+          },
+        },
+        responses: {},
+      },
+    },
+  };
+
+  // 'OBJECT'/'STRING' normalized to lowercase, 'Any' dropped entirely.
+  const sanitizedDeclaration = {
+    name: 'create_item',
+    description: '',
+    parameters: {
+      type: 'object',
+      properties: {name: {type: 'string'}, weird: {}},
+      title: 'createItem_Arguments',
+    },
+  };
+
+  it('should sanitize a non-conforming JSON spec string', async () => {
+    const toolset = new OpenAPIToolset({
+      specStr: JSON.stringify({
+        openapi: '3.0.0',
+        info: {title: 'Connectors API', version: '1.0.0'},
+        paths: nonConformingPaths,
+      }),
+      specType: 'json',
+    });
+    const tools = await toolset.getTools();
+
+    expect(tools.map((tool) => tool.name)).toEqual(['create_item']);
+    expect(tools[0]._getDeclaration()).toEqual(sanitizedDeclaration);
+  });
+
+  it('should sanitize a non-conforming YAML spec string', async () => {
+    const toolset = new OpenAPIToolset({
+      specStr: `
+openapi: '3.0.0'
+info:
+  title: Connectors API
+  version: '1.0.0'
+paths:
+  /items:
+    post:
+      operationId: createItem
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: OBJECT
+              properties:
+                name:
+                  type: STRING
+                weird:
+                  type: Any
+      responses: {}
+`,
+      specType: 'yaml',
+    });
+    const tools = await toolset.getTools();
+
+    expect(tools.map((tool) => tool.name)).toEqual(['create_item']);
+    expect(tools[0]._getDeclaration()).toEqual(sanitizedDeclaration);
+  });
+
   it('should filter tools', async () => {
     const toolset = new OpenAPIToolset({
       specDict: mockSpec,
