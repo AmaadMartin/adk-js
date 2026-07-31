@@ -4,9 +4,6 @@
   "description": "Google ADK JS",
   "author": "Google",
   "license": "Apache-2.0",
-  "engines": {
-    "node": ">=22.13.0"
-  },
   "type": "module",
   "repository": {
     "type": "git",
