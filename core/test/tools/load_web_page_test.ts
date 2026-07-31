@@ -8,6 +8,7 @@ import {lookup} from 'node:dns/promises';
 
 import {FunctionTool, LOAD_WEB_PAGE, loadWebPage} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
+import {createToolContext} from '../testing_utils.js';
 
 vi.mock('node:dns/promises', () => ({
   lookup: vi.fn(),
@@ -368,7 +369,7 @@ describe('LOAD_WEB_PAGE tool', () => {
   it('runs through the tool interface and returns the parity failure string', async () => {
     const result = await LOAD_WEB_PAGE.runAsync({
       args: {url: 'file:///etc/passwd'},
-      toolContext: {} as never,
+      toolContext: createToolContext(),
     });
 
     expect(result).toBe('Failed to fetch url: file:///etc/passwd');

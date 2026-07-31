@@ -4,13 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   AgentRegistrySingleMCPToolset,
   GCP_MCP_SERVER_DESTINATION_ID,
-} from '../../src/index.js';
-import {StreamableHTTPConnectionParams} from '../../src/tools/mcp/mcp_session_manager.js';
+  StreamableHTTPConnectionParams,
+} from '@google/adk';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {logger} from '../../src/utils/logger.js';
+import {createReadonlyContext} from '../testing_utils.js';
 
 const mockListTools = vi.fn().mockResolvedValue({
   tools: [
@@ -185,7 +186,7 @@ describe('AgentRegistrySingleMCPToolset', () => {
 
     it('passes context to headerProvider when one is provided', async () => {
       const headerProvider = vi.fn().mockResolvedValue({});
-      const context = {} as never;
+      const context = createReadonlyContext();
       const toolset = new AgentRegistrySingleMCPToolset({
         connectionParams: BASE_PARAMS,
         headerProvider,

@@ -6,6 +6,7 @@
 
 import {LongRunningFunctionTool} from '@google/adk';
 import {describe, expect, it} from 'vitest';
+import {createToolContext} from '../testing_utils.js';
 
 const LONG_RUNNING_INSTRUCTION = `\n\nNOTE: This is a long-running operation. Do not call this tool again if it has already returned some intermediate or pending status.`;
 
@@ -64,7 +65,7 @@ describe('LongRunningFunctionTool', () => {
 
     const result = await tool.runAsync({
       args: {},
-      toolContext: {} as never,
+      toolContext: createToolContext(),
     });
 
     expect(result).toBe(42);
