@@ -9,7 +9,9 @@ import {
   Context,
   InvocationContext,
   RunSkillScriptTool,
+  SessionArtifactService,
   Skill,
+  SkillScriptResponse,
   SkillToolset,
   UnsafeLocalCodeExecutor,
 } from '@google/adk';
@@ -17,6 +19,10 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {describe, expect, it} from 'vitest';
+import {
+  loadArtifactText,
+  SessionScopedInMemoryArtifactService,
+} from './artifact_service_test_utils.js';
 
 const IS_WINDOWS = os.platform() === 'win32';
 const IS_UNIX = os.platform() === 'linux' || os.platform() === 'darwin';
@@ -28,13 +34,24 @@ const IS_UNIX = os.platform() === 'linux' || os.platform() === 'darwin';
 const TEST_EXECUTION_TIMEOUT = 40000;
 
 describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
-  function createMockContext(agentName = 'test-agent') {
+  function createMockContext(
+    agentName = 'test-agent',
+    artifactService?: SessionArtifactService,
+  ) {
     return new Context({
       invocationContext: {
         session: {state: {}},
         agent: {name: agentName},
+        artifactService,
       } as unknown as InvocationContext,
     });
+  }
+
+  async function cwdContains(filename: string): Promise<boolean> {
+    return fs
+      .access(path.join(process.cwd(), filename))
+      .then(() => true)
+      .catch(() => false);
   }
 
   const testSkill: Skill = {
@@ -280,51 +297,66 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
     TEST_EXECUTION_TIMEOUT,
   );
 
-  it('creates files in process.cwd returned from execution', async () => {
+  it('saves script output files to the artifact service', async () => {
     const executor = new UnsafeLocalCodeExecutor();
     const toolset = new SkillToolset([testSkill], {codeExecutor: executor});
     const tool = new RunSkillScriptTool(toolset);
+    const artifactService = new SessionScopedInMemoryArtifactService();
+    const toolContext = createMockContext('test-agent', artifactService);
 
     const result = (await tool.runAsync({
       args: {
         skill_name: 'test-skill',
         script_path: 'scripts/create_file.js',
       },
-      toolContext: createMockContext(),
-    })) as CodeExecutionResult;
+      toolContext,
+    })) as SkillScriptResponse;
 
-    expect(result).toBeDefined();
-    expect(result.outputFiles).toBeDefined();
-    expect(result.outputFiles?.length).toBeGreaterThan(0);
-
-    const outputFile = result.outputFiles?.find(
-      (f) => f.name === 'output_from_script.txt',
-    );
-    expect(outputFile).toBeDefined();
-
-    // Verify file was created in process.cwd()
-    const fullPath = path.join(process.cwd(), 'output_from_script.txt');
-    const exists = await fs
-      .access(fullPath)
-      .then(() => true)
-      .catch(() => false);
-    expect(exists).toBe(true);
-
-    const content = await fs.readFile(fullPath, 'utf-8');
-    expect(content).toBe('hello from script file');
-
-    // Clean up
-    await fs.unlink(fullPath);
+    expect(result.outputFiles).toEqual([
+      {name: 'output_from_script.txt', mimeType: 'text/plain'},
+    ]);
+    expect(result.warning).toBeUndefined();
+    expect(
+      await loadArtifactText(artifactService, 'output_from_script.txt'),
+    ).toBe('hello from script file');
+    expect(toolContext.actions.artifactDelta).toEqual({
+      'output_from_script.txt': 0,
+    });
+    expect(await cwdContains('output_from_script.txt')).toBe(false);
   });
 
-  it('handles file collisions by appending a numeric suffix', async () => {
+  it('creates a new artifact version instead of a renamed file on repeat runs', async () => {
     const executor = new UnsafeLocalCodeExecutor();
     const toolset = new SkillToolset([testSkill], {codeExecutor: executor});
     const tool = new RunSkillScriptTool(toolset);
+    const artifactService = new SessionScopedInMemoryArtifactService();
+    const args = {
+      skill_name: 'test-skill',
+      script_path: 'scripts/create_file.js',
+    };
 
-    // Pre-create the target file to force a collision
-    const targetFile = path.join(process.cwd(), 'output_from_script.txt');
-    await fs.writeFile(targetFile, 'existing content');
+    await tool.runAsync({
+      args,
+      toolContext: createMockContext('test-agent', artifactService),
+    });
+    const result = (await tool.runAsync({
+      args,
+      toolContext: createMockContext('test-agent', artifactService),
+    })) as SkillScriptResponse;
+
+    expect(result.outputFiles).toEqual([
+      {name: 'output_from_script.txt', mimeType: 'text/plain'},
+    ]);
+    expect(
+      await artifactService.listVersions('output_from_script.txt'),
+    ).toEqual([0, 1]);
+    expect(await cwdContains('output_from_script_2.txt')).toBe(false);
+  });
+
+  it('reports output files with a warning when no artifact service is configured', async () => {
+    const executor = new UnsafeLocalCodeExecutor();
+    const toolset = new SkillToolset([testSkill], {codeExecutor: executor});
+    const tool = new RunSkillScriptTool(toolset);
 
     const result = (await tool.runAsync({
       args: {
@@ -332,29 +364,12 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
         script_path: 'scripts/create_file.js',
       },
       toolContext: createMockContext(),
-    })) as CodeExecutionResult;
+    })) as SkillScriptResponse;
 
-    expect(result).toBeDefined();
-    expect(result.outputFiles).toBeDefined();
-
-    const outputFile = result.outputFiles?.find(
-      (f) => f.name === 'output_from_script_2.txt',
-    );
-    expect(outputFile).toBeDefined();
-
-    // Verify collision file was created in process.cwd()
-    const fullPath = path.join(process.cwd(), 'output_from_script_2.txt');
-    const exists = await fs
-      .access(fullPath)
-      .then(() => true)
-      .catch(() => false);
-    expect(exists).toBe(true);
-
-    const content = await fs.readFile(fullPath, 'utf-8');
-    expect(content).toBe('hello from script file');
-
-    // Clean up both files
-    await fs.unlink(targetFile);
-    await fs.unlink(fullPath);
+    expect(result.outputFiles).toEqual([
+      {name: 'output_from_script.txt', mimeType: 'text/plain'},
+    ]);
+    expect(result.warning).toMatch(/No artifact service is configured/);
+    expect(await cwdContains('output_from_script.txt')).toBe(false);
   });
 });
