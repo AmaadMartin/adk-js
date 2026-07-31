@@ -54,6 +54,15 @@ const IGNORED_EXTENSIONS = new Set([
 ]);
 
 /**
+ * Matches the leading YAML frontmatter block: an opening `---` line, the
+ * frontmatter text (group 1, absent when the block holds no lines), and a
+ * closing `---` line. Both delimiters must occupy a line of their own, so a
+ * `---` inside a frontmatter value does not close the block.
+ */
+const FRONTMATTER_BLOCK_PATTERN =
+  /^---[ \t]*\r?\n([\s\S]*?\r?\n)?---[ \t]*(?:\r?\n|$)/;
+
+/**
  * Recursively loads files from a directory into a dictionary.
  *
  * @param directoryPath - The absolute or relative path of the directory to load.
@@ -121,17 +130,13 @@ function parseFrontmatterYaml(content: string): {
     throw new Error('SKILL.md must start with YAML frontmatter (---)');
   }
 
-  // Split into at least 3 parts: empty before ---, frontmatter, body
-  const parts = content.split('---');
-  if (parts.length < 3) {
+  const match = FRONTMATTER_BLOCK_PATTERN.exec(content);
+  if (!match) {
     throw new Error('SKILL.md frontmatter not properly closed with ---');
   }
 
-  const frontmatterStr = parts[1];
-  const body = parts
-    .filter((_, i) => i >= 2)
-    .join('---')
-    .trim();
+  const frontmatterStr = match[1] ?? '';
+  const body = content.slice(match[0].length).trim();
 
   try {
     const parsed = yaml.load(frontmatterStr);

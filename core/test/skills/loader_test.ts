@@ -119,6 +119,91 @@ ${body}
       const result = parseSkillMdContent(content);
       expect(result.body).toBe(body);
     });
+
+    it('keeps a quoted frontmatter value containing ---', () => {
+      const content = `---
+name: test-skill
+description: "a --- b"
+---
+Body`;
+      const result = parseSkillMdContent(content);
+      expect(result.frontmatter.name).toBe('test-skill');
+      expect(result.frontmatter.description).toBe('a --- b');
+      expect(result.body).toBe('Body');
+    });
+
+    it('keeps a frontmatter value with --- mid-line', () => {
+      const content = `---
+name: test-skill
+description: a --- b
+license: MIT
+---
+Body`;
+      const result = parseSkillMdContent(content);
+      expect(result.frontmatter.description).toBe('a --- b');
+      expect(result.frontmatter.license).toBe('MIT');
+      expect(result.body).toBe('Body');
+    });
+
+    it('keeps a frontmatter value whose line ends with ---', () => {
+      const content = `---
+name: test-skill
+description: a ---
+---
+Body`;
+      const result = parseSkillMdContent(content);
+      expect(result.frontmatter.description).toBe('a ---');
+      expect(result.body).toBe('Body');
+    });
+
+    it('parses frontmatter with CRLF line endings', () => {
+      const content =
+        '---\r\nname: test-skill\r\ndescription: "a --- b"\r\n---\r\nBody';
+      const result = parseSkillMdContent(content);
+      expect(result.frontmatter.description).toBe('a --- b');
+      expect(result.body).toBe('Body');
+    });
+
+    it('accepts a closing delimiter with trailing whitespace', () => {
+      const content = '---\nname: test-skill\ndescription: d\n---   \nBody';
+      const result = parseSkillMdContent(content);
+      expect(result.frontmatter.description).toBe('d');
+      expect(result.body).toBe('Body');
+    });
+
+    it('throws when the only --- after the frontmatter is inside a value', () => {
+      const content = `---
+name: test-skill
+description: a --- b
+Body`;
+      expect(() => parseSkillMdContent(content)).toThrow(
+        'SKILL.md frontmatter not properly closed with ---',
+      );
+    });
+
+    it('preserves a --- horizontal rule in the body', () => {
+      const body = `intro
+
+---
+
+more`;
+      const content = `---
+name: test-skill
+description: A test skill
+---
+${body}`;
+      const result = parseSkillMdContent(content);
+      expect(result.body).toBe(body);
+    });
+
+    it('still rejects a frontmatter block with no content', () => {
+      const content = `---
+---
+Body`;
+      expect(() => parseSkillMdContent(content)).toThrow(
+        'Invalid YAML in frontmatter: SKILL.md frontmatter must be a YAML mapping',
+      );
+    });
   });
 
   describe('loadSkillFromDir', () => {
@@ -242,6 +327,27 @@ Instructions`,
       );
       expect(skill.resources?.assets?.['logo.png']).toBe('binary content');
       expect(skill.resources?.scripts?.['run.sh']).toEqual({src: 'echo hello'});
+
+      await fs.rm(tempDir, {recursive: true, force: true});
+    });
+
+    it('loads a skill whose description contains ---', async () => {
+      tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-skill-test-'));
+      const skillDir = path.join(tempDir, 'test-skill');
+      await fs.mkdir(skillDir);
+
+      await fs.writeFile(
+        path.join(skillDir, 'SKILL.md'),
+        `---
+name: test-skill
+description: "run with -- --- to reset"
+---
+Instructions content`,
+      );
+
+      const skill = await loadSkillFromDir(skillDir);
+      expect(skill.frontmatter.description).toBe('run with -- --- to reset');
+      expect(skill.instructions).toBe('Instructions content');
 
       await fs.rm(tempDir, {recursive: true, force: true});
     });
@@ -663,6 +769,17 @@ Instruction body`;
       expect(() => loadSkillFromZipBuffer(zipBuffer)).toThrow(
         'Invalid YAML in frontmatter: SKILL.md frontmatter must be a YAML mapping',
       );
+    });
+
+    it('loads a zipped skill whose description contains ---', () => {
+      const zipBuffer = createZipWithSkillMd(
+        '---\nname: test-skill\ndescription: "a --- b"\n---\nBody',
+      );
+
+      const skill = loadSkillFromZipBuffer(zipBuffer);
+
+      expect(skill.frontmatter.description).toBe('a --- b');
+      expect(skill.instructions).toBe('Body');
     });
 
     it('still reports a missing SKILL.md in a benign archive', () => {
