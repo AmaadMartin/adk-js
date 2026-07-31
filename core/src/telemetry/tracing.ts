@@ -397,14 +397,23 @@ export function runAsyncGeneratorWithOtelContext<TThis, T>(
 /**
  * Determines whether to add request/response content to spans.
  *
+ * Reads `ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS`, ignoring surrounding whitespace
+ * and letter case. Only `'false'` and `'0'` disable capture; every other value —
+ * including an unrecognized one such as `'yes'` — leaves it enabled. This
+ * matches adk-python, which normalizes the same variable with `.strip().lower()`
+ * before comparing (see `src/google/adk/telemetry/context.py`).
+ *
  * Defaults to true for now to preserve backward compatibility.
  * Once prompt and response logging is well established in ADK, we might start
  * a deprecation of request/response content in spans by switching the default
  * to false.
  *
- * @returns false only when ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS is explicitly set to 'false' or '0'
+ * @returns false only when ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS is set to
+ *     'false' or '0' (case-insensitive, surrounding whitespace ignored).
  */
 function shouldAddRequestResponseToSpans(): boolean {
-  const envValue = process.env.ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS || 'true';
-  return envValue === 'true' || envValue === '1';
+  const envValue = (process.env.ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS ?? 'true')
+    .trim()
+    .toLowerCase();
+  return envValue !== 'false' && envValue !== '0';
 }
