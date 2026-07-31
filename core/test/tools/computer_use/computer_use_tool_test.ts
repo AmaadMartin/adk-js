@@ -39,7 +39,7 @@ describe('ComputerUseTool', () => {
   });
 
   it('validates screen sizes during initialization', () => {
-    const fn = async () => {};
+    const fn = async () => ({});
     expect(
       () =>
         new ComputerUseTool({
