@@ -175,9 +175,9 @@ describe('event_processor_utils', () => {
   });
 
   describe('getTaskInputRequiredEvent', () => {
-    it('returns undefined if task is falsy', () => {
+    it('returns undefined if task is undefined', () => {
       expect(
-        getTaskInputRequiredEvent(null as unknown as Task, {} as GenAIContent),
+        getTaskInputRequiredEvent(undefined, {} as GenAIContent),
       ).toBeUndefined();
     });
 

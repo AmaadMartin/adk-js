@@ -157,9 +157,11 @@ function getLongRunnningFunctionCallId(
 
 /**
  * Returns input required task status update events if the provided user request does not contain responses for all function calls in the task status.
+ *
+ * Returns undefined when no task is supplied.
  */
 export function getTaskInputRequiredEvent(
-  task: Task,
+  task: Task | undefined,
   genAIContent: GenAIContent,
 ): TaskStatusUpdateEvent | undefined {
   if (
