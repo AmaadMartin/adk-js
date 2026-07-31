@@ -172,10 +172,10 @@ describe('E2E Telemetry Metrics Integration', () => {
       }
     }
 
-    // Verify gen_ai.agent.invocation.duration
+    // Verify gen_ai.invoke_agent.duration
     const durationPoints = dataPointsOf(
       metricMap,
-      'gen_ai.agent.invocation.duration',
+      'gen_ai.invoke_agent.duration',
     );
     expect(durationPoints.length).toBe(1);
     expect(durationPoints[0].attributes).toEqual({
@@ -264,15 +264,16 @@ describe('E2E Telemetry Metrics Integration', () => {
       'gen_ai.token.type': 'output',
     });
 
-    // Verify gen_ai.tool.execution.duration
+    // Verify gen_ai.execute_tool.duration
     const toolDurationPoints = dataPointsOf(
       metricMap,
-      'gen_ai.tool.execution.duration',
+      'gen_ai.execute_tool.duration',
     );
     expect(toolDurationPoints.length).toBe(1);
     expect(toolDurationPoints[0].attributes).toEqual({
       'gen_ai.agent.name': 'metrics_e2e_agent',
       'gen_ai.tool.name': 'fake_tool',
+      'gen_ai.tool.type': 'FunctionTool',
     });
   });
 });

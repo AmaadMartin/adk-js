@@ -373,18 +373,18 @@ describe('LlmAgent.callLlm', () => {
     agent.model = new MockLlm(originalLlmResponse);
     await callLlmUnderTest();
 
-    expect(spyDuration).toHaveBeenCalledWith(
-      'test_agent',
-      expect.any(Number),
+    expect(spyDuration).toHaveBeenCalledWith({
+      agentName: 'test_agent',
+      elapsedS: expect.any(Number),
       llmRequest,
-      originalLlmResponse,
-      undefined,
-    );
-    expect(spyTokenUsage).toHaveBeenCalledWith(
-      'test_agent',
+      response: originalLlmResponse,
+      error: undefined,
+    });
+    expect(spyTokenUsage).toHaveBeenCalledWith({
+      agentName: 'test_agent',
       llmRequest,
-      originalLlmResponse,
-    );
+      response: originalLlmResponse,
+    });
   });
 });
 
