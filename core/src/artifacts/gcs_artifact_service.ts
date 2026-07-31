@@ -23,7 +23,6 @@ const GCS_FILE_URI_METADATA_KEY = 'adkFileUri';
 const GCS_FILE_MIME_TYPE_METADATA_KEY = 'adkFileMimeType';
 const GCS_DISPLAY_NAME_METADATA_KEY = 'adkDisplayName';
 const GCS_IS_TEXT_METADATA_KEY = 'adkIsText';
-const GCS_STORAGE_PACKAGE = '@google-cloud/storage';
 
 export class GcsArtifactService implements BaseArtifactService {
   private readonly bucketName: string;
@@ -298,7 +297,7 @@ async function createBucket(
 ): Promise<Bucket> {
   const {Storage} = await loadOptionalDependency(
     () => import('@google-cloud/storage'),
-    {packageName: GCS_STORAGE_PACKAGE, feature: 'GcsArtifactService'},
+    {packageName: '@google-cloud/storage', feature: 'GcsArtifactService'},
   );
   return new Storage(options).bucket(name);
 }
