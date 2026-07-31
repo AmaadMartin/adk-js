@@ -4,11 +4,26 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {
+  MeterProvider as ApiMeterProvider,
+  metrics,
+  trace,
+} from '@opentelemetry/api';
+import {
+  DataPoint,
+  DataPointType,
+  Histogram,
+  HistogramMetricData,
+  MeterProvider,
+  MetricReader,
+} from '@opentelemetry/sdk-metrics';
+import {BasicTracerProvider} from '@opentelemetry/sdk-trace-base';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {LlmRequest} from '../../src/models/llm_request.js';
 import {LlmResponse} from '../../src/models/llm_response.js';
 import {
+  getElapsedS,
   recordAgentInvocationDuration,
   recordAgentRequestSize,
   recordAgentResponseSize,
@@ -17,316 +32,284 @@ import {
   recordClientTokenUsage,
   recordToolExecutionDuration,
 } from '../../src/telemetry/metrics.js';
-import {
-  getGoogleLlmVariant,
-  GoogleLLMVariant,
-} from '../../src/utils/variant_utils.js';
+import {logger} from '../../src/utils/logger.js';
 
-// Define stable mock histograms at the top level so they survive across tests
-const mockHistograms = {
-  'gen_ai.agent.invocation.duration': {record: vi.fn()},
-  'gen_ai.tool.execution.duration': {record: vi.fn()},
-  'gen_ai.agent.request.size': {record: vi.fn()},
-  'gen_ai.agent.response.size': {record: vi.fn()},
-  'gen_ai.agent.workflow.steps': {record: vi.fn()},
-  'gen_ai.client.operation.duration': {record: vi.fn()},
-  'gen_ai.client.token.usage': {record: vi.fn()},
-};
+/** Bucket boundaries the SDK applies when an instrument gives no advisory. */
+const SDK_DEFAULT_BOUNDARIES = [
+  0, 5, 10, 25, 50, 75, 100, 250, 500, 750, 1000, 2500, 5000, 7500, 10000,
+];
 
-const mockMeter = {
-  createHistogram: vi.fn((name: keyof typeof mockHistograms) => {
-    return mockHistograms[name];
-  }),
-};
+class InMemoryMetricReader extends MetricReader {
+  protected async onForceFlush(): Promise<void> {}
+  protected async onShutdown(): Promise<void> {}
+}
 
-vi.mock('@opentelemetry/api', () => {
-  return {
-    metrics: {
-      getMeter: vi.fn(() => mockMeter),
-    },
-  };
+let reader: InMemoryMetricReader;
+let provider: MeterProvider;
+
+function installMeterProvider(): MeterProvider {
+  reader = new InMemoryMetricReader();
+  const installed = new MeterProvider({readers: [reader]});
+  metrics.disable();
+  metrics.setGlobalMeterProvider(installed);
+  return installed;
+}
+
+async function collectHistograms(): Promise<Map<string, HistogramMetricData>> {
+  const {resourceMetrics} = await reader.collect();
+  const byName = new Map<string, HistogramMetricData>();
+  for (const scopeMetric of resourceMetrics.scopeMetrics) {
+    for (const metric of scopeMetric.metrics) {
+      if (metric.dataPointType === DataPointType.HISTOGRAM) {
+        byName.set(metric.descriptor.name, metric);
+      }
+    }
+  }
+  return byName;
+}
+
+async function collectHistogram(name: string): Promise<HistogramMetricData> {
+  const metric = (await collectHistograms()).get(name);
+  if (!metric) {
+    expect.fail(`no measurement recorded for ${name}`);
+  }
+  return metric;
+}
+
+async function collectDataPoint(name: string): Promise<DataPoint<Histogram>> {
+  const metric = await collectHistogram(name);
+  expect(metric.dataPoints).toHaveLength(1);
+  return metric.dataPoints[0];
+}
+
+const llmRequest = (model?: string): LlmRequest => ({
+  model,
+  contents: [],
+  liveConnectConfig: {},
+  toolsDict: {},
 });
 
-vi.mock('../../src/utils/variant_utils.js', () => {
-  return {
-    getGoogleLlmVariant: vi.fn(() => 'GEMINI_API'),
-    GoogleLLMVariant: {
-      VERTEX_AI: 'VERTEX_AI',
-      GEMINI_API: 'GEMINI_API',
-    },
-  };
-});
-
-describe('Telemetry Metrics Functions', () => {
+describe('telemetry metrics', () => {
   beforeEach(() => {
-    // Clear call history but keep mock references stable
-    vi.clearAllMocks();
-    vi.mocked(getGoogleLlmVariant).mockReturnValue(GoogleLLMVariant.GEMINI_API);
+    provider = installMeterProvider();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await provider.shutdown();
+    metrics.disable();
+    vi.unstubAllEnvs();
     vi.restoreAllMocks();
   });
 
+  describe('instrument definitions', () => {
+    const instruments = [
+      {
+        name: 'gen_ai.invoke_agent.duration',
+        unit: 's',
+        description: 'Duration of agent invocations.',
+        boundaries: [
+          0.1, 0.2, 0.4, 0.8, 1.6, 3.2, 6.4, 12.8, 25.6, 51.2, 102.4, 204.8,
+          409.6,
+        ],
+        record: () => recordAgentInvocationDuration('an-agent', 1),
+      },
+      {
+        name: 'gen_ai.execute_tool.duration',
+        unit: 's',
+        description: 'Duration of tool executions.',
+        boundaries: [
+          0.01, 0.02, 0.04, 0.08, 0.16, 0.32, 0.64, 1.28, 2.56, 5.12, 10.24,
+          20.48, 40.96, 81.92,
+        ],
+        record: () =>
+          recordToolExecutionDuration('a-tool', 'FunctionTool', 'an-agent', 1),
+      },
+      {
+        name: 'gen_ai.client.operation.duration',
+        unit: 's',
+        description: 'GenAI operation duration.',
+        boundaries: SDK_DEFAULT_BOUNDARIES,
+        record: () =>
+          recordClientOperationDuration({
+            agentName: 'an-agent',
+            elapsedS: 1,
+            llmRequest: llmRequest('a-model'),
+          }),
+      },
+      {
+        name: 'gen_ai.client.token.usage',
+        unit: '{token}',
+        description: 'Number of input and output tokens used.',
+        boundaries: SDK_DEFAULT_BOUNDARIES,
+        record: () =>
+          recordClientTokenUsage({
+            agentName: 'an-agent',
+            llmRequest: llmRequest('a-model'),
+            response: {usageMetadata: {promptTokenCount: 1}},
+          }),
+      },
+      {
+        name: 'gen_ai.agent.request.size',
+        unit: 'By',
+        description: 'Size of agent requests.',
+        boundaries: SDK_DEFAULT_BOUNDARIES,
+        record: () =>
+          recordAgentRequestSize('an-agent', {parts: [{text: 'x'}]}),
+      },
+      {
+        name: 'gen_ai.agent.response.size',
+        unit: 'By',
+        description: 'Size of agent responses.',
+        boundaries: SDK_DEFAULT_BOUNDARIES,
+        record: () =>
+          recordAgentResponseSize('an-agent', {parts: [{text: 'x'}]}),
+      },
+      {
+        name: 'gen_ai.agent.workflow.steps',
+        unit: '1',
+        description: 'Length of agentic workflow (# of events).',
+        boundaries: SDK_DEFAULT_BOUNDARIES,
+        record: () => recordAgentWorkflowSteps('an-agent', 1),
+      },
+    ];
+
+    it.each(instruments)(
+      'declares $name with its unit, description and buckets',
+      async ({name, unit, description, boundaries, record}) => {
+        record();
+
+        const metric = await collectHistogram(name);
+        expect(metric.descriptor.unit).toBe(unit);
+        expect(metric.descriptor.description).toBe(description);
+        expect(metric.dataPoints[0].value.buckets.boundaries).toEqual(
+          boundaries,
+        );
+      },
+    );
+  });
+
   describe('recordAgentInvocationDuration', () => {
-    it('should record agent invocation duration with correct attributes', () => {
-      recordAgentInvocationDuration('my-agent', 123.45);
-      expect(
-        mockHistograms['gen_ai.agent.invocation.duration'].record,
-      ).toHaveBeenCalledWith(123.45, {
-        'gen_ai.agent.name': 'my-agent',
+    it('records the elapsed seconds against the agent name', async () => {
+      recordAgentInvocationDuration('test_agent', 1.0);
+
+      const dataPoint = await collectDataPoint('gen_ai.invoke_agent.duration');
+      expect(dataPoint.value.sum).toBe(1.0);
+      expect(dataPoint.attributes).toEqual({'gen_ai.agent.name': 'test_agent'});
+    });
+
+    it('adds the error type when the invocation failed', async () => {
+      recordAgentInvocationDuration('test_agent', 1.0, new TypeError('boom'));
+
+      const dataPoint = await collectDataPoint('gen_ai.invoke_agent.duration');
+      expect(dataPoint.attributes).toEqual({
+        'gen_ai.agent.name': 'test_agent',
+        'error.type': 'TypeError',
       });
     });
 
-    it('should record agent invocation duration with error.type attribute if error is provided', () => {
-      const err = new Error('Test error');
-      recordAgentInvocationDuration('my-agent', 123.45, err);
-      expect(
-        mockHistograms['gen_ai.agent.invocation.duration'].record,
-      ).toHaveBeenCalledWith(123.45, {
-        'gen_ai.agent.name': 'my-agent',
-        'error.type': 'Error',
-      });
-    });
+    it('falls back to the class name if error.name is empty', async () => {
+      const error = new TypeError('boom');
+      error.name = '';
+      recordAgentInvocationDuration('test_agent', 1.0, error);
 
-    it('should fall back to constructor name if error.name is empty', () => {
-      const err = new Error('Test error');
-      err.name = '';
-      recordAgentInvocationDuration('my-agent', 123.45, err);
-      expect(
-        mockHistograms['gen_ai.agent.invocation.duration'].record,
-      ).toHaveBeenCalledWith(123.45, {
-        'gen_ai.agent.name': 'my-agent',
-        'error.type': 'Error',
-      });
-    });
-
-    it('should handle errors gracefully when recording fails', () => {
-      mockHistograms[
-        'gen_ai.agent.invocation.duration'
-      ].record.mockImplementationOnce(() => {
-        throw new Error('Recording failed');
-      });
-      expect(() => {
-        recordAgentInvocationDuration('my-agent', 123.45);
-      }).not.toThrow();
+      const dataPoint = await collectDataPoint('gen_ai.invoke_agent.duration');
+      expect(dataPoint.attributes['error.type']).toBe('TypeError');
     });
   });
 
   describe('recordToolExecutionDuration', () => {
-    it('should record tool execution duration with correct attributes', () => {
-      recordToolExecutionDuration('my-tool', 'my-agent', 456.78);
-      expect(
-        mockHistograms['gen_ai.tool.execution.duration'].record,
-      ).toHaveBeenCalledWith(456.78, {
-        'gen_ai.agent.name': 'my-agent',
-        'gen_ai.tool.name': 'my-tool',
+    it('records the tool name, type and agent', async () => {
+      recordToolExecutionDuration(
+        'test_tool',
+        'test_tool_type',
+        'test_agent',
+        0.5,
+      );
+
+      const dataPoint = await collectDataPoint('gen_ai.execute_tool.duration');
+      expect(dataPoint.value.sum).toBe(0.5);
+      expect(dataPoint.attributes).toEqual({
+        'gen_ai.agent.name': 'test_agent',
+        'gen_ai.tool.name': 'test_tool',
+        'gen_ai.tool.type': 'test_tool_type',
       });
     });
 
-    it('should record tool execution duration with error.type attribute if error is provided', () => {
-      const err = new TypeError('Test type error');
-      recordToolExecutionDuration('my-tool', 'my-agent', 456.78, err);
-      expect(
-        mockHistograms['gen_ai.tool.execution.duration'].record,
-      ).toHaveBeenCalledWith(456.78, {
-        'gen_ai.agent.name': 'my-agent',
-        'gen_ai.tool.name': 'my-tool',
-        'error.type': 'TypeError',
-      });
-    });
+    it('adds the error type when the tool failed', async () => {
+      recordToolExecutionDuration(
+        'test_tool',
+        'test_tool_type',
+        'test_agent',
+        0.5,
+        new TypeError('tool failed'),
+      );
 
-    it('should fall back to constructor name if error.name is empty', () => {
-      const err = new TypeError('Test type error');
-      err.name = '';
-      recordToolExecutionDuration('my-tool', 'my-agent', 456.78, err);
-      expect(
-        mockHistograms['gen_ai.tool.execution.duration'].record,
-      ).toHaveBeenCalledWith(456.78, {
-        'gen_ai.agent.name': 'my-agent',
-        'gen_ai.tool.name': 'my-tool',
-        'error.type': 'TypeError',
-      });
-    });
-
-    it('should handle errors gracefully when recording fails', () => {
-      mockHistograms[
-        'gen_ai.tool.execution.duration'
-      ].record.mockImplementationOnce(() => {
-        throw new Error('Recording failed');
-      });
-      expect(() => {
-        recordToolExecutionDuration('my-tool', 'my-agent', 456.78);
-      }).not.toThrow();
+      const dataPoint = await collectDataPoint('gen_ai.execute_tool.duration');
+      expect(dataPoint.attributes['error.type']).toBe('TypeError');
     });
   });
 
   describe('recordAgentRequestSize', () => {
-    it('should record 0 size for null/undefined content', () => {
-      recordAgentRequestSize('my-agent', null);
-      expect(
-        mockHistograms['gen_ai.agent.request.size'].record,
-      ).toHaveBeenCalledWith(0, {
-        'gen_ai.agent.name': 'my-agent',
-      });
+    it('records the request size against the agent name', async () => {
+      recordAgentRequestSize('my-agent', {parts: [{text: 'Hello World'}]});
+
+      const dataPoint = await collectDataPoint('gen_ai.agent.request.size');
+      expect(dataPoint.value.sum).toBe(11);
+      expect(dataPoint.attributes).toEqual({'gen_ai.agent.name': 'my-agent'});
     });
 
-    it('should record 0 size for content with no parts', () => {
-      recordAgentRequestSize('my-agent', {parts: []});
-      expect(
-        mockHistograms['gen_ai.agent.request.size'].record,
-      ).toHaveBeenCalledWith(0, {
-        'gen_ai.agent.name': 'my-agent',
-      });
-    });
+    it('records 0 when the invocation carried no content', async () => {
+      recordAgentRequestSize('my-agent', undefined);
 
-    it('should record correct byte size for text content', () => {
-      recordAgentRequestSize('my-agent', {
-        parts: [{text: 'Hello World'}], // 11 bytes
-      });
       expect(
-        mockHistograms['gen_ai.agent.request.size'].record,
-      ).toHaveBeenCalledWith(11, {
-        'gen_ai.agent.name': 'my-agent',
-      });
-    });
-
-    it('should record correct byte size for base64 inlineData', () => {
-      recordAgentRequestSize('my-agent', {
-        parts: [{inlineData: {data: 'SGVsbG8=', mimeType: 'text/plain'}}], // "Hello" -> 5 bytes
-      });
-      expect(
-        mockHistograms['gen_ai.agent.request.size'].record,
-      ).toHaveBeenCalledWith(5, {
-        'gen_ai.agent.name': 'my-agent',
-      });
-    });
-
-    it('should record correct byte size for base64 inlineData with padding = 2', () => {
-      recordAgentRequestSize('my-agent', {
-        parts: [{inlineData: {data: 'QQ==', mimeType: 'text/plain'}}], // 1 byte
-      });
-      expect(
-        mockHistograms['gen_ai.agent.request.size'].record,
-      ).toHaveBeenCalledWith(1, {
-        'gen_ai.agent.name': 'my-agent',
-      });
-    });
-
-    it('should record 0 byte size for empty base64 inlineData', () => {
-      recordAgentRequestSize('my-agent', {
-        parts: [{inlineData: {data: '', mimeType: 'text/plain'}}],
-      });
-      expect(
-        mockHistograms['gen_ai.agent.request.size'].record,
-      ).toHaveBeenCalledWith(0, {
-        'gen_ai.agent.name': 'my-agent',
-      });
-    });
-
-    it('should handle errors gracefully when recording fails', () => {
-      mockHistograms['gen_ai.agent.request.size'].record.mockImplementationOnce(
-        () => {
-          throw new Error('Recording failed');
-        },
-      );
-      expect(() => {
-        recordAgentRequestSize('my-agent', {parts: [{text: 'Hello'}]});
-      }).not.toThrow();
+        (await collectDataPoint('gen_ai.agent.request.size')).value.sum,
+      ).toBe(0);
     });
   });
 
   describe('recordAgentResponseSize', () => {
-    it('should record 0 size if the agent produced no content', () => {
+    it('records the response size against the agent name', async () => {
+      recordAgentResponseSize('my-agent', {parts: [{text: 'Second Response'}]});
+
+      const dataPoint = await collectDataPoint('gen_ai.agent.response.size');
+      expect(dataPoint.value.sum).toBe(15);
+      expect(dataPoint.attributes).toEqual({'gen_ai.agent.name': 'my-agent'});
+    });
+
+    it('records 0 if the agent produced no content', async () => {
       recordAgentResponseSize('my-agent', undefined);
-      expect(
-        mockHistograms['gen_ai.agent.response.size'].record,
-      ).toHaveBeenCalledWith(0, {
-        'gen_ai.agent.name': 'my-agent',
-      });
-    });
 
-    it('should record correct byte size for the response content', () => {
-      recordAgentResponseSize('my-agent', {
-        parts: [{text: 'Second Response'}], // 15 bytes
-      });
       expect(
-        mockHistograms['gen_ai.agent.response.size'].record,
-      ).toHaveBeenCalledWith(15, {
-        'gen_ai.agent.name': 'my-agent',
-      });
-    });
-
-    it('should record the JSON byte size of a function call part', () => {
-      recordAgentResponseSize('my-agent', {
-        // {"name":"fake_tool","args":{}} -> 30 bytes
-        parts: [{functionCall: {name: 'fake_tool', args: {}}}],
-      });
-      expect(
-        mockHistograms['gen_ai.agent.response.size'].record,
-      ).toHaveBeenCalledWith(30, {
-        'gen_ai.agent.name': 'my-agent',
-      });
-    });
-
-    it('should sum text and structured parts of the same content', () => {
-      recordAgentResponseSize('my-agent', {
-        parts: [
-          {text: 'Hello'}, // 5 bytes
-          // {"name":"t","response":{}} -> 26 bytes
-          {functionResponse: {name: 't', response: {}}},
-        ],
-      });
-      expect(
-        mockHistograms['gen_ai.agent.response.size'].record,
-      ).toHaveBeenCalledWith(31, {
-        'gen_ai.agent.name': 'my-agent',
-      });
-    });
-
-    it('should handle errors gracefully when recording fails', () => {
-      mockHistograms[
-        'gen_ai.agent.response.size'
-      ].record.mockImplementationOnce(() => {
-        throw new Error('Recording failed');
-      });
-      expect(() => {
-        recordAgentResponseSize('my-agent', {parts: [{text: 'Hello'}]});
-      }).not.toThrow();
+        (await collectDataPoint('gen_ai.agent.response.size')).value.sum,
+      ).toBe(0);
     });
   });
 
   describe('recordAgentWorkflowSteps', () => {
-    it('should record the given workflow step count', () => {
+    it('records the given workflow step count', async () => {
       recordAgentWorkflowSteps('my-agent', 3);
-      expect(
-        mockHistograms['gen_ai.agent.workflow.steps'].record,
-      ).toHaveBeenCalledWith(3, {
-        'gen_ai.agent.name': 'my-agent',
-      });
-    });
 
-    it('should handle errors gracefully when recording fails', () => {
-      mockHistograms[
-        'gen_ai.agent.workflow.steps'
-      ].record.mockImplementationOnce(() => {
-        throw new Error('Recording failed');
-      });
-      expect(() => {
-        recordAgentWorkflowSteps('my-agent', 0);
-      }).not.toThrow();
+      const dataPoint = await collectDataPoint('gen_ai.agent.workflow.steps');
+      expect(dataPoint.value.sum).toBe(3);
+      expect(dataPoint.attributes).toEqual({'gen_ai.agent.name': 'my-agent'});
     });
   });
 
   describe('recordClientOperationDuration', () => {
-    it('should record client operation duration converted to seconds with Gemini provider', () => {
-      const llmRequest: LlmRequest = {model: 'model-a'} as LlmRequest;
-      const lastResponse: LlmResponse = {modelVersion: 'model-a-v1'};
-      recordClientOperationDuration('my-agent', 1500, llmRequest, lastResponse);
-      expect(
-        mockHistograms['gen_ai.client.operation.duration'].record,
-      ).toHaveBeenCalledWith(1.5, {
-        'gen_ai.agent.name': 'my-agent',
+    it('records the request and response models', async () => {
+      recordClientOperationDuration({
+        agentName: 'test_agent',
+        elapsedS: 0.1,
+        llmRequest: llmRequest('model-a'),
+        response: {modelVersion: 'model-a-v1'},
+      });
+
+      const dataPoint = await collectDataPoint(
+        'gen_ai.client.operation.duration',
+      );
+      expect(dataPoint.value.sum).toBe(0.1);
+      expect(dataPoint.attributes).toEqual({
+        'gen_ai.agent.name': 'test_agent',
         'gen_ai.operation.name': 'generate_content',
         'gen_ai.provider.name': 'gemini',
         'gen_ai.request.model': 'model-a',
@@ -334,226 +317,296 @@ describe('Telemetry Metrics Functions', () => {
       });
     });
 
-    it('should record client operation duration converted to seconds with Vertex AI provider', () => {
-      vi.mocked(getGoogleLlmVariant).mockReturnValue(
-        GoogleLLMVariant.VERTEX_AI,
+    it('reports vertex_ai when GOOGLE_GENAI_USE_VERTEXAI is set', async () => {
+      vi.stubEnv('GOOGLE_GENAI_USE_VERTEXAI', 'true');
+
+      recordClientOperationDuration({
+        agentName: 'test_agent',
+        elapsedS: 0.1,
+        llmRequest: llmRequest('model-a'),
+      });
+
+      const dataPoint = await collectDataPoint(
+        'gen_ai.client.operation.duration',
       );
-      const llmRequest: LlmRequest = {model: 'model-a'} as LlmRequest;
-      const lastResponse: LlmResponse = {modelVersion: 'model-a-v1'};
-      recordClientOperationDuration('my-agent', 1500, llmRequest, lastResponse);
-      expect(
-        mockHistograms['gen_ai.client.operation.duration'].record,
-      ).toHaveBeenCalledWith(1.5, {
-        'gen_ai.agent.name': 'my-agent',
-        'gen_ai.operation.name': 'generate_content',
-        'gen_ai.provider.name': 'vertex_ai',
-        'gen_ai.request.model': 'model-a',
-        'gen_ai.response.model': 'model-a-v1',
-      });
+      expect(dataPoint.attributes['gen_ai.provider.name']).toBe('vertex_ai');
     });
 
-    it('should fall back to llmRequest.model if lastResponse.modelVersion is missing', () => {
-      const llmRequest: LlmRequest = {model: 'model-a'} as LlmRequest;
-      const lastResponse: LlmResponse = {};
-      recordClientOperationDuration('my-agent', 1500, llmRequest, lastResponse);
-      expect(
-        mockHistograms['gen_ai.client.operation.duration'].record,
-      ).toHaveBeenCalledWith(1.5, {
-        'gen_ai.agent.name': 'my-agent',
-        'gen_ai.operation.name': 'generate_content',
-        'gen_ai.provider.name': 'gemini',
-        'gen_ai.request.model': 'model-a',
-        'gen_ai.response.model': 'model-a',
+    it('falls back to the request model when the response omits it', async () => {
+      recordClientOperationDuration({
+        agentName: 'test_agent',
+        elapsedS: 0.1,
+        llmRequest: llmRequest('model-a'),
+        response: {},
       });
-    });
 
-    it('should handle getGoogleLlmVariant throwing error', () => {
-      vi.mocked(getGoogleLlmVariant).mockImplementationOnce(() => {
-        throw new Error('Variant error');
-      });
-      const llmRequest: LlmRequest = {model: 'model-a'} as LlmRequest;
-      const lastResponse: LlmResponse = {modelVersion: 'model-a-v1'};
-      recordClientOperationDuration('my-agent', 1500, llmRequest, lastResponse);
-      expect(
-        mockHistograms['gen_ai.client.operation.duration'].record,
-      ).toHaveBeenCalledWith(1.5, {
-        'gen_ai.agent.name': 'my-agent',
-        'gen_ai.operation.name': 'generate_content',
-        'gen_ai.provider.name': 'gemini',
-        'gen_ai.request.model': 'model-a',
-        'gen_ai.response.model': 'model-a-v1',
-      });
-    });
-
-    it('should handle a missing response and no models', () => {
-      const llmRequest: LlmRequest = {} as LlmRequest;
-      recordClientOperationDuration('my-agent', 1500, llmRequest, undefined);
-      expect(
-        mockHistograms['gen_ai.client.operation.duration'].record,
-      ).toHaveBeenCalledWith(1.5, {
-        'gen_ai.agent.name': 'my-agent',
-        'gen_ai.operation.name': 'generate_content',
-        'gen_ai.provider.name': 'gemini',
-      });
-    });
-
-    it('should record client operation duration with error', () => {
-      const llmRequest: LlmRequest = {model: 'model-a'} as LlmRequest;
-      const err = new Error('LLM Error');
-      recordClientOperationDuration(
-        'my-agent',
-        2000,
-        llmRequest,
-        undefined,
-        err,
+      const dataPoint = await collectDataPoint(
+        'gen_ai.client.operation.duration',
       );
-      expect(
-        mockHistograms['gen_ai.client.operation.duration'].record,
-      ).toHaveBeenCalledWith(2.0, {
-        'gen_ai.agent.name': 'my-agent',
-        'gen_ai.operation.name': 'generate_content',
-        'gen_ai.provider.name': 'gemini',
-        'gen_ai.request.model': 'model-a',
-        'error.type': 'Error',
-      });
+      expect(dataPoint.attributes['gen_ai.response.model']).toBe('model-a');
     });
 
-    it('should fall back to constructor name if error.name is empty', () => {
-      const llmRequest: LlmRequest = {model: 'model-a'} as LlmRequest;
-      const err = new Error('LLM Error');
-      err.name = '';
-      recordClientOperationDuration(
-        'my-agent',
-        2000,
-        llmRequest,
-        undefined,
-        err,
+    it('omits the response model when no response arrived', async () => {
+      recordClientOperationDuration({
+        agentName: 'test_agent',
+        elapsedS: 0.1,
+        llmRequest: llmRequest('model-a'),
+      });
+
+      const dataPoint = await collectDataPoint(
+        'gen_ai.client.operation.duration',
       );
-      expect(
-        mockHistograms['gen_ai.client.operation.duration'].record,
-      ).toHaveBeenCalledWith(2.0, {
-        'gen_ai.agent.name': 'my-agent',
+      expect(dataPoint.attributes).not.toHaveProperty('gen_ai.response.model');
+    });
+
+    it('omits both models when neither is known', async () => {
+      recordClientOperationDuration({
+        agentName: 'test_agent',
+        elapsedS: 0.1,
+        llmRequest: llmRequest(undefined),
+        response: {},
+      });
+
+      const dataPoint = await collectDataPoint(
+        'gen_ai.client.operation.duration',
+      );
+      expect(dataPoint.attributes).toEqual({
+        'gen_ai.agent.name': 'test_agent',
         'gen_ai.operation.name': 'generate_content',
         'gen_ai.provider.name': 'gemini',
-        'gen_ai.request.model': 'model-a',
-        'error.type': 'Error',
       });
     });
 
-    it('should handle errors gracefully when recording fails', () => {
-      mockHistograms[
-        'gen_ai.client.operation.duration'
-      ].record.mockImplementationOnce(() => {
-        throw new Error('Recording failed');
+    it('adds the error type when the call failed', async () => {
+      recordClientOperationDuration({
+        agentName: 'test_agent',
+        elapsedS: 0.2,
+        llmRequest: llmRequest('model-a'),
+        error: new TypeError('LLM error'),
       });
-      expect(() => {
-        recordClientOperationDuration('my-agent', 1500, {} as LlmRequest, {});
-      }).not.toThrow();
+
+      const dataPoint = await collectDataPoint(
+        'gen_ai.client.operation.duration',
+      );
+      expect(dataPoint.attributes['error.type']).toBe('TypeError');
     });
   });
 
   describe('recordClientTokenUsage', () => {
-    it('should skip if no response is provided', () => {
-      const llmRequest: LlmRequest = {model: 'model-a'} as LlmRequest;
-      recordClientTokenUsage('my-agent', llmRequest, undefined);
-      expect(
-        mockHistograms['gen_ai.client.token.usage'].record,
-      ).not.toHaveBeenCalled();
-    });
+    const usageResponse: LlmResponse = {
+      modelVersion: 'test-model-v1',
+      usageMetadata: {
+        promptTokenCount: 20,
+        candidatesTokenCount: 30,
+        toolUsePromptTokenCount: 5,
+        thoughtsTokenCount: 10,
+      },
+    };
 
-    it('should skip if usageMetadata is missing in the last response', () => {
-      const llmRequest: LlmRequest = {model: 'model-a'} as LlmRequest;
-      recordClientTokenUsage('my-agent', llmRequest, {});
-      expect(
-        mockHistograms['gen_ai.client.token.usage'].record,
-      ).not.toHaveBeenCalled();
-    });
-
-    it('should record input and output token usage correctly', () => {
-      const llmRequest: LlmRequest = {model: 'model-a'} as LlmRequest;
-      const lastResponse: LlmResponse = {
-        modelVersion: 'model-a-v1',
-        usageMetadata: {
-          promptTokenCount: 10,
-          toolUsePromptTokenCount: 5,
-          candidatesTokenCount: 20,
-          thoughtsTokenCount: 3,
-        },
-      };
-      recordClientTokenUsage('my-agent', llmRequest, lastResponse);
-
-      // Input usage = promptTokenCount (10) + toolUsePromptTokenCount (5) = 15
-      expect(
-        mockHistograms['gen_ai.client.token.usage'].record,
-      ).toHaveBeenCalledWith(15, {
-        'gen_ai.agent.name': 'my-agent',
-        'gen_ai.operation.name': 'generate_content',
-        'gen_ai.provider.name': 'gemini',
-        'gen_ai.request.model': 'model-a',
-        'gen_ai.response.model': 'model-a-v1',
-        'gen_ai.token.type': 'input',
+    it('splits the usage into an input and an output measurement', async () => {
+      recordClientTokenUsage({
+        agentName: 'test_agent',
+        llmRequest: llmRequest('test-model'),
+        response: usageResponse,
       });
 
-      // Output usage = candidatesTokenCount (20) + thoughtsTokenCount (3) = 23
-      expect(
-        mockHistograms['gen_ai.client.token.usage'].record,
-      ).toHaveBeenCalledWith(23, {
-        'gen_ai.agent.name': 'my-agent',
+      const metric = await collectHistogram('gen_ai.client.token.usage');
+      expect(metric.dataPoints).toHaveLength(2);
+      const baseAttributes = {
+        'gen_ai.agent.name': 'test_agent',
         'gen_ai.operation.name': 'generate_content',
         'gen_ai.provider.name': 'gemini',
-        'gen_ai.request.model': 'model-a',
-        'gen_ai.response.model': 'model-a-v1',
+        'gen_ai.request.model': 'test-model',
+        'gen_ai.response.model': 'test-model-v1',
+      };
+
+      const input = metric.dataPoints.find(
+        (dataPoint) => dataPoint.attributes['gen_ai.token.type'] === 'input',
+      );
+      const output = metric.dataPoints.find(
+        (dataPoint) => dataPoint.attributes['gen_ai.token.type'] === 'output',
+      );
+      if (!input || !output) {
+        expect.fail('missing input or output token usage');
+      }
+      // prompt (20) + tool use (5), and candidates (30) + thoughts (10).
+      expect(input.value.sum).toBe(25);
+      expect(input.attributes).toEqual({
+        ...baseAttributes,
+        'gen_ai.token.type': 'input',
+      });
+      expect(output.value.sum).toBe(40);
+      expect(output.attributes).toEqual({
+        ...baseAttributes,
         'gen_ai.token.type': 'output',
       });
     });
 
-    it('should fall back to llmRequest.model if the response has no modelVersion', () => {
-      const llmRequest: LlmRequest = {model: 'model-a'} as LlmRequest;
-      const lastResponse: LlmResponse = {
-        usageMetadata: {promptTokenCount: 10},
-      };
-      recordClientTokenUsage('my-agent', llmRequest, lastResponse);
-      expect(
-        mockHistograms['gen_ai.client.token.usage'].record,
-      ).toHaveBeenCalledWith(10, {
-        'gen_ai.agent.name': 'my-agent',
-        'gen_ai.operation.name': 'generate_content',
-        'gen_ai.provider.name': 'gemini',
-        'gen_ai.request.model': 'model-a',
-        'gen_ai.response.model': 'model-a',
-        'gen_ai.token.type': 'input',
+    it('records only the input side when there is no output', async () => {
+      recordClientTokenUsage({
+        agentName: 'test_agent',
+        llmRequest: llmRequest('test-model'),
+        response: {usageMetadata: {promptTokenCount: 10}},
       });
+
+      const dataPoint = await collectDataPoint('gen_ai.client.token.usage');
+      expect(dataPoint.value.sum).toBe(10);
+      expect(dataPoint.attributes['gen_ai.token.type']).toBe('input');
+      expect(dataPoint.attributes['gen_ai.response.model']).toBe('test-model');
     });
 
-    it('should not record if input or output token count is zero', () => {
-      const llmRequest: LlmRequest = {model: 'model-a'} as LlmRequest;
-      const lastResponse: LlmResponse = {
-        usageMetadata: {
-          promptTokenCount: 0,
-          toolUsePromptTokenCount: 0,
-          candidatesTokenCount: 0,
-          thoughtsTokenCount: 0,
-        },
-      };
-      recordClientTokenUsage('my-agent', llmRequest, lastResponse);
-      expect(
-        mockHistograms['gen_ai.client.token.usage'].record,
-      ).not.toHaveBeenCalled();
+    it('records only the output side when there is no input', async () => {
+      recordClientTokenUsage({
+        agentName: 'test_agent',
+        llmRequest: llmRequest('test-model'),
+        response: {usageMetadata: {candidatesTokenCount: 12}},
+      });
+
+      const dataPoint = await collectDataPoint('gen_ai.client.token.usage');
+      expect(dataPoint.value.sum).toBe(12);
+      expect(dataPoint.attributes['gen_ai.token.type']).toBe('output');
     });
 
-    it('should handle errors gracefully when recording fails', () => {
-      mockHistograms['gen_ai.client.token.usage'].record.mockImplementationOnce(
-        () => {
-          throw new Error('Recording failed');
-        },
+    it('records nothing when there is no response', async () => {
+      recordClientTokenUsage({
+        agentName: 'test_agent',
+        llmRequest: llmRequest('test-model'),
+      });
+
+      expect((await collectHistograms()).has('gen_ai.client.token.usage')).toBe(
+        false,
       );
-      const llmRequest: LlmRequest = {model: 'model-a'} as LlmRequest;
-      const lastResponse: LlmResponse = {
-        usageMetadata: {promptTokenCount: 10},
+    });
+
+    it('warns and records nothing when the usage metadata is missing', async () => {
+      const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+      recordClientTokenUsage({
+        agentName: 'test_agent',
+        llmRequest: llmRequest('test-model'),
+        response: {},
+      });
+
+      expect(warn).toHaveBeenCalledWith(
+        'Skipping missing token usage metadata for agent test_agent and model test-model',
+      );
+      expect((await collectHistograms()).has('gen_ai.client.token.usage')).toBe(
+        false,
+      );
+    });
+
+    it('records nothing when every count is zero', async () => {
+      recordClientTokenUsage({
+        agentName: 'test_agent',
+        llmRequest: llmRequest('test-model'),
+        response: {
+          usageMetadata: {
+            promptTokenCount: 0,
+            toolUsePromptTokenCount: 0,
+            candidatesTokenCount: 0,
+            thoughtsTokenCount: 0,
+          },
+        },
+      });
+
+      expect((await collectHistograms()).has('gen_ai.client.token.usage')).toBe(
+        false,
+      );
+    });
+  });
+
+  describe('meter provider resolution', () => {
+    it('records against a provider registered after the first call', async () => {
+      metrics.disable();
+      recordAgentInvocationDuration('test_agent', 1.0);
+
+      provider = installMeterProvider();
+      recordAgentInvocationDuration('test_agent', 2.0);
+
+      const dataPoint = await collectDataPoint('gen_ai.invoke_agent.duration');
+      expect(dataPoint.value.count).toBe(1);
+      expect(dataPoint.value.sum).toBe(2.0);
+    });
+
+    it('never throws a telemetry failure at the caller', () => {
+      const throwingProvider: ApiMeterProvider = {
+        getMeter() {
+          throw new Error('meter unavailable');
+        },
       };
+      const debug = vi.spyOn(logger, 'debug').mockImplementation(() => {});
+      metrics.disable();
+      metrics.setGlobalMeterProvider(throwingProvider);
+
       expect(() => {
-        recordClientTokenUsage('my-agent', llmRequest, lastResponse);
+        recordAgentInvocationDuration('test_agent', 1.0);
+        recordToolExecutionDuration('t', 'FunctionTool', 'test_agent', 1.0);
+        recordAgentRequestSize('test_agent', {parts: [{text: 'x'}]});
+        recordAgentResponseSize('test_agent', {parts: [{text: 'x'}]});
+        recordAgentWorkflowSteps('test_agent', 1);
+        recordClientOperationDuration({
+          agentName: 'test_agent',
+          elapsedS: 1.0,
+          llmRequest: llmRequest('model-a'),
+        });
+        recordClientTokenUsage({
+          agentName: 'test_agent',
+          llmRequest: llmRequest('model-a'),
+          response: {usageMetadata: {promptTokenCount: 1}},
+        });
+      }).not.toThrow();
+      expect(debug).toHaveBeenCalledTimes(7);
+    });
+
+    it('is a no-op when no meter provider is configured', () => {
+      metrics.disable();
+
+      expect(() => {
+        recordAgentInvocationDuration('test_agent', 1.0);
+        recordToolExecutionDuration('t', 'FunctionTool', 'test_agent', 1.0);
+        recordAgentRequestSize('test_agent', {parts: [{text: 'x'}]});
+        recordAgentResponseSize('test_agent', {parts: [{text: 'x'}]});
+        recordAgentWorkflowSteps('test_agent', 1);
+        recordClientOperationDuration({
+          agentName: 'test_agent',
+          elapsedS: 1.0,
+          llmRequest: llmRequest('model-a'),
+        });
+        recordClientTokenUsage({
+          agentName: 'test_agent',
+          llmRequest: llmRequest('model-a'),
+          response: {usageMetadata: {promptTokenCount: 1}},
+        });
       }).not.toThrow();
     });
+  });
+});
+
+describe('getElapsedS', () => {
+  it('takes the duration from an ended span, to the nanosecond', () => {
+    const span = new BasicTracerProvider()
+      .getTracer('test')
+      .startSpan('op', {startTime: [10, 500_000_000]});
+    span.end([12, 750_000_000]);
+
+    expect(getElapsedS(span, performance.now())).toBeCloseTo(2.25, 9);
+  });
+
+  it('falls back to the monotonic clock for a span without timings', () => {
+    trace.disable();
+    const span = trace.getTracer('test').startSpan('op');
+    span.end();
+
+    const elapsed = getElapsedS(span, performance.now() - 1000);
+
+    expect(elapsed).toBeGreaterThanOrEqual(1);
+    expect(elapsed).toBeLessThan(60);
+  });
+
+  it('falls back to the monotonic clock when there is no span', () => {
+    const elapsed = getElapsedS(undefined, performance.now() - 2000);
+
+    expect(elapsed).toBeGreaterThanOrEqual(2);
+    expect(elapsed).toBeLessThan(60);
   });
 });

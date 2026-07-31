@@ -134,6 +134,7 @@ describe('handleFunctionCallList', () => {
     });
     expect(spy).toHaveBeenCalledWith(
       'testTool',
+      'FunctionTool',
       'test_agent',
       expect.any(Number),
       undefined,
@@ -335,6 +336,7 @@ describe('handleFunctionCallList', () => {
     });
     expect(spy).toHaveBeenCalledWith(
       'errorTool',
+      'FunctionTool',
       'test_agent',
       expect.any(Number),
       expect.any(Error),

@@ -37,6 +37,7 @@ import {logger} from '../utils/logger.js';
 import {Context} from './context.js';
 
 import {
+  getElapsedS,
   recordClientOperationDuration,
   recordClientTokenUsage,
 } from '../telemetry/metrics.js';
@@ -1093,7 +1094,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       invocationContext.incrementLlmCallCount();
       const startTime = performance.now();
       let lastResponse: LlmResponse | undefined;
-      let error: Error | undefined;
+      let error: unknown;
       try {
         const responsesGenerator = llm.generateContentAsync(
           llmRequest,
@@ -1129,18 +1130,21 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
           yield alteredLlmResponse ?? llmResponse;
         }
       } catch (e) {
-        error = e as Error;
+        error = e;
         throw e;
       } finally {
-        const elapsedMs = performance.now() - startTime;
-        recordClientOperationDuration(
-          this.name,
-          elapsedMs,
+        recordClientOperationDuration({
+          agentName: this.name,
+          elapsedS: getElapsedS(undefined, startTime),
           llmRequest,
-          lastResponse,
+          response: lastResponse,
           error,
-        );
-        recordClientTokenUsage(this.name, llmRequest, lastResponse);
+        });
+        recordClientTokenUsage({
+          agentName: this.name,
+          llmRequest,
+          response: lastResponse,
+        });
       }
     }
   }

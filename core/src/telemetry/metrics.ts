@@ -4,36 +4,85 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content, Part} from '@google/genai';
-import {Histogram, Meter, metrics} from '@opentelemetry/api';
+import {Content} from '@google/genai';
+import {
+  Attributes,
+  Histogram,
+  HrTime,
+  MeterProvider,
+  MetricAdvice,
+  metrics,
+  Span,
+} from '@opentelemetry/api';
 
 import {LlmRequest} from '../models/llm_request.js';
 import {LlmResponse} from '../models/llm_response.js';
+import {contentSize} from '../utils/content_size_utils.js';
+import {resolveErrorType} from '../utils/error_utils.js';
 import {logger} from '../utils/logger.js';
 import {getGoogleLlmVariant, GoogleLLMVariant} from '../utils/variant_utils.js';
 import {version} from '../version.js';
+import {TokenUsage} from './token_usage.js';
 
-let meter: Meter | undefined;
-function getMeter(): Meter {
-  if (!meter) {
-    meter = metrics.getMeter('gcp.vertex.agent', version);
-  }
-  return meter;
+const METER_NAME = 'gcp.vertex.agent';
+
+const ERROR_TYPE = 'error.type';
+const GEN_AI_AGENT_NAME = 'gen_ai.agent.name';
+const GEN_AI_OPERATION_NAME = 'gen_ai.operation.name';
+const GEN_AI_PROVIDER_NAME = 'gen_ai.provider.name';
+const GEN_AI_REQUEST_MODEL = 'gen_ai.request.model';
+const GEN_AI_RESPONSE_MODEL = 'gen_ai.response.model';
+const GEN_AI_TOKEN_TYPE = 'gen_ai.token.type';
+const GEN_AI_TOOL_NAME = 'gen_ai.tool.name';
+const GEN_AI_TOOL_TYPE = 'gen_ai.tool.type';
+
+interface HistogramSpec {
+  name: string;
+  unit: string;
+  description: string;
+  advice?: MetricAdvice;
 }
 
 /**
- * Name, unit and description of every histogram recorded by this module.
+ * Name, unit, description and bucket advisory of every histogram recorded by
+ * this module.
+ *
+ * The names, units and bucket boundaries are a wire contract shared with
+ * adk-python, so a dashboard built against one runtime works against the
+ * other. Do not rename or re-unit them.
  */
 const HISTOGRAMS = {
   agentInvocationDuration: {
-    name: 'gen_ai.agent.invocation.duration',
-    unit: 'ms',
+    name: 'gen_ai.invoke_agent.duration',
+    unit: 's',
     description: 'Duration of agent invocations.',
+    advice: {
+      explicitBucketBoundaries: [
+        0.1, 0.2, 0.4, 0.8, 1.6, 3.2, 6.4, 12.8, 25.6, 51.2, 102.4, 204.8,
+        409.6,
+      ],
+    },
   },
   toolExecutionDuration: {
-    name: 'gen_ai.tool.execution.duration',
-    unit: 'ms',
+    name: 'gen_ai.execute_tool.duration',
+    unit: 's',
     description: 'Duration of tool executions.',
+    advice: {
+      explicitBucketBoundaries: [
+        0.01, 0.02, 0.04, 0.08, 0.16, 0.32, 0.64, 1.28, 2.56, 5.12, 10.24,
+        20.48, 40.96, 81.92,
+      ],
+    },
+  },
+  clientOperationDuration: {
+    name: 'gen_ai.client.operation.duration',
+    unit: 's',
+    description: 'GenAI operation duration.',
+  },
+  clientTokenUsage: {
+    name: 'gen_ai.client.token.usage',
+    unit: '{token}',
+    description: 'Number of input and output tokens used.',
   },
   agentRequestSize: {
     name: 'gen_ai.agent.request.size',
@@ -50,140 +99,114 @@ const HISTOGRAMS = {
     unit: '1',
     description: 'Length of agentic workflow (# of events).',
   },
-  clientOperationDuration: {
-    name: 'gen_ai.client.operation.duration',
-    unit: 's',
-    description: 'Duration of client operations.',
-  },
-  clientTokenUsage: {
-    name: 'gen_ai.client.token.usage',
-    unit: '1',
-    description: 'Token usage of client operations.',
-  },
-} as const;
+} satisfies Record<string, HistogramSpec>;
 
 type HistogramKey = keyof typeof HISTOGRAMS;
 
-const instruments = new Map<HistogramKey, Histogram>();
+let cache:
+  | {provider: MeterProvider; instruments: Map<HistogramKey, Histogram>}
+  | undefined;
 
 /**
  * Returns the histogram for `key`, creating it on first use so that no
  * instrument is registered until a metric is actually recorded.
+ *
+ * Unlike the tracing API, the metrics API has no proxy that re-binds to a
+ * meter provider installed later: `metrics.getMeterProvider()` resolves to
+ * whatever is registered at call time, and the no-op provider before that.
+ * Caching against the provider identity is what lets a provider registered
+ * after the first recording still receive measurements.
  */
 function histogram(key: HistogramKey): Histogram {
-  let instrument = instruments.get(key);
+  const provider = metrics.getMeterProvider();
+  if (cache?.provider !== provider) {
+    cache = {provider, instruments: new Map()};
+  }
+  let instrument = cache.instruments.get(key);
   if (!instrument) {
-    const {name, unit, description} = HISTOGRAMS[key];
-    instrument = getMeter().createHistogram(name, {unit, description});
-    instruments.set(key, instrument);
+    const spec: HistogramSpec = HISTOGRAMS[key];
+    const {name, unit, description, advice} = spec;
+    instrument = provider
+      .getMeter(METER_NAME, version)
+      .createHistogram(name, {unit, description, advice});
+    cache.instruments.set(key, instrument);
   }
   return instrument;
 }
 
-const textEncoder = new TextEncoder();
-
-function getBase64ByteLength(base64String: string): number {
-  const len = base64String.length;
-  let padding = 0;
-  if (base64String.endsWith('==')) {
-    padding = 2;
-  } else if (base64String.endsWith('=')) {
-    padding = 1;
-  }
-  return Math.floor((len * 3) / 4) - padding;
-}
-
 /**
- * Part fields whose payload is structured rather than text or inline bytes.
- * Their wire size is approximated by the size of their JSON encoding.
- */
-const STRUCTURED_PART_FIELDS = [
-  'functionCall',
-  'functionResponse',
-  'fileData',
-  'executableCode',
-  'codeExecutionResult',
-] as const;
-
-function getPartSize(part: Part): number {
-  let size = 0;
-  if (part.text !== undefined && part.text !== null) {
-    size += textEncoder.encode(part.text).length;
-  }
-  if (part.inlineData?.data) {
-    size += getBase64ByteLength(part.inlineData.data);
-  }
-  for (const field of STRUCTURED_PART_FIELDS) {
-    const payload = part[field];
-    if (payload !== undefined && payload !== null) {
-      size += textEncoder.encode(JSON.stringify(payload)).length;
-    }
-  }
-  return size;
-}
-
-/**
- * Approximate size of `content` in bytes: UTF-8 bytes for text, decoded bytes
- * for inline blobs, and the UTF-8 size of the JSON encoding for structured
- * parts (function calls and responses, file references, executable code and
- * its results).
+ * Runs a recording, never letting a telemetry failure reach the caller.
  *
- * Structured parts are counted so that a tool-calling turn, whose content is
- * often a single `functionCall` part, is not reported as 0 bytes: a dashboard
- * cannot tell such a reading apart from an unmeasured response.
+ * @param what Named in the debug log so a swallowed failure is traceable.
  */
-function getContentSize(content?: Content | null): number {
-  if (!content || !content.parts) {
-    return 0;
+function safeRecord(what: string, record: () => void): void {
+  try {
+    record();
+  } catch (e) {
+    logger.debug(`Failed to record ${what}`, e);
   }
-  let size = 0;
-  for (const part of content.parts) {
-    size += getPartSize(part);
-  }
-  return size;
 }
 
 function getProviderName(): string {
-  try {
-    return getGoogleLlmVariant() === GoogleLLMVariant.VERTEX_AI
-      ? 'vertex_ai'
-      : 'gemini';
-  } catch (_e) {
-    return 'gemini';
-  }
+  return getGoogleLlmVariant() === GoogleLLMVariant.VERTEX_AI
+    ? 'vertex_ai'
+    : 'gemini';
 }
 
+/**
+ * Attributes shared by both `gen_ai.client.*` instruments.
+ *
+ * @param responseModel The model that answered, when it is known. The duration
+ *     recorder leaves it out until a response has arrived.
+ */
+function clientAttributes(
+  agentName: string,
+  llmRequest: LlmRequest,
+  responseModel?: string,
+): Attributes {
+  const attributes: Attributes = {
+    [GEN_AI_AGENT_NAME]: agentName,
+    [GEN_AI_OPERATION_NAME]: 'generate_content',
+    [GEN_AI_PROVIDER_NAME]: getProviderName(),
+  };
+  if (llmRequest.model) {
+    attributes[GEN_AI_REQUEST_MODEL] = llmRequest.model;
+  }
+  if (responseModel) {
+    attributes[GEN_AI_RESPONSE_MODEL] = responseModel;
+  }
+  return attributes;
+}
+
+/** Records the duration of an agent invocation, in seconds. */
 export function recordAgentInvocationDuration(
   agentName: string,
-  elapsedMs: number,
-  error?: Error,
+  elapsedS: number,
+  error?: unknown,
 ): void {
-  try {
-    const attributes: Record<string, string> = {
-      'gen_ai.agent.name': agentName,
-    };
-    if (error) {
-      attributes['error.type'] = error.name || error.constructor.name;
+  safeRecord('agent invocation duration', () => {
+    const attributes: Attributes = {[GEN_AI_AGENT_NAME]: agentName};
+    if (error !== undefined) {
+      attributes[ERROR_TYPE] = resolveErrorType(error);
     }
-    histogram('agentInvocationDuration').record(elapsedMs, attributes);
-  } catch (e) {
-    logger.debug('Failed to record agent invocation duration', e);
-  }
+    histogram('agentInvocationDuration').record(elapsedS, attributes);
+  });
 }
 
+/**
+ * Records the size of an agent's request.
+ *
+ * @param userContent The content the invocation was started with, if any.
+ */
 export function recordAgentRequestSize(
   agentName: string,
-  userContent?: Content | null,
+  userContent?: Content,
 ): void {
-  try {
-    const size = getContentSize(userContent);
-    const attributes = {
-      'gen_ai.agent.name': agentName,
-    };
-    histogram('agentRequestSize').record(size, attributes);
-  } catch (e) {
-    logger.debug('Failed to record agent request size', e);
-  }
+  safeRecord('agent request size', () => {
+    histogram('agentRequestSize').record(contentSize(userContent), {
+      [GEN_AI_AGENT_NAME]: agentName,
+    });
+  });
 }
 
 /**
@@ -196,15 +219,11 @@ export function recordAgentResponseSize(
   agentName: string,
   responseContent?: Content,
 ): void {
-  try {
-    const size = getContentSize(responseContent);
-    const attributes = {
-      'gen_ai.agent.name': agentName,
-    };
-    histogram('agentResponseSize').record(size, attributes);
-  } catch (e) {
-    logger.debug('Failed to record agent response size', e);
-  }
+  safeRecord('agent response size', () => {
+    histogram('agentResponseSize').record(contentSize(responseContent), {
+      [GEN_AI_AGENT_NAME]: agentName,
+    });
+  });
 }
 
 /**
@@ -217,135 +236,152 @@ export function recordAgentWorkflowSteps(
   agentName: string,
   stepCount: number,
 ): void {
-  try {
-    const attributes = {
-      'gen_ai.agent.name': agentName,
-    };
-    histogram('agentWorkflowSteps').record(stepCount, attributes);
-  } catch (e) {
-    logger.debug('Failed to record agent workflow steps', e);
-  }
+  safeRecord('agent workflow steps', () => {
+    histogram('agentWorkflowSteps').record(stepCount, {
+      [GEN_AI_AGENT_NAME]: agentName,
+    });
+  });
 }
 
+/** Records the duration of a tool execution, in seconds. */
 export function recordToolExecutionDuration(
   toolName: string,
+  toolType: string,
   agentName: string,
-  elapsedMs: number,
-  error?: Error,
+  elapsedS: number,
+  error?: unknown,
 ): void {
-  try {
-    const attributes: Record<string, string> = {
-      'gen_ai.agent.name': agentName,
-      'gen_ai.tool.name': toolName,
+  safeRecord('tool execution duration', () => {
+    const attributes: Attributes = {
+      [GEN_AI_AGENT_NAME]: agentName,
+      [GEN_AI_TOOL_NAME]: toolName,
+      [GEN_AI_TOOL_TYPE]: toolType,
     };
-    if (error) {
-      attributes['error.type'] = error.name || error.constructor.name;
+    if (error !== undefined) {
+      attributes[ERROR_TYPE] = resolveErrorType(error);
     }
-    histogram('toolExecutionDuration').record(elapsedMs, attributes);
-  } catch (e) {
-    logger.debug('Failed to record tool execution duration', e);
-  }
+    histogram('toolExecutionDuration').record(elapsedS, attributes);
+  });
 }
 
 /**
- * Records the duration of a call to the model.
+ * Records the duration of a call to the model, in seconds.
  *
- * @param lastResponse The final response of the call, if one was produced.
- *     Only the last response carries the model version and token counts of the
- *     whole call, so intermediate streaming chunks are not needed here.
+ * @param params.response The last response the call produced, if any. Only the
+ *     last one carries the model version of the whole call.
  */
-export function recordClientOperationDuration(
-  agentName: string,
-  elapsedMs: number,
-  llmRequest: LlmRequest,
-  lastResponse?: LlmResponse,
-  error?: Error,
-): void {
-  try {
-    const attributes: Record<string, string> = {
-      'gen_ai.agent.name': agentName,
-      'gen_ai.operation.name': 'generate_content',
-      'gen_ai.provider.name': getProviderName(),
-    };
-    if (llmRequest.model) {
-      attributes['gen_ai.request.model'] = llmRequest.model;
+export function recordClientOperationDuration(params: {
+  agentName: string;
+  elapsedS: number;
+  llmRequest: LlmRequest;
+  response?: LlmResponse;
+  error?: unknown;
+}): void {
+  safeRecord('client operation duration', () => {
+    const {agentName, elapsedS, llmRequest, response, error} = params;
+    const attributes = clientAttributes(
+      agentName,
+      llmRequest,
+      response && (response.modelVersion || llmRequest.model),
+    );
+    if (error !== undefined) {
+      attributes[ERROR_TYPE] = resolveErrorType(error);
     }
-    if (lastResponse) {
-      const responseModel = lastResponse.modelVersion || llmRequest.model;
-      if (responseModel) {
-        attributes['gen_ai.response.model'] = responseModel;
-      }
-    }
-    if (error) {
-      attributes['error.type'] = error.name || error.constructor.name;
-    }
-    histogram('clientOperationDuration').record(elapsedMs / 1000.0, attributes);
-  } catch (e) {
-    logger.debug('Failed to record client operation duration', e);
-  }
+    histogram('clientOperationDuration').record(elapsedS, attributes);
+  });
 }
 
 /**
- * Records the token usage of a call to the model.
+ * Records the token usage of a call to the model, split into an `input` and an
+ * `output` measurement.
  *
- * @param lastResponse The final response of the call, if one was produced. Its
- *     `usageMetadata` covers the whole call.
+ * Cached content tokens are left out because they are already part of the
+ * prompt tokens, and the total is left out because the semantic conventions
+ * ask for the input/output breakdown instead.
+ *
+ * @param params.response The last response the call produced, if any. Usage in
+ *     a streaming response is cumulative, so the last chunk holds the total
+ *     for the whole request and earlier chunks must not be added to it.
  */
-export function recordClientTokenUsage(
-  agentName: string,
-  llmRequest: LlmRequest,
-  lastResponse?: LlmResponse,
-): void {
-  try {
-    if (!lastResponse) {
+export function recordClientTokenUsage(params: {
+  agentName: string;
+  llmRequest: LlmRequest;
+  response?: LlmResponse;
+}): void {
+  safeRecord('client token usage', () => {
+    const {agentName, llmRequest, response} = params;
+    if (!response) {
       return;
     }
-    if (!lastResponse.usageMetadata) {
-      logger.debug(
+    if (!response.usageMetadata) {
+      logger.warn(
         `Skipping missing token usage metadata for agent ${agentName} and model ${llmRequest.model}`,
       );
       return;
     }
 
-    const promptTokens = lastResponse.usageMetadata.promptTokenCount || 0;
-    const toolTokens = lastResponse.usageMetadata.toolUsePromptTokenCount || 0;
-    const inputTokenCount = promptTokens + toolTokens;
-
-    const candidatesTokens =
-      lastResponse.usageMetadata.candidatesTokenCount || 0;
-    const thoughtsTokens = lastResponse.usageMetadata.thoughtsTokenCount || 0;
-    const outputTokenCount = candidatesTokens + thoughtsTokens;
-
-    const responseModel = lastResponse.modelVersion || llmRequest.model;
-
-    const baseAttributes: Record<string, string> = {
-      'gen_ai.agent.name': agentName,
-      'gen_ai.operation.name': 'generate_content',
-      'gen_ai.provider.name': getProviderName(),
-    };
-    if (llmRequest.model) {
-      baseAttributes['gen_ai.request.model'] = llmRequest.model;
-    }
-    if (responseModel) {
-      baseAttributes['gen_ai.response.model'] = responseModel;
-    }
+    const tokenUsage = new TokenUsage(response.usageMetadata);
+    const inputTokenCount = tokenUsage.inputTokenCount ?? 0;
+    const outputTokenCount = tokenUsage.outputTokenCount ?? 0;
+    const attributes = clientAttributes(
+      agentName,
+      llmRequest,
+      response.modelVersion || llmRequest.model,
+    );
 
     if (inputTokenCount > 0) {
-      const inputAttributes = {
-        ...baseAttributes,
-        'gen_ai.token.type': 'input',
-      };
-      histogram('clientTokenUsage').record(inputTokenCount, inputAttributes);
+      histogram('clientTokenUsage').record(inputTokenCount, {
+        ...attributes,
+        [GEN_AI_TOKEN_TYPE]: 'input',
+      });
     }
-
     if (outputTokenCount > 0) {
-      const outputAttributes = {
-        ...baseAttributes,
-        'gen_ai.token.type': 'output',
-      };
-      histogram('clientTokenUsage').record(outputTokenCount, outputAttributes);
+      histogram('clientTokenUsage').record(outputTokenCount, {
+        ...attributes,
+        [GEN_AI_TOKEN_TYPE]: 'output',
+      });
     }
-  } catch (e) {
-    logger.debug('Failed to record client token usage', e);
+  });
+}
+
+/** A span whose implementation records the timings the SDK exposes. */
+interface TimedSpan extends Span {
+  startTime?: unknown;
+  endTime?: unknown;
+}
+
+function isHrTime(value: unknown): value is HrTime {
+  return (
+    Array.isArray(value) &&
+    value.length === 2 &&
+    typeof value[0] === 'number' &&
+    typeof value[1] === 'number'
+  );
+}
+
+/**
+ * Returns the duration of an operation in seconds, from one consistent time
+ * source.
+ *
+ * Note: this must be called with an ended span.
+ *
+ * @param span The ended span to take the duration from. The API `Span` type
+ *     exposes no timings, so they are read off the SDK implementation when it
+ *     provides them.
+ * @param fallbackStartMs The start time in milliseconds, as returned by
+ *     `performance.now()`, used when the span carries no readable timings.
+ */
+export function getElapsedS(
+  span: Span | undefined,
+  fallbackStartMs: number,
+): number {
+  const timed: TimedSpan | undefined = span;
+  if (timed && isHrTime(timed.startTime) && isHrTime(timed.endTime)) {
+    return (
+      timed.endTime[0] -
+      timed.startTime[0] +
+      (timed.endTime[1] - timed.startTime[1]) / 1e9
+    );
   }
+  return (performance.now() - fallbackStartMs) / 1000;
 }

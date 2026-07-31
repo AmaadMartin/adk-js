@@ -10,6 +10,7 @@ import {context, trace} from '@opentelemetry/api';
 import {createEvent, Event} from '../events/event.js';
 
 import {
+  getElapsedS,
   recordAgentInvocationDuration,
   recordAgentRequestSize,
   recordAgentResponseSize,
@@ -283,7 +284,7 @@ export abstract class BaseAgent<
     const startTime = performance.now();
     const agentName = this.name;
     const tally: AgentEventTally = {stepCount: 0};
-    let error: Error | undefined;
+    let error: unknown;
     try {
       yield* runAsyncGeneratorWithOtelContext<BaseAgent, Event>(
         ctx,
@@ -323,12 +324,15 @@ export abstract class BaseAgent<
         },
       );
     } catch (e) {
-      error = e as Error;
+      error = e;
       throw e;
     } finally {
       span.end();
-      const elapsedMs = performance.now() - startTime;
-      recordAgentInvocationDuration(agentName, elapsedMs, error);
+      recordAgentInvocationDuration(
+        agentName,
+        getElapsedS(span, startTime),
+        error,
+      );
       recordAgentWorkflowSteps(agentName, tally.stepCount);
       recordAgentResponseSize(agentName, tally.lastContent);
     }
