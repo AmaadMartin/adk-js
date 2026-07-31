@@ -24,13 +24,13 @@ const INTEGRATION_TEST_TIMEOUT_MS = 60000;
  * Maps the workspace package names onto their source trees, shared by every
  * test project.
  *
- * The patterns are anchored regexes rather than plain strings because a string
- * alias matches by prefix, so `'@google/adk'` would also rewrite
- * `@google/adk/sessions/session.js` to `core/src/sessions/session.js`.
- * `core/package.json` and `integrations/package.json` each export only `"."`,
- * so that subpath resolves for nobody outside vitest: a prefix alias makes the
- * harness accept imports that `tsc` and Node both reject. Anchoring keeps the
- * resolver no more permissive than the published exports map.
+ * The patterns are anchored regexes rather than plain strings: a string `find`
+ * matches the package root *and every subpath under it*, so `'@google/adk'`
+ * also rewrote `@google/adk/sessions/session.js` to
+ * `core/src/sessions/session.js`. `core/package.json` and
+ * `integrations/package.json` export only `"."`, so that subpath resolves for
+ * nobody outside vitest: the alias made the harness accept imports that `tsc`
+ * (`moduleResolution: nodenext`) and Node both reject.
  *
  * Import an internal symbol through a relative `../src/...` path instead.
  */
