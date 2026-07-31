@@ -60,10 +60,8 @@ describe('Build setup', () => {
         await fs.readFile(`${projectPath}/package-lock.json`, 'utf-8'),
       );
 
-      // Asserted on the lockfile rather than `lstat().isSymbolicLink()`: npm
-      // creates junctions on Windows, but records `link: true` on every npm
-      // major and every OS in the matrix. Packing the workspaces instead drops
-      // the flag and grows this lockfile from 5 entries to ~630.
+      // Not `lstat().isSymbolicLink()`: npm creates junctions on Windows, but
+      // records `link: true` on every npm major and OS in the matrix.
       expect(lock.packages['node_modules/@google/adk']?.link).toBe(true);
       expect(lock.packages['node_modules/@google/adk-devtools']?.link).toBe(
         true,

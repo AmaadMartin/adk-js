@@ -376,6 +376,7 @@ export abstract class BaseTestServer {
  * `core` and `dev` workspaces measured 0.6s against 64s for packing their
  * transitive graph, and only the link mode resolves that graph through the
  * repo-root `node_modules` that the committed root `package-lock.json` pins.
+ * `--no-audit --no-fund` just drop registry chatter no test asserts on.
  *
  * Rejects if npm fails, so a broken fixture install surfaces as a hook failure.
  */
@@ -389,9 +390,9 @@ export async function installFixtureDeps(projectPath: string): Promise<void> {
  * Removes what {@link installFixtureDeps} generated, so no fixture leaves
  * `node_modules` or a lockfile in the working tree.
  *
- * `force` ignores an install that never got that far, but anything else — a
- * locked file, a permission error — is left to reject, so a fixture that cannot
- * be cleaned fails its `afterAll` instead of silently polluting the next run.
+ * `force` ignores an install that never got that far, but anything else -- a
+ * locked file, a permission error -- is left to reject, so a fixture that
+ * cannot be cleaned fails its `afterAll` instead of polluting the next run.
  */
 export async function cleanupFixtureDeps(projectPath: string): Promise<void> {
   await fs.rm(path.join(projectPath, 'node_modules'), {
