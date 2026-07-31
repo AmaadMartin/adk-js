@@ -6,6 +6,7 @@
 
 import {
   DatabaseSessionService,
+  getSessionServiceFromUri,
   InMemorySessionService,
   LogLevel,
   setLogLevel,
@@ -47,18 +48,29 @@ vi.mock('../../src/version', () => ({
 }));
 
 vi.mock('@google/adk', async (importOriginal) => {
-  const actual = await importOriginal();
+  const actual = await importOriginal<typeof import('@google/adk')>();
   return {
-    ...(actual as object),
+    ...actual,
     setLogLevel: vi.fn(),
+    getSessionServiceFromUri: vi.fn(actual.getSessionServiceFromUri),
   };
 });
+
+// Stands in for a developer's shell exporting DATABASE_URL. It has to be a
+// plain assignment made before the first `vi.stubEnv`, because the automatic
+// unstub between tests restores each variable to the value it had at that
+// point: a stub installed later would be erased rather than inherited.
+process.env.DATABASE_URL = 'postgresql://ambient:pass@localhost:5432/ambient';
 
 describe('CLI Entrypoint', () => {
   let program: ReturnType<typeof createProgram>;
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Every web/api_server/run case resolves a session service, so an ambient
+    // DATABASE_URL would silently swap the in-memory service they assume for a
+    // database-backed one.
+    vi.stubEnv('DATABASE_URL', undefined);
     program = createProgram();
     program.exitOverride();
   });
@@ -222,6 +234,15 @@ describe('CLI Entrypoint', () => {
 
       const args = vi.mocked(runAgent).mock.calls[0][0];
       expect(args.sessionService).toBeInstanceOf(DatabaseSessionService);
+    });
+
+    // The only case that leaves DATABASE_URL unstubbed, so the ambient value
+    // set at module scope is what reaches the CLI unless `beforeEach` scrubs
+    // it.
+    it('should ignore an ambient DATABASE_URL', async () => {
+      await parse(['web']);
+
+      expect(getSessionServiceFromUri).toHaveBeenCalledWith('memory://');
     });
   });
 
