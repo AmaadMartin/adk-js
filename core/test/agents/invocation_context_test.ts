@@ -7,14 +7,22 @@
 import {
   BaseAgent,
   BaseAgentConfig,
+  BaseAgentState,
   Event,
   InvocationContext,
   LoopAgent,
   PluginManager,
+  ResumabilityConfig,
   Session,
   createEvent,
+  createEventActions,
+  createSession,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
+
+// transformToCamelCaseEvent is internal to the events module, so it has no
+// public entry point to import from.
+import {transformToCamelCaseEvent} from '../../src/events/event.js';
 
 function makeSession(): Session {
   return {
@@ -170,5 +178,335 @@ describe('InvocationContext LLM-call cost tracking', () => {
     // Exactly the 3 permitted iterations produced an event before the throw,
     // proving the counter is shared across the per-iteration child contexts.
     expect(events).toHaveLength(3);
+  });
+});
+
+/**
+ * Builds a context whose session holds `events`, the analogue of the reference
+ * suite's `_create_test_invocation_context`.
+ */
+function makeContext(
+  options: {
+    resumabilityConfig?: ResumabilityConfig;
+    events?: Event[];
+    agent?: BaseAgent;
+  } = {},
+): InvocationContext {
+  return new InvocationContext({
+    invocationId: 'inv-1',
+    agent: options.agent ?? new LoopAgent({name: 'agent1'}),
+    session: createSession({
+      id: 'test-session',
+      appName: 'test-app',
+      userId: 'test-user',
+      events: options.events ?? [],
+    }),
+    pluginManager: new PluginManager(),
+    resumabilityConfig: options.resumabilityConfig,
+  });
+}
+
+function makeAgentEvent(params: Partial<Event>): Event {
+  return createEvent({invocationId: 'inv-1', author: 'agent1', ...params});
+}
+
+const MODEL_CONTENT = {role: 'model', parts: [{text: 'hi'}]};
+
+describe('InvocationContext.isResumable', () => {
+  it('is true when the resumability config enables resumption', () => {
+    expect(
+      makeContext({resumabilityConfig: {isResumable: true}}).isResumable,
+    ).toBe(true);
+  });
+
+  it('is false when the resumability config disables resumption', () => {
+    expect(
+      makeContext({resumabilityConfig: {isResumable: false}}).isResumable,
+    ).toBe(false);
+  });
+
+  it('is false when no resumability config is set', () => {
+    expect(makeContext().isResumable).toBe(false);
+  });
+
+  it('survives the child-context spread, which does not copy accessors', () => {
+    const parent = makeContext({resumabilityConfig: {isResumable: true}});
+    const child = new InvocationContext({
+      ...parent,
+      agent: new LoopAgent({name: 'sub'}),
+    });
+    expect(child.isResumable).toBe(true);
+  });
+});
+
+describe('InvocationContext.getCurrentInvocationEvents', () => {
+  it('keeps only this invocation, in session order', () => {
+    const first = makeAgentEvent({content: MODEL_CONTENT});
+    const other = createEvent({invocationId: 'inv-2', author: 'agent1'});
+    const last = makeAgentEvent({content: MODEL_CONTENT});
+
+    const events = makeContext({
+      events: [first, other, last],
+    }).getCurrentInvocationEvents();
+
+    expect(events).toEqual([first, last]);
+  });
+
+  it('returns an empty list for a session with no events', () => {
+    expect(makeContext().getCurrentInvocationEvents()).toEqual([]);
+  });
+});
+
+describe('InvocationContext.setAgentState', () => {
+  it('marks the agent final and drops its checkpoint', () => {
+    const ctx = makeContext();
+    ctx.setAgentState('agent1', {agentState: {}});
+
+    ctx.setAgentState('agent1', {endOfAgent: true});
+
+    expect(ctx.agentStates).toEqual({});
+    expect(ctx.endOfAgents).toEqual({agent1: true});
+  });
+
+  it('records the checkpoint by reference and clears the final flag', () => {
+    const ctx = makeContext();
+    ctx.setAgentState('agent1', {endOfAgent: true});
+    const agentState: BaseAgentState = {timesLooped: 1};
+
+    ctx.setAgentState('agent1', {agentState});
+
+    expect(ctx.agentStates['agent1']).toBe(agentState);
+    expect(ctx.endOfAgents).toEqual({agent1: false});
+  });
+
+  it('ignores the checkpoint when the agent is also marked final', () => {
+    const ctx = makeContext();
+
+    ctx.setAgentState('agent1', {agentState: {}, endOfAgent: true});
+
+    expect(ctx.agentStates).toEqual({});
+    expect(ctx.endOfAgents).toEqual({agent1: true});
+  });
+
+  it('removes both entries when called with no options, so the agent may re-run', () => {
+    const ctx = makeContext();
+    ctx.setAgentState('agent1', {endOfAgent: true});
+
+    ctx.setAgentState('agent1');
+
+    expect('agent1' in ctx.agentStates).toBe(false);
+    expect('agent1' in ctx.endOfAgents).toBe(false);
+  });
+});
+
+describe('InvocationContext.resetSubAgentStates', () => {
+  function makeAgentTree(): BaseAgent {
+    return new LoopAgent({
+      name: 'root_agent',
+      subAgents: [
+        new LoopAgent({
+          name: 'sub_agent_1',
+          subAgents: [new LoopAgent({name: 'sub_sub_agent_1'})],
+        }),
+        new LoopAgent({name: 'sub_agent_2'}),
+      ],
+    });
+  }
+
+  it('clears every transitive sub-agent', () => {
+    const ctx = makeContext({agent: makeAgentTree()});
+    ctx.setAgentState('sub_agent_1', {agentState: {}});
+    ctx.setAgentState('sub_agent_2', {endOfAgent: true});
+    ctx.setAgentState('sub_sub_agent_1', {agentState: {}});
+
+    ctx.resetSubAgentStates('root_agent');
+
+    expect(ctx.agentStates).toEqual({});
+    expect(ctx.endOfAgents).toEqual({});
+  });
+
+  it('leaves the state of the named agent itself untouched', () => {
+    const ctx = makeContext({agent: makeAgentTree()});
+    ctx.setAgentState('root_agent', {agentState: {}});
+    ctx.setAgentState('sub_agent_1', {agentState: {}});
+
+    ctx.resetSubAgentStates('root_agent');
+
+    expect(ctx.agentStates).toEqual({root_agent: {}});
+    expect(ctx.endOfAgents).toEqual({root_agent: false});
+  });
+
+  it('is a no-op for an agent name that is not in the tree', () => {
+    const ctx = makeContext({agent: makeAgentTree()});
+    ctx.setAgentState('sub_agent_1', {agentState: {}});
+
+    expect(() => ctx.resetSubAgentStates('nope')).not.toThrow();
+    expect(ctx.agentStates).toEqual({sub_agent_1: {}});
+    expect(ctx.endOfAgents).toEqual({sub_agent_1: false});
+  });
+});
+
+describe('InvocationContext.populateInvocationAgentStates', () => {
+  function populate(events: Event[]): InvocationContext {
+    const ctx = makeContext({
+      resumabilityConfig: {isResumable: true},
+      events,
+    });
+    ctx.populateInvocationAgentStates();
+    return ctx;
+  }
+
+  it('marks an agent final from an endOfAgent event', () => {
+    const ctx = populate([
+      makeAgentEvent({actions: createEventActions({endOfAgent: true})}),
+    ]);
+
+    expect(ctx.agentStates).toEqual({});
+    expect(ctx.endOfAgents).toEqual({agent1: true});
+  });
+
+  it('restores a checkpoint and invalidates a stale final flag', () => {
+    const ctx = makeContext({
+      resumabilityConfig: {isResumable: true},
+      events: [makeAgentEvent({actions: createEventActions({agentState: {}})})],
+    });
+    ctx.setAgentState('agent1', {endOfAgent: true});
+
+    ctx.populateInvocationAgentStates();
+
+    expect(ctx.agentStates).toEqual({agent1: {}});
+    expect(ctx.endOfAgents).toEqual({agent1: false});
+  });
+
+  it('seeds an empty checkpoint for an agent that produced content without one', () => {
+    const ctx = populate([makeAgentEvent({content: MODEL_CONTENT})]);
+
+    expect(ctx.agentStates).toEqual({agent1: {}});
+    expect(ctx.endOfAgents).toEqual({agent1: false});
+  });
+
+  it('lets endOfAgent win over agentState on the same event', () => {
+    const ctx = populate([
+      makeAgentEvent({
+        actions: createEventActions({endOfAgent: true, agentState: {}}),
+      }),
+    ]);
+
+    expect(ctx.agentStates).toEqual({});
+    expect(ctx.endOfAgents).toEqual({agent1: true});
+  });
+
+  it('ignores events belonging to another invocation', () => {
+    const ctx = populate([
+      makeAgentEvent({content: MODEL_CONTENT}),
+      createEvent({
+        invocationId: 'inv-2',
+        author: 'agent1',
+        actions: createEventActions({endOfAgent: true}),
+      }),
+    ]);
+
+    expect(ctx.agentStates).toEqual({agent1: {}});
+    expect(ctx.endOfAgents).toEqual({agent1: false});
+  });
+
+  it('does nothing when the invocation is not resumable', () => {
+    const ctx = makeContext({
+      resumabilityConfig: {isResumable: false},
+      events: [
+        makeAgentEvent({actions: createEventActions({endOfAgent: true})}),
+      ],
+    });
+
+    ctx.populateInvocationAgentStates();
+
+    expect(ctx.agentStates).toEqual({});
+    expect(ctx.endOfAgents).toEqual({});
+  });
+
+  it('ignores a user content event', () => {
+    const ctx = populate([
+      makeAgentEvent({
+        author: 'user',
+        content: {role: 'user', parts: [{text: 'hi'}]},
+      }),
+    ]);
+
+    expect(ctx.agentStates).toEqual({});
+    expect(ctx.endOfAgents).toEqual({});
+  });
+
+  it('ignores an event with neither content nor agent-state actions', () => {
+    const ctx = populate([makeAgentEvent({})]);
+
+    expect(ctx.agentStates).toEqual({});
+    expect(ctx.endOfAgents).toEqual({});
+  });
+
+  it('ignores an event with no author', () => {
+    const ctx = populate([
+      createEvent({
+        invocationId: 'inv-1',
+        content: MODEL_CONTENT,
+        actions: createEventActions({endOfAgent: true}),
+      }),
+    ]);
+
+    expect(ctx.agentStates).toEqual({});
+    expect(ctx.endOfAgents).toEqual({});
+  });
+
+  it('does not overwrite a recorded checkpoint with the empty seed', () => {
+    const ctx = makeContext({
+      resumabilityConfig: {isResumable: true},
+      events: [makeAgentEvent({content: MODEL_CONTENT})],
+    });
+    ctx.setAgentState('agent1', {agentState: {timesLooped: 1}});
+
+    ctx.populateInvocationAgentStates();
+
+    expect(ctx.agentStates).toEqual({agent1: {timesLooped: 1}});
+    expect(ctx.endOfAgents).toEqual({agent1: false});
+  });
+
+  it('treats a null agent_state written by adk-python as "not recorded"', () => {
+    // A persisted adk-python event serializes an unset checkpoint as null, not
+    // as an absent key, so it arrives here as `agentState: null`.
+    const pythonEvent = transformToCamelCaseEvent({
+      id: 'e1',
+      invocation_id: 'inv-1',
+      author: 'agent1',
+      content: {role: 'model', parts: [{text: 'hi'}]},
+      actions: {end_of_agent: null, agent_state: null},
+    });
+
+    const ctx = populate([pythonEvent]);
+
+    expect(ctx.agentStates).toEqual({agent1: {}});
+    expect(ctx.endOfAgents).toEqual({agent1: false});
+  });
+});
+
+describe('InvocationContext agent-state sharing with child contexts', () => {
+  it('records a sub-agent checkpoint on the parent context', () => {
+    const parent = makeContext({resumabilityConfig: {isResumable: true}});
+    const child = new InvocationContext({
+      ...parent,
+      agent: new LoopAgent({name: 'sub'}),
+    });
+
+    child.setAgentState('sub', {agentState: {timesLooped: 2}});
+    child.setAgentState('agent1', {endOfAgent: true});
+
+    expect(parent.agentStates).toEqual({sub: {timesLooped: 2}});
+    expect(parent.endOfAgents).toEqual({sub: false, agent1: true});
+  });
+
+  it('starts a separate invocation with its own maps', () => {
+    const first = makeContext();
+    first.setAgentState('agent1', {endOfAgent: true});
+
+    expect(makeContext().endOfAgents).toEqual({});
+    expect(first.endOfAgents).toEqual({agent1: true});
   });
 });
