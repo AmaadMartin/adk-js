@@ -9,8 +9,17 @@ import {defineConfig} from 'vitest/config';
 
 /**
  * Hook budget (ms) for the `integration` project: install-heavy `beforeAll`
- * hooks run `npm install` (and sometimes `npm run build`) per fixture, which
- * exceeds Vitest's 10s default on a slow or loaded machine.
+ * hooks run `npm install` (and sometimes `npm run build`) per fixture, and the
+ * matching `afterAll` hooks recursively remove the resulting `node_modules`.
+ * That exceeds Vitest's 10s default on a slow or loaded machine.
+ *
+ * The twelve `build_setup` hook runs take ~16s combined warm on ubuntu-latest,
+ * but a cold, network-bound install has been measured at ~70s, so 120s covers
+ * the worst case. Trade-off: a genuinely stuck hook takes this long to surface.
+ *
+ * This is the only definition of that budget. Suites must not pass a timeout
+ * argument to an install or teardown hook: it shadows this floor rather than
+ * raising it, and a per-test `it()` budget is not a hook budget.
  */
 const INTEGRATION_HOOK_TIMEOUT_MS = 120000;
 

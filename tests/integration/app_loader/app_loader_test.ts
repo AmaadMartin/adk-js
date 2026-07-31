@@ -29,7 +29,7 @@ describe('App loader CLI integration', () => {
 
       beforeAll(async () => {
         await execAsync('npm install', {cwd: projectPath});
-      }, TEST_EXECUTION_TIMEOUT);
+      });
 
       it(
         'should run app via package.json start script and get responses',
@@ -62,7 +62,7 @@ describe('App loader CLI integration', () => {
         await fs
           .unlink(path.join(projectPath, 'package-lock.json'))
           .catch(() => {});
-      }, TEST_EXECUTION_TIMEOUT);
+      });
     },
   );
 });
@@ -77,7 +77,7 @@ describe('AgentLoader discovery and loading integration', () => {
   beforeAll(async () => {
     await execAsync('npm install', {cwd: projectPath});
     loader = new AgentLoader(projectPath);
-  }, TEST_EXECUTION_TIMEOUT);
+  });
 
   it(
     'should discover apps vs agents across directories and standalone files',
@@ -138,5 +138,5 @@ describe('AgentLoader discovery and loading integration', () => {
     await fs
       .unlink(path.join(projectPath, 'package-lock.json'))
       .catch(() => {});
-  }, TEST_EXECUTION_TIMEOUT);
+  });
 });
