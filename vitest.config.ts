@@ -49,8 +49,13 @@ export default defineConfig({
         test: {
           name: 'unit:dev',
           environment: 'node',
+          // `@google/adk-devtools` is aliased to source in this project only.
+          // The `integration` project must keep resolving it to `dev/dist`:
+          // AdkApiServer serves the debug UI from `__dirname/../../browser`,
+          // which only ever exists as the downloaded `dev/dist/browser`.
           alias: {
             '@google/adk': path.resolve(__dirname, './core/src'),
+            '@google/adk-devtools': path.resolve(__dirname, './dev/src'),
             '@google/adk-integrations': path.resolve(
               __dirname,
               './integrations/src',
