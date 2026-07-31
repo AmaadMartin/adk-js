@@ -27,6 +27,7 @@ import {
   replaceDirnamePlugin,
 } from '../../src/utils/agent_loader.js';
 import * as fileUtils from '../../src/utils/file_utils.js';
+import {AdkLogger} from '../../src/utils/logger.js';
 
 vi.mock('../../src/utils/file_utils.js', () => ({
   getTempDir: vi.fn(),
@@ -747,6 +748,54 @@ describe('AgentLoader', () => {
 
       expect(agents).not.toContain('bad_agent_dir');
       await loader.disposeAll();
+    });
+
+    it('warns when a standalone agent file exports no BaseAgent', async () => {
+      const brokenPath = path.join(tempAgentsDir, 'broken_agent.js');
+      await fs.writeFile(brokenPath, 'exports.notAnAgent = 42;');
+
+      const warnSpy = vi
+        .spyOn(AdkLogger.prototype, 'warn')
+        .mockImplementation(() => {});
+      const loader = new AgentLoader(tempAgentsDir);
+      const agents = await loader.listAgents();
+
+      expect(agents).not.toContain('broken_agent');
+      const skipWarning = warnSpy.mock.calls
+        .map((args) => args.join(' '))
+        .find((message) => message.includes(brokenPath));
+      expect(skipWarning).toBeDefined();
+      expect(skipWarning).toContain(
+        'No @google/adk BaseAgent class instance found',
+      );
+
+      await loader.disposeAll();
+      warnSpy.mockRestore();
+    });
+
+    it('warns when a directory entrypoint exports no BaseAgent', async () => {
+      const brokenDir = path.join(tempAgentsDir, 'broken_entry_dir');
+      const brokenPath = path.join(brokenDir, 'agent.js');
+      await fs.mkdir(brokenDir);
+      await fs.writeFile(brokenPath, 'exports.foo = "bar";');
+
+      const warnSpy = vi
+        .spyOn(AdkLogger.prototype, 'warn')
+        .mockImplementation(() => {});
+      const loader = new AgentLoader(tempAgentsDir);
+      const agents = await loader.listAgents();
+
+      expect(agents).not.toContain('broken_entry_dir');
+      const skipWarning = warnSpy.mock.calls
+        .map((args) => args.join(' '))
+        .find((message) => message.includes(brokenPath));
+      expect(skipWarning).toBeDefined();
+      expect(skipWarning).toContain(
+        'No @google/adk BaseAgent class instance found',
+      );
+
+      await loader.disposeAll();
+      warnSpy.mockRestore();
     });
 
     it('discovers app entrypoint files (e.g. app.js) in directories and lists them via listApps() / getAppFile()', async () => {
