@@ -8,6 +8,7 @@ import {
   BaseAgent,
   BaseAgentConfig,
   Event,
+  InMemoryCredentialService,
   InvocationContext,
   LoopAgent,
   PluginManager,
@@ -56,6 +57,40 @@ class LlmCallingAgent extends BaseAgent {
     // Not needed for this test.
   }
 }
+
+describe('InvocationContext services', () => {
+  it('exposes the credential service it was constructed with', () => {
+    const credentialService = new InMemoryCredentialService();
+
+    const context = new InvocationContext({
+      invocationId: 'inv-1',
+      agent: new LoopAgent({name: 'root'}),
+      session: makeSession(),
+      pluginManager: new PluginManager(),
+      credentialService,
+    });
+
+    expect(context.credentialService).toBe(credentialService);
+  });
+
+  it('passes the credential service down to a child context', () => {
+    const credentialService = new InMemoryCredentialService();
+    const root = new InvocationContext({
+      invocationId: 'inv-1',
+      agent: new LoopAgent({name: 'root'}),
+      session: makeSession(),
+      pluginManager: new PluginManager(),
+      credentialService,
+    });
+
+    const child = new InvocationContext({
+      ...root,
+      agent: new LoopAgent({name: 'child'}),
+    });
+
+    expect(child.credentialService).toBe(credentialService);
+  });
+});
 
 describe('InvocationContext LLM-call cost tracking', () => {
   it('shares the LLM-call counter across child contexts so maxLlmCalls spans the whole invocation', () => {
