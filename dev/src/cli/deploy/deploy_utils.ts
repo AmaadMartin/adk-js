@@ -3,12 +3,14 @@
  * Copyright 2026 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
+import dotenv from 'dotenv';
 import {exec, spawn, SpawnOptions} from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import {promisify} from 'node:util';
 import {AgentFileOptions, AgentLoader} from '../../utils/agent_loader.js';
 import {
+  isFileExists,
   loadFileData,
   saveToFile,
   tryToFindFileRecursively,
@@ -193,4 +195,146 @@ export async function resolveDefaultFromGcloudConfig(
 ): Promise<string | undefined> {
   const {stdout} = await execAsync('gcloud config get-value ' + property);
   return stdout.trim();
+}
+
+/** Environment configuration read from an agent's `.env` file. */
+export interface AgentEnvConfig {
+  /** Variables to forward to the deployed agent, in file order. */
+  envVars: Record<string, string>;
+  /** Google Cloud project, resolved from the CLI flag then `.env`. */
+  project?: string;
+  /** Google Cloud region, resolved from the CLI flag then `.env`. */
+  region?: string;
+}
+
+/**
+ * Removes `key` from `envVars` and returns its value when it should act as a
+ * fall-back for a CLI flag, i.e. when it is non-empty and the flag is unset.
+ */
+function takeEnvFallback(
+  envVars: Record<string, string>,
+  key: string,
+  flagValue: string | undefined,
+  flagName: string,
+): string | undefined {
+  const value = envVars[key];
+  delete envVars[key];
+
+  if (!value) {
+    return undefined;
+  }
+  if (flagValue) {
+    console.warn(
+      `Ignoring ${key} in .env as \`${flagName}\` was explicitly passed and takes precedence`,
+    );
+    return undefined;
+  }
+  return value;
+}
+
+/**
+ * Reads `<agentDir>/.env` and returns the variables to forward to the deployed
+ * agent, together with the project/region it resolves.
+ *
+ * `GOOGLE_CLOUD_PROJECT` and `GOOGLE_CLOUD_LOCATION` are consumed as fall-backs
+ * for the CLI flags and removed from the forwarded set: the resolved values are
+ * already written into the generated Dockerfile, and re-forwarding a stale copy
+ * would override them at runtime.
+ *
+ * Returns empty results when the file does not exist. Variable values are never
+ * logged.
+ */
+export async function loadAgentEnvConfig(
+  agentDir: string,
+  options: {project?: string; region?: string},
+): Promise<AgentEnvConfig> {
+  const envFile = path.join(agentDir, '.env');
+  if (!(await isFileExists(envFile))) {
+    return {envVars: {}, project: options.project, region: options.region};
+  }
+
+  console.info(`Reading environment variables from ${envFile}`);
+  const envVars = dotenv.parse(await fs.readFile(envFile, {encoding: 'utf-8'}));
+
+  const envProject = takeEnvFallback(
+    envVars,
+    'GOOGLE_CLOUD_PROJECT',
+    options.project,
+    '--project',
+  );
+  if (envProject) {
+    console.info(
+      `project='${envProject}' set by GOOGLE_CLOUD_PROJECT in ${envFile}`,
+    );
+  }
+
+  const envRegion = takeEnvFallback(
+    envVars,
+    'GOOGLE_CLOUD_LOCATION',
+    options.region,
+    '--region',
+  );
+  if (envRegion) {
+    console.info(
+      `region='${envRegion}' set by GOOGLE_CLOUD_LOCATION in ${envFile}`,
+    );
+  }
+
+  const forwarded = Object.keys(envVars);
+  if (forwarded.length) {
+    console.info(
+      `Forwarding ${forwarded.length} environment variable(s) from ${
+        envFile
+      }: ${forwarded.join(', ')}`,
+    );
+  }
+
+  return {
+    envVars,
+    project: options.project || envProject,
+    region: options.region || envRegion,
+  };
+}
+
+/**
+ * Delimiters gcloud accepts for dict-valued flags, in preference order. See
+ * https://cloud.google.com/sdk/gcloud/reference/topic/escaping
+ */
+const GCLOUD_DICT_DELIMITERS = [',', '@', '|', ';', '#'] as const;
+
+/**
+ * Formats env vars as a single gcloud dict-flag value. gcloud splits pairs on
+ * `,` unless the value opens with `^DELIM^`, so a delimiter absent from the
+ * payload is selected.
+ */
+export function formatGcloudEnvVarsArg(
+  envVars: Record<string, string>,
+): string {
+  const entries = Object.entries(envVars).map(
+    ([name, value]) => `${name}=${value}`,
+  );
+  const delimiter = GCLOUD_DICT_DELIMITERS.find((candidate) =>
+    entries.every((entry) => !entry.includes(candidate)),
+  );
+
+  if (!delimiter) {
+    const offending = Object.entries(envVars)
+      .filter(([name, value]) =>
+        GCLOUD_DICT_DELIMITERS.some((candidate) =>
+          `${name}=${value}`.includes(candidate),
+        ),
+      )
+      .map(([name]) => name);
+    throw new Error(
+      `Cannot pass environment variable(s) ${offending.join(
+        ', ',
+      )} to gcloud: their values use every supported delimiter (${GCLOUD_DICT_DELIMITERS.join(
+        ' ',
+      )}). Remove them from .env and set them on the service directly with "gcloud run services update --update-env-vars".`,
+    );
+  }
+
+  return delimiter === ','
+    ? entries.join(',')
+    : `^${delimiter}^${entries.join(delimiter)}`;
 }
