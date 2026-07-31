@@ -10,6 +10,13 @@ const MODEL_NAME_PATTERN =
   '^projects/[^/]+/locations/[^/]+/publishers/[^/]+/models/(.+)$';
 
 /**
+ * Matches the Early Access Program (EAP) Gemini naming convention. Lower-case
+ * only, and without the `g` flag so `.test()` stays stateless.
+ */
+const EAP_MODEL_NAME_PATTERN =
+  /^gemini-[a-z0-9_]+(?:-[a-z0-9_]+)*-early-exp\d*$/;
+
+/**
  * Extract the actual model name from either simple or path-based format.
  *
  * @param modelString Either a simple model name like "gemini-2.5-pro" or
@@ -72,10 +79,31 @@ export function isGemini1Model(modelString: string): boolean {
 }
 
 /**
- * Check if the model is a Gemini 2.x model using regex patterns.
+ * Check if the model is an Early Access Program (EAP) Gemini model.
+ *
+ * Matches names of the form `gemini-<variant>-early-exp` optionally followed
+ * by a numeric suffix, e.g. `gemini-flash-early-exp` or
+ * `gemini-flash-early-exp3`. `<variant>` is one or more alphanumeric or
+ * underscore segments separated by `-` (e.g. `flash`, `pro`, `flash-lite`).
+ *
+ * @param modelName An already-extracted model name, as returned by
+ *     {@link extractModelName}
+ * @return true if it matches the EAP naming convention, false otherwise.
+ */
+function isGeminiEapModel(modelName: string): boolean {
+  return EAP_MODEL_NAME_PATTERN.test(modelName);
+}
+
+/**
+ * Check if the model is a Gemini EAP or a Gemini 2.0+ model.
+ *
+ * EAP Gemini models do not encode a numeric version, so they are matched by
+ * naming convention first (see {@link isGeminiEapModel}). Otherwise the model
+ * name is parsed as a version and matches when the major version is >= 2.
  *
  * @param modelString Either a simple model name or path - based model name
- * @return true if it's a Gemini 2.x model, false otherwise.
+ * @return true if it's a Gemini EAP model or a Gemini 2.0+ model, false
+ *     otherwise.
  */
 export function isGemini2OrAbove(modelString: string): boolean {
   if (!modelString) {
@@ -83,6 +111,10 @@ export function isGemini2OrAbove(modelString: string): boolean {
   }
 
   const modelName = extractModelName(modelString);
+
+  if (isGeminiEapModel(modelName)) {
+    return true;
+  }
 
   if (!modelName.startsWith('gemini-')) {
     return false;
