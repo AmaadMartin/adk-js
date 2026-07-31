@@ -100,6 +100,23 @@ export class DatabaseSessionService extends BaseSessionService {
     this.initialized = true;
   }
 
+  /**
+   * Closes the underlying database connection and releases pooled resources.
+   *
+   * Safe to call more than once, and safe to call before {@link init}. The
+   * service is left re-initializable: a subsequent operation calls
+   * {@link init} again and opens a fresh connection.
+   */
+  async close(): Promise<void> {
+    if (!this.orm) {
+      return;
+    }
+
+    await this.orm.close();
+    this.orm = undefined;
+    this.initialized = false;
+  }
+
   async createSession({
     appName,
     userId,
