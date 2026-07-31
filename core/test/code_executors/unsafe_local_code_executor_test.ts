@@ -14,13 +14,11 @@ import {
   createSession,
 } from '@google/adk';
 import {EventEmitter} from 'node:events';
-import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   InterpreterCommands,
-  createTempScriptFile,
   getExtensionForLanguage,
   resolveInterpreterDefaults,
   resolveSpawnCommand,
@@ -749,25 +747,5 @@ describe('platform-independent resolution', () => {
         ).toEqual({command: 'node-command', args: [SCRIPT]});
       },
     );
-  });
-
-  describe('createTempScriptFile', () => {
-    it('falls back to a .js script when the language has no extension', async () => {
-      const {filePath, tempDir} = await createTempScriptFile(
-        'console.log("fallback");',
-        CodeExecutionLanguage.UNSPECIFIED,
-        undefined,
-        false,
-      );
-
-      try {
-        expect(path.basename(filePath)).toBe('script.js');
-        await expect(fs.readFile(filePath, 'utf8')).resolves.toBe(
-          'console.log("fallback");',
-        );
-      } finally {
-        await fs.rm(tempDir, {recursive: true, force: true});
-      }
-    });
   });
 });

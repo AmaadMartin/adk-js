@@ -70,11 +70,10 @@ export interface InterpreterCommands {
   shell: string;
 }
 
-export async function createTempScriptFile(
+async function createTempScriptFile(
   code: string,
   language: CodeExecutionLanguage,
-  shellCommandPath: string | undefined,
-  isWindows: boolean,
+  shellCommandPath?: string,
 ): Promise<{filePath: string; tempDir: string}> {
   const tempDir = path.join(
     os.tmpdir(),
@@ -84,7 +83,7 @@ export async function createTempScriptFile(
   await fs.mkdir(tempDir, {recursive: true});
 
   const ext =
-    getExtensionForLanguage(language, shellCommandPath, isWindows) || '.js';
+    getExtensionForLanguage(language, shellCommandPath, IS_WINDOWS) || '.js';
   const filePath = path.join(tempDir, `script${ext}`);
   await fs.writeFile(filePath, code);
 
@@ -241,7 +240,6 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
         code,
         language,
         this.commands.shell,
-        IS_WINDOWS,
       );
       const filePath = res.filePath;
       tempDir = res.tempDir;

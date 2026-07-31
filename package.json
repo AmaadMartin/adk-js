@@ -30,7 +30,6 @@
     "test:e2e": "vitest --project e2e",
     "test:cross-language": "vitest --project cross-language",
     "test:coverage": "vitest run --project unit:core --project unit:dev --project integration --project e2e --coverage",
-    "coverage:diff": "node scripts/diff_coverage.mjs",
     "prepare": "husky"
   },
   "workspaces": [

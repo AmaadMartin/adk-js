@@ -47,7 +47,9 @@ jobs:
         run: npm run test:coverage
 
       # Uploaded even when the threshold check fails the step above: that is
-      # exactly when the per-leg report is worth diffing (npm run coverage:diff).
+      # exactly when the per-leg report is wanted. Without this the report is
+      # written to the gitignored coverage/ directory and discarded, so a leg
+      # reporting different totals from its siblings cannot be investigated.
       - name: Upload coverage report
         if: always()
         uses: actions/upload-artifact@v4

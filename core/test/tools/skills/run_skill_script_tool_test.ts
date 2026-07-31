@@ -246,8 +246,11 @@ describe('buildWrapperCode', () => {
       "import runpy\nrunpy.run_path('./scripts/setup.js', run_name='__main__')",
     ],
     [CodeExecutionLanguage.SHELL, 'source ./scripts/setup.js "$@"'],
-    // The Windows arms emit a doubled separator today. Windows resolves the
-    // path regardless, and this change deliberately does not alter it.
+    // The Windows arms emit a doubled separator because buildWrapperCode's
+    // replacement is '\\\\' inside a template literal. Windows resolves the
+    // path anyway, so the next two expectations characterise what the code
+    // does today rather than state an intended contract: whoever narrows that
+    // replacement to a single separator should update them in the same change.
     [CodeExecutionLanguage.POWERSHELL, '& .\\scripts\\\\setup.js $args'],
     [CodeExecutionLanguage.WINDOWS_CMD, 'call .\\scripts\\\\setup.js %*'],
   ])('wraps a script for %s', (language, expected) => {
