@@ -63,6 +63,7 @@ describe('ComputerUseTool', () => {
     const tool = new ComputerUseTool({
       func: async (args) => {
         capturedArgs = args;
+        return {};
       },
       screenSize: [1920, 1080],
     });
@@ -85,6 +86,7 @@ describe('ComputerUseTool', () => {
     const tool = new ComputerUseTool({
       func: async (args) => {
         capturedArgs = args;
+        return {};
       },
       screenSize: [1280, 800],
       virtualScreenSize: [2000, 2000],
@@ -100,7 +102,7 @@ describe('ComputerUseTool', () => {
 
   it('rejects unexpected non-numeric coordinates', async () => {
     const tool = new ComputerUseTool({
-      func: async () => {},
+      func: async () => ({}),
       screenSize: [1920, 1080],
     });
 
@@ -139,7 +141,7 @@ describe('ComputerUseTool', () => {
 
   it('implements safety decisions correctly for require_confirmation', async () => {
     const tool = new ComputerUseTool({
-      func: async () => {},
+      func: async () => ({}),
       screenSize: [1920, 1080],
     });
 
@@ -163,7 +165,7 @@ describe('ComputerUseTool', () => {
 
   it('ignores a safety decision that is not an object', async () => {
     const tool = new ComputerUseTool({
-      func: async () => 'ran',
+      func: async () => ({url: 'ran'}),
       screenSize: [1920, 1080],
     });
 
@@ -172,12 +174,12 @@ describe('ComputerUseTool', () => {
       toolContext: context,
     });
 
-    expect(response).toBe('ran');
+    expect(response).toEqual({url: 'ran'});
   });
 
   it('rejects call if toolConfirmation is strictly unconfirmed', async () => {
     const tool = new ComputerUseTool({
-      func: async () => {},
+      func: async () => ({}),
       screenSize: [1920, 1080],
     });
 
@@ -193,7 +195,7 @@ describe('ComputerUseTool', () => {
 
   it('returns undefined for _getDeclaration()', () => {
     const tool = new ComputerUseTool({
-      func: async () => {},
+      func: async () => ({}),
       screenSize: [1920, 1080],
       name: 'click_at',
     });
@@ -204,7 +206,7 @@ describe('ComputerUseTool', () => {
   it('adds safety_acknowledgement if confirmation is true', async () => {
     const tool = new ComputerUseTool({
       func: async () => {
-        return {something: 'else'};
+        return {url: 'https://example.com'};
       },
       screenSize: [1920, 1080],
     });
@@ -217,14 +219,14 @@ describe('ComputerUseTool', () => {
     });
 
     expect(response).toEqual({
-      something: 'else',
+      url: 'https://example.com',
       safety_acknowledgement: 'true',
     });
   });
 
   it('provides a no-op processLlmRequest', async () => {
     const tool = new ComputerUseTool({
-      func: async () => {},
+      func: async () => ({}),
       screenSize: [1920, 1080],
     });
     const llmRequest: LlmRequest = {
@@ -236,47 +238,6 @@ describe('ComputerUseTool', () => {
       tool.processLlmRequest({llmRequest, toolContext: context}),
     ).resolves.toBeUndefined();
     expect(llmRequest.toolsDict).toEqual({});
-  });
-
-  it('returns a result with a non-binary screenshot untouched', async () => {
-    const tool = new ComputerUseTool({
-      func: async () => {
-        return {screenshot: 123, url: 'https://example.com'};
-      },
-      screenSize: [1920, 1080],
-    });
-    const response = await tool.runAsync({args: {}, toolContext: context});
-    expect(response).toEqual({screenshot: 123, url: 'https://example.com'});
-  });
-
-  it('never encodes a string screenshot as if it were image bytes', async () => {
-    const tool = new ComputerUseTool({
-      func: async () => {
-        return {screenshot: 'not-bytes', url: 'https://example.com'};
-      },
-      screenSize: [1920, 1080],
-    });
-
-    const response = await tool.runAsync({args: {}, toolContext: context});
-
-    expect(response).toEqual({
-      screenshot: 'not-bytes',
-      url: 'https://example.com',
-    });
-    expect(response).not.toHaveProperty('image');
-  });
-
-  it('returns a state carrying an unknown key untouched', async () => {
-    const tool = new ComputerUseTool({
-      func: async () => {
-        return {url: 'https://example.com', extra: 1};
-      },
-      screenSize: [1920, 1080],
-    });
-
-    const response = await tool.runAsync({args: {}, toolContext: context});
-
-    expect(response).toEqual({url: 'https://example.com', extra: 1});
   });
 
   it('omits the image key for a state with no screenshot', async () => {
@@ -336,19 +297,6 @@ describe('ComputerUseTool', () => {
     expect(tool.virtualScreenSize).toEqual([800, 600]);
   });
 
-  it('handles non-object response with confirmation', async () => {
-    const tool = new ComputerUseTool({
-      func: async () => 'raw string',
-      screenSize: [1920, 1080],
-    });
-    context.toolConfirmation = new ToolConfirmation({confirmed: true});
-    const response = await tool.runAsync({args: {}, toolContext: context});
-    expect(response).toEqual({
-      result: 'raw string',
-      safety_acknowledgement: 'true',
-    });
-  });
-
   it('rejects with error if func throws', async () => {
     const tool = new ComputerUseTool({
       func: async () => {
@@ -363,7 +311,7 @@ describe('ComputerUseTool', () => {
 
   it('uses default hint if explanation is missing', async () => {
     const tool = new ComputerUseTool({
-      func: async () => {},
+      func: async () => ({}),
       screenSize: [1920, 1080],
     });
     await tool.runAsync({
@@ -380,7 +328,7 @@ describe('ComputerUseTool', () => {
     expect(
       () =>
         new ComputerUseTool({
-          func: async () => {},
+          func: async () => ({}),
           name: '',
           screenSize: [1920, 1080],
         }),
@@ -389,7 +337,7 @@ describe('ComputerUseTool', () => {
 
   it('rejects unexpected non-numeric y coordinates', async () => {
     const tool = new ComputerUseTool({
-      func: async () => {},
+      func: async () => ({}),
       screenSize: [1920, 1080],
     });
 

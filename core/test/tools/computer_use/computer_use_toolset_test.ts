@@ -19,7 +19,6 @@ import {
   Context,
   createSession,
   InvocationContext,
-  isComputerUseTool,
   LlmAgent,
   LlmRequest,
   PluginManager,
@@ -141,7 +140,7 @@ describe('ComputerUseToolset', () => {
     computer = new MockComputer();
     toolset = new ComputerUseToolset({
       computer,
-      excludedPredefinedFunctions: ['hoverAt'],
+      excludedPredefinedFunctions: ['hover_at'],
     });
     context = createToolContext();
   });
@@ -272,7 +271,7 @@ describe('ComputerUseToolset', () => {
       {
         computerUse: {
           environment: Environment.ENVIRONMENT_BROWSER,
-          excludedPredefinedFunctions: ['hoverAt'],
+          excludedPredefinedFunctions: ['hover_at'],
         },
       },
     ]);
@@ -322,6 +321,28 @@ describe('ComputerUseToolset', () => {
     expect(tools1).toBe(tools2);
   });
 
+  it('rejects a wrong-typed string, boolean or array argument', async () => {
+    const tools = await toolset.getTools();
+    const navigateTool = tools.find((tool) => tool.name === 'navigate');
+    const typeTool = tools.find((tool) => tool.name === 'type_text_at');
+    const keysTool = tools.find((tool) => tool.name === 'key_combination');
+
+    await expect(
+      navigateTool!.runAsync({args: {url: 42}, toolContext: context}),
+    ).rejects.toThrowError(/"url" must be a string, got number/);
+
+    await expect(
+      typeTool!.runAsync({
+        args: {x: 1, y: 1, text: 'hi', press_enter: 'yes'},
+        toolContext: context,
+      }),
+    ).rejects.toThrowError(/"press_enter" must be a boolean, got string/);
+
+    await expect(
+      keysTool!.runAsync({args: {keys: 'ctrl'}, toolContext: context}),
+    ).rejects.toThrowError(/"keys" must be a string array/);
+  });
+
   it('gives every tool the real screen size and the default virtual space', async () => {
     const tools = await toolset.getTools();
 
@@ -329,109 +350,5 @@ describe('ComputerUseToolset', () => {
       expect(tool.screenSize).toEqual([1920, 1080]);
       expect(tool.virtualScreenSize).toEqual([1000, 1000]);
     }
-  });
-});
-
-describe('ComputerUseToolset.adaptComputerUseTool', () => {
-  let computer: MockComputer;
-  let toolset: ComputerUseToolset;
-  let context: Context;
-  let llmRequest: LlmRequest;
-
-  beforeEach(async () => {
-    computer = new MockComputer();
-    toolset = new ComputerUseToolset({computer});
-    context = createToolContext();
-    llmRequest = createLlmRequest();
-    await toolset.processLlmRequest(context, llmRequest);
-  });
-
-  afterEach(async () => {
-    await toolset.close();
-  });
-
-  it('replaces a registered tool with the adapted function', async () => {
-    const original = llmRequest.toolsDict['wait'];
-    expect(isComputerUseTool(original)).toBe(true);
-
-    await ComputerUseToolset.adaptComputerUseTool(
-      'wait',
-      (func) =>
-        async function wait_5_seconds(_args, toolContext) {
-          return func({seconds: 5}, toolContext);
-        },
-      llmRequest,
-    );
-
-    expect(llmRequest.toolsDict['wait']).toBeUndefined();
-    const adapted = llmRequest.toolsDict['wait_5_seconds'];
-    if (!isComputerUseTool(adapted)) {
-      expect.fail('expected an adapted ComputerUseTool');
-    }
-    expect(adapted.name).toBe('wait_5_seconds');
-    expect(adapted.screenSize).toEqual([1920, 1080]);
-    expect(adapted.virtualScreenSize).toEqual([1000, 1000]);
-
-    await adapted.runAsync({args: {}, toolContext: context});
-    expect(computer.calls).toContainEqual(['wait', {seconds: 5}]);
-  });
-
-  it('accepts an async adapter', async () => {
-    await ComputerUseToolset.adaptComputerUseTool(
-      'wait',
-      async (func) =>
-        async function wait_5_seconds(_args, toolContext) {
-          return func({seconds: 5}, toolContext);
-        },
-      llmRequest,
-    );
-
-    expect(llmRequest.toolsDict['wait']).toBeUndefined();
-    expect(llmRequest.toolsDict['wait_5_seconds']).toBeDefined();
-  });
-
-  it.each([
-    ['a name that is not a predefined action', 'invalid_method'],
-    ['a method that is never exposed as a tool', 'screen_size'],
-  ])('leaves toolsDict untouched for %s', async (_label, toolName) => {
-    const before = {...llmRequest.toolsDict};
-
-    await ComputerUseToolset.adaptComputerUseTool(
-      toolName,
-      () =>
-        async function renamed() {
-          return {};
-        },
-      llmRequest,
-    );
-
-    expect(llmRequest.toolsDict).toEqual(before);
-  });
-
-  it('leaves toolsDict untouched when the tool is not registered', async () => {
-    const unregistered = createLlmRequest();
-
-    await ComputerUseToolset.adaptComputerUseTool(
-      'wait',
-      () =>
-        async function renamed() {
-          return {};
-        },
-      unregistered,
-    );
-
-    expect(unregistered.toolsDict).toEqual({});
-  });
-
-  it('leaves toolsDict untouched when the adapted function is anonymous', async () => {
-    const before = {...llmRequest.toolsDict};
-
-    await ComputerUseToolset.adaptComputerUseTool(
-      'wait',
-      () => async (_args, _toolContext) => ({}),
-      llmRequest,
-    );
-
-    expect(llmRequest.toolsDict).toEqual(before);
   });
 });

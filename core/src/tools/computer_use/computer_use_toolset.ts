@@ -11,6 +11,7 @@ import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {LlmRequest} from '../../models/llm_request.js';
 import {experimental} from '../../utils/experimental.js';
 import {logger} from '../../utils/logger.js';
+import {toSnakeCaseKey} from '../../utils/object_notation_utils.js';
 import {BaseToolset} from '../base_toolset.js';
 import {
   BaseComputer,
@@ -18,11 +19,7 @@ import {
   ComputerScrollDirection,
   ComputerState,
 } from './base_computer.js';
-import {
-  ComputerFunc,
-  ComputerUseTool,
-  isComputerUseTool,
-} from './computer_use_tool.js';
+import {ComputerUseTool} from './computer_use_tool.js';
 
 const SCROLL_DIRECTIONS: readonly ComputerScrollDirection[] = [
   'up',
@@ -170,30 +167,6 @@ const COMPUTER_ACTIONS: Readonly<
   currentState: (computer) => computer.currentState(),
 };
 
-/**
- * Converts a computer method name to the snake_case tool name the model uses.
- */
-function toSnakeCase(name: string): string {
-  return name.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
-}
-
-/**
- * The model-facing tool name of every predefined computer-use action.
- */
-const COMPUTER_ACTION_TOOL_NAMES: ReadonlySet<string> = new Set(
-  Object.keys(COMPUTER_ACTIONS).map(toSnakeCase),
-);
-
-/**
- * Produces a replacement for a registered computer-use function.
- *
- * The name of the returned function becomes the name of the replacement tool,
- * so it must be a named function. May be sync or async.
- */
-export type ComputerUseToolAdapter = (
-  func: ComputerFunc,
-) => ComputerFunc | Promise<ComputerFunc>;
-
 @experimental
 export class ComputerUseToolset extends BaseToolset {
   private readonly computer: BaseComputer;
@@ -207,56 +180,6 @@ export class ComputerUseToolset extends BaseToolset {
     super([]);
     this.computer = options.computer;
     this.excludedPredefinedFunctions = options.excludedPredefinedFunctions;
-  }
-
-  /**
-   * Replaces a registered computer-use tool with an adapted variant.
-   *
-   * A model preprocessor uses this to reshape a predefined action for a
-   * specific model -- turning `wait(seconds)` into a zero-argument
-   * `wait_5_seconds`, for example. Anything it cannot act on is a warning
-   * rather than an error, so a preprocessor never breaks a request by asking
-   * to adapt a tool the toolset did not register.
-   *
-   * @param toolName The model-facing tool name to adapt, e.g. `wait`.
-   * @param adapter Produces the replacement function; its name becomes the
-   *     name of the replacement tool.
-   * @param llmRequest The request whose `toolsDict` is rewritten in place.
-   */
-  static async adaptComputerUseTool(
-    toolName: string,
-    adapter: ComputerUseToolAdapter,
-    llmRequest: LlmRequest,
-  ): Promise<void> {
-    if (!COMPUTER_ACTION_TOOL_NAMES.has(toolName)) {
-      logger.warn(`${toolName} is not a predefined computer use action`);
-      return;
-    }
-
-    const originalTool = llmRequest.toolsDict[toolName];
-    if (!isComputerUseTool(originalTool)) {
-      logger.warn(`Computer use tool ${toolName} is not in tools_dict`);
-      return;
-    }
-
-    const adaptedFunc = await adapter(originalTool.func);
-    const adaptedName = adaptedFunc.name;
-    if (!adaptedName) {
-      logger.warn(
-        `Adapter for ${toolName} returned an anonymous function, which cannot be registered as a tool`,
-      );
-      return;
-    }
-
-    llmRequest.toolsDict[adaptedName] = new ComputerUseTool({
-      name: adaptedName,
-      func: adaptedFunc,
-      screenSize: originalTool.screenSize,
-      virtualScreenSize: originalTool.virtualScreenSize,
-    });
-    delete llmRequest.toolsDict[toolName];
-
-    logger.debug(`Adapted computer use tool ${toolName} to ${adaptedName}`);
   }
 
   override getTools(
@@ -274,18 +197,15 @@ export class ComputerUseToolset extends BaseToolset {
 
     const tools: ComputerUseTool[] = [];
     for (const [methodName, invokeAction] of Object.entries(COMPUTER_ACTIONS)) {
-      const snakeCaseName = toSnakeCase(methodName);
+      const toolName = toSnakeCaseKey(methodName);
 
-      if (
-        this.excludedPredefinedFunctions?.includes(methodName) ||
-        this.excludedPredefinedFunctions?.includes(snakeCaseName)
-      ) {
+      if (this.excludedPredefinedFunctions?.includes(toolName)) {
         continue;
       }
 
       tools.push(
         new ComputerUseTool({
-          name: snakeCaseName,
+          name: toolName,
           func: async (args, toolContext) => {
             await this.computer.prepare(toolContext);
             return invokeAction(this.computer, args);
@@ -306,36 +226,31 @@ export class ComputerUseToolset extends BaseToolset {
     toolContext: Context,
     llmRequest: LlmRequest,
   ): Promise<void> {
-    try {
-      for (const tool of await this.getTools()) {
-        llmRequest.toolsDict[tool.name] = tool;
-      }
-
-      llmRequest.config = llmRequest.config ?? {};
-      llmRequest.config.tools = llmRequest.config.tools ?? [];
-
-      for (const tool of llmRequest.config.tools) {
-        if ('computerUse' in tool && tool.computerUse) {
-          logger.debug('Computer use already configured in LLM request');
-          return;
-        }
-      }
-
-      const environment = await this.computer.environment();
-      const computerUseTool: Tool = {
-        computerUse: {
-          environment,
-          excludedPredefinedFunctions: this.excludedPredefinedFunctions,
-        },
-      };
-      llmRequest.config.tools.push(computerUseTool);
-
-      logger.debug(
-        `Added computer use tool with environment: ${environment}, excluded_functions: ${this.excludedPredefinedFunctions}`,
-      );
-    } catch (e) {
-      logger.error(`Error in ComputerUseToolset.processLlmRequest: ${e}`);
-      throw e;
+    for (const tool of await this.getTools()) {
+      llmRequest.toolsDict[tool.name] = tool;
     }
+
+    llmRequest.config = llmRequest.config ?? {};
+    llmRequest.config.tools = llmRequest.config.tools ?? [];
+
+    for (const tool of llmRequest.config.tools) {
+      if ('computerUse' in tool && tool.computerUse) {
+        logger.debug('Computer use already configured in LLM request');
+        return;
+      }
+    }
+
+    const environment = await this.computer.environment();
+    const computerUseTool: Tool = {
+      computerUse: {
+        environment,
+        excludedPredefinedFunctions: this.excludedPredefinedFunctions,
+      },
+    };
+    llmRequest.config.tools.push(computerUseTool);
+
+    logger.debug(
+      `Added computer use tool with environment: ${environment}, excluded_functions: ${this.excludedPredefinedFunctions}`,
+    );
   }
 }
