@@ -254,4 +254,29 @@ describe('RunSkillScriptTool', () => {
 
     expect(materializeFiles).toHaveBeenCalledWith([testFile], outputDir);
   });
+
+  it('surfaces an EXECUTION_ERROR when materializing output files is refused', async () => {
+    const outputDir = path.join(os.tmpdir(), 'skill-output');
+    const mockExecutor = new MockCodeExecutor();
+    mockExecutor.mockResult = {stdout: '', stderr: '', outputFiles: [testFile]};
+    vi.mocked(materializeFiles).mockRejectedValueOnce(
+      new Error(
+        `Path traversal detected: ../escape.txt resolves outside of ${outputDir}`,
+      ),
+    );
+
+    const toolset = new SkillToolset([mockSkill], {
+      codeExecutor: mockExecutor,
+      outputDir,
+    });
+    const tool = new RunSkillScriptTool(toolset);
+
+    const result = (await tool.runAsync({
+      args: {skill_name: 'test-skill', script_path: 'scripts/setup.js'},
+      toolContext: createMockContext(),
+    })) as ToolErrorResponse;
+
+    expect(result.errorCode).toBe('EXECUTION_ERROR');
+    expect(result.error).toContain('Path traversal detected');
+  });
 });

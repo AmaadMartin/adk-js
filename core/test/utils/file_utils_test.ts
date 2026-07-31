@@ -92,6 +92,29 @@ describe('file_utils', () => {
       }
     });
 
+    it('should create the target directory when it does not exist', async () => {
+      // What a configured `outputDir` relies on: the operator names a
+      // directory, the first write brings it into existence.
+      const missingDir = path.join(tempDir, 'nested', 'out');
+      const files = [
+        {
+          name: 'created.txt',
+          content: 'hello',
+          contentEncoding: FileContentEncoding.UTF8,
+          mimeType: 'text/plain',
+        },
+      ];
+
+      const written = await materializeFiles(files, missingDir);
+
+      expect(written[0].name).toBe('created.txt');
+      const content = await fs.readFile(
+        path.join(missingDir, 'created.txt'),
+        'utf8',
+      );
+      expect(content).toBe('hello');
+    });
+
     it('should throw an error if file attempts to escape target directory via relative path', async () => {
       const files = [
         {

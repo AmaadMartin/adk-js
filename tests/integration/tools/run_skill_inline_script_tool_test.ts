@@ -216,6 +216,9 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
       expect(inCwd).toBe(false);
     } finally {
       await fs.rm(outputDir, {recursive: true, force: true});
+      // A regression writes to the launch directory instead; remove it so a
+      // failing run does not leave the working tree dirty.
+      await fs.rm(path.join(process.cwd(), testFileName), {force: true});
     }
   });
 
