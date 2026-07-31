@@ -51,9 +51,8 @@ export type VertexAiSearchToolParams = DataStoreParams | SearchEngineParams;
 /**
  * Validates the mutually exclusive Vertex AI Search tool parameters.
  *
- * `VertexAiSearchToolParams` makes the invalid combinations unspellable, so
- * this parameter type is deliberately wider: it exists for JavaScript callers
- * and for parameters that arrive untyped (for example from parsed config).
+ * The parameter type is deliberately wider than `VertexAiSearchToolParams`,
+ * which makes the invalid combinations unspellable and so untestable.
  *
  * @throws Error if neither or both of `dataStoreId` and `searchEngineId` are
  *   specified, or if `dataStoreSpecs` is specified without `searchEngineId`.
