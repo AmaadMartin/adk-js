@@ -9,11 +9,14 @@ on:
 jobs:
   check-license:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 1
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
+
+      - name: Hang for longer than the ceiling
+        run: sleep 300
 
       - name: Run license check
         run: bash scripts/check_license.sh
