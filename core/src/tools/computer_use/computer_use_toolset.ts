@@ -18,7 +18,11 @@ import {
   ComputerScrollDirection,
   ComputerState,
 } from './base_computer.js';
-import {ComputerUseTool} from './computer_use_tool.js';
+import {
+  ComputerFunc,
+  ComputerUseTool,
+  isComputerUseTool,
+} from './computer_use_tool.js';
 
 const SCROLL_DIRECTIONS: readonly ComputerScrollDirection[] = [
   'up',
@@ -173,11 +177,28 @@ function toSnakeCase(name: string): string {
   return name.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
 }
 
+/**
+ * The model-facing tool name of every predefined computer-use action.
+ */
+const COMPUTER_ACTION_TOOL_NAMES: ReadonlySet<string> = new Set(
+  Object.keys(COMPUTER_ACTIONS).map(toSnakeCase),
+);
+
+/**
+ * Produces a replacement for a registered computer-use function.
+ *
+ * The name of the returned function becomes the name of the replacement tool,
+ * so it must be a named function. May be sync or async.
+ */
+export type ComputerUseToolAdapter = (
+  func: ComputerFunc,
+) => ComputerFunc | Promise<ComputerFunc>;
+
 @experimental
 export class ComputerUseToolset extends BaseToolset {
   private readonly computer: BaseComputer;
   private readonly excludedPredefinedFunctions?: string[];
-  private tools: ComputerUseTool[] | null = null;
+  private tools?: Promise<ComputerUseTool[]>;
 
   constructor(options: {
     computer: BaseComputer;
@@ -188,13 +209,66 @@ export class ComputerUseToolset extends BaseToolset {
     this.excludedPredefinedFunctions = options.excludedPredefinedFunctions;
   }
 
-  override async getTools(
-    _readonlyContext?: ReadonlyContext,
-  ): Promise<ComputerUseTool[]> {
-    if (this.tools) {
-      return this.tools;
+  /**
+   * Replaces a registered computer-use tool with an adapted variant.
+   *
+   * A model preprocessor uses this to reshape a predefined action for a
+   * specific model -- turning `wait(seconds)` into a zero-argument
+   * `wait_5_seconds`, for example. Anything it cannot act on is a warning
+   * rather than an error, so a preprocessor never breaks a request by asking
+   * to adapt a tool the toolset did not register.
+   *
+   * @param toolName The model-facing tool name to adapt, e.g. `wait`.
+   * @param adapter Produces the replacement function; its name becomes the
+   *     name of the replacement tool.
+   * @param llmRequest The request whose `toolsDict` is rewritten in place.
+   */
+  static async adaptComputerUseTool(
+    toolName: string,
+    adapter: ComputerUseToolAdapter,
+    llmRequest: LlmRequest,
+  ): Promise<void> {
+    if (!COMPUTER_ACTION_TOOL_NAMES.has(toolName)) {
+      logger.warn(`${toolName} is not a predefined computer use action`);
+      return;
     }
 
+    const originalTool = llmRequest.toolsDict[toolName];
+    if (!isComputerUseTool(originalTool)) {
+      logger.warn(`Computer use tool ${toolName} is not in tools_dict`);
+      return;
+    }
+
+    const adaptedFunc = await adapter(originalTool.func);
+    const adaptedName = adaptedFunc.name;
+    if (!adaptedName) {
+      logger.warn(
+        `Adapter for ${toolName} returned an anonymous function, which cannot be registered as a tool`,
+      );
+      return;
+    }
+
+    llmRequest.toolsDict[adaptedName] = new ComputerUseTool({
+      name: adaptedName,
+      func: adaptedFunc,
+      screenSize: originalTool.screenSize,
+      virtualScreenSize: originalTool.virtualScreenSize,
+    });
+    delete llmRequest.toolsDict[toolName];
+
+    logger.debug(`Adapted computer use tool ${toolName} to ${adaptedName}`);
+  }
+
+  override getTools(
+    _readonlyContext?: ReadonlyContext,
+  ): Promise<ComputerUseTool[]> {
+    // Memoizing the promise rather than the resolved array keeps
+    // `computer.initialize()` to one call even when callers race.
+    this.tools ??= this.buildTools();
+    return this.tools;
+  }
+
+  private async buildTools(): Promise<ComputerUseTool[]> {
     await this.computer.initialize();
     const screenSize = await this.computer.screenSize();
 
@@ -221,7 +295,6 @@ export class ComputerUseToolset extends BaseToolset {
       );
     }
 
-    this.tools = tools;
     return tools;
   }
 
