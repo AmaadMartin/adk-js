@@ -397,11 +397,9 @@ export function runAsyncGeneratorWithOtelContext<TThis, T>(
 /**
  * Determines whether to add request/response content to spans.
  *
- * Reads `ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS`, ignoring surrounding whitespace
- * and letter case. Only `'false'` and `'0'` disable capture; every other value —
- * including an unrecognized one such as `'yes'` — leaves it enabled. This
- * matches adk-python, which normalizes the same variable with `.strip().lower()`
- * before comparing (see `src/google/adk/telemetry/context.py`).
+ * Matches adk-python, which normalizes the same variable with `.strip().lower()`
+ * and tests it against a falsy set of `{'0', 'false'}` rather than against an
+ * affirmative allow-list (see `src/google/adk/telemetry/context.py`).
  *
  * Defaults to true for now to preserve backward compatibility.
  * Once prompt and response logging is well established in ADK, we might start
