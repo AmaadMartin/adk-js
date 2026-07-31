@@ -5,6 +5,7 @@
  */
 
 import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {
   createDockerFileContent,
@@ -18,6 +19,7 @@ import {
   isFile,
   isFolderExists,
   loadFileData,
+  saveToFile,
   tryToFindFileRecursively,
 } from '../../src/utils/file_utils.js';
 
@@ -495,5 +497,109 @@ describe('deployToCloudRun', () => {
       expect.stringContaining('Command failed with exit code 1'),
       expect.stringContaining('\x1b[0m'),
     );
+  });
+
+  describe('appName resolution', () => {
+    function getDockerfileContent(): string {
+      const call = (saveToFile as Mock).mock.calls.find(([filePath]) =>
+        String(filePath).endsWith('Dockerfile'),
+      );
+      if (!call) {
+        expect.fail('deployToCloudRun never wrote a Dockerfile');
+      }
+      return call[1] as string;
+    }
+
+    it('should use the explicit appName when agentPath is a directory', async () => {
+      (isFile as Mock).mockResolvedValue(false);
+
+      await deployToCloudRun({
+        ...defaultOptions,
+        agentPath: 'path/to/my-agent-dir',
+        appName: 'custom-app',
+      });
+
+      const content = getDockerfileContent();
+      expect(content).toContain(
+        'COPY --chown=myuser:myuser "agents/custom-app/" "/app/agents/custom-app/"',
+      );
+      expect(content).toContain(
+        'npx adk api_server /app/agents/custom-app --port=',
+      );
+      expect(fs.cp).toHaveBeenCalledWith(
+        'path/to/agent1.ts',
+        path.join('/tmp/test-deploy', 'agents', 'custom-app', 'agent1.ts'),
+      );
+    });
+
+    it('should use the explicit appName when agentPath is a file', async () => {
+      (isFile as Mock).mockResolvedValue(true);
+
+      await deployToCloudRun({
+        ...defaultOptions,
+        agentPath: 'path/to/my-agent-file.ts',
+        appName: 'custom-app',
+      });
+
+      const content = getDockerfileContent();
+      expect(content).toContain(
+        'COPY --chown=myuser:myuser "agents/custom-app/" "/app/agents/custom-app/"',
+      );
+      expect(content).toContain(
+        'npx adk api_server /app/agents/custom-app --port=',
+      );
+    });
+
+    // A dotted directory name pins the basename derivation: path.parse() would
+    // truncate it to 'my'.
+    it('should derive appName from the directory name when appName is not provided', async () => {
+      (isFile as Mock).mockResolvedValue(false);
+
+      await deployToCloudRun({
+        ...defaultOptions,
+        agentPath: 'path/to/my.agent-dir',
+      });
+
+      const content = getDockerfileContent();
+      expect(content).toContain(
+        'COPY --chown=myuser:myuser "agents/my.agent-dir/" "/app/agents/my.agent-dir/"',
+      );
+      expect(content).toContain(
+        'npx adk api_server /app/agents/my.agent-dir --port=',
+      );
+    });
+
+    it('should derive appName from the file stem when appName is not provided', async () => {
+      (isFile as Mock).mockResolvedValue(true);
+
+      await deployToCloudRun({
+        ...defaultOptions,
+        agentPath: 'path/to/my-agent-file.ts',
+      });
+
+      const content = getDockerfileContent();
+      expect(content).toContain(
+        'COPY --chown=myuser:myuser "agents/my-agent-file/" "/app/agents/my-agent-file/"',
+      );
+      expect(content).toContain(
+        'npx adk api_server /app/agents/my-agent-file --port=',
+      );
+    });
+
+    it('should fall back to the derived name when appName is an empty string', async () => {
+      (isFile as Mock).mockResolvedValue(false);
+
+      await deployToCloudRun({
+        ...defaultOptions,
+        agentPath: 'path/to/my-agent-dir',
+        appName: '',
+      });
+
+      const content = getDockerfileContent();
+      expect(content).toContain(
+        'COPY --chown=myuser:myuser "agents/my-agent-dir/" "/app/agents/my-agent-dir/"',
+      );
+      expect(content).not.toContain('agents//');
+    });
   });
 });
