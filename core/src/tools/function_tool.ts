@@ -46,14 +46,14 @@ export type ToolExecuteFunction<TParameters extends ToolInputParameters> = (
 /**
  * The signature {@link FunctionTool} invokes the user-provided function with.
  *
- * Subclasses may append arguments after the tool context; a user function that
- * does not declare them ignores them, the way every JavaScript function
+ * A subclass may append one argument after the tool context; a user function
+ * that does not declare it ignores it, the way every JavaScript function
  * ignores surplus arguments.
  */
 type ToolExecuteInvocation<TParameters extends ToolInputParameters> = (
   input: ToolExecuteArgument<TParameters>,
   toolContext?: Context,
-  ...extra: readonly unknown[]
+  extra?: unknown,
 ) => Promise<unknown> | unknown;
 
 /**
@@ -173,12 +173,12 @@ export class FunctionTool<
    * function more than the validated arguments and the tool context.
    *
    * @param req The tool request containing arguments and tool context.
-   * @param extraArgs Arguments appended after the tool context.
+   * @param extra An argument appended after the tool context.
    * @returns A promise resolving to the function's return value.
    */
   protected async callExecute(
     req: RunAsyncToolRequest,
-    extraArgs: readonly unknown[] = [],
+    extra?: unknown,
   ): Promise<unknown> {
     try {
       let validatedArgs: unknown = req.args;
@@ -188,7 +188,7 @@ export class FunctionTool<
       return await this.execute(
         validatedArgs as ToolExecuteArgument<TParameters>,
         req.toolContext,
-        ...extraArgs,
+        extra,
       );
     } catch (error) {
       const errorMessage =

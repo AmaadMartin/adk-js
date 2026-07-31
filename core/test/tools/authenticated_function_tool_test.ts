@@ -9,6 +9,7 @@ import {
   AuthCredential,
   AuthCredentialTypes,
   AuthenticatedFunctionTool,
+  AuthRequiredResponse,
   AuthScheme,
   Context,
   createSession,
@@ -72,7 +73,7 @@ function createToolContext(): Context {
 function createRecordingTool(
   options: {
     authConfig?: AuthConfig;
-    responseForAuthRequired?: string | Record<string, unknown>;
+    responseForAuthRequired?: AuthRequiredResponse;
   } = {},
 ): {tool: AuthenticatedFunctionTool<typeof parameters>; calls: RecordedCall[]} {
   const calls: RecordedCall[] = [];

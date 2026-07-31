@@ -17,6 +17,12 @@ import {BaseTool, BaseToolParams, RunAsyncToolRequest} from './base_tool.js';
  */
 export const PENDING_AUTH_RESPONSE = 'Pending User Authorization.';
 
+/**
+ * The response a tool returns to the model while the client collects a
+ * credential.
+ */
+export type AuthRequiredResponse = string | Record<string, unknown>;
+
 /** The parameters for the {@link BaseAuthenticatedTool} constructor. */
 export interface BaseAuthenticatedToolParams extends BaseToolParams {
   /**
@@ -29,7 +35,7 @@ export interface BaseAuthenticatedToolParams extends BaseToolParams {
    * The response returned to the model while the client collects a credential.
    * Defaults to {@link PENDING_AUTH_RESPONSE}.
    */
-  responseForAuthRequired?: string | Record<string, unknown>;
+  responseForAuthRequired?: AuthRequiredResponse;
 }
 
 /** The parameters for {@link BaseAuthenticatedTool.runAsyncImpl}. */
@@ -39,30 +45,56 @@ export interface RunAsyncAuthenticatedToolRequest extends RunAsyncToolRequest {
 }
 
 /**
- * Runs `run` with a resolved credential, or asks the client for one.
- *
- * The tool body never runs without a credential once a credential manager is
- * configured: a missing credential short-circuits to the auth-required
- * response so the framework can drive the interactive auth flow and re-invoke
- * the tool later.
+ * The credential handshake shared by the authenticated tools: it decides what
+ * "no auth config" means, resolves the credential, and asks the client for one
+ * when the tool cannot run yet.
  */
-export async function runWithCredential(
-  credentialManager: CredentialManager | undefined,
-  responseForAuthRequired: string | Record<string, unknown> | undefined,
-  toolContext: Context,
-  run: (credential?: AuthCredential) => Promise<unknown>,
-): Promise<unknown> {
-  if (!credentialManager) {
-    return run();
+export class ToolAuthGate {
+  private readonly credentialManager?: CredentialManager;
+
+  constructor(
+    toolName: string,
+    authConfig: AuthConfig | undefined,
+    private readonly responseForAuthRequired?: AuthRequiredResponse,
+  ) {
+    if (authConfig) {
+      this.credentialManager = new CredentialManager(authConfig);
+    } else {
+      logger.debug(
+        `authConfig is missing for tool ${toolName}, so authentication will be skipped.`,
+      );
+    }
   }
 
-  const credential = await credentialManager.getAuthCredential(toolContext);
-  if (!credential) {
-    await credentialManager.requestCredential(toolContext);
-    return responseForAuthRequired ?? PENDING_AUTH_RESPONSE;
-  }
+  /**
+   * Runs `body` with a resolved credential, or asks the client for one.
+   *
+   * The tool body never runs without a credential once an auth config is
+   * configured: a missing credential short-circuits to the auth-required
+   * response so the framework can drive the interactive auth flow and
+   * re-invoke the tool later.
+   *
+   * @param toolContext The context of the current tool call.
+   * @param body Runs the tool logic with the resolved credential.
+   * @returns The tool response, or the auth-required response.
+   */
+  async run(
+    toolContext: Context,
+    body: (credential?: AuthCredential) => Promise<unknown>,
+  ): Promise<unknown> {
+    if (!this.credentialManager) {
+      return body();
+    }
 
-  return run(credential);
+    const credential =
+      await this.credentialManager.getAuthCredential(toolContext);
+    if (!credential) {
+      this.credentialManager.requestCredential(toolContext);
+      return this.responseForAuthRequired ?? PENDING_AUTH_RESPONSE;
+    }
+
+    return body(credential);
+  }
 }
 
 /**
@@ -73,28 +105,21 @@ export async function runWithCredential(
  * @experimental  (Experimental, subject to change)
  */
 export abstract class BaseAuthenticatedTool extends BaseTool {
-  private readonly credentialManager?: CredentialManager;
-  private readonly responseForAuthRequired?: string | Record<string, unknown>;
+  private readonly authGate: ToolAuthGate;
 
   constructor(params: BaseAuthenticatedToolParams) {
     super(params);
 
-    if (params.authConfig) {
-      this.credentialManager = new CredentialManager(params.authConfig);
-    } else {
-      logger.debug(
-        `authConfig is missing for tool ${params.name}, so authentication will be skipped.`,
-      );
-    }
-    this.responseForAuthRequired = params.responseForAuthRequired;
+    this.authGate = new ToolAuthGate(
+      params.name,
+      params.authConfig,
+      params.responseForAuthRequired,
+    );
   }
 
   override async runAsync(req: RunAsyncToolRequest): Promise<unknown> {
-    return runWithCredential(
-      this.credentialManager,
-      this.responseForAuthRequired,
-      req.toolContext,
-      (credential) => this.runAsyncImpl({...req, credential}),
+    return this.authGate.run(req.toolContext, (credential) =>
+      this.runAsyncImpl({...req, credential}),
     );
   }
 

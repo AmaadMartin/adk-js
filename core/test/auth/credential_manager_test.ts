@@ -455,21 +455,21 @@ describe('CredentialManager', () => {
   });
 
   describe('requestCredential', () => {
-    it('records the auth config on the event actions', async () => {
+    it('records the auth config on the event actions', () => {
       const authConfig: AuthConfig = {
         credentialKey: CREDENTIAL_KEY,
         authScheme: apiKeyScheme,
       };
       const context = createToolContext();
 
-      await new CredentialManager(authConfig).requestCredential(context);
+      new CredentialManager(authConfig).requestCredential(context);
 
       expect(
         context.eventActions.requestedAuthConfigs[FUNCTION_CALL_ID],
       ).toEqual(authConfig);
     });
 
-    it('throws when the context has no function call id', async () => {
+    it('throws when the context has no function call id', () => {
       const manager = new CredentialManager({
         credentialKey: CREDENTIAL_KEY,
         authScheme: apiKeyScheme,
@@ -478,9 +478,9 @@ describe('CredentialManager', () => {
         invocationContext: createInvocationContext(),
       });
 
-      await expect(
+      expect(() =>
         manager.requestCredential(contextWithoutFunctionCall),
-      ).rejects.toThrow('functionCallId is not set.');
+      ).toThrow('functionCallId is not set.');
     });
   });
 });

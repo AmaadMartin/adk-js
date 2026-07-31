@@ -238,6 +238,7 @@ export {
   PENDING_AUTH_RESPONSE,
 } from './tools/base_authenticated_tool.js';
 export type {
+  AuthRequiredResponse,
   BaseAuthenticatedToolParams,
   RunAsyncAuthenticatedToolRequest,
 } from './tools/base_authenticated_tool.js';

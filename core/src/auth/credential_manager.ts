@@ -32,12 +32,6 @@ const READY_CREDENTIAL_TYPES: readonly AuthCredentialTypes[] = [
   AuthCredentialTypes.HTTP,
 ];
 
-/** The result of a refresh attempt. */
-interface RefreshResult {
-  credential: AuthCredential;
-  wasRefreshed: boolean;
-}
-
 /**
  * Whether the scheme drives a two-legged client-credentials flow, in which the
  * configured credential is sufficient and no end user has to sign in.
@@ -91,7 +85,10 @@ function validateAuthConfig(authConfig: AuthConfig): void {
  * Manages authentication credentials through a structured workflow: validate,
  * load, exchange, refresh and cache.
  *
- * This class is only for use by the Agent Development Kit.
+ * Exported for tools that implement their own credential handshake; the
+ * authenticated tools in this package own one already, so extending
+ * {@link BaseAuthenticatedTool} or using {@link AuthenticatedFunctionTool} is
+ * the usual way to get this behaviour.
  *
  * @experimental  (Experimental, subject to change)
  */
@@ -128,7 +125,7 @@ export class CredentialManager {
    * @throws {Error} If the context has no function call id to attach the
    *     request to.
    */
-  async requestCredential(toolContext: Context): Promise<void> {
+  requestCredential(toolContext: Context): void {
     toolContext.requestCredential(this.authConfig);
   }
 
@@ -181,14 +178,12 @@ export class CredentialManager {
     const exchanged = await this.exchange(credential);
     credential = exchanged.credential;
 
-    let wasRefreshed = false;
-    if (!exchanged.wasExchanged) {
-      const refreshed = await this.refresh(credential);
-      credential = refreshed.credential;
-      wasRefreshed = refreshed.wasRefreshed;
-    }
+    const refreshed = exchanged.wasExchanged
+      ? undefined
+      : await this.refresh(credential);
+    credential = refreshed ?? credential;
 
-    if (isUnsaved || exchanged.wasExchanged || wasRefreshed) {
+    if (isUnsaved || exchanged.wasExchanged || refreshed) {
       await credentialService?.saveCredential(
         {...this.authConfig, exchangedAuthCredential: credential},
         toolContext,
@@ -210,19 +205,19 @@ export class CredentialManager {
     });
   }
 
-  private async refresh(credential: AuthCredential): Promise<RefreshResult> {
+  /** Returns the refreshed credential, or `undefined` if none was needed. */
+  private async refresh(
+    credential: AuthCredential,
+  ): Promise<AuthCredential | undefined> {
     const refresher = this.refresherRegistry.getRefresher(credential.authType);
     const authScheme = this.authConfig.authScheme;
     if (
       !refresher ||
       !(await refresher.isRefreshNeeded(credential, authScheme))
     ) {
-      return {credential, wasRefreshed: false};
+      return undefined;
     }
 
-    return {
-      credential: await refresher.refresh(credential, authScheme),
-      wasRefreshed: true,
-    };
+    return refresher.refresh(credential, authScheme);
   }
 }
