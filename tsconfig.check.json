@@ -1,0 +1,27 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "baseUrl": ".",
+    // Resolve workspace packages to their sources, mirroring the aliases in
+    // vitest.config.ts, so tests are checked against the code they run against
+    // and the check does not depend on `npm run build` having run.
+    "paths": {
+      "@google/adk": ["./core/src/index.ts"],
+      "@google/adk/*": ["./core/src/*"],
+      "@google/adk-devtools": ["./dev/src/index.ts"],
+      "@google/adk-devtools/*": ["./dev/src/*"],
+      "@google/adk-integrations": ["./integrations/src/index.ts"],
+      "@google/adk-integrations/*": ["./integrations/src/*"]
+    }
+  },
+  "exclude": [
+    "**/node_modules",
+    "**/dist",
+    // Excluded only because they carry pre-existing type errors (154 in
+    // core/test, 1 here from a duplicate @google/genai install). Type-cleaning
+    // them is tracked separately; drop each entry as its cluster is fixed.
+    "core/test",
+    "tests/integration/sessions/vertex_ai_session_service_test.ts"
+  ]
+}
