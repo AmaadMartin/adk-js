@@ -109,6 +109,58 @@ const CAPTURE_ENV_CASES: CaptureEnvCase[] = [
     description: "captures payloads when the variable is 'TRUE'",
   },
   {
+    envValue: 'True',
+    captureEnabled: true,
+    description: "captures payloads when the variable is 'True'",
+  },
+  {
+    envValue: 'FALSE',
+    captureEnabled: false,
+    description: "redacts payloads when the variable is 'FALSE'",
+  },
+  {
+    envValue: ' true',
+    captureEnabled: true,
+    description: 'captures payloads when the variable is padded with a space',
+  },
+  {
+    envValue: 'true\n',
+    captureEnabled: true,
+    description: 'captures payloads when the variable has a trailing newline',
+  },
+  {
+    envValue: ' false ',
+    captureEnabled: false,
+    description: 'redacts payloads when the disabling value is padded',
+  },
+  {
+    envValue: '0\n',
+    captureEnabled: false,
+    description: 'redacts payloads when the disabling value has a newline',
+  },
+  {
+    envValue: '   ',
+    captureEnabled: true,
+    description: 'captures payloads when the variable is whitespace only',
+  },
+  {
+    envValue: 'yes',
+    captureEnabled: true,
+    description: "captures payloads when the variable is 'yes'",
+  },
+  {
+    // 'no' is not a supported disabling value in either SDK, so it resolves to
+    // the default. Operators relying on it must switch to 'false'.
+    envValue: 'no',
+    captureEnabled: true,
+    description: "captures payloads when the variable is 'no'",
+  },
+  {
+    envValue: 'treu',
+    captureEnabled: true,
+    description: "captures payloads when the variable misspells 'true'",
+  },
+  {
     envValue: 'not-a-boolean',
     captureEnabled: true,
     description: 'captures payloads when the variable is unrecognized',
