@@ -47,7 +47,8 @@ export type ToolExecuteFunction<TParameters extends ToolInputParameters> = (
  * The signature {@link FunctionTool} invokes the user-provided function with.
  *
  * Subclasses may append arguments after the tool context; a user function that
- * does not declare them simply ignores them, as any JavaScript function does.
+ * does not declare them ignores them, the way every JavaScript function
+ * ignores surplus arguments.
  */
 type ToolExecuteInvocation<TParameters extends ToolInputParameters> = (
   input: ToolExecuteArgument<TParameters>,
