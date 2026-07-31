@@ -208,21 +208,18 @@ export interface AgentEnvConfig {
 }
 
 /**
- * Removes `key` from `envVars` and returns its value when it should act as a
- * fall-back for `--<label>`, i.e. when it is non-empty and the flag is unset.
- * Reports which of the two won.
+ * Returns `envValue` when it can serve as the fall-back for `--<label>`, i.e.
+ * when it is non-empty and the flag did not override it, and reports which of
+ * the two won.
  */
-function takeEnvFallback(
-  envVars: Record<string, string>,
+function resolveEnvFallback(
   envFile: string,
   key: string,
   label: string,
+  envValue: string | undefined,
   flagValue: string | undefined,
 ): string | undefined {
-  const value = envVars[key];
-  delete envVars[key];
-
-  if (!value) {
+  if (!envValue) {
     return undefined;
   }
   if (flagValue) {
@@ -231,8 +228,8 @@ function takeEnvFallback(
     );
     return undefined;
   }
-  console.info(`${label}='${value}' set by ${key} in ${envFile}`);
-  return value;
+  console.info(`${label}='${envValue}' set by ${key} in ${envFile}`);
+  return envValue;
 }
 
 /**
@@ -256,20 +253,24 @@ export async function loadAgentEnvConfig(
   }
 
   console.info(`Reading environment variables from ${envFile}`);
-  const envVars = dotenv.parse(await fs.readFile(envFile, {encoding: 'utf-8'}));
+  const {
+    GOOGLE_CLOUD_PROJECT: envProject,
+    GOOGLE_CLOUD_LOCATION: envRegion,
+    ...envVars
+  } = dotenv.parse(await fs.readFile(envFile, {encoding: 'utf-8'}));
 
-  const project = takeEnvFallback(
-    envVars,
+  const project = resolveEnvFallback(
     envFile,
     'GOOGLE_CLOUD_PROJECT',
     'project',
+    envProject,
     options.project,
   );
-  const region = takeEnvFallback(
-    envVars,
+  const region = resolveEnvFallback(
     envFile,
     'GOOGLE_CLOUD_LOCATION',
     'region',
+    envRegion,
     options.region,
   );
 
@@ -297,6 +298,8 @@ export function formatGcloudEnvVarsArg(
   const entries = Object.entries(envVars).map(
     ([name, value]) => `${name}=${value}`,
   );
+  // The escaped form below is valid for any payload; the plain form is kept
+  // for the common case so the emitted gcloud command stays readable.
   if (entries.every((entry) => !entry.includes(','))) {
     return entries.join(',');
   }
