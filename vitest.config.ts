@@ -25,7 +25,9 @@ const INTEGRATION_HOOK_TIMEOUT_MS = 120000;
 
 /**
  * Test budget (ms) for the `integration` project: matches the largest per-file
- * timeout in the repo. Per-file `it()`/hook timeouts still override both.
+ * timeout in the repo. A per-test `it()` timeout still overrides this, and
+ * unlike the hook budget above it is expected to: how long a given assertion
+ * may take is a property of that test, not repo-wide policy.
  */
 const INTEGRATION_TEST_TIMEOUT_MS = 60000;
 
