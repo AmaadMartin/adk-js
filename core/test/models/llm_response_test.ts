@@ -63,6 +63,15 @@ describe('createLlmResponse', () => {
       expect(result.usageMetadata).toBe(usageMetadata);
     });
 
+    it('includes modelVersion when present', () => {
+      const response = makeResponse({
+        candidates: [{content: {parts: [{text: 'hi'}], role: 'model'}}],
+        modelVersion: 'gemini-2.5-flash',
+      });
+      const result = createLlmResponse(response);
+      expect(result.modelVersion).toBe('gemini-2.5-flash');
+    });
+
     it('includes finishReason from the first candidate', () => {
       const response = makeResponse({
         candidates: [
