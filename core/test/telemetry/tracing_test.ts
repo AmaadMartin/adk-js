@@ -68,9 +68,9 @@ interface CaptureEnvCase {
  * Every value of ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS that the current
  * implementation distinguishes, and the payload capture it selects.
  *
- * `''` and `'TRUE'` are the non-obvious rows: the empty string is falsy so it
- * takes the `|| 'true'` default, while `'TRUE'` fails the case-sensitive
- * comparison and therefore disables capture.
+ * The gate is an opt-out: capture stays on unless the value is `'false'` or
+ * `'0'` after trimming and lowercasing. An unrecognized value is therefore not
+ * an error condition, it resolves to the default.
  */
 const CAPTURE_ENV_CASES: CaptureEnvCase[] = [
   {
@@ -105,13 +105,65 @@ const CAPTURE_ENV_CASES: CaptureEnvCase[] = [
   },
   {
     envValue: 'TRUE',
+    captureEnabled: true,
+    description: "captures payloads when the variable is 'TRUE'",
+  },
+  {
+    envValue: 'True',
+    captureEnabled: true,
+    description: "captures payloads when the variable is 'True'",
+  },
+  {
+    envValue: 'FALSE',
     captureEnabled: false,
-    description: "redacts payloads when the variable is 'TRUE' (case matters)",
+    description: "redacts payloads when the variable is 'FALSE'",
+  },
+  {
+    envValue: ' true',
+    captureEnabled: true,
+    description: 'captures payloads when the variable is padded with a space',
+  },
+  {
+    envValue: 'true\n',
+    captureEnabled: true,
+    description: 'captures payloads when the variable has a trailing newline',
+  },
+  {
+    envValue: ' false ',
+    captureEnabled: false,
+    description: 'redacts payloads when the disabling value is padded',
+  },
+  {
+    envValue: '0\n',
+    captureEnabled: false,
+    description: 'redacts payloads when the disabling value has a newline',
+  },
+  {
+    envValue: '   ',
+    captureEnabled: true,
+    description: 'captures payloads when the variable is whitespace only',
+  },
+  {
+    envValue: 'yes',
+    captureEnabled: true,
+    description: "captures payloads when the variable is 'yes'",
+  },
+  {
+    // 'no' is not a supported disabling value in either SDK, so it resolves to
+    // the default. Operators relying on it must switch to 'false'.
+    envValue: 'no',
+    captureEnabled: true,
+    description: "captures payloads when the variable is 'no'",
+  },
+  {
+    envValue: 'treu',
+    captureEnabled: true,
+    description: "captures payloads when the variable misspells 'true'",
   },
   {
     envValue: 'not-a-boolean',
-    captureEnabled: false,
-    description: 'redacts payloads when the variable is unrecognized',
+    captureEnabled: true,
+    description: 'captures payloads when the variable is unrecognized',
   },
 ];
 
