@@ -319,33 +319,63 @@ describe('AnchoredContextCompactor', () => {
     expect(summarized.map((event) => event.invocationId)).toEqual(['inv1']);
   });
 
-  it('honours a rewind marker retained outside the window it is compacting', async () => {
+  it('honours a rewind marker sitting past the window it is compacting', async () => {
     const summarizer = new MockSummarizer();
     const summarizeSpy = vi.spyOn(summarizer, 'summarize');
     const compactor = new AnchoredContextCompactor({
       tokenThreshold: 1,
-      eventRetentionSize: 2,
+      eventRetentionSize: 3,
       summarizer,
     });
 
-    // The marker lands in the retained tail while the invocation it annuls is
-    // in the slice being summarized, so resolving rewinds over that slice
-    // alone would miss the marker and summarize the rewound event.
+    // The marker sits past the compaction boundary while the invocation it
+    // annuls falls inside it, so resolving rewinds over the slice alone would
+    // miss the marker and summarize the rewound event.
     const marker = createRewindMarkerEvent('rewind_inv', 'inv_to_rewind');
     const context = createMockInvocationContext([
       createInvocationEvent('inv1', 'hello', 5),
+      createInvocationEvent('inv1', 'hi', 5),
       createInvocationEvent('inv_to_rewind', REWOUND_TEXT, 5),
       marker,
       createInvocationEvent('inv3', 'next', 5),
+      createInvocationEvent('inv4', 'and again', 5),
     ]);
 
     await compactor.compact(context);
 
     expect(summarizeSpy).toHaveBeenCalledOnce();
     const summarized = summarizeSpy.mock.calls[0][0];
+    expect(
+      summarized.flatMap((event) => event.content?.parts ?? []),
+    ).not.toContainEqual({text: REWOUND_TEXT});
     expect(summarized.map((event) => event.invocationId)).toEqual(['inv1']);
     // The marker sits outside the compacted window, so the rebuild keeps it
     // and it goes on annulling its invocation.
     expect(context.session.events).toContain(marker);
+  });
+
+  it('does not compact when every compactable event has been rewound', async () => {
+    const summarizer = new MockSummarizer();
+    const summarizeSpy = vi.spyOn(summarizer, 'summarize');
+    const compactor = new AnchoredContextCompactor({
+      tokenThreshold: 1,
+      eventRetentionSize: 1,
+      summarizer,
+    });
+
+    // Everything ahead of the retained tail is rewound, so there is nothing
+    // left to summarize. The summarizer must not be handed an empty list, and
+    // shouldCompact has to agree or it would ask for this compaction forever.
+    const context = createMockInvocationContext([
+      createInvocationEvent('inv_to_rewind', REWOUND_TEXT, 5),
+      createInvocationEvent('inv_to_rewind', 'acknowledged', 5),
+      createRewindMarkerEvent('rewind_inv', 'inv_to_rewind'),
+      createInvocationEvent('inv3', 'next', 5),
+    ]);
+
+    expect(await compactor.shouldCompact(context)).toBe(false);
+    await expect(compactor.compact(context)).resolves.toBeUndefined();
+    expect(summarizeSpy).not.toHaveBeenCalled();
+    expect(context.session.events).toHaveLength(4);
   });
 });
