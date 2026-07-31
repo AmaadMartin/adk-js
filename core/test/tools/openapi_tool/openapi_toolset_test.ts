@@ -9,6 +9,13 @@ import {OpenAPIV3} from 'openapi-types';
 import {describe, expect, it} from 'vitest';
 import {createReadonlyContext} from '../../testing_utils.js';
 
+/** Exposes every tool, whatever the filter and context say. */
+class AlwaysSelectingToolset extends OpenAPIToolset {
+  protected override isToolSelected(): boolean {
+    return true;
+  }
+}
+
 describe('OpenAPIToolset', () => {
   const mockSpec: OpenAPIV3.Document = {
     openapi: '3.0.0',
@@ -158,12 +165,7 @@ describe('OpenAPIToolset', () => {
   });
 
   it('should handle context in getTools', async () => {
-    const toolset = new OpenAPIToolset({specDict: mockSpec});
-    (
-      toolset as unknown as {
-        isToolSelected: (tool: unknown, context: unknown) => boolean;
-      }
-    ).isToolSelected = () => true;
+    const toolset = new AlwaysSelectingToolset({specDict: mockSpec});
     const tools = await toolset.getTools(createReadonlyContext());
     expect(tools.length).toBe(2);
   });

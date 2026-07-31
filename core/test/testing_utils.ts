@@ -15,13 +15,11 @@ import {
 /**
  * Options for {@link createReadonlyContext}.
  */
-export interface ReadonlyContextOptions {
+interface ReadonlyContextOptions {
   /** Name of the agent that owns the invocation. */
   agentName?: string;
   /** Initial session state, readable through `context.state`. */
   state?: Record<string, unknown>;
-  /** Id of the invocation. */
-  invocationId?: string;
 }
 
 /**
@@ -32,14 +30,10 @@ export interface ReadonlyContextOptions {
 export function createReadonlyContext(
   options: ReadonlyContextOptions = {},
 ): ReadonlyContext {
-  const {
-    agentName = 'test-agent',
-    state = {},
-    invocationId = 'test-invocation',
-  } = options;
+  const {agentName = 'test-agent', state = {}} = options;
   return new ReadonlyContext(
     new InvocationContext({
-      invocationId,
+      invocationId: 'test-invocation',
       agent: new LlmAgent({name: agentName}),
       session: createSession({
         id: 'test-session',
