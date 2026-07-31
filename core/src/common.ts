@@ -294,7 +294,6 @@ export {ListSkillsTool} from './tools/skill/list_skills_tool.js';
 export {LoadSkillResourceTool} from './tools/skill/load_skill_resource_tool.js';
 export {LoadSkillTool} from './tools/skill/load_skill_tool.js';
 export {SearchSkillsTool} from './tools/skill/search_skills_tool.js';
-export type {MaterializedCodeExecutionResult} from './tools/skill/skill_output_files.js';
 export {SkillToolset} from './tools/skill/skill_toolset.js';
 
 export * from './artifacts/base_artifact_service.js';

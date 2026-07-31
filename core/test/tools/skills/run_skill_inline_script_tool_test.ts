@@ -14,15 +14,13 @@ import {
   FileContentEncoding,
   InvocationContext,
   LlmAgent,
-  MaterializedCodeExecutionResult,
   RunSkillInlineScriptErrorCode,
   RunSkillInlineScriptTool,
   SkillToolset,
 } from '@google/adk';
-import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {ToolConfirmation} from '../../../src/tools/tool_confirmation.js';
 import {materializeFiles} from '../../../src/utils/file_utils.js';
 
@@ -61,38 +59,6 @@ describe('RunSkillInlineScriptTool', () => {
     // assertion pins its own call rather than a historical one.
     vi.mocked(materializeFiles).mockClear();
   });
-
-  // Only materializeFiles is mocked, so the tool still creates its output
-  // directory on the real filesystem.
-  afterEach(async () => {
-    await Promise.all(
-      materializeFilesDirs().map((dir) =>
-        fs.rm(dir, {recursive: true, force: true}),
-      ),
-    );
-  });
-
-  /** Directories the tool passed to materializeFiles during this test. */
-  function materializeFilesDirs(): string[] {
-    return vi
-      .mocked(materializeFiles)
-      .mock.calls.map((call) => call[1])
-      .filter((dir): dir is string => dir !== undefined);
-  }
-
-  /**
-   * Returns the single directory the tool materialized into, failing the test
-   * when it did not call materializeFiles exactly once with one.
-   */
-  function onlyMaterializeFilesDir(): string {
-    const dirs = materializeFilesDirs();
-    if (dirs.length !== 1) {
-      return expect.fail(
-        `expected one materializeFiles call with a directory, got ${dirs.length}`,
-      );
-    }
-    return dirs[0];
-  }
 
   function createMockContext(
     agentName = 'test-agent',
@@ -269,18 +235,14 @@ describe('RunSkillInlineScriptTool', () => {
     mimeType: 'text/plain',
   };
 
-  function runWithOutputFiles(
-    outputFiles: File[],
-    toolsetOptions: {outputDir?: string} = {},
-  ): Promise<unknown> {
+  it('calls materializeFiles with output files from executor', async () => {
     const mockExecutor = new MockCodeExecutor();
-    mockExecutor.mockResult = {stdout: '', stderr: '', outputFiles};
-    const toolset = new SkillToolset([], {
-      codeExecutor: mockExecutor,
-      ...toolsetOptions,
-    });
+    mockExecutor.mockResult = {stdout: '', stderr: '', outputFiles: [testFile]};
 
-    return new RunSkillInlineScriptTool(toolset).runAsync({
+    const toolset = new SkillToolset([], {codeExecutor: mockExecutor});
+    const tool = new RunSkillInlineScriptTool(toolset);
+
+    await tool.runAsync({
       args: {
         script_content: 'console.log("test");',
         language: CodeExecutionLanguage.JAVASCRIPT,
@@ -289,67 +251,33 @@ describe('RunSkillInlineScriptTool', () => {
         toolConfirmation: confirmed(),
       }),
     });
-  }
 
-  it('materializes output files into a tool-owned temp directory', async () => {
-    await runWithOutputFiles([testFile]);
-
-    expect(materializeFiles).toHaveBeenCalledWith(
-      [testFile],
-      expect.any(String),
-    );
-    const dir = onlyMaterializeFilesDir();
-    expect(path.isAbsolute(dir)).toBe(true);
-    expect(path.dirname(dir)).toBe(path.resolve(os.tmpdir()));
-    expect(path.basename(dir).startsWith('adk-skill-output-')).toBe(true);
-    expect(dir).not.toBe(process.cwd());
+    // No configured directory: materializeFiles applies its own cwd default.
+    expect(materializeFiles).toHaveBeenCalledWith([testFile], undefined);
   });
 
-  it('reports the directory it materialized into as outputDir', async () => {
-    const result = (await runWithOutputFiles([
-      testFile,
-    ])) as MaterializedCodeExecutionResult;
+  it('materializes output files into the configured output directory', async () => {
+    const outputDir = path.join(os.tmpdir(), 'skill-inline-output');
+    const mockExecutor = new MockCodeExecutor();
+    mockExecutor.mockResult = {stdout: '', stderr: '', outputFiles: [testFile]};
 
-    expect(result.outputDir).toBe(onlyMaterializeFilesDir());
-    expect(result.outputFiles).toEqual([testFile]);
-  });
-
-  it('materializes into the declared output directory when configured', async () => {
-    const declaredDir = await fs.mkdtemp(
-      path.join(os.tmpdir(), 'run_skill_inline_declared_'),
-    );
-
-    const result = (await runWithOutputFiles([testFile], {
-      outputDir: declaredDir,
-    })) as MaterializedCodeExecutionResult;
-
-    expect(materializeFiles).toHaveBeenCalledWith(
-      [testFile],
-      path.resolve(declaredDir),
-    );
-    expect(result.outputDir).toBe(path.resolve(declaredDir));
-  });
-
-  it('materializes nothing when the executor produced no output files', async () => {
-    const result = (await runWithOutputFiles(
-      [],
-    )) as MaterializedCodeExecutionResult;
-
-    expect(materializeFiles).not.toHaveBeenCalled();
-    expect('outputDir' in result).toBe(false);
-  });
-
-  it('surfaces a materialization failure as EXECUTION_ERROR', async () => {
-    vi.mocked(materializeFiles).mockRejectedValueOnce(
-      new Error('Path traversal detected'),
-    );
-
-    const result = (await runWithOutputFiles([testFile])) as ToolErrorResponse;
-
-    expect(result).toEqual({
-      error: 'Failed to execute inline script: Path traversal detected',
-      errorCode: RunSkillInlineScriptErrorCode.EXECUTION_ERROR,
+    const toolset = new SkillToolset([], {
+      codeExecutor: mockExecutor,
+      outputDir,
     });
+    const tool = new RunSkillInlineScriptTool(toolset);
+
+    await tool.runAsync({
+      args: {
+        script_content: 'console.log("test");',
+        language: CodeExecutionLanguage.JAVASCRIPT,
+      },
+      toolContext: createMockContext('test-agent', undefined, {
+        toolConfirmation: confirmed(),
+      }),
+    });
+
+    expect(materializeFiles).toHaveBeenCalledWith([testFile], outputDir);
   });
 
   it('successfully passes array arguments to code executor', async () => {

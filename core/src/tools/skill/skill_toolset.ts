@@ -47,8 +47,11 @@ export class SkillToolset extends BaseToolset {
   public registry?: SkillRegistry;
   private toolCache = new Map<string, BaseTool[]>();
   private fetchedSkillCache = new Map<string, Map<string, Skill>>();
-  /** The declared skill-script output directory, if the operator set one. */
-  public outputDir?: string;
+  /**
+   * Directory that skill script output files are materialized into. Undefined
+   * when unconfigured, which leaves the default to `materializeFiles`.
+   */
+  public readonly outputDir?: string;
 
   constructor(
     skills: Record<string, Skill> | Skill[],
@@ -66,10 +69,12 @@ export class SkillToolset extends BaseToolset {
        */
       allowInlineScripts?: boolean;
       /**
-       * Directory that files produced by skill scripts are written to. When
-       * unset, each `run_skill_script` / `run_skill_inline_script` call writes
-       * into a fresh temporary directory that ADK never reaps. Operator
-       * configuration; the model cannot supply it.
+       * Directory that skill script output files are written into. The names
+       * the tools report back to the model are relative to it.
+       *
+       * Defaults to the host process's current working directory, so an agent
+       * launched from a source checkout writes model-named files into that
+       * checkout; set this to keep skill output out of the working tree.
        */
       outputDir?: string;
     } = {},

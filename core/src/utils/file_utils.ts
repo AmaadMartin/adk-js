@@ -9,8 +9,20 @@ import * as path from 'node:path';
 import {File} from '../code_executors/code_execution_utils.js';
 
 /**
- * Creates files with the given paths in the current working directory.
+ * Writes the given in-memory files to disk under a base directory, appending a
+ * numeric suffix (`report.txt` -> `report_2.txt`) rather than overwriting an
+ * existing file.
+ *
+ * Names resolving outside `dir` are rejected with a `Path traversal detected`
+ * error. That is a lexical check on the resolved path, not a sandbox: it does
+ * not survive symlinks or a concurrent rename.
+ *
  * @param files The files to materialize.
+ * @param dir Base directory to write under. Defaults to the host process's
+ *     current working directory; callers that do not want files there must
+ *     pass an explicit directory.
+ * @returns The written files, with `name` rewritten to the final path relative
+ *     to `dir`.
  */
 export async function materializeFiles(
   files: File[],

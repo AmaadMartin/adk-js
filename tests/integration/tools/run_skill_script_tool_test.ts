@@ -8,7 +8,6 @@ import {
   CodeExecutionResult,
   Context,
   InvocationContext,
-  MaterializedCodeExecutionResult,
   RunSkillScriptTool,
   Skill,
   SkillToolset,
@@ -271,7 +270,7 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
     },
   );
 
-  it('creates files in the tool-owned output directory returned from execution', async () => {
+  it('creates files in process.cwd returned from execution', async () => {
     const executor = new UnsafeLocalCodeExecutor();
     const toolset = new SkillToolset([testSkill], {codeExecutor: executor});
     const tool = new RunSkillScriptTool(toolset);
@@ -282,36 +281,30 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
         script_path: 'scripts/create_file.js',
       },
       toolContext: createMockContext(),
-    })) as MaterializedCodeExecutionResult;
+    })) as CodeExecutionResult;
 
-    const outputDir = result.outputDir;
-    if (outputDir === undefined) {
-      expect.fail('expected the tool to report an outputDir');
-    }
+    expect(result).toBeDefined();
+    expect(result.outputFiles).toBeDefined();
+    expect(result.outputFiles?.length).toBeGreaterThan(0);
 
-    try {
-      expect(outputDir).not.toBe(process.cwd());
+    const outputFile = result.outputFiles?.find(
+      (f) => f.name === 'output_from_script.txt',
+    );
+    expect(outputFile).toBeDefined();
 
-      const outputFile = result.outputFiles?.find(
-        (f) => f.name === 'output_from_script.txt',
-      );
-      expect(outputFile).toBeDefined();
+    // Verify file was created in process.cwd()
+    const fullPath = path.join(process.cwd(), 'output_from_script.txt');
+    const exists = await fs
+      .access(fullPath)
+      .then(() => true)
+      .catch(() => false);
+    expect(exists).toBe(true);
 
-      const content = await fs.readFile(
-        path.join(outputDir, 'output_from_script.txt'),
-        'utf-8',
-      );
-      expect(content).toBe('hello from script file');
+    const content = await fs.readFile(fullPath, 'utf-8');
+    expect(content).toBe('hello from script file');
 
-      // The launch directory must stay clean.
-      const inCwd = await fs
-        .access(path.join(process.cwd(), 'output_from_script.txt'))
-        .then(() => true)
-        .catch(() => false);
-      expect(inCwd).toBe(false);
-    } finally {
-      await fs.rm(outputDir, {recursive: true, force: true});
-    }
+    // Clean up
+    await fs.unlink(fullPath);
   });
 
   it('creates files in the configured output directory', async () => {
@@ -357,53 +350,43 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
   });
 
   it('handles file collisions by appending a numeric suffix', async () => {
-    const outputDir = await fs.mkdtemp(
-      path.join(os.tmpdir(), 'adk-skill-collision-'),
-    );
     const executor = new UnsafeLocalCodeExecutor();
-    const toolset = new SkillToolset([testSkill], {
-      codeExecutor: executor,
-      outputDir,
-    });
+    const toolset = new SkillToolset([testSkill], {codeExecutor: executor});
     const tool = new RunSkillScriptTool(toolset);
 
     // Pre-create the target file to force a collision
-    await fs.writeFile(
-      path.join(outputDir, 'output_from_script.txt'),
-      'existing content',
+    const targetFile = path.join(process.cwd(), 'output_from_script.txt');
+    await fs.writeFile(targetFile, 'existing content');
+
+    const result = (await tool.runAsync({
+      args: {
+        skill_name: 'test-skill',
+        script_path: 'scripts/create_file.js',
+      },
+      toolContext: createMockContext(),
+    })) as CodeExecutionResult;
+
+    expect(result).toBeDefined();
+    expect(result.outputFiles).toBeDefined();
+
+    const outputFile = result.outputFiles?.find(
+      (f) => f.name === 'output_from_script_2.txt',
     );
+    expect(outputFile).toBeDefined();
 
-    try {
-      const result = (await tool.runAsync({
-        args: {
-          skill_name: 'test-skill',
-          script_path: 'scripts/create_file.js',
-        },
-        toolContext: createMockContext(),
-      })) as CodeExecutionResult;
+    // Verify collision file was created in process.cwd()
+    const fullPath = path.join(process.cwd(), 'output_from_script_2.txt');
+    const exists = await fs
+      .access(fullPath)
+      .then(() => true)
+      .catch(() => false);
+    expect(exists).toBe(true);
 
-      expect(result).toBeDefined();
-      expect(result.outputFiles).toBeDefined();
+    const content = await fs.readFile(fullPath, 'utf-8');
+    expect(content).toBe('hello from script file');
 
-      const outputFile = result.outputFiles?.find(
-        (f) => f.name === 'output_from_script_2.txt',
-      );
-      expect(outputFile).toBeDefined();
-
-      const content = await fs.readFile(
-        path.join(outputDir, 'output_from_script_2.txt'),
-        'utf-8',
-      );
-      expect(content).toBe('hello from script file');
-
-      // The pre-existing file is left alone rather than overwritten.
-      const existing = await fs.readFile(
-        path.join(outputDir, 'output_from_script.txt'),
-        'utf-8',
-      );
-      expect(existing).toBe('existing content');
-    } finally {
-      await fs.rm(outputDir, {recursive: true, force: true});
-    }
+    // Clean up both files
+    await fs.unlink(targetFile);
+    await fs.unlink(fullPath);
   });
 });
