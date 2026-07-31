@@ -20,8 +20,8 @@ import {
  * Populates {@link LlmRequest.contents} from the session event history.
  *
  * Events annulled by a rewind are dropped first, so rewound history is never
- * sent to the model. This is the same filter the context compactors apply,
- * which keeps the two in agreement.
+ * sent to the model. The summarizing context compactors apply the same filter,
+ * so a compaction summary cannot carry rewound content back in.
  *
  * When a {@link CompactedEvent} exists in the session, only the most recent
  * compacted event and the raw events that follow it are included, eliding
@@ -47,8 +47,6 @@ export class ContentRequestProcessor implements BaseLlmRequestProcessor {
       return;
     }
 
-    // Rewinds are resolved against the raw history: a marker sitting behind a
-    // compaction boundary would otherwise be elided and the rewind forgotten.
     const events = getActiveEvents(
       applyRewinds(invocationContext.session.events),
     );

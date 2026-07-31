@@ -29,21 +29,21 @@ import {Event} from './event.js';
  */
 export function applyRewinds(events: Event[]): Event[] {
   const kept: Event[] = [];
-  let i = events.length - 1;
-  while (i >= 0) {
+  for (let i = events.length - 1; i >= 0; i--) {
     const rewindInvocationId = events[i].actions?.rewindBeforeInvocationId;
-    if (rewindInvocationId) {
-      for (let j = 0; j < i; j++) {
-        if (events[j].invocationId === rewindInvocationId) {
-          i = j;
-          break;
-        }
-      }
-    } else {
+    if (!rewindInvocationId) {
       kept.push(events[i]);
+      continue;
     }
-    i--;
+    // The earliest event of the rewound invocation is where the walk resumes.
+    // An index at or after the marker means that invocation does not precede
+    // it, so only the marker is dropped.
+    const resumeIndex = events.findIndex(
+      (event) => event.invocationId === rewindInvocationId,
+    );
+    if (resumeIndex >= 0 && resumeIndex < i) {
+      i = resumeIndex;
+    }
   }
-  kept.reverse();
-  return kept;
+  return kept.reverse();
 }

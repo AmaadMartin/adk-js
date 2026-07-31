@@ -13,9 +13,14 @@ import {
   InvocationContext,
   PluginManager,
   Session,
+  createEvent,
+  createEventActions,
   isScratchpadEvent,
 } from '@google/adk';
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
+
+/** Text carried only by the invocation that gets rewound. */
+const REWOUND_TEXT = 'SECRET_REWOUND_CONTENT';
 
 class MockSummarizer implements BaseSummarizer {
   async summarize(events: Event[]): Promise<CompactedEvent> {
@@ -86,6 +91,30 @@ function createMockScratchpadEvent(
   event.endTime = Date.now() - 5000;
   event.compactedContent = contentStr || 'Existing scratchpad content';
   return event;
+}
+
+function createInvocationEvent(
+  invocationId: string,
+  text: string,
+  tokenCount: number,
+): Event {
+  return createEvent({
+    invocationId,
+    author: 'user',
+    content: {role: 'user', parts: [{text}]},
+    usageMetadata: {promptTokenCount: tokenCount},
+  });
+}
+
+function createRewindMarkerEvent(
+  invocationId: string,
+  rewindBeforeInvocationId: string,
+): Event {
+  return createEvent({
+    invocationId,
+    author: 'user',
+    actions: createEventActions({rewindBeforeInvocationId}),
+  });
 }
 
 function createMockInvocationContext(events: Event[]): InvocationContext {
@@ -264,5 +293,59 @@ describe('AnchoredContextCompactor', () => {
     expect(context.session.events[1].id).toBe('2');
     expect(context.session.events[2].id).toBe('3');
     expect(context.session.events[3].id).toBe('4');
+  });
+
+  it('never summarizes a rewound invocation into the scratchpad', async () => {
+    const summarizer = new MockSummarizer();
+    const summarizeSpy = vi.spyOn(summarizer, 'summarize');
+    const compactor = new AnchoredContextCompactor({
+      tokenThreshold: 1,
+      eventRetentionSize: 1,
+      summarizer,
+    });
+
+    const context = createMockInvocationContext([
+      createInvocationEvent('inv1', 'hello', 5),
+      createInvocationEvent('inv_to_rewind', REWOUND_TEXT, 5),
+      createInvocationEvent('inv_to_rewind', 'acknowledged', 5),
+      createRewindMarkerEvent('rewind_inv', 'inv_to_rewind'),
+      createInvocationEvent('inv3', 'next', 5),
+    ]);
+
+    await compactor.compact(context);
+
+    expect(summarizeSpy).toHaveBeenCalledOnce();
+    const summarized = summarizeSpy.mock.calls[0][0];
+    expect(summarized.map((event) => event.invocationId)).toEqual(['inv1']);
+  });
+
+  it('honours a rewind marker retained outside the window it is compacting', async () => {
+    const summarizer = new MockSummarizer();
+    const summarizeSpy = vi.spyOn(summarizer, 'summarize');
+    const compactor = new AnchoredContextCompactor({
+      tokenThreshold: 1,
+      eventRetentionSize: 2,
+      summarizer,
+    });
+
+    // The marker lands in the retained tail while the invocation it annuls is
+    // in the slice being summarized, so resolving rewinds over that slice
+    // alone would miss the marker and summarize the rewound event.
+    const marker = createRewindMarkerEvent('rewind_inv', 'inv_to_rewind');
+    const context = createMockInvocationContext([
+      createInvocationEvent('inv1', 'hello', 5),
+      createInvocationEvent('inv_to_rewind', REWOUND_TEXT, 5),
+      marker,
+      createInvocationEvent('inv3', 'next', 5),
+    ]);
+
+    await compactor.compact(context);
+
+    expect(summarizeSpy).toHaveBeenCalledOnce();
+    const summarized = summarizeSpy.mock.calls[0][0];
+    expect(summarized.map((event) => event.invocationId)).toEqual(['inv1']);
+    // The marker sits outside the compacted window, so the rebuild keeps it
+    // and it goes on annulling its invocation.
+    expect(context.session.events).toContain(marker);
   });
 });

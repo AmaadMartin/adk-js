@@ -7,6 +7,7 @@
 import {InvocationContext} from '../agents/invocation_context.js';
 import {CompactedEvent, isScratchpadEvent} from '../events/compacted_event.js';
 import {Event, getEventTokens} from '../events/event.js';
+import {applyRewinds} from '../events/rewind_events.js';
 import {BaseContextCompactor} from './base_context_compactor.js';
 import {calculateRetainStartIndex} from './compaction_utils.js';
 import {BaseSummarizer} from './summarizers/base_summarizer.js';
@@ -29,6 +30,12 @@ export interface AnchoredContextCompactorOptions {
  *
  * When compaction is triggered, it merges new raw events into the existing
  * Scratchpad event and discards them from the active history view.
+ *
+ * Events annulled by a rewind are excluded from the summarizer input, so
+ * rewound content never enters the scratchpad. They are deliberately left in
+ * `session.events`: unlike the append-only compactors, this one rebuilds the
+ * array in place, so dropping them from its working list would delete the
+ * rewind marker from the stored session.
  */
 export class AnchoredContextCompactor implements BaseContextCompactor {
   private readonly tokenThreshold: number;
@@ -116,16 +123,28 @@ export class AnchoredContextCompactor implements BaseContextCompactor {
     // Extract raw events to compact.
     const rawEventsToCompact = rawEvents.slice(0, retainStartIndex);
 
+    // Rewound events must not be summarized, or they re-enter every later
+    // prompt through the scratchpad. The live set is resolved over the whole
+    // active window rather than over this slice, because a marker can sit in
+    // the retained tail while the invocation it annuls is being compacted.
+    // Only the summarizer input is filtered: the rebuild below drops whatever
+    // it does not carry over, so filtering the working list would erase the
+    // marker and its rewound events from the stored session.
+    const liveEvents = new Set(applyRewinds(activeEvents));
+    const eventsToCompact = rawEventsToCompact.filter((event) =>
+      liveEvents.has(event),
+    );
+
     let scratchpadEvent: CompactedEvent;
 
     if (hasScratchpad) {
       const existingScratchpad = activeEvents[0] as CompactedEvent;
       scratchpadEvent = await this.summarizer.summarize([
         existingScratchpad,
-        ...rawEventsToCompact,
+        ...eventsToCompact,
       ]);
     } else {
-      scratchpadEvent = await this.summarizer.summarize(rawEventsToCompact);
+      scratchpadEvent = await this.summarizer.summarize(eventsToCompact);
     }
 
     // Ensure the event is marked as scratchpad and has system author.
