@@ -55,9 +55,8 @@ describe('file_utils', () => {
     });
 
     it('should default the base directory to the working directory of each call', async () => {
-      // Callers that omit `dir` — the skill script tools when no output
-      // directory is configured — follow process.cwd() as of the call, not as
-      // of module load, so a process that chdir()s is tracked.
+      // Callers that omit `dir` follow process.cwd() as of the call, not as of
+      // module load, so a process that chdir()s is tracked.
       const secondDir = await fs.mkdtemp(
         path.join(os.tmpdir(), 'file_utils_test_second_'),
       );

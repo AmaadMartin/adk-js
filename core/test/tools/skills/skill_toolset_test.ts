@@ -100,8 +100,8 @@ describe('skill_toolset', () => {
 
     describe('outputDir', () => {
       it('is undefined when no directory is configured', () => {
-        // The toolset deliberately resolves no default of its own, so the cwd
-        // default stays where it was: resolved per call by materializeFiles.
+        // The toolset resolves no directory of its own; an undeclared output
+        // directory becomes a fresh temp directory per tool call.
         expect(new SkillToolset([mockSkill]).outputDir).toBeUndefined();
       });
 
