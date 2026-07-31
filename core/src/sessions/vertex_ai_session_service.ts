@@ -281,7 +281,9 @@ export class VertexAiSessionService extends BaseSessionService {
       const response = await this.sessions.listInternal({
         name: `reasoningEngines/${reasoningEngineId}`,
         config: {
-          ...(userId ? {filter: `user_id=${quoteFilterLiteral(userId)}`} : {}),
+          ...(userId !== undefined
+            ? {filter: `user_id=${quoteFilterLiteral(userId)}`}
+            : {}),
           ...(pageToken ? {pageToken} : {}),
         },
       });
