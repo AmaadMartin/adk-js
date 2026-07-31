@@ -24,8 +24,8 @@ const NPM_RUN_PATTERN = /\bnpm\s+run\s+([\w:@./-]+)/g;
 /** `--project <name>` or `--project=<name>` in an npm script command. */
 const PROJECT_FLAG_PATTERN = /--project[=\s]+([^\s"']+)/g;
 
-/** Root scripts that run tests: `test`, `test:unit`, `test:coverage`, ... */
-const TEST_SCRIPT_PATTERN = /^test(:|$)/;
+/** A command that runs vitest, rather than another tool taking `--project`. */
+const VITEST_COMMAND_PATTERN = /\bvitest\b/;
 
 /** Raw text of every workflow file. Throws if the directory is missing. */
 async function readWorkflowFiles(): Promise<string[]> {
@@ -51,29 +51,34 @@ function extractNpmRunScripts(text: string): string[] {
   );
 }
 
-function extractProjects(command: string): string[] {
-  return [...command.matchAll(PROJECT_FLAG_PATTERN)].map((match) => match[1]);
+/**
+ * Vitest projects a command selects. Other tools take a `--project` flag too
+ * (`tsc --project tsconfig.json`), so a command that does not run vitest
+ * selects none.
+ */
+function vitestProjects(command: string): string[] {
+  return VITEST_COMMAND_PATTERN.test(command)
+    ? [...command.matchAll(PROJECT_FLAG_PATTERN)].map((match) => match[1])
+    : [];
 }
 
 /**
- * One message per vitest project that a root test script targets but that no
+ * One message per vitest project that a root script runs but that no
  * workflow-invoked script runs, naming both the project and the script.
  */
 function findUnwiredProjects(
   scripts: Record<string, string>,
   workflowProjects: Set<string>,
 ): string[] {
-  return Object.entries(scripts)
-    .filter(([name]) => TEST_SCRIPT_PATTERN.test(name))
-    .flatMap(([name, command]) =>
-      extractProjects(command)
-        .filter((project) => !workflowProjects.has(project))
-        .map(
-          (project) =>
-            `vitest project "${project}" (from "npm run ${name}") is not ` +
-            `run by any .github/workflows step`,
-        ),
-    );
+  return Object.entries(scripts).flatMap(([name, command]) =>
+    vitestProjects(command)
+      .filter((project) => !workflowProjects.has(project))
+      .map(
+        (project) =>
+          `vitest project "${project}" (from "npm run ${name}") is not ` +
+          `run by any .github/workflows step`,
+      ),
+  );
 }
 
 describe('GitHub workflow / npm script wiring', () => {
@@ -99,7 +104,7 @@ describe('GitHub workflow / npm script wiring', () => {
     const workflowProjects = new Set(
       Object.entries(rootPackage.scripts)
         .filter(([name]) => invokedScripts.has(name))
-        .flatMap(([, command]) => extractProjects(command)),
+        .flatMap(([, command]) => vitestProjects(command)),
     );
 
     expect(workflowProjects.size).toBeGreaterThan(0);
@@ -123,30 +128,32 @@ describe('workflow script parsing', () => {
 
   it('reads both the --project name and --project=name spellings', () => {
     expect(
-      extractProjects(
-        'vitest run --project unit:core --project=e2e --coverage',
-      ),
+      vitestProjects('vitest run --project unit:core --project=e2e --coverage'),
     ).toEqual(['unit:core', 'e2e']);
-    expect(extractProjects('tsc --noEmit')).toEqual([]);
+    expect(vitestProjects('vitest run --coverage')).toEqual([]);
+  });
+
+  it('claims no project for a non-vitest tool that also takes --project', () => {
+    expect(vitestProjects('tsc --project tsconfig.check.json')).toEqual([]);
   });
 
   it('rescans from the start of the input on a repeated call', () => {
     const command = 'vitest --project integration';
-    expect(extractProjects(command)).toEqual(['integration']);
-    expect(extractProjects(command)).toEqual(['integration']);
+    expect(vitestProjects(command)).toEqual(['integration']);
+    expect(vitestProjects(command)).toEqual(['integration']);
 
     const step = 'run: npm run build && npm run lint';
     expect(extractNpmRunScripts(step)).toEqual(['build', 'lint']);
     expect(extractNpmRunScripts(step)).toEqual(['build', 'lint']);
   });
 
-  it('names every unwired project and the script that targets it', () => {
+  it('names every unwired project and the script that runs it', () => {
     expect(
       findUnwiredProjects(
         {
           test: 'vitest --project unit:core --project e2e',
           'test:foo': 'vitest --project foo',
-          testbed: 'vitest --project testbed',
+          'ts:check': 'tsc --project tsconfig.check.json',
         },
         new Set(['unit:core']),
       ),
