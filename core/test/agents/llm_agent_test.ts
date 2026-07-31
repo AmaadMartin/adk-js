@@ -26,7 +26,7 @@ import {
   Session,
   ToolProcessLlmRequest,
 } from '@google/adk';
-import {Content, Schema, Type} from '@google/genai';
+import {Content, FinishReason, Schema, Type} from '@google/genai';
 import {beforeEach, describe, expect, it} from 'vitest';
 import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
@@ -797,7 +797,7 @@ describe('LlmAgent postprocess empty parts filtering', () => {
           candidatesTokenCount: 0,
           totalTokenCount: 10,
         },
-        finishReason: 'STOP' as never,
+        finishReason: FinishReason.STOP,
         partial: false,
       }),
     });

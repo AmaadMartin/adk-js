@@ -7,14 +7,15 @@
 import {
   BaseTool,
   BaseToolset,
-  Context,
-  InvocationContext,
-  LlmRequest,
   ReadonlyContext,
   ToolPredicate,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
-import {createReadonlyContext} from '../testing_utils.js';
+import {
+  createLlmRequest,
+  createReadonlyContext,
+  createToolContext,
+} from '../testing_utils.js';
 
 class DummyTool extends BaseTool {
   constructor(name: string) {
@@ -108,15 +109,8 @@ describe('BaseToolset integration with LLM Request', () => {
     const tools1 = await toolset1.getTools();
     const tools2 = await toolset2.getTools();
 
-    const llmRequest: LlmRequest = {
-      contents: [],
-      toolsDict: {},
-      liveConnectConfig: {},
-    };
-    // Set up dummy context
-    const context = new Context({
-      invocationContext: {session: {state: {}}} as unknown as InvocationContext,
-    });
+    const llmRequest = createLlmRequest();
+    const context = createToolContext();
 
     for (const tool of tools1) {
       await tool.processLlmRequest({toolContext: context, llmRequest});
@@ -137,14 +131,8 @@ describe('BaseToolset integration with LLM Request', () => {
     const tools1 = await toolset1.getTools();
     const tools2 = await toolset2.getTools();
 
-    const llmRequest: LlmRequest = {
-      contents: [],
-      toolsDict: {},
-      liveConnectConfig: {},
-    };
-    const context = new Context({
-      invocationContext: {session: {state: {}}} as unknown as InvocationContext,
-    });
+    const llmRequest = createLlmRequest();
+    const context = createToolContext();
 
     for (const tool of tools1) {
       await tool.processLlmRequest({toolContext: context, llmRequest});

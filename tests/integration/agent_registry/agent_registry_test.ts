@@ -12,8 +12,8 @@ import {
   LlmAgent,
 } from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
-import {createReadonlyContext} from '../../../core/test/testing_utils.js';
 import {
+  createReadonlyContext,
   createRunner,
   GeminiWithMockResponses,
   RawGenerateContentResponse,

@@ -4,19 +4,27 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {VertexRagRetrievalTool} from '@google/adk';
+import {LlmRequest, VertexRagRetrievalTool} from '@google/adk';
+import {Tool, ToolUnion} from '@google/genai';
 import {describe, expect, it} from 'vitest';
+import {createLlmRequest, createToolContext} from '../testing_utils.js';
 
 const RAG_CORPUS =
   'projects/my-project/locations/us-central1/ragCorpora/my-corpus';
 
-function makeLlmRequest(model = 'gemini-2.0-flash') {
-  return {
-    model,
-    config: {},
-    contents: [],
-    systemInstruction: undefined,
-  };
+function makeLlmRequest(model = 'gemini-2.0-flash'): LlmRequest {
+  return createLlmRequest({model, config: {}});
+}
+
+/**
+ * Narrows a configured tool to `Tool`. `config.tools` holds
+ * `Tool | CallableTool`, and only `Tool` carries `retrieval`.
+ */
+function expectRetrievalTool(tool: ToolUnion): Tool {
+  if (!('retrieval' in tool)) {
+    expect.fail(`expected a retrieval tool, got ${JSON.stringify(tool)}`);
+  }
+  return tool;
 }
 
 describe('VertexRagRetrievalTool', () => {
@@ -27,10 +35,13 @@ describe('VertexRagRetrievalTool', () => {
       });
       const llmRequest = makeLlmRequest();
 
-      await tool.processLlmRequest({llmRequest} as never);
+      await tool.processLlmRequest({
+        llmRequest,
+        toolContext: createToolContext(),
+      });
 
-      expect(llmRequest.config.tools).toHaveLength(1);
-      expect(llmRequest.config.tools![0]).toEqual({
+      expect(llmRequest.config!.tools).toHaveLength(1);
+      expect(llmRequest.config!.tools![0]).toEqual({
         retrieval: {
           vertexRagStore: {
             ragResources: [{ragCorpus: RAG_CORPUS}],
@@ -46,10 +57,13 @@ describe('VertexRagRetrievalTool', () => {
       });
       const llmRequest = makeLlmRequest();
 
-      await tool.processLlmRequest({llmRequest} as never);
+      await tool.processLlmRequest({
+        llmRequest,
+        toolContext: createToolContext(),
+      });
 
-      const vertexRagStore =
-        llmRequest.config.tools![0].retrieval!.vertexRagStore!;
+      const vertexRagStore = expectRetrievalTool(llmRequest.config!.tools![0])
+        .retrieval!.vertexRagStore!;
       expect(vertexRagStore.similarityTopK).toBe(10);
     });
 
@@ -60,10 +74,13 @@ describe('VertexRagRetrievalTool', () => {
       });
       const llmRequest = makeLlmRequest();
 
-      await tool.processLlmRequest({llmRequest} as never);
+      await tool.processLlmRequest({
+        llmRequest,
+        toolContext: createToolContext(),
+      });
 
-      const vertexRagStore =
-        llmRequest.config.tools![0].retrieval!.vertexRagStore!;
+      const vertexRagStore = expectRetrievalTool(llmRequest.config!.tools![0])
+        .retrieval!.vertexRagStore!;
       expect(
         vertexRagStore.ragRetrievalConfig?.filter?.vectorDistanceThreshold,
       ).toBe(0.5);
@@ -75,10 +92,13 @@ describe('VertexRagRetrievalTool', () => {
       });
       const llmRequest = makeLlmRequest();
 
-      await tool.processLlmRequest({llmRequest} as never);
+      await tool.processLlmRequest({
+        llmRequest,
+        toolContext: createToolContext(),
+      });
 
-      const vertexRagStore =
-        llmRequest.config.tools![0].retrieval!.vertexRagStore!;
+      const vertexRagStore = expectRetrievalTool(llmRequest.config!.tools![0])
+        .retrieval!.vertexRagStore!;
       expect(vertexRagStore.similarityTopK).toBeUndefined();
       expect(vertexRagStore.ragRetrievalConfig).toBeUndefined();
     });
@@ -87,13 +107,14 @@ describe('VertexRagRetrievalTool', () => {
       const tool = new VertexRagRetrievalTool({
         ragResources: [{ragCorpus: RAG_CORPUS}],
       });
-      const llmRequest = {model: 'gemini-2.0-flash', contents: []} as never;
+      const llmRequest = createLlmRequest({model: 'gemini-2.0-flash'});
 
-      await tool.processLlmRequest({llmRequest} as never);
+      await tool.processLlmRequest({
+        llmRequest,
+        toolContext: createToolContext(),
+      });
 
-      expect(
-        (llmRequest as never as {config: {tools: unknown[]}}).config.tools,
-      ).toHaveLength(1);
+      expect(llmRequest.config!.tools).toHaveLength(1);
     });
 
     it('appends to existing tools without removing them', async () => {
@@ -101,12 +122,17 @@ describe('VertexRagRetrievalTool', () => {
         ragResources: [{ragCorpus: RAG_CORPUS}],
       });
       const llmRequest = makeLlmRequest();
-      llmRequest.config.tools = [{googleSearch: {}}] as never;
+      llmRequest.config!.tools = [{googleSearch: {}}];
 
-      await tool.processLlmRequest({llmRequest} as never);
+      await tool.processLlmRequest({
+        llmRequest,
+        toolContext: createToolContext(),
+      });
 
-      expect(llmRequest.config.tools).toHaveLength(2);
-      expect(llmRequest.config.tools![1].retrieval).toBeDefined();
+      expect(llmRequest.config!.tools).toHaveLength(2);
+      expect(
+        expectRetrievalTool(llmRequest.config!.tools![1]).retrieval,
+      ).toBeDefined();
     });
   });
 
@@ -115,7 +141,7 @@ describe('VertexRagRetrievalTool', () => {
       const tool = new VertexRagRetrievalTool({
         ragResources: [{ragCorpus: RAG_CORPUS}],
       });
-      const result = await tool.runAsync({} as never);
+      const result = await tool.runAsync();
       expect(result).toBeUndefined();
     });
   });
