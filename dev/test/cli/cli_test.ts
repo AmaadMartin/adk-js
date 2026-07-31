@@ -4,7 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {LogLevel, setLogLevel} from '@google/adk';
+import {
+  getArtifactServiceFromUri,
+  getSessionServiceFromUri,
+  LogLevel,
+  setLogLevel,
+} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {createProgram} from '../../src/cli/cli.js';
 import {createAgent} from '../../src/cli/cli_create.js';
@@ -48,6 +53,56 @@ vi.mock('@google/adk', async (importOriginal) => {
     setLogLevel: vi.fn(),
   };
 });
+
+/** A URI scheme the CLI help text names, with a URI that exercises it. */
+interface ServiceUriScheme {
+  scheme: string;
+  sampleUri: string;
+}
+
+/** Every scheme `getSessionServiceFromUri` routes to a session service. */
+const SESSION_SERVICE_URI_SCHEMES: ServiceUriScheme[] = [
+  {scheme: 'memory://', sampleUri: 'memory://'},
+  {scheme: 'postgres://', sampleUri: 'postgres://user:pw@localhost:5432/adk'},
+  {
+    scheme: 'postgresql://',
+    sampleUri: 'postgresql://user:pw@localhost:5432/adk',
+  },
+  {scheme: 'mysql://', sampleUri: 'mysql://user:pw@localhost:3306/adk'},
+  {scheme: 'mariadb://', sampleUri: 'mariadb://user:pw@localhost:3306/adk'},
+  {scheme: 'mssql://', sampleUri: 'mssql://user:pw@localhost:1433/adk'},
+  {scheme: 'sqlite://', sampleUri: 'sqlite://./adk_sessions.db'},
+];
+
+/** Every scheme `getArtifactServiceFromUri` routes to an artifact service. */
+const ARTIFACT_SERVICE_URI_SCHEMES: ServiceUriScheme[] = [
+  {scheme: 'memory://', sampleUri: 'memory://'},
+  {scheme: 'gs://', sampleUri: 'gs://my-bucket'},
+  {scheme: 'file://', sampleUri: 'file:///tmp/adk-artifacts'},
+];
+
+/**
+ * Returns the help description registered for `longFlag` on the `web` command.
+ *
+ * The service URI options are single shared `Option` instances added to every
+ * command, so reading `web`'s registration reads the text all five render.
+ */
+function webOptionDescription(
+  program: ReturnType<typeof createProgram>,
+  longFlag: string,
+): string {
+  const web = program.commands.find((command) => command.name() === 'web');
+  if (!web) {
+    expect.fail('The `web` command is not registered');
+  }
+
+  const option = web.options.find((o) => o.long === longFlag);
+  if (!option) {
+    expect.fail(`The \`web\` command does not register ${longFlag}`);
+  }
+
+  return option.description;
+}
 
 describe('CLI Entrypoint', () => {
   let program: ReturnType<typeof createProgram>;
@@ -413,6 +468,32 @@ describe('CLI Entrypoint', () => {
       expect((deployToAgentEngine as Mock).mock.calls[0][0]).toMatchObject({
         agentEngineId: '12345',
       });
+    });
+  });
+
+  describe('service URI help text', () => {
+    it('documents every session service URI scheme the registry accepts', () => {
+      const description = webOptionDescription(
+        program,
+        '--session_service_uri',
+      );
+
+      for (const {scheme, sampleUri} of SESSION_SERVICE_URI_SCHEMES) {
+        expect(description).toContain(scheme);
+        expect(getSessionServiceFromUri(sampleUri)).toBeDefined();
+      }
+    });
+
+    it('documents every artifact service URI scheme the registry accepts', () => {
+      const description = webOptionDescription(
+        program,
+        '--artifact_service_uri',
+      );
+
+      for (const {scheme, sampleUri} of ARTIFACT_SERVICE_URI_SCHEMES) {
+        expect(description).toContain(scheme);
+        expect(getArtifactServiceFromUri(sampleUri)).toBeDefined();
+      }
     });
   });
 });

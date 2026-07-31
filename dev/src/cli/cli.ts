@@ -121,11 +121,11 @@ const LOG_LEVEL_OPTION = new Option(
 ).default('info');
 const SESSION_SERVICE_URI_OPTION = new Option(
   '--session_service_uri <string>',
-  'Optional. The URI of the session service. Supported URIs: memory:// for in-memory session service.',
+  'Optional. The URI of the session service. Supported URIs: memory:// for the in-memory session service; postgres://, postgresql://, mysql://, mariadb://, mssql:// and sqlite://<path_to_sqlite_file> for the database session service.',
 );
 const ARTIFACT_SERVICE_URI_OPTION = new Option(
   '--artifact_service_uri <string>',
-  'Optional. The URI of the artifact service. Supported URIs: gs://<bucket name> for GCS artifact service.',
+  'Optional. The URI of the artifact service. Supported URIs: gs://<bucket_name> for the GCS artifact service; memory:// for the in-memory artifact service; file://<path> for the local file artifact service.',
 );
 const OTEL_TO_CLOUD_OPTION = new Option(
   '--otel_to_cloud [boolean]',
