@@ -68,9 +68,9 @@ interface CaptureEnvCase {
  * Every value of ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS that the current
  * implementation distinguishes, and the payload capture it selects.
  *
- * `''` and `'TRUE'` are the non-obvious rows: the empty string is falsy so it
- * takes the `|| 'true'` default, while `'TRUE'` fails the case-sensitive
- * comparison and therefore disables capture.
+ * The gate is an opt-out: capture stays on unless the value is `'false'` or
+ * `'0'` after trimming and lowercasing. An unrecognized value is therefore not
+ * an error condition, it resolves to the default.
  */
 const CAPTURE_ENV_CASES: CaptureEnvCase[] = [
   {
@@ -105,13 +105,13 @@ const CAPTURE_ENV_CASES: CaptureEnvCase[] = [
   },
   {
     envValue: 'TRUE',
-    captureEnabled: false,
-    description: "redacts payloads when the variable is 'TRUE' (case matters)",
+    captureEnabled: true,
+    description: "captures payloads when the variable is 'TRUE'",
   },
   {
     envValue: 'not-a-boolean',
-    captureEnabled: false,
-    description: 'redacts payloads when the variable is unrecognized',
+    captureEnabled: true,
+    description: 'captures payloads when the variable is unrecognized',
   },
 ];
 
