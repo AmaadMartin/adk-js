@@ -5,6 +5,7 @@ node_modules/
 .idea/
 .vscode/*
 !.vscode/settings.json
+# Regenerated per test run; pins nothing (see installFixtureDeps).
 tests/**/package-lock.json
 coverage/
 .env

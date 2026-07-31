@@ -7,12 +7,22 @@ import {exec, spawn} from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import {promisify} from 'node:util';
 import {afterAll, beforeAll, describe, expect, it} from 'vitest';
-import {getResponse, sendInput} from '../test_case_utils.js';
+import {
+  cleanupFixtureDeps,
+  getResponse,
+  installFixtureDeps,
+  sendInput,
+} from '../test_case_utils.js';
 
 const execAsync = promisify(exec);
 const dirname = process.cwd();
 
 const TEST_EXECUTION_TIMEOUT = 20000;
+
+/** The subset of a fixture lockfile this suite asserts on. */
+interface FixtureLockfile {
+  packages: Record<string, {link?: boolean}>;
+}
 
 describe('Build setup', () => {
   describe.each([
@@ -26,7 +36,7 @@ describe('Build setup', () => {
     const projectPath = `${dirname}/tests/integration/build_setup/${buildSetup}`;
 
     beforeAll(async () => {
-      await execAsync('npm install', {cwd: projectPath});
+      await installFixtureDeps(projectPath);
 
       if (buildSetup.startsWith('ts_')) {
         let buildResult;
@@ -43,6 +53,19 @@ describe('Build setup', () => {
         expect(buildResult.stderr).toBe('');
         expect(buildResult.stdout).toContain('\nBuild complete');
       }
+    });
+
+    it('should link the workspace packages rather than pack them', async () => {
+      const lock: FixtureLockfile = JSON.parse(
+        await fs.readFile(`${projectPath}/package-lock.json`, 'utf-8'),
+      );
+
+      // Not `lstat().isSymbolicLink()`: npm creates junctions on Windows, but
+      // records `link: true` on every npm major and OS in the matrix.
+      expect(lock.packages['node_modules/@google/adk']?.link).toBe(true);
+      expect(lock.packages['node_modules/@google/adk-devtools']?.link).toBe(
+        true,
+      );
     });
 
     it(
@@ -109,15 +132,10 @@ describe('Build setup', () => {
     );
 
     afterAll(async () => {
-      await fs
-        .rm(`${projectPath}/node_modules`, {recursive: true, force: true})
-        .catch(() => {});
-      await fs.unlink(`${projectPath}/package-lock.json`).catch(() => {});
+      await cleanupFixtureDeps(projectPath);
 
       if (buildSetup.startsWith('ts_')) {
-        await fs
-          .rm(`${projectPath}/dist`, {recursive: true, force: true})
-          .catch(() => {});
+        await fs.rm(`${projectPath}/dist`, {recursive: true, force: true});
       }
     });
   });
