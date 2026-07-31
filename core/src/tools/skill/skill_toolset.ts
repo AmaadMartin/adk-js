@@ -47,10 +47,6 @@ export class SkillToolset extends BaseToolset {
   public registry?: SkillRegistry;
   private toolCache = new Map<string, BaseTool[]>();
   private fetchedSkillCache = new Map<string, Map<string, Skill>>();
-  /**
-   * Directory that skill script output files are materialized into. Undefined
-   * when unconfigured, which leaves the default to `materializeFiles`.
-   */
   public readonly outputDir?: string;
 
   constructor(
