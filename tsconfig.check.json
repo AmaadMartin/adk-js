@@ -2,26 +2,65 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": true,
-    "baseUrl": ".",
-    // Resolve workspace packages to their sources, mirroring the aliases in
-    // vitest.config.ts, so tests are checked against the code they run against
-    // and the check does not depend on `npm run build` having run.
+    // Resolve the workspace packages to their sources, so the check never
+    // depends on `npm run build` and the same nominal type cannot enter the
+    // program twice (once via core/src, once via core/dist/types). For
+    // @google/adk and @google/adk-integrations this also matches the aliases in
+    // vitest.config.ts, so those files are checked against the code they
+    // actually run against; vitest has no @google/adk-devtools alias, so that
+    // entry buys build-independence only.
     "paths": {
       "@google/adk": ["./core/src/index.ts"],
       "@google/adk/*": ["./core/src/*"],
       "@google/adk-devtools": ["./dev/src/index.ts"],
-      "@google/adk-devtools/*": ["./dev/src/*"],
-      "@google/adk-integrations": ["./integrations/src/index.ts"],
-      "@google/adk-integrations/*": ["./integrations/src/*"]
+      "@google/adk-integrations": ["./integrations/src/index.ts"]
     }
   },
+  // Listed file by file rather than by directory, so a newly added test is
+  // checked from the day it lands. Every entry below carries pre-existing type
+  // errors; delete it once that file is clean. Two clusters: core/test (mostly
+  // LiveServerMessage becoming a class with getters in @google/genai v2, plus
+  // test doubles that do not implement their abstract base), and one
+  // integration test blocked on a dependency conflict rather than a type bug --
+  // @google-cloud/vertexai requires @google/genai ^1.45.0 while the root
+  // installs 2.9.0, so two structurally incompatible ApiClient types are in
+  // scope and no dedupe can merge them across the major boundary.
   "exclude": [
     "**/node_modules",
     "**/dist",
-    // Excluded only because they carry pre-existing type errors (154 in
-    // core/test, 1 here from a duplicate @google/genai install). Type-cleaning
-    // them is tracked separately; drop each entry as its cluster is fixed.
-    "core/test",
+    "core/test/agents/functions_test.ts",
+    "core/test/agents/processors/basic_llm_request_processor_test.ts",
+    "core/test/agents/processors/instructions_llm_request_processor_test.ts",
+    "core/test/agents/processors/request_confirmation_llm_request_processor_test.ts",
+    "core/test/agents/sequential_agent_test.ts",
+    "core/test/apps/app_test.ts",
+    "core/test/auth/exchanger/credential_exchanger_test.ts",
+    "core/test/code_executors/code_execution_utils_test.ts",
+    "core/test/code_executors/code_executor_context_test.ts",
+    "core/test/code_executors/unsafe_local_code_executor_test.ts",
+    "core/test/context/anchored_context_compactor_test.ts",
+    "core/test/context/token_based_context_compactor_test.ts",
+    "core/test/events/event_actions_test.ts",
+    "core/test/events/structured_events_test.ts",
+    "core/test/integrations/agent_registry_test.ts",
+    "core/test/memory/vertex_ai_memory_bank_service_test.ts",
+    "core/test/models/gemini_llm_connection_test.ts",
+    "core/test/models/google_llm_test.ts",
+    "core/test/models/llm_response_test.ts",
+    "core/test/plugins/global_instruction_plugin_test.ts",
+    "core/test/plugins/security_plugin_test.ts",
+    "core/test/runner/runner_test.ts",
+    "core/test/sessions/vertex_ai_session_service_test.ts",
+    "core/test/tools/google_search_tool_test.ts",
+    "core/test/tools/openapi_tool/auth_helpers_test.ts",
+    "core/test/tools/openapi_tool/openapi_spec_parser_test.ts",
+    "core/test/tools/openapi_tool/openapi_toolset_integration_test.ts",
+    "core/test/tools/openapi_tool/openapi_toolset_test.ts",
+    "core/test/tools/openapi_tool/tool_auth_handler_test.ts",
+    "core/test/tools/skills/run_skill_script_tool_test.ts",
+    "core/test/tools/vertex_ai_search_tool_test.ts",
+    "core/test/tools/vertex_rag_retrieval_tool_test.ts",
+    "core/test/utils/live_connection_utils_test.ts",
     "tests/integration/sessions/vertex_ai_session_service_test.ts"
   ]
 }
