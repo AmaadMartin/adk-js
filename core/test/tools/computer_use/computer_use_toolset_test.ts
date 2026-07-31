@@ -140,7 +140,7 @@ describe('ComputerUseToolset', () => {
     computer = new MockComputer();
     toolset = new ComputerUseToolset({
       computer,
-      excludedPredefinedFunctions: ['hoverAt'],
+      excludedPredefinedFunctions: ['hover_at'],
     });
     context = createToolContext();
   });
@@ -271,7 +271,7 @@ describe('ComputerUseToolset', () => {
       {
         computerUse: {
           environment: Environment.ENVIRONMENT_BROWSER,
-          excludedPredefinedFunctions: ['hoverAt'],
+          excludedPredefinedFunctions: ['hover_at'],
         },
       },
     ]);
@@ -307,5 +307,48 @@ describe('ComputerUseToolset', () => {
     vi.spyOn(computer, 'close');
     await toolset.close();
     expect(computer.close).toHaveBeenCalled();
+  });
+
+  it('initializes the computer once even when getTools calls race', async () => {
+    const initialize = vi.spyOn(computer, 'initialize');
+
+    const [tools1, tools2] = await Promise.all([
+      toolset.getTools(),
+      toolset.getTools(),
+    ]);
+
+    expect(initialize).toHaveBeenCalledTimes(1);
+    expect(tools1).toBe(tools2);
+  });
+
+  it('rejects a wrong-typed string, boolean or array argument', async () => {
+    const tools = await toolset.getTools();
+    const navigateTool = tools.find((tool) => tool.name === 'navigate');
+    const typeTool = tools.find((tool) => tool.name === 'type_text_at');
+    const keysTool = tools.find((tool) => tool.name === 'key_combination');
+
+    await expect(
+      navigateTool!.runAsync({args: {url: 42}, toolContext: context}),
+    ).rejects.toThrowError(/"url" must be a string, got number/);
+
+    await expect(
+      typeTool!.runAsync({
+        args: {x: 1, y: 1, text: 'hi', press_enter: 'yes'},
+        toolContext: context,
+      }),
+    ).rejects.toThrowError(/"press_enter" must be a boolean, got string/);
+
+    await expect(
+      keysTool!.runAsync({args: {keys: 'ctrl'}, toolContext: context}),
+    ).rejects.toThrowError(/"keys" must be a string array/);
+  });
+
+  it('gives every tool the real screen size and the default virtual space', async () => {
+    const tools = await toolset.getTools();
+
+    for (const tool of tools) {
+      expect(tool.screenSize).toEqual([1920, 1080]);
+      expect(tool.virtualScreenSize).toEqual([1000, 1000]);
+    }
   });
 });

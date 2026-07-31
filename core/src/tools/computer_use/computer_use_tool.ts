@@ -5,6 +5,7 @@
  */
 
 import {Context} from '../../agents/context.js';
+import {base64Encode} from '../../utils/env_aware_utils.js';
 import {experimental} from '../../utils/experimental.js';
 import {logger} from '../../utils/logger.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
@@ -19,7 +20,7 @@ import {ComputerState} from './base_computer.js';
 export type ComputerFunc = (
   args: Record<string, unknown>,
   toolContext: Context,
-) => Promise<unknown>;
+) => Promise<ComputerState>;
 
 /**
  * The virtual coordinate space the model reports coordinates in.
@@ -38,46 +39,47 @@ const COORDINATE_AXIS_BY_ARG = {
 } as const;
 
 /**
- * Whether a computer method returned a {@link ComputerState}.
+ * A unique symbol to identify ADK computer use tools.
  */
-function isComputerState(value: unknown): value is ComputerState {
+const COMPUTER_USE_TOOL_SIGNATURE_SYMBOL = Symbol.for(
+  'google.adk.computerUseTool',
+);
+
+/**
+ * Type guard to check if an object is a {@link ComputerUseTool}.
+ *
+ * @param obj The object to check.
+ * @returns True if the object is a `ComputerUseTool`, false otherwise.
+ */
+export function isComputerUseTool(obj: unknown): obj is ComputerUseTool {
   return (
-    typeof value === 'object' &&
-    value !== null &&
-    ('screenshot' in value || 'url' in value)
+    typeof obj === 'object' &&
+    obj !== null &&
+    COMPUTER_USE_TOOL_SIGNATURE_SYMBOL in obj &&
+    obj[COMPUTER_USE_TOOL_SIGNATURE_SYMBOL] === true
   );
 }
 
 /**
- * Whether a value is a plain keyed object that extra keys can be added to.
+ * The confirmation hint for a call the model flagged as needing one, or
+ * undefined when it did not flag the call.
  */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
-/**
- * The safety decision the model attaches to a computer use action.
- */
-interface SafetyDecision {
-  decision?: string;
-  explanation?: string;
-}
-
-/**
- * Reads the safety decision out of the model-provided tool arguments.
- */
-function readSafetyDecision(
+function safetyConfirmationHint(
   args: Record<string, unknown>,
-): SafetyDecision | undefined {
-  const value = args['safetyDecision'] ?? args['safety_decision'];
-  if (!isRecord(value)) {
+): string | undefined {
+  const decision = args['safetyDecision'] ?? args['safety_decision'];
+  if (
+    typeof decision !== 'object' ||
+    decision === null ||
+    !('decision' in decision) ||
+    decision.decision !== 'require_confirmation'
+  ) {
     return undefined;
   }
-  const {decision, explanation} = value;
-  return {
-    decision: typeof decision === 'string' ? decision : undefined,
-    explanation: typeof explanation === 'string' ? explanation : undefined,
-  };
+  const explanation = 'explanation' in decision ? decision.explanation : '';
+  return typeof explanation === 'string' && explanation
+    ? explanation
+    : 'This computer use action requires safety confirmation.';
 }
 
 /**
@@ -87,17 +89,12 @@ function toToolResponse(state: ComputerState): Record<string, unknown> {
   const response: Record<string, unknown> = {};
 
   if (state.screenshot) {
-    try {
-      response['image'] = {
-        mimetype: 'image/png',
-        data: Buffer.from(state.screenshot).toString('base64'),
-      };
-    } catch (e) {
-      // Surface the failure instead of returning a success with no screenshot,
-      // which the model cannot distinguish from a blank screen.
-      logger.warn(`Could not base64 encode screenshot. ${e}`);
-      response['error'] = `Could not base64 encode screenshot: ${e}`;
-    }
+    // base64Encode, not Buffer: core is also published for the browser via
+    // index_web.ts, where Buffer is not defined.
+    response['image'] = {
+      mimetype: 'image/png',
+      data: base64Encode(state.screenshot),
+    };
   }
 
   if (state.url) {
@@ -109,9 +106,14 @@ function toToolResponse(state: ComputerState): Record<string, unknown> {
 
 @experimental
 export class ComputerUseTool extends BaseTool {
-  private readonly screenSize: [number, number];
-  private readonly coordinateSpace: [number, number];
-  private readonly computerFunc: ComputerFunc;
+  /** A unique symbol to identify ADK computer use tools. */
+  readonly [COMPUTER_USE_TOOL_SIGNATURE_SYMBOL] = true;
+
+  /** Real screen size in pixels, as `[width, height]`. */
+  readonly screenSize: [number, number];
+  /** Virtual coordinate space the model reports coordinates in. */
+  readonly virtualScreenSize: [number, number];
+  private readonly func: ComputerFunc;
 
   constructor(options: {
     func: ComputerFunc;
@@ -129,15 +131,15 @@ export class ComputerUseTool extends BaseTool {
       description: `Computer control function: ${name}`,
     });
 
-    this.computerFunc = options.func;
+    this.func = options.func;
     this.screenSize = options.screenSize;
-    this.coordinateSpace =
+    this.virtualScreenSize =
       options.virtualScreenSize ?? DEFAULT_VIRTUAL_SCREEN_SIZE;
 
     // The tuple arity is enforced by the type; only the values need checking.
     for (const [sizeName, size] of [
       ['screenSize', this.screenSize],
-      ['virtualScreenSize', this.coordinateSpace],
+      ['virtualScreenSize', this.virtualScreenSize],
     ] as const) {
       if (size[0] <= 0 || size[1] <= 0) {
         throw new Error(`${sizeName} dimensions must be positive`);
@@ -151,7 +153,7 @@ export class ComputerUseTool extends BaseTool {
         `${argName} coordinate must be numeric, got ${typeof value}`,
       );
     const norm = Math.floor(
-      (value / this.coordinateSpace[axis]) * this.screenSize[axis],
+      (value / this.virtualScreenSize[axis]) * this.screenSize[axis],
     );
     return Math.max(0, Math.min(norm, this.screenSize[axis] - 1));
   }
@@ -160,11 +162,8 @@ export class ComputerUseTool extends BaseTool {
     const {args, toolContext} = req;
 
     if (!toolContext.toolConfirmation) {
-      const safetyDecision = readSafetyDecision(args);
-      if (safetyDecision?.decision === 'require_confirmation') {
-        const hint =
-          safetyDecision.explanation ||
-          'This computer use action requires safety confirmation.';
+      const hint = safetyConfirmationHint(args);
+      if (hint) {
         toolContext.requestConfirmation({hint});
         toolContext.actions.skipSummarization = true;
         return {
@@ -176,38 +175,23 @@ export class ComputerUseTool extends BaseTool {
       return {error: 'This tool call is rejected.'};
     }
 
-    try {
-      const callArgs = {...args};
+    const callArgs = {...args};
 
-      for (const [argName, axis] of Object.entries(COORDINATE_AXIS_BY_ARG)) {
-        if (argName in callArgs) {
-          const original = callArgs[argName];
-          const normalized = this.normalize(original, argName, axis);
-          callArgs[argName] = normalized;
-          logger.debug(`Normalized ${argName}: ${original} -> ${normalized}`);
-        }
+    for (const [argName, axis] of Object.entries(COORDINATE_AXIS_BY_ARG)) {
+      if (argName in callArgs) {
+        const original = callArgs[argName];
+        const normalized = this.normalize(original, argName, axis);
+        callArgs[argName] = normalized;
+        logger.debug(`Normalized ${argName}: ${original} -> ${normalized}`);
       }
-
-      // The toolset wraps each computer method to accept the argument object,
-      // so it is passed through unchanged.
-      const result = await this.computerFunc(callArgs, toolContext);
-
-      let response: unknown = isComputerState(result)
-        ? toToolResponse(result)
-        : result;
-
-      if (toolContext.toolConfirmation?.confirmed) {
-        const acknowledged: Record<string, unknown> = isRecord(response)
-          ? {...response}
-          : {result: response};
-        acknowledged['safety_acknowledgement'] = 'true';
-        response = acknowledged;
-      }
-
-      return response;
-    } catch (e) {
-      logger.error(`Error in ComputerUseTool.runAsync: ${e}`);
-      throw e;
     }
+
+    const response = toToolResponse(await this.func(callArgs, toolContext));
+
+    if (toolContext.toolConfirmation?.confirmed) {
+      response['safety_acknowledgement'] = 'true';
+    }
+
+    return response;
   }
 }

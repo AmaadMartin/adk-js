@@ -9,12 +9,13 @@ import {
   Context,
   createSession,
   InvocationContext,
+  isComputerUseTool,
   LlmAgent,
   LlmRequest,
   PluginManager,
   ToolConfirmation,
 } from '@google/adk';
-import {beforeEach, describe, expect, it} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 function createToolContext(): Context {
   const invocationContext = new InvocationContext({
@@ -33,8 +34,12 @@ describe('ComputerUseTool', () => {
     context = createToolContext();
   });
 
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it('validates screen sizes during initialization', () => {
-    const fn = async () => {};
+    const fn = async () => ({});
     expect(
       () =>
         new ComputerUseTool({
@@ -58,6 +63,7 @@ describe('ComputerUseTool', () => {
     const tool = new ComputerUseTool({
       func: async (args) => {
         capturedArgs = args;
+        return {};
       },
       screenSize: [1920, 1080],
     });
@@ -80,6 +86,7 @@ describe('ComputerUseTool', () => {
     const tool = new ComputerUseTool({
       func: async (args) => {
         capturedArgs = args;
+        return {};
       },
       screenSize: [1280, 800],
       virtualScreenSize: [2000, 2000],
@@ -95,7 +102,7 @@ describe('ComputerUseTool', () => {
 
   it('rejects unexpected non-numeric coordinates', async () => {
     const tool = new ComputerUseTool({
-      func: async () => {},
+      func: async () => ({}),
       screenSize: [1920, 1080],
     });
 
@@ -134,7 +141,7 @@ describe('ComputerUseTool', () => {
 
   it('implements safety decisions correctly for require_confirmation', async () => {
     const tool = new ComputerUseTool({
-      func: async () => {},
+      func: async () => ({}),
       screenSize: [1920, 1080],
     });
 
@@ -158,7 +165,7 @@ describe('ComputerUseTool', () => {
 
   it('ignores a safety decision that is not an object', async () => {
     const tool = new ComputerUseTool({
-      func: async () => 'ran',
+      func: async () => ({url: 'ran'}),
       screenSize: [1920, 1080],
     });
 
@@ -167,12 +174,12 @@ describe('ComputerUseTool', () => {
       toolContext: context,
     });
 
-    expect(response).toBe('ran');
+    expect(response).toEqual({url: 'ran'});
   });
 
   it('rejects call if toolConfirmation is strictly unconfirmed', async () => {
     const tool = new ComputerUseTool({
-      func: async () => {},
+      func: async () => ({}),
       screenSize: [1920, 1080],
     });
 
@@ -188,7 +195,7 @@ describe('ComputerUseTool', () => {
 
   it('returns undefined for _getDeclaration()', () => {
     const tool = new ComputerUseTool({
-      func: async () => {},
+      func: async () => ({}),
       screenSize: [1920, 1080],
       name: 'click_at',
     });
@@ -199,7 +206,7 @@ describe('ComputerUseTool', () => {
   it('adds safety_acknowledgement if confirmation is true', async () => {
     const tool = new ComputerUseTool({
       func: async () => {
-        return {something: 'else'};
+        return {url: 'https://example.com'};
       },
       screenSize: [1920, 1080],
     });
@@ -212,14 +219,14 @@ describe('ComputerUseTool', () => {
     });
 
     expect(response).toEqual({
-      something: 'else',
+      url: 'https://example.com',
       safety_acknowledgement: 'true',
     });
   });
 
   it('provides a no-op processLlmRequest', async () => {
     const tool = new ComputerUseTool({
-      func: async () => {},
+      func: async () => ({}),
       screenSize: [1920, 1080],
     });
     const llmRequest: LlmRequest = {
@@ -233,31 +240,61 @@ describe('ComputerUseTool', () => {
     expect(llmRequest.toolsDict).toEqual({});
   });
 
-  it('reports a screenshot that cannot be base64 encoded', async () => {
+  it('omits the image key for a state with no screenshot', async () => {
     const tool = new ComputerUseTool({
-      func: async () => {
-        return {screenshot: 123, url: 'https://example.com'};
-      },
+      func: async () => ({url: 'https://example.com'}),
       screenSize: [1920, 1080],
     });
+
     const response = await tool.runAsync({args: {}, toolContext: context});
+
+    expect(response).toEqual({url: 'https://example.com'});
+  });
+
+  it('encodes the screenshot in a browser runtime, where Buffer is absent', async () => {
+    // core is published for the browser too ("browser" in core/package.json),
+    // so the screenshot encoder may not reach for a Node global.
+    vi.stubGlobal('window', {btoa});
+    vi.stubGlobal('Buffer', undefined);
+
+    const tool = new ComputerUseTool({
+      func: async () => ({
+        screenshot: new Uint8Array([72, 101, 108, 108, 111]),
+        url: 'https://example.com',
+      }),
+      screenSize: [1920, 1080],
+    });
+
+    const response = await tool.runAsync({args: {}, toolContext: context});
+
     expect(response).toEqual({
-      error: expect.stringContaining('Could not base64 encode screenshot'),
+      image: {mimetype: 'image/png', data: 'SGVsbG8='},
       url: 'https://example.com',
     });
   });
 
-  it('handles non-object response with confirmation', async () => {
+  it('identifies computer use tools with isComputerUseTool', () => {
     const tool = new ComputerUseTool({
-      func: async () => 'raw string',
+      func: async () => ({}),
       screenSize: [1920, 1080],
+      name: 'click_at',
     });
-    context.toolConfirmation = new ToolConfirmation({confirmed: true});
-    const response = await tool.runAsync({args: {}, toolContext: context});
-    expect(response).toEqual({
-      result: 'raw string',
-      safety_acknowledgement: 'true',
+
+    expect(isComputerUseTool(tool)).toBe(true);
+    expect(isComputerUseTool({name: 'click_at'})).toBe(false);
+    expect(isComputerUseTool(null)).toBe(false);
+  });
+
+  it('exposes the screen sizes the adapter hook rebuilds a tool from', () => {
+    const tool = new ComputerUseTool({
+      func: async () => ({}),
+      screenSize: [2560, 1440],
+      virtualScreenSize: [800, 600],
+      name: 'click_at',
     });
+
+    expect(tool.screenSize).toEqual([2560, 1440]);
+    expect(tool.virtualScreenSize).toEqual([800, 600]);
   });
 
   it('rejects with error if func throws', async () => {
@@ -274,7 +311,7 @@ describe('ComputerUseTool', () => {
 
   it('uses default hint if explanation is missing', async () => {
     const tool = new ComputerUseTool({
-      func: async () => {},
+      func: async () => ({}),
       screenSize: [1920, 1080],
     });
     await tool.runAsync({
@@ -291,7 +328,7 @@ describe('ComputerUseTool', () => {
     expect(
       () =>
         new ComputerUseTool({
-          func: async () => {},
+          func: async () => ({}),
           name: '',
           screenSize: [1920, 1080],
         }),
@@ -300,7 +337,7 @@ describe('ComputerUseTool', () => {
 
   it('rejects unexpected non-numeric y coordinates', async () => {
     const tool = new ComputerUseTool({
-      func: async () => {},
+      func: async () => ({}),
       screenSize: [1920, 1080],
     });
 

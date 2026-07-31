@@ -11,6 +11,7 @@ import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {LlmRequest} from '../../models/llm_request.js';
 import {experimental} from '../../utils/experimental.js';
 import {logger} from '../../utils/logger.js';
+import {toSnakeCaseKey} from '../../utils/object_notation_utils.js';
 import {BaseToolset} from '../base_toolset.js';
 import {
   BaseComputer,
@@ -166,18 +167,11 @@ const COMPUTER_ACTIONS: Readonly<
   currentState: (computer) => computer.currentState(),
 };
 
-/**
- * Converts a computer method name to the snake_case tool name the model uses.
- */
-function toSnakeCase(name: string): string {
-  return name.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
-}
-
 @experimental
 export class ComputerUseToolset extends BaseToolset {
   private readonly computer: BaseComputer;
   private readonly excludedPredefinedFunctions?: string[];
-  private tools: ComputerUseTool[] | null = null;
+  private tools?: Promise<ComputerUseTool[]>;
 
   constructor(options: {
     computer: BaseComputer;
@@ -188,30 +182,30 @@ export class ComputerUseToolset extends BaseToolset {
     this.excludedPredefinedFunctions = options.excludedPredefinedFunctions;
   }
 
-  override async getTools(
+  override getTools(
     _readonlyContext?: ReadonlyContext,
   ): Promise<ComputerUseTool[]> {
-    if (this.tools) {
-      return this.tools;
-    }
+    // Memoizing the promise rather than the resolved array keeps
+    // `computer.initialize()` to one call even when callers race.
+    this.tools ??= this.buildTools();
+    return this.tools;
+  }
 
+  private async buildTools(): Promise<ComputerUseTool[]> {
     await this.computer.initialize();
     const screenSize = await this.computer.screenSize();
 
     const tools: ComputerUseTool[] = [];
     for (const [methodName, invokeAction] of Object.entries(COMPUTER_ACTIONS)) {
-      const snakeCaseName = toSnakeCase(methodName);
+      const toolName = toSnakeCaseKey(methodName);
 
-      if (
-        this.excludedPredefinedFunctions?.includes(methodName) ||
-        this.excludedPredefinedFunctions?.includes(snakeCaseName)
-      ) {
+      if (this.excludedPredefinedFunctions?.includes(toolName)) {
         continue;
       }
 
       tools.push(
         new ComputerUseTool({
-          name: snakeCaseName,
+          name: toolName,
           func: async (args, toolContext) => {
             await this.computer.prepare(toolContext);
             return invokeAction(this.computer, args);
@@ -221,7 +215,6 @@ export class ComputerUseToolset extends BaseToolset {
       );
     }
 
-    this.tools = tools;
     return tools;
   }
 
@@ -233,36 +226,31 @@ export class ComputerUseToolset extends BaseToolset {
     toolContext: Context,
     llmRequest: LlmRequest,
   ): Promise<void> {
-    try {
-      for (const tool of await this.getTools()) {
-        llmRequest.toolsDict[tool.name] = tool;
-      }
-
-      llmRequest.config = llmRequest.config ?? {};
-      llmRequest.config.tools = llmRequest.config.tools ?? [];
-
-      for (const tool of llmRequest.config.tools) {
-        if ('computerUse' in tool && tool.computerUse) {
-          logger.debug('Computer use already configured in LLM request');
-          return;
-        }
-      }
-
-      const environment = await this.computer.environment();
-      const computerUseTool: Tool = {
-        computerUse: {
-          environment,
-          excludedPredefinedFunctions: this.excludedPredefinedFunctions,
-        },
-      };
-      llmRequest.config.tools.push(computerUseTool);
-
-      logger.debug(
-        `Added computer use tool with environment: ${environment}, excluded_functions: ${this.excludedPredefinedFunctions}`,
-      );
-    } catch (e) {
-      logger.error(`Error in ComputerUseToolset.processLlmRequest: ${e}`);
-      throw e;
+    for (const tool of await this.getTools()) {
+      llmRequest.toolsDict[tool.name] = tool;
     }
+
+    llmRequest.config = llmRequest.config ?? {};
+    llmRequest.config.tools = llmRequest.config.tools ?? [];
+
+    for (const tool of llmRequest.config.tools) {
+      if ('computerUse' in tool && tool.computerUse) {
+        logger.debug('Computer use already configured in LLM request');
+        return;
+      }
+    }
+
+    const environment = await this.computer.environment();
+    const computerUseTool: Tool = {
+      computerUse: {
+        environment,
+        excludedPredefinedFunctions: this.excludedPredefinedFunctions,
+      },
+    };
+    llmRequest.config.tools.push(computerUseTool);
+
+    logger.debug(
+      `Added computer use tool with environment: ${environment}, excluded_functions: ${this.excludedPredefinedFunctions}`,
+    );
   }
 }

@@ -19,6 +19,36 @@ export interface ComputerState {
   url?: string;
 }
 
+/** Every key a {@link ComputerState} is allowed to carry. */
+const COMPUTER_STATE_KEYS: ReadonlySet<string> = new Set(['screenshot', 'url']);
+
+/**
+ * Whether a value is a {@link ComputerState}.
+ *
+ * The check is exact: the keys must be a non-empty subset of `screenshot` and
+ * `url`, and each present key must hold the declared type. A value carrying
+ * any other key is an ordinary tool result, so {@link ComputerUseTool} returns
+ * it to the model untouched rather than reinterpreting it as a screenshot.
+ *
+ * `ArrayBuffer.isView` rather than `instanceof Uint8Array`, so a state built
+ * by a second copy of this package in the same runtime is still recognized.
+ */
+export function isComputerState(value: unknown): value is ComputerState {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const keys = Object.keys(value);
+  if (keys.length === 0 || !keys.every((key) => COMPUTER_STATE_KEYS.has(key))) {
+    return false;
+  }
+  const screenshot = 'screenshot' in value ? value.screenshot : undefined;
+  const url = 'url' in value ? value.url : undefined;
+  return (
+    (screenshot === undefined || ArrayBuffer.isView(screenshot)) &&
+    (url === undefined || typeof url === 'string')
+  );
+}
+
 export interface ComputerClickArgs {
   x: number;
   y: number;
