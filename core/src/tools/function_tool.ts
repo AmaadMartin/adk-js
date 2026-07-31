@@ -44,6 +44,18 @@ export type ToolExecuteFunction<TParameters extends ToolInputParameters> = (
 ) => Promise<unknown> | unknown;
 
 /**
+ * The signature {@link FunctionTool} invokes the user-provided function with.
+ *
+ * Subclasses may append arguments after the tool context; a user function that
+ * does not declare them simply ignores them, as any JavaScript function does.
+ */
+type ToolExecuteInvocation<TParameters extends ToolInputParameters> = (
+  input: ToolExecuteArgument<TParameters>,
+  toolContext?: Context,
+  ...extra: readonly unknown[]
+) => Promise<unknown> | unknown;
+
+/**
  * The configuration options for creating a function-based tool.
  * The `name`, `description` and `parameters` fields are used to generate the
  * tool definition that is passed to the LLM prompt.
@@ -108,7 +120,7 @@ export class FunctionTool<
   readonly [FUNCTION_TOOL_SIGNATURE_SYMBOL] = true;
 
   // User defined function.
-  private readonly execute: ToolExecuteFunction<TParameters>;
+  private readonly execute: ToolExecuteInvocation<TParameters>;
   // Typed input parameters.
   private readonly parameters?: TParameters;
 
@@ -152,6 +164,22 @@ export class FunctionTool<
    * @returns A promise resolving to the function's return value.
    */
   override async runAsync(req: RunAsyncToolRequest): Promise<unknown> {
+    return this.callExecute(req);
+  }
+
+  /**
+   * Validates the model-provided arguments against the parameter schema and
+   * invokes the user-defined `execute` function.
+   *
+   * @param req The tool request containing arguments and tool context.
+   * @param extraArgs Arguments appended after the tool context, for subclasses
+   *     that pass the user function additional values.
+   * @returns A promise resolving to the function's return value.
+   */
+  protected async callExecute(
+    req: RunAsyncToolRequest,
+    extraArgs: readonly unknown[] = [],
+  ): Promise<unknown> {
     try {
       let validatedArgs: unknown = req.args;
       if (isZodObject(this.parameters)) {
@@ -160,6 +188,7 @@ export class FunctionTool<
       return await this.execute(
         validatedArgs as ToolExecuteArgument<TParameters>,
         req.toolContext,
+        ...extraArgs,
       );
     } catch (error) {
       const errorMessage =
