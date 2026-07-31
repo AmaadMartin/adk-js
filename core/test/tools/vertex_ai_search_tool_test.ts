@@ -7,7 +7,10 @@
 import {afterEach, describe, expect, it} from 'vitest';
 import {Context} from '../../src/agents/context.js';
 import {LlmRequest} from '../../src/models/llm_request.js';
-import {VertexAiSearchTool} from '../../src/tools/vertex_ai_search_tool.js';
+import {
+  VertexAiSearchTool,
+  validateVertexAiSearchToolParams,
+} from '../../src/tools/vertex_ai_search_tool.js';
 
 interface TestTool {
   retrieval?: {
@@ -21,35 +24,58 @@ interface TestTool {
   };
 }
 
-describe('VertexAiSearchTool', () => {
+describe('validateVertexAiSearchToolParams', () => {
   it('should throw error if neither dataStoreId nor searchEngineId is specified', () => {
-    expect(() => new VertexAiSearchTool({})).toThrowError(
+    expect(() => validateVertexAiSearchToolParams({})).toThrowError(
       'Either dataStoreId or searchEngineId must be specified.',
     );
   });
 
   it('should throw error if both dataStoreId and searchEngineId are specified', () => {
-    expect(
-      () =>
-        new VertexAiSearchTool({
-          dataStoreId: 'ds',
-          searchEngineId: 'se',
-        }),
+    expect(() =>
+      validateVertexAiSearchToolParams({
+        dataStoreId: 'ds',
+        searchEngineId: 'se',
+      }),
     ).toThrowError('Either dataStoreId or searchEngineId must be specified.');
   });
 
   it('should throw error if dataStoreSpecs is specified without searchEngineId', () => {
-    expect(
-      () =>
-        new VertexAiSearchTool({
-          dataStoreId: 'ds',
-          dataStoreSpecs: [{dataStore: 'ds1'}],
-        }),
+    expect(() =>
+      validateVertexAiSearchToolParams({
+        dataStoreId: 'ds',
+        dataStoreSpecs: [{dataStore: 'ds1'}],
+      }),
     ).toThrowError(
       'searchEngineId must be specified if dataStoreSpecs is specified.',
     );
   });
 
+  it('should report the mutual-exclusion failure first when only dataStoreSpecs is specified', () => {
+    expect(() =>
+      validateVertexAiSearchToolParams({
+        dataStoreSpecs: [{dataStore: 'ds1'}],
+      }),
+    ).toThrowError('Either dataStoreId or searchEngineId must be specified.');
+  });
+
+  it('should accept dataStoreId on its own', () => {
+    expect(() =>
+      validateVertexAiSearchToolParams({dataStoreId: 'ds'}),
+    ).not.toThrow();
+  });
+
+  it('should accept searchEngineId together with dataStoreSpecs', () => {
+    expect(() =>
+      validateVertexAiSearchToolParams({
+        searchEngineId: 'se',
+        dataStoreSpecs: [{dataStore: 'ds1'}],
+      }),
+    ).not.toThrow();
+  });
+});
+
+describe('VertexAiSearchTool', () => {
   it('should initialize correctly with dataStoreId', () => {
     const tool = new VertexAiSearchTool({dataStoreId: 'ds'});
     expect(tool.dataStoreId).toBe('ds');
