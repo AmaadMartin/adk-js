@@ -14,6 +14,7 @@ import {
   convertCodeExecutionParts,
   extractCodeAndTruncateContent,
   getEncodedFileContent,
+  toBase64Content,
 } from '../../src/code_executors/code_execution_utils.js';
 import {base64Encode} from '../../src/utils/env_aware_utils.js';
 
@@ -36,6 +37,46 @@ describe('getEncodedFileContent', () => {
     const result = getEncodedFileContent('');
     // empty string is valid base64 (empty), so it should come back unchanged or encoded
     expect(typeof result).toBe('string');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// toBase64Content
+// ---------------------------------------------------------------------------
+describe('toBase64Content', () => {
+  it('base64-encodes content declared as utf-8', () => {
+    expect(
+      toBase64Content({
+        name: 'out.txt',
+        content: 'hello',
+        contentEncoding: FileContentEncoding.UTF8,
+        mimeType: 'text/plain',
+      }),
+    ).toBe(base64Encode('hello'));
+  });
+
+  it('returns content declared as base64 unchanged', () => {
+    expect(
+      toBase64Content({
+        name: 'out.png',
+        content: 'aGVsbG8=',
+        contentEncoding: FileContentEncoding.BASE64,
+        mimeType: 'image/png',
+      }),
+    ).toBe('aGVsbG8=');
+  });
+
+  it('treats content with no declared encoding as base64', () => {
+    // AgentEngineSandboxCodeExecutor omits contentEncoding on already-base64
+    // content; unlike getEncodedFileContent this must not sniff the payload,
+    // because plain text such as 'hello' is itself valid base64.
+    expect(
+      toBase64Content({
+        name: 'out.bin',
+        content: 'aGVsbG8=',
+        mimeType: 'application/octet-stream',
+      }),
+    ).toBe('aGVsbG8=');
   });
 });
 
