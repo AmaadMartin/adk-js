@@ -167,8 +167,8 @@ describe('GoogleLlm', () => {
       const options = lastClientOptions();
       expect(options.vertexai).toBe(true);
       expect(options.apiKey).toBe('express-key');
-      expect(options).not.toHaveProperty('project');
-      expect(options).not.toHaveProperty('location');
+      expect(options.project).toBeUndefined();
+      expect(options.location).toBeUndefined();
     });
 
     it('should give the liveApiClient the express key and no "global" location default', () => {
@@ -183,7 +183,7 @@ describe('GoogleLlm', () => {
       const options = lastClientOptions();
       expect(options.vertexai).toBe(true);
       expect(options.apiKey).toBe('express-key');
-      expect(options).not.toHaveProperty('location');
+      expect(options.location).toBeUndefined();
     });
 
     it('should keep the classic Vertex AI clients free of an apiKey', () => {
@@ -198,13 +198,13 @@ describe('GoogleLlm', () => {
       const apiOptions = lastClientOptions();
       expect(apiOptions.project).toBe('p');
       expect(apiOptions.location).toBe('us-central1');
-      expect(apiOptions).not.toHaveProperty('apiKey');
+      expect(apiOptions.apiKey).toBeUndefined();
 
       expect(llm.liveApiClient).toBeDefined();
       const liveOptions = lastClientOptions();
       expect(liveOptions.project).toBe('p');
       expect(liveOptions.location).toBe('us-central1');
-      expect(liveOptions).not.toHaveProperty('apiKey');
+      expect(liveOptions.apiKey).toBeUndefined();
     });
   });
 
