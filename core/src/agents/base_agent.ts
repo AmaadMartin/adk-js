@@ -49,6 +49,21 @@ export interface BaseAgentConfig {
 }
 
 /**
+ * The resumption checkpoint an agent records for the current invocation.
+ *
+ * The base state is the empty object, meaning "this agent started but has
+ * nothing more specific to restore". Concrete workflow agents describe their own
+ * state shape (which sub-agent was running, how many times a loop has run, ...)
+ * and it is persisted verbatim on `EventActions.agentState`, so this is an open
+ * JSON record rather than a closed shape.
+ *
+ * Concrete state types must be declared with `type`, not `interface`: a TypeScript
+ * `interface` has no implicit index signature and is therefore not assignable to
+ * `Record<string, unknown>`.
+ */
+export type BaseAgentState = Record<string, unknown>;
+
+/**
  * A unique symbol to identify ADK agent classes.
  * Defined once and shared by all BaseAgent instances.
  */
