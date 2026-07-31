@@ -78,6 +78,7 @@ export default defineConfig({
         test: {
           name: 'e2e',
           environment: 'node',
+          setupFiles: ['./tests/e2e/utils/env_setup.ts'],
           alias: {
             '@google/adk': path.resolve(__dirname, './core/src'),
             '@google/adk-integrations': path.resolve(

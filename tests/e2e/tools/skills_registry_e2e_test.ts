@@ -11,21 +11,9 @@ import {
   SkillToolset,
 } from '@google/adk';
 import {createUserContent} from '@google/genai';
-import * as dotenv from 'dotenv';
-import * as fs from 'fs';
-import * as path from 'path';
-import {fileURLToPath} from 'url';
 import {describe, expect, it} from 'vitest';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
 describe('E2E Live GCP Skills Registry', () => {
-  const envPath = path.resolve(__dirname, '../../.env');
-  if (fs.existsSync(envPath)) {
-    dotenv.config({path: envPath});
-  }
-
   // Live E2E runs require an actual GCP project and a target skill name in the registry
   const hasLiveCredentials =
     !!process.env.GOOGLE_CLOUD_PROJECT && !!process.env.GCP_LIVE_SKILL_NAME;

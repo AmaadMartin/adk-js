@@ -6,22 +6,12 @@
 
 import {InMemoryRunner, LlmAgent, RestApiTool} from '@google/adk';
 import {createUserContent} from '@google/genai';
-import * as dotenv from 'dotenv';
-import * as fs from 'fs';
 import * as http from 'http';
 import {OpenAPIV3} from 'openapi-types';
-import * as path from 'path';
 import {afterAll, beforeAll, describe, expect, it} from 'vitest';
 import {hasModelCredentials} from '../utils/model_credentials.js';
 
 describe('RestApiTool Auth E2E', () => {
-  const envPath = path.resolve(__dirname, '../../../.env');
-  const envExists = fs.existsSync(envPath);
-
-  if (envExists) {
-    dotenv.config({path: envPath});
-  }
-
   const hasAKey = hasModelCredentials();
 
   let server: http.Server;

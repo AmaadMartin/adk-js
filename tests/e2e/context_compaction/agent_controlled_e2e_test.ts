@@ -12,9 +12,6 @@ import {
   isCompactedEvent,
 } from '@google/adk';
 import {createUserContent} from '@google/genai';
-import * as dotenv from 'dotenv';
-import * as fs from 'fs';
-import * as path from 'path';
 import {describe, expect, it} from 'vitest';
 import {hasModelCredentials} from '../utils/model_credentials.js';
 import {createAgentControlledCompactionAgent} from './agent.js';
@@ -45,16 +42,6 @@ class TestCompactionPlugin extends BasePlugin {
 }
 
 describe('E2e Context Compaction Agent-Controlled', () => {
-  for (const p of [
-    path.resolve(__dirname, '.env'),
-    path.resolve(__dirname, '../../../.env'),
-  ]) {
-    if (fs.existsSync(p)) {
-      dotenv.config({path: p});
-      break;
-    }
-  }
-
   const hasAKey = hasModelCredentials();
 
   it.skipIf(!hasAKey)(
