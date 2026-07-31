@@ -10,7 +10,7 @@ import {File} from '../code_executors/code_execution_utils.js';
 
 /**
  * Upper bound on the candidate names tried when resolving a filename
- * collision: the requested name, then `name_2` … `name_${this}`. Caps the
+ * collision: the requested name, then `name_2`, `name_3`, and so on. Caps the
  * syscalls one file can cost in a directory that already holds many
  * same-named files.
  */
