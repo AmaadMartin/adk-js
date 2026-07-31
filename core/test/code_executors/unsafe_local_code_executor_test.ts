@@ -7,6 +7,7 @@
 import {
   CodeExecutionLanguage,
   ExecuteCodeParams,
+  FileContentEncoding,
   InvocationContext,
   LlmAgent,
   PluginManager,
@@ -319,6 +320,37 @@ describe('UnsafeLocalCodeExecutor', () => {
     expect(result.outputFiles![0].content).toBe('hello from script');
     expect(result.outputFiles![0].contentEncoding).toBe('utf-8');
     expect(result.outputFiles![0].mimeType).toBe('text/plain');
+  });
+
+  it('should exclude collision-renamed input files from outputFiles', async () => {
+    const inputFiles = [
+      {
+        name: 'dup.txt',
+        content: 'first payload',
+        contentEncoding: FileContentEncoding.UTF8,
+        mimeType: 'text/plain',
+      },
+      {
+        name: 'dup.txt',
+        content: 'second payload',
+        contentEncoding: FileContentEncoding.UTF8,
+        mimeType: 'text/plain',
+      },
+    ];
+    const params: ExecuteCodeParams = {
+      invocationContext,
+      codeExecutionInput: {
+        code: 'const fs = require("fs"); console.log(fs.readFileSync("dup.txt", "utf8"), fs.readFileSync("dup_2.txt", "utf8"));',
+        language: CodeExecutionLanguage.JAVASCRIPT,
+        inputFiles,
+      },
+    };
+
+    const result = await executor.executeCode(params);
+
+    expect(result.stdout).toContain('first payload second payload');
+    expect(result.outputFiles).toEqual([]);
+    expect(inputFiles.map((file) => file.name)).toEqual(['dup.txt', 'dup.txt']);
   });
 
   it('should infer correct mimeType for generated JSON files', async () => {

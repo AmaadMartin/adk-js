@@ -8,13 +8,38 @@ import {FileContentEncoding} from '@google/adk';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {afterEach, beforeEach, describe, expect, it} from 'vitest';
-import {materializeFiles} from '../../src/utils/file_utils.js';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {
+  MAX_COLLISION_ATTEMPTS,
+  materializeFiles,
+} from '../../src/utils/file_utils.js';
+
+// Only `writeFile` is mocked; it defaults to the real implementation (see
+// `beforeEach`) so every other case still writes to a real temp directory.
+const writeFileMock = vi.hoisted(() => vi.fn());
+vi.mock('node:fs/promises', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('node:fs/promises')>()),
+  writeFile: writeFileMock,
+}));
+
+const {writeFile: realWriteFile} =
+  await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+
+function textFile(name: string, content: string) {
+  return {
+    name,
+    content,
+    contentEncoding: FileContentEncoding.UTF8,
+    mimeType: 'text/plain',
+  };
+}
 
 describe('file_utils', () => {
   let tempDir: string;
 
   beforeEach(async () => {
+    writeFileMock.mockReset();
+    writeFileMock.mockImplementation(realWriteFile);
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'file_utils_test_'));
   });
 
@@ -157,6 +182,97 @@ describe('file_utils', () => {
         'utf8',
       );
       expect(content3).toBe('third');
+    });
+
+    it('should not mutate the input files when resolving a collision', async () => {
+      const files = [
+        textFile('collision.txt', 'first'),
+        textFile('collision.txt', 'second'),
+        textFile('sub/collision.txt', 'third'),
+      ];
+      const snapshot = structuredClone(files);
+
+      const created = await materializeFiles(files, tempDir);
+
+      expect(files).toEqual(snapshot);
+      expect(created.map((file) => file.name)).toEqual([
+        'collision.txt',
+        'collision_2.txt',
+        path.join('sub', 'collision.txt'),
+      ]);
+    });
+
+    it('should not mutate the input file when the name resolves outside the target directory', async () => {
+      const files = [textFile('../escape.txt', 'dangerous')];
+      const snapshot = structuredClone(files);
+
+      await expect(materializeFiles(files, tempDir)).rejects.toThrow(
+        /Path traversal detected/,
+      );
+      expect(files).toEqual(snapshot);
+    });
+
+    it('should throw once the collision attempt cap is exhausted', async () => {
+      const taken = [
+        'cap.txt',
+        ...Array.from(
+          {length: MAX_COLLISION_ATTEMPTS - 1},
+          (_unused, index) => `cap_${index + 2}.txt`,
+        ),
+      ];
+      await Promise.all(
+        taken.map((name) => fs.writeFile(path.join(tempDir, name), 'taken')),
+      );
+
+      await expect(
+        materializeFiles([textFile('cap.txt', 'overflow')], tempDir),
+      ).rejects.toThrow(
+        new RegExp(`cap\\.txt.*${MAX_COLLISION_ATTEMPTS} candidate names`),
+      );
+      await expect(
+        fs.access(path.join(tempDir, `cap_${MAX_COLLISION_ATTEMPTS + 1}.txt`)),
+      ).rejects.toThrow();
+    });
+
+    it('should keep both payloads when two calls materialize the same name concurrently', async () => {
+      const [firstCreated, secondCreated] = await Promise.all([
+        materializeFiles([textFile('race.txt', 'a-content')], tempDir),
+        materializeFiles([textFile('race.txt', 'b-content')], tempDir),
+      ]);
+
+      expect(firstCreated[0].name).not.toBe(secondCreated[0].name);
+
+      const written = await fs.readdir(tempDir);
+      expect(written).toHaveLength(2);
+      const contents = await Promise.all(
+        written.map((name) => fs.readFile(path.join(tempDir, name), 'utf8')),
+      );
+      expect(new Set(contents)).toEqual(new Set(['a-content', 'b-content']));
+    });
+
+    it('should suffix past a directory occupying the target name', async () => {
+      await fs.mkdir(path.join(tempDir, 'collision.txt'));
+
+      const created = await materializeFiles(
+        [textFile('collision.txt', 'hello')],
+        tempDir,
+      );
+
+      expect(created[0].name).toBe('collision_2.txt');
+      expect(
+        await fs.readFile(path.join(tempDir, 'collision_2.txt'), 'utf8'),
+      ).toBe('hello');
+    });
+
+    it('should propagate a write failure that is not a name collision', async () => {
+      writeFileMock.mockRejectedValueOnce(
+        Object.assign(new Error('permission denied'), {code: 'EACCES'}),
+      );
+
+      await expect(
+        materializeFiles([textFile('denied.txt', 'hello')], tempDir),
+      ).rejects.toThrow('permission denied');
+      expect(writeFileMock).toHaveBeenCalledTimes(1);
     });
   });
 });
