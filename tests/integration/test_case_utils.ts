@@ -117,6 +117,12 @@ export class GeminiWithMockResponses extends Gemini {
     );
   }
 
+  // simplicity: `Gemini['apiClient']` rather than naming `GoogleGenAI`, because
+  // @google/genai is installed twice -- files under tests/ resolve the hoisted
+  // v1 copy that @google-cloud/vertexai pins, while core resolves its own v2 --
+  // so the two spellings are nominally different types here. Reverting to a
+  // plain `GoogleGenAI` annotation is a verified one-line change once a single
+  // copy is installed; the cast stays either way, as the mock is partial.
   override get apiClient(): Gemini['apiClient'] {
     return this._mockClient as unknown as Gemini['apiClient'];
   }

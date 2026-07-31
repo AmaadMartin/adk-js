@@ -8,13 +8,10 @@
       "@google/adk-integrations": ["./integrations/src/index.ts"]
     }
   },
-  // Entries below still carry pre-existing type errors and are each tracked by
-  // separate follow-up work; the list is expected to shrink to the first three.
-  // `exclude` only drops root files, not files reached through an import, so a
-  // module that anything checked imports has to be fixed rather than listed.
   "exclude": [
-    "node_modules",
     "**/dist",
+    // Below still carry pre-existing type errors; the list should shrink to
+    // just "**/dist".
     "core/test",
     "tests/integration/tools/agent_tool_vertexai_test.ts",
     "tests/integration/tools/skills_registry_integration_test.ts"
