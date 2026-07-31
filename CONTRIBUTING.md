@@ -50,6 +50,16 @@ To maintain high code quality and consistency:
    npm run format
    ```
 
+1. **Type checking**: Run the same type check CI runs. It resolves
+   `@google/adk` to `core/src`, so it needs no prior `npm run build`.
+
+   ```bash
+   npm run ts:check
+   ```
+
+   It does not yet cover `core/test`, `tests/integration` or
+   `tests/cross_language`, which still carry pre-existing type errors.
+
 The project uses `husky` and `lint-staged` to automatically lint and format
 your changes before each commit.
 
