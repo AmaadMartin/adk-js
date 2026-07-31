@@ -387,8 +387,11 @@ export async function installFixtureDeps(projectPath: string): Promise<void> {
 
 /**
  * Removes what {@link installFixtureDeps} generated, so no fixture leaves
- * `node_modules` or a lockfile in the working tree. Best-effort: `force`
- * ignores an install that never got that far.
+ * `node_modules` or a lockfile in the working tree.
+ *
+ * `force` ignores an install that never got that far, but anything else — a
+ * locked file, a permission error — is left to reject, so a fixture that cannot
+ * be cleaned fails its `afterAll` instead of silently polluting the next run.
  */
 export async function cleanupFixtureDeps(projectPath: string): Promise<void> {
   await fs.rm(path.join(projectPath, 'node_modules'), {

@@ -137,9 +137,7 @@ describe('Build setup', () => {
       await cleanupFixtureDeps(projectPath);
 
       if (buildSetup.startsWith('ts_')) {
-        await fs
-          .rm(`${projectPath}/dist`, {recursive: true, force: true})
-          .catch(() => {});
+        await fs.rm(`${projectPath}/dist`, {recursive: true, force: true});
       }
     });
   });
