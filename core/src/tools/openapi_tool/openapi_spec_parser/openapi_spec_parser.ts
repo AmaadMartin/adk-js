@@ -45,11 +45,9 @@ export class OpenApiSpecParser {
   /**
    * Parses an OpenAPI specification document and extracts a list of operations.
    *
-   * @param openapiSpec The OpenAPI V3 document to parse. An unvalidated plain
-   *   object (`JSON.parse` / `yaml.load` output) is also accepted: normalizing
-   *   schema `type` values that `OpenAPIV3.Document` cannot express, such as
-   *   the `OBJECT` and `Any` emitted by some API producers, is part of this
-   *   method's job.
+   * @param openapiSpec The OpenAPI V3 document to parse, or an unvalidated
+   *   plain object (`JSON.parse` / `yaml.load` output) whose non-standard
+   *   schema `type` values this method normalizes.
    * @returns An array of parsed operations.
    */
   @experimental
