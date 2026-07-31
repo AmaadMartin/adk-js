@@ -21,8 +21,6 @@ const GCP_PROJECT_ERROR_MESSAGE =
   'Cannot determine GCP Project. OTel GCP Exporters cannot be set up. ' +
   'Please make sure to log into correct GCP Project.';
 
-const METRIC_EXPORT_INTERVAL_MS = 5000;
-
 async function getGcpProjectId(): Promise<string | undefined> {
   try {
     const auth = new GoogleAuth();
@@ -72,7 +70,7 @@ export async function getGcpExporters(
     metricReaders.push(
       new PeriodicExportingMetricReader({
         exporter: new MetricExporter({projectId}),
-        exportIntervalMillis: METRIC_EXPORT_INTERVAL_MS,
+        exportIntervalMillis: 5000,
       }),
     );
   }

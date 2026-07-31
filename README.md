@@ -71,8 +71,8 @@ dependency.
 
 ### Optional dependencies
 
-Two features load their Google Cloud SDK lazily and declare it as an optional
-peer dependency, so `npm install @google/adk` stays small for everyone else.
+Three Google Cloud packages are loaded lazily and declared as optional peer
+dependencies, so `npm install @google/adk` stays small for everyone else.
 Install the package for the feature you use:
 
 | Feature                                      | Install                                                             |
@@ -84,6 +84,12 @@ Install the package for the feature you use:
 Enabling a feature without its package raises an error naming the package to
 install. `@google/adk-devtools` (the `adk` CLI) bundles all three, so no extra
 step is needed when using the CLI.
+
+`GcsArtifactService.loadArtifact` and `getArtifactVersion` resolve the storage
+client before their internal error handling, so a client-construction failure —
+including the missing-package error above — now rejects instead of being logged
+and reported as `undefined`. Failures of the GCS calls themselves still return
+`undefined` as before.
 
 `GcsArtifactService`'s constructor signature references `@google-cloud/storage`
 types, so TypeScript users who compile with `skipLibCheck: false` and do not

@@ -4,17 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/**
- * Node error codes for an unresolvable module specifier. A native `import()`
- * fails with `ERR_MODULE_NOT_FOUND`; both published node builds target
- * `node10.4` (see `core/build.js`), so esbuild lowers `import()` to a
- * `require()` wrapper that fails with `MODULE_NOT_FOUND` instead.
- */
-const MODULE_NOT_FOUND_CODES = new Set([
-  'ERR_MODULE_NOT_FOUND',
-  'MODULE_NOT_FOUND',
-]);
-
 /** Identifies an optional peer dependency for error reporting. */
 export interface OptionalDependency {
   /** npm package name, e.g. '@google-cloud/storage'. */
@@ -60,9 +49,17 @@ function isMissingPackageError(e: unknown, packageName: string): boolean {
   const code = 'code' in e ? e.code : undefined;
   const message = 'message' in e ? e.message : undefined;
 
+  // Both codes are reachable. Running from source (vitest, ts-node, or a
+  // bundler that preserves `import()`) gives a native import and
+  // ERR_MODULE_NOT_FOUND. In the published builds esbuild lowers `import()` to
+  // a `require()` wrapper, which throws MODULE_NOT_FOUND -- that applies to the
+  // esm output too, which is why core/build.js gives it a `createRequire`
+  // banner.
+  const isUnresolved =
+    code === 'ERR_MODULE_NOT_FOUND' || code === 'MODULE_NOT_FOUND';
+
   return (
-    typeof code === 'string' &&
-    MODULE_NOT_FOUND_CODES.has(code) &&
+    isUnresolved &&
     typeof message === 'string' &&
     // Node quotes the unresolved specifier: "Cannot find module '<pkg>'" (CJS)
     // and "Cannot find package '<pkg>' imported from <file>" (ESM). Requiring
