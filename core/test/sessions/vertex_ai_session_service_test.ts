@@ -619,6 +619,20 @@ describe('VertexAiSessionService', () => {
       );
     });
 
+    it('sends a user_id filter for an empty userId rather than listing all users', async () => {
+      mockClient.listInternal.mockResolvedValue({sessions: []});
+
+      await service.listSessions({
+        appName: '12345',
+        userId: '',
+      });
+
+      expect(mockClient.listInternal).toHaveBeenCalledWith({
+        name: 'reasoningEngines/12345',
+        config: {filter: 'user_id=""'},
+      });
+    });
+
     it('falls back to defaults in listSessions when state or updateTime is missing', async () => {
       mockClient.listInternal.mockResolvedValue({
         sessions: [{name: 'projects/p/locations/l/sessions/s1', userId: 'u1'}],
