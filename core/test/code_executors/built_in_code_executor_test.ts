@@ -48,6 +48,17 @@ describe('BuiltInCodeExecutor', () => {
     expect(llmRequest.config?.tools).toEqual([{codeExecution: {}}]);
   });
 
+  it('processLlmRequest should attach codeExecution for an EAP model', () => {
+    const llmRequest: LlmRequest = {
+      model: 'gemini-flash-early-exp',
+      contents: [],
+      toolsDict: {},
+      liveConnectConfig: {},
+    };
+    expect(() => executor.processLlmRequest(llmRequest)).not.toThrow();
+    expect(llmRequest.config?.tools).toEqual([{codeExecution: {}}]);
+  });
+
   it('processLlmRequest should throw error if model is invalid', () => {
     const llmRequest: LlmRequest = {
       model: 'invalid-model',
