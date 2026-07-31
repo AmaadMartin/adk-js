@@ -49,6 +49,37 @@ export interface SearchEngineParams extends BaseVertexAiSearchToolParams {
 export type VertexAiSearchToolParams = DataStoreParams | SearchEngineParams;
 
 /**
+ * Validates the mutually exclusive Vertex AI Search tool parameters.
+ *
+ * `VertexAiSearchToolParams` makes the invalid combinations unspellable, so
+ * this parameter type is deliberately wider: it exists for JavaScript callers
+ * and for parameters that arrive untyped (for example from parsed config).
+ *
+ * @throws Error if neither or both of `dataStoreId` and `searchEngineId` are
+ *   specified, or if `dataStoreSpecs` is specified without `searchEngineId`.
+ */
+export function validateVertexAiSearchToolParams(params: {
+  dataStoreId?: string;
+  searchEngineId?: string;
+  dataStoreSpecs?: VertexAISearchDataStoreSpec[];
+}): void {
+  const {dataStoreId, searchEngineId, dataStoreSpecs} = params;
+
+  if (
+    (dataStoreId === undefined && searchEngineId === undefined) ||
+    (dataStoreId !== undefined && searchEngineId !== undefined)
+  ) {
+    throw new Error('Either dataStoreId or searchEngineId must be specified.');
+  }
+
+  if (dataStoreSpecs !== undefined && searchEngineId === undefined) {
+    throw new Error(
+      'searchEngineId must be specified if dataStoreSpecs is specified.',
+    );
+  }
+}
+
+/**
  * A built-in tool using Vertex AI Search.
  */
 export class VertexAiSearchTool extends BaseTool {
@@ -63,6 +94,8 @@ export class VertexAiSearchTool extends BaseTool {
     // Name and description are not used because this is a model built-in tool.
     super({name: 'vertex_ai_search', description: 'vertex_ai_search'});
 
+    validateVertexAiSearchToolParams(params);
+
     const {
       dataStoreId,
       dataStoreSpecs,
@@ -71,21 +104,6 @@ export class VertexAiSearchTool extends BaseTool {
       maxResults,
       bypassMultiToolsLimit = false,
     } = params;
-
-    if (
-      (dataStoreId === undefined && searchEngineId === undefined) ||
-      (dataStoreId !== undefined && searchEngineId !== undefined)
-    ) {
-      throw new Error(
-        'Either dataStoreId or searchEngineId must be specified.',
-      );
-    }
-
-    if (dataStoreSpecs !== undefined && searchEngineId === undefined) {
-      throw new Error(
-        'searchEngineId must be specified if dataStoreSpecs is specified.',
-      );
-    }
 
     this.dataStoreId = dataStoreId;
     this.dataStoreSpecs = dataStoreSpecs;
