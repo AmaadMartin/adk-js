@@ -299,7 +299,7 @@ export abstract class BaseTestServer {
     const serverProcess = spawnProcess();
     this.serverProcess = serverProcess;
 
-    // Buffered only until the handshake settles, to explain a premature exit.
+    // Appended to only during the handshake, to explain a premature exit.
     const stdoutChunks: string[] = [];
     let releaseStartHandshake = () => {};
 
@@ -345,12 +345,10 @@ export abstract class BaseTestServer {
 
         releaseStartHandshake = () => {
           clearTimeout(startTimer);
+          // stdout stays in flowing mode after this, so it keeps draining and
+          // the child never blocks on a full pipe.
           serverProcess.stdout.off('data', onStdout);
           serverProcess.off('exit', onExit);
-          // Keep draining stdout so a chatty server never blocks on a full
-          // pipe.
-          serverProcess.stdout.resume();
-          stdoutChunks.length = 0;
         };
 
         serverProcess.stdout.on('data', onStdout);
