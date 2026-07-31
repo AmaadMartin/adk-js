@@ -169,12 +169,11 @@ export class FunctionTool<
   }
 
   /**
-   * Validates the model-provided arguments against the parameter schema and
-   * invokes the user-defined `execute` function.
+   * The body of {@link runAsync}, reusable by subclasses that hand the user
+   * function more than the validated arguments and the tool context.
    *
    * @param req The tool request containing arguments and tool context.
-   * @param extraArgs Arguments appended after the tool context, for subclasses
-   *     that pass the user function additional values.
+   * @param extraArgs Arguments appended after the tool context.
    * @returns A promise resolving to the function's return value.
    */
   protected async callExecute(
