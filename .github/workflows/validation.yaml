@@ -20,8 +20,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
+      # Pinned because setup-node otherwise leaves each runner image on its own
+      # default: ubuntu and windows ship Node 22 while macos ships Node 24, and
+      # the two V8 versions emit different coverage ranges for identical test
+      # runs, which is what made npm run test:coverage disagree across the legs.
       - name: Use Node.js
         uses: actions/setup-node@v6
+        with:
+          node-version: '22'
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -39,6 +45,18 @@ jobs:
 
       - name: Run tests and check code coverage
         run: npm run test:coverage
+
+      # Uploaded even when the threshold check fails the step above: that is
+      # exactly when the per-leg report is wanted. Without this the report is
+      # written to the gitignored coverage/ directory and discarded, so a leg
+      # reporting different totals from its siblings cannot be investigated.
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.os }}
+          path: coverage/coverage-final.json
+          retention-days: 7
 
       - name: Run lint check
         run: npm run lint

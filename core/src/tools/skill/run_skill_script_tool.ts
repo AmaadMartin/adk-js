@@ -154,7 +154,11 @@ export class RunSkillScriptTool extends BaseTool {
   }
 }
 
-function buildWrapperCode(
+/**
+ * Builds the snippet the executor's entry script uses to invoke `scriptPath`.
+ * The result depends only on `language`, never on the host platform.
+ */
+export function buildWrapperCode(
   scriptPath: string,
   language: CodeExecutionLanguage,
 ): string {
