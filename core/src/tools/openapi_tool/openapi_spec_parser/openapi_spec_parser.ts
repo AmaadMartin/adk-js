@@ -45,11 +45,17 @@ export class OpenApiSpecParser {
   /**
    * Parses an OpenAPI specification document and extracts a list of operations.
    *
-   * @param openapiSpec The OpenAPI V3 document to parse.
+   * @param openapiSpec The OpenAPI V3 document to parse. An unvalidated plain
+   *   object (`JSON.parse` / `yaml.load` output) is also accepted: normalizing
+   *   schema `type` values that `OpenAPIV3.Document` cannot express, such as
+   *   the `OBJECT` and `Any` emitted by some API producers, is part of this
+   *   method's job.
    * @returns An array of parsed operations.
    */
   @experimental
-  public parse(openapiSpec: OpenAPIV3.Document): ParsedOperation[] {
+  public parse(
+    openapiSpec: OpenAPIV3.Document | Record<string, unknown>,
+  ): ParsedOperation[] {
     const resolvedSpec = resolveReferences(openapiSpec);
     const sanitizedSpec = sanitizeSchemaTypes(resolvedSpec);
     return collectOperations(sanitizedSpec, {
@@ -61,7 +67,9 @@ export class OpenApiSpecParser {
 /**
  * Resolves all internal $ref references in the OpenAPI spec document.
  */
-function resolveReferences(spec: OpenAPIV3.Document): OpenAPIV3.Document {
+function resolveReferences(
+  spec: OpenAPIV3.Document | Record<string, unknown>,
+): OpenAPIV3.Document {
   const resolvedCache = new Map<string, unknown>();
   const specCopy = JSON.parse(JSON.stringify(spec)); // Deep copy
 
