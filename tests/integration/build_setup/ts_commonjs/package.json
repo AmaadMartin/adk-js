@@ -17,5 +17,8 @@
     "@google/adk": "file:../../../../core",
     "@google/adk-devtools": "file:../../../../dev",
     "@google/genai": "^2.9.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.7"
   }
 }
