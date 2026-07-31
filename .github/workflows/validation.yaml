@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 env:
-  NODE_OPTIONS: "--max-old-space-size=8192"
+  NODE_OPTIONS: '--max-old-space-size=8192'
 
 jobs:
   run-tests:
@@ -39,6 +39,16 @@ jobs:
 
       - name: Run tests and check code coverage
         run: npm run test:coverage
+
+      # Uploaded even when the threshold check fails the step above: that is
+      # exactly when the per-leg report is worth diffing (npm run coverage:diff).
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.os }}
+          path: coverage/coverage-final.json
+          retention-days: 7
 
       - name: Run lint check
         run: npm run lint
