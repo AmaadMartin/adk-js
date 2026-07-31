@@ -86,6 +86,14 @@ describe('loadOptionalDependency', () => {
     ).rejects.toBe(error);
   });
 
+  it('rethrows a thrown object that carries a code but no message', async () => {
+    const thrown = {code: 'MODULE_NOT_FOUND'};
+
+    await expect(
+      loadOptionalDependency(() => Promise.reject(thrown), STORAGE),
+    ).rejects.toBe(thrown);
+  });
+
   it('rethrows a non-Error rejection unchanged', async () => {
     await expect(
       loadOptionalDependency(() => Promise.reject('nope'), STORAGE),
