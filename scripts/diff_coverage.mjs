@@ -63,89 +63,100 @@ function byNormalizedKey(report) {
   return byKey;
 }
 
+function location(loc) {
+  return loc
+    ? `${loc.start.line}:${loc.start.column}-${loc.end.line}:${loc.end.column}`
+    : 'unknown';
+}
+
 /**
- * Flattens one coverage counter map into `unit id -> covered?`. A branch
- * contributes one unit per arm (`"3/1"` is arm 1 of branch 3) because v8 can
- * cover one arm of a conditional and not the other.
+ * Flattens one kind of counter into `source location -> covered?`. Locations
+ * are the key rather than the numeric counter id because the id is just a
+ * position in the report: when one report omits a counter the other has, every
+ * later id shifts and an id-keyed comparison reports the whole tail as
+ * different.
+ *
+ * A branch contributes one unit per arm, because v8 can cover one arm of a
+ * conditional and not the other.
  */
-function coverageUnits(counters) {
+function coverageUnits(entry, kind) {
   const units = new Map();
-  for (const [id, hits] of Object.entries(counters ?? {})) {
-    if (Array.isArray(hits)) {
-      hits.forEach((armHits, arm) => units.set(`${id}/${arm}`, armHits > 0));
-    } else {
-      units.set(id, hits > 0);
+  if (kind === 'statements') {
+    for (const [id, hits] of Object.entries(entry.s ?? {})) {
+      units.set(location(entry.statementMap?.[id]), hits > 0);
+    }
+  } else if (kind === 'functions') {
+    for (const [id, hits] of Object.entries(entry.f ?? {})) {
+      units.set(location(entry.fnMap?.[id]?.decl), hits > 0);
+    }
+  } else {
+    for (const [id, arms] of Object.entries(entry.b ?? {})) {
+      const branch = entry.branchMap?.[id];
+      arms.forEach((hits, arm) => {
+        units.set(location(branch?.locations?.[arm] ?? branch?.loc), hits > 0);
+      });
     }
   }
   return units;
 }
 
-/** Resolves the source line a unit id points at, for the detail lines. */
-function unitLine(kind, entry, unitId) {
-  const [id, arm] = unitId.split('/');
-  if (kind === 'statements') {
-    return entry.statementMap?.[id]?.start?.line;
-  }
-  if (kind === 'functions') {
-    return entry.fnMap?.[id]?.decl?.start?.line;
-  }
-  const location = entry.branchMap?.[id];
-  return (
-    location?.locations?.[Number(arm)]?.start?.line ??
-    location?.loc?.start?.line
-  );
-}
-
-/** Units covered in `a` but not in `b`, and vice versa. Common ids only. */
+/**
+ * Units covered in `a` but not in `b`, and vice versa, plus the units one
+ * report has no counter for at all. A missing unit is reported rather than
+ * skipped: the two reports then disagree on how many statements, branches or
+ * functions the file even has, which moves the percentage through the
+ * denominator.
+ */
 function diffUnits(a, b) {
   const onlyA = [];
   const onlyB = [];
-  for (const [unitId, coveredInA] of a) {
-    if (!b.has(unitId)) {
-      continue;
-    }
-    if (coveredInA && !b.get(unitId)) {
-      onlyA.push(unitId);
-    } else if (!coveredInA && b.get(unitId)) {
-      onlyB.push(unitId);
+  const absentFromB = [];
+  for (const [unit, coveredInA] of a) {
+    if (!b.has(unit)) {
+      absentFromB.push(unit);
+    } else if (coveredInA && !b.get(unit)) {
+      onlyA.push(unit);
+    } else if (!coveredInA && b.get(unit)) {
+      onlyB.push(unit);
     }
   }
-  return {onlyA, onlyB};
+  const absentFromA = [...b.keys()].filter((unit) => !a.has(unit));
+  return {onlyA, onlyB, absentFromA, absentFromB};
 }
 
 function diffFile(entryA, entryB) {
-  const kinds = [
-    ['statements', 's'],
-    ['branches', 'b'],
-    ['functions', 'f'],
-  ];
   const differences = [];
-  for (const [kind, counter] of kinds) {
-    const {onlyA, onlyB} = diffUnits(
-      coverageUnits(entryA[counter]),
-      coverageUnits(entryB[counter]),
+  for (const kind of ['statements', 'branches', 'functions']) {
+    const diff = diffUnits(
+      coverageUnits(entryA, kind),
+      coverageUnits(entryB, kind),
     );
-    if (onlyA.length > 0 || onlyB.length > 0) {
-      differences.push({kind, onlyA, onlyB});
+    if (Object.values(diff).some((units) => units.length > 0)) {
+      differences.push({kind, ...diff});
     }
   }
   return differences;
 }
 
-function printFileDiff(path, entryA, differences) {
+function printFileDiff(path, differences) {
   const summary = differences
-    .map(({kind, onlyA, onlyB}) => `${kind} +${onlyA.length}/-${onlyB.length}`)
+    .map(({kind, onlyA, onlyB, absentFromA, absentFromB}) => {
+      const absent = absentFromB.length + absentFromA.length;
+      const counted =
+        absent > 0 ? ` (${absent} counted in one report only)` : '';
+      return `${kind} +${onlyA.length}/-${onlyB.length}${counted}`;
+    })
     .join('  ');
   console.log(`${path}  ${summary}`);
-  for (const {kind, onlyA, onlyB} of differences) {
-    for (const [sign, unitIds] of [
+  for (const {kind, onlyA, onlyB, absentFromA, absentFromB} of differences) {
+    for (const [label, units] of [
       ['+', onlyA],
       ['-', onlyB],
+      ['only counted in A:', absentFromB],
+      ['only counted in B:', absentFromA],
     ]) {
-      for (const unitId of unitIds) {
-        console.log(
-          `  ${sign} ${kind} ${unitId} at line ${unitLine(kind, entryA, unitId)}`,
-        );
+      for (const unit of units) {
+        console.log(`  ${label} ${kind} at ${unit}`);
       }
     }
   }
@@ -185,7 +196,7 @@ function main(argv) {
     }
     const differences = diffFile(entryA, entryB);
     if (differences.length > 0) {
-      printFileDiff(path, entryA, differences);
+      printFileDiff(path, differences);
       differingFiles++;
     }
   }
