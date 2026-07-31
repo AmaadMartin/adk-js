@@ -16,7 +16,13 @@ const DEFAULT_TIMEOUT_MS = 15000;
 /** Distinctive value so the watchdog is identifiable among all setTimeout calls. */
 const WATCHDOG_TIMEOUT_MS = 12345;
 /** Port handed to the constructor, so a read-back is visible as a change. */
-const CONSTRUCTOR_PORT = 12345;
+const CONSTRUCTOR_PORT = 19999;
+
+/** Overrides a {@link FakeServer} applies to its start handshake. */
+interface FakeServerOptions {
+  startMessage?: string;
+  timeoutMs?: number;
+}
 
 /** Keeps a `node -e` child alive until the test kills it. */
 const KEEP_ALIVE = 'setTimeout(() => {}, 60000);';
@@ -40,7 +46,7 @@ class FakeServer extends BaseTestServer {
 
   constructor(
     private readonly script: string,
-    private readonly options: {startMessage?: string; timeoutMs?: number} = {},
+    private readonly options: FakeServerOptions = {},
   ) {
     super('localhost', CONSTRUCTOR_PORT);
   }
@@ -90,7 +96,7 @@ describe('BaseTestServer.startProcess', () => {
 
   function createServer(
     script: string,
-    options?: {startMessage?: string; timeoutMs?: number},
+    options?: FakeServerOptions,
   ): FakeServer {
     const server = new FakeServer(script, options);
     servers.push(server);
