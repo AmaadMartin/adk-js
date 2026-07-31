@@ -22,7 +22,10 @@ export default defineConfig({
         test: {
           name: 'unit:core',
           environment: 'node',
-          setupFiles: ['./tests/hermetic_env_setup.ts'],
+          setupFiles: [
+            './tests/hermetic_env_setup.ts',
+            './tests/setup_log_level.ts',
+          ],
           alias: {
             '@google/adk': path.resolve(__dirname, './core/src'),
             '@google/adk-integrations': path.resolve(
@@ -37,7 +40,10 @@ export default defineConfig({
         test: {
           name: 'unit:dev',
           environment: 'node',
-          setupFiles: ['./tests/hermetic_env_setup.ts'],
+          setupFiles: [
+            './tests/hermetic_env_setup.ts',
+            './tests/setup_log_level.ts',
+          ],
           alias: {
             '@google/adk': path.resolve(__dirname, './core/src'),
             '@google/adk-integrations': path.resolve(
@@ -52,7 +58,10 @@ export default defineConfig({
         test: {
           name: 'unit:integrations',
           environment: 'node',
-          setupFiles: ['./tests/hermetic_env_setup.ts'],
+          setupFiles: [
+            './tests/hermetic_env_setup.ts',
+            './tests/setup_log_level.ts',
+          ],
           alias: {
             '@google/adk': path.resolve(__dirname, './core/src'),
             '@google/adk-integrations': path.resolve(
@@ -67,6 +76,7 @@ export default defineConfig({
         test: {
           name: 'integration',
           environment: 'node',
+          setupFiles: ['./tests/setup_log_level.ts'],
           alias: {
             '@google/adk': path.resolve(__dirname, './core/src'),
             '@google/adk-integrations': path.resolve(
@@ -81,6 +91,7 @@ export default defineConfig({
         test: {
           name: 'e2e',
           environment: 'node',
+          setupFiles: ['./tests/setup_log_level.ts'],
           alias: {
             '@google/adk': path.resolve(__dirname, './core/src'),
             '@google/adk-integrations': path.resolve(
@@ -95,6 +106,7 @@ export default defineConfig({
         test: {
           name: 'cross-language',
           environment: 'node',
+          setupFiles: ['./tests/setup_log_level.ts'],
           alias: {
             '@google/adk': path.resolve(__dirname, './core/src'),
             '@google/adk-integrations': path.resolve(
@@ -124,6 +136,5 @@ export default defineConfig({
         lines: 86,
       },
     },
-    globalSetup: ['./tests/global_setup.ts'],
   },
 });
