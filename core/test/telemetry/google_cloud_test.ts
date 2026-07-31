@@ -124,12 +124,10 @@ describe('getGcpExporters', () => {
   );
 
   it('should construct no exporters when both flags are disabled', async () => {
-    const mockAuth = {
-      getProjectId: vi.fn().mockResolvedValue('test-project'),
-    };
-    vi.mocked(GoogleAuth).mockImplementation(
-      () => mockAuth as unknown as GoogleAuth,
-    );
+    // Narrow away the callback overload so the mock is typed without a cast.
+    const getProjectId: () => Promise<string> =
+      GoogleAuth.prototype.getProjectId;
+    vi.mocked(getProjectId).mockResolvedValue('test-project');
 
     const result = await getGcpExporters({});
 
