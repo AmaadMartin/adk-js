@@ -4,9 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {OpenApiSpecParser, OpenAPIToolset, ReadonlyContext} from '@google/adk';
+import {OpenApiSpecParser, OpenAPIToolset} from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
 import {describe, expect, it} from 'vitest';
+import {createReadonlyContext} from '../../testing_utils.js';
 
 describe('OpenAPIToolset', () => {
   const mockSpec: OpenAPIV3.Document = {
@@ -127,7 +128,7 @@ describe('OpenAPIToolset', () => {
 
   it('should return all tools when no toolFilter is set and a context is provided', async () => {
     const toolset = new OpenAPIToolset({specDict: mockSpec});
-    const tools = await toolset.getTools({} as unknown as ReadonlyContext);
+    const tools = await toolset.getTools(createReadonlyContext());
 
     expect(tools.length).toBe(2);
     expect(tools[0].name).toBe('get_users');
@@ -139,7 +140,7 @@ describe('OpenAPIToolset', () => {
       specDict: mockSpec,
       toolFilter: ['create_user'],
     });
-    const tools = await toolset.getTools({} as unknown as ReadonlyContext);
+    const tools = await toolset.getTools(createReadonlyContext());
 
     expect(tools.length).toBe(1);
     expect(tools[0].name).toBe('create_user');
@@ -150,7 +151,7 @@ describe('OpenAPIToolset', () => {
       specDict: mockSpec,
       toolFilter: (tool) => tool.name === 'get_users',
     });
-    const tools = await toolset.getTools({} as unknown as ReadonlyContext);
+    const tools = await toolset.getTools(createReadonlyContext());
 
     expect(tools.length).toBe(1);
     expect(tools[0].name).toBe('get_users');
@@ -158,15 +159,12 @@ describe('OpenAPIToolset', () => {
 
   it('should handle context in getTools', async () => {
     const toolset = new OpenAPIToolset({specDict: mockSpec});
-    const mockContext = {};
     (
       toolset as unknown as {
         isToolSelected: (tool: unknown, context: unknown) => boolean;
       }
     ).isToolSelected = () => true;
-    const tools = await toolset.getTools(
-      mockContext as unknown as ReadonlyContext,
-    );
+    const tools = await toolset.getTools(createReadonlyContext());
     expect(tools.length).toBe(2);
   });
 

@@ -14,6 +14,7 @@ import {
   ToolPredicate,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
+import {createReadonlyContext} from '../testing_utils.js';
 
 class DummyTool extends BaseTool {
   constructor(name: string) {
@@ -62,7 +63,7 @@ class FilteringToolset extends BaseToolset {
 }
 
 describe('BaseToolset.isToolSelected', () => {
-  const context = {} as unknown as ReadonlyContext;
+  const context = createReadonlyContext();
 
   it('selects all tools when the toolFilter is an empty array', async () => {
     const toolset = new FilteringToolset([]);
