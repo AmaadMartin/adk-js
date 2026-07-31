@@ -164,6 +164,27 @@ describe('file_utils', () => {
       await expect(fs.access(escapedPath)).rejects.toThrow();
     });
 
+    it('should write into a base directory whose name is a prefix of an existing sibling', async () => {
+      const baseDir = path.join(tempDir, 'adk-x');
+      await fs.mkdir(path.join(tempDir, 'adk-x-evil'), {recursive: true});
+      await fs.mkdir(baseDir);
+      const files = [
+        {
+          name: 'note.txt',
+          content: 'hello',
+          contentEncoding: FileContentEncoding.UTF8,
+          mimeType: 'text/plain',
+        },
+      ];
+
+      const created = await materializeFiles(files, baseDir);
+
+      expect(created[0].name).toBe('note.txt');
+      expect(await fs.readFile(path.join(baseDir, 'note.txt'), 'utf8')).toBe(
+        'hello',
+      );
+    });
+
     it('should throw when the name resolves to the base directory itself', async () => {
       const files = [
         {
