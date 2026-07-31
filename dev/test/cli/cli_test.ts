@@ -60,7 +60,12 @@ interface ServiceUriScheme {
   sampleUri: string;
 }
 
-/** Every scheme `getSessionServiceFromUri` routes to a session service. */
+/**
+ * Schemes named in the session help text. `vertexai://` is routed by the
+ * registry but deliberately undocumented, because
+ * `core/src/sessions/registry.ts` discards the URI and builds a
+ * `VertexAiSessionService` that throws without a project and location.
+ */
 const SESSION_SERVICE_URI_SCHEMES: ServiceUriScheme[] = [
   {scheme: 'memory://', sampleUri: 'memory://'},
   {scheme: 'postgres://', sampleUri: 'postgres://user:pw@localhost:5432/adk'},
@@ -74,7 +79,7 @@ const SESSION_SERVICE_URI_SCHEMES: ServiceUriScheme[] = [
   {scheme: 'sqlite://', sampleUri: 'sqlite://./adk_sessions.db'},
 ];
 
-/** Every scheme `getArtifactServiceFromUri` routes to an artifact service. */
+/** Schemes named in the artifact help text. */
 const ARTIFACT_SERVICE_URI_SCHEMES: ServiceUriScheme[] = [
   {scheme: 'memory://', sampleUri: 'memory://'},
   {scheme: 'gs://', sampleUri: 'gs://my-bucket'},
@@ -472,7 +477,7 @@ describe('CLI Entrypoint', () => {
   });
 
   describe('service URI help text', () => {
-    it('documents every session service URI scheme the registry accepts', () => {
+    it('names only session service URI schemes the registry accepts', () => {
       const description = webOptionDescription(
         program,
         '--session_service_uri',
@@ -480,11 +485,11 @@ describe('CLI Entrypoint', () => {
 
       for (const {scheme, sampleUri} of SESSION_SERVICE_URI_SCHEMES) {
         expect(description).toContain(scheme);
-        expect(getSessionServiceFromUri(sampleUri)).toBeDefined();
+        expect(() => getSessionServiceFromUri(sampleUri)).not.toThrow();
       }
     });
 
-    it('documents every artifact service URI scheme the registry accepts', () => {
+    it('names only artifact service URI schemes the registry accepts', () => {
       const description = webOptionDescription(
         program,
         '--artifact_service_uri',
@@ -492,7 +497,7 @@ describe('CLI Entrypoint', () => {
 
       for (const {scheme, sampleUri} of ARTIFACT_SERVICE_URI_SCHEMES) {
         expect(description).toContain(scheme);
-        expect(getArtifactServiceFromUri(sampleUri)).toBeDefined();
+        expect(() => getArtifactServiceFromUri(sampleUri)).not.toThrow();
       }
     });
   });
