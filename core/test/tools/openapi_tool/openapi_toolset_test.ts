@@ -379,7 +379,9 @@ describe('OpenApiSpecParser', () => {
   });
 
   it('should sanitize invalid schema types', () => {
-    const specWithInvalidType: OpenAPIV3.Document = {
+    // Not an `OpenAPIV3.Document`: 'Any' is not an OpenAPI 3.0 schema type,
+    // and stripping it is what this test pins.
+    const specWithInvalidType = {
       openapi: '3.0.0',
       info: {title: 'Test', version: '1.0'},
       paths: {
@@ -394,12 +396,7 @@ describe('OpenApiSpecParser', () => {
                     schema: {
                       type: 'object',
                       properties: {
-                        // 'Any' is not an OpenAPI 3.0 schema type; the
-                        // parser is expected to strip it. The assertion is
-                        // scoped to the type literal alone.
-                        invalidProp: {
-                          type: 'Any' as OpenAPIV3.NonArraySchemaObjectType,
-                        },
+                        invalidProp: {type: 'Any'},
                         validProp: {type: 'string'},
                       },
                     },
@@ -428,7 +425,9 @@ describe('OpenApiSpecParser', () => {
   });
 
   it('should sanitize invalid schema types in array', () => {
-    const specWithInvalidArrayType: OpenAPIV3.Document = {
+    // Not an `OpenAPIV3.Document`: a list-valued `type` is OpenAPI 3.1 syntax,
+    // and dropping its invalid 'Any' member is what this test pins.
+    const specWithInvalidArrayType = {
       openapi: '3.0.0',
       info: {title: 'Test', version: '1.0'},
       paths: {
@@ -443,13 +442,7 @@ describe('OpenApiSpecParser', () => {
                     schema: {
                       type: 'object',
                       properties: {
-                        // A list-valued `type` is OpenAPI 3.1 syntax with no
-                        // OpenAPI 3.0 typing at all, so the assertion has to
-                        // cover the whole property; the parser is expected to
-                        // drop the invalid 'Any' member.
-                        multiProp: {
-                          type: ['string', 'Any', 'integer'],
-                        } as unknown as OpenAPIV3.SchemaObject,
+                        multiProp: {type: ['string', 'Any', 'integer']},
                       },
                     },
                   },
