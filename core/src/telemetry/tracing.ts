@@ -25,6 +25,7 @@ import {LlmRequest} from '../models/llm_request.js';
 import {LlmResponse} from '../models/llm_response.js';
 import {BaseTool} from '../tools/base_tool.js';
 import {version} from '../version.js';
+import {TokenUsage} from './token_usage.js';
 
 const GEN_AI_AGENT_DESCRIPTION = 'gen_ai.agent.description';
 const GEN_AI_AGENT_NAME = 'gen_ai.agent.name';
@@ -247,19 +248,7 @@ export function traceCallLlm({
     shouldAddRequestResponseToSpans() ? safeJsonSerialize(llmResponse) : '{}',
   );
 
-  if (llmResponse.usageMetadata) {
-    span.setAttribute(
-      'gen_ai.usage.input_tokens',
-      llmResponse.usageMetadata.promptTokenCount || 0,
-    );
-  }
-
-  if (llmResponse.usageMetadata?.candidatesTokenCount) {
-    span.setAttribute(
-      'gen_ai.usage.output_tokens',
-      llmResponse.usageMetadata.candidatesTokenCount,
-    );
-  }
+  span.setAttributes(new TokenUsage(llmResponse.usageMetadata).toAttributes());
 
   if (llmResponse.finishReason) {
     // Convert enum to lowercase string array
