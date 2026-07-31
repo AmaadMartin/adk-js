@@ -9,7 +9,13 @@ import {z} from 'zod';
 export const SNAKE_OR_KEBAB_NAME_PATTERN =
   /^([a-z0-9]+(-[a-z0-9]+)*|[a-z0-9]+(_[a-z0-9]+)*)$/;
 
-const ALLOWED_TOOLS_ALIASES = ['allowed-tools', 'allowed_tools'];
+/**
+ * Folds a frontmatter key into camelCase so that the kebab-case, snake_case,
+ * and camelCase spellings of a field all compare equal.
+ */
+export function normalizeKey(key: string): string {
+  return key.replace(/[-_][a-z0-9]/g, (m) => m[1].toUpperCase());
+}
 
 /**
  * Schema and Type for Skill Frontmatter metadata.
@@ -18,7 +24,9 @@ export const FrontmatterSchema = z.preprocess(
   (data) => {
     if (typeof data === 'object' && data !== null) {
       const obj = data as Record<string, unknown>;
-      const alias = ALLOWED_TOOLS_ALIASES.find((key) => key in obj);
+      const alias = Object.keys(obj).find(
+        (key) => normalizeKey(key) === 'allowedTools',
+      );
       if (alias && !('allowedTools' in obj)) {
         return {
           ...obj,
@@ -40,9 +48,11 @@ export const FrontmatterSchema = z.preprocess(
       description: z.string().min(1).max(1024),
       license: z.string().optional(),
       compatibility: z.string().max(500).optional(),
+      // Each spelling is declared so that it is type-checked even when the
+      // preprocessor leaves it in place, i.e. when the author also wrote
+      // `allowedTools` directly.
       'allowed-tools': z.string().optional(),
-      // Every accepted spelling is funnelled here by the preprocessor, so this
-      // is what type-checks them all.
+      allowed_tools: z.string().optional(),
       allowedTools: z.string().optional(),
       metadata: z
         .record(z.string(), z.any())

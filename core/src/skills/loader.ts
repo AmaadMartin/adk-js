@@ -12,18 +12,11 @@ import {logger} from '../utils/logger.js';
 import {
   Frontmatter,
   FrontmatterSchema,
+  normalizeKey,
   Resources,
   Script,
   Skill,
 } from './skill.js';
-
-/**
- * Folds a frontmatter key into camelCase so that the kebab-case, snake_case,
- * and camelCase spellings of a field all compare equal.
- */
-function normalizeKey(key: string): string {
-  return key.replace(/[-_][a-z0-9]/g, (m) => m[1].toUpperCase());
-}
 
 const ALLOWED_FRONTMATTER_KEYS = new Set(
   [

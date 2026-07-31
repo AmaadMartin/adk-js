@@ -106,6 +106,15 @@ describe('skill', () => {
       },
     );
 
+    it('fails on a non-string alias even when allowedTools is set', () => {
+      const result = FrontmatterSchema.safeParse({
+        ...validFrontmatter,
+        allowed_tools: ['tool1', 'tool2'],
+        allowedTools: 'tool1',
+      });
+      expect(result.success).toBe(false);
+    });
+
     it('preserves allowedTools if provided directly', () => {
       const result = FrontmatterSchema.safeParse({
         ...validFrontmatter,
