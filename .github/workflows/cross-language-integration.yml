@@ -21,6 +21,9 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.25'
+          cache-dependency-path: |
+            tests/cross_language/a2a/go_ts/go_client/go.mod
+            tests/cross_language/a2a/ts_go/go_backend/go.mod
 
       - name: Install dependencies
         run: npm install
