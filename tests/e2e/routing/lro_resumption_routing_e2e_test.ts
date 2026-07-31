@@ -75,6 +75,10 @@ class DataProcessingAgent extends BaseAgent {
       longRunningToolIds: ['lro-call-id-999'],
     });
   }
+
+  protected runLiveImpl(): AsyncGenerator<Event, void, void> {
+    throw new Error('Not supported');
+  }
 }
 
 /**
@@ -109,6 +113,10 @@ class RootOrchestratorAgent extends BaseAgent {
         parts: [{text: 'Hello from root orchestrator.'}],
       },
     });
+  }
+
+  protected runLiveImpl(): AsyncGenerator<Event, void, void> {
+    throw new Error('Not supported');
   }
 }
 
