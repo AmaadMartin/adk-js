@@ -14,8 +14,17 @@ import {
   createSession,
 } from '@google/adk';
 import {EventEmitter} from 'node:events';
+import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
+import * as path from 'node:path';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {
+  InterpreterCommands,
+  createTempScriptFile,
+  getExtensionForLanguage,
+  resolveInterpreterDefaults,
+  resolveSpawnCommand,
+} from '../../src/code_executors/unsafe_local_code_executor.js';
 
 // Only `spawn` is mocked; it defaults to the real implementation (see
 // `beforeEach`) so the pre-existing tests still execute real scripts.
@@ -25,10 +34,20 @@ vi.mock('node:child_process', async (importOriginal) => ({
   spawn: spawnMock,
 }));
 
+// Likewise for `readdir`: only the output-file scan failure test overrides it.
+const readdirMock = vi.hoisted(() => vi.fn());
+vi.mock('node:fs/promises', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('node:fs/promises')>()),
+  readdir: readdirMock,
+}));
+
 const {spawn: realSpawn} =
   await vi.importActual<typeof import('node:child_process')>(
     'node:child_process',
   );
+
+const {readdir: realReaddir} =
+  await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
 
 const POWERSHELL_COMMAND = os.platform() === 'win32' ? 'powershell' : 'pwsh';
 
@@ -39,6 +58,8 @@ const POWERSHELL_FLAGS = [
   'Bypass',
   '-File',
 ];
+
+const CMD_FLAGS = ['/D', '/c'];
 
 const EXPECTED_POWERSHELL_ARGS = [
   ...POWERSHELL_FLAGS,
@@ -71,6 +92,8 @@ describe('UnsafeLocalCodeExecutor', () => {
   beforeEach(() => {
     spawnMock.mockReset();
     spawnMock.mockImplementation(realSpawn);
+    readdirMock.mockReset();
+    readdirMock.mockImplementation(realReaddir);
     executor = new UnsafeLocalCodeExecutor();
   });
 
@@ -341,6 +364,39 @@ describe('UnsafeLocalCodeExecutor', () => {
     expect(result.outputFiles![0].mimeType).toBe('application/json');
   });
 
+  it('should report the exit code when a failing script writes nothing to stderr', async () => {
+    const params: ExecuteCodeParams = {
+      invocationContext,
+      codeExecutionInput: {
+        code: 'process.exit(3);',
+        language: CodeExecutionLanguage.JAVASCRIPT,
+        inputFiles: [],
+      },
+    };
+
+    const result = await executor.executeCode(params);
+
+    expect(result.stderr).toBe('Exit code 3');
+  });
+
+  it('should still return the script output when the output file scan fails', async () => {
+    readdirMock.mockRejectedValueOnce(new Error('scan failed'));
+    const params: ExecuteCodeParams = {
+      invocationContext,
+      codeExecutionInput: {
+        code: 'const fs = require("fs"); fs.writeFileSync("out.txt", "x"); console.log("ran anyway");',
+        language: CodeExecutionLanguage.JAVASCRIPT,
+        inputFiles: [],
+      },
+    };
+
+    const result = await executor.executeCode(params);
+
+    expect(result.stdout).toContain('ran anyway');
+    expect(result.stderr).toBe('');
+    expect(result.outputFiles).toEqual([]);
+  });
+
   describe('spawn arguments', () => {
     beforeEach(() => {
       // Return a child process that immediately exits with code 0, so the
@@ -444,6 +500,274 @@ describe('UnsafeLocalCodeExecutor', () => {
         ['/D', '/c', expect.stringMatching(/script\.bat$/)],
         expect.anything(),
       );
+    });
+  });
+});
+
+// The helpers below take the platform as an argument, so every arm is reachable
+// on every host. That is what keeps `npm run test:coverage` from reporting
+// different totals on ubuntu, macos and windows.
+describe('platform-independent resolution', () => {
+  const COMMANDS: InterpreterCommands = {
+    node: 'node-command',
+    python: 'python-command',
+    shell: 'shell-command',
+  };
+  const SCRIPT = path.join('tmp', 'script.txt');
+
+  describe('getExtensionForLanguage', () => {
+    it.each([false, true])(
+      'maps the non-shell languages to a fixed extension when isWindows is %s',
+      (isWindows) => {
+        expect(
+          getExtensionForLanguage(
+            CodeExecutionLanguage.JAVASCRIPT,
+            undefined,
+            isWindows,
+          ),
+        ).toBe('.js');
+        expect(
+          getExtensionForLanguage(
+            CodeExecutionLanguage.PYTHON,
+            undefined,
+            isWindows,
+          ),
+        ).toBe('.py');
+        expect(
+          getExtensionForLanguage(
+            CodeExecutionLanguage.POWERSHELL,
+            undefined,
+            isWindows,
+          ),
+        ).toBe('.ps1');
+        expect(
+          getExtensionForLanguage(
+            CodeExecutionLanguage.WINDOWS_CMD,
+            undefined,
+            isWindows,
+          ),
+        ).toBe('.bat');
+      },
+    );
+
+    it.each([false, true])(
+      'returns no extension for an unsupported language when isWindows is %s',
+      (isWindows) => {
+        expect(
+          getExtensionForLanguage(
+            CodeExecutionLanguage.UNSPECIFIED,
+            undefined,
+            isWindows,
+          ),
+        ).toBeUndefined();
+      },
+    );
+
+    it('writes shell code to a .sh script off Windows', () => {
+      expect(
+        getExtensionForLanguage(CodeExecutionLanguage.SHELL, 'bash', false),
+      ).toBe('.sh');
+    });
+
+    it('writes shell code to a .ps1 script on Windows', () => {
+      expect(
+        getExtensionForLanguage(
+          CodeExecutionLanguage.SHELL,
+          'powershell',
+          true,
+        ),
+      ).toBe('.ps1');
+    });
+
+    it('writes shell code to a .bat script on Windows when the shell is cmd', () => {
+      expect(
+        getExtensionForLanguage(CodeExecutionLanguage.SHELL, 'CMD.EXE', true),
+      ).toBe('.bat');
+    });
+
+    it('writes shell code to a .ps1 script on Windows when no shell command is set', () => {
+      expect(
+        getExtensionForLanguage(CodeExecutionLanguage.SHELL, undefined, true),
+      ).toBe('.ps1');
+    });
+  });
+
+  describe('resolveInterpreterDefaults', () => {
+    it('defaults to python3 and bash off Windows', () => {
+      expect(resolveInterpreterDefaults({}, false)).toEqual({
+        node: process.execPath,
+        python: 'python3',
+        shell: 'bash',
+      });
+    });
+
+    it('defaults to python and powershell on Windows', () => {
+      expect(resolveInterpreterDefaults({}, true)).toEqual({
+        node: process.execPath,
+        python: 'python',
+        shell: 'powershell',
+      });
+    });
+
+    it.each([false, true])(
+      'prefers the caller commands over the defaults when isWindows is %s',
+      (isWindows) => {
+        expect(
+          resolveInterpreterDefaults(
+            {
+              commandPath: 'my-node',
+              pythonCommandPath: 'py',
+              shellCommandPath: 'zsh',
+            },
+            isWindows,
+          ),
+        ).toEqual({node: 'my-node', python: 'py', shell: 'zsh'});
+      },
+    );
+  });
+
+  describe('resolveSpawnCommand', () => {
+    it.each([false, true])(
+      'runs javascript through the node command when isWindows is %s',
+      (isWindows) => {
+        expect(
+          resolveSpawnCommand(
+            CodeExecutionLanguage.JAVASCRIPT,
+            SCRIPT,
+            COMMANDS,
+            isWindows,
+          ),
+        ).toEqual({command: 'node-command', args: [SCRIPT]});
+      },
+    );
+
+    it.each([false, true])(
+      'runs python through the python command when isWindows is %s',
+      (isWindows) => {
+        expect(
+          resolveSpawnCommand(
+            CodeExecutionLanguage.PYTHON,
+            SCRIPT,
+            COMMANDS,
+            isWindows,
+          ),
+        ).toEqual({command: 'python-command', args: [SCRIPT]});
+      },
+    );
+
+    it.each([false, true])(
+      'runs shell code through the shell command with no flags when it is neither powershell nor cmd, isWindows is %s',
+      (isWindows) => {
+        expect(
+          resolveSpawnCommand(
+            CodeExecutionLanguage.SHELL,
+            SCRIPT,
+            {...COMMANDS, shell: 'bash'},
+            isWindows,
+          ),
+        ).toEqual({command: 'bash', args: [SCRIPT]});
+      },
+    );
+
+    it.each([false, true])(
+      'adds the powershell flags when the shell command is powershell, isWindows is %s',
+      (isWindows) => {
+        expect(
+          resolveSpawnCommand(
+            CodeExecutionLanguage.SHELL,
+            SCRIPT,
+            {...COMMANDS, shell: 'C:\\Windows\\PowerShell.exe'},
+            isWindows,
+          ),
+        ).toEqual({
+          command: 'C:\\Windows\\PowerShell.exe',
+          args: [...POWERSHELL_FLAGS, SCRIPT],
+        });
+      },
+    );
+
+    it.each([false, true])(
+      'adds the cmd flags when the shell command is cmd, isWindows is %s',
+      (isWindows) => {
+        expect(
+          resolveSpawnCommand(
+            CodeExecutionLanguage.SHELL,
+            SCRIPT,
+            {...COMMANDS, shell: 'CMD.EXE'},
+            isWindows,
+          ),
+        ).toEqual({command: 'CMD.EXE', args: [...CMD_FLAGS, SCRIPT]});
+      },
+    );
+
+    it('runs powershell code through pwsh off Windows', () => {
+      expect(
+        resolveSpawnCommand(
+          CodeExecutionLanguage.POWERSHELL,
+          SCRIPT,
+          COMMANDS,
+          false,
+        ),
+      ).toEqual({command: 'pwsh', args: [...POWERSHELL_FLAGS, SCRIPT]});
+    });
+
+    it('runs powershell code through powershell on Windows', () => {
+      expect(
+        resolveSpawnCommand(
+          CodeExecutionLanguage.POWERSHELL,
+          SCRIPT,
+          COMMANDS,
+          true,
+        ),
+      ).toEqual({command: 'powershell', args: [...POWERSHELL_FLAGS, SCRIPT]});
+    });
+
+    it.each([false, true])(
+      'runs windows_cmd code through cmd.exe when isWindows is %s',
+      (isWindows) => {
+        expect(
+          resolveSpawnCommand(
+            CodeExecutionLanguage.WINDOWS_CMD,
+            SCRIPT,
+            COMMANDS,
+            isWindows,
+          ),
+        ).toEqual({command: 'cmd.exe', args: [...CMD_FLAGS, SCRIPT]});
+      },
+    );
+
+    it.each([false, true])(
+      'falls back to the node command for an unsupported language when isWindows is %s',
+      (isWindows) => {
+        expect(
+          resolveSpawnCommand(
+            CodeExecutionLanguage.UNSPECIFIED,
+            SCRIPT,
+            COMMANDS,
+            isWindows,
+          ),
+        ).toEqual({command: 'node-command', args: [SCRIPT]});
+      },
+    );
+  });
+
+  describe('createTempScriptFile', () => {
+    it('falls back to a .js script when the language has no extension', async () => {
+      const {filePath, tempDir} = await createTempScriptFile(
+        'console.log("fallback");',
+        CodeExecutionLanguage.UNSPECIFIED,
+        undefined,
+        false,
+      );
+
+      try {
+        expect(path.basename(filePath)).toBe('script.js');
+        await expect(fs.readFile(filePath, 'utf8')).resolves.toBe(
+          'console.log("fallback");',
+        );
+      } finally {
+        await fs.rm(tempDir, {recursive: true, force: true});
+      }
     });
   });
 });

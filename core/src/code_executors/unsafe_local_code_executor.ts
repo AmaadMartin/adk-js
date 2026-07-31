@@ -60,10 +60,21 @@ export interface UnsafeLocalCodeExecutorOptions {
   shellCommandPath?: string;
 }
 
-async function createTempScriptFile(
+/**
+ * The interpreter commands an executor runs scripts with, resolved once from
+ * the caller's options and the host platform.
+ */
+export interface InterpreterCommands {
+  node: string;
+  python: string;
+  shell: string;
+}
+
+export async function createTempScriptFile(
   code: string,
   language: CodeExecutionLanguage,
-  shellCommandPath?: string,
+  shellCommandPath: string | undefined,
+  isWindows: boolean,
 ): Promise<{filePath: string; tempDir: string}> {
   const tempDir = path.join(
     os.tmpdir(),
@@ -72,16 +83,23 @@ async function createTempScriptFile(
   );
   await fs.mkdir(tempDir, {recursive: true});
 
-  const ext = getExtensionForLanguage(language, shellCommandPath) || '.js';
+  const ext =
+    getExtensionForLanguage(language, shellCommandPath, isWindows) || '.js';
   const filePath = path.join(tempDir, `script${ext}`);
   await fs.writeFile(filePath, code);
 
   return {filePath, tempDir};
 }
 
-function getExtensionForLanguage(
+/**
+ * `isWindows` is required rather than defaulted to `IS_WINDOWS` so that both
+ * arms stay reachable from a test on any host. A default would itself be a
+ * branch only one platform can ever take.
+ */
+export function getExtensionForLanguage(
   language: CodeExecutionLanguage,
-  shellCommandPath?: string,
+  shellCommandPath: string | undefined,
+  isWindows: boolean,
 ): string | undefined {
   if (language === CodeExecutionLanguage.JAVASCRIPT) {
     return '.js';
@@ -100,7 +118,7 @@ function getExtensionForLanguage(
   }
 
   if (language === CodeExecutionLanguage.SHELL) {
-    if (IS_WINDOWS) {
+    if (isWindows) {
       if (shellCommandPath && shellCommandPath.toLowerCase().includes('cmd')) {
         return '.bat';
       }
@@ -110,6 +128,61 @@ function getExtensionForLanguage(
   }
 
   return undefined;
+}
+
+/** Applies the platform's interpreter defaults to the caller's options. */
+export function resolveInterpreterDefaults(
+  options: UnsafeLocalCodeExecutorOptions,
+  isWindows: boolean,
+): InterpreterCommands {
+  return {
+    node: options.commandPath ?? process.execPath,
+    python: options.pythonCommandPath ?? (isWindows ? 'python' : 'python3'),
+    shell: options.shellCommandPath ?? (isWindows ? 'powershell' : 'bash'),
+  };
+}
+
+/**
+ * Picks the interpreter and its flags for `language`. An unrecognised language
+ * falls through to the node command with no extra flags; `executeCode` rejects
+ * those before ever reaching here.
+ */
+export function resolveSpawnCommand(
+  language: CodeExecutionLanguage,
+  filePath: string,
+  commands: InterpreterCommands,
+  isWindows: boolean,
+): {command: string; args: string[]} {
+  if (language === CodeExecutionLanguage.PYTHON) {
+    return {command: commands.python, args: [filePath]};
+  }
+
+  if (language === CodeExecutionLanguage.SHELL) {
+    const shell = commands.shell.toLowerCase();
+    if (shell.includes('powershell')) {
+      return {
+        command: commands.shell,
+        args: [...POWERSHELL_BASE_ARGS, filePath],
+      };
+    }
+    if (shell.includes('cmd')) {
+      return {command: commands.shell, args: [...CMD_BASE_ARGS, filePath]};
+    }
+    return {command: commands.shell, args: [filePath]};
+  }
+
+  if (language === CodeExecutionLanguage.POWERSHELL) {
+    return {
+      command: isWindows ? 'powershell' : 'pwsh',
+      args: [...POWERSHELL_BASE_ARGS, filePath],
+    };
+  }
+
+  if (language === CodeExecutionLanguage.WINDOWS_CMD) {
+    return {command: 'cmd.exe', args: [...CMD_BASE_ARGS, filePath]};
+  }
+
+  return {command: commands.node, args: [filePath]};
 }
 
 /**
@@ -126,18 +199,12 @@ function getExtensionForLanguage(
  */
 export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
   private readonly timeoutSeconds: number;
-  private readonly nodeCommandPath: string;
-  private readonly pythonCommandPath: string;
-  private readonly shellCommandPath: string;
+  private readonly commands: InterpreterCommands;
 
   constructor(options: UnsafeLocalCodeExecutorOptions = {}) {
     super();
     this.timeoutSeconds = options.timeoutSeconds ?? 30;
-    this.nodeCommandPath = options.commandPath ?? process.execPath;
-    this.pythonCommandPath =
-      options.pythonCommandPath ?? (IS_WINDOWS ? 'python' : 'python3');
-    this.shellCommandPath =
-      options.shellCommandPath ?? (IS_WINDOWS ? 'powershell' : 'bash');
+    this.commands = resolveInterpreterDefaults(options, IS_WINDOWS);
     this.stateful = false;
     this.optimizeDataFile = false;
   }
@@ -173,7 +240,8 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
       const res = await createTempScriptFile(
         code,
         language,
-        this.shellCommandPath,
+        this.commands.shell,
+        IS_WINDOWS,
       );
       const filePath = res.filePath;
       tempDir = res.tempDir;
@@ -182,25 +250,12 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
         await materializeFiles(params.codeExecutionInput.inputFiles, tempDir);
       }
 
-      let command = this.nodeCommandPath;
-      let args = [filePath];
-
-      if (language === CodeExecutionLanguage.PYTHON) {
-        command = this.pythonCommandPath;
-      } else if (language === CodeExecutionLanguage.SHELL) {
-        command = this.shellCommandPath;
-        if (this.shellCommandPath.toLowerCase().includes('powershell')) {
-          args = [...POWERSHELL_BASE_ARGS, filePath];
-        } else if (this.shellCommandPath.toLowerCase().includes('cmd')) {
-          args = [...CMD_BASE_ARGS, filePath];
-        }
-      } else if (language === CodeExecutionLanguage.POWERSHELL) {
-        command = IS_WINDOWS ? 'powershell' : 'pwsh';
-        args = [...POWERSHELL_BASE_ARGS, filePath];
-      } else if (language === CodeExecutionLanguage.WINDOWS_CMD) {
-        command = 'cmd.exe';
-        args = [...CMD_BASE_ARGS, filePath];
-      }
+      const {command, args} = resolveSpawnCommand(
+        language,
+        filePath,
+        this.commands,
+        IS_WINDOWS,
+      );
 
       if (params.codeExecutionInput.args) {
         if (Array.isArray(params.codeExecutionInput.args)) {
