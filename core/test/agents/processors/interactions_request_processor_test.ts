@@ -18,6 +18,7 @@ import {
   LlmRequest,
   LlmResponse,
   PluginManager,
+  SequentialAgent,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
@@ -30,8 +31,8 @@ class MockLlm extends BaseLlm {
     _llmRequest: LlmRequest,
   ): AsyncGenerator<LlmResponse, void> {}
 
-  override async connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
-    return {} as unknown as BaseLlmConnection;
+  override connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
+    throw new Error('Not implemented');
   }
 }
 
@@ -230,9 +231,7 @@ describe('InteractionsRequestProcessor', () => {
       rawEvents,
       new MockLlm(),
     );
-    invocationContext.agent = {
-      name: 'not-an-llm-agent',
-    } as unknown as BaseAgent;
+    invocationContext.agent = new SequentialAgent({name: 'not-an-llm-agent'});
     const llmRequest: LlmRequest = {
       contents: [],
       toolsDict: {},
