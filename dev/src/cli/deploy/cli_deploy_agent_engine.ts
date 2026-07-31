@@ -45,7 +45,9 @@ export async function deployToAgentEngine(options: DeployToAgentEngineOptions) {
   const envConfig = await loadAgentEnvConfig(agentDir, options);
 
   const project =
-    envConfig.project || (await resolveDefaultFromGcloudConfig('project'));
+    options.project ||
+    envConfig.project ||
+    (await resolveDefaultFromGcloudConfig('project'));
   if (!project || project === '(unset)') {
     throw new Error(
       'Project is not specified and default value for "project" is not set in gcloud config.',
@@ -56,7 +58,9 @@ export async function deployToAgentEngine(options: DeployToAgentEngineOptions) {
   }
 
   const region =
-    envConfig.region || (await resolveDefaultFromGcloudConfig('run/region'));
+    options.region ||
+    envConfig.region ||
+    (await resolveDefaultFromGcloudConfig('run/region'));
   if (!region) {
     throw new Error(
       'Region is not specified and default value for "run/region" is not set in gcloud config.',

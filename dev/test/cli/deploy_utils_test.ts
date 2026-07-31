@@ -49,17 +49,13 @@ describe('loadAgentEnvConfig', () => {
     await fs.rm(agentDir, {recursive: true, force: true});
   });
 
-  it('should pass the flags through and stay silent when there is no .env', async () => {
+  it('should contribute nothing and stay silent when there is no .env', async () => {
     const config = await loadAgentEnvConfig(agentDir, {
       project: 'flag-project',
       region: 'flag-region',
     });
 
-    expect(config).toEqual({
-      envVars: {},
-      project: 'flag-project',
-      region: 'flag-region',
-    });
+    expect(config).toEqual({envVars: {}});
     expect(infoSpy).not.toHaveBeenCalled();
   });
 
@@ -114,8 +110,8 @@ describe('loadAgentEnvConfig', () => {
 
     expect(config).toEqual({
       envVars: {},
-      project: 'flag-project',
-      region: 'flag-region',
+      project: undefined,
+      region: undefined,
     });
     expect(warnSpy).toHaveBeenCalledWith(
       'Ignoring GOOGLE_CLOUD_PROJECT in .env as `--project` was explicitly passed and takes precedence',
@@ -198,13 +194,15 @@ describe('formatGcloudEnvVarsArg', () => {
     expect(formatGcloudEnvVarsArg({A: '1,2', B: '3'})).toBe('^@^A=1,2@B=3');
   });
 
-  it('should skip every delimiter present in the payload', () => {
-    expect(formatGcloudEnvVarsArg({A: '1,2', B: 'a@b'})).toBe('^|^A=1,2|B=a@b');
+  it('should grow the delimiter until it is absent from the payload', () => {
+    expect(formatGcloudEnvVarsArg({A: '1,2', B: 'a@b'})).toBe(
+      '^@@^A=1,2@@B=a@b',
+    );
   });
 
-  it('should throw and name the variables when no delimiter is available', () => {
-    expect(() => formatGcloudEnvVarsArg({A: ',@|;#', B: 'plain'})).toThrow(
-      /Cannot pass environment variable\(s\) A to gcloud/,
+  it('should escape a value containing every punctuation character', () => {
+    expect(formatGcloudEnvVarsArg({A: ',@|;#^', B: 'plain'})).toBe(
+      '^@@^A=,@|;#^@@B=plain',
     );
   });
 

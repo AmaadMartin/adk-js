@@ -131,7 +131,9 @@ export async function deployToCloudRun(options: DeployToCloudRunOptions) {
   const envConfig = await loadAgentEnvConfig(agentDir, options);
 
   const project =
-    envConfig.project || (await resolveDefaultFromGcloudConfig('project'));
+    options.project ||
+    envConfig.project ||
+    (await resolveDefaultFromGcloudConfig('project'));
   if (!project || project === '(unset)') {
     throw new Error(
       'Project is not specified and default value for "project" is not set in gcloud config. Please specify region with --project option or set default value running "gcloud config set project YOUR_PROJECT".',
@@ -148,7 +150,9 @@ export async function deployToCloudRun(options: DeployToCloudRunOptions) {
   }
 
   const region =
-    envConfig.region || (await resolveDefaultFromGcloudConfig('run/region'));
+    options.region ||
+    envConfig.region ||
+    (await resolveDefaultFromGcloudConfig('run/region'));
   if (!region) {
     throw new Error(
       'Region is not specified and default value for "run/region" is not set in gcloud config. Please specify region with --region option or set default value running "gcloud config set run/region YOUR_REGION".',
