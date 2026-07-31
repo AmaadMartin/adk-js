@@ -10,8 +10,10 @@ import * as path from 'node:path';
 import {promisify} from 'node:util';
 import {
   createFolder,
+  isFileExists,
   isFolderExists,
   listFiles,
+  readTextFile,
   removeFolder,
   saveToFile,
 } from '../utils/file_utils.js';
@@ -178,6 +180,37 @@ function generateEnvFile(options: AgentCreationOptions): string {
   return lines.join('\n');
 }
 
+const DOTENV_FILE_NAME = '.env';
+
+/**
+ * Excludes the generated .env, which may hold a raw GOOGLE_API_KEY, from
+ * version control so that `git add .` in a freshly scaffolded agent cannot
+ * commit the secret.
+ *
+ * An existing .gitignore is appended to, never overwritten: removeFolder()
+ * only logs when deletion fails, so scaffolding can proceed into a folder
+ * whose .gitignore survived. Entries are kept verbatim and .env is listed at
+ * most once.
+ */
+async function ensureDotenvGitignored(agentDir: string): Promise<void> {
+  const gitignorePath = path.join(agentDir, '.gitignore');
+  const content = (await isFileExists(gitignorePath))
+    ? await readTextFile(gitignorePath)
+    : '';
+
+  // \r?\n so a CRLF .gitignore is also recognized as already ignoring .env.
+  if (content.split(/\r?\n/).includes(DOTENV_FILE_NAME)) {
+    return;
+  }
+
+  const separator = content && !content.endsWith('\n') ? '\n' : '';
+
+  return saveToFile(
+    gitignorePath,
+    `${content}${separator}${DOTENV_FILE_NAME}\n`,
+  );
+}
+
 async function generateFiles(options: AgentCreationOptions) {
   const agentDir = path.join(dirname, options.agentName);
 
@@ -185,7 +218,11 @@ async function generateFiles(options: AgentCreationOptions) {
     path.join(agentDir, `agent.${options.language}`),
     AGENT_TEMPLATE(options.model || 'gemini-2.5-flash'),
   );
-  await saveToFile(path.join(agentDir, '.env'), generateEnvFile(options));
+  await saveToFile(
+    path.join(agentDir, DOTENV_FILE_NAME),
+    generateEnvFile(options),
+  );
+  await ensureDotenvGitignored(agentDir);
   await saveToFile(
     path.join(agentDir, 'package.json'),
     PACKAGE_JSON(options.agentName, options.language),

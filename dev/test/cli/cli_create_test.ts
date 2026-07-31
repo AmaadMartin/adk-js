@@ -19,8 +19,10 @@ import {
 import {createAgent} from '../../src/cli/cli_create.js';
 import {
   createFolder,
+  isFileExists,
   isFolderExists,
   listFiles,
+  readTextFile,
   removeFolder,
   saveToFile,
 } from '../../src/utils/file_utils.js';
@@ -46,8 +48,10 @@ vi.mock('node:child_process', () => ({
 
 vi.mock('../../src/utils/file_utils.js', () => ({
   createFolder: vi.fn(),
+  isFileExists: vi.fn(),
   isFolderExists: vi.fn(),
   listFiles: vi.fn(),
+  readTextFile: vi.fn(),
   removeFolder: vi.fn(),
   saveToFile: vi.fn(),
 }));
@@ -72,6 +76,8 @@ describe('createAgent', () => {
     vi.clearAllMocks();
     (isCancel as unknown as Mock).mockReturnValue(false);
     (listFiles as Mock).mockResolvedValue(['file1', 'file2']);
+    (isFileExists as Mock).mockResolvedValue(false);
+    (readTextFile as Mock).mockResolvedValue('');
   });
 
   afterEach(() => {
@@ -142,6 +148,91 @@ describe('createAgent', () => {
       expect(saveToFile).toHaveBeenCalledWith(
         expect.stringContaining('.env'),
         expect.stringContaining('GOOGLE_API_KEY=my-api-key'),
+      );
+    });
+  });
+
+  describe('.gitignore generation', () => {
+    const gitignorePath = expect.stringContaining('.gitignore');
+
+    const createWithApiKey = () =>
+      createAgent({
+        ...getFreshOptions(),
+        forceYes: true,
+        apiKey: 'my-api-key',
+      });
+
+    it('should create a .gitignore ignoring .env when none exists', async () => {
+      await createWithApiKey();
+
+      expect(saveToFile).toHaveBeenCalledWith(gitignorePath, '.env\n');
+    });
+
+    it('should create a .gitignore for the Vertex AI backend too', async () => {
+      await createAgent({
+        ...getFreshOptions(),
+        forceYes: true,
+        project: 'my-project',
+        region: 'us-central1',
+      });
+
+      expect(saveToFile).toHaveBeenCalledWith(gitignorePath, '.env\n');
+    });
+
+    it('should append .env to an existing .gitignore without a trailing newline', async () => {
+      (isFileExists as Mock).mockResolvedValue(true);
+      (readTextFile as Mock).mockResolvedValue('node_modules');
+
+      await createWithApiKey();
+
+      expect(saveToFile).toHaveBeenCalledWith(
+        gitignorePath,
+        'node_modules\n.env\n',
+      );
+    });
+
+    it('should append .env without a blank line when the .gitignore ends in a newline', async () => {
+      (isFileExists as Mock).mockResolvedValue(true);
+      (readTextFile as Mock).mockResolvedValue('node_modules\n');
+
+      await createWithApiKey();
+
+      expect(saveToFile).toHaveBeenCalledWith(
+        gitignorePath,
+        'node_modules\n.env\n',
+      );
+    });
+
+    it('should not add a leading blank line to an empty .gitignore', async () => {
+      (isFileExists as Mock).mockResolvedValue(true);
+      (readTextFile as Mock).mockResolvedValue('');
+
+      await createWithApiKey();
+
+      expect(saveToFile).toHaveBeenCalledWith(gitignorePath, '.env\n');
+    });
+
+    it('should not duplicate an existing .env entry', async () => {
+      (isFileExists as Mock).mockResolvedValue(true);
+      (readTextFile as Mock).mockResolvedValue('node_modules\n.env\n');
+
+      await createWithApiKey();
+
+      expect(saveToFile).not.toHaveBeenCalledWith(
+        gitignorePath,
+        expect.anything(),
+      );
+    });
+
+    it('should not duplicate an existing .env entry in a CRLF .gitignore', async () => {
+      (isFileExists as Mock).mockResolvedValue(true);
+      (readTextFile as Mock).mockResolvedValue('node_modules\r\n.env\r\n');
+
+      await createWithApiKey();
+
+      expect(saveToFile).not.toHaveBeenCalledWith(
+        gitignorePath,
+        expect.anything(),
       );
     });
   });
