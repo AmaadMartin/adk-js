@@ -37,6 +37,8 @@ describe('Lazy load DB drivers', () => {
 
     // We expect successful initialization because it doesn't need the other drivers.
     await expect(svc.init()).resolves.toBeUndefined();
+
+    await svc.close();
   });
 
   describe.each(missingDrivers)('Driver: $name', ({uri}) => {
