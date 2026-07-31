@@ -158,5 +158,31 @@ describe('file_utils', () => {
       );
       expect(content3).toBe('third');
     });
+
+    it('should keep the subdirectory when it renames a colliding file', async () => {
+      const files = [
+        {
+          name: 'nested/collision.txt',
+          content: 'first',
+          contentEncoding: FileContentEncoding.UTF8,
+          mimeType: 'text/plain',
+        },
+        {
+          name: 'nested/collision.txt',
+          content: 'second',
+          contentEncoding: FileContentEncoding.UTF8,
+          mimeType: 'text/plain',
+        },
+      ];
+
+      await materializeFiles(files, tempDir);
+
+      expect(files[1].name).toBe(path.join('nested', 'collision_2.txt'));
+      const content = await fs.readFile(
+        path.join(tempDir, 'nested', 'collision_2.txt'),
+        'utf8',
+      );
+      expect(content).toBe('second');
+    });
   });
 });
