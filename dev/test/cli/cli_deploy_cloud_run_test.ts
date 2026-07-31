@@ -321,7 +321,7 @@ describe('deployToCloudRun', () => {
         ([command]) => command === 'gcloud',
       );
       if (!call) {
-        expect.fail('gcloud was never spawned');
+        expect.fail('gcloud was not spawned');
       }
       const args: unknown = call[1];
       if (!Array.isArray(args)) {
