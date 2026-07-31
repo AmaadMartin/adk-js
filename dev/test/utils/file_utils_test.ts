@@ -13,6 +13,7 @@ import {
   isFolderExists,
   listFiles,
   loadFileData,
+  readTextFile,
   saveToFile,
   tryToFindFileRecursively,
 } from '../../src/utils/file_utils.js';
@@ -101,6 +102,19 @@ describe('file_utils', () => {
   it('loadFileData throws when readFile rejects', async () => {
     fsPromises.readFile.mockRejectedValue(new Error('read error'));
     await expect(loadFileData(testPath)).rejects.toThrow('read error');
+  });
+
+  it('readTextFile returns the file contents as text', async () => {
+    fsPromises.readFile.mockResolvedValue(testContent);
+    await expect(readTextFile(testPath)).resolves.toBe(testContent);
+    expect(fsPromises.readFile).toHaveBeenCalledWith(testPath, {
+      encoding: 'utf-8',
+    });
+  });
+
+  it('readTextFile throws when readFile rejects', async () => {
+    fsPromises.readFile.mockRejectedValue(new Error('read error'));
+    await expect(readTextFile(testPath)).rejects.toThrow('read error');
   });
 
   it('saveToFile writes string data as-is', async () => {

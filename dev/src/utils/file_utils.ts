@@ -84,6 +84,11 @@ export async function loadFileData<T>(
   }
 }
 
+/** Read the contents of a file as UTF-8 text. */
+export function readTextFile(filePath: string): Promise<string> {
+  return fs.readFile(filePath, {encoding: 'utf-8'});
+}
+
 /** Save data to a file in JSON format. */
 export async function saveToFile<T>(filePath: string, data: T): Promise<void> {
   try {
