@@ -63,17 +63,35 @@ function byNormalizedKey(report) {
   return byKey;
 }
 
-function location(loc) {
-  return loc
-    ? `${loc.start.line}:${loc.start.column}-${loc.end.line}:${loc.end.column}`
-    : 'unknown';
+/**
+ * Names a counter by the line span it covers. Columns are deliberately left
+ * out: a Windows checkout has CRLF line endings, so the byte offsets v8 reports
+ * — and every column derived from them — are shifted against a Linux checkout
+ * of identical source, and a column-sensitive key reports every file as
+ * different.
+ */
+function lineSpan(loc) {
+  return loc ? `lines ${loc.start.line}-${loc.end.line}` : 'unknown location';
 }
 
 /**
- * Flattens one kind of counter into `source location -> covered?`. Locations
- * are the key rather than the numeric counter id because the id is just a
- * position in the report: when one report omits a counter the other has, every
- * later id shifts and an id-keyed comparison reports the whole tail as
+ * Records `unit -> covered?`, disambiguating counters that share a line span
+ * (an inline ternary has both arms on one line) by their order within the
+ * report, which both reports enumerate the same way.
+ */
+function addUnit(units, span, covered) {
+  let unit = span;
+  for (let n = 2; units.has(unit); n++) {
+    unit = `${span} #${n}`;
+  }
+  units.set(unit, covered);
+}
+
+/**
+ * Flattens one kind of counter into `unit -> covered?`. Units are keyed by
+ * source position rather than by the numeric counter id because the id is only
+ * an index into the report: when one report omits a counter the other has,
+ * every later id shifts and an id-keyed comparison reports the whole tail as
  * different.
  *
  * A branch contributes one unit per arm, because v8 can cover one arm of a
@@ -83,17 +101,21 @@ function coverageUnits(entry, kind) {
   const units = new Map();
   if (kind === 'statements') {
     for (const [id, hits] of Object.entries(entry.s ?? {})) {
-      units.set(location(entry.statementMap?.[id]), hits > 0);
+      addUnit(units, lineSpan(entry.statementMap?.[id]), hits > 0);
     }
   } else if (kind === 'functions') {
     for (const [id, hits] of Object.entries(entry.f ?? {})) {
-      units.set(location(entry.fnMap?.[id]?.decl), hits > 0);
+      addUnit(units, lineSpan(entry.fnMap?.[id]?.decl), hits > 0);
     }
   } else {
     for (const [id, arms] of Object.entries(entry.b ?? {})) {
       const branch = entry.branchMap?.[id];
       arms.forEach((hits, arm) => {
-        units.set(location(branch?.locations?.[arm] ?? branch?.loc), hits > 0);
+        addUnit(
+          units,
+          lineSpan(branch?.locations?.[arm] ?? branch?.loc),
+          hits > 0,
+        );
       });
     }
   }

@@ -1,0 +1,5 @@
+# Check every text file out with LF, on every platform, matching
+# .editorconfig's end_of_line = lf. Without this a Windows checkout gets CRLF,
+# which shifts every byte offset v8 reports and makes `npm run test:coverage`
+# emit a differently shaped coverage report there than on Linux and macOS.
+* text=auto eol=lf

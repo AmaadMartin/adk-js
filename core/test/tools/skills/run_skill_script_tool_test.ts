@@ -18,6 +18,7 @@ import {
   SkillToolset,
 } from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
+import {buildWrapperCode} from '../../../src/tools/skill/run_skill_script_tool.js';
 import {materializeFiles} from '../../../src/utils/file_utils.js';
 
 vi.mock('../../../src/utils/file_utils.js', () => ({
@@ -227,5 +228,35 @@ describe('RunSkillScriptTool', () => {
     });
 
     expect(materializeFiles).toHaveBeenCalledWith([testFile]);
+  });
+});
+
+// The integration suite only reaches the shell arm on Unix and the
+// powershell/cmd arms on Windows, so without these cases the switch is covered
+// differently depending on which OS ran `npm run test:coverage`.
+describe('buildWrapperCode', () => {
+  it.each([
+    [CodeExecutionLanguage.JAVASCRIPT, "require('./scripts/setup.js');"],
+    [
+      CodeExecutionLanguage.TYPESCRIPT,
+      "require('ts-node/register');\nrequire('./scripts/setup.js');",
+    ],
+    [
+      CodeExecutionLanguage.PYTHON,
+      "import runpy\nrunpy.run_path('./scripts/setup.js', run_name='__main__')",
+    ],
+    [CodeExecutionLanguage.SHELL, 'source ./scripts/setup.js "$@"'],
+    // The Windows arms emit a doubled separator today. Windows resolves the
+    // path regardless, and this change deliberately does not alter it.
+    [CodeExecutionLanguage.POWERSHELL, '& .\\scripts\\\\setup.js $args'],
+    [CodeExecutionLanguage.WINDOWS_CMD, 'call .\\scripts\\\\setup.js %*'],
+  ])('wraps a script for %s', (language, expected) => {
+    expect(buildWrapperCode('scripts/setup.js', language)).toBe(expected);
+  });
+
+  it('rejects a language it has no wrapper for', () => {
+    expect(() =>
+      buildWrapperCode('scripts/setup.js', CodeExecutionLanguage.UNSPECIFIED),
+    ).toThrow('Unsupported wrapper language: unspecified');
   });
 });
