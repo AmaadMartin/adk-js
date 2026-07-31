@@ -24,6 +24,10 @@ import {expect} from 'vitest';
 /**
  * Represents a raw generate content response.
  */
+// Re-exported so the integration suites have one seam onto the core test
+// helpers rather than each reaching across trees on its own.
+export {createReadonlyContext} from '../../core/test/testing_utils.js';
+
 export interface RawGenerateContentResponse {
   candidates?: Candidate[];
   usageMetadata?: UsageMetadata;

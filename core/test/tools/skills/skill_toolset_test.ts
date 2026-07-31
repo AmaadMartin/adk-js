@@ -4,17 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  BaseTool,
-  BaseToolset,
-  Context,
-  InvocationContext,
-  LlmRequest,
-  Skill,
-  SkillToolset,
-} from '@google/adk';
+import {BaseTool, BaseToolset, Skill, SkillToolset} from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
-import {createReadonlyContext} from '../../testing_utils.js';
+import {
+  createLlmRequest,
+  createReadonlyContext,
+  createToolContext,
+} from '../../testing_utils.js';
 
 describe('skill_toolset', () => {
   const mockSkill: Skill = {
@@ -35,15 +31,6 @@ describe('skill_toolset', () => {
       },
     },
   };
-
-  function createMockContext(agentName = 'test-agent') {
-    return new Context({
-      invocationContext: {
-        session: {state: {}},
-        agent: {name: agentName},
-      } as unknown as InvocationContext,
-    });
-  }
 
   describe('SkillToolset', () => {
     it('provides default tools', async () => {
@@ -68,7 +55,7 @@ describe('skill_toolset', () => {
 
     it('returns default tools only when no skills activated', async () => {
       const toolset = new SkillToolset([mockSkill]);
-      const context = createMockContext();
+      const context = createToolContext();
       const tools = await toolset.getTools(context);
       expect(tools.length).toBe(4);
     });
@@ -98,13 +85,9 @@ describe('skill_toolset', () => {
 
     it('appends instructions to LLM request', async () => {
       const toolset = new SkillToolset([mockSkill]);
-      const llmRequest: LlmRequest = {
-        contents: [],
-        toolsDict: {},
-        liveConnectConfig: {},
-      };
+      const llmRequest = createLlmRequest();
 
-      await toolset.processLlmRequest(createMockContext(), llmRequest);
+      await toolset.processLlmRequest(createToolContext(), llmRequest);
 
       expect(llmRequest.config?.systemInstruction).toContain(
         "You can use specialized 'skills'",
