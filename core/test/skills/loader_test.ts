@@ -340,7 +340,7 @@ Instructions`,
       await fs.rm(tempDir, {recursive: true, force: true});
     });
 
-    it.each(['allowed-tools', 'allowedTools'])(
+    it.each(['allowed-tools', 'allowed_tools', 'allowedTools'])(
       'returns no problems for a skill declaring %s',
       async (key) => {
         tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-skill-test-'));

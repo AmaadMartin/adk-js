@@ -84,6 +84,17 @@ describe('skill', () => {
       }
     });
 
+    it('maps allowed_tools to allowedTools', () => {
+      const result = FrontmatterSchema.safeParse({
+        ...validFrontmatter,
+        allowed_tools: 'tool1,tool2',
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.allowedTools).toBe('tool1,tool2');
+      }
+    });
+
     it('preserves allowedTools if provided directly', () => {
       const result = FrontmatterSchema.safeParse({
         ...validFrontmatter,

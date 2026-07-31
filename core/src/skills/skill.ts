@@ -9,6 +9,8 @@ import {z} from 'zod';
 export const SNAKE_OR_KEBAB_NAME_PATTERN =
   /^([a-z0-9]+(-[a-z0-9]+)*|[a-z0-9]+(_[a-z0-9]+)*)$/;
 
+const ALLOWED_TOOLS_ALIASES = ['allowed-tools', 'allowed_tools'];
+
 /**
  * Schema and Type for Skill Frontmatter metadata.
  */
@@ -16,11 +18,14 @@ export const FrontmatterSchema = z.preprocess(
   (data) => {
     if (typeof data === 'object' && data !== null) {
       const obj = data as Record<string, unknown>;
-      if ('allowed-tools' in obj && !('allowedTools' in obj)) {
-        return {
-          ...obj,
-          allowedTools: obj['allowed-tools'],
-        };
+      if (!('allowedTools' in obj)) {
+        const alias = ALLOWED_TOOLS_ALIASES.find((key) => key in obj);
+        if (alias) {
+          return {
+            ...obj,
+            allowedTools: obj[alias],
+          };
+        }
       }
     }
     return data;

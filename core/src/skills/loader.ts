@@ -17,17 +17,26 @@ import {
   Skill,
 } from './skill.js';
 
-const ALLOWED_FRONTMATTER_KEYS = new Set([
-  'name',
-  'description',
-  'license',
-  'allowed-tools',
-  // Camel-case alias: FrontmatterSchema's preprocessor derives `allowedTools`
-  // from `allowed-tools`, and `.loose()` passes either spelling through.
-  'allowedTools',
-  'metadata',
-  'compatibility',
-]);
+/**
+ * Folds a frontmatter key into camelCase so that the kebab-case, snake_case,
+ * and camelCase spellings of a field all compare equal.
+ */
+function normalizeKey(key: string): string {
+  return key.replace(/[-_]([a-z0-9])/g, (_match, char: string) =>
+    char.toUpperCase(),
+  );
+}
+
+const ALLOWED_FRONTMATTER_KEYS = new Set(
+  [
+    'name',
+    'description',
+    'license',
+    'allowed-tools',
+    'metadata',
+    'compatibility',
+  ].map(normalizeKey),
+);
 
 const IGNORED_DIRECTORIES = new Set([
   '__pycache__',
@@ -256,7 +265,9 @@ export async function validateSkillDir(skillDir: string): Promise<string[]> {
 
   try {
     const keys = Object.keys(skill.frontmatter);
-    const unknown = keys.filter((k) => !ALLOWED_FRONTMATTER_KEYS.has(k));
+    const unknown = keys.filter(
+      (k) => !ALLOWED_FRONTMATTER_KEYS.has(normalizeKey(k)),
+    );
     if (unknown.length > 0) {
       problems.push(
         `Unknown frontmatter fields: [${unknown.sort().join(', ')}]`,
