@@ -8,14 +8,6 @@ import {OpenApiSpecParser} from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
 import {describe, expect, it} from 'vitest';
 
-/** A schema `type` name that `openapi-types` does not admit. */
-function unnormalizedSchemaType(
-  type: string,
-): OpenAPIV3.NonArraySchemaObjectType {
-  // @ts-expect-error feeding sanitizeSchemaTypes a schema type name openapi-types rejects, which is what this fixture exists to pin.
-  return type;
-}
-
 /** Returns the resolved schema of `name` in `schema.properties`. */
 function propertySchema(
   schema: OpenAPIV3.SchemaObject,
@@ -155,7 +147,9 @@ describe('OpenApiSpecParser', () => {
   });
 
   it('should sanitize schema types', () => {
-    const spec: OpenAPIV3.Document = {
+    // Not an `OpenAPIV3.Document`: these `type` values are what the sanitizer
+    // exists to normalize, and `openapi-types` cannot express them.
+    const spec = {
       openapi: '3.0.0',
       info: {title: 'Sanitize API', version: '1.0.0'},
       paths: {
@@ -166,10 +160,10 @@ describe('OpenApiSpecParser', () => {
               content: {
                 'application/json': {
                   schema: {
-                    type: unnormalizedSchemaType('OBJECT'),
+                    type: 'OBJECT',
                     properties: {
-                      age: {type: unnormalizedSchemaType('INTEGER')},
-                      invalid: {type: unnormalizedSchemaType('unknown_type')},
+                      age: {type: 'INTEGER'},
+                      invalid: {type: 'unknown_type'},
                     },
                   },
                 },
@@ -273,5 +267,23 @@ describe('OpenApiSpecParser', () => {
     const postOp = parsed.find((o) => o.name === 'secure_post_op');
     expect(postOp).toBeDefined();
     expect(postOp?.authScheme?.type).toBe('oauth2');
+  });
+
+  it('should accept a spec typed as a plain record', () => {
+    // The shape a caller gets back from `JSON.parse` / `yaml.load`.
+    const spec: Record<string, unknown> = {
+      openapi: '3.0.0',
+      info: {title: 'Record API', version: '1.0.0'},
+      paths: {
+        '/items': {
+          get: {operationId: 'listItems', responses: {}},
+        },
+      },
+    };
+
+    const parser = new OpenApiSpecParser();
+    const parsed = parser.parse(spec);
+
+    expect(parsed.map((op) => op.name)).toEqual(['list_items']);
   });
 });
