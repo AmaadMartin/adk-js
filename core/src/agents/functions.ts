@@ -5,7 +5,7 @@
  */
 
 import {Content, createUserContent, FunctionCall, Part} from '@google/genai';
-import {isEmpty} from 'lodash-es';
+import {isEmpty, isPlainObject} from 'lodash-es';
 
 import {InvocationContext} from '../agents/invocation_context.js';
 import {
@@ -413,8 +413,15 @@ export async function handleFunctionCallList({
     }
 
     // TODO - b/425992518: state event polluting runtime, consider fix.
-    // Allow long running function to return None as response.
-    if (tool.isLongRunning && !functionResponse) {
+    // Allow long running function to return None as response. An empty object
+    // counts as no response too, matching adk-python's `not function_response`
+    // check. isPlainObject keeps an empty array out: an array is a result here
+    // and is wrapped as {results: []} below.
+    if (
+      tool.isLongRunning &&
+      (!functionResponse ||
+        (isPlainObject(functionResponse) && isEmpty(functionResponse)))
+    ) {
       continue;
     }
 
