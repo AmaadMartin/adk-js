@@ -9,8 +9,32 @@ import * as path from 'node:path';
 import {File} from '../code_executors/code_execution_utils.js';
 
 /**
+ * Upper bound on the candidate names tried when resolving a filename
+ * collision: the requested name, then `name_2` … `name_${this}`. Caps the
+ * syscalls one file can cost in a directory that already holds many
+ * same-named files.
+ */
+export const MAX_COLLISION_ATTEMPTS = 100;
+
+function isFileExistsError(e: unknown): boolean {
+  return (
+    typeof e === 'object' && e !== null && 'code' in e && e.code === 'EEXIST'
+  );
+}
+
+/**
  * Creates files with the given paths in the current working directory.
+ *
+ * The input `files` are never modified; the name each file was actually
+ * written under is reported only through the returned array.
+ *
  * @param files The files to materialize.
+ * @returns Copies of `files` with `name` set to the path actually written,
+ *     relative to `dir`.
+ * @throws If a name resolves outside `dir`, or if every one of the
+ *     {@link MAX_COLLISION_ATTEMPTS} candidate names for a file is taken.
+ *     Either throw happens mid-way: files materialized for earlier entries
+ *     stay on disk and are not rolled back.
  */
 export async function materializeFiles(
   files: File[],
@@ -30,42 +54,49 @@ export async function materializeFiles(
     const ext = path.extname(fullPath);
     const dirName = path.dirname(fullPath);
     const base = path.basename(fullPath, ext);
+    const content = Buffer.from(file.content, file.contentEncoding);
 
-    let finalPath = fullPath;
-    let counter = 2;
+    await fs.mkdir(dirName, {recursive: true});
 
-    while (true) {
+    let writtenPath: string | undefined;
+
+    for (let attempt = 0; attempt < MAX_COLLISION_ATTEMPTS; attempt++) {
+      const candidatePath =
+        attempt === 0
+          ? fullPath
+          : path.join(dirName, `${base}_${attempt + 1}${ext}`);
+
+      if (!candidatePath.startsWith(resolvedBaseDir)) {
+        throw new Error(
+          `Path traversal detected: ${file.name} resolves outside of ${dir}`,
+        );
+      }
+
       try {
-        await fs.access(finalPath);
-        // File exists, try next name
-        const newName = `${base}_${counter}${ext}`;
-        finalPath = path.join(dirName, newName);
-        // Update file.name to reflect the actual relative path
-        const originalDir = path.dirname(file.name);
-        file.name =
-          originalDir === '.' ? newName : path.join(originalDir, newName);
-        counter++;
-      } catch {
-        // File does not exist, safe to write
+        // 'wx' claims the name atomically, so a writer that lost the race gets
+        // EEXIST here instead of silently clobbering the winner. A directory
+        // occupying the name also reports EEXIST, so it is suffixed past.
+        await fs.writeFile(candidatePath, content, {flag: 'wx'});
+        writtenPath = candidatePath;
         break;
+      } catch (e: unknown) {
+        if (!isFileExistsError(e)) {
+          throw e;
+        }
       }
     }
 
-    if (!finalPath.startsWith(resolvedBaseDir)) {
+    if (writtenPath === undefined) {
       throw new Error(
-        `Path traversal detected: ${file.name} resolves outside of ${dir}`,
+        `Unable to materialize ${file.name}: all ${MAX_COLLISION_ATTEMPTS} ` +
+          `candidate names are taken in ${dir}. Clean the directory or ` +
+          `materialize into a different one.`,
       );
     }
 
-    await fs.mkdir(path.dirname(finalPath), {recursive: true});
-    await fs.writeFile(
-      finalPath,
-      Buffer.from(file.content, file.contentEncoding),
-    );
-
     createdFiles.push({
       ...file,
-      name: path.relative(dir, finalPath),
+      name: path.relative(dir, writtenPath),
     });
   }
 

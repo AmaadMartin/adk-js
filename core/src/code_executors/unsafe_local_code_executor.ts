@@ -178,9 +178,12 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
       const filePath = res.filePath;
       tempDir = res.tempDir;
 
-      if (params.codeExecutionInput.inputFiles) {
-        await materializeFiles(params.codeExecutionInput.inputFiles, tempDir);
-      }
+      // materializeFiles renames on collision and reports the final names only
+      // through its return value, so keep it to exclude them from the output
+      // scan below.
+      const materializedInputFiles = params.codeExecutionInput.inputFiles
+        ? await materializeFiles(params.codeExecutionInput.inputFiles, tempDir)
+        : [];
 
       let command = this.nodeCommandPath;
       let args = [filePath];
@@ -271,7 +274,7 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
           }
 
           // Skip input files
-          const isInputFile = params.codeExecutionInput.inputFiles?.some(
+          const isInputFile = materializedInputFiles.some(
             (f) => f.name === relativeFilePath,
           );
           if (isInputFile) {
