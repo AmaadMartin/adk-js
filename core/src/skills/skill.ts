@@ -48,9 +48,11 @@ export const FrontmatterSchema = z.preprocess(
       description: z.string().min(1).max(1024),
       license: z.string().optional(),
       compatibility: z.string().max(500).optional(),
-      // Each spelling is declared so that it is type-checked even when the
-      // preprocessor leaves it in place, i.e. when the author also wrote
-      // `allowedTools` directly.
+      // Every spelling that `normalizeKey` folds to `allowedTools` is declared
+      // here, so it stays type-checked even when the preprocessor leaves it in
+      // place, i.e. when the author also wrote `allowedTools` directly. Widen
+      // the fold and these must follow, or the new spelling rides `.loose()`
+      // through unchecked.
       'allowed-tools': z.string().optional(),
       allowed_tools: z.string().optional(),
       allowedTools: z.string().optional(),
