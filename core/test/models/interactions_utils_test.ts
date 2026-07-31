@@ -32,7 +32,7 @@ import {
 } from '../../src/models/interactions_utils.js';
 import {LlmRequest} from '../../src/models/llm_request.js';
 
-function createLlmRequest(overrides: Partial<LlmRequest> = {}): LlmRequest {
+function createLlmRequest(overrides: Partial<LlmRequest>): LlmRequest {
   return {contents: [], toolsDict: {}, liveConnectConfig: {}, ...overrides};
 }
 

@@ -59,21 +59,11 @@ export interface ReceivedStep {
  * A streamed step delta as received from the interactions API.
  */
 export interface ReceivedStepDelta extends ReceivedContent {
-  name?: string;
-  id?: string;
   arguments?: string;
-  thought_signature?: string;
   signature?: string;
 }
 
 export interface ExtendedInteraction extends Interactions.Interaction {
-  error?: Interactions.ErrorEvent.Error;
-}
-
-export interface ExtendedInteractionStatusUpdate extends Omit<
-  Interactions.InteractionStatusUpdate,
-  'error'
-> {
   error?: Interactions.ErrorEvent.Error;
 }
 
@@ -359,24 +349,11 @@ export function convertStepToParts(
   }
 
   switch (step.type) {
-    case 'model_output': {
-      const modelOutputStep = step as Interactions.ModelOutputStep;
-      const parts: Part[] = [];
-      if (modelOutputStep.content) {
-        for (const content of modelOutputStep.content) {
-          const part = convertMediaContentToPart(content);
-          if (part) {
-            parts.push(part);
-          }
-        }
-      }
-      return parts;
-    }
+    case 'model_output':
     case 'user_input': {
-      const userInputStep = step as Interactions.UserInputStep;
       const parts: Part[] = [];
-      if (userInputStep.content) {
-        for (const content of userInputStep.content) {
+      if (step.content) {
+        for (const content of step.content) {
           const part = convertMediaContentToPart(content);
           if (part) {
             parts.push(part);
@@ -386,27 +363,25 @@ export function convertStepToParts(
       return parts;
     }
     case 'function_call': {
-      const functionCallStep = step as ExtendedFunctionCallStep;
       const part: Part = {
         functionCall: {
-          id: functionCallStep.id,
-          name: functionCallStep.name,
-          args: functionCallStep.arguments || {},
+          id: step.id,
+          name: step.name,
+          args: step.arguments || {},
         },
       };
-      if (functionCallStep.signature) {
-        part.thoughtSignature = functionCallStep.signature;
+      if (step.signature) {
+        part.thoughtSignature = step.signature;
       }
       return [part];
     }
     case 'function_result': {
-      const functionResultStep = step as Interactions.FunctionResultStep;
-      const result = functionResultStep.result;
+      const result = step.result;
       return [
         {
           functionResponse: {
-            id: functionResultStep.call_id,
-            name: functionResultStep.name || '',
+            id: step.call_id,
+            name: step.name || '',
             response:
               typeof result === 'object' && result !== null
                 ? (result as Record<string, unknown>)
@@ -442,12 +417,11 @@ export function convertStepToParts(
       ];
     }
     case 'thought': {
-      const thoughtStep = step as Interactions.ThoughtStep;
       const part: Part = {
         thought: true,
       };
-      if (thoughtStep.signature) {
-        part.thoughtSignature = thoughtStep.signature;
+      if (step.signature) {
+        part.thoughtSignature = step.signature;
       }
       return [part];
     }
@@ -768,8 +742,7 @@ export function convertInteractionEventToLlmResponse(
       interactionId: interactionId,
     };
   } else if (eventType === 'interaction.status_update') {
-    const statusUpdate = event as unknown as ExtendedInteractionStatusUpdate;
-    const status = statusUpdate.status;
+    const status = event.status;
     if (status === 'completed' || status === 'requires_action') {
       return {
         content:
@@ -782,7 +755,7 @@ export function convertInteractionEventToLlmResponse(
         interactionId: interactionId,
       };
     } else if (status === 'failed') {
-      const error = statusUpdate.error;
+      const error = event.error;
       return {
         errorCode: error ? error.code : 'UNKNOWN_ERROR',
         errorMessage: error ? error.message : 'Unknown error',
@@ -936,13 +909,12 @@ export async function* generateContentViaInteractions(
 
     const aggregatedParts: Part[] = [];
     for await (const event of responses) {
-      const sseEvent = event as ExtendedInteractionSSEEvent;
-      const interactionId = extractStreamInteractionId(sseEvent);
+      const interactionId = extractStreamInteractionId(event);
       if (interactionId) {
         currentInteractionId = interactionId;
       }
       const llmResponse = convertInteractionEventToLlmResponse(
-        sseEvent,
+        event,
         aggregatedParts,
         currentInteractionId,
       );
