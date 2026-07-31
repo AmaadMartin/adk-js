@@ -70,16 +70,6 @@ export async function getGcpProjectId(
   }
 }
 
-async function getGcpAuthClient(
-  auth: GoogleAuth,
-): Promise<AuthClient | undefined> {
-  try {
-    return await auth.getClient();
-  } catch (_e: unknown) {
-    return undefined;
-  }
-}
-
 /**
  * Builds the channel credentials the OTLP exporter authenticates each export
  * RPC with.
@@ -138,7 +128,7 @@ export async function getGcpExporters(
 
   const metricReaders: MetricReader[] = [];
   if (enableMetrics) {
-    const authClient = await getGcpAuthClient(auth);
+    const authClient = await auth.getClient().catch(() => undefined);
     if (authClient) {
       metricReaders.push(createGcpMetricReader(authClient));
     } else {
