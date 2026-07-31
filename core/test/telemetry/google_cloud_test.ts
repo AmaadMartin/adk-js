@@ -12,7 +12,13 @@ import {
 } from '@google/adk';
 import {CallCredentials, credentials, Metadata} from '@grpc/grpc-js';
 import {OTLPMetricExporter} from '@opentelemetry/exporter-metrics-otlp-grpc';
-import {detectResources, Resource} from '@opentelemetry/resources';
+import {gcpDetector} from '@opentelemetry/resource-detector-gcp';
+import {
+  detectResources,
+  envDetector,
+  Resource,
+  serviceInstanceIdDetector,
+} from '@opentelemetry/resources';
 import {PeriodicExportingMetricReader} from '@opentelemetry/sdk-metrics';
 import {GoogleAuth, OAuth2Client} from 'google-auth-library';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
@@ -305,8 +311,9 @@ describe('getGcpResource', () => {
 
     const result = await getGcpResource();
 
+    // Order is the contract: each detector overrides the ones before it.
     expect(detectResources).toHaveBeenCalledWith({
-      detectors: [expect.any(Object), expect.any(Object), expect.any(Object)],
+      detectors: [serviceInstanceIdDetector, envDetector, gcpDetector],
     });
     expect(result).toEqual(mockDetectedResource);
   });

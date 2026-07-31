@@ -48,15 +48,6 @@ const GCP_PROJECT_ID_ATTRIBUTE = 'gcp.project_id';
 /** Cloud Monitoring rejects sample periods below five seconds. */
 const METRIC_EXPORT_INTERVAL_MS = 5000;
 
-async function resolveProjectId(auth: GoogleAuth): Promise<string | undefined> {
-  try {
-    const projectId = await auth.getProjectId();
-    return projectId || undefined;
-  } catch (_e: unknown) {
-    return undefined;
-  }
-}
-
 /**
  * Resolves the GCP project from Application Default Credentials.
  *
@@ -64,10 +55,19 @@ async function resolveProjectId(auth: GoogleAuth): Promise<string | undefined> {
  * the resource, because the Telemetry API takes the destination project as a
  * resource attribute rather than an exporter argument.
  *
+ * @param auth credentials to resolve the project from, defaulting to
+ *   Application Default Credentials.
  * @returns the project id, or undefined when it cannot be determined.
  */
-export function getGcpProjectId(): Promise<string | undefined> {
-  return resolveProjectId(new GoogleAuth());
+export async function getGcpProjectId(
+  auth: GoogleAuth = new GoogleAuth(),
+): Promise<string | undefined> {
+  try {
+    const projectId = await auth.getProjectId();
+    return projectId || undefined;
+  } catch (_e: unknown) {
+    return undefined;
+  }
 }
 
 async function getGcpAuthClient(
@@ -130,7 +130,7 @@ export async function getGcpExporters(
   } = config;
 
   const auth = new GoogleAuth();
-  const projectId = await resolveProjectId(auth);
+  const projectId = await getGcpProjectId(auth);
   if (!projectId) {
     logger.warn(GCP_PROJECT_ERROR_MESSAGE);
     return {};
