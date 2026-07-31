@@ -294,24 +294,21 @@ export class InvocationContext {
   /**
    * Sets the state of an agent in this invocation.
    *
-   * * If `endOfAgent` is true, sets the end-of-agent flag and clears any
-   *   recorded state.
-   * * Otherwise, if `agentState` is given, records it and resets the
+   * * If `options.endOfAgent` is true, sets the end-of-agent flag and clears
+   *   any recorded state. `options.agentState` is ignored in that case.
+   * * Otherwise, if `options.agentState` is given, records it and resets the
    *   end-of-agent flag to false.
    * * Otherwise, clears both, allowing the agent to re-run.
    *
    * @param agentName The name of the agent.
-   * @param options.agentState The state of the agent. Ignored when
-   *   `endOfAgent` is true.
-   * @param options.endOfAgent Whether the agent has finished running.
+   * @param options The checkpoint to record, and whether the agent has
+   *   finished running.
    */
   setAgentState(
     agentName: string,
-    {
-      agentState,
-      endOfAgent = false,
-    }: {agentState?: BaseAgentState; endOfAgent?: boolean} = {},
+    options: {agentState?: BaseAgentState; endOfAgent?: boolean} = {},
   ): void {
+    const {agentState, endOfAgent = false} = options;
     if (endOfAgent) {
       this.endOfAgents[agentName] = true;
       delete this.agentStates[agentName];
