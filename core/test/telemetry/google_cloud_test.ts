@@ -123,6 +123,23 @@ describe('getGcpExporters', () => {
     },
   );
 
+  it('should construct no exporters when both flags are disabled', async () => {
+    const mockAuth = {
+      getProjectId: vi.fn().mockResolvedValue('test-project'),
+    };
+    vi.mocked(GoogleAuth).mockImplementation(
+      () => mockAuth as unknown as GoogleAuth,
+    );
+
+    const result = await getGcpExporters({});
+
+    expect(result).toEqual({
+      spanProcessors: [],
+      metricReaders: [],
+      logRecordProcessors: [],
+    });
+  });
+
   it('should return empty hooks when GoogleAuth fails to get project ID', async () => {
     const mockAuth = {
       getProjectId: vi.fn().mockRejectedValue(new Error('Auth error')),
