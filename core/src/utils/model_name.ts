@@ -97,9 +97,11 @@ function isGeminiEapModel(modelName: string): boolean {
 /**
  * Check if the model is a Gemini EAP or a Gemini 2.0+ model.
  *
- * EAP Gemini models do not encode a numeric version, so they are matched by
- * naming convention first (see {@link isGeminiEapModel}). Otherwise the model
- * name is parsed as a version and matches when the major version is >= 2.
+ * EAP Gemini models do not encode a numeric version, so they are matched
+ * first by their naming convention — `gemini-<variant>-early-exp` with an
+ * optional numeric suffix, e.g. `gemini-flash-early-exp` or
+ * `gemini-flash-early-exp3`. Otherwise the model name is parsed as a version
+ * and matches when the major version is >= 2.
  *
  * @param modelString Either a simple model name or path - based model name
  * @return true if it's a Gemini EAP model or a Gemini 2.0+ model, false
