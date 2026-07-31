@@ -9,12 +9,13 @@ import {
   Context,
   createSession,
   InvocationContext,
+  isComputerUseTool,
   LlmAgent,
   LlmRequest,
   PluginManager,
   ToolConfirmation,
 } from '@google/adk';
-import {beforeEach, describe, expect, it} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 function createToolContext(): Context {
   const invocationContext = new InvocationContext({
@@ -31,6 +32,10 @@ describe('ComputerUseTool', () => {
   let context: Context;
   beforeEach(() => {
     context = createToolContext();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it('validates screen sizes during initialization', () => {
@@ -233,7 +238,7 @@ describe('ComputerUseTool', () => {
     expect(llmRequest.toolsDict).toEqual({});
   });
 
-  it('reports a screenshot that cannot be base64 encoded', async () => {
+  it('returns a result with a non-binary screenshot untouched', async () => {
     const tool = new ComputerUseTool({
       func: async () => {
         return {screenshot: 123, url: 'https://example.com'};
@@ -241,10 +246,94 @@ describe('ComputerUseTool', () => {
       screenSize: [1920, 1080],
     });
     const response = await tool.runAsync({args: {}, toolContext: context});
+    expect(response).toEqual({screenshot: 123, url: 'https://example.com'});
+  });
+
+  it('never encodes a string screenshot as if it were image bytes', async () => {
+    const tool = new ComputerUseTool({
+      func: async () => {
+        return {screenshot: 'not-bytes', url: 'https://example.com'};
+      },
+      screenSize: [1920, 1080],
+    });
+
+    const response = await tool.runAsync({args: {}, toolContext: context});
+
     expect(response).toEqual({
-      error: expect.stringContaining('Could not base64 encode screenshot'),
+      screenshot: 'not-bytes',
       url: 'https://example.com',
     });
+    expect(response).not.toHaveProperty('image');
+  });
+
+  it('returns a state carrying an unknown key untouched', async () => {
+    const tool = new ComputerUseTool({
+      func: async () => {
+        return {url: 'https://example.com', extra: 1};
+      },
+      screenSize: [1920, 1080],
+    });
+
+    const response = await tool.runAsync({args: {}, toolContext: context});
+
+    expect(response).toEqual({url: 'https://example.com', extra: 1});
+  });
+
+  it('omits the image key for a state with no screenshot', async () => {
+    const tool = new ComputerUseTool({
+      func: async () => ({url: 'https://example.com'}),
+      screenSize: [1920, 1080],
+    });
+
+    const response = await tool.runAsync({args: {}, toolContext: context});
+
+    expect(response).toEqual({url: 'https://example.com'});
+  });
+
+  it('encodes the screenshot in a browser runtime, where Buffer is absent', async () => {
+    // core is published for the browser too ("browser" in core/package.json),
+    // so the screenshot encoder may not reach for a Node global.
+    vi.stubGlobal('window', {btoa});
+    vi.stubGlobal('Buffer', undefined);
+
+    const tool = new ComputerUseTool({
+      func: async () => ({
+        screenshot: new Uint8Array([72, 101, 108, 108, 111]),
+        url: 'https://example.com',
+      }),
+      screenSize: [1920, 1080],
+    });
+
+    const response = await tool.runAsync({args: {}, toolContext: context});
+
+    expect(response).toEqual({
+      image: {mimetype: 'image/png', data: 'SGVsbG8='},
+      url: 'https://example.com',
+    });
+  });
+
+  it('identifies computer use tools with isComputerUseTool', () => {
+    const tool = new ComputerUseTool({
+      func: async () => ({}),
+      screenSize: [1920, 1080],
+      name: 'click_at',
+    });
+
+    expect(isComputerUseTool(tool)).toBe(true);
+    expect(isComputerUseTool({name: 'click_at'})).toBe(false);
+    expect(isComputerUseTool(null)).toBe(false);
+  });
+
+  it('exposes the screen sizes the adapter hook rebuilds a tool from', () => {
+    const tool = new ComputerUseTool({
+      func: async () => ({}),
+      screenSize: [2560, 1440],
+      virtualScreenSize: [800, 600],
+      name: 'click_at',
+    });
+
+    expect(tool.screenSize).toEqual([2560, 1440]);
+    expect(tool.virtualScreenSize).toEqual([800, 600]);
   });
 
   it('handles non-object response with confirmation', async () => {
