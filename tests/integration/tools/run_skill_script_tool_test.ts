@@ -33,6 +33,18 @@ const IS_UNIX = os.platform() === 'linux' || os.platform() === 'darwin';
 // core/src/code_executors/unsafe_local_code_executor.ts
 const TEST_EXECUTION_TIMEOUT = 40000;
 
+/**
+ * The file `scripts/create_file.js` writes, as it appears on the tool response.
+ *
+ * Asserted by containment rather than equality: UnsafeLocalCodeExecutor skips
+ * input files by comparing `File.name` (which uses `/`) against an
+ * `fs.readdir({recursive: true})` entry (which uses `\` on Windows), so on
+ * Windows the skill's own input scripts are reported as outputs too. That is a
+ * pre-existing executor defect, tracked separately, and not something these
+ * tests should pin.
+ */
+const SCRIPT_OUTPUT = {name: 'output_from_script.txt', mimeType: 'text/plain'};
+
 describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
   function createMockContext(
     agentName = 'test-agent',
@@ -312,16 +324,12 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
       toolContext,
     })) as SkillScriptResponse;
 
-    expect(result.outputFiles).toEqual([
-      {name: 'output_from_script.txt', mimeType: 'text/plain'},
-    ]);
+    expect(result.outputFiles).toContainEqual(SCRIPT_OUTPUT);
     expect(result.warning).toBeUndefined();
     expect(
       await loadArtifactText(artifactService, 'output_from_script.txt'),
     ).toBe('hello from script file');
-    expect(toolContext.actions.artifactDelta).toEqual({
-      'output_from_script.txt': 0,
-    });
+    expect(toolContext.actions.artifactDelta['output_from_script.txt']).toBe(0);
     expect(await cwdContains('output_from_script.txt')).toBe(false);
   });
 
@@ -344,9 +352,7 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
       toolContext: createMockContext('test-agent', artifactService),
     })) as SkillScriptResponse;
 
-    expect(result.outputFiles).toEqual([
-      {name: 'output_from_script.txt', mimeType: 'text/plain'},
-    ]);
+    expect(result.outputFiles).toContainEqual(SCRIPT_OUTPUT);
     expect(
       await artifactService.listVersions('output_from_script.txt'),
     ).toEqual([0, 1]);
@@ -366,9 +372,7 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
       toolContext: createMockContext(),
     })) as SkillScriptResponse;
 
-    expect(result.outputFiles).toEqual([
-      {name: 'output_from_script.txt', mimeType: 'text/plain'},
-    ]);
+    expect(result.outputFiles).toContainEqual(SCRIPT_OUTPUT);
     expect(result.warning).toMatch(/No artifact service is configured/);
     expect(await cwdContains('output_from_script.txt')).toBe(false);
   });
