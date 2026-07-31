@@ -20,8 +20,8 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import {describe, expect, it} from 'vitest';
 import {
+  createSessionArtifactService,
   loadArtifactText,
-  SessionScopedInMemoryArtifactService,
 } from './artifact_service_test_utils.js';
 
 /** Content written by the output-file scripts under test. */
@@ -167,7 +167,7 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
     const executor = new UnsafeLocalCodeExecutor();
     const toolset = new SkillToolset([], {codeExecutor: executor});
     const tool = new RunSkillInlineScriptTool(toolset);
-    const artifactService = new SessionScopedInMemoryArtifactService();
+    const artifactService = createSessionArtifactService();
     const toolContext = createMockContext('test-agent', artifactService);
     const testFileName = `test_output_${Date.now()}.txt`;
 
@@ -251,7 +251,7 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
     const executor = new UnsafeLocalCodeExecutor();
     const toolset = new SkillToolset([], {codeExecutor: executor});
     const tool = new RunSkillInlineScriptTool(toolset);
-    const artifactService = new SessionScopedInMemoryArtifactService();
+    const artifactService = createSessionArtifactService();
     const testFileName = `test_inline_output_${Date.now()}.txt`;
     const args = {
       script_content: writeFileScript(testFileName),

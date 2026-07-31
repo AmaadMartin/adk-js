@@ -10,7 +10,11 @@ import {File} from '../code_executors/code_execution_utils.js';
 
 /**
  * Creates files with the given paths under `dir`.
- * @param files The files to materialize.
+ *
+ * A name that collides with an existing file is written with a `_2`, `_3`, …
+ * suffix, and `file.name` is updated in place to the name actually used.
+ *
+ * @param files The files to materialize. Mutated: see above.
  * @param dir The directory to create the files in. Required: an implicit
  *     default would write to whichever directory the host process happens to
  *     be running in.
@@ -18,9 +22,8 @@ import {File} from '../code_executors/code_execution_utils.js';
 export async function materializeFiles(
   files: File[],
   dir: string,
-): Promise<File[]> {
+): Promise<void> {
   const resolvedBaseDir = path.resolve(dir);
-  const createdFiles: File[] = [];
   for (const file of files) {
     const fullPath = path.resolve(dir, file.name);
 
@@ -65,14 +68,7 @@ export async function materializeFiles(
       finalPath,
       Buffer.from(file.content, file.contentEncoding),
     );
-
-    createdFiles.push({
-      ...file,
-      name: path.relative(dir, finalPath),
-    });
   }
-
-  return createdFiles;
 }
 
 export const EXTENSION_TO_MIME_TYPE: Record<string, string> = {

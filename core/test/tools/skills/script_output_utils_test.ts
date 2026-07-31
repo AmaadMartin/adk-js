@@ -7,6 +7,7 @@
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import {Context} from '../../../src/agents/context.js';
 import {InvocationContext} from '../../../src/agents/invocation_context.js';
+import {LlmAgent} from '../../../src/agents/llm_agent.js';
 import {InMemoryArtifactService} from '../../../src/artifacts/in_memory_artifact_service.js';
 import {ScopedArtifactService} from '../../../src/artifacts/scoped_artifact_service.js';
 import {SessionArtifactService} from '../../../src/artifacts/session_artifact_service.js';
@@ -14,6 +15,8 @@ import {
   File,
   FileContentEncoding,
 } from '../../../src/code_executors/code_execution_utils.js';
+import {PluginManager} from '../../../src/plugins/plugin_manager.js';
+import {createSession} from '../../../src/sessions/session.js';
 import {saveScriptOutputs} from '../../../src/tools/skill/script_output_utils.js';
 import {logger} from '../../../src/utils/logger.js';
 
@@ -28,11 +31,13 @@ function createSessionArtifactService(): SessionArtifactService {
 
 function createContext(artifactService?: SessionArtifactService): Context {
   return new Context({
-    invocationContext: {
-      session: {state: {}},
-      agent: {name: 'test-agent'},
+    invocationContext: new InvocationContext({
+      invocationId: 'test-invocation',
+      agent: new LlmAgent({name: 'test_agent'}),
+      session: createSession({id: 'test-session', appName: 'test-app'}),
+      pluginManager: new PluginManager(),
       artifactService,
-    } as unknown as InvocationContext,
+    }),
   });
 }
 
@@ -76,6 +81,19 @@ describe('saveScriptOutputs', () => {
     expect(response).toEqual({stdout: 'done', stderr: '', outputFiles: []});
     expect(await artifactService.listArtifactKeys()).toEqual([]);
     expect(toolContext.actions.artifactDelta).toEqual({});
+  });
+
+  it('does not warn about a missing artifact service when the script produced no files', async () => {
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+    const response = await saveScriptOutputs(createContext(), {
+      stdout: 'done',
+      stderr: '',
+      outputFiles: [],
+    });
+
+    expect(response).toEqual({stdout: 'done', stderr: '', outputFiles: []});
+    expect(warnSpy).not.toHaveBeenCalled();
   });
 
   it('saves each output file to the artifact service and returns only names and mime types', async () => {

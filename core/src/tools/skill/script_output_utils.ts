@@ -7,7 +7,6 @@
 import {Context} from '../../agents/context.js';
 import {
   CodeExecutionResult,
-  File,
   toBase64Content,
 } from '../../code_executors/code_execution_utils.js';
 import {logger} from '../../utils/logger.js';
@@ -48,25 +47,19 @@ export interface SkillScriptResponse {
  */
 export async function saveScriptOutputs(
   toolContext: Context,
-  result: CodeExecutionResult,
+  {stdout, stderr, outputFiles}: CodeExecutionResult,
 ): Promise<SkillScriptResponse> {
-  const {stdout, stderr, outputFiles} = result;
+  const names = outputFiles.map(({name, mimeType}) => ({name, mimeType}));
 
-  if (outputFiles.length === 0) {
-    return {stdout, stderr, outputFiles: []};
-  }
-
-  if (!toolContext.invocationContext.artifactService) {
+  if (
+    outputFiles.length > 0 &&
+    !toolContext.invocationContext.artifactService
+  ) {
     const warning =
       `No artifact service is configured; ${outputFiles.length} output ` +
       `file(s) produced by the script were discarded.`;
     logger.warn(warning);
-    return {
-      stdout,
-      stderr,
-      outputFiles: outputFiles.map(describeFile),
-      warning,
-    };
+    return {stdout, stderr, outputFiles: names, warning};
   }
 
   const outcomes = await Promise.allSettled(
@@ -80,14 +73,14 @@ export async function saveScriptOutputs(
   const saved: SavedOutputFile[] = [];
   const failed: string[] = [];
   outcomes.forEach((outcome, index) => {
-    const file = outputFiles[index];
     if (outcome.status === 'fulfilled') {
-      saved.push(describeFile(file));
+      saved.push(names[index]);
       return;
     }
-    failed.push(file.name);
+    const {name} = names[index];
+    failed.push(name);
     logger.warn(
-      `Failed to save output file '${file.name}' to the artifact service.`,
+      `Failed to save output file '${name}' to the artifact service.`,
       outcome.reason,
     );
   });
@@ -104,8 +97,4 @@ export async function saveScriptOutputs(
       `Failed to save ${failed.length} of ${outputFiles.length} output ` +
       `file(s) to the artifact service: ${failed.join(', ')}.`,
   };
-}
-
-function describeFile({name, mimeType}: File): SavedOutputFile {
-  return {name, mimeType};
 }

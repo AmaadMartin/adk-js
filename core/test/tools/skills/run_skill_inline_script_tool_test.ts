@@ -16,13 +16,13 @@ import {
   LlmAgent,
   RunSkillInlineScriptErrorCode,
   RunSkillInlineScriptTool,
+  ScopedArtifactService,
   SessionArtifactService,
   SkillScriptResponse,
   SkillToolset,
 } from '@google/adk';
 import * as fs from 'node:fs/promises';
 import {describe, expect, it} from 'vitest';
-import {ScopedArtifactService} from '../../../src/artifacts/scoped_artifact_service.js';
 import {ToolConfirmation} from '../../../src/tools/tool_confirmation.js';
 
 class MockCodeExecutor extends BaseCodeExecutor {

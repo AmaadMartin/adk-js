@@ -15,6 +15,7 @@ import {
   InvocationContext,
   LlmAgent,
   RunSkillScriptTool,
+  ScopedArtifactService,
   SessionArtifactService,
   Skill,
   SkillScriptResponse,
@@ -22,7 +23,6 @@ import {
 } from '@google/adk';
 import * as fs from 'node:fs/promises';
 import {describe, expect, it} from 'vitest';
-import {ScopedArtifactService} from '../../../src/artifacts/scoped_artifact_service.js';
 
 class MockCodeExecutor extends BaseCodeExecutor {
   mockResult: CodeExecutionResult = {

@@ -20,8 +20,8 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import {describe, expect, it} from 'vitest';
 import {
+  createSessionArtifactService,
   loadArtifactText,
-  SessionScopedInMemoryArtifactService,
 } from './artifact_service_test_utils.js';
 
 const IS_WINDOWS = os.platform() === 'win32';
@@ -40,8 +40,8 @@ const TEST_EXECUTION_TIMEOUT = 40000;
  * input files by comparing `File.name` (which uses `/`) against an
  * `fs.readdir({recursive: true})` entry (which uses `\` on Windows), so on
  * Windows the skill's own input scripts are reported as outputs too. That is a
- * pre-existing executor defect, tracked separately, and not something these
- * tests should pin.
+ * separate executor defect, so these tests pin this tool's handling of the
+ * script's output rather than the executor's file count.
  */
 const SCRIPT_OUTPUT = {name: 'output_from_script.txt', mimeType: 'text/plain'};
 
@@ -313,7 +313,7 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
     const executor = new UnsafeLocalCodeExecutor();
     const toolset = new SkillToolset([testSkill], {codeExecutor: executor});
     const tool = new RunSkillScriptTool(toolset);
-    const artifactService = new SessionScopedInMemoryArtifactService();
+    const artifactService = createSessionArtifactService();
     const toolContext = createMockContext('test-agent', artifactService);
 
     const result = (await tool.runAsync({
@@ -337,7 +337,7 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
     const executor = new UnsafeLocalCodeExecutor();
     const toolset = new SkillToolset([testSkill], {codeExecutor: executor});
     const tool = new RunSkillScriptTool(toolset);
-    const artifactService = new SessionScopedInMemoryArtifactService();
+    const artifactService = createSessionArtifactService();
     const args = {
       skill_name: 'test-skill',
       script_path: 'scripts/create_file.js',

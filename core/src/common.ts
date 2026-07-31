@@ -73,6 +73,7 @@ export type {
   SaveArtifactRequest,
 } from './artifacts/base_artifact_service.js';
 export {InMemoryArtifactService} from './artifacts/in_memory_artifact_service.js';
+export {ScopedArtifactService} from './artifacts/scoped_artifact_service.js';
 export type {
   SessionArtifactService,
   SessionLoadArtifactRequest,

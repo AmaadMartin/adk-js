@@ -90,7 +90,7 @@ describe('Agent with skills that generates JS script and runs it locally', () =>
         },
       );
 
-      let response = await sendInput(
+      const response = await sendInput(
         childProcess,
         'Let`s create algorithmic art.\n',
       );
@@ -98,8 +98,8 @@ describe('Agent with skills that generates JS script and runs it locally', () =>
         'I have created an original algorithmic art piece titled **"Ephemeral Entanglement"**.\n\nFollowing the generative art movement philosophy, I\'ve generated three files for you:\n\n1.  **`ephemeral_entanglement.md`**: The algorithmic philosophy detailing the conceptual foundation of this piece. It explores the delicate dance between deterministic forces and stochastic drift, visualizing unseen connections in a dynamic system.\n2.  **`index.html`**: The interactive viewer for the generative art. It includes a user interface to adjust parameters like particle count, connection radius, and noise scale, allowing you to explore the algorithm\'s emergent behavior.\n3.  **`sketch.js`**: The meticulously crafted p5.js algorithm that brings the philosophy to life. It uses layered Perlin noise to drive a flow field, guiding particles that form ephemeral, glowing bonds when they come into proximity. \n\nYou can view the art by opening the `index.html` file in your web browser. Let the algorithmic dance begin!',
       );
 
-      response = await sendInput(childProcess, 'exit\n');
-      expect(response.toString()).toContain('');
+      // Shut the CLI down so the session's artifacts are fully flushed.
+      await sendInput(childProcess, 'exit\n');
 
       // The script's output belongs to the session, not to the directory the
       // agent process happens to be running in.
