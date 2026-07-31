@@ -8,8 +8,7 @@
  * Reports whether the ambient environment can authenticate
  * `new Gemini({model})` with no explicit `apiKey`/`vertexai`/`project`/
  * `location`, mirroring the branch in `geminiInitParams`. Note that
- * `GOOGLE_CLOUD_PROJECT` alone satisfies neither path. Call it — do not
- * evaluate at import time — so a test file's `loadE2eEnv()` has run first.
+ * `GOOGLE_CLOUD_PROJECT` alone satisfies neither path.
  */
 export function hasModelCredentials(): boolean {
   const useVertexAi = ['true', '1'].includes(

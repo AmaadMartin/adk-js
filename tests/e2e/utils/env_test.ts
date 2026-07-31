@@ -7,6 +7,7 @@
 import * as dotenv from 'dotenv';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import {fileURLToPath} from 'node:url';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 
 vi.mock('node:fs', async (importOriginal) => {
@@ -19,8 +20,9 @@ vi.mock('dotenv', () => {
   return {config, default: {config}};
 });
 
-/** Path tail of candidate 1, spelled with the platform separator. */
-const CANONICAL_SUFFIX = path.join('tests', 'e2e', '.env');
+const UTILS_DIR = path.dirname(fileURLToPath(import.meta.url));
+const E2E_ENV = path.resolve(UTILS_DIR, '..', '.env');
+const ROOT_ENV = path.resolve(UTILS_DIR, '..', '..', '..', '.env');
 
 /**
  * Runs the loader with `fs.existsSync` answering `exists`, and reports the
@@ -50,44 +52,30 @@ describe('loadE2eEnv', () => {
   });
 
   it('probes tests/e2e/.env then the repo root, and loads neither when absent', async () => {
-    const probed = await probe(() => false);
-
-    expect(probed).toHaveLength(2);
-    expect(probed[0].endsWith(CANONICAL_SUFFIX)).toBe(true);
-    expect(path.basename(probed[1])).toBe('.env');
-    // The repo root is exactly the two directories above tests/e2e.
-    expect(
-      path.relative(path.dirname(probed[0]), path.dirname(probed[1])),
-    ).toBe(path.join('..', '..'));
+    expect(await probe(() => false)).toEqual([E2E_ENV, ROOT_ENV]);
     expect(dotenv.config).not.toHaveBeenCalled();
   });
 
   it('loads tests/e2e/.env and stops there when it exists', async () => {
-    const probed = await probe((candidate) =>
-      candidate.endsWith(CANONICAL_SUFFIX),
-    );
-
-    expect(probed).toHaveLength(1);
+    expect(await probe((candidate) => candidate === E2E_ENV)).toEqual([
+      E2E_ENV,
+    ]);
     expect(dotenv.config).toHaveBeenCalledTimes(1);
-    expect(dotenv.config).toHaveBeenCalledWith({path: probed[0]});
+    expect(dotenv.config).toHaveBeenCalledWith({path: E2E_ENV});
   });
 
   it('falls back to the repo root .env when tests/e2e/.env is absent', async () => {
-    const probed = await probe(
-      (candidate) => !candidate.endsWith(CANONICAL_SUFFIX),
-    );
-
-    expect(probed).toHaveLength(2);
+    expect(await probe((candidate) => candidate === ROOT_ENV)).toEqual([
+      E2E_ENV,
+      ROOT_ENV,
+    ]);
     expect(dotenv.config).toHaveBeenCalledTimes(1);
-    expect(dotenv.config).toHaveBeenCalledWith({path: probed[1]});
+    expect(dotenv.config).toHaveBeenCalledWith({path: ROOT_ENV});
   });
 
   it('reads only tests/e2e/.env when both candidates exist', async () => {
-    const probed = await probe(() => true);
-
-    expect(probed).toHaveLength(1);
-    expect(probed[0].endsWith(CANONICAL_SUFFIX)).toBe(true);
+    expect(await probe(() => true)).toEqual([E2E_ENV]);
     expect(dotenv.config).toHaveBeenCalledTimes(1);
-    expect(dotenv.config).toHaveBeenCalledWith({path: probed[0]});
+    expect(dotenv.config).toHaveBeenCalledWith({path: E2E_ENV});
   });
 });
