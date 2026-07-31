@@ -5,10 +5,11 @@
  */
 
 import {Context} from '../../agents/context.js';
+import {base64Encode} from '../../utils/env_aware_utils.js';
 import {experimental} from '../../utils/experimental.js';
 import {logger} from '../../utils/logger.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
-import {ComputerState} from './base_computer.js';
+import {ComputerState, isComputerState} from './base_computer.js';
 
 /**
  * The wrapped computer method a {@link ComputerUseTool} invokes.
@@ -38,13 +39,24 @@ const COORDINATE_AXIS_BY_ARG = {
 } as const;
 
 /**
- * Whether a computer method returned a {@link ComputerState}.
+ * A unique symbol to identify ADK computer use tools.
  */
-function isComputerState(value: unknown): value is ComputerState {
+const COMPUTER_USE_TOOL_SIGNATURE_SYMBOL = Symbol.for(
+  'google.adk.computerUseTool',
+);
+
+/**
+ * Type guard to check if an object is a {@link ComputerUseTool}.
+ *
+ * @param obj The object to check.
+ * @returns True if the object is a `ComputerUseTool`, false otherwise.
+ */
+export function isComputerUseTool(obj: unknown): obj is ComputerUseTool {
   return (
-    typeof value === 'object' &&
-    value !== null &&
-    ('screenshot' in value || 'url' in value)
+    typeof obj === 'object' &&
+    obj !== null &&
+    COMPUTER_USE_TOOL_SIGNATURE_SYMBOL in obj &&
+    obj[COMPUTER_USE_TOOL_SIGNATURE_SYMBOL] === true
   );
 }
 
@@ -87,17 +99,12 @@ function toToolResponse(state: ComputerState): Record<string, unknown> {
   const response: Record<string, unknown> = {};
 
   if (state.screenshot) {
-    try {
-      response['image'] = {
-        mimetype: 'image/png',
-        data: Buffer.from(state.screenshot).toString('base64'),
-      };
-    } catch (e) {
-      // Surface the failure instead of returning a success with no screenshot,
-      // which the model cannot distinguish from a blank screen.
-      logger.warn(`Could not base64 encode screenshot. ${e}`);
-      response['error'] = `Could not base64 encode screenshot: ${e}`;
-    }
+    // base64Encode, not Buffer: core is also published for the browser via
+    // index_web.ts, where Buffer is not defined.
+    response['image'] = {
+      mimetype: 'image/png',
+      data: base64Encode(state.screenshot),
+    };
   }
 
   if (state.url) {
@@ -109,9 +116,15 @@ function toToolResponse(state: ComputerState): Record<string, unknown> {
 
 @experimental
 export class ComputerUseTool extends BaseTool {
-  private readonly screenSize: [number, number];
-  private readonly coordinateSpace: [number, number];
-  private readonly computerFunc: ComputerFunc;
+  /** A unique symbol to identify ADK computer use tools. */
+  readonly [COMPUTER_USE_TOOL_SIGNATURE_SYMBOL] = true;
+
+  /** Real screen size in pixels, as `[width, height]`. */
+  readonly screenSize: [number, number];
+  /** Virtual coordinate space the model reports coordinates in. */
+  readonly virtualScreenSize: [number, number];
+  /** The wrapped computer method this tool invokes. */
+  readonly func: ComputerFunc;
 
   constructor(options: {
     func: ComputerFunc;
@@ -129,15 +142,15 @@ export class ComputerUseTool extends BaseTool {
       description: `Computer control function: ${name}`,
     });
 
-    this.computerFunc = options.func;
+    this.func = options.func;
     this.screenSize = options.screenSize;
-    this.coordinateSpace =
+    this.virtualScreenSize =
       options.virtualScreenSize ?? DEFAULT_VIRTUAL_SCREEN_SIZE;
 
     // The tuple arity is enforced by the type; only the values need checking.
     for (const [sizeName, size] of [
       ['screenSize', this.screenSize],
-      ['virtualScreenSize', this.coordinateSpace],
+      ['virtualScreenSize', this.virtualScreenSize],
     ] as const) {
       if (size[0] <= 0 || size[1] <= 0) {
         throw new Error(`${sizeName} dimensions must be positive`);
@@ -151,7 +164,7 @@ export class ComputerUseTool extends BaseTool {
         `${argName} coordinate must be numeric, got ${typeof value}`,
       );
     const norm = Math.floor(
-      (value / this.coordinateSpace[axis]) * this.screenSize[axis],
+      (value / this.virtualScreenSize[axis]) * this.screenSize[axis],
     );
     return Math.max(0, Math.min(norm, this.screenSize[axis] - 1));
   }
@@ -190,7 +203,7 @@ export class ComputerUseTool extends BaseTool {
 
       // The toolset wraps each computer method to accept the argument object,
       // so it is passed through unchanged.
-      const result = await this.computerFunc(callArgs, toolContext);
+      const result = await this.func(callArgs, toolContext);
 
       let response: unknown = isComputerState(result)
         ? toToolResponse(result)
