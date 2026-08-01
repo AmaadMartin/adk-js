@@ -86,18 +86,16 @@ export function createEventActions(
 /**
  * Returns whether anything was recorded on the given actions.
  *
- * A freshly created {@link EventActions} carries empty dictionaries and unset
- * scalars; this reports true once any of them has been populated.
+ * {@link createEventActions} defines the baseline: empty dictionaries and
+ * unset scalars. This reports true once any field departs from it, which is
+ * deliberately field-agnostic — enumerating the fields by hand would silently
+ * start dropping whichever field is added to {@link EventActions} next.
  */
 export function hasRecordedActions(actions: EventActions): boolean {
-  return (
-    !isEmpty(actions.stateDelta) ||
-    !isEmpty(actions.artifactDelta) ||
-    !isEmpty(actions.requestedAuthConfigs) ||
-    !isEmpty(actions.requestedToolConfirmations) ||
-    actions.skipSummarization !== undefined ||
-    actions.transferToAgent !== undefined ||
-    actions.escalate !== undefined
+  const recorded: Array<EventActions[keyof EventActions]> =
+    Object.values(actions);
+  return recorded.some((value) =>
+    typeof value === 'object' ? !isEmpty(value) : value !== undefined,
   );
 }
 
