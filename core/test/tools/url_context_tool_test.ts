@@ -4,16 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  Context,
-  createSession,
-  InvocationContext,
-  LlmAgent,
-  LlmRequest,
-  PluginManager,
-  URL_CONTEXT,
-  UrlContextTool,
-} from '@google/adk';
+import {LlmRequest, URL_CONTEXT, UrlContextTool} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 const MODEL_ID_CHECK_ENV_VAR = 'ADK_DISABLE_GEMINI_MODEL_ID_CHECK';
@@ -26,17 +17,6 @@ function makeRequest(model?: string, tools = []): LlmRequest {
     toolsDict: {},
     liveConnectConfig: {},
   } as unknown as LlmRequest;
-}
-
-function makeToolContext(): Context {
-  return new Context({
-    invocationContext: new InvocationContext({
-      invocationId: 'url-context-test',
-      agent: new LlmAgent({name: 'url_context_test_agent'}),
-      session: createSession({id: 'test-session', appName: 'test-app'}),
-      pluginManager: new PluginManager([]),
-    }),
-  });
 }
 
 describe('UrlContextTool', () => {
@@ -130,7 +110,7 @@ describe('UrlContextTool', () => {
       const req = makeRequest('internal-model-v1');
       await tool.processLlmRequest({
         llmRequest: req,
-        toolContext: makeToolContext(),
+        toolContext: {} as never,
       });
 
       expect(req.config!.tools).toEqual([{urlContext: {}}]);
@@ -143,7 +123,7 @@ describe('UrlContextTool', () => {
       await expect(
         tool.processLlmRequest({
           llmRequest: req,
-          toolContext: makeToolContext(),
+          toolContext: {} as never,
         }),
       ).rejects.toThrow(
         'URL context tool requires Gemini 2 or above, but got gemini-1.5-pro',
