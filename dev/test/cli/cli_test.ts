@@ -64,7 +64,6 @@ describe('CLI Entrypoint', () => {
 
   const parse = async (args: string[]) => {
     try {
-      process.argv = ['node', 'cli_entrypoint.js', ...args];
       await program.parseAsync(['node', 'cli_entrypoint.js', ...args]);
     } catch (e: unknown) {
       if ((e as {code: string}).code !== 'commander.exit') {
