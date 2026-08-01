@@ -695,6 +695,33 @@ describe('GoogleLlm', () => {
       expect(declarations[3].behavior).toBeUndefined();
     });
 
+    it('should skip live tool entries that declare no functions', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+      const scheduledTool = new FunctionTool({
+        name: 'scheduledTool',
+        description: 'reacts silently',
+        execute: async () => 'done',
+        responseScheduling: FunctionResponseScheduling.SILENT,
+      });
+      const declarations: FunctionDeclaration[] = [{name: 'scheduledTool'}];
+
+      await llm.connect({
+        model: 'gemini-2.5-flash',
+        contents: [],
+        liveConnectConfig: {},
+        config: {
+          tools: [
+            {googleSearch: {}},
+            {functionDeclarations: undefined},
+            {functionDeclarations: declarations},
+          ],
+        },
+        toolsDict: {scheduledTool},
+      });
+
+      expect(declarations[0].behavior).toBe(Behavior.NON_BLOCKING);
+    });
+
     it('should connect a request that declares no tools at all', async () => {
       const llm = new TestGemini({apiKey: 'test-key'});
 
