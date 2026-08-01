@@ -310,6 +310,32 @@ export * from './features/feature_registry.js';
 export * from './memory/base_memory_service.js';
 export * from './sessions/base_session_service.js';
 export * from './tools/base_tool.js';
+export {
+  DEFAULT_DISCOVERY_URL,
+  fetchDiscoveryDocument,
+} from './tools/google_api_tool/discovery_document.js';
+export type {
+  DiscoveryDocument,
+  DiscoveryMethod,
+  DiscoveryParameter,
+  DiscoveryResource,
+  DiscoverySchema,
+} from './tools/google_api_tool/discovery_document.js';
+export {
+  GoogleApiToOpenApiConverter,
+  convertDiscoveryDocument,
+  convertExternalDocs,
+  convertInfo,
+  convertMethods,
+  convertOperation,
+  convertParameterSchema,
+  convertResources,
+  convertSchemaObject,
+  convertSchemas,
+  convertSecuritySchemes,
+  convertServers,
+  extractPathParameters,
+} from './tools/google_api_tool/googleapi_to_openapi_converter.js';
 export {OpenApiSpecParser} from './tools/openapi_tool/openapi_spec_parser/openapi_spec_parser.js';
 export type {
   OperationEndpoint,
