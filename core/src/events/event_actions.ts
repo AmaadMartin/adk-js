@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {isEmpty} from 'lodash-es';
+
 import {AuthConfig} from '../auth/auth_tool.js';
 import {ToolConfirmation} from '../tools/tool_confirmation.js';
 
@@ -79,6 +81,22 @@ export function createEventActions(
     requestedToolConfirmations: {},
     ...state,
   };
+}
+
+/**
+ * Returns whether anything was recorded on the given actions.
+ *
+ * {@link createEventActions} defines the baseline: empty dictionaries and
+ * unset scalars. This reports true once any field departs from it, which is
+ * deliberately field-agnostic — enumerating the fields by hand would silently
+ * start dropping whichever field is added to {@link EventActions} next.
+ */
+export function hasRecordedActions(actions: EventActions): boolean {
+  const recorded: Array<EventActions[keyof EventActions]> =
+    Object.values(actions);
+  return recorded.some((value) =>
+    typeof value === 'object' ? !isEmpty(value) : value !== undefined,
+  );
 }
 
 /**

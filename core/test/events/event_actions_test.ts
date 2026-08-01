@@ -5,10 +5,13 @@
  */
 
 import {describe, expect, it} from 'vitest';
+import {AuthConfig} from '../../src/auth/auth_tool.js';
 import {
   createEventActions,
+  hasRecordedActions,
   mergeEventActions,
 } from '../../src/events/event_actions.js';
+import {ToolConfirmation} from '../../src/tools/tool_confirmation.js';
 
 describe('createEventActions', () => {
   it('creates an EventActions with empty dicts and no scalar fields', () => {
@@ -200,5 +203,67 @@ describe('mergeEventActions', () => {
       createEventActions({stateDelta: {x: 1}}),
     ]);
     expect(result.stateDelta).toEqual({x: 1});
+  });
+});
+
+describe('hasRecordedActions', () => {
+  it('returns false for freshly created EventActions', () => {
+    expect(hasRecordedActions(createEventActions())).toBe(false);
+  });
+
+  it('returns true when stateDelta is populated', () => {
+    expect(hasRecordedActions(createEventActions({stateDelta: {k: 'v'}}))).toBe(
+      true,
+    );
+  });
+
+  it('returns true when artifactDelta is populated', () => {
+    expect(
+      hasRecordedActions(createEventActions({artifactDelta: {'f.txt': 1}})),
+    ).toBe(true);
+  });
+
+  it('returns true when requestedAuthConfigs is populated', () => {
+    const authConfig: AuthConfig = {
+      authScheme: {type: 'apiKey', name: 'testKey', in: 'header'},
+      credentialKey: 'key-1',
+    };
+    expect(
+      hasRecordedActions(
+        createEventActions({requestedAuthConfigs: {'call-1': authConfig}}),
+      ),
+    ).toBe(true);
+  });
+
+  it('returns true when requestedToolConfirmations is populated', () => {
+    const confirmation = new ToolConfirmation({
+      hint: 'confirm?',
+      confirmed: false,
+    });
+    expect(
+      hasRecordedActions(
+        createEventActions({
+          requestedToolConfirmations: {'call-1': confirmation},
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it('returns true when skipSummarization is set to false', () => {
+    expect(
+      hasRecordedActions(createEventActions({skipSummarization: false})),
+    ).toBe(true);
+  });
+
+  it('returns true when transferToAgent is set', () => {
+    expect(
+      hasRecordedActions(createEventActions({transferToAgent: 'agent-b'})),
+    ).toBe(true);
+  });
+
+  it('returns true when escalate is set to false', () => {
+    expect(hasRecordedActions(createEventActions({escalate: false}))).toBe(
+      true,
+    );
   });
 });

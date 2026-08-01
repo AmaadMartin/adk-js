@@ -346,6 +346,29 @@ export function isLlmAgent(obj: unknown): obj is LlmAgent {
 }
 
 /**
+ * Returns whether an event carries something the model returned: a content
+ * object, an error code or an interruption.
+ *
+ * An event with none of those was built by ADK purely to carry its `actions`,
+ * such as the content-less event a deferring long-running tool produces. That
+ * is a real terminal event, not a residual chunk of the model turn, so the
+ * step loop must not keep running on it.
+ *
+ * This deliberately tests the response fields rather than the actions: every
+ * event of a step is spread from one `modelResponseEvent` and so shares a
+ * single `actions` object, which model callbacks and plugins also write to, so
+ * a state write from a callback would otherwise make a trailing empty chunk
+ * look like a terminal event and end the turn early.
+ */
+function carriesModelResponse(event: Event): boolean {
+  return (
+    event.content !== undefined ||
+    event.errorCode !== undefined ||
+    event.interrupted !== undefined
+  );
+}
+
+/**
  * An agent that uses a large language model to generate responses.
  */
 export class LlmAgent extends BaseAgent<LlmAgentConfig> {
@@ -701,7 +724,8 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       const isEmptyMetadataEvent =
         lastEvent.author === this.name &&
         !lastEvent.partial &&
-        (!lastEvent.content?.parts || lastEvent.content.parts.length === 0);
+        (!lastEvent.content?.parts || lastEvent.content.parts.length === 0) &&
+        carriesModelResponse(lastEvent);
 
       if (
         isFinalResponse(lastEvent) &&

@@ -15,7 +15,10 @@ import {
   getFunctionCalls,
   getFunctionResponses,
 } from '../events/event.js';
-import {mergeEventActions} from '../events/event_actions.js';
+import {
+  hasRecordedActions,
+  mergeEventActions,
+} from '../events/event_actions.js';
 import {BaseTool} from '../tools/base_tool.js';
 import {ToolConfirmation} from '../tools/tool_confirmation.js';
 import {logger} from '../utils/logger.js';
@@ -109,7 +112,7 @@ export function generateAuthEvent(
     branch: invocationContext.branch,
     content: {
       parts: parts,
-      role: functionResponseEvent.content!.role,
+      role: functionResponseEvent.content?.role,
     },
     longRunningToolIds: Array.from(longRunningToolIds),
   });
@@ -162,7 +165,7 @@ export function generateRequestConfirmationEvent({
     branch: invocationContext.branch,
     content: {
       parts: parts,
-      role: functionResponseEvent.content!.role,
+      role: functionResponseEvent.content?.role,
     },
     actions: functionResponseEvent.actions,
     longRunningToolIds: Array.from(longRunningToolIds),
@@ -241,7 +244,9 @@ function buildResponseEvent(
  *   - Execute the tool.
  *   - Execute after tool callbacks !!if a callback provides a response, short
  *     circuit the rest.
- *   - If the tool is long-running and the response is null, continue. !!state
+ *   - If the tool is long-running and the response is nullish, skip the
+ *     response event; emit a content-less event carrying its actions if it
+ *     recorded any.
  * - Merge all function response events into a single event.
  */
 export async function handleFunctionCallsAsync({
@@ -439,6 +444,19 @@ export async function handleFunctionCallList({
     // tools that return such a value now produce a response event where they
     // previously produced none.
     if (tool.isLongRunning && functionResponse == null) {
+      // The response event is the only carrier for what the tool recorded on
+      // toolContext.actions, so emit those on a content-less event rather than
+      // losing them. Tools that recorded nothing stay silent.
+      if (hasRecordedActions(toolContext.actions)) {
+        functionResponseEvents.push(
+          createEvent({
+            invocationId: invocationContext.invocationId,
+            author: invocationContext.agent.name,
+            actions: toolContext.actions,
+            branch: invocationContext.branch,
+          }),
+        );
+      }
       continue;
     }
 
@@ -563,7 +581,9 @@ export function mergeParallelFunctionResponseEvents(
     invocationId: baseEvent.invocationId,
     author: baseEvent.author,
     branch: baseEvent.branch,
-    content: {role: 'user', parts: mergedParts},
+    content: mergedParts.length
+      ? {role: 'user', parts: mergedParts}
+      : undefined,
     actions: mergedActions,
     timestamp: baseEvent.timestamp!,
   });
