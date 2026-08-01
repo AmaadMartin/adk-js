@@ -12,7 +12,6 @@ import {
   createSession,
   GoogleApiTool,
   GoogleApiToolset,
-  googleOidcAuthScheme,
   InvocationContext,
   LlmAgent,
   PluginManager,
@@ -22,6 +21,7 @@ import {
 } from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {googleOidcAuthScheme} from '../../../src/tools/google_api_tool/google_api_toolset.js';
 import {CALENDAR_DISCOVERY_DOCUMENT} from './discovery_fixtures.js';
 
 const CALENDAR_TOOL_NAMES = [
@@ -271,17 +271,6 @@ describe('GoogleApiToolset', () => {
     }).getTools();
     expect(filtered.map((tool) => tool.name)).toEqual([
       'cal_calendar.events.list',
-    ]);
-  });
-
-  it('honours a filter installed after construction', async () => {
-    const toolset = createToolset();
-    expect(await toolset.getTools()).toHaveLength(3);
-
-    toolset.setToolFilter(['calendar.calendars.insert']);
-
-    expect((await toolset.getTools()).map((tool) => tool.name)).toEqual([
-      'calendar.calendars.insert',
     ]);
   });
 

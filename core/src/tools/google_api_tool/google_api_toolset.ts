@@ -12,7 +12,6 @@ import {experimental} from '../../utils/experimental.js';
 import {logger} from '../../utils/logger.js';
 import {BaseToolset, ToolPredicate} from '../base_toolset.js';
 import {OpenAPIToolset} from '../openapi_tool/openapi_toolset.js';
-import {RestApiTool} from '../openapi_tool/rest_api_tool.js';
 import {GoogleApiTool} from './google_api_tool.js';
 import {GoogleApiToOpenApiConverter} from './googleapi_to_openapi_converter.js';
 
@@ -109,12 +108,6 @@ export function googleOidcAuthScheme(
  */
 @experimental
 export class GoogleApiToolset extends BaseToolset {
-  /**
-   * Redeclared as mutable so {@link GoogleApiToolset.setToolFilter} can
-   * replace the filter after construction.
-   */
-  override toolFilter: ToolPredicate | string[];
-
   private readonly apiName: string;
   private readonly apiVersion: string;
   private readonly additionalHeaders?: Record<string, string>;
@@ -127,7 +120,6 @@ export class GoogleApiToolset extends BaseToolset {
 
   constructor(options: GoogleApiToolsetOptions) {
     super(options.toolFilter ?? [], options.prefix);
-    this.toolFilter = options.toolFilter ?? [];
     this.apiName = options.apiName;
     this.apiVersion = options.apiVersion;
     this.clientId = options.clientId;
@@ -140,10 +132,18 @@ export class GoogleApiToolset extends BaseToolset {
 
   @experimental
   override async getTools(context?: ReadonlyContext): Promise<GoogleApiTool[]> {
+    if (!context && typeof this.toolFilter === 'function') {
+      logger.warn(
+        'GoogleApiToolset: a ToolPredicate toolFilter was provided but ' +
+          'getTools() was called without a ReadonlyContext. The filter will ' +
+          'not be applied.',
+      );
+    }
+
     const openApiToolset = await this.loadOpenApiToolset();
     const tools = await openApiToolset.getTools(context);
 
-    return this.selectTools(tools, context).map(
+    return tools.map(
       (tool) =>
         new GoogleApiTool(tool, {
           clientId: this.clientId,
@@ -152,12 +152,6 @@ export class GoogleApiToolset extends BaseToolset {
           additionalHeaders: this.additionalHeaders,
         }),
     );
-  }
-
-  /** Replaces the filter applied by the next `getTools` call. */
-  @experimental
-  setToolFilter(toolFilter: ToolPredicate | string[]): void {
-    this.toolFilter = toolFilter;
   }
 
   /** Authenticates through the OAuth2 user consent flow. */
@@ -197,35 +191,11 @@ export class GoogleApiToolset extends BaseToolset {
       {discoveryUrl: this.discoveryUrl},
     ).convert();
 
-    // The filter is applied by this toolset, not the inner one.
     return new OpenAPIToolset({
       specDict: spec,
+      toolFilter: this.toolFilter,
       prefix: this.prefix,
       authScheme: googleOidcAuthScheme(spec, this.additionalScopes),
     });
-  }
-
-  private selectTools(
-    tools: RestApiTool[],
-    context?: ReadonlyContext,
-  ): RestApiTool[] {
-    if (context) {
-      return tools.filter((tool) => this.isToolSelected(tool, context));
-    }
-
-    const filter = this.toolFilter;
-    if (Array.isArray(filter)) {
-      // An empty filter selects every tool.
-      return filter.length === 0
-        ? tools
-        : tools.filter((tool) => filter.includes(tool.name));
-    }
-
-    logger.warn(
-      'GoogleApiToolset: a ToolPredicate toolFilter was provided but ' +
-        'getTools() was called without a ReadonlyContext. The filter will ' +
-        'not be applied.',
-    );
-    return tools;
   }
 }

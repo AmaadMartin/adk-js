@@ -319,10 +319,7 @@ export type {
 } from './tools/google_api_tool/discovery_document.js';
 export {GoogleApiTool} from './tools/google_api_tool/google_api_tool.js';
 export type {GoogleApiToolOptions} from './tools/google_api_tool/google_api_tool.js';
-export {
-  GoogleApiToolset,
-  googleOidcAuthScheme,
-} from './tools/google_api_tool/google_api_toolset.js';
+export {GoogleApiToolset} from './tools/google_api_tool/google_api_toolset.js';
 export type {
   GoogleApiToolsetOptions,
   GoogleApiToolsetPresetOptions,
