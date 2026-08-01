@@ -284,8 +284,11 @@ export class APIHubClient implements BaseAPIHubClient {
 
     let token: string | null | undefined;
     try {
-      token = (await (await this.auth.getClient()).getAccessToken()).token;
+      const client = await this.auth.getClient();
+      token = (await client.getAccessToken()).token;
     } catch {
+      // Credential discovery or token acquisition failed; report the same
+      // "provide a credential" message adk-python raises for a missing ADC.
       token = undefined;
     }
     if (!token) {
