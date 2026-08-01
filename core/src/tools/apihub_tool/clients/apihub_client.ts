@@ -12,6 +12,8 @@ const REQUEST_TIMEOUT_MS = 30_000;
 const CLOUD_PLATFORM_SCOPES = [
   'https://www.googleapis.com/auth/cloud-platform',
 ];
+const NO_CREDENTIAL_MESSAGE =
+  'Please provide a service account or an access token to API Hub client.';
 
 /** An API registered in API Hub. */
 export interface ApiHubApi {
@@ -28,7 +30,7 @@ export interface ApiHubApiVersion {
 }
 
 /** The response of the API Hub `apis.list` method. */
-export interface ApiHubApiList {
+interface ApiHubApiList {
   apis?: ApiHubApi[];
 }
 
@@ -80,15 +82,11 @@ export function extractResourceName(urlOrPath: string): ApiHubResourceNames {
   }
 
   // A Console URL prefixes the resource path with the API Hub UI route.
-  if (path.includes('api-hub/')) {
-    path = path.split('api-hub')[1];
-  }
+  path = path.split('api-hub/').at(1) ?? path;
 
   const segments = path.split('/').filter(Boolean);
 
-  const project = segments.includes('projects')
-    ? segmentAfter(segments, 'projects')
-    : (query?.get('project') ?? undefined);
+  const project = segmentAfter(segments, 'projects') ?? query?.get('project');
   if (!project) {
     throw new Error(
       `Project ID not found in URL or path in APIHubClient. Input path is '${urlOrPath}'. Please make sure there is either '/projects/PROJECT_ID' in the path or 'project=PROJECT_ID' query param in the input.`,
@@ -126,13 +124,6 @@ export function extractResourceName(urlOrPath: string): ApiHubResourceNames {
   };
 }
 
-/** Decodes the base64 spec text, returning '' when the response carries none. */
-function decodeSpecContents(payload: ApiHubSpecContents): string {
-  return payload.contents
-    ? Buffer.from(payload.contents, 'base64').toString('utf-8')
-    : '';
-}
-
 /** Parses a service account JSON string without leaking it into the error. */
 function parseServiceAccountJson(serviceAccountJson: string): JWTInput {
   try {
@@ -165,11 +156,8 @@ export class APIHubClient implements BaseAPIHubClient {
   constructor(
     options: {accessToken?: string; serviceAccountJson?: string} = {},
   ) {
-    if (options.accessToken) {
-      this.accessToken = options.accessToken;
-    } else if (options.serviceAccountJson) {
-      this.serviceAccountJson = options.serviceAccountJson;
-    }
+    this.accessToken = options.accessToken;
+    this.serviceAccountJson = options.serviceAccountJson;
   }
 
   /**
@@ -207,7 +195,10 @@ export class APIHubClient implements BaseAPIHubClient {
       specName = specs[0];
     }
 
-    return this.fetchSpec(specName);
+    const {contents} = await this.get<ApiHubSpecContents>(
+      `${API_HUB_ROOT_URL}/${specName}:contents`,
+    );
+    return contents ? Buffer.from(contents, 'base64').toString('utf-8') : '';
   }
 
   /**
@@ -241,14 +232,6 @@ export class APIHubClient implements BaseAPIHubClient {
    */
   async getApiVersion(apiVersionName: string): Promise<ApiHubApiVersion> {
     return this.get<ApiHubApiVersion>(`${API_HUB_ROOT_URL}/${apiVersionName}`);
-  }
-
-  private async fetchSpec(apiSpecResourceName: string): Promise<string> {
-    return decodeSpecContents(
-      await this.get<ApiHubSpecContents>(
-        `${API_HUB_ROOT_URL}/${apiSpecResourceName}:contents`,
-      ),
-    );
   }
 
   private async get<T>(url: string): Promise<T> {
@@ -286,15 +269,11 @@ export class APIHubClient implements BaseAPIHubClient {
     try {
       const client = await this.auth.getClient();
       token = (await client.getAccessToken()).token;
-    } catch {
-      // Credential discovery or token acquisition failed; report the same
-      // "provide a credential" message adk-python raises for a missing ADC.
-      token = undefined;
+    } catch (cause: unknown) {
+      throw new Error(NO_CREDENTIAL_MESSAGE, {cause});
     }
     if (!token) {
-      throw new Error(
-        'Please provide a service account or an access token to API Hub client.',
-      );
+      throw new Error(NO_CREDENTIAL_MESSAGE);
     }
     return token;
   }

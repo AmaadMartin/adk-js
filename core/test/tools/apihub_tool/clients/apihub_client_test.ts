@@ -4,11 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {APIHubClient, ApiHubResourceNames} from '@google/adk';
+import {APIHubClient} from '@google/adk';
 import {GoogleAuth} from 'google-auth-library';
 import {Buffer} from 'node:buffer';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
-import {extractResourceName} from '../../../../src/tools/apihub_tool/clients/apihub_client.js';
+import {
+  ApiHubResourceNames,
+  extractResourceName,
+} from '../../../../src/tools/apihub_tool/clients/apihub_client.js';
 
 let adcToken: string | null = 'adc_token';
 let getClientRejects = false;
@@ -433,6 +436,17 @@ describe('apihub_client', () => {
 
       await expect(new APIHubClient().getApi(API_NAME)).rejects.toThrow(
         'Please provide a service account or an access token to API Hub client.',
+      );
+    });
+
+    it('should preserve the underlying credential failure as the cause', async () => {
+      getClientRejects = true;
+
+      const error = await rejectionOf(new APIHubClient().getApi(API_NAME));
+
+      expect(error).toHaveProperty(
+        'cause.message',
+        'Could not load the default credentials',
       );
     });
 
