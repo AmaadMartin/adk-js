@@ -644,6 +644,7 @@ export async function handleFunctionCallList({
           id: toolContext.functionCallId,
           name: tool.name,
           response: functionResponse,
+          scheduling: tool.responseScheduling,
         },
       }),
       actions: toolContext.actions,

@@ -4,7 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {FunctionDeclaration, Tool} from '@google/genai';
+import {
+  FunctionDeclaration,
+  FunctionResponseScheduling,
+  Tool,
+} from '@google/genai';
 
 import {LlmRequest} from '../models/llm_request.js';
 import {getGoogleLlmVariant} from '../utils/variant_utils.js';
@@ -35,6 +39,20 @@ export interface BaseToolParams {
   description: string;
   isLongRunning?: boolean;
   customMetadata?: Record<string, unknown>;
+
+  /**
+   * Controls when the model reacts to the tool's response (Live API only).
+   *
+   * Applied to the emitted `FunctionResponse` for asynchronous function
+   * calling:
+   * - `SILENT`: feeds the response back without triggering a model turn.
+   * - `WHEN_IDLE`: defers the reaction until the model is idle.
+   * - `INTERRUPT`: reacts immediately.
+   *
+   * Ignored by models that don't support asynchronous function calling.
+   * Leaving it unset preserves the default behavior.
+   */
+  responseScheduling?: FunctionResponseScheduling;
 }
 
 /**
@@ -67,6 +85,9 @@ export abstract class BaseTool {
   readonly name: string;
   readonly description: string;
   readonly isLongRunning: boolean;
+
+  /** See {@link BaseToolParams.responseScheduling}. */
+  readonly responseScheduling?: FunctionResponseScheduling;
 
   /**
    * Optional key-value metadata for this tool, e.g. tool manifests or
@@ -111,6 +132,7 @@ export abstract class BaseTool {
     this.description = params.description;
     this.isLongRunning = params.isLongRunning ?? false;
     this.customMetadata = params.customMetadata;
+    this.responseScheduling = params.responseScheduling;
   }
 
   /**
