@@ -5,6 +5,7 @@
  */
 
 import js from '@eslint/js';
+import n from 'eslint-plugin-n';
 import {defineConfig} from 'eslint/config';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
@@ -16,7 +17,7 @@ export default defineConfig([
   tseslint.configs.recommended,
   {
     files: ['**/*.ts'],
-    plugins: {js},
+    plugins: {js, n},
     extends: ['js/recommended'],
     languageOptions: {
       globals: {
@@ -34,6 +35,7 @@ export default defineConfig([
           'caughtErrorsIgnorePattern': '^_',
         },
       ],
+      'n/prefer-node-protocol': 'error',
     },
   },
 ]);
