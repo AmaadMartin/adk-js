@@ -48,8 +48,6 @@ export default defineConfig({
       },
       {
         test: {
-          // Unit-tests the `integrations/` package; the `integration` project
-          // below owns the cross-component suite in `tests/integration/`.
           name: 'unit:integrations',
           environment: 'node',
           alias: {
