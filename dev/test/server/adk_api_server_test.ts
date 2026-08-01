@@ -22,6 +22,7 @@ import {
   Session,
 } from '@google/adk';
 import {ReadableSpan} from '@opentelemetry/sdk-trace-base';
+import * as net from 'node:net';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {z} from 'zod';
 
@@ -1253,6 +1254,49 @@ describe('AdkWebServer', () => {
       } finally {
         await specificServer.stop();
       }
+    });
+  });
+
+  describe('Shutdown', () => {
+    it('should resolve stop() while a client holds a connection open', async () => {
+      // Pin the host so the client connects over the same address family the
+      // server bound: the default 'localhost' resolves to ::1 on some hosts.
+      const host = '127.0.0.1';
+      const shutdownServer = new AdkApiServer({
+        agentLoader,
+        sessionService,
+        memoryService,
+        artifactService,
+        host,
+      });
+      await shutdownServer.start();
+
+      const port = Number(shutdownServer.url.split(':').pop());
+      expect(port).toBeGreaterThan(0);
+
+      const socket = net.connect(port, host);
+      // Destroying the socket server-side surfaces as ECONNRESET on the client,
+      // and an unhandled 'error' event on a net.Socket crashes the worker.
+      socket.on('error', () => {});
+      try {
+        await new Promise<void>((resolve) => socket.once('connect', resolve));
+
+        await expect(shutdownServer.stop()).resolves.toBeUndefined();
+      } finally {
+        socket.destroy();
+      }
+    });
+
+    it('should resolve stop() with no connections attached', async () => {
+      const shutdownServer = new AdkApiServer({
+        agentLoader,
+        sessionService,
+        memoryService,
+        artifactService,
+      });
+      await shutdownServer.start();
+
+      await expect(shutdownServer.stop()).resolves.toBeUndefined();
     });
   });
 });

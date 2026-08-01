@@ -1004,6 +1004,14 @@ export class AdkApiServer {
 +-----------------------------------------------------------------------------+`);
         resolve();
       });
+
+      // `close()` only stops the listener and then waits for every established
+      // connection to drain, so a client parking a socket -- a browser tab on
+      // the dev UI, or an in-flight `/run_sse` stream -- would hold teardown
+      // open forever. Destroy the connections so `stop()` always settles. Node
+      // recommends doing this after `close()` so no connection can be accepted
+      // in between. (`closeAllConnections()` is available since Node 18.2.0.)
+      this.server!.closeAllConnections();
     });
   }
 
