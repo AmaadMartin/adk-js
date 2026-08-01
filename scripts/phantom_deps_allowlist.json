@@ -1,0 +1,20 @@
+{
+  "dev/package.json": [
+    "@a2a-js/sdk",
+    "@google-cloud/vertexai",
+    "@opentelemetry/api",
+    "@opentelemetry/sdk-trace-base",
+    "lodash-es"
+  ],
+  "package.json": [
+    "@google-cloud/vertexai",
+    "@modelcontextprotocol/sdk",
+    "dotenv",
+    "openapi-types",
+    "zod"
+  ],
+  "tests/integration/build_setup/js_commonjs/package.json": ["@mikro-orm/core"],
+  "tests/integration/build_setup/js_esm/package.json": ["@mikro-orm/core"],
+  "tests/integration/build_setup/ts_commonjs/package.json": ["@mikro-orm/core"],
+  "tests/integration/build_setup/ts_esm/package.json": ["@mikro-orm/core"]
+}
