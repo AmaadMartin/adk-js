@@ -10,7 +10,6 @@ import {afterEach, describe, expect, it, vi} from 'vitest';
 import {
   StubTool,
   createToolContext,
-  stubRegistry,
   stubRegistryWithText,
 } from '../environment_simulation_test_utils.js';
 
@@ -18,8 +17,6 @@ const TOOL = new StubTool('create_ticket', {
   name: 'create_ticket',
   description: 'Creates a ticket.',
 });
-
-const NOT_IMPLEMENTED = {status: 'error', error_message: 'Not implemented'};
 
 function mockRequest() {
   return {
@@ -50,19 +47,10 @@ describe('createMockStrategy', () => {
     expect(llm.requests).toHaveLength(1);
   });
 
-  it('returns the not-implemented placeholder for MOCK_STRATEGY_TRACING', async () => {
-    const llm = stubRegistry([]);
-
-    const strategy = createMockStrategy(
-      MockStrategy.MOCK_STRATEGY_TRACING,
-      'test-model',
-      {},
-    );
-
-    await expect(strategy.mock(mockRequest())).resolves.toEqual(
-      NOT_IMPLEMENTED,
-    );
-    expect(llm.requests).toEqual([]);
+  it('throws for the deprecated, unimplemented MOCK_STRATEGY_TRACING', () => {
+    expect(() =>
+      createMockStrategy(MockStrategy.MOCK_STRATEGY_TRACING, 'test-model', {}),
+    ).toThrow('Unknown mock strategy type: MOCK_STRATEGY_TRACING');
   });
 
   it('throws for MOCK_STRATEGY_UNSPECIFIED', () => {
@@ -70,29 +58,12 @@ describe('createMockStrategy', () => {
       createMockStrategy(MockStrategy.MOCK_STRATEGY_UNSPECIFIED, 'm', {}),
     ).toThrow('Unknown mock strategy type: MOCK_STRATEGY_UNSPECIFIED');
   });
-});
 
-describe('TracingMockStrategy', () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
+  it('does not resolve a model until the strategy is used', () => {
+    const llm = stubRegistryWithText(['{"ticket_id": "T-1"}']);
 
-  it('ignores the request it is given', async () => {
-    const llm = stubRegistry([]);
-    const strategy = createMockStrategy(
-      MockStrategy.MOCK_STRATEGY_TRACING,
-      'test-model',
-      {},
-    );
+    createMockStrategy(MockStrategy.MOCK_STRATEGY_TOOL_SPEC, 'test-model', {});
 
-    const response = await strategy.mock({
-      ...mockRequest(),
-      args: {ticket_id: 'T-1'},
-      environmentData: '{"tickets": []}',
-      tracing: '{"events": []}',
-    });
-
-    expect(response).toEqual(NOT_IMPLEMENTED);
     expect(llm.requests).toEqual([]);
   });
 });

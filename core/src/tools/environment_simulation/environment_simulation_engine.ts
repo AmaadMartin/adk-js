@@ -25,7 +25,7 @@ import {
   MockStrategy,
   ToolSimulationConfig,
 } from './environment_simulation_config.js';
-import {BaseMockStrategy, TracingMockStrategy} from './strategies/base.js';
+import {BaseMockStrategy} from './strategies/base.js';
 import {ToolSpecMockStrategy} from './strategies/tool_spec_mock_strategy.js';
 import {ToolConnectionAnalyzer} from './tool_connection_analyzer.js';
 import {ToolConnectionMap} from './tool_connection_map.js';
@@ -57,8 +57,6 @@ export function createMockStrategy(
   switch (mockStrategyType) {
     case MockStrategy.MOCK_STRATEGY_TOOL_SPEC:
       return new ToolSpecMockStrategy(llmName, llmConfig);
-    case MockStrategy.MOCK_STRATEGY_TRACING:
-      return new TracingMockStrategy();
     default:
       throw new Error(`Unknown mock strategy type: ${mockStrategyType}`);
   }
@@ -99,6 +97,11 @@ function sleep(milliseconds: number): Promise<void> {
 export class EnvironmentSimulationEngine {
   private readonly config: EnvironmentSimulationConfig;
   private readonly toolSimConfigs: Map<string, ToolSimulationConfig>;
+  /**
+   * The strategy for each tool that has one, built once and reused. Absence
+   * means the tool's `mockStrategyType` is `MOCK_STRATEGY_UNSPECIFIED`.
+   */
+  private readonly mockStrategies: Map<string, BaseMockStrategy>;
   private readonly analyzer: ToolConnectionAnalyzer;
   private readonly stateStore: Record<string, Record<string, unknown>> = {};
   private toolConnectionMap?: ToolConnectionMap;
@@ -122,6 +125,21 @@ export class EnvironmentSimulationEngine {
         config.toolName,
         config,
       ]),
+    );
+    this.mockStrategies = new Map(
+      this.config.toolSimulationConfigs
+        .filter(
+          (config) =>
+            config.mockStrategyType !== MockStrategy.MOCK_STRATEGY_UNSPECIFIED,
+        )
+        .map((config) => [
+          config.toolName,
+          createMockStrategy(
+            config.mockStrategyType,
+            this.config.simulationModel,
+            this.config.simulationModelConfiguration,
+          ),
+        ]),
     );
     this.analyzer = new ToolConnectionAnalyzer(
       this.config.simulationModel,
@@ -171,9 +189,8 @@ export class EnvironmentSimulationEngine {
       }
     }
 
-    if (
-      toolSimConfig.mockStrategyType === MockStrategy.MOCK_STRATEGY_UNSPECIFIED
-    ) {
+    const mockStrategy = this.mockStrategies.get(tool.name);
+    if (!mockStrategy) {
       logger.warn(
         `Tool '${tool.name}' did not hit any injection config and has no` +
           ' mock strategy configured. Returning no-op.',
@@ -181,11 +198,6 @@ export class EnvironmentSimulationEngine {
       return undefined;
     }
 
-    const mockStrategy = createMockStrategy(
-      toolSimConfig.mockStrategyType,
-      this.config.simulationModel,
-      this.config.simulationModelConfiguration,
-    );
     return mockStrategy.mock({
       tool,
       args,
@@ -205,11 +217,7 @@ export class EnvironmentSimulationEngine {
   private async analyzeToolConnectionsOnce(
     toolContext: Context,
   ): Promise<void> {
-    const anyToolHasStrategy = this.config.toolSimulationConfigs.some(
-      (config) =>
-        config.mockStrategyType !== MockStrategy.MOCK_STRATEGY_UNSPECIFIED,
-    );
-    if (this.isAnalyzed || !anyToolHasStrategy) {
+    if (this.isAnalyzed || this.mockStrategies.size === 0) {
       return;
     }
     const agent = toolContext.invocationContext.agent;

@@ -12,7 +12,6 @@ import {EnvironmentSimulationEngine} from './environment_simulation_engine.js';
 import {EnvironmentSimulationPlugin} from './environment_simulation_plugin.js';
 
 /** Builds the two supported ways of installing an environment simulation. */
-@experimental
 export class EnvironmentSimulationFactory {
   /**
    * Creates a before-tool callback simulating one agent's tool calls.
@@ -20,6 +19,7 @@ export class EnvironmentSimulationFactory {
    * @param config The simulation configuration.
    * @returns A callback to pass as an `LlmAgent`'s `beforeToolCallback`.
    */
+  @experimental
   static createCallback(
     config: EnvironmentSimulationConfigInput,
   ): SingleBeforeToolCallback {
@@ -34,6 +34,7 @@ export class EnvironmentSimulationFactory {
    * @param config The simulation configuration.
    * @returns A plugin to pass in a `Runner`'s `plugins`.
    */
+  @experimental
   static createPlugin(
     config: EnvironmentSimulationConfigInput,
   ): EnvironmentSimulationPlugin {

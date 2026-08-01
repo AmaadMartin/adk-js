@@ -41,14 +41,3 @@ export abstract class BaseMockStrategy {
    */
   abstract mock(request: MockRequest): Promise<Record<string, unknown>>;
 }
-
-/**
- * Placeholder for the deprecated `MOCK_STRATEGY_TRACING` strategy, which
- * adk-python has not implemented either. Use `MOCK_STRATEGY_TOOL_SPEC` with
- * the `tracing` config field instead.
- */
-export class TracingMockStrategy extends BaseMockStrategy {
-  async mock(_request: MockRequest): Promise<Record<string, unknown>> {
-    return {status: 'error', error_message: 'Not implemented'};
-  }
-}
