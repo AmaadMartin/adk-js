@@ -5,6 +5,7 @@
  */
 
 import {
+  FunctionTool,
   Gemini,
   GeminiParams,
   LlmRequest,
@@ -13,6 +14,9 @@ import {
   version,
 } from '@google/adk';
 import {
+  Behavior,
+  FunctionDeclaration,
+  FunctionResponseScheduling,
   GenerateContentResponse,
   GoogleGenAI,
   HttpOptions,
@@ -755,6 +759,58 @@ describe('GoogleLlm', () => {
         model: 'gemini-3.1-flash-live-preview',
       });
       expect(llm.liveApiVersion).toBe('v1alpha');
+    });
+
+    it('should mark declarations NON_BLOCKING only for tools that set responseScheduling', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+      const scheduledTool = new FunctionTool({
+        name: 'scheduledTool',
+        description: 'reacts silently',
+        execute: async () => 'done',
+        responseScheduling: FunctionResponseScheduling.SILENT,
+      });
+      const plainTool = new FunctionTool({
+        name: 'plainTool',
+        description: 'reacts normally',
+        execute: async () => 'done',
+      });
+      const declarations: FunctionDeclaration[] = [
+        {name: 'scheduledTool'},
+        {name: 'plainTool'},
+        {description: 'a declaration carrying no name'},
+        {name: 'toolMissingFromDict'},
+      ];
+
+      await llm.connect({
+        model: 'gemini-2.5-flash',
+        contents: [],
+        liveConnectConfig: {},
+        config: {tools: [{functionDeclarations: declarations}]},
+        toolsDict: {scheduledTool, plainTool},
+      });
+
+      expect(declarations[0].behavior).toBe(Behavior.NON_BLOCKING);
+      expect(declarations[1].behavior).toBeUndefined();
+      expect(declarations[2].behavior).toBeUndefined();
+      expect(declarations[3].behavior).toBeUndefined();
+    });
+
+    it('should connect a request that declares no tools at all', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+
+      const connection = await llm.connect({
+        model: 'gemini-2.5-flash',
+        contents: [],
+        liveConnectConfig: {},
+        toolsDict: {},
+      });
+
+      expect(connection).toBeDefined();
+      expect(llm.liveApiClient.live.connect).toHaveBeenCalledWith(
+        expect.objectContaining({
+          config: expect.objectContaining({tools: undefined}),
+        }),
+      );
     });
   });
 });
