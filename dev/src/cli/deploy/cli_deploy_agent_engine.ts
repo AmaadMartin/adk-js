@@ -71,9 +71,11 @@ export async function deployToAgentEngine(options: DeployToAgentEngineOptions) {
   const agentDir = isFileProvided
     ? path.dirname(options.agentPath)
     : options.agentPath;
-  const appName = isFileProvided
-    ? path.parse(options.agentPath).name
-    : path.basename(options.agentPath);
+  const appName =
+    options.appName ||
+    (isFileProvided
+      ? path.parse(options.agentPath).name
+      : path.basename(options.agentPath));
 
   const displayName = options.displayName || appName;
 
