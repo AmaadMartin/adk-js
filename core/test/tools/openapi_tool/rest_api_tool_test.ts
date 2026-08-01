@@ -6,8 +6,13 @@
 
 import {
   AuthCredential,
+  AuthCredentialTypes,
   Context,
   createRestApiTool,
+  createSession,
+  InvocationContext,
+  LlmAgent,
+  PluginManager,
   RestApiTool,
   ToolAuthHandler,
 } from '@google/adk';
@@ -17,6 +22,23 @@ import {
   prepareRequestBody,
   prepareRequestParams,
 } from '../../../src/tools/openapi_tool/rest_api_tool.js';
+
+/** Builds a real tool context, so no cast is needed to invoke a tool. */
+function createToolContext(): Context {
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'test-invocation',
+      agent: new LlmAgent({name: 'test_agent', model: 'gemini-2.5-flash'}),
+      session: createSession({
+        id: 'test-session',
+        appName: 'test-app',
+        userId: 'test-user',
+        events: [],
+      }),
+      pluginManager: new PluginManager(),
+    }),
+  });
+}
 
 describe('RestApiTool', () => {
   afterEach(() => {
@@ -473,6 +495,64 @@ describe('RestApiTool', () => {
     expect(result).toEqual({
       error: 'Failed to execute API call: Network error',
     });
+  });
+
+  it('should send the default headers on the request', async () => {
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      {baseUrl: 'http://api.example.com', path: '/test', method: 'GET'},
+      {responses: {}},
+    );
+    tool.setDefaultHeaders({'developer-token': 'test-token'});
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      headers: {get: () => 'text/plain'},
+      text: async () => 'ok',
+    });
+
+    await tool.runAsync({args: {}, toolContext: createToolContext()});
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({headers: {'developer-token': 'test-token'}}),
+    );
+  });
+
+  it('should not let a default header overwrite the credential header', async () => {
+    const authScheme: OpenAPIV3.SecuritySchemeObject = {
+      type: 'http',
+      scheme: 'bearer',
+    };
+    const authCredential: AuthCredential = {
+      authType: AuthCredentialTypes.HTTP,
+      http: {scheme: 'bearer', credentials: {token: 'credential-token'}},
+    };
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      {baseUrl: 'http://api.example.com', path: '/test', method: 'GET'},
+      {responses: {}},
+      authScheme,
+      authCredential,
+    );
+    tool.setDefaultHeaders({'Authorization': 'Bearer default-token'});
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      headers: {get: () => 'text/plain'},
+      text: async () => 'ok',
+    });
+
+    await tool.runAsync({args: {}, toolContext: createToolContext()});
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        headers: {'Authorization': 'Bearer credential-token'},
+      }),
+    );
   });
 
   it('should apply auth credentials to fetch request', async () => {

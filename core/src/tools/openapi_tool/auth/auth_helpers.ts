@@ -5,7 +5,11 @@
  */
 
 import {OpenAPIV3} from 'openapi-types';
-import {AuthCredential} from '../../../auth/auth_credential.js';
+import {
+  AuthCredential,
+  AuthCredentialTypes,
+  ServiceAccount,
+} from '../../../auth/auth_credential.js';
 
 /**
  * Applies the given credential to the request headers and URL.
@@ -75,5 +79,28 @@ export function createBearerScheme(): OpenAPIV3.SecuritySchemeObject {
   return {
     type: 'http',
     scheme: 'bearer',
+  };
+}
+
+/**
+ * Creates the auth scheme and credential for a Google service account.
+ *
+ * The service account key is exchanged for a bearer token by
+ * `ServiceAccountCredentialExchanger`, so the scheme describes a JWT bearer
+ * token and the credential carries the account configuration.
+ *
+ * @param config The service account configuration.
+ * @return The bearer scheme and the service-account credential.
+ */
+export function serviceAccountSchemeCredential(config: ServiceAccount): {
+  authScheme: OpenAPIV3.SecuritySchemeObject;
+  authCredential: AuthCredential;
+} {
+  return {
+    authScheme: {type: 'http', scheme: 'bearer', bearerFormat: 'JWT'},
+    authCredential: {
+      authType: AuthCredentialTypes.SERVICE_ACCOUNT,
+      serviceAccount: config,
+    },
   };
 }
