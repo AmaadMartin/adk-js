@@ -375,4 +375,32 @@ describe('deployToCloudRun', () => {
       expect.stringContaining('\x1b[0m'),
     );
   });
+
+  it('should still clean up temporary files when the deploy fails', async () => {
+    const disposeAll = vi.fn().mockResolvedValue(undefined);
+    (AgentLoader as Mock).mockImplementation(() => ({
+      listAgents: vi.fn().mockResolvedValue(['agent1']),
+      getAgentFile: vi.fn().mockResolvedValue({
+        getFilePath: vi.fn().mockReturnValue('path/to/agent1.ts'),
+      }),
+      disposeAll,
+    }));
+    spawnMock.mockReturnValue({
+      on: vi.fn((event: string, cb: (code: number) => void) => {
+        if (event === 'close') {
+          process.nextTick(() => cb(1));
+        }
+      }),
+    });
+
+    await expect(deployToCloudRun(defaultOptions)).rejects.toThrow(
+      /Command failed with exit code 1/,
+    );
+
+    expect(fs.rm).toHaveBeenCalledWith('/tmp/test-deploy', {
+      recursive: true,
+      force: true,
+    });
+    expect(disposeAll).toHaveBeenCalled();
+  });
 });
