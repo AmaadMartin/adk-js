@@ -48,10 +48,8 @@ export default defineConfig({
       },
       {
         test: {
-          // Unit tests for the `integrations/` workspace package
-          // (`@google/adk-integrations`). Distinct from the `integration`
-          // project below, which runs the cross-component suite in
-          // `tests/integration/`.
+          // Unit-tests the `integrations/` package; the `integration` project
+          // below owns the cross-component suite in `tests/integration/`.
           name: 'unit:integrations',
           environment: 'node',
           alias: {
@@ -66,9 +64,6 @@ export default defineConfig({
       },
       {
         test: {
-          // Cross-component tests in `tests/integration/`. Distinct from the
-          // `unit:integrations` project above, which unit-tests the
-          // `integrations/` workspace package.
           name: 'integration',
           environment: 'node',
           alias: {
