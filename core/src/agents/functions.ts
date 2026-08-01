@@ -112,7 +112,7 @@ export function generateAuthEvent(
     branch: invocationContext.branch,
     content: {
       parts: parts,
-      role: functionResponseEvent.content?.role,
+      role: functionResponseEvent.content?.role ?? 'user',
     },
     longRunningToolIds: Array.from(longRunningToolIds),
   });
@@ -165,7 +165,7 @@ export function generateRequestConfirmationEvent({
     branch: invocationContext.branch,
     content: {
       parts: parts,
-      role: functionResponseEvent.content?.role,
+      role: functionResponseEvent.content?.role ?? 'user',
     },
     actions: functionResponseEvent.actions,
     longRunningToolIds: Array.from(longRunningToolIds),

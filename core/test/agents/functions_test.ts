@@ -796,7 +796,7 @@ describe('generateAuthEvent', () => {
     expect(call2!.functionCall!.args!['auth_config']).toBe('auth_config_2');
   });
 
-  it('should return an auth event with an undefined role for a content-less response event', () => {
+  it('should return an auth event with a user role for a content-less response event', () => {
     const authConfig: AuthConfig = {
       authScheme: {type: 'apiKey', name: 'testKey', in: 'header'},
       credentialKey: 'key-1',
@@ -809,7 +809,7 @@ describe('generateAuthEvent', () => {
 
     const event = generateAuthEvent(invocationContext, functionResponseEvent);
 
-    expect(event?.content?.role).toBeUndefined();
+    expect(event?.content?.role).toBe('user');
     expect(event?.content?.parts).toEqual([
       expect.objectContaining({
         functionCall: expect.objectContaining({
@@ -994,7 +994,7 @@ describe('generateRequestConfirmationEvent', () => {
     expect(call1).toBeDefined();
   });
 
-  it('should return a confirmation event with an undefined role for a content-less response event', () => {
+  it('should return a confirmation event with a user role for a content-less response event', () => {
     const functionCallEvent = createEvent({
       content: {
         role: 'user',
@@ -1019,7 +1019,7 @@ describe('generateRequestConfirmationEvent', () => {
       functionResponseEvent,
     });
 
-    expect(event?.content?.role).toBeUndefined();
+    expect(event?.content?.role).toBe('user');
     expect(event?.content?.parts).toEqual([
       expect.objectContaining({
         functionCall: expect.objectContaining({
