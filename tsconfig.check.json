@@ -3,7 +3,6 @@
   "compilerOptions": {
     "paths": {
       "@google/adk": ["./core/src/index.ts"],
-      "@google/adk/*": ["./core/src/*"],
       "@google/adk-devtools": ["./dev/src/index.ts"],
       "@google/adk-integrations": ["./integrations/src/index.ts"]
     }
