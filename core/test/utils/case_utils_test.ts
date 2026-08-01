@@ -5,9 +5,24 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {camelCaseKeys} from '../../src/utils/case_utils.js';
+import {camelCaseKeys, snakeCase} from '../../src/utils/case_utils.js';
 
 describe('case_utils', () => {
+  describe('snakeCase', () => {
+    it.each([
+      ['camelCase', 'camel_case'],
+      ['UpperCamelCase', 'upper_camel_case'],
+      ['space separated', 'space_separated'],
+      ['Mock API', 'mock_api'],
+      ['REST API', 'rest_api'],
+      ['Empty Description API', 'empty_description_api'],
+      ['  weird--punctuation!!  ', 'weird_punctuation'],
+      ['', ''],
+    ])('should convert %o to %o', (input, expected) => {
+      expect(snakeCase(input)).toBe(expected);
+    });
+  });
+
   describe('camelCaseKeys', () => {
     it('should convert simple object keys', () => {
       const input = {
