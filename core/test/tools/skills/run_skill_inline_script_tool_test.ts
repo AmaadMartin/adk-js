@@ -252,8 +252,8 @@ describe('RunSkillInlineScriptTool', () => {
       }),
     });
 
-    // No configured directory: materializeFiles applies its own cwd default.
-    expect(materializeFiles).toHaveBeenCalledWith([testFile], undefined);
+    // No configured directory: the toolset resolves the cwd default itself.
+    expect(materializeFiles).toHaveBeenCalledWith([testFile], process.cwd());
   });
 
   it('materializes output files into the configured output directory', async () => {

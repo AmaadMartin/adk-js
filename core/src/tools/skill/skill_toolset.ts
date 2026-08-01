@@ -47,7 +47,7 @@ export class SkillToolset extends BaseToolset {
   public registry?: SkillRegistry;
   private toolCache = new Map<string, BaseTool[]>();
   private fetchedSkillCache = new Map<string, Map<string, Skill>>();
-  public readonly outputDir?: string;
+  private readonly configuredOutputDir?: string;
 
   constructor(
     skills: Record<string, Skill> | Skill[],
@@ -65,12 +65,10 @@ export class SkillToolset extends BaseToolset {
        */
       allowInlineScripts?: boolean;
       /**
-       * Directory that skill script output files are written into. The names
-       * the tools report back to the model are relative to it.
-       *
-       * Defaults to the host process's current working directory, so an agent
-       * launched from a source checkout writes model-named files into that
-       * checkout; set this to keep skill output out of the working tree.
+       * Directory that files produced by `run_skill_script` and
+       * `run_skill_inline_script` are written to. Relative paths resolve
+       * against the agent process's working directory. Defaults to the agent
+       * process's current working directory.
        */
       outputDir?: string;
     } = {},
@@ -82,7 +80,7 @@ export class SkillToolset extends BaseToolset {
     this.codeExecutor = options.codeExecutor;
     this.additionalTools = options.additionalTools || [];
     this.registry = options.registry;
-    this.outputDir = options.outputDir;
+    this.configuredOutputDir = options.outputDir;
 
     this.tools = [
       new ListSkillsTool(this),
@@ -100,6 +98,16 @@ export class SkillToolset extends BaseToolset {
     if (this.registry) {
       this.tools.push(new SearchSkillsTool(this));
     }
+  }
+
+  /**
+   * Directory that skill-script output files are written to.
+   *
+   * Resolved on each read so a host that changes its working directory is not
+   * pinned to the value captured when the toolset was constructed.
+   */
+  get outputDir(): string {
+    return this.configuredOutputDir ?? process.cwd();
   }
 
   override async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {
