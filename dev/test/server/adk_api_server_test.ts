@@ -18,6 +18,8 @@ import {
   InMemorySessionService,
   InvocationContext,
   LlmAgent,
+  Logger,
+  LogLevel,
   Runner,
   Session,
 } from '@google/adk';
@@ -1254,5 +1256,52 @@ describe('AdkWebServer', () => {
         await specificServer.stop();
       }
     });
+  });
+});
+
+/**
+ * A stub loader for tests that only exercise the constructor: a real
+ * `AgentLoader` installs process-level `SIGINT` and `uncaughtException`
+ * handlers that call `process.exit()`, which must not happen in a test worker.
+ * `AgentLoader` has private fields, so the stub cannot be structurally typed.
+ */
+const STUB_AGENT_LOADER = {
+  listAgents: () => Promise.resolve([]),
+} as unknown as AgentLoader;
+
+function createRecordingLogger(): {logger: Logger; pinnedLevels: LogLevel[]} {
+  const pinnedLevels: LogLevel[] = [];
+  return {
+    pinnedLevels,
+    logger: {
+      setLogLevel: (level: LogLevel) => pinnedLevels.push(level),
+      log: () => {},
+      debug: () => {},
+      info: () => {},
+      warn: () => {},
+      error: () => {},
+    },
+  };
+}
+
+describe('AdkApiServer log level', () => {
+  it('leaves the logger on the process default when no logLevel is given', () => {
+    const {logger, pinnedLevels} = createRecordingLogger();
+
+    new AdkApiServer({logger, agentLoader: STUB_AGENT_LOADER});
+
+    expect(pinnedLevels).toEqual([]);
+  });
+
+  it('pins the logger to the caller-supplied logLevel', () => {
+    const {logger, pinnedLevels} = createRecordingLogger();
+
+    new AdkApiServer({
+      logger,
+      agentLoader: STUB_AGENT_LOADER,
+      logLevel: LogLevel.DEBUG,
+    });
+
+    expect(pinnedLevels).toEqual([LogLevel.DEBUG]);
   });
 });
