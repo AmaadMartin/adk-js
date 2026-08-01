@@ -460,7 +460,7 @@ describe('handleFunctionCallList', () => {
     );
   });
 
-  it('should leave scheduling unset when the tool does not set it', async () => {
+  it('should omit scheduling entirely when the tool does not set it', async () => {
     const event = await handleFunctionCallList({
       invocationContext,
       functionCalls: [functionCall],
@@ -469,12 +469,12 @@ describe('handleFunctionCallList', () => {
       afterToolCallbacks: [],
     });
 
-    expect(
-      event?.content?.parts?.[0].functionResponse?.scheduling,
-    ).toBeUndefined();
+    expect(event?.content?.parts?.[0].functionResponse).not.toHaveProperty(
+      'scheduling',
+    );
   });
 
-  it('should serialise scheduling only when the tool sets it', async () => {
+  it('should carry scheduling through JSON serialisation', async () => {
     const interruptTool = new FunctionTool({
       name: 'interruptTool',
       description: 'tool the model must react to immediately',
@@ -483,31 +483,20 @@ describe('handleFunctionCallList', () => {
       responseScheduling: FunctionResponseScheduling.INTERRUPT,
     });
 
-    const stampedEvent = await handleFunctionCallList({
+    const event = await handleFunctionCallList({
       invocationContext,
       functionCalls: [callFor(interruptTool)],
       toolsDict: {interruptTool},
       beforeToolCallbacks: [],
       afterToolCallbacks: [],
     });
-    const stamped: unknown = JSON.parse(
-      JSON.stringify(stampedEvent?.content?.parts?.[0].functionResponse),
+
+    const serialised: unknown = JSON.parse(
+      JSON.stringify(event?.content?.parts?.[0].functionResponse),
     );
-    expect(stamped).toMatchObject({
+    expect(serialised).toMatchObject({
       scheduling: FunctionResponseScheduling.INTERRUPT,
     });
-
-    const unstampedEvent = await handleFunctionCallList({
-      invocationContext,
-      functionCalls: [functionCall],
-      toolsDict,
-      beforeToolCallbacks: [],
-      afterToolCallbacks: [],
-    });
-    const unstamped: unknown = JSON.parse(
-      JSON.stringify(unstampedEvent?.content?.parts?.[0].functionResponse),
-    );
-    expect(unstamped).not.toHaveProperty('scheduling');
   });
 });
 
