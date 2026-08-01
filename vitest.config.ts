@@ -7,6 +7,10 @@
 import path from 'path';
 import {defineConfig} from 'vitest/config';
 
+// A per-hook or per-test timeout argument replaces the budgets below rather
+// than adding to them, so add one only to raise a specific operation - never to
+// restate or lower one.
+
 /**
  * Hook budget (ms) for the `integration` project: install-heavy `beforeAll`
  * hooks run `npm install` (and sometimes `npm run build`) per fixture, and the
@@ -16,21 +20,14 @@ import {defineConfig} from 'vitest/config';
  * The twelve `build_setup` hook runs take ~16s combined warm on ubuntu-latest,
  * but a cold, network-bound install has been measured at ~70s, so 120s covers
  * the worst case. Trade-off: a genuinely stuck hook takes this long to surface.
- *
- * An install or teardown hook must not pass its own timeout argument, which
- * shadows this floor rather than raising it.
  */
 const INTEGRATION_HOOK_TIMEOUT_MS = 120000;
 
 /**
  * Test budget (ms) for the `integration` project, sized for the
- * subprocess-spawning and esbuild-bundling suites under `tests/integration`.
- *
- * A per-test `it()` timeout argument replaces this budget rather than adding
- * to it, so add one only to *raise* it for a specific operation, naming and
- * justifying it where it is declared. A per-file constant that restates or
- * lowers this value silently shrinks the budget for exactly the install- and
- * compile-bound work these defaults exist to cover.
+ * subprocess-spawning suites under `tests/integration`. Must stay above
+ * `UnsafeLocalCodeExecutor`'s default `timeoutSeconds` (30) so the executor's
+ * own timeout error surfaces before Vitest's.
  */
 const INTEGRATION_TEST_TIMEOUT_MS = 60000;
 
