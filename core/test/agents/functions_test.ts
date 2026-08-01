@@ -14,6 +14,7 @@ import {
   FunctionTool,
   InvocationContext,
   LlmAgent,
+  LongRunningFunctionTool,
   PluginManager,
   Session,
   SingleAfterToolCallback,
@@ -169,6 +170,35 @@ const skipSummarizationLongRunningTool = new FunctionTool({
   },
   isLongRunning: true,
 });
+
+const throwingLongRunningTool = new LongRunningFunctionTool({
+  name: 'throwingLongRunningTool',
+  description: 'long running tool that throws',
+  parameters: z.object({}),
+  execute: async () => {
+    throw new Error('boom');
+  },
+});
+
+/**
+ * Throws straight out of `BaseTool.runAsync`, so the error reaches
+ * `handleFunctionCallList` without the `FunctionTool` message prefix.
+ */
+class ThrowingLongRunningBaseTool extends BaseTool {
+  constructor() {
+    super({
+      name: 'throwingLongRunningBaseTool',
+      description: 'long running base tool that throws',
+      isLongRunning: true,
+    });
+  }
+
+  override async runAsync(): Promise<unknown> {
+    throw new Error('raw failure');
+  }
+}
+
+const throwingLongRunningBaseTool = new ThrowingLongRunningBaseTool();
 
 function callFor(tool: BaseTool): FunctionCall {
   return {id: randomIdForTestingOnly(), name: tool.name, args: {}};
@@ -604,6 +634,97 @@ describe('handleFunctionCallList', () => {
       ticket: 'T-1',
       assignee: 'ada',
     });
+  });
+
+  it('should emit an error response event when a long-running tool throws', async () => {
+    const throwingCall = callFor(throwingLongRunningTool);
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [throwingCall],
+      toolsDict: {throwingLongRunningTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event).not.toBeNull();
+    expect(event?.content?.parts?.[0].functionResponse).toEqual({
+      id: throwingCall.id,
+      name: 'throwingLongRunningTool',
+      response: {error: "Error in tool 'throwingLongRunningTool': boom"},
+    });
+  });
+
+  it('should emit an error response event when a long-running BaseTool subclass throws', async () => {
+    const throwingCall = callFor(throwingLongRunningBaseTool);
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [throwingCall],
+      toolsDict: {throwingLongRunningBaseTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event).not.toBeNull();
+    expect(event?.content?.parts?.[0].functionResponse).toEqual({
+      id: throwingCall.id,
+      name: 'throwingLongRunningBaseTool',
+      response: {error: 'raw failure'},
+    });
+  });
+
+  it('should still defer the event when a long-running tool returns nullish without throwing', async () => {
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(silentLongRunningTool)],
+      toolsDict: {silentLongRunningTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event).toBeNull();
+  });
+
+  it('should emit the plugin onToolErrorCallback response for a long-running tool', async () => {
+    const plugin = new TestPlugin('testPlugin');
+    plugin.onToolErrorCallbackResponse = {result: 'recovered'};
+    pluginManager.registerPlugin(plugin);
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(throwingLongRunningTool)],
+      toolsDict: {throwingLongRunningTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event).not.toBeNull();
+    expect(event?.content?.parts?.[0].functionResponse?.response).toEqual({
+      result: 'recovered',
+    });
+  });
+
+  it('should emit a response part only for the long-running tool that threw', async () => {
+    const throwingCall = callFor(throwingLongRunningTool);
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(silentLongRunningTool), throwingCall],
+      toolsDict: {silentLongRunningTool, throwingLongRunningTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event?.content?.parts).toEqual([
+      expect.objectContaining({
+        functionResponse: {
+          id: throwingCall.id,
+          name: 'throwingLongRunningTool',
+          response: {error: "Error in tool 'throwingLongRunningTool': boom"},
+        },
+      }),
+    ]);
   });
 });
 
