@@ -285,7 +285,7 @@ export class InvocationContext {
    *
    * @return A new array; the events themselves are not copied.
    */
-  getCurrentInvocationEvents(): Event[] {
+  private getCurrentInvocationEvents(): Event[] {
     return this.session.events.filter(
       (event) => event.invocationId === this.invocationId,
     );
@@ -361,18 +361,15 @@ export class InvocationContext {
       // read back through transformToCamelCaseEvent can carry an explicit
       // `null` here, which means "not recorded".
       if (event.actions.endOfAgent) {
-        this.endOfAgents[key] = true;
-        delete this.agentStates[key];
+        this.setAgentState(key, {endOfAgent: true});
       } else if (event.actions.agentState) {
-        this.agentStates[key] = event.actions.agentState;
-        this.endOfAgents[key] = false;
+        this.setAgentState(key, {agentState: event.actions.agentState});
       } else if (
         key !== 'user' &&
         event.content &&
         this.agentStates[key] === undefined
       ) {
-        this.agentStates[key] = {};
-        this.endOfAgents[key] = false;
+        this.setAgentState(key, {agentState: {}});
       }
     }
   }

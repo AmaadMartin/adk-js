@@ -239,24 +239,6 @@ describe('InvocationContext.isResumable', () => {
   });
 });
 
-describe('InvocationContext.getCurrentInvocationEvents', () => {
-  it('keeps only this invocation, in session order', () => {
-    const first = makeAgentEvent({content: MODEL_CONTENT});
-    const other = createEvent({invocationId: 'inv-2', author: 'agent1'});
-    const last = makeAgentEvent({content: MODEL_CONTENT});
-
-    const events = makeContext({
-      events: [first, other, last],
-    }).getCurrentInvocationEvents();
-
-    expect(events).toEqual([first, last]);
-  });
-
-  it('returns an empty list for a session with no events', () => {
-    expect(makeContext().getCurrentInvocationEvents()).toEqual([]);
-  });
-});
-
 describe('InvocationContext.setAgentState', () => {
   it('marks the agent final and drops its checkpoint', () => {
     const ctx = makeContext();
@@ -408,6 +390,38 @@ describe('InvocationContext.populateInvocationAgentStates', () => {
 
     expect(ctx.agentStates).toEqual({agent1: {}});
     expect(ctx.endOfAgents).toEqual({agent1: false});
+  });
+
+  it('drops an earlier checkpoint once the agent reports it finished', () => {
+    const ctx = populate([
+      makeAgentEvent({actions: createEventActions({agentState: {step: 1}})}),
+      makeAgentEvent({actions: createEventActions({endOfAgent: true})}),
+    ]);
+
+    expect(ctx.agentStates).toEqual({});
+    expect(ctx.endOfAgents).toEqual({agent1: true});
+  });
+
+  it('replays this invocation in session order, so the last checkpoint wins', () => {
+    const ctx = populate([
+      makeAgentEvent({actions: createEventActions({agentState: {step: 1}})}),
+      makeAgentEvent({actions: createEventActions({agentState: {step: 2}})}),
+      createEvent({
+        invocationId: 'inv-2',
+        author: 'agent1',
+        actions: createEventActions({endOfAgent: true}),
+      }),
+    ]);
+
+    expect(ctx.agentStates).toEqual({agent1: {step: 2}});
+    expect(ctx.endOfAgents).toEqual({agent1: false});
+  });
+
+  it('leaves both maps empty for a session with no events', () => {
+    const ctx = populate([]);
+
+    expect(ctx.agentStates).toEqual({});
+    expect(ctx.endOfAgents).toEqual({});
   });
 
   it('does nothing when the invocation is not resumable', () => {
