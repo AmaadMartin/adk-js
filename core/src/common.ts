@@ -307,11 +307,7 @@ export {SkillToolset} from './tools/skill/skill_toolset.js';
 
 export {
   DEFAULT_SIMULATION_MODEL,
-  EnvironmentSimulationConfigSchema,
-  InjectedErrorSchema,
-  InjectionConfigSchema,
   MockStrategy,
-  ToolSimulationConfigSchema,
 } from './tools/environment_simulation/environment_simulation_config.js';
 export type {
   EnvironmentSimulationConfig,
@@ -321,10 +317,6 @@ export type {
   ToolSimulationConfig,
 } from './tools/environment_simulation/environment_simulation_config.js';
 export {ToolConnectionAnalyzer} from './tools/environment_simulation/tool_connection_analyzer.js';
-export {
-  StatefulParameterSchema,
-  ToolConnectionMapSchema,
-} from './tools/environment_simulation/tool_connection_map.js';
 export type {
   StatefulParameter,
   ToolConnectionMap,

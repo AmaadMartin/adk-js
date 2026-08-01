@@ -6,11 +6,11 @@
 
 import {GenerateContentConfig} from '@google/genai';
 
-import {BaseLlm} from '../../models/base_llm.js';
-import {LlmRequest} from '../../models/llm_request.js';
+import {BaseLlm} from '../models/base_llm.js';
+import {LlmRequest} from '../models/llm_request.js';
 
-/** Parameters for {@link generateSimulationText}. */
-export interface GenerateSimulationTextParams {
+/** Parameters for {@link generateJsonText}. */
+export interface GenerateJsonTextParams {
   /** The model to send the prompt to. */
   llm: BaseLlm;
   /** The model name recorded on the request. */
@@ -25,18 +25,18 @@ const LEADING_CODE_FENCE = /^```[a-zA-Z]*\n/;
 const TRAILING_CODE_FENCE = /\n```$/;
 
 /**
- * Sends a single-prompt JSON request to `llm` and concatenates the text parts
- * of every streamed response.
+ * Sends a single-prompt request asking for JSON to `llm` and concatenates the
+ * text parts of every streamed response.
  *
  * @param params The model, model name, generation config and prompt.
  * @returns The concatenated response text.
  */
-export async function generateSimulationText({
+export async function generateJsonText({
   llm,
   model,
   config,
   prompt,
-}: GenerateSimulationTextParams): Promise<string> {
+}: GenerateJsonTextParams): Promise<string> {
   const request: LlmRequest = {
     model,
     contents: [{role: 'user', parts: [{text: prompt}]}],
@@ -63,7 +63,7 @@ export async function generateSimulationText({
  * @returns The parsed value, or `undefined` when the text is not valid JSON.
  *     Callers decide how to recover, so this never throws.
  */
-export function parseFencedJson(text: string): unknown | undefined {
+export function parseFencedJson(text: string): unknown {
   const unfenced = text
     .replace(LEADING_CODE_FENCE, '')
     .replace(TRAILING_CODE_FENCE, '')

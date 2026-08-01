@@ -4,13 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {MockStrategy} from '@google/adk';
+import {describe, expect, it} from 'vitest';
+
 import {
   EnvironmentSimulationConfigSchema,
   InjectionConfigSchema,
-  MockStrategy,
   ToolSimulationConfigSchema,
-} from '@google/adk';
-import {describe, expect, it} from 'vitest';
+} from '../../../src/tools/environment_simulation/environment_simulation_config.js';
 
 const TOOL_SPEC_ENTRY = {
   toolName: 'create_ticket',
