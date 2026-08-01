@@ -57,7 +57,7 @@ To maintain high code quality and consistency:
    npm run ts:check
    ```
 
-   A few paths with pre-existing type errors are still excluded; see
+   Some paths with pre-existing type errors are still excluded; see
    `exclude` in `tsconfig.check.json`.
 
 The project uses `husky` and `lint-staged` to automatically lint and format

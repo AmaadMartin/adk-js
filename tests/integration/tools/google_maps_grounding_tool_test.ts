@@ -45,9 +45,7 @@ class SpyGemini extends Gemini {
     this.spyClient = new SpyMockGenAIClient(response);
   }
 
-  // simplicity: `Gemini['apiClient']` rather than naming `GoogleGenAI` -- see
-  // the note in tests/integration/test_case_utils.ts; @google/genai resolves to
-  // a different copy here than inside core.
+  // Not `GoogleGenAI` -- see the note in tests/integration/test_case_utils.ts.
   override get apiClient(): Gemini['apiClient'] {
     return this.spyClient as unknown as Gemini['apiClient'];
   }
