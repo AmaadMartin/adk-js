@@ -262,11 +262,7 @@ export class DatabaseSessionService extends BaseSessionService {
     await this.init();
     const em = this.orm!.em.fork();
 
-    // One scope drives both the session query and the user-state query, so the
-    // two can never disagree about which users are in range.
-    const where = (
-      userId === undefined ? {appName} : {appName, userId}
-    ) satisfies FilterQuery<StorageSession> & FilterQuery<StorageUserState>;
+    const where = userId === undefined ? {appName} : {appName, userId};
 
     const orderBy =
       order === 'asc'
