@@ -17,6 +17,8 @@ import {
   ContextCompactorRequestProcessor,
   createEvent,
   Event,
+  FunctionTool,
+  InMemorySessionService,
   InvocationContext,
   LlmAgent,
   LlmRequest,
@@ -26,7 +28,7 @@ import {
   Session,
   ToolProcessLlmRequest,
 } from '@google/adk';
-import {Content, Schema, Type} from '@google/genai';
+import {Content, FinishReason, Schema, Type} from '@google/genai';
 import {beforeEach, describe, expect, it} from 'vitest';
 import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
@@ -837,5 +839,129 @@ describe('LlmAgent Default Request Processors', () => {
       CONTENT_REQUEST_PROCESSOR,
     );
     expect(authIndex).toBeLessThan(contentIndex);
+  });
+});
+
+/** A model that replays one array of chunks per call and counts its calls. */
+class MultiStepMockLlm extends BaseLlm {
+  callCount = 0;
+  readonly steps: LlmResponse[][];
+
+  constructor(steps: LlmResponse[][]) {
+    super({model: 'multi-step-mock-llm'});
+    this.steps = steps;
+  }
+
+  async *generateContentAsync(
+    _request: LlmRequest,
+  ): AsyncGenerator<LlmResponse, void, void> {
+    const chunks = this.steps[this.callCount] ?? [];
+    this.callCount++;
+    yield* chunks;
+  }
+
+  async connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
+    return new MockLlmConnection();
+  }
+}
+
+describe('LlmAgent step loop termination', () => {
+  let session: Session;
+
+  beforeEach(async () => {
+    session = await new InMemorySessionService().createSession({
+      appName: 'test_app',
+      userId: 'test_user',
+    });
+  });
+
+  it('should end the turn on the actions-only event of a deferring long-running tool', async () => {
+    const deferringTool = new FunctionTool({
+      name: 'deferringTool',
+      description: 'records state, defers its response',
+      parameters: z3.object({}),
+      execute: async (_args, toolContext) => {
+        toolContext?.state.set('ticket', 'T-1');
+        return null;
+      },
+      isLongRunning: true,
+    });
+    const model = new MultiStepMockLlm([
+      [
+        {
+          content: {
+            role: 'model',
+            parts: [{functionCall: {name: 'deferringTool', args: {}}}],
+          },
+        },
+      ],
+    ]);
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model,
+      tools: [deferringTool],
+    });
+    const invocationContext = new InvocationContext({
+      invocationId: 'inv_123',
+      session,
+      agent,
+      pluginManager: new PluginManager(),
+    });
+
+    const events: Event[] = [];
+    for await (const event of agent.runAsync(invocationContext)) {
+      events.push(event);
+    }
+
+    expect(model.callCount).toBe(1);
+    const lastEvent = events[events.length - 1];
+    expect(lastEvent.content).toBeUndefined();
+    expect(lastEvent.actions.stateDelta).toEqual({ticket: 'T-1'});
+  });
+
+  it('should continue the turn on a trailing empty metadata chunk that recorded no actions', async () => {
+    const respondingTool = new FunctionTool({
+      name: 'respondingTool',
+      description: 'returns a value',
+      parameters: z3.object({}),
+      execute: async () => ({result: 'done'}),
+    });
+    const model = new MultiStepMockLlm([
+      [
+        {
+          content: {
+            role: 'model',
+            parts: [{functionCall: {name: 'respondingTool', args: {}}}],
+          },
+        },
+        {
+          errorCode: FinishReason.STOP,
+          finishReason: FinishReason.STOP,
+          usageMetadata: {promptTokenCount: 10, totalTokenCount: 10},
+        },
+      ],
+      [{content: {role: 'model', parts: [{text: 'all done'}]}}],
+    ]);
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model,
+      tools: [respondingTool],
+    });
+    const invocationContext = new InvocationContext({
+      invocationId: 'inv_123',
+      session,
+      agent,
+      pluginManager: new PluginManager(),
+    });
+
+    const events: Event[] = [];
+    for await (const event of agent.runAsync(invocationContext)) {
+      events.push(event);
+    }
+
+    expect(model.callCount).toBe(2);
+    expect(events[events.length - 1].content?.parts).toEqual([
+      {text: 'all done'},
+    ]);
   });
 });

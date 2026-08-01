@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
+  AuthConfig,
   BasePlugin,
   BaseTool,
   createEvent,
@@ -107,6 +108,65 @@ const falsyLongRunningTool = new FunctionTool({
   description: 'long running tool returning an empty string',
   parameters: z.object({}),
   execute: async () => '',
+  isLongRunning: true,
+});
+
+const stateRecordingLongRunningTool = new FunctionTool({
+  name: 'stateRecordingLongRunningTool',
+  description: 'long running tool recording state and returning nullish',
+  parameters: z.object({}),
+  execute: async (_args, toolContext) => {
+    toolContext?.state.set('ticket', 'T-1');
+    return null;
+  },
+  isLongRunning: true,
+});
+
+const otherStateRecordingLongRunningTool = new FunctionTool({
+  name: 'otherStateRecordingLongRunningTool',
+  description: 'second long running tool recording state, returning nullish',
+  parameters: z.object({}),
+  execute: async (_args, toolContext) => {
+    toolContext?.state.set('assignee', 'ada');
+    return null;
+  },
+  isLongRunning: true,
+});
+
+const artifactRecordingLongRunningTool = new FunctionTool({
+  name: 'artifactRecordingLongRunningTool',
+  description: 'long running tool recording an artifact, returning nullish',
+  parameters: z.object({}),
+  execute: async (_args, toolContext) => {
+    if (toolContext) {
+      toolContext.actions.artifactDelta['report.txt'] = 1;
+    }
+    return null;
+  },
+  isLongRunning: true,
+});
+
+const confirmingLongRunningTool = new FunctionTool({
+  name: 'confirmingLongRunningTool',
+  description: 'long running tool requesting confirmation, returning nullish',
+  parameters: z.object({}),
+  execute: async (_args, toolContext) => {
+    toolContext?.requestConfirmation({hint: 'ok?'});
+    return null;
+  },
+  isLongRunning: true,
+});
+
+const skipSummarizationLongRunningTool = new FunctionTool({
+  name: 'skipSummarizationLongRunningTool',
+  description: 'long running tool setting a scalar action, returning nullish',
+  parameters: z.object({}),
+  execute: async (_args, toolContext) => {
+    if (toolContext) {
+      toolContext.actions.skipSummarization = true;
+    }
+    return null;
+  },
   isLongRunning: true,
 });
 
@@ -437,6 +497,114 @@ describe('handleFunctionCallList', () => {
       }),
     ]);
   });
+
+  it('should emit a content-less event carrying the state a deferring long-running tool recorded', async () => {
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(stateRecordingLongRunningTool)],
+      toolsDict: {stateRecordingLongRunningTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event).not.toBeNull();
+    expect(event?.content).toBeUndefined();
+    expect(event?.actions.stateDelta).toEqual({ticket: 'T-1'});
+    expect(event?.invocationId).toBe('inv_123');
+    expect(event?.author).toBe('test_agent');
+  });
+
+  it('should emit a content-less event carrying the artifactDelta a deferring long-running tool recorded', async () => {
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(artifactRecordingLongRunningTool)],
+      toolsDict: {artifactRecordingLongRunningTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event).not.toBeNull();
+    expect(event?.content).toBeUndefined();
+    expect(event?.actions.artifactDelta).toEqual({'report.txt': 1});
+  });
+
+  it('should emit the confirmation a deferring long-running tool requested, keyed by function call id', async () => {
+    const confirmationCall = callFor(confirmingLongRunningTool);
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [confirmationCall],
+      toolsDict: {confirmingLongRunningTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event).not.toBeNull();
+    expect(event?.content).toBeUndefined();
+    expect(event?.actions.requestedToolConfirmations).toEqual({
+      [confirmationCall.id!]: new ToolConfirmation({
+        hint: 'ok?',
+        confirmed: false,
+      }),
+    });
+  });
+
+  it('should emit a scalar action a deferring long-running tool recorded', async () => {
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(skipSummarizationLongRunningTool)],
+      toolsDict: {skipSummarizationLongRunningTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event).not.toBeNull();
+    expect(event?.content).toBeUndefined();
+    expect(event?.actions.skipSummarization).toBe(true);
+  });
+
+  it('should merge a deferring long-running tool actions with another tool response', async () => {
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(stateRecordingLongRunningTool), functionCall],
+      toolsDict: {stateRecordingLongRunningTool, ...toolsDict},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event?.content?.parts).toEqual([
+      expect.objectContaining({
+        functionResponse: expect.objectContaining({
+          name: 'testTool',
+          response: {result: 'tool executed'},
+        }),
+      }),
+    ]);
+    expect(event?.actions.stateDelta).toEqual({ticket: 'T-1'});
+  });
+
+  it('should merge two deferring long-running tools into one content-less event', async () => {
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [
+        callFor(stateRecordingLongRunningTool),
+        callFor(otherStateRecordingLongRunningTool),
+      ],
+      toolsDict: {
+        stateRecordingLongRunningTool,
+        otherStateRecordingLongRunningTool,
+      },
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event).not.toBeNull();
+    expect(event?.content).toBeUndefined();
+    expect(event?.actions.stateDelta).toEqual({
+      ticket: 'T-1',
+      assignee: 'ada',
+    });
+  });
 });
 
 describe('generateAuthEvent', () => {
@@ -505,6 +673,30 @@ describe('generateAuthEvent', () => {
     expect(call2).toBeDefined();
     expect(call2!.functionCall!.name).toBe('adk_request_credential');
     expect(call2!.functionCall!.args!['auth_config']).toBe('auth_config_2');
+  });
+
+  it('should return an auth event with an undefined role for a content-less response event', () => {
+    const authConfig: AuthConfig = {
+      authScheme: {type: 'apiKey', name: 'testKey', in: 'header'},
+      credentialKey: 'key-1',
+    };
+    const functionResponseEvent = createEvent({
+      actions: createEventActions({
+        requestedAuthConfigs: {'call_1': authConfig},
+      }),
+    });
+
+    const event = generateAuthEvent(invocationContext, functionResponseEvent);
+
+    expect(event?.content?.role).toBeUndefined();
+    expect(event?.content?.parts).toEqual([
+      expect.objectContaining({
+        functionCall: expect.objectContaining({
+          name: 'adk_request_credential',
+          args: {'function_call_id': 'call_1', 'auth_config': authConfig},
+        }),
+      }),
+    ]);
   });
 });
 
@@ -679,6 +871,49 @@ describe('generateRequestConfirmationEvent', () => {
         'call_1',
     );
     expect(call1).toBeDefined();
+  });
+
+  it('should return a confirmation event with an undefined role for a content-less response event', () => {
+    const functionCallEvent = createEvent({
+      content: {
+        role: 'user',
+        parts: [
+          {functionCall: {name: 'tool_1', args: {arg: 'val1'}, id: 'call_1'}},
+        ],
+      },
+    });
+    const toolConfirmation = new ToolConfirmation({
+      hint: 'confirm tool 1',
+      confirmed: false,
+    });
+    const functionResponseEvent = createEvent({
+      actions: createEventActions({
+        requestedToolConfirmations: {'call_1': toolConfirmation},
+      }),
+    });
+
+    const event = generateRequestConfirmationEvent({
+      invocationContext,
+      functionCallEvent,
+      functionResponseEvent,
+    });
+
+    expect(event?.content?.role).toBeUndefined();
+    expect(event?.content?.parts).toEqual([
+      expect.objectContaining({
+        functionCall: expect.objectContaining({
+          name: 'adk_request_confirmation',
+          args: {
+            'originalFunctionCall': {
+              name: 'tool_1',
+              args: {arg: 'val1'},
+              id: 'call_1',
+            },
+            'toolConfirmation': toolConfirmation,
+          },
+        }),
+      }),
+    ]);
   });
 });
 
