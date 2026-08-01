@@ -6,8 +6,8 @@
 
 import {InMemoryRunner, LlmAgent, RoutedAgent} from '@google/adk';
 import * as dotenv from 'dotenv';
-import * as fs from 'fs';
-import * as path from 'path';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import {describe, expect, it} from 'vitest';
 
 const envPath = path.resolve(__dirname, '.env');

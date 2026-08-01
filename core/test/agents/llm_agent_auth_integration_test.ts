@@ -17,7 +17,7 @@ import {
   RestApiTool,
   Runner,
 } from '@google/adk';
-import * as http from 'http';
+import * as http from 'node:http';
 import {OpenAPIV3} from 'openapi-types';
 import {
   afterAll,
