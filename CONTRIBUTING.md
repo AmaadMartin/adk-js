@@ -6,6 +6,10 @@ We'd love to accept your patches and contributions to this project.
 
 ### Getting Started
 
+> **Prerequisite:** Node.js 24 or newer (the current Active LTS line). This is
+> the version CI runs on all platforms, and it is declared as `engines.node` in
+> the root `package.json`.
+
 To set up your local development environment for contributing:
 
 1. **Clone the repository**:
