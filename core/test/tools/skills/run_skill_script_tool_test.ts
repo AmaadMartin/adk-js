@@ -13,12 +13,26 @@ import {
   File,
   InvocationContext,
   LlmAgent,
+  Resources,
   RunSkillScriptTool,
   Skill,
   SkillToolset,
 } from '@google/adk';
-import {describe, expect, it, vi} from 'vitest';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+  type MockInstance,
+} from 'vitest';
+import {
+  getSkillResourceFiles,
+  MAX_SKILL_PAYLOAD_BYTES,
+} from '../../../src/tools/skill/run_skill_script_tool.js';
 import {materializeFiles} from '../../../src/utils/file_utils.js';
+import {logger} from '../../../src/utils/logger.js';
 
 vi.mock('../../../src/utils/file_utils.js', () => ({
   materializeFiles: vi.fn(),
@@ -227,5 +241,71 @@ describe('RunSkillScriptTool', () => {
     });
 
     expect(materializeFiles).toHaveBeenCalledWith([testFile]);
+  });
+
+  describe('payload size accounting', () => {
+    let warnSpy: MockInstance<typeof logger.warn>;
+
+    beforeEach(() => {
+      warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+      warnSpy.mockRestore();
+    });
+
+    function skillWithResources(resources: Resources): Skill {
+      return {...mockSkill, resources};
+    }
+
+    function expectedWarning(totalBytes: number): string {
+      return (
+        `Skill '${mockSkill.frontmatter.name}' resources total ${totalBytes} bytes, ` +
+        `exceeding the recommended limit of ${MAX_SKILL_PAYLOAD_BYTES} bytes.`
+      );
+    }
+
+    it('does not warn when skill resources are under the limit', () => {
+      const files = getSkillResourceFiles(mockSkill);
+
+      expect(files).toHaveLength(4);
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it('does not warn when skill resources are exactly at the limit', () => {
+      const skill = skillWithResources({
+        references: {'big.txt': 'x'.repeat(MAX_SKILL_PAYLOAD_BYTES)},
+      });
+
+      const files = getSkillResourceFiles(skill);
+
+      expect(files).toHaveLength(1);
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it('warns when skill resources exceed the limit', () => {
+      const totalBytes = MAX_SKILL_PAYLOAD_BYTES + 1;
+      const skill = skillWithResources({
+        references: {'big.txt': 'x'.repeat(totalBytes)},
+      });
+
+      const files = getSkillResourceFiles(skill);
+
+      expect(files).toHaveLength(1);
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy).toHaveBeenCalledWith(expectedWarning(totalBytes));
+    });
+
+    it('counts Buffer resources toward the limit', () => {
+      const totalBytes = MAX_SKILL_PAYLOAD_BYTES + 1;
+      const skill = skillWithResources({
+        assets: {'big.bin': Buffer.alloc(totalBytes)},
+      });
+
+      getSkillResourceFiles(skill);
+
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy).toHaveBeenCalledWith(expectedWarning(totalBytes));
+    });
   });
 });

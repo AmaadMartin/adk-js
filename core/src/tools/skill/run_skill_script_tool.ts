@@ -18,8 +18,16 @@ import {
   getScriptLanguageByExtension,
 } from '../../utils/file_extension_utils.js';
 import {materializeFiles} from '../../utils/file_utils.js';
+import {logger} from '../../utils/logger.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
 import {SkillToolset} from './skill_toolset.js';
+
+/**
+ * Recommended maximum total size of a skill's resources shipped into a code
+ * executor. Exceeding it is logged as a warning, not enforced. Kept in sync
+ * with the Python SDK's limit in `src/google/adk/tools/skill_toolset.py`.
+ */
+export const MAX_SKILL_PAYLOAD_BYTES = 16 * 1024 * 1024; // 16 MB
 
 @experimental
 export class RunSkillScriptTool extends BaseTool {
@@ -178,6 +186,7 @@ function buildWrapperCode(
 
 export function getSkillResourceFiles(skill: Skill): File[] {
   const files: File[] = [];
+  let totalBytes = 0;
 
   for (const resourceType of ['references', 'assets', 'scripts']) {
     const resources =
@@ -207,6 +216,8 @@ export function getSkillResourceFiles(skill: Skill): File[] {
         continue;
       }
 
+      totalBytes += Buffer.byteLength(fileContent);
+
       const ext = path.extname(resourceName).toLowerCase();
       const {encoding, mimeType} = getMimeTypeAndEncoding(ext);
       files.push({
@@ -216,6 +227,13 @@ export function getSkillResourceFiles(skill: Skill): File[] {
         mimeType,
       });
     }
+  }
+
+  if (totalBytes > MAX_SKILL_PAYLOAD_BYTES) {
+    logger.warn(
+      `Skill '${skill.frontmatter.name}' resources total ${totalBytes} bytes, ` +
+        `exceeding the recommended limit of ${MAX_SKILL_PAYLOAD_BYTES} bytes.`,
+    );
   }
 
   return files;
