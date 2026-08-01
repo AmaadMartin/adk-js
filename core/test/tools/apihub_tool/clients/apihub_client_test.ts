@@ -167,6 +167,13 @@ describe('apihub_client', () => {
           apiResourceName: `projects/q-project/locations/${LOCATION}/apis/api1`,
         },
       ],
+      [
+        `projects/${PROJECT}/locations/${LOCATION}/apis/api-hub/versions/v1`,
+        {
+          apiResourceName: `projects/${PROJECT}/locations/${LOCATION}/apis/api-hub`,
+          apiVersionResourceName: `projects/${PROJECT}/locations/${LOCATION}/apis/api-hub/versions/v1`,
+        },
+      ],
     ])('should extract the resource names from %s', (input, expected) => {
       expect(extractResourceName(input)).toEqual(expected);
     });

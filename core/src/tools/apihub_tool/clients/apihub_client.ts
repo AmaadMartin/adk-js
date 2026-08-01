@@ -81,9 +81,9 @@ export function extractResourceName(urlOrPath: string): ApiHubResourceNames {
     query = url.searchParams;
   }
 
-  // A Console URL prefixes the resource path with the API Hub UI route.
-  path = path.split('api-hub/').at(1) ?? path;
-
+  // The segment walk below ignores any Console UI route prefix on its own, so
+  // the path needs no stripping. adk-python strips everything before
+  // 'api-hub/', which corrupts a resource path whose API id is 'api-hub'.
   const segments = path.split('/').filter(Boolean);
 
   const project = segmentAfter(segments, 'projects') ?? query?.get('project');
