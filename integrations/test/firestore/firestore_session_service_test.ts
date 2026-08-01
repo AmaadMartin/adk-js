@@ -21,7 +21,6 @@ import {
   EVENTS_COLLECTION,
   ROOT_COLLECTION_ENV_VAR,
   SESSIONS_COLLECTION,
-  splitStateDelta,
   USER_STATE_COLLECTION,
   USERS_COLLECTION,
 } from '../../src/firestore/firestore_session_service.js';
@@ -49,6 +48,14 @@ function eventPath(sessionId: string, eventId: string): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
+}
+
+/** Epoch milliseconds of a stored Timestamp field. */
+function toMillis(value: unknown): number {
+  if (!isRecord(value) || typeof value.toMillis !== 'function') {
+    expect.fail(`expected a Timestamp, got ${String(value)}`);
+  }
+  return Number(value.toMillis());
 }
 
 /** Narrows a stored field to a record, failing the test when it is not one. */
@@ -148,31 +155,6 @@ describe('collection constants', () => {
   });
 });
 
-describe('splitStateDelta', () => {
-  it('routes each key by prefix and drops temporary keys', () => {
-    expect(
-      splitStateDelta({
-        'app:theme': 'dark',
-        'user:locale': 'en',
-        'temp:scratch': 1,
-        turn: 2,
-      }),
-    ).toEqual({
-      app: {theme: 'dark'},
-      user: {locale: 'en'},
-      session: {turn: 2},
-    });
-  });
-
-  it('returns empty buckets for undefined state', () => {
-    expect(splitStateDelta(undefined)).toEqual({
-      app: {},
-      user: {},
-      session: {},
-    });
-  });
-});
-
 describe('FirestoreSessionService root collection', () => {
   it('defaults to adk-session', async () => {
     const session = await service.createSession({
@@ -265,8 +247,8 @@ describe('FirestoreSessionService.createSession', () => {
     expect(document.userId).toBe(USER_ID);
     expect(document.revision).toBe(0);
     expect(document.state).toBe(JSON.stringify({turn: 1}));
-    expect(document.createTime).toBeInstanceOf(Timestamp);
-    expect(document.updateTime).toBeInstanceOf(Timestamp);
+    expect(toMillis(document.createTime)).toBe(toMillis(document.updateTime));
+    expect(toMillis(document.updateTime)).toBe(session.lastUpdateTime);
   });
 
   it('honours an explicit session id', async () => {
@@ -959,6 +941,36 @@ describe('FirestoreSessionService.appendEvent', () => {
     expect(storedState('s1')).toEqual({turn: 1});
   });
 
+  it('persists the stored state, not a stale caller in-memory view', async () => {
+    // Two callers hold the same session. The first commits `a`; the second
+    // still holds a view from before that and appends `b`. Deriving the
+    // persisted state from the caller's session would drop `a`.
+    const first = await service.getSession({
+      appName: APP_NAME,
+      userId: USER_ID,
+      sessionId: 's1',
+    });
+    const second = await service.getSession({
+      appName: APP_NAME,
+      userId: USER_ID,
+      sessionId: 's1',
+    });
+    if (!first || !second) {
+      expect.fail('expected both reads to load the session');
+    }
+
+    await service.appendEvent({
+      session: first,
+      event: eventWithDelta('e1', {a: 1}),
+    });
+    await service.appendEvent({
+      session: second,
+      event: eventWithDelta('e2', {b: 2}),
+    });
+
+    expect(storedState('s1')).toEqual({a: 1, b: 2});
+  });
+
   it('treats a session document with no revision as revision 0', async () => {
     store.write(sessionPath('legacy'), {
       id: 'legacy',
@@ -1023,31 +1035,38 @@ describe('FirestoreSessionService.appendEvent', () => {
     );
 
     expect(storedSession('s1').revision).toBe(events.length);
+    // The appends genuinely raced: Firestore aborted and re-ran the losers.
+    expect(store.transactionRetryCount).toBeGreaterThan(0);
     for (const event of events) {
       expect(store.documents.has(eventPath('s1', event.id))).toBe(true);
     }
   });
 
-  it('does not serialize appends to different sessions', async () => {
+  it('lets appends to different sessions of one app proceed without contending', async () => {
     const other = await service.createSession({
       appName: APP_NAME,
       userId: USER_ID,
       sessionId: 's2',
     });
-    const from = store.operations.length;
+    store.transactionRetryCount = 0;
 
     await Promise.all([
-      service.appendEvent({session, event: newEvent({id: 'e1'})}),
-      service.appendEvent({session: other, event: newEvent({id: 'e2'})}),
+      service.appendEvent({
+        session,
+        event: eventWithDelta('e1', {'app:theme': 'dark'}),
+      }),
+      service.appendEvent({
+        session: other,
+        event: eventWithDelta('e2', {'app:locale': 'en'}),
+      }),
     ]);
 
-    const operations = store.operations.slice(from);
-    const firstWrite = operations.findIndex((operation) =>
-      operation.startsWith('write '),
-    );
-    expect(operations.slice(0, firstWrite)).toEqual([
-      `read ${sessionPath('s1')}`,
-      `read ${sessionPath('s2')}`,
-    ]);
+    // Only the two session documents are in the read sets, so the shared
+    // app-state document cannot make unrelated sessions abort each other.
+    expect(store.transactionRetryCount).toBe(0);
+    expect(store.documents.get(APP_STATE_PATH)).toEqual({
+      theme: 'dark',
+      locale: 'en',
+    });
   });
 });

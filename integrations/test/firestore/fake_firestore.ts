@@ -24,6 +24,9 @@ interface QuerySpec {
 /** The only field this fake can order or filter on. */
 const TIMESTAMP_FIELD = 'timestamp';
 
+/** Mirrors the real client's DEFAULT_MAX_TRANSACTION_ATTEMPTS. */
+const MAX_TRANSACTION_ATTEMPTS = 5;
+
 /**
  * An in-memory Firestore, holding every document in one flat map keyed by its
  * full slash-separated path. Children are derived by path prefix, so there is
@@ -35,6 +38,13 @@ const TIMESTAMP_FIELD = 'timestamp';
  */
 export class FakeStore {
   private readonly docs = new Map<string, StoredDocument>();
+
+  /**
+   * Bumped on every write to a path. A transaction records the versions it
+   * read and refuses to commit if any of them moved, which is how real
+   * Firestore detects a conflicting concurrent write.
+   */
+  private readonly versions = new Map<string, number>();
 
   /** Path of every query run, in order, for asserting a query did not run. */
   readonly queryPaths: string[] = [];
@@ -48,6 +58,18 @@ export class FakeStore {
   /** Number of write batches committed. */
   batchCommitCount = 0;
 
+  /** Number of transaction attempts aborted by a read-set conflict. */
+  transactionRetryCount = 0;
+
+  /** Current version of a path; 0 before it is ever written. */
+  versionOf(path: string): number {
+    return this.versions.get(path) ?? 0;
+  }
+
+  private bump(path: string): void {
+    this.versions.set(path, this.versionOf(path) + 1);
+  }
+
   /** Every stored document, keyed by full path. */
   get documents(): ReadonlyMap<string, StoredDocument> {
     return this.docs;
@@ -55,12 +77,14 @@ export class FakeStore {
 
   /** Writes a document outright, replacing any existing one. */
   write(path: string, data: StoredDocument): void {
+    this.bump(path);
     this.docs.set(path, {...data});
   }
 
   /** Writes a document, merging into the existing one when asked. */
   set(path: string, data: StoredDocument, merge: boolean): void {
     this.operations.push(`write ${path}`);
+    this.bump(path);
     const existing = merge ? this.docs.get(path) : undefined;
     this.docs.set(path, {...existing, ...data});
   }
@@ -68,6 +92,7 @@ export class FakeStore {
   /** Merges fields into an existing document, as Firestore's update does. */
   update(path: string, data: StoredDocument): void {
     this.operations.push(`write ${path}`);
+    this.bump(path);
     const existing = this.docs.get(path);
     if (!existing) {
       throw new Error(
@@ -79,6 +104,7 @@ export class FakeStore {
 
   /** Removes a document, if present. */
   delete(path: string): void {
+    this.bump(path);
     this.docs.delete(path);
   }
 
@@ -150,10 +176,20 @@ class FakeQuerySnapshot {
   constructor(readonly docs: FakeDocumentSnapshot[]) {}
 }
 
+/** Narrows a value to a Timestamp structurally, as the service does. */
+function isTimestamp(value: unknown): value is Timestamp {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'toMillis' in value &&
+    typeof value.toMillis === 'function'
+  );
+}
+
 /** Reads the orderable timestamp field off a stored document. */
 function timestampMillis(data: StoredDocument): number {
   const value = data[TIMESTAMP_FIELD];
-  if (!(value instanceof Timestamp)) {
+  if (!isTimestamp(value)) {
     throw new Error(
       `fake Firestore: document is missing a Timestamp '${TIMESTAMP_FIELD}'`,
     );
@@ -283,17 +319,31 @@ function documentId(path: string): string {
   return path.slice(path.lastIndexOf('/') + 1);
 }
 
+/** Raised when a transaction's read set changed before it committed. */
+export class FakeAbortedError extends Error {
+  constructor(path: string) {
+    super(`fake Firestore: transaction aborted, '${path}' changed`);
+  }
+}
+
 /**
  * A transaction that buffers its writes and applies them only once the
  * callback resolves, so a throwing callback leaves the store untouched.
+ *
+ * Reads are recorded with the version they saw, and the commit is refused if
+ * any of them moved meanwhile. That is Firestore's own concurrency model, and
+ * it is what makes the concurrent-append test meaningful: a fake that
+ * committed unconditionally would let a lost update pass.
  */
 class FakeTransaction {
   private readonly writes: Array<() => void> = [];
+  private readonly readVersions = new Map<string, number>();
 
   constructor(private readonly store: FakeStore) {}
 
   async get(ref: FakeDocumentReference): Promise<FakeDocumentSnapshot> {
     await this.store.yieldToPeers();
+    this.readVersions.set(ref.path, this.store.versionOf(ref.path));
     return ref.get();
   }
 
@@ -301,6 +351,9 @@ class FakeTransaction {
     ...refs: FakeDocumentReference[]
   ): Promise<FakeDocumentSnapshot[]> {
     await this.store.yieldToPeers();
+    for (const ref of refs) {
+      this.readVersions.set(ref.path, this.store.versionOf(ref.path));
+    }
     return Promise.all(refs.map((ref) => ref.get()));
   }
 
@@ -319,6 +372,11 @@ class FakeTransaction {
   }
 
   commit(): void {
+    for (const [path, version] of this.readVersions) {
+      if (this.store.versionOf(path) !== version) {
+        throw new FakeAbortedError(path);
+      }
+    }
     for (const write of this.writes) {
       write();
     }
@@ -359,10 +417,24 @@ class FakeFirestoreClient {
   async runTransaction<T>(
     updateFunction: (transaction: FakeTransaction) => Promise<T>,
   ): Promise<T> {
-    const transaction = new FakeTransaction(this.store);
-    const result = await updateFunction(transaction);
-    transaction.commit();
-    return result;
+    // Matches the real client, which re-runs the callback on an aborted
+    // commit up to DEFAULT_MAX_TRANSACTION_ATTEMPTS times.
+    for (let attempt = 1; ; attempt++) {
+      const transaction = new FakeTransaction(this.store);
+      const result = await updateFunction(transaction);
+      try {
+        transaction.commit();
+        return result;
+      } catch (e: unknown) {
+        if (
+          !(e instanceof FakeAbortedError) ||
+          attempt === MAX_TRANSACTION_ATTEMPTS
+        ) {
+          throw e;
+        }
+        this.store.transactionRetryCount++;
+      }
+    }
   }
 }
 

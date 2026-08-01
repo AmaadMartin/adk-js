@@ -4,13 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {randomUUID} from 'node:crypto';
+
 import {
   CollectionReference,
   DocumentReference,
   Firestore,
   Query,
   Timestamp,
-  Transaction,
 } from '@google-cloud/firestore';
 import {
   AppendEventRequest,
@@ -25,13 +26,10 @@ import {
   ListSessionsRequest,
   ListSessionsResponse,
   mergeStates,
-  randomUUID,
   Session,
-  State,
+  splitStateDelta,
   trimTempDeltaState,
 } from '@google/adk';
-
-import {SessionLockMap} from './session_lock.js';
 
 /** Root collection used when neither the option nor the env var is set. */
 export const DEFAULT_ROOT_COLLECTION = 'adk-session';
@@ -96,32 +94,6 @@ export interface FirestoreSessionServiceOptions {
   rootCollection?: string;
 }
 
-/**
- * Splits a state map into its app-scoped, user-scoped and session-scoped
- * parts, stripping the `app:` and `user:` prefixes and dropping `temp:` keys.
- */
-export function splitStateDelta(state: Record<string, unknown> | undefined): {
-  app: Record<string, unknown>;
-  user: Record<string, unknown>;
-  session: Record<string, unknown>;
-} {
-  const app: Record<string, unknown> = {};
-  const user: Record<string, unknown> = {};
-  const session: Record<string, unknown> = {};
-
-  for (const [key, value] of Object.entries(state ?? {})) {
-    if (key.startsWith(State.APP_PREFIX)) {
-      app[key.slice(State.APP_PREFIX.length)] = value;
-    } else if (key.startsWith(State.USER_PREFIX)) {
-      user[key.slice(State.USER_PREFIX.length)] = value;
-    } else if (!key.startsWith(State.TEMP_PREFIX)) {
-      session[key] = value;
-    }
-  }
-
-  return {app, user, session};
-}
-
 /** Narrows a value to a Firestore `Timestamp` without using `instanceof`. */
 function isTimestamp(value: unknown): value is Timestamp {
   return (
@@ -162,29 +134,19 @@ function toEventData(event: Event): Record<string, unknown> {
   return JSON.parse(JSON.stringify(event));
 }
 
-/** Identifies one session for {@link SessionLockMap}. */
-function sessionLockKey(
-  appName: string,
-  userId: string,
-  sessionId: string,
-): string {
-  return JSON.stringify([appName, userId, sessionId]);
-}
-
-/** Reads a shared-state document inside a transaction. */
-async function readStateDoc(
-  tx: Transaction,
-  ref: DocumentReference,
-): Promise<Record<string, unknown>> {
-  const snapshot = await tx.get(ref);
-  return snapshot.data() ?? {};
-}
-
 /** Reads a session's events, applying the window in `config`. */
 async function fetchEvents(
   sessionRef: DocumentReference,
   config: GetSessionConfig | undefined,
 ): Promise<Event[]> {
+  // A numRecentEvents of 0 asks for no events, but it is falsy, so it would
+  // otherwise fall through the limit below and return every event. Returning
+  // nothing matches VertexAiSessionService and the adk-python database,
+  // sqlite, in-memory and Vertex AI backends.
+  if (config?.numRecentEvents === 0) {
+    return [];
+  }
+
   let query: Query = sessionRef
     .collection(EVENTS_COLLECTION)
     .orderBy('timestamp');
@@ -281,14 +243,13 @@ function paginateSessions(
  * user_states/<appName>/users/<userId>
  * ```
  *
- * Appends are atomic within a Firestore transaction and serialized per session
- * within one process. Two processes appending to the same session can still
- * lose an update.
+ * `appendEvent` runs in a Firestore transaction whose writes all derive from
+ * the session document it read, so concurrent appends — from this process or
+ * another — are serialized by Firestore's own conflict detection and retry.
  */
 export class FirestoreSessionService extends BaseSessionService {
   private readonly client: Firestore;
   private readonly rootCollection: string;
-  private readonly sessionLocks = new SessionLockMap();
 
   constructor(options: FirestoreSessionServiceOptions = {}) {
     super();
@@ -331,16 +292,16 @@ export class FirestoreSessionService extends BaseSessionService {
           throw new Error(`Session with id ${id} already exists.`);
         }
 
+        // The snapshots are read for the merged state this returns; the
+        // writes only need the deltas, because `merge` merges server side.
         const currentApp: Record<string, unknown> = appSnapshot.data() ?? {};
         const currentUser: Record<string, unknown> = userSnapshot.data() ?? {};
 
         if (Object.keys(appDelta).length > 0) {
-          Object.assign(currentApp, appDelta);
-          tx.set(appRef, currentApp, {merge: true});
+          tx.set(appRef, appDelta, {merge: true});
         }
         if (Object.keys(userDelta).length > 0) {
-          Object.assign(currentUser, userDelta);
-          tx.set(userRef, currentUser, {merge: true});
+          tx.set(userRef, userDelta, {merge: true});
         }
 
         tx.set(sessionRef, {
@@ -361,7 +322,11 @@ export class FirestoreSessionService extends BaseSessionService {
       id,
       appName,
       userId,
-      state: mergeStates(appState, userState, sessionState),
+      state: mergeStates(
+        {...appState, ...appDelta},
+        {...userState, ...userDelta},
+        sessionState,
+      ),
       events: [],
       lastUpdateTime: nowMillis,
     });
@@ -379,14 +344,8 @@ export class FirestoreSessionService extends BaseSessionService {
       return undefined;
     }
 
-    // numRecentEvents of 0 asks for no events, but it is falsy, so letting it
-    // reach fetchEvents would drop the limit and return every event instead.
-    // Returning nothing matches VertexAiSessionService and the adk-python
-    // database, sqlite, in-memory and Vertex AI backends.
     const [events, appSnapshot, userSnapshot] = await Promise.all([
-      config?.numRecentEvents === 0
-        ? Promise.resolve<Event[]>([])
-        : fetchEvents(sessionRef, config),
+      fetchEvents(sessionRef, config),
       this.appStateRef(appName).get(),
       this.userStateRef(appName, userId).get(),
     ]);
@@ -490,54 +449,48 @@ export class FirestoreSessionService extends BaseSessionService {
       session.userId,
       session.id,
     );
-    const appRef = this.appStateRef(session.appName);
-    const userRef = this.userStateRef(session.appName, session.userId);
 
-    await this.sessionLocks.run(
-      sessionLockKey(session.appName, session.userId, session.id),
-      () =>
-        this.client.runTransaction(async (tx) => {
-          const data: StoredSession | undefined = (
-            await tx.get(sessionRef)
-          ).data();
-          if (!data) {
-            throw new Error(`Session ${session.id} not found for appendEvent`);
-          }
-          if (data.status === DELETING_STATUS) {
-            throw new Error(
-              `Session ${session.id} is currently being deleted.`,
-            );
-          }
+    await this.client.runTransaction(async (tx) => {
+      const data: StoredSession | undefined = (await tx.get(sessionRef)).data();
+      if (!data) {
+        throw new Error(`Session ${session.id} not found for appendEvent`);
+      }
+      if (data.status === DELETING_STATUS) {
+        throw new Error(`Session ${session.id} is currently being deleted.`);
+      }
 
-          const currentApp = hasAppDelta ? await readStateDoc(tx, appRef) : {};
-          const currentUser = hasUserDelta
-            ? await readStateDoc(tx, userRef)
-            : {};
-
-          if (hasAppDelta) {
-            tx.set(appRef, {...currentApp, ...appDelta}, {merge: true});
-          }
-          if (hasUserDelta) {
-            tx.set(userRef, {...currentUser, ...userDelta}, {merge: true});
-          }
-
-          tx.update(sessionRef, {
-            state: JSON.stringify({
-              ...splitStateDelta(session.state).session,
-              ...sessionDelta,
-            }),
-            updateTime: Timestamp.fromMillis(trimmed.timestamp),
-            revision: (data.revision ?? 0) + 1,
-          });
-
-          tx.set(sessionRef.collection(EVENTS_COLLECTION).doc(trimmed.id), {
-            [EVENT_DATA_FIELD]: toEventData(trimmed),
-            timestamp: Timestamp.fromMillis(trimmed.timestamp),
-            appName: session.appName,
-            userId: session.userId,
-          });
+      // Both written values derive from the snapshot just read, so they sit in
+      // the transaction's read set and Firestore aborts and re-runs this
+      // callback if a concurrent writer commits first. Deriving the state from
+      // the caller's in-memory `session.state` instead would put it outside the
+      // read set, leaving the conflict undetectable and letting a stale caller
+      // clobber another writer's keys.
+      tx.update(sessionRef, {
+        state: JSON.stringify({
+          ...parseSessionState(data.state),
+          ...sessionDelta,
         }),
-    );
+        updateTime: Timestamp.fromMillis(trimmed.timestamp),
+        revision: (data.revision ?? 0) + 1,
+      });
+
+      // `merge` merges field by field on the server, so these need no read.
+      if (hasAppDelta) {
+        tx.set(this.appStateRef(session.appName), appDelta, {merge: true});
+      }
+      if (hasUserDelta) {
+        tx.set(this.userStateRef(session.appName, session.userId), userDelta, {
+          merge: true,
+        });
+      }
+
+      tx.set(sessionRef.collection(EVENTS_COLLECTION).doc(trimmed.id), {
+        [EVENT_DATA_FIELD]: toEventData(trimmed),
+        timestamp: Timestamp.fromMillis(trimmed.timestamp),
+        appName: session.appName,
+        userId: session.userId,
+      });
+    });
 
     session.lastUpdateTime = trimmed.timestamp;
     return super.appendEvent({session, event: trimmed});

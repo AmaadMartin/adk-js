@@ -22,6 +22,7 @@ import {
   ListSessionsRequest,
   ListSessionsResponse,
   mergeStates,
+  splitStateDelta,
   trimTempDeltaState,
 } from './base_session_service.js';
 import {
@@ -37,7 +38,6 @@ import {
   StorageUserState,
 } from './db/schema.js';
 import {createSession, Session} from './session.js';
-import {State} from './state.js';
 
 /**
  * Checks if a URI is a database connection URI.
@@ -140,21 +140,11 @@ export class DatabaseSessionService extends BaseSessionService {
       em.persist(userStateModel);
     }
 
-    const appStateDelta: Record<string, unknown> = {};
-    const userStateDelta: Record<string, unknown> = {};
-    const sessionState: Record<string, unknown> = {};
-
-    if (state) {
-      for (const [key, value] of Object.entries(state)) {
-        if (key.startsWith(State.APP_PREFIX)) {
-          appStateDelta[key.replace(State.APP_PREFIX, '')] = value;
-        } else if (key.startsWith(State.USER_PREFIX)) {
-          userStateDelta[key.replace(State.USER_PREFIX, '')] = value;
-        } else if (!key.startsWith(State.TEMP_PREFIX)) {
-          sessionState[key] = value;
-        }
-      }
-    }
+    const {
+      app: appStateDelta,
+      user: userStateDelta,
+      session: sessionState,
+    } = splitStateDelta(state);
 
     if (Object.keys(appStateDelta).length > 0) {
       appStateModel.state = {...appStateModel.state, ...appStateDelta};
@@ -442,19 +432,11 @@ export class DatabaseSessionService extends BaseSessionService {
       }
 
       if (event.actions && event.actions.stateDelta) {
-        const appDelta: Record<string, unknown> = {};
-        const userDelta: Record<string, unknown> = {};
-        const sessionDelta: Record<string, unknown> = {};
-
-        for (const [key, value] of Object.entries(event.actions.stateDelta)) {
-          if (key.startsWith(State.APP_PREFIX)) {
-            appDelta[key.replace(State.APP_PREFIX, '')] = value;
-          } else if (key.startsWith(State.USER_PREFIX)) {
-            userDelta[key.replace(State.USER_PREFIX, '')] = value;
-          } else if (!key.startsWith(State.TEMP_PREFIX)) {
-            sessionDelta[key] = value;
-          }
-        }
+        const {
+          app: appDelta,
+          user: userDelta,
+          session: sessionDelta,
+        } = splitStateDelta(event.actions.stateDelta);
 
         if (Object.keys(appDelta).length > 0) {
           appStateModel.state = {...appStateModel.state, ...appDelta};
