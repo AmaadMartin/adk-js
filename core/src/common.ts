@@ -305,6 +305,31 @@ export {LoadSkillTool} from './tools/skill/load_skill_tool.js';
 export {SearchSkillsTool} from './tools/skill/search_skills_tool.js';
 export {SkillToolset} from './tools/skill/skill_toolset.js';
 
+export {
+  DEFAULT_SIMULATION_MODEL,
+  EnvironmentSimulationConfigSchema,
+  InjectedErrorSchema,
+  InjectionConfigSchema,
+  MockStrategy,
+  ToolSimulationConfigSchema,
+} from './tools/environment_simulation/environment_simulation_config.js';
+export type {
+  EnvironmentSimulationConfig,
+  EnvironmentSimulationConfigInput,
+  InjectedError,
+  InjectionConfig,
+  ToolSimulationConfig,
+} from './tools/environment_simulation/environment_simulation_config.js';
+export {ToolConnectionAnalyzer} from './tools/environment_simulation/tool_connection_analyzer.js';
+export {
+  StatefulParameterSchema,
+  ToolConnectionMapSchema,
+} from './tools/environment_simulation/tool_connection_map.js';
+export type {
+  StatefulParameter,
+  ToolConnectionMap,
+} from './tools/environment_simulation/tool_connection_map.js';
+
 export * from './artifacts/base_artifact_service.js';
 export * from './features/feature_registry.js';
 export * from './memory/base_memory_service.js';
