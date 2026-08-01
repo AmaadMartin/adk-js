@@ -12,8 +12,6 @@ import {getResponse, sendInput} from '../test_case_utils.js';
 const execAsync = promisify(exec);
 const dirname = process.cwd();
 
-const TEST_EXECUTION_TIMEOUT = 20000;
-
 describe('Build setup', () => {
   describe.each([
     'js_commonjs',
@@ -45,68 +43,50 @@ describe('Build setup', () => {
       }
     });
 
-    it(
-      'should build and run agent successfully',
-      async () => {
-        const childProcess = spawn('npm', ['run', 'start'], {
-          cwd: projectPath,
-          shell: true,
-        });
+    it('should build and run agent successfully', async () => {
+      const childProcess = spawn('npm', ['run', 'start'], {
+        cwd: projectPath,
+        shell: true,
+      });
 
-        let response = await sendInput(childProcess, 'Tell me a joke.\n');
-        expect(response.toString()).toContain('test-llm-model-response');
+      let response = await sendInput(childProcess, 'Tell me a joke.\n');
+      expect(response.toString()).toContain('test-llm-model-response');
 
-        response = await sendInput(childProcess, 'exit\n');
-        expect(response.toString()).toContain('');
-      },
-      TEST_EXECUTION_TIMEOUT,
-    );
+      response = await sendInput(childProcess, 'exit\n');
+      expect(response.toString()).toContain('');
+    });
 
     it.skipIf(
       !['js_commonjs', 'js_esm', 'ts_commonjs', 'ts_esm'].includes(buildSetup),
-    )(
-      'should handle dynamic imports in DatabaseSessionService',
-      async () => {
-        const childProcess = spawn('npm', ['run', 'test:db'], {
-          cwd: projectPath,
-          shell: true,
-        });
+    )('should handle dynamic imports in DatabaseSessionService', async () => {
+      const childProcess = spawn('npm', ['run', 'test:db'], {
+        cwd: projectPath,
+        shell: true,
+      });
 
-        const response = await getResponse(childProcess);
-        expect(response.toString()).toContain('DYNAMIC_IMPORT_SUCCESS');
-      },
-      TEST_EXECUTION_TIMEOUT,
-    );
+      const response = await getResponse(childProcess);
+      expect(response.toString()).toContain('DYNAMIC_IMPORT_SUCCESS');
+    });
 
     it.skipIf(
       !['js_commonjs', 'js_esm', 'ts_commonjs', 'ts_esm'].includes(buildSetup),
-    )(
-      'should import devtools successfully',
-      async () => {
-        const childProcess = spawn('npm', ['run', 'test:devtools'], {
-          cwd: projectPath,
-          shell: true,
-        });
+    )('should import devtools successfully', async () => {
+      const childProcess = spawn('npm', ['run', 'test:devtools'], {
+        cwd: projectPath,
+        shell: true,
+      });
 
-        const response = await getResponse(childProcess);
-        expect(response.toString()).toContain(
-          'Devtools verification successful',
-        );
-      },
-      TEST_EXECUTION_TIMEOUT,
-    );
+      const response = await getResponse(childProcess);
+      expect(response.toString()).toContain('Devtools verification successful');
+    });
 
-    it(
-      'should run devtools CLI successfully',
-      async () => {
-        const {stdout} = await execAsync('npx @google/adk-devtools --version', {
-          cwd: projectPath,
-        });
+    it('should run devtools CLI successfully', async () => {
+      const {stdout} = await execAsync('npx @google/adk-devtools --version', {
+        cwd: projectPath,
+      });
 
-        expect(stdout).toBeTruthy();
-      },
-      TEST_EXECUTION_TIMEOUT,
-    );
+      expect(stdout).toBeTruthy();
+    });
 
     afterAll(async () => {
       await fs

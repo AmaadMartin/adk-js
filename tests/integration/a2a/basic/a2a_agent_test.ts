@@ -22,7 +22,7 @@ describe('A2A: Remote Agent Basic', () => {
       startFailureTimeout: 60000,
     });
     await server.start();
-  }, 60000);
+  });
 
   afterAll(async () => {
     await server.stop();
