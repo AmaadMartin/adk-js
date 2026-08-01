@@ -618,6 +618,241 @@ describe('InMemorySessionService', () => {
 
       expect(response.sessions).toEqual([]);
     });
+
+    it('returns merged app, user and session state for each listed session', async () => {
+      const appName = 'app';
+      const userId = 'user';
+      const session = await service.createSession({appName, userId});
+      await service.appendEvent({
+        session,
+        event: createEvent({
+          timestamp: 1000,
+          actions: createEventActions({
+            stateDelta: {
+              sessionKey: 'sv',
+              [`${State.APP_PREFIX}appKey`]: 'av',
+              [`${State.USER_PREFIX}userKey`]: 'uv',
+            },
+          }),
+        }),
+      });
+
+      const response = await service.listSessions({appName, userId});
+
+      expect(response.sessions[0].state).toEqual({
+        sessionKey: 'sv',
+        [`${State.APP_PREFIX}appKey`]: 'av',
+        [`${State.USER_PREFIX}userKey`]: 'uv',
+      });
+    });
+
+    it('returns the same state from listSessions as getSession', async () => {
+      const appName = 'app';
+      const userId = 'user';
+      const session = await service.createSession({appName, userId});
+      await service.appendEvent({
+        session,
+        event: createEvent({
+          timestamp: 1000,
+          actions: createEventActions({
+            stateDelta: {
+              sessionKey: 'sv',
+              [`${State.APP_PREFIX}appKey`]: 'av',
+              [`${State.USER_PREFIX}userKey`]: 'uv',
+            },
+          }),
+        }),
+      });
+
+      const response = await service.listSessions({appName, userId});
+      const fetched = await service.getSession({
+        appName,
+        userId,
+        sessionId: session.id,
+      });
+
+      expect(response.sessions[0].state).toEqual(fetched?.state);
+    });
+
+    it('app state is visible on every listed session of the app', async () => {
+      const appName = 'app';
+      const userId = 'user';
+      const session1 = await service.createSession({appName, userId});
+      await service.createSession({appName, userId});
+      await service.appendEvent({
+        session: session1,
+        event: createEvent({
+          timestamp: 1000,
+          actions: createEventActions({
+            stateDelta: {[`${State.APP_PREFIX}appKey`]: 'av'},
+          }),
+        }),
+      });
+
+      const response = await service.listSessions({appName, userId});
+
+      expect(response.sessions).toHaveLength(2);
+      for (const listed of response.sessions) {
+        expect(listed.state[`${State.APP_PREFIX}appKey`]).toBe('av');
+      }
+    });
+
+    it("does not leak another user's user: state into listed sessions", async () => {
+      const appName = 'app';
+      const session1 = await service.createSession({appName, userId: 'u1'});
+      await service.createSession({appName, userId: 'u2'});
+      await service.appendEvent({
+        session: session1,
+        event: createEvent({
+          timestamp: 1000,
+          actions: createEventActions({
+            stateDelta: {[`${State.USER_PREFIX}userKey`]: 'uv'},
+          }),
+        }),
+      });
+
+      const listU1 = await service.listSessions({appName, userId: 'u1'});
+      const listU2 = await service.listSessions({appName, userId: 'u2'});
+
+      expect(listU1.sessions[0].state).toEqual({
+        [`${State.USER_PREFIX}userKey`]: 'uv',
+      });
+      expect(listU2.sessions[0].state).toEqual({});
+    });
+
+    it("merges each session owner's user state when userId is omitted", async () => {
+      const appName = 'app';
+      const session1 = await service.createSession({
+        appName,
+        userId: 'u1',
+        sessionId: 's1',
+      });
+      const session2 = await service.createSession({
+        appName,
+        userId: 'u2',
+        sessionId: 's2',
+      });
+      await service.appendEvent({
+        session: session1,
+        event: createEvent({
+          timestamp: 1000,
+          actions: createEventActions({
+            stateDelta: {[`${State.USER_PREFIX}pref`]: 'A'},
+          }),
+        }),
+      });
+      await service.appendEvent({
+        session: session2,
+        event: createEvent({
+          timestamp: 2000,
+          actions: createEventActions({
+            stateDelta: {[`${State.USER_PREFIX}pref`]: 'B'},
+          }),
+        }),
+      });
+
+      const response = await service.listSessions({appName});
+
+      const byId = new Map(response.sessions.map((s) => [s.id, s]));
+      expect(byId.get('s1')?.state[`${State.USER_PREFIX}pref`]).toBe('A');
+      expect(byId.get('s2')?.state[`${State.USER_PREFIX}pref`]).toBe('B');
+    });
+
+    it('listed sessions carry state but never events', async () => {
+      const appName = 'app';
+      const userId = 'user';
+      const session = await service.createSession({appName, userId});
+      await service.appendEvent({
+        session,
+        event: createEvent({
+          timestamp: 1000,
+          actions: createEventActions({
+            stateDelta: {[`${State.APP_PREFIX}appKey`]: 'av'},
+          }),
+        }),
+      });
+
+      const response = await service.listSessions({appName, userId});
+
+      expect(response.sessions[0].events).toEqual([]);
+      expect(response.sessions[0].state).toEqual({
+        [`${State.APP_PREFIX}appKey`]: 'av',
+      });
+    });
+
+    it('mutating returned state does not affect stored session state', async () => {
+      const appName = 'app';
+      const userId = 'user';
+      const session = await service.createSession({appName, userId});
+      await service.appendEvent({
+        session,
+        event: createEvent({
+          timestamp: 1000,
+          actions: createEventActions({stateDelta: {sessionKey: 'sv'}}),
+        }),
+      });
+
+      const response = await service.listSessions({appName, userId});
+      response.sessions[0].state['sessionKey'] = 'mutated';
+      response.sessions[0].state['injectedKey'] = 'injected';
+
+      const fetched = await service.getSession({
+        appName,
+        userId,
+        sessionId: session.id,
+      });
+
+      expect(fetched?.state).toEqual({sessionKey: 'sv'});
+    });
+
+    it('merged state is returned on the paginated path', async () => {
+      const appName = 'app';
+      const userId = 'user';
+      const created: Session[] = [];
+      for (let i = 1; i <= 3; i++) {
+        created.push(
+          await service.createSession({appName, userId, sessionId: `s${i}`}),
+        );
+      }
+      await service.appendEvent({
+        session: created[0],
+        event: createEvent({
+          timestamp: 1000,
+          actions: createEventActions({
+            stateDelta: {[`${State.APP_PREFIX}appKey`]: 'av'},
+          }),
+        }),
+      });
+
+      const response = await service.listSessions({
+        appName,
+        userId,
+        limit: 2,
+        order: 'asc',
+      });
+
+      expect(response.sessions).toHaveLength(2);
+      for (const listed of response.sessions) {
+        expect(listed.state[`${State.APP_PREFIX}appKey`]).toBe('av');
+      }
+    });
+
+    it('returns session state when no app or user state exists', async () => {
+      const appName = 'app';
+      const userId = 'user';
+      const session = await service.createSession({appName, userId});
+      await service.appendEvent({
+        session,
+        event: createEvent({
+          timestamp: 1000,
+          actions: createEventActions({stateDelta: {sessionKey: 'sv'}}),
+        }),
+      });
+
+      const response = await service.listSessions({appName, userId});
+
+      expect(response.sessions[0].state).toEqual({sessionKey: 'sv'});
+    });
   });
 
   describe('deleteSession', () => {

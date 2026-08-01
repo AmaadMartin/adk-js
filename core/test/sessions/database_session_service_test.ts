@@ -382,6 +382,27 @@ describe('DatabaseSessionService', () => {
     expect(listEmpty.sessions).toEqual([]);
   });
 
+  it('listSessions returns merged app, user and session state', async () => {
+    await service.createSession({
+      appName: 'app1',
+      userId: 'u1',
+      sessionId: 's1',
+      state: {
+        [`${State.APP_PREFIX}appKey`]: 'av',
+        [`${State.USER_PREFIX}userKey`]: 'uv',
+        sessionKey: 'sv',
+      },
+    });
+
+    const list = await service.listSessions({appName: 'app1', userId: 'u1'});
+
+    expect(list.sessions[0].state).toEqual({
+      [`${State.APP_PREFIX}appKey`]: 'av',
+      [`${State.USER_PREFIX}userKey`]: 'uv',
+      sessionKey: 'sv',
+    });
+  });
+
   it('should handle errors', async () => {
     await service.createSession({
       appName: 'app1',

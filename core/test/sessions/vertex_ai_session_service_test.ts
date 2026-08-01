@@ -911,6 +911,38 @@ describe('VertexAiSessionService', () => {
 
       expect(result.sessions.map((s) => s.id)).toEqual(['s2', 's3']);
     });
+
+    it('listSessions state matches getSession state for the same session', async () => {
+      const sessionState = {sessionKey: 'sv', [`${State.APP_PREFIX}k`]: 'av'};
+      mockClient.listInternal.mockResolvedValue({
+        sessions: [
+          {
+            name: 'projects/p/locations/l/sessions/s1',
+            userId: 'testUser',
+            sessionState,
+            updateTime: '2026-01-01T00:00:00Z',
+          },
+        ],
+      });
+      mockClient.get.mockResolvedValue({
+        userId: 'testUser',
+        sessionState,
+        updateTime: '2026-01-01T00:00:00Z',
+      });
+
+      const listed = await service.listSessions({
+        appName: '12345',
+        userId: 'testUser',
+      });
+      const fetched = await service.getSession({
+        appName: '12345',
+        userId: 'testUser',
+        sessionId: 's1',
+      });
+
+      expect(listed.sessions[0].state).toEqual(fetched?.state);
+      expect(listed.sessions[0].state).toEqual(sessionState);
+    });
   });
 
   describe('deleteSession', () => {
