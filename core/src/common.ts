@@ -316,6 +316,16 @@ export type {
   InjectionConfig,
   ToolSimulationConfig,
 } from './tools/environment_simulation/environment_simulation_config.js';
+export {
+  EnvironmentSimulationEngine,
+  createMockStrategy,
+} from './tools/environment_simulation/environment_simulation_engine.js';
+export type {SimulateRequest} from './tools/environment_simulation/environment_simulation_engine.js';
+export {EnvironmentSimulationFactory} from './tools/environment_simulation/environment_simulation_factory.js';
+export {EnvironmentSimulationPlugin} from './tools/environment_simulation/environment_simulation_plugin.js';
+export {BaseMockStrategy} from './tools/environment_simulation/strategies/base.js';
+export type {MockRequest} from './tools/environment_simulation/strategies/base.js';
+export {ToolSpecMockStrategy} from './tools/environment_simulation/strategies/tool_spec_mock_strategy.js';
 export {ToolConnectionAnalyzer} from './tools/environment_simulation/tool_connection_analyzer.js';
 export type {
   StatefulParameter,
