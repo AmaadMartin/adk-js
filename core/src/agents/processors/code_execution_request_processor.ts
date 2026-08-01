@@ -160,9 +160,12 @@ export class CodeExecutionResponseProcessor implements BaseLlmResponseProcessor 
 }
 
 /**
- * The exported response processor instance.
+ * The shared {@link CodeExecutionResponseProcessor} instance. Pass it in
+ * `LlmAgent`'s `responseProcessors` option to turn code-execution results into
+ * events.
  */
-export const responseProcessor = new CodeExecutionResponseProcessor();
+export const CODE_EXECUTION_RESPONSE_PROCESSOR =
+  new CodeExecutionResponseProcessor();
 
 /**
  * Pre-processes the user message by adding the user message to the execution
