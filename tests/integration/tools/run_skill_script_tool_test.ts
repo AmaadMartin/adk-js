@@ -60,6 +60,12 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
         'create_file.js': {
           src: "const fs = require('fs'); fs.writeFileSync('output_from_script.txt', 'hello from script file');",
         },
+        // A file name owned solely by the configured-output-dir test, so its
+        // cwd-absence assertion cannot be perturbed by the neighbouring tests
+        // that write, unlink and pre-create output_from_script.txt in the cwd.
+        'create_file_for_output_dir.js': {
+          src: "const fs = require('fs'); fs.writeFileSync('output_to_configured_dir.txt', 'hello from script file');",
+        },
         'hello.ps1': {
           src: 'Write-Host "hello from skill powershell"',
         },
@@ -322,25 +328,25 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
       const result = (await tool.runAsync({
         args: {
           skill_name: 'test-skill',
-          script_path: 'scripts/create_file.js',
+          script_path: 'scripts/create_file_for_output_dir.js',
         },
         toolContext: createMockContext(),
       })) as CodeExecutionResult;
 
       const outputFile = result.outputFiles?.find(
-        (f) => f.name === 'output_from_script.txt',
+        (f) => f.name === 'output_to_configured_dir.txt',
       );
       expect(outputFile).toBeDefined();
 
       const content = await fs.readFile(
-        path.join(outputDir, 'output_from_script.txt'),
+        path.join(outputDir, 'output_to_configured_dir.txt'),
         'utf-8',
       );
       expect(content).toBe('hello from script file');
 
       // The launch directory must stay clean.
       const inCwd = await fs
-        .access(path.join(process.cwd(), 'output_from_script.txt'))
+        .access(path.join(process.cwd(), 'output_to_configured_dir.txt'))
         .then(() => true)
         .catch(() => false);
       expect(inCwd).toBe(false);
@@ -348,7 +354,7 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
       await fs.rm(outputDir, {recursive: true, force: true});
       // A regression writes to the launch directory instead; remove it so a
       // failing run does not leave the working tree dirty.
-      await fs.rm(path.join(process.cwd(), 'output_from_script.txt'), {
+      await fs.rm(path.join(process.cwd(), 'output_to_configured_dir.txt'), {
         force: true,
       });
     }

@@ -101,10 +101,8 @@ export class SkillToolset extends BaseToolset {
   }
 
   /**
-   * Directory that skill-script output files are written to.
-   *
-   * Resolved on each read so a host that changes its working directory is not
-   * pinned to the value captured when the toolset was constructed.
+   * Resolved per read, so a host that changes its working directory is not
+   * pinned to the value captured at construction.
    */
   get outputDir(): string {
     return this.configuredOutputDir ?? process.cwd();

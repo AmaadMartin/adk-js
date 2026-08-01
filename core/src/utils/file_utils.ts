@@ -12,17 +12,14 @@ import {File} from '../code_executors/code_execution_utils.js';
  * Writes the given files into `dir`, creating parent directories as needed and
  * appending a `_2`, `_3`, ... suffix when a name is already taken.
  *
- * `dir` is required so that a caller which forgets to say where agent-produced
- * files go cannot silently write them into the host process's working
- * directory.
- *
  * File names are constrained to `dir` by a lexical path comparison. That is a
  * useful guard, not a sandbox: it does not survive symlinks, hardlinks, bind
  * mounts, or TOCTOU races.
  *
  * @param files The files to materialize.
- * @param dir The directory the files are written into. Relative paths resolve
- *     against the current working directory.
+ * @param dir The directory the files are written into, required so a caller
+ *     cannot silently fall back to the host process's working directory. A
+ *     relative path resolves against the current working directory.
  * @return The files as written, with `name` updated to the final path relative
  *     to `dir`.
  */
