@@ -24,10 +24,6 @@ describe('E2E AgentTool State Filtering', () => {
     !!process.env.GOOGLE_GENAI_API_KEY ||
     !!process.env.GOOGLE_CLOUD_PROJECT;
 
-  it('should always pass (dummy test for vitest)', () => {
-    expect(true).toBe(true);
-  });
-
   it.skipIf(!hasAKey)(
     'should not propagate temp state keys from parent to sub-agent session',
     async () => {
