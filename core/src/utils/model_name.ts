@@ -6,8 +6,17 @@
 
 import {getBooleanEnvVar} from './env_aware_utils.js';
 
-const MODEL_NAME_PATTERN =
-  '^projects/[^/]+/locations/[^/]+/publishers/[^/]+/models/(.+)$';
+/**
+ * Path-based model name patterns, tried in order: the Vertex AI publisher path
+ * and the Apigee path (`apigee/[<provider>/][<version>/]<model_id>`). Declared
+ * without the `g` flag so `.match()` stays stateless.
+ */
+const MODEL_PATH_PATTERNS = [
+  /^projects\/[^/]+\/locations\/[^/]+\/publishers\/[^/]+\/models\/(.+)$/,
+  /^apigee\/(?:[^/]+\/)?(?:[^/]+\/)?(.+)$/,
+];
+
+const MODELS_PREFIX = 'models/';
 
 /**
  * Matches the Early Access Program (EAP) Gemini naming convention. Lower-case
@@ -17,16 +26,46 @@ const EAP_MODEL_NAME_PATTERN =
   /^gemini-[a-z0-9_]+(?:-[a-z0-9_]+)*-early-exp\d*$/;
 
 /**
- * Extract the actual model name from either simple or path-based format.
+ * Extract the actual model name from a simple, path-based, `models/`-prefixed
+ * or provider-prefixed model string.
  *
- * @param modelString Either a simple model name like "gemini-2.5-pro" or
- *     a path-based model name like "projects/.../models/gemini-2.0-flash-001"
- * @return The extracted model name (e.g., "gemini-2.5-pro")
+ * Supported forms:
+ * - simple: `gemini-2.5-pro`
+ * - Vertex AI path:
+ *   `projects/.../locations/.../publishers/google/models/gemini-2.0-flash-001`
+ * - Apigee path: `apigee/vertex_ai/v1beta/gemini-2.5-flash`
+ * - `models/` prefixed: `models/gemini-2.5-pro`
+ * - provider-prefixed, LiteLLM style: `gemini/gemini-2.5-flash`,
+ *   `openrouter/google/gemini-2.5-pro:online`. Only Gemini ids are extracted
+ *   from this form; other providers fall through unchanged.
+ *
+ * @param modelString The model string, in any of the forms above.
+ * @return The extracted model name (e.g., "gemini-2.5-pro"), or the input
+ *     unchanged when no form applies.
  */
 export function extractModelName(modelString: string): string {
-  const match = modelString.match(MODEL_NAME_PATTERN);
-  if (match) {
-    return match[1];
+  for (const pattern of MODEL_PATH_PATTERNS) {
+    const match = modelString.match(pattern);
+    if (match) {
+      return match[1];
+    }
+  }
+
+  if (modelString.startsWith(MODELS_PREFIX)) {
+    return modelString.slice(MODELS_PREFIX.length);
+  }
+
+  // A 'projects/' string reaching here is a malformed Vertex path. Return it
+  // before the provider-prefix branch below reads its last segment as an id.
+  if (modelString.startsWith('projects/')) {
+    return modelString;
+  }
+
+  if (modelString.includes('/')) {
+    const modelName = modelString.slice(modelString.lastIndexOf('/') + 1);
+    if (modelName.startsWith('gemini-')) {
+      return modelName;
+    }
   }
 
   // If it's not a path-based model, return as-is (simple model name)

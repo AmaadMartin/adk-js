@@ -6,6 +6,179 @@
 
 import {isGemini2OrAbove, isGemini3xFlashLive} from '@google/adk';
 import {describe, expect, it} from 'vitest';
+import {
+  extractModelName,
+  isGemini1Model,
+  isGeminiModel,
+} from '../../src/utils/model_name.js';
+
+describe('extractModelName', () => {
+  describe('simple model names', () => {
+    const simpleNames = [
+      'gemini-2.5-pro',
+      'gemini-2.5-flash',
+      'gemini-1.0-pro',
+      'claude-3-sonnet',
+      'gpt-4',
+    ];
+
+    for (const model of simpleNames) {
+      it(`should return the input unchanged for: ${model}`, () => {
+        expect(extractModelName(model)).toBe(model);
+      });
+    }
+  });
+
+  describe('Vertex AI publisher paths', () => {
+    const vertexPaths: Array<[string, string]> = [
+      [
+        'projects/265104255505/locations/us-central1/publishers/google/models/gemini-2.5-flash',
+        'gemini-2.5-flash',
+      ],
+      [
+        'projects/12345/locations/us-east1/publishers/google/models/gemini-1.5-pro-preview',
+        'gemini-1.5-pro-preview',
+      ],
+      [
+        'projects/test-project/locations/europe-west1/publishers/google/models/claude-3-sonnet',
+        'claude-3-sonnet',
+      ],
+      [
+        'projects/my-test-project/locations/us-central1/publishers/google/models/gemini-1.5-pro',
+        'gemini-1.5-pro',
+      ],
+    ];
+
+    for (const [modelString, expected] of vertexPaths) {
+      it(`should extract "${expected}" from: ${modelString}`, () => {
+        expect(extractModelName(modelString)).toBe(expected);
+      });
+    }
+  });
+
+  describe('Apigee paths', () => {
+    const apigeePaths: Array<[string, string]> = [
+      ['apigee/gemini-2.5-flash', 'gemini-2.5-flash'],
+      ['apigee/v1/gemini-2.5-flash', 'gemini-2.5-flash'],
+      ['apigee/gemini/gemini-2.5-flash', 'gemini-2.5-flash'],
+      ['apigee/vertex_ai/gemini-2.5-flash', 'gemini-2.5-flash'],
+      ['apigee/gemini/v1/gemini-2.5-flash', 'gemini-2.5-flash'],
+      ['apigee/vertex_ai/v1beta/gemini-2.5-flash', 'gemini-2.5-flash'],
+      ['apigee/vertex_ai/v1beta/claude-3-sonnet', 'claude-3-sonnet'],
+      ['apigee/a/b/c/gemini-2.5-flash', 'c/gemini-2.5-flash'],
+    ];
+
+    for (const [modelString, expected] of apigeePaths) {
+      it(`should extract "${expected}" from: ${modelString}`, () => {
+        expect(extractModelName(modelString)).toBe(expected);
+      });
+    }
+  });
+
+  describe('"models/" prefixed names', () => {
+    const prefixedNames: Array<[string, string]> = [
+      ['models/gemini-2.5-pro', 'gemini-2.5-pro'],
+      ['models/gemini-2.5-flash', 'gemini-2.5-flash'],
+      ['models/claude-3-sonnet', 'claude-3-sonnet'],
+    ];
+
+    for (const [modelString, expected] of prefixedNames) {
+      it(`should extract "${expected}" from: ${modelString}`, () => {
+        expect(extractModelName(modelString)).toBe(expected);
+      });
+    }
+  });
+
+  describe('provider-prefixed names', () => {
+    const providerPrefixed: Array<[string, string]> = [
+      ['gemini/gemini-2.5-flash', 'gemini-2.5-flash'],
+      ['vertex_ai/gemini-2.5-flash', 'gemini-2.5-flash'],
+      ['openrouter/google/gemini-2.5-pro:online', 'gemini-2.5-pro:online'],
+      ['openrouter/google/gemini-1.5-pro:online', 'gemini-1.5-pro:online'],
+      [
+        'openrouter/anthropic/claude-sonnet-4',
+        'openrouter/anthropic/claude-sonnet-4',
+      ],
+    ];
+
+    for (const [modelString, expected] of providerPrefixed) {
+      it(`should extract "${expected}" from: ${modelString}`, () => {
+        expect(extractModelName(modelString)).toBe(expected);
+      });
+    }
+  });
+
+  describe('malformed or unrecognised strings', () => {
+    const unchanged = [
+      'projects/invalid/path/format',
+      'invalid/path/format',
+      // Missing the 'publishers' segment.
+      'projects/123/locations/us-central1/models/gemini-2.5-flash',
+      // Missing the 'locations' segment.
+      'projects/123/publishers/google/models/gemini-2.5-flash',
+      // Missing the 'models' segment: the 'projects/' guard must return this
+      // before the provider-prefix branch reads the trailing Gemini id.
+      'projects/123/locations/us-central1/publishers/google/gemini-2.5-flash',
+      'openai/gpt-4',
+    ];
+
+    for (const modelString of unchanged) {
+      it(`should return the input unchanged for: ${modelString}`, () => {
+        expect(extractModelName(modelString)).toBe(modelString);
+      });
+    }
+  });
+
+  it('should return an empty string for an empty string', () => {
+    expect(extractModelName('')).toBe('');
+  });
+});
+
+describe('isGeminiModel', () => {
+  describe('extended model id forms', () => {
+    const geminiModels = [
+      'gemini/gemini-2.5-flash',
+      'vertex_ai/gemini-2.5-flash',
+      'openrouter/google/gemini-2.5-pro:online',
+      'models/gemini-2.5-pro',
+      'apigee/vertex_ai/gemini-2.5-flash',
+    ];
+
+    for (const model of geminiModels) {
+      it(`should return true for model: ${model}`, () => {
+        expect(isGeminiModel(model)).toBe(true);
+      });
+    }
+
+    const nonGeminiModels = [
+      'openrouter/anthropic/claude-sonnet-4',
+      'openai/gpt-4',
+      'apigee/vertex_ai/v1beta/claude-3-sonnet',
+      'projects/265104255505/locations/us-central1/publishers/gemini/models/claude-3-sonnet',
+    ];
+
+    for (const model of nonGeminiModels) {
+      it(`should return false for model: ${model}`, () => {
+        expect(isGeminiModel(model)).toBe(false);
+      });
+    }
+  });
+});
+
+describe('isGemini1Model', () => {
+  describe('extended model id forms', () => {
+    it('should return true for a provider-prefixed Gemini 1.x model', () => {
+      expect(isGemini1Model('openrouter/google/gemini-1.5-pro:online')).toBe(
+        true,
+      );
+      expect(isGemini1Model('models/gemini-1.5-pro')).toBe(true);
+    });
+
+    it('should return false for a provider-prefixed Gemini 2.x model', () => {
+      expect(isGemini1Model('gemini/gemini-2.5-flash')).toBe(false);
+    });
+  });
+});
 
 describe('isGemini2OrAbove', () => {
   describe('valid models', () => {
@@ -93,6 +266,37 @@ describe('isGemini2OrAbove', () => {
       expect(isGemini2OrAbove('gemini-1.5-flash-early-exp')).toBe(false);
     });
   });
+});
+
+describe('isGemini2OrAbove with extended model id forms', () => {
+  const validModels = [
+    'gemini/gemini-2.5-flash',
+    'vertex_ai/gemini-2.5-flash',
+    'openrouter/google/gemini-2.5-pro:online',
+    'models/gemini-2.5-pro',
+    'apigee/gemini-2.5-flash',
+    'apigee/vertex_ai/v1beta/gemini-2.5-flash',
+  ];
+
+  for (const model of validModels) {
+    it(`should return true for model: ${model}`, () => {
+      expect(isGemini2OrAbove(model)).toBe(true);
+    });
+  }
+
+  const invalidModels = [
+    'openrouter/google/gemini-1.5-pro:online',
+    'openai/gpt-4',
+    'openrouter/anthropic/claude-sonnet-4',
+    // Malformed Vertex path: the trailing segment must not be read as an id.
+    'projects/123/locations/us-central1/publishers/google/gemini-2.5-flash',
+  ];
+
+  for (const model of invalidModels) {
+    it(`should return false for model: ${model}`, () => {
+      expect(isGemini2OrAbove(model)).toBe(false);
+    });
+  }
 });
 
 describe('isGemini3xFlashLive', () => {

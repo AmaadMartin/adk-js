@@ -59,6 +59,46 @@ describe('BuiltInCodeExecutor', () => {
     expect(llmRequest.config?.tools).toEqual([{codeExecution: {}}]);
   });
 
+  describe('extended model id forms', () => {
+    const supportedModels = [
+      'gemini/gemini-2.5-flash',
+      'models/gemini-2.5-pro',
+      'apigee/vertex_ai/v1beta/gemini-2.5-flash',
+    ];
+
+    for (const model of supportedModels) {
+      it(`processLlmRequest should attach codeExecution for model: ${model}`, () => {
+        const llmRequest: LlmRequest = {
+          model,
+          contents: [],
+          toolsDict: {},
+          liveConnectConfig: {},
+        };
+        expect(() => executor.processLlmRequest(llmRequest)).not.toThrow();
+        expect(llmRequest.config?.tools).toEqual([{codeExecution: {}}]);
+      });
+    }
+
+    const unsupportedModels = [
+      'openrouter/anthropic/claude-sonnet-4',
+      'openrouter/google/gemini-1.5-pro:online',
+    ];
+
+    for (const model of unsupportedModels) {
+      it(`processLlmRequest should throw error for model: ${model}`, () => {
+        const llmRequest: LlmRequest = {
+          model,
+          contents: [],
+          toolsDict: {},
+          liveConnectConfig: {},
+        };
+        expect(() => executor.processLlmRequest(llmRequest)).toThrowError(
+          `Gemini code execution tool is not supported for model ${model}`,
+        );
+      });
+    }
+  });
+
   it('processLlmRequest should throw error if model is invalid', () => {
     const llmRequest: LlmRequest = {
       model: 'invalid-model',
