@@ -8,9 +8,9 @@ import {BaseLlm, Gemini, LlmRequest, RoutedLlm} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 import {hasModelCredentials} from '../utils/model_credentials.js';
 
-const hasAKey = hasModelCredentials();
+const hasCredentials = hasModelCredentials();
 
-describe.skipIf(!hasAKey)('E2e Model Fallback with RoutedLlm', () => {
+describe.skipIf(!hasCredentials)('E2e Model Fallback with RoutedLlm', () => {
   it('should fallback to valid model if the primary model fails with a real error', async () => {
     // Configuration for RoutedLlm
     // First model is invalid and WILL fail on generation.

@@ -10,13 +10,11 @@ import {describe, expect, it} from 'vitest';
 import {hasModelCredentials} from '../utils/model_credentials.js';
 
 describe('E2E AgentTool State Filtering', () => {
-  const hasAKey = hasModelCredentials();
-
   it('should always pass (dummy test for vitest)', () => {
     expect(true).toBe(true);
   });
 
-  it.skipIf(!hasAKey)(
+  it.skipIf(!hasModelCredentials())(
     'should not propagate temp state keys from parent to sub-agent session',
     async () => {
       const subAgent = new LlmAgent({

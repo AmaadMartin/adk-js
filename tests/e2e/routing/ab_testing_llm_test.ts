@@ -8,9 +8,9 @@ import {Gemini, LlmRequest, RoutedLlm} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 import {hasModelCredentials} from '../utils/model_credentials.js';
 
-const hasAKey = hasModelCredentials();
+const hasCredentials = hasModelCredentials();
 
-describe.skipIf(!hasAKey)('E2e A/B Testing with RoutedLlm', () => {
+describe.skipIf(!hasCredentials)('E2e A/B Testing with RoutedLlm', () => {
   // External configuration mock
   const config = {
     selectedModel: 'model-a', // Default

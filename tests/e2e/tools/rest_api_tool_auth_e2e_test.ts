@@ -12,8 +12,6 @@ import {afterAll, beforeAll, describe, expect, it} from 'vitest';
 import {hasModelCredentials} from '../utils/model_credentials.js';
 
 describe('RestApiTool Auth E2E', () => {
-  const hasAKey = hasModelCredentials();
-
   let server: http.Server;
   let port: number;
 
@@ -44,7 +42,7 @@ describe('RestApiTool Auth E2E', () => {
     });
   });
 
-  it.skipIf(!hasAKey)(
+  it.skipIf(!hasModelCredentials())(
     'should complete auth flow and tool execution with real LLM',
     async () => {
       const endpoint = {

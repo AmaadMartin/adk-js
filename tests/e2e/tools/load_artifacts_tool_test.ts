@@ -10,9 +10,7 @@ import {describe, expect, it} from 'vitest';
 import {hasModelCredentials} from '../utils/model_credentials.js';
 
 describe('E2E LoadArtifactsTool', () => {
-  const hasAKey = hasModelCredentials();
-
-  it.skipIf(!hasAKey)(
+  it.skipIf(!hasModelCredentials())(
     'should use Gemini API to invoke load_artifacts and answer from it',
     async () => {
       const agent = new LlmAgent({

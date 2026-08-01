@@ -36,9 +36,9 @@ class FilterPlugin extends BasePlugin {
 }
 
 describe('E2E beforeToolSelection', () => {
-  const hasAKey = hasModelCredentials();
+  const hasCredentials = hasModelCredentials();
 
-  it.skipIf(!hasAKey)(
+  it.skipIf(!hasCredentials)(
     'should filter out LOAD_ARTIFACTS tool and fail to answer',
     async () => {
       const filterPlugin = new FilterPlugin();
@@ -102,7 +102,7 @@ describe('E2E beforeToolSelection', () => {
     30000,
   );
 
-  it.skipIf(!hasAKey)(
+  it.skipIf(!hasCredentials)(
     'should NOT filter out LOAD_ARTIFACTS tool when plugin returns undefined',
     async () => {
       class NoOpPlugin extends BasePlugin {

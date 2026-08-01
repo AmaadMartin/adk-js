@@ -42,9 +42,7 @@ class TestCompactionPlugin extends BasePlugin {
 }
 
 describe('E2e Context Compaction Agent-Controlled', () => {
-  const hasAKey = hasModelCredentials();
-
-  it.skipIf(!hasAKey)(
+  it.skipIf(!hasModelCredentials())(
     'should compact history when agent calls consolidate_context using Gemini API',
     async () => {
       const agent = createAgentControlledCompactionAgent();
