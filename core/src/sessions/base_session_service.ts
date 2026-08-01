@@ -83,7 +83,12 @@ export interface AppendEventRequest {
 /**
  * The response of listing sessions.
  *
- * The events and states are not set within each Session object.
+ * Events are never populated on a listed session; use `getSession` to load
+ * them. State is populated: each listed session carries the same merged view
+ * `getSession` returns for it, i.e. its session-scoped state plus the
+ * `app:`-prefixed application state and the `user:`-prefixed state of the
+ * session's own user, for services that keep separate application and user
+ * state stores.
  * When no pagination params were requested, `page` is 1, `limit` equals
  * `totalItems`, and `totalPages` is 1 (or 0 when there are no sessions).
  */
