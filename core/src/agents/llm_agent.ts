@@ -22,6 +22,7 @@ import {
   isFinalResponse,
   populateClientFunctionCallId,
 } from '../events/event.js';
+import {hasRecordedActions} from '../events/event_actions.js';
 
 import {BaseExampleProvider} from '../examples/base_example_provider.js';
 import {Example} from '../examples/example.js';
@@ -698,10 +699,14 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         break;
       }
 
+      // An event carrying recorded actions is a real terminal event, such as a
+      // deferring long-running tool's actions-only event, not a trailing empty
+      // model chunk, so it must not keep the step loop running.
       const isEmptyMetadataEvent =
         lastEvent.author === this.name &&
         !lastEvent.partial &&
-        (!lastEvent.content?.parts || lastEvent.content.parts.length === 0);
+        (!lastEvent.content?.parts || lastEvent.content.parts.length === 0) &&
+        !hasRecordedActions(lastEvent.actions);
 
       if (
         isFinalResponse(lastEvent) &&
