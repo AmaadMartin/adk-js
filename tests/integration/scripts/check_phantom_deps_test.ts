@@ -349,6 +349,7 @@ describe('check_phantom_deps', () => {
         'dist/out.js': source,
         'coverage/report.js': source,
         '.cache/cached.js': source,
+        '.adk_build_cache/adk_agent_loader/abc123/agent.js': source,
         'api-reference/docs.js': source,
         '.git/hook.js': source,
       });

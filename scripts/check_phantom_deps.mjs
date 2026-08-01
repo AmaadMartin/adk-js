@@ -35,10 +35,9 @@ const SCRIPT_KINDS_BY_EXTENSION = new Map([
   ['.cjs', ts.ScriptKind.JS],
 ]);
 
-const SOURCE_EXTENSIONS = new Set(SCRIPT_KINDS_BY_EXTENSION.keys());
-
 /** Build output, dependencies and caches: never first-party sources. */
 const SKIPPED_DIRECTORY_NAMES = new Set([
+  '.adk_build_cache',
   '.cache',
   '.git',
   'api-reference',
@@ -56,9 +55,7 @@ const MANIFEST_DEPENDENCY_FIELDS = [
 ];
 
 const NODE_BUILTIN_SPECIFIERS = new Set(builtinModules);
-const NODE_BUILTIN_PREFIX = 'node:';
 const REQUIRE_IDENTIFIER = 'require';
-const REQUIRE_RESOLVE_PROPERTY = 'resolve';
 
 /**
  * Orders strings by UTF-16 code unit so the report is byte-identical on every
@@ -78,6 +75,20 @@ function toRepoRelative(filePath, rootDir) {
   return path.relative(rootDir, filePath).split(path.sep).join('/');
 }
 
+/** Parsed JSON object at `filePath`; throws naming the file if it is not one. */
+function readJsonObject(filePath) {
+  let parsed;
+  try {
+    parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch (cause) {
+    throw new Error(`Unable to read ${filePath}`, {cause});
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`Unable to read ${filePath}: expected a JSON object`);
+  }
+  return parsed;
+}
+
 /** Every source file under `rootDir`, skipping generated directories. */
 function collectSourceFiles(rootDir) {
   const files = [];
@@ -92,7 +103,7 @@ function collectSourceFiles(rootDir) {
         }
       } else if (
         entry.isFile() &&
-        SOURCE_EXTENSIONS.has(path.extname(entry.name))
+        SCRIPT_KINDS_BY_EXTENSION.has(path.extname(entry.name))
       ) {
         files.push(entryPath);
       }
@@ -124,7 +135,7 @@ function isModuleLoadingCallee(expression) {
     ts.isPropertyAccessExpression(expression) &&
     ts.isIdentifier(expression.expression) &&
     expression.expression.text === REQUIRE_IDENTIFIER &&
-    expression.name.text === REQUIRE_RESOLVE_PROPERTY
+    expression.name.text === 'resolve'
   );
 }
 
@@ -178,8 +189,7 @@ function extractModuleSpecifiers(filePath) {
 
 function isNodeBuiltin(specifier) {
   return (
-    specifier.startsWith(NODE_BUILTIN_PREFIX) ||
-    NODE_BUILTIN_SPECIFIERS.has(specifier)
+    specifier.startsWith('node:') || NODE_BUILTIN_SPECIFIERS.has(specifier)
   );
 }
 
@@ -211,15 +221,7 @@ function readManifest(manifestPath, manifestCache) {
   if (cached) {
     return cached;
   }
-  let parsed;
-  try {
-    parsed = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-  } catch (cause) {
-    throw new Error(`Unable to read ${manifestPath}`, {cause});
-  }
-  if (parsed === null || typeof parsed !== 'object') {
-    throw new Error(`Unable to read ${manifestPath}: expected a JSON object`);
-  }
+  const parsed = readJsonObject(manifestPath);
   const dependencies = new Set();
   for (const field of MANIFEST_DEPENDENCY_FIELDS) {
     for (const name of Object.keys(parsed[field] ?? {})) {
@@ -348,7 +350,7 @@ function findPhantomDependencies(rootDir) {
     .map(({packageName, manifest, files}) => ({
       packageName,
       manifest,
-      files: [...files].sort(compareStrings),
+      files: [...files].sort(),
     }))
     .sort(
       (a, b) =>
@@ -364,16 +366,9 @@ function readAllowlist(rootDir) {
   if (!fs.existsSync(allowlistPath)) {
     return allowlist;
   }
-  let parsed;
-  try {
-    parsed = JSON.parse(fs.readFileSync(allowlistPath, 'utf8'));
-  } catch (cause) {
-    throw new Error(`Unable to read ${allowlistPath}`, {cause});
-  }
-  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error(`Unable to read ${allowlistPath}: expected a JSON object`);
-  }
-  for (const [manifest, packageNames] of Object.entries(parsed)) {
+  for (const [manifest, packageNames] of Object.entries(
+    readJsonObject(allowlistPath),
+  )) {
     if (!Array.isArray(packageNames)) {
       throw new Error(
         `Unable to read ${allowlistPath}: "${manifest}" must map to an array`,
@@ -459,14 +454,10 @@ function main(rootDir) {
   return reported.length === 0 && staleEntries.length === 0 ? 0 : 1;
 }
 
-const scriptPath = fileURLToPath(import.meta.url);
+const [, , rootDirArgument] = process.argv;
 
-// Keeps importing this module side-effect free.
-if (path.resolve(process.argv[1] ?? '') === scriptPath) {
-  const [, , rootDirArgument] = process.argv;
-  process.exitCode = main(
-    rootDirArgument
-      ? path.resolve(rootDirArgument)
-      : path.resolve(path.dirname(scriptPath), '..'),
-  );
-}
+process.exitCode = main(
+  rootDirArgument
+    ? path.resolve(rootDirArgument)
+    : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'),
+);
