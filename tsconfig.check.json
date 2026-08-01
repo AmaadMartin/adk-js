@@ -1,0 +1,27 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "declaration": false,
+    "sourceMap": false,
+    "paths": {
+      "@google/adk": ["./core/src/index.ts"],
+      "@google/adk/*": ["./core/src/*"],
+      "@google/adk-devtools": ["./dev/src/index.ts"],
+      "@google/adk-devtools/*": ["./dev/src/*"],
+      "@google/adk-integrations": ["./integrations/src/index.ts"],
+      "@google/adk-integrations/*": ["./integrations/src/*"]
+    }
+  },
+  "include": [
+    "core/src/**/*.ts",
+    "dev/src/**/*.ts",
+    "dev/samples/**/*.ts",
+    "integrations/src/**/*.ts",
+    "dev/test/**/*.ts",
+    "integrations/test/**/*.ts",
+    "tests/**/*.ts",
+    "vitest.config.ts"
+  ],
+  "exclude": ["**/node_modules/**", "**/dist/**", "core/test/**"]
+}
