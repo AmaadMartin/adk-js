@@ -14,9 +14,9 @@ import {
   URL_CONTEXT,
   UrlContextTool,
 } from '@google/adk';
-import {afterEach, describe, expect, it} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
-const ORIGINAL_MODEL_ID_CHECK = process.env.ADK_DISABLE_GEMINI_MODEL_ID_CHECK;
+const MODEL_ID_CHECK_ENV_VAR = 'ADK_DISABLE_GEMINI_MODEL_ID_CHECK';
 
 function makeRequest(model?: string, tools = []): LlmRequest {
   return {
@@ -41,12 +41,14 @@ function makeToolContext(): Context {
 
 describe('UrlContextTool', () => {
   describe('processLlmRequest', () => {
+    beforeEach(() => {
+      // Pin the escape hatch off so the model-id assertions hold whatever the
+      // ambient environment sets.
+      vi.stubEnv(MODEL_ID_CHECK_ENV_VAR, undefined);
+    });
+
     afterEach(() => {
-      if (ORIGINAL_MODEL_ID_CHECK === undefined) {
-        delete process.env.ADK_DISABLE_GEMINI_MODEL_ID_CHECK;
-      } else {
-        process.env.ADK_DISABLE_GEMINI_MODEL_ID_CHECK = ORIGINAL_MODEL_ID_CHECK;
-      }
+      vi.unstubAllEnvs();
     });
 
     it('returns early when model is not set', async () => {
@@ -123,7 +125,7 @@ describe('UrlContextTool', () => {
     });
 
     it('adds urlContext for a non-Gemini model when the model-id check is disabled', async () => {
-      process.env.ADK_DISABLE_GEMINI_MODEL_ID_CHECK = 'true';
+      vi.stubEnv(MODEL_ID_CHECK_ENV_VAR, 'true');
       const tool = new UrlContextTool();
       const req = makeRequest('internal-model-v1');
       await tool.processLlmRequest({
@@ -135,7 +137,7 @@ describe('UrlContextTool', () => {
     });
 
     it('still throws for a Gemini 1.x model when the model-id check is disabled', async () => {
-      process.env.ADK_DISABLE_GEMINI_MODEL_ID_CHECK = 'true';
+      vi.stubEnv(MODEL_ID_CHECK_ENV_VAR, 'true');
       const tool = new UrlContextTool();
       const req = makeRequest('gemini-1.5-pro');
       await expect(

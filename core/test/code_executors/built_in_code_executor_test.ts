@@ -6,23 +6,22 @@
 
 import type {ExecuteCodeParams} from '@google/adk';
 import {BuiltInCodeExecutor, LlmRequest} from '@google/adk';
-import {afterEach, beforeEach, describe, expect, it} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
-const ORIGINAL_MODEL_ID_CHECK = process.env.ADK_DISABLE_GEMINI_MODEL_ID_CHECK;
+const MODEL_ID_CHECK_ENV_VAR = 'ADK_DISABLE_GEMINI_MODEL_ID_CHECK';
 
 describe('BuiltInCodeExecutor', () => {
   let executor: BuiltInCodeExecutor;
 
   beforeEach(() => {
     executor = new BuiltInCodeExecutor();
+    // Pin the escape hatch off so the model-id assertions hold whatever the
+    // ambient environment sets.
+    vi.stubEnv(MODEL_ID_CHECK_ENV_VAR, undefined);
   });
 
   afterEach(() => {
-    if (ORIGINAL_MODEL_ID_CHECK === undefined) {
-      delete process.env.ADK_DISABLE_GEMINI_MODEL_ID_CHECK;
-    } else {
-      process.env.ADK_DISABLE_GEMINI_MODEL_ID_CHECK = ORIGINAL_MODEL_ID_CHECK;
-    }
+    vi.unstubAllEnvs();
   });
 
   it('executeCode should return dummy values', async () => {
@@ -71,7 +70,7 @@ describe('BuiltInCodeExecutor', () => {
   });
 
   it('processLlmRequest should add the tool for a non-Gemini model when the model-id check is disabled', () => {
-    process.env.ADK_DISABLE_GEMINI_MODEL_ID_CHECK = 'true';
+    vi.stubEnv(MODEL_ID_CHECK_ENV_VAR, 'true');
     const llmRequest: LlmRequest = {
       model: 'internal-model-v1',
       contents: [],
@@ -83,7 +82,7 @@ describe('BuiltInCodeExecutor', () => {
   });
 
   it('processLlmRequest should still throw when the model is unset and the model-id check is disabled', () => {
-    process.env.ADK_DISABLE_GEMINI_MODEL_ID_CHECK = 'true';
+    vi.stubEnv(MODEL_ID_CHECK_ENV_VAR, 'true');
     const llmRequest: LlmRequest = {
       contents: [],
       toolsDict: {},
