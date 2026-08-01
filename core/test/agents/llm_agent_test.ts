@@ -26,6 +26,7 @@ import {
   PluginManager,
   RunAsyncToolRequest,
   Session,
+  SingleBeforeModelCallback,
   ToolProcessLlmRequest,
 } from '@google/adk';
 import {Content, FinishReason, Schema, Type} from '@google/genai';
@@ -875,6 +876,63 @@ describe('LlmAgent step loop termination', () => {
     });
   });
 
+  const respondingTool = new FunctionTool({
+    name: 'respondingTool',
+    description: 'returns a value',
+    parameters: z3.object({}),
+    execute: async () => ({result: 'done'}),
+  });
+
+  /**
+   * Runs a turn whose first step calls a tool and then ends with
+   * `trailingChunk`, and whose second step answers with plain text.
+   */
+  async function runTurnEndingWith(
+    trailingChunk: LlmResponse,
+    beforeModelCallback?: SingleBeforeModelCallback,
+  ): Promise<{model: MultiStepMockLlm; events: Event[]}> {
+    const model = new MultiStepMockLlm([
+      [
+        {
+          content: {
+            role: 'model',
+            parts: [{functionCall: {name: 'respondingTool', args: {}}}],
+          },
+        },
+        trailingChunk,
+      ],
+      [{content: {role: 'model', parts: [{text: 'all done'}]}}],
+    ]);
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model,
+      tools: [respondingTool],
+      beforeModelCallback,
+    });
+    const invocationContext = new InvocationContext({
+      invocationId: 'inv_123',
+      session,
+      agent,
+      pluginManager: new PluginManager(),
+    });
+
+    const events: Event[] = [];
+    for await (const event of agent.runAsync(invocationContext)) {
+      events.push(event);
+    }
+    return {model, events};
+  }
+
+  function expectTurnContinued(result: {
+    model: MultiStepMockLlm;
+    events: Event[];
+  }) {
+    expect(result.model.callCount).toBe(2);
+    expect(result.events[result.events.length - 1].content?.parts).toEqual([
+      {text: 'all done'},
+    ]);
+  }
+
   it('should end the turn on the actions-only event of a deferring long-running tool', async () => {
     const deferringTool = new FunctionTool({
       name: 'deferringTool',
@@ -920,140 +978,36 @@ describe('LlmAgent step loop termination', () => {
   });
 
   it('should continue the turn on a trailing empty metadata chunk that recorded no actions', async () => {
-    const respondingTool = new FunctionTool({
-      name: 'respondingTool',
-      description: 'returns a value',
-      parameters: z3.object({}),
-      execute: async () => ({result: 'done'}),
-    });
-    const model = new MultiStepMockLlm([
-      [
-        {
-          content: {
-            role: 'model',
-            parts: [{functionCall: {name: 'respondingTool', args: {}}}],
-          },
-        },
-        {
-          errorCode: FinishReason.STOP,
-          finishReason: FinishReason.STOP,
-          usageMetadata: {promptTokenCount: 10, totalTokenCount: 10},
-        },
-      ],
-      [{content: {role: 'model', parts: [{text: 'all done'}]}}],
-    ]);
-    const agent = new LlmAgent({
-      name: 'test_agent',
-      model,
-      tools: [respondingTool],
-    });
-    const invocationContext = new InvocationContext({
-      invocationId: 'inv_123',
-      session,
-      agent,
-      pluginManager: new PluginManager(),
-    });
-
-    const events: Event[] = [];
-    for await (const event of agent.runAsync(invocationContext)) {
-      events.push(event);
-    }
-
-    expect(model.callCount).toBe(2);
-    expect(events[events.length - 1].content?.parts).toEqual([
-      {text: 'all done'},
-    ]);
+    expectTurnContinued(
+      await runTurnEndingWith({
+        errorCode: FinishReason.STOP,
+        finishReason: FinishReason.STOP,
+        usageMetadata: {promptTokenCount: 10, totalTokenCount: 10},
+      }),
+    );
   });
 
   it('should continue the turn on a trailing empty metadata chunk when a model callback wrote state', async () => {
-    const respondingTool = new FunctionTool({
-      name: 'respondingTool',
-      description: 'returns a value',
-      parameters: z3.object({}),
-      execute: async () => ({result: 'done'}),
-    });
-    const model = new MultiStepMockLlm([
-      [
-        {
-          content: {
-            role: 'model',
-            parts: [{functionCall: {name: 'respondingTool', args: {}}}],
-          },
-        },
+    expectTurnContinued(
+      await runTurnEndingWith(
         {
           errorCode: FinishReason.STOP,
           finishReason: FinishReason.STOP,
           usageMetadata: {promptTokenCount: 10, totalTokenCount: 10},
         },
-      ],
-      [{content: {role: 'model', parts: [{text: 'all done'}]}}],
-    ]);
-    const agent = new LlmAgent({
-      name: 'test_agent',
-      model,
-      tools: [respondingTool],
-      beforeModelCallback: ({context}) => {
-        context.state.set('turns', 1);
-        return undefined;
-      },
-    });
-    const invocationContext = new InvocationContext({
-      invocationId: 'inv_123',
-      session,
-      agent,
-      pluginManager: new PluginManager(),
-    });
-
-    const events: Event[] = [];
-    for await (const event of agent.runAsync(invocationContext)) {
-      events.push(event);
-    }
-
-    expect(model.callCount).toBe(2);
-    expect(events[events.length - 1].content?.parts).toEqual([
-      {text: 'all done'},
-    ]);
+        ({context}) => {
+          context.state.set('turns', 1);
+          return undefined;
+        },
+      ),
+    );
   });
 
   it('should continue the turn on a trailing model chunk whose content carries no parts', async () => {
-    const respondingTool = new FunctionTool({
-      name: 'respondingTool',
-      description: 'returns a value',
-      parameters: z3.object({}),
-      execute: async () => ({result: 'done'}),
-    });
-    const model = new MultiStepMockLlm([
-      [
-        {
-          content: {
-            role: 'model',
-            parts: [{functionCall: {name: 'respondingTool', args: {}}}],
-          },
-        },
-        {content: {role: 'model'}},
-      ],
-      [{content: {role: 'model', parts: [{text: 'all done'}]}}],
-    ]);
-    const agent = new LlmAgent({
-      name: 'test_agent',
-      model,
-      tools: [respondingTool],
-    });
-    const invocationContext = new InvocationContext({
-      invocationId: 'inv_123',
-      session,
-      agent,
-      pluginManager: new PluginManager(),
-    });
+    expectTurnContinued(await runTurnEndingWith({content: {role: 'model'}}));
+  });
 
-    const events: Event[] = [];
-    for await (const event of agent.runAsync(invocationContext)) {
-      events.push(event);
-    }
-
-    expect(model.callCount).toBe(2);
-    expect(events[events.length - 1].content?.parts).toEqual([
-      {text: 'all done'},
-    ]);
+  it('should continue the turn on a trailing interrupted chunk', async () => {
+    expectTurnContinued(await runTurnEndingWith({interrupted: true}));
   });
 });
