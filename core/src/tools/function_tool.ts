@@ -157,7 +157,7 @@ export class FunctionTool<
       if (isZodObject(this.parameters)) {
         validatedArgs = this.parameters.parse(req.args);
       }
-      return await this.invoke(
+      return await this.execute(
         validatedArgs as ToolExecuteArgument<TParameters>,
         req.toolContext,
       );
@@ -166,22 +166,5 @@ export class FunctionTool<
         error instanceof Error ? error.message : String(error);
       throw new Error(`Error in tool '${this.name}': ${errorMessage}`);
     }
-  }
-
-  /**
-   * Invokes the wrapped function with the already-validated arguments.
-   *
-   * Subclasses override this to run the call under extra machinery without
-   * re-implementing argument validation.
-   *
-   * @param args The arguments already validated against the parameter schema.
-   * @param toolContext The context of the current tool call.
-   * @returns A promise resolving to the function's return value.
-   */
-  protected async invoke(
-    args: ToolExecuteArgument<TParameters>,
-    toolContext: Context,
-  ): Promise<unknown> {
-    return this.execute(args, toolContext);
   }
 }
