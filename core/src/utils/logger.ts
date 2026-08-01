@@ -30,11 +30,76 @@ export interface Logger {
   setLogLevel(level: LogLevel): void;
 }
 
-class SimpleLogger implements Logger {
-  private readonly logger: winston.Logger;
-  private logLevel: LogLevel = LogLevel.INFO;
+/**
+ * Winston format options for a {@link WinstonLogger}.
+ */
+export interface WinstonLoggerOptions {
+  label: string;
+  colorize?: {
+    level?: boolean;
+    all?: boolean;
+    message?: boolean;
+    colors?: {
+      [level: string]: string;
+    };
+  };
+  timestamp?: boolean;
+  printFormat?: (info: {
+    message: unknown;
+    label?: string;
+    level?: string;
+    timestamp?: string;
+  }) => string;
+}
 
-  constructor() {
+/** Winston level names, keyed by ADK {@link LogLevel}. */
+const WINSTON_LEVEL_NAMES: Record<LogLevel, string> = {
+  [LogLevel.DEBUG]: 'debug',
+  [LogLevel.INFO]: 'info',
+  [LogLevel.WARN]: 'warn',
+  [LogLevel.ERROR]: 'error',
+};
+
+/** Process-wide default level for loggers that were never explicitly pinned. */
+let defaultLogLevel: LogLevel = LogLevel.INFO;
+
+/**
+ * A level-gated {@link Logger} backed by winston.
+ *
+ * The level is resolved on every log call as the instance pin when
+ * {@link WinstonLogger.setLogLevel} was called on this instance, and the
+ * process-wide default set by {@link setLogLevel} otherwise. Resolving it at
+ * log time is what lets a single `setLogLevel` call reach loggers that were
+ * already constructed.
+ */
+export class WinstonLogger implements Logger {
+  private readonly logger: winston.Logger;
+  private logLevel?: LogLevel;
+
+  constructor(options: WinstonLoggerOptions) {
+    const formats = [
+      winston.format.label({
+        label: options.label,
+        message: options.colorize?.all,
+      }),
+      winston.format((info) => {
+        info.level = info.level.toUpperCase();
+        return info;
+      })(),
+    ];
+
+    if (options.colorize) {
+      formats.push(winston.format.colorize(options.colorize));
+    }
+    if (options.timestamp) {
+      formats.push(winston.format.timestamp());
+    }
+    if (options.printFormat) {
+      formats.push(winston.format.printf(options.printFormat));
+    } else {
+      formats.push(winston.format.printf((info) => info.message as string));
+    }
+
     this.logger = winston.createLogger({
       levels: {
         'debug': LogLevel.DEBUG,
@@ -43,36 +108,30 @@ class SimpleLogger implements Logger {
         'error': LogLevel.ERROR,
       },
       level: 'error',
-      format: winston.format.combine(
-        winston.format.label({label: 'ADK'}),
-        winston.format((info) => {
-          info.level = info.level.toUpperCase();
-          return info;
-        })(),
-        winston.format.colorize(),
-        winston.format.timestamp(),
-        winston.format.printf((info) => {
-          return `${info.level}: [${info.label}] ${info.timestamp} ${info.message}`;
-        }),
-      ),
+      format: winston.format.combine(...formats),
       transports: [new winston.transports.Console()],
     });
   }
 
+  /** Pins this instance's level, overriding the process-wide default. */
   setLogLevel(level: LogLevel): void {
     this.logLevel = level;
   }
 
+  private isEnabled(level: LogLevel): boolean {
+    return (this.logLevel ?? defaultLogLevel) <= level;
+  }
+
   log(level: LogLevel, ...messages: unknown[]): void {
-    if (this.logLevel > level) {
+    if (!this.isEnabled(level)) {
       return;
     }
 
-    this.logger.log(level.toString(), messages.join(' '));
+    this.logger.log(WINSTON_LEVEL_NAMES[level], messages.join(' '));
   }
 
   debug(...messages: unknown[]): void {
-    if (this.logLevel > LogLevel.DEBUG) {
+    if (!this.isEnabled(LogLevel.DEBUG)) {
       return;
     }
 
@@ -80,7 +139,7 @@ class SimpleLogger implements Logger {
   }
 
   info(...messages: unknown[]): void {
-    if (this.logLevel > LogLevel.INFO) {
+    if (!this.isEnabled(LogLevel.INFO)) {
       return;
     }
 
@@ -88,7 +147,7 @@ class SimpleLogger implements Logger {
   }
 
   warn(...messages: unknown[]): void {
-    if (this.logLevel > LogLevel.WARN) {
+    if (!this.isEnabled(LogLevel.WARN)) {
       return;
     }
 
@@ -96,11 +155,26 @@ class SimpleLogger implements Logger {
   }
 
   error(...messages: unknown[]): void {
-    if (this.logLevel > LogLevel.ERROR) {
+    if (!this.isEnabled(LogLevel.ERROR)) {
       return;
     }
 
     this.logger.error(messages.join(' '));
+  }
+}
+
+/** Format options for the built-in ADK logger. */
+const DEFAULT_LOGGER_OPTIONS: WinstonLoggerOptions = {
+  label: 'ADK',
+  colorize: {level: true},
+  timestamp: true,
+  printFormat: (info) =>
+    `${info.level}: [${info.label}] ${info.timestamp} ${info.message}`,
+};
+
+class SimpleLogger extends WinstonLogger {
+  constructor() {
+    super(DEFAULT_LOGGER_OPTIONS);
   }
 }
 
@@ -141,8 +215,13 @@ export function resetLogger(): void {
 
 /**
  * Sets the log level for the logger.
+ *
+ * This sets the process-wide default that every built-in ADK logger follows,
+ * including loggers already constructed in other ADK packages, unless that
+ * logger was pinned with its own `setLogLevel` call.
  */
 export function setLogLevel(level: LogLevel) {
+  defaultLogLevel = level;
   logger.setLogLevel(level);
 }
 

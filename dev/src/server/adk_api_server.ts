@@ -139,7 +139,9 @@ export class AdkApiServer {
           return `${info.level}: [${info.label}] ${info.timestamp} ${info.message}`;
         },
       });
-    this.logger.setLogLevel(options.logLevel ?? LogLevel.INFO);
+    if (options.logLevel !== undefined) {
+      this.logger.setLogLevel(options.logLevel);
+    }
     this.a2a = options.a2a ?? false;
     // An exported-but-empty value means "no token"; anything else is handed
     // to the authenticator, which rejects a token that is not usable.
