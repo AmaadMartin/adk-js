@@ -9,8 +9,15 @@
   },
   "exclude": [
     "**/dist",
+    // These fixture packages own a tsconfig.json and are compiled in place by
+    // build_setup_test.ts against the installed tarball, so checking them here
+    // would grade them under weaker options and resolve the package from source.
+    "tests/integration/build_setup/ts_commonjs",
+    "tests/integration/build_setup/ts_commonjs_native_addon",
+    "tests/integration/build_setup/ts_esm",
+    "tests/integration/build_setup/ts_esm_native_addon",
     // Below still carry pre-existing type errors; the list should shrink to
-    // just "**/dist".
+    // just the entries above.
     "core/test/agents/processors/basic_llm_request_processor_test.ts",
     "core/test/agents/processors/instructions_llm_request_processor_test.ts",
     "core/test/agents/processors/request_confirmation_llm_request_processor_test.ts",
