@@ -114,6 +114,20 @@ export function getEncodedFileContent(data: string): string {
   return isBase64Encoded(data) ? data : base64Encode(data);
 }
 
+/**
+ * Returns the file content as base64, honoring the file's declared
+ * `contentEncoding`. Content with no declared encoding is assumed to already be
+ * base64, which is what `AgentEngineSandboxCodeExecutor` produces.
+ *
+ * @param file The file whose content to encode.
+ * @return The file content as base64-encoded bytes.
+ */
+export function toBase64Content(file: File): string {
+  return file.contentEncoding === FileContentEncoding.UTF8
+    ? base64Encode(file.content)
+    : file.content;
+}
+
 // Type to be used for regex matching of code blocks.
 interface CodeGroupMatch {
   groups?: {prefix?: string; codeStr?: string};

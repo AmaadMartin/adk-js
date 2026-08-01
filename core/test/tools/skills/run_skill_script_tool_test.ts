@@ -10,19 +10,19 @@ import {
   CodeExecutionResult,
   Context,
   ExecuteCodeParams,
-  File,
+  FileContentEncoding,
+  InMemoryArtifactService,
   InvocationContext,
   LlmAgent,
   RunSkillScriptTool,
+  ScopedArtifactService,
+  SessionArtifactService,
   Skill,
+  SkillScriptResponse,
   SkillToolset,
 } from '@google/adk';
-import {describe, expect, it, vi} from 'vitest';
-import {materializeFiles} from '../../../src/utils/file_utils.js';
-
-vi.mock('../../../src/utils/file_utils.js', () => ({
-  materializeFiles: vi.fn(),
-}));
+import * as fs from 'node:fs/promises';
+import {describe, expect, it} from 'vitest';
 
 class MockCodeExecutor extends BaseCodeExecutor {
   mockResult: CodeExecutionResult = {
@@ -53,6 +53,7 @@ describe('RunSkillScriptTool', () => {
   function createMockContext(
     agentName = 'test-agent',
     agentExecutor?: BaseCodeExecutor,
+    artifactService?: SessionArtifactService,
   ): Context {
     const agentObj: Record<string | symbol, unknown> = {name: agentName};
     if (agentExecutor) {
@@ -64,8 +65,35 @@ describe('RunSkillScriptTool', () => {
       invocationContext: {
         session: {state: {}},
         agent: agentObj as unknown as LlmAgent,
+        artifactService,
       } as unknown as InvocationContext,
     });
+  }
+
+  function createSessionArtifactService(): SessionArtifactService {
+    return new ScopedArtifactService(
+      new InMemoryArtifactService(),
+      'test-app',
+      'test-user',
+      'test-session',
+    );
+  }
+
+  function executorProducing(name: string): MockCodeExecutor {
+    const mockExecutor = new MockCodeExecutor();
+    mockExecutor.mockResult = {
+      stdout: 'script stdout',
+      stderr: '',
+      outputFiles: [
+        {
+          name,
+          content: 'hello',
+          contentEncoding: FileContentEncoding.UTF8,
+          mimeType: 'text/plain',
+        },
+      ],
+    };
+    return mockExecutor;
   }
 
   const mockSkill: Skill = {
@@ -204,28 +232,74 @@ describe('RunSkillScriptTool', () => {
     expect(binaryFile?.contentEncoding).toBe('base64');
   });
 
-  it('calls materializeFiles with output files from executor', async () => {
-    const mockExecutor = new MockCodeExecutor();
-    const testFile = {
-      name: 'output.txt',
-      content: 'hello',
-      contentEncoding: 'utf8',
-      mimeType: 'text/plain',
-    } as File;
-    mockExecutor.mockResult = {
-      stdout: '',
-      stderr: '',
-      outputFiles: [testFile],
-    };
-
+  it('saves script output files to the artifact service and omits file bytes from the response', async () => {
+    const mockExecutor = executorProducing('output.txt');
+    const artifactService = createSessionArtifactService();
+    const toolContext = createMockContext(
+      'test-agent',
+      undefined,
+      artifactService,
+    );
     const toolset = new SkillToolset([mockSkill], {codeExecutor: mockExecutor});
     const tool = new RunSkillScriptTool(toolset);
 
-    await tool.runAsync({
+    const result = (await tool.runAsync({
+      args: {skill_name: 'test-skill', script_path: 'scripts/setup.js'},
+      toolContext,
+    })) as SkillScriptResponse;
+
+    expect(result).toEqual({
+      stdout: 'script stdout',
+      stderr: '',
+      outputFiles: [{name: 'output.txt', mimeType: 'text/plain'}],
+    });
+    const artifact = await artifactService.loadArtifact({
+      filename: 'output.txt',
+    });
+    expect(artifact?.inlineData?.data).toBe(
+      Buffer.from('hello', 'utf-8').toString('base64'),
+    );
+    expect(toolContext.actions.artifactDelta).toEqual({'output.txt': 0});
+  });
+
+  it('does not write script output files to the process working directory', async () => {
+    const mockExecutor = executorProducing('cwd_regression_output.txt');
+    const toolset = new SkillToolset([mockSkill], {codeExecutor: mockExecutor});
+    const tool = new RunSkillScriptTool(toolset);
+    const before = (await fs.readdir(process.cwd())).sort();
+
+    const result = (await tool.runAsync({
+      args: {skill_name: 'test-skill', script_path: 'scripts/setup.js'},
+      toolContext: createMockContext(
+        'test-agent',
+        undefined,
+        createSessionArtifactService(),
+      ),
+    })) as SkillScriptResponse;
+
+    expect((await fs.readdir(process.cwd())).sort()).toEqual(before);
+    expect(result.outputFiles).toEqual([
+      {name: 'cwd_regression_output.txt', mimeType: 'text/plain'},
+    ]);
+  });
+
+  it('reports produced files with a warning when no artifact service is configured', async () => {
+    const mockExecutor = executorProducing('unsaved_output.txt');
+    const toolset = new SkillToolset([mockSkill], {codeExecutor: mockExecutor});
+    const tool = new RunSkillScriptTool(toolset);
+
+    const result = (await tool.runAsync({
       args: {skill_name: 'test-skill', script_path: 'scripts/setup.js'},
       toolContext: createMockContext(),
-    });
+    })) as SkillScriptResponse;
 
-    expect(materializeFiles).toHaveBeenCalledWith([testFile]);
+    expect(result).toEqual({
+      stdout: 'script stdout',
+      stderr: '',
+      outputFiles: [{name: 'unsaved_output.txt', mimeType: 'text/plain'}],
+      warning:
+        'No artifact service is configured; 1 output file(s) produced by the ' +
+        'script were discarded.',
+    });
   });
 });
