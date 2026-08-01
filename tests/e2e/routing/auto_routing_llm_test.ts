@@ -8,9 +8,9 @@ import {BaseLlm, Gemini, LlmRequest, RoutedLlm} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 import {hasModelCredentials} from '../utils/model_credentials.js';
 
-const hasAKey = hasModelCredentials();
+const hasCredentials = hasModelCredentials();
 
-describe.skipIf(!hasAKey)('E2e Auto Routing with RoutedLlm', () => {
+describe.skipIf(!hasCredentials)('E2e Auto Routing with RoutedLlm', () => {
   it('should route to simple model for simple request', async () => {
     const simpleModel = new Gemini({model: 'gemini-3-flash-preview'});
     const complexModel = new Gemini({model: 'gemini-3.1-pro-preview'});

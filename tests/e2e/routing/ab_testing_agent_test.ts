@@ -8,9 +8,9 @@ import {InMemoryRunner, LlmAgent, RoutedAgent} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 import {hasModelCredentials} from '../utils/model_credentials.js';
 
-const hasAKey = hasModelCredentials();
+const hasCredentials = hasModelCredentials();
 
-describe.skipIf(!hasAKey)('E2e A/B Testing with RoutedAgent', () => {
+describe.skipIf(!hasCredentials)('E2e A/B Testing with RoutedAgent', () => {
   // External configuration mock
   const config = {
     selectedAgent: 'agent-a',

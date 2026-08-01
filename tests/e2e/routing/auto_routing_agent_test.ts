@@ -15,9 +15,9 @@ import {
 import {describe, expect, it} from 'vitest';
 import {hasModelCredentials} from '../utils/model_credentials.js';
 
-const hasAKey = hasModelCredentials();
+const hasCredentials = hasModelCredentials();
 
-describe.skipIf(!hasAKey)('E2e Auto Routing with RoutedAgent', () => {
+describe.skipIf(!hasCredentials)('E2e Auto Routing with RoutedAgent', () => {
   it('should route to simple agent for simple request', async () => {
     const simpleAgent = new LlmAgent({
       name: 'simple_agent',

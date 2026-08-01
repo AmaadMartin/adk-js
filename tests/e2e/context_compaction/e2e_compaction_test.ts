@@ -42,9 +42,7 @@ class TestCompactionPlugin extends BasePlugin {
 }
 
 describe('E2e Context Compaction', () => {
-  const hasAKey = hasModelCredentials();
-
-  it.skipIf(!hasAKey)(
+  it.skipIf(!hasModelCredentials())(
     'should hit token threshold and compact history using Gemini API',
     async () => {
       // Instantiate agent inside the test so it relies on the loaded env variations

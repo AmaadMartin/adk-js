@@ -10,9 +10,9 @@ import {describe, expect, it} from 'vitest';
 import {z} from 'zod';
 import {hasModelCredentials} from '../utils/model_credentials.js';
 
-const hasAKey = hasModelCredentials();
+const hasCredentials = hasModelCredentials();
 
-describe.skipIf(!hasAKey)('E2e Planning Mode with RoutedAgent', () => {
+describe.skipIf(!hasCredentials)('E2e Planning Mode with RoutedAgent', () => {
   // Global flag for planning mode
   let planningMode = false;
 

@@ -9,9 +9,7 @@ import {createUserContent} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {hasModelCredentials} from '../utils/model_credentials.js';
 
-const hasAKey = hasModelCredentials();
-
-describe.skipIf(!hasAKey)('E2e customMetadata Support', () => {
+describe.skipIf(!hasModelCredentials())('E2e customMetadata Support', () => {
   it('should propagate customMetadata through a real run and attach to user event', async () => {
     const model = new Gemini({model: 'gemini-2.5-flash'});
     const agent = new Agent({

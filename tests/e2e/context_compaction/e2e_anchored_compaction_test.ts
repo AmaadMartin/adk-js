@@ -67,9 +67,7 @@ function createAnchoredCompactionAgent(): LlmAgent {
 }
 
 describe('E2e Anchored Context Compaction', () => {
-  const hasAKey = hasModelCredentials();
-
-  it.skipIf(!hasAKey)(
+  it.skipIf(!hasModelCredentials())(
     'should hit token threshold and maintain a persistent scratchpad at index 0',
     async () => {
       const agent = createAnchoredCompactionAgent();
