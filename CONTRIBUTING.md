@@ -57,8 +57,8 @@ To maintain high code quality and consistency:
    npm run ts:check
    ```
 
-   It does not yet cover `core/test`, which still carries pre-existing type
-   errors; see `exclude` in `tsconfig.check.json`.
+   It does not yet cover `core/test`; see
+   [#423](https://github.com/AmaadMartin/adk-js/issues/423).
 
 The project uses `husky` and `lint-staged` to automatically lint and format
 your changes before each commit.

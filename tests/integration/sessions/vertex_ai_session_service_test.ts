@@ -26,9 +26,9 @@ const AGENT_ENGINE_ID = '12345';
  * `@google-cloud/vertexai` 1.12.0 (whose range is `^1.45.0`), which is the
  * version `Sessions` is typed against. The two `ApiClient` classes are
  * identical at runtime but nominally distinct, so the client has to be
- * re-typed at this one boundary. Deduplicating `@google/genai` across the
- * major boundary would remove the need for this, and is a change to the
- * runtime dependency graph well beyond the scope of a type fix.
+ * re-typed at this one boundary. Deduplicating `@google/genai` removes the
+ * need for it and deletes this helper:
+ * https://github.com/AmaadMartin/adk-js/issues/424
  */
 function sessionsFor(apiClient: ApiClient): Sessions {
   return new Sessions(

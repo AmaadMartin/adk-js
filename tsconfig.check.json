@@ -2,15 +2,15 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": true,
-    "declaration": false,
-    "sourceMap": false,
+    // Resolve the workspace packages to their sources. This mirrors the
+    // aliases in vitest.config.ts, so a class has one identity instead of two
+    // (core/src/X and core/dist/types/X are nominally distinct), and it makes
+    // the check independent of whether `npm run build` has run.
     "paths": {
       "@google/adk": ["./core/src/index.ts"],
       "@google/adk/*": ["./core/src/*"],
       "@google/adk-devtools": ["./dev/src/index.ts"],
-      "@google/adk-devtools/*": ["./dev/src/*"],
-      "@google/adk-integrations": ["./integrations/src/index.ts"],
-      "@google/adk-integrations/*": ["./integrations/src/*"]
+      "@google/adk-integrations": ["./integrations/src/index.ts"]
     }
   },
   "include": [
@@ -23,5 +23,13 @@
     "tests/**/*.ts",
     "vitest.config.ts"
   ],
-  "exclude": ["**/node_modules/**", "**/dist/**", "core/test/**"]
+  "exclude": [
+    "**/node_modules/**",
+    // The tests/integration/build_setup fixtures emit declarations here when
+    // the integration suite runs; keep that output out of the program.
+    "**/dist/**",
+    // 154 pre-existing errors in 33 files. Tracked, and to be removed, in
+    // https://github.com/AmaadMartin/adk-js/issues/423
+    "core/test/**"
+  ]
 }
