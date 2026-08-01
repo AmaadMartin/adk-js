@@ -4,8 +4,19 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {LlmRequest, URL_CONTEXT, UrlContextTool} from '@google/adk';
-import {describe, expect, it} from 'vitest';
+import {
+  Context,
+  createSession,
+  InvocationContext,
+  LlmAgent,
+  LlmRequest,
+  PluginManager,
+  URL_CONTEXT,
+  UrlContextTool,
+} from '@google/adk';
+import {afterEach, describe, expect, it} from 'vitest';
+
+const ORIGINAL_MODEL_ID_CHECK = process.env.ADK_DISABLE_GEMINI_MODEL_ID_CHECK;
 
 function makeRequest(model?: string, tools = []): LlmRequest {
   return {
@@ -17,8 +28,27 @@ function makeRequest(model?: string, tools = []): LlmRequest {
   } as unknown as LlmRequest;
 }
 
+function makeToolContext(): Context {
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'url-context-test',
+      agent: new LlmAgent({name: 'url_context_test_agent'}),
+      session: createSession({id: 'test-session', appName: 'test-app'}),
+      pluginManager: new PluginManager([]),
+    }),
+  });
+}
+
 describe('UrlContextTool', () => {
   describe('processLlmRequest', () => {
+    afterEach(() => {
+      if (ORIGINAL_MODEL_ID_CHECK === undefined) {
+        delete process.env.ADK_DISABLE_GEMINI_MODEL_ID_CHECK;
+      } else {
+        process.env.ADK_DISABLE_GEMINI_MODEL_ID_CHECK = ORIGINAL_MODEL_ID_CHECK;
+      }
+    });
+
     it('returns early when model is not set', async () => {
       const tool = new UrlContextTool();
       const req = makeRequest(undefined);
@@ -90,6 +120,32 @@ describe('UrlContextTool', () => {
       });
 
       expect(req.config!.tools).toEqual([{urlContext: {}}]);
+    });
+
+    it('adds urlContext for a non-Gemini model when the model-id check is disabled', async () => {
+      process.env.ADK_DISABLE_GEMINI_MODEL_ID_CHECK = 'true';
+      const tool = new UrlContextTool();
+      const req = makeRequest('internal-model-v1');
+      await tool.processLlmRequest({
+        llmRequest: req,
+        toolContext: makeToolContext(),
+      });
+
+      expect(req.config!.tools).toEqual([{urlContext: {}}]);
+    });
+
+    it('still throws for a Gemini 1.x model when the model-id check is disabled', async () => {
+      process.env.ADK_DISABLE_GEMINI_MODEL_ID_CHECK = 'true';
+      const tool = new UrlContextTool();
+      const req = makeRequest('gemini-1.5-pro');
+      await expect(
+        tool.processLlmRequest({
+          llmRequest: req,
+          toolContext: makeToolContext(),
+        }),
+      ).rejects.toThrow(
+        'URL context tool requires Gemini 2 or above, but got gemini-1.5-pro',
+      );
     });
   });
 
