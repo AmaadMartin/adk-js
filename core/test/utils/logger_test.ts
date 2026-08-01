@@ -4,9 +4,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {getLogger, Logger, LogLevel, setLogger, setLogLevel} from '@google/adk';
+import {
+  getLogger,
+  getLogLevel,
+  Logger,
+  LogLevel,
+  setLogger,
+  setLogLevel,
+} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
-import {resetLogger} from '../../src/utils/logger.js';
+import {logger as loggerFacade, resetLogger} from '../../src/utils/logger.js';
 
 describe('setLogger', () => {
   beforeEach(() => {
@@ -139,6 +146,125 @@ describe('setLogger', () => {
       const logger = getLogger();
 
       expect(logger.constructor.name).toBe('SimpleLogger');
+    });
+  });
+});
+
+const LEVEL_CASES = [
+  LogLevel.DEBUG,
+  LogLevel.INFO,
+  LogLevel.WARN,
+  LogLevel.ERROR,
+].map((level) => ({name: LogLevel[level], level}));
+
+describe('getLogLevel', () => {
+  beforeEach(() => {
+    resetLogger();
+  });
+
+  afterEach(() => {
+    resetLogger();
+  });
+
+  describe('default logger', () => {
+    it('returns INFO for the default logger', () => {
+      expect(getLogLevel()).toBe(LogLevel.INFO);
+    });
+
+    it.each(LEVEL_CASES)('reflects setLogLevel($name)', ({level}) => {
+      setLogLevel(level);
+
+      expect(getLogLevel()).toBe(level);
+    });
+  });
+
+  describe('custom logger that implements getLogLevel', () => {
+    it('returns the level reported by the custom logger', () => {
+      const customLogger: Logger = {
+        setLogLevel: () => {},
+        log: () => {},
+        debug: () => {},
+        info: () => {},
+        warn: () => {},
+        error: () => {},
+        getLogLevel: () => LogLevel.WARN,
+      };
+
+      setLogger(customLogger);
+
+      expect(getLogLevel()).toBe(LogLevel.WARN);
+    });
+
+    it('delegates on every call instead of caching a copy', () => {
+      let level = LogLevel.INFO;
+      const customLogger: Logger = {
+        setLogLevel: (next) => {
+          level = next;
+        },
+        log: () => {},
+        debug: () => {},
+        info: () => {},
+        warn: () => {},
+        error: () => {},
+        getLogLevel: () => level,
+      };
+
+      setLogger(customLogger);
+      setLogLevel(LogLevel.ERROR);
+
+      expect(getLogLevel()).toBe(LogLevel.ERROR);
+    });
+  });
+
+  describe('custom logger that does not implement getLogLevel', () => {
+    const customLogger: Logger = {
+      setLogLevel: () => {},
+      log: () => {},
+      debug: () => {},
+      info: () => {},
+      warn: () => {},
+      error: () => {},
+    };
+
+    it('returns undefined', () => {
+      setLogger(customLogger);
+
+      expect(getLogLevel()).toBeUndefined();
+    });
+
+    it('does not throw', () => {
+      setLogger(customLogger);
+
+      expect(() => getLogLevel()).not.toThrow();
+    });
+  });
+
+  describe('null logger', () => {
+    it('returns undefined for the no-op logger', () => {
+      setLogger(null);
+
+      expect(getLogLevel()).toBeUndefined();
+    });
+
+    it('returns INFO again after resetLogger', () => {
+      setLogger(null);
+      resetLogger();
+
+      expect(getLogLevel()).toBe(LogLevel.INFO);
+    });
+  });
+
+  describe('logger facade', () => {
+    it('forwards to the active logger', () => {
+      setLogLevel(LogLevel.WARN);
+
+      expect(loggerFacade.getLogLevel?.()).toBe(LogLevel.WARN);
+    });
+
+    it('reports undefined when the active logger has no level', () => {
+      setLogger(null);
+
+      expect(loggerFacade.getLogLevel?.()).toBeUndefined();
     });
   });
 });
