@@ -23,9 +23,14 @@ import {defineConfig} from 'vitest/config';
 const INTEGRATION_HOOK_TIMEOUT_MS = 120000;
 
 /**
- * Test budget (ms) for the `integration` project: matches the largest per-file
- * timeout in the repo. A per-test `it()` timeout may still override this; a
- * hook timeout must not (see above).
+ * Test budget (ms) for the `integration` project, sized for the
+ * subprocess-spawning and esbuild-bundling suites under `tests/integration`.
+ *
+ * A per-test `it()` timeout argument replaces this budget rather than adding
+ * to it, so add one only to *raise* it for a specific operation, naming and
+ * justifying it where it is declared. A per-file constant that restates or
+ * lowers this value silently shrinks the budget for exactly the install- and
+ * compile-bound work these defaults exist to cover.
  */
 const INTEGRATION_TEST_TIMEOUT_MS = 60000;
 
