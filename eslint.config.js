@@ -34,6 +34,22 @@ export default defineConfig([
           'caughtErrorsIgnorePattern': '^_',
         },
       ],
+      'no-restricted-imports': [
+        'error',
+        {
+          'patterns': [
+            {
+              'group': [
+                '@google/adk/**',
+                '@google/adk-devtools/**',
+                '@google/adk-integrations/**',
+              ],
+              'message':
+                'Deep subpath imports are not resolvable from the published packages: their exports maps declare only ".". Import from the package root, or use a relative path into src/ for symbols that are intentionally not public API.',
+            },
+          ],
+        },
+      ],
     },
   },
 ]);
