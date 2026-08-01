@@ -64,12 +64,20 @@ export function createMockStrategy(
   }
 }
 
+/**
+ * Whether every entry of `matchArgs` is present in `args` with a structurally
+ * equal value.
+ *
+ * Only own keys of `args` count, matching Python's `item in args.items()`. An
+ * `in` test would walk the prototype chain and report `__proto__` or
+ * `constructor` as present in every argument object.
+ */
 function matchesArgs(
   matchArgs: Record<string, unknown>,
   args: Record<string, unknown>,
 ): boolean {
   return Object.entries(matchArgs).every(
-    ([key, value]) => key in args && isEqual(args[key], value),
+    ([key, value]) => Object.hasOwn(args, key) && isEqual(args[key], value),
   );
 }
 

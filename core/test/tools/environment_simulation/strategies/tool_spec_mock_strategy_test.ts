@@ -42,6 +42,15 @@ const CONNECTION_MAP: ToolConnectionMap = {
   ],
 };
 
+/** A connection map whose parameter name targets a prototype-chain key. */
+function mapForParameter(parameterName: string): ToolConnectionMap {
+  return {
+    statefulParameters: [
+      {parameterName, creatingTools: ['create_ticket'], consumingTools: []},
+    ],
+  };
+}
+
 let toolContext: Context;
 
 function request(overrides: Partial<MockRequest> = {}): MockRequest {
@@ -324,6 +333,95 @@ describe('ToolSpecMockStrategy', () => {
     expect(llm.requests[0].config).toEqual({
       temperature: 0.7,
       responseMimeType: 'application/json',
+    });
+  });
+
+  describe('model-controlled keys', () => {
+    // `parameterName` and the entity id both come out of an LLM: the analyzer
+    // model names the parameter and the strategy model produces its value.
+    // Neither may reach `Object.prototype`.
+    let prototypeKeysBefore: string[];
+    let objectKeysBefore: string[];
+
+    beforeEach(() => {
+      prototypeKeysBefore = Object.getOwnPropertyNames(Object.prototype);
+      objectKeysBefore = Object.getOwnPropertyNames(Object);
+    });
+
+    afterEach(() => {
+      expect(Object.getOwnPropertyNames(Object.prototype)).toEqual(
+        prototypeKeysBefore,
+      );
+      expect(Object.getOwnPropertyNames(Object)).toEqual(objectKeysBefore);
+    });
+
+    it('stores a __proto__ parameter as an own key, not on the prototype', async () => {
+      stubRegistryWithText(['{"__proto__": "polluted"}']);
+      const strategy = new ToolSpecMockStrategy('test-model', {});
+      const stateStore: Record<string, Record<string, unknown>> = {};
+
+      await strategy.mock(
+        request({stateStore, toolConnectionMap: mapForParameter('__proto__')}),
+      );
+
+      expect(Object.hasOwn(stateStore, '__proto__')).toBe(true);
+      expect(Object.getPrototypeOf(stateStore)).toBe(Object.prototype);
+      expect(Object.keys(stateStore['__proto__'])).toEqual(['polluted']);
+      expect(Object.hasOwn({}, 'polluted')).toBe(false);
+    });
+
+    it('stores a __proto__ entity id as an own key', async () => {
+      stubRegistryWithText(['{"ticket_id": "__proto__"}']);
+      const strategy = new ToolSpecMockStrategy('test-model', {});
+      const stateStore: Record<string, Record<string, unknown>> = {};
+
+      await strategy.mock(
+        request({stateStore, toolConnectionMap: CONNECTION_MAP}),
+      );
+
+      const entities = stateStore['ticket_id'];
+      expect(Object.hasOwn(entities, '__proto__')).toBe(true);
+      expect(Object.getPrototypeOf(entities)).toBe(Object.prototype);
+      expect(entities['__proto__']).toEqual({ticket_id: '__proto__'});
+    });
+
+    it('does not treat an inherited __proto__ as a stateful id', async () => {
+      stubRegistryWithText(['{"ticket_id": "T-1"}']);
+      const strategy = new ToolSpecMockStrategy('test-model', {});
+      const stateStore: Record<string, Record<string, unknown>> = {};
+
+      await strategy.mock(
+        request({stateStore, toolConnectionMap: mapForParameter('__proto__')}),
+      );
+
+      expect(stateStore).toEqual({});
+    });
+
+    it('does not treat an inherited constructor as a stateful id', async () => {
+      stubRegistryWithText(['{"ticket_id": "T-1"}']);
+      const strategy = new ToolSpecMockStrategy('test-model', {});
+      const stateStore: Record<string, Record<string, unknown>> = {};
+
+      await strategy.mock(
+        request({
+          stateStore,
+          toolConnectionMap: mapForParameter('constructor'),
+        }),
+      );
+
+      expect(stateStore).toEqual({});
+    });
+
+    it('does not treat an inherited toString as a stateful id when nested', async () => {
+      stubRegistryWithText(['{"ticket": {"id": "T-1"}}']);
+      const strategy = new ToolSpecMockStrategy('test-model', {});
+      const stateStore: Record<string, Record<string, unknown>> = {};
+
+      await strategy.mock(
+        request({stateStore, toolConnectionMap: mapForParameter('toString')}),
+      );
+
+      expect(stateStore).toEqual({});
     });
   });
 });

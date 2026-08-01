@@ -211,6 +211,24 @@ describe('EnvironmentSimulationEngine', () => {
       ).resolves.toEqual({ticket_id: 'T-1'});
     });
 
+    it('does not treat an inherited key as present in the arguments', async () => {
+      // `'constructor' in args` is true for every object and reads back the
+      // Object constructor, so an `in` test plus a structural comparison would
+      // match arguments that carry no such key at all.
+      await expect(
+        simulateWithMatchArgs({constructor: Object}, {param: 'value'}),
+      ).resolves.toEqual({ticket_id: 'T-1'});
+    });
+
+    it('does not treat an inherited method as present in the arguments', async () => {
+      await expect(
+        simulateWithMatchArgs(
+          {toString: Object.prototype.toString},
+          {param: 'value'},
+        ),
+      ).resolves.toEqual({ticket_id: 'T-1'});
+    });
+
     it('requires every matchArgs entry to match, not just one', async () => {
       await expect(
         simulateWithMatchArgs({a: 1, b: 2}, {a: 1, b: 999}),
@@ -276,6 +294,33 @@ describe('EnvironmentSimulationEngine', () => {
         error_code: 503,
         error_message: 'upstream down',
       });
+    });
+
+    it('returns an empty injected response, short-circuiting the tool', async () => {
+      // Documented divergence: adk-python's truthiness check treats an empty
+      // dict as unset and rejects the config, while the zod refine tests for
+      // presence. An empty object is not nullish, so `functions.ts` still
+      // short-circuits the real tool with it.
+      stubSimulationModel();
+      const engine = new EnvironmentSimulationEngine({
+        toolSimulationConfigs: [
+          {
+            toolName: 'create_ticket',
+            injectionConfigs: [{injectedResponse: {}}],
+          },
+        ],
+        simulationModel: 'test-model',
+        simulationModelConfiguration: {},
+      });
+
+      const result = await engine.simulate({
+        tool: CREATE_TICKET,
+        args: {},
+        toolContext,
+      });
+
+      expect(result).toEqual({});
+      expect(result).toBeDefined();
     });
 
     it('returns the injected response unchanged', async () => {
