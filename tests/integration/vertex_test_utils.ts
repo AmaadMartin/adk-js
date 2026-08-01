@@ -24,28 +24,8 @@ export const TEST_LOCATION = 'us-central1';
  */
 export const TEST_AGENT_ENGINE_ID = '12345';
 
-/** Options for {@link buildAgentEngineAppName}. */
-export interface AgentEngineAppNameOptions {
-  projectId: string;
-  location: string;
-  agentEngineId: string;
-}
-
 /**
- * Builds a fully qualified Agent Engine resource name, the form
+ * Canonical placeholder Agent Engine resource name, the form
  * `VertexAiSessionService` accepts as an `appName`.
  */
-export function buildAgentEngineAppName({
-  projectId,
-  location,
-  agentEngineId,
-}: AgentEngineAppNameOptions): string {
-  return `projects/${projectId}/locations/${location}/reasoningEngines/${agentEngineId}`;
-}
-
-/** {@link buildAgentEngineAppName} applied to the canonical placeholders. */
-export const TEST_AGENT_ENGINE_APP_NAME = buildAgentEngineAppName({
-  projectId: TEST_PROJECT_ID,
-  location: TEST_LOCATION,
-  agentEngineId: TEST_AGENT_ENGINE_ID,
-});
+export const TEST_AGENT_ENGINE_APP_NAME = `projects/${TEST_PROJECT_ID}/locations/${TEST_LOCATION}/reasoningEngines/${TEST_AGENT_ENGINE_ID}`;

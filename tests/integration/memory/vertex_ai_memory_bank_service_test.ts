@@ -16,7 +16,6 @@ import {
 import {createUserContent} from '@google/genai';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {GeminiWithMockResponses} from '../test_case_utils.js';
-import {TEST_AGENT_ENGINE_ID} from '../vertex_test_utils.js';
 
 describe('VertexAiMemoryBankService Integration', () => {
   let mockMemories: {
@@ -98,7 +97,7 @@ describe('VertexAiMemoryBankService Integration', () => {
       agent,
       sessionService: new InMemorySessionService(),
       memoryService: new VertexAiMemoryBankService({
-        agentEngineId: TEST_AGENT_ENGINE_ID,
+        agentEngineId: 'test-engine-id',
         client: mockClient as unknown as Client,
       }),
     });
