@@ -26,6 +26,7 @@ export class RestApiTool extends BaseTool {
 
   private headerProvider?: (context: ReadonlyContext) => Record<string, string>;
   private credentialKey?: string;
+  private defaultHeaders: Record<string, string> = {};
 
   constructor(
     name: string,
@@ -61,6 +62,19 @@ export class RestApiTool extends BaseTool {
   @experimental
   public configureCredentialKey(credentialKey: string) {
     this.credentialKey = credentialKey;
+  }
+
+  /**
+   * Sets headers added to every request this tool issues.
+   *
+   * A default header never replaces a header the request already carries, so
+   * it cannot clobber the `Authorization` header set from the credential.
+   *
+   * @param headers The headers to add by default.
+   */
+  @experimental
+  public setDefaultHeaders(headers: Record<string, string>) {
+    this.defaultHeaders = headers;
   }
 
   @experimental
@@ -128,6 +142,13 @@ export class RestApiTool extends BaseTool {
     if (this.headerProvider) {
       const providerHeaders = this.headerProvider(context);
       Object.assign(headers, providerHeaders);
+    }
+
+    // Apply the default headers, without overwriting a header already set.
+    for (const [key, value] of Object.entries(this.defaultHeaders)) {
+      if (!(key in headers)) {
+        headers[key] = value;
+      }
     }
 
     try {

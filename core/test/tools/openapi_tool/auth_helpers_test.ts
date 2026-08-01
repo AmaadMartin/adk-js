@@ -6,11 +6,16 @@
 
 import {OpenAPIV3} from 'openapi-types';
 import {describe, expect, it} from 'vitest';
-import {AuthCredential} from '../../../src/auth/auth_credential.js';
+import {
+  AuthCredential,
+  AuthCredentialTypes,
+  ServiceAccount,
+} from '../../../src/auth/auth_credential.js';
 import {
   applyCredential,
   createApiKeyScheme,
   createBearerScheme,
+  serviceAccountSchemeCredential,
 } from '../../../src/tools/openapi_tool/auth/auth_helpers.js';
 
 describe('auth_helpers', () => {
@@ -117,6 +122,30 @@ describe('auth_helpers', () => {
         type: 'http',
         scheme: 'bearer',
       });
+    });
+  });
+
+  describe('serviceAccountSchemeCredential', () => {
+    const config: ServiceAccount = {
+      useDefaultCredential: true,
+      scopes: ['https://www.googleapis.com/auth/calendar'],
+    };
+
+    it('should create a JWT bearer scheme', () => {
+      const {authScheme} = serviceAccountSchemeCredential(config);
+
+      expect(authScheme).toEqual({
+        type: 'http',
+        scheme: 'bearer',
+        bearerFormat: 'JWT',
+      });
+    });
+
+    it('should create a service account credential holding the config', () => {
+      const {authCredential} = serviceAccountSchemeCredential(config);
+
+      expect(authCredential.authType).toBe(AuthCredentialTypes.SERVICE_ACCOUNT);
+      expect(authCredential.serviceAccount).toBe(config);
     });
   });
 });
