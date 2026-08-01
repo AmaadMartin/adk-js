@@ -19,7 +19,7 @@ import {
   SingleBeforeToolCallback,
   ToolConfirmation,
 } from '@google/adk';
-import {FunctionCall} from '@google/genai';
+import {FunctionCall, FunctionResponseScheduling} from '@google/genai';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {z} from 'zod';
 import {
@@ -436,6 +436,78 @@ describe('handleFunctionCallList', () => {
         }),
       }),
     ]);
+  });
+
+  it('should stamp responseScheduling onto the emitted function response', async () => {
+    const silentTool = new FunctionTool({
+      name: 'silentTool',
+      description: 'tool the model must not react to',
+      parameters: z.object({}),
+      execute: async () => ({status: 'recorded'}),
+      responseScheduling: FunctionResponseScheduling.SILENT,
+    });
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(silentTool)],
+      toolsDict: {silentTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event?.content?.parts?.[0].functionResponse?.scheduling).toBe(
+      FunctionResponseScheduling.SILENT,
+    );
+  });
+
+  it('should leave scheduling unset when the tool does not set it', async () => {
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [functionCall],
+      toolsDict,
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(
+      event?.content?.parts?.[0].functionResponse?.scheduling,
+    ).toBeUndefined();
+  });
+
+  it('should serialise scheduling only when the tool sets it', async () => {
+    const interruptTool = new FunctionTool({
+      name: 'interruptTool',
+      description: 'tool the model must react to immediately',
+      parameters: z.object({}),
+      execute: async () => ({status: 'urgent'}),
+      responseScheduling: FunctionResponseScheduling.INTERRUPT,
+    });
+
+    const stampedEvent = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(interruptTool)],
+      toolsDict: {interruptTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+    const stamped: unknown = JSON.parse(
+      JSON.stringify(stampedEvent?.content?.parts?.[0].functionResponse),
+    );
+    expect(stamped).toMatchObject({
+      scheduling: FunctionResponseScheduling.INTERRUPT,
+    });
+
+    const unstampedEvent = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [functionCall],
+      toolsDict,
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+    const unstamped: unknown = JSON.parse(
+      JSON.stringify(unstampedEvent?.content?.parts?.[0].functionResponse),
+    );
+    expect(unstamped).not.toHaveProperty('scheduling');
   });
 });
 

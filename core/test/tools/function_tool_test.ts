@@ -5,7 +5,7 @@
  */
 
 import {Context, FunctionTool, isFunctionTool} from '@google/adk';
-import {Type} from '@google/genai';
+import {FunctionResponseScheduling, Type} from '@google/genai';
 import {beforeEach, describe, expect, it} from 'vitest';
 import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
@@ -488,6 +488,31 @@ describe('FunctionTool', () => {
           "Error in tool 'errorTool': Test error",
         );
       }
+    });
+  });
+
+  describe('responseScheduling', () => {
+    it('forwards responseScheduling to the tool', () => {
+      const tool = new FunctionTool({
+        name: 'my_tool',
+        description: 'Does something.',
+        execute: async () => 'done',
+        responseScheduling: FunctionResponseScheduling.WHEN_IDLE,
+      });
+
+      expect(tool.responseScheduling).toBe(
+        FunctionResponseScheduling.WHEN_IDLE,
+      );
+    });
+
+    it('leaves responseScheduling undefined by default', () => {
+      const tool = new FunctionTool({
+        name: 'my_tool',
+        description: 'Does something.',
+        execute: async () => 'done',
+      });
+
+      expect(tool.responseScheduling).toBeUndefined();
     });
   });
 });
