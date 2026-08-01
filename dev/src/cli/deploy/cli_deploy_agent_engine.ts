@@ -6,8 +6,8 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
-import {Client} from '@google-cloud/vertexai/build/src/genai/client.js';
-import {ReasoningEngine as VertexReasoningEngine} from '@google-cloud/vertexai/build/src/genai/types.js';
+import {Client} from '@google-cloud/vertexai';
+import type {ReasoningEngine as VertexReasoningEngine} from '@google-cloud/vertexai/build/src/genai/types.js';
 
 import {AgentLoader} from '../../utils/agent_loader.js';
 import {isFile, isFolderExists} from '../../utils/file_utils.js';
