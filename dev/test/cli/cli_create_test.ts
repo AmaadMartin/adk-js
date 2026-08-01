@@ -332,10 +332,10 @@ describe('createAgent', () => {
       const warning = logSpy.mock.calls
         .map((call) => String(call[0]))
         .find((message) => message.includes(WARNING_TEXT));
-      // Byte-for-byte identical to the adk-python banner tail, so a suffix
-      // such as `.env.local` cannot slip past the substring assertions above.
+      // Byte-for-byte identical to the adk-python banner tail. This also pins
+      // that the api key value is absent, and that a suffix such as
+      // `.env.local` cannot slip past the substring assertions above.
       expect(warning).toBe(`\n⚠️  ${WARNING_TEXT}`);
-      expect(warning).not.toContain('my-api-key');
     });
 
     it('should not warn when the create flow exits before writing files', async () => {
