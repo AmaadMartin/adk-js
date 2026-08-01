@@ -262,7 +262,9 @@ describe('deployToCloudRun', () => {
     const consoleErrorSpy = vi.spyOn(console, 'error');
     (loadFileData as Mock).mockResolvedValue({});
 
-    await deployToCloudRun(defaultOptions);
+    await expect(deployToCloudRun(defaultOptions)).rejects.toThrow(
+      /No dependencies found in package.json/,
+    );
 
     expect(consoleErrorSpy).toHaveBeenCalledWith(
       expect.stringContaining('\x1b[31mFailed to deploy to Cloud Run:'),
@@ -279,7 +281,9 @@ describe('deployToCloudRun', () => {
       },
     });
 
-    await deployToCloudRun(defaultOptions);
+    await expect(deployToCloudRun(defaultOptions)).rejects.toThrow(
+      /Package "@google\/adk" is required but not found/,
+    );
 
     expect(consoleErrorSpy).toHaveBeenCalledWith(
       expect.stringContaining('\x1b[31mFailed to deploy to Cloud Run:'),
@@ -351,7 +355,7 @@ describe('deployToCloudRun', () => {
     );
   });
 
-  it('should handle spawn failures', async () => {
+  it('should reject when the gcloud deploy spawn fails', async () => {
     const consoleErrorSpy = vi.spyOn(console, 'error');
     spawnMock.mockReturnValue({
       on: vi.fn((event: string, cb: (code: number) => void) => {
@@ -361,7 +365,9 @@ describe('deployToCloudRun', () => {
       }),
     });
 
-    await deployToCloudRun(defaultOptions);
+    await expect(deployToCloudRun(defaultOptions)).rejects.toThrow(
+      /Command failed with exit code 1/,
+    );
 
     expect(consoleErrorSpy).toHaveBeenCalledWith(
       expect.stringContaining('\x1b[31mFailed to deploy to Cloud Run:'),
