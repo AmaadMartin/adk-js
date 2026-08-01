@@ -29,7 +29,7 @@ describe('App loader CLI integration', () => {
 
       beforeAll(async () => {
         await execAsync('npm install', {cwd: projectPath});
-      }, TEST_EXECUTION_TIMEOUT);
+      });
 
       it(
         'should run app via package.json start script and get responses',
@@ -62,7 +62,7 @@ describe('App loader CLI integration', () => {
         await fs
           .unlink(path.join(projectPath, 'package-lock.json'))
           .catch(() => {});
-      }, TEST_EXECUTION_TIMEOUT);
+      });
     },
   );
 });
@@ -77,7 +77,7 @@ describe('AgentLoader discovery and loading integration', () => {
   beforeAll(async () => {
     await execAsync('npm install', {cwd: projectPath});
     loader = new AgentLoader(projectPath);
-  }, TEST_EXECUTION_TIMEOUT);
+  });
 
   it(
     'should discover apps vs agents across directories and standalone files',
@@ -127,6 +127,20 @@ describe('AgentLoader discovery and loading integration', () => {
     TEST_EXECUTION_TIMEOUT,
   );
 
+  it(
+    'compiles an agent without embedding the ADK runtime',
+    async () => {
+      const appFile = await loader.getAppFile('service_alpha');
+      await appFile.load();
+
+      // The ADK runtime is ~5.6MB minified, so an artifact this small can only
+      // be importing it rather than inlining a private copy of it.
+      const {size} = await fs.stat(appFile.getFilePath());
+      expect(size).toBeLessThan(64 * 1024);
+    },
+    TEST_EXECUTION_TIMEOUT,
+  );
+
   afterAll(async () => {
     await loader.disposeAll();
     await fs
@@ -138,5 +152,5 @@ describe('AgentLoader discovery and loading integration', () => {
     await fs
       .unlink(path.join(projectPath, 'package-lock.json'))
       .catch(() => {});
-  }, TEST_EXECUTION_TIMEOUT);
+  });
 });
