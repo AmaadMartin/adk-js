@@ -50,6 +50,13 @@ import {getAgentGraphAsDot} from './agent_graph.js';
  */
 export const A2A_AUTH_TOKEN_ENV_VAR = 'ADK_A2A_AUTH_TOKEN';
 
+/**
+ * The part of {@link AgentLoader} the API server depends on. Declaring the
+ * dependency structurally lets callers supply their own agent source without
+ * subclassing the concrete loader.
+ */
+export type AgentLoaderLike = Pick<AgentLoader, 'listAgents' | 'getAgentFile'>;
+
 interface ServerOptions {
   agentsDir?: string;
   host?: string;
@@ -57,7 +64,7 @@ interface ServerOptions {
   sessionService?: BaseSessionService;
   memoryService?: BaseMemoryService;
   artifactService?: BaseArtifactService;
-  agentLoader?: AgentLoader;
+  agentLoader?: AgentLoaderLike;
   agentFileLoadOptions?: AgentFileOptions;
   serveDebugUI?: boolean;
   allowOrigins?: string;
@@ -90,7 +97,7 @@ export class AdkApiServer {
   }
 
   readonly app: express.Application;
-  private readonly agentLoader: AgentLoader;
+  private readonly agentLoader: AgentLoaderLike;
   private readonly runnerCache: Record<string, Runner> = {};
   private readonly sessionService: BaseSessionService;
   private readonly memoryService: BaseMemoryService;

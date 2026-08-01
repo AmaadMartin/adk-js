@@ -52,14 +52,6 @@ export interface WinstonLoggerOptions {
   }) => string;
 }
 
-/** Winston level names, keyed by ADK {@link LogLevel}. */
-const WINSTON_LEVEL_NAMES: Record<LogLevel, string> = {
-  [LogLevel.DEBUG]: 'debug',
-  [LogLevel.INFO]: 'info',
-  [LogLevel.WARN]: 'warn',
-  [LogLevel.ERROR]: 'error',
-};
-
 /** Process-wide default level for loggers that were never explicitly pinned. */
 let defaultLogLevel: LogLevel = LogLevel.INFO;
 
@@ -127,7 +119,9 @@ export class WinstonLogger implements Logger {
       return;
     }
 
-    this.logger.log(WINSTON_LEVEL_NAMES[level], messages.join(' '));
+    // The winston level names are the LogLevel member names, lowercased; see
+    // the `levels` map above.
+    this.logger.log(LogLevel[level].toLowerCase(), messages.join(' '));
   }
 
   debug(...messages: unknown[]): void {

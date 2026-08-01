@@ -30,6 +30,7 @@ import {z} from 'zod';
 import {
   A2A_AUTH_TOKEN_ENV_VAR,
   AdkApiServer,
+  AgentLoaderLike,
 } from '../../src/server/adk_api_server.js';
 import {AgentLoader} from '../../src/utils/agent_loader.js';
 
@@ -1263,11 +1264,12 @@ describe('AdkWebServer', () => {
  * A stub loader for tests that only exercise the constructor: a real
  * `AgentLoader` installs process-level `SIGINT` and `uncaughtException`
  * handlers that call `process.exit()`, which must not happen in a test worker.
- * `AgentLoader` has private fields, so the stub cannot be structurally typed.
  */
-const STUB_AGENT_LOADER = {
+const STUB_AGENT_LOADER: AgentLoaderLike = {
   listAgents: () => Promise.resolve([]),
-} as unknown as AgentLoader;
+  getAgentFile: () =>
+    Promise.reject(new Error('these tests never load an agent file')),
+};
 
 function createRecordingLogger(): {logger: Logger; pinnedLevels: LogLevel[]} {
   const pinnedLevels: LogLevel[] = [];

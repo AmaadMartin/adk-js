@@ -112,7 +112,7 @@ describe('AdkLogger', () => {
     },
   );
 
-  it('still shapes the winston format from AdkLoggerOptions', () => {
+  it('still shapes the winston format from its constructor options', () => {
     new AdkLogger({
       label: 'ADK CLI',
       colorize: {all: true},
