@@ -248,6 +248,30 @@ function convertSchemaType(schemaDef: DiscoverySchema): OpenAPIV3.SchemaObject {
 }
 
 /**
+ * Copies the constraint keys Discovery and OpenAPI spell the same way.
+ *
+ * `description` is not among them: Discovery puts a parameter's description on
+ * the parameter rather than on its schema.
+ */
+function applyFacets(
+  schema: OpenAPIV3.SchemaObject,
+  def: DiscoverySchema,
+): void {
+  if (def.format !== undefined) {
+    schema.format = def.format;
+  }
+  if (def.enum !== undefined) {
+    schema.enum = def.enum;
+  }
+  if (def.pattern !== undefined) {
+    schema.pattern = def.pattern;
+  }
+  if (def.default !== undefined) {
+    schema.default = def.default;
+  }
+}
+
+/**
  * Recursively converts one Discovery schema definition into an OpenAPI schema.
  *
  * A definition carrying a `$ref` becomes a bare reference object: OpenAPI 3.0
@@ -262,21 +286,9 @@ export function convertSchemaObject(
   }
 
   const schema = convertSchemaType(schemaDef);
-
-  if (schemaDef.format !== undefined) {
-    schema.format = schemaDef.format;
-  }
-  if (schemaDef.enum !== undefined) {
-    schema.enum = schemaDef.enum;
-  }
+  applyFacets(schema, schemaDef);
   if (schemaDef.description !== undefined) {
     schema.description = schemaDef.description;
-  }
-  if (schemaDef.pattern !== undefined) {
-    schema.pattern = schemaDef.pattern;
-  }
-  if (schemaDef.default !== undefined) {
-    schema.default = schemaDef.default;
   }
 
   return schema;
@@ -431,19 +443,7 @@ export function convertParameterSchema(
   // Only the type is taken from the parameter: Discovery never nests
   // properties under a parameter, and neither does the reference converter.
   const schema = convertSchemaType({type: param.type ?? 'string'});
-
-  if (param.enum !== undefined) {
-    schema.enum = param.enum;
-  }
-  if (param.format !== undefined) {
-    schema.format = param.format;
-  }
-  if (param.default !== undefined) {
-    schema.default = param.default;
-  }
-  if (param.pattern !== undefined) {
-    schema.pattern = param.pattern;
-  }
+  applyFacets(schema, param);
 
   return schema;
 }

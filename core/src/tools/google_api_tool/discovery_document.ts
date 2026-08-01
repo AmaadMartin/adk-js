@@ -90,11 +90,11 @@ export async function fetchDiscoveryDocument(
   apiVersion: string,
   discoveryUrl: string = DEFAULT_DISCOVERY_URL,
 ): Promise<DiscoveryDocument> {
+  // Function replacements, so a `$` in an api id cannot be expanded as a
+  // replacement pattern.
   const url = discoveryUrl
-    .split('{api}')
-    .join(apiName)
-    .split('{apiVersion}')
-    .join(apiVersion);
+    .replaceAll('{api}', () => apiName)
+    .replaceAll('{apiVersion}', () => apiVersion);
 
   logger.debug(`Fetching Google API discovery document from ${url}`);
 

@@ -8,47 +8,20 @@ import {convertDiscoveryDocument} from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
 import {describe, expect, it} from 'vitest';
 import {DOCS_DISCOVERY_DOCUMENT} from './discovery_fixtures.js';
+import {
+  asReference,
+  asSchema,
+  operationAt,
+  parametersByName,
+  requestBodyOf,
+  responseAt,
+} from './openapi_narrowing.js';
 
 const SPEC = convertDiscoveryDocument(DOCS_DISCOVERY_DOCUMENT, 'docs', 'v1');
 const BATCH_UPDATE_PATH = '/v1/documents/{documentId}:batchUpdate';
 
-/** Narrows a possibly-referenced schema to a concrete schema object. */
-function asSchema(
-  schema: OpenAPIV3.SchemaObject | OpenAPIV3.ReferenceObject | undefined,
-): OpenAPIV3.SchemaObject {
-  if (!schema || '$ref' in schema) {
-    return expect.fail(
-      `expected a schema object, got ${JSON.stringify(schema)}`,
-    );
-  }
-  return schema;
-}
-
-/** Narrows a possibly-referenced schema to a reference object. */
-function asReference(
-  schema: OpenAPIV3.SchemaObject | OpenAPIV3.ReferenceObject | undefined,
-): OpenAPIV3.ReferenceObject {
-  if (!schema || !('$ref' in schema)) {
-    return expect.fail(
-      `expected a reference object, got ${JSON.stringify(schema)}`,
-    );
-  }
-  return schema;
-}
-
 function schemaNamed(name: string): OpenAPIV3.SchemaObject {
   return asSchema(SPEC.components?.schemas?.[name]);
-}
-
-function operationAt(
-  path: string,
-  method: 'get' | 'post',
-): OpenAPIV3.OperationObject {
-  const operation = SPEC.paths[path]?.[method];
-  if (!operation) {
-    return expect.fail(`expected a ${method} operation at ${path}`);
-  }
-  return operation;
 }
 
 describe('Google Docs discovery conversion', () => {
@@ -66,7 +39,7 @@ describe('Google Docs discovery conversion', () => {
   });
 
   it('converts batchUpdate into a post operation', () => {
-    const batchUpdate = operationAt(BATCH_UPDATE_PATH, 'post');
+    const batchUpdate = operationAt(SPEC.paths, BATCH_UPDATE_PATH, 'post');
 
     expect(batchUpdate.operationId).toBe('docs.documents.batchUpdate');
     expect(batchUpdate.summary).toBe(
@@ -84,13 +57,9 @@ describe('Google Docs discovery conversion', () => {
   });
 
   it('keeps documentId as a declared parameter despite the trailing verb', () => {
-    const parameters = operationAt(BATCH_UPDATE_PATH, 'post').parameters ?? [];
-    const documentId = parameters.find(
-      (parameter) => 'name' in parameter && parameter.name === 'documentId',
-    );
-    if (!documentId || !('name' in documentId)) {
-      return expect.fail('expected a documentId parameter');
-    }
+    const documentId = parametersByName(
+      operationAt(SPEC.paths, BATCH_UPDATE_PATH, 'post'),
+    )['documentId'];
 
     // The `:batchUpdate` suffix hides the placeholder from path extraction, so
     // the parameter arrives through the declared-parameter list instead.
@@ -100,15 +69,9 @@ describe('Google Docs discovery conversion', () => {
   });
 
   it('resolves the batchUpdate request and response references', () => {
-    const batchUpdate = operationAt(BATCH_UPDATE_PATH, 'post');
-    const requestBody = batchUpdate.requestBody;
-    if (!requestBody || '$ref' in requestBody) {
-      return expect.fail('expected a request body object');
-    }
-    const response = batchUpdate.responses?.['200'];
-    if (!response || '$ref' in response) {
-      return expect.fail('expected a 200 response object');
-    }
+    const batchUpdate = operationAt(SPEC.paths, BATCH_UPDATE_PATH, 'post');
+    const requestBody = requestBodyOf(batchUpdate);
+    const response = responseAt(batchUpdate, '200');
 
     expect(requestBody.required).toBe(true);
     expect(
@@ -190,13 +153,8 @@ describe('Google Docs discovery conversion', () => {
   });
 
   it('converts the documents get operation', () => {
-    const get = operationAt('/v1/documents/{documentId}', 'get');
-    const documentId = (get.parameters ?? []).find(
-      (parameter) => 'name' in parameter && parameter.name === 'documentId',
-    );
-    if (!documentId || !('name' in documentId)) {
-      return expect.fail('expected a documentId parameter');
-    }
+    const get = operationAt(SPEC.paths, '/v1/documents/{documentId}', 'get');
+    const documentId = parametersByName(get)['documentId'];
 
     expect(get.operationId).toBe('docs.documents.get');
     expect(documentId.required).toBe(true);
@@ -204,11 +162,8 @@ describe('Google Docs discovery conversion', () => {
   });
 
   it('converts the documents create operation', () => {
-    const create = operationAt('/v1/documents', 'post');
-    const requestBody = create.requestBody;
-    if (!requestBody || '$ref' in requestBody) {
-      return expect.fail('expected a request body object');
-    }
+    const create = operationAt(SPEC.paths, '/v1/documents', 'post');
+    const requestBody = requestBodyOf(create);
 
     expect(create.operationId).toBe('docs.documents.create');
     expect(

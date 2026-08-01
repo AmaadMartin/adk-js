@@ -5,7 +5,15 @@
  */
 
 import {
+  DiscoveryDocument,
+  DiscoveryParameter,
+  DiscoverySchema,
+  GoogleApiToOpenApiConverter,
   convertDiscoveryDocument,
+} from '@google/adk';
+import {OpenAPIV3} from 'openapi-types';
+import {afterEach, describe, expect, it, vi} from 'vitest';
+import {
   convertExternalDocs,
   convertInfo,
   convertMethods,
@@ -16,91 +24,20 @@ import {
   convertSchemas,
   convertSecuritySchemes,
   convertServers,
-  DiscoveryDocument,
-  DiscoveryParameter,
-  DiscoverySchema,
   extractPathParameters,
-  GoogleApiToOpenApiConverter,
-} from '@google/adk';
-import {OpenAPIV3} from 'openapi-types';
-import {afterEach, describe, expect, it, vi} from 'vitest';
+} from '../../../src/tools/google_api_tool/googleapi_to_openapi_converter.js';
 import {
   CALENDAR_DISCOVERY_DOCUMENT,
   DOCS_DISCOVERY_DOCUMENT,
 } from './discovery_fixtures.js';
-
-/** Narrows a possibly-referenced schema to a concrete schema object. */
-function asSchema(
-  schema: OpenAPIV3.SchemaObject | OpenAPIV3.ReferenceObject | undefined,
-): OpenAPIV3.SchemaObject {
-  if (!schema || '$ref' in schema) {
-    return expect.fail(
-      `expected a schema object, got ${JSON.stringify(schema)}`,
-    );
-  }
-  return schema;
-}
-
-/** Narrows a possibly-referenced schema to a reference object. */
-function asReference(
-  schema: OpenAPIV3.SchemaObject | OpenAPIV3.ReferenceObject | undefined,
-): OpenAPIV3.ReferenceObject {
-  if (!schema || !('$ref' in schema)) {
-    return expect.fail(
-      `expected a reference object, got ${JSON.stringify(schema)}`,
-    );
-  }
-  return schema;
-}
-
-/** Narrows an operation out of a converted paths object. */
-function operationAt(
-  paths: OpenAPIV3.PathsObject,
-  path: string,
-  method: 'get' | 'post',
-): OpenAPIV3.OperationObject {
-  const operation = paths[path]?.[method];
-  if (!operation) {
-    return expect.fail(`expected a ${method} operation at ${path}`);
-  }
-  return operation;
-}
-
-/** Narrows the response of an operation to a concrete response object. */
-function responseAt(
-  operation: OpenAPIV3.OperationObject,
-  status: string,
-): OpenAPIV3.ResponseObject {
-  const response = operation.responses?.[status];
-  if (!response || '$ref' in response) {
-    return expect.fail(`expected a ${status} response object`);
-  }
-  return response;
-}
-
-/** Narrows the request body of an operation. */
-function requestBodyOf(
-  operation: OpenAPIV3.OperationObject,
-): OpenAPIV3.RequestBodyObject {
-  const requestBody = operation.requestBody;
-  if (!requestBody || '$ref' in requestBody) {
-    return expect.fail('expected a request body object');
-  }
-  return requestBody;
-}
-
-/** Indexes the parameters of an operation by name. */
-function parametersByName(
-  operation: OpenAPIV3.OperationObject,
-): Record<string, OpenAPIV3.ParameterObject> {
-  const byName: Record<string, OpenAPIV3.ParameterObject> = {};
-  for (const parameter of operation.parameters ?? []) {
-    if ('name' in parameter) {
-      byName[parameter.name] = parameter;
-    }
-  }
-  return byName;
-}
+import {
+  asReference,
+  asSchema,
+  operationAt,
+  parametersByName,
+  requestBodyOf,
+  responseAt,
+} from './openapi_narrowing.js';
 
 describe('convertInfo', () => {
   it('copies the discovery metadata', () => {

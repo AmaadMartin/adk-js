@@ -4,8 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {DEFAULT_DISCOVERY_URL, fetchDiscoveryDocument} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {
+  DEFAULT_DISCOVERY_URL,
+  fetchDiscoveryDocument,
+} from '../../../src/tools/google_api_tool/discovery_document.js';
 import {CALENDAR_DISCOVERY_DOCUMENT} from './discovery_fixtures.js';
 
 describe('fetchDiscoveryDocument', () => {
