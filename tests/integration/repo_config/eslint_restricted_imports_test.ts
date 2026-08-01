@@ -11,7 +11,7 @@ import {describe, expect, it} from 'vitest';
 
 const REPO_ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
-  '../..',
+  '../../..',
 );
 
 /**
