@@ -166,17 +166,10 @@ export function setLogLevel(level: LogLevel) {
  *
  * Callers using this as an "is this level enabled?" guard should treat
  * `undefined` as enabled, so that a custom logger still receives messages it
- * may want to emit:
- *
- * ```ts
- * const level = getLogLevel();
- * if (level === undefined || level <= LogLevel.DEBUG) {
- *   logger.debug(`expensive: ${JSON.stringify(payload)}`);
- * }
- * ```
+ * may want to emit.
  */
 export function getLogLevel(): LogLevel | undefined {
-  return currentLogger.getLogLevel?.();
+  return logger.getLogLevel?.();
 }
 
 /**
