@@ -66,9 +66,6 @@ vi.mock('node:fs/promises', async (importOriginal) => {
   });
 
   const mockMkdir = vi.fn().mockImplementation((path, opts) => {
-    if (isCoveragePath(path)) {
-      return actual.mkdir(path, opts);
-    }
     return actual.mkdir(path, opts);
   });
 
