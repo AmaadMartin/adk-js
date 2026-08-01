@@ -6,6 +6,7 @@
 
 import {
   BaseAgent,
+  CODE_EXECUTION_RESPONSE_PROCESSOR,
   InvocationContext,
   LlmAgent,
   LlmRequest,
@@ -217,5 +218,13 @@ describe('CodeExecutionResponseProcessor', () => {
 
       expect(events).toHaveLength(0);
     });
+  });
+});
+
+describe('CODE_EXECUTION_RESPONSE_PROCESSOR', () => {
+  it('is exported from the package root as a usable response processor', () => {
+    expect(CODE_EXECUTION_RESPONSE_PROCESSOR).toBeInstanceOf(
+      CodeExecutionResponseProcessor,
+    );
   });
 });
