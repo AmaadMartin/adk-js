@@ -138,6 +138,8 @@ export class APIHubToolset extends BaseToolset {
     );
     // js-yaml parses JSON too, since JSON is a subset of YAML.
     const spec: unknown = yaml.load(specStr);
+    // An empty spec leaves the toolset with no tools rather than throwing,
+    // matching adk-python. OpenAPIToolset rejects an absent spec outright.
     if (!spec || typeof spec !== 'object') {
       return;
     }
