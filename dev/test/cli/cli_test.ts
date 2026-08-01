@@ -204,7 +204,7 @@ describe('CLI Entrypoint', () => {
       async (moduleType) => {
         await parse(['web', '--file_type', moduleType]);
 
-        const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
+        const args = vi.mocked(AdkApiServer).mock.calls[0][0];
         expect(args.agentFileLoadOptions).toMatchObject({moduleType});
       },
     );
@@ -212,8 +212,8 @@ describe('CLI Entrypoint', () => {
     it('leaves moduleType undefined when --file_type is omitted', async () => {
       await parse(['web']);
 
-      const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
-      expect(args.agentFileLoadOptions.moduleType).toBeUndefined();
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.agentFileLoadOptions).toMatchObject({moduleType: undefined});
     });
   });
 
