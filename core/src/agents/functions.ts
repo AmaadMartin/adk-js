@@ -112,7 +112,7 @@ export function generateAuthEvent(
     branch: invocationContext.branch,
     content: {
       parts: parts,
-      role: functionResponseEvent.content?.role,
+      role: functionResponseEvent.content?.role ?? 'user',
     },
     longRunningToolIds: Array.from(longRunningToolIds),
   });
@@ -165,7 +165,7 @@ export function generateRequestConfirmationEvent({
     branch: invocationContext.branch,
     content: {
       parts: parts,
-      role: functionResponseEvent.content?.role,
+      role: functionResponseEvent.content?.role ?? 'user',
     },
     actions: functionResponseEvent.actions,
     longRunningToolIds: Array.from(longRunningToolIds),
@@ -246,7 +246,8 @@ function buildResponseEvent(
  *     circuit the rest.
  *   - If the tool is long-running and the response is nullish, skip the
  *     response event; emit a content-less event carrying its actions if it
- *     recorded any.
+ *     recorded any. A tool that raised is not skipped: it still emits an error
+ *     response, because no deferred response is coming.
  * - Merge all function response events into a single event.
  */
 export async function handleFunctionCallsAsync({
@@ -443,7 +444,13 @@ export async function handleFunctionCallList({
     // ('', 0, false) is a real result and still emits one, so long-running
     // tools that return such a value now produce a response event where they
     // previously produced none.
-    if (tool.isLongRunning && functionResponse == null) {
+    // An unhandled tool error is never deferred: no response will arrive later,
+    // so it falls through and is reported to the model as {error: ...} below.
+    if (
+      tool.isLongRunning &&
+      functionResponse == null &&
+      !functionResponseError
+    ) {
       // The response event is the only carrier for what the tool recorded on
       // toolContext.actions, so emit those on a content-less event rather than
       // losing them. Tools that recorded nothing stay silent.
