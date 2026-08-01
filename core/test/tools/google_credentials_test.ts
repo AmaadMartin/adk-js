@@ -5,13 +5,14 @@
  */
 
 import {
-  AuthConfig,
   AuthCredential,
   AuthCredentialTypes,
   BaseGoogleCredentialsConfig,
   Context,
   GoogleCredentialsManager,
+  InvocationContext,
   State,
+  createSession,
 } from '@google/adk';
 import {AuthClient, OAuth2Client} from 'google-auth-library';
 import {afterEach, describe, expect, it, vi} from 'vitest';
@@ -20,6 +21,7 @@ const CLIENT_ID = 'test-client-id';
 const CLIENT_SECRET = 'test-client-secret';
 const SCOPES = ['https://www.googleapis.com/auth/calendar'];
 const TOKEN_CACHE_KEY = 'test_token_cache';
+const FUNCTION_CALL_ID = 'test-function-call-id';
 const HOUR_MS = 60 * 60 * 1000;
 
 /**
@@ -40,17 +42,48 @@ class NonOAuth2Client extends AuthClient {
   }
 }
 
-function createToolContext(state: State = new State()) {
-  const getAuthResponse =
-    vi.fn<(authConfig: AuthConfig) => AuthCredential | undefined>();
-  const requestCredential = vi.fn<(authConfig: AuthConfig) => void>();
-  const context = {
-    state,
-    getAuthResponse,
-    requestCredential,
-  } as unknown as Context;
+/**
+ * Builds a real {@link Context}, so `requestCredential` and `getAuthResponse`
+ * run the framework's own `AuthHandler` rather than a stub. The spies call
+ * through; they only add call counting.
+ */
+function createInvocationContext(): InvocationContext {
+  return {
+    session: createSession({
+      id: 'test-session',
+      appName: 'test-app',
+      userId: 'test-user',
+    }),
+  } as unknown as InvocationContext;
+}
 
-  return {context, state, getAuthResponse, requestCredential};
+function createToolContext() {
+  const context = new Context({
+    invocationContext: createInvocationContext(),
+    functionCallId: FUNCTION_CALL_ID,
+  });
+
+  return {
+    context,
+    state: context.state,
+    getAuthResponse: vi.spyOn(context, 'getAuthResponse'),
+    requestCredential: vi.spyOn(context, 'requestCredential'),
+  };
+}
+
+/**
+ * Completes an authorization the way the framework does, by storing the
+ * response in `temp:` state under the credential key the tool asked for.
+ */
+function completeAuthorization(
+  state: State,
+  credentialKey: string,
+  oauth2: AuthCredential['oauth2'],
+): void {
+  state.set(`${State.TEMP_PREFIX}${credentialKey}`, {
+    authType: AuthCredentialTypes.OAUTH2,
+    oauth2,
+  });
 }
 
 function oauthConfig(
@@ -62,10 +95,6 @@ function oauthConfig(
     scopes: SCOPES,
     ...overrides,
   });
-}
-
-function oauthResponse(oauth2: AuthCredential['oauth2']): AuthCredential {
-  return {authType: AuthCredentialTypes.OAUTH2, oauth2};
 }
 
 /** Replaces the token endpoint call with an in-memory token mint. */
@@ -186,14 +215,49 @@ describe('BaseGoogleCredentialsConfig', () => {
     expect(config.clientSecret).toBeUndefined();
     expect(config.scopes).toBeUndefined();
   });
+
+  describe('tokenCacheKey', () => {
+    it('defaults to a key derived from the client id and scopes', () => {
+      expect(oauthConfig().tokenCacheKey).toBe(
+        `google_${CLIENT_ID}_${SCOPES.join(',')}`,
+      );
+    });
+
+    it('is stable regardless of the order the scopes are declared in', () => {
+      expect(oauthConfig({scopes: ['scope-b', 'scope-a']}).tokenCacheKey).toBe(
+        oauthConfig({scopes: ['scope-a', 'scope-b']}).tokenCacheKey,
+      );
+    });
+
+    it('honours an explicit key', () => {
+      expect(oauthConfig({tokenCacheKey: TOKEN_CACHE_KEY}).tokenCacheKey).toBe(
+        TOKEN_CACHE_KEY,
+      );
+    });
+
+    it('is unset for a pre-supplied credential shared by every end user', () => {
+      const config = new BaseGoogleCredentialsConfig({
+        credentials: new NonOAuth2Client(),
+      });
+
+      expect(config.tokenCacheKey).toBeUndefined();
+    });
+
+    it('is unset when the host application owns the access token', () => {
+      const config = new BaseGoogleCredentialsConfig({
+        externalAccessTokenKey: 'token_key',
+      });
+
+      expect(config.tokenCacheKey).toBeUndefined();
+    });
+  });
 });
 
 describe('GoogleCredentialsManager', () => {
   describe('external access token', () => {
     it('builds a client from the token held in state', async () => {
-      const state = new State();
+      const {context, state, getAuthResponse} = createToolContext();
       state.set('external_token', 'host-supplied-token');
-      const {context, getAuthResponse} = createToolContext(state);
       const manager = new GoogleCredentialsManager(
         new BaseGoogleCredentialsConfig({
           externalAccessTokenKey: 'external_token',
@@ -285,18 +349,73 @@ describe('GoogleCredentialsManager', () => {
       expect(client).toBe(credentials);
       expect(credentials.getAccessToken).not.toHaveBeenCalled();
     });
+
+    it('writes nothing to state, because the credential is not per-user', async () => {
+      const credentials = new NonOAuth2Client();
+      credentials.setCredentials({access_token: 'still-good'});
+      const {context, state} = createToolContext();
+      const manager = new GoogleCredentialsManager(
+        new BaseGoogleCredentialsConfig({credentials}),
+      );
+
+      await manager.getValidCredentials(context);
+
+      expect(state.hasDelta()).toBe(false);
+    });
+
+    it('refreshes a pre-supplied credential without caching it', async () => {
+      // The credential is shared by every end user, so a refreshed token must
+      // not be written into one user's session state.
+      const refresh = stubTokenRefresh('refreshed-shared-token');
+      const credentials = new OAuth2Client({
+        clientId: CLIENT_ID,
+        clientSecret: CLIENT_SECRET,
+      });
+      credentials.setCredentials({
+        access_token: 'expired-token',
+        refresh_token: 'shared-refresh',
+        expiry_date: Date.now() - HOUR_MS,
+      });
+      const {context, state} = createToolContext();
+      const config = new BaseGoogleCredentialsConfig({credentials});
+      const manager = new GoogleCredentialsManager(config);
+
+      const client = await manager.getValidCredentials(context);
+
+      expect(refresh).toHaveBeenCalledTimes(1);
+      expect(client?.credentials.access_token).toBe('refreshed-shared-token');
+      expect(config.tokenCacheKey).toBeUndefined();
+      expect(state.hasDelta()).toBe(false);
+    });
+
+    it('reports the framework error when the client identity is unknown', async () => {
+      // An OAuth2 client with no client id cannot drive an authorization flow;
+      // `AuthHandler` rejects the request rather than producing a dead key.
+      const credentials = new OAuth2Client();
+      credentials.setCredentials({
+        access_token: 'expired-token',
+        expiry_date: Date.now() - HOUR_MS,
+      });
+      const {context} = createToolContext();
+      const manager = new GoogleCredentialsManager(
+        new BaseGoogleCredentialsConfig({credentials}),
+      );
+
+      await expect(manager.getValidCredentials(context)).rejects.toThrow(
+        'Auth Scheme oauth2 requires both clientId and clientSecret in authCredential.oauth2.',
+      );
+    });
   });
 
   describe('token cache', () => {
     it('resolves a valid cached token without an OAuth flow', async () => {
-      const state = new State();
+      const {context, state, requestCredential} = createToolContext();
       state.set(TOKEN_CACHE_KEY, {
         accessToken: 'cached-token',
         refreshToken: 'cached-refresh',
         expiryDate: Date.now() + HOUR_MS,
         scope: SCOPES.join(' '),
       });
-      const {context, requestCredential} = createToolContext(state);
       const manager = new GoogleCredentialsManager(
         oauthConfig({tokenCacheKey: TOKEN_CACHE_KEY}),
       );
@@ -310,13 +429,12 @@ describe('GoogleCredentialsManager', () => {
 
     it('refreshes an expired cached token and rewrites the cache', async () => {
       const refresh = stubTokenRefresh('refreshed-token');
-      const state = new State();
+      const {context, state, requestCredential} = createToolContext();
       state.set(TOKEN_CACHE_KEY, {
         accessToken: 'stale-token',
         refreshToken: 'cached-refresh',
         expiryDate: Date.now() - HOUR_MS,
       });
-      const {context, requestCredential} = createToolContext(state);
       const manager = new GoogleCredentialsManager(
         oauthConfig({tokenCacheKey: TOKEN_CACHE_KEY}),
       );
@@ -336,13 +454,12 @@ describe('GoogleCredentialsManager', () => {
       vi.spyOn(OAuth2Client.prototype, 'getAccessToken').mockRejectedValue(
         new Error('invalid_grant'),
       );
-      const state = new State();
+      const {context, state, requestCredential} = createToolContext();
       state.set(TOKEN_CACHE_KEY, {
         accessToken: 'stale-token',
         refreshToken: 'revoked-refresh',
         expiryDate: Date.now() - HOUR_MS,
       });
-      const {context, requestCredential} = createToolContext(state);
       const manager = new GoogleCredentialsManager(
         oauthConfig({tokenCacheKey: TOKEN_CACHE_KEY}),
       );
@@ -357,13 +474,12 @@ describe('GoogleCredentialsManager', () => {
       const refresh = vi
         .spyOn(OAuth2Client.prototype, 'getAccessToken')
         .mockImplementation(async () => ({token: null}));
-      const state = new State();
+      const {context, state, requestCredential} = createToolContext();
       state.set(TOKEN_CACHE_KEY, {
         accessToken: 'stale-token',
         refreshToken: 'cached-refresh',
         expiryDate: Date.now() - HOUR_MS,
       });
-      const {context, requestCredential} = createToolContext(state);
       const manager = new GoogleCredentialsManager(
         oauthConfig({tokenCacheKey: TOKEN_CACHE_KEY}),
       );
@@ -376,12 +492,11 @@ describe('GoogleCredentialsManager', () => {
     });
 
     it('starts an OAuth flow for an expired token with no refresh token', async () => {
-      const state = new State();
+      const {context, state, requestCredential} = createToolContext();
       state.set(TOKEN_CACHE_KEY, {
         accessToken: 'stale-token',
         expiryDate: Date.now() - HOUR_MS,
       });
-      const {context, requestCredential} = createToolContext(state);
       const manager = new GoogleCredentialsManager(
         oauthConfig({tokenCacheKey: TOKEN_CACHE_KEY}),
       );
@@ -393,30 +508,25 @@ describe('GoogleCredentialsManager', () => {
     });
 
     it('carries a completed flow across manager instances via the cache', async () => {
-      const {context, state, getAuthResponse, requestCredential} =
-        createToolContext();
-      getAuthResponse.mockReturnValue(
-        oauthResponse({
-          accessToken: 'flow-token',
-          refreshToken: 'flow-refresh',
-          expiresAt: Date.now() + HOUR_MS,
-        }),
-      );
-      const first = new GoogleCredentialsManager(
-        oauthConfig({tokenCacheKey: TOKEN_CACHE_KEY}),
-      );
+      const {context, state, requestCredential} = createToolContext();
+      const first = new GoogleCredentialsManager(oauthConfig());
+      await first.getValidCredentials(context);
+      const {credentialKey} = requestCredential.mock.calls[0][0];
+      completeAuthorization(state, credentialKey, {
+        accessToken: 'flow-token',
+        refreshToken: 'flow-refresh',
+        expiresAt: Date.now() + HOUR_MS,
+      });
       await first.getValidCredentials(context);
 
-      getAuthResponse.mockReturnValue(undefined);
-      const second = new GoogleCredentialsManager(
-        oauthConfig({tokenCacheKey: TOKEN_CACHE_KEY}),
-      );
+      // A fresh manager, with the authorization response no longer in `temp:`
+      // state, must resolve from the cache alone.
+      state.set(`${State.TEMP_PREFIX}${credentialKey}`, undefined);
+      requestCredential.mockClear();
+      const second = new GoogleCredentialsManager(oauthConfig());
       const client = await second.getValidCredentials(context);
 
       expect(client?.credentials.access_token).toBe('flow-token');
-      expect(state.get(TOKEN_CACHE_KEY)).toMatchObject({
-        accessToken: 'flow-token',
-      });
       expect(requestCredential).not.toHaveBeenCalled();
     });
   });
@@ -444,6 +554,39 @@ describe('GoogleCredentialsManager', () => {
         clientId: CLIENT_ID,
         clientSecret: CLIENT_SECRET,
       });
+    });
+
+    it('records an authorization request the client can act on', async () => {
+      const {context} = createToolContext();
+
+      await new GoogleCredentialsManager(oauthConfig()).getValidCredentials(
+        context,
+      );
+
+      const requested =
+        context.eventActions.requestedAuthConfigs[FUNCTION_CALL_ID];
+      const authUri = requested?.exchangedAuthCredential?.oauth2?.authUri;
+      if (!authUri) {
+        expect.fail('expected the framework to generate an authorization URI');
+      }
+      const url = new URL(authUri);
+      expect(url.origin + url.pathname).toBe(
+        'https://accounts.google.com/o/oauth2/auth',
+      );
+      expect(url.searchParams.get('client_id')).toBe(CLIENT_ID);
+      expect(url.searchParams.get('scope')).toBe(SCOPES.join(' '));
+    });
+
+    it('rejects when the tool call has no function call id', async () => {
+      const context = new Context({
+        invocationContext: createInvocationContext(),
+      });
+
+      await expect(
+        new GoogleCredentialsManager(oauthConfig()).getValidCredentials(
+          context,
+        ),
+      ).rejects.toThrow('functionCallId is not set.');
     });
 
     it('reads the response back under the credential key it requested', async () => {
@@ -476,12 +619,15 @@ describe('GoogleCredentialsManager', () => {
     });
 
     it('requests a credential again when the response carries no OAuth2 payload', async () => {
-      const {context, getAuthResponse, requestCredential} = createToolContext();
-      getAuthResponse.mockReturnValue({
+      const {context, state, requestCredential} = createToolContext();
+      const manager = new GoogleCredentialsManager(oauthConfig());
+      await manager.getValidCredentials(context);
+      const {credentialKey} = requestCredential.mock.calls[0][0];
+      state.set(`${State.TEMP_PREFIX}${credentialKey}`, {
         authType: AuthCredentialTypes.API_KEY,
         apiKey: 'not-an-oauth-response',
       });
-      const manager = new GoogleCredentialsManager(oauthConfig());
+      requestCredential.mockClear();
 
       const client = await manager.getValidCredentials(context);
 
@@ -491,17 +637,15 @@ describe('GoogleCredentialsManager', () => {
 
     it('builds a client from a completed flow and caches the token', async () => {
       const expiresAt = Date.now() + HOUR_MS;
-      const {context, state, getAuthResponse} = createToolContext();
-      getAuthResponse.mockReturnValue(
-        oauthResponse({
-          accessToken: 'flow-token',
-          refreshToken: 'flow-refresh',
-          expiresAt,
-        }),
-      );
-      const manager = new GoogleCredentialsManager(
-        oauthConfig({tokenCacheKey: TOKEN_CACHE_KEY}),
-      );
+      const {context, state, requestCredential} = createToolContext();
+      const manager = new GoogleCredentialsManager(oauthConfig());
+      await manager.getValidCredentials(context);
+      const {credentialKey} = requestCredential.mock.calls[0][0];
+      completeAuthorization(state, credentialKey, {
+        accessToken: 'flow-token',
+        refreshToken: 'flow-refresh',
+        expiresAt,
+      });
 
       const client = await manager.getValidCredentials(context);
 
@@ -511,7 +655,7 @@ describe('GoogleCredentialsManager', () => {
         expiry_date: expiresAt,
         scope: SCOPES.join(' '),
       });
-      expect(state.get(TOKEN_CACHE_KEY)).toEqual({
+      expect(state.get(manager.credentialsConfig.tokenCacheKey!)).toEqual({
         accessToken: 'flow-token',
         refreshToken: 'flow-refresh',
         expiryDate: expiresAt,
@@ -519,21 +663,8 @@ describe('GoogleCredentialsManager', () => {
       });
     });
 
-    it('writes nothing to state when no token cache key is configured', async () => {
-      const {context, state, getAuthResponse} = createToolContext();
-      getAuthResponse.mockReturnValue(
-        oauthResponse({accessToken: 'flow-token'}),
-      );
-      const manager = new GoogleCredentialsManager(oauthConfig());
-
-      const client = await manager.getValidCredentials(context);
-
-      expect(client?.credentials.access_token).toBe('flow-token');
-      expect(state.hasDelta()).toBe(false);
-    });
-
     it('handles a config that declares no scopes', async () => {
-      const {context, getAuthResponse, requestCredential} = createToolContext();
+      const {context, state, requestCredential} = createToolContext();
       const config = new BaseGoogleCredentialsConfig({
         clientId: CLIENT_ID,
         clientSecret: CLIENT_SECRET,
@@ -548,31 +679,12 @@ describe('GoogleCredentialsManager', () => {
       }
       expect(authConfig.authScheme.flows.authorizationCode?.scopes).toEqual({});
 
-      getAuthResponse.mockReturnValue(
-        oauthResponse({accessToken: 'flow-token'}),
-      );
+      completeAuthorization(state, authConfig.credentialKey, {
+        accessToken: 'flow-token',
+      });
       const client = await manager.getValidCredentials(context);
 
       expect(client?.credentials.scope).toBeUndefined();
-    });
-
-    it('falls back to a default credential key when the client id is unknown', async () => {
-      const credentials = new OAuth2Client();
-      credentials.setCredentials({
-        access_token: 'expired-token',
-        expiry_date: Date.now() - HOUR_MS,
-      });
-      const {context, requestCredential} = createToolContext();
-      const manager = new GoogleCredentialsManager(
-        new BaseGoogleCredentialsConfig({credentials}),
-      );
-
-      const client = await manager.getValidCredentials(context);
-
-      expect(client).toBeUndefined();
-      expect(requestCredential.mock.calls[0][0].credentialKey).toBe(
-        'google_default_',
-      );
     });
   });
 });

@@ -5,14 +5,13 @@
  */
 
 import {
-  AuthConfig,
-  AuthCredential,
   BaseGoogleCredentialsConfig,
   Context,
   GoogleCredentialsManager,
   GoogleTool,
   GoogleToolExecuteContext,
-  State,
+  InvocationContext,
+  createSession,
 } from '@google/adk';
 import {Type} from '@google/genai';
 import {OAuth2Client} from 'google-auth-library';
@@ -23,6 +22,7 @@ const CLIENT_ID = 'test-client-id';
 const CLIENT_SECRET = 'test-client-secret';
 const SCOPES = ['https://www.googleapis.com/auth/bigquery'];
 const HOUR_MS = 60 * 60 * 1000;
+const FUNCTION_CALL_ID = 'test-function-call-id';
 
 interface TestSettings {
   maxRows: number;
@@ -30,17 +30,32 @@ interface TestSettings {
 
 const TOOL_SETTINGS: TestSettings = {maxRows: 50};
 
-function createToolContext() {
-  const getAuthResponse =
-    vi.fn<(authConfig: AuthConfig) => AuthCredential | undefined>();
-  const requestCredential = vi.fn<(authConfig: AuthConfig) => void>();
-  const context = {
-    state: new State(),
-    getAuthResponse,
-    requestCredential,
-  } as unknown as Context;
+function createInvocationContext(): InvocationContext {
+  return {
+    session: createSession({
+      id: 'test-session',
+      appName: 'test-app',
+      userId: 'test-user',
+    }),
+  } as unknown as InvocationContext;
+}
 
-  return {context, getAuthResponse, requestCredential};
+/**
+ * Builds a real {@link Context}, so the auth handshake runs the framework's
+ * own `AuthHandler` rather than a stub. The spies call through; they only add
+ * call counting.
+ */
+function createToolContext() {
+  const context = new Context({
+    invocationContext: createInvocationContext(),
+    functionCallId: FUNCTION_CALL_ID,
+  });
+
+  return {
+    context,
+    getAuthResponse: vi.spyOn(context, 'getAuthResponse'),
+    requestCredential: vi.spyOn(context, 'requestCredential'),
+  };
 }
 
 function oauthConfig(): BaseGoogleCredentialsConfig {
@@ -251,8 +266,7 @@ describe('GoogleTool', () => {
         credentialsConfig: oauthConfig(),
         execute,
       });
-      const {context, getAuthResponse, requestCredential} = createToolContext();
-      getAuthResponse.mockReturnValue(undefined);
+      const {context, requestCredential} = createToolContext();
 
       const result = await tool.runAsync({args: {}, toolContext: context});
 
@@ -327,6 +341,29 @@ describe('GoogleTool', () => {
       expect(
         String((result as {error_details: string}).error_details),
       ).toContain('plain string failure');
+    });
+
+    it('returns a structured error when the framework rejects the request', async () => {
+      const execute = vi.fn(() => 'never');
+      const tool = new GoogleTool({
+        name: 'list_datasets',
+        description: 'Lists BigQuery datasets.',
+        credentialsConfig: oauthConfig(),
+        execute,
+      });
+      // `Context.requestCredential` refuses to record a request it cannot tie
+      // back to a function call; that must reach the model as a tool error.
+      const context = new Context({
+        invocationContext: createInvocationContext(),
+      });
+
+      const result = await tool.runAsync({args: {}, toolContext: context});
+
+      expect(execute).not.toHaveBeenCalled();
+      expect(result).toMatchObject({status: 'ERROR'});
+      expect(
+        String((result as {error_details: string}).error_details),
+      ).toContain('functionCallId is not set.');
     });
 
     it('returns a structured error when credential resolution throws', async () => {

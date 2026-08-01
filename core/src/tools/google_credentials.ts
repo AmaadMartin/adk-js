@@ -11,6 +11,7 @@ import {AuthCredentialTypes} from '../auth/auth_credential.js';
 import {AuthScheme} from '../auth/auth_schemes.js';
 import {AuthConfig} from '../auth/auth_tool.js';
 import {experimental} from '../utils/experimental.js';
+import {logger} from '../utils/logger.js';
 
 const GOOGLE_OAUTH_AUTHORIZATION_URL =
   'https://accounts.google.com/o/oauth2/auth';
@@ -47,9 +48,17 @@ export interface BaseGoogleCredentialsConfigOptions {
   /** The OAuth scopes requested from the end user. */
   scopes?: string[];
   /**
-   * The state key under which the resolved token is cached. Toolset-specific
-   * subclasses set this; while it is unset no token is written to session
-   * state.
+   * The session state key under which the authorized token is cached.
+   *
+   * Defaults to a key derived from `clientId` and `scopes` for the interactive
+   * OAuth mode, and is unset for the other two modes: a pre-supplied
+   * credential is shared by every end user, and an external access token is
+   * owned by the host application. Toolset subclasses may override it.
+   *
+   * Warning: the cached entry includes the refresh token. Session state may be
+   * persisted in plaintext, logged, or exposed by the runner environment, so
+   * treat a cached Google token the same way `SessionStateCredentialService`
+   * asks you to treat any credential in session state.
    */
   tokenCacheKey?: string;
 }
@@ -200,7 +209,25 @@ function cacheToken(
  */
 function googleCredentialKey(config: BaseGoogleCredentialsConfig): string {
   const scopes = [...(config.scopes ?? [])].sort().join(',');
-  return `google_${config.clientId ?? 'default'}_${scopes}`;
+  return `google_${config.clientId}_${scopes}`;
+}
+
+/**
+ * Chooses the cache key a config uses when it does not name one.
+ *
+ * A completed authorization is handed back through `temp:` session state,
+ * which `BaseSessionService` drops before persisting the session, so without a
+ * cache the end user would re-authorize on every invocation. Only the
+ * interactive mode caches: a pre-supplied credential is shared by every end
+ * user, and an external access token is owned by the host application.
+ */
+function defaultTokenCacheKey(
+  config: BaseGoogleCredentialsConfig,
+): string | undefined {
+  if (config.credentials || config.externalAccessTokenKey) {
+    return undefined;
+  }
+  return googleCredentialKey(config);
 }
 
 /** Builds the authorization-code auth config for the interactive flow. */
@@ -260,7 +287,6 @@ export class BaseGoogleCredentialsConfig {
     this.clientId = options.clientId;
     this.clientSecret = options.clientSecret;
     this.scopes = options.scopes;
-    this.tokenCacheKey = options.tokenCacheKey;
 
     // A supplied OAuth2 credential already carries the client identity a later
     // interactive flow would need, so adopt it.
@@ -269,6 +295,8 @@ export class BaseGoogleCredentialsConfig {
       this.clientSecret = this.credentials._clientSecret;
       this.scopes = this.credentials.credentials.scope?.split(' ');
     }
+
+    this.tokenCacheKey = options.tokenCacheKey ?? defaultTokenCacheKey(this);
   }
 }
 
@@ -279,6 +307,7 @@ export class BaseGoogleCredentialsConfig {
  * Centralizing credential management lets multiple tools share the same
  * authenticated session without duplicating OAuth logic.
  */
+@experimental
 export class GoogleCredentialsManager {
   /**
    * @param credentialsConfig The credential configuration to resolve against.
@@ -322,9 +351,13 @@ export class GoogleCredentialsManager {
       if (!hasValidAccessToken(client)) {
         try {
           await client.getAccessToken();
-        } catch {
+        } catch (error) {
           // The credential may still work for libraries that refresh
           // internally, so hand it back unchanged.
+          logger.warn(
+            'Could not mint a token for the supplied Google credential:',
+            error,
+          );
         }
       }
       return client;
@@ -341,8 +374,12 @@ export class GoogleCredentialsManager {
           cacheToken(config, toolContext, client);
           return client;
         }
-      } catch {
+      } catch (error) {
         // The refresh token is no longer usable; re-authorize below.
+        logger.warn(
+          'Could not refresh the Google credential, re-authorizing:',
+          error,
+        );
       }
     }
 

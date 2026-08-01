@@ -79,48 +79,6 @@ function authorizationRequiredMessage(toolName: string): string {
   return `User authorization is required to access Google services for ${toolName}. Please complete the authorization flow.`;
 }
 
-/** Everything {@link executeWithCredentials} needs beyond the call arguments. */
-interface GoogleToolCallable<
-  TParameters extends ToolInputParameters,
-  TSettings,
-> {
-  name: string;
-  execute: GoogleToolExecuteFunction<TParameters, TSettings>;
-  credentialsManager?: GoogleCredentialsManager;
-  settings?: TSettings;
-}
-
-/**
- * Resolves a Google credential, when one is configured, and invokes the
- * wrapped function with it.
- *
- * @param tool The wrapped function and the machinery configured around it.
- * @param input The arguments already validated against the parameter schema.
- * @param toolContext The context of the current tool call.
- * @returns The wrapped function's return value, or the authorization-required
- *     message while an OAuth flow is in flight.
- */
-async function executeWithCredentials<
-  TParameters extends ToolInputParameters,
-  TSettings,
->(
-  tool: GoogleToolCallable<TParameters, TSettings>,
-  input: ToolExecuteArgument<TParameters>,
-  toolContext: Context,
-): Promise<unknown> {
-  const {name, execute, credentialsManager, settings} = tool;
-  if (!credentialsManager) {
-    return execute(input, toolContext, {settings});
-  }
-
-  const credentials = await credentialsManager.getValidCredentials(toolContext);
-  if (!credentials) {
-    return authorizationRequiredMessage(name);
-  }
-
-  return execute(input, toolContext, {credentials, settings});
-}
-
 /**
  * A tool that calls a Google API on behalf of the end user.
  *
@@ -143,23 +101,33 @@ export class GoogleTool<
    */
   constructor(options: GoogleToolOptions<TParameters, TSettings>) {
     const {credentialsConfig, toolSettings, execute, ...toolOptions} = options;
-    const tool: GoogleToolCallable<TParameters, TSettings> = {
-      // The base class infers a missing name from the callback it is given,
-      // which below is the adapter rather than `execute`.
-      name: options.name ?? execute.name,
-      execute,
-      credentialsManager: credentialsConfig
-        ? new GoogleCredentialsManager(credentialsConfig)
-        : undefined,
-      settings: toolSettings,
-    };
+    // The base class infers a missing name from the callback it is given,
+    // which below is the adapter rather than `execute`.
+    const name = options.name ?? execute.name;
+    const credentialsManager = credentialsConfig
+      ? new GoogleCredentialsManager(credentialsConfig)
+      : undefined;
+
     super({
       ...toolOptions,
-      name: tool.name,
+      name,
       // `FunctionTool.runAsync` always supplies the tool context; the
       // parameter is optional only so a wrapped function may omit it.
-      execute: (input, toolContext) =>
-        executeWithCredentials(tool, input, toolContext!),
+      execute: async (input, toolContext) => {
+        if (!credentialsManager) {
+          return execute(input, toolContext, {settings: toolSettings});
+        }
+        const credentials = await credentialsManager.getValidCredentials(
+          toolContext!,
+        );
+        if (!credentials) {
+          return authorizationRequiredMessage(name);
+        }
+        return execute(input, toolContext, {
+          credentials,
+          settings: toolSettings,
+        });
+      },
     });
   }
 
