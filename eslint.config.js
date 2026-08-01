@@ -11,11 +11,13 @@ import tseslint from 'typescript-eslint';
 
 export default defineConfig([
   {
-    ignores: ['**/dist/**', 'dev/src/browser/**'],
+    // `api-reference/` is typedoc output from `npm run docs:generate`; it is
+    // not gitignored and it contains typedoc's own bundled `assets/main.js`.
+    ignores: ['**/dist/**', 'dev/src/browser/**', 'api-reference/**'],
   },
   tseslint.configs.recommended,
   {
-    files: ['**/*.ts'],
+    files: ['**/*.{js,cjs,mjs,ts}'],
     plugins: {js},
     extends: ['js/recommended'],
     languageOptions: {
@@ -35,5 +37,13 @@ export default defineConfig([
         },
       ],
     },
+  },
+  {
+    // A `.cjs` file is CommonJS by definition, so `require()` is correct there.
+    // `tseslint.configs.recommended` carries no `files` filter and sets
+    // `sourceType: 'module'` for every file, which this restores.
+    files: ['**/*.cjs'],
+    languageOptions: {sourceType: 'commonjs'},
+    rules: {'@typescript-eslint/no-require-imports': 'off'},
   },
 ]);
