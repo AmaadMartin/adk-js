@@ -57,7 +57,10 @@ export const USERS_COLLECTION = 'users';
 /** Status written to a session document while it is being deleted. */
 const DELETING_STATUS = 'DELETING';
 
-/** Firestore's limit on the number of writes in a single batch. */
+/**
+ * Deletes per write batch. Firestore caps the number of writes in one batched
+ * write; adk-python's port batches at this same size.
+ */
 const MAX_DELETES_PER_BATCH = 500;
 
 /** Field on an event document holding the serialized event. */
@@ -376,8 +379,10 @@ export class FirestoreSessionService extends BaseSessionService {
       return undefined;
     }
 
-    // The Node SDK rejects `limitToLast(0)`, so an explicit zero has to skip
-    // the events query rather than flow through as a limit.
+    // numRecentEvents of 0 asks for no events, but it is falsy, so letting it
+    // reach fetchEvents would drop the limit and return every event instead.
+    // Returning nothing matches VertexAiSessionService and the adk-python
+    // database, sqlite, in-memory and Vertex AI backends.
     const [events, appSnapshot, userSnapshot] = await Promise.all([
       config?.numRecentEvents === 0
         ? Promise.resolve<Event[]>([])
