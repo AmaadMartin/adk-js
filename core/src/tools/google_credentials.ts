@@ -57,13 +57,14 @@ export interface BaseGoogleCredentialsConfigOptions {
 /**
  * The token shape cached under {@link BaseGoogleCredentialsConfig.tokenCacheKey}.
  *
- * Field names mirror `google-auth-library`'s `Credentials`, in camelCase.
+ * Each field mirrors the `google-auth-library` `Credentials` field of the same
+ * name, nullability included, so the cache round-trips without translation.
  */
 interface CachedGoogleToken {
-  accessToken?: string;
-  refreshToken?: string;
+  accessToken?: string | null;
+  refreshToken?: string | null;
   /** Epoch milliseconds, mirroring `google-auth-library`'s `expiry_date`. */
-  expiryDate?: number;
+  expiryDate?: number | null;
   /** Space-delimited scopes, mirroring `google-auth-library`'s `scope`. */
   scope?: string;
 }
@@ -181,9 +182,9 @@ function cacheToken(
     scope,
   } = client.credentials;
   const token: CachedGoogleToken = {
-    accessToken: accessToken ?? undefined,
-    refreshToken: refreshToken ?? undefined,
-    expiryDate: expiryDate ?? undefined,
+    accessToken,
+    refreshToken,
+    expiryDate,
     scope,
   };
   toolContext.state.set(config.tokenCacheKey, token);
