@@ -228,16 +228,19 @@ describe('RunSkillInlineScriptTool', () => {
     });
   });
 
-  const testFile: File = {
-    name: 'output.txt',
-    content: 'hello',
-    contentEncoding: FileContentEncoding.UTF8,
-    mimeType: 'text/plain',
-  };
-
   it('calls materializeFiles with output files from executor', async () => {
     const mockExecutor = new MockCodeExecutor();
-    mockExecutor.mockResult = {stdout: '', stderr: '', outputFiles: [testFile]};
+    const testFile: File = {
+      name: 'output.txt',
+      content: 'hello',
+      contentEncoding: FileContentEncoding.UTF8,
+      mimeType: 'text/plain',
+    };
+    mockExecutor.mockResult = {
+      stdout: '',
+      stderr: '',
+      outputFiles: [testFile],
+    };
 
     const toolset = new SkillToolset([], {codeExecutor: mockExecutor});
     const tool = new RunSkillInlineScriptTool(toolset);
@@ -252,14 +255,24 @@ describe('RunSkillInlineScriptTool', () => {
       }),
     });
 
-    // No configured directory: materializeFiles applies its own cwd default.
-    expect(materializeFiles).toHaveBeenCalledWith([testFile], undefined);
+    // No configured directory: the toolset resolves the cwd default itself.
+    expect(materializeFiles).toHaveBeenCalledWith([testFile], process.cwd());
   });
 
   it('materializes output files into the configured output directory', async () => {
     const outputDir = path.join(os.tmpdir(), 'skill-inline-output');
     const mockExecutor = new MockCodeExecutor();
-    mockExecutor.mockResult = {stdout: '', stderr: '', outputFiles: [testFile]};
+    const testFile: File = {
+      name: 'output.txt',
+      content: 'hello',
+      contentEncoding: FileContentEncoding.UTF8,
+      mimeType: 'text/plain',
+    };
+    mockExecutor.mockResult = {
+      stdout: '',
+      stderr: '',
+      outputFiles: [testFile],
+    };
 
     const toolset = new SkillToolset([], {
       codeExecutor: mockExecutor,
@@ -283,7 +296,17 @@ describe('RunSkillInlineScriptTool', () => {
   it('surfaces an EXECUTION_ERROR when materializing output files is refused', async () => {
     const outputDir = path.join(os.tmpdir(), 'skill-inline-output');
     const mockExecutor = new MockCodeExecutor();
-    mockExecutor.mockResult = {stdout: '', stderr: '', outputFiles: [testFile]};
+    const testFile: File = {
+      name: 'output.txt',
+      content: 'hello',
+      contentEncoding: FileContentEncoding.UTF8,
+      mimeType: 'text/plain',
+    };
+    mockExecutor.mockResult = {
+      stdout: '',
+      stderr: '',
+      outputFiles: [testFile],
+    };
     vi.mocked(materializeFiles).mockRejectedValueOnce(
       new Error(
         `Path traversal detected: ../escape.txt resolves outside of ${outputDir}`,
