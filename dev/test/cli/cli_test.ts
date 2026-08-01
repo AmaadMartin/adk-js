@@ -13,6 +13,7 @@ import {runAgent} from '../../src/cli/cli_run.js';
 import {deployToAgentEngine} from '../../src/cli/deploy/cli_deploy_agent_engine.js';
 import {deployToCloudRun} from '../../src/cli/deploy/cli_deploy_cloud_run.js';
 import {AdkApiServer} from '../../src/server/adk_api_server.js';
+import {FileModuleType} from '../../src/utils/agent_loader.js';
 
 vi.mock('../../src/server/adk_api_server', () => {
   return {
@@ -88,6 +89,32 @@ function fileTypeHelp(program: Command, commandPath: string): string {
   return entry[0];
 }
 
+/** Builds the argv for a command path, including any required positional. */
+function argvFor(commandPath: string, ...args: string[]): string[] {
+  const positionals = commandPath === 'run' ? ['agent.ts'] : [];
+  return [...commandPath.split(' '), ...positionals, ...args];
+}
+
+/**
+ * Commander copies the exit callback and the output configuration into each
+ * subcommand when the subcommand is created, so applying them to the root
+ * program after createProgram() has built the tree does not reach the
+ * subcommands. Without this, an option validation error raised while parsing a
+ * subcommand calls process.exit() and kills the test worker.
+ */
+function applyExitOverride(command: Command) {
+  command.exitOverride().configureOutput({writeErr: () => {}});
+  command.commands.forEach(applyExitOverride);
+}
+
+/** Asserts that argv parsing failed before any command action was dispatched. */
+function expectNoActionRan() {
+  expect(AdkApiServer).not.toHaveBeenCalled();
+  expect(runAgent).not.toHaveBeenCalled();
+  expect(deployToCloudRun).not.toHaveBeenCalled();
+  expect(deployToAgentEngine).not.toHaveBeenCalled();
+}
+
 describe('CLI Entrypoint', () => {
   let program: ReturnType<typeof createProgram>;
 
@@ -135,6 +162,59 @@ describe('CLI Entrypoint', () => {
         expect(entry).toContain('(choices: "cjs", "esm")');
       },
     );
+  });
+
+  describe('option: --file_type validation', () => {
+    beforeEach(() => {
+      applyExitOverride(program);
+    });
+
+    it.each(AGENT_FILE_COMMANDS)(
+      'rejects an out-of-enum --file_type on `%s`',
+      async (commandPath) => {
+        await expect(
+          parse(argvFor(commandPath, '--file_type', 'garbage')),
+        ).rejects.toThrow(/Allowed choices are cjs, esm/);
+
+        expectNoActionRan();
+      },
+    );
+
+    it('reports the rejection as a commander invalid-argument error', async () => {
+      await expect(
+        parse(['web', '--file_type', 'garbage']),
+      ).rejects.toMatchObject({
+        code: 'commander.invalidArgument',
+        message:
+          "error: option '--file_type <string>' argument 'garbage' is invalid. " +
+          'Allowed choices are cjs, esm.',
+      });
+    });
+
+    it('rejects a differently-cased value, as the choices are case-sensitive', async () => {
+      await expect(parse(['web', '--file_type', 'CJS'])).rejects.toThrow(
+        /argument 'CJS' is invalid/,
+      );
+
+      expectNoActionRan();
+    });
+
+    it.each([FileModuleType.CJS, FileModuleType.ESM])(
+      'accepts --file_type %s and forwards it as moduleType',
+      async (moduleType) => {
+        await parse(['web', '--file_type', moduleType]);
+
+        const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
+        expect(args.agentFileLoadOptions).toMatchObject({moduleType});
+      },
+    );
+
+    it('leaves moduleType undefined when --file_type is omitted', async () => {
+      await parse(['web']);
+
+      const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
+      expect(args.agentFileLoadOptions.moduleType).toBeUndefined();
+    });
   });
 
   describe('command: web', () => {
