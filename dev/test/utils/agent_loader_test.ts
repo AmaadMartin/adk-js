@@ -289,6 +289,26 @@ describe('AgentLoader', () => {
       await expect(fs.access(compiledAgentPath)).rejects.toThrow();
     });
 
+    it('marks the ADK packages external so each agent does not embed a copy', async () => {
+      const agentPath = path.join(tempAgentsDir, 'agent_external.ts');
+      await fs.writeFile(agentPath, agent2TsContent);
+
+      const compiledAgentPath = compiledPath('agent_external.cjs');
+      (esbuild.build as Mock).mockImplementation(async () => {
+        await fs.writeFile(compiledAgentPath, agent2CjsContentMocked);
+        return Promise.resolve();
+      });
+
+      const agentFile = new AgentFile(agentPath);
+      await agentFile.load();
+
+      expect((esbuild.build as Mock).mock.calls[0][0].external).toEqual(
+        expect.arrayContaining(['@google/adk', '@google/adk-devtools']),
+      );
+
+      await agentFile.dispose();
+    });
+
     it('throws if rootAgent is not found', async () => {
       const agentPath = path.join(tempAgentsDir, 'bad_agent.js');
       await fs.writeFile(agentPath, 'exports.someOther = 1;');

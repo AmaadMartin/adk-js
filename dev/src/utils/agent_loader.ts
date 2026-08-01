@@ -191,6 +191,11 @@ export class AgentFile {
         plugins: [replaceDirnamePlugin(filePath, originalDir), shimPlugin()],
         // See http://mikro-orm.io/docs/deployment#deploy-a-bundle-of-entities-and-dependencies-with-esbuild for more details
         external: [
+          // Resolve the ADK runtime from the project's node_modules (see
+          // linkProjectNodeModules) instead of embedding a copy per agent, so a
+          // directory of N agents loads one shared ADK rather than N of them.
+          '@google/adk',
+          '@google/adk-devtools',
           'sqlite3',
           'better-sqlite3',
           'mysql',
