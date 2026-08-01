@@ -22,7 +22,6 @@ import {
   isFinalResponse,
   populateClientFunctionCallId,
 } from '../events/event.js';
-import {hasRecordedActions} from '../events/event_actions.js';
 
 import {BaseExampleProvider} from '../examples/base_example_provider.js';
 import {Example} from '../examples/example.js';
@@ -343,6 +342,29 @@ export function isLlmAgent(obj: unknown): obj is LlmAgent {
     obj !== null &&
     LLM_AGENT_SIGNATURE_SYMBOL in obj &&
     obj[LLM_AGENT_SIGNATURE_SYMBOL] === true
+  );
+}
+
+/**
+ * Returns whether an event carries something the model returned: a content
+ * object, an error code or an interruption.
+ *
+ * An event with none of those was built by ADK purely to carry its `actions`,
+ * such as the content-less event a deferring long-running tool produces. That
+ * is a real terminal event, not a residual chunk of the model turn, so the
+ * step loop must not keep running on it.
+ *
+ * This deliberately tests the response fields rather than the actions: every
+ * event of a step is spread from one `modelResponseEvent` and so shares a
+ * single `actions` object, which model callbacks and plugins also write to, so
+ * a state write from a callback would otherwise make a trailing empty chunk
+ * look like a terminal event and end the turn early.
+ */
+function carriesModelResponse(event: Event): boolean {
+  return (
+    event.content !== undefined ||
+    event.errorCode !== undefined ||
+    event.interrupted !== undefined
   );
 }
 
@@ -699,14 +721,11 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         break;
       }
 
-      // An event carrying recorded actions is a real terminal event, such as a
-      // deferring long-running tool's actions-only event, not a trailing empty
-      // model chunk, so it must not keep the step loop running.
       const isEmptyMetadataEvent =
         lastEvent.author === this.name &&
         !lastEvent.partial &&
         (!lastEvent.content?.parts || lastEvent.content.parts.length === 0) &&
-        !hasRecordedActions(lastEvent.actions);
+        carriesModelResponse(lastEvent);
 
       if (
         isFinalResponse(lastEvent) &&
