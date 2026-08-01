@@ -17,8 +17,11 @@ import http from 'node:http';
 import {AddressInfo} from 'node:net';
 import {json} from 'node:stream/consumers';
 import {afterAll, beforeAll, beforeEach, describe, expect, it} from 'vitest';
-
-const AGENT_ENGINE_ID = '12345';
+import {
+  TEST_AGENT_ENGINE_ID,
+  TEST_LOCATION,
+  TEST_PROJECT_ID,
+} from '../vertex_test_utils.js';
 
 /**
  * Exercises `getSession`'s NOT_FOUND handling against an error the SDK builds
@@ -55,7 +58,7 @@ describe('VertexAiSessionService over the real Sessions HTTP client', () => {
       httpOptions: {baseUrl: `http://127.0.0.1:${port}`},
     });
     service = new VertexAiSessionService({
-      agentEngineId: AGENT_ENGINE_ID,
+      agentEngineId: TEST_AGENT_ENGINE_ID,
       sessions: new Sessions(apiClient),
     });
   });
@@ -64,7 +67,7 @@ describe('VertexAiSessionService over the real Sessions HTTP client', () => {
 
   it('resolves undefined when the backend reports the session is gone', async () => {
     const session = await service.getSession({
-      appName: AGENT_ENGINE_ID,
+      appName: TEST_AGENT_ENGINE_ID,
       userId: 'testUser',
       sessionId: 'missing-session',
     });
@@ -98,7 +101,7 @@ describe('VertexAiSessionService session expiration over the wire', () => {
           name: 'operations/1',
           done: true,
           response: {
-            name: `reasoningEngines/${AGENT_ENGINE_ID}/sessions/session-1`,
+            name: `reasoningEngines/${TEST_AGENT_ENGINE_ID}/sessions/session-1`,
             updateTime: '2026-01-01T00:00:00Z',
           },
         }),
@@ -112,15 +115,15 @@ describe('VertexAiSessionService session expiration over the wire', () => {
       auth: unauthenticated,
       uploader: new NodeUploader(),
       downloader: new NodeDownloader(),
-      project: 'test-project',
-      location: 'us-central1',
+      project: TEST_PROJECT_ID,
+      location: TEST_LOCATION,
       vertexai: true,
       httpOptions: {
         baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
       },
     });
     service = new VertexAiSessionService({
-      agentEngineId: AGENT_ENGINE_ID,
+      agentEngineId: TEST_AGENT_ENGINE_ID,
       sessions: new Sessions(apiClient),
     });
   });
@@ -133,7 +136,7 @@ describe('VertexAiSessionService session expiration over the wire', () => {
 
   it('sends ttl in the create request body', async () => {
     const session = await service.createSession({
-      appName: AGENT_ENGINE_ID,
+      appName: TEST_AGENT_ENGINE_ID,
       userId: 'user-1',
       ttl: '7200s',
     });
@@ -144,7 +147,7 @@ describe('VertexAiSessionService session expiration over the wire', () => {
 
   it('sends expireTime in the create request body', async () => {
     await service.createSession({
-      appName: AGENT_ENGINE_ID,
+      appName: TEST_AGENT_ENGINE_ID,
       userId: 'user-1',
       expireTime: '2026-10-01T00:00:00Z',
     });

@@ -19,6 +19,7 @@ import * as dotenv from 'dotenv';
 import * as fs from 'fs';
 import * as path from 'path';
 import {describe, expect, it} from 'vitest';
+import {buildAgentEngineAppName} from '../../integration/vertex_test_utils.js';
 
 function createVertexAICompactionAgent(): LlmAgent {
   const compactor = new TokenBasedContextCompactor({
@@ -68,14 +69,14 @@ describe('E2e Context Compaction (Vertex AI)', () => {
       const memoryService = new InMemoryMemoryService();
 
       const runner = new Runner({
-        appName: `projects/${projectId}/locations/${location}/reasoningEngines/${agentEngineId}`,
+        appName: buildAgentEngineAppName({projectId, location, agentEngineId}),
         agent,
         sessionService,
         memoryService,
       });
 
       const session = await runner.sessionService.createSession({
-        appName: `projects/${projectId}/locations/${location}/reasoningEngines/${agentEngineId}`,
+        appName: buildAgentEngineAppName({projectId, location, agentEngineId}),
         userId: 'test_user',
       });
 
