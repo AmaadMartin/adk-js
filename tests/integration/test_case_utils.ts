@@ -13,11 +13,7 @@ import {
   isLlmAgent,
 } from '@google/adk';
 import type {Candidate, UsageMetadata} from '@google/genai';
-import {
-  createUserContent,
-  GenerateContentResponse,
-  GoogleGenAI,
-} from '@google/genai';
+import {createUserContent, GenerateContentResponse} from '@google/genai';
 import {ChildProcessWithoutNullStreams} from 'node:child_process';
 import {expect} from 'vitest';
 
@@ -121,8 +117,11 @@ export class GeminiWithMockResponses extends Gemini {
     );
   }
 
-  override get apiClient(): GoogleGenAI {
-    return this._mockClient as unknown as GoogleGenAI;
+  // @google/genai is installed twice: files under tests/ resolve the hoisted v1
+  // copy that @google-cloud/vertexai pins, core resolves its own v2. Naming
+  // `GoogleGenAI` here would pick the wrong one; `Gemini['apiClient']` cannot.
+  override get apiClient(): Gemini['apiClient'] {
+    return this._mockClient as unknown as Gemini['apiClient'];
   }
 }
 

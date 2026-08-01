@@ -57,8 +57,8 @@ To maintain high code quality and consistency:
    npm run ts:check
    ```
 
-   It does not yet cover `core/test`, `tests/integration` or
-   `tests/cross_language`, which still carry pre-existing type errors.
+   Some paths with pre-existing type errors are still excluded; see
+   `exclude` in `tsconfig.check.json`.
 
 The project uses `husky` and `lint-staged` to automatically lint and format
 your changes before each commit.
