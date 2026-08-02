@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {PublisherClient} from '@google-cloud/eventarc-publishing';
+import type {PublisherClient} from '@google-cloud/eventarc-publishing';
 import {AuthClient} from 'google-auth-library';
 import {createHash} from 'node:crypto';
 

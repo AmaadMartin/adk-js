@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {protos} from '@google-cloud/eventarc-publishing';
+import type {protos} from '@google-cloud/eventarc-publishing';
 import {Schema, Type} from '@google/genai';
 import {context, propagation} from '@opentelemetry/api';
 
