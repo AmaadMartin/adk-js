@@ -5,7 +5,7 @@
  */
 
 import {AuthCredential, AuthCredentialTypes} from '@google/adk';
-import {JWT} from 'google-auth-library';
+import {GoogleAuth, JWT} from 'google-auth-library';
 import {describe, expect, it, vi} from 'vitest';
 import {ServiceAccountCredentialExchanger} from '../../../src/auth/exchanger/service_account_credential_exchanger.js';
 
@@ -146,5 +146,77 @@ describe('ServiceAccountCredentialExchanger', () => {
     ).rejects.toThrow(
       'Failed to exchange explicit service account token: Auth failed',
     );
+  });
+
+  it('should throw if the default credentials yield no token', async () => {
+    const exchanger = new ServiceAccountCredentialExchanger();
+    const credential: AuthCredential = {
+      authType: AuthCredentialTypes.SERVICE_ACCOUNT,
+      serviceAccount: {useDefaultCredential: true},
+    };
+
+    vi.mocked(GoogleAuth).mockImplementationOnce(
+      () =>
+        ({
+          getClient: vi.fn().mockResolvedValue({
+            getAccessToken: vi.fn().mockResolvedValue({}),
+          }),
+        }) as unknown as GoogleAuth,
+    );
+
+    await expect(
+      exchanger.exchange({authCredential: credential}),
+    ).rejects.toThrow(
+      'Failed to exchange default service account token: Failed to get access token from default credentials',
+    );
+  });
+
+  it('should throw if resolving the default credentials fails', async () => {
+    const exchanger = new ServiceAccountCredentialExchanger();
+    const credential: AuthCredential = {
+      authType: AuthCredentialTypes.SERVICE_ACCOUNT,
+      serviceAccount: {useDefaultCredential: true},
+    };
+
+    vi.mocked(GoogleAuth).mockImplementationOnce(
+      () =>
+        ({
+          getClient: vi.fn().mockRejectedValue(new Error('ADC failed')),
+        }) as unknown as GoogleAuth,
+    );
+
+    await expect(
+      exchanger.exchange({authCredential: credential}),
+    ).rejects.toThrow(
+      'Failed to exchange default service account token: ADC failed',
+    );
+  });
+
+  it('should pass the configured scopes to GoogleAuth, defaulting to cloud-platform', async () => {
+    const exchanger = new ServiceAccountCredentialExchanger();
+    const withScopes: AuthCredential = {
+      authType: AuthCredentialTypes.SERVICE_ACCOUNT,
+      serviceAccount: {
+        useDefaultCredential: true,
+        scopes: ['https://www.googleapis.com/auth/drive'],
+      },
+    };
+
+    await exchanger.exchange({authCredential: withScopes});
+
+    expect(vi.mocked(GoogleAuth)).toHaveBeenLastCalledWith({
+      scopes: ['https://www.googleapis.com/auth/drive'],
+    });
+
+    const withoutScopes: AuthCredential = {
+      authType: AuthCredentialTypes.SERVICE_ACCOUNT,
+      serviceAccount: {useDefaultCredential: true},
+    };
+
+    await exchanger.exchange({authCredential: withoutScopes});
+
+    expect(vi.mocked(GoogleAuth)).toHaveBeenLastCalledWith({
+      scopes: ['https://www.googleapis.com/auth/cloud-platform'],
+    });
   });
 });
