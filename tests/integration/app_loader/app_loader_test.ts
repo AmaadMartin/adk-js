@@ -17,13 +17,6 @@ const execAsync = promisify(exec);
 const dirname = process.cwd();
 const TEST_EXECUTION_TIMEOUT = 40000;
 
-/**
- * Hook budget. Matches the `integration` project's `hookTimeout` in
- * vitest.config.ts and the same constant in build_setup_test.ts. Install and
- * compile work belongs here, not in a test's budget.
- */
-const HOOK_TIMEOUT = 120000;
-
 describe('App loader CLI integration', () => {
   describe.each(['app_ts', 'app_js', 'app_default'])(
     'App entrypoint with %s',
@@ -36,7 +29,7 @@ describe('App loader CLI integration', () => {
 
       beforeAll(async () => {
         await execAsync('npm install', {cwd: projectPath});
-      }, HOOK_TIMEOUT);
+      });
 
       it(
         'should run app via package.json start script and get responses',
@@ -69,7 +62,7 @@ describe('App loader CLI integration', () => {
         await fs
           .unlink(path.join(projectPath, 'package-lock.json'))
           .catch(() => {});
-      }, HOOK_TIMEOUT);
+      });
     },
   );
 });
@@ -88,7 +81,7 @@ describe('AgentLoader discovery and loading integration', () => {
   beforeAll(async () => {
     loader = new AgentLoader(projectPath);
     await loader.preloadAgents();
-  }, HOOK_TIMEOUT);
+  });
 
   it(
     'should discover apps vs agents across directories and standalone files',
@@ -140,5 +133,5 @@ describe('AgentLoader discovery and loading integration', () => {
 
   afterAll(async () => {
     await loader.disposeAll();
-  }, HOOK_TIMEOUT);
+  });
 });

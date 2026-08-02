@@ -12,7 +12,8 @@ import {
   getFreePort,
   MAX_CAPTURED_OUTPUT_BYTES,
   waitForProcessStart,
-} from './test_case_utils.js';
+} from './process_utils.js';
+import {tick} from './test_case_utils.js';
 
 const START_MESSAGE = 'SCRIPTED SERVER STARTED';
 const SERVER_NAME = 'Scripted';
@@ -35,7 +36,7 @@ function spawnScript(script: string): ChildProcessWithoutNullStreams {
 function startScript(
   script: string,
   timeoutMs = START_TIMEOUT_MS,
-): Promise<string> {
+): Promise<void> {
   return waitForProcessStart({
     childProcess: spawnScript(script),
     startMessage: START_MESSAGE,
@@ -53,11 +54,6 @@ function listenOn(port: number): Promise<void> {
     socket.once('error', reject);
     socket.listen({host: 'localhost', port}, () => resolve());
   });
-}
-
-/** Lets pending microtasks and one timer turn run. */
-function tick(): Promise<void> {
-  return new Promise<void>((resolve) => setTimeout(resolve, 50));
 }
 
 afterEach(async () => {
@@ -122,12 +118,23 @@ describe('waitForProcessStart', () => {
     );
   });
 
-  it('resolves with the captured stdout when the child signals readiness', async () => {
-    const stdout = await startScript(
-      `process.stdout.write('${START_MESSAGE}\\n');${STAY_ALIVE}`,
-    );
+  it('resolves when the child signals readiness', async () => {
+    await expect(
+      startScript(`process.stdout.write('${START_MESSAGE}\\n');${STAY_ALIVE}`),
+    ).resolves.toBeUndefined();
+  });
 
-    expect(stdout).toContain(START_MESSAGE);
+  it('matches a start message split across two writes', async () => {
+    const head = START_MESSAGE.slice(0, 8);
+    const tail = START_MESSAGE.slice(8);
+
+    await expect(
+      startScript(
+        `process.stdout.write('${head}');` +
+          `setTimeout(() => process.stdout.write('${tail}\\n'), 50);` +
+          STAY_ALIVE,
+      ),
+    ).resolves.toBeUndefined();
   });
 
   it('does not reject when a started child exits later', async () => {
@@ -146,8 +153,8 @@ describe('waitForProcessStart', () => {
       rejection = error;
     });
 
-    await expect(attempt).resolves.toContain(START_MESSAGE);
-    await tick();
+    await expect(attempt).resolves.toBeUndefined();
+    await tick(50);
 
     expect(rejection).toBeUndefined();
     expect(child.exitCode).toBe(0);
