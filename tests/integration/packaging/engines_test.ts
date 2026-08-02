@@ -3,16 +3,11 @@
  * Copyright 2026 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
+import {readFileSync} from 'node:fs';
 import {readFile} from 'node:fs/promises';
 import path from 'node:path';
 import {minVersion, satisfies} from 'semver';
 import {beforeAll, describe, expect, it} from 'vitest';
-
-/**
- * Workspace directories whose package.json is published to npm. The root
- * manifest is excluded: it is the workspace container, not a deliverable.
- */
-const PUBLISHED_WORKSPACES = ['core', 'dev', 'integrations'];
 
 /**
  * The consumer-facing Node.js floor, and the exact intersection of the
@@ -26,9 +21,17 @@ const PUBLISHED_WORKSPACES = ['core', 'dev', 'integrations'];
  */
 const EXPECTED_NODE_RANGE = '>=20.6.0';
 
+/**
+ * A manifest that is installed but never published. Fixtures inherit the
+ * repository's Node floor through the workspace they link against, so a floor
+ * of their own would only drift.
+ */
+const UNPUBLISHED_FIXTURE = 'tests/integration/build_setup/ts_esm';
+
 interface Manifest {
   name?: string;
   engines?: {node?: string};
+  workspaces?: string[];
 }
 
 interface LockfileEntry {
@@ -46,11 +49,27 @@ interface EngineConstraint {
   range: string;
 }
 
-/** Reads a workspace manifest; `.` reads the workspace root manifest. */
-async function readManifest(workspace: string): Promise<Manifest> {
-  const manifestPath = path.join(process.cwd(), workspace, 'package.json');
-  return JSON.parse(await readFile(manifestPath, 'utf8')) as Manifest;
+/**
+ * Reads a manifest relative to the repository root; `.` reads the root
+ * manifest. Synchronous because `it.each` needs the workspace list below at
+ * collection time.
+ */
+function readManifest(dir: string): Manifest {
+  const manifestPath = path.join(process.cwd(), dir, 'package.json');
+  return JSON.parse(readFileSync(manifestPath, 'utf8')) as Manifest;
 }
+
+/**
+ * Every manifest that must declare the floor: the workspace root, plus the
+ * workspaces it declares.
+ *
+ * Derived from the root manifest rather than hardcoded, so a workspace added
+ * later is held to the same invariant without anyone remembering to edit this
+ * file. The root is included because npm evaluates a project's own
+ * `engines` during `npm install`, which is how a contributor on an
+ * unsupported Node learns about it before CI does.
+ */
+const MANIFEST_DIRS = ['.', ...(readManifest('.').workspaces ?? [])];
 
 async function readLockfile(): Promise<Lockfile> {
   const lockfilePath = path.join(process.cwd(), 'package-lock.json');
@@ -79,19 +98,21 @@ function runtimeEngineConstraints(lockfile: Lockfile): EngineConstraint[] {
   });
 }
 
-describe('published package manifests', () => {
-  it.each(PUBLISHED_WORKSPACES)(
-    '%s declares the shared engines.node range',
-    async (workspace) => {
-      const manifest = await readManifest(workspace);
-      expect(manifest.engines?.node).toBe(EXPECTED_NODE_RANGE);
-    },
-  );
+describe('package manifests', () => {
+  it('derives the manifest list from the root workspaces array', () => {
+    // Guards the assertions below: an empty derived list would make every
+    // `it.each` over it vacuous instead of failing.
+    expect(MANIFEST_DIRS).toEqual(
+      expect.arrayContaining(['.', 'core', 'dev', 'integrations']),
+    );
+  });
 
-  it('leaves engines off the workspace root', async () => {
-    // Only core, dev and integrations are published, so a floor declared on
-    // the workspace container would reach no consumer.
-    expect((await readManifest('.')).engines).toBeUndefined();
+  it.each(MANIFEST_DIRS)('%s declares the shared engines.node range', (dir) => {
+    expect(readManifest(dir).engines?.node).toBe(EXPECTED_NODE_RANGE);
+  });
+
+  it('leaves engines off unpublished test fixtures', () => {
+    expect(readManifest(UNPUBLISHED_FIXTURE).engines).toBeUndefined();
   });
 });
 
@@ -113,14 +134,14 @@ describe('declared Node.js floor vs. the committed lockfile', () => {
    * edit here, and a maintainer stays free to declare a stricter floor than
    * the dependency closure strictly requires.
    */
-  it.each(PUBLISHED_WORKSPACES)(
+  it.each(MANIFEST_DIRS)(
     '%s declares a floor every runtime dependency accepts',
-    async (workspace) => {
-      const declared = (await readManifest(workspace)).engines?.node;
+    (dir) => {
+      const declared = readManifest(dir).engines?.node;
       const floor = declared === undefined ? null : minVersion(declared);
       if (floor === null) {
         expect.fail(
-          `${workspace}/package.json declares engines.node ` +
+          `${dir}/package.json declares engines.node ` +
             `${JSON.stringify(declared)}, which is not a satisfiable ` +
             'semver range',
         );
@@ -132,7 +153,7 @@ describe('declared Node.js floor vs. the committed lockfile', () => {
         offenders,
         `engines.node ${declared} admits Node ${floor.version}, which the ` +
           'listed runtime dependencies reject. Raise engines.node in the ' +
-          `published manifests (${PUBLISHED_WORKSPACES.join(', ')})`,
+          `declaring manifests (${MANIFEST_DIRS.join(', ')})`,
       ).toEqual([]);
     },
   );
