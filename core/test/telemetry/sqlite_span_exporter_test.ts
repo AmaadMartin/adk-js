@@ -290,6 +290,11 @@ describe('SqliteSpanExporter', () => {
       expect(result.error?.message).toContain(
         'Failed to export spans to SQLite',
       );
+
+      // The failed open must not leave the file handle behind: Windows refuses
+      // to unlink a file that is still open.
+      await exporter.shutdown();
+      await expect(rm(corruptPath)).resolves.toBeUndefined();
     });
 
     it('retries opening the database after a failed export', async () => {
