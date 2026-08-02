@@ -158,6 +158,49 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
     },
   );
 
+  it('caps stdout and stderr of a real noisy JavaScript skill script', async () => {
+    const maxOutputChars = 500;
+    const noisySkill: Skill = {
+      frontmatter: {
+        name: 'noisy-skill',
+        description: 'A skill whose script floods stdout and stderr',
+      },
+      instructions: 'Run scripts.',
+      resources: {
+        scripts: {
+          'noisy.js': {
+            src: [
+              "process.stdout.write('S'.repeat(600) + 'STDOUT_END');",
+              "process.stderr.write('E'.repeat(700) + 'STDERR_END');",
+            ].join('\n'),
+          },
+        },
+      },
+    };
+    const executor = new UnsafeLocalCodeExecutor();
+    const toolset = new SkillToolset([noisySkill], {
+      codeExecutor: executor,
+      maxOutputChars,
+    });
+    const tool = new RunSkillScriptTool(toolset);
+
+    const result = (await tool.runAsync({
+      args: {
+        skill_name: 'noisy-skill',
+        script_path: 'scripts/noisy.js',
+      },
+      toolContext: createMockContext(),
+    })) as CodeExecutionResult;
+
+    expect(result.stdout.startsWith('S'.repeat(maxOutputChars / 2))).toBe(true);
+    expect(result.stdout).toContain('... [truncated 110 characters] ...');
+    expect(result.stdout.endsWith('STDOUT_END')).toBe(true);
+
+    expect(result.stderr.startsWith('E'.repeat(maxOutputChars / 2))).toBe(true);
+    expect(result.stderr).toContain('... [truncated 210 characters] ...');
+    expect(result.stderr.endsWith('STDERR_END')).toBe(true);
+  });
+
   it('successfully executes a real Python skill script', async () => {
     const executor = new UnsafeLocalCodeExecutor();
     const toolset = new SkillToolset([testSkill], {codeExecutor: executor});
