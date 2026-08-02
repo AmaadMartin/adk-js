@@ -20,7 +20,6 @@ const BUILT_INS = new Set(builtinModules);
 
 interface PackageManifest {
   dependencies: Record<string, string>;
-  devDependencies: Record<string, string>;
 }
 
 /** A non-relative module specifier, tagged with where it was written. */
@@ -102,6 +101,10 @@ const manifest: PackageManifest = JSON.parse(
 
 describe('dev/package.json', () => {
   it('declares every package imported by dev/src', () => {
+    // Rename or move dev/src and the scan matches nothing, which would pass
+    // this test forever instead of reporting that it stopped guarding.
+    expect(imports.length).toBeGreaterThan(0);
+
     // dev/build.js bundles nothing (packages:'external'), so these specifiers
     // survive verbatim into the published dist and have to resolve from a
     // consumer's own install rather than from whatever npm hoists for core.
@@ -121,6 +124,9 @@ describe('dev/package.json', () => {
   });
 
   it('imports Node built-ins with the node: prefix', () => {
+    // As above: an empty scan must fail here, not pass silently.
+    expect(imports.length).toBeGreaterThan(0);
+
     const unprefixed = imports
       .filter(({specifier}) => isBareBuiltIn(specifier))
       .map(({specifier, at}) => `${specifier} (${at})`);
