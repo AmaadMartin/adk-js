@@ -872,8 +872,8 @@ describe('AgentLoader', () => {
     });
 
     it('never installs an uncaughtException listener', async () => {
-      const loader = new AgentLoader(tempAgentsDir);
       const before = process.listenerCount('uncaughtException');
+      const loader = new AgentLoader(tempAgentsDir);
 
       try {
         loader.installProcessHandlers();
