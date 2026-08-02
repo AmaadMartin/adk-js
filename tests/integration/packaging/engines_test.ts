@@ -13,7 +13,8 @@ import {describe, expect, it} from 'vitest';
  * versioned in lockstep and installed together, so they must all advertise
  * exactly this range rather than three different floors.
  */
-const SUPPORTED_NODE_RANGE = '>=20';
+const SUPPORTED_NODE_MAJOR = 20;
+const SUPPORTED_NODE_RANGE = `>=${SUPPORTED_NODE_MAJOR}`;
 
 /** Workspaces whose manifests are published to npm. */
 const PUBLISHED_WORKSPACES = ['core', 'dev', 'integrations'];
@@ -76,14 +77,7 @@ describe('toolchain Node version pin', () => {
       'utf8',
     ).trim();
     expect(pinned).toMatch(/^\d+$/);
-
-    const floor = /^>=(\d+)$/.exec(SUPPORTED_NODE_RANGE);
-    if (!floor) {
-      expect.fail(
-        `SUPPORTED_NODE_RANGE must be a ">=<major>" range, got ${SUPPORTED_NODE_RANGE}`,
-      );
-    }
-    expect(Number(pinned)).toBeGreaterThanOrEqual(Number(floor[1]));
+    expect(Number(pinned)).toBeGreaterThanOrEqual(SUPPORTED_NODE_MAJOR);
   });
 
   it('resolves every setup-node step from .nvmrc', () => {
