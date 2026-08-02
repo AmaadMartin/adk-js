@@ -32,6 +32,18 @@ export type AuthScheme =
   | OpenIdConnectWithConfig;
 
 /**
+ * Base type for auth schemes that are not part of the OpenAPI 3.0 security
+ * scheme set, identified by a custom `type` discriminator.
+ *
+ * This is deliberately not a member of {@link AuthScheme}: a member whose
+ * `type` is an open `string` would defeat discriminant narrowing for every
+ * existing consumer of that union.
+ */
+export interface CustomAuthScheme {
+  type: string;
+}
+
+/**
  * Represents the OAuth2 flow (or grant type).
  */
 export enum OAuthGrantType {
