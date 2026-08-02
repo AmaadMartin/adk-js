@@ -8,9 +8,11 @@ import {Client} from '@google-cloud/vertexai';
 import {
   AgentEngineSandboxCodeExecutor,
   CodeExecutionLanguage,
+  createSession,
   InvocationContext,
 } from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {createInvocationContext} from '../testing_utils.js';
 
 describe('AgentEngineSandboxCodeExecutor', () => {
   let executor: AgentEngineSandboxCodeExecutor;
@@ -146,16 +148,13 @@ describe('AgentEngineSandboxCodeExecutor', () => {
     let invocationContext: InvocationContext;
 
     beforeEach(() => {
-      invocationContext = {
-        session: {
+      invocationContext = createInvocationContext({
+        session: createSession({
           id: 'session-1',
           appName: '123',
           userId: 'user-1',
-          events: [],
-          lastUpdateTime: Date.now(),
-          state: {},
-        },
-      } as unknown as InvocationContext;
+        }),
+      });
       executor = new AgentEngineSandboxCodeExecutor({
         client: mockClient as unknown as Client,
       });
@@ -179,7 +178,7 @@ describe('AgentEngineSandboxCodeExecutor', () => {
     });
 
     it('reuses existing sandbox from session state', async () => {
-      invocationContext.session!.state!['sandbox_name_language_python'] =
+      invocationContext.session.state['sandbox_name_language_python'] =
         'projects/test-project/locations/us-central1/reasoningEngines/123/sandboxEnvironments/456';
 
       await executor.executeCode({
@@ -198,7 +197,7 @@ describe('AgentEngineSandboxCodeExecutor', () => {
     });
 
     it('creates new sandbox if existing one is not running', async () => {
-      invocationContext.session!.state!['sandbox_name_language_python'] =
+      invocationContext.session.state['sandbox_name_language_python'] =
         'projects/test-project/locations/us-central1/reasoningEngines/123/sandboxEnvironments/456';
       mockClient.agentEnginesInternal.sandboxes.getInternal.mockResolvedValue({
         state: 'STATE_EXPIRED',
@@ -488,15 +487,15 @@ describe('AgentEngineSandboxCodeExecutor', () => {
     });
 
     it('initializes session state if missing', async () => {
-      const contextWithoutState = {
-        session: {
-          id: 'session-1',
-          appName: '123',
-          userId: 'user-1',
-          events: [],
-          lastUpdateTime: Date.now(),
-        },
-      } as unknown as InvocationContext;
+      const session = createSession({
+        id: 'session-1',
+        appName: '123',
+        userId: 'user-1',
+      });
+      // The guard under test defends against a session persisted before
+      // `state` existed, which the Session type cannot express.
+      Reflect.deleteProperty(session, 'state');
+      const contextWithoutState = createInvocationContext({session});
 
       await executor.executeCode({
         invocationContext: contextWithoutState,
@@ -507,7 +506,7 @@ describe('AgentEngineSandboxCodeExecutor', () => {
         },
       });
 
-      expect(contextWithoutState.session?.state).toEqual({
+      expect(contextWithoutState.session.state).toEqual({
         sandbox_name_language_python:
           'projects/test-project/locations/us-central1/reasoningEngines/123/sandboxEnvironments/456',
       });
@@ -538,7 +537,7 @@ describe('AgentEngineSandboxCodeExecutor', () => {
     });
 
     it('creates new sandbox if getInternal throws error', async () => {
-      invocationContext.session!.state!['sandbox_name_language_python'] =
+      invocationContext.session.state['sandbox_name_language_python'] =
         'projects/test-project/locations/us-central1/reasoningEngines/123/sandboxEnvironments/456';
       mockClient.agentEnginesInternal.sandboxes.getInternal.mockRejectedValue(
         new Error('API Error'),
@@ -654,7 +653,7 @@ describe('AgentEngineSandboxCodeExecutor', () => {
         }),
       );
 
-      expect(invocationContext.session?.state).toEqual({
+      expect(invocationContext.session.state).toEqual({
         sandbox_name_language_javascript:
           'projects/test-project/locations/us-central1/reasoningEngines/123/sandboxEnvironments/456',
       });

@@ -4,15 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  Context,
-  InvocationContext,
-  MCPSessionManager,
-  MCPTool,
-} from '@google/adk';
+import {Context, MCPSessionManager, MCPTool} from '@google/adk';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {Tool} from '@modelcontextprotocol/sdk/types.js';
 import {describe, expect, it, vi} from 'vitest';
+import {createInvocationContext} from '../../testing_utils.js';
 
 describe('MCPTool', () => {
   it('passes abort signal to callTool', async () => {
@@ -37,10 +33,7 @@ describe('MCPTool', () => {
     const controller = new AbortController();
     const signal = controller.signal;
 
-    const invocationContext = {
-      abortSignal: signal,
-      session: {state: {}},
-    } as unknown as InvocationContext;
+    const invocationContext = createInvocationContext({abortSignal: signal});
 
     const toolContext = new Context({invocationContext});
 
@@ -76,10 +69,7 @@ describe('MCPTool', () => {
     const controller = new AbortController();
     const signal = controller.signal;
 
-    const invocationContext = {
-      abortSignal: signal,
-      session: {state: {}},
-    } as unknown as InvocationContext;
+    const invocationContext = createInvocationContext({abortSignal: signal});
 
     const toolContext = new Context({invocationContext});
 
@@ -119,10 +109,7 @@ describe('MCPTool', () => {
     controller.abort();
     const signal = controller.signal;
 
-    const invocationContext = {
-      abortSignal: signal,
-      session: {state: {}},
-    } as unknown as InvocationContext;
+    const invocationContext = createInvocationContext({abortSignal: signal});
 
     const toolContext = new Context({invocationContext});
 
@@ -149,10 +136,9 @@ describe('MCPTool', () => {
 
     const tool = new MCPTool(mockTool, mockSessionManager);
 
-    const invocationContext = {
+    const invocationContext = createInvocationContext({
       abortSignal: new AbortController().signal,
-      session: {state: {}},
-    } as unknown as InvocationContext;
+    });
 
     const toolContext = new Context({invocationContext});
 
