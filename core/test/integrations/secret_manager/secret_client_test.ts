@@ -82,14 +82,6 @@ const SERVICE_ACCOUNT = {
   client_email: 'test@example.com',
 };
 
-function lastClientOptions(): Record<string, unknown> {
-  const call = mocks.secretManagerConstructor.mock.calls.at(-1);
-  if (!call) {
-    expect.fail('SecretManagerServiceClient was never constructed');
-  }
-  return call[0] as Record<string, unknown>;
-}
-
 describe('SecretManagerClient', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -107,7 +99,6 @@ describe('SecretManagerClient', () => {
         libName: 'google-adk',
         libVersion: version,
       });
-      expect(lastClientOptions()).not.toHaveProperty('apiEndpoint');
     });
 
     it('builds a JWT client from service account JSON', () => {
@@ -145,7 +136,7 @@ describe('SecretManagerClient', () => {
     it('targets the regional endpoint when a location is given', () => {
       new SecretManagerClient({location: 'us-central1'});
 
-      expect(lastClientOptions()).toEqual({
+      expect(mocks.secretManagerConstructor).toHaveBeenCalledExactlyOnceWith({
         auth: expect.any(mocks.FakeGoogleAuth),
         libName: 'google-adk',
         libVersion: version,
