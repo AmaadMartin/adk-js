@@ -4,11 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {AuthCredential, AuthCredentialTypes} from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
-import {
-  AuthCredential,
-  AuthCredentialTypes,
-} from '../../../src/auth/auth_credential.js';
 import {AutoAuthCredentialExchanger} from '../../../src/tools/openapi_tool/auth/credential_exchangers/auto_auth_credential_exchanger.js';
 
 // Mock google-auth-library
@@ -38,16 +35,12 @@ describe('AutoAuthCredentialExchanger', () => {
 
   it('should use ServiceAccountCredentialExchanger for serviceAccount', async () => {
     const exchanger = new AutoAuthCredentialExchanger();
-    const credential = {
+    const credential: AuthCredential = {
       authType: AuthCredentialTypes.SERVICE_ACCOUNT,
-      serviceAccount: {
-        useDefaultCredential: true,
-      },
+      serviceAccount: {useDefaultCredential: true},
     };
 
-    const result = await exchanger.exchange({
-      authCredential: credential as unknown as AuthCredential,
-    });
+    const result = await exchanger.exchange({authCredential: credential});
 
     expect(result.wasExchanged).toBe(true);
     expect(result.credential.http?.credentials.token).toBe('mock-adc-token');

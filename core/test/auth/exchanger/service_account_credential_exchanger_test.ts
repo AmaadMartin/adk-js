@@ -4,7 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {AuthCredential, AuthCredentialTypes} from '@google/adk';
+import {
+  AuthCredential,
+  AuthCredentialTypes,
+  ServiceAccountCredential,
+} from '@google/adk';
 import {GoogleAuth, JWT} from 'google-auth-library';
 import {describe, expect, it, vi} from 'vitest';
 import {ServiceAccountCredentialExchanger} from '../../../src/auth/exchanger/service_account_credential_exchanger.js';
@@ -23,15 +27,28 @@ vi.mock('google-auth-library', () => {
   };
 });
 
+const SERVICE_ACCOUNT_CREDENTIAL: ServiceAccountCredential = {
+  type: 'service_account',
+  projectId: 'test-project',
+  privateKeyId: 'test-private-key-id',
+  privateKey: 'key',
+  clientEmail: 'test@example.com',
+  clientId: 'test-client-id',
+  authUri: 'https://accounts.google.com/o/oauth2/auth',
+  tokenUri: 'https://oauth2.googleapis.com/token',
+  authProviderX509CertUrl: 'https://www.googleapis.com/oauth2/v1/certs',
+  clientX509CertUrl:
+    'https://www.googleapis.com/robot/v1/metadata/x509/test%40example.com',
+  universeDomain: 'googleapis.com',
+};
+
 describe('ServiceAccountCredentialExchanger', () => {
   it('should throw if not service account credential', async () => {
     const exchanger = new ServiceAccountCredentialExchanger();
-    const credential = {authType: AuthCredentialTypes.API_KEY};
+    const credential: AuthCredential = {authType: AuthCredentialTypes.API_KEY};
 
     await expect(
-      exchanger.exchange({
-        authCredential: credential as unknown as AuthCredential,
-      }),
+      exchanger.exchange({authCredential: credential}),
     ).rejects.toThrow(
       'Invalid credential type for ServiceAccountCredentialExchanger',
     );
@@ -39,19 +56,12 @@ describe('ServiceAccountCredentialExchanger', () => {
 
   it('should exchange with explicit keys', async () => {
     const exchanger = new ServiceAccountCredentialExchanger();
-    const credential = {
+    const credential: AuthCredential = {
       authType: AuthCredentialTypes.SERVICE_ACCOUNT,
-      serviceAccount: {
-        serviceAccountCredential: {
-          clientEmail: 'test@example.com',
-          privateKey: 'key',
-        },
-      },
+      serviceAccount: {serviceAccountCredential: SERVICE_ACCOUNT_CREDENTIAL},
     };
 
-    const result = await exchanger.exchange({
-      authCredential: credential as unknown as AuthCredential,
-    });
+    const result = await exchanger.exchange({authCredential: credential});
 
     expect(result.wasExchanged).toBe(true);
     expect(result.credential.http?.credentials.token).toBe('mock-token');
@@ -59,16 +69,12 @@ describe('ServiceAccountCredentialExchanger', () => {
 
   it('should exchange with default credentials', async () => {
     const exchanger = new ServiceAccountCredentialExchanger();
-    const credential = {
+    const credential: AuthCredential = {
       authType: AuthCredentialTypes.SERVICE_ACCOUNT,
-      serviceAccount: {
-        useDefaultCredential: true,
-      },
+      serviceAccount: {useDefaultCredential: true},
     };
 
-    const result = await exchanger.exchange({
-      authCredential: credential as unknown as AuthCredential,
-    });
+    const result = await exchanger.exchange({authCredential: credential});
 
     expect(result.wasExchanged).toBe(true);
     expect(result.credential.http?.credentials.token).toBe('mock-adc-token');
@@ -76,30 +82,21 @@ describe('ServiceAccountCredentialExchanger', () => {
 
   it('should throw if explicit credentials missing', async () => {
     const exchanger = new ServiceAccountCredentialExchanger();
-    const credential = {
+    const credential: AuthCredential = {
       authType: AuthCredentialTypes.SERVICE_ACCOUNT,
-      serviceAccount: {
-        useDefaultCredential: false,
-      },
+      serviceAccount: {useDefaultCredential: false},
     };
 
     await expect(
-      exchanger.exchange({
-        authCredential: credential as unknown as AuthCredential,
-      }),
+      exchanger.exchange({authCredential: credential}),
     ).rejects.toThrow('Service account credentials are missing.');
   });
 
   it('should throw if token exchange fails (missing token)', async () => {
     const exchanger = new ServiceAccountCredentialExchanger();
-    const credential = {
+    const credential: AuthCredential = {
       authType: AuthCredentialTypes.SERVICE_ACCOUNT,
-      serviceAccount: {
-        serviceAccountCredential: {
-          clientEmail: 'test@example.com',
-          privateKey: 'key',
-        },
-      },
+      serviceAccount: {serviceAccountCredential: SERVICE_ACCOUNT_CREDENTIAL},
     };
 
     const mockJWT = vi.mocked(JWT);
@@ -111,9 +108,7 @@ describe('ServiceAccountCredentialExchanger', () => {
     );
 
     await expect(
-      exchanger.exchange({
-        authCredential: credential as unknown as AuthCredential,
-      }),
+      exchanger.exchange({authCredential: credential}),
     ).rejects.toThrow(
       'Failed to exchange explicit service account token: Failed to get access token from explicit credentials',
     );
@@ -121,14 +116,9 @@ describe('ServiceAccountCredentialExchanger', () => {
 
   it('should throw if token exchange throws error', async () => {
     const exchanger = new ServiceAccountCredentialExchanger();
-    const credential = {
+    const credential: AuthCredential = {
       authType: AuthCredentialTypes.SERVICE_ACCOUNT,
-      serviceAccount: {
-        serviceAccountCredential: {
-          clientEmail: 'test@example.com',
-          privateKey: 'key',
-        },
-      },
+      serviceAccount: {serviceAccountCredential: SERVICE_ACCOUNT_CREDENTIAL},
     };
 
     const mockJWT = vi.mocked(JWT);
@@ -140,9 +130,7 @@ describe('ServiceAccountCredentialExchanger', () => {
     );
 
     await expect(
-      exchanger.exchange({
-        authCredential: credential as unknown as AuthCredential,
-      }),
+      exchanger.exchange({authCredential: credential}),
     ).rejects.toThrow(
       'Failed to exchange explicit service account token: Auth failed',
     );
