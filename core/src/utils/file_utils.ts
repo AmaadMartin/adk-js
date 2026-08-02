@@ -9,8 +9,31 @@ import * as path from 'node:path';
 import {File} from '../code_executors/code_execution_utils.js';
 
 /**
- * Creates files with the given paths in the current working directory.
- * @param files The files to materialize.
+ * Reports whether `target` is `baseDir` itself or a descendant of it.
+ *
+ * This is a lexical comparison of resolved paths. It is not a sandbox: it does
+ * not survive symlinks, hardlinks, bind mounts, or TOCTOU races.
+ */
+function isWithinDir(baseDir: string, target: string): boolean {
+  const rel = path.relative(baseDir, target);
+
+  return (
+    rel === '' ||
+    (rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel))
+  );
+}
+
+/**
+ * Writes the given files under `dir`, creating parent directories as needed.
+ *
+ * A name that resolves outside `dir` is rejected. That containment check is
+ * lexical (`path.resolve` + `path.relative`) — it is not a sandbox and does
+ * not survive symlinks, hardlinks, bind mounts, or TOCTOU races.
+ *
+ * @param files The files to materialize. `name` is updated in place if a
+ *   collision forces a rename.
+ * @param dir The target directory. Defaults to the process working directory.
+ * @returns The created files, with `name` relative to `dir`.
  */
 export async function materializeFiles(
   files: File[],
@@ -21,7 +44,7 @@ export async function materializeFiles(
   for (const file of files) {
     const fullPath = path.resolve(dir, file.name);
 
-    if (!fullPath.startsWith(resolvedBaseDir)) {
+    if (!isWithinDir(resolvedBaseDir, fullPath)) {
       throw new Error(
         `Path traversal detected: ${file.name} resolves outside of ${dir}`,
       );
@@ -51,7 +74,7 @@ export async function materializeFiles(
       }
     }
 
-    if (!finalPath.startsWith(resolvedBaseDir)) {
+    if (!isWithinDir(resolvedBaseDir, finalPath)) {
       throw new Error(
         `Path traversal detected: ${file.name} resolves outside of ${dir}`,
       );
