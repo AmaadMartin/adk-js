@@ -36,4 +36,21 @@ export default defineConfig([
       ]
     },
   },
+  {
+    files: ["core/test/**/*.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          "patterns": [
+            {
+              "group": ["@google/adk", "@google/adk/**"],
+              "message":
+                "core/test must import ADK symbols from the source tree via a relative path (e.g. '../../src/index.js'). The package specifier resolves through the workspace symlink to the built declarations in core/dist/types, so TypeScript sees two distinct declarations of every class, while vitest aliases it to core/src -- the type checker and the runtime disagree."
+            }
+          ]
+        }
+      ]
+    },
+  },
 ]);
