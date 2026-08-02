@@ -149,7 +149,7 @@ describe('ExampleTool', () => {
     );
   });
 
-  it('is importable from @google/adk (public export)', () => {
+  it('is exported from the package barrel', () => {
     expect(new ExampleTool([])).toBeInstanceOf(ExampleTool);
   });
 });
