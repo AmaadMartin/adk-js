@@ -40,14 +40,14 @@ export interface CompiledLangGraph {
   ): Promise<{values?: Record<string, unknown>}>;
 
   /**
-   * `input` is `unknown` because TypeScript compares method parameters
-   * bivariantly and the real signature takes a graph-specific update type; any
-   * narrower hand-written object type would be assignable in neither
-   * direction.
+   * `input` is `unknown` because the real signature takes a graph-specific
+   * update type; any narrower hand-written object type would be assignable in
+   * neither direction, even under the bivariance TypeScript applies to method
+   * parameters.
    */
   invoke(
     input: unknown,
-    config: unknown,
+    config: LangGraphThreadConfig,
   ): Promise<{messages: Array<{content: unknown}>}>;
 }
 
@@ -174,23 +174,6 @@ function getConversationWithAgent(
 }
 
 /**
- * Converts the session events into LangChain messages.
- *
- * When the graph has its own memory only the last user messages are forwarded;
- * otherwise the full user/agent conversation is replayed.
- */
-function getMessages(
-  events: Event[],
-  agentName: string,
-  hasCheckpointer: boolean,
-  ctors: MessageConstructors,
-): BaseMessage[] {
-  return hasCheckpointer
-    ? getLastHumanMessages(events, ctors)
-    : getConversationWithAgent(events, agentName, ctors);
-}
-
-/**
  * Adapts a compiled LangGraph state graph for single or multi-turn use.
  *
  * `@langchain/langgraph` and `@langchain/core` are optional peer dependencies:
@@ -239,8 +222,12 @@ export class LangGraphAgent extends BaseAgent<LangGraphAgentConfig> {
     if (this.instruction && !hasGraphHistory) {
       messages.push(new ctors.SystemMessage(this.instruction));
     }
+    // A graph with its own memory has already replayed the conversation, so
+    // only the new user messages are forwarded to it.
     messages.push(
-      ...getMessages(context.session.events, this.name, hasCheckpointer, ctors),
+      ...(hasCheckpointer
+        ? getLastHumanMessages(context.session.events, ctors)
+        : getConversationWithAgent(context.session.events, this.name, ctors)),
     );
 
     const finalState = await this.graph.invoke({messages}, config);

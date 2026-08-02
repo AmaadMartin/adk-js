@@ -121,7 +121,6 @@
     "@google-cloud/opentelemetry-cloud-trace-exporter": "^3.0.0",
     "@google-cloud/storage": "^7.17.1",
     "@langchain/core": "^1.2.4",
-    "@langchain/langgraph": "^1.4.8",
     "@mikro-orm/mariadb": "^6.6.6",
     "@mikro-orm/mssql": "^6.6.6",
     "@mikro-orm/mysql": "^6.6.6",
@@ -141,9 +140,6 @@
       "optional": true
     },
     "@langchain/core": {
-      "optional": true
-    },
-    "@langchain/langgraph": {
       "optional": true
     },
     "@mikro-orm/mariadb": {
