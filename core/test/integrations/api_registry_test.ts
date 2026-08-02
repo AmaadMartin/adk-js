@@ -200,14 +200,38 @@ describe('ApiRegistry', () => {
       );
     });
 
-    it('skips servers returned without a name', async () => {
+    it('lets a later page overwrite a duplicate from an earlier one', async () => {
+      fetchMock()
+        .mockResolvedValueOnce(
+          okResponse({
+            mcpServers: [{name: 'dup', urls: ['stale.example.com']}],
+            nextPageToken: 'next_page_token',
+          }),
+        )
+        .mockResolvedValueOnce(
+          okResponse({
+            mcpServers: [{name: 'dup', urls: ['fresh.example.com']}],
+          }),
+        );
+
+      const {url} = await connectToolset(newRegistry(), 'dup');
+      expect(url.toString()).toBe('https://fresh.example.com/');
+    });
+
+    it('skips servers returned without a name but keeps their named siblings', async () => {
       fetchMock().mockResolvedValue(
-        okResponse({mcpServers: [{urls: ['mcp.nameless.com']}]}),
+        okResponse({
+          mcpServers: [
+            {urls: ['mcp.nameless.com']},
+            {name: 'named', urls: ['mcp.named.com']},
+          ],
+        }),
       );
       const registry = newRegistry();
       await expect(registry.getToolset('')).rejects.toThrow(
         'MCP server  not found in API Registry.',
       );
+      await expect(registry.getToolset('named')).resolves.toBeDefined();
     });
 
     it('tolerates a response with no mcpServers field', async () => {
