@@ -165,6 +165,14 @@ export {
   isBaseExampleProvider,
 } from './examples/base_example_provider.js';
 export type {Example} from './examples/example.js';
+export {VertexAiExampleStore} from './examples/vertex_ai_example_store.js';
+export type {
+  ExampleStoreClient,
+  SearchExamplesRequest,
+  SearchExamplesResponse,
+  SimilarExample,
+  VertexAiExampleStoreOptions,
+} from './examples/vertex_ai_example_store.js';
 export type {
   BaseMemoryService,
   SearchMemoryRequest,
