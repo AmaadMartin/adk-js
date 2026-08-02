@@ -58,7 +58,6 @@ export class AdkGoServer extends BaseTestServer {
         });
       },
       startMessage: 'A2A Server started on',
-      successLogMessage: 'Test Go Server started',
       serverName: 'Go Server',
       timeoutMs: this.params.startFailureTimeout || DEFAULT_TIMEOUT,
     });

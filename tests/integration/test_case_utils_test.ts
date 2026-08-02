@@ -61,7 +61,6 @@ class ScriptedTestServer extends BaseTestServer {
         return this.child;
       },
       startMessage: START_MESSAGE,
-      successLogMessage: 'Scripted server started',
       serverName: 'Scripted',
       timeoutMs,
     });
@@ -181,34 +180,6 @@ describe('BaseTestServer.startProcess', () => {
 
     expect(server.portAtSpawn).toBe(requested);
     expect(server.port).toBe(requested);
-  });
-
-  it('adopts the port the child announces in its banner', async () => {
-    const server = new ScriptedTestServer(
-      nodeScript(
-        "process.stdout.write('Listening on http://localhost:65535\\n');" +
-          `process.stdout.write('${START_MESSAGE}\\n');${STAY_ALIVE}`,
-      ),
-    );
-
-    await server.start();
-
-    expect(server.port).toBe(65535);
-    expect(server.url).toBe(`http://${HOST}:65535`);
-  });
-
-  it('keeps the reserved port when the banner announces port 0', async () => {
-    const server = new ScriptedTestServer(
-      nodeScript(
-        "process.stdout.write('Listening on http://localhost:0\\n');" +
-          `process.stdout.write('${START_MESSAGE}\\n');${STAY_ALIVE}`,
-      ),
-    );
-
-    await server.start();
-
-    expect(server.port).toBe(server.portAtSpawn);
-    expect(server.port).toBeGreaterThan(0);
   });
 
   it('completes the handshake when the banner is split across writes', async () => {

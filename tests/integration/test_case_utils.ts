@@ -265,12 +265,6 @@ const OUTPUT_EXCERPT_CHARS = 4000;
 /** How long `stop()` waits for a clean exit before escalating to SIGKILL. */
 const PROCESS_EXIT_TIMEOUT_MS = 5000;
 
-/** Matches the loopback URL a test server prints in its start-up banner. */
-const SERVER_URL_REGEX = /http:\/\/localhost:([0-9]+)/i;
-
-/** The signal that terminated a child, sourced from Node's own typing. */
-type TerminationSignal = ChildProcessWithoutNullStreams['signalCode'];
-
 /**
  * Returns a TCP port on `host` that the OS has just confirmed is free, by
  * binding port 0, reading the assignment back and releasing it.
@@ -284,39 +278,33 @@ export async function reserveFreePort(host: string): Promise<number> {
   const probe = createServer();
 
   try {
-    return await new Promise<number>((resolve, reject) => {
-      probe.once('error', reject);
-      probe.listen({host, port: 0}, () => {
-        const address = probe.address();
-        // `address()` is typed `AddressInfo | string | null`; the string form is
-        // for IPC servers, which this never is.
-        if (address === null || typeof address === 'string') {
-          reject(
-            new Error(`Expected a TCP address on ${host}, got ${address}`),
-          );
-          return;
-        }
-        resolve(address.port);
-      });
-    });
+    const listening = once(probe, 'listening');
+    probe.listen({host, port: 0});
+    await listening;
+
+    const address = probe.address();
+    // `address()` is typed `AddressInfo | string | null`; the string form is
+    // for IPC servers, which this never is.
+    if (address === null || typeof address === 'string') {
+      throw new Error(`Expected a TCP address on ${host}, got ${address}`);
+    }
+    return address.port;
   } finally {
     await new Promise<void>((resolve) => probe.close(() => resolve()));
   }
 }
 
 /**
- * Renders one captured stream, keeping only its last
- * {@link OUTPUT_EXCERPT_CHARS} characters: a child that dies noisily writes far
- * more than is useful, and the bytes it wrote last are the ones explaining why.
+ * Keeps only the last {@link OUTPUT_EXCERPT_CHARS} characters of a captured
+ * stream: a child that dies noisily writes far more than is useful, and the
+ * bytes it wrote last are the ones explaining why.
  */
-function formatStream(label: string, output: string): string {
-  const excerpt = output.slice(-OUTPUT_EXCERPT_CHARS);
-  return `\n${label}:\n${excerpt || '(no output captured)'}`;
+function excerpt(output: string): string {
+  return output.slice(-OUTPUT_EXCERPT_CHARS) || '(no output captured)';
 }
 
-/** Renders both captured streams for inclusion in a start-up failure. */
 function formatCapturedOutput(stdout: string, stderr: string): string {
-  return formatStream('stdout', stdout) + formatStream('stderr', stderr);
+  return `\nstdout:\n${excerpt(stdout)}\nstderr:\n${excerpt(stderr)}`;
 }
 
 /**
@@ -340,13 +328,11 @@ export abstract class BaseTestServer {
   protected async startProcess({
     spawnProcess,
     startMessage,
-    successLogMessage,
     serverName,
     timeoutMs,
   }: {
     spawnProcess: () => ChildProcessWithoutNullStreams;
     startMessage: string;
-    successLogMessage: string;
     serverName: string;
     timeoutMs: number;
   }): Promise<void> {
@@ -397,14 +383,6 @@ export abstract class BaseTestServer {
 
         // Matched against the accumulated output, not this chunk: a banner
         // split across two writes must still complete the handshake.
-        const urlMatch = stdout.match(SERVER_URL_REGEX);
-        if (urlMatch) {
-          const parsedPort = parseInt(urlMatch[1], 10);
-          if (parsedPort > 0) {
-            this.port = parsedPort;
-          }
-        }
-
         if (stdout.includes(startMessage)) {
           settle();
         }
@@ -427,7 +405,10 @@ export abstract class BaseTestServer {
       // 'close' rather than 'exit': it fires only once the stdio pipes have
       // been drained, so the child's last words -- the actual reason it refused
       // to start -- are already captured when the error is built.
-      const onClose = (code: number | null, signal: TerminationSignal) => {
+      const onClose = (
+        code: number | null,
+        signal: ChildProcessWithoutNullStreams['signalCode'],
+      ) => {
         settle(
           new Error(
             `${serverName} exited prematurely with code ${code}` +
@@ -452,7 +433,7 @@ export abstract class BaseTestServer {
       child.on('close', onClose);
     });
 
-    console.log(successLogMessage);
+    console.log(`${serverName} started at ${this.url}`);
   }
 
   async stop(): Promise<void> {
