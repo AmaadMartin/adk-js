@@ -13,6 +13,7 @@ import {Skill} from '../../skills/skill.js';
 import {SkillRegistry} from '../../skills/skill_registry.js';
 import {experimental} from '../../utils/experimental.js';
 import {logger} from '../../utils/logger.js';
+import {DEFAULT_MAX_OUTPUT_CHARS} from '../../utils/truncate_utils.js';
 import {BaseTool} from '../base_tool.js';
 import {BaseToolset} from '../base_toolset.js';
 import {ListSkillsTool} from './list_skills_tool.js';
@@ -45,6 +46,7 @@ export class SkillToolset extends BaseToolset {
   public additionalTools: Array<BaseTool | BaseToolset>;
   public codeExecutor?: BaseCodeExecutor;
   public registry?: SkillRegistry;
+  public readonly maxOutputChars: number;
   private toolCache = new Map<string, BaseTool[]>();
   private fetchedSkillCache = new Map<string, Map<string, Skill>>();
 
@@ -63,6 +65,13 @@ export class SkillToolset extends BaseToolset {
        * confirmation.
        */
       allowInlineScripts?: boolean;
+      /**
+       * Maximum number of characters of `stdout` / `stderr` returned to the
+       * model per skill script execution. Each stream is capped
+       * independently; output beyond the cap is elided from the middle with an
+       * explicit marker. Defaults to {@link DEFAULT_MAX_OUTPUT_CHARS}.
+       */
+      maxOutputChars?: number;
     } = {},
   ) {
     super([], 'adk_skill_toolset');
@@ -72,6 +81,7 @@ export class SkillToolset extends BaseToolset {
     this.codeExecutor = options.codeExecutor;
     this.additionalTools = options.additionalTools || [];
     this.registry = options.registry;
+    this.maxOutputChars = options.maxOutputChars ?? DEFAULT_MAX_OUTPUT_CHARS;
 
     this.tools = [
       new ListSkillsTool(this),
