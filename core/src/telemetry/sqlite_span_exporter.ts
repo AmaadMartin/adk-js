@@ -364,12 +364,22 @@ export class SqliteSpanExporter implements SpanExporter {
 
   private async open(): Promise<MikroORM> {
     const {SqliteDriver} = await import('@mikro-orm/sqlite');
+    // `connect: false` keeps the connection out of `init`, which would
+    // otherwise open the file and leak it by throwing before returning a
+    // handle to close. Windows then refuses to delete the file.
     const orm = await MikroORM.init({
       dbName: this.dbPath,
       driver: SqliteDriver,
       entities: [StorageSpan],
+      connect: false,
     });
-    await ensureDatabaseCreated(orm);
+    try {
+      await orm.connect();
+      await ensureDatabaseCreated(orm);
+    } catch (error: unknown) {
+      await orm.close();
+      throw error;
+    }
     this.orm = orm;
     return orm;
   }
