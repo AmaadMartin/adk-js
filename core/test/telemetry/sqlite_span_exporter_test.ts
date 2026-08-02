@@ -206,28 +206,28 @@ describe('SqliteSpanExporter', () => {
       expect(retrieved[0].attributes['version']).toBe(2);
     });
 
-    it('de-duplicates a span id repeated within one batch', async () => {
+    it('keeps the last version of a span id repeated within one batch', async () => {
       const exporter = createExporter();
       const attributes = {[SESSION_ID_ATTRIBUTE]: 'session-batch-dup'};
 
       const result = await exportSpans(exporter, [
+        createTestSpan({spanId: '0000000000000abc', name: 'first', attributes}),
+        createTestSpan({spanId: '0000000000000def', name: 'other', attributes}),
         createTestSpan({
           spanId: '0000000000000abc',
-          name: 'first',
+          name: 'middle',
           attributes,
         }),
-        createTestSpan({
-          spanId: '0000000000000abc',
-          name: 'last',
-          attributes,
-        }),
+        createTestSpan({spanId: '0000000000000abc', name: 'last', attributes}),
       ]);
 
       expect(result.code).toBe(ExportResultCode.SUCCESS);
       const retrieved =
         await exporter.getAllSpansForSession('session-batch-dup');
-      expect(retrieved).toHaveLength(1);
-      expect(retrieved[0].name).toBe('last');
+      expect(retrieved.map((span) => span.name).sort()).toEqual([
+        'last',
+        'other',
+      ]);
     });
 
     it('indexes a span that only carries the conversation id attribute', async () => {
