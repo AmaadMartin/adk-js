@@ -9,6 +9,9 @@
     "type": "git",
     "url": "https://github.com/google/adk-js"
   },
+  "engines": {
+    "node": ">=20.6.0"
+  },
   "scripts": {
     "build": "npm run build --workspaces",
     "clean": "npm run clean --workspaces",
