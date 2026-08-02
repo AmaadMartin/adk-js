@@ -500,49 +500,43 @@ interface ExtendedEvent extends Event {
 }
 
 /**
- * ADK `EventActions` field names that differ from their Agent Engine Sessions
- * API counterparts. ADK's `transferToAgent` is the API's `transferAgent`; every
- * other field shares its name.
+ * Copies `actions`, renaming `from` to `to` and dropping entries with no value.
+ * Every other key is passed through untouched, so a field added to
+ * `EventActions` persists without a change here. ADK's `transferToAgent` is the
+ * Agent Engine Sessions API's `transferAgent`; no other field diverges.
  */
-const ADK_TO_API_ACTION_KEYS: Record<string, string> = {
-  transferToAgent: 'transferAgent',
-};
-
-const API_TO_ADK_ACTION_KEYS: Record<string, string> = {
-  transferAgent: 'transferToAgent',
-};
-
-/**
- * Copies `actions`, renaming the keys listed in `keyMap` and dropping entries
- * with no value. Keys outside `keyMap` are passed through untouched, so a field
- * added to `EventActions` persists without a change here.
- */
-function renameActionKeys(
-  actions: Record<string, unknown>,
-  keyMap: Record<string, string>,
+function renameActionKey(
+  actions: object | undefined,
+  from: string,
+  to: string,
 ): Record<string, unknown> {
   const result: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(actions)) {
-    if (value === undefined || value === null) continue;
-    result[keyMap[key] ?? key] = value;
+  for (const [key, value] of Object.entries(actions ?? {})) {
+    if (value == null) continue;
+    result[key === from ? to : key] = value;
   }
   return result;
 }
 
 function toApiActions(actions: EventActions): VertexAiEventActions {
-  return renameActionKeys(
-    {...actions},
-    ADK_TO_API_ACTION_KEYS,
+  // The SDK type omits requestedToolConfirmations, which this channel carries.
+  return renameActionKey(
+    actions,
+    'transferToAgent',
+    'transferAgent',
   ) as VertexAiEventActions;
 }
 
 function fromApiActions(
   apiActions?: VertexAiEventActions,
 ): ExtendedEventActions {
-  const renamed = renameActionKeys({...apiActions}, API_TO_ADK_ACTION_KEYS);
   return createEventActions(
-    renamed as Partial<EventActions>,
-  ) as ExtendedEventActions;
+    renameActionKey(
+      apiActions,
+      'transferAgent',
+      'transferToAgent',
+    ) as Partial<EventActions>,
+  );
 }
 
 function _fromApiEvent(apiEventObj: VertexAiSessionEvent): Event {
