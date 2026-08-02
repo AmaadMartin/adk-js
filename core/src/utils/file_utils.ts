@@ -8,18 +8,11 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import {File} from '../code_executors/code_execution_utils.js';
 
-/**
- * Reports whether `target` is `baseDir` itself or a descendant of it.
- *
- * This is a lexical comparison of resolved paths. It is not a sandbox: it does
- * not survive symlinks, hardlinks, bind mounts, or TOCTOU races.
- */
+/** Reports whether `target` is `baseDir` itself or a descendant of it. */
 function isWithinDir(baseDir: string, target: string): boolean {
   const rel = path.relative(baseDir, target);
-
   return (
-    rel === '' ||
-    (rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel))
+    rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel)
   );
 }
 
