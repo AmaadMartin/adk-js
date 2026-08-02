@@ -365,7 +365,9 @@ export abstract class BaseTestServer {
     child.on('error', (error: Error) => {
       console.error(`${serverName} Error: ${error.message}`);
     });
-    child.on('close', (code: number | null) => {
+    // 'exit' rather than 'close': a child that leaves a grandchild holding the
+    // inherited stdio pipes never emits 'close'.
+    child.on('exit', (code: number | null) => {
       console.error(`${serverName} exited with code ${code}`);
     });
 
@@ -462,8 +464,11 @@ export abstract class BaseTestServer {
     // it would hang until the suite timeout.
     if (child.exitCode !== null || child.signalCode !== null) return;
 
+    // 'exit' rather than 'close': `go run` leaves a grandchild holding the
+    // inherited stdio pipes, and 'close' waits for those to be released, so it
+    // can outlive the process this is trying to reap.
     // Subscribed before the kill so a fast exit cannot be missed.
-    const exited = once(child, 'close');
+    const exited = once(child, 'exit');
     child.kill('SIGINT');
     // Windows emulates SIGINT as unconditional termination and a wedged child
     // may ignore it outright, so the wait is bounded rather than open-ended.

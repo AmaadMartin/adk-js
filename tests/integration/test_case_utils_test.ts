@@ -6,7 +6,10 @@
 
 import type {ChildProcessWithoutNullStreams} from 'node:child_process';
 import {spawn} from 'node:child_process';
+import {mkdtempSync, readFileSync} from 'node:fs';
 import {createServer, type Server} from 'node:net';
+import {tmpdir} from 'node:os';
+import * as path from 'node:path';
 import {afterEach, describe, expect, it} from 'vitest';
 import {BaseTestServer, reserveFreePort} from './test_case_utils.js';
 
@@ -16,9 +19,13 @@ const START_MESSAGE = 'SCRIPTED SERVER STARTED';
 const START_TIMEOUT_MS = 15000;
 /** Keeps a scripted child alive until the test tears it down. */
 const STAY_ALIVE = 'setInterval(() => {}, 1000);';
+/** Mirrors `PROCESS_EXIT_TIMEOUT_MS` in the harness under test. */
+const PROCESS_EXIT_TIMEOUT_MS = 5000;
 
 const spawned: ChildProcessWithoutNullStreams[] = [];
 const listeners: Server[] = [];
+/** Files holding the pid of a grandchild that teardown must reap. */
+const grandchildPidFiles: string[] = [];
 
 /** Spawns a `node -e` child; portable and needs no shell quoting. */
 function nodeScript(script: string): () => ChildProcessWithoutNullStreams {
@@ -78,6 +85,9 @@ function listenOn(port: number): Promise<void> {
 afterEach(async () => {
   for (const child of spawned.splice(0)) {
     child.kill('SIGKILL');
+  }
+  for (const pidFile of grandchildPidFiles.splice(0)) {
+    process.kill(Number(readFileSync(pidFile, 'utf8')), 'SIGKILL');
   }
   await Promise.all(
     listeners
@@ -327,6 +337,38 @@ describe('BaseTestServer.stop', () => {
 
     expect(child!.signalCode).toBe('SIGKILL');
   }, 20000);
+
+  it('returns when a grandchild still holds the inherited stdio pipes', async () => {
+    // `go run` behaves this way: killing the wrapper leaves the built binary
+    // holding the pipes, so the wrapper emits 'exit' but never 'close'. The
+    // grandchild here outlives the assertion window on purpose -- teardown
+    // reaps it -- so waiting on 'close' cannot pass by simply outlasting it.
+    const pidFile = path.join(
+      mkdtempSync(path.join(tmpdir(), 'adk-harness-')),
+      'grandchild.pid',
+    );
+    grandchildPidFiles.push(pidFile);
+    const server = new ScriptedTestServer(
+      nodeScript(
+        "const gc = require('node:child_process').spawn(process.execPath, " +
+          "['-e', 'setTimeout(() => {}, 60000)'], {stdio: 'inherit'});" +
+          // Recorded by the parent, which knows the pid the moment it spawns,
+          // so teardown cannot race the grandchild's own start-up.
+          `require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, ` +
+          'String(gc.pid));' +
+          `process.stdout.write('${START_MESSAGE}\\n');${STAY_ALIVE}`,
+      ),
+    );
+    await server.start();
+    const child = server.child;
+    expect(child).toBeDefined();
+
+    const startedAt = Date.now();
+    await server.stop();
+
+    expect(hasExited(child!)).toBe(true);
+    expect(Date.now() - startedAt).toBeLessThan(PROCESS_EXIT_TIMEOUT_MS);
+  });
 
   it('is a no-op on a server that was never started', async () => {
     const server = new ScriptedTestServer(nodeScript(STAY_ALIVE));
