@@ -9,6 +9,7 @@ import {fileURLToPath} from 'node:url';
 import {describe, expect, it} from 'vitest';
 
 const GENAI = '@google/genai';
+const OTEL_API = '@opentelemetry/api';
 const WORKSPACE_ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   '../..',
@@ -46,5 +47,31 @@ describe(`${GENAI} in the dev workspace manifest`, () => {
     expect(readManifest('dev').dependencies?.[GENAI]).toBe(
       readManifest('core').dependencies?.[GENAI],
     );
+  });
+});
+
+describe(`${OTEL_API} in the dev workspace manifest`, () => {
+  it('is declared as a runtime dependency', () => {
+    // dev/src imports the runtime value trace (and calls
+    // trace.getTracerProvider()), and dev/build.js builds with
+    // packages:'external', so that import survives into the published dist
+    // and has to resolve from a consumer's own install.
+    const dev = readManifest('dev');
+
+    expect(dev.dependencies?.[OTEL_API]).toBeDefined();
+    expect(dev.devDependencies?.[OTEL_API]).toBeUndefined();
+  });
+
+  it('declares the same range core declares', () => {
+    expect(readManifest('dev').dependencies?.[OTEL_API]).toBe(
+      readManifest('core').dependencies?.[OTEL_API],
+    );
+  });
+
+  it('is pinned exactly, because it is singleton-sensitive', () => {
+    // The package registers itself on a process-global key, so a second
+    // physical copy in the tree shadows the first and silently breaks
+    // tracing. A range would let dev resolve a copy core cannot share.
+    expect(readManifest('dev').dependencies?.[OTEL_API]).not.toMatch(/^[\^~]/);
   });
 });
