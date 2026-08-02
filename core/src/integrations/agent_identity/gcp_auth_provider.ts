@@ -29,14 +29,6 @@ export interface GcpAuthConfig {
   authScheme: GcpAuthProviderScheme;
 }
 
-/** A credentials service {@link GcpAuthProvider} can dispatch to. */
-export interface GcpCredentialsBackend {
-  getAuthCredential(
-    authScheme: GcpAuthProviderScheme,
-    context?: unknown,
-  ): Promise<AuthCredential | undefined>;
-}
-
 /**
  * An auth provider that obtains end-user access tokens from a Google Cloud
  * credentials service.
@@ -46,18 +38,9 @@ export interface GcpCredentialsBackend {
  * Identity Credentials service.
  */
 export class GcpAuthProvider implements BaseAuthProvider {
-  private readonly agentIdentityProvider: GcpCredentialsBackend;
-  private readonly iamConnectorProvider: GcpCredentialsBackend;
-
-  constructor(options?: {
-    agentIdentityProvider?: GcpCredentialsBackend;
-    iamConnectorProvider?: GcpCredentialsBackend;
-  }) {
-    this.agentIdentityProvider =
-      options?.agentIdentityProvider ?? new AgentIdentityCredentialsProvider();
-    this.iamConnectorProvider =
-      options?.iamConnectorProvider ?? new IamConnectorCredentialsProvider();
-  }
+  private readonly agentIdentityProvider =
+    new AgentIdentityCredentialsProvider();
+  private readonly iamConnectorProvider = new IamConnectorCredentialsProvider();
 
   /**
    * Retrieves an end-user credential for the configured auth provider.

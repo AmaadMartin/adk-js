@@ -10,7 +10,6 @@ import {GcpAuthProviderScheme} from '../../../src/integrations/agent_identity/gc
 import {
   IamConnectorCredentialsClient,
   Operation,
-  unpackOperation,
 } from '../../../src/integrations/agent_identity/iam_connector_credentials_client.js';
 import {IamConnectorCredentialsProvider} from '../../../src/integrations/agent_identity/iam_connector_credentials_provider.js';
 import {
@@ -43,28 +42,6 @@ const CONSENT_PENDING: Operation = {
 };
 
 const CONTEXT = contextWithEvents([]);
-
-describe('unpackOperation', () => {
-  it('returns the response and the metadata', () => {
-    expect(
-      unpackOperation({
-        done: true,
-        response: {header: 'Authorization: Bearer', token: 'test-token'},
-        metadata: {consentPending: {}},
-      }),
-    ).toEqual({
-      response: {header: 'Authorization: Bearer', token: 'test-token'},
-      metadata: {consentPending: {}},
-    });
-  });
-
-  it('returns nothing for an empty operation', () => {
-    expect(unpackOperation({})).toEqual({
-      response: undefined,
-      metadata: undefined,
-    });
-  });
-});
 
 describe('IamConnectorCredentialsProvider', () => {
   let client: {

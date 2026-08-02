@@ -21,7 +21,6 @@ import {
   IamConnectorCredentialsClient,
   Operation,
   RestIamConnectorCredentialsClient,
-  unpackOperation,
 } from './iam_connector_credentials_client.js';
 
 const SERVICE_LABEL = 'IAM Connector Credentials service';
@@ -66,15 +65,13 @@ export class IamConnectorCredentialsProvider {
       () => this.retrieveCredentials(userId, authScheme),
       failureMessage,
     );
-    const {response, metadata} = unpackOperation(operation);
-
     throwIfOperationFailed(operation);
     if (operation.done) {
       logger.debug('Auth credential obtained immediately.');
-      return constructAuthCredential(response, SERVICE_LABEL);
+      return constructAuthCredential(operation.response, SERVICE_LABEL);
     }
 
-    if (metadata?.consentPending) {
+    if (operation.metadata?.consentPending) {
       operation = await wrapRetrievalFailure(
         () =>
           pollWithDeadline(
@@ -90,18 +87,16 @@ export class IamConnectorCredentialsProvider {
       throwIfOperationFailed(operation);
       if (operation.done) {
         logger.debug('Auth credential obtained after polling.');
-        return constructAuthCredential(
-          unpackOperation(operation).response,
-          SERVICE_LABEL,
-        );
+        return constructAuthCredential(operation.response, SERVICE_LABEL);
       }
     }
 
-    if (metadata?.uriConsentRequired) {
+    const uriConsentRequired = operation.metadata?.uriConsentRequired;
+    if (uriConsentRequired) {
       return buildConsentCredential(
         agentIdentityContext,
-        metadata.uriConsentRequired.authorizationUri,
-        metadata.uriConsentRequired.consentNonce,
+        uriConsentRequired.authorizationUri,
+        uriConsentRequired.consentNonce,
       );
     }
     return undefined;

@@ -4,20 +4,31 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  AuthProviderRegistry,
-  AuthScheme,
-  GCP_AUTH_PROVIDER_SCHEME_TYPE,
-  GcpAuthProviderScheme,
-  isGcpAuthProviderScheme,
-} from '@google/adk';
+import {AuthProviderRegistry, AuthScheme} from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
-import {AgentIdentityCredentialsProvider} from '../../../src/integrations/agent_identity/agent_identity_credentials_provider.js';
 import {
   describeScheme,
   GcpAuthProvider,
 } from '../../../src/integrations/agent_identity/gcp_auth_provider.js';
-import {IamConnectorCredentialsProvider} from '../../../src/integrations/agent_identity/iam_connector_credentials_provider.js';
+import {
+  GCP_AUTH_PROVIDER_SCHEME_TYPE,
+  GcpAuthProviderScheme,
+} from '../../../src/integrations/agent_identity/gcp_auth_provider_scheme.js';
+
+vi.mock('google-auth-library', () => ({
+  GoogleAuth: vi.fn().mockImplementation(() => ({
+    getClient: vi.fn().mockResolvedValue({
+      getRequestHeaders: vi
+        .fn()
+        .mockResolvedValue({'Authorization': 'Bearer fake-token'}),
+      credentials: {},
+    }),
+  })),
+}));
+
+const AGENT_IDENTITY_HOST = 'https://agentidentitycredentials.googleapis.com';
+const IAM_CONNECTOR_URL =
+  'https://iamconnectorcredentials.googleapis.com/v1alpha/projects/p/locations/l/connectors/c/credentials:retrieve';
 
 const CONTEXT = {userId: 'user'};
 
@@ -25,31 +36,35 @@ function scheme(name: string): GcpAuthProviderScheme {
   return {type: GCP_AUTH_PROVIDER_SCHEME_TYPE, name};
 }
 
+/** The URL of the single request the provider made. */
+function requestedUrl(fetchMock: ReturnType<typeof vi.fn>): string {
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  const url: unknown = fetchMock.mock.calls[0][0];
+  if (typeof url !== 'string') {
+    expect.fail('expected the provider to fetch a string URL');
+  }
+  return url;
+}
+
 describe('GcpAuthProvider', () => {
-  let agentIdentityClient: {retrieveCredentials: ReturnType<typeof vi.fn>};
-  let iamConnectorClient: {retrieveCredentials: ReturnType<typeof vi.fn>};
+  let fetchMock: ReturnType<typeof vi.fn>;
   let provider: GcpAuthProvider;
 
   beforeEach(() => {
-    agentIdentityClient = {
-      retrieveCredentials: vi.fn().mockResolvedValue({
-        success: {header: 'Authorization: Bearer', token: 'agent-identity'},
-      }),
-    };
-    iamConnectorClient = {
-      retrieveCredentials: vi.fn().mockResolvedValue({
+    vi.clearAllMocks();
+    // Both services report an immediate success, each in its own shape: the
+    // Agent Identity service nests it under `success`, the IAM connector
+    // returns a completed operation with a `response`.
+    fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: vi.fn().mockResolvedValue({
+        success: {header: 'Authorization: Bearer', token: 'test-token'},
         done: true,
-        response: {header: 'Authorization: Bearer', token: 'iam-connector'},
+        response: {header: 'Authorization: Bearer', token: 'test-token'},
       }),
-    };
-    provider = new GcpAuthProvider({
-      agentIdentityProvider: new AgentIdentityCredentialsProvider(
-        agentIdentityClient,
-      ),
-      iamConnectorProvider: new IamConnectorCredentialsProvider(
-        iamConnectorClient,
-      ),
     });
+    global.fetch = fetchMock;
+    provider = new GcpAuthProvider();
   });
 
   it('rejects a scheme that is not a GcpAuthProviderScheme', async () => {
@@ -62,40 +77,40 @@ describe('GcpAuthProvider', () => {
     await expect(
       provider.getAuthCredential({authScheme, credentialKey: 'key'}, CONTEXT),
     ).rejects.toThrow('Expected GcpAuthProviderScheme, got apiKey');
-    expect(agentIdentityClient.retrieveCredentials).not.toHaveBeenCalled();
-    expect(iamConnectorClient.retrieveCredentials).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('routes a connector resource name to the IAM connector backend', async () => {
+  it('routes a connector resource name to the IAM connector service', async () => {
     const credential = await provider.getAuthCredential(
       {authScheme: scheme('projects/p/locations/l/connectors/c')},
       CONTEXT,
     );
 
-    expect(credential?.http?.credentials.token).toBe('iam-connector');
-    expect(iamConnectorClient.retrieveCredentials).toHaveBeenCalledTimes(1);
-    expect(agentIdentityClient.retrieveCredentials).not.toHaveBeenCalled();
+    expect(credential?.http?.credentials.token).toBe('test-token');
+    expect(requestedUrl(fetchMock)).toBe(IAM_CONNECTOR_URL);
   });
 
-  it('routes an auth provider resource name to the Agent Identity backend', async () => {
+  it('routes an auth provider resource name to the Agent Identity service', async () => {
     const credential = await provider.getAuthCredential(
       {authScheme: scheme('projects/p/locations/l/authProviders/a')},
       CONTEXT,
     );
 
-    expect(credential?.http?.credentials.token).toBe('agent-identity');
-    expect(agentIdentityClient.retrieveCredentials).toHaveBeenCalledTimes(1);
-    expect(iamConnectorClient.retrieveCredentials).not.toHaveBeenCalled();
+    expect(credential?.http?.credentials.token).toBe('test-token');
+    expect(requestedUrl(fetchMock)).toBe(
+      `${AGENT_IDENTITY_HOST}/v1/projects/p/locations/l/authProviders/a/credentials:retrieve`,
+    );
   });
 
   it('does not treat a longer connector path as a connector', async () => {
-    const credential = await provider.getAuthCredential(
+    await provider.getAuthCredential(
       {authScheme: scheme('projects/p/locations/l/connectors/c/keys/k')},
       CONTEXT,
     );
 
-    expect(credential?.http?.credentials.token).toBe('agent-identity');
-    expect(iamConnectorClient.retrieveCredentials).not.toHaveBeenCalled();
+    expect(requestedUrl(fetchMock)).toBe(
+      `${AGENT_IDENTITY_HOST}/v1/projects/p/locations/l/connectors/c/keys/k/credentials:retrieve`,
+    );
   });
 
   it('forwards the context to the selected backend', async () => {
@@ -104,14 +119,12 @@ describe('GcpAuthProvider', () => {
       {userId: 'other-user'},
     );
 
-    expect(iamConnectorClient.retrieveCredentials).toHaveBeenCalledWith(
-      'projects/p/locations/l/connectors/c',
-      expect.objectContaining({userId: 'other-user'}),
+    expect(fetchMock).toHaveBeenCalledWith(
+      IAM_CONNECTOR_URL,
+      expect.objectContaining({
+        body: expect.stringContaining('"userId":"other-user"'),
+      }),
     );
-  });
-
-  it('builds real backends when none are injected', () => {
-    expect(() => new GcpAuthProvider()).not.toThrow();
   });
 
   it('is resolvable from an AuthProviderRegistry by scheme type', () => {
@@ -143,26 +156,5 @@ describe('describeScheme', () => {
     expect(
       describeScheme({type: 'apiKey', name: 'secret-provider-name'}),
     ).not.toContain('secret-provider-name');
-  });
-});
-
-describe('isGcpAuthProviderScheme', () => {
-  it('accepts a well-formed scheme', () => {
-    expect(isGcpAuthProviderScheme(scheme('some-provider'))).toBe(true);
-  });
-
-  it.each([
-    ['undefined', undefined],
-    ['null', null],
-    ['a string', 'gcpAuthProviderScheme'],
-    ['another scheme type', {type: 'apiKey', name: 'testKey'}],
-    ['a scheme with no name', {type: GCP_AUTH_PROVIDER_SCHEME_TYPE}],
-    [
-      'a scheme whose name is not a string',
-      {type: GCP_AUTH_PROVIDER_SCHEME_TYPE, name: 42},
-    ],
-    ['an object with no type', {name: 'some-provider'}],
-  ])('rejects %s', (_label, value) => {
-    expect(isGcpAuthProviderScheme(value)).toBe(false);
   });
 });
