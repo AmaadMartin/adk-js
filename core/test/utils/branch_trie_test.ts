@@ -11,16 +11,12 @@ describe('branch_trie', () => {
   describe('isSegmentPrefix', () => {
     it('should return true when targetBranch is empty or undefined', () => {
       expect(isSegmentPrefix('agent_1.agent_2', '')).toBe(true);
-      expect(
-        isSegmentPrefix('agent_1.agent_2', undefined as unknown as string),
-      ).toBe(true);
+      expect(isSegmentPrefix('agent_1.agent_2', undefined)).toBe(true);
     });
 
     it('should return false when currentBranch is empty or undefined', () => {
       expect(isSegmentPrefix('', 'agent_1')).toBe(false);
-      expect(isSegmentPrefix(undefined as unknown as string, 'agent_1')).toBe(
-        false,
-      );
+      expect(isSegmentPrefix(undefined, 'agent_1')).toBe(false);
     });
 
     it('should return true for exact matches', () => {
