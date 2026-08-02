@@ -16,6 +16,7 @@ import {
   Language,
   Outcome,
   Part,
+  Type,
 } from '@google/genai';
 import {describe, expect, it, vi} from 'vitest';
 import {
@@ -256,7 +257,7 @@ describe('interactions_utils', () => {
               type: 'image',
               data: 'base64data',
               mime_type: 'image/png',
-            } as any,
+            },
           ],
         },
       ]);
@@ -282,7 +283,7 @@ describe('interactions_utils', () => {
               type: 'image',
               uri: 'gs://bucket/img.png',
               mime_type: 'image/png',
-            } as any,
+            },
           ],
         },
       ]);
@@ -341,7 +342,7 @@ describe('interactions_utils', () => {
           {
             thought: true,
             thoughtSignature: 'sig-data-string',
-          } as any,
+          },
         ],
       };
       expect(convertContentToSteps(content)).toEqual([
@@ -372,7 +373,7 @@ describe('interactions_utils', () => {
               type: 'audio',
               data: 'audiodata',
               mime_type: 'audio/mp3',
-            } as any,
+            },
           ],
         },
       ]);
@@ -398,7 +399,7 @@ describe('interactions_utils', () => {
               type: 'video',
               data: 'videodata',
               mime_type: 'video/mp4',
-            } as any,
+            },
           ],
         },
       ]);
@@ -424,7 +425,7 @@ describe('interactions_utils', () => {
               type: 'document',
               data: 'docdata',
               mime_type: 'application/pdf',
-            } as any,
+            },
           ],
         },
       ]);
@@ -450,7 +451,7 @@ describe('interactions_utils', () => {
               type: 'audio',
               uri: 'gs://bucket/audio.mp3',
               mime_type: 'audio/mp3',
-            } as any,
+            },
           ],
         },
       ]);
@@ -476,7 +477,7 @@ describe('interactions_utils', () => {
               type: 'video',
               uri: 'gs://bucket/video.mp4',
               mime_type: 'video/mp4',
-            } as any,
+            },
           ],
         },
       ]);
@@ -502,7 +503,7 @@ describe('interactions_utils', () => {
               type: 'document',
               uri: 'gs://bucket/doc.pdf',
               mime_type: 'application/pdf',
-            } as any,
+            },
           ],
         },
       ]);
@@ -527,7 +528,7 @@ describe('interactions_utils', () => {
               type: 'document',
               data: 'docdata',
               mime_type: '',
-            } as any,
+            },
           ],
         },
       ]);
@@ -552,7 +553,7 @@ describe('interactions_utils', () => {
               type: 'document',
               uri: 'gs://bucket/doc.pdf',
               mime_type: '',
-            } as any,
+            },
           ],
         },
       ]);
@@ -587,7 +588,7 @@ describe('interactions_utils', () => {
 
   describe('convertToolsConfigToInteractionsFormat', () => {
     it('should convert function declarations and built-in tools', () => {
-      const config = {
+      const config: GenerateContentConfig = {
         tools: [
           {
             functionDeclarations: [
@@ -595,9 +596,9 @@ describe('interactions_utils', () => {
                 name: 'tool1',
                 description: 'desc1',
                 parameters: {
-                  type: 'OBJECT',
+                  type: Type.OBJECT,
                   properties: {
-                    param1: {type: 'STRING'},
+                    param1: {type: Type.STRING},
                   },
                   required: ['param1'],
                 },
@@ -626,13 +627,11 @@ describe('interactions_utils', () => {
         {type: 'code_execution'},
       ];
 
-      expect(convertToolsConfigToInteractionsFormat(config as any)).toEqual(
-        expected,
-      );
+      expect(convertToolsConfigToInteractionsFormat(config)).toEqual(expected);
     });
 
     it('should convert function declarations without required parameters', () => {
-      const config = {
+      const config: GenerateContentConfig = {
         tools: [
           {
             functionDeclarations: [
@@ -640,9 +639,9 @@ describe('interactions_utils', () => {
                 name: 'tool1_no_req',
                 description: 'desc_no_req',
                 parameters: {
-                  type: 'OBJECT',
+                  type: Type.OBJECT,
                   properties: {
-                    param1: {type: 'STRING'},
+                    param1: {type: Type.STRING},
                   },
                 },
               },
@@ -666,13 +665,11 @@ describe('interactions_utils', () => {
         },
       ];
 
-      expect(convertToolsConfigToInteractionsFormat(config as any)).toEqual(
-        expected,
-      );
+      expect(convertToolsConfigToInteractionsFormat(config)).toEqual(expected);
     });
 
     it('should convert function declarations with parametersJsonSchema and urlContext', () => {
-      const config = {
+      const config: GenerateContentConfig = {
         tools: [
           {
             functionDeclarations: [
@@ -705,9 +702,7 @@ describe('interactions_utils', () => {
         {type: 'url_context'},
       ];
 
-      expect(convertToolsConfigToInteractionsFormat(config as any)).toEqual(
-        expected,
-      );
+      expect(convertToolsConfigToInteractionsFormat(config)).toEqual(expected);
     });
   });
 
@@ -2033,7 +2028,7 @@ describe('interactions_utils', () => {
           {
             thought: true,
             thoughtSignature: 'sig-123',
-          } as any,
+          },
         ],
       };
       expect(convertContentToSteps(content)).toEqual([
@@ -2067,9 +2062,7 @@ describe('interactions_utils', () => {
     });
 
     it('should return undefined if systemInstruction is object but has no parts', () => {
-      expect(
-        extractSystemInstruction({systemInstruction: {} as any}),
-      ).toBeUndefined();
+      expect(extractSystemInstruction({systemInstruction: {}})).toBeUndefined();
     });
 
     it('should return undefined if Content systemInstruction parts have no text', () => {
