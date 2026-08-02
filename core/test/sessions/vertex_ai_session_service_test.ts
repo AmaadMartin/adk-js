@@ -5,7 +5,17 @@
  */
 
 import {Sessions} from '@google-cloud/vertexai/build/src/genai/sessions.js';
-import {createEvent, State, VertexAiSessionService} from '@google/adk';
+import {
+  createEvent,
+  createEventActions,
+  createSession,
+  Event,
+  EventActions,
+  isCompactedEvent,
+  State,
+  ToolConfirmation,
+  VertexAiSessionService,
+} from '@google/adk';
 import {Session} from '@google/adk/sessions/session.js';
 import {ApiError} from '@google/genai';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
@@ -1181,6 +1191,197 @@ describe('VertexAiSessionService', () => {
           }),
         }),
       );
+    });
+  });
+
+  describe('EventActions round trip', () => {
+    /** The actions of the config handed to the client by the last append. */
+    function appendedActions(): Record<string, unknown> | undefined {
+      const calls = mockClient.events.append.mock.calls as Array<
+        [{config: {actions?: Record<string, unknown>}}]
+      >;
+      return calls[calls.length - 1][0].config.actions;
+    }
+
+    /** Serves `sessionEvents` from the client and returns the parsed events. */
+    async function readBack(
+      sessionEvents: Array<Record<string, unknown>>,
+    ): Promise<Event[]> {
+      mockClient.get.mockResolvedValue({
+        name: 'reasoningEngines/12345/sessions/round-trip',
+        userId: 'testUser',
+        sessionState: {},
+        updateTime: new Date().toISOString(),
+      });
+      mockClient.events.listInternal.mockResolvedValue({sessionEvents});
+
+      const session = await service.getSession({
+        appName: '12345',
+        userId: 'testUser',
+        sessionId: 'round-trip',
+      });
+      if (!session) {
+        expect.fail('getSession returned no session');
+      }
+      return session.events;
+    }
+
+    function apiEvent(
+      actions: Record<string, unknown>,
+      extra: Record<string, unknown> = {},
+    ): Record<string, unknown> {
+      return {
+        name: 'projects/p/locations/l/sessions/s/events/e1',
+        invocationId: 'inv-1',
+        author: 'agent-a',
+        timestamp: '2026-04-09T13:00:00Z',
+        actions,
+        ...extra,
+      };
+    }
+
+    it('writes transferToAgent under the API transferAgent field', async () => {
+      const session = createSession({
+        id: 'round-trip',
+        appName: '12345',
+        userId: 'testUser',
+      });
+      const event = createEvent({
+        content: {role: 'model', parts: [{text: 'handing off'}]},
+        actions: createEventActions({transferToAgent: 'agent-b'}),
+      });
+
+      await service.appendEvent({session, event});
+
+      expect(appendedActions()).toMatchObject({transferAgent: 'agent-b'});
+      expect(appendedActions()).not.toHaveProperty('transferToAgent');
+    });
+
+    it('reads the API transferAgent field back as transferToAgent', async () => {
+      const [event] = await readBack([apiEvent({transferAgent: 'agent-b'})]);
+
+      expect(event.actions.transferToAgent).toBe('agent-b');
+    });
+
+    it('round-trips every action field through the legacy channel', async () => {
+      const actions: EventActions & Record<string, unknown> = {
+        ...createEventActions({
+          skipSummarization: true,
+          stateDelta: {counter: 1},
+          artifactDelta: {'report.pdf': 3},
+          transferToAgent: 'agent-b',
+          escalate: true,
+          requestedAuthConfigs: {
+            'call-1': {
+              authScheme: {type: 'apiKey', in: 'header', name: 'X-Api-Key'},
+              credentialKey: 'key-1',
+            },
+          },
+          requestedToolConfirmations: {
+            'call-2': new ToolConfirmation({
+              hint: 'proceed?',
+              confirmed: false,
+            }),
+          },
+        }),
+        // Not declared on EventActions: stands in for the next action field
+        // added to it, which must persist without a change to the service.
+        rewindBeforeInvocationId: 'inv-1',
+      };
+      const session = createSession({
+        id: 'round-trip',
+        appName: '12345',
+        userId: 'testUser',
+      });
+
+      await service.appendEvent({
+        session,
+        event: createEvent({
+          content: {role: 'model', parts: [{text: 'handing off'}]},
+          actions,
+        }),
+      });
+      const written = appendedActions();
+      if (!written) {
+        expect.fail('appendEvent sent no actions');
+      }
+      const [event] = await readBack([apiEvent(written)]);
+
+      expect(event.actions).toEqual(actions);
+    });
+
+    it('still reads actions written with the legacy transferToAgent name', async () => {
+      const [event] = await readBack([apiEvent({transferToAgent: 'agent-b'})]);
+
+      expect(event.actions.transferToAgent).toBe('agent-b');
+    });
+
+    it('drops null action values instead of clobbering the defaults', async () => {
+      const [event] = await readBack([
+        apiEvent({escalate: null, stateDelta: null}),
+      ]);
+
+      expect(event.actions.escalate).toBeUndefined();
+      expect(event.actions.stateDelta).toEqual({});
+    });
+
+    it('prefers the customMetadata compaction over one inside actions', async () => {
+      const compaction = {
+        startTime: 1600000000000,
+        endTime: 1610000000000,
+        compactedContent: 'summary',
+      };
+      const [event] = await readBack([
+        apiEvent(
+          {
+            compaction: {
+              startTime: 1,
+              endTime: 2,
+              compactedContent: 'stale',
+            },
+          },
+          {eventMetadata: {customMetadata: {_compaction: compaction}}},
+        ),
+      ]);
+
+      if (!isCompactedEvent(event)) {
+        expect.fail('the parsed event is not a compacted event');
+      }
+      expect(event.startTime).toBe(compaction.startTime);
+      expect(event.endTime).toBe(compaction.endTime);
+      expect(event.compactedContent).toBe(compaction.compactedContent);
+      expect(
+        (event.actions as EventActions & Record<string, unknown>)['compaction'],
+      ).toEqual(compaction);
+    });
+
+    it('restores actions from rawEvent and ignores the typed actions', async () => {
+      const [event] = await readBack([
+        apiEvent(
+          {transferAgent: 'stale-agent'},
+          {
+            rawEvent: {
+              actions: createEventActions({transferToAgent: 'agent-b'}),
+            },
+          },
+        ),
+      ]);
+
+      expect(event.actions.transferToAgent).toBe('agent-b');
+    });
+
+    it('sends no actions when the event has none', async () => {
+      const session = createSession({
+        id: 'round-trip',
+        appName: '12345',
+        userId: 'testUser',
+      });
+      const event = createEvent({content: {role: 'model', parts: []}});
+      delete (event as Partial<Event>).actions;
+
+      await service.appendEvent({session, event});
+
+      expect(appendedActions()).toBeUndefined();
     });
   });
 });
