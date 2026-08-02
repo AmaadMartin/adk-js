@@ -47,10 +47,7 @@ export class SkillToolset extends BaseToolset {
   public registry?: SkillRegistry;
   private toolCache = new Map<string, BaseTool[]>();
   private fetchedSkillCache = new Map<string, Map<string, Skill>>();
-  /**
-   * Directory that skill script output files are materialized into. Undefined
-   * when unconfigured, which leaves the default to `materializeFiles`.
-   */
+  /** The configured skill script output directory, if any. */
   public readonly outputDir?: string;
 
   constructor(
@@ -69,12 +66,17 @@ export class SkillToolset extends BaseToolset {
        */
       allowInlineScripts?: boolean;
       /**
-       * Directory that skill script output files are written into. The names
-       * the tools report back to the model are relative to it.
+       * Directory that `run_skill_script` and `run_skill_inline_script` write
+       * their output files into. Those names come from the executed script, so
+       * the destination has to be declared by the application rather than
+       * defaulting to the host process's working directory.
        *
-       * Defaults to the host process's current working directory, so an agent
-       * launched from a source checkout writes model-named files into that
-       * checkout; set this to keep skill output out of the working tree.
+       * When unset the tools write nothing to the host filesystem; output
+       * files are still returned inline on the tool response.
+       *
+       * Point this at a scratch directory: a colliding name is suffixed
+       * (`report.txt` -> `report_2.txt`) rather than overwritten, so output
+       * accumulates across invocations.
        */
       outputDir?: string;
     } = {},

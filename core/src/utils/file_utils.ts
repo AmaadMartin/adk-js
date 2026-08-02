@@ -18,15 +18,15 @@ import {File} from '../code_executors/code_execution_utils.js';
  * not survive symlinks or a concurrent rename.
  *
  * @param files The files to materialize.
- * @param dir Base directory to write under. Defaults to the host process's
- *     current working directory; callers that do not want files there must
- *     pass an explicit directory.
+ * @param dir Base directory to write under. Required: file names come from
+ *     model- or script-controlled data, so the destination must be one the
+ *     caller declared rather than the process working directory.
  * @returns The written files, with `name` rewritten to the final path relative
  *     to `dir`.
  */
 export async function materializeFiles(
   files: File[],
-  dir = process.cwd(),
+  dir: string,
 ): Promise<File[]> {
   const resolvedBaseDir = path.resolve(dir);
   const createdFiles: File[] = [];
