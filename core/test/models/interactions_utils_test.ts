@@ -4,14 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
 import {
   Content,
   FinishReason,
   FunctionCall,
   FunctionResponse,
   GenerateContentConfig,
+  GoogleGenAI,
   Interactions,
   Language,
   Outcome,
@@ -32,6 +31,8 @@ import {
   generateContentViaInteractions,
   getLatestUserContents,
 } from '../../src/models/interactions_utils.js';
+import {LlmRequest} from '../../src/models/llm_request.js';
+import {LlmResponse} from '../../src/models/llm_response.js';
 
 /**
  * The raw `step` payload an interactions SSE stream sends on `step.start`.
@@ -1025,17 +1026,19 @@ describe('interactions_utils', () => {
         },
       };
 
-      const llmRequest = {
+      const llmRequest: LlmRequest = {
         model: 'gemini-2.5-flash',
         contents: [{role: 'user', parts: [{text: 'Hello'}]}],
+        liveConnectConfig: {},
+        toolsDict: {},
       };
 
       const generator = generateContentViaInteractions(
-        mockApiClient as any,
-        llmRequest as any,
+        mockApiClient as unknown as GoogleGenAI,
+        llmRequest,
         false,
       );
-      const responses = [];
+      const responses: LlmResponse[] = [];
       for await (const res of generator) {
         responses.push(res);
       }
@@ -1063,7 +1066,7 @@ describe('interactions_utils', () => {
     });
 
     it('should handle streaming call', async () => {
-      const mockEvents = [
+      const mockEvents: RawSseEvent[] = [
         {
           event_type: 'step.start',
           step: {
@@ -1102,17 +1105,19 @@ describe('interactions_utils', () => {
         },
       };
 
-      const llmRequest = {
+      const llmRequest: LlmRequest = {
         model: 'gemini-2.5-flash',
         contents: [{role: 'user', parts: [{text: 'Hello stream'}]}],
+        liveConnectConfig: {},
+        toolsDict: {},
       };
 
       const generator = generateContentViaInteractions(
-        mockApiClient as any,
-        llmRequest as any,
+        mockApiClient as unknown as GoogleGenAI,
+        llmRequest,
         true,
       );
-      const responses = [];
+      const responses: LlmResponse[] = [];
       for await (const res of generator) {
         responses.push(res);
       }
@@ -1168,7 +1173,7 @@ describe('interactions_utils', () => {
         },
       };
 
-      const llmRequest = {
+      const llmRequest: LlmRequest = {
         model: 'gemini-2.5-flash',
         contents: [
           {role: 'user', parts: [{text: 'Turn 1'}]},
@@ -1176,14 +1181,16 @@ describe('interactions_utils', () => {
           {role: 'user', parts: [{text: 'Turn 2'}]},
         ],
         previousInteractionId: 'int-prev',
+        liveConnectConfig: {},
+        toolsDict: {},
       };
 
       const generator = generateContentViaInteractions(
-        mockApiClient as any,
-        llmRequest as any,
+        mockApiClient as unknown as GoogleGenAI,
+        llmRequest,
         false,
       );
-      const responses = [];
+      const responses: LlmResponse[] = [];
       for await (const res of generator) {
         responses.push(res);
       }
@@ -1206,7 +1213,7 @@ describe('interactions_utils', () => {
     });
 
     it('should handle streaming call with interaction event and extract interaction ID', async () => {
-      const mockEvents = [
+      const mockEvents: RawSseEvent[] = [
         {
           event_type: 'step.start',
           step: {
@@ -1241,17 +1248,19 @@ describe('interactions_utils', () => {
         },
       };
 
-      const llmRequest = {
+      const llmRequest: LlmRequest = {
         model: 'gemini-2.5-flash',
         contents: [{role: 'user', parts: [{text: 'Hello'}]}],
+        liveConnectConfig: {},
+        toolsDict: {},
       };
 
       const generator = generateContentViaInteractions(
-        mockApiClient as any,
-        llmRequest as any,
+        mockApiClient as unknown as GoogleGenAI,
+        llmRequest,
         true,
       );
-      const responses = [];
+      const responses: LlmResponse[] = [];
       for await (const res of generator) {
         responses.push(res);
       }
@@ -1289,7 +1298,7 @@ describe('interactions_utils', () => {
         },
       };
 
-      const llmRequest = {
+      const llmRequest: LlmRequest = {
         model: 'gemini-2.5-flash',
         contents: [{role: 'user', parts: [{text: 'Hello'}]}],
         config: {
@@ -1302,11 +1311,13 @@ describe('interactions_utils', () => {
           frequencyPenalty: 0.5,
           tools: [{functionDeclarations: [{name: 'my_tool'}]}],
         } as GenerateContentConfig,
+        liveConnectConfig: {},
+        toolsDict: {},
       };
 
       const generator = generateContentViaInteractions(
-        mockApiClient as any,
-        llmRequest as any,
+        mockApiClient as unknown as GoogleGenAI,
+        llmRequest,
         false,
       );
       for await (const _ of generator) {
@@ -1365,18 +1376,20 @@ describe('interactions_utils', () => {
         },
       };
 
-      const llmRequest = {
+      const llmRequest: LlmRequest = {
         model: 'gemini-2.5-flash',
         contents: [{role: 'user', parts: [{text: 'Hello'}]}],
         config: {
           tools: [{functionDeclarations: [{name: 'my_tool'}]}],
           temperature: 0.5,
         } as GenerateContentConfig,
+        liveConnectConfig: {},
+        toolsDict: {},
       };
 
       const generator = generateContentViaInteractions(
-        mockApiClient as any,
-        llmRequest as any,
+        mockApiClient as unknown as GoogleGenAI,
+        llmRequest,
         true,
       );
       for await (const _ of generator) {
@@ -2153,7 +2166,7 @@ describe('interactions_utils', () => {
 
   describe('generateContentViaInteractions extra streaming cases', () => {
     it('should handle streaming call with interaction.created event and extract interaction ID from interaction object', async () => {
-      const mockEvents = [
+      const mockEvents: RawSseEvent[] = [
         {
           event_type: 'interaction.created',
           interaction: {id: 'int-start-id'},
@@ -2191,17 +2204,19 @@ describe('interactions_utils', () => {
         },
       };
 
-      const llmRequest = {
+      const llmRequest: LlmRequest = {
         model: 'gemini-2.5-flash',
         contents: [{role: 'user', parts: [{text: 'Hello'}]}],
+        liveConnectConfig: {},
+        toolsDict: {},
       };
 
       const generator = generateContentViaInteractions(
-        mockApiClient as any,
-        llmRequest as any,
+        mockApiClient as unknown as GoogleGenAI,
+        llmRequest,
         true,
       );
-      const responses = [];
+      const responses: LlmResponse[] = [];
       for await (const res of generator) {
         responses.push(res);
       }
@@ -2220,7 +2235,7 @@ describe('interactions_utils', () => {
     });
 
     it('should extract interaction ID from interactionId (camelCase) in streaming event', async () => {
-      const mockEvents = [
+      const mockEvents: RawSseEvent[] = [
         {
           event_type: 'step.start',
           step: {
@@ -2246,17 +2261,19 @@ describe('interactions_utils', () => {
           create: vi.fn().mockResolvedValue(mockStream),
         },
       };
-      const llmRequest = {
+      const llmRequest: LlmRequest = {
         model: 'gemini-2.5-flash',
         contents: [{role: 'user', parts: [{text: 'Hello'}]}],
+        liveConnectConfig: {},
+        toolsDict: {},
       };
 
       const generator = generateContentViaInteractions(
-        mockApiClient as any,
-        llmRequest as any,
+        mockApiClient as unknown as GoogleGenAI,
+        llmRequest,
         true,
       );
-      const responses = [];
+      const responses: LlmResponse[] = [];
       for await (const res of generator) {
         responses.push(res);
       }
