@@ -29,6 +29,15 @@ const INTEGRATION_HOOK_TIMEOUT_MS = 120000;
  */
 const INTEGRATION_TEST_TIMEOUT_MS = 60000;
 
+/**
+ * Compiled-agent-bundle paths to keep out of Vite's SSR transform in the
+ * `integration` project. AgentLoader esbuilds each agent into a throwaway
+ * multi-MB bundle under `<tmpdir>/adk_agent_loader/<uuid>/`; Vitest inlines it
+ * because it is outside the project root with no `node_modules` segment.
+ * Externalizing drops app_loader_test.ts's transform total from 38.1s to 1.1s.
+ */
+const AGENT_LOADER_BUNDLE_PATTERN = /[\\/]adk_agent_loader[\\/]/;
+
 export default defineConfig({
   test: {
     poolOptions: {
@@ -88,6 +97,7 @@ export default defineConfig({
           environment: 'node',
           hookTimeout: INTEGRATION_HOOK_TIMEOUT_MS,
           testTimeout: INTEGRATION_TEST_TIMEOUT_MS,
+          server: {deps: {external: [AGENT_LOADER_BUNDLE_PATTERN]}},
           alias: {
             '@google/adk': path.resolve(__dirname, './core/src'),
             '@google/adk-integrations': path.resolve(
