@@ -127,6 +127,19 @@ describe('BaseTestServer.startProcess', () => {
     expect(server.url).toBe(`http://${HOST}:${server.port}`);
   });
 
+  it('honours an explicitly requested port instead of reserving one', async () => {
+    const requested = await reserveFreePort(HOST);
+    const server = new ScriptedTestServer(
+      nodeScript(`process.stdout.write('${START_MESSAGE}\\n');${STAY_ALIVE}`),
+      requested,
+    );
+
+    await server.start();
+
+    expect(server.portAtSpawn).toBe(requested);
+    expect(server.port).toBe(requested);
+  });
+
   it('adopts the port the child announces in its banner', async () => {
     const server = new ScriptedTestServer(
       nodeScript(
@@ -260,13 +273,14 @@ describe('BaseTestServer.startProcess', () => {
   });
 
   it('keeps draining the pipes after the handshake settles', async () => {
-    // Far beyond the 64 KB pipe buffer: if the handshake left the streams
-    // unread, the child would block on write and never reach exit(0).
+    // Far beyond the 64 KB pipe buffer on both streams: if the handshake left
+    // either unread, the child would block on write and never reach exit(0).
     const server = new ScriptedTestServer(
       nodeScript(
         `process.stdout.write('${START_MESSAGE}\\n');` +
-          "setTimeout(() => process.stdout.write('y'.repeat(500000), " +
-          '() => process.exit(0)), 10);',
+          "setTimeout(() => process.stderr.write('e'.repeat(500000), " +
+          "() => process.stdout.write('y'.repeat(500000), " +
+          '() => process.exit(0))), 10);',
       ),
     );
 
