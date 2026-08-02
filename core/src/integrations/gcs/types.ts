@@ -5,7 +5,7 @@
  */
 
 /** Prefix applied to every GCS tool name exposed to the model. */
-export const DEFAULT_GCS_TOOL_NAME_PREFIX = 'gcs';
+export const GCS_TOOL_NAME_PREFIX = 'gcs';
 
 /** Outcome of a GCS tool invocation. */
 export enum GcsToolStatus {
@@ -29,7 +29,7 @@ export interface GcsToolResult {
 }
 
 /** Type of operations a GCS toolset is allowed to expose. */
-export enum GCSCapability {
+export enum GcsCapability {
   /** Only read operations are allowed. */
   READ_ONLY = 'read_only',
   /** Both read and write operations are allowed. */
@@ -37,11 +37,11 @@ export enum GCSCapability {
 }
 
 /** Settings for GCS tools. */
-export interface GCSToolSettings {
+export interface GcsToolSettings {
   /**
    * Allowed capabilities for GCS tools. Defaults to
-   * `[GCSCapability.READ_ONLY]` when omitted, so tools allow only read
+   * `[GcsCapability.READ_ONLY]` when omitted, so tools allow only read
    * operations. This behaviour may change in future versions.
    */
-  capabilities?: GCSCapability[];
+  capabilities?: GcsCapability[];
 }

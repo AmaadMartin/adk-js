@@ -13,8 +13,8 @@ export const GCS_DEFAULT_SCOPES = [
   'https://www.googleapis.com/auth/devstorage.full_control',
 ];
 
-/** Options for {@link GCSCredentialsConfig}. */
-export interface GCSCredentialsConfigOptions {
+/** Options for {@link GcsCredentialsConfig}. */
+export interface GcsCredentialsConfigOptions {
   /**
    * Ready-made options for the Cloud Storage client, and the place to pass an
    * already-authenticated client as `{authClient}`. That client is used for
@@ -45,14 +45,14 @@ export interface GCSCredentialsConfigOptions {
  * Application Default Credentials.
  */
 @experimental
-export class GCSCredentialsConfig {
+export class GcsCredentialsConfig {
   readonly storageOptions?: StorageOptions;
   readonly clientId?: string;
   readonly clientSecret?: string;
   readonly scopes: string[];
   readonly projectId?: string;
 
-  constructor(options: GCSCredentialsConfigOptions) {
+  constructor(options: GcsCredentialsConfigOptions) {
     if (
       options.storageOptions &&
       (options.clientId || options.clientSecret || options.scopes)

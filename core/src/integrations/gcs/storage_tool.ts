@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Storage} from '@google-cloud/storage';
+import {File, Storage} from '@google-cloud/storage';
 import {z} from 'zod';
 
 import {BaseTool} from '../../tools/base_tool.js';
@@ -13,14 +13,11 @@ import {GcsClientProvider} from './client.js';
 import {
   decodeObjectData,
   isNotFoundError,
-  nextPageToken,
+  listResult,
+  pageOptions,
   toErrorResult,
 } from './helpers.js';
-import {
-  DEFAULT_GCS_TOOL_NAME_PREFIX,
-  GcsToolResult,
-  GcsToolStatus,
-} from './types.js';
+import {GCS_TOOL_NAME_PREFIX, GcsToolResult, GcsToolStatus} from './types.js';
 
 const bucketNameSchema = z.string().describe('The name of the GCS bucket.');
 const objectNameSchema = z.string().describe('The name of the GCS object.');
@@ -40,15 +37,27 @@ const pageTokenSchema = z
   .optional()
   .describe('A page token, received from a previous list_objects call.');
 
-function objectErrorResult(
-  error: unknown,
-  bucketName: string,
-  objectName: string,
-): GcsToolResult {
+/** Arguments identifying a single, optionally versioned, object. */
+interface ObjectArgs {
+  bucket_name: string;
+  object_name: string;
+  generation?: number;
+}
+
+function objectHandle(storage: Storage, args: ObjectArgs): File {
+  return storage
+    .bucket(args.bucket_name)
+    .file(
+      args.object_name,
+      args.generation !== undefined ? {generation: args.generation} : undefined,
+    );
+}
+
+function objectErrorResult(error: unknown, args: ObjectArgs): GcsToolResult {
   return isNotFoundError(error)
     ? {
         status: GcsToolStatus.ERROR,
-        error_details: `Object ${objectName} not found in bucket ${bucketName}`,
+        error_details: `Object ${args.object_name} not found in bucket ${args.bucket_name}`,
       }
     : toErrorResult(error);
 }
@@ -77,22 +86,13 @@ async function listObjects(
   try {
     const [files, nextQuery] = await storage.bucket(args.bucket_name).getFiles({
       ...(args.prefix !== undefined ? {prefix: args.prefix} : {}),
-      ...(args.page_size !== undefined
-        ? {maxResults: args.page_size, autoPaginate: false}
-        : {}),
-      ...(args.page_token !== undefined ? {pageToken: args.page_token} : {}),
+      ...pageOptions(args.page_size, args.page_token),
     });
-
-    const result: GcsToolResult = {
-      status: GcsToolStatus.SUCCESS,
-      results: files.map((file) => file.name),
-    };
-    const token =
-      args.page_size !== undefined ? nextPageToken(nextQuery) : undefined;
-    if (token) {
-      result.next_page_token = token;
-    }
-    return result;
+    return listResult(
+      files.map((file) => file.name),
+      nextQuery,
+      args.page_size,
+    );
   } catch (error: unknown) {
     return toErrorResult(error);
   }
@@ -100,42 +100,22 @@ async function listObjects(
 
 async function getObjectMetadata(
   storage: Storage,
-  args: {bucket_name: string; object_name: string; generation?: number},
+  args: ObjectArgs,
 ): Promise<GcsToolResult> {
   try {
-    const file = storage
-      .bucket(args.bucket_name)
-      .file(
-        args.object_name,
-        args.generation !== undefined
-          ? {generation: args.generation}
-          : undefined,
-      );
-    const [metadata] = await file.getMetadata();
+    const [metadata] = await objectHandle(storage, args).getMetadata();
     return {status: GcsToolStatus.SUCCESS, results: metadata};
   } catch (error: unknown) {
-    return objectErrorResult(error, args.bucket_name, args.object_name);
+    return objectErrorResult(error, args);
   }
 }
 
 async function getObjectData(
   storage: Storage,
-  args: {
-    bucket_name: string;
-    object_name: string;
-    generation?: number;
-    destination_file_path?: string;
-  },
+  args: ObjectArgs & {destination_file_path?: string},
 ): Promise<GcsToolResult> {
   try {
-    const file = storage
-      .bucket(args.bucket_name)
-      .file(
-        args.object_name,
-        args.generation !== undefined
-          ? {generation: args.generation}
-          : undefined,
-      );
+    const file = objectHandle(storage, args);
 
     if (args.destination_file_path !== undefined) {
       await file.download({destination: args.destination_file_path});
@@ -149,7 +129,7 @@ async function getObjectData(
     const {content, encoding} = decodeObjectData(bytes);
     return {status: GcsToolStatus.SUCCESS, results: content, encoding};
   } catch (error: unknown) {
-    return objectErrorResult(error, args.bucket_name, args.object_name);
+    return objectErrorResult(error, args);
   }
 }
 
@@ -210,13 +190,13 @@ export function createStorageReadTools(
 ): BaseTool[] {
   return [
     new FunctionTool({
-      name: `${DEFAULT_GCS_TOOL_NAME_PREFIX}_get_bucket`,
+      name: `${GCS_TOOL_NAME_PREFIX}_get_bucket`,
       description: 'Get metadata information about a GCS bucket.',
       parameters: z.object({bucket_name: bucketNameSchema}),
       execute: (args) => getBucket(getClient(), args),
     }),
     new FunctionTool({
-      name: `${DEFAULT_GCS_TOOL_NAME_PREFIX}_get_object_data`,
+      name: `${GCS_TOOL_NAME_PREFIX}_get_object_data`,
       description: 'Get the content/data of a GCS object (blob).',
       parameters: z.object({
         bucket_name: bucketNameSchema,
@@ -232,7 +212,7 @@ export function createStorageReadTools(
       execute: (args) => getObjectData(getClient(), args),
     }),
     new FunctionTool({
-      name: `${DEFAULT_GCS_TOOL_NAME_PREFIX}_get_object_metadata`,
+      name: `${GCS_TOOL_NAME_PREFIX}_get_object_metadata`,
       description: 'Get metadata information about a GCS object (blob).',
       parameters: z.object({
         bucket_name: bucketNameSchema,
@@ -242,7 +222,7 @@ export function createStorageReadTools(
       execute: (args) => getObjectMetadata(getClient(), args),
     }),
     new FunctionTool({
-      name: `${DEFAULT_GCS_TOOL_NAME_PREFIX}_list_objects`,
+      name: `${GCS_TOOL_NAME_PREFIX}_list_objects`,
       description: 'List object names in a GCS bucket.',
       parameters: z.object({
         bucket_name: bucketNameSchema,
@@ -266,7 +246,7 @@ export function createStorageWriteTools(
 ): BaseTool[] {
   return [
     new FunctionTool({
-      name: `${DEFAULT_GCS_TOOL_NAME_PREFIX}_create_object`,
+      name: `${GCS_TOOL_NAME_PREFIX}_create_object`,
       description:
         'Create a new object (blob) in a GCS bucket from provided data or a local file.',
       parameters: z.object({
@@ -288,7 +268,7 @@ export function createStorageWriteTools(
       execute: (args) => createObject(getClient(), args),
     }),
     new FunctionTool({
-      name: `${DEFAULT_GCS_TOOL_NAME_PREFIX}_delete_objects`,
+      name: `${GCS_TOOL_NAME_PREFIX}_delete_objects`,
       description:
         'Delete multiple objects (blobs) from a GCS bucket. Note: a GCS bucket must be empty before it can be deleted. Use this tool to delete all objects if you intend to delete the bucket.',
       parameters: z.object({

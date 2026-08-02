@@ -5,26 +5,23 @@
  */
 
 import {
-  GCSCapability,
+  GcsCapability,
   GcsToolResult,
-  GCSToolSettings,
+  GcsToolSettings,
   GcsToolStatus,
 } from './types.js';
-
-/** Access levels granted by a {@link GCSToolSettings}. */
-export interface GcsAccess {
-  read: boolean;
-  write: boolean;
-}
 
 /**
  * Resolves the access a settings object grants, defaulting to read-only when
  * no capabilities were configured.
  */
-export function resolveAccess(settings?: GCSToolSettings): GcsAccess {
-  const capabilities = settings?.capabilities ?? [GCSCapability.READ_ONLY];
-  const write = capabilities.includes(GCSCapability.READ_WRITE);
-  return {read: write || capabilities.includes(GCSCapability.READ_ONLY), write};
+export function resolveAccess(settings?: GcsToolSettings): {
+  read: boolean;
+  write: boolean;
+} {
+  const capabilities = settings?.capabilities ?? [GcsCapability.READ_ONLY];
+  const write = capabilities.includes(GcsCapability.READ_WRITE);
+  return {read: write || capabilities.includes(GcsCapability.READ_ONLY), write};
 }
 
 /** Converts a caught value into the error result every GCS tool returns. */
@@ -35,17 +32,6 @@ export function toErrorResult(error: unknown): GcsToolResult {
   };
 }
 
-/**
- * Reads the page token out of the `nextQuery` value returned by the Cloud
- * Storage list APIs, which type it as `{}`.
- */
-export function nextPageToken(query: unknown): string | undefined {
-  if (typeof query !== 'object' || query === null || !('pageToken' in query)) {
-    return undefined;
-  }
-  return typeof query.pageToken === 'string' ? query.pageToken : undefined;
-}
-
 /** Whether a caught value is a Cloud Storage 404. */
 export function isNotFoundError(error: unknown): boolean {
   return (
@@ -54,6 +40,47 @@ export function isNotFoundError(error: unknown): boolean {
     'code' in error &&
     error.code === 404
   );
+}
+
+/**
+ * Query options that make a Cloud Storage list call return exactly one page,
+ * mirroring adk-python's single `next(pages)` read.
+ */
+export function pageOptions(pageSize?: number, pageToken?: string) {
+  return {
+    ...(pageSize !== undefined
+      ? {maxResults: pageSize, autoPaginate: false}
+      : {}),
+    ...(pageToken !== undefined ? {pageToken} : {}),
+  };
+}
+
+/**
+ * Reads the page token out of the `nextQuery` value returned by the Cloud
+ * Storage list APIs, which type it as `{}`.
+ */
+function nextPageToken(query: unknown): string | undefined {
+  if (typeof query !== 'object' || query === null || !('pageToken' in query)) {
+    return undefined;
+  }
+  return typeof query.pageToken === 'string' ? query.pageToken : undefined;
+}
+
+/**
+ * Builds the result of a list call, carrying the next page token only when
+ * paging was requested and the API returned one.
+ */
+export function listResult(
+  names: string[],
+  nextQuery: unknown,
+  pageSize?: number,
+): GcsToolResult {
+  const token = pageSize !== undefined ? nextPageToken(nextQuery) : undefined;
+  return {
+    status: GcsToolStatus.SUCCESS,
+    results: names,
+    ...(token ? {next_page_token: token} : {}),
+  };
 }
 
 /**

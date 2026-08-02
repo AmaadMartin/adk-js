@@ -6,12 +6,12 @@
 
 import {
   Context,
-  GCSAdminToolset,
-  GCSCredentialsConfig,
-  GCSToolset,
+  GcsAdminToolset,
+  GcsCredentialsConfig,
+  GcsToolset,
 } from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
-import {createToolContext, getTool} from './gcs_test_utils.js';
+import {createToolContext, getTool} from './test_utils.js';
 
 const {StorageMock, fakes} = vi.hoisted(() => {
   const bucket = {getMetadata: vi.fn()};
@@ -23,18 +23,18 @@ vi.mock('@google-cloud/storage', () => ({Storage: StorageMock}));
 
 const USER_AGENT_PATTERN = /^adk-gcs-tool google-adk\/\d/;
 
-describe('getGcsClient', () => {
+describe('Cloud Storage client provisioning', () => {
   let toolContext: Context;
 
   /** Runs `gcs_get_bucket`, which builds a client without a project. */
-  async function callGetBucket(toolset: GCSToolset): Promise<void> {
+  async function callGetBucket(toolset: GcsToolset): Promise<void> {
     const tool = await getTool(toolset, 'gcs_get_bucket');
     await tool.runAsync({args: {bucket_name: 'test-bucket'}, toolContext});
   }
 
   /** Runs `gcs_list_buckets`, which builds a client for the given project. */
   async function callListBuckets(
-    toolset: GCSAdminToolset,
+    toolset: GcsAdminToolset,
     projectId: string,
   ): Promise<void> {
     const tool = await getTool(toolset, 'gcs_list_buckets');
@@ -49,7 +49,7 @@ describe('getGcsClient', () => {
   });
 
   it('builds an Application Default Credentials client with the ADK user agent', async () => {
-    await callGetBucket(new GCSToolset());
+    await callGetBucket(new GcsToolset());
 
     expect(StorageMock).toHaveBeenCalledTimes(1);
     expect(StorageMock).toHaveBeenCalledWith({
@@ -58,13 +58,13 @@ describe('getGcsClient', () => {
   });
 
   it('builds the client from the credentials config', async () => {
-    const credentialsConfig = new GCSCredentialsConfig({
+    const credentialsConfig = new GcsCredentialsConfig({
       clientId: 'abc',
       clientSecret: 'def',
       projectId: 'configured-project',
     });
 
-    await callGetBucket(new GCSToolset({credentialsConfig}));
+    await callGetBucket(new GcsToolset({credentialsConfig}));
 
     expect(StorageMock).toHaveBeenCalledTimes(1);
     expect(StorageMock).toHaveBeenCalledWith({
@@ -75,12 +75,12 @@ describe('getGcsClient', () => {
     });
   });
 
-  it('reuses one client for repeated calls with the same config', async () => {
-    const credentialsConfig = new GCSCredentialsConfig({
+  it('reuses one client for repeated calls on the same toolset', async () => {
+    const credentialsConfig = new GcsCredentialsConfig({
       clientId: 'abc',
       clientSecret: 'def',
     });
-    const toolset = new GCSToolset({credentialsConfig});
+    const toolset = new GcsToolset({credentialsConfig});
 
     await callGetBucket(toolset);
     await callGetBucket(toolset);
@@ -89,12 +89,12 @@ describe('getGcsClient', () => {
   });
 
   it('builds a separate client per project', async () => {
-    const credentialsConfig = new GCSCredentialsConfig({
+    const credentialsConfig = new GcsCredentialsConfig({
       clientId: 'abc',
       clientSecret: 'def',
     });
-    const toolset = new GCSToolset({credentialsConfig});
-    const adminToolset = new GCSAdminToolset({credentialsConfig});
+    const toolset = new GcsToolset({credentialsConfig});
+    const adminToolset = new GcsAdminToolset({credentialsConfig});
 
     await callGetBucket(toolset);
     await callListBuckets(adminToolset, 'project-one');
@@ -111,8 +111,8 @@ describe('getGcsClient', () => {
   });
 
   it('drops the cache once it overflows', async () => {
-    const adminToolset = new GCSAdminToolset({
-      credentialsConfig: new GCSCredentialsConfig({
+    const adminToolset = new GcsAdminToolset({
+      credentialsConfig: new GcsCredentialsConfig({
         clientId: 'abc',
         clientSecret: 'def',
       }),

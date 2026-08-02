@@ -10,12 +10,8 @@ import {z} from 'zod';
 import {BaseTool} from '../../tools/base_tool.js';
 import {FunctionTool} from '../../tools/function_tool.js';
 import {GcsClientProvider} from './client.js';
-import {nextPageToken, toErrorResult} from './helpers.js';
-import {
-  DEFAULT_GCS_TOOL_NAME_PREFIX,
-  GcsToolResult,
-  GcsToolStatus,
-} from './types.js';
+import {listResult, pageOptions, toErrorResult} from './helpers.js';
+import {GCS_TOOL_NAME_PREFIX, GcsToolResult, GcsToolStatus} from './types.js';
 
 const projectIdSchema = z.string().describe('The Google Cloud project id.');
 
@@ -26,22 +22,13 @@ async function listBuckets(
   try {
     const [buckets, nextQuery] = await storage.getBuckets({
       project: args.project_id,
-      ...(args.page_size !== undefined
-        ? {maxResults: args.page_size, autoPaginate: false}
-        : {}),
-      ...(args.page_token !== undefined ? {pageToken: args.page_token} : {}),
+      ...pageOptions(args.page_size, args.page_token),
     });
-
-    const result: GcsToolResult = {
-      status: GcsToolStatus.SUCCESS,
-      results: buckets.map((bucket) => bucket.name),
-    };
-    const token =
-      args.page_size !== undefined ? nextPageToken(nextQuery) : undefined;
-    if (token) {
-      result.next_page_token = token;
-    }
-    return result;
+    return listResult(
+      buckets.map((bucket) => bucket.name),
+      nextQuery,
+      args.page_size,
+    );
   } catch (error: unknown) {
     return toErrorResult(error);
   }
@@ -119,7 +106,7 @@ async function deleteBucket(
 export function createAdminReadTools(getClient: GcsClientProvider): BaseTool[] {
   return [
     new FunctionTool({
-      name: `${DEFAULT_GCS_TOOL_NAME_PREFIX}_list_buckets`,
+      name: `${GCS_TOOL_NAME_PREFIX}_list_buckets`,
       description: 'List GCS bucket names in a Google Cloud project.',
       parameters: z.object({
         project_id: projectIdSchema,
@@ -149,7 +136,7 @@ export function createAdminWriteTools(
 ): BaseTool[] {
   return [
     new FunctionTool({
-      name: `${DEFAULT_GCS_TOOL_NAME_PREFIX}_create_bucket`,
+      name: `${GCS_TOOL_NAME_PREFIX}_create_bucket`,
       description: 'Create a new GCS bucket.',
       parameters: z.object({
         project_id: projectIdSchema,
@@ -161,7 +148,7 @@ export function createAdminWriteTools(
       execute: (args) => createBucket(getClient(args.project_id), args),
     }),
     new FunctionTool({
-      name: `${DEFAULT_GCS_TOOL_NAME_PREFIX}_update_bucket`,
+      name: `${GCS_TOOL_NAME_PREFIX}_update_bucket`,
       description: 'Update properties of a GCS bucket.',
       parameters: z.object({
         bucket_name: z
@@ -179,7 +166,7 @@ export function createAdminWriteTools(
       execute: (args) => updateBucket(getClient(), args),
     }),
     new FunctionTool({
-      name: `${DEFAULT_GCS_TOOL_NAME_PREFIX}_delete_bucket`,
+      name: `${GCS_TOOL_NAME_PREFIX}_delete_bucket`,
       description: 'Delete a GCS bucket.',
       parameters: z.object({
         bucket_name: z

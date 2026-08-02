@@ -4,12 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GCS_DEFAULT_SCOPES, GCSCredentialsConfig} from '@google/adk';
+import {GCS_DEFAULT_SCOPES, GcsCredentialsConfig} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
-describe('GCSCredentialsConfig', () => {
+describe('GcsCredentialsConfig', () => {
   it('defaults the scopes for a client id and secret', () => {
-    const config = new GCSCredentialsConfig({
+    const config = new GcsCredentialsConfig({
       clientId: 'abc',
       clientSecret: 'def',
     });
@@ -21,7 +21,7 @@ describe('GCSCredentialsConfig', () => {
   });
 
   it('keeps explicitly configured scopes', () => {
-    const config = new GCSCredentialsConfig({
+    const config = new GcsCredentialsConfig({
       clientId: 'abc',
       clientSecret: 'def',
       scopes: ['https://www.googleapis.com/auth/devstorage.read_only'],
@@ -33,7 +33,7 @@ describe('GCSCredentialsConfig', () => {
   });
 
   it('keeps ready-made storage options and leaves the OAuth fields unset', () => {
-    const config = new GCSCredentialsConfig({
+    const config = new GcsCredentialsConfig({
       storageOptions: {apiEndpoint: 'https://storage.example'},
     });
 
@@ -45,19 +45,19 @@ describe('GCSCredentialsConfig', () => {
   });
 
   it('rejects an empty configuration', () => {
-    expect(() => new GCSCredentialsConfig({})).toThrow(
+    expect(() => new GcsCredentialsConfig({})).toThrow(
       'Must provide either storageOptions, or both clientId and clientSecret.',
     );
   });
 
   it('rejects a client id without a client secret', () => {
-    expect(() => new GCSCredentialsConfig({clientId: 'abc'})).toThrow(
+    expect(() => new GcsCredentialsConfig({clientId: 'abc'})).toThrow(
       'Must provide either storageOptions, or both clientId and clientSecret.',
     );
   });
 
   it('rejects a client secret without a client id', () => {
-    expect(() => new GCSCredentialsConfig({clientSecret: 'def'})).toThrow(
+    expect(() => new GcsCredentialsConfig({clientSecret: 'def'})).toThrow(
       'Must provide either storageOptions, or both clientId and clientSecret.',
     );
   });
@@ -65,7 +65,7 @@ describe('GCSCredentialsConfig', () => {
   it('rejects storage options combined with OAuth client credentials', () => {
     expect(
       () =>
-        new GCSCredentialsConfig({
+        new GcsCredentialsConfig({
           storageOptions: {},
           clientId: 'abc',
           clientSecret: 'def',
@@ -78,7 +78,7 @@ describe('GCSCredentialsConfig', () => {
   it('rejects storage options combined with scopes', () => {
     expect(
       () =>
-        new GCSCredentialsConfig({
+        new GcsCredentialsConfig({
           storageOptions: {},
           scopes: ['https://www.googleapis.com/auth/devstorage.read_only'],
         }),
@@ -89,7 +89,7 @@ describe('GCSCredentialsConfig', () => {
 
   describe('toStorageOptions', () => {
     it('passes ready-made storage options through', () => {
-      const config = new GCSCredentialsConfig({
+      const config = new GcsCredentialsConfig({
         storageOptions: {apiEndpoint: 'https://storage.example'},
       });
 
@@ -99,7 +99,7 @@ describe('GCSCredentialsConfig', () => {
     });
 
     it('turns a client id and secret into client options and scopes', () => {
-      const config = new GCSCredentialsConfig({
+      const config = new GcsCredentialsConfig({
         clientId: 'abc',
         clientSecret: 'def',
       });
@@ -111,7 +111,7 @@ describe('GCSCredentialsConfig', () => {
     });
 
     it('uses the configured project when no override is given', () => {
-      const config = new GCSCredentialsConfig({
+      const config = new GcsCredentialsConfig({
         storageOptions: {},
         projectId: 'configured-project',
       });
@@ -122,7 +122,7 @@ describe('GCSCredentialsConfig', () => {
     });
 
     it('lets the call site override the configured project', () => {
-      const config = new GCSCredentialsConfig({
+      const config = new GcsCredentialsConfig({
         storageOptions: {projectId: 'options-project'},
         projectId: 'configured-project',
       });

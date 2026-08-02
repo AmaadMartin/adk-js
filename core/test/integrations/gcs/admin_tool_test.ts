@@ -4,14 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  Context,
-  GCSAdminToolset,
-  GCSCapability,
-  GcsToolStatus,
-} from '@google/adk';
+import {Context, GcsAdminToolset, GcsToolStatus} from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
-import {createToolContext, getTool} from './gcs_test_utils.js';
+import {createToolContext, getTool, READ_WRITE} from './test_utils.js';
 
 const {StorageMock, fakes} = vi.hoisted(() => {
   const bucket = {setMetadata: vi.fn(), delete: vi.fn()};
@@ -26,7 +21,7 @@ const {StorageMock, fakes} = vi.hoisted(() => {
 vi.mock('@google-cloud/storage', () => ({Storage: StorageMock}));
 
 describe('GCS admin tools', () => {
-  let toolset: GCSAdminToolset;
+  let toolset: GcsAdminToolset;
   let toolContext: Context;
 
   beforeEach(async () => {
@@ -36,9 +31,7 @@ describe('GCS admin tools', () => {
     fakes.bucket.setMetadata.mockResolvedValue(undefined);
     fakes.bucket.delete.mockResolvedValue(undefined);
 
-    toolset = new GCSAdminToolset({
-      toolSettings: {capabilities: [GCSCapability.READ_WRITE]},
-    });
+    toolset = new GcsAdminToolset({toolSettings: READ_WRITE});
     toolContext = await createToolContext();
   });
 

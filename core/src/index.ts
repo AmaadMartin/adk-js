@@ -57,21 +57,21 @@ export {
 export {RunSkillScriptTool} from './tools/skill/run_skill_script_tool.js';
 
 export * from './integrations/agent_registry/agent_registry.js';
-export {GCSAdminToolset} from './integrations/gcs/admin_toolset.js';
-export type {GCSAdminToolsetOptions} from './integrations/gcs/admin_toolset.js';
+export {GcsAdminToolset} from './integrations/gcs/admin_toolset.js';
+export type {GcsAdminToolsetOptions} from './integrations/gcs/admin_toolset.js';
 export {
-  GCSCredentialsConfig,
   GCS_DEFAULT_SCOPES,
-} from './integrations/gcs/gcs_credentials.js';
-export type {GCSCredentialsConfigOptions} from './integrations/gcs/gcs_credentials.js';
-export {GCSToolset} from './integrations/gcs/storage_toolset.js';
-export type {GCSToolsetOptions} from './integrations/gcs/storage_toolset.js';
+  GcsCredentialsConfig,
+} from './integrations/gcs/credentials.js';
+export type {GcsCredentialsConfigOptions} from './integrations/gcs/credentials.js';
+export {GcsToolset} from './integrations/gcs/storage_toolset.js';
+export type {GcsToolsetOptions} from './integrations/gcs/toolset_base.js';
 export {
-  DEFAULT_GCS_TOOL_NAME_PREFIX,
-  GCSCapability,
+  GCS_TOOL_NAME_PREFIX,
+  GcsCapability,
   GcsToolStatus,
 } from './integrations/gcs/types.js';
-export type {GCSToolSettings, GcsToolResult} from './integrations/gcs/types.js';
+export type {GcsToolResult, GcsToolSettings} from './integrations/gcs/types.js';
 export * from './telemetry/google_cloud.js';
 export * from './telemetry/setup.js';
 export * from './tools/mcp/load_mcp_resource_tool.js';

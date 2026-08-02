@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Context, GCSCapability, GCSToolset, GcsToolStatus} from '@google/adk';
+import {Context, GcsToolset, GcsToolStatus} from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
-import {createToolContext, getTool} from './gcs_test_utils.js';
+import {createToolContext, getTool, READ_WRITE} from './test_utils.js';
 
 const {StorageMock, fakes} = vi.hoisted(() => {
   const file = {
@@ -41,7 +41,7 @@ function apiError(code: number, message: string): Error & {code: number} {
 }
 
 describe('GCS storage tools', () => {
-  let toolset: GCSToolset;
+  let toolset: GcsToolset;
   let toolContext: Context;
 
   beforeEach(async () => {
@@ -54,9 +54,7 @@ describe('GCS storage tools', () => {
     fakes.file.save.mockResolvedValue(undefined);
     fakes.file.delete.mockResolvedValue(undefined);
 
-    toolset = new GCSToolset({
-      toolSettings: {capabilities: [GCSCapability.READ_WRITE]},
-    });
+    toolset = new GcsToolset({toolSettings: READ_WRITE});
     toolContext = await createToolContext();
   });
 
