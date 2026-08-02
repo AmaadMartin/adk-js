@@ -170,6 +170,7 @@ export async function deployToCloudRun(options: DeployToCloudRunOptions) {
     options.agentPath,
     options.agentFileLoadOptions,
   );
+  agentLoader.installProcessHandlers();
 
   const isFileProvided = await isFile(options.agentPath);
   const agentDir = isFileProvided

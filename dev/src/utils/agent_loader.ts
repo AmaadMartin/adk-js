@@ -50,6 +50,20 @@ const FILE_MODULE_TYPE_EXTENSION_MAP = {
 };
 
 /**
+ * Termination signals wired up by {@link AgentLoader.installProcessHandlers}.
+ */
+const TERMINATION_SIGNALS = ['SIGINT', 'SIGUSR1', 'SIGUSR2'] as const;
+
+/**
+ * A process listener installed by {@link AgentLoader.installProcessHandlers},
+ * kept so it can be removed again on teardown.
+ */
+interface ProcessHandler {
+  event: (typeof TERMINATION_SIGNALS)[number] | 'exit';
+  handler: () => void;
+}
+
+/**
  * Metadata for a file.
  */
 interface FileMetadata {
@@ -359,34 +373,45 @@ export class AgentLoader {
   private agentsAlreadyPreloaded = false;
   private readonly preloadedAgents: Record<string, AgentFile> = {};
   private watcher?: fs.FSWatcher;
+  private processHandlers: ProcessHandler[] = [];
 
   constructor(
     private readonly agentsDirPath: string = process.cwd(),
     private readonly options = DEFAULT_AGENT_FILE_OPTIONS,
     private readonly watchForChanges = false,
-  ) {
-    // Do cleanups on exit
-    const exitHandler = async ({
-      exit,
-      cleanup,
-    }: {
-      exit?: boolean;
-      cleanup?: boolean;
-    }) => {
-      if (cleanup) {
-        await this.disposeAll();
-      }
+  ) {}
 
-      if (exit) {
-        process.exit();
-      }
-    };
+  /**
+   * Wires process exit and termination signals to this loader's cleanup.
+   *
+   * This mutates global process state and terminates the process on a
+   * termination signal, so it is only appropriate for a CLI entrypoint that
+   * owns the process. Library and test consumers must instead call
+   * {@link disposeAll} when they are done. Calling this twice is a no-op, and
+   * {@link disposeAll} removes the listeners again.
+   */
+  installProcessHandlers(): void {
+    if (this.processHandlers.length > 0) {
+      return;
+    }
 
-    process.on('exit', () => exitHandler({cleanup: true}));
-    process.on('SIGINT', () => exitHandler({exit: true}));
-    process.on('SIGUSR1', () => exitHandler({exit: true}));
-    process.on('SIGUSR2', () => exitHandler({exit: true}));
-    process.on('uncaughtException', () => exitHandler({exit: true}));
+    // An `exit` listener cannot await, so this cleanup is best-effort.
+    const exitHandler = () => void this.disposeAll();
+    process.on('exit', exitHandler);
+    this.processHandlers.push({event: 'exit', handler: exitHandler});
+
+    for (const signal of TERMINATION_SIGNALS) {
+      const signalHandler = () => process.exit();
+      process.on(signal, signalHandler);
+      this.processHandlers.push({event: signal, handler: signalHandler});
+    }
+  }
+
+  private removeProcessHandlers(): void {
+    for (const {event, handler} of this.processHandlers) {
+      process.removeListener(event, handler);
+    }
+    this.processHandlers = [];
   }
 
   /**
@@ -469,6 +494,7 @@ export class AgentLoader {
   }
 
   async disposeAll(): Promise<void> {
+    this.removeProcessHandlers();
     this.watcher?.close();
     this.watcher = undefined;
     await Promise.all(

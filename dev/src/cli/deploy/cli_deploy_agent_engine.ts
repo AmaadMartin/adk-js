@@ -66,6 +66,7 @@ export async function deployToAgentEngine(options: DeployToAgentEngineOptions) {
     options.agentPath,
     options.agentFileLoadOptions,
   );
+  agentLoader.installProcessHandlers();
 
   const isFileProvided = await isFile(options.agentPath);
   const agentDir = isFileProvided

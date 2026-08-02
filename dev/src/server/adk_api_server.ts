@@ -58,6 +58,13 @@ interface ServerOptions {
   memoryService?: BaseMemoryService;
   artifactService?: BaseArtifactService;
   agentLoader?: AgentLoader;
+  /**
+   * Installs process exit and signal handlers on the agent loader. Only a CLI
+   * entrypoint that owns the process should enable this: the handlers call
+   * `process.exit()`. Defaults to false so an embedded server never mutates
+   * the host process.
+   */
+  installProcessHandlers?: boolean;
   agentFileLoadOptions?: AgentFileOptions;
   serveDebugUI?: boolean;
   allowOrigins?: string;
@@ -156,6 +163,10 @@ export class AdkApiServer {
     this.a2aAuthToken =
       options.a2aAuthToken || process.env[A2A_AUTH_TOKEN_ENV_VAR] || undefined;
     this.app = express();
+
+    if (options.installProcessHandlers) {
+      this.agentLoader.installProcessHandlers();
+    }
   }
 
   private async setupTelemetry(): Promise<void> {
