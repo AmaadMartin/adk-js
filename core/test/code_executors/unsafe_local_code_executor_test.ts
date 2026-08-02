@@ -74,6 +74,13 @@ describe('UnsafeLocalCodeExecutor', () => {
     executor = new UnsafeLocalCodeExecutor();
   });
 
+  // Every case below that starts a real interpreter carries a 60000ms budget.
+  // Process creation on a cold CI runner — Windows in particular — can eat most
+  // of Vitest's 5000ms default, which surfaced as a spurious
+  // `Test timed out in 5000ms.` on an otherwise green run. 60000ms also sits
+  // above the executor's own 30s kill deadline, so a child that genuinely hangs
+  // reports `Code execution timed out after 30 seconds.` rather than an opaque
+  // runner timeout. Cases that never spawn keep the 5000ms default.
   it('should execute code and return stdout', async () => {
     const params: ExecuteCodeParams = {
       invocationContext,
@@ -88,7 +95,7 @@ describe('UnsafeLocalCodeExecutor', () => {
 
     expect(result.stdout).toContain('Hello, World!');
     expect(result.stderr).toBe('');
-  });
+  }, 60000);
 
   it('should capture stderr', async () => {
     const params: ExecuteCodeParams = {
@@ -103,7 +110,7 @@ describe('UnsafeLocalCodeExecutor', () => {
     const result = await executor.executeCode(params);
 
     expect(result.stderr).toContain('An error occurred');
-  });
+  }, 60000);
 
   it('should handle execution errors', async () => {
     const params: ExecuteCodeParams = {
@@ -118,7 +125,7 @@ describe('UnsafeLocalCodeExecutor', () => {
     const result = await executor.executeCode(params);
 
     expect(result.stderr).toContain('Fatal error');
-  });
+  }, 60000);
 
   it('should respect timeout', async () => {
     // Create executor with 1 second timeout
@@ -140,7 +147,7 @@ describe('UnsafeLocalCodeExecutor', () => {
     expect(result.stderr).toContain(
       'Code execution timed out after 1 seconds.',
     );
-  });
+  }, 60000);
 
   it('should execute python code and return stdout', async () => {
     const params: ExecuteCodeParams = {
@@ -156,7 +163,7 @@ describe('UnsafeLocalCodeExecutor', () => {
 
     expect(result.stdout).toContain('Hello, Python!');
     expect(result.stderr).toBe('');
-  });
+  }, 60000);
 
   it('should execute shell code and return stdout', async () => {
     const params: ExecuteCodeParams = {
@@ -172,7 +179,7 @@ describe('UnsafeLocalCodeExecutor', () => {
 
     expect(result.stdout).toContain('Hello, Shell!');
     expect(result.stderr).toBe('');
-  });
+  }, 60000);
 
   it('should return error for unsupported language', async () => {
     const params: ExecuteCodeParams = {
@@ -208,7 +215,7 @@ describe('UnsafeLocalCodeExecutor', () => {
 
     expect(result.stderr).toContain('Process error:');
     expect(result.stderr).toContain('non-existent-python-executable-123');
-  });
+  }, 60000);
 
   it('should respect shellCommandPath', async () => {
     const customExecutor = new UnsafeLocalCodeExecutor({
@@ -228,7 +235,7 @@ describe('UnsafeLocalCodeExecutor', () => {
 
     expect(result.stderr).toContain('Process error:');
     expect(result.stderr).toContain('non-existent-shell-executable-456');
-  });
+  }, 60000);
 
   it('should pass array arguments to the script', async () => {
     const params: ExecuteCodeParams = {
@@ -245,7 +252,7 @@ describe('UnsafeLocalCodeExecutor', () => {
 
     expect(result.stdout).toContain('arg1 arg2 arg3');
     expect(result.stderr).toBe('');
-  });
+  }, 60000);
 
   it('should pass object arguments as --key value to the script', async () => {
     const params: ExecuteCodeParams = {
@@ -262,7 +269,7 @@ describe('UnsafeLocalCodeExecutor', () => {
 
     expect(result.stdout).toContain('--foo bar --flag true --count 42');
     expect(result.stderr).toBe('');
-  });
+  }, 60000);
 
   it('should materialize input files in the temporary directory', async () => {
     const params: ExecuteCodeParams = {
@@ -292,7 +299,7 @@ describe('UnsafeLocalCodeExecutor', () => {
     expect(result.stdout).toContain('hello file content');
     expect(result.stdout).toContain('{"key": "value"}');
     expect(result.stderr).toBe('');
-  });
+  }, 60000);
 
   it('should return only new files, excluding input files', async () => {
     const params: ExecuteCodeParams = {
@@ -319,7 +326,7 @@ describe('UnsafeLocalCodeExecutor', () => {
     expect(result.outputFiles![0].content).toBe('hello from script');
     expect(result.outputFiles![0].contentEncoding).toBe('utf-8');
     expect(result.outputFiles![0].mimeType).toBe('text/plain');
-  });
+  }, 60000);
 
   it('should infer correct mimeType for generated JSON files', async () => {
     const params: ExecuteCodeParams = {
@@ -339,7 +346,7 @@ describe('UnsafeLocalCodeExecutor', () => {
     expect(result.outputFiles![0].content).toBe('{"hello":"world"}');
     expect(result.outputFiles![0].contentEncoding).toBe('utf-8');
     expect(result.outputFiles![0].mimeType).toBe('application/json');
-  });
+  }, 60000);
 
   describe('spawn arguments', () => {
     beforeEach(() => {
