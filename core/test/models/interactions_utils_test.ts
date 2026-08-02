@@ -20,6 +20,7 @@ import {
 } from '@google/genai';
 import {describe, expect, it, vi} from 'vitest';
 import {
+  ExtendedFunctionCallStep,
   ExtendedInteraction,
   ExtendedInteractionSSEEvent,
   convertContentToSteps,
@@ -1408,17 +1409,23 @@ describe('interactions_utils', () => {
 
   describe('convertStepToParts', () => {
     it('should return empty array for empty or invalid step', () => {
-      expect(convertStepToParts(null as any)).toEqual([]);
-      expect(convertStepToParts({} as any)).toEqual([]);
-      expect(convertStepToParts({type: 'invalid'} as any)).toEqual([]);
+      // None of these is a valid `Interactions.Step`: they exercise the
+      // missing-step, missing-`type` and unmodelled-`type` rejection paths.
+      expect(convertStepToParts(null as unknown as Interactions.Step)).toEqual(
+        [],
+      );
+      expect(convertStepToParts({} as Interactions.Step)).toEqual([]);
+      expect(
+        convertStepToParts({type: 'invalid'} as unknown as Interactions.Step),
+      ).toEqual([]);
     });
 
     it('should convert model_output step with text content', () => {
-      const step = {
+      const step: Interactions.ModelOutputStep = {
         type: 'model_output',
         content: [{type: 'text', text: 'hello'}],
       };
-      expect(convertStepToParts(step as any)).toEqual([
+      expect(convertStepToParts(step)).toEqual([
         {
           text: 'hello',
         },
@@ -1426,11 +1433,12 @@ describe('interactions_utils', () => {
     });
 
     it('should convert model_output step with text content missing text', () => {
+      // `text` is intentionally absent: the converter must default it to ''.
       const step = {
         type: 'model_output',
         content: [{type: 'text'}],
-      };
-      expect(convertStepToParts(step as any)).toEqual([
+      } as Interactions.ModelOutputStep;
+      expect(convertStepToParts(step)).toEqual([
         {
           text: '',
         },
@@ -1438,13 +1446,13 @@ describe('interactions_utils', () => {
     });
 
     it('should convert function_call step', () => {
-      const step = {
+      const step: Interactions.FunctionCallStep = {
         type: 'function_call',
         id: 'call-1',
         name: 'my_tool',
         arguments: {a: 1},
       };
-      expect(convertStepToParts(step as any)).toEqual([
+      expect(convertStepToParts(step)).toEqual([
         {
           functionCall: {
             id: 'call-1',
@@ -1456,12 +1464,14 @@ describe('interactions_utils', () => {
     });
 
     it('should convert function_call step with missing arguments', () => {
+      // `arguments` is intentionally absent: the converter must default the
+      // call args to {}.
       const step = {
         type: 'function_call',
         id: 'call-1',
         name: 'my_tool',
-      };
-      expect(convertStepToParts(step as any)).toEqual([
+      } as Interactions.FunctionCallStep;
+      expect(convertStepToParts(step)).toEqual([
         {
           functionCall: {
             id: 'call-1',
@@ -1473,14 +1483,14 @@ describe('interactions_utils', () => {
     });
 
     it('should convert function_call step with signature', () => {
-      const step = {
+      const step: ExtendedFunctionCallStep = {
         type: 'function_call',
         id: 'call-1',
         name: 'my_tool',
         arguments: {a: 1},
         signature: 'sig-123',
       };
-      expect(convertStepToParts(step as any)).toEqual([
+      expect(convertStepToParts(step)).toEqual([
         {
           functionCall: {
             id: 'call-1',
@@ -1493,12 +1503,12 @@ describe('interactions_utils', () => {
     });
 
     it('should convert function_result step', () => {
-      const step = {
+      const step: Interactions.FunctionResultStep = {
         type: 'function_result',
         call_id: 'call-1',
         result: {res: 'ok'},
       };
-      expect(convertStepToParts(step as any)).toEqual([
+      expect(convertStepToParts(step)).toEqual([
         {
           functionResponse: {
             id: 'call-1',
@@ -1510,7 +1520,7 @@ describe('interactions_utils', () => {
     });
 
     it('should convert model_output step with image content (data)', () => {
-      const step = {
+      const step: Interactions.ModelOutputStep = {
         type: 'model_output',
         content: [
           {
@@ -1520,7 +1530,7 @@ describe('interactions_utils', () => {
           },
         ],
       };
-      expect(convertStepToParts(step as any)).toEqual([
+      expect(convertStepToParts(step)).toEqual([
         {
           inlineData: {
             data: 'base64data',
@@ -1531,7 +1541,7 @@ describe('interactions_utils', () => {
     });
 
     it('should convert model_output step with image content (uri)', () => {
-      const step = {
+      const step: Interactions.ModelOutputStep = {
         type: 'model_output',
         content: [
           {
@@ -1541,7 +1551,7 @@ describe('interactions_utils', () => {
           },
         ],
       };
-      expect(convertStepToParts(step as any)).toEqual([
+      expect(convertStepToParts(step)).toEqual([
         {
           fileData: {
             fileUri: 'gs://bucket/img.png',
@@ -1552,7 +1562,7 @@ describe('interactions_utils', () => {
     });
 
     it('should convert model_output step with audio content (data)', () => {
-      const step = {
+      const step: Interactions.ModelOutputStep = {
         type: 'model_output',
         content: [
           {
@@ -1562,7 +1572,7 @@ describe('interactions_utils', () => {
           },
         ],
       };
-      expect(convertStepToParts(step as any)).toEqual([
+      expect(convertStepToParts(step)).toEqual([
         {
           inlineData: {
             data: 'base64data',
@@ -1573,7 +1583,7 @@ describe('interactions_utils', () => {
     });
 
     it('should convert model_output step with audio content (uri)', () => {
-      const step = {
+      const step: Interactions.ModelOutputStep = {
         type: 'model_output',
         content: [
           {
@@ -1583,7 +1593,7 @@ describe('interactions_utils', () => {
           },
         ],
       };
-      expect(convertStepToParts(step as any)).toEqual([
+      expect(convertStepToParts(step)).toEqual([
         {
           fileData: {
             fileUri: 'gs://bucket/audio.mp3',
@@ -1594,11 +1604,11 @@ describe('interactions_utils', () => {
     });
 
     it('should convert thought step', () => {
-      const step = {
+      const step: Interactions.ThoughtStep = {
         type: 'thought',
         signature: 'sig-123',
       };
-      expect(convertStepToParts(step as any)).toEqual([
+      expect(convertStepToParts(step)).toEqual([
         {
           thought: true,
           thoughtSignature: 'sig-123',
@@ -1607,12 +1617,13 @@ describe('interactions_utils', () => {
     });
 
     it('should convert code_execution_result step', () => {
+      // `call_id` is absent: the converter reads only `result` and `is_error`.
       const step = {
         type: 'code_execution_result',
         result: 'output text',
         is_error: false,
-      };
-      expect(convertStepToParts(step as any)).toEqual([
+      } as Interactions.CodeExecutionResultStep;
+      expect(convertStepToParts(step)).toEqual([
         {
           codeExecutionResult: {
             output: 'output text',
@@ -1625,8 +1636,8 @@ describe('interactions_utils', () => {
         type: 'code_execution_result',
         result: 'error text',
         is_error: true,
-      };
-      expect(convertStepToParts(stepError as any)).toEqual([
+      } as Interactions.CodeExecutionResultStep;
+      expect(convertStepToParts(stepError)).toEqual([
         {
           codeExecutionResult: {
             output: 'error text',
@@ -1637,11 +1648,13 @@ describe('interactions_utils', () => {
     });
 
     it('should convert code_execution_result step with missing result', () => {
+      // `result` is intentionally absent: the converter must default the
+      // output to ''.
       const step = {
         type: 'code_execution_result',
         is_error: false,
-      };
-      expect(convertStepToParts(step as any)).toEqual([
+      } as Interactions.CodeExecutionResultStep;
+      expect(convertStepToParts(step)).toEqual([
         {
           codeExecutionResult: {
             output: '',
@@ -1652,14 +1665,17 @@ describe('interactions_utils', () => {
     });
 
     it('should convert code_execution_call step', () => {
+      // The wire sends the language upper-cased, which the SDK types as the
+      // lower-case literal 'python'; `id` is absent because the converter
+      // reads only `arguments`.
       const step = {
         type: 'code_execution_call',
         arguments: {
           code: 'print(1)',
           language: 'PYTHON',
         },
-      };
-      expect(convertStepToParts(step as any)).toEqual([
+      } as unknown as Interactions.CodeExecutionCallStep;
+      expect(convertStepToParts(step)).toEqual([
         {
           executableCode: {
             code: 'print(1)',
@@ -1670,10 +1686,12 @@ describe('interactions_utils', () => {
     });
 
     it('should convert code_execution_call step with missing arguments', () => {
+      // `arguments` is intentionally absent: the converter must default the
+      // code to '' and the language to PYTHON.
       const step = {
         type: 'code_execution_call',
-      };
-      expect(convertStepToParts(step as any)).toEqual([
+      } as Interactions.CodeExecutionCallStep;
+      expect(convertStepToParts(step)).toEqual([
         {
           executableCode: {
             code: '',
