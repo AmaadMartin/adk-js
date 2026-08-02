@@ -20,6 +20,8 @@ import {
 } from '@google/genai';
 import {describe, expect, it, vi} from 'vitest';
 import {
+  ExtendedInteraction,
+  ExtendedInteractionSSEEvent,
   convertContentToSteps,
   convertInteractionEventToLlmResponse,
   convertInteractionToLlmResponse,
@@ -29,6 +31,52 @@ import {
   generateContentViaInteractions,
   getLatestUserContents,
 } from '../../src/models/interactions_utils.js';
+
+/**
+ * The raw `step` payload an interactions SSE stream sends on `step.start`.
+ *
+ * `Interactions.Step` is a closed union whose members require fields the wire
+ * omits (`FunctionCallStep.arguments` has not streamed in yet at `step.start`),
+ * so the events below describe what the stream actually sends.
+ */
+interface RawSseStep {
+  type: string;
+  id?: string;
+  name?: string;
+  signature?: string;
+  content?: Interactions.Content[];
+}
+
+/** The raw `delta` payload an interactions SSE stream sends on `step.delta`. */
+interface RawSseDelta {
+  type: string;
+  text?: string;
+  arguments?: string;
+  signature?: string;
+  data?: string;
+  uri?: string;
+  mime_type?: string;
+}
+
+/**
+ * A raw interactions SSE payload.
+ *
+ * `ExtendedInteractionSSEEvent` is built with `Omit` over the
+ * `Interactions.InteractionSSEEvent` union, so it keeps only the keys every
+ * variant shares. Two wire shapes therefore cannot be expressed with it:
+ * `step`, sent on `step.start`, is not a member at all, and its `delta`
+ * requires `mime_type` and types `arguments` as an object even though text
+ * deltas carry no mime type and argument deltas stream a partial JSON string.
+ */
+interface RawSseEvent extends Omit<ExtendedInteractionSSEEvent, 'delta'> {
+  step?: RawSseStep;
+  delta?: RawSseDelta;
+}
+
+/** Presents a raw wire payload as the event type the converter accepts. */
+function asSseEvent(event: RawSseEvent): ExtendedInteractionSSEEvent {
+  return event as unknown as ExtendedInteractionSSEEvent;
+}
 
 describe('interactions_utils', () => {
   describe('getLatestUserContents', () => {
@@ -708,7 +756,7 @@ describe('interactions_utils', () => {
 
   describe('convertInteractionToLlmResponse', () => {
     it('should convert successful interaction response', () => {
-      const interaction = {
+      const interaction: ExtendedInteraction = {
         id: 'int-123',
         status: 'completed',
         steps: [
@@ -723,7 +771,7 @@ describe('interactions_utils', () => {
         },
       };
 
-      const response = convertInteractionToLlmResponse(interaction as any);
+      const response = convertInteractionToLlmResponse(interaction);
 
       expect(response.interactionId).toBe('int-123');
       expect(response.turnComplete).toBe(true);
@@ -738,7 +786,7 @@ describe('interactions_utils', () => {
     });
 
     it('should convert failed interaction response', () => {
-      const interaction = {
+      const interaction: ExtendedInteraction = {
         id: 'int-123',
         status: 'failed',
         error: {
@@ -747,7 +795,7 @@ describe('interactions_utils', () => {
         },
       };
 
-      const response = convertInteractionToLlmResponse(interaction as any);
+      const response = convertInteractionToLlmResponse(interaction);
 
       expect(response.interactionId).toBe('int-123');
       expect(response.errorCode).toBe('RESOURCE_EXHAUSTED');
@@ -758,20 +806,22 @@ describe('interactions_utils', () => {
       const interaction = {
         id: 'int-123',
         status: 'failed',
+        // `code` and `message` are intentionally absent: the converter must
+        // fall back to UNKNOWN_ERROR / 'Unknown error'.
         error: {},
-      };
-      const response = convertInteractionToLlmResponse(interaction as any);
+      } as ExtendedInteraction;
+      const response = convertInteractionToLlmResponse(interaction);
       expect(response.errorCode).toBe('UNKNOWN_ERROR');
       expect(response.errorMessage).toBe('Unknown error');
     });
 
     it('should handle missing token counts in usage', () => {
-      const interaction = {
+      const interaction: ExtendedInteraction = {
         id: 'int-123',
         status: 'completed',
         usage: {},
       };
-      const response = convertInteractionToLlmResponse(interaction as any);
+      const response = convertInteractionToLlmResponse(interaction);
       expect(response.usageMetadata).toEqual({
         promptTokenCount: 0,
         candidatesTokenCount: 0,
@@ -780,11 +830,11 @@ describe('interactions_utils', () => {
     });
 
     it('should handle requires_action status', () => {
-      const interaction = {
+      const interaction: ExtendedInteraction = {
         id: 'int-123',
         status: 'requires_action',
       };
-      const response = convertInteractionToLlmResponse(interaction as any);
+      const response = convertInteractionToLlmResponse(interaction);
       expect(response.turnComplete).toBe(true);
       expect(response.finishReason).toBe('STOP');
     });
@@ -792,7 +842,7 @@ describe('interactions_utils', () => {
 
   describe('convertInteractionEventToLlmResponse', () => {
     it('should handle step.delta text event', () => {
-      const event = {
+      const event: RawSseEvent = {
         event_type: 'step.delta',
         delta: {
           type: 'text',
@@ -801,7 +851,7 @@ describe('interactions_utils', () => {
       };
       const aggregatedParts: Part[] = [];
       const response = convertInteractionEventToLlmResponse(
-        event as any,
+        asSseEvent(event),
         aggregatedParts,
         'int-1',
       );
@@ -819,7 +869,7 @@ describe('interactions_utils', () => {
       const aggregatedParts: Part[] = [];
 
       // 1. Step Start
-      const startEvent = {
+      const startEvent: RawSseEvent = {
         event_type: 'step.start',
         step: {
           type: 'function_call',
@@ -828,7 +878,7 @@ describe('interactions_utils', () => {
         },
       };
       let response = convertInteractionEventToLlmResponse(
-        startEvent as any,
+        asSseEvent(startEvent),
         aggregatedParts,
         'int-1',
       );
@@ -845,7 +895,7 @@ describe('interactions_utils', () => {
       });
 
       // 2. Step Delta (arguments chunk 1)
-      const deltaEvent1 = {
+      const deltaEvent1: RawSseEvent = {
         event_type: 'step.delta',
         delta: {
           type: 'arguments_delta',
@@ -853,7 +903,7 @@ describe('interactions_utils', () => {
         },
       };
       response = convertInteractionEventToLlmResponse(
-        deltaEvent1 as any,
+        asSseEvent(deltaEvent1),
         aggregatedParts,
         'int-1',
       );
@@ -861,7 +911,7 @@ describe('interactions_utils', () => {
       expect(aggregatedParts[0].partMetadata?.accumulatedArgs).toBe('{"x":');
 
       // 3. Step Delta (arguments chunk 2)
-      const deltaEvent2 = {
+      const deltaEvent2: RawSseEvent = {
         event_type: 'step.delta',
         delta: {
           type: 'arguments_delta',
@@ -869,7 +919,7 @@ describe('interactions_utils', () => {
         },
       };
       response = convertInteractionEventToLlmResponse(
-        deltaEvent2 as any,
+        asSseEvent(deltaEvent2),
         aggregatedParts,
         'int-1',
       );
@@ -877,11 +927,11 @@ describe('interactions_utils', () => {
       expect(aggregatedParts[0].partMetadata?.accumulatedArgs).toBe('{"x": 1}');
 
       // 4. Step Stop
-      const stopEvent = {
+      const stopEvent: RawSseEvent = {
         event_type: 'step.stop',
       };
       response = convertInteractionEventToLlmResponse(
-        stopEvent as any,
+        asSseEvent(stopEvent),
         aggregatedParts,
         'int-1',
       );
@@ -909,7 +959,7 @@ describe('interactions_utils', () => {
 
     it('should handle step.start thought event', () => {
       const aggregatedParts: Part[] = [];
-      const event = {
+      const event: RawSseEvent = {
         event_type: 'step.start',
         step: {
           type: 'thought',
@@ -917,7 +967,7 @@ describe('interactions_utils', () => {
         },
       };
       const response = convertInteractionEventToLlmResponse(
-        event as any,
+        asSseEvent(event),
         aggregatedParts,
         'int-1',
       );
@@ -934,13 +984,13 @@ describe('interactions_utils', () => {
     });
 
     it('should handle interaction.status_update completed event', () => {
-      const event = {
+      const event: RawSseEvent = {
         event_type: 'interaction.status_update',
         status: 'completed',
       };
       const aggregatedParts: Part[] = [{text: 'final text'}];
       const response = convertInteractionEventToLlmResponse(
-        event as any,
+        asSseEvent(event),
         aggregatedParts,
         'int-1',
       );
@@ -1636,7 +1686,7 @@ describe('interactions_utils', () => {
 
   describe('convertInteractionEventToLlmResponse extra cases', () => {
     it('should handle step.delta image event (data)', () => {
-      const event = {
+      const event: RawSseEvent = {
         event_type: 'step.delta',
         delta: {
           type: 'image',
@@ -1646,7 +1696,7 @@ describe('interactions_utils', () => {
       };
       const aggregatedParts: Part[] = [];
       const response = convertInteractionEventToLlmResponse(
-        event as any,
+        asSseEvent(event),
         aggregatedParts,
         'int-1',
       );
@@ -1669,7 +1719,7 @@ describe('interactions_utils', () => {
     });
 
     it('should handle step.delta image event (uri)', () => {
-      const event = {
+      const event: RawSseEvent = {
         event_type: 'step.delta',
         delta: {
           type: 'image',
@@ -1679,7 +1729,7 @@ describe('interactions_utils', () => {
       };
       const aggregatedParts: Part[] = [];
       const response = convertInteractionEventToLlmResponse(
-        event as any,
+        asSseEvent(event),
         aggregatedParts,
         'int-1',
       );
@@ -1702,7 +1752,7 @@ describe('interactions_utils', () => {
     });
 
     it('should handle interaction.status_update failed event', () => {
-      const event = {
+      const event: RawSseEvent = {
         event_type: 'interaction.status_update',
         status: 'failed',
         error: {
@@ -1711,7 +1761,7 @@ describe('interactions_utils', () => {
         },
       };
       const response = convertInteractionEventToLlmResponse(
-        event as any,
+        asSseEvent(event),
         [],
         'int-1',
       );
@@ -1724,12 +1774,12 @@ describe('interactions_utils', () => {
     });
 
     it('should handle interaction.status_update failed event with missing error', () => {
-      const event = {
+      const event: RawSseEvent = {
         event_type: 'interaction.status_update',
         status: 'failed',
       };
       const response = convertInteractionEventToLlmResponse(
-        event as any,
+        asSseEvent(event),
         [],
         'int-1',
       );
@@ -1742,13 +1792,13 @@ describe('interactions_utils', () => {
     });
 
     it('should handle interaction.status_update completed event with aggregated parts', () => {
-      const event = {
+      const event: RawSseEvent = {
         event_type: 'interaction.status_update',
         status: 'completed',
       };
       const parts = [{text: 'part 1'}];
       const response = convertInteractionEventToLlmResponse(
-        event as any,
+        asSseEvent(event),
         parts,
         'int-1',
       );
@@ -1762,13 +1812,13 @@ describe('interactions_utils', () => {
     });
 
     it('should handle error event', () => {
-      const event = {
+      const event: RawSseEvent = {
         event_type: 'error',
         code: 'INTERNAL',
         message: 'internal error',
       };
       const response = convertInteractionEventToLlmResponse(
-        event as any,
+        asSseEvent(event),
         [],
         'int-1',
       );
@@ -1781,11 +1831,11 @@ describe('interactions_utils', () => {
     });
 
     it('should handle error event with missing code and message', () => {
-      const event = {
+      const event: RawSseEvent = {
         event_type: 'error',
       };
       const response = convertInteractionEventToLlmResponse(
-        event as any,
+        asSseEvent(event),
         [],
         'int-1',
       );
@@ -1798,15 +1848,17 @@ describe('interactions_utils', () => {
     });
 
     it('should return null if event.delta is missing in step.delta event', () => {
-      const event = {
+      const event: RawSseEvent = {
         event_type: 'step.delta',
       };
-      expect(convertInteractionEventToLlmResponse(event as any, [])).toBeNull();
+      expect(
+        convertInteractionEventToLlmResponse(asSseEvent(event), []),
+      ).toBeNull();
     });
 
     it('should handle step.delta thought_signature event', () => {
       // 1. Start the function call step
-      const startEvent = {
+      const startEvent: RawSseEvent = {
         event_type: 'step.start',
         step: {
           type: 'function_call',
@@ -1815,14 +1867,17 @@ describe('interactions_utils', () => {
         },
       };
       const aggregatedParts: Part[] = [];
-      convertInteractionEventToLlmResponse(startEvent as any, aggregatedParts);
+      convertInteractionEventToLlmResponse(
+        asSseEvent(startEvent),
+        aggregatedParts,
+      );
 
       expect(aggregatedParts.length).toBe(1);
       expect(aggregatedParts[0].functionCall).toBeDefined();
       expect(aggregatedParts[0].thoughtSignature).toBeUndefined();
 
       // 2. Stream the signature delta
-      const deltaEvent = {
+      const deltaEvent: RawSseEvent = {
         event_type: 'step.delta',
         delta: {
           type: 'thought_signature',
@@ -1830,7 +1885,7 @@ describe('interactions_utils', () => {
         },
       };
       const response = convertInteractionEventToLlmResponse(
-        deltaEvent as any,
+        asSseEvent(deltaEvent),
         aggregatedParts,
         'int-1',
       );
@@ -1840,7 +1895,7 @@ describe('interactions_utils', () => {
     });
 
     it('should handle event with camelCase eventType', () => {
-      const event = {
+      const event: RawSseEvent = {
         eventType: 'step.delta',
         delta: {
           type: 'text',
@@ -1849,7 +1904,7 @@ describe('interactions_utils', () => {
       };
       const aggregatedParts: Part[] = [];
       const response = convertInteractionEventToLlmResponse(
-        event as any,
+        asSseEvent(event),
         aggregatedParts,
         'int-1',
       );
@@ -1857,7 +1912,7 @@ describe('interactions_utils', () => {
     });
 
     it('should handle step.delta text event with missing text', () => {
-      const event = {
+      const event: RawSseEvent = {
         event_type: 'step.delta',
         delta: {
           type: 'text',
@@ -1865,7 +1920,7 @@ describe('interactions_utils', () => {
       };
       const aggregatedParts: Part[] = [];
       const response = convertInteractionEventToLlmResponse(
-        event as any,
+        asSseEvent(event),
         aggregatedParts,
         'int-1',
       );
@@ -1873,12 +1928,12 @@ describe('interactions_utils', () => {
     });
 
     it('should handle interaction.status_update requires_action event', () => {
-      const event = {
+      const event: RawSseEvent = {
         event_type: 'interaction.status_update',
         status: 'requires_action',
       };
       const response = convertInteractionEventToLlmResponse(
-        event as any,
+        asSseEvent(event),
         [],
         'int-1',
       );
@@ -1892,8 +1947,10 @@ describe('interactions_utils', () => {
     });
 
     it('should return null for unknown event type', () => {
-      const event = {event_type: 'unknown'};
-      expect(convertInteractionEventToLlmResponse(event as any, [])).toBeNull();
+      const event: RawSseEvent = {event_type: 'unknown'};
+      expect(
+        convertInteractionEventToLlmResponse(asSseEvent(event), []),
+      ).toBeNull();
     });
   });
 
