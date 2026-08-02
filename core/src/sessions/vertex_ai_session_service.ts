@@ -10,6 +10,7 @@ import {
   AppendAgentEngineSessionEventConfig,
   AppendAgentEngineSessionEventRequestParameters,
   EventMetadata,
+  EventActions as VertexAiEventActions,
   Session as VertexAiSession,
   SessionEvent as VertexAiSessionEvent,
 } from '@google-cloud/vertexai/build/src/genai/types.js';
@@ -17,10 +18,8 @@ import {Content, GenerateContentResponseUsageMetadata} from '@google/genai';
 import {isCompactedEvent} from '../events/compacted_event.js';
 import {experimental} from '../utils/experimental.js';
 
-import {AuthConfig} from '../auth/auth_tool.js';
 import {Event} from '../events/event.js';
-import {EventActions} from '../events/event_actions.js';
-import {ToolConfirmation} from '../tools/tool_confirmation.js';
+import {createEventActions, EventActions} from '../events/event_actions.js';
 import {logger} from '../utils/logger.js';
 import {getExpressModeApiKey} from '../utils/vertex_ai_utils.js';
 
@@ -432,10 +431,10 @@ export class VertexAiSessionService extends BaseSessionService {
 
     const config = partialCopy<AppendAgentEngineSessionEventConfig>(event, [
       'content',
-      'actions',
       'errorCode',
       'errorMessage',
     ]);
+    config.actions = event.actions ? toApiActions(event.actions) : undefined;
 
     config.eventMetadata = {
       ...partialCopy<EventMetadata>(event, [
@@ -500,6 +499,52 @@ interface ExtendedEvent extends Event {
   compactedContent?: string;
 }
 
+/**
+ * ADK `EventActions` field names that differ from their Agent Engine Sessions
+ * API counterparts. ADK's `transferToAgent` is the API's `transferAgent`; every
+ * other field shares its name.
+ */
+const ADK_TO_API_ACTION_KEYS: Record<string, string> = {
+  transferToAgent: 'transferAgent',
+};
+
+const API_TO_ADK_ACTION_KEYS: Record<string, string> = {
+  transferAgent: 'transferToAgent',
+};
+
+/**
+ * Copies `actions`, renaming the keys listed in `keyMap` and dropping entries
+ * with no value. Keys outside `keyMap` are passed through untouched, so a field
+ * added to `EventActions` persists without a change here.
+ */
+function renameActionKeys(
+  actions: Record<string, unknown>,
+  keyMap: Record<string, string>,
+): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(actions)) {
+    if (value === undefined || value === null) continue;
+    result[keyMap[key] ?? key] = value;
+  }
+  return result;
+}
+
+function toApiActions(actions: EventActions): VertexAiEventActions {
+  return renameActionKeys(
+    {...actions},
+    ADK_TO_API_ACTION_KEYS,
+  ) as VertexAiEventActions;
+}
+
+function fromApiActions(
+  apiActions?: VertexAiEventActions,
+): ExtendedEventActions {
+  const renamed = renameActionKeys({...apiActions}, API_TO_ADK_ACTION_KEYS);
+  return createEventActions(
+    renamed as Partial<EventActions>,
+  ) as ExtendedEventActions;
+}
+
 function _fromApiEvent(apiEventObj: VertexAiSessionEvent): Event {
   const rawEvent = apiEventObj.rawEvent;
   if (rawEvent) {
@@ -513,7 +558,6 @@ function _fromApiEvent(apiEventObj: VertexAiSessionEvent): Event {
     return event;
   }
 
-  const actions = apiEventObj.actions || {};
   const eventMetadata = apiEventObj.eventMetadata || {};
 
   let customMetadata = eventMetadata.customMetadata as
@@ -544,20 +588,10 @@ function _fromApiEvent(apiEventObj: VertexAiSessionEvent): Event {
     }
   }
 
-  const eventActions: ExtendedEventActions = {
-    stateDelta: (actions['stateDelta'] as {[key: string]: unknown}) || {},
-    artifactDelta: (actions['artifactDelta'] as {[key: string]: number}) || {},
-    requestedAuthConfigs:
-      (actions.requestedAuthConfigs as Record<string, AuthConfig>) || {},
-    requestedToolConfirmations:
-      ((actions as Record<string, unknown>)[
-        'requestedToolConfirmations'
-      ] as Record<string, ToolConfirmation>) || {},
-    skipSummarization: actions['skipSummarization'] as boolean | undefined,
-    transferToAgent: actions['transferAgent'] as string | undefined,
-    escalate: actions['escalate'] as boolean | undefined,
-    compaction: compactionData || undefined,
-  };
+  const eventActions = fromApiActions(apiEventObj.actions);
+  if (compactionData) {
+    eventActions.compaction = compactionData;
+  }
 
   const event: ExtendedEvent = {
     id: apiEventObj.name?.split('/').pop() || '',
