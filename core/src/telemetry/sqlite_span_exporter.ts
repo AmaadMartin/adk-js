@@ -31,6 +31,12 @@ const INSTRUMENTATION_SCOPE_NAME = 'gcp.vertex.agent';
 const NANOS_PER_SECOND = 1_000_000_000n;
 const NOT_SERIALIZABLE = '<not serializable>';
 
+/** How long SQLite waits out a contended write, matching the reference. */
+const BUSY_TIMEOUT_MS = 30_000;
+
+/** SQLite driver error codes, e.g. `SQLITE_BUSY`. */
+const SQLITE_ERROR_CODE = /^SQLITE_[A-Z]+$/;
+
 /** Value types `JSON.stringify` cannot represent. */
 const UNSUPPORTED_JSON_TYPES: ReadonlySet<string> = new Set([
   'bigint',
@@ -67,6 +73,32 @@ export function serializeAttributes(
     logger.debug('Failed to serialize span attributes:', e);
     return '{}';
   }
+}
+
+/**
+ * Names a failure without echoing what caused it.
+ *
+ * Driver errors inline the failing statement together with its bound values,
+ * and span attributes carry serialized LLM requests and responses by default
+ * (`ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS`), so neither the driver message nor
+ * the original error may escape: OpenTelemetry's global error handler
+ * stringifies every property it can reach on an `ExportResult.error`,
+ * including `cause`.
+ */
+export function describeError(cause: unknown): string {
+  if (typeof cause !== 'object' || cause === null) {
+    return typeof cause;
+  }
+  const name =
+    'name' in cause && typeof cause.name === 'string' ? cause.name : 'Error';
+  if (
+    'code' in cause &&
+    typeof cause.code === 'string' &&
+    SQLITE_ERROR_CODE.test(cause.code)
+  ) {
+    return `${name} (${cause.code})`;
+  }
+  return name;
 }
 
 /**
@@ -195,8 +227,9 @@ function toStorageSpanData(span: ReadableSpan): EntityData<StorageSpan> {
     name: span.name,
     startTimeUnixNano: hrTimeToUnixNanos(span.startTime),
     endTimeUnixNano: hrTimeToUnixNanos(span.endTime),
+    // `||`, not `??`: the reference falls through on an empty session id too.
     sessionId:
-      stringAttribute(span.attributes, SESSION_ID_ATTRIBUTE) ??
+      stringAttribute(span.attributes, SESSION_ID_ATTRIBUTE) ||
       stringAttribute(span.attributes, CONVERSATION_ID_ATTRIBUTE),
     invocationId: stringAttribute(span.attributes, INVOCATION_ID_ATTRIBUTE),
     attributesJson: serializeAttributes(span.attributes),
@@ -265,7 +298,6 @@ export interface SqliteSpanExporterOptions {
  */
 export class SqliteSpanExporter implements SpanExporter {
   private readonly dbPath: string;
-  private orm?: MikroORM;
   private initPromise?: Promise<MikroORM>;
 
   constructor(options: SqliteSpanExporterOptions) {
@@ -289,8 +321,7 @@ export class SqliteSpanExporter implements SpanExporter {
       },
       (cause: unknown) => {
         const error = new Error(
-          `Failed to export spans to SQLite: ${String(cause)}`,
-          {cause},
+          `Failed to export spans to SQLite: ${describeError(cause)}`,
         );
         logger.warn(error.message);
         resultCallback({code: ExportResultCode.FAILED, error});
@@ -333,12 +364,13 @@ export class SqliteSpanExporter implements SpanExporter {
 
   /** Closes the database. A later export transparently reopens it. */
   async shutdown(): Promise<void> {
-    const orm = this.orm;
-    this.orm = undefined;
+    const pending = this.initPromise;
     this.initPromise = undefined;
-    if (orm) {
-      await orm.close();
-    }
+    // Awaiting the in-flight open is what stops a shutdown issued mid-export
+    // from orphaning the connection it is still creating. An open that failed
+    // has already closed itself.
+    const orm = await pending?.catch(() => undefined);
+    await orm?.close();
   }
 
   /** Resolves immediately: every export has already been committed. */
@@ -375,12 +407,17 @@ export class SqliteSpanExporter implements SpanExporter {
     });
     try {
       await orm.connect();
+      // Parity with the reference exporter's 30s sqlite3 connect timeout: wait
+      // out a contended write rather than dropping the batch. Contention is
+      // realistic because the file may be shared with DatabaseSessionService.
+      await orm.em
+        .getConnection()
+        .execute(`pragma busy_timeout = ${BUSY_TIMEOUT_MS}`);
       await ensureDatabaseCreated(orm);
     } catch (error: unknown) {
       await orm.close();
       throw error;
     }
-    this.orm = orm;
     return orm;
   }
 }
