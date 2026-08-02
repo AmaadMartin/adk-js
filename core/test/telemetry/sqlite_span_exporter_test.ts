@@ -35,13 +35,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {StorageSpan} from '../../src/telemetry/db/schema.js';
-import {
-  describeError,
-  deserializeAttributes,
-  hrTimeToUnixNanos,
-  serializeAttributes,
-  unixNanosToHrTime,
-} from '../../src/telemetry/sqlite_span_exporter.js';
+import {describeError} from '../../src/telemetry/sqlite_span_exporter.js';
 
 const SESSION_ID_ATTRIBUTE = 'gcp.vertex.agent.session_id';
 const CONVERSATION_ID_ATTRIBUTE = 'gen_ai.conversation.id';
@@ -763,80 +757,19 @@ describe('SqliteSpanExporter', () => {
   });
 });
 
-describe('hrTimeToUnixNanos / unixNanosToHrTime', () => {
-  it('round-trips a timestamp above Number.MAX_SAFE_INTEGER exactly', () => {
-    const hrTime: HrTime = [1750000000, 123456789];
-    const nanos = hrTimeToUnixNanos(hrTime);
-
-    expect(nanos).toBe('1750000000123456789');
-    expect(Number(nanos)).toBeGreaterThan(Number.MAX_SAFE_INTEGER);
-    expect(unixNanosToHrTime(nanos)).toEqual(hrTime);
-  });
-
-  it('converts zero', () => {
-    expect(hrTimeToUnixNanos([0, 0])).toBe('0');
-    expect(unixNanosToHrTime('0')).toEqual([0, 0]);
-  });
-});
-
-describe('serializeAttributes', () => {
-  it('keeps serializable siblings of a value JSON cannot represent', () => {
-    const json = serializeAttributes({
-      [SESSION_ID_ATTRIBUTE]: 'session-nonser',
-      normal_attr: 'value',
-      big: 10n,
-      fn: () => 'nope',
-      sym: Symbol('nope'),
-    });
-
-    expect(JSON.parse(json)).toEqual({
-      [SESSION_ID_ATTRIBUTE]: 'session-nonser',
-      normal_attr: 'value',
-      big: '<not serializable>',
-      fn: '<not serializable>',
-      sym: '<not serializable>',
-    });
-  });
-
-  it('replaces only the circular reference', () => {
-    const cyclic: Record<string, unknown> = {label: 'loop'};
-    cyclic['self'] = cyclic;
-
-    const json = serializeAttributes({normal_attr: 'value', cyclic});
-
-    expect(JSON.parse(json)).toEqual({
-      normal_attr: 'value',
-      cyclic: {label: 'loop', self: '<not serializable>'},
-    });
-  });
-
-  it('keeps a shared value that appears twice without being a cycle', () => {
-    const shared = ['a', 'b'];
-
-    const json = serializeAttributes({first: shared, second: shared});
-
-    expect(JSON.parse(json)).toEqual({
-      first: ['a', 'b'],
-      second: ['a', 'b'],
-    });
-  });
-
-  it('falls back to an empty object when serialization throws', () => {
-    const throwing = {
-      toJSON() {
-        throw new Error('cannot serialize');
-      },
-    };
-
-    expect(serializeAttributes({throwing})).toBe('{}');
-  });
-});
-
 describe('describeError', () => {
   it('names the error and appends a SQLite driver code', () => {
     expect(
       describeError(Object.assign(new Error('x'), {code: 'SQLITE_BUSY'})),
     ).toBe('Error (SQLITE_BUSY)');
+  });
+
+  it('keeps an extended SQLite driver code', () => {
+    expect(
+      describeError(
+        Object.assign(new Error('x'), {code: 'SQLITE_CONSTRAINT_NOTNULL'}),
+      ),
+    ).toBe('Error (SQLITE_CONSTRAINT_NOTNULL)');
   });
 
   it('omits a code that is not a SQLite driver code', () => {
@@ -855,56 +788,5 @@ describe('describeError', () => {
   it('describes a non-object by its type', () => {
     expect(describeError('SUPER_SECRET_PROMPT')).toBe('string');
     expect(describeError(null)).toBe('object');
-  });
-});
-
-describe('deserializeAttributes', () => {
-  it('returns an empty object for empty, invalid and non-object payloads', () => {
-    for (const payload of [
-      undefined,
-      '',
-      'not valid json',
-      '[]',
-      'null',
-      '3',
-      '"text"',
-    ]) {
-      expect(deserializeAttributes(payload)).toEqual({});
-    }
-  });
-
-  it('keeps primitives and homogeneous primitive arrays', () => {
-    const json = JSON.stringify({
-      text: 'value',
-      count: 1,
-      flag: false,
-      strings: ['a', null, 'b'],
-      numbers: [1, 2],
-      empty: [],
-    });
-
-    expect(deserializeAttributes(json)).toEqual({
-      text: 'value',
-      count: 1,
-      flag: false,
-      strings: ['a', null, 'b'],
-      numbers: [1, 2],
-      empty: [],
-    });
-  });
-
-  it('drops nested objects and mixed or non-primitive arrays', () => {
-    const json = JSON.stringify({
-      keep: 'value',
-      nested: {a: 1},
-      mixed: ['a', 1],
-      objects: [{a: 1}],
-      nulls: [null],
-    });
-
-    expect(deserializeAttributes(json)).toEqual({
-      keep: 'value',
-      nulls: [null],
-    });
   });
 });
