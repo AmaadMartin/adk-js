@@ -15,6 +15,14 @@ To set up your local development environment for contributing:
    cd adk-js
    ```
 
+1. **Select the pinned Node.js version**: the repository pins the Node major it
+   builds and tests with in `.nvmrc`, and CI reads that same file, so this is the
+   version to develop against:
+
+   ```bash
+   nvm use   # or: fnm use
+   ```
+
 1. **Install dependencies**:
 
    ```bash
