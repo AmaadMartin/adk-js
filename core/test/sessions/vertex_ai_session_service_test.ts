@@ -5,8 +5,7 @@
  */
 
 import {Sessions} from '@google-cloud/vertexai/build/src/genai/sessions.js';
-import {createEvent, State, VertexAiSessionService} from '@google/adk';
-import {Session} from '@google/adk/sessions/session.js';
+import {createEvent, Session, State, VertexAiSessionService} from '@google/adk';
 import {ApiError} from '@google/genai';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 
@@ -24,8 +23,8 @@ vi.mock('nodejs-vertexai', () => ({
 import {
   isVertexAiConnectionString,
   quoteFilterLiteral,
-} from '@google/adk/sessions/vertex_ai_session_service.js';
-import {logger} from '@google/adk/utils/logger.js';
+} from '../../src/sessions/vertex_ai_session_service.js';
+import {logger} from '../../src/utils/logger.js';
 
 describe('isVertexAiConnectionString', () => {
   it('returns true for vertexai://', () => {
