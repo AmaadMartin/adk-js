@@ -44,13 +44,18 @@ export interface SearchExamplesRequest {
   };
 }
 
-/** A single scored result returned by `searchExamples`. */
+/**
+ * A single scored result returned by `searchExamples`.
+ *
+ * Fields holding a proto3 default value are omitted from the JSON response, so
+ * everything but the nested messages themselves is optional.
+ */
 export interface SimilarExample {
-  similarityScore: number;
+  similarityScore?: number;
   example: {
     storedContentsExample: {
-      searchKey: string;
-      contentsExample: {expectedContents: Array<{content: Content}>};
+      searchKey?: string;
+      contentsExample?: {expectedContents?: Array<{content: Content}>};
     };
   };
 }
@@ -119,8 +124,8 @@ function toPart(part: Part): Part | undefined {
 }
 
 function toExpectedOutput(result: SimilarExample): Content[] {
-  const {expectedContents} =
-    result.example.storedContentsExample.contentsExample;
+  const {expectedContents = []} =
+    result.example.storedContentsExample.contentsExample ?? {};
   return expectedContents.map(({content}) => ({
     role: content.role,
     parts: (content.parts ?? []).flatMap((part) => toPart(part) ?? []),
@@ -129,7 +134,9 @@ function toExpectedOutput(result: SimilarExample): Content[] {
 
 function toExample(result: SimilarExample): Example {
   return {
-    input: createUserContent(result.example.storedContentsExample.searchKey),
+    input: createUserContent(
+      result.example.storedContentsExample.searchKey ?? '',
+    ),
     output: toExpectedOutput(result),
   };
 }
@@ -140,15 +147,19 @@ function toExample(result: SimilarExample): Example {
  * Examples are fetched per request, so a curated store can be updated without
  * redeploying the agent.
  *
+ * Pass the provider to an {@link ExampleTool} to prepend the fetched examples
+ * to the agent's system instruction.
+ *
  * @example
  * ```ts
+ * const store = new VertexAiExampleStore({
+ *   examplesStoreName:
+ *     'projects/my-project/locations/us-central1/exampleStores/my-store',
+ * });
  * const agent = new LlmAgent({
  *   name: 'support_agent',
  *   model: 'gemini-2.0-flash',
- *   examples: new VertexAiExampleStore({
- *     examplesStoreName:
- *       'projects/my-project/locations/us-central1/exampleStores/my-store',
- *   }),
+ *   tools: [new ExampleTool(store)],
  * });
  * ```
  */
@@ -184,7 +195,7 @@ export class VertexAiExampleStore extends BaseExampleProvider {
       },
     });
     return (response.results ?? [])
-      .filter((result) => result.similarityScore >= MIN_SIMILARITY_SCORE)
+      .filter((result) => (result.similarityScore ?? 0) >= MIN_SIMILARITY_SCORE)
       .map(toExample);
   }
 }

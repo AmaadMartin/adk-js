@@ -258,6 +258,53 @@ describe('VertexAiExampleStore', () => {
     ]);
   });
 
+  it('drops a result whose similarity score is omitted', async () => {
+    const store = storeWith({
+      results: [
+        {
+          example: {
+            storedContentsExample: {
+              searchKey: 'no score',
+              contentsExample: {expectedContents: []},
+            },
+          },
+        },
+      ],
+    });
+
+    expect(await store.getExamples('anything')).toEqual([]);
+  });
+
+  it('maps a result whose searchKey and contentsExample are omitted', async () => {
+    const store = storeWith({
+      results: [{similarityScore: 0.9, example: {storedContentsExample: {}}}],
+    });
+
+    expect(await store.getExamples('anything')).toEqual([
+      {input: {role: 'user', parts: [{text: ''}]}, output: []},
+    ]);
+  });
+
+  it('maps a result whose expectedContents is omitted', async () => {
+    const store = storeWith({
+      results: [
+        {
+          similarityScore: 0.9,
+          example: {
+            storedContentsExample: {
+              searchKey: 'no contents',
+              contentsExample: {},
+            },
+          },
+        },
+      ],
+    });
+
+    expect(await store.getExamples('anything')).toEqual([
+      {input: {role: 'user', parts: [{text: 'no contents'}]}, output: []},
+    ]);
+  });
+
   it('returns no examples for an empty result set', async () => {
     const store = storeWith({results: []});
 
