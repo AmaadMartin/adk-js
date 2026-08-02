@@ -89,9 +89,8 @@ describe('published package manifests', () => {
   );
 
   it('leaves engines off the workspace root', async () => {
-    // The root package is the npm workspace container: release-please skips it
-    // and it has no `files` array, so it is never published and a floor
-    // declared there would reach no consumer.
+    // Only core, dev and integrations are published, so a floor declared on
+    // the workspace container would reach no consumer.
     expect((await readManifest('.')).engines).toBeUndefined();
   });
 });
