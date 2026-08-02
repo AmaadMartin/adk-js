@@ -55,15 +55,6 @@ const FILE_MODULE_TYPE_EXTENSION_MAP = {
 const TERMINATION_SIGNALS = ['SIGINT', 'SIGUSR1', 'SIGUSR2'] as const;
 
 /**
- * A process listener installed by {@link AgentLoader.installProcessHandlers},
- * kept so it can be removed again on teardown.
- */
-interface ProcessHandler {
-  event: (typeof TERMINATION_SIGNALS)[number] | 'exit';
-  handler: () => void;
-}
-
-/**
  * Metadata for a file.
  */
 interface FileMetadata {
@@ -373,7 +364,7 @@ export class AgentLoader {
   private agentsAlreadyPreloaded = false;
   private readonly preloadedAgents: Record<string, AgentFile> = {};
   private watcher?: fs.FSWatcher;
-  private processHandlers: ProcessHandler[] = [];
+  private removeProcessHandlers?: () => void;
 
   constructor(
     private readonly agentsDirPath: string = process.cwd(),
@@ -391,27 +382,26 @@ export class AgentLoader {
    * {@link disposeAll} removes the listeners again.
    */
   installProcessHandlers(): void {
-    if (this.processHandlers.length > 0) {
+    if (this.removeProcessHandlers) {
       return;
     }
 
     // An `exit` listener cannot await, so this cleanup is best-effort.
-    const exitHandler = () => void this.disposeAll();
-    process.on('exit', exitHandler);
-    this.processHandlers.push({event: 'exit', handler: exitHandler});
+    const onExit = () => void this.disposeAll();
+    const onSignal = () => process.exit();
 
+    process.on('exit', onExit);
     for (const signal of TERMINATION_SIGNALS) {
-      const signalHandler = () => process.exit();
-      process.on(signal, signalHandler);
-      this.processHandlers.push({event: signal, handler: signalHandler});
+      process.on(signal, onSignal);
     }
-  }
 
-  private removeProcessHandlers(): void {
-    for (const {event, handler} of this.processHandlers) {
-      process.removeListener(event, handler);
-    }
-    this.processHandlers = [];
+    this.removeProcessHandlers = () => {
+      process.removeListener('exit', onExit);
+      for (const signal of TERMINATION_SIGNALS) {
+        process.removeListener(signal, onSignal);
+      }
+      this.removeProcessHandlers = undefined;
+    };
   }
 
   /**
@@ -494,7 +484,7 @@ export class AgentLoader {
   }
 
   async disposeAll(): Promise<void> {
-    this.removeProcessHandlers();
+    this.removeProcessHandlers?.();
     this.watcher?.close();
     this.watcher = undefined;
     await Promise.all(
