@@ -16,12 +16,17 @@ import {
   LlmAgent,
   LlmRequest,
   PluginManager,
-  SearchExamplesResponse,
-  SimilarExample,
   VertexAiExampleStore,
 } from '@google/adk';
 import {Content} from '@google/genai';
 import {GoogleAuth} from 'google-auth-library';
+
+// The v1beta1 wire shapes are deliberately not part of the public API, so the
+// fixtures below reach for them by path.
+import {
+  SearchExamplesResponse,
+  SimilarExample,
+} from '../../src/examples/vertex_ai_example_store.js';
 
 const STORE_NAME = 'projects/p/locations/us-central1/exampleStores/s';
 const SEARCH_EXAMPLES_URL =

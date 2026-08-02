@@ -9,5 +9,9 @@
   "tsconfig": "./core/tsconfig.json",
   "plugin": ["typedoc-theme-fresh"],
   "theme": "fresh",
-  "excludeExternals": true
+  "excludeExternals": true,
+  "intentionallyNotExported": [
+    "SearchExamplesRequest",
+    "SearchExamplesResponse"
+  ]
 }
