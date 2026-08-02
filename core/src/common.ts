@@ -28,6 +28,12 @@ export type {
   InvocationContextParams,
   WorkflowInstructionScope,
 } from './agents/invocation_context.js';
+export {LangGraphAgent, isLangGraphAgent} from './agents/langgraph_agent.js';
+export type {
+  CompiledLangGraph,
+  LangGraphAgentConfig,
+  LangGraphThreadConfig,
+} from './agents/langgraph_agent.js';
 export {LiveRequestQueue} from './agents/live_request_queue.js';
 export type {LiveRequest} from './agents/live_request_queue.js';
 export {LlmAgent as Agent, LlmAgent, isLlmAgent} from './agents/llm_agent.js';
