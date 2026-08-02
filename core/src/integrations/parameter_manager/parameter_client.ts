@@ -12,12 +12,6 @@ const CLOUD_PLATFORM_SCOPES = [
 ];
 const GLOBAL_ENDPOINT = 'parametermanager.googleapis.com';
 
-/** Subset of the Parameter Manager `RenderParameterVersionResponse` used here. */
-interface RenderParameterVersionResponse {
-  /** The rendered payload, base64 encoded as a proto3 JSON `bytes` field. */
-  renderedPayload?: string;
-}
-
 /** Options for {@link ParameterManagerClient}. */
 export interface ParameterManagerClientOptions {
   /**
@@ -35,18 +29,6 @@ export interface ParameterManagerClientOptions {
    * service. If not provided, the global endpoint is used.
    */
   location?: string;
-}
-
-/**
- * Resolves the regional Parameter Manager endpoint for a location.
- *
- * adk-js has no mTLS support yet, so only the standard endpoint is selected
- * here. This is the single seam where the mTLS variant
- * (`parametermanager.{location}.rep.mtls.googleapis.com`) will be chosen once a
- * shared mTLS endpoint utility exists.
- */
-function regionalEndpoint(location: string): string {
-  return `parametermanager.${location}.rep.googleapis.com`;
 }
 
 /**
@@ -115,8 +97,9 @@ export class ParameterManagerClient {
       );
     }
     this.auth = createAuth(options);
+    // mTLS endpoints are not supported.
     this.endpoint = options.location
-      ? regionalEndpoint(options.location)
+      ? `parametermanager.${options.location}.rep.googleapis.com`
       : GLOBAL_ENDPOINT;
   }
 
@@ -137,7 +120,7 @@ export class ParameterManagerClient {
    */
   async getParameter(resourceName: string): Promise<string> {
     const client = await this.auth.getClient();
-    const {data} = await client.request<RenderParameterVersionResponse>({
+    const {data} = await client.request<{renderedPayload?: string}>({
       url: renderUrl(this.endpoint, resourceName),
       headers: {'x-goog-api-client': getClientLabels().join(' ')},
     });
