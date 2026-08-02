@@ -5,10 +5,7 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {
-  DEFAULT_MAX_OUTPUT_CHARS,
-  truncateMiddle,
-} from '../../src/utils/truncate_utils.js';
+import {truncateMiddle} from '../../src/utils/truncate_utils.js';
 
 describe('truncate_utils', () => {
   describe('truncateMiddle', () => {
@@ -64,18 +61,16 @@ describe('truncate_utils', () => {
       );
     });
 
-    it('defaults to DEFAULT_MAX_OUTPUT_CHARS characters', () => {
-      expect(DEFAULT_MAX_OUTPUT_CHARS).toBe(30_000);
+    it('preserves exactly limit characters of content plus the marker', () => {
+      const limit = 30_000;
 
-      const atLimit = 'a'.repeat(DEFAULT_MAX_OUTPUT_CHARS);
-      expect(truncateMiddle(atLimit)).toBe(atLimit);
+      const atLimit = 'a'.repeat(limit);
+      expect(truncateMiddle(atLimit, limit)).toBe(atLimit);
 
-      const overLimit = 'a'.repeat(DEFAULT_MAX_OUTPUT_CHARS + 1);
-      const result = truncateMiddle(overLimit);
+      const result = truncateMiddle('a'.repeat(limit + 1), limit);
       expect(result).toContain('... [truncated 1 characters] ...');
       expect(result.length).toBe(
-        DEFAULT_MAX_OUTPUT_CHARS +
-          '\n... [truncated 1 characters] ...\n'.length,
+        limit + '\n... [truncated 1 characters] ...\n'.length,
       );
     });
   });

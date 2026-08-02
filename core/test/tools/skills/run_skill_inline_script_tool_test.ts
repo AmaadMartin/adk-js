@@ -19,9 +19,9 @@ import {
   SkillToolset,
 } from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
+import {DEFAULT_MAX_OUTPUT_CHARS} from '../../../src/tools/skill/skill_toolset.js';
 import {ToolConfirmation} from '../../../src/tools/tool_confirmation.js';
 import {materializeFiles} from '../../../src/utils/file_utils.js';
-import {DEFAULT_MAX_OUTPUT_CHARS} from '../../../src/utils/truncate_utils.js';
 
 vi.mock('../../../src/utils/file_utils.js', () => ({
   materializeFiles: vi.fn().mockImplementation((files) => files),

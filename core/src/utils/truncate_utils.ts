@@ -5,12 +5,6 @@
  */
 
 /**
- * Maximum number of characters of original content preserved in a single text
- * field returned to the model.
- */
-export const DEFAULT_MAX_OUTPUT_CHARS = 30_000;
-
-/**
  * Truncates `text` to at most `limit` characters of original content by
  * dropping the middle, keeping the head and the tail. Returns `text` unchanged
  * when it already fits. The elided region is replaced by a marker naming the
@@ -25,10 +19,7 @@ export const DEFAULT_MAX_OUTPUT_CHARS = 30_000;
  *   values are clamped to zero.
  * @return `text` when it fits, otherwise the head, the marker and the tail.
  */
-export function truncateMiddle(
-  text: string,
-  limit: number = DEFAULT_MAX_OUTPUT_CHARS,
-): string {
+export function truncateMiddle(text: string, limit: number): string {
   const cap = Math.max(0, limit);
   if (text.length <= cap) {
     return text;

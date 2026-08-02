@@ -15,7 +15,7 @@ import {
   SkillToolset,
 } from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
-import {DEFAULT_MAX_OUTPUT_CHARS} from '../../../src/utils/truncate_utils.js';
+import {DEFAULT_MAX_OUTPUT_CHARS} from '../../../src/tools/skill/skill_toolset.js';
 
 describe('skill_toolset', () => {
   const mockSkill: Skill = {
@@ -318,6 +318,8 @@ describe('skill_toolset', () => {
 
   describe('maxOutputChars', () => {
     it('defaults to DEFAULT_MAX_OUTPUT_CHARS when the option is omitted', () => {
+      expect(DEFAULT_MAX_OUTPUT_CHARS).toBe(30_000);
+
       const toolset = new SkillToolset([mockSkill]);
       expect(toolset.maxOutputChars).toBe(DEFAULT_MAX_OUTPUT_CHARS);
     });

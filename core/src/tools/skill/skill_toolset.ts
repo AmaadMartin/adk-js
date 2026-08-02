@@ -13,7 +13,6 @@ import {Skill} from '../../skills/skill.js';
 import {SkillRegistry} from '../../skills/skill_registry.js';
 import {experimental} from '../../utils/experimental.js';
 import {logger} from '../../utils/logger.js';
-import {DEFAULT_MAX_OUTPUT_CHARS} from '../../utils/truncate_utils.js';
 import {BaseTool} from '../base_tool.js';
 import {BaseToolset} from '../base_toolset.js';
 import {ListSkillsTool} from './list_skills_tool.js';
@@ -22,6 +21,12 @@ import {LoadSkillTool} from './load_skill_tool.js';
 import {RunSkillInlineScriptTool} from './run_skill_inline_script_tool.js';
 import {RunSkillScriptTool} from './run_skill_script_tool.js';
 import {SearchSkillsTool} from './search_skills_tool.js';
+
+/**
+ * Default cap on the number of characters of a single `stdout` / `stderr`
+ * stream returned to the model per skill script execution.
+ */
+export const DEFAULT_MAX_OUTPUT_CHARS = 30_000;
 
 const DEFAULT_SKILL_SYSTEM_INSTRUCTION = `You can use specialized 'skills' to help you with complex tasks. You MUST use the skill tools to interact with these skills.
 
