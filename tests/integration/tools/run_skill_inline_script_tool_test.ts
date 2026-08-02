@@ -8,7 +8,6 @@ import {
   CodeExecutionLanguage,
   CodeExecutionResult,
   Context,
-  InvocationContext,
   RunSkillInlineScriptTool,
   SkillToolset,
   ToolConfirmation,
@@ -17,6 +16,7 @@ import {
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import {describe, expect, it} from 'vitest';
+import {createInvocationContext} from '../test_case_utils.js';
 
 describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', () => {
   // These integration tests exercise real code execution, which is gated behind
@@ -24,10 +24,7 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
   // so the tool proceeds to execute (see run_skill_inline_script_tool.ts).
   function createMockContext(agentName = 'test-agent') {
     return new Context({
-      invocationContext: {
-        session: {state: {}},
-        agent: {name: agentName},
-      } as unknown as InvocationContext,
+      invocationContext: createInvocationContext({agentName}),
       toolConfirmation: new ToolConfirmation({confirmed: true}),
     });
   }

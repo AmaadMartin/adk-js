@@ -17,8 +17,7 @@ import {
 } from '@google/adk';
 
 /**
- * Options for {@link createInvocationContext} and the context factories built
- * on top of it.
+ * Options for {@link createInvocationContext} and {@link createReadonlyContext}.
  */
 interface InvocationContextOptions {
   /** Name of the agent that owns the invocation. */
