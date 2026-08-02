@@ -38,6 +38,16 @@ export {
   type UnsafeLocalCodeExecutorOptions,
 } from './code_executors/unsafe_local_code_executor.js';
 export * from './common.js';
+export {
+  GCP_AUTH_PROVIDER_SCHEME_TYPE,
+  GcpAuthProvider,
+  isGcpAuthProviderScheme,
+} from './integrations/agent_identity/index.js';
+export type {
+  GcpAuthConfig,
+  GcpAuthProviderScheme,
+  GcpCredentialsBackend,
+} from './integrations/agent_identity/index.js';
 export {DatabaseSessionService} from './sessions/database_session_service.js';
 export {getSessionServiceFromUri} from './sessions/registry.js';
 export {VertexAiSessionService} from './sessions/vertex_ai_session_service.js';
