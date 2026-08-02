@@ -4,12 +4,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {SecretManagerServiceClient} from '@google-cloud/secret-manager';
 import {GoogleAuth, JWT, JWTInput, OAuth2Client} from 'google-auth-library';
 import {version} from '../../version.js';
 
 const DEFAULT_SCOPES = ['https://www.googleapis.com/auth/cloud-platform'];
-const ADK_LIB_NAME = 'google-adk';
+const GLOBAL_HOST = 'secretmanager.googleapis.com';
+
+/** The fields of `AccessSecretVersionResponse` this client reads. */
+interface AccessSecretVersionResponse {
+  /** Payload `data` is base64-encoded, as proto3 JSON encodes bytes. */
+  payload?: {data?: string};
+}
 
 /** Options for {@link SecretManagerClient}. */
 export interface SecretManagerClientOptions {
@@ -25,20 +30,11 @@ export interface SecretManagerClientOptions {
   authToken?: string;
   /**
    * Google Cloud region for the Secret Manager regional endpoint. When
-   * omitted, the global endpoint is used.
+   * omitted, the global endpoint is used. Only the standard endpoint is
+   * supported; the mTLS variant
+   * (`secretmanager.{location}.rep.mtls.googleapis.com`) is not ported.
    */
   location?: string;
-}
-
-/**
- * Resolves the Secret Manager API endpoint for a region.
- *
- * Only the standard endpoint is supported. mTLS endpoint selection
- * (`secretmanager.{location}.rep.mtls.googleapis.com`) is not implemented, and
- * this is the single place that computes an endpoint.
- */
-function resolveApiEndpoint(location: string): string {
-  return `secretmanager.${location}.rep.googleapis.com`;
 }
 
 function parseServiceAccountJson(serviceAccountJson: string): JWTInput {
@@ -51,9 +47,9 @@ function parseServiceAccountJson(serviceAccountJson: string): JWTInput {
 }
 
 /**
- * Builds the auth used by the generated client, in the same priority order as
- * the Python implementation: explicit service account key material, then an
- * existing access token, then Application Default Credentials.
+ * Builds the auth used by the client, in the same priority order as the Python
+ * implementation: explicit service account key material, then an existing
+ * access token, then Application Default Credentials.
  *
  * Application Default Credentials are resolved lazily on first use, so an
  * unresolvable ADC environment surfaces on the first
@@ -81,7 +77,8 @@ function resolveAuth(options: SecretManagerClientOptions): GoogleAuth {
  * Credentials when neither is provided.
  */
 export class SecretManagerClient {
-  private readonly client: SecretManagerServiceClient;
+  private readonly auth: GoogleAuth;
+  private readonly host: string;
 
   /**
    * @throws If both `serviceAccountJson` and `authToken` are provided, or if
@@ -94,14 +91,10 @@ export class SecretManagerClient {
       );
     }
 
-    this.client = new SecretManagerServiceClient({
-      auth: resolveAuth(options),
-      libName: ADK_LIB_NAME,
-      libVersion: version,
-      ...(options.location
-        ? {apiEndpoint: resolveApiEndpoint(options.location)}
-        : {}),
-    });
+    this.auth = resolveAuth(options);
+    this.host = options.location
+      ? `secretmanager.${options.location}.rep.googleapis.com`
+      : GLOBAL_HOST;
   }
 
   /**
@@ -115,15 +108,15 @@ export class SecretManagerClient {
    *   `projects/my-project/secrets/my-secret/versions/latest`.
    */
   async getSecret(resourceName: string): Promise<string> {
-    const [response] = await this.client.accessSecretVersion({
-      name: resourceName,
+    const client = await this.auth.getClient();
+    const response = await client.request<AccessSecretVersionResponse>({
+      url: `https://${this.host}/v1/${resourceName}:access`,
+      headers: {'User-Agent': `google-adk/${version}`},
     });
-    const data = response.payload?.data;
-    if (data === undefined || data === null) {
+    const data = response.data.payload?.data;
+    if (data == null) {
       throw new Error(`Secret version ${resourceName} has no payload data.`);
     }
-    return typeof data === 'string'
-      ? data
-      : Buffer.from(data).toString('utf-8');
+    return Buffer.from(data, 'base64').toString('utf-8');
   }
 }

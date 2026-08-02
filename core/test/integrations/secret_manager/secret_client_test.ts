@@ -8,25 +8,20 @@ import {SecretManagerClient, version} from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 
 const mocks = vi.hoisted(() => {
-  const secretManagerConstructor = vi.fn();
-  const accessSecretVersion = vi.fn();
+  const request = vi.fn();
   const googleAuthConstructor = vi.fn();
   const jwtConstructor = vi.fn();
   const jwtFromJSON = vi.fn();
   const oauthConstructor = vi.fn();
   const oauthSetCredentials = vi.fn();
 
-  class FakeSecretManagerServiceClient {
-    accessSecretVersion = accessSecretVersion;
-
-    constructor(options: unknown) {
-      secretManagerConstructor(options);
-    }
-  }
-
   class FakeGoogleAuth {
     constructor(options: unknown) {
       googleAuthConstructor(options);
+    }
+
+    getClient() {
+      return Promise.resolve({request});
     }
   }
 
@@ -47,23 +42,17 @@ const mocks = vi.hoisted(() => {
   }
 
   return {
-    accessSecretVersion,
     FakeGoogleAuth,
     FakeJWT,
     FakeOAuth2Client,
-    FakeSecretManagerServiceClient,
     googleAuthConstructor,
     jwtConstructor,
     jwtFromJSON,
     oauthConstructor,
     oauthSetCredentials,
-    secretManagerConstructor,
+    request,
   };
 });
-
-vi.mock('@google-cloud/secret-manager', () => ({
-  SecretManagerServiceClient: mocks.FakeSecretManagerServiceClient,
-}));
 
 vi.mock('google-auth-library', () => ({
   GoogleAuth: mocks.FakeGoogleAuth,
@@ -74,6 +63,7 @@ vi.mock('google-auth-library', () => ({
 const SCOPES = ['https://www.googleapis.com/auth/cloud-platform'];
 const RESOURCE_NAME =
   'projects/test-project/secrets/test-secret/versions/latest';
+const GLOBAL_URL = `https://secretmanager.googleapis.com/v1/${RESOURCE_NAME}:access`;
 const SERVICE_ACCOUNT = {
   type: 'service_account',
   project_id: 'test-project',
@@ -82,23 +72,25 @@ const SERVICE_ACCOUNT = {
   client_email: 'test@example.com',
 };
 
+/** Builds the shape `AuthClient.request` resolves to for a base64 payload. */
+function accessResponse(secret: string) {
+  return {data: {payload: {data: Buffer.from(secret).toString('base64')}}};
+}
+
 describe('SecretManagerClient', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   describe('constructor', () => {
-    it('uses application default credentials and the global endpoint', () => {
+    it('uses application default credentials', () => {
       new SecretManagerClient();
 
       expect(mocks.googleAuthConstructor).toHaveBeenCalledExactlyOnceWith({
         scopes: SCOPES,
       });
-      expect(mocks.secretManagerConstructor).toHaveBeenCalledExactlyOnceWith({
-        auth: expect.any(mocks.FakeGoogleAuth),
-        libName: 'google-adk',
-        libVersion: version,
-      });
+      expect(mocks.jwtConstructor).not.toHaveBeenCalled();
+      expect(mocks.oauthConstructor).not.toHaveBeenCalled();
     });
 
     it('builds a JWT client from service account JSON', () => {
@@ -133,22 +125,11 @@ describe('SecretManagerClient', () => {
       expect(mocks.jwtConstructor).not.toHaveBeenCalled();
     });
 
-    it('targets the regional endpoint when a location is given', () => {
-      new SecretManagerClient({location: 'us-central1'});
-
-      expect(mocks.secretManagerConstructor).toHaveBeenCalledExactlyOnceWith({
-        auth: expect.any(mocks.FakeGoogleAuth),
-        libName: 'google-adk',
-        libVersion: version,
-        apiEndpoint: 'secretmanager.us-central1.rep.googleapis.com',
-      });
-    });
-
     it('rejects service account JSON that does not parse', () => {
       expect(
         () => new SecretManagerClient({serviceAccountJson: 'invalid-json'}),
       ).toThrow(/Invalid service account JSON/);
-      expect(mocks.secretManagerConstructor).not.toHaveBeenCalled();
+      expect(mocks.googleAuthConstructor).not.toHaveBeenCalled();
     });
 
     it('rejects both service account JSON and an auth token', () => {
@@ -162,30 +143,13 @@ describe('SecretManagerClient', () => {
         "Must provide either 'serviceAccountJson' or 'authToken', not both.",
       );
       expect(mocks.jwtConstructor).not.toHaveBeenCalled();
-      expect(mocks.secretManagerConstructor).not.toHaveBeenCalled();
+      expect(mocks.googleAuthConstructor).not.toHaveBeenCalled();
     });
   });
 
   describe('getSecret', () => {
-    it('decodes a Buffer payload as UTF-8', async () => {
-      mocks.accessSecretVersion.mockResolvedValue([
-        {payload: {data: Buffer.from('secret-value')}},
-      ]);
-
-      const client = new SecretManagerClient();
-
-      await expect(client.getSecret(RESOURCE_NAME)).resolves.toBe(
-        'secret-value',
-      );
-      expect(mocks.accessSecretVersion).toHaveBeenCalledExactlyOnceWith({
-        name: RESOURCE_NAME,
-      });
-    });
-
-    it('decodes a Uint8Array payload as UTF-8', async () => {
-      mocks.accessSecretVersion.mockResolvedValue([
-        {payload: {data: new TextEncoder().encode('sécret-välue')}},
-      ]);
+    it('decodes the base64 payload as UTF-8', async () => {
+      mocks.request.mockResolvedValue(accessResponse('sécret-välue'));
 
       const client = new SecretManagerClient();
 
@@ -194,20 +158,40 @@ describe('SecretManagerClient', () => {
       );
     });
 
-    it('returns a string payload unchanged', async () => {
-      mocks.accessSecretVersion.mockResolvedValue([
-        {payload: {data: 'secret-value'}},
-      ]);
+    it('requests the global endpoint and identifies itself by version', async () => {
+      mocks.request.mockResolvedValue(accessResponse('secret-value'));
+
+      const client = new SecretManagerClient();
+      await client.getSecret(RESOURCE_NAME);
+
+      expect(mocks.request).toHaveBeenCalledExactlyOnceWith({
+        url: GLOBAL_URL,
+        headers: {'User-Agent': `google-adk/${version}`},
+      });
+    });
+
+    it('requests the regional endpoint when a location is given', async () => {
+      mocks.request.mockResolvedValue(accessResponse('secret-value'));
+
+      const client = new SecretManagerClient({location: 'us-central1'});
+      await client.getSecret(RESOURCE_NAME);
+
+      expect(mocks.request).toHaveBeenCalledExactlyOnceWith({
+        url: `https://secretmanager.us-central1.rep.googleapis.com/v1/${RESOURCE_NAME}:access`,
+        headers: {'User-Agent': `google-adk/${version}`},
+      });
+    });
+
+    it('returns an empty string for an empty secret', async () => {
+      mocks.request.mockResolvedValue(accessResponse(''));
 
       const client = new SecretManagerClient();
 
-      await expect(client.getSecret(RESOURCE_NAME)).resolves.toBe(
-        'secret-value',
-      );
+      await expect(client.getSecret(RESOURCE_NAME)).resolves.toBe('');
     });
 
     it('rejects when the response carries no payload', async () => {
-      mocks.accessSecretVersion.mockResolvedValue([{}]);
+      mocks.request.mockResolvedValue({data: {}});
 
       const client = new SecretManagerClient();
 
@@ -217,7 +201,7 @@ describe('SecretManagerClient', () => {
     });
 
     it('rejects when the payload data is null', async () => {
-      mocks.accessSecretVersion.mockResolvedValue([{payload: {data: null}}]);
+      mocks.request.mockResolvedValue({data: {payload: {data: null}}});
 
       const client = new SecretManagerClient();
 
@@ -228,7 +212,7 @@ describe('SecretManagerClient', () => {
 
     it('propagates API errors unchanged', async () => {
       const apiError = new Error('Secret error');
-      mocks.accessSecretVersion.mockRejectedValue(apiError);
+      mocks.request.mockRejectedValue(apiError);
 
       const client = new SecretManagerClient();
 

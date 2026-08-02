@@ -37,11 +37,6 @@
     "dev",
     "integrations"
   ],
-  "overrides": {
-    "google-gax": {
-      "google-auth-library": "^10.3.0"
-    }
-  },
   "devDependencies": {
     "@eslint/js": "^9.37.0",
     "@google/genai": "^2.9.0",
