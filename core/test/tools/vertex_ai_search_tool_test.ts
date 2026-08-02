@@ -6,45 +6,76 @@
 
 import {afterEach, describe, expect, it} from 'vitest';
 import {Context} from '../../src/agents/context.js';
+import {InvocationContext} from '../../src/agents/invocation_context.js';
+import {LlmAgent} from '../../src/agents/llm_agent.js';
 import {LlmRequest} from '../../src/models/llm_request.js';
-import {VertexAiSearchTool} from '../../src/tools/vertex_ai_search_tool.js';
+import {PluginManager} from '../../src/plugins/plugin_manager.js';
+import {createSession} from '../../src/sessions/session.js';
+import {
+  BaseVertexAiSearchToolParams,
+  VertexAISearchDataStoreSpec,
+  VertexAiSearchTool,
+  VertexAiSearchToolParams,
+} from '../../src/tools/vertex_ai_search_tool.js';
 
-interface TestTool {
-  retrieval?: {
-    vertexAiSearch?: {
-      datastore?: string;
-      dataStoreSpecs?: Array<{dataStore?: string}>;
-      engine?: string;
-      filter?: string;
-      maxResults?: number;
-    };
-  };
+/**
+ * The params object the constructor destructures before it validates.
+ *
+ * `VertexAiSearchToolParams` marks the opposite id `?: never` in each arm, so
+ * the combinations the runtime guard rejects — both ids, neither id, or
+ * `dataStoreSpecs` without `searchEngineId` — cannot be spelled as a typed
+ * literal, even though untyped JavaScript and config-driven callers do send
+ * them.
+ */
+interface UnvalidatedParams extends BaseVertexAiSearchToolParams {
+  dataStoreId?: string;
+  searchEngineId?: string;
+  dataStoreSpecs?: VertexAISearchDataStoreSpec[];
+}
+
+function newToolWithUnvalidatedParams(
+  params: UnvalidatedParams,
+): VertexAiSearchTool {
+  return new VertexAiSearchTool(params as VertexAiSearchToolParams);
+}
+
+/**
+ * Builds a real `Context` backed by a real `InvocationContext` and `Session`,
+ * the way the agent request loop invokes `processLlmRequest`.
+ */
+function createToolContext(): Context {
+  const session = createSession({id: 'test-session', appName: 'test-app'});
+  const invocationContext = new InvocationContext({
+    invocationId: 'test-invocation',
+    agent: new LlmAgent({name: 'test_agent', model: 'gemini-2.0-flash'}),
+    session,
+    pluginManager: new PluginManager([]),
+  });
+  return new Context({invocationContext});
 }
 
 describe('VertexAiSearchTool', () => {
   it('should throw error if neither dataStoreId nor searchEngineId is specified', () => {
-    expect(() => new VertexAiSearchTool({})).toThrowError(
+    expect(() => newToolWithUnvalidatedParams({})).toThrowError(
       'Either dataStoreId or searchEngineId must be specified.',
     );
   });
 
   it('should throw error if both dataStoreId and searchEngineId are specified', () => {
-    expect(
-      () =>
-        new VertexAiSearchTool({
-          dataStoreId: 'ds',
-          searchEngineId: 'se',
-        }),
+    expect(() =>
+      newToolWithUnvalidatedParams({
+        dataStoreId: 'ds',
+        searchEngineId: 'se',
+      }),
     ).toThrowError('Either dataStoreId or searchEngineId must be specified.');
   });
 
   it('should throw error if dataStoreSpecs is specified without searchEngineId', () => {
-    expect(
-      () =>
-        new VertexAiSearchTool({
-          dataStoreId: 'ds',
-          dataStoreSpecs: [{dataStore: 'ds1'}],
-        }),
+    expect(() =>
+      newToolWithUnvalidatedParams({
+        dataStoreId: 'ds',
+        dataStoreSpecs: [{dataStore: 'ds1'}],
+      }),
     ).toThrowError(
       'searchEngineId must be specified if dataStoreSpecs is specified.',
     );
@@ -70,17 +101,20 @@ describe('VertexAiSearchTool', () => {
     });
     const llmRequest: LlmRequest = {
       model: 'gemini-2.0-flash',
+      contents: [],
+      liveConnectConfig: {},
       toolsDict: {},
     };
-    const toolContext = {} as Context;
+    const toolContext = createToolContext();
 
     await tool.processLlmRequest({toolContext, llmRequest});
 
     expect(llmRequest.config?.tools).toHaveLength(1);
-    expect(
-      (llmRequest.config?.tools?.[0] as unknown as TestTool).retrieval
-        ?.vertexAiSearch,
-    ).toEqual({
+    const [appendedTool] = llmRequest.config?.tools ?? [];
+    if (!appendedTool || !('retrieval' in appendedTool)) {
+      expect.fail('Expected a retrieval tool on the LLM request.');
+    }
+    expect(appendedTool.retrieval?.vertexAiSearch).toEqual({
       datastore: 'ds',
       dataStoreSpecs: undefined,
       engine: undefined,
@@ -93,12 +127,14 @@ describe('VertexAiSearchTool', () => {
     const tool = new VertexAiSearchTool({dataStoreId: 'ds'});
     const llmRequest: LlmRequest = {
       model: 'gemini-1.5-pro',
+      contents: [],
+      liveConnectConfig: {},
       toolsDict: {},
       config: {
         tools: [{functionDeclarations: []}],
       },
     };
-    const toolContext = {} as Context;
+    const toolContext = createToolContext();
 
     await expect(
       tool.processLlmRequest({toolContext, llmRequest}),
@@ -114,12 +150,14 @@ describe('VertexAiSearchTool', () => {
     });
     const llmRequest: LlmRequest = {
       model: 'gemini-1.5-pro',
+      contents: [],
+      liveConnectConfig: {},
       toolsDict: {},
       config: {
         tools: [{functionDeclarations: []}],
       },
     };
-    const toolContext = {} as Context;
+    const toolContext = createToolContext();
 
     await tool.processLlmRequest({toolContext, llmRequest});
 
@@ -130,9 +168,11 @@ describe('VertexAiSearchTool', () => {
     const tool = new VertexAiSearchTool({dataStoreId: 'ds'});
     const llmRequest: LlmRequest = {
       model: 'claude-3',
+      contents: [],
+      liveConnectConfig: {},
       toolsDict: {},
     };
-    const toolContext = {} as Context;
+    const toolContext = createToolContext();
 
     await expect(
       tool.processLlmRequest({toolContext, llmRequest}),
@@ -157,9 +197,11 @@ describe('VertexAiSearchTool', () => {
       const tool = new VertexAiSearchTool({dataStoreId: 'ds'});
       const llmRequest: LlmRequest = {
         model: 'claude-3',
+        contents: [],
+        liveConnectConfig: {},
         toolsDict: {},
       };
-      const toolContext = {} as Context;
+      const toolContext = createToolContext();
 
       await tool.processLlmRequest({toolContext, llmRequest});
 
