@@ -9,7 +9,11 @@
     "paths": {
       "@google/adk": ["../src/index.ts"]
     }
-  }
-  // No `include`/`exclude`: a project with neither picks up every `.ts` file
-  // under its own directory, i.e. exactly `core/test/**`.
+  },
+  // Both keys are load-bearing. `exclude` is inherited through `extends`, and
+  // an inherited relative path resolves against the config that declared it, so
+  // omitting `exclude` here would inherit the root's `core/test` entry and
+  // leave this project with no inputs at all (TS18003).
+  "include": ["**/*.ts"],
+  "exclude": ["node_modules"]
 }

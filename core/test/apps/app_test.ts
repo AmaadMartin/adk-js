@@ -30,10 +30,16 @@ class DummyPlugin extends BasePlugin {
   }
 }
 
-/** Constructs an {@link App} from a `rootAgent` `AppOptions` cannot spell. */
+/**
+ * Constructs an {@link App} from a `rootAgent` `AppOptions` cannot spell.
+ *
+ * `AppOptions.rootAgent` is typed `BaseAgent`, so the `undefined` and
+ * non-agent values the constructor guards against are unreachable through the
+ * typed API. They reach it from untyped JavaScript and config-driven callers,
+ * which is what this models.
+ */
 function newAppWithUnvalidatedRootAgent(rootAgent: unknown): App {
-  // @ts-expect-error exercising App's runtime rootAgent guard with a value AppOptions.rootAgent (typed BaseAgent) cannot express.
-  return new App({name: 'test_app', rootAgent});
+  return new App({name: 'test_app', rootAgent: rootAgent as BaseAgent});
 }
 
 describe('validateAppName', () => {

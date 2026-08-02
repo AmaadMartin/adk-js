@@ -8,5 +8,6 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "experimentalDecorators": true
-  }
+  },
+  "exclude": ["node_modules", "core/test"]
 }

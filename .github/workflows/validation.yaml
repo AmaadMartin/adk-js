@@ -37,8 +37,8 @@ jobs:
       - name: Build packages
         run: npm run build
 
-      - name: Run workspace test typecheck
-        run: npm run ts:check:workspace-tests
+      - name: Type-check core tests
+        run: npm run ts:check:core-test
 
       - name: Run tests and check code coverage
         run: npm run test:coverage
