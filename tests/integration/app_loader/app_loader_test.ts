@@ -6,59 +6,18 @@
 
 import {App, isApp, isBaseAgent} from '@google/adk';
 import {exec, spawn} from 'node:child_process';
-import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import {promisify} from 'node:util';
 import {afterAll, beforeAll, describe, expect, it} from 'vitest';
 import {AgentLoader} from '../../../dev/src/utils/agent_loader.js';
-import {sendInput} from '../test_case_utils.js';
+import {
+  cleanUpFixture,
+  removeInstallArtifacts,
+  sendInput,
+} from '../test_case_utils.js';
 
 const execAsync = promisify(exec);
 const dirname = process.cwd();
-
-// Budget (ms) for the install hooks below. They run `npm install` in a fixture
-// project, which resolves the full transitive tree for `@google/adk` and
-// `@google/adk-devtools`; a cold, network-bound install runs well past 40s on a
-// loaded runner, and when the hook is killed mid-install it leaves a partial
-// `node_modules` that changes the next run's cost. Matches HOOK_TIMEOUT in
-// build_setup_test.ts and INTEGRATION_HOOK_TIMEOUT_MS in vitest.config.ts.
-// Trade-off: a genuinely stuck install now takes this long to surface.
-// The per-test budget is intentionally not set in this file - the `integration`
-// project in vitest.config.ts supplies it (INTEGRATION_TEST_TIMEOUT_MS).
-const HOOK_TIMEOUT = 120000;
-
-/**
- * Deletes everything `npm install` writes into a fixture project.
- *
- * `force: true` makes a missing path a no-op, so anything that still rejects
- * here is a real failure (EACCES, EPERM, EBUSY) rather than "already gone".
- */
-async function removeInstallArtifacts(projectPath: string): Promise<void> {
-  // `maxRetries`/`retryDelay` absorb the transient unlink races that recursive
-  // `node_modules` removal hits on Windows. Node ignores both unless
-  // `recursive` is set, so the lockfile removal below does not pass them.
-  await fs.rm(path.join(projectPath, 'node_modules'), {
-    force: true,
-    recursive: true,
-    maxRetries: 3,
-    retryDelay: 100,
-  });
-  await fs.rm(path.join(projectPath, 'package-lock.json'), {force: true});
-}
-
-/**
- * Teardown variant of {@link removeInstallArtifacts}. Every `beforeAll` below
- * re-cleans before installing, so determinism no longer depends on teardown
- * succeeding: a failure here must not fail an otherwise green suite, but it
- * must still be visible.
- */
-async function cleanUpFixture(projectPath: string): Promise<void> {
-  try {
-    await removeInstallArtifacts(projectPath);
-  } catch (error) {
-    console.warn(`Failed to clean up fixture at ${projectPath}:`, error);
-  }
-}
 
 describe('App loader CLI integration', () => {
   describe.each(['app_ts', 'app_js', 'app_default'])(
@@ -71,12 +30,11 @@ describe('App loader CLI integration', () => {
       );
 
       beforeAll(async () => {
-        // A run killed mid-install leaves a partial node_modules behind, and
-        // installing on top of it is what made this suite fail on alternate
-        // runs.
+        // A run killed mid-install leaves a partial node_modules that
+        // `npm install` does not clear, coupling this run to the last one.
         await removeInstallArtifacts(projectPath);
         await execAsync('npm install', {cwd: projectPath});
-      }, HOOK_TIMEOUT);
+      });
 
       it('should run app via package.json start script and get responses', async () => {
         const childProcess = spawn('npm', ['run', 'start'], {
@@ -95,7 +53,7 @@ describe('App loader CLI integration', () => {
         expect(response.toString()).toContain('');
       });
 
-      afterAll(() => cleanUpFixture(projectPath), HOOK_TIMEOUT);
+      afterAll(() => cleanUpFixture(projectPath));
     },
   );
 });
@@ -105,15 +63,14 @@ describe('AgentLoader discovery and loading integration', () => {
     dirname,
     'tests/integration/app_loader/discovery',
   );
-  // Constructed here rather than in `beforeAll`: the constructor only records
-  // the directory and registers exit handlers, so it cannot fail, and an
-  // install failure can no longer leave `afterAll` with an undefined `loader`.
+  // Constructed eagerly so a failed install cannot leave `afterAll` with an
+  // undefined `loader`; the constructor touches no filesystem.
   const loader = new AgentLoader(projectPath);
 
   beforeAll(async () => {
     await removeInstallArtifacts(projectPath);
     await execAsync('npm install', {cwd: projectPath});
-  }, HOOK_TIMEOUT);
+  });
 
   it('should discover apps vs agents across directories and standalone files', async () => {
     const apps = await loader.listApps();
@@ -158,5 +115,5 @@ describe('AgentLoader discovery and loading integration', () => {
     } finally {
       await cleanUpFixture(projectPath);
     }
-  }, HOOK_TIMEOUT);
+  });
 });
