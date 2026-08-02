@@ -7,8 +7,8 @@
 import {AgentRegistry, InMemoryRunner, LlmAgent} from '@google/adk';
 import {createUserContent} from '@google/genai';
 import * as dotenv from 'dotenv';
-import * as fs from 'fs';
-import * as path from 'path';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import {describe, expect, it} from 'vitest';
 
 describe('E2E Live Agent Registry', () => {
