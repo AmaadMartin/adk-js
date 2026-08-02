@@ -6,6 +6,7 @@
 import {
   BaseAgent,
   Event,
+  EventActions,
   InMemorySessionService,
   isLlmAgent,
   Runner,
@@ -17,12 +18,7 @@ import * as assert from 'node:assert';
 import {AgentRegistry} from './agent_registry.js';
 import {DummyLlm} from './dummy_llm.js';
 import {ReplayPlugin} from './replay_plugin.js';
-import {
-  FilteredEvent,
-  FilteredEventActions,
-  TestInfo,
-  UserMessage,
-} from './test_types.js';
+import {FilteredEvent, TestInfo, UserMessage} from './test_types.js';
 
 const SKIPPED_TESTS = [
   {
@@ -198,7 +194,7 @@ function removeEmptyAndUndefinedFields(obj: Record<string, unknown>) {
   }
 }
 
-function filterEventActionsStateDelta(actions?: FilteredEventActions) {
+function filterEventActionsStateDelta(actions?: EventActions) {
   if (!actions?.stateDelta) {
     return;
   }
@@ -213,14 +209,13 @@ function filterPartFields(part: Part) {
   delete part.functionResponse;
 }
 
-function filterEventFields(event: Event) {
-  // id, invocationId and timestamp are required on Event, so a direct delete is
-  // a TS2790 error; Partial<Event> is the view that makes them deletable.
-  const strippable: Partial<Event> = event;
-  delete strippable.id;
-  delete strippable.timestamp;
-  delete strippable.invocationId;
-  delete strippable.longRunningToolIds;
+// Takes Partial<Event> because id, invocationId and timestamp are required on
+// Event, and deleting a non-optional property is a TS2790 error.
+function filterEventFields(event: Partial<Event>) {
+  delete event.id;
+  delete event.timestamp;
+  delete event.invocationId;
+  delete event.longRunningToolIds;
 
   filterEventActionsStateDelta(event.actions);
 
