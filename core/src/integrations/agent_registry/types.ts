@@ -32,12 +32,7 @@ export interface Endpoint {
   attributes?: Record<string, unknown>;
 }
 
-export interface GcpAuthProviderScheme {
-  type: 'gcpAuthProviderScheme';
-  name: string;
-  scopes?: string[];
-  continueUri?: string;
-}
+export type {GcpAuthProviderScheme} from '../agent_identity/gcp_auth_provider_scheme.js';
 
 export interface McpServer {
   name?: string;
