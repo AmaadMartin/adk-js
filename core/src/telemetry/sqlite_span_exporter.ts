@@ -331,12 +331,7 @@ export class SqliteSpanExporter implements SpanExporter {
     }
 
     const orm = await this.init();
-    // A single upsert statement must not target the same primary key twice.
-    const rows = new Map<string, EntityData<StorageSpan>>();
-    for (const span of spans) {
-      rows.set(span.spanContext().spanId, toStorageSpanData(span));
-    }
-    await orm.em.fork().upsertMany(StorageSpan, [...rows.values()]);
+    await orm.em.fork().upsertMany(StorageSpan, spans.map(toStorageSpanData));
   }
 
   private init(): Promise<MikroORM> {
