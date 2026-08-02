@@ -42,24 +42,38 @@ export interface ExtendedFunctionCallStep
   signature?: string;
 }
 
-// Runtime event types can be more relaxed than compile-time
+// Runtime event types can be more relaxed than compile-time.
+//
+// `Omit` over the `InteractionSSEEvent` union keeps only the keys every variant
+// shares, so the variant-specific payloads are redeclared here: `step` is sent
+// on `step.start`, and `delta` on `step.delta`. Both are optional because a
+// single event carries at most one of them.
 export interface ExtendedInteractionSSEEvent extends Omit<
   Interactions.InteractionSSEEvent,
   'error' | 'interaction_id' | 'status' | 'event_type'
 > {
   event_type?: string;
   eventType?: string;
+  step?: {
+    type: string;
+    id?: string;
+    name?: string;
+    signature?: string;
+    content?: Interactions.Content[];
+  };
   delta?: {
     type: string;
     text?: string;
     name?: string;
     id?: string;
-    arguments?: Record<string, unknown>;
+    // A partial JSON string, per `Interactions.ArgumentsDelta`.
+    arguments?: string;
     thought_signature?: string;
     signature?: string;
     data?: string;
     uri?: string;
-    mime_type: string;
+    // Absent on text, arguments and signature deltas.
+    mime_type?: string;
   };
   status?: string;
   error?: {
@@ -595,14 +609,15 @@ export function convertInteractionEventToLlmResponse(
   const eventType = event.event_type || event.eventType;
 
   if (eventType === 'step.start') {
-    const stepStart = event as unknown as Interactions.StepStart;
-    const step = stepStart.step;
+    const step = event.step;
+    if (!step) {
+      return null;
+    }
     if (step.type === 'function_call') {
-      const fcStep = step as ExtendedFunctionCallStep;
       const part: Part = {
         functionCall: {
-          id: fcStep.id,
-          name: fcStep.name,
+          id: step.id,
+          name: step.name,
           args: {},
         },
         partMetadata: {
@@ -610,8 +625,8 @@ export function convertInteractionEventToLlmResponse(
           isComplete: false,
         },
       };
-      if (fcStep.signature) {
-        part.thoughtSignature = fcStep.signature;
+      if (step.signature) {
+        part.thoughtSignature = step.signature;
       }
       aggregatedParts.push(part);
       return null;
@@ -630,8 +645,7 @@ export function convertInteractionEventToLlmResponse(
       return null;
     }
   } else if (eventType === 'step.delta') {
-    const stepDelta = event as unknown as Interactions.StepDelta;
-    const delta = stepDelta.delta;
+    const delta = event.delta;
     if (!delta) {
       return null;
     }
@@ -861,9 +875,12 @@ function extractStreamInteractionId(
 
 /**
  * Generate content using the interactions API.
+ *
+ * Declared structurally: this path uses only `interactions.create`, so any
+ * client exposing it will do.
  */
 export async function* generateContentViaInteractions(
-  apiClient: GoogleGenAI,
+  apiClient: {interactions: Pick<GoogleGenAI['interactions'], 'create'>},
   llmRequest: LlmRequest,
   stream: boolean,
 ): AsyncGenerator<LlmResponse, void, void> {

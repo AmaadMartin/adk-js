@@ -10,7 +10,6 @@ import {
   FunctionCall,
   FunctionResponse,
   GenerateContentConfig,
-  GoogleGenAI,
   Interactions,
   Language,
   Outcome,
@@ -33,52 +32,6 @@ import {
 } from '../../src/models/interactions_utils.js';
 import {LlmRequest} from '../../src/models/llm_request.js';
 import {LlmResponse} from '../../src/models/llm_response.js';
-
-/**
- * The raw `step` payload an interactions SSE stream sends on `step.start`.
- *
- * `Interactions.Step` is a closed union whose members require fields the wire
- * omits (`FunctionCallStep.arguments` has not streamed in yet at `step.start`),
- * so the events below describe what the stream actually sends.
- */
-interface RawSseStep {
-  type: string;
-  id?: string;
-  name?: string;
-  signature?: string;
-  content?: Interactions.Content[];
-}
-
-/** The raw `delta` payload an interactions SSE stream sends on `step.delta`. */
-interface RawSseDelta {
-  type: string;
-  text?: string;
-  arguments?: string;
-  signature?: string;
-  data?: string;
-  uri?: string;
-  mime_type?: string;
-}
-
-/**
- * A raw interactions SSE payload.
- *
- * `ExtendedInteractionSSEEvent` is built with `Omit` over the
- * `Interactions.InteractionSSEEvent` union, so it keeps only the keys every
- * variant shares. Two wire shapes therefore cannot be expressed with it:
- * `step`, sent on `step.start`, is not a member at all, and its `delta`
- * requires `mime_type` and types `arguments` as an object even though text
- * deltas carry no mime type and argument deltas stream a partial JSON string.
- */
-interface RawSseEvent extends Omit<ExtendedInteractionSSEEvent, 'delta'> {
-  step?: RawSseStep;
-  delta?: RawSseDelta;
-}
-
-/** Presents a raw wire payload as the event type the converter accepts. */
-function asSseEvent(event: RawSseEvent): ExtendedInteractionSSEEvent {
-  return event as unknown as ExtendedInteractionSSEEvent;
-}
 
 describe('interactions_utils', () => {
   describe('getLatestUserContents', () => {
@@ -844,7 +797,7 @@ describe('interactions_utils', () => {
 
   describe('convertInteractionEventToLlmResponse', () => {
     it('should handle step.delta text event', () => {
-      const event: RawSseEvent = {
+      const event: ExtendedInteractionSSEEvent = {
         event_type: 'step.delta',
         delta: {
           type: 'text',
@@ -853,7 +806,7 @@ describe('interactions_utils', () => {
       };
       const aggregatedParts: Part[] = [];
       const response = convertInteractionEventToLlmResponse(
-        asSseEvent(event),
+        event,
         aggregatedParts,
         'int-1',
       );
@@ -871,7 +824,7 @@ describe('interactions_utils', () => {
       const aggregatedParts: Part[] = [];
 
       // 1. Step Start
-      const startEvent: RawSseEvent = {
+      const startEvent: ExtendedInteractionSSEEvent = {
         event_type: 'step.start',
         step: {
           type: 'function_call',
@@ -880,7 +833,7 @@ describe('interactions_utils', () => {
         },
       };
       let response = convertInteractionEventToLlmResponse(
-        asSseEvent(startEvent),
+        startEvent,
         aggregatedParts,
         'int-1',
       );
@@ -897,7 +850,7 @@ describe('interactions_utils', () => {
       });
 
       // 2. Step Delta (arguments chunk 1)
-      const deltaEvent1: RawSseEvent = {
+      const deltaEvent1: ExtendedInteractionSSEEvent = {
         event_type: 'step.delta',
         delta: {
           type: 'arguments_delta',
@@ -905,7 +858,7 @@ describe('interactions_utils', () => {
         },
       };
       response = convertInteractionEventToLlmResponse(
-        asSseEvent(deltaEvent1),
+        deltaEvent1,
         aggregatedParts,
         'int-1',
       );
@@ -913,7 +866,7 @@ describe('interactions_utils', () => {
       expect(aggregatedParts[0].partMetadata?.accumulatedArgs).toBe('{"x":');
 
       // 3. Step Delta (arguments chunk 2)
-      const deltaEvent2: RawSseEvent = {
+      const deltaEvent2: ExtendedInteractionSSEEvent = {
         event_type: 'step.delta',
         delta: {
           type: 'arguments_delta',
@@ -921,7 +874,7 @@ describe('interactions_utils', () => {
         },
       };
       response = convertInteractionEventToLlmResponse(
-        asSseEvent(deltaEvent2),
+        deltaEvent2,
         aggregatedParts,
         'int-1',
       );
@@ -929,11 +882,11 @@ describe('interactions_utils', () => {
       expect(aggregatedParts[0].partMetadata?.accumulatedArgs).toBe('{"x": 1}');
 
       // 4. Step Stop
-      const stopEvent: RawSseEvent = {
+      const stopEvent: ExtendedInteractionSSEEvent = {
         event_type: 'step.stop',
       };
       response = convertInteractionEventToLlmResponse(
-        asSseEvent(stopEvent),
+        stopEvent,
         aggregatedParts,
         'int-1',
       );
@@ -961,7 +914,7 @@ describe('interactions_utils', () => {
 
     it('should handle step.start thought event', () => {
       const aggregatedParts: Part[] = [];
-      const event: RawSseEvent = {
+      const event: ExtendedInteractionSSEEvent = {
         event_type: 'step.start',
         step: {
           type: 'thought',
@@ -969,7 +922,7 @@ describe('interactions_utils', () => {
         },
       };
       const response = convertInteractionEventToLlmResponse(
-        asSseEvent(event),
+        event,
         aggregatedParts,
         'int-1',
       );
@@ -986,13 +939,13 @@ describe('interactions_utils', () => {
     });
 
     it('should handle interaction.status_update completed event', () => {
-      const event: RawSseEvent = {
+      const event: ExtendedInteractionSSEEvent = {
         event_type: 'interaction.status_update',
         status: 'completed',
       };
       const aggregatedParts: Part[] = [{text: 'final text'}];
       const response = convertInteractionEventToLlmResponse(
-        asSseEvent(event),
+        event,
         aggregatedParts,
         'int-1',
       );
@@ -1034,7 +987,7 @@ describe('interactions_utils', () => {
       };
 
       const generator = generateContentViaInteractions(
-        mockApiClient as unknown as GoogleGenAI,
+        mockApiClient,
         llmRequest,
         false,
       );
@@ -1066,7 +1019,7 @@ describe('interactions_utils', () => {
     });
 
     it('should handle streaming call', async () => {
-      const mockEvents: RawSseEvent[] = [
+      const mockEvents: ExtendedInteractionSSEEvent[] = [
         {
           event_type: 'step.start',
           step: {
@@ -1113,7 +1066,7 @@ describe('interactions_utils', () => {
       };
 
       const generator = generateContentViaInteractions(
-        mockApiClient as unknown as GoogleGenAI,
+        mockApiClient,
         llmRequest,
         true,
       );
@@ -1186,7 +1139,7 @@ describe('interactions_utils', () => {
       };
 
       const generator = generateContentViaInteractions(
-        mockApiClient as unknown as GoogleGenAI,
+        mockApiClient,
         llmRequest,
         false,
       );
@@ -1213,7 +1166,7 @@ describe('interactions_utils', () => {
     });
 
     it('should handle streaming call with interaction event and extract interaction ID', async () => {
-      const mockEvents: RawSseEvent[] = [
+      const mockEvents: ExtendedInteractionSSEEvent[] = [
         {
           event_type: 'step.start',
           step: {
@@ -1256,7 +1209,7 @@ describe('interactions_utils', () => {
       };
 
       const generator = generateContentViaInteractions(
-        mockApiClient as unknown as GoogleGenAI,
+        mockApiClient,
         llmRequest,
         true,
       );
@@ -1316,7 +1269,7 @@ describe('interactions_utils', () => {
       };
 
       const generator = generateContentViaInteractions(
-        mockApiClient as unknown as GoogleGenAI,
+        mockApiClient,
         llmRequest,
         false,
       );
@@ -1388,7 +1341,7 @@ describe('interactions_utils', () => {
       };
 
       const generator = generateContentViaInteractions(
-        mockApiClient as unknown as GoogleGenAI,
+        mockApiClient,
         llmRequest,
         true,
       );
@@ -1717,7 +1670,7 @@ describe('interactions_utils', () => {
 
   describe('convertInteractionEventToLlmResponse extra cases', () => {
     it('should handle step.delta image event (data)', () => {
-      const event: RawSseEvent = {
+      const event: ExtendedInteractionSSEEvent = {
         event_type: 'step.delta',
         delta: {
           type: 'image',
@@ -1727,7 +1680,7 @@ describe('interactions_utils', () => {
       };
       const aggregatedParts: Part[] = [];
       const response = convertInteractionEventToLlmResponse(
-        asSseEvent(event),
+        event,
         aggregatedParts,
         'int-1',
       );
@@ -1750,7 +1703,7 @@ describe('interactions_utils', () => {
     });
 
     it('should handle step.delta image event (uri)', () => {
-      const event: RawSseEvent = {
+      const event: ExtendedInteractionSSEEvent = {
         event_type: 'step.delta',
         delta: {
           type: 'image',
@@ -1760,7 +1713,7 @@ describe('interactions_utils', () => {
       };
       const aggregatedParts: Part[] = [];
       const response = convertInteractionEventToLlmResponse(
-        asSseEvent(event),
+        event,
         aggregatedParts,
         'int-1',
       );
@@ -1783,7 +1736,7 @@ describe('interactions_utils', () => {
     });
 
     it('should handle interaction.status_update failed event', () => {
-      const event: RawSseEvent = {
+      const event: ExtendedInteractionSSEEvent = {
         event_type: 'interaction.status_update',
         status: 'failed',
         error: {
@@ -1791,11 +1744,7 @@ describe('interactions_utils', () => {
           message: 'user cancelled',
         },
       };
-      const response = convertInteractionEventToLlmResponse(
-        asSseEvent(event),
-        [],
-        'int-1',
-      );
+      const response = convertInteractionEventToLlmResponse(event, [], 'int-1');
       expect(response).toEqual({
         errorCode: 'CANCELLED',
         errorMessage: 'user cancelled',
@@ -1805,15 +1754,11 @@ describe('interactions_utils', () => {
     });
 
     it('should handle interaction.status_update failed event with missing error', () => {
-      const event: RawSseEvent = {
+      const event: ExtendedInteractionSSEEvent = {
         event_type: 'interaction.status_update',
         status: 'failed',
       };
-      const response = convertInteractionEventToLlmResponse(
-        asSseEvent(event),
-        [],
-        'int-1',
-      );
+      const response = convertInteractionEventToLlmResponse(event, [], 'int-1');
       expect(response).toEqual({
         errorCode: 'UNKNOWN_ERROR',
         errorMessage: 'Unknown error',
@@ -1823,13 +1768,13 @@ describe('interactions_utils', () => {
     });
 
     it('should handle interaction.status_update completed event with aggregated parts', () => {
-      const event: RawSseEvent = {
+      const event: ExtendedInteractionSSEEvent = {
         event_type: 'interaction.status_update',
         status: 'completed',
       };
       const parts = [{text: 'part 1'}];
       const response = convertInteractionEventToLlmResponse(
-        asSseEvent(event),
+        event,
         parts,
         'int-1',
       );
@@ -1843,16 +1788,12 @@ describe('interactions_utils', () => {
     });
 
     it('should handle error event', () => {
-      const event: RawSseEvent = {
+      const event: ExtendedInteractionSSEEvent = {
         event_type: 'error',
         code: 'INTERNAL',
         message: 'internal error',
       };
-      const response = convertInteractionEventToLlmResponse(
-        asSseEvent(event),
-        [],
-        'int-1',
-      );
+      const response = convertInteractionEventToLlmResponse(event, [], 'int-1');
       expect(response).toEqual({
         errorCode: 'INTERNAL',
         errorMessage: 'internal error',
@@ -1862,14 +1803,10 @@ describe('interactions_utils', () => {
     });
 
     it('should handle error event with missing code and message', () => {
-      const event: RawSseEvent = {
+      const event: ExtendedInteractionSSEEvent = {
         event_type: 'error',
       };
-      const response = convertInteractionEventToLlmResponse(
-        asSseEvent(event),
-        [],
-        'int-1',
-      );
+      const response = convertInteractionEventToLlmResponse(event, [], 'int-1');
       expect(response).toEqual({
         errorCode: 'UNKNOWN_ERROR',
         errorMessage: 'Unknown error',
@@ -1879,17 +1816,22 @@ describe('interactions_utils', () => {
     });
 
     it('should return null if event.delta is missing in step.delta event', () => {
-      const event: RawSseEvent = {
+      const event: ExtendedInteractionSSEEvent = {
         event_type: 'step.delta',
       };
-      expect(
-        convertInteractionEventToLlmResponse(asSseEvent(event), []),
-      ).toBeNull();
+      expect(convertInteractionEventToLlmResponse(event, [])).toBeNull();
+    });
+
+    it('should return null if event.step is missing in step.start event', () => {
+      const event: ExtendedInteractionSSEEvent = {
+        event_type: 'step.start',
+      };
+      expect(convertInteractionEventToLlmResponse(event, [])).toBeNull();
     });
 
     it('should handle step.delta thought_signature event', () => {
       // 1. Start the function call step
-      const startEvent: RawSseEvent = {
+      const startEvent: ExtendedInteractionSSEEvent = {
         event_type: 'step.start',
         step: {
           type: 'function_call',
@@ -1898,17 +1840,14 @@ describe('interactions_utils', () => {
         },
       };
       const aggregatedParts: Part[] = [];
-      convertInteractionEventToLlmResponse(
-        asSseEvent(startEvent),
-        aggregatedParts,
-      );
+      convertInteractionEventToLlmResponse(startEvent, aggregatedParts);
 
       expect(aggregatedParts.length).toBe(1);
       expect(aggregatedParts[0].functionCall).toBeDefined();
       expect(aggregatedParts[0].thoughtSignature).toBeUndefined();
 
       // 2. Stream the signature delta
-      const deltaEvent: RawSseEvent = {
+      const deltaEvent: ExtendedInteractionSSEEvent = {
         event_type: 'step.delta',
         delta: {
           type: 'thought_signature',
@@ -1916,7 +1855,7 @@ describe('interactions_utils', () => {
         },
       };
       const response = convertInteractionEventToLlmResponse(
-        asSseEvent(deltaEvent),
+        deltaEvent,
         aggregatedParts,
         'int-1',
       );
@@ -1926,7 +1865,7 @@ describe('interactions_utils', () => {
     });
 
     it('should handle event with camelCase eventType', () => {
-      const event: RawSseEvent = {
+      const event: ExtendedInteractionSSEEvent = {
         eventType: 'step.delta',
         delta: {
           type: 'text',
@@ -1935,7 +1874,7 @@ describe('interactions_utils', () => {
       };
       const aggregatedParts: Part[] = [];
       const response = convertInteractionEventToLlmResponse(
-        asSseEvent(event),
+        event,
         aggregatedParts,
         'int-1',
       );
@@ -1943,7 +1882,7 @@ describe('interactions_utils', () => {
     });
 
     it('should handle step.delta text event with missing text', () => {
-      const event: RawSseEvent = {
+      const event: ExtendedInteractionSSEEvent = {
         event_type: 'step.delta',
         delta: {
           type: 'text',
@@ -1951,7 +1890,7 @@ describe('interactions_utils', () => {
       };
       const aggregatedParts: Part[] = [];
       const response = convertInteractionEventToLlmResponse(
-        asSseEvent(event),
+        event,
         aggregatedParts,
         'int-1',
       );
@@ -1959,15 +1898,11 @@ describe('interactions_utils', () => {
     });
 
     it('should handle interaction.status_update requires_action event', () => {
-      const event: RawSseEvent = {
+      const event: ExtendedInteractionSSEEvent = {
         event_type: 'interaction.status_update',
         status: 'requires_action',
       };
-      const response = convertInteractionEventToLlmResponse(
-        asSseEvent(event),
-        [],
-        'int-1',
-      );
+      const response = convertInteractionEventToLlmResponse(event, [], 'int-1');
       expect(response).toEqual({
         content: undefined,
         partial: false,
@@ -1978,10 +1913,8 @@ describe('interactions_utils', () => {
     });
 
     it('should return null for unknown event type', () => {
-      const event: RawSseEvent = {event_type: 'unknown'};
-      expect(
-        convertInteractionEventToLlmResponse(asSseEvent(event), []),
-      ).toBeNull();
+      const event: ExtendedInteractionSSEEvent = {event_type: 'unknown'};
+      expect(convertInteractionEventToLlmResponse(event, [])).toBeNull();
     });
   });
 
@@ -2166,7 +2099,7 @@ describe('interactions_utils', () => {
 
   describe('generateContentViaInteractions extra streaming cases', () => {
     it('should handle streaming call with interaction.created event and extract interaction ID from interaction object', async () => {
-      const mockEvents: RawSseEvent[] = [
+      const mockEvents: ExtendedInteractionSSEEvent[] = [
         {
           event_type: 'interaction.created',
           interaction: {id: 'int-start-id'},
@@ -2212,7 +2145,7 @@ describe('interactions_utils', () => {
       };
 
       const generator = generateContentViaInteractions(
-        mockApiClient as unknown as GoogleGenAI,
+        mockApiClient,
         llmRequest,
         true,
       );
@@ -2235,7 +2168,7 @@ describe('interactions_utils', () => {
     });
 
     it('should extract interaction ID from interactionId (camelCase) in streaming event', async () => {
-      const mockEvents: RawSseEvent[] = [
+      const mockEvents: ExtendedInteractionSSEEvent[] = [
         {
           event_type: 'step.start',
           step: {
@@ -2269,7 +2202,7 @@ describe('interactions_utils', () => {
       };
 
       const generator = generateContentViaInteractions(
-        mockApiClient as unknown as GoogleGenAI,
+        mockApiClient,
         llmRequest,
         true,
       );
