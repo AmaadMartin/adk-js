@@ -108,7 +108,7 @@ export class ApiRegistry {
         url: toAbsoluteUrl(url),
         transportOptions: {requestInit: {headers}},
       },
-      options?.toolFilter ?? [],
+      options?.toolFilter,
       options?.toolNamePrefix,
     );
   }
@@ -120,12 +120,10 @@ export class ApiRegistry {
    * permanently poison the instance, and so no rejected promise is retained.
    */
   private loadMcpServers(): Promise<Map<string, ApiRegistryMcpServer>> {
-    if (!this.serversPromise) {
-      this.serversPromise = this.fetchMcpServers().catch((err: unknown) => {
-        this.serversPromise = undefined;
-        throw err;
-      });
-    }
+    this.serversPromise ??= this.fetchMcpServers().catch((err: unknown) => {
+      this.serversPromise = undefined;
+      throw err;
+    });
     return this.serversPromise;
   }
 

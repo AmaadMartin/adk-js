@@ -46,13 +46,11 @@ vi.mock('@modelcontextprotocol/sdk/client/streamableHttp.js', () => ({
 describe('ApiRegistry Integration', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => ({
+    global.fetch = vi.fn<typeof fetch>().mockImplementation(async () =>
+      Response.json({
         mcpServers: [{name: 'billing-server', urls: ['billing-mcp.com/v1']}],
       }),
-    });
+    );
   });
 
   it('resolves a registry toolset and runs it inside an LlmAgent', async () => {

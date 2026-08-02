@@ -77,7 +77,7 @@ function fetchedInit(index: number) {
 }
 
 /** Returns the URL and options the last MCP transport was constructed with. */
-function lastTransportCall(): {url: URL; headers: unknown} {
+function lastTransportCall() {
   const call = TransportMock.mock.calls.at(-1);
   if (!call) {
     expect.fail('StreamableHTTPClientTransport received no call');
@@ -86,10 +86,7 @@ function lastTransportCall(): {url: URL; headers: unknown} {
 }
 
 /** Resolves a toolset and returns the transport its connection produced. */
-async function connectToolset(
-  registry: ApiRegistry,
-  serverName: string,
-): Promise<{url: URL; headers: unknown}> {
+async function connectToolset(registry: ApiRegistry, serverName: string) {
   const toolset = await registry.getToolset(serverName);
   await toolset.getTools();
   return lastTransportCall();
