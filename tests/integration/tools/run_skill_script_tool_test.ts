@@ -7,7 +7,6 @@
 import {
   CodeExecutionResult,
   Context,
-  InvocationContext,
   RunSkillScriptTool,
   Skill,
   SkillToolset,
@@ -17,6 +16,7 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {describe, expect, it} from 'vitest';
+import {createInvocationContext} from '../test_case_utils.js';
 
 const IS_WINDOWS = os.platform() === 'win32';
 const IS_UNIX = os.platform() === 'linux' || os.platform() === 'darwin';
@@ -30,10 +30,7 @@ const TEST_EXECUTION_TIMEOUT = 40000;
 describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
   function createMockContext(agentName = 'test-agent') {
     return new Context({
-      invocationContext: {
-        session: {state: {}},
-        agent: {name: agentName},
-      } as unknown as InvocationContext,
+      invocationContext: createInvocationContext({agentName}),
     });
   }
 

@@ -6,13 +6,13 @@
 
 import {
   Context,
-  InvocationContext,
   LlmRequest,
   LoadSkillResourceTool,
   Skill,
   SkillToolset,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
+import {createInvocationContext} from '../../testing_utils.js';
 
 describe('LoadSkillResourceTool', () => {
   const mockSkill: Skill = {
@@ -36,10 +36,7 @@ describe('LoadSkillResourceTool', () => {
 
   function createMockContext(agentName = 'test-agent') {
     return new Context({
-      invocationContext: {
-        session: {state: {}},
-        agent: {name: agentName},
-      } as unknown as InvocationContext,
+      invocationContext: createInvocationContext({agentName}),
     });
   }
 

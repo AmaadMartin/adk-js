@@ -12,8 +12,6 @@ import {
   ExecuteCodeParams,
   File,
   FileContentEncoding,
-  InvocationContext,
-  LlmAgent,
   RunSkillInlineScriptErrorCode,
   RunSkillInlineScriptTool,
   SkillToolset,
@@ -21,6 +19,7 @@ import {
 import {describe, expect, it, vi} from 'vitest';
 import {ToolConfirmation} from '../../../src/tools/tool_confirmation.js';
 import {materializeFiles} from '../../../src/utils/file_utils.js';
+import {createInvocationContext} from '../../testing_utils.js';
 
 vi.mock('../../../src/utils/file_utils.js', () => ({
   materializeFiles: vi.fn().mockImplementation((files) => files),
@@ -60,17 +59,11 @@ describe('RunSkillInlineScriptTool', () => {
       toolConfirmation?: ToolConfirmation;
     } = {},
   ): Context {
-    const agentObj: Record<string | symbol, unknown> = {name: agentName};
-    if (agentExecutor) {
-      agentObj['codeExecutor'] = agentExecutor;
-      agentObj[Symbol.for('google.adk.llmAgent')] = true;
-    }
-
     return new Context({
-      invocationContext: {
-        session: {state: {}},
-        agent: agentObj as unknown as LlmAgent,
-      } as unknown as InvocationContext,
+      invocationContext: createInvocationContext({
+        agentName,
+        codeExecutor: agentExecutor,
+      }),
       functionCallId: options.functionCallId,
       toolConfirmation: options.toolConfirmation,
     });

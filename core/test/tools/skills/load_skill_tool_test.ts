@@ -4,14 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  Context,
-  InvocationContext,
-  LoadSkillTool,
-  Skill,
-  SkillToolset,
-} from '@google/adk';
+import {Context, LoadSkillTool, Skill, SkillToolset} from '@google/adk';
 import {describe, expect, it} from 'vitest';
+import {createInvocationContext} from '../../testing_utils.js';
 
 describe('LoadSkillTool', () => {
   const mockSkill: Skill = {
@@ -35,10 +30,7 @@ describe('LoadSkillTool', () => {
 
   function createMockContext(agentName = 'test-agent') {
     return new Context({
-      invocationContext: {
-        session: {state: {}},
-        agent: {name: agentName},
-      } as unknown as InvocationContext,
+      invocationContext: createInvocationContext({agentName}),
     });
   }
 

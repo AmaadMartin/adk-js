@@ -8,7 +8,6 @@ import {Client} from '@google-cloud/vertexai';
 import {
   Context,
   GCPSkillRegistry,
-  InvocationContext,
   LlmRequest,
   LoadSkillResourceTool,
   LoadSkillTool,
@@ -20,15 +19,12 @@ import {
 } from '@google/adk';
 import AdmZip from 'adm-zip';
 import {describe, expect, it, vi} from 'vitest';
+import {createInvocationContext} from '../../testing_utils.js';
 
 describe('skill_registry', () => {
   function createMockContext(agentName = 'test-agent') {
     return new Context({
-      invocationContext: {
-        invocationId: 'inv-123',
-        session: {state: {}},
-        agent: {name: agentName},
-      } as unknown as InvocationContext,
+      invocationContext: createInvocationContext({agentName}),
     });
   }
 
