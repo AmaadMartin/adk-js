@@ -91,6 +91,23 @@ describe('EventarcToolset', () => {
     expect(toolNames(await toolset.getTools())).toEqual(['publish_message']);
   });
 
+  it('filters the generic tool out when the filter excludes it', async () => {
+    const toolset = new EventarcToolset({toolFilter: ['other_tool']});
+
+    expect(toolNames(await toolset.getTools(CONTEXT))).toEqual([]);
+    expect(toolNames(await toolset.getTools())).toEqual(['publish_message']);
+  });
+
+  it('keeps the generic tool when a predicate selects it', async () => {
+    const toolset = new EventarcToolset({
+      toolFilter: (tool) => tool.name === 'publish_message',
+    });
+
+    expect(toolNames(await toolset.getTools(CONTEXT))).toEqual([
+      'publish_message',
+    ]);
+  });
+
   it('appends tools created with createPublishTool', async () => {
     const toolset = new EventarcToolset({
       toolConfig: {projectId: 'test-project'},

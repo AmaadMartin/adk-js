@@ -27,6 +27,7 @@ export {
 export {
   AgentProvided,
   isAgentProvided,
+  isUnspecified,
   MISSING,
   OMIT,
   type AgentProvidedBinding,

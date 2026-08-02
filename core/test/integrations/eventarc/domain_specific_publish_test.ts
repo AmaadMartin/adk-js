@@ -222,6 +222,18 @@ describe('buildDomainSpecificTool build-time validation', () => {
     },
   );
 
+  it('rejects a custom attribute that shadows the bus parameter', () => {
+    expect(() =>
+      buildTool({
+        ceAttributesBinding: {
+          type: 'my-type',
+          source: 'my-source',
+          customAttributes: {bus: AgentProvided({description: 'desc'})},
+        },
+      }),
+    ).toThrow("Custom attribute 'bus' shadows the 'bus' parameter.");
+  });
+
   it('rejects a MISSING custom attribute', () => {
     expect(() =>
       buildToolFromJsBindings({customAttributes: {mykey: MISSING}}),
@@ -457,7 +469,7 @@ describe('buildDomainSpecificTool runtime resolution', () => {
     await expect(
       tool.runAsync({args: {}, toolContext: TOOL_CONTEXT}),
     ).rejects.toThrow(
-      "Mandatory CloudEvent attribute 'type' cannot evaluate to null or undefined.",
+      "Mandatory attribute 'type' cannot evaluate to null or undefined.",
     );
   });
 
@@ -494,7 +506,7 @@ describe('buildDomainSpecificTool runtime resolution', () => {
     await expect(
       tool.runAsync({args: {}, toolContext: TOOL_CONTEXT}),
     ).rejects.toThrow(
-      "Mandatory attribute 'bus' cannot evaluate to None or OMIT.",
+      "Mandatory attribute 'bus' cannot evaluate to null or undefined.",
     );
   });
 
@@ -595,7 +607,7 @@ describe('buildDomainSpecificTool runtime resolution', () => {
     expect(lastPublishOptions().data).toEqual({anything: 1});
   });
 
-  it('tolerates a non-object argument payload from the model', async () => {
+  it('resolves fixed attributes when the model sends no arguments', async () => {
     const tool = buildTool({
       ceAttributesBinding: {type: 'my-type', source: 'my-source'},
     });

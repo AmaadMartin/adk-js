@@ -8,11 +8,16 @@ import {Schema, Type} from '@google/genai';
 
 import {BaseTool} from '../../tools/base_tool.js';
 import {FunctionTool, ToolInputParameters} from '../../tools/function_tool.js';
+import {isRecord} from '../../utils/object_utils.js';
 import {
   isZodObject,
   zodObjectToSchema,
 } from '../../utils/simple_zod_to_json.js';
-import {EventarcCredentialsConfig, EventarcToolConfig} from './config.js';
+import {
+  CUSTOM_ATTRIBUTE_KEY_PATTERN,
+  EventarcCredentialsConfig,
+  EventarcToolConfig,
+} from './config.js';
 import {
   publishMessage,
   PublishMessageOptions,
@@ -20,8 +25,14 @@ import {
 } from './message_tool.js';
 
 /**
- * Marks a binding as "not specified by the toolset author", which is
- * equivalent to leaving the field out entirely.
+ * Marks a binding as "not specified by the toolset author".
+ *
+ * TypeScript callers can simply omit the field; `MISSING` exists because it is
+ * part of the public surface of the Python toolset this module ports, so an
+ * agent moved over from `adk-python` keeps working, and because it states the
+ * intent explicitly when a binding is assembled from configuration. It is
+ * always treated exactly like `undefined` — {@link isUnspecified} is the one
+ * place that equivalence is expressed.
  *
  * Registered through `Symbol.for` so that two copies of `@google/adk` in one
  * runtime agree on sentinel identity.
@@ -31,7 +42,14 @@ export const MISSING: unique symbol = Symbol.for('google.adk.eventarc.MISSING');
 /** Type of the {@link MISSING} sentinel. */
 export type MissingSentinel = typeof MISSING;
 
-/** Marks a binding as "drop this attribute from the emitted CloudEvent". */
+/**
+ * Marks a binding as "drop this attribute from the emitted CloudEvent".
+ *
+ * For an optional attribute this is interchangeable with `null`, `MISSING` and
+ * omitting the field; `OMIT` is the canonical spelling because it also says
+ * "drop it" when it is the fallback of an {@link AgentProvided} binding, where
+ * omitting the field would instead make the parameter required.
+ */
 export const OMIT: unique symbol = Symbol.for('google.adk.eventarc.OMIT');
 
 /** Type of the {@link OMIT} sentinel. */
@@ -81,6 +99,13 @@ export function AgentProvided<TPayload = unknown>(options: {
     description: options.description,
     default: options.default,
   };
+}
+
+/** Returns true when the binding was left unspecified by the toolset author. */
+export function isUnspecified(
+  value: unknown,
+): value is MissingSentinel | undefined {
+  return value === undefined || value === MISSING;
 }
 
 /** Returns true when the value was produced by {@link AgentProvided}. */
@@ -170,12 +195,11 @@ const RESERVED_ATTRIBUTES = [
   ...OPTIONAL_ATTRIBUTES,
 ] as const;
 
-type ReservedAttribute = (typeof RESERVED_ATTRIBUTES)[number];
-
 /** Model-facing parameter carrying the structured payload. */
 const EVENT_DATA_PARAMETER = 'event_data';
 
-const CUSTOM_ATTRIBUTE_KEY_PATTERN = /^[a-z0-9]+$/;
+/** Model-facing parameter carrying the message bus. */
+const BUS_PARAMETER = 'bus';
 
 /**
  * Builds a tool that publishes a CloudEvent whose attributes are fixed by the
@@ -195,6 +219,8 @@ export function buildDomainSpecificTool<TPayload = unknown>(
     description: options.description,
     parameters: buildParameters(bus, ceAttributesBinding, payloadSchema),
     async execute(input: unknown): Promise<PublishMessageResult> {
+      // `FunctionTool` types the callback argument as `unknown` but always
+      // passes its argument bag; the fallback defends untyped JS callers.
       const args = isRecord(input) ? input : {};
       const payload = parsePayload<TPayload>(
         payloadSchema,
@@ -204,7 +230,7 @@ export function buildDomainSpecificTool<TPayload = unknown>(
       const publishOptions: PublishMessageOptions = {
         toolConfig: options.toolConfig,
         credentialsConfig: options.credentialsConfig,
-        bus: resolveBus(bus, args, payload),
+        bus: resolveMandatory(BUS_PARAMETER, bus, args, payload),
         type: resolveMandatory('type', ceAttributesBinding.type, args, payload),
         source: resolveMandatory(
           'source',
@@ -266,9 +292,14 @@ function validateBindings<TPayload>(
   for (const [key, binding] of Object.entries<unknown>(
     ceAttributesBinding.customAttributes ?? {},
   )) {
-    if (isReservedAttribute(key)) {
+    if ((RESERVED_ATTRIBUTES as readonly string[]).includes(key)) {
       throw new Error(
         `Custom attribute '${key}' shadows a standard CloudEvent attribute.`,
+      );
+    }
+    if (key === BUS_PARAMETER) {
+      throw new Error(
+        `Custom attribute '${key}' shadows the '${BUS_PARAMETER}' parameter.`,
       );
     }
     if (!CUSTOM_ATTRIBUTE_KEY_PATTERN.test(key)) {
@@ -294,7 +325,7 @@ function assertMandatoryBinding(
   binding: unknown,
   errors: {missing: string; omit: string; nullish: string},
 ): void {
-  if (binding === MISSING || binding === undefined) {
+  if (isUnspecified(binding)) {
     throw new TypeError(errors.missing);
   }
   if (binding === OMIT) {
@@ -323,7 +354,7 @@ function buildParameters<TPayload>(
     }
   };
 
-  declare('bus', bus);
+  declare(BUS_PARAMETER, bus);
   for (const attribute of RESERVED_ATTRIBUTES) {
     declare(attribute, ceAttributesBinding[attribute]);
   }
@@ -349,7 +380,7 @@ function buildParameters<TPayload>(
  * because they can only be evaluated at call time.
  */
 function isRequiredParameter(binding: AgentProvidedBinding): boolean {
-  return binding.default === undefined || binding.default === MISSING;
+  return isUnspecified(binding.default);
 }
 
 function agentProvidedSchema(binding: AgentProvidedBinding): Schema {
@@ -363,28 +394,8 @@ function agentProvidedSchema(binding: AgentProvidedBinding): Schema {
   return schema;
 }
 
-function resolveBus<TPayload>(
-  bus: AttributeBinding<TPayload>,
-  args: Record<string, unknown>,
-  payload: TPayload,
-): string {
-  const value = resolveAttribute({
-    key: 'bus',
-    binding: bus,
-    mandatory: true,
-    args,
-    payload,
-  });
-  if (value === undefined) {
-    throw new Error(
-      "Mandatory attribute 'bus' cannot evaluate to None or OMIT.",
-    );
-  }
-  return value;
-}
-
 function resolveMandatory<TPayload>(
-  key: (typeof MANDATORY_ATTRIBUTES)[number],
+  key: string,
   binding: AttributeBinding<TPayload>,
   args: Record<string, unknown>,
   payload: TPayload,
@@ -398,7 +409,7 @@ function resolveMandatory<TPayload>(
   });
   if (value === undefined) {
     throw new Error(
-      `Mandatory CloudEvent attribute '${key}' cannot evaluate to null or undefined.`,
+      `Mandatory attribute '${key}' cannot evaluate to null or undefined.`,
     );
   }
   return value;
@@ -445,7 +456,7 @@ function resolveAttribute<TPayload>(options: {
 }): string | undefined {
   const {key, binding, mandatory, args, payload} = options;
 
-  if (binding === MISSING || binding === undefined) {
+  if (isUnspecified(binding)) {
     return undefined;
   }
 
@@ -461,7 +472,7 @@ function resolveAttribute<TPayload>(options: {
     if (supplied !== undefined && supplied !== null) {
       return String(supplied);
     }
-    if (binding.default === undefined || binding.default === MISSING) {
+    if (isUnspecified(binding.default)) {
       throw new Error(`Agent did not provide mandatory attribute '${key}'`);
     }
     value = binding.default;
@@ -498,12 +509,4 @@ function parsePayload<TPayload>(
     ? payloadSchema.parse(value)
     : value;
   return parsed as TPayload;
-}
-
-function isReservedAttribute(key: string): key is ReservedAttribute {
-  return RESERVED_ATTRIBUTES.some((attribute) => attribute === key);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
