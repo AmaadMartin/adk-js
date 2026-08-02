@@ -17,6 +17,7 @@ import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {AuthCredential} from '../../auth/auth_credential.js';
 import {AuthScheme} from '../../auth/auth_schemes.js';
 import {StreamableHTTPConnectionParams} from '../../tools/mcp/mcp_session_manager.js';
+import {getGoogleAuthHeaders} from '../../utils/google_auth_utils.js';
 import {logger} from '../../utils/logger.js';
 import {AgentRegistrySingleMCPToolset} from './agent_registry_mcp_toolset.js';
 import {cleanName, isGoogleApi} from './helpers.js';
@@ -90,44 +91,10 @@ export class AgentRegistry {
    * Injects the billing/quota project identifier `x-goog-user-project` if present.
    */
   async getAuthHeaders(): Promise<Record<string, string>> {
-    try {
-      const client = await this.auth.getClient();
-      const headers = await client.getRequestHeaders(
-        'https://agentregistry.googleapis.com',
-      );
-      const authHeaders: Record<string, string> = {};
-      const rawHeaders = headers as unknown as Record<string, string>;
-      const authKey = Object.keys(rawHeaders).find(
-        (k) => k.toLowerCase() === 'authorization',
-      );
-      let token = authKey ? rawHeaders[authKey] : undefined;
-
-      // Fallback directly to the populated credentials object if headers are empty
-      if (
-        !token &&
-        client.credentials &&
-        (client.credentials as {access_token?: string}).access_token
-      ) {
-        token = `Bearer ${(client.credentials as {access_token?: string}).access_token}`;
-      }
-
-      if (token) {
-        authHeaders['Authorization'] = token;
-      }
-      authHeaders['Content-Type'] = 'application/json';
-
-      // Inject quota project ID for usage and billing tracking
-      const quotaProjectId =
-        (client as unknown as {quotaProjectId?: string}).quotaProjectId ||
-        (this.auth as unknown as {quotaProjectId?: string}).quotaProjectId;
-      if (quotaProjectId) {
-        authHeaders['x-goog-user-project'] = quotaProjectId;
-      }
-      return authHeaders;
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      throw new Error(`Failed to refresh Google Cloud credentials: ${msg}`);
-    }
+    return getGoogleAuthHeaders(
+      this.auth,
+      'https://agentregistry.googleapis.com',
+    );
   }
 
   /**
