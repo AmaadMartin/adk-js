@@ -158,7 +158,7 @@ describe('CLI Entrypoint', () => {
     it('should opt the server into process handlers', async () => {
       await parse(['web']);
 
-      const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
       expect(args.installProcessHandlers).toBe(true);
     });
   });
@@ -192,7 +192,7 @@ describe('CLI Entrypoint', () => {
     it('should opt the server into process handlers', async () => {
       await parse(['api_server']);
 
-      const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
       expect(args.installProcessHandlers).toBe(true);
     });
   });

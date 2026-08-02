@@ -326,7 +326,7 @@ describe('deployToAgentEngine', () => {
   it('installs process handlers on the agent loader', async () => {
     await deployToAgentEngine(defaultOptions);
 
-    const agentLoader = (AgentLoader as Mock).mock.results[0].value;
+    const agentLoader = vi.mocked(AgentLoader).mock.results[0].value;
     expect(agentLoader.installProcessHandlers).toHaveBeenCalledOnce();
   });
 
