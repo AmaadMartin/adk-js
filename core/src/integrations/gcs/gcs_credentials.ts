@@ -8,14 +8,6 @@ import {StorageOptions} from '@google-cloud/storage';
 
 import {experimental} from '../../utils/experimental.js';
 
-/**
- * An already-authenticated client accepted by the Cloud Storage client.
- *
- * Derived from `StorageOptions` so it always matches the auth library version
- * `@google-cloud/storage` itself resolves.
- */
-export type GcsAuthClient = NonNullable<StorageOptions['authClient']>;
-
 /** Scopes requested when none are configured explicitly. */
 export const GCS_DEFAULT_SCOPES = [
   'https://www.googleapis.com/auth/devstorage.full_control',
@@ -24,17 +16,20 @@ export const GCS_DEFAULT_SCOPES = [
 /** Options for {@link GCSCredentialsConfig}. */
 export interface GCSCredentialsConfigOptions {
   /**
-   * An existing auth client to use for every end user. Mutually exclusive
-   * with `clientId`, `clientSecret` and `scopes`.
+   * Ready-made options for the Cloud Storage client, and the place to pass an
+   * already-authenticated client as `{authClient}`. That client is used for
+   * every end user, so only set it when it is allowed to reach every end
+   * user's data. Mutually exclusive with `clientId`, `clientSecret` and
+   * `scopes`.
    */
-  credentials?: GcsAuthClient;
+  storageOptions?: StorageOptions;
   /** The OAuth client id to use. Requires `clientSecret`. */
   clientId?: string;
   /** The OAuth client secret to use. Requires `clientId`. */
   clientSecret?: string;
   /** The scopes to request. Defaults to {@link GCS_DEFAULT_SCOPES}. */
   scopes?: string[];
-  /** The Google Cloud project the client bills and operates against. */
+  /** The Google Cloud project the client operates against. */
   projectId?: string;
 }
 
@@ -45,13 +40,13 @@ export interface GCSCredentialsConfigOptions {
  * token. adk-python mints one by driving the interactive OAuth consent flow,
  * which adk-js does not implement yet, so requests made through the
  * `clientId`/`clientSecret` path fail at request time and surface as a normal
- * `{status: 'ERROR'}` tool result. Pass a pre-built `credentials` client, or
- * pass no credentials config at all and rely on Application Default
- * Credentials.
+ * `{status: 'ERROR'}` tool result. Pass an authenticated client through
+ * `storageOptions`, or pass no credentials config at all and rely on
+ * Application Default Credentials.
  */
 @experimental
 export class GCSCredentialsConfig {
-  readonly credentials?: GcsAuthClient;
+  readonly storageOptions?: StorageOptions;
   readonly clientId?: string;
   readonly clientSecret?: string;
   readonly scopes: string[];
@@ -59,20 +54,23 @@ export class GCSCredentialsConfig {
 
   constructor(options: GCSCredentialsConfigOptions) {
     if (
-      options.credentials &&
+      options.storageOptions &&
       (options.clientId || options.clientSecret || options.scopes)
     ) {
       throw new Error(
-        'If credentials are provided, clientId, clientSecret and scopes must not be provided.',
+        'If storageOptions are provided, clientId, clientSecret and scopes must not be provided.',
       );
     }
-    if (!options.credentials && !(options.clientId && options.clientSecret)) {
+    if (
+      !options.storageOptions &&
+      !(options.clientId && options.clientSecret)
+    ) {
       throw new Error(
-        'Must provide either credentials, or both clientId and clientSecret.',
+        'Must provide either storageOptions, or both clientId and clientSecret.',
       );
     }
 
-    this.credentials = options.credentials;
+    this.storageOptions = options.storageOptions;
     this.clientId = options.clientId;
     this.clientSecret = options.clientSecret;
     this.scopes = options.scopes ?? GCS_DEFAULT_SCOPES;
@@ -87,16 +85,14 @@ export class GCSCredentialsConfig {
   toStorageOptions(project?: string): StorageOptions {
     const projectId = project ?? this.projectId;
     return {
+      ...(this.storageOptions ?? {
+        clientOptions: {
+          clientId: this.clientId,
+          clientSecret: this.clientSecret,
+        },
+        scopes: this.scopes,
+      }),
       ...(projectId ? {projectId} : {}),
-      ...(this.credentials
-        ? {authClient: this.credentials}
-        : {
-            clientOptions: {
-              clientId: this.clientId,
-              clientSecret: this.clientSecret,
-            },
-            scopes: this.scopes,
-          }),
     };
   }
 }

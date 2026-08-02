@@ -63,10 +63,7 @@ export {
   GCSCredentialsConfig,
   GCS_DEFAULT_SCOPES,
 } from './integrations/gcs/gcs_credentials.js';
-export type {
-  GCSCredentialsConfigOptions,
-  GcsAuthClient,
-} from './integrations/gcs/gcs_credentials.js';
+export type {GCSCredentialsConfigOptions} from './integrations/gcs/gcs_credentials.js';
 export {GCSToolset} from './integrations/gcs/storage_toolset.js';
 export type {GCSToolsetOptions} from './integrations/gcs/storage_toolset.js';
 export {
