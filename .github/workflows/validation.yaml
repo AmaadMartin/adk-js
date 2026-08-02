@@ -48,3 +48,26 @@ jobs:
 
       - name: Run documentation build check
         run: npm run docs:check
+
+  check-lockfile:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      # Pinned deliberately: npm's lockfile serialization changes between npm
+      # majors, so an unpinned Node would make this check fail on runner image
+      # upgrades rather than on real lockfile drift.
+      - name: Use Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Check package-lock.json is in sync with the workspace manifests
+        run: |
+          npm install --package-lock-only --ignore-scripts
+          if ! git diff --exit-code -- package-lock.json; then
+            echo "::error::package-lock.json is out of sync with the package.json files. Run 'npm install --package-lock-only' locally and commit the updated lockfile."
+            exit 1
+          fi
