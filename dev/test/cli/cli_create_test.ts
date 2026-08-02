@@ -70,11 +70,16 @@ describe('createAgent', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // getGcpProject()/getGcpRegion() read these before falling back to the
+    // mocked gcloud lookup, so real Cloud config would win over the test input.
+    vi.stubEnv('GOOGLE_CLOUD_PROJECT', undefined);
+    vi.stubEnv('GOOGLE_CLOUD_LOCATION', undefined);
     (isCancel as unknown as Mock).mockReturnValue(false);
     (listFiles as Mock).mockResolvedValue(['file1', 'file2']);
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     vi.restoreAllMocks();
   });
 
@@ -220,6 +225,82 @@ describe('createAgent', () => {
         expect.stringContaining('.env'),
         expect.stringContaining('GOOGLE_CLOUD_PROJECT=gcloud-project'),
       );
+    });
+
+    it('should seed both Vertex prompts from the gcloud defaults', async () => {
+      (select as Mock).mockResolvedValueOnce('gemini-2.5-flash');
+      (select as Mock).mockResolvedValueOnce('ts');
+      (select as Mock).mockResolvedValueOnce('vertex'); // Backend
+
+      (execSync as Mock).mockImplementation((cmd: string) => {
+        if (cmd.includes('project')) return 'gcloud-project\n';
+        if (cmd.includes('region')) return 'gcloud-region\n';
+        return '';
+      });
+
+      (text as Mock).mockResolvedValueOnce('gcloud-project');
+      (text as Mock).mockResolvedValueOnce('gcloud-region');
+
+      await createAgent(getFreshOptions());
+
+      expect(text).toHaveBeenCalledWith({
+        message: 'Enter the Google Cloud Project ID',
+        initialValue: 'gcloud-project',
+      });
+      expect(text).toHaveBeenCalledWith({
+        message: 'Enter the Google Cloud Region',
+        initialValue: 'gcloud-region',
+      });
+    });
+
+    it('should prefer GOOGLE_CLOUD_* env vars over the gcloud lookup', async () => {
+      vi.stubEnv('GOOGLE_CLOUD_PROJECT', 'env-project');
+      vi.stubEnv('GOOGLE_CLOUD_LOCATION', 'env-region');
+
+      (select as Mock).mockResolvedValueOnce('gemini-2.5-flash');
+      (select as Mock).mockResolvedValueOnce('ts');
+      (select as Mock).mockResolvedValueOnce('vertex'); // Backend
+
+      (execSync as Mock).mockImplementation(() => 'gcloud-project\n');
+
+      (text as Mock).mockResolvedValueOnce('env-project');
+      (text as Mock).mockResolvedValueOnce('env-region');
+
+      await createAgent(getFreshOptions());
+
+      expect(execSync).not.toHaveBeenCalled();
+      expect(text).toHaveBeenCalledWith({
+        message: 'Enter the Google Cloud Project ID',
+        initialValue: 'env-project',
+      });
+      expect(text).toHaveBeenCalledWith({
+        message: 'Enter the Google Cloud Region',
+        initialValue: 'env-region',
+      });
+    });
+
+    it('should default to empty prompts when the gcloud lookup fails', async () => {
+      (select as Mock).mockResolvedValueOnce('gemini-2.5-flash');
+      (select as Mock).mockResolvedValueOnce('ts');
+      (select as Mock).mockResolvedValueOnce('vertex'); // Backend
+
+      (execSync as Mock).mockImplementation(() => {
+        throw new Error('gcloud: command not found');
+      });
+
+      (text as Mock).mockResolvedValueOnce('manual-project');
+      (text as Mock).mockResolvedValueOnce('manual-region');
+
+      await createAgent(getFreshOptions());
+
+      expect(text).toHaveBeenCalledWith({
+        message: 'Enter the Google Cloud Project ID',
+        initialValue: '',
+      });
+      expect(text).toHaveBeenCalledWith({
+        message: 'Enter the Google Cloud Region',
+        initialValue: '',
+      });
     });
   });
 
