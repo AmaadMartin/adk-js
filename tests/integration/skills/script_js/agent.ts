@@ -37,6 +37,9 @@ export const rootAgent = new LlmAgent({
       codeExecutor: new UnsafeLocalCodeExecutor(),
       // Inline-script execution is opt-in; enable it for this end-to-end test.
       allowInlineScripts: true,
+      // Skill script output is written only where the application asks for it.
+      // agent_test.ts creates a temporary directory and passes it in here.
+      outputDir: process.env['ADK_SKILL_OUTPUT_DIR'],
     }),
   ],
   // Executing model-provided inline scripts is gated behind a confirmation

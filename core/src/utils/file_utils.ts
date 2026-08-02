@@ -13,9 +13,13 @@ import {File} from '../code_executors/code_execution_utils.js';
  * numeric suffix (`report.txt` -> `report_2.txt`) rather than overwriting an
  * existing file.
  *
- * Names resolving outside `dir` are rejected with a `Path traversal detected`
- * error. That is a lexical check on the resolved path, not a sandbox: it does
- * not survive symlinks or a concurrent rename.
+ * Names that escape `dir` are rejected with a `Path traversal detected` error.
+ * That check is a string-prefix comparison on the resolved path, not a
+ * sandbox, and it is weaker than it looks: a sibling sharing the prefix
+ * (`dir` of `/a/out` with the name `../out_leak.txt`) resolves to `/a/out_leak.txt`
+ * and passes, and no lexical check survives symlinks, hardlinks, bind mounts
+ * or a concurrent rename. Treat `dir` as a tidiness boundary, not a security
+ * one, and do not point it at a directory whose siblings are sensitive.
  *
  * @param files The files to materialize.
  * @param dir Base directory to write under. Required: file names come from
