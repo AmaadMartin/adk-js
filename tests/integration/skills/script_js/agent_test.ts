@@ -5,6 +5,8 @@
  */
 import {exec, spawn} from 'node:child_process';
 import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import {promisify} from 'node:util';
 import {afterAll, beforeAll, describe, expect, it} from 'vitest';
 import {normalizeLineEndings, sendInput} from '../../test_case_utils.js';
@@ -22,14 +24,22 @@ const TEST_EXECUTION_TIMEOUT = 60000;
  * 1. Starts the agent by running `npm run start` in the test project directory.
  * 2. Simulates user interaction by sending a prompt: "Let's create algorithmic art."
  * 3. Asserts that the agent's response matches the expected output, confirming it claims to have created the art and files.
- * 4. Verifies that the expected files (`ephemeral_entanglement.md`, `index.html`, `sketch.js`) were actually generated in the file system.
+ * 4. Verifies that the expected files (`ephemeral_entanglement.md`, `index.html`, `sketch.js`) were actually generated in the output directory the agent was configured with.
  * 5. Compares the content of these generated files with reference files in the `expected/` directory to ensure correctness.
- * 6. Cleans up the generated files and installed dependencies after execution.
+ * 6. Cleans up the output directory and installed dependencies after execution.
+ *
+ * The output directory is a temporary one created here and handed to the agent
+ * through `ADK_SKILL_OUTPUT_DIR` (see `agent.ts`). Skill script output files are
+ * only written to a directory the application declares, so an agent launched
+ * from a checkout no longer drops script-named files into it.
  *
  * This test ensures the end-to-end flow of an agent using tools to generate and materialize files based on a high-level request.
  */
 describe('Agent with skills that generates JS script and runs it locally', () => {
+  let outputDir: string;
+
   beforeAll(async () => {
+    outputDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-script-js-out-'));
     await execAsync('npm install', {cwd: PROJECT_PATH});
   }, TEST_EXECUTION_TIMEOUT);
 
@@ -39,6 +49,7 @@ describe('Agent with skills that generates JS script and runs it locally', () =>
       const childProcess = spawn('npm', ['run', 'start'], {
         cwd: PROJECT_PATH,
         shell: true,
+        env: {...process.env, ADK_SKILL_OUTPUT_DIR: outputDir},
       });
 
       let response = await sendInput(
@@ -52,18 +63,29 @@ describe('Agent with skills that generates JS script and runs it locally', () =>
       response = await sendInput(childProcess, 'exit\n');
       expect(response.toString()).toContain('');
 
-      // verify that files were created and have the expected content
+      // verify that files were created in the declared output directory, and
+      // not in the agent's working directory, and have the expected content
       const resultMdFile = await fs.readFile(
-        `${PROJECT_PATH}/ephemeral_entanglement.md`,
+        path.join(outputDir, 'ephemeral_entanglement.md'),
         'utf-8',
       );
       const resultScriptFile = await fs.readFile(
-        `${PROJECT_PATH}/sketch.js`,
+        path.join(outputDir, 'sketch.js'),
         'utf-8',
       );
       const resultHtmlFile = await fs.readFile(
-        `${PROJECT_PATH}/index.html`,
+        path.join(outputDir, 'index.html'),
         'utf-8',
+      );
+
+      await expect(
+        fs.access(`${PROJECT_PATH}/ephemeral_entanglement.md`),
+      ).rejects.toThrow(/ENOENT/);
+      await expect(fs.access(`${PROJECT_PATH}/sketch.js`)).rejects.toThrow(
+        /ENOENT/,
+      );
+      await expect(fs.access(`${PROJECT_PATH}/index.html`)).rejects.toThrow(
+        /ENOENT/,
       );
 
       const expectedMdFile = await fs.readFile(
@@ -93,12 +115,7 @@ describe('Agent with skills that generates JS script and runs it locally', () =>
   );
 
   afterAll(async () => {
-    // delete generated files
-    await fs
-      .rm(`${PROJECT_PATH}/ephemeral_entanglement.md`, {force: true})
-      .catch(() => {});
-    await fs.rm(`${PROJECT_PATH}/index.html`, {force: true}).catch(() => {});
-    await fs.rm(`${PROJECT_PATH}/sketch.js`, {force: true}).catch(() => {});
+    await fs.rm(outputDir, {recursive: true, force: true}).catch(() => {});
 
     await fs
       .rm(`${PROJECT_PATH}/node_modules`, {recursive: true, force: true})
