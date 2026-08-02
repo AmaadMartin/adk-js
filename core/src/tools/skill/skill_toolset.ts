@@ -69,7 +69,7 @@ export class SkillToolset extends BaseToolset {
        * Maximum number of characters of `stdout` / `stderr` returned to the
        * model per skill script execution. Each stream is capped
        * independently; output beyond the cap is elided from the middle with an
-       * explicit marker. Defaults to {@link DEFAULT_MAX_OUTPUT_CHARS}.
+       * explicit marker. Defaults to `DEFAULT_MAX_OUTPUT_CHARS` (30,000).
        */
       maxOutputChars?: number;
     } = {},
