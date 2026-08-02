@@ -34,12 +34,82 @@ const READ_WRITE = {capabilities: [GCSCapability.READ_WRITE]};
 const READ_ONLY = {capabilities: [GCSCapability.READ_ONLY]};
 const NO_CAPABILITIES = {capabilities: []};
 
+/** The parameter contract the model sees, mirroring adk-python. */
+const EXPECTED_PARAMETERS: Record<
+  string,
+  {declared: string[]; required: string[]}
+> = {
+  gcs_get_bucket: {declared: ['bucket_name'], required: ['bucket_name']},
+  gcs_get_object_data: {
+    declared: [
+      'bucket_name',
+      'object_name',
+      'generation',
+      'destination_file_path',
+    ],
+    required: ['bucket_name', 'object_name'],
+  },
+  gcs_get_object_metadata: {
+    declared: ['bucket_name', 'object_name', 'generation'],
+    required: ['bucket_name', 'object_name'],
+  },
+  gcs_list_objects: {
+    declared: ['bucket_name', 'prefix', 'page_size', 'page_token'],
+    required: ['bucket_name'],
+  },
+  gcs_create_object: {
+    declared: ['bucket_name', 'object_name', 'data', 'source_file_path'],
+    required: ['bucket_name', 'object_name'],
+  },
+  gcs_delete_objects: {
+    declared: ['bucket_name', 'object_names'],
+    required: ['bucket_name', 'object_names'],
+  },
+  gcs_list_buckets: {
+    declared: ['project_id', 'page_size', 'page_token'],
+    required: ['project_id'],
+  },
+  gcs_create_bucket: {
+    declared: ['project_id', 'bucket_name', 'location'],
+    required: ['project_id', 'bucket_name'],
+  },
+  gcs_update_bucket: {
+    declared: [
+      'bucket_name',
+      'versioning_enabled',
+      'uniform_bucket_level_access_enabled',
+    ],
+    required: ['bucket_name'],
+  },
+  gcs_delete_bucket: {declared: ['bucket_name'], required: ['bucket_name']},
+};
+
 async function toolNames(
   toolset: GCSToolset | GCSAdminToolset,
   context?: ReadonlyContext,
 ): Promise<string[]> {
   return (await toolset.getTools(context)).map((tool) => tool.name).sort();
 }
+
+describe('GCS tool declarations', () => {
+  it('declare the adk-python parameter names to the model', async () => {
+    const tools = [
+      ...(await new GCSToolset({toolSettings: READ_WRITE}).getTools()),
+      ...(await new GCSAdminToolset({toolSettings: READ_WRITE}).getTools()),
+    ];
+    expect(tools).toHaveLength(Object.keys(EXPECTED_PARAMETERS).length);
+
+    for (const tool of tools) {
+      const parameters = tool._getDeclaration()?.parameters;
+      expect(Object.keys(parameters?.properties ?? {})).toEqual(
+        EXPECTED_PARAMETERS[tool.name].declared,
+      );
+      expect(parameters?.required ?? []).toEqual(
+        EXPECTED_PARAMETERS[tool.name].required,
+      );
+    }
+  });
+});
 
 describe('GCSToolset', () => {
   it('prefixes tool names with the GCS prefix', async () => {
