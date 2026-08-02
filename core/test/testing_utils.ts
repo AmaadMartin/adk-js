@@ -5,6 +5,7 @@
  */
 
 import {
+  BaseCodeExecutor,
   Context,
   createSession,
   InvocationContext,
@@ -12,33 +13,57 @@ import {
   LlmRequest,
   PluginManager,
   ReadonlyContext,
+  Session,
 } from '@google/adk';
 
 /**
- * Options for {@link createReadonlyContext}.
+ * Options for {@link createInvocationContext} and the context factories built
+ * on top of it.
  */
-interface ReadonlyContextOptions {
+interface InvocationContextOptions {
   /** Name of the agent that owns the invocation. */
   agentName?: string;
   /** Initial session state, readable through `context.state`. */
   state?: Record<string, unknown>;
+  /** Code executor carried by the agent that owns the invocation. */
+  codeExecutor?: BaseCodeExecutor;
+  /** Session to run against. Defaults to a fresh one seeded with `state`. */
+  session?: Session;
+  /** Signal that cancels the invocation. */
+  abortSignal?: AbortSignal;
 }
 
-/** Builds the invocation that backs the context factories below. */
-function createInvocationContext(
-  options: ReadonlyContextOptions = {},
+/**
+ * Builds a real {@link InvocationContext} for tests, so that a change to
+ * `InvocationContextParams` is a compile error in the fixtures rather than a
+ * runtime surprise.
+ *
+ * The defaults are rebuilt on every call: tools under test mutate
+ * `session.state` in place, so a shared session would leak between tests.
+ */
+export function createInvocationContext(
+  options: InvocationContextOptions = {},
 ): InvocationContext {
-  const {agentName = 'test-agent', state = {}} = options;
+  const {
+    agentName = 'test-agent',
+    state = {},
+    codeExecutor,
+    session,
+    abortSignal,
+  } = options;
   return new InvocationContext({
     invocationId: 'test-invocation',
-    agent: new LlmAgent({name: agentName}),
-    session: createSession({
-      id: 'test-session',
-      appName: 'test-app',
-      userId: 'test-user',
-      state,
-    }),
+    agent: new LlmAgent({name: agentName, codeExecutor}),
+    session:
+      session ??
+      createSession({
+        id: 'test-session',
+        appName: 'test-app',
+        userId: 'test-user',
+        state,
+      }),
     pluginManager: new PluginManager([]),
+    abortSignal,
   });
 }
 
@@ -48,7 +73,7 @@ function createInvocationContext(
  * without standing up a runner.
  */
 export function createReadonlyContext(
-  options: ReadonlyContextOptions = {},
+  options: InvocationContextOptions = {},
 ): ReadonlyContext {
   return new ReadonlyContext(createInvocationContext(options));
 }
