@@ -12,6 +12,10 @@ import {
   DEFAULT_PUBLISH_TIMEOUT_MS,
   resolvePublishTimeoutMs,
 } from '../../../src/integrations/eventarc/config.js';
+import {
+  AgentProvided,
+  OMIT,
+} from '../../../src/integrations/eventarc/domain_specific_publish.js';
 import {EventarcToolset} from '../../../src/integrations/eventarc/eventarc_toolset.js';
 import {BaseTool} from '../../../src/tools/base_tool.js';
 import {logger} from '../../../src/utils/logger.js';
@@ -87,20 +91,61 @@ describe('EventarcToolset', () => {
     expect(toolNames(await toolset.getTools())).toEqual(['publish_message']);
   });
 
-  it('filters the generic tool out when the filter excludes it', async () => {
-    const toolset = new EventarcToolset({toolFilter: ['other_tool']});
+  it('appends tools created with createPublishTool', async () => {
+    const toolset = new EventarcToolset({
+      toolConfig: {projectId: 'test-project'},
+    });
 
-    expect(toolNames(await toolset.getTools(CONTEXT))).toEqual([]);
-    expect(toolNames(await toolset.getTools())).toEqual(['publish_message']);
+    const tool = toolset.createPublishTool({
+      name: 'publish_order_event',
+      description: 'Publishes an order lifecycle event.',
+      bus: 'projects/p/locations/l/messageBuses/orders',
+      ceAttributesBinding: {
+        type: 'com.example.order.created',
+        source: '//my-app/order-service',
+        subject: AgentProvided({description: 'The order subject.'}),
+        time: OMIT,
+      },
+    });
+
+    expect(tool.name).toBe('publish_order_event');
+    expect(toolNames(await toolset.getTools())).toEqual([
+      'publish_message',
+      'publish_order_event',
+    ]);
   });
 
-  it('keeps the generic tool when a predicate selects it', async () => {
-    const toolset = new EventarcToolset({
-      toolFilter: (tool) => tool.name === 'publish_message',
+  it('filters tools by name when a context is supplied', async () => {
+    const toolset = new EventarcToolset({toolFilter: ['publish_order_event']});
+    toolset.createPublishTool({
+      name: 'publish_order_event',
+      description: 'Publishes an order lifecycle event.',
+      bus: 'projects/p/locations/l/messageBuses/orders',
+      ceAttributesBinding: {type: 'my-type', source: 'my-source'},
     });
 
     expect(toolNames(await toolset.getTools(CONTEXT))).toEqual([
+      'publish_order_event',
+    ]);
+    expect(toolNames(await toolset.getTools())).toEqual([
       'publish_message',
+      'publish_order_event',
+    ]);
+  });
+
+  it('filters tools with a predicate when a context is supplied', async () => {
+    const toolset = new EventarcToolset({
+      toolFilter: (tool) => tool.name.startsWith('publish_order'),
+    });
+    toolset.createPublishTool({
+      name: 'publish_order_event',
+      description: 'Publishes an order lifecycle event.',
+      bus: 'projects/p/locations/l/messageBuses/orders',
+      ceAttributesBinding: {type: 'my-type', source: 'my-source'},
+    });
+
+    expect(toolNames(await toolset.getTools(CONTEXT))).toEqual([
+      'publish_order_event',
     ]);
   });
 
