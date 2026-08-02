@@ -11,7 +11,7 @@ import {
   Runner,
   Session,
 } from '@google/adk';
-import {Content} from '@google/genai';
+import {Content, Part} from '@google/genai';
 import {cloneDeep} from 'lodash-es';
 import * as assert from 'node:assert';
 import {AgentRegistry} from './agent_registry.js';
@@ -20,7 +20,6 @@ import {ReplayPlugin} from './replay_plugin.js';
 import {
   FilteredEvent,
   FilteredEventActions,
-  FilteredPart,
   TestInfo,
   UserMessage,
 } from './test_types.js';
@@ -157,9 +156,14 @@ function validateSession(actual: Session, expected: Session) {
   assert.deepStrictEqual(actualEvents, expectedEvents);
 }
 
-function normalizeEvent(event: Event): FilteredEvent {
+/**
+ * Strips the fields that legitimately differ between two runs so recorded and
+ * live sessions can be compared field by field. Mutates `event` in place and
+ * returns it re-viewed as a `FilteredEvent`.
+ */
+export function normalizeEvent(event: Event): FilteredEvent {
+  filterEventFields(event);
   const filteredEvent = event as FilteredEvent;
-  filterEventFields(filteredEvent);
   removeEmptyAndUndefinedFields(
     filteredEvent as unknown as Record<string, unknown>,
   );
@@ -203,21 +207,20 @@ function filterEventActionsStateDelta(actions?: FilteredEventActions) {
   delete actions.stateDelta['_adk_replay_config'];
 }
 
-function filterPartFields(part: FilteredPart) {
-  /* eslint-disable @typescript-eslint/no-explicit-any */
-  delete (part as any).thoughtSignature;
-  delete (part as any).functionCall;
-  delete (part as any).functionResponse;
-  /* eslint-enable @typescript-eslint/no-explicit-any */
+function filterPartFields(part: Part) {
+  delete part.thoughtSignature;
+  delete part.functionCall;
+  delete part.functionResponse;
 }
 
-function filterEventFields(event: FilteredEvent) {
-  /* eslint-disable @typescript-eslint/no-explicit-any */
-  delete (event as any).id;
-  delete (event as any).timestamp;
-  delete (event as any).invocationId;
-  delete (event as any).longRunningToolIds;
-  /* eslint-enable @typescript-eslint/no-explicit-any */
+function filterEventFields(event: Event) {
+  // id, invocationId and timestamp are required on Event, so a direct delete is
+  // a TS2790 error; Partial<Event> is the view that makes them deletable.
+  const strippable: Partial<Event> = event;
+  delete strippable.id;
+  delete strippable.timestamp;
+  delete strippable.invocationId;
+  delete strippable.longRunningToolIds;
 
   filterEventActionsStateDelta(event.actions);
 
