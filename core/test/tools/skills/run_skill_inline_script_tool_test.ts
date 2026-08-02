@@ -25,7 +25,7 @@ import {ToolConfirmation} from '../../../src/tools/tool_confirmation.js';
 import {materializeFiles} from '../../../src/utils/file_utils.js';
 
 vi.mock('../../../src/utils/file_utils.js', () => ({
-  materializeFiles: vi.fn().mockImplementation((files) => files),
+  materializeFiles: vi.fn().mockImplementation((files: File[]) => files),
 }));
 
 class MockCodeExecutor extends BaseCodeExecutor {
@@ -235,14 +235,14 @@ describe('RunSkillInlineScriptTool', () => {
     mimeType: 'text/plain',
   };
 
-  it('calls materializeFiles with output files from executor', async () => {
+  it('does not write output files when no output directory is configured', async () => {
     const mockExecutor = new MockCodeExecutor();
     mockExecutor.mockResult = {stdout: '', stderr: '', outputFiles: [testFile]};
 
     const toolset = new SkillToolset([], {codeExecutor: mockExecutor});
     const tool = new RunSkillInlineScriptTool(toolset);
 
-    await tool.runAsync({
+    const result = (await tool.runAsync({
       args: {
         script_content: 'console.log("test");',
         language: CodeExecutionLanguage.JAVASCRIPT,
@@ -250,10 +250,11 @@ describe('RunSkillInlineScriptTool', () => {
       toolContext: createMockContext('test-agent', undefined, {
         toolConfirmation: confirmed(),
       }),
-    });
+    })) as CodeExecutionResult;
 
-    // No configured directory: materializeFiles applies its own cwd default.
-    expect(materializeFiles).toHaveBeenCalledWith([testFile], undefined);
+    expect(materializeFiles).not.toHaveBeenCalled();
+    // The bytes are still returned inline, so nothing is lost.
+    expect(result.outputFiles).toEqual([testFile]);
   });
 
   it('materializes output files into the configured output directory', async () => {

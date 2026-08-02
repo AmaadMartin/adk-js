@@ -24,7 +24,7 @@ import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {materializeFiles} from '../../../src/utils/file_utils.js';
 
 vi.mock('../../../src/utils/file_utils.js', () => ({
-  materializeFiles: vi.fn(),
+  materializeFiles: vi.fn().mockImplementation((files: File[]) => files),
 }));
 
 class MockCodeExecutor extends BaseCodeExecutor {
@@ -220,20 +220,21 @@ describe('RunSkillScriptTool', () => {
     mimeType: 'text/plain',
   };
 
-  it('calls materializeFiles with output files from executor', async () => {
+  it('does not write output files when no output directory is configured', async () => {
     const mockExecutor = new MockCodeExecutor();
     mockExecutor.mockResult = {stdout: '', stderr: '', outputFiles: [testFile]};
 
     const toolset = new SkillToolset([mockSkill], {codeExecutor: mockExecutor});
     const tool = new RunSkillScriptTool(toolset);
 
-    await tool.runAsync({
+    const result = (await tool.runAsync({
       args: {skill_name: 'test-skill', script_path: 'scripts/setup.js'},
       toolContext: createMockContext(),
-    });
+    })) as CodeExecutionResult;
 
-    // No configured directory: materializeFiles applies its own cwd default.
-    expect(materializeFiles).toHaveBeenCalledWith([testFile], undefined);
+    expect(materializeFiles).not.toHaveBeenCalled();
+    // The bytes are still returned inline, so nothing is lost.
+    expect(result.outputFiles).toEqual([testFile]);
   });
 
   it('materializes output files into the configured output directory', async () => {
