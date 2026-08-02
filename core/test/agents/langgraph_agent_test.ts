@@ -17,7 +17,11 @@ import {
   isLangGraphAgent,
 } from '@google/adk';
 import {AIMessage, BaseMessage} from '@langchain/core/messages';
-import {MessagesAnnotation, StateGraph} from '@langchain/langgraph';
+import {
+  MemorySaver,
+  MessagesAnnotation,
+  StateGraph,
+} from '@langchain/langgraph';
 import {describe, expect, it, vi} from 'vitest';
 
 const SESSION_ID = 'test-session';
@@ -370,6 +374,41 @@ describe('LangGraphAgent', () => {
     expect(events[0].content?.parts?.[0].text).toBe('real graph response');
     expect(observedMessages.map(describeMessage)).toEqual([
       ['SystemMessage', INSTRUCTION],
+    ]);
+  });
+
+  it('drives a real checkpointed graph across two turns', async () => {
+    const observedTurns: Array<Array<[string, unknown]>> = [];
+    const graph = new StateGraph(MessagesAnnotation)
+      .addNode('respond', (state) => {
+        observedTurns.push(state.messages.map(describeMessage));
+        return {messages: [new AIMessage(`reply ${observedTurns.length}`)]};
+      })
+      .addEdge('__start__', 'respond')
+      .addEdge('respond', '__end__')
+      .compile({checkpointer: new MemorySaver()});
+    const agent = createAgent(graph, INSTRUCTION);
+
+    const firstTurn = await runAgent(agent, [userEvent('first prompt')]);
+    const secondTurn = await runAgent(agent, [
+      userEvent('first prompt'),
+      agentEvent(AGENT_NAME, 'reply 1'),
+      userEvent('second prompt'),
+    ]);
+
+    expect(firstTurn[0].content?.parts?.[0].text).toBe('reply 1');
+    expect(secondTurn[0].content?.parts?.[0].text).toBe('reply 2');
+    expect(observedTurns[0]).toEqual([
+      ['SystemMessage', INSTRUCTION],
+      ['HumanMessage', 'first prompt'],
+    ]);
+    // The checkpointer replayed turn 1, so only the new user message is
+    // forwarded and the instruction is not prepended again.
+    expect(observedTurns[1]).toEqual([
+      ['SystemMessage', INSTRUCTION],
+      ['HumanMessage', 'first prompt'],
+      ['AIMessage', 'reply 1'],
+      ['HumanMessage', 'second prompt'],
     ]);
   });
 });
