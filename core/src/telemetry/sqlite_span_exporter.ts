@@ -31,6 +31,13 @@ const INSTRUMENTATION_SCOPE_NAME = 'gcp.vertex.agent';
 const NANOS_PER_SECOND = 1_000_000_000n;
 const NOT_SERIALIZABLE = '<not serializable>';
 
+/** Value types `JSON.stringify` cannot represent. */
+const UNSUPPORTED_JSON_TYPES: ReadonlySet<string> = new Set([
+  'bigint',
+  'function',
+  'symbol',
+]);
+
 /** Converts an OpenTelemetry `HrTime` to epoch nanoseconds. */
 export function hrTimeToUnixNanos(hrTime: HrTime): string {
   return (BigInt(hrTime[0]) * NANOS_PER_SECOND + BigInt(hrTime[1])).toString();
@@ -38,7 +45,10 @@ export function hrTimeToUnixNanos(hrTime: HrTime): string {
 
 /** Converts epoch nanoseconds back to an OpenTelemetry `HrTime`. */
 export function unixNanosToHrTime(nanos: string): HrTime {
-  const total = BigInt(nanos);
+  return nanosToHrTime(BigInt(nanos));
+}
+
+function nanosToHrTime(total: bigint): HrTime {
   return [Number(total / NANOS_PER_SECOND), Number(total % NANOS_PER_SECOND)];
 }
 
@@ -51,25 +61,8 @@ export function unixNanosToHrTime(nanos: string): HrTime {
 export function serializeAttributes(
   attributes: Record<string, unknown>,
 ): string {
-  const ancestors: unknown[] = [];
-  function replacer(this: unknown, key: string, value: unknown): unknown {
-    while (ancestors.length > 0 && ancestors.at(-1) !== this) {
-      ancestors.pop();
-    }
-    if (typeof value === 'object' && value !== null) {
-      // Only an ancestor of the current value is a real cycle; the same object
-      // appearing twice side by side is not.
-      if (ancestors.includes(value)) {
-        return NOT_SERIALIZABLE;
-      }
-      ancestors.push(value);
-      return value;
-    }
-    return isSerializablePrimitive(value) ? value : NOT_SERIALIZABLE;
-  }
-
   try {
-    return JSON.stringify(attributes, replacer);
+    return JSON.stringify(attributes, createNotSerializableReplacer());
   } catch (e: unknown) {
     logger.debug('Failed to serialize span attributes:', e);
     return '{}';
@@ -110,9 +103,35 @@ export function deserializeAttributes(
   return attributes;
 }
 
-function isSerializablePrimitive(value: unknown): boolean {
-  const type = typeof value;
-  return type !== 'bigint' && type !== 'function' && type !== 'symbol';
+/**
+ * Builds a `JSON.stringify` replacer mapping values JSON cannot represent, and
+ * references back to an enclosing value, to `'<not serializable>'`.
+ *
+ * The replacer tracks the path it is on, so every serialization needs its own.
+ */
+function createNotSerializableReplacer(): (
+  this: unknown,
+  key: string,
+  value: unknown,
+) => unknown {
+  const ancestors: unknown[] = [];
+  return function replacer(this: unknown, key: string, value: unknown) {
+    while (ancestors.length > 0 && ancestors.at(-1) !== this) {
+      ancestors.pop();
+    }
+    if (typeof value !== 'object' || value === null) {
+      return UNSUPPORTED_JSON_TYPES.has(typeof value)
+        ? NOT_SERIALIZABLE
+        : value;
+    }
+    // Only an enclosing value is a cycle; the same object appearing twice side
+    // by side is not.
+    if (ancestors.includes(value)) {
+      return NOT_SERIALIZABLE;
+    }
+    ancestors.push(value);
+    return value;
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -195,15 +214,15 @@ function toReadableSpan(row: StorageSpan): ReadableSpan {
   const endNanos = toNanos(row.endTimeUnixNano);
 
   return {
-    name: row.name || '',
+    name: row.name,
     kind: SpanKind.INTERNAL,
     spanContext: () => spanContext,
     parentSpanContext: row.parentSpanId
       ? {...spanContext, spanId: row.parentSpanId}
       : undefined,
-    startTime: unixNanosToHrTime(startNanos.toString()),
-    endTime: unixNanosToHrTime(endNanos.toString()),
-    duration: unixNanosToHrTime((endNanos - startNanos).toString()),
+    startTime: nanosToHrTime(startNanos),
+    endTime: nanosToHrTime(endNanos),
+    duration: nanosToHrTime(endNanos - startNanos),
     status: {code: SpanStatusCode.UNSET},
     attributes: deserializeAttributes(row.attributesJson),
     links: [],
