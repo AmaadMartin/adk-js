@@ -811,4 +811,175 @@ describe('AgentLoader', () => {
       await loader.disposeAll();
     });
   });
+
+  describe('process handlers', () => {
+    // Never `process.emit` any of these events: that also fires Vitest's and
+    // Tinypool's own listeners and can take the worker down. These tests
+    // capture the listener the loader installed and invoke it directly.
+    const PROCESS_EVENTS = [
+      'exit',
+      'SIGINT',
+      'SIGUSR1',
+      'SIGUSR2',
+      'uncaughtException',
+    ] as const;
+
+    const counts = () =>
+      PROCESS_EVENTS.map((event) => process.listenerCount(event));
+
+    const afterInstall = (before: number[]) =>
+      before.map((count, index) =>
+        PROCESS_EVENTS[index] === 'uncaughtException' ? count : count + 1,
+      );
+
+    const listenerAddedBy = <T>(
+      listenersOf: () => T[],
+      install: () => void,
+    ) => {
+      const before = new Set<T>(listenersOf());
+      install();
+      const added = listenersOf().filter((l) => !before.has(l));
+      expect(added).toHaveLength(1);
+      return added[0];
+    };
+
+    it('does not register process listeners in the constructor', async () => {
+      const before = counts();
+      const loaders = [
+        new AgentLoader(tempAgentsDir),
+        new AgentLoader(tempAgentsDir),
+        new AgentLoader(tempAgentsDir),
+      ];
+
+      try {
+        expect(counts()).toEqual(before);
+      } finally {
+        await Promise.all(loaders.map((loader) => loader.disposeAll()));
+      }
+    });
+
+    it('installs exit and termination signal listeners on demand', async () => {
+      const loader = new AgentLoader(tempAgentsDir);
+      const before = counts();
+
+      try {
+        loader.installProcessHandlers();
+
+        expect(counts()).toEqual(afterInstall(before));
+      } finally {
+        await loader.disposeAll();
+      }
+    });
+
+    it('never installs an uncaughtException listener', async () => {
+      const loader = new AgentLoader(tempAgentsDir);
+      const before = process.listenerCount('uncaughtException');
+
+      try {
+        loader.installProcessHandlers();
+
+        expect(process.listenerCount('uncaughtException')).toBe(before);
+      } finally {
+        await loader.disposeAll();
+      }
+    });
+
+    it('is idempotent', async () => {
+      const loader = new AgentLoader(tempAgentsDir);
+      const before = counts();
+
+      try {
+        loader.installProcessHandlers();
+        loader.installProcessHandlers();
+
+        expect(counts()).toEqual(afterInstall(before));
+      } finally {
+        await loader.disposeAll();
+      }
+    });
+
+    it('removes installed listeners on disposeAll', async () => {
+      const loader = new AgentLoader(tempAgentsDir);
+      const before = counts();
+
+      try {
+        loader.installProcessHandlers();
+        await loader.disposeAll();
+
+        expect(counts()).toEqual(before);
+      } finally {
+        await loader.disposeAll();
+      }
+    });
+
+    it('can reinstall after disposeAll', async () => {
+      const loader = new AgentLoader(tempAgentsDir);
+      const before = counts();
+
+      try {
+        loader.installProcessHandlers();
+        await loader.disposeAll();
+        loader.installProcessHandlers();
+
+        expect(counts()).toEqual(afterInstall(before));
+
+        await loader.disposeAll();
+
+        expect(counts()).toEqual(before);
+      } finally {
+        await loader.disposeAll();
+      }
+    });
+
+    it('disposeAll is a no-op for handlers that were never installed', async () => {
+      const before = counts();
+      const loader = new AgentLoader(tempAgentsDir);
+
+      await loader.disposeAll();
+
+      expect(counts()).toEqual(before);
+    });
+
+    it('the exit listener disposes cached agents', async () => {
+      const loader = new AgentLoader(tempAgentsDir);
+      const disposeAll = vi.spyOn(loader, 'disposeAll');
+
+      try {
+        const exitListener = listenerAddedBy(
+          () => process.listeners('exit'),
+          () => {
+            loader.installProcessHandlers();
+          },
+        );
+        exitListener(0);
+
+        expect(disposeAll).toHaveBeenCalled();
+      } finally {
+        disposeAll.mockRestore();
+        await loader.disposeAll();
+      }
+    });
+
+    it('a termination signal listener exits the process', async () => {
+      const loader = new AgentLoader(tempAgentsDir);
+      const exit = vi.spyOn(process, 'exit').mockImplementation(() => {
+        throw new Error('process.exit');
+      });
+
+      try {
+        const signalListener = listenerAddedBy(
+          () => process.listeners('SIGINT'),
+          () => {
+            loader.installProcessHandlers();
+          },
+        );
+
+        expect(() => signalListener('SIGINT')).toThrow('process.exit');
+        expect(exit).toHaveBeenCalled();
+      } finally {
+        exit.mockRestore();
+        await loader.disposeAll();
+      }
+    });
+  });
 });

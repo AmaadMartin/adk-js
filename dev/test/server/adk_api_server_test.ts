@@ -1284,4 +1284,32 @@ describe('AdkWebServer', () => {
       }
     });
   });
+
+  describe('process handlers', () => {
+    it('does not install agent loader process handlers by default', () => {
+      const loader = new AgentLoader(process.cwd());
+      const installProcessHandlers = vi.spyOn(loader, 'installProcessHandlers');
+      const signalListeners = process.listenerCount('SIGINT');
+
+      new AdkApiServer({agentLoader: loader});
+
+      expect(installProcessHandlers).not.toHaveBeenCalled();
+      expect(process.listenerCount('SIGINT')).toBe(signalListeners);
+    });
+
+    it('installs agent loader process handlers when opted in', async () => {
+      const loader = new AgentLoader(process.cwd());
+      const installProcessHandlers = vi.spyOn(loader, 'installProcessHandlers');
+      const signalListeners = process.listenerCount('SIGINT');
+
+      try {
+        new AdkApiServer({agentLoader: loader, installProcessHandlers: true});
+
+        expect(installProcessHandlers).toHaveBeenCalledOnce();
+        expect(process.listenerCount('SIGINT')).toBe(signalListeners + 1);
+      } finally {
+        await loader.disposeAll();
+      }
+    });
+  });
 });
