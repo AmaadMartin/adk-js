@@ -96,6 +96,21 @@
     },
     "@google-cloud/storage": {
       "optional": true
+    },
+    "@mikro-orm/mariadb": {
+      "optional": true
+    },
+    "@mikro-orm/mssql": {
+      "optional": true
+    },
+    "@mikro-orm/mysql": {
+      "optional": true
+    },
+    "@mikro-orm/postgresql": {
+      "optional": true
+    },
+    "@mikro-orm/sqlite": {
+      "optional": true
     }
   }
 }
