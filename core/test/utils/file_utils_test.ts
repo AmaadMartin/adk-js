@@ -9,7 +9,7 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
-import {materializeFiles, toPosixPath} from '../../src/utils/file_utils.js';
+import {asPosixPath, materializeFiles} from '../../src/utils/file_utils.js';
 
 describe('file_utils', () => {
   let tempDir: string;
@@ -160,25 +160,25 @@ describe('file_utils', () => {
     });
   });
 
-  describe('toPosixPath', () => {
+  describe('asPosixPath', () => {
     it('should convert a Windows-separated nested path to forward slashes', () => {
-      expect(toPosixPath('scripts\\hello.js', '\\')).toBe('scripts/hello.js');
+      expect(asPosixPath('scripts\\hello.js', '\\')).toBe('scripts/hello.js');
     });
 
     it('should convert every segment of a deep Windows-separated path', () => {
-      expect(toPosixPath('a\\b\\c.txt', '\\')).toBe('a/b/c.txt');
+      expect(asPosixPath('a\\b\\c.txt', '\\')).toBe('a/b/c.txt');
     });
 
     it('should leave an already POSIX path unchanged', () => {
-      expect(toPosixPath('scripts/hello.js', '/')).toBe('scripts/hello.js');
+      expect(asPosixPath('scripts/hello.js', '/')).toBe('scripts/hello.js');
     });
 
     it('should leave a path without a separator unchanged', () => {
-      expect(toPosixPath('hello.js', '\\')).toBe('hello.js');
+      expect(asPosixPath('hello.js', '\\')).toBe('hello.js');
     });
 
     it('should default to the host separator', () => {
-      expect(toPosixPath(path.join('scripts', 'hello.js'))).toBe(
+      expect(asPosixPath(path.join('scripts', 'hello.js'))).toBe(
         'scripts/hello.js',
       );
     });

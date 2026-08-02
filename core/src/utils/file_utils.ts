@@ -73,22 +73,19 @@ export async function materializeFiles(
 }
 
 /**
- * Rewrites a filesystem-relative path into the forward-slash form used by
- * `File.name`. Directory listings are `\`-separated on Windows, so a raw
- * comparison against a caller-supplied `File.name` would never match.
+ * Converts a path to a POSIX path.
  *
- * Splitting on the separator rather than replacing every backslash keeps POSIX
- * filenames that legitimately contain a backslash (`a\b.txt`) intact.
+ * Used for ensuring paths use forward slashes (/), regardless of the operating
+ * system. Splitting on the separator rather than replacing every backslash
+ * keeps POSIX filenames that legitimately contain a backslash (`a\b.txt`)
+ * intact.
  *
- * @param relativePath The path to convert.
- * @param separator The separator to split on. Defaults to the host's
- *   `path.sep`; pass one explicitly to exercise Windows behavior on any host.
+ * @param p The path.
+ * @param separator The separator convention `p` uses. Defaults to the host's.
+ * @returns The POSIX path.
  */
-export function toPosixPath(
-  relativePath: string,
-  separator: string = path.sep,
-): string {
-  return relativePath.split(separator).join('/');
+export function asPosixPath(p: string, separator: '\\' | '/' = path.sep) {
+  return p.split(separator).join('/');
 }
 
 export const EXTENSION_TO_MIME_TYPE: Record<string, string> = {

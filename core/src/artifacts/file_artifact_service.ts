@@ -9,6 +9,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import {fileURLToPath, pathToFileURL} from 'url';
 
+import {asPosixPath} from '../utils/file_utils.js';
 import {logger} from '../utils/logger.js';
 
 import {
@@ -678,16 +679,4 @@ function fileUriToPath(uri: string): string | undefined {
 
     return undefined;
   }
-}
-
-/**
- * Converts a path to a POSIX path.
- *
- * Used for ensuring paths use forward slashes (/), regardless of the operating system.
- *
- * @param p The path.
- * @returns The POSIX path.
- */
-function asPosixPath(p: string): string {
-  return p.split(path.sep).join('/');
 }
