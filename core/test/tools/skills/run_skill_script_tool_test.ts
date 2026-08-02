@@ -22,10 +22,7 @@ import {
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {InMemoryArtifactService} from '../../../src/artifacts/in_memory_artifact_service.js';
 import {ScopedArtifactService} from '../../../src/artifacts/scoped_artifact_service.js';
-import {
-  ArtifactSaveError,
-  SavedArtifact,
-} from '../../../src/utils/artifact_utils.js';
+import {SaveFilesAsArtifactsResult} from '../../../src/utils/artifact_utils.js';
 import {materializeFiles} from '../../../src/utils/file_utils.js';
 
 vi.mock('../../../src/utils/file_utils.js', () => ({
@@ -58,10 +55,7 @@ interface ToolErrorResponse {
 }
 
 /** The tool result once artifact persistence has augmented it. */
-interface ArtifactAugmentedResult extends CodeExecutionResult {
-  savedArtifacts: SavedArtifact[];
-  artifactSaveErrors: ArtifactSaveError[];
-}
+type ArtifactAugmentedResult = CodeExecutionResult & SaveFilesAsArtifactsResult;
 
 describe('RunSkillScriptTool', () => {
   function createMockContext(

@@ -148,11 +148,10 @@ export class RunSkillScriptTool extends BaseTool {
       if (!this.toolset.saveOutputsAsArtifacts) {
         return result;
       }
-      const artifacts = await saveFilesAsArtifacts(
-        toolContext,
-        result.outputFiles,
-      );
-      return artifacts ? {...result, ...artifacts} : result;
+      return {
+        ...result,
+        ...(await saveFilesAsArtifacts(toolContext, result.outputFiles)),
+      };
     } catch (e: unknown) {
       return {
         error: `Failed to execute script '${scriptPath}': ${(e as Error).message}`,

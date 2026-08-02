@@ -12,10 +12,12 @@ import {
   ArtifactVersion,
   BaseArtifactService,
   DeleteArtifactRequest,
+  fileHasUserNamespace,
   ListArtifactKeysRequest,
   ListVersionsRequest,
   LoadArtifactRequest,
   SaveArtifactRequest,
+  USER_NAMESPACE_PREFIX,
 } from './base_artifact_service.js';
 
 const GCS_FILE_URI_METADATA_KEY = 'adkFileUri';
@@ -172,7 +174,11 @@ export class GcsArtifactService implements BaseArtifactService {
 
     return [
       ...extractArtifactKeys(sessionFiles, sessionPrefix),
-      ...extractArtifactKeys(userSessionFiles, usernamePrefix, 'user:'),
+      ...extractArtifactKeys(
+        userSessionFiles,
+        usernamePrefix,
+        USER_NAMESPACE_PREFIX,
+      ),
     ].sort((a, b) => a.localeCompare(b));
   }
 
@@ -277,8 +283,10 @@ function getFileName({
   filename,
   version,
 }: LoadArtifactRequest): string {
-  const isUser = filename.startsWith('user:');
-  const cleanFilename = isUser ? filename.substring(5) : filename;
+  const isUser = fileHasUserNamespace(filename);
+  const cleanFilename = isUser
+    ? filename.substring(USER_NAMESPACE_PREFIX.length)
+    : filename;
 
   const prefix = isUser
     ? `${appName}/${userId}/user/${cleanFilename}`

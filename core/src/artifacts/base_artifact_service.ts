@@ -8,6 +8,22 @@ import {Part} from '@google/genai';
 import {CompositeSessionKey} from '../sessions/session.js';
 
 /**
+ * Filename prefix that scopes an artifact to the user across every session,
+ * rather than to the session that created it.
+ */
+export const USER_NAMESPACE_PREFIX = 'user:';
+
+/**
+ * Checks if the filename has a user namespace prefix.
+ *
+ * @param filename The filename to check.
+ * @return true if the filename is user-scoped rather than session-scoped.
+ */
+export function fileHasUserNamespace(filename: string): boolean {
+  return filename.startsWith(USER_NAMESPACE_PREFIX);
+}
+
+/**
  * The parameters for `saveArtifact`.
  */
 export interface SaveArtifactRequest extends CompositeSessionKey {

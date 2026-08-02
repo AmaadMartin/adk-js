@@ -6,16 +6,14 @@
 
 import {Context} from '../agents/context.js';
 import {
+  fileHasUserNamespace,
+  USER_NAMESPACE_PREFIX,
+} from '../artifacts/base_artifact_service.js';
+import {
   File,
   FileContentEncoding,
 } from '../code_executors/code_execution_utils.js';
 import {logger} from './logger.js';
-
-/**
- * Filename prefix that widens an artifact from session scope to cross-session
- * user scope. See `in_memory_artifact_service.ts`.
- */
-const USER_NAMESPACE_PREFIX = 'user:';
 
 /** One file successfully persisted to the artifact service. */
 export interface SavedArtifact {
@@ -66,7 +64,7 @@ export async function saveFilesAsArtifacts(
   for (const file of files) {
     // Filenames originate from executed code, so they must not be able to
     // widen an artifact beyond the session that produced it.
-    if (file.name.startsWith(USER_NAMESPACE_PREFIX)) {
+    if (fileHasUserNamespace(file.name)) {
       const error =
         `Artifact names starting with '${USER_NAMESPACE_PREFIX}' are not ` +
         'accepted from produced files.';

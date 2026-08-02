@@ -21,6 +21,7 @@ import {describe, expect, it} from 'vitest';
 // ScopedArtifactService is internal: it is the framework's own bridge from a
 // BaseArtifactService to the session-scoped service an invocation carries.
 import {ScopedArtifactService} from '../../../core/src/artifacts/scoped_artifact_service.js';
+import {SaveFilesAsArtifactsResult} from '../../../core/src/utils/artifact_utils.js';
 
 const IS_WINDOWS = os.platform() === 'win32';
 const IS_UNIX = os.platform() === 'linux' || os.platform() === 'darwin';
@@ -386,10 +387,7 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
         script_path: 'scripts/create_file.js',
       },
       toolContext: createMockContext('test-agent', artifactService),
-    })) as CodeExecutionResult & {
-      savedArtifacts: Array<{filename: string; version: number}>;
-      artifactSaveErrors: Array<{filename: string; error: string}>;
-    };
+    })) as CodeExecutionResult & SaveFilesAsArtifactsResult;
 
     // Matched by entry rather than against the whole list: on Windows the
     // executor also reports the skill's own input resources as outputs,
