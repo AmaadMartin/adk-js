@@ -14,12 +14,8 @@ import {File} from '../code_executors/code_execution_utils.js';
  * existing file.
  *
  * Names that escape `dir` are rejected with a `Path traversal detected` error.
- * That check is a string-prefix comparison on the resolved path, not a
- * sandbox, and it is weaker than it looks: a sibling sharing the prefix
- * (`dir` of `/a/out` with the name `../out_leak.txt`) resolves to `/a/out_leak.txt`
- * and passes, and no lexical check survives symlinks, hardlinks, bind mounts
- * or a concurrent rename. Treat `dir` as a tidiness boundary, not a security
- * one, and do not point it at a directory whose siblings are sensitive.
+ * That check is a lexical string-prefix comparison, not a sandbox: treat `dir`
+ * as a tidiness boundary, and do not point it at a sensitive location.
  *
  * @param files The files to materialize.
  * @param dir Base directory to write under. Required: file names come from

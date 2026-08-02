@@ -47,7 +47,6 @@ export class SkillToolset extends BaseToolset {
   public registry?: SkillRegistry;
   private toolCache = new Map<string, BaseTool[]>();
   private fetchedSkillCache = new Map<string, Map<string, Skill>>();
-  /** The configured skill script output directory, if any. */
   public readonly outputDir?: string;
 
   constructor(
@@ -73,10 +72,6 @@ export class SkillToolset extends BaseToolset {
        *
        * When unset the tools write nothing to the host filesystem; output
        * files are still returned inline on the tool response.
-       *
-       * Point this at a scratch directory: a colliding name is suffixed
-       * (`report.txt` -> `report_2.txt`) rather than overwritten, so output
-       * accumulates across invocations.
        */
       outputDir?: string;
     } = {},

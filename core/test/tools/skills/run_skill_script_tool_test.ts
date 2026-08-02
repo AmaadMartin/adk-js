@@ -24,7 +24,7 @@ import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {materializeFiles} from '../../../src/utils/file_utils.js';
 
 vi.mock('../../../src/utils/file_utils.js', () => ({
-  materializeFiles: vi.fn().mockImplementation((files: File[]) => files),
+  materializeFiles: vi.fn(),
 }));
 
 class MockCodeExecutor extends BaseCodeExecutor {

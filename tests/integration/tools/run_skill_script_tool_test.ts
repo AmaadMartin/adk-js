@@ -20,6 +20,7 @@ import {describe, expect, it} from 'vitest';
 
 const IS_WINDOWS = os.platform() === 'win32';
 const IS_UNIX = os.platform() === 'linux' || os.platform() === 'darwin';
+
 describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
   function createMockContext(agentName = 'test-agent') {
     return new Context({
