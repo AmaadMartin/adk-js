@@ -5,6 +5,8 @@
  */
 
 import {Client} from '@google-cloud/vertexai';
+import AdmZip from 'adm-zip';
+import {describe, expect, it, vi} from 'vitest';
 import {
   Context,
   GCPSkillRegistry,
@@ -17,9 +19,7 @@ import {
   Skill,
   SkillToolset,
   loadSkillFromZipBuffer,
-} from '@google/adk';
-import AdmZip from 'adm-zip';
-import {describe, expect, it, vi} from 'vitest';
+} from '../../../src/index.js';
 
 describe('skill_registry', () => {
   function createMockContext(agentName = 'test-agent') {

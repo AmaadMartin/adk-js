@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {describe, expect, it} from 'vitest';
 import {
   BaseLlm,
   Context,
@@ -14,8 +15,7 @@ import {
   LlmRequest,
   LlmResponse,
   ReadonlyContext,
-} from '@google/adk';
-import {describe, expect, it} from 'vitest';
+} from '../../src/index.js';
 
 class MockLlm extends BaseLlm {
   lastRequest?: LlmRequest;

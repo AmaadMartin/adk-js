@@ -4,6 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {Outcome} from '@google/genai';
+import {describe, expect, it} from 'vitest';
+import {
+  createNewEventId,
+  generateClientFunctionCallId,
+  populateClientFunctionCallId,
+  transformToCamelCaseEvent,
+  transformToSnakeCaseEvent,
+} from '../../src/events/event.js';
 import {
   AuthConfig,
   createEvent,
@@ -15,16 +24,7 @@ import {
   isFinalResponse,
   pruneThoughts,
   stringifyContent,
-} from '@google/adk';
-import {Outcome} from '@google/genai';
-import {describe, expect, it} from 'vitest';
-import {
-  createNewEventId,
-  generateClientFunctionCallId,
-  populateClientFunctionCallId,
-  transformToCamelCaseEvent,
-  transformToSnakeCaseEvent,
-} from '../../src/events/event.js';
+} from '../../src/index.js';
 
 describe('Event Utils', () => {
   describe('createEvent', () => {

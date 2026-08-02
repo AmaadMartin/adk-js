@@ -13,6 +13,9 @@ import {
 } from '@a2a-js/sdk';
 import {ClientFactory} from '@a2a-js/sdk/client';
 import {ExecutionEventBus, RequestContext} from '@a2a-js/sdk/server';
+import {Language, Outcome} from '@google/genai';
+import {beforeEach, describe, expect, it, Mock, vi} from 'vitest';
+import {A2AEvent} from '../../src/a2a/a2a_event.js';
 import {
   A2AAgentExecutor,
   Event as AdkEvent,
@@ -27,10 +30,7 @@ import {
   Runner,
   RunnerConfig,
   Session,
-} from '@google/adk';
-import {Language, Outcome} from '@google/genai';
-import {beforeEach, describe, expect, it, Mock, vi} from 'vitest';
-import {A2AEvent} from '../../src/a2a/a2a_event.js';
+} from '../../src/index.js';
 
 vi.mock('@a2a-js/sdk/client', () => {
   const Client = vi.fn().mockImplementation(() => ({

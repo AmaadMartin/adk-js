@@ -4,6 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {Content, Schema, Type} from '@google/genai';
+import {beforeEach, describe, expect, it} from 'vitest';
+import {z as z3} from 'zod/v3';
+import {z as z4} from 'zod/v4';
 import {
   AUTH_PREPROCESSOR,
   BaseLlm,
@@ -25,11 +29,7 @@ import {
   RunAsyncToolRequest,
   Session,
   ToolProcessLlmRequest,
-} from '@google/adk';
-import {Content, Schema, Type} from '@google/genai';
-import {beforeEach, describe, expect, it} from 'vitest';
-import {z as z3} from 'zod/v3';
-import {z as z4} from 'zod/v4';
+} from '../../src/index.js';
 
 class MockLlmConnection implements BaseLlmConnection {
   sendHistory(_history: Content[]): Promise<void> {

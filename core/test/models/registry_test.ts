@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {beforeAll, describe, expect, it} from 'vitest';
 import {
   BaseLlm,
   BaseLlmConnection,
@@ -11,8 +12,7 @@ import {
   LLMRegistry,
   LlmRequest,
   LlmResponse,
-} from '@google/adk';
-import {beforeAll, describe, expect, it} from 'vitest';
+} from '../../src/index.js';
 
 import {
   Blob,

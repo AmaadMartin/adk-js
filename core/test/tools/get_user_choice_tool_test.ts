@@ -4,8 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Context, createEventActions, getUserChoiceTool} from '@google/adk';
 import {describe, expect, it} from 'vitest';
+import {
+  Context,
+  createEventActions,
+  getUserChoiceTool,
+} from '../../src/index.js';
 
 describe('getUserChoiceTool', () => {
   it('computes the correct declaration', () => {

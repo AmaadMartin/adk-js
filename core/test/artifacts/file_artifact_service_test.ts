@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {FileArtifactService} from '@google/adk';
 import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
@@ -14,6 +13,7 @@ import {
   getSessionArtifactsDir,
   getUserRoot,
 } from '../../src/artifacts/file_artifact_service.js';
+import {FileArtifactService} from '../../src/index.js';
 import {runArtifactServiceTests} from './artifact_service_test_utils.js';
 
 describe('FileArtifactService', () => {

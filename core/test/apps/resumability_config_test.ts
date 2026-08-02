@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {createResumabilityConfig} from '@google/adk';
 import {describe, expect, it} from 'vitest';
+import {createResumabilityConfig} from '../../src/index.js';
 
 describe('createResumabilityConfig', () => {
   it('should default to isResumable = false when no params given', () => {

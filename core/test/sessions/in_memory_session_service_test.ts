@@ -4,14 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {beforeEach, describe, expect, it} from 'vitest';
 import {
   InMemorySessionService,
   Session,
   State,
   createEvent,
   createEventActions,
-} from '@google/adk';
-import {beforeEach, describe, expect, it} from 'vitest';
+} from '../../src/index.js';
 import {isInMemoryConnectionString} from '../../src/sessions/in_memory_session_service.js';
 
 describe('isInMemoryConnectionString', () => {

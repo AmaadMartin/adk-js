@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {describe, expect, it} from 'vitest';
 import {
   BaseAgent,
   CompactedEvent,
@@ -15,8 +16,7 @@ import {
   LlmRequest,
   PluginManager,
   Session,
-} from '@google/adk';
-import {describe, expect, it} from 'vitest';
+} from '../../../src/index.js';
 
 function createMockEvent(id: string, timestamp: number, text: string): Event {
   return {

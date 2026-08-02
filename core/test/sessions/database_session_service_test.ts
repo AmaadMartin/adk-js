@@ -4,16 +4,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {MikroORM} from '@mikro-orm/core';
+import {SqliteDriver} from '@mikro-orm/sqlite';
+import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {
   createEvent,
   createEventActions,
   DatabaseSessionService,
   Event,
   State,
-} from '@google/adk';
-import {MikroORM} from '@mikro-orm/core';
-import {SqliteDriver} from '@mikro-orm/sqlite';
-import {afterEach, beforeEach, describe, expect, it} from 'vitest';
+} from '../../src/index.js';
 import {isDatabaseConnectionString} from '../../src/sessions/database_session_service.js';
 import {validateDatabaseSchemaVersion} from '../../src/sessions/db/operations.js';
 

@@ -5,12 +5,12 @@
  */
 
 import {Client} from '@google-cloud/vertexai';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   AgentEngineSandboxCodeExecutor,
   CodeExecutionLanguage,
   InvocationContext,
-} from '@google/adk';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
+} from '../../src/index.js';
 
 describe('AgentEngineSandboxCodeExecutor', () => {
   let executor: AgentEngineSandboxCodeExecutor;

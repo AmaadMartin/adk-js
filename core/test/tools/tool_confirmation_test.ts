@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {ToolConfirmation} from '@google/adk';
 import {describe, expect, it} from 'vitest';
+import {ToolConfirmation} from '../../src/index.js';
 
 describe('ToolConfirmation', () => {
   it('stores all provided fields', () => {

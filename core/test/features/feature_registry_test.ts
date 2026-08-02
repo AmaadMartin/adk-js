@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   FeatureName,
   FeatureStage,
@@ -12,8 +13,7 @@ import {
   overrideFeatureEnabled,
   registerFeature,
   withTemporaryFeatureOverride,
-} from '@google/adk';
-import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+} from '../../src/index.js';
 
 describe('FeatureRegistry', () => {
   const originalEnv = process.env;

@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {BaseArtifactService, CompositeSessionKey} from '@google/adk';
 import {Part} from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
+import {BaseArtifactService, CompositeSessionKey} from '../../src/index.js';
 
 /**
  * Runs the shared artifact service tests.

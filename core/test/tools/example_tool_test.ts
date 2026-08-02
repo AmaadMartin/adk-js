@@ -6,6 +6,7 @@
 
 import {describe, expect, it, vi} from 'vitest';
 
+import {Content} from '@google/genai';
 import {
   BaseAgent,
   BaseExampleProvider,
@@ -16,8 +17,7 @@ import {
   InvocationContext,
   LlmRequest,
   PluginManager,
-} from '@google/adk';
-import {Content} from '@google/genai';
+} from '../../src/index.js';
 
 const SIMPLE_EXAMPLE: Example = {
   input: {parts: [{text: 'What is 2+2?'}]},
@@ -149,7 +149,7 @@ describe('ExampleTool', () => {
     );
   });
 
-  it('is importable from @google/adk (public export)', () => {
+  it('is exported from the package barrel', () => {
     expect(new ExampleTool([])).toBeInstanceOf(ExampleTool);
   });
 });

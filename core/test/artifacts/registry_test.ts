@@ -4,13 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {describe, expect, it} from 'vitest';
 import {
   FileArtifactService,
   GcsArtifactService,
   InMemoryArtifactService,
   getArtifactServiceFromUri,
-} from '@google/adk';
-import {describe, expect, it} from 'vitest';
+} from '../../src/index.js';
 
 describe('getArtifactServiceFromUri', () => {
   it('returns InMemoryArtifactService for memory uri', () => {

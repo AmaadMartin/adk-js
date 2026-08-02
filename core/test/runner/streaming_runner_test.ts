@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {Content, Language, Outcome} from '@google/genai';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   BaseAgent,
   BaseLlm,
@@ -21,9 +23,7 @@ import {
   RunAsyncToolRequest,
   Runner,
   toStructuredEvents,
-} from '@google/adk';
-import {Content, Language, Outcome} from '@google/genai';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
+} from '../../src/index.js';
 
 const TEST_APP_ID = 'test_app_id';
 const TEST_USER_ID = 'test_user_id';

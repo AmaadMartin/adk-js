@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Task} from '@google/adk';
 import {describe, expect, it} from 'vitest';
+import {Task} from '../../src/index.js';
 
 describe('task utils', () => {
   describe('Task class', () => {

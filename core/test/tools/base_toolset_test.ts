@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {describe, expect, it} from 'vitest';
 import {
   BaseTool,
   BaseToolset,
@@ -12,8 +13,7 @@ import {
   LlmRequest,
   ReadonlyContext,
   ToolPredicate,
-} from '@google/adk';
-import {describe, expect, it} from 'vitest';
+} from '../../src/index.js';
 
 class DummyTool extends BaseTool {
   constructor(name: string) {

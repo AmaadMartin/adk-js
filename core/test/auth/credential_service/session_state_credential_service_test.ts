@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {describe, expect, it, vi} from 'vitest';
 import {
   AuthConfig,
   AuthCredential,
@@ -11,8 +12,7 @@ import {
   AuthScheme,
   Context,
   SessionStateCredentialService,
-} from '@google/adk';
-import {describe, expect, it, vi} from 'vitest';
+} from '../../../src/index.js';
 
 describe('SessionStateCredentialService', () => {
   it('should load credential from state', async () => {

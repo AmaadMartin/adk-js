@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {getClientLabels, runWithClientLabel} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {getClientLabels, runWithClientLabel} from '../../src/index.js';
 import {parseUserAgent} from '../../src/utils/client_labels.js';
 
 describe('client_labels', () => {

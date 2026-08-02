@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {OAuthGrantType} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 import {getOAuthGrantTypeFromFlow} from '../../src/auth/auth_schemes.js';
+import {OAuthGrantType} from '../../src/index.js';
 
 describe('auth_schemes', () => {
   describe('getOAuthGrantTypeFromFlow', () => {

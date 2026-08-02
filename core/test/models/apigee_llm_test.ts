@@ -14,7 +14,7 @@ import {
   Gemini,
   LLMRegistry,
   LlmRequest,
-} from '@google/adk';
+} from '../../src/index.js';
 
 const geminiModelString = 'apigee/gemini/gemini-1.5-flash';
 const vertexModelString = 'apigee/vertex_ai/model-id';

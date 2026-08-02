@@ -4,15 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {Content, Type} from '@google/genai';
+import {beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {
   Context,
   LlmRequest,
   LoadMcpResourceTool,
   MCPToolset,
   RunAsyncToolRequest,
-} from '@google/adk';
-import {Content, Type} from '@google/genai';
-import {beforeEach, describe, expect, it, Mock, vi} from 'vitest';
+} from '../../../src/index.js';
 
 /**
  * Builds a {@link LoadMcpResourceTool} backed by a minimal mock toolset. Only

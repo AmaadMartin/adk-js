@@ -4,10 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Context, OpenAPIToolset} from '@google/adk';
 import * as fs from 'fs';
 import * as path from 'path';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {Context, OpenAPIToolset} from '../../../src/index.js';
 
 describe('OpenAPIToolset Integration', () => {
   let truanonSpec: string;

@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GcsArtifactService} from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
+import {GcsArtifactService} from '../../src/index.js';
 import {runArtifactServiceTests} from './artifact_service_test_utils.js';
 
 const {StorageMock, storageMock} = vi.hoisted(() => {

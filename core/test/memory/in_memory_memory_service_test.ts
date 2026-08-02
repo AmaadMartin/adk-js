@@ -4,12 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {beforeEach, describe, expect, it} from 'vitest';
 import {
   InMemoryMemoryService,
   InMemorySessionService,
   createEvent,
-} from '@google/adk';
-import {beforeEach, describe, expect, it} from 'vitest';
+} from '../../src/index.js';
 
 describe('InMemoryMemoryService', () => {
   let service: InMemoryMemoryService;

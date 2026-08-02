@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {ExecuteCodeParams} from '@google/adk';
-import {BuiltInCodeExecutor, LlmRequest} from '@google/adk';
 import {beforeEach, describe, expect, it} from 'vitest';
+import type {ExecuteCodeParams} from '../../src/index.js';
+import {BuiltInCodeExecutor, LlmRequest} from '../../src/index.js';
 
 describe('BuiltInCodeExecutor', () => {
   let executor: BuiltInCodeExecutor;

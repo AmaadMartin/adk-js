@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {describe, expect, it} from 'vitest';
 import {
   BaseAgent,
   BaseAgentConfig,
@@ -14,8 +15,7 @@ import {
   isSequentialAgent,
   PluginManager,
   SequentialAgent,
-} from '@google/adk';
-import {describe, expect, it} from 'vitest';
+} from '../../src/index.js';
 
 class MockSubAgent extends BaseAgent {
   private eventsToYield: Event[];

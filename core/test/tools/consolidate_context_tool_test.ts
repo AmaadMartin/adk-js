@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {Type} from '@google/genai';
+import {describe, expect, it} from 'vitest';
 import {
   BaseAgent,
   ConsolidateContextTool,
@@ -11,9 +13,7 @@ import {
   createSession,
   InvocationContext,
   PluginManager,
-} from '@google/adk';
-import {Type} from '@google/genai';
-import {describe, expect, it} from 'vitest';
+} from '../../src/index.js';
 
 describe('ConsolidateContextTool', () => {
   it('computes the correct declaration', () => {
