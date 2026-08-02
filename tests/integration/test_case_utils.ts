@@ -19,6 +19,7 @@ import {
   GoogleGenAI,
 } from '@google/genai';
 import {ChildProcessWithoutNullStreams} from 'node:child_process';
+import * as net from 'node:net';
 import {expect} from 'vitest';
 
 /**
@@ -257,6 +258,177 @@ export async function runTestCase(testCase: TestCase) {
   }
 }
 
+/** Cap on captured child output per stream, in bytes. */
+export const MAX_CAPTURED_OUTPUT_BYTES = 16384;
+
+/** Matches the loopback URL a test server prints in its start-up banner. */
+const SERVER_URL_REGEX = /http:\/\/localhost:([0-9]+)/i;
+
+/** The signal that terminated a child, sourced from Node's own typing. */
+type TerminationSignal = ChildProcessWithoutNullStreams['signalCode'];
+
+/** Options for {@link waitForProcessStart}. */
+export interface WaitForProcessStartOptions {
+  childProcess: ChildProcessWithoutNullStreams;
+  startMessage: string;
+  serverName: string;
+  timeoutMs: number;
+}
+
+/**
+ * Appends `chunk` to `captured`, keeping only its trailing
+ * {@link MAX_CAPTURED_OUTPUT_BYTES} bytes. A child that dies noisily can write
+ * far more than is useful, and the bytes it wrote last are the ones that
+ * explain why.
+ */
+function appendBounded(captured: Buffer, chunk: Buffer): Buffer {
+  return Buffer.concat([captured, chunk]).subarray(-MAX_CAPTURED_OUTPUT_BYTES);
+}
+
+function formatCapturedStream(
+  serverName: string,
+  label: string,
+  output: Buffer,
+): string {
+  const body = output.length > 0 ? output.toString() : '(no output captured)';
+  return `\n--- ${serverName} ${label} ---\n${body}`;
+}
+
+/**
+ * Renders both captured streams, labelled with the server they came from so
+ * they stay readable in a CI log that interleaves several vitest projects.
+ */
+function formatCapture(
+  serverName: string,
+  stdout: Buffer,
+  stderr: Buffer,
+): string {
+  return (
+    formatCapturedStream(serverName, 'stdout', stdout) +
+    formatCapturedStream(serverName, 'stderr', stderr)
+  );
+}
+
+/**
+ * Resolves with everything the child wrote to stdout once `startMessage`
+ * appears there.
+ *
+ * Rejects if the child closes first, fails to spawn, or does not signal
+ * readiness within `timeoutMs` — in every case with the child's captured
+ * stdout and stderr in the message, since the reason a server refused to start
+ * only ever exists in its own output. Both streams are captured because the
+ * ADK CLI logs its start-up failures to stdout, not stderr.
+ */
+export function waitForProcessStart({
+  childProcess,
+  startMessage,
+  serverName,
+  timeoutMs,
+}: WaitForProcessStartOptions): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    let stdout: Buffer = Buffer.alloc(0);
+    let stderr: Buffer = Buffer.alloc(0);
+
+    const settle = (finish: () => void) => {
+      clearTimeout(timer);
+      childProcess.stdout.off('data', onStdout);
+      childProcess.stderr.off('data', onStderr);
+      childProcess.off('error', onError);
+      childProcess.off('close', onClose);
+      finish();
+      // Detaching the handlers leaves both streams in flowing mode, so a
+      // healthy long-lived server keeps draining instead of blocking on a full
+      // pipe, while its output stops being retained.
+      stdout = Buffer.alloc(0);
+      stderr = Buffer.alloc(0);
+    };
+
+    const onStdout = (chunk: Buffer) => {
+      stdout = appendBounded(stdout, chunk);
+      if (stdout.includes(startMessage)) {
+        settle(() => resolve(stdout.toString()));
+      }
+    };
+
+    const onStderr = (chunk: Buffer) => {
+      stderr = appendBounded(stderr, chunk);
+    };
+
+    const onError = (error: Error) => {
+      settle(() =>
+        reject(
+          new Error(
+            `Failed to start ${serverName.toLowerCase()}: ${error.message}` +
+              formatCapture(serverName, stdout, stderr),
+          ),
+        ),
+      );
+    };
+
+    // 'close' rather than 'exit': it fires only once the child's stdio has
+    // been drained, so its last words are already captured. The two events
+    // have no guaranteed order relative to each other.
+    const onClose = (code: number | null, signal: TerminationSignal) => {
+      settle(() =>
+        reject(
+          new Error(
+            `${serverName} exited prematurely with code ${code} ` +
+              `(signal: ${signal ?? 'none'}).` +
+              formatCapture(serverName, stdout, stderr),
+          ),
+        ),
+      );
+    };
+
+    const timer = setTimeout(() => {
+      settle(() =>
+        reject(
+          new Error(
+            `Timeout waiting for ${serverName.toLowerCase()} to start.` +
+              formatCapture(serverName, stdout, stderr),
+          ),
+        ),
+      );
+    }, timeoutMs);
+
+    childProcess.stdout.on('data', onStdout);
+    childProcess.stderr.on('data', onStderr);
+    childProcess.on('error', onError);
+    childProcess.on('close', onClose);
+  });
+}
+
+/**
+ * Returns a port the OS has just confirmed is bindable on `host`, by listening
+ * on port 0 and releasing it again.
+ *
+ * This narrows the bind race rather than eliminating it: another process can
+ * still claim the port between the release here and the child's bind. Its real
+ * value is that the OS will not hand the same ephemeral port to two
+ * concurrently-starting vitest workers, which a shared random range can.
+ */
+export async function getFreePort(host = 'localhost'): Promise<number> {
+  const server = net.createServer();
+
+  try {
+    return await new Promise<number>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen({host, port: 0}, () => {
+        const address = server.address();
+        if (address === null || typeof address === 'string') {
+          reject(
+            new Error(`Expected a TCP address on ${host}, got ${address}`),
+          );
+          return;
+        }
+        resolve(address.port);
+      });
+    });
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+}
+
 /**
  * Base class for test servers.
  */
@@ -268,12 +440,8 @@ export abstract class BaseTestServer {
 
   constructor(host: string, port?: number) {
     this.host = host;
-    this.port = port || BaseTestServer.getRandomPort();
+    this.port = port ?? 0;
     this.url = `http://${this.host}:${this.port}`;
-  }
-
-  static getRandomPort(): number {
-    return 40000 + Math.floor(Math.random() * 10000);
   }
 
   protected async startProcess({
@@ -289,70 +457,43 @@ export abstract class BaseTestServer {
     serverName: string;
     timeoutMs: number;
   }): Promise<void> {
-    this.serverProcess = spawnProcess();
+    // Subclasses read `this.port` inside `spawnProcess` — for `--port` and for
+    // TEST_API_SERVER_PORT — so it has to be concrete before the child spawns.
+    if (this.port === 0) {
+      this.port = await getFreePort(this.host);
+      this.url = `http://${this.host}:${this.port}`;
+    }
 
-    await new Promise<void>((resolve, reject) => {
-      let started = false;
-      const stdoutChunks: string[] = [];
+    const serverProcess = spawnProcess();
+    this.serverProcess = serverProcess;
 
-      this.serverProcess!.stdout.on('data', (data) => {
-        const message = data.toString();
-        stdoutChunks.push(message);
-
-        // Find URL like http://localhost:12345
-        const urlMatch = message.match(/http:\/\/localhost:([0-9]+)/i);
-        if (urlMatch && urlMatch[1]) {
-          const parsedPort = parseInt(urlMatch[1], 10);
-          if (parsedPort > 0) {
-            this.port = parsedPort;
-            this.url = `http://${this.host}:${this.port}`;
-          }
-        }
-
-        if (message.includes(startMessage)) {
-          started = true;
-          console.log(successLogMessage);
-          resolve();
-        }
-      });
-
-      this.serverProcess!.stderr.on('data', (data) => {
-        console.error(`${serverName} Stderr: ${data.toString()}`);
-      });
-
-      this.serverProcess!.on('error', (error) => {
-        console.error(`${serverName} Error: ${error.message}`);
-
-        reject(
-          new Error(
-            `Failed to start ${serverName.toLowerCase()}: ${error.message}`,
-          ),
-        );
-      });
-
-      this.serverProcess!.on('exit', (code) => {
-        console.error(`${serverName} exited with code ${code}`);
-
-        if (!started) {
-          console.error(
-            `${serverName} Captured stdout before premature exit:\n${stdoutChunks.join('')}`,
-          );
-          reject(
-            new Error(`${serverName} exited prematurely with code ${code}`),
-          );
-        }
-      });
-
-      setTimeout(() => {
-        if (!started) {
-          reject(
-            new Error(
-              `Timeout waiting for ${serverName.toLowerCase()} to start.`,
-            ),
-          );
-        }
-      }, timeoutMs);
+    // Outlives the start handshake: an 'error' event with no listener is
+    // thrown by EventEmitter, and the exit of a server that started fine is
+    // still worth reporting.
+    serverProcess.on('error', (error) => {
+      console.error(`${serverName} Error: ${error.message}`);
     });
+    serverProcess.on('exit', (code) => {
+      console.error(`${serverName} exited with code ${code}`);
+    });
+
+    const stdout = await waitForProcessStart({
+      childProcess: serverProcess,
+      startMessage,
+      serverName,
+      timeoutMs,
+    });
+
+    const urlMatch = stdout.match(SERVER_URL_REGEX);
+    if (urlMatch) {
+      const parsedPort = parseInt(urlMatch[1], 10);
+      if (parsedPort > 0) {
+        this.port = parsedPort;
+        this.url = `http://${this.host}:${this.port}`;
+      }
+    }
+
+    console.log(successLogMessage);
   }
 
   async stop(): Promise<void> {
