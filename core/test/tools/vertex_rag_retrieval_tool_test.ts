@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {VertexRagRetrievalTool} from '@google/adk';
 import {describe, expect, it} from 'vitest';
+import {VertexRagRetrievalTool} from '../../src/index.js';
 
 const RAG_CORPUS =
   'projects/my-project/locations/us-central1/ragCorpora/my-corpus';

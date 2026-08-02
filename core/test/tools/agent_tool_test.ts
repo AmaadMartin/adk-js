@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {describe, expect, it, vi} from 'vitest';
 import {
   AgentTool,
   Context,
@@ -16,8 +17,7 @@ import {
   PluginManager,
   Runner,
   State,
-} from '@google/adk';
-import {describe, expect, it, vi} from 'vitest';
+} from '../../src/index.js';
 
 vi.mock('../../src/runner/runner.js', async (importOriginal) => {
   const actual =

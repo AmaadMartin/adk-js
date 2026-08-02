@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GoogleLLMVariant} from '@google/adk';
 import {afterEach, describe, expect, it} from 'vitest';
+import {GoogleLLMVariant} from '../../src/index.js';
 import {getGoogleLlmVariant} from '../../src/utils/variant_utils.js';
 
 describe('variant_utils', () => {

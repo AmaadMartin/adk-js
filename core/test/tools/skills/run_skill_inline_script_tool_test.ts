@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {describe, expect, it, vi} from 'vitest';
 import {
   BaseCodeExecutor,
   CodeExecutionLanguage,
@@ -17,8 +18,7 @@ import {
   RunSkillInlineScriptErrorCode,
   RunSkillInlineScriptTool,
   SkillToolset,
-} from '@google/adk';
-import {describe, expect, it, vi} from 'vitest';
+} from '../../../src/index.js';
 import {ToolConfirmation} from '../../../src/tools/tool_confirmation.js';
 import {materializeFiles} from '../../../src/utils/file_utils.js';
 

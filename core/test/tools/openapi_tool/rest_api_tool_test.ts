@@ -4,15 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {OpenAPIV3} from 'openapi-types';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 import {
   AuthCredential,
   Context,
   createRestApiTool,
   RestApiTool,
   ToolAuthHandler,
-} from '@google/adk';
-import {OpenAPIV3} from 'openapi-types';
-import {afterEach, describe, expect, it, vi} from 'vitest';
+} from '../../../src/index.js';
 import {
   prepareRequestBody,
   prepareRequestParams,

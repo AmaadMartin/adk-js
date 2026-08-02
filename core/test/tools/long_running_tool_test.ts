@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {LongRunningFunctionTool} from '@google/adk';
 import {describe, expect, it} from 'vitest';
+import {LongRunningFunctionTool} from '../../src/index.js';
 
 const LONG_RUNNING_INSTRUCTION = `\n\nNOTE: This is a long-running operation. Do not call this tool again if it has already returned some intermediate or pending status.`;
 

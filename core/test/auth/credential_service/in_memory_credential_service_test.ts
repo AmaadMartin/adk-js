@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {describe, expect, it} from 'vitest';
 import {
   AuthConfig,
   AuthCredential,
@@ -13,8 +14,7 @@ import {
   InMemoryCredentialService,
   InvocationContext,
   createSession,
-} from '@google/adk';
-import {describe, expect, it} from 'vitest';
+} from '../../../src/index.js';
 
 function createMockContext(appName: string, userId: string): Context {
   return new Context({

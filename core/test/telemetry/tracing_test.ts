@@ -16,7 +16,7 @@ import {
   LlmResponse,
   Session,
   createEventActions,
-} from '@google/adk';
+} from '../../src/index.js';
 import {
   traceAgentInvocation,
   traceCallLlm,

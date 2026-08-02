@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {describe, expect, it, vi} from 'vitest';
 import {
   BaseCodeExecutor,
   CodeExecutionLanguage,
@@ -16,8 +17,7 @@ import {
   RunSkillScriptTool,
   Skill,
   SkillToolset,
-} from '@google/adk';
-import {describe, expect, it, vi} from 'vitest';
+} from '../../../src/index.js';
 import {materializeFiles} from '../../../src/utils/file_utils.js';
 
 vi.mock('../../../src/utils/file_utils.js', () => ({

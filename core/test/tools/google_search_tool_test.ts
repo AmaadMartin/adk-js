@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GOOGLE_SEARCH, GoogleSearchTool, LlmRequest} from '@google/adk';
 import {describe, expect, it} from 'vitest';
+import {GOOGLE_SEARCH, GoogleSearchTool, LlmRequest} from '../../src/index.js';
 
 function makeRequest(model?: string, tools = []): LlmRequest {
   return {

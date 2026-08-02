@@ -16,6 +16,7 @@ import {
   ClientFactory,
   DefaultAgentCardResolver,
 } from '@a2a-js/sdk/client';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   Event as AdkEvent,
   createEvent,
@@ -23,8 +24,7 @@ import {
   RemoteA2AAgent,
   RemoteA2AAgentConfig,
   Session,
-} from '@google/adk';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
+} from '../../src/index.js';
 
 type A2AStreamEventData =
   | Message

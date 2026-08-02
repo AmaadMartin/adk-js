@@ -5,10 +5,10 @@
  */
 
 import {RequestContext} from '@a2a-js/sdk/server';
-import {Session} from '@google/adk';
 import {Content} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {createExecutorContext} from '../../src/a2a/executor_context.js';
+import {Session} from '../../src/index.js';
 
 describe('createExecutorContext', () => {
   const mockUserContent: Content = {role: 'user', parts: [{text: 'hello'}]};

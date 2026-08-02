@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {OpenApiSpecParser} from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
 import {describe, expect, it} from 'vitest';
+import {OpenApiSpecParser} from '../../../src/index.js';
 
 describe('OpenApiSpecParser', () => {
   it('should resolve internal references', () => {

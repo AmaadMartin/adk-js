@@ -13,7 +13,7 @@ import {
   PRELOAD_MEMORY,
   PreloadMemoryTool,
   SearchMemoryResponse,
-} from '@google/adk';
+} from '../../src/index.js';
 
 // We mock the logger.warn since we test a failing case
 import {vi} from 'vitest';

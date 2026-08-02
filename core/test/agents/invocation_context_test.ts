@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {describe, expect, it} from 'vitest';
 import {
   BaseAgent,
   BaseAgentConfig,
@@ -13,8 +14,7 @@ import {
   PluginManager,
   Session,
   createEvent,
-} from '@google/adk';
-import {describe, expect, it} from 'vitest';
+} from '../../src/index.js';
 
 function makeSession(): Session {
   return {

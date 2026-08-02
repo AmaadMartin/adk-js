@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {Content, FunctionCall, FunctionResponse} from '@google/genai';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   App,
   BaseAgent,
@@ -18,9 +20,7 @@ import {
   isRoutableLlmAgent,
   LlmAgent,
   Runner,
-} from '@google/adk';
-import {Content, FunctionCall, FunctionResponse} from '@google/genai';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
+} from '../../src/index.js';
 
 const TEST_APP_ID = 'test_app_id';
 const TEST_USER_ID = 'test_user_id';

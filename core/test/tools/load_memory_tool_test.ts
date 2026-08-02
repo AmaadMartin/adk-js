@@ -14,7 +14,7 @@ import {
   LoadMemoryTool,
   MemoryEntry,
   SearchMemoryResponse,
-} from '@google/adk';
+} from '../../src/index.js';
 
 class StubToolContext {
   private memories: MemoryEntry[];

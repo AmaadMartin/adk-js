@@ -6,6 +6,7 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+import {describe, expect, it} from 'vitest';
 import {
   BaseAgent,
   BaseLlm,
@@ -18,8 +19,7 @@ import {
   LlmRequest,
   PluginManager,
   Session,
-} from '@google/adk';
-import {describe, expect, it} from 'vitest';
+} from '../../../src/index.js';
 
 class MockLlm extends BaseLlm {
   constructor() {

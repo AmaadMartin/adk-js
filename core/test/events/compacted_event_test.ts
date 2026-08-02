@@ -4,12 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {createEvent} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 import {
   createCompactedEvent,
   isCompactedEvent,
 } from '../../src/events/compacted_event.js';
+import {createEvent} from '../../src/index.js';
 
 describe('isCompactedEvent', () => {
   it('returns true for a valid CompactedEvent', () => {

@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {describe, expect, it, vi} from 'vitest';
 import {
   BaseTool,
   BaseToolset,
@@ -13,8 +14,7 @@ import {
   ReadonlyContext,
   Skill,
   SkillToolset,
-} from '@google/adk';
-import {describe, expect, it, vi} from 'vitest';
+} from '../../../src/index.js';
 
 describe('skill_toolset', () => {
   const mockSkill: Skill = {

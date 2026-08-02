@@ -3,6 +3,16 @@
  * Copyright 2025 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
+import {FunctionCall} from '@google/genai';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {z} from 'zod';
+import {
+  findEventByFunctionCallId,
+  findMatchingFunctionCall,
+  generateClientFunctionCallId,
+  getLongRunningFunctionCalls,
+  mergeParallelFunctionResponseEvents,
+} from '../../src/agents/functions.js';
 import {
   BasePlugin,
   BaseTool,
@@ -18,17 +28,7 @@ import {
   SingleAfterToolCallback,
   SingleBeforeToolCallback,
   ToolConfirmation,
-} from '@google/adk';
-import {FunctionCall} from '@google/genai';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
-import {z} from 'zod';
-import {
-  findEventByFunctionCallId,
-  findMatchingFunctionCall,
-  generateClientFunctionCallId,
-  getLongRunningFunctionCalls,
-  mergeParallelFunctionResponseEvents,
-} from '../../src/agents/functions.js';
+} from '../../src/index.js';
 
 // Get the test target function
 const {

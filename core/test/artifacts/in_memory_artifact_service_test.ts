@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {InMemoryArtifactService} from '@google/adk';
 import {describe} from 'vitest';
+import {InMemoryArtifactService} from '../../src/index.js';
 import {runArtifactServiceTests} from './artifact_service_test_utils.js';
 
 describe('InMemoryArtifactService', () => {

@@ -4,13 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  AuthCredential,
-  AuthScheme,
-  CredentialExchangeError,
-  OAuth2CredentialExchanger,
-  OAuthGrantType,
-} from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
 import {
   determineGrantType,
@@ -18,6 +11,13 @@ import {
   exchangeClientCredentials,
 } from '../../../src/auth/oauth2/oauth2_credential_exchanger.js';
 import * as oauth2Utils from '../../../src/auth/oauth2/oauth2_utils.js';
+import {
+  AuthCredential,
+  AuthScheme,
+  CredentialExchangeError,
+  OAuth2CredentialExchanger,
+  OAuthGrantType,
+} from '../../../src/index.js';
 
 vi.mock('../../../src/auth/oauth2/oauth2_utils.js', () => ({
   getTokenEndpoint: vi.fn(),

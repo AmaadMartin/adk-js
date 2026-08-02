@@ -4,13 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {describe, expect, it, vi} from 'vitest';
 import {
   BaseContextCompactor,
   ContextCompactorRequestProcessor,
   InvocationContext,
   LlmRequest,
-} from '@google/adk';
-import {describe, expect, it, vi} from 'vitest';
+} from '../../../src/index.js';
 import {ContextCompactionTrigger} from '../../../src/plugins/base_plugin.js';
 
 describe('ContextCompactorRequestProcessor', () => {

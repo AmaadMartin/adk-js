@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {describe, expect, it} from 'vitest';
 import {
   AgentTransferLlmRequestProcessor,
   BaseAgent,
@@ -15,8 +16,7 @@ import {
   PluginManager,
   Session,
   createEvent,
-} from '@google/adk';
-import {describe, expect, it} from 'vitest';
+} from '../../src/index.js';
 
 class MockAgent extends BaseAgent {
   constructor(config: BaseAgentConfig) {

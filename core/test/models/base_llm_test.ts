@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {describe, expect, it} from 'vitest';
 import {
   BaseLlm,
   BaseLlmConnection,
@@ -12,8 +13,7 @@ import {
   isBaseLlm,
   runWithClientLabel,
   version,
-} from '@google/adk';
-import {describe, expect, it} from 'vitest';
+} from '../../src/index.js';
 
 class TestLlm extends BaseLlm {
   constructor() {

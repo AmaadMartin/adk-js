@@ -4,14 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {describe, expect, it} from 'vitest';
 import {
   BaseLlm,
   BaseLlmConnection,
   LlmRequest,
   LlmResponse,
   RoutedLlm,
-} from '@google/adk';
-import {describe, expect, it} from 'vitest';
+} from '../../src/index.js';
 import {Logger, setLogger} from '../../src/utils/logger.js';
 
 class MockLlm extends BaseLlm {

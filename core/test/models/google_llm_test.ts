@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {GenerateContentResponse, GoogleGenAI, HttpOptions} from '@google/genai';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   Gemini,
   GeminiParams,
@@ -11,9 +13,7 @@ import {
   LlmResponse,
   geminiInitParams,
   version,
-} from '@google/adk';
-import {GenerateContentResponse, GoogleGenAI, HttpOptions} from '@google/genai';
-import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+} from '../../src/index.js';
 
 vi.mock('@google/genai', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@google/genai')>();
