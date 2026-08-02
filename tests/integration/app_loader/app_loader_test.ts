@@ -77,6 +77,8 @@ describe('AgentLoader discovery and loading integration', () => {
   beforeAll(async () => {
     await execAsync('npm install', {cwd: projectPath});
     loader = new AgentLoader(projectPath);
+    // Warm the loader so its one-off bundling cost lands in the hook budget.
+    await loader.preloadAgents();
   });
 
   it(
