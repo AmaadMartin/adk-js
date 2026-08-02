@@ -416,7 +416,7 @@ describe('publishMessage base64 payloads', () => {
     });
 
     expect(expectError(result)).toBe(
-      'data must be a string when is_base64_encoded is True',
+      'data must be a string when is_base64_encoded is true',
     );
   });
 });
@@ -763,7 +763,7 @@ describe('createPublishMessageTool', () => {
     expect(publishedAttributes()).not.toHaveProperty('datacontenttype');
   });
 
-  it('treats a non-object argument bag as no arguments', async () => {
+  it('reports a missing type when the model sends no arguments', async () => {
     const result = await createPublishMessageTool({}).runAsync({
       args: {},
       toolContext: TOOL_CONTEXT,

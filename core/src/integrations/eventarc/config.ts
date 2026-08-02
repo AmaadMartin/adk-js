@@ -17,6 +17,12 @@ export const DEFAULT_PUBLISH_TIMEOUT_MS = 15_000;
 export const CLOUD_PLATFORM_SCOPE =
   'https://www.googleapis.com/auth/cloud-platform';
 
+/**
+ * CloudEvents requires extension attribute names to consist of lower-case
+ * letters and digits only.
+ */
+export const CUSTOM_ATTRIBUTE_KEY_PATTERN = /^[a-z0-9]+$/;
+
 /** Configuration for the Eventarc tools. */
 export interface EventarcToolConfig {
   /** Project ID used for telemetry and API calls. */

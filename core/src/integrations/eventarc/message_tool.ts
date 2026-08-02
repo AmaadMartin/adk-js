@@ -11,12 +11,14 @@ import {context, propagation} from '@opentelemetry/api';
 import {BaseTool} from '../../tools/base_tool.js';
 import {FunctionTool} from '../../tools/function_tool.js';
 import {randomUUID} from '../../utils/env_aware_utils.js';
+import {isRecord} from '../../utils/object_utils.js';
 import {
   getPublisherClient,
   loadPublisherClientCtor,
   removePublisherClient,
 } from './client.js';
 import {
+  CUSTOM_ATTRIBUTE_KEY_PATTERN,
   EventarcCredentialsConfig,
   EventarcToolConfig,
   resolvePublishTimeoutMs,
@@ -36,12 +38,6 @@ const CONTENT_TYPE_JSON = 'application/json';
 const CONTENT_TYPE_TEXT = 'text/plain';
 const CONTENT_TYPE_OCTET_STREAM = 'application/octet-stream';
 
-/**
- * CloudEvents requires extension attribute names to consist of lower-case
- * letters and digits only.
- */
-const CUSTOM_ATTRIBUTE_KEY_PATTERN = /^[a-z0-9]+$/;
-
 /** Canonical base64 alphabet with at most two padding characters. */
 const BASE64_PATTERN = /^[A-Za-z0-9+/]*={0,2}$/;
 
@@ -54,7 +50,7 @@ const ERROR_INVALID_ID = 'id, if provided, must be a non-empty string';
 const ERROR_INVALID_TIME = 'time must be a string';
 const ERROR_INVALID_CUSTOM_ATTRIBUTES = 'custom_attributes must be an object';
 const ERROR_INVALID_BASE64_DATA =
-  'data must be a string when is_base64_encoded is True';
+  'data must be a string when is_base64_encoded is true';
 
 /** Arguments accepted by {@link publishMessage}. */
 export interface PublishMessageOptions {
@@ -508,12 +504,13 @@ function requireRecordType(
   return value;
 }
 
+/**
+ * `FunctionTool` types the callback argument as `unknown` but always passes
+ * its `Record<string, unknown>` argument bag, so the fallback only defends
+ * untyped JavaScript callers that invoke the callback directly.
+ */
 function asRecord(value: unknown): Record<string, unknown> {
   return isRecord(value) ? value : {};
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function errorResult(error: unknown): PublishMessageResult {
