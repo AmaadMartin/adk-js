@@ -160,9 +160,10 @@ export class CodeExecutionResponseProcessor implements BaseLlmResponseProcessor 
 }
 
 /**
- * The exported response processor instance.
+ * The exported code execution response processor instance.
  */
-export const responseProcessor = new CodeExecutionResponseProcessor();
+export const CODE_EXECUTION_RESPONSE_PROCESSOR =
+  new CodeExecutionResponseProcessor();
 
 /**
  * Pre-processes the user message by adding the user message to the execution
