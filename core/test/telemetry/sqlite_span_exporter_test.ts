@@ -4,7 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {SqliteSpanExporter} from '@google/adk';
+import {
+  getLogger,
+  Logger,
+  LogLevel,
+  setLogger,
+  SqliteSpanExporter,
+} from '@google/adk';
 import {MikroORM} from '@mikro-orm/core';
 import {SqliteDriver} from '@mikro-orm/sqlite';
 import {
@@ -30,6 +36,7 @@ import {join} from 'node:path';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {StorageSpan} from '../../src/telemetry/db/schema.js';
 import {
+  describeError,
   deserializeAttributes,
   hrTimeToUnixNanos,
   serializeAttributes,
@@ -99,6 +106,28 @@ function exportSpans(
   return new Promise<ExportResult>((resolve) => {
     exporter.export(spans, resolve);
   });
+}
+
+/** Collects everything ADK logs, so tests can assert on it. */
+class RecordingLogger implements Logger {
+  readonly lines: string[] = [];
+
+  log(level: LogLevel, ...args: unknown[]): void {
+    this.lines.push(args.map(String).join(' '));
+  }
+  debug(...args: unknown[]): void {
+    this.log(LogLevel.DEBUG, ...args);
+  }
+  info(...args: unknown[]): void {
+    this.log(LogLevel.INFO, ...args);
+  }
+  warn(...args: unknown[]): void {
+    this.log(LogLevel.WARN, ...args);
+  }
+  error(...args: unknown[]): void {
+    this.log(LogLevel.ERROR, ...args);
+  }
+  setLogLevel(): void {}
 }
 
 describe('SqliteSpanExporter', () => {
@@ -297,16 +326,75 @@ describe('SqliteSpanExporter', () => {
       await expect(rm(corruptPath)).resolves.toBeUndefined();
     });
 
-    it('retries opening the database after a failed export', async () => {
+    it('reopens the database on the next export once the fault is cleared', async () => {
       const corruptPath = join(tempDir, 'retry.db');
       await writeFile(corruptPath, 'not a database');
       const exporter = createExporter(corruptPath);
+      const span = createTestSpan({
+        attributes: {[SESSION_ID_ATTRIBUTE]: 'session-retry'},
+      });
 
-      const first = await exportSpans(exporter, [createTestSpan()]);
-      const second = await exportSpans(exporter, [createTestSpan()]);
+      const failed = await exportSpans(exporter, [span]);
+      expect(failed.code).toBe(ExportResultCode.FAILED);
 
-      expect(first.code).toBe(ExportResultCode.FAILED);
-      expect(second.code).toBe(ExportResultCode.FAILED);
+      // Clearing the fault must be enough: a memoized failure would keep
+      // reporting FAILED forever.
+      await rm(corruptPath);
+      const retried = await exportSpans(exporter, [span]);
+
+      expect(retried.code).toBe(ExportResultCode.SUCCESS);
+      expect(
+        await exporter.getAllSpansForSession('session-retry'),
+      ).toHaveLength(1);
+    });
+
+    it('reports a failure without logging the span payload that caused it', async () => {
+      const strictPath = join(tempDir, 'strict.db');
+      const orm = await MikroORM.init({
+        dbName: strictPath,
+        driver: SqliteDriver,
+        entities: [StorageSpan],
+      });
+      // A NOT NULL column the exporter does not know about makes every insert
+      // fail, and safe-mode schema updates never drop it.
+      await orm.em
+        .getConnection()
+        .execute(
+          'create table `spans` (`span_id` text not null, `trace_id` text ' +
+            'not null, `name` text not null, `extra_required` text not null, ' +
+            'primary key (`span_id`))',
+        );
+      await orm.close();
+
+      const recorder = new RecordingLogger();
+      const previousLogger = getLogger();
+      setLogger(recorder);
+      let result: ExportResult;
+      try {
+        result = await exportSpans(createExporter(strictPath), [
+          createTestSpan({
+            attributes: {
+              [SESSION_ID_ATTRIBUTE]: 'session-secret',
+              'gcp.vertex.agent.llm_request': 'SUPER_SECRET_PROMPT',
+            },
+          }),
+        ]);
+      } finally {
+        setLogger(previousLogger);
+      }
+
+      expect(result.code).toBe(ExportResultCode.FAILED);
+      expect(recorder.lines).toEqual([
+        'Failed to export spans to SQLite: NotNullConstraintViolationException (SQLITE_CONSTRAINT)',
+      ]);
+      // OpenTelemetry stringifies every property it can reach on this error,
+      // `cause` included, so none of them may carry the attributes.
+      expect(result.error?.cause).toBeUndefined();
+      for (const property of Object.getOwnPropertyNames(result.error)) {
+        expect(
+          String(Reflect.get(Object(result.error), property)),
+        ).not.toContain('SUPER_SECRET_PROMPT');
+      }
     });
 
     it('initializes once when two exports are issued concurrently', async () => {
@@ -606,6 +694,32 @@ describe('SqliteSpanExporter', () => {
       expect(retrieved.map((span) => span.name)).toEqual(['before_shutdown']);
     });
 
+    it('releases the connection when shutdown races an in-flight open', async () => {
+      const exporter = createExporter();
+
+      const pendingExport = exportSpans(exporter, [
+        createTestSpan({attributes: {[SESSION_ID_ATTRIBUTE]: 'session-race'}}),
+      ]);
+      await exporter.shutdown();
+      await pendingExport;
+
+      // Whether that export landed is a race and not the point; the handle
+      // being released is. Windows refuses to unlink a file that is still open.
+      await expect(rm(dbPath, {force: true})).resolves.toBeUndefined();
+    });
+
+    it('does not reject when shutdown races an open that fails', async () => {
+      const corruptPath = join(tempDir, 'racing.db');
+      await writeFile(corruptPath, 'not a database');
+      const exporter = createExporter(corruptPath);
+
+      const pendingExport = exportSpans(exporter, [createTestSpan()]);
+      await expect(exporter.shutdown()).resolves.toBeUndefined();
+
+      expect((await pendingExport).code).toBe(ExportResultCode.FAILED);
+      await expect(rm(corruptPath)).resolves.toBeUndefined();
+    });
+
     it('is a no-op to shut down an exporter that never opened the database', async () => {
       await expect(createExporter().shutdown()).resolves.toBeUndefined();
       expect(existsSync(dbPath)).toBe(false);
@@ -715,6 +829,32 @@ describe('serializeAttributes', () => {
     };
 
     expect(serializeAttributes({throwing})).toBe('{}');
+  });
+});
+
+describe('describeError', () => {
+  it('names the error and appends a SQLite driver code', () => {
+    expect(
+      describeError(Object.assign(new Error('x'), {code: 'SQLITE_BUSY'})),
+    ).toBe('Error (SQLITE_BUSY)');
+  });
+
+  it('omits a code that is not a SQLite driver code', () => {
+    expect(describeError(Object.assign(new TypeError('x'), {code: 42}))).toBe(
+      'TypeError',
+    );
+    expect(
+      describeError(Object.assign(new Error('x'), {code: 'insert into spans'})),
+    ).toBe('Error');
+  });
+
+  it('falls back to a name for an error-like object without one', () => {
+    expect(describeError({message: 'SUPER_SECRET_PROMPT'})).toBe('Error');
+  });
+
+  it('describes a non-object by its type', () => {
+    expect(describeError('SUPER_SECRET_PROMPT')).toBe('string');
+    expect(describeError(null)).toBe('object');
   });
 });
 
