@@ -46,19 +46,6 @@ export interface IamConnectorCredentialsClient {
   ): Promise<Operation>;
 }
 
-/**
- * Splits an operation into its response and metadata.
- *
- * Over REST/JSON both are already expanded plain objects, so unlike the gRPC
- * surface no `google.protobuf.Any` decoding is required.
- */
-export function unpackOperation(operation: Operation): {
-  response?: RetrieveCredentialsResponse;
-  metadata?: RetrieveCredentialsMetadata;
-} {
-  return {response: operation.response, metadata: operation.metadata};
-}
-
 /** REST implementation of {@link IamConnectorCredentialsClient}. */
 export class RestIamConnectorCredentialsClient implements IamConnectorCredentialsClient {
   private client?: GoogleApiJsonClient;
