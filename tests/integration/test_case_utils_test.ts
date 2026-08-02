@@ -8,7 +8,7 @@ import type {ChildProcessWithoutNullStreams} from 'node:child_process';
 import {spawn} from 'node:child_process';
 import {mkdtempSync, readFileSync} from 'node:fs';
 import {createServer, type Server} from 'node:net';
-import {tmpdir} from 'node:os';
+import {platform, tmpdir} from 'node:os';
 import * as path from 'node:path';
 import {afterEach, describe, expect, it} from 'vitest';
 import {BaseTestServer, reserveFreePort} from './test_case_utils.js';
@@ -21,6 +21,7 @@ const START_TIMEOUT_MS = 15000;
 const STAY_ALIVE = 'setInterval(() => {}, 1000);';
 /** Mirrors `PROCESS_EXIT_TIMEOUT_MS` in the harness under test. */
 const PROCESS_EXIT_TIMEOUT_MS = 5000;
+const IS_WINDOWS = platform() === 'win32';
 
 const spawned: ChildProcessWithoutNullStreams[] = [];
 const listeners: Server[] = [];
@@ -71,6 +72,32 @@ function hasExited(child: ChildProcessWithoutNullStreams): boolean {
   return child.exitCode !== null || child.signalCode !== null;
 }
 
+/**
+ * Waits for the harness to reach its spawn closure. `startProcess` awaits the
+ * port reservation first, so the child handle is not available synchronously.
+ */
+async function waitForChild(
+  server: ScriptedTestServer,
+): Promise<ChildProcessWithoutNullStreams> {
+  for (let i = 0; i < 500 && !server.child; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  if (!server.child) {
+    expect.fail('the server never reached its spawn closure');
+  }
+  return server.child;
+}
+
+/** True for the Node error raised when a pid no longer exists. */
+function isNoSuchProcess(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    'code' in error &&
+    typeof error.code === 'string' &&
+    error.code === 'ESRCH'
+  );
+}
+
 /** Binds `port` for the rest of the test, proving it was bindable. */
 function listenOn(port: number): Promise<void> {
   const socket = createServer();
@@ -87,7 +114,13 @@ afterEach(async () => {
     child.kill('SIGKILL');
   }
   for (const pidFile of grandchildPidFiles.splice(0)) {
-    process.kill(Number(readFileSync(pidFile, 'utf8')), 'SIGKILL');
+    try {
+      process.kill(Number(readFileSync(pidFile, 'utf8')), 'SIGKILL');
+    } catch (error: unknown) {
+      // Windows tears the grandchild down with its parent, so by here it is
+      // already gone. Any other failure is real and must surface.
+      if (!isNoSuchProcess(error)) throw error;
+    }
   }
   await Promise.all(
     listeners
@@ -222,13 +255,13 @@ describe('BaseTestServer.startProcess', () => {
   });
 
   it('names the signal when the child is terminated', async () => {
-    // Self-signalling avoids racing the harness for the child handle, which is
-    // only assigned once `startProcess` reaches its spawn closure.
-    const server = new ScriptedTestServer(
-      nodeScript("process.kill(process.pid, 'SIGKILL');"),
-    );
+    // Killed from here rather than by the child itself: Windows reports the
+    // signal it was asked to terminate with, but a self-termination surfaces
+    // only as exit code 1.
+    const server = new ScriptedTestServer(nodeScript(STAY_ALIVE));
 
     const attempt = server.start();
+    (await waitForChild(server)).kill('SIGKILL');
 
     await expect(attempt).rejects.toThrow('(signal SIGKILL)');
     await expect(attempt).rejects.toThrow('exited prematurely with code null');
@@ -335,7 +368,9 @@ describe('BaseTestServer.stop', () => {
 
     await server.stop();
 
-    expect(child!.signalCode).toBe('SIGKILL');
+    // Windows emulates SIGINT as unconditional termination, so the child cannot
+    // ignore it and the escalation never arms; POSIX reaches the SIGKILL path.
+    expect(child!.signalCode).toBe(IS_WINDOWS ? 'SIGINT' : 'SIGKILL');
   }, 20000);
 
   it('returns when a grandchild still holds the inherited stdio pipes', async () => {
