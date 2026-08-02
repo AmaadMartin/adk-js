@@ -294,8 +294,9 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
     })) as CodeExecutionResult;
 
     expect(result).toBeDefined();
-    expect(result.outputFiles).toBeDefined();
-    expect(result.outputFiles?.length).toBeGreaterThan(0);
+    expect(result.outputFiles?.map((file) => file.name)).toEqual([
+      'output_from_script.txt',
+    ]);
 
     const outputFile = result.outputFiles?.find(
       (f) => f.name === 'output_from_script.txt',
@@ -335,7 +336,9 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
     })) as CodeExecutionResult;
 
     expect(result).toBeDefined();
-    expect(result.outputFiles).toBeDefined();
+    expect(result.outputFiles?.map((file) => file.name)).toEqual([
+      'output_from_script_2.txt',
+    ]);
 
     const outputFile = result.outputFiles?.find(
       (f) => f.name === 'output_from_script_2.txt',

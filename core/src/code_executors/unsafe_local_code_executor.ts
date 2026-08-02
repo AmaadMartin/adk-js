@@ -9,7 +9,7 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {getMimeTypeAndEncoding} from '../utils/file_extension_utils.js';
-import {materializeFiles} from '../utils/file_utils.js';
+import {materializeFiles, toPosixPath} from '../utils/file_utils.js';
 import {logger} from '../utils/logger.js';
 import {BaseCodeExecutor, ExecuteCodeParams} from './base_code_executor.js';
 import {
@@ -270,9 +270,13 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
             continue;
           }
 
-          // Skip input files
+          const outputFileName = toPosixPath(relativeFilePath);
+
+          // Skip input files. Both sides are normalized because
+          // `materializeFiles` rewrites `file.name` with `path.join` on a name
+          // collision, which can hand back a host-separated name.
           const isInputFile = params.codeExecutionInput.inputFiles?.some(
-            (f) => f.name === relativeFilePath,
+            (f) => toPosixPath(f.name) === outputFileName,
           );
           if (isInputFile) {
             continue;
@@ -280,10 +284,10 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
 
           const fileContent = await fs.readFile(fullPath);
           const {mimeType, encoding} = getMimeTypeAndEncoding(
-            path.extname(relativeFilePath),
+            path.extname(outputFileName),
           );
           outputFiles.push({
-            name: relativeFilePath,
+            name: outputFileName,
             content: fileContent.toString(encoding),
             contentEncoding: encoding,
             mimeType: mimeType,
