@@ -16,6 +16,12 @@ import {SqliteDriver} from '@mikro-orm/sqlite';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {isDatabaseConnectionString} from '../../src/sessions/database_session_service.js';
 import {validateDatabaseSchemaVersion} from '../../src/sessions/db/operations.js';
+import {StorageEvent, StorageSession} from '../../src/sessions/db/schema.js';
+
+/** Reaches the service's private MikroORM handle; tests only. */
+function ormOf(service: DatabaseSessionService): MikroORM {
+  return (service as unknown as {orm: MikroORM}).orm;
+}
 
 /** Matches the SGR colour escapes the MikroORM logger wraps messages in. */
 const ANSI_ESCAPE = new RegExp(`${String.fromCharCode(27)}\\[\\d+m`, 'g');
@@ -719,7 +725,7 @@ describe('DatabaseSessionService', () => {
      * before it reaches the `update_time` change under test.
      */
     async function blockSessionUpdate(): Promise<void> {
-      const orm = (service as unknown as {orm: MikroORM}).orm;
+      const orm = ormOf(service);
       await orm.em
         .getConnection()
         .execute(
@@ -785,7 +791,7 @@ describe('DatabaseSessionService', () => {
           expect(index).toBeLessThan(commitIndex);
         }
       } finally {
-        await (loggingService as unknown as {orm: MikroORM}).orm.close();
+        await ormOf(loggingService).close();
       }
     });
 
@@ -806,16 +812,16 @@ describe('DatabaseSessionService', () => {
         }),
       ).rejects.toThrow('update_time write blocked');
 
-      const em = (service as unknown as {orm: MikroORM}).orm.em.fork();
-      const storedEvents = await em.find('StorageEvent', {
+      const em = ormOf(service).em.fork();
+      const storedEvents = await em.find(StorageEvent, {
         sessionId: 's-rollback',
       });
-      const storedSession = (await em.findOne('StorageSession', {
+      const storedSession = await em.findOne(StorageSession, {
         id: 's-rollback',
-      })) as {id: string; updateTime: Date};
+      });
 
       expect(storedEvents).toHaveLength(0);
-      expect(storedSession.updateTime.getTime()).toBe(createUpdateTime);
+      expect(storedSession?.updateTime.getTime()).toBe(createUpdateTime);
     });
 
     it('should leave the in-memory session untouched when the append fails', async () => {
@@ -899,10 +905,10 @@ describe('DatabaseSessionService', () => {
       expect(session.events[0].author).toBe('agent');
       expect(session.lastUpdateTime).toBe(revised.timestamp);
 
-      const em = (service as unknown as {orm: MikroORM}).orm.em.fork();
-      const storedEvents = (await em.find('StorageEvent', {
+      const em = ormOf(service).em.fork();
+      const storedEvents = await em.find(StorageEvent, {
         sessionId: 's-replace',
-      })) as {sessionId: string; eventData: Event}[];
+      });
 
       expect(storedEvents).toHaveLength(1);
       expect(storedEvents[0].eventData.author).toBe('agent');

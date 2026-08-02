@@ -501,9 +501,7 @@ export class DatabaseSessionService extends BaseSessionService {
 
     // The caller's session is mutated only once the transaction has committed,
     // so a failed append leaves it untouched.
-    if (result.reloadedEvents) {
-      session.events = result.reloadedEvents;
-    }
+    session.events = result.reloadedEvents ?? session.events;
     session.state = result.mergedState;
 
     const index = session.events.findIndex((e) => e.id === event.id);
