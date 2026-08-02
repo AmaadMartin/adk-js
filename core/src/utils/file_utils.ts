@@ -9,13 +9,31 @@ import * as path from 'node:path';
 import {File} from '../code_executors/code_execution_utils.js';
 
 /**
+ * Reports whether `targetPath` is a strict descendant of `baseDir`. Both
+ * arguments must already be resolved absolute paths; the check is lexical.
+ */
+function isWithinDir(baseDir: string, targetPath: string): boolean {
+  const rel = path.relative(baseDir, targetPath);
+
+  return (
+    rel !== '' &&
+    rel !== '..' &&
+    !rel.startsWith(`..${path.sep}`) &&
+    !path.isAbsolute(rel)
+  );
+}
+
+/**
  * Writes the given in-memory files to disk under a base directory, appending a
  * numeric suffix (`report.txt` -> `report_2.txt`) rather than overwriting an
  * existing file.
  *
- * Names resolving outside `dir` are rejected with a `Path traversal detected`
- * error. That is a lexical check on the resolved path, not a sandbox: it does
- * not survive symlinks or a concurrent rename.
+ * A name is written only if it resolves to a strict descendant of `dir`.
+ * Anything else — a `..` escape, an absolute path elsewhere, a sibling sharing
+ * the `dir` name prefix, or `dir` itself — is rejected with a
+ * `Path traversal detected` error. That is a lexical check on the resolved
+ * path, not a sandbox: it does not survive symlinks, hardlinks, bind mounts, or
+ * a TOCTOU race between the check and the write.
  *
  * @param files The files to materialize.
  * @param dir Base directory to write under. Defaults to the host process's
@@ -33,7 +51,7 @@ export async function materializeFiles(
   for (const file of files) {
     const fullPath = path.resolve(dir, file.name);
 
-    if (!fullPath.startsWith(resolvedBaseDir)) {
+    if (!isWithinDir(resolvedBaseDir, fullPath)) {
       throw new Error(
         `Path traversal detected: ${file.name} resolves outside of ${dir}`,
       );
@@ -63,7 +81,8 @@ export async function materializeFiles(
       }
     }
 
-    if (!finalPath.startsWith(resolvedBaseDir)) {
+    // Re-validate the collision-renamed destination before writing.
+    if (!isWithinDir(resolvedBaseDir, finalPath)) {
       throw new Error(
         `Path traversal detected: ${file.name} resolves outside of ${dir}`,
       );
