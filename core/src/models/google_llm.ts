@@ -357,8 +357,8 @@ function removeDisplayNameIfPresent(
   dataObj: Blob | FileData | undefined,
 ): void {
   // display_name is not supported for Gemini API (non-vertex)
-  if (dataObj && (dataObj as FileData).displayName) {
-    (dataObj as FileData).displayName = undefined;
+  if (dataObj?.displayName) {
+    dataObj.displayName = undefined;
   }
 }
 
