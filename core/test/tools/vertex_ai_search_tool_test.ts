@@ -12,6 +12,7 @@ import {
   BaseVertexAiSearchToolParams,
   VertexAISearchDataStoreSpec,
   VertexAiSearchTool,
+  VertexAiSearchToolParams,
 } from '../../src/tools/vertex_ai_search_tool.js';
 
 /** The params object the constructor destructures before it validates. */
@@ -21,12 +22,18 @@ type UnvalidatedParams = BaseVertexAiSearchToolParams & {
   dataStoreSpecs?: VertexAISearchDataStoreSpec[];
 };
 
-/** Constructs the tool from params `VertexAiSearchToolParams` cannot spell. */
+/**
+ * Constructs the tool from params `VertexAiSearchToolParams` cannot spell.
+ *
+ * That union marks the opposite id `?: never` in each arm, so neither "both
+ * ids" nor "neither id" can be written as a typed literal — yet those are
+ * exactly the combinations the constructor's runtime guard rejects, and they
+ * do arrive from untyped JavaScript and config-driven callers.
+ */
 function newToolWithUnvalidatedParams(
   params: UnvalidatedParams,
 ): VertexAiSearchTool {
-  // @ts-expect-error exercising the constructor's runtime guard, which defends against param combinations VertexAiSearchToolParams cannot express.
-  return new VertexAiSearchTool(params);
+  return new VertexAiSearchTool(params as VertexAiSearchToolParams);
 }
 
 function makeLlmRequest(

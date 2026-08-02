@@ -8,12 +8,17 @@ import {OpenApiSpecParser} from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
 import {describe, expect, it} from 'vitest';
 
-/** A schema `type` name that `openapi-types` does not admit. */
+/**
+ * A schema `type` name that `openapi-types` does not admit.
+ *
+ * `NonArraySchemaObjectType` is a closed union of the normalized lowercase
+ * names, so the uppercase spellings real specs contain — and which the parser
+ * is expected to normalize — cannot be written as a typed literal.
+ */
 function unnormalizedSchemaType(
   type: string,
 ): OpenAPIV3.NonArraySchemaObjectType {
-  // @ts-expect-error feeding sanitizeSchemaTypes a schema type name openapi-types rejects, which is what this fixture exists to pin.
-  return type;
+  return type as OpenAPIV3.NonArraySchemaObjectType;
 }
 
 /** Returns the resolved schema of `name` in `schema.properties`. */
