@@ -36,6 +36,20 @@ class MockLlm extends BaseLlm {
   }
 }
 
+/**
+ * A non-LlmAgent that still exposes a `canonicalModel`, so the `isLlmAgent`
+ * early return is the only thing standing between the processor and a
+ * Gemini-backed model.
+ */
+class NonLlmAgentWithModel extends SequentialAgent {
+  readonly canonicalModel: BaseLlm;
+
+  constructor(params: {name: string; model: BaseLlm}) {
+    super({name: params.name});
+    this.canonicalModel = params.model;
+  }
+}
+
 function createMockEvent(
   id: string,
   author: string,
@@ -232,6 +246,103 @@ describe('InteractionsRequestProcessor', () => {
       new MockLlm(),
     );
     invocationContext.agent = new SequentialAgent({name: 'not-an-llm-agent'});
+    const llmRequest: LlmRequest = {
+      contents: [],
+      toolsDict: {},
+      liveConnectConfig: {},
+    };
+
+    for await (const _ of INTERACTIONS_REQUEST_PROCESSOR.runAsync(
+      invocationContext,
+      llmRequest,
+    )) {
+      // intentionally empty
+    }
+
+    expect(llmRequest.previousInteractionId).toBeUndefined();
+  });
+
+  it('should ignore a later event from another branch', async () => {
+    const rawEvents: Event[] = [
+      createMockEvent('1', 'test_agent', 'main', 'int-1'),
+      createMockEvent('2', 'test_agent', 'other-branch', 'int-2'),
+    ];
+    const geminiModel = new Gemini({
+      model: 'gemini-2.5-flash',
+      apiKey: 'dummy',
+      useInteractionsApi: true,
+    });
+    const invocationContext = createMockInvocationContext(
+      rawEvents,
+      geminiModel,
+    );
+    invocationContext.branch = 'main';
+    const llmRequest: LlmRequest = {
+      contents: [],
+      toolsDict: {},
+      liveConnectConfig: {},
+    };
+
+    for await (const _ of INTERACTIONS_REQUEST_PROCESSOR.runAsync(
+      invocationContext,
+      llmRequest,
+    )) {
+      // intentionally empty
+    }
+
+    expect(llmRequest.previousInteractionId).toBe('int-1');
+  });
+
+  it('should ignore a later event from another author', async () => {
+    const rawEvents: Event[] = [
+      createMockEvent('1', 'test_agent', 'main', 'int-1'),
+      createMockEvent('2', 'other_agent', 'main', 'int-2'),
+    ];
+    const geminiModel = new Gemini({
+      model: 'gemini-2.5-flash',
+      apiKey: 'dummy',
+      useInteractionsApi: true,
+    });
+    const invocationContext = createMockInvocationContext(
+      rawEvents,
+      geminiModel,
+      'test_agent',
+    );
+    invocationContext.branch = 'main';
+    const llmRequest: LlmRequest = {
+      contents: [],
+      toolsDict: {},
+      liveConnectConfig: {},
+    };
+
+    for await (const _ of INTERACTIONS_REQUEST_PROCESSOR.runAsync(
+      invocationContext,
+      llmRequest,
+    )) {
+      // intentionally empty
+    }
+
+    expect(llmRequest.previousInteractionId).toBe('int-1');
+  });
+
+  it('should do nothing if agent is not LlmAgent even when it exposes a Gemini model', async () => {
+    const rawEvents: Event[] = [
+      createMockEvent('1', 'test_agent', 'main', 'int-1'),
+    ];
+    const geminiModel = new Gemini({
+      model: 'gemini-2.5-flash',
+      apiKey: 'dummy',
+      useInteractionsApi: true,
+    });
+    const invocationContext = createMockInvocationContext(
+      rawEvents,
+      geminiModel,
+    );
+    invocationContext.branch = 'main';
+    invocationContext.agent = new NonLlmAgentWithModel({
+      name: 'test_agent',
+      model: geminiModel,
+    });
     const llmRequest: LlmRequest = {
       contents: [],
       toolsDict: {},
