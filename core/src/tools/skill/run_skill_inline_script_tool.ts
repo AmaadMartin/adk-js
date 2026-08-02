@@ -8,9 +8,11 @@ import {FunctionDeclaration, Type} from '@google/genai';
 import {Context} from '../../agents/context.js';
 import {isLlmAgent} from '../../agents/llm_agent.js';
 import {CodeExecutionLanguage} from '../../code_executors/code_execution_utils.js';
+import {Skill} from '../../skills/skill.js';
 import {experimental} from '../../utils/experimental.js';
 import {materializeFiles} from '../../utils/file_utils.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
+import {getSkillResourceFiles} from './run_skill_script_tool.js';
 import {SkillToolset} from './skill_toolset.js';
 
 /**
@@ -24,6 +26,8 @@ export enum RunSkillInlineScriptErrorCode {
   NO_CODE_EXECUTOR = 'NO_CODE_EXECUTOR',
   EXECUTION_ERROR = 'EXECUTION_ERROR',
   CONFIRMATION_REJECTED = 'CONFIRMATION_REJECTED',
+  SKILL_NOT_FOUND = 'SKILL_NOT_FOUND',
+  REGISTRY_ERROR = 'REGISTRY_ERROR',
 }
 
 /**
@@ -41,7 +45,9 @@ export class RunSkillInlineScriptTool extends BaseTool {
     super({
       name: 'run_skill_inline_script',
       description:
-        'Executes an inline script provided directly in the request.',
+        'Executes an inline script provided directly in the request. ' +
+        "Optionally runs it alongside a skill's references/, assets/ and " +
+        "scripts/, which are made available in the script's working directory.",
     });
   }
 
@@ -71,6 +77,11 @@ export class RunSkillInlineScriptTool extends BaseTool {
             description:
               'Optional arguments to pass to the script as key-value pairs or an array of strings.',
           },
+          skill_name: {
+            type: Type.STRING,
+            description:
+              'Optional name of a skill whose references/, assets/ and scripts/ are made available to the script in its working directory.',
+          },
         },
         required: ['script_content', 'language'],
       },
@@ -87,6 +98,7 @@ export class RunSkillInlineScriptTool extends BaseTool {
       | string[]
       | Record<string, string | number | boolean>
       | undefined;
+    const skillName = args['skill_name'] as string | undefined;
 
     if (!inlineScriptContent) {
       return {
@@ -116,6 +128,31 @@ export class RunSkillInlineScriptTool extends BaseTool {
       };
     }
 
+    // Resolved before the confirmation gate: the hint has to name the skill
+    // whose files are about to be mounted, and an unresolvable skill_name
+    // should not cost a human round-trip. The lookup is read-only.
+    let skill: Skill | undefined;
+    if (skillName) {
+      try {
+        skill = await this.toolset.getOrFetchSkill(
+          skillName,
+          toolContext.invocationId,
+        );
+      } catch (e: unknown) {
+        return {
+          error: `Failed to fetch skill '${skillName}' from registry: ${(e as Error).message || e}`,
+          errorCode: RunSkillInlineScriptErrorCode.REGISTRY_ERROR,
+        };
+      }
+
+      if (!skill) {
+        return {
+          error: `Skill '${skillName}' not found.`,
+          errorCode: RunSkillInlineScriptErrorCode.SKILL_NOT_FOUND,
+        };
+      }
+    }
+
     // Security gate: executing model-provided script content is equivalent to
     // arbitrary code execution in the code executor's context. Require an
     // explicit, server-enforced confirmation before dispatching so that a
@@ -124,6 +161,7 @@ export class RunSkillInlineScriptTool extends BaseTool {
       toolContext,
       inlineScriptContent,
       language,
+      skillName,
     );
     if (confirmationResult) {
       return confirmationResult;
@@ -134,7 +172,7 @@ export class RunSkillInlineScriptTool extends BaseTool {
         invocationContext: toolContext.invocationContext,
         codeExecutionInput: {
           code: inlineScriptContent,
-          inputFiles: [],
+          inputFiles: skill ? getSkillResourceFiles(skill) : [],
           language: language as CodeExecutionLanguage,
           args: scriptArgs,
         },
@@ -163,11 +201,16 @@ export class RunSkillInlineScriptTool extends BaseTool {
    *   returned and execution is refused.
    * - When the confirmation is confirmed, `undefined` is returned to allow the
    *   caller to proceed with execution.
+   *
+   * When `skillName` is supplied, the request also discloses that the skill's
+   * files will be readable by the script, since that widens what the human is
+   * approving.
    */
   private enforceConfirmation(
     toolContext: Context,
     scriptContent: string,
     language: string,
+    skillName?: string,
   ):
     | {partial: string}
     | {error: string; errorCode: RunSkillInlineScriptErrorCode}
@@ -175,13 +218,19 @@ export class RunSkillInlineScriptTool extends BaseTool {
     const confirmation = toolContext.toolConfirmation;
 
     if (!confirmation) {
+      const skillNotice = skillName
+        ? `\n\nThe script will run alongside the '${skillName}' skill, whose ` +
+          'references/, assets/ and scripts/ will be readable from its ' +
+          'working directory.'
+        : '';
       toolContext.requestConfirmation({
         hint:
           'Confirmation is required before executing an inline skill script. ' +
           `The agent requested to run the following ${language} script in the ` +
           'code executor. Only approve if you trust its contents:\n\n' +
-          scriptContent,
-        payload: {language, scriptContent},
+          scriptContent +
+          skillNotice,
+        payload: {language, scriptContent, ...(skillName ? {skillName} : {})},
       });
       return {partial: REQUIRE_CONFIRMATION_MESSAGE};
     }
