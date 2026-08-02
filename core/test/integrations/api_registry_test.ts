@@ -59,22 +59,28 @@ const LIST_URL =
   '/locations/global/mcpServers?filter=enabled%3Dfalse';
 
 const TransportMock = vi.mocked(StreamableHTTPClientTransport);
+const fetchMock = vi.fn<typeof fetch>();
 
-/** Builds a `fetch` Response stub carrying `body` as its JSON payload. */
+/** A 200 response whose body is `body` serialized as JSON. */
 function okResponse(body: unknown): Response {
-  return {ok: true, status: 200, json: async () => body} as unknown as Response;
+  return Response.json(body);
 }
 
-/** Returns the `fetch` mock, typed for assertions on its calls. */
-function fetchMock(): ReturnType<typeof vi.fn> {
-  return global.fetch as unknown as ReturnType<typeof vi.fn>;
+/** Returns the URL the nth `fetch` call targeted. */
+function fetchedUrl(index: number): string {
+  return String(fetchMock.mock.calls[index][0]);
+}
+
+/** Returns the request init the nth `fetch` call was given. */
+function fetchedInit(index: number) {
+  return fetchMock.mock.calls[index][1];
 }
 
 /** Returns the URL and options the last MCP transport was constructed with. */
 function lastTransportCall(): {url: URL; headers: unknown} {
   const call = TransportMock.mock.calls.at(-1);
   if (!call) {
-    expect.fail('StreamableHTTPClientTransport was never constructed');
+    expect.fail('StreamableHTTPClientTransport received no call');
   }
   return {url: call[0], headers: call[1]?.requestInit?.headers};
 }
@@ -98,7 +104,9 @@ describe('ApiRegistry', () => {
     vi.clearAllMocks();
     mockToken = 'mock_token';
     mockQuotaProjectId = undefined;
-    global.fetch = vi.fn().mockResolvedValue(okResponse(MOCK_MCP_SERVERS_LIST));
+    fetchMock.mockReset();
+    fetchMock.mockImplementation(async () => okResponse(MOCK_MCP_SERVERS_LIST));
+    global.fetch = fetchMock;
   });
 
   describe('construction', () => {
@@ -118,12 +126,12 @@ describe('ApiRegistry', () => {
     it('defaults location to global', async () => {
       const registry = new ApiRegistry({projectId: PROJECT_ID});
       await registry.getToolset('test-mcp-server-1');
-      expect(fetchMock().mock.calls[0][0]).toBe(LIST_URL);
+      expect(fetchedUrl(0)).toBe(LIST_URL);
     });
 
     it('performs no I/O', () => {
       newRegistry();
-      expect(global.fetch).not.toHaveBeenCalled();
+      expect(fetchMock).not.toHaveBeenCalled();
     });
   });
 
@@ -143,14 +151,14 @@ describe('ApiRegistry', () => {
         registry.getToolset('test-mcp-server-no-url'),
       ).rejects.toThrow('has no URLs');
 
-      expect(global.fetch).toHaveBeenCalledTimes(1);
-      expect(fetchMock().mock.calls[0][0]).toBe(LIST_URL);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchedUrl(0)).toBe(LIST_URL);
     });
 
     it('sends Content-Type and Authorization on the list request', async () => {
       const registry = newRegistry();
       await registry.getToolset('test-mcp-server-1');
-      expect(fetchMock().mock.calls[0][1]).toEqual({
+      expect(fetchedInit(0)).toEqual({
         method: 'GET',
         headers: {
           'Authorization': 'Bearer mock_token',
@@ -163,7 +171,7 @@ describe('ApiRegistry', () => {
       mockQuotaProjectId = 'quota-project';
       const registry = newRegistry();
       await registry.getToolset('test-mcp-server-1');
-      expect(fetchMock().mock.calls[0][1]).toEqual({
+      expect(fetchedInit(0)).toEqual({
         method: 'GET',
         headers: {
           'Authorization': 'Bearer mock_token',
@@ -174,7 +182,7 @@ describe('ApiRegistry', () => {
     });
 
     it('follows nextPageToken and merges every page', async () => {
-      fetchMock()
+      fetchMock
         .mockResolvedValueOnce(
           okResponse({
             mcpServers: MOCK_MCP_SERVERS_LIST.mcpServers.slice(0, 2),
@@ -193,15 +201,13 @@ describe('ApiRegistry', () => {
         registry.getToolset('test-mcp-server-https'),
       ).resolves.toBeDefined();
 
-      expect(global.fetch).toHaveBeenCalledTimes(2);
-      expect(fetchMock().mock.calls[0][0]).toBe(LIST_URL);
-      expect(fetchMock().mock.calls[1][0]).toBe(
-        `${LIST_URL}&pageToken=next_page_token`,
-      );
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchedUrl(0)).toBe(LIST_URL);
+      expect(fetchedUrl(1)).toBe(`${LIST_URL}&pageToken=next_page_token`);
     });
 
     it('lets a later page overwrite a duplicate from an earlier one', async () => {
-      fetchMock()
+      fetchMock
         .mockResolvedValueOnce(
           okResponse({
             mcpServers: [{name: 'dup', urls: ['stale.example.com']}],
@@ -219,7 +225,7 @@ describe('ApiRegistry', () => {
     });
 
     it('skips servers returned without a name but keeps their named siblings', async () => {
-      fetchMock().mockResolvedValue(
+      fetchMock.mockResolvedValue(
         okResponse({
           mcpServers: [
             {urls: ['mcp.nameless.com']},
@@ -235,7 +241,7 @@ describe('ApiRegistry', () => {
     });
 
     it('tolerates a response with no mcpServers field', async () => {
-      fetchMock().mockResolvedValue(okResponse({}));
+      fetchMock.mockResolvedValue(okResponse({}));
       const registry = newRegistry();
       await expect(registry.getToolset('test-mcp-server-1')).rejects.toThrow(
         'not found in API Registry',
@@ -243,7 +249,7 @@ describe('ApiRegistry', () => {
     });
 
     it('wraps a rejected fetch', async () => {
-      fetchMock().mockRejectedValue(new Error('Connection failed'));
+      fetchMock.mockRejectedValue(new Error('Connection failed'));
       const registry = newRegistry();
       await expect(registry.getToolset('test-mcp-server-1')).rejects.toThrow(
         'Error fetching MCP servers from API Registry: Connection failed',
@@ -251,11 +257,9 @@ describe('ApiRegistry', () => {
     });
 
     it('wraps a non-2xx response, quoting the status and body', async () => {
-      fetchMock().mockResolvedValue({
-        ok: false,
-        status: 403,
-        text: async () => 'permission denied',
-      } as unknown as Response);
+      fetchMock.mockImplementation(
+        async () => new Response('permission denied', {status: 403}),
+      );
       const registry = newRegistry();
       await expect(registry.getToolset('test-mcp-server-1')).rejects.toThrow(
         'Error fetching MCP servers from API Registry: request failed with ' +
@@ -264,21 +268,17 @@ describe('ApiRegistry', () => {
     });
 
     it('wraps a body that is not valid JSON', async () => {
-      fetchMock().mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: async () => {
-          throw new SyntaxError('Unexpected token < in JSON');
-        },
-      } as unknown as Response);
+      fetchMock.mockImplementation(
+        async () => new Response('<html>gateway error</html>', {status: 200}),
+      );
       const registry = newRegistry();
       await expect(registry.getToolset('test-mcp-server-1')).rejects.toThrow(
-        'Error fetching MCP servers from API Registry: Unexpected token <',
+        /^Error fetching MCP servers from API Registry: .*JSON/,
       );
     });
 
     it('wraps a non-Error rejection', async () => {
-      fetchMock().mockRejectedValue('socket hang up');
+      fetchMock.mockRejectedValue('socket hang up');
       const registry = newRegistry();
       await expect(registry.getToolset('test-mcp-server-1')).rejects.toThrow(
         'Error fetching MCP servers from API Registry: socket hang up',
@@ -289,7 +289,7 @@ describe('ApiRegistry', () => {
       const registry = newRegistry();
       await registry.getToolset('test-mcp-server-1');
       await registry.getToolset('test-mcp-server-2');
-      expect(global.fetch).toHaveBeenCalledTimes(1);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
     it('shares a single in-flight fetch across concurrent calls', async () => {
@@ -298,11 +298,11 @@ describe('ApiRegistry', () => {
         registry.getToolset('test-mcp-server-1'),
         registry.getToolset('test-mcp-server-2'),
       ]);
-      expect(global.fetch).toHaveBeenCalledTimes(1);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
     it('clears the memo after a failure so a later call retries', async () => {
-      fetchMock().mockRejectedValueOnce(new Error('Connection failed'));
+      fetchMock.mockRejectedValueOnce(new Error('Connection failed'));
       const registry = newRegistry();
 
       await expect(registry.getToolset('test-mcp-server-1')).rejects.toThrow(
@@ -311,7 +311,7 @@ describe('ApiRegistry', () => {
       await expect(
         registry.getToolset('test-mcp-server-1'),
       ).resolves.toBeDefined();
-      expect(global.fetch).toHaveBeenCalledTimes(2);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -368,7 +368,7 @@ describe('ApiRegistry', () => {
     });
 
     it('uses the first URL when a server registers several', async () => {
-      fetchMock().mockResolvedValue(
+      fetchMock.mockResolvedValue(
         okResponse({
           mcpServers: [
             {name: 'multi', urls: ['first.example.com', 'second.example.com']},
@@ -394,7 +394,7 @@ describe('ApiRegistry', () => {
     });
 
     it('rejects for a server whose urls list is empty', async () => {
-      fetchMock().mockResolvedValue(
+      fetchMock.mockResolvedValue(
         okResponse({mcpServers: [{name: 'empty-urls', urls: []}]}),
       );
       const registry = newRegistry();
@@ -427,7 +427,7 @@ describe('ApiRegistry', () => {
       process.env['GOOGLE_API_USE_MTLS_ENDPOINT'] = 'always';
       const registry = newRegistry();
       await registry.getToolset('test-mcp-server-1');
-      expect(fetchMock().mock.calls[0][0]).toBe(LIST_URL);
+      expect(fetchedUrl(0)).toBe(LIST_URL);
     });
   });
 });
