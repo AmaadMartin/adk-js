@@ -96,6 +96,18 @@ describe('skill_toolset', () => {
       expect(tools.length).toBe(5);
     });
 
+    it('defaults saveOutputsAsArtifacts to false', () => {
+      const toolset = new SkillToolset([mockSkill]);
+      expect(toolset.saveOutputsAsArtifacts).toBe(false);
+    });
+
+    it('enables saveOutputsAsArtifacts when the option is passed', () => {
+      const toolset = new SkillToolset([mockSkill], {
+        saveOutputsAsArtifacts: true,
+      });
+      expect(toolset.saveOutputsAsArtifacts).toBe(true);
+    });
+
     it('appends instructions to LLM request', async () => {
       const toolset = new SkillToolset([mockSkill]);
       const llmRequest: LlmRequest = {

@@ -12,6 +12,7 @@ import {
   File,
 } from '../../code_executors/code_execution_utils.js';
 import {Script, Skill} from '../../skills/skill.js';
+import {saveFilesAsArtifacts} from '../../utils/artifact_utils.js';
 import {experimental} from '../../utils/experimental.js';
 import {
   getMimeTypeAndEncoding,
@@ -144,7 +145,14 @@ export class RunSkillScriptTool extends BaseTool {
       // Final filename could be different if there was a collision, so update the result.
       result.outputFiles = await materializeFiles(result.outputFiles);
 
-      return result;
+      if (!this.toolset.saveOutputsAsArtifacts) {
+        return result;
+      }
+      const artifacts = await saveFilesAsArtifacts(
+        toolContext,
+        result.outputFiles,
+      );
+      return artifacts ? {...result, ...artifacts} : result;
     } catch (e: unknown) {
       return {
         error: `Failed to execute script '${scriptPath}': ${(e as Error).message}`,

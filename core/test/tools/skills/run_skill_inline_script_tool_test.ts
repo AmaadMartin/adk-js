@@ -16,10 +16,17 @@ import {
   LlmAgent,
   RunSkillInlineScriptErrorCode,
   RunSkillInlineScriptTool,
+  SessionArtifactService,
   SkillToolset,
 } from '@google/adk';
-import {describe, expect, it, vi} from 'vitest';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {InMemoryArtifactService} from '../../../src/artifacts/in_memory_artifact_service.js';
+import {ScopedArtifactService} from '../../../src/artifacts/scoped_artifact_service.js';
 import {ToolConfirmation} from '../../../src/tools/tool_confirmation.js';
+import {
+  ArtifactSaveError,
+  SavedArtifact,
+} from '../../../src/utils/artifact_utils.js';
 import {materializeFiles} from '../../../src/utils/file_utils.js';
 
 vi.mock('../../../src/utils/file_utils.js', () => ({
@@ -51,6 +58,12 @@ interface ToolErrorResponse {
   errorCode: RunSkillInlineScriptErrorCode;
 }
 
+/** The tool result once artifact persistence has augmented it. */
+interface ArtifactAugmentedResult extends CodeExecutionResult {
+  savedArtifacts: SavedArtifact[];
+  artifactSaveErrors: ArtifactSaveError[];
+}
+
 describe('RunSkillInlineScriptTool', () => {
   function createMockContext(
     agentName = 'test-agent',
@@ -58,6 +71,7 @@ describe('RunSkillInlineScriptTool', () => {
     options: {
       functionCallId?: string;
       toolConfirmation?: ToolConfirmation;
+      artifactService?: SessionArtifactService;
     } = {},
   ): Context {
     const agentObj: Record<string | symbol, unknown> = {name: agentName};
@@ -70,6 +84,7 @@ describe('RunSkillInlineScriptTool', () => {
       invocationContext: {
         session: {state: {}},
         agent: agentObj as unknown as LlmAgent,
+        artifactService: options.artifactService,
       } as unknown as InvocationContext,
       functionCallId: options.functionCallId,
       toolConfirmation: options.toolConfirmation,
@@ -401,6 +416,148 @@ describe('RunSkillInlineScriptTool', () => {
       expect(RunSkillInlineScriptErrorCode.CONFIRMATION_REJECTED).toBe(
         'CONFIRMATION_REJECTED',
       );
+    });
+  });
+
+  describe('saveOutputsAsArtifacts', () => {
+    const outputFile: File = {
+      name: 'report.txt',
+      content: 'inline script output',
+      contentEncoding: FileContentEncoding.UTF8,
+      mimeType: 'text/plain',
+    };
+
+    function createExecutor(): MockCodeExecutor {
+      const executor = new MockCodeExecutor();
+      executor.mockResult = {
+        stdout: 'inline ran',
+        stderr: '',
+        outputFiles: [outputFile],
+      };
+      return executor;
+    }
+
+    function createArtifactService(): ScopedArtifactService {
+      return new ScopedArtifactService(
+        new InMemoryArtifactService(),
+        'test-app',
+        'test-user',
+        'test-session',
+      );
+    }
+
+    function runInlineScript(
+      executor: MockCodeExecutor,
+      toolset: SkillToolset,
+      artifactService?: ScopedArtifactService,
+    ): Promise<unknown> {
+      return new RunSkillInlineScriptTool(toolset).runAsync({
+        args: {
+          script_content: 'console.log("go");',
+          language: CodeExecutionLanguage.JAVASCRIPT,
+        },
+        toolContext: createMockContext('test-agent', executor, {
+          toolConfirmation: confirmed(),
+          artifactService,
+        }),
+      });
+    }
+
+    beforeEach(() => {
+      vi.mocked(materializeFiles).mockImplementation(async (files) => files);
+    });
+
+    it('does not touch the artifact service when the option is off', async () => {
+      const artifactService = createArtifactService();
+      const saveSpy = vi.spyOn(artifactService, 'saveArtifact');
+      const executor = createExecutor();
+      const toolset = new SkillToolset([], {codeExecutor: executor});
+
+      const result = (await runInlineScript(
+        executor,
+        toolset,
+        artifactService,
+      )) as CodeExecutionResult;
+
+      expect(saveSpy).not.toHaveBeenCalled();
+      expect(result).not.toHaveProperty('savedArtifacts');
+      expect(result).not.toHaveProperty('artifactSaveErrors');
+      expect(result.outputFiles).toEqual([outputFile]);
+    });
+
+    it('reports saved artifacts when the option is on', async () => {
+      const artifactService = createArtifactService();
+      const executor = createExecutor();
+      const toolset = new SkillToolset([], {
+        codeExecutor: executor,
+        saveOutputsAsArtifacts: true,
+      });
+
+      const result = (await runInlineScript(
+        executor,
+        toolset,
+        artifactService,
+      )) as ArtifactAugmentedResult;
+
+      expect(result.savedArtifacts).toEqual([
+        {filename: 'report.txt', version: 0},
+      ]);
+      expect(result.artifactSaveErrors).toEqual([]);
+      expect(result.outputFiles).toEqual([outputFile]);
+
+      const saved = await artifactService.loadArtifact({
+        filename: 'report.txt',
+      });
+      const data = saved?.inlineData?.data;
+      if (data === undefined) {
+        expect.fail('expected the saved artifact to carry inline data');
+      }
+      expect(Buffer.from(data, 'base64').toString('utf-8')).toBe(
+        'inline script output',
+      );
+    });
+
+    it('returns the plain result when no artifact service is configured', async () => {
+      const executor = createExecutor();
+      const toolset = new SkillToolset([], {
+        codeExecutor: executor,
+        saveOutputsAsArtifacts: true,
+      });
+
+      const result = (await runInlineScript(
+        executor,
+        toolset,
+      )) as CodeExecutionResult;
+
+      expect(result).not.toHaveProperty('savedArtifacts');
+      expect(result).not.toHaveProperty('artifactSaveErrors');
+      expect(result.stdout).toBe('inline ran');
+      expect(result.outputFiles).toEqual([outputFile]);
+    });
+
+    it('surfaces a failed save without failing the script', async () => {
+      const artifactService = createArtifactService();
+      vi.spyOn(artifactService, 'saveArtifact').mockRejectedValue(
+        new Error('artifact backend unavailable'),
+      );
+      const executor = createExecutor();
+      const toolset = new SkillToolset([], {
+        codeExecutor: executor,
+        saveOutputsAsArtifacts: true,
+      });
+
+      const result = (await runInlineScript(
+        executor,
+        toolset,
+        artifactService,
+      )) as ArtifactAugmentedResult;
+
+      expect(result.savedArtifacts).toEqual([]);
+      expect(result.artifactSaveErrors).toEqual([
+        {filename: 'report.txt', error: 'artifact backend unavailable'},
+      ]);
+      expect(result.stdout).toBe('inline ran');
+      expect(result.outputFiles).toEqual([outputFile]);
     });
   });
 });
