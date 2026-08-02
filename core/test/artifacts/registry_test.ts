@@ -43,6 +43,12 @@ describe('getArtifactServiceFromUri', () => {
     expect(service).toBeInstanceOf(FileArtifactService);
   });
 
+  it.skipIf(!IS_WINDOWS)('rejects a driveless file uri on Windows', () => {
+    expect(() => getArtifactServiceFromUri('file:///tmp/artifacts')).toThrow(
+      /Invalid root directory/,
+    );
+  });
+
   it.skipIf(!IS_WINDOWS)(
     'returns FileArtifactService for a Windows drive-letter file uri',
     () => {
