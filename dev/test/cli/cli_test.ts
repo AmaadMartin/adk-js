@@ -323,9 +323,9 @@ describe('CLI Entrypoint', () => {
         expectNoActionRan();
       });
 
-      // A membership test written as `name in LOG_LEVEL_MAP` walks the
-      // prototype chain, and these are the inherited keys that survive
-      // lower-casing, so they would be taken for levels.
+      // The `Object.prototype` keys that survive lower-casing. They would be
+      // accepted as levels if the level table were ever a plain object
+      // consulted with the `in` operator.
       it.each(['constructor', '__proto__', 'CONSTRUCTOR', '__PROTO__'])(
         'rejects the inherited key --log_level %s',
         async (level) => {

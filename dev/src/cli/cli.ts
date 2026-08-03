@@ -29,30 +29,15 @@ import {deployToCloudRun} from './deploy/cli_deploy_cloud_run.js';
 
 dotenv.config({quiet: true});
 
-const LOG_LEVEL_MAP: Record<string, LogLevel> = {
-  'debug': LogLevel.DEBUG,
-  'info': LogLevel.INFO,
-  'warn': LogLevel.WARN,
-  'error': LogLevel.ERROR,
-};
+const LOG_LEVEL_MAP = new Map<string, LogLevel>([
+  ['debug', LogLevel.DEBUG],
+  ['info', LogLevel.INFO],
+  ['warn', LogLevel.WARN],
+  ['error', LogLevel.ERROR],
+]);
 
-/**
- * The `--log_level` values the CLI accepts, derived from {@link LOG_LEVEL_MAP}
- * so the advertised choices can never drift from the levels we can resolve.
- */
-const LOG_LEVEL_CHOICES = Object.keys(LOG_LEVEL_MAP);
-
-/**
- * Resolves a level name to its {@link LogLevel}, or `undefined` when the name is
- * not one we support.
- *
- * `Object.hasOwn`, not `name in LOG_LEVEL_MAP`: `in` walks the prototype chain,
- * so inherited keys such as `constructor` and `__proto__` would resolve to
- * something that is not a log level at all.
- */
-function resolveLogLevel(name: string): LogLevel | undefined {
-  return Object.hasOwn(LOG_LEVEL_MAP, name) ? LOG_LEVEL_MAP[name] : undefined;
-}
+/** The `--log_level` values the CLI accepts. */
+const LOG_LEVEL_CHOICES = [...LOG_LEVEL_MAP.keys()];
 
 /**
  * Validates a `--log_level` value and normalizes it to its canonical lower-case
@@ -64,7 +49,7 @@ function resolveLogLevel(name: string): LogLevel | undefined {
  */
 function parseLogLevel(value: string): string {
   const normalized = value.toLowerCase();
-  if (resolveLogLevel(normalized) === undefined) {
+  if (!LOG_LEVEL_MAP.has(normalized)) {
     throw new InvalidArgumentError(
       `Allowed choices are ${LOG_LEVEL_CHOICES.join(', ')}.`,
     );
@@ -82,7 +67,7 @@ function getLogLevelFromOptions(options: {
 
   if (typeof options.log_level === 'string') {
     // `??`, not `||`: LogLevel.DEBUG is 0 and would otherwise be discarded.
-    return resolveLogLevel(options.log_level.toLowerCase()) ?? LogLevel.INFO;
+    return LOG_LEVEL_MAP.get(options.log_level) ?? LogLevel.INFO;
   }
 
   return LogLevel.INFO;
