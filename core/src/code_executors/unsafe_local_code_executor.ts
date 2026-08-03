@@ -182,16 +182,13 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
       // platform separators (`subdir\file` on Windows) while `File.name` is
       // always `/`-separated, so comparing the two as raw strings misses
       // nested inputs and re-reports them as script output.
-      const inputFilePaths = new Set<string>();
-      if (params.codeExecutionInput.inputFiles) {
-        const inputFiles = await materializeFiles(
-          params.codeExecutionInput.inputFiles,
-          tempDir,
-        );
-        for (const inputFile of inputFiles) {
-          inputFilePaths.add(path.join(tempDir, inputFile.name));
-        }
-      }
+      const inputFiles = await materializeFiles(
+        params.codeExecutionInput.inputFiles,
+        tempDir,
+      );
+      const inputFilePaths = new Set(
+        inputFiles.map((f) => path.join(res.tempDir, f.name)),
+      );
 
       let command = this.nodeCommandPath;
       let args = [filePath];
