@@ -61,6 +61,17 @@ const AGENT_FILE_COMMANDS = [
   'deploy reasoning_engine',
 ];
 
+/** Command surfaces that register the shared `--log_level` option. */
+const LOG_LEVEL_COMMANDS = [
+  'web',
+  'api_server',
+  'run',
+  'deploy cloud_run',
+  'deploy agent_engine',
+  'deploy reasoning_engine',
+  'integration conformance',
+];
+
 /** Resolves a space-separated command path, e.g. `deploy cloud_run`. */
 function findCommand(program: Command, commandPath: string): Command {
   let command = program;
@@ -214,6 +225,97 @@ describe('CLI Entrypoint', () => {
 
       const args = vi.mocked(AdkApiServer).mock.calls[0][0];
       expect(args.agentFileLoadOptions).toMatchObject({moduleType: undefined});
+    });
+  });
+
+  describe('option: --log_level validation', () => {
+    it.each([
+      ['debug', LogLevel.DEBUG],
+      ['info', LogLevel.INFO],
+      ['warn', LogLevel.WARN],
+      ['error', LogLevel.ERROR],
+    ])('applies --log_level %s', async (level, expected) => {
+      await parse(['web', '--log_level', level]);
+
+      expect(setLogLevel).toHaveBeenCalledWith(expected);
+    });
+
+    it.each([
+      ['DEBUG', LogLevel.DEBUG],
+      ['Warn', LogLevel.WARN],
+    ])(
+      'accepts --log_level %s regardless of letter case',
+      async (level, expected) => {
+        await parse(['web', '--log_level', level]);
+
+        expect(setLogLevel).toHaveBeenCalledWith(expected);
+      },
+    );
+
+    it('normalizes the value handed to the Cloud Run deploy path', async () => {
+      await parse(['deploy', 'cloud_run', '--log_level=DEBUG']);
+
+      expect(vi.mocked(deployToCloudRun).mock.calls[0][0]).toMatchObject({
+        logLevel: 'debug',
+      });
+    });
+
+    it.each(LOG_LEVEL_COMMANDS)(
+      'lists the accepted levels in `%s` help',
+      (commandPath) => {
+        const help = findCommand(program, commandPath)
+          .helpInformation()
+          .replace(/\s+/g, ' ');
+
+        expect(help).toContain(
+          '(choices: "debug", "info", "warn", "error", default: "info")',
+        );
+      },
+    );
+
+    describe('rejection', () => {
+      beforeEach(() => {
+        applyExitOverride(program);
+      });
+
+      it.each(LOG_LEVEL_COMMANDS)(
+        'rejects an unsupported --log_level on `%s`',
+        async (commandPath) => {
+          await expect(
+            parse(argvFor(commandPath, '--log_level', 'trace')),
+          ).rejects.toThrow(/Allowed choices are debug, info, warn, error\./);
+
+          expect(setLogLevel).not.toHaveBeenCalled();
+          expectNoActionRan();
+        },
+      );
+
+      it('reports the rejection as a commander invalid-argument error', async () => {
+        await expect(
+          parse(['web', '--log_level', 'debbug']),
+        ).rejects.toMatchObject({
+          code: 'commander.invalidArgument',
+          message:
+            "error: option '--log_level <string>' argument 'debbug' is invalid. " +
+            'Allowed choices are debug, info, warn, error.',
+        });
+      });
+
+      it('rejects a near-miss level before anything is baked into a deploy', async () => {
+        await expect(
+          parse(['deploy', 'cloud_run', '--log_level=DEBUG2']),
+        ).rejects.toThrow(/Allowed choices are debug, info, warn, error\./);
+
+        expect(deployToCloudRun).not.toHaveBeenCalled();
+      });
+
+      it('rejects an empty --log_level', async () => {
+        await expect(parse(['web', '--log_level', ''])).rejects.toThrow(
+          /Allowed choices are debug, info, warn, error\./,
+        );
+
+        expectNoActionRan();
+      });
     });
   });
 
