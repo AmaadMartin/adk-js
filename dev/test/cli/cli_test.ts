@@ -332,10 +332,10 @@ describe('CLI Entrypoint', () => {
         'adk deploy cloud_run path/to/my_agent -- --min-instances=2',
       );
       expect(normalized).toContain(
-        'ADK sets --source, --project, --port, --verbosity and --region itself, so passing any of them as a gcloud argument is rejected.',
+        'ADK sets --source, --project, --port, --verbosity and --region itself',
       );
       expect(normalized).toContain(
-        'the gcloud env-var flags (--update-env-vars, --set-env-vars, --remove-env-vars, --clear-env-vars, --env-vars-file) are reserved as well',
+        'the gcloud env-var flags (--update-env-vars, --set-env-vars, --remove-env-vars, --clear-env-vars, --env-vars-file) when --a2a_auth_token is set',
       );
       // The epilog documents the option list, so it has to follow it.
       expect(
@@ -570,6 +570,21 @@ describe('CLI Entrypoint', () => {
       expect(deployedWith().extraGcloudArgs).toEqual([
         '--allow-unauthenticated',
       ]);
+    });
+
+    it('should not deploy a leading gcloud flag as the agent directory', async () => {
+      await parse(['deploy', 'cloud_run', '--allow-unauthenticated']);
+
+      expect(deployedWith().agentPath).toBe(process.cwd());
+    });
+
+    it('should support the -- example with the agent directory omitted', async () => {
+      await parse(['deploy', 'cloud_run', '--', '--min-instances=2']);
+
+      expect(deployedWith()).toMatchObject({
+        agentPath: process.cwd(),
+        extraGcloudArgs: ['--min-instances=2'],
+      });
     });
   });
 

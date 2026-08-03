@@ -118,6 +118,19 @@ function getExtraGcloudArgs(command: Command): string[] {
   return extraArgs.filter((arg) => arg !== '--');
 }
 
+/**
+ * Resolves the `[agents_dir]` value of a command that forwards unknown flags.
+ *
+ * Commander binds the first unmatched token to the declared argument even when
+ * that token is an unknown flag being forwarded, so an omitted directory would
+ * otherwise resolve the deploy source to `<cwd>/--some-gcloud-flag`. An agent
+ * path never starts with `-` (a relative one is spelled `./-name`), so fall
+ * back to the argument's own default.
+ */
+function resolveAgentPath(agentsDir: string): string {
+  return getAbsolutePath(agentsDir.startsWith('-') ? process.cwd() : agentsDir);
+}
+
 const AGENT_DIR_ARGUMENT = new Argument(
   '[agents_dir]',
   'Agent file or directory of agents to serve. For directory the internal structure should be agents_dir/{agentName}.js or agents_dir/{agentName}/agent.js. Agent file should has export of the rootAgent as instance of BaseAgent (e.g LlmAgent)',
@@ -223,11 +236,10 @@ Examples:
   adk deploy cloud_run --project=[project] --region=[region] path/to/my_agent
   adk deploy cloud_run path/to/my_agent -- --min-instances=2
 
-ADK sets --source, --project, --port, --verbosity and --region itself, so
-passing any of them as a gcloud argument is rejected. When --a2a_auth_token is
-set, the gcloud env-var flags (--update-env-vars, --set-env-vars,
---remove-env-vars, --clear-env-vars, --env-vars-file) are reserved as well,
-because they can drop the injected token.`;
+ADK sets --source, --project, --port, --verbosity and --region itself, and also
+reserves the gcloud env-var flags (--update-env-vars, --set-env-vars,
+--remove-env-vars, --clear-env-vars, --env-vars-file) when --a2a_auth_token is
+set. Passing a reserved flag as a gcloud argument is rejected.`;
 
 /**
  * Creates the ADK CLI program.
@@ -474,7 +486,7 @@ export function createProgram(): Command {
 
         try {
           await deployToCloudRun({
-            agentPath: getAbsolutePath(agentPath),
+            agentPath: resolveAgentPath(agentPath),
             project: options['project'],
             region: options['region'],
             serviceName: options['service_name'],
