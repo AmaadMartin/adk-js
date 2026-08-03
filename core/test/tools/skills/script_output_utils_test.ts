@@ -74,19 +74,29 @@ describe('materializeScriptOutputs', () => {
     );
   });
 
-  it('resolves a relative output directory to an absolute path', async () => {
-    const relativeDir = path.relative(process.cwd(), outputDir);
-    expect(path.isAbsolute(relativeDir)).toBe(false);
+  it('resolves a relative output directory against the working directory', async () => {
+    // Working directory is moved to the temp root rather than deriving a
+    // relative path from the real one: on Windows they sit on different
+    // drives, where no relative path between them exists.
+    const originalCwd = process.cwd();
+    process.chdir(tmpRoot);
+    try {
+      const relativeDir = path.basename(outputDir);
+      expect(path.isAbsolute(relativeDir)).toBe(false);
+      const expectedDir = path.resolve(process.cwd(), relativeDir);
 
-    const result = await materializeScriptOutputs(
-      executionResult([textFile('relative.txt', 'contents')]),
-      relativeDir,
-    );
+      const result = await materializeScriptOutputs(
+        executionResult([textFile('relative.txt', 'contents')]),
+        relativeDir,
+      );
 
-    expect(result.outputDir).toBe(outputDir);
-    expect(
-      await fs.readFile(path.join(outputDir, 'relative.txt'), 'utf8'),
-    ).toBe('contents');
+      expect(result.outputDir).toBe(expectedDir);
+      expect(
+        await fs.readFile(path.join(expectedDir, 'relative.txt'), 'utf8'),
+      ).toBe('contents');
+    } finally {
+      process.chdir(originalCwd);
+    }
   });
 
   it('writes to a fresh temp directory when no output directory is configured', async () => {
