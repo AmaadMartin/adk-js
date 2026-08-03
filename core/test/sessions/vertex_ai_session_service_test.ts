@@ -10,17 +10,6 @@ import {Session} from '@google/adk/sessions/session.js';
 import {ApiError} from '@google/genai';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 
-// Mock the unreleased nodejs-vertexai package so the import resolves
-vi.mock('nodejs-vertexai', () => ({
-  SessionsClient: class {
-    create = vi.fn();
-    get = vi.fn();
-    list = vi.fn();
-    delete = vi.fn();
-    events = {append: vi.fn()};
-  },
-}));
-
 import {
   isVertexAiConnectionString,
   quoteFilterLiteral,
