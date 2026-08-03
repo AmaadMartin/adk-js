@@ -13,6 +13,7 @@ import {
   BaseLlmResponseProcessor,
   BasePlugin,
   BaseTool,
+  CODE_EXECUTION_RESPONSE_PROCESSOR,
   CodeExecutionInput,
   CodeExecutionResult,
   CONTENT_REQUEST_PROCESSOR,
@@ -36,7 +37,6 @@ import {Content, Outcome, Schema, Type} from '@google/genai';
 import {beforeEach, describe, expect, it} from 'vitest';
 import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
-import {CODE_EXECUTION_RESPONSE_PROCESSOR} from '../../src/agents/processors/code_execution_request_processor.js';
 import {ScopedArtifactService} from '../../src/artifacts/scoped_artifact_service.js';
 
 class MockLlmConnection implements BaseLlmConnection {

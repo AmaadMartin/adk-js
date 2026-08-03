@@ -154,6 +154,23 @@ export async function createRunner(
   };
 }
 
+/**
+ * Drains an agent run into an array.
+ * @param run The `run` function returned by {@link createRunner}.
+ * @param prompt The user prompt to send.
+ * @returns Every event the run yielded, in order.
+ */
+export async function collectEvents(
+  run: (prompt: string) => AsyncGenerator<Event, void, undefined>,
+  prompt: string,
+): Promise<Event[]> {
+  const events: Event[] = [];
+  for await (const event of run(prompt)) {
+    events.push(event);
+  }
+  return events;
+}
+
 const ADK_EVENT_ID_REGEX = /^[a-zA-Z0-9]{8}$/;
 const INVOCATION_ID_REGEX =
   /^e-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
