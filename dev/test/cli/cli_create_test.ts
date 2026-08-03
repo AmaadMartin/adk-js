@@ -271,4 +271,61 @@ describe('createAgent', () => {
       expect(removeFolder).not.toHaveBeenCalled();
     });
   });
+
+  describe('Agent Name Validation', () => {
+    const expectNoFilesystemAccess = () => {
+      expect(isFolderExists).not.toHaveBeenCalled();
+      expect(createFolder).not.toHaveBeenCalled();
+      expect(removeFolder).not.toHaveBeenCalled();
+      expect(saveToFile).not.toHaveBeenCalled();
+    };
+
+    it('should reject a name containing a space before touching the filesystem', async () => {
+      await expect(
+        createAgent({
+          ...getFreshOptions(),
+          agentName: 'my agent',
+          forceYes: true,
+        }),
+      ).rejects.toThrow(/Invalid app name 'my agent'/);
+
+      expectNoFilesystemAccess();
+    });
+
+    it('should reject the reserved name "user" before touching the filesystem', async () => {
+      await expect(
+        createAgent({
+          ...getFreshOptions(),
+          agentName: 'user',
+          forceYes: true,
+        }),
+      ).rejects.toThrow(/reserved for end-user input/);
+
+      expectNoFilesystemAccess();
+    });
+
+    it('should reject a path-traversal name rather than scaffolding out of tree', async () => {
+      await expect(
+        createAgent({
+          ...getFreshOptions(),
+          agentName: '../../foo',
+          forceYes: true,
+        }),
+      ).rejects.toThrow(/Invalid app name '\.\.\/\.\.\/foo'/);
+
+      expectNoFilesystemAccess();
+    });
+
+    it('should scaffold a valid name unchanged', async () => {
+      await createAgent({
+        ...getFreshOptions(),
+        agentName: 'valid_agent-1',
+        forceYes: true,
+      });
+
+      expect(createFolder).toHaveBeenCalledWith(
+        expect.stringContaining('valid_agent-1'),
+      );
+    });
+  });
 });
