@@ -15,12 +15,9 @@ import {
 import {z} from 'zod';
 
 import {BaseAgent} from '../../agents/base_agent.js';
-import {InMemoryArtifactService} from '../../artifacts/in_memory_artifact_service.js';
-import {InMemoryCredentialService} from '../../auth/credential_service/in_memory_credential_service.js';
 import {isFinalResponse} from '../../events/event.js';
-import {InMemoryMemoryService} from '../../memory/in_memory_memory_service.js';
+import {InMemoryRunner} from '../../runner/in_memory_runner.js';
 import {Runner} from '../../runner/runner.js';
-import {InMemorySessionService} from '../../sessions/in_memory_session_service.js';
 import {version} from '../../version.js';
 
 /** The synthetic ADK user id used for every MCP-driven conversation. */
@@ -43,27 +40,6 @@ export interface ToMcpServerOptions {
   instructions?: string;
   /** A pre-built Runner. If omitted, one is built with in-memory services. */
   runner?: Runner;
-}
-
-/** Builds a Runner for the agent using in-memory services. */
-function buildRunner(agent: BaseAgent): Runner {
-  return new Runner({
-    appName: agent.name,
-    agent,
-    artifactService: new InMemoryArtifactService(),
-    sessionService: new InMemorySessionService(),
-    memoryService: new InMemoryMemoryService(),
-    credentialService: new InMemoryCredentialService(),
-  });
-}
-
-/** Creates the ADK session that backs one MCP connection. */
-async function createSessionId(runner: Runner): Promise<string> {
-  const session = await runner.sessionService.createSession({
-    appName: runner.appName,
-    userId: MCP_USER_ID,
-  });
-  return session.id;
 }
 
 /**
@@ -204,7 +180,8 @@ export function toMcpServer(
     {name: toolName, version},
     {instructions: options.instructions},
   );
-  const agentRunner = options.runner ?? buildRunner(agent);
+  const agentRunner =
+    options.runner ?? new InMemoryRunner({agent, appName: agent.name});
   let sessionIdPromise: Promise<string> | undefined;
 
   server.registerTool(
@@ -216,12 +193,13 @@ export function toMcpServer(
     async ({request}, extra) => {
       // A failed creation must not stay memoised, or one transient session
       // store error would brick every later call on this server.
-      sessionIdPromise ??= createSessionId(agentRunner).catch(
-        (error: unknown) => {
+      sessionIdPromise ??= agentRunner.sessionService
+        .createSession({appName: agentRunner.appName, userId: MCP_USER_ID})
+        .then((session) => session.id)
+        .catch((error: unknown) => {
           sessionIdPromise = undefined;
           throw error;
-        },
-      );
+        });
       const sessionId = await sessionIdPromise;
       return {content: await runAgent(agentRunner, request, sessionId, extra)};
     },
