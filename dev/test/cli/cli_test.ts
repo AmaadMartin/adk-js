@@ -50,18 +50,12 @@ vi.mock('@google/adk', async (importOriginal) => {
 });
 
 /**
- * Thrown by the mocked `process.exit` so that a test observes the same
+ * Replaces `process.exit` with a throw, so that a test observes the same
  * "nothing after this line runs" control flow as the real CLI.
  */
-class ProcessExitError extends Error {
-  constructor(readonly exitCode: number | string | null | undefined) {
-    super(`process.exit(${String(exitCode)})`);
-  }
-}
-
 const spyOnProcessExit = () =>
   vi.spyOn(process, 'exit').mockImplementation((code) => {
-    throw new ProcessExitError(code);
+    throw new Error(`process.exit(${String(code)})`);
   });
 
 describe('CLI Entrypoint', () => {
@@ -242,7 +236,7 @@ describe('CLI Entrypoint', () => {
       (createAgent as Mock).mockRejectedValue(new Error('boom'));
       const exitSpy = spyOnProcessExit();
 
-      await expect(parse(['create'])).rejects.toBeInstanceOf(ProcessExitError);
+      await expect(parse(['create'])).rejects.toThrow('process.exit(1)');
       expect(exitSpy).toHaveBeenCalledWith(1);
     });
 
@@ -298,8 +292,8 @@ describe('CLI Entrypoint', () => {
       (runAgent as Mock).mockRejectedValue(new Error('boom'));
       const exitSpy = spyOnProcessExit();
 
-      await expect(parse(['run', 'agent.ts'])).rejects.toBeInstanceOf(
-        ProcessExitError,
+      await expect(parse(['run', 'agent.ts'])).rejects.toThrow(
+        'process.exit(1)',
       );
       expect(exitSpy).toHaveBeenCalledWith(1);
     });
