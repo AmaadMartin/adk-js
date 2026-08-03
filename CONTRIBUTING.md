@@ -15,6 +15,13 @@ To set up your local development environment for contributing:
    cd adk-js
    ```
 
+1. **Use the pinned Node.js version**: `.nvmrc` records the Node.js version CI
+   runs.
+
+   ```bash
+   nvm use
+   ```
+
 1. **Install dependencies**:
 
    ```bash
