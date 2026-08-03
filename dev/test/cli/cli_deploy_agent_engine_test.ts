@@ -489,10 +489,18 @@ describe('deployToAgentEngine', () => {
   });
 
   it('should clean up existing temp folder before deploying', async () => {
+    const rmSpy = vi.spyOn(fs, 'rm');
     await fs.mkdir(tempFolder, {recursive: true});
+    await expect(fs.access(tempFolder)).resolves.toBeUndefined();
     (isFolderExists as Mock).mockResolvedValue(true);
 
     await deployToAgentEngine(defaultOptions);
+
+    expect(rmSpy).toHaveBeenNthCalledWith(1, tempFolder, {
+      recursive: true,
+      force: true,
+    });
+    expect(rmSpy).toHaveBeenCalledTimes(2);
 
     let exists = true;
     try {
