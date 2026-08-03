@@ -179,6 +179,17 @@ describe('ToolboxToolset', () => {
     expect(tools.map((tool) => tool.name)).toEqual(['a', 'b']);
   });
 
+  it('treats an empty toolNames array as no selector at all', async () => {
+    loadToolset.mockResolvedValue([createFakeSdkTool('search-hotels-by-name')]);
+
+    const toolset = new ToolboxToolset(SERVER_URL, {toolNames: []});
+    const tools = await toolset.getTools();
+
+    expect(loadToolset).toHaveBeenCalledWith(undefined, undefined, undefined);
+    expect(loadTool).not.toHaveBeenCalled();
+    expect(tools.map((tool) => tool.name)).toEqual(['search-hotels-by-name']);
+  });
+
   it('unions toolsetName with toolNames, toolset tools first', async () => {
     loadToolset.mockResolvedValue([createFakeSdkTool('from-toolset')]);
     loadTool.mockImplementation(async (name) => createFakeSdkTool(name));
