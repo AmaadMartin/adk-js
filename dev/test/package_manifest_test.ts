@@ -30,6 +30,7 @@ const devManifest = readManifest('../package.json');
  */
 const SHARED_RUNTIME_DEPENDENCIES = [
   '@google-cloud/vertexai',
+  '@google/genai',
   '@opentelemetry/api',
   '@opentelemetry/sdk-trace-base',
   'lodash-es',
