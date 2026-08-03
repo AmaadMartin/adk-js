@@ -67,6 +67,13 @@ class RecordingCodeExecutor extends BaseCodeExecutor {
   }
 }
 
+/** A code executor whose run always fails, to exercise the error path. */
+class FailingCodeExecutor extends BaseCodeExecutor {
+  async executeCode(_params: ExecuteCodeParams): Promise<CodeExecutionResult> {
+    return {stdout: '', stderr: 'NameError: boom', outputFiles: []};
+  }
+}
+
 async function collectEvents(
   run: (prompt: string) => AsyncGenerator<Event, void, undefined>,
   prompt: string,
@@ -107,14 +114,6 @@ describe('Agent with a codeExecutor and no explicit responseProcessors', () => {
   });
 
   it('surfaces a failed execution as OUTCOME_FAILED with the stderr text', async () => {
-    class FailingCodeExecutor extends BaseCodeExecutor {
-      async executeCode(
-        _params: ExecuteCodeParams,
-      ): Promise<CodeExecutionResult> {
-        return {stdout: '', stderr: 'NameError: boom', outputFiles: []};
-      }
-    }
-
     const agent = new LlmAgent({
       model: new GeminiWithMockResponses(mockResponses()),
       name: 'coderAgent',
