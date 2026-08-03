@@ -202,12 +202,16 @@ export function createProgram(): Command {
     colorize: {all: true},
   });
 
-  const program = new Command('ADK CLI');
+  const program = new Command('adk');
 
   program
     .addOption(new Option('-v, --version', 'Get ADK CLI version'))
-    .action(() => {
-      console.log(version);
+    .action((options: {version?: boolean}) => {
+      if (options.version) {
+        console.log(version);
+        return;
+      }
+      program.outputHelp();
     });
 
   program
