@@ -8,6 +8,7 @@ import {afterEach, describe, expect, it, vi} from 'vitest';
 // `saveFilesAsArtifacts` is internal, so it and the types it consumes are all
 // imported from source: mixing in `@google/adk` would give `Context` two
 // distinct declarations and break type identity at the call site.
+import {BaseAgent} from '../../src/agents/base_agent.js';
 import {Context} from '../../src/agents/context.js';
 import {InvocationContext} from '../../src/agents/invocation_context.js';
 import {InMemoryArtifactService} from '../../src/artifacts/in_memory_artifact_service.js';
@@ -16,6 +17,8 @@ import {
   File,
   FileContentEncoding,
 } from '../../src/code_executors/code_execution_utils.js';
+import {PluginManager} from '../../src/plugins/plugin_manager.js';
+import {createSession} from '../../src/sessions/session.js';
 import {saveFilesAsArtifacts} from '../../src/utils/artifact_utils.js';
 import {logger} from '../../src/utils/logger.js';
 
@@ -39,11 +42,17 @@ describe('saveFilesAsArtifacts', () => {
 
   function createContext(artifactService?: ScopedArtifactService): Context {
     return new Context({
-      invocationContext: {
-        session: {state: {}},
-        agent: {name: 'test-agent'},
+      invocationContext: new InvocationContext({
+        invocationId: 'test-invocation',
+        agent: {name: 'test-agent'} as BaseAgent,
+        session: createSession({
+          id: SESSION_ID,
+          appName: APP_NAME,
+          userId: USER_ID,
+        }),
+        pluginManager: new PluginManager([]),
         artifactService,
-      } as unknown as InvocationContext,
+      }),
     });
   }
 

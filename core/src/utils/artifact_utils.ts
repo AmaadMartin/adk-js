@@ -70,7 +70,6 @@ export async function saveFilesAsArtifacts(
       savedArtifacts[file.name] = await context.saveArtifact(file.name, {
         inlineData: {data, mimeType: file.mimeType},
       });
-      logger.debug(`Saved '${file.name}' as an artifact.`);
     } catch (e: unknown) {
       logger.warn(
         `Failed to save '${file.name}' as an artifact: ${(e as Error).message}`,

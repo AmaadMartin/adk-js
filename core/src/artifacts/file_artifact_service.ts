@@ -15,6 +15,7 @@ import {
   ArtifactVersion,
   BaseArtifactService,
   DeleteArtifactRequest,
+  fileHasUserNamespace,
   ListArtifactKeysRequest,
   ListVersionsRequest,
   LoadArtifactRequest,
@@ -442,7 +443,7 @@ function isUserScoped(
   sessionId: string | undefined,
   filename: string,
 ): boolean {
-  return !sessionId || filename.startsWith(USER_NAMESPACE_PREFIX);
+  return !sessionId || fileHasUserNamespace(filename);
 }
 
 function getUserArtifactsDir(userRoot: string): string {
@@ -493,7 +494,7 @@ function getArtifactDir(
   }
 
   let cleanFilename = filename;
-  if (cleanFilename.startsWith(USER_NAMESPACE_PREFIX)) {
+  if (fileHasUserNamespace(cleanFilename)) {
     cleanFilename = cleanFilename.substring(USER_NAMESPACE_PREFIX.length);
   }
   cleanFilename = cleanFilename.trim();

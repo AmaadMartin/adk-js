@@ -10,6 +10,7 @@ import {
   InMemoryArtifactService,
   InvocationContext,
   RunSkillScriptTool,
+  ScopedArtifactService,
   Skill,
   SkillToolset,
   UnsafeLocalCodeExecutor,
@@ -18,9 +19,6 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {describe, expect, it} from 'vitest';
-// ScopedArtifactService is internal: it is the framework's own bridge from a
-// BaseArtifactService to the session-scoped service an invocation carries.
-import {ScopedArtifactService} from '../../../core/src/artifacts/scoped_artifact_service.js';
 
 const IS_WINDOWS = os.platform() === 'win32';
 const IS_UNIX = os.platform() === 'linux' || os.platform() === 'darwin';
