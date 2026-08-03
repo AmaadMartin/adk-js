@@ -96,10 +96,9 @@ export function createEventActions(
  *
  * @param sources - Ordered list of partial {@link EventActions} to merge.
  *   Falsy entries are silently skipped.
- * @returns A newly created {@link EventActions}. Its four dictionaries are
- *   freshly allocated and owned by the returned object, so nothing reachable
- *   from `sources` is mutated. Dictionary entry values are copied by reference:
- *   this is a shallow, entry-wise merge.
+ * @returns A new {@link EventActions} whose four dictionaries are freshly
+ *   allocated, so nothing reachable from `sources` is mutated. Entry values
+ *   are copied by reference.
  */
 export function mergeEventActions(
   sources: Array<Partial<EventActions>>,
