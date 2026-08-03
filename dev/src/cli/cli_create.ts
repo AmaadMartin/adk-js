@@ -5,6 +5,7 @@
  */
 
 import {isCancel, select, text} from '@clack/prompts';
+import {validateAppName} from '@google/adk';
 import {exec, execSync} from 'node:child_process';
 import * as path from 'node:path';
 import {promisify} from 'node:util';
@@ -196,6 +197,8 @@ async function generateFiles(options: AgentCreationOptions) {
 }
 
 export async function createAgent(options: AgentCreationOptions) {
+  validateAppName(options.agentName);
+
   const agentDir = path.join(dirname, options.agentName);
   await generateAgentFolder(agentDir, options.forceYes);
 
