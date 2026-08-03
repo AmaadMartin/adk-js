@@ -21,7 +21,6 @@ import {describe, expect, it} from 'vitest';
 // ScopedArtifactService is internal: it is the framework's own bridge from a
 // BaseArtifactService to the session-scoped service an invocation carries.
 import {ScopedArtifactService} from '../../../core/src/artifacts/scoped_artifact_service.js';
-import {SaveFilesAsArtifactsResult} from '../../../core/src/utils/artifact_utils.js';
 
 const IS_WINDOWS = os.platform() === 'win32';
 const IS_UNIX = os.platform() === 'linux' || os.platform() === 'darwin';
@@ -367,7 +366,7 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
     await fs.unlink(fullPath);
   });
 
-  it('saves script output to the artifact service when the option is on', async () => {
+  it('saves script output to the artifact service', async () => {
     const artifactService = new ScopedArtifactService(
       new InMemoryArtifactService(),
       'test-app',
@@ -375,10 +374,7 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
       'test-session',
     );
     const executor = new UnsafeLocalCodeExecutor();
-    const toolset = new SkillToolset([testSkill], {
-      codeExecutor: executor,
-      saveOutputsAsArtifacts: true,
-    });
+    const toolset = new SkillToolset([testSkill], {codeExecutor: executor});
     const tool = new RunSkillScriptTool(toolset);
 
     const result = (await tool.runAsync({
@@ -387,18 +383,14 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
         script_path: 'scripts/create_file.js',
       },
       toolContext: createMockContext('test-agent', artifactService),
-    })) as CodeExecutionResult & SaveFilesAsArtifactsResult;
+    })) as CodeExecutionResult & {savedArtifacts: Record<string, number>};
 
-    // Matched by entry rather than against the whole list: on Windows the
+    // Matched by entry rather than against the whole map: on Windows the
     // executor also reports the skill's own input resources as outputs,
     // because it skips them by comparing `inputFiles[].name`
     // ('scripts/x.js') against a `readdir` path ('scripts\\x.js'). That is a
     // pre-existing executor issue, and not what this test pins.
-    expect(result.savedArtifacts).toContainEqual({
-      filename: 'output_from_script.txt',
-      version: 0,
-    });
-    expect(result.artifactSaveErrors).toEqual([]);
+    expect(result.savedArtifacts['output_from_script.txt']).toBe(0);
 
     const artifact = await artifactService.loadArtifact({
       filename: 'output_from_script.txt',

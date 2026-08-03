@@ -19,11 +19,10 @@ import {
   SessionArtifactService,
   SkillToolset,
 } from '@google/adk';
-import {describe, expect, it, vi} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {InMemoryArtifactService} from '../../../src/artifacts/in_memory_artifact_service.js';
 import {ScopedArtifactService} from '../../../src/artifacts/scoped_artifact_service.js';
 import {ToolConfirmation} from '../../../src/tools/tool_confirmation.js';
-import {SaveFilesAsArtifactsResult} from '../../../src/utils/artifact_utils.js';
 import {materializeFiles} from '../../../src/utils/file_utils.js';
 
 vi.mock('../../../src/utils/file_utils.js', () => ({
@@ -56,7 +55,9 @@ interface ToolErrorResponse {
 }
 
 /** The tool result once artifact persistence has augmented it. */
-type ArtifactAugmentedResult = CodeExecutionResult & SaveFilesAsArtifactsResult;
+type ArtifactAugmentedResult = CodeExecutionResult & {
+  savedArtifacts: Record<string, number>;
+};
 
 describe('RunSkillInlineScriptTool', () => {
   function createMockContext(
@@ -413,7 +414,11 @@ describe('RunSkillInlineScriptTool', () => {
     });
   });
 
-  describe('saveOutputsAsArtifacts', () => {
+  describe('artifact persistence', () => {
+    const INLINE_SCRIPT_ARGS = {
+      script_content: 'console.log("go");',
+      language: CodeExecutionLanguage.JAVASCRIPT,
+    };
     const outputFile: File = {
       name: 'report.txt',
       content: 'inline script output',
@@ -426,7 +431,7 @@ describe('RunSkillInlineScriptTool', () => {
       executor.mockResult = {
         stdout: 'inline ran',
         stderr: '',
-        outputFiles: [outputFile],
+        outputFiles: [{...outputFile}],
       };
       return executor;
     }
@@ -442,14 +447,11 @@ describe('RunSkillInlineScriptTool', () => {
 
     function runInlineScript(
       executor: MockCodeExecutor,
-      toolset: SkillToolset,
       artifactService?: ScopedArtifactService,
     ): Promise<unknown> {
+      const toolset = new SkillToolset([], {codeExecutor: executor});
       return new RunSkillInlineScriptTool(toolset).runAsync({
-        args: {
-          script_content: 'console.log("go");',
-          language: CodeExecutionLanguage.JAVASCRIPT,
-        },
+        args: INLINE_SCRIPT_ARGS,
         toolContext: createMockContext('test-agent', executor, {
           toolConfirmation: confirmed(),
           artifactService,
@@ -457,42 +459,24 @@ describe('RunSkillInlineScriptTool', () => {
       });
     }
 
-    it('does not touch the artifact service when the option is off', async () => {
-      const artifactService = createArtifactService();
-      const saveSpy = vi.spyOn(artifactService, 'saveArtifact');
-      const executor = createExecutor();
-      const toolset = new SkillToolset([], {codeExecutor: executor});
-
-      const result = (await runInlineScript(
-        executor,
-        toolset,
-        artifactService,
-      )) as CodeExecutionResult;
-
-      expect(saveSpy).not.toHaveBeenCalled();
-      expect(result).not.toHaveProperty('savedArtifacts');
-      expect(result).not.toHaveProperty('artifactSaveErrors');
-      expect(result.outputFiles).toEqual([outputFile]);
+    beforeEach(() => {
+      vi.mocked(materializeFiles).mockImplementation(async (files) => files);
     });
 
-    it('reports saved artifacts when the option is on', async () => {
+    afterEach(() => {
+      vi.mocked(materializeFiles).mockImplementation(async (files) => files);
+      vi.restoreAllMocks();
+    });
+
+    it('reports saved artifacts when an artifact service is configured', async () => {
       const artifactService = createArtifactService();
-      const executor = createExecutor();
-      const toolset = new SkillToolset([], {
-        codeExecutor: executor,
-        saveOutputsAsArtifacts: true,
-      });
 
       const result = (await runInlineScript(
-        executor,
-        toolset,
+        createExecutor(),
         artifactService,
       )) as ArtifactAugmentedResult;
 
-      expect(result.savedArtifacts).toEqual([
-        {filename: 'report.txt', version: 0},
-      ]);
-      expect(result.artifactSaveErrors).toEqual([]);
+      expect(result.savedArtifacts).toEqual({'report.txt': 0});
       expect(result.outputFiles).toEqual([outputFile]);
 
       const saved = await artifactService.loadArtifact({
@@ -507,47 +491,101 @@ describe('RunSkillInlineScriptTool', () => {
       );
     });
 
-    it('returns the plain result when no artifact service is configured', async () => {
-      const executor = createExecutor();
-      const toolset = new SkillToolset([], {
-        codeExecutor: executor,
-        saveOutputsAsArtifacts: true,
+    it('saves under the executor-reported name, not the materialized one', async () => {
+      const artifactService = createArtifactService();
+      const saveSpy = vi.spyOn(artifactService, 'saveArtifact');
+      vi.mocked(materializeFiles).mockImplementation(async (files) => {
+        files.forEach((file) => {
+          file.name = `renamed_${file.name}`;
+        });
+        return files;
       });
 
       const result = (await runInlineScript(
-        executor,
-        toolset,
+        createExecutor(),
+        artifactService,
+      )) as ArtifactAugmentedResult;
+
+      expect(saveSpy).toHaveBeenCalledWith(
+        expect.objectContaining({filename: 'report.txt'}),
+      );
+      expect(result.savedArtifacts).toEqual({'report.txt': 0});
+      expect(result.outputFiles[0].name).toBe('renamed_report.txt');
+    });
+
+    it('saves artifacts before materializing the files', async () => {
+      const calls: string[] = [];
+      const artifactService = createArtifactService();
+      vi.spyOn(artifactService, 'saveArtifact').mockImplementation(async () => {
+        calls.push('saveArtifact');
+        return 0;
+      });
+      vi.mocked(materializeFiles).mockImplementation(async (files) => {
+        calls.push('materializeFiles');
+        return files;
+      });
+
+      await runInlineScript(createExecutor(), artifactService);
+
+      expect(calls).toEqual(['saveArtifact', 'materializeFiles']);
+    });
+
+    it('returns the plain result when no artifact service is configured', async () => {
+      const result = (await runInlineScript(
+        createExecutor(),
       )) as CodeExecutionResult;
 
       expect(result).not.toHaveProperty('savedArtifacts');
-      expect(result).not.toHaveProperty('artifactSaveErrors');
       expect(result.stdout).toBe('inline ran');
       expect(result.outputFiles).toEqual([outputFile]);
     });
 
-    it('surfaces a failed save without failing the script', async () => {
+    it('omits savedArtifacts and still succeeds when every save fails', async () => {
       const artifactService = createArtifactService();
       vi.spyOn(artifactService, 'saveArtifact').mockRejectedValue(
         new Error('artifact backend unavailable'),
       );
-      const executor = createExecutor();
-      const toolset = new SkillToolset([], {
-        codeExecutor: executor,
-        saveOutputsAsArtifacts: true,
-      });
 
       const result = (await runInlineScript(
-        executor,
-        toolset,
+        createExecutor(),
         artifactService,
-      )) as ArtifactAugmentedResult;
+      )) as CodeExecutionResult;
 
-      expect(result.savedArtifacts).toEqual([]);
-      expect(result.artifactSaveErrors).toEqual([
-        {filename: 'report.txt', error: 'artifact backend unavailable'},
-      ]);
+      expect(result).not.toHaveProperty('savedArtifacts');
+      expect(result).not.toHaveProperty('error');
       expect(result.stdout).toBe('inline ran');
       expect(result.outputFiles).toEqual([outputFile]);
+    });
+
+    it('never saves an artifact when the confirmation gate has not passed', async () => {
+      const artifactService = createArtifactService();
+      const saveSpy = vi.spyOn(artifactService, 'saveArtifact');
+      const executor = createExecutor();
+      const tool = new RunSkillInlineScriptTool(
+        new SkillToolset([], {codeExecutor: executor}),
+      );
+
+      const pending = (await tool.runAsync({
+        args: INLINE_SCRIPT_ARGS,
+        toolContext: createMockContext('test-agent', executor, {
+          functionCallId: 'fc-artifact',
+          artifactService,
+        }),
+      })) as {partial: string};
+      const rejected = (await tool.runAsync({
+        args: INLINE_SCRIPT_ARGS,
+        toolContext: createMockContext('test-agent', executor, {
+          toolConfirmation: new ToolConfirmation({confirmed: false}),
+          artifactService,
+        }),
+      })) as ToolErrorResponse;
+
+      expect(pending.partial).toBeDefined();
+      expect(rejected.errorCode).toBe(
+        RunSkillInlineScriptErrorCode.CONFIRMATION_REJECTED,
+      );
+      expect(executor.executeCodeParams).toBeUndefined();
+      expect(saveSpy).not.toHaveBeenCalled();
     });
   });
 });

@@ -13,82 +13,70 @@ import {
   File,
   FileContentEncoding,
 } from '../code_executors/code_execution_utils.js';
+import {base64Encode} from './env_aware_utils.js';
 import {logger} from './logger.js';
 
-/** One file successfully persisted to the artifact service. */
-export interface SavedArtifact {
-  filename: string;
-  version: number;
-}
-
-/** One file that could not be persisted to the artifact service. */
-export interface ArtifactSaveError {
-  filename: string;
-  error: string;
-}
-
-/** Outcome of persisting a batch of files to the artifact service. */
-export interface SaveFilesAsArtifactsResult {
-  savedArtifacts: SavedArtifact[];
-  artifactSaveErrors: ArtifactSaveError[];
-}
-
 /**
- * Saves each file as an artifact of the current session.
+ * Saves code-executor output files to the session artifact service.
  *
- * Every file is accounted for in exactly one of the two returned arrays: a
- * failure is reported rather than thrown, because the files have already been
- * produced and failing the whole batch would discard the successful saves.
+ * Persistence is opportunistic: when the invocation carries no artifact
+ * service, nothing is saved and an empty map is returned, because the files
+ * have already been produced and refusing them would turn a working
+ * configuration into a hard failure. A save that fails for one file is logged
+ * and does not abort the remaining files for the same reason.
+ *
+ * Files must be passed with the names the executor reported. Artifact services
+ * version by filename, so a second `output.txt` is that artifact's next
+ * version rather than a new key.
  *
  * @param context The context owning the session's artifact service.
  * @param files The files to persist.
- * @return The per-file outcome, or `undefined` when the invocation has no
- *     artifact service configured, so callers can treat artifact persistence as
- *     best-effort.
+ * @return A map of artifact filename to saved version, empty when nothing was
+ *     saved.
  */
 export async function saveFilesAsArtifacts(
   context: Context,
   files: File[],
-): Promise<SaveFilesAsArtifactsResult | undefined> {
+): Promise<Record<string, number>> {
   if (!context.invocationContext.artifactService) {
-    logger.warn(
+    logger.debug(
       `No artifact service is configured; ${files.length} file(s) were not ` +
         'saved as artifacts.',
     );
-    return undefined;
+    return {};
   }
 
-  const savedArtifacts: SavedArtifact[] = [];
-  const artifactSaveErrors: ArtifactSaveError[] = [];
+  const savedArtifacts: Record<string, number> = {};
 
   for (const file of files) {
     // Filenames originate from executed code, so they must not be able to
     // widen an artifact beyond the session that produced it.
     if (fileHasUserNamespace(file.name)) {
-      const error =
-        `Artifact names starting with '${USER_NAMESPACE_PREFIX}' are not ` +
-        'accepted from produced files.';
-      logger.warn(`Refused to save '${file.name}' as an artifact: ${error}`);
-      artifactSaveErrors.push({filename: file.name, error});
+      logger.warn(
+        `Refused to save '${file.name}' as an artifact: names starting with ` +
+          `'${USER_NAMESPACE_PREFIX}' are not accepted from produced files.`,
+      );
       continue;
     }
 
+    // `Part.inlineData.data` is base64; any other encoding the executor
+    // reported has to be converted before the artifact service stores it.
     const data =
-      file.contentEncoding === FileContentEncoding.BASE64
-        ? file.content
-        : Buffer.from(file.content, file.contentEncoding).toString('base64');
+      file.contentEncoding === FileContentEncoding.UTF8
+        ? base64Encode(file.content)
+        : file.content;
 
     try {
-      const version = await context.saveArtifact(file.name, {
+      savedArtifacts[file.name] = await context.saveArtifact(file.name, {
         inlineData: {data, mimeType: file.mimeType},
       });
-      savedArtifacts.push({filename: file.name, version});
+      logger.debug(`Saved '${file.name}' as an artifact.`);
     } catch (e: unknown) {
-      const error = (e as Error).message;
-      logger.error(`Failed to save '${file.name}' as an artifact: ${error}`);
-      artifactSaveErrors.push({filename: file.name, error});
+      logger.warn(
+        `Failed to save '${file.name}' as an artifact: ${(e as Error).message}`,
+      );
     }
   }
 
-  return {savedArtifacts, artifactSaveErrors};
+  return savedArtifacts;
 }

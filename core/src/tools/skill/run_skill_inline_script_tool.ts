@@ -141,16 +141,19 @@ export class RunSkillInlineScriptTool extends BaseTool {
         },
       });
 
+      // Save before materializing: materializeFiles renames on local collision
+      // and mutates file.name, while artifact services version by filename.
+      const savedArtifacts = await saveFilesAsArtifacts(
+        toolContext,
+        result.outputFiles,
+      );
+
       // Final filename could be different if there was a collision, so update the result.
       result.outputFiles = await materializeFiles(result.outputFiles);
 
-      if (!this.toolset.saveOutputsAsArtifacts) {
-        return result;
-      }
-      return {
-        ...result,
-        ...(await saveFilesAsArtifacts(toolContext, result.outputFiles)),
-      };
+      return Object.keys(savedArtifacts).length > 0
+        ? {...result, savedArtifacts}
+        : result;
     } catch (e: unknown) {
       return {
         error: `Failed to execute inline script: ${(e as Error).message}`,
