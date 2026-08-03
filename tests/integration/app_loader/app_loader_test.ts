@@ -67,11 +67,13 @@ describe('AgentLoader discovery and loading integration', () => {
     dirname,
     'tests/integration/app_loader/discovery',
   );
-  let loader: AgentLoader;
+  // Constructed here rather than in beforeAll - the constructor only registers
+  // exit handlers - so a failed install cannot leave afterAll dereferencing an
+  // unassigned loader and reporting a TypeError over the real error.
+  const loader = new AgentLoader(projectPath);
 
   beforeAll(async () => {
     await execAsync('npm install', {cwd: projectPath});
-    loader = new AgentLoader(projectPath);
     // Loading is lazy, so without this the first test body pays for an esbuild
     // bundle+minify of all four discovered entrypoints: measured at 16710ms on
     // an idle Linux workstation, and enough to overrun a per-test budget on a
@@ -116,7 +118,7 @@ describe('AgentLoader discovery and loading integration', () => {
   });
 
   afterAll(async () => {
-    await loader?.disposeAll();
+    await loader.disposeAll();
     await fs
       .rm(path.join(projectPath, 'node_modules'), {
         recursive: true,
