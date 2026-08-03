@@ -12,6 +12,7 @@ import {createAgent} from '../../src/cli/cli_create.js';
 import {runAgent} from '../../src/cli/cli_run.js';
 import {deployToAgentEngine} from '../../src/cli/deploy/cli_deploy_agent_engine.js';
 import {deployToCloudRun} from '../../src/cli/deploy/cli_deploy_cloud_run.js';
+import {runIntegrationTests} from '../../src/integration/run_integration_tests.js';
 import {AdkApiServer} from '../../src/server/adk_api_server.js';
 import {FileModuleType} from '../../src/utils/agent_loader.js';
 
@@ -37,6 +38,10 @@ vi.mock('../../src/cli/deploy/cli_deploy_cloud_run', () => ({
 
 vi.mock('../../src/cli/cli_run', () => ({
   runAgent: vi.fn(),
+}));
+
+vi.mock('../../src/integration/run_integration_tests', () => ({
+  runIntegrationTests: vi.fn(),
 }));
 
 vi.mock('../../src/version', () => ({
@@ -124,6 +129,7 @@ function expectNoActionRan() {
   expect(runAgent).not.toHaveBeenCalled();
   expect(deployToCloudRun).not.toHaveBeenCalled();
   expect(deployToAgentEngine).not.toHaveBeenCalled();
+  expect(runIntegrationTests).not.toHaveBeenCalled();
 }
 
 describe('CLI Entrypoint', () => {
@@ -315,6 +321,29 @@ describe('CLI Entrypoint', () => {
         );
 
         expectNoActionRan();
+      });
+
+      // A membership test written as `name in LOG_LEVEL_MAP` walks the
+      // prototype chain, and these are the inherited keys that survive
+      // lower-casing, so they would be taken for levels.
+      it.each(['constructor', '__proto__', 'CONSTRUCTOR', '__PROTO__'])(
+        'rejects the inherited key --log_level %s',
+        async (level) => {
+          await expect(parse(['web', '--log_level', level])).rejects.toThrow(
+            /Allowed choices are debug, info, warn, error\./,
+          );
+
+          expect(setLogLevel).not.toHaveBeenCalled();
+          expectNoActionRan();
+        },
+      );
+
+      it('keeps an inherited key out of the Cloud Run deploy path', async () => {
+        await expect(
+          parse(['deploy', 'cloud_run', '--log_level=__proto__']),
+        ).rejects.toThrow(/Allowed choices are debug, info, warn, error\./);
+
+        expect(deployToCloudRun).not.toHaveBeenCalled();
       });
     });
   });

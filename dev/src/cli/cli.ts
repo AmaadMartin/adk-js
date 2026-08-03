@@ -43,6 +43,18 @@ const LOG_LEVEL_MAP: Record<string, LogLevel> = {
 const LOG_LEVEL_CHOICES = Object.keys(LOG_LEVEL_MAP);
 
 /**
+ * Resolves a level name to its {@link LogLevel}, or `undefined` when the name is
+ * not one we support.
+ *
+ * `Object.hasOwn`, not `name in LOG_LEVEL_MAP`: `in` walks the prototype chain,
+ * so inherited keys such as `constructor` and `__proto__` would resolve to
+ * something that is not a log level at all.
+ */
+function resolveLogLevel(name: string): LogLevel | undefined {
+  return Object.hasOwn(LOG_LEVEL_MAP, name) ? LOG_LEVEL_MAP[name] : undefined;
+}
+
+/**
  * Validates a `--log_level` value and normalizes it to its canonical lower-case
  * name.
  *
@@ -52,7 +64,7 @@ const LOG_LEVEL_CHOICES = Object.keys(LOG_LEVEL_MAP);
  */
 function parseLogLevel(value: string): string {
   const normalized = value.toLowerCase();
-  if (!(normalized in LOG_LEVEL_MAP)) {
+  if (resolveLogLevel(normalized) === undefined) {
     throw new InvalidArgumentError(
       `Allowed choices are ${LOG_LEVEL_CHOICES.join(', ')}.`,
     );
@@ -70,7 +82,7 @@ function getLogLevelFromOptions(options: {
 
   if (typeof options.log_level === 'string') {
     // `??`, not `||`: LogLevel.DEBUG is 0 and would otherwise be discarded.
-    return LOG_LEVEL_MAP[options.log_level.toLowerCase()] ?? LogLevel.INFO;
+    return resolveLogLevel(options.log_level.toLowerCase()) ?? LogLevel.INFO;
   }
 
   return LogLevel.INFO;
