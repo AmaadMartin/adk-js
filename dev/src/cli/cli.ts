@@ -95,10 +95,27 @@ function getBoolean(option?: string | boolean): boolean {
   return false;
 }
 
+/**
+ * Resolves the value commander bound to the optional `[agents_dir]` positional.
+ *
+ * The `deploy` subcommands enable `allowUnknownOption()`, and commander binds
+ * declared arguments from the front of `command.args`, which holds matched
+ * operands followed by unrecognized tokens. So when the directory is omitted
+ * and the first token is an unknown flag, that flag lands in the positional
+ * slot. An agent path never starts with `-` (a relative one is spelled
+ * `./-foo`), so a leading `-` means the directory was omitted and the default
+ * applies. The token stays in `command.args` and is still forwarded to gcloud.
+ */
+function resolveAgentsDir(value: string): string {
+  return value.startsWith('-') ? process.cwd() : value;
+}
+
 const AGENT_DIR_ARGUMENT = new Argument(
   '[agents_dir]',
   'Agent file or directory of agents to serve. For directory the internal structure should be agents_dir/{agentName}.js or agents_dir/{agentName}/agent.js. Agent file should has export of the rootAgent as instance of BaseAgent (e.g LlmAgent)',
-).default(process.cwd());
+)
+  .argParser(resolveAgentsDir)
+  .default(process.cwd());
 const HOST_OPTION = new Option(
   '-h, --host <string>',
   'Optional. The binding host of the server',
