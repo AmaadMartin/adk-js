@@ -423,7 +423,7 @@ describe('GoogleLlm', () => {
       expect(params.location).toBeUndefined();
     });
 
-    it('should prefer GOOGLE_API_KEY over an ambient project and location', () => {
+    it('should keep an ambient project and location ahead of GOOGLE_API_KEY', () => {
       process.env['GOOGLE_GENAI_USE_VERTEXAI'] = '1';
       process.env['GOOGLE_CLOUD_PROJECT'] = 'env-project';
       process.env['GOOGLE_CLOUD_LOCATION'] = 'us-central1';
@@ -432,9 +432,9 @@ describe('GoogleLlm', () => {
       const params = geminiInitParams({model: 'gemini-1.5-flash'});
 
       expect(params.vertexai).toBe(true);
-      expect(params.apiKey).toBe('env-express-key');
-      expect(params.project).toBeUndefined();
-      expect(params.location).toBeUndefined();
+      expect(params.apiKey).toBeUndefined();
+      expect(params.project).toBe('env-project');
+      expect(params.location).toBe('us-central1');
     });
 
     it('should use GOOGLE_API_KEY when no project or location is available', () => {
@@ -513,12 +513,11 @@ describe('GoogleLlm', () => {
 
     it('should be idempotent for an express mode result', () => {
       process.env['GOOGLE_GENAI_USE_VERTEXAI'] = '1';
-      process.env['GOOGLE_CLOUD_PROJECT'] = 'env-project';
-      process.env['GOOGLE_CLOUD_LOCATION'] = 'us-central1';
       process.env['GOOGLE_API_KEY'] = 'env-express-key';
 
       const params = geminiInitParams({model: 'gemini-1.5-flash'});
 
+      expect(params.apiKey).toBe('env-express-key');
       expect(geminiInitParams(params)).toEqual(params);
     });
   });
