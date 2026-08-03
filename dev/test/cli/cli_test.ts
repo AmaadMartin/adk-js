@@ -5,6 +5,7 @@
  */
 
 import {LogLevel, setLogLevel} from '@google/adk';
+import {CommanderError} from 'commander';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {createProgram} from '../../src/cli/cli.js';
 import {createAgent} from '../../src/cli/cli_create.js';
@@ -90,11 +91,13 @@ describe('CLI Entrypoint', () => {
       });
     });
 
-    const parseExpectingError = async (args: string[]) => {
+    const parseExpectingError = async (
+      args: string[],
+    ): Promise<CommanderError | undefined> => {
       try {
         await program.parseAsync(['node', 'cli_entrypoint.js', ...args]);
       } catch (e: unknown) {
-        return e as {code?: string; exitCode?: number};
+        return e as CommanderError;
       }
       return undefined;
     };
@@ -134,9 +137,12 @@ describe('CLI Entrypoint', () => {
 
     it('should exit non-zero for an unknown subcommand', async () => {
       const err = await parseExpectingError(['bogus']);
+      if (!err) {
+        expect.fail('expected commander to reject an unknown subcommand');
+      }
 
-      expect(err?.code).toBe('commander.excessArguments');
-      expect(err?.exitCode).toBe(1);
+      expect(err.code).toBe('commander.excessArguments');
+      expect(err.exitCode).toBe(1);
       expect(stdout).toBe('');
     });
   });
