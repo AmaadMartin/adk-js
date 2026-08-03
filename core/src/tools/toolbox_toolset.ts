@@ -15,9 +15,6 @@ import {ReadonlyContext} from '../agents/readonly_context.js';
 import {BaseTool, RunAsyncToolRequest} from './base_tool.js';
 import {BaseToolset} from './base_toolset.js';
 
-/** The npm package that backs {@link ToolboxToolset}. */
-const TOOLBOX_SDK_PACKAGE = '@toolbox-sdk/adk';
-
 /**
  * Produces an authentication token for a single named auth source.
  *
@@ -143,8 +140,8 @@ export class ToolboxToolset extends BaseToolset {
         sdk = await import('@toolbox-sdk/adk');
       } catch (cause) {
         throw new Error(
-          `ToolboxToolset requires the '${TOOLBOX_SDK_PACKAGE}' package. ` +
-            `Install it with \`npm install ${TOOLBOX_SDK_PACKAGE}\`.`,
+          "ToolboxToolset requires the '@toolbox-sdk/adk' package. " +
+            'Install it with `npm install @toolbox-sdk/adk`.',
           {cause},
         );
       }
