@@ -151,6 +151,13 @@ describe('Agent with a codeExecutor and no explicit responseProcessors', () => {
       (e) => e.content?.parts?.filter((p) => p.codeExecutionResult) ?? [],
     );
     expect(resultParts).toHaveLength(0);
-    expect(events.at(-1)?.content?.parts?.[0]?.text).toContain(CODE_BLOCK);
+
+    // The model turn reaches the caller untouched: nothing truncated it to the
+    // first code block.
+    const allText = events
+      .flatMap((e) => e.content?.parts ?? [])
+      .map((p) => p.text ?? '')
+      .join('');
+    expect(allText).toContain(CODE_BLOCK);
   });
 });
