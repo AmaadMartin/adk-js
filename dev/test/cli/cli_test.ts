@@ -22,10 +22,13 @@ import {deployToAgentEngine} from '../../src/cli/deploy/cli_deploy_agent_engine.
 import {deployToCloudRun} from '../../src/cli/deploy/cli_deploy_cloud_run.js';
 import {AdkApiServer} from '../../src/server/adk_api_server.js';
 
+/** Shared so a test can decide how `AdkApiServer.start()` settles. */
+const {mockServerStart} = vi.hoisted(() => ({mockServerStart: vi.fn()}));
+
 vi.mock('../../src/server/adk_api_server', () => {
   return {
     AdkApiServer: vi.fn(() => ({
-      start: vi.fn(),
+      start: mockServerStart,
     })),
   };
 });
@@ -245,7 +248,7 @@ describe('CLI Entrypoint', () => {
     it('should forward --port 0 to AdkApiServer unchanged', async () => {
       await parse(['api_server', '--port', '0']);
 
-      const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
       expect(args.port).toBe(0);
     });
   });
@@ -264,12 +267,11 @@ describe('CLI Entrypoint', () => {
       });
     };
 
-    /** Makes the next `AdkApiServer` reject from `start()`. */
-    const rejectNextStart = (error: unknown) => {
-      (AdkApiServer as unknown as Mock).mockImplementationOnce(() => ({
-        start: vi.fn().mockRejectedValue(error),
-      }));
-    };
+    // Drops a rejection queued by a test that failed before the CLI consumed
+    // it, so it cannot leak into the next test.
+    afterEach(() => {
+      mockServerStart.mockReset();
+    });
 
     const runExpectingExit = async (argv: string[]) => {
       try {
@@ -284,7 +286,7 @@ describe('CLI Entrypoint', () => {
     it('should write the API server failure and its stack to stderr', async () => {
       stubProcess();
       const error = new Error(FAILURE_MESSAGE);
-      rejectNextStart(error);
+      mockServerStart.mockRejectedValueOnce(error);
 
       await runExpectingExit(['api_server']);
 
@@ -300,7 +302,7 @@ describe('CLI Entrypoint', () => {
     it('should write the web server failure and its stack to stderr', async () => {
       stubProcess();
       const error = new Error(FAILURE_MESSAGE);
-      rejectNextStart(error);
+      mockServerStart.mockRejectedValueOnce(error);
 
       await runExpectingExit(['web']);
 
@@ -314,7 +316,7 @@ describe('CLI Entrypoint', () => {
 
     it('should exit only once the stderr diagnostic has flushed', async () => {
       stubProcess(true);
-      rejectNextStart(new Error(FAILURE_MESSAGE));
+      mockServerStart.mockRejectedValueOnce(new Error(FAILURE_MESSAGE));
 
       const run = runExpectingExit(['api_server']);
       await new Promise((resolve) => setImmediate(resolve));
@@ -332,7 +334,9 @@ describe('CLI Entrypoint', () => {
 
     it('should report a rejection value that is not an Error', async () => {
       stubProcess();
-      rejectNextStart('the agent directory does not exist');
+      mockServerStart.mockRejectedValueOnce(
+        'the agent directory does not exist',
+      );
 
       await runExpectingExit(['api_server']);
 
@@ -345,7 +349,7 @@ describe('CLI Entrypoint', () => {
       stubProcess();
       const error = new Error(FAILURE_MESSAGE);
       error.stack = undefined;
-      rejectNextStart(error);
+      mockServerStart.mockRejectedValueOnce(error);
 
       await runExpectingExit(['api_server']);
 
