@@ -56,10 +56,13 @@ function build({
     };
   }
 
-  // Prepend license header to the top of the file
-  if (format === 'cjs' || bundle) {
-    buildOptions.banner = {js: licenseHeaderText};
+  // The license header must be the first thing in every output file, so the
+  // ESM createRequire shim is appended after it rather than replacing it.
+  let bannerJs = licenseHeaderText;
+  if (format === 'esm') {
+    bannerJs += `import {createRequire as topLevelCreateRequire} from 'module';\nconst require = topLevelCreateRequire(import.meta.url);`;
   }
+  buildOptions.banner = {js: bannerJs};
 
   if (bundle) {
     buildOptions.entryPoints = [`./src/${entry}`];
@@ -67,14 +70,6 @@ function build({
   } else {
     buildOptions.entryPoints = ['./src/**/*.ts'];
     buildOptions.outdir = `./dist/${targetDir}`;
-  }
-
-  if (format === 'esm') {
-    buildOptions.banner = {
-      js:
-        (buildOptions.banner?.js || '') +
-        `import {createRequire as topLevelCreateRequire} from 'module';\nconst require = topLevelCreateRequire(import.meta.url);`,
-    };
   }
 
   return watch
