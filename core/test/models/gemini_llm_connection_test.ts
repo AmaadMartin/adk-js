@@ -10,10 +10,30 @@ import {
   GroundingMetadata,
   LiveServerGoAway,
   LiveServerMessage,
+  LiveServerSessionResumptionUpdate,
 } from '@google/genai';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {GeminiLlmConnection} from '../../src/models/gemini_llm_connection.js';
+import {LlmResponse} from '../../src/models/llm_response.js';
 import {AsyncQueue} from '../../src/utils/async_queue.js';
+import {createLiveServerMessage} from '../testing/live_server_message_test_utils.js';
+
+/**
+ * Reads the next response from a live connection.
+ *
+ * `receive()` is an `AsyncGenerator<LlmResponse, void, void>`, so `next()`
+ * widens `value` to `LlmResponse | void`. Tests that read a field off the
+ * result need the generator to have actually yielded.
+ */
+async function nextResponse(
+  generator: AsyncGenerator<LlmResponse, void, void>,
+): Promise<LlmResponse> {
+  const result = await generator.next();
+  if (result.done) {
+    throw new Error('Expected the connection to yield an LlmResponse.');
+  }
+  return result.value;
+}
 
 describe('GeminiLlmConnection', () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -275,10 +295,10 @@ describe('GeminiLlmConnection', () => {
 
       const usageMetadata = {
         promptTokenCount: 10,
-        candidatesTokenCount: 20,
+        responseTokenCount: 20,
         totalTokenCount: 30,
       };
-      messageQueue.push({usageMetadata});
+      messageQueue.push(createLiveServerMessage({usageMetadata}));
       messageQueue.close();
 
       const res = await generator.next();
@@ -298,25 +318,29 @@ describe('GeminiLlmConnection', () => {
       const generator = connection.receive();
 
       // Chunk 1: partial text
-      messageQueue.push({
-        serverContent: {
-          modelTurn: {
-            parts: [{text: 'Hello'}],
+      messageQueue.push(
+        createLiveServerMessage({
+          serverContent: {
+            modelTurn: {
+              parts: [{text: 'Hello'}],
+            },
           },
-        },
-      });
+        }),
+      );
 
       // Chunk 2: partial text and turnComplete with interrupted and groundingMetadata
-      messageQueue.push({
-        serverContent: {
-          modelTurn: {
-            parts: [{text: ' world!'}],
+      messageQueue.push(
+        createLiveServerMessage({
+          serverContent: {
+            modelTurn: {
+              parts: [{text: ' world!'}],
+            },
+            turnComplete: true,
+            interrupted: false,
+            groundingMetadata: {groundingChunks: []} as GroundingMetadata,
           },
-          turnComplete: true,
-          interrupted: false,
-          groundingMetadata: {groundingChunks: []} as GroundingMetadata,
-        },
-      });
+        }),
+      );
 
       const res1 = await generator.next();
       expect(res1.value).toEqual({
@@ -367,28 +391,34 @@ describe('GeminiLlmConnection', () => {
       const generator = connection.receive();
 
       // Chunk 1: thought
-      messageQueue.push({
-        serverContent: {
-          modelTurn: {
-            parts: [{text: 'Thinking...', thought: true}],
+      messageQueue.push(
+        createLiveServerMessage({
+          serverContent: {
+            modelTurn: {
+              parts: [{text: 'Thinking...', thought: true}],
+            },
           },
-        },
-      });
+        }),
+      );
 
       // Chunk 2: transition to text
-      messageQueue.push({
-        serverContent: {
-          modelTurn: {
-            parts: [{text: 'Answer is 42.'}],
+      messageQueue.push(
+        createLiveServerMessage({
+          serverContent: {
+            modelTurn: {
+              parts: [{text: 'Answer is 42.'}],
+            },
           },
-        },
-      });
+        }),
+      );
 
-      messageQueue.push({
-        serverContent: {
-          turnComplete: true,
-        },
-      });
+      messageQueue.push(
+        createLiveServerMessage({
+          serverContent: {
+            turnComplete: true,
+          },
+        }),
+      );
 
       const res1 = await generator.next(); // yields partial thought
       expect(res1.value).toEqual({
@@ -442,17 +472,21 @@ describe('GeminiLlmConnection', () => {
       );
       const generator = connection.receive();
 
-      messageQueue.push({
-        serverContent: {
-          inputTranscription: {text: 'hello', finished: false},
-        },
-      });
+      messageQueue.push(
+        createLiveServerMessage({
+          serverContent: {
+            inputTranscription: {text: 'hello', finished: false},
+          },
+        }),
+      );
 
-      messageQueue.push({
-        serverContent: {
-          inputTranscription: {text: ' world', finished: true},
-        },
-      });
+      messageQueue.push(
+        createLiveServerMessage({
+          serverContent: {
+            inputTranscription: {text: ' world', finished: true},
+          },
+        }),
+      );
 
       messageQueue.close();
 
@@ -488,21 +522,25 @@ describe('GeminiLlmConnection', () => {
       );
       const generator = connection.receive();
 
-      messageQueue.push({
-        serverContent: {
-          inputTranscription: {text: 'hello', finished: false},
-        },
-      });
+      messageQueue.push(
+        createLiveServerMessage({
+          serverContent: {
+            inputTranscription: {text: 'hello', finished: false},
+          },
+        }),
+      );
 
-      messageQueue.push({
-        serverContent: {
-          interrupted: true,
-        },
-      });
+      messageQueue.push(
+        createLiveServerMessage({
+          serverContent: {
+            interrupted: true,
+          },
+        }),
+      );
       messageQueue.close();
 
-      const res1 = await generator.next(); // partial transcription
-      expect(res1.value.inputTranscription).toEqual({
+      const res1 = await nextResponse(generator); // partial transcription
+      expect(res1.inputTranscription).toEqual({
         text: 'hello',
         finished: false,
       });
@@ -531,18 +569,20 @@ describe('GeminiLlmConnection', () => {
       );
       const generator = connection.receive();
 
-      messageQueue.push({
-        serverContent: {
-          modelTurn: {
-            parts: [{text: 'Partial text'}],
+      messageQueue.push(
+        createLiveServerMessage({
+          serverContent: {
+            modelTurn: {
+              parts: [{text: 'Partial text'}],
+            },
+            groundingMetadata: {
+              groundingChunks: [
+                {web: {uri: 'https://google.com', title: 'Google'}},
+              ],
+            } as GroundingMetadata,
           },
-          groundingMetadata: {
-            groundingChunks: [
-              {web: {uri: 'https://google.com', title: 'Google'}},
-            ],
-          } as GroundingMetadata,
-        },
-      });
+        }),
+      );
       messageQueue.close();
 
       const res1 = await generator.next();
@@ -568,17 +608,19 @@ describe('GeminiLlmConnection', () => {
       );
       const generator = connection.receive();
 
-      messageQueue.push({
-        serverContent: {
-          groundingMetadata: {
-            groundingChunks: [
-              {web: {uri: 'https://google.com', title: 'Google'}},
-            ],
-          } as GroundingMetadata,
-          turnComplete: false,
-          interrupted: false,
-        },
-      });
+      messageQueue.push(
+        createLiveServerMessage({
+          serverContent: {
+            groundingMetadata: {
+              groundingChunks: [
+                {web: {uri: 'https://google.com', title: 'Google'}},
+              ],
+            } as GroundingMetadata,
+            turnComplete: false,
+            interrupted: false,
+          },
+        }),
+      );
       messageQueue.close();
 
       const res1 = await generator.next();
@@ -604,22 +646,26 @@ describe('GeminiLlmConnection', () => {
       const generator = connection.receive();
 
       // Push text part
-      messageQueue.push({
-        serverContent: {
-          modelTurn: {
-            parts: [{text: 'Hello'}],
+      messageQueue.push(
+        createLiveServerMessage({
+          serverContent: {
+            modelTurn: {
+              parts: [{text: 'Hello'}],
+            },
           },
-        },
-      });
+        }),
+      );
 
       // Push non-text part (e.g. functionCall inside modelTurn parts)
-      messageQueue.push({
-        serverContent: {
-          modelTurn: {
-            parts: [{functionCall: {name: 'tool_a', args: {x: 1}, id: '1'}}],
+      messageQueue.push(
+        createLiveServerMessage({
+          serverContent: {
+            modelTurn: {
+              parts: [{functionCall: {name: 'tool_a', args: {x: 1}, id: '1'}}],
+            },
           },
-        },
-      });
+        }),
+      );
       messageQueue.close();
 
       // First yield: the partial response for 'Hello'
@@ -661,17 +707,21 @@ describe('GeminiLlmConnection', () => {
       );
       const generator = connection.receive();
 
-      messageQueue.push({
-        toolCall: {
-          functionCalls: [{name: 'tool_a', args: {x: 1}, id: '1'}],
-        },
-      });
+      messageQueue.push(
+        createLiveServerMessage({
+          toolCall: {
+            functionCalls: [{name: 'tool_a', args: {x: 1}, id: '1'}],
+          },
+        }),
+      );
 
-      messageQueue.push({
-        serverContent: {
-          turnComplete: true,
-        },
-      });
+      messageQueue.push(
+        createLiveServerMessage({
+          serverContent: {
+            turnComplete: true,
+          },
+        }),
+      );
 
       // For non-Gemini 3.x, tool call is buffered.
       // So we don't get anything on toolCall message (except if there was text, but there isn't).
@@ -703,11 +753,13 @@ describe('GeminiLlmConnection', () => {
       );
       const generator = connection.receive();
 
-      messageQueue.push({
-        toolCall: {
-          functionCalls: [{name: 'tool_a', args: {x: 1}, id: '1'}],
-        },
-      });
+      messageQueue.push(
+        createLiveServerMessage({
+          toolCall: {
+            functionCalls: [{name: 'tool_a', args: {x: 1}, id: '1'}],
+          },
+        }),
+      );
 
       const res1 = await generator.next();
       expect(res1.value).toEqual({
@@ -730,8 +782,13 @@ describe('GeminiLlmConnection', () => {
       );
       const generator = connection.receive();
 
-      const resumptionUpdate = {resumed: true};
-      messageQueue.push({sessionResumptionUpdate: resumptionUpdate});
+      const resumptionUpdate: LiveServerSessionResumptionUpdate = {
+        resumable: true,
+        newHandle: 'handle-1',
+      };
+      messageQueue.push(
+        createLiveServerMessage({sessionResumptionUpdate: resumptionUpdate}),
+      );
       messageQueue.close();
 
       const res = await generator.next();
@@ -751,8 +808,8 @@ describe('GeminiLlmConnection', () => {
       );
       const generator = connection.receive();
 
-      const goAway = {goAway: true}; // mock
-      messageQueue.push({goAway: goAway as LiveServerGoAway});
+      const goAway: LiveServerGoAway = {timeLeft: '10s'};
+      messageQueue.push(createLiveServerMessage({goAway}));
       messageQueue.close();
 
       const res = await generator.next();
@@ -772,11 +829,13 @@ describe('GeminiLlmConnection', () => {
       );
       const generator = connection.receive();
 
-      messageQueue.push({
-        toolCall: {
-          functionCalls: [{name: 'tool_a', args: {x: 1}, id: '1'}],
-        },
-      });
+      messageQueue.push(
+        createLiveServerMessage({
+          toolCall: {
+            functionCalls: [{name: 'tool_a', args: {x: 1}, id: '1'}],
+          },
+        }),
+      );
       messageQueue.close();
 
       const res = await generator.next();
@@ -798,11 +857,13 @@ describe('GeminiLlmConnection', () => {
       );
       const generator = connection.receive();
 
-      messageQueue.push({
-        toolCall: {
-          functionCalls: [{name: 'tool_a', args: {x: 1}, id: '1'}],
-        },
-      });
+      messageQueue.push(
+        createLiveServerMessage({
+          toolCall: {
+            functionCalls: [{name: 'tool_a', args: {x: 1}, id: '1'}],
+          },
+        }),
+      );
       messageQueue.close();
 
       const res = await generator.next();
@@ -824,19 +885,23 @@ describe('GeminiLlmConnection', () => {
       );
       const generator = connection.receive();
 
-      messageQueue.push({
-        serverContent: {
-          modelTurn: {
-            parts: [{text: 'Hello'}],
+      messageQueue.push(
+        createLiveServerMessage({
+          serverContent: {
+            modelTurn: {
+              parts: [{text: 'Hello'}],
+            },
           },
-        },
-      });
+        }),
+      );
 
-      messageQueue.push({
-        serverContent: {
-          interrupted: true,
-        },
-      });
+      messageQueue.push(
+        createLiveServerMessage({
+          serverContent: {
+            interrupted: true,
+          },
+        }),
+      );
       messageQueue.close();
 
       const res1 = await generator.next();
@@ -867,19 +932,23 @@ describe('GeminiLlmConnection', () => {
       );
       const generator = connection.receive();
 
-      messageQueue.push({
-        serverContent: {
-          modelTurn: {
-            parts: [{text: 'Hello'}],
+      messageQueue.push(
+        createLiveServerMessage({
+          serverContent: {
+            modelTurn: {
+              parts: [{text: 'Hello'}],
+            },
           },
-        },
-      });
+        }),
+      );
 
-      messageQueue.push({
-        toolCall: {
-          functionCalls: [{name: 'tool_a', args: {x: 1}, id: '1'}],
-        },
-      });
+      messageQueue.push(
+        createLiveServerMessage({
+          toolCall: {
+            functionCalls: [{name: 'tool_a', args: {x: 1}, id: '1'}],
+          },
+        }),
+      );
       messageQueue.close();
 
       const res1 = await generator.next();
@@ -919,17 +988,21 @@ describe('GeminiLlmConnection', () => {
       );
       const generator = connection.receive();
 
-      messageQueue.push({
-        serverContent: {
-          outputTranscription: {text: 'hello', finished: false},
-        },
-      });
+      messageQueue.push(
+        createLiveServerMessage({
+          serverContent: {
+            outputTranscription: {text: 'hello', finished: false},
+          },
+        }),
+      );
 
-      messageQueue.push({
-        serverContent: {
-          outputTranscription: {text: ' world', finished: true},
-        },
-      });
+      messageQueue.push(
+        createLiveServerMessage({
+          serverContent: {
+            outputTranscription: {text: ' world', finished: true},
+          },
+        }),
+      );
 
       messageQueue.close();
 
@@ -965,21 +1038,25 @@ describe('GeminiLlmConnection', () => {
       );
       const generator = connection.receive();
 
-      messageQueue.push({
-        serverContent: {
-          outputTranscription: {text: 'hello', finished: false},
-        },
-      });
+      messageQueue.push(
+        createLiveServerMessage({
+          serverContent: {
+            outputTranscription: {text: 'hello', finished: false},
+          },
+        }),
+      );
 
-      messageQueue.push({
-        serverContent: {
-          interrupted: true,
-        },
-      });
+      messageQueue.push(
+        createLiveServerMessage({
+          serverContent: {
+            interrupted: true,
+          },
+        }),
+      );
       messageQueue.close();
 
-      const res1 = await generator.next();
-      expect(res1.value.outputTranscription).toEqual({
+      const res1 = await nextResponse(generator);
+      expect(res1.outputTranscription).toEqual({
         text: 'hello',
         finished: false,
       });
