@@ -64,7 +64,9 @@ describe('CLI Entrypoint', () => {
 
   const parse = async (args: string[]) => {
     try {
-      process.argv = args;
+      // Must match what the parser is handed: actions that read `process.argv`
+      // positionally otherwise see a different offset than in production.
+      process.argv = ['node', 'cli_entrypoint.js', ...args];
       await program.parseAsync(['node', 'cli_entrypoint.js', ...args]);
     } catch (e: unknown) {
       if ((e as {code: string}).code !== 'commander.exit') {
@@ -353,9 +355,10 @@ describe('CLI Entrypoint', () => {
       async (_form, passThroughArgs) => {
         await parse(['deploy', 'cloud_run', ...passThroughArgs]);
 
-        expect(vi.mocked(deployToCloudRun).mock.calls[0][0].agentPath).toBe(
-          process.cwd(),
-        );
+        const args = vi.mocked(deployToCloudRun).mock.calls[0][0];
+        expect(args.agentPath).toBe(process.cwd());
+        // The displaced token is forwarded, not consumed by the positional.
+        expect(args.extraGcloudArgs).toEqual(passThroughArgs);
       },
     );
 
@@ -367,9 +370,9 @@ describe('CLI Entrypoint', () => {
         '--allow-unauthenticated',
       ]);
 
-      expect(vi.mocked(deployToCloudRun).mock.calls[0][0].agentPath).toEqual(
-        expect.stringContaining('my-agent-path'),
-      );
+      const args = vi.mocked(deployToCloudRun).mock.calls[0][0];
+      expect(args.agentPath).toEqual(expect.stringContaining('my-agent-path'));
+      expect(args.extraGcloudArgs).toEqual(['--allow-unauthenticated']);
     });
   });
 

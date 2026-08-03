@@ -96,13 +96,20 @@ function getBoolean(option?: string | boolean): boolean {
 }
 
 /**
+ * Whether a CLI token is an option rather than an operand. An agent path never
+ * starts with `-` (a relative one that does is spelled `./-foo`).
+ */
+function isFlagToken(token?: string): boolean {
+  return token?.startsWith('-') ?? false;
+}
+
+/**
  * Falls back to the `[agents_dir]` default when commander bound a flag to it:
  * the deploy subcommands allow unknown options, so an omitted directory lets
- * the first flag land in the positional slot. An agent path never starts with
- * `-` (a relative one that does is spelled `./-foo`).
+ * the first flag land in the positional slot.
  */
 function resolveAgentsDir(value: string): string {
-  return value.startsWith('-') ? process.cwd() : value;
+  return isFlagToken(value) ? process.cwd() : value;
 }
 
 const AGENT_DIR_ARGUMENT = new Argument(
@@ -438,8 +445,11 @@ export function createProgram(): Command {
     .addOption(A2A_OPTION)
     .addOption(A2A_AUTH_TOKEN_DEPLOY_OPTION)
     .action(async (agentPath: string, options: Record<string, string>) => {
+      // `[agents_dir]` occupies argv[4] unless it was omitted, in which case
+      // that slot already holds the first token destined for gcloud.
+      const extrasStart = isFlagToken(process.argv[4]) ? 4 : 5;
       const extraGcloudArgs = [];
-      for (const arg of process.argv.slice(5)) {
+      for (const arg of process.argv.slice(extrasStart)) {
         let argName = arg.replace(/^-+/, '');
         if (argName.includes('=')) {
           argName = argName.split('=')[0];
