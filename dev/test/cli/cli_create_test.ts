@@ -242,12 +242,6 @@ describe('createAgent', () => {
       (select as Mock).mockResolvedValueOnce('ts');
       (select as Mock).mockResolvedValueOnce('vertex'); // Backend
 
-      (execSync as Mock).mockImplementation((cmd: string) => {
-        if (cmd.includes('project')) return 'gcloud-project\n';
-        if (cmd.includes('region')) return 'gcloud-region\n';
-        return '';
-      });
-
       (text as Mock).mockResolvedValueOnce('env-project');
       (text as Mock).mockResolvedValueOnce('env-region');
 
@@ -285,8 +279,6 @@ describe('createAgent', () => {
       expect(saveToFile).not.toHaveBeenCalled();
     });
 
-    // Last in this block: the throwing execSync implementation survives
-    // vi.clearAllMocks(), which resets call history but not implementations.
     it('should fall back to an empty initial value when gcloud is unavailable', async () => {
       (select as Mock).mockResolvedValueOnce('gemini-2.5-flash');
       (select as Mock).mockResolvedValueOnce('ts');
