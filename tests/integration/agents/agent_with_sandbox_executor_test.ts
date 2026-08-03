@@ -6,8 +6,11 @@
 
 import {Client} from '@google-cloud/vertexai';
 import type {Event} from '@google/adk';
-import {AgentEngineSandboxCodeExecutor, LlmAgent} from '@google/adk';
-import {CODE_EXECUTION_RESPONSE_PROCESSOR} from '@google/adk/agents/processors/code_execution_request_processor.js';
+import {
+  AgentEngineSandboxCodeExecutor,
+  CODE_EXECUTION_RESPONSE_PROCESSOR,
+  LlmAgent,
+} from '@google/adk';
 import {FinishReason, Outcome} from '@google/genai';
 import {describe, expect, it, vi} from 'vitest';
 import {

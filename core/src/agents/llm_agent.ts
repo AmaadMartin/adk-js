@@ -303,6 +303,11 @@ export interface LlmAgentConfig extends BaseAgentConfig {
 
   /**
    * Processors to run after the LLM response is received.
+   *
+   * Omitting this selects the default list, which contains
+   * {@link CODE_EXECUTION_RESPONSE_PROCESSOR}. Supplying a list replaces the
+   * default entirely rather than extending it, so a caller that needs code
+   * execution alongside its own processors must include the default explicitly.
    */
   responseProcessors?: BaseLlmResponseProcessor[];
 
