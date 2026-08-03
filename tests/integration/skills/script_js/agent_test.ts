@@ -12,6 +12,10 @@ import {normalizeLineEndings, sendInput} from '../../test_case_utils.js';
 const execAsync = promisify(exec);
 const dirname = process.cwd();
 const PROJECT_PATH = `${dirname}/tests/integration/skills/script_js`;
+// Assertion budget only. The `npm install` / teardown hooks deliberately pass
+// no timeout so they inherit the `integration` project's hookTimeout from
+// vitest.config.ts, which is sized for a cold, network-bound install; sharing
+// this number with them reported a slow install as a test failure.
 const TEST_EXECUTION_TIMEOUT = 60000;
 
 /**
@@ -31,7 +35,7 @@ const TEST_EXECUTION_TIMEOUT = 60000;
 describe('Agent with skills that generates JS script and runs it locally', () => {
   beforeAll(async () => {
     await execAsync('npm install', {cwd: PROJECT_PATH});
-  }, TEST_EXECUTION_TIMEOUT);
+  });
 
   it(
     'should run agent with skills successfully',
