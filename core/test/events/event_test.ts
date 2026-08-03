@@ -339,6 +339,34 @@ describe('Event Utils', () => {
         NestedKey: 'value2',
       });
     });
+
+    it('preserves UI widget payload keys during conversion to camelCase', () => {
+      const snakeEvent = {
+        id: '123',
+        invocation_id: 'inv1',
+        actions: {
+          render_ui_widgets: [
+            {
+              id: 'widget_1',
+              provider: 'mcp',
+              payload: {
+                resource_uri: 'ui://app',
+                tool_args: {a: 1},
+                tool: {input_schema: {some_field: 'x'}},
+              },
+            },
+          ],
+        },
+      };
+
+      const camelEvent = transformToCamelCaseEvent(snakeEvent);
+
+      expect(camelEvent.actions?.renderUiWidgets?.[0].payload).toEqual({
+        resource_uri: 'ui://app',
+        tool_args: {a: 1},
+        tool: {input_schema: {some_field: 'x'}},
+      });
+    });
   });
 
   describe('transformToSnakeCaseEvent', () => {
@@ -371,6 +399,39 @@ describe('Event Utils', () => {
       expect(snakeEvent.custom_metadata).toEqual({
         'preserve-my-key': 'value',
         NestedKey: 'value2',
+      });
+    });
+
+    it('preserves UI widget payload keys during conversion to snake_case', () => {
+      const camelEvent = createEvent({
+        id: '123',
+        invocationId: 'inv1',
+        actions: createEventActions({
+          renderUiWidgets: [
+            {
+              id: 'widget_1',
+              provider: 'mcp',
+              payload: {
+                resource_uri: 'ui://app',
+                tool_args: {a: 1},
+                tool: {input_schema: {some_field: 'x'}},
+              },
+            },
+          ],
+        }),
+      });
+
+      const snakeEvent = transformToSnakeCaseEvent(camelEvent);
+
+      const actions = snakeEvent.actions as Record<string, unknown>;
+      expect(actions.renderUiWidgets).toBeUndefined();
+      const widgets = actions.render_ui_widgets as Array<
+        Record<string, unknown>
+      >;
+      expect(widgets[0].payload).toEqual({
+        resource_uri: 'ui://app',
+        tool_args: {a: 1},
+        tool: {input_schema: {some_field: 'x'}},
       });
     });
   });

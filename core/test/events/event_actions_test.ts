@@ -4,9 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {UiWidget} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 import {
   createEventActions,
+  EventActions,
   mergeEventActions,
 } from '../../src/events/event_actions.js';
 
@@ -200,5 +202,99 @@ describe('mergeEventActions', () => {
       createEventActions({stateDelta: {x: 1}}),
     ]);
     expect(result.stateDelta).toEqual({x: 1});
+  });
+});
+
+const widget1: UiWidget = {
+  id: 'widget_1',
+  provider: 'mcp',
+  payload: {resource_uri: 'ui://app/one'},
+};
+const widget2: UiWidget = {
+  id: 'widget_2',
+  provider: 'mcp',
+  payload: {resource_uri: 'ui://app/two'},
+};
+const widget3: UiWidget = {
+  id: 'widget_3',
+  provider: 'custom',
+  payload: {},
+};
+
+/**
+ * Builds a merge source carrying the snake_case `render_ui_widgets` spelling
+ * that ADK Python writes on the wire. `Object.assign` keeps the result out of
+ * the excess-property check that rejects the key on a fresh object literal.
+ */
+function sourceWithSnakeCaseWidgets(
+  widgets: unknown,
+  overrides: Partial<EventActions> = {},
+): Partial<EventActions> {
+  return Object.assign({render_ui_widgets: widgets}, overrides);
+}
+
+describe('EventActions renderUiWidgets', () => {
+  it('leaves renderUiWidgets undefined by default', () => {
+    expect(createEventActions().renderUiWidgets).toBeUndefined();
+  });
+
+  it('applies a renderUiWidgets override', () => {
+    const actions = createEventActions({renderUiWidgets: [widget1]});
+    expect(actions.renderUiWidgets).toEqual([widget1]);
+  });
+
+  it('concatenates widgets from multiple sources in source order', () => {
+    const result = mergeEventActions([
+      createEventActions({renderUiWidgets: [widget1]}),
+      createEventActions({renderUiWidgets: [widget2, widget3]}),
+    ]);
+    expect(result.renderUiWidgets?.map((widget) => widget.id)).toEqual([
+      'widget_1',
+      'widget_2',
+      'widget_3',
+    ]);
+  });
+
+  it('reads the snake_case render_ui_widgets key alongside camelCase', () => {
+    const result = mergeEventActions([
+      createEventActions({renderUiWidgets: [widget1]}),
+      sourceWithSnakeCaseWidgets([widget2]),
+    ]);
+    expect(result.renderUiWidgets).toEqual([widget1, widget2]);
+  });
+
+  it('falls through to snake_case when the camelCase list is empty', () => {
+    const result = mergeEventActions([
+      sourceWithSnakeCaseWidgets([widget2], {renderUiWidgets: []}),
+    ]);
+    expect(result.renderUiWidgets).toEqual([widget2]);
+  });
+
+  it('ignores a non-array render_ui_widgets value', () => {
+    const result = mergeEventActions([
+      sourceWithSnakeCaseWidgets('not-a-list'),
+    ]);
+    expect(result.renderUiWidgets).toBeUndefined();
+  });
+
+  it('leaves renderUiWidgets undefined when no source has widgets', () => {
+    const result = mergeEventActions([
+      createEventActions({stateDelta: {x: 1}}),
+      createEventActions(),
+    ]);
+    expect(result.renderUiWidgets).toBeUndefined();
+  });
+
+  it('does not mutate the widget arrays of the sources or the target', () => {
+    const target = createEventActions({renderUiWidgets: [widget1]});
+    const source = createEventActions({renderUiWidgets: [widget2]});
+
+    const result = mergeEventActions([source], target);
+
+    expect(result.renderUiWidgets).toEqual([widget1, widget2]);
+    expect(result.renderUiWidgets).not.toBe(target.renderUiWidgets);
+    expect(result.renderUiWidgets).not.toBe(source.renderUiWidgets);
+    expect(target.renderUiWidgets).toEqual([widget1]);
+    expect(source.renderUiWidgets).toEqual([widget2]);
   });
 });
