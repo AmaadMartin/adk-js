@@ -313,5 +313,17 @@ describe('skill_toolset', () => {
       expect(tools2.map((t) => t.name)).toContain('cached_tool');
       expect(mockInnerGetTools).toHaveBeenCalledTimes(1);
     });
+
+    it('exposes the configured outputDir', () => {
+      const toolset = new SkillToolset([], {outputDir: '/tmp/skill-output'});
+
+      expect(toolset.outputDir).toBe('/tmp/skill-output');
+    });
+
+    it('leaves outputDir undefined when not configured', () => {
+      const toolset = new SkillToolset([]);
+
+      expect(toolset.outputDir).toBeUndefined();
+    });
   });
 });

@@ -15,13 +15,16 @@ import {
   LlmAgent,
   RunSkillScriptTool,
   Skill,
+  SkillScriptResult,
   SkillToolset,
 } from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
-import {materializeFiles} from '../../../src/utils/file_utils.js';
+import {materializeScriptOutputs} from '../../../src/tools/skill/script_output_utils.js';
 
-vi.mock('../../../src/utils/file_utils.js', () => ({
-  materializeFiles: vi.fn(),
+vi.mock('../../../src/tools/skill/script_output_utils.js', () => ({
+  materializeScriptOutputs: vi
+    .fn()
+    .mockImplementation((result: CodeExecutionResult) => result),
 }));
 
 class MockCodeExecutor extends BaseCodeExecutor {
@@ -204,28 +207,64 @@ describe('RunSkillScriptTool', () => {
     expect(binaryFile?.contentEncoding).toBe('base64');
   });
 
-  it('calls materializeFiles with output files from executor', async () => {
+  const testFile = {
+    name: 'output.txt',
+    content: 'hello',
+    contentEncoding: 'utf8',
+    mimeType: 'text/plain',
+  } as File;
+
+  function executorReturning(outputFiles: File[]): MockCodeExecutor {
     const mockExecutor = new MockCodeExecutor();
-    const testFile = {
-      name: 'output.txt',
-      content: 'hello',
-      contentEncoding: 'utf8',
-      mimeType: 'text/plain',
-    } as File;
-    mockExecutor.mockResult = {
-      stdout: '',
-      stderr: '',
-      outputFiles: [testFile],
-    };
+    mockExecutor.mockResult = {stdout: '', stderr: '', outputFiles};
+    return mockExecutor;
+  }
 
-    const toolset = new SkillToolset([mockSkill], {codeExecutor: mockExecutor});
-    const tool = new RunSkillScriptTool(toolset);
-
-    await tool.runAsync({
+  async function runTool(toolset: SkillToolset): Promise<unknown> {
+    return new RunSkillScriptTool(toolset).runAsync({
       args: {skill_name: 'test-skill', script_path: 'scripts/setup.js'},
       toolContext: createMockContext(),
     });
+  }
 
-    expect(materializeFiles).toHaveBeenCalledWith([testFile]);
+  it('materializes output files with no directory when none is configured', async () => {
+    const mockExecutor = executorReturning([testFile]);
+
+    await runTool(new SkillToolset([mockSkill], {codeExecutor: mockExecutor}));
+
+    expect(materializeScriptOutputs).toHaveBeenCalledWith(
+      mockExecutor.mockResult,
+      undefined,
+    );
+  });
+
+  it('passes the toolset outputDir through', async () => {
+    const mockExecutor = executorReturning([testFile]);
+
+    await runTool(
+      new SkillToolset([mockSkill], {
+        codeExecutor: mockExecutor,
+        outputDir: '/configured/dir',
+      }),
+    );
+
+    expect(materializeScriptOutputs).toHaveBeenCalledWith(
+      mockExecutor.mockResult,
+      '/configured/dir',
+    );
+  });
+
+  it('returns the outputDir reported by the helper', async () => {
+    const mockExecutor = executorReturning([testFile]);
+    vi.mocked(materializeScriptOutputs).mockResolvedValueOnce({
+      ...mockExecutor.mockResult,
+      outputDir: '/somewhere',
+    });
+
+    const result = (await runTool(
+      new SkillToolset([mockSkill], {codeExecutor: mockExecutor}),
+    )) as SkillScriptResult;
+
+    expect(result.outputDir).toBe('/somewhere');
   });
 });

@@ -47,6 +47,7 @@ export class SkillToolset extends BaseToolset {
   public registry?: SkillRegistry;
   private toolCache = new Map<string, BaseTool[]>();
   private fetchedSkillCache = new Map<string, Map<string, Skill>>();
+  public readonly outputDir?: string;
 
   constructor(
     skills: Record<string, Skill> | Skill[],
@@ -63,6 +64,22 @@ export class SkillToolset extends BaseToolset {
        * confirmation.
        */
       allowInlineScripts?: boolean;
+      /**
+       * Directory that output files produced by `run_skill_script` and
+       * `run_skill_inline_script` are written into. A relative path is
+       * resolved against the host process's working directory.
+       *
+       * When unset, each execution that produces output files gets a fresh
+       * directory under the OS temp directory and the tool response reports
+       * its absolute path. Set this to keep script output in a location the
+       * application manages.
+       *
+       * The directory is never deleted, unlike the code executor's own scratch
+       * directory: it holds the artifacts the script was asked to produce.
+       * Unconfigured runs therefore rely on OS temp-directory cleanup, so an
+       * application that needs a managed lifetime should set this.
+       */
+      outputDir?: string;
     } = {},
   ) {
     super([], 'adk_skill_toolset');
@@ -72,6 +89,7 @@ export class SkillToolset extends BaseToolset {
     this.codeExecutor = options.codeExecutor;
     this.additionalTools = options.additionalTools || [];
     this.registry = options.registry;
+    this.outputDir = options.outputDir;
 
     this.tools = [
       new ListSkillsTool(this),
