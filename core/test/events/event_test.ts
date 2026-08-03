@@ -26,6 +26,18 @@ import {
   transformToSnakeCaseEvent,
 } from '../../src/events/event.js';
 
+/**
+ * A widget payload holding both key spellings at once: ADK writes
+ * `resource_uri`/`tool_args`, while the embedded raw MCP tool definition uses
+ * MCP's own camelCase `inputSchema`. Both must survive either conversion
+ * direction untouched, so this fixture detects a mangling in both.
+ */
+const MIXED_CASE_WIDGET_PAYLOAD = {
+  resource_uri: 'ui://app',
+  tool_args: {a: 1},
+  tool: {inputSchema: {someField: 'x'}},
+};
+
 describe('Event Utils', () => {
   describe('createEvent', () => {
     it('creates an event with default values', () => {
@@ -349,11 +361,7 @@ describe('Event Utils', () => {
             {
               id: 'widget_1',
               provider: 'mcp',
-              payload: {
-                resource_uri: 'ui://app',
-                tool_args: {a: 1},
-                tool: {input_schema: {some_field: 'x'}},
-              },
+              payload: MIXED_CASE_WIDGET_PAYLOAD,
             },
           ],
         },
@@ -361,11 +369,9 @@ describe('Event Utils', () => {
 
       const camelEvent = transformToCamelCaseEvent(snakeEvent);
 
-      expect(camelEvent.actions?.renderUiWidgets?.[0].payload).toEqual({
-        resource_uri: 'ui://app',
-        tool_args: {a: 1},
-        tool: {input_schema: {some_field: 'x'}},
-      });
+      expect(camelEvent.actions?.renderUiWidgets?.[0].payload).toEqual(
+        MIXED_CASE_WIDGET_PAYLOAD,
+      );
     });
   });
 
@@ -411,11 +417,7 @@ describe('Event Utils', () => {
             {
               id: 'widget_1',
               provider: 'mcp',
-              payload: {
-                resource_uri: 'ui://app',
-                tool_args: {a: 1},
-                tool: {input_schema: {some_field: 'x'}},
-              },
+              payload: MIXED_CASE_WIDGET_PAYLOAD,
             },
           ],
         }),
@@ -428,11 +430,7 @@ describe('Event Utils', () => {
       const widgets = actions.render_ui_widgets as Array<
         Record<string, unknown>
       >;
-      expect(widgets[0].payload).toEqual({
-        resource_uri: 'ui://app',
-        tool_args: {a: 1},
-        tool: {input_schema: {some_field: 'x'}},
-      });
+      expect(widgets[0].payload).toEqual(MIXED_CASE_WIDGET_PAYLOAD);
     });
   });
 
