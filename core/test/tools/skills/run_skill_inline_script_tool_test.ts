@@ -24,6 +24,7 @@ import {InMemoryArtifactService} from '../../../src/artifacts/in_memory_artifact
 import {ScopedArtifactService} from '../../../src/artifacts/scoped_artifact_service.js';
 import {ToolConfirmation} from '../../../src/tools/tool_confirmation.js';
 import {materializeFiles} from '../../../src/utils/file_utils.js';
+import {logger} from '../../../src/utils/logger.js';
 
 vi.mock('../../../src/utils/file_utils.js', () => ({
   materializeFiles: vi.fn().mockImplementation((files) => files),
@@ -531,6 +532,8 @@ describe('RunSkillInlineScriptTool', () => {
     });
 
     it('returns the plain result when no artifact service is configured', async () => {
+      const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
       const result = (await runInlineScript(
         createExecutor(),
       )) as CodeExecutionResult;
@@ -538,6 +541,8 @@ describe('RunSkillInlineScriptTool', () => {
       expect(result).not.toHaveProperty('savedArtifacts');
       expect(result.stdout).toBe('inline ran');
       expect(result.outputFiles).toEqual([outputFile]);
+      // The pre-existing no-artifact-service setup must stay quiet.
+      expect(warnSpy).not.toHaveBeenCalled();
     });
 
     it('omits savedArtifacts and still succeeds when every save fails', async () => {

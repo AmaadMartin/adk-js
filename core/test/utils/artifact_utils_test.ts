@@ -163,17 +163,22 @@ describe('saveFilesAsArtifacts', () => {
     });
   });
 
-  it('returns an empty map and logs when no artifact service is configured', async () => {
+  it('skips silently when no artifact service is configured', async () => {
     const debugSpy = vi.spyOn(logger, 'debug').mockImplementation(() => {});
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
     const context = createContext();
 
     const result = await saveFilesAsArtifacts(context, [
       textFile('orphan.txt', 'content'),
+      textFile('second.txt', 'content'),
     ]);
 
     expect(result).toEqual({});
-    expect(debugSpy).toHaveBeenCalledOnce();
     expect(context.eventActions.artifactDelta).toEqual({});
+    // Skipped, not attempted-and-failed: an unconfigured artifact service is a
+    // supported setup and must not produce a warning per output file.
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect(debugSpy).toHaveBeenCalledOnce();
   });
 
   it('returns an empty map without saving when there are no files', async () => {
