@@ -11,7 +11,11 @@ import {createServer, type Server} from 'node:net';
 import {platform, tmpdir} from 'node:os';
 import * as path from 'node:path';
 import {afterEach, describe, expect, it} from 'vitest';
-import {BaseTestServer, reserveFreePort} from './test_case_utils.js';
+import {
+  appendCapped,
+  BaseTestServer,
+  reserveFreePort,
+} from './test_case_utils.js';
 
 const HOST = 'localhost';
 const START_MESSAGE = 'SCRIPTED SERVER STARTED';
@@ -21,6 +25,13 @@ const START_TIMEOUT_MS = 15000;
 const STAY_ALIVE = 'setInterval(() => {}, 1000);';
 /** Mirrors `PROCESS_EXIT_TIMEOUT_MS` in the harness under test. */
 const PROCESS_EXIT_TIMEOUT_MS = 5000;
+/** Mirrors `OUTPUT_EXCERPT_CHARS` in the harness under test. */
+const OUTPUT_EXCERPT_CHARS = 4000;
+/**
+ * Readiness budget for the grandchild case: long enough that reaching it means
+ * the exit was never reported, short enough to fail fast when that regresses.
+ */
+const GRANDCHILD_START_TIMEOUT_MS = 10000;
 const IS_WINDOWS = platform() === 'win32';
 
 const spawned: ChildProcessWithoutNullStreams[] = [];
@@ -154,6 +165,40 @@ describe('reserveFreePort', () => {
   });
 });
 
+describe('appendCapped', () => {
+  it('appends without truncating below the cap', () => {
+    expect(appendCapped('abc', 'de', 8)).toBe('abcde');
+  });
+
+  it('appends without truncating exactly at the cap', () => {
+    expect(appendCapped('abc', 'de', 5)).toBe('abcde');
+  });
+
+  it('drops the head and keeps the tail once over the cap', () => {
+    expect(appendCapped('abc', 'de', 4)).toBe('bcde');
+  });
+
+  it('keeps only the tail of a chunk that alone exceeds the cap', () => {
+    expect(appendCapped('abc', 'defgh', 3)).toBe('fgh');
+  });
+
+  it('stays capped across repeated appends', () => {
+    let buffer = '';
+    for (let i = 0; i < 100; i++) {
+      buffer = appendCapped(buffer, '0123456789', 15);
+    }
+
+    expect(buffer).toHaveLength(15);
+    expect(buffer.endsWith('0123456789')).toBe(true);
+  });
+
+  it('defaults to the harness excerpt size', () => {
+    const overCap = 'x'.repeat(OUTPUT_EXCERPT_CHARS + 1000);
+
+    expect(appendCapped('', overCap)).toHaveLength(OUTPUT_EXCERPT_CHARS);
+  });
+});
+
 describe('BaseTestServer.startProcess', () => {
   it('reserves the port before the child is spawned', async () => {
     const server = new ScriptedTestServer(
@@ -210,6 +255,38 @@ describe('BaseTestServer.startProcess', () => {
     );
     await expect(attempt).rejects.toThrow('STDERR-REASON');
     await expect(attempt).rejects.toThrow('STDOUT-REASON');
+  });
+
+  it('reports the exit code when a grandchild holds the pipes open', async () => {
+    // `go run` behaves this way: the built binary inherits the stdio pipes, so
+    // the wrapper can die without them ever reaching EOF and 'close' never
+    // arrives. Waiting for it would report a start-up *timeout* minutes later
+    // instead of the exit code the child already handed us.
+    const pidFile = path.join(
+      mkdtempSync(path.join(tmpdir(), 'adk-harness-')),
+      'grandchild.pid',
+    );
+    grandchildPidFiles.push(pidFile);
+    const server = new ScriptedTestServer(
+      nodeScript(
+        "const gc = require('node:child_process').spawn(process.execPath, " +
+          "['-e', 'setTimeout(() => {}, 60000)'], {stdio: 'inherit'});" +
+          `require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, ` +
+          'String(gc.pid));' +
+          "process.stderr.write('HELD-STDERR\\n', () => " +
+          "process.stdout.write('HELD-STDOUT\\n', () => process.exit(3)));",
+      ),
+    );
+
+    // Far longer than the flush grace, so a rejection this side of it can only
+    // have come from the exit path rather than from the readiness timeout.
+    const attempt = server.start(GRANDCHILD_START_TIMEOUT_MS);
+
+    await expect(attempt).rejects.toThrow(
+      'Scripted exited prematurely with code 3',
+    );
+    await expect(attempt).rejects.toThrow('HELD-STDOUT');
+    await expect(attempt).rejects.toThrow('HELD-STDERR');
   });
 
   it('reports both streams as empty when the child exits silently', async () => {
