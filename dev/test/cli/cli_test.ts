@@ -5,6 +5,7 @@
  */
 
 import {LogLevel, setLogLevel} from '@google/adk';
+import type {Command} from 'commander';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {createProgram} from '../../src/cli/cli.js';
 import {createAgent} from '../../src/cli/cli_create.js';
@@ -48,6 +49,39 @@ vi.mock('@google/adk', async (importOriginal) => {
     setLogLevel: vi.fn(),
   };
 });
+
+/**
+ * Runs `--help` for the command at `commandPath` (e.g. `['deploy',
+ * 'cloud_run']`) and returns everything commander printed, asserting the help
+ * request exited with code 0.
+ *
+ * The output is captured on the command that renders it: `configureOutput`
+ * rebinds only that command's output configuration, and the epilog registered
+ * with `addHelpText` is emitted by `outputHelp`, not by `helpInformation`.
+ */
+async function captureHelp(
+  program: Command,
+  commandPath: string[],
+): Promise<string> {
+  let command = program;
+  for (const name of commandPath) {
+    const child = command.commands.find((c) => c.name() === name);
+    if (!child) {
+      expect.fail(`Command "${commandPath.join(' ')}" is not registered`);
+    }
+    command = child;
+  }
+
+  let help = '';
+  command.configureOutput({writeOut: (str) => (help += str)});
+  command.exitOverride();
+
+  await expect(
+    program.parseAsync(['node', 'cli_entrypoint.js', ...commandPath, '--help']),
+  ).rejects.toMatchObject({code: 'commander.helpDisplayed', exitCode: 0});
+
+  return help;
+}
 
 describe('CLI Entrypoint', () => {
   let program: ReturnType<typeof createProgram>;
@@ -263,7 +297,67 @@ describe('CLI Entrypoint', () => {
     });
   });
 
+  describe('command: deploy', () => {
+    it('should list every deploy subcommand with a description', async () => {
+      const help = (await captureHelp(program, ['deploy'])).replace(
+        /\s+/g,
+        ' ',
+      );
+
+      expect(help).toContain(
+        'cloud_run [options] [agents_dir] Deploys an agent to Cloud Run',
+      );
+      expect(help).toContain(
+        'agent_engine [options] [agents_dir] Deploys an agent to Vertex AI Agent Engine',
+      );
+      expect(help).toContain(
+        'reasoning_engine [options] [agents_dir] Deploys an agent to Vertex AI Agent Engine',
+      );
+    });
+  });
+
   describe('command: deploy cloud_run', () => {
+    it('should document the gcloud pass-through contract in its help', async () => {
+      const help = await captureHelp(program, ['deploy', 'cloud_run']);
+      const normalized = help.replace(/\s+/g, ' ');
+
+      expect(help).toContain('Deploys an agent to Cloud Run');
+      expect(help).toContain(
+        'Any option that is not listed above is forwarded verbatim to "gcloud run deploy".',
+      );
+      expect(help).toContain(
+        'Use -- to separate gcloud arguments from adk arguments.',
+      );
+      expect(help).toContain(
+        'adk deploy cloud_run path/to/my_agent -- --min-instances=2',
+      );
+      expect(normalized).toContain(
+        'ADK sets --source, --project, --port, --verbosity and --region itself, so passing any of them as a gcloud argument is rejected.',
+      );
+      expect(normalized).toContain(
+        'the gcloud env-var flags (--update-env-vars, --set-env-vars, --remove-env-vars, --clear-env-vars, --env-vars-file) are reserved as well',
+      );
+      // The epilog documents the option list, so it has to follow it.
+      expect(
+        help.indexOf('Any option that is not listed above'),
+      ).toBeGreaterThan(help.indexOf('-h, --help'));
+      expect(deployToCloudRun).not.toHaveBeenCalled();
+    });
+
+    it('should forward the -- example printed in its help', async () => {
+      await parse([
+        'deploy',
+        'cloud_run',
+        'path/to/my_agent',
+        '--',
+        '--min-instances=2',
+      ]);
+
+      expect(
+        (deployToCloudRun as Mock).mock.calls[0][0].extraGcloudArgs,
+      ).toEqual(['--min-instances=2']);
+    });
+
     it('should call deployToCloudRun with defaults', async () => {
       await parse(['deploy', 'cloud_run']);
 

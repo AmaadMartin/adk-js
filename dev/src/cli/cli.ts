@@ -210,6 +210,20 @@ export const AGENT_ENGINE_ID_OPTION = new Option(
   'Optional. ID of the Agent Engine instance to update if it exists (default: undefined, which means a new instance will be created). If project and region are set, this should be the resource ID or the full resource name (projects/.../locations/.../reasoningEngines/...).',
 );
 
+const CLOUD_RUN_HELP_EPILOG = `
+Any option that is not listed above is forwarded verbatim to "gcloud run deploy".
+Use -- to separate gcloud arguments from adk arguments.
+
+Examples:
+  adk deploy cloud_run --project=[project] --region=[region] path/to/my_agent
+  adk deploy cloud_run path/to/my_agent -- --min-instances=2
+
+ADK sets --source, --project, --port, --verbosity and --region itself, so
+passing any of them as a gcloud argument is rejected. When --a2a_auth_token is
+set, the gcloud env-var flags (--update-env-vars, --set-env-vars,
+--remove-env-vars, --clear-env-vars, --env-vars-file) are reserved as well,
+because they can drop the injected token.`;
+
 /**
  * Creates the ADK CLI program.
  * @returns The ADK CLI program.
@@ -415,6 +429,7 @@ export function createProgram(): Command {
     .allowExcessArguments();
 
   DEPLOY_COMMAND.command('cloud_run')
+    .description('Deploys an agent to Cloud Run')
     .addArgument(AGENT_DIR_ARGUMENT)
     .allowUnknownOption()
     .allowExcessArguments()
@@ -443,6 +458,7 @@ export function createProgram(): Command {
     .addOption(AGENT_FILE_MODULE_TYPE)
     .addOption(A2A_OPTION)
     .addOption(A2A_AUTH_TOKEN_DEPLOY_OPTION)
+    .addHelpText('after', CLOUD_RUN_HELP_EPILOG)
     .action(
       async (
         agentPath: string,
@@ -478,6 +494,7 @@ export function createProgram(): Command {
 
   const registerAgentEngineCommand = (cmd: Command) => {
     cmd
+      .description('Deploys an agent to Vertex AI Agent Engine')
       .addArgument(AGENT_DIR_ARGUMENT)
       .allowUnknownOption()
       .allowExcessArguments()
