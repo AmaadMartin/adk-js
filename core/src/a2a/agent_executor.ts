@@ -173,6 +173,9 @@ export class A2AAgentExecutor implements AgentExecutor {
           a2aEvent,
         );
 
+        // simplicity: convertAdkEventToA2AEvent emits only artifact updates, so
+        // the aggregator records nothing until that converter also emits the
+        // intermediate auth-required / input-required status updates.
         taskResultAggregator.processEvent(a2aEvent);
         eventBus.publish(a2aEvent);
       }
