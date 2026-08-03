@@ -22,13 +22,6 @@ const execFileAsync = promisify(execFile);
 const dirname = process.cwd();
 
 /**
- * Budget (ms) for the `beforeAll` hook. esbuild itself finishes in tens of
- * milliseconds; the variable cost is spawning a Node process on a loaded CI
- * runner, which the `windows-latest` leg makes the worst case.
- */
-const HOOK_TIMEOUT = 60000;
-
-/**
  * Whitespace-tolerant so a later reformat of the banner literal does not have
  * to be mirrored here. Anchored, because the point of the assertion is that
  * the header comes *first*.
@@ -63,7 +56,7 @@ describe('License banner', () => {
       await execFileAsync('node', [path.join(dirname, buildScript)], {
         cwd: tempDir,
       });
-    }, HOOK_TIMEOUT);
+    });
 
     afterAll(async () => {
       await fs.rm(tempDir, {recursive: true, force: true});
