@@ -196,22 +196,6 @@ export const AGENT_ENGINE_ID_OPTION = new Option(
 const CLI_LOG_LABEL = 'ADK CLI';
 
 /**
- * Writes to stderr and resolves once the chunk has actually been handed off.
- *
- * `process.exit()` discards pending asynchronous writes, and writes to a pipe
- * are asynchronous on Windows, so a diagnostic emitted immediately before
- * exiting is dropped there — precisely when a CI log is the only evidence
- * available. This bypasses the logger deliberately: its winston Console
- * transport defers the write by at least a tick, which `process.exit()` also
- * outruns.
- */
-function flushStderr(message: string): Promise<void> {
-  return new Promise((resolve) => {
-    process.stderr.write(message, () => resolve());
-  });
-}
-
-/**
  * Reports a fatal server start-up failure and exits non-zero.
  *
  * The stack is preferred over the message alone because `AdkApiServer.start()`
@@ -224,9 +208,16 @@ async function exitOnStartupFailure(
 ): Promise<never> {
   const detail =
     error instanceof Error ? (error.stack ?? error.message) : String(error);
-  await flushStderr(
-    `[${CLI_LOG_LABEL}] Error starting ${serverName}: ${detail}\n`,
-  );
+  // `process.exit()` discards pending asynchronous writes and writes to a pipe
+  // are asynchronous on Windows, so wait for the flush callback before exiting.
+  // The logger is bypassed for the same reason: its winston Console transport
+  // defers the write by at least a tick, which `process.exit()` also outruns.
+  await new Promise<void>((resolve) => {
+    process.stderr.write(
+      `[${CLI_LOG_LABEL}] Error starting ${serverName}: ${detail}\n`,
+      () => resolve(),
+    );
+  });
   process.exit(1);
 }
 
@@ -288,7 +279,7 @@ export function createProgram(): Command {
         });
 
         await server.start();
-      } catch (error: unknown) {
+      } catch (error) {
         await exitOnStartupFailure('web server', error);
       }
     });
@@ -332,7 +323,7 @@ export function createProgram(): Command {
           reloadAgents: getBoolean(options['reload_agents']),
         });
         await server.start();
-      } catch (error: unknown) {
+      } catch (error) {
         await exitOnStartupFailure('API server', error);
       }
     });
