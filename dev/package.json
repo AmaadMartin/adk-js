@@ -39,6 +39,9 @@
     "format": "prettier --write 'src/**/*.ts'",
     "prepublishOnly": "npm run build"
   },
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "devDependencies": {
     "@types/cors": "^2.8.19",
     "@types/express": "^4.17.21",
