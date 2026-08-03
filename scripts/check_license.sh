@@ -4,7 +4,7 @@ echo "🔍 Checking for license headers..."
 
 MISSING_FILES=""
 # Find files and check them using Perl (more robust for multi-line regex)
-FILES=$(find . -type d \( -name "node_modules" -o -name "dist" -o -name ".git" -o -name "browser" \) -prune -o \
+FILES=$(find . -type d \( -name "node_modules" -o -name "dist" -o -name ".git" \) -prune -o \
                -type f \( -name "*.js" -o -name "*.ts" \) -print)
 
 for FILE in $FILES; do
