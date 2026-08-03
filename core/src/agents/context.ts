@@ -10,6 +10,7 @@ import {AuthCredential} from '../auth/auth_credential.js';
 import {AuthHandler} from '../auth/auth_handler.js';
 import {AuthConfig} from '../auth/auth_tool.js';
 import {createEventActions, EventActions} from '../events/event_actions.js';
+import {UiWidget} from '../events/ui_widget.js';
 import {SearchMemoryResponse} from '../memory/base_memory_service.js';
 import {State} from '../sessions/state.js';
 import {ToolConfirmation} from '../tools/tool_confirmation.js';
@@ -181,5 +182,26 @@ export class Context extends ReadonlyContext {
         confirmed: false,
         payload: payload,
       });
+  }
+
+  /**
+   * Adds a UI widget to the current event's actions for the UI to render.
+   *
+   * UI widgets provide rendering metadata that the UI host uses to display
+   * rich interactive components (e.g. MCP App iframes) alongside agent
+   * responses.
+   *
+   * @param uiWidget The widget to render.
+   * @throws If a widget with the same id was already added to this event.
+   */
+  renderUiWidget(uiWidget: UiWidget): void {
+    const uiWidgets = (this.eventActions.renderUiWidgets ??= []);
+    if (uiWidgets.some((widget) => widget.id === uiWidget.id)) {
+      throw new Error(
+        `UI widget with ID '${uiWidget.id}' already exists in the current` +
+          ' event actions.',
+      );
+    }
+    uiWidgets.push(uiWidget);
   }
 }

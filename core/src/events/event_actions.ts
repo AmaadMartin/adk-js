@@ -7,6 +7,8 @@
 import {AuthConfig} from '../auth/auth_tool.js';
 import {ToolConfirmation} from '../tools/tool_confirmation.js';
 
+import {UiWidget} from './ui_widget.js';
+
 /**
  * Represents the actions attached to an event.
  */
@@ -56,6 +58,11 @@ export interface EventActions {
    * call id.
    */
   requestedToolConfirmations: {[key: string]: ToolConfirmation};
+
+  /**
+   * UI widgets to be rendered by the UI host for this event.
+   */
+  renderUiWidgets?: UiWidget[];
 }
 
 /**
@@ -65,8 +72,8 @@ export interface EventActions {
  * @param state - Optional partial {@link EventActions} whose properties
  *   override the defaults. Dictionary fields (`stateDelta`, `artifactDelta`,
  *   `requestedAuthConfigs`, `requestedToolConfirmations`) default to `{}`;
- *   scalar fields (`skipSummarization`, `transferToAgent`, `escalate`) default
- *   to `undefined`.
+ *   scalar fields (`skipSummarization`, `transferToAgent`, `escalate`) and list
+ *   fields (`renderUiWidgets`) default to `undefined`.
  * @returns A fully populated {@link EventActions} object.
  */
 export function createEventActions(
@@ -81,6 +88,27 @@ export function createEventActions(
   };
 }
 
+const RENDER_UI_WIDGETS_SNAKE_CASE_KEY = 'render_ui_widgets';
+
+/**
+ * Reads UI widgets off a partial {@link EventActions}, accepting both the
+ * camelCase field and the snake_case spelling ADK Python writes on the wire.
+ * An empty camelCase list falls through to the snake_case key, matching
+ * `merge_parallel_function_response_events` in adk-python
+ * (`src/google/adk/flows/llm_flows/functions.py`).
+ */
+function readRenderUiWidgets(
+  source: Partial<EventActions>,
+): UiWidget[] | undefined {
+  if (source.renderUiWidgets?.length) {
+    return source.renderUiWidgets;
+  }
+  const snakeCased = (source as Record<string, unknown>)[
+    RENDER_UI_WIDGETS_SNAKE_CASE_KEY
+  ];
+  return Array.isArray(snakeCased) ? (snakeCased as UiWidget[]) : undefined;
+}
+
 /**
  * Merges a list of {@link EventActions} objects into a single
  * {@link EventActions} object.
@@ -93,6 +121,9 @@ export function createEventActions(
  * 2. **Scalar fields** (`skipSummarization`, `transferToAgent`, `escalate`) —
  *    last-writer-wins: the value from the last source that sets the field is
  *    kept.
+ * 3. **List fields** (`renderUiWidgets`) — concatenated in source order. Both
+ *    the camelCase key and the snake_case `render_ui_widgets` spelling are
+ *    read on input; the result always uses the camelCase key.
  *
  * @param sources - Ordered list of partial {@link EventActions} to merge.
  *   Falsy entries are silently skipped.
@@ -127,6 +158,14 @@ export function mergeEventActions(
         result.requestedToolConfirmations,
         source.requestedToolConfirmations,
       );
+    }
+
+    const uiWidgets = readRenderUiWidgets(source);
+    if (uiWidgets?.length) {
+      result.renderUiWidgets = [
+        ...(result.renderUiWidgets ?? []),
+        ...uiWidgets,
+      ];
     }
 
     if (source.skipSummarization !== undefined) {
