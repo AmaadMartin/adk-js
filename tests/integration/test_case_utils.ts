@@ -406,8 +406,13 @@ export abstract class BaseTestServer {
       };
 
       const onStderr = (data: Buffer) => {
+        const message = data.toString();
+        // Echoed unconditionally: retention stops once the handshake settles,
+        // but a server that starts cleanly and fails later still has to reach
+        // the CI log.
+        console.error(`${serverName} Stderr: ${message}`);
         if (!capturing) return;
-        stderr = appendCapped(stderr, data.toString());
+        stderr = appendCapped(stderr, message);
       };
 
       const onError = (error: Error) => {

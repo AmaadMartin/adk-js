@@ -10,7 +10,7 @@ import {mkdtempSync, readFileSync} from 'node:fs';
 import {createServer, type Server} from 'node:net';
 import {platform, tmpdir} from 'node:os';
 import * as path from 'node:path';
-import {afterEach, describe, expect, it} from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 import {
   appendCapped,
   BaseTestServer,
@@ -106,6 +106,18 @@ function isNoSuchProcess(error: unknown): boolean {
     typeof error.code === 'string' &&
     error.code === 'ESRCH'
   );
+}
+
+/**
+ * Waits for `needle` to reach `lines`. The child writes on its own schedule, so
+ * an echo cannot be observed synchronously.
+ */
+async function waitForLine(lines: string[], needle: string): Promise<void> {
+  for (let i = 0; i < 500; i++) {
+    if (lines.some((line) => line.includes(needle))) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  expect.fail(`never echoed ${needle}`);
 }
 
 /** Binds `port` for the rest of the test, proving it was bindable. */
@@ -381,6 +393,33 @@ describe('BaseTestServer.startProcess', () => {
 
     await new Promise<void>((resolve) => child!.once('close', () => resolve()));
     expect(child!.exitCode).toBe(0);
+  });
+
+  it('echoes stderr written after the handshake has settled', async () => {
+    // Retention stops at settle, but the echo is what surfaces a server that
+    // starts cleanly and then fails mid-test, so it has to outlive the
+    // handshake.
+    const server = new ScriptedTestServer(
+      nodeScript(
+        `process.stdout.write('${START_MESSAGE}\\n');` +
+          "setTimeout(() => process.stderr.write('MID-TEST-FAILURE\\n'), 50);" +
+          STAY_ALIVE,
+      ),
+    );
+    const echoed: string[] = [];
+    const spy = vi
+      .spyOn(console, 'error')
+      .mockImplementation((...args: unknown[]) => {
+        echoed.push(args.map(String).join(' '));
+      });
+
+    try {
+      await server.start();
+
+      await waitForLine(echoed, 'Scripted Stderr: MID-TEST-FAILURE');
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 
