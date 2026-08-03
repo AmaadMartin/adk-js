@@ -25,10 +25,8 @@ const DEFAULT_MAX_ATTEMPTS = 30;
 /**
  * Options for {@link deployToAgentEngine}.
  *
- * The app name is derived from `agentPath` rather than supplied by the caller:
- * it names the agent directory inside the image and forms the Artifact
- * Registry tag `agent-engine-<appName>:latest`. `appName` is therefore omitted
- * from `BaseDeployOptions` here instead of being accepted and ignored. Use
+ * The app name is derived from `agentPath`: it names the agent directory in
+ * the image and forms the Artifact Registry tag `agent-engine-<appName>`. Use
  * `displayName` to set the user-facing name of the Reasoning Engine.
  */
 export interface DeployToAgentEngineOptions extends Omit<

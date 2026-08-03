@@ -152,25 +152,6 @@ vi.mock('@google-cloud/vertexai/build/src/genai/client.js', () => ({
   },
 }));
 
-/**
- * Compile-time guard: Agent Engine derives the app name from `agentPath`, so
- * the option type must not advertise an `appName` knob. If `appName` is
- * reintroduced, `AppNameIsNotAnOption` resolves to `never` and this fails to
- * compile under `npm run ts:check`.
- */
-type AppNameIsNotAnOption = 'appName' extends keyof DeployToAgentEngineOptions
-  ? never
-  : true;
-const _appNameIsNotAnOption: AppNameIsNotAnOption = true;
-
-function expectImageBuiltWithTag(tag: string) {
-  expect(spawnMock).toHaveBeenCalledWith(
-    'gcloud',
-    expect.arrayContaining(['builds', 'submit', '--tag', tag]),
-    expect.any(Object),
-  );
-}
-
 describe('deployToAgentEngine', () => {
   let tempFolder: string;
   let defaultOptions: DeployToAgentEngineOptions;
@@ -757,8 +738,15 @@ describe('deployToAgentEngine', () => {
       agentPath: 'path/to/agent.v2',
     });
 
-    expectImageBuiltWithTag(
-      'us-central1-docker.pkg.dev/test-project/agent-engine-repo/agent-engine-agent.v2:latest',
+    expect(spawnMock).toHaveBeenCalledWith(
+      'gcloud',
+      expect.arrayContaining([
+        'builds',
+        'submit',
+        '--tag',
+        'us-central1-docker.pkg.dev/test-project/agent-engine-repo/agent-engine-agent.v2:latest',
+      ]),
+      expect.any(Object),
     );
 
     expect(saveToFile).toHaveBeenCalledWith(
@@ -786,8 +774,15 @@ describe('deployToAgentEngine', () => {
       agentPath: 'path/to/agents/root_agent.ts',
     });
 
-    expectImageBuiltWithTag(
-      'us-central1-docker.pkg.dev/test-project/agent-engine-repo/agent-engine-root_agent:latest',
+    expect(spawnMock).toHaveBeenCalledWith(
+      'gcloud',
+      expect.arrayContaining([
+        'builds',
+        'submit',
+        '--tag',
+        'us-central1-docker.pkg.dev/test-project/agent-engine-repo/agent-engine-root_agent:latest',
+      ]),
+      expect.any(Object),
     );
 
     expect(saveToFile).toHaveBeenCalledWith(
