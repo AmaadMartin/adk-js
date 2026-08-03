@@ -8,6 +8,7 @@ import {afterEach, describe, expect, it, vi} from 'vitest';
 // `saveFilesAsArtifacts` is internal, so it and the types it consumes are all
 // imported from source: mixing in `@google/adk` would give `Context` two
 // distinct declarations and break type identity at the call site.
+import {BaseAgent} from '../../src/agents/base_agent.js';
 import {Context} from '../../src/agents/context.js';
 import {InvocationContext} from '../../src/agents/invocation_context.js';
 import {InMemoryArtifactService} from '../../src/artifacts/in_memory_artifact_service.js';
@@ -16,6 +17,8 @@ import {
   File,
   FileContentEncoding,
 } from '../../src/code_executors/code_execution_utils.js';
+import {PluginManager} from '../../src/plugins/plugin_manager.js';
+import {createSession} from '../../src/sessions/session.js';
 import {saveFilesAsArtifacts} from '../../src/utils/artifact_utils.js';
 import {logger} from '../../src/utils/logger.js';
 
@@ -39,11 +42,17 @@ describe('saveFilesAsArtifacts', () => {
 
   function createContext(artifactService?: ScopedArtifactService): Context {
     return new Context({
-      invocationContext: {
-        session: {state: {}},
-        agent: {name: 'test-agent'},
+      invocationContext: new InvocationContext({
+        invocationId: 'test-invocation',
+        agent: {name: 'test-agent'} as BaseAgent,
+        session: createSession({
+          id: SESSION_ID,
+          appName: APP_NAME,
+          userId: USER_ID,
+        }),
+        pluginManager: new PluginManager([]),
         artifactService,
-      } as unknown as InvocationContext,
+      }),
     });
   }
 
@@ -56,7 +65,7 @@ describe('saveFilesAsArtifacts', () => {
     };
   }
 
-  it('saves every file and reports its filename and version', async () => {
+  it('saves every file and maps its filename to its version', async () => {
     const artifactService = createArtifactService();
     const saveSpy = vi.spyOn(artifactService, 'saveArtifact');
     const context = createContext(artifactService);
@@ -66,13 +75,7 @@ describe('saveFilesAsArtifacts', () => {
       textFile('second.txt', 'two'),
     ]);
 
-    expect(result).toEqual({
-      savedArtifacts: [
-        {filename: 'first.txt', version: 0},
-        {filename: 'second.txt', version: 0},
-      ],
-      artifactSaveErrors: [],
-    });
+    expect(result).toEqual({'first.txt': 0, 'second.txt': 0});
     expect(saveSpy).toHaveBeenCalledTimes(2);
     expect(saveSpy).toHaveBeenNthCalledWith(1, {
       filename: 'first.txt',
@@ -83,6 +86,21 @@ describe('saveFilesAsArtifacts', () => {
         },
       },
     });
+  });
+
+  it('maps each file to the version its own save resolved to', async () => {
+    const artifactService = createArtifactService();
+    vi.spyOn(artifactService, 'saveArtifact')
+      .mockResolvedValueOnce(3)
+      .mockResolvedValueOnce(7);
+    const context = createContext(artifactService);
+
+    const result = await saveFilesAsArtifacts(context, [
+      textFile('first.txt', 'one'),
+      textFile('second.txt', 'two'),
+    ]);
+
+    expect(result).toEqual({'first.txt': 3, 'second.txt': 7});
   });
 
   it('base64-encodes utf-8 content exactly once', async () => {
@@ -126,6 +144,21 @@ describe('saveFilesAsArtifacts', () => {
     expect(artifact?.inlineData?.mimeType).toBe('image/png');
   });
 
+  it('treats an absent content encoding as base64', async () => {
+    const artifactService = createArtifactService();
+    const context = createContext(artifactService);
+    const encoded = Buffer.from('sandbox bytes', 'utf-8').toString('base64');
+
+    await saveFilesAsArtifacts(context, [
+      {name: 'chart.png', content: encoded, mimeType: 'image/png'},
+    ]);
+
+    const artifact = await artifactService.loadArtifact({
+      filename: 'chart.png',
+    });
+    expect(artifact?.inlineData?.data).toBe(encoded);
+  });
+
   it('records the saved version in the event actions artifact delta', async () => {
     const artifactService = createArtifactService();
     const context = createContext(artifactService);
@@ -134,25 +167,40 @@ describe('saveFilesAsArtifacts', () => {
       textFile('delta.txt', 'content'),
     ]);
 
-    expect(context.eventActions.artifactDelta['delta.txt']).toBe(
-      result?.savedArtifacts[0].version,
-    );
+    expect(context.eventActions.artifactDelta).toEqual({
+      'delta.txt': result['delta.txt'],
+    });
   });
 
-  it('returns undefined and warns when no artifact service is configured', async () => {
+  it('skips silently when no artifact service is configured', async () => {
+    const debugSpy = vi.spyOn(logger, 'debug').mockImplementation(() => {});
     const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
     const context = createContext();
 
     const result = await saveFilesAsArtifacts(context, [
       textFile('orphan.txt', 'content'),
+      textFile('second.txt', 'content'),
     ]);
 
-    expect(result).toBeUndefined();
-    expect(warnSpy).toHaveBeenCalledOnce();
+    expect(result).toEqual({});
+    expect(context.eventActions.artifactDelta).toEqual({});
+    // Skipped, not attempted-and-failed: an unconfigured artifact service is a
+    // supported setup and must not produce a warning per output file.
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect(debugSpy).toHaveBeenCalledOnce();
   });
 
-  it('reports a failing save per file and still saves the rest', async () => {
-    const errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
+  it('returns an empty map without saving when there are no files', async () => {
+    const artifactService = createArtifactService();
+    const saveSpy = vi.spyOn(artifactService, 'saveArtifact');
+    const context = createContext(artifactService);
+
+    expect(await saveFilesAsArtifacts(context, [])).toEqual({});
+    expect(saveSpy).not.toHaveBeenCalled();
+  });
+
+  it('omits a failing file and still saves the rest', async () => {
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
     const artifactService = createArtifactService();
     vi.spyOn(artifactService, 'saveArtifact').mockRejectedValueOnce(
       new Error('artifact backend unavailable'),
@@ -164,13 +212,9 @@ describe('saveFilesAsArtifacts', () => {
       textFile('survivor.txt', 'two'),
     ]);
 
-    expect(result).toEqual({
-      savedArtifacts: [{filename: 'survivor.txt', version: 0}],
-      artifactSaveErrors: [
-        {filename: 'doomed.txt', error: 'artifact backend unavailable'},
-      ],
-    });
-    expect(errorSpy).toHaveBeenCalledOnce();
+    expect(result).toEqual({'survivor.txt': 0});
+    expect(warnSpy).toHaveBeenCalledOnce();
+    expect(warnSpy.mock.calls[0][0]).toContain('artifact backend unavailable');
   });
 
   it('refuses a filename in the user namespace without calling saveArtifact', async () => {
@@ -184,21 +228,12 @@ describe('saveFilesAsArtifacts', () => {
       textFile('allowed.txt', 'two'),
     ]);
 
-    expect(result?.savedArtifacts).toEqual([
-      {filename: 'allowed.txt', version: 0},
-    ]);
-    expect(result?.artifactSaveErrors).toEqual([
-      {
-        filename: 'user:escalated.txt',
-        error:
-          "Artifact names starting with 'user:' are not accepted from " +
-          'produced files.',
-      },
-    ]);
+    expect(result).toEqual({'allowed.txt': 0});
     expect(saveSpy).toHaveBeenCalledOnce();
     expect(saveSpy).toHaveBeenCalledWith(
       expect.objectContaining({filename: 'allowed.txt'}),
     );
     expect(warnSpy).toHaveBeenCalledOnce();
+    expect(warnSpy.mock.calls[0][0]).toContain('user:escalated.txt');
   });
 });
