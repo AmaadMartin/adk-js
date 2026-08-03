@@ -32,6 +32,7 @@ export enum TaskState {
   CANCELED = 'canceled',
   REJECTED = 'rejected',
   INPUT_REQUIRED = 'input-required',
+  AUTH_REQUIRED = 'auth-required',
 }
 
 /**
