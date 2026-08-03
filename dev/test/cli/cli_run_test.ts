@@ -23,7 +23,10 @@ vi.mock('../../src/utils/file_utils.js', () => ({
 
 vi.mock('@google/adk', () => {
   return {
-    Runner: vi.fn().mockImplementation(() => ({
+    // `vi.fn(fn)` rather than `vi.fn().mockImplementation(fn)`: the suite's
+    // `vi.restoreAllMocks()` resets every registered mock's implementation, and
+    // only the constructor-argument form survives it.
+    Runner: vi.fn(() => ({
       runAsync: vi.fn().mockImplementation(async function* () {
         yield {
           author: 'model',
@@ -32,7 +35,7 @@ vi.mock('@google/adk', () => {
       }),
     })),
     InMemoryArtifactService: vi.fn(),
-    InMemorySessionService: vi.fn().mockImplementation(() => ({
+    InMemorySessionService: vi.fn(() => ({
       createSession: vi.fn().mockResolvedValue({
         id: 'session-123',
         appName: 'test-agent',
@@ -209,5 +212,22 @@ describe('cli_run', () => {
       expect.stringContaining('prompted-session-id.session.json'),
       expect.anything(),
     );
+  });
+
+  it('should propagate agent load failures to the caller', async () => {
+    (mockAgentFile.load as Mock).mockRejectedValue(new Error('load failed'));
+
+    await expect(runAgent({agentPath: 'agent.ts'})).rejects.toThrow(
+      'load failed',
+    );
+  });
+
+  it('should dispose the agent file when the run fails', async () => {
+    (mockAgentFile.load as Mock).mockRejectedValue(new Error('load failed'));
+
+    await expect(runAgent({agentPath: 'agent.ts'})).rejects.toThrow(
+      'load failed',
+    );
+    expect(mockAgentFile[Symbol.asyncDispose]).toHaveBeenCalled();
   });
 });
