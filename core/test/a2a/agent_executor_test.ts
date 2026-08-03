@@ -12,6 +12,7 @@ import {
   BaseSessionService,
   createEvent,
   createEventActions,
+  createSession,
   Runner,
   RunnerConfig,
   Session,
@@ -162,6 +163,45 @@ describe('A2AAgentExecutor', () => {
         kind: 'status-update',
       }),
     );
+  });
+
+  it('publishes a completed final status when the run only produces artifact updates', async () => {
+    mockSessionService.getSession.mockResolvedValue(
+      createSession({
+        id: 'session-id',
+        userId: 'test-user',
+        appName: 'test-app',
+      }),
+    );
+
+    async function* mockRunAsync() {
+      yield createEvent({
+        author: 'model',
+        content: {role: 'model', parts: [{text: 'the answer'}]},
+        partial: false,
+        actions: createEventActions(),
+      });
+    }
+
+    // The module-level vi.mock replaces Runner with a partial double; the
+    // executor only reads appName, sessionService and runAsync from it.
+    vi.mocked(Runner).mockImplementation(((config: RunnerConfig) => ({
+      appName: config.appName,
+      sessionService: config.sessionService,
+      runAsync: mockRunAsync,
+    })) as unknown as () => Runner);
+
+    const executor = new A2AAgentExecutor({
+      runner: {appName: 'test-app', sessionService: mockSessionService},
+    });
+
+    await executor.execute(createRequestContext(), mockEventBus);
+
+    const calls = mockEventBus.publish.mock.calls;
+    const finalEvent = calls[calls.length - 1][0] as TaskStatusUpdateEvent;
+    expect(finalEvent.kind).toBe('status-update');
+    expect(finalEvent.status.state).toBe('completed');
+    expect(finalEvent.final).toBe(true);
   });
 
   it('should return early with input required event if task needs input', async () => {

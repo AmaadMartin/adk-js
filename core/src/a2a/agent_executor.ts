@@ -33,6 +33,10 @@ import {
   getA2ASessionMetadata,
 } from './metadata_converter_utils.js';
 import {toA2AParts, toGenAIContent} from './part_converter_utils.js';
+import {
+  applyAggregatedTaskState,
+  TaskResultAggregator,
+} from './task_result_aggregator.js';
 
 /**
  * Represents a runner or a configuration for a runner.
@@ -149,6 +153,7 @@ export class A2AAgentExecutor implements AgentExecutor {
       );
 
       const adkEvents: AdkEvent[] = [];
+      const taskResultAggregator = new TaskResultAggregator();
       for await (const adkEvent of adkRunner.runAsync({
         userId,
         sessionId,
@@ -171,13 +176,17 @@ export class A2AAgentExecutor implements AgentExecutor {
           a2aEvent,
         );
 
+        taskResultAggregator.processEvent(a2aEvent);
         eventBus.publish(a2aEvent);
       }
 
       await this.publishFinalTaskStatus({
         executorContext,
         eventBus,
-        event: getFinalTaskStatusUpdate(adkEvents, executorContext),
+        event: applyAggregatedTaskState(
+          getFinalTaskStatusUpdate(adkEvents, executorContext),
+          taskResultAggregator,
+        ),
       });
     } catch (e: unknown) {
       const error = e as Error;
