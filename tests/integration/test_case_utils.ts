@@ -313,12 +313,11 @@ export function appendCapped(
   return (buffer + chunk).slice(-maxChars);
 }
 
-function excerpt(output: string): string {
-  return output || '(no output captured)';
-}
+/** Stands in for a stream the child never wrote to. */
+const NO_OUTPUT = '(no output captured)';
 
 function formatCapturedOutput(stdout: string, stderr: string): string {
-  return `\nstdout:\n${excerpt(stdout)}\nstderr:\n${excerpt(stderr)}`;
+  return `\nstdout:\n${stdout || NO_OUTPUT}\nstderr:\n${stderr || NO_OUTPUT}`;
 }
 
 /**

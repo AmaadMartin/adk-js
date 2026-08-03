@@ -32,6 +32,8 @@ const OUTPUT_EXCERPT_CHARS = 4000;
  * the exit was never reported, short enough to fail fast when that regresses.
  */
 const GRANDCHILD_START_TIMEOUT_MS = 10000;
+/** Children write on their own schedule, so observations are polled. */
+const WAIT_FOR_OPTIONS = {timeout: 5000, interval: 10};
 const IS_WINDOWS = platform() === 'win32';
 
 const spawned: ChildProcessWithoutNullStreams[] = [];
@@ -86,16 +88,14 @@ function hasExited(child: ChildProcessWithoutNullStreams): boolean {
  * Waits for the harness to reach its spawn closure. `startProcess` awaits the
  * port reservation first, so the child handle is not available synchronously.
  */
-async function waitForChild(
+function waitForChild(
   server: ScriptedTestServer,
 ): Promise<ChildProcessWithoutNullStreams> {
-  for (let i = 0; i < 500 && !server.child; i++) {
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  if (!server.child) {
-    expect.fail('the server never reached its spawn closure');
-  }
-  return server.child;
+  return vi.waitFor(() => {
+    const child = server.child;
+    if (!child) expect.fail('the server never reached its spawn closure');
+    return child;
+  }, WAIT_FOR_OPTIONS);
 }
 
 /** True for the Node error raised when a pid no longer exists. */
@@ -106,18 +106,6 @@ function isNoSuchProcess(error: unknown): boolean {
     typeof error.code === 'string' &&
     error.code === 'ESRCH'
   );
-}
-
-/**
- * Waits for `needle` to reach `lines`. The child writes on its own schedule, so
- * an echo cannot be observed synchronously.
- */
-async function waitForLine(lines: string[], needle: string): Promise<void> {
-  for (let i = 0; i < 500; i++) {
-    if (lines.some((line) => line.includes(needle))) return;
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  expect.fail(`never echoed ${needle}`);
 }
 
 /** Binds `port` for the rest of the test, proving it was bindable. */
@@ -406,19 +394,20 @@ describe('BaseTestServer.startProcess', () => {
           STAY_ALIVE,
       ),
     );
-    const echoed: string[] = [];
-    const spy = vi
-      .spyOn(console, 'error')
-      .mockImplementation((...args: unknown[]) => {
-        echoed.push(args.map(String).join(' '));
-      });
+    const echoed = vi.spyOn(console, 'error');
 
     try {
       await server.start();
 
-      await waitForLine(echoed, 'Scripted Stderr: MID-TEST-FAILURE');
+      await vi.waitFor(
+        () =>
+          expect(echoed).toHaveBeenCalledWith(
+            expect.stringContaining('Scripted Stderr: MID-TEST-FAILURE'),
+          ),
+        WAIT_FOR_OPTIONS,
+      );
     } finally {
-      spy.mockRestore();
+      echoed.mockRestore();
     }
   });
 });
