@@ -216,10 +216,12 @@ export function toMcpServer(
     async ({request}, extra) => {
       // A failed creation must not stay memoised, or one transient session
       // store error would brick every later call on this server.
-      sessionIdPromise ??= createSessionId(agentRunner).catch((error) => {
-        sessionIdPromise = undefined;
-        throw error;
-      });
+      sessionIdPromise ??= createSessionId(agentRunner).catch(
+        (error: unknown) => {
+          sessionIdPromise = undefined;
+          throw error;
+        },
+      );
       const sessionId = await sessionIdPromise;
       return {content: await runAgent(agentRunner, request, sessionId, extra)};
     },
