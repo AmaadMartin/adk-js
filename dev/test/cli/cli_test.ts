@@ -12,6 +12,7 @@ import {createAgent} from '../../src/cli/cli_create.js';
 import {runAgent} from '../../src/cli/cli_run.js';
 import {deployToAgentEngine} from '../../src/cli/deploy/cli_deploy_agent_engine.js';
 import {deployToCloudRun} from '../../src/cli/deploy/cli_deploy_cloud_run.js';
+import {runIntegrationTests} from '../../src/integration/run_integration_tests.js';
 import {AdkApiServer} from '../../src/server/adk_api_server.js';
 import {FileModuleType} from '../../src/utils/agent_loader.js';
 
@@ -39,6 +40,10 @@ vi.mock('../../src/cli/cli_run', () => ({
   runAgent: vi.fn(),
 }));
 
+vi.mock('../../src/integration/run_integration_tests', () => ({
+  runIntegrationTests: vi.fn(),
+}));
+
 vi.mock('../../src/version', () => ({
   version: '1.0.0-test',
 }));
@@ -59,6 +64,17 @@ const AGENT_FILE_COMMANDS = [
   'deploy cloud_run',
   'deploy agent_engine',
   'deploy reasoning_engine',
+];
+
+/** Command surfaces that register the shared `--log_level` option. */
+const LOG_LEVEL_COMMANDS = [
+  'web',
+  'api_server',
+  'run',
+  'deploy cloud_run',
+  'deploy agent_engine',
+  'deploy reasoning_engine',
+  'integration conformance',
 ];
 
 /** Resolves a space-separated command path, e.g. `deploy cloud_run`. */
@@ -113,6 +129,7 @@ function expectNoActionRan() {
   expect(runAgent).not.toHaveBeenCalled();
   expect(deployToCloudRun).not.toHaveBeenCalled();
   expect(deployToAgentEngine).not.toHaveBeenCalled();
+  expect(runIntegrationTests).not.toHaveBeenCalled();
 }
 
 describe('CLI Entrypoint', () => {
@@ -214,6 +231,120 @@ describe('CLI Entrypoint', () => {
 
       const args = vi.mocked(AdkApiServer).mock.calls[0][0];
       expect(args.agentFileLoadOptions).toMatchObject({moduleType: undefined});
+    });
+  });
+
+  describe('option: --log_level validation', () => {
+    it.each([
+      ['debug', LogLevel.DEBUG],
+      ['info', LogLevel.INFO],
+      ['warn', LogLevel.WARN],
+      ['error', LogLevel.ERROR],
+    ])('applies --log_level %s', async (level, expected) => {
+      await parse(['web', '--log_level', level]);
+
+      expect(setLogLevel).toHaveBeenCalledWith(expected);
+    });
+
+    it.each([
+      ['DEBUG', LogLevel.DEBUG],
+      ['Warn', LogLevel.WARN],
+    ])(
+      'accepts --log_level %s regardless of letter case',
+      async (level, expected) => {
+        await parse(['web', '--log_level', level]);
+
+        expect(setLogLevel).toHaveBeenCalledWith(expected);
+      },
+    );
+
+    it('normalizes the value handed to the Cloud Run deploy path', async () => {
+      await parse(['deploy', 'cloud_run', '--log_level=DEBUG']);
+
+      expect(vi.mocked(deployToCloudRun).mock.calls[0][0]).toMatchObject({
+        logLevel: 'debug',
+      });
+    });
+
+    it.each(LOG_LEVEL_COMMANDS)(
+      'lists the accepted levels in `%s` help',
+      (commandPath) => {
+        const help = findCommand(program, commandPath)
+          .helpInformation()
+          .replace(/\s+/g, ' ');
+
+        expect(help).toContain(
+          '(choices: "debug", "info", "warn", "error", default: "info")',
+        );
+      },
+    );
+
+    describe('rejection', () => {
+      beforeEach(() => {
+        applyExitOverride(program);
+      });
+
+      it.each(LOG_LEVEL_COMMANDS)(
+        'rejects an unsupported --log_level on `%s`',
+        async (commandPath) => {
+          await expect(
+            parse(argvFor(commandPath, '--log_level', 'trace')),
+          ).rejects.toThrow(/Allowed choices are debug, info, warn, error\./);
+
+          expect(setLogLevel).not.toHaveBeenCalled();
+          expectNoActionRan();
+        },
+      );
+
+      it('reports the rejection as a commander invalid-argument error', async () => {
+        await expect(
+          parse(['web', '--log_level', 'debbug']),
+        ).rejects.toMatchObject({
+          code: 'commander.invalidArgument',
+          message:
+            "error: option '--log_level <string>' argument 'debbug' is invalid. " +
+            'Allowed choices are debug, info, warn, error.',
+        });
+      });
+
+      it('rejects a near-miss level before anything is baked into a deploy', async () => {
+        await expect(
+          parse(['deploy', 'cloud_run', '--log_level=DEBUG2']),
+        ).rejects.toThrow(/Allowed choices are debug, info, warn, error\./);
+
+        expect(deployToCloudRun).not.toHaveBeenCalled();
+      });
+
+      it('rejects an empty --log_level', async () => {
+        await expect(parse(['web', '--log_level', ''])).rejects.toThrow(
+          /Allowed choices are debug, info, warn, error\./,
+        );
+
+        expectNoActionRan();
+      });
+
+      // The `Object.prototype` keys that survive lower-casing. They would be
+      // accepted as levels if the level table were ever a plain object
+      // consulted with the `in` operator.
+      it.each(['constructor', '__proto__', 'CONSTRUCTOR', '__PROTO__'])(
+        'rejects the inherited key --log_level %s',
+        async (level) => {
+          await expect(parse(['web', '--log_level', level])).rejects.toThrow(
+            /Allowed choices are debug, info, warn, error\./,
+          );
+
+          expect(setLogLevel).not.toHaveBeenCalled();
+          expectNoActionRan();
+        },
+      );
+
+      it('keeps an inherited key out of the Cloud Run deploy path', async () => {
+        await expect(
+          parse(['deploy', 'cloud_run', '--log_level=__proto__']),
+        ).rejects.toThrow(/Allowed choices are debug, info, warn, error\./);
+
+        expect(deployToCloudRun).not.toHaveBeenCalled();
+      });
     });
   });
 

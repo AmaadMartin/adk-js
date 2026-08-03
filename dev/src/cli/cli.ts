@@ -13,7 +13,7 @@ import {
   getSessionServiceFromUri,
   setLogLevel as setAdkCoreLogLevel,
 } from '@google/adk';
-import {Argument, Command, Option} from 'commander';
+import {Argument, Command, InvalidArgumentError, Option} from 'commander';
 import dotenv from 'dotenv';
 import * as path from 'path';
 import {runIntegrationTests} from '../integration/run_integration_tests.js';
@@ -29,12 +29,33 @@ import {deployToCloudRun} from './deploy/cli_deploy_cloud_run.js';
 
 dotenv.config({quiet: true});
 
-const LOG_LEVEL_MAP: Record<string, LogLevel> = {
-  'debug': LogLevel.DEBUG,
-  'info': LogLevel.INFO,
-  'warn': LogLevel.WARN,
-  'error': LogLevel.ERROR,
-};
+const LOG_LEVEL_MAP = new Map<string, LogLevel>([
+  ['debug', LogLevel.DEBUG],
+  ['info', LogLevel.INFO],
+  ['warn', LogLevel.WARN],
+  ['error', LogLevel.ERROR],
+]);
+
+/** The `--log_level` values the CLI accepts. */
+const LOG_LEVEL_CHOICES = [...LOG_LEVEL_MAP.keys()];
+
+/**
+ * Validates a `--log_level` value and normalizes it to its canonical lower-case
+ * name.
+ *
+ * `Option.choices()` on its own is case-sensitive and would reject
+ * `--log_level DEBUG`, which works today and which the Python SDK accepts via
+ * `click.Choice(..., case_sensitive=False)`.
+ */
+function parseLogLevel(value: string): string {
+  const normalized = value.toLowerCase();
+  if (!LOG_LEVEL_MAP.has(normalized)) {
+    throw new InvalidArgumentError(
+      `Allowed choices are ${LOG_LEVEL_CHOICES.join(', ')}.`,
+    );
+  }
+  return normalized;
+}
 
 function getLogLevelFromOptions(options: {
   verbose?: boolean;
@@ -45,7 +66,8 @@ function getLogLevelFromOptions(options: {
   }
 
   if (typeof options.log_level === 'string') {
-    return LOG_LEVEL_MAP[options.log_level.toLowerCase()] || LogLevel.INFO;
+    // `??`, not `||`: LogLevel.DEBUG is 0 and would otherwise be discarded.
+    return LOG_LEVEL_MAP.get(options.log_level) ?? LogLevel.INFO;
   }
 
   return LogLevel.INFO;
@@ -118,7 +140,14 @@ const VERBOSE_OPTION = new Option(
 const LOG_LEVEL_OPTION = new Option(
   '--log_level <string>',
   'Optional. The log level of the server',
-).default('info');
+)
+  // `.choices()` populates the list that `--help` and commander's "Allowed
+  // choices are ..." message render; `.argParser()` then replaces its
+  // case-sensitive validator with the case-insensitive one, so it must come
+  // second.
+  .choices(LOG_LEVEL_CHOICES)
+  .argParser(parseLogLevel)
+  .default('info');
 const SESSION_SERVICE_URI_OPTION = new Option(
   '--session_service_uri <string>',
   'Optional. The URI of the session service. Supported URIs: memory:// for in-memory session service.',
