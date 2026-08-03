@@ -102,6 +102,8 @@ describe('AgentEngineSandboxCodeExecutor', () => {
   it('defaults location to us-central1 if missing in env', () => {
     vi.stubEnv('GOOGLE_CLOUD_LOCATION', '');
     executor = new AgentEngineSandboxCodeExecutor({projectId: TEST_PROJECT});
+    // Not TEST_LOCATION: this pins the library default, which only happens to
+    // share its value. Reusing the constant here would make the test vacuous.
     expect(executor['location']).toBe('us-central1');
   });
 

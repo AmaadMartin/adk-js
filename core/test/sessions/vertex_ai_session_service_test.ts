@@ -27,7 +27,13 @@ import {
 } from '@google/adk/sessions/vertex_ai_session_service.js';
 import {logger} from '@google/adk/utils/logger.js';
 
-/** Vertex AI requires an app name that is digits or a full resource name. */
+/**
+ * Vertex AI requires an app name that is digits or a full resource name.
+ *
+ * Inputs and mock fixtures only. Assertions that pin the
+ * appName -> reasoningEngines/<id> mapping keep their expected value
+ * hardcoded, so that mapping stays pinned independently of this value.
+ */
 const APP_NAME = '12345';
 
 describe('isVertexAiConnectionString', () => {
@@ -195,7 +201,7 @@ describe('VertexAiSessionService', () => {
       expect(session.id).toBe('test-id'); // Read from mock name 'test-id'
       expect(session.appName).toBe(APP_NAME);
       expect(mockClient.createInternal).toHaveBeenCalledWith({
-        name: `reasoningEngines/${APP_NAME}`,
+        name: 'reasoningEngines/12345',
         userId: 'testUser',
         config: {sessionState: {foo: 'bar'}},
       });
@@ -214,7 +220,7 @@ describe('VertexAiSessionService', () => {
       expect(session.id).toBe('test-id');
       expect(session.appName).toBe(APP_NAME);
       expect(mockClient.createInternal).toHaveBeenCalledWith({
-        name: `reasoningEngines/${APP_NAME}`,
+        name: 'reasoningEngines/12345',
         userId: 'testUser',
         config: {sessionState: {foo: 'bar'}},
       });
@@ -289,7 +295,7 @@ describe('VertexAiSessionService', () => {
       });
 
       expect(mockClient.createInternal).toHaveBeenCalledWith({
-        name: `reasoningEngines/${APP_NAME}`,
+        name: 'reasoningEngines/12345',
         userId: 'testUser',
         config: {ttl: '7200s'},
       });
@@ -303,7 +309,7 @@ describe('VertexAiSessionService', () => {
       });
 
       expect(mockClient.createInternal).toHaveBeenCalledWith({
-        name: `reasoningEngines/${APP_NAME}`,
+        name: 'reasoningEngines/12345',
         userId: 'testUser',
         config: {expireTime: '2025-10-01T00:00:00Z'},
       });
@@ -336,10 +342,10 @@ describe('VertexAiSessionService', () => {
       expect(session?.id).toBe('my-session-id');
       expect(session?.appName).toBe(APP_NAME);
       expect(mockClient.get).toHaveBeenCalledWith({
-        name: `reasoningEngines/${APP_NAME}/sessions/my-session-id`,
+        name: 'reasoningEngines/12345/sessions/my-session-id',
       });
       expect(mockClient.events.listInternal).toHaveBeenCalledWith({
-        name: `reasoningEngines/${APP_NAME}/sessions/my-session-id`,
+        name: 'reasoningEngines/12345/sessions/my-session-id',
         config: {},
       });
     });
@@ -627,7 +633,7 @@ describe('VertexAiSessionService', () => {
       });
 
       expect(mockClient.listInternal).toHaveBeenCalledWith({
-        name: `reasoningEngines/${APP_NAME}`,
+        name: 'reasoningEngines/12345',
         config: {filter: 'user_id="testUser"'},
       });
       expect(response.sessions).toHaveLength(2);
@@ -647,7 +653,7 @@ describe('VertexAiSessionService', () => {
       });
 
       expect(mockClient.listInternal).toHaveBeenCalledWith({
-        name: `reasoningEngines/${APP_NAME}`,
+        name: 'reasoningEngines/12345',
         config: {filter: 'user_id="attacker\\" OR user_id!=\\""'},
       });
     });
@@ -953,7 +959,7 @@ describe('VertexAiSessionService', () => {
       });
 
       expect(mockClient.delete).toHaveBeenCalledWith({
-        name: `reasoningEngines/${APP_NAME}/sessions/delete-session`,
+        name: `reasoningEngines/12345/sessions/delete-session`,
       });
     });
 
@@ -1040,7 +1046,7 @@ describe('VertexAiSessionService', () => {
       expect(session.lastUpdateTime).toBe(event.timestamp);
 
       expect(mockClient.events.append).toHaveBeenCalledWith({
-        name: `reasoningEngines/${APP_NAME}/sessions/append-session`,
+        name: 'reasoningEngines/12345/sessions/append-session',
         author: 'user',
         invocationId: 'inv-1700000000000',
         timestamp: new Date(1620000000000).toISOString(),
