@@ -265,6 +265,9 @@ const OUTPUT_EXCERPT_CHARS = 4000;
 /** How long `stop()` waits for a clean exit before escalating to SIGKILL. */
 const PROCESS_EXIT_TIMEOUT_MS = 5000;
 
+/** How long a premature `'exit'` waits for the stdio pipes to reach EOF. */
+const STDIO_FLUSH_GRACE_MS = 250;
+
 /**
  * Returns a TCP port on `host` that the OS has just confirmed is free, by
  * binding port 0, reading the assignment back and releasing it.
@@ -295,16 +298,26 @@ export async function reserveFreePort(host: string): Promise<number> {
 }
 
 /**
- * Keeps only the last {@link OUTPUT_EXCERPT_CHARS} characters of a captured
- * stream: a child that dies noisily writes far more than is useful, and the
- * bytes it wrote last are the ones explaining why.
+ * Appends `chunk` to `buffer`, retaining only the last
+ * {@link OUTPUT_EXCERPT_CHARS} characters.
+ *
+ * Capping on the way in rather than on the way out bounds what a child can make
+ * the harness hold: a server stuck in a log loop writes for the whole readiness
+ * window, and only its last words explain why it never started.
  */
-function excerpt(output: string): string {
-  return output.slice(-OUTPUT_EXCERPT_CHARS) || '(no output captured)';
+export function appendCapped(
+  buffer: string,
+  chunk: string,
+  maxChars = OUTPUT_EXCERPT_CHARS,
+): string {
+  return (buffer + chunk).slice(-maxChars);
 }
 
+/** Stands in for a stream the child never wrote to. */
+const NO_OUTPUT = '(no output captured)';
+
 function formatCapturedOutput(stdout: string, stderr: string): string {
-  return `\nstdout:\n${excerpt(stdout)}\nstderr:\n${excerpt(stderr)}`;
+  return `\nstdout:\n${stdout || NO_OUTPUT}\nstderr:\n${stderr || NO_OUTPUT}`;
 }
 
 /**
@@ -364,11 +377,14 @@ export abstract class BaseTestServer {
       // of the child so its pipes keep draining; a chatty server that filled
       // the 64 KB pipe buffer would otherwise block.
       let capturing = true;
+      let flushGrace: ReturnType<typeof setTimeout> | undefined;
 
       const settle = (error?: Error) => {
         clearTimeout(timer);
+        clearTimeout(flushGrace);
         capturing = false;
         child.off('error', onError);
+        child.off('exit', onExit);
         child.off('close', onClose);
         if (error) {
           reject(error);
@@ -379,7 +395,7 @@ export abstract class BaseTestServer {
 
       const onStdout = (data: Buffer) => {
         if (!capturing) return;
-        stdout += data.toString();
+        stdout = appendCapped(stdout, data.toString());
 
         // Matched against the accumulated output, not this chunk: a banner
         // split across two writes must still complete the handshake.
@@ -389,8 +405,13 @@ export abstract class BaseTestServer {
       };
 
       const onStderr = (data: Buffer) => {
+        const message = data.toString();
+        // Echoed unconditionally: retention stops once the handshake settles,
+        // but a server that starts cleanly and fails later still has to reach
+        // the CI log.
+        console.error(`${serverName} Stderr: ${message}`);
         if (!capturing) return;
-        stderr += data.toString();
+        stderr = appendCapped(stderr, message);
       };
 
       const onError = (error: Error) => {
@@ -418,6 +439,21 @@ export abstract class BaseTestServer {
         );
       };
 
+      // A child that leaves a grandchild holding the inherited stdio pipes --
+      // `go run` does exactly that -- emits 'exit' but never 'close', so the
+      // wait for a drained pipe is bounded and then reported anyway. Reporting
+      // the exit code beats stalling until the readiness timeout claims the
+      // server merely started slowly.
+      const onExit = (
+        code: number | null,
+        signal: ChildProcessWithoutNullStreams['signalCode'],
+      ) => {
+        flushGrace = setTimeout(
+          () => onClose(code, signal),
+          STDIO_FLUSH_GRACE_MS,
+        );
+      };
+
       const timer = setTimeout(() => {
         settle(
           new Error(
@@ -430,6 +466,7 @@ export abstract class BaseTestServer {
       child.stdout.on('data', onStdout);
       child.stderr.on('data', onStderr);
       child.on('error', onError);
+      child.on('exit', onExit);
       child.on('close', onClose);
     });
 
