@@ -102,6 +102,11 @@ function getBoolean(option?: string | boolean): boolean {
  * declared `[agents_dir]` argument followed by every token it did not
  * recognize; values of recognized options (`--port 9000`) are consumed during
  * parsing and never appear here.
+ *
+ * Commander discards the `--` end-of-options marker only while it is still
+ * collecting operands, so a `--` that follows an unrecognized flag survives in
+ * `command.args`. `gcloud run deploy` declares no trailing-remainder argument
+ * and fails with `unrecognized arguments: --`, so every bare marker is dropped.
  */
 function getExtraGcloudArgs(command: Command): string[] {
   const extraArgs = [...command.args];
@@ -110,7 +115,20 @@ function getExtraGcloudArgs(command: Command): string[] {
   if (extraArgs.length > 0 && !extraArgs[0].startsWith('-')) {
     extraArgs.shift();
   }
-  return extraArgs;
+  return extraArgs.filter((arg) => arg !== '--');
+}
+
+/**
+ * Resolves the `[agents_dir]` value of a command that forwards unknown flags.
+ *
+ * Commander binds the first unmatched token to the declared argument even when
+ * that token is an unknown flag being forwarded, so an omitted directory would
+ * otherwise resolve the deploy source to `<cwd>/--some-gcloud-flag`. An agent
+ * path never starts with `-` (a relative one is spelled `./-name`), so fall
+ * back to the argument's own default.
+ */
+function resolveAgentPath(agentsDir: string): string {
+  return getAbsolutePath(agentsDir.startsWith('-') ? process.cwd() : agentsDir);
 }
 
 const AGENT_DIR_ARGUMENT = new Argument(
@@ -209,6 +227,19 @@ export const AGENT_ENGINE_ID_OPTION = new Option(
   '--agent_engine_id [id]',
   'Optional. ID of the Agent Engine instance to update if it exists (default: undefined, which means a new instance will be created). If project and region are set, this should be the resource ID or the full resource name (projects/.../locations/.../reasoningEngines/...).',
 );
+
+const CLOUD_RUN_HELP_EPILOG = `
+Any option that is not listed above is forwarded verbatim to "gcloud run deploy".
+Use -- to separate gcloud arguments from adk arguments.
+
+Examples:
+  adk deploy cloud_run --project=[project] --region=[region] path/to/my_agent
+  adk deploy cloud_run path/to/my_agent -- --min-instances=2
+
+ADK sets --source, --project, --port, --verbosity and --region itself, and also
+reserves the gcloud env-var flags (--update-env-vars, --set-env-vars,
+--remove-env-vars, --clear-env-vars, --env-vars-file) when --a2a_auth_token is
+set. Passing a reserved flag as a gcloud argument is rejected.`;
 
 /**
  * Creates the ADK CLI program.
@@ -415,6 +446,7 @@ export function createProgram(): Command {
     .allowExcessArguments();
 
   DEPLOY_COMMAND.command('cloud_run')
+    .description('Deploys an agent to Cloud Run')
     .addArgument(AGENT_DIR_ARGUMENT)
     .allowUnknownOption()
     .allowExcessArguments()
@@ -443,6 +475,7 @@ export function createProgram(): Command {
     .addOption(AGENT_FILE_MODULE_TYPE)
     .addOption(A2A_OPTION)
     .addOption(A2A_AUTH_TOKEN_DEPLOY_OPTION)
+    .addHelpText('after', CLOUD_RUN_HELP_EPILOG)
     .action(
       async (
         agentPath: string,
@@ -453,7 +486,7 @@ export function createProgram(): Command {
 
         try {
           await deployToCloudRun({
-            agentPath: getAbsolutePath(agentPath),
+            agentPath: resolveAgentPath(agentPath),
             project: options['project'],
             region: options['region'],
             serviceName: options['service_name'],
@@ -478,6 +511,7 @@ export function createProgram(): Command {
 
   const registerAgentEngineCommand = (cmd: Command) => {
     cmd
+      .description('Deploys an agent to Vertex AI Agent Engine')
       .addArgument(AGENT_DIR_ARGUMENT)
       .allowUnknownOption()
       .allowExcessArguments()
