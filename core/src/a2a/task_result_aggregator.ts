@@ -72,30 +72,27 @@ export class TaskResultAggregator {
 
     event.status.state = TaskState.WORKING;
   }
-}
 
-/**
- * Returns the final status event to publish for a run.
- *
- * `fallback` is the status derived from the ADK event stream. It is returned
- * unchanged unless the aggregator observed a signal of higher priority than
- * `working`, in which case the aggregated state and status message win — the
- * same resolution `a2a_agent_executor.py` performs when it closes out a task.
- */
-export function applyAggregatedTaskState(
-  fallback: TaskStatusUpdateEvent,
-  aggregator: TaskResultAggregator,
-): TaskStatusUpdateEvent {
-  if (aggregator.taskState === TaskState.WORKING) {
-    return fallback;
+  /**
+   * Returns the final status event to publish for the run.
+   *
+   * `fallback` is the status derived from the ADK event stream. It is returned
+   * unchanged unless a signal of higher priority than `working` was observed,
+   * in which case the aggregated state and status message win — the same
+   * resolution `a2a_agent_executor.py` performs when it closes out a task.
+   */
+  resolveFinalStatus(fallback: TaskStatusUpdateEvent): TaskStatusUpdateEvent {
+    if (this.state === TaskState.WORKING) {
+      return fallback;
+    }
+
+    return {
+      ...fallback,
+      status: {
+        state: this.state,
+        message: this.message,
+        timestamp: fallback.status.timestamp,
+      },
+    };
   }
-
-  return {
-    ...fallback,
-    status: {
-      state: aggregator.taskState,
-      message: aggregator.taskStatusMessage,
-      timestamp: fallback.status.timestamp,
-    },
-  };
 }

@@ -33,10 +33,7 @@ import {
   getA2ASessionMetadata,
 } from './metadata_converter_utils.js';
 import {toA2AParts, toGenAIContent} from './part_converter_utils.js';
-import {
-  applyAggregatedTaskState,
-  TaskResultAggregator,
-} from './task_result_aggregator.js';
+import {TaskResultAggregator} from './task_result_aggregator.js';
 
 /**
  * Represents a runner or a configuration for a runner.
@@ -183,9 +180,8 @@ export class A2AAgentExecutor implements AgentExecutor {
       await this.publishFinalTaskStatus({
         executorContext,
         eventBus,
-        event: applyAggregatedTaskState(
+        event: taskResultAggregator.resolveFinalStatus(
           getFinalTaskStatusUpdate(adkEvents, executorContext),
-          taskResultAggregator,
         ),
       });
     } catch (e: unknown) {

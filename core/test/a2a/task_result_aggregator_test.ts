@@ -12,10 +12,7 @@ import {
 } from '@a2a-js/sdk';
 import {describe, expect, it} from 'vitest';
 import {MessageRole, TaskState} from '../../src/a2a/a2a_event.js';
-import {
-  applyAggregatedTaskState,
-  TaskResultAggregator,
-} from '../../src/a2a/task_result_aggregator.js';
+import {TaskResultAggregator} from '../../src/a2a/task_result_aggregator.js';
 
 function createTestMessage(text: string): Message {
   return {
@@ -315,7 +312,7 @@ describe('TaskResultAggregator', () => {
   });
 });
 
-describe('applyAggregatedTaskState', () => {
+describe('TaskResultAggregator.resolveFinalStatus', () => {
   const createFallback = (): TaskStatusUpdateEvent => ({
     kind: 'status-update',
     taskId: 'fallback-task',
@@ -331,10 +328,7 @@ describe('applyAggregatedTaskState', () => {
   it('returns the fallback unchanged while the aggregated state is working', () => {
     const fallback = createFallback();
 
-    const result = applyAggregatedTaskState(
-      fallback,
-      new TaskResultAggregator(),
-    );
+    const result = new TaskResultAggregator().resolveFinalStatus(fallback);
 
     expect(result).toBe(fallback);
   });
@@ -347,7 +341,7 @@ describe('applyAggregatedTaskState', () => {
     );
     const fallback = createFallback();
 
-    const result = applyAggregatedTaskState(fallback, aggregator);
+    const result = aggregator.resolveFinalStatus(fallback);
 
     expect(result.status.state).toBe(TaskState.FAILED);
     expect(result.status.message).toBe(failedMessage);
@@ -364,7 +358,7 @@ describe('applyAggregatedTaskState', () => {
       createStatusEvent(TaskState.FAILED, undefined, true),
     );
 
-    const result = applyAggregatedTaskState(createFallback(), aggregator);
+    const result = aggregator.resolveFinalStatus(createFallback());
 
     expect(result.status.state).toBe(TaskState.FAILED);
     expect(result.status.message).toBeUndefined();

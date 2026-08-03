@@ -33,6 +33,22 @@ vi.mock('../../src/runner/runner.js', async (importOriginal) => {
   };
 });
 
+/**
+ * Points the mocked Runner class at `runAsync`.
+ *
+ * The module-level `vi.mock` above replaces Runner with a structurally partial
+ * double — the executor only reads `appName`, `sessionService` and `runAsync`
+ * from it, not `agent`, `pluginManager` or the runner brand symbol — so the
+ * cast to the full class is unavoidable and is confined to this one site.
+ */
+function stubRunner(runAsync: Runner['runAsync']): void {
+  vi.mocked(Runner).mockImplementation(((config: RunnerConfig) => ({
+    appName: config.appName,
+    sessionService: config.sessionService,
+    runAsync,
+  })) as unknown as () => Runner);
+}
+
 describe('A2AAgentExecutor', () => {
   let mockSessionService: Mocked<BaseSessionService>;
   let mockEventBus: Mocked<ExecutionEventBus>;
@@ -110,13 +126,7 @@ describe('A2AAgentExecutor', () => {
       }
     }
 
-    vi.mocked(Runner).mockImplementation(((config: RunnerConfig) => {
-      return {
-        appName: config?.appName,
-        sessionService: config?.sessionService,
-        runAsync: mockRunAsync,
-      } as unknown as Runner;
-    }) as unknown as () => Runner);
+    stubRunner(mockRunAsync);
 
     let beforeExecutedCalled = false;
     let afterEventCount = 0;
@@ -183,13 +193,7 @@ describe('A2AAgentExecutor', () => {
       });
     }
 
-    // The module-level vi.mock replaces Runner with a partial double; the
-    // executor only reads appName, sessionService and runAsync from it.
-    vi.mocked(Runner).mockImplementation(((config: RunnerConfig) => ({
-      appName: config.appName,
-      sessionService: config.sessionService,
-      runAsync: mockRunAsync,
-    })) as unknown as () => Runner);
+    stubRunner(mockRunAsync);
 
     const executor = new A2AAgentExecutor({
       runner: {appName: 'test-app', sessionService: mockSessionService},
@@ -272,13 +276,7 @@ describe('A2AAgentExecutor', () => {
       throw new Error('LLM failed');
     }
 
-    vi.mocked(Runner).mockImplementation(((config: RunnerConfig) => {
-      return {
-        appName: config?.appName,
-        sessionService: config?.sessionService,
-        runAsync: mockRunAsyncWithError,
-      } as unknown as Runner;
-    }) as unknown as () => Runner);
+    stubRunner(mockRunAsyncWithError);
 
     const executor = new A2AAgentExecutor({
       runner: {
