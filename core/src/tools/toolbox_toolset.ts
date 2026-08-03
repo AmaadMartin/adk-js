@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {FunctionDeclaration} from '@google/genai';
 import type {
   ToolboxClient as ToolboxSdkClient,
   ToolboxTool as ToolboxSdkTool,
@@ -12,7 +11,7 @@ import type {
 
 import {ReadonlyContext} from '../agents/readonly_context.js';
 
-import {BaseTool, RunAsyncToolRequest} from './base_tool.js';
+import {BaseTool} from './base_tool.js';
 import {BaseToolset} from './base_toolset.js';
 
 /**
@@ -22,15 +21,6 @@ import {BaseToolset} from './base_toolset.js';
  * call, so a short-lived token can be refreshed between calls.
  */
 export type ToolboxAuthTokenGetter = () => string | Promise<string>;
-
-/**
- * A value bound to a tool parameter: either a literal, or a callable that
- * produces one when the tool is invoked.
- */
-export type ToolboxBoundValue =
-  | unknown
-  | (() => unknown)
-  | (() => Promise<unknown>);
 
 /**
  * Options for {@link ToolboxToolset}.
@@ -59,38 +49,14 @@ export interface ToolboxToolsetOptions {
 
   /**
    * Maps a tool parameter name to a value that is pre-filled on every call
-   * and hidden from the model. See
+   * and hidden from the model. A value is either a literal or a callable,
+   * sync or async, that the toolbox SDK resolves on each call. See
    * https://github.com/googleapis/mcp-toolbox-sdk-js/tree/main/packages/toolbox-core#binding-parameter-values
    */
-  boundParams?: Record<string, ToolboxBoundValue>;
+  boundParams?: Record<string, unknown>;
 
   /** Static headers sent with every request to the toolbox server. */
   additionalHeaders?: Record<string, string>;
-}
-
-/**
- * Adapts a toolbox SDK tool to the ADK {@link BaseTool} contract.
- *
- * The SDK ships its own `BaseTool` subclass, but it extends the `BaseTool`
- * of whichever `@google/adk` copy the SDK resolved, which is not necessarily
- * this one. Wrapping keeps `getTools()` returning tools branded by this
- * package.
- */
-class ToolboxTool extends BaseTool {
-  constructor(private readonly sdkTool: ToolboxSdkTool) {
-    super({
-      name: sdkTool.getCoreTool().toolName,
-      description: sdkTool.getCoreTool().description,
-    });
-  }
-
-  override _getDeclaration(): FunctionDeclaration | undefined {
-    return this.sdkTool._getDeclaration();
-  }
-
-  override async runAsync(request: RunAsyncToolRequest): Promise<unknown> {
-    return this.sdkTool.getCoreTool()(request.args);
-  }
 }
 
 /**
@@ -162,7 +128,8 @@ export class ToolboxToolset extends BaseToolset {
    *
    * @param _context Unused; selection is driven by the constructor options.
    * @return The named toolset's tools followed by the individually named
-   *     tools.
+   *     tools. The SDK returns `BaseTool`s already, so they are passed
+   *     through unwrapped.
    */
   override async getTools(_context?: ReadonlyContext): Promise<BaseTool[]> {
     const client = await this.getClient();
@@ -188,7 +155,7 @@ export class ToolboxToolset extends BaseToolset {
         )),
       );
     }
-    return sdkTools.map((sdkTool) => new ToolboxTool(sdkTool));
+    return sdkTools;
   }
 
   /**

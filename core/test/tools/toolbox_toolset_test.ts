@@ -7,6 +7,7 @@
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {
+  BaseTool,
   Context,
   createSession,
   InvocationContext,
@@ -14,9 +15,9 @@ import {
   isBaseToolset,
   PluginManager,
   ReadonlyContext,
+  RunAsyncToolRequest,
   SequentialAgent,
   ToolboxAuthTokenGetter,
-  ToolboxBoundValue,
   ToolboxToolset,
 } from '@google/adk';
 import {FunctionDeclaration, Type} from '@google/genai';
@@ -24,40 +25,40 @@ import {FunctionDeclaration, Type} from '@google/genai';
 const SERVER_URL = 'http://127.0.0.1:5000';
 
 /**
- * The subset of the `@toolbox-sdk/adk` tool surface that `ToolboxToolset`
- * actually touches. The real SDK is never loaded: it imports `@google/adk` at
- * module scope, which resolves to the built `core/dist` and is absent on an
- * unbuilt checkout.
+ * Stands in for `@toolbox-sdk/adk`'s `ToolboxTool`, which is itself a
+ * `BaseTool` wrapping a callable `@toolbox-sdk/core` tool. The real SDK is
+ * never loaded: it imports `@google/adk` at module scope, which resolves to
+ * the built `core/dist` and is absent on an unbuilt checkout.
  */
-interface FakeSdkTool {
-  getCoreTool(): FakeCoreTool;
-  _getDeclaration(): FunctionDeclaration | undefined;
-}
-
-type FakeCoreTool = ReturnType<typeof createFakeCoreTool>;
-
-/**
- * Builds the callable `@toolbox-sdk/core` tool object: a function carrying the
- * server-provided name and description as properties.
- */
-function createFakeCoreTool(toolName: string) {
-  return Object.assign(
-    vi.fn(async (args?: Record<string, unknown>): Promise<string> => {
-      return `${toolName}:${JSON.stringify(args ?? {})}`;
-    }),
-    {toolName, description: `Description of ${toolName}`},
+class FakeSdkTool extends BaseTool {
+  /** The callable core tool, exposed so tests can assert how it was invoked. */
+  readonly coreTool = vi.fn(
+    async (args?: Record<string, unknown>): Promise<string> => {
+      return `${this.name}:${JSON.stringify(args ?? {})}`;
+    },
   );
+
+  constructor(
+    name: string,
+    private readonly declaration: FunctionDeclaration | undefined,
+  ) {
+    super({name, description: `Description of ${name}`});
+  }
+
+  override _getDeclaration(): FunctionDeclaration | undefined {
+    return this.declaration;
+  }
+
+  override async runAsync(request: RunAsyncToolRequest): Promise<unknown> {
+    return this.coreTool(request.args);
+  }
 }
 
 function createFakeSdkTool(
   toolName: string,
   declaration: FunctionDeclaration | undefined = {name: toolName},
 ): FakeSdkTool {
-  const coreTool = createFakeCoreTool(toolName);
-  return {
-    getCoreTool: () => coreTool,
-    _getDeclaration: () => declaration,
-  };
+  return new FakeSdkTool(toolName, declaration);
 }
 
 const {clientConstructor, loadTool, loadToolset, MockToolboxClient} =
@@ -75,7 +76,7 @@ const {clientConstructor, loadTool, loadToolset, MockToolboxClient} =
         (
           name?: string,
           authTokenGetters?: Record<string, ToolboxAuthTokenGetter>,
-          boundParams?: Record<string, ToolboxBoundValue>,
+          boundParams?: Record<string, unknown>,
         ) => Promise<FakeSdkTool[]>
       >();
     const loadTool =
@@ -83,7 +84,7 @@ const {clientConstructor, loadTool, loadToolset, MockToolboxClient} =
         (
           name: string,
           authTokenGetters?: Record<string, ToolboxAuthTokenGetter>,
-          boundParams?: Record<string, ToolboxBoundValue>,
+          boundParams?: Record<string, unknown>,
         ) => Promise<FakeSdkTool>
       >();
 
@@ -273,7 +274,7 @@ describe('ToolboxToolset', () => {
     expect(loadToolset).toHaveBeenCalledTimes(2);
   });
 
-  it('routes runAsync to the core callable and returns its result', async () => {
+  it('returns the SDK tool unwrapped, so runAsync reaches the core callable', async () => {
     const sdkTool = createFakeSdkTool('search-hotels-by-name');
     loadToolset.mockResolvedValue([sdkTool]);
 
@@ -285,18 +286,17 @@ describe('ToolboxToolset', () => {
       toolContext: createRealContext(),
     });
 
-    expect(sdkTool.getCoreTool()).toHaveBeenCalledTimes(1);
-    expect(sdkTool.getCoreTool()).toHaveBeenCalledWith(args);
+    expect(sdkTool.coreTool).toHaveBeenCalledTimes(1);
+    expect(sdkTool.coreTool).toHaveBeenCalledWith(args);
     expect(result).toBe('search-hotels-by-name:{"name":"Hilton"}');
   });
 
-  it('surfaces an undefined declaration unchanged', async () => {
-    const coreTool = createFakeCoreTool('no-declaration');
-    const sdkTool: FakeSdkTool = {
-      getCoreTool: () => coreTool,
-      _getDeclaration: () => undefined,
-    };
-    loadToolset.mockResolvedValue([sdkTool]);
+  it('returns the SDK tool unwrapped, so an absent declaration stays absent', async () => {
+    // Constructed directly: passing `undefined` to createFakeSdkTool would
+    // fall back to its default declaration.
+    loadToolset.mockResolvedValue([
+      new FakeSdkTool('no-declaration', undefined),
+    ]);
 
     const toolset = new ToolboxToolset(SERVER_URL);
     const [tool] = await toolset.getTools();
