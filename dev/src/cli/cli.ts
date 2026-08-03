@@ -102,6 +102,11 @@ function getBoolean(option?: string | boolean): boolean {
  * declared `[agents_dir]` argument followed by every token it did not
  * recognize; values of recognized options (`--port 9000`) are consumed during
  * parsing and never appear here.
+ *
+ * Commander discards the `--` end-of-options marker only while it is still
+ * collecting operands, so a `--` that follows an unrecognized flag survives in
+ * `command.args`. `gcloud run deploy` declares no trailing-remainder argument
+ * and fails with `unrecognized arguments: --`, so every bare marker is dropped.
  */
 function getExtraGcloudArgs(command: Command): string[] {
   const extraArgs = [...command.args];
@@ -110,7 +115,7 @@ function getExtraGcloudArgs(command: Command): string[] {
   if (extraArgs.length > 0 && !extraArgs[0].startsWith('-')) {
     extraArgs.shift();
   }
-  return extraArgs;
+  return extraArgs.filter((arg) => arg !== '--');
 }
 
 const AGENT_DIR_ARGUMENT = new Argument(

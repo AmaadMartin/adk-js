@@ -358,6 +358,39 @@ describe('CLI Entrypoint', () => {
       ).toEqual(['--min-instances=2']);
     });
 
+    it('should drop the -- separator when a gcloud flag precedes it', async () => {
+      await parse([
+        'deploy',
+        'cloud_run',
+        './my-agent-path',
+        '--no-allow-unauthenticated',
+        '--',
+        '--min-instances=2',
+      ]);
+
+      expect(
+        (deployToCloudRun as Mock).mock.calls[0][0].extraGcloudArgs,
+      ).toEqual(['--no-allow-unauthenticated', '--min-instances=2']);
+    });
+
+    it('should drop every bare -- from the forwarded gcloud args', async () => {
+      await parse([
+        'deploy',
+        'cloud_run',
+        './my-agent-path',
+        '--memory',
+        '512Mi',
+        '--',
+        '--min-instances=2',
+        '--',
+        '--cpu=2',
+      ]);
+
+      expect(
+        (deployToCloudRun as Mock).mock.calls[0][0].extraGcloudArgs,
+      ).toEqual(['--memory', '512Mi', '--min-instances=2', '--cpu=2']);
+    });
+
     it('should call deployToCloudRun with defaults', async () => {
       await parse(['deploy', 'cloud_run']);
 
