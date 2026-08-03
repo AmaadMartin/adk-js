@@ -11,6 +11,7 @@ import {
   Context,
   ExecuteCodeParams,
   File,
+  FileContentEncoding,
   InvocationContext,
   LlmAgent,
   RunSkillScriptTool,
@@ -207,12 +208,12 @@ describe('RunSkillScriptTool', () => {
     expect(binaryFile?.contentEncoding).toBe('base64');
   });
 
-  const testFile = {
+  const testFile: File = {
     name: 'output.txt',
     content: 'hello',
-    contentEncoding: 'utf8',
+    contentEncoding: FileContentEncoding.UTF8,
     mimeType: 'text/plain',
-  } as File;
+  };
 
   function executorReturning(outputFiles: File[]): MockCodeExecutor {
     const mockExecutor = new MockCodeExecutor();
