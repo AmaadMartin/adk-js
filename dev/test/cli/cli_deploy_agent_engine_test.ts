@@ -141,7 +141,7 @@ const mockCreateInternal = vi.fn();
 const mockUpdateInternal = vi.fn();
 const mockGetAgentOperationInternal = vi.fn();
 
-vi.mock('@google-cloud/vertexai/build/src/genai/client.js', () => ({
+vi.mock('@google-cloud/vertexai', () => ({
   Client: class {
     agentEnginesInternal = {
       createInternal: mockCreateInternal,
