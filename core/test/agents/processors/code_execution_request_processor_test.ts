@@ -6,7 +6,6 @@
 
 import {
   BaseAgent,
-  CODE_EXECUTION_RESPONSE_PROCESSOR,
   InvocationContext,
   LlmAgent,
   LlmRequest,
@@ -14,7 +13,10 @@ import {
   createSession,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
-import {CODE_EXECUTION_REQUEST_PROCESSOR} from '../../../src/agents/processors/code_execution_request_processor.js';
+import {
+  CODE_EXECUTION_REQUEST_PROCESSOR,
+  CodeExecutionResponseProcessor,
+} from '../../../src/agents/processors/code_execution_request_processor.js';
 import {
   BaseCodeExecutor,
   ExecuteCodeParams,
@@ -126,7 +128,7 @@ describe('CodeExecutionRequestProcessor', () => {
 });
 
 describe('CodeExecutionResponseProcessor', () => {
-  const responseProcessor = CODE_EXECUTION_RESPONSE_PROCESSOR;
+  const responseProcessor = new CodeExecutionResponseProcessor();
 
   describe('early-exit paths', () => {
     it('yields no events for a partial response', async () => {

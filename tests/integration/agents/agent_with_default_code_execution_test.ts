@@ -7,13 +7,13 @@
 import type {
   CodeExecutionInput,
   CodeExecutionResult,
-  Event,
   ExecuteCodeParams,
 } from '@google/adk';
 import {BaseCodeExecutor, LlmAgent} from '@google/adk';
 import {FinishReason, Outcome} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {
+  collectEvents,
   createRunner,
   GeminiWithMockResponses,
   RawGenerateContentResponse,
@@ -72,17 +72,6 @@ class FailingCodeExecutor extends BaseCodeExecutor {
   async executeCode(_params: ExecuteCodeParams): Promise<CodeExecutionResult> {
     return {stdout: '', stderr: 'NameError: boom', outputFiles: []};
   }
-}
-
-async function collectEvents(
-  run: (prompt: string) => AsyncGenerator<Event, void, undefined>,
-  prompt: string,
-): Promise<Event[]> {
-  const events: Event[] = [];
-  for await (const event of run(prompt)) {
-    events.push(event);
-  }
-  return events;
 }
 
 describe('Agent with a codeExecutor and no explicit responseProcessors', () => {
