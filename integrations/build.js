@@ -63,7 +63,10 @@ function build({
     buildOptions.outdir = `./dist/${targetDir}`;
   }
 
-  if (format === 'esm') {
+  // The createRequire preamble lets Node ESM output reach CommonJS-only
+  // dependencies. It is meaningless in a browser, where 'module' is an
+  // unresolvable bare specifier, so restrict it to the Node targets.
+  if (platform === 'node' && format === 'esm') {
     buildOptions.banner = {
       js:
         (buildOptions.banner?.js || '') +
