@@ -158,8 +158,9 @@ describe('CLI Entrypoint', () => {
     it('should serve the current directory when a flag-like token follows the -- terminator', async () => {
       await parse(['web', '--', '--not-a-directory']);
 
-      const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
-      expect(args.agentsDir).toBe(process.cwd());
+      expect(vi.mocked(AdkApiServer).mock.calls[0][0].agentsDir).toBe(
+        process.cwd(),
+      );
     });
   });
 
@@ -352,7 +353,7 @@ describe('CLI Entrypoint', () => {
       async (_form, passThroughArgs) => {
         await parse(['deploy', 'cloud_run', ...passThroughArgs]);
 
-        expect((deployToCloudRun as Mock).mock.calls[0][0].agentPath).toBe(
+        expect(vi.mocked(deployToCloudRun).mock.calls[0][0].agentPath).toBe(
           process.cwd(),
         );
       },
@@ -366,7 +367,7 @@ describe('CLI Entrypoint', () => {
         '--allow-unauthenticated',
       ]);
 
-      expect((deployToCloudRun as Mock).mock.calls[0][0].agentPath).toEqual(
+      expect(vi.mocked(deployToCloudRun).mock.calls[0][0].agentPath).toEqual(
         expect.stringContaining('my-agent-path'),
       );
     });
@@ -431,7 +432,7 @@ describe('CLI Entrypoint', () => {
     it('should deploy the current directory when an unknown flag takes the positional slot', async () => {
       await parse(['deploy', 'agent_engine', '--some-unknown-flag']);
 
-      expect((deployToAgentEngine as Mock).mock.calls[0][0].agentPath).toBe(
+      expect(vi.mocked(deployToAgentEngine).mock.calls[0][0].agentPath).toBe(
         process.cwd(),
       );
     });
@@ -461,7 +462,7 @@ describe('CLI Entrypoint', () => {
     it('should deploy the current directory when an unknown flag takes the positional slot', async () => {
       await parse(['deploy', 'reasoning_engine', '--some-unknown-flag']);
 
-      expect((deployToAgentEngine as Mock).mock.calls[0][0].agentPath).toBe(
+      expect(vi.mocked(deployToAgentEngine).mock.calls[0][0].agentPath).toBe(
         process.cwd(),
       );
     });
