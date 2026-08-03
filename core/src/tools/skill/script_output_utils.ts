@@ -10,8 +10,6 @@ import * as path from 'node:path';
 import {CodeExecutionResult} from '../../code_executors/code_execution_utils.js';
 import {materializeFiles} from '../../utils/file_utils.js';
 
-const OUTPUT_DIR_PREFIX = 'adk-skill-outputs-';
-
 /**
  * The result of a skill script execution, annotated with the directory its
  * output files were written to.
@@ -25,22 +23,13 @@ export interface SkillScriptResult extends CodeExecutionResult {
 }
 
 /**
- * Writes the output files of a skill script execution to disk and reports
- * where they went.
- *
- * With `outputDir` set, files are written under it (a relative path is
- * resolved against the host process's working directory). Without it, a fresh
- * directory is created for this execution under the OS temp directory, so
- * script-chosen filenames never land in whichever directory the host process
- * was launched from. Nothing is written and no directory is created when the
- * script produced no output files.
- *
- * The directory is **not** cleaned up — it holds the artifacts the caller asked
- * for. Unconfigured runs therefore rely on OS temp-directory cleanup; pass
- * `outputDir` to put the files somewhere the application manages.
+ * Writes the output files of a skill script execution under `outputDir`, or
+ * into a fresh per-execution directory in the OS temp directory when it is
+ * unset. Nothing is written when the script produced no output files.
  *
  * @param result The result returned by the code executor.
- * @param outputDir Directory to write the output files into.
+ * @param outputDir Directory to write the output files into. See
+ *     `SkillToolset`'s option of the same name for the lifetime policy.
  * @returns The result with each output file name rewritten relative to the
  *     output directory, plus the absolute `outputDir` the files went to.
  */
@@ -54,7 +43,7 @@ export async function materializeScriptOutputs(
 
   const dir = outputDir
     ? path.resolve(outputDir)
-    : await fs.mkdtemp(path.join(os.tmpdir(), OUTPUT_DIR_PREFIX));
+    : await fs.mkdtemp(path.join(os.tmpdir(), 'adk-skill-outputs-'));
 
   return {
     ...result,

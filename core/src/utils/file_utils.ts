@@ -33,10 +33,7 @@ function isContained(baseDir: string, fullPath: string): boolean {
  *
  * @param files The files to materialize. `name` is updated in place when a
  *     collision forces a rename.
- * @param dir Base directory to write under. Required rather than defaulted:
- *     file names originate from script- or model-controlled data, and an
- *     implicit default writes them into whichever directory the host process
- *     happened to be launched from.
+ * @param dir Base directory to write under.
  * @returns The written files, each `name` rewritten to the final path relative
  *     to `dir`.
  */
