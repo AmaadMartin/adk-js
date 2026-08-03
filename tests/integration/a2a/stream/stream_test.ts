@@ -22,7 +22,7 @@ describe('A2A: RemoteAgent Streaming', () => {
       startFailureTimeout: TEST_TIMEOUT,
     });
     await server.start();
-  }, TEST_TIMEOUT);
+  });
 
   afterAll(async () => {
     await server.stop();
