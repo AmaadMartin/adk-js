@@ -96,15 +96,10 @@ function getBoolean(option?: string | boolean): boolean {
 }
 
 /**
- * Resolves the value commander bound to the optional `[agents_dir]` positional.
- *
- * The `deploy` subcommands enable `allowUnknownOption()`, and commander binds
- * declared arguments from the front of `command.args`, which holds matched
- * operands followed by unrecognized tokens. So when the directory is omitted
- * and the first token is an unknown flag, that flag lands in the positional
- * slot. An agent path never starts with `-` (a relative one is spelled
- * `./-foo`), so a leading `-` means the directory was omitted and the default
- * applies. The token stays in `command.args` and is still forwarded to gcloud.
+ * Falls back to the `[agents_dir]` default when commander bound a flag to it:
+ * the deploy subcommands allow unknown options, so an omitted directory lets
+ * the first flag land in the positional slot. An agent path never starts with
+ * `-` (a relative one that does is spelled `./-foo`).
  */
 function resolveAgentsDir(value: string): string {
   return value.startsWith('-') ? process.cwd() : value;
