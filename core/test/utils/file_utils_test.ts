@@ -116,6 +116,45 @@ describe('file_utils', () => {
       expect(content2).toBe('world');
     });
 
+    it('rejects a sibling directory whose name extends the base directory name', async () => {
+      const base = path.join(tempDir, 'out');
+      const files = [
+        {
+          name: path.join('..', 'outX', 'leak.txt'),
+          content: 'dangerous',
+          contentEncoding: FileContentEncoding.UTF8,
+          mimeType: 'text/plain',
+        },
+      ];
+
+      await expect(materializeFiles(files, base)).rejects.toThrow(
+        /Path traversal detected/,
+      );
+
+      await expect(
+        fs.access(path.join(tempDir, 'outX', 'leak.txt')),
+      ).rejects.toThrow(/ENOENT/);
+    });
+
+    it("allows a nested path whose segment merely starts with '..'", async () => {
+      const files = [
+        {
+          name: path.join('..data', 'report.txt'),
+          content: 'contained',
+          contentEncoding: FileContentEncoding.UTF8,
+          mimeType: 'text/plain',
+        },
+      ];
+
+      await materializeFiles(files, tempDir);
+
+      const content = await fs.readFile(
+        path.join(tempDir, '..data', 'report.txt'),
+        'utf8',
+      );
+      expect(content).toBe('contained');
+    });
+
     it('should append a numeric suffix to the filename if it already exists', async () => {
       const files = [
         {
