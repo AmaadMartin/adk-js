@@ -39,10 +39,16 @@ export default defineConfig([
     },
   },
   {
-    // A `.cjs` file is CommonJS by definition, so `require()` is correct there.
+    // CommonJS sources, where `require()` is correct: `.cjs` by extension, plus
+    // the `.js` fixtures whose nearest package.json declares
+    // `"type": "commonjs"` or omits `"type"` altogether.
     // `tseslint.configs.recommended` carries no `files` filter and sets
     // `sourceType: 'module'` for every file, which this restores.
-    files: ['**/*.cjs'],
+    files: [
+      '**/*.cjs',
+      'tests/integration/build_setup/js_commonjs/**/*.js',
+      'tests/integration/app_loader/app_js/**/*.js',
+    ],
     languageOptions: {sourceType: 'commonjs'},
     rules: {'@typescript-eslint/no-require-imports': 'off'},
   },

@@ -3,7 +3,7 @@
  * Copyright 2026 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
-const {AdkApiServer} = require('@google/adk-devtools'); // eslint-disable-line @typescript-eslint/no-require-imports
+const {AdkApiServer} = require('@google/adk-devtools');
 
 console.log('Importing AdkApiServer works');
 if (typeof AdkApiServer !== 'function') {

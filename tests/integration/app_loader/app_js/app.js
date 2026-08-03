@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/* eslint-disable @typescript-eslint/no-require-imports */
 const {App, BaseLlm, LlmAgent, LLMRegistry} = require('@google/adk');
 const {createModelContent} = require('@google/genai');
 const fs = require('node:fs/promises');

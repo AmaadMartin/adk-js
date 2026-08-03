@@ -3,8 +3,8 @@
  * Copyright 2026 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
-const {DatabaseSessionService} = require('@google/adk'); // eslint-disable-line @typescript-eslint/no-require-imports
-const {MikroORM} = require('@mikro-orm/core'); // eslint-disable-line @typescript-eslint/no-require-imports
+const {DatabaseSessionService} = require('@google/adk');
+const {MikroORM} = require('@mikro-orm/core');
 
 MikroORM.init = async () => {
   return {

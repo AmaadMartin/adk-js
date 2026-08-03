@@ -9,9 +9,9 @@ const {
   LogLevel,
   BaseLlm,
   LLMRegistry,
-} = require('@google/adk'); // eslint-disable-line @typescript-eslint/no-require-imports
-const {createModelContent, GenerateContentResponse} = require('@google/genai'); // eslint-disable-line @typescript-eslint/no-require-imports
-const {MockLlmConnection} = require('../../mock_llm_connection'); // eslint-disable-line @typescript-eslint/no-require-imports
+} = require('@google/adk');
+const {createModelContent, GenerateContentResponse} = require('@google/genai');
+const {MockLlmConnection} = require('../../mock_llm_connection');
 
 setLogLevel(LogLevel.DEBUG);
 
