@@ -7,7 +7,6 @@
 import {
   Blob,
   Content,
-  GroundingMetadata,
   LiveServerGoAway,
   LiveServerMessage,
   LiveServerSessionResumptionUpdate,
@@ -337,7 +336,7 @@ describe('GeminiLlmConnection', () => {
             },
             turnComplete: true,
             interrupted: false,
-            groundingMetadata: {groundingChunks: []} as GroundingMetadata,
+            groundingMetadata: {groundingChunks: []},
           },
         }),
       );
@@ -579,7 +578,7 @@ describe('GeminiLlmConnection', () => {
               groundingChunks: [
                 {web: {uri: 'https://google.com', title: 'Google'}},
               ],
-            } as GroundingMetadata,
+            },
           },
         }),
       );
@@ -615,7 +614,7 @@ describe('GeminiLlmConnection', () => {
               groundingChunks: [
                 {web: {uri: 'https://google.com', title: 'Google'}},
               ],
-            } as GroundingMetadata,
+            },
             turnComplete: false,
             interrupted: false,
           },

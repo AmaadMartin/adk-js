@@ -5,7 +5,6 @@
  */
 
 import {
-  GroundingMetadata,
   LiveServerGoAway,
   LiveServerSessionResumptionUpdate,
 } from '@google/genai';
@@ -66,7 +65,7 @@ describe('LiveResponseAggregator', () => {
           },
           turnComplete: true,
           interrupted: false,
-          groundingMetadata: {groundingChunks: []} as GroundingMetadata,
+          groundingMetadata: {groundingChunks: []},
         },
       }),
     );
@@ -269,7 +268,7 @@ describe('LiveResponseAggregator', () => {
               groundingChunks: [
                 {web: {uri: 'https://google.com', title: 'Google'}},
               ],
-            } as GroundingMetadata,
+            },
           },
         }),
       ),
