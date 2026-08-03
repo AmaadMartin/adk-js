@@ -15,10 +15,8 @@ import {sendInput} from '../test_case_utils.js';
 
 const execAsync = promisify(exec);
 const dirname = process.cwd();
-// Assertion budget only. The `npm install` / teardown hooks deliberately pass
-// no timeout so they inherit the `integration` project's hookTimeout from
-// vitest.config.ts, which is sized for a cold, network-bound install; sharing
-// this number with them reported a slow install as a test failure.
+// Assertion budget only: the install/teardown hooks inherit vitest.config.ts's
+// hookTimeout so a slow cold install is not reported as a test failure.
 const TEST_EXECUTION_TIMEOUT = 40000;
 
 describe('App loader CLI integration', () => {
