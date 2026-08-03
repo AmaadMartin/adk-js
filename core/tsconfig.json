@@ -2,7 +2,12 @@
   "extends": "../tsconfig.json",
   "compilerOptions": {
     "rootDir": "src",
-    "outDir": "dist/types"
+    "outDir": "dist/types",
+    // `@toolbox-sdk/adk`'s declarations import `@google/adk`, which the
+    // workspace symlink resolves to this package's own build output. tsc then
+    // sees dist/types as both an input and an output and refuses to emit
+    // (TS5055) on every build after the first. Point it at the sources.
+    "paths": {"@google/adk": ["./src/index.ts"]}
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]
