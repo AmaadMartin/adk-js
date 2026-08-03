@@ -96,19 +96,15 @@ export function createEventActions(
  *
  * @param sources - Ordered list of partial {@link EventActions} to merge.
  *   Falsy entries are silently skipped.
- * @param target - Optional base {@link EventActions} to merge into. When
- *   provided it is used as the starting state before applying `sources`.
- * @returns A new {@link EventActions} containing the merged result.
+ * @returns A newly created {@link EventActions}. Its four dictionaries are
+ *   freshly allocated and owned by the returned object, so nothing reachable
+ *   from `sources` is mutated. Dictionary entry values are copied by reference:
+ *   this is a shallow, entry-wise merge.
  */
 export function mergeEventActions(
   sources: Array<Partial<EventActions>>,
-  target?: EventActions,
 ): EventActions {
   const result = createEventActions();
-
-  if (target) {
-    Object.assign(result, target);
-  }
 
   for (const source of sources) {
     if (!source) continue;
