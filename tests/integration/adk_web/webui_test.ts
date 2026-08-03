@@ -5,6 +5,7 @@
  */
 
 import {AdkApiServer} from '@google/adk-devtools';
+import * as fs from 'node:fs';
 import * as http from 'node:http';
 import * as path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -28,7 +29,30 @@ const SERVER_START_TIMEOUT = 20000;
  */
 const SERVER_STOP_TIMEOUT = 10000;
 
+/**
+ * Built artifacts this suite serves over HTTP: the CLI entrypoint spawned by
+ * `AdkTsApiServer`, and the adk-web bundle `AdkApiServer` mounts at `/dev-ui`.
+ * `dist/browser` is a downloaded release asset rather than a compile output,
+ * so it can be missing from an otherwise-built tree.
+ */
+const REQUIRED_BUILD_ARTIFACTS = [
+  path.resolve(__dirname, '../../../dev/dist/esm/cli_entrypoint.js'),
+  path.resolve(__dirname, '../../../dev/dist/browser/index.html'),
+];
+
+function assertRepoIsBuilt(): void {
+  const missing = REQUIRED_BUILD_ARTIFACTS.filter((p) => !fs.existsSync(p));
+  if (missing.length > 0) {
+    throw new Error(
+      'webui_test.ts exercises built output; run `npm run build` first. ' +
+        `Missing: ${missing.join(', ')}`,
+    );
+  }
+}
+
 describe('WebUI Integration Test', () => {
+  beforeAll(assertRepoIsBuilt);
+
   describe.each([
     {
       name: 'Run from ADK CLI',
