@@ -70,11 +70,16 @@ describe('createAgent', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // createAgent() reads these before falling back to `gcloud config`, so a
+    // developer machine that exports them would shadow the execSync mock.
+    vi.stubEnv('GOOGLE_CLOUD_PROJECT', undefined);
+    vi.stubEnv('GOOGLE_CLOUD_LOCATION', undefined);
     (isCancel as unknown as Mock).mockReturnValue(false);
     (listFiles as Mock).mockResolvedValue(['file1', 'file2']);
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     vi.restoreAllMocks();
   });
 
@@ -219,6 +224,33 @@ describe('createAgent', () => {
       expect(saveToFile).toHaveBeenCalledWith(
         expect.stringContaining('.env'),
         expect.stringContaining('GOOGLE_CLOUD_PROJECT=gcloud-project'),
+      );
+    });
+
+    it('should prefer environment variables over gcloud defaults', async () => {
+      vi.stubEnv('GOOGLE_CLOUD_PROJECT', 'env-project');
+      vi.stubEnv('GOOGLE_CLOUD_LOCATION', 'env-region');
+      (select as Mock).mockResolvedValueOnce('gemini-2.5-flash');
+      (select as Mock).mockResolvedValueOnce('ts');
+      (select as Mock).mockResolvedValueOnce('vertex'); // Backend
+      (execSync as Mock).mockReturnValue('gcloud-value\n');
+      (text as Mock).mockResolvedValueOnce('env-project');
+      (text as Mock).mockResolvedValueOnce('env-region');
+
+      await createAgent(getFreshOptions());
+
+      expect(execSync).not.toHaveBeenCalled();
+      expect(text).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: 'Enter the Google Cloud Project ID',
+          initialValue: 'env-project',
+        }),
+      );
+      expect(text).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: 'Enter the Google Cloud Region',
+          initialValue: 'env-region',
+        }),
       );
     });
 
