@@ -20,6 +20,14 @@ const INTEGRATION_HOOK_TIMEOUT_MS = 120000;
  */
 const INTEGRATION_TEST_TIMEOUT_MS = 60000;
 
+/**
+ * Setup module for the unit projects. It strips ADK-relevant environment
+ * variables so a developer's shell cannot change unit test behaviour. The
+ * `integration`, `e2e` and `cross-language` projects deliberately do not use
+ * it: they read real credentials.
+ */
+const UNIT_SETUP_FILE = path.resolve(__dirname, './tests/unit_setup.ts');
+
 export default defineConfig({
   test: {
     poolOptions: {
@@ -35,6 +43,7 @@ export default defineConfig({
         test: {
           name: 'unit:core',
           environment: 'node',
+          setupFiles: [UNIT_SETUP_FILE],
           alias: {
             '@google/adk': path.resolve(__dirname, './core/src'),
             '@google/adk-integrations': path.resolve(
@@ -49,6 +58,7 @@ export default defineConfig({
         test: {
           name: 'unit:dev',
           environment: 'node',
+          setupFiles: [UNIT_SETUP_FILE],
           alias: {
             '@google/adk': path.resolve(__dirname, './core/src'),
             '@google/adk-integrations': path.resolve(
@@ -63,6 +73,7 @@ export default defineConfig({
         test: {
           name: 'unit:integrations',
           environment: 'node',
+          setupFiles: [UNIT_SETUP_FILE],
           alias: {
             '@google/adk': path.resolve(__dirname, './core/src'),
             '@google/adk-integrations': path.resolve(
