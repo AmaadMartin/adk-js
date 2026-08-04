@@ -97,6 +97,18 @@ export interface ListSessionsResponse {
 }
 
 /**
+ * The slice bounds and response metadata derived from a `ListSessionsRequest`.
+ */
+export interface ResolvedPagination {
+  /** Zero-based index of the first session to return. */
+  offset: number;
+  /** Maximum number of sessions to return; undefined means "all remaining". */
+  take?: number;
+  /** Pagination metadata for the response. */
+  meta: Omit<ListSessionsResponse, 'sessions'>;
+}
+
+/**
  * Base class for session services.
  *
  * The service provides a set of methods for managing sessions and events.
@@ -257,4 +269,100 @@ export function mergeStates(
     merged[State.USER_PREFIX + k] = v;
   }
   return merged;
+}
+
+/** Orders sessions by ascending last update time, ties broken by id. */
+function compareByLastUpdateAsc(a: Session, b: Session): number {
+  return a.lastUpdateTime - b.lastUpdateTime || a.id.localeCompare(b.id);
+}
+
+/** Orders sessions by descending last update time, ties broken by id. */
+function compareByLastUpdateDesc(a: Session, b: Session): number {
+  return b.lastUpdateTime - a.lastUpdateTime || a.id.localeCompare(b.id);
+}
+
+/**
+ * Resolves the pagination parameters of a `ListSessionsRequest` against a known
+ * total into slice bounds and `ListSessionsResponse` metadata.
+ *
+ * Intended for backends that paginate in their storage layer: the returned
+ * `offset` and `take` map onto a query's `OFFSET` and `LIMIT`. Backends holding
+ * the whole result set in memory should use `paginateSessions` instead.
+ *
+ * Negative and out-of-range values are passed through untouched; no session
+ * backend validates or clamps them.
+ *
+ * @param request The request whose `limit`, `offset` and `page` are read.
+ * @param totalItems The number of matching sessions, counted before `offset`
+ *     and `limit` are applied.
+ * @return The slice bounds and the response metadata.
+ */
+export function resolvePagination(
+  request: ListSessionsRequest,
+  totalItems: number,
+): ResolvedPagination {
+  const {limit, page} = request;
+
+  if (limit === undefined) {
+    return {
+      offset: request.offset ?? 0,
+      meta: {
+        page: 1,
+        limit: totalItems,
+        totalItems,
+        totalPages: totalItems === 0 ? 0 : 1,
+      },
+    };
+  }
+
+  const offset =
+    page !== undefined ? (page - 1) * limit : (request.offset ?? 0);
+
+  return {
+    offset,
+    take: limit,
+    meta: {
+      page: page ?? (limit === 0 ? 1 : Math.floor(offset / limit) + 1),
+      limit,
+      totalItems,
+      totalPages: limit === 0 ? 0 : Math.ceil(totalItems / limit),
+    },
+  };
+}
+
+/**
+ * Orders, slices and wraps a fully materialised set of sessions into a
+ * `ListSessionsResponse`.
+ *
+ * For backends that hold every matching session in memory. The input array is
+ * left untouched; ordering is applied to a copy, and only when `request.order`
+ * is set.
+ *
+ * @param sessions Every session matching the request, before pagination.
+ * @param request The request whose `order`, `limit`, `offset` and `page` are
+ *     read.
+ * @return The requested page of sessions and its metadata.
+ */
+export function paginateSessions(
+  sessions: Session[],
+  request: ListSessionsRequest,
+): ListSessionsResponse {
+  const ordered =
+    request.order === undefined
+      ? sessions
+      : [...sessions].sort(
+          request.order === 'asc'
+            ? compareByLastUpdateAsc
+            : compareByLastUpdateDesc,
+        );
+
+  const {offset, take, meta} = resolvePagination(request, sessions.length);
+
+  return {
+    sessions:
+      take === undefined
+        ? ordered.slice(offset)
+        : ordered.slice(offset, offset + take),
+    ...meta,
+  };
 }
