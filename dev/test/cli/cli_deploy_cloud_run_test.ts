@@ -265,6 +265,13 @@ describe('deployToCloudRun', () => {
     });
   });
 
+  it('should create no temp folder when one is supplied', async () => {
+    await deployToCloudRun(defaultOptions);
+
+    expect(createTempDir).not.toHaveBeenCalled();
+    expect(spawnMock.mock.calls[0][1]).toContain(defaultOptions.tempFolder);
+  });
+
   it('should clean up existing temp folder before deploying', async () => {
     (isFolderExists as Mock).mockResolvedValue(true);
 
