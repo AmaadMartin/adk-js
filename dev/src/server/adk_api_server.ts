@@ -863,11 +863,17 @@ export class AdkApiServer {
         });
         req.on('end', async () => {
           this.logger.info(`Received Reasoning Engine raw body: ${rawBody}`);
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          let body: any = {};
+          let body: object = {};
           if (rawBody) {
             try {
-              body = JSON.parse(rawBody);
+              const parsed: unknown = JSON.parse(rawBody);
+              if (typeof parsed === 'object' && parsed !== null) {
+                body = parsed;
+              } else {
+                this.logger.warn(
+                  `Ignoring non-object Reasoning Engine body: ${rawBody}`,
+                );
+              }
             } catch (e) {
               this.logger.error(`Failed to parse raw body as JSON: ${e}`);
             }
