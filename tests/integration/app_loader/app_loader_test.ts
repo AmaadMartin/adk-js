@@ -15,6 +15,10 @@ import {sendInput} from '../test_case_utils.js';
 
 const execAsync = promisify(exec);
 const dirname = process.cwd();
+// Per-test budget only. Hooks deliberately pass no explicit timeout, so they
+// inherit the integration project's hookTimeout (vitest.config.ts) that is
+// sized for the fixture `npm install` they run; passing this constant to a
+// hook capped it below that project budget.
 const TEST_EXECUTION_TIMEOUT = 40000;
 
 describe('App loader CLI integration', () => {
@@ -29,7 +33,7 @@ describe('App loader CLI integration', () => {
 
       beforeAll(async () => {
         await execAsync('npm install', {cwd: projectPath});
-      }, TEST_EXECUTION_TIMEOUT);
+      });
 
       it(
         'should run app via package.json start script and get responses',
@@ -62,7 +66,7 @@ describe('App loader CLI integration', () => {
         await fs
           .unlink(path.join(projectPath, 'package-lock.json'))
           .catch(() => {});
-      }, TEST_EXECUTION_TIMEOUT);
+      });
     },
   );
 });

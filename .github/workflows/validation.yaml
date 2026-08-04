@@ -13,6 +13,9 @@ jobs:
   run-tests:
     runs-on: ${{ matrix.os }}
     strategy:
+      # One OS timing out must not cancel the sibling OS jobs; a single flake
+      # would otherwise leave the whole matrix without a result.
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
 
