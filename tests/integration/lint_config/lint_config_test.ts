@@ -3,7 +3,7 @@
  * Copyright 2026 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
-import {ESLint} from 'eslint';
+import {ESLint, type Linter} from 'eslint';
 import {describe, expect, it} from 'vitest';
 
 /** Source trees linted with type information. */
@@ -63,9 +63,9 @@ const eslint = new ESLint();
 function severityOf(
   config: Awaited<ReturnType<ESLint['calculateConfigForFile']>>,
   ruleId: string,
-): number | undefined {
-  const entry: unknown = config.rules?.[ruleId];
-  return Array.isArray(entry) ? (entry[0] as number) : undefined;
+): Linter.RuleSeverity | undefined {
+  const entry: Linter.RuleEntry | undefined = config.rules?.[ruleId];
+  return Array.isArray(entry) ? entry[0] : entry;
 }
 
 function lintWithTypeInfoRequiredRule(): ESLint {

@@ -9,11 +9,6 @@ import globals from "globals";
 import tseslint from "typescript-eslint";
 import { defineConfig } from "eslint/config";
 
-const TYPE_CHECKED_SOURCES = [
-  "core/src/**/*.ts",
-  "integrations/src/**/*.ts",
-];
-
 export default defineConfig([
   {
     ignores: ["**/dist/**", "dev/src/browser/**"],
@@ -25,7 +20,7 @@ export default defineConfig([
   // (no-undef, no-const-assign, no-unreachable, ...) that "js/recommended"
   // re-enables afterwards.
   {
-    files: TYPE_CHECKED_SOURCES,
+    files: ["core/src/**/*.ts", "integrations/src/**/*.ts"],
     extends: [tseslint.configs.recommendedTypeCheckedOnly],
     languageOptions: {
       parserOptions: {
@@ -34,7 +29,8 @@ export default defineConfig([
       },
     },
     rules: {
-      // Deferred, with the finding count measured on core/src + integrations/src.
+      // Pre-existing findings, deferred for staged adoption rather than
+      // suppressed: burn each count down and re-enable the rule.
       "@typescript-eslint/no-base-to-string": "off", // 4 findings, 4 files
       "@typescript-eslint/no-redundant-type-constituents": "off", // 4 findings, 4 files
       "@typescript-eslint/no-unnecessary-type-assertion": "off", // 82 findings, 38 files
