@@ -10,16 +10,26 @@ import * as fs from 'node:fs/promises';
 import {BaseAgent} from '../agents/base_agent.js';
 import {
   InvocationContext,
-  InvocationContextParams,
+  newInvocationContextId,
 } from '../agents/invocation_context.js';
 import {isLlmAgent, LlmAgent} from '../agents/llm_agent.js';
 import {isLoopAgent, LoopAgent} from '../agents/loop_agent.js';
 import {isParallelAgent} from '../agents/parallel_agent.js';
 import {ReadonlyContext} from '../agents/readonly_context.js';
 import {isSequentialAgent} from '../agents/sequential_agent.js';
+import {PluginManager} from '../plugins/plugin_manager.js';
+import {createSession} from '../sessions/session.js';
 import {BaseTool, isBaseTool} from '../tools/base_tool.js';
 import {isBaseToolset} from '../tools/base_toolset.js';
 import {logger} from '../utils/logger.js';
+
+/**
+ * Session id of the placeholder session used while rendering the agent card.
+ *
+ * The card is built at startup, outside any invocation, so there is no real
+ * session to attach.
+ */
+const CARD_SESSION_ID = 'agent-card';
 
 /**
  * Resolves the AgentCard from the provided source.
@@ -286,6 +296,28 @@ function buildLoopAgentDescription(agent: LoopAgent): string {
   return `${descriptions.join(' ')} in a loop (max ${maxIterations} iterations).`;
 }
 
+/**
+ * Builds the context handed to instruction providers while rendering the card.
+ *
+ * The card is rendered once at startup, so there is no invocation, user or
+ * session behind it. A provider therefore sees an empty placeholder session
+ * rather than live state; supplying it explicitly keeps every ReadonlyContext
+ * accessor well defined instead of dereferencing undefined.
+ */
+function createCardRenderingContext(agent: BaseAgent): ReadonlyContext {
+  return new ReadonlyContext(
+    new InvocationContext({
+      invocationId: newInvocationContextId(),
+      agent,
+      session: createSession({
+        id: CARD_SESSION_ID,
+        appName: agent.rootAgent.name,
+      }),
+      pluginManager: new PluginManager(),
+    }),
+  );
+}
+
 async function buildDescriptionFromInstructions(
   agent: LlmAgent,
 ): Promise<string> {
@@ -297,13 +329,9 @@ async function buildDescriptionFromInstructions(
   if (agent.instruction) {
     let instructionStr: string;
     if (typeof agent.instruction === 'function') {
-      const dummyContext = new ReadonlyContext(
-        new InvocationContext({
-          agent: agent,
-        } as unknown as InvocationContextParams),
-      );
+      const cardContext = createCardRenderingContext(agent);
       try {
-        instructionStr = await agent.instruction(dummyContext);
+        instructionStr = await agent.instruction(cardContext);
       } catch (e) {
         logger.warn('Failed to resolve dynamic instruction for AgentCard', e);
         instructionStr = '';
@@ -321,13 +349,9 @@ async function buildDescriptionFromInstructions(
   if (isLlmAgent(root) && root.globalInstruction) {
     let globalInstructionStr: string;
     if (typeof root.globalInstruction === 'function') {
-      const dummyContext = new ReadonlyContext(
-        new InvocationContext({
-          agent: agent,
-        } as unknown as InvocationContextParams),
-      );
+      const cardContext = createCardRenderingContext(agent);
       try {
-        globalInstructionStr = await root.globalInstruction(dummyContext);
+        globalInstructionStr = await root.globalInstruction(cardContext);
       } catch (e) {
         logger.warn(
           'Failed to resolve dynamic global instruction for AgentCard',
