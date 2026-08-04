@@ -4,7 +4,6 @@ about: Suggest an idea for TypeScript ADK
 title: ''
 labels: ''
 assignees: ''
-
 ---
 
 ** Please make sure you read the contribution guide and file the issues in the
