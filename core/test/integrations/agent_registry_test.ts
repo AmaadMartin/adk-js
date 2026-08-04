@@ -6,6 +6,8 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+import {AgentCard} from '@a2a-js/sdk';
+import {Client, ClientFactory} from '@a2a-js/sdk/client';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   AgentRegistry,
@@ -18,6 +20,22 @@ import {
   RemoteA2AAgent,
   StreamableHTTPConnectionParams,
 } from '../../src/index.js';
+
+function makeAgentCard(overrides: Partial<AgentCard>): AgentCard {
+  return {
+    name: 'TestAgent',
+    description: 'Desc',
+    version: '1.0.0',
+    url: 'https://agent.com',
+    preferredTransport: 'JSONRPC',
+    protocolVersion: '0.3.0',
+    capabilities: {},
+    defaultInputModes: ['text/plain'],
+    defaultOutputModes: ['text/plain'],
+    skills: [],
+    ...overrides,
+  };
+}
 
 // Mock google-auth-library
 let shouldAuthThrow = false;
@@ -551,15 +569,7 @@ describe('AgentRegistry', () => {
       const agentInfo = {
         card: {
           type: 'A2A_AGENT_CARD',
-          content: {
-            name: 'CustomAgent',
-            description: 'Desc',
-            version: '2.0.0',
-            url: 'https://agent.com',
-            preferredTransport: 'JSONRPC',
-            protocolVersion: '0.3.0',
-            skills: [],
-          },
+          content: makeAgentCard({name: 'CustomAgent', version: '2.0.0'}),
         },
       };
 
@@ -691,19 +701,14 @@ describe('AgentRegistry', () => {
       const agentInfo = {
         card: {
           type: 'A2A_AGENT_CARD',
-          content: {
-            name: 'CustomAgentWithOptions',
-            description: 'Desc',
-            url: 'https://agent.com',
-            preferredTransport: 'JSONRPC',
-            protocolVersion: '0.3.0',
-            skills: [],
-          },
+          content: makeAgentCard({name: 'CustomAgentWithOptions'}),
         },
       };
 
-      const dummyClient = {};
-      const dummyClientFactory = () => {};
+      // A real Client is only obtainable from a live transport; this test only
+      // checks that the handle it is given is forwarded unchanged.
+      const dummyClient = {sendMessage: vi.fn()} as unknown as Client;
+      const dummyClientFactory = new ClientFactory();
 
       vi.spyOn(registry, 'getAgentInfo').mockResolvedValue(agentInfo);
       const agent = await registry.getRemoteA2AAgent('agents/agent-1', {
