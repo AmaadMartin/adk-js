@@ -7,6 +7,8 @@
 import {
   App,
   BaseAgent,
+  BaseLlm,
+  BaseLlmConnection,
   BasePlugin,
   createEvent,
   createResumabilityConfig,
@@ -17,6 +19,7 @@ import {
   InvocationContext,
   isRoutableLlmAgent,
   LlmAgent,
+  LlmResponse,
   Runner,
 } from '@google/adk';
 import {Content, FunctionCall, FunctionResponse} from '@google/genai';
@@ -1239,5 +1242,62 @@ describe('Runner artifact saving (`saveInputBlobsAsArtifacts`)', () => {
     expect(userEvents[1].content!.parts).toEqual([
       {text: '[Uploaded Artifact: "file2.pdf"]'},
     ]);
+  });
+});
+
+/**
+ * A model stub carrying only an id, for gates that inspect the model name
+ * before any request is issued.
+ */
+class NamedModelStub extends BaseLlm {
+  async *generateContentAsync(): AsyncGenerator<LlmResponse, void, void> {
+    yield {content: {role: 'model', parts: [{text: ''}]}};
+  }
+
+  connect(): Promise<BaseLlmConnection> {
+    return Promise.reject(new Error('connect is not supported by this stub'));
+  }
+}
+
+describe('Runner CFC model gate', () => {
+  const sessionService = new InMemorySessionService();
+
+  async function runWithCfc(model: string): Promise<Event[]> {
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent: new LlmAgent({
+        name: 'cfc_agent',
+        model: new NamedModelStub({model}),
+      }),
+      sessionService,
+    });
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+    });
+
+    const events: Event[] = [];
+    for await (const event of runner.runAsync({
+      userId: session.userId,
+      sessionId: session.id,
+      newMessage: {role: 'user', parts: [{text: TEST_MESSAGE}]},
+      runConfig: {supportCfc: true},
+    })) {
+      events.push(event);
+    }
+
+    return events;
+  }
+
+  it('rejects an EAP model, matching the adk-python bare gemini-2 prefix gate', async () => {
+    await expect(runWithCfc('gemini-flash-early-exp')).rejects.toThrow(
+      'CFC is not supported for model: gemini-flash-early-exp in agent: cfc_agent',
+    );
+  });
+
+  it('rejects a Gemini 1.x model', async () => {
+    await expect(runWithCfc('gemini-1.5-pro')).rejects.toThrow(
+      'CFC is not supported for model: gemini-1.5-pro in agent: cfc_agent',
+    );
   });
 });

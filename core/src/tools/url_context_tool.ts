@@ -5,13 +5,13 @@
  */
 import {GenerateContentConfig} from '@google/genai';
 
-import {isGemini2OrAbove, isGeminiModel} from '../utils/model_name.js';
+import {isGeminiEapOr2OrAbove, isGeminiModel} from '../utils/model_name.js';
 
 import {BaseTool, ToolProcessLlmRequest} from './base_tool.js';
 
 /**
- * A built-in tool that allows Gemini 2+ models to retrieve content from URLs
- * provided in the conversation.
+ * A built-in tool that allows Gemini 2+ and Gemini EAP models to retrieve
+ * content from URLs provided in the conversation.
  *
  * This tool operates internally within the model and does not require or
  * perform local code execution.
@@ -40,7 +40,7 @@ export class UrlContextTool extends BaseTool {
       );
     }
 
-    if (!isGemini2OrAbove(llmRequest.model)) {
+    if (!isGeminiEapOr2OrAbove(llmRequest.model)) {
       throw new Error(
         `URL context tool requires Gemini 2 or above, but got ${llmRequest.model}`,
       );

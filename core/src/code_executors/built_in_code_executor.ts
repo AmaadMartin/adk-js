@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {LlmRequest} from '../models/llm_request.js';
-import {isGemini2OrAbove} from '../utils/model_name.js';
+import {isGeminiEapOr2OrAbove} from '../utils/model_name.js';
 
 import {BaseCodeExecutor, ExecuteCodeParams} from './base_code_executor.js';
 import {CodeExecutionResult} from './code_execution_utils.js';
@@ -36,8 +36,8 @@ export function isBuiltInCodeExecutor(
 /**
  * A code executor that uses the Model's built-in code executor.
  *
- * Currently only supports Gemini 2.0+ models, but will be expanded to
- * other models.
+ * Currently only supports Gemini 2.0+ and Gemini EAP models, but will be
+ * expanded to other models.
  */
 export class BuiltInCodeExecutor extends BaseCodeExecutor {
   /** A unique symbol to identify BuiltInCodeExecutor class. */
@@ -52,7 +52,7 @@ export class BuiltInCodeExecutor extends BaseCodeExecutor {
   }
 
   processLlmRequest(llmRequest: LlmRequest) {
-    if (llmRequest.model && isGemini2OrAbove(llmRequest.model)) {
+    if (llmRequest.model && isGeminiEapOr2OrAbove(llmRequest.model)) {
       llmRequest.config = llmRequest.config || {};
       llmRequest.config.tools = llmRequest.config.tools || [];
       llmRequest.config.tools.push({codeExecution: {}});

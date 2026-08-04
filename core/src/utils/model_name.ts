@@ -123,17 +123,13 @@ export function isGemini1Model(modelString: string): boolean {
 }
 
 /**
- * Check if the model is a Gemini EAP or a Gemini 2.0+ model.
+ * Check if the model is a Gemini 2.x model using regex patterns.
  *
- * EAP Gemini models do not encode a numeric version, so they are matched
- * first by their naming convention — `gemini-<variant>-early-exp` with an
- * optional numeric suffix, e.g. `gemini-flash-early-exp` or
- * `gemini-flash-early-exp3`. Otherwise the model name is parsed as a version
- * and matches when the major version is >= 2.
+ * EAP models are deliberately not matched here: they carry no numeric version.
+ * Use {@link isGeminiEapOr2OrAbove} where they should be accepted.
  *
  * @param modelString Either a simple model name or path - based model name
- * @return true if it's a Gemini EAP model or a Gemini 2.0+ model, false
- *     otherwise.
+ * @return true if it's a Gemini 2.x model, false otherwise.
  */
 export function isGemini2OrAbove(modelString: string): boolean {
   if (!modelString) {
@@ -141,10 +137,6 @@ export function isGemini2OrAbove(modelString: string): boolean {
   }
 
   const modelName = extractModelName(modelString);
-
-  if (EAP_MODEL_NAME_PATTERN.test(modelName)) {
-    return true;
-  }
 
   if (!modelName.startsWith('gemini-')) {
     return false;
@@ -154,6 +146,32 @@ export function isGemini2OrAbove(modelString: string): boolean {
 
   const parsedVersion = parseVersion(versionString);
   return parsedVersion.valid && parsedVersion.major >= 2;
+}
+
+/**
+ * Check if the model is an Early Access Program (EAP) Gemini model, i.e.
+ * `gemini-<variant>-early-exp` with an optional numeric suffix — for example
+ * `gemini-flash-early-exp` or `gemini-flash-lite-early-exp3`.
+ *
+ * @param modelString Either a simple model name or path - based model name
+ * @return true if it's a Gemini EAP model, false otherwise.
+ */
+function isGeminiEapModel(modelString: string): boolean {
+  return EAP_MODEL_NAME_PATTERN.test(extractModelName(modelString));
+}
+
+/**
+ * Check if the model is a Gemini EAP or a Gemini 2.0+ model.
+ *
+ * EAP Gemini models do not encode a numeric version, so they are matched by
+ * naming convention before any version parsing.
+ *
+ * @param modelString Either a simple model name or path - based model name
+ * @return true if it's a Gemini EAP model or a Gemini 2.0+ model, false
+ *     otherwise.
+ */
+export function isGeminiEapOr2OrAbove(modelString: string): boolean {
+  return isGeminiEapModel(modelString) || isGemini2OrAbove(modelString);
 }
 
 /**
