@@ -742,6 +742,155 @@ describe('DatabaseSessionService', () => {
       ).toBeUndefined();
     });
 
+    it('trims the caller event in place and returns that same event', async () => {
+      const session = await service.createSession({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 's-temp-in-place',
+      });
+
+      const event = createEvent({
+        timestamp: Date.now(),
+        actions: createEventActions({
+          stateDelta: {
+            [State.TEMP_PREFIX + 'hide']: 'me',
+            'keep': 'me',
+          },
+        }),
+      });
+
+      const returnedEvent = await service.appendEvent({session, event});
+
+      expect(returnedEvent).toBe(event);
+      expect(event.actions?.stateDelta).not.toHaveProperty(
+        State.TEMP_PREFIX + 'hide',
+      );
+      expect(event.actions?.stateDelta).toHaveProperty('keep', 'me');
+    });
+
+    it('keeps temp: state from an earlier event readable when a later event is appended', async () => {
+      const session = await service.createSession({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 's-temp-across-events',
+      });
+
+      await service.appendEvent({
+        session,
+        event: createEvent({
+          timestamp: Date.now(),
+          actions: createEventActions({
+            stateDelta: {[State.TEMP_PREFIX + 'out']: 'from-agent-1'},
+          }),
+        }),
+      });
+
+      await service.appendEvent({
+        session,
+        event: createEvent({
+          timestamp: Date.now() + 1,
+          actions: createEventActions({stateDelta: {count: 1}}),
+        }),
+      });
+
+      expect(session.state[State.TEMP_PREFIX + 'out']).toBe('from-agent-1');
+      expect(session.state['count']).toBe(1);
+
+      const fetched = await service.getSession({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 's-temp-across-events',
+      });
+      expect(fetched?.state).toHaveProperty('count', 1);
+      expect(fetched?.state).not.toHaveProperty(State.TEMP_PREFIX + 'out');
+    });
+
+    it('keeps temp: state written straight onto the session state across an append', async () => {
+      const session = await service.createSession({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 's-temp-state-set',
+      });
+
+      // What `State.set('temp:x', ...)` does during an invocation.
+      session.state[State.TEMP_PREFIX + 'x'] = 'written-by-a-tool';
+
+      await service.appendEvent({
+        session,
+        event: createEvent({
+          timestamp: Date.now(),
+          actions: createEventActions({stateDelta: {count: 1}}),
+        }),
+      });
+
+      expect(session.state[State.TEMP_PREFIX + 'x']).toBe('written-by-a-tool');
+
+      const fetched = await service.getSession({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 's-temp-state-set',
+      });
+      expect(fetched?.state).not.toHaveProperty(State.TEMP_PREFIX + 'x');
+    });
+
+    it('leaves a partial event untouched: no state applied and no delta trimmed', async () => {
+      const session = await service.createSession({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 's-temp-partial',
+      });
+
+      const event = createEvent({
+        timestamp: Date.now(),
+        partial: true,
+        actions: createEventActions({
+          stateDelta: {[State.TEMP_PREFIX + 'hide']: 'me', 'keep': 'me'},
+        }),
+      });
+
+      await service.appendEvent({session, event});
+
+      expect(session.state).not.toHaveProperty(State.TEMP_PREFIX + 'hide');
+      expect(session.state).not.toHaveProperty('keep');
+      expect(session.events).toHaveLength(0);
+      expect(event.actions?.stateDelta).toHaveProperty(
+        State.TEMP_PREFIX + 'hide',
+        'me',
+      );
+    });
+
+    it('keeps temp: state when the append reloads a stale session', async () => {
+      const session = await service.createSession({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 's-temp-stale',
+      });
+
+      await service.appendEvent({
+        session,
+        event: createEvent({
+          timestamp: Date.now(),
+          actions: createEventActions({
+            stateDelta: {[State.TEMP_PREFIX + 'out']: 'from-agent-1'},
+          }),
+        }),
+      });
+
+      // Force the stale-session branch, which reloads state from storage.
+      session.lastUpdateTime = 0;
+
+      await service.appendEvent({
+        session,
+        event: createEvent({
+          timestamp: Date.now() + 1,
+          actions: createEventActions({stateDelta: {count: 1}}),
+        }),
+      });
+
+      expect(session.state[State.TEMP_PREFIX + 'out']).toBe('from-agent-1');
+      expect(session.state['count']).toBe(1);
+    });
+
     it('should align session updateTime with event timestamp', async () => {
       const session = await service.createSession({
         appName: 'test-app',
