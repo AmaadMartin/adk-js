@@ -405,7 +405,7 @@ export function geminiInitParams({
     if (params.project && params.location) {
       return params;
     }
-    // An ambient key is the last resort: any project or location that resolved,
+    // An ambient key is the last resort. A project or location that resolved,
     // explicitly or from the environment, outranks it.
     if (
       !params.project &&
