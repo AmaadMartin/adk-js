@@ -272,7 +272,7 @@ describe('RunSkillInlineScriptTool', () => {
     );
   });
 
-  it('materializes output files into the configured output directory', async () => {
+  it('passes the configured outputDir to materializeFiles', async () => {
     const outputDir = path.join(os.tmpdir(), 'skill-inline-output');
     const mockExecutor = new MockCodeExecutor();
     mockExecutor.mockResult = {stdout: '', stderr: '', outputFiles: [testFile]};
@@ -299,7 +299,7 @@ describe('RunSkillInlineScriptTool', () => {
     );
   });
 
-  it('materializes output files into the configured outputDir', async () => {
+  it('reports the configured outputDir on the result', async () => {
     const configuredDir = path.join(
       os.tmpdir(),
       'adk-configured-inline-output',

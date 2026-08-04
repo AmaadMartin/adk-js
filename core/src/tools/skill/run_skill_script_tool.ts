@@ -140,9 +140,7 @@ export class RunSkillScriptTool extends BaseTool {
         },
       });
 
-      // Awaited inside the try: returning the promise unawaited would escape
-      // the catch below and surface as an unhandled rejection instead of the
-      // tool's EXECUTION_ERROR response.
+      // Awaited, not returned bare, so a rejection lands in the catch below.
       return await this.toolset.materializeOutputFiles(result);
     } catch (e: unknown) {
       return {

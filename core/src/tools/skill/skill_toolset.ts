@@ -43,13 +43,9 @@ This is very important:
 4. Use \`run_skill_script\` to run scripts from a skill's \`scripts/\` directory. Use \`load_skill_resource\` to view script content first if needed.
 `;
 
-/** Filename prefix for the per-execution skill output directory. */
 const SKILL_OUTPUT_DIR_PREFIX = 'adk-skill-output-';
 
-/**
- * The result of a skill script execution, annotated with the directory its
- * output files were written to.
- */
+/** A skill script execution result, annotated with its output destination. */
 export interface SkillScriptResult extends CodeExecutionResult {
   /**
    * Absolute path of the directory `outputFiles` were written to. Omitted when
@@ -94,9 +90,8 @@ export class SkillToolset extends BaseToolset {
        * directory under the OS temp root, whose absolute path is reported on
        * the result. The host process's working directory is never used.
        *
-       * Materialized files are the script's product and are never deleted, so
-       * an unconfigured run relies on OS-level temp reaping; set this to put
-       * script output somewhere the application manages.
+       * Output files are never deleted, so an unconfigured run relies on
+       * OS-level temp reaping.
        */
       outputDir?: string;
     } = {},
@@ -131,10 +126,6 @@ export class SkillToolset extends BaseToolset {
   /**
    * Materializes the output files produced by a skill script and reports the
    * directory they were written to.
-   *
-   * Files go to the configured `outputDir`, or to a fresh directory under the
-   * OS temp root when none is configured; the host process's working directory
-   * is never used as an implicit destination.
    */
   async materializeOutputFiles(
     result: CodeExecutionResult,

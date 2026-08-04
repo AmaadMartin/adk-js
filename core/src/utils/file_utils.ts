@@ -13,11 +13,9 @@ import {File} from '../code_executors/code_execution_utils.js';
  * numeric suffix (`report.txt` -> `report_2.txt`) rather than overwriting an
  * existing file.
  *
- * Most names resolving outside `dir` are rejected with a `Path traversal
- * detected` error. That is a lexical prefix comparison of resolved paths, not
- * a sandbox: it does not survive symlinks or a concurrent rename, and it lets
- * through a sibling directory whose name extends `dir`'s own (with `dir` of
- * `/tmp/out`, a name of `../out-evil/x.txt` passes).
+ * A name resolving outside `dir` is rejected with a `Path traversal detected`
+ * error. That is a lexical check on resolved paths, not a sandbox: it does not
+ * survive symlinks or a concurrent rename.
  *
  * @param files The files to materialize.
  * @param dir Base directory to write under. Required: callers must state where
@@ -34,7 +32,9 @@ export async function materializeFiles(
   for (const file of files) {
     const fullPath = path.resolve(dir, file.name);
 
-    if (!fullPath.startsWith(resolvedBaseDir)) {
+    // Compare against `resolvedBaseDir + sep` so a sibling directory whose
+    // name merely extends the base ('<base>-evil') does not pass as contained.
+    if (!fullPath.startsWith(resolvedBaseDir + path.sep)) {
       throw new Error(
         `Path traversal detected: ${file.name} resolves outside of ${dir}`,
       );
@@ -62,12 +62,6 @@ export async function materializeFiles(
         // File does not exist, safe to write
         break;
       }
-    }
-
-    if (!finalPath.startsWith(resolvedBaseDir)) {
-      throw new Error(
-        `Path traversal detected: ${file.name} resolves outside of ${dir}`,
-      );
     }
 
     await fs.mkdir(path.dirname(finalPath), {recursive: true});

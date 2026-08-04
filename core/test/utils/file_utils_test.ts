@@ -108,6 +108,28 @@ describe('file_utils', () => {
       );
     });
 
+    it('should throw an error if file escapes into a sibling directory whose name extends the target', async () => {
+      // A bare prefix comparison passes `<tempDir>-evil/x.txt`, because the
+      // resolved path starts with the base directory's own name.
+      const files = [
+        {
+          name: path.join('..', `${path.basename(tempDir)}-evil`, 'x.txt'),
+          content: 'dangerous',
+          contentEncoding: FileContentEncoding.UTF8,
+          mimeType: 'text/plain',
+        },
+      ];
+
+      await expect(materializeFiles(files, tempDir)).rejects.toThrow(
+        /Path traversal detected/,
+      );
+      await expect(
+        fs.access(
+          path.resolve(tempDir, '..', `${path.basename(tempDir)}-evil`),
+        ),
+      ).rejects.toThrow();
+    });
+
     it('should allow relative paths that stay within the target directory', async () => {
       const files = [
         {
