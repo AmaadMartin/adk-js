@@ -24,6 +24,9 @@ import {App, isApp} from '@google/adk';
 import {
   AgentFile,
   AgentLoader,
+  FileMetadata,
+  isAgentEntrypointFile,
+  isScannableDirectory,
   replaceDirnamePlugin,
 } from '../../src/utils/agent_loader.js';
 import * as fileUtils from '../../src/utils/file_utils.js';
@@ -238,6 +241,66 @@ describe('AgentLoader', () => {
     await fs.mkdir(googleDir, {recursive: true});
     await fs.symlink(adkPath, path.join(googleDir, 'adk'), 'dir');
   }
+
+  describe('discovery filters', () => {
+    const fileEntry = (fileName: string): FileMetadata => {
+      const ext = path.extname(fileName);
+      return {
+        path: path.join('/agents', fileName),
+        name: fileName.slice(0, fileName.length - ext.length),
+        ext,
+        isFile: true,
+        isDirectory: false,
+      };
+    };
+
+    const dirEntry = (dirName: string): FileMetadata => ({
+      path: path.join('/agents', dirName),
+      name: dirName,
+      isFile: false,
+      isDirectory: true,
+    });
+
+    it.each([
+      ['agent.js', true],
+      ['agent.ts', true],
+      ['agent.mts', true],
+      ['agent.cjs', true],
+      ['agent.py', false],
+      ['agent.json', false],
+      // `.d.ts` needs the separating dot: `ad.ts` is an ordinary agent file.
+      ['ad.ts', true],
+      ['a.d.ts', false],
+      ['a.d.mts', false],
+      ['a.d.cts', false],
+      // Likewise `.spec.` / `.test.` need the separating dot.
+      ['xspec.ts', true],
+      ['x.spec.mts', false],
+      ['x.test.js', false],
+      ['x.spec.cjs', false],
+      ['.hidden.ts', false],
+    ])('isAgentEntrypointFile(%s) is %s', (fileName, expected) => {
+      expect(isAgentEntrypointFile(fileEntry(fileName))).toBe(expected);
+    });
+
+    it('isAgentEntrypointFile rejects a directory entry', () => {
+      expect(isAgentEntrypointFile(dirEntry('agent.ts'))).toBe(false);
+    });
+
+    it.each([
+      ['my_agent', true],
+      ['node_modules', false],
+      ['dist', false],
+      ['build', false],
+      ['.git', false],
+    ])('isScannableDirectory(%s) is %s', (dirName, expected) => {
+      expect(isScannableDirectory(dirEntry(dirName))).toBe(expected);
+    });
+
+    it('isScannableDirectory rejects a file entry', () => {
+      expect(isScannableDirectory(fileEntry('my_agent.ts'))).toBe(false);
+    });
+  });
 
   describe('AgentFile', () => {
     it('loads .js agent file', async () => {
@@ -788,6 +851,215 @@ describe('AgentLoader', () => {
         'agent3',
         'agent4',
       ]);
+
+      await loader.disposeAll();
+    });
+
+    it('lists agents without compiling any of them', async () => {
+      const loader = new AgentLoader(tempAgentsDir);
+
+      expect(await loader.listAgents()).toEqual(['agent1', 'agent2', 'agent3']);
+      expect(esbuild.build).not.toHaveBeenCalled();
+
+      await loader.disposeAll();
+    });
+
+    it('returns an unloaded handle from getAgentFile()', async () => {
+      const loader = new AgentLoader(tempAgentsDir);
+      const agentFile = await loader.getAgentFile('agent2');
+
+      expect(() => agentFile.getFilePath()).toThrow('Agent is not loaded yet');
+      expect(esbuild.build).not.toHaveBeenCalled();
+
+      await loader.disposeAll();
+    });
+
+    it('compiles only the agent that is actually loaded', async () => {
+      const loader = new AgentLoader(tempAgentsDir);
+      const agentFile = await loader.getAgentFile('agent2');
+
+      expect((await agentFile.load()).name).toBe('agent2');
+      expect(esbuild.build).toHaveBeenCalledTimes(1);
+      expect((esbuild.build as Mock).mock.calls[0][0]).toMatchObject({
+        entryPoints: [path.join(tempAgentsDir, 'agent2.ts')],
+      });
+
+      await loader.disposeAll();
+    });
+
+    it('loads candidates and lists only the App entrypoints', async () => {
+      const appDir = path.join(tempAgentsDir, 'my_service');
+      await fs.mkdir(appDir, {recursive: true});
+      await fs.writeFile(path.join(appDir, 'app.js'), appJsContent);
+
+      const loader = new AgentLoader(tempAgentsDir);
+
+      expect(await loader.listApps()).toEqual(['my_service']);
+      expect(esbuild.build).toHaveBeenCalled();
+
+      await loader.disposeAll();
+    });
+
+    it('excludes dotfiles, declaration files and test files from discovery', async () => {
+      await fs.writeFile(
+        path.join(tempAgentsDir, 'helpers.d.ts'),
+        'export {};',
+      );
+      await fs.writeFile(
+        path.join(tempAgentsDir, 'agent.test.ts'),
+        agent2TsContent,
+      );
+      await fs.writeFile(
+        path.join(tempAgentsDir, '.hidden.ts'),
+        agent2TsContent,
+      );
+
+      const loader = new AgentLoader(tempAgentsDir);
+
+      expect(await loader.listAgents()).toEqual(['agent1', 'agent2', 'agent3']);
+
+      await loader.disposeAll();
+    });
+
+    it('does not scan node_modules, dist, build or dot-directories', async () => {
+      const nodeModulesAgent = path.join(
+        tempAgentsDir,
+        'node_modules',
+        'agent.js',
+      );
+      await fs.writeFile(nodeModulesAgent, agent1JsContent);
+      for (const dirName of ['dist', 'build', '.cache']) {
+        await fs.mkdir(path.join(tempAgentsDir, dirName));
+        await fs.writeFile(
+          path.join(tempAgentsDir, dirName, 'agent.js'),
+          agent1JsContent,
+        );
+      }
+
+      const loader = new AgentLoader(tempAgentsDir);
+
+      try {
+        expect(await loader.listAgents()).toEqual([
+          'agent1',
+          'agent2',
+          'agent3',
+        ]);
+      } finally {
+        // `node_modules` survives the per-test cleanup, so undo this one here.
+        await fs.rm(nodeModulesAgent, {force: true});
+        await loader.disposeAll();
+      }
+    });
+
+    it('does not discover a directory without an app or agent entrypoint', async () => {
+      const dirPath = path.join(tempAgentsDir, 'just_a_library');
+      await fs.mkdir(dirPath);
+      await fs.writeFile(path.join(dirPath, 'index.js'), agent1JsContent);
+
+      const loader = new AgentLoader(tempAgentsDir);
+
+      expect(await loader.listAgents()).toEqual(['agent1', 'agent2', 'agent3']);
+
+      await loader.disposeAll();
+    });
+
+    it('scans once for concurrent listAgents() callers', async () => {
+      const loader = new AgentLoader(tempAgentsDir);
+
+      // `isFile` is consulted exactly once per scan, on the agents dir itself.
+      (fileUtils.isFile as Mock).mockClear();
+      const results = await Promise.all([
+        loader.listAgents(),
+        loader.listAgents(),
+        loader.listAgents(),
+      ]);
+
+      expect(fileUtils.isFile).toHaveBeenCalledTimes(1);
+      expect(results).toEqual([
+        ['agent1', 'agent2', 'agent3'],
+        ['agent1', 'agent2', 'agent3'],
+        ['agent1', 'agent2', 'agent3'],
+      ]);
+
+      await loader.disposeAll();
+    });
+
+    it('compiles once and returns one instance for concurrent load() calls', async () => {
+      const loader = new AgentLoader(tempAgentsDir);
+      const agentFile = await loader.getAgentFile('agent2');
+
+      const [first, second, third] = await Promise.all([
+        agentFile.load(),
+        agentFile.load(),
+        agentFile.load(),
+      ]);
+
+      expect(esbuild.build).toHaveBeenCalledTimes(1);
+      expect(second).toBe(first);
+      expect(third).toBe(first);
+
+      await loader.disposeAll();
+    });
+
+    it('leaves no temp directory behind after concurrent load() calls', async () => {
+      const loader = new AgentLoader(tempAgentsDir);
+      const agentFile = await loader.getAgentFile('agent2');
+
+      await Promise.all([agentFile.load(), agentFile.load(), agentFile.load()]);
+      expect(await fs.readdir(tempLoaderDir)).toHaveLength(1);
+
+      await loader.disposeAll();
+      expect(await fs.readdir(tempLoaderDir)).toEqual([]);
+    });
+
+    it('retries the compile after a failed load', async () => {
+      const loader = new AgentLoader(tempAgentsDir);
+      const agentFile = await loader.getAgentFile('agent2');
+      (esbuild.build as Mock).mockRejectedValueOnce(
+        new Error('compile failed'),
+      );
+
+      await expect(agentFile.load()).rejects.toThrow('compile failed');
+      expect((await agentFile.load()).name).toBe('agent2');
+      expect(esbuild.build).toHaveBeenCalledTimes(2);
+
+      await loader.disposeAll();
+    });
+
+    it('lists a single agent without compiling when agentsDirPath is a file', async () => {
+      (fileUtils.isFile as Mock).mockReturnValue(true);
+      const loader = new AgentLoader(path.join(tempAgentsDir, 'agent1.js'));
+
+      expect(await loader.listAgents()).toEqual(['agent1']);
+      expect(esbuild.build).not.toHaveBeenCalled();
+
+      await loader.disposeAll();
+    });
+
+    it('lists an explicitly named dot-prefixed agent file', async () => {
+      const hiddenAgentPath = path.join(tempAgentsDir, '.hidden_agent.js');
+      await fs.writeFile(hiddenAgentPath, agent1JsContent);
+      (fileUtils.isFile as Mock).mockReturnValue(true);
+
+      const loader = new AgentLoader(hiddenAgentPath);
+
+      expect(await loader.listAgents()).toEqual(['.hidden_agent']);
+
+      await loader.disposeAll();
+    });
+
+    it('retries the scan after a failed discovery', async () => {
+      const loader = new AgentLoader(path.join(tempAgentsDir, 'missing_dir'));
+
+      await expect(loader.listAgents()).rejects.toThrow();
+
+      await fs.mkdir(path.join(tempAgentsDir, 'missing_dir'));
+      await fs.writeFile(
+        path.join(tempAgentsDir, 'missing_dir', 'agent.js'),
+        agent1JsContent,
+      );
+
+      expect(await loader.listAgents()).toEqual(['agent']);
 
       await loader.disposeAll();
     });

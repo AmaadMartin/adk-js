@@ -801,6 +801,20 @@ describe('AdkWebServer', () => {
       expect(response.data).toEqual(['testApp']);
     });
 
+    it('should not load any agent to serve the list', async () => {
+      const originalGetAgentFile = agentLoader.getAgentFile;
+      const getAgentFile = vi.fn(originalGetAgentFile);
+      agentLoader.getAgentFile = getAgentFile;
+
+      try {
+        const response = await client.get<string[]>('/list-apps');
+        expect(response.data).toEqual(['testApp']);
+        expect(getAgentFile).not.toHaveBeenCalled();
+      } finally {
+        agentLoader.getAgentFile = originalGetAgentFile;
+      }
+    });
+
     it('should return 500 if listAgents fails', async () => {
       const originalListAgents = agentLoader.listAgents;
       agentLoader.listAgents = () => Promise.reject(new Error('List failed'));
