@@ -40,6 +40,13 @@ vi.mock('../../src/utils/file_utils.js', () => ({
   tryToFindFileRecursively: vi.fn(),
 }));
 
+const {watchMock} = vi.hoisted(() => ({watchMock: vi.fn()}));
+
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  return {...actual, default: {...actual, watch: watchMock}, watch: watchMock};
+});
+
 vi.mock('esbuild', async (importOriginal) => {
   const actual = await importOriginal<typeof import('esbuild')>();
   return {
@@ -1044,6 +1051,61 @@ describe('AgentLoader', () => {
       const loader = new AgentLoader(hiddenAgentPath);
 
       expect(await loader.listAgents()).toEqual(['.hidden_agent']);
+
+      await loader.disposeAll();
+    });
+
+    it('starts one directory watcher when watchForChanges is set', async () => {
+      const watcher = {on: vi.fn(), close: vi.fn()};
+      watchMock.mockReturnValue(watcher);
+      const loader = new AgentLoader(tempAgentsDir, undefined, true);
+
+      await loader.listAgents();
+      (loader as unknown as {invalidateAll: () => void}).invalidateAll();
+      await loader.listAgents();
+
+      expect(watchMock).toHaveBeenCalledTimes(1);
+      expect(watchMock).toHaveBeenCalledWith(
+        tempAgentsDir,
+        {recursive: true},
+        expect.any(Function),
+      );
+
+      await loader.disposeAll();
+      expect(watcher.close).toHaveBeenCalled();
+    });
+
+    it('does not watch the agents directory by default', async () => {
+      const loader = new AgentLoader(tempAgentsDir);
+
+      await loader.listAgents();
+
+      expect(watchMock).not.toHaveBeenCalled();
+      await loader.disposeAll();
+    });
+
+    it('rescans when the watcher reports a change to a JS file', async () => {
+      watchMock.mockReturnValue({on: vi.fn(), close: vi.fn()});
+      const loader = new AgentLoader(tempAgentsDir, undefined, true);
+      await loader.listAgents();
+      const onChange = watchMock.mock.calls[0][2];
+
+      await fs.writeFile(
+        path.join(tempAgentsDir, 'agent4.js'),
+        agent1JsContent,
+      );
+      onChange('change', 'notes.md');
+
+      expect(await loader.listAgents()).toEqual(['agent1', 'agent2', 'agent3']);
+
+      onChange('change', 'agent4.js');
+
+      expect(await loader.listAgents()).toEqual([
+        'agent1',
+        'agent2',
+        'agent3',
+        'agent4',
+      ]);
 
       await loader.disposeAll();
     });
