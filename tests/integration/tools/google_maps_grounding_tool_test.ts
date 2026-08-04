@@ -45,10 +45,8 @@ class SpyGemini extends Gemini {
     this.spyClient = new SpyMockGenAIClient(response);
   }
 
-  // The root install resolves @google/genai to the copy hoisted by
-  // @google-cloud/vertexai, which is a different major than the one core
-  // builds against. Deriving the type from Gemini keeps the override on the
-  // same GoogleGenAI the base class declares.
+  // Derived from Gemini: the root install hoists a different @google/genai
+  // major than core builds against.
   override get apiClient(): Gemini['apiClient'] {
     return this.spyClient as unknown as Gemini['apiClient'];
   }
