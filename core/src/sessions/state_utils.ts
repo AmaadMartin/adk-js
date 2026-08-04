@@ -22,14 +22,14 @@ export interface StateDeltas {
  * Splits a state map into its app-, user- and session-scoped partitions,
  * stripping the `app:` and `user:` prefixes and dropping `temp:` keys.
  *
- * The inverse of `mergeStates`, which re-applies the prefixes.
+ * The inverse of {@link mergeStates}, which re-applies the prefixes.
  *
  * @param state The state to split. Absent or empty state yields empty buckets.
  * @return Freshly allocated app, user and session buckets. Values are carried
  *     over by reference; `state` itself is never mutated.
  */
 export function extractStateDelta(
-  state?: Record<string, unknown>,
+  state: Record<string, unknown> | undefined,
 ): StateDeltas {
   const app: Record<string, unknown> = {};
   const user: Record<string, unknown> = {};

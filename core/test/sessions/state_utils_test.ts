@@ -56,14 +56,14 @@ describe('extractStateDelta', () => {
     expect(
       extractStateDelta({
         'app:theme': 'dark',
-        'user:lang': 'en',
-        'temp:scratch': 'x',
-        turn: 3,
+        'user:locale': 'en',
+        'temp:scratch': 1,
+        turn: 2,
       }),
     ).toEqual({
       app: {theme: 'dark'},
-      user: {lang: 'en'},
-      session: {turn: 3},
+      user: {locale: 'en'},
+      session: {turn: 2},
     });
   });
 
