@@ -10,17 +10,14 @@ import * as dotenv from 'dotenv';
 import {fileURLToPath} from 'node:url';
 import {describe, expect, it} from 'vitest';
 
-// Anchored to this module so neither the process working directory nor a
-// future move of this file can silently retarget it. A missing file is the
-// normal CI state: dotenv reports it in the return value instead of throwing.
+// No existsSync guard: a missing .env is the normal CI state and dotenv
+// reports it in the return value instead of throwing.
 dotenv.config({
   path: fileURLToPath(new URL('.env', import.meta.url)),
   quiet: true,
 });
 
-// A live Vertex connection needs a project id and there is no sensible default
-// for one, so an unset project means skip rather than fail against a project
-// that does not exist. A region does have a defensible default.
+// No sensible default for a project id, so unset means skip, not fail.
 const project = process.env.GOOGLE_CLOUD_PROJECT;
 const location = process.env.GOOGLE_CLOUD_LOCATION || 'us-central1';
 
