@@ -14,8 +14,22 @@ import {
 } from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {AgentRegistry} from '../../src/integration/agent_registry.js';
-import {YamlAgentConfig} from '../../src/integration/agent_types.js';
+import {
+  AgentClass,
+  YamlAgentConfig,
+} from '../../src/integration/agent_types.js';
 import {IntegrationRegistry} from '../../src/integration/integration_registry.js';
+
+/**
+ * Produces a config with no `agentClass`, mirroring a YAML file that omits the
+ * field. That is the case the `?? 'LlmAgent'` fallback in `instantiateAgent`
+ * exists for, and it is unreachable through the declared type.
+ */
+function configWithoutAgentClass(
+  config: Omit<YamlAgentConfig, 'agentClass'>,
+): YamlAgentConfig {
+  return config as YamlAgentConfig;
+}
 
 describe('AgentRegistry', () => {
   let integrationRegistry: IntegrationRegistry;
@@ -266,14 +280,16 @@ describe('AgentRegistry', () => {
     const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const debugSpy = vi.spyOn(getLogger(), 'debug');
 
-    const config = {
-      name: 'logged_agent',
-      model: 'model',
-      description: 'desc',
-      instruction: 'inst',
-    } as unknown as YamlAgentConfig;
-
-    agentRegistry.registerAgentConfig('logged_agent', config);
+    agentRegistry.registerAgentConfig(
+      'logged_agent',
+      configWithoutAgentClass({
+        name: 'logged_agent',
+        model: 'model',
+        description: 'desc',
+        instruction: 'inst',
+        isRootAgent: false,
+      }),
+    );
 
     expect(agentRegistry.getAgent('logged_agent')).toBeInstanceOf(LlmAgent);
     expect(debugSpy).toHaveBeenCalledWith(
@@ -285,11 +301,14 @@ describe('AgentRegistry', () => {
   it('should log the declared agent class when the config supplies one', () => {
     const debugSpy = vi.spyOn(getLogger(), 'debug');
 
-    const config = {
+    const config: YamlAgentConfig = {
       name: 'sequential_agent',
+      model: 'model',
       description: 'desc',
-      agentClass: 'SequentialAgent',
-    } as unknown as YamlAgentConfig;
+      instruction: 'inst',
+      agentClass: AgentClass.SequentialAgent,
+      isRootAgent: false,
+    };
 
     agentRegistry.registerAgentConfig('sequential_agent', config);
 
@@ -302,14 +321,15 @@ describe('AgentRegistry', () => {
   it('should not log to the console when a tool is missing', () => {
     const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
-    const config = {
+    const config: YamlAgentConfig = {
       name: 'silent_bad_agent',
       model: 'model',
       description: 'desc',
       instruction: 'inst',
-      agentClass: 'LlmAgent',
+      agentClass: AgentClass.LlmAgent,
+      isRootAgent: false,
       tools: [{name: 'missing_tool'}],
-    } as unknown as YamlAgentConfig;
+    };
 
     agentRegistry.registerAgentConfig('silent_bad_agent', config);
 
