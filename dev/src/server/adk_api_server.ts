@@ -869,10 +869,6 @@ export class AdkApiServer {
               const parsed: unknown = JSON.parse(rawBody);
               if (typeof parsed === 'object' && parsed !== null) {
                 body = parsed;
-              } else {
-                this.logger.warn(
-                  `Ignoring non-object Reasoning Engine body: ${rawBody}`,
-                );
               }
             } catch (e) {
               this.logger.error(`Failed to parse raw body as JSON: ${e}`);
