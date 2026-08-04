@@ -64,9 +64,9 @@ interface MtlsTransport {
  * Loads the client certificate when one is configured and derives the base URL
  * to call.
  *
- * Never rejects: a certificate that cannot be loaded degrades to a plain
- * non-mTLS request against the plain host, so a moved or malformed
- * certificate cannot take the registry client offline.
+ * Never rejects: a certificate that cannot be loaded degrades to a request
+ * without one, so a moved or malformed certificate cannot take the registry
+ * client offline.
  */
 async function resolveMtlsTransport(): Promise<MtlsTransport> {
   const dispatcher = await createMtlsDispatcher().catch((e: unknown) => {
