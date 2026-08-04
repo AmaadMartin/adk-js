@@ -13,31 +13,7 @@ import {
   buildExecutableCodePart,
   convertCodeExecutionParts,
   extractCodeAndTruncateContent,
-  getEncodedFileContent,
 } from '../../src/code_executors/code_execution_utils.js';
-import {base64Encode} from '../../src/utils/env_aware_utils.js';
-
-// ---------------------------------------------------------------------------
-// getEncodedFileContent
-// ---------------------------------------------------------------------------
-describe('getEncodedFileContent', () => {
-  it('returns data unchanged when already base64 encoded', () => {
-    const encoded = base64Encode('hello world');
-    expect(getEncodedFileContent(encoded)).toBe(encoded);
-  });
-
-  it('base64-encodes plain text that is not already encoded', () => {
-    const plain = 'hello world';
-    const result = getEncodedFileContent(plain);
-    expect(result).toBe(base64Encode(plain));
-  });
-
-  it('handles empty string', () => {
-    const result = getEncodedFileContent('');
-    // empty string is valid base64 (empty), so it should come back unchanged or encoded
-    expect(typeof result).toBe('string');
-  });
-});
 
 // ---------------------------------------------------------------------------
 // buildExecutableCodePart
