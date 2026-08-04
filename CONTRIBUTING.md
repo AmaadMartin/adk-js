@@ -51,16 +51,13 @@ To maintain high code quality and consistency:
    ```
 
 1. **Type checking**: Use `tsc` to type-check the whole repository, including
-   the test trees and root-level configs that the per-workspace build does not
-   cover. It resolves the workspace packages to their `src` directories the
-   same way the vitest projects do, so it does not require a build first.
+   the test trees the per-workspace build does not cover.
 
    ```bash
    npm run ts:check
    ```
 
-   This currently reports pre-existing errors in the test trees; it is not yet
-   enforced in CI.
+   This currently reports pre-existing errors and is not yet enforced in CI.
 
 The project uses `husky` and `lint-staged` to automatically lint and format
 your changes before each commit.
