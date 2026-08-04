@@ -387,8 +387,7 @@ export function geminiInitParams({
   if (params.vertexai) {
     // @google/genai rejects an initializer carrying both, so exactly one of an
     // Express Mode key and a project/location pair may survive this block.
-    const explicitProjectOrLocation = !!(project || location);
-    if (params.apiKey && explicitProjectOrLocation) {
+    if (params.apiKey && (project || location)) {
       throw new Error(
         'Cannot specify project or location and an Express Mode API key. ' +
           'Either use project and location, or just the API key.',
@@ -406,16 +405,15 @@ export function geminiInitParams({
     if (params.project && params.location) {
       return params;
     }
-    // An ambient key is the last resort: an explicitly supplied project or
-    // location outranks it, and so does a complete ambient pair.
+    // An ambient key is the last resort: any project or location that resolved,
+    // explicitly or from the environment, outranks it.
     if (
-      !explicitProjectOrLocation &&
+      !params.project &&
+      !params.location &&
       !isBrowser() &&
       process.env['GOOGLE_API_KEY']
     ) {
       params.apiKey = process.env['GOOGLE_API_KEY'];
-      params.project = undefined;
-      params.location = undefined;
       return params;
     }
     if (!params.project) {

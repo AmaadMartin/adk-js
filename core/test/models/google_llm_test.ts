@@ -448,16 +448,14 @@ describe('GoogleLlm', () => {
       expect(params.location).toBeUndefined();
     });
 
-    it('should drop a half resolved project when GOOGLE_API_KEY takes over', () => {
+    it('should keep an ambient project ahead of GOOGLE_API_KEY and report the missing location', () => {
       process.env['GOOGLE_GENAI_USE_VERTEXAI'] = '1';
       process.env['GOOGLE_CLOUD_PROJECT'] = 'env-project';
       process.env['GOOGLE_API_KEY'] = 'env-express-key';
 
-      const params = geminiInitParams({model: 'gemini-1.5-flash'});
-
-      expect(params.apiKey).toBe('env-express-key');
-      expect(params.project).toBeUndefined();
-      expect(params.location).toBeUndefined();
+      expect(() => geminiInitParams({model: 'gemini-1.5-flash'})).toThrow(
+        /VertexAI location.*GOOGLE_CLOUD_LOCATION.*GOOGLE_API_KEY/,
+      );
     });
 
     it('should keep an explicit project ahead of GOOGLE_API_KEY and report the missing location', () => {
