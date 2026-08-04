@@ -24,14 +24,6 @@ import {isBaseToolset} from '../tools/base_toolset.js';
 import {logger} from '../utils/logger.js';
 
 /**
- * Session id of the placeholder session used while rendering the agent card.
- *
- * The card is built at startup, outside any invocation, so there is no real
- * session to attach.
- */
-const CARD_SESSION_ID = 'agent-card';
-
-/**
  * Resolves the AgentCard from the provided source.
  */
 export async function resolveAgentCard(
@@ -310,7 +302,7 @@ function createCardRenderingContext(agent: BaseAgent): ReadonlyContext {
       invocationId: newInvocationContextId(),
       agent,
       session: createSession({
-        id: CARD_SESSION_ID,
+        id: 'agent-card',
         appName: agent.rootAgent.name,
       }),
       pluginManager: new PluginManager(),
@@ -326,10 +318,11 @@ async function buildDescriptionFromInstructions(
     descriptionParts.push(agent.description);
   }
 
+  const cardContext = createCardRenderingContext(agent);
+
   if (agent.instruction) {
     let instructionStr: string;
     if (typeof agent.instruction === 'function') {
-      const cardContext = createCardRenderingContext(agent);
       try {
         instructionStr = await agent.instruction(cardContext);
       } catch (e) {
@@ -349,7 +342,6 @@ async function buildDescriptionFromInstructions(
   if (isLlmAgent(root) && root.globalInstruction) {
     let globalInstructionStr: string;
     if (typeof root.globalInstruction === 'function') {
-      const cardContext = createCardRenderingContext(agent);
       try {
         globalInstructionStr = await root.globalInstruction(cardContext);
       } catch (e) {
