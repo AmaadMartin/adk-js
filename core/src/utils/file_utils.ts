@@ -17,12 +17,8 @@ import {File} from '../code_executors/code_execution_utils.js';
  * whose name merely starts with the same string, e.g. base dir `/tmp/agent`
  * wrongly "containing" `/tmp/agent-evil/x`.
  *
- * This is a lexical string comparison, not a sandbox. It says nothing about
- * what the path points at on disk: it does not survive symlinks, hardlinks,
- * bind mounts, or a TOCTOU race between the check and the subsequent
- * filesystem call. The comparison is case-sensitive on every platform. Use it
- * to reject malformed or hostile path *names*, not as a security boundary
- * around the filesystem.
+ * Lexical comparison only: it is case-sensitive on every platform and says
+ * nothing about symlinks or a TOCTOU race with the following filesystem call.
  */
 export function isInsideDir(targetPath: string, baseDir: string): boolean {
   const resolvedBase = path.resolve(baseDir);
@@ -41,12 +37,11 @@ export async function materializeFiles(
   files: File[],
   dir = process.cwd(),
 ): Promise<File[]> {
-  const resolvedBaseDir = path.resolve(dir);
   const createdFiles: File[] = [];
   for (const file of files) {
     const fullPath = path.resolve(dir, file.name);
 
-    if (!isInsideDir(fullPath, resolvedBaseDir)) {
+    if (!isInsideDir(fullPath, dir)) {
       throw new Error(
         `Path traversal detected: ${file.name} resolves outside of ${dir}`,
       );
@@ -76,7 +71,7 @@ export async function materializeFiles(
       }
     }
 
-    if (!isInsideDir(finalPath, resolvedBaseDir)) {
+    if (!isInsideDir(finalPath, dir)) {
       throw new Error(
         `Path traversal detected: ${file.name} resolves outside of ${dir}`,
       );
