@@ -198,9 +198,7 @@ function detectErrorTypeForTelemetry(
       return undefined;
     }
     const errorType: unknown = tool.detectErrorInResponse?.(response);
-    return typeof errorType === 'string' && errorType !== ''
-      ? errorType
-      : undefined;
+    return typeof errorType === 'string' ? errorType : undefined;
   } catch (e: unknown) {
     logger.error(
       `Error detecting error type for telemetry from tool ${tool.name}.`,
