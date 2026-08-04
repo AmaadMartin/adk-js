@@ -144,22 +144,4 @@ describe('AgentRegistry mTLS', () => {
 
     expect(createMtlsDispatcher).toHaveBeenCalledTimes(2);
   });
-
-  it('still serves the request on the plain host when certificate loading rejects', async () => {
-    vi.mocked(createMtlsDispatcher).mockRejectedValue(new Error('boom'));
-
-    await expect(registry.listAgents()).resolves.toEqual({agents: []});
-
-    const {url, init} = fetchCall(0);
-    expect(url.startsWith(PLAIN_BASE_URL)).toBe(true);
-    expect(init).not.toHaveProperty('dispatcher');
-  });
-
-  it('still serves the request when certificate loading rejects with a non-Error', async () => {
-    vi.mocked(createMtlsDispatcher).mockRejectedValue('boom');
-
-    await expect(registry.listAgents()).resolves.toEqual({agents: []});
-
-    expect(fetchCall(0).url.startsWith(PLAIN_BASE_URL)).toBe(true);
-  });
 });

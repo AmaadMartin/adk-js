@@ -20,10 +20,7 @@ import {logger} from '../../src/utils/logger.js';
 import {
   createMtlsDispatcher,
   effectiveGoogleapisEndpoint,
-  isNonMtlsGoogleapisEndpoint,
   MtlsEndpointSetting,
-  shouldUseMtlsEndpoint,
-  useClientCertEffective,
 } from '../../src/utils/mtls_utils.js';
 
 const {agentCtor} = vi.hoisted(() => ({agentCtor: vi.fn()}));
@@ -117,79 +114,6 @@ describe('mtls_utils', () => {
     ]);
   });
 
-  describe('useClientCertEffective', () => {
-    it.each([
-      ['true', true],
-      ['1', true],
-      ['TRUE', true],
-      ['false', false],
-      ['', false],
-    ])('returns %s -> %s', (value, expected) => {
-      process.env['GOOGLE_API_USE_CLIENT_CERTIFICATE'] = value;
-      expect(useClientCertEffective()).toBe(expected);
-    });
-
-    it('returns false when the variable is unset', () => {
-      expect(useClientCertEffective()).toBe(false);
-    });
-  });
-
-  describe('shouldUseMtlsEndpoint', () => {
-    it('returns true for "always" even without a certificate', () => {
-      process.env['GOOGLE_API_USE_MTLS_ENDPOINT'] = 'always';
-      expect(shouldUseMtlsEndpoint(false)).toBe(true);
-    });
-
-    it('returns false for "never" even with a certificate', () => {
-      process.env['GOOGLE_API_USE_MTLS_ENDPOINT'] = 'never';
-      expect(shouldUseMtlsEndpoint(true)).toBe(false);
-    });
-
-    it('returns true for "auto" with a certificate', () => {
-      process.env['GOOGLE_API_USE_MTLS_ENDPOINT'] = 'auto';
-      expect(shouldUseMtlsEndpoint(true)).toBe(true);
-    });
-
-    it('returns false for "auto" without a certificate', () => {
-      process.env['GOOGLE_API_USE_MTLS_ENDPOINT'] = 'auto';
-      expect(shouldUseMtlsEndpoint(false)).toBe(false);
-    });
-
-    it('treats an unrecognised value as "auto"', () => {
-      process.env['GOOGLE_API_USE_MTLS_ENDPOINT'] = 'invalid';
-      expect(shouldUseMtlsEndpoint(true)).toBe(true);
-      expect(shouldUseMtlsEndpoint(false)).toBe(false);
-    });
-
-    it('defaults to "auto" when the variable is unset', () => {
-      expect(shouldUseMtlsEndpoint(true)).toBe(true);
-      expect(shouldUseMtlsEndpoint(false)).toBe(false);
-    });
-
-    it('matches the setting case-insensitively', () => {
-      process.env['GOOGLE_API_USE_MTLS_ENDPOINT'] = 'ALWAYS';
-      expect(shouldUseMtlsEndpoint(false)).toBe(true);
-      process.env['GOOGLE_API_USE_MTLS_ENDPOINT'] = 'Never';
-      expect(shouldUseMtlsEndpoint(true)).toBe(false);
-    });
-  });
-
-  describe('isNonMtlsGoogleapisEndpoint', () => {
-    it.each([
-      ['https://oauth2.googleapis.com/token', true],
-      ['https://openidconnect.googleapis.com/v1/userinfo', true],
-      ['https://oauth2.mtls.googleapis.com/token', false],
-      ['https://example.com/token', false],
-      ['https://accounts.google.com/o/oauth2/v2/auth', false],
-      ['', false],
-      ['not a url', false],
-      ['https://evil-googleapis.com.attacker.test/x', false],
-      ['https://googleapis.com/token', false],
-    ])('classifies %s as %s', (url, expected) => {
-      expect(isNonMtlsGoogleapisEndpoint(url)).toBe(expected);
-    });
-  });
-
   describe('effectiveGoogleapisEndpoint', () => {
     it.each([
       [
@@ -208,28 +132,118 @@ describe('mtls_utils', () => {
         'https://iam.googleapis.com:8443/v1/x#frag',
         'https://iam.mtls.googleapis.com:8443/v1/x#frag',
       ],
-      // Non-Google providers are never rewritten.
-      ['https://example.com/token', 'https://example.com/token'],
-      // Already-mTLS hosts are left alone.
-      [
-        'https://oauth2.mtls.googleapis.com/token',
-        'https://oauth2.mtls.googleapis.com/token',
-      ],
     ])('rewrites %s to %s', (url, expected) => {
-      expect(effectiveGoogleapisEndpoint(url)).toBe(expected);
+      expect(effectiveGoogleapisEndpoint(url, true)).toBe(expected);
     });
 
-    it('leaves the url unchanged when the setting is "never"', () => {
+    it.each([
+      // Already-mTLS hosts are left alone.
+      'https://oauth2.mtls.googleapis.com/token',
+      // Non-Google providers are never rewritten.
+      'https://example.com/token',
+      'https://accounts.google.com/o/oauth2/v2/auth',
+      // A lookalike host must not match on a substring.
+      'https://evil-googleapis.com.attacker.test/x',
+      // The bare apex is not a `*.googleapis.com` host.
+      'https://googleapis.com/token',
+      // Unparseable input is passed through untouched.
+      '',
+      'not a url',
+    ])('leaves %s unchanged', (url) => {
+      expect(effectiveGoogleapisEndpoint(url, true)).toBe(url);
+    });
+
+    it('rewrites for "always" even without a certificate', () => {
+      process.env['GOOGLE_API_USE_MTLS_ENDPOINT'] = 'always';
+      expect(
+        effectiveGoogleapisEndpoint(
+          'https://oauth2.googleapis.com/token',
+          false,
+        ),
+      ).toBe('https://oauth2.mtls.googleapis.com/token');
+    });
+
+    it('does not rewrite for "never" even with a certificate', () => {
       process.env['GOOGLE_API_USE_MTLS_ENDPOINT'] = 'never';
       expect(
-        effectiveGoogleapisEndpoint('https://oauth2.googleapis.com/token'),
+        effectiveGoogleapisEndpoint(
+          'https://oauth2.googleapis.com/token',
+          true,
+        ),
+      ).toBe('https://oauth2.googleapis.com/token');
+    });
+
+    it('does not rewrite for "auto" without a certificate', () => {
+      process.env['GOOGLE_API_USE_MTLS_ENDPOINT'] = 'auto';
+      expect(
+        effectiveGoogleapisEndpoint(
+          'https://oauth2.googleapis.com/token',
+          false,
+        ),
+      ).toBe('https://oauth2.googleapis.com/token');
+    });
+
+    it('treats an unrecognised setting as "auto"', () => {
+      process.env['GOOGLE_API_USE_MTLS_ENDPOINT'] = 'invalid';
+      expect(
+        effectiveGoogleapisEndpoint(
+          'https://oauth2.googleapis.com/token',
+          true,
+        ),
+      ).toBe('https://oauth2.mtls.googleapis.com/token');
+      expect(
+        effectiveGoogleapisEndpoint(
+          'https://oauth2.googleapis.com/token',
+          false,
+        ),
+      ).toBe('https://oauth2.googleapis.com/token');
+    });
+
+    it('matches the setting case-insensitively', () => {
+      process.env['GOOGLE_API_USE_MTLS_ENDPOINT'] = 'ALWAYS';
+      expect(
+        effectiveGoogleapisEndpoint(
+          'https://oauth2.googleapis.com/token',
+          false,
+        ),
+      ).toBe('https://oauth2.mtls.googleapis.com/token');
+      process.env['GOOGLE_API_USE_MTLS_ENDPOINT'] = 'Never';
+      expect(
+        effectiveGoogleapisEndpoint(
+          'https://oauth2.googleapis.com/token',
+          true,
+        ),
       ).toBe('https://oauth2.googleapis.com/token');
     });
   });
 
   describe('createMtlsDispatcher', () => {
-    it('returns undefined without touching the filesystem when disabled', async () => {
+    it.each(['true', '1', 'TRUE'])(
+      'loads a certificate when GOOGLE_API_USE_CLIENT_CERTIFICATE is "%s"',
+      async (value) => {
+        process.env['GOOGLE_API_USE_CLIENT_CERTIFICATE'] = value;
+        process.env['GOOGLE_API_CERTIFICATE_CONFIG'] = CONFIG_PATH;
+        mockCertificateFiles(CONFIG_PATH);
+
+        await expect(createMtlsDispatcher()).resolves.toBeDefined();
+      },
+    );
+
+    it.each(['false', '0', ''])(
+      'returns undefined without touching the filesystem when GOOGLE_API_USE_CLIENT_CERTIFICATE is "%s"',
+      async (value) => {
+        process.env['GOOGLE_API_USE_CLIENT_CERTIFICATE'] = value;
+
+        await expect(createMtlsDispatcher()).resolves.toBeUndefined();
+
+        expect(readFile).not.toHaveBeenCalled();
+        expect(warnSpy).not.toHaveBeenCalled();
+      },
+    );
+
+    it('returns undefined without touching the filesystem when the variable is unset', async () => {
       await expect(createMtlsDispatcher()).resolves.toBeUndefined();
+
       expect(readFile).not.toHaveBeenCalled();
       expect(warnSpy).not.toHaveBeenCalled();
     });

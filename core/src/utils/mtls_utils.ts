@@ -39,12 +39,6 @@ export enum MtlsEndpointSetting {
   NEVER = 'never',
 }
 
-/** A PEM client certificate and its private key, as read from disk. */
-interface ClientCertificate {
-  cert: Buffer;
-  key: Buffer;
-}
-
 /**
  * The subset of `certificate_config.json` this module reads. The snake_case
  * keys are the on-disk format written by gcloud and must not be camelCased.
@@ -54,8 +48,10 @@ interface CertificateConfigFile {
 }
 
 /**
- * The init argument accepted by the global `fetch`. Derived from `fetch`
- * itself because the DOM `RequestInit` interface has no importable module.
+ * The init argument accepted by the global `fetch`. Spelled as a derivation of
+ * `fetch` rather than as the `RequestInit` global it resolves to, because
+ * eslint's `no-undef` does not see type-only DOM globals and rejects the bare
+ * name.
  */
 type FetchInit = NonNullable<Parameters<typeof fetch>[1]>;
 
@@ -80,60 +76,44 @@ function mtlsEndpointSetting(): MtlsEndpointSetting {
   }
 }
 
-/** Returns whether a client certificate should be presented at all. */
-export function useClientCertEffective(): boolean {
-  return getBooleanEnvVar('GOOGLE_API_USE_CLIENT_CERTIFICATE');
-}
-
 /**
- * Returns whether requests should target the mTLS host: always when the
- * setting is `always`, and in `auto` only when a certificate is available.
- */
-export function shouldUseMtlsEndpoint(hasClientCert: boolean): boolean {
-  const setting = mtlsEndpointSetting();
-  return (
-    setting === MtlsEndpointSetting.ALWAYS ||
-    (setting === MtlsEndpointSetting.AUTO && hasClientCert)
-  );
-}
-
-/** Returns the hostname of `url`, or an empty string if it does not parse. */
-function hostnameOf(url: string): string {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return '';
-  }
-}
-
-/**
- * Returns whether `url` points at a `*.googleapis.com` host that does not
- * already carry the mTLS infix.
- */
-export function isNonMtlsGoogleapisEndpoint(url: string): boolean {
-  const hostname = hostnameOf(url);
-  return (
-    hostname.endsWith(GOOGLEAPIS_SUFFIX) &&
-    !hostname.includes(MTLS_GOOGLEAPIS_SUFFIX)
-  );
-}
-
-/**
- * Rewrites a `*.googleapis.com` url to its `*.mtls.googleapis.com` variant,
- * preserving scheme, port, path, query and fragment.
+ * Returns the endpoint `url` should actually be called on: its
+ * `*.mtls.googleapis.com` variant when the environment calls for mTLS, and
+ * `url` unchanged otherwise.
  *
- * Honors `GOOGLE_API_USE_MTLS_ENDPOINT=never` as an opt-out. Hosts that are
- * not googleapis.com hosts, or are already mTLS hosts, are returned unchanged
- * so non-Google providers are never affected.
+ * The host is rewritten only when `GOOGLE_API_USE_MTLS_ENDPOINT` is `always`,
+ * or is `auto` (the default) and `hasClientCert` is true. Scheme, port, path,
+ * query and fragment are preserved. Hosts that are not `*.googleapis.com`
+ * hosts, and hosts that are already mTLS hosts, are returned unchanged, so
+ * non-Google providers are never affected.
+ *
+ * Unlike adk-python's `effective_googleapis_endpoint`, this takes the
+ * certificate state as an argument rather than leaving it to a separate
+ * predicate, so the policy is applied in exactly one place.
  */
-export function effectiveGoogleapisEndpoint(url: string): string {
-  if (!isNonMtlsGoogleapisEndpoint(url)) {
+export function effectiveGoogleapisEndpoint(
+  url: string,
+  hasClientCert: boolean,
+): string {
+  const setting = mtlsEndpointSetting();
+  const useMtls =
+    setting === MtlsEndpointSetting.ALWAYS ||
+    (setting === MtlsEndpointSetting.AUTO && hasClientCert);
+  if (!useMtls) {
     return url;
   }
-  if (mtlsEndpointSetting() === MtlsEndpointSetting.NEVER) {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
     return url;
   }
-  const parsed = new URL(url);
+  if (
+    !parsed.hostname.endsWith(GOOGLEAPIS_SUFFIX) ||
+    parsed.hostname.includes(MTLS_GOOGLEAPIS_SUFFIX)
+  ) {
+    return url;
+  }
   parsed.hostname =
     parsed.hostname.slice(0, -GOOGLEAPIS_SUFFIX.length) +
     MTLS_GOOGLEAPIS_SUFFIX;
@@ -167,7 +147,7 @@ function certificateConfigPath(): string {
 /** Reads the workload client certificate described by `configPath`. */
 async function readClientCertificate(
   configPath: string,
-): Promise<ClientCertificate> {
+): Promise<{cert: Buffer; key: Buffer}> {
   const config = JSON.parse(
     await readFile(configPath, 'utf8'),
   ) as CertificateConfigFile;
@@ -190,10 +170,11 @@ async function readClientCertificate(
  * `GOOGLE_API_USE_CLIENT_CERTIFICATE` is not enabled. When a certificate is
  * requested but cannot be loaded this fails open: it logs a warning and
  * returns `undefined` so the caller falls back to a plain request rather than
- * failing outright. Certificate and key material is never logged.
+ * failing outright. It never rejects, and certificate and key material is
+ * never logged.
  */
 export async function createMtlsDispatcher(): Promise<Dispatcher | undefined> {
-  if (!useClientCertEffective()) {
+  if (!getBooleanEnvVar('GOOGLE_API_USE_CLIENT_CERTIFICATE')) {
     return undefined;
   }
   const configPath = certificateConfigPath();

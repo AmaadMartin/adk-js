@@ -23,7 +23,6 @@ import {
   createMtlsDispatcher,
   effectiveGoogleapisEndpoint,
   FetchInitWithDispatcher,
-  shouldUseMtlsEndpoint,
 } from '../../utils/mtls_utils.js';
 import {AgentRegistrySingleMCPToolset} from './agent_registry_mcp_toolset.js';
 import {cleanName, isGoogleApi} from './helpers.js';
@@ -60,24 +59,16 @@ interface MtlsTransport {
   dispatcher?: Dispatcher;
 }
 
-/**
- * Loads the client certificate when one is configured and derives the base URL
- * to call.
- *
- * Never rejects: a certificate that cannot be loaded degrades to a request
- * without one, so a moved or malformed certificate cannot take the registry
- * client offline.
- */
+/** Loads the client certificate when one is configured and picks the host. */
 async function resolveMtlsTransport(): Promise<MtlsTransport> {
-  const dispatcher = await createMtlsDispatcher().catch((e: unknown) => {
-    const msg = e instanceof Error ? e.message : String(e);
-    logger.warn(`Failed to configure mTLS for the Agent Registry: ${msg}`);
-    return undefined;
-  });
-  const baseUrl = shouldUseMtlsEndpoint(dispatcher !== undefined)
-    ? effectiveGoogleapisEndpoint(AGENT_REGISTRY_BASE_URL)
-    : AGENT_REGISTRY_BASE_URL;
-  return {baseUrl, dispatcher};
+  const dispatcher = await createMtlsDispatcher();
+  return {
+    baseUrl: effectiveGoogleapisEndpoint(
+      AGENT_REGISTRY_BASE_URL,
+      dispatcher !== undefined,
+    ),
+    dispatcher,
+  };
 }
 
 /**
