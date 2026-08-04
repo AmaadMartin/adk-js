@@ -34,6 +34,16 @@ const logger = new AdkLogger({label: 'AgentLoader', colorize: {all: true}});
 const JS_FILES_EXTENSIONS = ['.js', '.cjs', '.mjs', '.ts', '.mts', '.cts'];
 
 /**
+ * Basenames that can never be an agent entrypoint: dotfiles, TypeScript
+ * declaration files, and test/spec files.
+ */
+const NON_ENTRYPOINT_FILE_PATTERN =
+  /^\.|\.d\.[cm]?ts$|\.(test|spec)\.[cm]?[jt]s$/;
+
+/** Directory names never scanned for an agent entrypoint. */
+const SKIPPED_DIRECTORIES = new Set(['node_modules', 'dist', 'build']);
+
+/**
  * Supported JS/TS file module types.
  */
 export enum FileModuleType {
@@ -52,7 +62,7 @@ const FILE_MODULE_TYPE_EXTENSION_MAP = {
 /**
  * Metadata for a file.
  */
-interface FileMetadata {
+export interface FileMetadata {
   path: string;
   name: string;
   ext?: string;
@@ -62,8 +72,13 @@ interface FileMetadata {
 
 /**
  * Error class for agent file loading.
+ *
+ * Thrown when a file is not a usable agent entrypoint — it does not exist, or
+ * it is a valid module that exports no `BaseAgent`/`App`. Every other failure
+ * (a compile error, a permission error, a module that throws at import time)
+ * is reported with its own error type.
  */
-class AgentFileLoadingError extends Error {}
+export class AgentFileLoadingError extends Error {}
 
 /**
  * Options for loading an agent file.
@@ -138,12 +153,19 @@ export class AgentFile {
   private disposed = false;
   private agent?: BaseAgent;
   private app?: App;
+  private loadPromise?: Promise<BaseAgent | App>;
 
   constructor(
     private readonly filePath: string,
     private readonly options = DEFAULT_AGENT_FILE_OPTIONS,
   ) {}
 
+  /**
+   * Compiles and imports the agent file, at most once.
+   *
+   * Concurrent callers share a single compile + import; a rejected load clears
+   * the memo so a transient failure stays retryable.
+   */
   async load(): Promise<BaseAgent | App> {
     if (this.app) {
       return this.app;
@@ -152,6 +174,15 @@ export class AgentFile {
       return this.agent;
     }
 
+    this.loadPromise ??= this.loadUncached().catch((e: unknown) => {
+      this.loadPromise = undefined;
+      throw e;
+    });
+
+    return this.loadPromise;
+  }
+
+  private async loadUncached(): Promise<BaseAgent | App> {
     try {
       await fsPromises.stat(this.filePath);
     } catch (e) {
@@ -336,6 +367,8 @@ export class AgentFile {
       return;
     }
 
+    this.loadPromise = undefined;
+
     if (this.cleanupFilePath) {
       this.disposed = true;
       await fsPromises.unlink(this.cleanupFilePath);
@@ -358,8 +391,8 @@ export class AgentFile {
  * app/rootApp as instance of App.
  */
 export class AgentLoader {
-  private agentsAlreadyPreloaded = false;
-  private readonly preloadedAgents: Record<string, AgentFile> = {};
+  private discoveryPromise?: Promise<void>;
+  private readonly discoveredAgents: Record<string, AgentFile> = {};
   private watcher?: fs.FSWatcher;
 
   constructor(
@@ -425,45 +458,47 @@ export class AgentLoader {
    * Disposes all cached agents and marks them for reload on the next request.
    */
   private invalidateAll(): void {
-    for (const agentFile of Object.values(this.preloadedAgents)) {
+    for (const agentFile of Object.values(this.discoveredAgents)) {
       agentFile.dispose().catch(() => {});
     }
 
-    for (const key of Object.keys(this.preloadedAgents)) {
-      delete this.preloadedAgents[key];
+    for (const key of Object.keys(this.discoveredAgents)) {
+      delete this.discoveredAgents[key];
     }
 
-    this.agentsAlreadyPreloaded = false;
+    this.discoveryPromise = undefined;
   }
 
   async listAgents(): Promise<string[]> {
-    await this.preloadAgents();
+    await this.discoverAgents();
 
-    return Object.keys(this.preloadedAgents).sort();
+    return Object.keys(this.discoveredAgents).sort();
   }
 
   async listApps(): Promise<string[]> {
-    await this.preloadAgents();
+    await this.discoverAgents();
 
     const appNames: string[] = [];
-    for (const [name, agentFile] of Object.entries(this.preloadedAgents)) {
-      try {
-        const loaded = await agentFile.load();
-        if (isApp(loaded)) {
-          appNames.push(name);
-        }
-      } catch {
-        // Ignore loading errors when listing apps
+    for (const [name, agentFile] of Object.entries(this.discoveredAgents)) {
+      if (isApp(await tryLoadAgentFile(agentFile))) {
+        appNames.push(name);
       }
     }
 
     return appNames.sort();
   }
 
+  /**
+   * Returns the handle for a discovered agent, or `undefined` when no
+   * candidate of that name exists.
+   *
+   * The handle is **not** loaded: callers that need the agent instance or the
+   * compiled artifact path must `await agentFile.load()` first.
+   */
   async getAgentFile(agentName: string): Promise<AgentFile> {
-    await this.preloadAgents();
+    await this.discoverAgents();
 
-    return this.preloadedAgents[agentName];
+    return this.discoveredAgents[agentName];
   }
 
   async getAppFile(appName: string): Promise<AgentFile> {
@@ -474,54 +509,56 @@ export class AgentLoader {
     this.watcher?.close();
     this.watcher = undefined;
     await Promise.all(
-      Object.values(this.preloadedAgents).map((f) => f.dispose()),
+      Object.values(this.discoveredAgents).map((f) => f.dispose()),
     );
   }
 
-  async preloadAgents() {
-    if (this.agentsAlreadyPreloaded) {
-      return;
+  /**
+   * Scans the agents directory and registers one unloaded {@link AgentFile}
+   * handle per candidate, at most once.
+   *
+   * Discovery never compiles and never imports; that cost is deferred to
+   * {@link AgentFile.load}. Concurrent callers share a single scan, and a
+   * rejected scan clears the memo so it stays retryable.
+   */
+  async discoverAgents(): Promise<void> {
+    this.discoveryPromise ??= this.scanAgentsDir().catch((e: unknown) => {
+      this.discoveryPromise = undefined;
+      throw e;
+    });
+
+    return this.discoveryPromise;
+  }
+
+  private async scanAgentsDir(): Promise<void> {
+    if (await isFile(this.agentsDirPath)) {
+      // The structural filters apply to entries found by scanning a directory,
+      // never to a file the caller named explicitly.
+      this.registerAgentFromFile(await getFileMetadata(this.agentsDirPath));
+    } else {
+      const entries = await getDirFiles(this.agentsDirPath);
+
+      await Promise.all(
+        entries.map(async (entry: FileMetadata) => {
+          if (isAgentEntrypointFile(entry)) {
+            this.registerAgentFromFile(entry);
+          } else if (isScannableDirectory(entry)) {
+            await this.registerAgentFromDirectory(entry);
+          }
+        }),
+      );
     }
 
-    const files = (await isFile(this.agentsDirPath))
-      ? [await getFileMetadata(this.agentsDirPath)]
-      : await getDirFiles(this.agentsDirPath);
-
-    await Promise.all(
-      files.map(async (fileOrDir: FileMetadata) => {
-        if (fileOrDir.isFile && isJsFile(fileOrDir.ext)) {
-          return this.loadAgentFromFile(fileOrDir);
-        }
-
-        if (fileOrDir.isDirectory) {
-          return this.loadAgentFromDirectory(fileOrDir);
-        }
-      }),
-    );
-
-    this.agentsAlreadyPreloaded = true;
-
-    if (this.watchForChanges && !this.watcher) {
+    if (this.watchForChanges) {
       this.startWatching();
     }
-
-    return;
   }
 
-  private async loadAgentFromFile(file: FileMetadata): Promise<void> {
-    try {
-      const agentFile = new AgentFile(file.path, this.options);
-      await agentFile.load();
-      this.preloadedAgents[file.name] = agentFile;
-    } catch (e) {
-      if (e instanceof AgentFileLoadingError) {
-        return;
-      }
-      throw e;
-    }
+  private registerAgentFromFile(file: FileMetadata): void {
+    this.discoveredAgents[file.name] = new AgentFile(file.path, this.options);
   }
 
-  private async loadAgentFromDirectory(dir: FileMetadata): Promise<void> {
+  private async registerAgentFromDirectory(dir: FileMetadata): Promise<void> {
     const subFiles = await getDirFiles(dir.path);
     const possibleEntryFile =
       subFiles.find((f) => f.isFile && f.name === 'app' && isJsFile(f.ext)) ??
@@ -531,17 +568,58 @@ export class AgentLoader {
       return;
     }
 
-    try {
-      const agentFile = new AgentFile(possibleEntryFile.path, this.options);
-      await agentFile.load();
-      this.preloadedAgents[dir.name] = agentFile;
-    } catch (e) {
-      if (e instanceof AgentFileLoadingError) {
-        return;
-      }
-      throw e;
-    }
+    this.discoveredAgents[dir.name] = new AgentFile(
+      possibleEntryFile.path,
+      this.options,
+    );
   }
+}
+
+/**
+ * Loads an agent file, returning `undefined` when the file is not a valid
+ * agent entrypoint. Any other failure — a compile error, for instance —
+ * propagates to the caller.
+ */
+export async function tryLoadAgentFile(
+  agentFile: AgentFile,
+): Promise<BaseAgent | App | undefined> {
+  try {
+    return await agentFile.load();
+  } catch (e: unknown) {
+    if (e instanceof AgentFileLoadingError) {
+      return undefined;
+    }
+    throw e;
+  }
+}
+
+/**
+ * Returns whether a scanned directory entry can be an agent entrypoint file.
+ *
+ * Dotfiles, TypeScript declaration files and test/spec files share the agent
+ * extensions but can never export an agent.
+ */
+export function isAgentEntrypointFile(file: FileMetadata): boolean {
+  return (
+    file.isFile &&
+    isJsFile(file.ext) &&
+    !NON_ENTRYPOINT_FILE_PATTERN.test(path.basename(file.path))
+  );
+}
+
+/**
+ * Returns whether a scanned directory entry should be searched for an agent
+ * entrypoint.
+ *
+ * Mirrors `adk-python`'s rule of skipping dot-directories, plus the tooling
+ * directories that never hold a developer's agent.
+ */
+export function isScannableDirectory(dir: FileMetadata): boolean {
+  return (
+    dir.isDirectory &&
+    !dir.name.startsWith('.') &&
+    !SKIPPED_DIRECTORIES.has(dir.name)
+  );
 }
 
 function isJsFile(fileExt?: string): boolean {

@@ -7,7 +7,11 @@ import {exec, spawn, SpawnOptions} from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import {promisify} from 'node:util';
-import {AgentFileOptions, AgentLoader} from '../../utils/agent_loader.js';
+import {
+  AgentFileOptions,
+  AgentLoader,
+  tryLoadAgentFile,
+} from '../../utils/agent_loader.js';
 import {
   loadFileData,
   saveToFile,
@@ -144,9 +148,17 @@ export async function copyAgentFiles(
 
   for (const agentName of agentNames) {
     const agentFile = await agentLoader.getAgentFile(agentName);
-    const fileName = path.parse(agentFile.getFilePath()).base;
+    if (!(await tryLoadAgentFile(agentFile))) {
+      continue;
+    }
 
-    await fs.cp(agentFile.getFilePath(), path.join(targetPath, fileName));
+    // The compiled bundle, not the source file, is what gets deployed.
+    const compiledPath = agentFile.getFilePath();
+
+    await fs.cp(
+      compiledPath,
+      path.join(targetPath, path.parse(compiledPath).base),
+    );
   }
 }
 
