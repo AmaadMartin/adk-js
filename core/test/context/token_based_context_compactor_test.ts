@@ -8,6 +8,7 @@ import {
   BaseAgent,
   BaseSummarizer,
   CompactedEvent,
+  createEventActions,
   Event,
   InvocationContext,
   PluginManager,
@@ -22,12 +23,7 @@ class MockSummarizer implements BaseSummarizer {
       id: 'mock-id',
       invocationId: '',
       author: 'system',
-      actions: {
-        stateDelta: {},
-        artifactDelta: {},
-        requestedAuthConfigs: [],
-        requestedToolConfirmations: {},
-      },
+      actions: createEventActions(),
       timestamp: Date.now(),
       isCompacted: true,
       startTime: events[0].timestamp,
@@ -37,7 +33,7 @@ class MockSummarizer implements BaseSummarizer {
         role: 'model',
         parts: [{text: `Mock summary of ${events.length} events`}],
       },
-    } as CompactedEvent;
+    };
   }
 }
 
