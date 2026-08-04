@@ -877,6 +877,69 @@ class SequencedMockLlm extends BaseLlm {
   }
 }
 
+/**
+ * Runs one code-execution turn against a mock model that emits a fenced code
+ * block, returning the executor and the emitted events for assertion.
+ */
+async function runCodeExecutionAgent(
+  responseProcessors?: BaseLlmResponseProcessor[],
+): Promise<{executor: RecordingCodeExecutor; events: Event[]}> {
+  const executor = new RecordingCodeExecutor();
+  const agent = new LlmAgent({
+    name: 'test_agent',
+    model: new SequencedMockLlm([
+      {
+        content: {
+          role: 'model',
+          parts: [{text: 'Here is the code:\n```python\nprint("hello")\n```'}],
+        },
+      },
+      {content: {role: 'model', parts: [{text: 'Execution finished.'}]}},
+    ]),
+    codeExecutor: executor,
+    responseProcessors,
+  });
+
+  const appName = 'test_app';
+  const userId = 'test_user';
+  const sessionId = 'sess_123';
+  const invocationContext = new InvocationContext({
+    invocationId: 'inv_123',
+    session: createSession({id: sessionId, appName, userId, events: []}),
+    agent,
+    pluginManager: new PluginManager(),
+    artifactService: new ScopedArtifactService(
+      new InMemoryArtifactService(),
+      appName,
+      userId,
+      sessionId,
+    ),
+  });
+
+  const events: Event[] = [];
+  for await (const event of agent.runAsync(invocationContext)) {
+    events.push(event);
+  }
+  return {executor, events};
+}
+
+function expectCodeWasExecuted(
+  executor: RecordingCodeExecutor,
+  events: Event[],
+) {
+  expect(executor.calls).toHaveLength(1);
+  expect(executor.calls[0].code).toBe('print("hello")');
+
+  const resultParts = events.flatMap(
+    (e) => e.content?.parts?.filter((p) => p.codeExecutionResult) ?? [],
+  );
+  expect(resultParts).toHaveLength(1);
+  expect(resultParts[0].codeExecutionResult?.outcome).toBe(Outcome.OUTCOME_OK);
+  expect(resultParts[0].text).toContain('hello');
+
+  expect(events.at(-1)?.content?.parts?.[0]?.text).toBe('Execution finished.');
+}
+
 describe('LlmAgent Default Response Processors', () => {
   it('includes CODE_EXECUTION_RESPONSE_PROCESSOR when a codeExecutor is set', () => {
     const agent = new LlmAgent({
@@ -902,58 +965,16 @@ describe('LlmAgent Default Response Processors', () => {
   });
 
   it('executes a model-emitted code block with only codeExecutor configured', async () => {
-    const executor = new RecordingCodeExecutor();
-    const agent = new LlmAgent({
-      name: 'test_agent',
-      model: new SequencedMockLlm([
-        {
-          content: {
-            role: 'model',
-            parts: [
-              {text: 'Here is the code:\n```python\nprint("hello")\n```'},
-            ],
-          },
-        },
-        {content: {role: 'model', parts: [{text: 'Execution finished.'}]}},
-      ]),
-      codeExecutor: executor,
-    });
+    const {executor, events} = await runCodeExecutionAgent();
+    expectCodeWasExecuted(executor, events);
+  });
 
-    const appName = 'test_app';
-    const userId = 'test_user';
-    const sessionId = 'sess_123';
-    const invocationContext = new InvocationContext({
-      invocationId: 'inv_123',
-      session: createSession({id: sessionId, appName, userId, events: []}),
-      agent,
-      pluginManager: new PluginManager(),
-      artifactService: new ScopedArtifactService(
-        new InMemoryArtifactService(),
-        appName,
-        userId,
-        sessionId,
-      ),
-    });
+  it('executes a model-emitted code block when an explicit responseProcessors list includes the code-execution processor', async () => {
+    const explicitProcessors = new LlmAgent({name: 'probe_agent'})
+      .responseProcessors;
+    expect(explicitProcessors).toContain(CODE_EXECUTION_RESPONSE_PROCESSOR);
 
-    const events: Event[] = [];
-    for await (const event of agent.runAsync(invocationContext)) {
-      events.push(event);
-    }
-
-    expect(executor.calls).toHaveLength(1);
-    expect(executor.calls[0].code).toBe('print("hello")');
-
-    const resultParts = events.flatMap(
-      (e) => e.content?.parts?.filter((p) => p.codeExecutionResult) ?? [],
-    );
-    expect(resultParts).toHaveLength(1);
-    expect(resultParts[0].codeExecutionResult?.outcome).toBe(
-      Outcome.OUTCOME_OK,
-    );
-    expect(resultParts[0].text).toContain('hello');
-
-    expect(events.at(-1)?.content?.parts?.[0]?.text).toBe(
-      'Execution finished.',
-    );
+    const {executor, events} = await runCodeExecutionAgent(explicitProcessors);
+    expectCodeWasExecuted(executor, events);
   });
 });

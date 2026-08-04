@@ -44,8 +44,8 @@ const MOCK_RESPONSES: RawGenerateContentResponse[] = [
   },
 ];
 
-function createMockClient() {
-  return {
+function createSandboxFixture() {
+  const mockClient = {
     agentEnginesInternal: {
       createInternal: vi.fn().mockResolvedValue({
         name: 'operations/create-engine-op',
@@ -78,16 +78,19 @@ function createMockClient() {
       },
     },
   };
+
+  return {
+    mockClient,
+    executor: new AgentEngineSandboxCodeExecutor({
+      projectId: 'test-project',
+      client: mockClient as unknown as Client,
+    }),
+  };
 }
 
 describe('Agent with AgentEngineSandboxCodeExecutor', () => {
   it('does not execute code when responseProcessors is overridden', async () => {
-    const mockClient = createMockClient();
-
-    const executor = new AgentEngineSandboxCodeExecutor({
-      projectId: 'test-project',
-      client: mockClient as unknown as Client,
-    });
+    const {mockClient, executor} = createSandboxFixture();
 
     const model = new GeminiWithMockResponses(MOCK_RESPONSES);
     const agent = new LlmAgent({
@@ -121,12 +124,7 @@ describe('Agent with AgentEngineSandboxCodeExecutor', () => {
   });
 
   it('executes code with no explicit responseProcessors', async () => {
-    const mockClient = createMockClient();
-
-    const executor = new AgentEngineSandboxCodeExecutor({
-      projectId: 'test-project',
-      client: mockClient as unknown as Client,
-    });
+    const {mockClient, executor} = createSandboxFixture();
 
     const model = new GeminiWithMockResponses(MOCK_RESPONSES);
     const agent = new LlmAgent({
