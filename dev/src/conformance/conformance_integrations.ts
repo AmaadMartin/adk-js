@@ -234,11 +234,10 @@ export const searchFlights = new FunctionTool({
     const trip = input.trip;
     const preferences = input.preferences;
 
-    const prefs = preferences ? preferences : ({} as FlightPreferences);
-    const cabinClass = prefs.cabinClass ?? 'economy';
-    const maxStops = prefs.maxStops ?? 1;
-    const preferredAirline = prefs.preferredAirline ?? null;
-    const flexibleDates = prefs.flexibleDates ?? false;
+    const cabinClass = preferences?.cabinClass ?? 'economy';
+    const maxStops = preferences?.maxStops ?? 1;
+    const preferredAirline = preferences?.preferredAirline ?? null;
+    const flexibleDates = preferences?.flexibleDates ?? false;
 
     const tripType = input.trip.returnDate ? 'round-trip' : 'one-way';
 
