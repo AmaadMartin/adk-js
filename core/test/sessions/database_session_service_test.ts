@@ -130,6 +130,92 @@ describe('DatabaseSessionService', () => {
     expect(session).toBeUndefined();
   });
 
+  it('should delete a session and its events in one transaction', async () => {
+    const session = await service.createSession({
+      appName: 'test-app',
+      userId: 'test-user',
+      sessionId: 's-atomic-ok',
+    });
+    await service.appendEvent({
+      session,
+      event: createEvent({timestamp: Date.now()}),
+    });
+
+    await service.deleteSession({
+      appName: 'test-app',
+      userId: 'test-user',
+      sessionId: 's-atomic-ok',
+    });
+
+    const em = (service as unknown as {orm: MikroORM}).orm.em.fork();
+    expect(
+      await em.count('StorageSession', {
+        appName: 'test-app',
+        userId: 'test-user',
+        id: 's-atomic-ok',
+      }),
+    ).toBe(0);
+    expect(
+      await em.count('StorageEvent', {
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 's-atomic-ok',
+      }),
+    ).toBe(0);
+  });
+
+  it('should not delete the session when deleting its events fails', async () => {
+    const session = await service.createSession({
+      appName: 'test-app',
+      userId: 'test-user',
+      sessionId: 's-atomic-fail',
+    });
+    await service.appendEvent({
+      session,
+      event: createEvent({timestamp: Date.now()}),
+    });
+
+    const orm = (service as unknown as {orm: MikroORM}).orm;
+    await orm.em.getConnection().execute(
+      `CREATE TRIGGER block_event_delete
+       BEFORE DELETE ON events
+       BEGIN
+         SELECT RAISE(ABORT, 'event delete blocked');
+       END;`,
+    );
+
+    await expect(
+      service.deleteSession({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 's-atomic-fail',
+      }),
+    ).rejects.toThrow(/event delete blocked/);
+
+    const em = orm.em.fork();
+    expect(
+      await em.count('StorageSession', {
+        appName: 'test-app',
+        userId: 'test-user',
+        id: 's-atomic-fail',
+      }),
+    ).toBe(1);
+    expect(
+      await em.count('StorageEvent', {
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 's-atomic-fail',
+      }),
+    ).toBe(1);
+
+    const survivingSession = await service.getSession({
+      appName: 'test-app',
+      userId: 'test-user',
+      sessionId: 's-atomic-fail',
+    });
+    expect(survivingSession?.events.length).toBe(1);
+  });
+
   it('should append event and update state', async () => {
     const session = await service.createSession({
       appName: 'test-app',
