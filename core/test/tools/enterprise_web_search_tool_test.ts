@@ -5,6 +5,7 @@
  */
 
 import {
+  Context,
   ENTERPRISE_WEB_SEARCH,
   EnterpriseWebSearchTool,
   LlmRequest,
@@ -136,7 +137,9 @@ describe('EnterpriseWebSearchTool', () => {
 
     it('runAsync returns resolved promise', async () => {
       const tool = new EnterpriseWebSearchTool();
-      await expect(tool.runAsync()).resolves.toBeUndefined();
+      await expect(
+        tool.runAsync({args: {}, toolContext: {} as Context}),
+      ).resolves.toBeUndefined();
     });
   });
 

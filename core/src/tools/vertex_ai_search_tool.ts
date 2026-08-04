@@ -12,7 +12,11 @@ import {
   isGeminiModel,
   isGeminiModelIdCheckDisabled,
 } from '../utils/model_name.js';
-import {BaseTool, ToolProcessLlmRequest} from './base_tool.js';
+import {
+  BaseTool,
+  RunAsyncToolRequest,
+  ToolProcessLlmRequest,
+} from './base_tool.js';
 
 const logger = getLogger();
 
@@ -95,7 +99,7 @@ export class VertexAiSearchTool extends BaseTool {
     this.bypassMultiToolsLimit = bypassMultiToolsLimit;
   }
 
-  runAsync(): Promise<unknown> {
+  override runAsync(_request: RunAsyncToolRequest): Promise<unknown> {
     // This is a built-in tool on server side, it's triggered by setting the
     // corresponding request parameters.
     return Promise.resolve();
