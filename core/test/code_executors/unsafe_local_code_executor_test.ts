@@ -45,13 +45,19 @@ const EXPECTED_POWERSHELL_ARGS = [
   expect.stringMatching(/script\.ps1$/),
 ];
 
-// Cases that spawn a real interpreter need a budget above vitest's 5000ms
-// default: PowerShell/python cold-start on the windows-latest CI runner alone
-// can exceed it. Must also exceed UnsafeLocalCodeExecutor's default
-// timeoutSeconds (30) so a hung child reports the executor's own timeout error
-// instead of an opaque vitest timeout; see
+// Every case in the outer suite launches a real interpreter: the outer
+// beforeEach restores spawnMock to realSpawn. Those need a budget above
+// vitest's 5000ms default, because process cold-start on the windows-latest CI
+// runner alone can exceed it. The budget must also exceed
+// UnsafeLocalCodeExecutor's default timeoutSeconds (30) so a hung child reports
+// the executor's own timeout error instead of an opaque vitest timeout; see
 // core/src/code_executors/unsafe_local_code_executor.ts
 const TEST_EXECUTION_TIMEOUT = 40000;
+vi.setConfig({testTimeout: TEST_EXECUTION_TIMEOUT});
+
+// The spawn-argument cases replace spawnMock with a synchronous stub and never
+// create a process, so they keep vitest's default budget and still fail fast.
+const MOCKED_SPAWN_TIMEOUT = 5000;
 
 function createMockInvocationContext(): InvocationContext {
   const agent = new LlmAgent({
@@ -128,71 +134,59 @@ describe('UnsafeLocalCodeExecutor', () => {
     expect(result.stderr).toContain('Fatal error');
   });
 
-  it(
-    'should respect timeout',
-    async () => {
-      // Create executor with 1 second timeout
-      const shortTimeoutExecutor = new UnsafeLocalCodeExecutor({
-        timeoutSeconds: 1,
-      });
+  it('should respect timeout', async () => {
+    // Create executor with 1 second timeout
+    const shortTimeoutExecutor = new UnsafeLocalCodeExecutor({
+      timeoutSeconds: 1,
+    });
 
-      const params: ExecuteCodeParams = {
-        invocationContext,
-        codeExecutionInput: {
-          code: 'setTimeout(() => {}, 5000);', // Sleep for 5 seconds
-          language: CodeExecutionLanguage.JAVASCRIPT,
-          inputFiles: [],
-        },
-      };
+    const params: ExecuteCodeParams = {
+      invocationContext,
+      codeExecutionInput: {
+        code: 'setTimeout(() => {}, 5000);', // Sleep for 5 seconds
+        language: CodeExecutionLanguage.JAVASCRIPT,
+        inputFiles: [],
+      },
+    };
 
-      const result = await shortTimeoutExecutor.executeCode(params);
+    const result = await shortTimeoutExecutor.executeCode(params);
 
-      expect(result.stderr).toContain(
-        'Code execution timed out after 1 seconds.',
-      );
-    },
-    TEST_EXECUTION_TIMEOUT,
-  );
+    expect(result.stderr).toContain(
+      'Code execution timed out after 1 seconds.',
+    );
+  });
 
-  it(
-    'should execute python code and return stdout',
-    async () => {
-      const params: ExecuteCodeParams = {
-        invocationContext,
-        codeExecutionInput: {
-          code: 'print("Hello, Python!")',
-          language: CodeExecutionLanguage.PYTHON,
-          inputFiles: [],
-        },
-      };
+  it('should execute python code and return stdout', async () => {
+    const params: ExecuteCodeParams = {
+      invocationContext,
+      codeExecutionInput: {
+        code: 'print("Hello, Python!")',
+        language: CodeExecutionLanguage.PYTHON,
+        inputFiles: [],
+      },
+    };
 
-      const result = await executor.executeCode(params);
+    const result = await executor.executeCode(params);
 
-      expect(result.stdout).toContain('Hello, Python!');
-      expect(result.stderr).toBe('');
-    },
-    TEST_EXECUTION_TIMEOUT,
-  );
+    expect(result.stdout).toContain('Hello, Python!');
+    expect(result.stderr).toBe('');
+  });
 
-  it(
-    'should execute shell code and return stdout',
-    async () => {
-      const params: ExecuteCodeParams = {
-        invocationContext,
-        codeExecutionInput: {
-          code: 'echo "Hello, Shell!"',
-          language: CodeExecutionLanguage.SHELL,
-          inputFiles: [],
-        },
-      };
+  it('should execute shell code and return stdout', async () => {
+    const params: ExecuteCodeParams = {
+      invocationContext,
+      codeExecutionInput: {
+        code: 'echo "Hello, Shell!"',
+        language: CodeExecutionLanguage.SHELL,
+        inputFiles: [],
+      },
+    };
 
-      const result = await executor.executeCode(params);
+    const result = await executor.executeCode(params);
 
-      expect(result.stdout).toContain('Hello, Shell!');
-      expect(result.stderr).toBe('');
-    },
-    TEST_EXECUTION_TIMEOUT,
-  );
+    expect(result.stdout).toContain('Hello, Shell!');
+    expect(result.stderr).toBe('');
+  });
 
   it('should return error for unsupported language', async () => {
     const params: ExecuteCodeParams = {
@@ -361,7 +355,7 @@ describe('UnsafeLocalCodeExecutor', () => {
     expect(result.outputFiles![0].mimeType).toBe('application/json');
   });
 
-  describe('spawn arguments', () => {
+  describe('spawn arguments', {timeout: MOCKED_SPAWN_TIMEOUT}, () => {
     beforeEach(() => {
       // Return a child process that immediately exits with code 0, so the
       // interpreters under test need not be installed on the host.
