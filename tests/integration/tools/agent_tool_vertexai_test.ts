@@ -20,6 +20,12 @@ import {
   RawGenerateContentResponse,
 } from '../test_case_utils.js';
 
+/** Returns the trailing segment of a slash-delimited resource name. */
+function lastPathSegment(name: string): string {
+  const segments = name.split('/');
+  return segments[segments.length - 1];
+}
+
 describe('AgentTool (Vertex AI)', () => {
   it('propagates state changes from sub-agent to parent session (VertexAI)', async () => {
     const mockSubAgentResponses: RawGenerateContentResponse[] = [
@@ -114,7 +120,7 @@ describe('AgentTool (Vertex AI)', () => {
         };
       },
       get: async (req: {name: string}) => {
-        const id = req.name.split('/').pop();
+        const id = lastPathSegment(req.name);
         return {
           userId: 'TestUser',
           sessionState: {
@@ -129,7 +135,7 @@ describe('AgentTool (Vertex AI)', () => {
           name: string;
           config?: {actions?: {stateDelta?: Record<string, unknown>}};
         }) => {
-          const id = req.name.split('/').pop();
+          const id = lastPathSegment(req.name);
           eventsStore.push(req);
           if (req.config?.actions?.stateDelta) {
             sessionStateStore[id] = {

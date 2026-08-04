@@ -10,7 +10,7 @@ import {
   LlmAgent,
   LlmRequest,
 } from '@google/adk';
-import {GenerateContentResponse, GoogleGenAI} from '@google/genai';
+import {GenerateContentResponse} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {createRunner} from '../test_case_utils.js';
 
@@ -45,8 +45,12 @@ class SpyGemini extends Gemini {
     this.spyClient = new SpyMockGenAIClient(response);
   }
 
-  override get apiClient(): GoogleGenAI {
-    return this.spyClient as unknown as GoogleGenAI;
+  // The root install resolves @google/genai to the copy hoisted by
+  // @google-cloud/vertexai, which is a different major than the one core
+  // builds against. Deriving the type from Gemini keeps the override on the
+  // same GoogleGenAI the base class declares.
+  override get apiClient(): Gemini['apiClient'] {
+    return this.spyClient as unknown as Gemini['apiClient'];
   }
 }
 
