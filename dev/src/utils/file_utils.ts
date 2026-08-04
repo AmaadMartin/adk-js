@@ -101,15 +101,11 @@ export async function saveToFile<T>(filePath: string, data: T): Promise<void> {
 /**
  * Atomically creates a private temporary directory and returns its path.
  *
- * The directory is created by a single `mkdtemp` call directly under the system
- * temp root, with a random name and, on POSIX, mode 0700. Composing the path
- * from a fixed prefix and materialising it later with a recursive `mkdir` would
- * leave a predictable intermediate directory that another local user can
- * pre-create or replace with a symlink, placing everything written afterwards
- * under their control.
+ * A single `mkdtemp` call is deliberate: composing a fixed-prefix path and
+ * materialising it later leaves a predictable directory another local user can
+ * pre-create or replace with a symlink.
  *
  * @param prefix Name prefix for the directory. Must be a single path segment.
- * @returns The absolute path of the newly created directory.
  */
 export async function createTempDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), `${prefix}-`));

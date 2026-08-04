@@ -150,9 +150,7 @@ export async function deployToCloudRun(options: DeployToCloudRunOptions) {
     );
   }
 
-  // Built before any directory is created: a conflicting extra gcloud arg
-  // throws out of deployToCloudRun, and there is no `finally` this early to
-  // remove a temp folder.
+  // Built before the temp dir exists: a rejected extra arg throws with no `finally` yet to remove it.
   const gcloudCommands = prepareGCloudArguments(options);
 
   if (options.a2a && !options.a2aAuthToken) {
