@@ -6,17 +6,25 @@
 
 import {Gemini, LlmRequest} from '@google/adk';
 import {Modality} from '@google/genai';
+import * as dotenv from 'dotenv';
+import {fileURLToPath} from 'node:url';
 import {describe, expect, it} from 'vitest';
 
-const isCI = process.env.CI === 'true';
+// Anchored to this module so neither the process working directory nor a
+// future move of this file can silently retarget it. A missing file is the
+// normal CI state: dotenv reports it in the return value instead of throwing.
+dotenv.config({
+  path: fileURLToPath(new URL('.env', import.meta.url)),
+  quiet: true,
+});
 
-describe.skipIf(isCI)('Live Gemini Live Connection E2E', () => {
-  const project =
-    process.env.GCP_PROJECT ||
-    process.env.GOOGLE_CLOUD_PROJECT ||
-    'placeholder-project';
-  const location = process.env.GCP_LOCATION || 'us-central1';
+// A live Vertex connection needs a project id and there is no sensible default
+// for one, so an unset project means skip rather than fail against a project
+// that does not exist. A region does have a defensible default.
+const project = process.env.GOOGLE_CLOUD_PROJECT;
+const location = process.env.GOOGLE_CLOUD_LOCATION || 'us-central1';
 
+describe.skipIf(!project)('Live Gemini Live Connection E2E', () => {
   it('should connect and stream responses from Gemini Live using Vertex AI', async () => {
     const llm = new Gemini({
       model: 'gemini-live-2.5-flash-native-audio',
