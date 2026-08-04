@@ -1372,11 +1372,8 @@ describe('AdkWebServer', () => {
     });
 
     it('should not dispose an agent loader supplied by the caller', async () => {
-      const disposeAll = vi.fn();
-      const suppliedLoader = {
-        listAgents: () => Promise.resolve(['testApp']),
-        disposeAll,
-      } as unknown as AgentLoader;
+      const suppliedLoader = new AgentLoader(tempAgentsDir);
+      const disposeAll = vi.spyOn(suppliedLoader, 'disposeAll');
       const injectedServer = new AdkApiServer({
         agentLoader: suppliedLoader,
         sessionService,

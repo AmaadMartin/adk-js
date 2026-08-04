@@ -353,7 +353,7 @@ export class AgentFile {
    */
   disposeSync(): void {
     // `load()` sets this alongside `cleanupFilePath` when it compiles; an
-    // agent file that was never compiled owns no artifact and stays usable.
+    // agent file with no compiled output owns no artifact and stays usable.
     if (this.disposed || !this.cleanupDirPath) {
       return;
     }
