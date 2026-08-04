@@ -5,21 +5,14 @@
  */
 
 import {
-  AuthConfig,
   createEvent,
   createEventActions,
   Event,
   generateClientFunctionCallId,
-  ToolConfirmation,
 } from '@google/adk';
 import * as assert from 'node:assert';
 import {describe, expect, it} from 'vitest';
 import {normalizeEvent} from '../../src/integration/test_runner.js';
-
-const AUTH_CONFIG: AuthConfig = {
-  credentialKey: 'testKey',
-  authScheme: {type: 'apiKey', name: 'testKey', in: 'header'},
-};
 
 function toolCallEvent(
   id: string,
@@ -103,23 +96,6 @@ describe('normalizeEvent', () => {
             _adk_replay_config: {b: 2},
             userKey: 'v',
           },
-        }),
-      }),
-    );
-
-    expect(normalized.actions).toEqual({stateDelta: {userKey: 'v'}});
-  });
-
-  it('drops the requested auth configs and tool confirmations', () => {
-    const normalized = normalizeEvent(
-      createEvent({
-        author: 'agent',
-        actions: createEventActions({
-          requestedAuthConfigs: {'fc-1': AUTH_CONFIG},
-          requestedToolConfirmations: {
-            'fc-1': new ToolConfirmation({hint: 'ok?', confirmed: false}),
-          },
-          stateDelta: {userKey: 'v'},
         }),
       }),
     );

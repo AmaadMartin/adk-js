@@ -194,18 +194,13 @@ function removeEmptyAndUndefinedFields(obj: Record<string, unknown>) {
   }
 }
 
-// Takes Partial<EventActions> because requestedAuthConfigs and
-// requestedToolConfirmations are required on EventActions, and deleting a
-// non-optional property is a TS2790 error.
-function filterEventActions(actions?: Partial<EventActions>) {
-  if (!actions) {
+function filterEventActionsStateDelta(actions?: EventActions) {
+  if (!actions?.stateDelta) {
     return;
   }
 
-  delete actions.stateDelta?.['_adk_recordings_config'];
-  delete actions.stateDelta?.['_adk_replay_config'];
-  delete actions.requestedAuthConfigs;
-  delete actions.requestedToolConfirmations;
+  delete actions.stateDelta['_adk_recordings_config'];
+  delete actions.stateDelta['_adk_replay_config'];
 }
 
 // functionCall and functionResponse are compared, so that a wrong tool name,
@@ -225,7 +220,7 @@ function filterEventFields(event: Partial<Event>) {
   delete event.invocationId;
   delete event.longRunningToolIds;
 
-  filterEventActions(event.actions);
+  filterEventActionsStateDelta(event.actions);
 
   if (event.content) {
     event.content.parts?.forEach(filterPartFields);
