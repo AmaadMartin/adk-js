@@ -11,11 +11,10 @@ import {createRunner} from '../../../integration/test_case_utils.js';
 import {AdkGoServer} from './go_backend/go_server.js';
 
 /**
- * Readiness budget (ms) handed to the test server. Half the `cross-language`
- * project `hookTimeout` in vitest.config.ts, so a server that never comes up
- * fails with the server's own diagnostic instead of Vitest's generic hook
- * timeout. Sized at ~2x the 41.8s the Go server's cold `go run .` compile
- * measured on the macos-latest runner the cross-language workflow uses.
+ * Readiness budget (ms) for the Go server, replacing AdkGoServer's 30s default:
+ * its cold `go run .` compile measured 41.8s on macos-latest. Must stay below
+ * the `cross-language` hookTimeout in vitest.config.ts so a server that never
+ * comes up reports its own diagnostic rather than a generic hook timeout.
  */
 const SERVER_START_TIMEOUT_MS = 90000;
 
