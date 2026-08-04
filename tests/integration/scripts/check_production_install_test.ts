@@ -166,6 +166,20 @@ describe('check_production_install', () => {
     expect(result.stdout).toContain('Verified 1 production dependencies');
   });
 
+  it('accepts a workspace that declares no dependencies', () => {
+    writeRootManifest(['alpha', 'beta']);
+    writeWorkspaceManifest('alpha', {dependencies: {'dep-one': '^1.0.0'}});
+    writeWorkspaceManifest('beta', {});
+    installPackage('.', 'dep-one');
+
+    const result = runCheck();
+
+    expect(result.stderr).toBe('');
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('Verified 1 production dependencies');
+    expect(result.stdout).toContain('across 2 workspaces');
+  });
+
   it('reports every unresolved dependency in a single run', () => {
     writeRootManifest(['alpha', 'beta']);
     writeWorkspaceManifest('alpha', {dependencies: {'dep-one': '^1.0.0'}});
