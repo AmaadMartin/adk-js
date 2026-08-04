@@ -20,17 +20,6 @@ import {
 } from '../../src/integration/agent_types.js';
 import {IntegrationRegistry} from '../../src/integration/integration_registry.js';
 
-/**
- * Produces a config with no `agentClass`, mirroring a YAML file that omits the
- * field. That is the case the `?? 'LlmAgent'` fallback in `instantiateAgent`
- * exists for, and it is unreachable through the declared type.
- */
-function configWithoutAgentClass(
-  config: Omit<YamlAgentConfig, 'agentClass'>,
-): YamlAgentConfig {
-  return config as YamlAgentConfig;
-}
-
 describe('AgentRegistry', () => {
   let integrationRegistry: IntegrationRegistry;
   let agentRegistry: AgentRegistry;
@@ -280,16 +269,15 @@ describe('AgentRegistry', () => {
     const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const debugSpy = vi.spyOn(getLogger(), 'debug');
 
-    agentRegistry.registerAgentConfig(
-      'logged_agent',
-      configWithoutAgentClass({
-        name: 'logged_agent',
-        model: 'model',
-        description: 'desc',
-        instruction: 'inst',
-        isRootAgent: false,
-      }),
-    );
+    const config: YamlAgentConfig = {
+      name: 'logged_agent',
+      model: 'model',
+      description: 'desc',
+      instruction: 'inst',
+      isRootAgent: false,
+    };
+
+    agentRegistry.registerAgentConfig('logged_agent', config);
 
     expect(agentRegistry.getAgent('logged_agent')).toBeInstanceOf(LlmAgent);
     expect(debugSpy).toHaveBeenCalledWith(

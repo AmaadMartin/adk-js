@@ -24,8 +24,6 @@ import {
 } from './agent_types.js';
 import {IntegrationRegistry} from './integration_registry.js';
 
-const logger = getLogger();
-
 const BUILTIN_TOOLS = [
   'exit_loop',
   'google_search',
@@ -85,7 +83,7 @@ export class AgentRegistry {
   }
 
   private instantiateAgent(name: string, config: YamlAgentConfig): BaseAgent {
-    logger.debug(
+    getLogger().debug(
       `Instantiating ${name} of class ${config.agentClass ?? 'LlmAgent'}`,
     );
 
