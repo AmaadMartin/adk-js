@@ -24,7 +24,7 @@ export interface StateDeltas {
  *
  * The inverse of {@link mergeStates}, which re-applies the prefixes.
  *
- * @param state The state to split. Absent or empty state yields empty buckets.
+ * @param state The state to split. Undefined or empty yields empty buckets.
  * @return Freshly allocated app, user and session buckets. Values are carried
  *     over by reference; `state` itself is never mutated.
  */
