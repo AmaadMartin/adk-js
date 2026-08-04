@@ -5,16 +5,28 @@
  */
 
 import {
+  BaseTool,
   Context,
   createSession,
   InvocationContext,
   LlmAgent,
   PluginManager,
 } from '@google/adk';
-import {describe, expect, it} from 'vitest';
-import {searchFlights} from '../../src/conformance/conformance_integrations.js';
+import {Type} from '@google/genai';
+import {beforeEach, describe, expect, it} from 'vitest';
+import {
+  askForApproval,
+  calculateTripCost,
+  createBooking,
+  getUserId,
+  registerConformanceIntegrations,
+  reimburse,
+  searchFlights,
+  validateEmail,
+} from '../../src/conformance/conformance_integrations.js';
+import {IntegrationRegistry} from '../../src/integration/integration_registry.js';
 
-// searchFlights ignores the tool context, but runAsync requires one.
+// These conformance tools ignore the tool context, but runAsync requires one.
 const toolContext = new Context({
   invocationContext: new InvocationContext({
     invocationId: 'test-invocation',
@@ -118,5 +130,85 @@ describe('searchFlights', () => {
         'Departure: 2026-05-20',
       ],
     });
+  });
+});
+
+const REGISTERED_TOOLS: ReadonlyArray<readonly [string, BaseTool]> = [
+  ['tools_agent_009.tools.reimburse', reimburse],
+  ['tools_agent_009.tools.ask_for_approval', askForApproval],
+  ['tools_agent_004.tools.search_flights', searchFlights],
+  ['tools_agent_004.tools.calculate_trip_cost', calculateTripCost],
+  ['tools_agent_002.tools.validate_email', validateEmail],
+  ['tools_agent_002.tools.get_user_id', getUserId],
+  ['tools_agent_002.tools.create_booking', createBooking],
+];
+
+describe('registerConformanceIntegrations', () => {
+  let registry: IntegrationRegistry;
+
+  beforeEach(() => {
+    registry = new IntegrationRegistry();
+    registerConformanceIntegrations(registry);
+  });
+
+  it('registers every conformance tool under its qualified name', () => {
+    for (const [qualifiedName, tool] of REGISTERED_TOOLS) {
+      expect(registry.getTool(qualifiedName)).toBe(tool);
+    }
+
+    expect(
+      registry.getTool('tools_agent_009.tools.ask_for_approval')?.name,
+    ).toBe('ask_for_approval');
+    expect(registry.getTool('tools_agent_002.tools.get_user_id')?.name).toBe(
+      'get_user_id',
+    );
+    expect(registry.getTool('tools_agent_002.tools.nope')).toBeUndefined();
+  });
+
+  it('keeps the zod parameter schema in the registered tool declaration', () => {
+    const tool = registry.getTool('tools_agent_002.tools.create_booking');
+    expect(tool).toBeDefined();
+
+    const declaration = tool!._getDeclaration();
+    expect(declaration).toBeDefined();
+    expect(declaration!.name).toBe('create_booking');
+    expect(declaration!.description).toBe('Creates a booking for a user.');
+
+    const parameters = declaration!.parameters;
+    expect(parameters?.type).toBe(Type.OBJECT);
+    expect(Object.keys(parameters?.properties ?? {}).sort()).toEqual([
+      'details',
+      'isConfirmed',
+      'userId',
+    ]);
+    expect(parameters?.properties?.['userId']).toEqual({
+      type: Type.NUMBER,
+      description: 'The unique identifier for the user.',
+    });
+    expect(parameters?.properties?.['isConfirmed']).toEqual({
+      type: Type.BOOLEAN,
+      description: 'Whether the booking is confirmed.',
+    });
+    expect(parameters?.properties?.['details']).toEqual({
+      type: Type.STRING,
+      description: 'Any additional details for the booking.',
+    });
+    expect([...(parameters?.required ?? [])].sort()).toEqual([
+      'details',
+      'isConfirmed',
+      'userId',
+    ]);
+  });
+
+  it('runs the registered validate_email tool', async () => {
+    const tool = registry.getTool('tools_agent_002.tools.validate_email');
+    expect(tool).toBeDefined();
+
+    const result = await tool!.runAsync({
+      args: {email: 'ada.lovelace@example.com'},
+      toolContext,
+    });
+
+    expect(result).toBe(true);
   });
 });
