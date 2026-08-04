@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 env:
-  NODE_OPTIONS: "--max-old-space-size=8192"
+  NODE_OPTIONS: '--max-old-space-size=8192'
 
 jobs:
   run-tests:
@@ -48,3 +48,24 @@ jobs:
 
       - name: Run documentation build check
         run: npm run docs:check
+
+  # A production install is the only place the published dependency set is
+  # exercised: `run-tests` installs devDependencies too, so a package that is
+  # only reachable through the dev tree still resolves there.
+  production-install:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Use Node.js
+        uses: actions/setup-node@v6
+
+      # --ignore-scripts skips lifecycle scripts but still extracts every
+      # package, so the directories the check probes are present.
+      - name: Install production dependencies only
+        run: npm ci --omit=dev --ignore-scripts
+
+      - name: Check declared production dependencies are installed
+        run: node scripts/check_production_install.mjs
