@@ -72,14 +72,10 @@ export interface VertexAiSessionServiceOptions {
    * A pre-built Agent Engine `Sessions` client, or a test double.
    *
    * Most callers should omit this and pass `projectId`/`location` (or
-   * `expressModeApiKey`) instead, so that the client is built internally and
-   * no genai SDK type crosses the API boundary. Constructing the `ApiClient`
-   * yourself means holding a type from `@google/genai`, and npm installs two
-   * copies of that package (the one `@google-cloud/vertexai` pins, and the
-   * one ADK depends on), so `new Sessions(apiClient)` fails to compile with
-   * `TS2345 ... separate declarations of a private property 'customBaseUrl'`
-   * until the consuming project dedupes them. See "Advanced: injecting a
-   * Vertex AI Sessions client" in the ADK README.
+   * `expressModeApiKey`) instead. Constructing the client yourself means npm
+   * may install two copies of `@google/genai` and `new Sessions(apiClient)`
+   * then fails to compile; see "Advanced: injecting a Vertex AI Sessions
+   * client" in the ADK README.
    */
   sessions?: Sessions;
 }
