@@ -35,7 +35,6 @@
     "rebuild": "npm run clean:all && npm install && npm run build",
     "build": "tsc --emitDeclarationOnly && node ./build.js",
     "test": "vitest",
-    "lint": "eslint 'src/**/*.ts'",
     "format": "prettier --write 'src/**/*.ts'",
     "prepublishOnly": "npm run build"
   },
