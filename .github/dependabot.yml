@@ -1,7 +1,4 @@
-# Keeps the GitHub Actions used by .github/workflows up to date. Dependabot
-# advances both a tag reference and a commit-SHA pin (rewriting the trailing
-# version comment alongside the SHA), so this stays correct as the workflow
-# pinning style evolves.
+# Keeps the GitHub Actions used by .github/workflows up to date.
 # Schema: https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference
 version: 2
 updates:
@@ -16,6 +13,5 @@ updates:
         patterns:
           - '*'
     commit-message:
-      # Conventional-commit prefix so release-please treats dependency bumps as
-      # chores rather than releasable changes.
+      # 'chore' prefix so release-please treats bumps as non-releasable.
       prefix: 'chore(deps)'
