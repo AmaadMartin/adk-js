@@ -13,6 +13,7 @@ import {
   InvocationContext,
   PluginManager,
   Session,
+  createEventActions,
   isScratchpadEvent,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
@@ -23,12 +24,7 @@ class MockSummarizer implements BaseSummarizer {
       id: 'mock-id',
       invocationId: '',
       author: 'system',
-      actions: {
-        stateDelta: {},
-        artifactDelta: {},
-        requestedAuthConfigs: [],
-        requestedToolConfirmations: {},
-      },
+      actions: createEventActions(),
       timestamp: Date.now(),
       isCompacted: true,
       startTime: events[0].timestamp,
@@ -38,7 +34,7 @@ class MockSummarizer implements BaseSummarizer {
         role: 'model',
         parts: [{text: `Mock summary of ${events.length} events`}],
       },
-    } as CompactedEvent;
+    };
   }
 }
 
@@ -78,14 +74,15 @@ function createMockScratchpadEvent(
   tokenCount?: number,
   contentStr?: string,
 ): CompactedEvent {
-  const event = createMockEvent(id, tokenCount) as CompactedEvent;
-  event.isCompacted = true;
-  event.isScratchpad = true;
-  event.author = 'system';
-  event.startTime = Date.now() - 10000;
-  event.endTime = Date.now() - 5000;
-  event.compactedContent = contentStr || 'Existing scratchpad content';
-  return event;
+  return {
+    ...createMockEvent(id, tokenCount),
+    isCompacted: true,
+    isScratchpad: true,
+    author: 'system',
+    startTime: Date.now() - 10000,
+    endTime: Date.now() - 5000,
+    compactedContent: contentStr || 'Existing scratchpad content',
+  };
 }
 
 function createMockInvocationContext(events: Event[]): InvocationContext {

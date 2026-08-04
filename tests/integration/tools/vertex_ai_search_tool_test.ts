@@ -5,7 +5,7 @@
  */
 
 import {Gemini, LlmAgent, LlmRequest, VertexAiSearchTool} from '@google/adk';
-import {GenerateContentResponse, GoogleGenAI} from '@google/genai';
+import {GenerateContentResponse} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {createRunner} from '../test_case_utils.js';
 
@@ -52,8 +52,10 @@ class SpyGemini extends Gemini {
     this.spyClient = new SpyMockGenAIClient(response);
   }
 
-  override get apiClient(): GoogleGenAI {
-    return this.spyClient as unknown as GoogleGenAI;
+  // Derived from Gemini: the root install hoists a different @google/genai
+  // major than core builds against.
+  override get apiClient(): Gemini['apiClient'] {
+    return this.spyClient as unknown as Gemini['apiClient'];
   }
 }
 

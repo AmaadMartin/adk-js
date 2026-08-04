@@ -7,6 +7,7 @@
 import {OpenApiSpecParser} from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
 import {describe, expect, it} from 'vitest';
+import {inlined} from './openapi_test_utils.js';
 
 describe('OpenApiSpecParser', () => {
   it('should resolve internal references', () => {
@@ -133,7 +134,9 @@ describe('OpenApiSpecParser', () => {
   });
 
   it('should sanitize schema types', () => {
-    const spec: OpenAPIV3.Document = {
+    // The uppercase and unknown schema types below are what the sanitizer is
+    // meant to normalize away, so OpenAPIV3.Document rejects them by design.
+    const spec = {
       openapi: '3.0.0',
       info: {title: 'Sanitize API', version: '1.0.0'},
       paths: {
@@ -157,7 +160,7 @@ describe('OpenApiSpecParser', () => {
           },
         },
       },
-    };
+    } as unknown as OpenAPIV3.Document;
 
     const parser = new OpenApiSpecParser();
     const parsed = parser.parse(spec);
@@ -168,7 +171,7 @@ describe('OpenApiSpecParser', () => {
     const schema = body.content['application/json']
       .schema as OpenAPIV3.SchemaObject;
     expect(schema.type).toBe('object');
-    expect(schema.properties?.age?.type).toBe('integer');
+    expect(inlined(schema.properties?.age).type).toBe('integer');
     expect(
       (schema.properties?.invalid as OpenAPIV3.SchemaObject).type,
     ).toBeUndefined();

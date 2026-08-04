@@ -6,13 +6,21 @@
 
 import {describe, expect, it} from 'vitest';
 import {BaseAgent} from '../../src/agents/base_agent.js';
-import {App, isApp, validateAppName} from '../../src/apps/app.js';
+import {App, AppOptions, isApp, validateAppName} from '../../src/apps/app.js';
 import {createResumabilityConfig} from '../../src/apps/resumability_config.js';
 import {BasePlugin} from '../../src/plugins/base_plugin.js';
 
 class DummyAgent extends BaseAgent {
   constructor(name = 'dummy_agent') {
     super({name});
+  }
+
+  protected async *runAsyncImpl() {
+    yield* [];
+  }
+
+  protected async *runLiveImpl() {
+    yield* [];
   }
 }
 
@@ -78,12 +86,17 @@ describe('App', () => {
   });
 
   it('throws if rootAgent is missing or not a BaseAgent', () => {
-    expect(() => new App({name: 'test_app', rootAgent: undefined})).toThrow(
+    // AppOptions requires a BaseAgent, so these two shapes only reach the
+    // runtime guards from a caller that is not type-checked.
+    const invalidOptions = (rootAgent: unknown): AppOptions =>
+      ({name: 'test_app', rootAgent}) as AppOptions;
+
+    expect(() => new App(invalidOptions(undefined))).toThrow(
       'rootAgent must be provided.',
     );
-    expect(
-      () => new App({name: 'test_app', rootAgent: {name: 'fake'}}),
-    ).toThrow(/rootAgent must be a BaseAgent instance/);
+    expect(() => new App(invalidOptions({name: 'fake'}))).toThrow(
+      /rootAgent must be a BaseAgent instance/,
+    );
   });
 
   it('creates an App with resumabilityConfig', () => {

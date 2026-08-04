@@ -4,9 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {OpenApiSpecParser, OpenAPIToolset, ReadonlyContext} from '@google/adk';
+import {
+  AuthCredentialTypes,
+  OpenApiSpecParser,
+  OpenAPIToolset,
+  ReadonlyContext,
+} from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
 import {describe, expect, it} from 'vitest';
+import {inlined} from './openapi_test_utils.js';
 
 describe('OpenAPIToolset', () => {
   const mockSpec: OpenAPIV3.Document = {
@@ -112,7 +118,7 @@ describe('OpenAPIToolset', () => {
     const toolset = new OpenAPIToolset({
       specDict: mockSpec,
       authScheme: {type: 'apiKey', name: 'key', in: 'header'},
-      authCredential: {api_key: 'my-key'},
+      authCredential: {authType: AuthCredentialTypes.API_KEY, apiKey: 'my-key'},
     });
     const tools = await toolset.getTools();
 
@@ -122,7 +128,7 @@ describe('OpenAPIToolset', () => {
     );
     expect(
       (tools[0] as unknown as Record<string, unknown>).authCredential,
-    ).toEqual({api_key: 'my-key'});
+    ).toEqual({authType: AuthCredentialTypes.API_KEY, apiKey: 'my-key'});
   });
 
   it('should return all tools when no toolFilter is set and a context is provided', async () => {
@@ -381,9 +387,11 @@ describe('OpenApiSpecParser', () => {
     const operations = parser.parse(specWithInvalidType);
 
     expect(operations.length).toBe(1);
-    const schema = operations[0].operation.responses?.['200']?.content?.[
-      'application/json'
-    ]?.schema as OpenAPIV3.SchemaObject;
+    const schema = inlined(
+      inlined(operations[0].operation.responses?.['200']).content?.[
+        'application/json'
+      ]?.schema,
+    );
     const invalidPropSchema = schema.properties?.[
       'invalidProp'
     ] as OpenAPIV3.SchemaObject;
@@ -426,9 +434,11 @@ describe('OpenApiSpecParser', () => {
     const operations = parser.parse(specWithInvalidArrayType);
 
     expect(operations.length).toBe(1);
-    const schema = operations[0].operation.responses?.['200']?.content?.[
-      'application/json'
-    ]?.schema as OpenAPIV3.SchemaObject;
+    const schema = inlined(
+      inlined(operations[0].operation.responses?.['200']).content?.[
+        'application/json'
+      ]?.schema,
+    );
     const multiPropSchema = schema.properties?.[
       'multiProp'
     ] as OpenAPIV3.SchemaObject;

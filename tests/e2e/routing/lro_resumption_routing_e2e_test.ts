@@ -75,6 +75,10 @@ class DataProcessingAgent extends BaseAgent {
       longRunningToolIds: ['lro-call-id-999'],
     });
   }
+
+  override async *runLiveImpl(): AsyncGenerator<Event, void, void> {
+    yield* [];
+  }
 }
 
 /**
@@ -109,6 +113,10 @@ class RootOrchestratorAgent extends BaseAgent {
         parts: [{text: 'Hello from root orchestrator.'}],
       },
     });
+  }
+
+  override async *runLiveImpl(): AsyncGenerator<Event, void, void> {
+    yield* [];
   }
 }
 

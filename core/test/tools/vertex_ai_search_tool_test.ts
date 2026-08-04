@@ -7,7 +7,10 @@
 import {afterEach, describe, expect, it} from 'vitest';
 import {Context} from '../../src/agents/context.js';
 import {LlmRequest} from '../../src/models/llm_request.js';
-import {VertexAiSearchTool} from '../../src/tools/vertex_ai_search_tool.js';
+import {
+  VertexAiSearchTool,
+  VertexAiSearchToolParams,
+} from '../../src/tools/vertex_ai_search_tool.js';
 
 interface TestTool {
   retrieval?: {
@@ -21,9 +24,19 @@ interface TestTool {
   };
 }
 
+/**
+ * `VertexAiSearchToolParams` is a discriminated union whose `never` members
+ * make these three combinations unrepresentable. The constructor still guards
+ * against them at runtime for callers that are not type-checked, so the guard
+ * tests have to reach past the union to reach the guard.
+ */
+function invalidParams(params: object): VertexAiSearchToolParams {
+  return params as VertexAiSearchToolParams;
+}
+
 describe('VertexAiSearchTool', () => {
   it('should throw error if neither dataStoreId nor searchEngineId is specified', () => {
-    expect(() => new VertexAiSearchTool({})).toThrowError(
+    expect(() => new VertexAiSearchTool(invalidParams({}))).toThrowError(
       'Either dataStoreId or searchEngineId must be specified.',
     );
   });
@@ -31,20 +44,24 @@ describe('VertexAiSearchTool', () => {
   it('should throw error if both dataStoreId and searchEngineId are specified', () => {
     expect(
       () =>
-        new VertexAiSearchTool({
-          dataStoreId: 'ds',
-          searchEngineId: 'se',
-        }),
+        new VertexAiSearchTool(
+          invalidParams({
+            dataStoreId: 'ds',
+            searchEngineId: 'se',
+          }),
+        ),
     ).toThrowError('Either dataStoreId or searchEngineId must be specified.');
   });
 
   it('should throw error if dataStoreSpecs is specified without searchEngineId', () => {
     expect(
       () =>
-        new VertexAiSearchTool({
-          dataStoreId: 'ds',
-          dataStoreSpecs: [{dataStore: 'ds1'}],
-        }),
+        new VertexAiSearchTool(
+          invalidParams({
+            dataStoreId: 'ds',
+            dataStoreSpecs: [{dataStore: 'ds1'}],
+          }),
+        ),
     ).toThrowError(
       'searchEngineId must be specified if dataStoreSpecs is specified.',
     );
@@ -70,6 +87,8 @@ describe('VertexAiSearchTool', () => {
     });
     const llmRequest: LlmRequest = {
       model: 'gemini-2.0-flash',
+      contents: [],
+      liveConnectConfig: {},
       toolsDict: {},
     };
     const toolContext = {} as Context;
@@ -93,6 +112,8 @@ describe('VertexAiSearchTool', () => {
     const tool = new VertexAiSearchTool({dataStoreId: 'ds'});
     const llmRequest: LlmRequest = {
       model: 'gemini-1.5-pro',
+      contents: [],
+      liveConnectConfig: {},
       toolsDict: {},
       config: {
         tools: [{functionDeclarations: []}],
@@ -114,6 +135,8 @@ describe('VertexAiSearchTool', () => {
     });
     const llmRequest: LlmRequest = {
       model: 'gemini-1.5-pro',
+      contents: [],
+      liveConnectConfig: {},
       toolsDict: {},
       config: {
         tools: [{functionDeclarations: []}],
@@ -130,6 +153,8 @@ describe('VertexAiSearchTool', () => {
     const tool = new VertexAiSearchTool({dataStoreId: 'ds'});
     const llmRequest: LlmRequest = {
       model: 'claude-3',
+      contents: [],
+      liveConnectConfig: {},
       toolsDict: {},
     };
     const toolContext = {} as Context;
@@ -157,6 +182,8 @@ describe('VertexAiSearchTool', () => {
       const tool = new VertexAiSearchTool({dataStoreId: 'ds'});
       const llmRequest: LlmRequest = {
         model: 'claude-3',
+        contents: [],
+        liveConnectConfig: {},
         toolsDict: {},
       };
       const toolContext = {} as Context;
