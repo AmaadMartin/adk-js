@@ -75,9 +75,20 @@ describe('AgentLoader discovery and loading integration', () => {
   let loader: AgentLoader;
 
   beforeAll(async () => {
-    await execAsync('npm install', {cwd: projectPath});
     loader = new AgentLoader(projectPath);
-  }, TEST_EXECUTION_TIMEOUT);
+    // Warm the loader here rather than in a test body. listAgents() drives
+    // preloadAgents(), which esbuild-bundles each of the four discovered
+    // entrypoints with the whole @google/adk graph inlined: measured at 20511ms
+    // on an idle Linux workstation, against a 40000ms per-test budget. Worse,
+    // preloadAgents() has no in-flight guard, so once the first test overran
+    // its budget the next one started a second full set of bundles and overran
+    // too. This hook deliberately passes no budget of its own, so it inherits
+    // the integration project's hookTimeout instead of pinning a second copy
+    // of that number here.
+    // TEST_EXECUTION_TIMEOUT stays 40000: warmed, the bodies below take ~1ms,
+    // so it still catches a future change that makes discovery expensive again.
+    await loader.listAgents();
+  });
 
   it(
     'should discover apps vs agents across directories and standalone files',
@@ -128,15 +139,6 @@ describe('AgentLoader discovery and loading integration', () => {
   );
 
   afterAll(async () => {
-    await loader.disposeAll();
-    await fs
-      .rm(path.join(projectPath, 'node_modules'), {
-        recursive: true,
-        force: true,
-      })
-      .catch(() => {});
-    await fs
-      .unlink(path.join(projectPath, 'package-lock.json'))
-      .catch(() => {});
+    await loader?.disposeAll();
   }, TEST_EXECUTION_TIMEOUT);
 });
