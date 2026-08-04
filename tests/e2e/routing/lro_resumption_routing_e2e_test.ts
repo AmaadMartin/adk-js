@@ -77,7 +77,7 @@ class DataProcessingAgent extends BaseAgent {
   }
 
   override async *runLiveImpl(): AsyncGenerator<Event, void, void> {
-    throw new Error('Live mode is not exercised by this test.');
+    yield* [];
   }
 }
 
@@ -116,7 +116,7 @@ class RootOrchestratorAgent extends BaseAgent {
   }
 
   override async *runLiveImpl(): AsyncGenerator<Event, void, void> {
-    throw new Error('Live mode is not exercised by this test.');
+    yield* [];
   }
 }
 
