@@ -18,10 +18,9 @@ import {
   ListSessionsRequest,
   ListSessionsResponse,
   mergeStates,
-  trimTempState,
 } from './base_session_service.js';
 import {createSession, Session} from './session.js';
-import {extractStateDelta} from './state_utils.js';
+import {extractStateDelta, StateDeltas} from './state_utils.js';
 
 /**
  * Checks if the given URI is an in-memory memory service URI.
@@ -52,18 +51,45 @@ export class InMemorySessionService extends BaseSessionService {
    */
   private appState: Record<string, Record<string, unknown>> = {};
 
+  /**
+   * Merges app- and user-scoped deltas into the stores shared across sessions.
+   *
+   * Empty deltas are skipped so that apps and users which never set scoped
+   * state gain no entry at all.
+   */
+  private applyScopedDeltas(
+    appName: string,
+    userId: string,
+    {app, user}: StateDeltas,
+  ): void {
+    if (Object.keys(app).length > 0) {
+      this.appState[appName] = {...this.appState[appName], ...app};
+    }
+
+    if (Object.keys(user).length > 0) {
+      this.userState[appName] = this.userState[appName] || {};
+      this.userState[appName][userId] = {
+        ...this.userState[appName][userId],
+        ...user,
+      };
+    }
+  }
+
   async createSession({
     appName,
     userId,
     state,
     sessionId,
   }: CreateSessionRequest): Promise<Session> {
-    const filteredState = state ? trimTempState(state) : undefined;
+    const deltas = extractStateDelta(state);
+    // Must precede the mergeStates() below, which re-reads the scope stores.
+    this.applyScopedDeltas(appName, userId, deltas);
+
     const session = createSession({
       id: sessionId || randomUUID(),
       appName,
       userId,
-      state: filteredState,
+      state: deltas.session,
       events: [],
       lastUpdateTime: Date.now(),
     });
@@ -275,21 +301,11 @@ export class InMemorySessionService extends BaseSessionService {
     if (event.actions && event.actions.stateDelta) {
       // The session bucket is deliberately ignored: session state is applied by
       // super.appendEvent(), which keeps the `app:`/`user:` prefixes on the key.
-      const {app: appDelta, user: userDelta} = extractStateDelta(
-        event.actions.stateDelta,
+      this.applyScopedDeltas(
+        appName,
+        userId,
+        extractStateDelta(event.actions.stateDelta),
       );
-
-      if (Object.keys(appDelta).length > 0) {
-        this.appState[appName] = {...this.appState[appName], ...appDelta};
-      }
-
-      if (Object.keys(userDelta).length > 0) {
-        this.userState[appName] = this.userState[appName] || {};
-        this.userState[appName][userId] = {
-          ...this.userState[appName][userId],
-          ...userDelta,
-        };
-      }
     }
 
     const storageSession: Session = this.sessions[appName][userId][sessionId];
