@@ -6,10 +6,12 @@
 
 import {
   BaseAgent,
+  InMemoryArtifactService,
   InvocationContext,
   LlmAgent,
   LlmRequest,
   PluginManager,
+  SessionArtifactService,
   createSession,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
@@ -17,6 +19,7 @@ import {
   CODE_EXECUTION_REQUEST_PROCESSOR,
   CodeExecutionResponseProcessor,
 } from '../../../src/agents/processors/code_execution_request_processor.js';
+import {ScopedArtifactService} from '../../../src/artifacts/scoped_artifact_service.js';
 import {
   BaseCodeExecutor,
   ExecuteCodeParams,
@@ -37,10 +40,24 @@ class TestCodeExecutor extends BaseCodeExecutor {
   }
 }
 
-function createMockInvocationContext(agent: BaseAgent): InvocationContext {
+class FixedResultCodeExecutor extends BaseCodeExecutor {
+  constructor(private readonly result: CodeExecutionResult) {
+    super();
+  }
+
+  async executeCode(_params: ExecuteCodeParams): Promise<CodeExecutionResult> {
+    return this.result;
+  }
+}
+
+function createMockInvocationContext(
+  agent: BaseAgent,
+  artifactService?: SessionArtifactService,
+): InvocationContext {
   return new InvocationContext({
     invocationId: 'test-invocation',
     agent,
+    artifactService,
     session: createSession({
       id: 'test-session',
       events: [],
@@ -216,6 +233,103 @@ describe('CodeExecutionResponseProcessor', () => {
       );
 
       expect(events).toHaveLength(0);
+    });
+  });
+
+  describe('artifact service requirement for the execution result', () => {
+    const pythonCodeResponse = {
+      partial: false,
+      content: {
+        role: 'model',
+        parts: [{text: '```python\nprint("hello")\n```'}],
+      },
+    };
+    const outputFile = {
+      name: 'plot.png',
+      content: 'YWJj',
+      mimeType: 'image/png',
+    };
+
+    function createAgent(result: CodeExecutionResult): LlmAgent {
+      return new LlmAgent({
+        name: 'agent-with-executor',
+        model: 'gemini-2.5-flash',
+        codeExecutor: new FixedResultCodeExecutor(result),
+      });
+    }
+
+    it('emits the result event without an artifact service when there are no output files', async () => {
+      const agent = createAgent({
+        stdout: 'hello',
+        stderr: '',
+        outputFiles: [],
+      });
+      const ctx = createMockInvocationContext(agent);
+
+      const events = await collectEvents(
+        responseProcessor.runAsync(ctx, {...pythonCodeResponse}),
+      );
+
+      expect(events).toHaveLength(2);
+      expect(events[1].actions.artifactDelta).toEqual({});
+    });
+
+    it('records the error count for a failed execution without an artifact service', async () => {
+      const agent = createAgent({
+        stdout: '',
+        stderr: 'boom',
+        outputFiles: [],
+      });
+      const ctx = createMockInvocationContext(agent);
+
+      const events = await collectEvents(
+        responseProcessor.runAsync(ctx, {...pythonCodeResponse}),
+      );
+
+      expect(events).toHaveLength(2);
+      expect(ctx.session.state['_code_executor_error_counts']).toEqual({
+        'test-invocation': 1,
+      });
+    });
+
+    it('throws without an artifact service when there are output files', async () => {
+      const agent = createAgent({
+        stdout: '',
+        stderr: '',
+        outputFiles: [outputFile],
+      });
+      const ctx = createMockInvocationContext(agent);
+
+      await expect(
+        collectEvents(responseProcessor.runAsync(ctx, {...pythonCodeResponse})),
+      ).rejects.toThrow('Artifact service is not initialized.');
+    });
+
+    it('saves output files and records the artifact delta when an artifact service is configured', async () => {
+      const agent = createAgent({
+        stdout: '',
+        stderr: '',
+        outputFiles: [outputFile],
+      });
+      const artifactService = new ScopedArtifactService(
+        new InMemoryArtifactService(),
+        'test-app',
+        'test-user',
+        'test-session',
+      );
+      const ctx = createMockInvocationContext(agent, artifactService);
+
+      const events = await collectEvents(
+        responseProcessor.runAsync(ctx, {...pythonCodeResponse}),
+      );
+
+      expect(events).toHaveLength(2);
+      expect(events[1].actions.artifactDelta).toEqual({'plot.png': 0});
+      await expect(
+        artifactService.loadArtifact({filename: 'plot.png'}),
+      ).resolves.toEqual({
+        inlineData: {data: outputFile.content, mimeType: outputFile.mimeType},
+      });
     });
   });
 });
