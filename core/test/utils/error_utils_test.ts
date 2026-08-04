@@ -5,7 +5,10 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {formatError} from '../../src/utils/error_utils.js';
+import {
+  formatError,
+  isModuleNotFoundError,
+} from '../../src/utils/error_utils.js';
 
 const TRUNCATION_MARKER = '... [truncated]';
 const MAX_RESPONSE_BODY_LENGTH = 1000;
@@ -206,5 +209,41 @@ describe('formatError', () => {
       response: {status: 502, text: 'text body'},
     });
     expect(formatError(err)).toContain('text body');
+  });
+});
+
+describe('isModuleNotFoundError', () => {
+  it.each([
+    [
+      'an ESM resolution failure',
+      Object.assign(new Error('x'), {code: 'ERR_MODULE_NOT_FOUND'}),
+      true,
+    ],
+    [
+      'a CommonJS resolution failure',
+      Object.assign(new Error('x'), {code: 'MODULE_NOT_FOUND'}),
+      true,
+    ],
+    ['a plain object carrying the code', {code: 'MODULE_NOT_FOUND'}, true],
+    [
+      'an unrelated errno error',
+      Object.assign(new Error('x'), {code: 'ENOENT'}),
+      false,
+    ],
+    ['an error with no code', new Error('no code at all'), false],
+    ['a non-string code', Object.assign(new Error('x'), {code: 42}), false],
+    [
+      'an error that only wraps a resolution failure in its cause',
+      new Error('outer', {
+        cause: Object.assign(new Error('x'), {code: 'ERR_MODULE_NOT_FOUND'}),
+      }),
+      false,
+    ],
+    ['null', null, false],
+    ['undefined', undefined, false],
+    ['the code as a bare string', 'ERR_MODULE_NOT_FOUND', false],
+    ['a number', 7, false],
+  ])('classifies %s', (_label, value, expected) => {
+    expect(isModuleNotFoundError(value)).toBe(expected);
   });
 });

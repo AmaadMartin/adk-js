@@ -5,6 +5,7 @@
  */
 
 import {MikroORM, Options as MikroORMOptions} from '@mikro-orm/core';
+import {isModuleNotFoundError} from '../../utils/error_utils.js';
 import {
   ENTITIES,
   SCHEMA_VERSION_1_JSON,
@@ -17,30 +18,45 @@ import {
  *
  * @param uri The database connection URI (e.g., "postgres://user:password@host:port/database")
  * @returns MikroORM Options configured for the database
- * @throws Error if the URI is invalid or unsupported
+ * @throws Error if the URI is invalid or unsupported, or if the dialect driver
+ *     it selects is not installed.
  */
 export async function getConnectionOptionsFromUri(
   uri: string,
 ): Promise<MikroORMOptions> {
   let driver: unknown | undefined;
+  let packageName = '';
+  let uriScheme = '';
 
-  if (uri.startsWith('postgres://') || uri.startsWith('postgresql://')) {
-    const {PostgreSqlDriver} = await import('@mikro-orm/postgresql');
-    driver = PostgreSqlDriver;
-  } else if (uri.startsWith('mysql://')) {
-    const {MySqlDriver} = await import('@mikro-orm/mysql');
-    driver = MySqlDriver;
-  } else if (uri.startsWith('mariadb://')) {
-    const {MariaDbDriver} = await import('@mikro-orm/mariadb');
-    driver = MariaDbDriver;
-  } else if (uri.startsWith('sqlite://')) {
-    const {SqliteDriver} = await import('@mikro-orm/sqlite');
-    driver = SqliteDriver;
-  } else if (uri.startsWith('mssql://')) {
-    const {MsSqlDriver} = await import('@mikro-orm/mssql');
-    driver = MsSqlDriver;
-  } else {
-    throw new Error(`Unsupported database URI: ${uri}`);
+  try {
+    if (uri.startsWith('postgres://') || uri.startsWith('postgresql://')) {
+      [packageName, uriScheme] = ['@mikro-orm/postgresql', 'postgres://'];
+      driver = (await import('@mikro-orm/postgresql')).PostgreSqlDriver;
+    } else if (uri.startsWith('mysql://')) {
+      [packageName, uriScheme] = ['@mikro-orm/mysql', 'mysql://'];
+      driver = (await import('@mikro-orm/mysql')).MySqlDriver;
+    } else if (uri.startsWith('mariadb://')) {
+      [packageName, uriScheme] = ['@mikro-orm/mariadb', 'mariadb://'];
+      driver = (await import('@mikro-orm/mariadb')).MariaDbDriver;
+    } else if (uri.startsWith('sqlite://')) {
+      [packageName, uriScheme] = ['@mikro-orm/sqlite', 'sqlite://'];
+      driver = (await import('@mikro-orm/sqlite')).SqliteDriver;
+    } else if (uri.startsWith('mssql://')) {
+      [packageName, uriScheme] = ['@mikro-orm/mssql', 'mssql://'];
+      driver = (await import('@mikro-orm/mssql')).MsSqlDriver;
+    } else {
+      throw new Error(`Unsupported database URI: ${uri}`);
+    }
+  } catch (error: unknown) {
+    if (!isModuleNotFoundError(error)) {
+      throw error;
+    }
+    throw new Error(
+      `Database driver '${packageName}' is required for ${uriScheme} ` +
+        `connection URIs but is not installed. ` +
+        `Install it with: npm install ${packageName}`,
+      {cause: error},
+    );
   }
 
   if (uri.startsWith('sqlite://')) {

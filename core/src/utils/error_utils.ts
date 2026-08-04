@@ -159,3 +159,25 @@ function formatErrorRecursive(err: unknown, seen: Set<unknown>): string {
 export function formatError(err: unknown): string {
   return formatErrorRecursive(err, new Set<unknown>());
 }
+
+/**
+ * Returns true when `err` is a module-resolution failure, i.e. the module
+ * specifier could not be resolved at all.
+ *
+ * Narrows on the error `code` rather than the message, which is not stable
+ * across Node versions or module formats. Only the value itself is inspected:
+ * an error that merely *wraps* a resolution failure in its `cause` is not one.
+ *
+ * @param err The thrown or rejected value to classify.
+ * @return True if the value carries a module-resolution error code.
+ */
+export function isModuleNotFoundError(err: unknown): boolean {
+  // Node reports a failed ESM specifier resolution as ERR_MODULE_NOT_FOUND and
+  // a failed CommonJS require() as MODULE_NOT_FOUND; ADK ships both formats.
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    'code' in err &&
+    (err.code === 'ERR_MODULE_NOT_FOUND' || err.code === 'MODULE_NOT_FOUND')
+  );
+}
