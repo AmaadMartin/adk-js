@@ -99,14 +99,14 @@ export class RunSkillScriptTool extends BaseTool {
       };
     }
 
-    let resourceName = scriptPath.startsWith('scripts/')
+    const scripts = skill.resources?.scripts;
+    const relScriptPath = scriptPath.startsWith('scripts/')
       ? scriptPath.substring('scripts/'.length)
       : scriptPath;
-    let script = skill.resources?.scripts?.[resourceName];
-    if (!script) {
-      resourceName = scriptPath;
-      script = skill.resources?.scripts?.[resourceName];
-    }
+    // The key that actually matched, so the wrapper path equals the name
+    // getSkillResourceFiles() materializes the script under.
+    const resourceName = scripts?.[relScriptPath] ? relScriptPath : scriptPath;
+    const script = scripts?.[resourceName];
 
     if (!script) {
       return {
@@ -114,10 +114,6 @@ export class RunSkillScriptTool extends BaseTool {
         errorCode: 'SCRIPT_NOT_FOUND',
       };
     }
-
-    // Derived from the matched resource key so it is always equal to the name
-    // getSkillResourceFiles() materializes the script under.
-    const canonicalScriptPath = `scripts/${resourceName}`;
 
     let codeExecutor = this.toolset.codeExecutor;
     if (!codeExecutor) {
@@ -139,7 +135,7 @@ export class RunSkillScriptTool extends BaseTool {
       const result = await codeExecutor.executeCode({
         invocationContext: toolContext.invocationContext,
         codeExecutionInput: {
-          code: buildWrapperCode(canonicalScriptPath, language),
+          code: buildWrapperCode(`scripts/${resourceName}`, language),
           inputFiles: getSkillResourceFiles(skill),
           language,
           args: scriptArgs,
