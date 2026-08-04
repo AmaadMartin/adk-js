@@ -19,11 +19,10 @@ import {
 } from '../../test_case_utils.js';
 import modelResponses from './model_responses.json' with {type: 'json'};
 
+const AGENT_DIR = path.dirname(fileURLToPath(import.meta.url));
+
 const skill = await loadSkillFromDir(
-  path.join(
-    path.dirname(fileURLToPath(import.meta.url)),
-    '../skills/algorithmic-art',
-  ),
+  path.join(AGENT_DIR, '../skills/algorithmic-art'),
 );
 
 export const rootAgent = new LlmAgent({
@@ -37,6 +36,10 @@ export const rootAgent = new LlmAgent({
       codeExecutor: new UnsafeLocalCodeExecutor(),
       // Inline-script execution is opt-in; enable it for this end-to-end test.
       allowInlineScripts: true,
+      // Skill script output goes to a fresh temp directory unless a
+      // destination is declared. This agent's test reads the generated art
+      // back out of the project directory, so name it explicitly.
+      outputDir: AGENT_DIR,
     }),
   ],
   // Executing model-provided inline scripts is gated behind a confirmation

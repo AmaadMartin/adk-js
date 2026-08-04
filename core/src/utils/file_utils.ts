@@ -9,19 +9,32 @@ import * as path from 'node:path';
 import {File} from '../code_executors/code_execution_utils.js';
 
 /**
- * Creates files with the given paths in the current working directory.
+ * Writes the given in-memory files to disk under a base directory, appending a
+ * numeric suffix (`report.txt` -> `report_2.txt`) rather than overwriting an
+ * existing file.
+ *
+ * A name resolving outside `dir` is rejected with a `Path traversal detected`
+ * error. That is a lexical check on resolved paths, not a sandbox: it does not
+ * survive symlinks or a concurrent rename.
+ *
  * @param files The files to materialize.
+ * @param dir Base directory to write under. Required: callers must state where
+ *     model-named files are allowed to land.
+ * @returns The written files, with `name` rewritten to the final path relative
+ *     to `dir`.
  */
 export async function materializeFiles(
   files: File[],
-  dir = process.cwd(),
+  dir: string,
 ): Promise<File[]> {
   const resolvedBaseDir = path.resolve(dir);
   const createdFiles: File[] = [];
   for (const file of files) {
     const fullPath = path.resolve(dir, file.name);
 
-    if (!fullPath.startsWith(resolvedBaseDir)) {
+    // Compare against `resolvedBaseDir + sep` so a sibling directory whose
+    // name merely extends the base ('<base>-evil') does not pass as contained.
+    if (!fullPath.startsWith(resolvedBaseDir + path.sep)) {
       throw new Error(
         `Path traversal detected: ${file.name} resolves outside of ${dir}`,
       );
@@ -49,12 +62,6 @@ export async function materializeFiles(
         // File does not exist, safe to write
         break;
       }
-    }
-
-    if (!finalPath.startsWith(resolvedBaseDir)) {
-      throw new Error(
-        `Path traversal detected: ${file.name} resolves outside of ${dir}`,
-      );
     }
 
     await fs.mkdir(path.dirname(finalPath), {recursive: true});

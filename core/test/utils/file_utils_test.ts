@@ -54,6 +54,29 @@ describe('file_utils', () => {
       expect(content2).toBe('world');
     });
 
+    it('should create the target directory when it does not exist', async () => {
+      // What a configured `outputDir` relies on: the operator names a
+      // directory, the first write brings it into existence.
+      const missingDir = path.join(tempDir, 'nested', 'out');
+      const files = [
+        {
+          name: 'created.txt',
+          content: 'hello',
+          contentEncoding: FileContentEncoding.UTF8,
+          mimeType: 'text/plain',
+        },
+      ];
+
+      const written = await materializeFiles(files, missingDir);
+
+      expect(written[0].name).toBe('created.txt');
+      const content = await fs.readFile(
+        path.join(missingDir, 'created.txt'),
+        'utf8',
+      );
+      expect(content).toBe('hello');
+    });
+
     it('should throw an error if file attempts to escape target directory via relative path', async () => {
       const files = [
         {
@@ -83,6 +106,28 @@ describe('file_utils', () => {
       await expect(materializeFiles(files, tempDir)).rejects.toThrow(
         /Path traversal detected/,
       );
+    });
+
+    it('should throw an error if file escapes into a sibling directory whose name extends the target', async () => {
+      // A bare prefix comparison passes `<tempDir>-evil/x.txt`, because the
+      // resolved path starts with the base directory's own name.
+      const files = [
+        {
+          name: path.join('..', `${path.basename(tempDir)}-evil`, 'x.txt'),
+          content: 'dangerous',
+          contentEncoding: FileContentEncoding.UTF8,
+          mimeType: 'text/plain',
+        },
+      ];
+
+      await expect(materializeFiles(files, tempDir)).rejects.toThrow(
+        /Path traversal detected/,
+      );
+      await expect(
+        fs.access(
+          path.resolve(tempDir, '..', `${path.basename(tempDir)}-evil`),
+        ),
+      ).rejects.toThrow();
     });
 
     it('should allow relative paths that stay within the target directory', async () => {
