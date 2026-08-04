@@ -40,7 +40,21 @@ vi.mock('../../src/utils/file_utils.js', () => ({
   tryToFindFileRecursively: vi.fn(),
 }));
 
-const {watchMock} = vi.hoisted(() => ({watchMock: vi.fn()}));
+const {watchMock} = vi.hoisted(() => ({
+  watchMock:
+    vi.fn<
+      (
+        dir: string,
+        options: {recursive: boolean},
+        listener: (event: string, filename: string | undefined) => void,
+      ) => {on: () => void; close: () => void}
+    >(),
+}));
+
+/** Replays a watcher event onto the listener the loader registered. */
+function notifyWatcher(event: string, filename: string | undefined): void {
+  watchMock.mock.calls[0][2](event, filename);
+}
 
 vi.mock('node:fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs')>();
@@ -837,8 +851,9 @@ describe('AgentLoader', () => {
       await loader.disposeAll();
     });
 
-    it('rescans the agents directory when invalidateAll is called (simulates file-change reload)', async () => {
-      const loader = new AgentLoader(tempAgentsDir);
+    it('rescans the agents directory after a reported file change', async () => {
+      watchMock.mockReturnValue({on: vi.fn(), close: vi.fn()});
+      const loader = new AgentLoader(tempAgentsDir, undefined, true);
 
       expect(await loader.listAgents()).toEqual(['agent1', 'agent2', 'agent3']);
 
@@ -849,8 +864,7 @@ describe('AgentLoader', () => {
 
       expect(await loader.listAgents()).toEqual(['agent1', 'agent2', 'agent3']);
 
-      // Simulate what the fs.watch callback does when a file changes
-      (loader as unknown as {invalidateAll: () => void}).invalidateAll();
+      notifyWatcher('change', 'agent4.js');
 
       expect(await loader.listAgents()).toEqual([
         'agent1',
@@ -1061,7 +1075,7 @@ describe('AgentLoader', () => {
       const loader = new AgentLoader(tempAgentsDir, undefined, true);
 
       await loader.listAgents();
-      (loader as unknown as {invalidateAll: () => void}).invalidateAll();
+      notifyWatcher('change', 'agent1.js');
       await loader.listAgents();
 
       expect(watchMock).toHaveBeenCalledTimes(1);
@@ -1084,28 +1098,19 @@ describe('AgentLoader', () => {
       await loader.disposeAll();
     });
 
-    it('rescans when the watcher reports a change to a JS file', async () => {
+    it('ignores a watcher event that is not about a JS file', async () => {
       watchMock.mockReturnValue({on: vi.fn(), close: vi.fn()});
       const loader = new AgentLoader(tempAgentsDir, undefined, true);
       await loader.listAgents();
-      const onChange = watchMock.mock.calls[0][2];
 
       await fs.writeFile(
         path.join(tempAgentsDir, 'agent4.js'),
         agent1JsContent,
       );
-      onChange('change', 'notes.md');
+      notifyWatcher('change', 'notes.md');
+      notifyWatcher('change', undefined);
 
       expect(await loader.listAgents()).toEqual(['agent1', 'agent2', 'agent3']);
-
-      onChange('change', 'agent4.js');
-
-      expect(await loader.listAgents()).toEqual([
-        'agent1',
-        'agent2',
-        'agent3',
-        'agent4',
-      ]);
 
       await loader.disposeAll();
     });
