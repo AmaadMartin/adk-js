@@ -9,19 +9,27 @@ import * as path from 'node:path';
 import {File} from '../code_executors/code_execution_utils.js';
 
 /**
- * Reports whether resolvedPath is resolvedBaseDir itself, or a path nested
- * inside it.
+ * Reports whether `targetPath` is `baseDir` itself, or a path nested inside it.
  *
- * A plain `resolvedPath.startsWith(resolvedBaseDir)` check is a path-separator-
- * unaware prefix match: it also accepts sibling directories whose name merely
- * starts with the same string, e.g. base dir `/tmp/agent` wrongly "contains"
- * `/tmp/agent-evil/x`. Requiring the trailing separator (or exact equality)
- * closes that gap.
+ * Both arguments are resolved with `path.resolve` before comparison, and
+ * containment requires a path-separator boundary (or exact equality). A plain
+ * `startsWith` prefix match is separator-unaware: it also accepts a sibling
+ * whose name merely starts with the same string, e.g. base dir `/tmp/agent`
+ * wrongly "containing" `/tmp/agent-evil/x`.
+ *
+ * This is a lexical string comparison, not a sandbox. It says nothing about
+ * what the path points at on disk: it does not survive symlinks, hardlinks,
+ * bind mounts, or a TOCTOU race between the check and the subsequent
+ * filesystem call. The comparison is case-sensitive on every platform. Use it
+ * to reject malformed or hostile path *names*, not as a security boundary
+ * around the filesystem.
  */
-function isInsideDir(resolvedPath: string, resolvedBaseDir: string): boolean {
+export function isInsideDir(targetPath: string, baseDir: string): boolean {
+  const resolvedBase = path.resolve(baseDir);
+  const resolvedTarget = path.resolve(targetPath);
   return (
-    resolvedPath === resolvedBaseDir ||
-    resolvedPath.startsWith(resolvedBaseDir + path.sep)
+    resolvedTarget === resolvedBase ||
+    resolvedTarget.startsWith(resolvedBase + path.sep)
   );
 }
 
