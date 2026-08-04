@@ -1,0 +1,21 @@
+# Keeps the GitHub Actions used by .github/workflows up to date. Dependabot
+# advances both a tag reference and a commit-SHA pin (rewriting the trailing
+# version comment alongside the SHA), so this stays correct as the workflow
+# pinning style evolves.
+# Schema: https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference
+version: 2
+updates:
+  - package-ecosystem: 'github-actions'
+    # For this ecosystem '/' means "scan .github/workflows", not the repo root.
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+    groups:
+      # Collapse every action bump into one PR per week instead of one per action.
+      github-actions:
+        patterns:
+          - '*'
+    commit-message:
+      # Conventional-commit prefix so release-please treats dependency bumps as
+      # chores rather than releasable changes.
+      prefix: 'chore(deps)'
