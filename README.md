@@ -69,6 +69,54 @@ yarn add -D @google/adk-devtools
 This installs the core SDK and the dev tools (CLI and dev UI) as a dev
 dependency.
 
+### Advanced: injecting a Vertex AI Sessions client
+
+Most users do not need this. `new VertexAiSessionService({projectId, location})`
+(or `expressModeApiKey`) builds the Agent Engine client internally, and nothing
+below applies.
+
+If you pass your own `sessions:` client, you construct `new Sessions(apiClient)`
+yourself, so your project needs both `@google-cloud/vertexai` and
+`@google/genai` as **direct** dependencies — you import from both, so do not
+rely on npm hoisting a transitive copy into scope.
+
+That exposes a version conflict: `@google-cloud/vertexai@1.12.0` requires
+`@google/genai@^1.45.0`, while `@google/adk` requires `^2.9.0`. The ranges are
+disjoint, so npm installs two copies of `@google/genai` and your
+`new Sessions(apiClient)` call fails to typecheck:
+
+```
+error TS2345: Argument of type '...ApiClient' is not assignable to parameter of type '...ApiClient'.
+  Types have separate declarations of a private property 'customBaseUrl'.
+```
+
+ADK cannot fix this from its own manifest, because npm honours `overrides` only
+in the root project and ignores an `overrides` block declared by a dependency.
+The dedupe has to go in **your** root `package.json`:
+
+```json
+{
+  "overrides": {
+    "@google-cloud/vertexai": {
+      "@google/genai": "^2.9.0"
+    }
+  }
+}
+```
+
+Adding `overrides` does not re-resolve an existing lockfile: a plain
+`npm install` leaves the nested copy in place. Remove both first:
+
+```bash
+rm -rf node_modules package-lock.json
+npm install
+```
+
+Yarn and pnpm have equivalent mechanisms, `resolutions` and `pnpm.overrides`.
+
+This workaround becomes unnecessary once `@google-cloud/vertexai` widens its
+`@google/genai` range to accept 2.x.
+
 ## Quick Start
 
 Set up authentication. Get an API key from
