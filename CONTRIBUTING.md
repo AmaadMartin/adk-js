@@ -56,10 +56,10 @@ To maintain high code quality and consistency:
    npm run ts:check
    ```
 
-   This runs as part of CI validation and must pass. A small number of legacy
-   test files with pre-existing type errors are listed in the `exclude` array
-   of `tsconfig.json`; if you fix one, delete its entry. Never add a new entry,
-   and never silence a type error with `@ts-expect-error` or `any`.
+   This runs as part of CI validation and must pass. It needs no prior build:
+   `tsconfig.json` maps the workspace packages to their sources. Fix a type
+   error at its root rather than silencing it with `@ts-expect-error` or `any`,
+   and never exclude a file from the program to make the check pass.
 
 The project uses `husky` and `lint-staged` to automatically lint and format
 your changes before each commit.
