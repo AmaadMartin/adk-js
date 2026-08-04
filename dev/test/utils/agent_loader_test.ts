@@ -721,21 +721,19 @@ describe('AgentLoader', () => {
       await loader.disposeAll();
     });
 
-    it('does not preload agents again if already preloaded', async () => {
+    it('does not rescan the agents directory once discovery has run', async () => {
       const loader = new AgentLoader(tempAgentsDir);
-      await loader.preloadAgents();
+      await loader.discoverAgents();
 
-      const spy = vi.spyOn(
-        loader as unknown as {loadAgentFromFile: () => void},
-        'loadAgentFromFile',
-      );
-      await loader.preloadAgents();
+      // `isFile` is consulted exactly once per scan, on the agents dir itself.
+      (fileUtils.isFile as Mock).mockClear();
+      await loader.discoverAgents();
 
-      expect(spy).not.toHaveBeenCalled();
+      expect(fileUtils.isFile).not.toHaveBeenCalled();
       await loader.disposeAll();
     });
 
-    it('handles AgentFileLoadingError in directory loading', async () => {
+    it('lists a directory whose entrypoint exports no agent but excludes it from apps', async () => {
       await fs.mkdir(path.join(tempAgentsDir, 'bad_agent_dir'));
       await fs.writeFile(
         path.join(tempAgentsDir, 'bad_agent_dir', 'agent.js'),
@@ -743,9 +741,10 @@ describe('AgentLoader', () => {
       );
 
       const loader = new AgentLoader(tempAgentsDir);
-      const agents = await loader.listAgents();
 
-      expect(agents).not.toContain('bad_agent_dir');
+      expect(await loader.listAgents()).toContain('bad_agent_dir');
+      expect(await loader.listApps()).not.toContain('bad_agent_dir');
+
       await loader.disposeAll();
     });
 
@@ -768,25 +767,27 @@ describe('AgentLoader', () => {
       await loader.disposeAll();
     });
 
-    it('resets preload cache when invalidateAll is called (simulates file-change reload)', async () => {
+    it('rescans the agents directory when invalidateAll is called (simulates file-change reload)', async () => {
       const loader = new AgentLoader(tempAgentsDir);
 
-      // Initial load should populate the cache and mark as preloaded
-      await loader.listAgents();
-      expect(
-        (loader as unknown as {agentsAlreadyPreloaded: boolean})
-          .agentsAlreadyPreloaded,
-      ).toBe(true);
+      expect(await loader.listAgents()).toEqual(['agent1', 'agent2', 'agent3']);
+
+      await fs.writeFile(
+        path.join(tempAgentsDir, 'agent4.js'),
+        agent1JsContent,
+      );
+
+      expect(await loader.listAgents()).toEqual(['agent1', 'agent2', 'agent3']);
 
       // Simulate what the fs.watch callback does when a file changes
       (loader as unknown as {invalidateAll: () => void}).invalidateAll();
 
-      // After invalidation the preloaded flag is reset so that the next
-      // request triggers a full re-scan from disk
-      expect(
-        (loader as unknown as {agentsAlreadyPreloaded: boolean})
-          .agentsAlreadyPreloaded,
-      ).toBe(false);
+      expect(await loader.listAgents()).toEqual([
+        'agent1',
+        'agent2',
+        'agent3',
+        'agent4',
+      ]);
 
       await loader.disposeAll();
     });

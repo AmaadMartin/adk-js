@@ -46,11 +46,13 @@ vi.mock('node:fs/promises', () => {
   };
 });
 
-vi.mock('../../src/utils/agent_loader.js', () => ({
+vi.mock('../../src/utils/agent_loader.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/utils/agent_loader.js')>()),
   AgentLoader: vi.fn().mockImplementation(() => ({
     listAgents: vi.fn().mockResolvedValue(['agent1']),
     getAgentFile: vi.fn().mockResolvedValue({
       getFilePath: vi.fn().mockReturnValue('path/to/agent1.ts'),
+      load: vi.fn().mockResolvedValue({}),
     }),
     disposeAll: vi.fn().mockResolvedValue(undefined),
   })),
@@ -149,6 +151,7 @@ describe('deployToCloudRun', () => {
       listAgents: vi.fn().mockResolvedValue(['agent1']),
       getAgentFile: vi.fn().mockResolvedValue({
         getFilePath: vi.fn().mockReturnValue('path/to/agent1.ts'),
+        load: vi.fn().mockResolvedValue({}),
       }),
       disposeAll: vi.fn().mockResolvedValue(undefined),
     }));
