@@ -8,7 +8,10 @@ on:
 
 jobs:
   run-tests:
-    runs-on: macos-latest
+    # This suite is loopback HTTP between a Node process and a Go process and
+    # has no macOS-specific surface; validation.yaml keeps the repository's
+    # macOS coverage via its ubuntu/windows/macos matrix.
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
