@@ -4,14 +4,19 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import {Context} from '../../agents/context.js';
 import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {BaseCodeExecutor} from '../../code_executors/base_code_executor.js';
+import {CodeExecutionResult} from '../../code_executors/code_execution_utils.js';
 import {appendInstructions, LlmRequest} from '../../models/llm_request.js';
 import {formatSkillsAsXml} from '../../skills/prompt.js';
 import {Skill} from '../../skills/skill.js';
 import {SkillRegistry} from '../../skills/skill_registry.js';
 import {experimental} from '../../utils/experimental.js';
+import {materializeFiles} from '../../utils/file_utils.js';
 import {logger} from '../../utils/logger.js';
 import {BaseTool} from '../base_tool.js';
 import {BaseToolset} from '../base_toolset.js';
@@ -38,6 +43,21 @@ This is very important:
 4. Use \`run_skill_script\` to run scripts from a skill's \`scripts/\` directory. Use \`load_skill_resource\` to view script content first if needed.
 `;
 
+/** Filename prefix for the per-execution skill output directory. */
+const SKILL_OUTPUT_DIR_PREFIX = 'adk-skill-output-';
+
+/**
+ * The result of a skill script execution, annotated with the directory its
+ * output files were written to.
+ */
+export interface SkillScriptResult extends CodeExecutionResult {
+  /**
+   * Absolute path of the directory `outputFiles` were written to. Omitted when
+   * the script produced no output files.
+   */
+  outputDir?: string;
+}
+
 @experimental
 export class SkillToolset extends BaseToolset {
   public skills: Record<string, Skill>;
@@ -47,7 +67,7 @@ export class SkillToolset extends BaseToolset {
   public registry?: SkillRegistry;
   private toolCache = new Map<string, BaseTool[]>();
   private fetchedSkillCache = new Map<string, Map<string, Skill>>();
-  public readonly outputDir?: string;
+  private readonly outputDir?: string;
 
   constructor(
     skills: Record<string, Skill> | Skill[],
@@ -65,12 +85,18 @@ export class SkillToolset extends BaseToolset {
        */
       allowInlineScripts?: boolean;
       /**
-       * Directory that skill script output files are written into. The names
-       * the tools report back to the model are relative to it.
+       * Directory that files produced by skill scripts are written to. A
+       * relative path is resolved against the host process's working
+       * directory. The names the tools report back to the model are relative
+       * to this directory.
        *
-       * Defaults to the host process's current working directory, so an agent
-       * launched from a source checkout writes model-named files into that
-       * checkout; set this to keep skill output out of the working tree.
+       * When omitted, each execution that produces files gets a fresh
+       * directory under the OS temp root, whose absolute path is reported on
+       * the result. The host process's working directory is never used.
+       *
+       * Materialized files are the script's product and are never deleted, so
+       * an unconfigured run relies on OS-level temp reaping; set this to put
+       * script output somewhere the application manages.
        */
       outputDir?: string;
     } = {},
@@ -100,6 +126,33 @@ export class SkillToolset extends BaseToolset {
     if (this.registry) {
       this.tools.push(new SearchSkillsTool(this));
     }
+  }
+
+  /**
+   * Materializes the output files produced by a skill script and reports the
+   * directory they were written to.
+   *
+   * Files go to the configured `outputDir`, or to a fresh directory under the
+   * OS temp root when none is configured; the host process's working directory
+   * is never used as an implicit destination.
+   */
+  async materializeOutputFiles(
+    result: CodeExecutionResult,
+  ): Promise<SkillScriptResult> {
+    if (result.outputFiles.length === 0) {
+      return result;
+    }
+
+    const outputDir = this.outputDir
+      ? path.resolve(this.outputDir)
+      : await fs.mkdtemp(path.join(os.tmpdir(), SKILL_OUTPUT_DIR_PREFIX));
+
+    return {
+      ...result,
+      // A collision renames the file, so take the names materializeFiles returns.
+      outputFiles: await materializeFiles(result.outputFiles, outputDir),
+      outputDir,
+    };
   }
 
   override async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {

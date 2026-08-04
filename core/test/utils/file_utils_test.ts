@@ -8,7 +8,7 @@ import {FileContentEncoding} from '@google/adk';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {materializeFiles} from '../../src/utils/file_utils.js';
 
 describe('file_utils', () => {
@@ -52,44 +52,6 @@ describe('file_utils', () => {
         'utf8',
       );
       expect(content2).toBe('world');
-    });
-
-    it('should default the base directory to the working directory of each call', async () => {
-      // Callers that omit `dir` — the skill script tools when no output
-      // directory is configured — follow process.cwd() as of the call, not as
-      // of module load, so a process that chdir()s is tracked.
-      const secondDir = await fs.mkdtemp(
-        path.join(os.tmpdir(), 'file_utils_test_second_'),
-      );
-      const newFile = () => [
-        {
-          name: 'default_dir.txt',
-          content: 'hello',
-          contentEncoding: FileContentEncoding.UTF8,
-          mimeType: 'text/plain',
-        },
-      ];
-      const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(tempDir);
-
-      try {
-        const first = await materializeFiles(newFile());
-        expect(first[0].name).toBe('default_dir.txt');
-
-        cwdSpy.mockReturnValue(secondDir);
-        await materializeFiles(newFile());
-
-        // Written under the cwd in effect at each call, not a single snapshot
-        // (a snapshot would have collided and produced default_dir_2.txt).
-        expect(
-          await fs.readFile(path.join(tempDir, 'default_dir.txt'), 'utf8'),
-        ).toBe('hello');
-        expect(
-          await fs.readFile(path.join(secondDir, 'default_dir.txt'), 'utf8'),
-        ).toBe('hello');
-      } finally {
-        cwdSpy.mockRestore();
-        await fs.rm(secondDir, {recursive: true, force: true});
-      }
     });
 
     it('should create the target directory when it does not exist', async () => {

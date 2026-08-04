@@ -17,7 +17,6 @@ import {
   getMimeTypeAndEncoding,
   getScriptLanguageByExtension,
 } from '../../utils/file_extension_utils.js';
-import {materializeFiles} from '../../utils/file_utils.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
 import {SkillToolset} from './skill_toolset.js';
 
@@ -141,13 +140,10 @@ export class RunSkillScriptTool extends BaseTool {
         },
       });
 
-      // Final filename could be different if there was a collision, so update the result.
-      result.outputFiles = await materializeFiles(
-        result.outputFiles,
-        this.toolset.outputDir,
-      );
-
-      return result;
+      // Awaited inside the try: returning the promise unawaited would escape
+      // the catch below and surface as an unhandled rejection instead of the
+      // tool's EXECUTION_ERROR response.
+      return await this.toolset.materializeOutputFiles(result);
     } catch (e: unknown) {
       return {
         error: `Failed to execute script '${scriptPath}': ${(e as Error).message}`,

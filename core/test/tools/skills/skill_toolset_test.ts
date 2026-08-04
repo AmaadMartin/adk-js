@@ -14,8 +14,6 @@ import {
   Skill,
   SkillToolset,
 } from '@google/adk';
-import * as os from 'node:os';
-import * as path from 'node:path';
 import {describe, expect, it, vi} from 'vitest';
 
 describe('skill_toolset', () => {
@@ -96,20 +94,6 @@ describe('skill_toolset', () => {
       const tools = await toolset.getTools();
       expect(tools.map((t) => t.name)).toContain('run_skill_inline_script');
       expect(tools.length).toBe(5);
-    });
-
-    describe('outputDir', () => {
-      it('is undefined when no directory is configured', () => {
-        // The toolset deliberately resolves no default of its own, so the cwd
-        // default stays where it was: resolved per call by materializeFiles.
-        expect(new SkillToolset([mockSkill]).outputDir).toBeUndefined();
-      });
-
-      it('exposes the configured directory', () => {
-        const outputDir = path.join(os.tmpdir(), 'skill-output');
-        const toolset = new SkillToolset([mockSkill], {outputDir});
-        expect(toolset.outputDir).toBe(outputDir);
-      });
     });
 
     it('appends instructions to LLM request', async () => {

@@ -13,20 +13,21 @@ import {File} from '../code_executors/code_execution_utils.js';
  * numeric suffix (`report.txt` -> `report_2.txt`) rather than overwriting an
  * existing file.
  *
- * Names resolving outside `dir` are rejected with a `Path traversal detected`
- * error. That is a lexical check on the resolved path, not a sandbox: it does
- * not survive symlinks or a concurrent rename.
+ * Most names resolving outside `dir` are rejected with a `Path traversal
+ * detected` error. That is a lexical prefix comparison of resolved paths, not
+ * a sandbox: it does not survive symlinks or a concurrent rename, and it lets
+ * through a sibling directory whose name extends `dir`'s own (with `dir` of
+ * `/tmp/out`, a name of `../out-evil/x.txt` passes).
  *
  * @param files The files to materialize.
- * @param dir Base directory to write under. Defaults to the host process's
- *     current working directory; callers that do not want files there must
- *     pass an explicit directory.
+ * @param dir Base directory to write under. Required: callers must state where
+ *     model-named files are allowed to land.
  * @returns The written files, with `name` rewritten to the final path relative
  *     to `dir`.
  */
 export async function materializeFiles(
   files: File[],
-  dir = process.cwd(),
+  dir: string,
 ): Promise<File[]> {
   const resolvedBaseDir = path.resolve(dir);
   const createdFiles: File[] = [];

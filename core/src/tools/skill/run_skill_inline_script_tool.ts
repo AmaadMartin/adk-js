@@ -9,7 +9,6 @@ import {Context} from '../../agents/context.js';
 import {isLlmAgent} from '../../agents/llm_agent.js';
 import {CodeExecutionLanguage} from '../../code_executors/code_execution_utils.js';
 import {experimental} from '../../utils/experimental.js';
-import {materializeFiles} from '../../utils/file_utils.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
 import {SkillToolset} from './skill_toolset.js';
 
@@ -140,13 +139,10 @@ export class RunSkillInlineScriptTool extends BaseTool {
         },
       });
 
-      // Final filename could be different if there was a collision, so update the result.
-      result.outputFiles = await materializeFiles(
-        result.outputFiles,
-        this.toolset.outputDir,
-      );
-
-      return result;
+      // Awaited inside the try: returning the promise unawaited would escape
+      // the catch below and surface as an unhandled rejection instead of the
+      // tool's EXECUTION_ERROR response.
+      return await this.toolset.materializeOutputFiles(result);
     } catch (e: unknown) {
       return {
         error: `Failed to execute inline script: ${(e as Error).message}`,

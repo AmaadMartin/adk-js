@@ -10,6 +10,7 @@ import {
   Context,
   InvocationContext,
   RunSkillInlineScriptTool,
+  SkillScriptResult,
   SkillToolset,
   ToolConfirmation,
   UnsafeLocalCodeExecutor,
@@ -17,7 +18,7 @@ import {
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {describe, expect, it} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 
 describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', () => {
   // These integration tests exercise real code execution, which is gated behind
@@ -139,68 +140,54 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
     expect(result.stderr).toContain('some python error');
   });
 
-  it('creates files in process.cwd returned from execution', async () => {
-    const executor = new UnsafeLocalCodeExecutor();
-    const toolset = new SkillToolset([], {codeExecutor: executor});
-    const tool = new RunSkillInlineScriptTool(toolset);
-
-    const testFileName = `test_output_${Date.now()}.txt`;
+  describe('output file materialization', () => {
+    let outputDir: string;
+    let testFileName: string;
     const testFileContent = 'hello from output file';
 
-    const result = (await tool.runAsync({
-      args: {
-        script_content: `const fs = require('fs'); fs.writeFileSync('${testFileName}', '${testFileContent}');`,
-        language: CodeExecutionLanguage.JAVASCRIPT,
-      },
-      toolContext: createMockContext(),
-    })) as CodeExecutionResult;
+    beforeEach(async () => {
+      outputDir = await fs.mkdtemp(
+        path.join(os.tmpdir(), 'adk-skill-inline-it-'),
+      );
+      testFileName = `test_output_${Date.now()}.txt`;
+    });
 
-    expect(result).toBeDefined();
-    expect(result.outputFiles).toBeDefined();
-    expect(result.outputFiles?.length).toBeGreaterThan(0);
+    afterEach(async () => {
+      await fs.rm(outputDir, {recursive: true, force: true});
+      // A regression writes to the launch directory instead; remove it so a
+      // failing run does not leave the working tree dirty.
+      await fs.rm(path.join(process.cwd(), testFileName), {force: true});
+      await fs.rm(
+        path.join(
+          process.cwd(),
+          `${path.basename(testFileName, '.txt')}_2.txt`,
+        ),
+        {force: true},
+      );
+    });
 
-    const outputFile = result.outputFiles?.find((f) => f.name === testFileName);
-    expect(outputFile).toBeDefined();
+    function writeFileScript(): string {
+      return `const fs = require('fs'); fs.writeFileSync('${testFileName}', '${testFileContent}');`;
+    }
 
-    // Verify file was created in process.cwd()
-    const fullPath = path.join(process.cwd(), testFileName);
-    const exists = await fs
-      .access(fullPath)
-      .then(() => true)
-      .catch(() => false);
-    expect(exists).toBe(true);
+    it('materializes output files into the configured output directory', async () => {
+      const executor = new UnsafeLocalCodeExecutor();
+      const toolset = new SkillToolset([], {codeExecutor: executor, outputDir});
+      const tool = new RunSkillInlineScriptTool(toolset);
 
-    const content = await fs.readFile(fullPath, 'utf-8');
-    expect(content).toBe(testFileContent);
-
-    // Clean up
-    await fs.unlink(fullPath);
-  });
-
-  it('creates files in the configured output directory', async () => {
-    const outputDir = await fs.mkdtemp(
-      path.join(os.tmpdir(), 'adk-skill-output-'),
-    );
-    const executor = new UnsafeLocalCodeExecutor();
-    const toolset = new SkillToolset([], {codeExecutor: executor, outputDir});
-    const tool = new RunSkillInlineScriptTool(toolset);
-
-    const testFileName = `test_output_${Date.now()}.txt`;
-    const testFileContent = 'hello from output file';
-
-    try {
       const result = (await tool.runAsync({
         args: {
-          script_content: `const fs = require('fs'); fs.writeFileSync('${testFileName}', '${testFileContent}');`,
+          script_content: writeFileScript(),
           language: CodeExecutionLanguage.JAVASCRIPT,
         },
         toolContext: createMockContext(),
-      })) as CodeExecutionResult;
+      })) as SkillScriptResult;
 
       const outputFile = result.outputFiles?.find(
         (f) => f.name === testFileName,
       );
       expect(outputFile).toBeDefined();
+      expect(result.outputDir).toBe(outputDir);
 
       const content = await fs.readFile(
         path.join(outputDir, testFileName),
@@ -214,12 +201,84 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
         .then(() => true)
         .catch(() => false);
       expect(inCwd).toBe(false);
-    } finally {
-      await fs.rm(outputDir, {recursive: true, force: true});
-      // A regression writes to the launch directory instead; remove it so a
-      // failing run does not leave the working tree dirty.
-      await fs.rm(path.join(process.cwd(), testFileName), {force: true});
-    }
+    });
+
+    it('defaults to a temp directory outside the process working directory', async () => {
+      const executor = new UnsafeLocalCodeExecutor();
+      const toolset = new SkillToolset([], {codeExecutor: executor});
+      const tool = new RunSkillInlineScriptTool(toolset);
+
+      const result = (await tool.runAsync({
+        args: {
+          script_content: writeFileScript(),
+          language: CodeExecutionLanguage.JAVASCRIPT,
+        },
+        toolContext: createMockContext(),
+      })) as SkillScriptResult;
+
+      const defaultDir = result.outputDir;
+      // Also guards the recursive cleanup below: a regression that reports the
+      // launch directory here must never be handed to fs.rm.
+      if (
+        defaultDir === undefined ||
+        path.dirname(defaultDir) !== os.tmpdir()
+      ) {
+        expect.fail(
+          `expected a fresh directory under ${os.tmpdir()}, got ${defaultDir}`,
+        );
+      }
+
+      try {
+        expect(path.basename(defaultDir)).toMatch(/^adk-skill-output-/);
+
+        const content = await fs.readFile(
+          path.join(defaultDir, testFileName),
+          'utf-8',
+        );
+        expect(content).toBe(testFileContent);
+
+        const inCwd = await fs
+          .access(path.join(process.cwd(), testFileName))
+          .then(() => true)
+          .catch(() => false);
+        expect(inCwd).toBe(false);
+      } finally {
+        await fs.rm(defaultDir, {recursive: true, force: true});
+      }
+    });
+
+    it('handles file collisions by appending a numeric suffix', async () => {
+      const executor = new UnsafeLocalCodeExecutor();
+      const toolset = new SkillToolset([], {codeExecutor: executor, outputDir});
+      const tool = new RunSkillInlineScriptTool(toolset);
+
+      // Pre-create the target file to force a collision.
+      await fs.writeFile(
+        path.join(outputDir, testFileName),
+        'existing content',
+      );
+
+      const result = (await tool.runAsync({
+        args: {
+          script_content: writeFileScript(),
+          language: CodeExecutionLanguage.JAVASCRIPT,
+        },
+        toolContext: createMockContext(),
+      })) as SkillScriptResult;
+
+      const expectedName = `${path.basename(testFileName, '.txt')}_2.txt`;
+      const outputFile = result.outputFiles?.find(
+        (f) => f.name === expectedName,
+      );
+      expect(outputFile).toBeDefined();
+      expect(result.outputDir).toBe(outputDir);
+
+      const content = await fs.readFile(
+        path.join(outputDir, expectedName),
+        'utf-8',
+      );
+      expect(content).toBe(testFileContent);
+    });
   });
 
   it('successfully passes array arguments to a JavaScript inline script', async () => {
@@ -256,50 +315,5 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
 
     expect(result).toBeDefined();
     expect(result.stdout).toContain('--flag1 val1 --flag2 val2');
-  });
-
-  it('handles file collisions by appending a numeric suffix', async () => {
-    const executor = new UnsafeLocalCodeExecutor();
-    const toolset = new SkillToolset([], {codeExecutor: executor});
-    const tool = new RunSkillInlineScriptTool(toolset);
-
-    const testFileName = `test_inline_output_${Date.now()}.txt`;
-    const testFileContent = 'hello from output file';
-
-    // Pre-create the target file to force a collision
-    const targetFile = path.join(process.cwd(), testFileName);
-    await fs.writeFile(targetFile, 'existing content');
-
-    const result = (await tool.runAsync({
-      args: {
-        script_content: `const fs = require('fs'); fs.writeFileSync('${testFileName}', '${testFileContent}');`,
-        language: CodeExecutionLanguage.JAVASCRIPT,
-      },
-      toolContext: createMockContext(),
-    })) as CodeExecutionResult;
-
-    expect(result).toBeDefined();
-    expect(result.outputFiles).toBeDefined();
-
-    const baseName = path.basename(testFileName, '.txt');
-    const expectedName = `${baseName}_2.txt`;
-
-    const outputFile = result.outputFiles?.find((f) => f.name === expectedName);
-    expect(outputFile).toBeDefined();
-
-    // Verify collision file was created in process.cwd()
-    const fullPath = path.join(process.cwd(), expectedName);
-    const exists = await fs
-      .access(fullPath)
-      .then(() => true)
-      .catch(() => false);
-    expect(exists).toBe(true);
-
-    const content = await fs.readFile(fullPath, 'utf-8');
-    expect(content).toBe(testFileContent);
-
-    // Clean up both files
-    await fs.unlink(targetFile);
-    await fs.unlink(fullPath);
   });
 });
