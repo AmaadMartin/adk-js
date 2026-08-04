@@ -194,19 +194,27 @@ function removeEmptyAndUndefinedFields(obj: Record<string, unknown>) {
   }
 }
 
-function filterEventActionsStateDelta(actions?: EventActions) {
-  if (!actions?.stateDelta) {
+// Takes Partial<EventActions> because requestedAuthConfigs and
+// requestedToolConfirmations are required on EventActions, and deleting a
+// non-optional property is a TS2790 error.
+function filterEventActions(actions?: Partial<EventActions>) {
+  if (!actions) {
     return;
   }
 
-  delete actions.stateDelta['_adk_recordings_config'];
-  delete actions.stateDelta['_adk_replay_config'];
+  delete actions.stateDelta?.['_adk_recordings_config'];
+  delete actions.stateDelta?.['_adk_replay_config'];
+  delete actions.requestedAuthConfigs;
+  delete actions.requestedToolConfirmations;
 }
 
+// functionCall and functionResponse are compared, so that a wrong tool name,
+// wrong arguments or a wrong tool result fails the replay. Only their `id` is
+// stripped: it is minted per run by generateClientFunctionCallId().
 function filterPartFields(part: Part) {
   delete part.thoughtSignature;
-  delete part.functionCall;
-  delete part.functionResponse;
+  delete part.functionCall?.id;
+  delete part.functionResponse?.id;
 }
 
 // Takes Partial<Event> because id, invocationId and timestamp are required on
@@ -217,7 +225,7 @@ function filterEventFields(event: Partial<Event>) {
   delete event.invocationId;
   delete event.longRunningToolIds;
 
-  filterEventActionsStateDelta(event.actions);
+  filterEventActions(event.actions);
 
   if (event.content) {
     event.content.parts?.forEach(filterPartFields);

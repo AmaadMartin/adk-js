@@ -48,7 +48,14 @@ describe('normalizeEvent', () => {
       }),
     );
 
-    expect(normalized.content?.parts).toEqual([{text: 'hi', thought: true}]);
+    expect(normalized.content?.parts).toEqual([
+      {
+        text: 'hi',
+        thought: true,
+        functionCall: {name: 'roll', args: {sides: 6}},
+        functionResponse: {name: 'roll', response: {result: 4}},
+      },
+    ]);
   });
 
   it('keeps user state but drops replay bookkeeping keys', () => {
