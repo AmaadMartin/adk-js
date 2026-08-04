@@ -11,16 +11,27 @@ import {
   Event,
   functionsExportedForTestingOnly,
   FunctionTool,
+  getLogger,
   InvocationContext,
   LlmAgent,
+  Logger,
   PluginManager,
+  RunAsyncToolRequest,
   Session,
   SingleAfterToolCallback,
   SingleBeforeToolCallback,
   ToolConfirmation,
 } from '@google/adk';
 import {FunctionCall} from '@google/genai';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  MockInstance,
+  vi,
+} from 'vitest';
 import {z} from 'zod';
 import {
   findEventByFunctionCallId,
@@ -29,6 +40,14 @@ import {
   getLongRunningFunctionCalls,
   mergeParallelFunctionResponseEvents,
 } from '../../src/agents/functions.js';
+import {traceToolCall} from '../../src/telemetry/tracing.js';
+
+// Only the tool-call tracer is stubbed; `tracer` stays real so the tool call
+// still runs inside its span.
+vi.mock('../../src/telemetry/tracing.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/telemetry/tracing.js')>()),
+  traceToolCall: vi.fn(),
+}));
 
 // Get the test target function
 const {
@@ -839,5 +858,196 @@ describe('findMatchingFunctionCall', () => {
     });
     expect(findMatchingFunctionCall([callEvent])).toBeUndefined();
     expect(findMatchingFunctionCall([])).toBeUndefined();
+  });
+});
+
+/** Mirrors a tool that reports a failure in its response instead of throwing. */
+class StatusReportingTool extends BaseTool {
+  constructor(private readonly response: Record<string, unknown>) {
+    super({name: 'statusReportingTool', description: 'reports status in-band'});
+  }
+
+  override async runAsync(): Promise<unknown> {
+    return this.response;
+  }
+
+  override detectErrorInResponse(response: unknown): string | undefined {
+    return isErrorStatus(response) ? 'TOOL_ERROR' : undefined;
+  }
+}
+
+/** Mirrors a tool whose response is a control signal, not a failure. */
+class ControlSignalTool extends BaseTool {
+  constructor(private readonly signal: 'confirm' | 'auth') {
+    super({name: `${signal}Tool`, description: 'requests a control signal'});
+  }
+
+  override async runAsync({
+    toolContext,
+  }: RunAsyncToolRequest): Promise<unknown> {
+    if (this.signal === 'confirm') {
+      toolContext.requestConfirmation({hint: 'Authorize execution?'});
+    } else {
+      toolContext.requestCredential({
+        credentialKey: 'bearer-credential',
+        authScheme: {type: 'http', scheme: 'bearer'},
+      });
+    }
+    return {status: 'ERROR', message: 'This tool requires user approval.'};
+  }
+
+  override detectErrorInResponse(response: unknown): string | undefined {
+    return isErrorStatus(response) ? 'TOOL_ERROR' : undefined;
+  }
+}
+
+/** Mirrors a tool whose detector is buggy and raises. */
+class ExplodingDetectorTool extends BaseTool {
+  constructor() {
+    super({name: 'explodingDetectorTool', description: 'buggy detector'});
+  }
+
+  override async runAsync(): Promise<unknown> {
+    return {result: 'tool executed'};
+  }
+
+  override detectErrorInResponse(): string | undefined {
+    throw new Error('detection exploded');
+  }
+}
+
+/**
+ * Mirrors an untyped JavaScript tool whose detector hands back something that
+ * is not an error label. `JSON.parse` stands in for the untyped value such a
+ * tool would produce; the declared hook signature cannot prevent it.
+ */
+class NonStringDetectorTool extends BaseTool {
+  constructor() {
+    super({name: 'nonStringDetectorTool', description: 'untyped detector'});
+  }
+
+  override async runAsync(): Promise<unknown> {
+    return {status: 'ERROR'};
+  }
+
+  override detectErrorInResponse(): string | undefined {
+    return JSON.parse('500');
+  }
+}
+
+function isErrorStatus(response: unknown): boolean {
+  return (
+    typeof response === 'object' &&
+    response !== null &&
+    'status' in response &&
+    response.status === 'ERROR'
+  );
+}
+
+describe('tool error detection for telemetry', () => {
+  let invocationContext: InvocationContext;
+  let loggerErrorSpy: MockInstance<Logger['error']>;
+
+  beforeEach(() => {
+    const agent = new LlmAgent({name: 'test_agent', model: 'test_model'});
+    invocationContext = new InvocationContext({
+      invocationId: 'inv_123',
+      session: {} as Session,
+      agent,
+      pluginManager: new PluginManager(),
+    });
+    vi.mocked(traceToolCall).mockClear();
+    loggerErrorSpy = vi
+      .spyOn(getLogger(), 'error')
+      .mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    loggerErrorSpy.mockRestore();
+  });
+
+  async function runToolAndGetTracedErrorType(
+    tool: BaseTool,
+  ): Promise<{event: Event | null; errorType: string | undefined}> {
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(tool)],
+      toolsDict: {[tool.name]: tool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+    expect(traceToolCall).toHaveBeenCalledTimes(1);
+    return {
+      event,
+      errorType: vi.mocked(traceToolCall).mock.calls[0][0].errorType,
+    };
+  }
+
+  it('should report the error type a tool detects in its own response', async () => {
+    const tool = new StatusReportingTool({
+      status: 'ERROR',
+      detail: 'no such SKU',
+    });
+
+    const {errorType} = await runToolAndGetTracedErrorType(tool);
+
+    expect(errorType).toBe('TOOL_ERROR');
+  });
+
+  it('should report no error type when the same tool succeeds', async () => {
+    const tool = new StatusReportingTool({status: 'OK', result: 'done'});
+
+    const {errorType} = await runToolAndGetTracedErrorType(tool);
+
+    expect(errorType).toBeUndefined();
+  });
+
+  it('should report no error type for a tool that declares no detector', async () => {
+    const {event, errorType} = await runToolAndGetTracedErrorType(testTool);
+
+    expect(errorType).toBeUndefined();
+    expect(event?.content?.parts?.[0].functionResponse?.response).toEqual({
+      result: 'tool executed',
+    });
+  });
+
+  it('should skip detection while the tool is requesting confirmation', async () => {
+    const {errorType} = await runToolAndGetTracedErrorType(
+      new ControlSignalTool('confirm'),
+    );
+
+    expect(errorType).toBeUndefined();
+  });
+
+  it('should skip detection while the tool is requesting auth', async () => {
+    const {errorType} = await runToolAndGetTracedErrorType(
+      new ControlSignalTool('auth'),
+    );
+
+    expect(errorType).toBeUndefined();
+  });
+
+  it('should swallow and log a detector that throws', async () => {
+    const {event, errorType} = await runToolAndGetTracedErrorType(
+      new ExplodingDetectorTool(),
+    );
+
+    expect(errorType).toBeUndefined();
+    expect(event?.content?.parts?.[0].functionResponse?.response).toEqual({
+      result: 'tool executed',
+    });
+    expect(loggerErrorSpy).toHaveBeenCalledTimes(1);
+    expect(loggerErrorSpy).toHaveBeenCalledWith(
+      'Error detecting error type for telemetry from tool explodingDetectorTool.',
+      expect.any(Error),
+    );
+  });
+
+  it('should ignore a detector result that is not an error label', async () => {
+    const {errorType} = await runToolAndGetTracedErrorType(
+      new NonStringDetectorTool(),
+    );
+
+    expect(errorType).toBeUndefined();
   });
 });
