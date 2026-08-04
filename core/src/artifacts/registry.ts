@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {logger} from '../utils/logger.js';
 import {BaseArtifactService} from './base_artifact_service.js';
 import {FileArtifactService} from './file_artifact_service.js';
 import {GcsArtifactService} from './gcs_artifact_service.js';
@@ -18,7 +19,15 @@ export function getArtifactServiceFromUri(uri: string): BaseArtifactService {
   }
 
   if (uri.startsWith('gs://')) {
-    const bucket = uri.split('://')[1];
+    // Only the authority names the bucket; a path component is not part of a
+    // GCS bucket name (matches adk-python's urlparse(uri).netloc).
+    const {hostname: bucket, pathname} = new URL(uri);
+
+    if (pathname && pathname !== '/') {
+      logger.warn(
+        `[getArtifactServiceFromUri] Ignoring path "${pathname}" in artifact service URI "${uri}"; artifacts are stored from the root of bucket "${bucket}".`,
+      );
+    }
 
     return new GcsArtifactService(bucket);
   }
