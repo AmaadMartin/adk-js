@@ -93,16 +93,19 @@ describe('Agent with skills that generates JS script and runs it locally', () =>
   );
 
   afterAll(async () => {
-    // delete generated files
-    await fs
-      .rm(`${PROJECT_PATH}/ephemeral_entanglement.md`, {force: true})
-      .catch(() => {});
-    await fs.rm(`${PROJECT_PATH}/index.html`, {force: true}).catch(() => {});
-    await fs.rm(`${PROJECT_PATH}/sketch.js`, {force: true}).catch(() => {});
-
-    await fs
-      .rm(`${PROJECT_PATH}/node_modules`, {recursive: true, force: true})
-      .catch(() => {});
-    await fs.unlink(`${PROJECT_PATH}/package-lock.json`).catch(() => {});
+    try {
+      await fs.rm(`${PROJECT_PATH}/ephemeral_entanglement.md`, {force: true});
+      await fs.rm(`${PROJECT_PATH}/index.html`, {force: true});
+      await fs.rm(`${PROJECT_PATH}/sketch.js`, {force: true});
+      await fs.rm(`${PROJECT_PATH}/node_modules`, {
+        recursive: true,
+        force: true,
+      });
+      await fs.rm(`${PROJECT_PATH}/package-lock.json`, {force: true});
+    } catch (error) {
+      // Reported, not thrown: a dirty fixture must be visible, but teardown
+      // failing must not turn a green suite red.
+      console.error(`Fixture cleanup failed for ${PROJECT_PATH}:`, error);
+    }
   });
 });

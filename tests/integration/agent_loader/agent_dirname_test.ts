@@ -47,15 +47,17 @@ describe.each(['__dirname', '__filename', 'import_meta_url'])(
     );
 
     afterAll(async () => {
-      await fs
-        .rm(path.join(projectPath, 'node_modules'), {
+      try {
+        await fs.rm(path.join(projectPath, 'node_modules'), {
           recursive: true,
           force: true,
-        })
-        .catch(() => {});
-      await fs
-        .unlink(path.join(projectPath, 'package-lock.json'))
-        .catch(() => {});
+        });
+        await fs.rm(path.join(projectPath, 'package-lock.json'), {force: true});
+      } catch (error) {
+        // Reported, not thrown: a dirty fixture must be visible, but teardown
+        // failing must not turn a green suite red.
+        console.error(`Fixture cleanup failed for ${projectPath}:`, error);
+      }
     }, TEST_EXECUTION_TIMEOUT);
   },
 );
