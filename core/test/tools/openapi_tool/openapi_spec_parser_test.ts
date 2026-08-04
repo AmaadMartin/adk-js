@@ -197,7 +197,7 @@ describe('OpenApiSpecParser', () => {
           },
         },
       },
-    } as unknown as OpenAPIV3.Document;
+    };
 
     const parser = new OpenApiSpecParser();
     const parsed = parser.parse(spec);
