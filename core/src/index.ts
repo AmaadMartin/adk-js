@@ -4,6 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {installNodeClientLabelStore} from './utils/client_labels_node.js';
+
+installNodeClientLabelStore();
+
 export {AGENT_CARD_PATH, RemoteA2AAgent} from './a2a/a2a_remote_agent.js';
 export type {
   A2AStreamEventData,

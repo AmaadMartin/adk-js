@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {AsyncLocalStorage} from 'node:async_hooks';
 import {version} from '../version.js';
+import {AsyncLocalStorage as SingleSlotClientLabelStore} from './async_hooks_shim.js';
 import {isBrowser} from './env_aware_utils.js';
 
 const ADK_LABEL = 'google-adk';
@@ -13,7 +13,23 @@ const LANGUAGE_LABEL = 'gl-typescript';
 const AGENT_ENGINE_TELEMETRY_TAG = 'remote_reasoning_engine';
 const AGENT_ENGINE_TELEMETRY_ENV_VARIABLE_NAME = 'GOOGLE_CLOUD_AGENT_ENGINE_ID';
 
-const clientLabelLocalStorage = new AsyncLocalStorage<string>();
+/** The slice of `AsyncLocalStorage` that client-label propagation needs. */
+export interface ClientLabelStore {
+  run<R>(clientLabel: string, callback: () => R): R;
+  getStore(): string | undefined;
+}
+
+let clientLabelStore: ClientLabelStore =
+  new SingleSlotClientLabelStore<string>();
+
+/**
+ * Installs the context store backing `runWithClientLabel`. Node calls this from
+ * `index.ts` to swap in a real `AsyncLocalStorage`; every other runtime keeps
+ * the synchronous fallback. Internal — not part of the public API.
+ */
+export function setClientLabelStore(store: ClientLabelStore): void {
+  clientLabelStore = store;
+}
 
 const USER_AGENT_PATTERNS = [
   ['Edge', /(?:Edg|Edge|EdgA)\/([0-9.]+)/i],
@@ -69,7 +85,7 @@ export function runWithClientLabel<R>(
     throw new Error('Client label must be a non-empty string.');
   }
 
-  return clientLabelLocalStorage.run(clientLabel, callback);
+  return clientLabelStore.run(clientLabel, callback);
 }
 
 /**
@@ -77,7 +93,7 @@ export function runWithClientLabel<R>(
  */
 export function getClientLabels(): string[] {
   const labels = _getDefaultLabels();
-  const contextLabel = clientLabelLocalStorage.getStore();
+  const contextLabel = clientLabelStore.getStore();
   if (contextLabel) {
     labels.push(contextLabel);
   }
