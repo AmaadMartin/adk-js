@@ -273,7 +273,6 @@ describe('resolvePagination', () => {
   it('converts a page number into an offset', () => {
     expect(resolvePagination(request({limit: 5, page: 3}), 12)).toEqual({
       offset: 10,
-      take: 5,
       meta: {page: 3, limit: 5, totalItems: 12, totalPages: 3},
     });
   });
@@ -281,7 +280,6 @@ describe('resolvePagination', () => {
   it('derives the page number from the offset', () => {
     expect(resolvePagination(request({limit: 5, offset: 5}), 12)).toEqual({
       offset: 5,
-      take: 5,
       meta: {page: 2, limit: 5, totalItems: 12, totalPages: 3},
     });
   });
@@ -289,7 +287,6 @@ describe('resolvePagination', () => {
   it('defaults the offset to zero when only a limit is requested', () => {
     expect(resolvePagination(request({limit: 5}), 12)).toEqual({
       offset: 0,
-      take: 5,
       meta: {page: 1, limit: 5, totalItems: 12, totalPages: 3},
     });
   });
@@ -297,7 +294,6 @@ describe('resolvePagination', () => {
   it('reports page 1 and zero pages for limit 0', () => {
     expect(resolvePagination(request({limit: 0}), 12)).toEqual({
       offset: 0,
-      take: 0,
       meta: {page: 1, limit: 0, totalItems: 12, totalPages: 0},
     });
   });

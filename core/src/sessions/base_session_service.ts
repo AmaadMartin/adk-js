@@ -102,8 +102,6 @@ export interface ListSessionsResponse {
 export interface ResolvedPagination {
   /** Zero-based index of the first session to return. */
   offset: number;
-  /** Maximum number of sessions to return; undefined means "all remaining". */
-  take?: number;
   /** Pagination metadata for the response. */
   meta: Omit<ListSessionsResponse, 'sessions'>;
 }
@@ -271,23 +269,14 @@ export function mergeStates(
   return merged;
 }
 
-/** Orders sessions by ascending last update time, ties broken by id. */
-function compareByLastUpdateAsc(a: Session, b: Session): number {
-  return a.lastUpdateTime - b.lastUpdateTime || a.id.localeCompare(b.id);
-}
-
-/** Orders sessions by descending last update time, ties broken by id. */
-function compareByLastUpdateDesc(a: Session, b: Session): number {
-  return b.lastUpdateTime - a.lastUpdateTime || a.id.localeCompare(b.id);
-}
-
 /**
  * Resolves the pagination parameters of a `ListSessionsRequest` against a known
  * total into slice bounds and `ListSessionsResponse` metadata.
  *
  * Intended for backends that paginate in their storage layer: the returned
- * `offset` and `take` map onto a query's `OFFSET` and `LIMIT`. Backends holding
- * the whole result set in memory should use `paginateSessions` instead.
+ * `offset` and the request's `limit` map onto a query's `OFFSET` and `LIMIT`.
+ * Backends holding the whole result set in memory should use
+ * `paginateSessions` instead.
  *
  * Negative and out-of-range values are passed through untouched; no session
  * backend validates or clamps them.
@@ -320,7 +309,6 @@ export function resolvePagination(
 
   return {
     offset,
-    take: limit,
     meta: {
       page: page ?? (limit === 0 ? 1 : Math.floor(offset / limit) + 1),
       limit,
@@ -347,22 +335,23 @@ export function paginateSessions(
   sessions: Session[],
   request: ListSessionsRequest,
 ): ListSessionsResponse {
-  const ordered =
-    request.order === undefined
-      ? sessions
-      : [...sessions].sort(
-          request.order === 'asc'
-            ? compareByLastUpdateAsc
-            : compareByLastUpdateDesc,
-        );
+  const {limit, order} = request;
+  const direction = order === 'asc' ? 1 : -1;
+  const ordered = order
+    ? [...sessions].sort(
+        (a, b) =>
+          direction * (a.lastUpdateTime - b.lastUpdateTime) ||
+          a.id.localeCompare(b.id),
+      )
+    : sessions;
 
-  const {offset, take, meta} = resolvePagination(request, sessions.length);
+  const {offset, meta} = resolvePagination(request, sessions.length);
 
   return {
-    sessions:
-      take === undefined
-        ? ordered.slice(offset)
-        : ordered.slice(offset, offset + take),
+    sessions: ordered.slice(
+      offset,
+      limit === undefined ? undefined : offset + limit,
+    ),
     ...meta,
   };
 }

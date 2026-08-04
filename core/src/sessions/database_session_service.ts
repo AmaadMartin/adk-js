@@ -287,16 +287,14 @@ export class DatabaseSessionService extends BaseSessionService {
         offset: effectiveOffset,
       });
       paginationMeta = meta;
-    } else if (offset) {
-      const totalItems = await em.count(StorageSession, where);
-      storageSessions = await em.find(StorageSession, where, {
-        orderBy,
-        offset,
-      });
-      paginationMeta = resolvePagination(request, totalItems).meta;
     } else {
-      storageSessions = await em.find(StorageSession, where, {orderBy});
-      paginationMeta = resolvePagination(request, storageSessions.length).meta;
+      storageSessions = await em.find(StorageSession, where, {orderBy, offset});
+      // The rows are the whole result set unless an offset skipped some of
+      // them, in which case the true total costs a separate count.
+      const totalItems = offset
+        ? await em.count(StorageSession, where)
+        : storageSessions.length;
+      paginationMeta = resolvePagination(request, totalItems).meta;
     }
 
     const appStateModel = await em.findOne(StorageAppState, {appName});
