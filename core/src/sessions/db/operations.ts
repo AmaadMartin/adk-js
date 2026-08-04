@@ -14,82 +14,49 @@ import {
 } from './schema.js';
 
 /**
- * Loads a MikroORM dialect driver, replacing an unresolvable-package failure
- * with a message naming the package and the command that installs it.
- *
- * Any other failure — including a driver that is installed but throws while its
- * module body evaluates — propagates unchanged so a real defect is never masked.
- *
- * @param packageName The driver package to load, e.g. `@mikro-orm/postgresql`.
- * @param uriScheme The canonical URI scheme that selected this driver.
- * @param load Resolves the package and reads its driver export.
- * @returns The driver export.
- * @throws Error naming the install command if the package is not installed.
- */
-async function importDriver(
-  packageName: string,
-  uriScheme: string,
-  load: () => Promise<unknown>,
-): Promise<unknown> {
-  try {
-    return await load();
-  } catch (error: unknown) {
-    if (isModuleNotFoundError(error)) {
-      throw new Error(
-        `Database driver '${packageName}' is required for ${uriScheme} ` +
-          `connection URIs but is not installed. ` +
-          `Install it with: npm install ${packageName}`,
-        {cause: error},
-      );
-    }
-    throw error;
-  }
-}
-
-/**
  * Parses a database connection URI and returns MikroORM Options.
  *
  * @param uri The database connection URI (e.g., "postgres://user:password@host:port/database")
  * @returns MikroORM Options configured for the database
- * @throws Error if the URI is invalid or unsupported
+ * @throws Error if the URI is invalid or unsupported, or if the dialect driver
+ *     it selects is not installed.
  */
 export async function getConnectionOptionsFromUri(
   uri: string,
 ): Promise<MikroORMOptions> {
   let driver: unknown | undefined;
+  let packageName = '';
+  let uriScheme = '';
 
-  if (uri.startsWith('postgres://') || uri.startsWith('postgresql://')) {
-    driver = await importDriver(
-      '@mikro-orm/postgresql',
-      'postgres://',
-      async () => (await import('@mikro-orm/postgresql')).PostgreSqlDriver,
+  try {
+    if (uri.startsWith('postgres://') || uri.startsWith('postgresql://')) {
+      [packageName, uriScheme] = ['@mikro-orm/postgresql', 'postgres://'];
+      driver = (await import('@mikro-orm/postgresql')).PostgreSqlDriver;
+    } else if (uri.startsWith('mysql://')) {
+      [packageName, uriScheme] = ['@mikro-orm/mysql', 'mysql://'];
+      driver = (await import('@mikro-orm/mysql')).MySqlDriver;
+    } else if (uri.startsWith('mariadb://')) {
+      [packageName, uriScheme] = ['@mikro-orm/mariadb', 'mariadb://'];
+      driver = (await import('@mikro-orm/mariadb')).MariaDbDriver;
+    } else if (uri.startsWith('sqlite://')) {
+      [packageName, uriScheme] = ['@mikro-orm/sqlite', 'sqlite://'];
+      driver = (await import('@mikro-orm/sqlite')).SqliteDriver;
+    } else if (uri.startsWith('mssql://')) {
+      [packageName, uriScheme] = ['@mikro-orm/mssql', 'mssql://'];
+      driver = (await import('@mikro-orm/mssql')).MsSqlDriver;
+    } else {
+      throw new Error(`Unsupported database URI: ${uri}`);
+    }
+  } catch (error: unknown) {
+    if (!isModuleNotFoundError(error)) {
+      throw error;
+    }
+    throw new Error(
+      `Database driver '${packageName}' is required for ${uriScheme} ` +
+        `connection URIs but is not installed. ` +
+        `Install it with: npm install ${packageName}`,
+      {cause: error},
     );
-  } else if (uri.startsWith('mysql://')) {
-    driver = await importDriver(
-      '@mikro-orm/mysql',
-      'mysql://',
-      async () => (await import('@mikro-orm/mysql')).MySqlDriver,
-    );
-  } else if (uri.startsWith('mariadb://')) {
-    driver = await importDriver(
-      '@mikro-orm/mariadb',
-      'mariadb://',
-      async () => (await import('@mikro-orm/mariadb')).MariaDbDriver,
-    );
-  } else if (uri.startsWith('sqlite://')) {
-    driver = await importDriver(
-      '@mikro-orm/sqlite',
-      'sqlite://',
-      async () => (await import('@mikro-orm/sqlite')).SqliteDriver,
-    );
-  } else if (uri.startsWith('mssql://')) {
-    driver = await importDriver(
-      '@mikro-orm/mssql',
-      'mssql://',
-      async () => (await import('@mikro-orm/mssql')).MsSqlDriver,
-    );
-  } else {
-    throw new Error(`Unsupported database URI: ${uri}`);
   }
 
   if (uri.startsWith('sqlite://')) {

@@ -161,16 +161,6 @@ export function formatError(err: unknown): string {
 }
 
 /**
- * Node reports a failed ESM specifier resolution as `ERR_MODULE_NOT_FOUND` and
- * a failed CommonJS `require()` as `MODULE_NOT_FOUND`. ADK ships both module
- * formats, so both codes mean "the package is not installed".
- */
-const MODULE_NOT_FOUND_CODES: readonly string[] = [
-  'ERR_MODULE_NOT_FOUND',
-  'MODULE_NOT_FOUND',
-];
-
-/**
  * Returns true when `err` is a module-resolution failure, i.e. the module
  * specifier could not be resolved at all.
  *
@@ -182,11 +172,12 @@ const MODULE_NOT_FOUND_CODES: readonly string[] = [
  * @return True if the value carries a module-resolution error code.
  */
 export function isModuleNotFoundError(err: unknown): boolean {
+  // Node reports a failed ESM specifier resolution as ERR_MODULE_NOT_FOUND and
+  // a failed CommonJS require() as MODULE_NOT_FOUND; ADK ships both formats.
   return (
     typeof err === 'object' &&
     err !== null &&
     'code' in err &&
-    typeof err.code === 'string' &&
-    MODULE_NOT_FOUND_CODES.includes(err.code)
+    (err.code === 'ERR_MODULE_NOT_FOUND' || err.code === 'MODULE_NOT_FOUND')
   );
 }
