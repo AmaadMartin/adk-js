@@ -52,6 +52,17 @@ describe('UrlContextTool', () => {
       expect(req.config!.tools).toEqual([{urlContext: {}}]);
     });
 
+    it('adds urlContext for an EAP model', async () => {
+      const tool = new UrlContextTool();
+      const req = makeRequest('gemini-flash-early-exp');
+      await tool.processLlmRequest({
+        llmRequest: req,
+        toolContext: {} as never,
+      });
+
+      expect(req.config!.tools).toEqual([{urlContext: {}}]);
+    });
+
     it('throws for Gemini 1.x model', async () => {
       const tool = new UrlContextTool();
       const req = makeRequest('gemini-1.5-pro');
