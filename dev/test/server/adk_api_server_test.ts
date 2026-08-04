@@ -22,6 +22,8 @@ import {
   Session,
 } from '@google/adk';
 import {ReadableSpan} from '@opentelemetry/sdk-trace-base';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {z} from 'zod';
 
@@ -29,7 +31,7 @@ import {
   A2A_AUTH_TOKEN_ENV_VAR,
   AdkApiServer,
 } from '../../src/server/adk_api_server.js';
-import {AgentLoader} from '../../src/utils/agent_loader.js';
+import {AgentFile, AgentLoader} from '../../src/utils/agent_loader.js';
 
 interface JsonRpcResponse {
   result?: unknown;
@@ -1011,6 +1013,37 @@ describe('AdkWebServer', () => {
         expect(response.data?.name).toBe('testAgent');
       },
     );
+
+    it('should skip a discovered file that is not an agent', async () => {
+      // A real handle over a path that does not exist: `load()` rejects with
+      // AgentFileLoadingError, exactly as a discovered non-agent file does.
+      const missingAgentFile = new AgentFile(
+        path.join(os.tmpdir(), 'adk_missing_agent.js'),
+      );
+      const originalListAgents = agentLoader.listAgents;
+      const originalGetAgentFile = agentLoader.getAgentFile;
+      agentLoader.listAgents = () =>
+        Promise.resolve(['testApp', 'not_an_agent']);
+      agentLoader.getAgentFile = (agentName: string) =>
+        agentName === 'not_an_agent'
+          ? Promise.resolve(missingAgentFile)
+          : originalGetAgentFile(agentName);
+
+      try {
+        const a2aClient = new HttpClient(await startA2aServer());
+
+        expect(
+          (await a2aClient.get<AgentCard>(`/a2a/testApp/${AGENT_CARD_PATH}`))
+            .status,
+        ).toBe(200);
+        await expect(
+          a2aClient.get(`/a2a/not_an_agent/${AGENT_CARD_PATH}`),
+        ).rejects.toMatchObject({response: {status: 404}});
+      } finally {
+        agentLoader.listAgents = originalListAgents;
+        agentLoader.getAgentFile = originalGetAgentFile;
+      }
+    });
 
     it('should run the agent for a call carrying the configured token', async () => {
       const url = await startA2aServer(A2A_TOKEN);
