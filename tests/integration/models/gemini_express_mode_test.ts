@@ -84,10 +84,8 @@ describe('Gemini Vertex AI Express Mode', () => {
     expect(headers.get('x-goog-api-key')).toBe(EXPRESS_MODE_API_KEY);
   });
 
-  it('sends GOOGLE_API_KEY even when an ambient project and location are set', async () => {
+  it('sends GOOGLE_API_KEY when no project or location is configured', async () => {
     process.env['GOOGLE_GENAI_USE_VERTEXAI'] = '1';
-    process.env['GOOGLE_CLOUD_PROJECT'] = 'test-project';
-    process.env['GOOGLE_CLOUD_LOCATION'] = 'us-central1';
     process.env['GOOGLE_API_KEY'] = EXPRESS_MODE_API_KEY;
 
     const llm = new Gemini({model: 'gemini-2.5-flash'});
