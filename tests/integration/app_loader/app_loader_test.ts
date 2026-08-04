@@ -76,15 +76,11 @@ describe('AgentLoader discovery and loading integration', () => {
 
   beforeAll(async () => {
     loader = new AgentLoader(projectPath);
-    // Warm the loader here, not in a test body: listAgents() drives
-    // preloadAgents(), which esbuild-bundles all four discovered entrypoints
-    // with the whole @google/adk graph inlined (20511ms measured, against a
-    // 40000ms per-test budget). preloadAgents() has no in-flight guard, so
-    // once the first test overran, the next re-entered it and overran too.
-    // This hook passes no budget of its own, inheriting the integration
-    // project's hookTimeout rather than pinning a second copy of it here.
-    // TEST_EXECUTION_TIMEOUT stays 40000: warmed, the bodies take ~1ms.
-    await loader.listAgents();
+    // Warm the loader here, not in a test body: preloadAgents() esbuild-bundles
+    // all four discovered entrypoints with the whole @google/adk graph inlined
+    // (20511ms measured, against a 40000ms budget) and has no in-flight guard,
+    // so once the first test overran, the next re-entered it and overran too.
+    await loader.preloadAgents();
   });
 
   it(
@@ -136,6 +132,6 @@ describe('AgentLoader discovery and loading integration', () => {
   );
 
   afterAll(async () => {
-    await loader?.disposeAll();
-  }, TEST_EXECUTION_TIMEOUT);
+    await loader.disposeAll();
+  });
 });
