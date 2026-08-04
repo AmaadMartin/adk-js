@@ -302,6 +302,17 @@ describe('deployToAgentEngine', () => {
     expect(exists).toBe(false);
   });
 
+  it('should create no temp folder when one is supplied', async () => {
+    await deployToAgentEngine(defaultOptions);
+
+    expect(createTempDir).not.toHaveBeenCalled();
+    expect(spawnMock).toHaveBeenCalledWith(
+      'gcloud',
+      expect.arrayContaining(['builds', 'submit', tempFolder]),
+      expect.any(Object),
+    );
+  });
+
   it('should create a private temp folder when none is supplied', async () => {
     const createdTempFolder = await fs.mkdtemp(
       path.join(os.tmpdir(), 'agent_engine_deploy_src-'),
