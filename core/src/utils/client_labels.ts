@@ -13,13 +13,7 @@ const LANGUAGE_LABEL = 'gl-typescript';
 const AGENT_ENGINE_TELEMETRY_TAG = 'remote_reasoning_engine';
 const AGENT_ENGINE_TELEMETRY_ENV_VARIABLE_NAME = 'GOOGLE_CLOUD_AGENT_ENGINE_ID';
 
-/**
- * The slice of `AsyncLocalStorage` that client-label propagation needs.
- *
- * Node installs a real `AsyncLocalStorage` (see `client_labels_node.ts`); other
- * runtimes fall back to the synchronous single-slot store in
- * `async_hooks_shim.ts`.
- */
+/** The slice of `AsyncLocalStorage` that client-label propagation needs. */
 export interface ClientLabelStore {
   run<R>(clientLabel: string, callback: () => R): R;
   getStore(): string | undefined;
