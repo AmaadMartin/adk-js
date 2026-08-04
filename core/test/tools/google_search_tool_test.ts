@@ -91,6 +91,50 @@ describe('GoogleSearchTool', () => {
 
       expect(req.config!.tools).toEqual([{googleSearch: {}}]);
     });
+
+    it('adds googleSearch for non-Gemini model when check is disabled', async () => {
+      const tool = new GoogleSearchTool();
+      const req = makeRequest('internal-model-v1');
+
+      const originalValue = process.env.ADK_DISABLE_GEMINI_MODEL_ID_CHECK;
+      process.env.ADK_DISABLE_GEMINI_MODEL_ID_CHECK = 'true';
+
+      try {
+        await tool.processLlmRequest({
+          llmRequest: req,
+          toolContext: {} as never,
+        });
+        expect(req.config!.tools).toEqual([{googleSearch: {}}]);
+      } finally {
+        if (originalValue === undefined) {
+          delete process.env.ADK_DISABLE_GEMINI_MODEL_ID_CHECK;
+        } else {
+          process.env.ADK_DISABLE_GEMINI_MODEL_ID_CHECK = originalValue;
+        }
+      }
+    });
+
+    it('keeps Gemini 1.x handling when check is disabled', async () => {
+      const tool = new GoogleSearchTool();
+      const req = makeRequest('gemini-1.5-pro');
+
+      const originalValue = process.env.ADK_DISABLE_GEMINI_MODEL_ID_CHECK;
+      process.env.ADK_DISABLE_GEMINI_MODEL_ID_CHECK = 'true';
+
+      try {
+        await tool.processLlmRequest({
+          llmRequest: req,
+          toolContext: {} as never,
+        });
+        expect(req.config!.tools).toEqual([{googleSearchRetrieval: {}}]);
+      } finally {
+        if (originalValue === undefined) {
+          delete process.env.ADK_DISABLE_GEMINI_MODEL_ID_CHECK;
+        } else {
+          process.env.ADK_DISABLE_GEMINI_MODEL_ID_CHECK = originalValue;
+        }
+      }
+    });
   });
 
   it('has a global instance GOOGLE_SEARCH', () => {
