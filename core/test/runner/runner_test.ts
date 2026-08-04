@@ -733,7 +733,6 @@ describe('Runner error handling', () => {
 
   it('should throw clear error when appName is not configured in runner', async () => {
     const agent = new MockLlmAgent('test_agent');
-    // @ts-expect-error - Intentionally omitting appName to test error handling
     const runner = new Runner({
       agent: agent,
       sessionService,
@@ -928,7 +927,7 @@ describe('Runner artifact saving (`saveInputBlobsAsArtifacts`)', () => {
             data: 'JVBERi0xLjQ...',
             displayName: 'file.pdf',
           },
-        } as unknown as Content['parts']![0],
+        } as unknown as NonNullable<Content['parts']>[0],
       ],
     };
 
@@ -983,7 +982,7 @@ describe('Runner artifact saving (`saveInputBlobsAsArtifacts`)', () => {
             data: 'JVBERi0xLjQ...',
             displayName: 'file.pdf',
           },
-        } as unknown as Content['parts']![0],
+        } as unknown as NonNullable<Content['parts']>[0],
       ],
     };
 
@@ -1026,7 +1025,7 @@ describe('Runner artifact saving (`saveInputBlobsAsArtifacts`)', () => {
       parts: [
         {
           inlineData: inlineDataObj,
-        } as unknown as Content['parts']![0],
+        } as unknown as NonNullable<Content['parts']>[0],
       ],
     };
 
@@ -1066,7 +1065,7 @@ describe('Runner artifact saving (`saveInputBlobsAsArtifacts`)', () => {
             data: 'JVBERi0xLjQ...',
             displayName: 'named_doc.pdf',
           },
-        } as unknown as Content['parts']![0],
+        } as unknown as NonNullable<Content['parts']>[0],
         {
           inlineData: {
             mimeType: 'image/png',
@@ -1124,14 +1123,14 @@ describe('Runner artifact saving (`saveInputBlobsAsArtifacts`)', () => {
             data: 'JVBERi0xLjQ...',
             displayName: 'good.pdf',
           },
-        } as unknown as Content['parts']![0],
+        } as unknown as NonNullable<Content['parts']>[0],
         {
           inlineData: {
             mimeType: 'image/png',
             data: 'bad_data',
             displayName: 'bad.png',
           },
-        } as unknown as Content['parts']![0],
+        } as unknown as NonNullable<Content['parts']>[0],
       ],
     };
 
@@ -1180,7 +1179,7 @@ describe('Runner artifact saving (`saveInputBlobsAsArtifacts`)', () => {
             data: 'data',
             displayName: 'file1.pdf',
           },
-        } as unknown as Content['parts']![0],
+        } as unknown as NonNullable<Content['parts']>[0],
       ],
     };
 
@@ -1217,7 +1216,7 @@ describe('Runner artifact saving (`saveInputBlobsAsArtifacts`)', () => {
             data: 'data',
             displayName: 'file2.pdf',
           },
-        } as unknown as Content['parts']![0],
+        } as unknown as NonNullable<Content['parts']>[0],
       ],
     };
 
