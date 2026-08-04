@@ -15,10 +15,7 @@ import {sendInput} from '../test_case_utils.js';
 
 const execAsync = promisify(exec);
 const dirname = process.cwd();
-// Per-test budget only. Hooks deliberately pass no explicit timeout, so they
-// inherit the integration project's hookTimeout (vitest.config.ts) that is
-// sized for the fixture `npm install` they run; passing this constant to a
-// hook capped it below that project budget.
+// Per-test budget only; hooks inherit the integration project's hookTimeout.
 const TEST_EXECUTION_TIMEOUT = 40000;
 
 describe('App loader CLI integration', () => {
@@ -80,10 +77,8 @@ describe('AgentLoader discovery and loading integration', () => {
 
   beforeAll(async () => {
     loader = new AgentLoader(projectPath);
-    // Warm the loader here, not in a test body: preloadAgents() esbuild-bundles
-    // all four discovered entrypoints with the whole @google/adk graph inlined
-    // (20511ms measured, against a 40000ms budget) and has no in-flight guard,
-    // so once the first test overran, the next re-entered it and overran too.
+    // preloadAgents() esbuild-bundles all four entrypoints with the @google/adk
+    // graph inlined; hoist it so it runs under the hook budget, not a test one.
     await loader.preloadAgents();
   });
 
