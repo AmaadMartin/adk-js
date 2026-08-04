@@ -476,14 +476,16 @@ export class AgentLoader {
   async listApps(): Promise<string[]> {
     await this.discoverAgents();
 
-    const appNames: string[] = [];
-    for (const [name, agentFile] of Object.entries(this.discoveredAgents)) {
-      if (isApp(await tryLoadAgentFile(agentFile))) {
-        appNames.push(name);
-      }
-    }
+    // Candidates are loaded concurrently: this is the one call that still has
+    // to compile and import everything, so serializing it would make it cost
+    // the sum of every agent's load rather than the slowest one.
+    const appNames = await Promise.all(
+      Object.entries(this.discoveredAgents).map(async ([name, agentFile]) =>
+        isApp(await tryLoadAgentFile(agentFile)) ? name : undefined,
+      ),
+    );
 
-    return appNames.sort();
+    return appNames.filter((name) => name !== undefined).sort();
   }
 
   /**

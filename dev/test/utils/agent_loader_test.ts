@@ -921,6 +921,43 @@ describe('AgentLoader', () => {
       await loader.disposeAll();
     });
 
+    it('loads the candidates concurrently in listApps()', async () => {
+      const appDir = path.join(tempAgentsDir, 'my_service');
+      await fs.mkdir(appDir, {recursive: true});
+      await fs.writeFile(path.join(appDir, 'app.js'), appJsContent);
+
+      // Every build blocks until all four candidates have started building, so
+      // a listApps() that loaded them one at a time would never resolve.
+      const expectedBuilds = 4;
+      let started = 0;
+      let releaseBuilds = () => {};
+      const allStarted = new Promise<void>((resolve) => {
+        releaseBuilds = resolve;
+      });
+      (esbuild.build as Mock).mockImplementation(
+        async (options: {entryPoints: string[]; outfile: string}) => {
+          if (++started === expectedBuilds) {
+            releaseBuilds();
+          }
+          await allStarted;
+          const entryPoint = options.entryPoints[0];
+          await fs.writeFile(
+            options.outfile,
+            entryPoint.endsWith('agent2.ts')
+              ? agent2CjsContentMocked
+              : await fs.readFile(entryPoint, 'utf8'),
+          );
+        },
+      );
+
+      const loader = new AgentLoader(tempAgentsDir);
+
+      expect(await loader.listApps()).toEqual(['my_service']);
+      expect(esbuild.build).toHaveBeenCalledTimes(expectedBuilds);
+
+      await loader.disposeAll();
+    });
+
     it('excludes dotfiles, declaration files and test files from discovery', async () => {
       await fs.writeFile(
         path.join(tempAgentsDir, 'helpers.d.ts'),
