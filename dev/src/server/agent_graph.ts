@@ -242,11 +242,6 @@ function getNodeName(toolOrAgent: BaseAgent | BaseTool): string {
 }
 
 // TODO: Support BaseRetrievalTool
-/**
- * Returns the graph node caption for an agent or tool.
- *
- * Exported for unit testing only; not part of the `@google/adk-devtools` API.
- */
 export function getNodeCaption(toolOrAgent: BaseAgent | BaseTool): string {
   if (isBaseAgent(toolOrAgent)) {
     return `🤖 ${toolOrAgent.name}`;
@@ -270,11 +265,6 @@ export function getNodeCaption(toolOrAgent: BaseAgent | BaseTool): string {
 }
 
 // TODO: Support BaseRetrievalTool
-/**
- * Returns the graph node shape for an agent or tool.
- *
- * Exported for unit testing only; not part of the `@google/adk-devtools` API.
- */
 export function getNodeShape(toolOrAgent: BaseAgent | BaseTool): string {
   if (isBaseAgent(toolOrAgent)) {
     return 'ellipse';
