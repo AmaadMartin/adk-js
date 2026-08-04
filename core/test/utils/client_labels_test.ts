@@ -5,8 +5,27 @@
  */
 
 import {getClientLabels, runWithClientLabel} from '@google/adk';
+import * as esbuild from 'esbuild';
+import {fileURLToPath} from 'node:url';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-import {parseUserAgent} from '../../src/utils/client_labels.js';
+import type {ClientLabelStore} from '../../src/utils/client_labels.js';
+import {
+  parseUserAgent,
+  setClientLabelStore,
+} from '../../src/utils/client_labels.js';
+import {installNodeClientLabelStore} from '../../src/utils/client_labels_node.js';
+
+const CLIENT_LABELS_SRC = fileURLToPath(
+  new URL('../../src/utils/client_labels.ts', import.meta.url),
+);
+
+/**
+ * The label `runWithClientLabel` contributed, if any. `getClientLabels` appends
+ * it after the two default labels.
+ */
+function contextLabel(): string | undefined {
+  return getClientLabels()[2];
+}
 
 describe('client_labels', () => {
   describe('parseUserAgent', () => {
@@ -143,6 +162,73 @@ describe('client_labels', () => {
       expect(() => {
         runWithClientLabel('   ', () => {});
       }).toThrow('Client label must be a non-empty string.');
+    });
+  });
+
+  describe('runWithClientLabel context isolation', () => {
+    it('should keep concurrent invocations from seeing each other label', async () => {
+      const run = (label: string, delayMs: number) =>
+        runWithClientLabel(label, async () => {
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+          return contextLabel();
+        });
+
+      await expect(
+        Promise.all([run('task-a', 20), run('task-b', 5)]),
+      ).resolves.toEqual(['task-a', 'task-b']);
+    });
+
+    it('should restore the outer label when a nested run returns', () => {
+      const seen: Array<string | undefined> = [];
+
+      runWithClientLabel('outer', () => {
+        seen.push(contextLabel());
+        runWithClientLabel('inner', () => {
+          seen.push(contextLabel());
+        });
+        seen.push(contextLabel());
+      });
+      seen.push(contextLabel());
+
+      expect(seen).toEqual(['outer', 'inner', 'outer', undefined]);
+    });
+  });
+
+  describe('setClientLabelStore', () => {
+    afterEach(() => {
+      installNodeClientLabelStore();
+    });
+
+    it('should route both entry points through the installed store', () => {
+      const runCalls: string[] = [];
+      const fakeStore: ClientLabelStore = {
+        run<R>(clientLabel: string, callback: () => R): R {
+          runCalls.push(clientLabel);
+          return callback();
+        },
+        getStore: () => 'from-fake-store',
+      };
+      setClientLabelStore(fakeStore);
+
+      const seen = runWithClientLabel('routed-label', () => contextLabel());
+
+      expect(runCalls).toEqual(['routed-label']);
+      expect(seen).toBe('from-fake-store');
+    });
+  });
+
+  describe('browser safety', () => {
+    it('should bundle for the browser with no unresolved imports', async () => {
+      const result = await esbuild.build({
+        entryPoints: [CLIENT_LABELS_SRC],
+        bundle: true,
+        platform: 'browser',
+        format: 'esm',
+        write: false,
+        logLevel: 'silent',
+      });
+
+      expect(result.errors).toEqual([]);
     });
   });
 });
