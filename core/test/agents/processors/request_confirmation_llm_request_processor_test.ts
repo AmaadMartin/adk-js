@@ -6,6 +6,7 @@
 
 import {
   BaseAgent,
+  BaseLlmRequestProcessor,
   InvocationContext,
   LlmAgent,
   LlmRequest,
@@ -59,15 +60,17 @@ function makeLlmRequest(): LlmRequest {
   };
 }
 
+// The processor narrows runAsync to the context alone; the pipeline still
+// invokes it through the two-parameter base contract.
+const processor: BaseLlmRequestProcessor =
+  REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR;
+
 async function collectEvents(
   invocationContext: InvocationContext,
   llmRequest: LlmRequest = makeLlmRequest(),
 ) {
   const events = [];
-  for await (const event of REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR.runAsync(
-    invocationContext,
-    llmRequest,
-  )) {
+  for await (const event of processor.runAsync(invocationContext, llmRequest)) {
     events.push(event);
   }
   return events;
