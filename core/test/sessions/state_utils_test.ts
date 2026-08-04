@@ -1,0 +1,118 @@
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import {extractStateDelta, mergeStates} from '@google/adk';
+import {describe, expect, it} from 'vitest';
+
+describe('extractStateDelta', () => {
+  it('returns empty buckets for an empty state', () => {
+    expect(extractStateDelta({})).toEqual({app: {}, user: {}, session: {}});
+  });
+
+  it('returns empty buckets for undefined state', () => {
+    expect(extractStateDelta(undefined)).toEqual({
+      app: {},
+      user: {},
+      session: {},
+    });
+  });
+
+  it('routes an app-prefixed key to the app bucket with the prefix stripped', () => {
+    expect(extractStateDelta({'app:theme': 'dark'})).toEqual({
+      app: {theme: 'dark'},
+      user: {},
+      session: {},
+    });
+  });
+
+  it('routes a user-prefixed key to the user bucket with the prefix stripped', () => {
+    expect(extractStateDelta({'user:lang': 'en'})).toEqual({
+      app: {},
+      user: {lang: 'en'},
+      session: {},
+    });
+  });
+
+  it('routes an unprefixed key to the session bucket verbatim', () => {
+    expect(extractStateDelta({turn: 3})).toEqual({
+      app: {},
+      user: {},
+      session: {turn: 3},
+    });
+  });
+
+  it('drops a temporary key from every bucket', () => {
+    expect(extractStateDelta({'temp:scratch': 'ignore_me'})).toEqual({
+      app: {},
+      user: {},
+      session: {},
+    });
+  });
+
+  it('routes each key by prefix and drops temporary keys', () => {
+    expect(
+      extractStateDelta({
+        'app:theme': 'dark',
+        'user:lang': 'en',
+        'temp:scratch': 'x',
+        turn: 3,
+      }),
+    ).toEqual({
+      app: {theme: 'dark'},
+      user: {lang: 'en'},
+      session: {turn: 3},
+    });
+  });
+
+  it('does not mutate the input and allocates fresh buckets', () => {
+    const state = Object.freeze({'app:theme': 'dark', turn: 3});
+
+    const deltas = extractStateDelta(state);
+
+    expect(state).toEqual({'app:theme': 'dark', turn: 3});
+    expect(deltas.app).not.toBe(state);
+    expect(deltas.user).not.toBe(state);
+    expect(deltas.session).not.toBe(state);
+  });
+
+  it('keeps an empty remainder when the key is only a prefix', () => {
+    expect(extractStateDelta({'app:': 1})).toEqual({
+      app: {'': 1},
+      user: {},
+      session: {},
+    });
+  });
+
+  it('strips only the leading prefix when a prefix repeats', () => {
+    expect(extractStateDelta({'app:app:nested': 1})).toEqual({
+      app: {'app:nested': 1},
+      user: {},
+      session: {},
+    });
+  });
+
+  it('strips only the leading prefix when another prefix follows it', () => {
+    expect(extractStateDelta({'app:user:x': 1})).toEqual({
+      app: {'user:x': 1},
+      user: {},
+      session: {},
+    });
+  });
+
+  it('carries object values over by reference', () => {
+    const config = {a: 1};
+
+    expect(extractStateDelta({'app:cfg': config}).app['cfg']).toBe(config);
+  });
+
+  it('round-trips through mergeStates for non-temporary keys', () => {
+    const state = {'app:theme': 'dark', 'user:locale': 'en', turn: 2};
+
+    const {app, user, session} = extractStateDelta(state);
+
+    expect(mergeStates(app, user, session)).toEqual(state);
+  });
+});

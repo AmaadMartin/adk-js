@@ -22,7 +22,6 @@ import {
   ListSessionsRequest,
   ListSessionsResponse,
   mergeStates,
-  splitStateDelta,
   trimTempDeltaState,
 } from './base_session_service.js';
 import {
@@ -38,6 +37,7 @@ import {
   StorageUserState,
 } from './db/schema.js';
 import {createSession, Session} from './session.js';
+import {extractStateDelta} from './state_utils.js';
 
 /**
  * Checks if a URI is a database connection URI.
@@ -144,7 +144,7 @@ export class DatabaseSessionService extends BaseSessionService {
       app: appStateDelta,
       user: userStateDelta,
       session: sessionState,
-    } = splitStateDelta(state);
+    } = extractStateDelta(state);
 
     if (Object.keys(appStateDelta).length > 0) {
       appStateModel.state = {...appStateModel.state, ...appStateDelta};
@@ -436,7 +436,7 @@ export class DatabaseSessionService extends BaseSessionService {
           app: appDelta,
           user: userDelta,
           session: sessionDelta,
-        } = splitStateDelta(event.actions.stateDelta);
+        } = extractStateDelta(event.actions.stateDelta);
 
         if (Object.keys(appDelta).length > 0) {
           appStateModel.state = {...appStateModel.state, ...appDelta};

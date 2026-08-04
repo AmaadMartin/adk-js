@@ -237,37 +237,6 @@ export function trimTempState(
 }
 
 /**
- * Splits a state map into its app-scoped, user-scoped and session-scoped
- * parts, stripping the `app:` and `user:` prefixes and dropping `temp:` keys.
- *
- * The inverse of {@link mergeStates}, which re-applies the prefixes.
- *
- * @param state The state to split.
- * @return The app, user and session buckets.
- */
-export function splitStateDelta(state: Record<string, unknown> | undefined): {
-  app: Record<string, unknown>;
-  user: Record<string, unknown>;
-  session: Record<string, unknown>;
-} {
-  const app: Record<string, unknown> = {};
-  const user: Record<string, unknown> = {};
-  const session: Record<string, unknown> = {};
-
-  for (const [key, value] of Object.entries(state ?? {})) {
-    if (key.startsWith(State.APP_PREFIX)) {
-      app[key.slice(State.APP_PREFIX.length)] = value;
-    } else if (key.startsWith(State.USER_PREFIX)) {
-      user[key.slice(State.USER_PREFIX.length)] = value;
-    } else if (!key.startsWith(State.TEMP_PREFIX)) {
-      session[key] = value;
-    }
-  }
-
-  return {app, user, session};
-}
-
-/**
  * Merges app state, user state, and session state.
  *
  * @param appState The application state.
