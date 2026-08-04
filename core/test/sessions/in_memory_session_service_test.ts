@@ -736,6 +736,30 @@ describe('InMemorySessionService', () => {
       expect(fetched?.state).not.toHaveProperty(`${State.TEMP_PREFIX}output`);
       expect(fetched?.state).not.toHaveProperty(`${State.TEMP_PREFIX}output2`);
     });
+
+    it('leaves a partial event untouched: no state applied and no delta trimmed', async () => {
+      const session = await service.createSession({
+        appName: 'app',
+        userId: 'user',
+      });
+      const event = createEvent({
+        timestamp: Date.now(),
+        partial: true,
+        actions: createEventActions({
+          stateDelta: {[`${State.TEMP_PREFIX}k1`]: 'v1', sk: 'v2'},
+        }),
+      });
+
+      await service.appendEvent({session, event});
+
+      expect(session.state).not.toHaveProperty(`${State.TEMP_PREFIX}k1`);
+      expect(session.state).not.toHaveProperty('sk');
+      expect(session.events).toHaveLength(0);
+      expect(event.actions?.stateDelta).toHaveProperty(
+        `${State.TEMP_PREFIX}k1`,
+        'v1',
+      );
+    });
   });
 
   describe('applyTempState (helper)', () => {
