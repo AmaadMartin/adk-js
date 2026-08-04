@@ -646,6 +646,33 @@ describe('DatabaseSessionService', () => {
       expect(response.sessions.map((s) => s.id)).toEqual(['s3', 's4']);
       expect(response.page).toBe(2);
     });
+
+    it('offset without limit skips N sessions and reports the pre-offset total', async () => {
+      for (let i = 1; i <= 4; i++) {
+        const s = await service.createSession({
+          appName,
+          userId,
+          sessionId: `s${i}`,
+        });
+        await service.appendEvent({
+          session: s,
+          event: createEvent({timestamp: i * 1000}),
+        });
+      }
+
+      const response = await service.listSessions({
+        appName,
+        userId,
+        offset: 3,
+        order: 'asc',
+      });
+
+      expect(response.sessions.map((s) => s.id)).toEqual(['s4']);
+      expect(response.page).toBe(1);
+      expect(response.limit).toBe(4);
+      expect(response.totalItems).toBe(4);
+      expect(response.totalPages).toBe(1);
+    });
   });
 
   describe('Alignment Verification', () => {
