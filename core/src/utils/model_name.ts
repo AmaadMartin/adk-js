@@ -8,19 +8,16 @@ import {getBooleanEnvVar} from './env_aware_utils.js';
 
 /**
  * Path-based model name patterns, tried in order: the Vertex AI publisher path
- * and the Apigee path (`apigee/[<provider>/][<version>/]<model_id>`). Declared
- * without the `g` flag so `.match()` stays stateless.
+ * and the Apigee path (`apigee/[<provider>/][<version>/]<model_id>`).
  */
 const MODEL_PATH_PATTERNS = [
   /^projects\/[^/]+\/locations\/[^/]+\/publishers\/[^/]+\/models\/(.+)$/,
   /^apigee\/(?:[^/]+\/)?(?:[^/]+\/)?(.+)$/,
 ];
 
-const MODELS_PREFIX = 'models/';
-
 /**
  * Matches the Early Access Program (EAP) Gemini naming convention. Lower-case
- * only, and without the `g` flag so `.test()` stays stateless.
+ * only.
  */
 const EAP_MODEL_NAME_PATTERN =
   /^gemini-[a-z0-9_]+(?:-[a-z0-9_]+)*-early-exp\d*$/;
@@ -58,8 +55,8 @@ export function extractModelName(modelString: string): string {
     }
   }
 
-  if (modelString.startsWith(MODELS_PREFIX)) {
-    return modelString.slice(MODELS_PREFIX.length);
+  if (modelString.startsWith('models/')) {
+    return modelString.slice('models/'.length);
   }
 
   // A 'projects/' string reaching here is a malformed Vertex path. Return it
@@ -149,29 +146,17 @@ export function isGemini2OrAbove(modelString: string): boolean {
 }
 
 /**
- * Check if the model is an Early Access Program (EAP) Gemini model, i.e.
- * `gemini-<variant>-early-exp` with an optional numeric suffix — for example
- * `gemini-flash-early-exp` or `gemini-flash-lite-early-exp3`.
- *
- * @param modelString Either a simple model name or path - based model name
- * @return true if it's a Gemini EAP model, false otherwise.
- */
-function isGeminiEapModel(modelString: string): boolean {
-  return EAP_MODEL_NAME_PATTERN.test(extractModelName(modelString));
-}
-
-/**
  * Check if the model is a Gemini EAP or a Gemini 2.0+ model.
- *
- * EAP Gemini models do not encode a numeric version, so they are matched by
- * naming convention before any version parsing.
  *
  * @param modelString Either a simple model name or path - based model name
  * @return true if it's a Gemini EAP model or a Gemini 2.0+ model, false
  *     otherwise.
  */
 export function isGeminiEapOr2OrAbove(modelString: string): boolean {
-  return isGeminiEapModel(modelString) || isGemini2OrAbove(modelString);
+  return (
+    EAP_MODEL_NAME_PATTERN.test(extractModelName(modelString)) ||
+    isGemini2OrAbove(modelString)
+  );
 }
 
 /**
