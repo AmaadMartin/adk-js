@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {ESLint} from 'eslint';
-import {rm, writeFile} from 'node:fs/promises';
 import {describe, expect, it} from 'vitest';
 
 /** Source trees linted with type information. */
@@ -49,14 +48,12 @@ const CORE_RULES_PRESERVED_BY_BLOCK_ORDER = [
   'no-with',
 ];
 
-/** Only reported when the linter has type information for the file. */
-const FLOATING_PROMISE_SOURCE = [
-  'async function flush(): Promise<void> {}',
-  'export function shutdown() {',
-  '  flush();',
-  '}',
-  '',
-].join('\n');
+/**
+ * A rule that cannot run without type information: typescript-eslint throws
+ * rather than reporting when the parser produced no program for the file.
+ */
+const TYPE_INFO_REQUIRED_RULE =
+  '@typescript-eslint/no-unnecessary-type-assertion';
 
 const ERROR = 2;
 const OFF = 0;
@@ -71,19 +68,10 @@ function severityOf(
   return Array.isArray(entry) ? (entry[0] as number) : undefined;
 }
 
-/**
- * Lints {@link FLOATING_PROMISE_SOURCE} written to `probePath`, and returns the
- * rules that fired. The probe is a real file because the TypeScript program
- * reads source from disk, so linting in-memory text would not exercise it.
- */
-async function lintProbeFile(probePath: string): Promise<Array<string | null>> {
-  await writeFile(probePath, FLOATING_PROMISE_SOURCE);
-  try {
-    const [result] = await eslint.lintFiles([probePath]);
-    return result.messages.map((message) => message.ruleId);
-  } finally {
-    await rm(probePath, {force: true});
-  }
+function lintWithTypeInfoRequiredRule(): ESLint {
+  return new ESLint({
+    overrideConfig: {rules: {[TYPE_INFO_REQUIRED_RULE]: 'error'}},
+  });
 }
 
 describe('ESLint type-aware configuration', () => {
@@ -154,15 +142,19 @@ describe('ESLint type-aware configuration', () => {
     expect(result.errorCount).toBe(0);
   });
 
-  it('reports a floating promise in a type-checked tree', async () => {
-    const rules = await lintProbeFile('core/src/floating_promise_probe.ts');
+  it('runs a type-information-dependent rule over core/src', async () => {
+    const [result] = await lintWithTypeInfoRequiredRule().lintFiles([
+      'core/src/utils/task.ts',
+    ]);
 
-    expect(rules).toContain('@typescript-eslint/no-floating-promises');
+    expect(result.fatalErrorCount).toBe(0);
   });
 
-  it('ignores the same floating promise in a test tree', async () => {
-    const rules = await lintProbeFile('core/test/floating_promise_probe.ts');
-
-    expect(rules).not.toContain('@typescript-eslint/no-floating-promises');
+  it('has no type information to give the test tree', async () => {
+    await expect(
+      lintWithTypeInfoRequiredRule().lintFiles([
+        'core/test/utils/task_test.ts',
+      ]),
+    ).rejects.toThrow(/requires type information/);
   });
 });
