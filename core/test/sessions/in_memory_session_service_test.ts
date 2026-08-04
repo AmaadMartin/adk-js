@@ -100,6 +100,141 @@ describe('InMemorySessionService', () => {
       expect(session.state).toHaveProperty('normalKey', 'value');
       expect(session.state).not.toHaveProperty(`${State.TEMP_PREFIX}tempKey`);
     });
+
+    it('shares app: state from initial state with other sessions of the same app', async () => {
+      const appName = 'app';
+      await service.createSession({
+        appName,
+        userId: 'user1',
+        state: {[`${State.APP_PREFIX}config`]: 'dark-mode'},
+      });
+
+      const session2 = await service.createSession({appName, userId: 'user2'});
+
+      expect(session2.state).toHaveProperty(
+        `${State.APP_PREFIX}config`,
+        'dark-mode',
+      );
+    });
+
+    it('shares user: state from initial state with other sessions of the same user', async () => {
+      const appName = 'app';
+      const userId = 'user1';
+      await service.createSession({
+        appName,
+        userId,
+        state: {[`${State.USER_PREFIX}pref`]: 'A'},
+      });
+
+      const session2 = await service.createSession({appName, userId});
+
+      expect(session2.state).toHaveProperty(`${State.USER_PREFIX}pref`, 'A');
+    });
+
+    it('does not share user: state from initial state with a different user', async () => {
+      const appName = 'app';
+      await service.createSession({
+        appName,
+        userId: 'user1',
+        state: {[`${State.USER_PREFIX}pref`]: 'A'},
+      });
+
+      const session2 = await service.createSession({appName, userId: 'user2'});
+
+      expect(session2.state).not.toHaveProperty(`${State.USER_PREFIX}pref`);
+    });
+
+    it('keeps unprefixed initial state scoped to the session that created it', async () => {
+      const appName = 'app';
+      const userId = 'user';
+      const session1 = await service.createSession({
+        appName,
+        userId,
+        state: {sessionKey: 'value'},
+      });
+
+      const session2 = await service.createSession({appName, userId});
+      const retrieved = await service.getSession({
+        appName,
+        userId,
+        sessionId: session1.id,
+      });
+
+      expect(retrieved?.state).toEqual({sessionKey: 'value'});
+      expect(session2.state).not.toHaveProperty('sessionKey');
+    });
+
+    it('drops temp: keys from initial state instead of promoting them', async () => {
+      const appName = 'app';
+      const session1 = await service.createSession({
+        appName,
+        userId: 'user1',
+        state: {
+          [`${State.TEMP_PREFIX}scratch`]: 'dropped',
+          [`${State.APP_PREFIX}kept`]: 1,
+        },
+      });
+
+      const session2 = await service.createSession({appName, userId: 'user2'});
+
+      expect(session1.state).toEqual({[`${State.APP_PREFIX}kept`]: 1});
+      expect(session2.state).toEqual({[`${State.APP_PREFIX}kept`]: 1});
+    });
+
+    it('lets app: initial state overwrite an existing app value', async () => {
+      const appName = 'app';
+      const userId = 'user';
+      const session1 = await service.createSession({
+        appName,
+        userId,
+        state: {[`${State.APP_PREFIX}config`]: 'dark-mode'},
+      });
+
+      const session2 = await service.createSession({
+        appName,
+        userId,
+        state: {[`${State.APP_PREFIX}config`]: 'light-mode'},
+      });
+      const retrieved = await service.getSession({
+        appName,
+        userId,
+        sessionId: session1.id,
+      });
+
+      expect(session2.state).toHaveProperty(
+        `${State.APP_PREFIX}config`,
+        'light-mode',
+      );
+      expect(retrieved?.state).toHaveProperty(
+        `${State.APP_PREFIX}config`,
+        'light-mode',
+      );
+    });
+
+    it('merges initial app: state with app state set by an event', async () => {
+      const appName = 'app';
+      const session1 = await service.createSession({
+        appName,
+        userId: 'user1',
+        state: {[`${State.APP_PREFIX}k1`]: 'v1'},
+      });
+      await service.appendEvent({
+        session: session1,
+        event: createEvent({
+          timestamp: Date.now(),
+          actions: createEventActions({
+            stateDelta: {[`${State.APP_PREFIX}k2`]: 'v2'},
+          }),
+        }),
+      });
+
+      const session2 = await service.createSession({appName, userId: 'user2'});
+
+      expect(session2.state).toEqual({
+        [`${State.APP_PREFIX}k1`]: 'v1',
+        [`${State.APP_PREFIX}k2`]: 'v2',
+      });
+    });
   });
 
   describe('getSession', () => {
