@@ -10,76 +10,70 @@ import {afterAll, beforeAll, describe, expect, it} from 'vitest';
 import {AdkTsApiServer} from '../../../integration/test_api_server.js';
 import {GoAgent} from './go_client/go_agent.js';
 
-const TIMEOUT = 60000;
+/**
+ * Readiness budget (ms) handed to the test server. Deliberately below the
+ * `cross-language` project `hookTimeout` in vitest.config.ts, so a server that
+ * never comes up fails with the server's own diagnostic — which includes the
+ * captured stdout — instead of Vitest's generic hook timeout.
+ */
+const SERVER_START_TIMEOUT_MS = 60000;
 
-describe(
-  'A2A ADK Cross-Language Integration: Go <--A2A--> TS',
-  () => {
-    let tsServer: AdkTsApiServer;
+describe('A2A ADK Cross-Language Integration: Go <--A2A--> TS', () => {
+  let tsServer: AdkTsApiServer;
 
-    beforeAll(async () => {
-      tsServer = new AdkTsApiServer({
-        agentsDir: path.resolve(__dirname, 'ts_backend'),
-        a2a: true,
-        startFailureTimeout: TIMEOUT,
-      });
-      await tsServer.start();
-    }, TIMEOUT);
+  beforeAll(async () => {
+    tsServer = new AdkTsApiServer({
+      agentsDir: path.resolve(__dirname, 'ts_backend'),
+      a2a: true,
+      startFailureTimeout: SERVER_START_TIMEOUT_MS,
+    });
+    await tsServer.start();
+  });
 
-    afterAll(async () => {
-      await tsServer.stop();
-    }, TIMEOUT);
+  afterAll(async () => {
+    await tsServer.stop();
+  });
 
-    it(
-      'Should connect to TS agent and receive expected response',
-      async () => {
-        const goAgent = new GoAgent({
-          dir: path.resolve(__dirname, 'go_client'),
-          agentUrl: `${tsServer.url}/a2a/basic_agent/`,
-        });
+  it('Should connect to TS agent and receive expected response', async () => {
+    const goAgent = new GoAgent({
+      dir: path.resolve(__dirname, 'go_client'),
+      agentUrl: `${tsServer.url}/a2a/basic_agent/`,
+    });
 
-        const events: Event[] = [];
-        for await (const chunk of goAgent.run('Hello TS Agent From Go!')) {
-          events.push(chunk);
-        }
+    const events: Event[] = [];
+    for await (const chunk of goAgent.run('Hello TS Agent From Go!')) {
+      events.push(chunk);
+    }
 
-        expect(events.length).toBe(2);
-        const hasExpectedText = events.some((event) =>
-          event.content?.parts?.some((part) =>
-            part.text?.includes('Hello from TS basic agent'),
-          ),
-        );
-        expect(hasExpectedText).toBe(true);
-      },
-      TIMEOUT,
+    expect(events.length).toBe(2);
+    const hasExpectedText = events.some((event) =>
+      event.content?.parts?.some((part) =>
+        part.text?.includes('Hello from TS basic agent'),
+      ),
     );
+    expect(hasExpectedText).toBe(true);
+  });
 
-    it(
-      'Should handle InputRequired from TS agent',
-      async () => {
-        const goAgent = new GoAgent({
-          dir: path.resolve(__dirname, 'go_client'),
-          agentUrl: `${tsServer.url}/a2a/hitl_agent/`,
-        });
+  it('Should handle InputRequired from TS agent', async () => {
+    const goAgent = new GoAgent({
+      dir: path.resolve(__dirname, 'go_client'),
+      agentUrl: `${tsServer.url}/a2a/hitl_agent/`,
+    });
 
-        const events: Event[] = [];
-        for await (const event of goAgent.run('Need approval')) {
-          events.push(event);
-        }
+    const events: Event[] = [];
+    for await (const event of goAgent.run('Need approval')) {
+      events.push(event);
+    }
 
-        expect(events.length).toBe(2);
-        const lastEvent = events[events.length - 1];
-        const hasApprovalTool = events.some((event) =>
-          event.content?.parts?.some(
-            (part) => part.functionCall?.name === 'request_approval',
-          ),
-        );
-        expect(hasApprovalTool).toBe(true);
-        expect(lastEvent.longRunningToolIds).toBeDefined();
-        expect(lastEvent.longRunningToolIds).toContain('call-123');
-      },
-      TIMEOUT,
+    expect(events.length).toBe(2);
+    const lastEvent = events[events.length - 1];
+    const hasApprovalTool = events.some((event) =>
+      event.content?.parts?.some(
+        (part) => part.functionCall?.name === 'request_approval',
+      ),
     );
-  },
-  TIMEOUT,
-);
+    expect(hasApprovalTool).toBe(true);
+    expect(lastEvent.longRunningToolIds).toBeDefined();
+    expect(lastEvent.longRunningToolIds).toContain('call-123');
+  });
+});

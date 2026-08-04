@@ -20,6 +20,30 @@ const INTEGRATION_HOOK_TIMEOUT_MS = 120000;
  */
 const INTEGRATION_TEST_TIMEOUT_MS = 60000;
 
+/**
+ * Hook budget (ms) for the `cross-language` project: `beforeAll` in
+ * tests/cross_language/a2a/ts_go compiles and boots a Go A2A server with
+ * `go run .`. The Go build cache is cold on every CI run — `go.sum` is
+ * gitignored, so `actions/setup-go` has nothing to key a build cache on — and
+ * the a2a-go + grpc + otel + genai dependency tree measured 18.3s to compile
+ * on a quiet Linux workstation capped at 3 build processes; the shared
+ * macos-latest runners this workflow uses are slower and contended. Must stay
+ * above the `startFailureTimeout` the suites hand their test servers, so a
+ * server that never comes up fails with the server's own diagnostic rather
+ * than a generic hook timeout. Trade-off: a genuinely stuck hook now takes
+ * this long to surface.
+ */
+const CROSS_LANGUAGE_HOOK_TIMEOUT_MS = 120000;
+
+/**
+ * Test budget (ms) for the `cross-language` project. Unlike `integration`, the
+ * test bodies here also shell out to `go run .`
+ * (tests/cross_language/a2a/go_ts drives a Go client per test), so the first
+ * test of a run pays the same cold Go compile as the hooks and needs the same
+ * budget. Per-file `it()`/hook timeouts still override both.
+ */
+const CROSS_LANGUAGE_TEST_TIMEOUT_MS = 120000;
+
 export default defineConfig({
   test: {
     poolOptions: {
@@ -107,6 +131,8 @@ export default defineConfig({
         test: {
           name: 'cross-language',
           environment: 'node',
+          hookTimeout: CROSS_LANGUAGE_HOOK_TIMEOUT_MS,
+          testTimeout: CROSS_LANGUAGE_TEST_TIMEOUT_MS,
           alias: {
             '@google/adk': path.resolve(__dirname, './core/src'),
             '@google/adk-integrations': path.resolve(
