@@ -10,8 +10,10 @@ const MODEL_NAME_PATTERN =
   '^projects/[^/]+/locations/[^/]+/publishers/[^/]+/models/(.+)$';
 
 /**
- * Matches the Early Access Program (EAP) Gemini naming convention. Lower-case
- * only, and without the `g` flag so `.test()` stays stateless.
+ * Matches the Early Access Program (EAP) Gemini naming convention:
+ * `gemini-<variant>-early-exp` with an optional numeric suffix, e.g.
+ * `gemini-flash-early-exp` or `gemini-flash-early-exp3`. `<variant>` is one or
+ * more lower-case alphanumeric/underscore segments joined by `-`.
  */
 const EAP_MODEL_NAME_PATTERN =
   /^gemini-[a-z0-9_]+(?:-[a-z0-9_]+)*-early-exp\d*$/;
@@ -81,11 +83,9 @@ export function isGemini1Model(modelString: string): boolean {
 /**
  * Check if the model is a Gemini EAP or a Gemini 2.0+ model.
  *
- * EAP Gemini models do not encode a numeric version, so they are matched
- * first by their naming convention — `gemini-<variant>-early-exp` with an
- * optional numeric suffix, e.g. `gemini-flash-early-exp` or
- * `gemini-flash-early-exp3`. Otherwise the model name is parsed as a version
- * and matches when the major version is >= 2.
+ * EAP names carry no numeric version, so `EAP_MODEL_NAME_PATTERN` is tried
+ * first; otherwise the name is parsed as a version and matches when the major
+ * version is >= 2.
  *
  * @param modelString Either a simple model name or path - based model name
  * @return true if it's a Gemini EAP model or a Gemini 2.0+ model, false
