@@ -57,7 +57,10 @@ vi.mock('../../src/utils/file_utils.js', async (importOriginal) => {
   const path = await import('node:path');
   return {
     ...actual,
-    getTempDir: () => path.join(tempState.root, `agent-${tempState.index++}`),
+    getTempDir: (prefix?: string) =>
+      tempState.root
+        ? path.join(tempState.root, `agent-${tempState.index++}`)
+        : actual.getTempDir(prefix),
   };
 });
 
@@ -1346,6 +1349,25 @@ describe('AdkWebServer', () => {
         if (running) {
           await ownServer.stop();
         }
+      }
+    });
+
+    it('should release its own agent loader even when closing the server fails', async () => {
+      const disposeAll = vi.spyOn(AgentLoader.prototype, 'disposeAll');
+      const ownServer = new AdkApiServer({agentsDir: tempAgentsDir});
+      await ownServer.start();
+
+      try {
+        await ownServer.stop();
+        expect(disposeAll).toHaveBeenCalledTimes(1);
+
+        // The HTTP server is closed already, so close() reports
+        // ERR_SERVER_NOT_RUNNING and stop() rejects; the loader must still be
+        // released on that path.
+        await expect(ownServer.stop()).rejects.toThrow(/not running/i);
+        expect(disposeAll).toHaveBeenCalledTimes(2);
+      } finally {
+        disposeAll.mockRestore();
       }
     });
 

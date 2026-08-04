@@ -5,6 +5,7 @@
  */
 import esbuild from 'esbuild';
 import {EventEmitter} from 'node:events';
+import type {FSWatcher, PathLike, WatchOptions} from 'node:fs';
 import * as nodeFs from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
@@ -56,7 +57,11 @@ vi.mock('esbuild', async (importOriginal) => {
  * redefined. Every other `node:fs` export, and `rmSync` itself while the flag
  * is off, is the real implementation.
  */
-const fsMockState = vi.hoisted(() => ({rmSyncFailure: '', rmSyncCalls: 0}));
+const fsMockState = vi.hoisted(() => ({
+  rmSyncFailure: '',
+  rmSyncCalls: 0,
+  watchers: [] as FSWatcher[],
+}));
 
 vi.mock('node:fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs')>();
@@ -67,8 +72,19 @@ vi.mock('node:fs', async (importOriginal) => {
     }
     return actual.rmSync(target, options);
   };
+  // `FSWatcher` is not an export of `node:fs`, so recording the instances is
+  // the only way to observe that the loader closed the one it opened.
+  const watch = (
+    target: PathLike,
+    options: WatchOptions,
+    listener: (event: string, filename: string | null) => void,
+  ): FSWatcher => {
+    const watcher = actual.watch(target, options, listener);
+    fsMockState.watchers.push(watcher);
+    return watcher;
+  };
 
-  return {...actual, default: {...actual, rmSync}, rmSync};
+  return {...actual, default: {...actual, rmSync, watch}, rmSync, watch};
 });
 
 const agent1JsContent = `
@@ -180,6 +196,39 @@ const PROCESS_CLEANUP_EVENTS = [
  * iterated as strings instead of matching one typed overload each.
  */
 const processEvents: EventEmitter = process;
+
+/**
+ * Snapshots the current process listeners so the ones a freshly constructed
+ * `AgentLoader` adds can be singled out, invoked, and removed again.
+ */
+function trackLoaderProcessListeners(): {
+  added(event: string): ProcessListener[];
+  restore(): void;
+} {
+  const before = new Map(
+    PROCESS_CLEANUP_EVENTS.map((event) => [
+      event,
+      processEvents.listeners(event),
+    ]),
+  );
+  const added = (event: string) =>
+    processEvents
+      .listeners(event)
+      .filter(
+        (listener) => !before.get(event)!.includes(listener),
+      ) as ProcessListener[];
+
+  return {
+    added,
+    restore: () => {
+      for (const event of PROCESS_CLEANUP_EVENTS) {
+        for (const listener of added(event)) {
+          processEvents.removeListener(event, listener);
+        }
+      }
+    },
+  };
+}
 
 /**
  * Preloads every agent and returns the compiled output directory of each one.
@@ -968,12 +1017,7 @@ describe('AgentLoader', () => {
     });
 
     it('cleans up synchronously from the exit listener installed by the constructor', async () => {
-      const listenersBefore = new Map(
-        PROCESS_CLEANUP_EVENTS.map((event) => [
-          event,
-          processEvents.listeners(event),
-        ]),
-      );
+      const listeners = trackLoaderProcessListeners();
       const loader = new AgentLoader(tempAgentsDir);
 
       try {
@@ -983,26 +1027,59 @@ describe('AgentLoader', () => {
         // Invoke this loader's own listener rather than emitting 'exit', which
         // would also run the listeners every other loader in this file left
         // registered.
-        const addedExitListeners = processEvents
-          .listeners('exit')
-          .filter(
-            (listener) => !listenersBefore.get('exit')!.includes(listener),
-          );
-        expect(addedExitListeners).toHaveLength(1);
+        const exitListeners = listeners.added('exit');
+        expect(exitListeners).toHaveLength(1);
 
-        (addedExitListeners[0] as () => void)();
+        exitListeners[0]();
 
         for (const outputDir of outputDirs) {
           expect(nodeFs.existsSync(outputDir)).toBe(false);
         }
       } finally {
-        for (const event of PROCESS_CLEANUP_EVENTS) {
-          for (const listener of processEvents.listeners(event)) {
-            if (!listenersBefore.get(event)!.includes(listener)) {
-              processEvents.removeListener(event, listener as ProcessListener);
-            }
-          }
+        listeners.restore();
+      }
+    });
+
+    it('exits the process from the SIGINT handler, which emits the exit event', async () => {
+      const listeners = trackLoaderProcessListeners();
+      const exit = vi.spyOn(process, 'exit').mockImplementation(() => {
+        throw new Error('process.exit');
+      });
+      const loader = new AgentLoader(tempAgentsDir);
+
+      try {
+        await loader.listAgents();
+        const sigintListeners = listeners.added('SIGINT');
+        expect(sigintListeners).toHaveLength(1);
+
+        expect(() => sigintListeners[0]()).toThrow('process.exit');
+        expect(exit).toHaveBeenCalledTimes(1);
+      } finally {
+        exit.mockRestore();
+        listeners.restore();
+        loader.disposeAllSync();
+      }
+    });
+
+    it('closes the directory watcher on disposeAllSync', async () => {
+      fsMockState.watchers.length = 0;
+      const listeners = trackLoaderProcessListeners();
+      const loader = new AgentLoader(tempAgentsDir, undefined, true);
+
+      try {
+        await loader.listAgents();
+        expect(fsMockState.watchers).toHaveLength(1);
+        const closeWatcher = vi.spyOn(fsMockState.watchers[0], 'close');
+
+        loader.disposeAllSync();
+
+        expect(closeWatcher).toHaveBeenCalledTimes(1);
+      } finally {
+        for (const watcher of fsMockState.watchers) {
+          watcher.close();
         }
+        fsMockState.watchers.length = 0;
+        listeners.restore();
       }
     });
 

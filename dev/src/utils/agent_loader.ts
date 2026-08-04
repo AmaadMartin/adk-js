@@ -352,18 +352,21 @@ export class AgentFile {
    * caller left to handle them. Prefer {@link dispose} everywhere else.
    */
   disposeSync(): void {
-    if (this.disposed || !this.cleanupFilePath) {
+    // `load()` sets this alongside `cleanupFilePath` when it compiles; an
+    // agent file that was never compiled owns no artifact and stays usable.
+    if (this.disposed || !this.cleanupDirPath) {
       return;
     }
 
     this.disposed = true;
-    const target = this.cleanupDirPath ?? this.cleanupFilePath;
     try {
       // `rmSync` unlinks the `node_modules` symlink inside the output
       // directory rather than following it into the project's real one.
-      fs.rmSync(target, {recursive: true, force: true});
+      fs.rmSync(this.cleanupDirPath, {recursive: true, force: true});
     } catch (e) {
-      logger.warn(`Failed to remove ${target}: ${(e as Error).message}`);
+      logger.warn(
+        `Failed to remove ${this.cleanupDirPath}: ${(e as Error).message}`,
+      );
     }
   }
 }
