@@ -358,4 +358,35 @@ describe('InteractionsRequestProcessor', () => {
 
     expect(llmRequest.previousInteractionId).toBeUndefined();
   });
+
+  it('should skip a later event that has no interactionId', async () => {
+    const rawEvents: Event[] = [
+      createMockEvent('1', 'test_agent', 'main', 'int-1'),
+      createMockEvent('2', 'test_agent', 'main'),
+    ];
+    const geminiModel = new Gemini({
+      model: 'gemini-2.5-flash',
+      apiKey: 'dummy',
+      useInteractionsApi: true,
+    });
+    const invocationContext = createMockInvocationContext(
+      rawEvents,
+      geminiModel,
+    );
+    invocationContext.branch = 'main';
+    const llmRequest: LlmRequest = {
+      contents: [],
+      toolsDict: {},
+      liveConnectConfig: {},
+    };
+
+    for await (const _ of INTERACTIONS_REQUEST_PROCESSOR.runAsync(
+      invocationContext,
+      llmRequest,
+    )) {
+      // intentionally empty
+    }
+
+    expect(llmRequest.previousInteractionId).toBe('int-1');
+  });
 });
