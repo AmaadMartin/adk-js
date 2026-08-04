@@ -45,6 +45,10 @@ describe('isGemini2OrAbove', () => {
       'qwen3-next-80b-a3b-instruct-maas',
       'gemini-1.5-pro',
       'gemini-1.0-pro',
+      'gemini-one',
+      'gemini-0.9-test',
+      'gemini-2.',
+      'gemini-',
     ];
 
     for (const model of invalidModels) {
@@ -52,6 +56,10 @@ describe('isGemini2OrAbove', () => {
         expect(isGemini2OrAbove(model)).toBe(false);
       });
     }
+
+    it('should return false for an empty model string', () => {
+      expect(isGemini2OrAbove('')).toBe(false);
+    });
   });
 
   describe('EAP models', () => {
@@ -79,6 +87,9 @@ describe('isGemini2OrAbove', () => {
       'gemini-Flash-early-exp',
       'my-gemini-flash-early-exp',
       'claude-3.7-sonnet',
+      'gemini-flash-early-experiment',
+      'gemini-flash-early-expX',
+      'gemini-early-exp3',
     ];
 
     for (const model of nonEapModels) {
@@ -91,6 +102,12 @@ describe('isGemini2OrAbove', () => {
       // The EAP character class excludes '.', so a 1.x name carrying the
       // suffix cannot match and stays below the 2.0 bar.
       expect(isGemini2OrAbove('gemini-1.5-flash-early-exp')).toBe(false);
+    });
+
+    it('should admit a versioned name carrying the EAP suffix', () => {
+      // Same character class exclusion as above, resolved through the version
+      // path instead: '2.5' >= 2.
+      expect(isGemini2OrAbove('gemini-2.5-flash-early-exp')).toBe(true);
     });
   });
 });
