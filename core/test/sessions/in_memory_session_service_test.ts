@@ -695,7 +695,7 @@ describe('InMemorySessionService', () => {
       });
     });
 
-    it('keeps prefixed and plain keys in session state but drops temp keys', async () => {
+    it('exposes exactly the prefixed and plain keys on the retrieved session', async () => {
       const appName = 'app';
       const userId = 'user';
       const session = await service.createSession({appName, userId});
