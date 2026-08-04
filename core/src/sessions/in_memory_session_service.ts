@@ -274,7 +274,7 @@ export class InMemorySessionService extends BaseSessionService {
 
     if (event.actions && event.actions.stateDelta) {
       // The session bucket is deliberately ignored: session state is applied by
-      // super.appendEvent() above, which keeps the `app:`/`user:` prefixes.
+      // super.appendEvent(), which keeps the `app:`/`user:` prefixes on the key.
       const {app: appDelta, user: userDelta} = extractStateDelta(
         event.actions.stateDelta,
       );
