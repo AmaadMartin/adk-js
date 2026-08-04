@@ -21,7 +21,7 @@ import {
   trimTempState,
 } from './base_session_service.js';
 import {createSession, Session} from './session.js';
-import {State} from './state.js';
+import {extractStateDelta} from './state_utils.js';
 
 /**
  * Checks if the given URI is an in-memory memory service URI.
@@ -273,20 +273,22 @@ export class InMemorySessionService extends BaseSessionService {
     }
 
     if (event.actions && event.actions.stateDelta) {
-      for (const key of Object.keys(event.actions.stateDelta)) {
-        if (key.startsWith(State.APP_PREFIX)) {
-          this.appState[appName] = this.appState[appName] || {};
-          this.appState[appName][key.replace(State.APP_PREFIX, '')] =
-            event.actions.stateDelta[key];
-        }
+      // The session bucket is deliberately ignored: session state is applied by
+      // super.appendEvent(), which keeps the `app:`/`user:` prefixes on the key.
+      const {app: appDelta, user: userDelta} = extractStateDelta(
+        event.actions.stateDelta,
+      );
 
-        if (key.startsWith(State.USER_PREFIX)) {
-          this.userState[appName] = this.userState[appName] || {};
-          this.userState[appName][userId] =
-            this.userState[appName][userId] || {};
-          this.userState[appName][userId][key.replace(State.USER_PREFIX, '')] =
-            event.actions.stateDelta[key];
-        }
+      if (Object.keys(appDelta).length > 0) {
+        this.appState[appName] = {...this.appState[appName], ...appDelta};
+      }
+
+      if (Object.keys(userDelta).length > 0) {
+        this.userState[appName] = this.userState[appName] || {};
+        this.userState[appName][userId] = {
+          ...this.userState[appName][userId],
+          ...userDelta,
+        };
       }
     }
 

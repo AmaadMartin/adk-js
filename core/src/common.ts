@@ -225,6 +225,8 @@ export {InMemorySessionService} from './sessions/in_memory_session_service.js';
 export {createSession} from './sessions/session.js';
 export type {CompositeSessionKey, Session} from './sessions/session.js';
 export {State} from './sessions/state.js';
+export {extractStateDelta} from './sessions/state_utils.js';
+export type {StateDeltas} from './sessions/state_utils.js';
 export {AgentTool, isAgentTool} from './tools/agent_tool.js';
 export type {AgentToolConfig} from './tools/agent_tool.js';
 export {BaseTool, isBaseTool} from './tools/base_tool.js';

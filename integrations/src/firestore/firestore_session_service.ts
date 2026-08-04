@@ -20,6 +20,7 @@ import {
   CreateSessionRequest,
   DeleteSessionRequest,
   Event,
+  extractStateDelta,
   getLogger,
   GetSessionConfig,
   GetSessionRequest,
@@ -27,7 +28,6 @@ import {
   ListSessionsResponse,
   mergeStates,
   Session,
-  splitStateDelta,
   trimTempDeltaState,
 } from '@google/adk';
 
@@ -271,7 +271,7 @@ export class FirestoreSessionService extends BaseSessionService {
       app: appDelta,
       user: userDelta,
       session: sessionState,
-    } = splitStateDelta(state);
+    } = extractStateDelta(state);
 
     const sessionRef = this.sessionRef(appName, userId, id);
     const appRef = this.appStateRef(appName);
@@ -440,7 +440,7 @@ export class FirestoreSessionService extends BaseSessionService {
       app: appDelta,
       user: userDelta,
       session: sessionDelta,
-    } = splitStateDelta(trimmed.actions.stateDelta);
+    } = extractStateDelta(trimmed.actions.stateDelta);
     const hasAppDelta = Object.keys(appDelta).length > 0;
     const hasUserDelta = Object.keys(userDelta).length > 0;
 
