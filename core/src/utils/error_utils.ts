@@ -159,3 +159,34 @@ function formatErrorRecursive(err: unknown, seen: Set<unknown>): string {
 export function formatError(err: unknown): string {
   return formatErrorRecursive(err, new Set<unknown>());
 }
+
+/**
+ * Node reports a failed ESM specifier resolution as `ERR_MODULE_NOT_FOUND` and
+ * a failed CommonJS `require()` as `MODULE_NOT_FOUND`. ADK ships both module
+ * formats, so both codes mean "the package is not installed".
+ */
+const MODULE_NOT_FOUND_CODES: readonly string[] = [
+  'ERR_MODULE_NOT_FOUND',
+  'MODULE_NOT_FOUND',
+];
+
+/**
+ * Returns true when `err` is a module-resolution failure, i.e. the module
+ * specifier could not be resolved at all.
+ *
+ * Narrows on the error `code` rather than the message, which is not stable
+ * across Node versions or module formats. Only the value itself is inspected:
+ * an error that merely *wraps* a resolution failure in its `cause` is not one.
+ *
+ * @param err The thrown or rejected value to classify.
+ * @return True if the value carries a module-resolution error code.
+ */
+export function isModuleNotFoundError(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    'code' in err &&
+    typeof err.code === 'string' &&
+    MODULE_NOT_FOUND_CODES.includes(err.code)
+  );
+}

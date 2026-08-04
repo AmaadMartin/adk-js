@@ -49,4 +49,28 @@ describe('Lazy load DB drivers', () => {
       );
     });
   });
+
+  it('reports the install command when a driver cannot be resolved', async () => {
+    // The failure is raised from the namespace getter rather than the factory:
+    // Vitest replaces a factory-thrown error with its own "error when mocking a
+    // module" error, which would not carry the resolution code.
+    vi.doMock('@mikro-orm/postgresql', () => ({
+      get PostgreSqlDriver(): unknown {
+        throw Object.assign(
+          new Error("Cannot find package '@mikro-orm/postgresql'"),
+          {code: 'ERR_MODULE_NOT_FOUND'},
+        );
+      },
+    }));
+    const svc = new DatabaseSessionService(
+      // secretlint-disable-next-line @secretlint/secretlint-rule-database-connection-string
+      'postgres://test:test@localhost/test',
+    );
+
+    await expect(svc.init()).rejects.toThrow(
+      "Database driver '@mikro-orm/postgresql' is required for postgres:// " +
+        'connection URIs but is not installed. ' +
+        'Install it with: npm install @mikro-orm/postgresql',
+    );
+  });
 });
