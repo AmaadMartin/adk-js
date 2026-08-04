@@ -4,6 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {installNodeClientLabelStore} from './utils/client_labels_node.js';
+
+// `index.ts` is the Node entry point; `index_web.ts` is not, which is how the
+// browser build stays free of `node:async_hooks`.
+installNodeClientLabelStore();
+
 export {AGENT_CARD_PATH, RemoteA2AAgent} from './a2a/a2a_remote_agent.js';
 export type {
   A2AStreamEventData,
