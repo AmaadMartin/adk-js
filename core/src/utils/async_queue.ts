@@ -14,7 +14,7 @@ export class AsyncQueue<T> implements AsyncIterable<T> {
     reject: (reason?: unknown) => void;
   }> = [];
   private closed = false;
-  private errorVal?: unknown;
+  private errorVal?: Error;
 
   push(value: T) {
     if (this.closed) return;
@@ -26,7 +26,7 @@ export class AsyncQueue<T> implements AsyncIterable<T> {
     }
   }
 
-  error(err: unknown) {
+  error(err: Error) {
     this.errorVal = err;
     while (this.resolvers.length > 0) {
       const {reject} = this.resolvers.shift()!;

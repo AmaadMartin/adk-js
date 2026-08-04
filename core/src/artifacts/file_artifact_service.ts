@@ -558,12 +558,7 @@ async function getCanonicalUri(
   filename: string,
   version: number,
 ): Promise<string> {
-  const artifactDir = await getArtifactDir(
-    rootDir,
-    userId,
-    sessionId,
-    filename,
-  );
+  const artifactDir = getArtifactDir(rootDir, userId, sessionId, filename);
   const storedFilename = path.basename(artifactDir);
   const versionsDir = getVersionsDir(artifactDir);
   const payloadPath = path.join(

@@ -51,6 +51,18 @@ class TestGemini extends Gemini {
   }
 }
 
+/** Node has no global ErrorEvent, which is what the live API reports errors as. */
+class TestErrorEvent extends Event implements ErrorEvent {
+  readonly colno = 0;
+  readonly error: unknown = undefined;
+  readonly filename = '';
+  readonly lineno = 0;
+
+  constructor(readonly message: string) {
+    super('error');
+  }
+}
+
 describe('GoogleLlm', () => {
   const clearEnv = () => {
     delete process.env['GOOGLE_CLOUD_PROJECT'];
@@ -651,6 +663,38 @@ describe('GoogleLlm', () => {
           }),
         }),
       );
+    });
+
+    it('surfaces a live API error as an Error keeping the event as cause', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+      const connection = await llm.connect({
+        model: 'gemini-2.5-flash',
+        contents: [],
+        liveConnectConfig: {},
+        toolsDict: {},
+      });
+
+      const [params] = vi.mocked(llm.liveApiClient.live.connect).mock.calls[0];
+      const {onerror} = params.callbacks;
+      if (!onerror) {
+        expect.fail('connect() did not register an onerror callback');
+      }
+      const event = new TestErrorEvent('live socket failed');
+      onerror(event);
+
+      const failure = await connection
+        .receive()
+        .next()
+        .then(
+          () => expect.fail('receive() should have rejected'),
+          (error: unknown) => error,
+        );
+
+      if (!(failure instanceof Error)) {
+        expect.fail(`expected an Error, got ${typeof failure}`);
+      }
+      expect(failure.message).toBe('live socket failed');
+      expect(failure.cause).toBe(event);
     });
   });
 });
