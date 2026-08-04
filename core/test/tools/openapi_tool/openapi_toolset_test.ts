@@ -7,12 +7,33 @@
 import {
   AuthCredential,
   AuthCredentialTypes,
+  AuthHandler,
+  Context,
+  createSession,
+  InvocationContext,
+  LlmAgent,
   OpenApiSpecParser,
   OpenAPIToolset,
+  PluginManager,
   ReadonlyContext,
 } from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
-import {describe, expect, it} from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
+
+const FUNCTION_CALL_ID = 'test-function-call';
+
+/** Builds a tool context whose auth requests are keyed by FUNCTION_CALL_ID. */
+function createToolContext(): Context {
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'test-invocation',
+      agent: new LlmAgent({name: 'test_agent'}),
+      session: createSession({id: 'test-session', appName: 'test-app'}),
+      pluginManager: new PluginManager([]),
+    }),
+    functionCallId: FUNCTION_CALL_ID,
+  });
+}
 
 /** Returns the resolved `application/json` schema of the `200` response. */
 function jsonResponseSchema(
@@ -34,6 +55,10 @@ function jsonResponseSchema(
 }
 
 describe('OpenAPIToolset', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   const mockSpec: OpenAPIV3.Document = {
     openapi: '3.0.0',
     info: {
@@ -133,16 +158,18 @@ describe('OpenAPIToolset', () => {
     expect(tools[1].name).toBe('test_create_user');
   });
 
+  const authScheme: OpenAPIV3.SecuritySchemeObject = {
+    type: 'apiKey',
+    name: 'key',
+    in: 'header',
+  };
+
+  const authCredential: AuthCredential = {
+    authType: AuthCredentialTypes.API_KEY,
+    apiKey: 'my-key',
+  };
+
   it('should apply global auth overrides', async () => {
-    const authScheme: OpenAPIV3.SecuritySchemeObject = {
-      type: 'apiKey',
-      name: 'key',
-      in: 'header',
-    };
-    const authCredential: AuthCredential = {
-      authType: AuthCredentialTypes.API_KEY,
-      apiKey: 'my-key',
-    };
     const toolset = new OpenAPIToolset({
       specDict: mockSpec,
       authScheme,
@@ -151,8 +178,49 @@ describe('OpenAPIToolset', () => {
     const tools = await toolset.getTools();
 
     expect(tools.length).toBe(2);
-    expect(tools[0]).toMatchObject({authScheme, authCredential});
-    expect(tools[1]).toMatchObject({authScheme, authCredential});
+    for (const tool of tools) {
+      const toolContext = createToolContext();
+      await tool.runAsync({args: {}, toolContext});
+
+      // A tool with no stored credential asks for one, and the request it
+      // publishes carries both overrides: the scheme is what makes it ask at
+      // all, and the credential is what it asks with.
+      expect(
+        toolContext.eventActions.requestedAuthConfigs[FUNCTION_CALL_ID],
+      ).toMatchObject({authScheme, rawAuthCredential: authCredential});
+    }
+  });
+
+  it('should send the overridden api key on the outgoing request', async () => {
+    const toolset = new OpenAPIToolset({
+      specDict: mockSpec,
+      authScheme,
+      authCredential,
+    });
+    const [tool] = await toolset.getTools();
+    const toolContext = createToolContext();
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async () => new Response('ok'));
+
+    await tool.runAsync({args: {}, toolContext});
+    const requested =
+      toolContext.eventActions.requestedAuthConfigs[FUNCTION_CALL_ID];
+    expect(requested).toBeDefined();
+    // Answer the tool's auth request the way a client does, with the very
+    // credential it asked for, so the value on the wire traces back to the
+    // override rather than to the fixture.
+    await new AuthHandler({
+      ...requested,
+      exchangedAuthCredential: requested.rawAuthCredential,
+    }).parseAndStoreAuthResponse(toolContext.state);
+
+    await tool.runAsync({args: {}, toolContext});
+
+    // The header name comes from the overriding scheme and its value from the
+    // overriding credential, so one header pins both.
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy.mock.calls[0][1]?.headers).toEqual({key: 'my-key'});
   });
 
   it('should return all tools when no toolFilter is set and a context is provided', async () => {
