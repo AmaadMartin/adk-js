@@ -178,6 +178,43 @@ describe('isGemini1Model', () => {
       expect(isGemini1Model('gemini/gemini-2.5-flash')).toBe(false);
     });
   });
+
+  describe('version boundary', () => {
+    const gemini1Models = [
+      'gemini-1.5-flash',
+      'gemini-1.0-pro',
+      'gemini-1.5-pro-preview',
+      'gemini-1.9-experimental',
+      'projects/12345/locations/us-east1/publishers/google/models/gemini-1.0-pro-preview',
+      'gemini/gemini-1.5-flash',
+    ];
+
+    for (const model of gemini1Models) {
+      it(`should return true for model: ${model}`, () => {
+        expect(isGemini1Model(model)).toBe(true);
+      });
+    }
+
+    const nonGemini1Models = [
+      // A double-digit major must not be read as Gemini 1.x.
+      'gemini-10.0-pro',
+      'gemini-10-flash',
+      // The dotted minor version is mandatory.
+      'gemini-1',
+      'gemini-1-pro',
+      'gemini-1.',
+      'gemini-2.5-flash',
+      'claude-3-sonnet',
+      'my-gemini-1.5-model',
+      '',
+    ];
+
+    for (const model of nonGemini1Models) {
+      it(`should return false for model: ${model || '<empty string>'}`, () => {
+        expect(isGemini1Model(model)).toBe(false);
+      });
+    }
+  });
 });
 
 describe('isGemini2OrAbove', () => {

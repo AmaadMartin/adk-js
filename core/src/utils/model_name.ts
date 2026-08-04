@@ -26,6 +26,13 @@ const EAP_MODEL_NAME_PATTERN =
   /^gemini-[a-z0-9_]+(?:-[a-z0-9_]+)*-early-exp\d*$/;
 
 /**
+ * Matches Gemini 1.x names such as `gemini-1.5-pro`. The dotted minor version
+ * is mandatory, so a future double-digit major like `gemini-10.0-pro` is not
+ * mistaken for Gemini 1.x.
+ */
+const GEMINI_1_MODEL_NAME_PATTERN = /^gemini-1\.\d+/;
+
+/**
  * Extract the actual model name from a simple, path-based, `models/`-prefixed
  * or provider-prefixed model string.
  *
@@ -112,9 +119,7 @@ function parseVersion(versionString: string): ParsedVersion {
  * @return true if it's a Gemini 1.x model, false otherwise.
  */
 export function isGemini1Model(modelString: string): boolean {
-  const modelName = extractModelName(modelString);
-
-  return modelName.startsWith('gemini-1');
+  return GEMINI_1_MODEL_NAME_PATTERN.test(extractModelName(modelString));
 }
 
 /**
