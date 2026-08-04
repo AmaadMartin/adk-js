@@ -91,8 +91,7 @@ export interface FilteredEventActions {
 // A filtered GenAI Part missing some filtered fields
 // Excluded is:
 // - thought_signature
-// - function_call
-// - function_response
+// - function_call.id and function_response.id (minted fresh per run)
 //
 // Copying from the original type: Only one of these is expected to be set.
 // More than one is invalid and an error.
@@ -101,6 +100,8 @@ export interface FilteredPart {
   codeExecutionResult?: CodeExecutionResult;
   executableCode?: ExecutableCode;
   fileData?: FileData;
+  functionCall?: FunctionCall;
+  functionResponse?: FunctionResponse;
   inlineData?: Blob;
   text?: string;
   thought?: boolean;

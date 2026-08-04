@@ -203,10 +203,13 @@ function filterEventActionsStateDelta(actions?: EventActions) {
   delete actions.stateDelta['_adk_replay_config'];
 }
 
+// functionCall and functionResponse are compared, so that a wrong tool name,
+// wrong arguments or a wrong tool result fails the replay. Only their `id` is
+// stripped: it is minted per run by generateClientFunctionCallId().
 function filterPartFields(part: Part) {
   delete part.thoughtSignature;
-  delete part.functionCall;
-  delete part.functionResponse;
+  delete part.functionCall?.id;
+  delete part.functionResponse?.id;
 }
 
 // Takes Partial<Event> because id, invocationId and timestamp are required on
