@@ -152,9 +152,7 @@ export async function copyAgentFiles(
       continue;
     }
 
-    // The compiled bundle, not the source file, is what gets deployed.
     const compiledPath = agentFile.getFilePath();
-
     await fs.cp(
       compiledPath,
       path.join(targetPath, path.parse(compiledPath).base),

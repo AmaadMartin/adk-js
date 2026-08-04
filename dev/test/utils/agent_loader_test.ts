@@ -1033,6 +1033,33 @@ describe('AgentLoader', () => {
       expect(await fs.readdir(tempLoaderDir)).toEqual([]);
     });
 
+    it('does not start a second compile when dispose lands mid-load', async () => {
+      const loader = new AgentLoader(tempAgentsDir);
+      const agentFile = await loader.getAgentFile('agent2');
+
+      let releaseBuild = () => {};
+      const buildGate = new Promise<void>((resolve) => {
+        releaseBuild = resolve;
+      });
+      (esbuild.build as Mock).mockImplementation(
+        async (options: {outfile: string}) => {
+          await buildGate;
+          await fs.writeFile(options.outfile, agent2CjsContentMocked);
+        },
+      );
+
+      const first = agentFile.load();
+      await agentFile.dispose();
+      const second = agentFile.load();
+      releaseBuild();
+      await Promise.all([first, second]);
+
+      expect(esbuild.build).toHaveBeenCalledTimes(1);
+
+      await loader.disposeAll();
+      expect(await fs.readdir(tempLoaderDir)).toEqual([]);
+    });
+
     it('retries the compile after a failed load', async () => {
       const loader = new AgentLoader(tempAgentsDir);
       const agentFile = await loader.getAgentFile('agent2');

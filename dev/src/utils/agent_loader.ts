@@ -367,8 +367,6 @@ export class AgentFile {
       return;
     }
 
-    this.loadPromise = undefined;
-
     if (this.cleanupFilePath) {
       this.disposed = true;
       await fsPromises.unlink(this.cleanupFilePath);
@@ -489,8 +487,7 @@ export class AgentLoader {
   }
 
   /**
-   * Returns the handle for a discovered agent, or `undefined` when no
-   * candidate of that name exists.
+   * Returns the handle for a discovered agent.
    *
    * The handle is **not** loaded: callers that need the agent instance or the
    * compiled artifact path must `await agentFile.load()` first.
