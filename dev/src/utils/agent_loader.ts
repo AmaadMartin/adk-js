@@ -344,6 +344,28 @@ export class AgentFile {
       }
     }
   }
+
+  /**
+   * Removes the compiled artifact synchronously, for use from a process
+   * `'exit'` listener where the runtime drops any pending promise or I/O as
+   * soon as the listener returns. Failures are swallowed: at exit there is no
+   * caller left to handle them. Prefer {@link dispose} everywhere else.
+   */
+  disposeSync(): void {
+    if (this.disposed || !this.cleanupFilePath) {
+      return;
+    }
+
+    this.disposed = true;
+    const target = this.cleanupDirPath ?? this.cleanupFilePath;
+    try {
+      // `rmSync` unlinks the `node_modules` symlink inside the output
+      // directory rather than following it into the project's real one.
+      fs.rmSync(target, {recursive: true, force: true});
+    } catch (e) {
+      logger.warn(`Failed to remove ${target}: ${(e as Error).message}`);
+    }
+  }
 }
 
 /**
@@ -367,8 +389,9 @@ export class AgentLoader {
     private readonly options = DEFAULT_AGENT_FILE_OPTIONS,
     private readonly watchForChanges = false,
   ) {
-    // Do cleanups on exit
-    const exitHandler = async ({
+    // Do cleanups on exit. An `'exit'` listener must be fully synchronous:
+    // Node drops any pending promise or I/O once the listener returns.
+    const exitHandler = ({
       exit,
       cleanup,
     }: {
@@ -376,7 +399,7 @@ export class AgentLoader {
       cleanup?: boolean;
     }) => {
       if (cleanup) {
-        await this.disposeAll();
+        this.disposeAllSync();
       }
 
       if (exit) {
@@ -476,6 +499,18 @@ export class AgentLoader {
     await Promise.all(
       Object.values(this.preloadedAgents).map((f) => f.dispose()),
     );
+  }
+
+  /**
+   * Synchronous counterpart of {@link disposeAll} for a process `'exit'`
+   * listener. Best-effort: see {@link AgentFile.disposeSync}.
+   */
+  disposeAllSync(): void {
+    this.watcher?.close();
+    this.watcher = undefined;
+    for (const agentFile of Object.values(this.preloadedAgents)) {
+      agentFile.disposeSync();
+    }
   }
 
   async preloadAgents() {

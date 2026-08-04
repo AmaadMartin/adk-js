@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import esbuild from 'esbuild';
+import {EventEmitter} from 'node:events';
+import * as nodeFs from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -46,6 +48,27 @@ vi.mock('esbuild', async (importOriginal) => {
       build: vi.fn(),
     },
   };
+});
+
+/**
+ * Makes `fs.rmSync` fail on demand. `vi.spyOn(fs, 'rmSync')` cannot do this:
+ * an ESM module namespace is not configurable, so the property cannot be
+ * redefined. Every other `node:fs` export, and `rmSync` itself while the flag
+ * is off, is the real implementation.
+ */
+const fsMockState = vi.hoisted(() => ({rmSyncFailure: '', rmSyncCalls: 0}));
+
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  const rmSync: typeof actual.rmSync = (target, options) => {
+    fsMockState.rmSyncCalls++;
+    if (fsMockState.rmSyncFailure) {
+      throw new Error(fsMockState.rmSyncFailure);
+    }
+    return actual.rmSync(target, options);
+  };
+
+  return {...actual, default: {...actual, rmSync}, rmSync};
 });
 
 const agent1JsContent = `
@@ -138,6 +161,38 @@ class FakeAgentForApp extends BaseAgent {
 const agent = new FakeAgentForApp('agent_for_app_default');
 export default new App({ name: 'test_app_default', rootAgent: agent });
 `;
+
+type ProcessListener = (...args: unknown[]) => void;
+
+/**
+ * Process events the `AgentLoader` constructor registers a listener on.
+ */
+const PROCESS_CLEANUP_EVENTS = [
+  'exit',
+  'SIGINT',
+  'SIGUSR1',
+  'SIGUSR2',
+  'uncaughtException',
+];
+
+/**
+ * `process` seen as the plain emitter it is, so the event names above can be
+ * iterated as strings instead of matching one typed overload each.
+ */
+const processEvents: EventEmitter = process;
+
+/**
+ * Preloads every agent and returns the compiled output directory of each one.
+ */
+async function preloadedOutputDirs(loader: AgentLoader): Promise<string[]> {
+  const names = await loader.listAgents();
+
+  return Promise.all(
+    names.map(async (name) =>
+      path.dirname((await loader.getAgentFile(name)).getFilePath()),
+    ),
+  );
+}
 
 describe('AgentLoader', () => {
   let tempAgentsDir: string;
@@ -485,6 +540,134 @@ describe('AgentLoader', () => {
         `Agent file ${agentPath} does not exists`,
       );
     });
+
+    it('removes the compiled output directory synchronously on disposeSync', async () => {
+      const agentPath = path.join(tempAgentsDir, 'agent1.js');
+      await fs.writeFile(agentPath, agent1JsContent);
+
+      const compiledAgentPath = compiledPath('agent1.cjs');
+      (esbuild.build as Mock).mockImplementation(async () => {
+        await fs.writeFile(compiledAgentPath, agent1JsContent);
+      });
+
+      const agentFile = new AgentFile(agentPath);
+      await agentFile.load();
+      expect(nodeFs.existsSync(tempLoaderDir)).toBe(true);
+
+      agentFile.disposeSync();
+
+      // No await between the call and the assertion: that ordering is what
+      // pins the bug, since a process 'exit' listener gets nothing more.
+      expect(nodeFs.existsSync(tempLoaderDir)).toBe(false);
+      expect(() => agentFile.getFilePath()).toThrow(
+        'Agent is disposed and can not be used',
+      );
+    });
+
+    it('is a no-op when disposeSync runs twice', async () => {
+      const agentPath = path.join(tempAgentsDir, 'agent1.js');
+      await fs.writeFile(agentPath, agent1JsContent);
+
+      const compiledAgentPath = compiledPath('agent1.cjs');
+      (esbuild.build as Mock).mockImplementation(async () => {
+        await fs.writeFile(compiledAgentPath, agent1JsContent);
+      });
+
+      const agentFile = new AgentFile(agentPath);
+      await agentFile.load();
+
+      agentFile.disposeSync();
+      const callsAfterFirst = fsMockState.rmSyncCalls;
+
+      expect(() => agentFile.disposeSync()).not.toThrow();
+      expect(fsMockState.rmSyncCalls).toBe(callsAfterFirst);
+      expect(nodeFs.existsSync(tempLoaderDir)).toBe(false);
+    });
+
+    it('does not touch the filesystem when disposeSync runs after dispose', async () => {
+      const agentPath = path.join(tempAgentsDir, 'agent1.js');
+      await fs.writeFile(agentPath, agent1JsContent);
+
+      const compiledAgentPath = compiledPath('agent1.cjs');
+      (esbuild.build as Mock).mockImplementation(async () => {
+        await fs.writeFile(compiledAgentPath, agent1JsContent);
+      });
+
+      const agentFile = new AgentFile(agentPath);
+      await agentFile.load();
+      await agentFile.dispose();
+      const callsAfterDispose = fsMockState.rmSyncCalls;
+
+      agentFile.disposeSync();
+
+      expect(fsMockState.rmSyncCalls).toBe(callsAfterDispose);
+    });
+
+    it('keeps an uncompiled agent file usable after disposeSync', async () => {
+      const agentPath = path.join(tempAgentsDir, 'agent1.js');
+      await fs.writeFile(agentPath, agent1JsContent);
+
+      const agentFile = new AgentFile(agentPath, {
+        compile: false,
+        bundle: false,
+      });
+      await agentFile.load();
+
+      agentFile.disposeSync();
+
+      expect(agentFile.getFilePath()).toEqual(agentPath);
+      expect(nodeFs.existsSync(agentPath)).toBe(true);
+    });
+
+    it('swallows a filesystem failure while removing the output directory', async () => {
+      const agentPath = path.join(tempAgentsDir, 'agent1.js');
+      await fs.writeFile(agentPath, agent1JsContent);
+
+      const compiledAgentPath = compiledPath('agent1.cjs');
+      (esbuild.build as Mock).mockImplementation(async () => {
+        await fs.writeFile(compiledAgentPath, agent1JsContent);
+      });
+
+      const agentFile = new AgentFile(agentPath);
+      await agentFile.load();
+
+      fsMockState.rmSyncFailure = 'EBUSY: resource busy or locked';
+      try {
+        expect(() => agentFile.disposeSync()).not.toThrow();
+        expect(nodeFs.existsSync(tempLoaderDir)).toBe(true);
+      } finally {
+        fsMockState.rmSyncFailure = '';
+      }
+
+      expect(() => agentFile.getFilePath()).toThrow(
+        'Agent is disposed and can not be used',
+      );
+    });
+
+    it('does not follow the node_modules symlink when removing the output directory', async () => {
+      const agentPath = path.join(tempAgentsDir, 'agent1.js');
+      await fs.writeFile(agentPath, agent1JsContent);
+
+      const compiledAgentPath = compiledPath('agent1.cjs');
+      (esbuild.build as Mock).mockImplementation(async () => {
+        await fs.writeFile(compiledAgentPath, agent1JsContent);
+      });
+
+      const agentFile = new AgentFile(agentPath);
+      await agentFile.load();
+      expect(nodeFs.existsSync(path.join(tempLoaderDir, 'node_modules'))).toBe(
+        true,
+      );
+
+      agentFile.disposeSync();
+
+      expect(nodeFs.existsSync(tempLoaderDir)).toBe(false);
+      expect(
+        nodeFs.existsSync(
+          path.join(tempAgentsDir, 'node_modules', '@google', 'adk'),
+        ),
+      ).toBe(true);
+    });
   });
 
   describe('replaceDirnamePlugin', () => {
@@ -766,6 +949,61 @@ describe('AgentLoader', () => {
       expect((loaded as App).name).toBe('test_app');
 
       await loader.disposeAll();
+    });
+
+    it('removes every preloaded output directory synchronously on disposeAllSync', async () => {
+      const loader = new AgentLoader(tempAgentsDir);
+      const outputDirs = await preloadedOutputDirs(loader);
+
+      expect(outputDirs).toHaveLength(3);
+      for (const outputDir of outputDirs) {
+        expect(nodeFs.existsSync(outputDir)).toBe(true);
+      }
+
+      loader.disposeAllSync();
+
+      for (const outputDir of outputDirs) {
+        expect(nodeFs.existsSync(outputDir)).toBe(false);
+      }
+    });
+
+    it('cleans up synchronously from the exit listener installed by the constructor', async () => {
+      const listenersBefore = new Map(
+        PROCESS_CLEANUP_EVENTS.map((event) => [
+          event,
+          processEvents.listeners(event),
+        ]),
+      );
+      const loader = new AgentLoader(tempAgentsDir);
+
+      try {
+        const outputDirs = await preloadedOutputDirs(loader);
+        expect(outputDirs).toHaveLength(3);
+
+        // Invoke this loader's own listener rather than emitting 'exit', which
+        // would also run the listeners every other loader in this file left
+        // registered.
+        const addedExitListeners = processEvents
+          .listeners('exit')
+          .filter(
+            (listener) => !listenersBefore.get('exit')!.includes(listener),
+          );
+        expect(addedExitListeners).toHaveLength(1);
+
+        (addedExitListeners[0] as () => void)();
+
+        for (const outputDir of outputDirs) {
+          expect(nodeFs.existsSync(outputDir)).toBe(false);
+        }
+      } finally {
+        for (const event of PROCESS_CLEANUP_EVENTS) {
+          for (const listener of processEvents.listeners(event)) {
+            if (!listenersBefore.get(event)!.includes(listener)) {
+              processEvents.removeListener(event, listener as ProcessListener);
+            }
+          }
+        }
+      }
     });
 
     it('resets preload cache when invalidateAll is called (simulates file-change reload)', async () => {

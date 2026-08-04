@@ -91,6 +91,12 @@ export class AdkApiServer {
 
   readonly app: express.Application;
   private readonly agentLoader: AgentLoader;
+  /**
+   * True when this server built its own {@link AgentLoader}; a loader passed
+   * in through `ServerOptions` belongs to the caller and is never disposed
+   * here.
+   */
+  private readonly ownsAgentLoader: boolean;
   private readonly runnerCache: Record<string, Runner> = {};
   private readonly sessionService: BaseSessionService;
   private readonly memoryService: BaseMemoryService;
@@ -117,6 +123,7 @@ export class AdkApiServer {
     this.memoryService = options.memoryService ?? new InMemoryMemoryService();
     this.artifactService =
       options.artifactService ?? new InMemoryArtifactService();
+    this.ownsAgentLoader = options.agentLoader === undefined;
     this.agentLoader =
       options.agentLoader ??
       new AgentLoader(
@@ -986,25 +993,23 @@ export class AdkApiServer {
     });
   }
 
-  stop(): Promise<void> {
-    if (!this.server) {
-      return Promise.resolve();
-    }
-
-    return new Promise((resolve, reject) => {
-      this.server!.close((err) => {
-        if (err) {
-          reject(err);
-          return;
-        }
+  async stop(): Promise<void> {
+    try {
+      if (this.server) {
+        await new Promise<void>((resolve, reject) => {
+          this.server!.close((err) => (err ? reject(err) : resolve()));
+        });
 
         console.log(`
 +-----------------------------------------------------------------------------+
 | ADK API Server stopped                                                      |
 +-----------------------------------------------------------------------------+`);
-        resolve();
-      });
-    });
+      }
+    } finally {
+      if (this.ownsAgentLoader) {
+        await this.agentLoader.disposeAll();
+      }
+    }
   }
 
   private async getRunner(
