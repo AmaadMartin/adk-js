@@ -641,6 +641,90 @@ describe('InMemorySessionService', () => {
       expect(session2.state).toHaveProperty(`${State.USER_PREFIX}key`, 'value');
     });
 
+    it('accumulates app state across successive events', async () => {
+      const appName = 'app';
+      const userId = 'user';
+      const session = await service.createSession({appName, userId});
+
+      for (const [key, value] of [
+        ['first', 'a'],
+        ['second', 'b'],
+      ]) {
+        await service.appendEvent({
+          session,
+          event: createEvent({
+            timestamp: Date.now(),
+            actions: createEventActions({
+              stateDelta: {[`${State.APP_PREFIX}${key}`]: value},
+            }),
+          }),
+        });
+      }
+
+      const session2 = await service.createSession({appName, userId});
+      expect(session2.state).toMatchObject({
+        [`${State.APP_PREFIX}first`]: 'a',
+        [`${State.APP_PREFIX}second`]: 'b',
+      });
+    });
+
+    it('accumulates user state across successive events', async () => {
+      const appName = 'app';
+      const userId = 'user';
+      const session = await service.createSession({appName, userId});
+
+      for (const [key, value] of [
+        ['first', 'a'],
+        ['second', 'b'],
+      ]) {
+        await service.appendEvent({
+          session,
+          event: createEvent({
+            timestamp: Date.now(),
+            actions: createEventActions({
+              stateDelta: {[`${State.USER_PREFIX}${key}`]: value},
+            }),
+          }),
+        });
+      }
+
+      const session2 = await service.createSession({appName, userId});
+      expect(session2.state).toMatchObject({
+        [`${State.USER_PREFIX}first`]: 'a',
+        [`${State.USER_PREFIX}second`]: 'b',
+      });
+    });
+
+    it('keeps prefixed and plain keys in session state but drops temp keys', async () => {
+      const appName = 'app';
+      const userId = 'user';
+      const session = await service.createSession({appName, userId});
+      const event = createEvent({
+        timestamp: Date.now(),
+        actions: createEventActions({
+          stateDelta: {
+            [`${State.APP_PREFIX}appKey`]: 'appValue',
+            [`${State.USER_PREFIX}userKey`]: 'userValue',
+            [`${State.TEMP_PREFIX}scratch`]: 'dropped',
+            plainKey: 'plainValue',
+          },
+        }),
+      });
+
+      await service.appendEvent({session, event});
+
+      const retrieved = await service.getSession({
+        appName,
+        userId,
+        sessionId: session.id,
+      });
+      expect(retrieved?.state).toEqual({
+        [`${State.APP_PREFIX}appKey`]: 'appValue',
+        [`${State.USER_PREFIX}userKey`]: 'userValue',
+        plainKey: 'plainValue',
+      });
+    });
+
     it('handles non-existent app/user/session gracefully', async () => {
       const session: Session = {
         id: 'fake-session',
