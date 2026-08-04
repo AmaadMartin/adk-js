@@ -4,7 +4,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GOOGLE_SEARCH, GoogleSearchTool, LlmRequest} from '@google/adk';
+import {
+  Context,
+  createSession,
+  GOOGLE_SEARCH,
+  GoogleSearchTool,
+  InvocationContext,
+  LlmAgent,
+  LlmRequest,
+  PluginManager,
+} from '@google/adk';
 import {GenerateContentConfig} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
@@ -19,6 +28,21 @@ function makeRequest(
     toolsDict: {},
     liveConnectConfig: {},
   } as unknown as LlmRequest;
+}
+
+function makeToolContext(): Context {
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'google-search-test',
+      agent: new LlmAgent({name: 'google_search_test_agent'}),
+      session: createSession({
+        id: 'test-session',
+        appName: 'test-app',
+        userId: 'test-user',
+      }),
+      pluginManager: new PluginManager([]),
+    }),
+  });
 }
 
 describe('GoogleSearchTool', () => {
@@ -77,7 +101,7 @@ describe('GoogleSearchTool', () => {
         const req = makeRequest(model);
         await tool.processLlmRequest({
           llmRequest: req,
-          toolContext: {} as never,
+          toolContext: makeToolContext(),
         });
 
         expect(req.config!.tools).toEqual([{googleSearch: {}}]);
@@ -88,7 +112,7 @@ describe('GoogleSearchTool', () => {
         const req = makeRequest(model, [{functionDeclarations: []}]);
         await tool.processLlmRequest({
           llmRequest: req,
-          toolContext: {} as never,
+          toolContext: makeToolContext(),
         });
 
         expect(req.config!.tools).toEqual([
