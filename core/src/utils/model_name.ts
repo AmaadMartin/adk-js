@@ -8,22 +8,26 @@ import {getBooleanEnvVar} from './env_aware_utils.js';
 
 /**
  * Path-based model name patterns, tried in order: the Vertex AI publisher path
- * and the Apigee path (`apigee/[<provider>/][<version>/]<model_id>`). Declared
- * without the `g` flag so `.match()` stays stateless.
+ * and the Apigee path (`apigee/[<provider>/][<version>/]<model_id>`).
  */
 const MODEL_PATH_PATTERNS = [
   /^projects\/[^/]+\/locations\/[^/]+\/publishers\/[^/]+\/models\/(.+)$/,
   /^apigee\/(?:[^/]+\/)?(?:[^/]+\/)?(.+)$/,
 ];
 
-const MODELS_PREFIX = 'models/';
-
 /**
  * Matches the Early Access Program (EAP) Gemini naming convention. Lower-case
- * only, and without the `g` flag so `.test()` stays stateless.
+ * only.
  */
 const EAP_MODEL_NAME_PATTERN =
   /^gemini-[a-z0-9_]+(?:-[a-z0-9_]+)*-early-exp\d*$/;
+
+/**
+ * Matches Gemini 1.x names such as `gemini-1.5-pro`. The dotted minor version
+ * is mandatory, so a future double-digit major like `gemini-10.0-pro` is not
+ * mistaken for Gemini 1.x.
+ */
+const GEMINI_1_MODEL_NAME_PATTERN = /^gemini-1\.\d+/;
 
 /**
  * Extract the actual model name from a simple, path-based, `models/`-prefixed
@@ -51,8 +55,8 @@ export function extractModelName(modelString: string): string {
     }
   }
 
-  if (modelString.startsWith(MODELS_PREFIX)) {
-    return modelString.slice(MODELS_PREFIX.length);
+  if (modelString.startsWith('models/')) {
+    return modelString.slice('models/'.length);
   }
 
   // A 'projects/' string reaching here is a malformed Vertex path. Return it
@@ -112,23 +116,17 @@ function parseVersion(versionString: string): ParsedVersion {
  * @return true if it's a Gemini 1.x model, false otherwise.
  */
 export function isGemini1Model(modelString: string): boolean {
-  const modelName = extractModelName(modelString);
-
-  return modelName.startsWith('gemini-1');
+  return GEMINI_1_MODEL_NAME_PATTERN.test(extractModelName(modelString));
 }
 
 /**
- * Check if the model is a Gemini EAP or a Gemini 2.0+ model.
+ * Check if the model is a Gemini 2.x model using regex patterns.
  *
- * EAP Gemini models do not encode a numeric version, so they are matched
- * first by their naming convention — `gemini-<variant>-early-exp` with an
- * optional numeric suffix, e.g. `gemini-flash-early-exp` or
- * `gemini-flash-early-exp3`. Otherwise the model name is parsed as a version
- * and matches when the major version is >= 2.
+ * EAP models are deliberately not matched here: they carry no numeric version.
+ * Use {@link isGeminiEapOr2OrAbove} where they should be accepted.
  *
  * @param modelString Either a simple model name or path - based model name
- * @return true if it's a Gemini EAP model or a Gemini 2.0+ model, false
- *     otherwise.
+ * @return true if it's a Gemini 2.x model, false otherwise.
  */
 export function isGemini2OrAbove(modelString: string): boolean {
   if (!modelString) {
@@ -136,10 +134,6 @@ export function isGemini2OrAbove(modelString: string): boolean {
   }
 
   const modelName = extractModelName(modelString);
-
-  if (EAP_MODEL_NAME_PATTERN.test(modelName)) {
-    return true;
-  }
 
   if (!modelName.startsWith('gemini-')) {
     return false;
@@ -149,6 +143,20 @@ export function isGemini2OrAbove(modelString: string): boolean {
 
   const parsedVersion = parseVersion(versionString);
   return parsedVersion.valid && parsedVersion.major >= 2;
+}
+
+/**
+ * Check if the model is a Gemini EAP or a Gemini 2.0+ model.
+ *
+ * @param modelString Either a simple model name or path - based model name
+ * @return true if it's a Gemini EAP model or a Gemini 2.0+ model, false
+ *     otherwise.
+ */
+export function isGeminiEapOr2OrAbove(modelString: string): boolean {
+  return (
+    EAP_MODEL_NAME_PATTERN.test(extractModelName(modelString)) ||
+    isGemini2OrAbove(modelString)
+  );
 }
 
 /**

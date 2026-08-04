@@ -87,6 +87,52 @@ describe('UrlContextTool', () => {
       expect(req.config!.tools).toEqual([{urlContext: {}}]);
     });
 
+    const extendedForms = [
+      'models/gemini-2.5-pro',
+      'gemini/gemini-2.5-flash',
+      'apigee/vertex_ai/v1beta/gemini-2.5-flash',
+      'models/gemini-flash-early-exp',
+    ];
+
+    for (const model of extendedForms) {
+      it(`adds urlContext for model: ${model}`, async () => {
+        const tool = new UrlContextTool();
+        const req = makeRequest(model);
+        await tool.processLlmRequest({
+          llmRequest: req,
+          toolContext: makeToolContext(),
+        });
+
+        expect(req.config!.tools).toEqual([{urlContext: {}}]);
+      });
+    }
+
+    const rejectedForms: Array<[string, string]> = [
+      [
+        'openrouter/google/gemini-1.5-pro:online',
+        'URL context tool requires Gemini 2 or above, but got openrouter/google/gemini-1.5-pro:online',
+      ],
+      [
+        // Malformed Vertex path: the trailing segment must not be read as an
+        // id, so this stays a non-Gemini model.
+        'projects/123/locations/us-central1/publishers/google/gemini-2.5-flash',
+        'URL context tool is not supported for model projects/123/locations/us-central1/publishers/google/gemini-2.5-flash',
+      ],
+    ];
+
+    for (const [model, message] of rejectedForms) {
+      it(`throws for model: ${model}`, async () => {
+        const tool = new UrlContextTool();
+        const req = makeRequest(model);
+        await expect(
+          tool.processLlmRequest({
+            llmRequest: req,
+            toolContext: makeToolContext(),
+          }),
+        ).rejects.toThrow(message);
+      });
+    }
+
     it('throws for Gemini 1.x model', async () => {
       const tool = new UrlContextTool();
       const req = makeRequest('gemini-1.5-pro');
