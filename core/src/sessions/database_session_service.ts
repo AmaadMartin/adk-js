@@ -512,15 +512,15 @@ export class DatabaseSessionService extends BaseSessionService {
       );
       session.state = {...newMergedState, ...tempState};
 
-      const index = session.events.findIndex((e) => e.id === trimmedEvent.id);
+      const index = session.events.findIndex((e) => e.id === event.id);
       if (index >= 0) {
-        session.events[index] = trimmedEvent;
+        session.events[index] = event;
       } else {
-        session.events.push(trimmedEvent);
+        session.events.push(event);
       }
       session.lastUpdateTime = storageSession.updateTime.getTime();
     });
 
-    return trimmedEvent;
+    return event;
   }
 }

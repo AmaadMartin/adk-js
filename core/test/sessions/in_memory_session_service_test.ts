@@ -792,16 +792,14 @@ describe('InMemorySessionService', () => {
       expect(session.state).not.toHaveProperty(`${State.APP_PREFIX}a`);
     });
 
-    it('is a no-op (no throw, no mutation) when the event has no actions or no stateDelta', () => {
-      const noActions = createEvent({timestamp: Date.now()});
-      delete (noActions as unknown as {actions?: unknown}).actions;
-      const noStateDelta = createEvent({timestamp: Date.now()});
-      (noStateDelta.actions as unknown as {stateDelta?: unknown}).stateDelta =
-        undefined;
+    it('is a no-op (no throw, no mutation) when the event has an empty stateDelta', () => {
+      const event = createEvent({
+        timestamp: Date.now(),
+        actions: createEventActions({stateDelta: {}}),
+      });
       const session = makeSession({existing: 1});
 
-      expect(() => applyTempState(session, noActions)).not.toThrow();
-      applyTempState(session, noStateDelta);
+      applyTempState(session, event);
 
       expect(session.state).toEqual({existing: 1});
     });

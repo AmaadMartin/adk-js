@@ -1098,14 +1098,14 @@ describe('VertexAiSessionService', () => {
     });
 
     it('applies temp: state to the in-memory session and does not send temp keys to the backend', async () => {
-      const session = {
+      const session: Session = {
         id: 'append-session',
         appName: '12345',
         userId: 'testUser',
         state: {},
         events: [],
         lastUpdateTime: Date.now(),
-      } as unknown as Session;
+      };
 
       const event = createEvent({
         timestamp: 1620000000000,

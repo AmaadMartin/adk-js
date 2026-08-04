@@ -193,10 +193,9 @@ export abstract class BaseSessionService {
    * @param request The request to update the session state.
    */
   private updateSessionState({session, event}: AppendEventRequest): void {
-    if (!event.actions || !event.actions.stateDelta) {
-      return;
-    }
-    for (const [key, value] of Object.entries(event.actions.stateDelta)) {
+    for (const [key, value] of Object.entries(
+      event.actions?.stateDelta ?? {},
+    )) {
       session.state[key] = value;
     }
   }
@@ -213,10 +212,9 @@ export abstract class BaseSessionService {
  * {@link trimTempDeltaState}).
  */
 export function applyTempState(session: Session, event: Event): void {
-  if (!event.actions || !event.actions.stateDelta) {
-    return;
-  }
-  for (const [key, value] of Object.entries(event.actions.stateDelta)) {
+  // `actions` is typed as required but is absent on events deserialized from a
+  // backend; see the VertexAiSessionService `actions: undefined` path.
+  for (const [key, value] of Object.entries(event.actions?.stateDelta ?? {})) {
     if (key.startsWith(State.TEMP_PREFIX)) {
       session.state[key] = value;
     }
