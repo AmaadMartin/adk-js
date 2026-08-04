@@ -11,11 +11,11 @@
  * Behaviour is driven entirely by the standard Google client-library
  * environment variables:
  *
- * - `GOOGLE_API_USE_CLIENT_CERTIFICATE` — `true`/`1` to present a client
+ * - `GOOGLE_API_USE_CLIENT_CERTIFICATE`: `true`/`1` to present a client
  *   certificate; anything else (including absent) disables it.
- * - `GOOGLE_API_USE_MTLS_ENDPOINT` — `auto` (default), `always` or `never`;
+ * - `GOOGLE_API_USE_MTLS_ENDPOINT`: `auto` (default), `always` or `never`;
  *   decides whether requests target the `*.mtls.googleapis.com` host.
- * - `GOOGLE_API_CERTIFICATE_CONFIG` — path to `certificate_config.json`,
+ * - `GOOGLE_API_CERTIFICATE_CONFIG`: path to `certificate_config.json`,
  *   overriding the well-known gcloud location.
  *
  * This module is Node-only and is deliberately not part of the browser bundle.
@@ -186,7 +186,7 @@ async function readClientCertificate(
  * Builds an HTTP dispatcher that presents the application-default client
  * certificate, for use as the `dispatcher` init property of a `fetch` call.
  *
- * Returns `undefined` — without touching the filesystem — when
+ * Returns `undefined`, without touching the filesystem, when
  * `GOOGLE_API_USE_CLIENT_CERTIFICATE` is not enabled. When a certificate is
  * requested but cannot be loaded this fails open: it logs a warning and
  * returns `undefined` so the caller falls back to a plain request rather than

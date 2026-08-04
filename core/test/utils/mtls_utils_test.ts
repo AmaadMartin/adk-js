@@ -21,6 +21,7 @@ import {
   createMtlsDispatcher,
   effectiveGoogleapisEndpoint,
   isNonMtlsGoogleapisEndpoint,
+  MtlsEndpointSetting,
   shouldUseMtlsEndpoint,
   useClientCertEffective,
 } from '../../src/utils/mtls_utils.js';
@@ -106,6 +107,14 @@ describe('mtls_utils', () => {
   afterEach(() => {
     process.env = originalEnv;
     vi.restoreAllMocks();
+  });
+
+  it('keeps the setting values adk-python writes on the wire', () => {
+    expect(Object.values(MtlsEndpointSetting)).toEqual([
+      'auto',
+      'always',
+      'never',
+    ]);
   });
 
   describe('useClientCertEffective', () => {
