@@ -11,12 +11,13 @@ import {createRunner} from '../../../integration/test_case_utils.js';
 import {AdkGoServer} from './go_backend/go_server.js';
 
 /**
- * Readiness budget (ms) handed to the test server. Deliberately below the
- * `cross-language` project `hookTimeout` in vitest.config.ts, so a server that
- * never comes up fails with the server's own diagnostic — which includes the
- * captured stdout — instead of Vitest's generic hook timeout.
+ * Readiness budget (ms) handed to the test server. Half the `cross-language`
+ * project `hookTimeout` in vitest.config.ts, so a server that never comes up
+ * fails with the server's own diagnostic instead of Vitest's generic hook
+ * timeout. Sized at ~2x the 41.8s the Go server's cold `go run .` compile
+ * measured on the macos-latest runner the cross-language workflow uses.
  */
-const SERVER_START_TIMEOUT_MS = 60000;
+const SERVER_START_TIMEOUT_MS = 90000;
 
 describe('A2A ADK Cross-Language Integration: TS <--A2A--> Go', () => {
   let goServer: AdkGoServer;
