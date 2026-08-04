@@ -147,21 +147,27 @@ describe('DatabaseSessionService', () => {
       sessionId: 's-atomic-ok',
     });
 
-    const em = (service as unknown as {orm: MikroORM}).orm.em.fork();
     expect(
-      await em.count('StorageSession', {
-        appName: 'test-app',
-        userId: 'test-user',
-        id: 's-atomic-ok',
-      }),
-    ).toBe(0);
-    expect(
-      await em.count('StorageEvent', {
+      await service.getSession({
         appName: 'test-app',
         userId: 'test-user',
         sessionId: 's-atomic-ok',
       }),
-    ).toBe(0);
+    ).toBeUndefined();
+
+    // Re-creating the same key resurrects any orphaned events, so an empty
+    // event list proves the event rows were deleted with the session.
+    await service.createSession({
+      appName: 'test-app',
+      userId: 'test-user',
+      sessionId: 's-atomic-ok',
+    });
+    const recreated = await service.getSession({
+      appName: 'test-app',
+      userId: 'test-user',
+      sessionId: 's-atomic-ok',
+    });
+    expect(recreated?.events).toEqual([]);
   });
 
   it('should not delete the session when deleting its events fails', async () => {
