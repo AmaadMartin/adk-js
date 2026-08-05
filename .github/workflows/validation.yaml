@@ -22,10 +22,6 @@ jobs:
 
       - name: Use Node.js
         uses: actions/setup-node@v6
-        with:
-          # npm caching is owned by the explicit actions/cache step below, which
-          # falls back to the previous cache when the lockfile changes.
-          package-manager-cache: false
 
       - name: Setup Python
         uses: actions/setup-python@v5
