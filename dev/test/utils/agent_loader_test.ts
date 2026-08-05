@@ -768,26 +768,6 @@ describe('AgentLoader', () => {
       await loader.disposeAll();
     });
 
-    it('resets preload cache when invalidateAll is called (simulates file-change reload)', async () => {
-      const loader = new AgentLoader(tempAgentsDir);
-
-      // Initial load should populate the cache
-      await loader.listAgents();
-      const compiledAfterFirstLoad = compiledEntryPoints().length;
-      expect(compiledAfterFirstLoad).toBeGreaterThan(0);
-
-      // Simulate what the fs.watch callback does when a file changes
-      (loader as unknown as {invalidateAll: () => void}).invalidateAll();
-
-      // After invalidation the next request triggers a full re-scan from disk
-      await loader.listAgents();
-      expect(compiledEntryPoints().length).toBeGreaterThan(
-        compiledAfterFirstLoad,
-      );
-
-      await loader.disposeAll();
-    });
-
     /**
      * The entrypoint each esbuild invocation compiled, in call order.
      * Comparing the list against its distinct entries counts duplicated
@@ -798,6 +778,35 @@ describe('AgentLoader', () => {
         (call) => (call[0] as {entryPoints: string[]}).entryPoints[0],
       );
     }
+
+    /**
+     * Invalidates the loader the way the fs.watch callback does. The loader
+     * keeps that entry point private and exposes no public trigger, so the
+     * cast lives here once instead of in every test that needs it.
+     */
+    function invalidateAll(loader: AgentLoader): void {
+      (loader as unknown as {invalidateAll: () => void}).invalidateAll();
+    }
+
+    it('resets preload cache when invalidateAll is called (simulates file-change reload)', async () => {
+      const loader = new AgentLoader(tempAgentsDir);
+
+      // Initial load should populate the cache
+      await loader.listAgents();
+      const compiledAfterFirstLoad = compiledEntryPoints().length;
+      expect(compiledAfterFirstLoad).toBeGreaterThan(0);
+
+      // Simulate what the fs.watch callback does when a file changes
+      invalidateAll(loader);
+
+      // After invalidation the next request triggers a full re-scan from disk
+      await loader.listAgents();
+      expect(compiledEntryPoints().length).toBeGreaterThan(
+        compiledAfterFirstLoad,
+      );
+
+      await loader.disposeAll();
+    });
 
     it('runs a single discovery pass for concurrent preloadAgents() calls', async () => {
       const loader = new AgentLoader(tempAgentsDir);
@@ -838,7 +847,7 @@ describe('AgentLoader', () => {
       const loader = new AgentLoader(tempAgentsDir);
       const invalidatedScan = loader.preloadAgents();
 
-      (loader as unknown as {invalidateAll: () => void}).invalidateAll();
+      invalidateAll(loader);
 
       await Promise.all([invalidatedScan, loader.preloadAgents()]);
 
@@ -859,7 +868,7 @@ describe('AgentLoader', () => {
       const loader = new AgentLoader(tempAgentsDir);
 
       const invalidatedScan = loader.preloadAgents();
-      (loader as unknown as {invalidateAll: () => void}).invalidateAll();
+      invalidateAll(loader);
       await invalidatedScan;
 
       const compiledBeforeReload = compiledEntryPoints().length;
@@ -893,7 +902,7 @@ describe('AgentLoader', () => {
       const superseded = loader.preloadAgents();
       await compiling;
 
-      (loader as unknown as {invalidateAll: () => void}).invalidateAll();
+      invalidateAll(loader);
       const replacement = loader.preloadAgents();
       await replacement;
 

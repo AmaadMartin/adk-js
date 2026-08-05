@@ -488,9 +488,7 @@ export class AgentLoader {
    * later call retries from scratch.
    */
   async preloadAgents(): Promise<void> {
-    // A second concurrent scan re-bundles and re-imports every entrypoint, and
-    // its AgentFile instances overwrite the first scan's in `preloadedAgents`,
-    // so the displaced ones are never disposed and their temp directories leak.
+    // Dedupe concurrent scans; a second scan re-bundles every entrypoint.
     const scan: Promise<void> = (this.preloadInFlight ??=
       this.scanAgents().catch((e: unknown) => {
         // Only the scan that is still current may drop the memo. A scan
