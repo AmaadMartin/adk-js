@@ -4,39 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import esbuild from 'esbuild';
-import {readdir, writeFile} from 'node:fs/promises';
-import {sep} from 'node:path';
+import {writeFile} from 'node:fs/promises';
 
 const platformBuildTargets = {
   'node': ['node10.4'],
   'browser': ['chrome58', 'firefox57', 'safari11'],
 };
-
-/**
- * Source modules the browser build must not emit. `dist/web` is transpile-only
- * - every module in `src` is compiled on its own and its import specifiers are
- * passed through verbatim - so emitting the Node entry point or a Node-only
- * implementation would put `winston` into the published browser artifact even
- * though nothing reachable from `index_web.ts` imports them.
- */
-const NODE_ONLY_SOURCE = /^\.\/src\/index\.ts$|_node\.ts$/;
-
-/**
- * Lists the entry points for a transpile-only (non-bundled) build.
- *
- * @param {string} platform - The esbuild platform.
- * @return {!Promise<!Array<string>>} The entry points to compile.
- */
-async function transpileEntryPoints(platform) {
-  if (platform !== 'browser') {
-    return ['./src/**/*.ts'];
-  }
-
-  const names = await readdir('./src', {recursive: true});
-  return names
-    .map((name) => `./src/${name.split(sep).join('/')}`)
-    .filter((file) => file.endsWith('.ts') && !NODE_ONLY_SOURCE.test(file));
-}
 
 const licenseHeaderText = `/**
   * @license
@@ -58,7 +31,7 @@ const licenseHeaderText = `/**
  * }} options - The build options.
  * @return {!Promise} A promise that resolves when the build is complete.
  */
-async function build({
+function build({
   targetDir,
   platform,
   format,
@@ -92,10 +65,7 @@ async function build({
     buildOptions.entryPoints = [`./src/${entry}`];
     buildOptions.outfile = `./dist/${targetDir}/index.js`;
   } else {
-    buildOptions.entryPoints = await transpileEntryPoints(platform);
-    // Pinned so that excluding a source file cannot shift the emitted layout:
-    // esbuild otherwise derives the output root from the entry points.
-    buildOptions.outbase = './src';
+    buildOptions.entryPoints = ['./src/**/*.ts'];
     buildOptions.outdir = `./dist/${targetDir}`;
   }
 
