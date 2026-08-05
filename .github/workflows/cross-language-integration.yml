@@ -16,11 +16,29 @@ jobs:
 
       - name: Use Node.js
         uses: actions/setup-node@v6
+        with:
+          # npm caching is owned by the explicit actions/cache step below, which
+          # falls back to the previous cache when the lockfile changes.
+          package-manager-cache: false
 
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
           go-version: '1.25'
+
+      - name: Resolve npm cache directory
+        id: npm-cache-dir
+        shell: bash
+        # tr strips the carriage return npm emits on the Windows runner.
+        run: echo "dir=$(npm config get cache | tr -d '\r')" >> "$GITHUB_OUTPUT"
+
+      - name: Cache npm downloads
+        uses: actions/cache@v6
+        with:
+          path: ${{ steps.npm-cache-dir.outputs.dir }}
+          key: npm-cross-language-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            npm-cross-language-${{ runner.os }}-
 
       - name: Install dependencies
         run: npm install
