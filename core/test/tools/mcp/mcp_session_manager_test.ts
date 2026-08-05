@@ -4,11 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {MCPSessionManager} from '@google/adk';
+import {MCPConnectionParams, MCPSessionManager} from '@google/adk';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import {describe, expect, it, vi} from 'vitest';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
 
 vi.hoisted(() => {
   vi.resetModules();
@@ -180,5 +180,182 @@ describe('MCPSessionManager', () => {
 
     await manager.closeSession(client2);
     expect(manager.getActiveSessions()).toEqual([]);
+  });
+
+  describe('createSession headers', () => {
+    /** Options handed to the most recently constructed HTTP transport. */
+    const lastTransportOptions = () =>
+      vi.mocked(StreamableHTTPClientTransport).mock.calls.at(-1)?.[1];
+
+    beforeEach(() => {
+      vi.mocked(StreamableHTTPClientTransport).mockClear();
+      vi.mocked(StdioClientTransport).mockClear();
+    });
+
+    it('merges extraHeaders into transportOptions.requestInit.headers', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+        transportOptions: {requestInit: {headers: {'x-static': 'yes'}}},
+      });
+
+      await manager.createSession({Authorization: 'Bearer t'});
+
+      expect(lastTransportOptions()).toEqual({
+        requestInit: {headers: {'x-static': 'yes', Authorization: 'Bearer t'}},
+      });
+    });
+
+    it('adds extraHeaders when the connection carries no static headers', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+      });
+
+      await manager.createSession({Authorization: 'Bearer t'});
+
+      expect(lastTransportOptions()).toEqual({
+        requestInit: {headers: {Authorization: 'Bearer t'}},
+      });
+    });
+
+    it('extraHeaders win over static transportOptions headers on conflict', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+        transportOptions: {
+          requestInit: {headers: {Authorization: 'Bearer old'}},
+        },
+      });
+
+      await manager.createSession({Authorization: 'Bearer new'});
+
+      expect(lastTransportOptions()).toEqual({
+        requestInit: {headers: {Authorization: 'Bearer new'}},
+      });
+    });
+
+    it('merges extraHeaders over the deprecated header field', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+        header: {'x-legacy': 'yes', Authorization: 'Bearer old'},
+      });
+
+      await manager.createSession({Authorization: 'Bearer new'});
+
+      expect(lastTransportOptions()).toEqual({
+        requestInit: {
+          headers: {'x-legacy': 'yes', Authorization: 'Bearer new'},
+        },
+      });
+    });
+
+    it('preserves static headers supplied as a Headers instance', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+        transportOptions: {
+          requestInit: {headers: new Headers({'x-static': 'yes'})},
+        },
+      });
+
+      await manager.createSession({Authorization: 'Bearer t'});
+
+      expect(lastTransportOptions()).toEqual({
+        requestInit: {headers: {'x-static': 'yes', Authorization: 'Bearer t'}},
+      });
+    });
+
+    it('preserves static headers supplied as an array of pairs', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+        transportOptions: {requestInit: {headers: [['x-static', 'yes']]}},
+      });
+
+      await manager.createSession({Authorization: 'Bearer t'});
+
+      expect(lastTransportOptions()).toEqual({
+        requestInit: {headers: {'x-static': 'yes', Authorization: 'Bearer t'}},
+      });
+    });
+
+    it('leaves transport options untouched for an empty extraHeaders record', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+        transportOptions: {requestInit: {headers: {'x-static': 'yes'}}},
+      });
+
+      await manager.createSession({});
+
+      expect(lastTransportOptions()).toEqual({
+        requestInit: {headers: {'x-static': 'yes'}},
+      });
+    });
+
+    it('adds no requestInit at all for an empty extraHeaders record', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+      });
+
+      await manager.createSession({});
+
+      expect(lastTransportOptions()).toEqual({});
+    });
+
+    it('does not mutate the callers connectionParams', async () => {
+      // `transportOptions` must be present but carry no `requestInit`: that is
+      // the only shape where the deprecated `header` fallback used to write
+      // back into the object the caller still owns.
+      const params: MCPConnectionParams = {
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+        transportOptions: {},
+        header: {'x-legacy': 'yes'},
+      };
+      const snapshot = structuredClone(params);
+
+      const manager = new MCPSessionManager(params);
+      await manager.createSession({Authorization: 'Bearer t'});
+
+      expect(params).toEqual(snapshot);
+      expect(lastTransportOptions()).toEqual({
+        requestInit: {
+          headers: {'x-legacy': 'yes', Authorization: 'Bearer t'},
+        },
+      });
+    });
+
+    it('does not bleed headers between successive sessions', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+        transportOptions: {requestInit: {headers: {'x-static': 'yes'}}},
+      });
+
+      await manager.createSession({'x-first': '1'});
+      await manager.createSession({'x-second': '2'});
+
+      expect(lastTransportOptions()).toEqual({
+        requestInit: {headers: {'x-static': 'yes', 'x-second': '2'}},
+      });
+    });
+
+    it('ignores extraHeaders for stdio connections', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StdioConnectionParams',
+        serverParams: {command: 'test-command'},
+      });
+
+      const client = await manager.createSession({Authorization: 'Bearer t'});
+
+      expect(StdioClientTransport).toHaveBeenCalledWith({
+        command: 'test-command',
+      });
+      expect(client.connect).toHaveBeenCalled();
+    });
   });
 });

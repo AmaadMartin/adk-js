@@ -14,6 +14,36 @@ import {
   StreamableHTTPClientTransportOptions,
 } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
+/** Every shape the transport accepts for `requestInit.headers`. */
+type TransportHeaders = NonNullable<
+  NonNullable<StreamableHTTPClientTransportOptions['requestInit']>['headers']
+>;
+
+/**
+ * Normalizes any headers shape into a plain record so that static headers
+ * supplied as a `Headers` instance or an array of pairs are not silently
+ * dropped when extra headers are merged over them.
+ */
+function toHeaderRecord(init?: TransportHeaders): Record<string, string> {
+  if (!init) return {};
+
+  const record: Record<string, string> = {};
+  if (init instanceof Headers) {
+    // `Headers` is iterable only under the DOM.Iterable lib, which this
+    // package does not enable; `forEach` is on the base DOM lib.
+    init.forEach((value, name) => {
+      record[name] = value;
+    });
+  } else if (Array.isArray(init)) {
+    for (const [name, value] of init) {
+      record[name] = value;
+    }
+  } else {
+    Object.assign(record, init);
+  }
+  return record;
+}
+
 /**
  * Defines the parameters for establishing a connection to an MCP server using
  * standard input/output (stdio). This is typically used for running MCP servers
@@ -78,7 +108,14 @@ export class MCPSessionManager {
     this.connectionParams = connectionParams;
   }
 
-  async createSession(): Promise<Client> {
+  /**
+   * Opens a new MCP client session.
+   *
+   * @param extraHeaders Headers merged over the connection's static headers
+   *     for this session only; on key conflict these win. Ignored for stdio
+   *     connections, which have no headers.
+   */
+  async createSession(extraHeaders?: Record<string, string>): Promise<Client> {
     const client = new Client({name: 'MCPClient', version: '1.0.0'});
 
     switch (this.connectionParams.type) {
@@ -88,22 +125,34 @@ export class MCPSessionManager {
         );
         break;
       case 'StreamableHTTPConnectionParams': {
-        const options = this.connectionParams.transportOptions ?? {};
+        const params = this.connectionParams;
+        // Copy-on-write: `params.transportOptions` is shared across every
+        // session, so per-session headers must never be written back into it.
+        let options: StreamableHTTPClientTransportOptions =
+          params.transportOptions ?? {};
 
-        if (
-          !options.requestInit &&
-          this.connectionParams.header !== undefined
-        ) {
-          options.requestInit = {
-            headers: this.connectionParams.header as Record<string, string>,
+        if (!options.requestInit && params.header !== undefined) {
+          options = {
+            ...options,
+            requestInit: {headers: params.header as Record<string, string>},
+          };
+        }
+
+        if (extraHeaders && Object.keys(extraHeaders).length > 0) {
+          options = {
+            ...options,
+            requestInit: {
+              ...options.requestInit,
+              headers: {
+                ...toHeaderRecord(options.requestInit?.headers),
+                ...extraHeaders,
+              },
+            },
           };
         }
 
         await client.connect(
-          new StreamableHTTPClientTransport(
-            new URL(this.connectionParams.url),
-            options,
-          ),
+          new StreamableHTTPClientTransport(new URL(params.url), options),
         );
         break;
       }
