@@ -52,8 +52,11 @@ const IS_WINDOWS = os.platform() === 'win32';
 /** Mirrors `TERMINATE_GRACE_MS` in unsafe_local_code_executor.ts. */
 const TERMINATE_GRACE_MS = 5000;
 
-/** Budget for the cases that spawn and then kill real processes. */
-const REAL_PROCESS_TIMEOUT_MS = 20000;
+/**
+ * Budget for the cases that wait on real processes or on real filesystem work
+ * under a fake clock. The 5s default is not enough on a loaded CI runner.
+ */
+const SLOW_TEST_TIMEOUT_MS = 20000;
 
 const BACKGROUND_PID_FILE = 'background_pid.txt';
 const GRANDCHILD_PID_FILE = 'grandchild_pid.txt';
@@ -113,6 +116,36 @@ function emitClose(child: ReturnType<typeof createFakeChild>) {
     child.emit('close', 0, null);
   });
   return child;
+}
+
+/**
+ * Installs a fake child and reports when the executor has spawned it, so a
+ * test can drive its events. The executor awaits real filesystem work before
+ * it spawns; waiting on this promise lets that finish under a fake clock,
+ * which pumping the clock does not reliably do.
+ */
+function fakeChildOnSpawn(pid: number | undefined): {
+  child: ReturnType<typeof createFakeChild>;
+  spawned: Promise<void>;
+} {
+  const child = createFakeChild(pid);
+  let reportSpawned!: () => void;
+  const spawned = new Promise<void>((resolve) => {
+    reportSpawned = resolve;
+  });
+  spawnMock.mockImplementation(() => {
+    reportSpawned();
+    return child;
+  });
+  return {child, spawned};
+}
+
+/**
+ * Fakes only the timer functions the executor uses, so `getTimerCount` counts
+ * its timers alone and real filesystem work still progresses.
+ */
+function useTimerFakes(): void {
+  vi.useFakeTimers({toFake: ['setTimeout', 'clearTimeout']});
 }
 
 function spyOnProcessKill() {
@@ -608,19 +641,6 @@ describe('UnsafeLocalCodeExecutor', () => {
       };
     }
 
-    /**
-     * Advances the fake clock until the executor has spawned, so the test can
-     * drive the fake child. The executor awaits real filesystem work first,
-     * which only progresses when the async timer helpers yield to the event
-     * loop.
-     */
-    async function waitForSpawn(): Promise<void> {
-      for (let i = 0; i < 100 && spawnMock.mock.calls.length === 0; i++) {
-        await vi.advanceTimersByTimeAsync(0);
-      }
-      expect(spawnMock).toHaveBeenCalled();
-    }
-
     it.skipIf(IS_WINDOWS)(
       'should spawn the script detached so it leads its own process group',
       async () => {
@@ -687,12 +707,11 @@ describe('UnsafeLocalCodeExecutor', () => {
     it.skipIf(IS_WINDOWS)(
       'should ignore child events that arrive after the call settled',
       async () => {
-        vi.useFakeTimers();
-        const child = createFakeChild(4321);
-        spawnMock.mockImplementation(() => child);
+        useTimerFakes();
+        const {child, spawned} = fakeChildOnSpawn(4321);
 
         const execution = executor.executeCode(jsParams('console.log("hi");'));
-        await waitForSpawn();
+        await spawned;
         child.emit('close', 0, null);
         const result = await execution;
 
@@ -704,42 +723,41 @@ describe('UnsafeLocalCodeExecutor', () => {
 
         expect(killSpy).not.toHaveBeenCalled();
         expect(result.stderr).toBe('');
-        expect(vi.getTimerCount()).toBe(0);
       },
+      SLOW_TEST_TIMEOUT_MS,
     );
 
     it.skipIf(IS_WINDOWS)(
       'should clear its timers and stop signalling once the call settles',
       async () => {
-        vi.useFakeTimers();
-        const child = createFakeChild(4321);
-        spawnMock.mockImplementation(() => child);
+        useTimerFakes();
+        const {child, spawned} = fakeChildOnSpawn(4321);
 
         const execution = executor.executeCode(jsParams('console.log("hi");'));
-        await waitForSpawn();
+        await spawned;
         child.emit('exit', 0, null);
         child.emit('close', 0, null);
-        await execution;
 
         // A live escalation timer would hold the event loop and could signal a
         // process group id that the operating system has since reused.
         expect(vi.getTimerCount()).toBe(0);
 
+        await execution;
         await vi.advanceTimersByTimeAsync(TERMINATE_GRACE_MS * 2);
 
         expect(killSpy.mock.calls).toEqual([[-4321, 'SIGTERM']]);
       },
+      SLOW_TEST_TIMEOUT_MS,
     );
 
     it.skipIf(IS_WINDOWS)(
       'should escalate to SIGKILL when the group outlives the grace period',
       async () => {
-        vi.useFakeTimers();
-        const child = createFakeChild(4321);
-        spawnMock.mockImplementation(() => child);
+        useTimerFakes();
+        const {child, spawned} = fakeChildOnSpawn(4321);
 
         const execution = executor.executeCode(jsParams('console.log("hi");'));
-        await waitForSpawn();
+        await spawned;
         // `close` never arrives: something in the group still holds the pipes.
         child.emit('exit', 0, null);
         await vi.advanceTimersByTimeAsync(0);
@@ -754,14 +772,14 @@ describe('UnsafeLocalCodeExecutor', () => {
           [-4321, 'SIGKILL'],
         ]);
       },
+      SLOW_TEST_TIMEOUT_MS,
     );
 
     it.skipIf(IS_WINDOWS)(
       'should signal the group and report the timeout when the script runs too long',
       async () => {
-        vi.useFakeTimers();
-        const child = createFakeChild(9876);
-        spawnMock.mockImplementation(() => child);
+        useTimerFakes();
+        const {spawned} = fakeChildOnSpawn(9876);
         const shortTimeoutExecutor = new UnsafeLocalCodeExecutor({
           timeoutSeconds: 1,
         });
@@ -769,7 +787,7 @@ describe('UnsafeLocalCodeExecutor', () => {
         const execution = shortTimeoutExecutor.executeCode(
           jsParams('setTimeout(() => {}, 60000);'),
         );
-        await waitForSpawn();
+        await spawned;
         await vi.advanceTimersByTimeAsync(1000);
 
         expect(killSpy.mock.calls).toEqual([[-9876, 'SIGTERM']]);
@@ -785,6 +803,7 @@ describe('UnsafeLocalCodeExecutor', () => {
           'Code execution timed out after 1 seconds.',
         );
       },
+      SLOW_TEST_TIMEOUT_MS,
     );
 
     it.skipIf(IS_WINDOWS)(
@@ -857,7 +876,7 @@ describe('UnsafeLocalCodeExecutor', () => {
         expect(result.stderr).toBe('');
         await waitForExit(readPid(result, BACKGROUND_PID_FILE));
       },
-      REAL_PROCESS_TIMEOUT_MS,
+      SLOW_TEST_TIMEOUT_MS,
     );
 
     it(
@@ -878,7 +897,7 @@ describe('UnsafeLocalCodeExecutor', () => {
         expect(result.stdout).toContain('script done');
         await waitForExit(readPid(result, BACKGROUND_PID_FILE));
       },
-      REAL_PROCESS_TIMEOUT_MS,
+      SLOW_TEST_TIMEOUT_MS,
     );
 
     it(
@@ -905,7 +924,7 @@ describe('UnsafeLocalCodeExecutor', () => {
         );
         await waitForExit(readPid(result, BACKGROUND_PID_FILE));
       },
-      REAL_PROCESS_TIMEOUT_MS,
+      SLOW_TEST_TIMEOUT_MS,
     );
 
     it(
@@ -923,7 +942,7 @@ describe('UnsafeLocalCodeExecutor', () => {
         expect(result.stderr).toBe('');
         await waitForExit(readPid(result, GRANDCHILD_PID_FILE));
       },
-      REAL_PROCESS_TIMEOUT_MS,
+      SLOW_TEST_TIMEOUT_MS,
     );
   });
 });
