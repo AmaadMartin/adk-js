@@ -22,6 +22,20 @@ import {MCPConnectionParams, MCPSessionManager} from './mcp_session_manager.js';
 import {MCPTool} from './mcp_tool.js';
 
 /**
+ * Resolves request headers immediately before an MCP session is created.
+ *
+ * Called once per `getTools()` invocation, so short-lived credentials (e.g. an
+ * OAuth bearer token) are always freshly minted. Returned headers are merged
+ * over any static headers in
+ * `StreamableHTTPConnectionParams.transportOptions.requestInit.headers`; on key
+ * conflict the provider wins. Headers are only meaningful for HTTP transports —
+ * they are ignored for `StdioConnectionParams`.
+ */
+export type MCPHeaderProvider = (
+  context?: ReadonlyContext,
+) => Promise<Record<string, string>> | Record<string, string>;
+
+/**
  * A toolset that dynamically discovers and provides tools from a Model Context
  * Protocol (MCP) server.
  *
@@ -49,21 +63,33 @@ import {MCPTool} from './mcp_tool.js';
  *   const mcpToolset = new MCPToolset(connectionParams);
  *   const tools = await mcpToolset.getTools();
  *
+ * For servers that require short-lived credentials, pass an
+ * {@link MCPHeaderProvider}: it is invoked on every `getTools()` call and its
+ * headers are merged over the connection's static headers for the discovery
+ * session and for every tool call made by the returned tools. Headers only
+ * apply to HTTP transports; they are ignored for stdio connections.
+ *
  */
 export class MCPToolset extends BaseToolset {
   private readonly mcpSessionManager: MCPSessionManager;
+  private readonly headerProvider?: MCPHeaderProvider;
 
   constructor(
     connectionParams: MCPConnectionParams,
     toolFilter: ToolPredicate | string[] = [],
     prefix?: string,
+    headerProvider?: MCPHeaderProvider,
   ) {
     super(toolFilter, prefix);
     this.mcpSessionManager = new MCPSessionManager(connectionParams);
+    this.headerProvider = headerProvider;
   }
 
   async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {
-    const session = await this.mcpSessionManager.createSession();
+    const headers = this.headerProvider
+      ? await this.headerProvider(context)
+      : undefined;
+    const session = await this.mcpSessionManager.createSession(headers);
 
     let listResult: ListToolsResult;
     try {
@@ -82,7 +108,12 @@ export class MCPToolset extends BaseToolset {
         ...tool,
         name: this.prefix ? `${this.prefix}_${tool.name}` : tool.name,
       };
-      return new MCPTool(toolWithPrefix, this.mcpSessionManager, tool.name);
+      return new MCPTool(
+        toolWithPrefix,
+        this.mcpSessionManager,
+        tool.name,
+        headers,
+      );
     });
 
     // Apply toolFilter when specified.

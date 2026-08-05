@@ -13,6 +13,7 @@ import {
   StreamableHTTPClientTransport,
   StreamableHTTPClientTransportOptions,
 } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import {normalizeHeaders} from '@modelcontextprotocol/sdk/shared/transport.js';
 
 /**
  * Defines the parameters for establishing a connection to an MCP server using
@@ -78,7 +79,14 @@ export class MCPSessionManager {
     this.connectionParams = connectionParams;
   }
 
-  async createSession(): Promise<Client> {
+  /**
+   * Opens a new MCP client session.
+   *
+   * @param extraHeaders Headers merged over the connection's static headers
+   *     for this session only; on key conflict these win. Ignored for stdio
+   *     connections, which have no headers.
+   */
+  async createSession(extraHeaders?: Record<string, string>): Promise<Client> {
     const client = new Client({name: 'MCPClient', version: '1.0.0'});
 
     switch (this.connectionParams.type) {
@@ -88,22 +96,31 @@ export class MCPSessionManager {
         );
         break;
       case 'StreamableHTTPConnectionParams': {
-        const options = this.connectionParams.transportOptions ?? {};
+        const params = this.connectionParams;
+        // Copy-on-write: `params.transportOptions` is shared across every
+        // session, so per-session headers must never be written back into it.
+        const options: StreamableHTTPClientTransportOptions = {
+          ...params.transportOptions,
+        };
 
-        if (
-          !options.requestInit &&
-          this.connectionParams.header !== undefined
-        ) {
+        if (!options.requestInit && params.header !== undefined) {
           options.requestInit = {
-            headers: this.connectionParams.header as Record<string, string>,
+            headers: params.header as Record<string, string>,
+          };
+        }
+
+        if (extraHeaders && Object.keys(extraHeaders).length > 0) {
+          options.requestInit = {
+            ...options.requestInit,
+            headers: {
+              ...normalizeHeaders(options.requestInit?.headers),
+              ...extraHeaders,
+            },
           };
         }
 
         await client.connect(
-          new StreamableHTTPClientTransport(
-            new URL(this.connectionParams.url),
-            options,
-          ),
+          new StreamableHTTPClientTransport(new URL(params.url), options),
         );
         break;
       }
