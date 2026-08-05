@@ -274,11 +274,11 @@ describe('SimpleLogger', () => {
 });
 
 describe('browser safety', () => {
-  it('keeps Node-only imports out of the browser-reachable logger', async () => {
+  it('keeps the browser-reachable logger free of imports', async () => {
     const source = await readCoreSource('logger.ts');
 
-    expect(source).not.toMatch(/from 'winston'/);
-    expect(source).not.toMatch(/from 'node:/);
+    expect(source).not.toMatch(/^\s*import\b/m);
+    expect(source).not.toMatch(/\bimport\(/);
   });
 
   it('keeps winston in the Node-only logger', async () => {

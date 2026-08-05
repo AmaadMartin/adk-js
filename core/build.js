@@ -19,7 +19,7 @@ const platformBuildTargets = {
  * implementation would put `winston` into the published browser artifact even
  * though nothing reachable from `index_web.ts` imports them.
  */
-const NODE_ONLY_SOURCE = /(?:^|\/)(?:index\.ts|[^/]+_node\.ts)$/;
+const NODE_ONLY_SOURCE = /^\.\/src\/index\.ts$|_node\.ts$/;
 
 /**
  * Lists the entry points for a transpile-only (non-bundled) build.
