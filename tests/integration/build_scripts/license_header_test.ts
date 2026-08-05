@@ -32,7 +32,9 @@ describe('Build script license banner', () => {
     '%s defines the canonical Apache-2.0 header',
     async (buildScript: string) => {
       const source = await readFile(path.join(dirname, buildScript), 'utf8');
-      const match = LICENSE_HEADER_TEXT.exec(source);
+      // Git checks the build scripts out with CRLF on Windows. The assertion
+      // is about the indentation, not the line terminator.
+      const match = LICENSE_HEADER_TEXT.exec(source.replaceAll('\r\n', '\n'));
 
       if (match === null) {
         expect.fail(`${buildScript} does not define licenseHeaderText`);
