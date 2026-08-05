@@ -9,8 +9,8 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import {fileURLToPath, pathToFileURL} from 'url';
 
-import {isInsideDir} from '../utils/file_utils.js';
 import {logger} from '../utils/logger.js';
+import {isPathInside} from '../utils/path_utils.js';
 
 import {
   ArtifactVersion,
@@ -424,7 +424,7 @@ export function assertInsideRoot(
   rootDir: string,
   label: string,
 ): void {
-  if (!isInsideDir(resolvedPath, rootDir)) {
+  if (!isPathInside(rootDir, resolvedPath)) {
     const resolved = path.resolve(resolvedPath);
     const root = path.resolve(rootDir);
     throw new Error(
@@ -506,7 +506,7 @@ function getArtifactDir(
 
   const resolvedScopeRoot = path.resolve(scopeRoot);
   const artifactDir = path.resolve(scopeRoot, cleanFilename);
-  if (!isInsideDir(artifactDir, resolvedScopeRoot)) {
+  if (!isPathInside(resolvedScopeRoot, artifactDir)) {
     throw new Error(`Artifact filename ${filename} escapes storage directory.`);
   }
   if (artifactDir === resolvedScopeRoot) {
