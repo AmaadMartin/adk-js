@@ -39,6 +39,32 @@ const POWERSHELL_BASE_ARGS = [
 const CMD_BASE_ARGS = ['/D', '/c'] as const;
 
 /**
+ * How long a finished or timed-out execution's process group is given to exit
+ * after `SIGTERM` before it is killed outright, so teardown cannot block
+ * forever. Mirrors `_TERMINATE_GRACE_SECONDS` in adk-python.
+ */
+const TERMINATE_GRACE_MS = 5000;
+
+/**
+ * Whether an execution can be put in its own process group. Windows has no
+ * process groups, and `detached` there means "own console, outlives the
+ * parent", which is the opposite of what this is for.
+ */
+const USE_PROCESS_GROUP = !IS_WINDOWS;
+
+/** The only signals this module sends to an execution's process group. */
+type TerminationSignal = 'SIGTERM' | 'SIGKILL';
+
+/** Signals every process left in `group`, tolerating a group already gone. */
+function signalGroup(group: number, signal: TerminationSignal): void {
+  try {
+    process.kill(-group, signal);
+  } catch {
+    logger.debug(`Could not signal the execution process group ${group}.`);
+  }
+}
+
+/**
  * Options for UnsafeLocalCodeExecutor.
  */
 export interface UnsafeLocalCodeExecutorOptions {
@@ -118,6 +144,14 @@ function getExtensionForLanguage(
  * - **JavaScript**: Executed via `node` (defaults to `process.execPath`).
  * - **Python**: Executed via `python3` on Unix, and `python` on Windows.
  * - **Shell**: Executed via `bash` on Unix, and defaults to `powershell` (injecting `-NoProfile` and `-ExecutionPolicy Bypass`) or `cmd.exe` (injecting `/D`) on Windows.
+ *
+ * **Process Lifetime**:
+ * - On POSIX the execution runs in its own process group. When the call
+ *   finishes, by timeout or by normal completion, the executor terminates that
+ *   whole group with `SIGTERM` and then `SIGKILL`. A background process the
+ *   executed code started does not outlive the call.
+ * - On Windows there are no process groups, so the executor terminates only the
+ *   script process. Processes the code started can survive the call.
  *
  * WARNING: This executor runs code in the local environment without sandboxing or security restrictions.
  * Use with caution and only for trusted code.
@@ -216,13 +250,61 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
         exitCode: number | null;
       }>((resolve) => {
         const child = spawn(command, args, {
-          timeout: this.timeoutSeconds * 1000,
-          killSignal: 'SIGKILL',
           cwd: tempDir,
+          detached: USE_PROCESS_GROUP,
         });
+
+        // `detached` makes the child lead a new group whose id is its pid. That
+        // group, not the child alone, holds whatever the executed code spawned.
+        const group = USE_PROCESS_GROUP ? child.pid : undefined;
 
         let stdout = '';
         let stderr = '';
+        let timedOut = false;
+        let settled = false;
+        let killTimer: ReturnType<typeof setTimeout> | undefined;
+
+        const terminate = (signal: TerminationSignal) => {
+          if (group === undefined) {
+            child.kill(signal);
+            return;
+          }
+          signalGroup(group, signal);
+        };
+
+        const settle = (exitCode: number | null) => {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          clearTimeout(timeoutTimer);
+          clearTimeout(killTimer);
+          if (timedOut) {
+            stderr += `\nCode execution timed out after ${this.timeoutSeconds} seconds.`;
+          } else if (exitCode !== 0 && exitCode !== null && !stderr) {
+            stderr = `Exit code ${exitCode}`;
+          }
+          resolve({stdout, stderr, exitCode});
+        };
+
+        // Runs on the normal path too, not only on timeout: once the script is
+        // gone whatever it started is unwatched, and anything still holding the
+        // stdio pipes keeps `close` from ever arriving.
+        const tearDown = () => {
+          if (settled || killTimer) {
+            return;
+          }
+          terminate('SIGTERM');
+          killTimer = setTimeout(() => {
+            terminate('SIGKILL');
+            settle(null);
+          }, TERMINATE_GRACE_MS);
+        };
+
+        const timeoutTimer = setTimeout(() => {
+          timedOut = true;
+          tearDown();
+        }, this.timeoutSeconds * 1000);
 
         if (child.stdout) {
           child.stdout.on('data', (data) => {
@@ -240,16 +322,9 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
           stderr += `Process error: ${err.message}\n`;
         });
 
-        child.on('close', (exitCode, signal) => {
-          if (signal === 'SIGKILL' || signal === 'SIGTERM') {
-            stderr += `\nCode execution timed out after ${this.timeoutSeconds} seconds.`;
-          } else if (exitCode !== 0 && exitCode !== null) {
-            if (!stderr) {
-              stderr = `Exit code ${exitCode}`;
-            }
-          }
-          resolve({stdout, stderr, exitCode});
-        });
+        child.on('exit', () => tearDown());
+
+        child.on('close', (exitCode) => settle(exitCode));
       });
 
       const outputFiles: File[] = [];

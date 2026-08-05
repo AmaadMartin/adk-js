@@ -6,6 +6,7 @@
 
 import {
   CodeExecutionLanguage,
+  CodeExecutionResult,
   ExecuteCodeParams,
   InvocationContext,
   LlmAgent,
@@ -16,7 +17,7 @@ import {
 import {EventEmitter} from 'node:events';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 // Only `spawn` is mocked; it defaults to the real implementation (see
 // `beforeEach`) so the pre-existing tests still execute real scripts.
@@ -45,6 +46,106 @@ const EXPECTED_POWERSHELL_ARGS = [
   ...POWERSHELL_FLAGS,
   expect.stringMatching(/script\.ps1$/),
 ];
+
+const IS_WINDOWS = os.platform() === 'win32';
+
+/** Mirrors `TERMINATE_GRACE_MS` in unsafe_local_code_executor.ts. */
+const TERMINATE_GRACE_MS = 5000;
+
+/** Budget for the cases that spawn and then kill real processes. */
+const REAL_PROCESS_TIMEOUT_MS = 20000;
+
+const BACKGROUND_PID_FILE = 'background_pid.txt';
+const GRANDCHILD_PID_FILE = 'grandchild_pid.txt';
+
+/** Code that leaves one background process behind and reports its pid. */
+function backgroundChildScript(
+  stdio: 'ignore' | 'inherit',
+  trailer = '',
+): string {
+  return [
+    `const {spawn} = require('node:child_process');`,
+    `const fs = require('node:fs');`,
+    `const background = spawn(process.execPath,`,
+    `    ['-e', 'setTimeout(() => {}, 60000)'], {stdio: '${stdio}'});`,
+    `background.unref();`,
+    `fs.writeFileSync('${BACKGROUND_PID_FILE}', String(background.pid));`,
+    trailer,
+  ].join('\n');
+}
+
+/**
+ * Code that leaves a process two levels down. The script holds no handle to
+ * the grandchild, so only a group teardown can reach it. The intermediate
+ * child is not unreferenced, which keeps the script alive until the pid file
+ * exists.
+ */
+const GRANDCHILD_SCRIPT = [
+  `const {spawn} = require('node:child_process');`,
+  `const childCode = [`,
+  `  "const {spawn} = require('node:child_process');",`,
+  `  "const fs = require('node:fs');",`,
+  `  "const grandchild = spawn(process.execPath,",`,
+  `  "    ['-e', 'setTimeout(() => {}, 60000)'], {stdio: 'ignore'});",`,
+  `  "grandchild.unref();",`,
+  `  "fs.writeFileSync('${GRANDCHILD_PID_FILE}', String(grandchild.pid));",`,
+  `].join('\\n');`,
+  `spawn(process.execPath, ['-e', childCode], {stdio: 'ignore'});`,
+].join('\n');
+
+/**
+ * A stand-in for a spawned child. The executor uses only `pid`, `kill`, the
+ * two stdio streams and the `error` / `exit` / `close` events.
+ */
+function createFakeChild(pid: number | undefined) {
+  return Object.assign(new EventEmitter(), {
+    pid,
+    kill: vi.fn(() => true),
+    stdout: new EventEmitter(),
+    stderr: new EventEmitter(),
+  });
+}
+
+/** Makes a fake child report a clean exit on the next turn of the loop. */
+function emitClose(child: ReturnType<typeof createFakeChild>) {
+  setImmediate(() => {
+    child.emit('exit', 0, null);
+    child.emit('close', 0, null);
+  });
+  return child;
+}
+
+function spyOnProcessKill() {
+  return vi.spyOn(process, 'kill').mockImplementation(() => true);
+}
+
+/** Reports whether `pid` is alive without reading /proc, which macOS lacks. */
+function isAlive(pid: number): boolean {
+  try {
+    return process.kill(pid, 0);
+  } catch {
+    return false;
+  }
+}
+
+async function waitForExit(pid: number, timeoutMs = 10000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (isAlive(pid)) {
+    if (Date.now() > deadline) {
+      expect.fail(`Process ${pid} was still alive after ${timeoutMs}ms.`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
+
+/** Reads a pid the executed script reported through an output file. */
+function readPid(result: CodeExecutionResult, name: string): number {
+  const file = result.outputFiles?.find((f) => f.name === name);
+  if (!file) {
+    expect.fail(`The script reported no ${name}; stderr: ${result.stderr}`);
+  }
+  return Number(file.content);
+}
 
 function createMockInvocationContext(): InvocationContext {
   const agent = new LlmAgent({
@@ -482,5 +583,347 @@ describe('UnsafeLocalCodeExecutor', () => {
         expect.anything(),
       );
     });
+  });
+
+  describe('process group teardown', () => {
+    let killSpy: ReturnType<typeof spyOnProcessKill>;
+
+    beforeEach(() => {
+      killSpy = spyOnProcessKill();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+      killSpy.mockRestore();
+    });
+
+    function jsParams(code: string): ExecuteCodeParams {
+      return {
+        invocationContext,
+        codeExecutionInput: {
+          code,
+          language: CodeExecutionLanguage.JAVASCRIPT,
+          inputFiles: [],
+        },
+      };
+    }
+
+    /**
+     * Advances the fake clock until the executor has spawned, so the test can
+     * drive the fake child. The executor awaits real filesystem work first,
+     * which only progresses when the async timer helpers yield to the event
+     * loop.
+     */
+    async function waitForSpawn(): Promise<void> {
+      for (let i = 0; i < 100 && spawnMock.mock.calls.length === 0; i++) {
+        await vi.advanceTimersByTimeAsync(0);
+      }
+      expect(spawnMock).toHaveBeenCalled();
+    }
+
+    it.skipIf(IS_WINDOWS)(
+      'should spawn the script detached so it leads its own process group',
+      async () => {
+        spawnMock.mockImplementation(() => emitClose(createFakeChild(4321)));
+
+        await executor.executeCode(jsParams('console.log("hi");'));
+
+        expect(spawnMock).toHaveBeenCalledWith(
+          process.execPath,
+          expect.anything(),
+          expect.objectContaining({detached: true, cwd: expect.any(String)}),
+        );
+      },
+    );
+
+    it.skipIf(!IS_WINDOWS)(
+      'should not spawn the script detached on Windows, which has no process groups',
+      async () => {
+        spawnMock.mockImplementation(() => emitClose(createFakeChild(4321)));
+
+        await executor.executeCode(jsParams('console.log("hi");'));
+
+        expect(spawnMock.mock.calls[0][2].detached).toBeFalsy();
+      },
+    );
+
+    it('should not pass a spawn timeout, which would kill the script alone', async () => {
+      spawnMock.mockImplementation(() => emitClose(createFakeChild(4321)));
+
+      await executor.executeCode(jsParams('console.log("hi");'));
+
+      expect(spawnMock.mock.calls[0][2]).not.toHaveProperty('timeout');
+    });
+
+    it.skipIf(IS_WINDOWS)(
+      'should signal the group when the script completes normally',
+      async () => {
+        spawnMock.mockImplementation(() => emitClose(createFakeChild(4321)));
+
+        const result = await executor.executeCode(
+          jsParams('console.log("hi");'),
+        );
+
+        expect(killSpy).toHaveBeenCalledWith(-4321, 'SIGTERM');
+        expect(result.stderr).toBe('');
+      },
+    );
+
+    it('should report a non-zero exit code the script gave no message for', async () => {
+      spawnMock.mockImplementation(() => {
+        const child = createFakeChild(4321);
+        setImmediate(() => {
+          child.emit('exit', 3, null);
+          child.emit('close', 3, null);
+        });
+        return child;
+      });
+
+      const result = await executor.executeCode(jsParams('process.exit(3);'));
+
+      expect(result.stderr).toBe('Exit code 3');
+    });
+
+    it.skipIf(IS_WINDOWS)(
+      'should ignore child events that arrive after the call settled',
+      async () => {
+        vi.useFakeTimers();
+        const child = createFakeChild(4321);
+        spawnMock.mockImplementation(() => child);
+
+        const execution = executor.executeCode(jsParams('console.log("hi");'));
+        await waitForSpawn();
+        child.emit('close', 0, null);
+        const result = await execution;
+
+        // Late events must not restart the teardown: the group id may already
+        // belong to an unrelated process.
+        child.emit('exit', 0, null);
+        child.emit('close', 9, null);
+        await vi.advanceTimersByTimeAsync(TERMINATE_GRACE_MS * 2);
+
+        expect(killSpy).not.toHaveBeenCalled();
+        expect(result.stderr).toBe('');
+        expect(vi.getTimerCount()).toBe(0);
+      },
+    );
+
+    it.skipIf(IS_WINDOWS)(
+      'should clear its timers and stop signalling once the call settles',
+      async () => {
+        vi.useFakeTimers();
+        const child = createFakeChild(4321);
+        spawnMock.mockImplementation(() => child);
+
+        const execution = executor.executeCode(jsParams('console.log("hi");'));
+        await waitForSpawn();
+        child.emit('exit', 0, null);
+        child.emit('close', 0, null);
+        await execution;
+
+        // A live escalation timer would hold the event loop and could signal a
+        // process group id that the operating system has since reused.
+        expect(vi.getTimerCount()).toBe(0);
+
+        await vi.advanceTimersByTimeAsync(TERMINATE_GRACE_MS * 2);
+
+        expect(killSpy.mock.calls).toEqual([[-4321, 'SIGTERM']]);
+      },
+    );
+
+    it.skipIf(IS_WINDOWS)(
+      'should escalate to SIGKILL when the group outlives the grace period',
+      async () => {
+        vi.useFakeTimers();
+        const child = createFakeChild(4321);
+        spawnMock.mockImplementation(() => child);
+
+        const execution = executor.executeCode(jsParams('console.log("hi");'));
+        await waitForSpawn();
+        // `close` never arrives: something in the group still holds the pipes.
+        child.emit('exit', 0, null);
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(killSpy.mock.calls).toEqual([[-4321, 'SIGTERM']]);
+
+        await vi.advanceTimersByTimeAsync(TERMINATE_GRACE_MS);
+        await execution;
+
+        expect(killSpy.mock.calls).toEqual([
+          [-4321, 'SIGTERM'],
+          [-4321, 'SIGKILL'],
+        ]);
+      },
+    );
+
+    it.skipIf(IS_WINDOWS)(
+      'should signal the group and report the timeout when the script runs too long',
+      async () => {
+        vi.useFakeTimers();
+        const child = createFakeChild(9876);
+        spawnMock.mockImplementation(() => child);
+        const shortTimeoutExecutor = new UnsafeLocalCodeExecutor({
+          timeoutSeconds: 1,
+        });
+
+        const execution = shortTimeoutExecutor.executeCode(
+          jsParams('setTimeout(() => {}, 60000);'),
+        );
+        await waitForSpawn();
+        await vi.advanceTimersByTimeAsync(1000);
+
+        expect(killSpy.mock.calls).toEqual([[-9876, 'SIGTERM']]);
+
+        await vi.advanceTimersByTimeAsync(TERMINATE_GRACE_MS);
+        const result = await execution;
+
+        expect(killSpy.mock.calls).toEqual([
+          [-9876, 'SIGTERM'],
+          [-9876, 'SIGKILL'],
+        ]);
+        expect(result.stderr).toContain(
+          'Code execution timed out after 1 seconds.',
+        );
+      },
+    );
+
+    it.skipIf(IS_WINDOWS)(
+      'should treat an already empty group as success',
+      async () => {
+        killSpy.mockImplementation(() => {
+          throw new Error('kill ESRCH');
+        });
+        spawnMock.mockImplementation(() => {
+          const child = createFakeChild(4321);
+          setImmediate(() => {
+            child.stdout.emit('data', Buffer.from('hi'));
+            child.emit('exit', 0, null);
+            child.emit('close', 0, null);
+          });
+          return child;
+        });
+
+        const result = await executor.executeCode(
+          jsParams('console.log("hi");'),
+        );
+
+        expect(result.stdout).toBe('hi');
+        expect(result.stderr).toBe('');
+      },
+    );
+
+    it('should signal no group when spawn produced no pid', async () => {
+      spawnMock.mockImplementation(() => {
+        const child = createFakeChild(undefined);
+        setImmediate(() => {
+          child.emit('error', new Error('spawn ENOENT'));
+          child.emit('close', null, null);
+        });
+        return child;
+      });
+
+      const result = await executor.executeCode(jsParams('console.log("hi");'));
+
+      expect(killSpy).not.toHaveBeenCalled();
+      expect(result.stderr).toContain('Process error:');
+    });
+
+    it('should terminate the script alone when it has no process group', async () => {
+      const child = createFakeChild(undefined);
+      spawnMock.mockImplementation(() => emitClose(child));
+
+      await executor.executeCode(jsParams('console.log("hi");'));
+
+      expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+      expect(killSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  // Real processes, so these prove the group teardown works rather than that
+  // the executor calls the right functions.
+  describe.skipIf(IS_WINDOWS)('process group teardown (real processes)', () => {
+    it(
+      'should kill a background process the script left behind',
+      async () => {
+        const result = await executor.executeCode({
+          invocationContext,
+          codeExecutionInput: {
+            code: backgroundChildScript('ignore'),
+            language: CodeExecutionLanguage.JAVASCRIPT,
+            inputFiles: [],
+          },
+        });
+
+        expect(result.stderr).toBe('');
+        await waitForExit(readPid(result, BACKGROUND_PID_FILE));
+      },
+      REAL_PROCESS_TIMEOUT_MS,
+    );
+
+    it(
+      'should settle when a background process holds the stdio pipes',
+      async () => {
+        const result = await executor.executeCode({
+          invocationContext,
+          codeExecutionInput: {
+            code: backgroundChildScript(
+              'inherit',
+              'console.log("script done");',
+            ),
+            language: CodeExecutionLanguage.JAVASCRIPT,
+            inputFiles: [],
+          },
+        });
+
+        expect(result.stdout).toContain('script done');
+        await waitForExit(readPid(result, BACKGROUND_PID_FILE));
+      },
+      REAL_PROCESS_TIMEOUT_MS,
+    );
+
+    it(
+      'should kill a background process when the script times out',
+      async () => {
+        const shortTimeoutExecutor = new UnsafeLocalCodeExecutor({
+          timeoutSeconds: 1,
+        });
+
+        const result = await shortTimeoutExecutor.executeCode({
+          invocationContext,
+          codeExecutionInput: {
+            code: backgroundChildScript(
+              'ignore',
+              'setTimeout(() => {}, 60000);',
+            ),
+            language: CodeExecutionLanguage.JAVASCRIPT,
+            inputFiles: [],
+          },
+        });
+
+        expect(result.stderr).toContain(
+          'Code execution timed out after 1 seconds.',
+        );
+        await waitForExit(readPid(result, BACKGROUND_PID_FILE));
+      },
+      REAL_PROCESS_TIMEOUT_MS,
+    );
+
+    it(
+      'should kill a grandchild the script never held a handle to',
+      async () => {
+        const result = await executor.executeCode({
+          invocationContext,
+          codeExecutionInput: {
+            code: GRANDCHILD_SCRIPT,
+            language: CodeExecutionLanguage.JAVASCRIPT,
+            inputFiles: [],
+          },
+        });
+
+        expect(result.stderr).toBe('');
+        await waitForExit(readPid(result, GRANDCHILD_PID_FILE));
+      },
+      REAL_PROCESS_TIMEOUT_MS,
+    );
   });
 });
