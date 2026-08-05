@@ -806,6 +806,15 @@ describe('UnsafeLocalCodeExecutor', () => {
           [-4321, 'SIGTERM'],
           [-4321, 'SIGKILL'],
         ]);
+
+        // The pipes close once the SIGKILL lands. That is after the call
+        // returned, so it must not signal a second time.
+        child.emit('close', 0, null);
+
+        expect(killSpy.mock.calls).toEqual([
+          [-4321, 'SIGTERM'],
+          [-4321, 'SIGKILL'],
+        ]);
       },
       SLOW_TEST_TIMEOUT_MS,
     );

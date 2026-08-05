@@ -52,18 +52,6 @@ const TERMINATE_GRACE_MS = 5000;
  */
 const USE_PROCESS_GROUP = !IS_WINDOWS;
 
-/** The only signals this module sends to an execution's process group. */
-type TerminationSignal = 'SIGTERM' | 'SIGKILL';
-
-/** Signals every process left in `group`, tolerating a group already gone. */
-function signalGroup(group: number, signal: TerminationSignal): void {
-  try {
-    process.kill(-group, signal);
-  } catch {
-    logger.debug(`Could not signal the execution process group ${group}.`);
-  }
-}
-
 /**
  * Options for UnsafeLocalCodeExecutor.
  */
@@ -269,25 +257,17 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
         let exitedWith: number | null = null;
         let killTimer: ReturnType<typeof setTimeout> | undefined;
 
-        const terminate = (signal: TerminationSignal) => {
-          if (group === undefined) {
-            child.kill(signal);
-            return;
+        const terminate = (signal: 'SIGTERM' | 'SIGKILL') => {
+          try {
+            // A negative pid signals the whole group, not its leader alone.
+            if (group === undefined) {
+              child.kill(signal);
+            } else {
+              process.kill(-group, signal);
+            }
+          } catch {
+            logger.debug('Could not signal the execution; it is already gone.');
           }
-          signalGroup(group, signal);
-        };
-
-        // Sends the `SIGKILL` that a started teardown owes the group, once and
-        // only once. `close` arriving proves the pipe holders are gone, not
-        // that a group member ignoring `SIGTERM` has exited, so the escalation
-        // happens whether the grace period expired or the call settled first.
-        const escalate = () => {
-          if (killTimer === undefined) {
-            return;
-          }
-          clearTimeout(killTimer);
-          killTimer = undefined;
-          terminate('SIGKILL');
         };
 
         const settle = (exitCode: number | null) => {
@@ -296,7 +276,13 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
           }
           settled = true;
           clearTimeout(timeoutTimer);
-          escalate();
+          // A started teardown still owes the group its `SIGKILL`: `close`
+          // proves the pipe holders are gone, not that a group member ignoring
+          // `SIGTERM` has exited.
+          if (killTimer !== undefined) {
+            clearTimeout(killTimer);
+            terminate('SIGKILL');
+          }
           if (timedOut) {
             stderr += `\nCode execution timed out after ${this.timeoutSeconds} seconds.`;
           } else if (exitCode !== 0 && exitCode !== null && !stderr) {
@@ -313,10 +299,7 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
             return;
           }
           terminate('SIGTERM');
-          killTimer = setTimeout(() => {
-            escalate();
-            settle(exitedWith);
-          }, TERMINATE_GRACE_MS);
+          killTimer = setTimeout(() => settle(exitedWith), TERMINATE_GRACE_MS);
         };
 
         const timeoutTimer = setTimeout(() => {
