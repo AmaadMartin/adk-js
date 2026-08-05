@@ -39,6 +39,20 @@ const POWERSHELL_BASE_ARGS = [
 const CMD_BASE_ARGS = ['/D', '/c'] as const;
 
 /**
+ * How long a finished or timed-out execution's process group is given to exit
+ * after `SIGTERM` before it is killed outright, so teardown cannot block
+ * forever. Mirrors `_TERMINATE_GRACE_SECONDS` in adk-python.
+ */
+const TERMINATE_GRACE_MS = 5000;
+
+/**
+ * Whether an execution can be put in its own process group. Windows has no
+ * process groups, and `detached` there means "own console, outlives the
+ * parent", which is the opposite of what this is for.
+ */
+const USE_PROCESS_GROUP = !IS_WINDOWS;
+
+/**
  * Options for UnsafeLocalCodeExecutor.
  */
 export interface UnsafeLocalCodeExecutorOptions {
@@ -118,6 +132,18 @@ function getExtensionForLanguage(
  * - **JavaScript**: Executed via `node` (defaults to `process.execPath`).
  * - **Python**: Executed via `python3` on Unix, and `python` on Windows.
  * - **Shell**: Executed via `bash` on Unix, and defaults to `powershell` (injecting `-NoProfile` and `-ExecutionPolicy Bypass`) or `cmd.exe` (injecting `/D`) on Windows.
+ *
+ * **Process Lifetime**:
+ * - On POSIX the execution runs in its own process group. When the call
+ *   finishes, by timeout or by normal completion, the executor sends `SIGTERM`
+ *   to that whole group and then always `SIGKILL`. A background process the
+ *   executed code started does not outlive the call, unless the code moved it
+ *   out of the group with its own `setsid`.
+ * - Because the execution leaves the agent's session, a `Ctrl-C` sent to the
+ *   agent's terminal no longer reaches it, and killing the agent outright
+ *   orphans the group instead of tearing it down.
+ * - On Windows there are no process groups, so the executor terminates only the
+ *   script process. Processes the code started can survive the call.
  *
  * WARNING: This executor runs code in the local environment without sandboxing or security restrictions.
  * Use with caution and only for trusted code.
@@ -216,13 +242,70 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
         exitCode: number | null;
       }>((resolve) => {
         const child = spawn(command, args, {
-          timeout: this.timeoutSeconds * 1000,
-          killSignal: 'SIGKILL',
           cwd: tempDir,
+          detached: USE_PROCESS_GROUP,
         });
+
+        // `detached` makes the child lead a new group whose id is its pid. That
+        // group, not the child alone, holds whatever the executed code spawned.
+        const group = USE_PROCESS_GROUP ? child.pid : undefined;
 
         let stdout = '';
         let stderr = '';
+        let timedOut = false;
+        let settled = false;
+        let exitedWith: number | null = null;
+        let killTimer: ReturnType<typeof setTimeout> | undefined;
+
+        const terminate = (signal: 'SIGTERM' | 'SIGKILL') => {
+          try {
+            // A negative pid signals the whole group, not its leader alone.
+            if (group === undefined) {
+              child.kill(signal);
+            } else {
+              process.kill(-group, signal);
+            }
+          } catch {
+            logger.debug('Could not signal the execution; it is already gone.');
+          }
+        };
+
+        const settle = (exitCode: number | null) => {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          clearTimeout(timeoutTimer);
+          // A started teardown still owes the group its `SIGKILL`: `close`
+          // proves the pipe holders are gone, not that a group member ignoring
+          // `SIGTERM` has exited.
+          if (killTimer !== undefined) {
+            clearTimeout(killTimer);
+            terminate('SIGKILL');
+          }
+          if (timedOut) {
+            stderr += `\nCode execution timed out after ${this.timeoutSeconds} seconds.`;
+          } else if (exitCode !== 0 && exitCode !== null && !stderr) {
+            stderr = `Exit code ${exitCode}`;
+          }
+          resolve({stdout, stderr, exitCode});
+        };
+
+        // Runs on the normal path too, not only on timeout: once the script is
+        // gone whatever it started is unwatched, and anything still holding the
+        // stdio pipes keeps `close` from ever arriving.
+        const tearDown = () => {
+          if (settled || killTimer) {
+            return;
+          }
+          terminate('SIGTERM');
+          killTimer = setTimeout(() => settle(exitedWith), TERMINATE_GRACE_MS);
+        };
+
+        const timeoutTimer = setTimeout(() => {
+          timedOut = true;
+          tearDown();
+        }, this.timeoutSeconds * 1000);
 
         if (child.stdout) {
           child.stdout.on('data', (data) => {
@@ -240,16 +323,14 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
           stderr += `Process error: ${err.message}\n`;
         });
 
-        child.on('close', (exitCode, signal) => {
-          if (signal === 'SIGKILL' || signal === 'SIGTERM') {
-            stderr += `\nCode execution timed out after ${this.timeoutSeconds} seconds.`;
-          } else if (exitCode !== 0 && exitCode !== null) {
-            if (!stderr) {
-              stderr = `Exit code ${exitCode}`;
-            }
-          }
-          resolve({stdout, stderr, exitCode});
+        // The exit code is recorded here because `close` may never arrive: the
+        // escalation then settles the call and still reports it.
+        child.on('exit', (code) => {
+          exitedWith = code;
+          tearDown();
         });
+
+        child.on('close', (exitCode) => settle(exitCode));
       });
 
       const outputFiles: File[] = [];
