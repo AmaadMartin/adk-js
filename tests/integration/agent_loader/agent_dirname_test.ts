@@ -47,16 +47,18 @@ describe.each(['__dirname', '__filename', 'import_meta_url'])(
     );
 
     afterAll(async () => {
-      try {
-        await fs.rm(path.join(projectPath, 'node_modules'), {
-          recursive: true,
-          force: true,
-        });
-        await fs.rm(path.join(projectPath, 'package-lock.json'), {force: true});
-      } catch (error) {
-        // Reported, not thrown: a dirty fixture must be visible, but teardown
-        // failing must not turn a green suite red.
-        console.error(`Fixture cleanup failed for ${projectPath}:`, error);
+      // Reported, not thrown: a dirty fixture must be visible, but a failed
+      // teardown must not turn a green suite red. Each removal is independent
+      // so an early failure cannot skip the rest.
+      for (const target of ['node_modules', 'package-lock.json']) {
+        await fs
+          .rm(path.join(projectPath, target), {recursive: true, force: true})
+          .catch((error: unknown) =>
+            console.error(
+              `Cleanup failed for ${projectPath}/${target}:`,
+              error,
+            ),
+          );
       }
     }, TEST_EXECUTION_TIMEOUT);
   },
