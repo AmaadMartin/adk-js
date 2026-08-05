@@ -48,7 +48,7 @@
     "@google/genai": "^2.9.0",
     "@mikro-orm/core": "^6.6.10",
     "@mikro-orm/reflection": "^6.6.6",
-    "@modelcontextprotocol/sdk": "^1.26.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@opentelemetry/api": "1.9.0",
     "@opentelemetry/api-logs": "^0.205.0",
     "@opentelemetry/exporter-logs-otlp-http": "^0.205.0",
