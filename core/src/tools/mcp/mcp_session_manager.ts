@@ -13,36 +13,7 @@ import {
   StreamableHTTPClientTransport,
   StreamableHTTPClientTransportOptions,
 } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-
-/** Every shape the transport accepts for `requestInit.headers`. */
-type TransportHeaders = NonNullable<
-  NonNullable<StreamableHTTPClientTransportOptions['requestInit']>['headers']
->;
-
-/**
- * Normalizes any headers shape into a plain record so that static headers
- * supplied as a `Headers` instance or an array of pairs are not silently
- * dropped when extra headers are merged over them.
- */
-function toHeaderRecord(init?: TransportHeaders): Record<string, string> {
-  if (!init) return {};
-
-  const record: Record<string, string> = {};
-  if (init instanceof Headers) {
-    // `Headers` is iterable only under the DOM.Iterable lib, which this
-    // package does not enable; `forEach` is on the base DOM lib.
-    init.forEach((value, name) => {
-      record[name] = value;
-    });
-  } else if (Array.isArray(init)) {
-    for (const [name, value] of init) {
-      record[name] = value;
-    }
-  } else {
-    Object.assign(record, init);
-  }
-  return record;
-}
+import {normalizeHeaders} from '@modelcontextprotocol/sdk/shared/transport.js';
 
 /**
  * Defines the parameters for establishing a connection to an MCP server using
@@ -128,25 +99,22 @@ export class MCPSessionManager {
         const params = this.connectionParams;
         // Copy-on-write: `params.transportOptions` is shared across every
         // session, so per-session headers must never be written back into it.
-        let options: StreamableHTTPClientTransportOptions =
-          params.transportOptions ?? {};
+        const options: StreamableHTTPClientTransportOptions = {
+          ...params.transportOptions,
+        };
 
         if (!options.requestInit && params.header !== undefined) {
-          options = {
-            ...options,
-            requestInit: {headers: params.header as Record<string, string>},
+          options.requestInit = {
+            headers: params.header as Record<string, string>,
           };
         }
 
         if (extraHeaders && Object.keys(extraHeaders).length > 0) {
-          options = {
-            ...options,
-            requestInit: {
-              ...options.requestInit,
-              headers: {
-                ...toHeaderRecord(options.requestInit?.headers),
-                ...extraHeaders,
-              },
+          options.requestInit = {
+            ...options.requestInit,
+            headers: {
+              ...normalizeHeaders(options.requestInit?.headers),
+              ...extraHeaders,
             },
           };
         }
