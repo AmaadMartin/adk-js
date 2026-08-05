@@ -5,10 +5,20 @@
  */
 
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
-import {describe, expect, it, vi} from 'vitest';
+import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
+import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {BaseAgent} from '../../../src/agents/base_agent.js';
+import {Context} from '../../../src/agents/context.js';
+import {InvocationContext} from '../../../src/agents/invocation_context.js';
 import {ReadonlyContext} from '../../../src/agents/readonly_context.js';
+import {PluginManager} from '../../../src/plugins/plugin_manager.js';
+import {createSession} from '../../../src/sessions/session.js';
 import {MCPConnectionParams} from '../../../src/tools/mcp/mcp_session_manager.js';
-import {MCPToolset} from '../../../src/tools/mcp/mcp_toolset.js';
+import {
+  MCPHeaderProvider,
+  MCPToolset,
+} from '../../../src/tools/mcp/mcp_toolset.js';
 
 vi.hoisted(() => {
   vi.resetModules();
@@ -36,6 +46,7 @@ vi.mock('@modelcontextprotocol/sdk/client/index.js', () => {
           {uri: 'file:///res1', mimeType: 'text/plain', text: 'hello'},
         ],
       }),
+      callTool: vi.fn().mockResolvedValue({content: []}),
     })),
   };
 });
@@ -49,10 +60,22 @@ vi.mock('@modelcontextprotocol/sdk/client/stdio.js', () => {
   };
 });
 
+vi.mock('@modelcontextprotocol/sdk/client/streamableHttp.js', () => {
+  return {
+    StreamableHTTPClientTransport: vi.fn(),
+  };
+});
+
 const stdioParams = {
   type: 'StdioConnectionParams',
   serverParams: {command: 'test'},
 } as unknown as MCPConnectionParams;
+
+const httpParams: MCPConnectionParams = {
+  type: 'StreamableHTTPConnectionParams',
+  url: 'http://test-url',
+  transportOptions: {requestInit: {headers: {'X-Static': 'yes'}}},
+};
 
 describe('MCPToolset', () => {
   it('discovers tools without prefix', async () => {
@@ -128,6 +151,165 @@ describe('MCPToolset', () => {
       const tools = await toolset.getTools();
 
       expect(tools).toHaveLength(2);
+    });
+  });
+
+  describe('headerProvider', () => {
+    /** Options handed to the most recently constructed HTTP transport. */
+    const lastTransportOptions = () =>
+      vi.mocked(StreamableHTTPClientTransport).mock.calls.at(-1)?.[1];
+
+    beforeEach(() => {
+      vi.mocked(StreamableHTTPClientTransport).mockClear();
+      vi.mocked(StdioClientTransport).mockClear();
+      vi.mocked(Client).mockClear();
+    });
+
+    it('no headerProvider leaves transport options unchanged', async () => {
+      const toolset = new MCPToolset(httpParams);
+
+      await toolset.getTools();
+
+      expect(lastTransportOptions()).toEqual({
+        requestInit: {headers: {'X-Static': 'yes'}},
+      });
+    });
+
+    it('invokes the provider once per getTools() call and uses the fresh value', async () => {
+      const provider = vi
+        .fn<MCPHeaderProvider>()
+        .mockImplementationOnce(async () => ({Authorization: 'Bearer t1'}))
+        .mockImplementationOnce(async () => ({Authorization: 'Bearer t2'}));
+      const toolset = new MCPToolset(httpParams, [], undefined, provider);
+
+      await toolset.getTools();
+      const firstOptions = lastTransportOptions();
+      await toolset.getTools();
+
+      expect(provider).toHaveBeenCalledTimes(2);
+      expect(firstOptions).toEqual({
+        requestInit: {headers: {'X-Static': 'yes', Authorization: 'Bearer t1'}},
+      });
+      expect(lastTransportOptions()).toEqual({
+        requestInit: {headers: {'X-Static': 'yes', Authorization: 'Bearer t2'}},
+      });
+    });
+
+    it('merges provider headers over static transportOptions headers', async () => {
+      const params: MCPConnectionParams = {
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+        transportOptions: {
+          requestInit: {
+            headers: {'X-Static': 'yes', Authorization: 'Bearer old'},
+          },
+        },
+      };
+      const toolset = new MCPToolset(params, [], undefined, async () => ({
+        Authorization: 'Bearer new',
+      }));
+
+      await toolset.getTools();
+
+      expect(lastTransportOptions()).toEqual({
+        requestInit: {
+          headers: {'X-Static': 'yes', Authorization: 'Bearer new'},
+        },
+      });
+    });
+
+    it('passes the ReadonlyContext to the provider', async () => {
+      const provider = vi
+        .fn<MCPHeaderProvider>()
+        .mockImplementation(async () => ({}));
+      const context = {} as ReadonlyContext;
+      const toolset = new MCPToolset(httpParams, [], undefined, provider);
+
+      await toolset.getTools(context);
+
+      expect(provider).toHaveBeenCalledWith(context);
+    });
+
+    it('calls the provider with undefined when getTools() has no context', async () => {
+      const provider = vi
+        .fn<MCPHeaderProvider>()
+        .mockImplementation(async () => ({}));
+      const toolset = new MCPToolset(httpParams, [], undefined, provider);
+
+      await toolset.getTools();
+
+      expect(provider).toHaveBeenCalledWith(undefined);
+    });
+
+    it('supports a synchronous provider', async () => {
+      const toolset = new MCPToolset(httpParams, [], undefined, () => ({
+        Authorization: 'Bearer sync',
+      }));
+
+      await toolset.getTools();
+
+      expect(lastTransportOptions()).toEqual({
+        requestInit: {
+          headers: {'X-Static': 'yes', Authorization: 'Bearer sync'},
+        },
+      });
+    });
+
+    it('an empty provider result leaves transport options unchanged', async () => {
+      const toolset = new MCPToolset(httpParams, [], undefined, () => ({}));
+
+      await toolset.getTools();
+
+      expect(lastTransportOptions()).toEqual({
+        requestInit: {headers: {'X-Static': 'yes'}},
+      });
+    });
+
+    it('propagates a provider rejection and creates no session', async () => {
+      const toolset = new MCPToolset(httpParams, [], undefined, async () => {
+        throw new Error('token fetch failed');
+      });
+
+      await expect(toolset.getTools()).rejects.toThrow('token fetch failed');
+      expect(Client).not.toHaveBeenCalled();
+      expect(StreamableHTTPClientTransport).not.toHaveBeenCalled();
+    });
+
+    it('resolved headers are handed to the returned MCPTools', async () => {
+      const toolset = new MCPToolset(httpParams, [], undefined, () => ({
+        Authorization: 'Bearer call',
+      }));
+
+      const tools = await toolset.getTools();
+      const toolContext = new Context({
+        invocationContext: new InvocationContext({
+          invocationId: 'inv-1',
+          agent: {} as BaseAgent,
+          session: createSession({id: 'session-1', appName: 'app'}),
+          pluginManager: new PluginManager(),
+          abortSignal: new AbortController().signal,
+        }),
+      });
+      await tools[0].runAsync({args: {}, toolContext});
+
+      // Two transports: the discovery session, then the tool-call session.
+      expect(StreamableHTTPClientTransport).toHaveBeenCalledTimes(2);
+      expect(lastTransportOptions()).toEqual({
+        requestInit: {
+          headers: {'X-Static': 'yes', Authorization: 'Bearer call'},
+        },
+      });
+    });
+
+    it('works with a stdio transport', async () => {
+      const toolset = new MCPToolset(stdioParams, [], undefined, () => ({
+        Authorization: 'Bearer ignored',
+      }));
+
+      const tools = await toolset.getTools();
+
+      expect(tools).toHaveLength(2);
+      expect(StdioClientTransport).toHaveBeenCalledWith({command: 'test'});
     });
   });
 
