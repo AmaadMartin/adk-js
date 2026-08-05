@@ -6,16 +6,7 @@
 
 import {isCancel, select, text} from '@clack/prompts';
 import {execSync} from 'node:child_process';
-import {
-  afterEach,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  Mock,
-  vi,
-} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {createAgent} from '../../src/cli/cli_create.js';
 import {
   createFolder,
@@ -63,13 +54,10 @@ describe('createAgent', () => {
     language: '',
   });
 
-  beforeAll(() => {
-    vi.spyOn(console, 'log').mockImplementation(() => {});
-    vi.spyOn(console, 'error').mockImplementation(() => {});
-  });
-
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
     (isCancel as unknown as Mock).mockReturnValue(false);
     (listFiles as Mock).mockResolvedValue(['file1', 'file2']);
   });
