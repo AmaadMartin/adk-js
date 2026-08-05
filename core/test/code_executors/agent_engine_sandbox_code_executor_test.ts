@@ -8,6 +8,7 @@ import {Client} from '@google-cloud/vertexai';
 import {
   AgentEngineSandboxCodeExecutor,
   CodeExecutionLanguage,
+  FileContentEncoding,
   InvocationContext,
 } from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
@@ -283,6 +284,98 @@ describe('AgentEngineSandboxCodeExecutor', () => {
       expect(result.outputFiles).toHaveLength(1);
       expect(result.outputFiles[0].name).toBe('plot.png');
       expect(result.outputFiles[0].mimeType).toBe('image/png');
+    });
+
+    it('marks output files as base64', async () => {
+      mockClient.agentEnginesInternal.sandboxes.executeCodeInternal.mockResolvedValue(
+        {
+          outputs: [
+            {
+              mimeType: 'image/png',
+              data: 'base64data',
+              metadata: {
+                attributes: {
+                  file_name: Buffer.from('plot.png').toString('base64'),
+                },
+              },
+            },
+          ],
+        },
+      );
+
+      const result = await executor.executeCode({
+        invocationContext,
+        codeExecutionInput: {
+          code: 'print("hello")',
+          language: CodeExecutionLanguage.PYTHON,
+          inputFiles: [],
+        },
+      });
+
+      expect(result.outputFiles[0].contentEncoding).toBe(
+        FileContentEncoding.BASE64,
+      );
+    });
+
+    it('base64-encodes an input file that declares utf-8', async () => {
+      await executor.executeCode({
+        invocationContext,
+        codeExecutionInput: {
+          code: 'print("hello")',
+          language: CodeExecutionLanguage.PYTHON,
+          inputFiles: [
+            {
+              name: 'a.md',
+              content: '# hi',
+              contentEncoding: FileContentEncoding.UTF8,
+              mimeType: 'text/markdown',
+            },
+          ],
+        },
+      });
+
+      expect(
+        mockClient.agentEnginesInternal.sandboxes.executeCodeInternal,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          inputs: expect.arrayContaining([
+            expect.objectContaining({
+              mimeType: 'text/markdown',
+              data: Buffer.from('# hi').toString('base64'),
+            }),
+          ]),
+        }),
+      );
+    });
+
+    it('passes a base64 input file through unchanged', async () => {
+      const encoded = Buffer.from('a,b,c').toString('base64');
+
+      await executor.executeCode({
+        invocationContext,
+        codeExecutionInput: {
+          code: 'print("hello")',
+          language: CodeExecutionLanguage.PYTHON,
+          inputFiles: [
+            {
+              name: 'data.csv',
+              content: encoded,
+              contentEncoding: FileContentEncoding.BASE64,
+              mimeType: 'text/csv',
+            },
+          ],
+        },
+      });
+
+      expect(
+        mockClient.agentEnginesInternal.sandboxes.executeCodeInternal,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          inputs: expect.arrayContaining([
+            expect.objectContaining({mimeType: 'text/csv', data: encoded}),
+          ]),
+        }),
+      );
     });
 
     it('guesses mime type if missing in output', async () => {

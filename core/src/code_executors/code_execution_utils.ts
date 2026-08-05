@@ -23,12 +23,13 @@ export interface File {
   name: string;
 
   /**
-   * The encoded bytes of the file content.
+   * The file content, encoded as described by `contentEncoding`.
    * */
   content: string;
 
   /**
-   * The encoding of the file content.
+   * How `content` is encoded. Defaults to `FileContentEncoding.BASE64` when
+   * absent, so binary content survives a `File` that omits the field.
    */
   contentEncoding?: FileContentEncoding;
 

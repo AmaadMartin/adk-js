@@ -7,7 +7,7 @@
 import {Client} from '@google-cloud/vertexai';
 import {Language} from '@google-cloud/vertexai/build/src/genai/types.js';
 import {experimental} from '../utils/experimental.js';
-import {guessMimeType} from '../utils/file_utils.js';
+import {decodeFileContent, guessMimeType} from '../utils/file_utils.js';
 
 interface LocalChunk {
   data?: string;
@@ -30,6 +30,7 @@ import {
   CodeExecutionLanguage,
   CodeExecutionResult,
   File,
+  FileContentEncoding,
 } from './code_execution_utils.js';
 
 const DEFAULT_MAX_ATTEMPTS = 180;
@@ -166,7 +167,7 @@ export class AgentEngineSandboxCodeExecutor extends BaseCodeExecutor {
       for (const file of codeExecutionInput.inputFiles) {
         inputs.push({
           mimeType: file.mimeType,
-          data: file.content, // Assumed to be already base64 encoded based on CodeExecutionInput definition
+          data: decodeFileContent(file).toString('base64'),
           metadata: {
             attributes: {
               file_name: Buffer.from(file.name).toString('base64'),
@@ -226,6 +227,7 @@ export class AgentEngineSandboxCodeExecutor extends BaseCodeExecutor {
           outputFiles.push({
             name: name,
             content: output.data || '',
+            contentEncoding: FileContentEncoding.BASE64,
             mimeType: mimeType,
           });
         }
