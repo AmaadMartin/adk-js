@@ -60,6 +60,7 @@ const SLOW_TEST_TIMEOUT_MS = 20000;
 
 const BACKGROUND_PID_FILE = 'background_pid.txt';
 const GRANDCHILD_PID_FILE = 'grandchild_pid.txt';
+const STUBBORN_PID_FILE = 'stubborn_pid.txt';
 
 /** Code that leaves one background process behind and reports its pid. */
 function backgroundChildScript(
@@ -94,6 +95,28 @@ const GRANDCHILD_SCRIPT = [
   `  "fs.writeFileSync('${GRANDCHILD_PID_FILE}', String(grandchild.pid));",`,
   `].join('\\n');`,
   `spawn(process.execPath, ['-e', childCode], {stdio: 'ignore'});`,
+].join('\n');
+
+/**
+ * Code that leaves a background process which ignores `SIGTERM`, so only the
+ * `SIGKILL` escalation can end it. The script waits for the pid file, which
+ * the background process writes after it installs its handler, so the teardown
+ * cannot race the handler.
+ */
+const STUBBORN_CHILD_SCRIPT = [
+  `const {spawn} = require('node:child_process');`,
+  `const fs = require('node:fs');`,
+  `const backgroundCode = [`,
+  `  "process.on('SIGTERM', () => {});",`,
+  `  "setTimeout(() => {}, 60000);",`,
+  `  "require('node:fs').writeFileSync('${STUBBORN_PID_FILE}', String(process.pid));",`,
+  `].join('\\n');`,
+  `const background = spawn(process.execPath, ['-e', backgroundCode],`,
+  `    {stdio: 'ignore'});`,
+  `background.unref();`,
+  `const poll = setInterval(() => {`,
+  `  if (fs.existsSync('${STUBBORN_PID_FILE}')) clearInterval(poll);`,
+  `}, 10);`,
 ].join('\n');
 
 /**
@@ -684,7 +707,10 @@ describe('UnsafeLocalCodeExecutor', () => {
           jsParams('console.log("hi");'),
         );
 
-        expect(killSpy).toHaveBeenCalledWith(-4321, 'SIGTERM');
+        expect(killSpy.mock.calls).toEqual([
+          [-4321, 'SIGTERM'],
+          [-4321, 'SIGKILL'],
+        ]);
         expect(result.stderr).toBe('');
       },
     );
@@ -728,7 +754,7 @@ describe('UnsafeLocalCodeExecutor', () => {
     );
 
     it.skipIf(IS_WINDOWS)(
-      'should clear its timers and stop signalling once the call settles',
+      'should escalate as soon as the call settles, without waiting out the grace period',
       async () => {
         useTimerFakes();
         const {child, spawned} = fakeChildOnSpawn(4321);
@@ -738,6 +764,12 @@ describe('UnsafeLocalCodeExecutor', () => {
         child.emit('exit', 0, null);
         child.emit('close', 0, null);
 
+        // `close` proves the pipe holders are gone, not that a group member
+        // ignoring SIGTERM has exited, so the SIGKILL is still owed.
+        expect(killSpy.mock.calls).toEqual([
+          [-4321, 'SIGTERM'],
+          [-4321, 'SIGKILL'],
+        ]);
         // A live escalation timer would hold the event loop and could signal a
         // process group id that the operating system has since reused.
         expect(vi.getTimerCount()).toBe(0);
@@ -745,7 +777,10 @@ describe('UnsafeLocalCodeExecutor', () => {
         await execution;
         await vi.advanceTimersByTimeAsync(TERMINATE_GRACE_MS * 2);
 
-        expect(killSpy.mock.calls).toEqual([[-4321, 'SIGTERM']]);
+        expect(killSpy.mock.calls).toEqual([
+          [-4321, 'SIGTERM'],
+          [-4321, 'SIGKILL'],
+        ]);
       },
       SLOW_TEST_TIMEOUT_MS,
     );
@@ -853,9 +888,27 @@ describe('UnsafeLocalCodeExecutor', () => {
 
       await executor.executeCode(jsParams('console.log("hi");'));
 
-      expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+      expect(child.kill.mock.calls).toEqual([['SIGTERM'], ['SIGKILL']]);
       expect(killSpy).not.toHaveBeenCalled();
     });
+
+    it.skipIf(IS_WINDOWS)(
+      'should report the exit code when the escalation settles the call',
+      async () => {
+        useTimerFakes();
+        const {child, spawned} = fakeChildOnSpawn(4321);
+
+        const execution = executor.executeCode(jsParams('process.exit(3);'));
+        await spawned;
+        // `close` never arrives, so the escalation has to report the code.
+        child.emit('exit', 3, null);
+        await vi.advanceTimersByTimeAsync(TERMINATE_GRACE_MS);
+        const result = await execution;
+
+        expect(result.stderr).toBe('Exit code 3');
+      },
+      SLOW_TEST_TIMEOUT_MS,
+    );
   });
 
   // Real processes, so these prove the group teardown works rather than that
@@ -923,6 +976,24 @@ describe('UnsafeLocalCodeExecutor', () => {
           'Code execution timed out after 1 seconds.',
         );
         await waitForExit(readPid(result, BACKGROUND_PID_FILE));
+      },
+      SLOW_TEST_TIMEOUT_MS,
+    );
+
+    it(
+      'should kill a background process that ignores SIGTERM',
+      async () => {
+        const result = await executor.executeCode({
+          invocationContext,
+          codeExecutionInput: {
+            code: STUBBORN_CHILD_SCRIPT,
+            language: CodeExecutionLanguage.JAVASCRIPT,
+            inputFiles: [],
+          },
+        });
+
+        expect(result.stderr).toBe('');
+        await waitForExit(readPid(result, STUBBORN_PID_FILE));
       },
       SLOW_TEST_TIMEOUT_MS,
     );

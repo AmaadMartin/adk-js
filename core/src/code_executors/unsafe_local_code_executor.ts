@@ -147,9 +147,13 @@ function getExtensionForLanguage(
  *
  * **Process Lifetime**:
  * - On POSIX the execution runs in its own process group. When the call
- *   finishes, by timeout or by normal completion, the executor terminates that
- *   whole group with `SIGTERM` and then `SIGKILL`. A background process the
- *   executed code started does not outlive the call.
+ *   finishes, by timeout or by normal completion, the executor sends `SIGTERM`
+ *   to that whole group and then always `SIGKILL`. A background process the
+ *   executed code started does not outlive the call, unless the code moved it
+ *   out of the group with its own `setsid`.
+ * - Because the execution leaves the agent's session, a `Ctrl-C` sent to the
+ *   agent's terminal no longer reaches it, and killing the agent outright
+ *   orphans the group instead of tearing it down.
  * - On Windows there are no process groups, so the executor terminates only the
  *   script process. Processes the code started can survive the call.
  *
@@ -262,6 +266,7 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
         let stderr = '';
         let timedOut = false;
         let settled = false;
+        let exitedWith: number | null = null;
         let killTimer: ReturnType<typeof setTimeout> | undefined;
 
         const terminate = (signal: TerminationSignal) => {
@@ -272,13 +277,26 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
           signalGroup(group, signal);
         };
 
+        // Sends the `SIGKILL` that a started teardown owes the group, once and
+        // only once. `close` arriving proves the pipe holders are gone, not
+        // that a group member ignoring `SIGTERM` has exited, so the escalation
+        // happens whether the grace period expired or the call settled first.
+        const escalate = () => {
+          if (killTimer === undefined) {
+            return;
+          }
+          clearTimeout(killTimer);
+          killTimer = undefined;
+          terminate('SIGKILL');
+        };
+
         const settle = (exitCode: number | null) => {
           if (settled) {
             return;
           }
           settled = true;
           clearTimeout(timeoutTimer);
-          clearTimeout(killTimer);
+          escalate();
           if (timedOut) {
             stderr += `\nCode execution timed out after ${this.timeoutSeconds} seconds.`;
           } else if (exitCode !== 0 && exitCode !== null && !stderr) {
@@ -296,8 +314,8 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
           }
           terminate('SIGTERM');
           killTimer = setTimeout(() => {
-            terminate('SIGKILL');
-            settle(null);
+            escalate();
+            settle(exitedWith);
           }, TERMINATE_GRACE_MS);
         };
 
@@ -322,7 +340,12 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
           stderr += `Process error: ${err.message}\n`;
         });
 
-        child.on('exit', () => tearDown());
+        // The exit code is recorded here because `close` may never arrive: the
+        // escalation then settles the call and still reports it.
+        child.on('exit', (code) => {
+          exitedWith = code;
+          tearDown();
+        });
 
         child.on('close', (exitCode) => settle(exitCode));
       });
