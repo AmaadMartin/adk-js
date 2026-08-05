@@ -874,19 +874,34 @@ describe('AgentLoader', () => {
     });
 
     it('keeps the replacement memo when a superseded scan fails', async () => {
-      (esbuild.build as Mock).mockRejectedValueOnce(
-        new Error('compile failed'),
+      // The first compile is held open so the test decides when the scan that
+      // owns it fails, instead of racing the replacement scan's compiles.
+      let compileStarted!: () => void;
+      const compiling = new Promise<void>((resolve) => {
+        compileStarted = resolve;
+      });
+      let failCompile!: (error: Error) => void;
+      (esbuild.build as Mock).mockImplementationOnce(
+        () =>
+          new Promise<void>((_resolve, reject) => {
+            failCompile = reject;
+            compileStarted();
+          }),
       );
 
       const loader = new AgentLoader(tempAgentsDir);
       const superseded = loader.preloadAgents();
+      await compiling;
+
       (loader as unknown as {invalidateAll: () => void}).invalidateAll();
       const replacement = loader.preloadAgents();
-
-      await expect(superseded).rejects.toThrow('compile failed');
       await replacement;
 
-      // The replacement is still memoized, so listing does not scan again.
+      // The superseded scan fails while the replacement owns the memo.
+      failCompile(new Error('compile failed'));
+      await expect(superseded).rejects.toThrow('compile failed');
+
+      // The replacement is still memoized, so a later call does not scan again.
       const compiledAfterReplacement = compiledEntryPoints().length;
       await loader.preloadAgents();
 
