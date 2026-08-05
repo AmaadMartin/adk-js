@@ -849,10 +849,11 @@ describe('AgentLoader', () => {
       // its replacement.
       const compiled = compiledEntryPoints();
       expect(compiled.length).toBe(2 * new Set(compiled).size);
-      expect(
-        (loader as unknown as {agentsAlreadyPreloaded: boolean})
-          .agentsAlreadyPreloaded,
-      ).toBe(true);
+
+      // The replacement scan completed, so listing serves it from the cache
+      // instead of scanning a third time.
+      expect(await loader.listAgents()).toEqual(['agent1', 'agent2', 'agent3']);
+      expect(compiledEntryPoints().length).toBe(compiled.length);
 
       await loader.disposeAll();
     });
