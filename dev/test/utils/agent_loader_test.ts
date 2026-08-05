@@ -771,22 +771,19 @@ describe('AgentLoader', () => {
     it('resets preload cache when invalidateAll is called (simulates file-change reload)', async () => {
       const loader = new AgentLoader(tempAgentsDir);
 
-      // Initial load should populate the cache and mark as preloaded
+      // Initial load should populate the cache
       await loader.listAgents();
-      expect(
-        (loader as unknown as {agentsAlreadyPreloaded: boolean})
-          .agentsAlreadyPreloaded,
-      ).toBe(true);
+      const compiledAfterFirstLoad = compiledEntryPoints().length;
+      expect(compiledAfterFirstLoad).toBeGreaterThan(0);
 
       // Simulate what the fs.watch callback does when a file changes
       (loader as unknown as {invalidateAll: () => void}).invalidateAll();
 
-      // After invalidation the preloaded flag is reset so that the next
-      // request triggers a full re-scan from disk
-      expect(
-        (loader as unknown as {agentsAlreadyPreloaded: boolean})
-          .agentsAlreadyPreloaded,
-      ).toBe(false);
+      // After invalidation the next request triggers a full re-scan from disk
+      await loader.listAgents();
+      expect(compiledEntryPoints().length).toBeGreaterThan(
+        compiledAfterFirstLoad,
+      );
 
       await loader.disposeAll();
     });
@@ -854,6 +851,46 @@ describe('AgentLoader', () => {
       // instead of scanning a third time.
       expect(await loader.listAgents()).toEqual(['agent1', 'agent2', 'agent3']);
       expect(compiledEntryPoints().length).toBe(compiled.length);
+
+      await loader.disposeAll();
+    });
+
+    it('does not reuse a scan that was invalidated while it was in flight', async () => {
+      const loader = new AgentLoader(tempAgentsDir);
+
+      const invalidatedScan = loader.preloadAgents();
+      (loader as unknown as {invalidateAll: () => void}).invalidateAll();
+      await invalidatedScan;
+
+      const compiledBeforeReload = compiledEntryPoints().length;
+      await loader.preloadAgents();
+
+      expect(compiledEntryPoints().length).toBeGreaterThan(
+        compiledBeforeReload,
+      );
+      expect(await loader.listAgents()).toEqual(['agent1', 'agent2', 'agent3']);
+
+      await loader.disposeAll();
+    });
+
+    it('keeps the replacement memo when a superseded scan fails', async () => {
+      (esbuild.build as Mock).mockRejectedValueOnce(
+        new Error('compile failed'),
+      );
+
+      const loader = new AgentLoader(tempAgentsDir);
+      const superseded = loader.preloadAgents();
+      (loader as unknown as {invalidateAll: () => void}).invalidateAll();
+      const replacement = loader.preloadAgents();
+
+      await expect(superseded).rejects.toThrow('compile failed');
+      await replacement;
+
+      // The replacement is still memoized, so listing does not scan again.
+      const compiledAfterReplacement = compiledEntryPoints().length;
+      await loader.preloadAgents();
+
+      expect(compiledEntryPoints().length).toBe(compiledAfterReplacement);
 
       await loader.disposeAll();
     });

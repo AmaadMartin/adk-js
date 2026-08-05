@@ -358,7 +358,6 @@ export class AgentFile {
  * app/rootApp as instance of App.
  */
 export class AgentLoader {
-  private agentsAlreadyPreloaded = false;
   private preloadInFlight?: Promise<void>;
   private readonly preloadedAgents: Record<string, AgentFile> = {};
   private watcher?: fs.FSWatcher;
@@ -434,7 +433,6 @@ export class AgentLoader {
       delete this.preloadedAgents[key];
     }
 
-    this.agentsAlreadyPreloaded = false;
     // Detach any running scan so the invalidation is not swallowed by a
     // caller joining results that were gathered before the change.
     this.preloadInFlight = undefined;
@@ -485,23 +483,27 @@ export class AgentLoader {
   /**
    * Discovers, compiles and imports every agent in the agents directory.
    *
-   * Callers that arrive while a scan is running join it. A rejected scan is
-   * discarded, so a later call retries from scratch.
+   * Callers that arrive while a scan is running join it, and the settled
+   * promise serves every later caller. A rejected scan is discarded, so a
+   * later call retries from scratch.
    */
   async preloadAgents(): Promise<void> {
-    if (this.agentsAlreadyPreloaded) {
-      return;
-    }
-
     // A second concurrent scan re-bundles and re-imports every entrypoint, and
     // its AgentFile instances overwrite the first scan's in `preloadedAgents`,
     // so the displaced ones are never disposed and their temp directories leak.
-    this.preloadInFlight ??= this.scanAgents().catch((e: unknown) => {
-      this.preloadInFlight = undefined;
-      throw e;
-    });
+    const scan: Promise<void> = (this.preloadInFlight ??=
+      this.scanAgents().catch((e: unknown) => {
+        // Only the scan that is still current may drop the memo. A scan
+        // superseded by invalidateAll() would otherwise discard the results of
+        // the replacement that a later caller already started.
+        if (this.preloadInFlight === scan) {
+          this.preloadInFlight = undefined;
+        }
 
-    return this.preloadInFlight;
+        throw e;
+      }));
+
+    return scan;
   }
 
   private async scanAgents(): Promise<void> {
@@ -520,8 +522,6 @@ export class AgentLoader {
         }
       }),
     );
-
-    this.agentsAlreadyPreloaded = true;
 
     if (this.watchForChanges && !this.watcher) {
       this.startWatching();
