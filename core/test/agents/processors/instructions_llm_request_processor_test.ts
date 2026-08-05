@@ -14,6 +14,7 @@ import {
   PluginManager,
   ReadonlyContext,
 } from '@google/adk';
+import {Schema, Type} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {INSTRUCTIONS_LLM_REQUEST_PROCESSOR} from '../../../src/agents/processors/instructions_llm_request_processor.js';
 
@@ -162,10 +163,10 @@ describe('InstructionsLlmRequestProcessor', () => {
   });
 
   it('should append set_model_response instruction when outputSchema and tools are present', async () => {
-    const outputSchema = {
-      type: 'object' as const,
+    const outputSchema: Schema = {
+      type: Type.OBJECT,
       properties: {
-        answer: {type: 'string' as const},
+        answer: {type: Type.STRING},
       },
     };
     const agent = new LlmAgent({

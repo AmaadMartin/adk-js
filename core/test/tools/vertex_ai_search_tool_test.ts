@@ -4,47 +4,67 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {GenerateContentConfig} from '@google/genai';
 import {afterEach, describe, expect, it} from 'vitest';
 import {Context} from '../../src/agents/context.js';
 import {LlmRequest} from '../../src/models/llm_request.js';
-import {VertexAiSearchTool} from '../../src/tools/vertex_ai_search_tool.js';
+import {
+  BaseVertexAiSearchToolParams,
+  VertexAISearchDataStoreSpec,
+  VertexAiSearchTool,
+  VertexAiSearchToolParams,
+} from '../../src/tools/vertex_ai_search_tool.js';
 
-interface TestTool {
-  retrieval?: {
-    vertexAiSearch?: {
-      datastore?: string;
-      dataStoreSpecs?: Array<{dataStore?: string}>;
-      engine?: string;
-      filter?: string;
-      maxResults?: number;
-    };
-  };
+/** The params object the constructor destructures before it validates. */
+type UnvalidatedParams = BaseVertexAiSearchToolParams & {
+  dataStoreId?: string;
+  searchEngineId?: string;
+  dataStoreSpecs?: VertexAISearchDataStoreSpec[];
+};
+
+/**
+ * Constructs the tool from params `VertexAiSearchToolParams` cannot spell.
+ *
+ * That union marks the opposite id `?: never` in each arm, so neither "both
+ * ids" nor "neither id" can be written as a typed literal — yet those are
+ * exactly the combinations the constructor's runtime guard rejects, and they
+ * do arrive from untyped JavaScript and config-driven callers.
+ */
+function newToolWithUnvalidatedParams(
+  params: UnvalidatedParams,
+): VertexAiSearchTool {
+  return new VertexAiSearchTool(params as VertexAiSearchToolParams);
+}
+
+function makeLlmRequest(
+  model: string,
+  config?: GenerateContentConfig,
+): LlmRequest {
+  return {model, toolsDict: {}, contents: [], liveConnectConfig: {}, config};
 }
 
 describe('VertexAiSearchTool', () => {
   it('should throw error if neither dataStoreId nor searchEngineId is specified', () => {
-    expect(() => new VertexAiSearchTool({})).toThrowError(
+    expect(() => newToolWithUnvalidatedParams({})).toThrowError(
       'Either dataStoreId or searchEngineId must be specified.',
     );
   });
 
   it('should throw error if both dataStoreId and searchEngineId are specified', () => {
-    expect(
-      () =>
-        new VertexAiSearchTool({
-          dataStoreId: 'ds',
-          searchEngineId: 'se',
-        }),
+    expect(() =>
+      newToolWithUnvalidatedParams({
+        dataStoreId: 'ds',
+        searchEngineId: 'se',
+      }),
     ).toThrowError('Either dataStoreId or searchEngineId must be specified.');
   });
 
   it('should throw error if dataStoreSpecs is specified without searchEngineId', () => {
-    expect(
-      () =>
-        new VertexAiSearchTool({
-          dataStoreId: 'ds',
-          dataStoreSpecs: [{dataStore: 'ds1'}],
-        }),
+    expect(() =>
+      newToolWithUnvalidatedParams({
+        dataStoreId: 'ds',
+        dataStoreSpecs: [{dataStore: 'ds1'}],
+      }),
     ).toThrowError(
       'searchEngineId must be specified if dataStoreSpecs is specified.',
     );
@@ -68,36 +88,30 @@ describe('VertexAiSearchTool', () => {
       filter: 'f',
       maxResults: 10,
     });
-    const llmRequest: LlmRequest = {
-      model: 'gemini-2.0-flash',
-      toolsDict: {},
-    };
+    const llmRequest = makeLlmRequest('gemini-2.0-flash');
     const toolContext = {} as Context;
 
     await tool.processLlmRequest({toolContext, llmRequest});
 
     expect(llmRequest.config?.tools).toHaveLength(1);
-    expect(
-      (llmRequest.config?.tools?.[0] as unknown as TestTool).retrieval
-        ?.vertexAiSearch,
-    ).toEqual({
-      datastore: 'ds',
-      dataStoreSpecs: undefined,
-      engine: undefined,
-      filter: 'f',
-      maxResults: 10,
+    expect(llmRequest.config?.tools?.[0]).toEqual({
+      retrieval: {
+        vertexAiSearch: {
+          datastore: 'ds',
+          dataStoreSpecs: undefined,
+          engine: undefined,
+          filter: 'f',
+          maxResults: 10,
+        },
+      },
     });
   });
 
   it('should throw error for Gemini 1.x if other tools are present and bypass is false', async () => {
     const tool = new VertexAiSearchTool({dataStoreId: 'ds'});
-    const llmRequest: LlmRequest = {
-      model: 'gemini-1.5-pro',
-      toolsDict: {},
-      config: {
-        tools: [{functionDeclarations: []}],
-      },
-    };
+    const llmRequest = makeLlmRequest('gemini-1.5-pro', {
+      tools: [{functionDeclarations: []}],
+    });
     const toolContext = {} as Context;
 
     await expect(
@@ -112,13 +126,9 @@ describe('VertexAiSearchTool', () => {
       dataStoreId: 'ds',
       bypassMultiToolsLimit: true,
     });
-    const llmRequest: LlmRequest = {
-      model: 'gemini-1.5-pro',
-      toolsDict: {},
-      config: {
-        tools: [{functionDeclarations: []}],
-      },
-    };
+    const llmRequest = makeLlmRequest('gemini-1.5-pro', {
+      tools: [{functionDeclarations: []}],
+    });
     const toolContext = {} as Context;
 
     await tool.processLlmRequest({toolContext, llmRequest});
@@ -128,10 +138,7 @@ describe('VertexAiSearchTool', () => {
 
   it('should throw error for non-Gemini model', async () => {
     const tool = new VertexAiSearchTool({dataStoreId: 'ds'});
-    const llmRequest: LlmRequest = {
-      model: 'claude-3',
-      toolsDict: {},
-    };
+    const llmRequest = makeLlmRequest('claude-3');
     const toolContext = {} as Context;
 
     await expect(
@@ -155,10 +162,7 @@ describe('VertexAiSearchTool', () => {
     it('should bypass model check if ADK_DISABLE_GEMINI_MODEL_ID_CHECK is true', async () => {
       process.env.ADK_DISABLE_GEMINI_MODEL_ID_CHECK = 'true';
       const tool = new VertexAiSearchTool({dataStoreId: 'ds'});
-      const llmRequest: LlmRequest = {
-        model: 'claude-3',
-        toolsDict: {},
-      };
+      const llmRequest = makeLlmRequest('claude-3');
       const toolContext = {} as Context;
 
       await tool.processLlmRequest({toolContext, llmRequest});

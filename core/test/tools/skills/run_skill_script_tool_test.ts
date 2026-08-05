@@ -11,6 +11,7 @@ import {
   Context,
   ExecuteCodeParams,
   File,
+  FileContentEncoding,
   InvocationContext,
   LlmAgent,
   RunSkillScriptTool,
@@ -201,17 +202,17 @@ describe('RunSkillScriptTool', () => {
     expect(fileNames).toContain('assets/binary.dat');
 
     const binaryFile = inputFiles?.find((f) => f.name === 'assets/binary.dat');
-    expect(binaryFile?.contentEncoding).toBe('base64');
+    expect(binaryFile?.contentEncoding).toBe(FileContentEncoding.BASE64);
   });
 
   it('calls materializeFiles with output files from executor', async () => {
     const mockExecutor = new MockCodeExecutor();
-    const testFile = {
+    const testFile: File = {
       name: 'output.txt',
       content: 'hello',
-      contentEncoding: 'utf8',
+      contentEncoding: FileContentEncoding.UTF8,
       mimeType: 'text/plain',
-    } as File;
+    };
     mockExecutor.mockResult = {
       stdout: '',
       stderr: '',

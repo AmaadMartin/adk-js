@@ -8,6 +8,33 @@ import {OpenApiSpecParser} from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
 import {describe, expect, it} from 'vitest';
 
+/**
+ * A schema `type` name that `openapi-types` does not admit.
+ *
+ * `NonArraySchemaObjectType` is a closed union of the normalized lowercase
+ * names, so the uppercase spellings real specs contain — and which the parser
+ * is expected to normalize — cannot be written as a typed literal.
+ */
+function unnormalizedSchemaType(
+  type: string,
+): OpenAPIV3.NonArraySchemaObjectType {
+  return type as OpenAPIV3.NonArraySchemaObjectType;
+}
+
+/** Returns the resolved schema of `name` in `schema.properties`. */
+function propertySchema(
+  schema: OpenAPIV3.SchemaObject,
+  name: string,
+): OpenAPIV3.SchemaObject {
+  const property = schema.properties?.[name];
+  if (!property || '$ref' in property) {
+    expect.fail(
+      `expected a resolved schema for property "${name}", got ${JSON.stringify(property)}`,
+    );
+  }
+  return property;
+}
+
 describe('OpenApiSpecParser', () => {
   it('should resolve internal references', () => {
     const spec: OpenAPIV3.Document = {
@@ -144,10 +171,10 @@ describe('OpenApiSpecParser', () => {
               content: {
                 'application/json': {
                   schema: {
-                    type: 'OBJECT', // uppercase, should be normalized
+                    type: unnormalizedSchemaType('OBJECT'),
                     properties: {
-                      age: {type: 'INTEGER'}, // uppercase, should be normalized
-                      invalid: {type: 'unknown_type'}, // invalid, should be removed
+                      age: {type: unnormalizedSchemaType('INTEGER')},
+                      invalid: {type: unnormalizedSchemaType('unknown_type')},
                     },
                   },
                 },
@@ -168,10 +195,8 @@ describe('OpenApiSpecParser', () => {
     const schema = body.content['application/json']
       .schema as OpenAPIV3.SchemaObject;
     expect(schema.type).toBe('object');
-    expect(schema.properties?.age?.type).toBe('integer');
-    expect(
-      (schema.properties?.invalid as OpenAPIV3.SchemaObject).type,
-    ).toBeUndefined();
+    expect(propertySchema(schema, 'age').type).toBe('integer');
+    expect(propertySchema(schema, 'invalid').type).toBeUndefined();
   });
 
   it('should merge path-level parameters and generate operationId if missing', () => {

@@ -14,12 +14,32 @@ class DummyAgent extends BaseAgent {
   constructor(name = 'dummy_agent') {
     super({name});
   }
+
+  protected async *runAsyncImpl() {
+    yield* [];
+  }
+
+  protected async *runLiveImpl() {
+    yield* [];
+  }
 }
 
 class DummyPlugin extends BasePlugin {
   constructor(name = 'dummy_plugin') {
     super(name);
   }
+}
+
+/**
+ * Constructs an {@link App} from a `rootAgent` `AppOptions` cannot spell.
+ *
+ * `AppOptions.rootAgent` is typed `BaseAgent`, so the `undefined` and
+ * non-agent values the constructor guards against are unreachable through the
+ * typed API. They reach it from untyped JavaScript and config-driven callers,
+ * which is what this models.
+ */
+function newAppWithUnvalidatedRootAgent(rootAgent: unknown): App {
+  return new App({name: 'test_app', rootAgent: rootAgent as BaseAgent});
 }
 
 describe('validateAppName', () => {
@@ -78,12 +98,12 @@ describe('App', () => {
   });
 
   it('throws if rootAgent is missing or not a BaseAgent', () => {
-    expect(() => new App({name: 'test_app', rootAgent: undefined})).toThrow(
+    expect(() => newAppWithUnvalidatedRootAgent(undefined)).toThrow(
       'rootAgent must be provided.',
     );
-    expect(
-      () => new App({name: 'test_app', rootAgent: {name: 'fake'}}),
-    ).toThrow(/rootAgent must be a BaseAgent instance/);
+    expect(() => newAppWithUnvalidatedRootAgent({name: 'fake'})).toThrow(
+      /rootAgent must be a BaseAgent instance/,
+    );
   });
 
   it('creates an App with resumabilityConfig', () => {
