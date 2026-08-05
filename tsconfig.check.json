@@ -2,11 +2,13 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": true,
-    // Resolve workspace packages to source, mirroring vitest.config.ts:
-    // core/dist/types is weaker, as declaration emit erases private types.
+    // Resolve every workspace package to source, so the check runs on a clean
+    // checkout with no build output. Source is also stronger than dist/types,
+    // as declaration emit erases the types of private class members.
     "paths": {
       "@google/adk": ["./core/src/index.ts"],
       "@google/adk/*": ["./core/src/*"],
+      "@google/adk-devtools": ["./dev/src/index.ts"],
       "@google/adk-integrations": ["./integrations/src/index.ts"]
     }
   },

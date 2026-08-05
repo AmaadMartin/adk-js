@@ -34,11 +34,13 @@ jobs:
       - name: Check for secrets leaks
         run: npx secretlint "**/*"
 
-      - name: Build packages
-        run: npm run build
-
+      # Runs before the build, so CI fails if the check ever starts to depend
+      # on build output.
       - name: Run type check
         run: npm run ts:check
+
+      - name: Build packages
+        run: npm run build
 
       - name: Run tests and check code coverage
         run: npm run test:coverage
