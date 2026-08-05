@@ -5,16 +5,11 @@
  */
 import {Console} from 'node:console';
 import {Writable} from 'node:stream';
+import {stripVTControlCharacters} from 'node:util';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 
 import {LogLevel} from '@google/adk';
 import {AdkLogger, AdkLoggerOptions} from '../../src/utils/logger.js';
-
-/**
- * Matches the colour codes that the `colorize` format injects. It is built
- * from a char code because a literal escape is a control character.
- */
-const ANSI_PATTERN = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
 
 /** The options `AdkApiServer` builds its logger with. */
 const API_SERVER_OPTIONS: AdkLoggerOptions = {
@@ -47,10 +42,6 @@ class CaptureStream extends Writable {
     this.text += chunk.toString();
     done();
   }
-}
-
-function stripAnsi(text: string): string {
-  return text.replace(ANSI_PATTERN, '');
 }
 
 const realConsole = globalThis.console;
@@ -103,7 +94,7 @@ describe('AdkLogger', () => {
   it('keeps the record layout on stderr', () => {
     new AdkLogger(API_SERVER_OPTIONS).error('kaboom');
 
-    expect(stripAnsi(stderr.text)).toMatch(
+    expect(stripVTControlCharacters(stderr.text)).toMatch(
       /^ERROR: \[ADK API Server\] .+ kaboom/,
     );
   });
