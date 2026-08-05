@@ -8,6 +8,13 @@ import {LogLevel, Logger} from '@google/adk';
 import * as winston from 'winston';
 
 /**
+ * Levels the Console transport writes to stderr rather than stdout. Winston
+ * matches these against the raw level name on `info[LEVEL]`, so they stay
+ * lowercase even though the format below upper-cases the level for display.
+ */
+const STDERR_LEVELS = ['warn', 'error'];
+
+/**
  * Options for the ADK CLI logger.
  */
 export interface AdkLoggerOptions {
@@ -69,7 +76,9 @@ export class AdkLogger implements Logger {
       },
       level: 'error',
       format: winston.format.combine(...formats),
-      transports: [new winston.transports.Console()],
+      transports: [
+        new winston.transports.Console({stderrLevels: STDERR_LEVELS}),
+      ],
     });
   }
 
