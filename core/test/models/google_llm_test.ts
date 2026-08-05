@@ -120,6 +120,7 @@ describe('GoogleLlm', () => {
   });
 
   it('should respect configured location for Vertex AI liveApiClient', () => {
+    // Kept literal: the resource path, location, and assertion must agree.
     const llm = new TestGemini({
       model: 'projects/p/locations/us-central1/models/gemini-2.5-flash',
       vertexai: true,
