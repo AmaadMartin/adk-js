@@ -19,6 +19,8 @@ import {
 const geminiModelString = 'apigee/gemini/gemini-1.5-flash';
 const vertexModelString = 'apigee/vertex_ai/model-id';
 const defaultProxyUrl = 'https://proxy.example.com';
+const TEST_PROJECT = 'test-project';
+const TEST_LOCATION = 'us-central1';
 
 describe('ApigeeLlm', () => {
   afterEach(() => {
@@ -59,8 +61,8 @@ describe('ApigeeLlm', () => {
     });
 
     it('vertexai is used if the model starts with apigee/vertex_ai/', () => {
-      process.env['GOOGLE_CLOUD_PROJECT'] = 'test-project';
-      process.env['GOOGLE_CLOUD_LOCATION'] = 'us-central1';
+      process.env['GOOGLE_CLOUD_PROJECT'] = TEST_PROJECT;
+      process.env['GOOGLE_CLOUD_LOCATION'] = TEST_LOCATION;
       const llm = new ApigeeLlm({
         model: vertexModelString,
         proxyUrl: defaultProxyUrl,
@@ -70,8 +72,8 @@ describe('ApigeeLlm', () => {
 
     it('vertexai is used if GOOGLE_GENAI_USE_VERTEXAI is true', () => {
       process.env['GOOGLE_GENAI_USE_VERTEXAI'] = 'true';
-      process.env['GOOGLE_CLOUD_PROJECT'] = 'test-project';
-      process.env['GOOGLE_CLOUD_LOCATION'] = 'us-central1';
+      process.env['GOOGLE_CLOUD_PROJECT'] = TEST_PROJECT;
+      process.env['GOOGLE_CLOUD_LOCATION'] = TEST_LOCATION;
       const llm = new ApigeeLlm({
         model: 'apigee/unknown-model',
         proxyUrl: defaultProxyUrl,
@@ -96,7 +98,7 @@ describe('ApigeeLlm', () => {
         description:
           'vertexai with project but no location throws an error about missing GOOGLE_CLOUD_LOCATION',
         envVars: {
-          'GOOGLE_CLOUD_PROJECT': 'test-project',
+          'GOOGLE_CLOUD_PROJECT': TEST_PROJECT,
         },
         expectedError: /GOOGLE_CLOUD_LOCATION/,
       },
@@ -104,8 +106,8 @@ describe('ApigeeLlm', () => {
         description:
           'vertexai with project and location but no proxy url throws an error about missing APIGEE_PROXY_URL',
         envVars: {
-          'GOOGLE_CLOUD_LOCATION': 'us-central1',
-          'GOOGLE_CLOUD_PROJECT': 'test-project',
+          'GOOGLE_CLOUD_LOCATION': TEST_LOCATION,
+          'GOOGLE_CLOUD_PROJECT': TEST_PROJECT,
         },
         expectedError: /APIGEE_PROXY_URL/,
       },
@@ -317,8 +319,8 @@ describe('ApigeeLlm', () => {
     validModels.forEach((model) => {
       it(`should accept valid model: ${model}`, () => {
         // Mock env vars for vertexai models to avoid other errors
-        process.env['GOOGLE_CLOUD_PROJECT'] = 'test-project';
-        process.env['GOOGLE_CLOUD_LOCATION'] = 'us-central1';
+        process.env['GOOGLE_CLOUD_PROJECT'] = TEST_PROJECT;
+        process.env['GOOGLE_CLOUD_LOCATION'] = TEST_LOCATION;
         expect(() => {
           new ApigeeLlm({model, proxyUrl: defaultProxyUrl});
         }).not.toThrowError(/not a valid Apigee model/);
@@ -473,8 +475,8 @@ describe('ApigeeLlm', () => {
         expectedVersion: 'v1beta1',
         setupEnv: {
           'GOOGLE_GENAI_USE_VERTEXAI': 'true',
-          'GOOGLE_CLOUD_PROJECT': 'test-project',
-          'GOOGLE_CLOUD_LOCATION': 'us-central1',
+          'GOOGLE_CLOUD_PROJECT': TEST_PROJECT,
+          'GOOGLE_CLOUD_LOCATION': TEST_LOCATION,
         },
       },
       {
@@ -486,8 +488,8 @@ describe('ApigeeLlm', () => {
         expectedVersion: 'v3',
         setupEnv: {
           'GOOGLE_GENAI_USE_VERTEXAI': 'true',
-          'GOOGLE_CLOUD_PROJECT': 'test-project',
-          'GOOGLE_CLOUD_LOCATION': 'us-central1',
+          'GOOGLE_CLOUD_PROJECT': TEST_PROJECT,
+          'GOOGLE_CLOUD_LOCATION': TEST_LOCATION,
         },
       },
     ];
@@ -511,8 +513,8 @@ describe('ApigeeLlm', () => {
 describe('ApigeeLlm LLMRegistry integration', () => {
   beforeAll(() => {
     process.env['APIGEE_PROXY_URL'] = defaultProxyUrl;
-    process.env['GOOGLE_CLOUD_PROJECT'] = 'test-project';
-    process.env['GOOGLE_CLOUD_LOCATION'] = 'us-central1';
+    process.env['GOOGLE_CLOUD_PROJECT'] = TEST_PROJECT;
+    process.env['GOOGLE_CLOUD_LOCATION'] = TEST_LOCATION;
   });
 
   afterAll(() => {
