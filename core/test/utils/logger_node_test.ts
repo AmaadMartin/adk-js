@@ -105,6 +105,24 @@ describe('WinstonLogger', () => {
     ]);
   });
 
+  it('writes a debug line when the level allows it', async () => {
+    setLogLevel(LogLevel.DEBUG);
+
+    getLogger().debug('trace');
+    await flush();
+
+    expect(stripAnsi(lines[0]).trimEnd()).toMatch(/^DEBUG: \[ADK\] .* trace$/);
+  });
+
+  it('suppresses a warning below the configured level', async () => {
+    setLogLevel(LogLevel.ERROR);
+
+    getLogger().warn('w');
+    await flush();
+
+    expect(lines).toHaveLength(0);
+  });
+
   it('joins arguments with a single space', async () => {
     setLogLevel(LogLevel.INFO);
 
