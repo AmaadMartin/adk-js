@@ -6,12 +6,10 @@
 
 import * as adk from '@google/adk';
 import esbuild from 'esbuild';
+import {isBuiltin} from 'node:module';
 import {fileURLToPath} from 'node:url';
 import {describe, expect, it} from 'vitest';
 import * as web from '../src/index_web.js';
-
-/** Captures the specifier of every `node:` built-in an ESM bundle imports. */
-const NODE_BUILTIN_IMPORT = /from\s*["'](node:[^"']+)["']/g;
 
 /**
  * The Node built-ins the browser build is allowed to reach, because
@@ -19,8 +17,8 @@ const NODE_BUILTIN_IMPORT = /from\s*["'](node:[^"']+)["']/g;
  * implementation. Keep this set in step with that alias table.
  *
  * The `import {createRequire} from 'module'` banner is excluded on purpose: it
- * is not a `node:` specifier, and removing it from the browser build is
- * separately queued work.
+ * is injected after the module graph is resolved, so it never appears in the
+ * metafile, and removing it from the browser build is separately queued work.
  */
 const ALIASED_NODE_BUILTINS = new Set(['node:async_hooks']);
 
@@ -58,14 +56,13 @@ describe('browser entry point', () => {
         bundle: true,
         packages: 'external',
         logLevel: 'silent',
+        metafile: true,
         write: false,
       });
 
+      const [output] = Object.values(result.metafile.outputs);
       const imported = new Set(
-        Array.from(
-          result.outputFiles[0].text.matchAll(NODE_BUILTIN_IMPORT),
-          (match) => match[1],
-        ),
+        output.imports.map((entry) => entry.path).filter(isBuiltin),
       );
 
       expect(imported).toEqual(ALIASED_NODE_BUILTINS);
