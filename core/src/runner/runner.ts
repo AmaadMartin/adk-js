@@ -269,10 +269,7 @@ export class Runner {
             throw new Error(`Session not found: ${sessionId}`);
           }
 
-          // CFC ships through the built-in code-execution tool, so the gate
-          // must admit what BuiltInCodeExecutor admits, which is Gemini major
-          // 2 and above, after the path or provider wrapper is stripped. A
-          // literal startsWith('gemini-2') here would reject future majors.
+          // CFC ships through BuiltInCodeExecutor, so gate on what it admits.
           if (runConfig.supportCfc && isLlmAgent(this.agent)) {
             const modelName = this.agent.canonicalModel.model;
             if (!isGemini2OrAbove(modelName)) {
