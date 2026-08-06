@@ -111,7 +111,7 @@ const ORIGINS_OPTION = new Option(
   'Optional. The allow origins of the server',
 ).default('');
 const VERBOSE_OPTION = new Option(
-  '-v, --verbose [boolean]',
+  '-v, --verbose',
   'Optional. The verbose level of the server',
 ).default(false);
 const LOG_LEVEL_OPTION = new Option(
@@ -127,19 +127,27 @@ const ARTIFACT_SERVICE_URI_OPTION = new Option(
   'Optional. The URI of the artifact service. Supported URIs: gs://<bucket name> for GCS artifact service.',
 );
 const OTEL_TO_CLOUD_OPTION = new Option(
-  '--otel_to_cloud [boolean]',
+  '--otel_to_cloud',
   'Optional. Whether to send otel traces to cloud.',
 ).default(false);
 const COMPILE_AGENT_FILE = new Option(
-  '--compile [boolean]',
+  '--compile',
   'Optional. Whether to compile ts agent file to js before execution',
 ).default(true);
+const NO_COMPILE_AGENT_FILE = new Option(
+  '--no-compile',
+  'Optional. Do not compile the ts agent file to js before execution',
+);
 const BUNDLE_AGENT_FILE = new Option(
-  '--bundle [boolean]',
+  '--bundle',
   'Optional. Whether to compile ts agent file to js before execution',
 ).default(true);
+const NO_BUNDLE_AGENT_FILE = new Option(
+  '--no-bundle',
+  'Optional. Do not bundle the ts agent file before execution',
+);
 const A2A_OPTION = new Option(
-  '--a2a [boolean]',
+  '--a2a',
   'Optional. Whether to enable A2A for web/api server. Default: false',
 ).default(false);
 const A2A_AUTH_TOKEN_OPTION = new Option(
@@ -151,7 +159,7 @@ const A2A_AUTH_TOKEN_DEPLOY_OPTION = new Option(
   'Optional. Shared bearer token used to authenticate the deployed A2A surface. Callers must send "Authorization: Bearer <token>". It is sent to Cloud Run as the ADK_A2A_AUTH_TOKEN environment variable and is never written into the image. If unset, the deployed A2A surface is served WITHOUT authentication.',
 );
 const RELOAD_AGENTS_OPTION = new Option(
-  '--reload_agents [boolean]',
+  '--reload_agents',
   'Optional. Watch agent files for changes and automatically reload them. Default: false. To see any changes to your agent file, you need to initiate a new agent run.',
 ).default(false);
 const AGENT_FILE_MODULE_TYPE = new Option('--file_type <string>', 'Optional. ');
@@ -171,7 +179,7 @@ export const ADK_VERSION_OPTION = new Option(
   'Optional. ADK version to use. If not set, default to the latest version available on npm',
 ).default('latest');
 export const WITH_UI_OPTION = new Option(
-  '--with_ui [boolean]',
+  '--with_ui',
   'Optional. Deploy ADK Web UI if set. (default: deploy ADK API server only)',
 ).default(false);
 export const DISPLAY_NAME_OPTION = new Option(
@@ -222,7 +230,9 @@ export function createProgram(): Command {
     .addOption(ARTIFACT_SERVICE_URI_OPTION)
     .addOption(OTEL_TO_CLOUD_OPTION)
     .addOption(COMPILE_AGENT_FILE)
+    .addOption(NO_COMPILE_AGENT_FILE)
     .addOption(BUNDLE_AGENT_FILE)
+    .addOption(NO_BUNDLE_AGENT_FILE)
     .addOption(AGENT_FILE_MODULE_TYPE)
     .addOption(A2A_OPTION)
     .addOption(A2A_AUTH_TOKEN_OPTION)
@@ -268,7 +278,9 @@ export function createProgram(): Command {
     .addOption(ARTIFACT_SERVICE_URI_OPTION)
     .addOption(OTEL_TO_CLOUD_OPTION)
     .addOption(COMPILE_AGENT_FILE)
+    .addOption(NO_COMPILE_AGENT_FILE)
     .addOption(BUNDLE_AGENT_FILE)
+    .addOption(NO_BUNDLE_AGENT_FILE)
     .addOption(AGENT_FILE_MODULE_TYPE)
     .addOption(A2A_OPTION)
     .addOption(A2A_AUTH_TOKEN_OPTION)
@@ -343,7 +355,7 @@ export function createProgram(): Command {
     .description('Runs agent')
     .argument('<agent>', 'Agent file path (.js or .ts)')
     .option(
-      '--save_session [boolean]',
+      '--save_session',
       'Optional. Whether to save the session to a json file on exit.',
       false,
     )
@@ -365,7 +377,9 @@ export function createProgram(): Command {
     .addOption(ARTIFACT_SERVICE_URI_OPTION)
     .addOption(OTEL_TO_CLOUD_OPTION)
     .addOption(COMPILE_AGENT_FILE)
+    .addOption(NO_COMPILE_AGENT_FILE)
     .addOption(BUNDLE_AGENT_FILE)
+    .addOption(NO_BUNDLE_AGENT_FILE)
     .addOption(AGENT_FILE_MODULE_TYPE)
     .addOption(RELOAD_AGENTS_OPTION)
     .action(async (agentPath: string, options: Record<string, string>) => {
@@ -419,7 +433,9 @@ export function createProgram(): Command {
     .addOption(SESSION_SERVICE_URI_OPTION)
     .addOption(ARTIFACT_SERVICE_URI_OPTION)
     .addOption(COMPILE_AGENT_FILE)
+    .addOption(NO_COMPILE_AGENT_FILE)
     .addOption(BUNDLE_AGENT_FILE)
+    .addOption(NO_BUNDLE_AGENT_FILE)
     .addOption(AGENT_FILE_MODULE_TYPE)
     .addOption(A2A_OPTION)
     .addOption(A2A_AUTH_TOKEN_DEPLOY_OPTION)
@@ -430,7 +446,12 @@ export function createProgram(): Command {
         if (argName.includes('=')) {
           argName = argName.split('=')[0];
         }
-        if (argName in options) {
+        // Commander records `--no-compile` under the `compile` key, so strip
+        // the negation prefix before deciding whether the flag was one of ours.
+        const optionName = argName.startsWith('no-')
+          ? argName.slice('no-'.length)
+          : argName;
+        if (optionName in options) {
           continue;
         }
 
@@ -483,7 +504,9 @@ export function createProgram(): Command {
       .addOption(SESSION_SERVICE_URI_OPTION)
       .addOption(ARTIFACT_SERVICE_URI_OPTION)
       .addOption(COMPILE_AGENT_FILE)
+      .addOption(NO_COMPILE_AGENT_FILE)
       .addOption(BUNDLE_AGENT_FILE)
+      .addOption(NO_BUNDLE_AGENT_FILE)
       .addOption(AGENT_FILE_MODULE_TYPE)
       .addOption(A2A_OPTION)
       .addOption(AGENT_ENGINE_ID_OPTION)
