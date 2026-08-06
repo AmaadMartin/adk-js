@@ -789,10 +789,8 @@ describe('GeminiLlmConnection', () => {
       );
       const generator = connection.receive();
 
-      const goAway = {goAway: true}; // mock
-      messageQueue.push(
-        createLiveServerMessage({goAway: goAway as LiveServerGoAway}),
-      );
+      const goAway: LiveServerGoAway = {timeLeft: '10s'};
+      messageQueue.push(createLiveServerMessage({goAway}));
       messageQueue.close();
 
       const res = await generator.next();

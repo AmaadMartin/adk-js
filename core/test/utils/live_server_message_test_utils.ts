@@ -7,11 +7,6 @@
 import {LiveServerMessage} from '@google/genai';
 
 /**
- * The data fields of a {@link LiveServerMessage}.
- */
-type LiveServerMessageInit = Omit<LiveServerMessage, 'text' | 'data'>;
-
-/**
  * Builds a {@link LiveServerMessage} fixture.
  *
  * `text` and `data` are getters on the class, so a plain object literal is not
@@ -19,7 +14,7 @@ type LiveServerMessageInit = Omit<LiveServerMessage, 'text' | 'data'>;
  * them on the prototype.
  */
 export function createLiveServerMessage(
-  init: LiveServerMessageInit,
+  init: Omit<LiveServerMessage, 'text' | 'data'>,
 ): LiveServerMessage {
   return Object.assign(new LiveServerMessage(), init);
 }

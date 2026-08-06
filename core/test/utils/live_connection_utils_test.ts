@@ -364,12 +364,10 @@ describe('LiveResponseAggregator', () => {
 
   it('should yield go away', () => {
     const aggregator = new LiveResponseAggregator('gemini-2.5-flash');
-    const goAway = {goAway: true};
+    const goAway: LiveServerGoAway = {timeLeft: '10s'};
 
     const res = Array.from(
-      aggregator.processMessage(
-        createLiveServerMessage({goAway: goAway as LiveServerGoAway}),
-      ),
+      aggregator.processMessage(createLiveServerMessage({goAway})),
     );
     expect(res).toEqual([
       {
