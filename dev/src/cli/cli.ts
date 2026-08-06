@@ -207,6 +207,12 @@ export function createProgram(): Command {
   program
     .addOption(new Option('-v, --version', 'Get ADK CLI version'))
     .action((options: {version?: boolean}) => {
+      const [unknownCommand] = program.args;
+      if (unknownCommand !== undefined) {
+        program.error(`error: unknown command '${unknownCommand}'`, {
+          code: 'commander.unknownCommand',
+        });
+      }
       if (options.version) {
         console.log(version);
         return;
@@ -550,6 +556,11 @@ export function createProgram(): Command {
         forceRunAll: getBoolean(options['force']),
       });
     });
+
+  // Must stay after every .command() call: commander copies this setting into
+  // subcommands as they are created, which would make them accept excess
+  // arguments too.
+  program.allowExcessArguments(true);
 
   return program;
 }

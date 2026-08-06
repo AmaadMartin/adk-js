@@ -152,7 +152,7 @@ describe('CLI Entrypoint', () => {
         expect.fail('expected commander to reject an unknown subcommand');
       }
 
-      expect(err.code).toBe('commander.excessArguments');
+      expect(err.code).toBe('commander.unknownCommand');
       expect(err.exitCode).toBe(1);
       expect(stdout).toBe('');
     });
