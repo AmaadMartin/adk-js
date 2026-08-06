@@ -9,6 +9,7 @@ import {
   Modality,
   ProactivityConfig,
   RealtimeInputConfig,
+  SessionResumptionConfig,
   SpeechConfig,
 } from '@google/genai';
 
@@ -99,6 +100,17 @@ export interface RunConfig {
    * to intercept and execute tools (Client-Side Tool Execution).
    */
   pauseOnToolCalls?: boolean;
+
+  /**
+   * Whether to save live mode audio/video blobs (inlineData) to session storage.
+   * Default is false to avoid session bloat.
+   */
+  saveLiveBlob?: boolean;
+
+  /**
+   * Session resumption configuration for live mode.
+   */
+  sessionResumption?: SessionResumptionConfig;
 }
 
 /**
@@ -111,6 +123,7 @@ export interface RunConfig {
  * - `streamingMode` → {@link StreamingMode.NONE}
  * - `maxLlmCalls` → `500` (validated via `validateMaxLlmCalls`)
  * - `pauseOnToolCalls` → `false`
+ * - `saveLiveBlob` → `false`
  *
  * @param params - Optional partial {@link RunConfig} overriding defaults.
  * @returns A merged {@link RunConfig} object.
@@ -123,6 +136,7 @@ export function createRunConfig(params: Partial<RunConfig> = {}) {
     enableAffectiveDialog: false,
     streamingMode: StreamingMode.NONE,
     pauseOnToolCalls: false,
+    saveLiveBlob: false,
     ...params,
     maxLlmCalls: validateMaxLlmCalls(params.maxLlmCalls ?? 500),
   };

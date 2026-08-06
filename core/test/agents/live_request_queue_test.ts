@@ -147,4 +147,24 @@ describe('LiveRequestQueue', () => {
     expect(await queue.get()).toEqual({close: true});
     expect(await queue.get()).toEqual({close: true});
   });
+
+  it('should immediately return close signal if abortSignal is already aborted', async () => {
+    const queue = new LiveRequestQueue();
+    const controller = new AbortController();
+    controller.abort();
+    expect(await queue.get(controller.signal)).toEqual({close: true});
+  });
+
+  it('should return close signal and remove resolution function when abortSignal aborts while waiting', async () => {
+    const queue = new LiveRequestQueue();
+    const controller = new AbortController();
+    const getPromise = queue.get(controller.signal);
+    controller.abort();
+    expect(await getPromise).toEqual({close: true});
+
+    // Verify sending afterwards goes to queue or another pending get rather than the aborted one
+    const req = {content: createUserContent('after-abort')};
+    queue.send(req);
+    expect(await queue.get()).toEqual(req);
+  });
 });

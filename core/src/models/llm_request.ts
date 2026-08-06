@@ -35,6 +35,9 @@ export interface LlmRequest {
    */
   config?: GenerateContentConfig;
 
+  /**
+   * Config for the live (bidirectional) connection to the model.
+   */
   liveConnectConfig: LiveConnectConfig;
 
   /**

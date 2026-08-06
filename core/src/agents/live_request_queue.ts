@@ -20,6 +20,8 @@ export interface LiveRequest {
   activityEnd?: ActivityEnd;
   /** If set, close the queue. */
   close?: boolean;
+  /** If set, indicates the content is partial. */
+  partial?: boolean;
 }
 
 /** Function type for resolving a Promise with a LiveRequest. */
@@ -55,9 +57,13 @@ export class LiveRequestQueue {
   /**
    * Retrieves a request from the queue. If the queue is empty, it will
    * wait until a request is available.
+   * @param abortSignal Optional AbortSignal to cancel waiting for a request.
    * @returns A promise that resolves with the next available request.
    */
-  async get(): Promise<LiveRequest> {
+  async get(abortSignal?: AbortSignal): Promise<LiveRequest> {
+    if (abortSignal?.aborted) {
+      return {close: true};
+    }
     if (this.queue.length > 0) {
       return this.queue.shift()!;
     }
@@ -65,7 +71,19 @@ export class LiveRequestQueue {
       return {close: true};
     }
     return new Promise<LiveRequest>((resolve) => {
-      this.resolveFnFifoQueue.push(resolve);
+      const resolveFn = (req: LiveRequest) => {
+        abortSignal?.removeEventListener('abort', onAbort);
+        resolve(req);
+      };
+      const onAbort = () => {
+        const index = this.resolveFnFifoQueue.indexOf(resolveFn);
+        if (index !== -1) {
+          this.resolveFnFifoQueue.splice(index, 1);
+        }
+        resolve({close: true});
+      };
+      abortSignal?.addEventListener('abort', onAbort);
+      this.resolveFnFifoQueue.push(resolveFn);
     });
   }
 
@@ -135,6 +153,7 @@ export class LiveRequestQueue {
   > {
     while (true) {
       const request = await this.get();
+
       yield request;
       if (request.close) {
         break;

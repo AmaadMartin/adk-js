@@ -43,6 +43,7 @@ export const REQUEST_CONFIRMATION_FUNCTION_CALL_NAME =
 // Export these items for testing purposes only
 export const functionsExportedForTestingOnly = {
   handleFunctionCallList,
+  handleFunctionCallsLiveAsync,
   generateAuthEvent,
   generateRequestConfirmationEvent,
 };
@@ -569,7 +570,60 @@ export function mergeParallelFunctionResponseEvents(
   });
 }
 
-// TODO - b/425992518: support function call in live connection.
+/**
+ * Calls the functions for live mode and returns the function response event.
+ * Also handles stop_streaming function calls by closing the tool stream and active task.
+ */
+export async function handleFunctionCallsLiveAsync({
+  invocationContext,
+  functionCallEvent,
+  toolsDict,
+  beforeToolCallbacks = [],
+  afterToolCallbacks = [],
+  filters,
+  toolConfirmationDict,
+}: {
+  invocationContext: InvocationContext;
+  functionCallEvent: Event;
+  toolsDict: Record<string, BaseTool>;
+  beforeToolCallbacks?: SingleBeforeToolCallback[];
+  afterToolCallbacks?: SingleAfterToolCallback[];
+  filters?: Set<string>;
+  toolConfirmationDict?: Record<string, ToolConfirmation>;
+}): Promise<Event | null> {
+  const functionCalls = getFunctionCalls(functionCallEvent);
+
+  for (const functionCall of functionCalls) {
+    if (
+      functionCall.name === 'stop_streaming' &&
+      functionCall.args?.['function_name']
+    ) {
+      const functionName = functionCall.args['function_name'] as string;
+      const streamTool = invocationContext.activeStreamingTools?.[functionName];
+      if (streamTool) {
+        streamTool.stream?.close();
+        streamTool.stream = undefined;
+        streamTool.task = undefined;
+      }
+    }
+  }
+
+  const resultEvent = await handleFunctionCallList({
+    invocationContext,
+    functionCalls,
+    toolsDict,
+    beforeToolCallbacks,
+    afterToolCallbacks,
+    filters,
+    toolConfirmationDict,
+  });
+
+  if (resultEvent && functionCallEvent.liveSessionId) {
+    resultEvent.liveSessionId = functionCallEvent.liveSessionId;
+  }
+
+  return resultEvent;
+}
 
 /**
  * Finds the function call event that matches the function call ID.

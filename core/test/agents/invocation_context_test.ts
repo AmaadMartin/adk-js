@@ -9,6 +9,7 @@ import {
   BaseAgentConfig,
   Event,
   InvocationContext,
+  LiveRequestQueue,
   LoopAgent,
   PluginManager,
   Session,
@@ -170,5 +171,58 @@ describe('InvocationContext LLM-call cost tracking', () => {
     // Exactly the 3 permitted iterations produced an event before the throw,
     // proving the counter is shared across the per-iteration child contexts.
     expect(events).toHaveLength(3);
+  });
+});
+
+describe('InvocationContext.copy', () => {
+  function createContext(maxLlmCalls: number): InvocationContext {
+    return new InvocationContext({
+      invocationId: 'inv-1',
+      agent: new LoopAgent({name: 'root'}),
+      session: makeSession(),
+      pluginManager: new PluginManager(),
+      runConfig: {maxLlmCalls},
+    });
+  }
+
+  it('keeps enforcing maxLlmCalls across copies', () => {
+    // `copy()` backs the live `transfer_to_agent` path, so a model that
+    // ping-pongs between two agents must not get a fresh budget each time.
+    const context = createContext(2);
+    context.incrementLlmCallCount();
+
+    const copied = context.copy();
+    copied.incrementLlmCallCount();
+
+    expect(() => copied.incrementLlmCallCount()).toThrowError(
+      /Max number of llm calls limit of 2 exceeded/,
+    );
+  });
+
+  it('counts calls made through a copy against the original budget', () => {
+    const context = createContext(1);
+    context.copy().incrementLlmCallCount();
+
+    expect(() => context.incrementLlmCallCount()).toThrowError(
+      /Max number of llm calls limit of 1 exceeded/,
+    );
+  });
+
+  it('applies overrides and carries the live request queue', () => {
+    const liveRequestQueue = new LiveRequestQueue();
+    const context = new InvocationContext({
+      invocationId: 'inv-1',
+      agent: new LoopAgent({name: 'root'}),
+      session: makeSession(),
+      pluginManager: new PluginManager(),
+      liveRequestQueue,
+      liveSessionResumptionHandle: 'handle_1',
+    });
+
+    const copied = context.copy({liveSessionResumptionHandle: undefined});
+
+    expect(copied.liveSessionResumptionHandle).toBeUndefined();
+    expect(copied.liveRequestQueue).toBe(liveRequestQueue);
+    expect(copied.invocationId).toBe('inv-1');
   });
 });
