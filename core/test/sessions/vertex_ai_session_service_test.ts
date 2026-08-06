@@ -1000,6 +1000,81 @@ describe('VertexAiSessionService', () => {
 
       expect(result.sessions.map((s) => s.id)).toEqual(['s2', 's3']);
     });
+
+    describe('pagination validation', () => {
+      const appName = '12345';
+      const userId = 'testUser';
+
+      it('rejects a negative offset', async () => {
+        await expect(
+          service.listSessions({appName, userId, offset: -1}),
+        ).rejects.toThrow('offset must be a non-negative integer (got -1).');
+        expect(mockClient.listInternal).not.toHaveBeenCalled();
+      });
+
+      it('rejects a negative limit', async () => {
+        await expect(
+          service.listSessions({appName, userId, limit: -1}),
+        ).rejects.toThrow('limit must be a non-negative integer (got -1).');
+      });
+
+      it('rejects a page below 1', async () => {
+        await expect(
+          service.listSessions({appName, userId, limit: 2, page: 0}),
+        ).rejects.toThrow('page must be a positive integer (got 0).');
+        await expect(
+          service.listSessions({appName, userId, limit: 2, page: -1}),
+        ).rejects.toThrow('page must be a positive integer (got -1).');
+      });
+
+      it('rejects a non-integer limit, offset or page', async () => {
+        await expect(
+          service.listSessions({appName, userId, limit: 1.5}),
+        ).rejects.toThrow('limit must be a non-negative integer (got 1.5).');
+        await expect(
+          service.listSessions({appName, userId, offset: 0.5}),
+        ).rejects.toThrow('offset must be a non-negative integer (got 0.5).');
+        await expect(
+          service.listSessions({appName, userId, limit: 2, page: 1.5}),
+        ).rejects.toThrow('page must be a positive integer (got 1.5).');
+      });
+
+      it('rejects NaN and Infinity', async () => {
+        await expect(
+          service.listSessions({appName, userId, limit: Number.NaN}),
+        ).rejects.toThrow('limit must be a non-negative integer (got NaN).');
+        await expect(
+          service.listSessions({
+            appName,
+            userId,
+            offset: Number.POSITIVE_INFINITY,
+          }),
+        ).rejects.toThrow(
+          'offset must be a non-negative integer (got Infinity).',
+        );
+      });
+
+      it('validates offset even when page takes precedence', async () => {
+        await expect(
+          service.listSessions({
+            appName,
+            userId,
+            limit: 2,
+            page: 1,
+            offset: -1,
+          }),
+        ).rejects.toThrow('offset must be a non-negative integer (got -1).');
+      });
+
+      it('accepts zero for limit and offset', async () => {
+        await expect(
+          service.listSessions({appName, userId, limit: 0}),
+        ).resolves.toMatchObject({sessions: [], totalItems: 2});
+        await expect(
+          service.listSessions({appName, userId, offset: 0}),
+        ).resolves.toMatchObject({totalItems: 2});
+      });
+    });
   });
 
   describe('deleteSession', () => {
