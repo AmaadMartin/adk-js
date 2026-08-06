@@ -52,12 +52,26 @@ export class InMemorySessionService extends BaseSessionService {
    */
   private appState: Record<string, Record<string, unknown>> = {};
 
+  /**
+   * Creates a new session.
+   *
+   * @throws if `sessionId` is given and a session already exists for that app,
+   *     user and id. `DatabaseSessionService` rejects the duplicate too;
+   *     replacing the stored session would discard its events and state.
+   */
   async createSession({
     appName,
     userId,
     state,
     sessionId,
   }: CreateSessionRequest): Promise<Session> {
+    const userSessions = this.sessions[appName]?.[userId];
+    // `hasOwn`, not a truthiness check: the store is a plain object, so ids
+    // such as `constructor` would otherwise always look taken.
+    if (sessionId && userSessions && Object.hasOwn(userSessions, sessionId)) {
+      throw new Error(`Session with id ${sessionId} already exists.`);
+    }
+
     const filteredState = state ? trimTempState(state) : undefined;
     const session = createSession({
       id: sessionId || randomUUID(),

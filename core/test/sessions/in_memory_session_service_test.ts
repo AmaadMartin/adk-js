@@ -100,6 +100,136 @@ describe('InMemorySessionService', () => {
       expect(session.state).toHaveProperty('normalKey', 'value');
       expect(session.state).not.toHaveProperty(`${State.TEMP_PREFIX}tempKey`);
     });
+
+    it('throws when a session with the same id already exists', async () => {
+      await service.createSession({
+        appName: 'app',
+        userId: 'user',
+        sessionId: 's1',
+      });
+
+      await expect(
+        service.createSession({
+          appName: 'app',
+          userId: 'user',
+          sessionId: 's1',
+        }),
+      ).rejects.toThrow('Session with id s1 already exists.');
+    });
+
+    it('keeps the existing session when a duplicate create is rejected', async () => {
+      const first = await service.createSession({
+        appName: 'app',
+        userId: 'user',
+        sessionId: 's1',
+        state: {seen: true},
+      });
+      await service.appendEvent({
+        session: first,
+        event: createEvent({timestamp: 1}),
+      });
+
+      await expect(
+        service.createSession({
+          appName: 'app',
+          userId: 'user',
+          sessionId: 's1',
+        }),
+      ).rejects.toThrow('Session with id s1 already exists.');
+
+      const stored = await service.getSession({
+        appName: 'app',
+        userId: 'user',
+        sessionId: 's1',
+      });
+      expect(stored).toBeDefined();
+      expect(stored?.events).toHaveLength(1);
+      expect(stored?.state).toHaveProperty('seen', true);
+    });
+
+    it('allows the same session id for a different user', async () => {
+      await service.createSession({
+        appName: 'app',
+        userId: 'u1',
+        sessionId: 's1',
+      });
+
+      const second = await service.createSession({
+        appName: 'app',
+        userId: 'u2',
+        sessionId: 's1',
+      });
+
+      expect(second.userId).toBe('u2');
+      expect(second.events).toEqual([]);
+    });
+
+    it('allows the same session id for a different app', async () => {
+      await service.createSession({
+        appName: 'app1',
+        userId: 'user',
+        sessionId: 's1',
+      });
+
+      const second = await service.createSession({
+        appName: 'app2',
+        userId: 'user',
+        sessionId: 's1',
+      });
+
+      expect(second.appName).toBe('app2');
+      expect(second.events).toEqual([]);
+    });
+
+    it('allows reusing a session id after the session is deleted', async () => {
+      await service.createSession({
+        appName: 'app',
+        userId: 'user',
+        sessionId: 's1',
+      });
+      await service.deleteSession({
+        appName: 'app',
+        userId: 'user',
+        sessionId: 's1',
+      });
+
+      const recreated = await service.createSession({
+        appName: 'app',
+        userId: 'user',
+        sessionId: 's1',
+      });
+
+      expect(recreated.id).toBe('s1');
+    });
+
+    it('generates a new id instead of throwing when no sessionId is given', async () => {
+      const first = await service.createSession({
+        appName: 'app',
+        userId: 'user',
+      });
+      const second = await service.createSession({
+        appName: 'app',
+        userId: 'user',
+      });
+
+      expect(second.id).not.toBe(first.id);
+    });
+
+    it('accepts a session id that names an inherited object property', async () => {
+      await service.createSession({
+        appName: 'app',
+        userId: 'user',
+        sessionId: 's1',
+      });
+
+      const session = await service.createSession({
+        appName: 'app',
+        userId: 'user',
+        sessionId: 'constructor',
+      });
+
+      expect(session.id).toBe('constructor');
+    });
   });
 
   describe('getSession', () => {
