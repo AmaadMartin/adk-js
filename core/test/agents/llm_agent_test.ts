@@ -6,12 +6,15 @@
 
 import {
   AUTH_PREPROCESSOR,
+  AuthConfig,
+  AuthCredentialTypes,
   BaseLlm,
   BaseLlmConnection,
   BaseLlmRequestProcessor,
   BaseLlmResponseProcessor,
   BasePlugin,
   BaseTool,
+  BaseToolset,
   CONTENT_REQUEST_PROCESSOR,
   Context,
   ContextCompactorRequestProcessor,
@@ -27,11 +30,14 @@ import {
   RunAsyncToolRequest,
   Session,
   ToolProcessLlmRequest,
+  TOOLSET_AUTH_CREDENTIAL_ID_PREFIX,
+  TOOLSET_AUTH_PREPROCESSOR,
 } from '@google/adk';
 import {Content, Schema, Type} from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
+import {TOOL_FILTER_REQUEST_PROCESSOR} from '../../src/agents/processors/tool_filter_request_processor.js';
 
 class MockLlmConnection implements BaseLlmConnection {
   sendHistory(_history: Content[]): Promise<void> {
@@ -977,4 +983,142 @@ describe('LlmAgent outputSchema with tools', () => {
       );
     },
   );
+});
+
+/** Records whether the model was asked to generate anything. */
+class CallCountingLlm extends BaseLlm {
+  callCount = 0;
+
+  constructor() {
+    super({model: 'call-counting-llm'});
+  }
+
+  async *generateContentAsync(
+    _request: LlmRequest,
+  ): AsyncGenerator<LlmResponse, void, void> {
+    this.callCount++;
+    yield {content: {role: 'model', parts: [{text: 'answer'}]}};
+  }
+
+  async connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
+    return new MockLlmConnection();
+  }
+}
+
+/** A toolset that cannot list its tools before ADK resolves its credential. */
+class PendingAuthToolset extends BaseToolset {
+  getToolsCallCount = 0;
+
+  constructor() {
+    super([]);
+  }
+
+  override getAuthConfig(): AuthConfig {
+    return {
+      credentialKey: 'pending_key',
+      authScheme: {
+        type: 'oauth2',
+        flows: {
+          authorizationCode: {
+            authorizationUrl: 'https://example.com/authorize',
+            tokenUrl: 'https://example.com/token',
+            scopes: {},
+          },
+        },
+      },
+      rawAuthCredential: {
+        authType: AuthCredentialTypes.OAUTH2,
+        oauth2: {clientId: 'client-id', clientSecret: 'client-secret'},
+      },
+    };
+  }
+
+  override async getTools(): Promise<BaseTool[]> {
+    this.getToolsCallCount++;
+    return [];
+  }
+
+  override async close(): Promise<void> {}
+}
+
+describe('LlmAgent toolset auth', () => {
+  it('places TOOLSET_AUTH_PREPROCESSOR after AUTH_PREPROCESSOR and before tool filtering', () => {
+    const agent = new LlmAgent({name: 'test_agent'});
+
+    const authIndex = agent.requestProcessors.indexOf(AUTH_PREPROCESSOR);
+    const toolsetAuthIndex = agent.requestProcessors.indexOf(
+      TOOLSET_AUTH_PREPROCESSOR,
+    );
+    const toolFilterIndex = agent.requestProcessors.indexOf(
+      TOOL_FILTER_REQUEST_PROCESSOR,
+    );
+
+    expect(toolsetAuthIndex).toBe(authIndex + 1);
+    expect(toolsetAuthIndex).toBeLessThan(toolFilterIndex);
+  });
+
+  it('ends the turn on the credential request without listing tools or calling the model', async () => {
+    const toolset = new PendingAuthToolset();
+    const model = new CallCountingLlm();
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model,
+      tools: [toolset],
+    });
+    const invocationContext = new InvocationContext({
+      invocationId: 'inv_auth',
+      agent,
+      session: createSession({id: 'sess_auth', appName: 'test_app'}),
+      pluginManager: new PluginManager(),
+    });
+
+    const events: Event[] = [];
+    for await (const event of agent.runAsync(invocationContext)) {
+      events.push(event);
+    }
+
+    expect(events).toHaveLength(1);
+    const functionCall = events[0].content!.parts![0].functionCall!;
+    expect(functionCall.name).toBe('adk_request_credential');
+    expect(functionCall.args!['function_call_id']).toBe(
+      `${TOOLSET_AUTH_CREDENTIAL_ID_PREFIX}pending_key`,
+    );
+    expect(model.callCount).toBe(0);
+    expect(toolset.getToolsCallCount).toBe(0);
+  });
+
+  it('runs the turn normally once the credential is in the session state', async () => {
+    const toolset = new PendingAuthToolset();
+    const model = new CallCountingLlm();
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model,
+      tools: [toolset],
+    });
+    const invocationContext = new InvocationContext({
+      invocationId: 'inv_auth',
+      agent,
+      session: createSession({
+        id: 'sess_auth',
+        appName: 'test_app',
+        state: {
+          'temp:pending_key': {
+            authType: AuthCredentialTypes.OAUTH2,
+            oauth2: {accessToken: 'stored-token'},
+          },
+        },
+      }),
+      pluginManager: new PluginManager(),
+    });
+
+    const events: Event[] = [];
+    for await (const event of agent.runAsync(invocationContext)) {
+      events.push(event);
+    }
+
+    expect(events).toHaveLength(1);
+    expect(events[0].content!.parts![0].text).toBe('answer');
+    expect(model.callCount).toBe(1);
+    expect(toolset.getToolsCallCount).toBeGreaterThan(0);
+  });
 });

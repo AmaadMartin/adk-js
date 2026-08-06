@@ -786,13 +786,13 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
 
         yield event;
       }
-    }
 
-    // A request processor can interrupt the turn, for example when a toolset
-    // needs a credential before it can list its tools. Stop before the
-    // remaining steps list those tools and call the model.
-    if (invocationContext.endInvocation) {
-      return;
+      // A request processor can interrupt the turn, for example when a toolset
+      // needs a credential before it can list its tools. Stop before the
+      // remaining processors list those tools and before the model is called.
+      if (invocationContext.endInvocation) {
+        return;
+      }
     }
 
     // TODO - b/425992518: check if tool preprocessors can be simplified.
