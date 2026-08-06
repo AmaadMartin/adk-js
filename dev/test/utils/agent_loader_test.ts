@@ -385,6 +385,38 @@ describe('AgentLoader', () => {
       await agentFile.dispose();
     });
 
+    it('throws when getting file path if an uncompiled agent is disposed', async () => {
+      const agentPath = path.join(tempAgentsDir, 'agent1.js');
+      await fs.writeFile(agentPath, agent1JsContent);
+
+      const agentFile = new AgentFile(agentPath, {
+        compile: false,
+        bundle: false,
+      });
+      await agentFile.load();
+      await agentFile.dispose();
+
+      expect(() => agentFile.getFilePath()).toThrow(
+        'Agent is disposed and can not be used',
+      );
+    });
+
+    it('disposes an uncompiled agent file without touching the filesystem', async () => {
+      const agentPath = path.join(tempAgentsDir, 'agent1.js');
+      await fs.writeFile(agentPath, agent1JsContent);
+
+      const agentFile = new AgentFile(agentPath, {
+        compile: false,
+        bundle: false,
+      });
+      await agentFile.load();
+      await agentFile.dispose();
+      await agentFile.dispose();
+
+      await expect(fs.access(agentPath)).resolves.toBeUndefined();
+      expect(fileUtils.removeFolder).not.toHaveBeenCalled();
+    });
+
     it('loads agent with default export', async () => {
       const agentPath = path.join(tempAgentsDir, 'agent_default.js');
       await fs.writeFile(agentPath, agentDefaultExportContent);
