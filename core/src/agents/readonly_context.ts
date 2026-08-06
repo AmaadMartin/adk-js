@@ -6,6 +6,7 @@
 
 import {Content} from '@google/genai';
 
+import type {AuthCredential} from '../auth/auth_credential.js';
 import {State} from '../sessions/state.js';
 
 import {InvocationContext} from './invocation_context.js';
@@ -59,5 +60,19 @@ export class ReadonlyContext {
       this.invocationContext.session.state,
       {},
     ) as Readonly<State>;
+  }
+
+  /**
+   * Returns the credential ADK resolved for this invocation under `key`.
+   *
+   * See `BaseToolset.getAuthConfig` for the toolset-level auth flow that
+   * populates it.
+   *
+   * @param key The `credentialKey` of the auth config that asked for the
+   *     credential.
+   * @return The resolved credential, or `undefined` when ADK resolved none.
+   */
+  getCredential(key: string): AuthCredential | undefined {
+    return this.invocationContext.credentialByKey[key];
   }
 }

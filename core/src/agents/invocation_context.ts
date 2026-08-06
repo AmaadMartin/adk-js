@@ -7,6 +7,7 @@
 import {Content} from '@google/genai';
 
 import {SessionArtifactService} from '../artifacts/session_artifact_service.js';
+import type {AuthCredential} from '../auth/auth_credential.js';
 import {BaseCredentialService} from '../auth/credential_service/base_credential_service.js';
 import {BaseMemoryService} from '../memory/base_memory_service.js';
 import {PluginManager} from '../plugins/plugin_manager.js';
@@ -38,6 +39,11 @@ export interface InvocationContextParams {
   activeStreamingTools?: Record<string, ActiveStreamingTool>;
   pluginManager: PluginManager;
   abortSignal?: AbortSignal;
+  /**
+   * Credentials ADK resolved for this invocation, keyed by the
+   * `credentialKey` of the auth config that asked for them.
+   */
+  credentialByKey?: Record<string, AuthCredential>;
 }
 
 /**
@@ -186,6 +192,17 @@ export class InvocationContext {
   readonly abortSignal?: AbortSignal;
 
   /**
+   * Credentials ADK resolved for this invocation, keyed by the
+   * `credentialKey` of the auth config that asked for them.
+   *
+   * Toolset-level credentials live here rather than on the toolset's own
+   * `AuthConfig`, because an application normally shares one toolset instance
+   * across users and sessions. Read them back with
+   * `ReadonlyContext.getCredential`.
+   */
+  readonly credentialByKey: Record<string, AuthCredential>;
+
+  /**
    * @param params The parameters for creating an invocation context.
    */
   constructor(params: InvocationContextParams) {
@@ -203,6 +220,7 @@ export class InvocationContext {
     this.activeStreamingTools = params.activeStreamingTools;
     this.pluginManager = params.pluginManager;
     this.abortSignal = params.abortSignal;
+    this.credentialByKey = params.credentialByKey ?? {};
     // Inherit the parent invocation's cost manager when one is available.
     // Child contexts created for sub-agents, agent transfers and loop
     // iterations (via createInvocationContext / createBranchCtxForSubAgent)
