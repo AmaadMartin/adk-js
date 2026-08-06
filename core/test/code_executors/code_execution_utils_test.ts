@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content, Language, Outcome} from '@google/genai';
+import {Content, Language, Outcome, Part} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {
   CodeExecutionLanguage,
@@ -264,7 +264,7 @@ describe('convertCodeExecutionParts', () => {
   });
 
   it('converts last executableCode part to text', () => {
-    const content = {
+    const content: Content & {parts: Part[]} = {
       parts: [{executableCode: {code: 'x = 1', language: Language.PYTHON}}],
       role: 'model',
     };
@@ -274,7 +274,7 @@ describe('convertCodeExecutionParts', () => {
   });
 
   it('converts single codeExecutionResult part to text and sets role to user', () => {
-    const content = {
+    const content: Content & {parts: Part[]} = {
       parts: [
         {
           codeExecutionResult: {
