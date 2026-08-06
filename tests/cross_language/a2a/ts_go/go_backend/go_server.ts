@@ -4,10 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {execSync, spawn} from 'node:child_process';
-import * as fs from 'node:fs';
-import * as path from 'node:path';
+import {spawn} from 'node:child_process';
 import {BaseTestServer} from '../../../../integration/test_case_utils.js';
+import {ensureGoModules} from '../../../go_modules.js';
 
 /**
  * Interface representing the parameters for creating the test Go agent server.
@@ -18,7 +17,15 @@ export interface TestGoServerParams {
   startFailureTimeout?: number;
 }
 
-const DEFAULT_TIMEOUT = 30000;
+/**
+ * Readiness budget (ms) for the Go server.
+ *
+ * `go run .` compiles the module from source before the server prints its
+ * banner, which is strictly more work than the already-built Node API server
+ * does at start-up. This default therefore matches that server's 60000 rather
+ * than undercutting it.
+ */
+const DEFAULT_TIMEOUT = 60000;
 
 /**
  * Go server for testing.
@@ -32,20 +39,7 @@ export class AdkGoServer extends BaseTestServer {
   }
 
   async start(): Promise<void> {
-    if (!fs.existsSync(path.join(this.params.serverDir, 'go.sum'))) {
-      try {
-        console.log('Running go mod tidy to fetch dependencies...');
-        execSync('go mod tidy', {
-          cwd: this.params.serverDir,
-          stdio: 'inherit',
-          env: process.env,
-        });
-      } catch (_e: unknown) {
-        console.warn(
-          'Failed to run go mod tidy, ensure go is installed and network is available.',
-        );
-      }
-    }
+    await ensureGoModules(this.params.serverDir);
 
     await this.startProcess({
       spawnProcess: () => {

@@ -5,10 +5,9 @@
  */
 
 import type {Event} from '@google/adk';
-import {execSync, spawn} from 'node:child_process';
-import * as fs from 'node:fs';
-import * as path from 'node:path';
+import {spawn} from 'node:child_process';
 import * as readline from 'node:readline';
+import {ensureGoModules} from '../../../go_modules.js';
 
 export interface GoAgentParams {
   dir: string;
@@ -28,17 +27,7 @@ export class GoAgent {
   }
 
   public async *run(userMessage: string): AsyncGenerator<Event, void, unknown> {
-    if (!fs.existsSync(path.join(this.dir, 'go.sum'))) {
-      try {
-        execSync('go mod tidy', {
-          cwd: this.dir,
-          stdio: 'inherit',
-          env: process.env,
-        });
-      } catch (_e: unknown) {
-        console.warn('Failed to run go mod tidy');
-      }
-    }
+    await ensureGoModules(this.dir);
 
     const child = spawn(
       'go',
