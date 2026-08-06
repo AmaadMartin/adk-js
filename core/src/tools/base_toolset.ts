@@ -5,6 +5,7 @@
  */
 
 import {ReadonlyContext} from '../agents/readonly_context.js';
+import type {AuthConfig} from '../auth/auth_tool.js';
 import {LlmRequest} from '../models/llm_request.js';
 
 import {Context} from '../agents/context.js';
@@ -112,4 +113,29 @@ export abstract class BaseToolset {
     toolContext: Context, // eslint-disable-line @typescript-eslint/no-unused-vars
     llmRequest: LlmRequest, // eslint-disable-line @typescript-eslint/no-unused-vars
   ): Promise<void> {}
+
+  /**
+   * Returns the auth config this toolset needs, if it needs one.
+   *
+   * When a toolset returns a config, ADK resolves a ready-to-use credential
+   * for it before it calls `getTools()` and before it executes any tool the
+   * toolset returned, so the toolset can authenticate tool listing as well as
+   * tool calls. The toolset reads the credential back with
+   * `readonlyContext.getCredential(authConfig.credentialKey)`. ADK stores the
+   * credential on the invocation instead of writing it onto the returned
+   * config, because an application normally shares one toolset instance across
+   * users and sessions.
+   *
+   * If ADK cannot resolve a credential, it asks the client for one and ends
+   * the invocation without calling `getTools()`.
+   *
+   * If a tool call needs a different credential from the one the toolset lists
+   * with, request it from the tool with `context.requestCredential`.
+   *
+   * @return The auth config, or `undefined` when the toolset needs no
+   *     credential.
+   */
+  getAuthConfig(): AuthConfig | undefined {
+    return undefined;
+  }
 }
