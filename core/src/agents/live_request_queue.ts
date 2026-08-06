@@ -20,6 +20,16 @@ export interface LiveRequest {
   activityEnd?: ActivityEnd;
   /** If set, close the queue. */
   close?: boolean;
+  /**
+   * If set, the content is a partial turn update that does not complete the
+   * current model turn.
+   */
+  partial?: boolean;
+  /**
+   * State changes applied to the session so they take effect even when the
+   * request carries no content or a partial / function-response turn.
+   */
+  stateDelta?: Record<string, unknown>;
 }
 
 /** Function type for resolving a Promise with a LiveRequest. */

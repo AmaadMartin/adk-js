@@ -6,6 +6,11 @@
 
 export {ActiveStreamingTool} from './agents/active_streaming_tool.js';
 export type {ActiveStreamingToolParams} from './agents/active_streaming_tool.js';
+export {AudioCacheManager} from './agents/audio_cache_manager.js';
+export type {
+  AudioCacheType,
+  FlushCachesOptions,
+} from './agents/audio_cache_manager.js';
 export {BaseAgent, isBaseAgent} from './agents/base_agent.js';
 export type {
   AfterAgentCallback,
@@ -20,7 +25,15 @@ export {
   functionsExportedForTestingOnly,
 } from './agents/functions.js';
 export {InvocationContext} from './agents/invocation_context.js';
-export type {InvocationContextParams} from './agents/invocation_context.js';
+export type {
+  InvocationContextParams,
+  RealtimeCacheEntry,
+} from './agents/invocation_context.js';
+export {
+  fanOutLiveRequest,
+  handleControlEventFlush,
+  persistLiveRequest,
+} from './agents/live_flow_utils.js';
 export {LiveRequestQueue} from './agents/live_request_queue.js';
 export type {LiveRequest} from './agents/live_request_queue.js';
 export {LlmAgent as Agent, LlmAgent, isLlmAgent} from './agents/llm_agent.js';

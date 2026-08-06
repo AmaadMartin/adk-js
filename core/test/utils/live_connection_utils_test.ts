@@ -4,7 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GroundingMetadata, LiveServerGoAway} from '@google/genai';
+import {
+  GroundingMetadata,
+  LiveServerGoAway,
+  VoiceActivityType,
+} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {LiveResponseAggregator} from '../../src/utils/live_connection_utils.js';
 
@@ -344,5 +348,33 @@ describe('LiveResponseAggregator', () => {
         modelVersion: 'gemini-2.5-flash',
       },
     ]);
+  });
+
+  it('should yield voice activity with the model version', () => {
+    const aggregator = new LiveResponseAggregator('gemini-2.5-flash');
+    const voiceActivity = {
+      voiceActivityType: VoiceActivityType.ACTIVITY_START,
+      audioOffset: '1.5s',
+    };
+
+    const res = Array.from(aggregator.processMessage({voiceActivity}));
+
+    expect(res).toEqual([
+      {
+        voiceActivity,
+        modelVersion: 'gemini-2.5-flash',
+      },
+    ]);
+  });
+
+  it('should yield voice activity without a model version', () => {
+    const aggregator = new LiveResponseAggregator();
+    const voiceActivity = {
+      voiceActivityType: VoiceActivityType.ACTIVITY_END,
+    };
+
+    const res = Array.from(aggregator.processMessage({voiceActivity}));
+
+    expect(res).toEqual([{voiceActivity}]);
   });
 });
