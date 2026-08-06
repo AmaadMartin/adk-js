@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {spawn} from 'node:child_process';
+import {spawnSync, type SpawnSyncReturns} from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -30,38 +30,16 @@ echo "find: ./denied: Permission denied" >&2
 exit 1
 `;
 
-interface ScriptResult {
-  code: number | null;
-  stdout: string;
-  stderr: string;
-}
-
-function runScript(cwd: string, pathPrefix?: string): Promise<ScriptResult> {
-  return new Promise((resolve, reject) => {
-    const child = spawn('bash', [SCRIPT_PATH], {
-      cwd,
-      env: pathPrefix
-        ? {
-            ...process.env,
-            PATH: `${pathPrefix}${path.delimiter}${process.env.PATH}`,
-          }
-        : process.env,
-    });
-
-    let stdout = '';
-    let stderr = '';
-    child.stdout.setEncoding('utf8');
-    child.stderr.setEncoding('utf8');
-    child.stdout.on('data', (chunk: string) => {
-      stdout += chunk;
-    });
-    child.stderr.on('data', (chunk: string) => {
-      stderr += chunk;
-    });
-    child.on('error', reject);
-    child.on('close', (code) => {
-      resolve({code, stdout, stderr});
-    });
+function runScript(cwd: string, pathPrefix?: string): SpawnSyncReturns<string> {
+  return spawnSync('bash', [SCRIPT_PATH], {
+    cwd,
+    encoding: 'utf8',
+    env: pathPrefix
+      ? {
+          ...process.env,
+          PATH: `${pathPrefix}${path.delimiter}${process.env.PATH}`,
+        }
+      : process.env,
   });
 }
 
@@ -79,13 +57,13 @@ describe.skipIf(process.platform === 'win32')('check_license.sh', () => {
   it('passes when every file has a valid header', async () => {
     await fs.writeFile(path.join(scratchDir, 'ok.ts'), LICENSE_HEADER);
 
-    const result = await runScript(scratchDir);
+    const result = runScript(scratchDir);
 
     expect(result.stderr).toBe('');
     expect(result.stdout).toContain(
       '✅ All files have the correct license header.',
     );
-    expect(result.code).toBe(0);
+    expect(result.status).toBe(0);
   });
 
   it('fails and names the file when a header is missing', async () => {
@@ -94,7 +72,7 @@ describe.skipIf(process.platform === 'win32')('check_license.sh', () => {
       'export const x = 1;\n',
     );
 
-    const result = await runScript(scratchDir);
+    const result = runScript(scratchDir);
 
     expect(result.stdout).toContain(
       '❌ Missing or invalid license header: ./bad.ts',
@@ -102,17 +80,17 @@ describe.skipIf(process.platform === 'win32')('check_license.sh', () => {
     expect(result.stdout).toContain(
       'Error: Some files are missing the required license header.',
     );
-    expect(result.code).toBe(1);
+    expect(result.status).toBe(1);
   });
 
   it('fails when the search matches no .js or .ts file', async () => {
     await fs.writeFile(path.join(scratchDir, 'README.md'), '# no sources\n');
 
-    const result = await runScript(scratchDir);
+    const result = runScript(scratchDir);
 
     expect(result.stderr).toContain('no .js or .ts files were found');
     expect(result.stdout).not.toContain('✅');
-    expect(result.code).toBe(1);
+    expect(result.status).toBe(1);
   });
 
   it('checks a file whose directory name contains a space', async () => {
@@ -123,13 +101,13 @@ describe.skipIf(process.platform === 'win32')('check_license.sh', () => {
       'export const y = 2;\n',
     );
 
-    const result = await runScript(scratchDir);
+    const result = runScript(scratchDir);
 
     expect(result.stdout).toContain(
       '❌ Missing or invalid license header: ./a b/bad.ts',
     );
     expect(`${result.stdout}${result.stderr}`).not.toContain("Can't open");
-    expect(result.code).toBe(1);
+    expect(result.status).toBe(1);
   });
 
   it('fails when find exits non-zero after printing a path', async () => {
@@ -140,10 +118,10 @@ describe.skipIf(process.platform === 'win32')('check_license.sh', () => {
     await fs.writeFile(stubPath, FAILING_FIND_STUB);
     await fs.chmod(stubPath, 0o755);
 
-    const result = await runScript(scratchDir, stubDir);
+    const result = runScript(scratchDir, stubDir);
 
     expect(result.stderr).toContain('failed to list source files');
     expect(result.stdout).not.toContain('✅');
-    expect(result.code).toBe(1);
+    expect(result.status).toBe(1);
   });
 });
