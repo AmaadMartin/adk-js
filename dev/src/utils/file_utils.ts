@@ -31,13 +31,16 @@ export async function isFileExists(folderPath: string): Promise<boolean> {
   }
 }
 
-/** Create a new folder at the specific path */
+/**
+ * Create a new folder at the specific path.
+ *
+ * Rejects with the original `fs.mkdir` error. Swallowing it left the caller to
+ * fail later on the missing directory, so `adk create` in a non-writable
+ * directory reported a downstream ENOENT on `agent.ts` instead of the EACCES
+ * that actually stopped it.
+ */
 export async function createFolder(folderPath: string): Promise<void> {
-  try {
-    await fs.mkdir(folderPath);
-  } catch (e) {
-    console.error(`Failed to create folder ${folderPath}`, e);
-  }
+  return fs.mkdir(folderPath);
 }
 
 /** Remove a folder at the specified location */
