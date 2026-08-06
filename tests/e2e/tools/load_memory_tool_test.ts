@@ -89,6 +89,5 @@ describe('E2E LoadMemoryTool', () => {
       // Check the output
       expect(finalResponse.toLowerCase()).toContain('fido');
     },
-    30000,
   );
 });

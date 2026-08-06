@@ -81,7 +81,7 @@ describe.skipIf(isCI)('Live Gemini Live Connection E2E', () => {
     expect(gotTurnComplete).toBe(true);
 
     await connection.close();
-  }, 30000);
+  });
 
   it('should support multi-turn conversations over the same live connection', async () => {
     const llm = new Gemini({
@@ -159,7 +159,7 @@ describe.skipIf(isCI)('Live Gemini Live Connection E2E', () => {
     expect(gotTurnComplete).toBe(true);
 
     await connection.close();
-  }, 45000);
+  });
 
   // Note: Gemini 3.1 Live is currently in private preview and requires explicit project allowlisting on Vertex AI (yields 1008 Policy Violation otherwise).
   it.skip('should connect and stream responses from Gemini 3.1 Live using Vertex AI', async () => {
@@ -226,5 +226,5 @@ describe.skipIf(isCI)('Live Gemini Live Connection E2E', () => {
     expect(gotTurnComplete).toBe(true);
 
     await connection.close();
-  }, 30000);
+  });
 });

@@ -83,6 +83,5 @@ describe('E2E PreloadMemoryTool', () => {
       // Check the output
       expect(finalResponse.toLowerCase()).toContain('whiskers');
     },
-    30000,
   );
 });

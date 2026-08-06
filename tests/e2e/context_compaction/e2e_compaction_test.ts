@@ -109,6 +109,5 @@ describe('E2e Context Compaction', () => {
       expect(plugin.beforeCalled).toBe(true);
       expect(plugin.afterCalled).toBe(true);
     },
-    30000,
-  ); // 30 sec timeout for e2e LLM tests
+  );
 });

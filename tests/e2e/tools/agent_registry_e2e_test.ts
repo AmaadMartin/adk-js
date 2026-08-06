@@ -70,6 +70,5 @@ describe('E2E Live Agent Registry', () => {
 
       expect(finalResponse.length).toBeGreaterThan(0);
     },
-    60000,
   );
 });

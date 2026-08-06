@@ -79,6 +79,5 @@ describe('E2E LoadArtifactsTool', () => {
       // Check the output
       expect(finalResponse.toLowerCase()).toContain('30');
     },
-    30000,
   );
 });

@@ -111,7 +111,7 @@ Request: "${text}"`;
       }
     }
     expect(responseText).toBeTruthy();
-  }, 30000);
+  });
 
   it('should route to complex agent for complex request', async () => {
     const simpleAgent = new LlmAgent({
@@ -201,5 +201,5 @@ Request: "${text}"`;
       }
     }
     expect(responseText).toBeTruthy();
-  }, 30000);
+  });
 });

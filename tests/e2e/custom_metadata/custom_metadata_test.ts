@@ -90,5 +90,5 @@ describe.skipIf(!hasAKey)('E2e customMetadata Support', () => {
     const userEvent = updatedSession!.events.find((e) => e.author === 'user');
     expect(userEvent).toBeDefined();
     expect(userEvent!.customMetadata).toEqual(customMetadata);
-  }, 30000); // 30s timeout
+  });
 });

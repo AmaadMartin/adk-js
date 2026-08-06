@@ -85,6 +85,5 @@ describe('E2E AgentTool State Filtering', () => {
         `${State.TEMP_PREFIX}tempKey`,
       );
     },
-    30000,
   );
 });

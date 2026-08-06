@@ -59,7 +59,7 @@ describe.skipIf(!hasAKey)('E2e A/B Testing with RoutedLlm', () => {
       }
     }
     expect(responseText).toBeTruthy();
-  }, 30000);
+  });
 
   it('should route to model-b when config is set to model-b', async () => {
     config.selectedModel = 'model-b';
@@ -88,5 +88,5 @@ describe.skipIf(!hasAKey)('E2e A/B Testing with RoutedLlm', () => {
       }
     }
     expect(responseText).toBeTruthy();
-  }, 30000);
+  });
 });

@@ -178,6 +178,5 @@ describe('RestApiTool Auth E2E', () => {
       expect(finalResponse.content?.parts?.[0].text).toBeDefined();
       expect(finalResponse.content?.parts?.[0].text?.length).toBeGreaterThan(0);
     },
-    60000,
   );
 });

@@ -116,7 +116,7 @@ describe.skipIf(!hasAKey)('E2e Planning Mode with RoutedAgent', () => {
       }
     }
     expect(responseText).toBeTruthy();
-  }, 30000);
+  });
 
   it('should route to advanced Agent when planningMode is true', async () => {
     planningMode = true;
@@ -142,5 +142,5 @@ describe.skipIf(!hasAKey)('E2e Planning Mode with RoutedAgent', () => {
       }
     }
     expect(responseText).toBeTruthy();
-  }, 30000);
+  });
 });

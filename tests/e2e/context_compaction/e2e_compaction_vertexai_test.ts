@@ -110,6 +110,5 @@ describe('E2e Context Compaction (Vertex AI)', () => {
       expect(latestCompacted.compactedContent).toBeTruthy();
       expect(latestCompacted.compactedContent.length).toBeGreaterThan(0);
     },
-    30000,
   );
 });

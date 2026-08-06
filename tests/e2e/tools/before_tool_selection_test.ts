@@ -111,7 +111,6 @@ describe('E2E beforeToolSelection', () => {
       // Since the tool was filtered out, the agent should NOT be able to answer '12345'.
       expect(finalResponse.toLowerCase()).not.toContain('12345');
     },
-    30000,
   );
 
   it.skipIf(!hasAKey)(
@@ -182,6 +181,5 @@ describe('E2E beforeToolSelection', () => {
       // Check the output
       expect(finalResponse.toLowerCase()).toContain('12345');
     },
-    30000,
   );
 });

@@ -113,6 +113,5 @@ describe('E2e Context Compaction Agent-Controlled', () => {
         ContextCompactionTrigger.AgentControlled,
       );
     },
-    60000, // 60 sec timeout for e2e LLM tests (might take longer if multiple turns and tools)
   );
 });

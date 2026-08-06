@@ -77,7 +77,7 @@ Request: "${req.contents[0]?.parts?.[0]?.text || ''}"`;
       }
     }
     expect(responseText).toBeTruthy();
-  }, 30000);
+  });
 
   it('should route to complex model for complex request', async () => {
     const simpleModel = new Gemini({model: 'gemini-3-flash-preview'});
@@ -142,5 +142,5 @@ Request: "${req.contents[0]?.parts?.[0]?.text || ''}"`;
       }
     }
     expect(responseText).toBeTruthy();
-  }, 30000);
+  });
 });

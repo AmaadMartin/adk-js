@@ -81,7 +81,7 @@ describe.skipIf(!hasAKey)('E2e A/B Testing with RoutedAgent', () => {
       }
     }
     expect(responseText).toBeTruthy();
-  }, 30000);
+  });
 
   it('should route to agent-b when config is set to agent-b', async () => {
     config.selectedAgent = 'agent-b';
@@ -107,5 +107,5 @@ describe.skipIf(!hasAKey)('E2e A/B Testing with RoutedAgent', () => {
       }
     }
     expect(responseText).toBeTruthy();
-  }, 30000);
+  });
 });

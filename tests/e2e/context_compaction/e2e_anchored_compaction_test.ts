@@ -141,6 +141,5 @@ describe('E2e Anchored Context Compaction', () => {
       expect(plugin.beforeCalled).toBe(true);
       expect(plugin.afterCalled).toBe(true);
     },
-    30000,
   );
 });

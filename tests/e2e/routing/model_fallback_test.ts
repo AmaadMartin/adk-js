@@ -75,5 +75,5 @@ describe.skipIf(!hasAKey)('E2e Model Fallback with RoutedLlm', () => {
 
     expect(finalResponse).toBeTruthy();
     expect(routerCalls).toBe(2); // Initial call + fallback call
-  }, 30000); // Timeout
+  });
 });
