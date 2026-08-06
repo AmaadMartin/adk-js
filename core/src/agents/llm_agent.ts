@@ -57,6 +57,7 @@ import {
 } from './functions.js';
 
 import {AUTH_PREPROCESSOR} from '../auth/auth_preprocessor.js';
+import {TOOLSET_AUTH_PREPROCESSOR} from '../auth/toolset_auth_preprocessor.js';
 import {BaseContextCompactor} from '../context/base_context_compactor.js';
 import {InvocationContext} from './invocation_context.js';
 import {AGENT_TRANSFER_LLM_REQUEST_PROCESSOR} from './processors/agent_transfer_llm_request_processor.js';
@@ -71,7 +72,6 @@ import {REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR} from './processors/request_c
 import {TOOL_FILTER_REQUEST_PROCESSOR} from './processors/tool_filter_request_processor.js';
 import {ReadonlyContext} from './readonly_context.js';
 import {StreamingMode} from './run_config.js';
-import {TOOLSET_AUTH_PREPROCESSOR} from './toolset_auth.js';
 
 /**
  * Input/output schema type for agent.

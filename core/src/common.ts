@@ -61,10 +61,6 @@ export type {AgentRouter, RoutedAgentConfig} from './agents/routed_agent.js';
 export {StreamingMode} from './agents/run_config.js';
 export type {RunConfig} from './agents/run_config.js';
 export {SequentialAgent, isSequentialAgent} from './agents/sequential_agent.js';
-export {
-  TOOLSET_AUTH_PREPROCESSOR,
-  ToolsetAuthPreprocessor,
-} from './agents/toolset_auth.js';
 export type {TranscriptionEntry} from './agents/transcription_entry.js';
 export {createResumabilityConfig} from './apps/resumability_config.js';
 export type {ResumabilityConfig} from './apps/resumability_config.js';
@@ -110,6 +106,10 @@ export {OAuth2CredentialExchanger} from './auth/oauth2/oauth2_credential_exchang
 export {OAuth2DiscoveryManager} from './auth/oauth2/oauth2_discovery.js';
 export type {BaseCredentialRefresher} from './auth/refresher/base_credential_refresher.js';
 export {CredentialRefresherRegistry} from './auth/refresher/credential_refresher_registry.js';
+export {
+  TOOLSET_AUTH_PREPROCESSOR,
+  ToolsetAuthPreprocessor,
+} from './auth/toolset_auth_preprocessor.js';
 export {BaseCodeExecutor} from './code_executors/base_code_executor.js';
 export type {ExecuteCodeParams} from './code_executors/base_code_executor.js';
 export {BuiltInCodeExecutor} from './code_executors/built_in_code_executor.js';

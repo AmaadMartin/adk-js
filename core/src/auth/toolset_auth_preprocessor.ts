@@ -4,23 +4,20 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {cloneDeep, isEmpty} from 'lodash-es';
+import {cloneDeep} from 'lodash-es';
 
-import {AuthCredential} from '../auth/auth_credential.js';
-import {AuthHandler} from '../auth/auth_handler.js';
-import {
-  AuthConfig,
-  TOOLSET_AUTH_CREDENTIAL_ID_PREFIX,
-} from '../auth/auth_tool.js';
+import {Context} from '../agents/context.js';
+import {buildAuthRequestEvent} from '../agents/functions.js';
+import {InvocationContext} from '../agents/invocation_context.js';
+import {isLlmAgent, ToolUnion} from '../agents/llm_agent.js';
+import {BaseLlmRequestProcessor} from '../agents/processors/base_llm_processor.js';
 import {Event} from '../events/event.js';
 import {isBaseToolset} from '../tools/base_toolset.js';
 import {logger} from '../utils/logger.js';
 
-import {Context} from './context.js';
-import {buildAuthRequestEvent} from './functions.js';
-import {InvocationContext} from './invocation_context.js';
-import {isLlmAgent, ToolUnion} from './llm_agent.js';
-import {BaseLlmRequestProcessor} from './processors/base_llm_processor.js';
+import {AuthCredential} from './auth_credential.js';
+import {AuthHandler} from './auth_handler.js';
+import {AuthConfig, TOOLSET_AUTH_CREDENTIAL_ID_PREFIX} from './auth_tool.js';
 
 /**
  * Resolves toolset-level credentials before any later processor lists tools.
@@ -60,10 +57,6 @@ export async function* resolveToolsetAuth(
   invocationContext: InvocationContext,
   tools: ToolUnion[],
 ): AsyncGenerator<Event, void, void> {
-  if (isEmpty(tools)) {
-    return;
-  }
-
   const context = new Context({invocationContext});
   const pendingAuthRequests: Record<string, AuthConfig> = {};
 
@@ -101,18 +94,15 @@ export async function* resolveToolsetAuth(
     }
   }
 
-  if (isEmpty(pendingAuthRequests)) {
-    return;
-  }
-
   const event = buildAuthRequestEvent(
     invocationContext,
     pendingAuthRequests,
     'model',
   );
-  if (event) {
-    yield event;
+  if (!event) {
+    return;
   }
+  yield event;
   invocationContext.endInvocation = true;
 }
 

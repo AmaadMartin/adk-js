@@ -25,7 +25,7 @@ import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   resolveToolsetAuth,
   TOOLSET_AUTH_PREPROCESSOR,
-} from '../../src/agents/toolset_auth.js';
+} from '../../src/auth/toolset_auth_preprocessor.js';
 import {logger} from '../../src/utils/logger.js';
 
 const TOOLSET_AUTH_PREFIX = '_adk_toolset_auth_';
