@@ -70,6 +70,9 @@
       "eslint --fix",
       "prettier --write"
     ],
+    "**/*.cjs": [
+      "prettier --write"
+    ],
     "**/*.{json,md}": [
       "prettier --write"
     ]
