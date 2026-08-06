@@ -70,6 +70,32 @@ export function getLongRunningFunctionCalls(
   return longRunningToolIds;
 }
 
+// TODO - b/425992518: consider internalize as part of llm_agent's runtime.
+// The auth part of function calling is a bit hacky, need to to clarify.
+/**
+ * Generates an authentication event.
+ *
+ * It iterates through requested auth configurations in a function response
+ * event and creates a new function call for each.
+ */
+export function generateAuthEvent(
+  invocationContext: InvocationContext,
+  functionResponseEvent: Event,
+): Event | undefined {
+  if (
+    !functionResponseEvent.actions?.requestedAuthConfigs ||
+    isEmpty(functionResponseEvent.actions.requestedAuthConfigs)
+  ) {
+    return undefined;
+  }
+
+  return buildAuthRequestEvent(
+    invocationContext,
+    functionResponseEvent.actions.requestedAuthConfigs,
+    {role: functionResponseEvent.content!.role},
+  );
+}
+
 /**
  * Builds an auth request event carrying one `adk_request_credential` function
  * call per requested credential.
@@ -114,32 +140,6 @@ export function buildAuthRequestEvent(
     },
     longRunningToolIds: Array.from(longRunningToolIds),
   });
-}
-
-// TODO - b/425992518: consider internalize as part of llm_agent's runtime.
-// The auth part of function calling is a bit hacky, need to to clarify.
-/**
- * Generates an authentication event.
- *
- * It iterates through requested auth configurations in a function response
- * event and creates a new function call for each.
- */
-export function generateAuthEvent(
-  invocationContext: InvocationContext,
-  functionResponseEvent: Event,
-): Event | undefined {
-  if (
-    !functionResponseEvent.actions?.requestedAuthConfigs ||
-    isEmpty(functionResponseEvent.actions.requestedAuthConfigs)
-  ) {
-    return undefined;
-  }
-
-  return buildAuthRequestEvent(
-    invocationContext,
-    functionResponseEvent.actions.requestedAuthConfigs,
-    {role: functionResponseEvent.content!.role},
-  );
 }
 
 /**
