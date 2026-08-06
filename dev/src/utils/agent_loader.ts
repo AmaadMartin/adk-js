@@ -75,6 +75,23 @@ export interface AgentFileOptions {
 }
 
 /**
+ * Metadata for a single app, returned by the detailed form of `/list-apps`.
+ *
+ * The field names are camelCase to match the JSON that the Python dev server
+ * emits (`AppInfo` in adk-python `src/google/adk/cli/api_server.py`), because
+ * the same `adk-web` front-end bundle consumes both servers.
+ */
+export interface AppInfo {
+  /** Directory or file name that the agent was discovered under. */
+  name: string;
+  /** `name` of the loaded root agent, which need not match `name`. */
+  rootAgentName: string;
+  description: string;
+  language: 'typescript';
+  isComputerUse: boolean;
+}
+
+/**
  * Default options for loading an agent file.
  *
  * Compile and bundle only .ts files.
@@ -456,6 +473,38 @@ export class AgentLoader {
     }
 
     return appNames.sort();
+  }
+
+  /**
+   * Lists every discovered agent with its metadata, sorted by name.
+   *
+   * An agent that fails to load is logged and omitted, so one broken agent
+   * cannot fail the whole listing.
+   */
+  async listAgentsDetailed(): Promise<AppInfo[]> {
+    const names = await this.listAgents();
+
+    const appsInfo: AppInfo[] = [];
+    for (const name of names) {
+      try {
+        const loaded = await this.preloadedAgents[name].load();
+        const agent = isApp(loaded) ? loaded.rootAgent : loaded;
+
+        appsInfo.push({
+          name,
+          rootAgentName: agent.name,
+          description: agent.description ?? '',
+          language: 'typescript',
+          // adk-js has no computer-use toolset to detect, so this is always
+          // false. The field stays for parity with the Python dev server.
+          isComputerUse: false,
+        });
+      } catch (e: unknown) {
+        logger.error(`Failed to load agent '${name}': ${e}`);
+      }
+    }
+
+    return appsInfo;
   }
 
   async getAgentFile(agentName: string): Promise<AgentFile> {

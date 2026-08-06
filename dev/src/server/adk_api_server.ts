@@ -33,7 +33,7 @@ import express, {Request, Response} from 'express';
 import * as http from 'node:http';
 import * as path from 'node:path';
 
-import {AgentFileOptions, AgentLoader} from '../utils/agent_loader.js';
+import {AgentFileOptions, AgentLoader, AppInfo} from '../utils/agent_loader.js';
 import {AdkLogger} from '../utils/logger.js';
 import {
   ApiServerSpanExporter,
@@ -49,6 +49,11 @@ import {getAgentGraphAsDot} from './agent_graph.js';
  * command line.
  */
 export const A2A_AUTH_TOKEN_ENV_VAR = 'ADK_A2A_AUTH_TOKEN';
+
+/** Response body of `GET /list-apps?detailed=true`. */
+export interface ListAppsResponse {
+  apps: AppInfo[];
+}
 
 interface ServerOptions {
   agentsDir?: string;
@@ -243,6 +248,20 @@ export class AdkApiServer {
 
     app.get('/list-apps', async (req: Request, res: Response) => {
       try {
+        // Anything other than these two values falls back to the legacy array
+        // response, so an unrecognised value never changes the response shape.
+        const detailedParam = req.query['detailed'];
+        const detailed = detailedParam === 'true' || detailedParam === '1';
+
+        if (detailed) {
+          const response: ListAppsResponse = {
+            apps: await this.agentLoader.listAgentsDetailed(),
+          };
+          res.json(response);
+
+          return;
+        }
+
         const apps = await this.agentLoader.listAgents();
         res.json(apps);
       } catch (e: unknown) {

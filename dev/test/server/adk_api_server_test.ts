@@ -28,6 +28,7 @@ import {z} from 'zod';
 import {
   A2A_AUTH_TOKEN_ENV_VAR,
   AdkApiServer,
+  ListAppsResponse,
 } from '../../src/server/adk_api_server.js';
 import {AgentLoader} from '../../src/utils/agent_loader.js';
 
@@ -224,6 +225,16 @@ describe('AdkWebServer', () => {
   beforeEach(async () => {
     agentLoader = {
       listAgents: () => Promise.resolve(['testApp']),
+      listAgentsDetailed: () =>
+        Promise.resolve([
+          {
+            name: 'testApp',
+            rootAgentName: 'testAgent',
+            description: 'test agent',
+            language: 'typescript',
+            isComputerUse: false,
+          },
+        ]),
       getAgentFile: () =>
         Promise.resolve({
           load() {
@@ -811,6 +822,64 @@ describe('AdkWebServer', () => {
         expect((e as {response: {status: number}}).response.status).toBe(500);
       } finally {
         agentLoader.listAgents = originalListAgents;
+      }
+    });
+
+    const detailedEnvelope: ListAppsResponse = {
+      apps: [
+        {
+          name: 'testApp',
+          rootAgentName: 'testAgent',
+          description: 'test agent',
+          language: 'typescript',
+          isComputerUse: false,
+        },
+      ],
+    };
+
+    it('returns detailed app info when detailed=true', async () => {
+      const response = await client.get<ListAppsResponse>(
+        '/list-apps?detailed=true',
+      );
+
+      expect(response.status).toBe(200);
+      expect(response.data).toEqual(detailedEnvelope);
+    });
+
+    it('accepts detailed=1', async () => {
+      const response = await client.get<ListAppsResponse>(
+        '/list-apps?detailed=1',
+      );
+
+      expect(response.status).toBe(200);
+      expect(response.data).toEqual(detailedEnvelope);
+    });
+
+    it('returns the plain array when detailed=false', async () => {
+      const response = await client.get<string[]>('/list-apps?detailed=false');
+
+      expect(response.status).toBe(200);
+      expect(response.data).toEqual(['testApp']);
+    });
+
+    it('returns the plain array for an unrecognised detailed value', async () => {
+      const response = await client.get<string[]>('/list-apps?detailed=yes');
+
+      expect(response.status).toBe(200);
+      expect(response.data).toEqual(['testApp']);
+    });
+
+    it('returns 500 if listAgentsDetailed fails', async () => {
+      const originalListAgentsDetailed = agentLoader.listAgentsDetailed;
+      agentLoader.listAgentsDetailed = () =>
+        Promise.reject(new Error('List failed'));
+
+      try {
+        await expect(
+          client.get('/list-apps?detailed=true'),
+        ).rejects.toMatchObject({response: {status: 500}});
+      } finally {
+        agentLoader.listAgentsDetailed = originalListAgentsDetailed;
       }
     });
   });

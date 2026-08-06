@@ -27,6 +27,7 @@ import {
   replaceDirnamePlugin,
 } from '../../src/utils/agent_loader.js';
 import * as fileUtils from '../../src/utils/file_utils.js';
+import {AdkLogger} from '../../src/utils/logger.js';
 
 vi.mock('../../src/utils/file_utils.js', () => ({
   createTempDir: vi.fn(),
@@ -137,6 +138,17 @@ class FakeAgentForApp extends BaseAgent {
 }
 const agent = new FakeAgentForApp('agent_for_app_default');
 export default new App({ name: 'test_app_default', rootAgent: agent });
+`;
+
+const agentWithDescriptionContent = `
+const {BaseAgent} = require('@google/adk');
+
+class FakeDescribedAgent extends BaseAgent {
+  constructor(name, description) {
+    super({ name, description });
+  }
+}
+exports.rootAgent = new FakeDescribedAgent('described_root', 'A described agent');
 `;
 
 describe('AgentLoader', () => {
@@ -785,6 +797,82 @@ describe('AgentLoader', () => {
       expect(isApp(loaded)).toBe(true);
       expect((loaded as App).name).toBe('test_app');
 
+      await loader.disposeAll();
+    });
+
+    it('lists agents with detailed metadata', async () => {
+      await fs.writeFile(
+        path.join(tempAgentsDir, 'described_agent.js'),
+        agentWithDescriptionContent,
+      );
+
+      const loader = new AgentLoader(tempAgentsDir);
+      const result = await loader.listAgentsDetailed();
+
+      expect(result).toContainEqual({
+        name: 'described_agent',
+        rootAgentName: 'described_root',
+        description: 'A described agent',
+        language: 'typescript',
+        isComputerUse: false,
+      });
+
+      await loader.disposeAll();
+    });
+
+    it('defaults description to an empty string', async () => {
+      const loader = new AgentLoader(tempAgentsDir);
+      const result = await loader.listAgentsDetailed();
+
+      expect(result.find((a) => a.name === 'agent1')?.description).toBe('');
+
+      await loader.disposeAll();
+    });
+
+    it('sorts detailed entries by name', async () => {
+      const loader = new AgentLoader(tempAgentsDir);
+      const result = await loader.listAgentsDetailed();
+
+      expect(result.map((a) => a.name)).toEqual(['agent1', 'agent2', 'agent3']);
+
+      await loader.disposeAll();
+    });
+
+    it('unwraps the root agent of an App', async () => {
+      const appDir = path.join(tempAgentsDir, 'my_service');
+      await fs.mkdir(appDir, {recursive: true});
+      await fs.writeFile(path.join(appDir, 'app.js'), appJsContent);
+
+      const loader = new AgentLoader(tempAgentsDir);
+      const result = await loader.listAgentsDetailed();
+
+      expect(result.find((a) => a.name === 'my_service')?.rootAgentName).toBe(
+        'agent_for_app',
+      );
+
+      await loader.disposeAll();
+    });
+
+    it('skips and logs agents that fail to load', async () => {
+      const loader = new AgentLoader(tempAgentsDir);
+      await loader.preloadAgents();
+
+      const agent2File = await loader.getAgentFile('agent2');
+      const loadSpy = vi
+        .spyOn(agent2File, 'load')
+        .mockRejectedValue(new Error('boom'));
+      const errorSpy = vi
+        .spyOn(AdkLogger.prototype, 'error')
+        .mockImplementation(() => {});
+
+      const result = await loader.listAgentsDetailed();
+
+      expect(result.map((a) => a.name)).toEqual(['agent1', 'agent3']);
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(String(errorSpy.mock.calls[0][0])).toContain('agent2');
+
+      loadSpy.mockRestore();
+      errorSpy.mockRestore();
       await loader.disposeAll();
     });
 
