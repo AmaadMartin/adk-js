@@ -4,12 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {FileContentEncoding} from '@google/adk';
+import {File, FileContentEncoding} from '@google/adk';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {afterEach, beforeEach, describe, expect, it} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {materializeFiles} from '../../src/utils/file_utils.js';
+
+/** Absolute win32 directory the simulated Windows tests materialize into. */
+const WIN_DIR = 'C:\\work';
 
 describe('file_utils', () => {
   let tempDir: string;
@@ -39,7 +42,7 @@ describe('file_utils', () => {
         },
       ];
 
-      await materializeFiles(files, tempDir);
+      const created = await materializeFiles(files, tempDir);
 
       const content1 = await fs.readFile(
         path.join(tempDir, 'test.txt'),
@@ -52,6 +55,8 @@ describe('file_utils', () => {
         'utf8',
       );
       expect(content2).toBe('world');
+
+      expect(created.map((f) => f.name)).toEqual(['test.txt', 'sub/test2.txt']);
     });
 
     it('should throw an error if file attempts to escape target directory via relative path', async () => {
@@ -180,6 +185,103 @@ describe('file_utils', () => {
         'utf8',
       );
       expect(content3).toBe('third');
+    });
+
+    describe('on a Windows host', () => {
+      /** Absolute win32 paths that `fs.access` reports as already existing. */
+      let existingPaths: Set<string>;
+
+      /**
+       * Re-imports file_utils with `node:path` bound to win32 and the
+       * filesystem stubbed, so the Windows separator behaviour can be pinned
+       * on a POSIX runner. The test file's own top-level `node:path` and
+       * `node:fs/promises` imports are already resolved and stay real.
+       */
+      async function loadMaterializeFiles() {
+        vi.resetModules();
+        vi.doMock('node:path', async () => {
+          const actual =
+            await vi.importActual<typeof import('node:path')>('node:path');
+          return {...actual.win32, default: actual.win32};
+        });
+        vi.doMock('node:fs/promises', () => {
+          const impl = {
+            access: async (p: string) => {
+              if (!existingPaths.has(p)) {
+                throw new Error(`ENOENT: ${p}`);
+              }
+            },
+            mkdir: async () => undefined,
+            writeFile: async () => undefined,
+          };
+          return {...impl, default: impl};
+        });
+        return (await import('../../src/utils/file_utils.js')).materializeFiles;
+      }
+
+      function nestedFile(): File {
+        return {
+          name: 'sub/test2.txt',
+          content: 'world',
+          contentEncoding: FileContentEncoding.UTF8,
+          mimeType: 'text/plain',
+        };
+      }
+
+      beforeEach(() => {
+        existingPaths = new Set<string>();
+      });
+
+      afterEach(() => {
+        vi.doUnmock('node:path');
+        vi.doUnmock('node:fs/promises');
+        vi.resetModules();
+      });
+
+      it('returns a nested name with forward slashes, not the host separator', async () => {
+        const materializeFilesWin32 = await loadMaterializeFiles();
+
+        const created = await materializeFilesWin32([nestedFile()], WIN_DIR);
+
+        expect(created.map((f) => f.name)).toEqual(['sub/test2.txt']);
+      });
+
+      it('returns a nested collision-renamed name with forward slashes', async () => {
+        existingPaths.add('C:\\work\\sub\\test2.txt');
+        const materializeFilesWin32 = await loadMaterializeFiles();
+
+        const created = await materializeFilesWin32([nestedFile()], WIN_DIR);
+
+        expect(created.map((f) => f.name)).toEqual(['sub/test2_2.txt']);
+      });
+
+      it('rewrites the input name with forward slashes on a nested collision', async () => {
+        existingPaths.add('C:\\work\\sub\\test2.txt');
+        const materializeFilesWin32 = await loadMaterializeFiles();
+        const files = [nestedFile()];
+
+        await materializeFilesWin32(files, WIN_DIR);
+
+        expect(files.map((f) => f.name)).toEqual(['sub/test2_2.txt']);
+      });
+
+      it('leaves a top-level collision name unchanged', async () => {
+        existingPaths.add('C:\\work\\test.txt');
+        const materializeFilesWin32 = await loadMaterializeFiles();
+        const files: File[] = [
+          {
+            name: 'test.txt',
+            content: 'hello',
+            contentEncoding: FileContentEncoding.UTF8,
+            mimeType: 'text/plain',
+          },
+        ];
+
+        const created = await materializeFilesWin32(files, WIN_DIR);
+
+        expect(created.map((f) => f.name)).toEqual(['test_2.txt']);
+        expect(files.map((f) => f.name)).toEqual(['test_2.txt']);
+      });
     });
   });
 });
