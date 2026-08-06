@@ -31,6 +31,41 @@ export function isInMemoryConnectionString(uri?: string): boolean {
 }
 
 /**
+ * Applies the session-scoped part of an event's state delta to a stored
+ * session's state.
+ *
+ * `app:` and `user:` keys belong to the service's `appState`/`userState` maps
+ * and are projected back onto a session by `mergeStates` on read, so a stored
+ * session must not hold a second copy of them; two copies of one value can
+ * drift. The live session a caller holds still receives the whole non-`temp:`
+ * delta with its prefixes, written by `BaseSessionService.appendEvent`. Only
+ * the stored copy is narrowed here, as `DatabaseSessionService` and the Python
+ * implementation both do.
+ *
+ * `temp:` keys need no filtering: `trimTempDeltaState` removes them from the
+ * delta before this runs.
+ */
+export function applySessionScopedState(
+  state: Record<string, unknown>,
+  stateDelta: Record<string, unknown>,
+): void {
+  for (const [key, value] of Object.entries(stateDelta)) {
+    if (key.startsWith(State.APP_PREFIX) || key.startsWith(State.USER_PREFIX)) {
+      continue;
+    }
+    // `defineProperty`, not assignment: `state['__proto__'] = value` reaches
+    // the inherited setter and re-parents the state map instead of storing an
+    // own property.
+    Object.defineProperty(state, key, {
+      value,
+      writable: true,
+      enumerable: true,
+      configurable: true,
+    });
+  }
+}
+
+/**
  * An in-memory implementation of the session service.
  */
 export class InMemorySessionService extends BaseSessionService {
@@ -291,9 +326,22 @@ export class InMemorySessionService extends BaseSessionService {
     }
 
     const storageSession: Session = this.sessions[appName][userId][sessionId];
-    await super.appendEvent({session: storageSession, event});
-
     storageSession.lastUpdateTime = event.timestamp;
+
+    if (event.partial) {
+      return event;
+    }
+
+    const index = storageSession.events.findIndex((e) => e.id === event.id);
+    if (index >= 0) {
+      storageSession.events[index] = event;
+    } else {
+      storageSession.events.push(event);
+    }
+
+    if (event.actions && event.actions.stateDelta) {
+      applySessionScopedState(storageSession.state, event.actions.stateDelta);
+    }
 
     return event;
   }
