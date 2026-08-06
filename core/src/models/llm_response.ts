@@ -16,6 +16,8 @@ import {
   Transcription,
 } from '@google/genai';
 
+import {CacheMetadata} from './cache_metadata.js';
+
 /**
  * LLM response class that provides the first candidate response from the
  * model if available. Otherwise, returns error code and message.
@@ -75,6 +77,11 @@ export interface LlmResponse {
    * The usage metadata of the LlmResponse.
    */
   usageMetadata?: GenerateContentResponseUsageMetadata;
+
+  /**
+   * Metadata for the context cache associated with this response, if any.
+   */
+  cacheMetadata?: CacheMetadata;
 
   /**
    * The finish reason of the response.
