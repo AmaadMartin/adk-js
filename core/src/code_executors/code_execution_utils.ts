@@ -225,13 +225,16 @@ export function buildCodeExecutionResultPart(
   }
 
   const finalResult = [];
-  if (codeExecutionResult.stdout || !codeExecutionResult.outputFiles) {
+  if (
+    codeExecutionResult.stdout ||
+    codeExecutionResult.outputFiles.length === 0
+  ) {
     finalResult.push(`Code execution result:\n${codeExecutionResult.stdout}\n`);
   }
-  if (codeExecutionResult.outputFiles) {
+  if (codeExecutionResult.outputFiles.length > 0) {
     finalResult.push(
       `Saved artifacts:\n` +
-        codeExecutionResult.outputFiles.map((f) => f.name).join(', '),
+        codeExecutionResult.outputFiles.map((f) => `\`${f.name}\``).join(','),
     );
   }
 
