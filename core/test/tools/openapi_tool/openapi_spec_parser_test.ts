@@ -8,6 +8,23 @@ import {OpenApiSpecParser} from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
 import {describe, expect, it} from 'vitest';
 
+/**
+ * A schema whose properties are inline schemas rather than `$ref`s. The
+ * fixtures below never use a `$ref` inside `properties`.
+ */
+type InlineSchemaObject = OpenAPIV3.SchemaObject & {
+  properties?: Record<string, OpenAPIV3.SchemaObject>;
+};
+
+/**
+ * Returns a schema `type` exactly as an untrusted spec writes it. The sanitizer
+ * fixture below uses names the OpenAPI 3 schema does not admit (wrong case, or
+ * unknown), which `NonArraySchemaObjectType` cannot express.
+ */
+function rawSchemaType(type: string): OpenAPIV3.NonArraySchemaObjectType {
+  return type as OpenAPIV3.NonArraySchemaObjectType;
+}
+
 describe('OpenApiSpecParser', () => {
   it('should resolve internal references', () => {
     const spec: OpenAPIV3.Document = {
@@ -50,7 +67,7 @@ describe('OpenApiSpecParser', () => {
     expect(op.operation.requestBody).toBeDefined();
     const body = op.operation.requestBody as OpenAPIV3.RequestBodyObject;
     const schema = body.content['application/json']
-      .schema as OpenAPIV3.SchemaObject;
+      .schema as InlineSchemaObject;
     expect(schema.type).toBe('object');
     expect(schema.properties?.name).toBeDefined();
   });
@@ -144,10 +161,12 @@ describe('OpenApiSpecParser', () => {
               content: {
                 'application/json': {
                   schema: {
-                    type: 'OBJECT', // uppercase, should be normalized
+                    type: rawSchemaType('OBJECT'), // uppercase, should be normalized
                     properties: {
-                      age: {type: 'INTEGER'}, // uppercase, should be normalized
-                      invalid: {type: 'unknown_type'}, // invalid, should be removed
+                      // uppercase, should be normalized
+                      age: {type: rawSchemaType('INTEGER')},
+                      // invalid, should be removed
+                      invalid: {type: rawSchemaType('unknown_type')},
                     },
                   },
                 },
@@ -166,7 +185,7 @@ describe('OpenApiSpecParser', () => {
     const op = parsed[0];
     const body = op.operation.requestBody as OpenAPIV3.RequestBodyObject;
     const schema = body.content['application/json']
-      .schema as OpenAPIV3.SchemaObject;
+      .schema as InlineSchemaObject;
     expect(schema.type).toBe('object');
     expect(schema.properties?.age?.type).toBe('integer');
     expect(
