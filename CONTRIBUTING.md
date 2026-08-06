@@ -28,6 +28,18 @@ To set up your local development environment for contributing:
    npm test
    ```
 
+### Supported Node.js versions
+
+The minimum supported runtime is declared as `engines.node` in the root
+`package.json` and in each published workspace manifest, and the `validation`
+workflow runs the test suite on every supported Node.js LTS line.
+
+The floor tracks the oldest Node.js LTS line that is still in support. When
+that line reaches end of life, raise `engines.node`, drop the retired major
+from the workflow matrix, and update the constants in
+`tests/integration/repo_config/node_engines_test.ts` — the test fails until all
+three agree.
+
 ### Code Quality
 
 To maintain high code quality and consistency:
