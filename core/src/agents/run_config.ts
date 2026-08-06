@@ -99,6 +99,13 @@ export interface RunConfig {
    * to intercept and execute tools (Client-Side Tool Execution).
    */
   pauseOnToolCalls?: boolean;
+
+  /**
+   * When true, live model audio (input + output) is aggregated into an audio
+   * artifact and only a file_data reference to that artifact is persisted to
+   * the session; raw inline audio blobs are not persisted. Defaults to false.
+   */
+  saveLiveModelAudioToSession?: boolean;
 }
 
 /**
@@ -111,6 +118,7 @@ export interface RunConfig {
  * - `streamingMode` → {@link StreamingMode.NONE}
  * - `maxLlmCalls` → `500` (validated via `validateMaxLlmCalls`)
  * - `pauseOnToolCalls` → `false`
+ * - `saveLiveModelAudioToSession` → `false`
  *
  * @param params - Optional partial {@link RunConfig} overriding defaults.
  * @returns A merged {@link RunConfig} object.
@@ -123,6 +131,7 @@ export function createRunConfig(params: Partial<RunConfig> = {}) {
     enableAffectiveDialog: false,
     streamingMode: StreamingMode.NONE,
     pauseOnToolCalls: false,
+    saveLiveModelAudioToSession: false,
     ...params,
     maxLlmCalls: validateMaxLlmCalls(params.maxLlmCalls ?? 500),
   };
