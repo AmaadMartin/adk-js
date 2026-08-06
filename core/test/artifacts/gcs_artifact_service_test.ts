@@ -363,4 +363,25 @@ describe('GcsArtifactService', () => {
       expect(loaded?.inlineData?.displayName).toBe('photo.png');
     });
   });
+
+  describe('lazy Storage construction', () => {
+    it('defers the Storage client to the first operation and reuses it', async () => {
+      storageMock.buckets.clear();
+      StorageMock.mockClear();
+
+      const service = new GcsArtifactService(bucketName);
+      expect(StorageMock).not.toHaveBeenCalled();
+
+      const request = {
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 'test-session',
+        filename: 'lazy.txt',
+      };
+      await service.listVersions(request);
+      await service.listArtifactKeys(request);
+
+      expect(StorageMock).toHaveBeenCalledTimes(1);
+    });
+  });
 });

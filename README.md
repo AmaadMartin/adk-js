@@ -69,6 +69,33 @@ yarn add -D @google/adk-devtools
 This installs the core SDK and the dev tools (CLI and dev UI) as a dev
 dependency.
 
+### Optional dependencies
+
+Three Google Cloud packages are loaded lazily and declared as optional peer
+dependencies, so `npm install @google/adk` stays small for everyone else.
+Install the package for the feature you use:
+
+| Feature                                      | Install                                                             |
+| -------------------------------------------- | ------------------------------------------------------------------- |
+| `GcsArtifactService` / `gs://` artifact URIs | `npm install @google-cloud/storage`                                 |
+| `getGcpExporters({enableTracing: true})`     | `npm install @google-cloud/opentelemetry-cloud-trace-exporter`      |
+| `getGcpExporters({enableMetrics: true})`     | `npm install @google-cloud/opentelemetry-cloud-monitoring-exporter` |
+
+Enabling a feature without its package raises an error naming the package to
+install. `@google/adk-devtools` (the `adk` CLI) bundles all three, so no extra
+step is needed when using the CLI.
+
+`GcsArtifactService.loadArtifact` and `getArtifactVersion` resolve the storage
+client before their internal error handling, so a client-construction failure —
+including the missing-package error above — now rejects instead of being logged
+and reported as `undefined`. Failures of the GCS calls themselves still return
+`undefined` as before.
+
+`GcsArtifactService`'s constructor signature references `@google-cloud/storage`
+types, so TypeScript users who compile with `skipLibCheck: false` and do not
+install that package will see an unresolved-module error on the shipped
+declaration file.
+
 ## Quick Start
 
 Define an agent:

@@ -123,6 +123,21 @@ describe('getGcpExporters', () => {
     },
   );
 
+  it('should construct no exporters when both flags are disabled', async () => {
+    // Narrow away the callback overload so the mock is typed without a cast.
+    const getProjectId: () => Promise<string> =
+      GoogleAuth.prototype.getProjectId;
+    vi.mocked(getProjectId).mockResolvedValue('test-project');
+
+    const result = await getGcpExporters({});
+
+    expect(result).toEqual({
+      spanProcessors: [],
+      metricReaders: [],
+      logRecordProcessors: [],
+    });
+  });
+
   it('should return empty hooks when GoogleAuth fails to get project ID', async () => {
     const mockAuth = {
       getProjectId: vi.fn().mockRejectedValue(new Error('Auth error')),
