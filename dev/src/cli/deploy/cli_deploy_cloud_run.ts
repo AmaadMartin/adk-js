@@ -68,10 +68,6 @@ const GCLOUD_VERBOSITY_BY_LOG_LEVEL: Record<string, string> = {
   'error': 'error',
 };
 
-function toGcloudVerbosity(logLevel: string): string {
-  return GCLOUD_VERBOSITY_BY_LOG_LEVEL[logLevel.toLowerCase()] ?? 'info';
-}
-
 function prepareGCloudArguments(options: DeployToCloudRunOptions): string[] {
   const regionOptions: string[] = options.region
     ? ['--region', options.region]
@@ -105,7 +101,7 @@ function prepareGCloudArguments(options: DeployToCloudRunOptions): string[] {
     '--port',
     options.port.toString(),
     '--verbosity',
-    toGcloudVerbosity(options.logLevel),
+    GCLOUD_VERBOSITY_BY_LOG_LEVEL[options.logLevel.toLowerCase()] ?? 'info',
   ];
 
   if (options.a2aAuthToken) {

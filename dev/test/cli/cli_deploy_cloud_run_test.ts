@@ -479,17 +479,6 @@ describe('deployToCloudRun', () => {
     );
   });
 
-  // gcloud's full --verbosity vocabulary, as reported by
-  // `gcloud version --verbosity=bogus`.
-  const GCLOUD_VERBOSITIES = [
-    'critical',
-    'debug',
-    'error',
-    'info',
-    'none',
-    'warning',
-  ];
-
   function verbosityArg(): string {
     const gcloudArgs = spawnMock.mock.calls[0][1];
     return gcloudArgs[gcloudArgs.indexOf('--verbosity') + 1];
@@ -521,7 +510,6 @@ describe('deployToCloudRun', () => {
     await deployToCloudRun({...defaultOptions, logLevel: 'trace'});
 
     expect(verbosityArg()).toBe('info');
-    expect(GCLOUD_VERBOSITIES).toContain(verbosityArg());
   });
 
   it('should keep the raw ADK log level in the generated Dockerfile', async () => {
