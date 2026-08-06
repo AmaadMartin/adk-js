@@ -13,7 +13,9 @@ import {
   UnsafeLocalCodeExecutor,
   createSession,
 } from '@google/adk';
+import type {SpawnOptions} from 'node:child_process';
 import {EventEmitter} from 'node:events';
+import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
@@ -125,6 +127,68 @@ describe('UnsafeLocalCodeExecutor', () => {
     if (os.platform() !== 'win32') {
       expect(first.mode).toBe('700');
     }
+  });
+
+  it('removes the scratch directory under the system temp dir after a successful execution', async () => {
+    let scratchDir: string | undefined;
+    // The directory is read off the `spawn` call, not off the script's own
+    // `process.cwd()`: `process.cwd()` resolves symlinks, so on macOS the
+    // script reports `/private/var/...` while `os.tmpdir()` returns `/var/...`.
+    spawnMock.mockImplementation(
+      (command: string, args: readonly string[], options: SpawnOptions) => {
+        if (typeof options.cwd === 'string') {
+          scratchDir = options.cwd;
+        }
+        return realSpawn(command, args, options);
+      },
+    );
+
+    const result = await executor.executeCode({
+      invocationContext,
+      codeExecutionInput: {
+        code: 'console.log("done");',
+        language: CodeExecutionLanguage.JAVASCRIPT,
+        inputFiles: [],
+      },
+    });
+
+    expect(result.stderr).toBe('');
+    if (scratchDir === undefined) {
+      expect.fail('the executor spawned the script without a string cwd');
+    }
+    expect(path.dirname(scratchDir)).toBe(os.tmpdir());
+    await expect(fs.access(scratchDir)).rejects.toThrow();
+  });
+
+  it('removes the scratch directory when the child process cannot be spawned', async () => {
+    let scratchDir: string | undefined;
+    // Same reason as above: the failed `spawn` call is the only place the
+    // scratch directory's path is observable, since no script ever runs.
+    spawnMock.mockImplementation(
+      (_command: string, _args: readonly string[], options: SpawnOptions) => {
+        if (typeof options.cwd === 'string') {
+          scratchDir = options.cwd;
+        }
+        throw new Error('spawn EACCES');
+      },
+    );
+
+    await expect(
+      executor.executeCode({
+        invocationContext,
+        codeExecutionInput: {
+          code: 'console.log("never runs");',
+          language: CodeExecutionLanguage.JAVASCRIPT,
+          inputFiles: [],
+        },
+      }),
+    ).rejects.toThrow('spawn EACCES');
+
+    if (scratchDir === undefined) {
+      expect.fail('the executor spawned the script without a string cwd');
+    }
+    expect(path.dirname(scratchDir)).toBe(os.tmpdir());
+    await expect(fs.access(scratchDir)).rejects.toThrow();
   });
 
   it('should capture stderr', async () => {
