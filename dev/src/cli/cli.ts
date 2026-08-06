@@ -57,20 +57,34 @@ function parseLogLevel(value: string): string {
   return normalized;
 }
 
-function getLogLevelFromOptions(options: {
-  verbose?: boolean;
-  log_level?: string;
-}) {
-  if (options.verbose) {
-    return LogLevel.DEBUG;
+/**
+ * Resolves the log level name to run at from `--log_level` and `-v/--verbose`.
+ *
+ * `--verbose` is a shortcut for `--log_level debug`, so it only applies while
+ * `--log_level` sits at its default: an explicitly supplied level wins. The
+ * Python SDK draws the same line with
+ * `ctx.get_parameter_source("log_level") == ParameterSource.DEFAULT`.
+ */
+function resolveLogLevelName(
+  command: Command,
+  options: {verbose?: boolean; log_level?: string},
+): string {
+  const source = command.getOptionValueSource('log_level');
+  if (options.verbose && (source === undefined || source === 'default')) {
+    return 'debug';
   }
 
-  if (typeof options.log_level === 'string') {
-    // `??`, not `||`: LogLevel.DEBUG is 0 and would otherwise be discarded.
-    return LOG_LEVEL_MAP.get(options.log_level) ?? LogLevel.INFO;
-  }
+  return options.log_level ?? 'info';
+}
 
-  return LogLevel.INFO;
+function getLogLevelFromOptions(
+  command: Command,
+  options: {verbose?: boolean; log_level?: string},
+): LogLevel {
+  // `??`, not `||`: LogLevel.DEBUG is 0 and would otherwise be discarded.
+  return (
+    LOG_LEVEL_MAP.get(resolveLogLevelName(command, options)) ?? LogLevel.INFO
+  );
 }
 
 function getAbsolutePath(p: string): string {
@@ -135,7 +149,7 @@ const ORIGINS_OPTION = new Option(
 ).default('');
 const VERBOSE_OPTION = new Option(
   '-v, --verbose [boolean]',
-  'Optional. The verbose level of the server',
+  'Optional. Enable verbose (DEBUG) logging. Shortcut for --log_level debug; an explicitly passed --log_level wins.',
 ).default(false);
 const LOG_LEVEL_OPTION = new Option(
   '--log_level <string>',
@@ -250,32 +264,38 @@ export function createProgram(): Command {
     .addOption(AGENT_FILE_MODULE_TYPE)
     .addOption(A2A_OPTION)
     .addOption(RELOAD_AGENTS_OPTION)
-    .action(async (agentsDir: string, options: Record<string, string>) => {
-      const logLevel = getLogLevelFromOptions(options);
-      setAdkCoreLogLevel(logLevel);
+    .action(
+      async (
+        agentsDir: string,
+        options: Record<string, string>,
+        command: Command,
+      ) => {
+        const logLevel = getLogLevelFromOptions(command, options);
+        setAdkCoreLogLevel(logLevel);
 
-      try {
-        const server = new AdkApiServer({
-          logLevel,
-          agentsDir: getAbsolutePath(agentsDir),
-          host: options['host'],
-          port: parseInt(options['port'], 10),
-          serveDebugUI: true,
-          allowOrigins: options['allow_origins'],
-          sessionService: getSessionServiceFromOptions(options),
-          artifactService: getArtifactServiceFromOptions(options),
-          otelToCloud: options['otel_to_cloud'] ? true : false,
-          agentFileLoadOptions: getAgentFileOptions(options),
-          a2a: getBoolean(options['a2a']),
-          reloadAgents: getBoolean(options['reload_agents']),
-        });
+        try {
+          const server = new AdkApiServer({
+            logLevel,
+            agentsDir: getAbsolutePath(agentsDir),
+            host: options['host'],
+            port: parseInt(options['port'], 10),
+            serveDebugUI: true,
+            allowOrigins: options['allow_origins'],
+            sessionService: getSessionServiceFromOptions(options),
+            artifactService: getArtifactServiceFromOptions(options),
+            otelToCloud: options['otel_to_cloud'] ? true : false,
+            agentFileLoadOptions: getAgentFileOptions(options),
+            a2a: getBoolean(options['a2a']),
+            reloadAgents: getBoolean(options['reload_agents']),
+          });
 
-        await server.start();
-      } catch (error) {
-        logger.error('Error starting web server:', (error as Error).message);
-        process.exit(1);
-      }
-    });
+          await server.start();
+        } catch (error) {
+          logger.error('Error starting web server:', (error as Error).message);
+          process.exit(1);
+        }
+      },
+    );
 
   program
     .command('api_server')
@@ -294,31 +314,37 @@ export function createProgram(): Command {
     .addOption(AGENT_FILE_MODULE_TYPE)
     .addOption(A2A_OPTION)
     .addOption(RELOAD_AGENTS_OPTION)
-    .action(async (agentsDir: string, options: Record<string, string>) => {
-      const logLevel = getLogLevelFromOptions(options);
-      setAdkCoreLogLevel(logLevel);
+    .action(
+      async (
+        agentsDir: string,
+        options: Record<string, string>,
+        command: Command,
+      ) => {
+        const logLevel = getLogLevelFromOptions(command, options);
+        setAdkCoreLogLevel(logLevel);
 
-      try {
-        const server = new AdkApiServer({
-          logLevel,
-          agentsDir: getAbsolutePath(agentsDir),
-          host: options['host'],
-          port: parseInt(options['port'], 10),
-          serveDebugUI: false,
-          allowOrigins: options['allow_origins'],
-          sessionService: getSessionServiceFromOptions(options),
-          artifactService: getArtifactServiceFromOptions(options),
-          otelToCloud: options['otel_to_cloud'] ? true : false,
-          agentFileLoadOptions: getAgentFileOptions(options),
-          a2a: getBoolean(options['a2a']),
-          reloadAgents: getBoolean(options['reload_agents']),
-        });
-        await server.start();
-      } catch (error) {
-        logger.error('Error starting API server:', (error as Error).message);
-        process.exit(1);
-      }
-    });
+        try {
+          const server = new AdkApiServer({
+            logLevel,
+            agentsDir: getAbsolutePath(agentsDir),
+            host: options['host'],
+            port: parseInt(options['port'], 10),
+            serveDebugUI: false,
+            allowOrigins: options['allow_origins'],
+            sessionService: getSessionServiceFromOptions(options),
+            artifactService: getArtifactServiceFromOptions(options),
+            otelToCloud: options['otel_to_cloud'] ? true : false,
+            agentFileLoadOptions: getAgentFileOptions(options),
+            a2a: getBoolean(options['a2a']),
+            reloadAgents: getBoolean(options['reload_agents']),
+          });
+          await server.start();
+        } catch (error) {
+          logger.error('Error starting API server:', (error as Error).message);
+          process.exit(1);
+        }
+      },
+    );
 
   program
     .command('create')
@@ -388,26 +414,32 @@ export function createProgram(): Command {
     .addOption(BUNDLE_AGENT_FILE)
     .addOption(AGENT_FILE_MODULE_TYPE)
     .addOption(RELOAD_AGENTS_OPTION)
-    .action(async (agentPath: string, options: Record<string, string>) => {
-      setAdkCoreLogLevel(getLogLevelFromOptions(options));
+    .action(
+      async (
+        agentPath: string,
+        options: Record<string, string>,
+        command: Command,
+      ) => {
+        setAdkCoreLogLevel(getLogLevelFromOptions(command, options));
 
-      try {
-        await runAgent({
-          agentPath,
-          inputFile: options['replay'],
-          savedSessionFile: options['resume'],
-          saveSession: getBoolean(options['save_session']),
-          sessionId: options['session_id'],
-          sessionService: getSessionServiceFromOptions(options),
-          artifactService: getArtifactServiceFromOptions(options),
-          otelToCloud: options['otel_to_cloud'] ? true : false,
-          agentFileLoadOptions: getAgentFileOptions(options),
-          reloadAgents: getBoolean(options['reload_agents']),
-        });
-      } catch (error) {
-        logger.error('Error running agent:', (error as Error).message);
-      }
-    });
+        try {
+          await runAgent({
+            agentPath,
+            inputFile: options['replay'],
+            savedSessionFile: options['resume'],
+            saveSession: getBoolean(options['save_session']),
+            sessionId: options['session_id'],
+            sessionService: getSessionServiceFromOptions(options),
+            artifactService: getArtifactServiceFromOptions(options),
+            otelToCloud: options['otel_to_cloud'] ? true : false,
+            agentFileLoadOptions: getAgentFileOptions(options),
+            reloadAgents: getBoolean(options['reload_agents']),
+          });
+        } catch (error) {
+          logger.error('Error running agent:', (error as Error).message);
+        }
+      },
+    );
 
   const DEPLOY_COMMAND = program
     .command('deploy')
@@ -443,42 +475,48 @@ export function createProgram(): Command {
     .addOption(BUNDLE_AGENT_FILE)
     .addOption(AGENT_FILE_MODULE_TYPE)
     .addOption(A2A_OPTION)
-    .action(async (agentPath: string, options: Record<string, string>) => {
-      const extraGcloudArgs = [];
-      for (const arg of process.argv.slice(5)) {
-        let argName = arg.replace(/^-+/, '');
-        if (argName.includes('=')) {
-          argName = argName.split('=')[0];
-        }
-        if (argName in options) {
-          continue;
+    .action(
+      async (
+        agentPath: string,
+        options: Record<string, string>,
+        command: Command,
+      ) => {
+        const extraGcloudArgs = [];
+        for (const arg of process.argv.slice(5)) {
+          let argName = arg.replace(/^-+/, '');
+          if (argName.includes('=')) {
+            argName = argName.split('=')[0];
+          }
+          if (argName in options) {
+            continue;
+          }
+
+          extraGcloudArgs.push(arg);
         }
 
-        extraGcloudArgs.push(arg);
-      }
-
-      try {
-        await deployToCloudRun({
-          agentPath: getAbsolutePath(agentPath),
-          project: options['project'],
-          region: options['region'],
-          serviceName: options['service_name'],
-          tempFolder: options['temp_folder'],
-          port: parseInt(options['port'], 10),
-          withUi: getBoolean(options['with_ui']),
-          logLevel: options['log_level'],
-          adkVersion: options['adk_version'],
-          allowOrigins: options['allow_origins'],
-          sessionServiceUri: options['session_service_uri'],
-          artifactServiceUri: options['artifact_service_uri'],
-          agentFileLoadOptions: getAgentFileOptions(options),
-          a2a: getBoolean(options['a2a']),
-          extraGcloudArgs,
-        });
-      } catch (error) {
-        logger.error('Error deploying agent:', (error as Error).message);
-      }
-    });
+        try {
+          await deployToCloudRun({
+            agentPath: getAbsolutePath(agentPath),
+            project: options['project'],
+            region: options['region'],
+            serviceName: options['service_name'],
+            tempFolder: options['temp_folder'],
+            port: parseInt(options['port'], 10),
+            withUi: getBoolean(options['with_ui']),
+            logLevel: resolveLogLevelName(command, options),
+            adkVersion: options['adk_version'],
+            allowOrigins: options['allow_origins'],
+            sessionServiceUri: options['session_service_uri'],
+            artifactServiceUri: options['artifact_service_uri'],
+            agentFileLoadOptions: getAgentFileOptions(options),
+            a2a: getBoolean(options['a2a']),
+            extraGcloudArgs,
+          });
+        } catch (error) {
+          logger.error('Error deploying agent:', (error as Error).message);
+        }
+      },
+    );
 
   const registerAgentEngineCommand = (cmd: Command) => {
     cmd
@@ -507,31 +545,37 @@ export function createProgram(): Command {
       .addOption(AGENT_FILE_MODULE_TYPE)
       .addOption(A2A_OPTION)
       .addOption(AGENT_ENGINE_ID_OPTION)
-      .action(async (agentPath: string, options: Record<string, string>) => {
-        try {
-          await deployToAgentEngine({
-            agentPath: getAbsolutePath(agentPath),
-            project: options['project'],
-            region: options['region'],
-            displayName: options['display_name'],
-            description: options['description'],
-            repository: options['repository'],
-            tempFolder: options['temp_folder'],
-            port: 8080, // Agent Engine requires fixed port of 8080
-            withUi: getBoolean(options['with_ui']),
-            logLevel: options['log_level'],
-            adkVersion: options['adk_version'],
-            allowOrigins: options['allow_origins'],
-            sessionServiceUri: options['session_service_uri'],
-            artifactServiceUri: options['artifact_service_uri'],
-            agentFileLoadOptions: getAgentFileOptions(options),
-            a2a: getBoolean(options['a2a']),
-            agentEngineId: options['agent_engine_id'],
-          });
-        } catch (error) {
-          logger.error('Error deploying agent:', (error as Error).message);
-        }
-      });
+      .action(
+        async (
+          agentPath: string,
+          options: Record<string, string>,
+          command: Command,
+        ) => {
+          try {
+            await deployToAgentEngine({
+              agentPath: getAbsolutePath(agentPath),
+              project: options['project'],
+              region: options['region'],
+              displayName: options['display_name'],
+              description: options['description'],
+              repository: options['repository'],
+              tempFolder: options['temp_folder'],
+              port: 8080, // Agent Engine requires fixed port of 8080
+              withUi: getBoolean(options['with_ui']),
+              logLevel: resolveLogLevelName(command, options),
+              adkVersion: options['adk_version'],
+              allowOrigins: options['allow_origins'],
+              sessionServiceUri: options['session_service_uri'],
+              artifactServiceUri: options['artifact_service_uri'],
+              agentFileLoadOptions: getAgentFileOptions(options),
+              a2a: getBoolean(options['a2a']),
+              agentEngineId: options['agent_engine_id'],
+            });
+          } catch (error) {
+            logger.error('Error deploying agent:', (error as Error).message);
+          }
+        },
+      );
   };
 
   registerAgentEngineCommand(DEPLOY_COMMAND.command('agent_engine'));
@@ -556,7 +600,9 @@ export function createProgram(): Command {
       process.cwd(),
     )
     .option('--force', 'Force run skipped tests.')
-    .action(async (options: Record<string, string>) => {
+    .action(async (options: Record<string, string>, command: Command) => {
+      setAdkCoreLogLevel(getLogLevelFromOptions(command, options));
+
       runIntegrationTests({
         agentsDir: options['agents_dir'],
         testsDir: options['tests_dir'],

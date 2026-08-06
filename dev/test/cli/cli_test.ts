@@ -348,6 +348,107 @@ describe('CLI Entrypoint', () => {
     });
   });
 
+  describe('option: --verbose', () => {
+    it('lets an explicit level win over a following --verbose', async () => {
+      await parse(['web', '--log_level', 'error', '--verbose']);
+
+      expect(setLogLevel).toHaveBeenCalledWith(LogLevel.ERROR);
+    });
+
+    it('lets an explicit level win over a preceding --verbose', async () => {
+      await parse(['web', '--verbose', '--log_level', 'error']);
+
+      expect(setLogLevel).toHaveBeenCalledWith(LogLevel.ERROR);
+    });
+
+    it('lets an explicit level win even when it equals the default', async () => {
+      await parse(['web', '--log_level', 'info', '--verbose']);
+
+      expect(setLogLevel).toHaveBeenCalledWith(LogLevel.INFO);
+    });
+
+    it('keeps debug when the explicit level also asks for debug', async () => {
+      await parse(['web', '--log_level', 'debug', '--verbose']);
+
+      expect(setLogLevel).toHaveBeenCalledWith(LogLevel.DEBUG);
+    });
+
+    it('lets an explicit level win on api_server', async () => {
+      await parse(['api_server', '--log_level', 'warn', '--verbose']);
+
+      expect(setLogLevel).toHaveBeenCalledWith(LogLevel.WARN);
+    });
+
+    it('lets an explicit level win on run', async () => {
+      await parse(argvFor('run', '--log_level', 'error', '--verbose'));
+
+      expect(setLogLevel).toHaveBeenCalledWith(LogLevel.ERROR);
+      expect(runAgent).toHaveBeenCalled();
+    });
+
+    it.each([
+      [['--verbose'], 'debug'],
+      [['--log_level=error', '--verbose'], 'error'],
+      [[], 'info'],
+    ])(
+      'bakes the level resolved from `%s` into the Cloud Run deploy',
+      async (flags, logLevel) => {
+        await parse(['deploy', 'cloud_run', ...flags]);
+
+        expect(vi.mocked(deployToCloudRun).mock.calls[0][0]).toMatchObject({
+          logLevel,
+        });
+      },
+    );
+
+    it.each(['agent_engine', 'reasoning_engine'])(
+      'bakes debug into `deploy %s --verbose`',
+      async (command) => {
+        await parse(['deploy', command, '--verbose']);
+
+        expect(vi.mocked(deployToAgentEngine).mock.calls[0][0]).toMatchObject({
+          logLevel: 'debug',
+        });
+      },
+    );
+
+    it('lets an explicit level win on deploy agent_engine', async () => {
+      await parse(['deploy', 'agent_engine', '--log_level=warn', '--verbose']);
+
+      expect(vi.mocked(deployToAgentEngine).mock.calls[0][0]).toMatchObject({
+        logLevel: 'warn',
+      });
+    });
+
+    it.each([
+      [[], LogLevel.INFO],
+      [['--verbose'], LogLevel.DEBUG],
+      [['--log_level', 'error', '--verbose'], LogLevel.ERROR],
+    ])(
+      'applies the resolved level on `integration conformance %s`',
+      async (flags, expected) => {
+        await parse(['integration', 'conformance', ...flags]);
+
+        expect(setLogLevel).toHaveBeenCalledWith(expected);
+        expect(runIntegrationTests).toHaveBeenCalled();
+      },
+    );
+
+    it.each(LOG_LEVEL_COMMANDS)(
+      'documents the shortcut and its precedence in `%s` help',
+      (commandPath) => {
+        const help = findCommand(program, commandPath)
+          .helpInformation()
+          .replace(/\s+/g, ' ');
+
+        expect(help).toContain(
+          'Enable verbose (DEBUG) logging. Shortcut for --log_level debug; ' +
+            'an explicitly passed --log_level wins.',
+        );
+      },
+    );
+  });
+
   describe('command: web', () => {
     it('should start AdkApiServer with default options', async () => {
       await parse(['web']);
