@@ -21,6 +21,23 @@ import {afterAll, beforeAll, beforeEach, describe, expect, it} from 'vitest';
 const AGENT_ENGINE_ID = '12345';
 
 /**
+ * Builds a `Sessions` client from the root `@google/genai` `ApiClient`.
+ *
+ * The tree installs two copies of `@google/genai`: 2.9.0 at the root, and
+ * 1.52.0 nested under `@google-cloud/vertexai@1.12.0`, whose declared range is
+ * `^1.45.0`. `Sessions` is typed against the nested copy. The two `ApiClient`
+ * classes are identical at runtime but each declares a private field, so `tsc`
+ * treats them as distinct types. Deduplicating `@google/genai` onto one copy
+ * would remove the need for this helper; that moves the runtime dependency
+ * graph across a major version boundary and is out of scope here.
+ */
+function sessionsFor(apiClient: ApiClient): Sessions {
+  return new Sessions(
+    apiClient as unknown as ConstructorParameters<typeof Sessions>[0],
+  );
+}
+
+/**
  * Exercises `getSession`'s NOT_FOUND handling against an error the SDK builds
  * itself: a loopback HTTP server answers 404 in place of the Agent Engine
  * Sessions API, and the response travels back through the real
@@ -56,7 +73,7 @@ describe('VertexAiSessionService over the real Sessions HTTP client', () => {
     });
     service = new VertexAiSessionService({
       agentEngineId: AGENT_ENGINE_ID,
-      sessions: new Sessions(apiClient),
+      sessions: sessionsFor(apiClient),
     });
   });
 
@@ -121,7 +138,7 @@ describe('VertexAiSessionService session expiration over the wire', () => {
     });
     service = new VertexAiSessionService({
       agentEngineId: AGENT_ENGINE_ID,
-      sessions: new Sessions(apiClient),
+      sessions: sessionsFor(apiClient),
     });
   });
 
