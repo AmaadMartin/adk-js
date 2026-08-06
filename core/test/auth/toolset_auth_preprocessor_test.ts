@@ -306,14 +306,23 @@ describe('ToolsetAuthPreprocessor', () => {
   it('emits an id that AuthPreprocessor does not resume as a tool call', async () => {
     expect(TOOLSET_AUTH_CREDENTIAL_ID_PREFIX).toBe('_adk_toolset_auth_');
 
-    const invocationContext = createContext([
-      new StubToolset(oauth2Config('catalog_key')),
-    ]);
+    const toolset = new StubToolset(oauth2Config('catalog_key'));
+    const invocationContext = createContext([toolset]);
     const requestEvent = (await collect(invocationContext))[0];
     const requestCall = functionCalls(requestEvent)[0];
+    const syntheticId = requestCall.args?.['function_call_id'] as string;
 
     const session = invocationContext.session;
     session.events.push(
+      // A decoy tool call that carries the synthetic id. AuthPreprocessor
+      // resumes it only if the prefix check fails to skip the id.
+      createEvent({
+        author: 'test_agent',
+        content: {
+          role: 'model',
+          parts: [{functionCall: {id: syntheticId, name: 'stub_tool'}}],
+        },
+      }),
       createEvent({
         author: 'test_agent',
         content: {role: 'model', parts: [{functionCall: requestCall}]},
@@ -347,5 +356,14 @@ describe('ToolsetAuthPreprocessor', () => {
     }
 
     expect(resumeEvents).toHaveLength(0);
+    expect(toolset.getToolsCallCount).toBe(0);
+    expect(session.state['temp:catalog_key']).toEqual({
+      authType: AuthCredentialTypes.OAUTH2,
+      oauth2: {accessToken: 'exchanged-token'},
+    });
+
+    invocationContext.endInvocation = false;
+    expect(await collect(invocationContext)).toHaveLength(0);
+    expect(invocationContext.endInvocation).toBe(false);
   });
 });
