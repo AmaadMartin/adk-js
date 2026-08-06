@@ -83,7 +83,7 @@ export function generateAuthEvent(
 ): Event | undefined {
   return buildAuthRequestEvent(
     invocationContext,
-    functionResponseEvent.actions?.requestedAuthConfigs ?? {},
+    functionResponseEvent.actions.requestedAuthConfigs,
     functionResponseEvent.content?.role,
   );
 }

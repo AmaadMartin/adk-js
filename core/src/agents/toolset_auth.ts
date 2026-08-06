@@ -19,7 +19,28 @@ import {logger} from '../utils/logger.js';
 import {Context} from './context.js';
 import {buildAuthRequestEvent} from './functions.js';
 import {InvocationContext} from './invocation_context.js';
-import type {ToolUnion} from './llm_agent.js';
+import {isLlmAgent, ToolUnion} from './llm_agent.js';
+import {BaseLlmRequestProcessor} from './processors/base_llm_processor.js';
+
+/**
+ * Resolves toolset-level credentials before any later processor lists tools.
+ *
+ * It runs directly after `AuthPreprocessor`, which is what stores the
+ * credential the client returned for an earlier request.
+ */
+export class ToolsetAuthPreprocessor extends BaseLlmRequestProcessor {
+  override async *runAsync(
+    invocationContext: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    const agent = invocationContext.agent;
+    if (!isLlmAgent(agent)) {
+      return;
+    }
+    yield* resolveToolsetAuth(invocationContext, agent.tools);
+  }
+}
+
+export const TOOLSET_AUTH_PREPROCESSOR = new ToolsetAuthPreprocessor();
 
 /**
  * Resolves the toolset-level credentials an agent's toolsets declared through

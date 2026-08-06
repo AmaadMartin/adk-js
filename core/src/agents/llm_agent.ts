@@ -71,7 +71,7 @@ import {REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR} from './processors/request_c
 import {TOOL_FILTER_REQUEST_PROCESSOR} from './processors/tool_filter_request_processor.js';
 import {ReadonlyContext} from './readonly_context.js';
 import {StreamingMode} from './run_config.js';
-import {resolveToolsetAuth} from './toolset_auth.js';
+import {TOOLSET_AUTH_PREPROCESSOR} from './toolset_auth.js';
 
 /**
  * Input/output schema type for agent.
@@ -402,6 +402,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     this.requestProcessors = config.requestProcessors ?? [
       BASIC_LLM_REQUEST_PROCESSOR,
       AUTH_PREPROCESSOR,
+      TOOLSET_AUTH_PREPROCESSOR,
       IDENTITY_LLM_REQUEST_PROCESSOR,
       INSTRUCTIONS_LLM_REQUEST_PROCESSOR,
       REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR,
@@ -785,15 +786,13 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
 
         yield event;
       }
-    }
 
-    // Toolset credentials must be resolved before any toolset lists its tools.
-    yield* resolveToolsetAuth(invocationContext, this.tools);
-    if (
-      invocationContext.endInvocation ||
-      invocationContext.abortSignal?.aborted
-    ) {
-      return;
+      // A processor that interrupts the step, such as ToolsetAuthPreprocessor
+      // asking the client for a credential, must stop the remaining
+      // processors: they list the agent's tools.
+      if (invocationContext.endInvocation) {
+        return;
+      }
     }
 
     // TODO - b/425992518: check if tool preprocessors can be simplified.

@@ -5,6 +5,8 @@
  */
 
 import {
+  AuthConfig,
+  AuthCredentialTypes,
   BaseTool,
   BaseToolset,
   Context,
@@ -60,6 +62,43 @@ class FilteringToolset extends BaseToolset {
 
   async close(): Promise<void> {}
 }
+
+const AUTHENTICATED_TOOLSET_CONFIG: AuthConfig = {
+  credentialKey: 'authenticated_toolset_key',
+  authScheme: {type: 'apiKey', name: 'X-API-Key', in: 'header'},
+  rawAuthCredential: {
+    authType: AuthCredentialTypes.API_KEY,
+    apiKey: 'test-api-key',
+  },
+};
+
+class AuthenticatedToolset extends BaseToolset {
+  constructor() {
+    super([]);
+  }
+
+  override getAuthConfig(): AuthConfig {
+    return AUTHENTICATED_TOOLSET_CONFIG;
+  }
+
+  async getTools(): Promise<BaseTool[]> {
+    return [new DummyTool('tool1')];
+  }
+
+  async close(): Promise<void> {}
+}
+
+describe('BaseToolset.getAuthConfig', () => {
+  it('returns undefined when the toolset does not override it', () => {
+    expect(new DummyToolset().getAuthConfig()).toBeUndefined();
+  });
+
+  it('returns the config the toolset declares', () => {
+    expect(new AuthenticatedToolset().getAuthConfig()).toBe(
+      AUTHENTICATED_TOOLSET_CONFIG,
+    );
+  });
+});
 
 describe('BaseToolset.isToolSelected', () => {
   const context = {} as unknown as ReadonlyContext;
