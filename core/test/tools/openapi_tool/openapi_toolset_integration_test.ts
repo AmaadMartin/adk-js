@@ -4,7 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Context, OpenAPIToolset} from '@google/adk';
+import {
+  Context,
+  createSession,
+  InvocationContext,
+  LoopAgent,
+  OpenAPIToolset,
+  PluginManager,
+} from '@google/adk';
 import * as fs from 'fs';
 import * as path from 'path';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
@@ -159,21 +166,22 @@ describe('OpenAPIToolset Integration', () => {
       'x_request_id',
     ]);
 
-    vi.mocked(globalThis.fetch).mockResolvedValue({
-      ok: true,
-      headers: {get: () => 'application/json'},
-      json: async () => ({id: 1}),
-    } as unknown as Response);
-
-    const mockContext = {
-      getAuthResponse: vi.fn().mockReturnValue(undefined),
-      requestCredential: vi.fn(),
-      state: {},
-    };
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      new Response(JSON.stringify({id: 1}), {
+        headers: {'content-type': 'application/json'},
+      }),
+    );
 
     await tool.runAsync({
       args: {x_request_id: 'abc'},
-      toolContext: mockContext as unknown as Context,
+      toolContext: new Context({
+        invocationContext: new InvocationContext({
+          invocationId: 'inv-1',
+          agent: new LoopAgent({name: 'test_agent'}),
+          session: createSession({id: 'session-1', appName: 'test-app'}),
+          pluginManager: new PluginManager(),
+        }),
+      }),
     });
 
     expect(globalThis.fetch).toHaveBeenCalledWith(
