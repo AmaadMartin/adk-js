@@ -26,6 +26,17 @@ export interface LiveRequest {
 type PromiseResolveFn = (req: LiveRequest) => void;
 
 /**
+ * Builds an error that signals a pending {@link LiveRequestQueue.get} was
+ * cancelled via its `AbortSignal`. Uses `name === 'AbortError'` so callers can
+ * distinguish an intentional cancellation from a genuine failure.
+ */
+function createAbortError(): Error {
+  const error = new Error('The live request wait was aborted.');
+  error.name = 'AbortError';
+  return error;
+}
+
+/**
  * Queue used to send LiveRequest in a live (bidirectional streaming) way.
  */
 export class LiveRequestQueue {
@@ -55,17 +66,38 @@ export class LiveRequestQueue {
   /**
    * Retrieves a request from the queue. If the queue is empty, it will
    * wait until a request is available.
+   *
+   * @param signal An optional signal that cancels a pending wait. When it
+   *     aborts, the pending waiter is removed from the queue (so a request
+   *     sent afterwards is never handed to an abandoned waiter) and the
+   *     returned promise rejects with an `AbortError`. Requests already
+   *     queued are returned immediately regardless of the signal.
    * @returns A promise that resolves with the next available request.
    */
-  async get(): Promise<LiveRequest> {
+  async get(signal?: AbortSignal): Promise<LiveRequest> {
     if (this.queue.length > 0) {
       return this.queue.shift()!;
     }
     if (this.isClosed) {
       return {close: true};
     }
-    return new Promise<LiveRequest>((resolve) => {
-      this.resolveFnFifoQueue.push(resolve);
+    if (signal?.aborted) {
+      throw createAbortError();
+    }
+    return new Promise<LiveRequest>((resolve, reject) => {
+      const onAbort = () => {
+        const index = this.resolveFnFifoQueue.indexOf(wrappedResolve);
+        if (index !== -1) {
+          this.resolveFnFifoQueue.splice(index, 1);
+        }
+        reject(createAbortError());
+      };
+      const wrappedResolve: PromiseResolveFn = (req) => {
+        signal?.removeEventListener('abort', onAbort);
+        resolve(req);
+      };
+      this.resolveFnFifoQueue.push(wrappedResolve);
+      signal?.addEventListener('abort', onAbort, {once: true});
     });
   }
 
