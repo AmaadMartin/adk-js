@@ -540,12 +540,6 @@ describe('AgentLoader', () => {
       };
 
       plugin.setup(mockBuild as unknown as esbuild.PluginBuild);
-
-      expect(mockBuild.onLoad).toHaveBeenCalledWith(
-        {filter: /.*/},
-        expect.any(Function),
-      );
-
       const onLoadCallback = mockBuild.onLoad.mock.calls[0][1];
 
       await fs.writeFile(filePath, content);
@@ -580,23 +574,23 @@ describe('AgentLoader', () => {
       expect(result.loader).toBe('js');
     });
 
-    it('returns undefined for node_modules', async () => {
-      const filePath = '/path/to/node_modules/some_pkg/index.js';
-      const plugin = replaceDirnamePlugin(
-        path.join(tempAgentsDir, 'test_agent.ts'),
-        tempAgentsDir,
-      );
+    it('registers an onLoad filter matching only the escaped entrypoint', () => {
+      const entryPath = path.join(tempAgentsDir, 'agent (v1).ts');
+      const plugin = replaceDirnamePlugin(entryPath, tempAgentsDir);
 
       const mockBuild = {
         onLoad: vi.fn(),
       };
 
       plugin.setup(mockBuild as unknown as esbuild.PluginBuild);
-      const onLoadCallback = mockBuild.onLoad.mock.calls[0][1];
+      const {filter} = mockBuild.onLoad.mock.calls[0][0];
 
-      const result = await onLoadCallback({path: filePath});
-
-      expect(result).toBeUndefined();
+      expect(filter.test(entryPath)).toBe(true);
+      // Unescaped, `(v1)` would be a group and `.` a wildcard, matching this too.
+      expect(filter.test(path.join(tempAgentsDir, 'agent v1_ts'))).toBe(false);
+      // Anchored at both ends, so neither a longer nor a nested path matches.
+      expect(filter.test(`${entryPath}.map`)).toBe(false);
+      expect(filter.test(path.join('/prefix', entryPath))).toBe(false);
     });
 
     it('uses js loader for non-ts files', async () => {

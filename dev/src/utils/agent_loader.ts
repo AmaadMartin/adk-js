@@ -84,6 +84,10 @@ const DEFAULT_AGENT_FILE_OPTIONS: AgentFileOptions = {
   bundle: true,
 };
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 /**
  * Returns an esbuild plugin that replaces `__dirname`, `__filename`, and `import.meta.url`
  * with the original directory path, file path, and file URL in the agent file.
@@ -95,11 +99,17 @@ const DEFAULT_AGENT_FILE_OPTIONS: AgentFileOptions = {
  * @returns An esbuild plugin that replaces path and URL references in the agent file.
  */
 export function replaceDirnamePlugin(filePath: string, originalDir: string) {
+  // Match only the agent entrypoint. esbuild evaluates `filter` in its own
+  // process but calls back into JS for every match, so a `/.*/` filter would
+  // cost one round-trip per module in the whole dependency graph.
+  const entryPointFilter = new RegExp(`^${escapeRegExp(filePath)}$`);
+
   return {
     name: 'replace-dirname',
     setup(build: esbuild.PluginBuild) {
-      build.onLoad({filter: /.*/}, async (args: esbuild.OnLoadArgs) => {
-        if (args.path === filePath) {
+      build.onLoad(
+        {filter: entryPointFilter},
+        async (args: esbuild.OnLoadArgs) => {
           const content = await fsPromises.readFile(args.path, 'utf8');
           const fileUrl = pathToFileURL(filePath).href;
           const loader = ['.ts', '.mts', '.cts'].includes(
@@ -120,9 +130,8 @@ export function replaceDirnamePlugin(filePath: string, originalDir: string) {
             contents: transformResult.code,
             loader: 'js',
           };
-        }
-        return undefined;
-      });
+        },
+      );
     },
   };
 }
