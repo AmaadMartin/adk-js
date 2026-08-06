@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import esbuild from 'esbuild';
+import {EventEmitter} from 'node:events';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -138,6 +139,54 @@ class FakeAgentForApp extends BaseAgent {
 const agent = new FakeAgentForApp('agent_for_app_default');
 export default new App({ name: 'test_app_default', rootAgent: agent });
 `;
+
+type ProcessListener = (...args: unknown[]) => void;
+
+/**
+ * Signals the `AgentLoader` turns into a `128 + N` exit status.
+ */
+const TERMINATION_SIGNALS = ['SIGINT', 'SIGUSR1', 'SIGUSR2'] as const;
+
+/**
+ * Process events the `AgentLoader` constructor registers a listener on.
+ */
+const LOADER_PROCESS_EVENTS = ['exit', ...TERMINATION_SIGNALS];
+
+/**
+ * Process events to count: the ones the constructor registers, plus
+ * `'uncaughtException'`, which it must never register.
+ */
+const WATCHED_PROCESS_EVENTS = [...LOADER_PROCESS_EVENTS, 'uncaughtException'];
+
+/**
+ * `process` seen as the plain emitter it is, so the event names above can be
+ * iterated as strings instead of matching one typed overload each.
+ */
+const processEvents: EventEmitter = process;
+
+const listenerCounts = (events: readonly string[]) =>
+  events.map((event) => processEvents.listenerCount(event));
+
+/**
+ * Snapshots the current process listeners and returns a lookup for the ones a
+ * freshly constructed `AgentLoader` adds, so they can be invoked directly.
+ * Emitting the real events would also run Vitest's own listeners.
+ */
+function trackLoaderProcessListeners(): (event: string) => ProcessListener[] {
+  const before = new Map(
+    LOADER_PROCESS_EVENTS.map((event) => [
+      event,
+      processEvents.listeners(event),
+    ]),
+  );
+
+  return (event) =>
+    processEvents
+      .listeners(event)
+      .filter(
+        (listener) => !before.get(event)!.includes(listener),
+      ) as ProcessListener[];
+}
 
 describe('AgentLoader', () => {
   let tempAgentsDir: string;
@@ -809,6 +858,100 @@ describe('AgentLoader', () => {
       ).toBe(false);
 
       await loader.disposeAll();
+    });
+
+    describe('process handlers', () => {
+      it('does not install an uncaughtException listener', async () => {
+        const before = processEvents.listenerCount('uncaughtException');
+        const loader = new AgentLoader(tempAgentsDir);
+
+        try {
+          // A listener here replaces Node's default fatal handler, so a crash
+          // prints no stack trace and exits 0.
+          expect(processEvents.listenerCount('uncaughtException')).toBe(before);
+        } finally {
+          await loader.disposeAll();
+        }
+      });
+
+      it('installs one exit listener and one per termination signal', async () => {
+        const added = trackLoaderProcessListeners();
+        const loader = new AgentLoader(tempAgentsDir);
+
+        try {
+          for (const event of LOADER_PROCESS_EVENTS) {
+            expect(added(event)).toHaveLength(1);
+          }
+        } finally {
+          await loader.disposeAll();
+        }
+      });
+
+      it('removes every listener it installed on disposeAll', async () => {
+        const before = listenerCounts(WATCHED_PROCESS_EVENTS);
+        const loader = new AgentLoader(tempAgentsDir);
+
+        await loader.disposeAll();
+
+        expect(listenerCounts(WATCHED_PROCESS_EVENTS)).toEqual(before);
+      });
+
+      it('keeps another loader listeners when disposeAll runs twice', async () => {
+        const before = listenerCounts(LOADER_PROCESS_EVENTS);
+        const survivor = new AgentLoader(tempAgentsDir);
+        const disposed = new AgentLoader(tempAgentsDir);
+
+        try {
+          await disposed.disposeAll();
+          await disposed.disposeAll();
+
+          expect(listenerCounts(LOADER_PROCESS_EVENTS)).toEqual(
+            before.map((count) => count + 1),
+          );
+        } finally {
+          await survivor.disposeAll();
+        }
+      });
+
+      it.each(TERMINATION_SIGNALS)(
+        'exits %s with 128 plus the signal number',
+        async (signal) => {
+          const added = trackLoaderProcessListeners();
+          const exit = vi.spyOn(process, 'exit').mockImplementation(() => {
+            throw new Error('process.exit');
+          });
+          const loader = new AgentLoader(tempAgentsDir);
+
+          try {
+            const [onSignal] = added(signal);
+
+            expect(() => onSignal()).toThrow('process.exit');
+            expect(exit).toHaveBeenCalledWith(
+              128 + os.constants.signals[signal],
+            );
+          } finally {
+            exit.mockRestore();
+            await loader.disposeAll();
+          }
+        },
+      );
+
+      it('disposes the loader from the exit listener', async () => {
+        const added = trackLoaderProcessListeners();
+        const loader = new AgentLoader(tempAgentsDir);
+        const disposeAll = vi.spyOn(loader, 'disposeAll');
+
+        try {
+          const [onExit] = added('exit');
+
+          onExit();
+
+          expect(disposeAll).toHaveBeenCalledTimes(1);
+        } finally {
+          disposeAll.mockRestore();
+          await loader.disposeAll();
+        }
+      });
     });
   });
 });
