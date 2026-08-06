@@ -316,6 +316,29 @@ describe('LiveResponseAggregator', () => {
     ]);
   });
 
+  it('should yield tool calls immediately for non-flash Gemini 3.x Live', () => {
+    const aggregator = new LiveResponseAggregator(
+      'gemini-3.5-flash-lite-live-preview',
+    );
+
+    const res1 = Array.from(
+      aggregator.processMessage({
+        toolCall: {
+          functionCalls: [{name: 'tool_a', args: {x: 1}, id: '1'}],
+        },
+      }),
+    );
+    expect(res1).toEqual([
+      {
+        content: {
+          role: 'model',
+          parts: [{functionCall: {name: 'tool_a', args: {x: 1}, id: '1'}}],
+        },
+        modelVersion: 'gemini-3.5-flash-lite-live-preview',
+      },
+    ]);
+  });
+
   it('should yield session resumption update', () => {
     const aggregator = new LiveResponseAggregator('gemini-2.5-flash');
     const resumptionUpdate = {resumed: true};

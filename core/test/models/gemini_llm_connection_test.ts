@@ -67,6 +67,24 @@ describe('GeminiLlmConnection', () => {
       });
     });
 
+    it('should send history with turnComplete=true for non-flash Gemini 3.x Live', async () => {
+      const connection = new GeminiLlmConnection(
+        mockSession,
+        'gemini-3.5-flash-lite-live-preview',
+      );
+      const history: Content[] = [
+        {role: 'user', parts: [{text: 'hello'}]},
+        {role: 'model', parts: [{text: 'hi'}]},
+      ];
+
+      await connection.sendHistory(history);
+
+      expect(mockSession.sendClientContent).toHaveBeenCalledWith({
+        turns: history,
+        turnComplete: true,
+      });
+    });
+
     it('should not send history if empty', async () => {
       const connection = new GeminiLlmConnection(
         mockSession,
@@ -116,6 +134,23 @@ describe('GeminiLlmConnection', () => {
       expect(mockSession.sendRealtimeInput).toHaveBeenCalledWith({
         text: 'hello',
       });
+    });
+
+    it('should use sendRealtimeInput for non-flash Gemini 3.x Live single-part text', async () => {
+      const connection = new GeminiLlmConnection(
+        mockSession,
+        'gemini-3.5-flash-lite-live-preview',
+      );
+      const content: Content = {
+        parts: [{text: 'hello'}],
+      };
+
+      await connection.sendContent(content);
+
+      expect(mockSession.sendRealtimeInput).toHaveBeenCalledWith({
+        text: 'hello',
+      });
+      expect(mockSession.sendClientContent).not.toHaveBeenCalled();
     });
 
     it('should use sendClientContent for non-Gemini 3.x single-part text', async () => {
@@ -186,6 +221,34 @@ describe('GeminiLlmConnection', () => {
 
       expect(mockSession.sendRealtimeInput).toHaveBeenCalledWith({
         video: blob,
+      });
+    });
+
+    it('should use sendRealtimeInput with audio for non-flash Gemini 3.x Live audio', async () => {
+      const connection = new GeminiLlmConnection(
+        mockSession,
+        'gemini-3.5-flash-lite-live-preview',
+      );
+      const blob: Blob = {mimeType: 'audio/pcm', data: 'base64data'};
+
+      await connection.sendRealtime(blob);
+
+      expect(mockSession.sendRealtimeInput).toHaveBeenCalledWith({
+        audio: blob,
+      });
+    });
+
+    it('should use sendRealtimeInput with media for Live Translate audio', async () => {
+      const connection = new GeminiLlmConnection(
+        mockSession,
+        'gemini-3.5-live-translate',
+      );
+      const blob: Blob = {mimeType: 'audio/pcm', data: 'base64data'};
+
+      await connection.sendRealtime(blob);
+
+      expect(mockSession.sendRealtimeInput).toHaveBeenCalledWith({
+        media: blob,
       });
     });
 

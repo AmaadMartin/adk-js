@@ -4,7 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {isGemini2OrAbove, isGemini3xLive} from '@google/adk';
+import {
+  isGemini2OrAbove,
+  isGemini35LiveTranslate,
+  isGemini3xLive,
+} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
 describe('isGemini2OrAbove', () => {
@@ -78,5 +82,45 @@ describe('isGemini3xLive', () => {
     expect(isGemini3xLive('gemini-3.0-flash')).toBe(false);
     expect(isGemini3xLive(undefined)).toBe(false);
     expect(isGemini3xLive('')).toBe(false);
+  });
+
+  it('should return true for non-flash Gemini 3.x Live models', () => {
+    expect(isGemini3xLive('gemini-3.5-flash-lite-live-preview')).toBe(true);
+    expect(
+      isGemini3xLive(
+        'projects/my-project/locations/us-central1/publishers/google/models/gemini-3.5-flash-lite-live-preview',
+      ),
+    ).toBe(true);
+  });
+
+  it('should return false for Live Translate models', () => {
+    expect(isGemini3xLive('gemini-3.5-live-translate')).toBe(false);
+    expect(
+      isGemini3xLive(
+        'projects/my-project/locations/us-central1/publishers/google/models/gemini-3.5-live-translate-preview',
+      ),
+    ).toBe(false);
+  });
+
+  it('should return false for non-live and pre-3.x live models', () => {
+    expect(isGemini3xLive('gemini-3.1-pro')).toBe(false);
+    expect(isGemini3xLive('gemini-2.5-flash-live')).toBe(false);
+  });
+});
+
+describe('isGemini35LiveTranslate', () => {
+  it('should return true for Live Translate models', () => {
+    expect(isGemini35LiveTranslate('gemini-3.5-live-translate')).toBe(true);
+    expect(
+      isGemini35LiveTranslate(
+        'projects/my-project/locations/us-central1/publishers/google/models/gemini-3.5-live-translate-preview',
+      ),
+    ).toBe(true);
+  });
+
+  it('should return false for other models', () => {
+    expect(isGemini35LiveTranslate('gemini-3.5-flash-live')).toBe(false);
+    expect(isGemini35LiveTranslate(undefined)).toBe(false);
+    expect(isGemini35LiveTranslate('')).toBe(false);
   });
 });
