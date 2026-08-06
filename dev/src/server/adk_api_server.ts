@@ -42,6 +42,7 @@ import {
   setupTelemetry,
 } from '../utils/telemetry_utils.js';
 import {getAgentGraphAsDot} from './agent_graph.js';
+import {crossOriginGuard, declaresJsonBody} from './csrf.js';
 
 /**
  * Environment variable holding the shared bearer token used to authenticate
@@ -198,6 +199,10 @@ export class AdkApiServer {
   private async init() {
     const app = this.app;
     await this.setupTelemetry();
+
+    // Registered first so that no route, including the A2A routes mounted later
+    // by initA2A(), can escape the check.
+    app.use(crossOriginGuard(this.logger, this.allowOrigins));
 
     if (this.serveDebugUI) {
       app.get('/', (req: Request, res: Response) => {
@@ -856,6 +861,10 @@ export class AdkApiServer {
           `Using already parsed body: ${JSON.stringify(req.body)}`,
         );
         await executeQuery(req.body);
+      } else if (!declaresJsonBody(req.headers['content-type'])) {
+        res.status(415).json({
+          error: 'Unsupported content type, application/json is required',
+        });
       } else {
         let rawBody = '';
         req.on('data', (chunk) => {
