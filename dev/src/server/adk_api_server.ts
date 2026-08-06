@@ -336,7 +336,7 @@ export class AdkApiServer {
 
           const functionCalls = getFunctionCalls(event);
           const functionResponses = getFunctionResponses(event);
-          await using agentFile = await this.agentLoader.getAgentFile(appName);
+          const agentFile = await this.agentLoader.getAgentFile(appName);
           const loaded = await agentFile.load();
           const rootAgent = isApp(loaded) ? loaded.rootAgent : loaded;
 
@@ -1036,9 +1036,7 @@ export class AdkApiServer {
     runConfig?: RunConfig;
     abortSignal: AbortSignal;
   }): AsyncGenerator<Event> {
-    await using agentFile = await this.agentLoader.getAgentFile(
-      options.appName,
-    );
+    const agentFile = await this.agentLoader.getAgentFile(options.appName);
     const loaded = await agentFile.load();
     const runner = await this.getRunner(loaded, options.appName);
 

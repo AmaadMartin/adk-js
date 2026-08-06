@@ -458,6 +458,13 @@ export class AgentLoader {
     return appNames.sort();
   }
 
+  /**
+   * Lends the caller the `AgentFile` this loader owns for `agentName`.
+   *
+   * Every caller shares the handle, and only `invalidateAll()` or
+   * `disposeAll()` ends its life. A caller must not dispose it: disposal
+   * deletes the compiled artifact that the other callers still read.
+   */
   async getAgentFile(agentName: string): Promise<AgentFile> {
     await this.preloadAgents();
 
