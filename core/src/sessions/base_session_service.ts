@@ -184,16 +184,14 @@ export abstract class BaseSessionService {
    * @param _request The request to get the user state.
    * @return A promise that resolves to the raw user-scoped key/value pairs, or
    *     to an empty map when the app and user have no stored user state.
-   * @throws An error when the session service cannot read user state without a
-   *     session. Callers should then enumerate sessions via `listSessions` and
-   *     call `getSession` on each result to read the merged state, or continue
-   *     without user state.
+   * @throws An error when the session service does not support reading user
+   *     state without a session.
    */
   async getUserState(
     _request: GetUserStateRequest,
   ): Promise<Record<string, unknown>> {
     throw new Error(
-      'This session service does not support getUserState. To read user ' +
+      `${this.constructor.name} does not support getUserState. To read user ` +
         'state, enumerate sessions via listSessions and call getSession on ' +
         'each result to access the merged state.',
     );

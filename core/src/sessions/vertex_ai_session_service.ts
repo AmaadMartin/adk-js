@@ -34,7 +34,6 @@ import {
   CreateSessionRequest,
   DeleteSessionRequest,
   GetSessionRequest,
-  GetUserStateRequest,
   ListSessionsRequest,
   ListSessionsResponse,
   trimTempState,
@@ -410,26 +409,6 @@ export class VertexAiSessionService extends BaseSessionService {
     await this.sessions.delete({
       name: `reasoningEngines/${reasoningEngineId}/sessions/${sessionId}`,
     });
-  }
-
-  /**
-   * Reading user state is not supported by the Vertex AI Agent Engine backend.
-   *
-   * The Agent Engine Sessions API scopes state to a single session and exposes
-   * no resource keyed by app name and user ID.
-   *
-   * @param _request The request to get the user state.
-   * @throws An error, always.
-   */
-  override async getUserState(
-    _request: GetUserStateRequest,
-  ): Promise<Record<string, unknown>> {
-    throw new Error(
-      'VertexAiSessionService does not support getUserState. The Vertex AI ' +
-        'Agent Engine API does not expose user state independently of a ' +
-        'session. To read user state, enumerate sessions via listSessions ' +
-        'and call getSession on each result.',
-    );
   }
 
   override async appendEvent({

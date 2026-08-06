@@ -40,6 +40,10 @@ export function experimental<
       }
     };
 
+    // The replacement is an anonymous class expression, so without this its
+    // name is the binding name and every decorated class reports the same one.
+    Object.defineProperty(newConstructor, 'name', {value: className});
+
     // We must cast to the conditional return type because TS cannot
     // narrow return types based on control flow across conditional types.
     return newConstructor as P extends undefined ? T : PropertyDescriptor;
