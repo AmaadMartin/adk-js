@@ -13,7 +13,7 @@ import {
 } from '@google/adk';
 import {beforeEach, describe, expect, it} from 'vitest';
 import {
-  applySessionScopedState,
+  deleteScopedStateKeys,
   isInMemoryConnectionString,
 } from '../../src/sessions/in_memory_session_service.js';
 
@@ -30,43 +30,27 @@ describe('isInMemoryConnectionString', () => {
   });
 });
 
-describe('applySessionScopedState', () => {
-  it('writes only the session-scoped keys', () => {
-    const state: Record<string, unknown> = {};
-
-    applySessionScopedState(state, {
+describe('deleteScopedStateKeys', () => {
+  it('deletes the app: and user: keys and keeps the rest', () => {
+    const state: Record<string, unknown> = {
       [`${State.APP_PREFIX}theme`]: 'dark',
       [`${State.USER_PREFIX}lang`]: 'en',
       k: 'v',
-    });
+    };
+
+    deleteScopedStateKeys(state, {...state});
 
     expect(state).toEqual({k: 'v'});
-    expect(`${State.APP_PREFIX}theme` in state).toBe(false);
-    expect(`${State.USER_PREFIX}lang` in state).toBe(false);
   });
 
-  it('overwrites an existing session-scoped key and leaves the rest alone', () => {
-    const state: Record<string, unknown> = {k: 'old', other: 1};
+  it('keeps a scoped key that the delta does not carry', () => {
+    const state: Record<string, unknown> = {
+      [`${State.APP_PREFIX}theme`]: 'dark',
+    };
 
-    applySessionScopedState(state, {k: 'new'});
+    deleteScopedStateKeys(state, {k: 'v'});
 
-    expect(state).toEqual({k: 'new', other: 1});
-  });
-
-  it('keeps a __proto__ delta key as an own property', () => {
-    const state: Record<string, unknown> = {};
-    // An object literal cannot express an own `__proto__` key.
-    const stateDelta = JSON.parse('{"__proto__": {"isAdmin": true}}') as Record<
-      string,
-      unknown
-    >;
-
-    applySessionScopedState(state, stateDelta);
-
-    expect(Object.getOwnPropertyDescriptor(state, '__proto__')?.value).toEqual({
-      isAdmin: true,
-    });
-    expect(new State(state).get('isAdmin')).toBeUndefined();
+    expect(state).toEqual({[`${State.APP_PREFIX}theme`]: 'dark'});
   });
 });
 

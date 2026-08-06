@@ -31,37 +31,19 @@ export function isInMemoryConnectionString(uri?: string): boolean {
 }
 
 /**
- * Applies the session-scoped part of an event's state delta to a stored
- * session's state.
- *
- * `app:` and `user:` keys belong to the service's `appState`/`userState` maps
- * and are projected back onto a session by `mergeStates` on read, so a stored
- * session must not hold a second copy of them; two copies of one value can
- * drift. The live session a caller holds still receives the whole non-`temp:`
- * delta with its prefixes, written by `BaseSessionService.appendEvent`. Only
- * the stored copy is narrowed here, as `DatabaseSessionService` and the Python
- * implementation both do.
- *
- * `temp:` keys need no filtering: `trimTempDeltaState` removes them from the
- * delta before this runs.
+ * Deletes a state delta's `app:`- and `user:`-scoped keys from a stored
+ * session's state. Those keys belong to the service's `appState`/`userState`
+ * maps, which `mergeStates` projects back onto a session on read, so a stored
+ * session that also keeps them holds a second copy that can drift.
  */
-export function applySessionScopedState(
+export function deleteScopedStateKeys(
   state: Record<string, unknown>,
   stateDelta: Record<string, unknown>,
 ): void {
-  for (const [key, value] of Object.entries(stateDelta)) {
+  for (const key of Object.keys(stateDelta)) {
     if (key.startsWith(State.APP_PREFIX) || key.startsWith(State.USER_PREFIX)) {
-      continue;
+      delete state[key];
     }
-    // `defineProperty`, not assignment: `state['__proto__'] = value` reaches
-    // the inherited setter and re-parents the state map instead of storing an
-    // own property.
-    Object.defineProperty(state, key, {
-      value,
-      writable: true,
-      enumerable: true,
-      configurable: true,
-    });
   }
 }
 
@@ -326,22 +308,14 @@ export class InMemorySessionService extends BaseSessionService {
     }
 
     const storageSession: Session = this.sessions[appName][userId][sessionId];
+    await super.appendEvent({session: storageSession, event});
+
     storageSession.lastUpdateTime = event.timestamp;
 
-    if (event.partial) {
-      return event;
-    }
-
-    const index = storageSession.events.findIndex((e) => e.id === event.id);
-    if (index >= 0) {
-      storageSession.events[index] = event;
-    } else {
-      storageSession.events.push(event);
-    }
-
-    if (event.actions && event.actions.stateDelta) {
-      applySessionScopedState(storageSession.state, event.actions.stateDelta);
-    }
+    deleteScopedStateKeys(
+      storageSession.state,
+      event.actions?.stateDelta ?? {},
+    );
 
     return event;
   }
