@@ -88,7 +88,11 @@ export type {
   ServiceAccountCredential,
 } from './auth/auth_credential.js';
 export {AuthHandler} from './auth/auth_handler.js';
-export {AUTH_PREPROCESSOR, AuthPreprocessor} from './auth/auth_preprocessor.js';
+export {
+  AUTH_PREPROCESSOR,
+  AuthPreprocessor,
+  TOOLSET_AUTH_CREDENTIAL_ID_PREFIX,
+} from './auth/auth_preprocessor.js';
 export {AuthProviderRegistry} from './auth/auth_provider_registry.js';
 export {OAuthGrantType} from './auth/auth_schemes.js';
 export type {AuthScheme, OpenIdConnectWithConfig} from './auth/auth_schemes.js';
@@ -106,6 +110,10 @@ export {OAuth2CredentialExchanger} from './auth/oauth2/oauth2_credential_exchang
 export {OAuth2DiscoveryManager} from './auth/oauth2/oauth2_discovery.js';
 export type {BaseCredentialRefresher} from './auth/refresher/base_credential_refresher.js';
 export {CredentialRefresherRegistry} from './auth/refresher/credential_refresher_registry.js';
+export {
+  TOOLSET_AUTH_PREPROCESSOR,
+  ToolsetAuthPreprocessor,
+} from './auth/toolset_auth_preprocessor.js';
 export {BaseCodeExecutor} from './code_executors/base_code_executor.js';
 export type {ExecuteCodeParams} from './code_executors/base_code_executor.js';
 export {BuiltInCodeExecutor} from './code_executors/built_in_code_executor.js';

@@ -8,6 +8,7 @@ import {Content, createUserContent, FunctionCall, Part} from '@google/genai';
 import {isEmpty} from 'lodash-es';
 
 import {InvocationContext} from '../agents/invocation_context.js';
+import {AuthConfig} from '../auth/auth_tool.js';
 import {
   createEvent,
   Event,
@@ -43,6 +44,7 @@ export const REQUEST_CONFIRMATION_FUNCTION_CALL_NAME =
 // Export these items for testing purposes only
 export const functionsExportedForTestingOnly = {
   handleFunctionCallList,
+  buildAuthRequestEvent,
   generateAuthEvent,
   generateRequestConfirmationEvent,
 };
@@ -68,6 +70,52 @@ export function getLongRunningFunctionCalls(
   return longRunningToolIds;
 }
 
+/**
+ * Builds an auth request event carrying one `adk_request_credential` function
+ * call per requested credential.
+ *
+ * Both auth paths share this builder: the tool-level path, where a tool
+ * requests a credential while it runs, and the toolset-level path, where ADK
+ * resolves a toolset's credential before it lists the toolset's tools.
+ *
+ * @param invocationContext The current invocation context.
+ * @param authRequests The requested configs, keyed by function call id.
+ * @param options.author The event author. Defaults to the agent name.
+ * @param options.role The content role. Defaults to `undefined`.
+ * @return The auth request event.
+ */
+export function buildAuthRequestEvent(
+  invocationContext: InvocationContext,
+  authRequests: Record<string, AuthConfig>,
+  options?: {author?: string; role?: string},
+): Event {
+  const parts: Part[] = [];
+  const longRunningToolIds = new Set<string>();
+  for (const [functionCallId, authConfig] of Object.entries(authRequests)) {
+    const requestEucFunctionCall: FunctionCall = {
+      name: REQUEST_EUC_FUNCTION_CALL_NAME,
+      args: {
+        'function_call_id': functionCallId,
+        'auth_config': authConfig,
+      },
+      id: generateClientFunctionCallId(),
+    };
+    longRunningToolIds.add(requestEucFunctionCall.id!);
+    parts.push({functionCall: requestEucFunctionCall});
+  }
+
+  return createEvent({
+    invocationId: invocationContext.invocationId,
+    author: options?.author ?? invocationContext.agent.name,
+    branch: invocationContext.branch,
+    content: {
+      parts: parts,
+      role: options?.role,
+    },
+    longRunningToolIds: Array.from(longRunningToolIds),
+  });
+}
+
 // TODO - b/425992518: consider internalize as part of llm_agent's runtime.
 // The auth part of function calling is a bit hacky, need to to clarify.
 /**
@@ -86,33 +134,12 @@ export function generateAuthEvent(
   ) {
     return undefined;
   }
-  const parts: Part[] = [];
-  const longRunningToolIds = new Set<string>();
-  for (const [functionCallId, authConfig] of Object.entries(
-    functionResponseEvent.actions.requestedAuthConfigs,
-  )) {
-    const requestEucFunctionCall: FunctionCall = {
-      name: REQUEST_EUC_FUNCTION_CALL_NAME,
-      args: {
-        'function_call_id': functionCallId,
-        'auth_config': authConfig,
-      },
-      id: generateClientFunctionCallId(),
-    };
-    longRunningToolIds.add(requestEucFunctionCall.id!);
-    parts.push({functionCall: requestEucFunctionCall});
-  }
 
-  return createEvent({
-    invocationId: invocationContext.invocationId,
-    author: invocationContext.agent.name,
-    branch: invocationContext.branch,
-    content: {
-      parts: parts,
-      role: functionResponseEvent.content!.role,
-    },
-    longRunningToolIds: Array.from(longRunningToolIds),
-  });
+  return buildAuthRequestEvent(
+    invocationContext,
+    functionResponseEvent.actions.requestedAuthConfigs,
+    {role: functionResponseEvent.content!.role},
+  );
 }
 
 /**

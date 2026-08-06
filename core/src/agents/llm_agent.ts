@@ -57,6 +57,7 @@ import {
 } from './functions.js';
 
 import {AUTH_PREPROCESSOR} from '../auth/auth_preprocessor.js';
+import {TOOLSET_AUTH_PREPROCESSOR} from '../auth/toolset_auth_preprocessor.js';
 import {BaseContextCompactor} from '../context/base_context_compactor.js';
 import {InvocationContext} from './invocation_context.js';
 import {AGENT_TRANSFER_LLM_REQUEST_PROCESSOR} from './processors/agent_transfer_llm_request_processor.js';
@@ -401,6 +402,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     this.requestProcessors = config.requestProcessors ?? [
       BASIC_LLM_REQUEST_PROCESSOR,
       AUTH_PREPROCESSOR,
+      TOOLSET_AUTH_PREPROCESSOR,
       IDENTITY_LLM_REQUEST_PROCESSOR,
       INSTRUCTIONS_LLM_REQUEST_PROCESSOR,
       REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR,
@@ -785,6 +787,14 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         yield event;
       }
     }
+
+    // A request processor can interrupt the turn, for example when a toolset
+    // needs a credential before it can list its tools. Stop before the
+    // remaining steps list those tools and call the model.
+    if (invocationContext.endInvocation) {
+      return;
+    }
+
     // TODO - b/425992518: check if tool preprocessors can be simplified.
     // Run pre-processors for tools.
     const allTools = [...this.tools];
