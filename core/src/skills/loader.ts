@@ -57,8 +57,9 @@ const IGNORED_EXTENSIONS = new Set([
  * Recursively loads files from a directory into a dictionary.
  *
  * @param directoryPath - The absolute or relative path of the directory to load.
- * @returns A promise that resolves to a dictionary where keys are relative file paths
- * and values are the file contents (as string for UTF-8 or Buffer otherwise).
+ * @returns A promise that resolves to a dictionary where keys are POSIX-style
+ * ('/'-separated) relative file paths and values are the file contents (as
+ * string for UTF-8 or Buffer otherwise).
  */
 async function loadDir(
   directoryPath: string,
@@ -76,7 +77,13 @@ async function loadDir(
 
         await walk(fullPath);
       } else if (entry.isFile()) {
-        const relativePath = path.relative(directoryPath, fullPath);
+        // Keys are '/'-separated on every platform so a directory-loaded skill
+        // and a zip-loaded skill of the same layout agree; zip entry names are
+        // POSIX by specification.
+        const relativePath = path
+          .relative(directoryPath, fullPath)
+          .split(path.sep)
+          .join('/');
         if (IGNORED_EXTENSIONS.has(path.extname(entry.name))) {
           continue;
         }
