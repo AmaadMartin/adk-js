@@ -31,6 +31,23 @@ export function isInMemoryConnectionString(uri?: string): boolean {
 }
 
 /**
+ * Deletes a state delta's `app:`- and `user:`-scoped keys from a stored
+ * session's state. Those keys belong to the service's `appState`/`userState`
+ * maps, which `mergeStates` projects back onto a session on read, so a stored
+ * session that also keeps them holds a second copy that can drift.
+ */
+export function deleteScopedStateKeys(
+  state: Record<string, unknown>,
+  stateDelta: Record<string, unknown>,
+): void {
+  for (const key of Object.keys(stateDelta)) {
+    if (key.startsWith(State.APP_PREFIX) || key.startsWith(State.USER_PREFIX)) {
+      delete state[key];
+    }
+  }
+}
+
+/**
  * An in-memory implementation of the session service.
  */
 export class InMemorySessionService extends BaseSessionService {
@@ -294,6 +311,11 @@ export class InMemorySessionService extends BaseSessionService {
     await super.appendEvent({session: storageSession, event});
 
     storageSession.lastUpdateTime = event.timestamp;
+
+    deleteScopedStateKeys(
+      storageSession.state,
+      event.actions?.stateDelta ?? {},
+    );
 
     return event;
   }
