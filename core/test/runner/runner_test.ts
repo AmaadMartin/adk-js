@@ -8,6 +8,7 @@ import {
   App,
   BaseAgent,
   BasePlugin,
+  createContextCacheConfig,
   createEvent,
   createResumabilityConfig,
   determineAgentForResumption,
@@ -352,6 +353,37 @@ describe('Runner.determineAgentForResumption', () => {
     });
 
     expect(appRunner.resumabilityConfig?.isResumable).toBe(true);
+  });
+
+  it('should derive contextCacheConfig from direct runner config', () => {
+    const contextCacheConfig = createContextCacheConfig({minTokens: 2048});
+    const directRunner = new Runner({
+      appName: TEST_APP_ID,
+      agent: rootAgent,
+      sessionService,
+      artifactService,
+      contextCacheConfig,
+    });
+
+    expect(directRunner.contextCacheConfig).toBe(contextCacheConfig);
+  });
+
+  it('should prefer the app contextCacheConfig over the direct runner config', () => {
+    const appConfig = createContextCacheConfig({minTokens: 2048});
+    const directConfig = createContextCacheConfig({minTokens: 4096});
+    const app = new App({
+      name: TEST_APP_ID,
+      rootAgent,
+      contextCacheConfig: appConfig,
+    });
+    const appRunner = new Runner({
+      app,
+      sessionService,
+      artifactService,
+      contextCacheConfig: directConfig,
+    });
+
+    expect(appRunner.contextCacheConfig).toBe(appConfig);
   });
 
   it('should skip function response resumption routing when resumabilityConfig.isResumable is false or undefined', async () => {

@@ -8,6 +8,7 @@ import {Content, createPartFromText, Part} from '@google/genai';
 import {context, trace} from '@opentelemetry/api';
 
 import {BaseAgent} from '../agents/base_agent.js';
+import {ContextCacheConfig} from '../agents/context_cache_config.js';
 import {findMatchingFunctionCall} from '../agents/functions.js';
 import {
   InvocationContext,
@@ -88,6 +89,12 @@ export interface RunnerConfig {
    * An optional resumability configuration applied to the runner.
    */
   resumabilityConfig?: ResumabilityConfig;
+
+  /**
+   * An optional context cache configuration applied to the runner. When the
+   * runner is built from an `app`, the app's config takes precedence.
+   */
+  contextCacheConfig?: ContextCacheConfig;
 }
 
 /**
@@ -145,6 +152,7 @@ export class Runner {
   readonly memoryService?: BaseMemoryService;
   readonly credentialService?: BaseCredentialService;
   readonly resumabilityConfig?: ResumabilityConfig;
+  readonly contextCacheConfig?: ContextCacheConfig;
 
   /**
    * Creates a new Runner instance.
@@ -170,6 +178,8 @@ export class Runner {
     this.credentialService = input.credentialService;
     this.resumabilityConfig =
       input.app?.resumabilityConfig ?? input.resumabilityConfig;
+    this.contextCacheConfig =
+      input.app?.contextCacheConfig ?? input.contextCacheConfig;
   }
 
   /**
@@ -303,6 +313,7 @@ export class Runner {
             runConfig,
             pluginManager: this.pluginManager,
             abortSignal: params.abortSignal,
+            contextCacheConfig: this.contextCacheConfig,
           });
 
           // =========================================================================
