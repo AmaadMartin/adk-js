@@ -6,6 +6,7 @@
 
 import {AGENT_CARD_PATH, AgentCard} from '@a2a-js/sdk';
 import {
+  BaseAgent,
   BaseArtifactService,
   BaseMemoryService,
   BaseSessionService,
@@ -213,8 +214,41 @@ const TEST_AGENT = new TestAgent({
   ],
 });
 
+const COMPILED_AGENT_PATH = '/tmp/adk_agent_loader-test/testApp.mjs';
+
+/**
+ * Test double for the `AgentFile` the loader lends out. It mirrors the real
+ * disposal semantics: once disposed, `getFilePath()` throws for good.
+ */
+interface AgentFileStub {
+  disposeCount: number;
+  load: () => Promise<BaseAgent>;
+  getFilePath: () => string;
+  [Symbol.asyncDispose]: () => Promise<void>;
+}
+
+function createAgentFileStub(): AgentFileStub {
+  const stub: AgentFileStub = {
+    disposeCount: 0,
+    load: () => Promise.resolve(TEST_AGENT),
+    getFilePath: () => {
+      if (stub.disposeCount > 0) {
+        throw new Error('Agent is disposed and can not be used');
+      }
+      return COMPILED_AGENT_PATH;
+    },
+    [Symbol.asyncDispose]: () => {
+      stub.disposeCount++;
+      return Promise.resolve();
+    },
+  };
+
+  return stub;
+}
+
 describe('AdkWebServer', () => {
   let agentLoader: AgentLoader;
+  let agentFile: AgentFileStub;
   let sessionService: BaseSessionService;
   let memoryService: BaseMemoryService;
   let artifactService: BaseArtifactService;
@@ -222,17 +256,10 @@ describe('AdkWebServer', () => {
   let client: HttpClient;
 
   beforeEach(async () => {
+    agentFile = createAgentFileStub();
     agentLoader = {
       listAgents: () => Promise.resolve(['testApp']),
-      getAgentFile: () =>
-        Promise.resolve({
-          load() {
-            return Promise.resolve(TEST_AGENT);
-          },
-          async [Symbol.asyncDispose](): Promise<void> {
-            return;
-          },
-        }),
+      getAgentFile: () => Promise.resolve(agentFile),
     } as unknown as AgentLoader;
     sessionService = new InMemorySessionService();
     memoryService = new InMemoryMemoryService();
@@ -940,6 +967,84 @@ describe('AdkWebServer', () => {
       } catch (e: unknown) {
         expect((e as {response: {status: number}}).response.status).toBe(404);
       }
+    });
+  });
+
+  describe('agent file lifecycle', () => {
+    const RUN_BODY = {
+      appName: 'testApp',
+      userId: 'testUser',
+      sessionId: 'sessionId',
+      newMessage: {parts: [{text: 'Hello test agent!'}], role: 'user'},
+    };
+    const GRAPH_PATH =
+      '/apps/testApp/users/testUser/sessions/fullSession/events/event1/graph';
+
+    async function postRun(): Promise<void> {
+      const response = await client.post<Event[]>('/run', RUN_BODY);
+
+      expect(response.status).toBe(200);
+    }
+
+    async function getGraph(times: number): Promise<void> {
+      const originalGetSession = sessionService.getSession;
+      sessionService.getSession = async () =>
+        createSession({
+          id: 'fullSession',
+          appName: 'testApp',
+          userId: 'testUser',
+          events: [
+            createEvent({
+              id: 'event1',
+              author: 'model',
+              content: {parts: [{functionCall: {name: 'foo', args: {}}}]},
+              invocationId: 'inv-1',
+            }),
+          ],
+        });
+
+      try {
+        for (let i = 0; i < times; i++) {
+          const response = await client.get<{dotSrc: string}>(GRAPH_PATH);
+
+          expect(response.status).toBe(200);
+        }
+      } finally {
+        sessionService.getSession = originalGetSession;
+      }
+    }
+
+    function expectAgentFileNotDisposed(): void {
+      expect(agentFile.disposeCount).toBe(0);
+      expect(() => agentFile.getFilePath()).not.toThrow();
+    }
+
+    beforeEach(async () => {
+      await sessionService.createSession({
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: 'sessionId',
+      });
+    });
+
+    it('leaves the loader-owned agent file usable after two sequential run requests', async () => {
+      await postRun();
+      await postRun();
+
+      expectAgentFileNotDisposed();
+    });
+
+    it('leaves the loader-owned agent file usable after two sequential agent-graph requests', async () => {
+      await getGraph(2);
+
+      expectAgentFileNotDisposed();
+    });
+
+    it('does not dispose the loader-owned agent file when a run and a graph request share an app', async () => {
+      await postRun();
+      await getGraph(1);
+
+      expectAgentFileNotDisposed();
     });
   });
 

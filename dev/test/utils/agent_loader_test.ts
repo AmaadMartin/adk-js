@@ -717,6 +717,24 @@ describe('AgentLoader', () => {
       await agentLoader.disposeAll();
     });
 
+    it('returns the same shared AgentFile instance for repeated getAgentFile calls', async () => {
+      const loader = new AgentLoader(tempAgentsDir);
+      const first = await loader.getAgentFile('agent2');
+      const second = await loader.getAgentFile('agent2');
+
+      expect(second).toBe(first);
+
+      await first.load();
+      await first.dispose();
+      const afterDispose = await loader.getAgentFile('agent2');
+
+      expect(() => afterDispose.getFilePath()).toThrow(
+        'Agent is disposed and can not be used',
+      );
+
+      await loader.disposeAll();
+    });
+
     it('disposes all agent files', async () => {
       const agentLoader = new AgentLoader(tempAgentsDir);
       await agentLoader.listAgents();
