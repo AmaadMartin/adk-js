@@ -5,8 +5,11 @@
  */
 
 import {
+  DatabaseSessionService,
   getArtifactServiceFromUri,
   getSessionServiceFromUri,
+  InMemoryArtifactService,
+  InMemorySessionService,
   LogLevel,
   setLogLevel,
 } from '@google/adk';
@@ -77,6 +80,7 @@ const SESSION_SERVICE_URI_SCHEMES: ServiceUriScheme[] = [
   {scheme: 'mariadb://', sampleUri: 'mariadb://user:pw@localhost:3306/adk'},
   {scheme: 'mssql://', sampleUri: 'mssql://user:pw@localhost:1433/adk'},
   {scheme: 'sqlite://', sampleUri: 'sqlite://./adk_sessions.db'},
+  {scheme: 'sqlite://:memory:', sampleUri: 'sqlite://:memory:'},
 ];
 
 /** Schemes named in the artifact help text. */
@@ -109,6 +113,11 @@ function webOptionDescription(
   return option.description;
 }
 
+/** Returns the options the CLI passed to the first `AdkApiServer` it built. */
+function servedOptions() {
+  return vi.mocked(AdkApiServer).mock.calls[0][0];
+}
+
 describe('CLI Entrypoint', () => {
   let program: ReturnType<typeof createProgram>;
 
@@ -120,6 +129,7 @@ describe('CLI Entrypoint', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
   });
 
   const parse = async (args: string[]) => {
@@ -499,6 +509,65 @@ describe('CLI Entrypoint', () => {
         expect(description).toContain(scheme);
         expect(() => getArtifactServiceFromUri(sampleUri)).not.toThrow();
       }
+    });
+
+    it('documents the DATABASE_URL fall-back and the memory:// default', () => {
+      const description = webOptionDescription(
+        program,
+        '--session_service_uri',
+      );
+
+      expect(description).toContain('DATABASE_URL');
+      expect(description).toContain('if that is unset too, memory://');
+    });
+
+    it('documents the memory:// default for artifacts', () => {
+      const description = webOptionDescription(
+        program,
+        '--artifact_service_uri',
+      );
+
+      expect(description).toContain('If unset, memory://');
+    });
+  });
+
+  describe('service URI fall-backs', () => {
+    it('uses DATABASE_URL when --session_service_uri is omitted', async () => {
+      vi.stubEnv('DATABASE_URL', 'sqlite://:memory:');
+
+      await parse(['web']);
+
+      expect(servedOptions().sessionService).toBeInstanceOf(
+        DatabaseSessionService,
+      );
+    });
+
+    it('falls back to an in-memory session service when neither is set', async () => {
+      vi.stubEnv('DATABASE_URL', undefined);
+
+      await parse(['web']);
+
+      expect(servedOptions().sessionService).toBeInstanceOf(
+        InMemorySessionService,
+      );
+    });
+
+    it('prefers --session_service_uri over DATABASE_URL', async () => {
+      vi.stubEnv('DATABASE_URL', 'sqlite://:memory:');
+
+      await parse(['web', '--session_service_uri', 'memory://']);
+
+      expect(servedOptions().sessionService).toBeInstanceOf(
+        InMemorySessionService,
+      );
+    });
+
+    it('falls back to an in-memory artifact service when the flag is omitted', async () => {
+      await parse(['web']);
+
+      expect(servedOptions().artifactService).toBeInstanceOf(
+        InMemoryArtifactService,
+      );
     });
   });
 });
