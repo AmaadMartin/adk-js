@@ -12,6 +12,7 @@ import {shimPlugin} from 'esbuild-shim-plugin';
 import * as fs from 'node:fs';
 import * as fsPromises from 'node:fs/promises';
 import {createRequire} from 'node:module';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import {pathToFileURL} from 'node:url';
 
@@ -48,6 +49,17 @@ const FILE_MODULE_TYPE_EXTENSION_MAP = {
   [FileModuleType.CJS]: '.cjs',
   [FileModuleType.ESM]: '.mjs',
 };
+
+/**
+ * Termination signals the loader turns into a conventional exit status.
+ *
+ * A shell reports a process killed by signal `N` as `128 + N`, so Ctrl-C
+ * (`SIGINT`) must exit `130`. Signal numbers differ per platform, so they are
+ * read from `os.constants.signals` instead of being hard-coded.
+ */
+const TERMINATION_SIGNALS = ['SIGINT', 'SIGUSR1', 'SIGUSR2'] as const;
+
+type TerminationSignal = (typeof TERMINATION_SIGNALS)[number];
 
 /**
  * Metadata for a file.
@@ -359,34 +371,33 @@ export class AgentLoader {
   private agentsAlreadyPreloaded = false;
   private readonly preloadedAgents: Record<string, AgentFile> = {};
   private watcher?: fs.FSWatcher;
+  /** Removes the process listeners this instance installed. */
+  private readonly removeProcessHandlers: () => void;
 
   constructor(
     private readonly agentsDirPath: string = process.cwd(),
     private readonly options = DEFAULT_AGENT_FILE_OPTIONS,
     private readonly watchForChanges = false,
   ) {
-    // Do cleanups on exit
-    const exitHandler = async ({
-      exit,
-      cleanup,
-    }: {
-      exit?: boolean;
-      cleanup?: boolean;
-    }) => {
-      if (cleanup) {
-        await this.disposeAll();
-      }
+    // No 'uncaughtException' listener: one would replace Node's default fatal
+    // handler, which prints the stack and exits 1.
+    const handlers: Array<[TerminationSignal | 'exit', () => void]> = [
+      ['exit', () => void this.disposeAll()],
+      ...TERMINATION_SIGNALS.map((signal): [TerminationSignal, () => void] => [
+        signal,
+        () => process.exit(128 + os.constants.signals[signal]),
+      ]),
+    ];
 
-      if (exit) {
-        process.exit();
+    for (const [event, handler] of handlers) {
+      process.on(event, handler);
+    }
+
+    this.removeProcessHandlers = () => {
+      for (const [event, handler] of handlers) {
+        process.removeListener(event, handler);
       }
     };
-
-    process.on('exit', () => exitHandler({cleanup: true}));
-    process.on('SIGINT', () => exitHandler({exit: true}));
-    process.on('SIGUSR1', () => exitHandler({exit: true}));
-    process.on('SIGUSR2', () => exitHandler({exit: true}));
-    process.on('uncaughtException', () => exitHandler({exit: true}));
   }
 
   /**
@@ -469,6 +480,7 @@ export class AgentLoader {
   }
 
   async disposeAll(): Promise<void> {
+    this.removeProcessHandlers();
     this.watcher?.close();
     this.watcher = undefined;
     await Promise.all(
