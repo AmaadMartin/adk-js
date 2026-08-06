@@ -134,7 +134,6 @@ export class RestApiTool extends BaseTool {
       const response = await globalThis.fetch(url, {
         method,
         headers,
-        // eslint-disable-next-line no-undef
         body: body as BodyInit,
       });
 

@@ -323,7 +323,7 @@ export class Gemini extends BaseLlm {
           messageQueue.push(message);
         },
         onerror: (error) => {
-          messageQueue.error(error);
+          messageQueue.error(new Error(error.message, {cause: error}));
         },
         onclose: () => {
           messageQueue.close();
