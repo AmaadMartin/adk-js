@@ -10,9 +10,9 @@
  * Handles lowerCamelCase, UpperCamelCase, space-separated text, acronyms
  * (e.g. "REST API") and consecutive uppercase letters.
  *
- * This mirrors `_to_snake_case` in adk-python, which names the same tools and
- * tool arguments there. The six steps must keep their order and none of them
- * is redundant: steps 2 and 3 insert the underscores that step 5 collapses.
+ * This mirrors `_to_snake_case` in adk-python, which names the same OpenAPI
+ * tools and tool arguments there. Keep the steps and their order in sync with
+ * that function; the unit test pins the outputs row by row.
  *
  * @param text The string to convert.
  * @returns The snake_case version of the string.

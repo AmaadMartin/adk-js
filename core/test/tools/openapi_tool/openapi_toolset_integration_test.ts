@@ -123,4 +123,64 @@ describe('OpenAPIToolset Integration', () => {
       error: 'Failed to execute API call: Network error',
     });
   });
+
+  it('should snake_case the tool and argument names but send the spec header name', async () => {
+    const toolset = new OpenAPIToolset({
+      specDict: {
+        openapi: '3.0.0',
+        info: {title: 'Pet API', version: '1.0.0'},
+        servers: [{url: 'https://pets.example.com'}],
+        paths: {
+          '/pet': {
+            get: {
+              operationId: 'getPetByID',
+              parameters: [
+                {
+                  name: 'X-Request-Id',
+                  in: 'header',
+                  required: true,
+                  schema: {type: 'string'},
+                },
+              ],
+              responses: {'200': {description: 'OK'}},
+            },
+          },
+        },
+      },
+    });
+    const [tool] = await toolset.getTools();
+    if (!tool) {
+      expect.fail('the toolset produced no tool for /pet');
+    }
+
+    expect(tool.name).toBe('get_pet_by_id');
+    const declaration = tool._getDeclaration();
+    expect(Object.keys(declaration?.parameters?.properties ?? {})).toEqual([
+      'x_request_id',
+    ]);
+
+    vi.mocked(globalThis.fetch).mockResolvedValue({
+      ok: true,
+      headers: {get: () => 'application/json'},
+      json: async () => ({id: 1}),
+    } as unknown as Response);
+
+    const mockContext = {
+      getAuthResponse: vi.fn().mockReturnValue(undefined),
+      requestCredential: vi.fn(),
+      state: {},
+    };
+
+    await tool.runAsync({
+      args: {x_request_id: 'abc'},
+      toolContext: mockContext as unknown as Context,
+    });
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'https://pets.example.com/pet',
+      expect.objectContaining({
+        headers: expect.objectContaining({'X-Request-Id': 'abc'}),
+      }),
+    );
+  });
 });
