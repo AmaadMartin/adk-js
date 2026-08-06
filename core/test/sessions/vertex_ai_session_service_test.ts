@@ -8,7 +8,6 @@ import {Sessions} from '@google-cloud/vertexai/build/src/genai/sessions.js';
 import {
   createEvent,
   isCompactedEvent,
-  ListSessionsRequest,
   Session,
   State,
   VertexAiSessionService,
@@ -50,12 +49,6 @@ import {
   quoteFilterLiteral,
 } from '../../src/sessions/vertex_ai_session_service.js';
 import {logger} from '../../src/utils/logger.js';
-
-// ListSessionsRequest declares userId as required. These cases cover the
-// runtime branch that omits the filter, which an untyped caller can reach.
-function withoutUserId(appName: string): ListSessionsRequest {
-  return {appName} as ListSessionsRequest;
-}
 
 describe('isVertexAiConnectionString', () => {
   it('returns true for vertexai://', () => {
@@ -723,7 +716,7 @@ describe('VertexAiSessionService', () => {
     });
 
     it('lists sessions without filter if userId is missing', async () => {
-      await service.listSessions(withoutUserId('12345'));
+      await service.listSessions({appName: '12345', userId: ''});
 
       expect(mockClient.listInternal).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -737,7 +730,7 @@ describe('VertexAiSessionService', () => {
         sessions: [{name: 'projects/p/locations/l/sessions/s1', userId: 'u1'}],
       });
 
-      const result = await service.listSessions(withoutUserId('12345'));
+      const result = await service.listSessions({appName: '12345', userId: ''});
 
       expect(result.sessions[0].state).toEqual({});
       expect(result.sessions[0].lastUpdateTime).toBeGreaterThan(0);
@@ -746,7 +739,7 @@ describe('VertexAiSessionService', () => {
     it('returns empty list if no sessions found in listSessions', async () => {
       mockClient.listInternal.mockResolvedValue({}); // No sessions!
 
-      const result = await service.listSessions(withoutUserId('12345'));
+      const result = await service.listSessions({appName: '12345', userId: ''});
 
       expect(result.sessions).toEqual([]);
     });
@@ -763,7 +756,7 @@ describe('VertexAiSessionService', () => {
         ],
       });
 
-      const result = await service.listSessions(withoutUserId('12345'));
+      const result = await service.listSessions({appName: '12345', userId: ''});
 
       expect(result.sessions[0].state).toEqual({foo: 'bar'});
       expect(result.sessions[0].lastUpdateTime).toBe(

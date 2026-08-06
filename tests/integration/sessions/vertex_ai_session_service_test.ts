@@ -28,8 +28,7 @@ const AGENT_ENGINE_ID = '12345';
  * `^1.45.0`. `Sessions` is typed against the nested copy. The two `ApiClient`
  * classes are identical at runtime but each declares a private field, so `tsc`
  * treats them as distinct types. Deduplicating `@google/genai` onto one copy
- * would remove the need for this helper; that moves the runtime dependency
- * graph across a major version boundary and is out of scope here.
+ * removes the need for this helper.
  */
 function sessionsFor(apiClient: ApiClient): Sessions {
   return new Sessions(
