@@ -35,11 +35,15 @@ vi.mock('node:child_process', () => ({
     spawnMock(cmd, args, opts),
 }));
 
+// Every fake below passes its implementation as the `vi.fn()` constructor
+// argument. `vi.restoreAllMocks()` in `afterEach` drops a `.mockResolvedValue()` body
+// for good but restores a constructor-argument one, and a factory body runs
+// only once.
 vi.mock('node:fs/promises', () => {
   const mockFs = {
-    cp: vi.fn().mockResolvedValue(undefined),
-    mkdir: vi.fn().mockResolvedValue(undefined),
-    rm: vi.fn().mockResolvedValue(undefined),
+    cp: vi.fn(async () => {}),
+    mkdir: vi.fn(async () => {}),
+    rm: vi.fn(async () => {}),
   };
   return {
     ...mockFs,
@@ -48,12 +52,12 @@ vi.mock('node:fs/promises', () => {
 });
 
 vi.mock('../../src/utils/agent_loader.js', () => ({
-  AgentLoader: vi.fn().mockImplementation(() => ({
-    listAgents: vi.fn().mockResolvedValue(['agent1']),
-    getAgentFile: vi.fn().mockResolvedValue({
-      getFilePath: vi.fn().mockReturnValue('path/to/agent1.ts'),
-    }),
-    disposeAll: vi.fn().mockResolvedValue(undefined),
+  AgentLoader: vi.fn(() => ({
+    listAgents: vi.fn(async () => ['agent1']),
+    getAgentFile: vi.fn(async () => ({
+      getFilePath: vi.fn(() => 'path/to/agent1.ts'),
+    })),
+    disposeAll: vi.fn(async () => {}),
   })),
 }));
 
@@ -294,6 +298,18 @@ describe('deployToCloudRun', () => {
       recursive: true,
       force: true,
     });
+  });
+
+  // Deliberately not the first test in the block: it only holds if the fakes
+  // survived the preceding test's `vi.restoreAllMocks()`. This pins the
+  // fixture rather than product behaviour, because every call site awaits
+  // these fakes, where a bare `undefined` and a resolved promise behave alike.
+  it('should keep the node:fs/promises fakes returning promises after a restore', async () => {
+    await expect(
+      fs.rm('/tmp/x', {recursive: true, force: true}),
+    ).resolves.toBeUndefined();
+    await expect(fs.mkdir('/tmp/x')).resolves.toBeUndefined();
+    await expect(fs.cp('/tmp/x', '/tmp/y')).resolves.toBeUndefined();
   });
 
   it('should resolve default project and region from gcloud if not provided', async () => {
