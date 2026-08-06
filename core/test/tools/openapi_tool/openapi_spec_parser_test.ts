@@ -189,7 +189,8 @@ describe('OpenApiSpecParser', () => {
             },
           ],
           get: {
-            // operationId is missing, should be auto-generated as "get__users__id_"
+            // operationId is missing, so it is synthesized as "get__users__id_"
+            // and the tool name is the snake_case form of that.
             responses: {},
           },
         },
@@ -201,7 +202,7 @@ describe('OpenApiSpecParser', () => {
 
     expect(parsed.length).toBe(1);
     const op = parsed[0];
-    expect(op.name).toBe('get__users__id_');
+    expect(op.name).toBe('get_users_id');
     expect(op.parameters.length).toBe(1);
     expect(op.parameters[0].name).toBe('id');
   });
