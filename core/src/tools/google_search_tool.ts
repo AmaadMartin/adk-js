@@ -9,6 +9,25 @@ import {isGemini1Model, isGeminiModel} from '../utils/model_name.js';
 
 import {BaseTool, ToolProcessLlmRequest} from './base_tool.js';
 
+/** Parameters for constructing a {@link GoogleSearchTool}. */
+export interface GoogleSearchToolParams {
+  /**
+   * Whether the tool may be used alongside other tools on a Gemini 1.x model.
+   *
+   * Gemini 1.x rejects Google Search combined with other tools, so by default
+   * `processLlmRequest` throws in that case. Set to `true` to opt out of that
+   * check.
+   */
+  bypassMultiToolsLimit?: boolean;
+
+  /**
+   * Model name to process the request as, instead of the model on the
+   * incoming request. When set, it replaces `llmRequest.model` before the
+   * model family is inspected.
+   */
+  model?: string;
+}
+
 /**
  * A built-in tool that is automatically invoked by Gemini 2 models to retrieve
  * search results from Google Search.
@@ -17,8 +36,14 @@ import {BaseTool, ToolProcessLlmRequest} from './base_tool.js';
  * perform local code execution.
  */
 export class GoogleSearchTool extends BaseTool {
-  constructor() {
+  readonly bypassMultiToolsLimit: boolean;
+  readonly model?: string;
+
+  constructor(params: GoogleSearchToolParams = {}) {
     super({name: 'google_search', description: 'Google Search Tool'});
+
+    this.bypassMultiToolsLimit = params.bypassMultiToolsLimit ?? false;
+    this.model = params.model;
   }
 
   runAsync(): Promise<unknown> {
@@ -30,6 +55,10 @@ export class GoogleSearchTool extends BaseTool {
   override async processLlmRequest({
     llmRequest,
   }: ToolProcessLlmRequest): Promise<void> {
+    if (this.model !== undefined) {
+      llmRequest.model = this.model;
+    }
+
     if (!llmRequest.model) {
       return;
     }
@@ -38,7 +67,7 @@ export class GoogleSearchTool extends BaseTool {
     llmRequest.config.tools = llmRequest.config.tools || [];
 
     if (isGemini1Model(llmRequest.model)) {
-      if (llmRequest.config.tools.length > 0) {
+      if (llmRequest.config.tools.length > 0 && !this.bypassMultiToolsLimit) {
         throw new Error(
           'Google search tool can not be used with other tools in Gemini 1.x.',
         );

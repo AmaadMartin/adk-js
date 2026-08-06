@@ -255,6 +255,7 @@ export {
   GoogleMapsGroundingTool,
 } from './tools/google_maps_grounding_tool.js';
 export {GOOGLE_SEARCH, GoogleSearchTool} from './tools/google_search_tool.js';
+export type {GoogleSearchToolParams} from './tools/google_search_tool.js';
 export {
   LOAD_ARTIFACTS,
   LoadArtifactsTool,
