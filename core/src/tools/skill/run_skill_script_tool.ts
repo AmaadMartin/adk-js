@@ -32,9 +32,18 @@ export enum RunSkillScriptErrorCode {
   REGISTRY_ERROR = 'REGISTRY_ERROR',
   SKILL_NOT_FOUND = 'SKILL_NOT_FOUND',
   SCRIPT_NOT_FOUND = 'SCRIPT_NOT_FOUND',
+  SCRIPT_NOT_FOUND_FATAL = 'SCRIPT_NOT_FOUND_FATAL',
   NO_CODE_EXECUTOR = 'NO_CODE_EXECUTOR',
   EXECUTION_ERROR = 'EXECUTION_ERROR',
 }
+
+/**
+ * Prefix of the invocation-scoped script-lookup failure counter. `temp:` keeps
+ * the counter out of durable session storage; the invocation id suffix stops
+ * in-memory session backends from carrying a count into the next invocation.
+ */
+const SCRIPT_NOT_FOUND_COUNT_KEY_PREFIX =
+  'temp:_adk_skill_script_not_found_count_';
 
 @experimental
 export class RunSkillScriptTool extends BaseTool {
@@ -123,8 +132,24 @@ export class RunSkillScriptTool extends BaseTool {
     }
 
     if (!script) {
+      // Counted across all paths and skills so the guard still fires when the
+      // model hallucinates a different script path on each retry.
+      const counterKey = `${SCRIPT_NOT_FOUND_COUNT_KEY_PREFIX}${toolContext.invocationId}`;
+      const failCount = (toolContext.state.get<number>(counterKey) || 0) + 1;
+      toolContext.state.set(counterKey, failCount);
+
+      const notFoundMessage = `Script '${scriptPath}' not found in skill '${skillName}'.`;
+      if (failCount > 1) {
+        return {
+          error:
+            `${notFoundMessage} This is script lookup failure #${failCount}` +
+            ' this invocation. Do not retry any script path — report the' +
+            ' error to the user and stop.',
+          errorCode: RunSkillScriptErrorCode.SCRIPT_NOT_FOUND_FATAL,
+        };
+      }
       return {
-        error: `Script '${scriptPath}' not found in skill '${skillName}'.`,
+        error: notFoundMessage,
         errorCode: RunSkillScriptErrorCode.SCRIPT_NOT_FOUND,
       };
     }

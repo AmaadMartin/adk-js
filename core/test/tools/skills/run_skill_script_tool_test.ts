@@ -54,6 +54,8 @@ describe('RunSkillScriptTool', () => {
   function createMockContext(
     agentName = 'test-agent',
     agentExecutor?: BaseCodeExecutor,
+    invocationId = 'inv-1',
+    sessionState: Record<string, unknown> = {},
   ): Context {
     const agentObj: Record<string | symbol, unknown> = {name: agentName};
     if (agentExecutor) {
@@ -63,7 +65,8 @@ describe('RunSkillScriptTool', () => {
 
     return new Context({
       invocationContext: {
-        session: {state: {}},
+        invocationId,
+        session: {state: sessionState},
         agent: agentObj as unknown as LlmAgent,
       } as unknown as InvocationContext,
     });
@@ -142,6 +145,114 @@ describe('RunSkillScriptTool', () => {
     expect(result).toEqual({
       error: "Script 'scripts/invalid.js' not found in skill 'test-skill'.",
       errorCode: 'SCRIPT_NOT_FOUND',
+    });
+  });
+
+  it('returns SCRIPT_NOT_FOUND on the first script lookup miss', async () => {
+    const toolset = new SkillToolset([mockSkill]);
+    const tool = new RunSkillScriptTool(toolset);
+    const result = (await tool.runAsync({
+      args: {skill_name: 'test-skill', script_path: 'scripts/invalid.js'},
+      toolContext: createMockContext(),
+    })) as ToolErrorResponse;
+
+    expect(result.errorCode).toBe(RunSkillScriptErrorCode.SCRIPT_NOT_FOUND);
+    expect(result.error).not.toContain('#');
+  });
+
+  it('escalates to SCRIPT_NOT_FOUND_FATAL on the second miss in the same invocation', async () => {
+    const toolset = new SkillToolset([mockSkill]);
+    const tool = new RunSkillScriptTool(toolset);
+    const toolContext = createMockContext();
+    const args = {skill_name: 'test-skill', script_path: 'scripts/invalid.js'};
+
+    const first = (await tool.runAsync({
+      args,
+      toolContext,
+    })) as ToolErrorResponse;
+    const second = (await tool.runAsync({
+      args,
+      toolContext,
+    })) as ToolErrorResponse;
+
+    expect(first).toEqual({
+      error: "Script 'scripts/invalid.js' not found in skill 'test-skill'.",
+      errorCode: RunSkillScriptErrorCode.SCRIPT_NOT_FOUND,
+    });
+    expect(second).toEqual({
+      error:
+        "Script 'scripts/invalid.js' not found in skill 'test-skill'. This is" +
+        ' script lookup failure #2 this invocation. Do not retry any script' +
+        ' path — report the error to the user and stop.',
+      errorCode: RunSkillScriptErrorCode.SCRIPT_NOT_FOUND_FATAL,
+    });
+  });
+
+  it('escalates even when the second miss uses a different script path', async () => {
+    const toolset = new SkillToolset([mockSkill]);
+    const tool = new RunSkillScriptTool(toolset);
+    const toolContext = createMockContext();
+
+    const first = (await tool.runAsync({
+      args: {skill_name: 'test-skill', script_path: 'scripts/invalid.js'},
+      toolContext,
+    })) as ToolErrorResponse;
+    const second = (await tool.runAsync({
+      args: {
+        skill_name: 'test-skill',
+        script_path: 'scripts/some-other-guess.ts',
+      },
+      toolContext,
+    })) as ToolErrorResponse;
+
+    expect(first.errorCode).toBe(RunSkillScriptErrorCode.SCRIPT_NOT_FOUND);
+    expect(second).toEqual({
+      error:
+        "Script 'scripts/some-other-guess.ts' not found in skill 'test-skill'." +
+        ' This is script lookup failure #2 this invocation. Do not retry any' +
+        ' script path — report the error to the user and stop.',
+      errorCode: RunSkillScriptErrorCode.SCRIPT_NOT_FOUND_FATAL,
+    });
+  });
+
+  it('resets the counter for a new invocation id', async () => {
+    const toolset = new SkillToolset([mockSkill]);
+    const tool = new RunSkillScriptTool(toolset);
+    const sharedState: Record<string, unknown> = {};
+    const args = {skill_name: 'test-skill', script_path: 'scripts/invalid.js'};
+    const firstInvocation = createMockContext(
+      'test-agent',
+      undefined,
+      'inv-1',
+      sharedState,
+    );
+    const secondInvocation = createMockContext(
+      'test-agent',
+      undefined,
+      'inv-2',
+      sharedState,
+    );
+
+    await tool.runAsync({args, toolContext: firstInvocation});
+    const secondMiss = (await tool.runAsync({
+      args,
+      toolContext: firstInvocation,
+    })) as ToolErrorResponse;
+    const newInvocationMiss = (await tool.runAsync({
+      args,
+      toolContext: secondInvocation,
+    })) as ToolErrorResponse;
+
+    expect(secondMiss.errorCode).toBe(
+      RunSkillScriptErrorCode.SCRIPT_NOT_FOUND_FATAL,
+    );
+    expect(newInvocationMiss).toEqual({
+      error: "Script 'scripts/invalid.js' not found in skill 'test-skill'.",
+      errorCode: RunSkillScriptErrorCode.SCRIPT_NOT_FOUND,
+    });
+    expect(sharedState).toEqual({
+      'temp:_adk_skill_script_not_found_count_inv-1': 2,
+      'temp:_adk_skill_script_not_found_count_inv-2': 1,
     });
   });
 
@@ -262,6 +373,12 @@ describe('RunSkillScriptTool', () => {
       expect(RunSkillScriptErrorCode.SCRIPT_NOT_FOUND).toBe('SCRIPT_NOT_FOUND');
       expect(RunSkillScriptErrorCode.NO_CODE_EXECUTOR).toBe('NO_CODE_EXECUTOR');
       expect(RunSkillScriptErrorCode.EXECUTION_ERROR).toBe('EXECUTION_ERROR');
+    });
+
+    it('exposes the fatal script-lookup code shared with the Python SDK', () => {
+      expect(RunSkillScriptErrorCode.SCRIPT_NOT_FOUND_FATAL).toBe(
+        'SCRIPT_NOT_FOUND_FATAL',
+      );
     });
   });
 });
