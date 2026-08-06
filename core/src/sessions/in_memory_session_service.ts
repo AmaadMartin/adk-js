@@ -19,6 +19,7 @@ import {
   ListSessionsResponse,
   mergeStates,
   trimTempState,
+  validateListSessionsPagination,
 } from './base_session_service.js';
 import {createSession, Session} from './session.js';
 import {State} from './state.js';
@@ -133,7 +134,7 @@ export class InMemorySessionService extends BaseSessionService {
     return copiedSession;
   }
 
-  listSessions({
+  async listSessions({
     appName,
     userId,
     limit,
@@ -141,6 +142,8 @@ export class InMemorySessionService extends BaseSessionService {
     page,
     order,
   }: ListSessionsRequest): Promise<ListSessionsResponse> {
+    validateListSessionsPagination({limit, offset, page});
+
     if (!this.sessions[appName] || !this.sessions[appName][userId]) {
       if (limit !== undefined) {
         const effectiveOffset =
@@ -151,21 +154,21 @@ export class InMemorySessionService extends BaseSessionService {
             : limit === 0
               ? 1
               : Math.floor(effectiveOffset / limit) + 1;
-        return Promise.resolve({
+        return {
           sessions: [],
           page: effectivePage,
           limit,
           totalItems: 0,
           totalPages: 0,
-        });
+        };
       }
-      return Promise.resolve({
+      return {
         sessions: [],
         page: 1,
         limit: 0,
         totalItems: 0,
         totalPages: 0,
-      });
+      };
     }
 
     const all: Session[] = Object.values(this.sessions[appName][userId]).map(
@@ -195,13 +198,13 @@ export class InMemorySessionService extends BaseSessionService {
     if (limit === undefined) {
       const totalItems = all.length;
       const sliced = offset ? all.slice(offset) : all;
-      return Promise.resolve({
+      return {
         sessions: sliced,
         page: 1,
         limit: totalItems,
         totalItems,
         totalPages: totalItems === 0 ? 0 : 1,
-      });
+      };
     }
 
     const totalItems = all.length;
@@ -219,13 +222,13 @@ export class InMemorySessionService extends BaseSessionService {
 
     const paginated = all.slice(effectiveOffset, effectiveOffset + limit);
 
-    return Promise.resolve({
+    return {
       sessions: paginated,
       page: effectivePage,
       limit,
       totalItems,
       totalPages,
-    });
+    };
   }
 
   async deleteSession({

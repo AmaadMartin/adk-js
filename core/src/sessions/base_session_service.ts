@@ -51,11 +51,17 @@ export interface ListSessionsRequest {
   appName: string;
   /** The ID of the user. */
   userId: string;
-  /** Maximum number of sessions to return. */
+  /** Maximum number of sessions to return. Must be a non-negative integer. */
   limit?: number;
-  /** Zero-based index of the first session to return. Ignored if `page` is set. */
+  /**
+   * Zero-based index of the first session to return. Ignored if `page` is set,
+   * but still validated. Must be a non-negative integer.
+   */
   offset?: number;
-  /** 1-based page number. Requires `limit`. Takes precedence over `offset`. */
+  /**
+   * 1-based page number. Requires `limit`. Takes precedence over `offset`.
+   * Must be a positive integer.
+   */
   page?: number;
   /** Sort direction by last update time. No ordering is applied if omitted. */
   order?: 'asc' | 'desc';
@@ -146,6 +152,8 @@ export abstract class BaseSessionService {
    *
    * @param request The request to list sessions.
    * @return A promise that resolves to a list of sessions for the user.
+   * @throws {Error} When `request` violates the pagination contract checked by
+   *     {@link validateListSessionsPagination}.
    */
   abstract listSessions(
     request: ListSessionsRequest,
@@ -257,4 +265,33 @@ export function mergeStates(
     merged[State.USER_PREFIX + k] = v;
   }
   return merged;
+}
+
+/**
+ * Validates the pagination fields of a `listSessions` request.
+ *
+ * Every `BaseSessionService` implementation calls this before it reads from its
+ * backing store, so that an out-of-range or fractional value fails the same way
+ * regardless of which session service is configured. Fields are checked in the
+ * order `limit`, `offset`, `page`, and a field is checked whenever it is
+ * present — including when `page` means the `offset` will not be used.
+ *
+ * @param pagination The pagination fields of the request.
+ * @throws {Error} When `limit` or `offset` is present and is not a non-negative
+ *     integer, or `page` is present and is not a positive integer.
+ */
+export function validateListSessionsPagination({
+  limit,
+  offset,
+  page,
+}: Pick<ListSessionsRequest, 'limit' | 'offset' | 'page'>): void {
+  if (limit !== undefined && (!Number.isInteger(limit) || limit < 0)) {
+    throw new Error(`limit must be a non-negative integer (got ${limit}).`);
+  }
+  if (offset !== undefined && (!Number.isInteger(offset) || offset < 0)) {
+    throw new Error(`offset must be a non-negative integer (got ${offset}).`);
+  }
+  if (page !== undefined && (!Number.isInteger(page) || page < 1)) {
+    throw new Error(`page must be a positive integer (got ${page}).`);
+  }
 }

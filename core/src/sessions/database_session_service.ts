@@ -23,6 +23,7 @@ import {
   ListSessionsResponse,
   mergeStates,
   trimTempDeltaState,
+  validateListSessionsPagination,
 } from './base_session_service.js';
 import {
   ensureDatabaseCreated,
@@ -259,6 +260,8 @@ export class DatabaseSessionService extends BaseSessionService {
     page,
     order,
   }: ListSessionsRequest): Promise<ListSessionsResponse> {
+    validateListSessionsPagination({limit, offset, page});
+
     await this.init();
     const em = this.orm!.em.fork();
 

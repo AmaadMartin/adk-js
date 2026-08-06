@@ -37,6 +37,7 @@ import {
   ListSessionsRequest,
   ListSessionsResponse,
   trimTempState,
+  validateListSessionsPagination,
 } from './base_session_service.js';
 import {createSession, Session} from './session.js';
 
@@ -305,6 +306,8 @@ export class VertexAiSessionService extends BaseSessionService {
     page,
     order,
   }: ListSessionsRequest): Promise<ListSessionsResponse> {
+    validateListSessionsPagination({limit, offset, page});
+
     const reasoningEngineId = this.getReasoningEngineId(appName);
     const adkSessions: Session[] = [];
     let pageToken: string | undefined = undefined;
