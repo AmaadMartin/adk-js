@@ -40,6 +40,7 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
+    "@google-cloud/firestore": "^8.7.0",
     "@google/adk": "^1.5.0"
   }
 }
