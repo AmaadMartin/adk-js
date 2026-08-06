@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export default async function autoAssign({ github, context }) {
+export default async function autoAssign({github, context}) {
   console.log('Auto-assignment script started');
 
   let issueNumber;
@@ -23,7 +23,9 @@ export default async function autoAssign({ github, context }) {
     issueNumber = context.payload.pull_request.number;
 
     // Skip PRs from forks to prevent 403 errors
-    if (context.repo.owner !== context.payload.pull_request.head.repo.owner.login) {
+    if (
+      context.repo.owner !== context.payload.pull_request.head.repo.owner.login
+    ) {
       console.log('PR from fork detected: skipping auto-assignment');
       return;
     }
