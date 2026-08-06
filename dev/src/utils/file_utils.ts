@@ -8,6 +8,10 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
+import {AdkLogger} from './logger.js';
+
+const logger = new AdkLogger({label: 'FileUtils', colorize: {all: true}});
+
 /** Check if the given folder exists. */
 export async function isFolderExists(folderPath: string): Promise<boolean> {
   try {
@@ -36,7 +40,7 @@ export async function createFolder(folderPath: string): Promise<void> {
   try {
     await fs.mkdir(folderPath);
   } catch (e) {
-    console.error(`Failed to create folder ${folderPath}`, e);
+    logger.error(`Failed to create folder ${folderPath}`, e);
   }
 }
 
@@ -45,7 +49,7 @@ export async function removeFolder(folderPath: string): Promise<void> {
   try {
     await fs.rm(folderPath, {recursive: true});
   } catch (e) {
-    console.error(`Failed to remove folder ${folderPath}`, e);
+    logger.error(`Failed to remove folder ${folderPath}`, e);
   }
 }
 
@@ -54,7 +58,7 @@ export async function listFiles(folderPath: string): Promise<string[]> {
   try {
     return await fs.readdir(folderPath);
   } catch (e) {
-    console.error(`Failed to list files in folder ${folderPath}`, e);
+    logger.error(`Failed to list files in folder ${folderPath}`, e);
 
     return [];
   }
@@ -77,7 +81,7 @@ export async function loadFileData<T>(
   try {
     return JSON.parse(await fs.readFile(filePath, {encoding: 'utf-8'})) as T;
   } catch (e) {
-    console.error(`Failed to read or parse file ${filePath}:`, e);
+    logger.error(`Failed to read or parse file ${filePath}:`, e);
 
     throw e;
   }
@@ -92,7 +96,7 @@ export async function saveToFile<T>(filePath: string, data: T): Promise<void> {
       {encoding: 'utf-8'},
     );
   } catch (e) {
-    console.error(`Failed to write file ${filePath}:`, e);
+    logger.error(`Failed to write file ${filePath}:`, e);
 
     throw e;
   }
