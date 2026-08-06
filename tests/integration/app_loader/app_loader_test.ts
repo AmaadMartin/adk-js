@@ -82,17 +82,21 @@ describe('AgentLoader discovery and loading integration', () => {
   it(
     'should discover apps vs agents across directories and standalone files',
     async () => {
-      const apps = await loader.listApps();
-      expect(apps).toHaveLength(2);
-      expect(apps).toContain('service_alpha');
-      expect(apps).toContain('standalone_app');
-
       const agentsAndApps = await loader.listAgents();
       expect(agentsAndApps).toHaveLength(4);
       expect(agentsAndApps).toContain('service_alpha');
       expect(agentsAndApps).toContain('service_beta');
       expect(agentsAndApps).toContain('standalone_agent');
       expect(agentsAndApps).toContain('standalone_app');
+
+      const appNames: string[] = [];
+      for (const name of agentsAndApps) {
+        const file = await loader.getAgentFile(name);
+        if (isApp(await file.load())) {
+          appNames.push(name);
+        }
+      }
+      expect(appNames.sort()).toEqual(['service_alpha', 'standalone_app']);
     },
     TEST_EXECUTION_TIMEOUT,
   );
@@ -100,7 +104,7 @@ describe('AgentLoader discovery and loading integration', () => {
   it(
     'should load App from directory entrypoint and expose App and rootAgent',
     async () => {
-      const appFile = await loader.getAppFile('service_alpha');
+      const appFile = await loader.getAgentFile('service_alpha');
       const loaded = await appFile.load();
       expect(isApp(loaded)).toBe(true);
       expect((loaded as App).name).toBe('alpha_app');
@@ -115,7 +119,7 @@ describe('AgentLoader discovery and loading integration', () => {
   it(
     'should synthesize App when loadApp() is called on BaseAgent file',
     async () => {
-      const agentFile = await loader.getAppFile('service_beta');
+      const agentFile = await loader.getAgentFile('service_beta');
       const loaded = await agentFile.load();
       expect(isBaseAgent(loaded)).toBe(true);
       expect(isApp(loaded)).toBe(false);

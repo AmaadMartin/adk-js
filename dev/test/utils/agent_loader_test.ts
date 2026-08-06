@@ -769,17 +769,17 @@ describe('AgentLoader', () => {
       await loader.disposeAll();
     });
 
-    it('discovers app entrypoint files (e.g. app.js) in directories and lists them via listApps() / getAppFile()', async () => {
+    it('discovers app entrypoint files (e.g. app.js) in directories', async () => {
       const appDir = path.join(tempAgentsDir, 'my_service');
       await fs.mkdir(appDir, {recursive: true});
       await fs.writeFile(path.join(appDir, 'app.js'), appJsContent);
 
       const loader = new AgentLoader(tempAgentsDir);
-      const apps = await loader.listApps();
+      const agents = await loader.listAgents();
 
-      expect(apps).toContain('my_service');
+      expect(agents).toContain('my_service');
 
-      const appFile = await loader.getAppFile('my_service');
+      const appFile = await loader.getAgentFile('my_service');
       const loaded = await appFile.load();
 
       expect(isApp(loaded)).toBe(true);
