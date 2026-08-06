@@ -93,17 +93,11 @@ describe('ensureGoModules', () => {
     );
   });
 
-  it('rejects with the budget it was given when the tidy times out', async () => {
+  it('names the budget when the tidy times out', async () => {
     rejectWith(Object.assign(new Error('killed'), {killed: true, code: null}));
 
-    await expect(ensureGoModules(moduleDir, 1234)).rejects.toThrow(
-      'it exceeded its 1234ms budget',
-    );
-    expect(execFileMock).toHaveBeenCalledWith(
-      'go',
-      ['mod', 'tidy'],
-      expect.objectContaining({timeout: 1234}),
-      expect.any(Function),
+    await expect(ensureGoModules(moduleDir)).rejects.toThrow(
+      `it exceeded its ${GO_MOD_TIDY_TIMEOUT_MS}ms budget`,
     );
   });
 

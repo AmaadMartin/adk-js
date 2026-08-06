@@ -18,12 +18,8 @@ export interface TestGoServerParams {
 }
 
 /**
- * Readiness budget (ms) for the Go server.
- *
- * `go run .` compiles the module from source before the server prints its
- * banner, which is strictly more work than the already-built Node API server
- * does at start-up. This default therefore matches that server's 60000 rather
- * than undercutting it.
+ * Readiness budget (ms). Matches `AdkTsApiServer`'s 60000 because `go run .`
+ * compiles the module before the server boots.
  */
 const DEFAULT_TIMEOUT = 60000;
 

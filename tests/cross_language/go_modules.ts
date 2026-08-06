@@ -13,24 +13,19 @@ const execFileAsync = promisify(execFile);
 
 /**
  * Budget (ms) for the one-off `go mod tidy` that populates a module's `go.sum`.
- *
- * A cold tidy of the two cross-language Go modules measured 3.2s against an
- * empty module cache. 45000 is about 14x that, which leaves room for two Vitest
- * workers that contend on the shared module cache. It stays below the 60000
- * per-hook and per-test budget of the cross-language suites, so a wedged
- * download reports the message from {@link ensureGoModules} rather than a
+ * A cold tidy measured 3.2s; 45000 stays under the 60000 per-hook and per-test
+ * budget of the cross-language suites, so this helper's message wins over a
  * generic Vitest timeout.
  */
 export const GO_MOD_TIDY_TIMEOUT_MS = 45000;
 
-/** The fields of an `execFile` rejection that classify a failure. */
-type ExecFileFailure = Pick<ExecFileException, 'code' | 'killed' | 'stderr'>;
-
-function isExecFileFailure(error: unknown): error is ExecFileFailure {
+function isExecFileFailure(
+  error: unknown,
+): error is Pick<ExecFileException, 'code' | 'killed' | 'stderr'> {
   return typeof error === 'object' && error !== null;
 }
 
-function describeFailure(error: unknown, timeoutMs: number): string {
+function describeFailure(error: unknown): string {
   if (!isExecFileFailure(error)) {
     return String(error);
   }
@@ -38,7 +33,7 @@ function describeFailure(error: unknown, timeoutMs: number): string {
     return "the 'go' executable was not found on PATH";
   }
   if (error.killed) {
-    return `it exceeded its ${timeoutMs}ms budget`;
+    return `it exceeded its ${GO_MOD_TIDY_TIMEOUT_MS}ms budget`;
   }
   const stderr = error.stderr?.trim();
   return stderr
@@ -54,16 +49,11 @@ function describeFailure(error: unknown, timeoutMs: number): string {
  * the cross-language workflow tidies both modules in a dedicated step.
  *
  * @param moduleDir Absolute path of a directory that contains a `go.mod`.
- * @param timeoutMs Budget for the tidy. Defaults to
- *     {@link GO_MOD_TIDY_TIMEOUT_MS}.
  * @throws Error naming the module directory and the concrete cause: a missing
  *     `go` executable, a non-zero exit, or the timeout. Nothing is swallowed,
  *     so the caller never spawns `go run .` against an unresolved module.
  */
-export async function ensureGoModules(
-  moduleDir: string,
-  timeoutMs: number = GO_MOD_TIDY_TIMEOUT_MS,
-): Promise<void> {
+export async function ensureGoModules(moduleDir: string): Promise<void> {
   if (fs.existsSync(path.join(moduleDir, 'go.sum'))) {
     return;
   }
@@ -71,12 +61,11 @@ export async function ensureGoModules(
   try {
     await execFileAsync('go', ['mod', 'tidy'], {
       cwd: moduleDir,
-      timeout: timeoutMs,
+      timeout: GO_MOD_TIDY_TIMEOUT_MS,
     });
   } catch (error: unknown) {
     throw new Error(
-      `go mod tidy failed in ${moduleDir}: ` +
-        `${describeFailure(error, timeoutMs)}. ` +
+      `go mod tidy failed in ${moduleDir}: ${describeFailure(error)}. ` +
         `Install the Go toolchain (https://go.dev/dl/) or run 'go mod tidy' ` +
         `in that directory manually before running the cross-language tests.`,
       {cause: error},
