@@ -52,7 +52,8 @@ web runtimes.
 
 ## 🚀 Installation
 
-> **Prerequisite:** ADK for TypeScript requires a current Node.js LTS release.
+> **Prerequisite:** ADK for TypeScript requires Node.js 20.6.0 or newer, as
+> declared by `engines.node` on each published package.
 
 ```bash
 npm install @google/adk
