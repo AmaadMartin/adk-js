@@ -187,7 +187,10 @@ describe('CLI Entrypoint', () => {
       try {
         await program.parseAsync(['node', 'cli_entrypoint.js', ...args]);
       } catch (e: unknown) {
-        return e as CommanderError;
+        if (e instanceof CommanderError) {
+          return e;
+        }
+        throw e;
       }
       return undefined;
     };
