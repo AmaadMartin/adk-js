@@ -4,8 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {ApiError} from '@google/genai';
 import {describe, expect, it} from 'vitest';
-import {formatError} from '../../src/utils/error_utils.js';
+import {formatError, resolveErrorType} from '../../src/utils/error_utils.js';
 
 const TRUNCATION_MARKER = '... [truncated]';
 const MAX_RESPONSE_BODY_LENGTH = 1000;
@@ -206,5 +207,66 @@ describe('formatError', () => {
       response: {status: 502, text: 'text body'},
     });
     expect(formatError(err)).toContain('text body');
+  });
+});
+
+/** An error that classifies itself, the way an MCP tool failure does. */
+class ClassifiedError extends Error {
+  constructor(
+    message: string,
+    readonly errorType: string,
+  ) {
+    super(message);
+  }
+}
+
+/** An error that never assigns `this.name`, so only its class identifies it. */
+class MyToolError extends Error {}
+
+describe('resolveErrorType', () => {
+  it('prefers the error type the error classified itself with', () => {
+    const err = new ClassifiedError('tool failed', 'MCP_TOOL_ERROR');
+    expect(resolveErrorType(err)).toBe('MCP_TOOL_ERROR');
+  });
+
+  it('reports the HTTP status of a genai API error', () => {
+    const err = new ApiError({message: 'rate limited', status: 429});
+    expect(resolveErrorType(err)).toBe('429');
+  });
+
+  it('prefers a self-classified error type over the HTTP status', () => {
+    const err = Object.assign(new ApiError({message: 'quota', status: 429}), {
+      errorType: 'QUOTA_EXCEEDED',
+    });
+    expect(resolveErrorType(err)).toBe('QUOTA_EXCEEDED');
+  });
+
+  it('reports the class name of a standard error', () => {
+    expect(resolveErrorType(new TypeError('bad'))).toBe('TypeError');
+  });
+
+  it('reports the class name of a subclass that never sets its name', () => {
+    expect(resolveErrorType(new MyToolError('bad'))).toBe('MyToolError');
+  });
+
+  it('ignores a numeric status outside the HTTP range', () => {
+    const err = Object.assign(new MyToolError('bad'), {status: 0});
+    expect(resolveErrorType(err)).toBe('MyToolError');
+  });
+
+  it('ignores a status that is not a number', () => {
+    const err = Object.assign(new MyToolError('bad'), {status: '429'});
+    expect(resolveErrorType(err)).toBe('MyToolError');
+  });
+
+  it('stringifies a thrown value that is not an error', () => {
+    expect(resolveErrorType('boom')).toBe('boom');
+    expect(resolveErrorType(42)).toBe('42');
+  });
+
+  it('reads the error type off a plain object that carries one', () => {
+    expect(resolveErrorType({errorType: 'PLAIN_OBJECT_ERROR'})).toBe(
+      'PLAIN_OBJECT_ERROR',
+    );
   });
 });
