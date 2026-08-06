@@ -6,7 +6,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
-import {Client} from '@google-cloud/vertexai/build/src/genai/client.js';
+import {Client} from '@google-cloud/vertexai';
 import {ReasoningEngine as VertexReasoningEngine} from '@google-cloud/vertexai/build/src/genai/types.js';
 
 import {AgentLoader} from '../../utils/agent_loader.js';
