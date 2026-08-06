@@ -459,6 +459,9 @@ export async function handleFunctionCallList({
           id: toolContext.functionCallId,
           name: tool.name,
           response: functionResponse,
+          ...(tool.responseScheduling !== undefined && {
+            scheduling: tool.responseScheduling,
+          }),
         },
       }),
       actions: toolContext.actions,
