@@ -12,7 +12,6 @@ import {
   RequestHandler,
   Response,
 } from 'express';
-import {Readable} from 'node:stream';
 
 /** Status used when an error carries no usable HTTP status of its own. */
 const INTERNAL_SERVER_ERROR = 500;
@@ -42,23 +41,6 @@ export function asyncHandler(handler: AsyncRequestHandler): RequestHandler {
   return (req, res, next) => {
     void handler(req, res, next).catch(next);
   };
-}
-
-/**
- * Buffers a request stream into a string. Unlike an `end` listener, this
- * observes a stream `error` and rejects.
- */
-export function readRawBody(stream: Readable): Promise<string> {
-  return new Promise<string>((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    stream.on('data', (chunk: Buffer | string) => {
-      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-    });
-    stream.on('end', () => {
-      resolve(Buffer.concat(chunks).toString('utf8'));
-    });
-    stream.on('error', reject);
-  });
 }
 
 /**

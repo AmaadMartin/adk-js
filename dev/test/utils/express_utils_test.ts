@@ -7,14 +7,12 @@
 import {Logger, LogLevel} from '@google/adk';
 import express, {NextFunction, Request, Response} from 'express';
 import {once} from 'node:events';
-import {Readable} from 'node:stream';
 import {describe, expect, it} from 'vitest';
 
 import {
   asyncHandler,
   errorHandler,
   errorStatus,
-  readRawBody,
 } from '../../src/utils/express_utils.js';
 
 /** Records what the error middleware logs. */
@@ -130,36 +128,6 @@ describe('asyncHandler', () => {
     );
 
     expect(returnValue).toBeUndefined();
-  });
-});
-
-describe('readRawBody', () => {
-  it('joins string chunks', async () => {
-    await expect(readRawBody(Readable.from(['{"a":', '1}']))).resolves.toBe(
-      '{"a":1}',
-    );
-  });
-
-  it('decodes a multi-byte character split across buffer chunks', async () => {
-    const encoded = Buffer.from('é', 'utf8');
-
-    await expect(
-      readRawBody(Readable.from([encoded.subarray(0, 1), encoded.subarray(1)])),
-    ).resolves.toBe('é');
-  });
-
-  it('resolves to an empty string for an empty stream', async () => {
-    await expect(readRawBody(Readable.from([]))).resolves.toBe('');
-  });
-
-  it('rejects when the stream errors', async () => {
-    const stream = new Readable({
-      read() {
-        this.destroy(new Error('socket died'));
-      },
-    });
-
-    await expect(readRawBody(stream)).rejects.toThrow('socket died');
   });
 });
 

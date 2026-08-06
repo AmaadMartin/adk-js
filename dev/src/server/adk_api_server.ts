@@ -32,13 +32,10 @@ import cors from 'cors';
 import express, {Request, Response} from 'express';
 import * as http from 'node:http';
 import * as path from 'node:path';
+import {text} from 'node:stream/consumers';
 
 import {AgentFileOptions, AgentLoader} from '../utils/agent_loader.js';
-import {
-  asyncHandler,
-  errorHandler,
-  readRawBody,
-} from '../utils/express_utils.js';
+import {asyncHandler, errorHandler} from '../utils/express_utils.js';
 import {AdkLogger} from '../utils/logger.js';
 import {
   ApiServerSpanExporter,
@@ -870,7 +867,7 @@ export class AdkApiServer {
           );
           await executeQuery(req.body);
         } else {
-          const rawBody = await readRawBody(req);
+          const rawBody = await text(req);
           this.logger.info(`Received Reasoning Engine raw body: ${rawBody}`);
           let body: unknown = {};
           if (rawBody) {
@@ -965,32 +962,12 @@ export class AdkApiServer {
     app.use(errorHandler(this.logger));
   }
 
-  /**
-   * Finishes startup once the socket is listening. Kept off the `listen`
-   * callback itself, which express expects to return `void`.
-   */
-  private async onListening(): Promise<void> {
-    if (this.a2a) {
-      await this.initA2A();
-    }
-
-    console.log(`
-+-----------------------------------------------------------------------------+
-| ADK API Server started                                                      |
-|                                                                             |
-| For local testing, access at ${this.url}.${''.padStart(39 - this.url.length)}       |
-+-----------------------------------------------------------------------------+`);
-  }
-
   async start(): Promise<void> {
     await this.init();
 
-    return new Promise((resolve, reject) => {
+    await new Promise<void>((resolve, reject) => {
       this.server = this.app.listen(this.port, this.host, () => {
-        void this.onListening().then(resolve, (error: unknown) => {
-          this.logger.error('Error during AdkApiServer startup:', error);
-          reject(error);
-        });
+        resolve();
       });
 
       this.server.on('error', (err: unknown) => {
@@ -1004,6 +981,22 @@ export class AdkApiServer {
         }
       });
     });
+
+    try {
+      if (this.a2a) {
+        await this.initA2A();
+      }
+    } catch (error) {
+      this.logger.error('Error during AdkApiServer startup:', error);
+      throw error;
+    }
+
+    console.log(`
++-----------------------------------------------------------------------------+
+| ADK API Server started                                                      |
+|                                                                             |
+| For local testing, access at ${this.url}.${''.padStart(39 - this.url.length)}       |
++-----------------------------------------------------------------------------+`);
   }
 
   stop(): Promise<void> {
