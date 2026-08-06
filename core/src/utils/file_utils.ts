@@ -26,13 +26,10 @@ function isInsideDir(resolvedPath: string, resolvedBaseDir: string): boolean {
 }
 
 /**
- * Rewrites a host-separated path to the forward-slash form that every
- * `File.name` producer in the repo emits, so the name contract does not vary
- * by platform.
+ * Rewrites a host-separated path to the forward-slash `File.name` form.
  *
- * Splitting on `path.sep` rather than replacing every backslash leaves a POSIX
- * filename that legitimately contains a backslash (`a\b.txt`) intact; on POSIX
- * the call is the identity.
+ * Splitting on `path.sep` rather than replacing every backslash keeps a POSIX
+ * filename that legitimately contains a backslash (`a\b.txt`) intact.
  */
 function asPosixName(p: string): string {
   return p.split(path.sep).join('/');
@@ -73,11 +70,7 @@ export async function materializeFiles(
         const newName = `${base}_${counter}${ext}`;
         finalPath = path.join(dirName, newName);
         // Update file.name to reflect the actual relative path
-        const originalDir = path.dirname(file.name);
-        file.name =
-          originalDir === '.'
-            ? newName
-            : asPosixName(path.join(originalDir, newName));
+        file.name = asPosixName(path.join(path.dirname(file.name), newName));
         counter++;
       } catch {
         // File does not exist, safe to write
