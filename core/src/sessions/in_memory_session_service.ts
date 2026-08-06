@@ -15,6 +15,7 @@ import {
   CreateSessionRequest,
   DeleteSessionRequest,
   GetSessionRequest,
+  GetUserStateRequest,
   ListSessionsRequest,
   ListSessionsResponse,
   mergeStates,
@@ -240,6 +241,13 @@ export class InMemorySessionService extends BaseSessionService {
     }
 
     delete this.sessions[appName][userId][sessionId];
+  }
+
+  override async getUserState({
+    appName,
+    userId,
+  }: GetUserStateRequest): Promise<Record<string, unknown>> {
+    return {...this.userState[appName]?.[userId]};
   }
 
   override async appendEvent({

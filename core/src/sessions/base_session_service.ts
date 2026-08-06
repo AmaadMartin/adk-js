@@ -67,6 +67,16 @@ export interface ListSessionsRequest {
 export type DeleteSessionRequest = CompositeSessionKey;
 
 /**
+ * The parameters for `getUserState`.
+ */
+export interface GetUserStateRequest {
+  /** The name of the application. */
+  appName: string;
+  /** The ID of the user. */
+  userId: string;
+}
+
+/**
  * The parameters for `appendEvent`.
  */
 export interface AppendEventRequest {
@@ -158,6 +168,36 @@ export abstract class BaseSessionService {
    * @return A promise that resolves when the session is deleted.
    */
   abstract deleteSession(request: DeleteSessionRequest): Promise<void>;
+
+  /**
+   * Gets the user-scoped state of an app and a user.
+   *
+   * User state is keyed by app name and user ID, and it is shared by every
+   * session that the user has in that app. The returned keys are raw: a
+   * `user:profile` state delta comes back as `profile`. Callers can therefore
+   * read user state without an active session, for example to bootstrap
+   * context before `createSession`.
+   *
+   * Implementing this method is optional. The default implementation always
+   * throws.
+   *
+   * @param _request The request to get the user state.
+   * @return A promise that resolves to the raw user-scoped key/value pairs, or
+   *     to an empty map when the app and user have no stored user state.
+   * @throws An error when the session service cannot read user state without a
+   *     session. Callers should then enumerate sessions via `listSessions` and
+   *     call `getSession` on each result to read the merged state, or continue
+   *     without user state.
+   */
+  async getUserState(
+    _request: GetUserStateRequest,
+  ): Promise<Record<string, unknown>> {
+    throw new Error(
+      'This session service does not support getUserState. To read user ' +
+        'state, enumerate sessions via listSessions and call getSession on ' +
+        'each result to access the merged state.',
+    );
+  }
 
   /**
    * Appends an event to a session.

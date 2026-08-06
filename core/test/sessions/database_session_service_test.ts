@@ -16,6 +16,7 @@ import {SqliteDriver} from '@mikro-orm/sqlite';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {isDatabaseConnectionString} from '../../src/sessions/database_session_service.js';
 import {validateDatabaseSchemaVersion} from '../../src/sessions/db/operations.js';
+import {runGetUserStateTests} from './session_service_test_utils.js';
 
 describe('DatabaseSessionService', () => {
   let service: DatabaseSessionService;
@@ -740,4 +741,27 @@ describe('isDatabaseConnectionString', () => {
     ); // Has = and ; but no common keys
     expect(isDatabaseConnectionString('Server=myServer')).toBe(false); // Missing semicolon implies not a full connection string or just a weird config
   });
+});
+
+describe('DatabaseSessionService.getUserState', () => {
+  // Deliberately left un-initialized: getUserState must call init() itself,
+  // like every other public method on this service.
+  let service: DatabaseSessionService;
+
+  beforeEach(() => {
+    service = new DatabaseSessionService({
+      dbName: ':memory:',
+      driver: SqliteDriver,
+      allowGlobalContext: true, // simplified for tests
+    });
+  });
+
+  afterEach(async () => {
+    const orm = (service as unknown as {orm?: MikroORM}).orm;
+    if (orm) {
+      await orm.close();
+    }
+  });
+
+  runGetUserStateTests(() => service);
 });
