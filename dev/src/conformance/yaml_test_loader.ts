@@ -4,13 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Session} from '@google/adk';
+import {getLogger, Session} from '@google/adk';
 import camelcaseKeys from 'camelcase-keys';
 import fg from 'fast-glob';
 import yaml from 'js-yaml';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import {Recordings, TestInfo, TestSpec} from '../integration/test_types.js';
+
+const logger = getLogger();
 
 /**
  * batchLoadYamlTestDefs will recursively search the directory given
@@ -90,7 +92,7 @@ export async function batchLoadYamlTestDefs(
       recordings: recordings,
     });
 
-    console.log('loaded test', name, 'from', baseDir);
+    logger.debug(`Loaded test ${name} from ${baseDir}`);
   }
 
   return tests;

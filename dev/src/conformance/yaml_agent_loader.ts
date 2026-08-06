@@ -4,12 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {getLogger} from '@google/adk';
 import camelcaseKeys from 'camelcase-keys';
 import fg from 'fast-glob';
 import yaml from 'js-yaml';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import {AgentToolArgs, YamlAgentConfig} from '../integration/agent_types.js';
+
+const logger = getLogger();
 
 /**
  * batchLoadYamlAgentConfig will recursively search the directory given
@@ -18,7 +21,7 @@ import {AgentToolArgs, YamlAgentConfig} from '../integration/agent_types.js';
 export async function batchLoadYamlAgentConfig(
   directory: string,
 ): Promise<Map<string, YamlAgentConfig>> {
-  console.log('Loading agents from ', directory);
+  logger.debug(`Loading agents from ${directory}`);
   const files = fg.stream('**/*.{yaml,yml}', {
     cwd: directory,
     absolute: true,
