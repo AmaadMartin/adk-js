@@ -293,6 +293,7 @@ export {LoadSkillTool} from './tools/skill/load_skill_tool.js';
 export {SearchSkillsTool} from './tools/skill/search_skills_tool.js';
 export {SkillToolset} from './tools/skill/skill_toolset.js';
 
+export {NotFoundError} from './errors/not_found_error.js';
 export {
   AgentDetailsSchema,
   AppDetailsSchema,
@@ -330,6 +331,14 @@ export type {
   ConversationScenario,
   ConversationScenarios,
 } from './evaluation/conversation_scenarios.js';
+export {
+  CustomMetricEvaluator,
+  getMetricFunction,
+} from './evaluation/custom_metric_evaluator.js';
+export type {
+  CustomMetricEvaluatorOptions,
+  CustomMetricFunction,
+} from './evaluation/custom_metric_evaluator.js';
 export {
   EvalCaseSchema,
   IntermediateDataSchema,
@@ -424,6 +433,52 @@ export type {EvalSet} from './evaluation/eval_set.js';
 export type {EvalSetResultsManager} from './evaluation/eval_set_results_manager.js';
 export type {EvalSetsManager} from './evaluation/eval_sets_manager.js';
 export {
+  EvaluationResultSchema,
+  Evaluator,
+  PerInvocationResultSchema,
+  validateInvocationLengths,
+} from './evaluation/evaluator.js';
+export type {
+  EvaluationResult,
+  PerInvocationResult,
+} from './evaluation/evaluator.js';
+export {
+  RougeEvaluator,
+  UnicodeAwareTokenizer,
+  calculateRouge1Scores,
+  isCjk,
+  isNonSpacedScript,
+  isWordChar,
+} from './evaluation/final_response_match_v1.js';
+export type {Rouge1Score} from './evaluation/final_response_match_v1.js';
+export {
+  DEFAULT_METRIC_EVALUATOR_REGISTRY,
+  MetricEvaluatorRegistry,
+  registerCustomMetricsFromConfig,
+} from './evaluation/metric_evaluator_registry.js';
+export type {
+  EvaluatorConstructor,
+  EvaluatorConstructorOptions,
+} from './evaluation/metric_evaluator_registry.js';
+export {
+  FinalResponseMatchV2EvaluatorMetricInfoProvider,
+  HallucinationsV1EvaluatorMetricInfoProvider,
+  MultiTurnTaskSuccessV1MetricInfoProvider,
+  MultiTurnToolUseQualityV1MetricInfoProvider,
+  MultiTurnTrajectoryQualityV1MetricInfoProvider,
+  PerTurnUserSimulatorQualityV1MetricInfoProvider,
+  ResponseEvaluatorMetricInfoProvider,
+  RubricBasedFinalResponseQualityV1EvaluatorMetricInfoProvider,
+  RubricBasedMultiTurnTrajectoryMetricInfoProvider,
+  RubricBasedToolUseV1EvaluatorMetricInfoProvider,
+  SafetyEvaluatorV1MetricInfoProvider,
+  TrajectoryEvaluatorMetricInfoProvider,
+} from './evaluation/metric_info_providers.js';
+export {ResponseEvaluator} from './evaluation/response_evaluator.js';
+export type {ResponseEvaluatorOptions} from './evaluation/response_evaluator.js';
+export {SafetyEvaluatorV1} from './evaluation/safety_evaluator.js';
+export type {SafetyEvaluatorV1Options} from './evaluation/safety_evaluator.js';
+export {
   UserBehaviorSchema,
   UserPersonaSchema,
   getBehaviorInstructionsStr,
@@ -433,6 +488,21 @@ export type {
   UserBehavior,
   UserPersona,
 } from './evaluation/simulation/user_simulator_personas.js';
+export {TrajectoryEvaluator} from './evaluation/trajectory_evaluator.js';
+export type {TrajectoryEvaluatorOptions} from './evaluation/trajectory_evaluator.js';
+export {
+  PrebuiltMetric,
+  SingleTurnVertexAiEvalFacade,
+  VertexAiEvalFacade,
+} from './evaluation/vertex_ai_eval_facade.js';
+export type {
+  PerformEvalRequest,
+  VertexAggregatedMetricResult,
+  VertexAiEvalFacadeOptions,
+  VertexEvalCase,
+  VertexEvalDataset,
+  VertexEvalResult,
+} from './evaluation/vertex_ai_eval_facade.js';
 
 export * from './artifacts/base_artifact_service.js';
 export * from './features/feature_registry.js';
