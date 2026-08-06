@@ -5,13 +5,11 @@
  */
 
 import type {Event} from '@google/adk';
-import {execSync, spawn} from 'node:child_process';
-import * as fs from 'node:fs';
-import * as path from 'node:path';
+import {spawn} from 'node:child_process';
 import * as readline from 'node:readline';
 
 export interface GoAgentParams {
-  dir: string;
+  binaryPath: string;
   agentUrl: string;
 }
 
@@ -19,39 +17,19 @@ export interface GoAgentParams {
  * A TS client for a Go agent that communicates with Go agent file using command line.
  */
 export class GoAgent {
-  private readonly dir: string;
+  private readonly binaryPath: string;
   private readonly agentUrl: string;
 
   constructor(params: GoAgentParams) {
-    this.dir = params.dir;
+    this.binaryPath = params.binaryPath;
     this.agentUrl = params.agentUrl;
   }
 
   public async *run(userMessage: string): AsyncGenerator<Event, void, unknown> {
-    if (!fs.existsSync(path.join(this.dir, 'go.sum'))) {
-      try {
-        execSync('go mod tidy', {
-          cwd: this.dir,
-          stdio: 'inherit',
-          env: process.env,
-        });
-      } catch (_e: unknown) {
-        console.warn('Failed to run go mod tidy');
-      }
-    }
-
     const child = spawn(
-      'go',
-      [
-        'run',
-        '.',
-        `-agent_url=${this.agentUrl}`,
-        `-agent_input=${userMessage}`,
-      ],
-      {
-        cwd: this.dir,
-        env: process.env,
-      },
+      this.binaryPath,
+      [`-agent_url=${this.agentUrl}`, `-agent_input=${userMessage}`],
+      {env: process.env},
     );
 
     let stderr = '';

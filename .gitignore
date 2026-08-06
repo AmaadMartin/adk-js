@@ -6,6 +6,7 @@ node_modules/
 .vscode/*
 !.vscode/settings.json
 tests/**/package-lock.json
+tests/cross_language/.bin/
 coverage/
 .env
 go.sum

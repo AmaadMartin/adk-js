@@ -4,16 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {execSync, spawn} from 'node:child_process';
-import * as fs from 'node:fs';
-import * as path from 'node:path';
+import {spawn} from 'node:child_process';
 import {BaseTestServer} from '../../../../integration/test_case_utils.js';
 
 /**
  * Interface representing the parameters for creating the test Go agent server.
  */
 export interface TestGoServerParams {
-  serverDir: string;
+  binaryPath: string;
   port?: number;
   startFailureTimeout?: number;
 }
@@ -32,25 +30,9 @@ export class AdkGoServer extends BaseTestServer {
   }
 
   async start(): Promise<void> {
-    if (!fs.existsSync(path.join(this.params.serverDir, 'go.sum'))) {
-      try {
-        console.log('Running go mod tidy to fetch dependencies...');
-        execSync('go mod tidy', {
-          cwd: this.params.serverDir,
-          stdio: 'inherit',
-          env: process.env,
-        });
-      } catch (_e: unknown) {
-        console.warn(
-          'Failed to run go mod tidy, ensure go is installed and network is available.',
-        );
-      }
-    }
-
     await this.startProcess({
       spawnProcess: () => {
-        return spawn('go', ['run', '.'], {
-          cwd: this.params.serverDir,
+        return spawn(this.params.binaryPath, [], {
           env: {
             ...process.env,
             PORT: this.port.toString(),

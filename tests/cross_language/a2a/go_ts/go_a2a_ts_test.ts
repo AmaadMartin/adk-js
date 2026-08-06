@@ -8,6 +8,7 @@ import type {Event} from '@google/adk';
 import * as path from 'node:path';
 import {afterAll, beforeAll, describe, expect, it} from 'vitest';
 import {AdkTsApiServer} from '../../../integration/test_api_server.js';
+import {GO_CLIENT_FIXTURE} from '../go_fixtures.js';
 import {GoAgent} from './go_client/go_agent.js';
 
 const TIMEOUT = 60000;
@@ -34,7 +35,7 @@ describe(
       'Should connect to TS agent and receive expected response',
       async () => {
         const goAgent = new GoAgent({
-          dir: path.resolve(__dirname, 'go_client'),
+          binaryPath: GO_CLIENT_FIXTURE.binaryPath,
           agentUrl: `${tsServer.url}/a2a/basic_agent/`,
         });
 
@@ -58,7 +59,7 @@ describe(
       'Should handle InputRequired from TS agent',
       async () => {
         const goAgent = new GoAgent({
-          dir: path.resolve(__dirname, 'go_client'),
+          binaryPath: GO_CLIENT_FIXTURE.binaryPath,
           agentUrl: `${tsServer.url}/a2a/hitl_agent/`,
         });
 

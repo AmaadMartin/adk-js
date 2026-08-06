@@ -107,6 +107,7 @@ export default defineConfig({
         test: {
           name: 'cross-language',
           environment: 'node',
+          globalSetup: ['./tests/cross_language/global_setup.ts'],
           alias: {
             '@google/adk': path.resolve(__dirname, './core/src'),
             '@google/adk-integrations': path.resolve(

@@ -5,9 +5,9 @@
  */
 
 import {Event, RemoteA2AAgent} from '@google/adk';
-import * as path from 'node:path';
 import {afterAll, beforeAll, describe, expect, it} from 'vitest';
 import {createRunner} from '../../../integration/test_case_utils.js';
+import {GO_BACKEND_FIXTURE} from '../go_fixtures.js';
 import {AdkGoServer} from './go_backend/go_server.js';
 
 const TIMEOUT = 60000;
@@ -19,7 +19,7 @@ describe(
 
     beforeAll(async () => {
       goServer = new AdkGoServer({
-        serverDir: path.resolve(__dirname, 'go_backend'),
+        binaryPath: GO_BACKEND_FIXTURE.binaryPath,
         startFailureTimeout: TIMEOUT,
       });
       await goServer.start();
