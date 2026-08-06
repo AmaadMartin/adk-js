@@ -57,20 +57,9 @@ function parseLogLevel(value: string): string {
   return normalized;
 }
 
-function getLogLevelFromOptions(options: {
-  verbose?: boolean;
-  log_level?: string;
-}) {
-  if (options.verbose) {
-    return LogLevel.DEBUG;
-  }
-
-  if (typeof options.log_level === 'string') {
-    // `??`, not `||`: LogLevel.DEBUG is 0 and would otherwise be discarded.
-    return LOG_LEVEL_MAP.get(options.log_level) ?? LogLevel.INFO;
-  }
-
-  return LogLevel.INFO;
+function getLogLevelFromOptions(options: {log_level?: string}): LogLevel {
+  // `??`, not `||`: LogLevel.DEBUG is 0 and would otherwise be discarded.
+  return LOG_LEVEL_MAP.get(options.log_level ?? 'info') ?? LogLevel.INFO;
 }
 
 function getAbsolutePath(p: string): string {
@@ -135,8 +124,13 @@ const ORIGINS_OPTION = new Option(
 ).default('');
 const VERBOSE_OPTION = new Option(
   '-v, --verbose [boolean]',
-  'Optional. The verbose level of the server',
-).default(false);
+  'Optional. Enable verbose (DEBUG) logging. Shortcut for --log_level debug; an explicitly passed --log_level wins.',
+)
+  // Commander applies an implied value only while the target option sits at
+  // its default, which is the precedence rule the Python SDK gets from
+  // `ctx.get_parameter_source("log_level") == ParameterSource.DEFAULT`.
+  .implies({log_level: 'debug'})
+  .default(false);
 const LOG_LEVEL_OPTION = new Option(
   '--log_level <string>',
   'Optional. The log level of the server',
@@ -557,6 +551,8 @@ export function createProgram(): Command {
     )
     .option('--force', 'Force run skipped tests.')
     .action(async (options: Record<string, string>) => {
+      setAdkCoreLogLevel(getLogLevelFromOptions(options));
+
       runIntegrationTests({
         agentsDir: options['agents_dir'],
         testsDir: options['tests_dir'],
