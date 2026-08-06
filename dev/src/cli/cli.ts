@@ -140,7 +140,7 @@ const NO_COMPILE_AGENT_FILE = new Option(
 );
 const BUNDLE_AGENT_FILE = new Option(
   '--bundle',
-  'Optional. Whether to compile ts agent file to js before execution',
+  'Optional. Whether to bundle the ts agent file before execution',
 ).default(true);
 const NO_BUNDLE_AGENT_FILE = new Option(
   '--no-bundle',
@@ -446,12 +446,8 @@ export function createProgram(): Command {
         if (argName.includes('=')) {
           argName = argName.split('=')[0];
         }
-        // Commander records `--no-compile` under the `compile` key, so strip
-        // the negation prefix before deciding whether the flag was one of ours.
-        const optionName = argName.startsWith('no-')
-          ? argName.slice('no-'.length)
-          : argName;
-        if (optionName in options) {
+        // Commander records `--no-compile` under the `compile` key.
+        if (argName.replace(/^no-/, '') in options) {
           continue;
         }
 
