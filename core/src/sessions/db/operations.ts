@@ -4,7 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {MikroORM, Options as MikroORMOptions} from '@mikro-orm/core';
+import {
+  MikroORM,
+  Options as MikroORMOptions,
+  QueryResult,
+} from '@mikro-orm/core';
 import {logger} from '../../utils/logger.js';
 import {
   ENTITIES,
@@ -77,8 +81,12 @@ export async function getConnectionOptionsFromUri(
  * @returns Promise<void>
  */
 export async function deleteOrphanedEvents(orm: MikroORM): Promise<void> {
-  logger.debug('Deleting event rows whose session no longer exists.');
-  await orm.em.getConnection().execute(DELETE_ORPHANED_EVENTS_SQL);
+  const result: QueryResult = await orm.em
+    .getConnection()
+    .execute(DELETE_ORPHANED_EVENTS_SQL, [], 'run');
+  logger.warn(
+    `Deleted ${result.affectedRows} event rows whose session no longer exists.`,
+  );
 }
 
 /**
@@ -94,11 +102,15 @@ export async function ensureDatabaseCreated(orm: MikroORM): Promise<void> {
   try {
     // creates tables if they don't exist. Safe mode prevents dropping columns or tables.
     await orm.schema.updateSchema({safe: true});
-  } catch {
+  } catch (error) {
     // A database created before the events -> sessions foreign key can hold
     // event rows whose session is already gone, and the constraint cannot be
     // added while they exist. Those rows are unreachable through the service,
     // so drop them and let the schema update finish.
+    logger.warn(
+      'Schema update failed; retrying after deleting orphaned events.',
+      error,
+    );
     await deleteOrphanedEvents(orm);
     await orm.schema.updateSchema({safe: true});
   }

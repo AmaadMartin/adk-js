@@ -10,6 +10,7 @@ import {SqliteDriver} from '@mikro-orm/sqlite';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {
   ENTITIES,
+  STORAGE_KEY_COLUMN_LENGTH,
   StorageEvent,
   StorageSession,
 } from '../../../src/sessions/db/schema.js';
@@ -68,6 +69,25 @@ describe('storage schema', () => {
   async function countEvents(): Promise<number> {
     return orm.em.fork().count(StorageEvent, {});
   }
+
+  it('keeps events composite key columns within the MySQL index limit', async () => {
+    // `session` owns app_name, user_id and session_id, so these two
+    // properties emit every key column of the events table.
+    const eventProperties = orm.getMetadata().get(StorageEvent.name)
+      .properties as Record<string, {length?: number; fieldNames: string[]}>;
+    const keyColumnLengths = ['id', 'session'].flatMap((keyProperty) => {
+      const property = eventProperties[keyProperty];
+      return property.fieldNames.map(() => property.length);
+    });
+
+    expect(keyColumnLengths).toEqual(Array(4).fill(STORAGE_KEY_COLUMN_LENGTH));
+
+    const utf8mb4KeyBytes = keyColumnLengths.reduce<number>(
+      (total, length) => total + (length ?? 0) * 4,
+      0,
+    );
+    expect(utf8mb4KeyBytes).toBeLessThanOrEqual(3072);
+  });
 
   it('declares an events -> sessions foreign key that cascades on delete', async () => {
     const sql = await orm.schema.getCreateSchemaSQL();

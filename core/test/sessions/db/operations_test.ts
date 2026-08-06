@@ -17,10 +17,10 @@ import {
   ENTITIES,
   SCHEMA_VERSION_1_JSON,
   SCHEMA_VERSION_KEY,
-  STORAGE_KEY_COLUMN_LENGTH,
   StorageEvent,
   StorageMetadata,
 } from '../../../src/sessions/db/schema.js';
+import {resetLogger, setLogger} from '../../../src/utils/logger.js';
 
 // Mock dynamic imports for drivers that might not be installed in dev
 vi.mock('@mikro-orm/postgresql', () => ({
@@ -79,44 +79,22 @@ async function countEvents(orm: MikroORM): Promise<number> {
   return orm.em.fork().count(StorageEvent, {});
 }
 
+function makeWarnCapturingLogger() {
+  const warnCalls: string[] = [];
+  const mockLogger = {
+    setLogLevel: () => {},
+    log: () => {},
+    debug: () => {},
+    info: () => {},
+    warn: (...args: unknown[]) => {
+      warnCalls.push(args.map(String).join(' '));
+    },
+    error: () => {},
+  };
+  return {mockLogger, warnCalls};
+}
+
 describe('operations', () => {
-  describe('storage schema', () => {
-    let orm: MikroORM;
-
-    afterEach(async () => {
-      if (orm) {
-        await orm.close();
-      }
-    });
-
-    it('keeps events composite key columns within the MySQL index limit', async () => {
-      orm = await MikroORM.init({
-        dbName: ':memory:',
-        driver: SqliteDriver,
-        entities: ENTITIES,
-      });
-
-      // `session` owns app_name, user_id and session_id, so these two
-      // properties emit every key column of the events table.
-      const eventProperties = orm.getMetadata().get(StorageEvent.name)
-        .properties as Record<string, {length?: number; fieldNames: string[]}>;
-      const keyColumnLengths = ['id', 'session'].flatMap((keyProperty) => {
-        const property = eventProperties[keyProperty];
-        return property.fieldNames.map(() => property.length);
-      });
-
-      expect(keyColumnLengths).toEqual(
-        Array(4).fill(STORAGE_KEY_COLUMN_LENGTH),
-      );
-
-      const utf8mb4KeyBytes = keyColumnLengths.reduce<number>(
-        (total, length) => total + (length ?? 0) * 4,
-        0,
-      );
-      expect(utf8mb4KeyBytes).toBeLessThanOrEqual(3072);
-    });
-  });
-
   describe('getConnectionOptionsFromUri', () => {
     it('should parse postgresql URI', async () => {
       const options = await getConnectionOptionsFromUri(
@@ -247,6 +225,31 @@ describe('operations', () => {
         'second failure',
       );
     });
+
+    it('logs the schema update failure that triggered the retry', async () => {
+      orm = await MikroORM.init({
+        dbName: ':memory:',
+        driver: SqliteDriver,
+        entities: ENTITIES,
+      });
+      await orm.schema.createSchema();
+
+      const updateSchema = vi.spyOn(orm.schema, 'updateSchema');
+      updateSchema.mockRejectedValueOnce(new Error('lock timeout'));
+      const {mockLogger, warnCalls} = makeWarnCapturingLogger();
+      setLogger(mockLogger);
+
+      try {
+        await ensureDatabaseCreated(orm);
+      } finally {
+        resetLogger();
+      }
+
+      expect(warnCalls[0]).toBe(
+        'Schema update failed; retrying after deleting orphaned events. ' +
+          'Error: lock timeout',
+      );
+    });
   });
 
   describe('deleteOrphanedEvents', () => {
@@ -275,6 +278,29 @@ describe('operations', () => {
         .fork()
         .find(StorageEvent, {}, {fields: ['id']});
       expect(remaining.map((event) => event.id)).toEqual(['live-event']);
+    });
+
+    it('logs how many rows it deleted', async () => {
+      orm = await MikroORM.init({
+        dbName: ':memory:',
+        driver: SqliteDriver,
+        entities: ENTITIES,
+      });
+      await orm.schema.createSchema();
+      await insertLiveSessionWithEvent(orm);
+      await insertOrphanedEvent(orm);
+      const {mockLogger, warnCalls} = makeWarnCapturingLogger();
+      setLogger(mockLogger);
+
+      try {
+        await deleteOrphanedEvents(orm);
+      } finally {
+        resetLogger();
+      }
+
+      expect(warnCalls).toEqual([
+        'Deleted 1 event rows whose session no longer exists.',
+      ]);
     });
   });
 
