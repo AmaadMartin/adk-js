@@ -20,6 +20,15 @@ const INTEGRATION_HOOK_TIMEOUT_MS = 120000;
  */
 const INTEGRATION_TEST_TIMEOUT_MS = 60000;
 
+/**
+ * Test budget (ms) for the `e2e` project: these tests drive live model turns,
+ * and Vitest's 5s default has already expired on the credential-free
+ * tests/e2e/tools/mcp suite on windows-latest. 60s is the largest budget the
+ * suite's own multi-turn LLM tests declare for themselves; the two tests that
+ * need more keep their own `it()` timeout.
+ */
+const E2E_TEST_TIMEOUT_MS = 60000;
+
 export default defineConfig({
   test: {
     poolOptions: {
@@ -93,6 +102,7 @@ export default defineConfig({
         test: {
           name: 'e2e',
           environment: 'node',
+          testTimeout: E2E_TEST_TIMEOUT_MS,
           alias: {
             '@google/adk': path.resolve(__dirname, './core/src'),
             '@google/adk-integrations': path.resolve(
