@@ -8,6 +8,7 @@ import {MikroORM} from '@mikro-orm/core';
 import {SqliteDriver} from '@mikro-orm/sqlite';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {
+  deleteOrphanedEvents,
   ensureDatabaseCreated,
   getConnectionOptionsFromUri,
   validateDatabaseSchemaVersion,
@@ -34,6 +35,49 @@ vi.mock('@mikro-orm/mariadb', () => ({
 vi.mock('@mikro-orm/mssql', () => ({
   MsSqlDriver: class MockMsSqlDriver {},
 }));
+
+const APP_NAME = 'test-app';
+const USER_ID = 'test-user';
+const SESSION_ID = 'test-session';
+
+async function insertEventRow(
+  orm: MikroORM,
+  id: string,
+  sessionId: string,
+): Promise<void> {
+  await orm.em
+    .getConnection()
+    .execute(
+      'INSERT INTO events (id, app_name, user_id, session_id, invocation_id, timestamp, event_data) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [id, APP_NAME, USER_ID, sessionId, `invocation-${id}`, Date.now(), '{}'],
+    );
+}
+
+async function insertLiveSessionWithEvent(orm: MikroORM): Promise<void> {
+  const now = Date.now();
+  await orm.em
+    .getConnection()
+    .execute(
+      'INSERT INTO sessions (app_name, user_id, id, state, create_time, update_time) VALUES (?, ?, ?, ?, ?, ?)',
+      [APP_NAME, USER_ID, SESSION_ID, '{}', now, now],
+    );
+  await insertEventRow(orm, 'live-event', SESSION_ID);
+}
+
+/**
+ * Writes the row shape that a database created before the foreign key can
+ * hold: an event whose session was deleted.
+ */
+async function insertOrphanedEvent(orm: MikroORM): Promise<void> {
+  const connection = orm.em.getConnection();
+  await connection.execute('pragma foreign_keys = off');
+  await insertEventRow(orm, 'orphan-event', 'missing-session');
+  await connection.execute('pragma foreign_keys = on');
+}
+
+async function countEvents(orm: MikroORM): Promise<number> {
+  return orm.em.fork().count(StorageEvent, {});
+}
 
 describe('operations', () => {
   describe('storage schema', () => {
@@ -165,6 +209,72 @@ describe('operations', () => {
 
       // Verify it runs without error
       await expect(ensureDatabaseCreated(orm)).resolves.not.toThrow();
+    });
+
+    it('deletes orphaned events and retries when the schema update fails', async () => {
+      orm = await MikroORM.init({
+        dbName: ':memory:',
+        driver: SqliteDriver,
+        entities: ENTITIES,
+      });
+      await orm.schema.createSchema();
+      await insertOrphanedEvent(orm);
+
+      const updateSchema = vi.spyOn(orm.schema, 'updateSchema');
+      updateSchema.mockRejectedValueOnce(
+        new Error('constraint "events_app_name_user_id_session_id_foreign"'),
+      );
+
+      await expect(ensureDatabaseCreated(orm)).resolves.toBeUndefined();
+
+      expect(updateSchema).toHaveBeenCalledTimes(2);
+      expect(await countEvents(orm)).toBe(0);
+    });
+
+    it('propagates the error when the schema update fails again', async () => {
+      orm = await MikroORM.init({
+        dbName: ':memory:',
+        driver: SqliteDriver,
+        entities: ENTITIES,
+      });
+      await orm.schema.createSchema();
+
+      const updateSchema = vi.spyOn(orm.schema, 'updateSchema');
+      updateSchema.mockRejectedValueOnce(new Error('first failure'));
+      updateSchema.mockRejectedValueOnce(new Error('second failure'));
+
+      await expect(ensureDatabaseCreated(orm)).rejects.toThrow(
+        'second failure',
+      );
+    });
+  });
+
+  describe('deleteOrphanedEvents', () => {
+    let orm: MikroORM;
+
+    afterEach(async () => {
+      if (orm) {
+        await orm.close();
+      }
+    });
+
+    it('removes only the events whose session is gone', async () => {
+      orm = await MikroORM.init({
+        dbName: ':memory:',
+        driver: SqliteDriver,
+        entities: ENTITIES,
+      });
+      await orm.schema.createSchema();
+      await insertLiveSessionWithEvent(orm);
+      await insertOrphanedEvent(orm);
+      expect(await countEvents(orm)).toBe(2);
+
+      await deleteOrphanedEvents(orm);
+
+      const remaining = await orm.em
+        .fork()
+        .find(StorageEvent, {}, {fields: ['id']});
+      expect(remaining.map((event) => event.id)).toEqual(['live-event']);
     });
   });
 

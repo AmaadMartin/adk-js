@@ -5,12 +5,21 @@
  */
 
 import {MikroORM, Options as MikroORMOptions} from '@mikro-orm/core';
+import {logger} from '../../utils/logger.js';
 import {
   ENTITIES,
   SCHEMA_VERSION_1_JSON,
   SCHEMA_VERSION_KEY,
   StorageMetadata,
 } from './schema.js';
+
+const DELETE_ORPHANED_EVENTS_SQL = `DELETE FROM events
+WHERE NOT EXISTS (
+  SELECT 1 FROM sessions
+  WHERE sessions.app_name = events.app_name
+    AND sessions.user_id = events.user_id
+    AND sessions.id = events.session_id
+)`;
 
 /**
  * Parses a database connection URI and returns MikroORM Options.
@@ -62,6 +71,17 @@ export async function getConnectionOptionsFromUri(
 }
 
 /**
+ * Deletes event rows whose session no longer exists.
+ *
+ * @param orm The MikroORM instance.
+ * @returns Promise<void>
+ */
+export async function deleteOrphanedEvents(orm: MikroORM): Promise<void> {
+  logger.debug('Deleting event rows whose session no longer exists.');
+  await orm.em.getConnection().execute(DELETE_ORPHANED_EVENTS_SQL);
+}
+
+/**
  * Creates a database and tables if they don't exist.
  *
  * @param orm The MikroORM instance.
@@ -71,8 +91,17 @@ export async function ensureDatabaseCreated(orm: MikroORM): Promise<void> {
   // creates database if it doesn't exist
   await orm.schema.ensureDatabase();
 
-  // creates tables if they don't exist. Safe mode prevents dropping columns or tables.
-  await orm.schema.updateSchema({safe: true});
+  try {
+    // creates tables if they don't exist. Safe mode prevents dropping columns or tables.
+    await orm.schema.updateSchema({safe: true});
+  } catch {
+    // A database created before the events -> sessions foreign key can hold
+    // event rows whose session is already gone, and the constraint cannot be
+    // added while they exist. Those rows are unreachable through the service,
+    // so drop them and let the schema update finish.
+    await deleteOrphanedEvents(orm);
+    await orm.schema.updateSchema({safe: true});
+  }
 }
 
 /**
