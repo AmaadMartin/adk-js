@@ -15,6 +15,14 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
+        node: ['24.x']
+        include:
+          # The exact lower bound of engines.node in core/dev/integrations
+          # package.json. Pinned to the patch so a Node API added later in the
+          # 20.x line cannot pass CI while breaking a consumer who is still
+          # inside the declared range. Keep the two in sync.
+          - os: ubuntu-latest
+            node: '20.19.0'
 
     steps:
       - name: Checkout code
@@ -22,6 +30,8 @@ jobs:
 
       - name: Use Node.js
         uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node }}
 
       - name: Setup Python
         uses: actions/setup-python@v5

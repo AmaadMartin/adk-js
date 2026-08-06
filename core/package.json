@@ -8,6 +8,9 @@
     "type": "git",
     "url": "https://github.com/google/adk-js"
   },
+  "engines": {
+    "node": ">=20.19.0"
+  },
   "files": [
     "package.json",
     "README.md",
