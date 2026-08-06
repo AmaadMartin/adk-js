@@ -7,11 +7,11 @@
 import {
   AuthCredential,
   AuthCredentialTypes,
+  createSession,
   InvocationContext,
   LlmAgent,
   PluginManager,
   ReadonlyContext,
-  Session,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
@@ -23,20 +23,15 @@ const CREDENTIAL: AuthCredential = {
 function createReadonlyContext(
   credentialByKey?: Record<string, AuthCredential>,
 ): ReadonlyContext {
-  const session = {
-    id: 'test-session-id',
-    appName: 'test-app',
-    userId: 'test-user',
-    state: {},
-    events: [],
-    lastUpdateTime: Date.now(),
-  } as unknown as Session;
-
   return new ReadonlyContext(
     new InvocationContext({
       invocationId: 'test-invocation-id',
       agent: new LlmAgent({name: 'test_agent', model: 'test_model'}),
-      session,
+      session: createSession({
+        id: 'test-session-id',
+        appName: 'test-app',
+        userId: 'test-user',
+      }),
       pluginManager: new PluginManager(),
       credentialByKey,
     }),

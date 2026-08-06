@@ -11,10 +11,10 @@ import {
   BaseCredentialService,
   BaseTool,
   BaseToolset,
+  createSession,
   Event,
   InvocationContext,
   LlmAgent,
-  LlmRequest,
   LoopAgent,
   PluginManager,
   ReadonlyContext,
@@ -109,15 +109,13 @@ function createCredential(accessToken: string): AuthCredential {
   };
 }
 
-function createSession(state: Record<string, unknown> = {}): Session {
-  return {
+function makeSession(state: Record<string, unknown> = {}): Session {
+  return createSession({
     id: 'test-session-id',
     appName: 'test-app',
     userId: 'test-user',
     state,
-    events: [],
-    lastUpdateTime: Date.now(),
-  } as unknown as Session;
+  });
 }
 
 function createInvocationContext(options?: {
@@ -127,7 +125,7 @@ function createInvocationContext(options?: {
   return new InvocationContext({
     invocationId: 'test-invocation-id',
     agent: new LlmAgent({name: 'test_agent', model: 'test_model'}),
-    session: createSession(options?.state),
+    session: makeSession(options?.state),
     pluginManager: new PluginManager(),
     credentialService: options?.credentialService,
   });
@@ -412,12 +410,6 @@ describe('resolveToolsetAuth', () => {
 });
 
 describe('ToolsetAuthPreprocessor', () => {
-  const llmRequest: LlmRequest = {
-    contents: [],
-    toolsDict: {},
-    liveConnectConfig: {},
-  };
-
   it('resolves the auth of the agent it runs for', async () => {
     const invocationContext = createInvocationContext();
     invocationContext.agent = new LlmAgent({
@@ -427,7 +419,7 @@ describe('ToolsetAuthPreprocessor', () => {
     });
 
     const events = await collect(
-      TOOLSET_AUTH_PREPROCESSOR.runAsync(invocationContext, llmRequest),
+      TOOLSET_AUTH_PREPROCESSOR.runAsync(invocationContext),
     );
 
     expect(events).toHaveLength(1);
@@ -439,7 +431,7 @@ describe('ToolsetAuthPreprocessor', () => {
     invocationContext.agent = new LoopAgent({name: 'loop_agent'});
 
     const events = await collect(
-      TOOLSET_AUTH_PREPROCESSOR.runAsync(invocationContext, llmRequest),
+      TOOLSET_AUTH_PREPROCESSOR.runAsync(invocationContext),
     );
 
     expect(events).toEqual([]);
