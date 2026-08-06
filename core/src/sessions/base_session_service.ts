@@ -272,11 +272,8 @@ export function mergeStates(
  *
  * Every `BaseSessionService` implementation calls this before it reads from its
  * backing store, so that an out-of-range or fractional value fails the same way
- * regardless of which session service is configured. Fields are checked in the
- * order `limit`, `offset`, `page`, and a field is checked whenever it is
- * present — including when `page` means the `offset` will not be used.
+ * regardless of which session service is configured.
  *
- * @param pagination The pagination fields of the request.
  * @throws {Error} When `limit` or `offset` is present and is not a non-negative
  *     integer, or `page` is present and is not a positive integer.
  */
