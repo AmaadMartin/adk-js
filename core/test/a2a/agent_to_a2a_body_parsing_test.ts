@@ -33,10 +33,8 @@ vi.mock('@a2a-js/sdk/server/express', () => {
   };
 });
 
-// Every fake below passes its implementation as the `vi.fn()` constructor
-// argument. `vi.restoreAllMocks()` in `afterEach` drops a `.mockImplementation()` body
-// for good but restores a constructor-argument one, and a factory body runs
-// only once.
+// Implementations go in the vi.fn() constructor argument so they survive the
+// vi.restoreAllMocks() in afterEach.
 vi.mock('@a2a-js/sdk/server', () => ({
   DefaultRequestHandler: vi.fn(() => ({})),
   InMemoryTaskStore: vi.fn(() => ({})),
@@ -113,7 +111,7 @@ describe('toA2a body parsing', () => {
 
   // Deliberately not the first test in the file: it only holds if the agent
   // card fake survived the preceding test's `vi.restoreAllMocks()`.
-  it('builds the request handler from the resolved agent card', () => {
+  it('builds the request handler from the generated agent card', () => {
     expect(DefaultRequestHandler).toHaveBeenCalledWith(
       {name: 'mocked_card'},
       expect.anything(),

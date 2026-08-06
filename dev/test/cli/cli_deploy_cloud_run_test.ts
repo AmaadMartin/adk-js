@@ -12,7 +12,6 @@ import {
   deployToCloudRun,
 } from '../../src/cli/deploy/cli_deploy_cloud_run.js';
 import {A2A_AUTH_TOKEN_ENV_VAR} from '../../src/server/adk_api_server.js';
-import {AgentLoader} from '../../src/utils/agent_loader.js';
 import {
   createTempDir,
   isFile,
@@ -35,10 +34,8 @@ vi.mock('node:child_process', () => ({
     spawnMock(cmd, args, opts),
 }));
 
-// Every fake below passes its implementation as the `vi.fn()` constructor
-// argument. `vi.restoreAllMocks()` in `afterEach` drops a `.mockResolvedValue()` body
-// for good but restores a constructor-argument one, and a factory body runs
-// only once.
+// Implementations go in the vi.fn() constructor argument so they survive the
+// vi.restoreAllMocks() in afterEach.
 vi.mock('node:fs/promises', () => {
   const mockFs = {
     cp: vi.fn(async () => {}),
@@ -246,14 +243,6 @@ describe('deployToCloudRun', () => {
         '@google/adk': '^1.0.0',
       },
     });
-
-    (AgentLoader as Mock).mockImplementation(() => ({
-      listAgents: vi.fn().mockResolvedValue(['agent1']),
-      getAgentFile: vi.fn().mockResolvedValue({
-        getFilePath: vi.fn().mockReturnValue('path/to/agent1.ts'),
-      }),
-      disposeAll: vi.fn().mockResolvedValue(undefined),
-    }));
 
     execMock.mockImplementation((cmd: string, callback: Callback) => {
       if (cmd.includes('config get-value project')) {
