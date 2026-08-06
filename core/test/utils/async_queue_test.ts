@@ -85,4 +85,28 @@ describe('AsyncQueue', () => {
     const res = await pending;
     expect(res.done).toBe(true);
   });
+
+  it('should carry an undefined value on the pending next() resolved by close', async () => {
+    const queue = new AsyncQueue<number>();
+    const iterator = queue[Symbol.asyncIterator]();
+    const pending = iterator.next();
+    queue.close();
+
+    await expect(pending).resolves.toStrictEqual({
+      value: undefined,
+      done: true,
+    });
+  });
+
+  it('should return an undefined done result when already closed', async () => {
+    const queue = new AsyncQueue<number>();
+    queue.close();
+
+    const iterator = queue[Symbol.asyncIterator]();
+
+    await expect(iterator.next()).resolves.toStrictEqual({
+      value: undefined,
+      done: true,
+    });
+  });
 });
