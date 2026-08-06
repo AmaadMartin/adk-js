@@ -4,22 +4,20 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  BaseAgent,
-  BaseLlm,
-  BaseLlmConnection,
-  createSession,
-  FunctionTool,
-  InvocationContext,
-  LlmAgent,
-  LlmRequest,
-  LlmResponse,
-  PluginManager,
-  ReadonlyContext,
-} from '@google/adk';
 import {Schema, Type} from '@google/genai';
 import {afterEach, describe, expect, it, vi} from 'vitest';
+import {BaseAgent} from '../../../src/agents/base_agent.js';
+import {InvocationContext} from '../../../src/agents/invocation_context.js';
+import {LlmAgent} from '../../../src/agents/llm_agent.js';
 import {INSTRUCTIONS_LLM_REQUEST_PROCESSOR} from '../../../src/agents/processors/instructions_llm_request_processor.js';
+import {ReadonlyContext} from '../../../src/agents/readonly_context.js';
+import {BaseLlm} from '../../../src/models/base_llm.js';
+import {BaseLlmConnection} from '../../../src/models/base_llm_connection.js';
+import {LlmRequest} from '../../../src/models/llm_request.js';
+import {LlmResponse} from '../../../src/models/llm_response.js';
+import {PluginManager} from '../../../src/plugins/plugin_manager.js';
+import {createSession} from '../../../src/sessions/session.js';
+import {FunctionTool} from '../../../src/tools/function_tool.js';
 
 const VERTEX_ENV_VAR = 'GOOGLE_GENAI_USE_VERTEXAI';
 

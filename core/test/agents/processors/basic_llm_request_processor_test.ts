@@ -5,20 +5,6 @@
  */
 
 import {
-  BaseAgent,
-  BaseLlm,
-  BaseLlmConnection,
-  createSession,
-  FunctionTool,
-  InvocationContext,
-  LlmAgent,
-  LLMRegistry,
-  LlmRequest,
-  LlmResponse,
-  PluginManager,
-  RunConfig,
-} from '@google/adk';
-import {
   Content,
   Blob as GenaiBlob,
   Modality,
@@ -26,7 +12,19 @@ import {
   Type,
 } from '@google/genai';
 import {afterEach, beforeAll, describe, expect, it, vi} from 'vitest';
+import {BaseAgent} from '../../../src/agents/base_agent.js';
+import {InvocationContext} from '../../../src/agents/invocation_context.js';
+import {LlmAgent} from '../../../src/agents/llm_agent.js';
 import {BASIC_LLM_REQUEST_PROCESSOR} from '../../../src/agents/processors/basic_llm_request_processor.js';
+import {RunConfig} from '../../../src/agents/run_config.js';
+import {BaseLlm} from '../../../src/models/base_llm.js';
+import {BaseLlmConnection} from '../../../src/models/base_llm_connection.js';
+import {LlmRequest} from '../../../src/models/llm_request.js';
+import {LlmResponse} from '../../../src/models/llm_response.js';
+import {LLMRegistry} from '../../../src/models/registry.js';
+import {PluginManager} from '../../../src/plugins/plugin_manager.js';
+import {createSession} from '../../../src/sessions/session.js';
+import {FunctionTool} from '../../../src/tools/function_tool.js';
 
 const VERTEX_ENV_VAR = 'GOOGLE_GENAI_USE_VERTEXAI';
 
@@ -163,9 +161,9 @@ describe('BasicLlmRequestProcessor', () => {
 
   it('should set outputSchema in config when agent has outputSchema', async () => {
     const outputSchema = {
-      type: 'object' as const,
+      type: Type.OBJECT,
       properties: {
-        answer: {type: 'string' as const},
+        answer: {type: Type.STRING},
       },
     };
     const agent = new LlmAgent({
@@ -184,9 +182,9 @@ describe('BasicLlmRequestProcessor', () => {
 
   it('should not set outputSchema in config when agent has outputSchema and tools', async () => {
     const outputSchema = {
-      type: 'object' as const,
+      type: Type.OBJECT,
       properties: {
-        answer: {type: 'string' as const},
+        answer: {type: Type.STRING},
       },
     };
     const agent = new LlmAgent({

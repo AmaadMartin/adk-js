@@ -4,16 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  BaseAgent,
-  InvocationContext,
-  LlmAgent,
-  LlmRequest,
-  PluginManager,
-  createSession,
-} from '@google/adk';
 import {describe, expect, it} from 'vitest';
+import {BaseAgent} from '../../../src/agents/base_agent.js';
+import {InvocationContext} from '../../../src/agents/invocation_context.js';
+import {LlmAgent} from '../../../src/agents/llm_agent.js';
 import {IDENTITY_LLM_REQUEST_PROCESSOR} from '../../../src/agents/processors/identity_llm_request_processor.js';
+import {LlmRequest} from '../../../src/models/llm_request.js';
+import {PluginManager} from '../../../src/plugins/plugin_manager.js';
+import {createSession} from '../../../src/sessions/session.js';
 
 class MockRootAgent extends BaseAgent {
   constructor(name: string, subAgents: BaseAgent[] = []) {

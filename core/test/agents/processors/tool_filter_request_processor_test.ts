@@ -4,22 +4,20 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  BaseAgent,
-  BasePlugin,
-  BaseTool,
-  Context,
-  InvocationContext,
-  LlmAgent,
-  LlmRequest,
-  PluginManager,
-  ReadonlyContext,
-  createSession,
-} from '@google/adk';
 import {describe, expect, it} from 'vitest';
+import {BaseAgent} from '../../../src/agents/base_agent.js';
+import {Context} from '../../../src/agents/context.js';
 import {handleFunctionCallsAsync} from '../../../src/agents/functions.js';
+import {InvocationContext} from '../../../src/agents/invocation_context.js';
+import {LlmAgent} from '../../../src/agents/llm_agent.js';
 import {TOOL_FILTER_REQUEST_PROCESSOR} from '../../../src/agents/processors/tool_filter_request_processor.js';
+import {ReadonlyContext} from '../../../src/agents/readonly_context.js';
 import {createEvent} from '../../../src/events/event.js';
+import {LlmRequest} from '../../../src/models/llm_request.js';
+import {BasePlugin} from '../../../src/plugins/base_plugin.js';
+import {PluginManager} from '../../../src/plugins/plugin_manager.js';
+import {createSession} from '../../../src/sessions/session.js';
+import {BaseTool} from '../../../src/tools/base_tool.js';
 
 class MockTool extends BaseTool {
   constructor(name: string) {

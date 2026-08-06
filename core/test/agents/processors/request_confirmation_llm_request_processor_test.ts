@@ -4,18 +4,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  BaseAgent,
-  InvocationContext,
-  LlmAgent,
-  LlmRequest,
-  PluginManager,
-  REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
-  createEvent,
-  createSession,
-} from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
+import {BaseAgent} from '../../../src/agents/base_agent.js';
+import {InvocationContext} from '../../../src/agents/invocation_context.js';
+import {LlmAgent} from '../../../src/agents/llm_agent.js';
+import {BaseLlmRequestProcessor} from '../../../src/agents/processors/base_llm_processor.js';
 import {REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR} from '../../../src/agents/processors/request_confirmation_llm_request_processor.js';
+import {createEvent} from '../../../src/events/event.js';
+import {LlmRequest} from '../../../src/models/llm_request.js';
+import {PluginManager} from '../../../src/plugins/plugin_manager.js';
+import {REQUEST_CONFIRMATION_FUNCTION_CALL_NAME} from '../../../src/plugins/security_plugin.js';
+import {createSession} from '../../../src/sessions/session.js';
 
 vi.mock('../../../src/agents/functions.js', async (importOriginal) => {
   const original =
@@ -59,15 +58,17 @@ function makeLlmRequest(): LlmRequest {
   };
 }
 
+// The processor narrows runAsync to the context alone; the pipeline still
+// invokes it through the two-parameter base contract.
+const processor: BaseLlmRequestProcessor =
+  REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR;
+
 async function collectEvents(
   invocationContext: InvocationContext,
   llmRequest: LlmRequest = makeLlmRequest(),
 ) {
   const events = [];
-  for await (const event of REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR.runAsync(
-    invocationContext,
-    llmRequest,
-  )) {
+  for await (const event of processor.runAsync(invocationContext, llmRequest)) {
     events.push(event);
   }
   return events;
