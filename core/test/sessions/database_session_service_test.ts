@@ -13,7 +13,7 @@ import {
 } from '@google/adk';
 import {MikroORM} from '@mikro-orm/core';
 import {SqliteDriver} from '@mikro-orm/sqlite';
-import {afterEach, beforeEach, describe, expect, it} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {isDatabaseConnectionString} from '../../src/sessions/database_session_service.js';
 import {validateDatabaseSchemaVersion} from '../../src/sessions/db/operations.js';
 import {runGetUserStateTests} from './session_service_test_utils.js';
@@ -703,6 +703,18 @@ describe('DatabaseSessionService', () => {
       expect(storedSession.updateTime.getTime()).toBe(timestamp);
     });
   });
+
+  describe('getUserState', () => {
+    runGetUserStateTests(() => service);
+
+    it('initializes the ORM before it reads', async () => {
+      const initSpy = vi.spyOn(service, 'init');
+
+      await service.getUserState({appName: 'my_app', userId: 'u1'});
+
+      expect(initSpy).toHaveBeenCalled();
+    });
+  });
 });
 
 describe('isDatabaseConnectionString', () => {
@@ -741,27 +753,4 @@ describe('isDatabaseConnectionString', () => {
     ); // Has = and ; but no common keys
     expect(isDatabaseConnectionString('Server=myServer')).toBe(false); // Missing semicolon implies not a full connection string or just a weird config
   });
-});
-
-describe('DatabaseSessionService.getUserState', () => {
-  // Deliberately left un-initialized: getUserState must call init() itself,
-  // like every other public method on this service.
-  let service: DatabaseSessionService;
-
-  beforeEach(() => {
-    service = new DatabaseSessionService({
-      dbName: ':memory:',
-      driver: SqliteDriver,
-      allowGlobalContext: true, // simplified for tests
-    });
-  });
-
-  afterEach(async () => {
-    const orm = (service as unknown as {orm?: MikroORM}).orm;
-    if (orm) {
-      await orm.close();
-    }
-  });
-
-  runGetUserStateTests(() => service);
 });
