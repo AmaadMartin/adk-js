@@ -755,6 +755,73 @@ describe('mergeParallelFunctionResponseEvents', () => {
     const merged = mergeParallelFunctionResponseEvents([event]);
     expect(merged).toBe(event);
   });
+
+  it('should aggregate UI widgets from every merged event', () => {
+    const event1 = createEvent({
+      invocationId: 'inv-1',
+      author: 'agent-1',
+      content: {
+        role: 'user',
+        parts: [
+          {functionResponse: {name: 'tool1', response: {result: 1}, id: 'id1'}},
+        ],
+      },
+      actions: createEventActions({
+        renderUiWidgets: [
+          {id: 'widget_1', provider: 'mcp', payload: {resource_uri: 'ui://a'}},
+        ],
+      }),
+    });
+    const event2 = createEvent({
+      invocationId: 'inv-1',
+      author: 'agent-1',
+      content: {
+        role: 'user',
+        parts: [
+          {functionResponse: {name: 'tool2', response: {result: 2}, id: 'id2'}},
+        ],
+      },
+      actions: createEventActions({
+        renderUiWidgets: [
+          {id: 'widget_2', provider: 'mcp', payload: {resource_uri: 'ui://b'}},
+          {id: 'widget_3', provider: 'custom', payload: {}},
+        ],
+      }),
+    });
+
+    const merged = mergeParallelFunctionResponseEvents([event1, event2]);
+
+    expect(merged.actions!.renderUiWidgets?.map((widget) => widget.id)).toEqual(
+      ['widget_1', 'widget_2', 'widget_3'],
+    );
+  });
+
+  it('should leave renderUiWidgets undefined when no event has widgets', () => {
+    const event1 = createEvent({
+      invocationId: 'inv-1',
+      author: 'agent-1',
+      content: {
+        role: 'user',
+        parts: [
+          {functionResponse: {name: 'tool1', response: {result: 1}, id: 'id1'}},
+        ],
+      },
+    });
+    const event2 = createEvent({
+      invocationId: 'inv-1',
+      author: 'agent-1',
+      content: {
+        role: 'user',
+        parts: [
+          {functionResponse: {name: 'tool2', response: {result: 2}, id: 'id2'}},
+        ],
+      },
+    });
+
+    const merged = mergeParallelFunctionResponseEvents([event1, event2]);
+
+    expect(merged.actions!.renderUiWidgets).toBeUndefined();
+  });
 });
 
 describe('findEventByFunctionCallId', () => {

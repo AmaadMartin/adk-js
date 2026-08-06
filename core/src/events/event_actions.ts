@@ -7,6 +7,8 @@
 import {AuthConfig} from '../auth/auth_tool.js';
 import {ToolConfirmation} from '../tools/tool_confirmation.js';
 
+import {UiWidget} from './ui_widget.js';
+
 /**
  * Represents the actions attached to an event.
  */
@@ -56,6 +58,11 @@ export interface EventActions {
    * call id.
    */
   requestedToolConfirmations: {[key: string]: ToolConfirmation};
+
+  /**
+   * UI widgets to be rendered by the UI host for this event.
+   */
+  renderUiWidgets?: UiWidget[];
 }
 
 /**
@@ -65,8 +72,8 @@ export interface EventActions {
  * @param state - Optional partial {@link EventActions} whose properties
  *   override the defaults. Dictionary fields (`stateDelta`, `artifactDelta`,
  *   `requestedAuthConfigs`, `requestedToolConfirmations`) default to `{}`;
- *   scalar fields (`skipSummarization`, `transferToAgent`, `escalate`) default
- *   to `undefined`.
+ *   scalar fields (`skipSummarization`, `transferToAgent`, `escalate`) and list
+ *   fields (`renderUiWidgets`) default to `undefined`.
  * @returns A fully populated {@link EventActions} object.
  */
 export function createEventActions(
@@ -93,6 +100,7 @@ export function createEventActions(
  * 2. **Scalar fields** (`skipSummarization`, `transferToAgent`, `escalate`) —
  *    last-writer-wins: the value from the last source that sets the field is
  *    kept.
+ * 3. **List fields** (`renderUiWidgets`) — concatenated in source order.
  *
  * @param sources - Ordered list of partial {@link EventActions} to merge.
  *   Falsy entries are silently skipped.
@@ -127,6 +135,13 @@ export function mergeEventActions(
         result.requestedToolConfirmations,
         source.requestedToolConfirmations,
       );
+    }
+
+    if (source.renderUiWidgets?.length) {
+      result.renderUiWidgets = [
+        ...(result.renderUiWidgets ?? []),
+        ...source.renderUiWidgets,
+      ];
     }
 
     if (source.skipSummarization !== undefined) {
