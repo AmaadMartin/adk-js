@@ -211,7 +211,10 @@ export {
   isRunner,
 } from './runner/runner.js';
 export type {RunnerConfig} from './runner/runner.js';
-export {BaseSessionService} from './sessions/base_session_service.js';
+export {
+  BaseSessionService,
+  BoundSessionService,
+} from './sessions/base_session_service.js';
 export type {
   AppendEventRequest,
   CreateSessionRequest,
