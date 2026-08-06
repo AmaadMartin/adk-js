@@ -5,6 +5,7 @@
  */
 
 import {OpenAPIV3} from 'openapi-types';
+import {snakeCase} from '../../../utils/case_utils.js';
 import {experimental} from '../../../utils/experimental.js';
 
 export interface ApiParameter {
@@ -40,13 +41,7 @@ export class OperationParser {
   }
 
   private getParamName(originalName: string): string {
-    if (this.preservePropertyNames) {
-      return originalName;
-    }
-    // Simple snake_case conversion
-    return originalName
-      .replace(/[A-Z]/g, (g) => '_' + g.toLowerCase())
-      .replace(/^_/, '');
+    return this.preservePropertyNames ? originalName : snakeCase(originalName);
   }
 
   private processOperationParameters() {
