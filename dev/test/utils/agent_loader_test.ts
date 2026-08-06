@@ -865,15 +865,17 @@ describe('AgentLoader', () => {
         .spyOn(AdkLogger.prototype, 'error')
         .mockImplementation(() => {});
 
-      const result = await loader.listAgentsDetailed();
+      try {
+        const result = await loader.listAgentsDetailed();
 
-      expect(result.map((a) => a.name)).toEqual(['agent1', 'agent3']);
-      expect(errorSpy).toHaveBeenCalledTimes(1);
-      expect(String(errorSpy.mock.calls[0][0])).toContain('agent2');
-
-      loadSpy.mockRestore();
-      errorSpy.mockRestore();
-      await loader.disposeAll();
+        expect(result.map((a) => a.name)).toEqual(['agent1', 'agent3']);
+        expect(errorSpy).toHaveBeenCalledTimes(1);
+        expect(String(errorSpy.mock.calls[0][0])).toContain('agent2');
+      } finally {
+        loadSpy.mockRestore();
+        errorSpy.mockRestore();
+        await loader.disposeAll();
+      }
     });
 
     it('resets preload cache when invalidateAll is called (simulates file-change reload)', async () => {
