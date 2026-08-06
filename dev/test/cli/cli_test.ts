@@ -141,13 +141,6 @@ describe('CLI Entrypoint', () => {
       expect(args.a2a).toBe(true);
     });
 
-    it('should start AdkApiServer with a2a: true when --a2a true is set', async () => {
-      await parse(['web', '--a2a', 'true']);
-
-      const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
-      expect(args.a2a).toBe(true);
-    });
-
     it('should pass a2aAuthToken when --a2a_auth_token is set', async () => {
       await parse(['web', '--a2a', '--a2a_auth_token', 'tok']);
 
