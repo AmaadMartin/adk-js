@@ -5,6 +5,8 @@
  */
 
 import {
+  AuthCredential,
+  AuthCredentialTypes,
   BaseAgent,
   BaseAgentConfig,
   Event,
@@ -56,6 +58,48 @@ class LlmCallingAgent extends BaseAgent {
     // Not needed for this test.
   }
 }
+
+describe('InvocationContext.credentialByKey', () => {
+  const credential: AuthCredential = {
+    authType: AuthCredentialTypes.OAUTH2,
+    oauth2: {accessToken: 'parked_token'},
+  };
+
+  function createContext(
+    credentialByKey?: Record<string, AuthCredential>,
+  ): InvocationContext {
+    return new InvocationContext({
+      invocationId: 'inv-credentials',
+      agent: new LoopAgent({name: 'root'}),
+      session: makeSession(),
+      pluginManager: new PluginManager(),
+      credentialByKey,
+    });
+  }
+
+  it('defaults to an empty record', () => {
+    expect(createContext().credentialByKey).toEqual({});
+  });
+
+  it('keeps the credentials passed to the constructor', () => {
+    expect(createContext({key: credential}).credentialByKey['key']).toBe(
+      credential,
+    );
+  });
+
+  it('shares the credentials with a child context', () => {
+    const root = createContext({key: credential});
+
+    // Mirrors BaseAgent.createInvocationContext: a child context for a
+    // sub-agent copies the parent context and swaps the agent.
+    const child = new InvocationContext({
+      ...root,
+      agent: new LoopAgent({name: 'sub'}),
+    });
+
+    expect(child.credentialByKey['key']).toBe(credential);
+  });
+});
 
 describe('InvocationContext LLM-call cost tracking', () => {
   it('shares the LLM-call counter across child contexts so maxLlmCalls spans the whole invocation', () => {

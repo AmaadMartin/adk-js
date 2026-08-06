@@ -8,6 +8,14 @@ import {AuthCredential} from './auth_credential.js';
 import {AuthScheme} from './auth_schemes.js';
 
 /**
+ * Prefix for the function call id ADK uses when it asks the client for a
+ * toolset-level credential. `AuthPreprocessor` uses it to tell a toolset auth
+ * request apart from a tool auth request, which must not be resumed as a tool
+ * call.
+ */
+export const TOOLSET_AUTH_CREDENTIAL_ID_PREFIX = '_adk_toolset_auth_';
+
+/**
  * The auth config sent by tool asking client to collect auth credentials and
  * adk and client will help to fill in the response.
  */

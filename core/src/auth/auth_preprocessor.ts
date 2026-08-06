@@ -21,9 +21,7 @@ import {State} from '../sessions/state.js';
 import {BaseTool} from '../tools/base_tool.js';
 import {camelCaseKeys} from '../utils/case_utils.js';
 import {AuthHandler} from './auth_handler.js';
-import {AuthConfig} from './auth_tool.js';
-
-const TOOLSET_AUTH_CREDENTIAL_ID_PREFIX = '_adk_toolset_auth_';
+import {AuthConfig, TOOLSET_AUTH_CREDENTIAL_ID_PREFIX} from './auth_tool.js';
 
 interface RequestCredentialArgs {
   authConfig?: AuthConfig;

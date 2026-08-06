@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
+  AuthConfig,
   BasePlugin,
   BaseTool,
   createEvent,
@@ -23,6 +24,7 @@ import {FunctionCall} from '@google/genai';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {z} from 'zod';
 import {
+  buildAuthRequestEvent,
   findEventByFunctionCallId,
   findMatchingFunctionCall,
   generateClientFunctionCallId,
@@ -505,6 +507,48 @@ describe('generateAuthEvent', () => {
     expect(call2).toBeDefined();
     expect(call2!.functionCall!.name).toBe('adk_request_credential');
     expect(call2!.functionCall!.args!['auth_config']).toBe('auth_config_2');
+  });
+});
+
+describe('buildAuthRequestEvent', () => {
+  let invocationContext: InvocationContext;
+
+  const authConfig: AuthConfig = {
+    credentialKey: 'key_1',
+    authScheme: {type: 'apiKey', name: 'X-API-Key', in: 'header'},
+  };
+
+  beforeEach(() => {
+    invocationContext = new InvocationContext({
+      invocationId: 'inv_123',
+      session: {} as Session,
+      agent: new LlmAgent({name: 'test_agent', model: 'test_model'}),
+      pluginManager: new PluginManager(),
+    });
+  });
+
+  it('should return undefined for an empty record', () => {
+    expect(
+      buildAuthRequestEvent(invocationContext, {}, 'model'),
+    ).toBeUndefined();
+  });
+
+  it('should build one long-running function call per requested config', () => {
+    const event = buildAuthRequestEvent(
+      invocationContext,
+      {'id_1': authConfig, 'id_2': authConfig},
+      'model',
+    );
+
+    expect(event).toBeDefined();
+    expect(event!.content!.role).toBe('model');
+    const parts = event!.content!.parts!;
+    expect(
+      parts.map((part) => part.functionCall!.args!['function_call_id']),
+    ).toEqual(['id_1', 'id_2']);
+    expect(event!.longRunningToolIds).toEqual(
+      parts.map((part) => part.functionCall!.id),
+    );
   });
 });
 

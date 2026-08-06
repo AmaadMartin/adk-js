@@ -8,6 +8,7 @@ import {Content, createUserContent, FunctionCall, Part} from '@google/genai';
 import {isEmpty} from 'lodash-es';
 
 import {InvocationContext} from '../agents/invocation_context.js';
+import type {AuthConfig} from '../auth/auth_tool.js';
 import {
   createEvent,
   Event,
@@ -80,16 +81,39 @@ export function generateAuthEvent(
   invocationContext: InvocationContext,
   functionResponseEvent: Event,
 ): Event | undefined {
-  if (
-    !functionResponseEvent.actions?.requestedAuthConfigs ||
-    isEmpty(functionResponseEvent.actions.requestedAuthConfigs)
-  ) {
+  return buildAuthRequestEvent(
+    invocationContext,
+    functionResponseEvent.actions.requestedAuthConfigs,
+    functionResponseEvent.content?.role,
+  );
+}
+
+/**
+ * Builds an event that asks the client for one credential per requested auth
+ * config.
+ *
+ * Each entry becomes an `adk_request_credential` function call keyed by the
+ * record's key, and every generated call id is marked long running so the
+ * runtime waits for the client's response.
+ *
+ * @param invocationContext The invocation context.
+ * @param requestedAuthConfigs The auth configs to request, keyed by the id the
+ *     response must be correlated with.
+ * @param role The content role of the generated event.
+ * @return The event, or `undefined` when nothing was requested.
+ */
+export function buildAuthRequestEvent(
+  invocationContext: InvocationContext,
+  requestedAuthConfigs: Record<string, AuthConfig>,
+  role: string | undefined,
+): Event | undefined {
+  if (isEmpty(requestedAuthConfigs)) {
     return undefined;
   }
   const parts: Part[] = [];
   const longRunningToolIds = new Set<string>();
   for (const [functionCallId, authConfig] of Object.entries(
-    functionResponseEvent.actions.requestedAuthConfigs,
+    requestedAuthConfigs,
   )) {
     const requestEucFunctionCall: FunctionCall = {
       name: REQUEST_EUC_FUNCTION_CALL_NAME,
@@ -109,7 +133,7 @@ export function generateAuthEvent(
     branch: invocationContext.branch,
     content: {
       parts: parts,
-      role: functionResponseEvent.content!.role,
+      role,
     },
     longRunningToolIds: Array.from(longRunningToolIds),
   });
