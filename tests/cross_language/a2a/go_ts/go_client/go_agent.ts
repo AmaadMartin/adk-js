@@ -26,11 +26,10 @@ export class GoAgent {
   }
 
   public async *run(userMessage: string): AsyncGenerator<Event, void, unknown> {
-    const child = spawn(
-      this.binaryPath,
-      [`-agent_url=${this.agentUrl}`, `-agent_input=${userMessage}`],
-      {env: process.env},
-    );
+    const child = spawn(this.binaryPath, [
+      `-agent_url=${this.agentUrl}`,
+      `-agent_input=${userMessage}`,
+    ]);
 
     let stderr = '';
     child.stderr.on('data', (data) => {

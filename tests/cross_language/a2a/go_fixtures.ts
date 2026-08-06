@@ -17,13 +17,10 @@ export interface GoFixture {
   binaryPath: string;
 }
 
-/**
- * Resolved from `import.meta.url` rather than `__dirname` because this module
- * is imported both by the Vitest global setup and by test-worker code.
- */
+/** Directory of the a2a fixtures. */
 const A2A_DIR = path.dirname(fileURLToPath(import.meta.url));
 
-const BIN_DIR = path.resolve(A2A_DIR, '..', '.bin');
+const BIN_DIR = path.join(A2A_DIR, '.bin');
 
 const EXE_SUFFIX = process.platform === 'win32' ? '.exe' : '';
 
@@ -49,17 +46,10 @@ export const GO_FIXTURES: readonly GoFixture[] = [
  * prints its own diagnostics, and the thrown error names the failing command.
  */
 export function buildGoFixture(fixture: GoFixture): void {
+  const options = {cwd: fixture.moduleDir, stdio: 'inherit'} as const;
   if (!fs.existsSync(path.join(fixture.moduleDir, 'go.sum'))) {
-    execFileSync('go', ['mod', 'tidy'], {
-      cwd: fixture.moduleDir,
-      stdio: 'inherit',
-      env: process.env,
-    });
+    execFileSync('go', ['mod', 'tidy'], options);
   }
   fs.mkdirSync(path.dirname(fixture.binaryPath), {recursive: true});
-  execFileSync('go', ['build', '-o', fixture.binaryPath, '.'], {
-    cwd: fixture.moduleDir,
-    stdio: 'inherit',
-    env: process.env,
-  });
+  execFileSync('go', ['build', '-o', fixture.binaryPath, '.'], options);
 }

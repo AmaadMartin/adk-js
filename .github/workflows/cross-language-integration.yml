@@ -25,12 +25,6 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Install Go dependencies
-        shell: bash
-        run: |
-          (cd tests/cross_language/a2a/go_ts/go_client && go mod tidy)
-          (cd tests/cross_language/a2a/ts_go/go_backend && go mod tidy)
-
       - name: Build packages
         run: npm run build
 
