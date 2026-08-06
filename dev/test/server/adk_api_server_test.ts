@@ -18,6 +18,8 @@ import {
   InMemorySessionService,
   InvocationContext,
   LlmAgent,
+  Logger,
+  LogLevel,
   Runner,
   Session,
 } from '@google/adk';
@@ -129,6 +131,56 @@ class HttpClient {
       data,
       text,
     };
+  }
+}
+
+/** Time given to node to classify a dropped promise as unhandled. */
+const REJECTION_SETTLE_MS = 50;
+
+/**
+ * Captures process-level unhandled rejections. A promise express drops is
+ * observable nowhere else, so this tells "the request was answered" apart from
+ * "the request was answered and nothing leaked".
+ */
+function trackUnhandledRejections(): {
+  settled: () => Promise<unknown[]>;
+  stop: () => void;
+} {
+  const seen: unknown[] = [];
+  const listener = (reason: unknown) => {
+    seen.push(reason);
+  };
+  process.on('unhandledRejection', listener);
+
+  return {
+    async settled(): Promise<unknown[]> {
+      await new Promise((resolve) => setTimeout(resolve, REJECTION_SETTLE_MS));
+      return seen;
+    },
+    stop(): void {
+      process.off('unhandledRejection', listener);
+    },
+  };
+}
+
+/**
+ * A logger that throws on one message. It injects a failure into the Reasoning
+ * Engine raw-body branch, whose other failure modes the inner try/catch
+ * already answers.
+ */
+class ExplodingLogger implements Logger {
+  constructor(private readonly failOn: string) {}
+
+  setLogLevel(_level: LogLevel): void {}
+  log(_level: LogLevel, ..._args: unknown[]): void {}
+  debug(..._args: unknown[]): void {}
+  warn(..._args: unknown[]): void {}
+  error(..._args: unknown[]): void {}
+
+  info(...args: unknown[]): void {
+    if (args.join(' ').includes(this.failOn)) {
+      throw new Error('logger exploded');
+    }
   }
 }
 
@@ -1188,6 +1240,19 @@ describe('AdkWebServer', () => {
         agentLoader.getAgentFile = originalGetAgentFile;
       }
     });
+
+    it('should fall back to an empty raw body that will not parse', async () => {
+      const response = await fetch(`${server.url}/api/reasoning_engine`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json,application/json'},
+        body: '{not json',
+      });
+
+      expect(response.status).toBe(400);
+      expect(((await response.json()) as {error: string}).error).toContain(
+        'appName is required',
+      );
+    });
   });
 
   describe('Startup', () => {
@@ -1211,6 +1276,27 @@ describe('AdkWebServer', () => {
         );
       } finally {
         await duplicateServer.stop().catch(() => {});
+      }
+    });
+
+    it('should reject when mounting the A2A surface fails', async () => {
+      const originalListAgents = agentLoader.listAgents;
+      agentLoader.listAgents = () =>
+        Promise.reject(new Error('agent scan failed'));
+
+      const a2aServer = new AdkApiServer({
+        agentLoader,
+        sessionService,
+        memoryService,
+        artifactService,
+        a2a: true,
+      });
+
+      try {
+        await expect(a2aServer.start()).rejects.toThrow('agent scan failed');
+      } finally {
+        agentLoader.listAgents = originalListAgents;
+        await a2aServer.stop();
       }
     });
 
@@ -1252,6 +1338,102 @@ describe('AdkWebServer', () => {
         expect(address.address).toBe('127.0.0.1');
       } finally {
         await specificServer.stop();
+      }
+    });
+  });
+
+  describe('Async handler failures', () => {
+    const newMessage = {parts: [{text: 'Hello'}], role: 'user'};
+
+    it('should answer 500 when the run_sse session lookup rejects', async () => {
+      const getSession = vi
+        .spyOn(sessionService, 'getSession')
+        .mockRejectedValue(new Error('session store offline'));
+      const rejections = trackUnhandledRejections();
+
+      try {
+        const response = await fetch(`${server.url}/run_sse`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            appName: 'testApp',
+            userId: 'testUser',
+            sessionId: 'sessionId',
+            newMessage,
+          }),
+        });
+
+        expect(response.status).toBe(500);
+        expect(((await response.json()) as {error: string}).error).toContain(
+          'session store offline',
+        );
+        expect(await rejections.settled()).toEqual([]);
+      } finally {
+        rejections.stop();
+        getSession.mockRestore();
+      }
+    });
+
+    it('should answer 500 when the run session lookup rejects', async () => {
+      const getSession = vi
+        .spyOn(sessionService, 'getSession')
+        .mockRejectedValue(new Error('session store offline'));
+      const rejections = trackUnhandledRejections();
+
+      try {
+        const response = await fetch(`${server.url}/run`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            appName: 'testApp',
+            userId: 'testUser',
+            sessionId: 'sessionId',
+            newMessage,
+          }),
+        });
+
+        expect(response.status).toBe(500);
+        expect(((await response.json()) as {error: string}).error).toContain(
+          'session store offline',
+        );
+        expect(await rejections.settled()).toEqual([]);
+      } finally {
+        rejections.stop();
+        getSession.mockRestore();
+      }
+    });
+
+    it('should answer 500 when the reasoning_engine raw body path throws', async () => {
+      const failingServer = new AdkApiServer({
+        agentLoader,
+        sessionService,
+        memoryService,
+        artifactService,
+        logger: new ExplodingLogger('Received Reasoning Engine raw body'),
+      });
+      await failingServer.start();
+      const rejections = trackUnhandledRejections();
+
+      try {
+        const response = await fetch(
+          `${failingServer.url}/api/reasoning_engine`,
+          {
+            method: 'POST',
+            // A content type express's JSON parser does not recognise, which
+            // is what selects the raw-body branch.
+            headers: {'Content-Type': 'application/json,application/json'},
+            body: JSON.stringify({input: {appName: 'testApp'}}),
+          },
+        );
+
+        expect(response.status).toBe(500);
+        expect(((await response.json()) as {error: string}).error).toContain(
+          'logger exploded',
+        );
+        expect(await rejections.settled()).toEqual([]);
+      } finally {
+        rejections.stop();
+        await failingServer.stop();
       }
     });
   });
