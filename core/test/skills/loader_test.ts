@@ -245,6 +245,122 @@ Instructions`,
 
       await fs.rm(tempDir, {recursive: true, force: true});
     });
+
+    it('keys nested resources by their POSIX relative path', async () => {
+      tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-skill-test-'));
+      const skillDir = path.join(tempDir, 'test-skill');
+      await fs.mkdir(skillDir);
+
+      await fs.writeFile(
+        path.join(skillDir, 'SKILL.md'),
+        `---
+name: test-skill
+description: A test skill
+---
+Instructions`,
+      );
+
+      // path.join builds the fixture with the host separator, so the
+      // assertions below are meaningful on Windows.
+      await fs.mkdir(path.join(skillDir, 'scripts', 'sub'), {recursive: true});
+      await fs.mkdir(path.join(skillDir, 'references', 'nested', 'deep'), {
+        recursive: true,
+      });
+      await fs.mkdir(path.join(skillDir, 'assets', 'img'), {recursive: true});
+
+      await fs.writeFile(
+        path.join(skillDir, 'scripts', 'sub', 'setup.js'),
+        'export const ready = true;',
+      );
+      await fs.writeFile(
+        path.join(skillDir, 'references', 'nested', 'deep', 'guide.md'),
+        'guide content',
+      );
+      await fs.writeFile(
+        path.join(skillDir, 'assets', 'img', 'logo.png'),
+        'binary content',
+      );
+
+      const skill = await loadSkillFromDir(skillDir);
+
+      expect(Object.keys(skill.resources!.scripts!)).toEqual(['sub/setup.js']);
+      expect(Object.keys(skill.resources!.references!)).toEqual([
+        'nested/deep/guide.md',
+      ]);
+      expect(Object.keys(skill.resources!.assets!)).toEqual(['img/logo.png']);
+
+      expect(skill.resources?.scripts?.['sub/setup.js']).toEqual({
+        src: 'export const ready = true;',
+      });
+      expect(skill.resources?.references?.['nested/deep/guide.md']).toBe(
+        'guide content',
+      );
+      expect(skill.resources?.assets?.['img/logo.png']).toBe('binary content');
+
+      await fs.rm(tempDir, {recursive: true, force: true});
+    });
+
+    it('keys a top-level resource without a separator', async () => {
+      tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-skill-test-'));
+      const skillDir = path.join(tempDir, 'test-skill');
+      await fs.mkdir(skillDir);
+
+      await fs.writeFile(
+        path.join(skillDir, 'SKILL.md'),
+        `---
+name: test-skill
+description: A test skill
+---
+Instructions`,
+      );
+
+      await fs.mkdir(path.join(skillDir, 'scripts'));
+      await fs.writeFile(
+        path.join(skillDir, 'scripts', 'run.sh'),
+        'echo hello',
+      );
+
+      const skill = await loadSkillFromDir(skillDir);
+
+      expect(Object.keys(skill.resources!.scripts!)).toEqual(['run.sh']);
+
+      await fs.rm(tempDir, {recursive: true, force: true});
+    });
+
+    // Windows forbids '\' in a file name, so only POSIX hosts can create this
+    // fixture.
+    it.skipIf(os.platform() === 'win32')(
+      'preserves a backslash inside a POSIX file name',
+      async () => {
+        tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-skill-test-'));
+        const skillDir = path.join(tempDir, 'test-skill');
+        await fs.mkdir(skillDir);
+
+        await fs.writeFile(
+          path.join(skillDir, 'SKILL.md'),
+          `---
+name: test-skill
+description: A test skill
+---
+Instructions`,
+        );
+
+        await fs.mkdir(path.join(skillDir, 'references'));
+        await fs.writeFile(
+          path.join(skillDir, 'references', 'a\\b.txt'),
+          'backslash content',
+        );
+
+        const skill = await loadSkillFromDir(skillDir);
+
+        expect(Object.keys(skill.resources!.references!)).toEqual(['a\\b.txt']);
+        expect(skill.resources?.references?.['a\\b.txt']).toBe(
+          'backslash content',
+        );
+
+        await fs.rm(tempDir, {recursive: true, force: true});
+      },
+    );
   });
 
   describe('validateSkillDir', () => {
@@ -672,6 +788,54 @@ Instruction body`;
       expect(() => loadSkillFromZipBuffer(zip.toBuffer())).toThrow(
         'SKILL.md not found in zipped filesystem.',
       );
+    });
+  });
+
+  describe('loader parity', () => {
+    const skillMd = `---
+name: test-skill
+description: A test skill
+---
+Instructions`;
+
+    const layout = [
+      ['references', 'nested/deep/guide.md', 'guide content'],
+      ['assets', 'img/logo.png', 'binary content'],
+      ['scripts', 'sub/setup.js', 'export const ready = true;'],
+    ] as const;
+
+    it('gives a directory skill and a zip skill the same resource keys', async () => {
+      const tempDir = await fs.mkdtemp(
+        path.join(os.tmpdir(), 'adk-skill-test-'),
+      );
+      const skillDir = path.join(tempDir, 'test-skill');
+      await fs.mkdir(skillDir);
+      await fs.writeFile(path.join(skillDir, 'SKILL.md'), skillMd);
+
+      const zip = new AdmZip();
+      zip.addFile('SKILL.md', Buffer.from(skillMd, 'utf-8'));
+
+      for (const [tree, relativePath, content] of layout) {
+        const target = path.join(skillDir, tree, ...relativePath.split('/'));
+        await fs.mkdir(path.dirname(target), {recursive: true});
+        await fs.writeFile(target, content);
+        zip.addFile(`${tree}/${relativePath}`, Buffer.from(content, 'utf-8'));
+      }
+
+      const fromDir = await loadSkillFromDir(skillDir);
+      const fromZip = loadSkillFromZipBuffer(zip.toBuffer());
+
+      expect(Object.keys(fromDir.resources!.references!)).toEqual(
+        Object.keys(fromZip.resources!.references!),
+      );
+      expect(Object.keys(fromDir.resources!.assets!)).toEqual(
+        Object.keys(fromZip.resources!.assets!),
+      );
+      expect(Object.keys(fromDir.resources!.scripts!)).toEqual(
+        Object.keys(fromZip.resources!.scripts!),
+      );
+
+      await fs.rm(tempDir, {recursive: true, force: true});
     });
   });
 });
