@@ -214,16 +214,10 @@ const TEST_AGENT = new TestAgent({
   ],
 });
 
-const COMPILED_AGENT_PATH = '/tmp/adk_agent_loader-test/testApp.mjs';
-
-/**
- * Test double for the `AgentFile` the loader lends out. It mirrors the real
- * disposal semantics: once disposed, `getFilePath()` throws for good.
- */
+/** Test double for the `AgentFile` the loader lends out. */
 interface AgentFileStub {
   disposeCount: number;
   load: () => Promise<BaseAgent>;
-  getFilePath: () => string;
   [Symbol.asyncDispose]: () => Promise<void>;
 }
 
@@ -231,12 +225,6 @@ function createAgentFileStub(): AgentFileStub {
   const stub: AgentFileStub = {
     disposeCount: 0,
     load: () => Promise.resolve(TEST_AGENT),
-    getFilePath: () => {
-      if (stub.disposeCount > 0) {
-        throw new Error('Agent is disposed and can not be used');
-      }
-      return COMPILED_AGENT_PATH;
-    },
     [Symbol.asyncDispose]: () => {
       stub.disposeCount++;
       return Promise.resolve();
@@ -1014,11 +1002,6 @@ describe('AdkWebServer', () => {
       }
     }
 
-    function expectAgentFileNotDisposed(): void {
-      expect(agentFile.disposeCount).toBe(0);
-      expect(() => agentFile.getFilePath()).not.toThrow();
-    }
-
     beforeEach(async () => {
       await sessionService.createSession({
         appName: 'testApp',
@@ -1031,20 +1014,20 @@ describe('AdkWebServer', () => {
       await postRun();
       await postRun();
 
-      expectAgentFileNotDisposed();
+      expect(agentFile.disposeCount).toBe(0);
     });
 
     it('leaves the loader-owned agent file usable after two sequential agent-graph requests', async () => {
       await getGraph(2);
 
-      expectAgentFileNotDisposed();
+      expect(agentFile.disposeCount).toBe(0);
     });
 
     it('does not dispose the loader-owned agent file when a run and a graph request share an app', async () => {
       await postRun();
       await getGraph(1);
 
-      expectAgentFileNotDisposed();
+      expect(agentFile.disposeCount).toBe(0);
     });
   });
 
