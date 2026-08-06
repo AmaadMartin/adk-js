@@ -4,7 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Context, OpenAPIToolset} from '@google/adk';
+import {
+  Context,
+  createSession,
+  InvocationContext,
+  LoopAgent,
+  OpenAPIToolset,
+  PluginManager,
+} from '@google/adk';
 import * as fs from 'fs';
 import * as path from 'path';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
@@ -122,5 +129,66 @@ describe('OpenAPIToolset Integration', () => {
     expect(result).toEqual({
       error: 'Failed to execute API call: Network error',
     });
+  });
+
+  it('should snake_case the tool and argument names but send the spec header name', async () => {
+    const toolset = new OpenAPIToolset({
+      specDict: {
+        openapi: '3.0.0',
+        info: {title: 'Pet API', version: '1.0.0'},
+        servers: [{url: 'https://pets.example.com'}],
+        paths: {
+          '/pet': {
+            get: {
+              operationId: 'getPetByID',
+              parameters: [
+                {
+                  name: 'X-Request-Id',
+                  in: 'header',
+                  required: true,
+                  schema: {type: 'string'},
+                },
+              ],
+              responses: {'200': {description: 'OK'}},
+            },
+          },
+        },
+      },
+    });
+    const [tool] = await toolset.getTools();
+    if (!tool) {
+      expect.fail('the toolset produced no tool for /pet');
+    }
+
+    expect(tool.name).toBe('get_pet_by_id');
+    const declaration = tool._getDeclaration();
+    expect(Object.keys(declaration?.parameters?.properties ?? {})).toEqual([
+      'x_request_id',
+    ]);
+
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      new Response(JSON.stringify({id: 1}), {
+        headers: {'content-type': 'application/json'},
+      }),
+    );
+
+    await tool.runAsync({
+      args: {x_request_id: 'abc'},
+      toolContext: new Context({
+        invocationContext: new InvocationContext({
+          invocationId: 'inv-1',
+          agent: new LoopAgent({name: 'test_agent'}),
+          session: createSession({id: 'session-1', appName: 'test-app'}),
+          pluginManager: new PluginManager(),
+        }),
+      }),
+    });
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'https://pets.example.com/pet',
+      expect.objectContaining({
+        headers: expect.objectContaining({'X-Request-Id': 'abc'}),
+      }),
+    );
   });
 });
