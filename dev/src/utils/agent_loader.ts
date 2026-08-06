@@ -556,7 +556,11 @@ function isJsFile(fileExt?: string): boolean {
 }
 
 async function getDirFiles(dir: string): Promise<FileMetadata[]> {
-  const files = await fsPromises.readdir(dir);
+  // Dependency trees and dotfiles are tooling, never agent sources. Skipping
+  // them by name avoids a `stat` per installed package.
+  const files = (await fsPromises.readdir(dir)).filter(
+    (name) => !name.startsWith('.') && name !== 'node_modules',
+  );
 
   return await Promise.all(
     files.map((filePath) => getFileMetadata(path.join(dir, filePath))),
