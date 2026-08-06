@@ -5,7 +5,7 @@
  */
 
 import {LogLevel, setLogLevel} from '@google/adk';
-import {CommanderError} from 'commander';
+import {Command, CommanderError} from 'commander';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {createProgram} from '../../src/cli/cli.js';
 import {createAgent} from '../../src/cli/cli_create.js';
@@ -152,9 +152,90 @@ describe('CLI Entrypoint', () => {
         expect.fail('expected commander to reject an unknown subcommand');
       }
 
-      expect(err.code).toBe('commander.excessArguments');
+      expect(err.code).toBe('commander.unknownCommand');
       expect(err.exitCode).toBe(1);
       expect(stdout).toBe('');
+    });
+  });
+
+  describe('unknown subcommand', () => {
+    let stdout: string;
+    let stderr: string;
+
+    const captureOutputAndExit = (cmd: Command) => {
+      cmd.exitOverride();
+      cmd.configureOutput({
+        writeOut: (str) => {
+          stdout += str;
+        },
+        writeErr: (str) => {
+          stderr += str;
+        },
+      });
+      cmd.commands.forEach(captureOutputAndExit);
+    };
+
+    beforeEach(() => {
+      stdout = '';
+      stderr = '';
+      captureOutputAndExit(program);
+    });
+
+    const parseExpectingError = async (
+      args: string[],
+    ): Promise<CommanderError | undefined> => {
+      try {
+        await program.parseAsync(['node', 'cli_entrypoint.js', ...args]);
+      } catch (e: unknown) {
+        if (e instanceof CommanderError) {
+          return e;
+        }
+        throw e;
+      }
+      return undefined;
+    };
+
+    it('should name the unrecognised subcommand and skip the root action', async () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      const err = await parseExpectingError(['bogus']);
+      if (!err) {
+        expect.fail('expected commander to reject an unknown subcommand');
+      }
+
+      expect(stderr).toContain("error: unknown command 'bogus'");
+      expect(err.code).toBe('commander.unknownCommand');
+      expect(err.exitCode).toBe(1);
+      expect(logSpy).not.toHaveBeenCalledWith('1.0.0-test');
+    });
+
+    it('should report only the first operand of an unrecognised subcommand', async () => {
+      const err = await parseExpectingError(['bogus', 'extra']);
+      if (!err) {
+        expect.fail('expected commander to reject an unknown subcommand');
+      }
+
+      expect(stderr).toContain("error: unknown command 'bogus'");
+      expect(stderr).not.toContain('extra');
+      expect(err.code).toBe('commander.unknownCommand');
+      expect(err.exitCode).toBe(1);
+    });
+
+    it('should leave a bare invocation on the non-error path', async () => {
+      expect(await parseExpectingError([])).toBeUndefined();
+
+      expect(stderr).toBe('');
+      expect(stdout).toContain('Usage: adk');
+    });
+
+    it('should still reject excess arguments on a subcommand', async () => {
+      const err = await parseExpectingError(['create', 'x', 'y']);
+      if (!err) {
+        expect.fail('expected commander to reject excess subcommand arguments');
+      }
+
+      expect(err.code).toBe('commander.excessArguments');
+      expect(err.exitCode).toBe(1);
     });
   });
 
