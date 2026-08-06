@@ -92,7 +92,7 @@ export function generateAuthEvent(
   return buildAuthRequestEvent(
     invocationContext,
     functionResponseEvent.actions.requestedAuthConfigs,
-    {role: functionResponseEvent.content!.role},
+    functionResponseEvent.content!.role,
   );
 }
 
@@ -106,14 +106,13 @@ export function generateAuthEvent(
  *
  * @param invocationContext The current invocation context.
  * @param authRequests The requested configs, keyed by function call id.
- * @param options.author The event author. Defaults to the agent name.
- * @param options.role The content role. Defaults to `undefined`.
+ * @param role The content role. Defaults to `undefined`.
  * @return The auth request event.
  */
 export function buildAuthRequestEvent(
   invocationContext: InvocationContext,
   authRequests: Record<string, AuthConfig>,
-  options?: {author?: string; role?: string},
+  role?: string,
 ): Event {
   const parts: Part[] = [];
   const longRunningToolIds = new Set<string>();
@@ -132,11 +131,11 @@ export function buildAuthRequestEvent(
 
   return createEvent({
     invocationId: invocationContext.invocationId,
-    author: options?.author ?? invocationContext.agent.name,
+    author: invocationContext.agent.name,
     branch: invocationContext.branch,
     content: {
       parts: parts,
-      role: options?.role,
+      role,
     },
     longRunningToolIds: Array.from(longRunningToolIds),
   });

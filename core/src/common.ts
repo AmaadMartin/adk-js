@@ -88,11 +88,7 @@ export type {
   ServiceAccountCredential,
 } from './auth/auth_credential.js';
 export {AuthHandler} from './auth/auth_handler.js';
-export {
-  AUTH_PREPROCESSOR,
-  AuthPreprocessor,
-  TOOLSET_AUTH_CREDENTIAL_ID_PREFIX,
-} from './auth/auth_preprocessor.js';
+export {AUTH_PREPROCESSOR, AuthPreprocessor} from './auth/auth_preprocessor.js';
 export {AuthProviderRegistry} from './auth/auth_provider_registry.js';
 export {OAuthGrantType} from './auth/auth_schemes.js';
 export type {AuthScheme, OpenIdConnectWithConfig} from './auth/auth_schemes.js';

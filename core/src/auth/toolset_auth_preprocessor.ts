@@ -12,12 +12,9 @@ import {Event} from '../events/event.js';
 import {State} from '../sessions/state.js';
 import {isBaseToolset} from '../tools/base_toolset.js';
 import {logger} from '../utils/logger.js';
-import {AuthHandler} from './auth_handler.js';
+import {AuthHandler, requiresCredentialExchange} from './auth_handler.js';
 import {TOOLSET_AUTH_CREDENTIAL_ID_PREFIX} from './auth_preprocessor.js';
 import {AuthConfig} from './auth_tool.js';
-
-/** Auth schemes whose raw credential must be exchanged before it can be used. */
-const EXCHANGEABLE_AUTH_SCHEME_TYPES = ['oauth2', 'openIdConnect'];
 
 /**
  * Returns whether a usable credential is already available for `authConfig`.
@@ -26,11 +23,10 @@ function hasCredential(authConfig: AuthConfig, state: State): boolean {
   if (new AuthHandler(authConfig).getAuthResponse(state)) {
     return true;
   }
-  // A raw API key or bearer token is usable as supplied, so it needs no user
-  // interaction. A raw OAuth2 credential is only a client id and secret, so it
-  // never satisfies the check.
+  // A raw credential that needs no exchange is usable as supplied, so it needs
+  // no user interaction.
   return (
-    !EXCHANGEABLE_AUTH_SCHEME_TYPES.includes(authConfig.authScheme.type) &&
+    !requiresCredentialExchange(authConfig.authScheme) &&
     authConfig.rawAuthCredential !== undefined
   );
 }
@@ -93,9 +89,7 @@ export class ToolsetAuthPreprocessor extends BaseLlmRequestProcessor {
       return;
     }
 
-    yield buildAuthRequestEvent(invocationContext, authRequests, {
-      author: agent.name,
-    });
+    yield buildAuthRequestEvent(invocationContext, authRequests);
     invocationContext.endInvocation = true;
   }
 }

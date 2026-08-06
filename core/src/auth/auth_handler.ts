@@ -8,8 +8,21 @@ import {State} from '../sessions/state.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
 
 import {AuthCredential} from './auth_credential.js';
+import {AuthScheme} from './auth_schemes.js';
 import {AuthConfig} from './auth_tool.js';
 import {OAuth2CredentialExchanger} from './oauth2/oauth2_credential_exchanger.js';
+
+/** Auth scheme types whose credential must be exchanged before it can be used. */
+const EXCHANGEABLE_AUTH_SCHEME_TYPES = ['oauth2', 'openIdConnect'];
+
+/**
+ * Returns whether the scheme's raw credential must be exchanged before a
+ * caller can use it. An OAuth2 raw credential is a client id and secret, not a
+ * token; an API key or bearer token is usable as supplied.
+ */
+export function requiresCredentialExchange(authScheme: AuthScheme): boolean {
+  return EXCHANGEABLE_AUTH_SCHEME_TYPES.includes(authScheme.type);
+}
 
 /**
  * A handler that handles the auth flow in Agent Development Kit to help
@@ -28,8 +41,7 @@ export class AuthHandler {
   async parseAndStoreAuthResponse(state: State): Promise<void> {
     const credentialKey = 'temp:' + this.authConfig.credentialKey;
 
-    const authSchemeType = this.authConfig.authScheme.type;
-    if (!['oauth2', 'openIdConnect'].includes(authSchemeType)) {
+    if (!requiresCredentialExchange(this.authConfig.authScheme)) {
       state.set(credentialKey, this.authConfig.exchangedAuthCredential);
 
       return;
@@ -48,7 +60,7 @@ export class AuthHandler {
   generateAuthRequest(): AuthConfig {
     const authSchemeType = this.authConfig.authScheme.type;
 
-    if (!['oauth2', 'openIdConnect'].includes(authSchemeType)) {
+    if (!requiresCredentialExchange(this.authConfig.authScheme)) {
       return this.authConfig;
     }
 

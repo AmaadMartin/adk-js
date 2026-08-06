@@ -573,22 +573,12 @@ describe('buildAuthRequestEvent', () => {
     expect(event.longRunningToolIds).toEqual(ids);
   });
 
-  it('should default the author to the agent name', () => {
+  it('should set the author to the agent name', () => {
     const event = buildAuthRequestEvent(invocationContext, {
       'call_1': apiKeyConfig,
     });
 
     expect(event.author).toBe('test_agent');
-  });
-
-  it('should use the author from the options', () => {
-    const event = buildAuthRequestEvent(
-      invocationContext,
-      {'call_1': apiKeyConfig},
-      {author: 'other_agent'},
-    );
-
-    expect(event.author).toBe('other_agent');
   });
 
   it('should leave the content role undefined by default', () => {
@@ -599,11 +589,11 @@ describe('buildAuthRequestEvent', () => {
     expect(event.content!.role).toBeUndefined();
   });
 
-  it('should use the content role from the options', () => {
+  it('should use the content role it is given', () => {
     const event = buildAuthRequestEvent(
       invocationContext,
       {'call_1': apiKeyConfig},
-      {role: 'model'},
+      'model',
     );
 
     expect(event.content!.role).toBe('model');

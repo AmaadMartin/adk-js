@@ -30,7 +30,6 @@ import {
   RunAsyncToolRequest,
   Session,
   ToolProcessLlmRequest,
-  TOOLSET_AUTH_CREDENTIAL_ID_PREFIX,
   TOOLSET_AUTH_PREPROCESSOR,
 } from '@google/adk';
 import {Content, Schema, Type} from '@google/genai';
@@ -38,6 +37,7 @@ import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
 import {TOOL_FILTER_REQUEST_PROCESSOR} from '../../src/agents/processors/tool_filter_request_processor.js';
+import {TOOLSET_AUTH_CREDENTIAL_ID_PREFIX} from '../../src/auth/auth_preprocessor.js';
 
 class MockLlmConnection implements BaseLlmConnection {
   sendHistory(_history: Content[]): Promise<void> {

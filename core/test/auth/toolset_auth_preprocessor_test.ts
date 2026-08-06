@@ -18,13 +18,13 @@ import {
   LlmAgent,
   PluginManager,
   SequentialAgent,
-  TOOLSET_AUTH_CREDENTIAL_ID_PREFIX,
   TOOLSET_AUTH_PREPROCESSOR,
   ToolUnion,
 } from '@google/adk';
 import {FunctionCall} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {REQUEST_EUC_FUNCTION_CALL_NAME} from '../../src/agents/functions.js';
+import {TOOLSET_AUTH_CREDENTIAL_ID_PREFIX} from '../../src/auth/auth_preprocessor.js';
 
 const OAUTH2_SCHEME: AuthScheme = {
   type: 'oauth2',
