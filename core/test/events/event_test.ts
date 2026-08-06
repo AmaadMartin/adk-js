@@ -339,6 +339,22 @@ describe('Event Utils', () => {
         NestedKey: 'value2',
       });
     });
+
+    it('converts the agent resumption actions, including the keys inside agent_state', () => {
+      // Unlike state_delta, the keys of an agent state are ADK-declared schema
+      // fields rather than user data, so they are deliberately converted.
+      const snakeEvent = {
+        id: '123',
+        invocation_id: 'inv1',
+        actions: {
+          end_of_agent: true,
+          agent_state: {times_looped: 1},
+        },
+      };
+      const camelEvent = transformToCamelCaseEvent(snakeEvent);
+      expect(camelEvent.actions.endOfAgent).toBe(true);
+      expect(camelEvent.actions.agentState).toEqual({timesLooped: 1});
+    });
   });
 
   describe('transformToSnakeCaseEvent', () => {
@@ -372,6 +388,21 @@ describe('Event Utils', () => {
         'preserve-my-key': 'value',
         NestedKey: 'value2',
       });
+    });
+
+    it('converts the agent resumption actions, including the keys inside agentState', () => {
+      const camelEvent = createEvent({
+        id: '123',
+        invocationId: 'inv1',
+        actions: createEventActions({
+          endOfAgent: true,
+          agentState: {timesLooped: 1},
+        }),
+      });
+      const snakeEvent = transformToSnakeCaseEvent(camelEvent);
+      const actions = snakeEvent.actions as Record<string, unknown>;
+      expect(actions.end_of_agent).toBe(true);
+      expect(actions.agent_state).toEqual({times_looped: 1});
     });
   });
 

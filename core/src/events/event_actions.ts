@@ -4,6 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+// Type-only: erased at compile time, so it cannot create a runtime import
+// cycle (base_agent.ts -> events/event.ts -> events/event_actions.ts).
+import type {BaseAgentState} from '../agents/base_agent.js';
 import {AuthConfig} from '../auth/auth_tool.js';
 import {ToolConfirmation} from '../tools/tool_confirmation.js';
 
@@ -56,6 +59,21 @@ export interface EventActions {
    * call id.
    */
   requestedToolConfirmations: {[key: string]: ToolConfirmation};
+
+  /**
+   * If true, the agent that authored this event has finished its current run.
+   *
+   * There can be multiple events with `endOfAgent` set for the same agent
+   * within one invocation when a loop re-runs it. This should only be set by
+   * ADK workflow.
+   */
+  endOfAgent?: boolean;
+
+  /**
+   * The agent state at this event, used to checkpoint and resume the agent.
+   * This should only be set by ADK workflow.
+   */
+  agentState?: BaseAgentState;
 }
 
 /**
@@ -65,8 +83,8 @@ export interface EventActions {
  * @param state - Optional partial {@link EventActions} whose properties
  *   override the defaults. Dictionary fields (`stateDelta`, `artifactDelta`,
  *   `requestedAuthConfigs`, `requestedToolConfirmations`) default to `{}`;
- *   scalar fields (`skipSummarization`, `transferToAgent`, `escalate`) default
- *   to `undefined`.
+ *   scalar fields (`skipSummarization`, `transferToAgent`, `escalate`,
+ *   `endOfAgent`, `agentState`) default to `undefined`.
  * @returns A fully populated {@link EventActions} object.
  */
 export function createEventActions(
@@ -90,9 +108,12 @@ export function createEventActions(
  *    `requestedAuthConfigs`, `requestedToolConfirmations`) — all entries from
  *    every source are combined via `Object.assign`. Later sources win on
  *    duplicate keys.
- * 2. **Scalar fields** (`skipSummarization`, `transferToAgent`, `escalate`) —
- *    last-writer-wins: the value from the last source that sets the field is
- *    kept.
+ * 2. **Scalar fields** (`skipSummarization`, `transferToAgent`, `escalate`,
+ *    `endOfAgent`, `agentState`) — last-writer-wins: the value from the last
+ *    source that sets the field is kept. `agentState` is treated as a scalar
+ *    rather than merged key-by-key because a checkpoint is an atomic snapshot
+ *    of one agent; combining two agents' checkpoints into one object would
+ *    describe neither.
  *
  * @param sources - Ordered list of partial {@link EventActions} to merge.
  *   Falsy entries are silently skipped.
@@ -137,6 +158,12 @@ export function mergeEventActions(
     }
     if (source.escalate !== undefined) {
       result.escalate = source.escalate;
+    }
+    if (source.endOfAgent !== undefined) {
+      result.endOfAgent = source.endOfAgent;
+    }
+    if (source.agentState !== undefined) {
+      result.agentState = source.agentState;
     }
   }
   return result;

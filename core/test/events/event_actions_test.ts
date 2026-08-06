@@ -202,3 +202,45 @@ describe('mergeEventActions', () => {
     expect(result.stateDelta).toEqual({x: 1});
   });
 });
+
+describe('createEventActions agent resumption fields', () => {
+  it('leaves endOfAgent and agentState unset by default', () => {
+    const actions = createEventActions();
+    expect(actions.endOfAgent).toBeUndefined();
+    expect(actions.agentState).toBeUndefined();
+  });
+
+  it('passes endOfAgent and agentState through', () => {
+    const agentState = {timesLooped: 1};
+    const actions = createEventActions({endOfAgent: true, agentState});
+    expect(actions.endOfAgent).toBe(true);
+    expect(actions.agentState).toBe(agentState);
+  });
+});
+
+describe('mergeEventActions agent resumption fields', () => {
+  it('uses last-writer-wins for endOfAgent', () => {
+    const result = mergeEventActions([
+      createEventActions({endOfAgent: true}),
+      createEventActions({endOfAgent: false}),
+    ]);
+    expect(result.endOfAgent).toBe(false);
+  });
+
+  it('uses last-writer-wins for agentState rather than merging the snapshots', () => {
+    const result = mergeEventActions([
+      createEventActions({agentState: {timesLooped: 1}}),
+      createEventActions({agentState: {currentSubAgent: 'b'}}),
+    ]);
+    expect(result.agentState).toEqual({currentSubAgent: 'b'});
+  });
+
+  it('keeps an already merged agentState when a later source does not set one', () => {
+    const result = mergeEventActions([
+      createEventActions({agentState: {timesLooped: 1}, endOfAgent: true}),
+      createEventActions({stateDelta: {a: 1}}),
+    ]);
+    expect(result.agentState).toEqual({timesLooped: 1});
+    expect(result.endOfAgent).toBe(true);
+  });
+});

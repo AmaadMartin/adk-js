@@ -10,6 +10,7 @@ export {BaseAgent, isBaseAgent} from './agents/base_agent.js';
 export type {
   AfterAgentCallback,
   BaseAgentConfig,
+  BaseAgentState,
   BeforeAgentCallback,
   SingleAgentCallback,
 } from './agents/base_agent.js';
