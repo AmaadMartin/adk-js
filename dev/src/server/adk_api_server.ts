@@ -34,6 +34,11 @@ import * as http from 'node:http';
 import * as path from 'node:path';
 
 import {AgentFileOptions, AgentLoader} from '../utils/agent_loader.js';
+import {
+  asyncHandler,
+  errorHandler,
+  readRawBody,
+} from '../utils/express_utils.js';
 import {AdkLogger} from '../utils/logger.js';
 import {
   ApiServerSpanExporter,
@@ -241,19 +246,22 @@ export class AdkApiServer {
       next();
     });
 
-    app.get('/list-apps', async (req: Request, res: Response) => {
-      try {
-        const apps = await this.agentLoader.listAgents();
-        res.json(apps);
-      } catch (e: unknown) {
-        const error = `Failed to list apps: ${e}`;
+    app.get(
+      '/list-apps',
+      asyncHandler(async (req: Request, res: Response) => {
+        try {
+          const apps = await this.agentLoader.listAgents();
+          res.json(apps);
+        } catch (e: unknown) {
+          const error = `Failed to list apps: ${e}`;
 
-        res.status(500).json({error});
-        this.logger.error(error);
+          res.status(500).json({error});
+          this.logger.error(error);
 
-        return;
-      }
-    });
+          return;
+        }
+      }),
+    );
 
     app.get('/debug/trace/:eventId', (req: Request, res: Response) => {
       try {
@@ -308,7 +316,7 @@ export class AdkApiServer {
 
     app.get(
       '/apps/:appName/users/:userId/sessions/:sessionId/events/:eventId/graph',
-      async (req: Request, res: Response) => {
+      asyncHandler(async (req: Request, res: Response) => {
         try {
           const appName = req.params['appName'];
           const userId = req.params['userId'];
@@ -382,13 +390,13 @@ export class AdkApiServer {
           this.logger.error(error);
           return;
         }
-      },
+      }),
     );
 
     // ------------------------- Session related endpoints ---------------------
     app.get(
       '/apps/:appName/users/:userId/sessions/:sessionId',
-      async (req: Request, res: Response) => {
+      asyncHandler(async (req: Request, res: Response) => {
         try {
           const appName = req.params['appName'];
           const userId = req.params['userId'];
@@ -412,12 +420,12 @@ export class AdkApiServer {
           res.status(500).json({error});
           this.logger.error(error);
         }
-      },
+      }),
     );
 
     app.get(
       '/apps/:appName/users/:userId/sessions',
-      async (req: Request, res: Response) => {
+      asyncHandler(async (req: Request, res: Response) => {
         try {
           const appName = req.params['appName'];
           const userId = req.params['userId'];
@@ -434,12 +442,12 @@ export class AdkApiServer {
           res.status(500).json({error});
           this.logger.error(error);
         }
-      },
+      }),
     );
 
     app.post(
       '/apps/:appName/users/:userId/sessions/:sessionId',
-      async (req: Request, res: Response) => {
+      asyncHandler(async (req: Request, res: Response) => {
         try {
           const appName = req.params['appName'];
           const userId = req.params['userId'];
@@ -473,12 +481,12 @@ export class AdkApiServer {
           res.status(500).json({error});
           this.logger.error(error);
         }
-      },
+      }),
     );
 
     app.post(
       '/apps/:appName/users/:userId/sessions',
-      async (req: Request, res: Response) => {
+      asyncHandler(async (req: Request, res: Response) => {
         try {
           const appName = req.params['appName'];
           const userId = req.params['userId'];
@@ -497,12 +505,12 @@ export class AdkApiServer {
           res.status(500).json({error});
           this.logger.error(error);
         }
-      },
+      }),
     );
 
     app.delete(
       '/apps/:appName/users/:userId/sessions/:sessionId',
-      async (req: Request, res: Response) => {
+      asyncHandler(async (req: Request, res: Response) => {
         try {
           const appName = req.params['appName'];
           const userId = req.params['userId'];
@@ -532,13 +540,13 @@ export class AdkApiServer {
           res.status(500).json({error});
           this.logger.error(error);
         }
-      },
+      }),
     );
 
     // ----------------------- Artifact related endpoints ----------------------
     app.get(
       '/apps/:appName/users/:userId/sessions/:sessionId/artifacts/:artifactName',
-      async (req: Request, res: Response) => {
+      asyncHandler(async (req: Request, res: Response) => {
         try {
           const appName = req.params['appName'];
           const userId = req.params['userId'];
@@ -566,12 +574,12 @@ export class AdkApiServer {
           res.status(500).json({error});
           this.logger.error(error);
         }
-      },
+      }),
     );
 
     app.get(
       '/apps/:appName/users/:userId/sessions/:sessionId/artifacts/:artifactName/versions/:versionId',
-      async (req: Request, res: Response) => {
+      asyncHandler(async (req: Request, res: Response) => {
         try {
           const appName = req.params['appName'];
           const userId = req.params['userId'];
@@ -601,12 +609,12 @@ export class AdkApiServer {
           res.status(500).json({error});
           this.logger.error(error);
         }
-      },
+      }),
     );
 
     app.get(
       '/apps/:appName/users/:userId/sessions/:sessionId/artifacts',
-      async (req: Request, res: Response) => {
+      asyncHandler(async (req: Request, res: Response) => {
         try {
           const appName = req.params['appName'];
           const userId = req.params['userId'];
@@ -625,12 +633,12 @@ export class AdkApiServer {
           res.status(500).json({error});
           this.logger.error(error);
         }
-      },
+      }),
     );
 
     app.get(
       '/apps/:appName/users/:userId/sessions/:sessionId/artifacts/:artifactName/versions',
-      async (req: Request, res: Response) => {
+      asyncHandler(async (req: Request, res: Response) => {
         try {
           const appName = req.params['appName'];
           const userId = req.params['userId'];
@@ -651,12 +659,12 @@ export class AdkApiServer {
           res.status(500).json({error});
           this.logger.error(error);
         }
-      },
+      }),
     );
 
     app.delete(
       '/apps/:appName/users/:userId/sessions/:sessionId/artifacts/:artifactName',
-      async (req: Request, res: Response) => {
+      asyncHandler(async (req: Request, res: Response) => {
         try {
           const appName = req.params['appName'];
           const userId = req.params['userId'];
@@ -677,7 +685,7 @@ export class AdkApiServer {
           res.status(500).json({error});
           this.logger.error(error);
         }
-      },
+      }),
     );
 
     // --------------------- Eval Sets related endpoints -----------------------
@@ -753,84 +761,35 @@ export class AdkApiServer {
     });
 
     // -------------------------- Run related endpoints ------------------------
-    app.post('/run', async (req: Request, res: Response) => {
-      const {appName, userId, sessionId, newMessage, stateDelta} = req.body;
-      const session = await this.sessionService.getSession({
-        appName,
-        userId,
-        sessionId,
-      });
-
-      if (!session) {
-        res.status(404).json({error: `Session not found: ${sessionId}`});
-        return;
-      }
-
-      const abortController = new AbortController();
-      let responseCompleted = false;
-
-      req.on('close', () => {
-        if (!responseCompleted) {
-          this.logger.info(
-            `HTTP connection closed. Aborting agent execution for session ${sessionId}`,
-          );
-          abortController.abort();
-        }
-      });
-
-      try {
-        const events: Event[] = [];
-        for await (const e of this.executeAgentRun({
+    app.post(
+      '/run',
+      asyncHandler(async (req: Request, res: Response) => {
+        const {appName, userId, sessionId, newMessage, stateDelta} = req.body;
+        const session = await this.sessionService.getSession({
           appName,
           userId,
           sessionId,
-          newMessage,
-          stateDelta,
-          abortSignal: abortController.signal,
-        })) {
-          events.push(e);
-        }
+        });
 
-        responseCompleted = true;
-        res.json(events);
-      } catch (e: unknown) {
-        const error = `Failed to run agent: ${e}`;
-
-        res.status(500).json({error});
-        this.logger.error(error);
-      }
-    });
-
-    app.post('/api/reasoning_engine', async (req: Request, res: Response) => {
-      this.logger.info(
-        `Received Reasoning Engine query headers: ${JSON.stringify(req.headers)}`,
-      );
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const executeQuery = async (body: any) => {
-        const input = body.input || {};
-        const appName = input.appName || body.appName;
-        const userId = input.userId || body.userId || 'default-user';
-        const sessionId =
-          input.sessionId || body.sessionId || 'default-session';
-        const newMessage = input.newMessage || body.newMessage;
-        const stateDelta = input.stateDelta || body.stateDelta;
-        if (!appName) {
-          res.status(400).json({error: 'appName is required in input'});
+        if (!session) {
+          res.status(404).json({error: `Session not found: ${sessionId}`});
           return;
         }
-        try {
-          await this.sessionService.getOrCreateSession({
-            appName,
-            userId,
-            sessionId,
-            state: {},
-          });
-          const events: Event[] = [];
-          const abortController = new AbortController();
-          req.on('close', () => {
+
+        const abortController = new AbortController();
+        let responseCompleted = false;
+
+        req.on('close', () => {
+          if (!responseCompleted) {
+            this.logger.info(
+              `HTTP connection closed. Aborting agent execution for session ${sessionId}`,
+            );
             abortController.abort();
-          });
+          }
+        });
+
+        try {
+          const events: Event[] = [];
           for await (const e of this.executeAgentRun({
             appName,
             userId,
@@ -841,30 +800,79 @@ export class AdkApiServer {
           })) {
             events.push(e);
           }
-          res.json({output: events});
+
+          responseCompleted = true;
+          res.json(events);
         } catch (e: unknown) {
-          const error = `Failed to run agent via Reasoning Engine API: ${e}`;
+          const error = `Failed to run agent: ${e}`;
+
           res.status(500).json({error});
           this.logger.error(error);
         }
-      };
+      }),
+    );
 
-      const isParsed =
-        req.body && (Object.keys(req.body).length > 0 || !req.readable);
-      if (isParsed) {
+    app.post(
+      '/api/reasoning_engine',
+      asyncHandler(async (req: Request, res: Response) => {
         this.logger.info(
-          `Using already parsed body: ${JSON.stringify(req.body)}`,
+          `Received Reasoning Engine query headers: ${JSON.stringify(req.headers)}`,
         );
-        await executeQuery(req.body);
-      } else {
-        let rawBody = '';
-        req.on('data', (chunk) => {
-          rawBody += chunk;
-        });
-        req.on('end', async () => {
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const executeQuery = async (body: any) => {
+          const input = body.input || {};
+          const appName = input.appName || body.appName;
+          const userId = input.userId || body.userId || 'default-user';
+          const sessionId =
+            input.sessionId || body.sessionId || 'default-session';
+          const newMessage = input.newMessage || body.newMessage;
+          const stateDelta = input.stateDelta || body.stateDelta;
+          if (!appName) {
+            res.status(400).json({error: 'appName is required in input'});
+            return;
+          }
+          try {
+            await this.sessionService.getOrCreateSession({
+              appName,
+              userId,
+              sessionId,
+              state: {},
+            });
+            const events: Event[] = [];
+            const abortController = new AbortController();
+            req.on('close', () => {
+              abortController.abort();
+            });
+            for await (const e of this.executeAgentRun({
+              appName,
+              userId,
+              sessionId,
+              newMessage,
+              stateDelta,
+              abortSignal: abortController.signal,
+            })) {
+              events.push(e);
+            }
+            res.json({output: events});
+          } catch (e: unknown) {
+            const error = `Failed to run agent via Reasoning Engine API: ${e}`;
+            res.status(500).json({error});
+            this.logger.error(error);
+          }
+        };
+
+        const isParsed =
+          req.body && (Object.keys(req.body).length > 0 || !req.readable);
+        if (isParsed) {
+          this.logger.info(
+            `Using already parsed body: ${JSON.stringify(req.body)}`,
+          );
+          await executeQuery(req.body);
+        } else {
+          const rawBody = await readRawBody(req);
           this.logger.info(`Received Reasoning Engine raw body: ${rawBody}`);
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          let body: any = {};
+          let body: unknown = {};
           if (rawBody) {
             try {
               body = JSON.parse(rawBody);
@@ -873,104 +881,116 @@ export class AdkApiServer {
             }
           }
           await executeQuery(body);
-        });
-      }
-    });
-
-    app.post('/run_sse', async (req: Request, res: Response) => {
-      const {appName, userId, sessionId, newMessage, streaming, stateDelta} =
-        req.body;
-
-      const session = await this.sessionService.getSession({
-        appName,
-        userId,
-        sessionId,
-      });
-
-      if (!session) {
-        const error = `Session not found: ${sessionId}`;
-
-        res.status(404).json({error});
-        this.logger.error(error);
-        return;
-      }
-
-      const abortController = new AbortController();
-      let responseCompleted = false;
-
-      req.on('close', () => {
-        if (!responseCompleted) {
-          this.logger.info(
-            `HTTP connection closed. Aborting agent SSE execution for session ${sessionId}`,
-          );
-          abortController.abort();
         }
-      });
+      }),
+    );
 
-      try {
-        res.setHeader('Cache-Control', 'no-cache');
-        res.setHeader('Content-Type', 'text/event-stream');
-        res.setHeader('Connection', 'keep-alive');
-        res.flushHeaders();
+    app.post(
+      '/run_sse',
+      asyncHandler(async (req: Request, res: Response) => {
+        const {appName, userId, sessionId, newMessage, streaming, stateDelta} =
+          req.body;
 
-        for await (const event of this.executeAgentRun({
+        const session = await this.sessionService.getSession({
           appName,
           userId,
           sessionId,
-          newMessage,
-          stateDelta,
-          runConfig: {
-            streamingMode: streaming ? StreamingMode.SSE : StreamingMode.NONE,
-          },
-          abortSignal: abortController.signal,
-        })) {
-          res.write(`data: ${JSON.stringify(event)}\n\n`);
-        }
+        });
 
-        responseCompleted = true;
-        res.end();
-      } catch (e: unknown) {
-        if (res.headersSent) {
-          if (!responseCompleted) {
-            const error = (e as Error).message;
-            this.logger.error(error);
-            try {
-              res.end(`data: ${JSON.stringify({error})}\n\n`);
-            } catch {
-              // Ignore errors from res.end when the response has already been sent.
-            }
-          }
-        } else {
-          const error = `Failed to run agent: ${e}`;
+        if (!session) {
+          const error = `Session not found: ${sessionId}`;
 
-          res.status(500).json({error});
+          res.status(404).json({error});
           this.logger.error(error);
+          return;
         }
-      }
-    });
+
+        const abortController = new AbortController();
+        let responseCompleted = false;
+
+        req.on('close', () => {
+          if (!responseCompleted) {
+            this.logger.info(
+              `HTTP connection closed. Aborting agent SSE execution for session ${sessionId}`,
+            );
+            abortController.abort();
+          }
+        });
+
+        try {
+          res.setHeader('Cache-Control', 'no-cache');
+          res.setHeader('Content-Type', 'text/event-stream');
+          res.setHeader('Connection', 'keep-alive');
+          res.flushHeaders();
+
+          for await (const event of this.executeAgentRun({
+            appName,
+            userId,
+            sessionId,
+            newMessage,
+            stateDelta,
+            runConfig: {
+              streamingMode: streaming ? StreamingMode.SSE : StreamingMode.NONE,
+            },
+            abortSignal: abortController.signal,
+          })) {
+            res.write(`data: ${JSON.stringify(event)}\n\n`);
+          }
+
+          responseCompleted = true;
+          res.end();
+        } catch (e: unknown) {
+          if (res.headersSent) {
+            if (!responseCompleted) {
+              const error = (e as Error).message;
+              this.logger.error(error);
+              try {
+                res.end(`data: ${JSON.stringify({error})}\n\n`);
+              } catch {
+                // Ignore errors from res.end when the response has already been sent.
+              }
+            }
+          } else {
+            const error = `Failed to run agent: ${e}`;
+
+            res.status(500).json({error});
+            this.logger.error(error);
+          }
+        }
+      }),
+    );
+
+    // Registered last: express only looks for an error handler in the layers
+    // that follow the one that failed.
+    app.use(errorHandler(this.logger));
+  }
+
+  /**
+   * Finishes startup once the socket is listening. Kept off the `listen`
+   * callback itself, which express expects to return `void`.
+   */
+  private async onListening(): Promise<void> {
+    if (this.a2a) {
+      await this.initA2A();
+    }
+
+    console.log(`
++-----------------------------------------------------------------------------+
+| ADK API Server started                                                      |
+|                                                                             |
+| For local testing, access at ${this.url}.${''.padStart(39 - this.url.length)}       |
++-----------------------------------------------------------------------------+`);
   }
 
   async start(): Promise<void> {
     await this.init();
 
     return new Promise((resolve, reject) => {
-      this.server = this.app.listen(this.port, this.host, async () => {
-        try {
-          if (this.a2a) {
-            await this.initA2A();
-          }
-
-          console.log(`
-+-----------------------------------------------------------------------------+
-| ADK API Server started                                                      |
-|                                                                             |
-| For local testing, access at ${this.url}.${''.padStart(39 - this.url.length)}       |
-+-----------------------------------------------------------------------------+`);
-          resolve();
-        } catch (error) {
+      this.server = this.app.listen(this.port, this.host, () => {
+        void this.onListening().then(resolve, (error: unknown) => {
           this.logger.error('Error during AdkApiServer startup:', error);
           reject(error);
-        }
+        });
       });
 
       this.server.on('error', (err: unknown) => {
