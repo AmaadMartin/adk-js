@@ -4,7 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Entity, JsonType, PrimaryKey, Property} from '@mikro-orm/core';
+import {
+  Entity,
+  JsonType,
+  ManyToOne,
+  PrimaryKey,
+  Property,
+} from '@mikro-orm/core';
 import {
   Event,
   transformToCamelCaseEvent,
@@ -96,11 +102,14 @@ export class StorageUserState {
   [PrimaryKey.name]?: [string, string];
 }
 
+/**
+ * The primary key is declared in the order `app_name, user_id, id` to match
+ * adk-python's v1 schema. MikroORM binds a composite foreign key in the
+ * target's declaration order, so this order is what keeps the `events` columns
+ * laid out as `id, app_name, user_id, session_id`.
+ */
 @Entity({tableName: 'sessions'})
 export class StorageSession {
-  @PrimaryKey({type: 'string', length: STORAGE_KEY_COLUMN_LENGTH})
-  id!: string;
-
   @PrimaryKey({
     type: 'string',
     fieldName: 'app_name',
@@ -114,6 +123,9 @@ export class StorageSession {
     length: STORAGE_KEY_COLUMN_LENGTH,
   })
   userId!: string;
+
+  @PrimaryKey({type: 'string', length: STORAGE_KEY_COLUMN_LENGTH})
+  id!: string;
 
   @Property({type: 'json'})
   state!: Record<string, unknown>;
@@ -135,30 +147,33 @@ export class StorageSession {
   [PrimaryKey.name]?: [string, string, string];
 }
 
+/**
+ * The `session` relation owns `app_name`, `user_id` and `session_id`, so the
+ * database enforces that every event belongs to a live session and removes the
+ * events when that session row is deleted. `appName`, `userId` and `sessionId`
+ * stay declared as non-persistent mirrors of the same columns so that queries
+ * can filter on them without loading the relation.
+ */
 @Entity({tableName: 'events'})
 export class StorageEvent {
   @PrimaryKey({type: 'string', length: STORAGE_KEY_COLUMN_LENGTH})
   id!: string;
 
-  @PrimaryKey({
-    type: 'string',
-    fieldName: 'app_name',
-    length: STORAGE_KEY_COLUMN_LENGTH,
+  @ManyToOne(() => StorageSession, {
+    primary: true,
+    joinColumns: ['app_name', 'user_id', 'session_id'],
+    deleteRule: 'cascade',
+    updateRule: 'cascade',
   })
+  session!: StorageSession;
+
+  @Property({type: 'string', fieldName: 'app_name', persist: false})
   appName!: string;
 
-  @PrimaryKey({
-    type: 'string',
-    fieldName: 'user_id',
-    length: STORAGE_KEY_COLUMN_LENGTH,
-  })
+  @Property({type: 'string', fieldName: 'user_id', persist: false})
   userId!: string;
 
-  @PrimaryKey({
-    type: 'string',
-    fieldName: 'session_id',
-    length: STORAGE_KEY_COLUMN_LENGTH,
-  })
+  @Property({type: 'string', fieldName: 'session_id', persist: false})
   sessionId!: string;
 
   @Property({type: 'string', fieldName: 'invocation_id'})

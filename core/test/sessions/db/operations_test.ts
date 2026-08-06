@@ -52,19 +52,23 @@ describe('operations', () => {
         entities: ENTITIES,
       });
 
+      // `session` owns app_name, user_id and session_id, so these two
+      // properties emit every key column of the events table.
       const eventProperties = orm.getMetadata().get(StorageEvent.name)
-        .properties as Record<string, {length?: number}>;
-      const keyProperties = ['id', 'appName', 'userId', 'sessionId'];
+        .properties as Record<string, {length?: number; fieldNames: string[]}>;
+      const keyColumnLengths = ['id', 'session'].flatMap((keyProperty) => {
+        const property = eventProperties[keyProperty];
+        return property.fieldNames.map(() => property.length);
+      });
 
-      for (const keyProperty of keyProperties) {
-        expect(eventProperties[keyProperty].length).toBe(
-          STORAGE_KEY_COLUMN_LENGTH,
-        );
-      }
+      expect(keyColumnLengths).toEqual(
+        Array(4).fill(STORAGE_KEY_COLUMN_LENGTH),
+      );
 
-      const utf8mb4KeyBytes = keyProperties.reduce((total, keyProperty) => {
-        return total + eventProperties[keyProperty].length! * 4;
-      }, 0);
+      const utf8mb4KeyBytes = keyColumnLengths.reduce<number>(
+        (total, length) => total + (length ?? 0) * 4,
+        0,
+      );
       expect(utf8mb4KeyBytes).toBeLessThanOrEqual(3072);
     });
   });

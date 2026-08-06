@@ -481,9 +481,7 @@ export class DatabaseSessionService extends BaseSessionService {
       } else {
         const newStorageEvent = txEm.create(StorageEvent, {
           id: trimmedEvent.id,
-          appName: session.appName,
-          userId: session.userId,
-          sessionId: session.id,
+          session: storageSession,
           invocationId: trimmedEvent.invocationId,
           timestamp: new Date(trimmedEvent.timestamp),
           eventData: trimmedEvent,
