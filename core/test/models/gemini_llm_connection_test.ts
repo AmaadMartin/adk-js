@@ -790,7 +790,7 @@ describe('GeminiLlmConnection', () => {
       expect((await generator.next()).done).toBe(true);
     });
 
-    it('should handle undefined modelVersion in isGemini3xFlashLive check', async () => {
+    it('should handle undefined modelVersion in isGemini3xLive check', async () => {
       const connection = new GeminiLlmConnection(
         mockSession,
         undefined,

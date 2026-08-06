@@ -95,17 +95,39 @@ export function isGemini2OrAbove(modelString: string): boolean {
 }
 
 /**
- * Check if the model is a Gemini 3.x Flash Live model.
+ * Check if the model is a Gemini 3.x Live model.
+ *
+ * Live Translate models are excluded; use {@link isGemini35LiveTranslate} for
+ * those.
  *
  * @param modelString Either a simple model name or path-based model name
- * @return true if it's a Gemini 3.x Flash Live model, false otherwise.
+ * @return true if it's a Gemini 3.x Live model, false otherwise.
  */
-export function isGemini3xFlashLive(modelString: string | undefined): boolean {
+export function isGemini3xLive(modelString: string | undefined): boolean {
   if (!modelString) {
     return false;
   }
   const modelName = extractModelName(modelString);
-  return modelName.startsWith('gemini-3.') && modelName.includes('-flash-live');
+  return (
+    modelName.startsWith('gemini-3.') &&
+    modelName.includes('-live') &&
+    !isGemini35LiveTranslate(modelString)
+  );
+}
+
+/**
+ * Check if the model is a Gemini 3.5 Live Translate model.
+ *
+ * @param modelString Either a simple model name or path-based model name
+ * @return true if it's a Gemini 3.5 Live Translate model, false otherwise.
+ */
+export function isGemini35LiveTranslate(
+  modelString: string | undefined,
+): boolean {
+  if (!modelString) {
+    return false;
+  }
+  return extractModelName(modelString).startsWith('gemini-3.5-live-translate');
 }
 
 /**
