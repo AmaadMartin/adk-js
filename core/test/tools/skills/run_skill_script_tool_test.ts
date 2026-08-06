@@ -307,5 +307,37 @@ describe('RunSkillScriptTool', () => {
       expect(warnSpy).toHaveBeenCalledTimes(1);
       expect(warnSpy).toHaveBeenCalledWith(expectedWarning(totalBytes));
     });
+
+    it('measures multi-byte text in UTF-8 bytes, not UTF-16 code units', () => {
+      // 'é' is one UTF-16 code unit and two UTF-8 bytes, so this content is
+      // under the limit by String.length and over it by byte length.
+      const content = 'é'.repeat(MAX_SKILL_PAYLOAD_BYTES / 2 + 1);
+      const skill = skillWithResources({references: {'doc.txt': content}});
+
+      expect(content.length).toBeLessThan(MAX_SKILL_PAYLOAD_BYTES);
+
+      const files = getSkillResourceFiles(skill);
+
+      expect(files).toHaveLength(1);
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expectedWarning(MAX_SKILL_PAYLOAD_BYTES + 2),
+      );
+    });
+
+    it('sums bytes across resource types', () => {
+      const skill = skillWithResources({
+        references: {'doc.txt': 'a'.repeat(MAX_SKILL_PAYLOAD_BYTES - 1)},
+        assets: {'small.bin': Buffer.alloc(2)},
+      });
+
+      const files = getSkillResourceFiles(skill);
+
+      expect(files).toHaveLength(2);
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expectedWarning(MAX_SKILL_PAYLOAD_BYTES + 1),
+      );
+    });
   });
 });
