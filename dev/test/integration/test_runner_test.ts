@@ -81,7 +81,7 @@ describe('normalizeEvent', () => {
     const recorded = camelcaseKeys({[LIVE_ID]: {}}, {deep: true});
 
     expect(Object.keys(recorded)).toEqual([RECORDED_ID]);
-    expect(RECORDED_ID.startsWith('adk-')).toBe(false);
+    expect(Object.keys(recorded)[0].startsWith('adk-')).toBe(false);
   });
 
   it('compares auth configs whose function call ids differ per run', () => {
