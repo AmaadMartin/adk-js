@@ -14,6 +14,9 @@ class DummyAgent extends BaseAgent {
   constructor(name = 'dummy_agent') {
     super({name});
   }
+
+  protected async *runAsyncImpl() {}
+  protected async *runLiveImpl() {}
 }
 
 class DummyPlugin extends BasePlugin {
