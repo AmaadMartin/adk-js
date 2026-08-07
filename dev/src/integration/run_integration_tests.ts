@@ -11,6 +11,25 @@ import {AgentRegistry} from './agent_registry.js';
 import {IntegrationRegistry} from './integration_registry.js';
 import {TestRunner} from './test_runner.js';
 
+/** A conformance test that threw, with the reason it threw. */
+interface FailedTest {
+  name: string;
+  message: string;
+}
+
+/** Returns the human-readable reason an arbitrary thrown value carries. */
+function failureMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** Indents every line of `text` by two spaces. */
+function indent(text: string): string {
+  return text
+    .split('\n')
+    .map((line) => `  ${line}`)
+    .join('\n');
+}
+
 export async function runIntegrationTests({
   agentsDir,
   testsDir,
@@ -43,7 +62,7 @@ export async function runIntegrationTests({
   console.log('Running tests.');
   const successfulTests = [];
   const skippedTests = [];
-  const failedTests = [];
+  const failedTests: FailedTest[] = [];
   const testRunner = new TestRunner(agentRegistry);
 
   for (const [name, testInfo] of testSpecs) {
@@ -59,9 +78,11 @@ export async function runIntegrationTests({
 
       successfulTests.push(name);
       console.log('\n\x1b[32mTest passed.\x1b[0m\n');
-    } catch (_: unknown) {
-      failedTests.push(name);
-      console.error('\n\x1b[31mTest failed.\x1b[0m\n');
+    } catch (error: unknown) {
+      const message = failureMessage(error);
+      failedTests.push({name, message});
+      console.error(`\n\x1b[31mTest failed: ${name}\x1b[0m`);
+      console.error(`${message}\n`);
     }
   }
 
@@ -71,8 +92,15 @@ export async function runIntegrationTests({
       `${failedTests.length} tests failed.`,
   );
 
-  console.log('Successfull tests:', successfulTests.join(', '));
+  console.log('Successful tests:', successfulTests.join(', '));
   console.log('Skipped tests:', skippedTests.join(', '));
-  console.log('Failed tests:', failedTests.join(', '));
+  console.log('Failed tests:', failedTests.map((test) => test.name).join(', '));
+
+  for (const test of failedTests) {
+    console.error(
+      `\n\x1b[31mFAILED ${test.name}\x1b[0m\n${indent(test.message)}`,
+    );
+  }
+
   console.log('\n');
 }
