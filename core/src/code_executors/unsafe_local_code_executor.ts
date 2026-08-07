@@ -39,21 +39,6 @@ const POWERSHELL_BASE_ARGS = [
 const CMD_BASE_ARGS = ['/D', '/c'] as const;
 
 /**
- * Written beside a generated JavaScript file so Node resolves the script's
- * module system from the scratch directory instead of inheriting `"type"`
- * from whichever package encloses `os.tmpdir()`.
- */
-const MODULE_SCOPE_MANIFEST_NAME = 'package.json';
-
-/**
- * Carries no `"type"` field on purpose: that is what a script in a
- * package-less `/tmp` already sees, so `require()` and `import` programs keep
- * behaving as they do today. Pinning `"commonjs"` here would reject `import`
- * syntax that currently works.
- */
-const MODULE_SCOPE_MANIFEST_CONTENT = '{}\n';
-
-/**
  * Whether `commandPath` names Windows PowerShell (`powershell`) or PowerShell
  * 7+ (`pwsh`). `path.win32` splits on both separators on every platform.
  */
@@ -91,7 +76,7 @@ async function createTempScriptFile(
   code: string,
   language: CodeExecutionLanguage,
   shellCommandPath?: string,
-): Promise<{filePath: string; tempDir: string; scaffoldFiles: string[]}> {
+): Promise<{filePath: string; tempDir: string; scaffoldFiles: Set<string>}> {
   // mkdtemp names the directory itself and creates it exclusively at 0o700.
   const tempDir = await fs.mkdtemp(
     path.join(os.tmpdir(), 'adk_js_unsafe_code_executor_'),
@@ -101,13 +86,19 @@ async function createTempScriptFile(
   const filePath = path.join(tempDir, `script${ext}`);
   await fs.writeFile(filePath, code);
 
-  const scaffoldFiles = [path.basename(filePath)];
+  const scaffoldFiles = new Set([path.basename(filePath)]);
   if (language === CodeExecutionLanguage.JAVASCRIPT) {
-    await fs.writeFile(
-      path.join(tempDir, MODULE_SCOPE_MANIFEST_NAME),
-      MODULE_SCOPE_MANIFEST_CONTENT,
-    );
-    scaffoldFiles.push(MODULE_SCOPE_MANIFEST_NAME);
+    // Pins the script's module system to the scratch directory instead of
+    // inheriting `"type"` from whichever package encloses `os.tmpdir()`. No
+    // `"type"` field on purpose: that matches a package-less `/tmp`, so
+    // `require()` and `import` programs both keep working, where `"commonjs"`
+    // would reject `import` syntax that works today. Written before
+    // `materializeFiles`, so this manifest beats an input file of the same
+    // name; that input lands as `package_2.json` instead. The precedence is
+    // deliberate: an input `{"type": "module"}` would otherwise re-break
+    // module resolution for every `require()` program.
+    await fs.writeFile(path.join(tempDir, 'package.json'), '{}\n');
+    scaffoldFiles.add('package.json');
   }
 
   return {filePath, tempDir, scaffoldFiles};
@@ -214,7 +205,6 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
       );
       const filePath = res.filePath;
       tempDir = res.tempDir;
-      const scaffoldFiles = new Set(res.scaffoldFiles);
 
       if (params.codeExecutionInput.inputFiles) {
         await materializeFiles(params.codeExecutionInput.inputFiles, tempDir);
@@ -304,7 +294,7 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
           }
 
           // Skip the files the executor itself put in the scratch directory.
-          if (scaffoldFiles.has(relativeFilePath)) {
+          if (res.scaffoldFiles.has(relativeFilePath)) {
             continue;
           }
 

@@ -454,11 +454,19 @@ describe('UnsafeLocalCodeExecutor', () => {
       expect(result.stderr).not.toContain('Cannot use import statement');
     });
 
-    it('materializes an input file named package.json without clobbering the module-scope manifest', async () => {
+    // The manifest deliberately beats an input file of the same name: an input
+    // `{"type": "module"}` would otherwise re-break module resolution.
+    it('gives the module-scope manifest precedence over an input file named package.json', async () => {
       const result = await executor.executeCode({
         invocationContext,
         codeExecutionInput: {
-          code: 'const fs = require("node:fs"); console.log(fs.readFileSync("package_2.json", "utf8"));',
+          code: [
+            'const fs = require("node:fs");',
+            'console.log(JSON.stringify({',
+            '  manifest: fs.readFileSync("package.json", "utf8"),',
+            '  input: fs.readFileSync("package_2.json", "utf8"),',
+            '}));',
+          ].join('\n'),
           language: CodeExecutionLanguage.JAVASCRIPT,
           inputFiles: [
             {
@@ -472,7 +480,10 @@ describe('UnsafeLocalCodeExecutor', () => {
       });
 
       expect(result.stderr).toBe('');
-      expect(result.stdout).toContain('{"type":"module"}');
+      expect(JSON.parse(result.stdout)).toEqual({
+        manifest: '{}\n',
+        input: '{"type":"module"}',
+      });
     });
   });
 
