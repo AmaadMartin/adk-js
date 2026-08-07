@@ -233,6 +233,11 @@ export type {
 export {InMemorySessionService} from './sessions/in_memory_session_service.js';
 export {createSession} from './sessions/session.js';
 export type {CompositeSessionKey, Session} from './sessions/session.js';
+export type {
+  CreateSessionScope,
+  SessionScope,
+  UserScope,
+} from './sessions/session_scope.js';
 export {State} from './sessions/state.js';
 export {AgentTool, isAgentTool} from './tools/agent_tool.js';
 export type {AgentToolConfig} from './tools/agent_tool.js';

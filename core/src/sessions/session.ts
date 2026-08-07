@@ -6,17 +6,16 @@
 
 import {Event} from '../events/event.js';
 
+import {SessionScope} from './session_scope.js';
+
 /**
  * Represents a unified composite session key grouping application, user, and session identifiers.
+ *
+ * An alias of {@link SessionScope}, which is the single definition of this
+ * shape. Kept as a distinct exported name because it is already part of the
+ * public API and is used by the artifact services and the runner.
  */
-export interface CompositeSessionKey {
-  /** The name of the application. */
-  appName: string;
-  /** The ID of the user. */
-  userId: string;
-  /** The ID of the session. */
-  sessionId: string;
-}
+export type CompositeSessionKey = SessionScope;
 
 /**
  * Represents a session in a conversation between agents and users.
