@@ -73,10 +73,13 @@ export abstract class BaseToolset {
    * Returns whether the tool should be exposed to LLM.
    *
    * @param tool The tool to check.
-   * @param context Context used to filter tools available to the agent.
+   * @param context Context used to filter tools available to the agent. A
+   *     {@link ToolPredicate} filter can only be evaluated with a context; when
+   *     `getTools` is called without one the tool is selected, matching
+   *     `MCPToolset`.
    * @return Whether the tool should be exposed to LLM.
    */
-  protected isToolSelected(tool: BaseTool, context: ReadonlyContext): boolean {
+  protected isToolSelected(tool: BaseTool, context?: ReadonlyContext): boolean {
     // An empty tool filter means no filtering: all tools are selected.
     if (
       !this.toolFilter ||
@@ -86,7 +89,7 @@ export abstract class BaseToolset {
     }
 
     if (typeof this.toolFilter === 'function') {
-      return this.toolFilter(tool, context);
+      return context ? this.toolFilter(tool, context) : true;
     }
 
     if (Array.isArray(this.toolFilter)) {

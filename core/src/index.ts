@@ -64,3 +64,4 @@ export * from './tools/mcp/load_mcp_resource_tool.js';
 export * from './tools/mcp/mcp_session_manager.js';
 export * from './tools/mcp/mcp_tool.js';
 export * from './tools/mcp/mcp_toolset.js';
+export * from './tools/pubsub/index.js';
