@@ -744,7 +744,7 @@ describe('Runner error handling', () => {
 
   it('should throw clear error when appName is not configured in runner', async () => {
     const agent = new MockLlmAgent('test_agent');
-    // @ts-expect-error - Intentionally omitting appName to test error handling
+    // Intentionally omitting appName to exercise the error path.
     const runner = new Runner({
       agent: agent,
       sessionService,
