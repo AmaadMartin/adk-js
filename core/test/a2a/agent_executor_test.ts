@@ -18,6 +18,7 @@ import {
   BaseSessionService,
   createEvent,
   createEventActions,
+  createSession,
   ExecutorContext,
   IntentMismatchReason,
   Runner,
@@ -71,6 +72,22 @@ describe('A2AAgentExecutor', () => {
       userMessage: {role: 'user', parts: [{kind: 'text', text: 'hello'}]}, // a2a UserMessage
       ...overrides,
     } as unknown as RequestContext;
+  };
+
+  const runnerConfig = (): RunnerConfig => ({
+    appName: 'test-app',
+    sessionService: mockSessionService,
+  });
+
+  const mockRunner = (runAsync: Runner['runAsync']) => {
+    vi.mocked(Runner).mockImplementation(
+      (config?: RunnerConfig) =>
+        ({
+          appName: config?.appName,
+          sessionService: config?.sessionService,
+          runAsync,
+        }) as unknown as Runner,
+    );
   };
 
   it('should throw an error if no message is provided', async () => {
@@ -285,26 +302,6 @@ describe('A2AAgentExecutor', () => {
       args: {to: 'alice', amount: 10},
     };
 
-    const createSessionMock = () => {
-      mockSessionService.getSession.mockResolvedValue({
-        id: 'session-id',
-        userId: 'test-user',
-        appName: 'test-app',
-        events: [],
-        state: {},
-      } as unknown as Session);
-    };
-
-    const mockRunner = (runAsync: unknown) => {
-      vi.mocked(Runner).mockImplementation(((config: RunnerConfig) => {
-        return {
-          appName: config?.appName,
-          sessionService: config?.sessionService,
-          runAsync,
-        } as unknown as Runner;
-      }) as unknown as () => Runner);
-    };
-
     const createMessage = (
       messageId: string,
       parts: Array<{
@@ -364,19 +361,18 @@ describe('A2AAgentExecutor', () => {
     };
 
     beforeEach(() => {
-      createSessionMock();
+      mockSessionService.getSession.mockResolvedValue(
+        createSession({id: 'session-id', appName: 'test-app'}),
+      );
     });
 
     it('fails the task when the resume answers an action the human never saw', async () => {
-      const runAsync = vi.fn();
+      const runAsync = vi.fn(async function* () {});
       mockRunner(runAsync);
       const resumeInfos: TaskResumeInfo[] = [];
 
       const executor = new A2AAgentExecutor({
-        runner: {
-          appName: 'test-app',
-          sessionService: mockSessionService,
-        } as unknown as RunnerConfig,
+        runner: runnerConfig(),
         verifyResumeIntent: true,
         onTaskResumeCallback: async (_ctx, info) => {
           resumeInfos.push(info);
@@ -423,10 +419,7 @@ describe('A2AAgentExecutor', () => {
       const resumeInfos: TaskResumeInfo[] = [];
 
       const executor = new A2AAgentExecutor({
-        runner: {
-          appName: 'test-app',
-          sessionService: mockSessionService,
-        } as unknown as RunnerConfig,
+        runner: runnerConfig(),
         onTaskResumeCallback: async (_ctx, info) => {
           resumeInfos.push(info);
         },
@@ -460,10 +453,7 @@ describe('A2AAgentExecutor', () => {
       let finalContext: ExecutorContext | undefined;
 
       const executor = new A2AAgentExecutor({
-        runner: {
-          appName: 'test-app',
-          sessionService: mockSessionService,
-        } as unknown as RunnerConfig,
+        runner: runnerConfig(),
         verifyResumeIntent: true,
         onTaskResumeCallback: async (_ctx, info) => {
           resumeInfos.push(info);
@@ -500,14 +490,11 @@ describe('A2AAgentExecutor', () => {
     });
 
     it('requires a matching response before resuming an auth-required task', async () => {
-      const runAsync = vi.fn();
+      const runAsync = vi.fn(async function* () {});
       mockRunner(runAsync);
 
       const executor = new A2AAgentExecutor({
-        runner: {
-          appName: 'test-app',
-          sessionService: mockSessionService,
-        } as unknown as RunnerConfig,
+        runner: runnerConfig(),
       });
 
       await executor.execute(
@@ -543,10 +530,7 @@ describe('A2AAgentExecutor', () => {
       let finalContext: ExecutorContext | undefined;
 
       const executor = new A2AAgentExecutor({
-        runner: {
-          appName: 'test-app',
-          sessionService: mockSessionService,
-        } as unknown as RunnerConfig,
+        runner: runnerConfig(),
         verifyResumeIntent: true,
         afterExecuteCallback: async (ctx) => {
           finalContext = ctx;
@@ -571,14 +555,11 @@ describe('A2AAgentExecutor', () => {
     });
 
     it('aborts the resume even when the resume hook throws', async () => {
-      const runAsync = vi.fn();
+      const runAsync = vi.fn(async function* () {});
       mockRunner(runAsync);
 
       const executor = new A2AAgentExecutor({
-        runner: {
-          appName: 'test-app',
-          sessionService: mockSessionService,
-        } as unknown as RunnerConfig,
+        runner: runnerConfig(),
         verifyResumeIntent: true,
         onTaskResumeCallback: async () => {
           throw new Error('hook exploded');
@@ -625,30 +606,17 @@ describe('A2AAgentExecutor', () => {
       });
 
     beforeEach(() => {
-      mockSessionService.getSession.mockResolvedValue({
-        id: 'session-id',
-        userId: 'test-user',
-        appName: 'test-app',
-        events: [],
-        state: {},
-      } as unknown as Session);
+      mockSessionService.getSession.mockResolvedValue(
+        createSession({id: 'session-id', appName: 'test-app'}),
+      );
     });
 
     it('fires when the run ends in a paused state', async () => {
-      vi.mocked(Runner).mockImplementation(((config: RunnerConfig) => {
-        return {
-          appName: config?.appName,
-          sessionService: config?.sessionService,
-          runAsync: pendingApprovalRun(),
-        } as unknown as Runner;
-      }) as unknown as () => Runner);
+      mockRunner(pendingApprovalRun());
       const pauseEvents: TaskStatusUpdateEvent[] = [];
 
       const executor = new A2AAgentExecutor({
-        runner: {
-          appName: 'test-app',
-          sessionService: mockSessionService,
-        } as unknown as RunnerConfig,
+        runner: runnerConfig(),
         onTaskPauseCallback: async (_ctx, pauseEvent) => {
           pauseEvents.push(pauseEvent);
         },
@@ -661,26 +629,19 @@ describe('A2AAgentExecutor', () => {
     });
 
     it('does not fire when the run completes', async () => {
-      vi.mocked(Runner).mockImplementation(((config: RunnerConfig) => {
-        return {
-          appName: config?.appName,
-          sessionService: config?.sessionService,
-          runAsync: vi.fn(async function* () {
-            yield createEvent({
-              author: 'model',
-              content: {role: 'model', parts: [{text: 'done'}]},
-              actions: createEventActions(),
-            });
-          }),
-        } as unknown as Runner;
-      }) as unknown as () => Runner);
+      mockRunner(
+        vi.fn(async function* () {
+          yield createEvent({
+            author: 'model',
+            content: {role: 'model', parts: [{text: 'done'}]},
+            actions: createEventActions(),
+          });
+        }),
+      );
       const pauseEvents: TaskStatusUpdateEvent[] = [];
 
       const executor = new A2AAgentExecutor({
-        runner: {
-          appName: 'test-app',
-          sessionService: mockSessionService,
-        } as unknown as RunnerConfig,
+        runner: runnerConfig(),
         onTaskPauseCallback: async (_ctx, pauseEvent) => {
           pauseEvents.push(pauseEvent);
         },
@@ -692,20 +653,11 @@ describe('A2AAgentExecutor', () => {
     });
 
     it('still publishes the pause event when the pause hook throws', async () => {
-      vi.mocked(Runner).mockImplementation(((config: RunnerConfig) => {
-        return {
-          appName: config?.appName,
-          sessionService: config?.sessionService,
-          runAsync: pendingApprovalRun(),
-        } as unknown as Runner;
-      }) as unknown as () => Runner);
+      mockRunner(pendingApprovalRun());
       let afterExecuteCalled = false;
 
       const executor = new A2AAgentExecutor({
-        runner: {
-          appName: 'test-app',
-          sessionService: mockSessionService,
-        } as unknown as RunnerConfig,
+        runner: runnerConfig(),
         onTaskPauseCallback: async () => {
           throw new Error('hook exploded');
         },
