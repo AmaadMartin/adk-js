@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    // Mirrors the vitest `unit:core` aliases. Those are prefix aliases, so
+    // each one needs a bare and a wildcard entry here to resolve the same way.
+    "paths": {
+      "@google/adk": ["../src/index.ts"],
+      "@google/adk/*": ["../src/*"],
+      "@google/adk-integrations": ["../../integrations/src/index.ts"],
+      "@google/adk-integrations/*": ["../../integrations/src/*"]
+    }
+  },
+  // Narrowed while the type errors in the remaining subdirectories are fixed;
+  // dropping this key checks all of core/test.
+  "include": ["models/**/*", "runner/**/*", "utils/**/*"]
+}

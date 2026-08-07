@@ -4,9 +4,24 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GroundingMetadata, LiveServerGoAway} from '@google/genai';
+import {
+  GroundingMetadata,
+  LiveServerGoAway,
+  LiveServerSessionResumptionUpdate,
+} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {LiveResponseAggregator} from '../../src/utils/live_connection_utils.js';
+import {
+  LiveServerMessageFields,
+  createLiveServerMessage,
+} from './live_server_message_test_utils.js';
+
+function processMessage(
+  aggregator: LiveResponseAggregator,
+  fields: Partial<LiveServerMessageFields>,
+) {
+  return aggregator.processMessage(createLiveServerMessage(fields));
+}
 
 describe('LiveResponseAggregator', () => {
   it('should yield usage metadata', () => {
@@ -17,7 +32,7 @@ describe('LiveResponseAggregator', () => {
       totalTokenCount: 30,
     };
 
-    const generator = aggregator.processMessage({usageMetadata});
+    const generator = processMessage(aggregator, {usageMetadata});
     const results = Array.from(generator);
 
     expect(results).toEqual([
@@ -32,7 +47,7 @@ describe('LiveResponseAggregator', () => {
     const aggregator = new LiveResponseAggregator('gemini-2.5-flash');
 
     // Message 1: partial text
-    const gen1 = aggregator.processMessage({
+    const gen1 = processMessage(aggregator, {
       serverContent: {
         modelTurn: {
           parts: [{text: 'Hello'}],
@@ -49,7 +64,7 @@ describe('LiveResponseAggregator', () => {
     ]);
 
     // Message 2: partial text and turnComplete
-    const gen2 = aggregator.processMessage({
+    const gen2 = processMessage(aggregator, {
       serverContent: {
         modelTurn: {
           parts: [{text: ' world!'}],
@@ -90,7 +105,7 @@ describe('LiveResponseAggregator', () => {
 
     // Message 1: thought
     const res1 = Array.from(
-      aggregator.processMessage({
+      processMessage(aggregator, {
         serverContent: {
           modelTurn: {
             parts: [{text: 'Thinking...', thought: true}],
@@ -108,7 +123,7 @@ describe('LiveResponseAggregator', () => {
 
     // Message 2: transition to text
     const res2 = Array.from(
-      aggregator.processMessage({
+      processMessage(aggregator, {
         serverContent: {
           modelTurn: {
             parts: [{text: 'Answer is 42.'}],
@@ -134,7 +149,7 @@ describe('LiveResponseAggregator', () => {
 
     // Message 3: turn complete
     const res3 = Array.from(
-      aggregator.processMessage({
+      processMessage(aggregator, {
         serverContent: {
           turnComplete: true,
         },
@@ -160,7 +175,7 @@ describe('LiveResponseAggregator', () => {
     const aggregator = new LiveResponseAggregator('gemini-2.5-flash');
 
     const res1 = Array.from(
-      aggregator.processMessage({
+      processMessage(aggregator, {
         serverContent: {
           inputTranscription: {text: 'hello', finished: false},
         },
@@ -175,7 +190,7 @@ describe('LiveResponseAggregator', () => {
     ]);
 
     const res2 = Array.from(
-      aggregator.processMessage({
+      processMessage(aggregator, {
         serverContent: {
           inputTranscription: {text: ' world', finished: true},
         },
@@ -199,7 +214,7 @@ describe('LiveResponseAggregator', () => {
     const aggregator = new LiveResponseAggregator('gemini-2.5-flash');
 
     const res1 = Array.from(
-      aggregator.processMessage({
+      processMessage(aggregator, {
         serverContent: {
           inputTranscription: {text: 'hello', finished: false},
         },
@@ -211,7 +226,7 @@ describe('LiveResponseAggregator', () => {
     });
 
     const res2 = Array.from(
-      aggregator.processMessage({
+      processMessage(aggregator, {
         serverContent: {
           interrupted: true,
         },
@@ -234,7 +249,7 @@ describe('LiveResponseAggregator', () => {
     const aggregator = new LiveResponseAggregator('gemini-2.5-flash');
 
     const res1 = Array.from(
-      aggregator.processMessage({
+      processMessage(aggregator, {
         serverContent: {
           modelTurn: {
             parts: [{text: 'Partial text'}],
@@ -265,7 +280,7 @@ describe('LiveResponseAggregator', () => {
     const aggregator = new LiveResponseAggregator('gemini-2.5-flash');
 
     const res1 = Array.from(
-      aggregator.processMessage({
+      processMessage(aggregator, {
         toolCall: {
           functionCalls: [{name: 'tool_a', args: {x: 1}, id: '1'}],
         },
@@ -274,7 +289,7 @@ describe('LiveResponseAggregator', () => {
     expect(res1).toEqual([]); // Buffered
 
     const res2 = Array.from(
-      aggregator.processMessage({
+      processMessage(aggregator, {
         serverContent: {
           turnComplete: true,
         },
@@ -299,7 +314,7 @@ describe('LiveResponseAggregator', () => {
     const aggregator = new LiveResponseAggregator('gemini-3.1-flash-live');
 
     const res1 = Array.from(
-      aggregator.processMessage({
+      processMessage(aggregator, {
         toolCall: {
           functionCalls: [{name: 'tool_a', args: {x: 1}, id: '1'}],
         },
@@ -318,10 +333,12 @@ describe('LiveResponseAggregator', () => {
 
   it('should yield session resumption update', () => {
     const aggregator = new LiveResponseAggregator('gemini-2.5-flash');
-    const resumptionUpdate = {resumed: true};
+    const resumptionUpdate: LiveServerSessionResumptionUpdate = {
+      resumable: true,
+    };
 
     const res = Array.from(
-      aggregator.processMessage({sessionResumptionUpdate: resumptionUpdate}),
+      processMessage(aggregator, {sessionResumptionUpdate: resumptionUpdate}),
     );
     expect(res).toEqual([
       {
@@ -333,11 +350,9 @@ describe('LiveResponseAggregator', () => {
 
   it('should yield go away', () => {
     const aggregator = new LiveResponseAggregator('gemini-2.5-flash');
-    const goAway = {goAway: true};
+    const goAway: LiveServerGoAway = {timeLeft: '10s'};
 
-    const res = Array.from(
-      aggregator.processMessage({goAway: goAway as LiveServerGoAway}),
-    );
+    const res = Array.from(processMessage(aggregator, {goAway}));
     expect(res).toEqual([
       {
         goAway,
