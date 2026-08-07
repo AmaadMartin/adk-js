@@ -32,22 +32,16 @@ export interface ExecutorContext {
  * @param session The session.
  * @param userContent The content of the user.
  * @param requestContext The request context.
- * @param pausedIntent The action frozen when the task paused.
- * @param contextMutation Whether other messages arrived during the pause.
  * @returns The A2A Agent Executor context.
  */
 export function createExecutorContext({
   session,
   userContent,
   requestContext,
-  pausedIntent,
-  contextMutation,
 }: {
   session: Session;
   userContent: Content;
   requestContext: RequestContext;
-  pausedIntent?: IntentBinding;
-  contextMutation?: ContextMutation;
 }): ExecutorContext {
   return {
     userId: session.userId,
@@ -57,7 +51,5 @@ export function createExecutorContext({
     events: session.events,
     userContent,
     requestContext,
-    pausedIntent,
-    contextMutation,
   };
 }

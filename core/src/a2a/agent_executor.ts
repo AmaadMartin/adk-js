@@ -34,10 +34,8 @@ import {
 } from './event_processor_utils.js';
 import {createExecutorContext, ExecutorContext} from './executor_context.js';
 import {
-  ContextMutation,
   detectContextMutation,
   freezeIntent,
-  IntentBinding,
   IntentVerification,
   verifyIntent,
 } from './intent_binding.js';
@@ -88,20 +86,13 @@ export type OnTaskPauseCallback = (
 ) => Promise<void>;
 
 /**
- * Details of a resume attempt, passed to {@link OnTaskResumeCallback}.
- */
-export interface TaskResumeInfo {
-  binding: IntentBinding;
-  verification: IntentVerification;
-  mutation: ContextMutation;
-}
-
-/**
  * Callback called when the executor resumes a paused task, after verification.
+ *
+ * The frozen action and the pause-time context mutation are on `ctx`.
  */
 export type OnTaskResumeCallback = (
   ctx: ExecutorContext,
-  info: TaskResumeInfo,
+  verification: IntentVerification,
 ) => Promise<void>;
 
 /**
@@ -326,11 +317,7 @@ export class A2AAgentExecutor implements AgentExecutor {
     });
 
     try {
-      await this.config.onTaskResumeCallback?.(executorContext, {
-        binding,
-        verification,
-        mutation: executorContext.contextMutation,
-      });
+      await this.config.onTaskResumeCallback?.(executorContext, verification);
     } catch (e: unknown) {
       logger.error('Error in onTaskResumeCallback:', e);
     }

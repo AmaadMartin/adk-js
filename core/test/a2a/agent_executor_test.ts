@@ -21,10 +21,10 @@ import {
   createSession,
   ExecutorContext,
   IntentMismatchReason,
+  IntentVerification,
   Runner,
   RunnerConfig,
   Session,
-  TaskResumeInfo,
 } from '@google/adk';
 import {FunctionCall, FunctionResponse} from '@google/genai';
 import {beforeEach, describe, expect, it, Mocked, vi} from 'vitest';
@@ -369,13 +369,13 @@ describe('A2AAgentExecutor', () => {
     it('fails the task when the resume answers an action the human never saw', async () => {
       const runAsync = vi.fn(async function* () {});
       mockRunner(runAsync);
-      const resumeInfos: TaskResumeInfo[] = [];
+      const resumed: Array<[ExecutorContext, IntentVerification]> = [];
 
       const executor = new A2AAgentExecutor({
         runner: runnerConfig(),
         verifyResumeIntent: true,
-        onTaskResumeCallback: async (_ctx, info) => {
-          resumeInfos.push(info);
+        onTaskResumeCallback: async (ctx, verification) => {
+          resumed.push([ctx, verification]);
         },
       });
 
@@ -398,11 +398,12 @@ describe('A2AAgentExecutor', () => {
       expect((event.status.message!.parts[0] as TextPart).text).toContain(
         IntentMismatchReason.UNKNOWN_ACTION,
       );
-      expect(resumeInfos).toHaveLength(1);
-      expect(resumeInfos[0].verification.ok).toBe(false);
-      expect(resumeInfos[0].binding.actions[0].id).toBe('call-A');
-      expect(resumeInfos[0].mutation.mutatedWhilePaused).toBe(true);
-      expect(resumeInfos[0].mutation.messageIdsSincePause).toEqual([
+      expect(resumed).toHaveLength(1);
+      const [resumeContext, verification] = resumed[0];
+      expect(verification.ok).toBe(false);
+      expect(resumeContext.pausedIntent?.actions[0].id).toBe('call-A');
+      expect(resumeContext.contextMutation?.mutatedWhilePaused).toBe(true);
+      expect(resumeContext.contextMutation?.messageIdsSincePause).toEqual([
         'smuggled-2',
       ]);
     });
@@ -416,12 +417,12 @@ describe('A2AAgentExecutor', () => {
         });
       });
       mockRunner(runAsync);
-      const resumeInfos: TaskResumeInfo[] = [];
+      const resumed: Array<[ExecutorContext, IntentVerification]> = [];
 
       const executor = new A2AAgentExecutor({
         runner: runnerConfig(),
-        onTaskResumeCallback: async (_ctx, info) => {
-          resumeInfos.push(info);
+        onTaskResumeCallback: async (ctx, verification) => {
+          resumed.push([ctx, verification]);
         },
       });
 
@@ -437,7 +438,7 @@ describe('A2AAgentExecutor', () => {
       );
 
       expect(runAsync).toHaveBeenCalledTimes(1);
-      expect(resumeInfos[0].verification.ok).toBe(true);
+      expect(resumed[0][1].ok).toBe(true);
     });
 
     it('runs the agent on a clean resume and reports the frozen intent', async () => {
@@ -449,14 +450,14 @@ describe('A2AAgentExecutor', () => {
         });
       });
       mockRunner(runAsync);
-      const resumeInfos: TaskResumeInfo[] = [];
+      const resumed: Array<[ExecutorContext, IntentVerification]> = [];
       let finalContext: ExecutorContext | undefined;
 
       const executor = new A2AAgentExecutor({
         runner: runnerConfig(),
         verifyResumeIntent: true,
-        onTaskResumeCallback: async (_ctx, info) => {
-          resumeInfos.push(info);
+        onTaskResumeCallback: async (ctx, verification) => {
+          resumed.push([ctx, verification]);
         },
         afterExecuteCallback: async (ctx) => {
           finalContext = ctx;
@@ -478,7 +479,7 @@ describe('A2AAgentExecutor', () => {
       );
 
       expect(runAsync).toHaveBeenCalledTimes(1);
-      expect(resumeInfos[0].verification).toEqual({ok: true});
+      expect(resumed[0][1]).toEqual({ok: true});
       expect(finalContext?.pausedIntent?.actions[0].name).toBe(
         'adk_request_confirmation',
       );

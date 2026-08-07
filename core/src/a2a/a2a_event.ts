@@ -37,14 +37,6 @@ export enum TaskState {
 }
 
 /**
- * The task states in which the task waits for a human before it can continue.
- */
-const PAUSED_TASK_STATES: readonly TaskState[] = [
-  TaskState.INPUT_REQUIRED,
-  TaskState.AUTH_REQUIRED,
-];
-
-/**
  * A2A event.
  */
 export type A2AEvent =
@@ -126,23 +118,15 @@ export function isTerminalTaskStatusUpdateEvent(event: unknown): boolean {
 }
 
 /**
- * Checks if the event is an input required task status update event.
- */
-export function isInputRequiredTaskStatusUpdateEvent(event: unknown): boolean {
-  return (
-    (isTaskStatusUpdateEvent(event) || isTask(event)) &&
-    event.status.state === TaskState.INPUT_REQUIRED
-  );
-}
-
-/**
  * Checks if the event is a paused task status update event, meaning the task
  * waits for a human before it can continue.
  */
 export function isPausedTaskStatusUpdateEvent(event: unknown): boolean {
   return (
     (isTaskStatusUpdateEvent(event) || isTask(event)) &&
-    PAUSED_TASK_STATES.includes(event.status.state as TaskState)
+    [TaskState.INPUT_REQUIRED, TaskState.AUTH_REQUIRED].includes(
+      event.status.state as TaskState,
+    )
   );
 }
 

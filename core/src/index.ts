@@ -21,7 +21,6 @@ export type {
   OnTaskPauseCallback,
   OnTaskResumeCallback,
   RunnerOrRunnerConfig,
-  TaskResumeInfo,
 } from './a2a/agent_executor.js';
 export {toA2a} from './a2a/agent_to_a2a.js';
 export type {A2aUserBuilder, ToA2aOptions} from './a2a/agent_to_a2a.js';

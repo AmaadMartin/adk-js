@@ -23,7 +23,6 @@ import {
   getEventMetadata,
   getFailedTaskStatusUpdateEventError,
   isFailedTaskStatusUpdateEvent,
-  isInputRequiredTaskStatusUpdateEvent,
   isMessage,
   isPausedTaskStatusUpdateEvent,
   isTask,
@@ -117,27 +116,6 @@ describe('a2a_event', () => {
       ).toBe(true);
       expect(
         isTerminalTaskStatusUpdateEvent({
-          kind: 'status-update',
-          status: {state: 'working'},
-        }),
-      ).toBe(false);
-    });
-
-    it('isInputRequiredTaskStatusUpdateEvent', () => {
-      expect(
-        isInputRequiredTaskStatusUpdateEvent({
-          kind: 'status-update',
-          status: {state: 'input-required'},
-        }),
-      ).toBe(true);
-      expect(
-        isInputRequiredTaskStatusUpdateEvent({
-          kind: 'task',
-          status: {state: 'input-required'},
-        }),
-      ).toBe(true);
-      expect(
-        isInputRequiredTaskStatusUpdateEvent({
           kind: 'status-update',
           status: {state: 'working'},
         }),

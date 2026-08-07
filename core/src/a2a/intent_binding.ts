@@ -243,24 +243,17 @@ function digest(value: unknown): string {
  * two payloads that differ only in key order produce the same digest.
  */
 function canonicalize(value: unknown): string {
-  if (Array.isArray(value)) {
-    return `[${value.map(canonicalize).join(',')}]`;
-  }
-
-  if (isRecord(value)) {
-    const entries = Object.entries(value)
-      .filter(([, entryValue]) => entryValue !== undefined)
-      .sort(([left], [right]) => (left < right ? -1 : 1));
-
-    return `{${entries
-      .map(
-        ([key, entryValue]) =>
-          `${JSON.stringify(key)}:${canonicalize(entryValue)}`,
-      )
-      .join(',')}}`;
-  }
-
-  return JSON.stringify(value) ?? 'null';
+  return (
+    JSON.stringify(value, (_key, entry: unknown) =>
+      isRecord(entry)
+        ? Object.fromEntries(
+            Object.entries(entry).sort(([left], [right]) =>
+              left < right ? -1 : 1,
+            ),
+          )
+        : entry,
+    ) ?? 'null'
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
