@@ -4,11 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {MCPConnectionParams, MCPToolset} from '@google/adk';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {describe, expect, it, vi} from 'vitest';
-import {ReadonlyContext} from '../../../src/agents/readonly_context.js';
-import {MCPConnectionParams} from '../../../src/tools/mcp/mcp_session_manager.js';
-import {MCPToolset} from '../../../src/tools/mcp/mcp_toolset.js';
+import {createReadonlyContext} from '../../testing_utils.js';
 
 vi.hoisted(() => {
   vi.resetModules();
@@ -113,7 +112,7 @@ describe('MCPToolset', () => {
         stdioParams,
         (tool) => tool.name === 'other-tool',
       );
-      const tools = await toolset.getTools({} as ReadonlyContext);
+      const tools = await toolset.getTools(createReadonlyContext());
 
       expect(tools).toHaveLength(1);
       expect(tools[0].name).toBe('other-tool');

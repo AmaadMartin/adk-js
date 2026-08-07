@@ -10,9 +10,9 @@ import {
   Event,
   GCP_MCP_SERVER_DESTINATION_ID,
   LlmAgent,
-  ReadonlyContext,
 } from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {createReadonlyContext} from '../../../core/test/testing_utils.js';
 import {
   createRunner,
   GeminiWithMockResponses,
@@ -117,7 +117,7 @@ describe('AgentRegistry Integration E2E', () => {
     expect(toolset.destinationResourceId).toBe('urn:mcp:gcp:billing-server');
 
     // 3. Retrieve tool wrappers and verify they have the telemetry destination key attached
-    const context = {} as ReadonlyContext;
+    const context = createReadonlyContext();
     const tools = await toolset.getTools(context);
     expect(tools).toHaveLength(1);
     expect(tools[0].name).toBe('Billing_Server_retrieve_billing_data');

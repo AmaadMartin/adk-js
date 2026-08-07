@@ -6,7 +6,6 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   AgentRegistry,
   AgentRegistrySingleMCPToolset,
@@ -14,10 +13,11 @@ import {
   GCP_MCP_SERVER_DESTINATION_ID,
   isGoogleApi,
   ProtocolType,
-  ReadonlyContext,
   RemoteA2AAgent,
   StreamableHTTPConnectionParams,
-} from '../../src/index.js';
+} from '@google/adk';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {createReadonlyContext} from '../testing_utils.js';
 
 // Mock google-auth-library
 let shouldAuthThrow = false;
@@ -307,7 +307,7 @@ describe('AgentRegistry', () => {
       expect(toolset.prefix).toBe('My_BigQuery_Server');
       expect(toolset.destinationResourceId).toBe('urn:mcp:1234:bigquery');
 
-      const tools = await toolset.getTools({} as ReadonlyContext);
+      const tools = await toolset.getTools(createReadonlyContext());
       expect(tools.length).toBe(2);
       expect(
         (tools[0] as any).customMetadata[GCP_MCP_SERVER_DESTINATION_ID],
@@ -749,7 +749,7 @@ describe('AgentRegistry', () => {
       );
 
       const toolset = await customHeaderRegistry.getMcpToolset('mcpServers/bq');
-      const tools = await toolset.getTools({} as ReadonlyContext);
+      const tools = await toolset.getTools(createReadonlyContext());
       expect(tools.length).toBe(2);
     });
 
@@ -776,7 +776,7 @@ describe('AgentRegistry', () => {
         'mcpServers/bq',
         {},
       );
-      const tools = await toolset.getTools({} as ReadonlyContext);
+      const tools = await toolset.getTools(createReadonlyContext());
       expect(tools.length).toBe(2);
     });
 
@@ -790,7 +790,7 @@ describe('AgentRegistry', () => {
         toolFilter: ['tool1'],
       });
 
-      const context = {} as ReadonlyContext;
+      const context = createReadonlyContext();
       const tools = await toolset.getTools(context);
       expect(tools.length).toBe(1);
       expect(tools[0].name).toBe('tool1');
@@ -806,7 +806,7 @@ describe('AgentRegistry', () => {
         connectionParams,
       });
 
-      const context = {} as ReadonlyContext;
+      const context = createReadonlyContext();
       const tools = await toolset.getTools(context);
       expect(tools.length).toBe(2);
       expect(tools[0].name).toBe('tool1');
@@ -824,7 +824,7 @@ describe('AgentRegistry', () => {
         connectionParams,
       });
 
-      const context = {} as ReadonlyContext;
+      const context = createReadonlyContext();
       const tools = await toolset.getTools(context);
       expect(tools.length).toBe(2);
       expect(tools[0].name).toBe('tool1');
@@ -844,7 +844,7 @@ describe('AgentRegistry', () => {
         connectionParams,
       });
 
-      const context = {} as ReadonlyContext;
+      const context = createReadonlyContext();
       const tools = await toolset.getTools(context);
       expect(tools.length).toBe(2);
       expect(tools[0].name).toBe('tool1');

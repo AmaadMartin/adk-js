@@ -10,11 +10,11 @@ import {
   Context,
   InvocationContext,
   LlmRequest,
-  ReadonlyContext,
   Skill,
   SkillToolset,
 } from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
+import {createReadonlyContext} from '../../testing_utils.js';
 
 describe('skill_toolset', () => {
   const mockSkill: Skill = {
@@ -143,14 +143,10 @@ describe('skill_toolset', () => {
         additionalTools: [dummyTool],
       });
 
-      const mockState = {
-        get: vi.fn().mockReturnValue(['skill-with-tools']),
-      };
-
-      const context = {
+      const context = createReadonlyContext({
         agentName: 'test-agent',
-        state: mockState,
-      } as unknown as ReadonlyContext;
+        state: {'_adk_activated_skill_test-agent': ['skill-with-tools']},
+      });
 
       const tools = await toolset.getTools(context);
       expect(tools.map((t) => t.name)).toContain('dummy_tool');
@@ -186,14 +182,10 @@ describe('skill_toolset', () => {
         additionalTools: [tool1, tool2],
       });
 
-      const mockState = {
-        get: vi.fn().mockReturnValue(['skill-with-tools']),
-      };
-
-      const context = {
+      const context = createReadonlyContext({
         agentName: 'test-agent',
-        state: mockState,
-      } as unknown as ReadonlyContext;
+        state: {'_adk_activated_skill_test-agent': ['skill-with-tools']},
+      });
 
       await expect(toolset.getTools(context)).rejects.toThrow(
         'Duplicate tool name: duplicate_tool',
@@ -242,14 +234,10 @@ describe('skill_toolset', () => {
         additionalTools: [tool1, customToolset],
       });
 
-      const mockState = {
-        get: vi.fn().mockReturnValue(['skill-with-tools']),
-      };
-
-      const context = {
+      const context = createReadonlyContext({
         agentName: 'test-agent',
-        state: mockState,
-      } as unknown as ReadonlyContext;
+        state: {'_adk_activated_skill_test-agent': ['skill-with-tools']},
+      });
 
       await expect(toolset.getTools(context)).rejects.toThrow(
         'Duplicate tool name: shared_name',
@@ -296,14 +284,10 @@ describe('skill_toolset', () => {
         additionalTools: [spyToolset],
       });
 
-      const mockState = {
-        get: vi.fn().mockReturnValue(['skill-with-tools']),
-      };
-
-      const context = {
+      const context = createReadonlyContext({
         agentName: 'test-agent',
-        state: mockState,
-      } as unknown as ReadonlyContext;
+        state: {'_adk_activated_skill_test-agent': ['skill-with-tools']},
+      });
 
       const tools1 = await toolset.getTools(context);
       expect(tools1.map((t) => t.name)).toContain('cached_tool');
