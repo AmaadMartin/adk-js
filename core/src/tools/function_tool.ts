@@ -139,8 +139,13 @@ export class FunctionTool<
 
   // User defined function.
   private readonly execute: ToolExecuteFunction<TParameters>;
-  // Typed input parameters.
-  private readonly parameters?: TParameters;
+  /**
+   * The declared input schema, as supplied via {@link ToolOptions.parameters}.
+   *
+   * Readable by callers: this is the schema {@link _getDeclaration} converts
+   * and shows the model, so it is part of the tool's declared contract.
+   */
+  readonly parameters?: TParameters;
   // Whether the tool requires user confirmation before running.
   private readonly requireConfirmation: RequireConfirmation<TParameters>;
 

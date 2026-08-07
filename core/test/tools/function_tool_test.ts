@@ -5,7 +5,7 @@
  */
 
 import {Context, FunctionTool, isFunctionTool} from '@google/adk';
-import {Type} from '@google/genai';
+import {Schema, Type} from '@google/genai';
 import {beforeEach, describe, expect, it} from 'vitest';
 import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
@@ -488,6 +488,73 @@ describe('FunctionTool', () => {
           "Error in tool 'errorTool': Test error",
         );
       }
+    });
+  });
+
+  describe('parameters', () => {
+    it('exposes the zod v3 schema it was constructed with', () => {
+      const schema = z3.object({a: z3.number()});
+      const tool = new FunctionTool({
+        name: 'add',
+        description: 'Adds.',
+        parameters: schema,
+        execute: async ({a}) => a,
+      });
+
+      expect(tool.parameters).toBe(schema);
+      expect(tool._getDeclaration().parameters).toEqual({
+        type: Type.OBJECT,
+        properties: {a: {type: Type.NUMBER}},
+        required: ['a'],
+      });
+    });
+
+    it('exposes the zod v4 schema it was constructed with', () => {
+      const schema = z4.object({a: z4.number()});
+      const tool = new FunctionTool({
+        name: 'add',
+        description: 'Adds.',
+        parameters: schema,
+        execute: async ({a}) => a,
+      });
+
+      expect(tool.parameters).toBe(schema);
+      expect(tool._getDeclaration().parameters).toEqual({
+        type: Type.OBJECT,
+        properties: {a: {type: Type.NUMBER}},
+        required: ['a'],
+      });
+    });
+
+    it('exposes a raw genai Schema it was constructed with', () => {
+      const schema: Schema = {
+        type: Type.OBJECT,
+        properties: {a: {type: Type.NUMBER}},
+        required: ['a'],
+      };
+      const tool = new FunctionTool({
+        name: 'add',
+        description: 'Adds.',
+        parameters: schema,
+        execute: async () => 1,
+      });
+
+      expect(tool.parameters).toBe(schema);
+      expect(tool._getDeclaration().parameters).toBe(schema);
+    });
+
+    it('is undefined when no schema is supplied', () => {
+      const tool = new FunctionTool({
+        name: 'noop',
+        description: 'Does nothing.',
+        execute: async () => 1,
+      });
+
+      expect(tool.parameters).toBeUndefined();
+      expect(tool._getDeclaration().parameters).toEqual({
+        type: Type.OBJECT,
+        properties: {},
+      });
     });
   });
 });
