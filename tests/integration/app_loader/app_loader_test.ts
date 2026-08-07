@@ -11,11 +11,11 @@ import * as path from 'node:path';
 import {promisify} from 'node:util';
 import {afterAll, beforeAll, describe, expect, it} from 'vitest';
 import {AgentLoader} from '../../../dev/src/utils/agent_loader.js';
-import {sendInput} from '../test_case_utils.js';
+import {PLATFORM_TIMEOUT_MULTIPLIER, sendInput} from '../test_case_utils.js';
 
 const execAsync = promisify(exec);
 const dirname = process.cwd();
-const TEST_EXECUTION_TIMEOUT = 40000;
+const TEST_EXECUTION_TIMEOUT = 40000 * PLATFORM_TIMEOUT_MULTIPLIER;
 
 describe('App loader CLI integration', () => {
   describe.each(['app_ts', 'app_js', 'app_default'])(
