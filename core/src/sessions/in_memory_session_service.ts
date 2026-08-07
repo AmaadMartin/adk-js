@@ -151,35 +151,13 @@ export class InMemorySessionService extends BaseSessionService {
     page,
     order,
   }: ListSessionsRequest): Promise<ListSessionsResponse> {
-    if (!this.sessions[appName] || !this.sessions[appName][userId]) {
-      if (limit !== undefined) {
-        const effectiveOffset =
-          page !== undefined ? (page - 1) * limit : (offset ?? 0);
-        const effectivePage =
-          page !== undefined
-            ? page
-            : limit === 0
-              ? 1
-              : Math.floor(effectiveOffset / limit) + 1;
-        return Promise.resolve({
-          sessions: [],
-          page: effectivePage,
-          limit,
-          totalItems: 0,
-          totalPages: 0,
-        });
-      }
-      return Promise.resolve({
-        sessions: [],
-        page: 1,
-        limit: 0,
-        totalItems: 0,
-        totalPages: 0,
-      });
-    }
+    const byUser = this.sessions[appName] ?? {};
+    const buckets =
+      userId === undefined ? Object.values(byUser) : [byUser[userId] ?? {}];
 
-    const all: Session[] = Object.values(this.sessions[appName][userId]).map(
-      (session) =>
+    const all: Session[] = buckets
+      .flatMap((bucket) => Object.values(bucket))
+      .map((session) =>
         createSession({
           id: session.id,
           appName: session.appName,
@@ -188,7 +166,7 @@ export class InMemorySessionService extends BaseSessionService {
           events: [],
           lastUpdateTime: session.lastUpdateTime,
         }),
-    );
+      );
 
     if (order === 'asc') {
       all.sort(

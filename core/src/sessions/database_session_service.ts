@@ -262,10 +262,11 @@ export class DatabaseSessionService extends BaseSessionService {
     await this.init();
     const em = this.orm!.em.fork();
 
-    const where: FilterQuery<StorageSession> = {appName};
-    if (userId) {
-      where.userId = userId;
-    }
+    // One scope drives both the session query and the user-state query, so the
+    // two can never disagree about which users are in range.
+    const where = (
+      userId === undefined ? {appName} : {appName, userId}
+    ) satisfies FilterQuery<StorageSession> & FilterQuery<StorageUserState>;
 
     const orderBy =
       order === 'asc'
@@ -326,17 +327,12 @@ export class DatabaseSessionService extends BaseSessionService {
 
     const appStateModel = await em.findOne(StorageAppState, {appName});
     const appState = appStateModel?.state || {};
-    const userStateMap: Record<string, Record<string, unknown>> = {};
-
-    if (userId) {
-      const u = await em.findOne(StorageUserState, {appName, userId});
-      if (u) userStateMap[userId] = u.state;
-    } else {
-      const allUserStates = await em.find(StorageUserState, {appName});
-      for (const u of allUserStates) {
-        userStateMap[u.userId] = u.state;
-      }
-    }
+    // (appName, userId) is the composite primary key, so scoping to both keys
+    // matches at most one row.
+    const userStates = await em.find(StorageUserState, where);
+    const userStateMap = Object.fromEntries(
+      userStates.map((u) => [u.userId, u.state]),
+    );
 
     const sessions = storageSessions.map((ss) => {
       const uState = userStateMap[ss.userId] || {};
