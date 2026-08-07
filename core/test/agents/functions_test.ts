@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
+  AuthConfig,
+  AuthCredentialTypes,
   BasePlugin,
   BaseTool,
   createEvent,
@@ -33,6 +35,7 @@ import {
 // Get the test target function
 const {
   handleFunctionCallList,
+  buildAuthRequestEvent,
   generateAuthEvent,
   generateRequestConfirmationEvent,
 } = functionsExportedForTestingOnly;
@@ -505,6 +508,95 @@ describe('generateAuthEvent', () => {
     expect(call2).toBeDefined();
     expect(call2!.functionCall!.name).toBe('adk_request_credential');
     expect(call2!.functionCall!.args!['auth_config']).toBe('auth_config_2');
+  });
+});
+
+describe('buildAuthRequestEvent', () => {
+  let invocationContext: InvocationContext;
+
+  const apiKeyConfig: AuthConfig = {
+    credentialKey: 'api_key',
+    authScheme: {type: 'apiKey', name: 'X-Api-Key', in: 'header'},
+    rawAuthCredential: {
+      authType: AuthCredentialTypes.API_KEY,
+      apiKey: 'developer-supplied-key',
+    },
+  };
+  const secondConfig: AuthConfig = {
+    credentialKey: 'second_key',
+    authScheme: {type: 'http', scheme: 'bearer'},
+  };
+
+  beforeEach(() => {
+    const agent = new LlmAgent({name: 'test_agent', model: 'test_model'});
+    invocationContext = new InvocationContext({
+      invocationId: 'inv_123',
+      branch: 'main_branch',
+      session: {} as Session,
+      agent,
+      pluginManager: new PluginManager(),
+    });
+  });
+
+  it('should build one function call per auth request', () => {
+    const event = buildAuthRequestEvent(invocationContext, {
+      'call_1': apiKeyConfig,
+    });
+
+    expect(event.invocationId).toBe('inv_123');
+    expect(event.branch).toBe('main_branch');
+    expect(event.content!.parts!.length).toBe(1);
+    const functionCall = event.content!.parts![0].functionCall!;
+    expect(functionCall.name).toBe('adk_request_credential');
+    expect(functionCall.args!['function_call_id']).toBe('call_1');
+    expect(functionCall.args!['auth_config']).toBe(apiKeyConfig);
+  });
+
+  it('should build a distinct id for every auth request', () => {
+    const event = buildAuthRequestEvent(invocationContext, {
+      'call_1': apiKeyConfig,
+      'call_2': secondConfig,
+    });
+
+    const ids = event.content!.parts!.map((part) => part.functionCall!.id);
+    expect(ids.length).toBe(2);
+    expect(new Set(ids).size).toBe(2);
+  });
+
+  it('should register every function call id as long running', () => {
+    const event = buildAuthRequestEvent(invocationContext, {
+      'call_1': apiKeyConfig,
+      'call_2': secondConfig,
+    });
+
+    const ids = event.content!.parts!.map((part) => part.functionCall!.id);
+    expect(event.longRunningToolIds).toEqual(ids);
+  });
+
+  it('should set the author to the agent name', () => {
+    const event = buildAuthRequestEvent(invocationContext, {
+      'call_1': apiKeyConfig,
+    });
+
+    expect(event.author).toBe('test_agent');
+  });
+
+  it('should leave the content role undefined by default', () => {
+    const event = buildAuthRequestEvent(invocationContext, {
+      'call_1': apiKeyConfig,
+    });
+
+    expect(event.content!.role).toBeUndefined();
+  });
+
+  it('should use the content role it is given', () => {
+    const event = buildAuthRequestEvent(
+      invocationContext,
+      {'call_1': apiKeyConfig},
+      'model',
+    );
+
+    expect(event.content!.role).toBe('model');
   });
 });
 

@@ -8,6 +8,7 @@ import {Content, createUserContent, FunctionCall, Part} from '@google/genai';
 import {isEmpty} from 'lodash-es';
 
 import {InvocationContext} from '../agents/invocation_context.js';
+import {AuthConfig} from '../auth/auth_tool.js';
 import {
   createEvent,
   Event,
@@ -43,6 +44,7 @@ export const REQUEST_CONFIRMATION_FUNCTION_CALL_NAME =
 // Export these items for testing purposes only
 export const functionsExportedForTestingOnly = {
   handleFunctionCallList,
+  buildAuthRequestEvent,
   generateAuthEvent,
   generateRequestConfirmationEvent,
 };
@@ -86,11 +88,35 @@ export function generateAuthEvent(
   ) {
     return undefined;
   }
+
+  return buildAuthRequestEvent(
+    invocationContext,
+    functionResponseEvent.actions.requestedAuthConfigs,
+    functionResponseEvent.content!.role,
+  );
+}
+
+/**
+ * Builds an auth request event carrying one `adk_request_credential` function
+ * call per requested credential.
+ *
+ * Both auth paths share this builder: the tool-level path, where a tool
+ * requests a credential while it runs, and the toolset-level path, where ADK
+ * resolves a toolset's credential before it lists the toolset's tools.
+ *
+ * @param invocationContext The current invocation context.
+ * @param authRequests The requested configs, keyed by function call id.
+ * @param role The content role. Defaults to `undefined`.
+ * @return The auth request event.
+ */
+export function buildAuthRequestEvent(
+  invocationContext: InvocationContext,
+  authRequests: Record<string, AuthConfig>,
+  role?: string,
+): Event {
   const parts: Part[] = [];
   const longRunningToolIds = new Set<string>();
-  for (const [functionCallId, authConfig] of Object.entries(
-    functionResponseEvent.actions.requestedAuthConfigs,
-  )) {
+  for (const [functionCallId, authConfig] of Object.entries(authRequests)) {
     const requestEucFunctionCall: FunctionCall = {
       name: REQUEST_EUC_FUNCTION_CALL_NAME,
       args: {
@@ -109,7 +135,7 @@ export function generateAuthEvent(
     branch: invocationContext.branch,
     content: {
       parts: parts,
-      role: functionResponseEvent.content!.role,
+      role,
     },
     longRunningToolIds: Array.from(longRunningToolIds),
   });

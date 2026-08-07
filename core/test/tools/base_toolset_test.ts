@@ -5,6 +5,7 @@
  */
 
 import {
+  AuthConfig,
   BaseTool,
   BaseToolset,
   Context,
@@ -159,5 +160,40 @@ describe('BaseToolset integration with LLM Request', () => {
     expect(toolKeys).toContain('prefixA_tool2');
     expect(toolKeys).toContain('prefixB_tool1');
     expect(toolKeys).toContain('prefixB_tool2');
+  });
+});
+
+describe('BaseToolset.getAuthConfig', () => {
+  const authConfig: AuthConfig = {
+    credentialKey: 'catalog_key',
+    authScheme: {type: 'apiKey', name: 'X-Api-Key', in: 'header'},
+  };
+
+  class AuthenticatedToolset extends BaseToolset {
+    constructor() {
+      super([]);
+    }
+
+    override getAuthConfig(): AuthConfig | undefined {
+      return authConfig;
+    }
+
+    async getTools(): Promise<BaseTool[]> {
+      return [];
+    }
+
+    async close(): Promise<void> {}
+  }
+
+  it('returns undefined when the toolset does not override it', () => {
+    const toolset: BaseToolset = new DummyToolset();
+
+    expect(toolset.getAuthConfig()).toBeUndefined();
+  });
+
+  it('returns the overridden config through a base-class reference', () => {
+    const toolset: BaseToolset = new AuthenticatedToolset();
+
+    expect(toolset.getAuthConfig()).toBe(authConfig);
   });
 });

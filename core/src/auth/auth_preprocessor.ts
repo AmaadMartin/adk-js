@@ -23,7 +23,15 @@ import {camelCaseKeys} from '../utils/case_utils.js';
 import {AuthHandler} from './auth_handler.js';
 import {AuthConfig} from './auth_tool.js';
 
-const TOOLSET_AUTH_CREDENTIAL_ID_PREFIX = '_adk_toolset_auth_';
+/**
+ * Prefix of the synthetic `function_call_id` that a toolset-level credential
+ * request carries.
+ *
+ * A credential request built with this prefix answers a toolset, not a pending
+ * tool call, so {@link AuthPreprocessor} stores the returned credential without
+ * resuming a tool.
+ */
+export const TOOLSET_AUTH_CREDENTIAL_ID_PREFIX = '_adk_toolset_auth_';
 
 interface RequestCredentialArgs {
   authConfig?: AuthConfig;
