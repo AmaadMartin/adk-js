@@ -13,6 +13,7 @@ import {
 } from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {isInMemoryConnectionString} from '../../src/sessions/in_memory_session_service.js';
+import {runGetUserStateTests} from './session_service_test_utils.js';
 
 describe('isInMemoryConnectionString', () => {
   it('returns true for memory://', () => {
@@ -866,4 +867,14 @@ describe('InMemorySessionService', () => {
       expect(session?.id).toBe('poc_sid');
     });
   });
+});
+
+describe('InMemorySessionService.getUserState', () => {
+  let service: InMemorySessionService;
+
+  beforeEach(() => {
+    service = new InMemorySessionService();
+  });
+
+  runGetUserStateTests(() => service);
 });

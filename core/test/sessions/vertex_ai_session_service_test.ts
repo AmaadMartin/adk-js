@@ -1244,4 +1244,22 @@ describe('VertexAiSessionService', () => {
       );
     });
   });
+
+  describe('getUserState', () => {
+    it('rejects because the backend has no user-scoped state', async () => {
+      await expect(
+        service.getUserState({appName: '12345', userId: 'testUser'}),
+      ).rejects.toThrow(/VertexAiSessionService does not support getUserState/);
+    });
+
+    it('rejects without calling the Agent Engine API', async () => {
+      await expect(
+        service.getUserState({appName: '12345', userId: 'testUser'}),
+      ).rejects.toThrow();
+
+      expect(mockClient.get).not.toHaveBeenCalled();
+      expect(mockClient.listInternal).not.toHaveBeenCalled();
+      expect(mockClient.events.listInternal).not.toHaveBeenCalled();
+    });
+  });
 });

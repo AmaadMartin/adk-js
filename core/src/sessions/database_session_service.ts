@@ -19,6 +19,7 @@ import {
   CreateSessionRequest,
   DeleteSessionRequest,
   GetSessionRequest,
+  GetUserStateRequest,
   ListSessionsRequest,
   ListSessionsResponse,
   mergeStates,
@@ -364,6 +365,21 @@ export class DatabaseSessionService extends BaseSessionService {
 
     await em.nativeDelete(StorageSession, {appName, userId, id: sessionId});
     await em.nativeDelete(StorageEvent, {appName, userId, sessionId});
+  }
+
+  override async getUserState({
+    appName,
+    userId,
+  }: GetUserStateRequest): Promise<Record<string, unknown>> {
+    await this.init();
+    const em = this.orm!.em.fork();
+
+    const userStateModel = await em.findOne(StorageUserState, {
+      appName,
+      userId,
+    });
+
+    return {...userStateModel?.state};
   }
 
   override async appendEvent({

@@ -51,6 +51,14 @@ describe('experimental decorator', () => {
       expect(warnCalls).toHaveLength(1);
     });
 
+    it('keeps the decorated class name', () => {
+      @experimental
+      class TestNamedClass {}
+
+      expect(TestNamedClass.name).toBe('TestNamedClass');
+      expect(new TestNamedClass().constructor.name).toBe('TestNamedClass');
+    });
+
     it('does not warn for classes not marked as experimental', () => {
       class NormalClass {}
       new NormalClass();
