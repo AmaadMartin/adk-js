@@ -269,6 +269,15 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
 
       const outputFiles: File[] = [];
       try {
+        // Normalized paths, not raw name strings: `readdir` reports entries
+        // with the platform separator while input names are declared with '/',
+        // so on Windows a string compare misses every input file and echoes it
+        // back to the caller as output.
+        const inputFilePaths = new Set(
+          params.codeExecutionInput.inputFiles?.map((f) =>
+            path.normalize(f.name),
+          ),
+        );
         const allFiles = await fs.readdir(tempDir, {recursive: true});
         for (const relativeFilePath of allFiles) {
           const fullPath = path.join(tempDir, relativeFilePath);
@@ -283,11 +292,7 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
             continue;
           }
 
-          // Skip input files
-          const isInputFile = params.codeExecutionInput.inputFiles?.some(
-            (f) => f.name === relativeFilePath,
-          );
-          if (isInputFile) {
+          if (inputFilePaths.has(path.normalize(relativeFilePath))) {
             continue;
           }
 

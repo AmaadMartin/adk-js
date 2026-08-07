@@ -7,6 +7,7 @@
 import {
   CodeExecutionLanguage,
   ExecuteCodeParams,
+  FileContentEncoding,
   InvocationContext,
   LlmAgent,
   PluginManager,
@@ -356,6 +357,50 @@ describe('UnsafeLocalCodeExecutor', () => {
     expect(result.outputFiles![0].content).toBe('hello from script');
     expect(result.outputFiles![0].contentEncoding).toBe('utf-8');
     expect(result.outputFiles![0].mimeType).toBe('text/plain');
+  });
+
+  it('should exclude an input file whose name is not already normalized', async () => {
+    const params: ExecuteCodeParams = {
+      invocationContext,
+      codeExecutionInput: {
+        code: 'const fs = require("fs"); fs.writeFileSync("new_output.txt", "hello from script");',
+        language: CodeExecutionLanguage.JAVASCRIPT,
+        inputFiles: [
+          {
+            name: './existing_input.txt',
+            content: 'hello input',
+            contentEncoding: FileContentEncoding.UTF8,
+            mimeType: 'text/plain',
+          },
+        ],
+      },
+    };
+
+    const result = await executor.executeCode(params);
+
+    expect(result.outputFiles!.map((f) => f.name)).toEqual(['new_output.txt']);
+  });
+
+  it('should exclude an input file that lives in a subdirectory', async () => {
+    const params: ExecuteCodeParams = {
+      invocationContext,
+      codeExecutionInput: {
+        code: 'const fs = require("fs"); fs.writeFileSync("new_output.txt", "hello from script");',
+        language: CodeExecutionLanguage.JAVASCRIPT,
+        inputFiles: [
+          {
+            name: 'scripts/existing_input.txt',
+            content: 'hello input',
+            contentEncoding: FileContentEncoding.UTF8,
+            mimeType: 'text/plain',
+          },
+        ],
+      },
+    };
+
+    const result = await executor.executeCode(params);
+
+    expect(result.outputFiles!.map((f) => f.name)).toEqual(['new_output.txt']);
   });
 
   it('should infer correct mimeType for generated JSON files', async () => {
