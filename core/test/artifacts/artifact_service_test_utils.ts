@@ -9,6 +9,18 @@ import {Part} from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 
 /**
+ * Legal-but-unusual artifact filenames that every backend must handle
+ * identically. Leading/trailing whitespace and `..`-prefixed names are
+ * deliberately absent: the backends genuinely disagree on those today.
+ */
+const FILENAME_EDGE_CASES: Array<[label: string, filename: string]> = [
+  ['a leading dot', '.hidden.txt'],
+  ['an interior space', 'my report.txt'],
+  ['a trailing dot', 'trailing.dot.'],
+  ['a nested path', 'nested/dir/report.txt'],
+];
+
+/**
  * Runs the shared artifact service tests.
  *
  * @param createService A function that returns a promise that resolves to the artifact service.
@@ -243,6 +255,61 @@ export function runArtifactServiceTests(
       expect(keys).toContain('session.txt');
       expect(keys).toContain('nested/dir/session.txt');
       expect(keys).toContain('user:user.txt');
+    });
+  });
+
+  describe('filename edge cases', () => {
+    it.each(FILENAME_EDGE_CASES)(
+      'round-trips a filename with %s',
+      async (_label, filename) => {
+        const text = `content of ${filename}`;
+
+        const version = await service.saveArtifact({
+          appName,
+          userId,
+          sessionId,
+          filename,
+          artifact: {text},
+        });
+        expect(version).toBe(0);
+
+        const loaded = await service.loadArtifact({
+          appName,
+          userId,
+          sessionId,
+          filename,
+        });
+        expect(loaded?.text).toBe(text);
+
+        const keys = await service.listArtifactKeys({
+          appName,
+          userId,
+          sessionId,
+        });
+        expect(keys).toContain(filename);
+      },
+    );
+
+    it('lists every edge-case filename verbatim and keeps them distinct', async () => {
+      for (const [, filename] of FILENAME_EDGE_CASES) {
+        await service.saveArtifact({
+          appName,
+          userId,
+          sessionId,
+          filename,
+          artifact: {text: filename},
+        });
+      }
+
+      const keys = await service.listArtifactKeys({
+        appName,
+        userId,
+        sessionId,
+      });
+
+      expect([...keys].sort()).toEqual(
+        FILENAME_EDGE_CASES.map(([, filename]) => filename).sort(),
+      );
     });
   });
 
