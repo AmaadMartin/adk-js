@@ -586,6 +586,11 @@ describe('deployToAgentEngine', () => {
     vi.useFakeTimers();
 
     const deployPromise = deployToAgentEngine(defaultOptions);
+    // Attach the handler before advancing: the deploy now rejects during the
+    // advance loop, and an unattached rejection is reported as unhandled.
+    const rejection = expect(deployPromise).rejects.toThrow(
+      'Reasoning Engine creation operation operations/test-operation did not complete in time.',
+    );
 
     await reachedLoopPromise;
     await Promise.resolve(); // yield
@@ -594,9 +599,7 @@ describe('deployToAgentEngine', () => {
       await vi.advanceTimersByTimeAsync(5000);
     }
 
-    await expect(deployPromise).rejects.toThrow(
-      'Reasoning Engine creation operation operations/test-operation did not complete in time.',
-    );
+    await rejection;
 
     vi.useRealTimers();
   }, 30000);
@@ -710,6 +713,11 @@ describe('deployToAgentEngine', () => {
     vi.useFakeTimers();
 
     const deployPromise = deployToAgentEngine(options);
+    // Attach the handler before advancing: the deploy now rejects during the
+    // advance loop, and an unattached rejection is reported as unhandled.
+    const rejection = expect(deployPromise).rejects.toThrow(
+      'Reasoning Engine update operation operations/test-update-op did not complete in time.',
+    );
 
     await reachedLoopPromise;
     await Promise.resolve(); // yield
@@ -718,9 +726,7 @@ describe('deployToAgentEngine', () => {
       await vi.advanceTimersByTimeAsync(5000);
     }
 
-    await expect(deployPromise).rejects.toThrow(
-      'Reasoning Engine update operation operations/test-update-op did not complete in time.',
-    );
+    await rejection;
 
     vi.useRealTimers();
   }, 30000);
