@@ -503,7 +503,10 @@ function getArtifactDir(
     throw new Error(`Absolute artifact filename ${filename} is not permitted.`);
   }
 
-  cleanFilename = toPosixSeparators(cleanFilename);
+  // Interpret Windows separators on every host, as _to_posix_path does in
+  // adk-python. asPosixPath is not usable here: it splits on path.sep, so it
+  // is a no-op for backslashes on POSIX.
+  cleanFilename = cleanFilename.replaceAll('\\', '/');
 
   const artifactDir = path.resolve(scopeRoot, cleanFilename);
   const relative = path.relative(scopeRoot, artifactDir);
@@ -709,18 +712,4 @@ function asPosixPath(p: string): string {
  */
 function isRootedFilename(filename: string): boolean {
   return path.win32.parse(filename).root !== '';
-}
-
-/**
- * Rewrites Windows separators to `/` so a filename nests into the same
- * artifact key on every host OS.
- *
- * Distinct from `asPosixPath`, which converts a native path produced by the
- * `path` module and is a no-op for backslashes on POSIX.
- *
- * @param filename The filename.
- * @returns The filename with `/` separators only.
- */
-function toPosixSeparators(filename: string): string {
-  return filename.split('\\').join('/');
 }
