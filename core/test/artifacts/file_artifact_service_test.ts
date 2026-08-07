@@ -16,6 +16,27 @@ import {
 } from '../../src/artifacts/file_artifact_service.js';
 import {runArtifactServiceTests} from './artifact_service_test_utils.js';
 
+const APP_NAME = 'test-app';
+const USER_ID = 'test-user';
+const SESSION_ID = 'test-session';
+
+/**
+ * Runs `body` against a service backed by a fresh temporary root directory,
+ * then removes that directory.
+ */
+async function withArtifactService(
+  body: (service: FileArtifactService, serviceRoot: string) => Promise<void>,
+): Promise<void> {
+  const serviceRoot = await fs.mkdtemp(
+    path.join(os.tmpdir(), 'adk-artifacts-test-'),
+  );
+  try {
+    await body(new FileArtifactService(serviceRoot), serviceRoot);
+  } finally {
+    await fs.rm(serviceRoot, {recursive: true, force: true});
+  }
+}
+
 describe('FileArtifactService', () => {
   let rootDir: string;
 
@@ -100,6 +121,120 @@ describe('FileArtifactService', () => {
       } finally {
         await fs.rm(rootDir, {recursive: true, force: true});
       }
+    });
+
+    describe('host-independent filename rooting', () => {
+      it('rejects a Windows drive-absolute filename', async () => {
+        await withArtifactService(async (service) => {
+          await expect(
+            service.saveArtifact({
+              appName: APP_NAME,
+              userId: USER_ID,
+              sessionId: SESSION_ID,
+              filename: 'C:\\evil.txt',
+              artifact: {text: 'x'},
+            }),
+          ).rejects.toThrow(
+            'Absolute artifact filename C:\\evil.txt is not permitted.',
+          );
+        });
+      });
+
+      it('rejects a Windows root-relative filename', async () => {
+        await withArtifactService(async (service) => {
+          await expect(
+            service.saveArtifact({
+              appName: APP_NAME,
+              userId: USER_ID,
+              sessionId: SESSION_ID,
+              filename: '\\evil.txt',
+              artifact: {text: 'x'},
+            }),
+          ).rejects.toThrow(
+            'Absolute artifact filename \\evil.txt is not permitted.',
+          );
+        });
+      });
+
+      it('rejects a Windows drive-relative filename', async () => {
+        await withArtifactService(async (service) => {
+          await expect(
+            service.saveArtifact({
+              appName: APP_NAME,
+              userId: USER_ID,
+              sessionId: SESSION_ID,
+              filename: 'C:evil.txt',
+              artifact: {text: 'x'},
+            }),
+          ).rejects.toThrow(
+            'Absolute artifact filename C:evil.txt is not permitted.',
+          );
+        });
+      });
+
+      it('rejects traversal expressed with Windows separators', async () => {
+        await withArtifactService(async (service) => {
+          await expect(
+            service.saveArtifact({
+              appName: APP_NAME,
+              userId: USER_ID,
+              sessionId: SESSION_ID,
+              filename: '..\\escape.txt',
+              artifact: {text: 'x'},
+            }),
+          ).rejects.toThrow('escapes storage directory');
+        });
+      });
+
+      it('rejects nested traversal expressed with Windows separators', async () => {
+        await withArtifactService(async (service) => {
+          await expect(
+            service.saveArtifact({
+              appName: APP_NAME,
+              userId: USER_ID,
+              sessionId: SESSION_ID,
+              filename: 'sub\\..\\..\\escape.txt',
+              artifact: {text: 'x'},
+            }),
+          ).rejects.toThrow('escapes storage directory');
+        });
+      });
+
+      it('nests a filename that uses Windows separators', async () => {
+        await withArtifactService(async (service, serviceRoot) => {
+          await service.saveArtifact({
+            appName: APP_NAME,
+            userId: USER_ID,
+            sessionId: SESSION_ID,
+            filename: 'sub\\file.txt',
+            artifact: {text: 'hello'},
+          });
+
+          const versionDir = path.join(
+            getSessionArtifactsDir(
+              getUserRoot(serviceRoot, USER_ID),
+              SESSION_ID,
+            ),
+            'sub',
+            'file.txt',
+            'versions',
+            '0',
+          );
+          await expect(fs.access(versionDir)).resolves.toBeUndefined();
+          expect((await fs.readdir(versionDir)).sort()).toEqual([
+            'file.txt',
+            'metadata.json',
+          ]);
+
+          const loaded = await service.loadArtifact({
+            appName: APP_NAME,
+            userId: USER_ID,
+            sessionId: SESSION_ID,
+            filename: 'sub\\file.txt',
+          });
+          expect(loaded?.text).toBe('hello');
+        });
+      });
     });
 
     const ROOT = '/tmp/adk-test-root';
