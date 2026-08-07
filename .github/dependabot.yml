@@ -1,4 +1,4 @@
-# Keeps the GitHub Actions used by .github/workflows up to date.
+# Keeps the GitHub Actions in .github/workflows and the npm dependency tree up to date.
 # Schema: https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference
 version: 2
 updates:
@@ -14,4 +14,20 @@ updates:
           - '*'
     commit-message:
       # 'chore' prefix so release-please treats bumps as non-releasable.
+      prefix: 'chore(deps)'
+  - package-ecosystem: 'npm'
+    # The root manifest and package-lock.json; the workspace members are reached from here.
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+    groups:
+      # Minor and patch bumps land as one PR a week; majors stay individual so a
+      # breaking bump cannot hold back the safe ones.
+      npm-minor-and-patch:
+        patterns:
+          - '*'
+        update-types:
+          - 'minor'
+          - 'patch'
+    commit-message:
       prefix: 'chore(deps)'
