@@ -33,10 +33,7 @@ const logger = new AdkLogger({label: 'AgentLoader', colorize: {all: true}});
  */
 const JS_FILES_EXTENSIONS = ['.js', '.cjs', '.mjs', '.ts', '.mts', '.cts'];
 
-/**
- * Maximum number of folder levels to walk up when looking for the project's
- * `node_modules`.
- */
+/** Folder levels to walk up when looking for `node_modules`. */
 const MAX_NODE_MODULES_LOOKUP_LEVELS = 10;
 
 /**

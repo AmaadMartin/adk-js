@@ -115,16 +115,7 @@ export async function createTempDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), `${prefix}-`));
 }
 
-/**
- * Try to find an entry recursively in the given folder and its parents.
- * @param sourceFolder The folder to search in.
- * @param entryName The name of the entry to find.
- * @param maxIterations The maximum number of iterations to perform.
- * @param exists Predicate deciding whether a candidate path is a match.
- * @returns The absolute path of the found entry.
- * @throws Error if the entry is not found after the maximum number of
- *     iterations.
- */
+/** Walks up from sourceFolder for entryName, matched by exists. */
 async function tryToFindEntryRecursively(
   sourceFolder: string,
   entryName: string,
