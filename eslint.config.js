@@ -25,6 +25,22 @@ export default defineConfig([
       },
     },
     rules: {
+      "@typescript-eslint/no-restricted-imports": [
+        "error",
+        {
+          "patterns": [
+            {
+              "group": ["@google-cloud/vertexai/build/**"],
+              // Neither the Sessions class nor the Language enum has a
+              // root-level re-export, and both are dereferenced at runtime,
+              // so they need a deep value import.
+              "allowImportNames": ["Sessions", "Language"],
+              "allowTypeImports": true,
+              "message": "Deep paths into the @google-cloud/vertexai build output bypass the package entry point and break when it reorganises that output. Import values from '@google-cloud/vertexai'; use a type-only import for symbols that have no root-level re-export."
+            }
+          ]
+        }
+      ],
       "no-unused-vars": "off",
       "@typescript-eslint/no-unused-vars": [
         "error",

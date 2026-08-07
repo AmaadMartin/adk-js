@@ -5,8 +5,8 @@
  */
 
 import {Client} from '@google-cloud/vertexai';
-import {Memories} from '@google-cloud/vertexai/build/src/genai/memories.js';
-import {
+import type {Memories} from '@google-cloud/vertexai/build/src/genai/memories.js';
+import type {
   AgentEngineMemoryConfig,
   GenerateAgentEngineMemoriesConfig,
   GenerateMemoriesRequestDirectContentsSourceEvent,
