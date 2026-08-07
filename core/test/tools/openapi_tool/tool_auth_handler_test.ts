@@ -8,6 +8,10 @@ import {
   AuthCredential,
   AuthCredentialTypes,
   Context,
+  createSession,
+  InvocationContext,
+  LlmAgent,
+  PluginManager,
   ToolAuthHandler,
 } from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
@@ -270,13 +274,22 @@ describe('ToolAuthHandler', () => {
       };
     }
 
-    function seedStore(credential: AuthCredential) {
-      const state = new State({
-        oauth2_existing_exchanged_credential: credential,
+    // A real Context, so the credential is read from the session state and any
+    // write goes through the event actions that persist it, as in production.
+    function seedStore(credential: AuthCredential): Context {
+      return new Context({
+        invocationContext: new InvocationContext({
+          invocationId: 'invocation-1',
+          agent: new LlmAgent({name: 'test_agent'}),
+          session: createSession({
+            id: 'session-1',
+            appName: 'app',
+            userId: 'user',
+            state: {oauth2_existing_exchanged_credential: credential},
+          }),
+          pluginManager: new PluginManager(),
+        }),
       });
-      const context = {state} as unknown as Context;
-
-      return {state, context};
     }
 
     function stubFetch(buildResponse: () => Response) {
@@ -305,7 +318,7 @@ describe('ToolAuthHandler', () => {
           expires_in: 3600,
         }),
       );
-      const {context} = seedStore(storedOAuth2Credential(Date.now() - 1000));
+      const context = seedStore(storedOAuth2Credential(Date.now() - 1000));
 
       const result = await new ToolAuthHandler(
         context,
@@ -332,29 +345,25 @@ describe('ToolAuthHandler', () => {
           expires_in: 3600,
         }),
       );
-      const {state, context} = seedStore(
-        storedOAuth2Credential(Date.now() - 1000),
-      );
+      const context = seedStore(storedOAuth2Credential(Date.now() - 1000));
 
       await new ToolAuthHandler(
         context,
         OAUTH2_SCHEME,
       ).prepareAuthCredentials();
 
-      const stored = state.get<AuthCredential>(
+      const stored = context.state.get<AuthCredential>(
         'oauth2_existing_exchanged_credential',
       );
       expect(stored?.oauth2?.accessToken).toBe('refreshed-token');
       expect(stored?.oauth2?.refreshToken).toBe('new-refresh');
       // Recorded in the delta, so the session keeps the rotated refresh token.
-      expect(state.hasDelta()).toBe(true);
+      expect(context.state.hasDelta()).toBe(true);
     });
 
     it('returns a stored OAuth2 credential that has not expired without refreshing', async () => {
       const fetchMock = stubFetch(() => tokenResponse({}));
-      const {state, context} = seedStore(
-        storedOAuth2Credential(Date.now() + 3_600_000),
-      );
+      const context = seedStore(storedOAuth2Credential(Date.now() + 3_600_000));
 
       const result = await new ToolAuthHandler(
         context,
@@ -363,12 +372,12 @@ describe('ToolAuthHandler', () => {
 
       expect(result.authCredential?.oauth2?.accessToken).toBe('stale-token');
       expect(fetchMock).not.toHaveBeenCalled();
-      expect(state.hasDelta()).toBe(false);
+      expect(context.state.hasDelta()).toBe(false);
     });
 
     it('does not attempt to refresh a stored non-OAuth2 credential', async () => {
       const fetchMock = stubFetch(() => tokenResponse({}));
-      const {state, context} = seedStore({
+      const context = seedStore({
         authType: AuthCredentialTypes.HTTP,
         http: {scheme: 'bearer', credentials: {token: 'sa-token'}},
       });
@@ -380,12 +389,12 @@ describe('ToolAuthHandler', () => {
 
       expect(result.authCredential?.http?.credentials.token).toBe('sa-token');
       expect(fetchMock).not.toHaveBeenCalled();
-      expect(state.hasDelta()).toBe(false);
+      expect(context.state.hasDelta()).toBe(false);
     });
 
     it('returns the stored credential unchanged when the refresh request fails', async () => {
       stubFetch(() => new Response('', {status: 500}));
-      const {context} = seedStore(storedOAuth2Credential(Date.now() - 1000));
+      const context = seedStore(storedOAuth2Credential(Date.now() - 1000));
 
       const result = await new ToolAuthHandler(
         context,
