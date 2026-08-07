@@ -32,6 +32,28 @@ export type AuthScheme =
   | OpenIdConnectWithConfig;
 
 /**
+ * Returns true if the scheme is an OpenAPI OAuth2 security scheme.
+ */
+export function isOAuth2Scheme(
+  scheme: AuthScheme,
+): scheme is OpenAPIV3.OAuth2SecurityScheme {
+  return scheme.type === 'oauth2';
+}
+
+/**
+ * Returns true if the scheme is an OpenID Connect security scheme.
+ *
+ * Narrows on the OpenAPI `type` discriminant alone; the OIDC configuration
+ * fields are not validated, so a caller reading `tokenEndpoint` or
+ * `authorizationEndpoint` must still handle them being absent at runtime.
+ */
+export function isOpenIdConnectWithConfigScheme(
+  scheme: AuthScheme,
+): scheme is OpenIdConnectWithConfig {
+  return scheme.type === 'openIdConnect';
+}
+
+/**
  * Represents the OAuth2 flow (or grant type).
  */
 export enum OAuthGrantType {

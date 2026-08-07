@@ -198,6 +198,49 @@ describe('OAuth2CredentialExchanger', () => {
 
       expect(determineGrantType(authScheme)).toBeUndefined();
     });
+
+    it('returns undefined for an oauth2 scheme that declares no flow', () => {
+      const authScheme: AuthScheme = {type: 'oauth2', flows: {}};
+
+      expect(determineGrantType(authScheme)).toBeUndefined();
+    });
+
+    it('returns undefined for an OpenIdConnect scheme with no grantTypesSupported', () => {
+      const authScheme: AuthScheme = {
+        type: 'openIdConnect',
+        openIdConnectUrl:
+          'https://example.com/.well-known/openid-configuration',
+        authorizationEndpoint: 'https://example.com/auth',
+        tokenEndpoint: 'https://example.com/token',
+      };
+
+      expect(determineGrantType(authScheme)).toBeUndefined();
+    });
+
+    it('returns undefined for a non-OAuth2 scheme that happens to carry flows', () => {
+      const authScheme = {
+        type: 'http' as const,
+        scheme: 'bearer',
+        flows: {
+          clientCredentials: {
+            tokenUrl: 'https://example.com/token',
+            scopes: {},
+          },
+        },
+      };
+
+      expect(determineGrantType(authScheme)).toBeUndefined();
+    });
+
+    it('returns undefined for a non-OIDC scheme that happens to carry grantTypesSupported', () => {
+      const authScheme = {
+        type: 'http' as const,
+        scheme: 'bearer',
+        grantTypesSupported: ['client_credentials'],
+      };
+
+      expect(determineGrantType(authScheme)).toBeUndefined();
+    });
   });
 
   describe('exchangeClientCredentials', () => {

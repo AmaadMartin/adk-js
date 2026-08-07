@@ -9,8 +9,9 @@ import {AuthCredential} from '../auth_credential.js';
 import {
   AuthScheme,
   getOAuthGrantTypeFromFlow,
+  isOAuth2Scheme,
+  isOpenIdConnectWithConfigScheme,
   OAuthGrantType,
-  OpenIdConnectWithConfig,
 } from '../auth_schemes.js';
 import {
   BaseCredentialExchanger,
@@ -69,19 +70,21 @@ export class OAuth2CredentialExchanger implements BaseCredentialExchanger {
 export function determineGrantType(
   authScheme: AuthScheme,
 ): OAuthGrantType | undefined {
-  if ('flows' in authScheme && authScheme.flows) {
+  if (isOAuth2Scheme(authScheme) && authScheme.flows) {
     return getOAuthGrantTypeFromFlow(authScheme.flows);
   }
 
-  if ((authScheme as OpenIdConnectWithConfig).grantTypesSupported) {
-    const oidcScheme = authScheme as OpenIdConnectWithConfig;
-
-    if (oidcScheme.grantTypesSupported?.includes('client_credentials')) {
+  if (
+    isOpenIdConnectWithConfigScheme(authScheme) &&
+    authScheme.grantTypesSupported
+  ) {
+    if (authScheme.grantTypesSupported.includes('client_credentials')) {
       return OAuthGrantType.CLIENT_CREDENTIALS;
     }
 
     return OAuthGrantType.AUTHORIZATION_CODE;
   }
+
   return undefined;
 }
 
