@@ -4,10 +4,32 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Context, OpenAPIToolset} from '@google/adk';
+import {
+  Context,
+  createSession,
+  InvocationContext,
+  LlmAgent,
+  OpenAPIToolset,
+  PluginManager,
+} from '@google/adk';
 import * as fs from 'fs';
 import * as path from 'path';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
+
+/**
+ * Builds the same real `Context` the agent request loop hands a tool, so the
+ * fixture cannot drift from the type `RestApiTool.runAsync` actually receives.
+ */
+function createToolContext(): Context {
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'test-invocation',
+      agent: new LlmAgent({name: 'test_agent'}),
+      session: createSession({id: 'test-session', appName: 'test-app'}),
+      pluginManager: new PluginManager([]),
+    }),
+  });
+}
 
 describe('OpenAPIToolset Integration', () => {
   let truanonSpec: string;
@@ -49,16 +71,9 @@ describe('OpenAPIToolset Integration', () => {
       json: async () => mockResponse,
     });
 
-    // Mock context
-    const mockContext = {
-      getAuthResponse: vi.fn().mockReturnValue(undefined),
-      requestCredential: vi.fn(),
-      state: {},
-    };
-
     const result = await getProfileTool!.runAsync({
       args: {id: 'user1', service: 'myservice'},
-      toolContext: mockContext as unknown as Context,
+      toolContext: createToolContext(),
     });
 
     expect(result).toEqual(mockResponse);
@@ -84,15 +99,9 @@ describe('OpenAPIToolset Integration', () => {
       text: async () => 'plain text response',
     });
 
-    const mockContext = {
-      getAuthResponse: vi.fn().mockReturnValue(undefined),
-      requestCredential: vi.fn(),
-      state: {},
-    };
-
     const result = await getProfileTool!.runAsync({
       args: {id: 'user1', service: 'myservice'},
-      toolContext: mockContext as unknown as Context,
+      toolContext: createToolContext(),
     });
 
     expect(result).toBe('plain text response');
@@ -108,15 +117,9 @@ describe('OpenAPIToolset Integration', () => {
 
     vi.mocked(globalThis.fetch).mockRejectedValue(new Error('Network error'));
 
-    const mockContext = {
-      getAuthResponse: vi.fn().mockReturnValue(undefined),
-      requestCredential: vi.fn(),
-      state: {},
-    };
-
     const result = await getProfileTool!.runAsync({
       args: {id: 'user1', service: 'myservice'},
-      toolContext: mockContext as unknown as Context,
+      toolContext: createToolContext(),
     });
 
     expect(result).toEqual({
