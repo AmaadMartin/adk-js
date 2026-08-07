@@ -6,6 +6,7 @@
 
 import {
   BasePlugin,
+  BaseTool,
   Context,
   FunctionTool,
   LongRunningFunctionTool,
@@ -57,7 +58,7 @@ export function registerConformanceIntegrations(registry: IntegrationRegistry) {
   }
 
   // Tools
-  const tools: {name: string; tool: FunctionTool}[] = [
+  const tools: {name: string; tool: BaseTool}[] = [
     {name: 'tools_agent_009.tools.reimburse', tool: reimburse},
     {name: 'tools_agent_009.tools.ask_for_approval', tool: askForApproval},
     {name: 'tools_agent_004.tools.search_flights', tool: searchFlights},
