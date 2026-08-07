@@ -7,13 +7,17 @@
 import {
   AgentTool,
   FunctionTool,
+  getLogger,
   LlmAgent,
   MCPToolset,
   SingleAgentCallback,
 } from '@google/adk';
-import {beforeEach, describe, expect, it} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {AgentRegistry} from '../../src/integration/agent_registry.js';
-import {YamlAgentConfig} from '../../src/integration/agent_types.js';
+import {
+  AgentClass,
+  YamlAgentConfig,
+} from '../../src/integration/agent_types.js';
 import {IntegrationRegistry} from '../../src/integration/integration_registry.js';
 
 describe('AgentRegistry', () => {
@@ -23,6 +27,10 @@ describe('AgentRegistry', () => {
   beforeEach(() => {
     integrationRegistry = new IntegrationRegistry();
     agentRegistry = new AgentRegistry(integrationRegistry);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it('should register and retrieve an agent', () => {
@@ -255,6 +263,68 @@ describe('AgentRegistry', () => {
 
     expect(retrieved).toBeDefined();
     expect(retrieved.tools[0]).toBe(tool);
+  });
+
+  it('should log instantiation via the debug logger, not the console', () => {
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const debugSpy = vi.spyOn(getLogger(), 'debug');
+
+    const config: YamlAgentConfig = {
+      name: 'logged_agent',
+      model: 'model',
+      description: 'desc',
+      instruction: 'inst',
+      isRootAgent: false,
+    };
+
+    agentRegistry.registerAgentConfig('logged_agent', config);
+
+    expect(agentRegistry.getAgent('logged_agent')).toBeInstanceOf(LlmAgent);
+    expect(debugSpy).toHaveBeenCalledWith(
+      'Instantiating logged_agent of class LlmAgent',
+    );
+    expect(consoleSpy).not.toHaveBeenCalled();
+  });
+
+  it('should log the declared agent class when the config supplies one', () => {
+    const debugSpy = vi.spyOn(getLogger(), 'debug');
+
+    const config: YamlAgentConfig = {
+      name: 'sequential_agent',
+      model: 'model',
+      description: 'desc',
+      instruction: 'inst',
+      agentClass: AgentClass.SequentialAgent,
+      isRootAgent: false,
+    };
+
+    agentRegistry.registerAgentConfig('sequential_agent', config);
+
+    expect(agentRegistry.getAgent('sequential_agent')).toBeDefined();
+    expect(debugSpy).toHaveBeenCalledWith(
+      'Instantiating sequential_agent of class SequentialAgent',
+    );
+  });
+
+  it('should not log to the console when a tool is missing', () => {
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const config: YamlAgentConfig = {
+      name: 'silent_bad_agent',
+      model: 'model',
+      description: 'desc',
+      instruction: 'inst',
+      agentClass: AgentClass.LlmAgent,
+      isRootAgent: false,
+      tools: [{name: 'missing_tool'}],
+    };
+
+    agentRegistry.registerAgentConfig('silent_bad_agent', config);
+
+    expect(() => agentRegistry.getAgent('silent_bad_agent')).toThrow(
+      'Tool missing_tool not found in registry',
+    );
+    expect(consoleSpy).not.toHaveBeenCalled();
   });
 
   it('should skip built-in tools', () => {

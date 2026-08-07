@@ -71,7 +71,7 @@ export interface ToolsConfiguration {
 
 // Main config interface
 export interface YamlAgentConfig {
-  agentClass: AgentClass;
+  agentClass?: AgentClass;
   name: string;
   model: string;
   description: string;
