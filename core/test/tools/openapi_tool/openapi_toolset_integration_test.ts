@@ -7,7 +7,7 @@
 import {Context, OpenAPIToolset, RestApiTool} from '@google/adk';
 import * as fs from 'fs';
 import * as path from 'path';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 describe('OpenAPIToolset Integration', () => {
   let truanonSpec: string;
@@ -18,6 +18,10 @@ describe('OpenAPIToolset Integration', () => {
 
     // Mock global fetch
     globalThis.fetch = vi.fn();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it('should parse truanon spec and create tools', async () => {
@@ -62,8 +66,6 @@ describe('OpenAPIToolset Integration', () => {
         grantTypesSupported: ['authorization_code'],
       });
     }
-
-    configure.mockRestore();
   });
 
   it('should execute a tool with mocked fetch', async () => {

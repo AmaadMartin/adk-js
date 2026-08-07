@@ -11,9 +11,13 @@ import {
   RestApiTool,
 } from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
-import {describe, expect, it, vi} from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 
 describe('OpenAPIToolset', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   const mockSpec: OpenAPIV3.Document = {
     openapi: '3.0.0',
     info: {
@@ -157,8 +161,6 @@ describe('OpenAPIToolset', () => {
         tokenEndpoint: 'https://issuer.example.com/token',
       });
     }
-
-    configure.mockRestore();
   });
 
   it('should return all tools when no toolFilter is set and a context is provided', async () => {
