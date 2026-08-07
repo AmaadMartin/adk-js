@@ -6,7 +6,10 @@
 
 import {OpenAPIV3} from 'openapi-types';
 import {describe, expect, it} from 'vitest';
-import {AuthCredential} from '../../../src/auth/auth_credential.js';
+import {
+  AuthCredential,
+  AuthCredentialTypes,
+} from '../../../src/auth/auth_credential.js';
 import {
   applyCredential,
   createApiKeyScheme,
@@ -96,6 +99,28 @@ describe('auth_helpers', () => {
 
       expect(result).toBe(url);
       expect(headers['Authorization']).toBe('Bearer my_token');
+    });
+
+    it('applies an API key credential when given an OpenID Connect scheme with endpoint config', () => {
+      const url = 'http://example.com';
+      const headers: Record<string, string> = {};
+      const credential: AuthCredential = {
+        authType: AuthCredentialTypes.API_KEY,
+        apiKey: 'secret_key',
+      };
+
+      const result = applyCredential(url, headers, credential, {
+        type: 'openIdConnect',
+        openIdConnectUrl:
+          'https://issuer.example.com/.well-known/openid-configuration',
+        authorizationEndpoint: 'https://issuer.example.com/authorize',
+        tokenEndpoint: 'https://issuer.example.com/token',
+      });
+
+      // A non-apiKey scheme names no location, so the default Authorization
+      // header branch runs.
+      expect(result).toBe(url);
+      expect(headers['Authorization']).toBe('secret_key');
     });
   });
 

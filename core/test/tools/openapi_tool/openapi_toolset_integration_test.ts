@@ -4,10 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Context, OpenAPIToolset} from '@google/adk';
+import {Context, OpenAPIToolset, RestApiTool} from '@google/adk';
 import * as fs from 'fs';
 import * as path from 'path';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 describe('OpenAPIToolset Integration', () => {
   let truanonSpec: string;
@@ -20,6 +20,10 @@ describe('OpenAPIToolset Integration', () => {
     globalThis.fetch = vi.fn();
   });
 
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('should parse truanon spec and create tools', async () => {
     const toolset = new OpenAPIToolset({
       specStr: truanonSpec,
@@ -30,6 +34,38 @@ describe('OpenAPIToolset Integration', () => {
     const toolNames = tools.map((t) => t.name);
     expect(toolNames).toContain('get_profile');
     expect(toolNames).toContain('get_token');
+  });
+
+  it('builds tools from a spec string with an OpenID Connect scheme carrying endpoint config', async () => {
+    const configure = vi.spyOn(RestApiTool.prototype, 'configureAuthScheme');
+
+    const toolset = new OpenAPIToolset({
+      specStr: truanonSpec,
+      specType: 'yaml',
+      authScheme: {
+        type: 'openIdConnect',
+        openIdConnectUrl:
+          'https://issuer.example.com/.well-known/openid-configuration',
+        authorizationEndpoint: 'https://issuer.example.com/authorize',
+        tokenEndpoint: 'https://issuer.example.com/token',
+        grantTypesSupported: ['authorization_code'],
+      },
+    });
+    const tools = await toolset.getTools();
+
+    const toolNames = tools.map((t) => t.name);
+    expect(toolNames).toContain('get_profile');
+    expect(toolNames).toContain('get_token');
+
+    // The override reaches every tool with its endpoint config intact.
+    expect(configure).toHaveBeenCalledTimes(tools.length);
+    for (const call of configure.mock.calls) {
+      expect(call[0]).toMatchObject({
+        type: 'openIdConnect',
+        tokenEndpoint: 'https://issuer.example.com/token',
+        grantTypesSupported: ['authorization_code'],
+      });
+    }
   });
 
   it('should execute a tool with mocked fetch', async () => {

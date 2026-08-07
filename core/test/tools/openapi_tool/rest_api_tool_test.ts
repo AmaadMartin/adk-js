@@ -648,9 +648,70 @@ describe('RestApiTool', () => {
       expect.anything(),
     );
   });
+
+  it('hands an OpenID Connect scheme with endpoint config to the auth handler', async () => {
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      {baseUrl: 'http://api.example.com', path: '/test', method: 'GET'},
+      {responses: {}},
+      {
+        type: 'openIdConnect',
+        openIdConnectUrl:
+          'https://issuer.example.com/.well-known/openid-configuration',
+        authorizationEndpoint: 'https://issuer.example.com/authorize',
+        tokenEndpoint: 'https://issuer.example.com/token',
+      },
+    );
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      headers: {get: () => 'text/plain'},
+      text: async () => 'ok',
+    });
+    const spy = vi.spyOn(ToolAuthHandler, 'fromToolContext').mockReturnValue({
+      prepareAuthCredentials: async () => ({state: 'done'}),
+    } as unknown as ToolAuthHandler);
+
+    await tool.runAsync({args: {}, toolContext: {} as unknown as Context});
+
+    expect(spy).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        type: 'openIdConnect',
+        tokenEndpoint: 'https://issuer.example.com/token',
+      }),
+      undefined,
+      expect.anything(),
+    );
+
+    tool.configureAuthScheme({
+      type: 'openIdConnect',
+      openIdConnectUrl:
+        'https://other.example.com/.well-known/openid-configuration',
+      authorizationEndpoint: 'https://other.example.com/authorize',
+      tokenEndpoint: 'https://other.example.com/token',
+      revocationEndpoint: 'https://other.example.com/revoke',
+    });
+
+    await tool.runAsync({args: {}, toolContext: {} as unknown as Context});
+
+    expect(spy).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        revocationEndpoint: 'https://other.example.com/revoke',
+      }),
+      undefined,
+      expect.anything(),
+    );
+  });
 });
 
 describe('RestApiTool Utilities', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   describe('createRestApiTool', () => {
     it('should successfully create a RestApiTool instance', () => {
       const endpoint = {
@@ -670,6 +731,48 @@ describe('RestApiTool Utilities', () => {
       expect(tool).toBeInstanceOf(RestApiTool);
       expect(tool.name).toBe('test_tool');
       expect(tool.description).toBe('description');
+    });
+
+    it('accepts an OpenID Connect scheme with endpoint config', async () => {
+      const tool = createRestApiTool({
+        name: 'test_tool',
+        description: 'description',
+        endpoint: {
+          baseUrl: 'http://api.example.com',
+          path: '/test',
+          method: 'GET',
+        },
+        operation: {responses: {}},
+        authScheme: {
+          type: 'openIdConnect',
+          openIdConnectUrl:
+            'https://issuer.example.com/.well-known/openid-configuration',
+          authorizationEndpoint: 'https://issuer.example.com/authorize',
+          tokenEndpoint: 'https://issuer.example.com/token',
+        },
+      });
+
+      expect(tool).toBeInstanceOf(RestApiTool);
+
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        headers: {get: () => 'text/plain'},
+        text: async () => 'ok',
+      });
+      const spy = vi.spyOn(ToolAuthHandler, 'fromToolContext').mockReturnValue({
+        prepareAuthCredentials: async () => ({state: 'done'}),
+      } as unknown as ToolAuthHandler);
+
+      await tool.runAsync({args: {}, toolContext: {} as unknown as Context});
+
+      expect(spy).toHaveBeenLastCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          tokenEndpoint: 'https://issuer.example.com/token',
+        }),
+        undefined,
+        expect.anything(),
+      );
     });
   });
 
