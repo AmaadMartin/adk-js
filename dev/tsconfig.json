@@ -2,7 +2,12 @@
   "extends": "../tsconfig.json",
   "compilerOptions": {
     "rootDir": "src",
-    "outDir": "dist/types"
+    "outDir": "dist/types",
+    // Drop the root "paths" mapping for declaration emit. dev/src imports
+    // "@google/adk" in 18 files; resolving those to ../core/src pulls files
+    // outside this project's rootDir into the program and fails the build with
+    // TS6059. Emit resolves through node_modules to core/dist/types instead.
+    "paths": {}
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]

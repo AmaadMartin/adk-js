@@ -7,6 +7,17 @@
     "moduleResolution": "nodenext",
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "experimentalDecorators": true
+    "experimentalDecorators": true,
+    // Resolve the workspace packages to their sources, mirroring the aliases
+    // vitest.config.ts already applies at runtime. A test that imports both
+    // "@google/adk" and a relative "../../src/..." path otherwise sees two
+    // unrelated copies of every type. This also makes `tsc --noEmit`
+    // independent of `npm run build`.
+    "paths": {
+      "@google/adk": ["./core/src/index.ts"],
+      "@google/adk/*": ["./core/src/*"],
+      "@google/adk-devtools": ["./dev/src/index.ts"],
+      "@google/adk-integrations": ["./integrations/src/index.ts"]
+    }
   }
 }
