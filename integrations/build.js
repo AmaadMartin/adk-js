@@ -50,6 +50,13 @@ function build({
     logLevel: 'info',
   };
 
+  // The declared browser targets predate dynamic import(), so esbuild would
+  // down-level `await import(...)` into `require(...)`, which is not defined in
+  // a browser. Emit it natively without moving the target baseline.
+  if (platform === 'browser') {
+    buildOptions.supported = {'dynamic-import': true};
+  }
+
   // Prepend license header to the top of the file
   if (format === 'cjs' || bundle) {
     buildOptions.banner = {js: licenseHeaderText};
