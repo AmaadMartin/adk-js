@@ -14,6 +14,7 @@ import {
   createSession,
 } from '@google/adk';
 import {EventEmitter} from 'node:events';
+import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
@@ -31,19 +32,60 @@ const {spawn: realSpawn} =
 
 const DEFAULT_SANDBOX_BIN = '/usr/local/gcp/bin/sandbox';
 
+/** How long the stand-in sandbox and the process that outlives it stay up. */
+const SURVIVOR_LIFETIME_MS = 5000;
+
+/**
+ * What the stand-in sandbox case allows for a `timeoutSeconds: 1` run: the
+ * timeout, the stdio drain, and slack for a loaded CI runner. Well under
+ * {@link SURVIVOR_LIFETIME_MS}, so an unbounded wait fails the assertion
+ * rather than the runner's own budget.
+ */
+const BOUNDED_RETURN_BUDGET_MS = 3000;
+
+/** Budget for the stand-in sandbox case, which spawns real processes. */
+const REAL_SANDBOX_TEST_TIMEOUT_MS = 15000;
+
+/**
+ * Writes an executable stand-in for the guest `sandbox` binary that reproduces
+ * the one behaviour that matters here: it supervises the interpreter in a
+ * separate process, so killing the stand-in leaves that process alive holding
+ * the inherited pipes.
+ */
+async function writeForkingSandbox(dir: string): Promise<string> {
+  const sandboxBin = path.join(dir, 'fake_sandbox');
+  await fs.writeFile(
+    sandboxBin,
+    [
+      `#!${process.execPath}`,
+      "const {spawn} = require('node:child_process');",
+      "process.stdout.write('partial output\\n');",
+      `spawn(process.execPath, ['-e', 'setTimeout(() => {}, ${SURVIVOR_LIFETIME_MS})'], {stdio: 'inherit'});`,
+      `setTimeout(() => {}, ${SURVIVOR_LIFETIME_MS});`,
+    ].join('\n'),
+    {mode: 0o755},
+  );
+  return sandboxBin;
+}
+
 interface FakeChildOptions {
-  /** Chunks emitted on the child's stdout before it closes. */
+  /** Chunks emitted on the child's stdout before it exits. */
   stdout?: string;
-  /** Chunks emitted on the child's stderr before it closes. */
+  /** Chunks emitted on the child's stderr before it exits. */
   stderr?: string;
-  /** Exit code reported by the `close` event. */
+  /** Exit code reported by the `exit` and `close` events. */
   exitCode?: number | null;
-  /** Signal reported by the `close` event. */
+  /** Signal reported by the `exit` and `close` events. */
   signal?: 'SIGKILL' | null;
-  /** Emitted on the child itself, before `close`, when set. */
+  /** Emitted on the child itself, in place of `exit`, when set. */
   spawnError?: Error;
-  /** Emitted on the child's stdin, before `close`, when set. */
+  /** Emitted on the child's stdin, before it exits, when set. */
   stdinError?: Error;
+  /**
+   * Withholds `close`, as Node does while a process that outlived the child
+   * still holds the inherited pipes open.
+   */
+  pipesHeldOpen?: boolean;
 }
 
 /**
@@ -51,7 +93,7 @@ interface FakeChildOptions {
  * stdin, so a test can assert the program that was piped into the sandbox.
  *
  * The streams are plain `EventEmitter`s rather than `PassThrough`s because
- * `emit` is synchronous: `data` is therefore always delivered before `close`.
+ * `emit` is synchronous: `data` is therefore always delivered before `exit`.
  */
 function mockSpawn(options: FakeChildOptions = {}): {
   end: ReturnType<typeof vi.fn>;
@@ -59,8 +101,14 @@ function mockSpawn(options: FakeChildOptions = {}): {
   const stdin = Object.assign(new EventEmitter(), {end: vi.fn()});
   spawnMock.mockImplementation(() => {
     const child = Object.assign(new EventEmitter(), {
-      stdout: Object.assign(new EventEmitter(), {setEncoding: vi.fn()}),
-      stderr: Object.assign(new EventEmitter(), {setEncoding: vi.fn()}),
+      stdout: Object.assign(new EventEmitter(), {
+        setEncoding: vi.fn(),
+        destroy: vi.fn(),
+      }),
+      stderr: Object.assign(new EventEmitter(), {
+        setEncoding: vi.fn(),
+        destroy: vi.fn(),
+      }),
       stdin,
     });
     setImmediate(() => {
@@ -73,10 +121,17 @@ function mockSpawn(options: FakeChildOptions = {}): {
       if (options.stdinError !== undefined) {
         stdin.emit('error', options.stdinError);
       }
+      const exitCode = options.exitCode ?? 0;
+      const signal = options.signal ?? null;
+      // A failed spawn reports 'error' and then 'close', never 'exit'.
       if (options.spawnError !== undefined) {
         child.emit('error', options.spawnError);
+      } else {
+        child.emit('exit', exitCode, signal);
       }
-      child.emit('close', options.exitCode ?? 0, options.signal ?? null);
+      if (!options.pipesHeldOpen) {
+        child.emit('close', exitCode, signal);
+      }
     });
     return child;
   });
@@ -252,6 +307,41 @@ describe('CloudRunSandboxCodeExecutor', () => {
     expect(result.stderr).toBe('partial stderr');
   });
 
+  it('leaves no drain timer pending once close arrives', async () => {
+    // setImmediate stays real so the fake child still emits its events.
+    vi.useFakeTimers({toFake: ['setTimeout', 'clearTimeout']});
+    try {
+      mockSpawn({exitCode: null, signal: 'SIGKILL'});
+
+      await new CloudRunSandboxCodeExecutor({timeoutSeconds: 5}).executeCode(
+        params('import time\ntime.sleep(10)'),
+      );
+
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reports a timed-out run whose close never arrives', async () => {
+    mockSpawn({
+      stdout: 'partial stdout',
+      exitCode: null,
+      signal: 'SIGKILL',
+      pipesHeldOpen: true,
+    });
+
+    const result = await new CloudRunSandboxCodeExecutor({
+      timeoutSeconds: 5,
+    }).executeCode(params('import time\ntime.sleep(10)'));
+
+    expect(result).toEqual({
+      stdout: 'partial stdout',
+      stderr: 'Code execution timed out after 5 seconds.',
+      outputFiles: [],
+    });
+  });
+
   it('names the configured binary when the sandbox binary is missing', async () => {
     mockSpawn({
       spawnError: Object.assign(new Error('spawn sandbox ENOENT'), {
@@ -332,6 +422,35 @@ describe('CloudRunSandboxCodeExecutor', () => {
       outputFiles: [],
     });
   });
+
+  // Node refuses to spawn a `.cmd` or `.bat` without a shell, so there is no
+  // portable executable stand-in for the guest binary on Windows. The mocked
+  // case above pins the same drain path on every platform.
+  it.runIf(os.platform() !== 'win32')(
+    'bounds a timed-out run by timeoutSeconds, not by the survivor holding the pipes',
+    async () => {
+      spawnMock.mockImplementation(realSpawn);
+      const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk_js_crs_test_'));
+      try {
+        const startedAt = Date.now();
+
+        const result = await new CloudRunSandboxCodeExecutor({
+          sandboxBin: await writeForkingSandbox(dir),
+          timeoutSeconds: 1,
+        }).executeCode(params('print("hi")'));
+
+        expect(Date.now() - startedAt).toBeLessThan(BOUNDED_RETURN_BUDGET_MS);
+        expect(result).toEqual({
+          stdout: 'partial output\n',
+          stderr: 'Code execution timed out after 1 seconds.',
+          outputFiles: [],
+        });
+      } finally {
+        await fs.rm(dir, {recursive: true, force: true});
+      }
+    },
+    REAL_SANDBOX_TEST_TIMEOUT_MS,
+  );
 
   // Drives the real `node:child_process.spawn`, so it covers the whole path
   // an agent takes outside a sandbox-enabled Cloud Run container.

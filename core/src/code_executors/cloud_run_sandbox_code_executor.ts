@@ -14,6 +14,16 @@ import {CodeExecutionResult} from './code_execution_utils.js';
 const DEFAULT_SANDBOX_BIN = '/usr/local/gcp/bin/sandbox';
 
 /**
+ * How long a killed child's stdio may keep draining before the run is reported
+ * without it.
+ *
+ * When nothing outlives the child, `'close'` follows `'exit'` immediately
+ * (measured at 0 ms even for a 50 MB stdout), so this budget only ever applies
+ * to the timed-out run described on {@link CloudRunSandboxCodeExecutor}.
+ */
+const STDIO_DRAIN_GRACE_MS = 200;
+
+/**
  * stderr fragments the sandbox emits while it tears down its network
  * namespace. They appear on fully successful runs, and any non-empty stderr
  * makes `buildCodeExecutionResultPart` report the execution to the model as
@@ -144,6 +154,49 @@ export class CloudRunSandboxCodeExecutor extends BaseCodeExecutor {
 
         let stdout = '';
         let stderr = '';
+        let drainTimer: ReturnType<typeof setTimeout> | undefined;
+        let settled = false;
+
+        // Lets go of the pipes, so an abandoned program stops growing the
+        // accumulators, and reports the run. Every step is idempotent, so the
+        // loser of a race costs nothing.
+        const settle = (result: CodeExecutionResult) => {
+          settled = true;
+          clearTimeout(drainTimer);
+          child.stdout.destroy();
+          child.stderr.destroy();
+          resolve(result);
+        };
+
+        // Both `'close'` and the drain timer below report a finished child,
+        // and the loser of that race still fires. Log and report once.
+        const report = (exitCode: number | null, signal: string | null) => {
+          if (settled) {
+            return;
+          }
+          if (stderr) {
+            logger.warn(`Sandbox stderr: ${stderr}`);
+          }
+          const filtered = filterStderr(stderr);
+          if (this.timeoutSeconds !== undefined && signal === 'SIGKILL') {
+            logger.error(
+              `Sandbox execution timed out after ${this.timeoutSeconds} seconds.`,
+            );
+            settle({
+              stdout,
+              stderr:
+                filtered ||
+                `Code execution timed out after ${this.timeoutSeconds} seconds.`,
+              outputFiles: [],
+            });
+            return;
+          }
+          logger.debug(
+            `Sandbox execution finished. Exit code: ${exitCode}, stdout length: ${stdout.length}, stderr length: ${stderr.length}`,
+          );
+          settle({stdout, stderr: filtered, outputFiles: []});
+        };
+
         child.stdout.setEncoding('utf8');
         child.stdout.on('data', (chunk: string) => {
           stdout += chunk;
@@ -163,7 +216,7 @@ export class CloudRunSandboxCodeExecutor extends BaseCodeExecutor {
         child.on('error', (err) => {
           if (isFileNotFoundError(err)) {
             logger.error(`Sandbox binary not found: ${formatError(err)}`);
-            resolve(
+            settle(
               errorResult(
                 `Sandbox binary "${this.sandboxBin}" not found. Ensure you are ` +
                   'running in an environment with the sandbox tool installed.',
@@ -172,35 +225,28 @@ export class CloudRunSandboxCodeExecutor extends BaseCodeExecutor {
             return;
           }
           logger.error(`Unexpected error running sandbox: ${formatError(err)}`);
-          resolve(
+          settle(
             errorResult(
               `Unexpected error running sandbox: ${formatError(err)}`,
             ),
           );
         });
 
-        child.on('close', (exitCode, signal) => {
-          if (stderr) {
-            logger.warn(`Sandbox stderr: ${stderr}`);
-          }
-          const filtered = filterStderr(stderr);
-          if (this.timeoutSeconds !== undefined && signal === 'SIGKILL') {
-            logger.error(
-              `Sandbox execution timed out after ${this.timeoutSeconds} seconds.`,
-            );
-            resolve({
-              stdout,
-              stderr:
-                filtered ||
-                `Code execution timed out after ${this.timeoutSeconds} seconds.`,
-              outputFiles: [],
-            });
+        child.on('close', report);
+
+        child.on('exit', (exitCode, signal) => {
+          if (this.timeoutSeconds === undefined || signal !== 'SIGKILL') {
             return;
           }
-          logger.debug(
-            `Sandbox execution finished. Exit code: ${exitCode}, stdout length: ${stdout.length}, stderr length: ${stderr.length}`,
+          // The timeout kills the `sandbox` process alone. Because `sandbox`
+          // supervises the interpreter rather than replacing itself with it,
+          // the interpreter survives holding the inherited pipes, and `'close'`
+          // waits for every pipe. Waiting for `'close'` here would therefore
+          // ignore `timeoutSeconds` for as long as the program runs.
+          drainTimer = setTimeout(
+            () => report(exitCode, signal),
+            STDIO_DRAIN_GRACE_MS,
           );
-          resolve({stdout, stderr: filtered, outputFiles: []});
         });
 
         child.stdin.end(code);
