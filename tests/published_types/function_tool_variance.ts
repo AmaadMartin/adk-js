@@ -11,8 +11,7 @@
  *
  * Declaration emit erases the types of `private` members, so a generic that
  * only private members reference disappears from the shipped `.d.ts` and stops
- * constraining consumers. These assertions must hold identically against both
- * resolution targets.
+ * constraining consumers.
  */
 
 import {
