@@ -10,6 +10,7 @@ import {
   FileData,
   GoogleGenAI,
   HttpOptions,
+  HttpRetryOptions,
   LiveServerMessage,
 } from '@google/genai';
 
@@ -60,6 +61,12 @@ export interface GeminiParams {
    * Whether to use the Interactions API for stateful conversations.
    */
   useInteractionsApi?: boolean;
+  /**
+   * HTTP retry options applied to the underlying GoogleGenAI client (both the
+   * standard and live clients). Mirrors adk-python's `retry_options`.
+   * See `HttpRetryOptions` from `@google/genai` (e.g. `{attempts: 3}`).
+   */
+  retryOptions?: HttpRetryOptions;
 }
 
 const GEMINI_MODEL_SYMBOL = Symbol.for('google.adk.geminiModel');
@@ -89,6 +96,7 @@ export class Gemini extends BaseLlm {
   private readonly location?: string;
   private readonly headers?: Record<string, string>;
   readonly useInteractionsApi: boolean;
+  private readonly retryOptions?: HttpRetryOptions;
 
   /**
    * @param params The parameters for creating a Gemini instance.
@@ -101,6 +109,7 @@ export class Gemini extends BaseLlm {
     location,
     headers,
     useInteractionsApi,
+    retryOptions,
   }: GeminiParams) {
     if (!model) {
       model = 'gemini-2.5-flash';
@@ -126,6 +135,7 @@ export class Gemini extends BaseLlm {
     this.headers = headers;
     this.vertexai = !!params.vertexai;
     this.useInteractionsApi = !!useInteractionsApi;
+    this.retryOptions = retryOptions;
   }
 
   /**
@@ -212,7 +222,10 @@ export class Gemini extends BaseLlm {
   }
 
   protected getHttpOptions(): HttpOptions {
-    return {headers: {...this.trackingHeaders, ...this.headers}};
+    return {
+      headers: {...this.trackingHeaders, ...this.headers},
+      retryOptions: this.retryOptions,
+    };
   }
 
   get apiClient(): GoogleGenAI {
@@ -257,6 +270,7 @@ export class Gemini extends BaseLlm {
     return {
       headers: this.trackingHeaders,
       apiVersion: this.liveApiVersion,
+      retryOptions: this.retryOptions,
     };
   }
 
