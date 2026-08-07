@@ -39,6 +39,10 @@ export {
   type UnsafeLocalCodeExecutorOptions,
 } from './code_executors/unsafe_local_code_executor.js';
 export * from './common.js';
+export {
+  ParameterManagerClient,
+  type ParameterManagerClientOptions,
+} from './integrations/parameter_manager/parameter_client.js';
 export {DatabaseSessionService} from './sessions/database_session_service.js';
 export {getSessionServiceFromUri} from './sessions/registry.js';
 export {VertexAiSessionService} from './sessions/vertex_ai_session_service.js';
