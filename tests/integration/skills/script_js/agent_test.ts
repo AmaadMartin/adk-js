@@ -60,10 +60,7 @@ async function removeGeneratedOutputs(): Promise<void> {
  */
 describe('Agent with skills that generates JS script and runs it locally', () => {
   beforeAll(async () => {
-    // A previous run's outputs must not survive into this one: the skill's
-    // write path de-duplicates against existing files, so the agent would
-    // write `<name>_2.<ext>` and the comparisons below would read the stale
-    // file instead of this run's output.
+    // Start from a clean fixture dir; see GENERATED_FILE_NAMES.
     await removeGeneratedOutputs();
     await execAsync('npm install', {cwd: PROJECT_PATH});
   }, TEST_EXECUTION_TIMEOUT);
@@ -124,9 +121,7 @@ describe('Agent with skills that generates JS script and runs it locally', () =>
         (normalizeLineEndings(expectedHtmlFile) as string).trim(),
       );
 
-      // The run must have written the three names verbatim. A `_<n>` variant
-      // here means the fixture directory was dirty and the comparisons above
-      // read a previous run's output.
+      // Fail loudly if the run produced a `_<n>` variant.
       const generated = (await fs.readdir(PROJECT_PATH)).filter(
         isGeneratedOutput,
       );
@@ -136,8 +131,7 @@ describe('Agent with skills that generates JS script and runs it locally', () =>
   );
 
   afterAll(async () => {
-    // Removed by name shape, not by exact name: a run that started dirty
-    // produces `<name>_2.<ext>`, which an exact-name teardown leaves behind.
+    // By name shape, not exact name: variants must go too.
     await removeGeneratedOutputs().catch(() => {});
 
     await fs
