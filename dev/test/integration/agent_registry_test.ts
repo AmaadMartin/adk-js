@@ -11,7 +11,7 @@ import {
   MCPToolset,
   SingleAgentCallback,
 } from '@google/adk';
-import {beforeEach, describe, expect, it} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {AgentRegistry} from '../../src/integration/agent_registry.js';
 import {YamlAgentConfig} from '../../src/integration/agent_types.js';
 import {IntegrationRegistry} from '../../src/integration/integration_registry.js';
@@ -21,8 +21,15 @@ describe('AgentRegistry', () => {
   let agentRegistry: AgentRegistry;
 
   beforeEach(() => {
+    // AgentRegistry logs every instantiation with `console.log`.
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+
     integrationRegistry = new IntegrationRegistry();
     agentRegistry = new AgentRegistry(integrationRegistry);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it('should register and retrieve an agent', () => {

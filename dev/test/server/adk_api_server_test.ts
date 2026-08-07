@@ -13,6 +13,7 @@ import {
   createSession,
   Event,
   FunctionTool,
+  getLogger,
   InMemoryArtifactService,
   InMemoryMemoryService,
   InMemorySessionService,
@@ -20,6 +21,7 @@ import {
   LlmAgent,
   Runner,
   Session,
+  setLogger,
 } from '@google/adk';
 import {ReadableSpan} from '@opentelemetry/sdk-trace-base';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
@@ -213,6 +215,12 @@ const TEST_AGENT = new TestAgent({
   ],
 });
 
+// The dev server and the core SDK both log through winston, which writes to
+// the console's underlying stream and so slips past a `console` spy. Both
+// accept a Logger, so hand them the SDK's built-in no-op one.
+setLogger(null);
+const SILENT_LOGGER = getLogger();
+
 describe('AdkWebServer', () => {
   let agentLoader: AgentLoader;
   let sessionService: BaseSessionService;
@@ -222,6 +230,12 @@ describe('AdkWebServer', () => {
   let client: HttpClient;
 
   beforeEach(async () => {
+    // Installed before `server.start()` below, which prints a banner.
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'info').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
     agentLoader = {
       listAgents: () => Promise.resolve(['testApp']),
       getAgentFile: () =>
@@ -242,6 +256,7 @@ describe('AdkWebServer', () => {
       sessionService,
       memoryService,
       artifactService,
+      logger: SILENT_LOGGER,
     });
     await server.start();
 
@@ -250,6 +265,7 @@ describe('AdkWebServer', () => {
 
   afterEach(async () => {
     await server.stop();
+    vi.restoreAllMocks();
   });
 
   describe('Sessions', () => {
@@ -955,6 +971,7 @@ describe('AdkWebServer', () => {
         artifactService,
         a2a: true,
         a2aAuthToken,
+        logger: SILENT_LOGGER,
       });
       await a2aServer.start();
       return a2aServer.url;
@@ -962,16 +979,12 @@ describe('AdkWebServer', () => {
 
     beforeEach(() => {
       vi.stubEnv(A2A_AUTH_TOKEN_ENV_VAR, undefined);
-      // The SDK logs the rejection thrown by the authenticator; keep it out of
-      // the test output.
-      vi.spyOn(console, 'error').mockImplementation(() => {});
     });
 
     afterEach(async () => {
       await a2aServer?.stop();
       a2aServer = undefined;
       vi.unstubAllEnvs();
-      vi.restoreAllMocks();
     });
 
     it('should return 404 for A2A endpoints when disabled', async () => {

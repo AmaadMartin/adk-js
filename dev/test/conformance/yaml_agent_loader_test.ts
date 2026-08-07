@@ -6,7 +6,7 @@
 
 import fg from 'fast-glob';
 import * as fs from 'node:fs/promises';
-import {beforeEach, describe, expect, it, Mock, vi} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {batchLoadYamlAgentConfig} from '../../src/conformance/yaml_agent_loader.js';
 
 // Mock fast-glob
@@ -69,6 +69,12 @@ tools:
 describe('batchLoadYamlAgentConfig', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // batchLoadYamlAgentConfig logs every loaded file with `console.log`.
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it('should load and parse yaml files recursively', async () => {
