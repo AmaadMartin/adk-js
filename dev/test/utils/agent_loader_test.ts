@@ -810,5 +810,134 @@ describe('AgentLoader', () => {
 
       await loader.disposeAll();
     });
+
+    /**
+     * Invalidates the loader the way the fs.watch callback does. The loader
+     * exposes no public trigger for it.
+     */
+    function invalidateAll(loader: AgentLoader): void {
+      (loader as unknown as {invalidateAll: () => void}).invalidateAll();
+    }
+
+    function isPreloaded(loader: AgentLoader): boolean {
+      return (loader as unknown as {agentsAlreadyPreloaded: boolean})
+        .agentsAlreadyPreloaded;
+    }
+
+    /**
+     * Holds every compile open until the test releases it, so an invalidation
+     * can land while a preload pass is parked mid-scan.
+     *
+     * @param buildCount how many compiles must reach the gate before `atGate`
+     *   resolves.
+     */
+    function gateBuilds(buildCount: number): {
+      atGate: Promise<void>;
+      release: () => void;
+    } {
+      let release!: () => void;
+      const released = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let markAtGate!: () => void;
+      const atGate = new Promise<void>((resolve) => {
+        markAtGate = resolve;
+      });
+
+      let reachedGate = 0;
+      (esbuild.build as Mock).mockImplementation(
+        async (options: {entryPoints: string[]; outfile: string}) => {
+          if (++reachedGate === buildCount) {
+            markAtGate();
+          }
+
+          await released;
+          await fs.writeFile(
+            options.outfile,
+            options.entryPoints[0].includes('agent1.js')
+              ? agent1JsContent
+              : agent3JsContent,
+          );
+        },
+      );
+
+      return {atGate, release};
+    }
+
+    /**
+     * Records every temp directory the loader creates for a compiled agent, so
+     * a test can assert that a superseded pass removed the ones it created.
+     */
+    function trackAgentTempDirs(): string[] {
+      const createdDirs: string[] = [];
+
+      (fileUtils.createTempDir as Mock).mockImplementation(async () => {
+        await fs.mkdir(tempLoaderDir, {recursive: true});
+        const dir = await fs.mkdtemp(path.join(tempLoaderDir, 'agent-'));
+        createdDirs.push(dir);
+
+        return dir;
+      });
+
+      return createdDirs;
+    }
+
+    it('drops the results of a preload pass that invalidateAll() superseded', async () => {
+      const scanDir = await fs.mkdtemp(path.join(tempAgentsDir, 'scan-'));
+      await fs.writeFile(path.join(scanDir, 'agent1.js'), agent1JsContent);
+      const createdDirs = trackAgentTempDirs();
+      const {atGate, release} = gateBuilds(1);
+
+      const loader = new AgentLoader(scanDir);
+      const inFlight = loader.preloadAgents();
+      await atGate;
+      invalidateAll(loader);
+      release();
+      await inFlight;
+
+      expect(
+        (loader as unknown as {preloadedAgents: Record<string, AgentFile>})
+          .preloadedAgents,
+      ).toEqual({});
+      expect(isPreloaded(loader)).toBe(false);
+
+      expect(createdDirs.length).toBeGreaterThan(0);
+      for (const dir of createdDirs) {
+        await expect(fs.access(dir)).rejects.toThrow();
+      }
+
+      await loader.disposeAll();
+    });
+
+    it('re-scans from disk after a superseded pass, dropping a file deleted mid-scan', async () => {
+      const scanDir = await fs.mkdtemp(path.join(tempAgentsDir, 'scan-'));
+      await fs.writeFile(path.join(scanDir, 'agent1.js'), agent1JsContent);
+      await fs.writeFile(path.join(scanDir, 'agent3.js'), agent3JsContent);
+      const {atGate, release} = gateBuilds(2);
+
+      const loader = new AgentLoader(scanDir);
+      const inFlight = loader.preloadAgents();
+      await atGate;
+      await fs.rm(path.join(scanDir, 'agent1.js'));
+      invalidateAll(loader);
+      release();
+      await inFlight;
+
+      expect(await loader.listAgents()).toEqual(['agent3']);
+
+      await loader.disposeAll();
+    });
+
+    it('still caches a pass that starts after an invalidation', async () => {
+      const loader = new AgentLoader(tempAgentsDir);
+      await loader.listAgents();
+
+      invalidateAll(loader);
+
+      expect(await loader.listAgents()).toEqual(['agent1', 'agent2', 'agent3']);
+      expect(isPreloaded(loader)).toBe(true);
+
+      await loader.disposeAll();
+    });
   });
 });

@@ -357,6 +357,12 @@ export class AgentFile {
  */
 export class AgentLoader {
   private agentsAlreadyPreloaded = false;
+  /**
+   * Bumped by every invalidation. A preload pass captures the value it started
+   * with, so a scan that describes the pre-change directory can recognise that
+   * it has been superseded and discard what it built.
+   */
+  private generation = 0;
   private readonly preloadedAgents: Record<string, AgentFile> = {};
   private watcher?: fs.FSWatcher;
 
@@ -423,6 +429,8 @@ export class AgentLoader {
    * Disposes all cached agents and marks them for reload on the next request.
    */
   private invalidateAll(): void {
+    this.generation++;
+
     for (const agentFile of Object.values(this.preloadedAgents)) {
       agentFile.dispose().catch(() => {});
     }
@@ -481,6 +489,8 @@ export class AgentLoader {
       return;
     }
 
+    const generation = this.generation;
+
     const files = (await isFile(this.agentsDirPath))
       ? [await getFileMetadata(this.agentsDirPath)]
       : await getDirFiles(this.agentsDirPath);
@@ -488,16 +498,20 @@ export class AgentLoader {
     await Promise.all(
       files.map(async (fileOrDir: FileMetadata) => {
         if (fileOrDir.isFile && isJsFile(fileOrDir.ext)) {
-          return this.loadAgentFromFile(fileOrDir);
+          return this.loadAgentFromFile(fileOrDir, generation);
         }
 
         if (fileOrDir.isDirectory) {
-          return this.loadAgentFromDirectory(fileOrDir);
+          return this.loadAgentFromDirectory(fileOrDir, generation);
         }
       }),
     );
 
-    this.agentsAlreadyPreloaded = true;
+    // A superseded pass scanned a directory state that no longer exists, so it
+    // must not report the cache as complete.
+    if (generation === this.generation) {
+      this.agentsAlreadyPreloaded = true;
+    }
 
     if (this.watchForChanges && !this.watcher) {
       this.startWatching();
@@ -506,11 +520,14 @@ export class AgentLoader {
     return;
   }
 
-  private async loadAgentFromFile(file: FileMetadata): Promise<void> {
+  private async loadAgentFromFile(
+    file: FileMetadata,
+    generation: number,
+  ): Promise<void> {
     try {
       const agentFile = new AgentFile(file.path, this.options);
       await agentFile.load();
-      this.preloadedAgents[file.name] = agentFile;
+      await this.storeOrDispose(file.name, agentFile, generation);
     } catch (e) {
       if (e instanceof AgentFileLoadingError) {
         return;
@@ -519,7 +536,10 @@ export class AgentLoader {
     }
   }
 
-  private async loadAgentFromDirectory(dir: FileMetadata): Promise<void> {
+  private async loadAgentFromDirectory(
+    dir: FileMetadata,
+    generation: number,
+  ): Promise<void> {
     const subFiles = await getDirFiles(dir.path);
     const possibleEntryFile =
       subFiles.find((f) => f.isFile && f.name === 'app' && isJsFile(f.ext)) ??
@@ -532,13 +552,32 @@ export class AgentLoader {
     try {
       const agentFile = new AgentFile(possibleEntryFile.path, this.options);
       await agentFile.load();
-      this.preloadedAgents[dir.name] = agentFile;
+      await this.storeOrDispose(dir.name, agentFile, generation);
     } catch (e) {
       if (e instanceof AgentFileLoadingError) {
         return;
       }
       throw e;
     }
+  }
+
+  /**
+   * Publishes a freshly built agent, unless an invalidation landed while it was
+   * building. Storing a superseded result would resurrect an entry that
+   * `invalidateAll()` deleted; dropping it without disposing would leak its
+   * compiled artifact and temp directory.
+   */
+  private async storeOrDispose(
+    name: string,
+    agentFile: AgentFile,
+    generation: number,
+  ): Promise<void> {
+    if (generation !== this.generation) {
+      await agentFile.dispose().catch(() => {});
+      return;
+    }
+
+    this.preloadedAgents[name] = agentFile;
   }
 }
 
