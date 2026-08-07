@@ -16,6 +16,7 @@ import {
   createDockerFile,
   createDockerFileContent,
   createPackageJson,
+  registerStagingFolderCleanup,
   resolveDefaultFromGcloudConfig,
   spawnAsync,
 } from './deploy_utils.js';
@@ -186,6 +187,8 @@ export async function deployToCloudRun(options: DeployToCloudRunOptions) {
     options.tempFolder ?? (await createTempDir('cloud_run_deploy_src'));
   gcloudCommands.push('--source', tempFolder);
 
+  const unregisterExitCleanup = registerStagingFolderCleanup(tempFolder);
+
   if (options.tempFolder && (await isFolderExists(tempFolder))) {
     console.info('Cleaning up existing temporary files...');
     await fs.rm(tempFolder, {recursive: true, force: true});
@@ -224,5 +227,8 @@ export async function deployToCloudRun(options: DeployToCloudRunOptions) {
     await fs.rm(tempFolder, {recursive: true, force: true});
     await agentLoader.disposeAll();
     console.info('Temporary files cleaned up.');
+    // Disarmed last: an interrupt during the async removal above still needs
+    // the synchronous backstop.
+    unregisterExitCleanup();
   }
 }

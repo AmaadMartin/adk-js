@@ -16,6 +16,7 @@ import {
   copyAgentFiles,
   createDockerFile,
   createPackageJson,
+  registerStagingFolderCleanup,
   resolveDefaultFromGcloudConfig,
   spawnAsync,
 } from './deploy_utils.js';
@@ -81,6 +82,8 @@ export async function deployToAgentEngine(options: DeployToAgentEngineOptions) {
 
   const tempFolder =
     options.tempFolder ?? (await createTempDir('agent_engine_deploy_src'));
+
+  const unregisterExitCleanup = registerStagingFolderCleanup(tempFolder);
 
   if (options.tempFolder && (await isFolderExists(tempFolder))) {
     await fs.rm(tempFolder, {recursive: true, force: true});
@@ -218,5 +221,8 @@ export async function deployToAgentEngine(options: DeployToAgentEngineOptions) {
     await fs.rm(tempFolder, {recursive: true, force: true});
     await agentLoader.disposeAll();
     console.info('Temporary files cleaned up.');
+    // Disarmed last: an interrupt during the async removal above still needs
+    // the synchronous backstop.
+    unregisterExitCleanup();
   }
 }
