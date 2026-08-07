@@ -44,35 +44,6 @@ class ToolContextCredentialStore {
   }
 }
 
-/**
- * Refreshes a credential read back out of the store when its access token has
- * expired, and returns the live credential.
- *
- * The refreshed credential is written back to the store because many providers
- * rotate the refresh token on every refresh. Keeping the pre-refresh copy would
- * leave the next invocation holding a refresh token the authorization server
- * has already revoked, and no later refresh could succeed.
- */
-async function refreshStoredCredential(
-  credential: AuthCredential,
-  authScheme: OpenAPIV3.SecuritySchemeObject,
-  store: ToolContextCredentialStore,
-): Promise<AuthCredential> {
-  if (!credential.oauth2) {
-    return credential;
-  }
-
-  const refresher = new OAuth2CredentialRefresher();
-  if (!(await refresher.isRefreshNeeded(credential))) {
-    return credential;
-  }
-
-  const refreshed = await refresher.refresh(credential, authScheme);
-  store.storeCredential(store.getCredentialKey(authScheme), refreshed);
-
-  return refreshed;
-}
-
 @experimental
 export class ToolAuthHandler {
   constructor(
@@ -107,14 +78,31 @@ export class ToolAuthHandler {
     const existingCredential = store.getCredential(this.authScheme);
 
     if (existingCredential) {
-      return {
-        state: 'done',
-        authCredential: await refreshStoredCredential(
-          existingCredential,
-          this.authScheme,
-          store,
-        ),
-      };
+      // Only an expired credential is refreshed. Handing an unexpired one to
+      // `refresh` would warn about the missing refresh token that a
+      // client-credentials grant is not supposed to issue (RFC 6749 4.4.3).
+      const refresher = new OAuth2CredentialRefresher();
+      if (!(await refresher.isRefreshNeeded(existingCredential))) {
+        return {state: 'done', authCredential: existingCredential};
+      }
+
+      // Write the refreshed credential back, because many providers rotate the
+      // refresh token on every refresh: keeping the pre-refresh copy would
+      // leave the next invocation holding a refresh token the authorization
+      // server has already revoked. `refresh` returns its input unchanged when
+      // it fails, and re-storing that would persist the same secret again.
+      const refreshed = await refresher.refresh(
+        existingCredential,
+        this.authScheme,
+      );
+      if (refreshed !== existingCredential) {
+        store.storeCredential(
+          store.getCredentialKey(this.authScheme),
+          refreshed,
+        );
+      }
+
+      return {state: 'done', authCredential: refreshed};
     }
 
     const authConfig: AuthConfig = {

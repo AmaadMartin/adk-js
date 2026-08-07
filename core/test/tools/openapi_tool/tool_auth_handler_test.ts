@@ -18,6 +18,7 @@ import {OpenAPIV3} from 'openapi-types';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import {State} from '../../../src/sessions/state.js';
 import {AutoAuthCredentialExchanger} from '../../../src/tools/openapi_tool/auth/credential_exchangers/auto_auth_credential_exchanger.js';
+import {logger} from '../../../src/utils/logger.js';
 
 // Mock AutoAuthCredentialExchanger
 vi.mock(
@@ -308,6 +309,7 @@ describe('ToolAuthHandler', () => {
 
     afterEach(() => {
       vi.unstubAllGlobals();
+      vi.restoreAllMocks();
     });
 
     it('refreshes an expired OAuth2 credential read from the credential store', async () => {
@@ -403,6 +405,30 @@ describe('ToolAuthHandler', () => {
 
       expect(result.state).toBe('done');
       expect(result.authCredential?.oauth2?.accessToken).toBe('stale-token');
+      // A failed refresh must not re-write the same secret into session state.
+      expect(context.state.hasDelta()).toBe(false);
+    });
+
+    it('does not warn about a missing refresh token for an unexpired credential', async () => {
+      const warn = vi.spyOn(logger, 'warn');
+      const context = seedStore({
+        authType: AuthCredentialTypes.OAUTH2,
+        // A client-credentials grant issues no refresh token (RFC 6749 4.4.3).
+        oauth2: {
+          clientId: 'client-id',
+          clientSecret: 'client-secret',
+          accessToken: 'live-token',
+          expiresAt: Date.now() + 3_600_000,
+        },
+      });
+
+      const result = await new ToolAuthHandler(
+        context,
+        OAUTH2_SCHEME,
+      ).prepareAuthCredentials();
+
+      expect(result.authCredential?.oauth2?.accessToken).toBe('live-token');
+      expect(warn).not.toHaveBeenCalled();
     });
   });
 });
