@@ -50,6 +50,18 @@ To maintain high code quality and consistency:
    npm run format
    ```
 
+1. **Type checking**: Check the whole tree, tests included. Build first.
+
+   ```bash
+   npm run build
+   npm run ts:check
+   ```
+
+   The root `tsconfig.json` maps `@google/adk` to its sources, so a test file
+   is checked against the same sources it runs against under Vitest. The build
+   has to run first because the `tests/integration` build-setup fixtures
+   resolve `@google/adk-devtools` from `dev/dist`, which is not checked in.
+
 The project uses `husky` and `lint-staged` to automatically lint and format
 your changes before each commit.
 

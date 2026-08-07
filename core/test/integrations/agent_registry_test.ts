@@ -6,6 +6,7 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+import {ClientFactory} from '@a2a-js/sdk/client';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   AgentRegistry,
@@ -559,6 +560,9 @@ describe('AgentRegistry', () => {
             preferredTransport: 'JSONRPC',
             protocolVersion: '0.3.0',
             skills: [],
+            capabilities: {},
+            defaultInputModes: ['text'],
+            defaultOutputModes: ['text'],
           },
         },
       };
@@ -694,25 +698,31 @@ describe('AgentRegistry', () => {
           content: {
             name: 'CustomAgentWithOptions',
             description: 'Desc',
+            version: '1.0.0',
             url: 'https://agent.com',
             preferredTransport: 'JSONRPC',
             protocolVersion: '0.3.0',
             skills: [],
+            capabilities: {},
+            defaultInputModes: ['text'],
+            defaultOutputModes: ['text'],
           },
         },
       };
 
-      const dummyClient = {};
-      const dummyClientFactory = () => {};
+      const clientFactory = new ClientFactory();
+      const client = await clientFactory.createFromAgentCard(
+        agentInfo.card.content,
+      );
 
       vi.spyOn(registry, 'getAgentInfo').mockResolvedValue(agentInfo);
       const agent = await registry.getRemoteA2AAgent('agents/agent-1', {
-        client: dummyClient,
-        clientFactory: dummyClientFactory,
+        client,
+        clientFactory,
       });
       expect(agent).toBeInstanceOf(RemoteA2AAgent);
-      expect((agent as any).a2aConfig.client).toBe(dummyClient);
-      expect((agent as any).a2aConfig.clientFactory).toBe(dummyClientFactory);
+      expect((agent as any).a2aConfig.client).toBe(client);
+      expect((agent as any).a2aConfig.clientFactory).toBe(clientFactory);
     });
   });
 

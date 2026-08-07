@@ -5,10 +5,21 @@
  */
 
 import {describe, expect, it} from 'vitest';
+import {AuthConfig} from '../../src/auth/auth_tool.js';
 import {
   createEventActions,
   mergeEventActions,
 } from '../../src/events/event_actions.js';
+
+const OAUTH2_AUTH_CONFIG: AuthConfig = {
+  authScheme: {type: 'http', scheme: 'bearer'},
+  credentialKey: 'oauth2-key',
+};
+
+const API_KEY_AUTH_CONFIG: AuthConfig = {
+  authScheme: {type: 'apiKey', name: 'X-API-Key', in: 'header'},
+  credentialKey: 'api-key',
+};
 
 describe('createEventActions', () => {
   it('creates an EventActions with empty dicts and no scalar fields', () => {
@@ -40,7 +51,7 @@ describe('createEventActions', () => {
   });
 
   it('applies requestedAuthConfigs override', () => {
-    const authConfig = {scheme: 'oauth2'};
+    const authConfig = OAUTH2_AUTH_CONFIG;
     const actions = createEventActions({
       requestedAuthConfigs: {'call-1': authConfig},
     });
@@ -112,19 +123,19 @@ describe('mergeEventActions', () => {
       {
         stateDelta: {},
         artifactDelta: {},
-        requestedAuthConfigs: {'call-1': {scheme: 'oauth2'}},
+        requestedAuthConfigs: {'call-1': OAUTH2_AUTH_CONFIG},
         requestedToolConfirmations: {},
       },
       {
         stateDelta: {},
         artifactDelta: {},
-        requestedAuthConfigs: {'call-2': {scheme: 'apiKey'}},
+        requestedAuthConfigs: {'call-2': API_KEY_AUTH_CONFIG},
         requestedToolConfirmations: {},
       },
     ]);
     expect(result.requestedAuthConfigs).toEqual({
-      'call-1': {scheme: 'oauth2'},
-      'call-2': {scheme: 'apiKey'},
+      'call-1': OAUTH2_AUTH_CONFIG,
+      'call-2': API_KEY_AUTH_CONFIG,
     });
   });
 

@@ -5,16 +5,17 @@
  */
 
 import {GOOGLE_SEARCH, GoogleSearchTool, LlmRequest} from '@google/adk';
+import {ToolUnion} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
-function makeRequest(model?: string, tools = []): LlmRequest {
+function makeRequest(model?: string, tools: ToolUnion[] = []): LlmRequest {
   return {
     model,
     config: {tools},
     contents: [],
     toolsDict: {},
     liveConnectConfig: {},
-  } as unknown as LlmRequest;
+  };
 }
 
 describe('GoogleSearchTool', () => {

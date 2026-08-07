@@ -7,6 +7,19 @@
     "moduleResolution": "nodenext",
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "experimentalDecorators": true
+    "experimentalDecorators": true,
+    // Resolve the workspace packages to their sources, exactly mirroring the
+    // aliases vitest.config.ts applies at runtime. A test that imports both
+    // "@google/adk" and a relative "../../src/..." path otherwise sees two
+    // unrelated copies of every type.
+    //
+    // "@google/adk-devtools" is deliberately absent, as it is from the vitest
+    // aliases: its only importers are the tests/integration/build_setup
+    // fixtures, which exist to verify that the *published* package resolves.
+    "paths": {
+      "@google/adk": ["./core/src/index.ts"],
+      "@google/adk/*": ["./core/src/*"],
+      "@google/adk-integrations": ["./integrations/src/index.ts"]
+    }
   }
 }

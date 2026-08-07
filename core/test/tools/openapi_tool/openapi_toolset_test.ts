@@ -4,9 +4,20 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {OpenApiSpecParser, OpenAPIToolset, ReadonlyContext} from '@google/adk';
+import {
+  AuthCredential,
+  AuthCredentialTypes,
+  OpenApiSpecParser,
+  OpenAPIToolset,
+  ReadonlyContext,
+} from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
 import {describe, expect, it} from 'vitest';
+
+const API_KEY_CREDENTIAL: AuthCredential = {
+  authType: AuthCredentialTypes.API_KEY,
+  apiKey: 'my-key',
+};
 
 describe('OpenAPIToolset', () => {
   const mockSpec: OpenAPIV3.Document = {
@@ -112,7 +123,7 @@ describe('OpenAPIToolset', () => {
     const toolset = new OpenAPIToolset({
       specDict: mockSpec,
       authScheme: {type: 'apiKey', name: 'key', in: 'header'},
-      authCredential: {api_key: 'my-key'},
+      authCredential: API_KEY_CREDENTIAL,
     });
     const tools = await toolset.getTools();
 
@@ -122,7 +133,7 @@ describe('OpenAPIToolset', () => {
     );
     expect(
       (tools[0] as unknown as Record<string, unknown>).authCredential,
-    ).toEqual({api_key: 'my-key'});
+    ).toEqual(API_KEY_CREDENTIAL);
   });
 
   it('should return all tools when no toolFilter is set and a context is provided', async () => {
@@ -381,9 +392,12 @@ describe('OpenApiSpecParser', () => {
     const operations = parser.parse(specWithInvalidType);
 
     expect(operations.length).toBe(1);
-    const schema = operations[0].operation.responses?.['200']?.content?.[
-      'application/json'
-    ]?.schema as OpenAPIV3.SchemaObject;
+    const response = operations[0].operation.responses?.['200'];
+    if (!response || '$ref' in response) {
+      expect.fail('the parser returned a $ref instead of an inline response');
+    }
+    const schema = response.content?.['application/json']
+      ?.schema as OpenAPIV3.SchemaObject;
     const invalidPropSchema = schema.properties?.[
       'invalidProp'
     ] as OpenAPIV3.SchemaObject;
@@ -426,9 +440,12 @@ describe('OpenApiSpecParser', () => {
     const operations = parser.parse(specWithInvalidArrayType);
 
     expect(operations.length).toBe(1);
-    const schema = operations[0].operation.responses?.['200']?.content?.[
-      'application/json'
-    ]?.schema as OpenAPIV3.SchemaObject;
+    const response = operations[0].operation.responses?.['200'];
+    if (!response || '$ref' in response) {
+      expect.fail('the parser returned a $ref instead of an inline response');
+    }
+    const schema = response.content?.['application/json']
+      ?.schema as OpenAPIV3.SchemaObject;
     const multiPropSchema = schema.properties?.[
       'multiProp'
     ] as OpenAPIV3.SchemaObject;

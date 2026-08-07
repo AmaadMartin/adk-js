@@ -13,6 +13,7 @@ import {
   MCPToolset,
   ParallelAgent,
   SequentialAgent,
+  ToolInputParameters,
 } from '@google/adk';
 import * as path from 'node:path';
 import {
@@ -73,7 +74,7 @@ export class AgentRegistry {
     this.configs.set(name, config);
   }
 
-  private findToolOrThrow(name: string): FunctionTool<undefined> {
+  private findToolOrThrow(name: string): FunctionTool<ToolInputParameters> {
     const tool = this.integrationRegistry.getTool(name);
     if (!tool) {
       console.log('Tool not found in registry', name);

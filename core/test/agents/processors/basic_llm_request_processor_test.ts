@@ -162,16 +162,10 @@ describe('BasicLlmRequestProcessor', () => {
   });
 
   it('should set outputSchema in config when agent has outputSchema', async () => {
-    const outputSchema = {
-      type: 'object' as const,
-      properties: {
-        answer: {type: 'string' as const},
-      },
-    };
     const agent = new LlmAgent({
       name: 'test_agent',
       model: 'test-basic-processor-model',
-      outputSchema,
+      outputSchema: OUTPUT_SCHEMA,
     });
     const invocationContext = createMockInvocationContext(agent);
     const llmRequest = makeLlmRequest();
@@ -183,16 +177,10 @@ describe('BasicLlmRequestProcessor', () => {
   });
 
   it('should not set outputSchema in config when agent has outputSchema and tools', async () => {
-    const outputSchema = {
-      type: 'object' as const,
-      properties: {
-        answer: {type: 'string' as const},
-      },
-    };
     const agent = new LlmAgent({
       name: 'test_agent',
       model: 'test-basic-processor-model',
-      outputSchema,
+      outputSchema: OUTPUT_SCHEMA,
       tools: [
         new FunctionTool({
           name: 'some_tool',

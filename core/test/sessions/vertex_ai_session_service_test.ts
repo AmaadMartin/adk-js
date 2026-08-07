@@ -5,7 +5,12 @@
  */
 
 import {Sessions} from '@google-cloud/vertexai/build/src/genai/sessions.js';
-import {createEvent, State, VertexAiSessionService} from '@google/adk';
+import {
+  createEvent,
+  isCompactedEvent,
+  State,
+  VertexAiSessionService,
+} from '@google/adk';
 import {Session} from '@google/adk/sessions/session.js';
 import {ApiError} from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
@@ -484,7 +489,7 @@ describe('VertexAiSessionService', () => {
 
       expect(session?.events).toHaveLength(1);
       const parsedEvent = session?.events[0];
-      expect(parsedEvent?.isCompacted).toBe(true);
+      expect(parsedEvent && isCompactedEvent(parsedEvent)).toBe(true);
       expect(parsedEvent?.usageMetadata).toEqual({promptTokens: 10});
     });
 
@@ -710,9 +715,10 @@ describe('VertexAiSessionService', () => {
       });
     });
 
-    it('lists sessions without filter if userId is missing', async () => {
+    it('lists sessions without filter if userId is empty', async () => {
       await service.listSessions({
         appName: '12345',
+        userId: '',
       });
 
       expect(mockClient.listInternal).toHaveBeenCalledWith(
@@ -729,6 +735,7 @@ describe('VertexAiSessionService', () => {
 
       const result = await service.listSessions({
         appName: '12345',
+        userId: 'u1',
       });
 
       expect(result.sessions[0].state).toEqual({});
@@ -740,6 +747,7 @@ describe('VertexAiSessionService', () => {
 
       const result = await service.listSessions({
         appName: '12345',
+        userId: 'u1',
       });
 
       expect(result.sessions).toEqual([]);
@@ -759,6 +767,7 @@ describe('VertexAiSessionService', () => {
 
       const result = await service.listSessions({
         appName: '12345',
+        userId: 'u1',
       });
 
       expect(result.sessions[0].state).toEqual({foo: 'bar'});
