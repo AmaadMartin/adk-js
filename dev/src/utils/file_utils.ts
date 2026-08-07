@@ -116,6 +116,41 @@ export async function createTempDir(prefix: string): Promise<string> {
 }
 
 /**
+ * Try to find an entry recursively in the given folder and its parents.
+ * @param sourceFolder The folder to search in.
+ * @param entryName The name of the entry to find.
+ * @param maxIterations The maximum number of iterations to perform.
+ * @param exists Predicate deciding whether a candidate path is a match.
+ * @returns The absolute path of the found entry.
+ * @throws Error if the entry is not found after the maximum number of
+ *     iterations.
+ */
+async function tryToFindEntryRecursively(
+  sourceFolder: string,
+  entryName: string,
+  maxIterations: number,
+  exists: (entryPath: string) => Promise<boolean>,
+): Promise<string> {
+  let currentFolder = sourceFolder;
+
+  for (let i = 0; i < maxIterations; i++) {
+    const entryPath = path.join(currentFolder, entryName);
+
+    if (await exists(entryPath)) {
+      return entryPath;
+    }
+
+    currentFolder = path.dirname(currentFolder);
+  }
+
+  throw new Error(
+    `No ${entryName} found in ${
+      sourceFolder
+    } or its parent folders up to ${maxIterations} levels.`,
+  );
+}
+
+/**
  * Try to find a file recursively in the given folder.
  * @param sourceFolder The folder to search in.
  * @param fileName The name of the file to find.
@@ -129,21 +164,36 @@ export async function tryToFindFileRecursively(
   fileName: string,
   maxIterations: number,
 ): Promise<string> {
-  let currentFolder = sourceFolder;
+  return tryToFindEntryRecursively(
+    sourceFolder,
+    fileName,
+    maxIterations,
+    isFileExists,
+  );
+}
 
-  for (let i = 0; i < maxIterations; i++) {
-    const filePath = path.join(currentFolder, fileName);
-
-    if (await isFileExists(filePath)) {
-      return filePath;
-    }
-
-    currentFolder = path.dirname(currentFolder);
-  }
-
-  throw new Error(
-    `No ${fileName} found in ${
-      sourceFolder
-    } or its parent folders up to ${maxIterations} levels.`,
+/**
+ * Try to find a folder recursively in the given folder and its parents.
+ *
+ * A plain file with the same name is not a match. The walk skips it and
+ * continues upward.
+ *
+ * @param sourceFolder The folder to search in.
+ * @param folderName The name of the folder to find.
+ * @param maxIterations The maximum number of iterations to perform.
+ * @returns The absolute path of the found folder.
+ * @throws Error if the folder is not found after the maximum number of
+ *     iterations.
+ */
+export async function tryToFindFolderRecursively(
+  sourceFolder: string,
+  folderName: string,
+  maxIterations: number,
+): Promise<string> {
+  return tryToFindEntryRecursively(
+    sourceFolder,
+    folderName,
+    maxIterations,
+    isFolderExists,
   );
 }
