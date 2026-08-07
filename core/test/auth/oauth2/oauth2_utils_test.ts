@@ -68,6 +68,15 @@ describe('oauth2_utils', () => {
       } as AuthScheme;
       expect(getTokenEndpoint(scheme)).toBeUndefined();
     });
+
+    it('returns undefined for an openIdConnect scheme with no tokenEndpoint', () => {
+      const scheme: AuthScheme = {
+        type: 'openIdConnect',
+        openIdConnectUrl:
+          'https://example.com/.well-known/openid-configuration',
+      };
+      expect(getTokenEndpoint(scheme)).toBeUndefined();
+    });
   });
 
   describe('fetchOAuth2Tokens', () => {

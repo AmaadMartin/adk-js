@@ -8,8 +8,7 @@ import {AuthScheme, OAuthGrantType} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 import {
   getOAuthGrantTypeFromFlow,
-  isOAuth2Scheme,
-  isOpenIdConnectWithConfigScheme,
+  isOpenIdConnectScheme,
 } from '../../src/auth/auth_schemes.js';
 
 const OAUTH2_SCHEME: AuthScheme = {
@@ -87,44 +86,9 @@ describe('auth_schemes', () => {
     });
   });
 
-  describe('isOAuth2Scheme', () => {
-    it('accepts a scheme whose type is oauth2', () => {
-      expect(isOAuth2Scheme(OAUTH2_SCHEME)).toBe(true);
-    });
-
-    it('rejects an openIdConnect scheme', () => {
-      expect(isOAuth2Scheme(OPEN_ID_CONNECT_SCHEME)).toBe(false);
-    });
-
-    it('rejects an http scheme', () => {
-      expect(isOAuth2Scheme(HTTP_SCHEME)).toBe(false);
-    });
-
-    it('rejects an apiKey scheme', () => {
-      expect(isOAuth2Scheme(API_KEY_SCHEME)).toBe(false);
-    });
-
-    it('rejects an http scheme that carries a flows property', () => {
-      const scheme = {
-        type: 'http' as const,
-        scheme: 'bearer',
-        flows: {
-          clientCredentials: {
-            tokenUrl: 'https://example.com/token',
-            scopes: {},
-          },
-        },
-      };
-
-      expect(isOAuth2Scheme(scheme)).toBe(false);
-    });
-  });
-
-  describe('isOpenIdConnectWithConfigScheme', () => {
+  describe('isOpenIdConnectScheme', () => {
     it('accepts a scheme whose type is openIdConnect', () => {
-      expect(isOpenIdConnectWithConfigScheme(OPEN_ID_CONNECT_SCHEME)).toBe(
-        true,
-      );
+      expect(isOpenIdConnectScheme(OPEN_ID_CONNECT_SCHEME)).toBe(true);
     });
 
     it('accepts an openIdConnect scheme that carries no configuration fields', () => {
@@ -134,19 +98,19 @@ describe('auth_schemes', () => {
           'https://example.com/.well-known/openid-configuration',
       };
 
-      expect(isOpenIdConnectWithConfigScheme(scheme)).toBe(true);
+      expect(isOpenIdConnectScheme(scheme)).toBe(true);
     });
 
     it('rejects an oauth2 scheme', () => {
-      expect(isOpenIdConnectWithConfigScheme(OAUTH2_SCHEME)).toBe(false);
+      expect(isOpenIdConnectScheme(OAUTH2_SCHEME)).toBe(false);
     });
 
     it('rejects an http scheme', () => {
-      expect(isOpenIdConnectWithConfigScheme(HTTP_SCHEME)).toBe(false);
+      expect(isOpenIdConnectScheme(HTTP_SCHEME)).toBe(false);
     });
 
     it('rejects an apiKey scheme', () => {
-      expect(isOpenIdConnectWithConfigScheme(API_KEY_SCHEME)).toBe(false);
+      expect(isOpenIdConnectScheme(API_KEY_SCHEME)).toBe(false);
     });
 
     it('rejects an http scheme that carries a grantTypesSupported property', () => {
@@ -156,7 +120,7 @@ describe('auth_schemes', () => {
         grantTypesSupported: ['client_credentials'],
       };
 
-      expect(isOpenIdConnectWithConfigScheme(scheme)).toBe(false);
+      expect(isOpenIdConnectScheme(scheme)).toBe(false);
     });
   });
 });

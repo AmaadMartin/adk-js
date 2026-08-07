@@ -32,24 +32,14 @@ export type AuthScheme =
   | OpenIdConnectWithConfig;
 
 /**
- * Returns true if the scheme is an OpenAPI OAuth2 security scheme.
- */
-export function isOAuth2Scheme(
-  scheme: AuthScheme,
-): scheme is OpenAPIV3.OAuth2SecurityScheme {
-  return scheme.type === 'oauth2';
-}
-
-/**
  * Returns true if the scheme is an OpenID Connect security scheme.
  *
- * Narrows on the OpenAPI `type` discriminant alone; the OIDC configuration
- * fields are not validated, so a caller reading `tokenEndpoint` or
- * `authorizationEndpoint` must still handle them being absent at runtime.
+ * The configuration fields stay optional in the narrowed type because the
+ * `type` discriminant does not prove that any of them are present.
  */
-export function isOpenIdConnectWithConfigScheme(
+export function isOpenIdConnectScheme(
   scheme: AuthScheme,
-): scheme is OpenIdConnectWithConfig {
+): scheme is OpenAPIV3.OpenIdSecurityScheme & Partial<OpenIdConnectWithConfig> {
   return scheme.type === 'openIdConnect';
 }
 

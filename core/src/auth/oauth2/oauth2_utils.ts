@@ -7,18 +7,15 @@
 import {logger} from '../../utils/logger.js';
 import {OAuth2Auth} from '../auth_credential.js';
 
-import {AuthScheme, OpenIdConnectWithConfig} from '../auth_schemes.js';
+import {AuthScheme, isOpenIdConnectScheme} from '../auth_schemes.js';
 import {validateDiscoveryUrl} from './oauth2_discovery.js';
 
 /**
  * Returns the token endpoint for the given auth scheme.
  */
 export function getTokenEndpoint(authScheme: AuthScheme): string | undefined {
-  if (
-    authScheme.type === 'openIdConnect' &&
-    (authScheme as OpenIdConnectWithConfig).tokenEndpoint
-  ) {
-    return (authScheme as OpenIdConnectWithConfig).tokenEndpoint;
+  if (isOpenIdConnectScheme(authScheme) && authScheme.tokenEndpoint) {
+    return authScheme.tokenEndpoint;
   }
 
   if (authScheme.type === 'oauth2' && authScheme.flows) {
