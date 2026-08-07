@@ -513,6 +513,9 @@ export class AgentLoader {
       this.preloadedAgents[file.name] = agentFile;
     } catch (e) {
       if (e instanceof AgentFileLoadingError) {
+        // Warn rather than throw: a non-agent module may legitimately sit in
+        // the agents directory.
+        logger.warn(`Skipping ${file.path}: ${e.message}`);
         return;
       }
       throw e;
@@ -535,6 +538,7 @@ export class AgentLoader {
       this.preloadedAgents[dir.name] = agentFile;
     } catch (e) {
       if (e instanceof AgentFileLoadingError) {
+        logger.warn(`Skipping ${possibleEntryFile.path}: ${e.message}`);
         return;
       }
       throw e;
