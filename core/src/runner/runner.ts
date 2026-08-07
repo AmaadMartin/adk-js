@@ -4,7 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content, createPartFromText, Part} from '@google/genai';
+import {
+  Content,
+  createPartFromText,
+  createUserContent,
+  Part,
+} from '@google/genai';
 import {context, trace} from '@opentelemetry/api';
 
 import {BaseAgent} from '../agents/base_agent.js';
@@ -37,6 +42,7 @@ import {
   tracer,
 } from '../telemetry/tracing.js';
 import {BaseToolset, isBaseToolset} from '../tools/base_toolset.js';
+import {printEvent} from '../utils/debug_output.js';
 import {logger} from '../utils/logger.js';
 import {isGemini2OrAbove} from '../utils/model_name.js';
 
@@ -95,6 +101,18 @@ export interface RunnerConfig {
  * Defined once and shared by all Runner instances.
  */
 const RUNNER_SIGNATURE_SYMBOL = Symbol.for('google.adk.runner');
+
+/**
+ * Default user id for {@link Runner.runDebug}. Byte-identical to the
+ * `google/adk-python` default so cross-language samples line up.
+ */
+const DEBUG_USER_ID = 'debug_user_id';
+
+/**
+ * Default session id for {@link Runner.runDebug}. Byte-identical to the
+ * `google/adk-python` default so cross-language samples line up.
+ */
+const DEBUG_SESSION_ID = 'debug_session_id';
 
 /**
  * Type guard to check if an object is an instance of Runner.
@@ -455,6 +473,88 @@ export class Runner {
       const toolsets = getAllToolsets(this.agent);
       await Promise.allSettled(toolsets.map((t) => t.close()));
     }
+  }
+
+  /**
+   * Sends one or more messages to the agent and returns every event produced.
+   *
+   * The method gets or creates the session, wraps each message in user content
+   * and drives {@link Runner.runAsync} once per message, so a first run needs
+   * no boilerplate. Unless `quiet` is set, it emits a readable transcript
+   * through the ADK logger at `info` level.
+   *
+   * This is for debugging and experimentation only. For production use, call
+   * {@link Runner.runAsync}, which gives full control over session management,
+   * event streaming and error handling.
+   *
+   * @param userMessages A single message, or several messages sent in order.
+   * @param options.userId The user id. Defaults to `'debug_user_id'`.
+   * @param options.sessionId The session id. Reuse the same id to continue a
+   *     conversation. Defaults to `'debug_session_id'`.
+   * @param options.runConfig The run config for the agent.
+   * @param options.quiet Suppresses all output when true.
+   * @param options.verbose Adds tool call, tool result and code execution
+   *     detail to the transcript. This writes tool arguments and tool responses
+   *     to the log, where they can expose credentials or user data, so keep it
+   *     off outside local debugging.
+   * @return Every event from every message, in emission order.
+   *
+   * @example
+   * ```typescript
+   * const runner = new InMemoryRunner({agent: myAgent});
+   * const events = await runner.runDebug('What is 2+2?');
+   * ```
+   */
+  async runDebug(
+    userMessages: string | string[],
+    options: {
+      userId?: string;
+      sessionId?: string;
+      runConfig?: RunConfig;
+      quiet?: boolean;
+      verbose?: boolean;
+    } = {},
+  ): Promise<Event[]> {
+    const {
+      userId = DEBUG_USER_ID,
+      sessionId = DEBUG_SESSION_ID,
+      runConfig,
+      quiet = false,
+      verbose = false,
+    } = options;
+
+    const session = await this.sessionService.getOrCreateSession({
+      appName: this.appName,
+      userId,
+      sessionId,
+    });
+    if (!quiet) {
+      logger.info(`Debug session: ${session.id}`);
+    }
+
+    const messages = Array.isArray(userMessages)
+      ? userMessages
+      : [userMessages];
+    const events: Event[] = [];
+
+    for (const message of messages) {
+      if (!quiet) {
+        logger.info(`User > ${message}`);
+      }
+      for await (const event of this.runAsync({
+        userId,
+        sessionId: session.id,
+        newMessage: createUserContent(message),
+        runConfig,
+      })) {
+        if (!quiet) {
+          printEvent(event, {verbose});
+        }
+        events.push(event);
+      }
+    }
+
+    return events;
   }
 
   /**
