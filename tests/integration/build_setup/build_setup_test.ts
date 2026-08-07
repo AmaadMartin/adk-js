@@ -12,6 +12,9 @@ import {getResponse, sendInput} from '../test_case_utils.js';
 const execAsync = promisify(exec);
 const dirname = process.cwd();
 
+// Below the 60s project testTimeout on purpose: the install and the build run
+// in the hook, so each test only spawns an installed fixture and reads its
+// output. A hang there should surface in 20s.
 const TEST_EXECUTION_TIMEOUT = 20000;
 
 describe('Build setup', () => {

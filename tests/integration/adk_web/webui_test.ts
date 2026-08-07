@@ -85,4 +85,4 @@ describe('WebUI Integration Test', () => {
       });
     },
   );
-}, 20000);
+});

@@ -12,9 +12,6 @@ import {normalizeLineEndings, sendInput} from '../../test_case_utils.js';
 const execAsync = promisify(exec);
 const dirname = process.cwd();
 const PROJECT_PATH = `${dirname}/tests/integration/skills/script_js`;
-// Assertion budget only: the install/teardown hooks inherit vitest.config.ts's
-// hookTimeout so a slow cold install is not reported as a test failure.
-const TEST_EXECUTION_TIMEOUT = 60000;
 
 /**
  * This integration test verifies that an agent equipped with script execution skills
@@ -35,64 +32,60 @@ describe('Agent with skills that generates JS script and runs it locally', () =>
     await execAsync('npm install', {cwd: PROJECT_PATH});
   });
 
-  it(
-    'should run agent with skills successfully',
-    async () => {
-      const childProcess = spawn('npm', ['run', 'start'], {
-        cwd: PROJECT_PATH,
-        shell: true,
-      });
+  it('should run agent with skills successfully', async () => {
+    const childProcess = spawn('npm', ['run', 'start'], {
+      cwd: PROJECT_PATH,
+      shell: true,
+    });
 
-      let response = await sendInput(
-        childProcess,
-        'Let`s create algorithmic art.\n',
-      );
-      expect(response.toString()).toContain(
-        'I have created an original algorithmic art piece titled **"Ephemeral Entanglement"**.\n\nFollowing the generative art movement philosophy, I\'ve generated three files for you:\n\n1.  **`ephemeral_entanglement.md`**: The algorithmic philosophy detailing the conceptual foundation of this piece. It explores the delicate dance between deterministic forces and stochastic drift, visualizing unseen connections in a dynamic system.\n2.  **`index.html`**: The interactive viewer for the generative art. It includes a user interface to adjust parameters like particle count, connection radius, and noise scale, allowing you to explore the algorithm\'s emergent behavior.\n3.  **`sketch.js`**: The meticulously crafted p5.js algorithm that brings the philosophy to life. It uses layered Perlin noise to drive a flow field, guiding particles that form ephemeral, glowing bonds when they come into proximity. \n\nYou can view the art by opening the `index.html` file in your web browser. Let the algorithmic dance begin!',
-      );
+    let response = await sendInput(
+      childProcess,
+      'Let`s create algorithmic art.\n',
+    );
+    expect(response.toString()).toContain(
+      'I have created an original algorithmic art piece titled **"Ephemeral Entanglement"**.\n\nFollowing the generative art movement philosophy, I\'ve generated three files for you:\n\n1.  **`ephemeral_entanglement.md`**: The algorithmic philosophy detailing the conceptual foundation of this piece. It explores the delicate dance between deterministic forces and stochastic drift, visualizing unseen connections in a dynamic system.\n2.  **`index.html`**: The interactive viewer for the generative art. It includes a user interface to adjust parameters like particle count, connection radius, and noise scale, allowing you to explore the algorithm\'s emergent behavior.\n3.  **`sketch.js`**: The meticulously crafted p5.js algorithm that brings the philosophy to life. It uses layered Perlin noise to drive a flow field, guiding particles that form ephemeral, glowing bonds when they come into proximity. \n\nYou can view the art by opening the `index.html` file in your web browser. Let the algorithmic dance begin!',
+    );
 
-      response = await sendInput(childProcess, 'exit\n');
-      expect(response.toString()).toContain('');
+    response = await sendInput(childProcess, 'exit\n');
+    expect(response.toString()).toContain('');
 
-      // verify that files were created and have the expected content
-      const resultMdFile = await fs.readFile(
-        `${PROJECT_PATH}/ephemeral_entanglement.md`,
-        'utf-8',
-      );
-      const resultScriptFile = await fs.readFile(
-        `${PROJECT_PATH}/sketch.js`,
-        'utf-8',
-      );
-      const resultHtmlFile = await fs.readFile(
-        `${PROJECT_PATH}/index.html`,
-        'utf-8',
-      );
+    // verify that files were created and have the expected content
+    const resultMdFile = await fs.readFile(
+      `${PROJECT_PATH}/ephemeral_entanglement.md`,
+      'utf-8',
+    );
+    const resultScriptFile = await fs.readFile(
+      `${PROJECT_PATH}/sketch.js`,
+      'utf-8',
+    );
+    const resultHtmlFile = await fs.readFile(
+      `${PROJECT_PATH}/index.html`,
+      'utf-8',
+    );
 
-      const expectedMdFile = await fs.readFile(
-        `${PROJECT_PATH}/expected/ephemeral_entanglement.md`,
-        'utf-8',
-      );
-      const expectedScriptFile = await fs.readFile(
-        `${PROJECT_PATH}/expected/sketch.js`,
-        'utf-8',
-      );
-      const expectedHtmlFile = await fs.readFile(
-        `${PROJECT_PATH}/expected/index.html`,
-        'utf-8',
-      );
+    const expectedMdFile = await fs.readFile(
+      `${PROJECT_PATH}/expected/ephemeral_entanglement.md`,
+      'utf-8',
+    );
+    const expectedScriptFile = await fs.readFile(
+      `${PROJECT_PATH}/expected/sketch.js`,
+      'utf-8',
+    );
+    const expectedHtmlFile = await fs.readFile(
+      `${PROJECT_PATH}/expected/index.html`,
+      'utf-8',
+    );
 
-      expect((normalizeLineEndings(resultMdFile) as string).trim()).toEqual(
-        (normalizeLineEndings(expectedMdFile) as string).trim(),
-      );
-      expect((normalizeLineEndings(resultScriptFile) as string).trim()).toEqual(
-        (normalizeLineEndings(expectedScriptFile) as string).trim(),
-      );
-      expect((normalizeLineEndings(resultHtmlFile) as string).trim()).toEqual(
-        (normalizeLineEndings(expectedHtmlFile) as string).trim(),
-      );
-    },
-    TEST_EXECUTION_TIMEOUT,
-  );
+    expect((normalizeLineEndings(resultMdFile) as string).trim()).toEqual(
+      (normalizeLineEndings(expectedMdFile) as string).trim(),
+    );
+    expect((normalizeLineEndings(resultScriptFile) as string).trim()).toEqual(
+      (normalizeLineEndings(expectedScriptFile) as string).trim(),
+    );
+    expect((normalizeLineEndings(resultHtmlFile) as string).trim()).toEqual(
+      (normalizeLineEndings(expectedHtmlFile) as string).trim(),
+    );
+  });
 
   afterAll(async () => {
     // delete generated files
