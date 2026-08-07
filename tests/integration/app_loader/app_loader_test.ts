@@ -15,6 +15,7 @@ import {sendInput} from '../test_case_utils.js';
 
 const execAsync = promisify(exec);
 const dirname = process.cwd();
+// Per-test budget only; hooks inherit the integration project's hookTimeout.
 const TEST_EXECUTION_TIMEOUT = 40000;
 
 describe('App loader CLI integration', () => {
@@ -29,7 +30,7 @@ describe('App loader CLI integration', () => {
 
       beforeAll(async () => {
         await execAsync('npm install', {cwd: projectPath});
-      }, TEST_EXECUTION_TIMEOUT);
+      });
 
       it(
         'should run app via package.json start script and get responses',
@@ -62,7 +63,7 @@ describe('App loader CLI integration', () => {
         await fs
           .unlink(path.join(projectPath, 'package-lock.json'))
           .catch(() => {});
-      }, TEST_EXECUTION_TIMEOUT);
+      });
     },
   );
 });
@@ -75,9 +76,11 @@ describe('AgentLoader discovery and loading integration', () => {
   let loader: AgentLoader;
 
   beforeAll(async () => {
-    await execAsync('npm install', {cwd: projectPath});
     loader = new AgentLoader(projectPath);
-  }, TEST_EXECUTION_TIMEOUT);
+    // preloadAgents() esbuild-bundles all four entrypoints with the @google/adk
+    // graph inlined; hoist it so it runs under the hook budget, not a test one.
+    await loader.preloadAgents();
+  });
 
   it(
     'should discover apps vs agents across directories and standalone files',
@@ -129,14 +132,5 @@ describe('AgentLoader discovery and loading integration', () => {
 
   afterAll(async () => {
     await loader.disposeAll();
-    await fs
-      .rm(path.join(projectPath, 'node_modules'), {
-        recursive: true,
-        force: true,
-      })
-      .catch(() => {});
-    await fs
-      .unlink(path.join(projectPath, 'package-lock.json'))
-      .catch(() => {});
-  }, TEST_EXECUTION_TIMEOUT);
+  });
 });
