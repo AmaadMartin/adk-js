@@ -7,6 +7,7 @@
 import {getClientLabels} from '../utils/client_labels.js';
 
 import {BaseLlmConnection} from './base_llm_connection.js';
+import {LlmCapabilities} from './capabilities.js';
 import {LlmRequest} from './llm_request.js';
 import {LlmResponse} from './llm_response.js';
 
@@ -55,6 +56,33 @@ export abstract class BaseLlm {
    * List of supported models in regex for LlmRegistry.
    */
   static readonly supportedModels: Array<string | RegExp> = [];
+
+  /**
+   * The capabilities of this model instance.
+   *
+   * Subclasses override this to declare what they support, so that callers can
+   * ask the model instead of deriving support from its name, backend variant,
+   * or type. A model that does not override it supports nothing beyond the
+   * defaults.
+   *
+   * Build an override on what the parent reports, so that capabilities the
+   * override does not name keep the parent's value:
+   *
+   * ```ts
+   * class MyGemini extends Gemini {
+   *   override get capabilities(): LlmCapabilities {
+   *     return {...super.capabilities, outputSchemaAndTools: true};
+   *   }
+   * }
+   * ```
+   *
+   * Keep an override a plain getter rather than caching the result: a
+   * capability may depend on state that changes after construction, such as an
+   * environment variable or a reassigned `model`.
+   */
+  get capabilities(): LlmCapabilities {
+    return {outputSchemaAndTools: false};
+  }
 
   /**
    * Generates one content from the given contents and tools.
