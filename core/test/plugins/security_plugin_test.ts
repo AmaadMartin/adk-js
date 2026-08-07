@@ -4,7 +4,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {BaseTool, createEvent} from '@google/adk';
+import {
+  BaseTool,
+  createEvent,
+  createEventActions,
+  functionsExportedForTestingOnly,
+  InvocationContext,
+  LlmAgent,
+  PluginManager,
+  REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
+  Session,
+} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 import {Context} from '../../src/agents/context.js';
 import {
@@ -13,7 +23,6 @@ import {
   InMemoryPolicyEngine,
   PolicyCheckResult,
   PolicyOutcome,
-  REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
   SecurityPlugin,
 } from '../../src/plugins/security_plugin.js';
 import {ToolConfirmation} from '../../src/tools/tool_confirmation.js';
@@ -351,6 +360,43 @@ describe('SecurityPlugin', () => {
       });
       const result = getAskUserConfirmationFunctionCalls(event);
       expect(result).toEqual([]);
+    });
+
+    it('detects the confirmation call emitted by generateRequestConfirmationEvent', () => {
+      const {generateRequestConfirmationEvent} =
+        functionsExportedForTestingOnly;
+      const invocationContext = new InvocationContext({
+        invocationId: 'inv_123',
+        session: {} as Session,
+        agent: new LlmAgent({name: 'test_agent', model: 'test_model'}),
+        pluginManager: new PluginManager(),
+      });
+      const functionCallEvent = createEvent({
+        content: {
+          role: 'user',
+          parts: [{functionCall: {name: 'tool_1', args: {}, id: 'call_1'}}],
+        },
+      });
+      const functionResponseEvent = createEvent({
+        actions: createEventActions({
+          requestedToolConfirmations: {
+            'call_1': new ToolConfirmation({hint: 'confirm', confirmed: false}),
+          },
+        }),
+        content: {role: 'model', parts: []},
+      });
+
+      const event = generateRequestConfirmationEvent({
+        invocationContext,
+        functionCallEvent,
+        functionResponseEvent,
+      });
+
+      const result = getAskUserConfirmationFunctionCalls(event!);
+      expect(result).toHaveLength(1);
+      // Hardcoded on purpose: pins the wire name against the real producer, so
+      // mutating the constant fails here instead of staying self-consistent.
+      expect(result[0].name).toBe('adk_request_confirmation');
     });
   });
 });

@@ -15,6 +15,7 @@ export type {
 } from './agents/base_agent.js';
 export {Context} from './agents/context.js';
 export {
+  REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
   findEventByFunctionCallId,
   findMatchingFunctionCall,
   functionsExportedForTestingOnly,
@@ -202,7 +203,6 @@ export {PluginManager} from './plugins/plugin_manager.js';
 export {
   InMemoryPolicyEngine,
   PolicyOutcome,
-  REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
   SecurityPlugin,
   getAskUserConfirmationFunctionCalls,
 } from './plugins/security_plugin.js';
