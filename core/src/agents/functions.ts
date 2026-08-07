@@ -196,20 +196,36 @@ async function callToolAsync(
   });
 }
 
+/**
+ * Normalizes a raw tool result into the `FunctionResponse.response` dict.
+ *
+ * Mirrors adk-python `_build_function_response_content`
+ * (src/google/adk/flows/llm_flows/functions.py): an object passes through with
+ * its keys unchecked, and everything else -- including an array -- becomes
+ * `{result: value}`. The Gemini API requires this payload to be a JSON object,
+ * so the wrapping stays (google/adk-js#347); the key is `result` for parity
+ * with the Python SDK.
+ */
+export function normalizeToolResult(
+  functionResult: unknown,
+): Record<string, unknown> {
+  if (
+    typeof functionResult === 'object' &&
+    functionResult !== null &&
+    !Array.isArray(functionResult)
+  ) {
+    return functionResult as Record<string, unknown>;
+  }
+  return {result: functionResult};
+}
+
 function buildResponseEvent(
   tool: BaseTool,
   functionResult: unknown,
   toolContext: Context,
   invocationContext: InvocationContext,
 ): Event {
-  let responseResult: Record<string, unknown>;
-  if (typeof functionResult !== 'object' || functionResult == null) {
-    responseResult = {result: functionResult};
-  } else if (Array.isArray(functionResult)) {
-    responseResult = {results: functionResult};
-  } else {
-    responseResult = functionResult as Record<string, unknown>;
-  }
+  const responseResult = normalizeToolResult(functionResult);
 
   const partFunctionResponse: Part = {
     functionResponse: {
@@ -282,13 +298,7 @@ function normalizeCallbackResponse(
   if (response == null) {
     return undefined;
   }
-  if (typeof response !== 'object') {
-    return {result: response};
-  }
-  if (Array.isArray(response)) {
-    return {results: response};
-  }
-  return response as Record<string, unknown>;
+  return normalizeToolResult(response);
 }
 
 /**
