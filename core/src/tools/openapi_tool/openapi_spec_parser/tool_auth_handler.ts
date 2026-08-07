@@ -8,6 +8,7 @@ import {OpenAPIV3} from 'openapi-types';
 import {Context} from '../../../agents/context.js';
 import {AuthCredential} from '../../../auth/auth_credential.js';
 import {AuthConfig} from '../../../auth/auth_tool.js';
+import {OAuth2CredentialRefresher} from '../../../auth/oauth2/oauth2_credential_refresher.js';
 import {experimental} from '../../../utils/experimental.js';
 import {AutoAuthCredentialExchanger} from '../auth/credential_exchangers/auto_auth_credential_exchanger.js';
 
@@ -41,6 +42,35 @@ class ToolContextCredentialStore {
     // exchanged credential would be re-created on every tool invocation.
     this.context.state.set(key, credential);
   }
+}
+
+/**
+ * Returns a live credential for one read back out of the store, refreshing it
+ * first when its access token has expired.
+ *
+ * The refreshed credential is written back to the store because many providers
+ * rotate the refresh token on every refresh. Keeping the pre-refresh copy would
+ * leave the next invocation holding a refresh token the authorization server
+ * has already revoked, and no later refresh could succeed.
+ */
+async function refreshStoredCredential(
+  credential: AuthCredential,
+  authScheme: OpenAPIV3.SecuritySchemeObject,
+  store: ToolContextCredentialStore,
+): Promise<AuthCredential> {
+  if (!credential.oauth2) {
+    return credential;
+  }
+
+  const refresher = new OAuth2CredentialRefresher();
+  if (!(await refresher.isRefreshNeeded(credential))) {
+    return credential;
+  }
+
+  const refreshed = await refresher.refresh(credential, authScheme);
+  store.storeCredential(store.getCredentialKey(authScheme), refreshed);
+
+  return refreshed;
 }
 
 @experimental
@@ -77,7 +107,14 @@ export class ToolAuthHandler {
     const existingCredential = store.getCredential(this.authScheme);
 
     if (existingCredential) {
-      return {state: 'done', authCredential: existingCredential};
+      return {
+        state: 'done',
+        authCredential: await refreshStoredCredential(
+          existingCredential,
+          this.authScheme,
+          store,
+        ),
+      };
     }
 
     const authConfig: AuthConfig = {

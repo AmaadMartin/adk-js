@@ -10,7 +10,8 @@ import {
   Context,
   ToolAuthHandler,
 } from '@google/adk';
-import {describe, expect, it, vi} from 'vitest';
+import {OpenAPIV3} from 'openapi-types';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 import {State} from '../../../src/sessions/state.js';
 import {AutoAuthCredentialExchanger} from '../../../src/tools/openapi_tool/auth/credential_exchangers/auto_auth_credential_exchanger.js';
 
@@ -242,5 +243,157 @@ describe('ToolAuthHandler', () => {
       'oauth2_existing_exchanged_credential',
     );
     expect(stored?.http?.credentials.token).toBe('exchanged-token');
+  });
+
+  describe('stored credential refresh', () => {
+    const OAUTH2_SCHEME: OpenAPIV3.SecuritySchemeObject = {
+      type: 'oauth2',
+      flows: {
+        authorizationCode: {
+          authorizationUrl: 'https://example.com/auth',
+          tokenUrl: 'https://example.com/token',
+          scopes: {},
+        },
+      },
+    };
+
+    function storedOAuth2Credential(expiresAt: number): AuthCredential {
+      return {
+        authType: AuthCredentialTypes.OAUTH2,
+        oauth2: {
+          clientId: 'client-id',
+          clientSecret: 'client-secret',
+          accessToken: 'stale-token',
+          refreshToken: 'old-refresh',
+          expiresAt,
+        },
+      };
+    }
+
+    function seedStore(credential: AuthCredential) {
+      const state = new State({
+        oauth2_existing_exchanged_credential: credential,
+      });
+      const context = {state} as unknown as Context;
+
+      return {state, context};
+    }
+
+    function stubFetch(buildResponse: () => Response) {
+      const fetchMock = vi.fn<typeof fetch>(async () => buildResponse());
+      vi.stubGlobal('fetch', fetchMock);
+
+      return fetchMock;
+    }
+
+    function tokenResponse(body: Record<string, unknown>): Response {
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: {'Content-Type': 'application/json'},
+      });
+    }
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it('refreshes an expired OAuth2 credential read from the credential store', async () => {
+      const fetchMock = stubFetch(() =>
+        tokenResponse({
+          access_token: 'refreshed-token',
+          refresh_token: 'new-refresh',
+          expires_in: 3600,
+        }),
+      );
+      const {context} = seedStore(storedOAuth2Credential(Date.now() - 1000));
+
+      const result = await new ToolAuthHandler(
+        context,
+        OAUTH2_SCHEME,
+      ).prepareAuthCredentials();
+
+      expect(result.state).toBe('done');
+      expect(result.authCredential?.oauth2?.accessToken).toBe(
+        'refreshed-token',
+      );
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const [url, init] = fetchMock.mock.calls[0];
+      expect(url).toBe('https://example.com/token');
+      const requestBody = new URLSearchParams(String(init?.body));
+      expect(requestBody.get('grant_type')).toBe('refresh_token');
+      expect(requestBody.get('refresh_token')).toBe('old-refresh');
+    });
+
+    it('persists the refreshed credential so the next call does not reuse a rotated refresh token', async () => {
+      stubFetch(() =>
+        tokenResponse({
+          access_token: 'refreshed-token',
+          refresh_token: 'new-refresh',
+          expires_in: 3600,
+        }),
+      );
+      const {state, context} = seedStore(
+        storedOAuth2Credential(Date.now() - 1000),
+      );
+
+      await new ToolAuthHandler(
+        context,
+        OAUTH2_SCHEME,
+      ).prepareAuthCredentials();
+
+      const stored = state.get<AuthCredential>(
+        'oauth2_existing_exchanged_credential',
+      );
+      expect(stored?.oauth2?.accessToken).toBe('refreshed-token');
+      expect(stored?.oauth2?.refreshToken).toBe('new-refresh');
+      // Recorded in the delta, so the session keeps the rotated refresh token.
+      expect(state.hasDelta()).toBe(true);
+    });
+
+    it('returns a stored OAuth2 credential that has not expired without refreshing', async () => {
+      const fetchMock = stubFetch(() => tokenResponse({}));
+      const {state, context} = seedStore(
+        storedOAuth2Credential(Date.now() + 3_600_000),
+      );
+
+      const result = await new ToolAuthHandler(
+        context,
+        OAUTH2_SCHEME,
+      ).prepareAuthCredentials();
+
+      expect(result.authCredential?.oauth2?.accessToken).toBe('stale-token');
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(state.hasDelta()).toBe(false);
+    });
+
+    it('does not attempt to refresh a stored non-OAuth2 credential', async () => {
+      const fetchMock = stubFetch(() => tokenResponse({}));
+      const {state, context} = seedStore({
+        authType: AuthCredentialTypes.HTTP,
+        http: {scheme: 'bearer', credentials: {token: 'sa-token'}},
+      });
+
+      const result = await new ToolAuthHandler(
+        context,
+        OAUTH2_SCHEME,
+      ).prepareAuthCredentials();
+
+      expect(result.authCredential?.http?.credentials.token).toBe('sa-token');
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(state.hasDelta()).toBe(false);
+    });
+
+    it('returns the stored credential unchanged when the refresh request fails', async () => {
+      stubFetch(() => new Response('', {status: 500}));
+      const {context} = seedStore(storedOAuth2Credential(Date.now() - 1000));
+
+      const result = await new ToolAuthHandler(
+        context,
+        OAUTH2_SCHEME,
+      ).prepareAuthCredentials();
+
+      expect(result.state).toBe('done');
+      expect(result.authCredential?.oauth2?.accessToken).toBe('stale-token');
+    });
   });
 });
