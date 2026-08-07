@@ -10,13 +10,17 @@ import {Client} from '@google-cloud/vertexai/build/src/genai/client.js';
 import {ReasoningEngine as VertexReasoningEngine} from '@google-cloud/vertexai/build/src/genai/types.js';
 
 import {AgentLoader} from '../../utils/agent_loader.js';
-import {createTempDir, isFile, isFolderExists} from '../../utils/file_utils.js';
+import {
+  createTempDir,
+  isFile,
+  isFolderExists,
+  removeFolderOnExit,
+} from '../../utils/file_utils.js';
 import {
   BaseDeployOptions,
   copyAgentFiles,
   createDockerFile,
   createPackageJson,
-  registerStagingFolderCleanup,
   resolveDefaultFromGcloudConfig,
   spawnAsync,
 } from './deploy_utils.js';
@@ -83,7 +87,7 @@ export async function deployToAgentEngine(options: DeployToAgentEngineOptions) {
   const tempFolder =
     options.tempFolder ?? (await createTempDir('agent_engine_deploy_src'));
 
-  const unregisterExitCleanup = registerStagingFolderCleanup(tempFolder);
+  const unregisterExitCleanup = removeFolderOnExit(tempFolder);
 
   if (options.tempFolder && (await isFolderExists(tempFolder))) {
     await fs.rm(tempFolder, {recursive: true, force: true});

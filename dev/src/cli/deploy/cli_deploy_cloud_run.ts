@@ -8,7 +8,12 @@ import * as path from 'node:path';
 
 import {A2A_AUTH_TOKEN_ENV_VAR} from '../../server/adk_api_server.js';
 import {AgentLoader} from '../../utils/agent_loader.js';
-import {createTempDir, isFile, isFolderExists} from '../../utils/file_utils.js';
+import {
+  createTempDir,
+  isFile,
+  isFolderExists,
+  removeFolderOnExit,
+} from '../../utils/file_utils.js';
 import {
   BaseDeployOptions,
   CreateDockerFileContentOptions,
@@ -16,7 +21,6 @@ import {
   createDockerFile,
   createDockerFileContent,
   createPackageJson,
-  registerStagingFolderCleanup,
   resolveDefaultFromGcloudConfig,
   spawnAsync,
 } from './deploy_utils.js';
@@ -187,7 +191,7 @@ export async function deployToCloudRun(options: DeployToCloudRunOptions) {
     options.tempFolder ?? (await createTempDir('cloud_run_deploy_src'));
   gcloudCommands.push('--source', tempFolder);
 
-  const unregisterExitCleanup = registerStagingFolderCleanup(tempFolder);
+  const unregisterExitCleanup = removeFolderOnExit(tempFolder);
 
   if (options.tempFolder && (await isFolderExists(tempFolder))) {
     console.info('Cleaning up existing temporary files...');

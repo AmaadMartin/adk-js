@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {exec, spawn, SpawnOptions} from 'node:child_process';
-import {rmSync} from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import {promisify} from 'node:util';
@@ -33,37 +32,6 @@ export const spawnAsync = (
     child.on('error', reject);
   });
 };
-
-/**
- * Arms a best-effort removal of `stagingFolder` for process exit, and returns
- * the function that disarms it.
- *
- * The deploy commands remove the staging folder in a `finally`, which an
- * interrupted deploy never reaches: the SIGINT handler calls `process.exit()`
- * while the gcloud step is still awaited, so the staged bundle survives in the
- * temp directory. Node drops any pending promise or I/O as soon as an `'exit'`
- * listener returns, hence `rmSync` rather than the `fs/promises` removal the
- * normal path uses.
- */
-export function registerStagingFolderCleanup(
-  stagingFolder: string,
-): () => void {
-  const removeStagingFolder = () => {
-    try {
-      rmSync(stagingFolder, {recursive: true, force: true});
-    } catch {
-      // At exit there is no caller left to handle a removal failure, and
-      // throwing from an 'exit' listener would replace the operator's own
-      // interrupt with a crash.
-    }
-  };
-
-  process.on('exit', removeStagingFolder);
-
-  return () => {
-    process.off('exit', removeStagingFolder);
-  };
-}
 
 export const REQUIRED_NPM_PACKAGES = ['@google/adk'];
 

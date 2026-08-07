@@ -131,7 +131,8 @@ vi.mock('../../src/utils/agent_loader.js', () => ({
   })),
 }));
 
-vi.mock('../../src/utils/file_utils.js', () => ({
+vi.mock('../../src/utils/file_utils.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/utils/file_utils.js')>()),
   createTempDir: vi.fn(),
   isFile: vi.fn(),
   isFolderExists: vi.fn(),
