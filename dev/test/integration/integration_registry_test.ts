@@ -6,6 +6,7 @@
 
 import {BasePlugin, FunctionTool, SingleAgentCallback} from '@google/adk';
 import {beforeEach, describe, expect, it} from 'vitest';
+import {z} from 'zod';
 import {IntegrationRegistry} from '../../src/integration/integration_registry.js';
 
 describe('IntegrationRegistry', () => {
@@ -27,6 +28,19 @@ describe('IntegrationRegistry', () => {
 
     expect(retrieved).toBe(tool);
     expect(registry.getTool('non_existent')).toBeUndefined();
+  });
+
+  it('should register and retrieve tools declared with input parameters', () => {
+    const tool = new FunctionTool({
+      name: 'reimburse',
+      description: 'Reimburses a purchase.',
+      parameters: z.object({purpose: z.string(), amount: z.number()}),
+      execute: async ({purpose, amount}) => ({purpose, amount}),
+    });
+
+    registry.registerTool('reimburse', tool);
+
+    expect(registry.getTool('reimburse')).toBe(tool);
   });
 
   it('should register and retrieve before agent callbacks', () => {
