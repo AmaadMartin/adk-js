@@ -243,4 +243,67 @@ describe('ToolAuthHandler', () => {
     );
     expect(stored?.http?.credentials.token).toBe('exchanged-token');
   });
+
+  it('derives the same credential-store key for an OpenID Connect scheme carrying endpoint config', async () => {
+    const state = new State();
+    const mockContext = {
+      state,
+      getAuthResponse: vi.fn().mockReturnValue(undefined),
+      requestCredential: vi.fn(),
+    } as unknown as Context;
+
+    const result = await new ToolAuthHandler(
+      mockContext,
+      {
+        type: 'openIdConnect',
+        openIdConnectUrl:
+          'https://issuer.example.com/.well-known/openid-configuration',
+        authorizationEndpoint: 'https://issuer.example.com/authorize',
+        tokenEndpoint: 'https://issuer.example.com/token',
+      },
+      {
+        authType: AuthCredentialTypes.OAUTH2,
+        oauth2: {clientId: 'client-id', clientSecret: 'client-secret'},
+      },
+    ).prepareAuthCredentials();
+
+    expect(result.state).toBe('done');
+    // The endpoint config does not change the scheme type, so the exchanged
+    // credential lands under the same key a plain openIdConnect scheme uses.
+    // Credentials persisted by earlier releases keep resolving.
+    const stored = state.get<{http?: {credentials: {token: string}}}>(
+      'openIdConnect_existing_exchanged_credential',
+    );
+    expect(stored?.http?.credentials.token).toBe('exchanged-token');
+  });
+
+  it('accepts an OpenID Connect scheme with endpoint config via fromToolContext', async () => {
+    const mockContext = {
+      state: new State(),
+      getAuthResponse: vi.fn().mockReturnValue(undefined),
+      requestCredential: vi.fn(),
+    } as unknown as Context;
+
+    const result = await ToolAuthHandler.fromToolContext(
+      mockContext,
+      {
+        type: 'openIdConnect',
+        openIdConnectUrl:
+          'https://issuer.example.com/.well-known/openid-configuration',
+        authorizationEndpoint: 'https://issuer.example.com/authorize',
+        tokenEndpoint: 'https://issuer.example.com/token',
+        userinfoEndpoint: 'https://issuer.example.com/userinfo',
+        grantTypesSupported: ['authorization_code'],
+      },
+      {
+        authType: AuthCredentialTypes.OAUTH2,
+        oauth2: {clientId: 'client-id', clientSecret: 'client-secret'},
+      },
+    ).prepareAuthCredentials();
+
+    expect(result.state).toBe('done');
+    expect(result.authCredential?.http?.credentials.token).toBe(
+      'exchanged-token',
+    );
+  });
 });

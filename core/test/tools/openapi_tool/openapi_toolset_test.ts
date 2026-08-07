@@ -4,9 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {OpenApiSpecParser, OpenAPIToolset, ReadonlyContext} from '@google/adk';
+import {
+  OpenApiSpecParser,
+  OpenAPIToolset,
+  ReadonlyContext,
+  RestApiTool,
+} from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 
 describe('OpenAPIToolset', () => {
   const mockSpec: OpenAPIV3.Document = {
@@ -123,6 +128,37 @@ describe('OpenAPIToolset', () => {
     expect(
       (tools[0] as unknown as Record<string, unknown>).authCredential,
     ).toEqual({api_key: 'my-key'});
+  });
+
+  it('applies an OpenID Connect scheme with endpoint config as a global auth override', async () => {
+    const configure = vi.spyOn(RestApiTool.prototype, 'configureAuthScheme');
+
+    const toolset = new OpenAPIToolset({
+      specDict: mockSpec,
+      authScheme: {
+        type: 'openIdConnect',
+        openIdConnectUrl:
+          'https://issuer.example.com/.well-known/openid-configuration',
+        authorizationEndpoint: 'https://issuer.example.com/authorize',
+        tokenEndpoint: 'https://issuer.example.com/token',
+      },
+    });
+    const tools = await toolset.getTools();
+
+    expect(tools.length).toBe(2);
+    // The override reaches every tool with its endpoint config intact.
+    expect(configure).toHaveBeenCalledTimes(2);
+    for (const call of configure.mock.calls) {
+      expect(call[0]).toEqual({
+        type: 'openIdConnect',
+        openIdConnectUrl:
+          'https://issuer.example.com/.well-known/openid-configuration',
+        authorizationEndpoint: 'https://issuer.example.com/authorize',
+        tokenEndpoint: 'https://issuer.example.com/token',
+      });
+    }
+
+    configure.mockRestore();
   });
 
   it('should return all tools when no toolFilter is set and a context is provided', async () => {
