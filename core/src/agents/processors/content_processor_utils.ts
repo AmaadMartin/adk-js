@@ -70,8 +70,10 @@ export function getContents(
       continue;
     }
 
-    // Skip events not in the current branch.
-    // simplicity: direct segment prefix check avoids per-invocation Trie allocations; upgrade to Trie index if unique branches > 100
+    // Skip events not in the current branch. A direct segment-prefix check per
+    // event is deliberate: this loop already walks every event once, so a
+    // prefix-tree index would add a per-call build cost without removing the
+    // walk.
     if (
       currentBranch &&
       event.branch &&

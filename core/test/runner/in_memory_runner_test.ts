@@ -5,11 +5,13 @@
  */
 
 import {
+  App,
   BaseAgent,
   BasePlugin,
   BaseTool,
   BaseToolset,
   createEvent,
+  createResumabilityConfig,
   Event,
   InMemoryRunner,
   InvocationContext,
@@ -82,6 +84,39 @@ describe('InMemoryRunner', () => {
     const runner = new InMemoryRunner({agent});
 
     expect(runner.pluginManager).toBeDefined();
+  });
+
+  it('should forward an explicit resumabilityConfig to the base runner', () => {
+    const agent = new MockAgent();
+    const resumabilityConfig = createResumabilityConfig({isResumable: false});
+
+    const runner = new InMemoryRunner({agent, resumabilityConfig});
+
+    expect(runner.resumabilityConfig).toBe(resumabilityConfig);
+  });
+
+  it('should prefer app.resumabilityConfig over the explicit parameter', () => {
+    // Guards the precedence rule after the duplicated merge in
+    // InMemoryRunner was dropped in favour of the base constructor's.
+    const appConfig = createResumabilityConfig({isResumable: true});
+    const paramConfig = createResumabilityConfig({isResumable: false});
+    const app = new App({
+      name: 'resumable_app',
+      rootAgent: new MockAgent(),
+      resumabilityConfig: appConfig,
+    });
+
+    const runner = new InMemoryRunner({app, resumabilityConfig: paramConfig});
+
+    expect(runner.resumabilityConfig).toBe(appConfig);
+  });
+
+  it('should leave resumabilityConfig undefined when neither source provides one', () => {
+    const agent = new MockAgent();
+
+    const runner = new InMemoryRunner({agent});
+
+    expect(runner.resumabilityConfig).toBeUndefined();
   });
 
   it('should run agent and yield events', async () => {

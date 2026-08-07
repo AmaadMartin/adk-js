@@ -148,12 +148,15 @@ describe('Runner.determineAgentForResumption', () => {
     );
     rootAgent.subAgents.push(subAgent1, subAgent2, nonTransferableAgent);
 
+    // Deliberately constructed WITHOUT a `resumabilityConfig`. This is the
+    // shape of every call site that predates the config, so these tests double
+    // as the regression guard that function-response resumption routing stays
+    // on by default.
     runner = new Runner({
       appName: TEST_APP_ID,
       agent: rootAgent,
       sessionService,
       artifactService,
-      resumabilityConfig: createResumabilityConfig({isResumable: true}),
     });
   });
 
@@ -354,22 +357,29 @@ describe('Runner.determineAgentForResumption', () => {
     expect(appRunner.resumabilityConfig?.isResumable).toBe(true);
   });
 
-  it('should skip function response resumption routing when resumabilityConfig.isResumable is false or undefined', async () => {
-    const nonResumableRunner = new Runner({
-      appName: TEST_APP_ID,
-      agent: rootAgent,
-      sessionService,
-      artifactService,
-      resumabilityConfig: createResumabilityConfig({isResumable: false}),
-    });
-
+  /**
+   * Appends a `sub_agent2` function call plus a `root_agent` message to a fresh
+   * session, then replays the matching function response through `targetRunner`
+   * and returns the author of the first emitted event.
+   *
+   * Case 1 (function-response routing) and Case 2 (last routable author) pick
+   * different agents for this history — `sub_agent2` vs `root_agent` — so the
+   * author alone tells us which path ran. `Event.author` is optional, so the
+   * return type stays `string | undefined` and an absent author fails the
+   * caller's assertion rather than being asserted away here.
+   */
+  async function runFunctionResponseRouting(
+    targetRunner: Runner,
+    sessionId: string,
+    functionCallId: string,
+  ): Promise<string | undefined> {
     const functionCall: FunctionCall = {
-      id: 'func_789',
+      id: functionCallId,
       name: 'test_func',
       args: {},
     };
     const functionResponse: FunctionResponse = {
-      id: 'func_789',
+      id: functionCallId,
       name: 'test_func',
       response: {},
     };
@@ -389,14 +399,14 @@ describe('Runner.determineAgentForResumption', () => {
     const session = await sessionService.createSession({
       appName: TEST_APP_ID,
       userId: TEST_USER_ID,
-      sessionId: 'session_non_resumable',
+      sessionId,
     });
 
     await sessionService.appendEvent({session, event: callEvent});
     await sessionService.appendEvent({session, event: rootEvent});
 
     const events: Event[] = [];
-    for await (const event of nonResumableRunner.runAsync({
+    for await (const event of targetRunner.runAsync({
       userId: session.userId,
       sessionId: session.id,
       newMessage: {role: 'user', parts: [{functionResponse}]},
@@ -404,7 +414,77 @@ describe('Runner.determineAgentForResumption', () => {
       events.push(event);
     }
 
-    expect(events[0].author).toBe('root_agent');
+    return events[0].author;
+  }
+
+  it('should skip function response resumption routing only when resumabilityConfig.isResumable is explicitly false', async () => {
+    const nonResumableRunner = new Runner({
+      appName: TEST_APP_ID,
+      agent: rootAgent,
+      sessionService,
+      artifactService,
+      resumabilityConfig: createResumabilityConfig({isResumable: false}),
+    });
+
+    const author = await runFunctionResponseRouting(
+      nonResumableRunner,
+      'session_non_resumable',
+      'func_789',
+    );
+
+    expect(author).toBe('root_agent');
+  });
+
+  it('should keep function response resumption routing on when no resumabilityConfig is supplied', async () => {
+    // Regression guard: gating Case 1 on an optional config silently disabled
+    // routing for every pre-existing caller, which passes no config at all.
+    const defaultRunner = new Runner({
+      appName: TEST_APP_ID,
+      agent: rootAgent,
+      sessionService,
+      artifactService,
+    });
+    expect(defaultRunner.resumabilityConfig).toBeUndefined();
+
+    const author = await runFunctionResponseRouting(
+      defaultRunner,
+      'session_default_config',
+      'func_790',
+    );
+
+    expect(author).toBe('sub_agent2');
+  });
+
+  it('should keep function response resumption routing on for an App with no resumabilityConfig', async () => {
+    const app = new App({name: TEST_APP_ID, rootAgent});
+    const appRunner = new Runner({app, sessionService, artifactService});
+    expect(appRunner.resumabilityConfig).toBeUndefined();
+
+    const author = await runFunctionResponseRouting(
+      appRunner,
+      'session_app_default_config',
+      'func_791',
+    );
+
+    expect(author).toBe('sub_agent2');
+  });
+
+  it('should keep function response resumption routing on for a default createResumabilityConfig()', async () => {
+    const factoryDefaultRunner = new Runner({
+      appName: TEST_APP_ID,
+      agent: rootAgent,
+      sessionService,
+      artifactService,
+      resumabilityConfig: createResumabilityConfig(),
+    });
+
+    const author = await runFunctionResponseRouting(
+      factoryDefaultRunner,
+      'session_factory_default_config',
+      'func_792',
+    );
+
+    expect(author).toBe('sub_agent2');
   });
 
   it('should route to sub-agent when resuming from an LRO function response across session boundaries', async () => {

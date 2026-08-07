@@ -16,7 +16,10 @@ import {
 import {isLlmAgent} from '../agents/llm_agent.js';
 import {createRunConfig, RunConfig} from '../agents/run_config.js';
 import {App} from '../apps/app.js';
-import {ResumabilityConfig} from '../apps/resumability_config.js';
+import {
+  DEFAULT_IS_RESUMABLE,
+  ResumabilityConfig,
+} from '../apps/resumability_config.js';
 import {BaseArtifactService} from '../artifacts/base_artifact_service.js';
 import {ScopedArtifactService} from '../artifacts/scoped_artifact_service.js';
 
@@ -551,10 +554,6 @@ export class Runner {
 
   /**
    * Determines the next agent to run to continue the session. This is primarily
-   * used for session resumption.
-   */
-  /**
-   * Determines the next agent to run to continue the session. This is primarily
    * used for session resumption across tool and LRO boundaries.
    */
   private determineAgentForResumption(
@@ -567,22 +566,19 @@ export class Runner {
       this.resumabilityConfig,
     );
   }
-
-  /**
-   * Whether the agent to run can transfer to any other agent in the agent tree.
-   *
-   * @param agentToRun The agent to check for transferability.
-   * @returns True if the agent can transfer, False otherwise.
-   */
-  private isRoutableLlmAgent(agentToRun: BaseAgent): boolean {
-    return isRoutableLlmAgent(agentToRun);
-  }
   // TODO - b/425992518: Implement runLive and related methods.
 }
 
 /**
  * Determines the next agent to run to continue the session. This is primarily
  * used for session resumption across tool and LRO boundaries.
+ *
+ * @param session The session to resume.
+ * @param rootAgent The root of the agent tree to resolve authors against.
+ * @param resumabilityConfig An optional resumability configuration. When
+ *   omitted, function-response routing stays enabled
+ *   ({@link DEFAULT_IS_RESUMABLE}); pass `{isResumable: false}` to opt out.
+ * @returns The agent that should handle the next turn.
  */
 export function determineAgentForResumption(
   session: Session,
@@ -590,11 +586,11 @@ export function determineAgentForResumption(
   resumabilityConfig?: ResumabilityConfig,
 ): BaseAgent {
   // =========================================================================
-  // Case 1: If the last event is a function response and resumability is enabled,
-  // this returns the agent that made the original function call.
+  // Case 1: If the last event is a function response and resumption routing is
+  // enabled, this returns the agent that made the original function call.
   // =========================================================================
-  const event = findEventByLastFunctionResponseId(session.events);
-  const isResumable = Boolean(resumabilityConfig?.isResumable);
+  const event = findMatchingFunctionCall(session.events);
+  const isResumable = resumabilityConfig?.isResumable ?? DEFAULT_IS_RESUMABLE;
   if (event && event.author && isResumable) {
     const resumedAgent = rootAgent.findAgent(event.author);
     if (resumedAgent) {
@@ -609,7 +605,9 @@ export function determineAgentForResumption(
   // Case 2: Otherwise, find the last agent that emitted a message and is
   // transferable across the agent tree.
   // =========================================================================
-  // simplicity: O(N) backward event scan, upgrade to indexed lookups or map if N > 1000.
+  // Backward linear scan: the answer is almost always in the last few events,
+  // so an index over the whole history would cost more to build than the scan
+  // saves.
   for (let i = session.events.length - 1; i >= 0; i--) {
     logger.debug('event:', JSON.stringify(session.events[i]));
     const event = session.events[i];
@@ -661,17 +659,6 @@ export function isRoutableLlmAgent(agentToRun: BaseAgent): boolean {
     agent = agent.parentAgent;
   }
   return true;
-}
-
-/**
- * It iterates through the events in reverse order, and returns the event
- * containing a function call with a functionCall.id matching the
- * functionResponse.id from the last event in the session.
- */
-export function findEventByLastFunctionResponseId(
-  events: Event[],
-): Event | null {
-  return findMatchingFunctionCall(events) ?? null;
 }
 
 function getAllToolsets(agent: BaseAgent): BaseToolset[] {
