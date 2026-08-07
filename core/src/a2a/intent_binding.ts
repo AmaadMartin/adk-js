@@ -110,10 +110,10 @@ export function freezeIntent(task: Task): IntentBinding | undefined {
  * means. Detail strings name function-call ids only, so a rejection can be
  * surfaced in a task message without echoing caller-supplied content back.
  *
- * @param binding The frozen request, from {@link freezeIntent}.
- * @param userMessage The incoming resume message.
- * @param strict Also reject responses to actions that were never frozen, and
- *   parts that are not an answer to a frozen action.
+ * `binding` is the frozen request from {@link freezeIntent}, `userMessage` is
+ * the incoming resume message, and `strict` also rejects responses to actions
+ * that were never frozen and parts that answer no frozen action.
+ *
  * @returns The verification outcome.
  */
 export function verifyIntent({

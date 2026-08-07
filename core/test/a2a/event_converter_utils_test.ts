@@ -569,6 +569,27 @@ describe('event_converter_utils', () => {
         });
       });
 
+      it('completes the turn for an auth-required task', () => {
+        const task: Task = {
+          kind: 'task',
+          id: 't1',
+          contextId: 'c1',
+          status: {
+            state: 'auth-required',
+            message: {
+              kind: 'message',
+              messageId: 'msg1',
+              role: 'agent',
+              parts: [{kind: 'text', text: 'sign in to continue'}],
+            },
+          },
+        };
+
+        const event = toAdkEvent(task, 'inv1', 'agent1');
+
+        expect(event!.turnComplete).toBe(true);
+      });
+
       it('converts failed task with text error message', () => {
         const task: Task = {
           kind: 'task',

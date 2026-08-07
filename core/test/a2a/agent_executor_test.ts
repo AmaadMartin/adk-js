@@ -602,6 +602,9 @@ describe('A2AAgentExecutor', () => {
       const event = mockEventBus.publish.mock
         .calls[0][0] as TaskStatusUpdateEvent;
       expect(event.status.state).toBe('failed');
+      expect((event.status.message!.parts[0] as TextPart).text).toContain(
+        IntentMismatchReason.UNKNOWN_ACTION,
+      );
     });
   });
 
