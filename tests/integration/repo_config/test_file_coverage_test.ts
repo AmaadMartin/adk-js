@@ -18,11 +18,15 @@ import vitestConfig from '../../../vitest.config.js';
 // "0 tests found". The contributor then reads a green build as a passing test.
 // These assertions turn that silence into a build failure.
 
-/** Filenames a contributor would reasonably expect Vitest to run. */
+/**
+ * Filenames a contributor would reasonably expect Vitest to run: the repo's own
+ * `*_test` convention, plus the `.test.`/`.spec.` names Vitest collects by
+ * default over the same extensions as its default `include`.
+ */
 const TEST_FILE_PATTERNS = [
-  '**/*_test.{ts,tsx,js,jsx,cjs,mjs}',
-  '**/*.test.{ts,tsx,js,jsx,cjs,mjs}',
-  '**/*.spec.{ts,tsx,js,jsx,cjs,mjs}',
+  '**/*_test.{ts,tsx,cts,mts,js,jsx,cjs,mjs}',
+  '**/*.test.{ts,tsx,cts,mts,js,jsx,cjs,mjs}',
+  '**/*.spec.{ts,tsx,cts,mts,js,jsx,cjs,mjs}',
 ];
 
 /**
