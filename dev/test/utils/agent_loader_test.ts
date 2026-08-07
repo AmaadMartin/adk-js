@@ -811,17 +811,18 @@ describe('AgentLoader', () => {
       await loader.disposeAll();
     });
 
-    /**
-     * Invalidates the loader the way the fs.watch callback does. The loader
-     * exposes no public trigger for it.
-     */
-    function invalidateAll(loader: AgentLoader): void {
-      (loader as unknown as {invalidateAll: () => void}).invalidateAll();
+    interface LoaderInternals {
+      invalidateAll: () => void;
+      agentsAlreadyPreloaded: boolean;
+      preloadedAgents: Record<string, AgentFile>;
     }
 
-    function isPreloaded(loader: AgentLoader): boolean {
-      return (loader as unknown as {agentsAlreadyPreloaded: boolean})
-        .agentsAlreadyPreloaded;
+    /**
+     * Reaches the loader state that has no public accessor: the trigger the
+     * fs.watch callback calls, and the two cache fields it resets.
+     */
+    function internals(loader: AgentLoader): LoaderInternals {
+      return loader as unknown as LoaderInternals;
     }
 
     /**
@@ -891,15 +892,12 @@ describe('AgentLoader', () => {
       const loader = new AgentLoader(scanDir);
       const inFlight = loader.preloadAgents();
       await atGate;
-      invalidateAll(loader);
+      internals(loader).invalidateAll();
       release();
       await inFlight;
 
-      expect(
-        (loader as unknown as {preloadedAgents: Record<string, AgentFile>})
-          .preloadedAgents,
-      ).toEqual({});
-      expect(isPreloaded(loader)).toBe(false);
+      expect(internals(loader).preloadedAgents).toEqual({});
+      expect(internals(loader).agentsAlreadyPreloaded).toBe(false);
 
       expect(createdDirs.length).toBeGreaterThan(0);
       for (const dir of createdDirs) {
@@ -919,7 +917,7 @@ describe('AgentLoader', () => {
       const inFlight = loader.preloadAgents();
       await atGate;
       await fs.rm(path.join(scanDir, 'agent1.js'));
-      invalidateAll(loader);
+      internals(loader).invalidateAll();
       release();
       await inFlight;
 
@@ -932,10 +930,10 @@ describe('AgentLoader', () => {
       const loader = new AgentLoader(tempAgentsDir);
       await loader.listAgents();
 
-      invalidateAll(loader);
+      internals(loader).invalidateAll();
 
       expect(await loader.listAgents()).toEqual(['agent1', 'agent2', 'agent3']);
-      expect(isPreloaded(loader)).toBe(true);
+      expect(internals(loader).agentsAlreadyPreloaded).toBe(true);
 
       await loader.disposeAll();
     });
