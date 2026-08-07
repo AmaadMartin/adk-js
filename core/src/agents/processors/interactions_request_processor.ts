@@ -31,7 +31,11 @@ export class InteractionsRequestProcessor implements BaseLlmRequestProcessor {
       const events = invocationContext.session.events;
       for (let i = events.length - 1; i >= 0; i--) {
         const event = events[i];
-        // Skip events not belonging to the current branch or author
+        // Take the most recent event on this branch, authored by this agent,
+        // that carries an interaction id. The id check is not redundant: a
+        // matching event without an id is skipped so the scan continues to an
+        // older event that has one. Mirrors `_find_previous_interaction_state`
+        // in adk-python.
         if (
           event.branch === invocationContext.branch &&
           event.author === agent.name &&
