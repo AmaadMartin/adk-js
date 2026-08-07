@@ -6,6 +6,7 @@
 
 import {
   AuthCredential,
+  AuthCredentialTypes,
   Context,
   createRestApiTool,
   createSession,
@@ -246,16 +247,16 @@ describe('RestApiTool', () => {
       operation,
     );
 
-    const mockAuthHandler = {
-      prepareAuthCredentials: async () => ({state: 'pending'}),
-    };
-    vi.spyOn(ToolAuthHandler, 'fromToolContext').mockReturnValue(
-      mockAuthHandler as unknown as ToolAuthHandler,
-    );
+    const toolContext = createToolContext();
+    const authHandler = new ToolAuthHandler(toolContext);
+    vi.spyOn(authHandler, 'prepareAuthCredentials').mockResolvedValue({
+      state: 'pending',
+    });
+    vi.spyOn(ToolAuthHandler, 'fromToolContext').mockReturnValue(authHandler);
 
     const result = await tool.runAsync({
       args: {},
-      toolContext: createToolContext(),
+      toolContext,
     });
 
     expect(result).toEqual({
@@ -516,19 +517,20 @@ describe('RestApiTool', () => {
       text: async () => 'ok',
     });
 
-    const mockAuthHandler = {
-      prepareAuthCredentials: async () => ({
-        state: 'done',
-        authCredential: {apiKey: 'secret_key'},
-      }),
-    };
-    vi.spyOn(ToolAuthHandler, 'fromToolContext').mockReturnValue(
-      mockAuthHandler as unknown as ToolAuthHandler,
-    );
+    const toolContext = createToolContext();
+    const authHandler = new ToolAuthHandler(toolContext, authScheme);
+    vi.spyOn(authHandler, 'prepareAuthCredentials').mockResolvedValue({
+      state: 'done',
+      authCredential: {
+        authType: AuthCredentialTypes.API_KEY,
+        apiKey: 'secret_key',
+      },
+    });
+    vi.spyOn(ToolAuthHandler, 'fromToolContext').mockReturnValue(authHandler);
 
     await tool.runAsync({
       args: {},
-      toolContext: createToolContext(),
+      toolContext,
     });
 
     expect(globalThis.fetch).toHaveBeenCalledWith(
@@ -585,12 +587,15 @@ describe('RestApiTool', () => {
       operation,
     );
 
-    const authScheme = {
+    const authScheme: OpenAPIV3.SecuritySchemeObject = {
       type: 'apiKey',
       name: 'X-API-Key',
       in: 'header',
-    } as unknown as OpenAPIV3.SecuritySchemeObject;
-    const authCredential = {apiKey: 'test-key'} as unknown as AuthCredential;
+    };
+    const authCredential: AuthCredential = {
+      authType: AuthCredentialTypes.API_KEY,
+      apiKey: 'test-key',
+    };
 
     tool.configureAuthScheme(authScheme);
     tool.configureAuthCredential(authCredential);
@@ -601,23 +606,27 @@ describe('RestApiTool', () => {
       text: async () => 'ok',
     });
 
-    const mockAuthHandler = {
-      prepareAuthCredentials: async () => ({
-        state: 'done',
-        authCredential,
-      }),
-    };
+    const toolContext = createToolContext();
+    const authHandler = new ToolAuthHandler(
+      toolContext,
+      authScheme,
+      authCredential,
+    );
+    vi.spyOn(authHandler, 'prepareAuthCredentials').mockResolvedValue({
+      state: 'done',
+      authCredential,
+    });
     const spy = vi
       .spyOn(ToolAuthHandler, 'fromToolContext')
-      .mockReturnValue(mockAuthHandler as unknown as ToolAuthHandler);
+      .mockReturnValue(authHandler);
 
     await tool.runAsync({
       args: {},
-      toolContext: createToolContext(),
+      toolContext,
     });
 
     expect(spy).toHaveBeenCalledWith(
-      expect.anything(),
+      toolContext,
       authScheme,
       authCredential,
       expect.anything(),
