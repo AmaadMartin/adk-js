@@ -10,6 +10,7 @@ import {
   Context,
   ToolAuthHandler,
 } from '@google/adk';
+import {OpenAPIV3} from 'openapi-types';
 import {describe, expect, it, vi} from 'vitest';
 import {State} from '../../../src/sessions/state.js';
 import {AutoAuthCredentialExchanger} from '../../../src/tools/openapi_tool/auth/credential_exchangers/auto_auth_credential_exchanger.js';
@@ -32,6 +33,12 @@ vi.mock(
   },
 );
 
+const API_KEY_SCHEME: OpenAPIV3.ApiKeySecurityScheme = {
+  type: 'apiKey',
+  name: 'X-API-Key',
+  in: 'header',
+};
+
 describe('ToolAuthHandler', () => {
   it('should return done if no auth scheme', async () => {
     const mockContext = {} as unknown as Context;
@@ -52,7 +59,7 @@ describe('ToolAuthHandler', () => {
       }),
     } as unknown as Context;
 
-    const handler = new ToolAuthHandler(mockContext, {type: 'apiKey'});
+    const handler = new ToolAuthHandler(mockContext, API_KEY_SCHEME);
 
     const result = await handler.prepareAuthCredentials();
 
@@ -69,7 +76,7 @@ describe('ToolAuthHandler', () => {
       requestCredential: vi.fn(),
     } as unknown as Context;
 
-    const handler = new ToolAuthHandler(mockContext, {type: 'apiKey'});
+    const handler = new ToolAuthHandler(mockContext, API_KEY_SCHEME);
 
     const result = await handler.prepareAuthCredentials();
 
@@ -87,7 +94,7 @@ describe('ToolAuthHandler', () => {
       }),
     } as unknown as Context;
 
-    const handler = new ToolAuthHandler(mockContext, {type: 'apiKey'});
+    const handler = new ToolAuthHandler(mockContext, API_KEY_SCHEME);
 
     const result = await handler.prepareAuthCredentials();
 
@@ -105,7 +112,7 @@ describe('ToolAuthHandler', () => {
       }),
     } as unknown as Context;
 
-    const handler = new ToolAuthHandler(mockContext, {type: 'apiKey'});
+    const handler = new ToolAuthHandler(mockContext, API_KEY_SCHEME);
 
     const result = await handler.prepareAuthCredentials();
 
@@ -130,9 +137,10 @@ describe('ToolAuthHandler', () => {
         apiKey: 'key',
       }),
     } as unknown as Context;
-    await new ToolAuthHandler(firstContext, {
-      type: 'apiKey',
-    }).prepareAuthCredentials();
+    await new ToolAuthHandler(
+      firstContext,
+      API_KEY_SCHEME,
+    ).prepareAuthCredentials();
 
     // Each tool call gets a fresh Context whose State is rebuilt from the
     // values persisted to the session. Only what was recorded in the state
@@ -142,9 +150,10 @@ describe('ToolAuthHandler', () => {
       state: secondState,
       getAuthResponse: vi.fn(),
     } as unknown as Context;
-    const result = await new ToolAuthHandler(secondContext, {
-      type: 'apiKey',
-    }).prepareAuthCredentials();
+    const result = await new ToolAuthHandler(
+      secondContext,
+      API_KEY_SCHEME,
+    ).prepareAuthCredentials();
 
     expect(result.state).toBe('done');
     expect(result.authCredential?.http?.credentials.token).toBe(

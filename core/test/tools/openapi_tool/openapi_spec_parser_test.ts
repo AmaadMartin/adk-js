@@ -8,6 +8,21 @@ import {OpenApiSpecParser} from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
 import {describe, expect, it} from 'vitest';
 
+/**
+ * Returns the inline schema of a named property, failing the test if the
+ * parser dropped it or left a $ref in its place.
+ */
+function propertySchema(
+  schema: OpenAPIV3.SchemaObject,
+  name: string,
+): OpenAPIV3.SchemaObject {
+  const property = schema.properties?.[name];
+  if (!property || '$ref' in property) {
+    expect.fail(`expected an inline schema for property '${name}'`);
+  }
+  return property;
+}
+
 describe('OpenApiSpecParser', () => {
   it('should resolve internal references', () => {
     const spec: OpenAPIV3.Document = {
@@ -133,6 +148,16 @@ describe('OpenApiSpecParser', () => {
   });
 
   it('should sanitize schema types', () => {
+    // OpenAPIV3.SchemaObject only admits the normalized lowercase type names,
+    // which is exactly what the sanitizer under test produces. The
+    // un-normalized input is therefore narrowed once, here.
+    const unnormalizedSchema = {
+      type: 'OBJECT', // uppercase, should be normalized
+      properties: {
+        age: {type: 'INTEGER'}, // uppercase, should be normalized
+        invalid: {type: 'unknown_type'}, // invalid, should be removed
+      },
+    };
     const spec: OpenAPIV3.Document = {
       openapi: '3.0.0',
       info: {title: 'Sanitize API', version: '1.0.0'},
@@ -143,13 +168,7 @@ describe('OpenApiSpecParser', () => {
             requestBody: {
               content: {
                 'application/json': {
-                  schema: {
-                    type: 'OBJECT', // uppercase, should be normalized
-                    properties: {
-                      age: {type: 'INTEGER'}, // uppercase, should be normalized
-                      invalid: {type: 'unknown_type'}, // invalid, should be removed
-                    },
-                  },
+                  schema: unnormalizedSchema as OpenAPIV3.SchemaObject,
                 },
               },
             },
@@ -168,10 +187,8 @@ describe('OpenApiSpecParser', () => {
     const schema = body.content['application/json']
       .schema as OpenAPIV3.SchemaObject;
     expect(schema.type).toBe('object');
-    expect(schema.properties?.age?.type).toBe('integer');
-    expect(
-      (schema.properties?.invalid as OpenAPIV3.SchemaObject).type,
-    ).toBeUndefined();
+    expect(propertySchema(schema, 'age').type).toBe('integer');
+    expect(propertySchema(schema, 'invalid').type).toBeUndefined();
   });
 
   it('should merge path-level parameters and generate operationId if missing', () => {
