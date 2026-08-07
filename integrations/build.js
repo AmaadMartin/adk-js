@@ -55,15 +55,8 @@ function build({
     buildOptions.banner = {js: licenseHeaderText};
   }
 
-  if (bundle) {
-    buildOptions.entryPoints = [`./src/${entry}`];
-    // Keep the emitted filename aligned with the entry so package.json's
-    // "browser" field keeps resolving to dist/web/index_web.js.
-    buildOptions.outfile = `./dist/${targetDir}/${entry.replace(/\.ts$/, '.js')}`;
-  } else {
-    buildOptions.entryPoints = ['./src/**/*.ts'];
-    buildOptions.outdir = `./dist/${targetDir}`;
-  }
+  buildOptions.entryPoints = bundle ? [`./src/${entry}`] : ['./src/**/*.ts'];
+  buildOptions.outdir = `./dist/${targetDir}`;
 
   if (format === 'esm') {
     buildOptions.banner = {

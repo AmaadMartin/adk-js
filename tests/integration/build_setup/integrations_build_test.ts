@@ -67,6 +67,13 @@ describe('integrations build output', () => {
       await expectEmitted('browser', manifest.browser);
       await expectEmitted('main', manifest.main);
       await expectEmitted('module', manifest.module);
+
+      const webDir = path.join(packageDir, path.dirname(manifest.browser));
+      const emitted = await fs.readdir(webDir);
+      expect(
+        emitted.filter((name) => name.endsWith('.js')),
+        'the bundled build must emit one bundle, not one file per source',
+      ).toEqual([path.basename(manifest.browser)]);
     },
     BUILD_TIMEOUT_MS,
   );
