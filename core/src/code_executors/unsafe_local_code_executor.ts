@@ -39,6 +39,21 @@ const POWERSHELL_BASE_ARGS = [
 const CMD_BASE_ARGS = ['/D', '/c'] as const;
 
 /**
+ * Written beside a generated JavaScript file so Node resolves the script's
+ * module system from the scratch directory instead of inheriting `"type"`
+ * from whichever package encloses `os.tmpdir()`.
+ */
+const MODULE_SCOPE_MANIFEST_NAME = 'package.json';
+
+/**
+ * Carries no `"type"` field on purpose: that is what a script in a
+ * package-less `/tmp` already sees, so `require()` and `import` programs keep
+ * behaving as they do today. Pinning `"commonjs"` here would reject `import`
+ * syntax that currently works.
+ */
+const MODULE_SCOPE_MANIFEST_CONTENT = '{}\n';
+
+/**
  * Whether `commandPath` names Windows PowerShell (`powershell`) or PowerShell
  * 7+ (`pwsh`). `path.win32` splits on both separators on every platform.
  */
@@ -76,7 +91,7 @@ async function createTempScriptFile(
   code: string,
   language: CodeExecutionLanguage,
   shellCommandPath?: string,
-): Promise<{filePath: string; tempDir: string}> {
+): Promise<{filePath: string; tempDir: string; scaffoldFiles: string[]}> {
   // mkdtemp names the directory itself and creates it exclusively at 0o700.
   const tempDir = await fs.mkdtemp(
     path.join(os.tmpdir(), 'adk_js_unsafe_code_executor_'),
@@ -86,7 +101,16 @@ async function createTempScriptFile(
   const filePath = path.join(tempDir, `script${ext}`);
   await fs.writeFile(filePath, code);
 
-  return {filePath, tempDir};
+  const scaffoldFiles = [path.basename(filePath)];
+  if (language === CodeExecutionLanguage.JAVASCRIPT) {
+    await fs.writeFile(
+      path.join(tempDir, MODULE_SCOPE_MANIFEST_NAME),
+      MODULE_SCOPE_MANIFEST_CONTENT,
+    );
+    scaffoldFiles.push(MODULE_SCOPE_MANIFEST_NAME);
+  }
+
+  return {filePath, tempDir, scaffoldFiles};
 }
 
 function getExtensionForLanguage(
@@ -190,6 +214,7 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
       );
       const filePath = res.filePath;
       tempDir = res.tempDir;
+      const scaffoldFiles = new Set(res.scaffoldFiles);
 
       if (params.codeExecutionInput.inputFiles) {
         await materializeFiles(params.codeExecutionInput.inputFiles, tempDir);
@@ -278,8 +303,8 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
             continue;
           }
 
-          // Skip the script file
-          if (relativeFilePath === path.basename(filePath)) {
+          // Skip the files the executor itself put in the scratch directory.
+          if (scaffoldFiles.has(relativeFilePath)) {
             continue;
           }
 
