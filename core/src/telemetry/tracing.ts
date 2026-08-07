@@ -354,7 +354,7 @@ function buildLlmRequestForTrace(
  */
 function bindOtelContextToAsyncGenerator<T>(
   ctx: Context,
-  generator: AsyncGenerator<T, void, void> & Partial<AsyncDisposable>,
+  generator: AsyncGenerator<T, void, void>,
 ): AsyncGenerator<T, void, void> & AsyncDisposable {
   return {
     // Bind the next() method to execute within the provided context
@@ -366,16 +366,9 @@ function bindOtelContextToAsyncGenerator<T>(
     // Bind the throw() method to execute within the provided context
     throw: context.bind(ctx, generator.throw.bind(generator)),
 
-    // Only runtimes that implement explicit resource management put
-    // [Symbol.asyncDispose] on AsyncGenerator.prototype; elsewhere return() is
-    // the equivalent, since disposal just resumes the generator so its finally
-    // blocks run.
+    // Explicit resource management defines async iterator disposal as this
+    // return() call, which resumes the generator so its finally blocks run.
     [Symbol.asyncDispose]: context.bind(ctx, async (): Promise<void> => {
-      const disposeGenerator = generator[Symbol.asyncDispose];
-      if (disposeGenerator) {
-        await disposeGenerator.call(generator);
-        return;
-      }
       await generator.return(undefined);
     }),
 

@@ -35,7 +35,7 @@ describe('runAsyncGeneratorWithOtelContext disposal', () => {
     expect((await gen.next()).done).toBe(true);
   });
 
-  it('delegates to the wrapped generator own asyncDispose when it has one', async () => {
+  it('finalises through return() even when the wrapped generator has its own disposer', async () => {
     const dispose = vi.fn(async (): Promise<void> => {});
     const returnFn = vi.fn(
       async (): Promise<IteratorResult<number, void>> => ({
@@ -60,8 +60,9 @@ describe('runAsyncGeneratorWithOtelContext disposal', () => {
     );
     await gen[Symbol.asyncDispose]();
 
-    expect(dispose).toHaveBeenCalledTimes(1);
-    expect(returnFn).not.toHaveBeenCalled();
+    expect(returnFn).toHaveBeenCalledTimes(1);
+    expect(returnFn).toHaveBeenCalledWith(undefined);
+    expect(dispose).not.toHaveBeenCalled();
   });
 
   it('runs the wrapped generator finally block when the caller uses await using', async () => {
