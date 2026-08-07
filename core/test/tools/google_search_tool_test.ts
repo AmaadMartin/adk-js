@@ -4,8 +4,19 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GOOGLE_SEARCH, GoogleSearchTool, LlmRequest} from '@google/adk';
-import {describe, expect, it} from 'vitest';
+import {
+  Context,
+  createSession,
+  GOOGLE_SEARCH,
+  GoogleSearchTool,
+  InvocationContext,
+  LlmAgent,
+  LlmRequest,
+  PluginManager,
+} from '@google/adk';
+import {afterEach, describe, expect, it, vi} from 'vitest';
+
+const MODEL_ID_CHECK_ENV_VAR = 'ADK_DISABLE_GEMINI_MODEL_ID_CHECK';
 
 function makeRequest(model?: string, tools = []): LlmRequest {
   return {
@@ -15,6 +26,18 @@ function makeRequest(model?: string, tools = []): LlmRequest {
     toolsDict: {},
     liveConnectConfig: {},
   } as unknown as LlmRequest;
+}
+
+/** Builds a real `Context` backed by real ADK plumbing, with no stubs. */
+function makeToolContext(): Context {
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'test-invocation',
+      agent: new LlmAgent({name: 'test_agent'}),
+      session: createSession({id: 'test-session', appName: 'test-app'}),
+      pluginManager: new PluginManager([]),
+    }),
+  });
 }
 
 describe('GoogleSearchTool', () => {
@@ -90,6 +113,53 @@ describe('GoogleSearchTool', () => {
       });
 
       expect(req.config!.tools).toEqual([{googleSearch: {}}]);
+    });
+
+    describe('ADK_DISABLE_GEMINI_MODEL_ID_CHECK', () => {
+      afterEach(() => {
+        vi.unstubAllEnvs();
+      });
+
+      it('adds googleSearch for a non-Gemini model when the check is disabled', async () => {
+        vi.stubEnv(MODEL_ID_CHECK_ENV_VAR, 'true');
+        const tool = new GoogleSearchTool();
+        const req = makeRequest('internal-model-v1');
+
+        await tool.processLlmRequest({
+          llmRequest: req,
+          toolContext: makeToolContext(),
+        });
+
+        expect(req.config!.tools).toEqual([{googleSearch: {}}]);
+      });
+
+      it('keeps Gemini 1.x handling when the check is disabled', async () => {
+        vi.stubEnv(MODEL_ID_CHECK_ENV_VAR, 'true');
+        const tool = new GoogleSearchTool();
+        const req = makeRequest('gemini-1.5-pro');
+
+        await tool.processLlmRequest({
+          llmRequest: req,
+          toolContext: makeToolContext(),
+        });
+
+        expect(req.config!.tools).toEqual([{googleSearchRetrieval: {}}]);
+      });
+
+      it('still throws for a non-Gemini model when the value is falsy', async () => {
+        vi.stubEnv(MODEL_ID_CHECK_ENV_VAR, 'false');
+        const tool = new GoogleSearchTool();
+        const req = makeRequest('internal-model-v1');
+
+        await expect(
+          tool.processLlmRequest({
+            llmRequest: req,
+            toolContext: makeToolContext(),
+          }),
+        ).rejects.toThrow(
+          'Google search tool is not supported for model internal-model-v1',
+        );
+      });
     });
   });
 
