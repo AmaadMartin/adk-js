@@ -7,15 +7,18 @@ import * as path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 
 import {
+  createFolder,
   createTempDir,
   isFile,
   isFileExists,
   isFolderExists,
   listFiles,
   loadFileData,
+  removeFolder,
   saveToFile,
   tryToFindFileRecursively,
 } from '../../src/utils/file_utils.js';
+import {AdkLogger} from '../../src/utils/logger.js';
 
 vi.mock('node:fs/promises', async () => {
   return {
@@ -31,8 +34,9 @@ vi.mock('node:fs/promises', async () => {
   };
 });
 
-vi.mock('node:os', async () => {
+vi.mock('node:os', async (importOriginal) => {
   return {
+    ...(await importOriginal<typeof import('node:os')>()),
     tmpdir: vi.fn(),
   };
 });
@@ -170,5 +174,88 @@ describe('file_utils', () => {
   it('isFileExists returns false for directories', async () => {
     fsPromises.stat.mockResolvedValue({isFile: () => false});
     await expect(isFileExists('/dir')).resolves.toBe(false);
+  });
+
+  describe('failure diagnostics', () => {
+    it('createFolder logs the failure and resolves', async () => {
+      const errorSpy = vi
+        .spyOn(AdkLogger.prototype, 'error')
+        .mockImplementation(() => {});
+      const err = new Error("EACCES: permission denied, mkdir '/some/dir'");
+      fsPromises.mkdir.mockRejectedValue(err);
+
+      await expect(createFolder('/some/dir')).resolves.toBeUndefined();
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(errorSpy).toHaveBeenCalledWith(
+        'Failed to create folder /some/dir',
+        err,
+      );
+    });
+
+    it('removeFolder logs the failure and resolves', async () => {
+      const errorSpy = vi
+        .spyOn(AdkLogger.prototype, 'error')
+        .mockImplementation(() => {});
+      const err = new Error(
+        "ENOTEMPTY: directory not empty, rmdir '/some/dir'",
+      );
+      fsPromises.rm.mockRejectedValue(err);
+
+      await expect(removeFolder('/some/dir')).resolves.toBeUndefined();
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(errorSpy).toHaveBeenCalledWith(
+        'Failed to remove folder /some/dir',
+        err,
+      );
+    });
+
+    it('listFiles logs the failure and returns an empty array', async () => {
+      const errorSpy = vi
+        .spyOn(AdkLogger.prototype, 'error')
+        .mockImplementation(() => {});
+      const err = new Error(
+        "ENOENT: no such file or directory, scandir '/some/dir'",
+      );
+      fsPromises.readdir.mockRejectedValue(err);
+
+      await expect(listFiles('/some/dir')).resolves.toEqual([]);
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(errorSpy).toHaveBeenCalledWith(
+        'Failed to list files in folder /some/dir',
+        err,
+      );
+    });
+
+    it('loadFileData logs the failure and re-throws', async () => {
+      const errorSpy = vi
+        .spyOn(AdkLogger.prototype, 'error')
+        .mockImplementation(() => {});
+      const err = new Error(
+        "ENOENT: no such file or directory, open '/tmp/test.txt'",
+      );
+      fsPromises.readFile.mockRejectedValue(err);
+
+      await expect(loadFileData(testPath)).rejects.toBe(err);
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(errorSpy).toHaveBeenCalledWith(
+        'Failed to read or parse file /tmp/test.txt:',
+        err,
+      );
+    });
+
+    it('saveToFile logs the failure and re-throws', async () => {
+      const errorSpy = vi
+        .spyOn(AdkLogger.prototype, 'error')
+        .mockImplementation(() => {});
+      const err = new Error("ENOSPC: no space left on device, write '/tmp'");
+      fsPromises.writeFile.mockRejectedValue(err);
+
+      await expect(saveToFile(testPath, testContent)).rejects.toBe(err);
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(errorSpy).toHaveBeenCalledWith(
+        'Failed to write file /tmp/test.txt:',
+        err,
+      );
+    });
   });
 });
