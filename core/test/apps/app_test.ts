@@ -78,12 +78,17 @@ describe('App', () => {
   });
 
   it('throws if rootAgent is missing or not a BaseAgent', () => {
-    expect(() => new App({name: 'test_app', rootAgent: undefined})).toThrow(
-      'rootAgent must be provided.',
-    );
+    // `AppOptions.rootAgent` is typed as `BaseAgent`, so these invalid values
+    // are cast to reach the constructor's runtime validation.
+    const missingRootAgent = undefined as unknown as BaseAgent;
+    const notAnAgent = {name: 'fake'} as unknown as BaseAgent;
+
     expect(
-      () => new App({name: 'test_app', rootAgent: {name: 'fake'}}),
-    ).toThrow(/rootAgent must be a BaseAgent instance/);
+      () => new App({name: 'test_app', rootAgent: missingRootAgent}),
+    ).toThrow('rootAgent must be provided.');
+    expect(() => new App({name: 'test_app', rootAgent: notAnAgent})).toThrow(
+      /rootAgent must be a BaseAgent instance/,
+    );
   });
 
   it('creates an App with resumabilityConfig', () => {
