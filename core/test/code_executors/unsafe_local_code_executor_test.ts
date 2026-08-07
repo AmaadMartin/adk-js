@@ -14,6 +14,7 @@ import {
   createSession,
 } from '@google/adk';
 import {EventEmitter} from 'node:events';
+import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
@@ -377,6 +378,31 @@ describe('UnsafeLocalCodeExecutor', () => {
     expect(result.outputFiles![0].contentEncoding).toBe('utf-8');
     expect(result.outputFiles![0].mimeType).toBe('application/json');
   });
+
+  // The 60s budget covers a cold `node` start on the windows-latest CI runner
+  // and exceeds the executor's own 30s kill deadline, so a hung child reports
+  // the executor's timeout message rather than an opaque runner timeout.
+  it('should remove the scratch directory after execution', async () => {
+    const params: ExecuteCodeParams = {
+      invocationContext,
+      codeExecutionInput: {
+        code: 'console.log(process.cwd());',
+        language: CodeExecutionLanguage.JAVASCRIPT,
+        inputFiles: [],
+      },
+    };
+
+    const result = await executor.executeCode(params);
+    const cwd = result.stdout.trim();
+
+    expect(result.stderr).toBe('');
+    // `fs.access('')` also rejects with ENOENT, so an empty cwd would make the
+    // assertion below vacuous.
+    expect(cwd).not.toBe('');
+    // ENOENT specifically: a bare rejection is also satisfied by EACCES against
+    // a directory that is still there.
+    await expect(fs.access(cwd)).rejects.toMatchObject({code: 'ENOENT'});
+  }, 60000);
 
   describe('spawn arguments', () => {
     beforeEach(() => {
