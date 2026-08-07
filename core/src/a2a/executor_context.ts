@@ -8,6 +8,7 @@ import {RequestContext} from '@a2a-js/sdk/server';
 import {Content} from '@google/genai';
 import {Event} from '../events/event.js';
 import {Session} from '../sessions/session.js';
+import {ContextMutation, IntentBinding} from './intent_binding.js';
 
 /**
  * The A2A Agent Executor context.
@@ -20,6 +21,10 @@ export interface ExecutorContext {
   events: Event[];
   userContent: Content;
   requestContext: RequestContext;
+  /** The action frozen when the task paused, when resuming a paused task. */
+  pausedIntent?: IntentBinding;
+  /** Whether other messages arrived while the task was paused. */
+  contextMutation?: ContextMutation;
 }
 
 /**
@@ -27,16 +32,22 @@ export interface ExecutorContext {
  * @param session The session.
  * @param userContent The content of the user.
  * @param requestContext The request context.
+ * @param pausedIntent The action frozen when the task paused.
+ * @param contextMutation Whether other messages arrived during the pause.
  * @returns The A2A Agent Executor context.
  */
 export function createExecutorContext({
   session,
   userContent,
   requestContext,
+  pausedIntent,
+  contextMutation,
 }: {
   session: Session;
   userContent: Content;
   requestContext: RequestContext;
+  pausedIntent?: IntentBinding;
+  contextMutation?: ContextMutation;
 }): ExecutorContext {
   return {
     userId: session.userId,
@@ -46,5 +57,7 @@ export function createExecutorContext({
     events: session.events,
     userContent,
     requestContext,
+    pausedIntent,
+    contextMutation,
   };
 }

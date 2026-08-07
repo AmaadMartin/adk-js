@@ -4,7 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {TaskArtifactUpdateEvent, TaskStatusUpdateEvent} from '@a2a-js/sdk';
+import {
+  Task,
+  TaskArtifactUpdateEvent,
+  TaskStatusUpdateEvent,
+} from '@a2a-js/sdk';
 import {
   AgentExecutor,
   ExecutionEventBus,
@@ -22,12 +26,21 @@ import {
   createTaskArtifactUpdateEvent,
   createTaskFailedEvent,
   createTaskWorkingEvent,
+  isPausedTaskStatusUpdateEvent,
 } from './a2a_event.js';
 import {
   getFinalTaskStatusUpdate,
   getTaskInputRequiredEvent,
 } from './event_processor_utils.js';
 import {createExecutorContext, ExecutorContext} from './executor_context.js';
+import {
+  ContextMutation,
+  detectContextMutation,
+  freezeIntent,
+  IntentBinding,
+  IntentVerification,
+  verifyIntent,
+} from './intent_binding.js';
 import {
   getA2AEventMetadata,
   getA2ASessionMetadata,
@@ -67,6 +80,31 @@ export type AfterExecuteCallback = (
 ) => Promise<void>;
 
 /**
+ * Callback called when the executor pauses a task to wait for a human.
+ */
+export type OnTaskPauseCallback = (
+  ctx: ExecutorContext,
+  pauseEvent: TaskStatusUpdateEvent,
+) => Promise<void>;
+
+/**
+ * Details of a resume attempt, passed to {@link OnTaskResumeCallback}.
+ */
+export interface TaskResumeInfo {
+  binding: IntentBinding;
+  verification: IntentVerification;
+  mutation: ContextMutation;
+}
+
+/**
+ * Callback called when the executor resumes a paused task, after verification.
+ */
+export type OnTaskResumeCallback = (
+  ctx: ExecutorContext,
+  info: TaskResumeInfo,
+) => Promise<void>;
+
+/**
  * Configuration for the Executor.
  */
 export interface AgentExecutorConfig {
@@ -75,6 +113,15 @@ export interface AgentExecutorConfig {
   beforeExecuteCallback?: BeforeExecuteCallback;
   afterEventCallback?: AfterEventCallback;
   afterExecuteCallback?: AfterExecuteCallback;
+  onTaskPauseCallback?: OnTaskPauseCallback;
+  onTaskResumeCallback?: OnTaskResumeCallback;
+  /**
+   * Fail a resume whose incoming message does not match the action frozen when
+   * the task paused, instead of running the agent. Defaults to `false` because
+   * a resume message carrying extra parts alongside the approval is existing
+   * supported traffic.
+   */
+  verifyResumeIntent?: boolean;
 }
 
 /**
@@ -113,6 +160,17 @@ export class A2AAgentExecutor implements AgentExecutor {
     try {
       if (this.config.beforeExecuteCallback) {
         await this.config.beforeExecuteCallback(ctx);
+      }
+
+      if (ctx.task && isPausedTaskStatusUpdateEvent(ctx.task)) {
+        const rejected = await this.rejectUnboundResume({
+          task: ctx.task,
+          executorContext,
+          eventBus,
+        });
+        if (rejected) {
+          return;
+        }
       }
 
       if (ctx.task) {
@@ -236,6 +294,68 @@ export class A2AAgentExecutor implements AgentExecutor {
   }
 
   /**
+   * Binds a resume request to the action frozen when the task paused, and
+   * records the outcome on the executor context.
+   *
+   * @returns `true` when the resume was rejected and the agent must not run.
+   */
+  private async rejectUnboundResume({
+    task,
+    executorContext,
+    eventBus,
+  }: {
+    task: Task;
+    executorContext: ExecutorContext;
+    eventBus: ExecutionEventBus;
+  }): Promise<boolean> {
+    const userMessage = executorContext.requestContext.userMessage;
+    executorContext.contextMutation = detectContextMutation(task, userMessage);
+
+    // The frozen intent comes from the status message the server authored when
+    // it paused, never from the incoming message, which the caller controls.
+    const binding = freezeIntent(task);
+    if (!binding) {
+      return false;
+    }
+    executorContext.pausedIntent = binding;
+
+    const verification = verifyIntent({
+      binding,
+      userMessage,
+      strict: this.config.verifyResumeIntent,
+    });
+
+    try {
+      await this.config.onTaskResumeCallback?.(executorContext, {
+        binding,
+        verification,
+        mutation: executorContext.contextMutation,
+      });
+    } catch (e: unknown) {
+      logger.error('Error in onTaskResumeCallback:', e);
+    }
+
+    if (verification.ok || !this.config.verifyResumeIntent) {
+      return false;
+    }
+
+    await this.publishFinalTaskStatus({
+      executorContext,
+      eventBus,
+      event: createTaskFailedEvent({
+        taskId: task.id,
+        contextId: task.contextId,
+        error: new Error(
+          `Resume rejected: ${verification.reason} (${verification.detail})`,
+        ),
+        metadata: getA2ASessionMetadata(executorContext),
+      }),
+    });
+
+    return true;
+  }
+
+  /**
    * Writes the final status event to the queue.
    */
   private async publishFinalTaskStatus({
@@ -249,6 +369,14 @@ export class A2AAgentExecutor implements AgentExecutor {
     event: TaskStatusUpdateEvent;
     error?: Error;
   }): Promise<void> {
+    if (isPausedTaskStatusUpdateEvent(event)) {
+      try {
+        await this.config.onTaskPauseCallback?.(executorContext, event);
+      } catch (e: unknown) {
+        logger.error('Error in onTaskPauseCallback:', e);
+      }
+    }
+
     try {
       await this.config.afterExecuteCallback?.(executorContext, event, error);
     } catch (e: unknown) {
