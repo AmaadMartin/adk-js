@@ -5,6 +5,7 @@
  */
 import {exec, spawn} from 'node:child_process';
 import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
 import {promisify} from 'node:util';
 import {afterAll, beforeAll, describe, expect, it} from 'vitest';
 import {normalizeLineEndings, sendInput} from '../../test_case_utils.js';
@@ -13,6 +14,35 @@ const execAsync = promisify(exec);
 const dirname = process.cwd();
 const PROJECT_PATH = `${dirname}/tests/integration/skills/script_js`;
 const TEST_EXECUTION_TIMEOUT = 60000;
+
+/**
+ * Files the skill script materializes into the fixture directory. The write
+ * path de-duplicates against existing files by appending `_2`, `_3`, ...
+ * before the extension (materializeFiles in core/src/utils/file_utils.ts), so
+ * a teardown keyed on these exact names leaves the variants behind.
+ */
+const GENERATED_FILE_NAMES = [
+  'ephemeral_entanglement.md',
+  'index.html',
+  'sketch.js',
+];
+
+/** True for a generated output name or one of its `_<n>` de-duplicated variants. */
+function isGeneratedOutput(entry: string): boolean {
+  const ext = path.extname(entry);
+  const base = path.basename(entry, ext);
+  return GENERATED_FILE_NAMES.includes(`${base.replace(/_\d+$/, '')}${ext}`);
+}
+
+/** Removes every generated output in the fixture directory, variants included. */
+async function removeGeneratedOutputs(): Promise<void> {
+  const entries = await fs.readdir(PROJECT_PATH);
+  await Promise.all(
+    entries
+      .filter(isGeneratedOutput)
+      .map((entry) => fs.rm(path.join(PROJECT_PATH, entry), {force: true})),
+  );
+}
 
 /**
  * This integration test verifies that an agent equipped with script execution skills
@@ -30,6 +60,11 @@ const TEST_EXECUTION_TIMEOUT = 60000;
  */
 describe('Agent with skills that generates JS script and runs it locally', () => {
   beforeAll(async () => {
+    // A previous run's outputs must not survive into this one: the skill's
+    // write path de-duplicates against existing files, so the agent would
+    // write `<name>_2.<ext>` and the comparisons below would read the stale
+    // file instead of this run's output.
+    await removeGeneratedOutputs();
     await execAsync('npm install', {cwd: PROJECT_PATH});
   }, TEST_EXECUTION_TIMEOUT);
 
@@ -88,17 +123,22 @@ describe('Agent with skills that generates JS script and runs it locally', () =>
       expect((normalizeLineEndings(resultHtmlFile) as string).trim()).toEqual(
         (normalizeLineEndings(expectedHtmlFile) as string).trim(),
       );
+
+      // The run must have written the three names verbatim. A `_<n>` variant
+      // here means the fixture directory was dirty and the comparisons above
+      // read a previous run's output.
+      const generated = (await fs.readdir(PROJECT_PATH)).filter(
+        isGeneratedOutput,
+      );
+      expect(generated.sort()).toEqual([...GENERATED_FILE_NAMES].sort());
     },
     TEST_EXECUTION_TIMEOUT,
   );
 
   afterAll(async () => {
-    // delete generated files
-    await fs
-      .rm(`${PROJECT_PATH}/ephemeral_entanglement.md`, {force: true})
-      .catch(() => {});
-    await fs.rm(`${PROJECT_PATH}/index.html`, {force: true}).catch(() => {});
-    await fs.rm(`${PROJECT_PATH}/sketch.js`, {force: true}).catch(() => {});
+    // Removed by name shape, not by exact name: a run that started dirty
+    // produces `<name>_2.<ext>`, which an exact-name teardown leaves behind.
+    await removeGeneratedOutputs().catch(() => {});
 
     await fs
       .rm(`${PROJECT_PATH}/node_modules`, {recursive: true, force: true})
