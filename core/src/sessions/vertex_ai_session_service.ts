@@ -36,6 +36,7 @@ import {
   GetSessionRequest,
   ListSessionsRequest,
   ListSessionsResponse,
+  paginateSessions,
   trimTempState,
 } from './base_session_service.js';
 import {createSession, Session} from './session.js';
@@ -297,14 +298,10 @@ export class VertexAiSessionService extends BaseSessionService {
     }
   }
 
-  async listSessions({
-    appName,
-    userId,
-    limit,
-    offset,
-    page,
-    order,
-  }: ListSessionsRequest): Promise<ListSessionsResponse> {
+  async listSessions(
+    request: ListSessionsRequest,
+  ): Promise<ListSessionsResponse> {
+    const {appName, userId} = request;
     const reasoningEngineId = this.getReasoningEngineId(appName);
     const adkSessions: Session[] = [];
     let pageToken: string | undefined = undefined;
@@ -338,50 +335,7 @@ export class VertexAiSessionService extends BaseSessionService {
       pageToken = (response as {nextPageToken?: string}).nextPageToken;
     } while (pageToken);
 
-    if (order === 'asc') {
-      adkSessions.sort(
-        (a, b) =>
-          a.lastUpdateTime - b.lastUpdateTime || a.id.localeCompare(b.id),
-      );
-    } else if (order === 'desc') {
-      adkSessions.sort(
-        (a, b) =>
-          b.lastUpdateTime - a.lastUpdateTime || a.id.localeCompare(b.id),
-      );
-    }
-
-    if (limit === undefined) {
-      const totalItems = adkSessions.length;
-      const sliced = offset ? adkSessions.slice(offset) : adkSessions;
-      return {
-        sessions: sliced,
-        page: 1,
-        limit: totalItems,
-        totalItems,
-        totalPages: totalItems === 0 ? 0 : 1,
-      };
-    }
-
-    const totalItems = adkSessions.length;
-    const totalPages = limit === 0 ? 0 : Math.ceil(totalItems / limit);
-
-    let effectiveOffset: number;
-    let effectivePage: number;
-    if (page !== undefined) {
-      effectiveOffset = (page - 1) * limit;
-      effectivePage = page;
-    } else {
-      effectiveOffset = offset ?? 0;
-      effectivePage = limit === 0 ? 1 : Math.floor(effectiveOffset / limit) + 1;
-    }
-
-    return {
-      sessions: adkSessions.slice(effectiveOffset, effectiveOffset + limit),
-      page: effectivePage,
-      limit,
-      totalItems,
-      totalPages,
-    };
+    return paginateSessions(adkSessions, request);
   }
 
   async deleteSession({

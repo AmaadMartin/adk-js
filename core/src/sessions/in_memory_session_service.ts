@@ -18,6 +18,7 @@ import {
   ListSessionsRequest,
   ListSessionsResponse,
   mergeStates,
+  paginateSessions,
   trimTempState,
 } from './base_session_service.js';
 import {createSession, Session} from './session.js';
@@ -143,99 +144,23 @@ export class InMemorySessionService extends BaseSessionService {
     return copiedSession;
   }
 
-  listSessions({
-    appName,
-    userId,
-    limit,
-    offset,
-    page,
-    order,
-  }: ListSessionsRequest): Promise<ListSessionsResponse> {
-    if (!this.sessions[appName] || !this.sessions[appName][userId]) {
-      if (limit !== undefined) {
-        const effectiveOffset =
-          page !== undefined ? (page - 1) * limit : (offset ?? 0);
-        const effectivePage =
-          page !== undefined
-            ? page
-            : limit === 0
-              ? 1
-              : Math.floor(effectiveOffset / limit) + 1;
-        return Promise.resolve({
-          sessions: [],
-          page: effectivePage,
-          limit,
-          totalItems: 0,
-          totalPages: 0,
-        });
-      }
-      return Promise.resolve({
-        sessions: [],
-        page: 1,
-        limit: 0,
-        totalItems: 0,
-        totalPages: 0,
-      });
-    }
+  listSessions(request: ListSessionsRequest): Promise<ListSessionsResponse> {
+    const {appName, userId} = request;
 
-    const all: Session[] = Object.values(this.sessions[appName][userId]).map(
-      (session) =>
-        createSession({
-          id: session.id,
-          appName: session.appName,
-          userId: session.userId,
-          state: {},
-          events: [],
-          lastUpdateTime: session.lastUpdateTime,
-        }),
+    const all: Session[] = Object.values(
+      this.sessions[appName]?.[userId] ?? {},
+    ).map((session) =>
+      createSession({
+        id: session.id,
+        appName: session.appName,
+        userId: session.userId,
+        state: {},
+        events: [],
+        lastUpdateTime: session.lastUpdateTime,
+      }),
     );
 
-    if (order === 'asc') {
-      all.sort(
-        (a, b) =>
-          a.lastUpdateTime - b.lastUpdateTime || a.id.localeCompare(b.id),
-      );
-    } else if (order === 'desc') {
-      all.sort(
-        (a, b) =>
-          b.lastUpdateTime - a.lastUpdateTime || a.id.localeCompare(b.id),
-      );
-    }
-
-    if (limit === undefined) {
-      const totalItems = all.length;
-      const sliced = offset ? all.slice(offset) : all;
-      return Promise.resolve({
-        sessions: sliced,
-        page: 1,
-        limit: totalItems,
-        totalItems,
-        totalPages: totalItems === 0 ? 0 : 1,
-      });
-    }
-
-    const totalItems = all.length;
-    const totalPages = limit === 0 ? 0 : Math.ceil(totalItems / limit);
-
-    let effectiveOffset: number;
-    let effectivePage: number;
-    if (page !== undefined) {
-      effectiveOffset = (page - 1) * limit;
-      effectivePage = page;
-    } else {
-      effectiveOffset = offset ?? 0;
-      effectivePage = limit === 0 ? 1 : Math.floor(effectiveOffset / limit) + 1;
-    }
-
-    const paginated = all.slice(effectiveOffset, effectiveOffset + limit);
-
-    return Promise.resolve({
-      sessions: paginated,
-      page: effectivePage,
-      limit,
-      totalItems,
-      totalPages,
-    });
+    return Promise.resolve(paginateSessions(all, request));
   }
 
   async deleteSession({
