@@ -5,14 +5,12 @@
  */
 
 /**
- * Returns true when `value` is a promise or any other thenable, using the same
- * test the language applies when it decides whether to adopt a value.
+ * Returns true when `value` has a callable `then`, which is what makes it a
+ * promise or any other thenable.
  */
 function isThenable(value: unknown): value is PromiseLike<unknown> {
   return (
-    ((typeof value === 'object' && value !== null) ||
-      typeof value === 'function') &&
-    typeof (value as {then?: unknown}).then === 'function'
+    typeof (value as {then?: unknown} | null | undefined)?.then === 'function'
   );
 }
 
@@ -40,25 +38,22 @@ export class AsyncLocalStorage<T> {
   run<R>(store: T, callback: () => R): R {
     const previous = this.store;
     this.store = store;
-    let result: R;
     try {
-      result = callback();
+      const result = callback();
+      if (isThenable(result)) {
+        // The callback keeps running after this throws. Without a handler its
+        // failure would surface as an unhandled rejection on top of the error
+        // the caller is about to see.
+        void Promise.resolve(result).catch(() => {});
+        throw new Error(
+          'AsyncLocalStorage: this runtime has no async context, so the store ' +
+            'does not survive an await. run() requires a synchronous callback.',
+        );
+      }
+      return result;
     } finally {
       this.store = previous;
     }
-
-    if (isThenable(result)) {
-      // The callback keeps running after this throws. Without a handler its
-      // failure would surface as an unhandled rejection on top of the error
-      // the caller is about to see.
-      void Promise.resolve(result).catch(() => {});
-      throw new Error(
-        'AsyncLocalStorage: this runtime has no async context, so the store ' +
-          'does not survive an await. run() requires a synchronous callback.',
-      );
-    }
-
-    return result;
   }
 
   getStore(): T | undefined {
