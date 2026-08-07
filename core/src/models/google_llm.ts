@@ -37,19 +37,25 @@ export interface GeminiParams {
   /**
    * The API key to use for the Gemini API. If not provided, it will look for
    * the GOOGLE_GENAI_API_KEY or GEMINI_API_KEY environment variable.
+   *
+   * When `vertexai` is true this is a Vertex AI Express Mode key, resolved from
+   * GOOGLE_API_KEY when not provided. It is mutually exclusive with `project`
+   * and `location`.
    */
   apiKey?: string;
   /**
-   * Whether to use Vertex AI. If true, `project`, `location`
-   * should be provided.
+   * Whether to use Vertex AI. If true, either `project` and `location` or an
+   * Express Mode `apiKey` should be provided.
    */
   vertexai?: boolean;
   /**
-   * The Vertex AI project ID. Required if `vertexai` is true.
+   * The Vertex AI project ID. Required if `vertexai` is true and no Express
+   * Mode `apiKey` is used.
    */
   project?: string;
   /**
-   * The Vertex AI location. Required if `vertexai` is true.
+   * The Vertex AI location. Required if `vertexai` is true and no Express Mode
+   * `apiKey` is used.
    */
   location?: string;
   /**
@@ -223,6 +229,7 @@ export class Gemini extends BaseLlm {
     if (this.vertexai) {
       this._apiClient = new GoogleGenAI({
         vertexai: this.vertexai,
+        apiKey: this.apiKey,
         project: this.project,
         location: this.location,
         httpOptions: this.getHttpOptions(),
@@ -265,8 +272,9 @@ export class Gemini extends BaseLlm {
       if (this.vertexai) {
         this._liveApiClient = new GoogleGenAI({
           vertexai: this.vertexai,
+          apiKey: this.apiKey,
           project: this.project,
-          location: this.location || 'global',
+          location: this.location,
           httpOptions: this.getLiveHttpOptions(),
         });
       } else {
@@ -377,21 +385,47 @@ export function geminiInitParams({
   }
 
   if (params.vertexai) {
-    if (!isBrowser() && !params.project) {
-      params.project = process.env['GOOGLE_CLOUD_PROJECT'];
-    }
-    if (!isBrowser() && !params.location) {
-      params.location = process.env['GOOGLE_CLOUD_LOCATION'];
-    }
-    if (!params.project) {
+    if (params.apiKey && (params.project || params.location)) {
       throw new Error(
-        'VertexAI project must be provided via constructor or GOOGLE_CLOUD_PROJECT environment variable.',
+        'Cannot specify project or location and an Express Mode API key. ' +
+          'Either use project and location, or just the API key.',
       );
     }
-    if (!params.location) {
-      throw new Error(
-        'VertexAI location must be provided via constructor or GOOGLE_CLOUD_LOCATION environment variable.',
-      );
+    if (!params.apiKey && !params.project && !params.location && !isBrowser()) {
+      // An ambient express key outranks an ambient project/location, inverting
+      // the tiebreak @google/genai applies: `adk deploy` always writes
+      // GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION, so the key could
+      // otherwise never reach the model.
+      params.apiKey = process.env['GOOGLE_API_KEY'];
+      if (
+        params.apiKey &&
+        (process.env['GOOGLE_CLOUD_PROJECT'] ||
+          process.env['GOOGLE_CLOUD_LOCATION'])
+      ) {
+        logger.warn(
+          'Using Vertex AI Express Mode with GOOGLE_API_KEY; ignoring ' +
+            'GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION.',
+        );
+      }
+    }
+
+    if (!params.apiKey) {
+      if (!isBrowser() && !params.project) {
+        params.project = process.env['GOOGLE_CLOUD_PROJECT'];
+      }
+      if (!isBrowser() && !params.location) {
+        params.location = process.env['GOOGLE_CLOUD_LOCATION'];
+      }
+      if (!params.project) {
+        throw new Error(
+          'VertexAI project must be provided via constructor or GOOGLE_CLOUD_PROJECT environment variable.',
+        );
+      }
+      if (!params.location) {
+        throw new Error(
+          'VertexAI location must be provided via constructor or GOOGLE_CLOUD_LOCATION environment variable.',
+        );
+      }
     }
   } else {
     if (!params.apiKey && !isBrowser()) {

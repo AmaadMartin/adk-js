@@ -12,7 +12,12 @@ import {
   geminiInitParams,
   version,
 } from '@google/adk';
-import {GenerateContentResponse, GoogleGenAI, HttpOptions} from '@google/genai';
+import {
+  GenerateContentResponse,
+  GoogleGenAI,
+  GoogleGenAIOptions,
+  HttpOptions,
+} from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 vi.mock('@google/genai', async (importOriginal) => {
@@ -56,6 +61,7 @@ describe('GoogleLlm', () => {
     delete process.env['GOOGLE_CLOUD_PROJECT'];
     delete process.env['GOOGLE_CLOUD_LOCATION'];
     delete process.env['GOOGLE_GENAI_API_KEY'];
+    delete process.env['GOOGLE_API_KEY'];
     delete process.env['GEMINI_API_KEY'];
     delete process.env['GOOGLE_GENAI_USE_VERTEXAI'];
     delete process.env['GOOGLE_CLOUD_AGENT_ENGINE_ID'];
@@ -137,6 +143,69 @@ describe('GoogleLlm', () => {
         location: 'us-central1',
       }),
     );
+  });
+
+  describe('Vertex AI client credentials', () => {
+    /** Returns the options the last `new GoogleGenAI(...)` was given. */
+    function lastClientOptions(): GoogleGenAIOptions {
+      const lastCall = vi.mocked(GoogleGenAI).mock.lastCall;
+      if (!lastCall) {
+        expect.fail('GoogleGenAI was never constructed');
+      }
+      return lastCall[0];
+    }
+
+    it('should give the apiClient the express key instead of a project and location', () => {
+      const llm = new TestGemini({
+        model: 'gemini-2.5-flash',
+        vertexai: true,
+        apiKey: 'express-key',
+      });
+
+      expect(llm.apiClient).toBeDefined();
+
+      const options = lastClientOptions();
+      expect(options.vertexai).toBe(true);
+      expect(options.apiKey).toBe('express-key');
+      expect(options.project).toBeUndefined();
+      expect(options.location).toBeUndefined();
+    });
+
+    it('should give the liveApiClient the express key and no "global" location default', () => {
+      const llm = new TestGemini({
+        model: 'gemini-2.5-flash',
+        vertexai: true,
+        apiKey: 'express-key',
+      });
+
+      expect(llm.liveApiClient).toBeDefined();
+
+      const options = lastClientOptions();
+      expect(options.vertexai).toBe(true);
+      expect(options.apiKey).toBe('express-key');
+      expect(options.location).toBeUndefined();
+    });
+
+    it('should keep the classic Vertex AI clients free of an apiKey', () => {
+      const llm = new TestGemini({
+        model: 'gemini-2.5-flash',
+        vertexai: true,
+        project: 'p',
+        location: 'us-central1',
+      });
+
+      expect(llm.apiClient).toBeDefined();
+      const apiOptions = lastClientOptions();
+      expect(apiOptions.project).toBe('p');
+      expect(apiOptions.location).toBe('us-central1');
+      expect(apiOptions.apiKey).toBeUndefined();
+
+      expect(llm.liveApiClient).toBeDefined();
+      const liveOptions = lastClientOptions();
+      expect(liveOptions.project).toBe('p');
+      expect(liveOptions.location).toBe('us-central1');
+      expect(liveOptions.apiKey).toBeUndefined();
+    });
   });
 
   describe('generateContentAsync streaming thoughtSignature propagation', () => {
@@ -337,6 +406,120 @@ describe('GoogleLlm', () => {
         location: 'us-central1',
       };
       expect(() => geminiInitParams(input)).toThrow(/VertexAI project/);
+    });
+  });
+
+  describe('geminiInitParams Vertex AI Express Mode', () => {
+    it('should accept an explicit express key without project or location', () => {
+      const params = geminiInitParams({
+        model: 'gemini-1.5-flash',
+        vertexai: true,
+        apiKey: 'express-key',
+      });
+
+      expect(params.vertexai).toBe(true);
+      expect(params.apiKey).toBe('express-key');
+      expect(params.project).toBeUndefined();
+      expect(params.location).toBeUndefined();
+    });
+
+    it('should prefer GOOGLE_API_KEY over an ambient project and location', () => {
+      process.env['GOOGLE_GENAI_USE_VERTEXAI'] = '1';
+      process.env['GOOGLE_CLOUD_PROJECT'] = 'env-project';
+      process.env['GOOGLE_CLOUD_LOCATION'] = 'us-central1';
+      process.env['GOOGLE_API_KEY'] = 'env-express-key';
+
+      const params = geminiInitParams({model: 'gemini-1.5-flash'});
+
+      expect(params.vertexai).toBe(true);
+      expect(params.apiKey).toBe('env-express-key');
+      expect(params.project).toBeUndefined();
+      expect(params.location).toBeUndefined();
+    });
+
+    it('should use GOOGLE_API_KEY when no project or location is available', () => {
+      process.env['GOOGLE_GENAI_USE_VERTEXAI'] = '1';
+      process.env['GOOGLE_API_KEY'] = 'env-express-key';
+
+      const params = geminiInitParams({model: 'gemini-1.5-flash'});
+
+      expect(params.apiKey).toBe('env-express-key');
+      expect(params.project).toBeUndefined();
+      expect(params.location).toBeUndefined();
+    });
+
+    it('should keep an explicit project and location ahead of GOOGLE_API_KEY', () => {
+      process.env['GOOGLE_API_KEY'] = 'env-express-key';
+
+      const params = geminiInitParams({
+        model: 'gemini-1.5-flash',
+        vertexai: true,
+        project: 'explicit-project',
+        location: 'us-central1',
+      });
+
+      expect(params.apiKey).toBeUndefined();
+      expect(params.project).toBe('explicit-project');
+      expect(params.location).toBe('us-central1');
+    });
+
+    const mutuallyExclusiveInputs: GeminiParams[] = [
+      {
+        model: 'gemini-1.5-flash',
+        vertexai: true,
+        apiKey: 'express-key',
+        project: 'explicit-project',
+      },
+      {
+        model: 'gemini-1.5-flash',
+        vertexai: true,
+        apiKey: 'express-key',
+        location: 'us-central1',
+      },
+      {
+        model: 'gemini-1.5-flash',
+        vertexai: true,
+        apiKey: 'express-key',
+        project: 'explicit-project',
+        location: 'us-central1',
+      },
+    ];
+
+    mutuallyExclusiveInputs.forEach((input) => {
+      const supplied = [
+        input.project && 'project',
+        input.location && 'location',
+      ]
+        .filter(Boolean)
+        .join(' and ');
+      it(`should throw when an express key is combined with ${supplied}`, () => {
+        expect(() => geminiInitParams(input)).toThrow(
+          /Cannot specify project or location and an Express Mode API key/,
+        );
+      });
+    });
+
+    it('should leave the Gemini API branch untouched by GOOGLE_API_KEY', () => {
+      process.env['GOOGLE_API_KEY'] = 'env-express-key';
+
+      const params = geminiInitParams({
+        model: 'gemini-1.5-flash',
+        vertexai: false,
+      });
+
+      expect(params.vertexai).toBe(false);
+      expect(params.apiKey).toBeUndefined();
+    });
+
+    it('should be idempotent for an express mode result', () => {
+      process.env['GOOGLE_GENAI_USE_VERTEXAI'] = '1';
+      process.env['GOOGLE_CLOUD_PROJECT'] = 'env-project';
+      process.env['GOOGLE_CLOUD_LOCATION'] = 'us-central1';
+      process.env['GOOGLE_API_KEY'] = 'env-express-key';
+
+      const params = geminiInitParams({model: 'gemini-1.5-flash'});
+
+      expect(geminiInitParams(params)).toEqual(params);
     });
   });
 
