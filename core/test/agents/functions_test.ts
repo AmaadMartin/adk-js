@@ -14,6 +14,7 @@ import {
   InvocationContext,
   LlmAgent,
   PluginManager,
+  REQUEST_EUC_FUNCTION_CALL_NAME,
   Session,
   SingleAfterToolCallback,
   SingleBeforeToolCallback,
@@ -839,5 +840,11 @@ describe('findMatchingFunctionCall', () => {
     });
     expect(findMatchingFunctionCall([callEvent])).toBeUndefined();
     expect(findMatchingFunctionCall([])).toBeUndefined();
+  });
+});
+
+describe('REQUEST_EUC_FUNCTION_CALL_NAME', () => {
+  it('is exported from the public package entry point', () => {
+    expect(REQUEST_EUC_FUNCTION_CALL_NAME).toBe('adk_request_credential');
   });
 });
