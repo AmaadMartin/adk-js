@@ -28,13 +28,8 @@ function createToolContext(): Context {
   return new Context({
     invocationContext: new InvocationContext({
       invocationId: 'test-invocation',
-      agent: new LlmAgent({name: 'test_agent', model: 'gemini-2.5-flash'}),
-      session: createSession({
-        id: 'test-session',
-        appName: 'test-app',
-        userId: 'test-user',
-        events: [],
-      }),
+      agent: new LlmAgent({name: 'test_agent'}),
+      session: createSession({id: 'test-session', appName: 'test-app'}),
       pluginManager: new PluginManager(),
     }),
   });
@@ -518,7 +513,7 @@ describe('RestApiTool', () => {
     });
 
     const toolContext = createToolContext();
-    const authHandler = new ToolAuthHandler(toolContext, authScheme);
+    const authHandler = new ToolAuthHandler(toolContext);
     vi.spyOn(authHandler, 'prepareAuthCredentials').mockResolvedValue({
       state: 'done',
       authCredential: {
@@ -607,11 +602,7 @@ describe('RestApiTool', () => {
     });
 
     const toolContext = createToolContext();
-    const authHandler = new ToolAuthHandler(
-      toolContext,
-      authScheme,
-      authCredential,
-    );
+    const authHandler = new ToolAuthHandler(toolContext);
     vi.spyOn(authHandler, 'prepareAuthCredentials').mockResolvedValue({
       state: 'done',
       authCredential,
