@@ -14,6 +14,8 @@ import {
   createSession,
 } from '@google/adk';
 import {EventEmitter} from 'node:events';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 
 const spawnMock = vi.hoisted(() => vi.fn());
@@ -21,6 +23,11 @@ vi.mock('node:child_process', async (importOriginal) => ({
   ...(await importOriginal<typeof import('node:child_process')>()),
   spawn: spawnMock,
 }));
+
+const {spawn: realSpawn} =
+  await vi.importActual<typeof import('node:child_process')>(
+    'node:child_process',
+  );
 
 const DEFAULT_SANDBOX_BIN = '/usr/local/gcp/bin/sandbox';
 
@@ -322,6 +329,25 @@ describe('CloudRunSandboxCodeExecutor', () => {
     expect(result).toEqual({
       stdout: '',
       stderr: 'Unexpected error running sandbox: boom',
+      outputFiles: [],
+    });
+  });
+
+  // Drives the real `node:child_process.spawn`, so it covers the whole path
+  // an agent takes outside a sandbox-enabled Cloud Run container.
+  it('returns the not-found result from an unmocked spawn of an absent binary', async () => {
+    spawnMock.mockImplementation(realSpawn);
+    const sandboxBin = path.join(os.tmpdir(), 'adk_js_absent_sandbox_binary');
+
+    const result = await new CloudRunSandboxCodeExecutor({
+      sandboxBin,
+    }).executeCode(params('print("hi")'));
+
+    expect(result).toEqual({
+      stdout: '',
+      stderr:
+        `Sandbox binary "${sandboxBin}" not found. Ensure you are running ` +
+        'in an environment with the sandbox tool installed.',
       outputFiles: [],
     });
   });
