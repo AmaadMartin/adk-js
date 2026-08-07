@@ -749,4 +749,72 @@ describe('deployToAgentEngine', () => {
       'Reasoning Engine update failed: [Code 404] Resource not found',
     );
   });
+
+  it('should resolve as soon as the first poll reports done, without waiting an interval', async () => {
+    // The beforeEach stub makes every sleep instantaneous, which would hide a
+    // trailing sleep. Use a fake clock so the elapsed time is measurable.
+    vi.unstubAllGlobals();
+    vi.useFakeTimers();
+    try {
+      const start = Date.now();
+
+      await deployToAgentEngine(defaultOptions);
+
+      expect(Date.now() - start).toBe(0);
+      expect(vi.getTimerCount()).toBe(0);
+      expect(mockGetAgentOperationInternal).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  }, 5000);
+
+  it('should space polls one interval apart and throw after the maximum attempts', async () => {
+    let resolveReachedLoop: () => void = () => {};
+    const reachedLoopPromise = new Promise<void>((r) => {
+      resolveReachedLoop = r;
+    });
+
+    mockCreateInternal.mockImplementation(() => {
+      resolveReachedLoop();
+      return Promise.resolve({
+        name: 'operations/test-operation',
+        done: false,
+      });
+    });
+
+    mockGetAgentOperationInternal.mockResolvedValue({
+      name: 'operations/test-operation',
+      done: false,
+    });
+
+    vi.unstubAllGlobals();
+    vi.useFakeTimers();
+    try {
+      const start = Date.now();
+      const deployPromise = deployToAgentEngine(defaultOptions);
+      const rejection = expect(deployPromise).rejects.toThrow(
+        'Reasoning Engine creation operation operations/test-operation did not complete in time.',
+      );
+
+      await reachedLoopPromise;
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mockGetAgentOperationInternal).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(4999);
+      expect(mockGetAgentOperationInternal).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(mockGetAgentOperationInternal).toHaveBeenCalledTimes(2);
+
+      await vi.advanceTimersByTimeAsync(28 * 5000);
+      expect(mockGetAgentOperationInternal).toHaveBeenCalledTimes(30);
+      // 30 polls separated by 29 sleeps, and nothing pending afterwards.
+      expect(Date.now() - start).toBe(29 * 5000);
+      expect(vi.getTimerCount()).toBe(0);
+
+      await rejection;
+    } finally {
+      vi.useRealTimers();
+    }
+  }, 30000);
 });
