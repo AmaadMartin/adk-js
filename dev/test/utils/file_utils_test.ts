@@ -56,6 +56,8 @@ describe('file_utils', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    // file_utils reports every failure with `console.error`.
+    vi.spyOn(console, 'error').mockImplementation(() => {});
     fsPromises = (await import('node:fs/promises')) as unknown as {
       readFile: Mock;
       writeFile: Mock;
