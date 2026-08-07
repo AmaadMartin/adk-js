@@ -92,3 +92,5 @@ gone through human refinement.
 
 We want our TSDocs to be concise and meaningful. Usually aligned with
 adk-python.
+
+<!-- temporary CI control commit; not for merge -->
