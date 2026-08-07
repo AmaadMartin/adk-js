@@ -53,11 +53,15 @@ describe('OAuth2CredentialExchanger', () => {
     it('logs warning and returns if grant type is unsupported', async () => {
       const exchanger = new OAuth2CredentialExchanger();
       const authCredential = {oauth2: {}} as AuthCredential;
-      const authScheme = {
+      const authScheme: AuthScheme = {
+        type: 'oauth2',
         flows: {
-          implicit: {}, // Unsupported for exchange by this exchanger usually, if determineGrantType returns undefined
+          implicit: {
+            authorizationUrl: 'https://example.com/auth',
+            scopes: {},
+          },
         },
-      } as AuthScheme;
+      };
 
       const result = await exchanger.exchange({authCredential, authScheme});
 
@@ -70,11 +74,15 @@ describe('OAuth2CredentialExchanger', () => {
       const authCredential = {
         oauth2: {clientId: 'id', clientSecret: 'secret'},
       } as AuthCredential;
-      const authScheme = {
+      const authScheme: AuthScheme = {
+        type: 'oauth2',
         flows: {
-          clientCredentials: {},
+          clientCredentials: {
+            tokenUrl: 'https://example.com/token',
+            scopes: {},
+          },
         },
-      } as AuthScheme;
+      };
       const mockTokens = {accessToken: 'new-token'};
 
       vi.mocked(oauth2Utils.getTokenEndpoint).mockReturnValue(
@@ -93,11 +101,16 @@ describe('OAuth2CredentialExchanger', () => {
       const authCredential = {
         oauth2: {clientId: 'id', clientSecret: 'secret', authCode: 'code'},
       } as AuthCredential;
-      const authScheme = {
+      const authScheme: AuthScheme = {
+        type: 'oauth2',
         flows: {
-          authorizationCode: {},
+          authorizationCode: {
+            authorizationUrl: 'https://example.com/auth',
+            tokenUrl: 'https://example.com/token',
+            scopes: {},
+          },
         },
-      } as AuthScheme;
+      };
       const mockTokens = {accessToken: 'new-token'};
 
       vi.mocked(oauth2Utils.getTokenEndpoint).mockReturnValue(
@@ -114,11 +127,15 @@ describe('OAuth2CredentialExchanger', () => {
 
   describe('determineGrantType', () => {
     it('returns CLIENT_CREDENTIALS if flows has clientCredentials', () => {
-      const authScheme = {
+      const authScheme: AuthScheme = {
+        type: 'oauth2',
         flows: {
-          clientCredentials: {},
+          clientCredentials: {
+            tokenUrl: 'https://example.com/token',
+            scopes: {},
+          },
         },
-      } as AuthScheme;
+      };
 
       expect(determineGrantType(authScheme)).toBe(
         OAuthGrantType.CLIENT_CREDENTIALS,
@@ -126,11 +143,16 @@ describe('OAuth2CredentialExchanger', () => {
     });
 
     it('returns AUTHORIZATION_CODE if flows has authorizationCode', () => {
-      const authScheme = {
+      const authScheme: AuthScheme = {
+        type: 'oauth2',
         flows: {
-          authorizationCode: {},
+          authorizationCode: {
+            authorizationUrl: 'https://example.com/auth',
+            tokenUrl: 'https://example.com/token',
+            scopes: {},
+          },
         },
-      } as AuthScheme;
+      };
 
       expect(determineGrantType(authScheme)).toBe(
         OAuthGrantType.AUTHORIZATION_CODE,
@@ -138,9 +160,14 @@ describe('OAuth2CredentialExchanger', () => {
     });
 
     it('returns CLIENT_CREDENTIALS for OpenIdConnect with client_credentials in grantTypesSupported', () => {
-      const authScheme = {
+      const authScheme: AuthScheme = {
+        type: 'openIdConnect',
+        openIdConnectUrl:
+          'https://example.com/.well-known/openid-configuration',
+        authorizationEndpoint: 'https://example.com/auth',
+        tokenEndpoint: 'https://example.com/token',
         grantTypesSupported: ['client_credentials'],
-      } as AuthScheme;
+      };
 
       expect(determineGrantType(authScheme)).toBe(
         OAuthGrantType.CLIENT_CREDENTIALS,
@@ -148,9 +175,14 @@ describe('OAuth2CredentialExchanger', () => {
     });
 
     it('returns AUTHORIZATION_CODE for OpenIdConnect without client_credentials in grantTypesSupported', () => {
-      const authScheme = {
+      const authScheme: AuthScheme = {
+        type: 'openIdConnect',
+        openIdConnectUrl:
+          'https://example.com/.well-known/openid-configuration',
+        authorizationEndpoint: 'https://example.com/auth',
+        tokenEndpoint: 'https://example.com/token',
         grantTypesSupported: ['authorization_code'],
-      } as AuthScheme;
+      };
 
       expect(determineGrantType(authScheme)).toBe(
         OAuthGrantType.AUTHORIZATION_CODE,
@@ -158,7 +190,11 @@ describe('OAuth2CredentialExchanger', () => {
     });
 
     it('returns undefined if no flows or grantTypesSupported', () => {
-      const authScheme = {} as AuthScheme;
+      const authScheme: AuthScheme = {
+        type: 'apiKey',
+        name: 'X-API-Key',
+        in: 'header',
+      };
 
       expect(determineGrantType(authScheme)).toBeUndefined();
     });
