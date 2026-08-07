@@ -10,7 +10,10 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import {promisify} from 'node:util';
 import {afterAll, beforeAll, describe, expect, it} from 'vitest';
-import {AgentLoader} from '../../../dev/src/utils/agent_loader.js';
+import {
+  AgentFileLoadingError,
+  AgentLoader,
+} from '../../../dev/src/utils/agent_loader.js';
 import {sendInput} from '../test_case_utils.js';
 
 const execAsync = promisify(exec);
@@ -126,6 +129,42 @@ describe('AgentLoader discovery and loading integration', () => {
     },
     TEST_EXECUTION_TIMEOUT,
   );
+
+  describe('structural discovery filters', () => {
+    const nonAgentPath = path.join(projectPath, 'not_an_agent.ts');
+    const declarationPath = path.join(projectPath, 'types.d.ts');
+    let filterLoader: AgentLoader;
+
+    beforeAll(async () => {
+      await fs.writeFile(
+        nonAgentPath,
+        'export const tools = {name: "tools"};\n',
+      );
+      await fs.writeFile(declarationPath, 'export declare const x: number;\n');
+      filterLoader = new AgentLoader(projectPath);
+    }, TEST_EXECUTION_TIMEOUT);
+
+    afterAll(async () => {
+      await filterLoader.disposeAll();
+      await fs.rm(nonAgentPath, {force: true}).catch(() => {});
+      await fs.rm(declarationPath, {force: true}).catch(() => {});
+    }, TEST_EXECUTION_TIMEOUT);
+
+    it(
+      'lists a module that exports no agent and hides declaration files',
+      async () => {
+        const agents = await filterLoader.listAgents();
+        expect(agents).toContain('not_an_agent');
+        expect(agents).not.toContain('types');
+        expect(agents).not.toContain('types.d');
+
+        // Listed, but it surfaces a real error when it is actually selected.
+        const agentFile = await filterLoader.getAgentFile('not_an_agent');
+        await expect(agentFile.load()).rejects.toThrow(AgentFileLoadingError);
+      },
+      TEST_EXECUTION_TIMEOUT,
+    );
+  });
 
   afterAll(async () => {
     await loader.disposeAll();

@@ -33,7 +33,11 @@ import express, {Request, Response} from 'express';
 import * as http from 'node:http';
 import * as path from 'node:path';
 
-import {AgentFileOptions, AgentLoader} from '../utils/agent_loader.js';
+import {
+  AgentFileOptions,
+  AgentLoader,
+  tryLoadAgentFile,
+} from '../utils/agent_loader.js';
 import {AdkLogger} from '../utils/logger.js';
 import {
   ApiServerSpanExporter,
@@ -180,7 +184,11 @@ export class AdkApiServer {
 
     for (const appName of appNames) {
       const agentFile = await this.agentLoader.getAgentFile(appName);
-      const loaded = await agentFile.load();
+      const loaded = await tryLoadAgentFile(agentFile);
+      if (!loaded) {
+        continue;
+      }
+
       const agent = isApp(loaded) ? loaded.rootAgent : loaded;
       const adkApp = isApp(loaded) ? loaded : undefined;
       const runner = await this.getRunner(adkApp ?? agent, appName);
