@@ -57,7 +57,9 @@ function build({
 
   if (bundle) {
     buildOptions.entryPoints = [`./src/${entry}`];
-    buildOptions.outfile = `./dist/${targetDir}/index.js`;
+    // Keep the emitted filename aligned with the entry so package.json's
+    // "browser" field keeps resolving to dist/web/index_web.js.
+    buildOptions.outfile = `./dist/${targetDir}/${entry.replace(/\.ts$/, '.js')}`;
   } else {
     buildOptions.entryPoints = ['./src/**/*.ts'];
     buildOptions.outdir = `./dist/${targetDir}`;
