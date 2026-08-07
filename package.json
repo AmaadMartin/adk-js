@@ -50,6 +50,7 @@
     "concurrently": "^9.2.1",
     "esbuild": "^0.25.9",
     "eslint": "^9.37.0",
+    "eslint-plugin-n": "^17.24.0",
     "globals": "^16.4.0",
     "gts": "^5.3.1",
     "http-server": "^14.1.1",
