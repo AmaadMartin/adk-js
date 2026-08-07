@@ -23,6 +23,7 @@ import {
 } from '@google/adk';
 import {ReadableSpan} from '@opentelemetry/sdk-trace-base';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import * as winston from 'winston';
 import {z} from 'zod';
 
 import {
@@ -222,6 +223,25 @@ describe('AdkWebServer', () => {
   let client: HttpClient;
 
   beforeEach(async () => {
+    // Installed before `server.start()` below, which prints a banner.
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'info').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    // The dev server and the core SDK log through winston, whose Console
+    // transport writes to the console's underlying stream and so slips past
+    // the `console` spies above.
+    vi.spyOn(winston.transports.Console.prototype, 'log').mockImplementation(
+      (...args: unknown[]) => {
+        // winston calls a transport as `log(info, next)`; leaving `next`
+        // uncalled would stall the transport stream.
+        const next = args[1];
+        if (typeof next === 'function') {
+          next();
+        }
+      },
+    );
+
     agentLoader = {
       listAgents: () => Promise.resolve(['testApp']),
       getAgentFile: () =>
@@ -250,6 +270,7 @@ describe('AdkWebServer', () => {
 
   afterEach(async () => {
     await server.stop();
+    vi.restoreAllMocks();
   });
 
   describe('Sessions', () => {
@@ -962,16 +983,12 @@ describe('AdkWebServer', () => {
 
     beforeEach(() => {
       vi.stubEnv(A2A_AUTH_TOKEN_ENV_VAR, undefined);
-      // The SDK logs the rejection thrown by the authenticator; keep it out of
-      // the test output.
-      vi.spyOn(console, 'error').mockImplementation(() => {});
     });
 
     afterEach(async () => {
       await a2aServer?.stop();
       a2aServer = undefined;
       vi.unstubAllEnvs();
-      vi.restoreAllMocks();
     });
 
     it('should return 404 for A2A endpoints when disabled', async () => {
