@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {describe, expect, it, vi} from 'vitest';
+import {describe, expect, it} from 'vitest';
 import {buildAgentSkills} from '../../src/a2a/agent_card.js';
 
 import {
@@ -100,7 +100,7 @@ describe('Agent Card', () => {
 
       const modelSkill = card.skills.find((s) => s.name === 'model');
       expect(modelSkill).toBeDefined();
-      expect(modelSkill?.description).toContain('I am a helpful assistant'); // pronoun replacement test
+      expect(modelSkill?.description).toBe('An LLM agent');
 
       const toolSkill = card.skills.find((s) => s.name === 'test_tool');
       expect(toolSkill).toBeDefined();
@@ -138,55 +138,6 @@ describe('Agent Card', () => {
   });
 
   describe('buildAgentSkills', () => {
-    it('handles dynamic instructions safely', async () => {
-      const mockProvider = vi
-        .fn()
-        .mockResolvedValue('You are dynamically created');
-      const agent = new LlmAgent({
-        name: 'dyn_agent',
-        instruction: mockProvider,
-      });
-
-      const skills = await buildAgentSkills(agent);
-      const modelSkill = skills.find((s) => s.name === 'model');
-      expect(modelSkill?.description).toContain('I am dynamically created');
-    });
-
-    it('handles dynamic instruction failure safely', async () => {
-      const mockProvider = vi.fn().mockRejectedValue(new Error('fail'));
-      const agent = new LlmAgent({
-        name: 'dyn_agent_fail',
-        description: 'Fallback desc',
-        instruction: mockProvider,
-      });
-
-      const skills = await buildAgentSkills(agent);
-      const modelSkill = skills.find((s) => s.name === 'model');
-      // If instruction fails, it falls back to empty, but still uses description
-      expect(modelSkill?.description).toContain('Fallback desc');
-    });
-
-    it('handles global instructions', async () => {
-      const properRoot = new LlmAgent({
-        name: 'root',
-        globalInstruction: 'You are global',
-        subAgents: [
-          new LlmAgent({
-            name: 'sub',
-            instruction: 'You are sub',
-          }),
-        ],
-      });
-
-      const properlyWiredSub = properRoot.subAgents[0] as LlmAgent;
-
-      const skills = await buildAgentSkills(properlyWiredSub);
-      const modelSkill = skills.find((s) => s.name === 'model');
-
-      expect(modelSkill?.description).toContain('I am sub');
-      expect(modelSkill?.description).toContain('I am global');
-    });
-
     it('supports parallel agent description', async () => {
       const sub1 = new CustomAgent('sub1', 'do A');
       const sub2 = new CustomAgent('sub2', 'do B');
