@@ -12,7 +12,14 @@ import {
   geminiInitParams,
   version,
 } from '@google/adk';
-import {GenerateContentResponse, GoogleGenAI, HttpOptions} from '@google/genai';
+import {
+  Blob,
+  FileData,
+  GenerateContentResponse,
+  GoogleGenAI,
+  HttpOptions,
+  Part,
+} from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 vi.mock('@google/genai', async (importOriginal) => {
@@ -651,6 +658,188 @@ describe('GoogleLlm', () => {
           }),
         }),
       );
+    });
+  });
+
+  describe('preprocessRequest displayName scrubbing', () => {
+    function mockGenerateContent(llm: TestGemini) {
+      const generateContentMock =
+        vi.fn<typeof llm.apiClient.models.generateContent>();
+      generateContentMock.mockResolvedValue(new GenerateContentResponse());
+      llm.apiClient.models.generateContent = generateContentMock;
+      return generateContentMock;
+    }
+
+    function vertexGemini(): TestGemini {
+      return new TestGemini({
+        model: 'gemini-2.5-flash',
+        vertexai: true,
+        project: 'test-project',
+        location: 'us-central1',
+      });
+    }
+
+    /**
+     * Wraps parts in a single `user` content so that
+     * `maybeAppendUserContent` does not append a trailing content and shift
+     * the indices the assertions rely on.
+     */
+    function userRequest(parts: Part[]): LlmRequest {
+      return {
+        contents: [{role: 'user', parts}],
+        liveConnectConfig: {},
+        toolsDict: {},
+      };
+    }
+
+    it('should clear inlineData.displayName for the Gemini API backend', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+      const generateContentMock = mockGenerateContent(llm);
+      const inlineData: Blob = {
+        data: 'abc',
+        mimeType: 'image/png',
+        displayName: 'photo.png',
+      };
+      const llmRequest = userRequest([{inlineData}]);
+
+      await llm.generateContentAsync(llmRequest).next();
+
+      expect(generateContentMock.mock.calls[0][0].contents).toBe(
+        llmRequest.contents,
+      );
+      expect(inlineData.displayName).toBeUndefined();
+      expect(inlineData.data).toBe('abc');
+      expect(inlineData.mimeType).toBe('image/png');
+    });
+
+    it('should clear fileData.displayName for the Gemini API backend', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+      const generateContentMock = mockGenerateContent(llm);
+      const fileData: FileData = {
+        fileUri: 'gs://bucket/file.pdf',
+        mimeType: 'application/pdf',
+        displayName: 'file.pdf',
+      };
+      const llmRequest = userRequest([{fileData}]);
+
+      await llm.generateContentAsync(llmRequest).next();
+
+      expect(generateContentMock.mock.calls[0][0].contents).toBe(
+        llmRequest.contents,
+      );
+      expect(fileData.displayName).toBeUndefined();
+      expect(fileData.fileUri).toBe('gs://bucket/file.pdf');
+      expect(fileData.mimeType).toBe('application/pdf');
+    });
+
+    it('should clear displayName on every part of a mixed content', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+      const generateContentMock = mockGenerateContent(llm);
+      const inlineData: Blob = {
+        data: 'abc',
+        mimeType: 'image/png',
+        displayName: 'photo.png',
+      };
+      const fileData: FileData = {
+        fileUri: 'gs://bucket/file.pdf',
+        mimeType: 'application/pdf',
+        displayName: 'file.pdf',
+      };
+      const llmRequest = userRequest([
+        {text: 'describe these'},
+        {inlineData},
+        {fileData},
+      ]);
+
+      await llm.generateContentAsync(llmRequest).next();
+
+      expect(generateContentMock.mock.calls[0][0].contents).toBe(
+        llmRequest.contents,
+      );
+      expect(inlineData.displayName).toBeUndefined();
+      expect(fileData.displayName).toBeUndefined();
+      expect(llmRequest.contents[0].parts).toEqual([
+        {text: 'describe these'},
+        {inlineData},
+        {fileData},
+      ]);
+    });
+
+    it('should preserve inlineData.displayName for the Vertex AI backend', async () => {
+      const llm = vertexGemini();
+      const generateContentMock = mockGenerateContent(llm);
+      const inlineData: Blob = {
+        data: 'abc',
+        mimeType: 'image/png',
+        displayName: 'photo.png',
+      };
+      const llmRequest = userRequest([{inlineData}]);
+
+      await llm.generateContentAsync(llmRequest).next();
+
+      expect(generateContentMock.mock.calls[0][0].contents).toBe(
+        llmRequest.contents,
+      );
+      expect(inlineData.displayName).toBe('photo.png');
+    });
+
+    it('should preserve fileData.displayName for the Vertex AI backend', async () => {
+      const llm = vertexGemini();
+      const generateContentMock = mockGenerateContent(llm);
+      const fileData: FileData = {
+        fileUri: 'gs://bucket/file.pdf',
+        mimeType: 'application/pdf',
+        displayName: 'file.pdf',
+      };
+      const llmRequest = userRequest([{fileData}]);
+
+      await llm.generateContentAsync(llmRequest).next();
+
+      expect(generateContentMock.mock.calls[0][0].contents).toBe(
+        llmRequest.contents,
+      );
+      expect(fileData.displayName).toBe('file.pdf');
+    });
+
+    it('should leave an empty-string displayName untouched for the Gemini API backend', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+      const generateContentMock = mockGenerateContent(llm);
+      const inlineData: Blob = {
+        data: 'abc',
+        mimeType: 'image/png',
+        displayName: '',
+      };
+      const llmRequest = userRequest([{inlineData}]);
+
+      await llm.generateContentAsync(llmRequest).next();
+
+      expect(generateContentMock.mock.calls[0][0].contents).toBe(
+        llmRequest.contents,
+      );
+      expect(inlineData.displayName).toBe('');
+    });
+
+    it('should skip a content without parts for the Gemini API backend', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+      const generateContentMock = mockGenerateContent(llm);
+      const inlineData: Blob = {
+        data: 'abc',
+        mimeType: 'image/png',
+        displayName: 'photo.png',
+      };
+      const llmRequest: LlmRequest = {
+        contents: [{role: 'user'}, {role: 'user', parts: [{inlineData}]}],
+        liveConnectConfig: {},
+        toolsDict: {},
+      };
+
+      await llm.generateContentAsync(llmRequest).next();
+
+      expect(generateContentMock.mock.calls[0][0].contents).toBe(
+        llmRequest.contents,
+      );
+      expect(llmRequest.contents).toHaveLength(2);
+      expect(inlineData.displayName).toBeUndefined();
     });
   });
 });
