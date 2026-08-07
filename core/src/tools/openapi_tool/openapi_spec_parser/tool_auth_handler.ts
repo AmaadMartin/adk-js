@@ -45,8 +45,8 @@ class ToolContextCredentialStore {
 }
 
 /**
- * Returns a live credential for one read back out of the store, refreshing it
- * first when its access token has expired.
+ * Refreshes a credential read back out of the store when its access token has
+ * expired, and returns the live credential.
  *
  * The refreshed credential is written back to the store because many providers
  * rotate the refresh token on every refresh. Keeping the pre-refresh copy would
