@@ -6,6 +6,7 @@
 
 import {OpenAPIV3} from 'openapi-types';
 import {AuthCredential} from '../../../auth/auth_credential.js';
+import {AuthScheme} from '../../../auth/auth_schemes.js';
 
 /**
  * Applies the given credential to the request headers and URL.
@@ -20,7 +21,7 @@ export function applyCredential(
   url: string,
   headers: Record<string, string>,
   credential?: AuthCredential,
-  authScheme?: OpenAPIV3.SecuritySchemeObject,
+  authScheme?: AuthScheme,
 ): string {
   if (!credential) return url;
 
