@@ -38,6 +38,15 @@ This is very important:
 4. Use \`run_skill_script\` to run scripts from a skill's \`scripts/\` directory. Use \`load_skill_resource\` to view script content first if needed.
 `;
 
+/**
+ * Default ceiling on the size of a binary skill resource that
+ * `load_skill_resource` will inline into a model request. Base64 encoding
+ * inflates a payload by roughly a third, and providers cap the total size of a
+ * request that carries inline data, so a multi-megabyte asset can push a turn
+ * past that cap on its own.
+ */
+export const DEFAULT_MAX_INLINE_RESOURCE_BYTES = 5 * 1024 * 1024; // 5 MiB
+
 @experimental
 export class SkillToolset extends BaseToolset {
   public skills: Record<string, Skill>;
@@ -45,6 +54,7 @@ export class SkillToolset extends BaseToolset {
   public additionalTools: Array<BaseTool | BaseToolset>;
   public codeExecutor?: BaseCodeExecutor;
   public registry?: SkillRegistry;
+  public readonly maxInlineResourceBytes: number;
   private toolCache = new Map<string, BaseTool[]>();
   private fetchedSkillCache = new Map<string, Map<string, Skill>>();
 
@@ -63,6 +73,15 @@ export class SkillToolset extends BaseToolset {
        * confirmation.
        */
       allowInlineScripts?: boolean;
+      /**
+       * Maximum size, in bytes, of a binary skill resource that
+       * `load_skill_resource` inlines into the conversation as base64. A
+       * resource above this size is declined with an explanatory status
+       * instead: base64 cannot be truncated without corrupting it, so there is
+       * no partial payload worth sending. Set to `0` to never inline binary
+       * resources. Defaults to {@link DEFAULT_MAX_INLINE_RESOURCE_BYTES}.
+       */
+      maxInlineResourceBytes?: number;
     } = {},
   ) {
     super([], 'adk_skill_toolset');
@@ -72,6 +91,8 @@ export class SkillToolset extends BaseToolset {
     this.codeExecutor = options.codeExecutor;
     this.additionalTools = options.additionalTools || [];
     this.registry = options.registry;
+    this.maxInlineResourceBytes =
+      options.maxInlineResourceBytes ?? DEFAULT_MAX_INLINE_RESOURCE_BYTES;
 
     this.tools = [
       new ListSkillsTool(this),

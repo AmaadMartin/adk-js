@@ -96,6 +96,18 @@ describe('skill_toolset', () => {
       expect(tools.length).toBe(5);
     });
 
+    it('defaults maxInlineResourceBytes', () => {
+      const toolset = new SkillToolset([mockSkill]);
+      expect(toolset.maxInlineResourceBytes).toBe(5 * 1024 * 1024);
+    });
+
+    it('honours a configured maxInlineResourceBytes', () => {
+      const toolset = new SkillToolset([mockSkill], {
+        maxInlineResourceBytes: 42,
+      });
+      expect(toolset.maxInlineResourceBytes).toBe(42);
+    });
+
     it('appends instructions to LLM request', async () => {
       const toolset = new SkillToolset([mockSkill]);
       const llmRequest: LlmRequest = {
