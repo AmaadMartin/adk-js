@@ -49,6 +49,15 @@ vi.mock('@google/adk', async (importOriginal) => {
   };
 });
 
+/**
+ * Replaces `process.exit` with a throw, so that a test observes the same
+ * "nothing after this line runs" control flow as the real CLI.
+ */
+const spyOnProcessExit = () =>
+  vi.spyOn(process, 'exit').mockImplementation((code) => {
+    throw new Error(`process.exit(${String(code)})`);
+  });
+
 describe('CLI Entrypoint', () => {
   let program: ReturnType<typeof createProgram>;
 
@@ -222,6 +231,22 @@ describe('CLI Entrypoint', () => {
         language: 'ts',
       });
     });
+
+    it('should exit with status 1 when createAgent fails', async () => {
+      (createAgent as Mock).mockRejectedValue(new Error('boom'));
+      const exitSpy = spyOnProcessExit();
+
+      await expect(parse(['create'])).rejects.toThrow('process.exit(1)');
+      expect(exitSpy).toHaveBeenCalledWith(1);
+    });
+
+    it('should not exit when createAgent succeeds', async () => {
+      const exitSpy = spyOnProcessExit();
+
+      await parse(['create']);
+
+      expect(exitSpy).not.toHaveBeenCalled();
+    });
   });
 
   describe('command: run', () => {
@@ -261,6 +286,24 @@ describe('CLI Entrypoint', () => {
           otelToCloud: true,
         }),
       );
+    });
+
+    it('should exit with status 1 when runAgent fails', async () => {
+      (runAgent as Mock).mockRejectedValue(new Error('boom'));
+      const exitSpy = spyOnProcessExit();
+
+      await expect(parse(['run', 'agent.ts'])).rejects.toThrow(
+        'process.exit(1)',
+      );
+      expect(exitSpy).toHaveBeenCalledWith(1);
+    });
+
+    it('should not exit when runAgent succeeds', async () => {
+      const exitSpy = spyOnProcessExit();
+
+      await parse(['run', 'agent.ts']);
+
+      expect(exitSpy).not.toHaveBeenCalled();
     });
   });
 
