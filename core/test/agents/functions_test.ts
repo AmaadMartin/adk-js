@@ -152,7 +152,7 @@ describe('handleFunctionCallList', () => {
     });
   });
 
-  it('should wrap array responses into a {results: array} object', async () => {
+  it('should wrap array responses into a {result: array} object for adk-python parity', async () => {
     const arrayTool = new FunctionTool({
       name: 'arrayTool',
       description: 'returns array',
@@ -179,7 +179,7 @@ describe('handleFunctionCallList', () => {
     expect(event).not.toBeNull();
     const definedEvent = event as Event;
     expect(definedEvent.content!.parts![0].functionResponse!.response).toEqual({
-      results: ['item1', 'item2'],
+      result: ['item1', 'item2'],
     });
   });
 
