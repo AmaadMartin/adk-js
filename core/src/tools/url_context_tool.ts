@@ -7,7 +7,11 @@ import {GenerateContentConfig} from '@google/genai';
 
 import {isGemini2OrAbove, isGeminiModel} from '../utils/model_name.js';
 
-import {BaseTool, ToolProcessLlmRequest} from './base_tool.js';
+import {
+  BaseTool,
+  RunAsyncToolRequest,
+  ToolProcessLlmRequest,
+} from './base_tool.js';
 
 /**
  * A built-in tool that allows Gemini 2+ models to retrieve content from URLs
@@ -21,7 +25,7 @@ export class UrlContextTool extends BaseTool {
     super({name: 'url_context', description: 'URL Context Tool'});
   }
 
-  runAsync(): Promise<unknown> {
+  override runAsync(_request: RunAsyncToolRequest): Promise<unknown> {
     // This is a built-in tool on server side, it's triggered by setting the
     // corresponding request parameters.
     return Promise.resolve();

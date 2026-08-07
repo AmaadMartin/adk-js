@@ -6,7 +6,11 @@
 
 import {GenerateContentConfig, VertexRagStore} from '@google/genai';
 
-import {BaseTool, ToolProcessLlmRequest} from './base_tool.js';
+import {
+  BaseTool,
+  RunAsyncToolRequest,
+  ToolProcessLlmRequest,
+} from './base_tool.js';
 
 /**
  * A tool that retrieves relevant content from a Vertex AI RAG corpus to ground
@@ -48,7 +52,7 @@ export class VertexRagRetrievalTool extends BaseTool {
    * This tool is executed server-side by the Vertex AI RAG Engine.
    * Local execution is not required.
    */
-  runAsync(): Promise<unknown> {
+  override runAsync(_request: RunAsyncToolRequest): Promise<unknown> {
     return Promise.resolve();
   }
 

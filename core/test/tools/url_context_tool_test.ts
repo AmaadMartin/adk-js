@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {LlmRequest, URL_CONTEXT, UrlContextTool} from '@google/adk';
+import {Context, LlmRequest, URL_CONTEXT, UrlContextTool} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
 function makeRequest(model?: string, tools = []): LlmRequest {
@@ -91,6 +91,13 @@ describe('UrlContextTool', () => {
 
       expect(req.config!.tools).toEqual([{urlContext: {}}]);
     });
+  });
+
+  it('runAsync returns resolved promise', async () => {
+    const tool = new UrlContextTool();
+    await expect(
+      tool.runAsync({args: {}, toolContext: {} as Context}),
+    ).resolves.toBeUndefined();
   });
 
   it('has a global instance URL_CONTEXT', () => {

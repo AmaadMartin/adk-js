@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {VertexRagRetrievalTool} from '@google/adk';
+import {Context, VertexRagRetrievalTool} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
 const RAG_CORPUS =
@@ -115,7 +115,10 @@ describe('VertexRagRetrievalTool', () => {
       const tool = new VertexRagRetrievalTool({
         ragResources: [{ragCorpus: RAG_CORPUS}],
       });
-      const result = await tool.runAsync({} as never);
+      const result = await tool.runAsync({
+        args: {},
+        toolContext: {} as Context,
+      });
       expect(result).toBeUndefined();
     });
   });
