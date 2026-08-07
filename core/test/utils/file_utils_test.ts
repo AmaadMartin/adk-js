@@ -257,9 +257,7 @@ describe('file_utils', () => {
       ];
 
       await expect(materializeFiles(files, tempDir)).rejects.toThrow(
-        new RegExp(
-          `Path traversal detected: ${path.basename(tempDir)}_2 resolves outside of`,
-        ),
+        `Path traversal detected: ${path.join('..', `${path.basename(tempDir)}_2`)} resolves outside of`,
       );
       expect(files[0].name).toBe('');
     });
