@@ -132,6 +132,108 @@ export {TrajectoryThoughtPruningCompactor} from './context/trajectory_thought_pr
 export type {TrajectoryThoughtPruningCompactorOptions} from './context/trajectory_thought_pruning_compactor.js';
 export {TruncatingContextCompactor} from './context/truncating_context_compactor.js';
 export type {TruncatingContextCompactorOptions} from './context/truncating_context_compactor.js';
+// Evaluation: the base data models (evaluator/eval_case/eval_metrics/
+// eval_rubrics/app_details/conversation_scenarios) are minimal stand-ins
+// pending evaluation sub-ports #1/#2/#4 -- their zod schemas are exported
+// alongside the inferred types (matching those sub-ports and satisfying
+// TypeDoc). The LLM-as-judge evaluators are delivered by sub-port #5.
+export {
+  AgentDetailsSchema,
+  AppDetailsSchema,
+  getDeveloperInstructions,
+  getToolsByAgentName,
+} from './evaluation/app_details.js';
+export type {AgentDetails, AppDetails} from './evaluation/app_details.js';
+export {ConversationScenarioSchema} from './evaluation/conversation_scenarios.js';
+export type {ConversationScenario} from './evaluation/conversation_scenarios.js';
+export {
+  IntermediateDataSchema,
+  IntermediateDataTypeSchema,
+  InvocationEventSchema,
+  InvocationEventsSchema,
+  InvocationSchema,
+  getAllToolCalls,
+  getAllToolCallsWithResponses,
+  getAllToolResponses,
+} from './evaluation/eval_case.js';
+export type {
+  IntermediateData,
+  IntermediateDataType,
+  Invocation,
+  InvocationEvent,
+  InvocationEvents,
+  ToolCallAndResponse,
+} from './evaluation/eval_case.js';
+export {
+  BaseCriterionSchema,
+  EvalMetricSchema,
+  EvalStatus,
+  HallucinationsCriterionSchema,
+  JudgeModelOptionsSchema,
+  LlmAsAJudgeCriterionSchema,
+  PrebuiltMetrics,
+  RubricsBasedCriterionSchema,
+} from './evaluation/eval_metrics.js';
+export type {
+  BaseCriterion,
+  EvalMetric,
+  HallucinationsCriterion,
+  JudgeModelOptions,
+  LlmAsAJudgeCriterion,
+  RubricsBasedCriterion,
+} from './evaluation/eval_metrics.js';
+export {
+  RubricContentSchema,
+  RubricSchema,
+  RubricScoreSchema,
+} from './evaluation/eval_rubrics.js';
+export type {
+  Rubric,
+  RubricContent,
+  RubricScore,
+} from './evaluation/eval_rubrics.js';
+export {Evaluator, validateInvocationLengths} from './evaluation/evaluator.js';
+export type {
+  EvaluationResult,
+  PerInvocationResult,
+} from './evaluation/evaluator.js';
+export {
+  FinalResponseMatchV2Evaluator,
+  parseCritique,
+} from './evaluation/final_response_match_v2.js';
+export {
+  HallucinationsV1Evaluator,
+  createContextForStep,
+  parseSentences,
+  parseValidationResults,
+} from './evaluation/hallucinations_v1.js';
+export type {EvaluationStep} from './evaluation/hallucinations_v1.js';
+export {LlmAsJudge} from './evaluation/llm_as_judge.js';
+export type {AutoRaterScore} from './evaluation/llm_as_judge.js';
+export {
+  Label,
+  PARTIALLY_VALID_VALUES,
+  getAverageRubricScore,
+  getEvalStatus,
+  getTextFromContent,
+  getToolCallsAndResponsesAsJsonStr,
+  getToolDeclarationsAsJsonStr,
+} from './evaluation/llm_as_judge_utils.js';
+export {
+  DefaultAutoRaterResponseParser,
+  MajorityVotePerInvocationResultsAggregator,
+  MeanInvocationResultsSummarizer,
+  RubricBasedEvaluator,
+} from './evaluation/rubric_based_evaluator.js';
+export type {
+  AutoRaterResponseParser,
+  InvocationResultsSummarizer,
+  PerInvocationResultsAggregator,
+  RubricResponse,
+} from './evaluation/rubric_based_evaluator.js';
+export {RubricBasedFinalResponseQualityV1Evaluator} from './evaluation/rubric_based_final_response_quality_v1.js';
+export {RubricBasedMultiTurnTrajectoryEvaluator} from './evaluation/rubric_based_multi_turn_trajectory_evaluator.js';
+export {RubricBasedToolUseV1Evaluator} from './evaluation/rubric_based_tool_use_quality_v1.js';
 export {isCompactedEvent, isScratchpadEvent} from './events/compacted_event.js';
 export type {CompactedEvent} from './events/compacted_event.js';
 export {
