@@ -5,7 +5,12 @@
  */
 
 import {Sessions} from '@google-cloud/vertexai/build/src/genai/sessions.js';
-import {createEvent, State, VertexAiSessionService} from '@google/adk';
+import {
+  createEvent,
+  createSession as createSessionObject,
+  State,
+  VertexAiSessionService,
+} from '@google/adk';
 import {Session} from '@google/adk/sessions/session.js';
 import {ApiError} from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
@@ -41,9 +46,24 @@ afterEach(() => {
 
 import {
   isVertexAiConnectionString,
+  normalizeSessionId,
   quoteFilterLiteral,
 } from '@google/adk/sessions/vertex_ai_session_service.js';
 import {logger} from '@google/adk/utils/logger.js';
+
+const FULL_SESSION_RESOURCE_NAME =
+  'projects/123/locations/us-east4/reasoningEngines/12345/sessions/session-123';
+
+/** Session IDs that would escape their URL path segment. */
+const UNSAFE_SESSION_IDS = [
+  '',
+  '..',
+  '../foo',
+  '..?force=true',
+  'a/b',
+  'invalid@id',
+  'invalid/id',
+];
 
 describe('isVertexAiConnectionString', () => {
   it('returns true for vertexai://', () => {
@@ -77,6 +97,39 @@ describe('quoteFilterLiteral', () => {
 
   it('quotes an empty string', () => {
     expect(quoteFilterLiteral('')).toBe('""');
+  });
+});
+
+describe('normalizeSessionId', () => {
+  it('leaves a short session ID unchanged', () => {
+    expect(normalizeSessionId('123', '12345')).toBe('123');
+    expect(normalizeSessionId('session-123_abc', '12345')).toBe(
+      'session-123_abc',
+    );
+  });
+
+  it('strips a full session resource name for the resolved engine', () => {
+    expect(normalizeSessionId(FULL_SESSION_RESOURCE_NAME, '12345')).toBe(
+      'session-123',
+    );
+  });
+
+  it('strips a session resource name that names no reasoning engine', () => {
+    expect(normalizeSessionId('sessions/session-123', '12345')).toBe(
+      'session-123',
+    );
+  });
+
+  it('rejects a resource name for a different reasoning engine', () => {
+    expect(() => normalizeSessionId(FULL_SESSION_RESOURCE_NAME, '999')).toThrow(
+      "Session resource name mismatch: session belongs to reasoningEngine '12345', but service is configured for '999'.",
+    );
+  });
+
+  it.each(UNSAFE_SESSION_IDS)('rejects %j', (sessionId) => {
+    expect(() => normalizeSessionId(sessionId, '12345')).toThrow(
+      `Invalid session ID '${sessionId}': must match ^[A-Za-z0-9_-]+$.`,
+    );
   });
 });
 
@@ -1242,6 +1295,109 @@ describe('VertexAiSessionService', () => {
           }),
         }),
       );
+    });
+  });
+
+  describe('session ID handling', () => {
+    it('getSession normalizes a full session resource name', async () => {
+      const session = await service.getSession({
+        appName: '12345',
+        userId: 'testUser',
+        sessionId: FULL_SESSION_RESOURCE_NAME,
+      });
+
+      expect(session?.id).toBe('session-123');
+      expect(mockClient.get).toHaveBeenCalledWith({
+        name: 'reasoningEngines/12345/sessions/session-123',
+      });
+      expect(mockClient.events.listInternal).toHaveBeenCalledWith({
+        name: 'reasoningEngines/12345/sessions/session-123',
+        config: {},
+      });
+    });
+
+    it('deleteSession normalizes a full session resource name', async () => {
+      await service.deleteSession({
+        appName: '12345',
+        userId: 'testUser',
+        sessionId: FULL_SESSION_RESOURCE_NAME,
+      });
+
+      expect(mockClient.delete).toHaveBeenCalledWith({
+        name: 'reasoningEngines/12345/sessions/session-123',
+      });
+    });
+
+    it('createSession normalizes a full session resource name', async () => {
+      await service.createSession({
+        appName: '12345',
+        userId: 'testUser',
+        sessionId: FULL_SESSION_RESOURCE_NAME,
+      });
+
+      expect(mockClient.createInternal).toHaveBeenCalledWith(
+        expect.objectContaining({config: {sessionId: 'session-123'}}),
+      );
+    });
+
+    it('getSession rejects an unsafe session ID without calling the API', async () => {
+      const loggerSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
+
+      await expect(
+        service.getSession({
+          appName: '12345',
+          userId: 'testUser',
+          sessionId: '../x',
+        }),
+      ).rejects.toThrow("Invalid session ID '../x'");
+
+      expect(mockClient.get).not.toHaveBeenCalled();
+      expect(loggerSpy).not.toHaveBeenCalled();
+      loggerSpy.mockRestore();
+    });
+
+    it('deleteSession rejects an unsafe session ID without calling the API', async () => {
+      await expect(
+        service.deleteSession({
+          appName: '12345',
+          userId: 'testUser',
+          sessionId: '../x',
+        }),
+      ).rejects.toThrow("Invalid session ID '../x'");
+
+      expect(mockClient.get).not.toHaveBeenCalled();
+      expect(mockClient.delete).not.toHaveBeenCalled();
+    });
+
+    it('createSession rejects an unsafe session ID without calling the API', async () => {
+      await expect(
+        service.createSession({
+          appName: '12345',
+          userId: 'testUser',
+          sessionId: '../x',
+        }),
+      ).rejects.toThrow("Invalid session ID '../x'");
+
+      expect(mockClient.createInternal).not.toHaveBeenCalled();
+    });
+
+    it('appendEvent rejects an unsafe session ID without calling the API', async () => {
+      const session = createSessionObject({
+        id: '../x',
+        appName: '12345',
+        userId: 'testUser',
+      });
+      const event = createEvent({
+        timestamp: Date.now(),
+        content: {role: 'model', parts: [{text: 'hello'}]},
+      });
+
+      await expect(service.appendEvent({session, event})).rejects.toThrow(
+        "Invalid session ID '../x'",
+      );
+
+      expect(mockClient.events.append).not.toHaveBeenCalled();
+      expect(session.events).toHaveLength(0);
     });
   });
 });

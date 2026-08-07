@@ -63,6 +63,43 @@ export function quoteFilterLiteral(value: string): string {
   return `"${escaped}"`;
 }
 
+const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
+
+/**
+ * Reduces a session identifier to a short ID that is safe to interpolate into
+ * a Vertex resource name.
+ *
+ * Agent Engine returns `.../reasoningEngines/{engine}/sessions/{session}` and
+ * callers hand those straight back, so that suffix is stripped. Anything else
+ * is checked as-is: a session ID containing `/`, `..` or a query separator
+ * would address a different resource, side-stepping the ownership checks that
+ * resource carries.
+ */
+export function normalizeSessionId(
+  sessionId: string,
+  engineId: string,
+): string {
+  const parts = sessionId.split('/');
+  const isResourceName = parts.at(-2) === 'sessions';
+  if (
+    isResourceName &&
+    parts.at(-4) === 'reasoningEngines' &&
+    parts.at(-3) !== engineId
+  ) {
+    throw new Error(
+      `Session resource name mismatch: session belongs to reasoningEngine '${parts.at(-3)}', but service is configured for '${engineId}'.`,
+    );
+  }
+
+  const shortSessionId = isResourceName ? parts[parts.length - 1] : sessionId;
+  if (!SESSION_ID_PATTERN.test(shortSessionId)) {
+    throw new Error(
+      `Invalid session ID '${shortSessionId}': must match ${SESSION_ID_PATTERN.source}.`,
+    );
+  }
+  return shortSessionId;
+}
+
 export interface VertexAiSessionServiceOptions {
   projectId?: string;
   location?: string;
@@ -166,12 +203,15 @@ export class VertexAiSessionService extends BaseSessionService {
 
     const reasoningEngineId = this.getReasoningEngineId(appName);
     const filteredState = state ? trimTempState(state) : undefined;
+    const shortSessionId = sessionId
+      ? normalizeSessionId(sessionId, reasoningEngineId)
+      : undefined;
     let apiResponse = await this.sessions.createInternal({
       name: `reasoningEngines/${reasoningEngineId}`,
       userId: userId,
       config: {
         ...(filteredState ? {sessionState: filteredState} : {}),
-        ...(sessionId ? {sessionId} : {}),
+        ...(shortSessionId ? {sessionId: shortSessionId} : {}),
         ...(ttl != null ? {ttl} : {}),
         ...(expireTime != null ? {expireTime} : {}),
       },
@@ -219,7 +259,11 @@ export class VertexAiSessionService extends BaseSessionService {
     config,
   }: GetSessionRequest): Promise<Session | undefined> {
     const reasoningEngineId = this.getReasoningEngineId(appName);
-    const sessionResourceName = `reasoningEngines/${reasoningEngineId}/sessions/${sessionId}`;
+    // Normalize outside the try block: a malformed session ID is a caller error
+    // and must surface as a throw, never as the `undefined` the NOT_FOUND
+    // handler below returns for a session that does not exist.
+    const shortSessionId = normalizeSessionId(sessionId, reasoningEngineId);
+    const sessionResourceName = `reasoningEngines/${reasoningEngineId}/sessions/${shortSessionId}`;
 
     try {
       let getSessionResponse: VertexAiSession | undefined;
@@ -254,12 +298,12 @@ export class VertexAiSessionService extends BaseSessionService {
 
       if (sessionObj.userId !== userId) {
         throw new Error(
-          `Session ${sessionId} does not belong to user ${userId}.`,
+          `Session ${shortSessionId} does not belong to user ${userId}.`,
         );
       }
 
       const session = createSession({
-        id: sessionId,
+        id: shortSessionId,
         appName,
         userId,
         state: sessionObj.sessionState,
@@ -395,7 +439,8 @@ export class VertexAiSessionService extends BaseSessionService {
     // already enforces this and throws when the stored session's userId does
     // not match, so load the session first and stop if it is missing or not
     // owned by this user. This keeps deleteSession consistent with getSession
-    // and with InMemorySessionService.deleteSession.
+    // and with InMemorySessionService.deleteSession. getSession also
+    // normalizes, so session.id is the short ID to delete.
     const session = await this.getSession({
       appName,
       userId,
@@ -407,7 +452,7 @@ export class VertexAiSessionService extends BaseSessionService {
     }
 
     await this.sessions.delete({
-      name: `reasoningEngines/${reasoningEngineId}/sessions/${sessionId}`,
+      name: `reasoningEngines/${reasoningEngineId}/sessions/${session.id}`,
     });
   }
 
@@ -415,10 +460,13 @@ export class VertexAiSessionService extends BaseSessionService {
     session,
     event,
   }: AppendEventRequest): Promise<Event> {
+    // Resolve the target resource before mutating the caller's session, so a
+    // rejected session ID leaves it untouched.
+    const reasoningEngineId = this.getReasoningEngineId(session.appName);
+    const shortSessionId = normalizeSessionId(session.id, reasoningEngineId);
+
     await super.appendEvent({session, event});
     session.lastUpdateTime = event.timestamp;
-
-    const reasoningEngineId = this.getReasoningEngineId(session.appName);
 
     const customMetadata: Record<string, unknown> = {...event.customMetadata};
     if (isCompactedEvent(event)) {
@@ -458,7 +506,7 @@ export class VertexAiSessionService extends BaseSessionService {
     >;
 
     const params: AppendAgentEngineSessionEventRequestParameters = {
-      name: `reasoningEngines/${reasoningEngineId}/sessions/${session.id}`,
+      name: `reasoningEngines/${reasoningEngineId}/sessions/${shortSessionId}`,
       author: event.author || 'user',
       invocationId: event.invocationId || `inv-${Date.now()}`,
       timestamp: new Date(event.timestamp).toISOString(),
@@ -474,7 +522,7 @@ export class VertexAiSessionService extends BaseSessionService {
       );
       delete config.rawEvent;
       await this.sessions.events.append({
-        name: `reasoningEngines/${reasoningEngineId}/sessions/${session.id}`,
+        name: `reasoningEngines/${reasoningEngineId}/sessions/${shortSessionId}`,
         author: event.author || 'user',
         invocationId: event.invocationId || `inv-${Date.now()}`,
         timestamp: new Date(event.timestamp).toISOString(),

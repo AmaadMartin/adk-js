@@ -91,6 +91,7 @@ describe('AgentTool (Vertex AI)', () => {
 
     const sessionStateStore: Record<string, Record<string, unknown>> = {};
     const eventsStore: unknown[] = [];
+    let lastGetName = '';
 
     const mockClient = {
       createInternal: async (req: {
@@ -114,6 +115,7 @@ describe('AgentTool (Vertex AI)', () => {
         };
       },
       get: async (req: {name: string}) => {
+        lastGetName = req.name;
         const id = req.name.split('/').pop() ?? '';
         return {
           userId: 'TestUser',
@@ -202,5 +204,19 @@ describe('AgentTool (Vertex AI)', () => {
     expect(session).toBeDefined();
     expect(session!.state['initialStateKey']).toBe('contexto inicial');
     expect(session!.state['subAgentOutput']).toBe('Today is Tuesday');
+
+    // Agent Engine hands back full session resource names, so feeding one
+    // straight back in must address the same short-name path.
+    const reloaded = await sessionService.getSession({
+      appName:
+        'projects/1055446556895/locations/us-west1/reasoningEngines/9208858483368132608',
+      userId: 'TestUser',
+      sessionId: `projects/1055446556895/locations/us-west1/reasoningEngines/9208858483368132608/sessions/${createdSession.id}`,
+    });
+
+    expect(reloaded?.id).toBe(createdSession.id);
+    expect(lastGetName).toBe(
+      `reasoningEngines/9208858483368132608/sessions/${createdSession.id}`,
+    );
   });
 });
