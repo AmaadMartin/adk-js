@@ -34,6 +34,9 @@ jobs:
       - name: Check for secrets leaks
         run: npx secretlint "**/*"
 
+      - name: Run TypeScript type check
+        run: npm run ts:check
+
       - name: Build packages
         run: npm run build
 

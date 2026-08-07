@@ -6,6 +6,7 @@
 
 import {BasePlugin, FunctionTool, SingleAgentCallback} from '@google/adk';
 import {beforeEach, describe, expect, it} from 'vitest';
+import {z} from 'zod';
 import {IntegrationRegistry} from '../../src/integration/integration_registry.js';
 
 describe('IntegrationRegistry', () => {
@@ -19,7 +20,8 @@ describe('IntegrationRegistry', () => {
     const tool = new FunctionTool({
       name: 'test_tool',
       description: 'A test tool',
-      execute: async () => ({result: 'success'}),
+      parameters: z.object({name: z.string()}),
+      execute: async ({name}) => ({result: `success ${name}`}),
     });
 
     registry.registerTool('test_tool', tool);
