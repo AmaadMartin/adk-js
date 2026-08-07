@@ -185,8 +185,7 @@ export function validateSession(actual: Session, expected: Session) {
  * Returns a copy of `state` without the ADK bookkeeping keys.
  *
  * `state` is optional because the recorded session is a cast over parsed YAML,
- * and the recorder omits a field left at its default. Copying also replaces a
- * null prototype, which `assert.deepStrictEqual` reports as a mismatch.
+ * and the recorder omits a field left at its default.
  */
 function normalizeSessionState(
   state?: Record<string, unknown>,
@@ -240,9 +239,7 @@ function filterEventActionsStateDelta(actions?: FilteredEventActions) {
     return;
   }
 
-  for (const key of ADK_INTERNAL_STATE_KEYS) {
-    delete actions.stateDelta[key];
-  }
+  actions.stateDelta = normalizeSessionState(actions.stateDelta);
 }
 
 function filterPartFields(part: FilteredPart) {

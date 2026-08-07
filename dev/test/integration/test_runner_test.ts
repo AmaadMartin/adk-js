@@ -116,8 +116,8 @@ describe('validateSession', () => {
   });
 
   it('treats a null-prototype actual state as equal to a plain object', () => {
-    // deepStrictEqual compares prototypes, and the session services build
-    // state maps with Object.create(null).
+    // deepStrictEqual compares prototypes. No session service builds a
+    // null-prototype state map today, so copying the state is defensive.
     const actual = session(
       Object.assign(Object.create(null), {locale: 'en-US'}),
     );
