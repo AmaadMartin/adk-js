@@ -8,6 +8,7 @@ import {
   BaseAgent,
   BaseAgentConfig,
   Event,
+  InMemoryCredentialService,
   InvocationContext,
   LoopAgent,
   PluginManager,
@@ -56,6 +57,54 @@ class LlmCallingAgent extends BaseAgent {
     // Not needed for this test.
   }
 }
+
+describe('InvocationContext credential service', () => {
+  it('exposes the credential service it was constructed with', () => {
+    const credentialService = new InMemoryCredentialService();
+
+    const context = new InvocationContext({
+      invocationId: 'inv-1',
+      agent: new LoopAgent({name: 'root'}),
+      session: makeSession(),
+      pluginManager: new PluginManager(),
+      credentialService,
+    });
+
+    expect(context.credentialService).toBe(credentialService);
+  });
+
+  it('leaves the credential service undefined when none is given', () => {
+    const context = new InvocationContext({
+      invocationId: 'inv-1',
+      agent: new LoopAgent({name: 'root'}),
+      session: makeSession(),
+      pluginManager: new PluginManager(),
+    });
+
+    expect(context.credentialService).toBeUndefined();
+  });
+
+  it('carries the credential service into a child context', () => {
+    const credentialService = new InMemoryCredentialService();
+    const root = new InvocationContext({
+      invocationId: 'inv-1',
+      agent: new LoopAgent({name: 'root'}),
+      session: makeSession(),
+      pluginManager: new PluginManager(),
+      credentialService,
+    });
+
+    // Mirrors BaseAgent.createInvocationContext, which spreads the parent
+    // context. A field the constructor never assigns is not an own property,
+    // so it does not survive the spread.
+    const child = new InvocationContext({
+      ...root,
+      agent: new LoopAgent({name: 'child'}),
+    });
+
+    expect(child.credentialService).toBe(credentialService);
+  });
+});
 
 describe('InvocationContext LLM-call cost tracking', () => {
   it('shares the LLM-call counter across child contexts so maxLlmCalls spans the whole invocation', () => {

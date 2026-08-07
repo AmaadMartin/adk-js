@@ -7,12 +7,14 @@
 import {
   App,
   BaseAgent,
+  BaseCredentialService,
   BasePlugin,
   createEvent,
   createResumabilityConfig,
   determineAgentForResumption,
   Event,
   InMemoryArtifactService,
+  InMemoryCredentialService,
   InMemorySessionService,
   InvocationContext,
   isRoutableLlmAgent,
@@ -1250,5 +1252,55 @@ describe('Runner artifact saving (`saveInputBlobsAsArtifacts`)', () => {
     expect(userEvents[1].content!.parts).toEqual([
       {text: '[Uploaded Artifact: "file2.pdf"]'},
     ]);
+  });
+});
+
+describe('Runner credential service', () => {
+  it('passes the credential service it was configured with into the invocation context', async () => {
+    let observedCredentialService: BaseCredentialService | undefined;
+
+    class ContextCapturingAgent extends BaseAgent {
+      protected override async *runAsyncImpl(
+        context: InvocationContext,
+      ): AsyncGenerator<Event, void, void> {
+        observedCredentialService = context.credentialService;
+        yield createEvent({
+          invocationId: context.invocationId,
+          author: this.name,
+          content: {role: 'model', parts: [{text: 'ok'}]},
+        });
+      }
+
+      protected override async *runLiveImpl(
+        _context: InvocationContext,
+      ): AsyncGenerator<Event, void, void> {}
+    }
+
+    const credentialService = new InMemoryCredentialService();
+    const sessionService = new InMemorySessionService();
+    await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent: new ContextCapturingAgent({name: 'capturing_agent'}),
+      sessionService,
+      credentialService,
+    });
+
+    for await (const _ of runner.runAsync({
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      newMessage: {role: 'user', parts: [{text: TEST_MESSAGE}]},
+    })) {
+      // Drain the stream so the agent runs to completion.
+    }
+
+    // The agent observes its own context, which BaseAgent.runAsync builds by
+    // spreading the runner's context, so this pins the whole chain.
+    expect(observedCredentialService).toBe(credentialService);
   });
 });
