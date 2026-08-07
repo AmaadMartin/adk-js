@@ -354,8 +354,8 @@ function buildLlmRequestForTrace(
  */
 function bindOtelContextToAsyncGenerator<T>(
   ctx: Context,
-  generator: AsyncGenerator<T, void, void>,
-): AsyncGenerator<T, void, void> {
+  generator: AsyncGenerator<T, void, void> & Partial<AsyncDisposable>,
+): AsyncGenerator<T, void, void> & AsyncDisposable {
   return {
     // Bind the next() method to execute within the provided context
     next: context.bind(ctx, generator.next.bind(generator)),
@@ -365,6 +365,19 @@ function bindOtelContextToAsyncGenerator<T>(
 
     // Bind the throw() method to execute within the provided context
     throw: context.bind(ctx, generator.throw.bind(generator)),
+
+    // Only runtimes that implement explicit resource management put
+    // [Symbol.asyncDispose] on AsyncGenerator.prototype; elsewhere return() is
+    // the equivalent, since disposal just resumes the generator so its finally
+    // blocks run.
+    [Symbol.asyncDispose]: context.bind(ctx, async (): Promise<void> => {
+      const disposeGenerator = generator[Symbol.asyncDispose];
+      if (disposeGenerator) {
+        await disposeGenerator.call(generator);
+        return;
+      }
+      await generator.return(undefined);
+    }),
 
     // Ensure the async iterator symbol also returns a context-bound generator
     [Symbol.asyncIterator]() {
@@ -383,13 +396,14 @@ function bindOtelContextToAsyncGenerator<T>(
  * @param generatorFnContext - The 'this' context to bind to the generator function
  * @param generatorFn - The generator function to execute
  *
- * @returns A new async generator that executes within both contexts
+ * @returns A new async generator that executes within both contexts, and that
+ *     disposes the wrapped generator within the bound context
  */
 export function runAsyncGeneratorWithOtelContext<TThis, T>(
   otelContext: Context,
   generatorFnContext: TThis,
   generatorFn: (this: TThis) => AsyncGenerator<T, void, void>,
-): AsyncGenerator<T, void, void> {
+): AsyncGenerator<T, void, void> & AsyncDisposable {
   const generator = generatorFn.call(generatorFnContext);
   return bindOtelContextToAsyncGenerator(otelContext, generator);
 }
