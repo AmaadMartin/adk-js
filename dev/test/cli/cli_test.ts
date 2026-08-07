@@ -5,6 +5,10 @@
  */
 
 import {LogLevel, setLogLevel} from '@google/adk';
+import dotenv from 'dotenv';
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {createProgram} from '../../src/cli/cli.js';
 import {createAgent} from '../../src/cli/cli_create.js';
@@ -48,6 +52,9 @@ vi.mock('@google/adk', async (importOriginal) => {
     setLogLevel: vi.fn(),
   };
 });
+
+/** Env var no production code reads, so the assertion pins the mechanism. */
+const DOTENV_SENTINEL = 'ADK_DOTENV_IMPORT_SENTINEL';
 
 describe('CLI Entrypoint', () => {
   let program: ReturnType<typeof createProgram>;
@@ -429,6 +436,41 @@ describe('CLI Entrypoint', () => {
       expect((deployToAgentEngine as Mock).mock.calls[0][0]).toMatchObject({
         agentEngineId: '12345',
       });
+    });
+  });
+
+  describe('module import side effects', () => {
+    let envDir: string;
+
+    beforeEach(async () => {
+      envDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-cli-dotenv-'));
+      await fs.writeFile(
+        path.join(envDir, '.env'),
+        `${DOTENV_SENTINEL}=leaked\n`,
+      );
+      // dotenv resolves `${process.cwd()}/.env` at call time, so the spy
+      // redirects the lookup the way a real chdir would.
+      vi.spyOn(process, 'cwd').mockReturnValue(envDir);
+    });
+
+    afterEach(async () => {
+      delete process.env[DOTENV_SENTINEL];
+      await fs.rm(envDir, {recursive: true, force: true});
+    });
+
+    it('should not read a .env file from the working directory on import', async () => {
+      // Without the reset, cli.js is already in the module registry from this
+      // file's static import and would not re-evaluate.
+      vi.resetModules();
+      await import('../../src/cli/cli.js');
+
+      expect(process.env[DOTENV_SENTINEL]).toBeUndefined();
+    });
+
+    it('should still load that .env once dotenv.config runs, as the entrypoint does', () => {
+      dotenv.config({quiet: true});
+
+      expect(process.env[DOTENV_SENTINEL]).toBe('leaked');
     });
   });
 });
