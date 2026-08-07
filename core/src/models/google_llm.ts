@@ -150,9 +150,6 @@ export class Gemini extends BaseLlm {
   private _liveApiClient?: GoogleGenAI;
 
   override get capabilities(): LlmCapabilities {
-    // Declared here rather than inherited: `BaseLlm` reports the defaults for a
-    // model that has not been taught to self-report, which is not the same
-    // statement as Gemini's own.
     return {outputSchemaAndTools: canUseOutputSchemaWithTools(this.model)};
   }
 

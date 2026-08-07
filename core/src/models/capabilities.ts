@@ -7,13 +7,6 @@
 /**
  * Resolved capabilities for an LLM instance.
  *
- * Each field holds the computed result for one capability, not an override, so
- * there is no "defer to auto-detection" placeholder.
- *
- * Models self-report by overriding `BaseLlm.capabilities`. Callers read the
- * field instead of re-deriving support from the model name, backend variant, or
- * type.
- *
  * The fields are `readonly` because `BaseLlm.capabilities` recomputes a fresh
  * snapshot on every access: mutating one in place would have no effect on the
  * model. Override a capability by subclassing the model instead.

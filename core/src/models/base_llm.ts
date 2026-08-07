@@ -58,23 +58,8 @@ export abstract class BaseLlm {
   static readonly supportedModels: Array<string | RegExp> = [];
 
   /**
-   * The capabilities of this model instance.
-   *
-   * Subclasses override this to declare what they support, so that callers can
-   * ask the model instead of deriving support from its name, backend variant,
-   * or type. A model that does not override it supports nothing beyond the
-   * defaults.
-   *
-   * Build an override on what the parent reports, so that capabilities the
-   * override does not name keep the parent's value:
-   *
-   * ```ts
-   * class MyGemini extends Gemini {
-   *   override get capabilities(): LlmCapabilities {
-   *     return {...super.capabilities, outputSchemaAndTools: true};
-   *   }
-   * }
-   * ```
+   * The capabilities of this model instance. A model that does not override
+   * this supports nothing beyond the defaults.
    *
    * Keep an override a plain getter rather than caching the result: a
    * capability may depend on state that changes after construction, such as an
