@@ -50,6 +50,15 @@ To maintain high code quality and consistency:
    npm run format
    ```
 
+1. **Type checking**: Use `tsc` to type-check the whole repository, including
+   the test trees the per-workspace build does not cover.
+
+   ```bash
+   npm run ts:check
+   ```
+
+   This currently reports pre-existing errors and is not yet enforced in CI.
+
 The project uses `husky` and `lint-staged` to automatically lint and format
 your changes before each commit.
 
