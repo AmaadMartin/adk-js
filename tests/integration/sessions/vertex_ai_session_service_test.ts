@@ -21,6 +21,22 @@ import {afterAll, beforeAll, beforeEach, describe, expect, it} from 'vitest';
 const AGENT_ENGINE_ID = '12345';
 
 /**
+ * The dependency tree resolves two copies of `@google/genai`: the hoisted
+ * 2.9.0 this test builds its client from, and the 1.52.0 nested under
+ * `@google-cloud/vertexai` 1.12.0 (whose range is `^1.45.0`), which is the
+ * version `Sessions` is typed against. The two `ApiClient` classes are
+ * identical at runtime but nominally distinct, so the client has to be
+ * re-typed at this one boundary. Deduplicating `@google/genai` removes the
+ * need for it and deletes this helper:
+ * https://github.com/AmaadMartin/adk-js/issues/424
+ */
+function sessionsFor(apiClient: ApiClient): Sessions {
+  return new Sessions(
+    apiClient as unknown as ConstructorParameters<typeof Sessions>[0],
+  );
+}
+
+/**
  * Exercises `getSession`'s NOT_FOUND handling against an error the SDK builds
  * itself: a loopback HTTP server answers 404 in place of the Agent Engine
  * Sessions API, and the response travels back through the real
@@ -56,7 +72,7 @@ describe('VertexAiSessionService over the real Sessions HTTP client', () => {
     });
     service = new VertexAiSessionService({
       agentEngineId: AGENT_ENGINE_ID,
-      sessions: new Sessions(apiClient),
+      sessions: sessionsFor(apiClient),
     });
   });
 
@@ -121,7 +137,7 @@ describe('VertexAiSessionService session expiration over the wire', () => {
     });
     service = new VertexAiSessionService({
       agentEngineId: AGENT_ENGINE_ID,
-      sessions: new Sessions(apiClient),
+      sessions: sessionsFor(apiClient),
     });
   });
 

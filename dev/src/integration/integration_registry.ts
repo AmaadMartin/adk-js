@@ -4,10 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {BasePlugin, FunctionTool, SingleAgentCallback} from '@google/adk';
+import {BasePlugin, BaseTool, SingleAgentCallback} from '@google/adk';
 
 export class IntegrationRegistry {
-  private tools = new Map<string, FunctionTool>();
+  private tools = new Map<string, BaseTool>();
   private beforeAgentCallbacks = new Map<string, SingleAgentCallback>();
   private afterAgentCallbacks = new Map<string, SingleAgentCallback>();
   private plugins = new Map<string, BasePlugin>();
@@ -21,11 +21,11 @@ export class IntegrationRegistry {
     );
   }
 
-  registerTool(name: string, tool: FunctionTool) {
+  registerTool(name: string, tool: BaseTool) {
     this.tools.set(name, tool);
   }
 
-  getTool(name: string): FunctionTool | undefined {
+  getTool(name: string): BaseTool | undefined {
     return this.tools.get(name);
   }
 
