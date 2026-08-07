@@ -241,6 +241,33 @@ describe('OAuth2CredentialExchanger', () => {
 
       expect(determineGrantType(authScheme)).toBeUndefined();
     });
+
+    it('returns undefined for an untyped object that carries flows', () => {
+      const authScheme = {
+        flows: {
+          clientCredentials: {
+            tokenUrl: 'https://example.com/token',
+            scopes: {},
+          },
+        },
+      } as AuthScheme;
+
+      expect(determineGrantType(authScheme)).toBeUndefined();
+    });
+
+    it('returns undefined for an untyped object that carries grantTypesSupported', () => {
+      const authScheme = {
+        grantTypesSupported: ['client_credentials'],
+      } as AuthScheme;
+
+      expect(determineGrantType(authScheme)).toBeUndefined();
+    });
+
+    it('returns undefined for an empty object', () => {
+      const authScheme = {} as AuthScheme;
+
+      expect(determineGrantType(authScheme)).toBeUndefined();
+    });
   });
 
   describe('exchangeClientCredentials', () => {
