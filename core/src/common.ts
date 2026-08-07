@@ -174,6 +174,26 @@ export {
   isBaseExampleProvider,
 } from './examples/base_example_provider.js';
 export type {Example} from './examples/example.js';
+export {
+  AGENT_REGISTRY_BASE_URL,
+  GCP_MCP_SERVER_DESTINATION_ID,
+  ProtocolType,
+} from './integrations/agent_registry/types.js';
+export type {
+  AgentInfo,
+  AgentSkillMetadata,
+  Binding,
+  ConnectionUriFilter,
+  ConnectionUriResult,
+  Endpoint,
+  GcpAuthProviderScheme,
+  Interface,
+  ListAgentsResponse,
+  ListBindingsResponse,
+  ListEndpointsResponse,
+  ListMcpServersResponse,
+  McpServer,
+} from './integrations/agent_registry/types.js';
 export type {
   BaseMemoryService,
   SearchMemoryRequest,
