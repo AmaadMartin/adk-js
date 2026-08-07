@@ -50,6 +50,16 @@ To maintain high code quality and consistency:
    npm run format
    ```
 
+1. **Type checking**: Check the whole tree, tests included.
+
+   ```bash
+   npm run ts:check
+   ```
+
+   The root `tsconfig.json` maps the workspace packages to their sources, so
+   this needs no prior `npm run build`, and a test file is checked against the
+   same sources it runs against under Vitest.
+
 The project uses `husky` and `lint-staged` to automatically lint and format
 your changes before each commit.
 
