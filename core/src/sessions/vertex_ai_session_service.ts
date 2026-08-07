@@ -10,6 +10,7 @@ import {
   AppendAgentEngineSessionEventConfig,
   AppendAgentEngineSessionEventRequestParameters,
   EventMetadata,
+  EventActions as VertexAiEventActions,
   Session as VertexAiSession,
   SessionEvent as VertexAiSessionEvent,
 } from '@google-cloud/vertexai/build/src/genai/types.js';
@@ -17,10 +18,8 @@ import {Content, GenerateContentResponseUsageMetadata} from '@google/genai';
 import {isCompactedEvent} from '../events/compacted_event.js';
 import {experimental} from '../utils/experimental.js';
 
-import {AuthConfig} from '../auth/auth_tool.js';
 import {Event} from '../events/event.js';
-import {EventActions} from '../events/event_actions.js';
-import {ToolConfirmation} from '../tools/tool_confirmation.js';
+import {createEventActions, EventActions} from '../events/event_actions.js';
 import {logger} from '../utils/logger.js';
 import {
   EXPRESS_MODE_UNSUPPORTED_MESSAGE,
@@ -434,10 +433,10 @@ export class VertexAiSessionService extends BaseSessionService {
 
     const config = partialCopy<AppendAgentEngineSessionEventConfig>(event, [
       'content',
-      'actions',
       'errorCode',
       'errorMessage',
     ]);
+    config.actions = event.actions ? toApiActions(event.actions) : undefined;
 
     config.eventMetadata = {
       ...partialCopy<EventMetadata>(event, [
@@ -502,6 +501,46 @@ interface ExtendedEvent extends Event {
   compactedContent?: string;
 }
 
+/**
+ * Copies `actions`, renaming `from` to `to` and dropping entries with no value.
+ * Every other key is passed through untouched, so a field added to
+ * `EventActions` persists without a change here. ADK's `transferToAgent` is the
+ * Agent Engine Sessions API's `transferAgent`; no other field diverges.
+ */
+function renameActionKey(
+  actions: object | undefined,
+  from: string,
+  to: string,
+): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(actions ?? {})) {
+    if (value == null) continue;
+    result[key === from ? to : key] = value;
+  }
+  return result;
+}
+
+function toApiActions(actions: EventActions): VertexAiEventActions {
+  // The SDK type omits requestedToolConfirmations, which this channel carries.
+  return renameActionKey(
+    actions,
+    'transferToAgent',
+    'transferAgent',
+  ) as VertexAiEventActions;
+}
+
+function fromApiActions(
+  apiActions?: VertexAiEventActions,
+): ExtendedEventActions {
+  return createEventActions(
+    renameActionKey(
+      apiActions,
+      'transferAgent',
+      'transferToAgent',
+    ) as Partial<EventActions>,
+  );
+}
+
 function _fromApiEvent(apiEventObj: VertexAiSessionEvent): Event {
   const rawEvent = apiEventObj.rawEvent;
   if (rawEvent) {
@@ -515,7 +554,6 @@ function _fromApiEvent(apiEventObj: VertexAiSessionEvent): Event {
     return event;
   }
 
-  const actions = apiEventObj.actions || {};
   const eventMetadata = apiEventObj.eventMetadata || {};
 
   let customMetadata = eventMetadata.customMetadata as
@@ -546,20 +584,10 @@ function _fromApiEvent(apiEventObj: VertexAiSessionEvent): Event {
     }
   }
 
-  const eventActions: ExtendedEventActions = {
-    stateDelta: (actions['stateDelta'] as {[key: string]: unknown}) || {},
-    artifactDelta: (actions['artifactDelta'] as {[key: string]: number}) || {},
-    requestedAuthConfigs:
-      (actions.requestedAuthConfigs as Record<string, AuthConfig>) || {},
-    requestedToolConfirmations:
-      ((actions as Record<string, unknown>)[
-        'requestedToolConfirmations'
-      ] as Record<string, ToolConfirmation>) || {},
-    skipSummarization: actions['skipSummarization'] as boolean | undefined,
-    transferToAgent: actions['transferAgent'] as string | undefined,
-    escalate: actions['escalate'] as boolean | undefined,
-    compaction: compactionData || undefined,
-  };
+  const eventActions = fromApiActions(apiEventObj.actions);
+  if (compactionData) {
+    eventActions.compaction = compactionData;
+  }
 
   const event: ExtendedEvent = {
     id: apiEventObj.name?.split('/').pop() || '',
