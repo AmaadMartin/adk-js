@@ -710,9 +710,10 @@ describe('VertexAiSessionService', () => {
       });
     });
 
-    it('lists sessions without filter if userId is missing', async () => {
+    it('lists sessions without filter if userId is empty', async () => {
       await service.listSessions({
         appName: '12345',
+        userId: '',
       });
 
       expect(mockClient.listInternal).toHaveBeenCalledWith(
@@ -729,6 +730,7 @@ describe('VertexAiSessionService', () => {
 
       const result = await service.listSessions({
         appName: '12345',
+        userId: 'u1',
       });
 
       expect(result.sessions[0].state).toEqual({});
@@ -740,6 +742,7 @@ describe('VertexAiSessionService', () => {
 
       const result = await service.listSessions({
         appName: '12345',
+        userId: 'u1',
       });
 
       expect(result.sessions).toEqual([]);
@@ -759,6 +762,7 @@ describe('VertexAiSessionService', () => {
 
       const result = await service.listSessions({
         appName: '12345',
+        userId: 'u1',
       });
 
       expect(result.sessions[0].state).toEqual({foo: 'bar'});
