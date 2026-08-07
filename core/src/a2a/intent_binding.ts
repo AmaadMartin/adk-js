@@ -201,17 +201,16 @@ export function detectContextMutation(
   task: Task,
   userMessage: Message,
 ): ContextMutation {
+  const history = task.history || [];
   const pauseMessageId = task.status.message?.messageId;
   const pauseIndex = pauseMessageId
-    ? (task.history || []).findIndex(
-        (message) => message.messageId === pauseMessageId,
-      )
+    ? history.findIndex((message) => message.messageId === pauseMessageId)
     : -1;
   if (pauseIndex < 0) {
     return {mutatedWhilePaused: false, messageIdsSincePause: []};
   }
 
-  const messageIdsSincePause = (task.history || [])
+  const messageIdsSincePause = history
     .slice(pauseIndex + 1)
     .map((message) => message.messageId)
     .filter((messageId) => messageId !== userMessage.messageId);
