@@ -1,5 +1,4 @@
 {
-  "extends": "./node_modules/gts/tsconfig-google.json",
   "compilerOptions": {
     "target": "ES2020",
     "module": "nodenext",
@@ -7,6 +6,17 @@
     "moduleResolution": "nodenext",
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "experimentalDecorators": true
-  }
+    "experimentalDecorators": true,
+    "declaration": true,
+    "sourceMap": true,
+    "strict": true,
+    "noEmitOnError": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "allowUnreachableCode": false,
+    "allowUnusedLabels": false,
+    "forceConsistentCasingInFileNames": true,
+    "pretty": true
+  },
+  "exclude": ["node_modules"]
 }
