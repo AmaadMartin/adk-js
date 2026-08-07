@@ -139,7 +139,6 @@ describe('normalizeToolResult', () => {
   it('passes an object through without inspecting its keys, matching adk-python', () => {
     const toolResult = {1: 'a', 2: 'b'};
     expect(normalizeToolResult(toolResult)).toBe(toolResult);
-    expect(normalizeToolResult(toolResult)).toEqual({'1': 'a', '2': 'b'});
   });
 });
 

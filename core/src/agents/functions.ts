@@ -199,7 +199,7 @@ async function callToolAsync(
 /**
  * Normalizes a raw tool result into the `FunctionResponse.response` dict.
  *
- * Mirrors adk-python `_build_function_response_content`
+ * Mirrors adk-python `_normalize_tool_result`
  * (src/google/adk/flows/llm_flows/functions.py): an object passes through with
  * its keys unchecked, and everything else -- including an array -- becomes
  * `{result: value}`. The Gemini API requires this payload to be a JSON object,
