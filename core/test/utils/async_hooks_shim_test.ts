@@ -85,7 +85,7 @@ describe('async_hooks_shim', () => {
     });
   });
 
-  describe('AsyncLocalStorage without a callback', () => {
+  describe('AsyncLocalStorage instance isolation', () => {
     it('reads undefined on a fresh instance and keeps instances separate', () => {
       const first = new AsyncLocalStorage<string>();
       const second = new AsyncLocalStorage<string>();
@@ -121,7 +121,7 @@ describe('async_hooks_shim', () => {
       expect(als.getStore()).toBeUndefined();
     });
 
-    it('rejects both of two interleaving runs instead of losing their stores', async () => {
+    it('throws for both of two interleaving async runs instead of losing their stores', async () => {
       const als = new AsyncLocalStorage<string>();
       const afterAwait: Array<string | undefined> = [];
       const callback = async () => {
