@@ -45,7 +45,7 @@ This is very important:
  * request that carries inline data, so a multi-megabyte asset can push a turn
  * past that cap on its own.
  */
-export const DEFAULT_MAX_INLINE_RESOURCE_BYTES = 5 * 1024 * 1024; // 5 MiB
+const DEFAULT_MAX_INLINE_RESOURCE_BYTES = 5 * 1024 * 1024; // 5 MiB
 
 @experimental
 export class SkillToolset extends BaseToolset {
@@ -79,7 +79,7 @@ export class SkillToolset extends BaseToolset {
        * resource above this size is declined with an explanatory status
        * instead: base64 cannot be truncated without corrupting it, so there is
        * no partial payload worth sending. Set to `0` to never inline binary
-       * resources. Defaults to `DEFAULT_MAX_INLINE_RESOURCE_BYTES`.
+       * resources. Defaults to 5 MiB.
        */
       maxInlineResourceBytes?: number;
     } = {},

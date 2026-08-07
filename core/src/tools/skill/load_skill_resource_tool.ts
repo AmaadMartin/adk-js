@@ -18,12 +18,7 @@ import {SkillToolset} from './skill_toolset.js';
 const BINARY_FILE_DETECTED_MSG =
   'Binary file detected. The content has been injected into the conversation history for you to analyze.';
 
-/**
- * Status returned in place of injecting a binary resource that is over the
- * configured inline limit. Unlike text, base64 cannot be elided in the middle
- * — a partial payload is undecodable — so an oversized resource is declined
- * outright and the model is told how big it was.
- */
+/** Status returned in place of an oversized binary resource. */
 function binaryTooLargeMsg(sizeBytes: number, limitBytes: number): string {
   return (
     `Binary file detected, but it was not injected into the conversation ` +
