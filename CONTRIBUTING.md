@@ -6,6 +6,8 @@ We'd love to accept your patches and contributions to this project.
 
 ### Getting Started
 
+> **Prerequisite:** Node.js 24 — the version CI runs on all platforms.
+
 To set up your local development environment for contributing:
 
 1. **Clone the repository**:
