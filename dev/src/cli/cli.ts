@@ -76,22 +76,10 @@ function getAgentFileOptions(options: {
   file_type?: string;
 }) {
   return {
-    compile: getBoolean(options['compile']),
-    bundle: getBoolean(options['bundle']),
+    compile: !!options['compile'],
+    bundle: !!options['bundle'],
     moduleType: options['file_type'] as FileModuleType | undefined,
   };
-}
-
-function getBoolean(option?: string | boolean): boolean {
-  if (typeof option === 'boolean') {
-    return option;
-  }
-
-  if (typeof option === 'string') {
-    return option === 'true' || option === '1';
-  }
-
-  return false;
 }
 
 const AGENT_DIR_ARGUMENT = new Argument(
@@ -253,9 +241,9 @@ export function createProgram(): Command {
           artifactService: getArtifactServiceFromOptions(options),
           otelToCloud: options['otel_to_cloud'] ? true : false,
           agentFileLoadOptions: getAgentFileOptions(options),
-          a2a: getBoolean(options['a2a']),
+          a2a: !!options['a2a'],
           a2aAuthToken: options['a2a_auth_token'],
-          reloadAgents: getBoolean(options['reload_agents']),
+          reloadAgents: !!options['reload_agents'],
         });
 
         await server.start();
@@ -301,9 +289,9 @@ export function createProgram(): Command {
           artifactService: getArtifactServiceFromOptions(options),
           otelToCloud: options['otel_to_cloud'] ? true : false,
           agentFileLoadOptions: getAgentFileOptions(options),
-          a2a: getBoolean(options['a2a']),
+          a2a: !!options['a2a'],
           a2aAuthToken: options['a2a_auth_token'],
-          reloadAgents: getBoolean(options['reload_agents']),
+          reloadAgents: !!options['reload_agents'],
         });
         await server.start();
       } catch (error) {
@@ -390,13 +378,13 @@ export function createProgram(): Command {
           agentPath,
           inputFile: options['replay'],
           savedSessionFile: options['resume'],
-          saveSession: getBoolean(options['save_session']),
+          saveSession: !!options['save_session'],
           sessionId: options['session_id'],
           sessionService: getSessionServiceFromOptions(options),
           artifactService: getArtifactServiceFromOptions(options),
           otelToCloud: options['otel_to_cloud'] ? true : false,
           agentFileLoadOptions: getAgentFileOptions(options),
-          reloadAgents: getBoolean(options['reload_agents']),
+          reloadAgents: !!options['reload_agents'],
         });
       } catch (error) {
         logger.error('Error running agent:', (error as Error).message);
@@ -462,14 +450,14 @@ export function createProgram(): Command {
           serviceName: options['service_name'],
           tempFolder: options['temp_folder'],
           port: parseInt(options['port'], 10),
-          withUi: getBoolean(options['with_ui']),
+          withUi: !!options['with_ui'],
           logLevel: options['log_level'],
           adkVersion: options['adk_version'],
           allowOrigins: options['allow_origins'],
           sessionServiceUri: options['session_service_uri'],
           artifactServiceUri: options['artifact_service_uri'],
           agentFileLoadOptions: getAgentFileOptions(options),
-          a2a: getBoolean(options['a2a']),
+          a2a: !!options['a2a'],
           a2aAuthToken: options['a2a_auth_token'],
           extraGcloudArgs,
         });
@@ -517,14 +505,14 @@ export function createProgram(): Command {
             repository: options['repository'],
             tempFolder: options['temp_folder'],
             port: 8080, // Agent Engine requires fixed port of 8080
-            withUi: getBoolean(options['with_ui']),
+            withUi: !!options['with_ui'],
             logLevel: options['log_level'],
             adkVersion: options['adk_version'],
             allowOrigins: options['allow_origins'],
             sessionServiceUri: options['session_service_uri'],
             artifactServiceUri: options['artifact_service_uri'],
             agentFileLoadOptions: getAgentFileOptions(options),
-            a2a: getBoolean(options['a2a']),
+            a2a: !!options['a2a'],
             agentEngineId: options['agent_engine_id'],
           });
         } catch (error) {
@@ -559,7 +547,7 @@ export function createProgram(): Command {
       runIntegrationTests({
         agentsDir: options['agents_dir'],
         testsDir: options['tests_dir'],
-        forceRunAll: getBoolean(options['force']),
+        forceRunAll: !!options['force'],
       });
     });
 
