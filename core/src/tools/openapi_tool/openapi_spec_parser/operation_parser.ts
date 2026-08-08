@@ -29,6 +29,13 @@ export class OperationParser {
   private returnValue?: ApiParameter;
   private preservePropertyNames: boolean;
 
+  /**
+   * @param operation The OpenAPI operation to parse.
+   * @param options.preservePropertyNames Keeps the spec's own spelling for
+   *   parameter and request-body property names instead of converting them to
+   *   snake_case. It applies to those names only; the tool name from
+   *   {@link getFunctionName} is always snake_case.
+   */
   constructor(
     private readonly operation: OpenAPIV3.OperationObject,
     options: {preservePropertyNames?: boolean} = {},
@@ -211,6 +218,9 @@ export class OperationParser {
   /**
    * Gets a valid tool function name derived from the operation's operationId.
    *
+   * The name is always snake_case, then truncated to 60 characters.
+   * `preservePropertyNames` does not affect it, matching adk-python.
+   *
    * @throws {Error} If the operation does not have an operationId.
    * @returns A string representing the function name.
    */
@@ -220,7 +230,7 @@ export class OperationParser {
     if (!operationId) {
       throw new Error('Operation ID is missing');
     }
-    return this.getParamName(operationId).substring(0, 60);
+    return snakeCase(operationId).substring(0, 60);
   }
 
   /**
