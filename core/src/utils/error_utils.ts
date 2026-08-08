@@ -23,6 +23,12 @@ const TRUNCATION_MARKER = '... [truncated]';
 /** Returned by {@link formatError} when the input carries no usable message. */
 const UNKNOWN_ERROR = 'Unknown error';
 
+/** Returned when a value cannot be converted to a string at all. */
+const UNSTRINGIFIABLE_VALUE = '<unstringifiable value>';
+
+/** `JSON.stringify` output for an object with no serializable own fields. */
+const EMPTY_JSON_OBJECT = '{}';
+
 /** Lowest and highest values treated as an HTTP status code. */
 const MIN_HTTP_STATUS = 100;
 const MAX_HTTP_STATUS = 599;
@@ -48,7 +54,10 @@ function firstString(...values: unknown[]): string | undefined {
   return undefined;
 }
 
-/** Truncates a response body to {@link MAX_RESPONSE_BODY_LENGTH} characters. */
+/**
+ * Truncates a response body or a serialized value to
+ * {@link MAX_RESPONSE_BODY_LENGTH} characters.
+ */
 function truncateBody(body: string): string {
   return body.length > MAX_RESPONSE_BODY_LENGTH
     ? body.slice(0, MAX_RESPONSE_BODY_LENGTH) + TRUNCATION_MARKER
@@ -57,13 +66,33 @@ function truncateBody(body: string): string {
 
 /** Returns the plain, non-recursive message for a single value. */
 function baseMessage(err: unknown): string {
-  if (err instanceof Error) {
-    return err.message;
+  try {
+    if (err instanceof Error) {
+      return err.message;
+    }
+    if (typeof err === 'string') {
+      return err;
+    }
+    const record = asRecord(err);
+    if (record !== undefined) {
+      const json = JSON.stringify(record);
+      // `JSON.stringify` is typed as returning `string`, but yields `undefined`
+      // when the value's `toJSON` returns nothing. `{}` says no more than
+      // `[object Object]`; both cases defer to the value's own `toString`,
+      // which a class instance may implement usefully.
+      if (typeof json === 'string' && json !== EMPTY_JSON_OBJECT) {
+        return truncateBody(json);
+      }
+    }
+    return String(err);
+  } catch {
+    // Every conversion above can throw. A value can carry a throwing
+    // `toString`, `Symbol.toPrimitive`, `toJSON` or property getter, a
+    // null-prototype object has no `toString` at all, and `JSON.stringify`
+    // refuses circular structures and BigInt. `formatError` promises never to
+    // throw, so such a value degrades to a placeholder.
+    return UNSTRINGIFIABLE_VALUE;
   }
-  if (typeof err === 'string') {
-    return err;
-  }
-  return String(err);
 }
 
 /**
