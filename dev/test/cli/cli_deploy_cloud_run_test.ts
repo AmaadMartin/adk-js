@@ -536,7 +536,6 @@ describe('deployToCloudRun', () => {
         (arg) => arg === LABELS_FLAG || arg.startsWith(LABELS_PREFIX),
       ),
     ).toEqual([LABELS_FLAG]);
-    expect(argv).not.toContain('--labels=team=abc');
   });
 
   it.each([
@@ -639,6 +638,5 @@ describe('deployToCloudRun', () => {
 
     const [value] = labelValues(spawnMock.mock.calls[0][1]);
     expect(value).toBe('created-by=adk,env=test,team=myteam');
-    expect(value).not.toMatch(/,,|,$/);
   });
 });

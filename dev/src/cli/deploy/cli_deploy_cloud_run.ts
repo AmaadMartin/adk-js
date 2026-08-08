@@ -33,8 +33,6 @@ export interface DeployToCloudRunOptions extends BaseDeployOptions {
   a2aAuthToken?: string;
 }
 
-const LABELS_FLAG = '--labels';
-
 /**
  * Splits pass-through gcloud args into user label values and everything else,
  * so the caller can merge those values with ADK's own provenance label into
@@ -53,9 +51,9 @@ function splitLabelArgs(extraGcloudArgs: string[]): {
   const passthroughArgs: string[] = [];
   for (let i = 0; i < extraGcloudArgs.length; i++) {
     const arg = extraGcloudArgs[i];
-    if (arg.startsWith(`${LABELS_FLAG}=`)) {
-      userLabels.push(arg.slice(LABELS_FLAG.length + 1));
-    } else if (arg === LABELS_FLAG) {
+    if (arg.startsWith('--labels=')) {
+      userLabels.push(arg.slice('--labels='.length));
+    } else if (arg === '--labels') {
       const value = extraGcloudArgs[i + 1];
       if (value !== undefined && !value.startsWith('-')) {
         userLabels.push(value);
@@ -141,7 +139,7 @@ function prepareGCloudArguments(options: DeployToCloudRunOptions): string[] {
   const {userLabels, passthroughArgs} = splitLabelArgs(
     options.extraGcloudArgs ?? [],
   );
-  gcloudCommands.push(LABELS_FLAG, ['created-by=adk', ...userLabels].join(','));
+  gcloudCommands.push('--labels', ['created-by=adk', ...userLabels].join(','));
   gcloudCommands.push(...passthroughArgs);
 
   return gcloudCommands;
