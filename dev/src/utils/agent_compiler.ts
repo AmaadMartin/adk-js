@@ -5,8 +5,6 @@
  */
 
 import esbuild from 'esbuild';
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore
 import {shimPlugin} from 'esbuild-shim-plugin';
 import * as fsPromises from 'node:fs/promises';
 import * as path from 'node:path';
