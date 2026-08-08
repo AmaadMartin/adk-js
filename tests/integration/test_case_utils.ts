@@ -326,6 +326,7 @@ export abstract class BaseTestServer {
 
         // Only attached during the handshake, so any exit it sees is premature.
         const onExit = (code: number | null) => {
+          console.error(`${serverName} exited with code ${code}`);
           console.error(
             `${serverName} Captured stdout before premature exit:\n${stdoutChunks.join('')}`,
           );
