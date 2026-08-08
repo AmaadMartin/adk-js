@@ -48,14 +48,14 @@ vi.mock('google-auth-library', () => {
 });
 
 const mockMcpClient = {
-  connect: vi.fn().mockResolvedValue(undefined),
-  close: vi.fn().mockResolvedValue(undefined),
-  listTools: vi.fn().mockResolvedValue({
+  connect: vi.fn(async () => undefined),
+  close: vi.fn(async () => undefined),
+  listTools: vi.fn(async () => ({
     tools: [
       {name: 'tool1', description: 'desc1', inputSchema: {}},
       {name: 'tool2', description: 'desc2', inputSchema: {}},
     ],
-  }),
+  })),
 };
 
 // Mock MCP Client

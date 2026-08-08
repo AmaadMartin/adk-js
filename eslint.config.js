@@ -37,11 +37,6 @@ export default defineConfig([
     },
   },
   {
-    // `vi.restoreAllMocks()` resets every registered `vi.fn()`, and a reset
-    // mock only falls back to an implementation that was passed to the
-    // `vi.fn()` constructor. An implementation attached afterwards is
-    // discarded, so a module fake declared that way silently degrades into an
-    // `undefined`-returning stub after the first test in the file.
     files: ['**/test/**/*.ts', '**/tests/**/*.ts'],
     rules: {
       'no-restricted-syntax': [
@@ -50,8 +45,7 @@ export default defineConfig([
           selector:
             "CallExpression[callee.object.name='vi'][callee.property.name=/^(mock|hoisted)$/] " +
             'CallExpression[callee.property.name=/^mock(Implementation|ResolvedValue|ReturnValue|RejectedValue)$/]' +
-            "[callee.object.callee.object.name='vi'][callee.object.callee.property.name='fn']" +
-            '[callee.object.arguments.length=0]',
+            "[callee.object.callee.object.name='vi'][callee.object.callee.property.name='fn']",
           message:
             'Inside a vi.mock() or vi.hoisted() factory, pass the implementation to vi.fn() ' +
             'directly (vi.fn(impl), vi.fn(async () => value)). vi.restoreAllMocks() discards ' +

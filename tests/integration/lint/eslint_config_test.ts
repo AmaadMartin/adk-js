@@ -13,7 +13,7 @@ const THIS_FILE = fileURLToPath(import.meta.url);
 const REPO_ROOT = path.resolve(path.dirname(THIS_FILE), '../../..');
 
 // A path outside `test/` and `tests/`, where the chained form is legitimate.
-const SOURCE_FILE = path.join(REPO_ROOT, 'core/src/scope_probe.ts');
+const SOURCE_FILE = path.join(REPO_ROOT, 'core/src/index.ts');
 
 const eslint = new ESLint({
   cwd: REPO_ROOT,
@@ -45,6 +45,15 @@ describe('vi.fn() module fakes in mock factories', () => {
   it('rejects the chained form inside a vi.hoisted() factory', async () => {
     const errors = await restrictedSyntaxErrors(
       `const f = vi.hoisted(() => vi.fn().mockResolvedValue(1));`,
+      THIS_FILE,
+    );
+
+    expect(errors).toHaveLength(1);
+  });
+
+  it('rejects a chained call that overrides a vi.fn() constructor argument', async () => {
+    const errors = await restrictedSyntaxErrors(
+      `vi.mock('./m.js', () => ({f: vi.fn(async () => 1).mockResolvedValue(2)}));`,
       THIS_FILE,
     );
 
