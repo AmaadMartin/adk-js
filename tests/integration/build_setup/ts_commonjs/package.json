@@ -8,7 +8,8 @@
     "build": "tsc && echo Build complete",
     "start": "npx @google/adk-devtools run agent.ts",
     "test:db": "node ./dist/db_init_check.js",
-    "test:devtools": "node ./dist/devtools_check.js"
+    "test:devtools": "node ./dist/devtools_check.js",
+    "test:subpaths": "node ./dist/subpath_check.js"
   },
   "keywords": [],
   "author": "",
