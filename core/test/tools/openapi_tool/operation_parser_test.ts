@@ -203,9 +203,7 @@ describe('OperationParser default argument name when the derived name is empty',
 
     const schema = new OperationParser(op).getJsonSchema();
 
-    expect(Object.keys(schema.properties as Record<string, unknown>)).toEqual([
-      'query_param',
-    ]);
+    expect(schema.properties).toEqual({query_param: {}});
     expect(schema.required).toEqual(['query_param']);
   });
 });
