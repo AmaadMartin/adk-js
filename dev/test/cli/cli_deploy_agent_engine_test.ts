@@ -120,8 +120,8 @@ vi.mock('node:fs/promises', async (importOriginal) => {
   return mockFs;
 });
 
-// Each fake below passes its implementation as the `vi.fn()` constructor
-// argument. `vi.restoreAllMocks()` in `afterEach` drops a
+// Each AgentLoader fake below passes its implementation as the `vi.fn()`
+// constructor argument. `vi.restoreAllMocks()` in `afterEach` drops a
 // `.mockImplementation()`/`.mockResolvedValue()` body for good but restores a
 // constructor-argument one, and a `vi.mock()` factory body runs only once.
 vi.mock('../../src/utils/agent_loader.js', () => ({
@@ -746,12 +746,8 @@ describe('deployToAgentEngine', () => {
     );
   });
 
-  // Deliberately not the first test in the block: it only holds if the
-  // AgentLoader fake survived an earlier test's `vi.restoreAllMocks()`. The
-  // explicit restore makes the guarantee independent of test order too. This
-  // pins the fixture rather than product behaviour, on purpose: the deploy
-  // path awaits `disposeAll()` in a `finally`, where a stubbed-out fake throws
-  // and masks whatever the test was actually asserting.
+  // The deploy path awaits `disposeAll()` in a `finally`, where a stubbed-out
+  // fake throws and masks whatever the test was actually asserting.
   it('should keep the AgentLoader fake alive across a restore', async () => {
     vi.restoreAllMocks();
 
