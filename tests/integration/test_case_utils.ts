@@ -393,7 +393,6 @@ export abstract class BaseTestServer {
         resolve();
       };
 
-      // Bounded: a child that ignores SIGINT must not hang suite teardown.
       const fallbackTimer = setTimeout(finish, STOP_EXIT_TIMEOUT_MS);
       // Subscribed before the kill so a fast exit cannot be missed.
       serverProcess.once('exit', finish);
