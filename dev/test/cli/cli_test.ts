@@ -544,4 +544,23 @@ describe('CLI Entrypoint', () => {
       });
     });
   });
+
+  describe('option help text', () => {
+    const description = (long: string) => {
+      const web = program.commands.find((c) => c.name() === 'web')!;
+      return web.options.find((o) => o.long === long)!.description;
+    };
+
+    it('describes --bundle as bundling and minifying, not as compiling', () => {
+      expect(description('--bundle')).not.toBe(description('--compile'));
+      expect(description('--bundle')).toMatch(/bundle/i);
+      expect(description('--bundle')).toMatch(/minif/i);
+    });
+
+    it('describes --no-bundle as skipping the bundling', () => {
+      expect(description('--no-bundle')).not.toBe(description('--no-compile'));
+      expect(description('--no-bundle')).toMatch(/bundle/i);
+      expect(description('--no-bundle')).toMatch(/minif/i);
+    });
+  });
 });
