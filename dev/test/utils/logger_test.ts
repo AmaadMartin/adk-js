@@ -6,6 +6,7 @@
 
 import {LogLevel} from '@google/adk';
 import {Console} from 'node:console';
+import {EOL} from 'node:os';
 import {Writable} from 'node:stream';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {AdkLogger, AdkLoggerOptions} from '../../src/utils/logger.js';
@@ -13,7 +14,8 @@ import {AdkLogger, AdkLoggerOptions} from '../../src/utils/logger.js';
 /**
  * A stream that keeps everything written to it. Winston's Console transport
  * writes straight to `console._stdout`, so a test reads a record by giving
- * `Console` streams that the test owns.
+ * `Console` streams that the test owns. The transport terminates a record with
+ * `os.EOL`, so an exact assertion has to spell that out.
  */
 class CaptureStream extends Writable {
   text = '';
@@ -77,19 +79,19 @@ describe('AdkLogger output formatting', () => {
   it('logs the contents of a plain object', () => {
     logger.error({a: 1});
 
-    expect(stdout.text).toBe('{ a: 1 }\n');
+    expect(stdout.text).toBe(`{ a: 1 }${EOL}`);
   });
 
   it('logs a string unchanged', () => {
     logger.error('plain message');
 
-    expect(stdout.text).toBe('plain message\n');
+    expect(stdout.text).toBe(`plain message${EOL}`);
   });
 
   it('logs undefined as the word undefined', () => {
     logger.error(undefined);
 
-    expect(stdout.text).toBe('undefined\n');
+    expect(stdout.text).toBe(`undefined${EOL}`);
   });
 
   it('formats the argument on the debug, info and warn methods', () => {
@@ -98,7 +100,7 @@ describe('AdkLogger output formatting', () => {
     logger.warn({level: 'warn'});
 
     expect(stdout.text).toBe(
-      "{ level: 'debug' }\n{ level: 'info' }\n{ level: 'warn' }\n",
+      `{ level: 'debug' }${EOL}{ level: 'info' }${EOL}{ level: 'warn' }${EOL}`,
     );
   });
 
