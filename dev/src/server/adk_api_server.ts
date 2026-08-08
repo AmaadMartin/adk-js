@@ -776,32 +776,18 @@ export class AdkApiServer {
         return;
       }
 
-      const abortController = new AbortController();
-      let responseCompleted = false;
-
-      req.on('close', () => {
-        if (!responseCompleted) {
-          this.logger.info(
-            `HTTP connection closed. Aborting agent execution for session ${sessionId}`,
-          );
-          abortController.abort();
-        }
-      });
-
       try {
         const events: Event[] = [];
-        for await (const e of this.executeAgentRun({
+        for await (const e of this.executeAgentRun(req, {
           appName,
           userId,
           sessionId,
           newMessage,
           stateDelta,
-          abortSignal: abortController.signal,
         })) {
           events.push(e);
         }
 
-        responseCompleted = true;
         res.json(events);
       } catch (e: unknown) {
         const error = `Failed to run agent: ${e}`;
@@ -837,17 +823,12 @@ export class AdkApiServer {
             state: {},
           });
           const events: Event[] = [];
-          const abortController = new AbortController();
-          req.on('close', () => {
-            abortController.abort();
-          });
-          for await (const e of this.executeAgentRun({
+          for await (const e of this.executeAgentRun(req, {
             appName,
             userId,
             sessionId,
             newMessage,
             stateDelta,
-            abortSignal: abortController.signal,
           })) {
             events.push(e);
           }
@@ -905,17 +886,7 @@ export class AdkApiServer {
         return;
       }
 
-      const abortController = new AbortController();
       let responseCompleted = false;
-
-      req.on('close', () => {
-        if (!responseCompleted) {
-          this.logger.info(
-            `HTTP connection closed. Aborting agent SSE execution for session ${sessionId}`,
-          );
-          abortController.abort();
-        }
-      });
 
       try {
         res.setHeader('Cache-Control', 'no-cache');
@@ -923,7 +894,7 @@ export class AdkApiServer {
         res.setHeader('Connection', 'keep-alive');
         res.flushHeaders();
 
-        for await (const event of this.executeAgentRun({
+        for await (const event of this.executeAgentRun(req, {
           appName,
           userId,
           sessionId,
@@ -932,7 +903,6 @@ export class AdkApiServer {
           runConfig: {
             streamingMode: streaming ? StreamingMode.SSE : StreamingMode.NONE,
           },
-          abortSignal: abortController.signal,
         })) {
           res.write(`data: ${JSON.stringify(event)}\n\n`);
         }
@@ -1037,28 +1007,49 @@ export class AdkApiServer {
     return this.runnerCache[appName];
   }
 
-  private async *executeAgentRun(options: {
-    appName: string;
-    userId: string;
-    sessionId: string;
-    newMessage: Content;
-    stateDelta?: Record<string, unknown>;
-    runConfig?: RunConfig;
-    abortSignal: AbortSignal;
-  }): AsyncGenerator<Event> {
-    await using agentFile = await this.agentLoader.getAgentFile(
-      options.appName,
-    );
-    const loaded = await agentFile.load();
-    const runner = await this.getRunner(loaded, options.appName);
+  /**
+   * Runs an agent for a single HTTP request and yields its events.
+   *
+   * The abort listener is removed in the `finally`, so a run that has already
+   * finished can no longer be aborted.
+   */
+  private async *executeAgentRun(
+    req: Request,
+    options: {
+      appName: string;
+      userId: string;
+      sessionId: string;
+      newMessage: Content;
+      stateDelta?: Record<string, unknown>;
+      runConfig?: RunConfig;
+    },
+  ): AsyncGenerator<Event> {
+    const abortController = new AbortController();
+    const onClose = () => {
+      this.logger.info(
+        `HTTP connection closed. Aborting agent execution for session ${options.sessionId}`,
+      );
+      abortController.abort();
+    };
+    req.on('close', onClose);
 
-    yield* runner.runAsync({
-      userId: options.userId,
-      sessionId: options.sessionId,
-      newMessage: options.newMessage,
-      runConfig: options.runConfig,
-      stateDelta: options.stateDelta,
-      abortSignal: options.abortSignal,
-    });
+    try {
+      await using agentFile = await this.agentLoader.getAgentFile(
+        options.appName,
+      );
+      const loaded = await agentFile.load();
+      const runner = await this.getRunner(loaded, options.appName);
+
+      yield* runner.runAsync({
+        userId: options.userId,
+        sessionId: options.sessionId,
+        newMessage: options.newMessage,
+        runConfig: options.runConfig,
+        stateDelta: options.stateDelta,
+        abortSignal: abortController.signal,
+      });
+    } finally {
+      req.off('close', onClose);
+    }
   }
 }
