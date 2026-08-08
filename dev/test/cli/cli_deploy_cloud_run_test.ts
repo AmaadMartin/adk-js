@@ -630,4 +630,15 @@ describe('deployToCloudRun', () => {
 
     expect(labelValues(spawnMock.mock.calls[0][1])).toEqual(['created-by=adk']);
   });
+
+  it('should drop empty segments inside a label value', async () => {
+    await deployToCloudRun({
+      ...defaultOptions,
+      extraGcloudArgs: ['--labels=env=test,', LABELS_FLAG, ',team=myteam'],
+    });
+
+    const [value] = labelValues(spawnMock.mock.calls[0][1]);
+    expect(value).toBe('created-by=adk,env=test,team=myteam');
+    expect(value).not.toMatch(/,,|,$/);
+  });
 });

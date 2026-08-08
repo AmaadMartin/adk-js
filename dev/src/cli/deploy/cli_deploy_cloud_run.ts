@@ -41,9 +41,9 @@ const LABELS_FLAG = '--labels';
  * the single `--labels` flag gcloud accepts.
  *
  * gcloud takes both `--labels=k=v` and `--labels k=v`, and the CLI forwards
- * whichever form the user typed, so both are recognised. A `--labels` with no
- * value, and an empty `--labels=`, are dropped rather than merged as an empty
- * label.
+ * whichever form the user typed, so both are recognised. Each value is itself
+ * a comma-separated list. A `--labels` with no value, and any empty segment,
+ * are dropped rather than merged as an empty label that gcloud rejects.
  */
 function splitLabelArgs(extraGcloudArgs: string[]): {
   userLabels: string[];
@@ -65,7 +65,10 @@ function splitLabelArgs(extraGcloudArgs: string[]): {
       passthroughArgs.push(arg);
     }
   }
-  return {userLabels: userLabels.filter(Boolean), passthroughArgs};
+  return {
+    userLabels: userLabels.flatMap((value) => value.split(',')).filter(Boolean),
+    passthroughArgs,
+  };
 }
 
 function validateGcloudExtraArgs(
