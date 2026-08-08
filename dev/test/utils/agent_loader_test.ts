@@ -859,6 +859,43 @@ describe('AgentLoader', () => {
       }
     });
 
+    it('skips the build when compile and bundle are both off', async () => {
+      const loader = new AgentLoader(tempAgentsDir, {
+        compile: false,
+        bundle: false,
+      });
+      const agents = await loader.listAgents();
+
+      expect(agents).toEqual(['agent1', 'agent2', 'agent3']);
+      expect(esbuild.build).not.toHaveBeenCalled();
+      expect(createdTempDirs).toEqual([]);
+      await loader.disposeAll();
+    });
+
+    it('creates no build for a directory with no entrypoint', async () => {
+      const emptyDir = await fs.mkdtemp(path.join(tempAgentsDir, 'empty-'));
+
+      const loader = new AgentLoader(emptyDir);
+      const agents = await loader.listAgents();
+
+      expect(agents).toEqual([]);
+      expect(esbuild.build).not.toHaveBeenCalled();
+      expect(createdTempDirs).toEqual([]);
+      await loader.disposeAll();
+    });
+
+    it('propagates an import error that is not an agent loading error', async () => {
+      const boomDir = await fs.mkdtemp(path.join(tempAgentsDir, 'boom-'));
+      await fs.writeFile(
+        path.join(boomDir, 'boom.js'),
+        `throw new Error('boom');`,
+      );
+
+      const loader = new AgentLoader(boomDir);
+
+      await expect(loader.listAgents()).rejects.toThrow('boom');
+    });
+
     it('removes the batch scratch directory after a successful preload', async () => {
       const loader = new AgentLoader(tempAgentsDir);
       await loader.listAgents();
