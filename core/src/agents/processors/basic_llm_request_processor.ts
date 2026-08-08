@@ -66,13 +66,12 @@ export class BasicLlmRequestProcessor extends BaseLlmRequestProcessor {
       llmRequest.liveConnectConfig.realtimeInputConfig =
         invocationContext.runConfig.realtimeInputConfig;
       // Gemini 3.x Live models reject these two fields.
-      const isGemini3xLiveModel = isGemini3xFlashLive(llmRequest.model);
-      llmRequest.liveConnectConfig.enableAffectiveDialog = isGemini3xLiveModel
-        ? undefined
-        : invocationContext.runConfig.enableAffectiveDialog;
-      llmRequest.liveConnectConfig.proactivity = isGemini3xLiveModel
-        ? undefined
-        : invocationContext.runConfig.proactivity;
+      if (!isGemini3xFlashLive(llmRequest.model)) {
+        llmRequest.liveConnectConfig.enableAffectiveDialog =
+          invocationContext.runConfig.enableAffectiveDialog;
+        llmRequest.liveConnectConfig.proactivity =
+          invocationContext.runConfig.proactivity;
+      }
     }
   }
 }
