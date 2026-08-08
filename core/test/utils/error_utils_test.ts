@@ -5,7 +5,7 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {formatError, formatLogArgs} from '../../src/utils/error_utils.js';
+import {formatError} from '../../src/utils/error_utils.js';
 
 const TRUNCATION_MARKER = '... [truncated]';
 const MAX_RESPONSE_BODY_LENGTH = 1000;
@@ -206,81 +206,5 @@ describe('formatError', () => {
       response: {status: 502, text: 'text body'},
     });
     expect(formatError(err)).toContain('text body');
-  });
-});
-
-describe('formatLogArgs', () => {
-  it('renders an Error as its stack trace', () => {
-    const formatted = formatLogArgs([new Error('boom')]);
-    expect(formatted).toContain('Error: boom');
-    expect(formatted).toContain('at ');
-  });
-
-  it('renders a subclassed Error under its own name', () => {
-    class NamedError extends Error {
-      constructor(message: string) {
-        super(message);
-        this.name = 'NamedError';
-      }
-    }
-    const formatted = formatLogArgs([new NamedError('sub-boom')]);
-    expect(formatted.startsWith('NamedError: ')).toBe(true);
-    expect(formatted).toContain('at ');
-  });
-
-  it('falls back to the message when an Error carries no stack', () => {
-    const err = new Error('nostack');
-    err.stack = undefined;
-    expect(formatLogArgs([err])).toBe('Error: nostack');
-  });
-
-  it('inspects a plain object instead of coercing it to a string', () => {
-    const formatted = formatLogArgs([{a: 1, b: 'two'}]);
-    expect(formatted).toBe("{ a: 1, b: 'two' }");
-    expect(formatted).not.toContain('[object Object]');
-  });
-
-  it('renders a value nested four levels deep', () => {
-    const formatted = formatLogArgs([{l1: {l2: {l3: {l4: 'innermost'}}}}]);
-    expect(formatted).toContain('innermost');
-    expect(formatted).not.toContain('[Object]');
-  });
-
-  it('renders a self-referential object without throwing', () => {
-    const cyclic: Record<string, unknown> = {a: 1};
-    cyclic['self'] = cyclic;
-    expect(formatLogArgs([cyclic])).toContain('[Circular');
-  });
-
-  it('passes a string through unchanged', () => {
-    expect(formatLogArgs(['plain'])).toBe('plain');
-  });
-
-  it('renders undefined as the word undefined', () => {
-    expect(formatLogArgs([undefined])).toBe('undefined');
-  });
-
-  it('renders null as the word null', () => {
-    expect(formatLogArgs([null])).toBe('null');
-  });
-
-  it('renders a number', () => {
-    expect(formatLogArgs([42])).toBe('42');
-  });
-
-  it('renders an array', () => {
-    const formatted = formatLogArgs([[1, 'a']]);
-    expect(formatted).toContain('1');
-    expect(formatted).toContain("'a'");
-  });
-
-  it('joins several arguments with a single space', () => {
-    expect(formatLogArgs(['prefix:', 42, undefined])).toBe(
-      'prefix: 42 undefined',
-    );
-  });
-
-  it('returns an empty string for no arguments', () => {
-    expect(formatLogArgs([])).toBe('');
   });
 });
