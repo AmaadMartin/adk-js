@@ -112,9 +112,14 @@ function declaredModules(field: unknown): unknown {
   return isStringArray(field) ? [...field].sort() : field;
 }
 
+/** Maps a `src`-relative TypeScript path onto the JavaScript path it builds to. */
+function builtModule(module: string): string {
+  return module.replace(/\.ts$/, '.js');
+}
+
 /** Maps a `src`-relative module path onto its published manifest entry. */
 function manifestEntry(module: string): string {
-  return `./dist/*/${module.replace(/\.ts$/, '.js')}`;
+  return `./dist/*/${builtModule(module)}`;
 }
 
 /**
@@ -150,7 +155,7 @@ async function retainedModules(entry: string): Promise<string[]> {
 /** Built ESM paths of every audited module, e.g. `dev/dist/esm/cli/cli.js`. */
 const AUDITED_MODULES = WORKSPACES.flatMap((workspace) =>
   collectSideEffectModules(sourceDir(workspace)).map(
-    (module) => `${workspace}/dist/esm/${module.replace(/\.ts$/, '.js')}`,
+    (module) => `${workspace}/dist/esm/${builtModule(module)}`,
   ),
 );
 
