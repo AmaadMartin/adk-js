@@ -458,6 +458,14 @@ export class AgentLoader {
     return appNames.sort();
   }
 
+  /**
+   * Lends the caller the `AgentFile` this loader owns for `agentName`.
+   *
+   * Every caller shares one handle and must not dispose it: disposal deletes
+   * the compiled artifact and the temp directory the other callers still read
+   * from. Only `invalidateAll()` and `disposeAll()` end a handle's life, and
+   * both drop the cache entry with it.
+   */
   async getAgentFile(agentName: string): Promise<AgentFile> {
     await this.preloadAgents();
 
@@ -468,12 +476,21 @@ export class AgentLoader {
     return this.getAgentFile(appName);
   }
 
+  /**
+   * Disposes every `AgentFile` this loader owns and empties its cache, so a
+   * later `getAgentFile()` re-scans instead of lending a disposed handle.
+   */
   async disposeAll(): Promise<void> {
     this.watcher?.close();
     this.watcher = undefined;
-    await Promise.all(
-      Object.values(this.preloadedAgents).map((f) => f.dispose()),
-    );
+
+    const agentFiles = Object.values(this.preloadedAgents);
+    for (const key of Object.keys(this.preloadedAgents)) {
+      delete this.preloadedAgents[key];
+    }
+    this.agentsAlreadyPreloaded = false;
+
+    await Promise.all(agentFiles.map((f) => f.dispose()));
   }
 
   async preloadAgents() {
