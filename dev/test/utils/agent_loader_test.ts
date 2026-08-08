@@ -670,6 +670,8 @@ describe('AgentLoader', () => {
       const firstResult = await plugin.load({path: firstPath});
       const secondResult = await plugin.load({path: secondPath});
 
+      expect(firstResult?.loader).toBe('js');
+      expect(secondResult?.loader).toBe('js');
       expect(firstResult?.contents).toContain(JSON.stringify(firstDir));
       expect(firstResult?.contents).not.toContain(JSON.stringify(secondDir));
       expect(secondResult?.contents).toContain(JSON.stringify(secondDir));
