@@ -122,13 +122,13 @@ agents:
 ### Advanced: injecting a Vertex AI Sessions client
 
 Most users do not need this. `new VertexAiSessionService({projectId, location})`
-(or `expressModeApiKey`) builds the Agent Engine client internally, and nothing
-below applies.
+builds the Agent Engine client internally, and nothing below applies.
 
 If you pass your own `sessions:` client you import `Sessions` from
-`@google-cloud/vertexai` and `ApiClient` from `@google/genai`, so both must be
-**direct** dependencies of your project — do not rely on npm hoisting a
-transitive copy into scope. That exposes a version conflict:
+`@google-cloud/vertexai/build/src/genai/sessions.js` and `ApiClient` from
+`@google/genai/vertex_internal`, so both packages must be **direct**
+dependencies of your project — do not rely on npm hoisting a transitive copy
+into scope. That exposes a version conflict:
 `@google-cloud/vertexai@1.12.0` requires `@google/genai@^1.45.0` while
 `@google/adk` requires `^2.9.0`, so npm installs two copies and your
 `new Sessions(apiClient)` call fails to typecheck:
