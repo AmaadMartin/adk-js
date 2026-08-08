@@ -5,6 +5,8 @@
  */
 
 import {getLogger, Logger, LogLevel, setLogger, setLogLevel} from '@google/adk';
+import {Console} from 'node:console';
+import {Writable} from 'node:stream';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {resetLogger} from '../../src/utils/logger.js';
 
@@ -140,5 +142,100 @@ describe('setLogger', () => {
 
       expect(logger.constructor.name).toBe('SimpleLogger');
     });
+  });
+});
+
+/**
+ * A stream that keeps everything written to it. Winston's Console transport
+ * writes straight to `console._stdout`, so a test reads a record by giving
+ * `Console` streams that the test owns.
+ */
+class CaptureStream extends Writable {
+  text = '';
+
+  override _write(
+    chunk: Buffer,
+    _encoding: string,
+    done: (error?: Error | null) => void,
+  ): void {
+    this.text += chunk.toString();
+    done();
+  }
+}
+
+describe('SimpleLogger output formatting', () => {
+  const realConsole = globalThis.console;
+  let stdout: CaptureStream;
+
+  beforeEach(() => {
+    stdout = new CaptureStream();
+    globalThis.console = new Console(stdout, new CaptureStream());
+    resetLogger();
+    setLogLevel(LogLevel.DEBUG);
+  });
+
+  afterEach(() => {
+    globalThis.console = realConsole;
+    resetLogger();
+  });
+
+  it('logs the stack of an Error', () => {
+    getLogger().error(new Error('boom'));
+
+    expect(stdout.text).toContain('Error: boom');
+    expect(stdout.text).toContain('at ');
+  });
+
+  it('logs the stack of a subclassed Error under its own name', () => {
+    class NamedError extends Error {
+      constructor(message: string) {
+        super(message);
+        this.name = 'NamedError';
+      }
+    }
+
+    getLogger().error(new NamedError('sub-boom'));
+
+    expect(stdout.text).toContain('NamedError: sub-boom');
+    expect(stdout.text).toContain('at ');
+  });
+
+  it('logs the contents of a plain object', () => {
+    getLogger().error({a: 1});
+
+    expect(stdout.text).toContain('{ a: 1 }');
+    expect(stdout.text).not.toContain('[object Object]');
+  });
+
+  it('logs a string unchanged', () => {
+    getLogger().error('plain message');
+
+    expect(stdout.text).toContain('plain message');
+  });
+
+  it('logs undefined as the word undefined', () => {
+    getLogger().error(undefined);
+
+    expect(stdout.text).toContain('undefined');
+  });
+
+  it('formats the argument on the debug, info and warn methods', () => {
+    const logger = getLogger();
+
+    logger.debug({level: 'debug'});
+    logger.info({level: 'info'});
+    logger.warn({level: 'warn'});
+
+    expect(stdout.text).toContain("{ level: 'debug' }");
+    expect(stdout.text).toContain("{ level: 'info' }");
+    expect(stdout.text).toContain("{ level: 'warn' }");
+    expect(stdout.text).not.toContain('[object Object]');
+  });
+
+  it('joins a prefix and an Error with a single space', () => {
+    getLogger().error('Error during startup:', new Error('boom'));
+
+    expect(stdout.text).toContain('Error during startup: Error: boom');
+    expect(stdout.text).toContain('at ');
   });
 });
