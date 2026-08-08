@@ -94,31 +94,6 @@ function getBoolean(option?: string | boolean): boolean {
   return false;
 }
 
-/**
- * Splits the leftover arguments of a command that allows unknown options into
- * its positional operands and the options it did not recognise.
- *
- * Commander concatenates the two into `Command.args`, having already removed
- * the options the command declared. It stops treating tokens as operands at
- * the first unrecognised option, so the operands are exactly the prefix that
- * precedes it.
- */
-function splitLeftoverArgs(args: string[]): {
-  operands: string[];
-  unknownArgs: string[];
-} {
-  const firstUnknown = args.findIndex(
-    (arg) => arg.length > 1 && arg.startsWith('-'),
-  );
-  if (firstUnknown === -1) {
-    return {operands: args, unknownArgs: []};
-  }
-  return {
-    operands: args.slice(0, firstUnknown),
-    unknownArgs: args.slice(firstUnknown),
-  };
-}
-
 const AGENT_DIR_ARGUMENT = new Argument(
   '[agents_dir]',
   'Agent file or directory of agents to serve. For directory the internal structure should be agents_dir/{agentName}.js or agents_dir/{agentName}/agent.js. Agent file should has export of the rootAgent as instance of BaseAgent (e.g LlmAgent)',
@@ -460,13 +435,16 @@ export function createProgram(): Command {
         options: Record<string, string>,
         command: Command,
       ) => {
-        const {operands, unknownArgs: extraGcloudArgs} = splitLeftoverArgs(
-          command.args,
+        // Commander merges leftover operands and unrecognised options into
+        // `command.args`, stopping operands at the first unrecognised option,
+        // so an unknown gcloud flag in slot 0 would otherwise be bound to
+        // `[agents_dir]`.
+        const firstFlag = command.args.findIndex(
+          (arg) => arg.length > 1 && arg.startsWith('-'),
         );
-        // Commander binds `[agents_dir]` from its leftovers by index, so an
-        // unrecognised gcloud flag in the first slot would be taken for the
-        // agent directory. Only a real operand may override the default.
-        const agentPath = operands.length > 0 ? agentsDir : process.cwd();
+        const extraGcloudArgs =
+          firstFlag === -1 ? [] : command.args.slice(firstFlag);
+        const agentPath = firstFlag === 0 ? process.cwd() : agentsDir;
 
         try {
           await deployToCloudRun({
