@@ -35,7 +35,7 @@ class CapturingLlm extends BaseLlm {
   }
 
   async connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
-    throw new Error('connect is not used by this test');
+    return expect.fail('the agent must not open a live connection');
   }
 }
 
