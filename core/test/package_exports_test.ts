@@ -104,9 +104,11 @@ describe('core package exports map', () => {
       expect(Object.keys(conditions), subpath).toEqual([...CONDITION_ORDER]);
       expect(conditions.default, subpath).toBe(conditions.import);
       for (const condition of CONDITION_ORDER) {
-        expect(conditions[condition], `${subpath} ${condition}`).toMatch(
-          new RegExp(`^${TARGET_PREFIX[condition]}`),
-        );
+        const target = conditions[condition];
+        expect(
+          target.startsWith(TARGET_PREFIX[condition]),
+          `${subpath} ${condition} is ${target}, expected ${TARGET_PREFIX[condition]}*`,
+        ).toBe(true);
       }
     }
   });
