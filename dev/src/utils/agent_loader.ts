@@ -420,18 +420,29 @@ export class AgentLoader {
   }
 
   /**
-   * Disposes all cached agents and marks them for reload on the next request.
+   * Empties the cache and hands back the `AgentFile`s it held, so the caller
+   * can end their lives. The next `getAgentFile()` re-scans the agents
+   * directory.
    */
-  private invalidateAll(): void {
-    for (const agentFile of Object.values(this.preloadedAgents)) {
-      agentFile.dispose().catch(() => {});
-    }
+  private takeAgentFiles(): AgentFile[] {
+    const agentFiles = Object.values(this.preloadedAgents);
 
     for (const key of Object.keys(this.preloadedAgents)) {
       delete this.preloadedAgents[key];
     }
 
     this.agentsAlreadyPreloaded = false;
+
+    return agentFiles;
+  }
+
+  /**
+   * Disposes all cached agents and marks them for reload on the next request.
+   */
+  private invalidateAll(): void {
+    for (const agentFile of this.takeAgentFiles()) {
+      agentFile.dispose().catch(() => {});
+    }
   }
 
   async listAgents(): Promise<string[]> {
@@ -458,6 +469,14 @@ export class AgentLoader {
     return appNames.sort();
   }
 
+  /**
+   * Lends the caller the `AgentFile` this loader owns for `agentName`.
+   *
+   * Every caller shares one handle and must not dispose it: disposal deletes
+   * the compiled artifact and the temp directory the other callers still read
+   * from. Only `invalidateAll()` and `disposeAll()` end a handle's life, and
+   * both drop the cache entry with it.
+   */
   async getAgentFile(agentName: string): Promise<AgentFile> {
     await this.preloadAgents();
 
@@ -468,12 +487,15 @@ export class AgentLoader {
     return this.getAgentFile(appName);
   }
 
+  /**
+   * Disposes every `AgentFile` this loader owns and empties its cache, so a
+   * later `getAgentFile()` re-scans instead of lending a disposed handle.
+   */
   async disposeAll(): Promise<void> {
     this.watcher?.close();
     this.watcher = undefined;
-    await Promise.all(
-      Object.values(this.preloadedAgents).map((f) => f.dispose()),
-    );
+
+    await Promise.all(this.takeAgentFiles().map((f) => f.dispose()));
   }
 
   async preloadAgents() {
