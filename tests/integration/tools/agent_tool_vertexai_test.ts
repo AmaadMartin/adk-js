@@ -4,8 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Client} from '@google-cloud/vertexai/build/src/genai/client.js';
-import {Sessions} from '@google-cloud/vertexai/build/src/genai/sessions.js';
+import {Client} from '@google-cloud/vertexai';
+// @google-cloud/vertexai 1.12.0 re-exports only `Client` out of `src/genai/`,
+// so `Sessions` has no root equivalent. Type-only, so the deep path is erased
+// from the compiled JS.
+import type {Sessions} from '@google-cloud/vertexai/build/src/genai/sessions.js';
 import {
   AgentTool,
   LlmAgent,

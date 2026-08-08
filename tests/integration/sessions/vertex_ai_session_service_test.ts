@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+// `Sessions` is constructed here (`new Sessions(...)`) and has no root
+// re-export in @google-cloud/vertexai 1.12.0, so this deep import has to stay.
 import {Sessions} from '@google-cloud/vertexai/build/src/genai/sessions.js';
 import {VertexAiSessionService} from '@google/adk';
 import {
