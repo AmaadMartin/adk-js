@@ -140,11 +140,11 @@ const NO_COMPILE_AGENT_FILE = new Option(
 );
 const BUNDLE_AGENT_FILE = new Option(
   '--bundle',
-  'Optional. Whether to bundle the ts agent file before execution',
+  'Optional. Whether to bundle the agent file dependencies into the single emitted file with esbuild and minify it before execution. Bundling implies compilation, so the esbuild step runs even with --no-compile.',
 ).default(true);
 const NO_BUNDLE_AGENT_FILE = new Option(
   '--no-bundle',
-  'Optional. Do not bundle the ts agent file before execution',
+  'Optional. Do not bundle or minify the agent file dependencies; emit the compiled agent file with its imports left intact.',
 );
 const A2A_OPTION = new Option(
   '--a2a',
