@@ -420,18 +420,29 @@ export class AgentLoader {
   }
 
   /**
-   * Disposes all cached agents and marks them for reload on the next request.
+   * Empties the cache and hands back the `AgentFile`s it held, so the caller
+   * can end their lives. The next `getAgentFile()` re-scans the agents
+   * directory.
    */
-  private invalidateAll(): void {
-    for (const agentFile of Object.values(this.preloadedAgents)) {
-      agentFile.dispose().catch(() => {});
-    }
+  private takeAgentFiles(): AgentFile[] {
+    const agentFiles = Object.values(this.preloadedAgents);
 
     for (const key of Object.keys(this.preloadedAgents)) {
       delete this.preloadedAgents[key];
     }
 
     this.agentsAlreadyPreloaded = false;
+
+    return agentFiles;
+  }
+
+  /**
+   * Disposes all cached agents and marks them for reload on the next request.
+   */
+  private invalidateAll(): void {
+    for (const agentFile of this.takeAgentFiles()) {
+      agentFile.dispose().catch(() => {});
+    }
   }
 
   async listAgents(): Promise<string[]> {
@@ -484,13 +495,7 @@ export class AgentLoader {
     this.watcher?.close();
     this.watcher = undefined;
 
-    const agentFiles = Object.values(this.preloadedAgents);
-    for (const key of Object.keys(this.preloadedAgents)) {
-      delete this.preloadedAgents[key];
-    }
-    this.agentsAlreadyPreloaded = false;
-
-    await Promise.all(agentFiles.map((f) => f.dispose()));
+    await Promise.all(this.takeAgentFiles().map((f) => f.dispose()));
   }
 
   async preloadAgents() {
