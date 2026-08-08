@@ -5,8 +5,20 @@
  */
 
 import {getLogger, Logger, LogLevel, setLogger, setLogLevel} from '@google/adk';
-import {afterEach, beforeEach, describe, expect, it} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import * as winston from 'winston';
 import {resetLogger} from '../../src/utils/logger.js';
+
+/** winston records the resolved level name under this triple-beam symbol. */
+const LEVEL = Symbol.for('level');
+
+/** Reads the winston level name off a record captured at the transport. */
+function winstonLevelOf(record: unknown): string {
+  if (typeof record !== 'object' || record === null) {
+    return '';
+  }
+  return String(Reflect.get(record, LEVEL));
+}
 
 describe('setLogger', () => {
   beforeEach(() => {
@@ -140,5 +152,52 @@ describe('setLogger', () => {
 
       expect(logger.constructor.name).toBe('SimpleLogger');
     });
+  });
+});
+
+describe('SimpleLogger.log', () => {
+  let records: unknown[];
+
+  beforeEach(() => {
+    records = [];
+    vi.spyOn(winston.transports.Console.prototype, 'log').mockImplementation(
+      (...args: unknown[]) => {
+        records.push(args[0]);
+        const next = args[1];
+        if (typeof next === 'function') {
+          next();
+        }
+      },
+    );
+    resetLogger();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    resetLogger();
+  });
+
+  it.each([
+    ['debug', LogLevel.DEBUG],
+    ['info', LogLevel.INFO],
+    ['warn', LogLevel.WARN],
+    ['error', LogLevel.ERROR],
+  ])('writes a %s record under that winston level name', (name, level) => {
+    const logger = getLogger();
+    logger.setLogLevel(LogLevel.DEBUG);
+
+    logger.log(level, 'hello');
+
+    expect(records).toHaveLength(1);
+    expect(winstonLevelOf(records[0])).toBe(name);
+  });
+
+  it('suppresses a record below the configured level', () => {
+    const logger = getLogger();
+    logger.setLogLevel(LogLevel.WARN);
+
+    logger.log(LogLevel.INFO, 'hidden');
+
+    expect(records).toHaveLength(0);
   });
 });
