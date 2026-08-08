@@ -10,9 +10,8 @@
  * Handles lowerCamelCase, UpperCamelCase, space-separated text, acronyms
  * (e.g. "REST API") and consecutive uppercase letters.
  *
- * This mirrors `_to_snake_case` in adk-python, which names the same OpenAPI
- * tools and tool arguments there. Keep the steps and their order in sync with
- * that function; the unit test pins the outputs row by row.
+ * This matches the output of `_to_snake_case` in adk-python, which names the
+ * same OpenAPI tools and tool arguments there.
  *
  * @param text The string to convert.
  * @returns The snake_case version of the string.
@@ -23,7 +22,6 @@ export function snakeCase(text: string): string {
     .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
     .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
     .toLowerCase()
-    .replace(/_+/g, '_')
     .replace(/^_+|_+$/g, '');
 }
 
