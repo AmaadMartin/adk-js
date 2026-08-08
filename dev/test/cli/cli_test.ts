@@ -51,6 +51,7 @@ vi.mock('@google/adk', async (importOriginal) => {
 
 describe('CLI Entrypoint', () => {
   let program: ReturnType<typeof createProgram>;
+  const originalArgv = process.argv;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -59,13 +60,17 @@ describe('CLI Entrypoint', () => {
   });
 
   afterEach(() => {
+    process.argv = originalArgv;
     vi.restoreAllMocks();
   });
 
   const parse = async (args: string[]) => {
+    // Mirror cli_entrypoint.ts, which calls parse(process.argv). The tests only
+    // see the real argv offsets while the two stay in sync.
+    const argv = ['node', 'cli_entrypoint.js', ...args];
     try {
-      process.argv = args;
-      await program.parseAsync(['node', 'cli_entrypoint.js', ...args]);
+      process.argv = argv;
+      await program.parseAsync(argv);
     } catch (e: unknown) {
       if ((e as {code: string}).code !== 'commander.exit') {
         throw e;
