@@ -16,7 +16,13 @@
  */
 
 import {Content} from '@google/genai';
-import {context, Context, trace} from '@opentelemetry/api';
+import {
+  context,
+  Context,
+  Span,
+  SpanStatusCode,
+  trace,
+} from '@opentelemetry/api';
 
 import {BaseAgent} from '../agents/base_agent.js';
 import {InvocationContext} from '../agents/invocation_context.js';
@@ -24,8 +30,10 @@ import {Event} from '../events/event.js';
 import {LlmRequest} from '../models/llm_request.js';
 import {LlmResponse} from '../models/llm_response.js';
 import {BaseTool} from '../tools/base_tool.js';
+import {resolveErrorType} from '../utils/error_utils.js';
 import {version} from '../version.js';
 
+const ERROR_TYPE = 'error.type';
 const GEN_AI_AGENT_DESCRIPTION = 'gen_ai.agent.description';
 const GEN_AI_AGENT_NAME = 'gen_ai.agent.name';
 const GEN_AI_CONVERSATION_ID = 'gen_ai.conversation.id';
@@ -36,6 +44,29 @@ const GEN_AI_TOOL_NAME = 'gen_ai.tool.name';
 const GEN_AI_TOOL_TYPE = 'gen_ai.tool.type';
 
 export const tracer = trace.getTracer('gcp.vertex.agent', version);
+
+/**
+ * Marks a span as failed by the error that ended it.
+ *
+ * OpenTelemetry JS, unlike OpenTelemetry Python, does not record anything when
+ * a span's body throws, so an unrecorded failure renders as a successful trace.
+ *
+ * The status message carries the error *type* rather than the error message,
+ * because the message can hold user or model content and the status is not
+ * gated by {@link shouldAddRequestResponseToSpans}.
+ *
+ * @param span The started, not-yet-ended span to mark.
+ * @param error The thrown value. JavaScript allows any value to be thrown, so
+ *     this accepts `unknown` rather than `Error`.
+ */
+export function recordSpanError(span: Span, error: unknown): void {
+  const failureType = resolveErrorType(error);
+  // Narrowing to OTel's `Exception` union, which accepts an `Error` or a
+  // string; not an ADK class check.
+  span.recordException(error instanceof Error ? error : String(error));
+  span.setAttribute(ERROR_TYPE, failureType);
+  span.setStatus({code: SpanStatusCode.ERROR, message: failureType});
+}
 
 /**
  * Convert any JavaScript object to a JSON-serializable string.

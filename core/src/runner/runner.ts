@@ -33,6 +33,7 @@ import {PluginManager} from '../plugins/plugin_manager.js';
 import {BaseSessionService} from '../sessions/base_session_service.js';
 import {CompositeSessionKey, Session} from '../sessions/session.js';
 import {
+  recordSpanError,
   runAsyncGeneratorWithOtelContext,
   tracer,
 } from '../telemetry/tracing.js';
@@ -450,6 +451,9 @@ export class Runner {
           }
         },
       );
+    } catch (e: unknown) {
+      recordSpanError(span, e);
+      throw e;
     } finally {
       span.end();
       const toolsets = getAllToolsets(this.agent);

@@ -10,6 +10,7 @@ import {context, trace} from '@opentelemetry/api';
 import {createEvent, Event} from '../events/event.js';
 
 import {
+  recordSpanError,
   runAsyncGeneratorWithOtelContext,
   traceAgentInvocation,
   tracer,
@@ -276,6 +277,9 @@ export abstract class BaseAgent<
           }
         },
       );
+    } catch (e: unknown) {
+      recordSpanError(span, e);
+      throw e;
     } finally {
       span.end();
     }
@@ -325,6 +329,9 @@ export abstract class BaseAgent<
           }
         },
       );
+    } catch (e: unknown) {
+      recordSpanError(span, e);
+      throw e;
     } finally {
       span.end();
     }
