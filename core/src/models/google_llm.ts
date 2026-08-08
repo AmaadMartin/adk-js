@@ -13,6 +13,7 @@ import {
   LiveServerMessage,
 } from '@google/genai';
 
+import {contentUnionToText} from '../utils/content_utils.js';
 import {getBooleanEnvVar, isBrowser} from '../utils/env_aware_utils.js';
 import {logger} from '../utils/logger.js';
 import {GoogleLLMVariant} from '../utils/variant_utils.js';
@@ -300,13 +301,13 @@ export class Gemini extends BaseLlm {
       llmRequest.liveConnectConfig.httpOptions.apiVersion = this.liveApiVersion;
     }
 
-    if (llmRequest.config?.systemInstruction) {
+    const systemInstructionText = contentUnionToText(
+      llmRequest.config?.systemInstruction,
+    );
+    if (systemInstructionText) {
       llmRequest.liveConnectConfig.systemInstruction = {
         role: 'system',
-        // TODO - b/425992518: validate type casting works well.
-        parts: [
-          createPartFromText(llmRequest.config.systemInstruction as string),
-        ],
+        parts: [createPartFromText(systemInstructionText)],
       };
     }
 

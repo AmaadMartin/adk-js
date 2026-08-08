@@ -13,6 +13,7 @@ import {
 } from '@google/genai';
 
 import {BaseTool} from '../tools/base_tool.js';
+import {contentUnionToText} from '../utils/content_utils.js';
 
 /**
  * LLM request class that allows passing in tools, output schema and system
@@ -55,6 +56,11 @@ export interface LlmRequest {
 
 /**
  * Appends instructions to the system instruction.
+ *
+ * `systemInstruction` is a `ContentUnion`, so any text it already carries is
+ * flattened before the new instructions are appended. The field always holds a
+ * string once this returns.
+ *
  * @param instructions The instructions to append.
  */
 export function appendInstructions(
@@ -65,11 +71,12 @@ export function appendInstructions(
     llmRequest.config = {};
   }
   const newInstructions = instructions.join('\n\n');
-  if (llmRequest.config.systemInstruction) {
-    llmRequest.config.systemInstruction += '\n\n' + newInstructions;
-  } else {
-    llmRequest.config.systemInstruction = newInstructions;
-  }
+  const existingInstruction = contentUnionToText(
+    llmRequest.config.systemInstruction,
+  );
+  llmRequest.config.systemInstruction = existingInstruction
+    ? `${existingInstruction}\n\n${newInstructions}`
+    : newInstructions;
 }
 
 /**
