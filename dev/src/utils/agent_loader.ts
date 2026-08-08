@@ -334,13 +334,10 @@ export class AgentFile {
       return;
     }
 
-    if (this.cleanupFilePath) {
+    if (this.cleanupDirPath) {
       this.disposed = true;
       try {
-        await fsPromises.unlink(this.cleanupFilePath);
-        if (this.cleanupDirPath) {
-          await removeFolder(this.cleanupDirPath);
-        }
+        await removeFolder(this.cleanupDirPath);
       } catch (e) {
         logger.debug(
           `Failed to clean up compiled artifacts for ${this.filePath}:`,

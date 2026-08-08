@@ -393,6 +393,7 @@ describe('AgentLoader', () => {
       await fs.rm(compiledAgentPath);
 
       await expect(agentFile.dispose()).resolves.toBeUndefined();
+      expect(fileUtils.removeFolder).toHaveBeenCalledWith(tempLoaderDir);
     });
 
     it('returns cleanup file path if compiled', async () => {
