@@ -4,6 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {
+  CopyOptions,
+  MakeDirectoryOptions,
+  ObjectEncodingOptions,
+  PathLike,
+} from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -54,26 +60,28 @@ vi.mock('node:fs/promises', async (importOriginal) => {
     );
   };
 
-  const mockCp = vi.fn((src, dest, opts) => {
-    if (isCoveragePath(src) || isCoveragePath(dest)) {
+  const mockCp = vi.fn(
+    (src: string | URL, dest: string | URL, opts?: CopyOptions) => {
+      if (isCoveragePath(src) || isCoveragePath(dest)) {
+        return actual.cp(src, dest, opts);
+      }
+      const destStr = typeof dest === 'string' ? dest : String(dest || '');
+      const tempFolder = globalThis.fsMockTempFolder;
+      if (tempFolder && destStr.startsWith(tempFolder)) {
+        return Promise.resolve();
+      }
       return actual.cp(src, dest, opts);
-    }
-    const destStr = typeof dest === 'string' ? dest : String(dest || '');
-    const tempFolder = globalThis.fsMockTempFolder;
-    if (tempFolder && destStr.startsWith(tempFolder)) {
-      return Promise.resolve();
-    }
-    return actual.cp(src, dest, opts);
-  });
+    },
+  );
 
-  const mockMkdir = vi.fn((path, opts) => {
+  const mockMkdir = vi.fn((path: PathLike, opts?: MakeDirectoryOptions) => {
     if (isCoveragePath(path)) {
       return actual.mkdir(path, opts);
     }
     return actual.mkdir(path, opts);
   });
 
-  const mockReaddir = vi.fn((path, opts) => {
+  const mockReaddir = vi.fn((path: PathLike, opts?: ObjectEncodingOptions) => {
     if (isCoveragePath(path)) {
       return actual.readdir(path, opts);
     }
