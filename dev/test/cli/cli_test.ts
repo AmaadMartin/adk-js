@@ -5,7 +5,7 @@
  */
 
 import {LogLevel, setLogLevel} from '@google/adk';
-import {Command} from 'commander';
+import {Command, CommanderError} from 'commander';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {createProgram} from '../../src/cli/cli.js';
 import {createAgent} from '../../src/cli/cli_create.js';
@@ -96,13 +96,10 @@ function captureStream(stream: TextStream): StreamCapture {
 }
 
 function commanderErrorCode(error: unknown): string {
-  if (typeof error === 'object' && error !== null && 'code' in error) {
-    const {code} = error;
-    if (typeof code === 'string') {
-      return code;
-    }
+  if (!(error instanceof CommanderError)) {
+    expect.fail(`expected a CommanderError, received: ${String(error)}`);
   }
-  return expect.fail(`expected a CommanderError, received: ${String(error)}`);
+  return error.code;
 }
 
 describe('CLI Entrypoint', () => {
