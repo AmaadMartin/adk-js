@@ -257,17 +257,9 @@ async function compileEntrypoints(
 function groupByModuleType(
   entries: readonly PreparedEntrypoint[],
 ): PreparedEntrypoint[][] {
-  const groups = new Map<FileModuleType, PreparedEntrypoint[]>();
-  for (const entry of entries) {
-    const group = groups.get(entry.moduleType);
-    if (group) {
-      group.push(entry);
-    } else {
-      groups.set(entry.moduleType, [entry]);
-    }
-  }
-
-  return [...groups.values()];
+  return Object.values(FileModuleType)
+    .map((moduleType) => entries.filter((e) => e.moduleType === moduleType))
+    .filter((group) => group.length > 0);
 }
 
 /**
