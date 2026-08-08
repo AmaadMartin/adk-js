@@ -20,6 +20,7 @@ import {
   LlmAgent,
   Runner,
   Session,
+  StreamingMode,
 } from '@google/adk';
 import {ReadableSpan} from '@opentelemetry/sdk-trace-base';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
@@ -652,6 +653,24 @@ describe('AdkWebServer', () => {
 
       spy.mockRestore();
     });
+
+    it('should return 404 without running the agent when the session does not exist', async () => {
+      const spy = vi.spyOn(Runner.prototype, 'runAsync');
+
+      try {
+        await expect(
+          client.post('/run', {
+            appName: 'testApp',
+            userId: 'testUser',
+            sessionId: 'missingSessionId',
+            newMessage: {parts: [{text: 'Hello'}], role: 'user'},
+          }),
+        ).rejects.toMatchObject({response: {status: 404}});
+        expect(spy).not.toHaveBeenCalled();
+      } finally {
+        spy.mockRestore();
+      }
+    });
   });
 
   describe('run_sse', () => {
@@ -791,6 +810,87 @@ describe('AdkWebServer', () => {
       expect(runAsyncParams.abortSignal).toBeInstanceOf(AbortSignal);
 
       spy.mockRestore();
+    });
+
+    it('should return 404 without running the agent when the session does not exist', async () => {
+      const spy = vi.spyOn(Runner.prototype, 'runAsync');
+
+      try {
+        await expect(
+          client.post('/run_sse', {
+            appName: 'testApp',
+            userId: 'testUser',
+            sessionId: 'missingSessionId',
+            newMessage: {parts: [{text: 'Hello'}], role: 'user'},
+          }),
+        ).rejects.toMatchObject({response: {status: 404}});
+        expect(spy).not.toHaveBeenCalled();
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it('should report a mid-stream failure as an in-band error frame', async () => {
+      await sessionService.createSession({
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: 'sessionId',
+      });
+
+      const spy = vi
+        .spyOn(Runner.prototype, 'runAsync')
+        .mockImplementation(async function* () {
+          yield createEvent({
+            invocationId: 'invocationId',
+            author: 'testAgent',
+            content: {parts: [{text: 'Event 1'}], role: 'model'},
+          });
+          throw new Error('agent exploded');
+        });
+
+      try {
+        const response = await client.post('/run_sse', {
+          appName: 'testApp',
+          userId: 'testUser',
+          sessionId: 'sessionId',
+          newMessage: {parts: [{text: 'Hello test agent!'}], role: 'user'},
+        });
+
+        expect(response.status).toBe(200);
+        expect(response.text).toContain('Event 1');
+        expect(response.text).toMatch(
+          /data: \{"error":"agent exploded"\}\n\n$/,
+        );
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it('should request SSE streaming mode when streaming is enabled', async () => {
+      await sessionService.createSession({
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: 'sessionId',
+      });
+
+      const spy = vi.spyOn(Runner.prototype, 'runAsync');
+
+      try {
+        const response = await client.post('/run_sse', {
+          appName: 'testApp',
+          userId: 'testUser',
+          sessionId: 'sessionId',
+          streaming: true,
+          newMessage: {parts: [{text: 'Hello test agent!'}], role: 'user'},
+        });
+
+        expect(response.status).toBe(200);
+        expect(spy.mock.calls[0][0].runConfig?.streamingMode).toBe(
+          StreamingMode.SSE,
+        );
+      } finally {
+        spy.mockRestore();
+      }
     });
   });
 
@@ -1186,6 +1286,37 @@ describe('AdkWebServer', () => {
         expect((e as {response: {status: number}}).response.status).toBe(500);
       } finally {
         agentLoader.getAgentFile = originalGetAgentFile;
+      }
+    });
+
+    it('should pass abortSignal to Runner.runAsync in /api/reasoning_engine', async () => {
+      await sessionService.createSession({
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: 'sessionId',
+      });
+
+      const spy = vi.spyOn(Runner.prototype, 'runAsync');
+
+      try {
+        const response = await client.post<{output: Event[]}>(
+          '/api/reasoning_engine',
+          {
+            input: {
+              appName: 'testApp',
+              userId: 'testUser',
+              sessionId: 'sessionId',
+              newMessage: {parts: [{text: 'Hello'}], role: 'user'},
+            },
+          },
+        );
+
+        expect(response.status).toBe(200);
+        const runAsyncParams = spy.mock.calls[0][0];
+        expect(runAsyncParams.abortSignal).toBeInstanceOf(AbortSignal);
+        expect(runAsyncParams.abortSignal?.aborted).toBe(false);
+      } finally {
+        spy.mockRestore();
       }
     });
   });
