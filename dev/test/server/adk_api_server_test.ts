@@ -6,6 +6,7 @@
 
 import {AGENT_CARD_PATH, AgentCard} from '@a2a-js/sdk';
 import {
+  BaseAgent,
   BaseArtifactService,
   BaseMemoryService,
   BaseSessionService,
@@ -29,7 +30,7 @@ import {
   A2A_AUTH_TOKEN_ENV_VAR,
   AdkApiServer,
 } from '../../src/server/adk_api_server.js';
-import {AgentLoader} from '../../src/utils/agent_loader.js';
+import {AgentFile, AgentLoader} from '../../src/utils/agent_loader.js';
 
 interface JsonRpcResponse {
   result?: unknown;
@@ -212,6 +213,74 @@ const TEST_AGENT = new TestAgent({
     }),
   ],
 });
+
+const GRAPH_PATH =
+  '/apps/testApp/users/testUser/sessions/fullSession/events/event1/graph';
+
+/** An `AgentFile` that lends `TEST_AGENT` and counts how often it is disposed. */
+class CountingAgentFile extends AgentFile {
+  disposeCount = 0;
+
+  constructor() {
+    super('testApp.ts');
+  }
+
+  override load(): Promise<BaseAgent> {
+    return Promise.resolve(TEST_AGENT);
+  }
+
+  override dispose(): Promise<void> {
+    this.disposeCount++;
+
+    return Promise.resolve();
+  }
+}
+
+/** A session holding one event with a function call, for the graph endpoint. */
+function createGraphSession(): Session {
+  return createSession({
+    id: 'fullSession',
+    appName: 'testApp',
+    userId: 'testUser',
+    events: [
+      createEvent({
+        id: 'event1',
+        author: 'model',
+        content: {parts: [{functionCall: {name: 'foo', args: {}}}]},
+        invocationId: 'inv-1',
+      }),
+    ],
+  });
+}
+
+/** Runs the test agent once and reports the HTTP status. */
+async function postRun(client: HttpClient): Promise<number> {
+  const response = await client.post<Event[]>('/run', {
+    appName: 'testApp',
+    userId: 'testUser',
+    sessionId: 'sessionId',
+    newMessage: {parts: [{text: 'Hello test agent!'}], role: 'user'},
+  });
+
+  return response.status;
+}
+
+/** Fetches the event graph once and reports the HTTP status. */
+async function getEventGraph(
+  client: HttpClient,
+  sessionService: BaseSessionService,
+): Promise<number> {
+  const originalGetSession = sessionService.getSession;
+  sessionService.getSession = () => Promise.resolve(createGraphSession());
+
+  try {
+    const response = await client.get<{dotSrc: string}>(GRAPH_PATH);
+
+    return response.status;
+  } finally {
+    sessionService.getSession = originalGetSession;
+  }
+}
 
 describe('AdkWebServer', () => {
   let agentLoader: AgentLoader;
@@ -940,6 +1009,48 @@ describe('AdkWebServer', () => {
       } catch (e: unknown) {
         expect((e as {response: {status: number}}).response.status).toBe(404);
       }
+    });
+  });
+
+  describe('agent file lifecycle', () => {
+    let agentFile: CountingAgentFile;
+    let originalGetAgentFile: AgentLoader['getAgentFile'];
+
+    beforeEach(async () => {
+      agentFile = new CountingAgentFile();
+      originalGetAgentFile = agentLoader.getAgentFile;
+      agentLoader.getAgentFile = () => Promise.resolve(agentFile);
+
+      await sessionService.createSession({
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: 'sessionId',
+      });
+    });
+
+    afterEach(() => {
+      agentLoader.getAgentFile = originalGetAgentFile;
+    });
+
+    it('leaves the borrowed agent file undisposed across two sequential run requests', async () => {
+      expect(await postRun(client)).toBe(200);
+      expect(await postRun(client)).toBe(200);
+
+      expect(agentFile.disposeCount).toBe(0);
+    });
+
+    it('leaves the borrowed agent file undisposed across two sequential agent-graph requests', async () => {
+      expect(await getEventGraph(client, sessionService)).toBe(200);
+      expect(await getEventGraph(client, sessionService)).toBe(200);
+
+      expect(agentFile.disposeCount).toBe(0);
+    });
+
+    it('does not dispose the borrowed agent file when a run and a graph request share an app', async () => {
+      expect(await postRun(client)).toBe(200);
+      expect(await getEventGraph(client, sessionService)).toBe(200);
+
+      expect(agentFile.disposeCount).toBe(0);
     });
   });
 
