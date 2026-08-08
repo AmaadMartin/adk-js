@@ -82,6 +82,9 @@ describe('getOrCreateSession with DatabaseSessionService', () => {
   });
 
   afterEach(async () => {
+    // DatabaseSessionService opens the MikroORM connection in init() and keeps
+    // it private, with no public close(). The cast releases it, and matches the
+    // teardown in database_session_service_test.ts.
     const orm = (service as unknown as {orm: MikroORM}).orm;
     if (orm) {
       await orm.close();
