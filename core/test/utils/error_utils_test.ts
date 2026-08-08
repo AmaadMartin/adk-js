@@ -5,7 +5,7 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {formatError} from '../../src/utils/error_utils.js';
+import {formatError, resolveErrorType} from '../../src/utils/error_utils.js';
 
 const TRUNCATION_MARKER = '... [truncated]';
 const MAX_RESPONSE_BODY_LENGTH = 1000;
@@ -206,5 +206,43 @@ describe('formatError', () => {
       response: {status: 502, text: 'text body'},
     });
     expect(formatError(err)).toContain('text body');
+  });
+});
+
+/** A subclass that never assigns `this.name`. */
+class QuotaExceededError extends Error {}
+
+describe('resolveErrorType', () => {
+  it('reports the HTTP status an ApiError-shaped error carries', () => {
+    const err = Object.assign(new Error('Resource exhausted'), {status: 429});
+    expect(resolveErrorType(err)).toBe('429');
+  });
+
+  it('reports the class name of a built-in error', () => {
+    expect(resolveErrorType(new TypeError('bad'))).toBe('TypeError');
+  });
+
+  it('reports the class name of a subclass that never sets this.name', () => {
+    expect(resolveErrorType(new QuotaExceededError('over'))).toBe(
+      'QuotaExceededError',
+    );
+  });
+
+  it('ignores a numeric status outside the HTTP range', () => {
+    const err = Object.assign(new QuotaExceededError('over'), {status: 0});
+    expect(resolveErrorType(err)).toBe('QuotaExceededError');
+  });
+
+  it('ignores a status that is not a number', () => {
+    const err = Object.assign(new QuotaExceededError('over'), {status: '429'});
+    expect(resolveErrorType(err)).toBe('QuotaExceededError');
+  });
+
+  it('stringifies a thrown string', () => {
+    expect(resolveErrorType('boom')).toBe('boom');
+  });
+
+  it('stringifies a thrown number', () => {
+    expect(resolveErrorType(42)).toBe('42');
   });
 });
