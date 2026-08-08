@@ -10,6 +10,7 @@ import {InstructionProvider} from '../agents/llm_agent.js';
 import {ReadonlyContext} from '../agents/readonly_context.js';
 import {LlmRequest} from '../models/llm_request.js';
 import {LlmResponse} from '../models/llm_response.js';
+import {isPart} from '../utils/content_utils.js';
 import {BasePlugin} from './base_plugin.js';
 
 /**
@@ -81,11 +82,19 @@ export class GlobalInstructionPlugin extends BasePlugin {
         finalGlobalInstruction,
         ...existingInstruction,
       ];
-    } else {
+    } else if (isPart(existingInstruction)) {
       params.llmRequest.config.systemInstruction = [
         finalGlobalInstruction,
         existingInstruction,
-      ] as unknown as string[];
+      ];
+    } else {
+      params.llmRequest.config.systemInstruction = {
+        role: existingInstruction.role,
+        parts: [
+          {text: finalGlobalInstruction},
+          ...(existingInstruction.parts ?? []),
+        ],
+      };
     }
 
     return;

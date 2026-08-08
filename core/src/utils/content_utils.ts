@@ -6,20 +6,17 @@
 
 import {Content, ContentUnion, Part} from '@google/genai';
 
-/** Separator placed between the text fragments recovered from one value. */
-const TEXT_SEPARATOR = '\n';
-
 /**
  * Distinguishes the two object arms of `ContentUnion`. Only `Content` carries
  * a `parts` array; every other object arm is a `Part`.
  */
-function isPart(value: Content | Part): value is Part {
+export function isPart(value: Content | Part): value is Part {
   return !('parts' in value);
 }
 
 /** Joins the fragments that carry text, or returns `undefined` when none do. */
 function joinTexts(texts: Array<string | undefined>): string | undefined {
-  return texts.filter((text) => !!text).join(TEXT_SEPARATOR) || undefined;
+  return texts.filter(Boolean).join('\n') || undefined;
 }
 
 /**

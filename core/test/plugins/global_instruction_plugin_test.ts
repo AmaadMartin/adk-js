@@ -278,6 +278,48 @@ describe('GlobalInstructionPlugin', () => {
     ]);
   });
 
+  it('should prepend global instruction as a part of an existing Content', async () => {
+    const plugin = new GlobalInstructionPlugin('Global instruction.');
+    const llmRequest: LlmRequest = {
+      contents: [],
+      toolsDict: {},
+      liveConnectConfig: {},
+      config: {
+        systemInstruction: {role: 'system', parts: [{text: 'Existing.'}]},
+      },
+    };
+
+    await plugin.beforeModelCallback({
+      callbackContext: mockCallbackContext,
+      llmRequest,
+    });
+
+    expect(llmRequest.config?.systemInstruction).toEqual({
+      role: 'system',
+      parts: [{text: 'Global instruction.'}, {text: 'Existing.'}],
+    });
+  });
+
+  it('should prepend global instruction to a Content that has no parts', async () => {
+    const plugin = new GlobalInstructionPlugin('Global instruction.');
+    const llmRequest: LlmRequest = {
+      contents: [],
+      toolsDict: {},
+      liveConnectConfig: {},
+      config: {systemInstruction: {role: 'system', parts: undefined}},
+    };
+
+    await plugin.beforeModelCallback({
+      callbackContext: mockCallbackContext,
+      llmRequest,
+    });
+
+    expect(llmRequest.config?.systemInstruction).toEqual({
+      role: 'system',
+      parts: [{text: 'Global instruction.'}],
+    });
+  });
+
   it('should keep every instruction when a tool appends after the plugin', async () => {
     const plugin = new GlobalInstructionPlugin('Global instruction.');
     const llmRequest = {
