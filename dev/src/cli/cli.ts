@@ -361,7 +361,7 @@ export function createProgram(): Command {
     )
     .option(
       '--session_id <string>',
-      'Optional. The session ID to save the session to on exit when --save_session is set to true. User will be prompted to enter a session ID if not set.',
+      'Optional. The session ID to save the session to on exit when --save_session is set. User will be prompted to enter a session ID if not set.',
     )
     .option(
       '--replay <string>',
