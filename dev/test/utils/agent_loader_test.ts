@@ -139,11 +139,102 @@ const agent = new FakeAgentForApp('agent_for_app_default');
 export default new App({ name: 'test_app_default', rootAgent: agent });
 `;
 
+const agentCjsContent = `
+const {BaseAgent} = require('@google/adk');
+
+class FakeCjsAgent extends BaseAgent {
+  constructor(name) {
+    super({ name });
+  }
+}
+exports.rootAgent = new FakeCjsAgent('agent_cjs');
+`;
+
+const agentEsmContent = `
+import {BaseAgent} from '@google/adk';
+
+class FakeEsmAgent extends BaseAgent {
+  constructor(name) {
+    super({ name });
+  }
+}
+export const rootAgent = new FakeEsmAgent('agent_esm');
+`;
+
+/** The batched `esbuild.build` option shape the agent loader passes. */
+interface BatchBuildOptions {
+  entryPoints: Array<{in: string; out: string}>;
+  outdir: string;
+  outExtension: {'.js': string};
+  format: string;
+}
+
+/** A temp directory handed out by the mocked `createTempDir`. */
+interface TempDirRecord {
+  prefix: string;
+  dir: string;
+}
+
+/** The `replace-dirname` plugin registered on a stub esbuild build. */
+interface PluginHarness {
+  name: string;
+  onLoad: Mock;
+  load: (
+    args: Pick<esbuild.OnLoadArgs, 'path'>,
+  ) => Promise<esbuild.OnLoadResult | undefined>;
+}
+
+function setupPlugin(entryDirs: ReadonlyMap<string, string>): PluginHarness {
+  const plugin = replaceDirnamePlugin(entryDirs);
+  // The stub carries `onLoad`, the only PluginBuild hook the plugin uses.
+  const build = {onLoad: vi.fn()};
+  plugin.setup(build as unknown as esbuild.PluginBuild);
+
+  return {
+    name: plugin.name,
+    onLoad: build.onLoad,
+    load: build.onLoad.mock.calls[0][1],
+  };
+}
+
 describe('AgentLoader', () => {
   let tempAgentsDir: string;
   let tempLoaderDir: string;
+  let createdTempDirs: TempDirRecord[];
 
-  const compiledPath = (fileName: string) => path.join(tempLoaderDir, fileName);
+  /** Returns the options of the given mocked `esbuild.build` call. */
+  function buildOptions(callIndex: number): BatchBuildOptions {
+    return (esbuild.build as Mock).mock.calls[callIndex][0];
+  }
+
+  /** Returns the temp directories created under the given prefix. */
+  function tempDirsWithPrefix(prefix: string): string[] {
+    return createdTempDirs
+      .filter((record) => record.prefix === prefix)
+      .map((record) => record.dir);
+  }
+
+  /**
+   * Makes `esbuild.build` write the given content for every entry point of the
+   * batch, at the path the loader expects to rename from.
+   */
+  function mockEsbuildBuild(
+    contentFor: (entryPath: string) => string | Promise<string>,
+  ) {
+    (esbuild.build as Mock).mockImplementation(
+      async (options: BatchBuildOptions) => {
+        const ext = options.outExtension['.js'];
+        await Promise.all(
+          options.entryPoints.map(async (entry) =>
+            fs.writeFile(
+              path.join(options.outdir, entry.out + ext),
+              await contentFor(entry.in),
+            ),
+          ),
+        );
+      },
+    );
+  }
 
   beforeAll(async () => {
     tempAgentsDir = await fs.mkdtemp(
@@ -161,10 +252,15 @@ describe('AgentLoader', () => {
   });
 
   beforeEach(async () => {
-    (fileUtils.createTempDir as Mock).mockImplementation(async () => {
-      await fs.mkdir(tempLoaderDir, {recursive: true});
-      return tempLoaderDir;
-    });
+    createdTempDirs = [];
+    (fileUtils.createTempDir as Mock).mockImplementation(
+      async (prefix: string) => {
+        await fs.mkdir(tempLoaderDir, {recursive: true});
+        const dir = await fs.mkdtemp(path.join(tempLoaderDir, 'agent-'));
+        createdTempDirs.push({prefix, dir});
+        return dir;
+      },
+    );
     (fileUtils.isFile as Mock).mockImplementation(async (filePath) => {
       try {
         const stat = await fs.stat(filePath as string);
@@ -247,16 +343,13 @@ describe('AgentLoader', () => {
       const agentPath = path.join(tempAgentsDir, 'agent1.js');
       await fs.writeFile(agentPath, agent1JsContent);
 
-      const compiledAgentPath = compiledPath('agent1.cjs');
-      (esbuild.build as Mock).mockImplementation(async () => {
-        await fs.writeFile(compiledAgentPath, agent1JsContent);
-        return Promise.resolve();
-      });
+      mockEsbuildBuild(() => agent1JsContent);
 
       const agentFile = new AgentFile(agentPath);
       const agent = await agentFile.load();
 
       expect(agent.name).toEqual('agent1');
+      const compiledAgentPath = agentFile.getFilePath();
       await agentFile.dispose();
       await expect(fs.access(compiledAgentPath)).rejects.toThrow();
     });
@@ -265,19 +358,16 @@ describe('AgentLoader', () => {
       const agentPath = path.join(tempAgentsDir, 'agent2.ts');
       await fs.writeFile(agentPath, agent2TsContent);
 
-      const compiledAgentPath = compiledPath('agent2.cjs');
-      (esbuild.build as Mock).mockImplementation(async () => {
-        await fs.writeFile(compiledAgentPath, agent2CjsContentMocked);
-        return Promise.resolve();
-      });
+      mockEsbuildBuild(() => agent2CjsContentMocked);
 
       const agentFile = new AgentFile(agentPath);
       const agent = await agentFile.load();
 
       expect(agent.name).toEqual('agent2');
       expect((esbuild.build as Mock).mock.calls[0][0]).toMatchObject({
-        entryPoints: [agentPath],
-        outfile: compiledAgentPath,
+        entryPoints: [{in: agentPath, out: expect.any(String)}],
+        outdir: expect.any(String),
+        outExtension: {'.js': '.cjs'},
         target: 'node16',
         platform: 'node',
         format: 'cjs',
@@ -287,19 +377,30 @@ describe('AgentLoader', () => {
         external: expect.arrayContaining(['onnxruntime-node']),
       });
 
+      const compiledAgentPath = agentFile.getFilePath();
       await agentFile.dispose();
       await expect(fs.access(compiledAgentPath)).rejects.toThrow();
+    });
+
+    it('compiles a lone entrypoint as a batch of one', async () => {
+      const agentPath = path.join(tempAgentsDir, 'agent1.js');
+      await fs.writeFile(agentPath, agent1JsContent);
+
+      mockEsbuildBuild(() => agent1JsContent);
+
+      const agentFile = new AgentFile(agentPath);
+      await agentFile.load();
+
+      expect(esbuild.build).toHaveBeenCalledTimes(1);
+      expect(buildOptions(0).entryPoints).toHaveLength(1);
+      await agentFile.dispose();
     });
 
     it('compiles into a private temp dir without allowing overwrite', async () => {
       const agentPath = path.join(tempAgentsDir, 'agent1.js');
       await fs.writeFile(agentPath, agent1JsContent);
 
-      const compiledAgentPath = compiledPath('agent1.cjs');
-      (esbuild.build as Mock).mockImplementation(async () => {
-        await fs.writeFile(compiledAgentPath, agent1JsContent);
-        return Promise.resolve();
-      });
+      mockEsbuildBuild(() => agent1JsContent);
 
       const agentFile = new AgentFile(agentPath);
       await agentFile.load();
@@ -316,14 +417,20 @@ describe('AgentLoader', () => {
       const agentPath = path.join(tempAgentsDir, 'bad_agent.js');
       await fs.writeFile(agentPath, 'exports.someOther = 1;');
 
-      const compiledAgentPath = compiledPath('bad_agent.cjs');
-      (esbuild.build as Mock).mockImplementation(async () => {
-        await fs.writeFile(compiledAgentPath, 'exports.someOther = 1;');
-        return Promise.resolve();
-      });
+      mockEsbuildBuild(() => 'exports.someOther = 1;');
 
       const agentFile = new AgentFile(agentPath);
-      await expect(agentFile.load()).rejects.toThrow(
+      const loadError = await agentFile.load().then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      const compiledAgentPath = path.join(
+        tempDirsWithPrefix('adk_agent_loader')[0],
+        'bad_agent.cjs',
+      );
+
+      expect(loadError).toHaveProperty(
+        'message',
         `Failed to load agent ${
           compiledAgentPath
         }: No @google/adk BaseAgent class instance found. Please check that file is not empty and it has export of @google/adk BaseAgent class (e.g. LlmAgent) instance.`,
@@ -342,11 +449,7 @@ describe('AgentLoader', () => {
       const agentPath = path.join(tempAgentsDir, 'agent1.js');
       await fs.writeFile(agentPath, agent1JsContent);
 
-      const compiledAgentPath = compiledPath('agent1.cjs');
-      (esbuild.build as Mock).mockImplementation(async () => {
-        await fs.writeFile(compiledAgentPath, agent1JsContent);
-        return Promise.resolve();
-      });
+      mockEsbuildBuild(() => agent1JsContent);
 
       const agentFile = new AgentFile(agentPath);
       await agentFile.load();
@@ -358,17 +461,15 @@ describe('AgentLoader', () => {
 
     it('returns cleanup file path if compiled', async () => {
       const agentPath = path.join(tempAgentsDir, 'agent2.ts');
-      const compiledAgentPath = compiledPath('agent2.cjs');
       await fs.writeFile(agentPath, agent2TsContent);
 
-      (esbuild.build as Mock).mockImplementation(async () => {
-        await fs.writeFile(compiledAgentPath, agent2CjsContentMocked);
-        return Promise.resolve();
-      });
+      mockEsbuildBuild(() => agent2CjsContentMocked);
 
       const agentFile = new AgentFile(agentPath);
       await agentFile.load();
-      expect(agentFile.getFilePath()).toEqual(compiledAgentPath);
+      expect(agentFile.getFilePath()).toEqual(
+        path.join(tempDirsWithPrefix('adk_agent_loader')[0], 'agent2.cjs'),
+      );
       await agentFile.dispose();
     });
 
@@ -389,16 +490,13 @@ describe('AgentLoader', () => {
       const agentPath = path.join(tempAgentsDir, 'agent_default.js');
       await fs.writeFile(agentPath, agentDefaultExportContent);
 
-      const compiledAgentPath = compiledPath('agent_default.cjs');
-      (esbuild.build as Mock).mockImplementation(async () => {
-        await fs.writeFile(compiledAgentPath, agentDefaultExportContent);
-        return Promise.resolve();
-      });
+      mockEsbuildBuild(() => agentDefaultExportContent);
 
       const agentFile = new AgentFile(agentPath);
       const agent = await agentFile.load();
 
       expect(agent.name).toEqual('agentDefault');
+      const compiledAgentPath = agentFile.getFilePath();
       await agentFile.dispose();
       await expect(fs.access(compiledAgentPath)).rejects.toThrow();
     });
@@ -407,11 +505,7 @@ describe('AgentLoader', () => {
       const appPath = path.join(tempAgentsDir, 'app1.js');
       await fs.writeFile(appPath, appJsContent);
 
-      const compiledAppPath = compiledPath('app1.cjs');
-      (esbuild.build as Mock).mockImplementation(async () => {
-        await fs.writeFile(compiledAppPath, appJsContent);
-        return Promise.resolve();
-      });
+      mockEsbuildBuild(() => appJsContent);
 
       const agentFile = new AgentFile(appPath);
       const loaded = await agentFile.load();
@@ -426,11 +520,7 @@ describe('AgentLoader', () => {
       const appPath = path.join(tempAgentsDir, 'app_default.js');
       await fs.writeFile(appPath, appDefaultExportContent);
 
-      const compiledAppPath = compiledPath('app_default.cjs');
-      (esbuild.build as Mock).mockImplementation(async () => {
-        await fs.writeFile(compiledAppPath, appDefaultExportContent);
-        return Promise.resolve();
-      });
+      mockEsbuildBuild(() => appDefaultExportContent);
 
       const agentFile = new AgentFile(appPath);
       const app = await agentFile.loadApp();
@@ -445,11 +535,7 @@ describe('AgentLoader', () => {
       const agentPath = path.join(tempAgentsDir, 'agent1.js');
       await fs.writeFile(agentPath, agent1JsContent);
 
-      const compiledAgentPath = compiledPath('agent1.cjs');
-      (esbuild.build as Mock).mockImplementation(async () => {
-        await fs.writeFile(compiledAgentPath, agent1JsContent);
-        return Promise.resolve();
-      });
+      mockEsbuildBuild(() => agent1JsContent);
 
       const agentFile = new AgentFile(agentPath);
       const app = await agentFile.loadApp();
@@ -464,11 +550,7 @@ describe('AgentLoader', () => {
       const agentPath = path.join(tempAgentsDir, 'agent_multiple.js');
       await fs.writeFile(agentPath, agentMultipleExportsContent);
 
-      const compiledAgentPath = compiledPath('agent_multiple.cjs');
-      (esbuild.build as Mock).mockImplementation(async () => {
-        await fs.writeFile(compiledAgentPath, agentMultipleExportsContent);
-        return Promise.resolve();
-      });
+      mockEsbuildBuild(() => agentMultipleExportsContent);
 
       const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const agentFile = new AgentFile(agentPath);
@@ -486,11 +568,7 @@ describe('AgentLoader', () => {
       const agentPath = path.join(tempAgentsDir, 'agent1.js');
       await fs.writeFile(agentPath, agent1JsContent);
 
-      const compiledAgentPath = compiledPath('agent1.cjs');
-      (esbuild.build as Mock).mockImplementation(async () => {
-        await fs.writeFile(compiledAgentPath, agent1JsContent);
-        return Promise.resolve();
-      });
+      mockEsbuildBuild(() => agent1JsContent);
 
       const agentFile = new AgentFile(agentPath);
       const agent1 = await agentFile.load();
@@ -531,146 +609,92 @@ describe('AgentLoader', () => {
     ])('$name', async ({content, expected}) => {
       const filePath = path.join(tempAgentsDir, 'test_agent.ts');
       const fileDir = path.dirname(filePath);
-      const plugin = replaceDirnamePlugin(filePath, fileDir);
+      const plugin = setupPlugin(new Map([[filePath, fileDir]]));
 
       expect(plugin.name).toBe('replace-dirname');
-
-      const mockBuild = {
-        onLoad: vi.fn(),
-      };
-
-      plugin.setup(mockBuild as unknown as esbuild.PluginBuild);
-
-      expect(mockBuild.onLoad).toHaveBeenCalledWith(
+      expect(plugin.onLoad).toHaveBeenCalledWith(
         {filter: /.*/},
         expect.any(Function),
       );
 
-      const onLoadCallback = mockBuild.onLoad.mock.calls[0][1];
-
       await fs.writeFile(filePath, content);
 
-      const result = await onLoadCallback({path: filePath});
+      const result = await plugin.load({path: filePath});
 
-      expect(result.contents).toContain(expected(filePath, fileDir));
-      expect(result.loader).toBe('js');
+      expect(result?.contents).toContain(expected(filePath, fileDir));
+      expect(result?.loader).toBe('js');
     });
 
     it('does not replace tokens in strings', async () => {
       const filePath = path.join(tempAgentsDir, 'test_agent.ts');
       const fileDir = path.dirname(filePath);
-      const plugin = replaceDirnamePlugin(filePath, fileDir);
-
-      const mockBuild = {
-        onLoad: vi.fn(),
-      };
-
-      plugin.setup(mockBuild as unknown as esbuild.PluginBuild);
-      const onLoadCallback = mockBuild.onLoad.mock.calls[0][1];
+      const plugin = setupPlugin(new Map([[filePath, fileDir]]));
 
       await fs.writeFile(
         filePath,
         `const str = "__dirname";\nconst code = __dirname;`,
       );
 
-      const result = await onLoadCallback({path: filePath});
+      const result = await plugin.load({path: filePath});
 
-      expect(result.contents).toContain('const str = "__dirname"');
-      expect(result.contents).toContain(JSON.stringify(fileDir));
-      expect(result.loader).toBe('js');
+      expect(result?.contents).toContain('const str = "__dirname"');
+      expect(result?.contents).toContain(JSON.stringify(fileDir));
+      expect(result?.loader).toBe('js');
     });
 
     it('returns undefined for node_modules', async () => {
       const filePath = '/path/to/node_modules/some_pkg/index.js';
-      const plugin = replaceDirnamePlugin(
-        path.join(tempAgentsDir, 'test_agent.ts'),
-        tempAgentsDir,
-      );
+      const entryPath = path.join(tempAgentsDir, 'test_agent.ts');
+      const plugin = setupPlugin(new Map([[entryPath, tempAgentsDir]]));
 
-      const mockBuild = {
-        onLoad: vi.fn(),
-      };
-
-      plugin.setup(mockBuild as unknown as esbuild.PluginBuild);
-      const onLoadCallback = mockBuild.onLoad.mock.calls[0][1];
-
-      const result = await onLoadCallback({path: filePath});
+      const result = await plugin.load({path: filePath});
 
       expect(result).toBeUndefined();
     });
 
-    it('uses js loader for non-ts files', async () => {
-      const filePath = path.join(tempAgentsDir, 'test_agent.js');
-      const fileDir = path.dirname(filePath);
-      const plugin = replaceDirnamePlugin(filePath, fileDir);
+    it('gives each batched entry its own directory', async () => {
+      const firstDir = await fs.mkdtemp(path.join(tempAgentsDir, 'batch-'));
+      const secondDir = await fs.mkdtemp(path.join(tempAgentsDir, 'batch-'));
+      const firstPath = path.join(firstDir, 'agent.ts');
+      const secondPath = path.join(secondDir, 'agent.ts');
+      await fs.writeFile(firstPath, 'const dir = __dirname;');
+      await fs.writeFile(secondPath, 'const dir = __dirname;');
 
-      const mockBuild = {
-        onLoad: vi.fn(),
-      };
+      const plugin = setupPlugin(
+        new Map([
+          [firstPath, firstDir],
+          [secondPath, secondDir],
+        ]),
+      );
 
-      plugin.setup(mockBuild as unknown as esbuild.PluginBuild);
-      const onLoadCallback = mockBuild.onLoad.mock.calls[0][1];
+      const firstResult = await plugin.load({path: firstPath});
+      const secondResult = await plugin.load({path: secondPath});
 
-      // Write real file
-      await fs.writeFile(filePath, 'const dir = __dirname;');
-
-      const result = await onLoadCallback({path: filePath});
-
-      expect(result).toMatchObject({
-        loader: 'js',
-      });
+      expect(firstResult?.contents).toContain(JSON.stringify(firstDir));
+      expect(firstResult?.contents).not.toContain(JSON.stringify(secondDir));
+      expect(secondResult?.contents).toContain(JSON.stringify(secondDir));
+      expect(secondResult?.contents).not.toContain(JSON.stringify(firstDir));
     });
 
-    it('returns js loader for mts files', async () => {
-      const filePath = path.join(tempAgentsDir, 'test_agent.mts');
+    it.each([
+      {name: 'uses js loader for non-ts files', fileName: 'test_agent.js'},
+      {name: 'returns js loader for mts files', fileName: 'test_agent.mts'},
+      {name: 'returns js loader for cts files', fileName: 'test_agent.cts'},
+    ])('$name', async ({fileName}) => {
+      const filePath = path.join(tempAgentsDir, fileName);
       const fileDir = path.dirname(filePath);
-      const plugin = replaceDirnamePlugin(filePath, fileDir);
-
-      const mockBuild = {
-        onLoad: vi.fn(),
-      };
-
-      plugin.setup(mockBuild as unknown as esbuild.PluginBuild);
-      const onLoadCallback = mockBuild.onLoad.mock.calls[0][1];
+      const plugin = setupPlugin(new Map([[filePath, fileDir]]));
 
       await fs.writeFile(filePath, 'const dir = __dirname;');
 
-      const result = await onLoadCallback({path: filePath});
+      const result = await plugin.load({path: filePath});
 
-      expect(result).toMatchObject({
-        loader: 'js',
-      });
-    });
-
-    it('returns js loader for cts files', async () => {
-      const filePath = path.join(tempAgentsDir, 'test_agent.cts');
-      const fileDir = path.dirname(filePath);
-      const plugin = replaceDirnamePlugin(filePath, fileDir);
-
-      const mockBuild = {
-        onLoad: vi.fn(),
-      };
-
-      plugin.setup(mockBuild as unknown as esbuild.PluginBuild);
-      const onLoadCallback = mockBuild.onLoad.mock.calls[0][1];
-
-      await fs.writeFile(filePath, 'const dir = __dirname;');
-
-      const result = await onLoadCallback({path: filePath});
-
-      expect(result).toMatchObject({
-        loader: 'js',
-      });
+      expect(result).toMatchObject({loader: 'js'});
     });
   });
 
   describe('AgentLoader', () => {
     beforeEach(async () => {
-      (fileUtils.createTempDir as Mock).mockImplementation(async () => {
-        await fs.mkdir(tempLoaderDir, {recursive: true});
-        return fs.mkdtemp(path.join(tempLoaderDir, 'agent-'));
-      });
-
       await fs.writeFile(
         path.join(tempAgentsDir, 'agent1.js'),
         agent1JsContent,
@@ -684,22 +708,18 @@ describe('AgentLoader', () => {
         agent3JsContent,
       );
 
-      (esbuild.build as Mock).mockImplementation(
-        async (options: {entryPoints: string[]; outfile: string}) => {
-          if (options.entryPoints[0].includes('agent1.js')) {
-            await fs.writeFile(options.outfile, agent1JsContent);
-          } else if (options.entryPoints[0].includes('agent2.ts')) {
-            await fs.writeFile(options.outfile, agent2CjsContentMocked);
-          } else if (options.entryPoints[0].includes('agent3')) {
-            await fs.writeFile(options.outfile, agent3JsContent);
-          } else {
-            const content = await fs.readFile(options.entryPoints[0], 'utf8');
-            await fs.writeFile(options.outfile, content);
-          }
-
-          return Promise.resolve();
-        },
-      );
+      mockEsbuildBuild((entryPath) => {
+        if (entryPath.includes('agent1.js')) {
+          return agent1JsContent;
+        }
+        if (entryPath.includes('agent2.ts')) {
+          return agent2CjsContentMocked;
+        }
+        if (entryPath.includes('agent3')) {
+          return agent3JsContent;
+        }
+        return fs.readFile(entryPath, 'utf8');
+      });
     });
 
     it('lists all agents', async () => {
@@ -745,13 +765,112 @@ describe('AgentLoader', () => {
       const loader = new AgentLoader(tempAgentsDir);
       await loader.preloadAgents();
 
-      const spy = vi.spyOn(
-        loader as unknown as {loadAgentFromFile: () => void},
-        'loadAgentFromFile',
-      );
+      const buildsAfterFirstPreload = (esbuild.build as Mock).mock.calls.length;
       await loader.preloadAgents();
 
-      expect(spy).not.toHaveBeenCalled();
+      expect((esbuild.build as Mock).mock.calls).toHaveLength(
+        buildsAfterFirstPreload,
+      );
+      await loader.disposeAll();
+    });
+
+    it('compiles every discovered entrypoint in one build', async () => {
+      const loader = new AgentLoader(tempAgentsDir);
+      const agents = await loader.listAgents();
+
+      expect(agents).toEqual(['agent1', 'agent2', 'agent3']);
+      expect(esbuild.build).toHaveBeenCalledTimes(1);
+      expect(
+        buildOptions(0)
+          .entryPoints.map((entry) => entry.in)
+          .sort(),
+      ).toEqual([
+        path.join(tempAgentsDir, 'agent1.js'),
+        path.join(tempAgentsDir, 'agent2.ts'),
+        path.join(tempAgentsDir, 'agent3', 'agent.js'),
+      ]);
+
+      await loader.disposeAll();
+    });
+
+    it('gives every entrypoint its own output file and directory', async () => {
+      const loader = new AgentLoader(tempAgentsDir);
+      await loader.listAgents();
+
+      const compiledPaths = await Promise.all(
+        ['agent1', 'agent2', 'agent3'].map(async (name) =>
+          (await loader.getAgentFile(name)).getFilePath(),
+        ),
+      );
+
+      expect(new Set(compiledPaths).size).toBe(3);
+      expect(new Set(compiledPaths.map((p) => path.dirname(p))).size).toBe(3);
+      await expect(fs.readFile(compiledPaths[0], 'utf8')).resolves.toBe(
+        agent1JsContent,
+      );
+      await expect(fs.readFile(compiledPaths[1], 'utf8')).resolves.toBe(
+        agent2CjsContentMocked,
+      );
+      await expect(fs.readFile(compiledPaths[2], 'utf8')).resolves.toBe(
+        agent3JsContent,
+      );
+
+      await loader.disposeAll();
+    });
+
+    it('builds cjs and esm entrypoints in separate builds', async () => {
+      const mixedDir = await fs.mkdtemp(path.join(tempAgentsDir, 'mixed-'));
+      await fs.writeFile(path.join(mixedDir, 'first.cjs'), agentCjsContent);
+      await fs.writeFile(path.join(mixedDir, 'second.mjs'), agentEsmContent);
+      mockEsbuildBuild((entryPath) => fs.readFile(entryPath, 'utf8'));
+
+      const loader = new AgentLoader(mixedDir);
+      const agents = await loader.listAgents();
+
+      expect(agents).toEqual(['first', 'second']);
+      expect(esbuild.build).toHaveBeenCalledTimes(2);
+      expect([buildOptions(0), buildOptions(1)]).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            format: 'cjs',
+            outExtension: {'.js': '.cjs'},
+          }),
+          expect.objectContaining({
+            format: 'esm',
+            outExtension: {'.js': '.mjs'},
+          }),
+        ]),
+      );
+
+      await loader.disposeAll();
+    });
+
+    it('removes every temp directory when the build fails', async () => {
+      (esbuild.build as Mock).mockRejectedValue(new Error('build failed'));
+
+      const loader = new AgentLoader(tempAgentsDir);
+
+      await expect(loader.listAgents()).rejects.toThrow('build failed');
+      expect(createdTempDirs.length).toBeGreaterThan(0);
+      for (const {dir} of createdTempDirs) {
+        await expect(fs.access(dir)).rejects.toThrow();
+      }
+    });
+
+    it('removes the batch scratch directory after a successful preload', async () => {
+      const loader = new AgentLoader(tempAgentsDir);
+      await loader.listAgents();
+
+      const scratchDirs = tempDirsWithPrefix('adk_agent_loader_build');
+      expect(scratchDirs).toHaveLength(1);
+      await expect(fs.access(scratchDirs[0])).rejects.toThrow();
+
+      const agentDirs = tempDirsWithPrefix('adk_agent_loader');
+      expect(agentDirs).toHaveLength(3);
+      for (const dir of agentDirs) {
+        await fs.access(dir);
+      }
+
       await loader.disposeAll();
     });
 
