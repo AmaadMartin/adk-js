@@ -9,7 +9,6 @@ import {
   DatabaseSessionService,
   InMemorySessionService,
 } from '@google/adk';
-import {MikroORM} from '@mikro-orm/core';
 import {SqliteDriver} from '@mikro-orm/sqlite';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
@@ -82,13 +81,7 @@ describe('getOrCreateSession with DatabaseSessionService', () => {
   });
 
   afterEach(async () => {
-    // DatabaseSessionService opens the MikroORM connection in init() and keeps
-    // it private, with no public close(). The cast releases it, and matches the
-    // teardown in database_session_service_test.ts.
-    const orm = (service as unknown as {orm: MikroORM}).orm;
-    if (orm) {
-      await orm.close();
-    }
+    await service.close();
   });
 
   it('resolves two concurrent calls for the same id to one session', async () => {
