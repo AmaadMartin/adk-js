@@ -90,6 +90,14 @@ export const rootAgent = new LlmAgent({
 });
 `.trim();
 
+/**
+ * Location used when the Vertex AI backend is selected but no region is
+ * available from `GOOGLE_CLOUD_LOCATION`, gcloud, or `--region`. Matches the
+ * default adk-python offers and the one adk-js already uses in
+ * `AgentEngineSandboxCodeExecutor`.
+ */
+const DEFAULT_VERTEX_REGION = 'us-central1';
+
 interface AgentCreationOptions {
   agentName: string;
   forceYes: boolean;
@@ -98,6 +106,12 @@ interface AgentCreationOptions {
   project: string;
   region: string;
   language: string;
+}
+
+function requireNonEmpty(value: string): string | undefined {
+  return value.trim()
+    ? undefined
+    : 'A value is required for the Vertex AI backend.';
 }
 
 async function getGcpProject(): Promise<string> {
@@ -168,16 +182,24 @@ function generateEnvFile(options: AgentCreationOptions): string {
     // core). GOOGLE_API_KEY is only consulted for Vertex AI Express Mode, so
     // writing it here left every scaffolded project unable to authenticate.
     lines.push(`GOOGLE_GENAI_API_KEY=${options.apiKey}`);
-    lines.push(`GOOGLE_GENAI_USE_VERTEXAI=0`);
   }
   if (options.project) {
+    // A project is only ever collected for the Vertex AI backend, so the
+    // project — not "every Vertex field is filled in" — is what selects it.
+    // The runtime rejects Vertex without a location, so fall back to the
+    // default region rather than write a .env that cannot start.
     lines.push(`GOOGLE_CLOUD_PROJECT=${options.project}`);
-  }
-  if (options.region) {
-    lines.push(`GOOGLE_CLOUD_LOCATION=${options.region}`);
-  }
-  if (options.region && options.project) {
+    lines.push(
+      `GOOGLE_CLOUD_LOCATION=${options.region || DEFAULT_VERTEX_REGION}`,
+    );
     lines.push(`GOOGLE_GENAI_USE_VERTEXAI=1`);
+  } else {
+    if (options.region) {
+      lines.push(`GOOGLE_CLOUD_LOCATION=${options.region}`);
+    }
+    if (options.apiKey) {
+      lines.push(`GOOGLE_GENAI_USE_VERTEXAI=0`);
+    }
   }
   return lines.join('\n');
 }
@@ -266,24 +288,26 @@ export async function createAgent(options: AgentCreationOptions) {
         : await text({
             message: 'Enter the Google Cloud Project ID',
             initialValue: defaultProject,
+            validate: requireNonEmpty,
           });
 
       if (isCancel(projectResponse)) {
         process.exit(0);
       }
-      options.project = projectResponse;
+      options.project = projectResponse.trim();
 
       const regionResponse: symbol | string = options.forceYes
         ? defaultRegion
         : await text({
             message: 'Enter the Google Cloud Region',
-            initialValue: defaultRegion,
+            initialValue: defaultRegion || DEFAULT_VERTEX_REGION,
+            validate: requireNonEmpty,
           });
 
       if (isCancel(regionResponse)) {
         process.exit(0);
       }
-      options.region = regionResponse;
+      options.region = regionResponse.trim();
     } else {
       const apiKeyResponse: symbol | string = options.forceYes
         ? ''
