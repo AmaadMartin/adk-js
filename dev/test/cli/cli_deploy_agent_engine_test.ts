@@ -4,12 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  CopyOptions,
-  MakeDirectoryOptions,
-  ObjectEncodingOptions,
-  PathLike,
-} from 'node:fs';
+import {CopyOptions, ObjectEncodingOptions, PathLike} from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -74,13 +69,6 @@ vi.mock('node:fs/promises', async (importOriginal) => {
     },
   );
 
-  const mockMkdir = vi.fn((path: PathLike, opts?: MakeDirectoryOptions) => {
-    if (isCoveragePath(path)) {
-      return actual.mkdir(path, opts);
-    }
-    return actual.mkdir(path, opts);
-  });
-
   const mockReaddir = vi.fn((path: PathLike, opts?: ObjectEncodingOptions) => {
     if (isCoveragePath(path)) {
       return actual.readdir(path, opts);
@@ -100,7 +88,6 @@ vi.mock('node:fs/promises', async (importOriginal) => {
   const mockFs: Record<string, unknown> = {
     ...actual,
     cp: mockCp,
-    mkdir: mockMkdir,
     readdir: mockReaddir,
   };
 
@@ -108,7 +95,6 @@ vi.mock('node:fs/promises', async (importOriginal) => {
     mockFs.default = {
       ...actual.default,
       cp: mockCp,
-      mkdir: mockMkdir,
       readdir: mockReaddir,
     };
   } else {
@@ -174,7 +160,6 @@ describe('deployToAgentEngine', () => {
     };
     vi.clearAllMocks();
 
-    mockReaddir.mockResolvedValue(['file1.js']);
     vi.spyOn(console, 'info').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
 
