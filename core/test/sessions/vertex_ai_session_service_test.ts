@@ -4,27 +4,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Sessions} from '@google-cloud/vertexai/build/src/genai/sessions.js';
+// @google-cloud/vertexai 1.12.0 re-exports only `Client` out of `src/genai/`.
+import type {Sessions} from '@google-cloud/vertexai/build/src/genai/sessions.js';
 import {createEvent, State, VertexAiSessionService} from '@google/adk';
 import {Session} from '@google/adk/sessions/session.js';
 import {ApiError} from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
-// Mock the unreleased nodejs-vertexai package so the import resolves
-vi.mock('nodejs-vertexai', () => ({
-  SessionsClient: class {
-    create = vi.fn();
-    get = vi.fn();
-    list = vi.fn();
-    delete = vi.fn();
-    events = {append: vi.fn()};
-  },
-}));
-
 const clientConstructor = vi.hoisted(() => vi.fn());
 
-// The service imports Client from this deep path, so the mock must target it.
-vi.mock('@google-cloud/vertexai/build/src/genai/client.js', () => ({
+// The service imports Client from the package root, so the mock must target it.
+vi.mock('@google-cloud/vertexai', () => ({
   Client: class {
     readonly agentEnginesInternal = {sessions: {}};
 

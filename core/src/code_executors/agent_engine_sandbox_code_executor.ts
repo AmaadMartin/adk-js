@@ -5,6 +5,9 @@
  */
 
 import {Client} from '@google-cloud/vertexai';
+// `Language` is a runtime enum with no root re-export in
+// @google-cloud/vertexai 1.12.0, so this deep import cannot be hoisted to the
+// package root or erased.
 import {Language} from '@google-cloud/vertexai/build/src/genai/types.js';
 import {experimental} from '../utils/experimental.js';
 import {guessMimeType} from '../utils/file_utils.js';
