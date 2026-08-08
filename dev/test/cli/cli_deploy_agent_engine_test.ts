@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {CopyOptions, ObjectEncodingOptions, PathLike} from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -54,45 +55,30 @@ vi.mock('node:fs/promises', async (importOriginal) => {
     );
   };
 
-  const mockCp = vi.fn((src, dest, opts) => {
-    if (isCoveragePath(src) || isCoveragePath(dest)) {
+  const mockCp = vi.fn(
+    (src: string | URL, dest: string | URL, opts?: CopyOptions) => {
+      if (isCoveragePath(src) || isCoveragePath(dest)) {
+        return actual.cp(src, dest, opts);
+      }
+      const destStr = typeof dest === 'string' ? dest : String(dest || '');
+      const tempFolder = globalThis.fsMockTempFolder;
+      if (tempFolder && destStr.startsWith(tempFolder)) {
+        return Promise.resolve();
+      }
       return actual.cp(src, dest, opts);
-    }
-    const destStr = typeof dest === 'string' ? dest : String(dest || '');
-    const tempFolder = globalThis.fsMockTempFolder;
-    if (tempFolder && destStr.startsWith(tempFolder)) {
-      return Promise.resolve();
-    }
-    return actual.cp(src, dest, opts);
-  });
+    },
+  );
 
-  const mockMkdir = vi.fn((path, opts) => {
-    if (isCoveragePath(path)) {
-      return actual.mkdir(path, opts);
-    }
-    return actual.mkdir(path, opts);
-  });
-
-  const mockReaddir = vi.fn((path, opts) => {
+  const mockReaddir = vi.fn((path: PathLike, opts?: ObjectEncodingOptions) => {
     if (isCoveragePath(path)) {
       return actual.readdir(path, opts);
     }
     const pathStr = typeof path === 'string' ? path : String(path || '');
     const tempFolder = globalThis.fsMockTempFolder;
-    process.stdout.write(
-      `[GLOBAL MOCK readdir] path: ${pathStr}, tempFolder: ${tempFolder}\n`,
-    );
     if (tempFolder && pathStr.startsWith(tempFolder)) {
       const mockReaddirFn = globalThis.fsMockReaddir;
-      process.stdout.write(
-        `[GLOBAL MOCK readdir] matched tempFolder, mockReaddirFn: ${mockReaddirFn ? 'DEFINED' : 'UNDEFINED'}\n`,
-      );
       if (mockReaddirFn) {
-        const res = mockReaddirFn(path, opts);
-        process.stdout.write(
-          `[GLOBAL MOCK readdir] mockReaddirFn returned: ${res} (type: ${typeof res})\n`,
-        );
-        return res;
+        return mockReaddirFn(path, opts);
       }
       return Promise.resolve([]);
     }
@@ -102,7 +88,6 @@ vi.mock('node:fs/promises', async (importOriginal) => {
   const mockFs: Record<string, unknown> = {
     ...actual,
     cp: mockCp,
-    mkdir: mockMkdir,
     readdir: mockReaddir,
   };
 
@@ -110,7 +95,6 @@ vi.mock('node:fs/promises', async (importOriginal) => {
     mockFs.default = {
       ...actual.default,
       cp: mockCp,
-      mkdir: mockMkdir,
       readdir: mockReaddir,
     };
   } else {
@@ -176,7 +160,6 @@ describe('deployToAgentEngine', () => {
     };
     vi.clearAllMocks();
 
-    mockReaddir.mockResolvedValue(['file1.js']);
     vi.spyOn(console, 'info').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
 
@@ -246,10 +229,6 @@ describe('deployToAgentEngine', () => {
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
-  });
-
-  it('debug: fs.readdir is mock', () => {
-    console.warn('XXX fs.readdir is mock?', vi.isMockFunction(fs.readdir));
   });
 
   it('should deploy successfully with explicit options', async () => {
@@ -523,10 +502,20 @@ describe('deployToAgentEngine', () => {
   });
 
   it('should clean up existing temp folder before deploying', async () => {
+    const rmSpy = vi.spyOn(fs, 'rm');
     await fs.mkdir(tempFolder, {recursive: true});
+    await expect(fs.access(tempFolder)).resolves.toBeUndefined();
     (isFolderExists as Mock).mockResolvedValue(true);
 
     await deployToAgentEngine(defaultOptions);
+
+    // The first rm is the pre-deploy cleanup; the second is the finally block,
+    // which removes the folder on every exit path.
+    expect(rmSpy).toHaveBeenNthCalledWith(1, tempFolder, {
+      recursive: true,
+      force: true,
+    });
+    expect(rmSpy).toHaveBeenCalledTimes(2);
 
     let exists = true;
     try {
