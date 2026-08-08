@@ -56,18 +56,8 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: Use Node.js
-        uses: actions/setup-node@v6
-
-      # `npm audit` resolves the tree from package-lock.json, so this job needs
-      # no install. `--omit=dev` limits the report to the dependencies we
-      # publish, so a devDependency advisory cannot show up on a pull request.
-      #
-      # This check reports; it does not gate. `npm audit` has no way to
-      # acknowledge a finding, so a blocking gate would fail every open pull
-      # request the moment a new advisory lands against a dependency we already
-      # ship. See CONTRIBUTING.md ("Dependency audit") for the conditions under
-      # which this becomes blocking.
+      # Advisory only; needs no install (npm audit reads package-lock.json).
+      # See CONTRIBUTING.md ("Dependency audit").
       #
       # `set -o pipefail` is load-bearing: without it `tee` returns 0 and the
       # summary below claims a clean tree over a report full of findings.
@@ -81,7 +71,6 @@ jobs:
       # `outcome` is the result before `continue-on-error` absorbs it;
       # `conclusion` is always `success` here.
       - name: Publish audit report
-        if: always()
         env:
           AUDIT_OUTCOME: ${{ steps.audit.outcome }}
         run: |
@@ -96,6 +85,6 @@ jobs:
             fi
             echo
             echo '```'
-            cat "${RUNNER_TEMP}/audit.log" || echo '(no audit output captured)'
+            cat "${RUNNER_TEMP}/audit.log"
             echo '```'
           } >> "${GITHUB_STEP_SUMMARY}"
