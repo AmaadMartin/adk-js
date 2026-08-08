@@ -4,28 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export {
-  A2AAgentExecutor,
-  AGENT_CARD_PATH,
-  RemoteA2AAgent,
-  bearerTokenUserBuilder,
-  getA2AAgentCard,
-  toA2a,
-} from './a2a/index.js';
-export type {
-  A2AStreamEventData,
-  A2aUserBuilder,
-  AfterA2ARequestCallback,
-  AfterEventCallback,
-  AfterExecuteCallback,
-  AgentExecutorConfig,
-  BeforeA2ARequestCallback,
-  BeforeExecuteCallback,
-  ExecutorContext,
-  RemoteA2AAgentConfig,
-  RunnerOrRunnerConfig,
-  ToA2aOptions,
-} from './a2a/index.js';
 export {InvocationContext} from './agents/invocation_context.js';
 export type {WorkflowInstructionScope} from './agents/invocation_context.js';
 export {FileArtifactService} from './artifacts/file_artifact_service.js';
@@ -59,6 +37,7 @@ export {
 } from './tools/skill/run_skill_inline_script_tool.js';
 export {RunSkillScriptTool} from './tools/skill/run_skill_script_tool.js';
 
+export * from './a2a/index.js';
 export * from './integrations/agent_registry/agent_registry.js';
 export * from './telemetry/index.js';
 export * from './tools/mcp/index.js';
