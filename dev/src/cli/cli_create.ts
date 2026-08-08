@@ -182,6 +182,9 @@ function generateEnvFile(options: AgentCreationOptions): string {
     // core). GOOGLE_API_KEY is only consulted for Vertex AI Express Mode, so
     // writing it here left every scaffolded project unable to authenticate.
     lines.push(`GOOGLE_GENAI_API_KEY=${options.apiKey}`);
+    if (!options.project) {
+      lines.push(`GOOGLE_GENAI_USE_VERTEXAI=0`);
+    }
   }
   if (options.project) {
     // A project is only ever collected for the Vertex AI backend, so the
@@ -193,13 +196,8 @@ function generateEnvFile(options: AgentCreationOptions): string {
       `GOOGLE_CLOUD_LOCATION=${options.region || DEFAULT_VERTEX_REGION}`,
     );
     lines.push(`GOOGLE_GENAI_USE_VERTEXAI=1`);
-  } else {
-    if (options.region) {
-      lines.push(`GOOGLE_CLOUD_LOCATION=${options.region}`);
-    }
-    if (options.apiKey) {
-      lines.push(`GOOGLE_GENAI_USE_VERTEXAI=0`);
-    }
+  } else if (options.region) {
+    lines.push(`GOOGLE_CLOUD_LOCATION=${options.region}`);
   }
   return lines.join('\n');
 }
@@ -301,7 +299,6 @@ export async function createAgent(options: AgentCreationOptions) {
         : await text({
             message: 'Enter the Google Cloud Region',
             initialValue: defaultRegion || DEFAULT_VERTEX_REGION,
-            validate: requireNonEmpty,
           });
 
       if (isCancel(regionResponse)) {

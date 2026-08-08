@@ -363,26 +363,23 @@ describe('createAgent', () => {
       );
     });
 
-    it('should reject an empty project or region at the prompt', async () => {
+    it('should reject an empty project at the prompt', async () => {
       answerVertexPrompts('gcloud-project', 'us-central1');
 
       await createAgent(getFreshOptions());
 
       // The @clack/prompts mock never runs `validate`, so call it directly.
-      for (const message of [
-        'Enter the Google Cloud Project ID',
-        'Enter the Google Cloud Region',
-      ]) {
-        const options = vi
-          .mocked(text)
-          .mock.calls.find(([opts]) => opts.message === message)?.[0];
-        if (!options?.validate) {
-          expect.fail(`the "${message}" prompt received no validate callback`);
-        }
-        expect(options.validate('')).toBeTypeOf('string');
-        expect(options.validate('   ')).toBeTypeOf('string');
-        expect(options.validate('us-central1')).toBeUndefined();
+      const options = vi
+        .mocked(text)
+        .mock.calls.find(
+          ([opts]) => opts.message === 'Enter the Google Cloud Project ID',
+        )?.[0];
+      if (!options?.validate) {
+        expect.fail('the project prompt received no validate callback');
       }
+      expect(options.validate('')).toBeTypeOf('string');
+      expect(options.validate('   ')).toBeTypeOf('string');
+      expect(options.validate('my-project')).toBeUndefined();
     });
 
     it('should trim the Vertex answers', async () => {
