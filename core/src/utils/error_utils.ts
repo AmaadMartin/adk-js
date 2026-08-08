@@ -26,9 +26,6 @@ const UNKNOWN_ERROR = 'Unknown error';
 /** Returned when a value cannot be converted to a string at all. */
 const UNSTRINGIFIABLE_VALUE = '<unstringifiable value>';
 
-/** `JSON.stringify` output for an object with no serializable own fields. */
-const EMPTY_JSON_OBJECT = '{}';
-
 /** Lowest and highest values treated as an HTTP status code. */
 const MIN_HTTP_STATUS = 100;
 const MAX_HTTP_STATUS = 599;
@@ -66,33 +63,23 @@ function truncateBody(body: string): string {
 
 /** Returns the plain, non-recursive message for a single value. */
 function baseMessage(err: unknown): string {
-  try {
-    if (err instanceof Error) {
-      return err.message;
-    }
-    if (typeof err === 'string') {
-      return err;
-    }
-    const record = asRecord(err);
-    if (record !== undefined) {
-      const json = JSON.stringify(record);
-      // `JSON.stringify` is typed as returning `string`, but yields `undefined`
-      // when the value's `toJSON` returns nothing. `{}` says no more than
-      // `[object Object]`; both cases defer to the value's own `toString`,
-      // which a class instance may implement usefully.
-      if (typeof json === 'string' && json !== EMPTY_JSON_OBJECT) {
-        return truncateBody(json);
-      }
-    }
-    return String(err);
-  } catch {
-    // Every conversion above can throw. A value can carry a throwing
-    // `toString`, `Symbol.toPrimitive`, `toJSON` or property getter, a
-    // null-prototype object has no `toString` at all, and `JSON.stringify`
-    // refuses circular structures and BigInt. `formatError` promises never to
-    // throw, so such a value degrades to a placeholder.
-    return UNSTRINGIFIABLE_VALUE;
+  if (err instanceof Error) {
+    return err.message;
   }
+  if (typeof err === 'string') {
+    return err;
+  }
+  const record = asRecord(err);
+  if (record !== undefined) {
+    const json = JSON.stringify(record);
+    // `JSON.stringify` is typed as returning `string` but yields `undefined`
+    // when `toJSON` returns nothing. `'{}'` says no more than `[object
+    // Object]`, so both cases defer to the value's own `toString`.
+    if (typeof json === 'string' && json !== '{}') {
+      return truncateBody(json);
+    }
+  }
+  return String(err);
 }
 
 /**
@@ -183,8 +170,16 @@ function formatErrorRecursive(err: unknown, seen: Set<unknown>): string {
  * on `null`/`undefined` and cyclic error graphs.
  *
  * @param err The thrown or rejected value to format.
- * @return A single human-readable message describing the root cause(s).
+ * @return A single human-readable message describing the root cause(s), or
+ *     `<unstringifiable value>` for a value that defeats every conversion.
  */
 export function formatError(err: unknown): string {
-  return formatErrorRecursive(err, new Set<unknown>());
+  try {
+    return formatErrorRecursive(err, new Set<unknown>());
+  } catch {
+    // A hostile value can throw from a property getter, `toString`,
+    // `Symbol.toPrimitive` or `toJSON`, a null-prototype object has no
+    // `toString`, and `JSON.stringify` refuses cycles and BigInt.
+    return UNSTRINGIFIABLE_VALUE;
+  }
 }

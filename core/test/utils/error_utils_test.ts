@@ -142,6 +142,17 @@ describe('formatError', () => {
     expect(formatError(hostile)).toBe(UNSTRINGIFIABLE_VALUE);
   });
 
+  // `status` is read by the HTTP branch, which runs before the base message.
+  it('degrades to a placeholder when an inspected getter throws', () => {
+    const hostile = {
+      get status(): number {
+        throw new Error('getter exploded');
+      },
+    };
+    expect(() => formatError(hostile)).not.toThrow();
+    expect(formatError(hostile)).toBe(UNSTRINGIFIABLE_VALUE);
+  });
+
   it('degrades to a placeholder for a circular plain object', () => {
     const circular: Record<string, unknown> = {detail: 'cyclic'};
     circular['self'] = circular;
