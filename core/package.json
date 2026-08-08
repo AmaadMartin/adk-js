@@ -25,6 +25,73 @@
       "import": "./dist/esm/index.js",
       "require": "./dist/cjs/index.js",
       "default": "./dist/esm/index.js"
+    },
+    "./common": {
+      "types": "./dist/types/common.d.ts",
+      "import": "./dist/esm/common.js",
+      "require": "./dist/cjs/common.js",
+      "default": "./dist/esm/common.js"
+    },
+    "./a2a": {
+      "types": "./dist/types/a2a/index.d.ts",
+      "import": "./dist/esm/a2a/index.js",
+      "require": "./dist/cjs/a2a/index.js",
+      "default": "./dist/esm/a2a/index.js"
+    },
+    "./telemetry": {
+      "types": "./dist/types/telemetry/index.d.ts",
+      "import": "./dist/esm/telemetry/index.js",
+      "require": "./dist/cjs/telemetry/index.js",
+      "default": "./dist/esm/telemetry/index.js"
+    },
+    "./tools/mcp": {
+      "types": "./dist/types/tools/mcp/index.d.ts",
+      "import": "./dist/esm/tools/mcp/index.js",
+      "require": "./dist/cjs/tools/mcp/index.js",
+      "default": "./dist/esm/tools/mcp/index.js"
+    },
+    "./sessions/database": {
+      "types": "./dist/types/sessions/database_session_service.d.ts",
+      "import": "./dist/esm/sessions/database_session_service.js",
+      "require": "./dist/cjs/sessions/database_session_service.js",
+      "default": "./dist/esm/sessions/database_session_service.js"
+    },
+    "./artifacts/gcs": {
+      "types": "./dist/types/artifacts/gcs_artifact_service.d.ts",
+      "import": "./dist/esm/artifacts/gcs_artifact_service.js",
+      "require": "./dist/cjs/artifacts/gcs_artifact_service.js",
+      "default": "./dist/esm/artifacts/gcs_artifact_service.js"
+    },
+    "./integrations/agent-registry": {
+      "types": "./dist/types/integrations/agent_registry/agent_registry.d.ts",
+      "import": "./dist/esm/integrations/agent_registry/agent_registry.js",
+      "require": "./dist/cjs/integrations/agent_registry/agent_registry.js",
+      "default": "./dist/esm/integrations/agent_registry/agent_registry.js"
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "common": [
+        "./dist/types/common.d.ts"
+      ],
+      "a2a": [
+        "./dist/types/a2a/index.d.ts"
+      ],
+      "telemetry": [
+        "./dist/types/telemetry/index.d.ts"
+      ],
+      "tools/mcp": [
+        "./dist/types/tools/mcp/index.d.ts"
+      ],
+      "sessions/database": [
+        "./dist/types/sessions/database_session_service.d.ts"
+      ],
+      "artifacts/gcs": [
+        "./dist/types/artifacts/gcs_artifact_service.d.ts"
+      ],
+      "integrations/agent-registry": [
+        "./dist/types/integrations/agent_registry/agent_registry.d.ts"
+      ]
     }
   },
   "scripts": {
