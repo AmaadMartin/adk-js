@@ -184,6 +184,17 @@ export abstract class BaseSessionService {
   }
 
   /**
+   * Flushes any buffered events.
+   *
+   * A session service that batches writes should drain its buffer here. The
+   * `Runner` calls this when an invocation finishes. Implementations that
+   * write synchronously need no override; the default is a no-op.
+   *
+   * @return A promise that resolves when buffered events have been written.
+   */
+  async flush(): Promise<void> {}
+
+  /**
    * Updates the session state based on the event.
    *
    * @param request The request to update the session state.

@@ -454,6 +454,7 @@ export class Runner {
       span.end();
       const toolsets = getAllToolsets(this.agent);
       await Promise.allSettled(toolsets.map((t) => t.close()));
+      await this.sessionService.flush();
     }
   }
 
