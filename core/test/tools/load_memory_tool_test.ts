@@ -8,12 +8,16 @@ import {Type} from '@google/genai';
 import {describe, expect, it, vi} from 'vitest';
 
 import {
+  BaseAgent,
   Context,
+  createSession,
   getLogger,
+  InvocationContext,
   LlmRequest,
   LOAD_MEMORY,
   LoadMemoryTool,
   MemoryEntry,
+  PluginManager,
   SearchMemoryResponse,
 } from '@google/adk';
 
@@ -133,20 +137,29 @@ describe('LoadMemoryTool', () => {
     const errorSpy = vi
       .spyOn(getLogger(), 'error')
       .mockImplementation(() => {});
+    const failure = new Error('search boom');
+    const invocationContext = new InvocationContext({
+      invocationId: 'test-invocation',
+      agent: {} as BaseAgent,
+      session: createSession({id: 'test-session', appName: 'test-app'}),
+      pluginManager: new PluginManager([]),
+      memoryService: {
+        addSessionToMemory: async () => {},
+        searchMemory: async () => {
+          throw failure;
+        },
+      },
+    });
+    const toolContext = new Context({invocationContext});
     const tool = new LoadMemoryTool();
-    const toolContext = new StubToolContext([]) as unknown as Context;
-    vi.spyOn(toolContext, 'searchMemory').mockRejectedValue(
-      new Error('search boom'),
-    );
 
     await expect(
       tool.runAsync({args: {query: 'hello'}, toolContext}),
-    ).rejects.toThrow('search boom');
+    ).rejects.toThrow(failure);
 
     expect(errorSpy).toHaveBeenCalledWith(
-      expect.stringContaining(
-        'LoadMemoryTool runAsync failed: Error: search boom',
-      ),
+      'LoadMemoryTool runAsync failed:',
+      failure,
     );
     errorSpy.mockRestore();
   });

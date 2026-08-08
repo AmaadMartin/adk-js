@@ -193,9 +193,10 @@ describe('AgentControlledContextCompactor', () => {
     const errorSpy = vi
       .spyOn(getLogger(), 'error')
       .mockImplementation(() => {});
+    const failure = new Error('Summarizer failed');
     const summarizer = {
       summarize: async () => {
-        throw new Error('Summarizer failed');
+        throw failure;
       },
     };
     const compactor = new AgentControlledContextCompactor({summarizer});
@@ -210,9 +211,7 @@ describe('AgentControlledContextCompactor', () => {
 
     await compactor.compact(context);
 
-    expect(errorSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Compaction failed: Error: Summarizer failed'),
-    );
+    expect(errorSpy).toHaveBeenCalledWith('Compaction failed:', failure);
     errorSpy.mockRestore();
   });
 });

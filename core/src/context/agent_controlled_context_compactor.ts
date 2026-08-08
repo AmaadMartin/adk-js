@@ -80,7 +80,7 @@ export class AgentControlledContextCompactor implements BaseContextCompactor {
     } catch (error) {
       // If the summarizer fails, log the error, clear the flags, and proceed without compaction.
       // (do not block the agent run)
-      logger.error(`Compaction failed: ${error}`);
+      logger.error('Compaction failed:', error);
     } finally {
       this.clearFlags(invocationContext);
     }

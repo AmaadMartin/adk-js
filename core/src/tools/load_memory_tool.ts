@@ -64,7 +64,7 @@ export class LoadMemoryTool extends BaseTool {
         })),
       };
     } catch (e) {
-      logger.error(`LoadMemoryTool runAsync failed: ${e}`);
+      logger.error('LoadMemoryTool runAsync failed:', e);
       throw e;
     }
   }
