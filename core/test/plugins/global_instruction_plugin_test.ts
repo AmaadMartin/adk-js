@@ -16,6 +16,7 @@ import {
   ReadonlyContext,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
+import {appendInstructions} from '../../src/models/llm_request.js';
 
 class MockLlm extends BaseLlm {
   lastRequest?: LlmRequest;
@@ -275,6 +276,33 @@ describe('GlobalInstructionPlugin', () => {
       'Global instruction.',
       existingObj,
     ]);
+  });
+
+  it('should keep every instruction when a tool appends after the plugin', async () => {
+    const plugin = new GlobalInstructionPlugin('Global instruction.');
+    const llmRequest = {
+      contents: [],
+      toolsDict: {},
+      liveConnectConfig: {},
+      config: {
+        systemInstruction: {
+          role: 'system',
+          parts: [{text: 'Always answer in French.'}],
+        },
+      },
+    };
+
+    await plugin.beforeModelCallback({
+      callbackContext: mockCallbackContext,
+      llmRequest,
+    });
+    appendInstructions(llmRequest, ['Tool instruction']);
+
+    const result = llmRequest.config.systemInstruction;
+    expect(result).toBe(
+      'Global instruction.\nAlways answer in French.\n\nTool instruction',
+    );
+    expect(result).not.toContain('[object Object]');
   });
 
   it('should inject system instruction in an end-to-end InMemoryRunner simulation', async () => {

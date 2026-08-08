@@ -318,6 +318,61 @@ describe('LoggingPlugin', () => {
     expect(infoCalls.some((m) => m.includes('...'))).toBe(true);
   });
 
+  it('beforeModelCallback should log the text of a Content system instruction', async () => {
+    const plugin = new LoggingPlugin();
+    const reqWithContentInstruction: LlmRequest = {
+      ...mockLlmRequest,
+      config: {
+        systemInstruction: {
+          role: 'system',
+          parts: [{text: 'You are a helpful assistant.'}],
+        },
+      },
+    };
+
+    await plugin.beforeModelCallback({
+      callbackContext: mockCallbackContext,
+      llmRequest: reqWithContentInstruction,
+    });
+
+    expect(
+      infoCalls.some((m) => m.includes('You are a helpful assistant.')),
+    ).toBe(true);
+    expect(infoCalls.some((m) => m.includes('[object Object]'))).toBe(false);
+  });
+
+  it('beforeModelCallback should not log a system instruction without text', async () => {
+    const plugin = new LoggingPlugin();
+    const reqWithTextlessInstruction: LlmRequest = {
+      ...mockLlmRequest,
+      config: {systemInstruction: {role: 'system', parts: [{}]}},
+    };
+
+    await plugin.beforeModelCallback({
+      callbackContext: mockCallbackContext,
+      llmRequest: reqWithTextlessInstruction,
+    });
+
+    expect(infoCalls.some((m) => m.includes('System Instruction:'))).toBe(
+      false,
+    );
+  });
+
+  it('beforeModelCallback should truncate a long array system instruction', async () => {
+    const plugin = new LoggingPlugin();
+    const reqWithArrayInstruction: LlmRequest = {
+      ...mockLlmRequest,
+      config: {systemInstruction: Array.from({length: 300}, () => 'A')},
+    };
+
+    await plugin.beforeModelCallback({
+      callbackContext: mockCallbackContext,
+      llmRequest: reqWithArrayInstruction,
+    });
+
+    expect(infoCalls.some((m) => m.includes('...'))).toBe(true);
+  });
+
   it('beforeModelCallback should log available tools when present', async () => {
     const plugin = new LoggingPlugin();
     const reqWithTools: LlmRequest = {

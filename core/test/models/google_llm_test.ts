@@ -652,5 +652,47 @@ describe('GoogleLlm', () => {
         }),
       );
     });
+
+    it('should flatten a Content system instruction', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+
+      const request: LlmRequest = {
+        model: 'gemini-2.5-flash',
+        contents: [],
+        liveConnectConfig: {},
+        config: {
+          systemInstruction: {
+            role: 'system',
+            parts: [{text: 'You are a helpful assistant.'}],
+          },
+        },
+        toolsDict: {},
+      };
+
+      await llm.connect(request);
+
+      expect(request.liveConnectConfig.systemInstruction).toEqual({
+        role: 'system',
+        parts: [{text: 'You are a helpful assistant.'}],
+      });
+    });
+
+    it('should leave the live system instruction unset when there is no text', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+
+      const request: LlmRequest = {
+        model: 'gemini-2.5-flash',
+        contents: [],
+        liveConnectConfig: {},
+        config: {
+          systemInstruction: {role: 'system', parts: [{}]},
+        },
+        toolsDict: {},
+      };
+
+      await llm.connect(request);
+
+      expect(request.liveConnectConfig.systemInstruction).toBeUndefined();
+    });
   });
 });
