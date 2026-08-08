@@ -204,4 +204,84 @@ describe('OperationParser', () => {
 
     expect(new OperationParser(op).getParameters()[0].name).toBe('');
   });
+
+  it.each([false, true])(
+    'should snake_case the tool name with preservePropertyNames %s',
+    (preservePropertyNames) => {
+      const op: OpenAPIV3.OperationObject = {
+        operationId: 'listIssues',
+        responses: {},
+      };
+
+      expect(
+        new OperationParser(op, {preservePropertyNames}).getFunctionName(),
+      ).toBe('list_issues');
+    },
+  );
+
+  it('should convert the tool name while preserving body property names', () => {
+    const op: OpenAPIV3.OperationObject = {
+      operationId: 'createUser',
+      requestBody: {
+        content: {
+          'application/json': {
+            schema: {
+              type: 'object',
+              properties: {
+                firstName: {type: 'string'},
+                lastName: {type: 'string'},
+                emailAddress: {type: 'string'},
+              },
+            },
+          },
+        },
+      },
+      responses: {'200': {description: 'OK'}},
+    };
+
+    const parser = new OperationParser(op, {preservePropertyNames: true});
+
+    expect(parser.getFunctionName()).toBe('create_user');
+    expect(parser.getParameters().map((p) => p.name)).toEqual([
+      'firstName',
+      'lastName',
+      'emailAddress',
+    ]);
+  });
+
+  it('should convert the tool name while preserving operation parameter names', () => {
+    const op: OpenAPIV3.OperationObject = {
+      operationId: 'jira_list_Issues',
+      parameters: [
+        {name: 'X-API-Key', in: 'header'},
+        {name: 'Issue_Id', in: 'query'},
+      ],
+      responses: {},
+    };
+
+    const parser = new OperationParser(op, {preservePropertyNames: true});
+
+    expect(parser.getFunctionName()).toBe('jira_list_issues');
+    expect(parser.getParameters().map((p) => p.name)).toEqual([
+      'X-API-Key',
+      'Issue_Id',
+    ]);
+  });
+
+  it('should truncate the preserved-name tool name after conversion', () => {
+    const op: OpenAPIV3.OperationObject = {
+      operationId:
+        'listIssuesForTheRepositoryWithAVeryLongOperationIdentifierName',
+      responses: {},
+    };
+
+    const name = new OperationParser(op, {
+      preservePropertyNames: true,
+    }).getFunctionName();
+
+    expect(name).toBe(
+      'list_issues_for_the_repository_with_a_very_long_operation_id',
+    );
+    expect(name.length).toBe(60);
+  });
 });

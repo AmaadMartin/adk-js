@@ -174,6 +174,47 @@ describe('OpenAPIToolset', () => {
     const toolset = new OpenAPIToolset({specDict: mockSpec});
     await expect(toolset.close()).resolves.toBeUndefined();
   });
+
+  it('should snake_case the tool name while preserving property names', async () => {
+    const camelCaseSpec: OpenAPIV3.Document = {
+      openapi: '3.0.0',
+      info: {title: 'Test API', version: '1.0.0'},
+      servers: [{url: 'https://api.example.com'}],
+      paths: {
+        '/users': {
+          post: {
+            operationId: 'createUser',
+            requestBody: {
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      firstName: {type: 'string'},
+                      lastName: {type: 'string'},
+                      emailAddress: {type: 'string'},
+                    },
+                  },
+                },
+              },
+            },
+            responses: {'200': {description: 'OK'}},
+          },
+        },
+      },
+    };
+
+    const toolset = new OpenAPIToolset({
+      specDict: camelCaseSpec,
+      preservePropertyNames: true,
+    });
+    const tools = await toolset.getTools();
+
+    expect(tools.map((tool) => tool.name)).toEqual(['create_user']);
+    expect(
+      Object.keys(tools[0]._getDeclaration()?.parameters?.properties ?? {}),
+    ).toEqual(['firstName', 'lastName', 'emailAddress']);
+  });
 });
 
 describe('OpenApiSpecParser', () => {
