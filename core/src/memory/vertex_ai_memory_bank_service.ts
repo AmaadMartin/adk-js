@@ -5,9 +5,7 @@
  */
 
 import {Client} from '@google-cloud/vertexai';
-// @google-cloud/vertexai 1.12.0 re-exports only `Client` out of `src/genai/`,
-// so these have no root equivalent. Type-only, so the deep path is erased from
-// the compiled JS.
+// @google-cloud/vertexai 1.12.0 re-exports only `Client` out of `src/genai/`.
 import type {Memories} from '@google-cloud/vertexai/build/src/genai/memories.js';
 import type {
   AgentEngineMemoryConfig,
