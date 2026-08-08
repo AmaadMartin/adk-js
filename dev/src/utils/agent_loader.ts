@@ -5,10 +5,6 @@
  */
 
 import {App, BaseAgent, isApp, isBaseAgent} from '@google/adk';
-import esbuild from 'esbuild';
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore
-import {shimPlugin} from 'esbuild-shim-plugin';
 import * as fs from 'node:fs';
 import * as fsPromises from 'node:fs/promises';
 import {createRequire} from 'node:module';
@@ -16,15 +12,14 @@ import * as path from 'node:path';
 import {pathToFileURL} from 'node:url';
 
 import {
-  createTempDir,
-  isFile,
-  isFileExists,
-  isFolderExists,
-  loadFileData,
-  removeFolder,
-  tryToFindFileRecursively,
-} from './file_utils.js';
+  CompiledEntrypoint,
+  compileEntrypoints,
+  CompileOptions,
+} from './agent_compiler.js';
+import {isFile, removeFolder} from './file_utils.js';
 import {AdkLogger} from './logger.js';
+
+export {FileModuleType} from './agent_compiler.js';
 
 const logger = new AdkLogger({label: 'AgentLoader', colorize: {all: true}});
 
@@ -32,22 +27,6 @@ const logger = new AdkLogger({label: 'AgentLoader', colorize: {all: true}});
  * Supported file extensions for JavaScript and TypeScript.
  */
 const JS_FILES_EXTENSIONS = ['.js', '.cjs', '.mjs', '.ts', '.mts', '.cts'];
-
-/**
- * Supported JS/TS file module types.
- */
-export enum FileModuleType {
-  CJS = 'cjs',
-  ESM = 'esm',
-}
-
-/**
- * Map of file module types to their file extensions.
- */
-const FILE_MODULE_TYPE_EXTENSION_MAP = {
-  [FileModuleType.CJS]: '.cjs',
-  [FileModuleType.ESM]: '.mjs',
-};
 
 /**
  * Metadata for a file.
@@ -60,6 +39,12 @@ interface FileMetadata {
   isDirectory: boolean;
 }
 
+/** A discovered agent entrypoint: the name it is registered under and its file. */
+interface DiscoveredEntrypoint {
+  name: string;
+  filePath: string;
+}
+
 /**
  * Error class for agent file loading.
  */
@@ -68,10 +53,8 @@ class AgentFileLoadingError extends Error {}
 /**
  * Options for loading an agent file.
  */
-export interface AgentFileOptions {
+export interface AgentFileOptions extends CompileOptions {
   compile?: boolean;
-  bundle?: boolean;
-  moduleType?: FileModuleType;
 }
 
 /**
@@ -83,49 +66,6 @@ const DEFAULT_AGENT_FILE_OPTIONS: AgentFileOptions = {
   compile: true,
   bundle: true,
 };
-
-/**
- * Returns an esbuild plugin that replaces `__dirname`, `__filename`, and `import.meta.url`
- * with the original directory path, file path, and file URL in the agent file.
- * This plugin is needed to ensure that the agent file has access to its original
- * location context after compilation.
- *
- * @param filePath - The path to the agent file.
- * @param originalDir - The original directory path of the agent file.
- * @returns An esbuild plugin that replaces path and URL references in the agent file.
- */
-export function replaceDirnamePlugin(filePath: string, originalDir: string) {
-  return {
-    name: 'replace-dirname',
-    setup(build: esbuild.PluginBuild) {
-      build.onLoad({filter: /.*/}, async (args: esbuild.OnLoadArgs) => {
-        if (args.path === filePath) {
-          const content = await fsPromises.readFile(args.path, 'utf8');
-          const fileUrl = pathToFileURL(filePath).href;
-          const loader = ['.ts', '.mts', '.cts'].includes(
-            path.extname(filePath),
-          )
-            ? 'ts'
-            : 'js';
-          const transformResult = await esbuild.transform(content, {
-            loader: loader,
-            define: {
-              '__dirname': JSON.stringify(originalDir),
-              '__filename': JSON.stringify(filePath),
-              'import.meta.url': JSON.stringify(fileUrl),
-            },
-          });
-
-          return {
-            contents: transformResult.code,
-            loader: 'js',
-          };
-        }
-        return undefined;
-      });
-    },
-  };
-}
 
 /**
  * Wrapper class which loads file that contains base agent or app (support both .js and
@@ -142,6 +82,7 @@ export class AgentFile {
   constructor(
     private readonly filePath: string,
     private readonly options = DEFAULT_AGENT_FILE_OPTIONS,
+    private readonly compiled?: CompiledEntrypoint,
   ) {}
 
   async load(): Promise<BaseAgent | App> {
@@ -166,52 +107,13 @@ export class AgentFile {
     const shouldCompile = this.options.compile || this.options.bundle;
 
     if (shouldCompile) {
-      const moduleType =
-        this.options.moduleType || (await getFileModuleType(filePath));
-      const parsedPath = path.parse(filePath);
-      const outputDir = await createTempDir('adk_agent_loader');
-      const compiledFilePath = path.join(
-        outputDir,
-        parsedPath.name + FILE_MODULE_TYPE_EXTENSION_MAP[moduleType],
-      );
-      const originalDir = path.dirname(filePath);
-      await linkProjectNodeModules(outputDir, parsedPath.dir);
+      const artifact =
+        this.compiled ??
+        (await compileEntrypoints([this.filePath], this.options))[0];
 
-      await esbuild.build({
-        entryPoints: [filePath],
-        outfile: compiledFilePath,
-        target: 'node16',
-        platform: 'node',
-        format: moduleType,
-        packages: 'bundle',
-        bundle: this.options.bundle,
-        minify: this.options.bundle,
-        plugins: [replaceDirnamePlugin(filePath, originalDir), shimPlugin()],
-        // See http://mikro-orm.io/docs/deployment#deploy-a-bundle-of-entities-and-dependencies-with-esbuild for more details
-        external: [
-          'sqlite3',
-          'better-sqlite3',
-          'mysql',
-          'mysql2',
-          // Native addons must remain external so Node can resolve their
-          // platform-specific assets at runtime.
-          'onnxruntime-node',
-          'oracledb',
-          'pg-native',
-          'pg-query-stream',
-          'tedious',
-          'libsql',
-          // Optional peer dependencies of vite and eslint that are not
-          // installed and MUST NOT be bundled.
-          'lightningcss',
-          'jiti',
-          'jiti/package.json',
-        ],
-      });
-
-      this.cleanupDirPath = outputDir;
-      this.cleanupFilePath = compiledFilePath;
-      filePath = compiledFilePath;
+      this.cleanupDirPath = artifact.outputDir;
+      this.cleanupFilePath = artifact.compiledFilePath;
+      filePath = artifact.compiledFilePath;
     }
 
     const require = createRequire(import.meta.url);
@@ -481,18 +383,31 @@ export class AgentLoader {
       return;
     }
 
-    const files = (await isFile(this.agentsDirPath))
-      ? [await getFileMetadata(this.agentsDirPath)]
-      : await getDirFiles(this.agentsDirPath);
+    const entrypoints = await this.discoverEntrypoints();
+    const shouldCompile = this.options.compile || this.options.bundle;
+    const compiled: CompiledEntrypoint[] =
+      shouldCompile && entrypoints.length > 0
+        ? await compileEntrypoints(
+            entrypoints.map((entrypoint) => entrypoint.filePath),
+            this.options,
+          )
+        : [];
 
     await Promise.all(
-      files.map(async (fileOrDir: FileMetadata) => {
-        if (fileOrDir.isFile && isJsFile(fileOrDir.ext)) {
-          return this.loadAgentFromFile(fileOrDir);
-        }
-
-        if (fileOrDir.isDirectory) {
-          return this.loadAgentFromDirectory(fileOrDir);
+      entrypoints.map(async ({name, filePath}, index) => {
+        const agentFile = new AgentFile(
+          filePath,
+          this.options,
+          compiled[index],
+        );
+        try {
+          await agentFile.load();
+          this.preloadedAgents[name] = agentFile;
+        } catch (e) {
+          if (e instanceof AgentFileLoadingError) {
+            return;
+          }
+          throw e;
         }
       }),
     );
@@ -506,40 +421,50 @@ export class AgentLoader {
     return;
   }
 
-  private async loadAgentFromFile(file: FileMetadata): Promise<void> {
-    try {
-      const agentFile = new AgentFile(file.path, this.options);
-      await agentFile.load();
-      this.preloadedAgents[file.name] = agentFile;
-    } catch (e) {
-      if (e instanceof AgentFileLoadingError) {
-        return;
-      }
-      throw e;
-    }
+  /**
+   * Scans the agents directory and returns every entrypoint it holds, without
+   * compiling or importing any of them.
+   */
+  private async discoverEntrypoints(): Promise<DiscoveredEntrypoint[]> {
+    const files = (await isFile(this.agentsDirPath))
+      ? [await getFileMetadata(this.agentsDirPath)]
+      : await getDirFiles(this.agentsDirPath);
+
+    const entrypoints = await Promise.all(
+      files.map(async (fileOrDir: FileMetadata) => {
+        if (fileOrDir.isFile && isJsFile(fileOrDir.ext)) {
+          return {name: fileOrDir.name, filePath: fileOrDir.path};
+        }
+
+        if (fileOrDir.isDirectory) {
+          const entryFile = await findDirEntrypoint(fileOrDir.path);
+          if (entryFile) {
+            return {name: fileOrDir.name, filePath: entryFile};
+          }
+        }
+
+        return undefined;
+      }),
+    );
+
+    return entrypoints.filter(
+      (entrypoint): entrypoint is DiscoveredEntrypoint =>
+        entrypoint !== undefined,
+    );
   }
+}
 
-  private async loadAgentFromDirectory(dir: FileMetadata): Promise<void> {
-    const subFiles = await getDirFiles(dir.path);
-    const possibleEntryFile =
-      subFiles.find((f) => f.isFile && f.name === 'app' && isJsFile(f.ext)) ??
-      subFiles.find((f) => f.isFile && f.name === 'agent' && isJsFile(f.ext));
+/**
+ * Returns the entrypoint of an agent directory, preferring `app.*` over
+ * `agent.*`, or `undefined` when the directory holds neither.
+ */
+async function findDirEntrypoint(dirPath: string): Promise<string | undefined> {
+  const subFiles = await getDirFiles(dirPath);
+  const entryFile =
+    subFiles.find((f) => f.isFile && f.name === 'app' && isJsFile(f.ext)) ??
+    subFiles.find((f) => f.isFile && f.name === 'agent' && isJsFile(f.ext));
 
-    if (!possibleEntryFile) {
-      return;
-    }
-
-    try {
-      const agentFile = new AgentFile(possibleEntryFile.path, this.options);
-      await agentFile.load();
-      this.preloadedAgents[dir.name] = agentFile;
-    } catch (e) {
-      if (e instanceof AgentFileLoadingError) {
-        return;
-      }
-      throw e;
-    }
-  }
+  return entryFile?.path;
 }
 
 function isJsFile(fileExt?: string): boolean {
@@ -567,93 +492,4 @@ async function getFileMetadata(filePath: string): Promise<FileMetadata> {
     isFile,
     isDirectory: fileStats.isDirectory(),
   };
-}
-
-async function getFileModuleType(filePath: string): Promise<FileModuleType> {
-  const {ext} = path.parse(filePath);
-
-  if (['.cjs', '.cts'].includes(ext)) {
-    return FileModuleType.CJS;
-  }
-  if (['.mts', '.mjs'].includes(ext)) {
-    return FileModuleType.ESM;
-  }
-
-  if (['.js', '.ts'].includes(ext)) {
-    return getTypeFromPackageJson(path.dirname(filePath));
-  }
-
-  return FileModuleType.CJS;
-}
-
-async function getTypeFromPackageJson(dir: string): Promise<FileModuleType> {
-  const packagePath = path.join(dir, 'package.json');
-
-  if (await isFileExists(packagePath)) {
-    try {
-      const packageJson = (await loadFileData(packagePath)) as {
-        type?: 'commonjs' | 'module';
-      };
-
-      return packageJson.type === 'module'
-        ? FileModuleType.ESM
-        : FileModuleType.CJS;
-    } catch {
-      return FileModuleType.CJS;
-    }
-  }
-
-  const parentDir = path.dirname(dir);
-  if (parentDir === dir) {
-    return FileModuleType.CJS;
-  }
-
-  return getTypeFromPackageJson(parentDir);
-}
-
-async function linkProjectNodeModules(
-  outputDir: string,
-  sourceDir: string,
-): Promise<void> {
-  const nodeModulesDir = await getProjectNodeModulesDir(sourceDir);
-  if (!nodeModulesDir) {
-    return;
-  }
-
-  const linkPath = path.join(outputDir, 'node_modules');
-  if (await isFolderExists(linkPath)) {
-    return;
-  }
-
-  try {
-    await fsPromises.symlink(
-      path.resolve(nodeModulesDir),
-      linkPath,
-      process.platform === 'win32' ? 'junction' : 'dir',
-    );
-  } catch (error) {
-    if ((error as {code?: string}).code !== 'EEXIST') {
-      throw error;
-    }
-  }
-}
-
-async function getProjectNodeModulesDir(
-  sourceDir: string,
-): Promise<string | undefined> {
-  try {
-    const packageJsonPath = await tryToFindFileRecursively(
-      sourceDir,
-      'package.json',
-      10,
-    );
-    const nodeModulesDir = path.join(
-      path.dirname(packageJsonPath),
-      'node_modules',
-    );
-
-    return (await isFolderExists(nodeModulesDir)) ? nodeModulesDir : undefined;
-  } catch {
-    return undefined;
-  }
 }
