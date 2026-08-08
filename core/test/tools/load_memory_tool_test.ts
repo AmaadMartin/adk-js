@@ -5,10 +5,11 @@
  */
 
 import {Type} from '@google/genai';
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 
 import {
   Context,
+  getLogger,
   LlmRequest,
   LOAD_MEMORY,
   LoadMemoryTool,
@@ -126,5 +127,27 @@ describe('LoadMemoryTool', () => {
     await tool.processLlmRequest({toolContext, llmRequest});
     // Instructions should be appended
     expect(llmRequest.config?.systemInstruction).toContain('You have memory.');
+  });
+
+  it('logs the failure before rethrowing', async () => {
+    const errorSpy = vi
+      .spyOn(getLogger(), 'error')
+      .mockImplementation(() => {});
+    const tool = new LoadMemoryTool();
+    const toolContext = new StubToolContext([]) as unknown as Context;
+    vi.spyOn(toolContext, 'searchMemory').mockRejectedValue(
+      new Error('search boom'),
+    );
+
+    await expect(
+      tool.runAsync({args: {query: 'hello'}, toolContext}),
+    ).rejects.toThrow('search boom');
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'LoadMemoryTool runAsync failed: Error: search boom',
+      ),
+    );
+    errorSpy.mockRestore();
   });
 });

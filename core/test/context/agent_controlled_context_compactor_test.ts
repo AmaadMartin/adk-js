@@ -10,6 +10,7 @@ import {
   BaseSummarizer,
   CompactedEvent,
   Event,
+  getLogger,
   InvocationContext,
   PluginManager,
   Session,
@@ -186,5 +187,32 @@ describe('AgentControlledContextCompactor', () => {
 
     expect(context.session.events.length).toBe(2); // no compacted event appended
     expect(context.session.state['temp:consolidate_context']).toBeUndefined();
+  });
+
+  it('logs the summarizer failure', async () => {
+    const errorSpy = vi
+      .spyOn(getLogger(), 'error')
+      .mockImplementation(() => {});
+    const summarizer = {
+      summarize: async () => {
+        throw new Error('Summarizer failed');
+      },
+    };
+    const compactor = new AgentControlledContextCompactor({summarizer});
+
+    const events = [
+      createMockEvent('1'),
+      createMockEvent('2', true, 'consolidate_context'),
+    ];
+    const context = createMockInvocationContext(events, {
+      'temp:consolidate_context': true,
+    });
+
+    await compactor.compact(context);
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Compaction failed: Error: Summarizer failed'),
+    );
+    errorSpy.mockRestore();
   });
 });
