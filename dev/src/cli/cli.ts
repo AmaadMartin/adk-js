@@ -144,7 +144,7 @@ const BUNDLE_AGENT_FILE = new Option(
 ).default(true);
 const NO_BUNDLE_AGENT_FILE = new Option(
   '--no-bundle',
-  'Optional. Do not bundle or minify the agent file dependencies; emit the compiled agent file with its imports left intact.',
+  'Optional. Do not bundle or minify the agent file; leave its imports intact.',
 );
 const A2A_OPTION = new Option(
   '--a2a',
