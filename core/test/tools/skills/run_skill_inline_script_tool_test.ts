@@ -23,7 +23,7 @@ import {ToolConfirmation} from '../../../src/tools/tool_confirmation.js';
 import {materializeFiles} from '../../../src/utils/file_utils.js';
 
 vi.mock('../../../src/utils/file_utils.js', () => ({
-  materializeFiles: vi.fn().mockImplementation((files) => files),
+  materializeFiles: vi.fn((files) => files),
 }));
 
 class MockCodeExecutor extends BaseCodeExecutor {

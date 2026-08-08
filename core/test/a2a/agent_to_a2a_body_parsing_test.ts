@@ -33,17 +33,17 @@ vi.mock('@a2a-js/sdk/server/express', () => {
 });
 
 vi.mock('@a2a-js/sdk/server', () => ({
-  DefaultRequestHandler: vi.fn().mockImplementation(() => ({})),
-  InMemoryTaskStore: vi.fn().mockImplementation(() => ({})),
+  DefaultRequestHandler: vi.fn(() => ({})),
+  InMemoryTaskStore: vi.fn(() => ({})),
 }));
 
 vi.mock('../../src/a2a/agent_executor.js', () => ({
-  A2AAgentExecutor: vi.fn().mockImplementation(() => ({})),
+  A2AAgentExecutor: vi.fn(() => ({})),
 }));
 
 vi.mock('../../src/a2a/agent_card.js', () => ({
-  getA2AAgentCard: vi.fn().mockResolvedValue({name: 'mocked_card'}),
-  resolveAgentCard: vi.fn().mockResolvedValue({name: 'resolved_card'}),
+  getA2AAgentCard: vi.fn(async () => ({name: 'mocked_card'})),
+  resolveAgentCard: vi.fn(async () => ({name: 'resolved_card'})),
 }));
 
 class TestAgent extends BaseAgent {

@@ -22,7 +22,7 @@ vi.mock('../../../src/agents/functions.js', async (importOriginal) => {
     await importOriginal<typeof import('../../../src/agents/functions.js')>();
   return {
     ...original,
-    handleFunctionCallList: vi.fn().mockResolvedValue(null),
+    handleFunctionCallList: vi.fn(async () => null),
   };
 });
 

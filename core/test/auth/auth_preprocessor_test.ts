@@ -19,16 +19,19 @@ vi.mock('../../src/agents/functions.js', async (importOriginal) => {
   };
   return {
     ...actual,
-    handleFunctionCallsAsync: vi.fn().mockResolvedValue({
-      id: 'mockResponseEvent',
-      author: 'system',
-    } as Event),
+    handleFunctionCallsAsync: vi.fn(
+      async () =>
+        ({
+          id: 'mockResponseEvent',
+          author: 'system',
+        }) as Event,
+    ),
   };
 });
 
 vi.mock('../../src/auth/auth_handler.js', () => ({
   AuthHandler: class {
-    parseAndStoreAuthResponse = vi.fn().mockResolvedValue(undefined);
+    parseAndStoreAuthResponse = vi.fn(async () => undefined);
   },
 }));
 

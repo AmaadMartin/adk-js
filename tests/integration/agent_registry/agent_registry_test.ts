@@ -22,14 +22,14 @@ import {
 // Mock google-auth-library
 vi.mock('google-auth-library', () => {
   return {
-    GoogleAuth: vi.fn().mockImplementation(() => {
+    GoogleAuth: vi.fn(() => {
       return {
-        getClient: vi.fn().mockResolvedValue({
-          getRequestHeaders: vi.fn().mockResolvedValue({
+        getClient: vi.fn(async () => ({
+          getRequestHeaders: vi.fn(async () => ({
             'Authorization': 'Bearer fake-token',
-          }),
+          })),
           quotaProjectId: 'quota-project-123',
-        }),
+        })),
         quotaProjectId: 'quota-project-123',
       };
     }),
@@ -52,7 +52,7 @@ const mockMcpClient = {
 // Mock MCP Client
 vi.mock('@modelcontextprotocol/sdk/client/index.js', () => {
   return {
-    Client: vi.fn().mockImplementation(() => mockMcpClient),
+    Client: vi.fn(() => mockMcpClient),
   };
 });
 

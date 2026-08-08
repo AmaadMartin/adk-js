@@ -16,13 +16,13 @@ import {ServiceAccountCredentialExchanger} from '../../../src/tools/openapi_tool
 // Mock google-auth-library
 vi.mock('google-auth-library', () => {
   return {
-    JWT: vi.fn().mockImplementation(() => ({
-      authorize: vi.fn().mockResolvedValue({access_token: 'mock-token'}),
+    JWT: vi.fn(() => ({
+      authorize: vi.fn(async () => ({access_token: 'mock-token'})),
     })),
-    GoogleAuth: vi.fn().mockImplementation(() => ({
-      getClient: vi.fn().mockResolvedValue({
-        getAccessToken: vi.fn().mockResolvedValue({token: 'mock-adc-token'}),
-      }),
+    GoogleAuth: vi.fn(() => ({
+      getClient: vi.fn(async () => ({
+        getAccessToken: vi.fn(async () => ({token: 'mock-adc-token'})),
+      })),
     })),
   };
 });

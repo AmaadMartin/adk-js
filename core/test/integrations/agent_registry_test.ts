@@ -26,16 +26,16 @@ let mockClientQuotaProjectId: string | undefined = 'quota-project-123';
 
 vi.mock('google-auth-library', () => {
   return {
-    GoogleAuth: vi.fn().mockImplementation(() => {
+    GoogleAuth: vi.fn(() => {
       return {
-        getClient: vi.fn().mockImplementation(() => {
+        getClient: vi.fn(() => {
           if (shouldAuthThrow) {
             return Promise.reject(new Error('Auth error'));
           }
           return Promise.resolve({
-            getRequestHeaders: vi.fn().mockResolvedValue({
+            getRequestHeaders: vi.fn(async () => ({
               'Authorization': 'Bearer fake-token',
-            }),
+            })),
             quotaProjectId: mockClientQuotaProjectId,
           });
         }),
@@ -61,7 +61,7 @@ const mockMcpClient = {
 // Mock MCP Client
 vi.mock('@modelcontextprotocol/sdk/client/index.js', () => {
   return {
-    Client: vi.fn().mockImplementation(() => mockMcpClient),
+    Client: vi.fn(() => mockMcpClient),
   };
 });
 
