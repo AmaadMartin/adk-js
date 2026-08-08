@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import * as winston from 'winston';
+import {formatLogArgs} from './error_utils.js';
 
 /** Log levels for the logger. */
 export enum LogLevel {
@@ -68,7 +69,7 @@ class SimpleLogger implements Logger {
       return;
     }
 
-    this.logger.log(level.toString(), messages.join(' '));
+    this.logger.log(level.toString(), formatLogArgs(messages));
   }
 
   debug(...messages: unknown[]): void {
@@ -76,7 +77,7 @@ class SimpleLogger implements Logger {
       return;
     }
 
-    this.logger.debug(messages.join(' '));
+    this.logger.debug(formatLogArgs(messages));
   }
 
   info(...messages: unknown[]): void {
@@ -84,7 +85,7 @@ class SimpleLogger implements Logger {
       return;
     }
 
-    this.logger.info(messages.join(' '));
+    this.logger.info(formatLogArgs(messages));
   }
 
   warn(...messages: unknown[]): void {
@@ -92,7 +93,7 @@ class SimpleLogger implements Logger {
       return;
     }
 
-    this.logger.warn(messages.join(' '));
+    this.logger.warn(formatLogArgs(messages));
   }
 
   error(...messages: unknown[]): void {
@@ -100,7 +101,7 @@ class SimpleLogger implements Logger {
       return;
     }
 
-    this.logger.error(messages.join(' '));
+    this.logger.error(formatLogArgs(messages));
   }
 }
 
