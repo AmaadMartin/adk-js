@@ -15,12 +15,12 @@
  * reaches the Gemini endpoint.
  */
 
-import {Gemini} from '@google/adk';
+import {Gemini, GoogleLLMVariant} from '@google/adk';
 import dotenv from 'dotenv';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {afterAll, beforeAll, describe, expect, it, vi} from 'vitest';
+import {afterAll, afterEach, beforeAll, describe, expect, it, vi} from 'vitest';
 
 const MODEL = 'gemini-2.5-flash';
 const TEST_API_KEY = 'test-api-key-from-adk-create';
@@ -69,6 +69,10 @@ describe('adk create: the generated .env is usable by the runtime', () => {
     process.chdir(workDir);
     ({createAgent} = await import('../../src/cli/cli_create.js'));
     vi.spyOn(console, 'log').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   afterAll(async () => {
@@ -135,5 +139,34 @@ describe('adk create: the generated .env is usable by the runtime', () => {
     expect(requests).toHaveLength(1);
     expect(requests[0]!.url).toContain('generativelanguage.googleapis.com');
     expect(requests[0]!.apiKey).toBe(TEST_API_KEY);
+  });
+
+  // A Vertex project with no region used to scaffold a `.env` that carried
+  // neither a location nor the Vertex selector, so the runtime fell through to
+  // the Gemini API path and demanded an API key the user never chose to supply.
+  it('selects the Vertex backend when no region is available', async () => {
+    await createAgent({
+      agentName: 'vertex-agent',
+      forceYes: true,
+      model: MODEL,
+      language: 'ts',
+      apiKey: '',
+      project: 'my-project',
+      region: '',
+    });
+
+    const generatedEnv = dotenv.parse(
+      await fs.readFile(path.join(workDir, 'vertex-agent', '.env'), 'utf-8'),
+    );
+    for (const name of CREDENTIAL_ENV_VARS) {
+      vi.stubEnv(name, undefined);
+    }
+    for (const [name, value] of Object.entries(generatedEnv)) {
+      vi.stubEnv(name, value);
+    }
+
+    expect(new Gemini({model: MODEL}).apiBackend).toBe(
+      GoogleLLMVariant.VERTEX_AI,
+    );
   });
 });
