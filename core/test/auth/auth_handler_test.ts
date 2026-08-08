@@ -9,13 +9,13 @@ import {describe, expect, it, vi} from 'vitest';
 
 vi.mock('../../src/auth/oauth2/oauth2_credential_exchanger.js', () => ({
   OAuth2CredentialExchanger: class {
-    exchange = vi.fn().mockResolvedValue({
+    exchange = vi.fn(async () => ({
       credential: {
         authType: 'oauth2',
         oauth2: {accessToken: 'mockAccessToken'},
       },
       wasExchanged: true,
-    });
+    }));
   },
 }));
 

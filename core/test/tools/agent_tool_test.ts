@@ -24,7 +24,7 @@ vi.mock('../../src/runner/runner.js', async (importOriginal) => {
     await importOriginal<typeof import('../../src/runner/runner.js')>();
   return {
     ...actual,
-    Runner: vi.fn().mockImplementation((config) => ({
+    Runner: vi.fn((config) => ({
       appName: config?.appName,
       sessionService: config?.sessionService,
       runAsync: vi.fn(),

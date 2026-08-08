@@ -12,18 +12,18 @@ import {
 import {StreamableHTTPConnectionParams} from '../../src/tools/mcp/mcp_session_manager.js';
 import {logger} from '../../src/utils/logger.js';
 
-const mockListTools = vi.fn().mockResolvedValue({
+const mockListTools = vi.fn(async () => ({
   tools: [
     {name: 'search', description: 'Search the web', inputSchema: {}},
     {name: 'fetch', description: 'Fetch a URL', inputSchema: {}},
   ],
-});
+}));
 
-const mockConnect = vi.fn().mockResolvedValue(undefined);
-const mockClose = vi.fn().mockResolvedValue(undefined);
+const mockConnect = vi.fn(async () => undefined);
+const mockClose = vi.fn(async () => undefined);
 
 vi.mock('@modelcontextprotocol/sdk/client/index.js', () => ({
-  Client: vi.fn().mockImplementation(() => ({
+  Client: vi.fn(() => ({
     connect: mockConnect,
     close: mockClose,
     listTools: mockListTools,
@@ -31,7 +31,7 @@ vi.mock('@modelcontextprotocol/sdk/client/index.js', () => ({
 }));
 
 vi.mock('@modelcontextprotocol/sdk/client/streamableHttp.js', () => ({
-  StreamableHTTPClientTransport: vi.fn().mockImplementation(() => ({})),
+  StreamableHTTPClientTransport: vi.fn(() => ({})),
 }));
 
 const BASE_PARAMS: StreamableHTTPConnectionParams = {

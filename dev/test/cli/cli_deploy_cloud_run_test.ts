@@ -37,9 +37,9 @@ vi.mock('node:child_process', () => ({
 
 vi.mock('node:fs/promises', () => {
   const mockFs = {
-    cp: vi.fn().mockResolvedValue(undefined),
-    mkdir: vi.fn().mockResolvedValue(undefined),
-    rm: vi.fn().mockResolvedValue(undefined),
+    cp: vi.fn(async () => undefined),
+    mkdir: vi.fn(async () => undefined),
+    rm: vi.fn(async () => undefined),
   };
   return {
     ...mockFs,
@@ -48,12 +48,12 @@ vi.mock('node:fs/promises', () => {
 });
 
 vi.mock('../../src/utils/agent_loader.js', () => ({
-  AgentLoader: vi.fn().mockImplementation(() => ({
-    listAgents: vi.fn().mockResolvedValue(['agent1']),
-    getAgentFile: vi.fn().mockResolvedValue({
-      getFilePath: vi.fn().mockReturnValue('path/to/agent1.ts'),
-    }),
-    disposeAll: vi.fn().mockResolvedValue(undefined),
+  AgentLoader: vi.fn(() => ({
+    listAgents: vi.fn(async () => ['agent1']),
+    getAgentFile: vi.fn(async () => ({
+      getFilePath: vi.fn(() => 'path/to/agent1.ts'),
+    })),
+    disposeAll: vi.fn(async () => undefined),
   })),
 }));
 

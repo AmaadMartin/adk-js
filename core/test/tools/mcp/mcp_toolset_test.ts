@@ -16,26 +16,26 @@ vi.hoisted(() => {
 
 vi.mock('@modelcontextprotocol/sdk/client/index.js', () => {
   return {
-    Client: vi.fn().mockImplementation(() => ({
-      connect: vi.fn().mockResolvedValue(undefined),
-      close: vi.fn().mockResolvedValue(undefined),
-      listTools: vi.fn().mockResolvedValue({
+    Client: vi.fn(() => ({
+      connect: vi.fn(async () => undefined),
+      close: vi.fn(async () => undefined),
+      listTools: vi.fn(async () => ({
         tools: [
           {name: 'test-tool', description: 'A test tool', inputSchema: {}},
           {name: 'other-tool', description: 'Another tool', inputSchema: {}},
         ],
-      }),
-      listResources: vi.fn().mockResolvedValue({
+      })),
+      listResources: vi.fn(async () => ({
         resources: [
           {uri: 'file:///res1', name: 'res1'},
           {uri: 'file:///res2', name: 'res2'},
         ],
-      }),
-      readResource: vi.fn().mockResolvedValue({
+      })),
+      readResource: vi.fn(async () => ({
         contents: [
           {uri: 'file:///res1', mimeType: 'text/plain', text: 'hello'},
         ],
-      }),
+      })),
     })),
   };
 });
