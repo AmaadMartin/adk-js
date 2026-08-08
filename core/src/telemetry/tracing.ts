@@ -59,7 +59,7 @@ export const tracer = trace.getTracer('gcp.vertex.agent', version);
  * @param error The thrown value. JavaScript allows any value to be thrown, so
  *     this accepts `unknown` rather than `Error`.
  */
-export function recordSpanError(span: Span, error: unknown): void {
+function recordSpanError(span: Span, error: unknown): void {
   const failureType = resolveErrorType(error);
   // Narrowing to OTel's `Exception` union, which accepts an `Error` or a
   // string; not an ADK class check.
@@ -423,6 +423,40 @@ export function runAsyncGeneratorWithOtelContext<TThis, T>(
 ): AsyncGenerator<T, void, void> {
   const generator = generatorFn.call(generatorFnContext);
   return bindOtelContextToAsyncGenerator(otelContext, generator);
+}
+
+/**
+ * Runs an async generator function inside a span that owns its whole lifecycle.
+ *
+ * The span is started, bound to the generator as the active OTEL context,
+ * marked with any error that ends the generator, and always ended. The error
+ * is rethrown unchanged.
+ *
+ * @param spanName - The name of the span to start
+ * @param generatorFnContext - The 'this' context to bind to the generator function
+ * @param generatorFn - The generator function to execute
+ *
+ * @returns A new async generator that executes within the span
+ */
+export async function* runAsyncGeneratorInSpan<TThis, T>(
+  spanName: string,
+  generatorFnContext: TThis,
+  generatorFn: (this: TThis) => AsyncGenerator<T, void, void>,
+): AsyncGenerator<T, void, void> {
+  const span = tracer.startSpan(spanName);
+  const otelContext = trace.setSpan(context.active(), span);
+  try {
+    yield* runAsyncGeneratorWithOtelContext(
+      otelContext,
+      generatorFnContext,
+      generatorFn,
+    );
+  } catch (e: unknown) {
+    recordSpanError(span, e);
+    throw e;
+  } finally {
+    span.end();
+  }
 }
 
 /**

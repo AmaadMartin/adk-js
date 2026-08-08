@@ -163,10 +163,10 @@ export function formatError(err: unknown): string {
 /**
  * Derives the `error.type` telemetry label for a failure.
  *
- * Prefers, in order: an `errorType` the error classified itself with; an HTTP
- * status the error carries (the `@google/genai` `ApiError` reports one, and the
- * SDK collapses every 4xx into a single class and every 5xx into another, so
- * the status is the only signal that tells them apart); finally the class name.
+ * Prefers the HTTP status the error carries (the `@google/genai` `ApiError`
+ * reports one, and the SDK collapses every 4xx into a single class and every
+ * 5xx into another, so the status is the only signal that tells them apart),
+ * and otherwise reports the class name.
  *
  * The status is duck-typed rather than matched with `instanceof`, because two
  * copies of `@google/genai` can share one runtime and an error raised by one is
@@ -179,12 +179,7 @@ export function formatError(err: unknown): string {
  * @return The value to report as `error.type`.
  */
 export function resolveErrorType(error: unknown): string {
-  const record = asRecord(error);
-  const errorType = record?.['errorType'];
-  if (typeof errorType === 'string') {
-    return errorType;
-  }
-  const status = record?.['status'];
+  const status = asRecord(error)?.['status'];
   if (
     typeof status === 'number' &&
     status >= MIN_HTTP_STATUS &&

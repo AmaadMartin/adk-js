@@ -209,36 +209,13 @@ describe('formatError', () => {
   });
 });
 
-/** An error that classifies itself, the way an MCP tool failure does. */
-class ClassifiedError extends Error {
-  constructor(
-    message: string,
-    readonly errorType: string,
-  ) {
-    super(message);
-  }
-}
-
 /** A subclass that never assigns `this.name`. */
 class QuotaExceededError extends Error {}
 
 describe('resolveErrorType', () => {
-  it('prefers the type the error classified itself with', () => {
-    expect(resolveErrorType(new ClassifiedError('nope', 'TOOL_TIMEOUT'))).toBe(
-      'TOOL_TIMEOUT',
-    );
-  });
-
   it('reports the HTTP status an ApiError-shaped error carries', () => {
     const err = Object.assign(new Error('Resource exhausted'), {status: 429});
     expect(resolveErrorType(err)).toBe('429');
-  });
-
-  it('prefers a self-classified type over the HTTP status', () => {
-    const err = Object.assign(new ClassifiedError('nope', 'RATE_LIMIT'), {
-      status: 429,
-    });
-    expect(resolveErrorType(err)).toBe('RATE_LIMIT');
   });
 
   it('reports the class name of a built-in error', () => {
@@ -267,9 +244,5 @@ describe('resolveErrorType', () => {
 
   it('stringifies a thrown number', () => {
     expect(resolveErrorType(42)).toBe('42');
-  });
-
-  it('reads errorType from a plain object', () => {
-    expect(resolveErrorType({errorType: 'X'})).toBe('X');
   });
 });

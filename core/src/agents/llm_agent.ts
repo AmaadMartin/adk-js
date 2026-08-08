@@ -5,7 +5,6 @@
  */
 
 import {GenerateContentConfig, Schema} from '@google/genai';
-import {context, trace} from '@opentelemetry/api';
 import {FinishTaskTool} from '../tools/finish_task_tool.js';
 import {FunctionTool} from '../tools/function_tool.js';
 import {AsyncQueue} from '../utils/async_queue.js';
@@ -41,12 +40,7 @@ import {logger} from '../utils/logger.js';
 import {canUseOutputSchemaWithTools} from '../utils/output_schema_utils.js';
 import {Context} from './context.js';
 
-import {
-  recordSpanError,
-  runAsyncGeneratorWithOtelContext,
-  traceCallLlm,
-  tracer,
-} from '../telemetry/tracing.js';
+import {runAsyncGeneratorInSpan, traceCallLlm} from '../telemetry/tracing.js';
 import {isZodObject, zodObjectToSchema} from '../utils/simple_zod_to_json.js';
 import {BaseAgent, BaseAgentConfig} from './base_agent.js';
 import {
@@ -899,58 +893,49 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     // =========================================================================
     // Calls the LLM
     // =========================================================================
-    const span = tracer.startSpan('call_llm');
-    const ctx = trace.setSpan(context.active(), span);
-    try {
-      yield* runAsyncGeneratorWithOtelContext<LlmAgent, Event>(
-        ctx,
-        this,
-        async function* () {
-          const responsesGenerator = async function* (this: LlmAgent) {
-            for await (const llmResponse of this.callLlmAsync(
+    yield* runAsyncGeneratorInSpan<LlmAgent, Event>(
+      'call_llm',
+      this,
+      async function* () {
+        const responsesGenerator = async function* (this: LlmAgent) {
+          for await (const llmResponse of this.callLlmAsync(
+            invocationContext,
+            llmRequest,
+            modelResponseEvent,
+          )) {
+            if (invocationContext.abortSignal?.aborted) {
+              return;
+            }
+
+            // ======================================================================
+            // Postprocess after calling the LLM
+            // ======================================================================
+            for await (const event of this.postprocess(
               invocationContext,
               llmRequest,
+              llmResponse,
               modelResponseEvent,
             )) {
               if (invocationContext.abortSignal?.aborted) {
                 return;
               }
 
-              // ======================================================================
-              // Postprocess after calling the LLM
-              // ======================================================================
-              for await (const event of this.postprocess(
-                invocationContext,
-                llmRequest,
-                llmResponse,
-                modelResponseEvent,
-              )) {
-                if (invocationContext.abortSignal?.aborted) {
-                  return;
-                }
-
-                // Update the mutable event id to avoid conflict
-                modelResponseEvent.id = createNewEventId();
-                modelResponseEvent.timestamp = new Date().getTime();
-                yield event;
-              }
+              // Update the mutable event id to avoid conflict
+              modelResponseEvent.id = createNewEventId();
+              modelResponseEvent.timestamp = new Date().getTime();
+              yield event;
             }
-          };
+          }
+        };
 
-          yield* this.runAndHandleError(
-            responsesGenerator.call(this),
-            invocationContext,
-            llmRequest,
-            modelResponseEvent,
-          );
-        },
-      );
-    } catch (e: unknown) {
-      recordSpanError(span, e);
-      throw e;
-    } finally {
-      span.end();
-    }
+        yield* this.runAndHandleError(
+          responsesGenerator.call(this),
+          invocationContext,
+          llmRequest,
+          modelResponseEvent,
+        );
+      },
+    );
   }
 
   private async *postprocess(
