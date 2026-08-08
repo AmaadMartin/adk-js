@@ -13,17 +13,6 @@ import {Session} from '@google/adk/sessions/session.js';
 import {ApiError} from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
-// Mock the unreleased nodejs-vertexai package so the import resolves
-vi.mock('nodejs-vertexai', () => ({
-  SessionsClient: class {
-    create = vi.fn();
-    get = vi.fn();
-    list = vi.fn();
-    delete = vi.fn();
-    events = {append: vi.fn()};
-  },
-}));
-
 const clientConstructor = vi.hoisted(() => vi.fn());
 
 // The service imports Client from the package root, so the mock must target it.
