@@ -136,7 +136,7 @@ const COMPILE_AGENT_FILE = new Option(
 ).default(true);
 const BUNDLE_AGENT_FILE = new Option(
   '--bundle [boolean]',
-  'Optional. Whether to compile ts agent file to js before execution',
+  'Optional. Whether to inline the agent file dependencies into a single compiled file. When disabled, the agent must be a single self-contained file',
 ).default(true);
 const A2A_OPTION = new Option(
   '--a2a [boolean]',
