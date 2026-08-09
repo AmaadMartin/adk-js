@@ -163,26 +163,19 @@ function isBlockedIpv4(octets: number[]): boolean {
 }
 
 /**
- * Returns `true` when `hextets` falls inside the network: every whole hextet
- * spanned by the prefix must match, plus the leading bits of the hextet the
- * prefix splits.
+ * Returns `true` when `hextets` falls inside the network. Every hextet is
+ * compared with the bits the prefix does not reach shifted away, so the shift
+ * is 0 for a hextet the prefix spans whole, partial for the hextet it splits,
+ * and 16 past the prefix, where both sides become 0 and always match.
  */
 function matchesIpv6Prefix(
   hextets: number[],
   {base, prefix}: Ipv6Cidr,
 ): boolean {
-  const wholeHextets = prefix >> 4;
-  for (let i = 0; i < wholeHextets; i++) {
-    if (hextets[i] !== base[i]) {
-      return false;
-    }
-  }
-  const splitBits = prefix & 0xf;
-  if (splitBits === 0) {
-    return true;
-  }
-  const shift = 16 - splitBits;
-  return hextets[wholeHextets] >> shift === base[wholeHextets] >> shift;
+  return base.every((baseHextet, i) => {
+    const shift = Math.min(16, Math.max(0, 16 * (i + 1) - prefix));
+    return hextets[i] >> shift === baseHextet >> shift;
+  });
 }
 
 /** Returns `true` if the IPv6 hextets fall within any blocked range. */
