@@ -8,6 +8,7 @@ import {
   CodeExecutionResult,
   Context,
   InvocationContext,
+  RunSkillScriptErrorCode,
   RunSkillScriptTool,
   Skill,
   SkillToolset,
@@ -20,6 +21,11 @@ import {describe, expect, it} from 'vitest';
 
 const IS_WINDOWS = os.platform() === 'win32';
 const IS_UNIX = os.platform() === 'linux' || os.platform() === 'darwin';
+
+interface ToolErrorResponse {
+  error: string;
+  errorCode: RunSkillScriptErrorCode;
+}
 
 describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
   function createMockContext(agentName = 'test-agent') {
@@ -44,6 +50,9 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
         },
         'hello.sh': {
           src: 'echo "hello from skill sh"',
+        },
+        'hello.ts': {
+          src: 'const msg: string = "hello from skill ts"; console.log(msg);',
         },
         'fail.js': {
           src: 'console.error("skill js error"); process.exit(1);',
@@ -346,5 +355,28 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
     // Clean up both files
     await fs.unlink(targetFile);
     await fs.unlink(fullPath);
+  });
+
+  it('refuses a TypeScript skill script instead of running it', async () => {
+    const executor = new UnsafeLocalCodeExecutor();
+    const toolset = new SkillToolset([testSkill], {codeExecutor: executor});
+    const tool = new RunSkillScriptTool(toolset);
+
+    const result = (await tool.runAsync({
+      args: {
+        skill_name: 'test-skill',
+        script_path: 'scripts/hello.ts',
+      },
+      toolContext: createMockContext(),
+    })) as ToolErrorResponse;
+
+    expect(result).toEqual({
+      error:
+        "Script 'scripts/hello.ts' has unsupported language 'typescript'. " +
+        'Skill scripts must be one of: .js, .py, .sh, .ps1, .bat, .cmd.',
+      errorCode: RunSkillScriptErrorCode.UNSUPPORTED_SCRIPT_LANGUAGE,
+    });
+    expect(result).not.toHaveProperty('stdout');
+    expect(result).not.toHaveProperty('stderr');
   });
 });
