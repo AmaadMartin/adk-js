@@ -53,6 +53,18 @@ recordings:
             - text: hi
 `;
 
+const NON_MAPPING_CASES = [
+  {file: 'spec.yaml', message: 'Spec file must be a YAML mapping'},
+  {
+    file: 'generated-session.yaml',
+    message: 'Session file must be a YAML mapping',
+  },
+  {
+    file: 'generated-recordings.yaml',
+    message: 'Recording file must be a YAML mapping',
+  },
+];
+
 describe('batchLoadYamlTestDefs', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -161,6 +173,25 @@ describe('batchLoadYamlTestDefs', () => {
       'File not found',
     );
   });
+
+  it.each(NON_MAPPING_CASES)(
+    'should name $file in the error when it is not a mapping',
+    async ({file, message}) => {
+      const rootDir = '/root/tests';
+      (fg.stream as unknown as Mock).mockReturnValue([
+        '/root/tests/t1/spec.yaml',
+      ]);
+      (fs.readFile as Mock).mockImplementation(async (filePath: string) => {
+        if (filePath.endsWith(file)) return 'just a string';
+        if (filePath.endsWith('generated-session.yaml')) return SESSION_YAML;
+        if (filePath.endsWith('generated-recordings.yaml'))
+          return RECORDINGS_YAML;
+        return SPEC_YAML;
+      });
+
+      await expect(batchLoadYamlTestDefs(rootDir)).rejects.toThrow(message);
+    },
+  );
 });
 
 const OPAQUE_ROOT_DIR = '/root/tests';

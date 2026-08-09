@@ -60,6 +60,25 @@ const RECORDINGS_OPAQUE_PATHS = [
 ];
 
 /**
+ * Reads one YAML document of a test case and camelCases its struct field
+ * names, leaving the subtrees named by `stopPaths` verbatim.
+ *
+ * @param label names the document in the error a non-mapping document raises.
+ */
+async function loadYamlMapping<T>(
+  filePath: string,
+  label: string,
+  stopPaths: string[],
+): Promise<T> {
+  const content = await fs.readFile(filePath, 'utf-8');
+  const parsed = yaml.load(content);
+  if (typeof parsed !== 'object' || parsed === null) {
+    throw new Error(`${label} file must be a YAML mapping`);
+  }
+  return camelcaseKeys(parsed, {deep: true, stopPaths}) as T;
+}
+
+/**
  * batchLoadYamlTestDefs will recursively search the directory given
  * and load all of the YAML files into in-memory config.
  */
@@ -87,45 +106,21 @@ export async function batchLoadYamlTestDefs(
     // Test directory
     const baseDir = path.posix.dirname(normalizedFile);
 
-    // Spec file
-    const specFile = path.posix.join(baseDir, 'spec.yaml');
-    const filePath = specFile;
-    const content = await fs.readFile(filePath, 'utf-8');
-    const parsedSpec = yaml.load(content);
-    if (typeof parsedSpec !== 'object' || parsedSpec === null) {
-      throw new Error('Spec file must be a YAML mapping');
-    }
-    const testSpec = camelcaseKeys(parsedSpec, {
-      deep: true,
-      stopPaths: SPEC_OPAQUE_PATHS,
-    }) as TestSpec;
-
-    // Session file
-    const sessionFile = path.posix.join(baseDir, 'generated-session.yaml');
-    const sessionContent = await fs.readFile(sessionFile, 'utf-8');
-    const parsedSession = yaml.load(sessionContent);
-    if (typeof parsedSession !== 'object' || parsedSession === null) {
-      throw new Error('Session file must be a YAML mapping');
-    }
-    const session = camelcaseKeys(parsedSession, {
-      deep: true,
-      stopPaths: SESSION_OPAQUE_PATHS,
-    }) as Session;
-
-    // Recordings file
-    const recordingsFile = path.posix.join(
-      baseDir,
-      'generated-recordings.yaml',
+    const testSpec = await loadYamlMapping<TestSpec>(
+      path.posix.join(baseDir, 'spec.yaml'),
+      'Spec',
+      SPEC_OPAQUE_PATHS,
     );
-    const recordingsContent = await fs.readFile(recordingsFile, 'utf-8');
-    const parsedRecordings = yaml.load(recordingsContent);
-    if (typeof parsedRecordings !== 'object' || parsedRecordings === null) {
-      throw new Error('Recording file must be a YAML mapping');
-    }
-    const recordings = camelcaseKeys(parsedRecordings, {
-      deep: true,
-      stopPaths: RECORDINGS_OPAQUE_PATHS,
-    }) as Recordings;
+    const session = await loadYamlMapping<Session>(
+      path.posix.join(baseDir, 'generated-session.yaml'),
+      'Session',
+      SESSION_OPAQUE_PATHS,
+    );
+    const recordings = await loadYamlMapping<Recordings>(
+      path.posix.join(baseDir, 'generated-recordings.yaml'),
+      'Recording',
+      RECORDINGS_OPAQUE_PATHS,
+    );
 
     // Make test names unique by including relative file path from given root dir
     const normalizedDir = directory.replaceAll('\\', '/');
