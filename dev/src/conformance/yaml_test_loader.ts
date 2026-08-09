@@ -33,11 +33,15 @@ const SESSION_OPAQUE_PATHS = [
   'state',
   'events.actions.state_delta',
   'events.actions.artifact_delta',
+  'events.actions.requested_auth_configs',
+  'events.actions.requested_tool_confirmations',
   'events.actions.custom_metadata',
   'events.actions.agent_state',
   'events.custom_metadata',
   'events.content.parts.function_call.args',
   'events.content.parts.function_response.response',
+  'events.output',
+  'events.route',
 ];
 
 /**

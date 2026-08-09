@@ -248,6 +248,35 @@ events:
         cursor_pos: 2
 `;
 
+const FUNCTION_CALL_ID = 'adk-3f9c1e20';
+
+const REQUESTED_CONFIGS_SESSION_YAML = `
+app_name: test-app
+user_id: user-1
+id: session-1
+events:
+  - author: agent
+    actions:
+      requested_auth_configs:
+        '${FUNCTION_CALL_ID}': {}
+      requested_tool_confirmations:
+        '${FUNCTION_CALL_ID}':
+          hint: confirm the transfer
+          confirmed: false
+`;
+
+const OUTPUT_SESSION_YAML = `
+app_name: test-app
+user_id: user-1
+id: session-1
+events:
+  - author: agent
+    output:
+      total_cost: 2
+      nested_result:
+        inner_key: 1
+`;
+
 const OPAQUE_SPEC_YAML = `
 description: Test description
 agent: test-agent
@@ -398,6 +427,27 @@ describe('batchLoadYamlTestDefs opaque payloads', () => {
     expect(event.actions).toEqual({
       customMetadata: {run_tag: 'nightly'},
       agentState: {cursor_pos: 2},
+    });
+  });
+
+  it('preserves the function call ids that key the requested configs', async () => {
+    const test = await loadTest({session: REQUESTED_CONFIGS_SESSION_YAML});
+
+    const actions = test.session.events[0].actions;
+    expect(Object.keys(actions.requestedAuthConfigs)).toEqual([
+      FUNCTION_CALL_ID,
+    ]);
+    expect(actions.requestedToolConfirmations).toEqual({
+      [FUNCTION_CALL_ID]: {hint: 'confirm the transfer', confirmed: false},
+    });
+  });
+
+  it('preserves workflow node output keys', async () => {
+    const test = await loadTest({session: OUTPUT_SESSION_YAML});
+
+    expect(test.session.events[0].output).toEqual({
+      total_cost: 2,
+      nested_result: {inner_key: 1},
     });
   });
 
