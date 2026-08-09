@@ -46,4 +46,11 @@ describe('canonicalJson', () => {
     cyclic['self'] = cyclic;
     expect(() => canonicalJson(cyclic)).toThrow(TypeError);
   });
+
+  it('keeps a __proto__ key as data rather than dropping it', () => {
+    const parsed: unknown = JSON.parse('{"b":1,"__proto__":{"polluted":true}}');
+
+    expect(canonicalJson(parsed)).toBe('{"__proto__":{"polluted":true},"b":1}');
+    expect(({} as Record<string, unknown>)['polluted']).toBeUndefined();
+  });
 });

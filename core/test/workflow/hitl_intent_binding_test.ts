@@ -6,10 +6,16 @@
 
 import {FunctionResponse, Part} from '@google/genai';
 import {describe, expect, it} from 'vitest';
+import {z} from 'zod';
+import {LlmAgent} from '../../src/agents/llm_agent.js';
 import {AuthCredentialTypes} from '../../src/auth/auth_credential.js';
 import {AuthScheme} from '../../src/auth/auth_schemes.js';
 import {AuthConfig} from '../../src/auth/auth_tool.js';
 import {createEvent, Event} from '../../src/events/event.js';
+import {BaseLlm} from '../../src/models/base_llm.js';
+import {BaseLlmConnection} from '../../src/models/base_llm_connection.js';
+import {LlmRequest} from '../../src/models/llm_request.js';
+import {LlmResponse} from '../../src/models/llm_response.js';
 import {Runner} from '../../src/runner/runner.js';
 import {InMemorySessionService} from '../../src/sessions/in_memory_session_service.js';
 import {
@@ -18,6 +24,7 @@ import {
 } from '../../src/workflow/errors.js';
 import {node} from '../../src/workflow/node.js';
 import {NodeContext} from '../../src/workflow/node_context.js';
+import {NodeTool} from '../../src/workflow/nodes/node_tool.js';
 import {RequestInput} from '../../src/workflow/request_input.js';
 import {
   createAuthRequestEvent,
@@ -394,6 +401,33 @@ function refundWorkflow(): {executed: unknown[]; agent: WorkflowAgent} {
   return {executed, agent: new WorkflowAgent(wf)};
 }
 
+/** The same refund workflow, shaped so a {@link NodeTool} can wrap it. */
+function refundToolWorkflow(): {executed: unknown[]; workflow: Workflow} {
+  const executed: unknown[] = [];
+  const gate = node(
+    (ctx: NodeContext) => {
+      const answer = ctx.resumeInputs[INTERRUPT_ID];
+      if (answer === undefined) {
+        return new RequestInput({
+          interruptId: INTERRUPT_ID,
+          payload: FROZEN_PAYLOAD,
+          message: 'Approve this refund?',
+        });
+      }
+      executed.push(answer);
+      return 'executed';
+    },
+    {name: 'gate', rerunOnResume: true},
+  );
+  const workflow = new Workflow({
+    name: TOOL_NAME,
+    description: 'Approves and executes a refund.',
+    inputSchema: z.object({amount: z.number()}),
+    edges: [['START', gate]],
+  });
+  return {executed, workflow};
+}
+
 /** Drives one turn of a workflow through a real Runner, collecting its events. */
 async function runTurn(
   runner: Runner,
@@ -498,7 +532,7 @@ describe('workflow resume — approve-A / execute-B', () => {
     expect(turn2.some((e) => e.output === 'executed')).toBe(true);
   });
 
-  it('lets a later plain-text reply recover a pause a mismatch left open', async () => {
+  it('keeps aborting when a plain-text reply follows a mismatch', async () => {
     const {executed, runner, sessionId} = await pauseOnRefund();
 
     const turn2 = runTurn(runner, sessionId, [
@@ -512,9 +546,38 @@ describe('workflow resume — approve-A / execute-B', () => {
     ]);
     await expect(turn2).rejects.toSatisfy(isRequestInputMismatchError);
 
-    // The bad response stays in the session history forever, so the pause must
-    // still accept a fresh answer typed by the human.
-    const turn3 = await runTurn(runner, sessionId, [{text: 'approved'}]);
+    // A resume value seeded outside the verified scan does not excuse the
+    // mismatch. A plain-text reply maps to the still-pending interrupt, so
+    // honouring it here would be an opening for any other such seed.
+    const turn3 = runTurn(runner, sessionId, [{text: 'approved'}]);
+
+    await expect(turn3).rejects.toSatisfy(isRequestInputMismatchError);
+    expect(executed).toEqual([]);
+  });
+
+  it('recovers when a well-formed response follows a mismatch', async () => {
+    const {executed, runner, sessionId} = await pauseOnRefund();
+
+    const turn2 = runTurn(runner, sessionId, [
+      {
+        functionResponse: {
+          id: INTERRUPT_ID,
+          name: 'transfer_funds',
+          response: {result: 'approved'},
+        },
+      },
+    ]);
+    await expect(turn2).rejects.toSatisfy(isRequestInputMismatchError);
+
+    const turn3 = await runTurn(runner, sessionId, [
+      {
+        functionResponse: {
+          id: INTERRUPT_ID,
+          name: REQUEST_INPUT_FUNCTION_CALL_NAME,
+          response: {result: 'approved'},
+        },
+      },
+    ]);
 
     expect(executed).toEqual(['approved']);
     expect(turn3.some((e) => e.output === 'executed')).toBe(true);
@@ -535,5 +598,120 @@ describe('workflow resume — approve-A / execute-B', () => {
 
     expect(executed).toEqual(['approved']);
     expect(turn2.some((e) => e.output === 'executed')).toBe(true);
+  });
+});
+
+/** A model that replays a fixed list of responses, one per call. */
+class ScriptedLlm extends BaseLlm {
+  private callCount = 0;
+
+  constructor(private readonly responses: LlmResponse[]) {
+    super({model: 'scripted-llm'});
+  }
+
+  async *generateContentAsync(
+    _request: LlmRequest,
+  ): AsyncGenerator<LlmResponse, void, void> {
+    const response = this.responses[this.callCount++];
+    if (response) {
+      yield response;
+    }
+  }
+
+  async connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
+    throw new Error('Live mode is not supported by ScriptedLlm.');
+  }
+}
+
+const TOOL_CALL_ID = 'call-1';
+const TOOL_NAME = 'refund_wf';
+
+/**
+ * The second HITL entry point: an `LlmAgent` calls the same workflow through a
+ * {@link NodeTool}, which seeds the node's resume inputs from the tool
+ * confirmation payload rather than from the verified rehydration scan.
+ */
+describe('NodeTool resume — approve-A / execute-B', () => {
+  async function pauseOnRefundTool(): Promise<{
+    executed: unknown[];
+    runner: Runner;
+    sessionId: string;
+  }> {
+    const {executed, workflow} = refundToolWorkflow();
+    const agent = new LlmAgent({
+      name: 'root',
+      model: new ScriptedLlm([
+        {
+          content: {
+            role: 'model',
+            parts: [
+              {
+                functionCall: {
+                  id: TOOL_CALL_ID,
+                  name: TOOL_NAME,
+                  args: {amount: 5},
+                },
+              },
+            ],
+          },
+        },
+      ]),
+      tools: [new NodeTool(workflow)],
+    });
+    const sessionService = new InMemorySessionService();
+    const session = await sessionService.createSession({
+      appName: 'test_app',
+      userId: 'u1',
+    });
+    const runner = new Runner({appName: 'test_app', agent, sessionService});
+
+    const turn1 = await runTurn(runner, session.id, [{text: 'refund alice 5'}]);
+
+    expect(executed).toEqual([]);
+    expect(
+      turn1.some((e) => (e.longRunningToolIds ?? []).includes(INTERRUPT_ID)),
+    ).toBe(true);
+
+    return {executed, runner, sessionId: session.id};
+  }
+
+  it('never executes the node when the resume response echoes a different payload', async () => {
+    const {executed, runner, sessionId} = await pauseOnRefundTool();
+
+    const turn2 = runTurn(runner, sessionId, [
+      {
+        functionResponse: {
+          id: INTERRUPT_ID,
+          name: REQUEST_INPUT_FUNCTION_CALL_NAME,
+          response: {
+            payload: {action: 'refund', to: 'bob', amount: 5000},
+            result: 'approved',
+          },
+        },
+      },
+    ]);
+
+    // The turn fails and the node body never runs. The agent's tool-call step
+    // converts any error a node-tool throws into a tool error before the caller
+    // sees it, so the rejection here is not the RequestInputMismatchError
+    // itself; the empty `executed` array is the property under test.
+    await expect(turn2).rejects.toThrow();
+    expect(executed).toEqual([]);
+  });
+
+  it('resumes when the response echoes the frozen payload', async () => {
+    const {executed, runner, sessionId} = await pauseOnRefundTool();
+
+    await runTurn(runner, sessionId, [
+      {
+        functionResponse: {
+          id: INTERRUPT_ID,
+          name: REQUEST_INPUT_FUNCTION_CALL_NAME,
+          response: {payload: FROZEN_PAYLOAD, result: 'approved'},
+        },
+      },
+    ]);
+
+    expect(executed).toEqual([{payload: FROZEN_PAYLOAD, result: 'approved'}]);
   });
 });
