@@ -25,17 +25,6 @@ import {
   UserMessage,
 } from './test_types.js';
 
-/**
- * The brand `createEvent` stamps on every event it builds.
- *
- * Re-derived from the global symbol registry because `core` keeps its
- * `Symbol.for('google.adk.*')` brands module-private. `assert.deepStrictEqual`
- * compares own enumerable symbol properties, and a session recorded to YAML
- * cannot carry one, so replayed events must be stripped of it before they are
- * compared.
- */
-const EVENT_SIGNATURE_SYMBOL = Symbol.for('google.adk.event');
-
 const SKIPPED_TESTS = [
   {
     name: 'tool/example_tool_001',
@@ -172,9 +161,9 @@ function validateSession(actual: Session, expected: Session) {
  * Strips the fields that vary between two runs of the same test.
  *
  * Removes the generated identifiers (`id`, `timestamp`, `invocationId`,
- * `longRunningToolIds`) and the non-serializable event signature brand, so a
- * replayed event can be compared against the same event loaded from a recorded
- * YAML session. Mutates and returns the event it is given.
+ * `longRunningToolIds`) and the non-serializable symbol brands, so a replayed
+ * event can be compared against the same event loaded from a recorded YAML
+ * session. Mutates and returns the event it is given.
  */
 export function normalizeEvent(event: Event): FilteredEvent {
   const filteredEvent = event as FilteredEvent;
@@ -231,7 +220,13 @@ function filterPartFields(part: FilteredPart) {
 }
 
 function filterEventFields(event: FilteredEvent) {
-  Reflect.deleteProperty(event, EVENT_SIGNATURE_SYMBOL);
+  // `assert.deepStrictEqual` compares own symbol properties, and an event
+  // loaded from a recorded YAML session can never have one. Every brand a
+  // runtime event carries, such as the one `createEvent` stamps, is therefore
+  // noise in the comparison.
+  for (const brand of Object.getOwnPropertySymbols(event)) {
+    Reflect.deleteProperty(event, brand);
+  }
 
   /* eslint-disable @typescript-eslint/no-explicit-any */
   delete (event as any).id;
