@@ -77,6 +77,16 @@ describe('oauth2_utils', () => {
       };
       expect(getTokenEndpoint(scheme)).toBeUndefined();
     });
+
+    it('returns undefined for a custom scheme', () => {
+      const scheme: AuthScheme = {type: 'acmeVault'};
+      expect(getTokenEndpoint(scheme)).toBeUndefined();
+    });
+
+    it('returns undefined for an oauth2 scheme that declares no flows', () => {
+      const scheme: AuthScheme = {type: 'oauth2'};
+      expect(getTokenEndpoint(scheme)).toBeUndefined();
+    });
   });
 
   describe('fetchOAuth2Tokens', () => {
