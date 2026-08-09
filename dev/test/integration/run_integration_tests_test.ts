@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// Covers the failure count `runIntegrationTests` returns. The filename avoids
-// `run_integration_tests_test.ts`, which a concurrent change adds.
-
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {batchLoadYamlTestDefs} from '../../src/conformance/yaml_test_loader.js';
 import {runIntegrationTests} from '../../src/integration/run_integration_tests.js';
