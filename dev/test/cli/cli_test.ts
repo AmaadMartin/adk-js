@@ -135,6 +135,16 @@ describe('CLI Entrypoint', () => {
         expect(entry).toContain('(choices: "cjs", "esm")');
       },
     );
+
+    it.each(AGENT_FILE_COMMANDS)(
+      'limits the package.json fallback to .js and .ts in `%s` help',
+      (commandPath) => {
+        const entry = fileTypeHelp(program, commandPath);
+
+        expect(entry).toContain('extension (.cjs/.cts, .mjs/.mts)');
+        expect(entry).toMatch(/nearest package\.json for \.js and \.ts files/);
+      },
+    );
   });
 
   describe('command: web', () => {

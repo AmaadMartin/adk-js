@@ -156,7 +156,7 @@ const RELOAD_AGENTS_OPTION = new Option(
 ).default(false);
 const AGENT_FILE_MODULE_TYPE = new Option(
   '--file_type <string>',
-  'Optional. The module format of the compiled agent file: cjs emits CommonJS to a .cjs file, esm emits an ES module to a .mjs file. If not set, the format is detected from the agent file extension and the nearest package.json "type" field.',
+  'Optional. The module format of the compiled agent file: cjs emits CommonJS to a .cjs file, esm emits an ES module to a .mjs file. If not set, the format is taken from the agent file extension (.cjs/.cts, .mjs/.mts), falling back to the "type" field of the nearest package.json for .js and .ts files.',
 );
 AGENT_FILE_MODULE_TYPE.argChoices = [FileModuleType.CJS, FileModuleType.ESM];
 
