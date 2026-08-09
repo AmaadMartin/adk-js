@@ -7,6 +7,7 @@
 import {
   CodeExecutionLanguage,
   ExecuteCodeParams,
+  FileContentEncoding,
   InvocationContext,
   LlmAgent,
   PluginManager,
@@ -403,6 +404,52 @@ describe('UnsafeLocalCodeExecutor', () => {
     // a directory that is still there.
     await expect(fs.access(cwd)).rejects.toMatchObject({code: 'ENOENT'});
   }, 60000);
+
+  // A rejected execution takes the same `finally` out of `executeCode` as a
+  // successful one, but it never reaches `spawn`, so the scratch directory's
+  // path is not observable through the script's `process.cwd()`. Redirecting
+  // the temp root instead makes the whole directory tree observable.
+  it('should remove the scratch directory when execution fails', async () => {
+    const tempRoot = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'adk_js_executor_failure_test_'),
+    );
+
+    try {
+      // `os.tmpdir()` re-reads these on every call, and it reads `TMPDIR` first
+      // on POSIX but `TEMP` first on Windows, so all three are stubbed.
+      for (const name of ['TMPDIR', 'TMP', 'TEMP']) {
+        vi.stubEnv(name, tempRoot);
+      }
+      // Without this the readdir assertion is vacuous: a scratch directory
+      // created outside `tempRoot` would leave it empty either way.
+      expect(os.tmpdir()).toBe(tempRoot);
+
+      const params: ExecuteCodeParams = {
+        invocationContext,
+        codeExecutionInput: {
+          code: 'console.log("never runs");',
+          language: CodeExecutionLanguage.JAVASCRIPT,
+          inputFiles: [
+            {
+              name: '../escaped.txt',
+              content: 'should never be written',
+              contentEncoding: FileContentEncoding.UTF8,
+              mimeType: 'text/plain',
+            },
+          ],
+        },
+      };
+
+      await expect(executor.executeCode(params)).rejects.toThrow(
+        'Path traversal detected',
+      );
+
+      expect(await fs.readdir(tempRoot)).toEqual([]);
+    } finally {
+      vi.unstubAllEnvs();
+      await fs.rm(tempRoot, {recursive: true, force: true});
+    }
+  });
 
   describe('spawn arguments', () => {
     beforeEach(() => {
