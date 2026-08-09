@@ -3,13 +3,11 @@
  * Copyright 2026 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
-import {exec, spawn} from 'node:child_process';
+import {spawn} from 'node:child_process';
 import * as fs from 'node:fs/promises';
-import {promisify} from 'node:util';
-import {afterAll, beforeAll, describe, expect, it} from 'vitest';
+import {afterAll, describe, expect, it} from 'vitest';
 import {normalizeLineEndings, sendInput} from '../../test_case_utils.js';
 
-const execAsync = promisify(exec);
 const dirname = process.cwd();
 const PROJECT_PATH = `${dirname}/tests/integration/skills/script_js`;
 const TEST_EXECUTION_TIMEOUT = 60000;
@@ -29,10 +27,6 @@ const TEST_EXECUTION_TIMEOUT = 60000;
  * This test ensures the end-to-end flow of an agent using tools to generate and materialize files based on a high-level request.
  */
 describe('Agent with skills that generates JS script and runs it locally', () => {
-  beforeAll(async () => {
-    await execAsync('npm install', {cwd: PROJECT_PATH});
-  }, TEST_EXECUTION_TIMEOUT);
-
   it(
     'should run agent with skills successfully',
     async () => {
@@ -99,10 +93,5 @@ describe('Agent with skills that generates JS script and runs it locally', () =>
       .catch(() => {});
     await fs.rm(`${PROJECT_PATH}/index.html`, {force: true}).catch(() => {});
     await fs.rm(`${PROJECT_PATH}/sketch.js`, {force: true}).catch(() => {});
-
-    await fs
-      .rm(`${PROJECT_PATH}/node_modules`, {recursive: true, force: true})
-      .catch(() => {});
-    await fs.unlink(`${PROJECT_PATH}/package-lock.json`).catch(() => {});
   });
 });

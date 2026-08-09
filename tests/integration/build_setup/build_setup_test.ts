@@ -14,11 +14,10 @@ const dirname = process.cwd();
 
 const TEST_EXECUTION_TIMEOUT = 20000;
 
-// These hooks run `npm install` (plus `npm run build` for ts_* setups) and the
-// recursive node_modules teardown, overrunning vitest's default 10s hookTimeout
-// and causing flaky "Hook timed out in 10000ms" failures. All twelve hook runs
-// take ~16s combined on ubuntu-latest, but a cold, network-bound install has
-// been measured at ~70s, so 120s covers the worst case. Don't raise
+// These hooks run `npm run build` for the ts_* setups and remove the generated
+// `dist`, which overruns vitest's default 10s hookTimeout and causes flaky
+// "Hook timed out in 10000ms" failures. Dependencies come from
+// `tests/integration/global_setup.ts`, so no hook installs them. Don't raise
 // TEST_EXECUTION_TIMEOUT for hook flakes; that stays the 20s per-test budget.
 // Trade-off: a stuck hook now takes this long to surface.
 const HOOK_TIMEOUT = 120000;
@@ -35,8 +34,6 @@ describe('Build setup', () => {
     const projectPath = `${dirname}/tests/integration/build_setup/${buildSetup}`;
 
     beforeAll(async () => {
-      await execAsync('npm install', {cwd: projectPath});
-
       if (buildSetup.startsWith('ts_')) {
         let buildResult;
         try {
@@ -118,11 +115,6 @@ describe('Build setup', () => {
     );
 
     afterAll(async () => {
-      await fs
-        .rm(`${projectPath}/node_modules`, {recursive: true, force: true})
-        .catch(() => {});
-      await fs.unlink(`${projectPath}/package-lock.json`).catch(() => {});
-
       if (buildSetup.startsWith('ts_')) {
         await fs
           .rm(`${projectPath}/dist`, {recursive: true, force: true})
