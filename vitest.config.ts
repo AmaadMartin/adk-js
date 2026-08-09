@@ -8,9 +8,11 @@ import path from 'path';
 import {defineConfig} from 'vitest/config';
 
 /**
- * Hook budget (ms) for the `integration` project: install-heavy `beforeAll`
- * hooks run `npm install` (and sometimes `npm run build`) per fixture, which
- * exceeds Vitest's 10s default on a slow or loaded machine.
+ * Hook budget (ms) for the `integration` project: `beforeAll` hooks compile a
+ * fixture (`npm run build`) and tear down its generated directories, which
+ * exceeds Vitest's 10s default on a slow or loaded machine. Fixture
+ * dependencies are installed by `tests/integration/global_setup.ts`, so no
+ * hook pays for an `npm install`.
  */
 const INTEGRATION_HOOK_TIMEOUT_MS = 120000;
 
@@ -87,6 +89,7 @@ export default defineConfig({
             ),
           },
           include: ['tests/integration/**/*_test.ts'],
+          globalSetup: ['./tests/integration/global_setup.ts'],
         },
       },
       {
