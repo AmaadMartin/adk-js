@@ -19,6 +19,8 @@ import {
   GoogleGenAI,
 } from '@google/genai';
 import {ChildProcessWithoutNullStreams} from 'node:child_process';
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
 import {expect} from 'vitest';
 
 /**
@@ -360,6 +362,39 @@ export abstract class BaseTestServer {
       this.serverProcess.kill('SIGINT');
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
+  }
+}
+
+/**
+ * Deletes everything `npm install` writes into a fixture project.
+ *
+ * `force: true` makes a missing path a no-op, so anything that still rejects
+ * here is a real failure (EACCES, EPERM, EBUSY) rather than "already gone".
+ */
+export async function removeInstallArtifacts(
+  projectPath: string,
+): Promise<void> {
+  // Retries absorb Windows unlink races during recursive removal. Node ignores
+  // them unless `recursive` is set, so the lockfile removal does not pass them.
+  await fs.rm(path.join(projectPath, 'node_modules'), {
+    force: true,
+    recursive: true,
+    maxRetries: 3,
+    retryDelay: 100,
+  });
+  await fs.rm(path.join(projectPath, 'package-lock.json'), {force: true});
+}
+
+/**
+ * Teardown variant of {@link removeInstallArtifacts}: warns instead of failing
+ * the suite. Callers pre-clean before installing, so determinism does not
+ * depend on teardown succeeding, but a failure must still be visible.
+ */
+export async function cleanUpFixture(projectPath: string): Promise<void> {
+  try {
+    await removeInstallArtifacts(projectPath);
+  } catch (error) {
+    console.warn(`Failed to clean up fixture at ${projectPath}:`, error);
   }
 }
 
