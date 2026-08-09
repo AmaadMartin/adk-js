@@ -352,6 +352,31 @@ export class AgentFile {
       }
     }
   }
+
+  /**
+   * Removes the compiled artifact synchronously, for use from a process
+   * `'exit'` listener where the runtime drops any pending promise or I/O as
+   * soon as the listener returns. Failures are swallowed: at exit there is no
+   * caller left to handle them. Prefer {@link dispose} everywhere else.
+   */
+  disposeSync(): void {
+    // `load()` sets this alongside `cleanupFilePath` when it compiles; an
+    // agent file with no compiled output owns no artifact and stays usable.
+    if (this.disposed || !this.cleanupDirPath) {
+      return;
+    }
+
+    this.disposed = true;
+    try {
+      // `rmSync` unlinks the `node_modules` symlink inside the output
+      // directory rather than following it into the project's real one.
+      fs.rmSync(this.cleanupDirPath, {recursive: true, force: true});
+    } catch (e) {
+      logger.warn(
+        `Failed to remove ${this.cleanupDirPath}: ${(e as Error).message}`,
+      );
+    }
+  }
 }
 
 /**
@@ -394,8 +419,8 @@ export class AgentLoader {
       return;
     }
 
-    // An `exit` listener cannot await, so this cleanup is best-effort.
-    const onExit = () => void this.disposeAll();
+    // An `exit` listener cannot await, so cleanup has to be synchronous.
+    const onExit = () => this.disposeAllSync();
     // Node passes the signal name to the listener, so one closure covers all
     // of them and still reports the conventional `128 + signal` status.
     const onSignal = (signal: (typeof TERMINATION_SIGNALS)[number]) =>
@@ -501,6 +526,21 @@ export class AgentLoader {
     await Promise.all(
       Object.values(this.preloadedAgents).map((f) => f.dispose()),
     );
+  }
+
+  /**
+   * Synchronous counterpart of {@link disposeAll} for a process `'exit'`
+   * listener. Best-effort: see {@link AgentFile.disposeSync}. Removing a
+   * listener while `'exit'` is being emitted is safe, so this releases the
+   * process handlers too and stays usable for ordinary teardown.
+   */
+  disposeAllSync(): void {
+    this.removeProcessHandlers?.();
+    this.watcher?.close();
+    this.watcher = undefined;
+    for (const agentFile of Object.values(this.preloadedAgents)) {
+      agentFile.disposeSync();
+    }
   }
 
   async preloadAgents() {
