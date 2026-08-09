@@ -1312,7 +1312,7 @@ describe('Runner getSessionConfig forwarding', () => {
       newMessage: NEW_MESSAGE,
       runConfig,
     })) {
-      // Drain the stream.
+      // Consume stream
     }
   }
 
@@ -1360,7 +1360,7 @@ describe('Runner getSessionConfig forwarding', () => {
     ).toHaveLength(1);
   });
 
-  it('omits config when getSessionConfig is absent', async () => {
+  it('leaves config undefined when getSessionConfig is absent', async () => {
     await run();
 
     expect(getSessionSpy.mock.calls[0][0].config).toBeUndefined();
