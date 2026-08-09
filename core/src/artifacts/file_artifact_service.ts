@@ -291,14 +291,10 @@ export class FileArtifactService implements BaseArtifactService {
         sessionId,
         filename,
       );
-      // Only this artifact's own versions go. Its directory may also be the
-      // parent of a nested artifact ('doc' vs 'doc/nested'), so it is pruned
-      // separately and only if nothing is left under it.
       await fs.rm(getVersionsDir(artifactDir), {recursive: true, force: true});
-      await pruneEmptyDirs(
-        artifactDir,
-        getScopeRoot(this.rootDir, userId, sessionId, filename),
-      );
+      // The directory may also be the parent of a nested artifact
+      // ('doc' vs 'doc/nested'), so drop it only if it is now empty.
+      await fs.rmdir(artifactDir).catch(() => {});
     } catch (e) {
       logger.warn(
         `[FileArtifactService] deleteArtifact: Failed to delete artifact ${filename}`,
@@ -472,63 +468,6 @@ function getVersionsDir(artifactDir: string): string {
 }
 
 /**
- * Removes `leaf` and each parent it leaves empty, stopping at `stopAt`.
- *
- * Filenames may contain '/', so an artifact's directory doubles as the parent
- * directory of every artifact nested under it: 'doc' is stored at
- * `{scope}/doc` and 'doc/nested' at `{scope}/doc/nested`. A directory may
- * therefore only be removed once it holds nothing, or deleting 'doc' would
- * take 'doc/nested' with it.
- *
- * @param leaf The directory to remove, if it is empty.
- * @param stopAt The scope root. It, and everything above it, is never removed.
- */
-async function pruneEmptyDirs(leaf: string, stopAt: string): Promise<void> {
-  const stop = path.resolve(stopAt);
-  let current = path.resolve(leaf);
-  while (current !== stop) {
-    const relative = path.relative(stop, current);
-    if (relative.startsWith('..') || path.isAbsolute(relative)) {
-      return;
-    }
-    try {
-      // Only succeeds on an empty directory, so a nested artifact survives.
-      await fs.rmdir(current);
-    } catch {
-      return;
-    }
-    current = path.dirname(current);
-  }
-}
-
-/**
- * Gets the directory that represents the artifact scope.
- *
- * @param rootDir The root directory.
- * @param userId The user ID.
- * @param sessionId The session ID.
- * @param filename The filename.
- * @returns The user-scoped or session-scoped artifacts directory.
- */
-function getScopeRoot(
-  rootDir: string,
-  userId: string,
-  sessionId: string,
-  filename: string,
-): string {
-  const userRoot = getUserRoot(rootDir, userId);
-  if (isUserScoped(sessionId, filename)) {
-    return getUserArtifactsDir(userRoot);
-  }
-  if (!sessionId) {
-    throw new Error(
-      'Session ID must be provided for session-scoped artifacts.',
-    );
-  }
-  return getSessionArtifactsDir(userRoot, sessionId);
-}
-
-/**
  * Gets the artifact directory full path for a given artifact keys.
  *
  * @param rootDir The root directory.
@@ -543,7 +482,19 @@ function getArtifactDir(
   sessionId: string,
   filename: string,
 ): string {
-  const scopeRoot = getScopeRoot(rootDir, userId, sessionId, filename);
+  const userRoot = getUserRoot(rootDir, userId);
+  let scopeRoot: string;
+
+  if (isUserScoped(sessionId, filename)) {
+    scopeRoot = getUserArtifactsDir(userRoot);
+  } else {
+    if (!sessionId) {
+      throw new Error(
+        'Session ID must be provided for session-scoped artifacts.',
+      );
+    }
+    scopeRoot = getSessionArtifactsDir(userRoot, sessionId);
+  }
 
   let cleanFilename = filename;
   if (cleanFilename.startsWith(USER_NAMESPACE_PREFIX)) {

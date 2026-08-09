@@ -137,7 +137,7 @@ describe('FileArtifactService', () => {
       }
     });
 
-    it('leaves no empty directories behind', async () => {
+    it('removes the artifact directory when nothing is nested under it', async () => {
       rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-artifacts-test-'));
       const service = new FileArtifactService(rootDir);
       const appName = 'test-app';
@@ -160,11 +160,13 @@ describe('FileArtifactService', () => {
           filename: 'a/b/c.txt',
         });
 
-        const scopeRoot = getSessionArtifactsDir(
-          getUserRoot(rootDir, userId),
-          sessionId,
+        const artifactDir = path.join(
+          getSessionArtifactsDir(getUserRoot(rootDir, userId), sessionId),
+          'a',
+          'b',
+          'c.txt',
         );
-        expect(await fs.readdir(scopeRoot)).toEqual([]);
+        await expect(fs.access(artifactDir)).rejects.toThrow();
       } finally {
         await fs.rm(rootDir, {recursive: true, force: true});
       }
