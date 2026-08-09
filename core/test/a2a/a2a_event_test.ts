@@ -13,12 +13,11 @@ import {
 import {afterAll, beforeAll, describe, expect, it, vi} from 'vitest';
 import {
   createInputMissingErrorEvent,
+  createPausedTaskEvent,
   createTask,
   createTaskArtifactUpdateEvent,
-  createTaskAuthRequiredEvent,
   createTaskCompletedEvent,
   createTaskFailedEvent,
-  createTaskInputRequiredEvent,
   createTaskSubmittedEvent,
   createTaskWorkingEvent,
   getEventMetadata,
@@ -30,6 +29,7 @@ import {
   isTaskArtifactUpdateEvent,
   isTaskStatusUpdateEvent,
   isTerminalTaskStatusUpdateEvent,
+  TaskState,
 } from '../../src/a2a/a2a_event.js';
 
 vi.mock('../../src/utils/env_aware_utils.js', () => ({
@@ -480,9 +480,9 @@ describe('a2a_event', () => {
       });
     });
 
-    it('createTaskInputRequiredEvent', () => {
+    it('createPausedTaskEvent', () => {
       expect(
-        createTaskInputRequiredEvent({
+        createPausedTaskEvent({
           taskId: 't1',
           contextId: 'c1',
           parts: [{kind: 'text', text: 'input required'}],
@@ -509,13 +509,14 @@ describe('a2a_event', () => {
       });
     });
 
-    it('createTaskAuthRequiredEvent', () => {
+    it('createPausedTaskEvent with the auth-required state', () => {
       expect(
-        createTaskAuthRequiredEvent({
+        createPausedTaskEvent({
           taskId: 't1',
           contextId: 'c1',
           parts: [{kind: 'text', text: 'auth required'}],
           metadata: {m: 1},
+          state: TaskState.AUTH_REQUIRED,
         }),
       ).toEqual({
         kind: 'status-update',
@@ -543,7 +544,7 @@ describe('a2a_event', () => {
         parts: [{kind: 'text', text: 'valid input'}],
         taskId: 't1',
         contextId: 'c1',
-        state: 'auth-required',
+        state: TaskState.AUTH_REQUIRED,
       });
 
       expect(event.status.state).toBe('auth-required');

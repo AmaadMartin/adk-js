@@ -11,11 +11,11 @@ import {Event as AdkEvent} from '../events/event.js';
 import {createEventActions} from '../events/event_actions.js';
 import {
   createInputMissingErrorEvent,
-  createTaskAuthRequiredEvent,
+  createPausedTaskEvent,
   createTaskCompletedEvent,
   createTaskFailedEvent,
-  createTaskInputRequiredEvent,
   isPausedTaskStatusUpdateEvent,
+  TaskState,
 } from './a2a_event.js';
 import {ExecutorContext} from './executor_context.js';
 import {
@@ -122,16 +122,16 @@ function scanForInputRequiredEvents(
   }
 
   if (inputRequiredParts.length > 0) {
-    // A pending credential request pauses the task as auth-required so the
-    // client runs its auth flow instead of prompting for a reply.
-    const createPauseEvent = hasCredentialRequest
-      ? createTaskAuthRequiredEvent
-      : createTaskInputRequiredEvent;
-    return createPauseEvent({
+    return createPausedTaskEvent({
       taskId: context.requestContext.taskId,
       contextId: context.requestContext.contextId,
       parts: toA2AParts(inputRequiredParts, [...inputRequiredFunctionCallIds]),
       metadata: getA2ASessionMetadata(context),
+      // A pending credential request pauses the task as auth-required so the
+      // client runs its auth flow instead of prompting for a reply.
+      state: hasCredentialRequest
+        ? TaskState.AUTH_REQUIRED
+        : TaskState.INPUT_REQUIRED,
     });
   }
 
@@ -194,7 +194,10 @@ export function getTaskInputRequiredEvent(
       return createInputMissingErrorEvent({
         taskId: task.id,
         contextId: task.contextId,
-        state: task.status.state,
+        state:
+          task.status.state === TaskState.AUTH_REQUIRED
+            ? TaskState.AUTH_REQUIRED
+            : TaskState.INPUT_REQUIRED,
         parts: [
           ...statusMsg.parts.filter((p) => !p.metadata?.validation_error),
           {
