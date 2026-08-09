@@ -261,8 +261,7 @@ export class AgentEngineSandboxCodeExecutor extends BaseCodeExecutor {
         let apiResponse = operation;
         let attempts = 0;
         while (!apiResponse.done && attempts < DEFAULT_MAX_ATTEMPTS) {
-          // Delay between polls only, so the poll that observes `done` returns
-          // immediately instead of waiting out an interval nothing depends on.
+          // Sleep between polls only; the first poll must not wait.
           if (attempts > 0) {
             await new Promise((resolve) =>
               setTimeout(resolve, POLL_INTERVAL_MS),
@@ -346,8 +345,7 @@ export class AgentEngineSandboxCodeExecutor extends BaseCodeExecutor {
       let apiResponse = operation;
       let attempts = 0;
       while (!apiResponse.done && attempts < DEFAULT_MAX_ATTEMPTS) {
-        // Delay between polls only, so the poll that observes `done` returns
-        // immediately instead of waiting out an interval nothing depends on.
+        // Sleep between polls only; the first poll must not wait.
         if (attempts > 0) {
           await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
         }

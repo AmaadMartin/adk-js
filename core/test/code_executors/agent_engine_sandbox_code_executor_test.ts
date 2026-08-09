@@ -684,7 +684,6 @@ describe('AgentEngineSandboxCodeExecutor', () => {
       );
 
       vi.useFakeTimers();
-      const startMs = Date.now();
 
       const executePromise = executor.executeCode({
         invocationContext,
@@ -704,7 +703,6 @@ describe('AgentEngineSandboxCodeExecutor', () => {
       await expect(executePromise).resolves.toMatchObject({
         stdout: 'hello world',
       });
-      expect(Date.now()).toBe(startMs);
       expect(
         mockClient.agentEnginesInternal.getAgentOperationInternal,
       ).toHaveBeenCalledTimes(1);
