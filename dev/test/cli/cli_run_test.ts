@@ -70,6 +70,21 @@ vi.mock('node:fs', async (importOriginal) => {
   return {...actual, default: {...actual, watch}, watch};
 });
 
+// `@google/adk` and the agent loader are mocked, so both fakes below are
+// duck-typed: the real classes are unavailable and `AgentFile` has private
+// fields a structural stand-in cannot satisfy.
+function fakeAgent(name: string): BaseAgent {
+  return {name} as unknown as BaseAgent;
+}
+
+function fakeAgentFile(rootAgent: BaseAgent): AgentFile {
+  return {
+    load: vi.fn().mockResolvedValue(rootAgent),
+    loadAgent: vi.fn().mockResolvedValue(rootAgent),
+    [Symbol.asyncDispose]: vi.fn(),
+  } as unknown as AgentFile;
+}
+
 describe('cli_run', () => {
   let mockAgentFile: AgentFile;
   let mockRootAgent: BaseAgent;
@@ -80,15 +95,8 @@ describe('cli_run', () => {
     watchListeners.length = 0;
     vi.spyOn(console, 'log').mockImplementation(() => {});
 
-    mockRootAgent = {
-      name: 'test-agent',
-    } as unknown as BaseAgent;
-
-    mockAgentFile = {
-      load: vi.fn().mockResolvedValue(mockRootAgent),
-      loadAgent: vi.fn().mockResolvedValue(mockRootAgent),
-      [Symbol.asyncDispose]: vi.fn(),
-    } as unknown as AgentFile;
+    mockRootAgent = fakeAgent('test-agent');
+    mockAgentFile = fakeAgentFile(mockRootAgent);
 
     (AgentFile as unknown as Mock).mockImplementation(() => mockAgentFile);
 
@@ -135,12 +143,8 @@ describe('cli_run', () => {
     }) as unknown as BaseSessionService;
 
   it('should rebuild the runner from the reloaded agent file', async () => {
-    const reloadedAgent = {name: 'reloaded-agent'} as unknown as BaseAgent;
-    const reloadedAgentFile = {
-      load: vi.fn().mockResolvedValue(reloadedAgent),
-      loadAgent: vi.fn().mockResolvedValue(reloadedAgent),
-      [Symbol.asyncDispose]: vi.fn(),
-    } as unknown as AgentFile;
+    const reloadedAgent = fakeAgent('reloaded-agent');
+    const reloadedAgentFile = fakeAgentFile(reloadedAgent);
     vi.mocked(AgentFile)
       .mockImplementationOnce(() => mockAgentFile)
       .mockImplementationOnce(() => reloadedAgentFile);
@@ -166,11 +170,10 @@ describe('cli_run', () => {
   });
 
   it('should keep the current runner when the reloaded file fails to load', async () => {
-    const failingAgentFile = {
-      load: vi.fn(),
-      loadAgent: vi.fn().mockRejectedValue(new Error('compile failed')),
-      [Symbol.asyncDispose]: vi.fn(),
-    } as unknown as AgentFile;
+    const failingAgentFile = fakeAgentFile(mockRootAgent);
+    vi.mocked(failingAgentFile.loadAgent).mockRejectedValue(
+      new Error('compile failed'),
+    );
     vi.mocked(AgentFile)
       .mockImplementationOnce(() => mockAgentFile)
       .mockImplementationOnce(() => failingAgentFile);
