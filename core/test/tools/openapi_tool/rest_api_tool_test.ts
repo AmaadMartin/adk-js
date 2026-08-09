@@ -6,8 +6,13 @@
 
 import {
   AuthCredential,
+  AuthCredentialTypes,
   Context,
   createRestApiTool,
+  createSession,
+  InvocationContext,
+  LlmAgent,
+  PluginManager,
   RestApiTool,
   ToolAuthHandler,
 } from '@google/adk';
@@ -18,12 +23,24 @@ import {
   prepareRequestParams,
 } from '../../../src/tools/openapi_tool/rest_api_tool.js';
 
+/** Builds a real tool context, so no cast is needed to invoke a tool. */
+function createToolContext(): Context {
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'test-invocation',
+      agent: new LlmAgent({name: 'test_agent'}),
+      session: createSession({id: 'test-session', appName: 'test-app'}),
+      pluginManager: new PluginManager(),
+    }),
+  });
+}
+
 describe('RestApiTool', () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it('should configure credential key', () => {
+  it('should pass the configured credential key to the auth handler', async () => {
     const endpoint = {
       baseUrl: 'http://api.example.com',
       path: '/test',
@@ -36,12 +53,21 @@ describe('RestApiTool', () => {
       endpoint,
       operation,
     );
+    const toolContext = createToolContext();
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      headers: {get: () => 'text/plain'},
+      text: async () => 'ok',
+    });
+    const spy = vi.spyOn(ToolAuthHandler, 'fromToolContext');
 
     tool.configureCredentialKey('my-credential-key');
+    await tool.runAsync({args: {}, toolContext});
 
-    expect((tool as unknown as {credentialKey: string}).credentialKey).toBe(
-      'my-credential-key',
-    );
+    expect(spy).toHaveBeenCalledWith(toolContext, undefined, undefined, {
+      credentialKey: 'my-credential-key',
+    });
   });
 
   it('should apply headers from provider', async () => {
@@ -70,13 +96,13 @@ describe('RestApiTool', () => {
       text: async () => 'ok',
     });
 
-    const mockContext = {};
+    const toolContext = createToolContext();
     await tool.runAsync({
       args: {},
-      toolContext: mockContext as unknown as Context,
+      toolContext,
     });
 
-    expect(headerProvider).toHaveBeenCalledWith(mockContext);
+    expect(headerProvider).toHaveBeenCalledWith(toolContext);
     expect(globalThis.fetch).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
@@ -91,7 +117,12 @@ describe('RestApiTool', () => {
       path: '/test',
       method: 'POST',
     };
-    const operation: OpenAPIV3.OperationObject = {responses: {}};
+    const operation: OpenAPIV3.OperationObject = {
+      responses: {},
+      requestBody: {
+        content: {'application/json': {schema: {type: 'object'}}},
+      },
+    };
     const tool = new RestApiTool(
       'test_tool',
       'description',
@@ -105,21 +136,15 @@ describe('RestApiTool', () => {
       text: async () => 'ok',
     });
 
-    // Mock operationParser to return a body parameter
-    (
-      tool as unknown as {operationParser: {getParameters: () => unknown[]}}
-    ).operationParser.getParameters = () => [
-      {name: 'body', originalName: 'body', paramLocation: 'body'},
-    ];
-
     await tool.runAsync({
       args: {body: {foo: 'bar'}},
-      toolContext: {} as unknown as Context,
+      toolContext: createToolContext(),
     });
 
     expect(globalThis.fetch).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
+        headers: expect.objectContaining({'Content-Type': 'application/json'}),
         body: JSON.stringify({foo: 'bar'}),
       }),
     );
@@ -131,7 +156,12 @@ describe('RestApiTool', () => {
       path: '/users/{id}',
       method: 'GET',
     };
-    const operation: OpenAPIV3.OperationObject = {responses: {}};
+    const operation: OpenAPIV3.OperationObject = {
+      responses: {},
+      parameters: [
+        {name: 'id', in: 'path', required: true, schema: {type: 'string'}},
+      ],
+    };
     const tool = new RestApiTool(
       'test_tool',
       'description',
@@ -145,15 +175,9 @@ describe('RestApiTool', () => {
       text: async () => 'ok',
     });
 
-    (
-      tool as unknown as {operationParser: {getParameters: () => unknown[]}}
-    ).operationParser.getParameters = () => [
-      {name: 'id', originalName: 'id', paramLocation: 'path'},
-    ];
-
     await tool.runAsync({
       args: {id: '123'},
-      toolContext: {} as unknown as Context,
+      toolContext: createToolContext(),
     });
 
     expect(globalThis.fetch).toHaveBeenCalledWith(
@@ -168,7 +192,16 @@ describe('RestApiTool', () => {
       path: '/test',
       method: 'POST',
     };
-    const operation: OpenAPIV3.OperationObject = {responses: {}};
+    const operation: OpenAPIV3.OperationObject = {
+      responses: {},
+      requestBody: {
+        content: {
+          'application/json': {
+            schema: {type: 'object', properties: {user: {type: 'object'}}},
+          },
+        },
+      },
+    };
     const tool = new RestApiTool(
       'test_tool',
       'description',
@@ -182,15 +215,9 @@ describe('RestApiTool', () => {
       text: async () => 'ok',
     });
 
-    (
-      tool as unknown as {operationParser: {getParameters: () => unknown[]}}
-    ).operationParser.getParameters = () => [
-      {name: 'user', originalName: 'user', paramLocation: 'body'},
-    ];
-
     await tool.runAsync({
       args: {user: {name: 'Alice'}},
-      toolContext: {} as unknown as Context,
+      toolContext: createToolContext(),
     });
 
     expect(globalThis.fetch).toHaveBeenCalledWith(
@@ -215,16 +242,16 @@ describe('RestApiTool', () => {
       operation,
     );
 
-    const mockAuthHandler = {
-      prepareAuthCredentials: async () => ({state: 'pending'}),
-    };
-    vi.spyOn(ToolAuthHandler, 'fromToolContext').mockReturnValue(
-      mockAuthHandler as unknown as ToolAuthHandler,
-    );
+    const toolContext = createToolContext();
+    const authHandler = new ToolAuthHandler(toolContext);
+    vi.spyOn(authHandler, 'prepareAuthCredentials').mockResolvedValue({
+      state: 'pending',
+    });
+    vi.spyOn(ToolAuthHandler, 'fromToolContext').mockReturnValue(authHandler);
 
     const result = await tool.runAsync({
       args: {},
-      toolContext: {} as unknown as Context,
+      toolContext,
     });
 
     expect(result).toEqual({
@@ -239,7 +266,10 @@ describe('RestApiTool', () => {
       path: '/test',
       method: 'GET',
     };
-    const operation: OpenAPIV3.OperationObject = {responses: {}};
+    const operation: OpenAPIV3.OperationObject = {
+      responses: {},
+      parameters: [{name: 'traceId', in: 'header', schema: {type: 'string'}}],
+    };
     const tool = new RestApiTool(
       'test_tool',
       'description',
@@ -253,21 +283,15 @@ describe('RestApiTool', () => {
       text: async () => 'ok',
     });
 
-    (
-      tool as unknown as {operationParser: {getParameters: () => unknown[]}}
-    ).operationParser.getParameters = () => [
-      {name: 'x-trace-id', originalName: 'X-Trace-Id', paramLocation: 'header'},
-    ];
-
     await tool.runAsync({
-      args: {'x-trace-id': 'trace-123'},
-      toolContext: {} as unknown as Context,
+      args: {trace_id: 'trace-123'},
+      toolContext: createToolContext(),
     });
 
     expect(globalThis.fetch).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        headers: expect.objectContaining({'X-Trace-Id': 'trace-123'}),
+        headers: expect.objectContaining({traceId: 'trace-123'}),
       }),
     );
   });
@@ -278,7 +302,13 @@ describe('RestApiTool', () => {
       path: '/test',
       method: 'GET',
     };
-    const operation: OpenAPIV3.OperationObject = {responses: {}};
+    const operation: OpenAPIV3.OperationObject = {
+      operationId: 'get_user',
+      parameters: [
+        {name: 'userId', in: 'path', required: true, schema: {type: 'string'}},
+      ],
+      responses: {},
+    };
     const tool = new RestApiTool(
       'test_tool',
       'description',
@@ -286,19 +316,15 @@ describe('RestApiTool', () => {
       operation,
     );
 
-    const mockSchema = {type: 'object', properties: {}};
-    (
-      tool as unknown as {operationParser: {getJsonSchema: () => unknown}}
-    ).operationParser.getJsonSchema = () => mockSchema;
-
-    const declaration = (
-      tool as unknown as {_getDeclaration: () => unknown}
-    )._getDeclaration();
-
-    expect(declaration).toEqual({
+    expect(tool._getDeclaration()).toEqual({
       name: 'test_tool',
       description: 'description',
-      parameters: mockSchema,
+      parameters: {
+        type: 'object',
+        properties: {user_id: {type: 'string'}},
+        required: ['user_id'],
+        title: 'get_user_Arguments',
+      },
     });
   });
 
@@ -308,7 +334,10 @@ describe('RestApiTool', () => {
       path: '/test?existing=param',
       method: 'GET',
     };
-    const operation: OpenAPIV3.OperationObject = {responses: {}};
+    const operation: OpenAPIV3.OperationObject = {
+      responses: {},
+      parameters: [{name: 'new_param', in: 'query', schema: {type: 'string'}}],
+    };
     const tool = new RestApiTool(
       'test_tool',
       'description',
@@ -322,25 +351,15 @@ describe('RestApiTool', () => {
       text: async () => 'ok',
     });
 
-    (
-      tool as unknown as {operationParser: {getParameters: () => unknown[]}}
-    ).operationParser.getParameters = () => [
-      {name: 'new_param', originalName: 'new_param', paramLocation: 'query'},
-    ];
-
     await tool.runAsync({
       args: {new_param: 'value'},
-      toolContext: {} as unknown as Context,
+      toolContext: createToolContext(),
     });
 
-    // Verify URL contains both parameters
     expect(globalThis.fetch).toHaveBeenCalledWith(
-      expect.stringContaining('http://api.example.com/test'),
+      'http://api.example.com/test?new_param=value&existing=param',
       expect.anything(),
     );
-    const calledUrl = vi.mocked(globalThis.fetch).mock.calls[0][0] as string;
-    expect(calledUrl).toContain('existing=param');
-    expect(calledUrl).toContain('new_param=value');
   });
 
   it('should handle application/x-www-form-urlencoded body', async () => {
@@ -354,7 +373,10 @@ describe('RestApiTool', () => {
       requestBody: {
         content: {
           'application/x-www-form-urlencoded': {
-            schema: {type: 'object'},
+            schema: {
+              type: 'object',
+              properties: {foo: {type: 'string'}, baz: {type: 'string'}},
+            },
           },
         },
       },
@@ -372,16 +394,9 @@ describe('RestApiTool', () => {
       text: async () => 'ok',
     });
 
-    (
-      tool as unknown as {operationParser: {getParameters: () => unknown[]}}
-    ).operationParser.getParameters = () => [
-      {name: 'foo', originalName: 'foo', paramLocation: 'body'},
-      {name: 'baz', originalName: 'baz', paramLocation: 'body'},
-    ];
-
     await tool.runAsync({
       args: {foo: 'bar', baz: 'qux'},
-      toolContext: {} as unknown as Context,
+      toolContext: createToolContext(),
     });
 
     expect(globalThis.fetch).toHaveBeenCalledWith(
@@ -407,7 +422,10 @@ describe('RestApiTool', () => {
       requestBody: {
         content: {
           'multipart/form-data': {
-            schema: {type: 'object'},
+            schema: {
+              type: 'object',
+              properties: {foo: {type: 'string'}, file: {type: 'string'}},
+            },
           },
         },
       },
@@ -425,16 +443,9 @@ describe('RestApiTool', () => {
       text: async () => 'ok',
     });
 
-    (
-      tool as unknown as {operationParser: {getParameters: () => unknown[]}}
-    ).operationParser.getParameters = () => [
-      {name: 'foo', originalName: 'foo', paramLocation: 'body'},
-      {name: 'file', originalName: 'file', paramLocation: 'body'},
-    ];
-
     await tool.runAsync({
       args: {foo: 'bar', file: 'content'},
-      toolContext: {} as unknown as Context,
+      toolContext: createToolContext(),
     });
 
     expect(globalThis.fetch).toHaveBeenCalledWith(
@@ -467,7 +478,7 @@ describe('RestApiTool', () => {
 
     const result = await tool.runAsync({
       args: {},
-      toolContext: {} as unknown as Context,
+      toolContext: createToolContext(),
     });
 
     expect(result).toEqual({
@@ -501,65 +512,26 @@ describe('RestApiTool', () => {
       text: async () => 'ok',
     });
 
-    const mockAuthHandler = {
-      prepareAuthCredentials: async () => ({
-        state: 'done',
-        authCredential: {apiKey: 'secret_key'},
-      }),
-    };
-    vi.spyOn(ToolAuthHandler, 'fromToolContext').mockReturnValue(
-      mockAuthHandler as unknown as ToolAuthHandler,
-    );
+    const toolContext = createToolContext();
+    const authHandler = new ToolAuthHandler(toolContext);
+    vi.spyOn(authHandler, 'prepareAuthCredentials').mockResolvedValue({
+      state: 'done',
+      authCredential: {
+        authType: AuthCredentialTypes.API_KEY,
+        apiKey: 'secret_key',
+      },
+    });
+    vi.spyOn(ToolAuthHandler, 'fromToolContext').mockReturnValue(authHandler);
 
     await tool.runAsync({
       args: {},
-      toolContext: {} as unknown as Context,
+      toolContext,
     });
 
     expect(globalThis.fetch).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
         headers: expect.objectContaining({'X-API-Key': 'secret_key'}),
-      }),
-    );
-  });
-
-  it('should fallback to JSON if no requestBody in spec', async () => {
-    const endpoint = {
-      baseUrl: 'http://api.example.com',
-      path: '/test',
-      method: 'POST',
-    };
-    const operation: OpenAPIV3.OperationObject = {responses: {}};
-    const tool = new RestApiTool(
-      'test_tool',
-      'description',
-      endpoint,
-      operation,
-    );
-
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      headers: {get: () => 'text/plain'},
-      text: async () => 'ok',
-    });
-
-    (
-      tool as unknown as {operationParser: {getParameters: () => unknown[]}}
-    ).operationParser.getParameters = () => [
-      {name: 'body', originalName: 'body', paramLocation: 'body'},
-    ];
-
-    await tool.runAsync({
-      args: {body: {foo: 'bar'}},
-      toolContext: {} as unknown as Context,
-    });
-
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        headers: expect.objectContaining({'Content-Type': 'application/json'}),
-        body: JSON.stringify({foo: 'bar'}),
       }),
     );
   });
@@ -590,7 +562,7 @@ describe('RestApiTool', () => {
 
     const result = await tool.runAsync({
       args: {},
-      toolContext: {} as unknown as Context,
+      toolContext: createToolContext(),
     });
 
     expect(result).toEqual(jsonResponse);
@@ -610,12 +582,15 @@ describe('RestApiTool', () => {
       operation,
     );
 
-    const authScheme = {
+    const authScheme: OpenAPIV3.SecuritySchemeObject = {
       type: 'apiKey',
       name: 'X-API-Key',
       in: 'header',
-    } as unknown as OpenAPIV3.SecuritySchemeObject;
-    const authCredential = {apiKey: 'test-key'} as unknown as AuthCredential;
+    };
+    const authCredential: AuthCredential = {
+      authType: AuthCredentialTypes.API_KEY,
+      apiKey: 'test-key',
+    };
 
     tool.configureAuthScheme(authScheme);
     tool.configureAuthCredential(authCredential);
@@ -626,23 +601,23 @@ describe('RestApiTool', () => {
       text: async () => 'ok',
     });
 
-    const mockAuthHandler = {
-      prepareAuthCredentials: async () => ({
-        state: 'done',
-        authCredential,
-      }),
-    };
+    const toolContext = createToolContext();
+    const authHandler = new ToolAuthHandler(toolContext);
+    vi.spyOn(authHandler, 'prepareAuthCredentials').mockResolvedValue({
+      state: 'done',
+      authCredential,
+    });
     const spy = vi
       .spyOn(ToolAuthHandler, 'fromToolContext')
-      .mockReturnValue(mockAuthHandler as unknown as ToolAuthHandler);
+      .mockReturnValue(authHandler);
 
     await tool.runAsync({
       args: {},
-      toolContext: {} as unknown as Context,
+      toolContext,
     });
 
     expect(spy).toHaveBeenCalledWith(
-      expect.anything(),
+      toolContext,
       authScheme,
       authCredential,
       expect.anything(),
