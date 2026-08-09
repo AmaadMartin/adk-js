@@ -53,6 +53,24 @@ recordings:
             - text: hi
 `;
 
+/**
+ * `vi.mock` replaces `fg.stream` with a mock, but its declared return type is a
+ * stream while the loader only needs an async iterable.
+ */
+const globStreamMock = fg.stream as unknown as Mock;
+
+const NON_MAPPING_CASES = [
+  {file: 'spec.yaml', message: 'Spec file must be a YAML mapping'},
+  {
+    file: 'generated-session.yaml',
+    message: 'Session file must be a YAML mapping',
+  },
+  {
+    file: 'generated-recordings.yaml',
+    message: 'Recording file must be a YAML mapping',
+  },
+];
+
 describe('batchLoadYamlTestDefs', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -161,16 +179,26 @@ describe('batchLoadYamlTestDefs', () => {
       'File not found',
     );
   });
+
+  it.each(NON_MAPPING_CASES)(
+    'should name $file in the error when it is not a mapping',
+    async ({file, message}) => {
+      const rootDir = '/root/tests';
+      globStreamMock.mockReturnValue([`${rootDir}/t1/spec.yaml`]);
+      (fs.readFile as Mock).mockImplementation(async (filePath: string) => {
+        if (filePath.endsWith(file)) return 'just a string';
+        if (filePath.endsWith('generated-session.yaml')) return SESSION_YAML;
+        if (filePath.endsWith('generated-recordings.yaml'))
+          return RECORDINGS_YAML;
+        return SPEC_YAML;
+      });
+
+      await expect(batchLoadYamlTestDefs(rootDir)).rejects.toThrow(message);
+    },
+  );
 });
 
 const OPAQUE_ROOT_DIR = '/root/tests';
-
-/**
- * `vi.mock` replaces `fg.stream` with a mock, but its declared return type is a
- * stream while the loader only needs an async iterable. This is the same view
- * the cases above take of the same mock.
- */
-const globStreamMock = fg.stream as unknown as Mock;
 
 const OPAQUE_STATE_SESSION_YAML = `
 app_name: test-app
@@ -246,6 +274,35 @@ events:
         run_tag: nightly
       agent_state:
         cursor_pos: 2
+`;
+
+const FUNCTION_CALL_ID = 'adk-3f9c1e20';
+
+const REQUESTED_CONFIGS_SESSION_YAML = `
+app_name: test-app
+user_id: user-1
+id: session-1
+events:
+  - author: agent
+    actions:
+      requested_auth_configs:
+        '${FUNCTION_CALL_ID}': {}
+      requested_tool_confirmations:
+        '${FUNCTION_CALL_ID}':
+          hint: confirm the transfer
+          confirmed: false
+`;
+
+const OUTPUT_SESSION_YAML = `
+app_name: test-app
+user_id: user-1
+id: session-1
+events:
+  - author: agent
+    output:
+      total_cost: 2
+      nested_result:
+        inner_key: 1
 `;
 
 const OPAQUE_SPEC_YAML = `
@@ -398,6 +455,27 @@ describe('batchLoadYamlTestDefs opaque payloads', () => {
     expect(event.actions).toEqual({
       customMetadata: {run_tag: 'nightly'},
       agentState: {cursor_pos: 2},
+    });
+  });
+
+  it('preserves the function call ids that key the requested configs', async () => {
+    const test = await loadTest({session: REQUESTED_CONFIGS_SESSION_YAML});
+
+    const actions = test.session.events[0].actions;
+    expect(Object.keys(actions.requestedAuthConfigs)).toEqual([
+      FUNCTION_CALL_ID,
+    ]);
+    expect(actions.requestedToolConfirmations).toEqual({
+      [FUNCTION_CALL_ID]: {hint: 'confirm the transfer', confirmed: false},
+    });
+  });
+
+  it('preserves workflow node output keys', async () => {
+    const test = await loadTest({session: OUTPUT_SESSION_YAML});
+
+    expect(test.session.events[0].output).toEqual({
+      total_cost: 2,
+      nested_result: {inner_key: 1},
     });
   });
 
