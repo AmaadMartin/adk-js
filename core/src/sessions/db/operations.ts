@@ -6,12 +6,7 @@
 
 import {MikroORM, Options as MikroORMOptions} from '@mikro-orm/core';
 import {redactUriPassword} from '../../utils/redact_uri.js';
-import {
-  ENTITIES,
-  SCHEMA_VERSION_1_JSON,
-  SCHEMA_VERSION_KEY,
-  StorageMetadata,
-} from './schema.js';
+import {ENTITIES} from './schema.js';
 
 /**
  * Parses a database connection URI and returns MikroORM Options.
@@ -74,33 +69,4 @@ export async function ensureDatabaseCreated(orm: MikroORM): Promise<void> {
 
   // creates tables if they don't exist. Safe mode prevents dropping columns or tables.
   await orm.schema.updateSchema({safe: true});
-}
-
-/**
- * Validates the schema version.
- *
- * @param orm The MikroORM instance.
- * @throws Error if the schema version is not compatible.
- */
-export async function validateDatabaseSchemaVersion(orm: MikroORM) {
-  const em = orm.em.fork();
-  const existing = await em.findOne(StorageMetadata, {
-    key: SCHEMA_VERSION_KEY,
-  });
-
-  if (existing) {
-    if (existing.value !== SCHEMA_VERSION_1_JSON) {
-      throw new Error(
-        `ADK Database schema version ${existing.value} is not compatible.`,
-      );
-    }
-    return;
-  }
-
-  const newVersion = em.create(StorageMetadata, {
-    key: SCHEMA_VERSION_KEY,
-    value: SCHEMA_VERSION_1_JSON,
-  });
-
-  await em.persist(newVersion).flush();
 }

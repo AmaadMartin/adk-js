@@ -27,7 +27,6 @@ import {
 import {
   ensureDatabaseCreated,
   getConnectionOptionsFromUri,
-  validateDatabaseSchemaVersion,
 } from './db/operations.js';
 import {
   ENTITIES,
@@ -36,6 +35,7 @@ import {
   StorageSession,
   StorageUserState,
 } from './db/schema.js';
+import {validateDatabaseSchemaVersion} from './db/schema_version.js';
 import {createSession, Session} from './session.js';
 import {State} from './state.js';
 
