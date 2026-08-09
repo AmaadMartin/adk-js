@@ -74,4 +74,9 @@ export type {
 } from './retry_config.js';
 
 // --- Errors ---
-export {NodeTimeoutError} from './errors.js';
+export {
+  NodeTimeoutError,
+  RequestInputMismatchError,
+  ResumeMismatchReason,
+  isRequestInputMismatchError,
+} from './errors.js';

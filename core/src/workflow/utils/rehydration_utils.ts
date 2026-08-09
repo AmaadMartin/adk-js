@@ -14,8 +14,14 @@
  */
 
 import {Event} from '../../events/event.js';
+import {ResumeMismatchReason} from '../errors.js';
 import {RouteValue} from '../graph.js';
 import type {NodeContext, NodeResult} from '../node_context.js';
+import {
+  FrozenRequest,
+  readFrozenRequests,
+  verifyResumeResponse,
+} from './hitl_utils.js';
 
 const RESULT_KEY = 'result';
 
@@ -33,6 +39,12 @@ export interface RehydratedNode {
   interruptIds: Set<string>;
   /** Resolved interrupt responses, keyed by interrupt id. */
   resolvedResponses: Map<string, unknown>;
+  /**
+   * Resume responses that failed to bind to their frozen request, keyed by
+   * interrupt id. Recorded, never thrown from here: `Workflow.orchestrate`
+   * turns an entry into a `RequestInputMismatchError`.
+   */
+  mismatchedResponses: Map<string, ResumeMismatchReason>;
 }
 
 /**
@@ -78,27 +90,43 @@ function reconstruct(
 ): Map<string, RehydratedNode> {
   const nodes = new Map<string, RehydratedNode>();
   const interruptOwner = new Map<string, string>();
+  const frozenRequests = new Map<string, FrozenRequest>();
 
   const getNode = (name: string): RehydratedNode => {
     let node = nodes.get(name);
     if (!node) {
-      node = {interruptIds: new Set(), resolvedResponses: new Map()};
+      node = {
+        interruptIds: new Set(),
+        resolvedResponses: new Map(),
+        mismatchedResponses: new Map(),
+      };
       nodes.set(name, node);
     }
     return node;
   };
 
   for (const event of events) {
-    // 1. User function responses resolving prior interrupts.
+    // 1. User function responses resolving prior interrupts. A response binds
+    // only if it matches the request frozen when the node paused; the last
+    // response for an id wins, so a fresh valid answer clears an earlier
+    // mismatch (and vice versa).
     if (event.author === 'user' && event.content?.parts) {
       for (const part of event.content.parts) {
         const fr = part.functionResponse;
-        if (fr?.id && interruptOwner.has(fr.id)) {
-          const owner = interruptOwner.get(fr.id)!;
-          getNode(owner).resolvedResponses.set(
-            fr.id,
-            unwrapResponse(fr.response),
-          );
+        if (!fr?.id || !interruptOwner.has(fr.id)) {
+          continue;
+        }
+        const node = getNode(interruptOwner.get(fr.id)!);
+        const frozen = frozenRequests.get(fr.id);
+        const mismatch = frozen
+          ? verifyResumeResponse({frozen, response: fr})
+          : undefined;
+        if (mismatch) {
+          node.mismatchedResponses.set(fr.id, mismatch);
+          node.resolvedResponses.delete(fr.id);
+        } else {
+          node.mismatchedResponses.delete(fr.id);
+          node.resolvedResponses.set(fr.id, unwrapResponse(fr.response));
         }
       }
       continue;
@@ -120,6 +148,9 @@ function reconstruct(
     for (const id of event.longRunningToolIds ?? []) {
       node.interruptIds.add(id);
       interruptOwner.set(id, key);
+    }
+    for (const frozen of readFrozenRequests(event)) {
+      frozenRequests.set(frozen.interruptId, frozen);
     }
     // Capture the node's original input, stashed on the interrupt event, so a
     // resumed waiting node re-runs with it (not the resume message). Guard the
