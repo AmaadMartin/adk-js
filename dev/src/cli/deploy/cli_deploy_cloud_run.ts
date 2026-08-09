@@ -164,8 +164,8 @@ export async function deployToCloudRun(options: DeployToCloudRunOptions) {
     );
   }
 
-  // Request to bundle any js or ts file into a single cjs file to be able to
-  // copy file with all it's dependencies correctly.
+  // Bundling is what makes the copied cjs file self-contained. The caller may
+  // disable it, in which case a multi-file agent is rejected at load time.
   const agentLoader = new AgentLoader(
     options.agentPath,
     options.agentFileLoadOptions,
