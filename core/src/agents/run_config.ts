@@ -12,6 +12,7 @@ import {
   SpeechConfig,
 } from '@google/genai';
 
+import type {GetSessionConfig} from '../sessions/base_session_service.js';
 import {logger} from '../utils/logger.js';
 
 /**
@@ -107,6 +108,17 @@ export interface RunConfig {
    * decision; interactive front-ends (e.g. `adk run`) opt in explicitly.
    */
   plainTextToolConfirmation?: boolean;
+
+  /**
+   * Configuration controlling which events are fetched when the run loads its
+   * session.
+   *
+   * When set, the Runner forwards it to the session service's `getSession`,
+   * bounding the events returned via `numRecentEvents` or `afterTimestamp`.
+   * Useful alongside context compaction to avoid loading the full event
+   * history on every invocation.
+   */
+  getSessionConfig?: GetSessionConfig;
 }
 
 /**
