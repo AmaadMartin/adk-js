@@ -311,6 +311,29 @@ describe('convertCodeExecutionParts', () => {
     expect(content.role).toBe('model');
   });
 
+  it('round-trips a built execution result part into tool_output text', () => {
+    const content: Content = {
+      role: 'model',
+      parts: [
+        buildCodeExecutionResultPart({
+          stdout: '42',
+          stderr: '',
+          outputFiles: [],
+        }),
+      ],
+    };
+
+    convertCodeExecutionParts(content, CODE_DELIM, RESULT_DELIM);
+
+    const text = content.parts![0].text!;
+    expect(text.startsWith('```tool_output\n')).toBe(true);
+    expect(text.endsWith('\n```')).toBe(true);
+    expect(text).toContain('Code execution result:\n42');
+    expect(text).not.toContain('undefined');
+    expect(content.parts![0].codeExecutionResult).toBeUndefined();
+    expect(content.role).toBe('user');
+  });
+
   it('does not modify parts that are plain text', () => {
     const content = {
       parts: [{text: 'just text'}],
