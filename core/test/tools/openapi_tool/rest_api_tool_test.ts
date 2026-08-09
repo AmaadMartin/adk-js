@@ -742,32 +742,6 @@ describe('RestApiTool Utilities', () => {
       });
     });
 
-    it('should fallback to JSON if no requestBody in spec', () => {
-      const body = {foo: 'bar'};
-      const bodyData = {};
-      const headers = {};
-
-      const result = prepareRequestBody(undefined, body, bodyData, headers);
-
-      expect(result).toBe(JSON.stringify(body));
-      expect(headers).toEqual({
-        'Content-Type': 'application/json',
-      });
-    });
-
-    it('should fallback to JSON and return string as is if finalData is string', () => {
-      const body = 'plain text body';
-      const bodyData = {};
-      const headers = {};
-
-      const result = prepareRequestBody(undefined, body, bodyData, headers);
-
-      expect(result).toBe(body);
-      expect(headers).toEqual({
-        'Content-Type': 'application/json',
-      });
-    });
-
     it('should handle unsupported mime type by returning undefined', () => {
       const requestBody: OpenAPIV3.RequestBodyObject = {
         content: {
@@ -826,7 +800,18 @@ describe('RestApiTool Utilities', () => {
       });
     });
 
-    it('should fallback to JSON if requestBody has no content', () => {
+    it('should return no body when the operation declares no requestBody', () => {
+      const body = {foo: 'bar'};
+      const bodyData = {};
+      const headers = {};
+
+      const result = prepareRequestBody(undefined, body, bodyData, headers);
+
+      expect(result).toBeUndefined();
+      expect(headers).toEqual({});
+    });
+
+    it('should return no body when requestBody declares no content', () => {
       const requestBody = {} as OpenAPIV3.RequestBodyObject; // defined but no content
       const body = {foo: 'bar'};
       const bodyData = {};
@@ -834,10 +819,8 @@ describe('RestApiTool Utilities', () => {
 
       const result = prepareRequestBody(requestBody, body, bodyData, headers);
 
-      expect(result).toBe(JSON.stringify(body));
-      expect(headers).toEqual({
-        'Content-Type': 'application/json',
-      });
+      expect(result).toBeUndefined();
+      expect(headers).toEqual({});
     });
   });
 });

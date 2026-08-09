@@ -224,6 +224,13 @@ export function prepareRequestParams(
   return {url, headers, body, bodyData};
 }
 
+/**
+ * Builds the fetch body for the first mime type the operation's request body
+ * declares, and sets `Content-Type` on `headers` for the mime types that need
+ * it. Returns `undefined` when the operation declares no request body content,
+ * when the declared mime type is unsupported, or when the arguments carry no
+ * body data.
+ */
 export function prepareRequestBody(
   requestBody:
     | OpenAPIV3.RequestBodyObject
@@ -266,12 +273,6 @@ export function prepareRequestBody(
       }
       break; // Process only the first mime type
     }
-  } else if (finalData !== undefined) {
-    // Fallback to JSON if no requestBody content specified but data exists
-    headers['Content-Type'] = 'application/json';
-    return typeof finalData === 'string'
-      ? finalData
-      : JSON.stringify(finalData);
   }
   return undefined;
 }
