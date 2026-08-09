@@ -248,6 +248,15 @@ describe('BasicLlmRequestProcessor', () => {
       expect(llmRequest.config?.responseMimeType).toBe('application/json');
     });
 
+    it('should set outputSchema on Vertex AI with an unversioned Gemini model', async () => {
+      vi.stubEnv(VERTEX_ENV_VAR, 'true');
+
+      const llmRequest = await runWithOutputSchemaAndTools('gemini-early-exp');
+
+      expect(llmRequest.config?.responseSchema).toBeDefined();
+      expect(llmRequest.config?.responseMimeType).toBe('application/json');
+    });
+
     it('should not set outputSchema on Vertex AI with a non-Gemini model', async () => {
       vi.stubEnv(VERTEX_ENV_VAR, 'true');
 

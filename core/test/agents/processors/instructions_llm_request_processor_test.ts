@@ -259,6 +259,22 @@ describe('InstructionsLlmRequestProcessor', () => {
       );
     });
 
+    it('should not append set_model_response instruction on Vertex AI with an unversioned Gemini model', async () => {
+      vi.stubEnv(VERTEX_ENV_VAR, 'true');
+
+      const llmRequest = await runWithOutputSchema({
+        model: 'gemini-early-exp',
+        withTools: true,
+      });
+
+      expect(llmRequest.config?.systemInstruction).not.toContain(
+        'set_model_response',
+      );
+      expect(llmRequest.config?.systemInstruction).toContain(
+        'Base instruction',
+      );
+    });
+
     it('should append set_model_response instruction on Vertex AI with a non-Gemini model', async () => {
       vi.stubEnv(VERTEX_ENV_VAR, 'true');
 
