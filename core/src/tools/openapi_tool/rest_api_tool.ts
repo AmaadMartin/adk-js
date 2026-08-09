@@ -228,7 +228,8 @@ export function prepareRequestParams(
  * Builds the fetch body for the first mime type the operation's request body
  * declares, and sets `Content-Type` on `headers` for the mime types that need
  * it. Returns `undefined` when the operation declares no request body content,
- * or when the declared mime type is unsupported.
+ * when the declared mime type is unsupported, or when the arguments carry no
+ * body data.
  */
 export function prepareRequestBody(
   requestBody:
