@@ -8,6 +8,7 @@ import {Part} from '@google/genai';
 
 import {logger} from '../utils/logger.js';
 
+import {assertUnpaddedFilename} from './artifact_filename.js';
 import {
   ArtifactVersion,
   BaseArtifactService,
@@ -31,7 +32,7 @@ export class InMemoryArtifactService implements BaseArtifactService {
     {part: Part; metadata: ArtifactVersion}[]
   > = {};
 
-  saveArtifact({
+  async saveArtifact({
     appName,
     userId,
     sessionId,
@@ -40,10 +41,10 @@ export class InMemoryArtifactService implements BaseArtifactService {
     customMetadata,
   }: SaveArtifactRequest): Promise<number> {
     if (!artifact.inlineData && !artifact.text && !artifact.fileData) {
-      return Promise.reject(
-        new Error('Artifact must have either inlineData or text content.'),
-      );
+      throw new Error('Artifact must have either inlineData or text content.');
     }
+
+    assertUnpaddedFilename(filename);
 
     const path = artifactPath(appName, userId, sessionId, filename);
 
@@ -65,7 +66,7 @@ export class InMemoryArtifactService implements BaseArtifactService {
 
     this.artifacts[path].push({part: artifact, metadata});
 
-    return Promise.resolve(version);
+    return version;
   }
 
   loadArtifact({

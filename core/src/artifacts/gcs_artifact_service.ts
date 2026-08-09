@@ -8,6 +8,7 @@ import {Bucket, File, Storage, StorageOptions} from '@google-cloud/storage';
 import {createPartFromBase64, createPartFromText, Part} from '@google/genai';
 import {logger} from '../utils/logger.js';
 
+import {assertUnpaddedFilename} from './artifact_filename.js';
 import {
   ArtifactVersion,
   BaseArtifactService,
@@ -31,6 +32,8 @@ export class GcsArtifactService implements BaseArtifactService {
   }
 
   async saveArtifact(request: SaveArtifactRequest): Promise<number> {
+    assertUnpaddedFilename(request.filename);
+
     if (
       !request.artifact.inlineData &&
       !request.artifact.text &&
