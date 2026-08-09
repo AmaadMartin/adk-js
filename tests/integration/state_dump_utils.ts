@@ -90,11 +90,6 @@ export class ModelEventCapturePlugin extends BasePlugin {
     return params.llmResponse;
   }
 
-  /**
-   * Writes the captured responses to `dir/fileName` and empties the buffer.
-   * @param dir Destination directory. Created if it does not exist.
-   * @param fileName Name of the file to write inside `dir`.
-   */
   dump(dir: string, fileName: string): Promise<void> {
     const modelResponses = this.modelResponses;
     this.modelResponses = [];
@@ -114,11 +109,6 @@ export class AgentEventCapturePlugin extends BasePlugin {
     return params.event;
   }
 
-  /**
-   * Writes the captured events to `dir/fileName` and empties the buffer.
-   * @param dir Destination directory. Created if it does not exist.
-   * @param fileName Name of the file to write inside `dir`.
-   */
   dump(dir: string, fileName: string): Promise<void> {
     const events = this.events;
     this.events = [];
@@ -128,12 +118,9 @@ export class AgentEventCapturePlugin extends BasePlugin {
 }
 
 /**
- * Runs the agent with the given prompts and dumps what the plugins captured.
- *
- * Every dump is written inside `outDir`, which is required and is created if
- * it does not exist. The returned promise resolves only after the last dump is
- * flushed to disk. The dump files are left in place: they are the artifact the
- * caller asked for.
+ * Runs the agent with the given prompts and dumps what the plugins captured
+ * into `outDir`. Resolves once the last dump is flushed to disk. `events` and
+ * `modelResponses` take `true` for the default per-turn name, or a file name.
  */
 export async function runAndCapture(
   agent: LlmAgent,
@@ -144,12 +131,9 @@ export async function runAndCapture(
     events,
     modelResponses,
   }: {
-    /** Directory the dump files are written to. Created if missing. */
     outDir: string;
     runConfig?: RunConfig;
-    /** `true` for the default per-turn name, or an explicit file name. */
     events?: string | boolean;
-    /** `true` for the default per-turn name, or an explicit file name. */
     modelResponses?: string | boolean;
   },
 ) {
