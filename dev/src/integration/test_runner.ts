@@ -150,23 +150,15 @@ function userMessageToContent(msg: UserMessage): Content {
   throw new Error('Either Content text or content field is required');
 }
 
-export function validateSession(actual: Session, expected: Session) {
-  compareEvents(
-    actual.events.map(normalizeEvent),
-    expected.events.map(normalizeEvent),
-  );
-}
-
 /**
  * Asserts the replayed events match the recorded ones one event at a time, so a
  * failure names the event that diverged instead of diffing the whole session.
- * Mirrors `compare_events()` in adk-python's
- * `src/google/adk/cli/conformance/_replay_validators.py`.
+ * The failure messages match those of adk-python's conformance replay.
  */
-function compareEvents(
-  actualEvents: FilteredEvent[],
-  recordedEvents: FilteredEvent[],
-) {
+export function validateSession(actual: Session, expected: Session) {
+  const actualEvents = actual.events.map(normalizeEvent);
+  const recordedEvents = expected.events.map(normalizeEvent);
+
   assert.strictEqual(
     actualEvents.length,
     recordedEvents.length,
