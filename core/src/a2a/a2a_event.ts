@@ -6,6 +6,7 @@
 
 import {
   Part as A2APart,
+  TaskState as A2ATaskState,
   Message,
   Task,
   TaskArtifactUpdateEvent,
@@ -32,6 +33,7 @@ export enum TaskState {
   CANCELED = 'canceled',
   REJECTED = 'rejected',
   INPUT_REQUIRED = 'input-required',
+  AUTH_REQUIRED = 'auth-required',
 }
 
 /**
@@ -116,12 +118,14 @@ export function isTerminalTaskStatusUpdateEvent(event: unknown): boolean {
 }
 
 /**
- * Checks if the event is an input required task status update event.
+ * Checks if the event is a paused task status update event, meaning the task
+ * waits on the user before it can continue.
  */
-export function isInputRequiredTaskStatusUpdateEvent(event: unknown): boolean {
+export function isPausedTaskStatusUpdateEvent(event: unknown): boolean {
   return (
     (isTaskStatusUpdateEvent(event) || isTask(event)) &&
-    event.status.state === TaskState.INPUT_REQUIRED
+    (event.status.state === TaskState.INPUT_REQUIRED ||
+      event.status.state === TaskState.AUTH_REQUIRED)
   );
 }
 
@@ -330,26 +334,26 @@ export function createTaskFailedEvent({
 }
 
 /**
- * Creates an input required event.
+ * Arguments shared by the events that pause a task.
  */
-export function createTaskInputRequiredEvent({
-  taskId,
-  contextId,
-  parts,
-  metadata,
-}: {
+interface PausedTaskEventArgs {
   taskId: string;
   contextId: string;
   parts: A2APart[];
   metadata?: Record<string, unknown>;
-}): TaskStatusUpdateEvent {
+}
+
+function createPausedTaskEvent(
+  state: TaskState.INPUT_REQUIRED | TaskState.AUTH_REQUIRED,
+  {taskId, contextId, parts, metadata}: PausedTaskEventArgs,
+): TaskStatusUpdateEvent {
   return {
     kind: 'status-update',
     taskId,
     contextId,
     final: true,
     status: {
-      state: TaskState.INPUT_REQUIRED,
+      state,
       message: {
         kind: 'message',
         messageId: randomUUID(),
@@ -365,6 +369,25 @@ export function createTaskInputRequiredEvent({
 }
 
 /**
+ * Creates an input required event.
+ */
+export function createTaskInputRequiredEvent(
+  args: PausedTaskEventArgs,
+): TaskStatusUpdateEvent {
+  return createPausedTaskEvent(TaskState.INPUT_REQUIRED, args);
+}
+
+/**
+ * Creates an auth required event, used when the task pauses to wait for
+ * end-user credentials.
+ */
+export function createTaskAuthRequiredEvent(
+  args: PausedTaskEventArgs,
+): TaskStatusUpdateEvent {
+  return createPausedTaskEvent(TaskState.AUTH_REQUIRED, args);
+}
+
+/**
  * Creates an error message for missing input for a function call.
  */
 export function createInputMissingErrorEvent({
@@ -372,11 +395,14 @@ export function createInputMissingErrorEvent({
   contextId,
   parts,
   metadata,
+  state = TaskState.INPUT_REQUIRED,
 }: {
   parts: A2APart[];
   taskId: string;
   contextId: string;
   metadata?: Record<string, unknown>;
+  /** The paused state to keep the task in. */
+  state?: A2ATaskState;
 }): TaskStatusUpdateEvent {
   return {
     kind: 'status-update',
@@ -384,7 +410,7 @@ export function createInputMissingErrorEvent({
     contextId,
     final: true,
     status: {
-      state: TaskState.INPUT_REQUIRED,
+      state,
       message: {
         kind: 'message',
         messageId: randomUUID(),

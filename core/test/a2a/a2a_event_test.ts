@@ -15,6 +15,7 @@ import {
   createInputMissingErrorEvent,
   createTask,
   createTaskArtifactUpdateEvent,
+  createTaskAuthRequiredEvent,
   createTaskCompletedEvent,
   createTaskFailedEvent,
   createTaskInputRequiredEvent,
@@ -23,8 +24,8 @@ import {
   getEventMetadata,
   getFailedTaskStatusUpdateEventError,
   isFailedTaskStatusUpdateEvent,
-  isInputRequiredTaskStatusUpdateEvent,
   isMessage,
+  isPausedTaskStatusUpdateEvent,
   isTask,
   isTaskArtifactUpdateEvent,
   isTaskStatusUpdateEvent,
@@ -122,25 +123,47 @@ describe('a2a_event', () => {
       ).toBe(false);
     });
 
-    it('isInputRequiredTaskStatusUpdateEvent', () => {
+    it('isPausedTaskStatusUpdateEvent', () => {
       expect(
-        isInputRequiredTaskStatusUpdateEvent({
+        isPausedTaskStatusUpdateEvent({
           kind: 'status-update',
           status: {state: 'input-required'},
         }),
       ).toBe(true);
       expect(
-        isInputRequiredTaskStatusUpdateEvent({
+        isPausedTaskStatusUpdateEvent({
           kind: 'task',
           status: {state: 'input-required'},
         }),
       ).toBe(true);
       expect(
-        isInputRequiredTaskStatusUpdateEvent({
+        isPausedTaskStatusUpdateEvent({
           kind: 'status-update',
           status: {state: 'working'},
         }),
       ).toBe(false);
+    });
+
+    it('isPausedTaskStatusUpdateEvent is true for auth-required', () => {
+      expect(
+        isPausedTaskStatusUpdateEvent({
+          kind: 'status-update',
+          status: {state: 'auth-required'},
+        }),
+      ).toBe(true);
+      expect(
+        isPausedTaskStatusUpdateEvent({
+          kind: 'task',
+          status: {state: 'auth-required'},
+        }),
+      ).toBe(true);
+      expect(
+        isPausedTaskStatusUpdateEvent({
+          kind: 'task',
+          status: {state: 'completed'},
+        }),
+      ).toBe(false);
+      expect(isPausedTaskStatusUpdateEvent(null)).toBe(false);
     });
   });
 
@@ -484,6 +507,47 @@ describe('a2a_event', () => {
         },
         metadata: {m: 1},
       });
+    });
+
+    it('createTaskAuthRequiredEvent', () => {
+      expect(
+        createTaskAuthRequiredEvent({
+          taskId: 't1',
+          contextId: 'c1',
+          parts: [{kind: 'text', text: 'auth required'}],
+          metadata: {m: 1},
+        }),
+      ).toEqual({
+        kind: 'status-update',
+        taskId: 't1',
+        contextId: 'c1',
+        final: true,
+        status: {
+          state: 'auth-required',
+          message: {
+            kind: 'message',
+            messageId: 'mock-uuid',
+            role: 'agent',
+            taskId: 't1',
+            contextId: 'c1',
+            parts: [{kind: 'text', text: 'auth required'}],
+          },
+          timestamp: '2024-01-01T00:00:00.000Z',
+        },
+        metadata: {m: 1},
+      });
+    });
+
+    it('createInputMissingErrorEvent keeps the given paused state', () => {
+      const event = createInputMissingErrorEvent({
+        parts: [{kind: 'text', text: 'valid input'}],
+        taskId: 't1',
+        contextId: 'c1',
+        state: 'auth-required',
+      });
+
+      expect(event.status.state).toBe('auth-required');
+      expect(event.final).toBe(true);
     });
 
     it('createInputMissingErrorEvent', () => {

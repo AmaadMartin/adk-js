@@ -6,14 +6,16 @@
 
 import {Task, TaskStatusUpdateEvent} from '@a2a-js/sdk';
 import {Content as GenAIContent, Part as GenAIPart} from '@google/genai';
+import {REQUEST_EUC_FUNCTION_CALL_NAME} from '../agents/functions.js';
 import {Event as AdkEvent} from '../events/event.js';
 import {createEventActions} from '../events/event_actions.js';
 import {
   createInputMissingErrorEvent,
+  createTaskAuthRequiredEvent,
   createTaskCompletedEvent,
   createTaskFailedEvent,
   createTaskInputRequiredEvent,
-  isInputRequiredTaskStatusUpdateEvent,
+  isPausedTaskStatusUpdateEvent,
 } from './a2a_event.js';
 import {ExecutorContext} from './executor_context.js';
 import {
@@ -87,6 +89,7 @@ function scanForInputRequiredEvents(
 ): TaskStatusUpdateEvent | undefined {
   const inputRequiredParts: GenAIPart[] = [];
   const inputRequiredFunctionCallIds = new Set<string>();
+  let hasCredentialRequest = false;
 
   for (const adkEvent of adkEvents) {
     if (!adkEvent.content?.parts?.length) {
@@ -112,11 +115,19 @@ function scanForInputRequiredEvents(
 
       inputRequiredParts.push(genAIPart);
       inputRequiredFunctionCallIds.add(longRunningFunctionCallId);
+      if (genAIPart.functionCall?.name === REQUEST_EUC_FUNCTION_CALL_NAME) {
+        hasCredentialRequest = true;
+      }
     }
   }
 
   if (inputRequiredParts.length > 0) {
-    return createTaskInputRequiredEvent({
+    // A pending credential request pauses the task as auth-required so the
+    // client runs its auth flow instead of prompting for a reply.
+    const createPauseEvent = hasCredentialRequest
+      ? createTaskAuthRequiredEvent
+      : createTaskInputRequiredEvent;
+    return createPauseEvent({
       taskId: context.requestContext.taskId,
       contextId: context.requestContext.contextId,
       parts: toA2AParts(inputRequiredParts, [...inputRequiredFunctionCallIds]),
@@ -162,11 +173,7 @@ export function getTaskInputRequiredEvent(
   task: Task,
   genAIContent: GenAIContent,
 ): TaskStatusUpdateEvent | undefined {
-  if (
-    !task ||
-    !isInputRequiredTaskStatusUpdateEvent(task) ||
-    !task.status.message
-  ) {
+  if (!task || !isPausedTaskStatusUpdateEvent(task) || !task.status.message) {
     return undefined;
   }
 
@@ -187,6 +194,7 @@ export function getTaskInputRequiredEvent(
       return createInputMissingErrorEvent({
         taskId: task.id,
         contextId: task.contextId,
+        state: task.status.state,
         parts: [
           ...statusMsg.parts.filter((p) => !p.metadata?.validation_error),
           {

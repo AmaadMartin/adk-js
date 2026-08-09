@@ -27,8 +27,8 @@ import {
   getEventMetadata,
   getFailedTaskStatusUpdateEventError,
   isFailedTaskStatusUpdateEvent,
-  isInputRequiredTaskStatusUpdateEvent,
   isMessage,
+  isPausedTaskStatusUpdateEvent,
   isTask,
   isTaskArtifactUpdateEvent,
   isTaskStatusUpdateEvent,
@@ -245,7 +245,7 @@ function taskToAdkEvent(
 
   const isTerminal =
     isTerminalTaskStatusUpdateEvent(a2aTask) ||
-    isInputRequiredTaskStatusUpdateEvent(a2aTask);
+    isPausedTaskStatusUpdateEvent(a2aTask);
   const isFailed = isFailedTaskStatusUpdateEvent(a2aTask);
 
   if (parts.length === 0 && !isFailed) {
