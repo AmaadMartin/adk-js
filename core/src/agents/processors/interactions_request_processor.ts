@@ -14,11 +14,6 @@ import {BaseLlmRequestProcessor} from './base_llm_processor.js';
 /**
  * Request processor for Gemini Interactions API.
  * Resolves the previous interaction ID from the session history.
- *
- * An event that carries no branch was authored at the root of the invocation
- * and stays visible from every branch, so it can be chained on while a branch
- * is active. This matches `_is_event_in_branch` in the adk-python reference
- * (`src/google/adk/flows/llm_flows/interactions_processor.py`).
  */
 export class InteractionsRequestProcessor implements BaseLlmRequestProcessor {
   // eslint-disable-next-line require-yield
@@ -36,7 +31,10 @@ export class InteractionsRequestProcessor implements BaseLlmRequestProcessor {
       const events = invocationContext.session.events;
       for (let i = events.length - 1; i >= 0; i--) {
         const event = events[i];
-        // Skip events not belonging to the current branch or author
+        // Newest event from this agent in the current branch; a branch-less
+        // event is invocation-root and visible from every branch (parity:
+        // _is_event_in_branch in adk-python
+        // flows/llm_flows/interactions_processor.py).
         if (
           (!event.branch || event.branch === invocationContext.branch) &&
           event.author === agent.name &&
