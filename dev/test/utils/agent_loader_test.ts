@@ -422,7 +422,7 @@ describe('AgentLoader', () => {
       await agentFile.dispose();
     });
 
-    it('loads an app via loadApp() and rootAgent via loadAgent()', async () => {
+    it('loads the rootAgent of an App file via loadAgent()', async () => {
       const appPath = path.join(tempAgentsDir, 'app_default.js');
       await fs.writeFile(appPath, appDefaultExportContent);
 
@@ -433,15 +433,17 @@ describe('AgentLoader', () => {
       });
 
       const agentFile = new AgentFile(appPath);
-      const app = await agentFile.loadApp();
+      const loaded = await agentFile.load();
       const agent = await agentFile.loadAgent();
 
-      expect(app.name).toBe('test_app_default');
+      expect(isApp(loaded)).toBe(true);
+      expect((loaded as App).name).toBe('test_app_default');
+      expect(isApp(agent)).toBe(false);
       expect(agent.name).toBe('agent_for_app_default');
       await agentFile.dispose();
     });
 
-    it('synthesizes an App when loadApp() is called on a BaseAgent file', async () => {
+    it('returns the agent itself via loadAgent() for a bare BaseAgent file', async () => {
       const agentPath = path.join(tempAgentsDir, 'agent1.js');
       await fs.writeFile(agentPath, agent1JsContent);
 
@@ -452,11 +454,10 @@ describe('AgentLoader', () => {
       });
 
       const agentFile = new AgentFile(agentPath);
-      const app = await agentFile.loadApp();
+      const agent = await agentFile.loadAgent();
 
-      expect(isApp(app)).toBe(true);
-      expect(app.name).toBe('agent1');
-      expect(app.rootAgent.name).toBe('agent1');
+      expect(isApp(agent)).toBe(false);
+      expect(agent.name).toBe('agent1');
       await agentFile.dispose();
     });
 

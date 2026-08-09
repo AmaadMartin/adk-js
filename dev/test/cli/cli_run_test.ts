@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {BaseAgent, BaseSessionService} from '@google/adk';
+import {BaseAgent, BaseSessionService, Runner} from '@google/adk';
 import * as readline from 'node:readline';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {runAgent} from '../../src/cli/cli_run.js';
@@ -56,6 +56,35 @@ vi.mock('node:readline', () => ({
   createInterface: vi.fn(),
 }));
 
+/** Listeners registered by `fs.watch`, newest last. */
+const watchListeners: Array<() => void | Promise<void>> = [];
+
+// `watch` is a plain function rather than a `vi.fn()` so that the
+// `restoreAllMocks()` in `afterEach` cannot strip its implementation.
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  const watch = (_path: string, listener: () => void | Promise<void>) => {
+    watchListeners.push(listener);
+    return {close: () => undefined};
+  };
+  return {...actual, default: {...actual, watch}, watch};
+});
+
+// `@google/adk` and the agent loader are mocked, so both fakes below are
+// duck-typed: the real classes are unavailable and `AgentFile` has private
+// fields a structural stand-in cannot satisfy.
+function fakeAgent(name: string): BaseAgent {
+  return {name} as unknown as BaseAgent;
+}
+
+function fakeAgentFile(rootAgent: BaseAgent): AgentFile {
+  return {
+    load: vi.fn().mockResolvedValue(rootAgent),
+    loadAgent: vi.fn().mockResolvedValue(rootAgent),
+    [Symbol.asyncDispose]: vi.fn(),
+  } as unknown as AgentFile;
+}
+
 describe('cli_run', () => {
   let mockAgentFile: AgentFile;
   let mockRootAgent: BaseAgent;
@@ -63,16 +92,11 @@ describe('cli_run', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    watchListeners.length = 0;
     vi.spyOn(console, 'log').mockImplementation(() => {});
 
-    mockRootAgent = {
-      name: 'test-agent',
-    } as unknown as BaseAgent;
-
-    mockAgentFile = {
-      load: vi.fn().mockResolvedValue(mockRootAgent),
-      [Symbol.asyncDispose]: vi.fn(),
-    } as unknown as AgentFile;
+    mockRootAgent = fakeAgent('test-agent');
+    mockAgentFile = fakeAgentFile(mockRootAgent);
 
     (AgentFile as unknown as Mock).mockImplementation(() => mockAgentFile);
 
@@ -117,6 +141,61 @@ describe('cli_run', () => {
         events: [],
       }),
     }) as unknown as BaseSessionService;
+
+  it('should rebuild the runner from the reloaded agent file', async () => {
+    const reloadedAgent = fakeAgent('reloaded-agent');
+    const reloadedAgentFile = fakeAgentFile(reloadedAgent);
+    vi.mocked(AgentFile)
+      .mockImplementationOnce(() => mockAgentFile)
+      .mockImplementationOnce(() => reloadedAgentFile);
+
+    await runAgent({
+      agentPath: 'agent.ts',
+      reloadAgents: true,
+      sessionService: createMockSessionService(),
+    });
+    const onAgentFileChanged = watchListeners.at(-1);
+    if (!onAgentFileChanged) {
+      expect.fail('runAgent did not register an fs.watch listener');
+    }
+    await onAgentFileChanged();
+
+    expect(reloadedAgentFile.loadAgent).toHaveBeenCalled();
+    expect(Runner).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        agent: reloadedAgent,
+        appName: 'reloaded-agent',
+      }),
+    );
+  });
+
+  it('should keep the current runner when the reloaded file fails to load', async () => {
+    const failingAgentFile = fakeAgentFile(mockRootAgent);
+    vi.mocked(failingAgentFile.loadAgent).mockRejectedValue(
+      new Error('compile failed'),
+    );
+    vi.mocked(AgentFile)
+      .mockImplementationOnce(() => mockAgentFile)
+      .mockImplementationOnce(() => failingAgentFile);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await runAgent({
+      agentPath: 'agent.ts',
+      reloadAgents: true,
+      sessionService: createMockSessionService(),
+    });
+    const onAgentFileChanged = watchListeners.at(-1);
+    if (!onAgentFileChanged) {
+      expect.fail('runAgent did not register an fs.watch listener');
+    }
+    await onAgentFileChanged();
+
+    expect(warn).toHaveBeenCalledWith(
+      'Failed to reload agent:',
+      'compile failed',
+    );
+    expect(Runner).toHaveBeenCalledTimes(1);
+  });
 
   it('should run from input file', async () => {
     const inputFileContent = {

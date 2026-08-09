@@ -6,8 +6,11 @@
 
 import {AGENT_CARD_PATH, AgentCard} from '@a2a-js/sdk';
 import {
+  App,
+  BaseAgent,
   BaseArtifactService,
   BaseMemoryService,
+  BasePlugin,
   BaseSessionService,
   createEvent,
   createSession,
@@ -17,6 +20,7 @@ import {
   InMemoryMemoryService,
   InMemorySessionService,
   InvocationContext,
+  isApp,
   LlmAgent,
   Runner,
   Session,
@@ -213,6 +217,41 @@ const TEST_AGENT = new TestAgent({
   ],
 });
 
+/** Counts the runs of the `Runner` it is installed on. */
+class RunCountingPlugin extends BasePlugin {
+  runs = 0;
+
+  constructor() {
+    super('run-counting-plugin');
+  }
+
+  override async beforeRunCallback(): Promise<undefined> {
+    this.runs++;
+    return undefined;
+  }
+}
+
+/**
+ * Builds an `AgentLoader` whose single agent file resolves `loaded`, together
+ * with the spy backing that file's `loadAgent()` accessor.
+ */
+function fakeAgentLoader(loaded: BaseAgent | App) {
+  const rootAgent: BaseAgent = isApp(loaded) ? loaded.rootAgent : loaded;
+  const loadAgent = vi.fn(() => Promise.resolve(rootAgent));
+  const agentLoader = {
+    listAgents: () => Promise.resolve(['testApp']),
+    getAgentFile: () =>
+      Promise.resolve({
+        load: () => Promise.resolve(loaded),
+        loadAgent,
+        async [Symbol.asyncDispose](): Promise<void> {
+          return;
+        },
+      }),
+  } as unknown as AgentLoader;
+  return {agentLoader, loadAgent};
+}
+
 describe('AdkWebServer', () => {
   let agentLoader: AgentLoader;
   let sessionService: BaseSessionService;
@@ -222,18 +261,7 @@ describe('AdkWebServer', () => {
   let client: HttpClient;
 
   beforeEach(async () => {
-    agentLoader = {
-      listAgents: () => Promise.resolve(['testApp']),
-      getAgentFile: () =>
-        Promise.resolve({
-          load() {
-            return Promise.resolve(TEST_AGENT);
-          },
-          async [Symbol.asyncDispose](): Promise<void> {
-            return;
-          },
-        }),
-    } as unknown as AgentLoader;
+    agentLoader = fakeAgentLoader(TEST_AGENT).agentLoader;
     sessionService = new InMemorySessionService();
     memoryService = new InMemoryMemoryService();
     artifactService = new InMemoryArtifactService();
@@ -917,6 +945,48 @@ describe('AdkWebServer', () => {
       }
     });
 
+    it('should return graph for an App-exporting agent file', async () => {
+      const fake = fakeAgentLoader(
+        new App({name: 'testApp', rootAgent: TEST_AGENT}),
+      );
+      const appServer = new AdkApiServer({
+        agentLoader: fake.agentLoader,
+        sessionService,
+        memoryService,
+        artifactService,
+      });
+      await appServer.start();
+      const appClient = new HttpClient(appServer.url);
+      const session = await sessionService.createSession({
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: 'appSession',
+      });
+      await sessionService.appendEvent({
+        session,
+        event: createEvent({
+          id: 'event1',
+          author: 'model',
+          content: {parts: [{functionCall: {name: 'foo', args: {}}}]},
+          invocationId: 'inv-1',
+        }),
+      });
+
+      try {
+        const response = await appClient.get<{
+          dotSrc: string;
+        }>(
+          '/apps/testApp/users/testUser/sessions/appSession/events/event1/graph',
+        );
+
+        expect(response.status).toBe(200);
+        expect(response.data!.dotSrc).toContain('testAgent');
+        expect(fake.loadAgent).toHaveBeenCalled();
+      } finally {
+        await appServer.stop();
+      }
+    });
+
     it('should return 404 if session not found', async () => {
       try {
         await client.get(
@@ -947,9 +1017,12 @@ describe('AdkWebServer', () => {
     const A2A_TOKEN = 'test-a2a-token';
     let a2aServer: AdkApiServer | undefined;
 
-    const startA2aServer = async (a2aAuthToken?: string) => {
+    const startA2aServer = async (
+      a2aAuthToken?: string,
+      loader: AgentLoader = agentLoader,
+    ) => {
       a2aServer = new AdkApiServer({
-        agentLoader,
+        agentLoader: loader,
         sessionService,
         memoryService,
         artifactService,
@@ -1051,6 +1124,40 @@ describe('AdkWebServer', () => {
 
       expect(response.status).toBe(200);
       expect(response.body.result).toBeDefined();
+    });
+
+    // The A2A bootstrap builds the cached Runner for every agent file. An
+    // App-exporting file must reach that Runner as an App, so the App's
+    // plugins stay installed for later requests.
+    it('should build the Runner from the App of an App-exporting agent file', async () => {
+      const plugin = new RunCountingPlugin();
+      const fake = fakeAgentLoader(
+        new App({name: 'testApp', rootAgent: TEST_AGENT, plugins: [plugin]}),
+      );
+      const a2aClient = new HttpClient(
+        await startA2aServer(undefined, fake.agentLoader),
+      );
+      await sessionService.createSession({
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: 'appSession',
+      });
+
+      const card = await a2aClient.get<AgentCard>(
+        `/a2a/testApp/${AGENT_CARD_PATH}`,
+      );
+      const run = await a2aClient.post<Event[]>('/run', {
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: 'appSession',
+        newMessage: {parts: [{text: 'Hello test agent!'}], role: 'user'},
+      });
+
+      expect(card.status).toBe(200);
+      expect(card.data?.name).toBe('testAgent');
+      expect(run.status).toBe(200);
+      expect(plugin.runs).toBe(1);
+      expect(fake.loadAgent).toHaveBeenCalled();
     });
   });
 

@@ -299,20 +299,6 @@ export class AgentFile {
     return this.agent!;
   }
 
-  async loadApp(): Promise<App> {
-    const loaded = await this.load();
-    if (isApp(loaded)) {
-      return loaded;
-    }
-    if (!this.app && this.agent) {
-      this.app = new App({
-        name: this.agent.name,
-        rootAgent: this.agent,
-      });
-    }
-    return this.app!;
-  }
-
   getFilePath(): string {
     if (!this.agent && !this.app) {
       throw new Error('Agent is not loaded yet');
