@@ -12,6 +12,7 @@
  */
 
 import {FunctionResponse, Part} from '@google/genai';
+import {isEqual} from 'lodash-es';
 import {
   AuthCredential,
   AuthCredentialTypes,
@@ -20,7 +21,6 @@ import {AuthHandler} from '../../auth/auth_handler.js';
 import {AuthConfig} from '../../auth/auth_tool.js';
 import {createEvent, Event} from '../../events/event.js';
 import {State} from '../../sessions/state.js';
-import {canonicalJson} from '../../utils/json_utils.js';
 import {toJsonSchema} from '../../utils/schema.js';
 import {ResumeMismatchReason} from '../errors.js';
 import {RequestInput} from '../request_input.js';
@@ -32,7 +32,7 @@ export const REQUEST_INPUT_FUNCTION_CALL_NAME = 'adk_request_input';
 export const REQUEST_CREDENTIAL_FUNCTION_CALL_NAME = 'adk_request_credential';
 
 /** Args key under which an interrupt freezes the payload the human reviews. */
-export const REQUEST_INPUT_PAYLOAD_KEY = 'payload';
+const REQUEST_INPUT_PAYLOAD_KEY = 'payload';
 
 /**
  * Creates an interrupt {@link Event} from a {@link RequestInput}. The event
@@ -157,12 +157,11 @@ export function readFrozenRequests(event: Event): FrozenRequest[] {
  * and the response echoes one, so it stays inert for a message-only request and
  * for `adk_request_credential`.
  */
-export function verifyResumeResponse(params: {
-  frozen: FrozenRequest;
-  response: FunctionResponse;
-}): ResumeMismatchReason | undefined {
-  const {frozen, response} = params;
-  if (response.name && frozen.name && response.name !== frozen.name) {
+export function verifyResumeResponse(
+  frozen: FrozenRequest,
+  response: FunctionResponse,
+): ResumeMismatchReason | undefined {
+  if (response.name && response.name !== frozen.name) {
     return ResumeMismatchReason.WRONG_FUNCTION;
   }
   if (frozen.payload === undefined || frozen.payload === null) {
@@ -174,8 +173,10 @@ export function verifyResumeResponse(params: {
   }
   try {
     if (
-      canonicalJson(body[REQUEST_INPUT_PAYLOAD_KEY]) !==
-      canonicalJson(frozen.payload)
+      !isEqual(
+        jsonValue(body[REQUEST_INPUT_PAYLOAD_KEY]),
+        jsonValue(frozen.payload),
+      )
     ) {
       return ResumeMismatchReason.PAYLOAD_MISMATCH;
     }
@@ -186,8 +187,18 @@ export function verifyResumeResponse(params: {
   return undefined;
 }
 
+/**
+ * Projects a value onto its JSON representation, so an echo that crossed the
+ * wire compares equal to a frozen payload still held in memory. The session may
+ * hold the interrupt event un-serialised (`InMemorySessionService` deep-clones
+ * it), which leaves `Date`s and `undefined`-valued keys the echo cannot carry.
+ */
+function jsonValue(value: unknown): unknown {
+  return JSON.parse(JSON.stringify(value) ?? 'null');
+}
+
 /** Narrows an unknown value to a plain (non-array) record. */
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 

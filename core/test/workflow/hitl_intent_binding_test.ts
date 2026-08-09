@@ -155,56 +155,89 @@ describe('verifyResumeResponse', () => {
     payload: FROZEN_PAYLOAD,
   };
 
+  /** A resume response answering {@link INTERRUPT_ID}, named unless overridden. */
+  function resumeResponse(
+    response?: Record<string, unknown>,
+    name: string | undefined = REQUEST_INPUT_FUNCTION_CALL_NAME,
+  ): FunctionResponse {
+    return {id: INTERRUPT_ID, name, response};
+  }
+
   it('reports WRONG_FUNCTION when the response names another function', () => {
-    const reason = verifyResumeResponse({
+    const reason = verifyResumeResponse(
       frozen,
-      response: {
-        id: INTERRUPT_ID,
-        name: 'transfer_funds',
-        response: {result: 'approved'},
-      },
-    });
+      resumeResponse({result: 'approved'}, 'transfer_funds'),
+    );
 
     expect(reason).toBe(ResumeMismatchReason.WRONG_FUNCTION);
   });
 
   it('accepts a response that omits the function name', () => {
-    const reason = verifyResumeResponse({
+    const reason = verifyResumeResponse(
       frozen,
-      response: {id: INTERRUPT_ID, response: {result: 'approved'}},
-    });
+      resumeResponse({result: 'approved'}, undefined),
+    );
 
     expect(reason).toBeUndefined();
   });
 
   it('accepts an echoed payload whose keys are in a different order', () => {
-    const reason = verifyResumeResponse({
+    const reason = verifyResumeResponse(
       frozen,
-      response: {
-        id: INTERRUPT_ID,
-        name: REQUEST_INPUT_FUNCTION_CALL_NAME,
-        response: {
-          payload: {amount: 5, to: 'alice', action: 'refund'},
-          result: 'approved',
-        },
-      },
-    });
+      resumeResponse({
+        payload: {amount: 5, to: 'alice', action: 'refund'},
+        result: 'approved',
+      }),
+    );
 
     expect(reason).toBeUndefined();
   });
 
   it('reports PAYLOAD_MISMATCH when the echoed payload differs', () => {
-    const reason = verifyResumeResponse({
+    const reason = verifyResumeResponse(
       frozen,
-      response: {
-        id: INTERRUPT_ID,
-        name: REQUEST_INPUT_FUNCTION_CALL_NAME,
-        response: {
-          payload: {action: 'refund', to: 'bob', amount: 5000},
-          result: 'approved',
-        },
-      },
-    });
+      resumeResponse({
+        payload: {action: 'refund', to: 'bob', amount: 5000},
+        result: 'approved',
+      }),
+    );
+
+    expect(reason).toBe(ResumeMismatchReason.PAYLOAD_MISMATCH);
+  });
+
+  it('reports PAYLOAD_MISMATCH when an echoed list is reordered', () => {
+    const reason = verifyResumeResponse(
+      {...frozen, payload: {items: ['alice', 'bob']}},
+      resumeResponse({payload: {items: ['bob', 'alice']}}),
+    );
+
+    expect(reason).toBe(ResumeMismatchReason.PAYLOAD_MISMATCH);
+  });
+
+  it('accepts an echo of a frozen Date the wire could only carry as a string', () => {
+    const due = new Date('2026-01-02T03:04:05.000Z');
+    const reason = verifyResumeResponse(
+      {...frozen, payload: {due}},
+      resumeResponse({payload: {due: due.toISOString()}}),
+    );
+
+    expect(reason).toBeUndefined();
+  });
+
+  it('accepts an echo that omits a frozen key whose value is undefined', () => {
+    const reason = verifyResumeResponse(
+      {...frozen, payload: {to: 'alice', note: undefined}},
+      resumeResponse({payload: {to: 'alice'}}),
+    );
+
+    expect(reason).toBeUndefined();
+  });
+
+  it('reports PAYLOAD_MISMATCH when the echoed payload is undefined', () => {
+    const reason = verifyResumeResponse(
+      frozen,
+      resumeResponse({payload: undefined}),
+    );
 
     expect(reason).toBe(ResumeMismatchReason.PAYLOAD_MISMATCH);
   });
@@ -213,38 +246,25 @@ describe('verifyResumeResponse', () => {
     const cyclic: Record<string, unknown> = {};
     cyclic['self'] = cyclic;
 
-    const reason = verifyResumeResponse({
+    const reason = verifyResumeResponse(
       frozen,
-      response: {
-        id: INTERRUPT_ID,
-        name: REQUEST_INPUT_FUNCTION_CALL_NAME,
-        response: {payload: cyclic},
-      },
-    });
+      resumeResponse({payload: cyclic}),
+    );
 
     expect(reason).toBe(ResumeMismatchReason.PAYLOAD_MISMATCH);
   });
 
   it('accepts a response that echoes no payload', () => {
-    const reason = verifyResumeResponse({
+    const reason = verifyResumeResponse(
       frozen,
-      response: {
-        id: INTERRUPT_ID,
-        name: REQUEST_INPUT_FUNCTION_CALL_NAME,
-        response: {result: 'approved'},
-      },
-    });
+      resumeResponse({result: 'approved'}),
+    );
 
     expect(reason).toBeUndefined();
   });
 
   it('accepts a response with no body', () => {
-    const reason = verifyResumeResponse({
-      frozen,
-      response: {id: INTERRUPT_ID, name: REQUEST_INPUT_FUNCTION_CALL_NAME},
-    });
-
-    expect(reason).toBeUndefined();
+    expect(verifyResumeResponse(frozen, resumeResponse())).toBeUndefined();
   });
 
   it('accepts a response whose body is not a record', () => {
@@ -254,22 +274,14 @@ describe('verifyResumeResponse', () => {
       `{"id": "${INTERRUPT_ID}", "name": "${REQUEST_INPUT_FUNCTION_CALL_NAME}", "response": ["approved"]}`,
     );
 
-    expect(verifyResumeResponse({frozen, response})).toBeUndefined();
+    expect(verifyResumeResponse(frozen, response)).toBeUndefined();
   });
 
   it('leaves the payload check inert when the request froze no payload', () => {
-    const reason = verifyResumeResponse({
-      frozen: {
-        interruptId: INTERRUPT_ID,
-        name: REQUEST_INPUT_FUNCTION_CALL_NAME,
-        payload: null,
-      },
-      response: {
-        id: INTERRUPT_ID,
-        name: REQUEST_INPUT_FUNCTION_CALL_NAME,
-        response: {payload: {anything: true}, result: 'approved'},
-      },
-    });
+    const reason = verifyResumeResponse(
+      {...frozen, payload: null},
+      resumeResponse({payload: {anything: true}, result: 'approved'}),
+    );
 
     expect(reason).toBeUndefined();
   });

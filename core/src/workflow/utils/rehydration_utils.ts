@@ -19,6 +19,7 @@ import {RouteValue} from '../graph.js';
 import type {NodeContext, NodeResult} from '../node_context.js';
 import {
   FrozenRequest,
+  isRecord,
   readFrozenRequests,
   verifyResumeResponse,
 } from './hitl_utils.js';
@@ -118,9 +119,7 @@ function reconstruct(
         }
         const node = getNode(interruptOwner.get(fr.id)!);
         const frozen = frozenRequests.get(fr.id);
-        const mismatch = frozen
-          ? verifyResumeResponse({frozen, response: fr})
-          : undefined;
+        const mismatch = frozen ? verifyResumeResponse(frozen, fr) : undefined;
         if (mismatch) {
           node.mismatchedResponses.set(fr.id, mismatch);
           node.resolvedResponses.delete(fr.id);
@@ -220,11 +219,6 @@ function directChildName(path: string, parentPath: string): string | undefined {
     return undefined; // a deeper descendant, not a direct child
   }
   return rest.split('@')[0];
-}
-
-/** Narrows an unknown value to a plain (non-array) record. */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /** Unwraps a `{result: value}` FunctionResponse envelope to the bare value. */
