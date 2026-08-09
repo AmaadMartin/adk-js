@@ -39,7 +39,7 @@ class MockLlm extends BaseLlm {
 function createMockEvent(
   id: string,
   author: string,
-  branch: string,
+  branch: string | undefined,
   interactionId?: string,
 ): Event {
   return {
@@ -191,6 +191,125 @@ describe('InteractionsRequestProcessor', () => {
     }
 
     expect(llmRequest.previousInteractionId).toBe('int-2');
+  });
+
+  it('should chain on a branch-less event while a branch is set', async () => {
+    const rawEvents: Event[] = [
+      createMockEvent('1', 'test_agent', undefined, 'int-1'),
+    ];
+    const geminiModel = new Gemini({
+      model: 'gemini-2.5-flash',
+      apiKey: 'dummy',
+      useInteractionsApi: true,
+    });
+    const invocationContext = createMockInvocationContext(
+      rawEvents,
+      geminiModel,
+    );
+    invocationContext.branch = 'main';
+    const llmRequest: LlmRequest = {
+      contents: [],
+      toolsDict: {},
+      liveConnectConfig: {},
+    };
+
+    for await (const _ of INTERACTIONS_REQUEST_PROCESSOR.runAsync(
+      invocationContext,
+      llmRequest,
+    )) {
+      // intentionally empty
+    }
+
+    expect(llmRequest.previousInteractionId).toBe('int-1');
+  });
+
+  it('should prefer a branch-less event over a later event from another branch', async () => {
+    const rawEvents: Event[] = [
+      createMockEvent('1', 'test_agent', undefined, 'int-root'),
+      createMockEvent('2', 'test_agent', 'other-branch', 'int-other'),
+    ];
+    const geminiModel = new Gemini({
+      model: 'gemini-2.5-flash',
+      apiKey: 'dummy',
+      useInteractionsApi: true,
+    });
+    const invocationContext = createMockInvocationContext(
+      rawEvents,
+      geminiModel,
+    );
+    invocationContext.branch = 'main';
+    const llmRequest: LlmRequest = {
+      contents: [],
+      toolsDict: {},
+      liveConnectConfig: {},
+    };
+
+    for await (const _ of INTERACTIONS_REQUEST_PROCESSOR.runAsync(
+      invocationContext,
+      llmRequest,
+    )) {
+      // intentionally empty
+    }
+
+    expect(llmRequest.previousInteractionId).toBe('int-root');
+  });
+
+  it('should chain on a branch-less event when no branch is set', async () => {
+    const rawEvents: Event[] = [
+      createMockEvent('1', 'test_agent', undefined, 'int-1'),
+    ];
+    const geminiModel = new Gemini({
+      model: 'gemini-2.5-flash',
+      apiKey: 'dummy',
+      useInteractionsApi: true,
+    });
+    const invocationContext = createMockInvocationContext(
+      rawEvents,
+      geminiModel,
+    );
+    const llmRequest: LlmRequest = {
+      contents: [],
+      toolsDict: {},
+      liveConnectConfig: {},
+    };
+
+    for await (const _ of INTERACTIONS_REQUEST_PROCESSOR.runAsync(
+      invocationContext,
+      llmRequest,
+    )) {
+      // intentionally empty
+    }
+
+    expect(llmRequest.previousInteractionId).toBe('int-1');
+  });
+
+  it('should ignore a branched event when no branch is set', async () => {
+    const rawEvents: Event[] = [
+      createMockEvent('1', 'test_agent', 'sub-branch', 'int-1'),
+    ];
+    const geminiModel = new Gemini({
+      model: 'gemini-2.5-flash',
+      apiKey: 'dummy',
+      useInteractionsApi: true,
+    });
+    const invocationContext = createMockInvocationContext(
+      rawEvents,
+      geminiModel,
+    );
+    const llmRequest: LlmRequest = {
+      contents: [],
+      toolsDict: {},
+      liveConnectConfig: {},
+    };
+
+    for await (const _ of INTERACTIONS_REQUEST_PROCESSOR.runAsync(
+      invocationContext,
+      llmRequest,
+    )) {
+      // intentionally empty
+    }
+
+    expect(llmRequest.previousInteractionId).toBeUndefined();
   });
 
   it('should ignore events from other authors', async () => {
