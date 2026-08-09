@@ -6,6 +6,7 @@
 
 import fg from 'fast-glob';
 import * as fs from 'node:fs/promises';
+import {Readable} from 'node:stream';
 import {beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {batchLoadYamlTestDefs} from '../../src/conformance/yaml_test_loader.js';
 import {TestInfo} from '../../src/integration/test_types.js';
@@ -165,13 +166,6 @@ describe('batchLoadYamlTestDefs', () => {
 
 const OPAQUE_ROOT_DIR = '/root/tests';
 
-/**
- * `vi.mock` replaces `fg.stream` with a mock, but its declared return type is a
- * stream while the loader only needs an async iterable. This is the same view
- * the cases above take of the same mock.
- */
-const globStreamMock = fg.stream as unknown as Mock;
-
 const OPAQUE_STATE_SESSION_YAML = `
 app_name: test-app
 user_id: user-1
@@ -248,6 +242,30 @@ events:
         cursor_pos: 2
 `;
 
+const OUTPUT_AND_AUTH_SESSION_YAML = `
+app_name: test-app
+user_id: user-1
+id: session-1
+events:
+  - author: agent
+    output:
+      node_result: ok
+      nested_out:
+        inner_key: 1
+    actions:
+      requested_tool_confirmations:
+        adk-call-1:
+          hint: confirm this
+          confirmed: false
+          payload:
+            order_id: 7
+      requested_auth_configs:
+        adk-call-2:
+          auth_scheme:
+            type: apiKey
+          credential_key: my_key
+`;
+
 const OPAQUE_SPEC_YAML = `
 description: Test description
 agent: test-agent
@@ -319,8 +337,11 @@ describe('batchLoadYamlTestDefs opaque payloads', () => {
     session?: string;
     recordings?: string;
   }): Promise<TestInfo> {
-    globStreamMock.mockReturnValue([`${OPAQUE_ROOT_DIR}/t1/spec.yaml`]);
-    (fs.readFile as Mock).mockImplementation(async (filePath: string) => {
+    vi.mocked(fg.stream).mockReturnValue(
+      Readable.from([`${OPAQUE_ROOT_DIR}/t1/spec.yaml`]),
+    );
+    vi.mocked(fs.readFile).mockImplementation(async (file) => {
+      const filePath = String(file);
       if (filePath.endsWith('spec.yaml')) return files.spec ?? SPEC_YAML;
       if (filePath.endsWith('generated-session.yaml'))
         return files.session ?? SESSION_YAML;
@@ -398,6 +419,33 @@ describe('batchLoadYamlTestDefs opaque payloads', () => {
     expect(event.actions).toEqual({
       customMetadata: {run_tag: 'nightly'},
       agentState: {cursor_pos: 2},
+    });
+  });
+
+  it('preserves event output and requested tool confirmations', async () => {
+    const test = await loadTest({session: OUTPUT_AND_AUTH_SESSION_YAML});
+
+    const event = test.session.events[0];
+    expect(event.output).toEqual({
+      node_result: 'ok',
+      nested_out: {inner_key: 1},
+    });
+    expect(event.actions.requestedToolConfirmations).toEqual({
+      'adk-call-1': {
+        hint: 'confirm this',
+        confirmed: false,
+        payload: {order_id: 7},
+      },
+    });
+  });
+
+  it('converts requested auth config values, which are ADK schema', async () => {
+    const test = await loadTest({session: OUTPUT_AND_AUTH_SESSION_YAML});
+
+    const authConfigs = test.session.events[0].actions.requestedAuthConfigs;
+    expect(Object.values(authConfigs)[0]).toEqual({
+      authScheme: {type: 'apiKey'},
+      credentialKey: 'my_key',
     });
   });
 

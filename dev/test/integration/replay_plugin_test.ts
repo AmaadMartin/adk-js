@@ -46,11 +46,11 @@ describe('transferTargetAgentName', () => {
     );
   });
 
-  it('reads the argument name declared by adk-js', () => {
-    expect(transferTargetAgentName({agentName: 'sub_agent'})).toBe('sub_agent');
+  it('ignores the argument name declared by adk-js', () => {
+    expect(transferTargetAgentName({agentName: 'sub_agent'})).toBeUndefined();
   });
 
-  it('prefers the recorded adk-python argument name', () => {
+  it('reads the recorded name when both spellings are present', () => {
     expect(
       transferTargetAgentName({agent_name: 'sub_agent', agentName: 'other'}),
     ).toBe('sub_agent');

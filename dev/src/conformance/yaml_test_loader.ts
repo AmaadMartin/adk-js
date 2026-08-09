@@ -26,18 +26,29 @@ const SPEC_OPAQUE_PATHS = [
 
 /**
  * Paths in `generated-session.yaml` that hold user data ADK passes through
- * verbatim. This is the preserve list core applies to an event, scoped under
- * `events.`, plus the session's own `state`.
+ * verbatim: the session's own `state`, plus the list core preserves on an
+ * event (`PRESERVE_KEYS_SNAKE_CASE` in `core/src/events/event.ts`) scoped
+ * under `events.`.
+ *
+ * Two entries of core's list are left out on purpose.
+ * `actions.requested_auth_configs` has opaque function-call ids for keys but
+ * `AuthConfig` values whose fields are camelCase in adk-js. A `stopPath`
+ * freezes a whole subtree, so preserving those keys would strand the values in
+ * snake_case. `route` holds a scalar or an array of scalars, so it has no keys
+ * to preserve. `requested_tool_confirmations` has neither problem: its fields
+ * are single words and its `payload` is opaque by design.
  */
 const SESSION_OPAQUE_PATHS = [
   'state',
   'events.actions.state_delta',
   'events.actions.artifact_delta',
+  'events.actions.requested_tool_confirmations',
   'events.actions.custom_metadata',
-  'events.actions.agent_state',
   'events.custom_metadata',
   'events.content.parts.function_call.args',
   'events.content.parts.function_response.response',
+  'events.output',
+  'events.actions.agent_state',
 ];
 
 /**
