@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {isEqual} from 'lodash-es';
+
 import {
   REQUEST_EUC_FUNCTION_CALL_NAME,
   handleFunctionCallsAsync,
@@ -20,7 +22,10 @@ import {
 import {State} from '../sessions/state.js';
 import {BaseTool} from '../tools/base_tool.js';
 import {camelCaseKeys} from '../utils/case_utils.js';
+import {logger} from '../utils/logger.js';
+import {AuthCredential} from './auth_credential.js';
 import {AuthHandler} from './auth_handler.js';
+import {AuthScheme} from './auth_schemes.js';
 import {AuthConfig} from './auth_tool.js';
 
 const TOOLSET_AUTH_CREDENTIAL_ID_PREFIX = '_adk_toolset_auth_';
@@ -30,14 +35,45 @@ interface RequestCredentialArgs {
   functionCallId?: string;
 }
 
+/** Shape of a client-supplied `adk_request_credential` response. */
+interface AuthResumeResponse {
+  authScheme?: unknown;
+  exchangedAuthCredential?: AuthCredential;
+}
+
+/**
+ * Whether a resume-supplied auth scheme contradicts the frozen requested one.
+ *
+ * Only the keys the response sets are compared, so a client that drops fields
+ * the request left `undefined` (a JSON round trip does exactly that) keeps
+ * working, while any changed or added field is a mismatch.
+ */
+function schemeContradictsRequest(
+  responseScheme: unknown,
+  requestedScheme: AuthScheme | undefined,
+): boolean {
+  if (responseScheme === undefined || responseScheme === null) {
+    return false;
+  }
+  const requested = (requestedScheme ?? {}) as Record<string, unknown>;
+  return Object.entries(responseScheme as Record<string, unknown>).some(
+    ([key, value]) => value !== undefined && !isEqual(value, requested[key]),
+  );
+}
+
 async function storeAuthAndCollectResumeTargets(
   events: Event[],
   authFcIds: Set<string>,
   authResponses: Record<string, unknown>,
   state: State,
 ): Promise<Set<string>> {
-  const requestedAuthConfigById: Record<string, AuthConfig> = {};
+  const requestById: Record<string, RequestCredentialArgs> = {};
   for (const event of events) {
+    // A client authors user events, so a function call it carries cannot
+    // define the frozen credential request.
+    if (event.author === 'user') {
+      continue;
+    }
     const eventFunctionCalls = getFunctionCalls(event);
     for (const functionCall of eventFunctionCalls) {
       if (
@@ -45,49 +81,50 @@ async function storeAuthAndCollectResumeTargets(
         authFcIds.has(functionCall.id) &&
         functionCall.name === REQUEST_EUC_FUNCTION_CALL_NAME
       ) {
-        const args = camelCaseKeys(functionCall.args) as RequestCredentialArgs;
-        const authConfig = args?.authConfig;
-        if (authConfig) {
-          requestedAuthConfigById[functionCall.id] = authConfig;
-        }
+        requestById[functionCall.id] = camelCaseKeys(
+          functionCall.args,
+        ) as RequestCredentialArgs;
       }
     }
-  }
-
-  for (const fcId of authFcIds) {
-    const authConfig = authResponses[fcId] as AuthConfig;
-    const requestedAuthConfig = requestedAuthConfigById[fcId];
-    if (requestedAuthConfig && requestedAuthConfig.credentialKey) {
-      authConfig.credentialKey = requestedAuthConfig.credentialKey;
-    }
-    await new AuthHandler(authConfig).parseAndStoreAuthResponse(state);
   }
 
   const toolsToResume: Set<string> = new Set();
   for (const fcId of authFcIds) {
-    const requestedAuthConfig = requestedAuthConfigById[fcId];
-    if (!requestedAuthConfig) {
+    const request = requestById[fcId];
+    const response = authResponses[fcId] as AuthResumeResponse | undefined;
+
+    if (!request?.authConfig?.credentialKey) {
+      logger.warn(
+        `Ignoring auth response for ${fcId}: no matching credential request.`,
+      );
       continue;
     }
-    for (const event of events) {
-      const eventFunctionCalls = getFunctionCalls(event);
-      for (const functionCall of eventFunctionCalls) {
-        if (
-          functionCall.id === fcId &&
-          functionCall.name === REQUEST_EUC_FUNCTION_CALL_NAME
-        ) {
-          const args = camelCaseKeys(
-            functionCall.args,
-          ) as RequestCredentialArgs;
-          const functionCallId = args?.functionCallId;
-          if (functionCallId) {
-            if (functionCallId.startsWith(TOOLSET_AUTH_CREDENTIAL_ID_PREFIX)) {
-              continue;
-            }
-            toolsToResume.add(functionCallId);
-          }
-        }
-      }
+
+    if (
+      schemeContradictsRequest(
+        response?.authScheme,
+        request.authConfig.authScheme,
+      )
+    ) {
+      logger.warn(
+        `Ignoring auth response for ${fcId}: authScheme does not match the requested one.`,
+      );
+      continue;
+    }
+
+    // The frozen request decides how the credential is stored and exchanged.
+    // A resume message may only carry the credential the user just obtained.
+    await new AuthHandler({
+      ...request.authConfig,
+      exchangedAuthCredential: response?.exchangedAuthCredential,
+    }).parseAndStoreAuthResponse(state);
+
+    const {functionCallId} = request;
+    if (
+      functionCallId &&
+      !functionCallId.startsWith(TOOLSET_AUTH_CREDENTIAL_ID_PREFIX)
+    ) {
+      toolsToResume.add(functionCallId);
     }
   }
 
