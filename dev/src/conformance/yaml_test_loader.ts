@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Session} from '@google/adk';
+import {PRESERVE_KEYS_SNAKE_CASE, Session} from '@google/adk';
 import camelcaseKeys from 'camelcase-keys';
 import fg from 'fast-glob';
 import yaml from 'js-yaml';
@@ -26,22 +26,13 @@ const SPEC_OPAQUE_PATHS = [
 
 /**
  * Paths in `generated-session.yaml` that hold user data ADK passes through
- * verbatim. This is the preserve list core applies to an event, scoped under
- * `events.`, plus the session's own `state`.
+ * verbatim: the list core preserves on an event, rooted at the session
+ * document, plus the session's own `state`. Deriving it keeps this loader in
+ * step whenever core starts preserving another path.
  */
 const SESSION_OPAQUE_PATHS = [
   'state',
-  'events.actions.state_delta',
-  'events.actions.artifact_delta',
-  'events.actions.requested_auth_configs',
-  'events.actions.requested_tool_confirmations',
-  'events.actions.custom_metadata',
-  'events.actions.agent_state',
-  'events.custom_metadata',
-  'events.content.parts.function_call.args',
-  'events.content.parts.function_response.response',
-  'events.output',
-  'events.route',
+  ...PRESERVE_KEYS_SNAKE_CASE.map((key) => `events.${key}`),
 ];
 
 /**

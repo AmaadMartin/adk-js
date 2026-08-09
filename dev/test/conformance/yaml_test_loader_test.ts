@@ -6,6 +6,7 @@
 
 import fg from 'fast-glob';
 import * as fs from 'node:fs/promises';
+import {Readable} from 'node:stream';
 import {beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {batchLoadYamlTestDefs} from '../../src/conformance/yaml_test_loader.js';
 import {TestInfo} from '../../src/integration/test_types.js';
@@ -53,11 +54,10 @@ recordings:
             - text: hi
 `;
 
-/**
- * `vi.mock` replaces `fg.stream` with a mock, but its declared return type is a
- * stream while the loader only needs an async iterable.
- */
-const globStreamMock = fg.stream as unknown as Mock;
+/** Makes the mocked `fg.stream` yield `files` to the loader. */
+function mockGlobStream(files: string[]): void {
+  vi.mocked(fg.stream).mockReturnValue(Readable.from(files));
+}
 
 const NON_MAPPING_CASES = [
   {file: 'spec.yaml', message: 'Spec file must be a YAML mapping'},
@@ -82,7 +82,7 @@ describe('batchLoadYamlTestDefs', () => {
     const rootDir = '/root/tests';
     const mockFiles = ['/root/tests/category/test1/spec.yaml'];
 
-    (fg.stream as unknown as Mock).mockReturnValue(mockFiles);
+    mockGlobStream(mockFiles);
 
     (fs.readFile as Mock).mockImplementation(async (filePath: string) => {
       if (filePath.endsWith('spec.yaml')) return SPEC_YAML;
@@ -130,7 +130,7 @@ describe('batchLoadYamlTestDefs', () => {
     const rootDir = '/root/tests';
     const mockFiles = ['/root/tests/t1/spec.yaml', '/root/tests/t2/spec.yaml'];
 
-    (fg.stream as unknown as Mock).mockReturnValue(mockFiles);
+    mockGlobStream(mockFiles);
     (fs.readFile as Mock).mockResolvedValue('{}');
 
     const tests = await batchLoadYamlTestDefs(rootDir);
@@ -143,7 +143,7 @@ describe('batchLoadYamlTestDefs', () => {
     const rootDir = 'C:\\root\\tests';
     const mockFiles = ['C:\\root\\tests\\category\\test1\\spec.yaml'];
 
-    (fg.stream as unknown as Mock).mockReturnValue(mockFiles);
+    mockGlobStream(mockFiles);
 
     (fs.readFile as Mock).mockImplementation(async (filePath: string) => {
       if (filePath.includes('spec.yaml')) return SPEC_YAML;
@@ -170,9 +170,7 @@ describe('batchLoadYamlTestDefs', () => {
 
   it('should throw an error if a required file is missing', async () => {
     const rootDir = '/root/tests';
-    (fg.stream as unknown as Mock).mockReturnValue([
-      '/root/tests/t1/spec.yaml',
-    ]);
+    mockGlobStream(['/root/tests/t1/spec.yaml']);
     (fs.readFile as Mock).mockRejectedValue(new Error('File not found'));
 
     await expect(batchLoadYamlTestDefs(rootDir)).rejects.toThrow(
@@ -184,7 +182,7 @@ describe('batchLoadYamlTestDefs', () => {
     'should name $file in the error when it is not a mapping',
     async ({file, message}) => {
       const rootDir = '/root/tests';
-      globStreamMock.mockReturnValue([`${rootDir}/t1/spec.yaml`]);
+      mockGlobStream([`${rootDir}/t1/spec.yaml`]);
       (fs.readFile as Mock).mockImplementation(async (filePath: string) => {
         if (filePath.endsWith(file)) return 'just a string';
         if (filePath.endsWith('generated-session.yaml')) return SESSION_YAML;
@@ -376,7 +374,7 @@ describe('batchLoadYamlTestDefs opaque payloads', () => {
     session?: string;
     recordings?: string;
   }): Promise<TestInfo> {
-    globStreamMock.mockReturnValue([`${OPAQUE_ROOT_DIR}/t1/spec.yaml`]);
+    mockGlobStream([`${OPAQUE_ROOT_DIR}/t1/spec.yaml`]);
     (fs.readFile as Mock).mockImplementation(async (filePath: string) => {
       if (filePath.endsWith('spec.yaml')) return files.spec ?? SPEC_YAML;
       if (filePath.endsWith('generated-session.yaml'))

@@ -135,6 +135,7 @@ export type {TruncatingContextCompactorOptions} from './context/truncating_conte
 export {isCompactedEvent, isScratchpadEvent} from './events/compacted_event.js';
 export type {CompactedEvent} from './events/compacted_event.js';
 export {
+  PRESERVE_KEYS_SNAKE_CASE,
   createEvent,
   generateClientFunctionCallId,
   getFunctionCalls,

@@ -13,7 +13,7 @@
  */
 export function toCamelCase(
   obj: unknown,
-  preserveKeys: string[] = [],
+  preserveKeys: readonly string[] = [],
 ): unknown {
   return toNotation(obj, toCamelCaseKey, '', preserveKeys);
 }
@@ -27,7 +27,7 @@ export function toCamelCase(
  */
 export function toSnakeCase(
   obj: unknown,
-  preserveKeys: string[] = [],
+  preserveKeys: readonly string[] = [],
 ): unknown {
   return toNotation(obj, toSnakeCaseKey, '', preserveKeys);
 }
@@ -44,7 +44,7 @@ function toNotation(
   obj: unknown,
   converter: (key: string) => string,
   parentKey: string = '',
-  preserveKeys: string[] = [],
+  preserveKeys: readonly string[] = [],
 ): unknown {
   if (Array.isArray(obj)) {
     return obj.map((item) =>

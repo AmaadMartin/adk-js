@@ -356,7 +356,7 @@ export function createNewEventId(): string {
  * inside of the `content.parts.function_call.args` will skip the conversion as it
  * can contain data in any notation.
  */
-const PRESERVE_KEYS_CAMEL_CASE = [
+const PRESERVE_KEYS_CAMEL_CASE: readonly string[] = [
   'actions.stateDelta',
   'actions.artifactDelta',
   'actions.requestedAuthConfigs',
@@ -382,7 +382,7 @@ const PRESERVE_KEYS_CAMEL_CASE = [
  * inside of the `content.parts.functionCall.args` will skip the conversion as it
  * can contain data in any notation.
  */
-const PRESERVE_KEYS_SNAKE_CASE = [
+export const PRESERVE_KEYS_SNAKE_CASE: readonly string[] = [
   'actions.state_delta',
   'actions.artifact_delta',
   'actions.requested_auth_configs',
