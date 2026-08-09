@@ -7,10 +7,9 @@
 import {
   AuthCredential,
   AuthCredentialTypes,
-  AuthScheme,
+  BaseCredentialExchanger,
   Context,
   createSession,
-  ExchangeResult,
   InvocationContext,
   LlmAgent,
   PluginManager,
@@ -20,14 +19,7 @@ import {
 import {OpenAPIV3} from 'openapi-types';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 
-const exchange = vi.hoisted(() =>
-  vi.fn<
-    (params: {
-      authScheme?: AuthScheme;
-      authCredential: AuthCredential;
-    }) => Promise<ExchangeResult>
-  >(),
-);
+const exchange = vi.hoisted(() => vi.fn<BaseCredentialExchanger['exchange']>());
 
 vi.mock(
   '../../../src/tools/openapi_tool/auth/credential_exchangers/auto_auth_credential_exchanger.js',
