@@ -37,7 +37,6 @@ import {
 } from './types.js';
 
 export * from './agent_registry_mcp_toolset.js';
-export * from './helpers.js';
 export * from './types.js';
 
 const TRANSPORT_MAPPING: Record<string, TransportProtocol> = {
