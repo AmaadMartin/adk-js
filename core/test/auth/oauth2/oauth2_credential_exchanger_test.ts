@@ -138,9 +138,14 @@ describe('OAuth2CredentialExchanger', () => {
     });
 
     it('returns CLIENT_CREDENTIALS for OpenIdConnect with client_credentials in grantTypesSupported', () => {
-      const authScheme = {
+      const authScheme: AuthScheme = {
+        type: 'openIdConnect',
+        openIdConnectUrl:
+          'https://example.com/.well-known/openid-configuration',
+        authorizationEndpoint: 'https://example.com/auth',
+        tokenEndpoint: 'https://example.com/token',
         grantTypesSupported: ['client_credentials'],
-      } as AuthScheme;
+      };
 
       expect(determineGrantType(authScheme)).toBe(
         OAuthGrantType.CLIENT_CREDENTIALS,
@@ -148,9 +153,14 @@ describe('OAuth2CredentialExchanger', () => {
     });
 
     it('returns AUTHORIZATION_CODE for OpenIdConnect without client_credentials in grantTypesSupported', () => {
-      const authScheme = {
+      const authScheme: AuthScheme = {
+        type: 'openIdConnect',
+        openIdConnectUrl:
+          'https://example.com/.well-known/openid-configuration',
+        authorizationEndpoint: 'https://example.com/auth',
+        tokenEndpoint: 'https://example.com/token',
         grantTypesSupported: ['authorization_code'],
-      } as AuthScheme;
+      };
 
       expect(determineGrantType(authScheme)).toBe(
         OAuthGrantType.AUTHORIZATION_CODE,
