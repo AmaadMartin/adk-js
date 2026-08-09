@@ -116,7 +116,7 @@ describe('cleanFixture', () => {
     ).rejects.toThrow();
   });
 
-  it('does nothing when the project was never installed', async () => {
+  it('does nothing when the project has no install artefacts', async () => {
     const dir = await makeTempProject({});
 
     await expect(cleanFixture(dir)).resolves.toBeUndefined();
