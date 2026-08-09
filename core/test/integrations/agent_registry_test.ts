@@ -91,10 +91,7 @@ describe('AgentRegistry Helpers', () => {
   });
 });
 
-/**
- * `cleanName` and `isGoogleApi` are module-internal. A wildcard re-export
- * published them from the package barrel by accident; keep them off it.
- */
+// `cleanName` and `isGoogleApi` are module-internal; keep them off the barrel.
 describe('@google/adk public surface', () => {
   it('does not export the agent registry internal helpers', () => {
     expect(Object.keys(adk)).not.toContain('cleanName');
