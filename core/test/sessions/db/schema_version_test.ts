@@ -17,12 +17,10 @@ import {
   StorageSession,
 } from '../../../src/sessions/db/schema.js';
 import {
-  classifySchemaVersion,
   LATEST_SCHEMA_VERSION,
   readSchemaVersion,
   SCHEMA_VERSION_1_JSON,
   SCHEMA_VERSION_KEY,
-  SchemaVersionState,
   stampSchemaVersion,
   SUPPORTED_SCHEMA_VERSIONS,
   validateDatabaseSchemaVersion,
@@ -40,63 +38,6 @@ describe('schema_version', () => {
       expect(SCHEMA_VERSION_KEY).toBe('schema_version');
       expect(SCHEMA_VERSION_1_JSON).toBe('1');
     });
-  });
-
-  describe('classifySchemaVersion', () => {
-    const oneVersion: ReadonlySet<string> = new Set(['1']);
-    const twoVersions: ReadonlySet<string> = new Set(['1', '2']);
-
-    it.each([
-      {
-        version: undefined,
-        supported: oneVersion,
-        latest: '1',
-        expected: SchemaVersionState.UNSTAMPED,
-      },
-      {
-        version: '1',
-        supported: oneVersion,
-        latest: '1',
-        expected: SchemaVersionState.CURRENT,
-      },
-      {
-        version: '1',
-        supported: twoVersions,
-        latest: '2',
-        expected: SchemaVersionState.SUPPORTED,
-      },
-      {
-        version: '2',
-        supported: twoVersions,
-        latest: '2',
-        expected: SchemaVersionState.CURRENT,
-      },
-      {
-        version: '999',
-        supported: oneVersion,
-        latest: '1',
-        expected: SchemaVersionState.INCOMPATIBLE,
-      },
-      {
-        version: '',
-        supported: oneVersion,
-        latest: '1',
-        expected: SchemaVersionState.INCOMPATIBLE,
-      },
-      {
-        version: '0',
-        supported: twoVersions,
-        latest: '2',
-        expected: SchemaVersionState.INCOMPATIBLE,
-      },
-    ])(
-      'classifies $version against latest $latest as $expected',
-      ({version, supported, latest, expected}) => {
-        expect(classifySchemaVersion(version, supported, latest)).toBe(
-          expected,
-        );
-      },
-    );
   });
 
   describe('against an open database', () => {

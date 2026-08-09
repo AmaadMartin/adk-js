@@ -35,10 +35,12 @@ Assume the current version is `1` and you are adding `2`.
 5. **Branch the business logic** in `DatabaseSessionService` on the stored
    version if a `'1'` database needs different reads or writes. Use
    `readSchemaVersion()`; do not add a second entity set.
-6. **Warn on the older version.** `validateDatabaseSchemaVersion()` returns
-   silently for the `SUPPORTED` state today, because there is no
-   supported-but-older version yet. Add the warning that points operators at
-   `upgradeSessionDatabaseSchema()` when the first one exists.
+6. **Warn on the older version.** `validateDatabaseSchemaVersion()` accepts an
+   older supported version silently, because there is no supported-but-older
+   version yet. Add
+   `if (version !== LATEST_SCHEMA_VERSION) logger.warn(...)` after the
+   `assertCompatibleVersion()` call, pointing operators at
+   `upgradeSessionDatabaseSchema()`.
 7. **Test the pair.** Cover a `'1'` database opened by the new build, and the
    upgrade from `'1'` to `'2'`.
 8. **Deprecate.** After at least two releases, remove `'1'` from

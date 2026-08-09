@@ -32,57 +32,16 @@ export const SUPPORTED_SCHEMA_VERSIONS: ReadonlySet<string> = new Set([
   SCHEMA_VERSION_1_JSON,
 ]);
 
-/** How a stored schema version relates to what this build supports. */
-export enum SchemaVersionState {
-  /** No version row; a new database, or one created before versions existed. */
-  UNSTAMPED = 'unstamped',
-  /** Already at `LATEST_SCHEMA_VERSION`. */
-  CURRENT = 'current',
-  /** Readable by this build but not the latest; upgradable. */
-  SUPPORTED = 'supported',
-  /** Outside the accepted set; unreadable. */
-  INCOMPATIBLE = 'incompatible',
-}
-
-/**
- * Classifies a stored schema version against an accepted set.
- *
- * @param version The stored version, or undefined when the row is absent.
- * @param supported The versions the caller can read and write.
- * @param latest The version the caller stamps on a new database.
- * @returns The state of the stored version.
- */
-export function classifySchemaVersion(
-  version: string | undefined,
-  supported: ReadonlySet<string>,
-  latest: string,
-): SchemaVersionState {
-  if (version === undefined) {
-    return SchemaVersionState.UNSTAMPED;
-  }
-
-  if (version === latest) {
-    return SchemaVersionState.CURRENT;
-  }
-
-  return supported.has(version)
-    ? SchemaVersionState.SUPPORTED
-    : SchemaVersionState.INCOMPATIBLE;
-}
-
 /**
  * Throws when the database holds a version this build cannot read.
  *
- * @param version The stored version. Always defined when `state` is
- *   `INCOMPATIBLE`, since only a stored string classifies that way.
- * @param state The classification of `version`.
+ * An absent version row is a new database, which is compatible by definition.
+ *
+ * @param version The stored version, or undefined when the row is absent.
  * @throws Error naming the accepted versions and both remedies.
  */
-function throwIfIncompatible(
-  version: string | undefined,
-  state: SchemaVersionState,
-): void {
-  if (state !== SchemaVersionState.INCOMPATIBLE) {
+function assertCompatibleVersion(version: string | undefined): void {
+  if (version === undefined || SUPPORTED_SCHEMA_VERSIONS.has(version)) {
     return;
   }
 
@@ -150,14 +109,9 @@ export async function validateDatabaseSchemaVersion(
   orm: MikroORM,
 ): Promise<void> {
   const version = await readSchemaVersion(orm);
-  const state = classifySchemaVersion(
-    version,
-    SUPPORTED_SCHEMA_VERSIONS,
-    LATEST_SCHEMA_VERSION,
-  );
-  throwIfIncompatible(version, state);
+  assertCompatibleVersion(version);
 
-  if (state === SchemaVersionState.UNSTAMPED) {
+  if (version === undefined) {
     await stampSchemaVersion(orm, LATEST_SCHEMA_VERSION);
   }
 }
@@ -191,14 +145,9 @@ export async function upgradeSessionDatabaseSchema(
     await ensureDatabaseCreated(orm);
 
     const version = await readSchemaVersion(orm);
-    const state = classifySchemaVersion(
-      version,
-      SUPPORTED_SCHEMA_VERSIONS,
-      LATEST_SCHEMA_VERSION,
-    );
-    throwIfIncompatible(version, state);
+    assertCompatibleVersion(version);
 
-    if (state === SchemaVersionState.CURRENT) {
+    if (version === LATEST_SCHEMA_VERSION) {
       logger.debug(
         `Session database is already at schema version ${LATEST_SCHEMA_VERSION}.`,
       );
