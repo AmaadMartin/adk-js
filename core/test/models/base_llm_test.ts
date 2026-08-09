@@ -77,6 +77,20 @@ describe('BaseLlm', () => {
       expect(headers['user-agent']).toContain(customLabel);
     });
   });
+
+  it('should include context client label in tracking headers read inside an async generator body', async () => {
+    const llm = new TestLlm();
+    const customLabel = 'streaming-label';
+    async function* readHeaders(): AsyncGenerator<Record<string, string>> {
+      yield llm.getTrackingHeaders();
+    }
+
+    const generator = runWithClientLabel(customLabel, () => readHeaders());
+    const {value: headers} = await generator.next();
+
+    expect(headers?.['x-goog-api-client']).toContain(customLabel);
+    expect(headers?.['user-agent']).toContain(customLabel);
+  });
 });
 
 describe('isBaseLlm', () => {
