@@ -949,11 +949,11 @@ describe('LlmAgent outputSchema with tools', () => {
     expect(request.config?.systemInstruction).toContain('set_model_response');
   });
 
-  it('uses the set_model_response workaround on Vertex AI with a pre-2.0 model', async () => {
+  it('uses the set_model_response workaround on Vertex AI with a non-Gemini model', async () => {
     vi.stubEnv(VERTEX_ENV_VAR, 'true');
 
     const request = await captureRequest({
-      model: 'gemini-1.5-pro',
+      model: 'claude-3-7-sonnet',
       withTools: true,
     });
 

@@ -259,11 +259,11 @@ describe('InstructionsLlmRequestProcessor', () => {
       );
     });
 
-    it('should append set_model_response instruction on Vertex AI with a pre-2.0 model', async () => {
+    it('should append set_model_response instruction on Vertex AI with a non-Gemini model', async () => {
       vi.stubEnv(VERTEX_ENV_VAR, 'true');
 
       const llmRequest = await runWithOutputSchema({
-        model: 'gemini-1.5-pro',
+        model: 'claude-3-7-sonnet',
         withTools: true,
       });
 

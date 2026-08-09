@@ -52,8 +52,8 @@ const TEST_CASES: TestCase[] = [
   {
     model: 'gemini-1.5-pro',
     vertexEnv: 'true',
-    expected: false,
-    why: 'Gemini 1.x is below the 2.0 floor',
+    expected: true,
+    why: 'there is no version floor: every Gemini id qualifies on Vertex AI',
   },
   {
     model: 'gemini-1.5-pro',
@@ -77,13 +77,13 @@ const TEST_CASES: TestCase[] = [
     model: 'projects/p/locations/l/publishers/google/models/gemini-2.5-flash',
     vertexEnv: 'true',
     expected: true,
-    why: 'the version is read out of the path-based model name',
+    why: 'the model id is read out of the path-based model name',
   },
   {
     model: 'gemini-flash-early-exp',
     vertexEnv: 'true',
-    expected: false,
-    why: 'Early Access Program names encode no numeric version, unlike the Python implementation',
+    expected: true,
+    why: 'an Early Access Program name is a Gemini id, even without a version',
   },
 ];
 
