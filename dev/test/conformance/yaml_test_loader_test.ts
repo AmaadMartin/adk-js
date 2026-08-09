@@ -53,6 +53,12 @@ recordings:
             - text: hi
 `;
 
+/**
+ * `vi.mock` replaces `fg.stream` with a mock, but its declared return type is a
+ * stream while the loader only needs an async iterable.
+ */
+const globStreamMock = fg.stream as unknown as Mock;
+
 const NON_MAPPING_CASES = [
   {file: 'spec.yaml', message: 'Spec file must be a YAML mapping'},
   {
@@ -178,9 +184,7 @@ describe('batchLoadYamlTestDefs', () => {
     'should name $file in the error when it is not a mapping',
     async ({file, message}) => {
       const rootDir = '/root/tests';
-      (fg.stream as unknown as Mock).mockReturnValue([
-        '/root/tests/t1/spec.yaml',
-      ]);
+      globStreamMock.mockReturnValue([`${rootDir}/t1/spec.yaml`]);
       (fs.readFile as Mock).mockImplementation(async (filePath: string) => {
         if (filePath.endsWith(file)) return 'just a string';
         if (filePath.endsWith('generated-session.yaml')) return SESSION_YAML;
@@ -195,13 +199,6 @@ describe('batchLoadYamlTestDefs', () => {
 });
 
 const OPAQUE_ROOT_DIR = '/root/tests';
-
-/**
- * `vi.mock` replaces `fg.stream` with a mock, but its declared return type is a
- * stream while the loader only needs an async iterable. This is the same view
- * the cases above take of the same mock.
- */
-const globStreamMock = fg.stream as unknown as Mock;
 
 const OPAQUE_STATE_SESSION_YAML = `
 app_name: test-app
