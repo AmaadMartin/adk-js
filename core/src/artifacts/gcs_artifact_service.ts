@@ -32,8 +32,6 @@ export class GcsArtifactService implements BaseArtifactService {
   }
 
   async saveArtifact(request: SaveArtifactRequest): Promise<number> {
-    assertUnpaddedFilename(request.filename);
-
     if (
       !request.artifact.inlineData &&
       !request.artifact.text &&
@@ -41,6 +39,8 @@ export class GcsArtifactService implements BaseArtifactService {
     ) {
       throw new Error('Artifact must have either inlineData or text content.');
     }
+
+    assertUnpaddedFilename(request.filename);
 
     const versions = await this.listVersions(request);
     const version = versions.length > 0 ? Math.max(...versions) + 1 : 0;
