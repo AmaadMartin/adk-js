@@ -43,6 +43,17 @@ describe('getArtifactServiceFromUri', () => {
     );
   });
 
+  it('returns FileArtifactService for file uri', () => {
+    const service = getArtifactServiceFromUri('file:///tmp/artifacts');
+    expect(service).toBeInstanceOf(FileArtifactService);
+  });
+
+  it('throws error for unsupported uri', () => {
+    expect(() => getArtifactServiceFromUri('unsupported://uri')).toThrow(
+      'Unsupported artifact service URI: unsupported://uri',
+    );
+  });
+
   describe('gs:// URIs', () => {
     let warnSpy: MockInstance<typeof logger.warn>;
 
@@ -80,16 +91,37 @@ describe('getArtifactServiceFromUri', () => {
       expect(bucketMock).toHaveBeenCalledWith('my-bucket');
       expect(warnSpy).not.toHaveBeenCalled();
     });
-  });
 
-  it('returns FileArtifactService for file uri', () => {
-    const service = getArtifactServiceFromUri('file:///tmp/artifacts');
-    expect(service).toBeInstanceOf(FileArtifactService);
-  });
+    it('throws for a gs uri that names no bucket', () => {
+      expect(() => getArtifactServiceFromUri('gs://')).toThrow(
+        'Invalid artifact service URI: gs://. A gs:// URI must name a bucket',
+      );
+      expect(bucketMock).not.toHaveBeenCalled();
+    });
 
-  it('throws error for unsupported uri', () => {
-    expect(() => getArtifactServiceFromUri('unsupported://uri')).toThrow(
-      'Unsupported artifact service URI: unsupported://uri',
-    );
+    it('throws the same error for a gs uri that cannot be parsed', () => {
+      expect(() => getArtifactServiceFromUri('gs://a b/c')).toThrow(
+        'Invalid artifact service URI: gs://<unparseable URI, redacted>. A gs:// URI must name a bucket',
+      );
+      expect(bucketMock).not.toHaveBeenCalled();
+    });
+
+    it('redacts the password of a gs uri in the ignored-path warning', () => {
+      getArtifactServiceFromUri('gs://admin:hunter2@my-bucket/prefix');
+      expect(bucketMock).toHaveBeenCalledWith('my-bucket');
+      const message = warnSpy.mock.calls[0][0];
+      expect(message).toContain('gs://admin:***@my-bucket/prefix');
+      expect(message).not.toContain('hunter2');
+    });
+
+    it('redacts the password of a gs uri in the invalid-uri error', () => {
+      expect(() => getArtifactServiceFromUri('gs://admin:hunter2@')).toThrow(
+        /gs:\/\/<unparseable URI, redacted>/,
+      );
+      expect(() =>
+        getArtifactServiceFromUri('gs://admin:hunter2@'),
+      ).not.toThrow(/hunter2/);
+      expect(bucketMock).not.toHaveBeenCalled();
+    });
   });
 });
