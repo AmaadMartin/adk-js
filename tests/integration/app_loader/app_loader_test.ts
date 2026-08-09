@@ -7,7 +7,7 @@
 import {App, isApp, isBaseAgent} from '@google/adk';
 import {spawn} from 'node:child_process';
 import * as path from 'node:path';
-import {afterAll, beforeAll, describe, expect, it} from 'vitest';
+import {afterAll, describe, expect, it} from 'vitest';
 import {AgentLoader} from '../../../dev/src/utils/agent_loader.js';
 import {sendInput} from '../test_case_utils.js';
 
@@ -53,11 +53,7 @@ describe('AgentLoader discovery and loading integration', () => {
     dirname,
     'tests/integration/app_loader/discovery',
   );
-  let loader: AgentLoader;
-
-  beforeAll(() => {
-    loader = new AgentLoader(projectPath);
-  });
+  const loader = new AgentLoader(projectPath);
 
   it(
     'should discover apps vs agents across directories and standalone files',

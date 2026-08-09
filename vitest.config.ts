@@ -8,11 +8,16 @@ import path from 'path';
 import {defineConfig} from 'vitest/config';
 
 /**
- * Hook budget (ms) for the `integration` project: `beforeAll` hooks compile a
- * fixture (`npm run build`) and tear down its generated directories, which
- * exceeds Vitest's 10s default on a slow or loaded machine. Fixture
- * dependencies are installed by `tests/integration/global_setup.ts`, so no
- * hook pays for an `npm install`.
+ * Hook budget (ms) for every `beforeAll` in the `integration` project. The
+ * hooks spawn an ADK server child process or compile a fixture, which exceeds
+ * Vitest's 10s default on a slow or loaded machine. `tests/integration/
+ * global_setup.ts` installs the fixture dependencies before the pool starts,
+ * so no hook pays for an `npm install`.
+ *
+ * This is a hang guard, not an expected runtime: the slowest hook is a fixture
+ * `npm run build`, measured at 3.6s on ubuntu. Nothing measures the server
+ * starts on the slowest CI runner, so the budget stays where it was until
+ * somebody does.
  */
 const INTEGRATION_HOOK_TIMEOUT_MS = 120000;
 
