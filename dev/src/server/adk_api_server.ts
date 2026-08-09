@@ -180,9 +180,8 @@ export class AdkApiServer {
 
     for (const appName of appNames) {
       const agentFile = await this.agentLoader.getAgentFile(appName);
-      const loaded = await agentFile.load();
-      const agent = isApp(loaded) ? loaded.rootAgent : loaded;
-      const runner = await this.getRunner(loaded, appName);
+      const runner = await this.getRunner(await agentFile.load(), appName);
+      const agent = await agentFile.loadAgent();
 
       await toA2a(agent, {
         protocol: 'http',

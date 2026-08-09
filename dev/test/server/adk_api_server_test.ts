@@ -1154,8 +1154,10 @@ describe('AdkWebServer', () => {
       });
 
       expect(card.status).toBe(200);
+      expect(card.data?.name).toBe('testAgent');
       expect(run.status).toBe(200);
       expect(plugin.runs).toBe(1);
+      expect(fake.loadAgent).toHaveBeenCalled();
     });
   });
 

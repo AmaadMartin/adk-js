@@ -433,8 +433,11 @@ describe('AgentLoader', () => {
       });
 
       const agentFile = new AgentFile(appPath);
+      const loaded = await agentFile.load();
       const agent = await agentFile.loadAgent();
 
+      expect(isApp(loaded)).toBe(true);
+      expect((loaded as App).name).toBe('test_app_default');
       expect(isApp(agent)).toBe(false);
       expect(agent.name).toBe('agent_for_app_default');
       await agentFile.dispose();
