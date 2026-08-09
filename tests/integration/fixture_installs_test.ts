@@ -29,15 +29,19 @@ const NESTED_LOCAL_PACKAGE_DIRS = [
 
 const tempDirs: string[] = [];
 
-async function makeTempProject(manifest: object): Promise<string> {
+async function makeTempDir(): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-fixture-'));
   tempDirs.push(dir);
-  await fs.writeFile(
-    path.join(dir, 'package.json'),
-    JSON.stringify({name: 'temp-fixture', version: '1.0.0', ...manifest}),
-  );
   return dir;
 }
+
+async function makeTempProject(manifest: string): Promise<string> {
+  const dir = await makeTempDir();
+  await fs.writeFile(path.join(dir, 'package.json'), manifest);
+  return dir;
+}
+
+const EMPTY_PROJECT_MANIFEST = '{"name": "temp-fixture", "version": "1.0.0"}';
 
 /** Directories under `root` that hold a `package.json`, ignoring installs. */
 async function findManifestDirs(root: string): Promise<string[]> {
@@ -83,7 +87,7 @@ describe('FIXTURE_PROJECT_DIRS', () => {
 
 describe('installFixture', () => {
   it('writes a lockfile for a dependency-free project', async () => {
-    const dir = await makeTempProject({});
+    const dir = await makeTempProject(EMPTY_PROJECT_MANIFEST);
 
     installFixture(dir);
 
@@ -92,10 +96,8 @@ describe('installFixture', () => {
     ).resolves.toBeUndefined();
   });
 
-  it('throws when npm cannot resolve a dependency', async () => {
-    const dir = await makeTempProject({
-      dependencies: {missing: 'file:./does-not-exist'},
-    });
+  it('throws when npm exits non-zero', async () => {
+    const dir = await makeTempProject('{ not a manifest');
 
     expect(() => installFixture(dir)).toThrow();
   });
@@ -103,7 +105,7 @@ describe('installFixture', () => {
 
 describe('cleanFixture', () => {
   it('removes the installed node_modules and the lockfile', async () => {
-    const dir = await makeTempProject({});
+    const dir = await makeTempProject(EMPTY_PROJECT_MANIFEST);
     await fs.mkdir(path.join(dir, 'node_modules', 'pkg'), {recursive: true});
     await fs.writeFile(path.join(dir, 'node_modules', 'pkg', 'index.js'), '');
     await fs.writeFile(path.join(dir, 'package-lock.json'), '{}');
@@ -117,13 +119,13 @@ describe('cleanFixture', () => {
   });
 
   it('does nothing when the project has no install artefacts', async () => {
-    const dir = await makeTempProject({});
+    const dir = await makeTempProject(EMPTY_PROJECT_MANIFEST);
 
     await expect(cleanFixture(dir)).resolves.toBeUndefined();
   });
 
   it('swallows a removal error', async () => {
-    const dir = await makeTempProject({});
+    const dir = await makeTempProject(EMPTY_PROJECT_MANIFEST);
     const notADirectory = path.join(dir, 'package.json');
 
     await expect(cleanFixture(notADirectory)).resolves.toBeUndefined();
