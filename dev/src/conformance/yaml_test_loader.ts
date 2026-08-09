@@ -13,6 +13,49 @@ import * as path from 'node:path';
 import {Recordings, TestInfo, TestSpec} from '../integration/test_types.js';
 
 /**
+ * Paths in `spec.yaml` that hold user data ADK passes through verbatim. Their
+ * keys are chosen by the test author, so camelCasing them corrupts the data.
+ * A `stopPath` still renames the matched key and skips only its value subtree.
+ */
+const SPEC_OPAQUE_PATHS = [
+  'initial_state',
+  'user_messages.state_delta',
+  'user_messages.content.parts.function_call.args',
+  'user_messages.content.parts.function_response.response',
+];
+
+/**
+ * Paths in `generated-session.yaml` that hold user data ADK passes through
+ * verbatim. This is the preserve list core applies to an event, scoped under
+ * `events.`, plus the session's own `state`.
+ */
+const SESSION_OPAQUE_PATHS = [
+  'state',
+  'events.actions.state_delta',
+  'events.actions.artifact_delta',
+  'events.actions.custom_metadata',
+  'events.actions.agent_state',
+  'events.custom_metadata',
+  'events.content.parts.function_call.args',
+  'events.content.parts.function_response.response',
+];
+
+/**
+ * Paths in `generated-recordings.yaml` that hold user data ADK passes through
+ * verbatim. The replay plugin returns these payloads to the running agent, so
+ * a rewritten key changes what the agent runs on, not only what it compares to.
+ */
+const RECORDINGS_OPAQUE_PATHS = [
+  'recordings.llm_recording.llm_request.contents.parts.function_call.args',
+  'recordings.llm_recording.llm_request.contents.parts.function_response.response',
+  'recordings.llm_recording.llm_response.content.parts.function_call.args',
+  'recordings.llm_recording.llm_response.content.parts.function_response.response',
+  'recordings.llm_recording.llm_response.custom_metadata',
+  'recordings.tool_recording.tool_call.args',
+  'recordings.tool_recording.tool_response.response',
+];
+
+/**
  * batchLoadYamlTestDefs will recursively search the directory given
  * and load all of the YAML files into in-memory config.
  */
@@ -50,6 +93,7 @@ export async function batchLoadYamlTestDefs(
     }
     const testSpec = camelcaseKeys(parsedSpec, {
       deep: true,
+      stopPaths: SPEC_OPAQUE_PATHS,
     }) as TestSpec;
 
     // Session file
@@ -61,6 +105,7 @@ export async function batchLoadYamlTestDefs(
     }
     const session = camelcaseKeys(parsedSession, {
       deep: true,
+      stopPaths: SESSION_OPAQUE_PATHS,
     }) as Session;
 
     // Recordings file
@@ -75,6 +120,7 @@ export async function batchLoadYamlTestDefs(
     }
     const recordings = camelcaseKeys(parsedRecordings, {
       deep: true,
+      stopPaths: RECORDINGS_OPAQUE_PATHS,
     }) as Recordings;
 
     // Make test names unique by including relative file path from given root dir
