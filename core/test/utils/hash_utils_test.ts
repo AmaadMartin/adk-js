@@ -5,68 +5,9 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {
-  canonicalJson,
-  sha256Hex,
-  stableDigest,
-} from '../../src/utils/hash_utils.js';
+import {canonicalJson, stableDigest} from '../../src/utils/hash_utils.js';
 
 describe('hash_utils', () => {
-  describe('sha256Hex', () => {
-    // Published FIPS 180-4 vectors. The 56-byte and 112-byte inputs are the
-    // lengths that no longer leave room for the length suffix, so they force
-    // the second padding block.
-    it.each([
-      {
-        bytes: 0,
-        input: '',
-        digest:
-          'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
-      },
-      {
-        bytes: 3,
-        input: 'abc',
-        digest:
-          'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
-      },
-      {
-        bytes: 56,
-        input: 'abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq',
-        digest:
-          '248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1',
-      },
-      {
-        bytes: 112,
-        input:
-          'abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmno' +
-          'ijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu',
-        digest:
-          'cf5b16a778af8380036ce59e7b0492370b249b11e8f07a51afac45037afee9d1',
-      },
-    ])(
-      'digests the $bytes-byte FIPS 180-4 vector',
-      ({bytes, input, digest}) => {
-        expect(input).toHaveLength(bytes);
-        expect(sha256Hex(input)).toBe(digest);
-      },
-    );
-
-    it('digests one million repetitions of "a"', () => {
-      expect(sha256Hex('a'.repeat(1000000))).toBe(
-        'cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0',
-      );
-    });
-
-    it('digests the UTF-8 bytes rather than the characters', () => {
-      // 'héllo' is six UTF-8 bytes and five characters, so an implementation
-      // that hashed char codes would read a different message.
-      expect(sha256Hex('héllo')).toBe(
-        '3c48591d8d098a4538f5e013dfcf406e948eac4d3277b10bf614e295d6068179',
-      );
-      expect(sha256Hex('héllo')).not.toBe(sha256Hex('hello'));
-    });
-  });
-
   describe('canonicalJson', () => {
     it('ignores property insertion order', () => {
       expect(canonicalJson({b: 1, a: 2})).toBe('{"a":2,"b":1}');
@@ -107,19 +48,28 @@ describe('hash_utils', () => {
   });
 
   describe('stableDigest', () => {
-    it('returns 16 lowercase hex characters', () => {
-      expect(stableDigest({a: 1})).toMatch(/^[0-9a-f]{16}$/);
+    // SHA-256('{}') is
+    // 44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a.
+    it('returns the first eight bytes of the SHA-256 of the canonical JSON', async () => {
+      expect(await stableDigest({})).toBe('44136fa355b3678a');
     });
 
-    it('is equal for two key-order-permuted twins', () => {
-      expect(stableDigest({a: 1, b: {c: 2, d: 3}})).toBe(
-        stableDigest({b: {d: 3, c: 2}, a: 1}),
+    // SHA-256('{"k":"héllo"}') as UTF-8 is
+    // d3352a192f21ed49ab7d14dbc8b24d71f95b178a227b9e2bbb6e10e584bbaa8f. A
+    // char-oriented encoder would hash a different message.
+    it('digests the UTF-8 bytes of a non-ASCII value', async () => {
+      expect(await stableDigest({k: 'héllo'})).toBe('d3352a192f21ed49');
+    });
+
+    it('is equal for two key-order-permuted twins', async () => {
+      expect(await stableDigest({a: 1, b: {c: 2, d: 3}})).toBe(
+        await stableDigest({b: {d: 3, c: 2}, a: 1}),
       );
     });
 
-    it('differs when one nested value differs', () => {
-      expect(stableDigest({a: 1, b: {c: 2}})).not.toBe(
-        stableDigest({a: 1, b: {c: 3}}),
+    it('differs when one nested value differs', async () => {
+      expect(await stableDigest({a: 1, b: {c: 2}})).not.toBe(
+        await stableDigest({a: 1, b: {c: 3}}),
       );
     });
   });

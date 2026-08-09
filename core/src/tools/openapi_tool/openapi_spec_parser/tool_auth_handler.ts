@@ -18,23 +18,26 @@ export interface AuthPreparationResult {
 }
 
 /**
- * OAuth2 fields that change on every consent round trip or per deployment, and
- * so must not contribute to a credential's cache identity. Mirrors the fields
- * cleared by adk-python's `ToolContextCredentialStore.get_credential_key`.
+ * OAuth2 fields that a consent round trip produces, or that change per
+ * deployment. They say nothing about which credential this is, so they must
+ * not contribute to its cache identity. The tokens are deliberately absent
+ * from this list: an `accessToken` or `refreshToken` the tool was configured
+ * with is the credential, so two tools holding different tokens must not
+ * share a slot.
  */
-const VOLATILE_OAUTH2_FIELDS: readonly (keyof OAuth2Auth)[] = [
+const ROUND_TRIP_OAUTH2_FIELDS: readonly (keyof OAuth2Auth)[] = [
   'authUri',
   'state',
   'authResponseUri',
   'authCode',
-  'accessToken',
-  'refreshToken',
+  'codeVerifier',
+  'nonce',
   'expiresAt',
   'expiresIn',
   'redirectUri',
 ];
 
-function withoutVolatileOAuth2Fields(
+function withoutRoundTripOAuth2Fields(
   credential: AuthCredential,
 ): AuthCredential {
   if (!credential.oauth2) {
@@ -42,7 +45,7 @@ function withoutVolatileOAuth2Fields(
   }
 
   const oauth2 = {...credential.oauth2};
-  for (const field of VOLATILE_OAUTH2_FIELDS) {
+  for (const field of ROUND_TRIP_OAUTH2_FIELDS) {
     delete oauth2[field];
   }
   return {...credential, oauth2};
@@ -51,57 +54,31 @@ function withoutVolatileOAuth2Fields(
 class ToolContextCredentialStore {
   constructor(private readonly context: Context) {}
 
-  getCredentialKey(
+  async getCredentialKey(
     authScheme: OpenAPIV3.SecuritySchemeObject,
     authCredential?: AuthCredential,
-  ): string {
+  ): Promise<string> {
     // The digest identifies the scheme and the credential, so two tools that
     // declare the same scheme type against different APIs get their own slot
     // instead of serving each other the first exchanged token.
-    const schemeName = `${authScheme.type}_${stableDigest(authScheme)}`;
+    const schemeName = `${authScheme.type}_${await stableDigest(authScheme)}`;
     const credentialName = authCredential
-      ? `${authCredential.authType}_${stableDigest(
-          withoutVolatileOAuth2Fields(authCredential),
+      ? `${authCredential.authType}_${await stableDigest(
+          withoutRoundTripOAuth2Fields(authCredential),
         )}`
       : '';
     return `${schemeName}_${credentialName}_existing_exchanged_credential`;
   }
 
-  /**
-   * The key an earlier release wrote, keyed on the scheme type alone. Nothing
-   * writes it any more; it is read so that a credential exchanged before the
-   * upgrade stays reachable instead of forcing a fresh consent round trip.
-   */
-  private getLegacyCredentialKey(
-    authScheme: OpenAPIV3.SecuritySchemeObject,
-  ): string {
-    return `${authScheme.type}_existing_exchanged_credential`;
-  }
-
-  getCredential(
+  async getCredential(
     authScheme: OpenAPIV3.SecuritySchemeObject,
     authCredential?: AuthCredential,
-  ): AuthCredential | undefined {
-    const key = this.getCredentialKey(authScheme, authCredential);
+  ): Promise<AuthCredential | undefined> {
+    const key = await this.getCredentialKey(authScheme, authCredential);
     // Read through the State API so we see values persisted from previous
     // tool calls. `context.state` is a `State` instance, not a plain object;
     // bracket access would bypass its value/delta store and always miss.
-    const credential = this.context.state.get<AuthCredential>(key);
-    if (credential) {
-      return credential;
-    }
-
-    const legacyCredential = this.context.state.get<AuthCredential>(
-      this.getLegacyCredentialKey(authScheme),
-    );
-    if (!legacyCredential) {
-      return undefined;
-    }
-
-    // Copy it forward so later lookups hit the identity key. State has no
-    // delete, so the legacy entry stays behind.
-    this.storeCredential(key, legacyCredential);
-    return legacyCredential;
+    return this.context.state.get<AuthCredential>(key);
   }
 
   storeCredential(key: string, credential: AuthCredential) {
@@ -144,7 +121,7 @@ export class ToolAuthHandler {
     }
 
     const store = new ToolContextCredentialStore(this.context);
-    const existingCredential = store.getCredential(
+    const existingCredential = await store.getCredential(
       this.authScheme,
       this.authCredential,
     );
@@ -186,7 +163,10 @@ export class ToolAuthHandler {
     // every invocation, so persisting it to session state would only copy a
     // secret into the session store for nothing.
     if (authResponseCredential || result.wasExchanged) {
-      const key = store.getCredentialKey(this.authScheme, this.authCredential);
+      const key = await store.getCredentialKey(
+        this.authScheme,
+        this.authCredential,
+      );
       store.storeCredential(key, result.credential);
     }
 

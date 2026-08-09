@@ -102,22 +102,28 @@ describe('ToolAuthHandler', () => {
     expect(mockContext.requestCredential).toHaveBeenCalled();
   });
 
-  it('should return cached credential if available', async () => {
-    const mockContext = {
-      state: new State({
-        'apiKey_existing_exchanged_credential': {
-          authType: AuthCredentialTypes.HTTP,
-          http: {scheme: 'bearer', credentials: {token: 'cached-token'}},
-        },
-      }),
-    } as unknown as Context;
+  it('ignores a credential stored under the pre-upgrade key', async () => {
+    // The pre-upgrade key names only the scheme type, so it cannot say which
+    // tool cached the credential. Serving it would hand one tool's token to
+    // another, which is the defect this key format exists to close.
+    const sessionState: Record<string, unknown> = {
+      'apiKey_existing_exchanged_credential': {
+        authType: AuthCredentialTypes.HTTP,
+        http: {scheme: 'bearer', credentials: {token: 'pre-upgrade-token'}},
+      },
+    };
 
-    const handler = new ToolAuthHandler(mockContext, {type: 'apiKey'});
-
-    const result = await handler.prepareAuthCredentials();
+    const result = await new ToolAuthHandler(
+      createContext(sessionState),
+      {type: 'apiKey', name: 'X-API-Key', in: 'header'},
+      {authType: AuthCredentialTypes.API_KEY, apiKey: 'static-key'},
+    ).prepareAuthCredentials();
 
     expect(result.state).toBe('done');
-    expect(result.authCredential?.http?.credentials.token).toBe('cached-token');
+    expect(result.authCredential?.http?.credentials.token).toBe(
+      'exchanged-token',
+    );
+    expect(cachedCredentialKeys(sessionState)).toHaveLength(1);
   });
 
   it('should store exchanged credential in state and record it in the delta', async () => {
@@ -361,7 +367,8 @@ describe('ToolAuthHandler', () => {
     }).prepareAuthCredentials();
 
     // The same tool behind a different callback URL, e.g. after the agent
-    // moves from a laptop to a hosted deployment.
+    // moves from a laptop to a hosted deployment, and after a fresh consent
+    // round trip supplied a new PKCE verifier.
     const result = await new ToolAuthHandler(
       createContext(sessionState),
       scheme,
@@ -371,6 +378,8 @@ describe('ToolAuthHandler', () => {
           clientId: 'client',
           clientSecret: 'secret',
           redirectUri: 'https://deployed.example.com/oauth2callback',
+          codeVerifier: 'verifier-from-the-second-round-trip',
+          state: 'state-from-the-second-round-trip',
         },
       },
     ).prepareAuthCredentials();
@@ -382,45 +391,26 @@ describe('ToolAuthHandler', () => {
     expect(cachedCredentialKeys(sessionState)).toHaveLength(1);
   });
 
-  it('migrates a credential stored under the pre-upgrade key', async () => {
-    const sessionState: Record<string, unknown> = {
-      'apiKey_existing_exchanged_credential': {
-        authType: AuthCredentialTypes.HTTP,
-        http: {scheme: 'bearer', credentials: {token: 'legacy-token'}},
+  it('gives two tools configured with different access tokens their own cache slot', async () => {
+    const scheme: OpenAPIV3.SecuritySchemeObject = {
+      type: 'oauth2',
+      flows: {
+        clientCredentials: {tokenUrl: 'https://example.com/token', scopes: {}},
       },
     };
-    const scheme: OpenAPIV3.SecuritySchemeObject = {
-      type: 'apiKey',
-      name: 'X-API-Key',
-      in: 'header',
-    };
+    const sessionState: Record<string, unknown> = {};
 
-    const context = createContext(sessionState);
-    const result = await new ToolAuthHandler(
-      context,
-      scheme,
-    ).prepareAuthCredentials();
+    // A token the tool was configured with is the credential, not round-trip
+    // state, so it has to reach the key.
+    await new ToolAuthHandler(createContext(sessionState), scheme, {
+      authType: AuthCredentialTypes.OAUTH2,
+      oauth2: {clientId: 'client', accessToken: 'token-a'},
+    }).prepareAuthCredentials();
+    await new ToolAuthHandler(createContext(sessionState), scheme, {
+      authType: AuthCredentialTypes.OAUTH2,
+      oauth2: {clientId: 'client', accessToken: 'token-b'},
+    }).prepareAuthCredentials();
 
-    expect(result.authCredential?.http?.credentials.token).toBe('legacy-token');
-    // The migration is a write, so a cache hit through the pre-upgrade key
-    // now contributes to the state delta the session persists.
-    const migratedKeys = Object.keys(context.eventActions.stateDelta).filter(
-      (key) => IDENTITY_KEY_PATTERN.test(key),
-    );
-    expect(migratedKeys).toHaveLength(1);
-
-    // Drop the pre-upgrade entry so the next lookup can only succeed through
-    // the migrated key.
-    delete sessionState['apiKey_existing_exchanged_credential'];
-    const secondContext = createContext(sessionState);
-    const secondResult = await new ToolAuthHandler(
-      secondContext,
-      scheme,
-    ).prepareAuthCredentials();
-
-    expect(secondResult.authCredential?.http?.credentials.token).toBe(
-      'legacy-token',
-    );
-    expect(secondContext.state.hasDelta()).toBe(false);
+    expect(cachedCredentialKeys(sessionState)).toHaveLength(2);
   });
 });
