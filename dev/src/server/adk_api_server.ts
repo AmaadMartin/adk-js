@@ -182,8 +182,7 @@ export class AdkApiServer {
       const agentFile = await this.agentLoader.getAgentFile(appName);
       const loaded = await agentFile.load();
       const agent = isApp(loaded) ? loaded.rootAgent : loaded;
-      const adkApp = isApp(loaded) ? loaded : undefined;
-      const runner = await this.getRunner(adkApp ?? agent, appName);
+      const runner = await this.getRunner(loaded, appName);
 
       await toA2a(agent, {
         protocol: 'http',
@@ -347,8 +346,7 @@ export class AdkApiServer {
           const functionCalls = getFunctionCalls(event);
           const functionResponses = getFunctionResponses(event);
           await using agentFile = await this.agentLoader.getAgentFile(appName);
-          const loaded = await agentFile.load();
-          const rootAgent = isApp(loaded) ? loaded.rootAgent : loaded;
+          const rootAgent = await agentFile.loadAgent();
 
           if (functionCalls.length > 0) {
             const functionCallHighlights: Array<[string, string]> = [];

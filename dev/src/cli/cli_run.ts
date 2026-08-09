@@ -214,8 +214,7 @@ export async function runAgent(options: RunAgentOptions): Promise<void> {
             agentFilePath,
             options.agentFileLoadOptions,
           );
-          const reloaded = await reloadedFile.load();
-          const newAgent = isApp(reloaded) ? reloaded.rootAgent : reloaded;
+          const newAgent = await reloadedFile.loadAgent();
           for (const subscriber of reloadSubscribers) {
             subscriber(newAgent);
           }
