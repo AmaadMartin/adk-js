@@ -8,6 +8,7 @@ import {
   CodeExecutionResult,
   Context,
   InvocationContext,
+  RunSkillScriptErrorCode,
   RunSkillScriptTool,
   Skill,
   SkillToolset,
@@ -44,6 +45,9 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
         },
         'hello.sh': {
           src: 'echo "hello from skill sh"',
+        },
+        'hello.ts': {
+          src: 'const msg: string = "hello from skill ts"; console.log(msg);',
         },
         'fail.js': {
           src: 'console.error("skill js error"); process.exit(1);',
@@ -346,5 +350,28 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
     // Clean up both files
     await fs.unlink(targetFile);
     await fs.unlink(fullPath);
+  });
+
+  it('refuses a TypeScript skill script instead of running it', async () => {
+    const executor = new UnsafeLocalCodeExecutor();
+    const toolset = new SkillToolset([testSkill], {codeExecutor: executor});
+    const tool = new RunSkillScriptTool(toolset);
+
+    const result = await tool.runAsync({
+      args: {
+        skill_name: 'test-skill',
+        script_path: 'scripts/hello.ts',
+      },
+      toolContext: createMockContext(),
+    });
+
+    expect(result).toEqual({
+      error:
+        "Script 'scripts/hello.ts' has unsupported extension '.ts'. " +
+        'Skill scripts must be one of: .js, .py, .sh, .ps1, .bat, .cmd.',
+      errorCode: RunSkillScriptErrorCode.UNSUPPORTED_SCRIPT_LANGUAGE,
+    });
+    expect(result).not.toHaveProperty('stdout');
+    expect(result).not.toHaveProperty('stderr');
   });
 });

@@ -33,8 +33,19 @@ export enum RunSkillScriptErrorCode {
   SKILL_NOT_FOUND = 'SKILL_NOT_FOUND',
   SCRIPT_NOT_FOUND = 'SCRIPT_NOT_FOUND',
   NO_CODE_EXECUTOR = 'NO_CODE_EXECUTOR',
+  UNSUPPORTED_SCRIPT_LANGUAGE = 'UNSUPPORTED_SCRIPT_LANGUAGE',
   EXECUTION_ERROR = 'EXECUTION_ERROR',
 }
+
+/** Script extensions `buildWrapperCode` can emit a launcher for. */
+const SUPPORTED_SCRIPT_EXTENSIONS = [
+  '.js',
+  '.py',
+  '.sh',
+  '.ps1',
+  '.bat',
+  '.cmd',
+] as const;
 
 @experimental
 export class RunSkillScriptTool extends BaseTool {
@@ -59,7 +70,8 @@ export class RunSkillScriptTool extends BaseTool {
           script_path: {
             type: Type.STRING,
             description:
-              "The relative path to the script (e.g., 'scripts/setup.js').",
+              "The relative path to the script (e.g., 'scripts/setup.js'). " +
+              `Supported extensions: ${SUPPORTED_SCRIPT_EXTENSIONS.join(', ')}.`,
           },
           args: {
             type: Type.OBJECT,
@@ -144,12 +156,23 @@ export class RunSkillScriptTool extends BaseTool {
       };
     }
 
+    const ext = path.extname(scriptPath);
+    const language = getScriptLanguageByExtension(ext);
+    const code = buildWrapperCode(scriptPath, language);
+    if (code === undefined) {
+      return {
+        error:
+          `Script '${scriptPath}' has unsupported extension '${ext}'. ` +
+          `Skill scripts must be one of: ${SUPPORTED_SCRIPT_EXTENSIONS.join(', ')}.`,
+        errorCode: RunSkillScriptErrorCode.UNSUPPORTED_SCRIPT_LANGUAGE,
+      };
+    }
+
     try {
-      const language = getScriptLanguageByExtension(path.extname(scriptPath));
       const result = await codeExecutor.executeCode({
         invocationContext: toolContext.invocationContext,
         codeExecutionInput: {
-          code: buildWrapperCode(scriptPath, language),
+          code,
           inputFiles: getSkillResourceFiles(skill),
           language,
           args: scriptArgs,
@@ -169,15 +192,17 @@ export class RunSkillScriptTool extends BaseTool {
   }
 }
 
+/**
+ * Builds the launcher a code executor runs to invoke the script, or
+ * `undefined` when the tool cannot launch the language.
+ */
 function buildWrapperCode(
   scriptPath: string,
   language: CodeExecutionLanguage,
-): string {
+): string | undefined {
   switch (language) {
     case CodeExecutionLanguage.JAVASCRIPT:
       return `require('./${scriptPath}');`;
-    case CodeExecutionLanguage.TYPESCRIPT:
-      return `require('ts-node/register');\nrequire('./${scriptPath}');`;
     case CodeExecutionLanguage.PYTHON:
       return `import runpy\nrunpy.run_path('./${scriptPath}', run_name='__main__')`;
     case CodeExecutionLanguage.SHELL:
@@ -187,7 +212,7 @@ function buildWrapperCode(
     case CodeExecutionLanguage.WINDOWS_CMD:
       return `call .\\${scriptPath.replace(/\//g, '\\\\')} %*`;
     default:
-      throw new Error(`Unsupported wrapper language: ${language}`);
+      return undefined;
   }
 }
 

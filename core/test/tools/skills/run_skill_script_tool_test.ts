@@ -89,6 +89,23 @@ describe('RunSkillScriptTool', () => {
     },
   };
 
+  const unsupportedLanguageSkill: Skill = {
+    frontmatter: {name: 'ts-skill', description: 'Ships non-runnable scripts'},
+    instructions: 'Test instructions',
+    resources: {
+      scripts: {
+        'setup.ts': {src: 'const x: number = 1; console.log(x);'},
+        'notes.txt': {src: 'not a script'},
+      },
+    },
+  };
+
+  const pythonSkill: Skill = {
+    frontmatter: {name: 'python-skill', description: 'Ships a Python script'},
+    instructions: 'Test instructions',
+    resources: {scripts: {'build.py': {src: 'print("build")'}}},
+  };
+
   it('returns error if skill name is missing', async () => {
     const toolset = new SkillToolset([mockSkill]);
     const tool = new RunSkillScriptTool(toolset);
@@ -247,6 +264,120 @@ describe('RunSkillScriptTool', () => {
     expect(materializeFiles).toHaveBeenCalledWith([testFile]);
   });
 
+  it('declares the supported script extensions to the model', () => {
+    const tool = new RunSkillScriptTool(new SkillToolset([mockSkill]));
+
+    const declaration = tool._getDeclaration();
+
+    expect(
+      declaration.parameters?.properties?.['script_path'].description,
+    ).toBe(
+      "The relative path to the script (e.g., 'scripts/setup.js'). " +
+        'Supported extensions: .js, .py, .sh, .ps1, .bat, .cmd.',
+    );
+  });
+
+  it('refuses a TypeScript script before reaching the executor', async () => {
+    const mockExecutor = new MockCodeExecutor();
+    const toolset = new SkillToolset([unsupportedLanguageSkill], {
+      codeExecutor: mockExecutor,
+    });
+    const tool = new RunSkillScriptTool(toolset);
+
+    const result = (await tool.runAsync({
+      args: {skill_name: 'ts-skill', script_path: 'scripts/setup.ts'},
+      toolContext: createMockContext(),
+    })) as ToolErrorResponse;
+
+    expect(result).toEqual({
+      error:
+        "Script 'scripts/setup.ts' has unsupported extension '.ts'. " +
+        'Skill scripts must be one of: .js, .py, .sh, .ps1, .bat, .cmd.',
+      errorCode: RunSkillScriptErrorCode.UNSUPPORTED_SCRIPT_LANGUAGE,
+    });
+    expect(mockExecutor.executeCodeParams).toBeUndefined();
+  });
+
+  it('refuses a TypeScript script requested without the scripts/ prefix', async () => {
+    const mockExecutor = new MockCodeExecutor();
+    const toolset = new SkillToolset([unsupportedLanguageSkill], {
+      codeExecutor: mockExecutor,
+    });
+    const tool = new RunSkillScriptTool(toolset);
+
+    const result = (await tool.runAsync({
+      args: {skill_name: 'ts-skill', script_path: 'setup.ts'},
+      toolContext: createMockContext(),
+    })) as ToolErrorResponse;
+
+    expect(result).toEqual({
+      error:
+        "Script 'setup.ts' has unsupported extension '.ts'. " +
+        'Skill scripts must be one of: .js, .py, .sh, .ps1, .bat, .cmd.',
+      errorCode: RunSkillScriptErrorCode.UNSUPPORTED_SCRIPT_LANGUAGE,
+    });
+    expect(mockExecutor.executeCodeParams).toBeUndefined();
+  });
+
+  it('refuses an extension that maps to no language', async () => {
+    const mockExecutor = new MockCodeExecutor();
+    const toolset = new SkillToolset([unsupportedLanguageSkill], {
+      codeExecutor: mockExecutor,
+    });
+    const tool = new RunSkillScriptTool(toolset);
+
+    const result = (await tool.runAsync({
+      args: {skill_name: 'ts-skill', script_path: 'scripts/notes.txt'},
+      toolContext: createMockContext(),
+    })) as ToolErrorResponse;
+
+    expect(result).toEqual({
+      error:
+        "Script 'scripts/notes.txt' has unsupported extension '.txt'. " +
+        'Skill scripts must be one of: .js, .py, .sh, .ps1, .bat, .cmd.',
+      errorCode: RunSkillScriptErrorCode.UNSUPPORTED_SCRIPT_LANGUAGE,
+    });
+    expect(mockExecutor.executeCodeParams).toBeUndefined();
+  });
+
+  it('still executes a Python script with the runpy wrapper', async () => {
+    const mockExecutor = new MockCodeExecutor();
+    const toolset = new SkillToolset([pythonSkill], {
+      codeExecutor: mockExecutor,
+    });
+    const tool = new RunSkillScriptTool(toolset);
+
+    await tool.runAsync({
+      args: {skill_name: 'python-skill', script_path: 'scripts/build.py'},
+      toolContext: createMockContext(),
+    });
+
+    expect(mockExecutor.executeCodeParams?.codeExecutionInput.code).toBe(
+      "import runpy\nrunpy.run_path('./scripts/build.py', run_name='__main__')",
+    );
+    expect(mockExecutor.executeCodeParams?.codeExecutionInput.language).toBe(
+      CodeExecutionLanguage.PYTHON,
+    );
+  });
+
+  it('still executes a Shell script with the source wrapper', async () => {
+    const mockExecutor = new MockCodeExecutor();
+    const toolset = new SkillToolset([mockSkill], {codeExecutor: mockExecutor});
+    const tool = new RunSkillScriptTool(toolset);
+
+    await tool.runAsync({
+      args: {skill_name: 'test-skill', script_path: 'scripts/run.sh'},
+      toolContext: createMockContext(),
+    });
+
+    expect(mockExecutor.executeCodeParams?.codeExecutionInput.code).toBe(
+      'source ./scripts/run.sh "$@"',
+    );
+    expect(mockExecutor.executeCodeParams?.codeExecutionInput.language).toBe(
+      CodeExecutionLanguage.SHELL,
+    );
+  });
+
   describe('error codes', () => {
     it('exposes stable string values for the error-code enum', () => {
       // The error-code string values are part of the tool's response contract
@@ -262,6 +393,12 @@ describe('RunSkillScriptTool', () => {
       expect(RunSkillScriptErrorCode.SCRIPT_NOT_FOUND).toBe('SCRIPT_NOT_FOUND');
       expect(RunSkillScriptErrorCode.NO_CODE_EXECUTOR).toBe('NO_CODE_EXECUTOR');
       expect(RunSkillScriptErrorCode.EXECUTION_ERROR).toBe('EXECUTION_ERROR');
+    });
+
+    it('exposes a stable string value for the unsupported-language code', () => {
+      expect(RunSkillScriptErrorCode.UNSUPPORTED_SCRIPT_LANGUAGE).toBe(
+        'UNSUPPORTED_SCRIPT_LANGUAGE',
+      );
     });
   });
 });
