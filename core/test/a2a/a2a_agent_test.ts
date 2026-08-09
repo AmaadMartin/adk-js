@@ -22,11 +22,11 @@ import {
   BeforeA2ARequestCallback,
   createEvent,
   createEventActions,
+  createSession,
   InvocationContext,
   RemoteA2AAgent,
   Runner,
   RunnerConfig,
-  Session,
 } from '@google/adk';
 import {Language, Outcome} from '@google/genai';
 import {beforeEach, describe, expect, it, Mock, vi} from 'vitest';
@@ -91,13 +91,11 @@ describe('A2A Agent Executor', () => {
       publish: vi.fn(),
     } as unknown as ExecutionEventBus;
 
-    const mockSession = {
+    const mockSession = createSession({
       id: 'session-id',
       userId: 'test-user',
       appName: 'test-app',
-      events: [],
-      state: {},
-    } as unknown as Session;
+    });
     (mockSessionService.getSession as Mock).mockResolvedValue(mockSession);
   });
 
@@ -728,7 +726,7 @@ describe('A2A Remote Agent', () => {
   const createMockContext = (overrides = {}): InvocationContext => {
     return {
       invocationId: 'test-invocation',
-      session: {
+      session: createSession({
         id: 'test-session',
         userId: 'test-user',
         appName: 'test-app',
@@ -738,8 +736,7 @@ describe('A2A Remote Agent', () => {
             content: {role: 'user', parts: [{text: 'hello'}]},
           }),
         ],
-        state: {},
-      } as unknown as Session,
+      }),
       ...overrides,
     } as unknown as InvocationContext;
   };

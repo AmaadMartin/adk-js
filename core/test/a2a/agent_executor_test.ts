@@ -12,9 +12,9 @@ import {
   BaseSessionService,
   createEvent,
   createEventActions,
+  createSession,
   Runner,
   RunnerConfig,
-  Session,
 } from '@google/adk';
 import {beforeEach, describe, expect, it, Mocked, vi} from 'vitest';
 
@@ -78,13 +78,11 @@ describe('A2AAgentExecutor', () => {
 
   it('should get or create a session, run the agent, and publish working and final status events', async () => {
     // Setup Session
-    const mockSession = {
+    const mockSession = createSession({
       id: 'session-id',
       userId: 'test-user',
       appName: 'test-app',
-      events: [],
-      state: {},
-    } as unknown as Session;
+    });
     mockSessionService.getSession.mockResolvedValue(mockSession);
 
     // Setup Runner
@@ -165,13 +163,11 @@ describe('A2AAgentExecutor', () => {
   });
 
   it('should return early with input required event if task needs input', async () => {
-    const mockSession = {
+    const mockSession = createSession({
       id: 'session-id',
       userId: 'test-user',
       appName: 'test-app',
-      events: [],
-      state: {},
-    } as unknown as Session;
+    });
     mockSessionService.getSession.mockResolvedValue(mockSession);
 
     const executor = new A2AAgentExecutor({
@@ -213,13 +209,11 @@ describe('A2AAgentExecutor', () => {
   });
 
   it('should handle unrecoverable runner errors properly', async () => {
-    const mockSession = {
+    const mockSession = createSession({
       id: 'session-id',
       userId: 'test-user',
       appName: 'test-app',
-      events: [],
-      state: {},
-    } as unknown as Session;
+    });
     mockSessionService.getSession.mockResolvedValue(mockSession);
 
     async function* mockRunAsyncWithError() {

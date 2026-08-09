@@ -5,7 +5,7 @@
  */
 
 import {RequestContext} from '@a2a-js/sdk/server';
-import {Session} from '@google/adk';
+import {createEvent, createSession} from '@google/adk';
 import {Content} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {createExecutorContext} from '../../src/a2a/executor_context.js';
@@ -17,13 +17,18 @@ describe('createExecutorContext', () => {
   } as RequestContext;
 
   it('creates context with session', () => {
-    const mockSession = {
+    const mockSession = createSession({
       id: 'session-123',
       userId: 'user-1',
       appName: 'agent-1',
       state: {key: 'value'},
-      events: [{kind: 'user_message', text: 'hi'}],
-    } as unknown as Session;
+      events: [
+        createEvent({
+          author: 'user',
+          content: {role: 'user', parts: [{text: 'hi'}]},
+        }),
+      ],
+    });
 
     const context = createExecutorContext({
       session: mockSession,
