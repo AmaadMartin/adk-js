@@ -62,9 +62,14 @@ afterEach(async () => {
 });
 
 describe('FIXTURE_PROJECT_DIRS', () => {
-  it.each(FIXTURE_PROJECT_DIRS)('points %s at a real project', async (dir) => {
-    const manifest = await fs.readFile(path.join(dir, 'package.json'), 'utf-8');
-    expect(JSON.parse(manifest).name).toBeTruthy();
+  it('points every entry at a project directory', async () => {
+    for (const dir of FIXTURE_PROJECT_DIRS) {
+      const manifest = await fs.readFile(
+        path.join(dir, 'package.json'),
+        'utf-8',
+      );
+      expect(JSON.parse(manifest).name, dir).toBeTruthy();
+    }
   });
 
   it('registers every fixture project on disk', async () => {
