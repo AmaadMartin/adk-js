@@ -8,6 +8,7 @@ import {
   AuthCredential,
   AuthCredentialTypes,
   Context,
+  InvocationContext,
   ToolAuthHandler,
 } from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
@@ -32,6 +33,29 @@ vi.mock(
     };
   },
 );
+
+/** Matches a cache key derived from a scheme, with or without a credential. */
+const IDENTITY_KEY_PATTERN =
+  /^[a-zA-Z0-9]+_[0-9a-f]{16}_([a-zA-Z0-9]+_[0-9a-f]{16})?_existing_exchanged_credential$/;
+
+/**
+ * Builds the Context a single tool call gets. `sessionState` is the record the
+ * session holds, so a credential cached by one call is visible to the next.
+ */
+function createContext(sessionState: Record<string, unknown>): Context {
+  return new Context({
+    invocationContext: {
+      session: {state: sessionState},
+      agent: {name: 'tool-auth-handler-agent'},
+    } as unknown as InvocationContext,
+  });
+}
+
+function cachedCredentialKeys(sessionState: Record<string, unknown>): string[] {
+  return Object.keys(sessionState).filter((key) =>
+    IDENTITY_KEY_PATTERN.test(key),
+  );
+}
 
 describe('ToolAuthHandler', () => {
   it('should return done if no auth scheme', async () => {
@@ -271,41 +295,25 @@ describe('ToolAuthHandler', () => {
         },
       },
     };
-    const credentialA: AuthCredential = {
+    const sessionState: Record<string, unknown> = {};
+
+    await new ToolAuthHandler(createContext(sessionState), schemeA, {
       authType: AuthCredentialTypes.OAUTH2,
       oauth2: {clientId: 'client-a', clientSecret: 'secret-a'},
-    };
-    const credentialB: AuthCredential = {
-      authType: AuthCredentialTypes.OAUTH2,
-      oauth2: {clientId: 'client-b', clientSecret: 'secret-b'},
-    };
-
-    const firstState = new State();
-    await new ToolAuthHandler(
-      {
-        state: firstState,
-        getAuthResponse: vi.fn().mockReturnValue(undefined),
-      } as unknown as Context,
-      schemeA,
-      credentialA,
-    ).prepareAuthCredentials();
-
-    const secondState = new State(firstState.toRecord());
-    const secondContext = {
-      state: secondState,
-      getAuthResponse: vi.fn().mockReturnValue(undefined),
-    } as unknown as Context;
+    }).prepareAuthCredentials();
     const result = await new ToolAuthHandler(
-      secondContext,
+      createContext(sessionState),
       schemeB,
-      credentialB,
+      {
+        authType: AuthCredentialTypes.OAUTH2,
+        oauth2: {clientId: 'client-b', clientSecret: 'secret-b'},
+      },
     ).prepareAuthCredentials();
 
     expect(result.state).toBe('done');
-    // Tool B exchanged its own credential instead of being served tool A's
-    // cached token, which is only reachable past the cache lookup.
-    expect(secondContext.getAuthResponse).toHaveBeenCalled();
-    expect(Object.keys(secondState.toRecord())).toHaveLength(2);
+    // Tool B exchanged its own credential rather than being served tool A's,
+    // so the session holds a credential per tool.
+    expect(cachedCredentialKeys(sessionState)).toHaveLength(2);
   });
 
   it('gives two apiKey tools with different scheme names their own cache slot', async () => {
@@ -313,31 +321,21 @@ describe('ToolAuthHandler', () => {
       authType: AuthCredentialTypes.API_KEY,
       apiKey: 'key',
     };
+    const sessionState: Record<string, unknown> = {};
 
-    const firstState = new State();
     await new ToolAuthHandler(
-      {
-        state: firstState,
-        getAuthResponse: vi.fn().mockReturnValue(credential),
-      } as unknown as Context,
+      createContext(sessionState),
       {type: 'apiKey', name: 'X-A-Key', in: 'header'},
       credential,
     ).prepareAuthCredentials();
-
-    const secondState = new State(firstState.toRecord());
-    const secondContext = {
-      state: secondState,
-      getAuthResponse: vi.fn().mockReturnValue(credential),
-    } as unknown as Context;
     const result = await new ToolAuthHandler(
-      secondContext,
+      createContext(sessionState),
       {type: 'apiKey', name: 'X-B-Key', in: 'header'},
       credential,
     ).prepareAuthCredentials();
 
     expect(result.state).toBe('done');
-    expect(secondContext.getAuthResponse).toHaveBeenCalled();
-    expect(Object.keys(secondState.toRecord())).toHaveLength(2);
+    expect(cachedCredentialKeys(sessionState)).toHaveLength(2);
   });
 
   it('reuses the cached credential when only the redirect URI differs', async () => {
@@ -351,87 +349,78 @@ describe('ToolAuthHandler', () => {
         },
       },
     };
+    const sessionState: Record<string, unknown> = {};
 
-    const firstState = new State();
-    await new ToolAuthHandler(
-      {
-        state: firstState,
-        getAuthResponse: vi.fn().mockReturnValue(undefined),
-      } as unknown as Context,
+    await new ToolAuthHandler(createContext(sessionState), scheme, {
+      authType: AuthCredentialTypes.OAUTH2,
+      oauth2: {
+        clientId: 'client',
+        clientSecret: 'secret',
+        redirectUri: 'http://localhost:8001/oauth2callback',
+      },
+    }).prepareAuthCredentials();
+
+    // The same tool behind a different callback URL, e.g. after the agent
+    // moves from a laptop to a hosted deployment.
+    const result = await new ToolAuthHandler(
+      createContext(sessionState),
       scheme,
       {
         authType: AuthCredentialTypes.OAUTH2,
         oauth2: {
           clientId: 'client',
           clientSecret: 'secret',
-          redirectUri: 'http://localhost:8001/oauth2callback',
+          redirectUri: 'https://deployed.example.com/oauth2callback',
         },
       },
     ).prepareAuthCredentials();
 
-    // The same deployment behind a different callback URL, e.g. after the
-    // agent moves from a laptop to a hosted environment.
-    const secondState = new State(firstState.toRecord());
-    const secondContext = {
-      state: secondState,
-      getAuthResponse: vi.fn().mockReturnValue(undefined),
-    } as unknown as Context;
-    const result = await new ToolAuthHandler(secondContext, scheme, {
-      authType: AuthCredentialTypes.OAUTH2,
-      oauth2: {
-        clientId: 'client',
-        clientSecret: 'secret',
-        redirectUri: 'https://deployed.example.com/oauth2callback',
-      },
-    }).prepareAuthCredentials();
-
     expect(result.authCredential?.http?.credentials.token).toBe(
       'exchanged-token',
     );
-    expect(secondContext.getAuthResponse).not.toHaveBeenCalled();
-    expect(Object.keys(secondState.toRecord())).toHaveLength(1);
+    // One slot, so the second tool read the credential the first one cached.
+    expect(cachedCredentialKeys(sessionState)).toHaveLength(1);
   });
 
   it('migrates a credential stored under the pre-upgrade key', async () => {
-    const state = new State({
+    const sessionState: Record<string, unknown> = {
       'apiKey_existing_exchanged_credential': {
         authType: AuthCredentialTypes.HTTP,
         http: {scheme: 'bearer', credentials: {token: 'legacy-token'}},
       },
-    });
+    };
     const scheme: OpenAPIV3.SecuritySchemeObject = {
       type: 'apiKey',
       name: 'X-API-Key',
       in: 'header',
     };
 
+    const context = createContext(sessionState);
     const result = await new ToolAuthHandler(
-      {state} as unknown as Context,
+      context,
       scheme,
     ).prepareAuthCredentials();
 
     expect(result.authCredential?.http?.credentials.token).toBe('legacy-token');
-    // The migration is a write, so a cache hit through the legacy key now
-    // contributes to the state delta.
-    expect(state.hasDelta()).toBe(true);
-    const migratedKeys = Object.keys(state.toRecord()).filter((key) =>
-      /^apiKey_[0-9a-f]{16}__existing_exchanged_credential$/.test(key),
+    // The migration is a write, so a cache hit through the pre-upgrade key
+    // now contributes to the state delta the session persists.
+    const migratedKeys = Object.keys(context.eventActions.stateDelta).filter(
+      (key) => IDENTITY_KEY_PATTERN.test(key),
     );
     expect(migratedKeys).toHaveLength(1);
 
     // Drop the pre-upgrade entry so the next lookup can only succeed through
     // the migrated key.
-    const persisted = state.toRecord();
-    delete persisted['apiKey_existing_exchanged_credential'];
-    const secondState = new State(persisted);
+    delete sessionState['apiKey_existing_exchanged_credential'];
+    const secondContext = createContext(sessionState);
     const secondResult = await new ToolAuthHandler(
-      {state: secondState} as unknown as Context,
+      secondContext,
       scheme,
     ).prepareAuthCredentials();
 
     expect(secondResult.authCredential?.http?.credentials.token).toBe(
       'legacy-token',
     );
-    expect(secondState.hasDelta()).toBe(false);
+    expect(secondContext.state.hasDelta()).toBe(false);
   });
 });
