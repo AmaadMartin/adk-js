@@ -81,54 +81,45 @@ async function storeAuthAndCollectResumeTargets(
         authFcIds.has(functionCall.id) &&
         functionCall.name === REQUEST_EUC_FUNCTION_CALL_NAME
       ) {
-        const args = camelCaseKeys(functionCall.args) as RequestCredentialArgs;
-        if (args?.authConfig) {
-          requestById[functionCall.id] = args;
-        }
+        requestById[functionCall.id] = camelCaseKeys(
+          functionCall.args,
+        ) as RequestCredentialArgs;
       }
     }
   }
 
-  const rejectedFcIds: Set<string> = new Set();
+  const toolsToResume: Set<string> = new Set();
   for (const fcId of authFcIds) {
-    const requestedAuthConfig = requestById[fcId]?.authConfig;
+    const request = requestById[fcId];
     const response = authResponses[fcId] as AuthResumeResponse | undefined;
 
-    if (!requestedAuthConfig?.credentialKey) {
+    if (!request?.authConfig?.credentialKey) {
       logger.warn(
         `Ignoring auth response for ${fcId}: no matching credential request.`,
       );
-      rejectedFcIds.add(fcId);
       continue;
     }
 
     if (
       schemeContradictsRequest(
         response?.authScheme,
-        requestedAuthConfig.authScheme,
+        request.authConfig.authScheme,
       )
     ) {
       logger.warn(
         `Ignoring auth response for ${fcId}: authScheme does not match the requested one.`,
       );
-      rejectedFcIds.add(fcId);
       continue;
     }
 
     // The frozen request decides how the credential is stored and exchanged.
     // A resume message may only carry the credential the user just obtained.
     await new AuthHandler({
-      ...requestedAuthConfig,
+      ...request.authConfig,
       exchangedAuthCredential: response?.exchangedAuthCredential,
     }).parseAndStoreAuthResponse(state);
-  }
 
-  const toolsToResume: Set<string> = new Set();
-  for (const fcId of authFcIds) {
-    if (rejectedFcIds.has(fcId)) {
-      continue;
-    }
-    const {functionCallId} = requestById[fcId];
+    const {functionCallId} = request;
     if (
       functionCallId &&
       !functionCallId.startsWith(TOOLSET_AUTH_CREDENTIAL_ID_PREFIX)
