@@ -139,6 +139,82 @@ const agent = new FakeAgentForApp('agent_for_app_default');
 export default new App({ name: 'test_app_default', rootAgent: agent });
 `;
 
+const agentToolsTsContent = `
+export function helper(): string {
+  return 'multi_file_agent';
+}
+`;
+
+const sharedConfigTsContent = `
+export const agentName = 'parent_import_agent';
+`;
+
+const multiFileAgentTsContent = `
+import {BaseAgent} from '@google/adk';
+import {helper} from './tools.js';
+
+class FakeMultiFileAgent extends BaseAgent {
+  constructor(public name: string) {
+    super({name});
+  }
+}
+export const rootAgent = new FakeMultiFileAgent(helper());
+`;
+
+const parentImportAgentTsContent = `
+import {BaseAgent} from '@google/adk';
+import {agentName} from '../shared/config.js';
+
+class FakeParentImportAgent extends BaseAgent {
+  constructor(public name: string) {
+    super({name});
+  }
+}
+export const rootAgent = new FakeParentImportAgent(agentName);
+`;
+
+const dynamicImportAgentTsContent = `
+import {BaseAgent} from '@google/adk';
+
+class FakeDynamicImportAgent extends BaseAgent {
+  constructor(public name: string) {
+    super({name});
+  }
+}
+
+export async function toolName(): Promise<string> {
+  const {helper} = await import('./tools.js');
+  return helper();
+}
+
+export const rootAgent = new FakeDynamicImportAgent('dynamic_import_agent');
+`;
+
+const singleFileAgentTsContent = `
+import {BaseAgent} from '@google/adk';
+import * as path from 'node:path';
+
+class FakeSingleFileAgent extends BaseAgent {
+  constructor(public name: string) {
+    super({name});
+  }
+}
+export const rootAgent = new FakeSingleFileAgent(
+  path.parse('single_file_agent.ts').name,
+);
+`;
+
+/** Mirrors the error text AgentFile.load() builds for a non-bundled agent. */
+const unresolvedRelativeImportsMessage = (
+  agentPath: string,
+  specifiers: string,
+) =>
+  `Agent file ${agentPath} imports relative module(s) ${specifiers}, but ` +
+  `bundling is disabled. Without bundling only the entry file is compiled, ` +
+  `into a temporary directory, so relative imports cannot be resolved at ` +
+  `runtime. Re-run with bundling enabled (the default, or --bundle true), ` +
+  `or make the agent a single self-contained file.`;
+
 describe('AgentLoader', () => {
   let tempAgentsDir: string;
   let tempLoaderDir: string;
@@ -564,6 +640,119 @@ describe('AgentLoader', () => {
       await agentFile.dispose();
     });
 
+    it('rejects a multi-file agent when bundling is disabled', async () => {
+      const {build: realEsbuildBuild} =
+        await vi.importActual<typeof import('esbuild')>('esbuild');
+      (esbuild.build as Mock).mockImplementationOnce(realEsbuildBuild);
+
+      await fs.writeFile(
+        path.join(tempAgentsDir, 'tools.ts'),
+        agentToolsTsContent,
+      );
+      const agentPath = path.join(tempAgentsDir, 'multi_file_agent.ts');
+      await fs.writeFile(agentPath, multiFileAgentTsContent);
+
+      const agentFile = new AgentFile(agentPath, {
+        compile: true,
+        bundle: false,
+      });
+
+      await expect(agentFile.load()).rejects.toThrow(
+        unresolvedRelativeImportsMessage(agentPath, '"./tools.js"'),
+      );
+      await expect(
+        fs.access(compiledPath('multi_file_agent.cjs')),
+      ).rejects.toThrow();
+    });
+
+    it('names a parent-relative import in the error', async () => {
+      const {build: realEsbuildBuild} =
+        await vi.importActual<typeof import('esbuild')>('esbuild');
+      (esbuild.build as Mock).mockImplementationOnce(realEsbuildBuild);
+
+      const sharedDir = path.join(tempAgentsDir, 'shared');
+      const nestedDir = path.join(tempAgentsDir, 'nested');
+      await fs.mkdir(sharedDir, {recursive: true});
+      await fs.mkdir(nestedDir, {recursive: true});
+      await fs.writeFile(
+        path.join(sharedDir, 'config.ts'),
+        sharedConfigTsContent,
+      );
+      const agentPath = path.join(nestedDir, 'parent_import_agent.ts');
+      await fs.writeFile(agentPath, parentImportAgentTsContent);
+
+      const agentFile = new AgentFile(agentPath, {
+        compile: true,
+        bundle: false,
+      });
+
+      await expect(agentFile.load()).rejects.toThrow(
+        unresolvedRelativeImportsMessage(agentPath, '"../shared/config.js"'),
+      );
+    });
+
+    it('catches a relative dynamic import', async () => {
+      const {build: realEsbuildBuild} =
+        await vi.importActual<typeof import('esbuild')>('esbuild');
+      (esbuild.build as Mock).mockImplementationOnce(realEsbuildBuild);
+
+      await fs.writeFile(
+        path.join(tempAgentsDir, 'tools.ts'),
+        agentToolsTsContent,
+      );
+      const agentPath = path.join(tempAgentsDir, 'dynamic_import_agent.ts');
+      await fs.writeFile(agentPath, dynamicImportAgentTsContent);
+
+      const agentFile = new AgentFile(agentPath, {
+        compile: true,
+        bundle: false,
+      });
+
+      await expect(agentFile.load()).rejects.toThrow(
+        unresolvedRelativeImportsMessage(agentPath, '"./tools.js"'),
+      );
+    });
+
+    it('loads a single-file agent with no relative imports when bundling is disabled', async () => {
+      const {build: realEsbuildBuild} =
+        await vi.importActual<typeof import('esbuild')>('esbuild');
+      (esbuild.build as Mock).mockImplementationOnce(realEsbuildBuild);
+
+      const agentPath = path.join(tempAgentsDir, 'single_file_agent.ts');
+      await fs.writeFile(agentPath, singleFileAgentTsContent);
+
+      const agentFile = new AgentFile(agentPath, {
+        compile: true,
+        bundle: false,
+      });
+      const agent = await agentFile.load();
+
+      expect(agent.name).toEqual('single_file_agent');
+      await agentFile.dispose();
+    });
+
+    it('does not request a metafile when bundling a multi-file agent', async () => {
+      const {build: realEsbuildBuild} =
+        await vi.importActual<typeof import('esbuild')>('esbuild');
+      (esbuild.build as Mock).mockImplementationOnce(realEsbuildBuild);
+
+      await fs.writeFile(
+        path.join(tempAgentsDir, 'tools.ts'),
+        agentToolsTsContent,
+      );
+      const agentPath = path.join(tempAgentsDir, 'bundled_multi_agent.ts');
+      await fs.writeFile(agentPath, multiFileAgentTsContent);
+
+      const agentFile = new AgentFile(agentPath);
+      const agent = await agentFile.load();
+
+      expect(agent.name).toEqual('multi_file_agent');
+      expect((esbuild.build as Mock).mock.calls[0][0]).not.toHaveProperty(
+        'metafile',
+      );
+      await agentFile.dispose();
+    }, 60000);
+
     it('throws specific error if file does not exist', async () => {
       const agentPath = path.join(tempAgentsDir, 'non_existent.js');
       const agentFile = new AgentFile(agentPath);
@@ -849,6 +1038,29 @@ describe('AgentLoader', () => {
       expect(isApp(loaded)).toBe(true);
       expect((loaded as App).name).toBe('test_app');
 
+      await loader.disposeAll();
+    });
+
+    it('skips a multi-file agent during discovery when bundling is disabled', async () => {
+      const {build: realEsbuildBuild} =
+        await vi.importActual<typeof import('esbuild')>('esbuild');
+      (esbuild.build as Mock).mockImplementationOnce(realEsbuildBuild);
+
+      const discoveryDir = path.join(tempAgentsDir, 'discovery');
+      const multiDir = path.join(discoveryDir, 'multi');
+      await fs.mkdir(multiDir, {recursive: true});
+      await fs.writeFile(path.join(multiDir, 'tools.ts'), agentToolsTsContent);
+      await fs.writeFile(
+        path.join(multiDir, 'agent.ts'),
+        multiFileAgentTsContent,
+      );
+
+      const loader = new AgentLoader(discoveryDir, {
+        compile: true,
+        bundle: false,
+      });
+
+      await expect(loader.listAgents()).resolves.toEqual([]);
       await loader.disposeAll();
     });
 
