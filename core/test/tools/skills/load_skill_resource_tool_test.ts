@@ -8,11 +8,18 @@ import {
   Context,
   InvocationContext,
   LlmRequest,
+  LoadSkillResourceErrorCode,
   LoadSkillResourceTool,
   Skill,
   SkillToolset,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
+
+/** Shape of the error response `runAsync` returns when a call fails. */
+interface ToolErrorResponse {
+  error: string;
+  error_code: LoadSkillResourceErrorCode;
+}
 
 describe('LoadSkillResourceTool', () => {
   const mockSkill: Skill = {
@@ -34,10 +41,15 @@ describe('LoadSkillResourceTool', () => {
     },
   };
 
-  function createMockContext(agentName = 'test-agent') {
+  function createMockContext(
+    agentName = 'test-agent',
+    invocationId = 'inv-1',
+    sessionState: Record<string, unknown> = {},
+  ) {
     return new Context({
       invocationContext: {
-        session: {state: {}},
+        invocationId,
+        session: {state: sessionState},
         agent: {name: agentName},
       } as unknown as InvocationContext,
     });
@@ -247,5 +259,105 @@ describe('LoadSkillResourceTool', () => {
     expect(llmRequest.contents[1]?.parts?.[1]?.inlineData?.mimeType).toBe(
       'application/octet-stream',
     );
+  });
+
+  it('escalates to RESOURCE_NOT_FOUND_FATAL on the second miss in the same invocation', async () => {
+    const toolset = new SkillToolset([mockSkill]);
+    const tool = new LoadSkillResourceTool(toolset);
+    const toolContext = createMockContext();
+    const args = {skill_name: 'test-skill', path: 'references/nonexistent.md'};
+
+    expect(await tool.runAsync({args, toolContext})).toEqual({
+      error:
+        "Resource 'references/nonexistent.md' not found in skill 'test-skill'.",
+      error_code: LoadSkillResourceErrorCode.RESOURCE_NOT_FOUND,
+    });
+    expect(await tool.runAsync({args, toolContext})).toEqual({
+      error:
+        "Resource 'references/nonexistent.md' not found in skill 'test-skill'." +
+        ' This is resource lookup failure #2 this invocation. Do not retry any' +
+        ' path — report the error to the user and stop.',
+      error_code: LoadSkillResourceErrorCode.RESOURCE_NOT_FOUND_FATAL,
+    });
+  });
+
+  it('escalates even when the second miss uses a different resource path', async () => {
+    const toolset = new SkillToolset([mockSkill]);
+    const tool = new LoadSkillResourceTool(toolset);
+    const toolContext = createMockContext();
+
+    const first = (await tool.runAsync({
+      args: {skill_name: 'test-skill', path: 'references/missing-a.md'},
+      toolContext,
+    })) as ToolErrorResponse;
+    expect(first.error_code).toBe(
+      LoadSkillResourceErrorCode.RESOURCE_NOT_FOUND,
+    );
+
+    expect(
+      await tool.runAsync({
+        args: {skill_name: 'test-skill', path: 'references/missing-b.md'},
+        toolContext,
+      }),
+    ).toEqual({
+      error:
+        "Resource 'references/missing-b.md' not found in skill 'test-skill'." +
+        ' This is resource lookup failure #2 this invocation. Do not retry any' +
+        ' path — report the error to the user and stop.',
+      error_code: LoadSkillResourceErrorCode.RESOURCE_NOT_FOUND_FATAL,
+    });
+  });
+
+  it('keeps counting misses across references/, assets/ and scripts/ prefixes', async () => {
+    const toolset = new SkillToolset([mockSkill]);
+    const tool = new LoadSkillResourceTool(toolset);
+    const toolContext = createMockContext();
+    const paths = ['references/nope.md', 'assets/nope.png', 'scripts/nope.sh'];
+
+    const results: ToolErrorResponse[] = [];
+    for (const path of paths) {
+      results.push(
+        (await tool.runAsync({
+          args: {skill_name: 'test-skill', path},
+          toolContext,
+        })) as ToolErrorResponse,
+      );
+    }
+
+    expect(results.map((r) => r.error_code)).toEqual([
+      LoadSkillResourceErrorCode.RESOURCE_NOT_FOUND,
+      LoadSkillResourceErrorCode.RESOURCE_NOT_FOUND_FATAL,
+      LoadSkillResourceErrorCode.RESOURCE_NOT_FOUND_FATAL,
+    ]);
+    expect(results[1].error).toContain('failure #2');
+    expect(results[2].error).toContain('failure #3');
+  });
+
+  it('resets the counter for a new invocation id', async () => {
+    const toolset = new SkillToolset([mockSkill]);
+    const tool = new LoadSkillResourceTool(toolset);
+    const sharedState: Record<string, unknown> = {};
+    const args = {skill_name: 'test-skill', path: 'references/typo.md'};
+    const first = createMockContext('test-agent', 'inv-1', sharedState);
+    const second = createMockContext('test-agent', 'inv-2', sharedState);
+
+    const codes: LoadSkillResourceErrorCode[] = [];
+    for (const toolContext of [first, first, second]) {
+      const result = (await tool.runAsync({
+        args,
+        toolContext,
+      })) as ToolErrorResponse;
+      codes.push(result.error_code);
+    }
+
+    expect(codes).toEqual([
+      LoadSkillResourceErrorCode.RESOURCE_NOT_FOUND,
+      LoadSkillResourceErrorCode.RESOURCE_NOT_FOUND_FATAL,
+      LoadSkillResourceErrorCode.RESOURCE_NOT_FOUND,
+    ]);
+    expect(sharedState).toEqual({
+      'temp:_adk_skill_resource_not_found_count_inv-1': 2,
+      'temp:_adk_skill_resource_not_found_count_inv-2': 1,
+    });
   });
 });
