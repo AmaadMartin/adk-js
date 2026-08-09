@@ -203,14 +203,9 @@ function buildResponseEvent(
   toolContext: Context,
   invocationContext: InvocationContext,
 ): Event {
-  let responseResult: Record<string, unknown>;
-  if (Array.isArray(functionResult)) {
-    responseResult = {results: functionResult};
-  } else if (isPlainObject(functionResult)) {
-    responseResult = functionResult as Record<string, unknown>;
-  } else {
-    responseResult = {result: functionResult};
-  }
+  const responseResult = normalizeCallbackResponse(functionResult) ?? {
+    result: functionResult,
+  };
 
   const partFunctionResponse: Part = {
     functionResponse: {
@@ -295,7 +290,7 @@ function normalizeCallbackResponse(
     return {results: response};
   }
   if (isPlainObject(response)) {
-    return response as Record<string, unknown>;
+    return response;
   }
   return {result: response};
 }

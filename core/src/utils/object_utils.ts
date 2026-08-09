@@ -8,7 +8,9 @@
  * Returns whether a value is a plain record: an object literal or a
  * null-prototype object, as opposed to an array or a class instance.
  */
-export function isPlainObject(value: unknown): boolean {
+export function isPlainObject(
+  value: unknown,
+): value is Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return false;
   }
