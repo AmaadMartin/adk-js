@@ -6,6 +6,7 @@
 
 import {FunctionDeclaration, Type} from '@google/genai';
 import path from 'node:path';
+import {State} from '../../sessions/state.js';
 import {experimental} from '../../utils/experimental.js';
 import {guessMimeType} from '../../utils/file_utils.js';
 import {
@@ -31,13 +32,12 @@ export enum LoadSkillResourceErrorCode {
 }
 
 /**
- * Prefix of the invocation-scoped resource-lookup failure counter. `temp:`
- * keeps the counter out of durable session storage; the invocation id suffix
- * stops in-memory session backends from carrying a count into the next
- * invocation.
+ * Prefix of the invocation-scoped resource-lookup failure counter. The
+ * {@link State.TEMP_PREFIX} keeps the counter out of durable session storage;
+ * the invocation id suffix stops in-memory session backends from carrying a
+ * count into the next invocation.
  */
-const RESOURCE_NOT_FOUND_COUNT_KEY_PREFIX =
-  'temp:_adk_skill_resource_not_found_count_';
+const RESOURCE_NOT_FOUND_COUNT_KEY_PREFIX = `${State.TEMP_PREFIX}_adk_skill_resource_not_found_count_`;
 
 const BINARY_FILE_DETECTED_MSG =
   'Binary file detected. The content has been injected into the conversation history for you to analyze.';
