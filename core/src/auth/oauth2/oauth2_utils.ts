@@ -7,7 +7,11 @@
 import {logger} from '../../utils/logger.js';
 import {OAuth2Auth} from '../auth_credential.js';
 
-import {AuthScheme, isOpenIdConnectScheme} from '../auth_schemes.js';
+import {
+  AuthScheme,
+  isOAuth2Scheme,
+  isOpenIdConnectScheme,
+} from '../auth_schemes.js';
 import {validateDiscoveryUrl} from './oauth2_discovery.js';
 
 /**
@@ -18,7 +22,7 @@ export function getTokenEndpoint(authScheme: AuthScheme): string | undefined {
     return authScheme.tokenEndpoint;
   }
 
-  if (authScheme.type === 'oauth2' && authScheme.flows) {
+  if (isOAuth2Scheme(authScheme) && authScheme.flows) {
     const flows = authScheme.flows;
     const flow =
       flows.authorizationCode ||
