@@ -322,7 +322,7 @@ describe('AuthPreprocessor credential binding', () => {
     expect(yielded).toHaveLength(1);
   });
 
-  it('stores the credential when the resume scheme leaves an extra key undefined', async () => {
+  it('stores the credential when the resume scheme drops a field to undefined', async () => {
     const context = createContext([
       toolCallEvent('toolFc1'),
       requestCredentialEvent('agent', 'fc1', {
@@ -333,7 +333,7 @@ describe('AuthPreprocessor credential binding', () => {
         {
           fcId: 'fc1',
           response: {
-            authScheme: {...REQUESTED_SCHEME, description: undefined},
+            authScheme: {...REQUESTED_SCHEME, name: undefined},
             exchangedAuthCredential: USER_CREDENTIAL,
           },
         },
@@ -450,6 +450,25 @@ describe('AuthPreprocessor credential binding', () => {
     const yielded = await collectEvents(context);
 
     expect(context.session.state['temp:testKey']).toEqual(USER_CREDENTIAL);
+    expect(yielded).toHaveLength(0);
+    expect(handleFunctionCallsAsync).not.toHaveBeenCalled();
+  });
+
+  it('stores a toolset credential without resuming a tool', async () => {
+    const context = createContext([
+      toolCallEvent('_adk_toolset_auth_someToolset'),
+      requestCredentialEvent('agent', 'fc1', {
+        authConfig: {credentialKey: 'toolsetKey', authScheme: REQUESTED_SCHEME},
+        functionCallId: '_adk_toolset_auth_someToolset',
+      }),
+      resumeEvent([
+        {fcId: 'fc1', response: {exchangedAuthCredential: USER_CREDENTIAL}},
+      ]),
+    ]);
+
+    const yielded = await collectEvents(context);
+
+    expect(context.session.state['temp:toolsetKey']).toEqual(USER_CREDENTIAL);
     expect(yielded).toHaveLength(0);
     expect(handleFunctionCallsAsync).not.toHaveBeenCalled();
   });
