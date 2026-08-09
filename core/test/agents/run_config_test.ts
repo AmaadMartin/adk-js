@@ -76,4 +76,13 @@ describe('createRunConfig', () => {
       createRunConfig({maxLlmCalls: Number.MAX_SAFE_INTEGER + 1}),
     ).toThrow();
   });
+
+  it('leaves getSessionConfig undefined by default', () => {
+    expect(createRunConfig().getSessionConfig).toBeUndefined();
+  });
+
+  it('passes getSessionConfig through', () => {
+    const config = createRunConfig({getSessionConfig: {numRecentEvents: 10}});
+    expect(config.getSessionConfig).toEqual({numRecentEvents: 10});
+  });
 });
