@@ -123,33 +123,14 @@ function collectTargets(manifest: PackageManifest): ManifestTarget[] {
   return targets.filter(({target}) => target.startsWith('./'));
 }
 
-/** A manifest target as npm reports it in the packed file list. */
-function toPackedPath(target: string): string {
-  return target.replace(/^\.\//, '');
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
 /**
- * Whether the packed file list satisfies `target`.
+ * Whether the packed file list contains `target`.
  *
- * A `*` pattern is satisfied by any one matching packed file, because the set
- * of subpaths a consumer may request through it is unbounded. That still
- * catches an output directory the build never wrote. Node substitutes the same
- * matched text into every `*` of a target, so later stars must repeat the
- * first one.
+ * Every target in this repository names one file. A `*` subpath pattern fails
+ * this lookup, which is the loud failure that asks for pattern support.
  */
 function isPacked(target: string, packedFiles: ReadonlySet<string>): boolean {
-  const packedPath = toPackedPath(target);
-  if (!packedPath.includes('*')) {
-    return packedFiles.has(packedPath);
-  }
-  const [head, ...rest] = packedPath.split('*');
-  const tail = rest.map((segment) => escapeRegExp(segment)).join('\\1');
-  const pattern = new RegExp(`^${escapeRegExp(head)}(.+)${tail}$`);
-  return [...packedFiles].some((file) => pattern.test(file));
+  return packedFiles.has(target.replace(/^\.\//, ''));
 }
 
 /** The files `npm pack` would put in `dir`'s tarball, as POSIX paths. */
@@ -263,21 +244,14 @@ describe('isPacked', () => {
   const PACKED_FIXTURE: ReadonlySet<string> = new Set([
     'package.json',
     'dist/esm/index.js',
-    'dist/esm/tools/mcp.js',
     'dist/cjs/index.js',
     'dist/types/index.d.ts',
-    'dist/web/a+b(c).js',
   ]);
 
   it.each([
     {target: './dist/esm/index.js', expected: true},
     {target: 'dist/esm/index.js', expected: true},
     {target: './dist/web/index_web.js', expected: false},
-    {target: './dist/esm/tools/*.js', expected: true},
-    {target: './dist/esm/missing/*.js', expected: false},
-    {target: './dist/*/index.js', expected: true},
-    {target: './dist/*/*.js', expected: false},
-    {target: './dist/*/a+b(c).js', expected: true},
   ])('$target is packed: $expected', ({target, expected}) => {
     expect(isPacked(target, PACKED_FIXTURE)).toBe(expected);
   });
