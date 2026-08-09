@@ -816,11 +816,11 @@ describe('AgentLoader', () => {
     // Never `process.emit` any of these events: that also fires Vitest's and
     // Tinypool's own listeners and can take the worker down. These tests
     // capture the listener the loader installed and invoke it directly.
+    const TERMINATION_SIGNALS = ['SIGINT', 'SIGUSR1', 'SIGUSR2'] as const;
+
     const PROCESS_EVENTS = [
       'exit',
-      'SIGINT',
-      'SIGUSR1',
-      'SIGUSR2',
+      ...TERMINATION_SIGNALS,
       'uncaughtException',
     ] as const;
 
@@ -979,6 +979,48 @@ describe('AgentLoader', () => {
       } finally {
         exit.mockRestore();
         await loader.disposeAll();
+      }
+    });
+
+    it.each(TERMINATION_SIGNALS)(
+      'exits %s with 128 plus the signal number',
+      async (signal) => {
+        const loader = new AgentLoader(tempAgentsDir);
+        const exit = vi.spyOn(process, 'exit').mockImplementation(() => {
+          throw new Error('process.exit');
+        });
+
+        try {
+          const signalListener = listenerAddedBy(
+            () => process.listeners(signal),
+            () => {
+              loader.installProcessHandlers();
+            },
+          );
+
+          expect(() => signalListener(signal)).toThrow('process.exit');
+          expect(exit).toHaveBeenCalledWith(128 + os.constants.signals[signal]);
+        } finally {
+          exit.mockRestore();
+          await loader.disposeAll();
+        }
+      },
+    );
+
+    it('keeps another loader listeners when disposeAll runs twice', async () => {
+      const before = counts();
+      const survivor = new AgentLoader(tempAgentsDir);
+      const disposed = new AgentLoader(tempAgentsDir);
+
+      try {
+        survivor.installProcessHandlers();
+        disposed.installProcessHandlers();
+        await disposed.disposeAll();
+        await disposed.disposeAll();
+
+        expect(counts()).toEqual(afterInstall(before));
+      } finally {
+        await survivor.disposeAll();
       }
     });
   });

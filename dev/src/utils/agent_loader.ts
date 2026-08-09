@@ -12,6 +12,7 @@ import {shimPlugin} from 'esbuild-shim-plugin';
 import * as fs from 'node:fs';
 import * as fsPromises from 'node:fs/promises';
 import {createRequire} from 'node:module';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import {pathToFileURL} from 'node:url';
 
@@ -51,6 +52,10 @@ const FILE_MODULE_TYPE_EXTENSION_MAP = {
 
 /**
  * Termination signals wired up by {@link AgentLoader.installProcessHandlers}.
+ *
+ * A shell reports a process killed by signal `N` as `128 + N`, so Ctrl-C
+ * (`SIGINT`) must exit `130`. Signal numbers differ per platform, so they are
+ * read from `os.constants.signals` instead of being hard-coded.
  */
 const TERMINATION_SIGNALS = ['SIGINT', 'SIGUSR1', 'SIGUSR2'] as const;
 
@@ -380,6 +385,9 @@ export class AgentLoader {
    * owns the process. Library and test consumers must instead call
    * {@link disposeAll} when they are done. Calling this twice is a no-op, and
    * {@link disposeAll} removes the listeners again.
+   *
+   * No `'uncaughtException'` listener is installed: one would replace Node's
+   * default fatal handler, which prints the stack and exits 1.
    */
   installProcessHandlers(): void {
     if (this.removeProcessHandlers) {
@@ -388,7 +396,10 @@ export class AgentLoader {
 
     // An `exit` listener cannot await, so this cleanup is best-effort.
     const onExit = () => void this.disposeAll();
-    const onSignal = () => process.exit();
+    // Node passes the signal name to the listener, so one closure covers all
+    // of them and still reports the conventional `128 + signal` status.
+    const onSignal = (signal: (typeof TERMINATION_SIGNALS)[number]) =>
+      process.exit(128 + os.constants.signals[signal]);
 
     process.on('exit', onExit);
     for (const signal of TERMINATION_SIGNALS) {
