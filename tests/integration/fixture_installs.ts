@@ -10,8 +10,8 @@ import * as path from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 /**
- * Resolved from this module's own location so the paths hold whatever
- * directory the runner was started from.
+ * Resolved from this module's own location, so the fixture paths do not depend
+ * on the directory the runner was started from.
  */
 const INTEGRATION_ROOT = path.dirname(fileURLToPath(import.meta.url));
 
