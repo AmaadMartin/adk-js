@@ -127,9 +127,12 @@ describe('VertexAiSessionService over the real Sessions HTTP client', () => {
     });
 
     expect(session).toBeUndefined();
-    expect(requested).toEqual([
+    // An auth failure also reports 404, which getSession maps to undefined, so
+    // this pins that the request reached the Sessions endpoint. getSession
+    // lists events concurrently, and that second request races the 404 here.
+    expect(requested).toContain(
       `/v1beta1/projects/${PROJECT}/locations/${LOCATION}/reasoningEngines/${AGENT_ENGINE_ID}/sessions/missing-session`,
-    ]);
+    );
   });
 });
 
