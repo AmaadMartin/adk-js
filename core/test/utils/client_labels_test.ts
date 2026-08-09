@@ -282,14 +282,13 @@ describe('client_labels', () => {
       expect(secondEnd.value).not.toContain('label-a');
     });
 
-    it('should return a non-generator result unchanged', async () => {
+    it('should return a non-generator result unchanged', () => {
       const promise = Promise.resolve('resolved');
 
       expect(runWithClientLabel(label, () => 42)).toBe(42);
       expect(runWithClientLabel(label, () => null)).toBeNull();
       expect(runWithClientLabel(label, () => undefined)).toBeUndefined();
       expect(runWithClientLabel(label, () => promise)).toBe(promise);
-      await expect(promise).resolves.toBe('resolved');
     });
 
     it('should not wrap a sync iterable', () => {
