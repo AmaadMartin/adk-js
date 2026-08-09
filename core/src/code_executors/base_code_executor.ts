@@ -70,13 +70,7 @@ export abstract class BaseCodeExecutor {
    */
   errorRetryAttempts = 2;
 
-  /**
-   * The fallback timeout in seconds for the code execution.
-   *
-   * Undefined means no timeout is applied by the base class. A subclass may
-   * narrow this to a required `number` and give it a finite default when an
-   * unbounded run would be unsafe for that execution mechanism.
-   */
+  /** The fallback timeout in seconds for the code execution. */
   timeoutSeconds?: number;
 
   /**

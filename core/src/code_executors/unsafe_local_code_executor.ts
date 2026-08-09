@@ -141,11 +141,7 @@ function getExtensionForLanguage(
  * Use with caution and only for trusted code.
  */
 export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
-  /**
-   * Always finite for this executor: it runs code directly on the host, so an
-   * unbounded run would pin a host process indefinitely. Defaults to 30
-   * seconds.
-   */
+  /** Always finite: an unbounded run would pin a host process. */
   override timeoutSeconds: number;
   private readonly nodeCommandPath: string;
   private readonly pythonCommandPath: string;
