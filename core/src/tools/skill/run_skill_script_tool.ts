@@ -156,12 +156,13 @@ export class RunSkillScriptTool extends BaseTool {
       };
     }
 
-    const language = getScriptLanguageByExtension(path.extname(scriptPath));
+    const ext = path.extname(scriptPath);
+    const language = getScriptLanguageByExtension(ext);
     const code = buildWrapperCode(scriptPath, language);
     if (code === undefined) {
       return {
         error:
-          `Script '${scriptPath}' has unsupported language '${language}'. ` +
+          `Script '${scriptPath}' has unsupported extension '${ext}'. ` +
           `Skill scripts must be one of: ${SUPPORTED_SCRIPT_EXTENSIONS.join(', ')}.`,
         errorCode: RunSkillScriptErrorCode.UNSUPPORTED_SCRIPT_LANGUAGE,
       };

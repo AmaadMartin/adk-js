@@ -291,7 +291,7 @@ describe('RunSkillScriptTool', () => {
 
     expect(result).toEqual({
       error:
-        "Script 'scripts/setup.ts' has unsupported language 'typescript'. " +
+        "Script 'scripts/setup.ts' has unsupported extension '.ts'. " +
         'Skill scripts must be one of: .js, .py, .sh, .ps1, .bat, .cmd.',
       errorCode: RunSkillScriptErrorCode.UNSUPPORTED_SCRIPT_LANGUAGE,
     });
@@ -312,7 +312,7 @@ describe('RunSkillScriptTool', () => {
 
     expect(result).toEqual({
       error:
-        "Script 'setup.ts' has unsupported language 'typescript'. " +
+        "Script 'setup.ts' has unsupported extension '.ts'. " +
         'Skill scripts must be one of: .js, .py, .sh, .ps1, .bat, .cmd.',
       errorCode: RunSkillScriptErrorCode.UNSUPPORTED_SCRIPT_LANGUAGE,
     });
@@ -333,7 +333,7 @@ describe('RunSkillScriptTool', () => {
 
     expect(result).toEqual({
       error:
-        "Script 'scripts/notes.txt' has unsupported language 'unspecified'. " +
+        "Script 'scripts/notes.txt' has unsupported extension '.txt'. " +
         'Skill scripts must be one of: .js, .py, .sh, .ps1, .bat, .cmd.',
       errorCode: RunSkillScriptErrorCode.UNSUPPORTED_SCRIPT_LANGUAGE,
     });

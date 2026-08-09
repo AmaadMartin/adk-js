@@ -22,11 +22,6 @@ import {describe, expect, it} from 'vitest';
 const IS_WINDOWS = os.platform() === 'win32';
 const IS_UNIX = os.platform() === 'linux' || os.platform() === 'darwin';
 
-interface ToolErrorResponse {
-  error: string;
-  errorCode: RunSkillScriptErrorCode;
-}
-
 describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
   function createMockContext(agentName = 'test-agent') {
     return new Context({
@@ -362,17 +357,17 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
     const toolset = new SkillToolset([testSkill], {codeExecutor: executor});
     const tool = new RunSkillScriptTool(toolset);
 
-    const result = (await tool.runAsync({
+    const result = await tool.runAsync({
       args: {
         skill_name: 'test-skill',
         script_path: 'scripts/hello.ts',
       },
       toolContext: createMockContext(),
-    })) as ToolErrorResponse;
+    });
 
     expect(result).toEqual({
       error:
-        "Script 'scripts/hello.ts' has unsupported language 'typescript'. " +
+        "Script 'scripts/hello.ts' has unsupported extension '.ts'. " +
         'Skill scripts must be one of: .js, .py, .sh, .ps1, .bat, .cmd.',
       errorCode: RunSkillScriptErrorCode.UNSUPPORTED_SCRIPT_LANGUAGE,
     });
