@@ -113,16 +113,15 @@ describe('AgentLoader discovery and loading integration', () => {
   );
 
   it(
-    'should synthesize App when loadApp() is called on BaseAgent file',
+    'should expose the rootAgent of a bare BaseAgent file via loadAgent()',
     async () => {
       const agentFile = await loader.getAppFile('service_beta');
       const loaded = await agentFile.load();
       expect(isBaseAgent(loaded)).toBe(true);
       expect(isApp(loaded)).toBe(false);
 
-      const synthApp = await agentFile.loadApp();
-      expect(isApp(synthApp)).toBe(true);
-      expect(synthApp.rootAgent.name).toBe('beta_agent');
+      const rootAgent = await agentFile.loadAgent();
+      expect(rootAgent.name).toBe('beta_agent');
     },
     TEST_EXECUTION_TIMEOUT,
   );
