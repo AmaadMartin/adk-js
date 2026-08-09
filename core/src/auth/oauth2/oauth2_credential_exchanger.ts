@@ -9,6 +9,7 @@ import {AuthCredential} from '../auth_credential.js';
 import {
   AuthScheme,
   getOAuthGrantTypeFromFlow,
+  isOAuth2Scheme,
   isOpenIdConnectScheme,
   OAuthGrantType,
 } from '../auth_schemes.js';
@@ -69,7 +70,7 @@ export class OAuth2CredentialExchanger implements BaseCredentialExchanger {
 export function determineGrantType(
   authScheme: AuthScheme,
 ): OAuthGrantType | undefined {
-  if (authScheme.type === 'oauth2' && authScheme.flows) {
+  if (isOAuth2Scheme(authScheme)) {
     return getOAuthGrantTypeFromFlow(authScheme.flows);
   }
 

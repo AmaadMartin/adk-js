@@ -4,12 +4,30 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {AuthScheme, OAuthGrantType} from '@google/adk';
+import {AuthScheme, CustomAuthScheme, OAuthGrantType} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 import {
   getOAuthGrantTypeFromFlow,
+  isOAuth2Scheme,
   isOpenIdConnectScheme,
 } from '../../src/auth/auth_schemes.js';
+
+interface AcmeVaultScheme extends CustomAuthScheme {
+  type: 'acmeVault';
+  vaultPath: string;
+}
+
+/** A custom scheme whose vendor payload happens to reuse the `flows` name. */
+interface AcmeGatewayScheme extends CustomAuthScheme {
+  type: 'acmeGateway';
+  flows: Record<string, string>;
+}
+
+/** An oauth2 scheme whose `flows` key is present but carries no value. */
+interface FlowlessOAuth2Scheme extends CustomAuthScheme {
+  type: 'oauth2';
+  flows: undefined;
+}
 
 const OAUTH2_SCHEME: AuthScheme = {
   type: 'oauth2',
@@ -31,6 +49,21 @@ const API_KEY_SCHEME: AuthScheme = {
   type: 'apiKey',
   name: 'X-API-Key',
   in: 'header',
+};
+
+const ACME_VAULT_SCHEME: AcmeVaultScheme = {
+  type: 'acmeVault',
+  vaultPath: 'secret/acme',
+};
+
+const ACME_GATEWAY_SCHEME: AcmeGatewayScheme = {
+  type: 'acmeGateway',
+  flows: {gateway: 'acme'},
+};
+
+const FLOWLESS_OAUTH2_SCHEME: FlowlessOAuth2Scheme = {
+  type: 'oauth2',
+  flows: undefined,
 };
 
 describe('auth_schemes', () => {
@@ -121,6 +154,46 @@ describe('auth_schemes', () => {
       };
 
       expect(isOpenIdConnectScheme(scheme)).toBe(false);
+    });
+  });
+
+  describe('isOAuth2Scheme', () => {
+    it('accepts an oauth2 scheme that declares flows', () => {
+      expect(isOAuth2Scheme(OAUTH2_SCHEME)).toBe(true);
+    });
+
+    it('rejects a scheme whose type is oauth2 but which declares no flows', () => {
+      const scheme: AuthScheme = {type: 'oauth2'};
+
+      expect(isOAuth2Scheme(scheme)).toBe(false);
+    });
+
+    it('rejects an oauth2 scheme whose flows key carries no value', () => {
+      expect(isOAuth2Scheme(FLOWLESS_OAUTH2_SCHEME)).toBe(false);
+    });
+
+    it('rejects a custom scheme that carries a flows property', () => {
+      expect(isOAuth2Scheme(ACME_GATEWAY_SCHEME)).toBe(false);
+    });
+
+    it('rejects a custom scheme', () => {
+      expect(isOAuth2Scheme(ACME_VAULT_SCHEME)).toBe(false);
+    });
+
+    it('rejects an openIdConnect scheme', () => {
+      expect(isOAuth2Scheme(OPEN_ID_CONNECT_SCHEME)).toBe(false);
+    });
+
+    it('rejects an apiKey scheme', () => {
+      expect(isOAuth2Scheme(API_KEY_SCHEME)).toBe(false);
+    });
+  });
+
+  describe('CustomAuthScheme', () => {
+    it('accepts an extending interface as an AuthScheme with its extra fields intact', () => {
+      const scheme: AuthScheme = ACME_VAULT_SCHEME;
+
+      expect(scheme).toEqual({type: 'acmeVault', vaultPath: 'secret/acme'});
     });
   });
 });

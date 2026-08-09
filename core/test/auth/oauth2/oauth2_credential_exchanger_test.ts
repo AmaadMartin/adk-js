@@ -232,6 +232,12 @@ describe('OAuth2CredentialExchanger', () => {
       expect(determineGrantType(authScheme)).toBeUndefined();
     });
 
+    it('returns undefined for a custom scheme', () => {
+      const authScheme: AuthScheme = {type: 'acmeVault'};
+
+      expect(determineGrantType(authScheme)).toBeUndefined();
+    });
+
     it('returns undefined for a non-OIDC scheme that happens to carry grantTypesSupported', () => {
       const authScheme = {
         type: 'http' as const,

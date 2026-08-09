@@ -289,11 +289,12 @@ export class AgentRegistry {
           if (targetId.endsWith(mcpServerId)) {
             const authProvider = b.authProviderBinding?.authProvider;
             if (authProvider) {
-              authScheme = {
+              const gcpScheme: GcpAuthProviderScheme = {
                 type: 'gcpAuthProviderScheme',
                 name: authProvider,
                 continueUri: options?.continueUri,
-              } as GcpAuthProviderScheme as unknown as AuthScheme;
+              };
+              authScheme = gcpScheme;
               break;
             }
           }

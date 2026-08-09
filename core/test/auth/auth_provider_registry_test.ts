@@ -4,7 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {AuthProviderRegistry, AuthScheme, BaseAuthProvider} from '@google/adk';
+import {
+  AuthProviderRegistry,
+  AuthScheme,
+  BaseAuthProvider,
+  CustomAuthScheme,
+} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
 // Mock auth provider for testing
@@ -13,6 +18,16 @@ class MockAuthProvider implements BaseAuthProvider {
     return undefined;
   }
 }
+
+interface AcmeVaultScheme extends CustomAuthScheme {
+  type: 'acmeVault';
+  vaultPath: string;
+}
+
+const ACME_VAULT_SCHEME: AcmeVaultScheme = {
+  type: 'acmeVault',
+  vaultPath: 'secret/acme',
+};
 
 describe('AuthProviderRegistry', () => {
   it('should initialize with an empty registry', () => {
@@ -77,6 +92,25 @@ describe('AuthProviderRegistry', () => {
     };
 
     expect(registry.getProvider(authScheme)).toBe(mockProvider2);
+  });
+
+  it('should serve a provider registered for a custom scheme type', () => {
+    const registry = new AuthProviderRegistry();
+    const mockProvider = new MockAuthProvider();
+
+    registry.register('acmeVault', mockProvider);
+
+    const authScheme: AuthScheme = ACME_VAULT_SCHEME;
+
+    expect(registry.getProvider(authScheme)).toBe(mockProvider);
+  });
+
+  it('should return undefined for an unregistered custom scheme type', () => {
+    const registry = new AuthProviderRegistry();
+
+    const authScheme: AuthScheme = ACME_VAULT_SCHEME;
+
+    expect(registry.getProvider(authScheme)).toBeUndefined();
   });
 
   it('should isolate registry instances', () => {
