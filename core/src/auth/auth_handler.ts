@@ -114,7 +114,7 @@ export class AuthHandler {
     if ('authorizationEndpoint' in authScheme) {
       authorizationEndpoint = authScheme.authorizationEndpoint;
       scopes = authScheme.scopes || [];
-    } else if (isOAuth2Scheme(authScheme) && authScheme.flows) {
+    } else if (isOAuth2Scheme(authScheme)) {
       const flows = authScheme.flows;
       const flow =
         flows.implicit ||

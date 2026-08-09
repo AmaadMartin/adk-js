@@ -73,14 +73,16 @@ export function isOpenIdConnectScheme(
 /**
  * Returns true if the scheme is an OpenAPI OAuth2 security scheme.
  *
- * The `flows` check is load-bearing: {@link CustomAuthScheme} declares `type`
+ * The `flows` checks are load-bearing. {@link CustomAuthScheme} declares `type`
  * as an open `string`, so a `type === 'oauth2'` comparison alone no longer
- * excludes a custom scheme from the narrowed type.
+ * excludes a custom scheme from the narrowed type. `flows` is required on
+ * `OAuth2SecurityScheme`, so the guard also rejects a scheme whose `flows` is
+ * missing at runtime; callers can then read `flows` without re-testing it.
  */
 export function isOAuth2Scheme(
   scheme: AuthScheme,
 ): scheme is OpenAPIV3.OAuth2SecurityScheme {
-  return scheme.type === 'oauth2' && 'flows' in scheme;
+  return scheme.type === 'oauth2' && 'flows' in scheme && Boolean(scheme.flows);
 }
 
 /**

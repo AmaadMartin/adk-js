@@ -4,15 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  AuthScheme,
-  CustomAuthScheme,
-  isOAuth2Scheme,
-  OAuthGrantType,
-} from '@google/adk';
+import {AuthScheme, CustomAuthScheme, OAuthGrantType} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 import {
   getOAuthGrantTypeFromFlow,
+  isOAuth2Scheme,
   isOpenIdConnectScheme,
 } from '../../src/auth/auth_schemes.js';
 
@@ -25,6 +21,12 @@ interface AcmeVaultScheme extends CustomAuthScheme {
 interface AcmeGatewayScheme extends CustomAuthScheme {
   type: 'acmeGateway';
   flows: Record<string, string>;
+}
+
+/** An oauth2 scheme whose `flows` key is present but carries no value. */
+interface FlowlessOAuth2Scheme extends CustomAuthScheme {
+  type: 'oauth2';
+  flows: undefined;
 }
 
 const OAUTH2_SCHEME: AuthScheme = {
@@ -57,6 +59,11 @@ const ACME_VAULT_SCHEME: AcmeVaultScheme = {
 const ACME_GATEWAY_SCHEME: AcmeGatewayScheme = {
   type: 'acmeGateway',
   flows: {gateway: 'acme'},
+};
+
+const FLOWLESS_OAUTH2_SCHEME: FlowlessOAuth2Scheme = {
+  type: 'oauth2',
+  flows: undefined,
 };
 
 describe('auth_schemes', () => {
@@ -159,6 +166,10 @@ describe('auth_schemes', () => {
       const scheme: AuthScheme = {type: 'oauth2'};
 
       expect(isOAuth2Scheme(scheme)).toBe(false);
+    });
+
+    it('rejects an oauth2 scheme whose flows key carries no value', () => {
+      expect(isOAuth2Scheme(FLOWLESS_OAUTH2_SCHEME)).toBe(false);
     });
 
     it('rejects a custom scheme that carries a flows property', () => {

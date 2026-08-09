@@ -70,7 +70,7 @@ export class OAuth2CredentialExchanger implements BaseCredentialExchanger {
 export function determineGrantType(
   authScheme: AuthScheme,
 ): OAuthGrantType | undefined {
-  if (isOAuth2Scheme(authScheme) && authScheme.flows) {
+  if (isOAuth2Scheme(authScheme)) {
     return getOAuthGrantTypeFromFlow(authScheme.flows);
   }
 

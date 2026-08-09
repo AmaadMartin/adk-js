@@ -22,7 +22,7 @@ export function getTokenEndpoint(authScheme: AuthScheme): string | undefined {
     return authScheme.tokenEndpoint;
   }
 
-  if (isOAuth2Scheme(authScheme) && authScheme.flows) {
+  if (isOAuth2Scheme(authScheme)) {
     const flows = authScheme.flows;
     const flow =
       flows.authorizationCode ||
