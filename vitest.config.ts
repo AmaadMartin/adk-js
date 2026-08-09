@@ -15,8 +15,11 @@ import {defineConfig} from 'vitest/config';
 const INTEGRATION_HOOK_TIMEOUT_MS = 120000;
 
 /**
- * Test budget (ms) for the `integration` project: matches the largest per-file
- * timeout in the repo. Per-file `it()`/hook timeouts still override both.
+ * Test budget (ms) for the `integration` project: a test body spawns
+ * `npm run start` and reads the child's stdout to EOF with no internal
+ * timeout, so this budget is its only bound. A per-file `it()`/hook argument
+ * replaces this value rather than raising it, so a file that states one must
+ * record the measurement behind it.
  */
 const INTEGRATION_TEST_TIMEOUT_MS = 60000;
 
