@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {
   BlobResourceContents,
   ListResourcesResult,
@@ -19,7 +18,11 @@ import {logger} from '../../utils/logger.js';
 import {BaseTool} from '../base_tool.js';
 import {BaseToolset, ToolPredicate} from '../base_toolset.js';
 
-import {MCPConnectionParams, MCPSessionManager} from './mcp_session_manager.js';
+import {
+  closeSessionQuietly,
+  MCPConnectionParams,
+  MCPSessionManager,
+} from './mcp_session_manager.js';
 import {MCPTool} from './mcp_tool.js';
 
 /**
@@ -70,7 +73,7 @@ export class MCPToolset extends BaseToolset {
     try {
       listResult = (await session.listTools()) as ListToolsResult;
     } finally {
-      await this.closeSessionQuietly(session);
+      await closeSessionQuietly(this.mcpSessionManager, session);
     }
     logger.debug(`number of tools: ${listResult.tools.length}`);
     for (const tool of listResult.tools) {
@@ -123,7 +126,7 @@ export class MCPToolset extends BaseToolset {
       const result = (await session.listResources()) as ListResourcesResult;
       return result.resources.map((resource) => resource.name);
     } finally {
-      await this.closeSessionQuietly(session);
+      await closeSessionQuietly(this.mcpSessionManager, session);
     }
   }
 
@@ -140,7 +143,7 @@ export class MCPToolset extends BaseToolset {
     try {
       result = (await session.listResources()) as ListResourcesResult;
     } finally {
-      await this.closeSessionQuietly(session);
+      await closeSessionQuietly(this.mcpSessionManager, session);
     }
 
     const resource = result.resources.find(
@@ -178,7 +181,7 @@ export class MCPToolset extends BaseToolset {
       })) as ReadResourceResult;
       return result.contents;
     } finally {
-      await this.closeSessionQuietly(session);
+      await closeSessionQuietly(this.mcpSessionManager, session);
     }
   }
 
@@ -187,21 +190,5 @@ export class MCPToolset extends BaseToolset {
     await Promise.allSettled(
       sessions.map((session) => this.mcpSessionManager.closeSession(session)),
     );
-  }
-
-  /**
-   * Closes a short-lived session, logging rather than throwing when the close
-   * itself fails.
-   *
-   * Every caller invokes this from a `finally` block, where a rejection would
-   * replace the completion the block is already unwinding: a failing close
-   * would either mask the real MCP error or turn an already-successful call
-   * into a rejection. The close failure is a secondary cleanup fault, so it is
-   * reported and dropped and the original outcome survives.
-   */
-  private async closeSessionQuietly(session: Client): Promise<void> {
-    await this.mcpSessionManager.closeSession(session).catch((e: unknown) => {
-      logger.warn('Failed to close MCP discovery session', e);
-    });
   }
 }

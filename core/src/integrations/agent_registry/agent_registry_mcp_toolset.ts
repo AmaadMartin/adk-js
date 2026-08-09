@@ -11,11 +11,11 @@ import {AuthScheme} from '../../auth/auth_schemes.js';
 import {BaseTool} from '../../tools/base_tool.js';
 import {BaseToolset, ToolPredicate} from '../../tools/base_toolset.js';
 import {
+  closeSessionQuietly,
   MCPSessionManager,
   StreamableHTTPConnectionParams,
 } from '../../tools/mcp/mcp_session_manager.js';
 import {MCPTool} from '../../tools/mcp/mcp_tool.js';
-import {logger} from '../../utils/logger.js';
 import {GCP_MCP_SERVER_DESTINATION_ID} from './types.js';
 
 /**
@@ -112,9 +112,7 @@ export class AgentRegistrySingleMCPToolset extends BaseToolset {
     try {
       listResult = (await session.listTools()) as ListToolsResult;
     } finally {
-      await sessionManager.closeSession(session).catch((e) => {
-        logger.warn('Failed to close MCP discovery session', e);
-      });
+      await closeSessionQuietly(sessionManager, session);
     }
 
     // Map tool definitions to MCPTools

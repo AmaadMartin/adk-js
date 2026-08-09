@@ -48,7 +48,7 @@ const noop = () => vi.fn().mockResolvedValue(undefined);
  * Builds a stub MCP client. `connect` and `close` default to resolving no-ops;
  * supply only the methods the test exercises.
  */
-function mockClient(overrides: Partial<Record<keyof Client, unknown>>): Client {
+function mockClient(overrides: Partial<Client>): Client {
   return {connect: noop(), close: noop(), ...overrides} as unknown as Client;
 }
 
