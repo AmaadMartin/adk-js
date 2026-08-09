@@ -42,7 +42,7 @@ describe('WebUI Integration Test', () => {
         });
         await server.start();
         url = server.url;
-      }, 20000);
+      });
 
       afterAll(async () => {
         if (server) {
