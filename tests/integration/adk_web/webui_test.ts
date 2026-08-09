@@ -34,6 +34,9 @@ describe('WebUI Integration Test', () => {
       let server: AdkApiServer | AdkCliApiServer;
       let url: string;
 
+      // No local timeout: the hook inherits vitest.config.ts's hookTimeout,
+      // which must stay above AdkTsApiServer's 60s start watchdog so the
+      // server's captured-stdout diagnostic wins (test_api_server.ts).
       beforeAll(async () => {
         server = new serverClass({
           agentsDir: path.resolve(__dirname, './agent'),
@@ -42,7 +45,7 @@ describe('WebUI Integration Test', () => {
         });
         await server.start();
         url = server.url;
-      }, 20000);
+      });
 
       afterAll(async () => {
         if (server) {
@@ -82,4 +85,4 @@ describe('WebUI Integration Test', () => {
       });
     },
   );
-}, 20000);
+});

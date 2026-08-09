@@ -13,7 +13,6 @@ import {sendInput} from '../test_case_utils.js';
 
 const execAsync = promisify(exec);
 const dirname = process.cwd();
-const TEST_EXECUTION_TIMEOUT = 40000;
 
 describe.each(['__dirname', '__filename', 'import_meta_url'])(
   'Agent with %s',
@@ -26,25 +25,21 @@ describe.each(['__dirname', '__filename', 'import_meta_url'])(
 
     beforeAll(async () => {
       await execAsync('npm install', {cwd: projectPath});
-    }, TEST_EXECUTION_TIMEOUT);
+    });
 
-    it(
-      'should run agent and load params from file nearby via package.json script',
-      async () => {
-        const childProcess = spawn('npm', ['run', 'start'], {
-          cwd: projectPath,
-          shell: true,
-        });
+    it('should run agent and load params from file nearby via package.json script', async () => {
+      const childProcess = spawn('npm', ['run', 'start'], {
+        cwd: projectPath,
+        shell: true,
+      });
 
-        let response = await sendInput(childProcess, 'Tell me a joke.\n');
+      let response = await sendInput(childProcess, 'Tell me a joke.\n');
 
-        expect(response.toString()).toContain("I'm stubby model response!");
+      expect(response.toString()).toContain("I'm stubby model response!");
 
-        response = await sendInput(childProcess, 'exit\n');
-        expect(response.toString()).toContain('');
-      },
-      TEST_EXECUTION_TIMEOUT,
-    );
+      response = await sendInput(childProcess, 'exit\n');
+      expect(response.toString()).toContain('');
+    });
 
     afterAll(async () => {
       await fs
@@ -56,6 +51,6 @@ describe.each(['__dirname', '__filename', 'import_meta_url'])(
       await fs
         .unlink(path.join(projectPath, 'package-lock.json'))
         .catch(() => {});
-    }, TEST_EXECUTION_TIMEOUT);
+    });
   },
 );
