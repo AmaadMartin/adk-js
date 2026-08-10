@@ -58,11 +58,19 @@ export class OperationParser {
         const description = param.description || '';
         const location = param.in || '';
         const schema = (param.schema as OpenAPIV3.SchemaObject) || {};
+        // Only the schema reaches the model, so the parameter-level
+        // description is copied onto it, and the more specific schema-level
+        // one wins. The copy matters: a resolved $ref and a path-level
+        // parameter are both shared between operations.
+        const paramSchema =
+          description && !schema.description
+            ? {...schema, description}
+            : schema;
 
         this.params.push({
           originalName,
           paramLocation: location,
-          paramSchema: schema,
+          paramSchema,
           description,
           required: param.required || false,
           name: this.getParamName(originalName),
