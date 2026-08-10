@@ -91,28 +91,17 @@ export class OperationParser {
     if (schema && !('$ref' in schema)) {
       if (schema.type === 'object') {
         const properties = schema.properties || {};
-        if (Object.keys(properties).length > 0) {
-          for (const [propName, propDetails] of Object.entries(properties)) {
-            if (!('$ref' in propDetails)) {
-              this.params.push({
-                originalName: propName,
-                paramLocation: 'body',
-                paramSchema: propDetails,
-                description: propDetails.description,
-                required: (schema.required || []).includes(propName),
-                name: this.getParamName(propName),
-              });
-            }
+        for (const [propName, propDetails] of Object.entries(properties)) {
+          if (!('$ref' in propDetails)) {
+            this.params.push({
+              originalName: propName,
+              paramLocation: 'body',
+              paramSchema: propDetails,
+              description: propDetails.description,
+              required: (schema.required || []).includes(propName),
+              name: this.getParamName(propName),
+            });
           }
-        } else {
-          this.params.push({
-            originalName: '',
-            paramLocation: 'body',
-            paramSchema: schema,
-            description,
-            required: true,
-            name: 'body',
-          });
         }
       } else if (schema.type === 'array') {
         this.params.push({
