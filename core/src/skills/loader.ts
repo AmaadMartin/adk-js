@@ -399,12 +399,12 @@ export async function loadAllSkillsInDir(
 /**
  * Loads a complete skill directly from in-memory zip file buffer.
  *
- * The whole archive is rejected if it holds more than {@link MAX_ZIP_ENTRIES}
- * members, if its members declare more than
- * {@link MAX_ZIP_UNCOMPRESSED_BYTES} uncompressed bytes in total, or if any
- * member name escapes the extraction root. The skill name must be a bare path
- * segment. Both size limits are read from the central directory, so they
- * reject an archive before any member is decompressed.
+ * The whole archive is rejected if it holds more than `MAX_ZIP_ENTRIES`
+ * members, if its members declare more than `MAX_ZIP_UNCOMPRESSED_BYTES`
+ * uncompressed bytes in total, or if any member name escapes the extraction
+ * root. The skill name must be a bare path segment. Both size limits are read
+ * from the central directory, so they reject an archive before any member is
+ * decompressed.
  *
  * @param zipBuffer - The raw Buffer of the zip file containing the skill.
  * @returns A Skill object with all components loaded.
