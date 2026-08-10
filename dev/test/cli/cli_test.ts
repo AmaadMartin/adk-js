@@ -12,6 +12,7 @@ import {runAgent} from '../../src/cli/cli_run.js';
 import {deployToAgentEngine} from '../../src/cli/deploy/cli_deploy_agent_engine.js';
 import {deployToCloudRun} from '../../src/cli/deploy/cli_deploy_cloud_run.js';
 import {AdkApiServer} from '../../src/server/adk_api_server.js';
+import {AdkLogger} from '../../src/utils/logger.js';
 
 vi.mock('../../src/server/adk_api_server', () => {
   return {
@@ -153,6 +154,51 @@ describe('CLI Entrypoint', () => {
 
       const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
       expect(args.a2aAuthToken).toBe('tok');
+    });
+
+    it('should forward compile: false to the agent loader options', async () => {
+      vi.spyOn(AdkLogger.prototype, 'warn').mockImplementation(() => {});
+
+      await parse(['web', '--compile', 'false']);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.agentFileLoadOptions).toMatchObject({
+        compile: false,
+        bundle: true,
+      });
+    });
+
+    it('should warn that bundling is skipped when --compile false keeps the default --bundle', async () => {
+      const warnSpy = vi
+        .spyOn(AdkLogger.prototype, 'warn')
+        .mockImplementation(() => {});
+
+      await parse(['web', '--compile', 'false']);
+
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('--compile false'),
+      );
+    });
+
+    it('should not warn when --compile false is combined with --bundle false', async () => {
+      const warnSpy = vi
+        .spyOn(AdkLogger.prototype, 'warn')
+        .mockImplementation(() => {});
+
+      await parse(['web', '--compile', 'false', '--bundle', 'false']);
+
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it('should not warn for the default compile and bundle options', async () => {
+      const warnSpy = vi
+        .spyOn(AdkLogger.prototype, 'warn')
+        .mockImplementation(() => {});
+
+      await parse(['web']);
+
+      expect(warnSpy).not.toHaveBeenCalled();
     });
   });
 

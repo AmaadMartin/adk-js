@@ -28,6 +28,11 @@ import {deployToCloudRun} from './deploy/cli_deploy_cloud_run.js';
 
 dotenv.config({quiet: true});
 
+const logger = new AdkLogger({
+  label: 'ADK CLI',
+  colorize: {all: true},
+});
+
 const LOG_LEVEL_MAP: Record<string, LogLevel> = {
   'debug': LogLevel.DEBUG,
   'info': LogLevel.INFO,
@@ -75,9 +80,18 @@ function getAgentFileOptions(options: {
   bundle?: boolean;
   file_type?: string;
 }) {
+  const compile = getBoolean(options['compile']);
+  const bundle = getBoolean(options['bundle']);
+
+  if (!compile && bundle) {
+    logger.warn(
+      '--compile false skips the esbuild pass entirely: the agent file will not be bundled or minified.',
+    );
+  }
+
   return {
-    compile: getBoolean(options['compile']),
-    bundle: getBoolean(options['bundle']),
+    compile,
+    bundle,
     moduleType: options['file_type'] as FileModuleType | undefined,
   };
 }
@@ -132,7 +146,7 @@ const OTEL_TO_CLOUD_OPTION = new Option(
 ).default(false);
 const COMPILE_AGENT_FILE = new Option(
   '--compile [boolean]',
-  'Optional. Whether to compile ts agent file to js before execution',
+  'Optional. Whether to compile the ts agent file to js with esbuild before execution. Setting it to false skips the esbuild pass entirely, so the agent file is not bundled or minified either.',
 ).default(true);
 const BUNDLE_AGENT_FILE = new Option(
   '--bundle [boolean]',
@@ -196,11 +210,6 @@ export const AGENT_ENGINE_ID_OPTION = new Option(
  * @returns The ADK CLI program.
  */
 export function createProgram(): Command {
-  const logger = new AdkLogger({
-    label: 'ADK CLI',
-    colorize: {all: true},
-  });
-
   const program = new Command('ADK CLI');
 
   program
