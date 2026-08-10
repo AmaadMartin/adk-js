@@ -123,4 +123,31 @@ describe('OpenAPIToolset Integration', () => {
       error: 'Failed to execute API call: Network error',
     });
   });
+
+  it('should declare an empty query parameter as query_param', async () => {
+    const specStr = JSON.stringify({
+      openapi: '3.0.0',
+      info: {title: 'Empty Name API', version: '1.0.0'},
+      servers: [{url: 'https://things.example.com'}],
+      paths: {
+        '/things': {
+          get: {
+            operationId: 'listThings',
+            parameters: [
+              {name: '', in: 'query', required: true, schema: {type: 'string'}},
+            ],
+            responses: {'200': {description: 'OK'}},
+          },
+        },
+      },
+    });
+
+    const [tool] = await new OpenAPIToolset({specStr}).getTools();
+    if (!tool) {
+      expect.fail('the toolset produced no tool for /things');
+    }
+
+    const properties = tool._getDeclaration()?.parameters?.properties ?? {};
+    expect(Object.keys(properties)).toEqual(['query_param']);
+  });
 });

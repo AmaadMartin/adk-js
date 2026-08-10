@@ -206,6 +206,28 @@ describe('OpenApiSpecParser', () => {
     expect(op.parameters[0].name).toBe('id');
   });
 
+  it('should name an empty parameter after its location', () => {
+    const spec: OpenAPIV3.Document = {
+      openapi: '3.0.0',
+      info: {title: 'Empty Name API', version: '1.0.0'},
+      paths: {
+        '/things': {
+          get: {
+            operationId: 'listThings',
+            parameters: [{name: '', in: 'query', schema: {type: 'string'}}],
+            responses: {},
+          },
+        },
+      },
+    };
+
+    const parsed = new OpenApiSpecParser().parse(spec);
+
+    expect(parsed.length).toBe(1);
+    expect(parsed[0].parameters[0].name).toBe('query_param');
+    expect(parsed[0].parameters[0].originalName).toBe('');
+  });
+
   it('should resolve security schemes', () => {
     const spec: OpenAPIV3.Document = {
       openapi: '3.0.0',

@@ -17,6 +17,30 @@ export interface ApiParameter {
 }
 
 /**
+ * Argument names used when an OpenAPI parameter's name derives to nothing — a
+ * spec may declare `{"name": ""}`, and a name made only of separators
+ * snake_cases away entirely. Mirrors `_default_py_name` in adk-python
+ * (`src/google/adk/tools/openapi_tool/common/common.py`) so both SDKs advertise
+ * the same argument for the same spec.
+ *
+ * A `Map` rather than an object literal: the key is `parameter.in` straight
+ * from an untrusted spec, and `{}[...]` resolves inherited names, so an `in` of
+ * `__proto__` or `constructor` would yield an object where a string is
+ * required.
+ */
+const DEFAULT_NAME_BY_LOCATION = new Map<string, string>([
+  ['body', 'body'],
+  ['query', 'query_param'],
+  ['path', 'path_param'],
+  ['header', 'header_param'],
+  ['cookie', 'cookie_param'],
+]);
+
+function defaultParamName(paramLocation: string): string {
+  return DEFAULT_NAME_BY_LOCATION.get(paramLocation) ?? 'value';
+}
+
+/**
  * Parses an OpenAPI OperationObject and extracts its parameters, request body, and return value.
  *
  * It maps OpenAPI parameters and request bodies into a flat list of `ApiParameter` objects
@@ -65,7 +89,7 @@ export class OperationParser {
           paramSchema: schema,
           description,
           required: param.required || false,
-          name: this.getParamName(originalName),
+          name: this.getParamName(originalName) || defaultParamName(location),
         });
       }
     }
@@ -100,7 +124,7 @@ export class OperationParser {
                 paramSchema: propDetails,
                 description: propDetails.description,
                 required: (schema.required || []).includes(propName),
-                name: this.getParamName(propName),
+                name: this.getParamName(propName) || defaultParamName('body'),
               });
             }
           }
