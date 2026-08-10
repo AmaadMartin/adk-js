@@ -538,4 +538,16 @@ describe('deployToCloudRun', () => {
     expect(dockerfile).not.toContain('--session_service_uri');
     expect(dockerfile).not.toContain('--artifact_service_uri');
   });
+
+  it('should forward otelToCloud onto the generated Dockerfile CMD line', async () => {
+    await deployToCloudRun({...defaultOptions, otelToCloud: true});
+
+    expect(readGeneratedDockerfile()).toMatch(/^CMD .*--otel_to_cloud/m);
+  });
+
+  it('should omit the otel flag when otelToCloud is not set', async () => {
+    await deployToCloudRun(defaultOptions);
+
+    expect(readGeneratedDockerfile()).not.toContain('--otel_to_cloud');
+  });
 });
