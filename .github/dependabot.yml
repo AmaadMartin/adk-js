@@ -1,4 +1,5 @@
-# Keeps the GitHub Actions in .github/workflows and the npm dependency tree up to date.
+# Keeps the GitHub Actions in .github/workflows, the npm dependency tree and the
+# cross-language Go test modules up to date.
 # Schema: https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference
 version: 2
 updates:
@@ -29,5 +30,23 @@ updates:
         update-types:
           - 'minor'
           - 'patch'
+    commit-message:
+      prefix: 'chore(deps)'
+  - package-ecosystem: 'gomod'
+    # Both cross-language test modules on one entry, so a module they share is
+    # bumped in both at once instead of one at a time.
+    directories:
+      - '/tests/cross_language/a2a/go_ts/go_client'
+      - '/tests/cross_language/a2a/ts_go/go_backend'
+    schedule:
+      interval: 'weekly'
+    allow:
+      # Both go.mod files pin their transitive modules explicitly, and that is
+      # where they drifted; the default of direct requirements only misses them.
+      - dependency-type: 'all'
+    groups:
+      go-modules:
+        # One PR per module, spanning both directories.
+        group-by: dependency-name
     commit-message:
       prefix: 'chore(deps)'
