@@ -94,6 +94,105 @@ describe('OperationParser', () => {
   });
 });
 
+describe('OperationParser unresolved references', () => {
+  function requestBodyOperation(
+    content: Record<string, OpenAPIV3.MediaTypeObject>,
+  ): OpenAPIV3.OperationObject {
+    return {operationId: 'createPet', requestBody: {content}, responses: {}};
+  }
+
+  it('should throw for an unresolved parameter reference', () => {
+    const op: OpenAPIV3.OperationObject = {
+      operationId: 'getPet',
+      parameters: [{$ref: '#/components/parameters/petId'}],
+      responses: {},
+    };
+
+    expect(() => new OperationParser(op)).toThrow(
+      /Operation 'getPet' has an unresolved reference in parameters: '#\/components\/parameters\/petId'/,
+    );
+  });
+
+  it('should name the operation unnamed when it has no operationId', () => {
+    const op: OpenAPIV3.OperationObject = {
+      parameters: [{$ref: '#/components/parameters/petId'}],
+      responses: {},
+    };
+
+    expect(() => new OperationParser(op)).toThrow(
+      /Operation 'unnamed' has an unresolved reference/,
+    );
+  });
+
+  it('should throw for an unresolved request body reference', () => {
+    const op: OpenAPIV3.OperationObject = {
+      operationId: 'createPet',
+      requestBody: {$ref: '#/components/requestBodies/Pet'},
+      responses: {},
+    };
+
+    expect(() => new OperationParser(op)).toThrow(
+      /Operation 'createPet' has an unresolved reference in the request body: '#\/components\/requestBodies\/Pet'/,
+    );
+  });
+
+  it('should throw for an unresolved request body schema reference', () => {
+    const op = requestBodyOperation({
+      'application/json': {schema: {$ref: '#/components/schemas/Pet'}},
+    });
+
+    expect(() => new OperationParser(op)).toThrow(
+      /Operation 'createPet' has an unresolved reference in the request body schema: '#\/components\/schemas\/Pet'/,
+    );
+  });
+
+  it('should throw for an unresolved request body property reference', () => {
+    const op = requestBodyOperation({
+      'application/json': {
+        schema: {
+          type: 'object',
+          properties: {
+            name: {type: 'string'},
+            tag: {$ref: '#/components/schemas/Tag'},
+          },
+        },
+      },
+    });
+
+    expect(() => new OperationParser(op)).toThrow(
+      /Operation 'createPet' has an unresolved reference in the request body property 'tag': '#\/components\/schemas\/Tag'/,
+    );
+  });
+
+  it('should parse an object request body with all properties inlined', () => {
+    const op = requestBodyOperation({
+      'application/json': {
+        schema: {
+          type: 'object',
+          required: ['name'],
+          properties: {
+            name: {type: 'string'},
+            tag: {type: 'string'},
+          },
+        },
+      },
+    });
+
+    const params = new OperationParser(op).getParameters();
+
+    expect(
+      params.map((p) => ({
+        name: p.name,
+        paramLocation: p.paramLocation,
+        required: p.required,
+      })),
+    ).toEqual([
+      {name: 'name', paramLocation: 'body', required: true},
+      {name: 'tag', paramLocation: 'body', required: false},
+    ]);
+  });
+});
+
 describe('OperationParser default argument name when the derived name is empty', () => {
   function parseOneParameter(
     parameter: OpenAPIV3.ParameterObject,
