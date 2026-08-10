@@ -612,6 +612,42 @@ Instruction body`;
       expect(skill.resources?.scripts?.['run.sh']?.src).toBe('echo hello');
     });
 
+    it('loads an archive that overstates its uncompressed size', () => {
+      // The declared uncompressed size in a zip header is attacker
+      // controlled: this archive claims its member expands to ~4 GiB. adm-zip
+      // below 0.6.0 allocated that declared size before it read a single
+      // compressed byte (GHSA-xcpc-8h2w-3j85). 0.6.0 sizes the output from the
+      // data it actually inflates, so the declared value is inert.
+      const bogusUncompressedSize = 0xfffffff0;
+      const zip = new AdmZip();
+      const entry = zip.addFile('SKILL.md', Buffer.from(validSkillMd, 'utf-8'));
+      entry.header.size = bogusUncompressedSize;
+      const zipBuffer = zip.toBuffer();
+
+      // Pin the fixture. The size must be a lie in the local file header
+      // (signature 0x04034b50, size at offset 22) and in the central directory
+      // header (signature 0x02014b50, size at offset 24). Without this, a
+      // change in how adm-zip serialises an entry would make the archive
+      // benign, and the regression signal would rot away.
+      const localHeader = zipBuffer.indexOf(
+        Buffer.from([0x50, 0x4b, 0x03, 0x04]),
+      );
+      const centralHeader = zipBuffer.indexOf(
+        Buffer.from([0x50, 0x4b, 0x01, 0x02]),
+      );
+      expect(zipBuffer.readUInt32LE(localHeader + 22)).toBe(
+        bogusUncompressedSize,
+      );
+      expect(zipBuffer.readUInt32LE(centralHeader + 24)).toBe(
+        bogusUncompressedSize,
+      );
+
+      const skill = loadSkillFromZipBuffer(zipBuffer);
+
+      expect(skill.frontmatter.name).toBe('test-skill');
+      expect(skill.instructions).toBe('Instruction body');
+    });
+
     it.each(['/etc/passwd', '../evil.txt', 'references/../../esc.txt'])(
       'rejects the whole archive for the dangerous entry %s',
       (entryName) => {
