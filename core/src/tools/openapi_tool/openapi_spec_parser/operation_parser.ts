@@ -73,32 +73,55 @@ export class OperationParser {
       .replace(/^_/, '');
   }
 
+  /**
+   * Builds the error thrown when the operation still holds a `$ref` that
+   * nothing resolved. Dropping the reference would produce a tool whose
+   * declaration is missing an argument, with no diagnostic.
+   */
+  private unresolvedRefError(location: string, ref: string): Error {
+    const operationId = this.operation.operationId || 'unnamed';
+    return new Error(
+      `Operation '${operationId}' has an unresolved reference in ` +
+        `${location}: '${ref}'. References must be resolved before parsing.`,
+    );
+  }
+
   private processOperationParameters() {
     const parameters = this.operation.parameters || [];
     for (const param of parameters) {
-      // Assume resolved references for now
-      if ('name' in param) {
-        const originalName = param.name;
-        const description = param.description || '';
-        const location = param.in || '';
-        const schema = (param.schema as OpenAPIV3.SchemaObject) || {};
-
-        this.params.push({
-          originalName,
-          paramLocation: location,
-          paramSchema: schema,
-          description,
-          required: param.required || false,
-          name: this.getParamName(originalName) || defaultParamName(location),
-        });
+      if ('$ref' in param) {
+        throw this.unresolvedRefError('parameters', param.$ref);
       }
+
+      // The union guarantees a name, but the spec is untrusted input, and
+      // resolveReferences() leaves a bare {} where it broke a reference cycle.
+      if (!('name' in param)) {
+        continue;
+      }
+
+      const originalName = param.name;
+      const description = param.description || '';
+      const location = param.in || '';
+      const schema = (param.schema as OpenAPIV3.SchemaObject) || {};
+
+      this.params.push({
+        originalName,
+        paramLocation: location,
+        paramSchema: schema,
+        description,
+        required: param.required || false,
+        name: this.getParamName(originalName) || defaultParamName(location),
+      });
     }
   }
 
   private processRequestBody() {
     const requestBody = this.operation.requestBody;
-    if (!requestBody || '$ref' in requestBody) {
+    if (!requestBody) {
       return;
+    }
+    if ('$ref' in requestBody) {
+      throw this.unresolvedRefError('the request body', requestBody.$ref);
     }
 
     const content = requestBody.content || {};
@@ -112,44 +135,36 @@ export class OperationParser {
     const schema = mediaTypeObject.schema;
     const description = requestBody.description || '';
 
-    if (schema && !('$ref' in schema)) {
-      if (schema.type === 'object') {
-        const properties = schema.properties || {};
-        if (Object.keys(properties).length > 0) {
-          for (const [propName, propDetails] of Object.entries(properties)) {
-            if (!('$ref' in propDetails)) {
-              this.params.push({
-                originalName: propName,
-                paramLocation: 'body',
-                paramSchema: propDetails,
-                description: propDetails.description,
-                required: (schema.required || []).includes(propName),
-                name: this.getParamName(propName) || defaultParamName('body'),
-              });
-            }
+    if (!schema) {
+      return;
+    }
+    if ('$ref' in schema) {
+      throw this.unresolvedRefError('the request body schema', schema.$ref);
+    }
+
+    if (schema.type === 'object') {
+      const properties = schema.properties || {};
+      if (Object.keys(properties).length > 0) {
+        for (const [propName, propDetails] of Object.entries(properties)) {
+          if ('$ref' in propDetails) {
+            throw this.unresolvedRefError(
+              `the request body property '${propName}'`,
+              propDetails.$ref,
+            );
           }
-        } else {
+
           this.params.push({
-            originalName: '',
+            originalName: propName,
             paramLocation: 'body',
-            paramSchema: schema,
-            description,
-            required: true,
-            name: 'body',
+            paramSchema: propDetails,
+            description: propDetails.description,
+            required: (schema.required || []).includes(propName),
+            name: this.getParamName(propName) || defaultParamName('body'),
           });
         }
-      } else if (schema.type === 'array') {
-        this.params.push({
-          originalName: 'array',
-          paramLocation: 'body',
-          paramSchema: schema,
-          description,
-          required: true,
-          name: 'body',
-        });
       } else {
         this.params.push({
-          originalName: 'body',
+          originalName: '',
           paramLocation: 'body',
           paramSchema: schema,
           description,
@@ -157,6 +172,24 @@ export class OperationParser {
           name: 'body',
         });
       }
+    } else if (schema.type === 'array') {
+      this.params.push({
+        originalName: 'array',
+        paramLocation: 'body',
+        paramSchema: schema,
+        description,
+        required: true,
+        name: 'body',
+      });
+    } else {
+      this.params.push({
+        originalName: 'body',
+        paramLocation: 'body',
+        paramSchema: schema,
+        description,
+        required: true,
+        name: 'body',
+      });
     }
   }
 

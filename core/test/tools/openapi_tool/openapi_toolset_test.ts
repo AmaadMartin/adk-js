@@ -288,7 +288,7 @@ describe('OpenApiSpecParser', () => {
     });
   });
 
-  it('should handle broken reference', () => {
+  it('should throw for a broken reference', () => {
     const specWithBrokenRef = {
       openapi: '3.0.0',
       info: {title: 'Test', version: '1.0'},
@@ -307,12 +307,10 @@ describe('OpenApiSpecParser', () => {
     } as unknown as OpenAPIV3.Document;
 
     const parser = new OpenApiSpecParser();
-    const operations = parser.parse(specWithBrokenRef);
 
-    expect(operations.length).toBe(1);
-    expect(operations[0].operation.parameters?.[0]).toEqual({
-      $ref: '#/components/parameters/nonexistent',
-    });
+    expect(() => parser.parse(specWithBrokenRef)).toThrow(
+      /Operation 'testOp' has an unresolved reference in parameters: '#\/components\/parameters\/nonexistent'/,
+    );
   });
 
   it('should handle global security', () => {

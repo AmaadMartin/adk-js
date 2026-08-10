@@ -101,6 +101,32 @@ describe('OpenApiSpecParser', () => {
     expect(op.operation.responses['200']).toBeDefined();
   });
 
+  it('should skip a parameter whose reference cycle was broken', () => {
+    const spec: OpenAPIV3.Document = {
+      openapi: '3.0.0',
+      info: {title: 'Circular Param API', version: '1.0.0'},
+      paths: {
+        '/things': {
+          get: {
+            operationId: 'listThings',
+            parameters: [{$ref: '#/components/parameters/self'}],
+            responses: {},
+          },
+        },
+      },
+      components: {
+        parameters: {self: {$ref: '#/components/parameters/self'}},
+      },
+    };
+
+    const parsed = new OpenApiSpecParser().parse(spec);
+
+    // resolveReferences() breaks the cycle by deleting the $ref key, so the
+    // parameter arrives nameless rather than as an unresolved reference.
+    expect(parsed[0].operation.parameters).toEqual([{}]);
+    expect(parsed[0].parameters).toEqual([]);
+  });
+
   it('should throw error for external references', () => {
     const spec: OpenAPIV3.Document = {
       openapi: '3.0.0',
@@ -226,6 +252,54 @@ describe('OpenApiSpecParser', () => {
     expect(parsed.length).toBe(1);
     expect(parsed[0].parameters[0].name).toBe('query_param');
     expect(parsed[0].parameters[0].originalName).toBe('');
+  });
+
+  it('should keep resolved parameter references in the parsed parameters', () => {
+    const spec: OpenAPIV3.Document = {
+      openapi: '3.0.0',
+      info: {title: 'Ref Param API', version: '1.0.0'},
+      paths: {
+        '/things': {
+          get: {
+            operationId: 'listThings',
+            parameters: [{$ref: '#/components/parameters/limit'}],
+            responses: {},
+          },
+        },
+      },
+      components: {
+        parameters: {
+          limit: {name: 'limit', in: 'query', schema: {type: 'integer'}},
+        },
+      },
+    };
+
+    const parsed = new OpenApiSpecParser().parse(spec);
+
+    expect(parsed[0].parameters.length).toBe(1);
+    expect(parsed[0].parameters[0].originalName).toBe('limit');
+    expect(parsed[0].parameters[0].paramLocation).toBe('query');
+  });
+
+  it('should throw for a dangling parameter reference', () => {
+    const spec: OpenAPIV3.Document = {
+      openapi: '3.0.0',
+      info: {title: 'Ref Param API', version: '1.0.0'},
+      paths: {
+        '/things': {
+          get: {
+            operationId: 'listThings',
+            parameters: [{$ref: '#/components/parameters/limit'}],
+            responses: {},
+          },
+        },
+      },
+      components: {parameters: {}},
+    };
+
+    expect(() => new OpenApiSpecParser().parse(spec)).toThrow(
+      /Operation 'listThings' has an unresolved reference in parameters: '#\/components\/parameters\/limit'/,
+    );
   });
 
   it('should resolve security schemes', () => {
