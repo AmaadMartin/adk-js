@@ -101,6 +101,32 @@ describe('OpenApiSpecParser', () => {
     expect(op.operation.responses['200']).toBeDefined();
   });
 
+  it('should skip a parameter whose reference cycle was broken', () => {
+    const spec: OpenAPIV3.Document = {
+      openapi: '3.0.0',
+      info: {title: 'Circular Param API', version: '1.0.0'},
+      paths: {
+        '/things': {
+          get: {
+            operationId: 'listThings',
+            parameters: [{$ref: '#/components/parameters/self'}],
+            responses: {},
+          },
+        },
+      },
+      components: {
+        parameters: {self: {$ref: '#/components/parameters/self'}},
+      },
+    };
+
+    const parsed = new OpenApiSpecParser().parse(spec);
+
+    // resolveReferences() breaks the cycle by deleting the $ref key, so the
+    // parameter arrives nameless rather than as an unresolved reference.
+    expect(parsed[0].operation.parameters).toEqual([{}]);
+    expect(parsed[0].parameters).toEqual([]);
+  });
+
   it('should throw error for external references', () => {
     const spec: OpenAPIV3.Document = {
       openapi: '3.0.0',

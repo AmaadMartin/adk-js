@@ -100,6 +100,12 @@ export class OperationParser {
         );
       }
 
+      // The union guarantees a name, but the spec is untrusted input, and
+      // resolveReferences() leaves a bare {} where it broke a reference cycle.
+      if (!('name' in param)) {
+        continue;
+      }
+
       const originalName = param.name;
       const description = param.description || '';
       const location = param.in || '';
