@@ -54,22 +54,9 @@ describe('OperationParser', () => {
   });
 
   it("should key the json schema for an array request body on 'array'", () => {
-    const op: OpenAPIV3.OperationObject = {
-      operationId: 'testOp',
-      requestBody: {
-        content: {
-          'application/json': {
-            schema: {
-              type: 'array',
-              items: {type: 'string'},
-            },
-          },
-        },
-      },
-      responses: {},
-    };
-
-    const schema = new OperationParser(op).getJsonSchema();
+    const schema = new OperationParser(
+      operationWithBody({type: 'array', items: {type: 'string'}}),
+    ).getJsonSchema();
 
     expect(schema.properties).toEqual({
       array: {type: 'array', items: {type: 'string'}},
