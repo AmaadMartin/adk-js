@@ -41,22 +41,6 @@ function defaultParamName(paramLocation: string): string {
 }
 
 /**
- * Builds the error thrown when an operation still holds a `$ref` that nothing
- * resolved. Dropping the reference would produce a tool whose declaration is
- * missing an argument, with no diagnostic.
- */
-function unresolvedRefError(
-  operationId: string | undefined,
-  location: string,
-  ref: string,
-): Error {
-  return new Error(
-    `Operation '${operationId || 'unnamed'}' has an unresolved reference in ` +
-      `${location}: '${ref}'. References must be resolved before parsing.`,
-  );
-}
-
-/**
  * Parses an OpenAPI OperationObject and extracts its parameters, request body, and return value.
  *
  * It maps OpenAPI parameters and request bodies into a flat list of `ApiParameter` objects
@@ -89,15 +73,24 @@ export class OperationParser {
       .replace(/^_/, '');
   }
 
+  /**
+   * Builds the error thrown when the operation still holds a `$ref` that
+   * nothing resolved. Dropping the reference would produce a tool whose
+   * declaration is missing an argument, with no diagnostic.
+   */
+  private unresolvedRefError(location: string, ref: string): Error {
+    const operationId = this.operation.operationId || 'unnamed';
+    return new Error(
+      `Operation '${operationId}' has an unresolved reference in ` +
+        `${location}: '${ref}'. References must be resolved before parsing.`,
+    );
+  }
+
   private processOperationParameters() {
     const parameters = this.operation.parameters || [];
     for (const param of parameters) {
       if ('$ref' in param) {
-        throw unresolvedRefError(
-          this.operation.operationId,
-          'parameters',
-          param.$ref,
-        );
+        throw this.unresolvedRefError('parameters', param.$ref);
       }
 
       // The union guarantees a name, but the spec is untrusted input, and
@@ -128,11 +121,7 @@ export class OperationParser {
       return;
     }
     if ('$ref' in requestBody) {
-      throw unresolvedRefError(
-        this.operation.operationId,
-        'the request body',
-        requestBody.$ref,
-      );
+      throw this.unresolvedRefError('the request body', requestBody.$ref);
     }
 
     const content = requestBody.content || {};
@@ -150,11 +139,7 @@ export class OperationParser {
       return;
     }
     if ('$ref' in schema) {
-      throw unresolvedRefError(
-        this.operation.operationId,
-        'the request body schema',
-        schema.$ref,
-      );
+      throw this.unresolvedRefError('the request body schema', schema.$ref);
     }
 
     if (schema.type === 'object') {
@@ -162,8 +147,7 @@ export class OperationParser {
       if (Object.keys(properties).length > 0) {
         for (const [propName, propDetails] of Object.entries(properties)) {
           if ('$ref' in propDetails) {
-            throw unresolvedRefError(
-              this.operation.operationId,
+            throw this.unresolvedRefError(
               `the request body property '${propName}'`,
               propDetails.$ref,
             );
