@@ -385,6 +385,78 @@ describe('AgentLoader', () => {
       await agentFile.dispose();
     });
 
+    it('does not run esbuild when compile is false even if bundle is true', async () => {
+      const agentPath = path.join(tempAgentsDir, 'agent1.js');
+      await fs.writeFile(agentPath, agent1JsContent);
+
+      // Kept loadable through the compiled path so a regression fails on the
+      // esbuild assertion below rather than on a missing temp artifact.
+      (esbuild.build as Mock).mockImplementation(async () => {
+        await fs.writeFile(compiledPath('agent1.cjs'), agent1JsContent);
+        return Promise.resolve();
+      });
+
+      const agentFile = new AgentFile(agentPath, {
+        compile: false,
+        bundle: true,
+      });
+      const agent = await agentFile.load();
+
+      expect(esbuild.build as Mock).not.toHaveBeenCalled();
+      expect(agentFile.getFilePath()).toEqual(agentPath);
+      expect(agent.name).toEqual('agent1');
+      await agentFile.dispose();
+    });
+
+    it('skips esbuild when compile is false and bundle is unset', async () => {
+      const agentPath = path.join(tempAgentsDir, 'agent1.js');
+      await fs.writeFile(agentPath, agent1JsContent);
+
+      const agentFile = new AgentFile(agentPath, {compile: false});
+      await agentFile.load();
+
+      expect(esbuild.build as Mock).not.toHaveBeenCalled();
+      expect(agentFile.getFilePath()).toEqual(agentPath);
+      await agentFile.dispose();
+    });
+
+    it('skips esbuild when neither compile nor bundle is set', async () => {
+      const agentPath = path.join(tempAgentsDir, 'agent1.js');
+      await fs.writeFile(agentPath, agent1JsContent);
+
+      const agentFile = new AgentFile(agentPath, {});
+      await agentFile.load();
+
+      expect(esbuild.build as Mock).not.toHaveBeenCalled();
+      expect(agentFile.getFilePath()).toEqual(agentPath);
+      await agentFile.dispose();
+    });
+
+    it('compiles when only bundle is set and compile is unspecified', async () => {
+      const agentPath = path.join(tempAgentsDir, 'agent2.ts');
+      await fs.writeFile(agentPath, agent2TsContent);
+
+      const compiledAgentPath = compiledPath('agent2.cjs');
+      (esbuild.build as Mock).mockImplementation(async () => {
+        await fs.writeFile(compiledAgentPath, agent2CjsContentMocked);
+        return Promise.resolve();
+      });
+
+      const agentFile = new AgentFile(agentPath, {bundle: true});
+      const agent = await agentFile.load();
+
+      expect(agent.name).toEqual('agent2');
+      expect(esbuild.build as Mock).toHaveBeenCalledTimes(1);
+      expect((esbuild.build as Mock).mock.calls[0][0]).toMatchObject({
+        entryPoints: [agentPath],
+        outfile: compiledAgentPath,
+        bundle: true,
+        minify: true,
+      });
+
+      await agentFile.dispose();
+    });
+
     it('loads agent with default export', async () => {
       const agentPath = path.join(tempAgentsDir, 'agent_default.js');
       await fs.writeFile(agentPath, agentDefaultExportContent);

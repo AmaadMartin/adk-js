@@ -83,7 +83,17 @@ export interface AgentLoadFailure {
  * Options for loading an agent file.
  */
 export interface AgentFileOptions {
+  /**
+   * Transpiles the agent file with esbuild before importing it. Defaults to
+   * `true`. Setting it to `false` skips the esbuild pass entirely, so `bundle`
+   * has no effect.
+   */
   compile?: boolean;
+  /**
+   * Bundles the agent file's dependencies into the emitted file and minifies
+   * it. Ignored when `compile` is `false`; implies compilation when `compile`
+   * is left unset.
+   */
   bundle?: boolean;
   moduleType?: FileModuleType;
 }
@@ -177,7 +187,9 @@ export class AgentFile {
     }
 
     let filePath = this.filePath;
-    const shouldCompile = this.options.compile || this.options.bundle;
+    // `compile` is the master switch: `bundle` only selects HOW the esbuild
+    // pass runs, so it can turn the pass on only when `compile` is unspecified.
+    const shouldCompile = this.options.compile ?? this.options.bundle ?? false;
 
     if (shouldCompile) {
       const moduleType =
