@@ -121,7 +121,7 @@ export class OperationParser {
           paramSchema: schema,
           description,
           required: true,
-          name: 'body',
+          name: 'array',
         });
       } else {
         this.params.push({
