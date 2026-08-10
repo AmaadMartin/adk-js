@@ -780,6 +780,27 @@ describe('RestApiTool Utilities', () => {
       expect(result.bodyData).toEqual({});
     });
 
+    it('should route an unnamed body parameter to the whole body', () => {
+      const endpoint = {
+        baseUrl: 'http://api.example.com',
+        path: '/items',
+        method: 'POST',
+      };
+      const operation: OpenAPIV3.OperationObject = {
+        operationId: 'legacyBody',
+        parameters: [{name: '', in: 'body', schema: {type: 'object'}}],
+        responses: {},
+      };
+      const parameters = new OperationParser(operation).getParameters();
+
+      const result = prepareRequestParams(endpoint, parameters, {
+        '': {id: 1},
+      });
+
+      expect(result.body).toEqual({id: 1});
+      expect(result.bodyData).toEqual({});
+    });
+
     describe('path parameter encoding', () => {
       const usersEndpoint = {
         baseUrl: 'http://api.example.com',

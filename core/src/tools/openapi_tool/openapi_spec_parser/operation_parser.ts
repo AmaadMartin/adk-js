@@ -90,8 +90,9 @@ export class OperationParser {
 
     if (schema && !('$ref' in schema)) {
       if (schema.type === 'object') {
-        const properties = schema.properties || {};
-        for (const [propName, propDetails] of Object.entries(properties)) {
+        for (const [propName, propDetails] of Object.entries(
+          schema.properties ?? {},
+        )) {
           if (!('$ref' in propDetails)) {
             this.params.push({
               originalName: propName,
