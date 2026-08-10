@@ -92,6 +92,26 @@ describe('OperationParser', () => {
     expect(schema).toBeTruthy();
     expect(schema.title).toBe('testOp_Arguments');
   });
+
+  it('should parse no parameters from a request body without content', () => {
+    const op: OpenAPIV3.OperationObject = {
+      operationId: 'testOp',
+      requestBody: {content: {}},
+      responses: {},
+    };
+
+    expect(new OperationParser(op).getParameters()).toEqual([]);
+  });
+
+  it('should parse no parameters from a media type without a schema', () => {
+    const op: OpenAPIV3.OperationObject = {
+      operationId: 'testOp',
+      requestBody: {content: {'application/json': {}}},
+      responses: {},
+    };
+
+    expect(new OperationParser(op).getParameters()).toEqual([]);
+  });
 });
 
 describe('OperationParser unresolved references', () => {
