@@ -172,7 +172,9 @@ export class OperationParser {
       const name = param.name;
       const count = nameCounts.get(name) || 0;
       if (count > 0) {
-        param.name = `${name}_${count}`;
+        // adk-python numbers duplicates from 0, so the second occurrence of a
+        // name gets the `_0` suffix.
+        param.name = `${name}_${count - 1}`;
       }
       nameCounts.set(name, count + 1);
     }
