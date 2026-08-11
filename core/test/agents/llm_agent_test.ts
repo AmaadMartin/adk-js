@@ -430,18 +430,14 @@ describe('LlmAgent Output Processing', () => {
       outputSchema: validationSchema,
       outputKey: 'result',
     });
-    const mockState = {
-      hasDelta: () => false,
-      get: () => undefined,
-      set: () => {},
-    };
     invocationContext = new InvocationContext({
       invocationId: 'inv_123',
-      session: {
+      session: createSession({
         id: 'sess_123',
-        state: mockState,
         events: [],
-      } as unknown as Session,
+        appName: 'test-app',
+        userId: 'test-user',
+      }),
       agent: agent,
       pluginManager: new PluginManager(),
     });
@@ -553,20 +549,15 @@ describe('LlmAgent Abort Handling', () => {
     const mockModel = new StreamingMockLlm(responseChunks);
     const agent = new LlmAgent({name: 'test_agent', model: mockModel});
 
-    const mockState = {
-      hasDelta: () => false,
-      get: () => undefined,
-      set: () => {},
-    };
-
     const abortController = new AbortController();
     const invocationContext = new InvocationContext({
       invocationId: 'inv_123',
-      session: {
+      session: createSession({
         id: 'sess_123',
-        state: mockState,
         events: [],
-      } as unknown as Session,
+        appName: 'test-app',
+        userId: 'test-user',
+      }),
       agent: agent,
       pluginManager: new PluginManager(),
       abortSignal: abortController.signal,
@@ -593,20 +584,15 @@ describe('LlmAgent Abort Handling', () => {
       requestProcessors: [mockProcessor],
     });
 
-    const mockState = {
-      hasDelta: () => false,
-      get: () => undefined,
-      set: () => {},
-    };
-
     const abortController = new AbortController();
     const invocationContext = new InvocationContext({
       invocationId: 'inv_123',
-      session: {
+      session: createSession({
         id: 'sess_123',
-        state: mockState,
         events: [],
-      } as unknown as Session,
+        appName: 'test-app',
+        userId: 'test-user',
+      }),
       agent: agent,
       pluginManager: new PluginManager(),
       abortSignal: abortController.signal,
@@ -633,19 +619,14 @@ describe('LlmAgent Abort Handling', () => {
       model: new MockLlm(null),
     });
 
-    const mockState = {
-      hasDelta: () => false,
-      get: () => undefined,
-      set: () => {},
-    };
-
     const invocationContext = new InvocationContext({
       invocationId: 'inv_123',
-      session: {
+      session: createSession({
         id: 'sess_123',
-        state: mockState,
         events: [],
-      } as unknown as Session,
+        appName: 'test-app',
+        userId: 'test-user',
+      }),
       agent: agent,
       pluginManager: new PluginManager(),
       abortSignal: abortController.signal,
@@ -672,19 +653,14 @@ describe('LlmAgent Abort Handling', () => {
       return undefined;
     };
 
-    const mockState = {
-      hasDelta: () => false,
-      get: () => undefined,
-      set: () => {},
-    };
-
     const invocationContext = new InvocationContext({
       invocationId: 'inv_123',
-      session: {
+      session: createSession({
         id: 'sess_123',
-        state: mockState,
         events: [],
-      } as unknown as Session,
+        appName: 'test-app',
+        userId: 'test-user',
+      }),
       agent: agent,
       pluginManager: new PluginManager(),
       abortSignal: abortController.signal,
@@ -720,19 +696,14 @@ describe('LlmAgent Abort Handling', () => {
       model: mockModel,
     });
 
-    const mockState = {
-      hasDelta: () => false,
-      get: () => undefined,
-      set: () => {},
-    };
-
     const invocationContext = new InvocationContext({
       invocationId: 'inv_123',
-      session: {
+      session: createSession({
         id: 'sess_123',
-        state: mockState,
         events: [],
-      } as unknown as Session,
+        appName: 'test-app',
+        userId: 'test-user',
+      }),
       agent: agent,
       pluginManager: new PluginManager(),
       abortSignal: abortController.signal,
@@ -758,20 +729,15 @@ describe('LlmAgent Abort Handling', () => {
       model: new MockLlm({content: {parts: [{text: 'mock response'}]}}),
     });
 
-    const mockState = {
-      hasDelta: () => false,
-      get: () => undefined,
-      set: () => {},
-    };
-
     const abortController = new AbortController();
     const invocationContext = new InvocationContext({
       invocationId: 'inv_123',
-      session: {
+      session: createSession({
         id: 'sess_123',
-        state: mockState,
         events: [],
-      } as unknown as Session,
+        appName: 'test-app',
+        userId: 'test-user',
+      }),
       agent: agent,
       pluginManager: new PluginManager(),
       abortSignal: abortController.signal,
@@ -805,18 +771,14 @@ describe('LlmAgent postprocess empty parts filtering', () => {
         partial: false,
       }),
     });
-    const mockState = {
-      hasDelta: () => false,
-      get: () => undefined,
-      set: () => {},
-    };
     const invocationContext = new InvocationContext({
       invocationId: 'inv_123',
-      session: {
+      session: createSession({
         id: 'sess_123',
-        state: mockState,
         events: [],
-      } as unknown as Session,
+        appName: 'test-app',
+        userId: 'test-user',
+      }),
       agent,
       pluginManager: new PluginManager(),
     });
