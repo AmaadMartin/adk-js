@@ -12,6 +12,10 @@ import {
   deployToAgentEngine,
   DeployToAgentEngineOptions,
 } from '../../src/cli/deploy/cli_deploy_agent_engine.js';
+import {
+  ARTIFACT_SERVICE_URI_ENV_VAR,
+  SESSION_SERVICE_URI_ENV_VAR,
+} from '../../src/cli/deploy/deploy_utils.js';
 import {AgentLoader} from '../../src/utils/agent_loader.js';
 import {
   createTempDir,
@@ -368,6 +372,16 @@ describe('deployToAgentEngine', () => {
               cpu: '1',
               memory: '2Gi',
             },
+            env: [
+              {
+                name: SESSION_SERVICE_URI_ENV_VAR,
+                value: 'http://session-service',
+              },
+              {
+                name: ARTIFACT_SERVICE_URI_ENV_VAR,
+                value: 'http://artifact-service',
+              },
+            ],
           },
         },
       },

