@@ -278,6 +278,7 @@ export function prepareRequestBody(
             ? finalData
             : JSON.stringify(finalData);
         } else if (mimeType === 'application/x-www-form-urlencoded') {
+          headers['Content-Type'] = mimeType;
           return new URLSearchParams(finalData as Record<string, string>);
         } else if (mimeType === 'multipart/form-data') {
           const formData = new FormData();
@@ -287,6 +288,9 @@ export function prepareRequestBody(
             }
           }
           return formData;
+        } else if (mimeType === 'application/octet-stream') {
+          headers['Content-Type'] = mimeType;
+          return finalData;
         } else if (mimeType === 'text/plain') {
           headers['Content-Type'] = mimeType;
           return String(finalData);
