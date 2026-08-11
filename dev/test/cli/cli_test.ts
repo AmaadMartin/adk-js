@@ -12,6 +12,7 @@ import {runAgent} from '../../src/cli/cli_run.js';
 import {deployToAgentEngine} from '../../src/cli/deploy/cli_deploy_agent_engine.js';
 import {deployToCloudRun} from '../../src/cli/deploy/cli_deploy_cloud_run.js';
 import {AdkApiServer} from '../../src/server/adk_api_server.js';
+import {AdkLogger} from '../../src/utils/logger.js';
 
 vi.mock('../../src/server/adk_api_server', () => {
   return {
@@ -180,6 +181,129 @@ describe('CLI Entrypoint', () => {
 
       const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
       expect(args.a2aAuthToken).toBe('tok');
+    });
+  });
+
+  describe('server start-up failure', () => {
+    const mockAdkApiServer = AdkApiServer as unknown as Mock;
+    let originalExitCode: typeof process.exitCode;
+
+    beforeEach(() => {
+      originalExitCode = process.exitCode;
+      process.exitCode = 0;
+    });
+
+    afterEach(() => {
+      process.exitCode = originalExitCode;
+    });
+
+    /** Makes the next `AdkApiServer` reject from `start()`; returns its `stop` mock. */
+    const rejectNextStart = (
+      error: unknown,
+      stop = vi.fn().mockResolvedValue(undefined),
+    ) => {
+      mockAdkApiServer.mockImplementationOnce(() => ({
+        start: vi.fn().mockRejectedValue(error),
+        stop,
+      }));
+      return stop;
+    };
+
+    const spyOnLoggerError = () =>
+      vi.spyOn(AdkLogger.prototype, 'error').mockImplementation(() => {});
+
+    const failIfProcessExits = () =>
+      vi.spyOn(process, 'exit').mockImplementation(() => {
+        throw new Error('process.exit was called');
+      });
+
+    it('should log the reason, stop the server and exit 1 for web', async () => {
+      const errorSpy = spyOnLoggerError();
+      const exitSpy = failIfProcessExits();
+      const stop = rejectNextStart(new Error('Port 8000 is already in use'));
+
+      await parse(['web']);
+
+      expect(errorSpy).toHaveBeenCalledWith(
+        'Error starting web server:',
+        'Port 8000 is already in use',
+      );
+      expect(stop).toHaveBeenCalledTimes(1);
+      expect(process.exitCode).toBe(1);
+      expect(exitSpy).not.toHaveBeenCalled();
+    });
+
+    it('should log the reason, stop the server and exit 1 for api_server', async () => {
+      const errorSpy = spyOnLoggerError();
+      const exitSpy = failIfProcessExits();
+      const stop = rejectNextStart(new Error('Port 8000 is already in use'));
+
+      await parse(['api_server']);
+
+      expect(errorSpy).toHaveBeenCalledWith(
+        'Error starting API server:',
+        'Port 8000 is already in use',
+      );
+      expect(stop).toHaveBeenCalledTimes(1);
+      expect(process.exitCode).toBe(1);
+      expect(exitSpy).not.toHaveBeenCalled();
+    });
+
+    it('should swallow a stop() rejection from a server that never bound', async () => {
+      const errorSpy = spyOnLoggerError();
+      rejectNextStart(
+        new Error('Port 8000 is already in use'),
+        vi.fn().mockRejectedValue(new Error('Server is not running.')),
+      );
+
+      await expect(parse(['api_server'])).resolves.toBeUndefined();
+
+      expect(errorSpy).toHaveBeenCalledWith(
+        'Error starting API server:',
+        'Port 8000 is already in use',
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('should log a non-Error rejection as its string form', async () => {
+      const errorSpy = spyOnLoggerError();
+      rejectNextStart('the agent directory does not exist');
+
+      await parse(['web']);
+
+      expect(errorSpy).toHaveBeenCalledWith(
+        'Error starting web server:',
+        'the agent directory does not exist',
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('should report a constructor failure with no server to stop', async () => {
+      const errorSpy = spyOnLoggerError();
+      mockAdkApiServer.mockImplementationOnce(() => {
+        throw new Error('bad session service uri');
+      });
+
+      await expect(parse(['web'])).resolves.toBeUndefined();
+
+      expect(errorSpy).toHaveBeenCalledWith(
+        'Error starting web server:',
+        'bad session service uri',
+      );
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('should leave the exit code alone and not stop the server on success', async () => {
+      const stop = vi.fn().mockResolvedValue(undefined);
+      mockAdkApiServer.mockImplementationOnce(() => ({
+        start: vi.fn().mockResolvedValue(undefined),
+        stop,
+      }));
+
+      await parse(['api_server']);
+
+      expect(process.exitCode).toBe(0);
+      expect(stop).not.toHaveBeenCalled();
     });
   });
 
