@@ -411,4 +411,11 @@ describe('BasePlugin', () => {
       resetLogger();
     }
   });
+
+  it('default close should resolve and be safe to call twice', async () => {
+    const plugin = new TestablePlugin('closable_plugin');
+
+    await expect(plugin.close()).resolves.toBeUndefined();
+    await expect(plugin.close()).resolves.toBeUndefined();
+  });
 });

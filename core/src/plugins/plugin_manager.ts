@@ -389,4 +389,30 @@ export class PluginManager {
       'onToolErrorCallback',
     )) as Record<string, unknown> | undefined;
   }
+
+  /**
+   * Closes every registered plugin.
+   *
+   * Plugins are closed sequentially in registration order. A plugin that
+   * throws does not prevent the remaining plugins from being closed; all
+   * failures are collected and raised together once the loop completes.
+   *
+   * @throws An `AggregateError` naming every plugin that failed to close.
+   */
+  async close(): Promise<void> {
+    const failures: Array<[string, unknown]> = [];
+    for (const plugin of this.plugins) {
+      try {
+        await plugin.close();
+      } catch (e: unknown) {
+        failures.push([plugin.name, e]);
+      }
+    }
+    if (failures.length > 0) {
+      throw new AggregateError(
+        failures.map(([, error]) => error),
+        `Failed to close plugins: ${failures.map(([name]) => name).join(', ')}`,
+      );
+    }
+  }
 }

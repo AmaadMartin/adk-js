@@ -333,3 +333,67 @@ describe('PluginManager', () => {
     expect(plugin1.callLog.sort()).toEqual(expectedCallbacks.sort());
   });
 });
+
+class ClosablePlugin extends BasePlugin {
+  closeCount = 0;
+
+  constructor(
+    name: string,
+    private readonly closeLog: string[],
+    private readonly failure?: Error,
+  ) {
+    super(name);
+  }
+
+  override async close(): Promise<void> {
+    this.closeCount++;
+    this.closeLog.push(this.name);
+    if (this.failure) {
+      throw this.failure;
+    }
+  }
+}
+
+describe('PluginManager.close', () => {
+  it('should close every registered plugin in registration order', async () => {
+    const closeLog: string[] = [];
+    const manager = new PluginManager([
+      new ClosablePlugin('plugin1', closeLog),
+      new ClosablePlugin('plugin2', closeLog),
+      new ClosablePlugin('plugin3', closeLog),
+    ]);
+
+    await manager.close();
+
+    expect(closeLog).toEqual(['plugin1', 'plugin2', 'plugin3']);
+  });
+
+  it('should resolve for a manager with no plugins', async () => {
+    await expect(new PluginManager().close()).resolves.toBeUndefined();
+  });
+
+  it('should close the remaining plugins and aggregate the failures', async () => {
+    const closeLog: string[] = [];
+    const firstFailure = new Error('first boom');
+    const secondFailure = new Error('second boom');
+    const healthy = new ClosablePlugin('plugin_good', closeLog);
+    const manager = new PluginManager([
+      new ClosablePlugin('plugin_bad1', closeLog, firstFailure),
+      new ClosablePlugin('plugin_bad2', closeLog, secondFailure),
+      healthy,
+    ]);
+
+    const error = await manager.close().catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(AggregateError);
+    expect((error as AggregateError).errors).toEqual([
+      firstFailure,
+      secondFailure,
+    ]);
+    expect((error as AggregateError).message).toEqual(
+      'Failed to close plugins: plugin_bad1, plugin_bad2',
+    );
+    expect(healthy.closeCount).toEqual(1);
+    expect(closeLog).toEqual(['plugin_bad1', 'plugin_bad2', 'plugin_good']);
+  });
+});
