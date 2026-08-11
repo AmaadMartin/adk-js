@@ -116,6 +116,31 @@ describe('OAuth2CredentialExchanger', () => {
       expect(result.wasExchanged).toBe(true);
       expect(result.credential.oauth2?.accessToken).toBe('new-token');
     });
+
+    it('returns the unexchanged credential when the delegated authorization code exchange fails', async () => {
+      const exchanger = new OAuth2CredentialExchanger();
+      const authCredential = {
+        oauth2: {clientId: 'id', clientSecret: 'secret', authCode: 'code'},
+      } as AuthCredential;
+      const authScheme = {
+        flows: {
+          authorizationCode: {},
+        },
+      } as AuthScheme;
+
+      vi.mocked(oauth2Utils.getTokenEndpoint).mockReturnValue(
+        'https://example.com/token',
+      );
+      vi.mocked(oauth2Utils.fetchOAuth2Tokens).mockRejectedValue(
+        new Error('Service Unavailable'),
+      );
+
+      const result = await exchanger.exchange({authCredential, authScheme});
+
+      expect(result.wasExchanged).toBe(false);
+      expect(result.credential).toBe(authCredential);
+      expect(result.credential.oauth2?.accessToken).toBeUndefined();
+    });
   });
 
   describe('determineGrantType', () => {
@@ -463,6 +488,59 @@ describe('OAuth2CredentialExchanger', () => {
       await expect(
         exchangeAuthorizationCode({authCredential, authScheme}),
       ).rejects.toThrow('State mismatch detected');
+    });
+
+    it('reports a state mismatch as a mismatch rather than a parse failure', async () => {
+      const authCredential = {
+        oauth2: {
+          clientId: 'id',
+          clientSecret: 'secret',
+          authResponseUri: 'https://callback?code=abc&state=wrong',
+          state: 'expected-state',
+        },
+      } as AuthCredential;
+      const authScheme = {} as AuthScheme;
+
+      vi.mocked(oauth2Utils.getTokenEndpoint).mockReturnValue(
+        'https://example.com/token',
+      );
+      vi.mocked(oauth2Utils.parseAuthorizationCode).mockReturnValue('abc');
+
+      await expect(
+        exchangeAuthorizationCode({authCredential, authScheme}),
+      ).rejects.toThrow(
+        new CredentialExchangeError(
+          'State mismatch detected. Potential CSRF attack.',
+        ),
+      );
+      expect(oauth2Utils.fetchOAuth2Tokens).not.toHaveBeenCalled();
+    });
+
+    it('returns the unexchanged credential if authResponseUri cannot be parsed for state validation', async () => {
+      const authCredential = {
+        oauth2: {
+          clientId: 'id',
+          clientSecret: 'secret',
+          authResponseUri: 'not a url',
+          state: 'expected-state',
+        },
+      } as AuthCredential;
+      const authScheme = {} as AuthScheme;
+
+      vi.mocked(oauth2Utils.getTokenEndpoint).mockReturnValue(
+        'https://example.com/token',
+      );
+      vi.mocked(oauth2Utils.parseAuthorizationCode).mockReturnValue('abc');
+
+      const result = await exchangeAuthorizationCode({
+        authCredential,
+        authScheme,
+      });
+
+      expect(result.wasExchanged).toBe(false);
+      expect(result.credential).toBe(authCredential);
+      expect(result.credential.oauth2?.accessToken).toBeUndefined();
+      expect(oauth2Utils.fetchOAuth2Tokens).not.toHaveBeenCalled();
     });
 
     it('succeeds if state in authResponseUri matches expected state', async () => {
