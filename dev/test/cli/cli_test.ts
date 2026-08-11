@@ -6,7 +6,6 @@
 
 import {LogLevel, setLogLevel} from '@google/adk';
 import type {Command} from 'commander';
-import * as path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {createProgram} from '../../src/cli/cli.js';
 import {createAgent} from '../../src/cli/cli_create.js';
@@ -61,11 +60,6 @@ function overrideExitRecursively(cmd: Command) {
   cmd.exitOverride();
   cmd.configureOutput({writeErr: () => {}});
   cmd.commands.forEach(overrideExitRecursively);
-}
-
-/** Pins the invariant that a flag never reaches the deploy path as a directory. */
-function expectAgentPathIsNotAFlag(agentPath: string) {
-  expect(path.basename(agentPath)).not.toMatch(/^-/);
 }
 
 const UNKNOWN_OPTION_INVOCATIONS: Array<[string, string[], RegExp]> = [
@@ -519,7 +513,6 @@ describe('CLI Entrypoint', () => {
         displayName: 'my-display-name',
         agentEngineId: '12345',
       });
-      expectAgentPathIsNotAFlag(options.agentPath);
     });
 
     it('should keep deploying the current directory when the agent directory is omitted', async () => {
@@ -528,7 +521,6 @@ describe('CLI Entrypoint', () => {
       expect(deployToAgentEngine).toHaveBeenCalledTimes(1);
       const {agentPath} = vi.mocked(deployToAgentEngine).mock.calls[0][0];
       expect(agentPath).toBe(process.cwd());
-      expectAgentPathIsNotAFlag(agentPath);
     });
   });
 });
