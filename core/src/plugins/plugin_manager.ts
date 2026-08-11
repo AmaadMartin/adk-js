@@ -13,6 +13,7 @@ import {Event} from '../events/event.js';
 import {LlmRequest} from '../models/llm_request.js';
 import {LlmResponse} from '../models/llm_response.js';
 import {BaseTool} from '../tools/base_tool.js';
+import {formatError} from '../utils/error_utils.js';
 import {logger} from '../utils/logger.js';
 
 import {BasePlugin, ContextCompactionTrigger} from './base_plugin.js';
@@ -388,5 +389,34 @@ export class PluginManager {
         plugin.onToolErrorCallback({tool, toolArgs, toolContext, error}),
       'onToolErrorCallback',
     )) as Record<string, unknown> | undefined;
+  }
+
+  /**
+   * Closes every registered plugin.
+   *
+   * Plugins are closed sequentially in registration order. A plugin that
+   * throws does not prevent the remaining plugins from being closed; all
+   * failures are collected and raised together once the fan-out completes.
+   *
+   * @throws An `AggregateError` naming every plugin that failed to close.
+   */
+  async close(): Promise<void> {
+    const failures: Array<[string, unknown]> = [];
+    for (const plugin of this.plugins) {
+      try {
+        await plugin.close();
+      } catch (e: unknown) {
+        failures.push([plugin.name, e]);
+        logger.error(
+          `Error closing plugin '${plugin.name}': ${formatError(e)}`,
+        );
+      }
+    }
+    if (failures.length > 0) {
+      throw new AggregateError(
+        failures.map(([, error]) => error),
+        `Failed to close plugins: ${failures.map(([name]) => name).join(', ')}`,
+      );
+    }
   }
 }
