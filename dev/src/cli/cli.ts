@@ -7,9 +7,11 @@
 
 import {
   BaseArtifactService,
+  BaseMemoryService,
   BaseSessionService,
   LogLevel,
   getArtifactServiceFromUri,
+  getMemoryServiceFromUri,
   getSessionServiceFromUri,
   setLogLevel as setAdkCoreLogLevel,
 } from '@google/adk';
@@ -66,6 +68,12 @@ function getArtifactServiceFromOptions(options: {
   return getArtifactServiceFromUri(
     options['artifact_service_uri'] || 'memory://',
   );
+}
+
+function getMemoryServiceFromOptions(options: {
+  memory_service_uri?: string;
+}): BaseMemoryService {
+  return getMemoryServiceFromUri(options['memory_service_uri'] || 'memory://');
 }
 
 function getAgentFileOptions(options: {
@@ -147,6 +155,10 @@ const SESSION_SERVICE_URI_OPTION = new Option(
 const ARTIFACT_SERVICE_URI_OPTION = new Option(
   '--artifact_service_uri <string>',
   'Optional. The URI of the artifact service. Supported URIs: gs://<bucket name> for GCS artifact service.',
+);
+const MEMORY_SERVICE_URI_OPTION = new Option(
+  '--memory_service_uri <string>',
+  'Optional. The URI of the memory service. Supported URIs: memory:// for the in-memory memory service, agentengine://<agent_engine> for Vertex AI Agent Engine Memory Bank, where <agent_engine> is either the resource id or the full resource name projects/<project>/locations/<location>/reasoningEngines/<id>.',
 );
 const OTEL_TO_CLOUD_OPTION = new Option(
   '--otel_to_cloud [boolean]',
@@ -244,6 +256,7 @@ export function createProgram(): Command {
     .addOption(LOG_LEVEL_OPTION)
     .addOption(SESSION_SERVICE_URI_OPTION)
     .addOption(ARTIFACT_SERVICE_URI_OPTION)
+    .addOption(MEMORY_SERVICE_URI_OPTION)
     .addOption(OTEL_TO_CLOUD_OPTION)
     .addOption(COMPILE_AGENT_FILE)
     .addOption(BUNDLE_AGENT_FILE)
@@ -266,6 +279,7 @@ export function createProgram(): Command {
           allowedHosts: getAllowedHosts(options['allowed_hosts']),
           sessionService: getSessionServiceFromOptions(options),
           artifactService: getArtifactServiceFromOptions(options),
+          memoryService: getMemoryServiceFromOptions(options),
           otelToCloud: options['otel_to_cloud'] ? true : false,
           agentFileLoadOptions: getAgentFileOptions(options),
           a2a: getBoolean(options['a2a']),
@@ -292,6 +306,7 @@ export function createProgram(): Command {
     .addOption(LOG_LEVEL_OPTION)
     .addOption(SESSION_SERVICE_URI_OPTION)
     .addOption(ARTIFACT_SERVICE_URI_OPTION)
+    .addOption(MEMORY_SERVICE_URI_OPTION)
     .addOption(OTEL_TO_CLOUD_OPTION)
     .addOption(COMPILE_AGENT_FILE)
     .addOption(BUNDLE_AGENT_FILE)
@@ -314,6 +329,7 @@ export function createProgram(): Command {
           allowedHosts: getAllowedHosts(options['allowed_hosts']),
           sessionService: getSessionServiceFromOptions(options),
           artifactService: getArtifactServiceFromOptions(options),
+          memoryService: getMemoryServiceFromOptions(options),
           otelToCloud: options['otel_to_cloud'] ? true : false,
           agentFileLoadOptions: getAgentFileOptions(options),
           a2a: getBoolean(options['a2a']),
@@ -390,6 +406,7 @@ export function createProgram(): Command {
     .addOption(LOG_LEVEL_OPTION)
     .addOption(SESSION_SERVICE_URI_OPTION)
     .addOption(ARTIFACT_SERVICE_URI_OPTION)
+    .addOption(MEMORY_SERVICE_URI_OPTION)
     .addOption(OTEL_TO_CLOUD_OPTION)
     .addOption(COMPILE_AGENT_FILE)
     .addOption(BUNDLE_AGENT_FILE)
@@ -407,6 +424,7 @@ export function createProgram(): Command {
           sessionId: options['session_id'],
           sessionService: getSessionServiceFromOptions(options),
           artifactService: getArtifactServiceFromOptions(options),
+          memoryService: getMemoryServiceFromOptions(options),
           otelToCloud: options['otel_to_cloud'] ? true : false,
           agentFileLoadOptions: getAgentFileOptions(options),
           reloadAgents: getBoolean(options['reload_agents']),
