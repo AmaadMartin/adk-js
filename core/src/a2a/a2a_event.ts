@@ -32,6 +32,7 @@ export enum TaskState {
   CANCELED = 'canceled',
   REJECTED = 'rejected',
   INPUT_REQUIRED = 'input-required',
+  AUTH_REQUIRED = 'auth-required',
 }
 
 /**
@@ -122,6 +123,16 @@ export function isInputRequiredTaskStatusUpdateEvent(event: unknown): boolean {
   return (
     (isTaskStatusUpdateEvent(event) || isTask(event)) &&
     event.status.state === TaskState.INPUT_REQUIRED
+  );
+}
+
+/**
+ * Checks if the event is an auth required task status update event.
+ */
+export function isAuthRequiredTaskStatusUpdateEvent(event: unknown): boolean {
+  return (
+    (isTaskStatusUpdateEvent(event) || isTask(event)) &&
+    event.status.state === TaskState.AUTH_REQUIRED
   );
 }
 

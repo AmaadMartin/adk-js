@@ -22,6 +22,7 @@ import {
   createTaskWorkingEvent,
   getEventMetadata,
   getFailedTaskStatusUpdateEventError,
+  isAuthRequiredTaskStatusUpdateEvent,
   isFailedTaskStatusUpdateEvent,
   isInputRequiredTaskStatusUpdateEvent,
   isMessage,
@@ -141,6 +142,28 @@ describe('a2a_event', () => {
           status: {state: 'working'},
         }),
       ).toBe(false);
+    });
+
+    it('isAuthRequiredTaskStatusUpdateEvent', () => {
+      expect(
+        isAuthRequiredTaskStatusUpdateEvent({
+          kind: 'status-update',
+          status: {state: 'auth-required'},
+        }),
+      ).toBe(true);
+      expect(
+        isAuthRequiredTaskStatusUpdateEvent({
+          kind: 'task',
+          status: {state: 'auth-required'},
+        }),
+      ).toBe(true);
+      expect(
+        isAuthRequiredTaskStatusUpdateEvent({
+          kind: 'status-update',
+          status: {state: 'input-required'},
+        }),
+      ).toBe(false);
+      expect(isAuthRequiredTaskStatusUpdateEvent({foo: 'bar'})).toBe(false);
     });
   });
 
