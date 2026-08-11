@@ -208,12 +208,16 @@ function agentNameFor(entryPoint, agentsDir) {
 
 /**
  * The loader deletes the bundle of a file that compiled but exported no agent,
- * so such a build has no size to report.
+ * so such a build reports nothing: it can be neither sized nor re-imported.
  */
 async function bundleReport(build, agentsDir) {
   const stats = await statOrUndefined(build.outfile);
   return stats
-    ? {name: agentNameFor(build.entryPoint, agentsDir), bytes: stats.size}
+    ? {
+        name: agentNameFor(build.entryPoint, agentsDir),
+        bytes: stats.size,
+        outfile: build.outfile,
+      }
     : undefined;
 }
 
@@ -353,7 +357,9 @@ async function runOnce(agentsDir, AgentLoader) {
     const bundles = (
       await Promise.all(builds.map((build) => bundleReport(build, agentsDir)))
     ).filter((bundle) => bundle !== undefined);
-    const importMs = await timeImportPass(builds.map((build) => build.outfile));
+    const importMs = await timeImportPass(
+      bundles.map((bundle) => bundle.outfile),
+    );
     const e2eMs = endedAt - startedAt;
 
     return {
