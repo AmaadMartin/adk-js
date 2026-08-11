@@ -7,7 +7,10 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
 import {Client} from '@google-cloud/vertexai/build/src/genai/client.js';
-import {ReasoningEngine as VertexReasoningEngine} from '@google-cloud/vertexai/build/src/genai/types.js';
+import {
+  EnvVar,
+  ReasoningEngine as VertexReasoningEngine,
+} from '@google-cloud/vertexai/build/src/genai/types.js';
 
 import {AgentLoader} from '../../utils/agent_loader.js';
 import {createTempDir, isFile, isFolderExists} from '../../utils/file_utils.js';
@@ -16,6 +19,7 @@ import {
   copyAgentFiles,
   createDockerFile,
   createPackageJson,
+  getServiceUriEnvVars,
   resolveDefaultFromGcloudConfig,
   spawnAsync,
 } from './deploy_utils.js';
@@ -139,6 +143,10 @@ export async function deployToAgentEngine(options: DeployToAgentEngineOptions) {
       location: options.region,
     });
 
+    const serviceUriEnv: EnvVar[] = Object.entries(
+      getServiceUriEnvVars(options),
+    ).map(([name, value]) => ({name, value}));
+
     const config = {
       displayName,
       description: options.description,
@@ -154,6 +162,7 @@ export async function deployToAgentEngine(options: DeployToAgentEngineOptions) {
             cpu: '1',
             memory: '2Gi',
           },
+          ...(serviceUriEnv.length ? {env: serviceUriEnv} : {}),
         },
       },
     };

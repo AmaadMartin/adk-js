@@ -35,6 +35,37 @@ export const spawnAsync = (
 
 export const REQUIRED_NPM_PACKAGES = ['@google/adk'];
 
+/**
+ * Environment variables the deployed container reads the session and artifact
+ * service URIs from.
+ *
+ * The deploy commands set these on the running service, and the generated
+ * Dockerfile only references them by name. A service URI routinely carries a
+ * password in its userinfo, and a value written into the Dockerfile is baked
+ * into the image config and history, where everyone with read access to the
+ * image repository can recover it.
+ */
+export const SESSION_SERVICE_URI_ENV_VAR = 'ADK_SESSION_SERVICE_URI';
+export const ARTIFACT_SERVICE_URI_ENV_VAR = 'ADK_ARTIFACT_SERVICE_URI';
+
+/**
+ * Maps the supplied service URIs to the environment variables the deployed
+ * container reads them from. Returns an empty record when neither is set.
+ */
+export function getServiceUriEnvVars(options: {
+  sessionServiceUri?: string;
+  artifactServiceUri?: string;
+}): Record<string, string> {
+  const envVars: Record<string, string> = {};
+  if (options.sessionServiceUri) {
+    envVars[SESSION_SERVICE_URI_ENV_VAR] = options.sessionServiceUri;
+  }
+  if (options.artifactServiceUri) {
+    envVars[ARTIFACT_SERVICE_URI_ENV_VAR] = options.artifactServiceUri;
+  }
+  return envVars;
+}
+
 export interface CreateDockerFileContentOptions {
   appName?: string;
   project: string;
@@ -78,13 +109,12 @@ function assertSafeDockerfileToken(value: string, label: string): void {
   }
 }
 
-// logLevel, allowOrigins, sessionServiceUri and artifactServiceUri are
-// free-form (a service URI can carry credentials, allowOrigins is a
-// comma-separated list) so they can't be restricted to the plain-identifier
-// token above. They only reach the Dockerfile's CMD line, so a newline in
-// any of them still breaks out of that instruction the same way appName
-// does, and once inside the CMD line they're read by /bin/sh at container
-// start, so shell metacharacters must be neutralized too.
+// logLevel and allowOrigins are free-form (allowOrigins is a comma-separated
+// list) so they can't be restricted to the plain-identifier token above. They
+// only reach the Dockerfile's CMD line, so a newline in either of them still
+// breaks out of that instruction the same way appName does, and once inside
+// the CMD line they're read by /bin/sh at container start, so shell
+// metacharacters must be neutralized too.
 function assertNoDockerfileNewline(value: string, label: string): void {
   if (/[\r\n]/.test(value)) {
     throw new Error(
@@ -123,17 +153,18 @@ export function createDockerFileContent(
     );
   }
 
+  // Only the presence of a URI is read here. The value is delivered to the
+  // running container as an environment variable, which /bin/sh expands out of
+  // the CMD line's shell form at container start.
   if (options.artifactServiceUri) {
-    assertNoDockerfileNewline(options.artifactServiceUri, 'artifactServiceUri');
     adkServerOptions.push(
-      `--artifact_service_uri=${shellQuote(options.artifactServiceUri)}`,
+      `--artifact_service_uri="$${ARTIFACT_SERVICE_URI_ENV_VAR}"`,
     );
   }
 
   if (options.sessionServiceUri) {
-    assertNoDockerfileNewline(options.sessionServiceUri, 'sessionServiceUri');
     adkServerOptions.push(
-      `--session_service_uri=${shellQuote(options.sessionServiceUri)}`,
+      `--session_service_uri="$${SESSION_SERVICE_URI_ENV_VAR}"`,
     );
   }
 
