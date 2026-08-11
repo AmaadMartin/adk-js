@@ -57,9 +57,22 @@ function parseLogLevel(value: string): string {
   return normalized;
 }
 
-function getLogLevelFromOptions(options: {log_level?: string}): LogLevel {
+/**
+ * Applies the requested level to both loggers the CLI owns: the ADK core
+ * logger and the CLI's own logger.
+ *
+ * @returns The applied level, for callers that forward it further.
+ */
+function applyLogLevel(
+  logger: AdkLogger,
+  options: {log_level?: string},
+): LogLevel {
   // `??`, not `||`: LogLevel.DEBUG is 0 and would otherwise be discarded.
-  return LOG_LEVEL_MAP.get(options.log_level ?? 'info') ?? LogLevel.INFO;
+  const logLevel =
+    LOG_LEVEL_MAP.get(options.log_level ?? 'info') ?? LogLevel.INFO;
+  setAdkCoreLogLevel(logLevel);
+  logger.setLogLevel(logLevel);
+  return logLevel;
 }
 
 function getAbsolutePath(p: string): string {
@@ -245,8 +258,7 @@ export function createProgram(): Command {
     .addOption(A2A_OPTION)
     .addOption(RELOAD_AGENTS_OPTION)
     .action(async (agentsDir: string, options: Record<string, string>) => {
-      const logLevel = getLogLevelFromOptions(options);
-      setAdkCoreLogLevel(logLevel);
+      const logLevel = applyLogLevel(logger, options);
 
       try {
         const server = new AdkApiServer({
@@ -289,8 +301,7 @@ export function createProgram(): Command {
     .addOption(A2A_OPTION)
     .addOption(RELOAD_AGENTS_OPTION)
     .action(async (agentsDir: string, options: Record<string, string>) => {
-      const logLevel = getLogLevelFromOptions(options);
-      setAdkCoreLogLevel(logLevel);
+      const logLevel = applyLogLevel(logger, options);
 
       try {
         const server = new AdkApiServer({
@@ -383,7 +394,7 @@ export function createProgram(): Command {
     .addOption(AGENT_FILE_MODULE_TYPE)
     .addOption(RELOAD_AGENTS_OPTION)
     .action(async (agentPath: string, options: Record<string, string>) => {
-      setAdkCoreLogLevel(getLogLevelFromOptions(options));
+      applyLogLevel(logger, options);
 
       try {
         await runAgent({
@@ -438,6 +449,8 @@ export function createProgram(): Command {
     .addOption(AGENT_FILE_MODULE_TYPE)
     .addOption(A2A_OPTION)
     .action(async (agentPath: string, options: Record<string, string>) => {
+      applyLogLevel(logger, options);
+
       const extraGcloudArgs = [];
       for (const arg of process.argv.slice(5)) {
         let argName = arg.replace(/^-+/, '');
@@ -502,6 +515,8 @@ export function createProgram(): Command {
       .addOption(A2A_OPTION)
       .addOption(AGENT_ENGINE_ID_OPTION)
       .action(async (agentPath: string, options: Record<string, string>) => {
+        applyLogLevel(logger, options);
+
         try {
           await deployToAgentEngine({
             agentPath: getAbsolutePath(agentPath),
@@ -551,7 +566,7 @@ export function createProgram(): Command {
     )
     .option('--force', 'Force run skipped tests.')
     .action(async (options: Record<string, string>) => {
-      setAdkCoreLogLevel(getLogLevelFromOptions(options));
+      applyLogLevel(logger, options);
 
       runIntegrationTests({
         agentsDir: options['agents_dir'],
