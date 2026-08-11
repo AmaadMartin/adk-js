@@ -886,8 +886,6 @@ export class AdkApiServer {
         return;
       }
 
-      let responseCompleted = false;
-
       try {
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Content-Type', 'text/event-stream');
@@ -907,18 +905,15 @@ export class AdkApiServer {
           res.write(`data: ${JSON.stringify(event)}\n\n`);
         }
 
-        responseCompleted = true;
         res.end();
       } catch (e: unknown) {
         if (res.headersSent) {
-          if (!responseCompleted) {
-            const error = (e as Error).message;
-            this.logger.error(error);
-            try {
-              res.end(`data: ${JSON.stringify({error})}\n\n`);
-            } catch {
-              // Ignore errors from res.end when the response has already been sent.
-            }
+          const error = (e as Error).message;
+          this.logger.error(error);
+          try {
+            res.end(`data: ${JSON.stringify({error})}\n\n`);
+          } catch {
+            // Ignore errors from res.end when the response has already been sent.
           }
         } else {
           const error = `Failed to run agent: ${e}`;
