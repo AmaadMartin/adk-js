@@ -51,6 +51,10 @@ export interface RunnerConfig {
 
   /**
    * The application name. Required if `app` is not provided.
+   *
+   * When both are given, this name overrides `app.name`. A host that addresses
+   * the app by its own key, such as the dev server, then stores sessions and
+   * artifacts under that key.
    */
   appName?: string;
 
@@ -152,7 +156,7 @@ export class Runner {
    * @param input The configuration for the runner.
    */
   constructor(input: RunnerConfig) {
-    const appName = input.app?.name ?? input.appName;
+    const appName = input.appName ?? input.app?.name;
     const agent = input.app?.rootAgent ?? input.agent;
     if (!agent) {
       throw new Error(

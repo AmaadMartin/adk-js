@@ -1017,6 +1017,13 @@ export class AdkApiServer {
     });
   }
 
+  /**
+   * Builds the {@link Runner} for an app key, and caches it under that key.
+   *
+   * Every route and the dev UI address an app by its key, so the key is the
+   * authoritative app name here: it names the session and artifact namespace
+   * the rest of the HTTP surface reads.
+   */
   private async getRunner(
     agentOrApp: BaseAgent | App,
     appName: string,
@@ -1024,6 +1031,12 @@ export class AdkApiServer {
     if (!(appName in this.runnerCache)) {
       const isAppInstance = isApp(agentOrApp);
       const agent = isAppInstance ? agentOrApp.rootAgent : agentOrApp;
+      if (isAppInstance && agentOrApp.name !== appName) {
+        this.logger.warn(
+          `App '${agentOrApp.name}' is served under the app key '${appName}'. ` +
+            `The key wins: sessions and artifacts are stored under '${appName}'.`,
+        );
+      }
       this.runnerCache[appName] = new Runner({
         app: isAppInstance ? agentOrApp : undefined,
         appName,
