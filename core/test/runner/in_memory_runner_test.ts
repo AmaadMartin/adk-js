@@ -5,6 +5,7 @@
  */
 
 import {
+  App,
   BaseAgent,
   BasePlugin,
   BaseTool,
@@ -54,6 +55,20 @@ describe('InMemoryRunner', () => {
     const runner = new InMemoryRunner({agent, appName: 'MyApp'});
 
     expect(runner.appName).toBe('MyApp');
+  });
+
+  it('uses the app name when constructed with an app', () => {
+    const app = new App({name: 'app_from_module', rootAgent: new MockAgent()});
+    const runner = new InMemoryRunner({app});
+
+    expect(runner.appName).toBe('app_from_module');
+  });
+
+  it('prefers an explicit appName over the app name', () => {
+    const app = new App({name: 'app_from_module', rootAgent: new MockAgent()});
+    const runner = new InMemoryRunner({app, appName: 'custom'});
+
+    expect(runner.appName).toBe('custom');
   });
 
   it('should initialize with in-memory services', () => {
