@@ -1,8 +1,0 @@
-{
-  "name": "discovery-test",
-  "version": "1.0.0",
-  "devDependencies": {
-    "@google/adk-devtools": "file:../../../../dev",
-    "@google/adk": "file:../../../../core"
-  }
-}
