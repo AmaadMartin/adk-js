@@ -319,6 +319,24 @@ describe('askDataAgent', () => {
     });
   });
 
+  it('runs the preflight without the settings, as adk-python does', async () => {
+    queueJson({name: 'projects/p/locations/eu/dataAgents/a'});
+    queueStream(['[{', '"systemMessage": {"text": "hi"}', '}]']);
+
+    await askDataAgent(
+      {dataAgentName: 'projects/p/locations/eu/dataAgents/a', query: 'q'},
+      deps({settings: {location: 'us-central1'}}),
+    );
+
+    const [preflight, chat] = recordedRequests();
+    expect(preflight.url).toBe(
+      `${EU_ENDPOINT}/v1/projects/p/locations/eu/dataAgents/a`,
+    );
+    expect(chat.url).toBe(
+      'https://geminidataanalytics-us-central1.googleapis.com/v1/projects/p/locations/eu:chat',
+    );
+  });
+
   it('defaults to 50 rows when no settings are given', async () => {
     const rows = Array.from({length: 51}, (_, i) => ({a: i}));
     queueJson({name: AGENT_NAME});
