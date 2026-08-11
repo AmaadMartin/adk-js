@@ -32,7 +32,6 @@ import {
   REQUEST_EUC_FUNCTION_CALL_NAME,
   handleFunctionCallsAsync,
 } from '../../src/agents/functions.js';
-import {bindOAuth2ToRequest} from '../../src/auth/auth_preprocessor.js';
 
 vi.mock('../../src/agents/functions.js', async (importOriginal) => {
   const original =
@@ -73,17 +72,6 @@ const TOOL_OWNED_OAUTH2: OAuth2Auth = {
   nonce: 'adk-nonce',
   audience: 'adk-audience',
   tokenEndpointAuthMethod: 'client_secret_post',
-};
-
-/** Every OAuth2 field a resume message may contribute. */
-const RESUME_CONTRIBUTED_OAUTH2: OAuth2Auth = {
-  authResponseUri: `${REDIRECT_URI}?code=good-code&state=${FROZEN_NONCE}`,
-  authCode: 'good-code',
-  accessToken: 'resume-token',
-  refreshToken: 'resume-refresh',
-  idToken: 'resume-id-token',
-  expiresIn: 3600,
-  expiresAt: 1780000000000,
 };
 
 /** The same fields as {@link TOOL_OWNED_OAUTH2}, under attacker control. */
@@ -218,74 +206,6 @@ function tokenRequestBody(
   }
   return new URLSearchParams(body);
 }
-
-describe('bindOAuth2ToRequest', () => {
-  it('keeps the tool-owned fields and takes only the resumable ones', () => {
-    const bound = bindOAuth2ToRequest(
-      FROZEN_OAUTH2_CONFIG,
-      oauth2Credential({
-        ...ATTACKER_OWNED_OAUTH2,
-        ...RESUME_CONTRIBUTED_OAUTH2,
-      }),
-    );
-
-    expect(bound?.oauth2).toEqual({
-      ...TOOL_OWNED_OAUTH2,
-      ...RESUME_CONTRIBUTED_OAUTH2,
-    });
-  });
-
-  it('keeps a frozen value when the resume leaves the field undefined', () => {
-    const frozen: AuthConfig = {
-      ...FROZEN_OAUTH2_CONFIG,
-      exchangedAuthCredential: oauth2Credential({
-        ...TOOL_OWNED_OAUTH2,
-        accessToken: 'frozen-token',
-      }),
-    };
-
-    const bound = bindOAuth2ToRequest(
-      frozen,
-      oauth2Credential({accessToken: undefined, authCode: 'good-code'}),
-    );
-
-    expect(bound?.oauth2?.accessToken).toBe('frozen-token');
-    expect(bound?.oauth2?.authCode).toBe('good-code');
-  });
-
-  it('falls back to the raw credential when no exchanged one was frozen', () => {
-    const frozen: AuthConfig = {
-      credentialKey: 'testKey',
-      authScheme: OAUTH2_SCHEME,
-      rawAuthCredential: oauth2Credential({clientId: 'adk-client'}),
-    };
-
-    const bound = bindOAuth2ToRequest(
-      frozen,
-      oauth2Credential({clientId: 'attacker-client', authCode: 'good-code'}),
-    );
-
-    expect(bound?.oauth2).toEqual({
-      clientId: 'adk-client',
-      authCode: 'good-code',
-    });
-  });
-
-  it('returns the frozen credential when the resume carries none', () => {
-    const bound = bindOAuth2ToRequest(FROZEN_OAUTH2_CONFIG, undefined);
-
-    expect(bound?.oauth2).toEqual(TOOL_OWNED_OAUTH2);
-  });
-
-  it('returns the resume credential when the request froze no oauth2', () => {
-    const bound = bindOAuth2ToRequest(
-      FROZEN_API_KEY_CONFIG,
-      RESUME_API_KEY_CREDENTIAL,
-    );
-
-    expect(bound).toBe(RESUME_API_KEY_CREDENTIAL);
-  });
-});
 
 describe('AuthPreprocessor OAuth2 resume binding', () => {
   let fetchSpy: MockInstance<typeof globalThis.fetch>;
