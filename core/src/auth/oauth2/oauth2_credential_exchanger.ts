@@ -165,17 +165,20 @@ export async function exchangeAuthorizationCode({
   }
 
   if (authCredential.oauth2.authResponseUri && authCredential.oauth2.state) {
+    let receivedState: string | undefined;
     try {
       const url = new URL(authCredential.oauth2.authResponseUri);
-      const receivedState = url.searchParams.get('state') || undefined;
-      if (authCredential.oauth2.state !== receivedState) {
-        throw new CredentialExchangeError(
-          'State mismatch detected. Potential CSRF attack.',
-        );
-      }
+      receivedState = url.searchParams.get('state') || undefined;
     } catch (e) {
       throw new CredentialExchangeError(
         `Failed to parse authResponseUri for state validation: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+    // Thrown outside the try so a detected CSRF is not rewrapped as a parse
+    // failure.
+    if (authCredential.oauth2.state !== receivedState) {
+      throw new CredentialExchangeError(
+        'State mismatch detected. Potential CSRF attack.',
       );
     }
   }

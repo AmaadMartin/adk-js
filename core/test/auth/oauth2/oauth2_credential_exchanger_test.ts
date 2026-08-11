@@ -6,6 +6,7 @@
 
 import {
   AuthCredential,
+  AuthCredentialTypes,
   AuthScheme,
   CredentialExchangeError,
   OAuth2CredentialExchanger,
@@ -456,6 +457,102 @@ describe('OAuth2CredentialExchanger', () => {
           codeVerifier: 'verifier-123',
         }),
       );
+    });
+
+    it('reports a state mismatch as a mismatch, not as a parse failure', async () => {
+      const authCredential: AuthCredential = {
+        authType: AuthCredentialTypes.OAUTH2,
+        oauth2: {
+          clientId: 'id',
+          clientSecret: 'secret',
+          authResponseUri: 'https://callback.example.com/?code=abc&state=wrong',
+          state: 'expected-state',
+        },
+      };
+      const authScheme: AuthScheme = {
+        type: 'oauth2',
+        flows: {
+          authorizationCode: {
+            authorizationUrl: 'https://auth.example.com/authorize',
+            tokenUrl: 'https://example.com/token',
+            scopes: {},
+          },
+        },
+      };
+
+      vi.mocked(oauth2Utils.getTokenEndpoint).mockReturnValue(
+        'https://example.com/token',
+      );
+      vi.mocked(oauth2Utils.parseAuthorizationCode).mockReturnValue('abc');
+
+      await expect(
+        exchangeAuthorizationCode({authCredential, authScheme}),
+      ).rejects.toThrow('State mismatch detected. Potential CSRF attack.');
+      await expect(
+        exchangeAuthorizationCode({authCredential, authScheme}),
+      ).rejects.not.toThrow('Failed to parse');
+    });
+
+    it('rejects an authResponseUri that carries no state at all', async () => {
+      const authCredential: AuthCredential = {
+        authType: AuthCredentialTypes.OAUTH2,
+        oauth2: {
+          clientId: 'id',
+          clientSecret: 'secret',
+          authResponseUri: 'https://callback.example.com/?code=abc',
+          state: 'expected-state',
+        },
+      };
+      const authScheme: AuthScheme = {
+        type: 'oauth2',
+        flows: {
+          authorizationCode: {
+            authorizationUrl: 'https://auth.example.com/authorize',
+            tokenUrl: 'https://example.com/token',
+            scopes: {},
+          },
+        },
+      };
+
+      vi.mocked(oauth2Utils.getTokenEndpoint).mockReturnValue(
+        'https://example.com/token',
+      );
+      vi.mocked(oauth2Utils.parseAuthorizationCode).mockReturnValue('abc');
+
+      await expect(
+        exchangeAuthorizationCode({authCredential, authScheme}),
+      ).rejects.toThrow('State mismatch detected. Potential CSRF attack.');
+    });
+
+    it('still reports an unparsable authResponseUri as a parse failure', async () => {
+      const authCredential: AuthCredential = {
+        authType: AuthCredentialTypes.OAUTH2,
+        oauth2: {
+          clientId: 'id',
+          clientSecret: 'secret',
+          authResponseUri: 'not-a-url',
+          state: 'expected-state',
+        },
+      };
+      const authScheme: AuthScheme = {
+        type: 'oauth2',
+        flows: {
+          authorizationCode: {
+            authorizationUrl: 'https://auth.example.com/authorize',
+            tokenUrl: 'https://example.com/token',
+            scopes: {},
+          },
+        },
+      };
+
+      vi.mocked(oauth2Utils.getTokenEndpoint).mockReturnValue(
+        'https://example.com/token',
+      );
+      vi.mocked(oauth2Utils.parseAuthorizationCode).mockReturnValue('abc');
+
+      await expect(
+        exchangeAuthorizationCode({authCredential, authScheme}),
+      ).rejects.toThrow('Failed to parse authResponseUri for state validation');
     });
   });
 });

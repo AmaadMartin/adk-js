@@ -5,9 +5,10 @@
  */
 
 import {logger} from '../../utils/logger.js';
-import {OAuth2Auth} from '../auth_credential.js';
+import {AuthCredential, OAuth2Auth} from '../auth_credential.js';
 
 import {AuthScheme, OpenIdConnectWithConfig} from '../auth_schemes.js';
+import {AuthConfig} from '../auth_tool.js';
 import {validateDiscoveryUrl} from './oauth2_discovery.js';
 
 /**
@@ -179,4 +180,58 @@ export function isTokenExpired(token: OAuth2Auth, leeway = 60): boolean {
   const expirationThreshold = token.expiresAt - leeway * 1000;
 
   return expirationThreshold < Date.now();
+}
+
+/**
+ * The OAuth2 fields a resume message may contribute.
+ *
+ * Everything else on `oauth2` — the client credentials, the redirect URI, the
+ * PKCE verifier and the CSRF nonce — belongs to the tool or to ADK, so it is
+ * read back from the frozen request. A field added to `OAuth2Auth` later stays
+ * frozen-sourced until it is named here.
+ */
+const RESUMABLE_OAUTH2_FIELDS = [
+  'authResponseUri',
+  'authCode',
+  'accessToken',
+  'refreshToken',
+  'idToken',
+  'expiresIn',
+  'expiresAt',
+] as const satisfies readonly (keyof OAuth2Auth)[];
+
+function overlayResumedField<
+  K extends (typeof RESUMABLE_OAUTH2_FIELDS)[number],
+>(target: OAuth2Auth, resumed: OAuth2Auth, field: K): void {
+  if (resumed[field] !== undefined) {
+    target[field] = resumed[field];
+  }
+}
+
+/**
+ * Rebuilds the OAuth2 credential to store from the frozen auth request,
+ * overlaying only the fields a resume message is allowed to contribute.
+ *
+ * The nonce therefore always comes from the request, so the state comparison
+ * during the token exchange has an ADK-issued value to compare the returned
+ * one against.
+ */
+export function bindOAuth2ToRequest(
+  requestedAuthConfig: AuthConfig,
+  responseCredential: AuthCredential | undefined,
+): AuthCredential | undefined {
+  const frozen =
+    requestedAuthConfig.exchangedAuthCredential ??
+    requestedAuthConfig.rawAuthCredential;
+  if (!frozen?.oauth2) {
+    return responseCredential;
+  }
+  const oauth2: OAuth2Auth = {...frozen.oauth2};
+  const resumed = responseCredential?.oauth2;
+  if (resumed) {
+    for (const field of RESUMABLE_OAUTH2_FIELDS) {
+      overlayResumedField(oauth2, resumed, field);
+    }
+  }
+  return {...frozen, oauth2};
 }

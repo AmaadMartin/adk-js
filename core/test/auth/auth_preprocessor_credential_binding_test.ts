@@ -208,6 +208,54 @@ describe('AuthPreprocessor credential binding', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it('rejects a resume whose authScheme is a number', async () => {
+    const context = createContext([
+      toolCallEvent('toolFc1'),
+      requestCredentialEvent('agent', 'fc1', {
+        authConfig: {credentialKey: 'testKey', authScheme: REQUESTED_SCHEME},
+        functionCallId: 'toolFc1',
+      }),
+      resumeEvent([
+        {
+          fcId: 'fc1',
+          response: {
+            authScheme: 42,
+            exchangedAuthCredential: ATTACKER_CREDENTIAL,
+          },
+        },
+      ]),
+    ]);
+
+    const yielded = await collectEvents(context);
+
+    expect(context.session.state['temp:testKey']).toBeUndefined();
+    expect(yielded).toHaveLength(0);
+  });
+
+  it('stores the credential when the resume nulls a scheme field', async () => {
+    const context = createContext([
+      toolCallEvent('toolFc1'),
+      requestCredentialEvent('agent', 'fc1', {
+        authConfig: {credentialKey: 'testKey', authScheme: REQUESTED_SCHEME},
+        functionCallId: 'toolFc1',
+      }),
+      resumeEvent([
+        {
+          fcId: 'fc1',
+          response: {
+            authScheme: {...REQUESTED_SCHEME, description: null},
+            exchangedAuthCredential: USER_CREDENTIAL,
+          },
+        },
+      ]),
+    ]);
+
+    const yielded = await collectEvents(context);
+
+    expect(context.session.state['temp:testKey']).toEqual(USER_CREDENTIAL);
+    expect(yielded).toHaveLength(1);
+  });
+
   it('rejects a resume whose authScheme is not an object', async () => {
     const context = createContext([
       toolCallEvent('toolFc1'),

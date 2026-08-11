@@ -4,10 +4,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {AuthScheme, OAuth2Auth} from '@google/adk';
+import {
+  AuthConfig,
+  AuthCredential,
+  AuthCredentialTypes,
+  AuthScheme,
+  OAuth2Auth,
+} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   AuthorizationCodeParams,
+  bindOAuth2ToRequest,
   ClientCredentialsParams,
   createOAuth2TokenRequestBody,
   fetchOAuth2Tokens,
@@ -281,6 +288,143 @@ describe('oauth2_utils', () => {
       expect(isTokenExpired({expiresAt: nearFutureTimeMs} as OAuth2Auth)).toBe(
         true,
       );
+    });
+  });
+
+  describe('bindOAuth2ToRequest', () => {
+    const FROZEN_NONCE = 'adk-issued-nonce';
+    const REDIRECT_URI = 'https://app.example.com/callback';
+
+    const OAUTH2_SCHEME: AuthScheme = {
+      type: 'oauth2',
+      flows: {
+        authorizationCode: {
+          authorizationUrl: 'https://auth.example.com/authorize',
+          tokenUrl: 'https://oauth2.example.com/token',
+          scopes: {},
+        },
+      },
+    };
+
+    /** Every OAuth2 field the tool configured or ADK minted. */
+    const TOOL_OWNED_OAUTH2: OAuth2Auth = {
+      clientId: 'adk-client',
+      clientSecret: 'adk-secret',
+      redirectUri: REDIRECT_URI,
+      codeVerifier: 'adk-verifier',
+      state: FROZEN_NONCE,
+      authUri: `https://auth.example.com/authorize?state=${FROZEN_NONCE}`,
+      nonce: 'adk-nonce',
+      audience: 'adk-audience',
+      tokenEndpointAuthMethod: 'client_secret_post',
+    };
+
+    /** Every OAuth2 field a resume message may contribute. */
+    const RESUME_CONTRIBUTED_OAUTH2: OAuth2Auth = {
+      authResponseUri: `${REDIRECT_URI}?code=good-code&state=${FROZEN_NONCE}`,
+      authCode: 'good-code',
+      accessToken: 'resume-token',
+      refreshToken: 'resume-refresh',
+      idToken: 'resume-id-token',
+      expiresIn: 3600,
+      expiresAt: 1780000000000,
+    };
+
+    /** The same fields as TOOL_OWNED_OAUTH2, under attacker control. */
+    const ATTACKER_OWNED_OAUTH2: OAuth2Auth = {
+      clientId: 'attacker-client',
+      clientSecret: 'attacker-secret',
+      redirectUri: 'https://attacker.example.com/callback',
+      codeVerifier: 'attacker-verifier',
+      state: 'attacker-state',
+      authUri: 'https://attacker.example.com/authorize',
+      nonce: 'attacker-nonce',
+      audience: 'attacker-audience',
+      tokenEndpointAuthMethod: 'none',
+    };
+
+    const FROZEN_OAUTH2_CONFIG: AuthConfig = {
+      credentialKey: 'testKey',
+      authScheme: OAUTH2_SCHEME,
+      exchangedAuthCredential: oauth2Credential(TOOL_OWNED_OAUTH2),
+    };
+
+    function oauth2Credential(oauth2: OAuth2Auth): AuthCredential {
+      return {authType: AuthCredentialTypes.OAUTH2, oauth2};
+    }
+
+    it('keeps the tool-owned fields and takes only the resumable ones', () => {
+      const bound = bindOAuth2ToRequest(
+        FROZEN_OAUTH2_CONFIG,
+        oauth2Credential({
+          ...ATTACKER_OWNED_OAUTH2,
+          ...RESUME_CONTRIBUTED_OAUTH2,
+        }),
+      );
+
+      expect(bound?.oauth2).toEqual({
+        ...TOOL_OWNED_OAUTH2,
+        ...RESUME_CONTRIBUTED_OAUTH2,
+      });
+    });
+
+    it('keeps a frozen value when the resume leaves the field undefined', () => {
+      const frozen: AuthConfig = {
+        ...FROZEN_OAUTH2_CONFIG,
+        exchangedAuthCredential: oauth2Credential({
+          ...TOOL_OWNED_OAUTH2,
+          accessToken: 'frozen-token',
+        }),
+      };
+
+      const bound = bindOAuth2ToRequest(
+        frozen,
+        oauth2Credential({accessToken: undefined, authCode: 'good-code'}),
+      );
+
+      expect(bound?.oauth2?.accessToken).toBe('frozen-token');
+      expect(bound?.oauth2?.authCode).toBe('good-code');
+    });
+
+    it('falls back to the raw credential when no exchanged one was frozen', () => {
+      const frozen: AuthConfig = {
+        credentialKey: 'testKey',
+        authScheme: OAUTH2_SCHEME,
+        rawAuthCredential: oauth2Credential({clientId: 'adk-client'}),
+      };
+
+      const bound = bindOAuth2ToRequest(
+        frozen,
+        oauth2Credential({clientId: 'attacker-client', authCode: 'good-code'}),
+      );
+
+      expect(bound?.oauth2).toEqual({
+        clientId: 'adk-client',
+        authCode: 'good-code',
+      });
+    });
+
+    it('returns the frozen credential when the resume carries none', () => {
+      const bound = bindOAuth2ToRequest(FROZEN_OAUTH2_CONFIG, undefined);
+
+      expect(bound?.oauth2).toEqual(TOOL_OWNED_OAUTH2);
+    });
+
+    it('returns the resume credential when the request froze no oauth2', () => {
+      const apiKeyCredential: AuthCredential = {
+        authType: AuthCredentialTypes.API_KEY,
+        apiKey: 'user-value',
+      };
+
+      const bound = bindOAuth2ToRequest(
+        {
+          credentialKey: 'testKey',
+          authScheme: {type: 'apiKey', in: 'header', name: 'X-API-Key'},
+        },
+        apiKeyCredential,
+      );
+
+      expect(bound).toBe(apiKeyCredential);
     });
   });
 });

@@ -27,6 +27,7 @@ import {AuthCredential} from './auth_credential.js';
 import {AuthHandler} from './auth_handler.js';
 import {AuthScheme} from './auth_schemes.js';
 import {AuthConfig} from './auth_tool.js';
+import {bindOAuth2ToRequest} from './oauth2/oauth2_utils.js';
 
 const TOOLSET_AUTH_CREDENTIAL_ID_PREFIX = '_adk_toolset_auth_';
 
@@ -45,8 +46,9 @@ interface AuthResumeResponse {
  * Whether a resume-supplied auth scheme contradicts the frozen requested one.
  *
  * Only the keys the response sets are compared, so a client that drops fields
- * the request left `undefined` (a JSON round trip does exactly that) keeps
- * working, while any changed or added field is a mismatch.
+ * the request left `undefined` — or nulls them, which is what a serializer such
+ * as pydantic or `encoding/json` emits for an unset optional — keeps working,
+ * while any changed or added field is a mismatch.
  */
 function schemeContradictsRequest(
   responseScheme: unknown,
@@ -55,9 +57,12 @@ function schemeContradictsRequest(
   if (responseScheme === undefined || responseScheme === null) {
     return false;
   }
+  if (typeof responseScheme !== 'object') {
+    return true;
+  }
   const requested = (requestedScheme ?? {}) as Record<string, unknown>;
-  return Object.entries(responseScheme as Record<string, unknown>).some(
-    ([key, value]) => value !== undefined && !isEqual(value, requested[key]),
+  return Object.entries(responseScheme).some(
+    ([key, value]) => value != null && !isEqual(value, requested[key]),
   );
 }
 
@@ -116,7 +121,10 @@ async function storeAuthAndCollectResumeTargets(
     // A resume message may only carry the credential the user just obtained.
     await new AuthHandler({
       ...request.authConfig,
-      exchangedAuthCredential: response?.exchangedAuthCredential,
+      exchangedAuthCredential: bindOAuth2ToRequest(
+        request.authConfig,
+        response?.exchangedAuthCredential,
+      ),
     }).parseAndStoreAuthResponse(state);
 
     const {functionCallId} = request;
