@@ -11,6 +11,7 @@ import {
   LlmAgent,
   PluginManager,
   UnsafeLocalCodeExecutor,
+  UnsupportedLanguageError,
   createSession,
 } from '@google/adk';
 import {EventEmitter} from 'node:events';
@@ -211,7 +212,7 @@ describe('UnsafeLocalCodeExecutor', () => {
     expect(result.stderr).toBe('');
   });
 
-  it('should return error for unsupported language', async () => {
+  it('should throw for unsupported language', async () => {
     const params: ExecuteCodeParams = {
       invocationContext,
       codeExecutionInput: {
@@ -221,10 +222,9 @@ describe('UnsafeLocalCodeExecutor', () => {
       },
     };
 
-    const result = await executor.executeCode(params);
-
-    expect(result.stdout).toBe('');
-    expect(result.stderr).toContain('Unsupported language: unspecified');
+    await expect(executor.executeCode(params)).rejects.toThrow(
+      new UnsupportedLanguageError('UnsafeLocalCodeExecutor', 'unspecified'),
+    );
   });
 
   it('should respect pythonCommandPath', async () => {
