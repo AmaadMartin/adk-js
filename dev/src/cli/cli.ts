@@ -94,6 +94,36 @@ function getBoolean(option?: string | boolean): boolean {
   return false;
 }
 
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Reports a server start-up failure and makes the CLI exit non-zero.
+ *
+ * Sets `process.exitCode` rather than calling `process.exit()`, because the
+ * winston Console transport writes on a later tick and an immediate exit drops
+ * the diagnostic whenever the output is a pipe. Stops the server because
+ * `start()` can reject after `listen()` has bound the socket, and the listening
+ * handle would otherwise keep the process alive forever.
+ */
+async function reportStartupFailure(
+  logger: AdkLogger,
+  serverName: string,
+  server: AdkApiServer | undefined,
+  error: unknown,
+): Promise<void> {
+  logger.error(`Error starting ${serverName}:`, describeError(error));
+
+  try {
+    await server?.stop();
+  } catch {
+    // A server whose bind never succeeded rejects with ERR_SERVER_NOT_RUNNING.
+  }
+
+  process.exitCode = 1;
+}
+
 const AGENT_DIR_ARGUMENT = new Argument(
   '[agents_dir]',
   'Agent file or directory of agents to serve. For directory the internal structure should be agents_dir/{agentName}.js or agents_dir/{agentName}/agent.js. Agent file should has export of the rootAgent as instance of BaseAgent (e.g LlmAgent)',
@@ -231,8 +261,10 @@ export function createProgram(): Command {
       const logLevel = getLogLevelFromOptions(options);
       setAdkCoreLogLevel(logLevel);
 
+      let server: AdkApiServer | undefined;
+
       try {
-        const server = new AdkApiServer({
+        server = new AdkApiServer({
           logLevel,
           agentsDir: getAbsolutePath(agentsDir),
           host: options['host'],
@@ -249,9 +281,8 @@ export function createProgram(): Command {
         });
 
         await server.start();
-      } catch (error) {
-        logger.error('Error starting web server:', (error as Error).message);
-        process.exit(1);
+      } catch (error: unknown) {
+        await reportStartupFailure(logger, 'web server', server, error);
       }
     });
 
@@ -277,8 +308,10 @@ export function createProgram(): Command {
       const logLevel = getLogLevelFromOptions(options);
       setAdkCoreLogLevel(logLevel);
 
+      let server: AdkApiServer | undefined;
+
       try {
-        const server = new AdkApiServer({
+        server = new AdkApiServer({
           logLevel,
           agentsDir: getAbsolutePath(agentsDir),
           host: options['host'],
@@ -294,9 +327,8 @@ export function createProgram(): Command {
           reloadAgents: getBoolean(options['reload_agents']),
         });
         await server.start();
-      } catch (error) {
-        logger.error('Error starting API server:', (error as Error).message);
-        process.exit(1);
+      } catch (error: unknown) {
+        await reportStartupFailure(logger, 'API server', server, error);
       }
     });
 
