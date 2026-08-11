@@ -27,7 +27,6 @@ import {
   PluginManager,
   RunAsyncToolRequest,
   Runner,
-  Session,
   ToolProcessLlmRequest,
 } from '@google/adk';
 import {Content, Schema, Type} from '@google/genai';
@@ -263,7 +262,12 @@ describe('LlmAgent.callLlm', () => {
     agent = new TestLlmAgent({name: 'test_agent'});
     invocationContext = new InvocationContext({
       invocationId: 'inv_123',
-      session: {} as Session,
+      session: createSession({
+        id: 'sess_123',
+        events: [],
+        appName: 'test-app',
+        userId: 'test-user',
+      }),
       agent: agent,
       pluginManager,
     });
