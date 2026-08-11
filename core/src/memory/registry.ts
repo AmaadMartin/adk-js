@@ -5,20 +5,18 @@
  */
 
 import {redactUriPassword} from '../utils/redact_uri.js';
+import {
+  AgentEngineResourceName,
+  parseAgentEngineResourceName,
+} from '../utils/vertex_ai_utils.js';
 import {BaseMemoryService} from './base_memory_service.js';
 import {
   InMemoryMemoryService,
   isInMemoryConnectionString,
 } from './in_memory_memory_service.js';
-import {
-  VertexAiMemoryBankService,
-  VertexAiMemoryBankServiceOptions,
-} from './vertex_ai_memory_bank_service.js';
+import {VertexAiMemoryBankService} from './vertex_ai_memory_bank_service.js';
 
 const AGENT_ENGINE_SCHEME = 'agentengine://';
-
-const AGENT_ENGINE_RESOURCE_NAME =
-  /^projects\/([^/]+)\/locations\/([^/]+)\/reasoningEngines\/([^/]+)$/;
 
 /**
  * Parses the part of an `agentengine://` URI that follows the scheme.
@@ -28,9 +26,7 @@ const AGENT_ENGINE_RESOURCE_NAME =
  * Both forms resolve to the bare id, because `VertexAiMemoryBankService`
  * expects an id rather than a path.
  */
-function parseAgentEngineUri(
-  resource: string,
-): VertexAiMemoryBankServiceOptions {
+function parseAgentEngineUri(resource: string): AgentEngineResourceName {
   if (!resource) {
     throw new Error(
       'Agent engine resource name or resource id cannot be empty.',
@@ -53,16 +49,16 @@ function parseAgentEngineUri(
     return {projectId, location, agentEngineId: resource};
   }
 
-  const parts = AGENT_ENGINE_RESOURCE_NAME.exec(resource);
+  const parsed = parseAgentEngineResourceName(resource);
 
-  if (!parts) {
+  if (!parsed) {
     throw new Error(
       'Agent engine resource name is mal-formatted. It should be of format: ' +
         'projects/{project}/locations/{location}/reasoningEngines/{id}',
     );
   }
 
-  return {projectId: parts[1], location: parts[2], agentEngineId: parts[3]};
+  return parsed;
 }
 
 export function getMemoryServiceFromUri(uri: string): BaseMemoryService {
@@ -71,7 +67,6 @@ export function getMemoryServiceFromUri(uri: string): BaseMemoryService {
   }
 
   if (uri.startsWith(AGENT_ENGINE_SCHEME)) {
-    // `new URL()` lowercases the host, which would mangle the project id.
     return new VertexAiMemoryBankService(
       parseAgentEngineUri(uri.slice(AGENT_ENGINE_SCHEME.length)),
     );
