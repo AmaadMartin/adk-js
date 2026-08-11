@@ -9,6 +9,8 @@ import {describe, expect, it} from 'vitest';
 
 // Mock auth provider for testing
 class MockAuthProvider implements BaseAuthProvider {
+  readonly supportedAuthSchemes: readonly string[] = [];
+
   async getAuthCredential() {
     return undefined;
   }
