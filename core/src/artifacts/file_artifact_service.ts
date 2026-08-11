@@ -12,8 +12,8 @@ import {fileURLToPath, pathToFileURL} from 'url';
 import {logger} from '../utils/logger.js';
 
 import {
-  assertNoTrailingPeriod,
-  assertUnpaddedFilename,
+  assertValidArtifactFilename,
+  stripUserNamespace,
   USER_NAMESPACE_PREFIX,
 } from './artifact_filename.js';
 import {
@@ -485,8 +485,7 @@ function getArtifactDir(
   sessionId: string,
   filename: string,
 ): string {
-  assertUnpaddedFilename(filename);
-  assertNoTrailingPeriod(filename);
+  assertValidArtifactFilename(filename);
 
   const userRoot = getUserRoot(rootDir, userId);
   let scopeRoot: string;
@@ -502,10 +501,7 @@ function getArtifactDir(
     scopeRoot = getSessionArtifactsDir(userRoot, sessionId);
   }
 
-  let cleanFilename = filename;
-  if (cleanFilename.startsWith(USER_NAMESPACE_PREFIX)) {
-    cleanFilename = cleanFilename.substring(USER_NAMESPACE_PREFIX.length);
-  }
+  const cleanFilename = stripUserNamespace(filename);
 
   if (path.isAbsolute(cleanFilename)) {
     throw new Error(`Absolute artifact filename ${filename} is not permitted.`);

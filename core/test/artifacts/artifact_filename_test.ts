@@ -5,7 +5,7 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {assertNoTrailingPeriod} from '../../src/artifacts/artifact_filename.js';
+import {assertValidArtifactFilename} from '../../src/artifacts/artifact_filename.js';
 
 const ACCEPTED_FILENAMES: Array<[label: string, filename: string]> = [
   ['an interior period', 'a.txt'],
@@ -31,19 +31,19 @@ const REJECTED_FILENAMES: Array<[label: string, filename: string]> = [
   ['a trailing period after the user: prefix', 'user:trailing.dot.'],
 ];
 
-describe('assertNoTrailingPeriod', () => {
+describe('assertValidArtifactFilename', () => {
   it.each(ACCEPTED_FILENAMES)('accepts a filename with %s', (_l, filename) => {
-    expect(() => assertNoTrailingPeriod(filename)).not.toThrow();
+    expect(() => assertValidArtifactFilename(filename)).not.toThrow();
   });
 
   it.each(REJECTED_FILENAMES)('rejects a filename with %s', (_l, filename) => {
-    expect(() => assertNoTrailingPeriod(filename)).toThrow(
+    expect(() => assertValidArtifactFilename(filename)).toThrow(
       /must not have a path segment ending in a period/,
     );
   });
 
   it('reports the original filename including the user: prefix', () => {
-    expect(() => assertNoTrailingPeriod('user:trailing.dot.')).toThrow(
+    expect(() => assertValidArtifactFilename('user:trailing.dot.')).toThrow(
       'Artifact filename "user:trailing.dot." must not have a path segment ending in a period.',
     );
   });

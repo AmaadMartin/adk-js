@@ -8,37 +8,15 @@
 export const USER_NAMESPACE_PREFIX = 'user:';
 
 /**
- * Throws if `filename` has leading or trailing whitespace.
+ * Throws if `filename` cannot be stored faithfully by every backend.
  *
  * An artifact filename is a storage key. `FileArtifactService` maps a filename
  * onto a directory name, and Windows removes trailing spaces and periods from
- * a path component, so a padded name cannot be stored there distinctly from
- * its unpadded twin. Every backend rejects a padded name, so that one backend
- * never aliases `' a.txt'` onto `'a.txt'` while the others keep them apart.
- *
- * See
- * https://learn.microsoft.com/en-us/dotnet/standard/io/file-path-formats#trim-characters.
- *
- * @param filename The artifact filename, including any `user:` prefix.
- */
-export function assertUnpaddedFilename(filename: string): void {
-  const scoped = stripUserNamespace(filename);
-  if (scoped !== scoped.trim()) {
-    throw new Error(
-      `Artifact filename ${JSON.stringify(filename)} must not have leading or trailing whitespace.`,
-    );
-  }
-}
-
-/**
- * Throws if any path segment of `filename` ends with a period.
- *
- * Windows removes a trailing period from a path component, so
- * `'trailing.dot.'` and `'trailing.dot'` name one directory there. The second
- * save then appends a version to the first artifact and reads return the wrong
- * bytes, while the in-memory and GCS backends keep the two names apart. Every
- * backend rejects the name so that no backend aliases one artifact onto
- * another.
+ * a path component, so two such names collapse onto one directory there while
+ * the in-memory and GCS backends keep them apart. Every backend rejects the
+ * name instead, so no backend aliases one artifact onto another. Two shapes
+ * are rejected: a name with leading or trailing whitespace, and a name with a
+ * path segment ending in a period.
  *
  * The answer is host-independent by design. The check splits on `\` as well as
  * `/`, so a backslash-separated name is rejected on POSIX too, where a
@@ -51,21 +29,24 @@ export function assertUnpaddedFilename(filename: string): void {
  *
  * @param filename The artifact filename, including any `user:` prefix.
  */
-export function assertNoTrailingPeriod(filename: string): void {
-  const segments = stripUserNamespace(filename).split(/[/\\]/);
-  if (segments.some(endsWithPeriod)) {
+export function assertValidArtifactFilename(filename: string): void {
+  const scoped = stripUserNamespace(filename);
+  if (scoped !== scoped.trim()) {
+    throw new Error(
+      `Artifact filename ${JSON.stringify(filename)} must not have leading or trailing whitespace.`,
+    );
+  }
+  const segments = scoped.split(/[/\\]/);
+  if (segments.some((s) => s.endsWith('.') && s !== '.' && s !== '..')) {
     throw new Error(
       `Artifact filename ${JSON.stringify(filename)} must not have a path segment ending in a period.`,
     );
   }
 }
 
-function stripUserNamespace(filename: string): string {
+/** Removes the `user:` prefix from `filename`, if it has one. */
+export function stripUserNamespace(filename: string): string {
   return filename.startsWith(USER_NAMESPACE_PREFIX)
     ? filename.substring(USER_NAMESPACE_PREFIX.length)
     : filename;
-}
-
-function endsWithPeriod(segment: string): boolean {
-  return segment.endsWith('.') && segment !== '.' && segment !== '..';
 }
