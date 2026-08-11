@@ -19,6 +19,8 @@ import {
   GoogleGenAI,
 } from '@google/genai';
 import {ChildProcessWithoutNullStreams} from 'node:child_process';
+import {once} from 'node:events';
+import {createServer} from 'node:net';
 import {expect} from 'vitest';
 
 /**
@@ -257,108 +259,234 @@ export async function runTestCase(testCase: TestCase) {
   }
 }
 
+/** Maximum characters retained from each captured stream in a failure. */
+const OUTPUT_EXCERPT_CHARS = 4000;
+
+/** How long `stop()` waits for a clean exit before escalating to SIGKILL. */
+const PROCESS_EXIT_TIMEOUT_MS = 5000;
+
+/** How long a premature `'exit'` waits for the stdio pipes to reach EOF. */
+const STDIO_FLUSH_GRACE_MS = 250;
+
+/**
+ * Returns a TCP port on `host` that the OS has just confirmed is free, by
+ * binding port 0, reading the assignment back and releasing it.
+ */
+export async function reserveFreePort(host: string): Promise<number> {
+  const probe = createServer();
+
+  try {
+    const listening = once(probe, 'listening');
+    probe.listen({host, port: 0});
+    await listening;
+
+    const address = probe.address();
+    // `address()` is typed `AddressInfo | string | null`; the string form is
+    // for IPC servers, which this never is.
+    if (address === null || typeof address === 'string') {
+      throw new Error(`Expected a TCP address on ${host}, got ${address}`);
+    }
+    return address.port;
+  } finally {
+    await new Promise<void>((resolve) => probe.close(() => resolve()));
+  }
+}
+
+/**
+ * Appends `chunk` to `buffer`, retaining only the last
+ * {@link OUTPUT_EXCERPT_CHARS} characters. Keeping the tail bounds what a
+ * chatty child can make the harness hold, and its last words are the ones that
+ * explain why it never started.
+ */
+export function appendCapped(
+  buffer: string,
+  chunk: string,
+  maxChars = OUTPUT_EXCERPT_CHARS,
+): string {
+  return (buffer + chunk).slice(-maxChars);
+}
+
+/** Stands in for a stream the child never wrote to. */
+const NO_OUTPUT = '(no output captured)';
+
+function formatCapturedOutput(stdout: string, stderr: string): string {
+  return `\nstdout:\n${stdout || NO_OUTPUT}\nstderr:\n${stderr || NO_OUTPUT}`;
+}
+
+interface StartProcessOptions {
+  spawnProcess: () => ChildProcessWithoutNullStreams;
+  startMessage: string;
+  serverName: string;
+  timeoutMs: number;
+}
+
 /**
  * Base class for test servers.
  */
 export abstract class BaseTestServer {
   host: string;
   port: number;
-  url: string;
   protected serverProcess?: ChildProcessWithoutNullStreams;
 
   constructor(host: string, port?: number) {
     this.host = host;
-    this.port = port || BaseTestServer.getRandomPort();
-    this.url = `http://${this.host}:${this.port}`;
+    // 0 means "allocate at start"; `startProcess` resolves it before spawning.
+    this.port = port ?? 0;
   }
 
-  static getRandomPort(): number {
-    return 40000 + Math.floor(Math.random() * 10000);
+  get url(): string {
+    return `http://${this.host}:${this.port}`;
   }
 
   protected async startProcess({
     spawnProcess,
     startMessage,
-    successLogMessage,
     serverName,
     timeoutMs,
-  }: {
-    spawnProcess: () => ChildProcessWithoutNullStreams;
-    startMessage: string;
-    successLogMessage: string;
-    serverName: string;
-    timeoutMs: number;
-  }): Promise<void> {
-    this.serverProcess = spawnProcess();
+  }: StartProcessOptions): Promise<void> {
+    // Both subclasses read `this.port` from inside `spawnProcess` -- for
+    // `--port` and for TEST_API_SERVER_PORT -- so it has to be a real port
+    // before the child starts, not after its banner is parsed.
+    if (!this.port) {
+      this.port = await reserveFreePort(this.host);
+    }
+
+    const child = spawnProcess();
+    this.serverProcess = child;
+
+    // Outlive the handshake: an 'error' with no listener is rethrown by
+    // EventEmitter, and a mid-test death is still worth reporting.
+    child.on('error', (error: Error) => {
+      console.error(`${serverName} Error: ${error.message}`);
+    });
+    // 'exit' rather than 'close': a child that leaves a grandchild holding the
+    // inherited stdio pipes never emits 'close'.
+    child.on('exit', (code: number | null) => {
+      console.error(`${serverName} exited with code ${code}`);
+    });
 
     await new Promise<void>((resolve, reject) => {
-      let started = false;
-      const stdoutChunks: string[] = [];
+      let stdout = '';
+      let stderr = '';
+      // Gates retention only; the 'data' listeners stay attached for the life
+      // of the child so its pipes keep draining.
+      let capturing = true;
+      let flushGrace: ReturnType<typeof setTimeout> | undefined;
 
-      this.serverProcess!.stdout.on('data', (data) => {
-        const message = data.toString();
-        stdoutChunks.push(message);
-
-        // Find URL like http://localhost:12345
-        const urlMatch = message.match(/http:\/\/localhost:([0-9]+)/i);
-        if (urlMatch && urlMatch[1]) {
-          const parsedPort = parseInt(urlMatch[1], 10);
-          if (parsedPort > 0) {
-            this.port = parsedPort;
-            this.url = `http://${this.host}:${this.port}`;
-          }
-        }
-
-        if (message.includes(startMessage)) {
-          started = true;
-          console.log(successLogMessage);
+      const settle = (error?: Error) => {
+        clearTimeout(timer);
+        clearTimeout(flushGrace);
+        capturing = false;
+        child.off('error', onError);
+        child.off('exit', onExit);
+        child.off('close', onClose);
+        if (error) {
+          reject(error);
+        } else {
           resolve();
         }
-      });
+      };
 
-      this.serverProcess!.stderr.on('data', (data) => {
-        console.error(`${serverName} Stderr: ${data.toString()}`);
-      });
+      const onStdout = (data: Buffer) => {
+        if (!capturing) return;
+        stdout = appendCapped(stdout, data.toString());
 
-      this.serverProcess!.on('error', (error) => {
-        console.error(`${serverName} Error: ${error.message}`);
+        // Matched against the accumulated output, not this chunk: a banner
+        // split across two writes must still complete the handshake.
+        if (stdout.includes(startMessage)) {
+          settle();
+        }
+      };
 
-        reject(
+      const onStderr = (data: Buffer) => {
+        const message = data.toString();
+        // Echoed unconditionally, so a server that starts cleanly and fails
+        // later still reaches the CI log.
+        console.error(`${serverName} Stderr: ${message}`);
+        if (!capturing) return;
+        stderr = appendCapped(stderr, message);
+      };
+
+      const onError = (error: Error) => {
+        settle(
           new Error(
-            `Failed to start ${serverName.toLowerCase()}: ${error.message}`,
+            `Failed to start ${serverName.toLowerCase()}: ${error.message}` +
+              formatCapturedOutput(stdout, stderr),
           ),
         );
-      });
+      };
 
-      this.serverProcess!.on('exit', (code) => {
-        console.error(`${serverName} exited with code ${code}`);
+      // 'close' rather than 'exit': it fires only once the stdio pipes have
+      // drained, so the child's last words are captured before the error.
+      const onClose = (
+        code: number | null,
+        signal: ChildProcessWithoutNullStreams['signalCode'],
+      ) => {
+        settle(
+          new Error(
+            `${serverName} exited prematurely with code ${code}` +
+              (signal ? ` (signal ${signal})` : '') +
+              formatCapturedOutput(stdout, stderr),
+          ),
+        );
+      };
 
-        if (!started) {
-          console.error(
-            `${serverName} Captured stdout before premature exit:\n${stdoutChunks.join('')}`,
-          );
-          reject(
-            new Error(`${serverName} exited prematurely with code ${code}`),
-          );
-        }
-      });
+      // A child that leaves a grandchild holding the inherited pipes -- `go
+      // run` does -- emits 'exit' but never 'close', so bound the drain wait
+      // rather than stalling until the readiness timeout misreports it.
+      const onExit = (
+        code: number | null,
+        signal: ChildProcessWithoutNullStreams['signalCode'],
+      ) => {
+        flushGrace = setTimeout(
+          () => onClose(code, signal),
+          STDIO_FLUSH_GRACE_MS,
+        );
+      };
 
-      setTimeout(() => {
-        if (!started) {
-          reject(
-            new Error(
-              `Timeout waiting for ${serverName.toLowerCase()} to start.`,
-            ),
-          );
-        }
+      const timer = setTimeout(() => {
+        settle(
+          new Error(
+            `Timeout waiting for ${serverName.toLowerCase()} to start.` +
+              formatCapturedOutput(stdout, stderr),
+          ),
+        );
       }, timeoutMs);
+
+      child.stdout.on('data', onStdout);
+      child.stderr.on('data', onStderr);
+      child.on('error', onError);
+      child.on('exit', onExit);
+      child.on('close', onClose);
     });
+
+    console.log(`${serverName} started at ${this.url}`);
   }
 
   async stop(): Promise<void> {
-    if (this.serverProcess) {
-      this.serverProcess.kill('SIGINT');
-      await new Promise((resolve) => setTimeout(resolve, 500));
+    const child = this.serverProcess;
+    if (!child) return;
+    this.serverProcess = undefined;
+
+    // 'close' never fires again for a child that is already gone, so waiting on
+    // it would hang until the suite timeout.
+    if (child.exitCode !== null || child.signalCode !== null) return;
+
+    // 'exit' rather than 'close', which waits on pipes a grandchild may still
+    // hold. Subscribed before the kill so a fast exit cannot be missed.
+    const exited = once(child, 'exit');
+    child.kill('SIGINT');
+    // Windows emulates SIGINT as unconditional termination and a wedged child
+    // may ignore it outright, so the wait is bounded rather than open-ended.
+    const escalation = setTimeout(
+      () => child.kill('SIGKILL'),
+      PROCESS_EXIT_TIMEOUT_MS,
+    );
+
+    try {
+      await exited;
+    } finally {
+      clearTimeout(escalation);
     }
   }
 }
