@@ -37,6 +37,7 @@ import {
   tracer,
 } from '../telemetry/tracing.js';
 import {BaseToolset, isBaseToolset} from '../tools/base_toolset.js';
+import {formatError} from '../utils/error_utils.js';
 import {logger} from '../utils/logger.js';
 import {isGemini2OrAbove} from '../utils/model_name.js';
 
@@ -145,6 +146,8 @@ export class Runner {
   readonly memoryService?: BaseMemoryService;
   readonly credentialService?: BaseCredentialService;
   readonly resumabilityConfig?: ResumabilityConfig;
+
+  private closed = false;
 
   /**
    * Creates a new Runner instance.
@@ -452,9 +455,29 @@ export class Runner {
       );
     } finally {
       span.end();
-      const toolsets = getAllToolsets(this.agent);
-      await Promise.allSettled(toolsets.map((t) => t.close()));
+      await closeToolsets(this.agent);
     }
+  }
+
+  /**
+   * Releases the resources owned by this runner.
+   *
+   * Closes the toolsets reachable from the agent tree, then closes every
+   * registered plugin. Safe to call more than once; subsequent calls are
+   * no-ops. Toolsets are also closed at the end of each invocation, so a
+   * caller that never reuses a runner does not have to call this.
+   *
+   * @throws An `AggregateError` if one or more plugins fail to close. Every
+   *     plugin is still closed before the error is raised. Toolset failures
+   *     are logged rather than thrown, matching the per-invocation cleanup.
+   */
+  async close(): Promise<void> {
+    if (this.closed) {
+      return;
+    }
+    this.closed = true;
+    await closeToolsets(this.agent);
+    await this.pluginManager.close();
   }
 
   /**
@@ -697,4 +720,21 @@ function getAllToolsets(agent: BaseAgent): BaseToolset[] {
 
   traverse(agent);
   return toolsets;
+}
+
+/**
+ * Closes every toolset reachable from the agent tree.
+ *
+ * A toolset that fails to close is logged and skipped so that the remaining
+ * toolsets are still closed.
+ */
+async function closeToolsets(agent: BaseAgent): Promise<void> {
+  const results = await Promise.allSettled(
+    getAllToolsets(agent).map((toolset) => toolset.close()),
+  );
+  for (const result of results) {
+    if (result.status === 'rejected') {
+      logger.warn(`Failed to close toolset: ${formatError(result.reason)}`);
+    }
+  }
 }

@@ -8,19 +8,24 @@ import {
   App,
   BaseAgent,
   BasePlugin,
+  BaseTool,
+  BaseToolset,
   createEvent,
   createResumabilityConfig,
   determineAgentForResumption,
   Event,
   InMemoryArtifactService,
+  InMemoryRunner,
   InMemorySessionService,
   InvocationContext,
   isRoutableLlmAgent,
   LlmAgent,
   Runner,
+  ToolUnion,
 } from '@google/adk';
 import {Content, FunctionCall, FunctionResponse} from '@google/genai';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {resetLogger, setLogger} from '../../src/utils/logger.js';
 
 const TEST_APP_ID = 'test_app_id';
 const TEST_USER_ID = 'test_user_id';
@@ -1250,5 +1255,256 @@ describe('Runner artifact saving (`saveInputBlobsAsArtifacts`)', () => {
     expect(userEvents[1].content!.parts).toEqual([
       {text: '[Uploaded Artifact: "file2.pdf"]'},
     ]);
+  });
+});
+
+class RecordingToolset extends BaseToolset {
+  closeCount = 0;
+
+  constructor(
+    private readonly closeLog: string[],
+    private readonly label: string,
+    private readonly failure?: Error,
+  ) {
+    super([]);
+  }
+
+  async getTools(): Promise<BaseTool[]> {
+    return [];
+  }
+
+  async close(): Promise<void> {
+    this.closeCount++;
+    this.closeLog.push(`toolset:${this.label}`);
+    if (this.failure) {
+      throw this.failure;
+    }
+  }
+}
+
+class RecordingPlugin extends BasePlugin {
+  closeCount = 0;
+
+  constructor(
+    name: string,
+    private readonly closeLog: string[],
+    private readonly failure?: Error,
+  ) {
+    super(name);
+  }
+
+  override async afterRunCallback(_params: {
+    invocationContext: InvocationContext;
+  }): Promise<void> {
+    this.closeLog.push(`afterRun:${this.name}`);
+  }
+
+  override async close(): Promise<void> {
+    this.closeCount++;
+    this.closeLog.push(`plugin:${this.name}`);
+    if (this.failure) {
+      throw this.failure;
+    }
+  }
+}
+
+class ToolsetAgent extends LlmAgent {
+  constructor(name: string, tools: ToolUnion[], subAgents: BaseAgent[] = []) {
+    super({name, model: 'gemini-2.5-flash', tools, subAgents});
+  }
+
+  protected override async *runAsyncImpl(
+    context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    yield createEvent({
+      invocationId: context.invocationId,
+      author: this.name,
+      content: {role: 'model', parts: [{text: 'Test LLM response'}]},
+    });
+  }
+}
+
+describe('Runner.close', () => {
+  let sessionService: InMemorySessionService;
+  let closeLog: string[];
+
+  beforeEach(() => {
+    sessionService = new InMemorySessionService();
+    closeLog = [];
+  });
+
+  function createRunner(agent: BaseAgent, plugins: BasePlugin[] = []): Runner {
+    return new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      plugins,
+      sessionService,
+    });
+  }
+
+  it('closes toolsets on the root agent and on a sub-agent', async () => {
+    const rootToolset = new RecordingToolset(closeLog, 'root');
+    const subToolset = new RecordingToolset(closeLog, 'sub');
+    const subAgent = new ToolsetAgent('sub_agent', [subToolset]);
+    const rootAgent = new ToolsetAgent('root_agent', [rootToolset], [subAgent]);
+
+    await createRunner(rootAgent).close();
+
+    expect(rootToolset.closeCount).toEqual(1);
+    expect(subToolset.closeCount).toEqual(1);
+  });
+
+  it('closes every registered plugin exactly once', async () => {
+    const pluginA = new RecordingPlugin('plugin_a', closeLog);
+    const pluginB = new RecordingPlugin('plugin_b', closeLog);
+    const runner = createRunner(new ToolsetAgent('root_agent', []), [
+      pluginA,
+      pluginB,
+    ]);
+
+    await runner.close();
+
+    expect(pluginA.closeCount).toEqual(1);
+    expect(pluginB.closeCount).toEqual(1);
+  });
+
+  it('closes toolsets before plugins', async () => {
+    const toolset = new RecordingToolset(closeLog, 'root');
+    const plugin = new RecordingPlugin('plugin_a', closeLog);
+    const runner = createRunner(new ToolsetAgent('root_agent', [toolset]), [
+      plugin,
+    ]);
+
+    await runner.close();
+
+    expect(closeLog).toEqual(['toolset:root', 'plugin:plugin_a']);
+  });
+
+  it('is a no-op when called a second time', async () => {
+    const toolset = new RecordingToolset(closeLog, 'root');
+    const plugin = new RecordingPlugin('plugin_a', closeLog);
+    const runner = createRunner(new ToolsetAgent('root_agent', [toolset]), [
+      plugin,
+    ]);
+
+    await runner.close();
+    await runner.close();
+
+    expect(plugin.closeCount).toEqual(1);
+    expect(toolset.closeCount).toEqual(1);
+  });
+
+  it('logs a failing toolset and still closes the plugins', async () => {
+    const failing = new RecordingToolset(
+      closeLog,
+      'broken',
+      new Error('toolset boom'),
+    );
+    const healthy = new RecordingToolset(closeLog, 'healthy');
+    const plugin = new RecordingPlugin('plugin_a', closeLog);
+    const subAgent = new ToolsetAgent('sub_agent', [healthy]);
+    const rootAgent = new ToolsetAgent('root_agent', [failing], [subAgent]);
+    const runner = createRunner(rootAgent, [plugin]);
+    const warnCalls: string[] = [];
+    setLogger({
+      setLogLevel: () => {},
+      log: () => {},
+      debug: () => {},
+      info: () => {},
+      warn: (...args: unknown[]) => {
+        warnCalls.push(args.map((a) => String(a)).join(' '));
+      },
+      error: () => {},
+    });
+
+    try {
+      await expect(runner.close()).resolves.toBeUndefined();
+    } finally {
+      resetLogger();
+    }
+
+    expect(healthy.closeCount).toEqual(1);
+    expect(plugin.closeCount).toEqual(1);
+    expect(warnCalls).toEqual(['Failed to close toolset: toolset boom']);
+  });
+
+  it('rejects with an AggregateError when a plugin fails to close', async () => {
+    const failure = new Error('plugin boom');
+    const toolset = new RecordingToolset(closeLog, 'root');
+    const failing = new RecordingPlugin('plugin_bad', closeLog, failure);
+    const healthy = new RecordingPlugin('plugin_good', closeLog);
+    const runner = createRunner(new ToolsetAgent('root_agent', [toolset]), [
+      failing,
+      healthy,
+    ]);
+
+    const error = await runner.close().catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(AggregateError);
+    expect((error as AggregateError).errors).toEqual([failure]);
+    expect((error as AggregateError).message).toContain('plugin_bad');
+    expect(healthy.closeCount).toEqual(1);
+    expect(toolset.closeCount).toEqual(1);
+    expect(closeLog[0]).toEqual('toolset:root');
+  });
+
+  it('is a no-op after a close that rejected', async () => {
+    const failing = new RecordingPlugin(
+      'plugin_bad',
+      closeLog,
+      new Error('plugin boom'),
+    );
+    const runner = createRunner(new ToolsetAgent('root_agent', []), [failing]);
+
+    await expect(runner.close()).rejects.toBeInstanceOf(AggregateError);
+    await expect(runner.close()).resolves.toBeUndefined();
+
+    expect(failing.closeCount).toEqual(1);
+  });
+
+  it('resolves for a runner with no plugins and no toolsets', async () => {
+    const runner = createRunner(new ToolsetAgent('root_agent', []));
+
+    await expect(runner.close()).resolves.toBeUndefined();
+  });
+
+  it('closes toolsets at the end of an invocation without close()', async () => {
+    const toolset = new RecordingToolset(closeLog, 'root');
+    const rootAgent = new ToolsetAgent('root_agent', [toolset]);
+    const runner = createRunner(rootAgent);
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    for await (const _ of runner.runAsync({
+      userId: session.userId,
+      sessionId: session.id,
+      newMessage: {role: 'user', parts: [{text: TEST_MESSAGE}]},
+    })) {
+      // Drain the stream.
+    }
+
+    expect(toolset.closeCount).toEqual(1);
+  });
+
+  it('closes the plugins of an InMemoryRunner after a real invocation', async () => {
+    const plugin = new RecordingPlugin('probe', closeLog);
+    const runner = new InMemoryRunner({
+      agent: new ToolsetAgent('root_agent', []),
+      plugins: [plugin],
+    });
+
+    for await (const _ of runner.runEphemeral({
+      userId: TEST_USER_ID,
+      newMessage: {role: 'user', parts: [{text: TEST_MESSAGE}]},
+    })) {
+      // Drain the stream.
+    }
+    await runner.close();
+
+    expect(closeLog).toEqual(['afterRun:probe', 'plugin:probe']);
+    expect(plugin.closeCount).toEqual(1);
   });
 });
