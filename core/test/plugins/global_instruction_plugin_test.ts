@@ -6,16 +6,15 @@
 
 import {
   BaseLlm,
-  Context,
   GlobalInstructionPlugin,
   InMemoryRunner,
-  InvocationContext,
   LlmAgent,
   LlmRequest,
   LlmResponse,
   ReadonlyContext,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
+import {createTestContext} from './test_helpers.js';
 
 class MockLlm extends BaseLlm {
   lastRequest?: LlmRequest;
@@ -35,25 +34,9 @@ class MockLlm extends BaseLlm {
 }
 
 describe('GlobalInstructionPlugin', () => {
-  const mockSession = {
-    id: 'session-1',
-    state: {
-      user_id: 'test_user_123',
-    },
-  } as unknown as InvocationContext['session'];
-
-  const mockInvocationContext = {
-    invocationId: 'inv-1',
-    session: mockSession,
-    userId: 'user-1',
-    appName: 'test-app',
-  } as unknown as InvocationContext;
-
-  const mockCallbackContext = {
-    agentName: 'test_agent',
-    invocationId: 'inv-1',
-    invocationContext: mockInvocationContext,
-  } as unknown as Context;
+  const mockCallbackContext = createTestContext({
+    state: {user_id: 'test_user_123'},
+  });
 
   it('should initialize with default name "global_instruction"', () => {
     const plugin = new GlobalInstructionPlugin('instruction');
@@ -263,7 +246,7 @@ describe('GlobalInstructionPlugin', () => {
       contents: [],
       toolsDict: {},
       liveConnectConfig: {},
-      config: {systemInstruction: existingObj as unknown as string},
+      config: {systemInstruction: existingObj},
     };
 
     await plugin.beforeModelCallback({
