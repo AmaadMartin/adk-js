@@ -8,7 +8,10 @@ import {Part} from '@google/genai';
 
 import {logger} from '../utils/logger.js';
 
-import {assertUnpaddedFilename} from './artifact_filename.js';
+import {
+  assertNoTrailingPeriod,
+  assertUnpaddedFilename,
+} from './artifact_filename.js';
 import {
   ArtifactVersion,
   BaseArtifactService,
@@ -45,6 +48,7 @@ export class InMemoryArtifactService implements BaseArtifactService {
     }
 
     assertUnpaddedFilename(filename);
+    assertNoTrailingPeriod(filename);
 
     const path = artifactPath(appName, userId, sessionId, filename);
 

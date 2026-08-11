@@ -8,7 +8,10 @@ import {Bucket, File, Storage, StorageOptions} from '@google-cloud/storage';
 import {createPartFromBase64, createPartFromText, Part} from '@google/genai';
 import {logger} from '../utils/logger.js';
 
-import {assertUnpaddedFilename} from './artifact_filename.js';
+import {
+  assertNoTrailingPeriod,
+  assertUnpaddedFilename,
+} from './artifact_filename.js';
 import {
   ArtifactVersion,
   BaseArtifactService,
@@ -41,6 +44,7 @@ export class GcsArtifactService implements BaseArtifactService {
     }
 
     assertUnpaddedFilename(request.filename);
+    assertNoTrailingPeriod(request.filename);
 
     const versions = await this.listVersions(request);
     const version = versions.length > 0 ? Math.max(...versions) + 1 : 0;
