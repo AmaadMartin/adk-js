@@ -19,7 +19,7 @@ to that module later by an author who never considered the public surface.
 `typedoc.json` sets `entryPoints` to `./core/src/index.ts` and nothing else, and
 `npm run docs:check` runs typedoc with `--treatWarningsAsErrors`. Every symbol
 reachable from that barrel is therefore rendered into the published API
-reference. This audit does not change the typedoc configuration.
+reference.
 
 ### 1.1. Incremental Surface
 
@@ -190,11 +190,17 @@ by wildcard alone.
 | `FeatureName`                  | enum      | 2, 3: TSDoc; `core/src/utils/streaming_utils.ts`                 | intentionally-public |
 | `isFeatureEnabled`             | function  | 2, 3: TSDoc; `core/src/utils/streaming_utils.ts`                 | intentionally-public |
 | `FeatureConfig`                | interface | 2 only: TSDoc; no consumer outside `core/src/features/`          | needs-owner-decision |
-| `FeatureStage`                 | enum      | 2 only: TSDoc; used only through `FeatureConfig.stage`           | needs-owner-decision |
+| `FeatureStage`                 | enum      | 2 only: TSDoc; used in source only through `FeatureConfig.stage` | needs-owner-decision |
 | `getFeatureConfig`             | function  | 2 only: TSDoc; called only inside its own module and `core/test` | needs-owner-decision |
 | `registerFeature`              | function  | 2 only: TSDoc; called only from `core/test`                      | needs-owner-decision |
 | `overrideFeatureEnabled`       | function  | 2 only: TSDoc; called only from `core/test`                      | needs-owner-decision |
 | `withTemporaryFeatureOverride` | function  | 2 only: TSDoc; called only from `core/test`                      | needs-owner-decision |
+
+`core/test/features/feature_registry_test.ts:7-15` imports five of the six
+`needs-owner-decision` symbols from `@google/adk`; only `FeatureConfig` is
+absent. That is test usage, so it does not change any verdict, but a retraction
+must move that import to `'../../src/features/feature_registry.js'` or the suite
+fails to compile.
 
 `withTemporaryFeatureOverride` restores the previous override in a `finally`
 block. That is test ergonomics, and it may be deliberate public API for
@@ -218,7 +224,8 @@ Three helpers are not.
 | `mergeStates`        | function | 2 only: TSDoc; called only from `core/src/sessions/` | needs-owner-decision |
 
 An author of a custom `BaseSessionService` implementation would plausibly want
-all three, which is why the verdict is not `accidentally-public`.
+all three, which is why the verdict is not `accidentally-public`. No test
+imports them through the barrel, so a retraction needs no test change.
 
 ### 3.11. `tools/base_tool.ts`
 
@@ -235,7 +242,7 @@ No explicit export names any symbol of this module.
 | `App`             | class     | 1, 2, 3: TSDoc; type of `RunnerConfig.app`, and `RunnerConfig` is explicitly exported; `dev/src/utils/agent_loader.ts` imports it from `@google/adk` | intentionally-public |
 | `isApp`           | function  | 2, 3: TSDoc; `dev/src/utils/agent_loader.ts`, `dev/src/server/adk_api_server.ts` and `dev/src/cli/cli_run.ts` import it from `@google/adk`           | intentionally-public |
 | `AppOptions`      | interface | 1, 2: TSDoc; the sole constructor parameter of `App`                                                                                                 | intentionally-public |
-| `validateAppName` | function  | 2 only: TSDoc; called only from the `App` constructor and `core/test`                                                                                | needs-owner-decision |
+| `validateAppName` | function  | 2 only: TSDoc; called only from the `App` constructor and `core/test/apps/app_test.ts`, which imports it relatively, not through the barrel          | needs-owner-decision |
 
 ### 3.13. `integrations/agent_registry/agent_registry_mcp_toolset.ts`
 
@@ -252,6 +259,12 @@ No explicit export names any symbol of this module.
 
 Both are string and URL helpers with no relation to the registry contract. They
 are the finding that prompted this audit.
+
+`core/test/integrations/agent_registry_test.ts:13,15` imports both through the
+barrel, at `'../../src/index.js'`. That is test usage, so it does not change
+either verdict, but the retraction must switch that import to
+`'../../src/integrations/agent_registry/helpers.js'` or the suite fails to
+compile.
 
 ### 3.15. `integrations/agent_registry/types.ts`
 
@@ -349,14 +362,21 @@ Ordered from safest to most disruptive.
   breaking for anyone who imports it, and it has no consumer outside
   `core/src/apps/`.
 - **`integrations/agent_registry/helpers.js` (`agent_registry.ts:40`).** Delete
-  the wildcard and import the two helpers directly. Breaking for anyone
-  importing `cleanName` or `isGoogleApi`. **Already tracked separately.**
+  the wildcard and import the two helpers directly. The same PR must repoint
+  `core/test/integrations/agent_registry_test.ts:13,15` at
+  `'../../src/integrations/agent_registry/helpers.js'`; it reaches both helpers
+  through the barrel today, so the suite fails to compile otherwise. Breaking
+  for anyone importing `cleanName` or `isGoogleApi`. **Already tracked
+  separately.**
 - **`sessions/base_session_service.js` (`common.ts:341`).** Decide on
   `trimTempDeltaState`, `trimTempState` and `mergeStates`, then replace the
   wildcard with an explicit list. Breaking if the three are retracted.
 - **`features/feature_registry.js` (`common.ts:339`).** Decide on the six
   `needs-owner-decision` symbols. `FeatureName` and `isFeatureEnabled` must stay.
-  Breaking for anyone who drives the registry programmatically.
+  A retraction must also repoint
+  `core/test/features/feature_registry_test.ts:7-15` at
+  `'../../src/features/feature_registry.js'`. Breaking for anyone who drives the
+  registry programmatically.
 - **`integrations/agent_registry/types.js` (`agent_registry.ts:41`).** Replace
   with an explicit list of the twelve intentionally-public symbols and retract
   the other four. Breaking for anyone importing `AGENT_REGISTRY_BASE_URL`,
@@ -378,9 +398,6 @@ grep -rn "export \* from" core/src --include=*.ts
 ```
 
 ### 6.2. The enumeration script
-
-Written to `/tmp` and deliberately not committed. Keeping it out of `scripts/`
-keeps this change documentation-only.
 
 ```js
 // /tmp/dump-surface.mjs - throwaway, not part of the diff.
@@ -448,39 +465,16 @@ if (explicitOnly) {
 
 ### 6.3. Published symbols per module
 
-```
-node /tmp/dump-surface.mjs core/src/tools/base_tool.ts
-BaseTool	class
-BaseToolParams	interface
-RunAsyncToolRequest	interface
-ToolProcessLlmRequest	interface
-isBaseTool	function
-```
-
-Repeat for each of the 15 leaf targets, and for `core/src/index.ts`,
-`core/src/index_web.ts` and `core/src/common.ts` to get the full reachable set.
+`node /tmp/dump-surface.mjs <module.ts>` prints one symbol and kind per line.
+Run it on each of the 15 leaves, on `core/src/index.ts`, on
+`core/src/index_web.ts` and on `core/src/common.ts`. Those counts are the
+Published column of section 2.
 
 ### 6.4. Cross-check against the source
 
-The compiler's list must agree with the source text. It does, for all 15 leaves.
-
-```
-for f in core/src/apps/app.ts core/src/artifacts/base_artifact_service.ts \
-         core/src/features/feature_registry.ts \
-         core/src/memory/base_memory_service.ts \
-         core/src/sessions/base_session_service.ts core/src/tools/base_tool.ts \
-         core/src/telemetry/google_cloud.ts core/src/telemetry/setup.ts \
-         core/src/tools/mcp/load_mcp_resource_tool.ts \
-         core/src/tools/mcp/mcp_session_manager.ts \
-         core/src/tools/mcp/mcp_tool.ts core/src/tools/mcp/mcp_toolset.ts \
-         core/src/integrations/agent_registry/agent_registry_mcp_toolset.ts \
-         core/src/integrations/agent_registry/helpers.ts \
-         core/src/integrations/agent_registry/types.ts; do
-  a=$(node /tmp/dump-surface.mjs "$f" | cut -f1 | sort)
-  b=$(grep -nE '^export ' "$f" | sed -E 's/^[0-9]+:export (declare )?(abstract )?(async )?(class|interface|type|enum|const|function|let|var) ([A-Za-z0-9_]+).*/\5/' | sort)
-  [ "$a" == "$b" ] && echo "OK   $f" || { echo "DIFF $f"; diff <(echo "$a") <(echo "$b"); }
-done
-```
+Sort that output and compare it against `grep -nE '^export ' <file>` reduced to
+declaration names. Doing so for each of the 15 leaves is what backs the
+equivalence claim in section 4.
 
 ### 6.5. Incremental surface
 
@@ -520,46 +514,10 @@ removal.
 
 ### 6.6. TSDoc presence
 
-Signal 2 needs a real doc block, not the `@license` header, so the header is
-filtered out.
-
-```js
-// /tmp/tsdoc.mjs - throwaway, not part of the diff.
-import {createRequire} from 'node:module';
-const ts = createRequire(`${process.cwd()}/`)('typescript');
-import fs from 'node:fs';
-for (const file of process.argv.slice(2)) {
-  const src = ts.createSourceFile(
-    file,
-    fs.readFileSync(file, 'utf8'),
-    ts.ScriptTarget.ES2022,
-    true,
-  );
-  console.log(`### ${file}`);
-  for (const st of src.statements) {
-    const exported = ts
-      .getModifiers(st)
-      ?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
-    if (!exported) continue;
-    const names = ts.isVariableStatement(st)
-      ? st.declarationList.declarations.map((d) => d.name.text)
-      : st.name
-        ? [st.name.text]
-        : [];
-    const doc = ts
-      .getJSDocCommentsAndTags(st)
-      .some((d) => !/@license|SPDX-License-Identifier/.test(d.getFullText()));
-    for (const n of names) console.log(`  ${n}\ttsdoc=${doc}`);
-  }
-}
-```
-
-```
-node /tmp/tsdoc.mjs core/src/integrations/agent_registry/helpers.ts
-### core/src/integrations/agent_registry/helpers.ts
-  isGoogleApi	tsdoc=false
-  cleanName	tsdoc=false
-```
+Signal 2 is a JSDoc block on the exported declaration, read with
+`ts.getJSDocCommentsAndTags` and ignoring any block containing `@license` or
+`SPDX-License-Identifier`. The per-symbol result is the `2:` or `2 only:` prefix
+in every section 3 evidence cell.
 
 ### 6.7. Usage evidence
 
