@@ -29,6 +29,7 @@ import * as readline from 'node:readline';
 
 import {AgentFile, AgentFileOptions} from '../utils/agent_loader.js';
 import {loadFileData, saveToFile} from '../utils/file_utils.js';
+import {setupTelemetry, shutdownTelemetry} from '../utils/telemetry_utils.js';
 
 const dirname = process.cwd();
 
@@ -281,6 +282,8 @@ export interface RunAgentOptions {
 }
 export async function runAgent(options: RunAgentOptions): Promise<void> {
   try {
+    await setupTelemetry(options.otelToCloud ?? false);
+
     const userId = 'test_user';
     const artifactService =
       options.artifactService || new InMemoryArtifactService();
@@ -406,5 +409,7 @@ export async function runAgent(options: RunAgentOptions): Promise<void> {
     }
   } catch (e) {
     console.log(e);
+  } finally {
+    await shutdownTelemetry();
   }
 }
