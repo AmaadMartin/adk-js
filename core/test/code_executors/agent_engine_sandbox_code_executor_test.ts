@@ -11,7 +11,7 @@ import {
   CodeExecutionResult,
   InvocationContext,
 } from '@google/adk';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 describe('AgentEngineSandboxCodeExecutor', () => {
   let executor: AgentEngineSandboxCodeExecutor;
@@ -160,6 +160,10 @@ describe('AgentEngineSandboxCodeExecutor', () => {
       executor = new AgentEngineSandboxCodeExecutor({
         client: mockClient as unknown as Client,
       });
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
     });
 
     it('creates agent engine and sandbox if not provided', async () => {
@@ -699,8 +703,6 @@ describe('AgentEngineSandboxCodeExecutor', () => {
       expect(
         mockClient.agentEnginesInternal.getAgentOperationInternal,
       ).toHaveBeenCalledTimes(180);
-
-      vi.useRealTimers();
     });
 
     it('shortens the agent engine wait when operationTimeoutSeconds is set', async () => {
@@ -721,8 +723,6 @@ describe('AgentEngineSandboxCodeExecutor', () => {
       expect(
         mockClient.agentEnginesInternal.getAgentOperationInternal,
       ).toHaveBeenCalledTimes(5);
-
-      vi.useRealTimers();
     });
 
     it('applies operationTimeoutSeconds to the sandbox wait too', async () => {
@@ -748,8 +748,6 @@ describe('AgentEngineSandboxCodeExecutor', () => {
       expect(
         mockClient.agentEnginesInternal.sandboxes.getSandboxOperationInternal,
       ).toHaveBeenCalledTimes(5);
-
-      vi.useRealTimers();
     });
 
     it('executes code after slow agent engine provisioning', async () => {
@@ -777,8 +775,6 @@ describe('AgentEngineSandboxCodeExecutor', () => {
         mockClient.agentEnginesInternal.getAgentOperationInternal,
       ).toHaveBeenCalledTimes(2);
       expect(result.stdout).toBe('hello world');
-
-      vi.useRealTimers();
     });
   });
 });

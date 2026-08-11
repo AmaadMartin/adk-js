@@ -18,8 +18,11 @@ interface PollableOperation {
   done?: boolean;
 }
 
-/** Parameters for {@link waitForOperation}. */
-export interface WaitForOperationParams<T extends PollableOperation> {
+/**
+ * Polls `operation` until it reports `done`, and returns the operation in that
+ * state. Throws when the deadline passes first.
+ */
+export async function waitForOperation<T extends PollableOperation>(params: {
   /** The operation returned by the create call. */
   operation: T;
   /** Fetches the latest state of the operation. */
@@ -28,21 +31,9 @@ export interface WaitForOperationParams<T extends PollableOperation> {
   timeoutSeconds: number;
   /** What is being created, e.g. `'Agent Engine creation'`. */
   description: string;
-}
-
-/**
- * Polls `operation` until it reports `done`, and returns the operation in that
- * state. Throws when the deadline passes first.
- *
- * A `timeoutSeconds` below one poll interval (including `0`, a negative value
- * or `NaN`) allows no poll, so an operation that is not already done fails
- * immediately.
- */
-export async function waitForOperation<T extends PollableOperation>(
-  params: WaitForOperationParams<T>,
-): Promise<T> {
+}): Promise<T> {
   const maxAttempts = Math.ceil(
-    params.timeoutSeconds / (POLL_INTERVAL_MS / 1000),
+    (params.timeoutSeconds * 1000) / POLL_INTERVAL_MS,
   );
   let current = params.operation;
   let attempts = 0;
