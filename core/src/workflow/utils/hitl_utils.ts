@@ -11,7 +11,8 @@
  * `workflow/utils/_workflow_hitl_utils.py`.
  */
 
-import {Part} from '@google/genai';
+import {FunctionResponse, Part} from '@google/genai';
+import {isEqual} from 'lodash-es';
 import {
   REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
   REQUEST_INPUT_FUNCTION_CALL_NAME,
@@ -25,12 +26,16 @@ import {AuthConfig} from '../../auth/auth_tool.js';
 import {createEvent, Event} from '../../events/event.js';
 import {State} from '../../sessions/state.js';
 import {toJsonSchema} from '../../utils/schema.js';
+import {ResumeMismatchReason} from '../errors.js';
 import {RequestInput} from '../request_input.js';
 
 export {
   REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
   REQUEST_INPUT_FUNCTION_CALL_NAME,
 } from '../../agents/functions.js';
+
+/** Args key under which an interrupt freezes the payload the human reviews. */
+const REQUEST_INPUT_PAYLOAD_KEY = 'payload';
 
 /**
  * Creates an interrupt {@link Event} from a {@link RequestInput}. The event
@@ -40,7 +45,7 @@ export {
 export function createRequestInputEvent(requestInput: RequestInput): Event {
   const args: Record<string, unknown> = {
     interruptId: requestInput.interruptId,
-    payload: requestInput.payload ?? null,
+    [REQUEST_INPUT_PAYLOAD_KEY]: requestInput.payload ?? null,
     message: requestInput.message ?? null,
     responseSchema: requestInput.responseSchema
       ? toJsonSchema(requestInput.responseSchema)
@@ -105,6 +110,99 @@ export function createRequestInputResponse(
       response,
     },
   };
+}
+
+// ---------------------------------------------------------------------------
+// Resume intent binding (frozen request <-> resume response)
+// ---------------------------------------------------------------------------
+
+/** The request a node froze when it paused, read back off the interrupt event. */
+export interface FrozenRequest {
+  interruptId: string;
+  /** The interrupt call name (`adk_request_input` / `adk_request_credential`). */
+  name: string;
+  /** The payload the human was shown, when the request froze one. */
+  payload?: unknown;
+}
+
+/**
+ * Reads the frozen request(s) an interrupt event carries.
+ *
+ * Only function calls whose id is listed in `event.longRunningToolIds` are
+ * read, so the frozen request always comes from an engine-authored interrupt.
+ * An interrupt event that carries `longRunningToolIds` but no function-call
+ * part froze no request, and yields no entry.
+ */
+export function readFrozenRequests(event: Event): FrozenRequest[] {
+  const interruptIds = new Set(event.longRunningToolIds);
+  const frozen: FrozenRequest[] = [];
+  for (const part of event.content?.parts ?? []) {
+    const fc = part.functionCall;
+    if (fc?.id && fc.name && interruptIds.has(fc.id)) {
+      frozen.push({
+        interruptId: fc.id,
+        name: fc.name,
+        payload: fc.args?.[REQUEST_INPUT_PAYLOAD_KEY],
+      });
+    }
+  }
+  return frozen;
+}
+
+/**
+ * Verifies a resume function response against the request frozen when the node
+ * paused. Pure: never throws, never mutates, returns the mismatch reason or
+ * `undefined` when the response binds.
+ *
+ * A response with no function name is accepted: `FunctionResponse.name` is
+ * optional in `@google/genai`, and an absent name cannot be attributed to
+ * another call. The payload check applies only when the request froze a payload
+ * and the response echoes one, so it stays inert for a message-only request and
+ * for `adk_request_credential`.
+ */
+export function verifyResumeResponse(
+  frozen: FrozenRequest,
+  response: FunctionResponse,
+): ResumeMismatchReason | undefined {
+  if (response.name && response.name !== frozen.name) {
+    return ResumeMismatchReason.WRONG_FUNCTION;
+  }
+  if (frozen.payload === undefined || frozen.payload === null) {
+    return undefined;
+  }
+  const body = response.response;
+  if (!isRecord(body) || !(REQUEST_INPUT_PAYLOAD_KEY in body)) {
+    return undefined;
+  }
+  try {
+    if (
+      !isEqual(
+        jsonValue(body[REQUEST_INPUT_PAYLOAD_KEY]),
+        jsonValue(frozen.payload),
+      )
+    ) {
+      return ResumeMismatchReason.PAYLOAD_MISMATCH;
+    }
+  } catch {
+    // A value JSON.stringify refuses (a cycle) cannot be shown to match.
+    return ResumeMismatchReason.PAYLOAD_MISMATCH;
+  }
+  return undefined;
+}
+
+/**
+ * Projects a value onto its JSON representation, so an echo that crossed the
+ * wire compares equal to a frozen payload still held in memory. The session may
+ * hold the interrupt event un-serialised (`InMemorySessionService` deep-clones
+ * it), which leaves `Date`s and `undefined`-valued keys the echo cannot carry.
+ */
+function jsonValue(value: unknown): unknown {
+  return JSON.parse(JSON.stringify(value) ?? 'null');
+}
+
+/** Narrows an unknown value to a plain (non-array) record. */
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 // ---------------------------------------------------------------------------

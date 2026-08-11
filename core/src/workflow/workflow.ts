@@ -9,6 +9,7 @@ import {experimental} from '../utils/experimental.js';
 import {BaseNode, BaseNodeConfig} from './base_node.js';
 import {commonPrefixOf} from './branch_path.js';
 import {DynamicNodeScheduler} from './dynamic_node_scheduler.js';
+import {RequestInputMismatchError} from './errors.js';
 import {
   createGraphFromEdgeItems,
   EdgeItem,
@@ -196,6 +197,7 @@ export class Workflow extends BaseNode {
       ctx.nodePath || undefined,
     );
     this.applyResumeInputs(ctx, rehydrated);
+    assertNoResumeMismatch(rehydrated);
 
     if (this.dynamicEntry) {
       await this.runDynamicEntry(ctx, nodeInput, dynamicState);
@@ -617,6 +619,26 @@ export class Workflow extends BaseNode {
     const outstanding = [...loop.pending.values()];
     loop.pending.clear();
     await Promise.allSettled(outstanding);
+  }
+}
+
+/**
+ * Aborts the run when a prior resume response failed to bind to the request its
+ * node froze when it paused. Checked once per run, after resume inputs are
+ * applied, so the static-graph and `dynamicEntry` paths share one abort site.
+ *
+ * A resume value already present for the interrupt does not excuse the
+ * mismatch. Callers seed `ctx.resumeInputs` from unverified sources — `NodeTool`
+ * threads the same function response through `toolConfirmation.payload` — so
+ * trusting that value would hand the check the tampered answer as a reason to
+ * skip itself. The human re-answers by sending a well-formed response, which
+ * wins chronologically and clears the mismatch.
+ */
+function assertNoResumeMismatch(rehydrated: Map<string, RehydratedNode>): void {
+  for (const [nodeName, node] of rehydrated) {
+    for (const [interruptId, reason] of node.mismatchedResponses) {
+      throw new RequestInputMismatchError({nodeName, interruptId, reason});
+    }
   }
 }
 

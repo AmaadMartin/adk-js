@@ -119,3 +119,54 @@ export function isInvocationAbortedError(
 ): e is InvocationAbortedError {
   return e instanceof Error && e.name === 'InvocationAbortedError';
 }
+
+/** Why a resume response failed to bind to the request frozen at the pause. */
+export enum ResumeMismatchReason {
+  /** The response names a function other than the interrupt it answers. */
+  WRONG_FUNCTION = 'wrong_function',
+  /** The response echoes a payload other than the frozen one. */
+  PAYLOAD_MISMATCH = 'payload_mismatch',
+}
+
+/**
+ * Raised when a resume response does not answer the request a node froze when
+ * it paused, so the workflow aborts instead of resuming the node.
+ *
+ * The message names the node, the interrupt id and the reason only. A
+ * mismatched response is untrusted input, so neither it nor the frozen request
+ * is echoed back to the caller.
+ */
+export class RequestInputMismatchError extends Error {
+  readonly nodeName: string;
+  readonly interruptId: string;
+  readonly reason: ResumeMismatchReason;
+
+  /**
+   * @param options.nodeName The node whose interrupt the response claimed.
+   * @param options.interruptId The interrupt id the response claimed.
+   * @param options.reason Why the response failed to bind.
+   */
+  constructor(options: {
+    nodeName: string;
+    interruptId: string;
+    reason: ResumeMismatchReason;
+  }) {
+    super(
+      `Resume response for interrupt '${options.interruptId}' on node ` +
+        `'${options.nodeName}' does not match the request frozen when the node ` +
+        `paused (${options.reason}).`,
+    );
+    this.name = 'RequestInputMismatchError';
+    this.nodeName = options.nodeName;
+    this.interruptId = options.interruptId;
+    this.reason = options.reason;
+    Object.setPrototypeOf(this, RequestInputMismatchError.prototype);
+  }
+}
+
+/** Type guard for {@link RequestInputMismatchError} (name-based; see above). */
+export function isRequestInputMismatchError(
+  e: unknown,
+): e is RequestInputMismatchError {
+  return e instanceof Error && e.name === 'RequestInputMismatchError';
+}
