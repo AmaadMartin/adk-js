@@ -15,6 +15,9 @@ import {sendInput} from '../test_case_utils.js';
 
 const execAsync = promisify(exec);
 const dirname = process.cwd();
+
+// The slowest test here on windows-latest is the CLI spawn at 10.3s, so 60s
+// holds a 5.8x margin (measured 2026-08-11).
 const TEST_EXECUTION_TIMEOUT = 60000;
 
 describe('App loader CLI integration', () => {
@@ -74,10 +77,17 @@ describe('AgentLoader discovery and loading integration', () => {
   );
   let loader: AgentLoader;
 
+  // This hook takes no timeout argument, so it gets the integration project's
+  // 120s hookTimeout. It needs the room: the first loader call esbuild-bundles
+  // and imports all four fixture entrypoints, which took 36.9s on
+  // windows-latest (measured 2026-08-11). Billing that to the first test body
+  // left the second test racing a preload that had not finished, and both
+  // timed out.
   beforeAll(async () => {
     await execAsync('npm install', {cwd: projectPath});
     loader = new AgentLoader(projectPath);
-  }, TEST_EXECUTION_TIMEOUT);
+    await loader.listAgents();
+  });
 
   it(
     'should discover apps vs agents across directories and standalone files',
@@ -138,5 +148,5 @@ describe('AgentLoader discovery and loading integration', () => {
     await fs
       .unlink(path.join(projectPath, 'package-lock.json'))
       .catch(() => {});
-  }, TEST_EXECUTION_TIMEOUT);
+  });
 });
