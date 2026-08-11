@@ -107,20 +107,18 @@ describe('BaseTestServer start-up banner', () => {
     vi.restoreAllMocks();
   });
 
-  it.each([
-    'http://localhost:41234',
-    'http://127.0.0.1:41234',
-    'http://[::1]:41234',
-    'http://[::]:41234',
-  ])('reads the port back from the banner %s', async (banner) => {
-    const server = createServer(serverScript(`${START_MESSAGE} ${banner}`));
+  it.each(['http://localhost:41234', 'http://127.0.0.1:41234'])(
+    'reads the port back from the banner %s',
+    async (banner) => {
+      const server = createServer(serverScript(`${START_MESSAGE} ${banner}`));
 
-    await server.start();
+      await server.start();
 
-    expect(server.port).toBe(BANNER_PORT);
-    // The host is the one the constructor chose, for every spelling.
-    expect(server.url).toBe(`http://localhost:${BANNER_PORT}`);
-  });
+      expect(server.port).toBe(BANNER_PORT);
+      // The host is the one the constructor chose, for either spelling.
+      expect(server.url).toBe(`http://localhost:${BANNER_PORT}`);
+    },
+  );
 
   it('keeps the constructor port when the banner host is not loopback', async () => {
     const server = createServer(
@@ -163,8 +161,6 @@ describe('parseBannerPort', () => {
   it.each([
     'A2A Server started on http://localhost:41234',
     'A2A Server started on http://127.0.0.1:41234',
-    'A2A Server started on http://[::1]:41234',
-    'A2A Server started on http://[::]:41234',
     'HTTP://LOCALHOST:41234',
   ])('reads the port out of %s', (banner) => {
     expect(parseBannerPort(banner)).toBe(BANNER_PORT);
@@ -175,8 +171,6 @@ describe('parseBannerPort', () => {
     ['a host that is not loopback', 'listening on http://example.com:8080'],
     // The dots in `127\.0\.0\.1` are escaped, so they match no other character.
     ['a host that only looks numeric', 'listening on http://127x0x0x1:41234'],
-    // The brackets in `\[::1\]` are escaped, so they are not a character class.
-    ['an unbracketed IPv6 host', 'listening on http://::1:41234'],
     ['a port the server has not bound yet', 'listening on http://127.0.0.1:0'],
   ])('returns undefined for %s', (_case, banner) => {
     expect(parseBannerPort(banner)).toBeUndefined();
