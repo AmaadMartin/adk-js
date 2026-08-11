@@ -117,7 +117,7 @@ describe('RestApiTool against a local HTTP server', () => {
     expect(received.body.toString()).toBe('binary-payload');
   });
 
-  it('sends a bare urlencoded Content-Type to the server', async () => {
+  it('lets fetch derive the urlencoded Content-Type the server sees', async () => {
     const tool = await createUploadTool('application/x-www-form-urlencoded', {
       type: 'object',
       properties: {foo: {type: 'string'}},
@@ -132,7 +132,9 @@ describe('RestApiTool against a local HTTP server', () => {
     if (!received) {
       expect.fail('the server received no request');
     }
-    expect(received.contentType).toBe('application/x-www-form-urlencoded');
+    expect(received.contentType).toBe(
+      'application/x-www-form-urlencoded;charset=UTF-8',
+    );
     expect(received.body.toString()).toBe('foo=bar');
   });
 });

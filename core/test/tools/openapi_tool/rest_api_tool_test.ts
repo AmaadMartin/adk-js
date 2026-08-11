@@ -1214,7 +1214,7 @@ describe('RestApiTool Utilities', () => {
       expect(headers).toEqual({});
     });
 
-    it('should set Content-Type for application/x-www-form-urlencoded', () => {
+    it('should leave Content-Type to fetch for application/x-www-form-urlencoded', () => {
       const requestBody: OpenAPIV3.RequestBodyObject = {
         content: {
           'application/x-www-form-urlencoded': {
@@ -1234,9 +1234,7 @@ describe('RestApiTool Utilities', () => {
 
       expect(result).toBeInstanceOf(URLSearchParams);
       expect(String(result)).toBe('foo=bar&baz=qux');
-      expect(headers).toEqual({
-        'Content-Type': 'application/x-www-form-urlencoded',
-      });
+      expect(headers).toEqual({});
     });
 
     it('should not set Content-Type for multipart/form-data', () => {

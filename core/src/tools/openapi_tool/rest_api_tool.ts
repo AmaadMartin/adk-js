@@ -278,7 +278,6 @@ export function prepareRequestBody(
             ? finalData
             : JSON.stringify(finalData);
         } else if (mimeType === 'application/x-www-form-urlencoded') {
-          headers['Content-Type'] = mimeType;
           return new URLSearchParams(finalData as Record<string, string>);
         } else if (mimeType === 'multipart/form-data') {
           const formData = new FormData();
