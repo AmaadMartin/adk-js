@@ -13,6 +13,7 @@ jobs:
   run-tests:
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
 
@@ -38,7 +39,7 @@ jobs:
         run: npm run build
 
       - name: Run tests and check code coverage
-        run: npm run test:coverage
+        run: npm run test:coverage -- --reporter=verbose
 
       - name: Run lint check
         run: npm run lint
