@@ -11,7 +11,9 @@
  * Mirrors `google/adk-python` `_validate_resume_response`, which delegates to
  * pydantic in lax mode. The mainstream JSON Schema validators compile schemas
  * through the `Function` constructor, which a strict-CSP browser blocks, and
- * the web bundle is a supported target.
+ * the web bundle is a supported target. `zod`, already a dependency, is not a
+ * substitute: `z.fromJSONSchema` throws on the uppercase genai `Type` enum and
+ * on a `$ref` that this validator passes through, and it does not coerce.
  */
 
 import {formatError} from './error_utils.js';

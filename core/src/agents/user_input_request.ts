@@ -107,7 +107,11 @@ export function getUserInputRequests(event: Event): UserInputRequest[] {
           kind: 'input',
           message: asString(args['message']),
           payload: args['payload'] ?? undefined,
-          responseSchema: args['responseSchema'] ?? undefined,
+          // `google/adk-python` `create_request_input_event` writes this
+          // argument as `response_schema`, so a session written by either
+          // runtime is readable.
+          responseSchema:
+            args['responseSchema'] ?? args['response_schema'] ?? undefined,
         });
         break;
 

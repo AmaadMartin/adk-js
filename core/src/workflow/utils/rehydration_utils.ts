@@ -13,13 +13,15 @@
  * for deterministic parallel/dynamic replay is a Phase 5b continuation.
  */
 
-import {requiresUserInput} from '../../agents/user_input_request.js';
+import {
+  getUserInputRequests,
+  requiresUserInput,
+} from '../../agents/user_input_request.js';
 import {Event} from '../../events/event.js';
 import {formatError} from '../../utils/error_utils.js';
 import {validateAgainstJsonSchema} from '../../utils/json_schema_validator.js';
 import {RouteValue} from '../graph.js';
 import type {NodeContext, NodeResult} from '../node_context.js';
-import {REQUEST_INPUT_FUNCTION_CALL_NAME} from './hitl_utils.js';
 
 const RESULT_KEY = 'result';
 
@@ -215,10 +217,12 @@ function reconstruct(
     if (event.route !== undefined) {
       node.route = event.route as RouteValue | RouteValue[];
     }
+    for (const request of getUserInputRequests(event)) {
+      schemasById.set(request.interruptId, request.responseSchema);
+    }
     for (const id of event.longRunningToolIds ?? []) {
       node.interruptIds.add(id);
       interruptOwner.set(id, key);
-      schemasById.set(id, frozenResponseSchema(event, id));
     }
     // Capture the node's original input, stashed on the interrupt event, so a
     // resumed waiting node re-runs with it (not the resume message). Guard the
@@ -293,29 +297,6 @@ function directChildName(path: string, parentPath: string): string | undefined {
 /** Narrows an unknown value to a plain (non-array) record. */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-/**
- * Reads the response schema frozen into the `adk_request_input` call for
- * `interruptId`, or `undefined` when the interrupt carried none.
- *
- * `google/adk-python` `create_request_input_event` writes this argument as
- * `response_schema` while adk-js writes `responseSchema`, so both spellings
- * are accepted and a session written by either runtime is readable.
- */
-function frozenResponseSchema(event: Event, interruptId: string): unknown {
-  for (const part of event.content?.parts ?? []) {
-    const fc = part.functionCall;
-    if (
-      fc &&
-      fc.name === REQUEST_INPUT_FUNCTION_CALL_NAME &&
-      fc.id === interruptId &&
-      fc.args
-    ) {
-      return fc.args['responseSchema'] ?? fc.args['response_schema'];
-    }
-  }
-  return undefined;
 }
 
 /**
