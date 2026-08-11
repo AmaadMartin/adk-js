@@ -537,6 +537,27 @@ describe('deployToAgentEngine', () => {
     expect(exists).toBe(false);
   });
 
+  it('should abort before any gcloud call when the loader lists no agents', async () => {
+    (AgentLoader as Mock).mockImplementation(() => ({
+      agentsDirPath: 'path/to/agent',
+      listAgents: vi.fn().mockResolvedValue([]),
+      listLoadFailures: vi.fn().mockResolvedValue([
+        {
+          name: 'broken',
+          filePath: 'path/to/agent/broken/agent.js',
+          error: new Error('boom during construction'),
+        },
+      ]),
+      disposeAll: vi.fn().mockResolvedValue(undefined),
+    }));
+
+    await expect(deployToAgentEngine(defaultOptions)).rejects.toThrow(
+      '  - broken (path/to/agent/broken/agent.js): boom during construction',
+    );
+    expect(spawnMock).not.toHaveBeenCalled();
+    expect(tryToFindFileRecursively).not.toHaveBeenCalled();
+  });
+
   it('should throw error if required npm packages are missing in package.json', async () => {
     (loadFileData as Mock).mockResolvedValue({
       dependencies: {

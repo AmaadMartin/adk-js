@@ -7,7 +7,11 @@ import {exec, spawn, SpawnOptions} from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import {promisify} from 'node:util';
-import {AgentFileOptions, AgentLoader} from '../../utils/agent_loader.js';
+import {
+  AgentFileOptions,
+  AgentLoader,
+  AgentLoadFailure,
+} from '../../utils/agent_loader.js';
 import {
   loadFileData,
   saveToFile,
@@ -193,11 +197,41 @@ export async function createDockerFile(
   console.info('Creating Dockerfile complete:', dockerFilePath);
 }
 
+function formatNoAgentsError(
+  agentsPath: string,
+  failures: AgentLoadFailure[],
+): string {
+  const header =
+    `No agents were loaded from ${agentsPath}, so the deployment would ` +
+    `contain no agent code. Aborting before any gcloud command runs.`;
+
+  if (failures.length > 0) {
+    const details = failures
+      .map((f) => `  - ${f.name} (${f.filePath}): ${f.error.message}`)
+      .join('\n');
+    return `${header}\nEvery agent failed to load:\n${details}`;
+  }
+
+  return (
+    `${header}\nExpected ${agentsPath} to contain <name>.ts or ` +
+    `<name>/agent.ts exporting a @google/adk agent or app.`
+  );
+}
+
 export async function copyAgentFiles(
   agentLoader: AgentLoader,
   targetPath: string,
 ): Promise<void> {
   const agentNames = await agentLoader.listAgents();
+
+  if (agentNames.length === 0) {
+    throw new Error(
+      formatNoAgentsError(
+        agentLoader.agentsDirPath,
+        await agentLoader.listLoadFailures(),
+      ),
+    );
+  }
 
   for (const agentName of agentNames) {
     const agentFile = await agentLoader.getAgentFile(agentName);
