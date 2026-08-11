@@ -28,33 +28,6 @@ import {BaseAuthProvider} from './base_auth_provider.js';
 /** Registry of the providers {@link registerAuthProvider} records. */
 const registry = new AuthProviderRegistry();
 
-/** Marks {@link AuthProviderNotRegisteredError} across duplicate package copies. */
-const AUTH_PROVIDER_NOT_REGISTERED = 'AuthProviderNotRegisteredError';
-
-/**
- * Thrown when a custom auth scheme reaches
- * {@link getCustomSchemeCredential} with no provider registered for its type.
- *
- * This is a configuration fault, not a transient one, so callers should let it
- * surface rather than continuing without a credential.
- */
-export class AuthProviderNotRegisteredError extends Error {
-  constructor(readonly authSchemeType: string) {
-    super(
-      `No auth provider registered for custom auth scheme '${authSchemeType}'. ` +
-        'Register it using `registerAuthProvider(<YourAuthProviderInstance>)`.',
-    );
-    this.name = AUTH_PROVIDER_NOT_REGISTERED;
-  }
-}
-
-/** Returns whether `error` is an {@link AuthProviderNotRegisteredError}. */
-export function isAuthProviderNotRegisteredError(
-  error: unknown,
-): error is AuthProviderNotRegisteredError {
-  return error instanceof Error && error.name === AUTH_PROVIDER_NOT_REGISTERED;
-}
-
 /**
  * Registers `provider` for every scheme type it declares in
  * {@link BaseAuthProvider.supportedAuthSchemes}.
@@ -86,9 +59,8 @@ export function registerAuthProvider(provider: BaseAuthProvider): void {
  * @param authConfig The config carrying the custom scheme to resolve.
  * @param context The context of the invocation that needs the credential.
  * @returns The credential the provider returned.
- * @throws {AuthProviderNotRegisteredError} If no provider is registered for
- *   the scheme type.
- * @throws If the provider returns no credential.
+ * @throws If no provider is registered for the scheme type, or if the provider
+ *   returns no credential.
  */
 export async function getCustomSchemeCredential(
   authConfig: CustomAuthConfig,
@@ -96,7 +68,10 @@ export async function getCustomSchemeCredential(
 ): Promise<AuthCredential> {
   const provider = registry.getProvider(authConfig.authScheme);
   if (!provider) {
-    throw new AuthProviderNotRegisteredError(authConfig.authScheme.type);
+    throw new Error(
+      `No auth provider registered for custom auth scheme '${authConfig.authScheme.type}'. ` +
+        'Register it using `registerAuthProvider(<YourAuthProviderInstance>)`.',
+    );
   }
 
   const credential = await provider.getAuthCredential(authConfig, context);

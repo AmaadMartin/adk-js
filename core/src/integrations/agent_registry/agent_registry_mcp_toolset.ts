@@ -14,10 +14,7 @@ import {
   isCustomAuthScheme,
 } from '../../auth/auth_schemes.js';
 import {CustomAuthConfig} from '../../auth/auth_tool.js';
-import {
-  getCustomSchemeCredential,
-  isAuthProviderNotRegisteredError,
-} from '../../auth/credential_manager.js';
+import {getCustomSchemeCredential} from '../../auth/credential_manager.js';
 import {BaseTool} from '../../tools/base_tool.js';
 import {BaseToolset, ToolPredicate} from '../../tools/base_toolset.js';
 import {
@@ -84,13 +81,12 @@ export class AgentRegistrySingleMCPToolset extends BaseToolset {
    * Resolves a {@link CustomAuthScheme} into request headers through its
    * registered auth provider.
    *
-   * A provider that fails to mint yields no headers and a warning, so a
-   * transient outage does not break tool listing. A scheme with no registered
-   * provider is a configuration fault and propagates instead: continuing would
-   * connect anonymously and turn a typo into a confusing 401 from the server.
+   * A scheme with no registered provider, or a provider that fails to mint,
+   * yields no headers and a warning naming the scheme type. Tool listing must
+   * not fail on auth, matching how adk-python's toolset auth resolution treats
+   * a credential-manager error.
    *
    * @returns The credential headers, or an empty record.
-   * @throws {AuthProviderNotRegisteredError} If the scheme has no provider.
    */
   private async resolveAuthHeaders(
     context?: ReadonlyContext,
@@ -112,9 +108,6 @@ export class AgentRegistrySingleMCPToolset extends BaseToolset {
         await getCustomSchemeCredential(authConfig, context),
       );
     } catch (e: unknown) {
-      if (isAuthProviderNotRegisteredError(e)) {
-        throw e;
-      }
       const msg = e instanceof Error ? e.message : String(e);
       logger.warn(
         `Failed to resolve the credential for auth scheme ${this.authScheme.type}: ${msg}`,
@@ -133,8 +126,6 @@ export class AgentRegistrySingleMCPToolset extends BaseToolset {
    *
    * @param context - Optional readonly agent context passed to the header provider.
    * @returns The resolved and optionally filtered list of {@link MCPTool} instances.
-   * @throws {AuthProviderNotRegisteredError} If a custom `authScheme` has no
-   *   registered auth provider.
    */
   async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {
     const headers: Record<string, string> = {};

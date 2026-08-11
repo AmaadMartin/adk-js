@@ -115,9 +115,7 @@ export type {
 export type {AuthConfig, CustomAuthConfig} from './auth/auth_tool.js';
 export type {BaseAuthProvider} from './auth/base_auth_provider.js';
 export {
-  AuthProviderNotRegisteredError,
   getCustomSchemeCredential,
-  isAuthProviderNotRegisteredError,
   registerAuthProvider,
 } from './auth/credential_manager.js';
 export type {BaseCredentialService} from './auth/credential_service/base_credential_service.js';

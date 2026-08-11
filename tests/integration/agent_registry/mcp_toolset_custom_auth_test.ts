@@ -39,6 +39,15 @@ class StaticTokenAuthProvider implements BaseAuthProvider {
   }
 }
 
+/** Stands in for a registered provider whose token service is unreachable. */
+class FailingAuthProvider implements BaseAuthProvider {
+  readonly supportedAuthSchemes = ['e2eFailingTokenScheme'];
+
+  async getAuthCredential(): Promise<AuthCredential> {
+    throw new Error('token service unreachable');
+  }
+}
+
 describe('AgentRegistrySingleMCPToolset against a live MCP server', () => {
   let server: http.Server;
   let url: string;
@@ -107,6 +116,22 @@ describe('AgentRegistrySingleMCPToolset against a live MCP server', () => {
     const toolset = new AgentRegistrySingleMCPToolset({
       connectionParams: {type: 'StreamableHTTPConnectionParams', url},
       authScheme: {type: 'e2eUnregisteredScheme'},
+    });
+
+    const tools = await toolset.getTools();
+
+    expect(tools.map((t) => t.name)).toEqual(['ping']);
+    expect(receivedAuthorization.length).toBeGreaterThan(0);
+    for (const value of receivedAuthorization) {
+      expect(value).toBeUndefined();
+    }
+  });
+
+  it('lists tools with no header when the provider fails to mint', async () => {
+    registerAuthProvider(new FailingAuthProvider());
+    const toolset = new AgentRegistrySingleMCPToolset({
+      connectionParams: {type: 'StreamableHTTPConnectionParams', url},
+      authScheme: {type: 'e2eFailingTokenScheme'},
     });
 
     const tools = await toolset.getTools();

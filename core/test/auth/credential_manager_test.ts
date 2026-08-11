@@ -7,7 +7,6 @@
 import {
   AuthCredential,
   AuthCredentialTypes,
-  AuthProviderRegistry,
   BaseAuthProvider,
   createSession,
   CustomAuthConfig,
@@ -29,6 +28,9 @@ const CREDENTIAL: AuthCredential = {
 /**
  * A provider whose returned credential and declared scheme types are set per
  * test. `getAuthCredential` is a spy so call arguments can be asserted.
+ *
+ * `registerAuthProvider` writes to a process-wide registry with no reset, so
+ * every test below claims a scheme type unique to itself.
  */
 class FakeAuthProvider implements BaseAuthProvider {
   readonly getAuthCredential = vi
@@ -55,66 +57,46 @@ function makeContext(): ReadonlyContext {
 
 describe('getCustomSchemeCredential', () => {
   it('resolves the credential from the registered provider', async () => {
-    const registry = new AuthProviderRegistry();
-    registry.register('injectedScheme', new FakeAuthProvider([]));
+    registerAuthProvider(new FakeAuthProvider(['resolvedScheme']));
 
     await expect(
-      getCustomSchemeCredential(
-        makeAuthConfig('injectedScheme'),
-        undefined,
-        registry,
-      ),
+      getCustomSchemeCredential(makeAuthConfig('resolvedScheme')),
     ).resolves.toBe(CREDENTIAL);
   });
 
   it('throws naming the scheme type when no provider is registered', async () => {
     await expect(
-      getCustomSchemeCredential(
-        makeAuthConfig('unregisteredScheme'),
-        undefined,
-        new AuthProviderRegistry(),
-      ),
+      getCustomSchemeCredential(makeAuthConfig('unregisteredScheme')),
     ).rejects.toThrow(/unregisteredScheme.*registerAuthProvider/s);
   });
 
   it('throws when the provider resolves no credential', async () => {
-    const registry = new AuthProviderRegistry();
-    const provider = new FakeAuthProvider([]);
+    const provider = new FakeAuthProvider(['emptyScheme']);
     provider.getAuthCredential.mockResolvedValue(undefined);
-    registry.register('emptyScheme', provider);
+    registerAuthProvider(provider);
 
     await expect(
-      getCustomSchemeCredential(
-        makeAuthConfig('emptyScheme'),
-        undefined,
-        registry,
-      ),
+      getCustomSchemeCredential(makeAuthConfig('emptyScheme')),
     ).rejects.toThrow('AuthProvider did not return a credential.');
   });
 
   it('propagates a provider rejection unchanged', async () => {
-    const registry = new AuthProviderRegistry();
-    const provider = new FakeAuthProvider([]);
+    const provider = new FakeAuthProvider(['failingScheme']);
     provider.getAuthCredential.mockRejectedValue(new Error('minting failed'));
-    registry.register('failingScheme', provider);
+    registerAuthProvider(provider);
 
     await expect(
-      getCustomSchemeCredential(
-        makeAuthConfig('failingScheme'),
-        undefined,
-        registry,
-      ),
+      getCustomSchemeCredential(makeAuthConfig('failingScheme')),
     ).rejects.toThrow('minting failed');
   });
 
   it('passes the auth config and the context through to the provider', async () => {
-    const registry = new AuthProviderRegistry();
-    const provider = new FakeAuthProvider([]);
-    registry.register('passthroughScheme', provider);
+    const provider = new FakeAuthProvider(['passthroughScheme']);
+    registerAuthProvider(provider);
     const authConfig = makeAuthConfig('passthroughScheme');
     const context = makeContext();
 
-    await getCustomSchemeCredential(authConfig, context, registry);
+    await getCustomSchemeCredential(authConfig, context);
 
     expect(provider.getAuthCredential).toHaveBeenCalledWith(
       authConfig,
