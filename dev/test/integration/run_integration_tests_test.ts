@@ -7,7 +7,12 @@
 import {getLogger} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {registerConformanceIntegrations} from '../../src/conformance/conformance_integrations.js';
+import {batchLoadYamlAgentConfig} from '../../src/conformance/yaml_agent_loader.js';
 import {batchLoadYamlTestDefs} from '../../src/conformance/yaml_test_loader.js';
+import {
+  AgentClass,
+  YamlAgentConfig,
+} from '../../src/integration/agent_types.js';
 import {IntegrationRegistry} from '../../src/integration/integration_registry.js';
 import {runIntegrationTests} from '../../src/integration/run_integration_tests.js';
 import {TestRunner} from '../../src/integration/test_runner.js';
@@ -39,6 +44,22 @@ function testInfo(name: string): TestInfo {
 
 function testDefs(...names: string[]): Map<string, TestInfo> {
   return new Map(names.map((name) => [name, testInfo(name)]));
+}
+
+function agentConfigs(...names: string[]): Map<string, YamlAgentConfig> {
+  return new Map(
+    names.map((name) => [
+      name,
+      {
+        agentClass: AgentClass.LlmAgent,
+        name,
+        model: 'test-model',
+        description: `${name} agent`,
+        instruction: 'answer the question',
+        isRootAgent: true,
+      },
+    ]),
+  );
 }
 
 const OPTIONS = {agentsDir: '/agents', testsDir: '/tests', forceRunAll: false};
@@ -130,17 +151,18 @@ describe('runIntegrationTests logging', () => {
   }
 
   it('logs the setup narration at debug', async () => {
+    vi.mocked(batchLoadYamlAgentConfig).mockResolvedValue(agentConfigs('root'));
     vi.mocked(batchLoadYamlTestDefs).mockResolvedValue(testDefs());
 
     await runIntegrationTests(OPTIONS);
 
     expect(logSpies.debug.mock.calls).toEqual([
       ['Loading agents from /agents'],
-      [0, 'agents found'],
+      [1, 'agents found'],
       ['Registering conformance integrations.'],
       [conformanceSummary()],
       ['Registering agents.'],
-      ['0 configs, 0 instantiated agents'],
+      ['1 configs, 0 instantiated agents'],
       ['Loading tests from /tests'],
       [0, 'tests found.'],
       ['Running tests.'],
