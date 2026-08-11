@@ -7,11 +7,11 @@
 /**
  * Measures where `AgentLoader.listAgents()` spends its time on a directory of
  * agents, so that everyone who changes `dev/src/utils/agent_loader.ts` reports
- * the same numbers. It splits the call into three wall-clock segments - the
- * work before the first esbuild build, the build window itself, and everything
- * after the last build - and reports the minimum and the median over N runs,
- * plus the compiled size of each agent bundle. Run it by hand; it is not part
- * of the test suite or of CI.
+ * the same numbers. It times the discovery scan, the real `esbuild.build()`
+ * calls, an `await import()` pass over the compiled bundles and the end-to-end
+ * call, and reports the minimum and the median over N runs plus the compiled
+ * size of each agent bundle. Run it by hand; it is not part of the test suite
+ * or of CI.
  *
  *   npm run build
  *   npm install --prefix tests/integration/app_loader/discovery
@@ -19,15 +19,19 @@
  *
  * The script imports the built loader from `dev/dist`, so `npm run build` must
  * run first, and the agents directory must already have its own dependencies
- * installed. The three segments tile the end-to-end call exactly, so nothing
- * hides in a residual, but they are segments and not phase costs: the loader
- * compiles and imports every agent concurrently, so an agent whose build ends
- * early imports itself inside the compile window and its import cost lands in
- * the compile row. Every run keeps its evaluated bundles in memory, so a large
- * `--runs` may need `--max-old-space-size`.
+ * installed. The `unattributed` row is the end-to-end time minus the other
+ * three, which are timed in passes of their own rather than inside
+ * `listAgents()`. Expect it to be large and positive: the import pass runs
+ * after the loader has already imported the same bundles, so V8 answers it
+ * from a warm compilation cache. The last row measures that same import inside
+ * the end-to-end call, and accounts for most of the difference. A strongly
+ * negative residual means this script no longer models the loader, and the
+ * numbers should not be trusted. Each run evaluates every bundle twice and
+ * keeps both copies in memory, so a large `--runs` may need
+ * `--max-old-space-size`.
  */
 
-import {stat} from 'node:fs/promises';
+import {readdir, stat} from 'node:fs/promises';
 import Module, {createRequire} from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
@@ -48,14 +52,17 @@ const DEFAULT_AGENTS_DIR = path.join(
 );
 const DEFAULT_RUNS = 5;
 const WARMUP_RUNS = 1;
+const JS_FILE_EXTENSIONS = ['.js', '.cjs', '.mjs', '.ts', '.mts', '.cts'];
 const ENTRY_FILE_NAMES = ['app', 'agent'];
 const PHASE_ROWS = [
-  ['discovery + setup (before the first build)', 'setupMs'],
+  ['discovery scan', 'discoveryMs'],
   ['compile (esbuild, concurrent wall)', 'compileMs'],
-  ['import (bundles, after the last build)', 'importMs'],
+  ['import (bundles, cache-busted re-import)', 'importMs'],
   ['end-to-end listAgents()', 'e2eMs'],
+  ['unattributed (e2e - the three above)', 'unattributedMs'],
 ];
-const LABEL_WIDTH = 44;
+const LOADER_IMPORT_LABEL = 'loader import (inside e2e, after its last build)';
+const LABEL_WIDTH = 50;
 const NUMBER_WIDTH = 12;
 const USAGE = `Usage: node scripts/bench_agent_discovery.mjs [options]
 
@@ -64,6 +71,8 @@ const USAGE = `Usage: node scripts/bench_agent_discovery.mjs [options]
   --runs <n>     timed runs, after ${WARMUP_RUNS} untimed warm-up run
                  (default: ${DEFAULT_RUNS})
   --help         print this message`;
+
+const requireFromScript = createRequire(import.meta.url);
 
 /** Every `esbuild.build()` call the probe saw during the current run. */
 const recordedBuilds = [];
@@ -80,12 +89,16 @@ function parseCliArgs() {
     },
   });
 
+  if (values.help) {
+    return {help: true};
+  }
+
   const runs = Number(values.runs);
   if (!Number.isInteger(runs) || runs < 1) {
     throw new Error(`--runs must be an integer >= 1, got '${values.runs}'.`);
   }
 
-  return {dir: values.dir, runs, help: values.help};
+  return {dir: values.dir, runs, help: false};
 }
 
 function errorMessage(e) {
@@ -119,22 +132,88 @@ async function findPreconditionProblem(agentsDir) {
   return undefined;
 }
 
-/** Mirrors how `AgentLoader` names an agent after its file or its directory. */
-function agentNameFor(entryPoint) {
+function isJsFile(fileName) {
+  return JS_FILE_EXTENSIONS.includes(path.extname(fileName));
+}
+
+async function readDirMetadata(dir) {
+  const names = await readdir(dir);
+
+  return Promise.all(
+    names.map(async (name) => {
+      const filePath = path.join(dir, name);
+      const stats = await stat(filePath);
+      return {
+        path: filePath,
+        name,
+        isFile: stats.isFile(),
+        isDirectory: stats.isDirectory(),
+      };
+    }),
+  );
+}
+
+/** Mirrors the `app.*` over `agent.*` preference of `AgentLoader`. */
+function findEntryFile(files) {
+  for (const entryName of ENTRY_FILE_NAMES) {
+    const match = files.find(
+      (file) =>
+        file.isFile &&
+        isJsFile(file.name) &&
+        path.parse(file.name).name === entryName,
+    );
+    if (match) {
+      return match;
+    }
+  }
+
+  return undefined;
+}
+
+/**
+ * Repeats the `readdir`/`stat` walk that `AgentLoader.preloadAgents()` performs
+ * before it compiles anything, for the timing row and the discovered count.
+ */
+async function scanDiscovery(dir) {
+  const entries = await readDirMetadata(dir);
+  const subDirFiles = await Promise.all(
+    entries
+      .filter((entry) => entry.isDirectory)
+      .map((entry) => readDirMetadata(entry.path)),
+  );
+
+  const entryPoints = entries
+    .filter((entry) => entry.isFile && isJsFile(entry.name))
+    .map((entry) => entry.path);
+  for (const files of subDirFiles) {
+    const entryFile = findEntryFile(files);
+    if (entryFile) {
+      entryPoints.push(entryFile.path);
+    }
+  }
+
+  return entryPoints;
+}
+
+/**
+ * Mirrors `AgentLoader`, which names a top-level file after the file and a
+ * nested entrypoint after its directory.
+ */
+function agentNameFor(entryPoint, agentsDir) {
   const parsed = path.parse(entryPoint);
-  return ENTRY_FILE_NAMES.includes(parsed.name)
-    ? path.basename(parsed.dir)
-    : parsed.name;
+  return path.resolve(parsed.dir) === agentsDir
+    ? parsed.name
+    : path.basename(parsed.dir);
 }
 
 /**
  * The loader deletes the bundle of a file that compiled but exported no agent,
  * so such a build has no size to report.
  */
-async function bundleReport(build) {
+async function bundleReport(build, agentsDir) {
   const stats = await statOrUndefined(build.outfile);
   return stats
-    ? {name: agentNameFor(build.entryPoint), bytes: stats.size}
+    ? {name: agentNameFor(build.entryPoint, agentsDir), bytes: stats.size}
     : undefined;
 }
 
@@ -191,6 +270,30 @@ function restoreBuildProbe() {
   probe = undefined;
 }
 
+/**
+ * Re-evaluates the compiled bundles the way the loader does. Dropping the
+ * `require` cache entry first is what makes this a measurement: a cache-busted
+ * `import()` of a `.cjs` bundle otherwise resolves from the CommonJS cache and
+ * reports near zero.
+ */
+async function timeImportPass(outfiles) {
+  const start = performance.now();
+
+  await Promise.all(
+    outfiles.map(async (outfile) => {
+      try {
+        delete requireFromScript.cache[requireFromScript.resolve(outfile)];
+      } catch {
+        // The bundle is not in the CommonJS cache, so there is nothing to drop.
+      }
+      const cacheBuster = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+      await import(`${pathToFileURL(outfile).href}?t=${cacheBuster}`);
+    }),
+  );
+
+  return performance.now() - start;
+}
+
 function assertProbeAttached() {
   if (recordedBuilds.length > 0) {
     return;
@@ -223,36 +326,47 @@ function assertEverythingLoaded(agentsDir, loadedNames, failures) {
 
 async function runOnce(agentsDir, AgentLoader) {
   recordedBuilds.length = 0;
-  const loader = new AgentLoader(agentsDir);
 
+  const discoveryStart = performance.now();
+  const entryPoints = await scanDiscovery(agentsDir);
+  const discoveryMs = performance.now() - discoveryStart;
+
+  const loader = new AgentLoader(agentsDir);
   try {
     const startedAt = performance.now();
     const loadedNames = await loader.listAgents();
     const endedAt = performance.now();
 
-    assertProbeAttached();
+    // Checked before the probe: an empty directory also records no build, and
+    // "nothing loaded" is the useful diagnosis there.
     assertEverythingLoaded(
       agentsDir,
       loadedNames,
       await loader.listLoadFailures(),
     );
+    assertProbeAttached();
 
     const builds = [...recordedBuilds];
-    const firstBuildStart = Math.min(...builds.map((build) => build.start));
     const lastBuildEnd = Math.max(...builds.map((build) => build.end));
-    const bundles = (await Promise.all(builds.map(bundleReport))).filter(
-      (bundle) => bundle !== undefined,
-    );
+    const compileMs =
+      lastBuildEnd - Math.min(...builds.map((build) => build.start));
+    const bundles = (
+      await Promise.all(builds.map((build) => bundleReport(build, agentsDir)))
+    ).filter((bundle) => bundle !== undefined);
+    const importMs = await timeImportPass(builds.map((build) => build.outfile));
+    const e2eMs = endedAt - startedAt;
 
     return {
-      compiled: builds.length,
+      discovered: entryPoints.length,
       loaded: loadedNames.length,
       bundles,
       sample: {
-        setupMs: firstBuildStart - startedAt,
-        compileMs: lastBuildEnd - firstBuildStart,
-        importMs: endedAt - lastBuildEnd,
-        e2eMs: endedAt - startedAt,
+        discoveryMs,
+        compileMs,
+        importMs,
+        e2eMs,
+        unattributedMs: e2eMs - discoveryMs - compileMs - importMs,
+        loaderImportMs: endedAt - lastBuildEnd,
       },
     };
   } finally {
@@ -281,19 +395,29 @@ function formatRow(label, minText, medianText) {
   return `  ${label.padEnd(LABEL_WIDTH)}${minText.padStart(NUMBER_WIDTH)}${medianText.padStart(NUMBER_WIDTH)}`;
 }
 
+function formatPhaseRow(label, results, key) {
+  const values = results.map((result) => result.sample[key]);
+
+  return formatRow(
+    label,
+    formatMs(Math.min(...values)),
+    formatMs(median(values)),
+  );
+}
+
 function printReport(agentsDir, timedRuns, results) {
   const last = results[results.length - 1];
 
   console.log('agent discovery benchmark');
   console.log(`  agents dir  : ${agentsDir}`);
   console.log(
-    `  entrypoints : ${last.compiled} compiled, ${last.loaded} loaded`,
+    `  entrypoints : ${last.discovered} discovered, ${last.loaded} loaded`,
   );
   console.log(`  runs        : ${timedRuns} timed (${WARMUP_RUNS} warm-up)`);
   console.log(
     `  node        : ${process.version} ${process.platform}/${process.arch}, ${os.cpus().length} cpus`,
   );
-  if (last.compiled !== last.loaded) {
+  if (last.discovered !== last.loaded) {
     console.log(
       `  note        : the counts differ, so ${agentsDir} also holds files that export no agent.`,
     );
@@ -302,15 +426,15 @@ function printReport(agentsDir, timedRuns, results) {
   console.log('');
   console.log(formatRow('phase', 'min (ms)', 'median (ms)'));
   for (const [label, key] of PHASE_ROWS) {
-    const values = results.map((result) => result.sample[key]);
-    console.log(
-      formatRow(label, formatMs(Math.min(...values)), formatMs(median(values))),
-    );
+    console.log(formatPhaseRow(label, results, key));
   }
+
+  console.log('');
   console.log(
-    "  each run's three segments tile its end-to-end time; a build that ends",
+    '  unattributed is mostly the loader importing the same bundles,',
   );
-  console.log('  early overlaps its own import with the compile window.');
+  console.log('  which the warm re-import above cannot see:');
+  console.log(formatPhaseRow(LOADER_IMPORT_LABEL, results, 'loaderImportMs'));
 
   console.log('');
   console.log('  per-agent compiled bundle size');
@@ -328,6 +452,13 @@ async function main() {
   // Every AgentLoader adds five process listeners and never removes them, so a
   // multi-run benchmark would otherwise flood the report with warnings.
   process.setMaxListeners(0);
+  // One of those listeners answers an uncaught exception with an argument-less
+  // process.exit(), which reports success. Claim the exception first so that a
+  // crash cannot be mistaken for a completed measurement.
+  process.on('uncaughtException', (e) => {
+    console.error(errorMessage(e));
+    process.exit(1);
+  });
 
   let args;
   try {
