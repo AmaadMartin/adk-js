@@ -376,7 +376,8 @@ export class AgentLoader {
   private watcher?: fs.FSWatcher;
 
   constructor(
-    private readonly agentsDirPath: string = process.cwd(),
+    /** Directory scanned for agents, or the path of a single agent file. */
+    readonly agentsDirPath: string = process.cwd(),
     private readonly options = DEFAULT_AGENT_FILE_OPTIONS,
     private readonly watchForChanges = false,
   ) {

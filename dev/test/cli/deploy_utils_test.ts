@@ -28,7 +28,11 @@ export const rootAgent = new FakeAgent('${agentName}');
 }
 
 /** Fails on import, so AgentLoader records a load failure and skips it. */
-const BROKEN_AGENT_SOURCE = `throw new Error('fixture agent is broken');`;
+function brokenAgentSource(reason: string): string {
+  return `throw new Error('${reason}');`;
+}
+
+const BROKEN_AGENT_SOURCE = brokenAgentSource('fixture agent is broken');
 
 async function writeAgentFile(
   dirPath: string,
@@ -156,5 +160,47 @@ describe('copyAgentFiles', () => {
     await copyAgentFiles(newLoader(sourceDir), stagedDir);
 
     expect(await fs.readdir(stagedDir)).toEqual(['good']);
+  });
+
+  it('throws and stages nothing when the directory holds no agent file', async () => {
+    await fs.writeFile(path.join(sourceDir, 'README.md'), '# no agents here');
+
+    await expect(
+      copyAgentFiles(newLoader(sourceDir), stagedDir),
+    ).rejects.toThrow(
+      new RegExp(
+        `No agents were loaded from ${sourceDir}[\\s\\S]*` +
+          `Expected ${sourceDir} to contain <name>\\.ts or <name>/agent\\.ts`,
+      ),
+    );
+    await expect(fs.readdir(stagedDir)).rejects.toThrow(/ENOENT/);
+  });
+
+  it('names every agent that failed to load', async () => {
+    await writeAgentFile(
+      path.join(sourceDir, 'alpha'),
+      'agent.js',
+      brokenAgentSource('alpha exploded'),
+    );
+    await writeAgentFile(
+      path.join(sourceDir, 'beta'),
+      'agent.js',
+      brokenAgentSource('beta exploded'),
+    );
+
+    const error = await copyAgentFiles(newLoader(sourceDir), stagedDir).catch(
+      (e: unknown) => e,
+    );
+
+    if (!(error instanceof Error)) {
+      expect.fail('copyAgentFiles resolved instead of rejecting');
+    }
+    expect(error.message).toContain(
+      `  - alpha (${path.join(sourceDir, 'alpha', 'agent.js')}): alpha exploded`,
+    );
+    expect(error.message).toContain(
+      `  - beta (${path.join(sourceDir, 'beta', 'agent.js')}): beta exploded`,
+    );
+    await expect(fs.readdir(stagedDir)).rejects.toThrow(/ENOENT/);
   });
 });

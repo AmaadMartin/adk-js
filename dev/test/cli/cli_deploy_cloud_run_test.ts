@@ -404,6 +404,26 @@ describe('deployToCloudRun', () => {
     );
   });
 
+  it('should abort before any gcloud call when the loader lists no agents', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error');
+    (AgentLoader as Mock).mockImplementation(() => ({
+      agentsDirPath: 'path/to/agent',
+      listAgents: vi.fn().mockResolvedValue([]),
+      listLoadFailures: vi.fn().mockResolvedValue([]),
+      disposeAll: vi.fn().mockResolvedValue(undefined),
+    }));
+
+    await deployToCloudRun(defaultOptions);
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('\x1b[31mFailed to deploy to Cloud Run:'),
+      expect.stringContaining('No agents were loaded from path/to/agent'),
+      expect.stringContaining('\x1b[0m'),
+    );
+    expect(spawnMock).not.toHaveBeenCalled();
+    expect(tryToFindFileRecursively).not.toHaveBeenCalled();
+  });
+
   it('should forward the A2A token to Cloud Run as an environment variable', async () => {
     const consoleWarnSpy = vi.spyOn(console, 'warn');
 
