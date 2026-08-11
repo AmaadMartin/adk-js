@@ -54,6 +54,43 @@ export enum CodeExecutionLanguage {
   WINDOWS_CMD = 'cmd',
 }
 
+const EXECUTABLE_LANGUAGES = Object.values(CodeExecutionLanguage).filter(
+  (language) => language !== CodeExecutionLanguage.UNSPECIFIED,
+);
+
+/**
+ * Every language a code executor can be asked to run. `UNSPECIFIED` is not a
+ * language and is never a member.
+ */
+export const ALL_CODE_EXECUTION_LANGUAGES: ReadonlySet<CodeExecutionLanguage> =
+  new Set(EXECUTABLE_LANGUAGES);
+
+const EXECUTABLE_LANGUAGE_VALUES: ReadonlySet<string> =
+  ALL_CODE_EXECUTION_LANGUAGES;
+
+/**
+ * Narrows an unvalidated string to a language an executor can be asked to run.
+ */
+export function isCodeExecutionLanguage(
+  value: string,
+): value is CodeExecutionLanguage {
+  return EXECUTABLE_LANGUAGE_VALUES.has(value);
+}
+
+/**
+ * Thrown by a code executor asked to run a language outside its
+ * `supportedLanguages`.
+ */
+export class UnsupportedLanguageError extends Error {
+  constructor(
+    executorName: string,
+    readonly language: string,
+  ) {
+    super(`Unsupported language for ${executorName}: ${language}`);
+    this.name = 'UnsupportedLanguageError';
+  }
+}
+
 /**
  * A structure that contains the input of code execution.
  * */

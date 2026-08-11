@@ -5,6 +5,7 @@
  */
 
 import {
+  ALL_CODE_EXECUTION_LANGUAGES,
   BaseCodeExecutor,
   CodeExecutionLanguage,
   CodeExecutionResult,
@@ -34,6 +35,14 @@ class MockCodeExecutor extends BaseCodeExecutor {
   };
   executeCodeParams: ExecuteCodeParams | undefined;
   shouldThrow = false;
+  override readonly supportedLanguages: ReadonlySet<CodeExecutionLanguage>;
+
+  constructor(
+    supportedLanguages: ReadonlySet<CodeExecutionLanguage> = ALL_CODE_EXECUTION_LANGUAGES,
+  ) {
+    super();
+    this.supportedLanguages = supportedLanguages;
+  }
 
   override async executeCode(
     params: ExecuteCodeParams,
@@ -382,7 +391,96 @@ describe('RunSkillInlineScriptTool', () => {
     });
   });
 
+  describe('unsupported language', () => {
+    it('refuses a language that is not a CodeExecutionLanguage', async () => {
+      const mockExecutor = new MockCodeExecutor();
+      const toolset = new SkillToolset([], {codeExecutor: mockExecutor});
+      const tool = new RunSkillInlineScriptTool(toolset);
+      const mockToolContext = createMockContext('test-agent', undefined, {
+        functionCallId: 'fc-ruby',
+      });
+
+      const result = (await tool.runAsync({
+        args: {script_content: 'puts "hi"', language: 'ruby'},
+        toolContext: mockToolContext,
+      })) as ToolErrorResponse;
+
+      expect(result).toEqual({
+        error:
+          "The configured code executor cannot run 'ruby' scripts. " +
+          'Supported languages: python, javascript, typescript, shell, ' +
+          'powershell, cmd.',
+        errorCode: RunSkillInlineScriptErrorCode.UNSUPPORTED_LANGUAGE,
+      });
+      expect(mockExecutor.executeCodeParams).toBeUndefined();
+      expect(
+        mockToolContext.actions.requestedToolConfirmations['fc-ruby'],
+      ).toBeUndefined();
+    });
+
+    // The refusal must come before the confirmation gate, so a human is never
+    // asked to approve a script the executor was never going to run.
+    it('refuses an unsupported language without requesting confirmation', async () => {
+      const mockExecutor = new MockCodeExecutor(
+        new Set([CodeExecutionLanguage.PYTHON]),
+      );
+      const toolset = new SkillToolset([], {codeExecutor: mockExecutor});
+      const tool = new RunSkillInlineScriptTool(toolset);
+      const mockToolContext = createMockContext('test-agent', undefined, {
+        functionCallId: 'fc-shell',
+      });
+
+      const result = (await tool.runAsync({
+        args: {
+          script_content: 'rm -rf /',
+          language: CodeExecutionLanguage.SHELL,
+        },
+        toolContext: mockToolContext,
+      })) as ToolErrorResponse;
+
+      expect(result).toEqual({
+        error:
+          "The configured code executor cannot run 'shell' scripts. " +
+          'Supported languages: python.',
+        errorCode: RunSkillInlineScriptErrorCode.UNSUPPORTED_LANGUAGE,
+      });
+      expect(mockExecutor.executeCodeParams).toBeUndefined();
+      expect(
+        mockToolContext.actions.requestedToolConfirmations['fc-shell'],
+      ).toBeUndefined();
+    });
+
+    it('still dispatches a declared language once confirmed', async () => {
+      const mockExecutor = new MockCodeExecutor(
+        new Set([CodeExecutionLanguage.PYTHON]),
+      );
+      const toolset = new SkillToolset([], {codeExecutor: mockExecutor});
+      const tool = new RunSkillInlineScriptTool(toolset);
+
+      await tool.runAsync({
+        args: {
+          script_content: 'print("hi")',
+          language: CodeExecutionLanguage.PYTHON,
+        },
+        toolContext: createMockContext('test-agent', undefined, {
+          functionCallId: 'fc-python',
+          toolConfirmation: confirmed(),
+        }),
+      });
+
+      expect(mockExecutor.executeCodeParams?.codeExecutionInput.language).toBe(
+        CodeExecutionLanguage.PYTHON,
+      );
+    });
+  });
+
   describe('error codes', () => {
+    it('exposes a stable string value for the unsupported-language code', () => {
+      expect(RunSkillInlineScriptErrorCode.UNSUPPORTED_LANGUAGE).toBe(
+        'UNSUPPORTED_LANGUAGE',
+      );
+    });
+
     it('exposes stable string values for the error-code enum', () => {
       // The error-code string values are part of the tool's response contract
       // and must remain stable across releases.

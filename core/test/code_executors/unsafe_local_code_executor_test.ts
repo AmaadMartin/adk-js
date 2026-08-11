@@ -5,12 +5,14 @@
  */
 
 import {
+  ALL_CODE_EXECUTION_LANGUAGES,
   CodeExecutionLanguage,
   ExecuteCodeParams,
   InvocationContext,
   LlmAgent,
   PluginManager,
   UnsafeLocalCodeExecutor,
+  UnsupportedLanguageError,
   createSession,
 } from '@google/adk';
 import {EventEmitter} from 'node:events';
@@ -211,7 +213,7 @@ describe('UnsafeLocalCodeExecutor', () => {
     expect(result.stderr).toBe('');
   });
 
-  it('should return error for unsupported language', async () => {
+  it('should throw for unsupported language', async () => {
     const params: ExecuteCodeParams = {
       invocationContext,
       codeExecutionInput: {
@@ -221,10 +223,9 @@ describe('UnsafeLocalCodeExecutor', () => {
       },
     };
 
-    const result = await executor.executeCode(params);
-
-    expect(result.stdout).toBe('');
-    expect(result.stderr).toContain('Unsupported language: unspecified');
+    await expect(executor.executeCode(params)).rejects.toThrow(
+      new UnsupportedLanguageError('UnsafeLocalCodeExecutor', 'unspecified'),
+    );
   });
 
   it('should respect pythonCommandPath', async () => {
@@ -525,6 +526,66 @@ describe('UnsafeLocalCodeExecutor', () => {
           expect.anything(),
         );
       });
+    });
+  });
+
+  // Pins the declared set against what executeCode actually accepts. Every
+  // language is dispatched, and each one's outcome must follow its membership
+  // of supportedLanguages, so the two cannot drift apart.
+  describe('supportedLanguages', () => {
+    const declared = new UnsafeLocalCodeExecutor().supportedLanguages;
+    const everyLanguage = [
+      ...ALL_CODE_EXECUTION_LANGUAGES,
+      CodeExecutionLanguage.UNSPECIFIED,
+    ];
+    const supported = everyLanguage.filter((language) =>
+      declared.has(language),
+    );
+    const unsupported = everyLanguage.filter(
+      (language) => !declared.has(language),
+    );
+
+    beforeEach(() => {
+      // Return a child process that immediately exits with code 0, so the
+      // interpreters under test need not be installed on the host.
+      spawnMock.mockImplementation(() => {
+        const child = new EventEmitter();
+        setImmediate(() => child.emit('close', 0, null));
+        return child;
+      });
+    });
+
+    function executeIn(language: CodeExecutionLanguage): Promise<unknown> {
+      return executor.executeCode({
+        invocationContext,
+        codeExecutionInput: {code: 'echo hi', language, inputFiles: []},
+      });
+    }
+
+    it('declares the five languages it can launch', () => {
+      expect([...declared]).toEqual([
+        CodeExecutionLanguage.JAVASCRIPT,
+        CodeExecutionLanguage.PYTHON,
+        CodeExecutionLanguage.SHELL,
+        CodeExecutionLanguage.WINDOWS_CMD,
+        CodeExecutionLanguage.POWERSHELL,
+      ]);
+      expect(unsupported).toEqual([
+        CodeExecutionLanguage.TYPESCRIPT,
+        CodeExecutionLanguage.UNSPECIFIED,
+      ]);
+    });
+
+    it.each(supported)('runs %s', async (language) => {
+      await expect(executeIn(language)).resolves.toBeDefined();
+      expect(spawnMock).toHaveBeenCalled();
+    });
+
+    it.each(unsupported)('refuses %s before spawning', async (language) => {
+      await expect(executeIn(language)).rejects.toThrow(
+        new UnsupportedLanguageError('UnsafeLocalCodeExecutor', language),
+      );
+      expect(spawnMock).not.toHaveBeenCalled();
     });
   });
 });

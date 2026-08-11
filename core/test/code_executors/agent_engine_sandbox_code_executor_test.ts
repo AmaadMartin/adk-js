@@ -6,9 +6,11 @@
 
 import {Client} from '@google-cloud/vertexai';
 import {
+  ALL_CODE_EXECUTION_LANGUAGES,
   AgentEngineSandboxCodeExecutor,
   CodeExecutionLanguage,
   InvocationContext,
+  UnsupportedLanguageError,
 } from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 
@@ -658,6 +660,47 @@ describe('AgentEngineSandboxCodeExecutor', () => {
         sandbox_name_language_javascript:
           'projects/test-project/locations/us-central1/reasoningEngines/123/sandboxEnvironments/456',
       });
+    });
+
+    // Pins the declared set against what executeCode actually accepts. Every
+    // language is dispatched, and each one's outcome must follow its
+    // membership of supportedLanguages, so the two cannot drift apart.
+    describe('supportedLanguages', () => {
+      const expectedLanguages = [
+        CodeExecutionLanguage.PYTHON,
+        CodeExecutionLanguage.JAVASCRIPT,
+      ];
+      const refusedLanguages = [
+        ...ALL_CODE_EXECUTION_LANGUAGES,
+        CodeExecutionLanguage.UNSPECIFIED,
+      ].filter((language) => !expectedLanguages.includes(language));
+
+      function executeIn(language: CodeExecutionLanguage): Promise<unknown> {
+        return executor.executeCode({
+          invocationContext,
+          codeExecutionInput: {code: 'print("hi")', language, inputFiles: []},
+        });
+      }
+
+      it('declares only the two languages the sandbox accepts', () => {
+        expect([...executor.supportedLanguages]).toEqual(expectedLanguages);
+      });
+
+      it.each(expectedLanguages)('runs %s', async (language) => {
+        await expect(executeIn(language)).resolves.toBeDefined();
+      });
+
+      it.each(refusedLanguages)(
+        'refuses %s without calling the sandbox',
+        async (language) => {
+          await expect(executeIn(language)).rejects.toThrow(
+            new UnsupportedLanguageError('Agent Engine Sandbox', language),
+          );
+          expect(
+            mockClient.agentEnginesInternal.sandboxes.executeCodeInternal,
+          ).not.toHaveBeenCalled();
+        },
+      );
     });
   });
 });

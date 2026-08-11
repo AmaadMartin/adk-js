@@ -10,7 +10,11 @@ import {
   ExecuteCodeParams,
   isBaseCodeExecutor,
 } from '../../src/code_executors/base_code_executor.js';
-import {CodeExecutionResult} from '../../src/code_executors/code_execution_utils.js';
+import {
+  ALL_CODE_EXECUTION_LANGUAGES,
+  CodeExecutionLanguage,
+  CodeExecutionResult,
+} from '../../src/code_executors/code_execution_utils.js';
 
 class TestExecutor extends BaseCodeExecutor {
   async executeCode(_params: ExecuteCodeParams): Promise<CodeExecutionResult> {
@@ -24,6 +28,23 @@ describe('BaseCodeExecutor', () => {
     expect(executor.optimizeDataFile).toBe(false);
     expect(executor.stateful).toBe(false);
     expect(executor.errorRetryAttempts).toBe(2);
+  });
+
+  it('supports every language by default', () => {
+    const executor = new TestExecutor();
+
+    expect(executor.supportedLanguages).toEqual(ALL_CODE_EXECUTION_LANGUAGES);
+    expect(
+      executor.supportedLanguages.has(CodeExecutionLanguage.UNSPECIFIED),
+    ).toBe(false);
+  });
+
+  // A third-party subclass that does not declare supportedLanguages must keep
+  // accepting what it accepted before the property existed.
+  it('lets a subclass that does not narrow the set accept shell', () => {
+    expect(
+      new TestExecutor().supportedLanguages.has(CodeExecutionLanguage.SHELL),
+    ).toBe(true);
   });
 
   it('should have default delimiters', () => {

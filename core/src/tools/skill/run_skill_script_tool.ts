@@ -33,6 +33,7 @@ export enum RunSkillScriptErrorCode {
   SKILL_NOT_FOUND = 'SKILL_NOT_FOUND',
   SCRIPT_NOT_FOUND = 'SCRIPT_NOT_FOUND',
   NO_CODE_EXECUTOR = 'NO_CODE_EXECUTOR',
+  UNSUPPORTED_LANGUAGE = 'UNSUPPORTED_LANGUAGE',
   EXECUTION_ERROR = 'EXECUTION_ERROR',
 }
 
@@ -144,8 +145,18 @@ export class RunSkillScriptTool extends BaseTool {
       };
     }
 
+    const language = getScriptLanguageByExtension(path.extname(scriptPath));
+    if (!codeExecutor.supportedLanguages.has(language)) {
+      return {
+        error:
+          `The configured code executor cannot run '${scriptPath}' ` +
+          `(resolved language: ${language}). Supported languages: ` +
+          `${[...codeExecutor.supportedLanguages].join(', ')}.`,
+        errorCode: RunSkillScriptErrorCode.UNSUPPORTED_LANGUAGE,
+      };
+    }
+
     try {
-      const language = getScriptLanguageByExtension(path.extname(scriptPath));
       const result = await codeExecutor.executeCode({
         invocationContext: toolContext.invocationContext,
         codeExecutionInput: {

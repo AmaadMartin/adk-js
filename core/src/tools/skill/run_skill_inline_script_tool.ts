@@ -7,7 +7,10 @@
 import {FunctionDeclaration, Type} from '@google/genai';
 import {Context} from '../../agents/context.js';
 import {isLlmAgent} from '../../agents/llm_agent.js';
-import {CodeExecutionLanguage} from '../../code_executors/code_execution_utils.js';
+import {
+  CodeExecutionLanguage,
+  isCodeExecutionLanguage,
+} from '../../code_executors/code_execution_utils.js';
 import {experimental} from '../../utils/experimental.js';
 import {materializeFiles} from '../../utils/file_utils.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
@@ -22,6 +25,7 @@ export enum RunSkillInlineScriptErrorCode {
   MISSING_SCRIPT_CONTENT = 'MISSING_SCRIPT_CONTENT',
   MISSING_LANGUAGE = 'MISSING_LANGUAGE',
   NO_CODE_EXECUTOR = 'NO_CODE_EXECUTOR',
+  UNSUPPORTED_LANGUAGE = 'UNSUPPORTED_LANGUAGE',
   EXECUTION_ERROR = 'EXECUTION_ERROR',
   CONFIRMATION_REJECTED = 'CONFIRMATION_REJECTED',
 }
@@ -116,6 +120,19 @@ export class RunSkillInlineScriptTool extends BaseTool {
       };
     }
 
+    if (
+      !isCodeExecutionLanguage(language) ||
+      !codeExecutor.supportedLanguages.has(language)
+    ) {
+      return {
+        error:
+          `The configured code executor cannot run '${language}' scripts. ` +
+          `Supported languages: ` +
+          `${[...codeExecutor.supportedLanguages].join(', ')}.`,
+        errorCode: RunSkillInlineScriptErrorCode.UNSUPPORTED_LANGUAGE,
+      };
+    }
+
     // Security gate: executing model-provided script content is equivalent to
     // arbitrary code execution in the code executor's context. Require an
     // explicit, server-enforced confirmation before dispatching so that a
@@ -135,7 +152,7 @@ export class RunSkillInlineScriptTool extends BaseTool {
         codeExecutionInput: {
           code: inlineScriptContent,
           inputFiles: [],
-          language: language as CodeExecutionLanguage,
+          language,
           args: scriptArgs,
         },
       });

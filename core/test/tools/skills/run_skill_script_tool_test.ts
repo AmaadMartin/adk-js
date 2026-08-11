@@ -5,6 +5,7 @@
  */
 
 import {
+  ALL_CODE_EXECUTION_LANGUAGES,
   BaseCodeExecutor,
   CodeExecutionLanguage,
   CodeExecutionResult,
@@ -33,6 +34,14 @@ class MockCodeExecutor extends BaseCodeExecutor {
   };
   executeCodeParams: ExecuteCodeParams | undefined;
   shouldThrow = false;
+  override readonly supportedLanguages: ReadonlySet<CodeExecutionLanguage>;
+
+  constructor(
+    supportedLanguages: ReadonlySet<CodeExecutionLanguage> = ALL_CODE_EXECUTION_LANGUAGES,
+  ) {
+    super();
+    this.supportedLanguages = supportedLanguages;
+  }
 
   override async executeCode(
     params: ExecuteCodeParams,
@@ -248,7 +257,88 @@ describe('RunSkillScriptTool', () => {
     });
   });
 
+  describe('unsupported language', () => {
+    const rubySkill: Skill = {
+      frontmatter: {name: 'ruby-skill', description: 'Ships a Ruby script'},
+      instructions: 'Test instructions',
+      resources: {scripts: {'setup.rb': {src: 'puts "setup"'}}},
+    };
+
+    it('refuses a shell script when the executor only runs Python', async () => {
+      const mockExecutor = new MockCodeExecutor(
+        new Set([CodeExecutionLanguage.PYTHON]),
+      );
+      const toolset = new SkillToolset([mockSkill], {
+        codeExecutor: mockExecutor,
+      });
+      const tool = new RunSkillScriptTool(toolset);
+
+      const result = (await tool.runAsync({
+        args: {skill_name: 'test-skill', script_path: 'scripts/run.sh'},
+        toolContext: createMockContext(),
+      })) as ToolErrorResponse;
+
+      expect(result).toEqual({
+        error:
+          "The configured code executor cannot run 'scripts/run.sh' " +
+          '(resolved language: shell). Supported languages: python.',
+        errorCode: RunSkillScriptErrorCode.UNSUPPORTED_LANGUAGE,
+      });
+      expect(mockExecutor.executeCodeParams).toBeUndefined();
+    });
+
+    // An extension no language claims resolves to UNSPECIFIED, which is in no
+    // executor's set, so the tool refuses instead of letting the wrapper throw.
+    it('refuses an extension that maps to no language', async () => {
+      const mockExecutor = new MockCodeExecutor();
+      const toolset = new SkillToolset([rubySkill], {
+        codeExecutor: mockExecutor,
+      });
+      const tool = new RunSkillScriptTool(toolset);
+
+      const result = (await tool.runAsync({
+        args: {skill_name: 'ruby-skill', script_path: 'scripts/setup.rb'},
+        toolContext: createMockContext(),
+      })) as ToolErrorResponse;
+
+      expect(result.errorCode).toBe(
+        RunSkillScriptErrorCode.UNSUPPORTED_LANGUAGE,
+      );
+      expect(result.error).toBe(
+        "The configured code executor cannot run 'scripts/setup.rb' " +
+          '(resolved language: unspecified). Supported languages: ' +
+          'python, javascript, typescript, shell, powershell, cmd.',
+      );
+      expect(mockExecutor.executeCodeParams).toBeUndefined();
+    });
+
+    it('still dispatches a script the executor declares', async () => {
+      const mockExecutor = new MockCodeExecutor(
+        new Set([CodeExecutionLanguage.SHELL]),
+      );
+      const toolset = new SkillToolset([mockSkill], {
+        codeExecutor: mockExecutor,
+      });
+      const tool = new RunSkillScriptTool(toolset);
+
+      await tool.runAsync({
+        args: {skill_name: 'test-skill', script_path: 'scripts/run.sh'},
+        toolContext: createMockContext(),
+      });
+
+      expect(mockExecutor.executeCodeParams?.codeExecutionInput.language).toBe(
+        CodeExecutionLanguage.SHELL,
+      );
+    });
+  });
+
   describe('error codes', () => {
+    it('exposes a stable string value for the unsupported-language code', () => {
+      expect(RunSkillScriptErrorCode.UNSUPPORTED_LANGUAGE).toBe(
+        'UNSUPPORTED_LANGUAGE',
+      );
+    });
+
     it('exposes stable string values for the error-code enum', () => {
       // The error-code string values are part of the tool's response contract
       // and must remain stable across releases.
