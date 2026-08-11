@@ -445,6 +445,18 @@ describe('CLI Entrypoint', () => {
   });
 
   describe('command: integration conformance', () => {
+    it('should apply the default log level', async () => {
+      await parse(['integration', 'conformance']);
+
+      expect(setLogLevel).toHaveBeenCalledWith(LogLevel.INFO);
+    });
+
+    it('should apply the debug log level with --verbose', async () => {
+      await parse(['integration', 'conformance', '--verbose']);
+
+      expect(setLogLevel).toHaveBeenCalledWith(LogLevel.DEBUG);
+    });
+
     it('should pass parsed options to runIntegrationTests', async () => {
       await parse([
         'integration',
