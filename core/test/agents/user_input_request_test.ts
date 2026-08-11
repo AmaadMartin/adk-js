@@ -77,6 +77,14 @@ describe('getUserInputRequests', () => {
     });
   });
 
+  it('reads the snake_case response schema a Python session writes', () => {
+    const [request] = getUserInputRequests(
+      requestInputEvent('i1', {response_schema: {type: 'integer'}}),
+    );
+
+    expect(request.responseSchema).toEqual({type: 'integer'});
+  });
+
   it('summarizes a request for a credential', () => {
     const authConfig = {
       authScheme: {type: 'apiKey', in: 'header', name: 'X-Api-Key'},

@@ -13,8 +13,13 @@
  * for deterministic parallel/dynamic replay is a Phase 5b continuation.
  */
 
-import {requiresUserInput} from '../../agents/user_input_request.js';
+import {
+  getUserInputRequests,
+  requiresUserInput,
+} from '../../agents/user_input_request.js';
 import {Event} from '../../events/event.js';
+import {formatError} from '../../utils/error_utils.js';
+import {validateAgainstJsonSchema} from '../../utils/json_schema_validator.js';
 import {RouteValue} from '../graph.js';
 import type {NodeContext, NodeResult} from '../node_context.js';
 
@@ -168,6 +173,7 @@ function reconstruct(
 ): Map<string, RehydratedNode> {
   const nodes = new Map<string, RehydratedNode>();
   const interruptOwner = new Map<string, string>();
+  const schemasById = new Map<string, unknown>();
 
   const getNode = (name: string): RehydratedNode => {
     let node = nodes.get(name);
@@ -187,7 +193,11 @@ function reconstruct(
           const owner = interruptOwner.get(fr.id)!;
           getNode(owner).resolvedResponses.set(
             fr.id,
-            unwrapResponse(fr.response),
+            validateResumeResponse(
+              fr.id,
+              unwrapResponse(fr.response),
+              schemasById.get(fr.id),
+            ),
           );
         }
       }
@@ -206,6 +216,9 @@ function reconstruct(
     }
     if (event.route !== undefined) {
       node.route = event.route as RouteValue | RouteValue[];
+    }
+    for (const request of getUserInputRequests(event)) {
+      schemasById.set(request.interruptId, request.responseSchema);
     }
     for (const id of event.longRunningToolIds ?? []) {
       node.interruptIds.add(id);
@@ -284,6 +297,25 @@ function directChildName(path: string, parentPath: string): string | undefined {
 /** Narrows an unknown value to a plain (non-array) record. */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Enforces the schema the node froze when it paused, so a node never observes
+ * a resume value that violates the contract it published.
+ */
+function validateResumeResponse(
+  interruptId: string,
+  response: unknown,
+  schema: unknown,
+): unknown {
+  try {
+    return validateAgainstJsonSchema(response, schema);
+  } catch (e: unknown) {
+    throw new Error(
+      `Validation failed for interrupt ${interruptId}: ${formatError(e)}`,
+      {cause: e},
+    );
+  }
 }
 
 /** Unwraps a `{result: value}` FunctionResponse envelope to the bare value. */

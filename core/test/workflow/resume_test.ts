@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {Content} from '@google/genai';
 import {describe, expect, it} from 'vitest';
+import {z} from 'zod';
 import {
   createEvent,
   Event,
@@ -214,5 +216,191 @@ describe('Phase 5b — HITL resume via the Runner', () => {
     expect(aRuns).toBe(1);
     // The workflow resumed through the gate and completed at c.
     expect(turn2.some((e) => e.output === 'C(A(x)|approved)')).toBe(true);
+  });
+});
+
+describe('Phase 5b — resume response validation', () => {
+  /** An interrupt event freezing `schema` for `gate-1` under `argKey`. */
+  function interruptEvent(schema: unknown, argKey = 'responseSchema'): Event {
+    return createEvent({
+      author: 'gate',
+      nodeInfo: {path: 'wf.gate'},
+      content: {
+        role: 'model',
+        parts: [
+          {
+            functionCall: {
+              name: 'adk_request_input',
+              id: 'gate-1',
+              args: {interruptId: 'gate-1', [argKey]: schema},
+            },
+          },
+        ],
+      },
+      longRunningToolIds: ['gate-1'],
+    });
+  }
+
+  /** The user's resolving function response for `gate-1`. */
+  function responseEvent(result: unknown): Event {
+    return createEvent({
+      author: 'user',
+      content: {
+        role: 'user',
+        parts: [
+          {
+            functionResponse: {
+              id: 'gate-1',
+              name: 'adk_request_input',
+              response: {result},
+            },
+          },
+        ],
+      },
+    });
+  }
+
+  /** The value stored for `gate-1` after reconstructing `events`. */
+  function resolved(events: Event[]): unknown {
+    return reconstructNodeStates(events)
+      .get('gate')
+      ?.resolvedResponses.get('gate-1');
+  }
+
+  it('stores a conforming response and coerces a numeric string', () => {
+    const schema = {type: 'integer'};
+    expect(resolved([interruptEvent(schema), responseEvent(42)])).toBe(42);
+    expect(resolved([interruptEvent(schema), responseEvent('42')])).toBe(42);
+  });
+
+  it('fails the resume when the response violates the frozen schema', () => {
+    const events = [interruptEvent({type: 'integer'}), responseEvent('abc')];
+    expect(() => reconstructNodeStates(events)).toThrow(
+      /Validation failed for interrupt gate-1: Failed to coerce data to integer/,
+    );
+  });
+
+  it('stores the response verbatim when the interrupt froze no schema', () => {
+    expect(resolved([interruptEvent(null), responseEvent('abc')])).toBe('abc');
+  });
+
+  it('honours the snake_case argument key a Python session writes', () => {
+    const events = [
+      interruptEvent({type: 'integer'}, 'response_schema'),
+      responseEvent('abc'),
+    ];
+    expect(() => reconstructNodeStates(events)).toThrow(
+      /Validation failed for interrupt gate-1/,
+    );
+  });
+
+  it('reads the frozen schema back after a DB serialization round-trip', () => {
+    const events = [
+      interruptEvent({type: 'integer'}),
+      responseEvent('abc'),
+    ].map(
+      (e) => transformToCamelCaseEvent(transformToSnakeCaseEvent(e)) as Event,
+    );
+    expect(() => reconstructNodeStates(events)).toThrow(
+      /Validation failed for interrupt gate-1/,
+    );
+  });
+});
+
+describe('Phase 5b — resume response validation via the Runner', () => {
+  /** A one-node workflow whose gate asks for a number and echoes the answer. */
+  function numberGateAgent(seen: unknown[]): WorkflowAgent {
+    const gate = node(
+      (ctx: NodeContext) => {
+        const answer = ctx.resumeInputs['gate-1'];
+        if (answer === undefined) {
+          return new RequestInput({
+            interruptId: 'gate-1',
+            message: 'how many?',
+            responseSchema: z.number(),
+          });
+        }
+        seen.push(answer);
+        return answer;
+      },
+      {name: 'gate', rerunOnResume: true},
+    );
+    return new WorkflowAgent(
+      new Workflow({name: 'validated_wf', edges: [['START', gate]]}),
+    );
+  }
+
+  /** Runs one turn to completion, collecting its events. */
+  async function runTurn(
+    runner: Runner,
+    sessionId: string,
+    newMessage: Content,
+  ): Promise<Event[]> {
+    const events: Event[] = [];
+    for await (const event of runner.runAsync({
+      userId: 'u1',
+      sessionId,
+      newMessage,
+    })) {
+      events.push(event);
+    }
+    return events;
+  }
+
+  async function startRun(
+    seen: unknown[],
+  ): Promise<{runner: Runner; sessionId: string}> {
+    const sessionService = new InMemorySessionService();
+    const session = await sessionService.createSession({
+      appName: 'test_app',
+      userId: 'u1',
+    });
+    const runner = new Runner({
+      appName: 'test_app',
+      agent: numberGateAgent(seen),
+      sessionService,
+    });
+    const turn1 = await runTurn(runner, session.id, {
+      role: 'user',
+      parts: [{text: 'go'}],
+    });
+    expect(turn1.some(hasRequestInputFunctionCall)).toBe(true);
+    return {runner, sessionId: session.id};
+  }
+
+  /** A resume message answering `gate-1` with `result`. */
+  function resumeMessage(result: unknown): Content {
+    return {
+      role: 'user',
+      parts: [
+        {
+          functionResponse: {
+            id: 'gate-1',
+            name: 'adk_request_input',
+            response: {result},
+          },
+        },
+      ],
+    };
+  }
+
+  it('hands the node the coerced value when the response conforms', async () => {
+    const seen: unknown[] = [];
+    const {runner, sessionId} = await startRun(seen);
+
+    const turn2 = await runTurn(runner, sessionId, resumeMessage('42'));
+
+    expect(seen).toEqual([42]);
+    expect(turn2.some((e) => e.output === 42)).toBe(true);
+  });
+
+  it('fails the run and never calls the node on an off-schema response', async () => {
+    const seen: unknown[] = [];
+    const {runner, sessionId} = await startRun(seen);
+
+    await expect(
+      runTurn(runner, sessionId, resumeMessage('abc')),
+    ).rejects.toThrow(/Validation failed for interrupt gate-1/);
+    expect(seen).toEqual([]);
   });
 });
