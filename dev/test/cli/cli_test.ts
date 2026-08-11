@@ -6,7 +6,19 @@
 
 import {LogLevel, setLogLevel} from '@google/adk';
 import {Command} from 'commander';
-import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
+import {Console} from 'node:console';
+import {Writable} from 'node:stream';
+import {stripVTControlCharacters} from 'node:util';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  Mock,
+  MockInstance,
+  vi,
+} from 'vitest';
 import {createProgram} from '../../src/cli/cli.js';
 import {createAgent} from '../../src/cli/cli_create.js';
 import {runAgent} from '../../src/cli/cli_run.js';
@@ -15,6 +27,7 @@ import {deployToCloudRun} from '../../src/cli/deploy/cli_deploy_cloud_run.js';
 import {runIntegrationTests} from '../../src/integration/run_integration_tests.js';
 import {AdkApiServer} from '../../src/server/adk_api_server.js';
 import {FileModuleType} from '../../src/utils/agent_loader.js';
+import {AdkLogger} from '../../src/utils/logger.js';
 
 vi.mock('../../src/server/adk_api_server', () => {
   return {
@@ -447,6 +460,72 @@ describe('CLI Entrypoint', () => {
         );
       },
     );
+  });
+
+  describe('log level wiring', () => {
+    let setCliLogLevel: MockInstance<AdkLogger['setLogLevel']>;
+
+    beforeEach(() => {
+      setCliLogLevel = vi.spyOn(AdkLogger.prototype, 'setLogLevel');
+    });
+
+    it.each(LOG_LEVEL_COMMANDS)(
+      'applies the debug level to both loggers on `%s --verbose`',
+      async (commandPath) => {
+        await parse(argvFor(commandPath, '--verbose'));
+
+        expect(setLogLevel).toHaveBeenCalledWith(LogLevel.DEBUG);
+        expect(setCliLogLevel).toHaveBeenCalledWith(LogLevel.DEBUG);
+      },
+    );
+
+    it.each(LOG_LEVEL_COMMANDS)(
+      'applies an explicit level to both loggers on `%s --log_level error`',
+      async (commandPath) => {
+        await parse(argvFor(commandPath, '--log_level', 'error'));
+
+        expect(setLogLevel).toHaveBeenCalledWith(LogLevel.ERROR);
+        expect(setCliLogLevel).toHaveBeenCalledWith(LogLevel.ERROR);
+      },
+    );
+
+    it.each(LOG_LEVEL_COMMANDS)(
+      'leaves both loggers at info on `%s` with no flag',
+      async (commandPath) => {
+        await parse(argvFor(commandPath));
+
+        expect(setLogLevel).toHaveBeenCalledWith(LogLevel.INFO);
+        expect(setCliLogLevel).toHaveBeenCalledWith(LogLevel.INFO);
+      },
+    );
+
+    it('still prints a deploy failure at the strictest selectable level', async () => {
+      const written: string[] = [];
+      const sink = new Writable({
+        write(chunk, _encoding, callback) {
+          written.push(String(chunk));
+          callback();
+        },
+      });
+      const realConsole = globalThis.console;
+      globalThis.console = new Console(sink, sink);
+      vi.mocked(deployToCloudRun).mockRejectedValueOnce(
+        new Error('permission denied'),
+      );
+
+      try {
+        await parse(['deploy', 'cloud_run', '--log_level', 'error']);
+        // Winston hands a record to its transport asynchronously.
+        await new Promise((resolve) => setImmediate(resolve));
+      } finally {
+        globalThis.console = realConsole;
+      }
+
+      expect(setCliLogLevel).toHaveBeenCalledWith(LogLevel.ERROR);
+      expect(stripVTControlCharacters(written.join(''))).toContain(
+        'Error deploying agent: permission denied',
+      );
+    });
   });
 
   describe('command: web', () => {
