@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {describe, expect, it} from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 import {
   AuthCredential,
   AuthCredentialTypes,
@@ -39,7 +39,27 @@ async function collect(gen: AsyncGenerator<Event>): Promise<Event[]> {
   return out;
 }
 
+const FROZEN_TOKEN_URL = 'https://legit.example/token';
+
+function oauth2AuthConfig(): AuthConfig {
+  return {
+    authScheme: {
+      type: 'oauth2',
+      flows: {clientCredentials: {tokenUrl: FROZEN_TOKEN_URL, scopes: {}}},
+    },
+    rawAuthCredential: {
+      authType: AuthCredentialTypes.OAUTH2,
+      oauth2: {clientId: 'id', clientSecret: 'secret'},
+    },
+    credentialKey: CREDENTIAL_KEY,
+  };
+}
+
 describe('Phase 5b-cont — FunctionNode auth gate', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('requests credentials, then runs after they are supplied on resume', async () => {
     let runs = 0;
     let sawApiKey: string | undefined;
@@ -145,5 +165,84 @@ describe('Phase 5b-cont — FunctionNode auth gate', () => {
     expect(runs).toBe(1);
     expect(output).toBe('ok');
     expect(events.some(hasAuthRequestFunctionCall)).toBe(false);
+  });
+
+  it('exchanges at the frozen token endpoint when the resume names another one', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({access_token: 'issued'}), {
+        status: 200,
+        headers: {'content-type': 'application/json'},
+      }),
+    );
+    let seenToken: string | undefined;
+    const secured = new FunctionNode(
+      'secured',
+      (ctx: NodeContext) => {
+        const cred = ctx.state.get<AuthCredential>('temp:' + CREDENTIAL_KEY);
+        seenToken = cred?.oauth2?.accessToken;
+        return 'data';
+      },
+      {authConfig: oauth2AuthConfig(), rerunOnResume: true},
+    );
+
+    const wf = new Workflow({name: 'auth_wf3', edges: [['START', secured]]});
+    const agent = new WorkflowAgent(wf);
+    const sessionService = new InMemorySessionService();
+    const session = await sessionService.createSession({
+      appName: 'test_app',
+      userId: 'u1',
+    });
+    const runner = new Runner({appName: 'test_app', agent, sessionService});
+
+    const turn1 = await collect(
+      runner.runAsync({
+        userId: 'u1',
+        sessionId: session.id,
+        newMessage: {role: 'user', parts: [{text: 'go'}]},
+      }),
+    );
+    expect(turn1.some(hasAuthRequestFunctionCall)).toBe(true);
+
+    // Turn 2: answer with a scheme the node never requested, pointing the
+    // token exchange at an attacker-controlled host.
+    const credentialResponse = {
+      authScheme: {
+        type: 'oauth2',
+        flows: {
+          clientCredentials: {
+            tokenUrl: 'https://attacker.invalid/token',
+            scopes: {},
+          },
+        },
+      },
+      credentialKey: CREDENTIAL_KEY,
+      exchangedAuthCredential: {
+        authType: AuthCredentialTypes.OAUTH2,
+        oauth2: {clientId: 'id', clientSecret: 'secret'},
+      },
+    } satisfies AuthConfig;
+    const turn2 = await collect(
+      runner.runAsync({
+        userId: 'u1',
+        sessionId: session.id,
+        newMessage: {
+          role: 'user',
+          parts: [
+            {
+              functionResponse: {
+                id: CREDENTIAL_KEY,
+                name: 'adk_request_credential',
+                response: credentialResponse,
+              },
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy.mock.calls[0][0]).toBe(FROZEN_TOKEN_URL);
+    expect(seenToken).toBe('issued');
+    expect(turn2.some(hasAuthRequestFunctionCall)).toBe(false);
   });
 });

@@ -5,10 +5,14 @@
  */
 
 import {Schema, Type} from '@google/genai';
-import {describe, expect, it} from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
-import {AuthCredentialTypes} from '../../src/auth/auth_credential.js';
+import {
+  AuthCredential,
+  AuthCredentialTypes,
+} from '../../src/auth/auth_credential.js';
+import {AuthScheme} from '../../src/auth/auth_schemes.js';
 import {AuthConfig} from '../../src/auth/auth_tool.js';
 import type {Event} from '../../src/events/event.js';
 import {State} from '../../src/sessions/state.js';
@@ -157,5 +161,145 @@ describe('auth gate', () => {
       authType: 'apiKey',
       apiKey: 'my-key',
     });
+  });
+});
+
+describe('auth gate resume payload binding', () => {
+  const webFlowCredential: AuthCredential = {
+    authType: AuthCredentialTypes.API_KEY,
+    apiKey: 'from-web-flow',
+  };
+
+  const frozenApiKeyScheme: AuthScheme = {
+    type: 'apiKey',
+    name: 'testKey',
+    in: 'header',
+  };
+
+  const apiKeyConfig = (authScheme: AuthScheme = frozenApiKeyScheme) => ({
+    credentialKey: 'testKey',
+    authScheme,
+    rawAuthCredential: {authType: AuthCredentialTypes.API_KEY},
+  });
+
+  const oauth2Config = (tokenUrl: string): AuthConfig => ({
+    credentialKey: 'oauthKey',
+    authScheme: {
+      type: 'oauth2',
+      flows: {clientCredentials: {tokenUrl, scopes: {}}},
+    },
+    rawAuthCredential: {
+      authType: AuthCredentialTypes.OAUTH2,
+      oauth2: {clientId: 'id', clientSecret: 'secret'},
+    },
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('accepts a payload that echoes the requested scheme', async () => {
+    const authConfig = apiKeyConfig();
+    const state = new State();
+
+    await processAuthResume({
+      responseData: {
+        authScheme: {type: 'apiKey', name: 'testKey', in: 'header'},
+        credentialKey: 'testKey',
+        exchangedAuthCredential: webFlowCredential,
+      },
+      authConfig,
+      state,
+    });
+
+    expect(state.get('temp:testKey')).toEqual(webFlowCredential);
+  });
+
+  it('ignores a credentialKey supplied by the payload', async () => {
+    const authConfig = apiKeyConfig();
+    const state = new State();
+
+    await processAuthResume({
+      responseData: {
+        authScheme: {type: 'apiKey', name: 'testKey', in: 'header'},
+        credentialKey: 'attacker',
+        exchangedAuthCredential: webFlowCredential,
+      },
+      authConfig,
+      state,
+    });
+
+    expect(state.has('temp:attacker')).toBe(false);
+    expect(state.get('temp:testKey')).toEqual(webFlowCredential);
+  });
+
+  it('rejects a payload with no exchangedAuthCredential', async () => {
+    const authConfig = apiKeyConfig();
+    const state = new State();
+
+    await processAuthResume({
+      responseData: {
+        authScheme: {type: 'apiKey', name: 'testKey', in: 'header'},
+        credentialKey: 'testKey',
+      },
+      authConfig,
+      state,
+    });
+
+    expect(state.has('temp:testKey')).toBe(false);
+  });
+
+  it('exchanges at the frozen token endpoint, not one named by the payload', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({access_token: 'issued'}), {
+        status: 200,
+        headers: {'content-type': 'application/json'},
+      }),
+    );
+    const authConfig = oauth2Config('https://legit.example/token');
+    const state = new State();
+
+    await processAuthResume({
+      responseData: {
+        authScheme: {
+          type: 'oauth2',
+          flows: {
+            clientCredentials: {
+              tokenUrl: 'https://attacker.invalid/token',
+              scopes: {},
+            },
+          },
+        },
+        credentialKey: 'oauthKey',
+        exchangedAuthCredential: {
+          authType: AuthCredentialTypes.OAUTH2,
+          oauth2: {clientId: 'id', clientSecret: 'secret'},
+        },
+      },
+      authConfig,
+      state,
+    });
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy.mock.calls[0][0]).toBe('https://legit.example/token');
+    expect(state.get<AuthCredential>('temp:oauthKey')?.oauth2).toMatchObject({
+      accessToken: 'issued',
+    });
+  });
+
+  it('still stores a credential from a plain resume object', async () => {
+    const authConfig: AuthConfig = {
+      credentialKey: 'bearerKey',
+      authScheme: {type: 'http', scheme: 'bearer'},
+    };
+    const state = new State();
+    const credential: AuthCredential = {
+      authType: AuthCredentialTypes.HTTP,
+      http: {scheme: 'bearer', credentials: {token: 'plain'}},
+    };
+
+    await processAuthResume({responseData: credential, authConfig, state});
+
+    expect(state.get('temp:bearerKey')).toEqual(credential);
   });
 });

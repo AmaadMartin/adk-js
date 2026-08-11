@@ -24,6 +24,7 @@ import {AuthHandler} from '../../auth/auth_handler.js';
 import {AuthConfig} from '../../auth/auth_tool.js';
 import {createEvent, Event} from '../../events/event.js';
 import {State} from '../../sessions/state.js';
+import {logger} from '../../utils/logger.js';
 import {toJsonSchema} from '../../utils/schema.js';
 import {RequestInput} from '../request_input.js';
 
@@ -166,6 +167,10 @@ export interface ProcessAuthResumeParams {
  * Stores credentials from an auth resume response into session state. Accepts a
  * full {@link AuthConfig} (web UI flow) or a plain value (e.g. an API key
  * string), mirroring `google/adk-python` `process_auth_resume`.
+ *
+ * The resume message is authored by the client, so it may only carry the
+ * credential the user just obtained. `authConfig` stays the single source of
+ * truth for how that credential is stored and exchanged.
  */
 export async function processAuthResume({
   responseData,
@@ -174,9 +179,15 @@ export async function processAuthResume({
 }: ProcessAuthResumeParams): Promise<void> {
   let responseConfig: AuthConfig;
   if (isAuthConfigLike(responseData)) {
+    if (!responseData.exchangedAuthCredential) {
+      logger.warn(
+        `Ignoring auth resume for ${authConfig.credentialKey}: no exchangedAuthCredential.`,
+      );
+      return;
+    }
     responseConfig = {
-      ...(responseData as AuthConfig),
-      credentialKey: authConfig.credentialKey,
+      ...authConfig,
+      exchangedAuthCredential: responseData.exchangedAuthCredential,
     };
   } else {
     responseConfig = {
