@@ -5,21 +5,18 @@
  */
 
 import {
-  BaseTool,
   Context,
   createEvent,
-  createSession,
   Event,
-  InvocationContext,
   LlmAgent,
   LlmRequest,
   LlmResponse,
-  PluginManager,
 } from '@google/adk';
 import {Content} from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {LoggingPlugin} from '../../src/plugins/logging_plugin.js';
 import {resetLogger, setLogger} from '../../src/utils/logger.js';
+import {createTestInvocationContext, createTestTool} from './test_helpers.js';
 
 function makeMockLogger() {
   const infoCalls: string[] = [];
@@ -36,44 +33,30 @@ function makeMockLogger() {
   return {mockLogger, infoCalls};
 }
 
-const testAgent = new LlmAgent({name: 'test_agent'});
-
-/** Builds a real invocation context for the callbacks under test. */
-function createTestInvocationContext(branch?: string): InvocationContext {
-  return new InvocationContext({
-    invocationId: 'inv-1',
-    branch,
-    agent: testAgent,
-    session: createSession({
-      id: 'session-1',
-      appName: 'test-app',
-      userId: 'user-1',
-    }),
-    pluginManager: new PluginManager([]),
-  });
-}
-
 describe('LoggingPlugin', () => {
-  const mockAgent = testAgent;
+  const mockAgent = new LlmAgent({name: 'test_agent'});
   const mockInvocationContext = createTestInvocationContext();
 
   const mockCallbackContext = new Context({
     invocationContext: mockInvocationContext,
   });
 
-  const mockTool = {name: 'my_tool'} as BaseTool;
+  const mockTool = createTestTool('my_tool');
   const mockToolContext = new Context({
     invocationContext: mockInvocationContext,
     functionCallId: 'fc-1',
   });
 
-  const mockLlmRequest = {
+  const mockLlmRequest: LlmRequest = {
     model: 'gemini-2.0-flash',
-  } as LlmRequest;
+    contents: [],
+    toolsDict: {},
+    liveConnectConfig: {},
+  };
 
-  const mockLlmResponse = {
+  const mockLlmResponse: LlmResponse = {
     content: {parts: [{text: 'response text'}]},
-  } as LlmResponse;
+  };
 
   const mockEvent: Event = createEvent({
     id: 'event-1',
@@ -125,7 +108,7 @@ describe('LoggingPlugin', () => {
 
   it('onUserMessageCallback should log branch when present', async () => {
     const plugin = new LoggingPlugin();
-    const ctxWithBranch = createTestInvocationContext('my-branch');
+    const ctxWithBranch = createTestInvocationContext({branch: 'my-branch'});
 
     await plugin.onUserMessageCallback({
       invocationContext: ctxWithBranch,
@@ -250,7 +233,7 @@ describe('LoggingPlugin', () => {
   it('beforeAgentCallback should log branch when present', async () => {
     const plugin = new LoggingPlugin();
     const ctxWithBranch = new Context({
-      invocationContext: createTestInvocationContext('agent-branch'),
+      invocationContext: createTestInvocationContext({branch: 'agent-branch'}),
     });
 
     await plugin.beforeAgentCallback({

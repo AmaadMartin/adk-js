@@ -4,49 +4,21 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {BaseTool, createEvent} from '@google/adk';
-import {describe, expect, it} from 'vitest';
-import {Context} from '../../src/agents/context.js';
 import {
   BasePolicyEngine,
+  createEvent,
   getAskUserConfirmationFunctionCalls,
   InMemoryPolicyEngine,
   PolicyCheckResult,
   PolicyOutcome,
   REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
   SecurityPlugin,
-} from '../../src/plugins/security_plugin.js';
-import {ToolConfirmation} from '../../src/tools/tool_confirmation.js';
+  ToolConfirmation,
+} from '@google/adk';
+import {describe, expect, it} from 'vitest';
+import {createTestContext, createTestTool} from './test_helpers.js';
 
-function makeToolContext(
-  functionCallId: string,
-  initialState: Record<string, unknown> = {},
-): {
-  toolContext: Context;
-  stateStore: Record<string, unknown>;
-  confirmationRequests: Array<{hint: string}>;
-} {
-  const stateStore: Record<string, unknown> = {...initialState};
-  const confirmationRequests: Array<{hint: string}> = [];
-
-  const toolContext = {
-    functionCallId,
-    state: {
-      get: (key: string) => stateStore[key],
-      set: (key: string, value: unknown) => {
-        stateStore[key] = value;
-      },
-    },
-    toolConfirmation: undefined as ToolConfirmation | undefined,
-    requestConfirmation: (params: {hint: string}) => {
-      confirmationRequests.push(params);
-    },
-  } as unknown as Context;
-
-  return {toolContext, stateStore, confirmationRequests};
-}
-
-const mockTool = {name: 'dangerous_tool'} as BaseTool;
+const mockTool = createTestTool('dangerous_tool');
 
 describe('SecurityPlugin', () => {
   describe('constructor', () => {
@@ -67,7 +39,7 @@ describe('SecurityPlugin', () => {
   describe('beforeToolCallback — ALLOW outcome', () => {
     it('should return undefined when policy allows the tool call', async () => {
       const plugin = new SecurityPlugin();
-      const {toolContext} = makeToolContext('fc-1');
+      const toolContext = createTestContext({functionCallId: 'fc-1'});
 
       const result = await plugin.beforeToolCallback({
         tool: mockTool,
@@ -80,7 +52,7 @@ describe('SecurityPlugin', () => {
 
     it('should return undefined on second call when state is ALLOW', async () => {
       const plugin = new SecurityPlugin();
-      const {toolContext} = makeToolContext('fc-1');
+      const toolContext = createTestContext({functionCallId: 'fc-1'});
 
       // First call sets state to ALLOW
       await plugin.beforeToolCallback({
@@ -109,7 +81,7 @@ describe('SecurityPlugin', () => {
         }),
       };
       const plugin = new SecurityPlugin({policyEngine: denyEngine});
-      const {toolContext} = makeToolContext('fc-deny');
+      const toolContext = createTestContext({functionCallId: 'fc-deny'});
 
       const result = await plugin.beforeToolCallback({
         tool: mockTool,
@@ -133,7 +105,7 @@ describe('SecurityPlugin', () => {
         }),
       };
       const plugin = new SecurityPlugin({policyEngine: confirmEngine});
-      const {toolContext, confirmationRequests} = makeToolContext('fc-confirm');
+      const toolContext = createTestContext({functionCallId: 'fc-confirm'});
 
       const result = await plugin.beforeToolCallback({
         tool: mockTool,
@@ -141,6 +113,9 @@ describe('SecurityPlugin', () => {
         toolContext,
       });
 
+      const confirmationRequests = Object.values(
+        toolContext.actions.requestedToolConfirmations,
+      );
       expect(result).toBeDefined();
       expect((result as Record<string, unknown>)['partial']).toBeDefined();
       expect(confirmationRequests).toHaveLength(1);
@@ -155,7 +130,7 @@ describe('SecurityPlugin', () => {
         }),
       };
       const plugin = new SecurityPlugin({policyEngine: confirmEngine});
-      const {toolContext} = makeToolContext('fc-confirm-2');
+      const toolContext = createTestContext({functionCallId: 'fc-confirm-2'});
 
       // First call — sets state to CONFIRM
       await plugin.beforeToolCallback({
@@ -183,7 +158,7 @@ describe('SecurityPlugin', () => {
         }),
       };
       const plugin = new SecurityPlugin({policyEngine: confirmEngine});
-      const {toolContext} = makeToolContext('fc-confirm-3');
+      const toolContext = createTestContext({functionCallId: 'fc-confirm-3'});
 
       // First call — sets state to CONFIRM
       await plugin.beforeToolCallback({
@@ -193,8 +168,7 @@ describe('SecurityPlugin', () => {
       });
 
       // Second call — user rejected
-      (toolContext as unknown as Record<string, unknown>)['toolConfirmation'] =
-        new ToolConfirmation({confirmed: false});
+      toolContext.toolConfirmation = new ToolConfirmation({confirmed: false});
 
       const result = await plugin.beforeToolCallback({
         tool: mockTool,
@@ -216,7 +190,7 @@ describe('SecurityPlugin', () => {
         }),
       };
       const plugin = new SecurityPlugin({policyEngine: confirmEngine});
-      const {toolContext} = makeToolContext('fc-confirm-4');
+      const toolContext = createTestContext({functionCallId: 'fc-confirm-4'});
 
       // First call — sets state to CONFIRM
       await plugin.beforeToolCallback({
@@ -226,8 +200,7 @@ describe('SecurityPlugin', () => {
       });
 
       // Second call — user confirmed
-      (toolContext as unknown as Record<string, unknown>)['toolConfirmation'] =
-        new ToolConfirmation({confirmed: true});
+      toolContext.toolConfirmation = new ToolConfirmation({confirmed: true});
 
       const result = await plugin.beforeToolCallback({
         tool: mockTool,
@@ -243,17 +216,7 @@ describe('SecurityPlugin', () => {
   describe('beforeToolCallback — missing functionCallId', () => {
     it('should check policy when functionCallId is undefined', async () => {
       const plugin = new SecurityPlugin();
-      const {toolContext} = makeToolContext('');
-      // Override to have undefined functionCallId
-      const ctxWithoutId = {
-        ...toolContext,
-        functionCallId: undefined,
-        state: toolContext.state,
-        requestConfirmation: (
-          toolContext as unknown as Record<string, unknown>
-        )['requestConfirmation'],
-        toolConfirmation: undefined,
-      } as unknown as Context;
+      const ctxWithoutId = createTestContext();
 
       // Should not throw — policy check proceeds but state not stored
       const result = await plugin.beforeToolCallback({

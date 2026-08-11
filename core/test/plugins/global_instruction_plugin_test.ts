@@ -6,18 +6,15 @@
 
 import {
   BaseLlm,
-  Context,
-  createSession,
   GlobalInstructionPlugin,
   InMemoryRunner,
-  InvocationContext,
   LlmAgent,
   LlmRequest,
   LlmResponse,
-  PluginManager,
   ReadonlyContext,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
+import {createTestContext} from './test_helpers.js';
 
 class MockLlm extends BaseLlm {
   lastRequest?: LlmRequest;
@@ -36,25 +33,10 @@ class MockLlm extends BaseLlm {
   }
 }
 
-/** Builds a real callback context for the callbacks under test. */
-function createTestCallbackContext(): Context {
-  return new Context({
-    invocationContext: new InvocationContext({
-      invocationId: 'inv-1',
-      agent: new LlmAgent({name: 'test_agent'}),
-      session: createSession({
-        id: 'session-1',
-        appName: 'test-app',
-        userId: 'user-1',
-        state: {user_id: 'test_user_123'},
-      }),
-      pluginManager: new PluginManager([]),
-    }),
-  });
-}
-
 describe('GlobalInstructionPlugin', () => {
-  const mockCallbackContext = createTestCallbackContext();
+  const mockCallbackContext = createTestContext({
+    state: {user_id: 'test_user_123'},
+  });
 
   it('should initialize with default name "global_instruction"', () => {
     const plugin = new GlobalInstructionPlugin('instruction');
@@ -264,7 +246,7 @@ describe('GlobalInstructionPlugin', () => {
       contents: [],
       toolsDict: {},
       liveConnectConfig: {},
-      config: {systemInstruction: existingObj as unknown as string},
+      config: {systemInstruction: existingObj},
     };
 
     await plugin.beforeModelCallback({
