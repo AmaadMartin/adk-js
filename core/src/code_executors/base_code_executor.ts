@@ -7,7 +7,9 @@
 import {InvocationContext} from '../agents/invocation_context.js';
 
 import {
+  ALL_CODE_EXECUTION_LANGUAGES,
   CodeExecutionInput,
+  CodeExecutionLanguage,
   CodeExecutionResult,
 } from './code_execution_utils.js';
 
@@ -69,6 +71,17 @@ export abstract class BaseCodeExecutor {
    * Default to 2.
    */
   errorRetryAttempts = 2;
+
+  /**
+   * The languages this executor can run. `executeCode` throws
+   * `UnsupportedLanguageError` when asked for anything else, so a caller that
+   * can choose the language should consult this before dispatching.
+   *
+   * Defaults to every language so an executor that does not narrow it accepts
+   * exactly what it accepted before.
+   */
+  readonly supportedLanguages: ReadonlySet<CodeExecutionLanguage> =
+    ALL_CODE_EXECUTION_LANGUAGES;
 
   /**
    * The list of the enclosing delimiters to identify the code blocks.
