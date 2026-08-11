@@ -183,6 +183,86 @@ describe('AgentEngineSandboxCodeExecutor', () => {
       expect(result.stdout).toBe('hello world');
     });
 
+    it('publishes the created sandbox name as a state delta', async () => {
+      const codeExecutorContext = new CodeExecutorContext(new State({}));
+
+      await executor.executeCode({
+        invocationContext,
+        codeExecutorContext,
+        codeExecutionInput: {
+          code: 'print("hello")',
+          language: CodeExecutionLanguage.PYTHON,
+          inputFiles: [],
+        },
+      });
+
+      expect(codeExecutorContext.getStateDelta()).toEqual({
+        _code_execution_context: {
+          sandbox_names: {language_python: SANDBOX_NAME},
+        },
+      });
+    });
+
+    it('leaves the caller session state untouched', async () => {
+      const codeExecutorContext = new CodeExecutorContext(new State({}));
+
+      await executor.executeCode({
+        invocationContext,
+        codeExecutorContext,
+        codeExecutionInput: {
+          code: 'print("hello")',
+          language: CodeExecutionLanguage.PYTHON,
+          inputFiles: [],
+        },
+      });
+
+      expect(invocationContext.session?.state).toEqual({});
+    });
+
+    it('records sandbox names per language', async () => {
+      const codeExecutorContext = new CodeExecutorContext(new State({}));
+
+      for (const language of [
+        CodeExecutionLanguage.PYTHON,
+        CodeExecutionLanguage.JAVASCRIPT,
+      ]) {
+        await executor.executeCode({
+          invocationContext,
+          codeExecutorContext,
+          codeExecutionInput: {code: 'noop', language, inputFiles: []},
+        });
+      }
+
+      expect(
+        mockClient.agentEnginesInternal.sandboxes.createInternal,
+      ).toHaveBeenCalledTimes(2);
+      expect(codeExecutorContext.getStateDelta()).toEqual({
+        _code_execution_context: {
+          sandbox_names: {
+            language_python: SANDBOX_NAME,
+            language_javascript: SANDBOX_NAME,
+          },
+        },
+      });
+    });
+
+    it('creates a sandbox without persisting it when no context is supplied', async () => {
+      const result = await executor.executeCode({
+        invocationContext,
+        codeExecutionInput: {
+          code: 'print("hello")',
+          language: CodeExecutionLanguage.PYTHON,
+          inputFiles: [],
+        },
+      });
+
+      expect(
+        mockClient.agentEnginesInternal.sandboxes.createInternal,
+      ).toHaveBeenCalled();
+      expect(result.stdout).toBe('hello world');
+      expect(invocationContext.session?.state).toEqual({});
+    });
+
     it('reuses existing sandbox from the code executor context', async () => {
       const codeExecutorContext = new CodeExecutorContext(new State({}));
       codeExecutorContext.setSandboxName('LANGUAGE_PYTHON', SANDBOX_NAME);
