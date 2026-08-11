@@ -10,6 +10,10 @@ import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {runAgent} from '../../src/cli/cli_run.js';
 import {AgentFile} from '../../src/utils/agent_loader.js';
 import {loadFileData, saveToFile} from '../../src/utils/file_utils.js';
+import {
+  setupTelemetry,
+  shutdownTelemetry,
+} from '../../src/utils/telemetry_utils.js';
 
 // Mock dependencies
 vi.mock('../../src/utils/agent_loader.js', () => ({
@@ -19,6 +23,11 @@ vi.mock('../../src/utils/agent_loader.js', () => ({
 vi.mock('../../src/utils/file_utils.js', () => ({
   loadFileData: vi.fn(),
   saveToFile: vi.fn(),
+}));
+
+vi.mock('../../src/utils/telemetry_utils.js', () => ({
+  setupTelemetry: vi.fn(),
+  shutdownTelemetry: vi.fn(),
 }));
 
 /** Events the mocked Runner yields for a turn; set per test. */
@@ -484,6 +493,59 @@ describe('cli_run', () => {
       });
 
       expect(output).not.toContain('is waiting');
+    });
+  });
+
+  /**
+   * `--otel_to_cloud` is only honoured if `runAgent` reads it, and the cloud
+   * exporters only deliver if the run flushes them before it returns.
+   */
+  describe('telemetry', () => {
+    it('requests cloud export when the option is set', async () => {
+      await runAgent({
+        agentPath: 'agent.ts',
+        otelToCloud: true,
+        sessionService: createMockSessionService(),
+      });
+
+      expect(setupTelemetry).toHaveBeenCalledWith(true);
+    });
+
+    it('keeps cloud export off when the option is omitted', async () => {
+      await runAgent({
+        agentPath: 'agent.ts',
+        sessionService: createMockSessionService(),
+      });
+
+      expect(setupTelemetry).toHaveBeenCalledWith(false);
+    });
+
+    it('sets telemetry up before it builds a Runner', async () => {
+      await runAgent({
+        agentPath: 'agent.ts',
+        sessionService: createMockSessionService(),
+      });
+
+      const setupOrder = vi.mocked(setupTelemetry).mock.invocationCallOrder[0];
+      const runnerOrder = vi.mocked(Runner).mock.invocationCallOrder[0];
+      expect(setupOrder).toBeLessThan(runnerOrder);
+    });
+
+    it('shuts telemetry down once when the run finishes', async () => {
+      await runAgent({
+        agentPath: 'agent.ts',
+        sessionService: createMockSessionService(),
+      });
+
+      expect(shutdownTelemetry).toHaveBeenCalledTimes(1);
+    });
+
+    it('shuts telemetry down when the agent fails to load', async () => {
+      vi.mocked(mockAgentFile.load).mockRejectedValue(new Error('load failed'));
+
+      await runAgent({agentPath: 'agent.ts'});
+
+      expect(shutdownTelemetry).toHaveBeenCalledTimes(1);
     });
   });
 });
