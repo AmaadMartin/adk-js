@@ -69,9 +69,9 @@ interface FileMetadata {
 class AgentFileLoadingError extends Error {}
 
 /**
- * Raised when an app name was never discovered in the agents directory, as
- * opposed to an agent that was found and failed to load. Callers use this to
- * answer "no such app" (404) rather than "the app is broken" (500).
+ * Raised when the loader never discovered an app of this name in the agents
+ * directory, as opposed to an agent it found and could not load. Callers use
+ * this to answer "no such app" (404) rather than "the app is broken" (500).
  */
 export class AgentNotFoundError extends Error {
   constructor(message: string) {

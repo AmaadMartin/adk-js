@@ -917,24 +917,31 @@ export class AdkApiServer {
         }
       });
 
+      const events = this.executeAgentRun({
+        appName,
+        userId,
+        sessionId,
+        newMessage,
+        stateDelta,
+        runConfig: {
+          streamingMode: streaming ? StreamingMode.SSE : StreamingMode.NONE,
+        },
+        abortSignal: abortController.signal,
+      });
+
       try {
+        // Resolve the agent before the SSE headers go out. Once the stream has
+        // started the status line is on the wire, so an unknown app could only
+        // be reported as a data frame.
+        const first = await events.next();
+
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Content-Type', 'text/event-stream');
         res.setHeader('Connection', 'keep-alive');
         res.flushHeaders();
 
-        for await (const event of this.executeAgentRun({
-          appName,
-          userId,
-          sessionId,
-          newMessage,
-          stateDelta,
-          runConfig: {
-            streamingMode: streaming ? StreamingMode.SSE : StreamingMode.NONE,
-          },
-          abortSignal: abortController.signal,
-        })) {
-          res.write(`data: ${JSON.stringify(event)}\n\n`);
+        for (let next = first; !next.done; next = await events.next()) {
+          res.write(`data: ${JSON.stringify(next.value)}\n\n`);
         }
 
         responseCompleted = true;
@@ -953,6 +960,10 @@ export class AdkApiServer {
         } else {
           this.sendAgentError(res, e, 'Failed to run agent');
         }
+      } finally {
+        // Closes the generator so its `await using` agent file is released even
+        // when the response fails part way through the stream.
+        await events.return(undefined);
       }
     });
   }
