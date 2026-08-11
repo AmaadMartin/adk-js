@@ -64,10 +64,20 @@ export class BasicLlmRequestProcessor extends BaseLlmRequestProcessor {
         invocationContext.runConfig.inputAudioTranscription;
       llmRequest.liveConnectConfig.realtimeInputConfig =
         invocationContext.runConfig.realtimeInputConfig;
+      llmRequest.liveConnectConfig.explicitVadSignal =
+        invocationContext.runConfig.explicitVadSignal;
+      llmRequest.liveConnectConfig.translationConfig =
+        invocationContext.runConfig.translationConfig;
       llmRequest.liveConnectConfig.enableAffectiveDialog =
         invocationContext.runConfig.enableAffectiveDialog;
       llmRequest.liveConnectConfig.proactivity =
         invocationContext.runConfig.proactivity;
+      llmRequest.liveConnectConfig.sessionResumption =
+        invocationContext.runConfig.sessionResumption;
+      llmRequest.liveConnectConfig.contextWindowCompression =
+        invocationContext.runConfig.contextWindowCompression;
+      llmRequest.liveConnectConfig.avatarConfig =
+        invocationContext.runConfig.avatarConfig;
     }
   }
 }

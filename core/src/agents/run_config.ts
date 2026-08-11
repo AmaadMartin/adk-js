@@ -6,10 +6,14 @@
 
 import {
   AudioTranscriptionConfig,
+  AvatarConfig,
+  ContextWindowCompressionConfig,
   Modality,
   ProactivityConfig,
   RealtimeInputConfig,
+  SessionResumptionConfig,
   SpeechConfig,
+  TranslationConfig,
 } from '@google/genai';
 
 import {logger} from '../utils/logger.js';
@@ -83,6 +87,36 @@ export interface RunConfig {
    * Realtime input config for live agents with audio input from user.
    */
   realtimeInputConfig?: RealtimeInputConfig;
+
+  /**
+   * Whether to enable explicit voice activity detection (VAD) signals from the
+   * model.
+   */
+  explicitVadSignal?: boolean;
+
+  /**
+   * Configures real-time speech-to-speech translation.
+   *
+   * Only supported by translation models.
+   */
+  translationConfig?: TranslationConfig;
+
+  /**
+   * Configures the session resumption mechanism. Only transparent session
+   * resumption mode is supported now.
+   */
+  sessionResumption?: SessionResumptionConfig;
+
+  /**
+   * Configuration for context window compression. If set, this enables context
+   * window compression for LLM input.
+   */
+  contextWindowCompression?: ContextWindowCompressionConfig;
+
+  /**
+   * Avatar configuration for the live agent.
+   */
+  avatarConfig?: AvatarConfig;
 
   /**
    * A limit on the total number of llm calls for a given run.

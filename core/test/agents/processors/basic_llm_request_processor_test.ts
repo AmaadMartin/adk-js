@@ -293,6 +293,62 @@ describe('BasicLlmRequestProcessor', () => {
     expect(llmRequest.liveConnectConfig.enableAffectiveDialog).toBe(true);
   });
 
+  it('should forward the remaining live connect fields from runConfig', async () => {
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: 'test-basic-processor-model',
+    });
+    const runConfig: RunConfig = {
+      explicitVadSignal: true,
+      translationConfig: {targetLanguageCode: 'pl', echoTargetLanguage: true},
+      sessionResumption: {handle: 'resume-handle', transparent: true},
+      contextWindowCompression: {
+        triggerTokens: '16000',
+        slidingWindow: {targetTokens: '8000'},
+      },
+      avatarConfig: {avatarName: 'test-avatar'},
+    };
+    const invocationContext = createMockInvocationContext(agent, runConfig);
+    const llmRequest = makeLlmRequest();
+
+    await runProcessor(invocationContext, llmRequest);
+
+    expect(llmRequest.liveConnectConfig.explicitVadSignal).toBe(true);
+    expect(llmRequest.liveConnectConfig.translationConfig).toEqual(
+      runConfig.translationConfig,
+    );
+    expect(llmRequest.liveConnectConfig.sessionResumption).toEqual(
+      runConfig.sessionResumption,
+    );
+    expect(llmRequest.liveConnectConfig.contextWindowCompression).toEqual(
+      runConfig.contextWindowCompression,
+    );
+    expect(llmRequest.liveConnectConfig.avatarConfig).toEqual(
+      runConfig.avatarConfig,
+    );
+  });
+
+  it('should leave the remaining live connect fields unset when runConfig omits them', async () => {
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: 'test-basic-processor-model',
+    });
+    const invocationContext = createMockInvocationContext(agent, {
+      responseModalities: [Modality.AUDIO],
+    });
+    const llmRequest = makeLlmRequest();
+
+    await runProcessor(invocationContext, llmRequest);
+
+    expect(llmRequest.liveConnectConfig.explicitVadSignal).toBeUndefined();
+    expect(llmRequest.liveConnectConfig.translationConfig).toBeUndefined();
+    expect(llmRequest.liveConnectConfig.sessionResumption).toBeUndefined();
+    expect(
+      llmRequest.liveConnectConfig.contextWindowCompression,
+    ).toBeUndefined();
+    expect(llmRequest.liveConnectConfig.avatarConfig).toBeUndefined();
+  });
+
   it('should not populate liveConnectConfig when runConfig is not set', async () => {
     const agent = new LlmAgent({
       name: 'test_agent',
