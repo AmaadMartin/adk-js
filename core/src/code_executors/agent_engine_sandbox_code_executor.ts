@@ -354,13 +354,7 @@ export class AgentEngineSandboxCodeExecutor extends BaseCodeExecutor {
       const response = apiResponse.response as {name?: string};
       sandboxName = response.name!;
 
-      if (codeExecutorContext) {
-        codeExecutorContext.setSandboxName(language, sandboxName);
-      } else {
-        logger.debug(
-          'No code executor context provided; the sandbox name will not be persisted and a new sandbox will be created for the next invocation.',
-        );
-      }
+      codeExecutorContext?.setSandboxName(language, sandboxName);
     }
 
     return sandboxName!;

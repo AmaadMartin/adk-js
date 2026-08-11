@@ -28,13 +28,9 @@ interface CodeExecutionResult {
  * The parameters for updating the code execution result.
  * */
 export interface UpdateCodeExecutionResultParams {
-  /** The invocation ID to update the code execution result for. */
   invocationId: string;
-  /** The code that was executed. */
   code: string;
-  /** The standard output of the code execution. */
   resultStdout: string;
-  /** The standard error of the code execution. */
   resultStderr: string;
 }
 
@@ -98,11 +94,8 @@ export class CodeExecutorContext {
    * @param sandboxName The sandbox resource name to record.
    */
   setSandboxName(language: string, sandboxName: string) {
-    if (!(SANDBOX_NAMES_KEY in this.context)) {
-      this.context[SANDBOX_NAMES_KEY] = {};
-    }
-
-    this.context[SANDBOX_NAMES_KEY]![language.toLowerCase()] = sandboxName;
+    this.context[SANDBOX_NAMES_KEY] ??= {};
+    this.context[SANDBOX_NAMES_KEY][language.toLowerCase()] = sandboxName;
   }
 
   /**
