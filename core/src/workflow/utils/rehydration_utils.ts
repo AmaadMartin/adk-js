@@ -15,8 +15,11 @@
 
 import {requiresUserInput} from '../../agents/user_input_request.js';
 import {Event} from '../../events/event.js';
+import {formatError} from '../../utils/error_utils.js';
+import {validateAgainstJsonSchema} from '../../utils/json_schema_validator.js';
 import {RouteValue} from '../graph.js';
 import type {NodeContext, NodeResult} from '../node_context.js';
+import {REQUEST_INPUT_FUNCTION_CALL_NAME} from './hitl_utils.js';
 
 const RESULT_KEY = 'result';
 
@@ -168,6 +171,7 @@ function reconstruct(
 ): Map<string, RehydratedNode> {
   const nodes = new Map<string, RehydratedNode>();
   const interruptOwner = new Map<string, string>();
+  const schemasById = new Map<string, unknown>();
 
   const getNode = (name: string): RehydratedNode => {
     let node = nodes.get(name);
@@ -187,7 +191,11 @@ function reconstruct(
           const owner = interruptOwner.get(fr.id)!;
           getNode(owner).resolvedResponses.set(
             fr.id,
-            unwrapResponse(fr.response),
+            validateResumeResponse(
+              fr.id,
+              unwrapResponse(fr.response),
+              schemasById.get(fr.id),
+            ),
           );
         }
       }
@@ -210,6 +218,7 @@ function reconstruct(
     for (const id of event.longRunningToolIds ?? []) {
       node.interruptIds.add(id);
       interruptOwner.set(id, key);
+      schemasById.set(id, frozenResponseSchema(event, id));
     }
     // Capture the node's original input, stashed on the interrupt event, so a
     // resumed waiting node re-runs with it (not the resume message). Guard the
@@ -284,6 +293,48 @@ function directChildName(path: string, parentPath: string): string | undefined {
 /** Narrows an unknown value to a plain (non-array) record. */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Reads the response schema frozen into the `adk_request_input` call for
+ * `interruptId`, or `undefined` when the interrupt carried none.
+ *
+ * `google/adk-python` `create_request_input_event` writes this argument as
+ * `response_schema` while adk-js writes `responseSchema`, so both spellings
+ * are accepted and a session written by either runtime is readable.
+ */
+function frozenResponseSchema(event: Event, interruptId: string): unknown {
+  for (const part of event.content?.parts ?? []) {
+    const fc = part.functionCall;
+    if (
+      fc &&
+      fc.name === REQUEST_INPUT_FUNCTION_CALL_NAME &&
+      fc.id === interruptId &&
+      fc.args
+    ) {
+      return fc.args['responseSchema'] ?? fc.args['response_schema'];
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Enforces the schema the node froze when it paused, so a node never observes
+ * a resume value that violates the contract it published.
+ */
+function validateResumeResponse(
+  interruptId: string,
+  response: unknown,
+  schema: unknown,
+): unknown {
+  try {
+    return validateAgainstJsonSchema(response, schema);
+  } catch (e: unknown) {
+    throw new Error(
+      `Validation failed for interrupt ${interruptId}: ${formatError(e)}`,
+      {cause: e},
+    );
+  }
 }
 
 /** Unwraps a `{result: value}` FunctionResponse envelope to the bare value. */
