@@ -703,6 +703,55 @@ describe('AgentEngineSandboxCodeExecutor', () => {
       vi.useRealTimers();
     });
 
+    it('shortens the agent engine wait when operationTimeoutSeconds is set', async () => {
+      stallAgentEngineCreation();
+      executor = new AgentEngineSandboxCodeExecutor({
+        client: mockClient as unknown as Client,
+        operationTimeoutSeconds: 5,
+      });
+
+      const executePromise = executeWithFakeTimers();
+
+      await Promise.all([
+        expect(executePromise).rejects.toThrow(
+          'Agent Engine creation operation operations/create-engine-op did not complete in time.',
+        ),
+        vi.runAllTimersAsync(),
+      ]);
+      expect(
+        mockClient.agentEnginesInternal.getAgentOperationInternal,
+      ).toHaveBeenCalledTimes(5);
+
+      vi.useRealTimers();
+    });
+
+    it('applies operationTimeoutSeconds to the sandbox wait too', async () => {
+      mockClient.agentEnginesInternal.sandboxes.createInternal.mockResolvedValue(
+        {name: 'operations/create-sandbox-op', done: false},
+      );
+      mockClient.agentEnginesInternal.sandboxes.getSandboxOperationInternal.mockResolvedValue(
+        {done: false},
+      );
+      executor = new AgentEngineSandboxCodeExecutor({
+        client: mockClient as unknown as Client,
+        operationTimeoutSeconds: 5,
+      });
+
+      const executePromise = executeWithFakeTimers();
+
+      await Promise.all([
+        expect(executePromise).rejects.toThrow(
+          'Sandbox creation operation operations/create-sandbox-op did not complete in time.',
+        ),
+        vi.runAllTimersAsync(),
+      ]);
+      expect(
+        mockClient.agentEnginesInternal.sandboxes.getSandboxOperationInternal,
+      ).toHaveBeenCalledTimes(5);
+
+      vi.useRealTimers();
+    });
+
     it('executes code after slow agent engine provisioning', async () => {
       mockClient.agentEnginesInternal.createInternal.mockResolvedValue({
         name: 'operations/create-engine-op',

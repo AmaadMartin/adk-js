@@ -65,6 +65,16 @@ export interface AgentEngineSandboxCodeExecutorOptions {
   location?: string;
 
   /**
+   * How long, in seconds, to wait for an Agent Engine or sandbox creation
+   * operation to finish before giving up. Default is 180.
+   *
+   * This bounds provisioning only. It has no effect on how long executed code
+   * is allowed to run. A value below one second allows no poll, so a creation
+   * that is not already finished fails immediately.
+   */
+  operationTimeoutSeconds?: number;
+
+  /**
    * Optional client instance to use. If not provided, a new one will be created.
    * Primarily for testing.
    */
@@ -96,11 +106,14 @@ export class AgentEngineSandboxCodeExecutor extends BaseCodeExecutor {
   private location?: string;
   private client: Client;
   private agentEngineCreationPromise?: Promise<string>;
+  private readonly operationTimeoutSeconds: number;
 
   constructor(options: AgentEngineSandboxCodeExecutorOptions = {}) {
     super();
     this.sandboxResourceName = options.sandboxResourceName;
     this.agentEngineResourceName = options.agentEngineResourceName;
+    this.operationTimeoutSeconds =
+      options.operationTimeoutSeconds ?? DEFAULT_OPERATION_TIMEOUT_SECONDS;
     this.projectId = options.projectId || process.env.GOOGLE_CLOUD_PROJECT;
     this.location =
       options.location || process.env.GOOGLE_CLOUD_LOCATION || 'us-central1';
@@ -264,7 +277,7 @@ export class AgentEngineSandboxCodeExecutor extends BaseCodeExecutor {
             this.client.agentEnginesInternal.getAgentOperationInternal({
               operationName: operation.name!,
             }),
-          timeoutSeconds: DEFAULT_OPERATION_TIMEOUT_SECONDS,
+          timeoutSeconds: this.operationTimeoutSeconds,
           description: 'Agent Engine creation',
         });
 
@@ -338,7 +351,7 @@ export class AgentEngineSandboxCodeExecutor extends BaseCodeExecutor {
               operationName: operation.name!,
             },
           ),
-        timeoutSeconds: DEFAULT_OPERATION_TIMEOUT_SECONDS,
+        timeoutSeconds: this.operationTimeoutSeconds,
         description: 'Sandbox creation',
       });
 
