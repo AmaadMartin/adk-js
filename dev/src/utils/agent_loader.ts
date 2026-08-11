@@ -69,6 +69,30 @@ interface FileMetadata {
 class AgentFileLoadingError extends Error {}
 
 /**
+ * Raised when an app name was never discovered in the agents directory, as
+ * opposed to an agent that was found and failed to load. Callers use this to
+ * answer "no such app" (404) rather than "the app is broken" (500).
+ */
+export class AgentNotFoundError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AgentNotFoundError';
+    // Restore prototype chain for `instanceof` across transpilation targets.
+    Object.setPrototypeOf(this, AgentNotFoundError.prototype);
+  }
+}
+
+/**
+ * Type guard for {@link AgentNotFoundError}.
+ *
+ * Matches on `name` rather than `instanceof` so it stays correct when two
+ * copies of adk-js share one runtime.
+ */
+export function isAgentNotFoundError(e: unknown): e is AgentNotFoundError {
+  return e instanceof Error && e.name === 'AgentNotFoundError';
+}
+
+/**
  * An agent that could not be loaded. Recorded rather than thrown, so one broken
  * agent cannot take the whole server down with it.
  */
@@ -507,7 +531,7 @@ export class AgentLoader {
       );
     }
 
-    throw new Error(
+    throw new AgentNotFoundError(
       `Agent '${agentName}' not found in ${this.agentsDirPath}. ` +
         `Available agents: ${Object.keys(this.preloadedAgents).sort().join(', ') || '(none)'}`,
     );

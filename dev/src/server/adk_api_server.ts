@@ -33,7 +33,11 @@ import express, {Request, Response} from 'express';
 import * as http from 'node:http';
 import * as path from 'node:path';
 
-import {AgentFileOptions, AgentLoader} from '../utils/agent_loader.js';
+import {
+  AgentFileOptions,
+  AgentLoader,
+  isAgentNotFoundError,
+} from '../utils/agent_loader.js';
 import {AdkLogger} from '../utils/logger.js';
 import {
   ApiServerSpanExporter,
@@ -386,10 +390,7 @@ export class AdkApiServer {
             dotSrc: await getAgentGraphAsDot(rootAgent!, [[event.author!, '']]),
           });
         } catch (e) {
-          const error = `Failed to get agent graph: ${e}`;
-
-          res.status(500).json({error});
-          this.logger.error(error);
+          this.sendAgentError(res, e, 'Failed to get agent graph');
           return;
         }
       },
@@ -804,10 +805,7 @@ export class AdkApiServer {
         responseCompleted = true;
         res.json(events);
       } catch (e: unknown) {
-        const error = `Failed to run agent: ${e}`;
-
-        res.status(500).json({error});
-        this.logger.error(error);
+        this.sendAgentError(res, e, 'Failed to run agent');
       }
     });
 
@@ -853,9 +851,11 @@ export class AdkApiServer {
           }
           res.json({output: events});
         } catch (e: unknown) {
-          const error = `Failed to run agent via Reasoning Engine API: ${e}`;
-          res.status(500).json({error});
-          this.logger.error(error);
+          this.sendAgentError(
+            res,
+            e,
+            'Failed to run agent via Reasoning Engine API',
+          );
         }
       };
 
@@ -951,10 +951,7 @@ export class AdkApiServer {
             }
           }
         } else {
-          const error = `Failed to run agent: ${e}`;
-
-          res.status(500).json({error});
-          this.logger.error(error);
+          this.sendAgentError(res, e, 'Failed to run agent');
         }
       }
     });
@@ -1015,6 +1012,22 @@ export class AdkApiServer {
         resolve();
       });
     });
+  }
+
+  /**
+   * An app name the loader never discovered is the caller's mistake (404);
+   * anything else is a real failure on our side (500).
+   */
+  private sendAgentError(
+    res: Response,
+    e: unknown,
+    fallbackPrefix: string,
+  ): void {
+    const notFound = isAgentNotFoundError(e);
+    const error = notFound ? e.message : `${fallbackPrefix}: ${e}`;
+
+    res.status(notFound ? 404 : 500).json({error});
+    this.logger.error(error);
   }
 
   private async getRunner(
