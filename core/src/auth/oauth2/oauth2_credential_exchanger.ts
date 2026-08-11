@@ -28,6 +28,17 @@ import {
  * Exchanges OAuth2 credentials from authorization responses using standard fetch.
  */
 export class OAuth2CredentialExchanger implements BaseCredentialExchanger {
+  /**
+   * Exchanges an OAuth2 credential from an authorization response.
+   *
+   * When the exchange cannot be completed, the original credential is returned
+   * with `wasExchanged: false` and the reason is logged. This matches
+   * adk-python, where a token endpoint failure degrades instead of aborting the
+   * invocation.
+   *
+   * @throws CredentialExchangeError If `authScheme` is missing, or if the
+   *     `state` in the authorization response does not match the expected one.
+   */
   async exchange({
     authCredential,
     authScheme,
@@ -42,10 +53,7 @@ export class OAuth2CredentialExchanger implements BaseCredentialExchanger {
     }
 
     if (authCredential.oauth2?.accessToken) {
-      return {
-        credential: authCredential,
-        wasExchanged: false,
-      };
+      return notExchanged(authCredential);
     }
 
     const grantType = determineGrantType(authScheme);
@@ -59,11 +67,19 @@ export class OAuth2CredentialExchanger implements BaseCredentialExchanger {
     }
 
     logger.warn(`Unsupported OAuth2 grant type: ${grantType}`);
-    return {
-      credential: authCredential,
-      wasExchanged: false,
-    };
+    return notExchanged(authCredential);
   }
+}
+
+/**
+ * Returns the original credential unchanged.
+ *
+ * adk-python returns the credential it was given with `was_exchanged=False`
+ * whenever an exchange cannot be completed, so the caller can continue with an
+ * unexchanged credential instead of handling an error.
+ */
+function notExchanged(authCredential: AuthCredential): ExchangeResult {
+  return {credential: authCredential, wasExchanged: false};
 }
 
 export function determineGrantType(
@@ -85,6 +101,12 @@ export function determineGrantType(
   return undefined;
 }
 
+/**
+ * Exchanges a client id and secret for an access token.
+ *
+ * Returns the original credential with `wasExchanged: false` when the exchange
+ * cannot be completed.
+ */
 export async function exchangeClientCredentials({
   authCredential,
   authScheme,
@@ -94,18 +116,20 @@ export async function exchangeClientCredentials({
 }): Promise<ExchangeResult> {
   const tokenEndpoint = getTokenEndpoint(authScheme);
   if (!tokenEndpoint) {
-    throw new CredentialExchangeError(
-      'Token endpoint not found in auth scheme.',
+    logger.warn(
+      'Could not create OAuth2 session for client credentials exchange: token endpoint not found in auth scheme.',
     );
+    return notExchanged(authCredential);
   }
 
   if (
     !authCredential.oauth2?.clientId ||
     !authCredential.oauth2?.clientSecret
   ) {
-    throw new CredentialExchangeError(
-      'clientId and clientSecret are required for client credentials exchange.',
+    logger.warn(
+      'Could not create OAuth2 session for client credentials exchange: clientId and clientSecret are required.',
     );
+    return notExchanged(authCredential);
   }
 
   const body = createOAuth2TokenRequestBody({
@@ -127,13 +151,23 @@ export async function exchangeClientCredentials({
       },
       wasExchanged: true,
     };
-  } catch (error) {
-    throw new CredentialExchangeError(
-      `Failed to exchange tokens: ${error instanceof Error ? error.message : String(error)}`,
+  } catch (error: unknown) {
+    logger.error(
+      `Failed to exchange client credentials: ${error instanceof Error ? error.message : String(error)}`,
     );
+    return notExchanged(authCredential);
   }
 }
 
+/**
+ * Exchanges an authorization code for an access token.
+ *
+ * Returns the original credential with `wasExchanged: false` when the exchange
+ * cannot be completed.
+ *
+ * @throws CredentialExchangeError If the `state` in the authorization response
+ *     does not match the expected one.
+ */
 export async function exchangeAuthorizationCode({
   authCredential,
   authScheme,
@@ -143,9 +177,10 @@ export async function exchangeAuthorizationCode({
 }): Promise<ExchangeResult> {
   const tokenEndpoint = getTokenEndpoint(authScheme);
   if (!tokenEndpoint) {
-    throw new CredentialExchangeError(
-      'Token endpoint not found in auth scheme.',
+    logger.warn(
+      'Could not create OAuth2 session for authorization code exchange: token endpoint not found in auth scheme.',
     );
+    return notExchanged(authCredential);
   }
 
   if (
@@ -154,9 +189,10 @@ export async function exchangeAuthorizationCode({
     (!authCredential.oauth2?.authCode &&
       !authCredential.oauth2?.authResponseUri)
   ) {
-    throw new CredentialExchangeError(
-      'clientId, clientSecret, and either authCode or authResponseUri are required for authorization code exchange.',
+    logger.warn(
+      'Could not create OAuth2 session for authorization code exchange: clientId, clientSecret, and either authCode or authResponseUri are required.',
     );
+    return notExchanged(authCredential);
   }
 
   let code = authCredential.oauth2.authCode;
@@ -165,25 +201,30 @@ export async function exchangeAuthorizationCode({
   }
 
   if (authCredential.oauth2.authResponseUri && authCredential.oauth2.state) {
+    let receivedState: string | undefined;
     try {
       const url = new URL(authCredential.oauth2.authResponseUri);
-      const receivedState = url.searchParams.get('state') || undefined;
-      if (authCredential.oauth2.state !== receivedState) {
-        throw new CredentialExchangeError(
-          'State mismatch detected. Potential CSRF attack.',
-        );
-      }
-    } catch (e) {
+      receivedState = url.searchParams.get('state') || undefined;
+    } catch (error: unknown) {
+      logger.warn(
+        `Failed to parse authResponseUri for state validation: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return notExchanged(authCredential);
+    }
+
+    // Compared outside the `try` so a detected mismatch is reported as the
+    // tampering signal it is, rather than caught and rewrapped as a parse
+    // failure.
+    if (authCredential.oauth2.state !== receivedState) {
       throw new CredentialExchangeError(
-        `Failed to parse authResponseUri for state validation: ${e instanceof Error ? e.message : String(e)}`,
+        'State mismatch detected. Potential CSRF attack.',
       );
     }
   }
 
   if (!code) {
-    throw new CredentialExchangeError(
-      'Authorization code not found in auth response.',
-    );
+    logger.warn('Authorization code not found in auth response.');
+    return notExchanged(authCredential);
   }
 
   const body = createOAuth2TokenRequestBody({
@@ -209,8 +250,9 @@ export async function exchangeAuthorizationCode({
       wasExchanged: true,
     };
   } catch (error: unknown) {
-    throw new CredentialExchangeError(
-      `Failed to exchange tokens: ${error instanceof Error ? error.message : String(error)}`,
+    logger.error(
+      `Failed to exchange authorization code: ${error instanceof Error ? error.message : String(error)}`,
     );
+    return notExchanged(authCredential);
   }
 }
