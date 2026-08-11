@@ -234,6 +234,10 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
           timeout: this.timeoutSeconds * 1000,
           killSignal: 'SIGKILL',
           cwd: tempDir,
+          // Windows gives the interpreter its own console window whenever the
+          // host process owns none. stdout and stderr are piped and stdin is
+          // never written, so the child needs no console of its own.
+          windowsHide: true,
         });
 
         let stdout = '';
