@@ -30,6 +30,7 @@ import {
   CodeExecutionLanguage,
   CodeExecutionResult,
   File,
+  UnsupportedLanguageError,
 } from './code_execution_utils.js';
 
 const DEFAULT_MAX_ATTEMPTS = 180;
@@ -70,18 +71,20 @@ export interface AgentEngineSandboxCodeExecutorOptions {
   client?: Client;
 }
 
-/**
- * A code executor that uses Agent Engine Code Execution Sandbox to execute code.
- */
+/** The languages the sandbox accepts, and the API enum each maps to. */
+const SANDBOX_LANGUAGES: ReadonlyMap<CodeExecutionLanguage, Language> = new Map(
+  [
+    [CodeExecutionLanguage.PYTHON, Language.LANGUAGE_PYTHON],
+    [CodeExecutionLanguage.JAVASCRIPT, Language.LANGUAGE_JAVASCRIPT],
+  ],
+);
+
 function mapLanguage(lang: CodeExecutionLanguage): Language {
-  switch (lang) {
-    case CodeExecutionLanguage.PYTHON:
-      return Language.LANGUAGE_PYTHON;
-    case CodeExecutionLanguage.JAVASCRIPT:
-      return Language.LANGUAGE_JAVASCRIPT;
-    default:
-      throw new Error(`Unsupported language for Agent Engine Sandbox: ${lang}`);
+  const mapped = SANDBOX_LANGUAGES.get(lang);
+  if (!mapped) {
+    throw new UnsupportedLanguageError('Agent Engine Sandbox', lang);
   }
+  return mapped;
 }
 
 /**
@@ -89,6 +92,8 @@ function mapLanguage(lang: CodeExecutionLanguage): Language {
  */
 @experimental
 export class AgentEngineSandboxCodeExecutor extends BaseCodeExecutor {
+  override readonly supportedLanguages: ReadonlySet<CodeExecutionLanguage> =
+    new Set(SANDBOX_LANGUAGES.keys());
   sandboxResourceName?: string;
   agentEngineResourceName?: string;
   private projectId?: string;
