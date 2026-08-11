@@ -72,8 +72,12 @@ export interface ExtendedInteractionSSEEvent extends Omit<
   interactionId?: string;
   interaction?: {
     id: string;
+    // The SDK's InteractionSseEventInteraction omits environment_id, which the
+    // API may still send on a lifecycle payload.
+    environment_id?: string;
   };
   id?: string;
+  environment_id?: string;
 }
 
 // --- Helper Functions ---
@@ -860,6 +864,27 @@ function extractStreamInteractionId(
 }
 
 /**
+ * Extract the environment id from an Interactions SSE event, if present.
+ *
+ * The full non-streaming `Interaction` declares `environment_id`, but the
+ * streaming lifecycle payload does not, so it is read opportunistically and is
+ * `undefined` whenever the API does not send it.
+ */
+function extractStreamEnvironmentId(
+  event: ExtendedInteractionSSEEvent,
+): string | undefined {
+  if (event.interaction?.environment_id) {
+    return event.interaction.environment_id;
+  }
+
+  if (event.event_type === 'interaction' || event.eventType === 'interaction') {
+    return event.environment_id;
+  }
+
+  return undefined;
+}
+
+/**
  * Generate content using the interactions API.
  */
 export async function* generateContentViaInteractions(
@@ -890,6 +915,7 @@ export async function* generateContentViaInteractions(
   );
 
   let currentInteractionId = previousInteractionId;
+  let currentEnvironmentId: string | undefined;
 
   if (stream) {
     const responses = (await apiClient.interactions.create({
@@ -910,12 +936,19 @@ export async function* generateContentViaInteractions(
       if (interactionId) {
         currentInteractionId = interactionId;
       }
+      const environmentId = extractStreamEnvironmentId(sseEvent);
+      if (environmentId) {
+        currentEnvironmentId = environmentId;
+      }
       const llmResponse = convertInteractionEventToLlmResponse(
         sseEvent,
         aggregatedParts,
         currentInteractionId,
       );
       if (llmResponse) {
+        if (currentEnvironmentId) {
+          llmResponse.environmentId = currentEnvironmentId;
+        }
         yield llmResponse;
       }
     }
@@ -927,6 +960,7 @@ export async function* generateContentViaInteractions(
         turnComplete: true,
         finishReason: 'STOP' as FinishReason,
         interactionId: currentInteractionId,
+        ...(currentEnvironmentId ? {environmentId: currentEnvironmentId} : {}),
       };
     }
   } else {
@@ -942,6 +976,10 @@ export async function* generateContentViaInteractions(
     })) as ExtendedInteraction;
 
     logger.info('Interaction response received from the model.');
-    yield convertInteractionToLlmResponse(interaction);
+    const llmResponse = convertInteractionToLlmResponse(interaction);
+    if (interaction.environment_id) {
+      llmResponse.environmentId = interaction.environment_id;
+    }
+    yield llmResponse;
   }
 }

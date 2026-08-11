@@ -107,6 +107,15 @@ export interface LlmResponse {
    */
   interactionId?: string;
 
+  /**
+   * The execution environment ID from the interactions API.
+   *
+   * Populated when an interactions-API model provisions or reuses an execution
+   * environment. It is persisted on the resulting Event so subsequent turns can
+   * reuse the same environment for stateful work.
+   */
+  environmentId?: string;
+
   /** The model version used to generate the response. */
   modelVersion?: string;
 
