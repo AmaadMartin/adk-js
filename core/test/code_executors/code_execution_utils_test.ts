@@ -43,10 +43,10 @@ describe('getEncodedFileContent', () => {
 // buildExecutableCodePart
 // ---------------------------------------------------------------------------
 describe('buildExecutableCodePart', () => {
-  it('builds a part with text and executableCode fields', () => {
+  it('builds a part carrying only executableCode', () => {
     const code = 'print("hello")';
     const part = buildExecutableCodePart(code);
-    expect(part.text).toBe(code);
+    expect(part.text).toBeUndefined();
     expect(part.executableCode).toBeDefined();
     expect(part.executableCode!.code).toBe(code);
   });
@@ -58,7 +58,7 @@ describe('buildExecutableCodePart', () => {
 
   it('handles empty code string', () => {
     const part = buildExecutableCodePart('');
-    expect(part.text).toBe('');
+    expect(part.text).toBeUndefined();
     expect(part.executableCode!.code).toBe('');
   });
 });
