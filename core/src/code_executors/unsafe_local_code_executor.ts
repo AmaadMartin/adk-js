@@ -16,6 +16,7 @@ import {
   CodeExecutionLanguage,
   CodeExecutionResult,
   File,
+  UnsupportedLanguageError,
 } from './code_execution_utils.js';
 
 const IS_WINDOWS = os.platform() === 'win32';
@@ -37,6 +38,15 @@ const POWERSHELL_BASE_ARGS = [
  * commands, the `-NoProfile` analogue.
  */
 const CMD_BASE_ARGS = ['/D', '/c'] as const;
+
+/** The languages this executor knows how to write to disk and launch. */
+const SUPPORTED_LANGUAGES: ReadonlySet<CodeExecutionLanguage> = new Set([
+  CodeExecutionLanguage.JAVASCRIPT,
+  CodeExecutionLanguage.PYTHON,
+  CodeExecutionLanguage.SHELL,
+  CodeExecutionLanguage.WINDOWS_CMD,
+  CodeExecutionLanguage.POWERSHELL,
+]);
 
 /**
  * Whether `commandPath` names Windows PowerShell (`powershell`) or PowerShell
@@ -138,6 +148,7 @@ function getExtensionForLanguage(
  * Use with caution and only for trusted code.
  */
 export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
+  override readonly supportedLanguages = SUPPORTED_LANGUAGES;
   private readonly timeoutSeconds: number;
   private readonly nodeCommandPath: string;
   private readonly pythonCommandPath: string;
@@ -157,20 +168,8 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
 
   async executeCode(params: ExecuteCodeParams): Promise<CodeExecutionResult> {
     const {code, language} = params.codeExecutionInput;
-    if (
-      ![
-        CodeExecutionLanguage.JAVASCRIPT,
-        CodeExecutionLanguage.PYTHON,
-        CodeExecutionLanguage.SHELL,
-        CodeExecutionLanguage.WINDOWS_CMD,
-        CodeExecutionLanguage.POWERSHELL,
-      ].includes(language)
-    ) {
-      return {
-        stdout: '',
-        stderr: `Unsupported language: ${language}`,
-        outputFiles: [],
-      };
+    if (!this.supportedLanguages.has(language)) {
+      throw new UnsupportedLanguageError('UnsafeLocalCodeExecutor', language);
     }
 
     logger.warn(
