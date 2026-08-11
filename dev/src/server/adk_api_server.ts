@@ -91,6 +91,8 @@ export class AdkApiServer {
 
   readonly app: express.Application;
   private readonly agentLoader: AgentLoader;
+  /** An injected loader belongs to the caller, so `stop()` leaves it alone. */
+  private readonly ownsAgentLoader: boolean;
   /**
    * Caches below are keyed by request path parameters (`appName`, `eventId`,
    * `sessionId`), so each is created with `Object.create(null)`. On an
@@ -134,6 +136,7 @@ export class AdkApiServer {
         options.agentFileLoadOptions,
         options.reloadAgents ?? false,
       );
+    this.ownsAgentLoader = !options.agentLoader;
     this.serveDebugUI = options.serveDebugUI ?? false;
     this.allowOrigins = options.allowOrigins;
     this.otelToCloud = options.otelToCloud ?? false;
@@ -996,9 +999,15 @@ export class AdkApiServer {
     });
   }
 
-  stop(): Promise<void> {
+  async stop(): Promise<void> {
+    // Released first, so a rejecting `close()` cannot strand the file watcher
+    // `--reload_agents` starts, which would keep the process alive forever.
+    if (this.ownsAgentLoader) {
+      await this.agentLoader.disposeAll();
+    }
+
     if (!this.server) {
-      return Promise.resolve();
+      return;
     }
 
     return new Promise((resolve, reject) => {
