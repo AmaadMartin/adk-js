@@ -120,6 +120,16 @@ export abstract class BasePlugin {
   }
 
   /**
+   * Releases the resources held by this plugin.
+   *
+   * Invoked once when the owning runner is closed. Override it to close
+   * network connections, flush exporters, or release file handles. The
+   * default implementation is a no-op, and implementations should be
+   * idempotent.
+   */
+  async close(): Promise<void> {}
+
+  /**
    * Callback executed when a user message is received before an invocation
    * starts.
    *
