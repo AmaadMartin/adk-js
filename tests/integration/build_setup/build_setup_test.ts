@@ -20,13 +20,10 @@ const dirname = process.cwd();
 // now takes this long to surface.
 const HOOK_TIMEOUT = 120000;
 
-// The four tests below pass no per-test timeout, so they take the integration
-// project's 60s testTimeout. Each spawns a child process and waits for it to
-// exit, which the windows-latest runner does far more slowly. The slowest is
-// `should build and run agent successfully` at 14.9s there against 6.5s on
-// ubuntu-latest; the other three stay under 7s (measured 2026-08-11). The old
-// 20s per-file budget left the slowest a 1.3x margin and expired under CI load,
-// while 60s gives 4x. Trade-off: a hung child now takes 60s to surface.
+// No per-test timeout below: these take the project's 60s testTimeout. The
+// slowest, `should build and run agent successfully`, takes 14.9s on
+// windows-latest (measured 2026-08-11), which the old 20s budget could not hold
+// under CI load. Trade-off: a hung child now takes 60s to surface.
 describe('Build setup', () => {
   describe.each([
     'js_commonjs',
