@@ -19,16 +19,11 @@
  *
  * The script imports the built loader from `dev/dist`, so `npm run build` must
  * run first, and the agents directory must already have its own dependencies
- * installed. The `unattributed` row is the end-to-end time minus the other
- * three, which are timed in passes of their own rather than inside
- * `listAgents()`. Expect it to be large and positive: the import pass runs
- * after the loader has already imported the same bundles, so V8 answers it
- * from a warm compilation cache. The last row measures that same import inside
- * the end-to-end call, and accounts for most of the difference. A strongly
- * negative residual means this script no longer models the loader, and the
- * numbers should not be trusted. Each run evaluates every bundle twice and
- * keeps both copies in memory, so a large `--runs` may need
- * `--max-old-space-size`.
+ * installed. The import pass runs after the loader has imported the same
+ * bundles, so V8 answers it from a warm compilation cache and it reads lower
+ * than the `loader import` row, which is the same work measured inside
+ * `listAgents()`. Each run evaluates every bundle twice and keeps both copies
+ * in memory, so a large `--runs` may need `--max-old-space-size`.
  */
 
 import {readdir, stat} from 'node:fs/promises';
@@ -51,26 +46,24 @@ const DEFAULT_AGENTS_DIR = path.join(
   'tests/integration/app_loader/discovery',
 );
 const DEFAULT_RUNS = 5;
-const WARMUP_RUNS = 1;
-const JS_FILE_EXTENSIONS = ['.js', '.cjs', '.mjs', '.ts', '.mts', '.cts'];
-const ENTRY_FILE_NAMES = ['app', 'agent'];
 const PHASE_ROWS = [
   ['discovery scan', 'discoveryMs'],
   ['compile (esbuild, concurrent wall)', 'compileMs'],
   ['import (bundles, cache-busted re-import)', 'importMs'],
+  ['loader import (inside e2e, after its last build)', 'loaderImportMs'],
   ['end-to-end listAgents()', 'e2eMs'],
-  ['unattributed (e2e - the three above)', 'unattributedMs'],
+  ['unattributed (e2e - discovery - compile - import)', 'unattributedMs'],
 ];
-const LOADER_IMPORT_LABEL = 'loader import (inside e2e, after its last build)';
-const LABEL_WIDTH = 50;
-const NUMBER_WIDTH = 12;
 const USAGE = `Usage: node scripts/bench_agent_discovery.mjs [options]
 
   --dir <path>   agents directory to measure
                  (default: ${DEFAULT_AGENTS_DIR})
-  --runs <n>     timed runs, after ${WARMUP_RUNS} untimed warm-up run
+  --runs <n>     timed runs, after 1 untimed warm-up run
                  (default: ${DEFAULT_RUNS})
-  --help         print this message`;
+  --help         print this message
+
+Run 'npm run build' first, and install the agents directory's own
+dependencies with 'npm install --prefix <dir>'.`;
 
 const requireFromScript = createRequire(import.meta.url);
 
@@ -132,67 +125,33 @@ async function findPreconditionProblem(agentsDir) {
   return undefined;
 }
 
-function isJsFile(fileName) {
-  return JS_FILE_EXTENSIONS.includes(path.extname(fileName));
-}
-
-async function readDirMetadata(dir) {
-  const names = await readdir(dir);
-
-  return Promise.all(
-    names.map(async (name) => {
-      const filePath = path.join(dir, name);
-      const stats = await stat(filePath);
-      return {
-        path: filePath,
-        name,
-        isFile: stats.isFile(),
-        isDirectory: stats.isDirectory(),
-      };
-    }),
-  );
-}
-
-/** Mirrors the `app.*` over `agent.*` preference of `AgentLoader`. */
-function findEntryFile(files) {
-  for (const entryName of ENTRY_FILE_NAMES) {
-    const match = files.find(
-      (file) =>
-        file.isFile &&
-        isJsFile(file.name) &&
-        path.parse(file.name).name === entryName,
-    );
-    if (match) {
-      return match;
-    }
-  }
-
-  return undefined;
-}
-
 /**
  * Repeats the `readdir`/`stat` walk that `AgentLoader.preloadAgents()` performs
- * before it compiles anything, for the timing row and the discovered count.
+ * over the agents directory and each of its subdirectories. Run it after the
+ * timed call, so that it cannot warm the directory cache for it.
  */
-async function scanDiscovery(dir) {
-  const entries = await readDirMetadata(dir);
-  const subDirFiles = await Promise.all(
+async function timeDiscoveryScan(dir) {
+  const start = performance.now();
+
+  const names = await readdir(dir);
+  const entries = await Promise.all(
+    names.map(async (name) => ({
+      path: path.join(dir, name),
+      stats: await stat(path.join(dir, name)),
+    })),
+  );
+  await Promise.all(
     entries
-      .filter((entry) => entry.isDirectory)
-      .map((entry) => readDirMetadata(entry.path)),
+      .filter((entry) => entry.stats.isDirectory())
+      .map(async (entry) => {
+        const subNames = await readdir(entry.path);
+        await Promise.all(
+          subNames.map((name) => stat(path.join(entry.path, name))),
+        );
+      }),
   );
 
-  const entryPoints = entries
-    .filter((entry) => entry.isFile && isJsFile(entry.name))
-    .map((entry) => entry.path);
-  for (const files of subDirFiles) {
-    const entryFile = findEntryFile(files);
-    if (entryFile) {
-      entryPoints.push(entryFile.path);
-    }
-  }
-
-  return entryPoints;
+  return performance.now() - start;
 }
 
 /**
@@ -330,12 +289,8 @@ function assertEverythingLoaded(agentsDir, loadedNames, failures) {
 
 async function runOnce(agentsDir, AgentLoader) {
   recordedBuilds.length = 0;
-
-  const discoveryStart = performance.now();
-  const entryPoints = await scanDiscovery(agentsDir);
-  const discoveryMs = performance.now() - discoveryStart;
-
   const loader = new AgentLoader(agentsDir);
+
   try {
     const startedAt = performance.now();
     const loadedNames = await loader.listAgents();
@@ -360,19 +315,20 @@ async function runOnce(agentsDir, AgentLoader) {
     const importMs = await timeImportPass(
       bundles.map((bundle) => bundle.outfile),
     );
+    const discoveryMs = await timeDiscoveryScan(agentsDir);
     const e2eMs = endedAt - startedAt;
 
     return {
-      discovered: entryPoints.length,
+      compiled: builds.length,
       loaded: loadedNames.length,
       bundles,
       sample: {
         discoveryMs,
         compileMs,
         importMs,
+        loaderImportMs: endedAt - lastBuildEnd,
         e2eMs,
         unattributedMs: e2eMs - discoveryMs - compileMs - importMs,
-        loaderImportMs: endedAt - lastBuildEnd,
       },
     };
   } finally {
@@ -389,26 +345,13 @@ function median(values) {
     : (sorted[middle - 1] + sorted[middle]) / 2;
 }
 
-function formatMs(value) {
-  return value.toFixed(1);
-}
-
-function formatBytes(bytes) {
-  return `${(bytes / 1024 / 1024).toFixed(2)} MiB`;
-}
-
-function formatRow(label, minText, medianText) {
-  return `  ${label.padEnd(LABEL_WIDTH)}${minText.padStart(NUMBER_WIDTH)}${medianText.padStart(NUMBER_WIDTH)}`;
-}
-
-function formatPhaseRow(label, results, key) {
+function phaseStats(results, key) {
   const values = results.map((result) => result.sample[key]);
 
-  return formatRow(
-    label,
-    formatMs(Math.min(...values)),
-    formatMs(median(values)),
-  );
+  return {
+    'min (ms)': Number(Math.min(...values).toFixed(1)),
+    'median (ms)': Number(median(values).toFixed(1)),
+  };
 }
 
 function printReport(agentsDir, timedRuns, results) {
@@ -417,41 +360,33 @@ function printReport(agentsDir, timedRuns, results) {
   console.log('agent discovery benchmark');
   console.log(`  agents dir  : ${agentsDir}`);
   console.log(
-    `  entrypoints : ${last.discovered} discovered, ${last.loaded} loaded`,
+    `  entrypoints : ${last.compiled} compiled, ${last.loaded} loaded`,
   );
-  console.log(`  runs        : ${timedRuns} timed (${WARMUP_RUNS} warm-up)`);
+  console.log(`  runs        : ${timedRuns} timed (1 warm-up)`);
   console.log(
     `  node        : ${process.version} ${process.platform}/${process.arch}, ${os.cpus().length} cpus`,
   );
-  if (last.discovered !== last.loaded) {
+  if (last.compiled !== last.loaded) {
     console.log(
       `  note        : the counts differ, so ${agentsDir} also holds files that export no agent.`,
     );
   }
 
-  console.log('');
-  console.log(formatRow('phase', 'min (ms)', 'median (ms)'));
-  for (const [label, key] of PHASE_ROWS) {
-    console.log(formatPhaseRow(label, results, key));
-  }
-
-  console.log('');
-  console.log(
-    '  unattributed is mostly the loader importing the same bundles,',
+  console.table(
+    Object.fromEntries(
+      PHASE_ROWS.map(([label, key]) => [label, phaseStats(results, key)]),
+    ),
   );
-  console.log('  which the warm re-import above cannot see:');
-  console.log(formatPhaseRow(LOADER_IMPORT_LABEL, results, 'loaderImportMs'));
-
-  console.log('');
-  console.log('  per-agent compiled bundle size');
-  const bundles = [...last.bundles].sort((a, b) =>
-    a.name.localeCompare(b.name),
+  console.table(
+    Object.fromEntries(
+      [...last.bundles]
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map((bundle) => [
+          bundle.name,
+          {'size (MiB)': Number((bundle.bytes / 1024 / 1024).toFixed(2))},
+        ]),
+    ),
   );
-  for (const bundle of bundles) {
-    console.log(
-      `    ${bundle.name.padEnd(LABEL_WIDTH - 2)}${formatBytes(bundle.bytes).padStart(NUMBER_WIDTH)}`,
-    );
-  }
 }
 
 async function main() {
@@ -491,9 +426,8 @@ async function main() {
     installBuildProbe(createRequire(loaderUrl));
     const {AgentLoader} = await import(loaderUrl);
 
-    for (let run = 0; run < WARMUP_RUNS; run++) {
-      await runOnce(agentsDir, AgentLoader);
-    }
+    // The first run pays for starting the esbuild service, so it is untimed.
+    await runOnce(agentsDir, AgentLoader);
 
     const results = [];
     for (let run = 0; run < args.runs; run++) {
