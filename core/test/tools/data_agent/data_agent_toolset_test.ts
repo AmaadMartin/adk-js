@@ -20,10 +20,6 @@ import {
 } from '@google/adk';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 
-// The logger is spied on, so it is imported from the module the toolset itself
-// loads rather than through the package barrel.
-import {logger} from '../../../src/utils/logger.js';
-
 const ALL_TOOL_NAMES = [
   'list_accessible_data_agents',
   'get_data_agent_info',
@@ -121,8 +117,9 @@ describe('DataAgentToolset', () => {
     ]);
   });
 
-  it('warns and skips a predicate filter when no context is supplied', async () => {
-    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+  it('skips a predicate filter when no context is supplied', async () => {
+    // A predicate needs a ReadonlyContext to evaluate, so without one the
+    // toolset returns everything, as OpenAPIToolset does.
     const predicate: ToolPredicate = (tool) => tool.name === 'ask_data_agent';
 
     const tools = await new DataAgentToolset({
@@ -130,10 +127,6 @@ describe('DataAgentToolset', () => {
     }).getTools();
 
     expect(namesOf(tools)).toEqual(ALL_TOOL_NAMES);
-    expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining('ToolPredicate toolFilter'),
-    );
-    warn.mockRestore();
   });
 
   it('declares only the model-facing snake_case parameters', async () => {

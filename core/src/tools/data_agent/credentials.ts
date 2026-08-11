@@ -51,7 +51,6 @@ export class DataAgentCredentialsConfig {
   private readonly authClient?: AuthClient;
   private readonly externalAccessTokenKey?: string;
   private readonly auth: GoogleAuth;
-  private adcClient?: Promise<AuthClient>;
 
   constructor(options: DataAgentCredentialsConfigOptions = {}) {
     if (options.authClient && options.externalAccessTokenKey) {
@@ -100,22 +99,8 @@ export class DataAgentCredentialsConfig {
       return this.authClient.getRequestHeaders(url);
     }
 
-    const client = await this.getAdcClient();
-    return client.getRequestHeaders(url);
-  }
-
-  /**
-   * Resolves the Application Default Credentials client, building it at most
-   * once. A failed lookup is not cached, so a transient credential error does
-   * not disable this config for the rest of the process.
-   */
-  private async getAdcClient(): Promise<AuthClient> {
-    this.adcClient ??= this.auth.getClient();
-    try {
-      return await this.adcClient;
-    } catch (e: unknown) {
-      this.adcClient = undefined;
-      throw e;
-    }
+    // GoogleAuth caches the client it builds and does not cache a failed
+    // lookup, so there is nothing to memoise here.
+    return (await this.auth.getClient()).getRequestHeaders(url);
   }
 }

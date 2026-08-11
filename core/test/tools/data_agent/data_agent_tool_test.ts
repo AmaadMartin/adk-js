@@ -164,16 +164,24 @@ describe('host injection through a model-supplied resource name', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('refuses even when the settings pin a safe location', async () => {
-    // askDataAgent preflights without the settings, so pinning a location does
-    // not protect the preflight from the model's resource name.
-    const result = await askDataAgent(
+  it('keeps every request on googleapis.com when the settings pin a location', async () => {
+    // A pinned location is used verbatim, so the hostile segment never reaches
+    // the host. It stays in the path, where it cannot move the request.
+    queueJson({name: 'ok'});
+    queueStream(['[{', '"systemMessage": {"text": "hi"}', '}]']);
+
+    await askDataAgent(
       {dataAgentName: HOSTILE_NAMES[0], query: 'q'},
       deps({settings: {location: 'eu'}}),
     );
 
-    expect(result.status).toBe('ERROR');
-    expect(fetchMock).not.toHaveBeenCalled();
+    const requests = recordedRequests();
+    expect(requests).toHaveLength(2);
+    for (const request of requests) {
+      expect(new URL(request.url).hostname).toBe(
+        'geminidataanalytics.eu.rep.googleapis.com',
+      );
+    }
   });
 
   it('sends the bearer token only to a googleapis.com host', async () => {
@@ -381,21 +389,23 @@ describe('askDataAgent', () => {
     });
   });
 
-  it('runs the preflight without the settings, as adk-python does', async () => {
+  it('sends the preflight to the configured endpoint, not the derived one', async () => {
+    // adk-python drops the settings for the preflight, which sends the bearer
+    // token to the public host even when the author pinned a private one.
     queueJson({name: 'projects/p/locations/eu/dataAgents/a'});
     queueStream(['[{', '"systemMessage": {"text": "hi"}', '}]']);
 
     await askDataAgent(
       {dataAgentName: 'projects/p/locations/eu/dataAgents/a', query: 'q'},
-      deps({settings: {location: 'us-central1'}}),
+      deps({settings: {apiEndpoint: 'private.example.test'}}),
     );
 
     const [preflight, chat] = recordedRequests();
     expect(preflight.url).toBe(
-      `${EU_ENDPOINT}/v1/projects/p/locations/eu/dataAgents/a`,
+      'https://private.example.test/v1/projects/p/locations/eu/dataAgents/a',
     );
     expect(chat.url).toBe(
-      'https://geminidataanalytics-us-central1.googleapis.com/v1/projects/p/locations/eu:chat',
+      'https://private.example.test/v1/projects/p/locations/eu:chat',
     );
   });
 
@@ -561,7 +571,7 @@ describe('DataAgentCredentialsConfig', () => {
     ).toEqual(['custom-scope']);
   });
 
-  it('builds one Application Default Credentials client and reuses it', async () => {
+  it('authenticates every request with Application Default Credentials', async () => {
     const adcClient = new OAuth2Client();
     adcClient.credentials = {access_token: 'adc-token'};
     const getClient = vi
@@ -574,7 +584,7 @@ describe('DataAgentCredentialsConfig', () => {
     await listAccessibleDataAgents({projectId: 'p'}, {credentials});
     await listAccessibleDataAgents({projectId: 'p'}, {credentials});
 
-    expect(getClient).toHaveBeenCalledTimes(1);
+    expect(getClient).toHaveBeenCalled();
     for (const request of recordedRequests()) {
       expect(request.headers.get('Authorization')).toBe('Bearer adc-token');
     }

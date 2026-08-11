@@ -6,20 +6,18 @@
 
 import {Context} from '../../agents/context.js';
 import {formatError} from '../../utils/error_utils.js';
+import {asRecord} from '../../utils/object_utils.js';
 
 import {DataAgentToolConfig, DEFAULT_MAX_QUERY_RESULT_ROWS} from './config.js';
 import {DataAgentCredentialsConfig} from './credentials.js';
 import {
-  asRecord,
   GDA_CLIENT_ID,
   GdaEndpointOptions,
   getGdaEndpoint,
+  GLOBAL_LOCATION,
   readGdaStream,
   throwIfNotOk,
 } from './gda_stream_utils.js';
-
-/** Location used when neither the settings nor the resource name supply one. */
-const GLOBAL_LOCATION = 'global';
 
 /** The envelope every data agent tool returns. Never throws. */
 export type DataAgentToolResult =
@@ -158,12 +156,7 @@ export async function askDataAgent(
       resolveEndpointOptions(args.dataAgentName, deps.settings),
     );
 
-    // The preflight deliberately runs without settings, matching adk-python:
-    // it re-derives its location from the resource name.
-    const agentInfo = await getDataAgentInfo(
-      {dataAgentName: args.dataAgentName},
-      {credentials: deps.credentials, toolContext: deps.toolContext},
-    );
+    const agentInfo = await getDataAgentInfo(args, deps);
     if (agentInfo.status === 'ERROR') {
       return agentInfo;
     }

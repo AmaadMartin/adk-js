@@ -8,7 +8,6 @@ import {z} from 'zod';
 
 import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {experimental} from '../../utils/experimental.js';
-import {logger} from '../../utils/logger.js';
 import {BaseTool} from '../base_tool.js';
 import {BaseToolset, ToolPredicate} from '../base_toolset.js';
 import {FunctionTool} from '../function_tool.js';
@@ -128,23 +127,12 @@ export class DataAgentToolset extends BaseToolset {
   }
 
   override async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {
-    const tools = createDataAgentTools(this.deps);
-
-    const filter = this.toolFilter;
-    if (Array.isArray(filter)) {
-      return filter.length === 0
-        ? tools
-        : tools.filter((tool) => filter.includes(tool.name));
-    }
-    if (!context) {
-      logger.warn(
-        'DataAgentToolset: a ToolPredicate toolFilter was provided but ' +
-          'getTools() was called without a ReadonlyContext. The filter will ' +
-          'not be applied.',
-      );
-      return tools;
-    }
-    return tools.filter((tool) => filter(tool, context));
+    return createDataAgentTools(this.deps).filter((tool) => {
+      if (Array.isArray(this.toolFilter) && this.toolFilter.length > 0) {
+        return this.toolFilter.includes(tool.name);
+      }
+      return context ? this.isToolSelected(tool, context) : true;
+    });
   }
 
   override async close(): Promise<void> {}

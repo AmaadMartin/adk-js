@@ -372,6 +372,13 @@ describe('readGdaStream', () => {
     expect(await readGdaStream(streamingResponse([]), 10)).toEqual([]);
   });
 
+  it('returns no messages when the response has no body at all', async () => {
+    const bodyless = new Response(null, {status: 204});
+
+    expect(bodyless.body).toBeNull();
+    expect(await readGdaStream(bodyless, 10)).toEqual([]);
+  });
+
   it('rejects when the stream errors mid-read', async () => {
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {

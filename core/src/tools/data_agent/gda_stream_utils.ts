@@ -10,8 +10,13 @@
  * message list the model sees.
  */
 
+import {asRecord} from '../../utils/object_utils.js';
+
 /** Value sent in the `X-Goog-API-Client` header and the chat `clientIdEnum`. */
 export const GDA_CLIENT_ID = 'GOOGLE_ADK';
+
+/** The location used when neither the settings nor a resource name supply one. */
+export const GLOBAL_LOCATION = 'global';
 
 /** Endpoint used for the `global` location. */
 const GDA_GLOBAL_ENDPOINT = 'https://geminidataanalytics.googleapis.com';
@@ -58,19 +63,6 @@ export interface GdaDataTable {
 }
 
 /**
- * Narrows a value to a plain object, or `undefined` when it is anything else.
- * Arrays are excluded, so this matches Python's `isinstance(value, dict)`.
- *
- * @param value The value to narrow.
- * @return The value as an indexable record, or `undefined`.
- */
-export function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
-}
-
-/**
  * Parses `text` as JSON. Returns `undefined` when `text` is not yet a complete
  * JSON document, so a caller can keep accumulating lines.
  */
@@ -101,7 +93,7 @@ export function getGdaEndpoint(options: GdaEndpointOptions = {}): string {
   }
 
   const location = (options.location ?? '').toLowerCase().trim();
-  if (!location || location === 'global') {
+  if (!location || location === GLOBAL_LOCATION) {
     return GDA_GLOBAL_ENDPOINT;
   }
   if (!ALLOWED_LOCATION.test(location)) {
@@ -191,7 +183,13 @@ export async function readGdaStream(
   let accumulator = '';
   let dataMessageIndex = -1;
 
-  for await (const line of readLines(response.body!)) {
+  // A bodyless response carries no messages, and matches what Python's
+  // `iter_lines()` yields for one.
+  if (!response.body) {
+    return messages;
+  }
+
+  for await (const line of readLines(response.body)) {
     if (!line) {
       continue;
     }
