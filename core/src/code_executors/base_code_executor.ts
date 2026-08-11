@@ -10,6 +10,7 @@ import {
   CodeExecutionInput,
   CodeExecutionResult,
 } from './code_execution_utils.js';
+import {CodeExecutorContext} from './code_executor_context.js';
 
 /**
  * The parameters for executing code.
@@ -19,6 +20,13 @@ export interface ExecuteCodeParams {
   invocationContext: InvocationContext;
   /** The input of the code execution. */
   codeExecutionInput: CodeExecutionInput;
+  /**
+   * The caller's code executor context. Executors that need to persist state
+   * across invocations write through it, and the caller publishes
+   * `getStateDelta()` onto the event it emits. When omitted, such state is not
+   * persisted.
+   */
+  codeExecutorContext?: CodeExecutorContext;
 }
 
 /**
