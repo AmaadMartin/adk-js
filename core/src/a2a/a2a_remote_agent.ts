@@ -26,6 +26,7 @@ import {A2ARemoteAgentRunProcessor} from './a2a_remote_agent_run_processor.js';
 import {
   getUserFunctionCallAt,
   toMissingRemoteSessionParts,
+  unwrapPauseAnswers,
 } from './a2a_remote_agent_utils.js';
 import {resolveAgentCard} from './agent_card.js';
 import {toAdkEvent} from './event_converter_utils.js';
@@ -170,7 +171,7 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
       if (userFnCall) {
         const event = userFnCall.response;
         parts = toA2AParts(
-          event.content?.parts || [],
+          unwrapPauseAnswers(event.content?.parts || []),
           event.longRunningToolIds,
         );
         taskId = userFnCall.taskId;

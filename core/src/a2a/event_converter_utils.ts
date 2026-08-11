@@ -6,6 +6,7 @@
 
 import {
   Part as A2APart,
+  TaskState as A2ATaskState,
   Message,
   Task,
   TaskArtifactUpdateEvent,
@@ -58,11 +59,20 @@ export const MOCK_FUNCTION_CALL_FOR_REQUIRED_USER_INPUT =
 export const MOCK_FUNCTION_CALL_FOR_REQUIRED_USER_AUTH =
   'mock_function_call_for_required_user_auth';
 
+/**
+ * The names of every function call this converter synthesizes, for a consumer
+ * that has to recognize one coming back as a function response.
+ */
+export const PAUSE_FUNCTION_CALL_NAMES: ReadonlySet<string> = new Set([
+  MOCK_FUNCTION_CALL_FOR_REQUIRED_USER_INPUT,
+  MOCK_FUNCTION_CALL_FOR_REQUIRED_USER_AUTH,
+]);
+
 // The args key differs per pause state so a consumer can tell an input pause
 // from a credential pause without re-reading the A2A task state. Both the
 // names and the keys are shared with adk-python.
 const PAUSE_FUNCTION_CALLS: Readonly<
-  Record<string, {name: string; argsKey: string}>
+  Partial<Record<A2ATaskState, {name: string; argsKey: string}>>
 > = {
   [TaskState.INPUT_REQUIRED]: {
     name: MOCK_FUNCTION_CALL_FOR_REQUIRED_USER_INPUT,
@@ -366,7 +376,7 @@ function createAdkEventFromMetadata(a2aEvent: A2AEvent): AdkEvent {
  * the task is not paused, or when no part carries a usable prompt.
  */
 function applyPauseFunctionCall(
-  state: string,
+  state: A2ATaskState,
   parts: GenAIPart[],
   longRunningToolIds: string[],
 ): void {
