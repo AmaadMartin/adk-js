@@ -90,6 +90,15 @@ export const rootAgent = new LlmAgent({
 });
 `.trim();
 
+/**
+ * Written to `.env` when `adk create` collected no credentials at all, so the
+ * scaffolded project names the variable the user still has to fill in.
+ */
+const MISSING_API_KEY_COMMENT = [
+  '# No API key was provided to `adk create`. Create one in AI Studio',
+  '# (https://aistudio.google.com/apikey) and paste it after the `=` below.',
+].join('\n');
+
 interface AgentCreationOptions {
   agentName: string;
   forceYes: boolean;
@@ -98,6 +107,23 @@ interface AgentCreationOptions {
   project: string;
   region: string;
   language: string;
+}
+
+/**
+ * Rejects an empty or whitespace-only API key. Returning a string is
+ * `@clack/prompts`' contract for "invalid — re-ask with this message", so the
+ * wizard can no longer be completed into a `.env` the runtime cannot
+ * authenticate with.
+ */
+function requireApiKey(value: string | undefined): string | undefined {
+  return value?.trim()
+    ? undefined
+    : 'An API key is required. Create one at https://aistudio.google.com/apikey';
+}
+
+/** True when neither a Google AI key nor any Vertex AI setting was collected. */
+function hasNoCredentials(options: AgentCreationOptions): boolean {
+  return !options.apiKey && !options.project && !options.region;
 }
 
 async function getGcpProject(): Promise<string> {
@@ -168,6 +194,12 @@ function generateEnvFile(options: AgentCreationOptions): string {
     // core). GOOGLE_API_KEY is only consulted for Vertex AI Express Mode, so
     // writing it here left every scaffolded project unable to authenticate.
     lines.push(`GOOGLE_GENAI_API_KEY=${options.apiKey}`);
+    lines.push(`GOOGLE_GENAI_USE_VERTEXAI=0`);
+  } else if (hasNoCredentials(options)) {
+    // An empty value keeps the runtime's actionable "API key must be provided"
+    // error and lets an ambient key win, which a placeholder string would not.
+    lines.push(MISSING_API_KEY_COMMENT);
+    lines.push(`GOOGLE_GENAI_API_KEY=`);
     lines.push(`GOOGLE_GENAI_USE_VERTEXAI=0`);
   }
   if (options.project) {
@@ -289,12 +321,13 @@ export async function createAgent(options: AgentCreationOptions) {
         ? ''
         : await text({
             message: 'Enter the Google API Key',
+            validate: requireApiKey,
           });
 
       if (isCancel(apiKeyResponse)) {
         process.exit(0);
       }
-      options.apiKey = apiKeyResponse;
+      options.apiKey = apiKeyResponse.trim();
     }
   }
 
@@ -312,6 +345,12 @@ export async function createAgent(options: AgentCreationOptions) {
   files.forEach((file) => {
     console.log(`  - ${file}`);
   });
+  if (hasNoCredentials(options)) {
+    console.warn(
+      `\nNo credentials were provided. Set GOOGLE_GENAI_API_KEY in ` +
+        `${options.agentName}/.env before running the agent.`,
+    );
+  }
   console.log(
     `Run 'cd ${options.agentName} && npm run web' to start the agent in a web interface`,
   );
