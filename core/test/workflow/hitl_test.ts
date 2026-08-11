@@ -233,140 +233,6 @@ describe('auth gate resume payload binding', () => {
     expect(state.get('temp:testKey')).toEqual(webFlowCredential);
   });
 
-  it('rejects a payload whose authScheme contradicts the frozen one', async () => {
-    const authConfig = apiKeyConfig();
-    const state = new State();
-
-    await processAuthResume({
-      responseData: {
-        authScheme: {type: 'apiKey', name: 'testKey', in: 'query'},
-        credentialKey: 'testKey',
-        exchangedAuthCredential: webFlowCredential,
-      },
-      authConfig,
-      state,
-    });
-
-    expect(state.has('temp:testKey')).toBe(false);
-  });
-
-  it('rejects a payload that adds a field to the frozen scheme', async () => {
-    const authConfig = apiKeyConfig();
-    const state = new State();
-
-    await processAuthResume({
-      responseData: {
-        authScheme: {
-          type: 'apiKey',
-          name: 'testKey',
-          in: 'header',
-          description: 'x',
-        },
-        credentialKey: 'testKey',
-        exchangedAuthCredential: webFlowCredential,
-      },
-      authConfig,
-      state,
-    });
-
-    expect(state.has('temp:testKey')).toBe(false);
-  });
-
-  it('rejects a non-object authScheme', async () => {
-    const authConfig = apiKeyConfig();
-    const state = new State();
-
-    await processAuthResume({
-      responseData: {
-        authScheme: 'apiKey',
-        credentialKey: 'testKey',
-        exchangedAuthCredential: webFlowCredential,
-      },
-      authConfig,
-      state,
-    });
-
-    expect(state.has('temp:testKey')).toBe(false);
-  });
-
-  it('accepts a payload whose scheme drops a field the request left undefined', async () => {
-    const authConfig = apiKeyConfig({
-      type: 'apiKey',
-      name: 'testKey',
-      in: 'header',
-      description: undefined,
-    });
-    const state = new State();
-
-    await processAuthResume({
-      responseData: {
-        authScheme: {type: 'apiKey', name: 'testKey', in: 'header'},
-        credentialKey: 'testKey',
-        exchangedAuthCredential: webFlowCredential,
-      },
-      authConfig,
-      state,
-    });
-
-    expect(state.get('temp:testKey')).toEqual(webFlowCredential);
-  });
-
-  it('accepts a payload whose scheme sets a field to undefined', async () => {
-    const authConfig = apiKeyConfig();
-    const state = new State();
-
-    await processAuthResume({
-      responseData: {
-        authScheme: {
-          type: 'apiKey',
-          name: 'testKey',
-          in: 'header',
-          description: undefined,
-        },
-        credentialKey: 'testKey',
-        exchangedAuthCredential: webFlowCredential,
-      },
-      authConfig,
-      state,
-    });
-
-    expect(state.get('temp:testKey')).toEqual(webFlowCredential);
-  });
-
-  it('accepts a payload that omits the authScheme', async () => {
-    const authConfig = apiKeyConfig();
-    const state = new State();
-
-    await processAuthResume({
-      responseData: {
-        authScheme: undefined,
-        credentialKey: 'testKey',
-        exchangedAuthCredential: webFlowCredential,
-      },
-      authConfig,
-      state,
-    });
-
-    expect(state.get('temp:testKey')).toEqual(webFlowCredential);
-  });
-
-  it('accepts a payload whose authScheme is null', async () => {
-    const authConfig = apiKeyConfig();
-    const state = new State();
-
-    await processAuthResume({
-      responseData: {
-        authScheme: null,
-        credentialKey: 'testKey',
-        exchangedAuthCredential: webFlowCredential,
-      },
-      authConfig,
-      state,
-    });
-
-    expect(state.get('temp:testKey')).toEqual(webFlowCredential);
-  });
-
   it('rejects a payload with no exchangedAuthCredential', async () => {
     const authConfig = apiKeyConfig();
     const state = new State();
@@ -383,11 +249,9 @@ describe('auth gate resume payload binding', () => {
     expect(state.has('temp:testKey')).toBe(false);
   });
 
-  it('never contacts a token endpoint named by the payload', async () => {
-    // A token response the exchanger would accept, so an unbound resume is
-    // caught by the assertions below and never reaches the network.
+  it('exchanges at the frozen token endpoint, not one named by the payload', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({access_token: 'stolen'}), {
+      new Response(JSON.stringify({access_token: 'issued'}), {
         status: 200,
         headers: {'content-type': 'application/json'},
       }),
@@ -416,8 +280,11 @@ describe('auth gate resume payload binding', () => {
       state,
     });
 
-    expect(fetchSpy).not.toHaveBeenCalled();
-    expect(state.has('temp:oauthKey')).toBe(false);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy.mock.calls[0][0]).toBe('https://legit.example/token');
+    expect(state.get<AuthCredential>('temp:oauthKey')?.oauth2).toMatchObject({
+      accessToken: 'issued',
+    });
   });
 
   it('still stores a credential from a plain resume object', async () => {

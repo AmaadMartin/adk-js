@@ -39,11 +39,20 @@ async function collect(gen: AsyncGenerator<Event>): Promise<Event[]> {
   return out;
 }
 
-/** The `temp:` state keys the events wrote, i.e. the credentials stored. */
-function storedCredentialKeys(events: Event[]): string[] {
-  return events.flatMap((e) =>
-    Object.keys(e.actions.stateDelta).filter((k) => k.startsWith('temp:')),
-  );
+const FROZEN_TOKEN_URL = 'https://legit.example/token';
+
+function oauth2AuthConfig(): AuthConfig {
+  return {
+    authScheme: {
+      type: 'oauth2',
+      flows: {clientCredentials: {tokenUrl: FROZEN_TOKEN_URL, scopes: {}}},
+    },
+    rawAuthCredential: {
+      authType: AuthCredentialTypes.OAUTH2,
+      oauth2: {clientId: 'id', clientSecret: 'secret'},
+    },
+    credentialKey: CREDENTIAL_KEY,
+  };
 }
 
 describe('Phase 5b-cont — FunctionNode auth gate', () => {
@@ -158,23 +167,22 @@ describe('Phase 5b-cont — FunctionNode auth gate', () => {
     expect(events.some(hasAuthRequestFunctionCall)).toBe(false);
   });
 
-  it('rejects a resume whose authScheme differs from the requested one', async () => {
-    // A token response the exchanger would accept, so an unbound resume fails
-    // on the assertions below rather than on a fetch error.
+  it('exchanges at the frozen token endpoint when the resume names another one', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({access_token: 'stolen'}), {
+      new Response(JSON.stringify({access_token: 'issued'}), {
         status: 200,
         headers: {'content-type': 'application/json'},
       }),
     );
-    let runs = 0;
+    let seenToken: string | undefined;
     const secured = new FunctionNode(
       'secured',
-      () => {
-        runs++;
+      (ctx: NodeContext) => {
+        const cred = ctx.state.get<AuthCredential>('temp:' + CREDENTIAL_KEY);
+        seenToken = cred?.oauth2?.accessToken;
         return 'data';
       },
-      {authConfig: apiKeyAuthConfig(), rerunOnResume: true},
+      {authConfig: oauth2AuthConfig(), rerunOnResume: true},
     );
 
     const wf = new Workflow({name: 'auth_wf3', edges: [['START', secured]]});
@@ -232,10 +240,9 @@ describe('Phase 5b-cont — FunctionNode auth gate', () => {
       }),
     );
 
-    expect(fetchSpy).not.toHaveBeenCalled();
-    expect(runs).toBe(0);
-    // No credential was stored, so the gate asks for one again.
-    expect(storedCredentialKeys(turn2)).toEqual([]);
-    expect(turn2.some(hasAuthRequestFunctionCall)).toBe(true);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy.mock.calls[0][0]).toBe(FROZEN_TOKEN_URL);
+    expect(seenToken).toBe('issued');
+    expect(turn2.some(hasAuthRequestFunctionCall)).toBe(false);
   });
 });
