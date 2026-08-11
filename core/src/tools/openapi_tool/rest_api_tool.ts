@@ -37,6 +37,9 @@ export class RestApiTool extends BaseTool {
     options: {
       preservePropertyNames?: boolean;
       headerProvider?: (context: ReadonlyContext) => Record<string, string>;
+      /**
+       * Optional stable key used for interactive auth and credential caching.
+       */
       credentialKey?: string;
     } = {},
   ) {

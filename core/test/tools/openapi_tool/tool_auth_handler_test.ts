@@ -413,4 +413,114 @@ describe('ToolAuthHandler', () => {
 
     expect(cachedCredentialKeys(sessionState)).toHaveLength(2);
   });
+
+  it('caches the exchanged credential under the configured credential key', async () => {
+    // The client answered the credential request, which ADK reads back from
+    // the `temp:`-namespaced request slot.
+    const sessionState: Record<string, unknown> = {
+      'temp:my_tool_tokens': {
+        authType: AuthCredentialTypes.API_KEY,
+        apiKey: 'key',
+      } satisfies AuthCredential,
+    };
+    const context = createContext(sessionState);
+
+    const result = await new ToolAuthHandler(
+      context,
+      {type: 'apiKey', name: 'X-API-Key', in: 'header'},
+      undefined,
+      'my_tool_tokens',
+    ).prepareAuthCredentials();
+
+    expect(result.state).toBe('done');
+    // The cache slot is exactly the configured key, with no derived key
+    // written alongside it, and it does not collide with the request slot.
+    expect(Object.keys(sessionState)).toEqual([
+      'temp:my_tool_tokens',
+      'my_tool_tokens',
+    ]);
+    expect(
+      context.state.get<AuthCredential>('my_tool_tokens')?.http?.credentials
+        .token,
+    ).toBe('exchanged-token');
+  });
+
+  it('reads back a credential cached under the same override by a different scheme', async () => {
+    const sessionState: Record<string, unknown> = {};
+    const staticCredential: AuthCredential = {
+      authType: AuthCredentialTypes.API_KEY,
+      apiKey: 'static-key',
+    };
+
+    await new ToolAuthHandler(
+      createContext(sessionState),
+      {type: 'apiKey', name: 'X-API-Key', in: 'header'},
+      staticCredential,
+      'shared_tool_tokens',
+    ).prepareAuthCredentials();
+
+    const second = await new ToolAuthHandler(
+      createContext(sessionState),
+      {type: 'http', scheme: 'bearer'},
+      staticCredential,
+      'shared_tool_tokens',
+    ).prepareAuthCredentials();
+
+    expect(second.state).toBe('done');
+    expect(second.authCredential?.http?.credentials.token).toBe(
+      'exchanged-token',
+    );
+    // One slot: the second handler read the first one's credential instead of
+    // exchanging into a slot of its own.
+    expect(Object.keys(sessionState)).toEqual(['shared_tool_tokens']);
+  });
+
+  it('gives two tools with different credential keys their own cache slot', async () => {
+    const scheme: OpenAPIV3.SecuritySchemeObject = {
+      type: 'apiKey',
+      name: 'X-API-Key',
+      in: 'header',
+    };
+    const staticCredential: AuthCredential = {
+      authType: AuthCredentialTypes.API_KEY,
+      apiKey: 'static-key',
+    };
+    const sessionState: Record<string, unknown> = {};
+
+    await new ToolAuthHandler(
+      createContext(sessionState),
+      scheme,
+      staticCredential,
+      'tool_a_tokens',
+    ).prepareAuthCredentials();
+    await new ToolAuthHandler(
+      createContext(sessionState),
+      scheme,
+      staticCredential,
+      'tool_b_tokens',
+    ).prepareAuthCredentials();
+
+    expect(Object.keys(sessionState)).toEqual([
+      'tool_a_tokens',
+      'tool_b_tokens',
+    ]);
+  });
+
+  it('falls back to the derived key when the credential key is empty', async () => {
+    const sessionState: Record<string, unknown> = {};
+
+    const result = await new ToolAuthHandler(
+      createContext(sessionState),
+      {type: 'apiKey', name: 'X-API-Key', in: 'header'},
+      {authType: AuthCredentialTypes.API_KEY, apiKey: 'static-key'},
+      '',
+    ).prepareAuthCredentials();
+
+    expect(result.state).toBe('done');
+    // An empty string names no slot, so the scheme and the credential still do.
+    expect(Object.keys(sessionState)).toHaveLength(1);
+    expect(cachedCredentialKeys(sessionState)).toEqual(
+      Object.keys(sessionState),
+    );
+  });
 });

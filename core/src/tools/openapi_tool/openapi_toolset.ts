@@ -28,6 +28,10 @@ export class OpenAPIToolset extends BaseToolset {
       preservePropertyNames?: boolean;
       authScheme?: OpenAPIV3.SecuritySchemeObject;
       authCredential?: AuthCredential;
+      /**
+       * Optional stable key used for interactive auth and credential caching
+       * across all tools in this toolset.
+       */
       credentialKey?: string;
       headerProvider?: (context: ReadonlyContext) => Record<string, string>;
     } = {},

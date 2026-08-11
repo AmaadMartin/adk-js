@@ -52,12 +52,21 @@ function withoutRoundTripOAuth2Fields(
 }
 
 class ToolContextCredentialStore {
-  constructor(private readonly context: Context) {}
+  constructor(
+    private readonly context: Context,
+    private readonly credentialKeyOverride?: string,
+  ) {}
 
   async getCredentialKey(
     authScheme: OpenAPIV3.SecuritySchemeObject,
     authCredential?: AuthCredential,
   ): Promise<string> {
+    // A key the developer named wins over the derived one: it is how they
+    // point several tools at one credential, or keep two apart. It cannot
+    // collide with the auth request slot, which lives under `temp:`.
+    if (this.credentialKeyOverride) {
+      return this.credentialKeyOverride;
+    }
     // The digest identifies the scheme and the credential, so two tools that
     // declare the same scheme type against different APIs get their own slot
     // instead of serving each other the first exchanged token.
@@ -120,7 +129,10 @@ export class ToolAuthHandler {
       return {state: 'done'};
     }
 
-    const store = new ToolContextCredentialStore(this.context);
+    const store = new ToolContextCredentialStore(
+      this.context,
+      this.credentialKey,
+    );
     const existingCredential = await store.getCredential(
       this.authScheme,
       this.authCredential,
