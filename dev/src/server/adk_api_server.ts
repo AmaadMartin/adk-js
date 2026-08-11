@@ -778,7 +778,7 @@ export class AdkApiServer {
 
       try {
         const events: Event[] = [];
-        for await (const e of this.executeAgentRun(req, {
+        for await (const e of this.executeAgentRun(res, {
           appName,
           userId,
           sessionId,
@@ -823,7 +823,7 @@ export class AdkApiServer {
             state: {},
           });
           const events: Event[] = [];
-          for await (const e of this.executeAgentRun(req, {
+          for await (const e of this.executeAgentRun(res, {
             appName,
             userId,
             sessionId,
@@ -894,7 +894,7 @@ export class AdkApiServer {
         res.setHeader('Connection', 'keep-alive');
         res.flushHeaders();
 
-        for await (const event of this.executeAgentRun(req, {
+        for await (const event of this.executeAgentRun(res, {
           appName,
           userId,
           sessionId,
@@ -1010,11 +1010,16 @@ export class AdkApiServer {
   /**
    * Runs an agent for a single HTTP request and yields its events.
    *
-   * The abort listener is removed in the `finally`, so a run that has already
-   * finished can no longer be aborted.
+   * The client-disconnect listener belongs on the response, not the request.
+   * `express.json()` has already consumed and ended the request body before a
+   * route handler runs, so the `IncomingMessage` is destroyed during the
+   * handler's first `await` and has emitted 'close' before this generator
+   * starts. The response emits 'close' on client disconnect and on normal
+   * completion alike, so the listener is removed in the `finally`: a run that
+   * has already finished can no longer be aborted.
    */
   private async *executeAgentRun(
-    req: Request,
+    res: Response,
     options: {
       appName: string;
       userId: string;
@@ -1031,7 +1036,7 @@ export class AdkApiServer {
       );
       abortController.abort();
     };
-    req.on('close', onClose);
+    res.on('close', onClose);
 
     try {
       await using agentFile = await this.agentLoader.getAgentFile(
@@ -1049,7 +1054,7 @@ export class AdkApiServer {
         abortSignal: abortController.signal,
       });
     } finally {
-      req.off('close', onClose);
+      res.off('close', onClose);
     }
   }
 }

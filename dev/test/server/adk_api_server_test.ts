@@ -23,6 +23,7 @@ import {
   StreamingMode,
 } from '@google/adk';
 import {ReadableSpan} from '@opentelemetry/sdk-trace-base';
+import {setTimeout as delay} from 'node:timers/promises';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {z} from 'zod';
 
@@ -32,9 +33,29 @@ import {
 } from '../../src/server/adk_api_server.js';
 import {AgentLoader} from '../../src/utils/agent_loader.js';
 
+/**
+ * Budget (ms) for a client disconnect to reach the server and abort the run.
+ * The assertion races against it, so a dead disconnect listener fails the test
+ * instead of hanging it.
+ */
+const ABORT_PROPAGATION_TIMEOUT_MS = 2000;
+
 interface JsonRpcResponse {
   result?: unknown;
   error?: {code: number; message: string};
+}
+
+interface Deferred {
+  promise: Promise<void>;
+  resolve: () => void;
+}
+
+function createDeferred(): Deferred {
+  let resolve!: () => void;
+  const promise = new Promise<void>((res) => {
+    resolve = res;
+  });
+  return {promise, resolve};
 }
 
 /**
@@ -650,6 +671,7 @@ describe('AdkWebServer', () => {
       const runAsyncParams = spy.mock.calls[0][0];
       expect(runAsyncParams.abortSignal).toBeDefined();
       expect(runAsyncParams.abortSignal).toBeInstanceOf(AbortSignal);
+      expect(runAsyncParams.abortSignal?.aborted).toBe(false);
 
       spy.mockRestore();
     });
@@ -808,8 +830,73 @@ describe('AdkWebServer', () => {
       const runAsyncParams = spy.mock.calls[0][0];
       expect(runAsyncParams.abortSignal).toBeDefined();
       expect(runAsyncParams.abortSignal).toBeInstanceOf(AbortSignal);
+      expect(runAsyncParams.abortSignal?.aborted).toBe(false);
 
       spy.mockRestore();
+    });
+
+    it('should abort the run when the client disconnects mid-stream', async () => {
+      await sessionService.createSession({
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: 'sessionId',
+      });
+
+      const runParked = createDeferred();
+      const releaseRun = createDeferred();
+      let capturedSignal: AbortSignal | undefined;
+
+      const spy = vi
+        .spyOn(Runner.prototype, 'runAsync')
+        .mockImplementation(async function* (params) {
+          capturedSignal = params.abortSignal;
+          yield createEvent({
+            invocationId: 'invocationId',
+            author: 'testAgent',
+            content: {parts: [{text: 'Event 1'}], role: 'model'},
+          });
+          runParked.resolve();
+          await releaseRun.promise;
+        });
+
+      const controller = new AbortController();
+      const responsePromise = fetch(`${server.url}/run_sse`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          appName: 'testApp',
+          userId: 'testUser',
+          sessionId: 'sessionId',
+          newMessage: {parts: [{text: 'Hello test agent!'}], role: 'user'},
+        }),
+        signal: controller.signal,
+      });
+      responsePromise.catch(() => {});
+
+      try {
+        await runParked.promise;
+
+        const signal = capturedSignal;
+        if (!signal) {
+          expect.fail('Runner.runAsync ran without an abort signal');
+        }
+        const abortObserved = new Promise<void>((resolve) => {
+          signal.addEventListener('abort', () => resolve(), {once: true});
+        });
+
+        controller.abort();
+
+        const aborted = await Promise.race([
+          abortObserved.then(() => true),
+          delay(ABORT_PROPAGATION_TIMEOUT_MS, false, {ref: false}),
+        ]);
+
+        expect(aborted).toBe(true);
+        expect(signal.aborted).toBe(true);
+      } finally {
+        releaseRun.resolve();
+        spy.mockRestore();
+      }
     });
 
     it('should return 404 without running the agent when the session does not exist', async () => {
