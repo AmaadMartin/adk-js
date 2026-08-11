@@ -108,11 +108,11 @@ export interface LlmResponse {
   interactionId?: string;
 
   /**
-   * The execution environment ID from the interactions API.
+   * The execution environment ID reported by the interactions API.
    *
-   * Populated when an interactions-API model provisions or reuses an execution
-   * environment. It is persisted on the resulting Event so subsequent turns can
-   * reuse the same environment for stateful work.
+   * The API reports one only when the request set an environment config. ADK
+   * sends no environment yet, so this is normally absent. It is surfaced here
+   * and persisted on the resulting Event for callers that read session history.
    */
   environmentId?: string;
 

@@ -2268,7 +2268,7 @@ describe('interactions_utils', () => {
       expect(responses[2].content?.parts).toEqual([{text: 'hi'}]);
     });
 
-    it('should stamp the environment id reported by a legacy interaction event', async () => {
+    it('should stamp a top-level environment id reported by a stream event', async () => {
       const responses = await collectResponses(
         asStream([
           {
@@ -2283,22 +2283,6 @@ describe('interactions_utils', () => {
 
       expect(responses[0].environmentId).toBe('env_legacy');
       expect(responses[0].interactionId).toBe('int-legacy');
-    });
-
-    it('should stamp the environment id reported by a camelCase legacy interaction event', async () => {
-      const responses = await collectResponses(
-        asStream([
-          {
-            eventType: 'interaction',
-            id: 'int-legacy-camel',
-            environment_id: 'env_legacy_camel',
-          },
-          {event_type: 'step.delta', delta: {type: 'text', text: 'hi'}},
-        ]),
-        true,
-      );
-
-      expect(responses[0].environmentId).toBe('env_legacy_camel');
     });
 
     it('should leave environmentId absent when the stream reports none', async () => {

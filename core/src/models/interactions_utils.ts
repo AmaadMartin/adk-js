@@ -864,24 +864,16 @@ function extractStreamInteractionId(
 }
 
 /**
- * Extract the environment id from an Interactions SSE event, if present.
+ * Copy `response`, adding the environment id the API reported for it.
  *
- * The full non-streaming `Interaction` declares `environment_id`, but the
- * streaming lifecycle payload does not, so it is read opportunistically and is
- * `undefined` whenever the API does not send it.
+ * An absent id leaves the response untouched, so no response carries an
+ * `environmentId` key the API did not report.
  */
-function extractStreamEnvironmentId(
-  event: ExtendedInteractionSSEEvent,
-): string | undefined {
-  if (event.interaction?.environment_id) {
-    return event.interaction.environment_id;
-  }
-
-  if (event.event_type === 'interaction' || event.eventType === 'interaction') {
-    return event.environment_id;
-  }
-
-  return undefined;
+function withEnvironmentId(
+  response: LlmResponse,
+  environmentId: string | undefined,
+): LlmResponse {
+  return environmentId ? {...response, environmentId} : response;
 }
 
 /**
@@ -936,32 +928,31 @@ export async function* generateContentViaInteractions(
       if (interactionId) {
         currentInteractionId = interactionId;
       }
-      const environmentId = extractStreamEnvironmentId(sseEvent);
-      if (environmentId) {
-        currentEnvironmentId = environmentId;
-      }
+      currentEnvironmentId =
+        sseEvent.interaction?.environment_id ||
+        sseEvent.environment_id ||
+        currentEnvironmentId;
       const llmResponse = convertInteractionEventToLlmResponse(
         sseEvent,
         aggregatedParts,
         currentInteractionId,
       );
       if (llmResponse) {
-        if (currentEnvironmentId) {
-          llmResponse.environmentId = currentEnvironmentId;
-        }
-        yield llmResponse;
+        yield withEnvironmentId(llmResponse, currentEnvironmentId);
       }
     }
 
     if (aggregatedParts.length > 0) {
-      yield {
-        content: {role: 'model', parts: aggregatedParts},
-        partial: false,
-        turnComplete: true,
-        finishReason: 'STOP' as FinishReason,
-        interactionId: currentInteractionId,
-        ...(currentEnvironmentId ? {environmentId: currentEnvironmentId} : {}),
-      };
+      yield withEnvironmentId(
+        {
+          content: {role: 'model', parts: aggregatedParts},
+          partial: false,
+          turnComplete: true,
+          finishReason: 'STOP' as FinishReason,
+          interactionId: currentInteractionId,
+        },
+        currentEnvironmentId,
+      );
     }
   } else {
     const interaction = (await apiClient.interactions.create({
@@ -976,10 +967,9 @@ export async function* generateContentViaInteractions(
     })) as ExtendedInteraction;
 
     logger.info('Interaction response received from the model.');
-    const llmResponse = convertInteractionToLlmResponse(interaction);
-    if (interaction.environment_id) {
-      llmResponse.environmentId = interaction.environment_id;
-    }
-    yield llmResponse;
+    yield withEnvironmentId(
+      convertInteractionToLlmResponse(interaction),
+      interaction.environment_id,
+    );
   }
 }
