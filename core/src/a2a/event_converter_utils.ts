@@ -26,6 +26,7 @@ import {
   A2AEvent,
   getEventMetadata,
   getFailedTaskStatusUpdateEventError,
+  isAuthRequiredTaskStatusUpdateEvent,
   isFailedTaskStatusUpdateEvent,
   isInputRequiredTaskStatusUpdateEvent,
   isMessage,
@@ -34,12 +35,44 @@ import {
   isTaskStatusUpdateEvent,
   isTerminalTaskStatusUpdateEvent,
   MessageRole,
+  TaskState,
 } from './a2a_event.js';
 import {
   A2AMetadataKeys,
   getA2AEventMetadata,
 } from './metadata_converter_utils.js';
 import {toA2AParts, toGenAIPart, toGenAIParts} from './part_converter_utils.js';
+
+/**
+ * Name of the function call synthesized when a remote A2A task pauses to wait
+ * for more user input. Shared with adk-python so a mixed-language deployment
+ * agrees on the wire.
+ */
+export const MOCK_FUNCTION_CALL_FOR_REQUIRED_USER_INPUT =
+  'mock_function_call_for_required_user_input';
+
+/**
+ * Name of the function call synthesized when a remote A2A task pauses to wait
+ * for credentials.
+ */
+export const MOCK_FUNCTION_CALL_FOR_REQUIRED_USER_AUTH =
+  'mock_function_call_for_required_user_auth';
+
+// The args key differs per pause state so a consumer can tell an input pause
+// from a credential pause without re-reading the A2A task state. Both the
+// names and the keys are shared with adk-python.
+const PAUSE_FUNCTION_CALLS: Readonly<
+  Record<string, {name: string; argsKey: string}>
+> = {
+  [TaskState.INPUT_REQUIRED]: {
+    name: MOCK_FUNCTION_CALL_FOR_REQUIRED_USER_INPUT,
+    argsKey: 'input_required',
+  },
+  [TaskState.AUTH_REQUIRED]: {
+    name: MOCK_FUNCTION_CALL_FOR_REQUIRED_USER_AUTH,
+    argsKey: 'auth_required',
+  },
+};
 
 /**
  * Converts a session Event to an A2A Message.
@@ -172,6 +205,9 @@ function finalTaskStatusUpdateToAdkEvent(
   }
 
   const parts = toGenAIParts(partsToConvert);
+  const longRunningToolIds = getLongRunningToolIDs(partsToConvert);
+  applyPauseFunctionCall(a2aEvent.status.state, parts, longRunningToolIds);
+
   const isFailedTask = isFailedTaskStatusUpdateEvent(a2aEvent);
   const hasContent = !isFailedTask && parts.length > 0;
 
@@ -184,7 +220,7 @@ function finalTaskStatusUpdateToAdkEvent(
       ? getFailedTaskStatusUpdateEventError(a2aEvent)
       : undefined,
     content: hasContent ? createModelContent(parts) : undefined,
-    longRunningToolIds: getLongRunningToolIDs(partsToConvert),
+    longRunningToolIds,
     turnComplete: true,
   };
 }
@@ -243,9 +279,12 @@ function taskToAdkEvent(
     longRunningToolIds.push(...getLongRunningToolIDs(a2aParts));
   }
 
+  applyPauseFunctionCall(a2aTask.status.state, parts, longRunningToolIds);
+
   const isTerminal =
     isTerminalTaskStatusUpdateEvent(a2aTask) ||
-    isInputRequiredTaskStatusUpdateEvent(a2aTask);
+    isInputRequiredTaskStatusUpdateEvent(a2aTask) ||
+    isAuthRequiredTaskStatusUpdateEvent(a2aTask);
   const isFailed = isFailedTaskStatusUpdateEvent(a2aTask);
 
   if (parts.length === 0 && !isFailed) {
@@ -315,6 +354,52 @@ function createAdkEventFromMetadata(a2aEvent: A2AEvent): AdkEvent {
       ),
     ),
   });
+}
+
+/**
+ * Replaces the last prompt-bearing part with a synthetic long-running function
+ * call when the remote task paused for user input or for credentials, so the
+ * caller sees the pause as an ordinary tool call it can answer.
+ *
+ * Both `parts` and `longRunningToolIds` are modified in place. Nothing is
+ * synthesized when the task already carries long-running ids of its own, when
+ * the task is not paused, or when no part carries a usable prompt.
+ */
+function applyPauseFunctionCall(
+  state: string,
+  parts: GenAIPart[],
+  longRunningToolIds: string[],
+): void {
+  // A task that already has a long-running call gives the caller something to
+  // answer; a second call would be one nobody responds to.
+  if (longRunningToolIds.length > 0) {
+    return;
+  }
+
+  const pauseCall = PAUSE_FUNCTION_CALLS[state];
+  if (!pauseCall) {
+    return;
+  }
+
+  // Scanning from the end: on a pause the prompt is the last thing the remote
+  // produced, and everything before it is context the caller should keep.
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const prompt = parts[i].text;
+    if (!prompt) {
+      continue;
+    }
+
+    const id = randomUUID();
+    parts[i] = {
+      functionCall: {
+        id,
+        name: pauseCall.name,
+        args: {[pauseCall.argsKey]: prompt},
+      },
+    };
+    longRunningToolIds.push(id);
+    return;
+  }
 }
 
 function getLongRunningToolIDs(parts: A2APart[]): string[] {
