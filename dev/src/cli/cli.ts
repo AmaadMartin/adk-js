@@ -94,10 +94,6 @@ function getBoolean(option?: string | boolean): boolean {
   return false;
 }
 
-function describeError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
 /**
  * Reports a server start-up failure and makes the CLI exit non-zero.
  *
@@ -113,13 +109,13 @@ async function reportStartupFailure(
   server: AdkApiServer | undefined,
   error: unknown,
 ): Promise<void> {
-  logger.error(`Error starting ${serverName}:`, describeError(error));
+  logger.error(
+    `Error starting ${serverName}:`,
+    error instanceof Error ? error.message : String(error),
+  );
 
-  try {
-    await server?.stop();
-  } catch {
-    // A server whose bind never succeeded rejects with ERR_SERVER_NOT_RUNNING.
-  }
+  // A server whose bind never succeeded rejects with ERR_SERVER_NOT_RUNNING.
+  await server?.stop().catch(() => {});
 
   process.exitCode = 1;
 }
