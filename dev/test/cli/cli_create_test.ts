@@ -70,6 +70,9 @@ describe('createAgent', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // `afterEach` restores the spies installed in `beforeAll`, so the
+    // credential warning needs a fresh spy on each test that reads it.
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
     (isCancel as unknown as Mock).mockReturnValue(false);
     (listFiles as Mock).mockResolvedValue(['file1', 'file2']);
   });
@@ -269,6 +272,118 @@ describe('createAgent', () => {
         /process\.exit/,
       );
       expect(removeFolder).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Credential Handling', () => {
+    const FILL_IN_ENV = [
+      '# No API key was provided to `adk create`. Create one in AI Studio',
+      '# (https://aistudio.google.com/apikey) and paste it after the `=` below.',
+      'GOOGLE_GENAI_API_KEY=',
+      'GOOGLE_GENAI_USE_VERTEXAI=0',
+    ].join('\n');
+
+    /** The content the wizard wrote to `.env`. */
+    const generatedEnv = (): string => {
+      const call = vi
+        .mocked(saveToFile)
+        .mock.calls.find(([file]) => file.endsWith('.env'));
+      if (!call) {
+        expect.fail('saveToFile was never called for .env');
+      }
+      const content = call[1];
+      if (typeof content !== 'string') {
+        expect.fail('.env was written with something other than a string');
+      }
+      return content;
+    };
+
+    /** Answers the model, language and backend prompts, then the key prompt. */
+    const answerGoogleAiPrompts = (apiKey: string) => {
+      (select as Mock).mockResolvedValueOnce('gemini-2.5-flash'); // Model
+      (select as Mock).mockResolvedValueOnce('ts'); // Language
+      (select as Mock).mockResolvedValueOnce('googleai'); // Backend
+      (text as Mock).mockResolvedValueOnce(apiKey); // API Key
+    };
+
+    it('rejects an empty API key at the prompt', async () => {
+      answerGoogleAiPrompts('test-key');
+
+      await createAgent(getFreshOptions());
+
+      expect(text).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: 'Enter the Google API Key',
+          validate: expect.any(Function),
+        }),
+      );
+
+      const validate = vi.mocked(text).mock.calls[0]?.[0].validate;
+      if (!validate) {
+        expect.fail('the API key prompt carries no validator');
+      }
+      expect(validate('')).toMatch(/An API key is required/);
+      expect(validate('   ')).toMatch(/An API key is required/);
+      expect(validate('AIzaSy-real')).toBeUndefined();
+    });
+
+    it('trims the API key before writing .env', async () => {
+      answerGoogleAiPrompts('  my-key  ');
+
+      await createAgent(getFreshOptions());
+
+      expect(generatedEnv()).toContain('GOOGLE_GENAI_API_KEY=my-key\n');
+      expect(generatedEnv()).not.toContain('GOOGLE_GENAI_API_KEY=  my-key');
+    });
+
+    it('writes a fill-in .env when -y runs with no credentials', async () => {
+      await createAgent({...getFreshOptions(), forceYes: true});
+
+      expect(generatedEnv()).toBe(FILL_IN_ENV);
+    });
+
+    it('warns when -y runs with no credentials', async () => {
+      await createAgent({...getFreshOptions(), forceYes: true});
+
+      expect(vi.mocked(console.warn)).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'Set GOOGLE_GENAI_API_KEY in test-agent/.env before running',
+        ),
+      );
+    });
+
+    it('does not write the fill-in stub when Vertex settings are given', async () => {
+      await createAgent({
+        ...getFreshOptions(),
+        forceYes: true,
+        project: 'my-project',
+        region: 'us-central1',
+      });
+
+      expect(generatedEnv()).not.toContain('aistudio.google.com');
+      expect(generatedEnv()).not.toContain('GOOGLE_GENAI_API_KEY');
+      expect(vi.mocked(console.warn)).not.toHaveBeenCalled();
+    });
+
+    it('does not write the fill-in stub when only a region is given', async () => {
+      await createAgent({
+        ...getFreshOptions(),
+        forceYes: true,
+        region: 'us-central1',
+      });
+
+      expect(generatedEnv()).toBe('GOOGLE_CLOUD_LOCATION=us-central1');
+      expect(vi.mocked(console.warn)).not.toHaveBeenCalled();
+    });
+
+    it('does not warn when an API key is provided', async () => {
+      await createAgent({
+        ...getFreshOptions(),
+        forceYes: true,
+        apiKey: 'my-api-key',
+      });
+
+      expect(vi.mocked(console.warn)).not.toHaveBeenCalled();
     });
   });
 });
