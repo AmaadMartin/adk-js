@@ -29,6 +29,7 @@ import {
   getLongRunningFunctionCalls,
   mergeParallelFunctionResponseEvents,
 } from '../../src/agents/functions.js';
+import {logger} from '../../src/utils/logger.js';
 
 // Get the test target function
 const {
@@ -108,6 +109,30 @@ const falsyLongRunningTool = new FunctionTool({
   parameters: z.object({}),
   execute: async () => '',
   isLongRunning: true,
+});
+
+/** Returned by reference so a test can pin the payload it becomes. */
+const INVENTORY = new Map([['widgets', 12]]);
+
+const mapTool = new FunctionTool({
+  name: 'mapTool',
+  description: 'returns a Map',
+  parameters: z.object({}),
+  execute: async () => INVENTORY,
+});
+
+const setTool = new FunctionTool({
+  name: 'setTool',
+  description: 'returns a Set',
+  parameters: z.object({}),
+  execute: async () => new Set([1, 2]),
+});
+
+const dateTool = new FunctionTool({
+  name: 'dateTool',
+  description: 'returns a Date',
+  parameters: z.object({}),
+  execute: async () => new Date(0),
 });
 
 function callFor(tool: BaseTool): FunctionCall {
@@ -436,6 +461,144 @@ describe('handleFunctionCallList', () => {
         }),
       }),
     ]);
+  });
+
+  it('should warn once and name the tool when a tool returns a Map', async () => {
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(mapTool)],
+      toolsDict: {mapTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+    expect(warnSpy).toHaveBeenCalledOnce();
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('mapTool'));
+    warnSpy.mockRestore();
+  });
+
+  it('should leave the payload of a Map response untouched', async () => {
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(mapTool)],
+      toolsDict: {mapTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+    expect(warnSpy).toHaveBeenCalledOnce();
+    expect(event?.content?.parts?.[0].functionResponse?.response).toBe(
+      INVENTORY,
+    );
+    warnSpy.mockRestore();
+  });
+
+  it('should warn once when a tool returns a Set', async () => {
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(setTool)],
+      toolsDict: {setTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+    expect(warnSpy).toHaveBeenCalledOnce();
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('setTool'));
+    warnSpy.mockRestore();
+  });
+
+  it('should warn once when a beforeToolCallback supplies a Map under a key', async () => {
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    const beforeToolCallback: SingleBeforeToolCallback = async () => {
+      return {stock: new Map([['widgets', 12]])};
+    };
+    await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [functionCall],
+      toolsDict,
+      beforeToolCallbacks: [beforeToolCallback],
+      afterToolCallbacks: [],
+    });
+    expect(warnSpy).toHaveBeenCalledOnce();
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('testTool'));
+    warnSpy.mockRestore();
+  });
+
+  it('should not warn when a tool returns a plain object', async () => {
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [functionCall],
+      toolsDict,
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it('should not warn when a tool returns an array', async () => {
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    const arrayTool = new FunctionTool({
+      name: 'arrayTool',
+      description: 'returns array',
+      parameters: z.object({}),
+      execute: async () => ['item1', 'item2'],
+    });
+    await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(arrayTool)],
+      toolsDict: {arrayTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it('should not warn when a tool returns null', async () => {
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    const nullTool = new FunctionTool({
+      name: 'nullTool',
+      description: 'tool returning nullish',
+      parameters: z.object({}),
+      execute: async () => null,
+    });
+    await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(nullTool)],
+      toolsDict: {nullTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it('should not warn when a tool throws', async () => {
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(errorTool)],
+      toolsDict: {errorTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it('should not warn when a tool returns a Date', async () => {
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(dateTool)],
+      toolsDict: {dateTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
   });
 });
 
