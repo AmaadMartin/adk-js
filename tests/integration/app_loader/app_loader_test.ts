@@ -16,8 +16,8 @@ import {sendInput} from '../test_case_utils.js';
 const execAsync = promisify(exec);
 const dirname = process.cwd();
 
-// The slowest test here on windows-latest is the CLI spawn at 10.3s, so 60s
-// holds a 5.8x margin (measured 2026-08-11).
+// The slowest test here on windows-latest is the CLI spawn at 10.8s, so 60s
+// holds a 5.6x margin (measured 2026-08-11).
 const TEST_EXECUTION_TIMEOUT = 60000;
 
 describe('App loader CLI integration', () => {
