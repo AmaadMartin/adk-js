@@ -780,4 +780,164 @@ export function runArtifactServiceTests(
       ).toBe('first');
     });
   });
+
+  describe('trailing-period filenames', () => {
+    const TRAILING_PERIOD_FILENAMES: Array<[label: string, filename: string]> =
+      [
+        ['a trailing period', 'trailing.dot.'],
+        ['repeated trailing periods', 'trailing.dot..'],
+        ['a trailing period on an interior segment', 'nested./report.txt'],
+        ['a trailing period after the user: prefix', 'user:trailing.dot.'],
+      ];
+
+    it.each(TRAILING_PERIOD_FILENAMES)(
+      'rejects saving a filename with %s',
+      async (_label, filename) => {
+        await expect(
+          service.saveArtifact({
+            appName,
+            userId,
+            sessionId,
+            filename,
+            artifact: {text: 'rejected'},
+          }),
+        ).rejects.toThrow(/ending in a period/);
+      },
+    );
+
+    it('does not fold a trailing-period filename onto its bare twin', async () => {
+      const filename = 'trailing.dot';
+      expect(
+        await service.saveArtifact({
+          appName,
+          userId,
+          sessionId,
+          filename,
+          artifact: {text: 'bare'},
+        }),
+      ).toBe(0);
+
+      await expect(
+        service.saveArtifact({
+          appName,
+          userId,
+          sessionId,
+          filename: 'trailing.dot.',
+          artifact: {text: 'dotted'},
+        }),
+      ).rejects.toThrow(/ending in a period/);
+
+      expect(
+        await service.listVersions({appName, userId, sessionId, filename}),
+      ).toEqual([0]);
+      expect(
+        (await service.loadArtifact({appName, userId, sessionId, filename}))
+          ?.text,
+      ).toBe('bare');
+      expect(
+        await service.loadArtifact({
+          appName,
+          userId,
+          sessionId,
+          filename: 'trailing.dot.',
+        }),
+      ).toBeUndefined();
+
+      const keys = await service.listArtifactKeys({
+        appName,
+        userId,
+        sessionId,
+      });
+      expect(keys).toContain(filename);
+      expect(keys).not.toContain('trailing.dot.');
+    });
+
+    it('stores nothing when a trailing-period save is rejected', async () => {
+      await expect(
+        service.saveArtifact({
+          appName,
+          userId,
+          sessionId,
+          filename: 'fresh.',
+          artifact: {text: 'rejected'},
+        }),
+      ).rejects.toThrow(/ending in a period/);
+
+      const keys = await service.listArtifactKeys({
+        appName,
+        userId,
+        sessionId,
+      });
+      expect(keys).not.toContain('fresh.');
+      expect(keys).not.toContain('fresh');
+      expect(
+        await service.listVersions({
+          appName,
+          userId,
+          sessionId,
+          filename: 'fresh',
+        }),
+      ).toEqual([]);
+    });
+
+    it('deletes nothing when the trailing-period twin is deleted', async () => {
+      const filename = 'keep.txt';
+      await service.saveArtifact({
+        appName,
+        userId,
+        sessionId,
+        filename,
+        artifact: {text: 'kept'},
+      });
+
+      await service.deleteArtifact({
+        appName,
+        userId,
+        sessionId,
+        filename: 'keep.txt.',
+      });
+
+      expect(
+        (await service.loadArtifact({appName, userId, sessionId, filename}))
+          ?.text,
+      ).toBe('kept');
+      expect(
+        await service.listArtifactKeys({appName, userId, sessionId}),
+      ).toContain(filename);
+    });
+
+    it('does not resolve a trailing-period filename onto the bare artifact', async () => {
+      await service.saveArtifact({
+        appName,
+        userId,
+        sessionId,
+        filename: 'probe.txt',
+        artifact: {text: 'bare'},
+      });
+
+      const filename = 'probe.txt.';
+      expect(
+        await service.loadArtifact({appName, userId, sessionId, filename}),
+      ).toBeUndefined();
+      expect(
+        await service.getArtifactVersion({
+          appName,
+          userId,
+          sessionId,
+          filename,
+        }),
+      ).toBeUndefined();
+      expect(
+        await service.listVersions({appName, userId, sessionId, filename}),
+      ).toEqual([]);
+      expect(
+        await service.listArtifactVersions({
+          appName,
+          userId,
+          sessionId,
+          filename,
+        }),
+      ).toEqual([]);
+    });
+  });
 }

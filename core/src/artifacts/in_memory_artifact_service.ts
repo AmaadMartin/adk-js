@@ -8,7 +8,7 @@ import {Part} from '@google/genai';
 
 import {logger} from '../utils/logger.js';
 
-import {assertUnpaddedFilename} from './artifact_filename.js';
+import {assertValidArtifactFilename} from './artifact_filename.js';
 import {
   ArtifactVersion,
   BaseArtifactService,
@@ -44,7 +44,7 @@ export class InMemoryArtifactService implements BaseArtifactService {
       throw new Error('Artifact must have either inlineData or text content.');
     }
 
-    assertUnpaddedFilename(filename);
+    assertValidArtifactFilename(filename);
 
     const path = artifactPath(appName, userId, sessionId, filename);
 

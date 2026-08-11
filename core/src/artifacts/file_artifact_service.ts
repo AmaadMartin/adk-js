@@ -12,7 +12,8 @@ import {fileURLToPath, pathToFileURL} from 'url';
 import {logger} from '../utils/logger.js';
 
 import {
-  assertUnpaddedFilename,
+  assertValidArtifactFilename,
+  stripUserNamespace,
   USER_NAMESPACE_PREFIX,
 } from './artifact_filename.js';
 import {
@@ -58,7 +59,8 @@ interface FileArtifactVersion extends ArtifactVersion {
  * portable across filesystems. `{artifactPath}` therefore mirrors the
  * sanitized, scope-relative path derived from each filename. Because a
  * filename becomes a directory name, a filename with leading or trailing
- * whitespace is rejected rather than silently normalized.
+ * whitespace is rejected rather than silently normalized, and so is a filename
+ * with a path segment ending in a period.
  */
 export class FileArtifactService implements BaseArtifactService {
   private readonly rootDir: string;
@@ -483,7 +485,7 @@ function getArtifactDir(
   sessionId: string,
   filename: string,
 ): string {
-  assertUnpaddedFilename(filename);
+  assertValidArtifactFilename(filename);
 
   const userRoot = getUserRoot(rootDir, userId);
   let scopeRoot: string;
@@ -499,10 +501,7 @@ function getArtifactDir(
     scopeRoot = getSessionArtifactsDir(userRoot, sessionId);
   }
 
-  let cleanFilename = filename;
-  if (cleanFilename.startsWith(USER_NAMESPACE_PREFIX)) {
-    cleanFilename = cleanFilename.substring(USER_NAMESPACE_PREFIX.length);
-  }
+  const cleanFilename = stripUserNamespace(filename);
 
   if (path.isAbsolute(cleanFilename)) {
     throw new Error(`Absolute artifact filename ${filename} is not permitted.`);
