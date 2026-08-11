@@ -132,11 +132,11 @@ const OTEL_TO_CLOUD_OPTION = new Option(
 ).default(false);
 const COMPILE_AGENT_FILE = new Option(
   '--compile [boolean]',
-  'Optional. Whether to compile ts agent file to js before execution',
+  'Optional. Whether to compile the ts agent file to js with esbuild before execution. Setting it to false skips the esbuild pass entirely, so the agent file is not bundled or minified either.',
 ).default(true);
 const BUNDLE_AGENT_FILE = new Option(
   '--bundle [boolean]',
-  'Optional. Whether to compile ts agent file to js before execution',
+  'Optional. Whether to bundle dependencies into the compiled agent file and minify it. Ignored when --compile is false.',
 ).default(true);
 const A2A_OPTION = new Option(
   '--a2a [boolean]',

@@ -154,6 +154,16 @@ describe('CLI Entrypoint', () => {
       const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
       expect(args.a2aAuthToken).toBe('tok');
     });
+
+    it('should forward compile: false to the agent loader options', async () => {
+      await parse(['web', '--compile', 'false']);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.agentFileLoadOptions).toMatchObject({
+        compile: false,
+        bundle: true,
+      });
+    });
   });
 
   describe('command: api_server', () => {
