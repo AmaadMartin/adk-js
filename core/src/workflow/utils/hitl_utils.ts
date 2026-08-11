@@ -12,6 +12,7 @@
  */
 
 import {Part} from '@google/genai';
+import {isEqual} from 'lodash-es';
 import {
   REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
   REQUEST_INPUT_FUNCTION_CALL_NAME,
@@ -21,9 +22,11 @@ import {
   AuthCredentialTypes,
 } from '../../auth/auth_credential.js';
 import {AuthHandler} from '../../auth/auth_handler.js';
+import {AuthScheme} from '../../auth/auth_schemes.js';
 import {AuthConfig} from '../../auth/auth_tool.js';
 import {createEvent, Event} from '../../events/event.js';
 import {State} from '../../sessions/state.js';
+import {logger} from '../../utils/logger.js';
 import {toJsonSchema} from '../../utils/schema.js';
 import {RequestInput} from '../request_input.js';
 
@@ -162,10 +165,20 @@ export interface ProcessAuthResumeParams {
   state: State;
 }
 
+/** The client-authored shape of an `AuthConfig`-like resume payload. */
+interface AuthResumePayload {
+  authScheme?: unknown;
+  exchangedAuthCredential?: AuthCredential;
+}
+
 /**
  * Stores credentials from an auth resume response into session state. Accepts a
  * full {@link AuthConfig} (web UI flow) or a plain value (e.g. an API key
  * string), mirroring `google/adk-python` `process_auth_resume`.
+ *
+ * The resume message is authored by the client, so it may only carry the
+ * credential the user just obtained. `authConfig` stays the single source of
+ * truth for how that credential is stored and exchanged.
  */
 export async function processAuthResume({
   responseData,
@@ -174,9 +187,22 @@ export async function processAuthResume({
 }: ProcessAuthResumeParams): Promise<void> {
   let responseConfig: AuthConfig;
   if (isAuthConfigLike(responseData)) {
+    const payload: AuthResumePayload = responseData;
+    if (schemeContradictsRequest(payload.authScheme, authConfig.authScheme)) {
+      logger.warn(
+        `Ignoring auth resume for ${authConfig.credentialKey}: authScheme does not match the requested one.`,
+      );
+      return;
+    }
+    if (!payload.exchangedAuthCredential) {
+      logger.warn(
+        `Ignoring auth resume for ${authConfig.credentialKey}: no exchangedAuthCredential.`,
+      );
+      return;
+    }
     responseConfig = {
-      ...(responseData as AuthConfig),
-      credentialKey: authConfig.credentialKey,
+      ...authConfig,
+      exchangedAuthCredential: payload.exchangedAuthCredential,
     };
   } else {
     responseConfig = {
@@ -188,6 +214,31 @@ export async function processAuthResume({
     };
   }
   await new AuthHandler(responseConfig).parseAndStoreAuthResponse(state);
+}
+
+/**
+ * Whether a resume-supplied auth scheme contradicts the frozen requested one.
+ *
+ * Only the keys the payload sets are compared, so a client that drops fields
+ * the request left `undefined` (a JSON round trip does exactly that) keeps
+ * working, while any changed or added field is a mismatch.
+ */
+function schemeContradictsRequest(
+  responseScheme: unknown,
+  requestedScheme: AuthScheme,
+): boolean {
+  if (responseScheme === undefined || responseScheme === null) {
+    return false;
+  }
+  if (typeof responseScheme !== 'object') {
+    return true;
+  }
+  const requested: Record<string, unknown> = {...requestedScheme};
+  const response: Record<string, unknown> = {...responseScheme};
+  return Object.keys(response).some(
+    (key) =>
+      response[key] !== undefined && !isEqual(response[key], requested[key]),
+  );
 }
 
 function isAuthConfigLike(value: unknown): value is AuthConfig {
