@@ -8,7 +8,6 @@ import {Client} from '@google-cloud/vertexai';
 import fs from 'node:fs';
 import http from 'node:http';
 import {createRequire} from 'node:module';
-import {AddressInfo} from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import {
@@ -117,6 +116,7 @@ describe('google-auth-library deduplication under @google-cloud/vertexai', () =>
  */
 describe('google-auth-library authentication with the override installed', () => {
   let server: http.Server;
+  let host: string;
   let fakeHome: string;
   let metadataRequests: string[];
   let apiRequests: Array<{url: string; authorization?: string}>;
@@ -152,14 +152,17 @@ describe('google-auth-library authentication with the override installed', () =>
       server.listen(0, '127.0.0.1', resolve),
     );
 
+    const address = server.address();
+    if (address === null || typeof address === 'string') {
+      expect.fail(`the loopback server bound ${address} instead of a TCP port`);
+    }
+    host = `127.0.0.1:${address.port}`;
+
     fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'adk-dedupe-home-'));
     vi.stubEnv('HOME', fakeHome);
     vi.stubEnv('APPDATA', fakeHome);
     vi.stubEnv('GOOGLE_APPLICATION_CREDENTIALS', undefined);
-    vi.stubEnv(
-      'GCE_METADATA_HOST',
-      `127.0.0.1:${(server.address() as AddressInfo).port}`,
-    );
+    vi.stubEnv('GCE_METADATA_HOST', host);
     vi.stubEnv('METADATA_SERVER_DETECTION', 'assume-present');
   });
 
@@ -202,7 +205,7 @@ describe('google-auth-library authentication with the override installed', () =>
     const client = new Client({
       project: PROJECT,
       location: LOCATION,
-      apiEndpoint: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+      apiEndpoint: `http://${host}`,
     });
 
     const session = await client.agentEnginesInternal.sessions.get({
