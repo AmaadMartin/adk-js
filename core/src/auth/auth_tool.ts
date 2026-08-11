@@ -5,7 +5,7 @@
  */
 
 import {AuthCredential} from './auth_credential.js';
-import {AuthScheme} from './auth_schemes.js';
+import {AuthScheme, CustomAuthScheme} from './auth_schemes.js';
 
 /**
  * The auth config sent by tool asking client to collect auth credentials and
@@ -45,6 +45,17 @@ export interface AuthConfig {
    * service.
    */
   credentialKey: string;
+}
+
+/**
+ * An {@link AuthConfig} whose scheme is a {@link CustomAuthScheme}.
+ *
+ * Custom schemes are served by a registered auth provider rather than by the
+ * OpenAPI credential machinery, so they travel through their own config type
+ * instead of widening `AuthConfig.authScheme`.
+ */
+export interface CustomAuthConfig extends Omit<AuthConfig, 'authScheme'> {
+  authScheme: CustomAuthScheme;
 }
 
 /**
