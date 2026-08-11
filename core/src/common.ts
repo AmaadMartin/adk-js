@@ -330,7 +330,10 @@ export {
 export type {Frontmatter, Resources, Script, Skill} from './skills/skill.js';
 export type {SkillRegistry} from './skills/skill_registry.js';
 export {ListSkillsTool} from './tools/skill/list_skills_tool.js';
-export {LoadSkillResourceTool} from './tools/skill/load_skill_resource_tool.js';
+export {
+  LoadSkillResourceErrorCode,
+  LoadSkillResourceTool,
+} from './tools/skill/load_skill_resource_tool.js';
 export {
   LoadSkillErrorCode,
   LoadSkillTool,
