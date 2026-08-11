@@ -20,9 +20,9 @@ const BARREL_ENTRY = 'core/src/index.ts';
 /**
  * Packages that must load on first use rather than on `import '@google/adk'`.
  * Each one costs hundreds of milliseconds to evaluate, and an agent on the
- * default in-memory services never touches either.
+ * default in-memory services never touches any of them.
  */
-const DEFERRED_PACKAGES = ['@mikro-orm/core', '@google-cloud/storage'];
+const DEFERRED_PACKAGES = ['@mikro-orm/core'];
 
 /**
  * A package the barrel genuinely does load at startup. It proves the trace

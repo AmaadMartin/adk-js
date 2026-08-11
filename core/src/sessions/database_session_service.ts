@@ -125,15 +125,13 @@ export class DatabaseSessionService extends BaseSessionService {
 
     await loadMikroOrm();
 
-    if (this.connectionString && (!this.options || !this.options.driver)) {
-      this.options = await getConnectionOptionsFromUri(this.connectionString);
-    } else {
-      // ENTITIES overrides a caller-supplied `entities` here, exactly as the
-      // constructor did before the schema module became lazy.
-      this.options = {...this.options!, entities: ENTITIES};
-    }
+    // ENTITIES overrides a caller-supplied `entities`, exactly as the
+    // constructor did before the schema module became lazy.
+    this.options = this.connectionString
+      ? await getConnectionOptionsFromUri(this.connectionString)
+      : {...this.options, entities: ENTITIES};
 
-    this.orm = await MikroORM.init(this.options!);
+    this.orm = await MikroORM.init(this.options);
     await ensureDatabaseCreated(this.orm!);
     await validateDatabaseSchemaVersion(this.orm!);
     this.initialized = true;
