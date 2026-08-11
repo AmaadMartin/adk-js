@@ -8,8 +8,10 @@ import {
   AuthCredential,
   AuthCredentialTypes,
   Context,
+  InvocationContext,
   ToolAuthHandler,
 } from '@google/adk';
+import {OpenAPIV3} from 'openapi-types';
 import {describe, expect, it, vi} from 'vitest';
 import {State} from '../../../src/sessions/state.js';
 import {AutoAuthCredentialExchanger} from '../../../src/tools/openapi_tool/auth/credential_exchangers/auto_auth_credential_exchanger.js';
@@ -31,6 +33,29 @@ vi.mock(
     };
   },
 );
+
+/** Matches a cache key derived from a scheme, with or without a credential. */
+const IDENTITY_KEY_PATTERN =
+  /^[a-zA-Z0-9]+_[0-9a-f]{16}_([a-zA-Z0-9]+_[0-9a-f]{16})?_existing_exchanged_credential$/;
+
+/**
+ * Builds the Context a single tool call gets. `sessionState` is the record the
+ * session holds, so a credential cached by one call is visible to the next.
+ */
+function createContext(sessionState: Record<string, unknown>): Context {
+  return new Context({
+    invocationContext: {
+      session: {state: sessionState},
+      agent: {name: 'tool-auth-handler-agent'},
+    } as unknown as InvocationContext,
+  });
+}
+
+function cachedCredentialKeys(sessionState: Record<string, unknown>): string[] {
+  return Object.keys(sessionState).filter((key) =>
+    IDENTITY_KEY_PATTERN.test(key),
+  );
+}
 
 describe('ToolAuthHandler', () => {
   it('should return done if no auth scheme', async () => {
@@ -77,22 +102,28 @@ describe('ToolAuthHandler', () => {
     expect(mockContext.requestCredential).toHaveBeenCalled();
   });
 
-  it('should return cached credential if available', async () => {
-    const mockContext = {
-      state: new State({
-        'apiKey_existing_exchanged_credential': {
-          authType: AuthCredentialTypes.HTTP,
-          http: {scheme: 'bearer', credentials: {token: 'cached-token'}},
-        },
-      }),
-    } as unknown as Context;
+  it('ignores a credential stored under the pre-upgrade key', async () => {
+    // The pre-upgrade key names only the scheme type, so it cannot say which
+    // tool cached the credential. Serving it would hand one tool's token to
+    // another, which is the defect this key format exists to close.
+    const sessionState: Record<string, unknown> = {
+      'apiKey_existing_exchanged_credential': {
+        authType: AuthCredentialTypes.HTTP,
+        http: {scheme: 'bearer', credentials: {token: 'pre-upgrade-token'}},
+      },
+    };
 
-    const handler = new ToolAuthHandler(mockContext, {type: 'apiKey'});
-
-    const result = await handler.prepareAuthCredentials();
+    const result = await new ToolAuthHandler(
+      createContext(sessionState),
+      {type: 'apiKey', name: 'X-API-Key', in: 'header'},
+      {authType: AuthCredentialTypes.API_KEY, apiKey: 'static-key'},
+    ).prepareAuthCredentials();
 
     expect(result.state).toBe('done');
-    expect(result.authCredential?.http?.credentials.token).toBe('cached-token');
+    expect(result.authCredential?.http?.credentials.token).toBe(
+      'exchanged-token',
+    );
+    expect(cachedCredentialKeys(sessionState)).toHaveLength(1);
   });
 
   it('should store exchanged credential in state and record it in the delta', async () => {
@@ -111,9 +142,12 @@ describe('ToolAuthHandler', () => {
 
     expect(result.state).toBe('done');
     // Stored via the State API so it is readable back through State.get...
-    const stored = state.get<{http?: {credentials: {token: string}}}>(
-      'apiKey_existing_exchanged_credential',
-    );
+    const [key, ...otherKeys] = Object.keys(state.toRecord());
+    expect(otherKeys).toEqual([]);
+    // ...under a key that identifies the scheme, with an empty credential
+    // segment because the tool was configured with no credential.
+    expect(key).toMatch(/^apiKey_[0-9a-f]{16}__existing_exchanged_credential$/);
+    const stored = state.get<{http?: {credentials: {token: string}}}>(key);
     expect(stored?.http?.credentials.token).toBe('exchanged-token');
     // ...and recorded in the delta so it is persisted to the session (rather
     // than being re-exchanged on every subsequent tool call).
@@ -238,9 +272,145 @@ describe('ToolAuthHandler', () => {
 
     expect(result.state).toBe('done');
     // An exchange costs a round trip, so its result is worth persisting.
-    const stored = state.get<{http?: {credentials: {token: string}}}>(
-      'oauth2_existing_exchanged_credential',
+    const [key, ...otherKeys] = Object.keys(state.toRecord());
+    expect(otherKeys).toEqual([]);
+    // Both the scheme and the configured credential identify the slot.
+    expect(key).toMatch(
+      /^oauth2_[0-9a-f]{16}_oauth2_[0-9a-f]{16}_existing_exchanged_credential$/,
     );
+    const stored = state.get<{http?: {credentials: {token: string}}}>(key);
     expect(stored?.http?.credentials.token).toBe('exchanged-token');
+  });
+
+  it('gives two oauth2 tools with different token URLs their own cache slot', async () => {
+    const schemeA: OpenAPIV3.SecuritySchemeObject = {
+      type: 'oauth2',
+      flows: {
+        clientCredentials: {
+          tokenUrl: 'https://a.example.com/token',
+          scopes: {},
+        },
+      },
+    };
+    const schemeB: OpenAPIV3.SecuritySchemeObject = {
+      type: 'oauth2',
+      flows: {
+        clientCredentials: {
+          tokenUrl: 'https://b.example.com/token',
+          scopes: {},
+        },
+      },
+    };
+    const sessionState: Record<string, unknown> = {};
+
+    await new ToolAuthHandler(createContext(sessionState), schemeA, {
+      authType: AuthCredentialTypes.OAUTH2,
+      oauth2: {clientId: 'client-a', clientSecret: 'secret-a'},
+    }).prepareAuthCredentials();
+    const result = await new ToolAuthHandler(
+      createContext(sessionState),
+      schemeB,
+      {
+        authType: AuthCredentialTypes.OAUTH2,
+        oauth2: {clientId: 'client-b', clientSecret: 'secret-b'},
+      },
+    ).prepareAuthCredentials();
+
+    expect(result.state).toBe('done');
+    // Tool B exchanged its own credential rather than being served tool A's,
+    // so the session holds a credential per tool.
+    expect(cachedCredentialKeys(sessionState)).toHaveLength(2);
+  });
+
+  it('gives two apiKey tools with different scheme names their own cache slot', async () => {
+    const credential: AuthCredential = {
+      authType: AuthCredentialTypes.API_KEY,
+      apiKey: 'key',
+    };
+    const sessionState: Record<string, unknown> = {};
+
+    await new ToolAuthHandler(
+      createContext(sessionState),
+      {type: 'apiKey', name: 'X-A-Key', in: 'header'},
+      credential,
+    ).prepareAuthCredentials();
+    const result = await new ToolAuthHandler(
+      createContext(sessionState),
+      {type: 'apiKey', name: 'X-B-Key', in: 'header'},
+      credential,
+    ).prepareAuthCredentials();
+
+    expect(result.state).toBe('done');
+    expect(cachedCredentialKeys(sessionState)).toHaveLength(2);
+  });
+
+  it('reuses the cached credential when only the redirect URI differs', async () => {
+    const scheme: OpenAPIV3.SecuritySchemeObject = {
+      type: 'oauth2',
+      flows: {
+        authorizationCode: {
+          authorizationUrl: 'https://example.com/auth',
+          tokenUrl: 'https://example.com/token',
+          scopes: {},
+        },
+      },
+    };
+    const sessionState: Record<string, unknown> = {};
+
+    await new ToolAuthHandler(createContext(sessionState), scheme, {
+      authType: AuthCredentialTypes.OAUTH2,
+      oauth2: {
+        clientId: 'client',
+        clientSecret: 'secret',
+        redirectUri: 'http://localhost:8001/oauth2callback',
+      },
+    }).prepareAuthCredentials();
+
+    // The same tool behind a different callback URL, e.g. after the agent
+    // moves from a laptop to a hosted deployment, and after a fresh consent
+    // round trip supplied a new PKCE verifier.
+    const result = await new ToolAuthHandler(
+      createContext(sessionState),
+      scheme,
+      {
+        authType: AuthCredentialTypes.OAUTH2,
+        oauth2: {
+          clientId: 'client',
+          clientSecret: 'secret',
+          redirectUri: 'https://deployed.example.com/oauth2callback',
+          codeVerifier: 'verifier-from-the-second-round-trip',
+          state: 'state-from-the-second-round-trip',
+        },
+      },
+    ).prepareAuthCredentials();
+
+    expect(result.authCredential?.http?.credentials.token).toBe(
+      'exchanged-token',
+    );
+    // One slot, so the second tool read the credential the first one cached.
+    expect(cachedCredentialKeys(sessionState)).toHaveLength(1);
+  });
+
+  it('gives two tools configured with different access tokens their own cache slot', async () => {
+    const scheme: OpenAPIV3.SecuritySchemeObject = {
+      type: 'oauth2',
+      flows: {
+        clientCredentials: {tokenUrl: 'https://example.com/token', scopes: {}},
+      },
+    };
+    const sessionState: Record<string, unknown> = {};
+
+    // A token the tool was configured with is the credential, not round-trip
+    // state, so it has to reach the key.
+    await new ToolAuthHandler(createContext(sessionState), scheme, {
+      authType: AuthCredentialTypes.OAUTH2,
+      oauth2: {clientId: 'client', accessToken: 'token-a'},
+    }).prepareAuthCredentials();
+    await new ToolAuthHandler(createContext(sessionState), scheme, {
+      authType: AuthCredentialTypes.OAUTH2,
+      oauth2: {clientId: 'client', accessToken: 'token-b'},
+    }).prepareAuthCredentials();
+
+    expect(cachedCredentialKeys(sessionState)).toHaveLength(2);
   });
 });

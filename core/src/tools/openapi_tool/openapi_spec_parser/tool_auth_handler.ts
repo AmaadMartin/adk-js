@@ -6,9 +6,10 @@
 
 import {OpenAPIV3} from 'openapi-types';
 import {Context} from '../../../agents/context.js';
-import {AuthCredential} from '../../../auth/auth_credential.js';
+import {AuthCredential, OAuth2Auth} from '../../../auth/auth_credential.js';
 import {AuthConfig} from '../../../auth/auth_tool.js';
 import {experimental} from '../../../utils/experimental.js';
+import {stableDigest} from '../../../utils/hash_utils.js';
 import {AutoAuthCredentialExchanger} from '../auth/credential_exchangers/auto_auth_credential_exchanger.js';
 
 export interface AuthPreparationResult {
@@ -16,18 +17,64 @@ export interface AuthPreparationResult {
   authCredential?: AuthCredential;
 }
 
+/**
+ * OAuth2 fields that a consent round trip produces, or that change per
+ * deployment. They say nothing about which credential this is, so they must
+ * not contribute to its cache identity. The tokens are deliberately absent
+ * from this list: an `accessToken` or `refreshToken` the tool was configured
+ * with is the credential, so two tools holding different tokens must not
+ * share a slot.
+ */
+const ROUND_TRIP_OAUTH2_FIELDS: readonly (keyof OAuth2Auth)[] = [
+  'authUri',
+  'state',
+  'authResponseUri',
+  'authCode',
+  'codeVerifier',
+  'nonce',
+  'expiresAt',
+  'expiresIn',
+  'redirectUri',
+];
+
+function withoutRoundTripOAuth2Fields(
+  credential: AuthCredential,
+): AuthCredential {
+  if (!credential.oauth2) {
+    return credential;
+  }
+
+  const oauth2 = {...credential.oauth2};
+  for (const field of ROUND_TRIP_OAUTH2_FIELDS) {
+    delete oauth2[field];
+  }
+  return {...credential, oauth2};
+}
+
 class ToolContextCredentialStore {
   constructor(private readonly context: Context) {}
 
-  getCredentialKey(authScheme?: OpenAPIV3.SecuritySchemeObject): string {
-    const schemeName = authScheme?.type || 'default';
-    return `${schemeName}_existing_exchanged_credential`;
+  async getCredentialKey(
+    authScheme: OpenAPIV3.SecuritySchemeObject,
+    authCredential?: AuthCredential,
+  ): Promise<string> {
+    // The digest identifies the scheme and the credential, so two tools that
+    // declare the same scheme type against different APIs get their own slot
+    // instead of serving each other the first exchanged token.
+    const schemeName = `${authScheme.type}_${await stableDigest(authScheme)}`;
+    const credentialName = authCredential
+      ? `${authCredential.authType}_${await stableDigest(
+          withoutRoundTripOAuth2Fields(authCredential),
+        )}`
+      : '';
+    return `${schemeName}_${credentialName}_existing_exchanged_credential`;
   }
 
-  getCredential(
-    authScheme?: OpenAPIV3.SecuritySchemeObject,
-  ): AuthCredential | undefined {
-    const key = this.getCredentialKey(authScheme);
+  async getCredential(
+    authScheme: OpenAPIV3.SecuritySchemeObject,
+    authCredential?: AuthCredential,
+  ): Promise<AuthCredential | undefined> {
+    const key = await this.getCredentialKey(authScheme, authCredential);
     // Read through the State API so we see values persisted from previous
     // tool calls. `context.state` is a `State` instance, not a plain object;
     // bracket access would bypass its value/delta store and always miss.
@@ -74,7 +121,10 @@ export class ToolAuthHandler {
     }
 
     const store = new ToolContextCredentialStore(this.context);
-    const existingCredential = store.getCredential(this.authScheme);
+    const existingCredential = await store.getCredential(
+      this.authScheme,
+      this.authCredential,
+    );
 
     if (existingCredential) {
       return {state: 'done', authCredential: existingCredential};
@@ -113,7 +163,10 @@ export class ToolAuthHandler {
     // every invocation, so persisting it to session state would only copy a
     // secret into the session store for nothing.
     if (authResponseCredential || result.wasExchanged) {
-      const key = store.getCredentialKey(this.authScheme);
+      const key = await store.getCredentialKey(
+        this.authScheme,
+        this.authCredential,
+      );
       store.storeCredential(key, result.credential);
     }
 
