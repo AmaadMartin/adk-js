@@ -149,14 +149,14 @@ describe('CLI Entrypoint', () => {
     it('should handle memory service uri', async () => {
       await parse(['web', '--memory_service_uri', 'memory://']);
 
-      const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
       expect(args.memoryService).toBeInstanceOf(InMemoryMemoryService);
     });
 
     it('should default the memory service when no uri is given', async () => {
       await parse(['web']);
 
-      const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
       expect(args.memoryService).toBeInstanceOf(InMemoryMemoryService);
     });
 
@@ -211,7 +211,7 @@ describe('CLI Entrypoint', () => {
     it('should handle memory service uri', async () => {
       await parse(['api_server', '--memory_service_uri', 'memory://']);
 
-      const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
       expect(args.memoryService).toBeInstanceOf(InMemoryMemoryService);
     });
   });
@@ -312,7 +312,7 @@ describe('CLI Entrypoint', () => {
     it('should handle memory service uri', async () => {
       await parse(['run', 'agent.ts', '--memory_service_uri', 'memory://']);
 
-      const args = (runAgent as Mock).mock.calls[0][0];
+      const args = vi.mocked(runAgent).mock.calls[0][0];
       expect(args.memoryService).toBeInstanceOf(InMemoryMemoryService);
     });
   });
