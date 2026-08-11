@@ -298,10 +298,8 @@ function normalizeCallbackResponse(
  *
  * `FunctionResponse.response` is serialized as JSON, so a `Map`, a `Set`, a
  * `RegExp` or an `Error` arrives empty and the tool's output is lost with no
- * error anywhere. Naming the tool is the only signal its author gets. Both
- * shapes are checked because the value may be the response itself or sit
- * under the `result` key the normalizer wraps it in. The spread keeps the
- * scan total, because the normalizer's return type admits `undefined`.
+ * error anywhere. The exotic value may be the whole response or sit under one
+ * of its keys, so both are checked.
  */
 function warnOnEmptyToolResponse(
   toolName: string,
@@ -309,7 +307,7 @@ function warnOnEmptyToolResponse(
 ): void {
   if (
     rendersAsEmptyJsonObject(response) ||
-    Object.values({...response}).some(rendersAsEmptyJsonObject)
+    Object.values(response ?? {}).some(rendersAsEmptyJsonObject)
   ) {
     logger.warn(
       `Tool ${toolName} returned a value with no JSON representation ` +
