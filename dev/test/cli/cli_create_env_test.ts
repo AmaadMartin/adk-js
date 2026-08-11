@@ -69,7 +69,6 @@ describe('adk create: the generated .env is usable by the runtime', () => {
     process.chdir(workDir);
     ({createAgent} = await import('../../src/cli/cli_create.js'));
     vi.spyOn(console, 'log').mockImplementation(() => {});
-    vi.spyOn(console, 'warn').mockImplementation(() => {});
   });
 
   afterAll(async () => {
