@@ -6,6 +6,7 @@
 
 import {Client} from '@google-cloud/vertexai';
 import {
+  AgentEngineSandboxCodeExecutor,
   BaseAgent,
   InvocationContext,
   LlmAgent,
@@ -21,7 +22,6 @@ import {
 import {InMemoryArtifactService} from '../../../src/artifacts/in_memory_artifact_service.js';
 import {ScopedArtifactService} from '../../../src/artifacts/scoped_artifact_service.js';
 import {SessionArtifactService} from '../../../src/artifacts/session_artifact_service.js';
-import {AgentEngineSandboxCodeExecutor} from '../../../src/code_executors/agent_engine_sandbox_code_executor.js';
 import {
   BaseCodeExecutor,
   ExecuteCodeParams,
