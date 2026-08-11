@@ -10,7 +10,7 @@ import {
   maybeSetOtelProviders,
   OTelHooks,
 } from '@google/adk';
-import {HrTime} from '@opentelemetry/api';
+import {HrTime, metrics, trace} from '@opentelemetry/api';
 import {
   ReadableSpan,
   SpanExporter,
@@ -150,6 +150,49 @@ export async function setupTelemetry(
     };
     maybeSetOtelProviders([otelHooks]);
   }
+}
+
+/** A provider that can flush its exporters and release them. */
+interface ShutdownableProvider {
+  shutdown(): Promise<void>;
+}
+
+/** The OpenTelemetry API keeps the real tracer provider behind a proxy. */
+function isDelegating(value: unknown): value is {getDelegate(): unknown} {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'getDelegate' in value &&
+    typeof value.getDelegate === 'function'
+  );
+}
+
+/** The noop providers, unlike the SDK providers, have no `shutdown`. */
+function isShutdownable(value: unknown): value is ShutdownableProvider {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'shutdown' in value &&
+    typeof value.shutdown === 'function'
+  );
+}
+
+/**
+ * Flushes and tears down the globally registered tracer and meter providers.
+ *
+ * The cloud exporters buffer behind a batch span processor and a periodic
+ * metric reader, so a short-lived command drops the tail of its telemetry if it
+ * exits without this. It does nothing when `setupTelemetry` registered no
+ * provider, which is the default `adk run` path.
+ */
+export async function shutdownTelemetry(): Promise<void> {
+  const providers = [trace.getTracerProvider(), metrics.getMeterProvider()].map(
+    (provider) => (isDelegating(provider) ? provider.getDelegate() : provider),
+  );
+
+  await Promise.all(
+    providers.filter(isShutdownable).map((provider) => provider.shutdown()),
+  );
 }
 
 async function setupGcpTelemetryExperimental(
