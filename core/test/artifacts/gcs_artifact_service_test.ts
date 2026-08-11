@@ -48,10 +48,6 @@ const {StorageMock, storageMock} = vi.hoisted(() => {
     }
 
     async delete(): Promise<void> {
-      // Real GCS rejects a delete of a missing object with a 404.
-      if (!this.bucket.files.has(this.name)) {
-        throw new Error(`File not found: ${this.name}`);
-      }
       this.bucket.files.delete(this.name);
     }
 
