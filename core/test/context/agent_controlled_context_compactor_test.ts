@@ -12,7 +12,7 @@ import {
   Event,
   InvocationContext,
   PluginManager,
-  Session,
+  createSession,
 } from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
 
@@ -61,13 +61,13 @@ function createMockInvocationContext(
   events: Event[],
   state: Record<string, unknown> = {},
 ): InvocationContext {
-  const session = {
+  const session = createSession({
     id: 'test-session',
     events,
     state,
     appName: 'test-app',
     userId: 'test-user',
-  } as unknown as Session;
+  });
   return new InvocationContext({
     invocationId: 'test-invocation',
     agent: {} as BaseAgent,
