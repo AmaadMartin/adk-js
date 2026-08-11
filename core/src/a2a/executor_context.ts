@@ -17,6 +17,13 @@ export interface ExecutorContext {
   sessionId: string;
   appName: string;
   readonlyState: Record<string, unknown>;
+  /**
+   * The events the session held when the executor resolved it. The executor
+   * resolves the session with an existence probe that asks for no event
+   * history, so this is empty on a session service that honors
+   * `numRecentEvents: 0`. It is not the conversation history: read the session
+   * from the session service directly when you need the history.
+   */
   events: Event[];
   userContent: Content;
   requestContext: RequestContext;
