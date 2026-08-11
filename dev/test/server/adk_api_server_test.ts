@@ -284,6 +284,15 @@ class StaticAppLoader extends AgentLoader {
   }
 }
 
+const MISMATCHED_APP_LOADER = new StaticAppLoader(
+  'testApp',
+  APP_WITH_DIFFERENT_NAME,
+);
+const MATCHED_APP_LOADER = new StaticAppLoader(
+  'sameName',
+  APP_WITH_MATCHING_NAME,
+);
+
 /** A `run_sse` frame: either an event, or the stream's error report. */
 type SseFrame = Event | {error: string};
 
@@ -1339,7 +1348,7 @@ describe('AdkWebServer', () => {
       logger = new AdkLogger({label: 'test'});
       vi.spyOn(logger, 'warn').mockImplementation(() => {});
       mismatchedServer = new AdkApiServer({
-        agentLoader: new StaticAppLoader('testApp', APP_WITH_DIFFERENT_NAME),
+        agentLoader: MISMATCHED_APP_LOADER,
         sessionService,
         memoryService,
         artifactService,
@@ -1453,7 +1462,7 @@ describe('AdkWebServer', () => {
       logger = new AdkLogger({label: 'test'});
       vi.spyOn(logger, 'warn').mockImplementation(() => {});
       matchedServer = new AdkApiServer({
-        agentLoader: new StaticAppLoader('sameName', APP_WITH_MATCHING_NAME),
+        agentLoader: MATCHED_APP_LOADER,
         sessionService,
         memoryService,
         artifactService,
