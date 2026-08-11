@@ -53,6 +53,15 @@ To maintain high code quality and consistency:
 The project uses `husky` and `lint-staged` to automatically lint and format
 your changes before each commit.
 
+### Benchmarking agent discovery
+
+`scripts/bench_agent_discovery.mjs` measures how long `AgentLoader` takes to
+discover, compile and import a directory of agents. Run it by hand; it is not
+part of the test suite or of CI. Its output is the common format for
+before-and-after numbers on a change to `dev/src/utils/agent_loader.ts`. Run
+`node scripts/bench_agent_discovery.mjs --help` for the options and the
+preconditions.
+
 ### Sign our Contributor License Agreement
 
 Contributions to this project must be accompanied by a
