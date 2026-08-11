@@ -516,6 +516,32 @@ describe('OAuth2CredentialExchanger', () => {
       expect(oauth2Utils.fetchOAuth2Tokens).not.toHaveBeenCalled();
     });
 
+    it('throws when the auth response carries no state at all', async () => {
+      const authCredential = {
+        oauth2: {
+          clientId: 'id',
+          clientSecret: 'secret',
+          authResponseUri: 'https://callback?code=abc',
+          state: 'expected-state',
+        },
+      } as AuthCredential;
+      const authScheme = {} as AuthScheme;
+
+      vi.mocked(oauth2Utils.getTokenEndpoint).mockReturnValue(
+        'https://example.com/token',
+      );
+      vi.mocked(oauth2Utils.parseAuthorizationCode).mockReturnValue('abc');
+
+      await expect(
+        exchangeAuthorizationCode({authCredential, authScheme}),
+      ).rejects.toThrow(
+        new CredentialExchangeError(
+          'State mismatch detected. Potential CSRF attack.',
+        ),
+      );
+      expect(oauth2Utils.fetchOAuth2Tokens).not.toHaveBeenCalled();
+    });
+
     it('returns the unexchanged credential if authResponseUri cannot be parsed for state validation', async () => {
       const authCredential = {
         oauth2: {
