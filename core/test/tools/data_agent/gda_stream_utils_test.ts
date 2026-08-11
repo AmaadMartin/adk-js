@@ -110,20 +110,48 @@ describe('getGdaEndpoint', () => {
       getGdaEndpoint({location: 'eu', apiEndpoint: 'https://foo.bar.com'}),
     ).toBe('https://foo.bar.com');
   });
+
+  it('rejects a location that would escape the googleapis.com authority', () => {
+    for (const location of [
+      'a@evil.example#',
+      'a.evil.example',
+      'a/../../evil',
+      'a:8080',
+      'a?x=1',
+      'a\\evil.example',
+      'a b',
+    ]) {
+      expect(() => getGdaEndpoint({location})).toThrowError(
+        /Invalid Data Agent location/,
+      );
+    }
+  });
+
+  it('keeps every accepted location inside googleapis.com', () => {
+    for (const location of ['eu', 'us', 'us-central1', 'asia-northeast1']) {
+      expect(new URL(getGdaEndpoint({location})).hostname).toMatch(
+        /\.googleapis\.com$/,
+      );
+    }
+  });
 });
 
 describe('throwIfNotOk', () => {
-  it('throws with the status for a non-2xx response', () => {
-    const response = new Response('denied', {
-      status: 403,
-      statusText: 'Forbidden',
-    });
-    expect(() => throwIfNotOk(response)).toThrowError(/403/);
-    expect(() => throwIfNotOk(response)).toThrowError(/Forbidden/);
+  it('throws with the status and the URL for a non-2xx response', () => {
+    const url = `${GLOBAL_ENDPOINT}/v1/projects/p/locations/global`;
+
+    expect(() =>
+      throwIfNotOk(
+        new Response('denied', {status: 403, statusText: 'Forbidden'}),
+        url,
+      ),
+    ).toThrowError(`HTTP 403 Forbidden for ${url}`);
   });
 
   it('does not throw for a 2xx response', () => {
-    expect(() => throwIfNotOk(new Response('{}', {status: 200}))).not.toThrow();
+    expect(() =>
+      throwIfNotOk(new Response('{}', {status: 200}), GLOBAL_ENDPOINT),
+    ).not.toThrow();
   });
 });
 

@@ -100,8 +100,22 @@ export class DataAgentCredentialsConfig {
       return this.authClient.getRequestHeaders(url);
     }
 
-    this.adcClient ??= this.auth.getClient();
-    const client = await this.adcClient;
+    const client = await this.getAdcClient();
     return client.getRequestHeaders(url);
+  }
+
+  /**
+   * Resolves the Application Default Credentials client, building it at most
+   * once. A failed lookup is not cached, so a transient credential error does
+   * not disable this config for the rest of the process.
+   */
+  private async getAdcClient(): Promise<AuthClient> {
+    this.adcClient ??= this.auth.getClient();
+    try {
+      return await this.adcClient;
+    } catch (e: unknown) {
+      this.adcClient = undefined;
+      throw e;
+    }
   }
 }

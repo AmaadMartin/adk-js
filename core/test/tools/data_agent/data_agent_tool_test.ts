@@ -130,6 +130,68 @@ describe('extractLocationFromResourceName', () => {
   });
 });
 
+describe('host injection through a model-supplied resource name', () => {
+  // A resource name reaches these tools straight from the model, and its
+  // location segment is interpolated into the endpoint host. Anything that
+  // ends the authority would send the bearer token to another origin.
+  const HOSTILE_NAMES = [
+    'projects/p/locations/a@evil.example#/dataAgents/x',
+    'projects/p/locations/a.evil.example/dataAgents/x',
+    'projects/p/locations/evil.example%23/dataAgents/x',
+    'projects/p/locations/a:9999/dataAgents/x',
+  ];
+
+  it.each(HOSTILE_NAMES)('getDataAgentInfo refuses %s', async (name) => {
+    const result = await getDataAgentInfo({dataAgentName: name}, deps());
+
+    expect(result).toMatchObject({
+      status: 'ERROR',
+      errorDetails: expect.stringContaining('Invalid Data Agent location'),
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each(HOSTILE_NAMES)('askDataAgent refuses %s', async (name) => {
+    const result = await askDataAgent(
+      {dataAgentName: name, query: 'q'},
+      deps(),
+    );
+
+    expect(result).toMatchObject({
+      status: 'ERROR',
+      errorDetails: expect.stringContaining('Invalid Data Agent location'),
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('refuses even when the settings pin a safe location', async () => {
+    // askDataAgent preflights without the settings, so pinning a location does
+    // not protect the preflight from the model's resource name.
+    const result = await askDataAgent(
+      {dataAgentName: HOSTILE_NAMES[0], query: 'q'},
+      deps({settings: {location: 'eu'}}),
+    );
+
+    expect(result.status).toBe('ERROR');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('sends the bearer token only to a googleapis.com host', async () => {
+    queueJson({name: 'ok'});
+
+    await getDataAgentInfo(
+      {dataAgentName: 'projects/p/locations/us-central1/dataAgents/x'},
+      deps(),
+    );
+
+    const [request] = recordedRequests();
+    expect(request.headers.get('Authorization')).toBe('Bearer test-token');
+    expect(new URL(request.url).hostname).toBe(
+      'geminidataanalytics-us-central1.googleapis.com',
+    );
+  });
+});
+
 describe('listAccessibleDataAgents', () => {
   it('calls the global listAccessible URL and returns the agents', async () => {
     queueJson({dataAgents: ['agent1', 'agent2']});
@@ -516,5 +578,36 @@ describe('DataAgentCredentialsConfig', () => {
     for (const request of recordedRequests()) {
       expect(request.headers.get('Authorization')).toBe('Bearer adc-token');
     }
+  });
+
+  it('retries the credential lookup after a transient failure', async () => {
+    const adcClient = new OAuth2Client();
+    adcClient.credentials = {access_token: 'adc-token'};
+    const getClient = vi
+      .spyOn(GoogleAuth.prototype, 'getClient')
+      .mockRejectedValueOnce(new Error('metadata server unreachable'))
+      .mockResolvedValue(adcClient);
+    const credentials = new DataAgentCredentialsConfig();
+    queueJson({dataAgents: []});
+
+    const failed = await listAccessibleDataAgents(
+      {projectId: 'p'},
+      {
+        credentials,
+      },
+    );
+    const retried = await listAccessibleDataAgents(
+      {projectId: 'p'},
+      {
+        credentials,
+      },
+    );
+
+    expect(failed).toMatchObject({
+      status: 'ERROR',
+      errorDetails: expect.stringContaining('metadata server unreachable'),
+    });
+    expect(retried.status).toBe('SUCCESS');
+    expect(getClient).toHaveBeenCalledTimes(2);
   });
 });

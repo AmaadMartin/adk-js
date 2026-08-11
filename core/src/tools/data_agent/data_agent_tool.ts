@@ -89,7 +89,7 @@ async function gdaFetch(
     body,
     headers,
   });
-  throwIfNotOk(response);
+  throwIfNotOk(response, url);
   return response;
 }
 

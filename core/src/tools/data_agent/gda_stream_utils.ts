@@ -19,6 +19,17 @@ const GDA_GLOBAL_ENDPOINT = 'https://geminidataanalytics.googleapis.com';
 /** Locations served by a regional endpoint program (`.rep.`) host. */
 const REP_LOCATIONS = new Set(['eu', 'us']);
 
+/**
+ * Locations that may be interpolated into an endpoint host.
+ *
+ * A location can reach this module from a model-supplied `data_agent_name`, so
+ * it is attacker-influenced. Characters such as `@`, `#`, `/` and `:` would end
+ * the authority component and send the request — and its bearer token — to
+ * another host, so only the characters a real Google Cloud location uses are
+ * accepted.
+ */
+const ALLOWED_LOCATION = /^[a-z0-9-]+$/;
+
 /** Key holding the table extracted from a data message. Model-facing. */
 const DATA_RETRIEVED_KEY = 'Data Retrieved';
 
@@ -74,8 +85,14 @@ function tryParseJson(text: string): {value: unknown} | undefined {
 /**
  * Resolves the Gemini Data Analytics host for a location or custom endpoint.
  *
+ * `apiEndpoint` is deliberately not constrained: it is set by the agent author
+ * in `DataAgentToolConfig` and never by the model, and pointing the tools at a
+ * private or test endpoint is a supported use. A `location` is constrained,
+ * because it can be derived from a model-supplied resource name.
+ *
  * @param options The location and custom endpoint to resolve.
  * @return The endpoint origin, without a trailing slash.
+ * @throws If the location contains anything outside {@link ALLOWED_LOCATION}.
  */
 export function getGdaEndpoint(options: GdaEndpointOptions = {}): string {
   const {apiEndpoint} = options;
@@ -86,6 +103,12 @@ export function getGdaEndpoint(options: GdaEndpointOptions = {}): string {
   const location = (options.location ?? '').toLowerCase().trim();
   if (!location || location === 'global') {
     return GDA_GLOBAL_ENDPOINT;
+  }
+  if (!ALLOWED_LOCATION.test(location)) {
+    throw new Error(
+      `Invalid Data Agent location ${JSON.stringify(location)}: a location ` +
+        'may contain only letters, digits and hyphens.',
+    );
   }
   if (REP_LOCATIONS.has(location)) {
     return `https://geminidataanalytics.${location}.rep.googleapis.com`;
@@ -98,11 +121,20 @@ export function getGdaEndpoint(options: GdaEndpointOptions = {}): string {
  * `raise_for_status()` call the Python implementation makes.
  *
  * @param response The response to check.
+ * @param url The requested URL, named in the error so a caller that issues
+ *     more than one request can tell which one failed.
  */
-export function throwIfNotOk(response: Response): void {
+export function throwIfNotOk(response: Response, url: string): void {
   if (!response.ok) {
-    throw new Error(`HTTP ${response.status} ${response.statusText}`);
+    throw new Error(
+      `HTTP ${response.status} ${response.statusText} for ${url}`,
+    );
   }
+}
+
+/** Drops the carriage return of a CRLF line ending. */
+function stripCarriageReturn(line: string): string {
+  return line.replace(/\r$/, '');
 }
 
 /**
@@ -124,12 +156,12 @@ async function* readLines(
       buffer += decoder.decode(value, {stream: true});
       let newline = buffer.indexOf('\n');
       while (newline >= 0) {
-        yield buffer.slice(0, newline).replace(/\r$/, '');
+        yield stripCarriageReturn(buffer.slice(0, newline));
         buffer = buffer.slice(newline + 1);
         newline = buffer.indexOf('\n');
       }
     }
-    yield buffer + decoder.decode();
+    yield stripCarriageReturn(buffer + decoder.decode());
   } finally {
     // Releases the lock when the consumer abandons the stream early, so the
     // response body can still be cancelled by its owner.
