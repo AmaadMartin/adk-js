@@ -8,6 +8,7 @@ import {Client} from '@google-cloud/vertexai';
 import {
   AgentEngineSandboxCodeExecutor,
   CodeExecutionLanguage,
+  CodeExecutionResult,
   InvocationContext,
 } from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
@@ -658,6 +659,77 @@ describe('AgentEngineSandboxCodeExecutor', () => {
         sandbox_name_language_javascript:
           'projects/test-project/locations/us-central1/reasoningEngines/123/sandboxEnvironments/456',
       });
+    });
+
+    /** Stalls the Agent Engine creation operation forever. */
+    function stallAgentEngineCreation() {
+      mockClient.agentEnginesInternal.createInternal.mockResolvedValue({
+        name: 'operations/create-engine-op',
+        done: false,
+      });
+      mockClient.agentEnginesInternal.getAgentOperationInternal.mockResolvedValue(
+        {done: false},
+      );
+    }
+
+    /** Runs executeCode under fake timers and returns the pending promise. */
+    function executeWithFakeTimers(): Promise<CodeExecutionResult> {
+      vi.useFakeTimers();
+      return executor.executeCode({
+        invocationContext,
+        codeExecutionInput: {
+          code: 'print("hello")',
+          language: CodeExecutionLanguage.PYTHON,
+          inputFiles: [],
+        },
+      });
+    }
+
+    it('polls the agent engine operation 180 times by default', async () => {
+      stallAgentEngineCreation();
+
+      const executePromise = executeWithFakeTimers();
+
+      await Promise.all([
+        expect(executePromise).rejects.toThrow(
+          'Agent Engine creation operation operations/create-engine-op did not complete in time.',
+        ),
+        vi.runAllTimersAsync(),
+      ]);
+      expect(
+        mockClient.agentEnginesInternal.getAgentOperationInternal,
+      ).toHaveBeenCalledTimes(180);
+
+      vi.useRealTimers();
+    });
+
+    it('executes code after slow agent engine provisioning', async () => {
+      mockClient.agentEnginesInternal.createInternal.mockResolvedValue({
+        name: 'operations/create-engine-op',
+        done: false,
+      });
+      mockClient.agentEnginesInternal.getAgentOperationInternal
+        .mockResolvedValueOnce({done: false})
+        .mockResolvedValue({
+          done: true,
+          response: {
+            name: 'projects/test-project/locations/us-central1/reasoningEngines/123',
+          },
+        });
+
+      const executePromise = executeWithFakeTimers();
+
+      const [result] = await Promise.all([
+        executePromise,
+        vi.runAllTimersAsync(),
+      ]);
+
+      expect(
+        mockClient.agentEnginesInternal.getAgentOperationInternal,
+      ).toHaveBeenCalledTimes(2);
+      expect(result.stdout).toBe('hello world');
+
+      vi.useRealTimers();
     });
   });
 });

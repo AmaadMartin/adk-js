@@ -8,6 +8,7 @@ import {Client} from '@google-cloud/vertexai';
 import {Language} from '@google-cloud/vertexai/build/src/genai/types.js';
 import {experimental} from '../utils/experimental.js';
 import {guessMimeType} from '../utils/file_utils.js';
+import {waitForOperation} from '../utils/operation_utils.js';
 
 interface LocalChunk {
   data?: string;
@@ -32,7 +33,7 @@ import {
   File,
 } from './code_execution_utils.js';
 
-const DEFAULT_MAX_ATTEMPTS = 180;
+const DEFAULT_OPERATION_TIMEOUT_SECONDS = 180;
 const DEFAULT_SANDBOX_TTL = '31536000s';
 const DEFAULT_SANDBOX_DISPLAY_NAME = 'default_sandbox';
 const DEFAULT_ENGINE_DISPLAY_NAME = 'default_engine';
@@ -257,22 +258,15 @@ export class AgentEngineSandboxCodeExecutor extends BaseCodeExecutor {
           },
         );
 
-        let apiResponse = operation;
-        let attempts = 0;
-        while (!apiResponse.done && attempts < DEFAULT_MAX_ATTEMPTS) {
-          await new Promise((resolve) => setTimeout(resolve, 1000));
-          apiResponse =
-            await this.client.agentEnginesInternal.getAgentOperationInternal({
+        const apiResponse = await waitForOperation({
+          operation,
+          poll: () =>
+            this.client.agentEnginesInternal.getAgentOperationInternal({
               operationName: operation.name!,
-            });
-          attempts++;
-        }
-
-        if (!apiResponse.done) {
-          throw new Error(
-            `Agent Engine creation operation ${operation.name} did not complete in time.`,
-          );
-        }
+            }),
+          timeoutSeconds: DEFAULT_OPERATION_TIMEOUT_SECONDS,
+          description: 'Agent Engine creation',
+        });
 
         const response = apiResponse.response as {name?: string};
         this.agentEngineResourceName = response.name;
@@ -336,24 +330,17 @@ export class AgentEngineSandboxCodeExecutor extends BaseCodeExecutor {
           },
         });
 
-      let apiResponse = operation;
-      let attempts = 0;
-      while (!apiResponse.done && attempts < DEFAULT_MAX_ATTEMPTS) {
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-        apiResponse =
-          await this.client.agentEnginesInternal.sandboxes.getSandboxOperationInternal(
+      const apiResponse = await waitForOperation({
+        operation,
+        poll: () =>
+          this.client.agentEnginesInternal.sandboxes.getSandboxOperationInternal(
             {
               operationName: operation.name!,
             },
-          );
-        attempts++;
-      }
-
-      if (!apiResponse.done) {
-        throw new Error(
-          `Sandbox creation operation ${operation.name} did not complete in time.`,
-        );
-      }
+          ),
+        timeoutSeconds: DEFAULT_OPERATION_TIMEOUT_SECONDS,
+        description: 'Sandbox creation',
+      });
 
       const response = apiResponse.response as {name?: string};
       sandboxName = response.name!;
