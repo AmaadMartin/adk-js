@@ -41,6 +41,7 @@
   ],
   "overrides": {
     "@google-cloud/vertexai": {
+      "@google/genai": "$@google/genai",
       "google-auth-library": "^10.3.0"
     }
   },
