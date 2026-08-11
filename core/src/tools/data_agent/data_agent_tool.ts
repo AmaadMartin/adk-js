@@ -70,12 +70,12 @@ function resolveEndpointOptions(
 
 /**
  * Sends one authenticated request to the Gemini Data Analytics API and throws
- * when it fails.
+ * when it fails. A request with a body is posted; one without is a GET.
  */
 async function gdaFetch(
   url: string,
   deps: DataAgentToolDeps,
-  init?: RequestInit,
+  body?: string,
 ): Promise<Response> {
   const headers = await deps.credentials.getRequestHeaders(
     url,
@@ -84,7 +84,11 @@ async function gdaFetch(
   headers.set('Content-Type', 'application/json');
   headers.set('X-Goog-API-Client', GDA_CLIENT_ID);
 
-  const response = await fetch(url, {...init, headers});
+  const response = await fetch(url, {
+    method: body === undefined ? 'GET' : 'POST',
+    body,
+    headers,
+  });
   throwIfNotOk(response);
   return response;
 }
@@ -165,14 +169,15 @@ export async function askDataAgent(
     }
 
     const parent = args.dataAgentName.split('/').slice(0, -2).join('/');
-    const response = await gdaFetch(`${endpoint}/v1/${parent}:chat`, deps, {
-      method: 'POST',
-      body: JSON.stringify({
+    const response = await gdaFetch(
+      `${endpoint}/v1/${parent}:chat`,
+      deps,
+      JSON.stringify({
         messages: [{userMessage: {text: args.query}}],
         dataAgentContext: {dataAgent: args.dataAgentName},
         clientIdEnum: GDA_CLIENT_ID,
       }),
-    });
+    );
 
     return {
       status: 'SUCCESS',
