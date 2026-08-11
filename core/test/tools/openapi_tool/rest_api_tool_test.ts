@@ -10,7 +10,11 @@ import {
   AuthCredentialTypes,
   Context,
   createRestApiTool,
+  createSession,
+  InvocationContext,
+  LlmAgent,
   OpenApiSpecParser,
+  PluginManager,
   RestApiTool,
   ToolAuthHandler,
 } from '@google/adk';
@@ -653,6 +657,64 @@ describe('RestApiTool', () => {
       authScheme,
       authCredential,
       expect.anything(),
+    );
+  });
+
+  it('resolves with the API response when the OAuth2 token exchange fails', async () => {
+    const authScheme: OpenAPIV3.SecuritySchemeObject = {
+      type: 'oauth2',
+      flows: {
+        authorizationCode: {
+          authorizationUrl: 'https://idp.example.com/auth',
+          tokenUrl: 'https://idp.example.com/token',
+          scopes: {},
+        },
+      },
+    };
+    const authCredential: AuthCredential = {
+      authType: AuthCredentialTypes.OAUTH2,
+      oauth2: {clientId: 'id', clientSecret: 'secret', authCode: 'code'},
+    };
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      {baseUrl: 'https://api.example.com', path: '/test', method: 'GET'},
+      {responses: {}},
+      authScheme,
+      authCredential,
+    );
+    // The identity provider is down; the API itself answers normally.
+    const fetchMock = vi.fn<typeof globalThis.fetch>(async (input) => {
+      if (String(input).startsWith('https://idp.example.com/token')) {
+        return new Response('', {status: 503});
+      }
+      return new Response(JSON.stringify({result: 'ok'}), {
+        status: 200,
+        headers: {'content-type': 'application/json'},
+      });
+    });
+    globalThis.fetch = fetchMock;
+    const context = new Context({
+      invocationContext: new InvocationContext({
+        invocationId: 'inv-1',
+        agent: new LlmAgent({name: 'test_agent'}),
+        session: createSession({id: 'session-1', appName: 'test-app'}),
+        pluginManager: new PluginManager(),
+      }),
+    });
+
+    const result = await tool.runAsync({args: {}, toolContext: context});
+
+    expect(result).toEqual({result: 'ok'});
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://idp.example.com/token',
+      expect.anything(),
+    );
+    // adk-python sends the same unauthenticated request and lets the API
+    // answer with its own 401.
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      'https://api.example.com/test',
+      expect.objectContaining({headers: {}}),
     );
   });
 });
