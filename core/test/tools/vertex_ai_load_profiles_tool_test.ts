@@ -66,8 +66,6 @@ describe('VertexAiLoadProfilesTool', () => {
     const parameters = tool._getDeclaration().parameters;
 
     expect(parameters?.properties).toEqual({});
-    expect('app_name' in (parameters?.properties ?? {})).toBe(false);
-    expect('user_id' in (parameters?.properties ?? {})).toBe(false);
     expect(parameters?.required).toBeUndefined();
   });
 

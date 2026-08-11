@@ -40,21 +40,10 @@ export class VertexAiLoadProfilesTool extends BaseTool {
     });
 
     return {
+      // adk-python drops a profile when its body is falsy; `{}` is truthy in JS.
       profiles: profiles
         .map((entry) => entry.profile)
-        .filter(isNonEmptyProfile),
+        .filter((profile) => profile && Object.keys(profile).length > 0),
     };
   }
-}
-
-/**
- * Reports whether a profile body holds data.
- *
- * Python drops a profile when `profile.profile` is falsy, which covers `{}`.
- * An empty object is truthy in JavaScript, so the emptiness test is explicit.
- */
-function isNonEmptyProfile(
-  profile: Record<string, unknown> | undefined,
-): profile is Record<string, unknown> {
-  return profile !== undefined && Object.keys(profile).length > 0;
 }
