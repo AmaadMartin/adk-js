@@ -38,3 +38,35 @@ export function getExpressModeApiKey(
 
   return undefined;
 }
+
+const AGENT_ENGINE_RESOURCE_NAME =
+  /^projects\/([^/]+)\/locations\/([^/]+)\/reasoningEngines\/([^/]+)$/;
+
+export interface AgentEngineResourceName {
+  projectId: string;
+  location: string;
+  agentEngineId: string;
+}
+
+/**
+ * Parses `projects/{project}/locations/{location}/reasoningEngines/{id}` into
+ * its three components.
+ *
+ * Each segment accepts anything but a `/`, matching how adk-python validates
+ * the same resource name.
+ *
+ * @param name The resource name to parse.
+ * @returns The components, or undefined when the name does not match. The
+ *     caller reports the failure, so that the error can name its own input.
+ */
+export function parseAgentEngineResourceName(
+  name: string,
+): AgentEngineResourceName | undefined {
+  const parts = AGENT_ENGINE_RESOURCE_NAME.exec(name);
+
+  if (!parts) {
+    return undefined;
+  }
+
+  return {projectId: parts[1], location: parts[2], agentEngineId: parts[3]};
+}

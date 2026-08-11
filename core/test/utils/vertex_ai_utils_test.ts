@@ -5,7 +5,10 @@
  */
 
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
-import {getExpressModeApiKey} from '../../src/utils/vertex_ai_utils.js';
+import {
+  getExpressModeApiKey,
+  parseAgentEngineResourceName,
+} from '../../src/utils/vertex_ai_utils.js';
 
 describe('vertex_ai_utils', () => {
   describe('getExpressModeApiKey', () => {
@@ -67,6 +70,50 @@ describe('vertex_ai_utils', () => {
       delete process.env['GOOGLE_API_KEY'];
       const result = getExpressModeApiKey();
       expect(result).toBeUndefined();
+    });
+  });
+
+  describe('parseAgentEngineResourceName', () => {
+    it('should split a full resource name into its three components', () => {
+      expect(
+        parseAgentEngineResourceName(
+          'projects/my-proj/locations/us-central1/reasoningEngines/123',
+        ),
+      ).toEqual({
+        projectId: 'my-proj',
+        location: 'us-central1',
+        agentEngineId: '123',
+      });
+    });
+
+    it('should preserve the case of every segment', () => {
+      expect(
+        parseAgentEngineResourceName(
+          'projects/My-Proj/locations/US-central1/reasoningEngines/Abc',
+        ),
+      ).toEqual({
+        projectId: 'My-Proj',
+        location: 'US-central1',
+        agentEngineId: 'Abc',
+      });
+    });
+
+    it('should return undefined for a name that is missing a segment', () => {
+      expect(
+        parseAgentEngineResourceName('projects/p/reasoningEngines/123'),
+      ).toBeUndefined();
+    });
+
+    it('should return undefined for a name with a trailing slash', () => {
+      expect(
+        parseAgentEngineResourceName(
+          'projects/p/locations/l/reasoningEngines/123/',
+        ),
+      ).toBeUndefined();
+    });
+
+    it('should return undefined for a bare resource id', () => {
+      expect(parseAgentEngineResourceName('123')).toBeUndefined();
     });
   });
 });
