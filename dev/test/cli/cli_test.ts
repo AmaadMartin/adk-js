@@ -162,7 +162,7 @@ describe('CLI Entrypoint', () => {
       await parse(['web', '-v']);
 
       expect(setLogLevel).toHaveBeenCalledWith(LogLevel.DEBUG);
-      const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
       expect(args.logLevel).toBe(LogLevel.DEBUG);
     });
 
@@ -176,7 +176,7 @@ describe('CLI Entrypoint', () => {
       await parse(['web', './agents', '-v']);
 
       expect(setLogLevel).toHaveBeenCalledWith(LogLevel.DEBUG);
-      const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
       expect(args.agentsDir).toBe(path.join(process.cwd(), 'agents'));
     });
 
