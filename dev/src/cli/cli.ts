@@ -28,11 +28,6 @@ import {deployToCloudRun} from './deploy/cli_deploy_cloud_run.js';
 
 dotenv.config({quiet: true});
 
-const logger = new AdkLogger({
-  label: 'ADK CLI',
-  colorize: {all: true},
-});
-
 const LOG_LEVEL_MAP: Record<string, LogLevel> = {
   'debug': LogLevel.DEBUG,
   'info': LogLevel.INFO,
@@ -80,18 +75,9 @@ function getAgentFileOptions(options: {
   bundle?: boolean;
   file_type?: string;
 }) {
-  const compile = getBoolean(options['compile']);
-  const bundle = getBoolean(options['bundle']);
-
-  if (!compile && bundle) {
-    logger.warn(
-      '--compile false skips the esbuild pass entirely: the agent file will not be bundled or minified.',
-    );
-  }
-
   return {
-    compile,
-    bundle,
+    compile: getBoolean(options['compile']),
+    bundle: getBoolean(options['bundle']),
     moduleType: options['file_type'] as FileModuleType | undefined,
   };
 }
@@ -150,7 +136,7 @@ const COMPILE_AGENT_FILE = new Option(
 ).default(true);
 const BUNDLE_AGENT_FILE = new Option(
   '--bundle [boolean]',
-  'Optional. Whether to compile ts agent file to js before execution',
+  'Optional. Whether to bundle dependencies into the compiled agent file and minify it. Ignored when --compile is false.',
 ).default(true);
 const A2A_OPTION = new Option(
   '--a2a [boolean]',
@@ -210,6 +196,11 @@ export const AGENT_ENGINE_ID_OPTION = new Option(
  * @returns The ADK CLI program.
  */
 export function createProgram(): Command {
+  const logger = new AdkLogger({
+    label: 'ADK CLI',
+    colorize: {all: true},
+  });
+
   const program = new Command('ADK CLI');
 
   program
