@@ -4,8 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content, Language, Outcome} from '@google/genai';
+import {Content, Language, Outcome, Part} from '@google/genai';
 import {describe, expect, it} from 'vitest';
+import {toA2APart} from '../../src/a2a/part_converter_utils.js';
 import {
   CodeExecutionLanguage,
   FileContentEncoding,
@@ -60,6 +61,16 @@ describe('buildExecutableCodePart', () => {
     const part = buildExecutableCodePart('');
     expect(part.text).toBeUndefined();
     expect(part.executableCode!.code).toBe('');
+  });
+
+  it('survives A2A conversion as a data part, not a text part', () => {
+    const code = 'print("hello")';
+    const a2aPart = toA2APart(buildExecutableCodePart(code));
+    expect(a2aPart).toEqual({
+      kind: 'data',
+      data: {code, language: Language.PYTHON},
+      metadata: {'adk_type': 'executable_code'},
+    });
   });
 });
 
@@ -241,6 +252,17 @@ describe('extractCodeAndTruncateContent', () => {
     };
     const result = extractCodeAndTruncateContent(content, PYTHON_DELIMITERS);
     expect(result).toBe('my_code()');
+  });
+
+  it('appends an executableCode part with no text field', () => {
+    const content: Content & {parts: Part[]} = {
+      parts: [{text: '```python\nx = 1\n```'}],
+      role: 'model',
+    };
+    extractCodeAndTruncateContent(content, PYTHON_DELIMITERS);
+    const codePart = content.parts[content.parts.length - 1];
+    expect(codePart.text).toBeUndefined();
+    expect(codePart.executableCode!.code).toBe('x = 1');
   });
 });
 
