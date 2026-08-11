@@ -7,12 +7,14 @@
 import {
   BaseLlm,
   Context,
+  createSession,
   GlobalInstructionPlugin,
   InMemoryRunner,
   InvocationContext,
   LlmAgent,
   LlmRequest,
   LlmResponse,
+  PluginManager,
   ReadonlyContext,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
@@ -34,26 +36,25 @@ class MockLlm extends BaseLlm {
   }
 }
 
+/** Builds a real callback context for the callbacks under test. */
+function createTestCallbackContext(): Context {
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'inv-1',
+      agent: new LlmAgent({name: 'test_agent'}),
+      session: createSession({
+        id: 'session-1',
+        appName: 'test-app',
+        userId: 'user-1',
+        state: {user_id: 'test_user_123'},
+      }),
+      pluginManager: new PluginManager([]),
+    }),
+  });
+}
+
 describe('GlobalInstructionPlugin', () => {
-  const mockSession = {
-    id: 'session-1',
-    state: {
-      user_id: 'test_user_123',
-    },
-  } as unknown as InvocationContext['session'];
-
-  const mockInvocationContext = {
-    invocationId: 'inv-1',
-    session: mockSession,
-    userId: 'user-1',
-    appName: 'test-app',
-  } as unknown as InvocationContext;
-
-  const mockCallbackContext = {
-    agentName: 'test_agent',
-    invocationId: 'inv-1',
-    invocationContext: mockInvocationContext,
-  } as unknown as Context;
+  const mockCallbackContext = createTestCallbackContext();
 
   it('should initialize with default name "global_instruction"', () => {
     const plugin = new GlobalInstructionPlugin('instruction');
