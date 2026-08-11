@@ -152,12 +152,11 @@ export async function setupTelemetry(
   }
 }
 
-/** A provider that can flush its exporters and release them. */
-interface ShutdownableProvider {
-  shutdown(): Promise<void>;
-}
-
-/** The OpenTelemetry API keeps the real tracer provider behind a proxy. */
+/**
+ * The OpenTelemetry API hands back the tracer provider behind a proxy. A guard
+ * rather than `instanceof ProxyTracerProvider`, because a runtime with two
+ * copies of `@opentelemetry/api` has two such classes.
+ */
 function isDelegating(value: unknown): value is {getDelegate(): unknown} {
   return (
     typeof value === 'object' &&
@@ -168,7 +167,7 @@ function isDelegating(value: unknown): value is {getDelegate(): unknown} {
 }
 
 /** The noop providers, unlike the SDK providers, have no `shutdown`. */
-function isShutdownable(value: unknown): value is ShutdownableProvider {
+function isShutdownable(value: unknown): value is {shutdown(): Promise<void>} {
   return (
     typeof value === 'object' &&
     value !== null &&
@@ -186,9 +185,13 @@ function isShutdownable(value: unknown): value is ShutdownableProvider {
  * provider, which is the default `adk run` path.
  */
 export async function shutdownTelemetry(): Promise<void> {
-  const providers = [trace.getTracerProvider(), metrics.getMeterProvider()].map(
-    (provider) => (isDelegating(provider) ? provider.getDelegate() : provider),
-  );
+  const tracerProvider = trace.getTracerProvider();
+  const providers: unknown[] = [
+    isDelegating(tracerProvider)
+      ? tracerProvider.getDelegate()
+      : tracerProvider,
+    metrics.getMeterProvider(),
+  ];
 
   await Promise.all(
     providers.filter(isShutdownable).map((provider) => provider.shutdown()),
