@@ -13,7 +13,6 @@ import {Event} from '../events/event.js';
 import {LlmRequest} from '../models/llm_request.js';
 import {LlmResponse} from '../models/llm_response.js';
 import {BaseTool} from '../tools/base_tool.js';
-import {formatError} from '../utils/error_utils.js';
 import {logger} from '../utils/logger.js';
 
 import {BasePlugin, ContextCompactionTrigger} from './base_plugin.js';
@@ -396,7 +395,7 @@ export class PluginManager {
    *
    * Plugins are closed sequentially in registration order. A plugin that
    * throws does not prevent the remaining plugins from being closed; all
-   * failures are collected and raised together once the fan-out completes.
+   * failures are collected and raised together once the loop completes.
    *
    * @throws An `AggregateError` naming every plugin that failed to close.
    */
@@ -407,9 +406,6 @@ export class PluginManager {
         await plugin.close();
       } catch (e: unknown) {
         failures.push([plugin.name, e]);
-        logger.error(
-          `Error closing plugin '${plugin.name}': ${formatError(e)}`,
-        );
       }
     }
     if (failures.length > 0) {

@@ -464,8 +464,8 @@ export class Runner {
    *
    * Closes the toolsets reachable from the agent tree, then closes every
    * registered plugin. Safe to call more than once; subsequent calls are
-   * no-ops. Toolsets are also closed at the end of each invocation, so a
-   * caller that never reuses a runner does not have to call this.
+   * no-ops. Toolsets are also closed at the end of each invocation, but the
+   * plugins are not, so a caller that never closes a runner leaks them.
    *
    * @throws An `AggregateError` if one or more plugins fail to close. Every
    *     plugin is still closed before the error is raised. Toolset failures
