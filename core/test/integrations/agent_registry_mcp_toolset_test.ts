@@ -287,12 +287,11 @@ describe('AgentRegistrySingleMCPToolset', () => {
   });
 
   describe('getTools — custom auth scheme resolution', () => {
-    async function transportHeaders(): Promise<
-      Record<string, string> | undefined
-    > {
-      const Transport = (
-        await import('@modelcontextprotocol/sdk/client/streamableHttp.js')
-      ).StreamableHTTPClientTransport as unknown as ReturnType<typeof vi.fn>;
+    async function transportHeaders() {
+      const Transport = vi.mocked(
+        (await import('@modelcontextprotocol/sdk/client/streamableHttp.js'))
+          .StreamableHTTPClientTransport,
+      );
       return Transport.mock.calls.at(-1)?.[1]?.requestInit?.headers;
     }
 
@@ -367,6 +366,28 @@ describe('AgentRegistrySingleMCPToolset', () => {
         expect.stringContaining('minting failed'),
       );
       expect(await transportHeaders()).not.toHaveProperty('Authorization');
+      warnSpy.mockRestore();
+    });
+
+    it('warns with the stringified value when the provider rejects a non-Error', async () => {
+      const provider = new StaticTokenProvider(
+        ['mcpRejectRawScheme'],
+        'unused',
+      );
+      provider.getAuthCredential.mockRejectedValue('token endpoint is down');
+      registerAuthProvider(provider);
+      const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      const toolset = new AgentRegistrySingleMCPToolset({
+        connectionParams: BASE_PARAMS,
+        authScheme: {type: 'mcpRejectRawScheme'},
+      });
+
+      const tools = await toolset.getTools();
+
+      expect(tools).toHaveLength(2);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('token endpoint is down'),
+      );
       warnSpy.mockRestore();
     });
 
