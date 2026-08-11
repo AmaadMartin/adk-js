@@ -28,9 +28,13 @@ interface CodeExecutionResult {
  * The parameters for updating the code execution result.
  * */
 export interface UpdateCodeExecutionResultParams {
+  /** The invocation ID to update the code execution result for. */
   invocationId: string;
+  /** The code that was executed. */
   code: string;
+  /** The standard output of the code execution. */
   resultStdout: string;
+  /** The standard error of the code execution. */
   resultStderr: string;
 }
 
@@ -211,11 +215,7 @@ export class CodeExecutorContext {
 
   /**
    * Updates the code execution result.
-   * @param invocationId The invocation ID to update the code execution result
-   *     for.
-   * @param code The code to execute.
-   * @param resultStdout The standard output of the code execution.
-   * @param resultStderr The standard error of the code execution.
+   * @param params The code execution result to record.
    */
   updateCodeExecutionResult({
     invocationId,
