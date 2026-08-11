@@ -19,6 +19,7 @@ import {
   createEventActions,
   createSession,
   ExecutorContext,
+  InMemorySessionService,
   Runner,
   RunnerConfig,
   Session,
@@ -389,6 +390,27 @@ describe('A2AAgentExecutor', () => {
       expect(finalEvent.status.state).toBe('completed');
     });
 
+    it('resolves a real InMemorySessionService session with no event history', async () => {
+      const sessionService = new InMemorySessionService();
+      const session = await sessionService.createSession({
+        appName: 'test-app',
+        userId: 'A2A_USER_test-context',
+        sessionId: 'test-context',
+      });
+      await sessionService.appendEvent({session, event: modelEvent()});
+      const getSession = vi.spyOn(sessionService, 'getSession');
+      stubRunAsync([modelEvent()]);
+      const executor = new A2AAgentExecutor({
+        runner: {appName: 'test-app', sessionService},
+      });
+
+      await executor.execute(createRequestContext(), mockEventBus);
+
+      const resolvedSession = await getSession.mock.results[0].value;
+      expect(resolvedSession?.id).toBe('test-context');
+      expect(resolvedSession?.events).toEqual([]);
+    });
+
     it('keeps the executor context and event metadata intact without event history', async () => {
       mockSessionService.getSession.mockResolvedValue(existingSession());
       stubRunAsync([modelEvent()]);
@@ -413,7 +435,6 @@ describe('A2AAgentExecutor', () => {
         userId: 'A2A_USER_test-context',
         sessionId: 'existing-session-id',
         readonlyState: {topic: 'billing'},
-        events: [],
         userContent: {role: 'user', parts: [{text: 'hello'}]},
       });
       expect(executeContext).toBe(eventContext);

@@ -6,7 +6,6 @@
 
 import {RequestContext} from '@a2a-js/sdk/server';
 import {Content} from '@google/genai';
-import {Event} from '../events/event.js';
 import {Session} from '../sessions/session.js';
 
 /**
@@ -17,14 +16,6 @@ export interface ExecutorContext {
   sessionId: string;
   appName: string;
   readonlyState: Record<string, unknown>;
-  /**
-   * The events the session held when the executor resolved it. The executor
-   * resolves the session with an existence probe that asks for no event
-   * history, so this is empty on a session service that honors
-   * `numRecentEvents: 0`. It is not the conversation history: read the session
-   * from the session service directly when you need the history.
-   */
-  events: Event[];
   userContent: Content;
   requestContext: RequestContext;
 }
@@ -50,7 +41,6 @@ export function createExecutorContext({
     sessionId: session.id,
     appName: session.appName,
     readonlyState: session.state,
-    events: session.events,
     userContent,
     requestContext,
   };
