@@ -65,9 +65,8 @@ const EXECUTABLE_LANGUAGES = Object.values(CodeExecutionLanguage).filter(
 export const ALL_CODE_EXECUTION_LANGUAGES: ReadonlySet<CodeExecutionLanguage> =
   new Set(EXECUTABLE_LANGUAGES);
 
-const EXECUTABLE_LANGUAGE_VALUES: ReadonlySet<string> = new Set(
-  EXECUTABLE_LANGUAGES,
-);
+const EXECUTABLE_LANGUAGE_VALUES: ReadonlySet<string> =
+  ALL_CODE_EXECUTION_LANGUAGES;
 
 /**
  * Narrows an unvalidated string to a language an executor can be asked to run.

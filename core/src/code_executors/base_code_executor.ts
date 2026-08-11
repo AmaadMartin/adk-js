@@ -73,9 +73,9 @@ export abstract class BaseCodeExecutor {
   errorRetryAttempts = 2;
 
   /**
-   * The languages this executor can run. `executeCode` throws
-   * `UnsupportedLanguageError` when asked for anything else, so a caller that
-   * can choose the language should consult this before dispatching.
+   * The languages this executor can run. An executor that narrows this set
+   * throws `UnsupportedLanguageError` for a language outside it, so a caller
+   * that can choose the language should consult this before dispatching.
    *
    * Defaults to every language so an executor that does not narrow it accepts
    * exactly what it accepted before.
