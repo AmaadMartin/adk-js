@@ -59,7 +59,7 @@ export interface ExtendedInteractionSSEEvent extends Omit<
     signature?: string;
     data?: string;
     uri?: string;
-    mime_type: string;
+    mime_type?: string;
   };
   status?: string;
   error?: {
