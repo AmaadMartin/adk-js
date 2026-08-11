@@ -111,8 +111,9 @@ describe('google-auth-library deduplication under @google-cloud/vertexai', () =>
  * Application Default Credentials must be sealed off, or `GoogleAuth` mints a
  * real token from the developer's own gcloud credentials and the test passes
  * without the loopback server ever being reached. `google-auth-library` 10.x
- * reads the well-known credentials file from `$HOME/.config/gcloud` and ignores
- * `CLOUDSDK_CONFIG`, so `HOME` is the variable that has to move.
+ * ignores `CLOUDSDK_CONFIG` and reads the well-known credentials file under
+ * `$HOME/.config` on Linux and macOS and under `%APPDATA%` on Windows, so both
+ * variables have to move.
  */
 describe('google-auth-library authentication with the override installed', () => {
   let server: http.Server;
@@ -153,6 +154,7 @@ describe('google-auth-library authentication with the override installed', () =>
 
     fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'adk-dedupe-home-'));
     vi.stubEnv('HOME', fakeHome);
+    vi.stubEnv('APPDATA', fakeHome);
     vi.stubEnv('GOOGLE_APPLICATION_CREDENTIALS', undefined);
     vi.stubEnv(
       'GCE_METADATA_HOST',
