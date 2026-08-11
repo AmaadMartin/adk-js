@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {LogLevel, setLogLevel} from '@google/adk';
+import {InMemoryMemoryService, LogLevel, setLogLevel} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {createProgram} from '../../src/cli/cli.js';
 import {createAgent} from '../../src/cli/cli_create.js';
@@ -134,6 +134,20 @@ describe('CLI Entrypoint', () => {
       expect(args.artifactService).toBeDefined();
     });
 
+    it('should handle memory service uri', async () => {
+      await parse(['web', '--memory_service_uri', 'memory://']);
+
+      const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
+      expect(args.memoryService).toBeInstanceOf(InMemoryMemoryService);
+    });
+
+    it('should default the memory service when no uri is given', async () => {
+      await parse(['web']);
+
+      const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
+      expect(args.memoryService).toBeInstanceOf(InMemoryMemoryService);
+    });
+
     it('should start AdkApiServer with a2a: true when --a2a is set', async () => {
       await parse(['web', '--a2a']);
 
@@ -180,6 +194,13 @@ describe('CLI Entrypoint', () => {
 
       const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
       expect(args.a2aAuthToken).toBe('tok');
+    });
+
+    it('should handle memory service uri', async () => {
+      await parse(['api_server', '--memory_service_uri', 'memory://']);
+
+      const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
+      expect(args.memoryService).toBeInstanceOf(InMemoryMemoryService);
     });
   });
 
@@ -261,6 +282,13 @@ describe('CLI Entrypoint', () => {
           otelToCloud: true,
         }),
       );
+    });
+
+    it('should handle memory service uri', async () => {
+      await parse(['run', 'agent.ts', '--memory_service_uri', 'memory://']);
+
+      const args = (runAgent as Mock).mock.calls[0][0];
+      expect(args.memoryService).toBeInstanceOf(InMemoryMemoryService);
     });
   });
 
