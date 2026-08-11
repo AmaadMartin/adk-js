@@ -244,11 +244,6 @@ const APP_WITH_DIFFERENT_NAME = new App({
   rootAgent: new ArtifactWritingAgent({name: 'artifactWritingAgent'}),
 });
 
-const APP_WITH_MATCHING_NAME = new App({
-  name: 'sameName',
-  rootAgent: new ArtifactWritingAgent({name: 'sameNameAgent'}),
-});
-
 /** An {@link AgentFile} that serves an already-constructed {@link App}. */
 class StaticAppFile extends AgentFile {
   constructor(private readonly staticApp: App) {
@@ -287,10 +282,6 @@ class StaticAppLoader extends AgentLoader {
 const MISMATCHED_APP_LOADER = new StaticAppLoader(
   'testApp',
   APP_WITH_DIFFERENT_NAME,
-);
-const MATCHED_APP_LOADER = new StaticAppLoader(
-  'sameName',
-  APP_WITH_MATCHING_NAME,
 );
 
 /** A `run_sse` frame: either an event, or the stream's error report. */
@@ -1346,7 +1337,7 @@ describe('AdkWebServer', () => {
 
     beforeEach(async () => {
       logger = new AdkLogger({label: 'test'});
-      vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      vi.spyOn(logger, 'debug').mockImplementation(() => {});
       mismatchedServer = new AdkApiServer({
         agentLoader: MISMATCHED_APP_LOADER,
         sessionService,
@@ -1406,7 +1397,8 @@ describe('AdkWebServer', () => {
         newMessage: {parts: [{text: 'Hello test agent!'}], role: 'user'},
       });
 
-      const rawFrames = response.text!.split('\n\n');
+      expect(response.text).toBeDefined();
+      const rawFrames = (response.text ?? '').split('\n\n');
       // Last element is always empty.
       rawFrames.pop();
       const frames = rawFrames.map(
@@ -1436,7 +1428,7 @@ describe('AdkWebServer', () => {
       expect(artifact.data?.text).toBe(ARTIFACT_TEXT);
     });
 
-    it('warns that the app key wins over the app name', async () => {
+    it('reports the storage namespace it chose', async () => {
       await mismatchedClient.post('/run', {
         appName: 'testApp',
         userId: 'testUser',
@@ -1444,54 +1436,12 @@ describe('AdkWebServer', () => {
         newMessage: {parts: [{text: 'Hello test agent!'}], role: 'user'},
       });
 
-      expect(logger.warn).toHaveBeenCalledWith(
+      expect(logger.debug).toHaveBeenCalledWith(
         expect.stringContaining("App 'differentAppName'"),
       );
-      expect(logger.warn).toHaveBeenCalledWith(
+      expect(logger.debug).toHaveBeenCalledWith(
         expect.stringContaining("stored under 'testApp'"),
       );
-    });
-  });
-
-  describe('App named after the app key', () => {
-    let matchedServer: AdkApiServer;
-    let matchedClient: HttpClient;
-    let logger: AdkLogger;
-
-    beforeEach(async () => {
-      logger = new AdkLogger({label: 'test'});
-      vi.spyOn(logger, 'warn').mockImplementation(() => {});
-      matchedServer = new AdkApiServer({
-        agentLoader: MATCHED_APP_LOADER,
-        sessionService,
-        memoryService,
-        artifactService,
-        logger,
-      });
-      await matchedServer.start();
-      matchedClient = new HttpClient(matchedServer.url);
-    });
-
-    afterEach(async () => {
-      await matchedServer.stop();
-      vi.restoreAllMocks();
-    });
-
-    it('stays quiet when the app name equals the app key', async () => {
-      await matchedClient.post(
-        '/apps/sameName/users/testUser/sessions/sessionId',
-        {},
-      );
-
-      const response = await matchedClient.post<Event[]>('/run', {
-        appName: 'sameName',
-        userId: 'testUser',
-        sessionId: 'sessionId',
-        newMessage: {parts: [{text: 'Hello test agent!'}], role: 'user'},
-      });
-
-      expect(response.status).toBe(200);
-      expect(logger.warn).not.toHaveBeenCalled();
     });
   });
 

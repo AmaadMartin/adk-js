@@ -1032,9 +1032,9 @@ export class AdkApiServer {
       const isAppInstance = isApp(agentOrApp);
       const agent = isAppInstance ? agentOrApp.rootAgent : agentOrApp;
       if (isAppInstance && agentOrApp.name !== appName) {
-        this.logger.warn(
+        this.logger.debug(
           `App '${agentOrApp.name}' is served under the app key '${appName}'. ` +
-            `The key wins: sessions and artifacts are stored under '${appName}'.`,
+            `Sessions and artifacts are stored under '${appName}'.`,
         );
       }
       this.runnerCache[appName] = new Runner({
