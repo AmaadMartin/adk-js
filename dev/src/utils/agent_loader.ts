@@ -191,6 +191,11 @@ export class AgentFile {
       const originalDir = path.dirname(filePath);
       await linkProjectNodeModules(outputDir, parsedPath.dir);
 
+      // Keep `outfile`: the artifact must stay one self-contained file.
+      // `splitting`/`outdir` emit sibling chunks, but `dispose()` unlinks this
+      // file and its directory as soon as the importing scope exits, so a
+      // chunk imported later would be gone. `copyAgentFiles` also stages this
+      // single file, not the directory, which holds a `node_modules` symlink.
       await esbuild.build({
         entryPoints: [filePath],
         outfile: compiledFilePath,
