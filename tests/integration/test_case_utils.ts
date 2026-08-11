@@ -158,6 +158,29 @@ const ADK_EVENT_ID_REGEX = /^[a-zA-Z0-9]{8}$/;
 const INVOCATION_ID_REGEX =
   /^e-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
+/**
+ * Matches the loopback URL a test server prints on start-up, e.g.
+ * `http://localhost:41234` or `http://127.0.0.1:41234`.
+ *
+ * A listener reports the address it bound rather than a name, so the numeric
+ * spellings and the `[::]` wildcard have to be accepted too: the Go A2A
+ * backend prints `listener.Addr().String()` verbatim.
+ */
+const SERVER_URL_REGEX =
+  /http:\/\/(?:localhost|127\.0\.0\.1|\[::1\]|\[::\]):([0-9]+)/i;
+
+/**
+ * Returns the port from the first loopback URL in `message`, or `undefined`
+ * when it carries none.
+ *
+ * `0` is rejected: a server that has not finished binding can print it, and it
+ * is never a port worth dialling.
+ */
+export function parseBannerPort(message: string): number | undefined {
+  const port = Number(SERVER_URL_REGEX.exec(message)?.[1]);
+  return port > 0 ? port : undefined;
+}
+
 const IGNORE_FIELDS = [
   'id',
   'invocationId',
@@ -299,11 +322,13 @@ export abstract class BaseTestServer {
         const message = data.toString();
         stdoutChunks.push(message);
 
-        // Find URL like http://localhost:12345
-        const urlMatch = message.match(/http:\/\/localhost:([0-9]+)/i);
-        if (urlMatch && urlMatch[1]) {
-          const parsedPort = parseInt(urlMatch[1], 10);
-          if (parsedPort > 0) {
+        if (!started) {
+          // Only the port is read back; the host stays the one the subclass
+          // chose. The address a server binds is not always reachable: `[::]`
+          // is a wildcard, and a backend on the IPv4 loopback is unreachable
+          // through a `localhost` that resolves to `::1` first.
+          const parsedPort = parseBannerPort(message);
+          if (parsedPort !== undefined) {
             this.port = parsedPort;
             this.url = `http://${this.host}:${this.port}`;
           }
