@@ -537,6 +537,8 @@ export function createProgram(): Command {
     )
     .option('--force', 'Force run skipped tests.')
     .action(async (options: Record<string, string>) => {
+      setAdkCoreLogLevel(getLogLevelFromOptions(options));
+
       try {
         const failedCount = await runIntegrationTests({
           agentsDir: options['agents_dir'],

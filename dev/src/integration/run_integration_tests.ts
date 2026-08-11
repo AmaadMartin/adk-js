@@ -4,12 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {getLogger} from '@google/adk';
 import {registerConformanceIntegrations} from '../conformance/conformance_integrations.js';
 import {batchLoadYamlAgentConfig} from '../conformance/yaml_agent_loader.js';
 import {batchLoadYamlTestDefs} from '../conformance/yaml_test_loader.js';
 import {AgentRegistry} from './agent_registry.js';
 import {IntegrationRegistry} from './integration_registry.js';
 import {TestRunner} from './test_runner.js';
+
+const logger = getLogger();
 
 /**
  * Runs every conformance test found under `testsDir` against the agents found
@@ -26,61 +29,60 @@ export async function runIntegrationTests({
   testsDir: string;
   forceRunAll: boolean;
 }): Promise<number> {
-  console.log(`Loading agents from ${agentsDir}`);
+  logger.debug(`Loading agents from ${agentsDir}`);
   const agentConfigs = await batchLoadYamlAgentConfig(agentsDir);
-  console.log(agentConfigs.size, 'agents found');
+  logger.debug(agentConfigs.size, 'agents found');
 
-  console.log('Registering conformance integrations.');
+  logger.debug('Registering conformance integrations.');
   const registry = new IntegrationRegistry();
   registerConformanceIntegrations(registry);
-  console.log(registry.summary());
+  logger.debug(registry.summary());
 
-  console.log('Registering agents.');
+  logger.debug('Registering agents.');
   const agentRegistry = new AgentRegistry(registry);
   for (const [name, agentConfig] of agentConfigs) {
     agentRegistry.registerAgentConfig(name, agentConfig);
   }
-  console.log(agentRegistry.summary());
+  logger.debug(agentRegistry.summary());
 
-  console.log(`Loading tests from ${testsDir}`);
+  logger.debug(`Loading tests from ${testsDir}`);
   const testSpecs = await batchLoadYamlTestDefs(testsDir);
-  console.log(testSpecs.size, 'tests found.');
+  logger.debug(testSpecs.size, 'tests found.');
 
-  console.log('Running tests.');
+  logger.debug('Running tests.');
   const successfulTests = [];
   const skippedTests = [];
   const failedTests = [];
   const testRunner = new TestRunner(agentRegistry);
 
   for (const [name, testInfo] of testSpecs) {
-    console.log('\x1b[33mRunning test', name, '\x1b[0m\n');
+    logger.debug('Running test', name);
     try {
       const skipped = await testRunner.run(testInfo, forceRunAll);
 
       if (skipped) {
         skippedTests.push(name);
-        console.log('\n\x1b[33mTest skipped.\x1b[0m\n');
+        logger.debug('Test skipped:', name);
         continue;
       }
 
       successfulTests.push(name);
-      console.log('\n\x1b[32mTest passed.\x1b[0m\n');
+      logger.debug('Test passed:', name);
     } catch (_: unknown) {
       failedTests.push(name);
-      console.error('\n\x1b[31mTest failed.\x1b[0m\n');
+      logger.error('Test failed:', name);
     }
   }
 
-  console.log(
-    `\n\n${successfulTests.length} tests passed, ` +
+  logger.info(
+    `${successfulTests.length} tests passed, ` +
       `${skippedTests.length} tests skipped, ` +
       `${failedTests.length} tests failed.`,
   );
 
-  console.log('Successfull tests:', successfulTests.join(', '));
-  console.log('Skipped tests:', skippedTests.join(', '));
-  console.log('Failed tests:', failedTests.join(', '));
-  console.log('\n');
+  logger.info('Successful tests:', successfulTests.join(', '));
+  logger.info('Skipped tests:', skippedTests.join(', '));
+  logger.info('Failed tests:', failedTests.join(', '));
 
   return failedTests.length;
 }
