@@ -21,6 +21,7 @@ import {
   createOAuth2TokenRequestBody,
   fetchOAuth2Tokens,
   getTokenEndpoint,
+  isOAuth2EndpointNotAllowedError,
   parseAuthorizationCode,
 } from './oauth2_utils.js';
 
@@ -34,10 +35,13 @@ export class OAuth2CredentialExchanger implements BaseCredentialExchanger {
    * When the exchange cannot be completed, the original credential is returned
    * with `wasExchanged: false` and the reason is logged. This matches
    * adk-python, where a token endpoint failure degrades instead of aborting the
-   * invocation.
+   * invocation. A configuration or tampering signal still throws, because no
+   * retry can make it safe.
    *
    * @throws CredentialExchangeError If `authScheme` is missing, or if the
    *     `state` in the authorization response does not match the expected one.
+   * @throws OAuth2EndpointNotAllowedError If the SSRF guard rejects the token
+   *     endpoint.
    */
   async exchange({
     authCredential,
@@ -71,13 +75,7 @@ export class OAuth2CredentialExchanger implements BaseCredentialExchanger {
   }
 }
 
-/**
- * Returns the original credential unchanged.
- *
- * adk-python returns the credential it was given with `was_exchanged=False`
- * whenever an exchange cannot be completed, so the caller can continue with an
- * unexchanged credential instead of handling an error.
- */
+/** Returns the original credential unchanged. */
 function notExchanged(authCredential: AuthCredential): ExchangeResult {
   return {credential: authCredential, wasExchanged: false};
 }
@@ -106,6 +104,9 @@ export function determineGrantType(
  *
  * Returns the original credential with `wasExchanged: false` when the exchange
  * cannot be completed.
+ *
+ * @throws OAuth2EndpointNotAllowedError If the SSRF guard rejects the token
+ *     endpoint.
  */
 export async function exchangeClientCredentials({
   authCredential,
@@ -152,9 +153,10 @@ export async function exchangeClientCredentials({
       wasExchanged: true,
     };
   } catch (error: unknown) {
-    logger.error(
-      `Failed to exchange client credentials: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    if (isOAuth2EndpointNotAllowedError(error)) {
+      throw error;
+    }
+    // fetchOAuth2Tokens already logged the failure with its endpoint context.
     return notExchanged(authCredential);
   }
 }
@@ -167,6 +169,8 @@ export async function exchangeClientCredentials({
  *
  * @throws CredentialExchangeError If the `state` in the authorization response
  *     does not match the expected one.
+ * @throws OAuth2EndpointNotAllowedError If the SSRF guard rejects the token
+ *     endpoint.
  */
 export async function exchangeAuthorizationCode({
   authCredential,
@@ -250,9 +254,10 @@ export async function exchangeAuthorizationCode({
       wasExchanged: true,
     };
   } catch (error: unknown) {
-    logger.error(
-      `Failed to exchange authorization code: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    if (isOAuth2EndpointNotAllowedError(error)) {
+      throw error;
+    }
+    // fetchOAuth2Tokens already logged the failure with its endpoint context.
     return notExchanged(authCredential);
   }
 }

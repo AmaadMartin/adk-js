@@ -19,7 +19,8 @@ import {
 } from '../../../src/auth/oauth2/oauth2_credential_exchanger.js';
 import * as oauth2Utils from '../../../src/auth/oauth2/oauth2_utils.js';
 
-vi.mock('../../../src/auth/oauth2/oauth2_utils.js', () => ({
+vi.mock('../../../src/auth/oauth2/oauth2_utils.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof oauth2Utils>()),
   getTokenEndpoint: vi.fn(),
   fetchOAuth2Tokens: vi.fn(),
   parseAuthorizationCode: vi.fn(),
@@ -282,6 +283,26 @@ describe('OAuth2CredentialExchanger', () => {
       expect(oauth2Utils.fetchOAuth2Tokens).toHaveBeenCalled();
     });
 
+    it('rethrows when the SSRF guard rejects the token endpoint', async () => {
+      const authCredential = {
+        oauth2: {clientId: 'id', clientSecret: 'secret'},
+      } as AuthCredential;
+      const authScheme = {} as AuthScheme;
+
+      vi.mocked(oauth2Utils.getTokenEndpoint).mockReturnValue(
+        'https://169.254.169.254/token',
+      );
+      vi.mocked(oauth2Utils.fetchOAuth2Tokens).mockRejectedValue(
+        new oauth2Utils.OAuth2EndpointNotAllowedError(
+          'SSRF protection: not allowed.',
+        ),
+      );
+
+      await expect(
+        exchangeClientCredentials({authCredential, authScheme}),
+      ).rejects.toThrow(oauth2Utils.OAuth2EndpointNotAllowedError);
+    });
+
     it('returns the unexchanged credential if fetchOAuth2Tokens fails with non-Error', async () => {
       const authCredential = {
         oauth2: {clientId: 'id', clientSecret: 'secret'},
@@ -443,6 +464,26 @@ describe('OAuth2CredentialExchanger', () => {
       expect(result.credential).toBe(authCredential);
       expect(result.credential.oauth2?.accessToken).toBeUndefined();
       expect(oauth2Utils.fetchOAuth2Tokens).toHaveBeenCalled();
+    });
+
+    it('rethrows when the SSRF guard rejects the token endpoint', async () => {
+      const authCredential = {
+        oauth2: {clientId: 'id', clientSecret: 'secret', authCode: 'code'},
+      } as AuthCredential;
+      const authScheme = {} as AuthScheme;
+
+      vi.mocked(oauth2Utils.getTokenEndpoint).mockReturnValue(
+        'https://169.254.169.254/token',
+      );
+      vi.mocked(oauth2Utils.fetchOAuth2Tokens).mockRejectedValue(
+        new oauth2Utils.OAuth2EndpointNotAllowedError(
+          'SSRF protection: not allowed.',
+        ),
+      );
+
+      await expect(
+        exchangeAuthorizationCode({authCredential, authScheme}),
+      ).rejects.toThrow(oauth2Utils.OAuth2EndpointNotAllowedError);
     });
 
     it('returns the unexchanged credential if fetchOAuth2Tokens fails with non-Error', async () => {
