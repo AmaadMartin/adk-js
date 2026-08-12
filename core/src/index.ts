@@ -39,6 +39,8 @@ export {
   type UnsafeLocalCodeExecutorOptions,
 } from './code_executors/unsafe_local_code_executor.js';
 export * from './common.js';
+export {DaytonaEnvironment} from './environment/daytona_environment.js';
+export type {DaytonaEnvironmentOptions} from './environment/daytona_environment.js';
 export {LocalEnvironment} from './environment/local_environment.js';
 export type {LocalEnvironmentOptions} from './environment/local_environment.js';
 export {DatabaseSessionService} from './sessions/database_session_service.js';
