@@ -12,17 +12,18 @@ import {getResponse, sendInput} from '../test_case_utils.js';
 const execAsync = promisify(exec);
 const dirname = process.cwd();
 
-const TEST_EXECUTION_TIMEOUT = 20000;
-
 // These hooks run `npm install` (plus `npm run build` for ts_* setups) and the
 // recursive node_modules teardown, overrunning vitest's default 10s hookTimeout
 // and causing flaky "Hook timed out in 10000ms" failures. All twelve hook runs
 // take ~16s combined on ubuntu-latest, but a cold, network-bound install has
-// been measured at ~70s, so 120s covers the worst case. Don't raise
-// TEST_EXECUTION_TIMEOUT for hook flakes; that stays the 20s per-test budget.
-// Trade-off: a stuck hook now takes this long to surface.
+// been measured at ~70s, so 120s covers the worst case. Trade-off: a stuck hook
+// now takes this long to surface.
 const HOOK_TIMEOUT = 120000;
 
+// No per-test timeout below: these take the project's 60s testTimeout. The
+// slowest, `should build and run agent successfully`, takes 14.9s on
+// windows-latest (measured 2026-08-11), which the old 20s budget could not hold
+// under CI load. Trade-off: a hung child now takes 60s to surface.
 describe('Build setup', () => {
   describe.each([
     'js_commonjs',
@@ -54,68 +55,50 @@ describe('Build setup', () => {
       }
     }, HOOK_TIMEOUT);
 
-    it(
-      'should build and run agent successfully',
-      async () => {
-        const childProcess = spawn('npm', ['run', 'start'], {
-          cwd: projectPath,
-          shell: true,
-        });
+    it('should build and run agent successfully', async () => {
+      const childProcess = spawn('npm', ['run', 'start'], {
+        cwd: projectPath,
+        shell: true,
+      });
 
-        let response = await sendInput(childProcess, 'Tell me a joke.\n');
-        expect(response.toString()).toContain('test-llm-model-response');
+      let response = await sendInput(childProcess, 'Tell me a joke.\n');
+      expect(response.toString()).toContain('test-llm-model-response');
 
-        response = await sendInput(childProcess, 'exit\n');
-        expect(response.toString()).toContain('');
-      },
-      TEST_EXECUTION_TIMEOUT,
-    );
+      response = await sendInput(childProcess, 'exit\n');
+      expect(response.toString()).toContain('');
+    });
 
     it.skipIf(
       !['js_commonjs', 'js_esm', 'ts_commonjs', 'ts_esm'].includes(buildSetup),
-    )(
-      'should handle dynamic imports in DatabaseSessionService',
-      async () => {
-        const childProcess = spawn('npm', ['run', 'test:db'], {
-          cwd: projectPath,
-          shell: true,
-        });
+    )('should handle dynamic imports in DatabaseSessionService', async () => {
+      const childProcess = spawn('npm', ['run', 'test:db'], {
+        cwd: projectPath,
+        shell: true,
+      });
 
-        const response = await getResponse(childProcess);
-        expect(response.toString()).toContain('DYNAMIC_IMPORT_SUCCESS');
-      },
-      TEST_EXECUTION_TIMEOUT,
-    );
+      const response = await getResponse(childProcess);
+      expect(response.toString()).toContain('DYNAMIC_IMPORT_SUCCESS');
+    });
 
     it.skipIf(
       !['js_commonjs', 'js_esm', 'ts_commonjs', 'ts_esm'].includes(buildSetup),
-    )(
-      'should import devtools successfully',
-      async () => {
-        const childProcess = spawn('npm', ['run', 'test:devtools'], {
-          cwd: projectPath,
-          shell: true,
-        });
+    )('should import devtools successfully', async () => {
+      const childProcess = spawn('npm', ['run', 'test:devtools'], {
+        cwd: projectPath,
+        shell: true,
+      });
 
-        const response = await getResponse(childProcess);
-        expect(response.toString()).toContain(
-          'Devtools verification successful',
-        );
-      },
-      TEST_EXECUTION_TIMEOUT,
-    );
+      const response = await getResponse(childProcess);
+      expect(response.toString()).toContain('Devtools verification successful');
+    });
 
-    it(
-      'should run devtools CLI successfully',
-      async () => {
-        const {stdout} = await execAsync('npx @google/adk-devtools --version', {
-          cwd: projectPath,
-        });
+    it('should run devtools CLI successfully', async () => {
+      const {stdout} = await execAsync('npx @google/adk-devtools --version', {
+        cwd: projectPath,
+      });
 
-        expect(stdout).toBeTruthy();
-      },
-      TEST_EXECUTION_TIMEOUT,
-    );
+      expect(stdout).toBeTruthy();
+    });
 
     afterAll(async () => {
       await fs
