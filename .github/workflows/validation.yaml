@@ -58,3 +58,43 @@ jobs:
 
       - name: Run documentation build check
         run: npm run docs:check
+
+  audit-dependencies:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      # Advisory only; needs no install (npm audit reads package-lock.json).
+      # See CONTRIBUTING.md ("Dependency audit").
+      #
+      # `set -o pipefail` is load-bearing: without it `tee` returns 0 and the
+      # summary below claims a clean tree over a report full of findings.
+      - name: Audit production dependencies
+        id: audit
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          npm audit --omit=dev --audit-level=high | tee "${RUNNER_TEMP}/audit.log"
+
+      # `outcome` is the result before `continue-on-error` absorbs it;
+      # `conclusion` is always `success` here.
+      - name: Publish audit report
+        env:
+          AUDIT_OUTCOME: ${{ steps.audit.outcome }}
+        run: |
+          {
+            echo '## Production dependency audit'
+            echo
+            if [ "${AUDIT_OUTCOME}" = 'success' ]; then
+              echo 'No high or critical advisories in the production dependency tree.'
+            else
+              echo 'npm audit reported high or critical advisories, or could not run.'
+              echo 'This check is advisory and does not block merging.'
+            fi
+            echo
+            echo '```'
+            cat "${RUNNER_TEMP}/audit.log"
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"

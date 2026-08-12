@@ -53,6 +53,21 @@ To maintain high code quality and consistency:
 The project uses `husky` and `lint-staged` to automatically lint and format
 your changes before each commit.
 
+### Dependency audit
+
+The `validation` workflow runs `npm audit --omit=dev --audit-level=high` in an
+`audit-dependencies` job and writes the report to the run summary. `--omit=dev`
+restricts it to the dependencies we publish.
+
+The job is advisory: it reports a finding, and it does not fail the build.
+`npm audit` cannot acknowledge a finding, so a blocking gate would fail every
+open pull request as soon as a new advisory is published against a dependency
+we already ship. Fix a finding in its own pull request with `npm audit fix`, or
+open an issue when the only fix is a major version bump.
+
+Once the tree is clean at `high`, drop `continue-on-error` from the audit step
+so the check starts to block.
+
 ### Sign our Contributor License Agreement
 
 Contributions to this project must be accompanied by a
