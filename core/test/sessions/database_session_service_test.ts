@@ -485,6 +485,26 @@ describe('DatabaseSessionService', () => {
       expect(response.sessions.map((s) => s.id)).toEqual(['s1', 's3', 's2']);
     });
 
+    it('tie-breaks by id when updateTime values are equal', async () => {
+      for (const sessionId of ['s3', 's1', 's2']) {
+        const session = await service.createSession({
+          appName,
+          userId,
+          sessionId,
+        });
+        await service.appendEvent({
+          session,
+          event: createEvent({timestamp: 1000}),
+        });
+      }
+
+      const asc = await service.listSessions({appName, userId, order: 'asc'});
+      expect(asc.sessions.map((s) => s.id)).toEqual(['s1', 's2', 's3']);
+
+      const desc = await service.listSessions({appName, userId, order: 'desc'});
+      expect(desc.sessions.map((s) => s.id)).toEqual(['s1', 's2', 's3']);
+    });
+
     it('limit returns only N sessions with correct metadata', async () => {
       for (let i = 1; i <= 5; i++) {
         const s = await service.createSession({
