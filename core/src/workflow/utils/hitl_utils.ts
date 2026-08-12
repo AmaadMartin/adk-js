@@ -12,7 +12,7 @@
  */
 
 import {Part} from '@google/genai';
-import {z as z4} from 'zod/v4';
+import type {z as z4} from 'zod/v4';
 import {
   REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
   REQUEST_INPUT_FUNCTION_CALL_NAME,
@@ -129,14 +129,6 @@ export function validateInterruptResponse(
   );
 }
 
-/** JSON Schema types a plain-text reply can be held to. */
-const SCALAR_SCHEMA_TYPES: ReadonlySet<string> = new Set([
-  'string',
-  'number',
-  'integer',
-  'boolean',
-]);
-
 /**
  * Resolves a plain-text reply against the `responseSchema` its interrupt
  * declared, returning the value to store in `resumeInputs`.
@@ -155,19 +147,13 @@ export function resolvePlainTextResponse(
   text: string,
   jsonSchema: unknown,
 ): unknown {
-  const scalarType = scalarSchemaType(jsonSchema);
+  const coerced = coerceScalar(text, jsonSchema);
   const validator = compileJsonSchema(jsonSchema);
-  // Nothing to enforce: no compilable contract, the text already satisfies it
-  // (which is what keeps '42' a string for `z.string()`), or the contract is
-  // wider than a scalar.
-  if (
-    !validator ||
-    validator.safeParse(text).success ||
-    scalarType === undefined
-  ) {
+  // Nothing to enforce: no compilable contract, or a contract wider than a
+  // scalar.
+  if (!validator || coerced === undefined) {
     return text;
   }
-  const coerced = coerceScalar(text, scalarType);
   const result = validator.safeParse(coerced);
   if (result.success) {
     return coerced;
@@ -183,40 +169,31 @@ export function resolvePlainTextResponse(
 }
 
 /**
- * The scalar type a JSON Schema declares, or `undefined` when it declares
- * something wider — an object, an array, a union, or no type at all.
+ * Reads typed text as the scalar its schema declared, or `undefined` when the
+ * schema declares something wider — an object, an array, a union, or no type.
  */
-function scalarSchemaType(jsonSchema: unknown): string | undefined {
-  if (
-    typeof jsonSchema !== 'object' ||
-    jsonSchema === null ||
-    !('type' in jsonSchema)
-  ) {
-    return undefined;
-  }
-  const type = jsonSchema.type;
-  return typeof type === 'string' && SCALAR_SCHEMA_TYPES.has(type)
-    ? type
-    : undefined;
-}
-
-/** Reads typed text as the scalar its schema declared, or leaves it as text. */
-function coerceScalar(text: string, scalarType: string): unknown {
+function coerceScalar(text: string, jsonSchema: unknown): unknown {
+  const type =
+    typeof jsonSchema === 'object' &&
+    jsonSchema !== null &&
+    'type' in jsonSchema
+      ? jsonSchema.type
+      : undefined;
   const trimmed = text.trim();
-  switch (scalarType) {
+  switch (type) {
     case 'number':
     case 'integer': {
       const value = Number(trimmed);
       return trimmed !== '' && Number.isFinite(value) ? value : text;
     }
     case 'boolean': {
-      if (trimmed.toLowerCase() === 'true') {
-        return true;
-      }
-      return trimmed.toLowerCase() === 'false' ? false : text;
+      const lower = trimmed.toLowerCase();
+      return lower === 'true' ? true : lower === 'false' ? false : text;
     }
-    default:
+    case 'string':
       return text;
+    default:
+      return undefined;
   }
 }
 
