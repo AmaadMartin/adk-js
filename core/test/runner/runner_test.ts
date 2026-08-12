@@ -7,7 +7,11 @@
 import {
   App,
   BaseAgent,
+  BaseCodeExecutor,
+  BaseLlm,
+  BaseLlmConnection,
   BasePlugin,
+  BuiltInCodeExecutor,
   createEvent,
   createResumabilityConfig,
   determineAgentForResumption,
@@ -17,10 +21,11 @@ import {
   InvocationContext,
   isRoutableLlmAgent,
   LlmAgent,
+  LlmResponse,
   Runner,
 } from '@google/adk';
 import {Content, FunctionCall, FunctionResponse} from '@google/genai';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 const TEST_APP_ID = 'test_app_id';
 const TEST_USER_ID = 'test_user_id';
@@ -1250,5 +1255,139 @@ describe('Runner artifact saving (`saveInputBlobsAsArtifacts`)', () => {
     expect(userEvents[1].content!.parts).toEqual([
       {text: '[Uploaded Artifact: "file2.pdf"]'},
     ]);
+  });
+});
+
+const CFC_AGENT_NAME = 'cfc_agent';
+const MODEL_ID_CHECK_ENV_VAR = 'ADK_DISABLE_GEMINI_MODEL_ID_CHECK';
+
+/**
+ * The stop an accepted run reaches: `LlmAgent.callLlmAsync` has no CFC call
+ * path yet, and the agent reports the refusal as an error event.
+ */
+const CFC_UNIMPLEMENTED_ERROR = 'CFC is not yet supported in callLlmAsync';
+
+/**
+ * A model that only carries an id.
+ *
+ * The CFC gate reads `canonicalModel.model`. A `string` model resolves through
+ * the LLM registry, which knows no non-Gemini id, so every case passes an
+ * instance instead.
+ */
+class IdOnlyLlm extends BaseLlm {
+  async *generateContentAsync(): AsyncGenerator<LlmResponse, void, void> {
+    yield {};
+  }
+
+  connect(): Promise<BaseLlmConnection> {
+    return Promise.reject(new Error('connect is not used by the CFC gate'));
+  }
+}
+
+function cfcGateError(model: string): string {
+  return `CFC is not supported for model: ${model} in agent: ${CFC_AGENT_NAME}`;
+}
+
+/**
+ * Builds an agent for one CFC case.
+ *
+ * Each case needs its own agent: the gate installs a code executor on the
+ * agent when it accepts the model.
+ */
+function createCfcAgent(
+  model: string,
+  codeExecutor?: BaseCodeExecutor,
+): LlmAgent {
+  return new LlmAgent({
+    name: CFC_AGENT_NAME,
+    model: new IdOnlyLlm({model}),
+    codeExecutor,
+  });
+}
+
+/** Runs `agent` to completion and returns the error message of every event. */
+async function runAndCollectErrors(
+  agent: LlmAgent,
+  supportCfc = true,
+): Promise<string[]> {
+  const sessionService = new InMemorySessionService();
+  const session = await sessionService.createSession({
+    appName: TEST_APP_ID,
+    userId: TEST_USER_ID,
+  });
+  const runner = new Runner({appName: TEST_APP_ID, agent, sessionService});
+
+  const errorMessages: string[] = [];
+  for await (const event of runner.runAsync({
+    userId: TEST_USER_ID,
+    sessionId: session.id,
+    newMessage: {role: 'user', parts: [{text: TEST_MESSAGE}]},
+    runConfig: {supportCfc},
+  })) {
+    if (event.errorMessage) {
+      errorMessages.push(event.errorMessage);
+    }
+  }
+  return errorMessages;
+}
+
+describe('Runner CFC model gate', () => {
+  beforeEach(() => {
+    vi.stubEnv(MODEL_ID_CHECK_ENV_VAR, undefined);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it.each([
+    'gemini-live-2.5-flash-native-audio',
+    'gemini-3-pro-preview',
+    'gemini-flash-early-exp',
+    'gemini-2.5-flash',
+  ])('accepts %s and installs a built-in code executor', async (model) => {
+    const agent = createCfcAgent(model);
+
+    await expect(runAndCollectErrors(agent)).resolves.toEqual([
+      CFC_UNIMPLEMENTED_ERROR,
+    ]);
+    expect(agent.codeExecutor).toStrictEqual(new BuiltInCodeExecutor());
+  });
+
+  it('rejects a non-Gemini model and installs no code executor', async () => {
+    const agent = createCfcAgent('claude-3-5-sonnet');
+
+    await expect(runAndCollectErrors(agent)).rejects.toThrowError(
+      cfcGateError('claude-3-5-sonnet'),
+    );
+    expect(agent.codeExecutor).toBeUndefined();
+  });
+
+  it('accepts a non-Gemini model when the model-id check is disabled', async () => {
+    vi.stubEnv(MODEL_ID_CHECK_ENV_VAR, 'true');
+    const agent = createCfcAgent('claude-3-5-sonnet');
+
+    await expect(runAndCollectErrors(agent)).resolves.toEqual([
+      CFC_UNIMPLEMENTED_ERROR,
+    ]);
+    expect(agent.codeExecutor).toStrictEqual(new BuiltInCodeExecutor());
+  });
+
+  it('keeps a built-in code executor the agent already has', async () => {
+    const codeExecutor = new BuiltInCodeExecutor();
+    const agent = createCfcAgent('gemini-2.5-flash', codeExecutor);
+
+    await runAndCollectErrors(agent);
+
+    expect(agent.codeExecutor).toBe(codeExecutor);
+  });
+
+  it('leaves the agent alone when supportCfc is off', async () => {
+    const agent = createCfcAgent('claude-3-5-sonnet');
+
+    await expect(
+      runAndCollectErrors(agent, /* supportCfc= */ false),
+    ).resolves.toEqual([]);
+    expect(agent.codeExecutor).toBeUndefined();
   });
 });
