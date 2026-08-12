@@ -6,6 +6,11 @@
 
 import type {Daytona, Sandbox} from '@daytona/sdk';
 import * as path from 'node:path';
+import {
+  errorHasCode,
+  errorHasStatus,
+  errorMessageIncludes,
+} from '../utils/error_utils.js';
 import {experimental} from '../utils/experimental.js';
 import {BaseEnvironment, ExecutionResult} from './base_environment.js';
 
@@ -66,36 +71,6 @@ async function loadDaytonaSdk(): Promise<typeof import('@daytona/sdk')> {
   }
 }
 
-function isErrorLike(error: unknown): error is object {
-  return typeof error === 'object' && error !== null;
-}
-
-/**
- * Matches a Daytona error by the machine-readable `code` it carries.
- *
- * Unlike `instanceof`, this still matches when two copies of the SDK are
- * resolved in one runtime, and it needs no runtime handle on the error classes
- * behind the optional import.
- */
-function errorHasCode(error: unknown, code: string): boolean {
-  return isErrorLike(error) && 'code' in error && error.code === code;
-}
-
-/** Matches a Daytona error by the HTTP status it was translated from. */
-function errorHasStatus(error: unknown, status: number): boolean {
-  return (
-    isErrorLike(error) && 'statusCode' in error && error.statusCode === status
-  );
-}
-
-function messageIncludes(error: unknown, text: string): boolean {
-  return (
-    isErrorLike(error) &&
-    'message' in error &&
-    String(error.message).toLowerCase().includes(text)
-  );
-}
-
 /**
  * Whether a command failure was a timeout.
  *
@@ -104,7 +79,8 @@ function messageIncludes(error: unknown, text: string): boolean {
  */
 function isTimeoutError(error: unknown): boolean {
   return (
-    errorHasCode(error, TIMEOUT_ERROR_CODE) || messageIncludes(error, 'timeout')
+    errorHasCode(error, TIMEOUT_ERROR_CODE) ||
+    errorMessageIncludes(error, 'timeout')
   );
 }
 
@@ -118,7 +94,7 @@ function isFileNotFoundError(error: unknown): boolean {
 function isAlreadyExistsError(error: unknown): boolean {
   return (
     errorHasStatus(error, HTTP_CONFLICT) ||
-    messageIncludes(error, 'already exists')
+    errorMessageIncludes(error, 'already exists')
   );
 }
 
@@ -130,9 +106,7 @@ function isAlreadyExistsError(error: unknown): boolean {
  * `path` functions — they would produce a Windows path on a Windows host.
  */
 function resolveSandboxPath(filePath: string): string {
-  return path.posix.isAbsolute(filePath)
-    ? path.posix.normalize(filePath)
-    : path.posix.join(SANDBOX_HOME, filePath);
+  return path.posix.resolve(SANDBOX_HOME, filePath);
 }
 
 /** Ancestor directories of `filePath`, outermost first, excluding `/`. */
@@ -177,12 +151,7 @@ function autoStopIntervalMinutes(timeoutSeconds: number): number {
  */
 @experimental
 export class DaytonaEnvironment extends BaseEnvironment {
-  /**
-   * Set together by {@link initialize} and cleared together by {@link close},
-   * so either one being defined implies the other is.
-   */
-  private sandbox?: Sandbox;
-  private client?: Daytona;
+  private session?: {client: Daytona; sandbox: Sandbox};
   private readonly image?: string;
   private readonly timeoutSeconds: number;
   private readonly apiKey?: string;
@@ -205,22 +174,31 @@ export class DaytonaEnvironment extends BaseEnvironment {
   }
 
   override async initialize(): Promise<void> {
-    if (this.sandbox !== undefined) {
+    if (this.session !== undefined) {
       return;
     }
     const sdk = await loadDaytonaSdk();
-    this.client = new sdk.Daytona({apiKey: this.apiKey, apiUrl: this.apiUrl});
+    const client = new sdk.Daytona({apiKey: this.apiKey, apiUrl: this.apiUrl});
     const params = {
       envVars: this.envVars ?? {},
       autoStopInterval: autoStopIntervalMinutes(this.timeoutSeconds),
       autoDeleteInterval: 0,
     };
-    // `create` is overloaded on the presence of `image`, so the two calls stay
-    // separate: a union-typed params variable defeats overload resolution.
-    this.sandbox =
-      this.image === undefined
-        ? await this.client.create({language: SANDBOX_LANGUAGE, ...params})
-        : await this.client.create({image: this.image, ...params});
+    try {
+      // `create` is overloaded on the presence of `image`, so the two calls
+      // stay separate: a union-typed params variable defeats overload
+      // resolution.
+      const sandbox =
+        this.image === undefined
+          ? await client.create({language: SANDBOX_LANGUAGE, ...params})
+          : await client.create({image: this.image, ...params});
+      this.session = {client, sandbox};
+    } catch (error: unknown) {
+      // There is no sandbox to close, so nothing else would release the
+      // client's websocket.
+      await client[Symbol.asyncDispose]();
+      throw error;
+    }
     this.initialized = true;
   }
 
@@ -231,18 +209,18 @@ export class DaytonaEnvironment extends BaseEnvironment {
    * not leak a websocket for the life of the process.
    */
   override async close(): Promise<void> {
-    if (this.sandbox === undefined) {
+    if (this.session === undefined) {
       return;
     }
+    const {client, sandbox} = this.session;
     try {
-      await this.sandbox.delete();
+      await sandbox.delete();
     } finally {
-      this.sandbox = undefined;
+      this.session = undefined;
       // The client has no `close()`. Disposing it shuts down the event
       // subscription manager and disconnects the websocket dispatcher, which
       // would otherwise leak across initialize/close cycles.
-      await this.client![Symbol.asyncDispose]();
-      this.client = undefined;
+      await client[Symbol.asyncDispose]();
       this.initialized = false;
     }
   }
@@ -345,7 +323,9 @@ export class DaytonaEnvironment extends BaseEnvironment {
 
   private async ensureSandbox(): Promise<Sandbox> {
     this.assertInitialized();
-    const sandbox = this.sandbox!;
+    // `session` is set and cleared with `initialized`, but `assertInitialized`
+    // is not a TypeScript assertion signature so it cannot narrow the field.
+    const {sandbox} = this.session!;
     await sandbox.refreshActivity();
     return sandbox;
   }

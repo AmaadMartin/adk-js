@@ -151,6 +151,17 @@ describe('DaytonaEnvironment', () => {
       });
     });
 
+    it('disposes the client when creating the sandbox fails', async () => {
+      const failure = new Error('no capacity');
+      client.create.mockRejectedValue(failure);
+      const env = new DaytonaEnvironment();
+
+      await expect(env.initialize()).rejects.toBe(failure);
+
+      expect(client[Symbol.asyncDispose]).toHaveBeenCalledTimes(1);
+      expect(env.isInitialized).toBe(false);
+    });
+
     it('rounds a sub-minute time-to-live up to one minute', async () => {
       const env = new DaytonaEnvironment({timeoutSeconds: 30});
 
