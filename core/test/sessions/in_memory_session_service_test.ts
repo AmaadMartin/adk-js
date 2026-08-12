@@ -10,8 +10,9 @@ import {
   State,
   createEvent,
   createEventActions,
+  getLogger,
 } from '@google/adk';
-import {afterEach, beforeEach, describe, expect, it} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {isInMemoryConnectionString} from '../../src/sessions/in_memory_session_service.js';
 
 describe('isInMemoryConnectionString', () => {
@@ -671,6 +672,184 @@ describe('InMemorySessionService', () => {
       // Should just log warnings and return event
       const returnedEvent = await service.appendEvent({session, event});
       expect(returnedEvent).toBe(event);
+    });
+  });
+
+  describe('appendEvent with a partial event', () => {
+    const appName = 'app';
+    const userId = 'user';
+    const APP_KEY = `${State.APP_PREFIX}key`;
+    const USER_KEY = `${State.USER_PREFIX}key`;
+    const VALUE = 'scoped-value';
+    const SCOPED_DELTA = {[APP_KEY]: VALUE, [USER_KEY]: VALUE};
+
+    /** How far ahead of the session an appended event is stamped. */
+    const TIMESTAMP_STEP_MS = 10_000;
+
+    const scopedEvent = ({
+      timestamp,
+      partial,
+      stateDelta = SCOPED_DELTA,
+    }: {
+      timestamp: number;
+      partial: boolean;
+      stateDelta?: Record<string, unknown>;
+    }) =>
+      createEvent({
+        timestamp,
+        partial,
+        actions: createEventActions({stateDelta}),
+      });
+
+    const getStored = async (sessionId: string): Promise<Session> => {
+      const stored = await service.getSession({appName, userId, sessionId});
+      if (!stored) {
+        expect.fail(`session ${sessionId} is missing from the service`);
+      }
+      return stored;
+    };
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('does not leak an app-scoped state delta to a sibling session', async () => {
+      const a = await service.createSession({appName, userId});
+      const b = await service.createSession({appName, userId});
+
+      await service.appendEvent({
+        session: a,
+        event: scopedEvent({
+          timestamp: Date.now(),
+          partial: true,
+          stateDelta: {[APP_KEY]: VALUE},
+        }),
+      });
+
+      expect((await getStored(b.id)).state).not.toHaveProperty(APP_KEY);
+    });
+
+    it('does not leak a user-scoped state delta to a sibling session', async () => {
+      const a = await service.createSession({appName, userId});
+      const b = await service.createSession({appName, userId});
+
+      await service.appendEvent({
+        session: a,
+        event: scopedEvent({
+          timestamp: Date.now(),
+          partial: true,
+          stateDelta: {[USER_KEY]: VALUE},
+        }),
+      });
+
+      expect((await getStored(b.id)).state).not.toHaveProperty(USER_KEY);
+    });
+
+    it('does not leak a scoped state delta into a session created afterwards', async () => {
+      const session = await service.createSession({appName, userId});
+
+      await service.appendEvent({
+        session,
+        event: scopedEvent({timestamp: Date.now(), partial: true}),
+      });
+
+      const later = await service.createSession({appName, userId});
+      expect(later.state).not.toHaveProperty(APP_KEY);
+      expect(later.state).not.toHaveProperty(USER_KEY);
+    });
+
+    it('does not advance lastUpdateTime on the caller session', async () => {
+      const session = await service.createSession({appName, userId});
+      const before = session.lastUpdateTime;
+
+      await service.appendEvent({
+        session,
+        event: scopedEvent({
+          timestamp: before + TIMESTAMP_STEP_MS,
+          partial: true,
+        }),
+      });
+
+      expect(session.lastUpdateTime).toBe(before);
+    });
+
+    it('does not advance lastUpdateTime on the stored session', async () => {
+      const session = await service.createSession({appName, userId});
+      const before = session.lastUpdateTime;
+
+      await service.appendEvent({
+        session,
+        event: scopedEvent({
+          timestamp: before + TIMESTAMP_STEP_MS,
+          partial: true,
+        }),
+      });
+
+      expect((await getStored(session.id)).lastUpdateTime).toBe(before);
+
+      const {sessions} = await service.listSessions({appName, userId});
+      const listed = sessions.find((s) => s.id === session.id);
+      expect(listed?.lastUpdateTime).toBe(before);
+    });
+
+    it('does not record the event', async () => {
+      const session = await service.createSession({appName, userId});
+
+      await service.appendEvent({
+        session,
+        event: scopedEvent({timestamp: Date.now(), partial: true}),
+      });
+
+      expect(session.events).toHaveLength(0);
+      expect((await getStored(session.id)).events).toHaveLength(0);
+    });
+
+    it('returns the event unchanged', async () => {
+      const session = await service.createSession({appName, userId});
+      const event = scopedEvent({timestamp: Date.now(), partial: true});
+
+      expect(await service.appendEvent({session, event})).toBe(event);
+    });
+
+    it('applies the delta once the same event is appended non-partially', async () => {
+      const a = await service.createSession({appName, userId});
+      const b = await service.createSession({appName, userId});
+      const timestamp = a.lastUpdateTime + TIMESTAMP_STEP_MS;
+
+      await service.appendEvent({
+        session: a,
+        event: scopedEvent({timestamp, partial: true}),
+      });
+      await service.appendEvent({
+        session: a,
+        event: scopedEvent({timestamp, partial: false}),
+      });
+
+      const storedB = await getStored(b.id);
+      expect(storedB.state).toHaveProperty(APP_KEY, VALUE);
+      expect(storedB.state).toHaveProperty(USER_KEY, VALUE);
+      expect(a.lastUpdateTime).toBe(timestamp);
+    });
+
+    it('does not warn for a partial event on an unknown session', async () => {
+      const warnSpy = vi
+        .spyOn(getLogger(), 'warn')
+        .mockImplementation(() => {});
+      const unknown: Session = {
+        id: 'fake-session',
+        appName: 'fake-app',
+        userId: 'fake-user',
+        state: {},
+        events: [],
+        lastUpdateTime: 0,
+      };
+
+      await service.appendEvent({
+        session: unknown,
+        event: scopedEvent({timestamp: Date.now(), partial: true}),
+      });
+
+      expect(warnSpy).not.toHaveBeenCalled();
     });
   });
 
