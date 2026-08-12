@@ -100,6 +100,15 @@ export class DatabaseSessionService extends BaseSessionService {
     this.initialized = true;
   }
 
+  /**
+   * Closes the database connection opened by init().
+   *
+   * The service is unusable afterwards.
+   */
+  async close() {
+    await this.orm?.close();
+  }
+
   async createSession({
     appName,
     userId,
