@@ -87,6 +87,17 @@ describe('OperationParser', () => {
     expect(params[0].paramSchema.type).toBe('string');
   });
 
+  it('should leave originalName empty for a typed scalar request body', () => {
+    const params = new OperationParser(
+      operationWithBody({type: 'string'}),
+    ).getParameters();
+
+    expect(params.length).toBe(1);
+    expect(params[0].originalName).toBe('');
+    expect(params[0].name).toBe('body');
+    expect(params[0].paramLocation).toBe('body');
+  });
+
   it('should emit no argument for an empty object request body', () => {
     const parser = new OperationParser(
       operationWithBody({type: 'object', properties: {}}),
@@ -113,7 +124,24 @@ describe('OperationParser', () => {
 
     expect(params.length).toBe(1);
     expect(params[0].name).toBe('body');
+    expect(params[0].originalName).toBe('body');
     expect(params[0].paramLocation).toBe('body');
+  });
+
+  it('should name a composed request body argument body even when it declares a type', () => {
+    const composedBodies: OpenAPIV3.SchemaObject[] = [
+      {type: 'string', oneOf: [{type: 'string'}]},
+      {type: 'string', anyOf: [{type: 'string'}]},
+      {type: 'string', allOf: [{type: 'string'}]},
+    ];
+
+    const originalNames = composedBodies.map(
+      (schema) =>
+        new OperationParser(operationWithBody(schema)).getParameters()[0]
+          .originalName,
+    );
+
+    expect(originalNames).toEqual(['body', 'body', 'body']);
   });
 
   it('should name an untyped request body argument body', () => {
@@ -124,6 +152,7 @@ describe('OperationParser', () => {
 
     expect(params.length).toBe(1);
     expect(params[0].name).toBe('body');
+    expect(params[0].originalName).toBe('body');
     expect(params[0].paramLocation).toBe('body');
   });
 

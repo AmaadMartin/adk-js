@@ -780,6 +780,29 @@ describe('RestApiTool Utilities', () => {
       expect(result.bodyData).toEqual({});
     });
 
+    it('should route a scalar request body to the whole body', () => {
+      const endpoint = {
+        baseUrl: 'http://api.example.com',
+        path: '/notes',
+        method: 'POST',
+      };
+      const operation: OpenAPIV3.OperationObject = {
+        operationId: 'writeNote',
+        requestBody: {
+          content: {'application/json': {schema: {type: 'string'}}},
+        },
+        responses: {},
+      };
+      const parameters = new OperationParser(operation).getParameters();
+
+      const result = prepareRequestParams(endpoint, parameters, {
+        body: 'hello',
+      });
+
+      expect(result.body).toBe('hello');
+      expect(result.bodyData).toEqual({});
+    });
+
     it('should route an unnamed body parameter to the whole body', () => {
       const endpoint = {
         baseUrl: 'http://api.example.com',

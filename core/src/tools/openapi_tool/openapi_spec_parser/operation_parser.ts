@@ -114,8 +114,12 @@ export class OperationParser {
           name: 'array',
         });
       } else {
+        // adk-python routes the whole body on an empty originalName, and keeps
+        // 'body' for a composed or untyped schema. rest_api_tool accepts both.
+        const composedOrUntyped =
+          !schema.type || !!schema.oneOf || !!schema.anyOf || !!schema.allOf;
         this.params.push({
-          originalName: 'body',
+          originalName: composedOrUntyped ? 'body' : '',
           paramLocation: 'body',
           paramSchema: schema,
           description,
