@@ -5,14 +5,19 @@
  */
 
 import {Type} from '@google/genai';
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 
 import {
+  BaseAgent,
   Context,
+  createSession,
+  getLogger,
+  InvocationContext,
   LlmRequest,
   LOAD_MEMORY,
   LoadMemoryTool,
   MemoryEntry,
+  PluginManager,
   SearchMemoryResponse,
 } from '@google/adk';
 
@@ -126,5 +131,36 @@ describe('LoadMemoryTool', () => {
     await tool.processLlmRequest({toolContext, llmRequest});
     // Instructions should be appended
     expect(llmRequest.config?.systemInstruction).toContain('You have memory.');
+  });
+
+  it('logs the failure before rethrowing', async () => {
+    const errorSpy = vi
+      .spyOn(getLogger(), 'error')
+      .mockImplementation(() => {});
+    const failure = new Error('search boom');
+    const invocationContext = new InvocationContext({
+      invocationId: 'test-invocation',
+      agent: {} as BaseAgent,
+      session: createSession({id: 'test-session', appName: 'test-app'}),
+      pluginManager: new PluginManager([]),
+      memoryService: {
+        addSessionToMemory: async () => {},
+        searchMemory: async () => {
+          throw failure;
+        },
+      },
+    });
+    const toolContext = new Context({invocationContext});
+    const tool = new LoadMemoryTool();
+
+    await expect(
+      tool.runAsync({args: {query: 'hello'}, toolContext}),
+    ).rejects.toThrow(failure);
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      'LoadMemoryTool runAsync failed:',
+      failure,
+    );
+    errorSpy.mockRestore();
   });
 });
