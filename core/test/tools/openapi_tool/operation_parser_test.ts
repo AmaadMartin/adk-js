@@ -128,6 +128,22 @@ describe('OperationParser', () => {
     expect(params[0].paramLocation).toBe('body');
   });
 
+  it('should name a composed request body argument body even when it declares a type', () => {
+    const composedBodies: OpenAPIV3.SchemaObject[] = [
+      {type: 'string', oneOf: [{type: 'string'}]},
+      {type: 'string', anyOf: [{type: 'string'}]},
+      {type: 'string', allOf: [{type: 'string'}]},
+    ];
+
+    const originalNames = composedBodies.map(
+      (schema) =>
+        new OperationParser(operationWithBody(schema)).getParameters()[0]
+          .originalName,
+    );
+
+    expect(originalNames).toEqual(['body', 'body', 'body']);
+  });
+
   it('should name an untyped request body argument body', () => {
     const parser = new OperationParser(
       operationWithBody({description: 'anything goes'}),
