@@ -54,6 +54,7 @@ vi.mock('../../src/utils/agent_loader.js', () => ({
       getFilePath: vi.fn().mockReturnValue('path/to/agent1.ts'),
     }),
     disposeAll: vi.fn().mockResolvedValue(undefined),
+    installProcessHandlers: vi.fn(),
   })),
 }));
 
@@ -249,6 +250,7 @@ describe('deployToCloudRun', () => {
         getFilePath: vi.fn().mockReturnValue('path/to/agent1.ts'),
       }),
       disposeAll: vi.fn().mockResolvedValue(undefined),
+      installProcessHandlers: vi.fn(),
     }));
 
     execMock.mockImplementation((cmd: string, callback: Callback) => {
@@ -294,6 +296,13 @@ describe('deployToCloudRun', () => {
       recursive: true,
       force: true,
     });
+  });
+
+  it('installs process handlers on the agent loader', async () => {
+    await deployToCloudRun(defaultOptions);
+
+    const agentLoader = vi.mocked(AgentLoader).mock.results[0].value;
+    expect(agentLoader.installProcessHandlers).toHaveBeenCalledOnce();
   });
 
   it('should resolve default project and region from gcloud if not provided', async () => {

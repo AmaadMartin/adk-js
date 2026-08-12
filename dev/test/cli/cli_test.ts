@@ -166,6 +166,13 @@ describe('CLI Entrypoint', () => {
       const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
       expect(args.a2aAuthToken).toBe('tok');
     });
+
+    it('should opt the server into process handlers', async () => {
+      await parse(['web']);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.installProcessHandlers).toBe(true);
+    });
   });
 
   describe('command: api_server', () => {
@@ -192,6 +199,13 @@ describe('CLI Entrypoint', () => {
 
       const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
       expect(args.a2aAuthToken).toBe('tok');
+    });
+
+    it('should opt the server into process handlers', async () => {
+      await parse(['api_server']);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.installProcessHandlers).toBe(true);
     });
   });
 

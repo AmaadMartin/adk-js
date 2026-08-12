@@ -12,6 +12,7 @@ import {shimPlugin} from 'esbuild-shim-plugin';
 import * as fs from 'node:fs';
 import * as fsPromises from 'node:fs/promises';
 import {createRequire} from 'node:module';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import {pathToFileURL} from 'node:url';
 
@@ -48,6 +49,15 @@ const FILE_MODULE_TYPE_EXTENSION_MAP = {
   [FileModuleType.CJS]: '.cjs',
   [FileModuleType.ESM]: '.mjs',
 };
+
+/**
+ * Termination signals wired up by {@link AgentLoader.installProcessHandlers}.
+ *
+ * A shell reports a process killed by signal `N` as `128 + N`, so Ctrl-C
+ * (`SIGINT`) must exit `130`. Signal numbers differ per platform, so they are
+ * read from `os.constants.signals` instead of being hard-coded.
+ */
+const TERMINATION_SIGNALS = ['SIGINT', 'SIGUSR1', 'SIGUSR2'] as const;
 
 /**
  * Metadata for a file.
@@ -356,6 +366,31 @@ export class AgentFile {
       }
     }
   }
+
+  /**
+   * Removes the compiled artifact synchronously, for use from a process
+   * `'exit'` listener where the runtime drops any pending promise or I/O as
+   * soon as the listener returns. Failures are swallowed: at exit there is no
+   * caller left to handle them. Prefer {@link dispose} everywhere else.
+   */
+  disposeSync(): void {
+    // `load()` sets this alongside `cleanupFilePath` when it compiles; an
+    // agent file with no compiled output owns no artifact and stays usable.
+    if (this.disposed || !this.cleanupDirPath) {
+      return;
+    }
+
+    this.disposed = true;
+    try {
+      // `rmSync` unlinks the `node_modules` symlink inside the output
+      // directory rather than following it into the project's real one.
+      fs.rmSync(this.cleanupDirPath, {recursive: true, force: true});
+    } catch (e) {
+      logger.warn(
+        `Failed to remove ${this.cleanupDirPath}: ${(e as Error).message}`,
+      );
+    }
+  }
 }
 
 /**
@@ -374,34 +409,50 @@ export class AgentLoader {
   private readonly preloadedAgents: Record<string, AgentFile> = {};
   private readonly loadFailures: Record<string, AgentLoadFailure> = {};
   private watcher?: fs.FSWatcher;
+  private removeProcessHandlers?: () => void;
 
   constructor(
     private readonly agentsDirPath: string = process.cwd(),
     private readonly options = DEFAULT_AGENT_FILE_OPTIONS,
     private readonly watchForChanges = false,
-  ) {
-    // Do cleanups on exit
-    const exitHandler = async ({
-      exit,
-      cleanup,
-    }: {
-      exit?: boolean;
-      cleanup?: boolean;
-    }) => {
-      if (cleanup) {
-        await this.disposeAll();
-      }
+  ) {}
 
-      if (exit) {
-        process.exit();
+  /**
+   * Wires process exit and termination signals to this loader's cleanup.
+   *
+   * This mutates global process state and terminates the process on a
+   * termination signal, so it is only appropriate for a CLI entrypoint that
+   * owns the process. Library and test consumers must instead call
+   * {@link disposeAll} when they are done. Calling this twice is a no-op, and
+   * {@link disposeAll} removes the listeners again.
+   *
+   * No `'uncaughtException'` listener is installed: one would replace Node's
+   * default fatal handler, which prints the stack and exits 1.
+   */
+  installProcessHandlers(): void {
+    if (this.removeProcessHandlers) {
+      return;
+    }
+
+    // An `exit` listener cannot await, so cleanup has to be synchronous.
+    const onExit = () => this.disposeAllSync();
+    // Node passes the signal name to the listener, so one closure covers all
+    // of them and still reports the conventional `128 + signal` status.
+    const onSignal = (signal: (typeof TERMINATION_SIGNALS)[number]) =>
+      process.exit(128 + os.constants.signals[signal]);
+
+    process.on('exit', onExit);
+    for (const signal of TERMINATION_SIGNALS) {
+      process.on(signal, onSignal);
+    }
+
+    this.removeProcessHandlers = () => {
+      process.removeListener('exit', onExit);
+      for (const signal of TERMINATION_SIGNALS) {
+        process.removeListener(signal, onSignal);
       }
+      this.removeProcessHandlers = undefined;
     };
-
-    process.on('exit', () => exitHandler({cleanup: true}));
-    process.on('SIGINT', () => exitHandler({exit: true}));
-    process.on('SIGUSR1', () => exitHandler({exit: true}));
-    process.on('SIGUSR2', () => exitHandler({exit: true}));
-    process.on('uncaughtException', () => exitHandler({exit: true}));
   }
 
   /**
@@ -518,11 +569,27 @@ export class AgentLoader {
   }
 
   async disposeAll(): Promise<void> {
+    this.removeProcessHandlers?.();
     this.watcher?.close();
     this.watcher = undefined;
     await Promise.all(
       Object.values(this.preloadedAgents).map((f) => f.dispose()),
     );
+  }
+
+  /**
+   * Synchronous counterpart of {@link disposeAll} for a process `'exit'`
+   * listener. Best-effort: see {@link AgentFile.disposeSync}. Removing a
+   * listener while `'exit'` is being emitted is safe, so this releases the
+   * process handlers too and stays usable for ordinary teardown.
+   */
+  disposeAllSync(): void {
+    this.removeProcessHandlers?.();
+    this.watcher?.close();
+    this.watcher = undefined;
+    for (const agentFile of Object.values(this.preloadedAgents)) {
+      agentFile.disposeSync();
+    }
   }
 
   async preloadAgents() {

@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import esbuild from 'esbuild';
+import type {FSWatcher, PathLike, WatchOptions} from 'node:fs';
+import * as nodeFs from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -46,6 +48,43 @@ vi.mock('esbuild', async (importOriginal) => {
       build: vi.fn(),
     },
   };
+});
+
+/**
+ * Makes `fs.rmSync` fail on demand and records the watchers `fs.watch` opens.
+ * `vi.spyOn(fs, 'rmSync')` cannot do this: an ESM module namespace is not
+ * configurable, so the property cannot be redefined. Every other `node:fs`
+ * export, and `rmSync` itself while the flag is off, is the real
+ * implementation.
+ */
+const fsMockState = vi.hoisted(() => ({
+  rmSyncFailure: '',
+  rmSyncCalls: 0,
+  watchers: [] as FSWatcher[],
+}));
+
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  const rmSync: typeof actual.rmSync = (target, options) => {
+    fsMockState.rmSyncCalls++;
+    if (fsMockState.rmSyncFailure) {
+      throw new Error(fsMockState.rmSyncFailure);
+    }
+    return actual.rmSync(target, options);
+  };
+  // `FSWatcher` is not an export of `node:fs`, so recording the instances is
+  // the only way to observe that the loader closed the one it opened.
+  const watch = (
+    target: PathLike,
+    options: WatchOptions,
+    listener: (event: string, filename: string | null) => void,
+  ): FSWatcher => {
+    const watcher = actual.watch(target, options, listener);
+    fsMockState.watchers.push(watcher);
+    return watcher;
+  };
+
+  return {...actual, default: {...actual, rmSync, watch}, rmSync, watch};
 });
 
 const agent1JsContent = `
@@ -138,6 +177,50 @@ class FakeAgentForApp extends BaseAgent {
 const agent = new FakeAgentForApp('agent_for_app_default');
 export default new App({ name: 'test_app_default', rootAgent: agent });
 `;
+
+// Never `process.emit` any of these events: that also fires Vitest's and
+// Tinypool's own listeners and can take the worker down. The tests below
+// capture the listener the loader installed and invoke it directly.
+const TERMINATION_SIGNALS = ['SIGINT', 'SIGUSR1', 'SIGUSR2'] as const;
+
+const PROCESS_EVENTS = [
+  'exit',
+  ...TERMINATION_SIGNALS,
+  'uncaughtException',
+] as const;
+
+const counts = () =>
+  PROCESS_EVENTS.map((event) => process.listenerCount(event));
+
+const afterInstall = (before: number[]) =>
+  before.map((count, index) =>
+    PROCESS_EVENTS[index] === 'uncaughtException' ? count : count + 1,
+  );
+
+/**
+ * Runs `install` and returns the single listener it added to the list
+ * `listenersOf` reports, so it can be invoked without emitting the event.
+ */
+const listenerAddedBy = <T>(listenersOf: () => T[], install: () => void) => {
+  const before = new Set<T>(listenersOf());
+  install();
+  const added = listenersOf().filter((l) => !before.has(l));
+  expect(added).toHaveLength(1);
+  return added[0];
+};
+
+/**
+ * Preloads every agent and returns the compiled output directory of each one.
+ */
+async function preloadedOutputDirs(loader: AgentLoader): Promise<string[]> {
+  const names = await loader.listAgents();
+
+  return Promise.all(
+    names.map(async (name) =>
+      path.dirname((await loader.getAgentFile(name)).getFilePath()),
+    ),
+  );
+}
 
 describe('AgentLoader', () => {
   let tempAgentsDir: string;
@@ -508,6 +591,107 @@ describe('AgentLoader', () => {
         `Agent file ${agentPath} does not exists`,
       );
     });
+
+    /**
+     * Writes an agent file and returns a loaded `AgentFile` whose compiled
+     * output lives in `tempLoaderDir`.
+     */
+    async function loadCompiledAgent(): Promise<AgentFile> {
+      const agentPath = path.join(tempAgentsDir, 'agent1.js');
+      await fs.writeFile(agentPath, agent1JsContent);
+
+      const compiledAgentPath = compiledPath('agent1.cjs');
+      (esbuild.build as Mock).mockImplementation(async () => {
+        await fs.writeFile(compiledAgentPath, agent1JsContent);
+      });
+
+      const agentFile = new AgentFile(agentPath);
+      await agentFile.load();
+      return agentFile;
+    }
+
+    it('removes the compiled output directory synchronously on disposeSync', async () => {
+      const agentFile = await loadCompiledAgent();
+      expect(nodeFs.existsSync(tempLoaderDir)).toBe(true);
+
+      agentFile.disposeSync();
+
+      // No await between the call and the assertion: that ordering is what
+      // pins the bug, since a process 'exit' listener gets nothing more.
+      expect(nodeFs.existsSync(tempLoaderDir)).toBe(false);
+      expect(() => agentFile.getFilePath()).toThrow(
+        'Agent is disposed and can not be used',
+      );
+    });
+
+    it('is a no-op when disposeSync runs twice', async () => {
+      const agentFile = await loadCompiledAgent();
+
+      agentFile.disposeSync();
+      const callsAfterFirst = fsMockState.rmSyncCalls;
+
+      expect(() => agentFile.disposeSync()).not.toThrow();
+      expect(fsMockState.rmSyncCalls).toBe(callsAfterFirst);
+      expect(nodeFs.existsSync(tempLoaderDir)).toBe(false);
+    });
+
+    it('does not touch the filesystem when disposeSync runs after dispose', async () => {
+      const agentFile = await loadCompiledAgent();
+      await agentFile.dispose();
+      const callsAfterDispose = fsMockState.rmSyncCalls;
+
+      agentFile.disposeSync();
+
+      expect(fsMockState.rmSyncCalls).toBe(callsAfterDispose);
+    });
+
+    it('keeps an uncompiled agent file usable after disposeSync', async () => {
+      const agentPath = path.join(tempAgentsDir, 'agent1.js');
+      await fs.writeFile(agentPath, agent1JsContent);
+
+      const agentFile = new AgentFile(agentPath, {
+        compile: false,
+        bundle: false,
+      });
+      await agentFile.load();
+
+      agentFile.disposeSync();
+
+      expect(agentFile.getFilePath()).toEqual(agentPath);
+      expect(nodeFs.existsSync(agentPath)).toBe(true);
+    });
+
+    it('swallows a filesystem failure while removing the output directory', async () => {
+      const agentFile = await loadCompiledAgent();
+
+      fsMockState.rmSyncFailure = 'EBUSY: resource busy or locked';
+      try {
+        expect(() => agentFile.disposeSync()).not.toThrow();
+        expect(nodeFs.existsSync(tempLoaderDir)).toBe(true);
+      } finally {
+        fsMockState.rmSyncFailure = '';
+      }
+
+      expect(() => agentFile.getFilePath()).toThrow(
+        'Agent is disposed and can not be used',
+      );
+    });
+
+    it('does not follow the node_modules symlink when removing the output directory', async () => {
+      const agentFile = await loadCompiledAgent();
+      expect(nodeFs.existsSync(path.join(tempLoaderDir, 'node_modules'))).toBe(
+        true,
+      );
+
+      agentFile.disposeSync();
+
+      expect(nodeFs.existsSync(tempLoaderDir)).toBe(false);
+      expect(
+        nodeFs.existsSync(
+          path.join(tempAgentsDir, 'node_modules', '@google', 'adk'),
+        ),
+      ).toBe(true);
+    });
   });
 
   describe('replaceDirnamePlugin', () => {
@@ -794,6 +978,67 @@ describe('AgentLoader', () => {
       await expect(fs.access(compiledAgent2Path)).rejects.toThrow();
     });
 
+    it('removes every preloaded output directory synchronously on disposeAllSync', async () => {
+      const loader = new AgentLoader(tempAgentsDir);
+      const outputDirs = await preloadedOutputDirs(loader);
+
+      expect(outputDirs).toHaveLength(3);
+      for (const outputDir of outputDirs) {
+        expect(nodeFs.existsSync(outputDir)).toBe(true);
+      }
+
+      loader.disposeAllSync();
+
+      for (const outputDir of outputDirs) {
+        expect(nodeFs.existsSync(outputDir)).toBe(false);
+      }
+    });
+
+    it('cleans up synchronously from the exit listener', async () => {
+      const loader = new AgentLoader(tempAgentsDir);
+
+      try {
+        const outputDirs = await preloadedOutputDirs(loader);
+        expect(outputDirs).toHaveLength(3);
+
+        const exitListener = listenerAddedBy(
+          () => process.listeners('exit'),
+          () => {
+            loader.installProcessHandlers();
+          },
+        );
+        exitListener(0);
+
+        // No await between the call and the assertion: a process 'exit'
+        // listener gets nothing more once it returns.
+        for (const outputDir of outputDirs) {
+          expect(nodeFs.existsSync(outputDir)).toBe(false);
+        }
+      } finally {
+        await loader.disposeAll();
+      }
+    });
+
+    it('closes the directory watcher on disposeAllSync', async () => {
+      fsMockState.watchers.length = 0;
+      const loader = new AgentLoader(tempAgentsDir, undefined, true);
+
+      try {
+        await loader.listAgents();
+        expect(fsMockState.watchers).toHaveLength(1);
+        const closeWatcher = vi.spyOn(fsMockState.watchers[0], 'close');
+
+        loader.disposeAllSync();
+
+        expect(closeWatcher).toHaveBeenCalledTimes(1);
+      } finally {
+        for (const watcher of fsMockState.watchers) {
+          watcher.close();
+        }
+        fsMockState.watchers.length = 0;
+      }
+    });
+
     it('can load agent when agentDir is the filepath', async () => {
       (fileUtils.isFile as Mock).mockReturnValue(true);
       const loader = new AgentLoader(path.join(tempAgentsDir, 'agent1.js'));
@@ -873,6 +1118,203 @@ describe('AgentLoader', () => {
       ).toBe(false);
 
       await loader.disposeAll();
+    });
+  });
+
+  describe('process handlers', () => {
+    it('does not register process listeners in the constructor', async () => {
+      const before = counts();
+      const loaders = [
+        new AgentLoader(tempAgentsDir),
+        new AgentLoader(tempAgentsDir),
+        new AgentLoader(tempAgentsDir),
+      ];
+
+      try {
+        expect(counts()).toEqual(before);
+      } finally {
+        await Promise.all(loaders.map((loader) => loader.disposeAll()));
+      }
+    });
+
+    it('installs exit and termination signal listeners on demand', async () => {
+      const loader = new AgentLoader(tempAgentsDir);
+      const before = counts();
+
+      try {
+        loader.installProcessHandlers();
+
+        expect(counts()).toEqual(afterInstall(before));
+      } finally {
+        await loader.disposeAll();
+      }
+    });
+
+    it('never installs an uncaughtException listener', async () => {
+      const before = process.listenerCount('uncaughtException');
+      const loader = new AgentLoader(tempAgentsDir);
+
+      try {
+        loader.installProcessHandlers();
+
+        expect(process.listenerCount('uncaughtException')).toBe(before);
+      } finally {
+        await loader.disposeAll();
+      }
+    });
+
+    it('is idempotent', async () => {
+      const loader = new AgentLoader(tempAgentsDir);
+      const before = counts();
+
+      try {
+        loader.installProcessHandlers();
+        loader.installProcessHandlers();
+
+        expect(counts()).toEqual(afterInstall(before));
+      } finally {
+        await loader.disposeAll();
+      }
+    });
+
+    it('removes installed listeners on disposeAll', async () => {
+      const loader = new AgentLoader(tempAgentsDir);
+      const before = counts();
+
+      try {
+        loader.installProcessHandlers();
+        await loader.disposeAll();
+
+        expect(counts()).toEqual(before);
+      } finally {
+        await loader.disposeAll();
+      }
+    });
+
+    it('can reinstall after disposeAll', async () => {
+      const loader = new AgentLoader(tempAgentsDir);
+      const before = counts();
+
+      try {
+        loader.installProcessHandlers();
+        await loader.disposeAll();
+        loader.installProcessHandlers();
+
+        expect(counts()).toEqual(afterInstall(before));
+
+        await loader.disposeAll();
+
+        expect(counts()).toEqual(before);
+      } finally {
+        await loader.disposeAll();
+      }
+    });
+
+    it('disposeAll is a no-op for handlers that were never installed', async () => {
+      const before = counts();
+      const loader = new AgentLoader(tempAgentsDir);
+
+      await loader.disposeAll();
+
+      expect(counts()).toEqual(before);
+    });
+
+    it('the exit listener disposes cached agents', async () => {
+      const loader = new AgentLoader(tempAgentsDir);
+      const disposeAllSync = vi.spyOn(loader, 'disposeAllSync');
+
+      try {
+        const exitListener = listenerAddedBy(
+          () => process.listeners('exit'),
+          () => {
+            loader.installProcessHandlers();
+          },
+        );
+        exitListener(0);
+
+        expect(disposeAllSync).toHaveBeenCalled();
+      } finally {
+        disposeAllSync.mockRestore();
+        await loader.disposeAll();
+      }
+    });
+
+    it('removes installed listeners on disposeAllSync', async () => {
+      const loader = new AgentLoader(tempAgentsDir);
+      const before = counts();
+
+      try {
+        loader.installProcessHandlers();
+        loader.disposeAllSync();
+
+        expect(counts()).toEqual(before);
+      } finally {
+        await loader.disposeAll();
+      }
+    });
+
+    it('a termination signal listener exits the process', async () => {
+      const loader = new AgentLoader(tempAgentsDir);
+      const exit = vi.spyOn(process, 'exit').mockImplementation(() => {
+        throw new Error('process.exit');
+      });
+
+      try {
+        const signalListener = listenerAddedBy(
+          () => process.listeners('SIGINT'),
+          () => {
+            loader.installProcessHandlers();
+          },
+        );
+
+        expect(() => signalListener('SIGINT')).toThrow('process.exit');
+        expect(exit).toHaveBeenCalled();
+      } finally {
+        exit.mockRestore();
+        await loader.disposeAll();
+      }
+    });
+
+    it.each(TERMINATION_SIGNALS)(
+      'exits %s with 128 plus the signal number',
+      async (signal) => {
+        const loader = new AgentLoader(tempAgentsDir);
+        const exit = vi.spyOn(process, 'exit').mockImplementation(() => {
+          throw new Error('process.exit');
+        });
+
+        try {
+          const signalListener = listenerAddedBy(
+            () => process.listeners(signal),
+            () => {
+              loader.installProcessHandlers();
+            },
+          );
+
+          expect(() => signalListener(signal)).toThrow('process.exit');
+          expect(exit).toHaveBeenCalledWith(128 + os.constants.signals[signal]);
+        } finally {
+          exit.mockRestore();
+          await loader.disposeAll();
+        }
+      },
+    );
+
+    it('keeps another loader listeners when disposeAll runs twice', async () => {
+      const before = counts();
+      const survivor = new AgentLoader(tempAgentsDir);
+      const disposed = new AgentLoader(tempAgentsDir);
+
+      try {
+        survivor.installProcessHandlers();
+        disposed.installProcessHandlers();
+        await disposed.disposeAll();
+        await disposed.disposeAll();
+
+        expect(counts()).toEqual(afterInstall(before));
+      } finally {
+        await survivor.disposeAll();
+      }
     });
   });
 });

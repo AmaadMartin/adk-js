@@ -22,14 +22,62 @@ import {
   Session,
 } from '@google/adk';
 import {ReadableSpan} from '@opentelemetry/sdk-trace-base';
-import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import * as nodeFs from 'node:fs';
+import * as fsPromises from 'node:fs/promises';
+import * as os from 'node:os';
+import * as nodePath from 'node:path';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
 import {z} from 'zod';
 
 import {
   A2A_AUTH_TOKEN_ENV_VAR,
   AdkApiServer,
 } from '../../src/server/adk_api_server.js';
-import {AgentLoader} from '../../src/utils/agent_loader.js';
+import {AgentLoader, FileModuleType} from '../../src/utils/agent_loader.js';
+
+/**
+ * Scratch space the self-built `AgentLoader` compiles into, so its disposal
+ * can be observed without diffing the shared OS temp directory (the
+ * `integration` project spawns real `adk` servers in parallel).
+ */
+const tempState = vi.hoisted(() => ({root: '', index: 0}));
+
+vi.mock('../../src/utils/file_utils.js', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../../src/utils/file_utils.js')>();
+  const path = await import('node:path');
+  const fs = await import('node:fs/promises');
+  return {
+    ...actual,
+    createTempDir: async (prefix: string) => {
+      if (!tempState.root) {
+        return actual.createTempDir(prefix);
+      }
+      const dir = path.join(tempState.root, `agent-${tempState.index++}`);
+      await fs.mkdir(dir, {recursive: true});
+      return dir;
+    },
+  };
+});
+
+/**
+ * A dependency-free agent the real loader can compile: `isBaseAgent` is a
+ * global symbol check, so no import of `@google/adk` is needed.
+ */
+const TEMP_AGENT_SOURCE = `export const rootAgent = {
+  name: 'tempAgent',
+  [Symbol.for('google.adk.baseAgent')]: true,
+};
+`;
 
 interface JsonRpcResponse {
   result?: unknown;
@@ -1282,6 +1330,123 @@ describe('AdkWebServer', () => {
         const response = await fetch(`${server.url}/debug/trace/${eventId}`);
         expect(response.status).toBe(404);
       }
+    });
+  });
+
+  describe('process handlers', () => {
+    it('does not install agent loader process handlers by default', () => {
+      const loader = new AgentLoader(process.cwd());
+      const installProcessHandlers = vi.spyOn(loader, 'installProcessHandlers');
+      const signalListeners = process.listenerCount('SIGINT');
+
+      new AdkApiServer({agentLoader: loader});
+
+      expect(installProcessHandlers).not.toHaveBeenCalled();
+      expect(process.listenerCount('SIGINT')).toBe(signalListeners);
+    });
+
+    it('installs agent loader process handlers when opted in', async () => {
+      const loader = new AgentLoader(process.cwd());
+      const installProcessHandlers = vi.spyOn(loader, 'installProcessHandlers');
+      const signalListeners = process.listenerCount('SIGINT');
+
+      try {
+        new AdkApiServer({agentLoader: loader, installProcessHandlers: true});
+
+        expect(installProcessHandlers).toHaveBeenCalledOnce();
+        expect(process.listenerCount('SIGINT')).toBe(signalListeners + 1);
+      } finally {
+        await loader.disposeAll();
+      }
+    });
+  });
+
+  describe('AgentLoader ownership', () => {
+    let tempAgentsDir: string;
+
+    beforeAll(async () => {
+      tempState.root = await fsPromises.mkdtemp(
+        nodePath.join(os.tmpdir(), 'adk-server-loader-'),
+      );
+      tempAgentsDir = await fsPromises.mkdtemp(
+        nodePath.join(os.tmpdir(), 'adk-server-agents-'),
+      );
+      await fsPromises.writeFile(
+        nodePath.join(tempAgentsDir, 'temp_agent.js'),
+        TEMP_AGENT_SOURCE,
+      );
+    });
+
+    afterAll(async () => {
+      await fsPromises.rm(tempState.root, {recursive: true, force: true});
+      await fsPromises.rm(tempAgentsDir, {recursive: true, force: true});
+    });
+
+    it('should dispose the agent loader it built itself when stopped', async () => {
+      const ownServer = new AdkApiServer({
+        agentsDir: tempAgentsDir,
+        agentFileLoadOptions: {
+          compile: true,
+          bundle: true,
+          moduleType: FileModuleType.ESM,
+        },
+      });
+      await ownServer.start();
+      let running = true;
+
+      try {
+        // Listing the apps is what triggers the compile; start() alone does
+        // not preload anything.
+        const listed = await new HttpClient(ownServer.url).get<string[]>(
+          '/list-apps',
+        );
+        expect(listed.data).toEqual(['temp_agent']);
+        expect(nodeFs.readdirSync(tempState.root)).toHaveLength(1);
+
+        await ownServer.stop();
+        running = false;
+
+        expect(nodeFs.readdirSync(tempState.root)).toEqual([]);
+      } finally {
+        if (running) {
+          await ownServer.stop();
+        }
+      }
+    });
+
+    it('should release its own agent loader even when closing the server fails', async () => {
+      const disposeAll = vi.spyOn(AgentLoader.prototype, 'disposeAll');
+      const ownServer = new AdkApiServer({agentsDir: tempAgentsDir});
+      await ownServer.start();
+
+      try {
+        await ownServer.stop();
+        expect(disposeAll).toHaveBeenCalledTimes(1);
+
+        // The HTTP server is closed already, so close() reports
+        // ERR_SERVER_NOT_RUNNING and stop() rejects; the loader must still be
+        // released on that path.
+        await expect(ownServer.stop()).rejects.toThrow(/not running/i);
+        expect(disposeAll).toHaveBeenCalledTimes(2);
+      } finally {
+        disposeAll.mockRestore();
+      }
+    });
+
+    it('should not dispose an agent loader supplied by the caller', async () => {
+      const suppliedLoader = new AgentLoader(tempAgentsDir);
+      const disposeAll = vi.spyOn(suppliedLoader, 'disposeAll');
+      const injectedServer = new AdkApiServer({
+        agentLoader: suppliedLoader,
+        sessionService,
+        memoryService,
+        artifactService,
+      });
+
+      await injectedServer.start();
+      await injectedServer.stop();
+
+      expect(disposeAll).not.toHaveBeenCalled();
     });
   });
 });

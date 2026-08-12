@@ -58,6 +58,13 @@ interface ServerOptions {
   memoryService?: BaseMemoryService;
   artifactService?: BaseArtifactService;
   agentLoader?: AgentLoader;
+  /**
+   * Installs process exit and signal handlers on the agent loader. Only a CLI
+   * entrypoint that owns the process should enable this: the handlers call
+   * `process.exit()`. Defaults to false so an embedded server never mutates
+   * the host process.
+   */
+  installProcessHandlers?: boolean;
   agentFileLoadOptions?: AgentFileOptions;
   serveDebugUI?: boolean;
   allowOrigins?: string;
@@ -91,6 +98,12 @@ export class AdkApiServer {
 
   readonly app: express.Application;
   private readonly agentLoader: AgentLoader;
+  /**
+   * True when this server built its own {@link AgentLoader}; a loader passed
+   * in through `ServerOptions` belongs to the caller and is never disposed
+   * here.
+   */
+  private readonly ownsAgentLoader: boolean;
   /**
    * Caches below are keyed by request path parameters (`appName`, `eventId`,
    * `sessionId`), so each is created with `Object.create(null)`. On an
@@ -127,6 +140,7 @@ export class AdkApiServer {
     this.memoryService = options.memoryService ?? new InMemoryMemoryService();
     this.artifactService =
       options.artifactService ?? new InMemoryArtifactService();
+    this.ownsAgentLoader = options.agentLoader === undefined;
     this.agentLoader =
       options.agentLoader ??
       new AgentLoader(
@@ -156,6 +170,10 @@ export class AdkApiServer {
     this.a2aAuthToken =
       options.a2aAuthToken || process.env[A2A_AUTH_TOKEN_ENV_VAR] || undefined;
     this.app = express();
+
+    if (options.installProcessHandlers) {
+      this.agentLoader.installProcessHandlers();
+    }
   }
 
   private async setupTelemetry(): Promise<void> {
@@ -996,25 +1014,23 @@ export class AdkApiServer {
     });
   }
 
-  stop(): Promise<void> {
-    if (!this.server) {
-      return Promise.resolve();
-    }
-
-    return new Promise((resolve, reject) => {
-      this.server!.close((err) => {
-        if (err) {
-          reject(err);
-          return;
-        }
+  async stop(): Promise<void> {
+    try {
+      if (this.server) {
+        await new Promise<void>((resolve, reject) => {
+          this.server!.close((err) => (err ? reject(err) : resolve()));
+        });
 
         console.log(`
 +-----------------------------------------------------------------------------+
 | ADK API Server stopped                                                      |
 +-----------------------------------------------------------------------------+`);
-        resolve();
-      });
-    });
+      }
+    } finally {
+      if (this.ownsAgentLoader) {
+        await this.agentLoader.disposeAll();
+      }
+    }
   }
 
   private async getRunner(
