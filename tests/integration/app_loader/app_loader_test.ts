@@ -5,15 +5,12 @@
  */
 
 import {App, isApp, isBaseAgent} from '@google/adk';
-import {exec, spawn} from 'node:child_process';
-import * as fs from 'node:fs/promises';
+import {spawn} from 'node:child_process';
 import * as path from 'node:path';
-import {promisify} from 'node:util';
-import {afterAll, beforeAll, describe, expect, it} from 'vitest';
+import {afterAll, describe, expect, it} from 'vitest';
 import {AgentLoader} from '../../../dev/src/utils/agent_loader.js';
 import {sendInput} from '../test_case_utils.js';
 
-const execAsync = promisify(exec);
 const dirname = process.cwd();
 const TEST_EXECUTION_TIMEOUT = 60000;
 
@@ -26,10 +23,6 @@ describe('App loader CLI integration', () => {
         'tests/integration/app_loader',
         testCaseName,
       );
-
-      beforeAll(async () => {
-        await execAsync('npm install', {cwd: projectPath});
-      }, TEST_EXECUTION_TIMEOUT);
 
       it(
         'should run app via package.json start script and get responses',
@@ -51,18 +44,6 @@ describe('App loader CLI integration', () => {
         },
         TEST_EXECUTION_TIMEOUT,
       );
-
-      afterAll(async () => {
-        await fs
-          .rm(path.join(projectPath, 'node_modules'), {
-            recursive: true,
-            force: true,
-          })
-          .catch(() => {});
-        await fs
-          .unlink(path.join(projectPath, 'package-lock.json'))
-          .catch(() => {});
-      }, TEST_EXECUTION_TIMEOUT);
     },
   );
 });
@@ -72,12 +53,7 @@ describe('AgentLoader discovery and loading integration', () => {
     dirname,
     'tests/integration/app_loader/discovery',
   );
-  let loader: AgentLoader;
-
-  beforeAll(async () => {
-    await execAsync('npm install', {cwd: projectPath});
-    loader = new AgentLoader(projectPath);
-  }, TEST_EXECUTION_TIMEOUT);
+  const loader = new AgentLoader(projectPath);
 
   it(
     'should discover apps vs agents across directories and standalone files',
@@ -129,14 +105,5 @@ describe('AgentLoader discovery and loading integration', () => {
 
   afterAll(async () => {
     await loader.disposeAll();
-    await fs
-      .rm(path.join(projectPath, 'node_modules'), {
-        recursive: true,
-        force: true,
-      })
-      .catch(() => {});
-    await fs
-      .unlink(path.join(projectPath, 'package-lock.json'))
-      .catch(() => {});
-  }, TEST_EXECUTION_TIMEOUT);
+  });
 });

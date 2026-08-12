@@ -4,14 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {exec, spawn} from 'node:child_process';
-import * as fs from 'node:fs/promises';
+import {spawn} from 'node:child_process';
 import * as path from 'node:path';
-import {promisify} from 'node:util';
-import {afterAll, beforeAll, describe, expect, it} from 'vitest';
+import {describe, expect, it} from 'vitest';
 import {sendInput} from '../test_case_utils.js';
 
-const execAsync = promisify(exec);
 const dirname = process.cwd();
 const TEST_EXECUTION_TIMEOUT = 40000;
 
@@ -23,10 +20,6 @@ describe.each(['__dirname', '__filename', 'import_meta_url'])(
       'tests/integration/agent_loader',
       testCaseName,
     );
-
-    beforeAll(async () => {
-      await execAsync('npm install', {cwd: projectPath});
-    }, TEST_EXECUTION_TIMEOUT);
 
     it(
       'should run agent and load params from file nearby via package.json script',
@@ -45,17 +38,5 @@ describe.each(['__dirname', '__filename', 'import_meta_url'])(
       },
       TEST_EXECUTION_TIMEOUT,
     );
-
-    afterAll(async () => {
-      await fs
-        .rm(path.join(projectPath, 'node_modules'), {
-          recursive: true,
-          force: true,
-        })
-        .catch(() => {});
-      await fs
-        .unlink(path.join(projectPath, 'package-lock.json'))
-        .catch(() => {});
-    }, TEST_EXECUTION_TIMEOUT);
   },
 );
