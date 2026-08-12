@@ -12,6 +12,7 @@ import {
   ArtifactVersion,
   BaseArtifactService,
   DeleteArtifactRequest,
+  fileHasUserNamespace,
   ListArtifactKeysRequest,
   ListVersionsRequest,
   LoadArtifactRequest,
@@ -218,15 +219,4 @@ function artifactPath(
 
 function artifactPrefix(scope: string, ...parts: string[]): string {
   return `${[scope, ...parts].map(encodeURIComponent).join('/')}/`;
-}
-
-/**
- * Checks if the filename has a user namespace prefix.
- *
- * @param filename The filename to check.
- * @return true if the filename has a user namespace (starts with "user:") false
- *     otherwise.
- */
-function fileHasUserNamespace(filename: string): boolean {
-  return filename.startsWith('user:');
 }

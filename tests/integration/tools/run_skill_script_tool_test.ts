@@ -7,6 +7,7 @@
 import {
   CodeExecutionResult,
   Context,
+  InMemoryArtifactService,
   InvocationContext,
   RunSkillScriptTool,
   Skill,
@@ -17,6 +18,10 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {describe, expect, it} from 'vitest';
+// ScopedArtifactService is internal: it is the framework's own bridge from a
+// BaseArtifactService to the session-scoped service an invocation carries.
+import {ScopedArtifactService} from '../../../core/src/artifacts/scoped_artifact_service.js';
+import {SaveFilesAsArtifactsResult} from '../../../core/src/utils/artifact_utils.js';
 
 const IS_WINDOWS = os.platform() === 'win32';
 const IS_UNIX = os.platform() === 'linux' || os.platform() === 'darwin';
@@ -28,11 +33,15 @@ const IS_UNIX = os.platform() === 'linux' || os.platform() === 'darwin';
 const TEST_EXECUTION_TIMEOUT = 40000;
 
 describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
-  function createMockContext(agentName = 'test-agent') {
+  function createMockContext(
+    agentName = 'test-agent',
+    artifactService?: ScopedArtifactService,
+  ) {
     return new Context({
       invocationContext: {
         session: {state: {}},
         agent: {name: agentName},
+        artifactService,
       } as unknown as InvocationContext,
     });
   }
@@ -356,5 +365,53 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
     // Clean up both files
     await fs.unlink(targetFile);
     await fs.unlink(fullPath);
+  });
+
+  it('saves script output to the artifact service when the option is on', async () => {
+    const artifactService = new ScopedArtifactService(
+      new InMemoryArtifactService(),
+      'test-app',
+      'test-user',
+      'test-session',
+    );
+    const executor = new UnsafeLocalCodeExecutor();
+    const toolset = new SkillToolset([testSkill], {
+      codeExecutor: executor,
+      saveOutputsAsArtifacts: true,
+    });
+    const tool = new RunSkillScriptTool(toolset);
+
+    const result = (await tool.runAsync({
+      args: {
+        skill_name: 'test-skill',
+        script_path: 'scripts/create_file.js',
+      },
+      toolContext: createMockContext('test-agent', artifactService),
+    })) as CodeExecutionResult & SaveFilesAsArtifactsResult;
+
+    // Matched by entry rather than against the whole list: on Windows the
+    // executor also reports the skill's own input resources as outputs,
+    // because it skips them by comparing `inputFiles[].name`
+    // ('scripts/x.js') against a `readdir` path ('scripts\\x.js'). That is a
+    // pre-existing executor issue, and not what this test pins.
+    expect(result.savedArtifacts).toContainEqual({
+      filename: 'output_from_script.txt',
+      version: 0,
+    });
+    expect(result.artifactSaveErrors).toEqual([]);
+
+    const artifact = await artifactService.loadArtifact({
+      filename: 'output_from_script.txt',
+    });
+    const data = artifact?.inlineData?.data;
+    if (data === undefined) {
+      expect.fail('expected the saved artifact to carry inline data');
+    }
+    expect(Buffer.from(data, 'base64').toString('utf-8')).toBe(
+      'hello from script file',
+    );
+
+    // The script still materializes into process.cwd(); do not leave it behind.
+    await fs.unlink(path.join(process.cwd(), 'output_from_script.txt'));
   });
 });

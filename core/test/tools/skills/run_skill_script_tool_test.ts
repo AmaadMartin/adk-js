@@ -15,10 +15,14 @@ import {
   InvocationContext,
   LlmAgent,
   RunSkillScriptTool,
+  SessionArtifactService,
   Skill,
   SkillToolset,
 } from '@google/adk';
-import {describe, expect, it, vi} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {InMemoryArtifactService} from '../../../src/artifacts/in_memory_artifact_service.js';
+import {ScopedArtifactService} from '../../../src/artifacts/scoped_artifact_service.js';
+import {SaveFilesAsArtifactsResult} from '../../../src/utils/artifact_utils.js';
 import {materializeFiles} from '../../../src/utils/file_utils.js';
 
 vi.mock('../../../src/utils/file_utils.js', () => ({
@@ -50,10 +54,14 @@ interface ToolErrorResponse {
   errorCode: string;
 }
 
+/** The tool result once artifact persistence has augmented it. */
+type ArtifactAugmentedResult = CodeExecutionResult & SaveFilesAsArtifactsResult;
+
 describe('RunSkillScriptTool', () => {
   function createMockContext(
     agentName = 'test-agent',
     agentExecutor?: BaseCodeExecutor,
+    artifactService?: SessionArtifactService,
   ): Context {
     const agentObj: Record<string | symbol, unknown> = {name: agentName};
     if (agentExecutor) {
@@ -65,6 +73,7 @@ describe('RunSkillScriptTool', () => {
       invocationContext: {
         session: {state: {}},
         agent: agentObj as unknown as LlmAgent,
+        artifactService,
       } as unknown as InvocationContext,
     });
   }
@@ -228,5 +237,139 @@ describe('RunSkillScriptTool', () => {
     });
 
     expect(materializeFiles).toHaveBeenCalledWith([testFile]);
+  });
+
+  describe('saveOutputsAsArtifacts', () => {
+    const outputFile: File = {
+      name: 'chart.png',
+      content: Buffer.from('chart bytes', 'utf-8').toString('base64'),
+      contentEncoding: FileContentEncoding.BASE64,
+      mimeType: 'image/png',
+    };
+
+    function createExecutor(): MockCodeExecutor {
+      const executor = new MockCodeExecutor();
+      executor.mockResult = {
+        stdout: 'script ran',
+        stderr: '',
+        outputFiles: [outputFile],
+      };
+      return executor;
+    }
+
+    function createArtifactService(): ScopedArtifactService {
+      return new ScopedArtifactService(
+        new InMemoryArtifactService(),
+        'test-app',
+        'test-user',
+        'test-session',
+      );
+    }
+
+    function runScript(
+      executor: MockCodeExecutor,
+      toolset: SkillToolset,
+      artifactService?: SessionArtifactService,
+    ): Promise<unknown> {
+      return new RunSkillScriptTool(toolset).runAsync({
+        args: {skill_name: 'test-skill', script_path: 'scripts/setup.js'},
+        toolContext: createMockContext('test-agent', executor, artifactService),
+      });
+    }
+
+    beforeEach(() => {
+      vi.mocked(materializeFiles).mockImplementation(async (files) => files);
+    });
+
+    afterEach(() => {
+      vi.mocked(materializeFiles).mockReset();
+      vi.restoreAllMocks();
+    });
+
+    it('does not touch the artifact service when the option is off', async () => {
+      const artifactService = createArtifactService();
+      const saveSpy = vi.spyOn(artifactService, 'saveArtifact');
+      const executor = createExecutor();
+      const toolset = new SkillToolset([mockSkill], {codeExecutor: executor});
+
+      const result = (await runScript(
+        executor,
+        toolset,
+        artifactService,
+      )) as CodeExecutionResult;
+
+      expect(saveSpy).not.toHaveBeenCalled();
+      expect(result).not.toHaveProperty('savedArtifacts');
+      expect(result).not.toHaveProperty('artifactSaveErrors');
+      expect(result.outputFiles).toEqual([outputFile]);
+    });
+
+    it('reports saved artifacts when the option is on', async () => {
+      const artifactService = createArtifactService();
+      const executor = createExecutor();
+      const toolset = new SkillToolset([mockSkill], {
+        codeExecutor: executor,
+        saveOutputsAsArtifacts: true,
+      });
+
+      const result = (await runScript(
+        executor,
+        toolset,
+        artifactService,
+      )) as ArtifactAugmentedResult;
+
+      expect(result.savedArtifacts).toEqual([
+        {filename: 'chart.png', version: 0},
+      ]);
+      expect(result.artifactSaveErrors).toEqual([]);
+      expect(result.outputFiles).toEqual([outputFile]);
+      expect(
+        (await artifactService.loadArtifact({filename: 'chart.png'}))
+          ?.inlineData?.data,
+      ).toBe(outputFile.content);
+    });
+
+    it('returns the plain result when no artifact service is configured', async () => {
+      const executor = createExecutor();
+      const toolset = new SkillToolset([mockSkill], {
+        codeExecutor: executor,
+        saveOutputsAsArtifacts: true,
+      });
+
+      const result = (await runScript(
+        executor,
+        toolset,
+      )) as CodeExecutionResult;
+
+      expect(result).not.toHaveProperty('savedArtifacts');
+      expect(result).not.toHaveProperty('artifactSaveErrors');
+      expect(result.stdout).toBe('script ran');
+      expect(result.outputFiles).toEqual([outputFile]);
+    });
+
+    it('surfaces a failed save without failing the script', async () => {
+      const artifactService = createArtifactService();
+      vi.spyOn(artifactService, 'saveArtifact').mockRejectedValue(
+        new Error('artifact backend unavailable'),
+      );
+      const executor = createExecutor();
+      const toolset = new SkillToolset([mockSkill], {
+        codeExecutor: executor,
+        saveOutputsAsArtifacts: true,
+      });
+
+      const result = (await runScript(
+        executor,
+        toolset,
+        artifactService,
+      )) as ArtifactAugmentedResult;
+
+      expect(result.savedArtifacts).toEqual([]);
+      expect(result.artifactSaveErrors).toEqual([
+        {filename: 'chart.png', error: 'artifact backend unavailable'},
+      ]);
+      expect(result.stdout).toBe('script ran');
+      expect(result.outputFiles).toEqual([outputFile]);
+    });
   });
 });

@@ -19,9 +19,8 @@ import {
   ListVersionsRequest,
   LoadArtifactRequest,
   SaveArtifactRequest,
+  USER_NAMESPACE_PREFIX,
 } from './base_artifact_service.js';
-
-const USER_NAMESPACE_PREFIX = 'user:';
 
 /**
  * Metadata for a file artifact version.

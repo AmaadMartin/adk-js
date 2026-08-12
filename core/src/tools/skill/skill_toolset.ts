@@ -45,6 +45,7 @@ export class SkillToolset extends BaseToolset {
   public additionalTools: Array<BaseTool | BaseToolset>;
   public codeExecutor?: BaseCodeExecutor;
   public registry?: SkillRegistry;
+  public saveOutputsAsArtifacts: boolean;
   private toolCache = new Map<string, BaseTool[]>();
   private fetchedSkillCache = new Map<string, Map<string, Skill>>();
 
@@ -63,6 +64,14 @@ export class SkillToolset extends BaseToolset {
        * confirmation.
        */
       allowInlineScripts?: boolean;
+      /**
+       * Whether output files produced by the skill script tools are
+       * additionally saved to the configured artifact service. Disabled by
+       * default. When no artifact service is configured on the invocation,
+       * script execution still succeeds and the outputs are reported as files
+       * only.
+       */
+      saveOutputsAsArtifacts?: boolean;
     } = {},
   ) {
     super([], 'adk_skill_toolset');
@@ -72,6 +81,7 @@ export class SkillToolset extends BaseToolset {
     this.codeExecutor = options.codeExecutor;
     this.additionalTools = options.additionalTools || [];
     this.registry = options.registry;
+    this.saveOutputsAsArtifacts = options.saveOutputsAsArtifacts ?? false;
 
     this.tools = [
       new ListSkillsTool(this),
