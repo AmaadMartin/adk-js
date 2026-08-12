@@ -287,6 +287,9 @@ export function prepareRequestBody(
             }
           }
           return formData;
+        } else if (mimeType === 'application/octet-stream') {
+          headers['Content-Type'] = mimeType;
+          return finalData;
         } else if (mimeType === 'text/plain') {
           headers['Content-Type'] = mimeType;
           return String(finalData);
