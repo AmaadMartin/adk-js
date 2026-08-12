@@ -64,7 +64,6 @@ describe('CLI Entrypoint', () => {
 
   const parse = async (args: string[]) => {
     try {
-      process.argv = args;
       await program.parseAsync(['node', 'cli_entrypoint.js', ...args]);
     } catch (e: unknown) {
       if ((e as {code: string}).code !== 'commander.exit') {
@@ -354,6 +353,116 @@ describe('CLI Entrypoint', () => {
       // A recognised flag must not also be passed through as an unknown one,
       // which gcloud would reject.
       expect(args.extraGcloudArgs).toEqual([]);
+    });
+
+    const deployedWith = () => (deployToCloudRun as Mock).mock.calls[0][0];
+
+    it.each([
+      ['space-separated', ['--port', '9000']],
+      ['equals-separated', ['--port=9000']],
+    ])(
+      'should not forward the value of a %s known flag to gcloud',
+      async (_form, portArgs) => {
+        await parse(['deploy', 'cloud_run', './my-agent-path', ...portArgs]);
+
+        const args = deployedWith();
+        expect(args.port).toBe(9000);
+        expect(args.extraGcloudArgs).toEqual([]);
+      },
+    );
+
+    it('should not forward space-separated values of --project, --region or --log_level', async () => {
+      await parse([
+        'deploy',
+        'cloud_run',
+        './my-agent-path',
+        '--project',
+        'my-proj',
+        '--region',
+        'us-west1',
+        '--log_level',
+        'debug',
+      ]);
+
+      const args = deployedWith();
+      expect(args).toMatchObject({
+        project: 'my-proj',
+        region: 'us-west1',
+        logLevel: 'debug',
+      });
+      expect(args.extraGcloudArgs).toEqual([]);
+    });
+
+    it('should not forward a space-separated --a2a_auth_token value', async () => {
+      await parse([
+        'deploy',
+        'cloud_run',
+        './my-agent-path',
+        '--a2a',
+        '--a2a_auth_token',
+        'tok',
+      ]);
+
+      const args = deployedWith();
+      expect(args).toMatchObject({a2a: true, a2aAuthToken: 'tok'});
+      expect(args.extraGcloudArgs).toEqual([]);
+    });
+
+    it('should forward unknown flags with their values while consuming known ones', async () => {
+      await parse([
+        'deploy',
+        'cloud_run',
+        './my-agent-path',
+        '--log_level',
+        'debug',
+        '--min-instances',
+        '1',
+        '--set-env-vars',
+        'FOO=bar',
+      ]);
+
+      const args = deployedWith();
+      expect(args.logLevel).toBe('debug');
+      expect(args.extraGcloudArgs).toEqual([
+        '--min-instances',
+        '1',
+        '--set-env-vars',
+        'FOO=bar',
+      ]);
+    });
+
+    it('should forward a lone unknown flag and its value unchanged', async () => {
+      await parse([
+        'deploy',
+        'cloud_run',
+        './my-agent-path',
+        '--memory',
+        '512Mi',
+      ]);
+
+      expect(deployedWith().extraGcloudArgs).toEqual(['--memory', '512Mi']);
+    });
+
+    it('should strip the -- terminator and forward what follows it', async () => {
+      await parse([
+        'deploy',
+        'cloud_run',
+        './my-agent-path',
+        '--',
+        '--no-allow-unauthenticated',
+      ]);
+
+      expect(deployedWith().extraGcloudArgs).toEqual([
+        '--no-allow-unauthenticated',
+      ]);
+    });
+
+    it('should forward a leading unknown flag when the agent directory is omitted', async () => {
+      await parse(['deploy', 'cloud_run', '--allow-unauthenticated']);
+
+      expect(deployedWith().extraGcloudArgs).toEqual([
+        '--allow-unauthenticated',
+      ]);
     });
   });
 
