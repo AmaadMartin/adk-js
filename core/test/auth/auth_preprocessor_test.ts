@@ -6,9 +6,14 @@
 
 import {
   AUTH_PREPROCESSOR,
+  BaseAgent,
   Event,
   InvocationContext,
+  LlmAgent,
+  PluginManager,
+  SequentialAgent,
   createEvent,
+  createSession,
 } from '@google/adk';
 import {Mock, describe, expect, it, vi} from 'vitest';
 import {REQUEST_CREDENTIAL_FUNCTION_CALL_NAME} from '../../src/agents/functions.js';
@@ -32,14 +37,28 @@ vi.mock('../../src/auth/auth_handler.js', () => ({
   },
 }));
 
-describe('AuthPreprocessor', () => {
-  const LLM_AGENT_SYMBOL = Symbol.for('google.adk.llmAgent');
+function createTestInvocationContext(
+  agent: BaseAgent,
+  events: Event[] = [],
+): InvocationContext {
+  return new InvocationContext({
+    invocationId: 'test-invocation',
+    agent,
+    session: createSession({
+      id: 'test-session',
+      appName: 'test-app',
+      userId: 'test-user',
+      events,
+    }),
+    pluginManager: new PluginManager([]),
+  });
+}
 
+describe('AuthPreprocessor', () => {
   it('skips if agent is not LlmAgent', async () => {
-    const invocationContext = {
-      agent: {}, // Not an LlmAgent
-      session: {events: []},
-    } as unknown as InvocationContext;
+    const invocationContext = createTestInvocationContext(
+      new SequentialAgent({name: 'not_an_llm_agent'}),
+    );
 
     const generator = AUTH_PREPROCESSOR.runAsync(invocationContext);
     const result = await generator.next();
@@ -48,10 +67,9 @@ describe('AuthPreprocessor', () => {
   });
 
   it('skips if no events are present', async () => {
-    const invocationContext = {
-      agent: {[LLM_AGENT_SYMBOL]: true},
-      session: {events: []},
-    } as unknown as InvocationContext;
+    const invocationContext = createTestInvocationContext(
+      new LlmAgent({name: 'test_agent'}),
+    );
 
     const generator = AUTH_PREPROCESSOR.runAsync(invocationContext);
     const result = await generator.next();
@@ -60,14 +78,10 @@ describe('AuthPreprocessor', () => {
   });
 
   it('skips if last event is not from user', async () => {
-    const invocationContext = {
-      agent: {[LLM_AGENT_SYMBOL]: true},
-      session: {
-        events: [
-          {author: 'system', content: {parts: [{text: 'hello'}]}} as Event,
-        ],
-      },
-    } as unknown as InvocationContext;
+    const invocationContext = createTestInvocationContext(
+      new LlmAgent({name: 'test_agent'}),
+      [createEvent({author: 'system', content: {parts: [{text: 'hello'}]}})],
+    );
 
     const generator = AUTH_PREPROCESSOR.runAsync(invocationContext);
     const result = await generator.next();
@@ -76,19 +90,17 @@ describe('AuthPreprocessor', () => {
   });
 
   it('skips if no function responses for request_credential are found', async () => {
-    const invocationContext = {
-      agent: {[LLM_AGENT_SYMBOL]: true},
-      session: {
-        events: [
-          {
-            author: 'user',
-            content: {
-              parts: [{text: 'hello'}],
-            },
-          } as Event,
-        ],
-      },
-    } as unknown as InvocationContext;
+    const invocationContext = createTestInvocationContext(
+      new LlmAgent({name: 'test_agent'}),
+      [
+        createEvent({
+          author: 'user',
+          content: {
+            parts: [{text: 'hello'}],
+          },
+        }),
+      ],
+    );
 
     const generator = AUTH_PREPROCESSOR.runAsync(invocationContext);
     const result = await generator.next();
@@ -97,71 +109,63 @@ describe('AuthPreprocessor', () => {
   });
 
   it('processes adk_request_credential responses and resumes tools', async () => {
-    const invocationContext = {
-      agent: {
-        [LLM_AGENT_SYMBOL]: true,
-        canonicalTools: vi.fn().mockResolvedValue([{name: 'someTool'}]),
-        canonicalBeforeToolCallbacks: [],
-        canonicalAfterToolCallbacks: [],
-      },
-      session: {
-        state: {},
-        events: [
-          createEvent({
-            author: 'agent',
-            content: {
-              parts: [
-                {
-                  functionCall: {
-                    id: 'toolFc1',
-                    name: 'someTool',
-                    args: {},
+    const invocationContext = createTestInvocationContext(
+      new LlmAgent({name: 'test_agent'}),
+      [
+        createEvent({
+          author: 'agent',
+          content: {
+            parts: [
+              {
+                functionCall: {
+                  id: 'toolFc1',
+                  name: 'someTool',
+                  args: {},
+                },
+              },
+            ],
+          },
+        }),
+        createEvent({
+          author: 'agent',
+          content: {
+            parts: [{text: 'thinking...'}],
+          },
+        }),
+        createEvent({
+          author: 'agent',
+          id: 'originalEvent',
+          content: {
+            parts: [
+              {
+                functionCall: {
+                  id: 'fc1',
+                  name: REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
+                  args: {
+                    authConfig: {credentialKey: 'testKey'},
+                    functionCallId: 'toolFc1',
                   },
                 },
-              ],
-            },
-          }),
-          createEvent({
-            author: 'agent',
-            content: {
-              parts: [{text: 'thinking...'}],
-            },
-          }),
-          createEvent({
-            author: 'agent',
-            id: 'originalEvent',
-            content: {
-              parts: [
-                {
-                  functionCall: {
-                    id: 'fc1',
-                    name: REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
-                    args: {
-                      authConfig: {credentialKey: 'testKey'},
-                      functionCallId: 'toolFc1',
-                    },
-                  },
+              },
+            ],
+          },
+        }),
+        createEvent({
+          author: 'user',
+          content: {
+            parts: [
+              {
+                functionResponse: {
+                  id: 'fc1',
+                  name: REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
+                  response: {authType: 'apiKey', apiKey: 'test'},
                 },
-              ],
-            },
-          }),
-          createEvent({
-            author: 'user',
-            content: {
-              parts: [
-                {
-                  functionResponse: {
-                    id: 'fc1',
-                    name: REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
-                    response: {authType: 'apiKey', apiKey: 'test'},
-                  },
-                },
-              ],
-            },
-          }),
-        ],
-      },
-    } as unknown as InvocationContext;
+              },
+            ],
+          },
+        }),
+      ],
+    );
 
     const generator = AUTH_PREPROCESSOR.runAsync(invocationContext);
     let result = await generator.next();
@@ -177,65 +181,57 @@ describe('AuthPreprocessor', () => {
   });
 
   it('processes adk_request_credential responses and resumes tools (snake_case args)', async () => {
-    const invocationContext = {
-      agent: {
-        [LLM_AGENT_SYMBOL]: true,
-        canonicalTools: vi.fn().mockResolvedValue([{name: 'someTool'}]),
-        canonicalBeforeToolCallbacks: [],
-        canonicalAfterToolCallbacks: [],
-      },
-      session: {
-        state: {},
-        events: [
-          createEvent({
-            author: 'agent',
-            content: {
-              parts: [
-                {
-                  functionCall: {
-                    id: 'toolFc1',
-                    name: 'someTool',
-                    args: {},
+    const invocationContext = createTestInvocationContext(
+      new LlmAgent({name: 'test_agent'}),
+      [
+        createEvent({
+          author: 'agent',
+          content: {
+            parts: [
+              {
+                functionCall: {
+                  id: 'toolFc1',
+                  name: 'someTool',
+                  args: {},
+                },
+              },
+            ],
+          },
+        }),
+        createEvent({
+          author: 'agent',
+          id: 'originalEvent',
+          content: {
+            parts: [
+              {
+                functionCall: {
+                  id: 'fc1',
+                  name: REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
+                  args: {
+                    auth_config: {credentialKey: 'testKey'},
+                    function_call_id: 'toolFc1',
                   },
                 },
-              ],
-            },
-          }),
-          createEvent({
-            author: 'agent',
-            id: 'originalEvent',
-            content: {
-              parts: [
-                {
-                  functionCall: {
-                    id: 'fc1',
-                    name: REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
-                    args: {
-                      auth_config: {credentialKey: 'testKey'},
-                      function_call_id: 'toolFc1',
-                    },
-                  },
+              },
+            ],
+          },
+        }),
+        createEvent({
+          author: 'user',
+          content: {
+            parts: [
+              {
+                functionResponse: {
+                  id: 'fc1',
+                  name: REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
+                  response: {authType: 'apiKey', apiKey: 'test'},
                 },
-              ],
-            },
-          }),
-          createEvent({
-            author: 'user',
-            content: {
-              parts: [
-                {
-                  functionResponse: {
-                    id: 'fc1',
-                    name: REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
-                    response: {authType: 'apiKey', apiKey: 'test'},
-                  },
-                },
-              ],
-            },
-          }),
-        ],
-      },
-    } as unknown as InvocationContext;
+              },
+            ],
+          },
+        }),
+      ],
+    );
 
     const generator = AUTH_PREPROCESSOR.runAsync(invocationContext);
     let result = await generator.next();
@@ -251,65 +247,57 @@ describe('AuthPreprocessor', () => {
   });
 
   it('processes adk_request_credential responses and resumes tools (deep snake_case args)', async () => {
-    const invocationContext = {
-      agent: {
-        [LLM_AGENT_SYMBOL]: true,
-        canonicalTools: vi.fn().mockResolvedValue([{name: 'someTool'}]),
-        canonicalBeforeToolCallbacks: [],
-        canonicalAfterToolCallbacks: [],
-      },
-      session: {
-        state: {},
-        events: [
-          createEvent({
-            author: 'agent',
-            content: {
-              parts: [
-                {
-                  functionCall: {
-                    id: 'toolFc1',
-                    name: 'someTool',
-                    args: {},
+    const invocationContext = createTestInvocationContext(
+      new LlmAgent({name: 'test_agent'}),
+      [
+        createEvent({
+          author: 'agent',
+          content: {
+            parts: [
+              {
+                functionCall: {
+                  id: 'toolFc1',
+                  name: 'someTool',
+                  args: {},
+                },
+              },
+            ],
+          },
+        }),
+        createEvent({
+          author: 'agent',
+          id: 'originalEvent',
+          content: {
+            parts: [
+              {
+                functionCall: {
+                  id: 'fc1',
+                  name: REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
+                  args: {
+                    auth_config: {credential_key: 'testKey'},
+                    function_call_id: 'toolFc1',
                   },
                 },
-              ],
-            },
-          }),
-          createEvent({
-            author: 'agent',
-            id: 'originalEvent',
-            content: {
-              parts: [
-                {
-                  functionCall: {
-                    id: 'fc1',
-                    name: REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
-                    args: {
-                      auth_config: {credential_key: 'testKey'},
-                      function_call_id: 'toolFc1',
-                    },
-                  },
+              },
+            ],
+          },
+        }),
+        createEvent({
+          author: 'user',
+          content: {
+            parts: [
+              {
+                functionResponse: {
+                  id: 'fc1',
+                  name: REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
+                  response: {authType: 'apiKey', apiKey: 'test'},
                 },
-              ],
-            },
-          }),
-          createEvent({
-            author: 'user',
-            content: {
-              parts: [
-                {
-                  functionResponse: {
-                    id: 'fc1',
-                    name: REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
-                    response: {authType: 'apiKey', apiKey: 'test'},
-                  },
-                },
-              ],
-            },
-          }),
-        ],
-      },
-    } as unknown as InvocationContext;
+              },
+            ],
+          },
+        }),
+      ],
+    );
 
     const generator = AUTH_PREPROCESSOR.runAsync(invocationContext);
     let result = await generator.next();
@@ -325,27 +313,25 @@ describe('AuthPreprocessor', () => {
   });
 
   it('skips if function responses exist but not for request_credential', async () => {
-    const invocationContext = {
-      agent: {[LLM_AGENT_SYMBOL]: true},
-      session: {
-        events: [
-          {
-            author: 'user',
-            content: {
-              parts: [
-                {
-                  functionResponse: {
-                    id: 'some_other_fc',
-                    name: 'some_other_tool',
-                    response: {},
-                  },
+    const invocationContext = createTestInvocationContext(
+      new LlmAgent({name: 'test_agent'}),
+      [
+        createEvent({
+          author: 'user',
+          content: {
+            parts: [
+              {
+                functionResponse: {
+                  id: 'some_other_fc',
+                  name: 'some_other_tool',
+                  response: {},
                 },
-              ],
-            },
-          } as Event,
-        ],
-      },
-    } as unknown as InvocationContext;
+              },
+            ],
+          },
+        }),
+      ],
+    );
 
     const generator = AUTH_PREPROCESSOR.runAsync(invocationContext);
     const result = await generator.next();
@@ -354,48 +340,43 @@ describe('AuthPreprocessor', () => {
   });
 
   it('skips if tools to resume is empty (e.g. toolset auth)', async () => {
-    const invocationContext = {
-      agent: {
-        [LLM_AGENT_SYMBOL]: true,
-      },
-      session: {
-        state: {},
-        events: [
-          createEvent({
-            author: 'agent',
-            id: 'originalEvent',
-            content: {
-              parts: [
-                {
-                  functionCall: {
-                    id: 'fc1',
-                    name: REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
-                    args: {
-                      authConfig: {credentialKey: 'testKey'},
-                      functionCallId: '_adk_toolset_auth_something',
-                    },
+    const invocationContext = createTestInvocationContext(
+      new LlmAgent({name: 'test_agent'}),
+      [
+        createEvent({
+          author: 'agent',
+          id: 'originalEvent',
+          content: {
+            parts: [
+              {
+                functionCall: {
+                  id: 'fc1',
+                  name: REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
+                  args: {
+                    authConfig: {credentialKey: 'testKey'},
+                    functionCallId: '_adk_toolset_auth_something',
                   },
                 },
-              ],
-            },
-          }),
-          createEvent({
-            author: 'user',
-            content: {
-              parts: [
-                {
-                  functionResponse: {
-                    id: 'fc1',
-                    name: REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
-                    response: {authType: 'apiKey', apiKey: 'test'},
-                  },
+              },
+            ],
+          },
+        }),
+        createEvent({
+          author: 'user',
+          content: {
+            parts: [
+              {
+                functionResponse: {
+                  id: 'fc1',
+                  name: REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
+                  response: {authType: 'apiKey', apiKey: 'test'},
                 },
-              ],
-            },
-          }),
-        ],
-      },
-    } as unknown as InvocationContext;
+              },
+            ],
+          },
+        }),
+      ],
+    );
 
     const generator = AUTH_PREPROCESSOR.runAsync(invocationContext);
     const result = await generator.next();
@@ -404,33 +385,25 @@ describe('AuthPreprocessor', () => {
   });
 
   it('skips if original function call is not found in history', async () => {
-    const invocationContext = {
-      agent: {
-        [LLM_AGENT_SYMBOL]: true,
-        canonicalTools: vi.fn().mockResolvedValue([]),
-        canonicalBeforeToolCallbacks: [],
-        canonicalAfterToolCallbacks: [],
-      },
-      session: {
-        state: {},
-        events: [
-          createEvent({
-            author: 'user',
-            content: {
-              parts: [
-                {
-                  functionResponse: {
-                    id: 'fc1',
-                    name: REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
-                    response: {authType: 'apiKey', apiKey: 'test'},
-                  },
+    const invocationContext = createTestInvocationContext(
+      new LlmAgent({name: 'test_agent'}),
+      [
+        createEvent({
+          author: 'user',
+          content: {
+            parts: [
+              {
+                functionResponse: {
+                  id: 'fc1',
+                  name: REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
+                  response: {authType: 'apiKey', apiKey: 'test'},
                 },
-              ],
-            },
-          }),
-        ],
-      },
-    } as unknown as InvocationContext;
+              },
+            ],
+          },
+        }),
+      ],
+    );
 
     const generator = AUTH_PREPROCESSOR.runAsync(invocationContext);
     const result = await generator.next();
@@ -439,64 +412,56 @@ describe('AuthPreprocessor', () => {
   });
 
   it('handles function calls without ids in history', async () => {
-    const invocationContext = {
-      agent: {
-        [LLM_AGENT_SYMBOL]: true,
-        canonicalTools: vi.fn().mockResolvedValue([]),
-        canonicalBeforeToolCallbacks: [],
-        canonicalAfterToolCallbacks: [],
-      },
-      session: {
-        state: {},
-        events: [
-          createEvent({
-            author: 'agent',
-            content: {
-              parts: [
-                {
-                  functionCall: {
-                    name: 'someTool',
-                    args: {},
+    const invocationContext = createTestInvocationContext(
+      new LlmAgent({name: 'test_agent'}),
+      [
+        createEvent({
+          author: 'agent',
+          content: {
+            parts: [
+              {
+                functionCall: {
+                  name: 'someTool',
+                  args: {},
+                },
+              },
+            ],
+          },
+        }),
+        createEvent({
+          author: 'agent',
+          id: 'originalEvent',
+          content: {
+            parts: [
+              {
+                functionCall: {
+                  id: 'fc1',
+                  name: REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
+                  args: {
+                    authConfig: {credentialKey: 'testKey'},
+                    functionCallId: 'toolFc1',
                   },
                 },
-              ],
-            },
-          }),
-          createEvent({
-            author: 'agent',
-            id: 'originalEvent',
-            content: {
-              parts: [
-                {
-                  functionCall: {
-                    id: 'fc1',
-                    name: REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
-                    args: {
-                      authConfig: {credentialKey: 'testKey'},
-                      functionCallId: 'toolFc1',
-                    },
-                  },
+              },
+            ],
+          },
+        }),
+        createEvent({
+          author: 'user',
+          content: {
+            parts: [
+              {
+                functionResponse: {
+                  id: 'fc1',
+                  name: REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
+                  response: {authType: 'apiKey', apiKey: 'test'},
                 },
-              ],
-            },
-          }),
-          createEvent({
-            author: 'user',
-            content: {
-              parts: [
-                {
-                  functionResponse: {
-                    id: 'fc1',
-                    name: REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
-                    response: {authType: 'apiKey', apiKey: 'test'},
-                  },
-                },
-              ],
-            },
-          }),
-        ],
-      },
-    } as unknown as InvocationContext;
+              },
+            ],
+          },
+        }),
+      ],
+    );
 
     const generator = AUTH_PREPROCESSOR.runAsync(invocationContext);
     const result = await generator.next();
