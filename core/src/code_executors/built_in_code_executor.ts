@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {LlmRequest} from '../models/llm_request.js';
-import {isGemini2OrAbove} from '../utils/model_name.js';
+import {
+  isGemini2OrAbove,
+  isGeminiModelIdCheckDisabled,
+} from '../utils/model_name.js';
 
 import {BaseCodeExecutor, ExecuteCodeParams} from './base_code_executor.js';
 import {CodeExecutionResult} from './code_execution_utils.js';
@@ -52,7 +55,11 @@ export class BuiltInCodeExecutor extends BaseCodeExecutor {
   }
 
   processLlmRequest(llmRequest: LlmRequest) {
-    if (llmRequest.model && isGemini2OrAbove(llmRequest.model)) {
+    const modelCheckDisabled = isGeminiModelIdCheckDisabled();
+    if (
+      llmRequest.model &&
+      (isGemini2OrAbove(llmRequest.model) || modelCheckDisabled)
+    ) {
       llmRequest.config = llmRequest.config || {};
       llmRequest.config.tools = llmRequest.config.tools || [];
       llmRequest.config.tools.push({codeExecution: {}});
