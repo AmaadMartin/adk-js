@@ -294,7 +294,25 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/** Unwraps a `{result: value}` FunctionResponse envelope to the bare value. */
+/**
+ * Parses `text` as JSON, or returns it unchanged when it is not JSON.
+ *
+ * Mirrors `google/adk-python` `_unwrap_response`: the web frontend wraps
+ * whatever the user typed as `{result: text}` without parsing it, so a JSON
+ * object typed into the UI must reach the node as an object, not as a string.
+ */
+function parseJsonOrOriginal(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
+/**
+ * Unwraps a `{result: value}` FunctionResponse envelope to the bare value,
+ * parsing that value as JSON when it is a string that parses.
+ */
 export function unwrapResponse(response: unknown): unknown {
   if (
     response &&
@@ -303,7 +321,8 @@ export function unwrapResponse(response: unknown): unknown {
     Object.keys(response).length === 1 &&
     RESULT_KEY in response
   ) {
-    return (response as Record<string, unknown>)[RESULT_KEY];
+    const value = (response as Record<string, unknown>)[RESULT_KEY];
+    return typeof value === 'string' ? parseJsonOrOriginal(value) : value;
   }
   return response;
 }

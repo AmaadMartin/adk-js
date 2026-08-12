@@ -325,7 +325,7 @@ describe('validateInterruptResponse', () => {
     expect(() =>
       validateInterruptResponse(
         'i1',
-        unwrapResponse({result: '21'}),
+        unwrapResponse({result: 'twenty one'}),
         stringSchema,
       ),
     ).not.toThrow();
