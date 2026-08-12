@@ -151,7 +151,10 @@ export {
   isCompactedEvent,
   isScratchpadEvent,
 } from './events/compacted_event.js';
-export type {CompactedEvent} from './events/compacted_event.js';
+export type {
+  CompactedEvent,
+  CreateCompactedEventParams,
+} from './events/compacted_event.js';
 export {
   createEvent,
   generateClientFunctionCallId,

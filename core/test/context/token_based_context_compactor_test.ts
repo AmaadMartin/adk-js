@@ -15,8 +15,9 @@ import {
   TokenBasedContextCompactor,
   createCompactedEvent,
   createEvent,
+  isCompactedEvent,
 } from '@google/adk';
-import {describe, expect, it} from 'vitest';
+import {assert, describe, expect, it} from 'vitest';
 
 class MockSummarizer implements BaseSummarizer {
   async summarize(events: Event[]): Promise<CompactedEvent> {
@@ -122,12 +123,8 @@ describe('TokenBasedContextCompactor', () => {
     // Resulting length = 4 (initial) + 1 (compacted) = 5
     expect(context.session.events.length).toBe(5);
     const compacted = context.session.events[4];
-    expect((compacted as unknown as {isCompacted: boolean}).isCompacted).toBe(
-      true,
-    );
-    expect(
-      (compacted as unknown as {compactedContent: string}).compactedContent,
-    ).toBe('Mock summary of 2 events');
+    assert(isCompactedEvent(compacted));
+    expect(compacted.compactedContent).toBe('Mock summary of 2 events');
     expect(context.session.events[2].id).toBe('3');
     expect(context.session.events[3].id).toBe('4');
   });
@@ -154,12 +151,8 @@ describe('TokenBasedContextCompactor', () => {
     // So only events[0] is compacted, and the new CompactedEvent is appended.
     expect(context.session.events.length).toBe(5); // 4 initial + 1 compacted
     const compacted = context.session.events[4];
-    expect((compacted as unknown as {isCompacted: boolean}).isCompacted).toBe(
-      true,
-    );
-    expect(
-      (compacted as unknown as {compactedContent: string}).compactedContent,
-    ).toBe('Mock summary of 1 events');
+    assert(isCompactedEvent(compacted));
+    expect(compacted.compactedContent).toBe('Mock summary of 1 events');
     expect(context.session.events[1].id).toBe('1');
     expect(context.session.events[2].id).toBe('2');
     expect(context.session.events[3].id).toBe('3');

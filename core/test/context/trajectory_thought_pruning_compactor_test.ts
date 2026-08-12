@@ -165,7 +165,7 @@ describe('TrajectoryThoughtPruningCompactor', () => {
       const compactor = new TrajectoryThoughtPruningCompactor({
         eventRetentionSize: 1,
       });
-      const event1 = {id: '1', timestamp: Date.now()} as Event;
+      const event1 = createEvent({id: '1', timestamp: Date.now()});
       const event2 = createMockEvent('2', [{text: 'thought', thought: true}]);
 
       const context = createMockInvocationContext([event1, event2]);

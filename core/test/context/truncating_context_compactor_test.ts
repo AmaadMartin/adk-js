@@ -11,22 +11,12 @@ import {
   PluginManager,
   Session,
   TruncatingContextCompactor,
+  createEvent,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
 function createDummyEvent(id: string): Event {
-  return {
-    id,
-    invocationId: 'inv-1',
-    timestamp: Date.now(),
-    actions: {
-      stateDelta: {},
-      artifactDelta: {},
-      requestedAuthConfigs: {},
-      requestedToolConfirmations: {},
-      skipSummarization: false,
-    },
-  };
+  return createEvent({id, invocationId: 'inv-1', timestamp: Date.now()});
 }
 
 function createDummyContext(events: Event[]): InvocationContext {

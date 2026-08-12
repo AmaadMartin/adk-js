@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Event, createEvent} from './event.js';
+import {CreateEventParams, Event, createEvent} from './event.js';
 
 /**
  * A specialized Event type that represents a synthesized summary of past events.
@@ -56,23 +56,33 @@ export function isScratchpadEvent(
 }
 
 /**
+ * Parameters for creating a compacted event.
+ *
+ * `startTime`, `endTime` and `compactedContent` are required: a compacted
+ * event that is missing any of them cannot describe what it summarized.
+ */
+export type CreateCompactedEventParams = CreateEventParams &
+  Pick<CompactedEvent, 'startTime' | 'endTime' | 'compactedContent'> &
+  Partial<Pick<CompactedEvent, 'isScratchpad'>>;
+
+/**
  * Creates a {@link CompactedEvent} from partial fields.
  *
  * Fills in the base {@link Event} defaults (id, invocationId, actions,
  * timestamp) and marks the event as compacted.
  *
- * @param params The partial compacted event to create the event from.
+ * @param params The fields to create the compacted event from.
  * @returns The compacted event.
  */
 export function createCompactedEvent(
-  params: Partial<CompactedEvent> = {},
+  params: CreateCompactedEventParams,
 ): CompactedEvent {
   return {
     ...createEvent(params),
-    isCompacted: params.isCompacted || true,
-    startTime: params.startTime!,
-    endTime: params.endTime!,
-    compactedContent: params.compactedContent!,
+    isCompacted: true,
+    startTime: params.startTime,
+    endTime: params.endTime,
+    compactedContent: params.compactedContent,
     isScratchpad: params.isScratchpad,
   };
 }
