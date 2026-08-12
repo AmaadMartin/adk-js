@@ -21,6 +21,7 @@ import {Application, Request, Response} from 'express';
 import {randomUUID} from 'node:crypto';
 import {z} from 'zod';
 
+import {decodeBase64Utf8, parseJsonOrRaw} from '../utils/base64_utils.js';
 import {Semaphore} from '../utils/semaphore.js';
 
 /** Trigger sources this router knows how to serve. */
@@ -29,29 +30,17 @@ export const VALID_TRIGGER_SOURCES = ['pubsub', 'eventarc'] as const;
 /** One of {@link VALID_TRIGGER_SOURCES}. */
 export type TriggerSource = (typeof VALID_TRIGGER_SOURCES)[number];
 
-/**
- * Trigger sources registered when none are requested. Empty on purpose: the
- * endpoints accept unauthenticated work, so they require an explicit opt-in.
- */
-const DEFAULT_TRIGGER_SOURCES: readonly string[] = [];
-
 /** Maximum concurrent agent invocations across all trigger requests. */
-export const DEFAULT_MAX_CONCURRENT = envInt('ADK_TRIGGER_MAX_CONCURRENT', 10);
+export const DEFAULT_MAX_CONCURRENT = 10;
 
 /** Maximum retry attempts for transient (429) errors per request. */
-export const DEFAULT_MAX_RETRIES = envInt('ADK_TRIGGER_MAX_RETRIES', 3);
+export const DEFAULT_MAX_RETRIES = 3;
 
 /** Base delay in seconds for exponential backoff. */
-export const DEFAULT_RETRY_BASE_DELAY = envNumber(
-  'ADK_TRIGGER_RETRY_BASE_DELAY',
-  1.0,
-);
+export const DEFAULT_RETRY_BASE_DELAY = 1.0;
 
 /** Maximum delay in seconds for exponential backoff. */
-export const DEFAULT_RETRY_MAX_DELAY = envNumber(
-  'ADK_TRIGGER_RETRY_MAX_DELAY',
-  30.0,
-);
+export const DEFAULT_RETRY_MAX_DELAY = 30.0;
 
 /** Fraction of the backoff delay added as jitter. */
 const JITTER_FRACTION = 0.5;
@@ -69,39 +58,18 @@ const TRANSIENT_ERROR_MARKERS = [
   'quota',
 ];
 
-/** Characters outside the base64 alphabet, which Python's decoder discards. */
-const NON_BASE64_PATTERN = /[^A-Za-z0-9+/=]/g;
-
 /** Leading and trailing `/` runs, which Python's `str.strip('/')` removes. */
 const SURROUNDING_SLASHES_PATTERN = /^\/+|\/+$/g;
-
-/** Brands {@link TransientError} so it survives duplicate package copies. */
-const TRANSIENT_ERROR_SYMBOL = Symbol.for('adk.trigger.TransientError');
 
 /**
  * Raised when every retry of a transient (rate-limit) failure was used up. The
  * handler turns it into a 500 so the event source redelivers.
  */
 export class TransientError extends Error {
-  readonly [TRANSIENT_ERROR_SYMBOL] = true;
-
   constructor(message: string) {
     super(message);
     this.name = 'TransientError';
   }
-}
-
-/**
- * Type guard for {@link TransientError}. It reads the brand instead of using
- * `instanceof`, which reports false when two copies of this package share one
- * runtime.
- */
-function isRetriesExhausted(value: unknown): value is TransientError {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    TRANSIENT_ERROR_SYMBOL in value
-  );
 }
 
 /** Inner message payload of a Pub/Sub push subscription. */
@@ -164,7 +132,11 @@ export interface TriggerServerContext {
 
 /** Tunables of a {@link TriggerRouter}. */
 export interface TriggerRouterOptions {
-  /** Sources to register. Unknown entries are dropped with a warning. */
+  /**
+   * Sources to register, from {@link VALID_TRIGGER_SOURCES}. Unknown entries
+   * are dropped with a warning. Absent or empty registers no route at all:
+   * these endpoints accept unauthenticated work, so they are opt-in.
+   */
   triggerSources?: string[];
   maxConcurrent?: number;
   maxRetries?: number;
@@ -172,32 +144,6 @@ export interface TriggerRouterOptions {
   retryBaseDelay?: number;
   /** Backoff ceiling, in seconds. */
   retryMaxDelay?: number;
-}
-
-/**
- * Reads `name` from the environment as a number, or returns `fallback` when it
- * is unset. Throws for a value that does not parse, because a silently ignored
- * value would hide a misconfigured quota bound.
- */
-function envNumber(name: string, fallback: number): number {
-  const raw = process.env[name];
-  if (raw === undefined) {
-    return fallback;
-  }
-  const value = Number(raw);
-  if (raw.trim() === '' || !Number.isFinite(value)) {
-    throw new Error(`${name} must be a number, got: "${raw}"`);
-  }
-  return value;
-}
-
-/** {@link envNumber} restricted to integers. */
-function envInt(name: string, fallback: number): number {
-  const value = envNumber(name, fallback);
-  if (!Number.isInteger(value)) {
-    throw new Error(`${name} must be an integer, got: ${value}`);
-  }
-  return value;
 }
 
 function isValidTriggerSource(value: string): value is TriggerSource {
@@ -248,32 +194,6 @@ export function computeRetryDelaySeconds(
 ): number {
   const delay = Math.min(baseDelay * Math.pow(2, attempt), maxDelay);
   return delay + randomFn() * delay * JITTER_FRACTION;
-}
-
-/**
- * Decodes base64 the way Python's `base64.b64decode(...).decode('utf-8')`
- * does, so an undecodable Pub/Sub payload is rejected rather than silently
- * mangled. Characters outside the base64 alphabet are discarded first, and
- * both incorrect padding and invalid UTF-8 throw. `Buffer.from(s, 'base64')`
- * alone throws for neither.
- */
-export function decodeBase64Utf8(data: string): string {
-  const normalized = data.replace(NON_BASE64_PATTERN, '');
-  if (normalized.length % 4 !== 0) {
-    throw new Error('Incorrect padding');
-  }
-  return new TextDecoder('utf-8', {fatal: true}).decode(
-    Buffer.from(normalized, 'base64'),
-  );
-}
-
-/** Parses `text` as JSON, keeping the raw string when it is not JSON. */
-function parseJsonOrRaw(text: string): unknown {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return text;
-  }
 }
 
 /**
@@ -366,7 +286,7 @@ export class TriggerRouter {
     private readonly context: TriggerServerContext,
     options: TriggerRouterOptions = {},
   ) {
-    const requested = options.triggerSources ?? DEFAULT_TRIGGER_SOURCES;
+    const requested = options.triggerSources ?? [];
     const unknown = [
       ...new Set(requested.filter((source) => !isValidTriggerSource(source))),
     ].sort();
@@ -544,17 +464,12 @@ export class TriggerRouter {
               ` retrying in ${delay.toFixed(1)}s: ${errorMessage(error)}`,
           );
           await sleep(delay * MS_PER_SECOND);
-        } else {
-          this.context.logger.error(
-            `Transient error persisted after ${totalAttempts} attempts:` +
-              ` ${errorMessage(error)}`,
-          );
         }
       }
     }
 
     throw new TransientError(
-      `Rate limit exceeded after ${totalAttempts} attempts: ${errorMessage(lastError)}`,
+      `Retries exhausted after ${totalAttempts} attempts: ${errorMessage(lastError)}`,
     );
   }
 
@@ -564,7 +479,9 @@ export class TriggerRouter {
    * tell a quota problem from an agent problem.
    */
   private respondToFailure(res: Response, error: unknown, label: string): void {
-    if (isRetriesExhausted(error)) {
+    // `instanceof` is safe here: this class is thrown and caught inside this
+    // module, so a second copy of the package cannot supply the value.
+    if (error instanceof TransientError) {
       this.context.logger.error(
         `${label}: transient error after retries: ${error.message}`,
       );

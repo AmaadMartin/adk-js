@@ -15,12 +15,11 @@ import {
 } from '@google/adk';
 import express from 'express';
 import * as http from 'node:http';
-import {afterEach, describe, expect, it, vi} from 'vitest';
+import {afterEach, describe, expect, it} from 'vitest';
 
 import {AdkApiServer} from '../../src/server/adk_api_server.js';
 import {
   computeRetryDelaySeconds,
-  decodeBase64Utf8,
   isTransientError,
   TriggerRouter,
   TriggerRouterOptions,
@@ -797,8 +796,10 @@ describe('retry on transient errors', () => {
     );
 
     expect(result.status).toBe(500);
-    expect(result.body?.['error']).toContain('Rate limit exceeded (429)');
-    expect(result.body?.['error']).toContain('after 3 attempts');
+    expect(result.body?.['error']).toBe(
+      'Rate limit exceeded (429). Retryable. Retries exhausted after 3' +
+        ' attempts: 429 RESOURCE_EXHAUSTED: quota',
+    );
     expect(harness.agent.invocations).toHaveLength(3);
   });
 
@@ -979,107 +980,6 @@ describe('computeRetryDelaySeconds', () => {
 
     expect(delay).toBeGreaterThanOrEqual(2);
     expect(delay).toBeLessThan(3);
-  });
-});
-
-describe('decodeBase64Utf8', () => {
-  it('decodes a clean payload', () => {
-    expect(decodeBase64Utf8(base64('hello world'))).toBe('hello world');
-  });
-
-  it('ignores characters outside the base64 alphabet', () => {
-    expect(decodeBase64Utf8('SGVs bG8=')).toBe('Hello');
-  });
-
-  it('throws on incorrect padding', () => {
-    expect(() => decodeBase64Utf8('!!!not-valid-base64!!!')).toThrow(
-      'Incorrect padding',
-    );
-  });
-
-  it('throws on bytes that are not valid UTF-8', () => {
-    expect(() =>
-      decodeBase64Utf8(Buffer.from([0xff, 0xfe, 0xfd]).toString('base64')),
-    ).toThrow();
-  });
-});
-
-describe('environment tunables', () => {
-  const TUNABLES = [
-    'ADK_TRIGGER_MAX_CONCURRENT',
-    'ADK_TRIGGER_MAX_RETRIES',
-    'ADK_TRIGGER_RETRY_BASE_DELAY',
-    'ADK_TRIGGER_RETRY_MAX_DELAY',
-  ];
-
-  /** Re-imports the module so its module-level constants are re-evaluated. */
-  function loadModule() {
-    vi.resetModules();
-    return import('../../src/server/trigger_routes.js');
-  }
-
-  function clearTunables(): void {
-    for (const name of TUNABLES) {
-      vi.stubEnv(name, undefined);
-    }
-  }
-
-  afterEach(() => {
-    vi.unstubAllEnvs();
-    vi.resetModules();
-  });
-
-  it('falls back to the documented defaults when nothing is set', async () => {
-    clearTunables();
-
-    const module = await loadModule();
-
-    expect(module.DEFAULT_MAX_CONCURRENT).toBe(10);
-    expect(module.DEFAULT_MAX_RETRIES).toBe(3);
-    expect(module.DEFAULT_RETRY_BASE_DELAY).toBe(1.0);
-    expect(module.DEFAULT_RETRY_MAX_DELAY).toBe(30.0);
-  });
-
-  it('reads every tunable from the environment', async () => {
-    clearTunables();
-    vi.stubEnv('ADK_TRIGGER_MAX_CONCURRENT', '4');
-    vi.stubEnv('ADK_TRIGGER_MAX_RETRIES', '7');
-    vi.stubEnv('ADK_TRIGGER_RETRY_BASE_DELAY', '0.25');
-    vi.stubEnv('ADK_TRIGGER_RETRY_MAX_DELAY', '12.5');
-
-    const module = await loadModule();
-
-    expect(module.DEFAULT_MAX_CONCURRENT).toBe(4);
-    expect(module.DEFAULT_MAX_RETRIES).toBe(7);
-    expect(module.DEFAULT_RETRY_BASE_DELAY).toBe(0.25);
-    expect(module.DEFAULT_RETRY_MAX_DELAY).toBe(12.5);
-  });
-
-  it('names the variable when a value does not parse', async () => {
-    clearTunables();
-    vi.stubEnv('ADK_TRIGGER_RETRY_BASE_DELAY', 'soon');
-
-    await expect(loadModule()).rejects.toThrow(
-      'ADK_TRIGGER_RETRY_BASE_DELAY must be a number, got: "soon"',
-    );
-  });
-
-  it('names the variable when an empty value is set', async () => {
-    clearTunables();
-    vi.stubEnv('ADK_TRIGGER_MAX_CONCURRENT', '');
-
-    await expect(loadModule()).rejects.toThrow(
-      'ADK_TRIGGER_MAX_CONCURRENT must be a number',
-    );
-  });
-
-  it('rejects a fractional integer tunable', async () => {
-    clearTunables();
-    vi.stubEnv('ADK_TRIGGER_MAX_RETRIES', '2.5');
-
-    await expect(loadModule()).rejects.toThrow(
-      'ADK_TRIGGER_MAX_RETRIES must be an integer, got: 2.5',
-    );
   });
 });
 
