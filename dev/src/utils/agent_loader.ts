@@ -395,6 +395,7 @@ export class AgentFile {
  */
 export class AgentLoader {
   private agentsAlreadyPreloaded = false;
+  private preloadInFlight?: Promise<void>;
   private readonly preloadedAgents: Record<string, AgentFile> = {};
   private readonly loadFailures: Record<string, AgentLoadFailure> = {};
   private watcher?: fs.FSWatcher;
@@ -475,6 +476,9 @@ export class AgentLoader {
     }
 
     this.agentsAlreadyPreloaded = false;
+    // Detach any running scan so the invalidation is not swallowed by a
+    // caller joining results that were gathered before the change.
+    this.preloadInFlight = undefined;
   }
 
   /**
@@ -549,11 +553,29 @@ export class AgentLoader {
     );
   }
 
-  async preloadAgents() {
+  /**
+   * Discovers, compiles and imports every agent in the agents directory.
+   *
+   * Callers that arrive while a scan is running join it. A rejected scan is
+   * discarded, so a later call retries from scratch.
+   */
+  async preloadAgents(): Promise<void> {
     if (this.agentsAlreadyPreloaded) {
       return;
     }
 
+    // A second concurrent scan re-bundles and re-imports every entrypoint, and
+    // its AgentFile instances overwrite the first scan's in `preloadedAgents`,
+    // so the displaced ones are never disposed and their temp directories leak.
+    this.preloadInFlight ??= this.scanAgents().catch((e: unknown) => {
+      this.preloadInFlight = undefined;
+      throw e;
+    });
+
+    return this.preloadInFlight;
+  }
+
+  private async scanAgents(): Promise<void> {
     const files = (await isFile(this.agentsDirPath))
       ? [await getFileMetadata(this.agentsDirPath)]
       : await getDirFiles(this.agentsDirPath);
