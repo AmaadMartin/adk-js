@@ -12,6 +12,7 @@ import {logger} from '../utils/logger.js';
 import {
   AppendEventRequest,
   BaseSessionService,
+  compareSessionsForList,
   CreateSessionRequest,
   DeleteSessionRequest,
   GetSessionRequest,
@@ -204,20 +205,8 @@ export class InMemorySessionService extends BaseSessionService {
       ),
     );
 
-    if (order === 'asc') {
-      all.sort(
-        (a, b) =>
-          a.lastUpdateTime - b.lastUpdateTime ||
-          a.userId.localeCompare(b.userId) ||
-          a.id.localeCompare(b.id),
-      );
-    } else if (order === 'desc') {
-      all.sort(
-        (a, b) =>
-          b.lastUpdateTime - a.lastUpdateTime ||
-          a.userId.localeCompare(b.userId) ||
-          a.id.localeCompare(b.id),
-      );
+    if (order) {
+      all.sort(compareSessionsForList(order));
     }
 
     if (limit === undefined) {

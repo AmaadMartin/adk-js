@@ -101,6 +101,20 @@ export interface ListSessionsResponse {
 }
 
 /**
+ * Builds the comparator that implements `ListSessionsRequest.order` for
+ * services that sort in process.
+ */
+export function compareSessionsForList(
+  order: 'asc' | 'desc',
+): (a: Session, b: Session) => number {
+  const direction = order === 'asc' ? 1 : -1;
+  return (a, b) =>
+    direction * (a.lastUpdateTime - b.lastUpdateTime) ||
+    a.userId.localeCompare(b.userId) ||
+    a.id.localeCompare(b.id);
+}
+
+/**
  * Base class for session services.
  *
  * The service provides a set of methods for managing sessions and events.

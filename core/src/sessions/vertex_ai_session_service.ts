@@ -36,6 +36,7 @@ import {partialCopy} from '../utils/partial_copy.js';
 import {
   AppendEventRequest,
   BaseSessionService,
+  compareSessionsForList,
   CreateSessionRequest,
   DeleteSessionRequest,
   GetSessionRequest,
@@ -357,20 +358,8 @@ export class VertexAiSessionService extends BaseSessionService {
       pageToken = (response as {nextPageToken?: string}).nextPageToken;
     } while (pageToken);
 
-    if (order === 'asc') {
-      adkSessions.sort(
-        (a, b) =>
-          a.lastUpdateTime - b.lastUpdateTime ||
-          a.userId.localeCompare(b.userId) ||
-          a.id.localeCompare(b.id),
-      );
-    } else if (order === 'desc') {
-      adkSessions.sort(
-        (a, b) =>
-          b.lastUpdateTime - a.lastUpdateTime ||
-          a.userId.localeCompare(b.userId) ||
-          a.id.localeCompare(b.id),
-      );
+    if (order) {
+      adkSessions.sort(compareSessionsForList(order));
     }
 
     if (limit === undefined) {
