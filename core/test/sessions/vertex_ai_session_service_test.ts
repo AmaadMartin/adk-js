@@ -7,6 +7,7 @@
 import {Sessions} from '@google-cloud/vertexai/build/src/genai/sessions.js';
 import {
   createEvent,
+  createSession,
   isCompactedEvent,
   State,
   VertexAiSessionService,
@@ -14,6 +15,7 @@ import {
 import {Session} from '@google/adk/sessions/session.js';
 import {ApiError} from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {createCompactedEvent} from '../../src/events/compacted_event.js';
 import {
   isFastForwardable,
   reconstructNodeStates,
@@ -529,6 +531,123 @@ describe('VertexAiSessionService', () => {
       });
 
       expect(session?.events[0].groundingMetadata).toEqual(groundingMetadata);
+    });
+
+    it('restores the compaction fields verbatim from custom metadata', async () => {
+      mockClient.events.listInternal.mockResolvedValue({
+        sessionEvents: [
+          {
+            name: 'projects/p/locations/l/sessions/s/events/e1',
+            invocationId: 'inv-1',
+            author: 'system',
+            timestamp: '2026-04-09T13:00:00Z',
+            eventMetadata: {
+              customMetadata: {
+                _compaction: {
+                  startTime: 1600000000000,
+                  endTime: 1610000000000,
+                  compactedContent: 'a text summary',
+                },
+              },
+            },
+          },
+        ],
+      });
+
+      const session = await service.getSession({
+        appName: '12345',
+        userId: 'testUser',
+        sessionId: 'my-session-id',
+      });
+
+      const parsed = session?.events[0];
+      if (!parsed || !isCompactedEvent(parsed)) {
+        expect.fail('the parsed event is not a CompactedEvent');
+      }
+      expect(parsed.startTime).toBe(1600000000000);
+      expect(parsed.endTime).toBe(1610000000000);
+      expect(parsed.compactedContent).toBe('a text summary');
+    });
+
+    it('round-trips a compacted event through append and read', async () => {
+      const compacted = createCompactedEvent({
+        author: 'system',
+        startTime: 1000,
+        endTime: 2000,
+        compactedContent: 'summary of the first turn',
+      });
+
+      await service.appendEvent({
+        session: createSession({
+          id: 'my-session-id',
+          appName: '12345',
+          userId: 'testUser',
+        }),
+        event: compacted,
+      });
+
+      const [appended] = mockClient.events.append.mock.calls[0] as [
+        {config: {eventMetadata: {customMetadata: Record<string, unknown>}}},
+      ];
+      mockClient.events.listInternal.mockResolvedValue({
+        sessionEvents: [
+          {
+            name: 'projects/p/locations/l/sessions/s/events/e1',
+            invocationId: 'inv-1',
+            author: 'system',
+            timestamp: '2026-04-09T13:00:00Z',
+            eventMetadata: {
+              customMetadata: {
+                _compaction:
+                  appended.config.eventMetadata.customMetadata._compaction,
+              },
+            },
+          },
+        ],
+      });
+
+      const session = await service.getSession({
+        appName: '12345',
+        userId: 'testUser',
+        sessionId: 'my-session-id',
+      });
+
+      const parsed = session?.events[0];
+      if (!parsed || !isCompactedEvent(parsed)) {
+        expect.fail('the compacted event did not survive the round trip');
+      }
+      expect(parsed.startTime).toBe(compacted.startTime);
+      expect(parsed.endTime).toBe(compacted.endTime);
+      expect(parsed.compactedContent).toBe(compacted.compactedContent);
+    });
+
+    it('does not mark a non-compacted API event as compacted', async () => {
+      mockClient.events.listInternal.mockResolvedValue({
+        sessionEvents: [
+          {
+            name: 'projects/p/locations/l/sessions/s/events/e1',
+            invocationId: 'inv-1',
+            author: 'user',
+            timestamp: '2026-04-09T13:00:00Z',
+            eventMetadata: {
+              customMetadata: {_usage_metadata: {promptTokens: 3}},
+            },
+          },
+        ],
+      });
+
+      const session = await service.getSession({
+        appName: '12345',
+        userId: 'testUser',
+        sessionId: 'my-session-id',
+      });
+
+      const parsed = session?.events[0];
+      if (!parsed) {
+        expect.fail('getSession returned no event');
+      }
+      expect(isCompactedEvent(parsed)).toBe(false);
+      expect('isCompacted' in parsed).toBe(false);
     });
 
     it('slices events based on numRecentEvents', async () => {
