@@ -6,7 +6,26 @@
 
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import {File} from '../code_executors/code_execution_utils.js';
+import {
+  File,
+  FileContentEncoding,
+} from '../code_executors/code_execution_utils.js';
+
+/**
+ * Decodes a file's content into its raw bytes.
+ *
+ * `contentEncoding` is optional, and an absent value means
+ * `FileContentEncoding.BASE64`: `File` is the only representation of a binary
+ * payload in the code-executor API, and arbitrary bytes do not survive being
+ * read back as text. Every producer in this package sets the field
+ * explicitly, so the default applies only to externally built files.
+ */
+export function decodeFileContent(file: File): Buffer {
+  return Buffer.from(
+    file.content,
+    file.contentEncoding ?? FileContentEncoding.BASE64,
+  );
+}
 
 /**
  * Reports whether resolvedPath is resolvedBaseDir itself, or a path nested
@@ -27,7 +46,8 @@ function isInsideDir(resolvedPath: string, resolvedBaseDir: string): boolean {
 
 /**
  * Creates files with the given paths in the current working directory.
- * @param files The files to materialize.
+ * @param files The files to materialize. Each file is written as the bytes
+ *     {@link decodeFileContent} decodes its content into.
  */
 export async function materializeFiles(
   files: File[],
@@ -75,10 +95,7 @@ export async function materializeFiles(
     }
 
     await fs.mkdir(path.dirname(finalPath), {recursive: true});
-    await fs.writeFile(
-      finalPath,
-      Buffer.from(file.content, file.contentEncoding),
-    );
+    await fs.writeFile(finalPath, decodeFileContent(file));
 
     createdFiles.push({
       ...file,

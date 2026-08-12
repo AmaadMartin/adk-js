@@ -181,5 +181,58 @@ describe('file_utils', () => {
       );
       expect(content3).toBe('third');
     });
+
+    // The PNG signature is not valid utf-8, so a utf-8 write cannot reproduce
+    // it. Assert on the Buffer: a string comparison passes on mojibake.
+    const pngSignature = Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    ]);
+
+    it('should write a file with no contentEncoding as decoded base64 bytes', async () => {
+      const files = [
+        {
+          name: 'plot.png',
+          content: pngSignature.toString('base64'),
+          mimeType: 'image/png',
+        },
+      ];
+
+      await materializeFiles(files, tempDir);
+
+      const written = await fs.readFile(path.join(tempDir, 'plot.png'));
+      expect(written).toEqual(pngSignature);
+    });
+
+    it('should write a file that declares base64 as decoded bytes', async () => {
+      const files = [
+        {
+          name: 'plot.png',
+          content: pngSignature.toString('base64'),
+          contentEncoding: FileContentEncoding.BASE64,
+          mimeType: 'image/png',
+        },
+      ];
+
+      await materializeFiles(files, tempDir);
+
+      const written = await fs.readFile(path.join(tempDir, 'plot.png'));
+      expect(written).toEqual(pngSignature);
+    });
+
+    it('should write a file that declares utf-8 verbatim', async () => {
+      const files = [
+        {
+          name: 'data.csv',
+          content: 'a,b,c\nhello',
+          contentEncoding: FileContentEncoding.UTF8,
+          mimeType: 'text/csv',
+        },
+      ];
+
+      await materializeFiles(files, tempDir);
+
+      const written = await fs.readFile(path.join(tempDir, 'data.csv'), 'utf8');
+      expect(written).toBe('a,b,c\nhello');
+    });
   });
 });

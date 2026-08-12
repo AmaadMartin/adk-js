@@ -17,6 +17,7 @@ import {
   convertCodeExecutionParts,
   extractCodeAndTruncateContent,
   File,
+  FileContentEncoding,
 } from '../../code_executors/code_execution_utils.js';
 import {CodeExecutorContext} from '../../code_executors/code_executor_context.js';
 import {createEvent, Event} from '../../events/event.js';
@@ -427,6 +428,7 @@ function extractAndReplaceInlineFiles(
       const file: File = {
         name: fileName,
         content: base64Decode(part.inlineData.data!),
+        contentEncoding: FileContentEncoding.UTF8,
         mimeType,
       };
 
