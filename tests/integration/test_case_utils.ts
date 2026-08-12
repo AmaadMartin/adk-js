@@ -20,6 +20,7 @@ import {
 } from '@google/genai';
 import {ChildProcessWithoutNullStreams} from 'node:child_process';
 import {expect} from 'vitest';
+import {getFreePort, waitForProcessStart} from './process_utils.js';
 
 /**
  * Represents a raw generate content response.
@@ -268,12 +269,8 @@ export abstract class BaseTestServer {
 
   constructor(host: string, port?: number) {
     this.host = host;
-    this.port = port || BaseTestServer.getRandomPort();
+    this.port = port ?? 0;
     this.url = `http://${this.host}:${this.port}`;
-  }
-
-  static getRandomPort(): number {
-    return 40000 + Math.floor(Math.random() * 10000);
   }
 
   protected async startProcess({
@@ -289,70 +286,34 @@ export abstract class BaseTestServer {
     serverName: string;
     timeoutMs: number;
   }): Promise<void> {
-    this.serverProcess = spawnProcess();
+    // Subclasses read `this.port` inside `spawnProcess` — for `--port` and for
+    // TEST_API_SERVER_PORT — so it has to be concrete before the child spawns.
+    if (this.port === 0) {
+      this.port = await getFreePort(this.host);
+      this.url = `http://${this.host}:${this.port}`;
+    }
 
-    await new Promise<void>((resolve, reject) => {
-      let started = false;
-      const stdoutChunks: string[] = [];
+    const serverProcess = spawnProcess();
+    this.serverProcess = serverProcess;
 
-      this.serverProcess!.stdout.on('data', (data) => {
-        const message = data.toString();
-        stdoutChunks.push(message);
-
-        // Find URL like http://localhost:12345
-        const urlMatch = message.match(/http:\/\/localhost:([0-9]+)/i);
-        if (urlMatch && urlMatch[1]) {
-          const parsedPort = parseInt(urlMatch[1], 10);
-          if (parsedPort > 0) {
-            this.port = parsedPort;
-            this.url = `http://${this.host}:${this.port}`;
-          }
-        }
-
-        if (message.includes(startMessage)) {
-          started = true;
-          console.log(successLogMessage);
-          resolve();
-        }
-      });
-
-      this.serverProcess!.stderr.on('data', (data) => {
-        console.error(`${serverName} Stderr: ${data.toString()}`);
-      });
-
-      this.serverProcess!.on('error', (error) => {
-        console.error(`${serverName} Error: ${error.message}`);
-
-        reject(
-          new Error(
-            `Failed to start ${serverName.toLowerCase()}: ${error.message}`,
-          ),
-        );
-      });
-
-      this.serverProcess!.on('exit', (code) => {
-        console.error(`${serverName} exited with code ${code}`);
-
-        if (!started) {
-          console.error(
-            `${serverName} Captured stdout before premature exit:\n${stdoutChunks.join('')}`,
-          );
-          reject(
-            new Error(`${serverName} exited prematurely with code ${code}`),
-          );
-        }
-      });
-
-      setTimeout(() => {
-        if (!started) {
-          reject(
-            new Error(
-              `Timeout waiting for ${serverName.toLowerCase()} to start.`,
-            ),
-          );
-        }
-      }, timeoutMs);
+    // Outlives the start handshake: an 'error' event with no listener is
+    // thrown by EventEmitter, and the exit of a server that started fine is
+    // still worth reporting.
+    serverProcess.on('error', (error) => {
+      console.error(`${serverName} Error: ${error.message}`);
     });
+    serverProcess.on('exit', (code) => {
+      console.error(`${serverName} exited with code ${code}`);
+    });
+
+    await waitForProcessStart({
+      childProcess: serverProcess,
+      startMessage,
+      serverName,
+      timeoutMs,
+    });
+
+    console.log(successLogMessage);
   }
 
   async stop(): Promise<void> {

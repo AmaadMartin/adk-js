@@ -29,7 +29,7 @@ describe('App loader CLI integration', () => {
 
       beforeAll(async () => {
         await execAsync('npm install', {cwd: projectPath});
-      }, TEST_EXECUTION_TIMEOUT);
+      });
 
       it(
         'should run app via package.json start script and get responses',
@@ -62,7 +62,7 @@ describe('App loader CLI integration', () => {
         await fs
           .unlink(path.join(projectPath, 'package-lock.json'))
           .catch(() => {});
-      }, TEST_EXECUTION_TIMEOUT);
+      });
     },
   );
 });
@@ -74,10 +74,14 @@ describe('AgentLoader discovery and loading integration', () => {
   );
   let loader: AgentLoader;
 
+  // The fixture resolves `@google/adk` through the workspace-root
+  // node_modules, so it needs no install of its own. Warming the loader here
+  // charges the one-time esbuild bundle of all four entrypoints to the hook
+  // rather than to whichever test happens to run first.
   beforeAll(async () => {
-    await execAsync('npm install', {cwd: projectPath});
     loader = new AgentLoader(projectPath);
-  }, TEST_EXECUTION_TIMEOUT);
+    await loader.preloadAgents();
+  });
 
   it(
     'should discover apps vs agents across directories and standalone files',
@@ -129,14 +133,5 @@ describe('AgentLoader discovery and loading integration', () => {
 
   afterAll(async () => {
     await loader.disposeAll();
-    await fs
-      .rm(path.join(projectPath, 'node_modules'), {
-        recursive: true,
-        force: true,
-      })
-      .catch(() => {});
-    await fs
-      .unlink(path.join(projectPath, 'package-lock.json'))
-      .catch(() => {});
-  }, TEST_EXECUTION_TIMEOUT);
+  });
 });
