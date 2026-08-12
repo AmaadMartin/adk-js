@@ -374,6 +374,58 @@ describe('UnsafeLocalCodeExecutor', () => {
     expect(result.outputFiles![0].mimeType).toBe('text/plain');
   });
 
+  it('should not report a collision-renamed input file as an output file', async () => {
+    const params: ExecuteCodeParams = {
+      invocationContext,
+      codeExecutionInput: {
+        code: 'const fs = require("fs"); fs.writeFileSync("new_output.txt", "hello from script");',
+        language: CodeExecutionLanguage.JAVASCRIPT,
+        inputFiles: [
+          {
+            name: 'data.csv',
+            content: 'a,b',
+            contentEncoding: FileContentEncoding.UTF8,
+            mimeType: 'text/csv',
+          },
+          {
+            name: 'data.csv',
+            content: 'c,d',
+            contentEncoding: FileContentEncoding.UTF8,
+            mimeType: 'text/csv',
+          },
+        ],
+      },
+    };
+
+    const result = await executor.executeCode(params);
+
+    expect(result.outputFiles).toBeDefined();
+    expect(result.outputFiles!.map((f) => f.name)).toEqual(['new_output.txt']);
+  });
+
+  it('should not report a dot-relative input file as an output file', async () => {
+    const params: ExecuteCodeParams = {
+      invocationContext,
+      codeExecutionInput: {
+        code: 'const fs = require("fs"); fs.writeFileSync("new_output.txt", "hello from script");',
+        language: CodeExecutionLanguage.JAVASCRIPT,
+        inputFiles: [
+          {
+            name: './input.txt',
+            content: 'hello input',
+            contentEncoding: FileContentEncoding.UTF8,
+            mimeType: 'text/plain',
+          },
+        ],
+      },
+    };
+
+    const result = await executor.executeCode(params);
+
+    expect(result.outputFiles).toBeDefined();
+    expect(result.outputFiles!.map((f) => f.name)).toEqual(['new_output.txt']);
+  });
+
   it('should infer correct mimeType for generated JSON files', async () => {
     const params: ExecuteCodeParams = {
       invocationContext,

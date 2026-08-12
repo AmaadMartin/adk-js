@@ -26,8 +26,11 @@ function isInsideDir(resolvedPath: string, resolvedBaseDir: string): boolean {
 }
 
 /**
- * Creates files with the given paths in the current working directory.
- * @param files The files to materialize.
+ * Creates files with the given paths in `dir`.
+ *
+ * @param files The files to materialize. Not modified.
+ * @returns Copies of `files` with `name` set to the path written, relative to
+ *     `dir`.
  */
 export async function materializeFiles(
   files: File[],
@@ -55,12 +58,7 @@ export async function materializeFiles(
       try {
         await fs.access(finalPath);
         // File exists, try next name
-        const newName = `${base}_${counter}${ext}`;
-        finalPath = path.join(dirName, newName);
-        // Update file.name to reflect the actual relative path
-        const originalDir = path.dirname(file.name);
-        file.name =
-          originalDir === '.' ? newName : path.join(originalDir, newName);
+        finalPath = path.join(dirName, `${base}_${counter}${ext}`);
         counter++;
       } catch {
         // File does not exist, safe to write
@@ -70,7 +68,7 @@ export async function materializeFiles(
 
     if (!isInsideDir(finalPath, resolvedBaseDir)) {
       throw new Error(
-        `Path traversal detected: ${file.name} resolves outside of ${dir}`,
+        `Path traversal detected: ${path.relative(dir, finalPath)} resolves outside of ${dir}`,
       );
     }
 

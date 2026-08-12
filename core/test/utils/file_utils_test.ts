@@ -181,5 +181,85 @@ describe('file_utils', () => {
       );
       expect(content3).toBe('third');
     });
+
+    it('should not modify the caller File objects when a name collides', async () => {
+      const files = [
+        {
+          name: 'collision.txt',
+          content: 'first',
+          contentEncoding: FileContentEncoding.UTF8,
+          mimeType: 'text/plain',
+        },
+        {
+          name: 'collision.txt',
+          content: 'second',
+          contentEncoding: FileContentEncoding.UTF8,
+          mimeType: 'text/plain',
+        },
+        {
+          name: 'collision.txt',
+          content: 'third',
+          contentEncoding: FileContentEncoding.UTF8,
+          mimeType: 'text/plain',
+        },
+      ];
+
+      const created = await materializeFiles(files, tempDir);
+
+      expect(files.map((f) => f.name)).toEqual([
+        'collision.txt',
+        'collision.txt',
+        'collision.txt',
+      ]);
+      expect(created.map((f) => f.name)).toEqual([
+        'collision.txt',
+        'collision_2.txt',
+        'collision_3.txt',
+      ]);
+    });
+
+    it('should not modify the caller File objects when a nested name collides', async () => {
+      const files = [
+        {
+          name: 'sub/o.txt',
+          content: 'first',
+          contentEncoding: FileContentEncoding.UTF8,
+          mimeType: 'text/plain',
+        },
+        {
+          name: 'sub/o.txt',
+          content: 'second',
+          contentEncoding: FileContentEncoding.UTF8,
+          mimeType: 'text/plain',
+        },
+      ];
+
+      const created = await materializeFiles(files, tempDir);
+
+      expect(files.map((f) => f.name)).toEqual(['sub/o.txt', 'sub/o.txt']);
+      expect(created.map((f) => f.name)).toEqual([
+        path.join('sub', 'o.txt'),
+        path.join('sub', 'o_2.txt'),
+      ]);
+    });
+
+    it('should report the renamed candidate when a collision escapes the target directory', async () => {
+      // An empty name resolves to `tempDir` itself, which `isInsideDir` allows.
+      // That directory exists, so the loop suffixes the candidate to
+      // `<tempDir>_2` in the parent directory, which the second check rejects.
+      const files = [
+        {
+          name: '',
+          content: 'dangerous',
+          contentEncoding: FileContentEncoding.UTF8,
+          mimeType: 'text/plain',
+        },
+      ];
+
+      await expect(materializeFiles(files, tempDir)).rejects.toThrow(
+        `Path traversal detected: ${path.join('..', `${path.basename(tempDir)}_2`)} resolves outside of`,
+      );
+      expect(files[0].name).toBe('');
+    });
   });
 });
