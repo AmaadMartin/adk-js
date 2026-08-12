@@ -10,6 +10,7 @@ import {Client} from '@google-cloud/vertexai/build/src/genai/client.js';
 import {ReasoningEngine as VertexReasoningEngine} from '@google-cloud/vertexai/build/src/genai/types.js';
 
 import {AgentLoader} from '../../utils/agent_loader.js';
+import {errorMessage} from '../../utils/error_utils.js';
 import {createTempDir, isFile, isFolderExists} from '../../utils/file_utils.js';
 import {
   BaseDeployOptions,
@@ -209,7 +210,7 @@ export async function deployToAgentEngine(options: DeployToAgentEngineOptions) {
   } catch (e: unknown) {
     console.error(
       '\x1b[31mFailed to deploy to Agent Engine:',
-      (e as Error).message,
+      errorMessage(e),
       '\x1b[0m',
     );
     throw e;

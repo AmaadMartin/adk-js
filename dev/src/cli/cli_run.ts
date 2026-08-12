@@ -28,6 +28,7 @@ import * as path from 'node:path';
 import * as readline from 'node:readline';
 
 import {AgentFile, AgentFileOptions} from '../utils/agent_loader.js';
+import {errorMessage} from '../utils/error_utils.js';
 import {loadFileData, saveToFile} from '../utils/file_utils.js';
 
 const dirname = process.cwd();
@@ -317,7 +318,7 @@ export async function runAgent(options: RunAgentOptions): Promise<void> {
             subscriber(newAgent);
           }
         } catch (err) {
-          console.warn('Failed to reload agent:', (err as Error).message);
+          console.warn('Failed to reload agent:', errorMessage(err));
         }
       });
     }
