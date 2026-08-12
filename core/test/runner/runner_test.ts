@@ -6,6 +6,7 @@
 
 import {
   App,
+  AppendEventRequest,
   BaseAgent,
   BasePlugin,
   createEvent,
@@ -1572,5 +1573,140 @@ describe('Runner getSessionConfig forwarding', () => {
     expect(getSessionSpy.mock.calls[0][0].config).toBeUndefined();
     // The full seeded history plus the new user message.
     expect(agent.seenEventCounts).toEqual([SEED_TIMESTAMPS.length + 1]);
+  });
+});
+
+/** A session service that only writes events out when it is drained. */
+class BufferingSessionService extends InMemorySessionService {
+  readonly pending: Event[] = [];
+  readonly written: Event[] = [];
+
+  override async appendEvent(request: AppendEventRequest): Promise<Event> {
+    const event = await super.appendEvent(request);
+    this.pending.push(event);
+    return event;
+  }
+
+  override async flush(): Promise<void> {
+    this.written.push(...this.pending);
+    this.pending.length = 0;
+  }
+}
+
+describe('Runner session service flush', () => {
+  let sessionService: InMemorySessionService;
+  let runner: Runner;
+
+  beforeEach(() => {
+    sessionService = new InMemorySessionService();
+    runner = new Runner({
+      appName: TEST_APP_ID,
+      agent: new MockLlmAgent('test_agent'),
+      sessionService,
+    });
+  });
+
+  async function runToCompletion(sessionId: string): Promise<void> {
+    for await (const _ of runner.runAsync({
+      userId: TEST_USER_ID,
+      sessionId,
+      newMessage: {role: 'user', parts: [{text: TEST_MESSAGE}]},
+    })) {
+      // Consume stream
+    }
+  }
+
+  it('drains the session service once per completed invocation', async () => {
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+    const flushSpy = vi.spyOn(sessionService, 'flush');
+
+    await runToCompletion(session.id);
+
+    expect(flushSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('drains the session service after the last appendEvent', async () => {
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+    const appendEventSpy = vi.spyOn(sessionService, 'appendEvent');
+    const flushSpy = vi.spyOn(sessionService, 'flush');
+
+    await runToCompletion(session.id);
+
+    expect(appendEventSpy.mock.invocationCallOrder.length).toBeGreaterThan(0);
+    expect(flushSpy.mock.invocationCallOrder[0]).toBeGreaterThan(
+      Math.max(...appendEventSpy.mock.invocationCallOrder),
+    );
+  });
+
+  it('drains the session service once per invocation, not once per runner', async () => {
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+    const flushSpy = vi.spyOn(sessionService, 'flush');
+
+    await runToCompletion(session.id);
+    await runToCompletion(session.id);
+
+    expect(flushSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('drains the session service when the invocation throws', async () => {
+    const flushSpy = vi.spyOn(sessionService, 'flush');
+
+    await expect(runToCompletion('non_existent_session_id')).rejects.toThrow(
+      'Session not found: non_existent_session_id',
+    );
+
+    expect(flushSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('drains the session service before runEphemeral deletes the session', async () => {
+    const flushSpy = vi.spyOn(sessionService, 'flush');
+    const deleteSessionSpy = vi.spyOn(sessionService, 'deleteSession');
+
+    for await (const _ of runner.runEphemeral({
+      userId: TEST_USER_ID,
+      newMessage: {role: 'user', parts: [{text: TEST_MESSAGE}]},
+    })) {
+      // Consume stream
+    }
+
+    expect(flushSpy).toHaveBeenCalledTimes(1);
+    expect(deleteSessionSpy).toHaveBeenCalledTimes(1);
+    expect(flushSpy.mock.invocationCallOrder[0]).toBeLessThan(
+      deleteSessionSpy.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('drains a buffering session service by the end of the invocation', async () => {
+    const bufferingService = new BufferingSessionService();
+    const bufferingRunner = new Runner({
+      appName: TEST_APP_ID,
+      agent: new MockLlmAgent('test_agent'),
+      sessionService: bufferingService,
+    });
+
+    for await (const _ of bufferingRunner.runEphemeral({
+      userId: TEST_USER_ID,
+      newMessage: {role: 'user', parts: [{text: TEST_MESSAGE}]},
+    })) {
+      // Consume stream
+    }
+
+    expect(bufferingService.pending).toEqual([]);
+    expect(bufferingService.written.map((e) => e.author)).toEqual([
+      'user',
+      'test_agent',
+    ]);
   });
 });
