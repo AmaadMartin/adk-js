@@ -14,6 +14,7 @@
   "license": "ISC",
   "dependencies": {
     "@google/adk": "file:../../../../core",
-    "@google/adk-devtools": "file:../../../../dev"
+    "@google/adk-devtools": "file:../../../../dev",
+    "@google/genai": "^2.9.0"
   }
 }
