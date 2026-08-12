@@ -42,6 +42,7 @@ import {
   setupTelemetry,
 } from '../utils/telemetry_utils.js';
 import {getAgentGraphAsDot} from './agent_graph.js';
+import {TriggerRouter} from './trigger_routes.js';
 
 /**
  * Environment variable holding the shared bearer token used to authenticate
@@ -71,6 +72,13 @@ interface ServerOptions {
    * `a2a` is enabled, the A2A surface is mounted WITHOUT authentication.
    */
   a2aAuthToken?: string;
+  /**
+   * Event sources allowed to invoke an agent over `/apps/:appName/trigger/*`.
+   * These endpoints accept unauthenticated work by design, so they are off by
+   * default: when this is absent, empty, or names no valid source, no trigger
+   * route is mounted. See {@link TriggerRouter} for the valid source names.
+   */
+  triggerSources?: string[];
   reloadAgents?: boolean;
   registerProcessors?: (tracerProvider: TracerProvider) => void;
 }
@@ -118,6 +126,7 @@ export class AdkApiServer {
   private readonly logger: Logger;
   private readonly a2a: boolean;
   private readonly a2aAuthToken?: string;
+  private readonly triggerSources?: string[];
 
   constructor(options: ServerOptions) {
     this.host = options.host ?? 'localhost';
@@ -155,6 +164,7 @@ export class AdkApiServer {
     // to the authenticator, which rejects a token that is not usable.
     this.a2aAuthToken =
       options.a2aAuthToken || process.env[A2A_AUTH_TOKEN_ENV_VAR] || undefined;
+    this.triggerSources = options.triggerSources;
     this.app = express();
   }
 
@@ -958,6 +968,21 @@ export class AdkApiServer {
         }
       }
     });
+
+    if (this.triggerSources?.length) {
+      new TriggerRouter(
+        {
+          withRunner: async (appName, fn) => {
+            await using agentFile =
+              await this.agentLoader.getAgentFile(appName);
+            const loaded = await agentFile.load();
+            return fn(await this.getRunner(loaded, appName));
+          },
+          logger: this.logger,
+        },
+        {triggerSources: this.triggerSources},
+      ).register(app);
+    }
   }
 
   async start(): Promise<void> {
