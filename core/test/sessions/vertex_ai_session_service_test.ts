@@ -7,11 +7,11 @@
 import {Sessions} from '@google-cloud/vertexai/build/src/genai/sessions.js';
 import {
   createEvent,
+  createSession,
   isCompactedEvent,
   State,
   VertexAiSessionService,
 } from '@google/adk';
-import {Session} from '@google/adk/sessions/session.js';
 import {ApiError} from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
@@ -1247,13 +1247,13 @@ describe('VertexAiSessionService', () => {
 
   describe('appendEvent', () => {
     it('appends event to session and falls back on empty invocationId/author', async () => {
-      const session = {
+      const session = createSession({
         id: 'append-session',
         appName: APP_NAME,
         userId: 'testUser',
         events: [],
         lastUpdateTime: Date.now(),
-      } as unknown as Session;
+      });
 
       const event = createEvent({
         timestamp: 1620000000000,
@@ -1300,12 +1300,12 @@ describe('VertexAiSessionService', () => {
     });
 
     it('appends compaction metadata if event is compacted', async () => {
-      const session = {
+      const session = createSession({
         id: 's1',
         appName: APP_NAME,
         userId: 'u1',
         events: [],
-      } as unknown as Session;
+      });
       const event = createEvent({
         timestamp: Date.now(),
         content: {role: 'model', parts: []},
@@ -1337,12 +1337,12 @@ describe('VertexAiSessionService', () => {
     });
 
     it('appends usage metadata if present', async () => {
-      const session = {
+      const session = createSession({
         id: 's1',
         appName: APP_NAME,
         userId: 'u1',
         events: [],
-      } as unknown as Session;
+      });
       const event = createEvent({
         timestamp: Date.now(),
         content: {role: 'model', parts: []},
@@ -1368,13 +1368,13 @@ describe('VertexAiSessionService', () => {
     });
 
     it('passes provided author and invocationId from Event', async () => {
-      const session = {
+      const session = createSession({
         id: 'append-session',
         appName: APP_NAME,
         userId: 'testUser',
         events: [],
         lastUpdateTime: Date.now(),
-      } as unknown as Session;
+      });
 
       const event = createEvent({
         timestamp: 1620000000000,
@@ -1394,12 +1394,12 @@ describe('VertexAiSessionService', () => {
     });
 
     it('handles event without actions in appendEvent', async () => {
-      const session = {
+      const session = createSession({
         id: 's1',
         appName: APP_NAME,
         userId: 'u1',
         events: [],
-      } as unknown as Session;
+      });
       const event = createEvent({
         timestamp: Date.now(),
         content: {role: 'model', parts: []},

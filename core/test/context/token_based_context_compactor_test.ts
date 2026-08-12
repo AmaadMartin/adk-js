@@ -8,10 +8,10 @@ import {
   BaseAgent,
   BaseSummarizer,
   CompactedEvent,
+  createSession,
   Event,
   InvocationContext,
   PluginManager,
-  Session,
   TokenBasedContextCompactor,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
@@ -72,12 +72,12 @@ function createMockEvent(
 }
 
 function createMockInvocationContext(events: Event[]): InvocationContext {
-  const session = {
+  const session = createSession({
     id: 'test-session',
     events,
     appName: 'test-app',
     userId: 'test-user',
-  } as unknown as Session;
+  });
   return new InvocationContext({
     invocationId: 'test-invocation',
     agent: {name: 'test-agent'} as BaseAgent,
