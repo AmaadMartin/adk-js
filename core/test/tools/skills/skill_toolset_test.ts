@@ -15,6 +15,7 @@ import {
   SkillToolset,
 } from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
+import {DEFAULT_MAX_OUTPUT_CHARS} from '../../../src/tools/skill/skill_toolset.js';
 
 describe('skill_toolset', () => {
   const mockSkill: Skill = {
@@ -312,6 +313,20 @@ describe('skill_toolset', () => {
       const tools2 = await toolset.getTools(context);
       expect(tools2.map((t) => t.name)).toContain('cached_tool');
       expect(mockInnerGetTools).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('maxOutputChars', () => {
+    it('defaults to DEFAULT_MAX_OUTPUT_CHARS when the option is omitted', () => {
+      expect(DEFAULT_MAX_OUTPUT_CHARS).toBe(30_000);
+
+      const toolset = new SkillToolset([mockSkill]);
+      expect(toolset.maxOutputChars).toBe(DEFAULT_MAX_OUTPUT_CHARS);
+    });
+
+    it('reflects an explicitly passed option', () => {
+      const toolset = new SkillToolset([mockSkill], {maxOutputChars: 512});
+      expect(toolset.maxOutputChars).toBe(512);
     });
   });
 });

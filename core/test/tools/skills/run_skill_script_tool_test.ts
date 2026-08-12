@@ -19,6 +19,7 @@ import {
   SkillToolset,
 } from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
+import {DEFAULT_MAX_OUTPUT_CHARS} from '../../../src/tools/skill/skill_toolset.js';
 import {materializeFiles} from '../../../src/utils/file_utils.js';
 
 vi.mock('../../../src/utils/file_utils.js', () => ({
@@ -228,5 +229,111 @@ describe('RunSkillScriptTool', () => {
     });
 
     expect(materializeFiles).toHaveBeenCalledWith([testFile]);
+  });
+
+  it('returns execution error when executor throws', async () => {
+    const mockExecutor = new MockCodeExecutor();
+    mockExecutor.shouldThrow = true;
+    const toolset = new SkillToolset([mockSkill], {codeExecutor: mockExecutor});
+    const tool = new RunSkillScriptTool(toolset);
+
+    const result = (await tool.runAsync({
+      args: {skill_name: 'test-skill', script_path: 'scripts/setup.js'},
+      toolContext: createMockContext(),
+    })) as ToolErrorResponse;
+
+    expect(result).toEqual({
+      error:
+        "Failed to execute script 'scripts/setup.js': Mock execution failure",
+      errorCode: 'EXECUTION_ERROR',
+    });
+  });
+
+  describe('output truncation', () => {
+    async function runWith(
+      mockResult: CodeExecutionResult,
+      maxOutputChars?: number,
+    ): Promise<CodeExecutionResult> {
+      const mockExecutor = new MockCodeExecutor();
+      mockExecutor.mockResult = mockResult;
+      const toolset = new SkillToolset([mockSkill], {
+        codeExecutor: mockExecutor,
+        maxOutputChars,
+      });
+      const tool = new RunSkillScriptTool(toolset);
+
+      return (await tool.runAsync({
+        args: {skill_name: 'test-skill', script_path: 'scripts/setup.js'},
+        toolContext: createMockContext(),
+      })) as CodeExecutionResult;
+    }
+
+    it('returns stdout below the cap verbatim', async () => {
+      const stdout = 'a'.repeat(DEFAULT_MAX_OUTPUT_CHARS);
+
+      const result = await runWith({stdout, stderr: '', outputFiles: []});
+
+      expect(result.stdout).toBe(stdout);
+    });
+
+    it('truncates stdout above the cap', async () => {
+      const stdout = 'a'.repeat(DEFAULT_MAX_OUTPUT_CHARS) + 'bbb';
+
+      const result = await runWith({stdout, stderr: '', outputFiles: []});
+
+      const half = DEFAULT_MAX_OUTPUT_CHARS / 2;
+      expect(result.stdout.startsWith('a'.repeat(half))).toBe(true);
+      expect(result.stdout.endsWith('bbb')).toBe(true);
+      expect(result.stdout).toContain('... [truncated 3 characters] ...');
+    });
+
+    it('truncates stderr above the cap while leaving a short stdout verbatim', async () => {
+      const stderr = 'e'.repeat(DEFAULT_MAX_OUTPUT_CHARS + 10);
+
+      const result = await runWith({stdout: 'ok', stderr, outputFiles: []});
+
+      expect(result.stdout).toBe('ok');
+      expect(result.stderr).toContain('... [truncated 10 characters] ...');
+    });
+
+    it('caps stdout and stderr independently in one call', async () => {
+      const result = await runWith(
+        {stdout: '0123456789', stderr: 'abcdefghij', outputFiles: []},
+        4,
+      );
+
+      expect(result.stdout).toBe('01\n... [truncated 6 characters] ...\n89');
+      expect(result.stderr).toBe('ab\n... [truncated 6 characters] ...\nij');
+    });
+
+    it('honours a custom maxOutputChars on the toolset', async () => {
+      const result = await runWith(
+        {stdout: 'x'.repeat(30), stderr: '', outputFiles: []},
+        10,
+      );
+
+      expect(result.stdout).toBe(
+        `${'x'.repeat(5)}\n... [truncated 20 characters] ...\n${'x'.repeat(5)}`,
+      );
+    });
+
+    it('does not mutate the executor result', async () => {
+      const stdout = 'y'.repeat(50);
+      const mockExecutor = new MockCodeExecutor();
+      mockExecutor.mockResult = {stdout, stderr: '', outputFiles: []};
+      const toolset = new SkillToolset([mockSkill], {
+        codeExecutor: mockExecutor,
+        maxOutputChars: 10,
+      });
+      const tool = new RunSkillScriptTool(toolset);
+
+      const result = (await tool.runAsync({
+        args: {skill_name: 'test-skill', script_path: 'scripts/setup.js'},
+        toolContext: createMockContext(),
+      })) as CodeExecutionResult;
+
+      expect(result.stdout).not.toBe(stdout);
+      expect(mockExecutor.mockResult.stdout).toBe(stdout);
+    });
   });
 });

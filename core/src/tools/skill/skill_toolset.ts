@@ -22,6 +22,12 @@ import {RunSkillInlineScriptTool} from './run_skill_inline_script_tool.js';
 import {RunSkillScriptTool} from './run_skill_script_tool.js';
 import {SearchSkillsTool} from './search_skills_tool.js';
 
+/**
+ * Default cap on the number of characters of a single `stdout` / `stderr`
+ * stream returned to the model per skill script execution.
+ */
+export const DEFAULT_MAX_OUTPUT_CHARS = 30_000;
+
 const DEFAULT_SKILL_SYSTEM_INSTRUCTION = `You can use specialized 'skills' to help you with complex tasks. You MUST use the skill tools to interact with these skills.
 
 Skills are folders of instructions and resources that extend your capabilities for specialized tasks. Each skill folder contains:
@@ -45,6 +51,7 @@ export class SkillToolset extends BaseToolset {
   public additionalTools: Array<BaseTool | BaseToolset>;
   public codeExecutor?: BaseCodeExecutor;
   public registry?: SkillRegistry;
+  public readonly maxOutputChars: number;
   private toolCache = new Map<string, BaseTool[]>();
   private fetchedSkillCache = new Map<string, Map<string, Skill>>();
 
@@ -63,6 +70,13 @@ export class SkillToolset extends BaseToolset {
        * confirmation.
        */
       allowInlineScripts?: boolean;
+      /**
+       * Maximum number of characters of `stdout` / `stderr` returned to the
+       * model per skill script execution. Each stream is capped
+       * independently; output beyond the cap is elided from the middle with an
+       * explicit marker. Defaults to `DEFAULT_MAX_OUTPUT_CHARS` (30,000).
+       */
+      maxOutputChars?: number;
     } = {},
   ) {
     super([], 'adk_skill_toolset');
@@ -72,6 +86,7 @@ export class SkillToolset extends BaseToolset {
     this.codeExecutor = options.codeExecutor;
     this.additionalTools = options.additionalTools || [];
     this.registry = options.registry;
+    this.maxOutputChars = options.maxOutputChars ?? DEFAULT_MAX_OUTPUT_CHARS;
 
     this.tools = [
       new ListSkillsTool(this),

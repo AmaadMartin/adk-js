@@ -19,6 +19,7 @@ import {
   SkillToolset,
 } from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
+import {DEFAULT_MAX_OUTPUT_CHARS} from '../../../src/tools/skill/skill_toolset.js';
 import {ToolConfirmation} from '../../../src/tools/tool_confirmation.js';
 import {materializeFiles} from '../../../src/utils/file_utils.js';
 
@@ -379,6 +380,70 @@ describe('RunSkillInlineScriptTool', () => {
       expect(
         mockToolContext.actions.requestedToolConfirmations['fc-3'],
       ).toBeUndefined();
+    });
+  });
+
+  describe('output truncation', () => {
+    async function runWith(
+      mockResult: CodeExecutionResult,
+      maxOutputChars?: number,
+    ): Promise<CodeExecutionResult> {
+      const mockExecutor = new MockCodeExecutor();
+      mockExecutor.mockResult = mockResult;
+      const toolset = new SkillToolset([], {
+        codeExecutor: mockExecutor,
+        allowInlineScripts: true,
+        maxOutputChars,
+      });
+      const tool = new RunSkillInlineScriptTool(toolset);
+
+      return (await tool.runAsync({
+        args: {
+          script_content: 'console.log("noisy");',
+          language: CodeExecutionLanguage.JAVASCRIPT,
+        },
+        toolContext: createMockContext('test-agent', undefined, {
+          toolConfirmation: confirmed(),
+        }),
+      })) as CodeExecutionResult;
+    }
+
+    it('returns stdout below the cap verbatim', async () => {
+      const stdout = 'a'.repeat(DEFAULT_MAX_OUTPUT_CHARS);
+
+      const result = await runWith({stdout, stderr: '', outputFiles: []});
+
+      expect(result.stdout).toBe(stdout);
+    });
+
+    it('truncates stdout above the cap', async () => {
+      const stdout = 'a'.repeat(DEFAULT_MAX_OUTPUT_CHARS) + 'bbbbb';
+
+      const result = await runWith({stdout, stderr: '', outputFiles: []});
+
+      const half = DEFAULT_MAX_OUTPUT_CHARS / 2;
+      expect(result.stdout.startsWith('a'.repeat(half))).toBe(true);
+      expect(result.stdout.endsWith('bbbbb')).toBe(true);
+      expect(result.stdout).toContain('... [truncated 5 characters] ...');
+    });
+
+    it('truncates stderr above the cap', async () => {
+      const stderr = 'e'.repeat(DEFAULT_MAX_OUTPUT_CHARS + 7);
+
+      const result = await runWith({stdout: 'ok', stderr, outputFiles: []});
+
+      expect(result.stdout).toBe('ok');
+      expect(result.stderr).toContain('... [truncated 7 characters] ...');
+    });
+
+    it('honours a custom maxOutputChars on the toolset', async () => {
+      const result = await runWith(
+        {stdout: '0123456789', stderr: 'abcdefghij', outputFiles: []},
+        4,
+      );
+
+      expect(result.stdout).toBe('01\n... [truncated 6 characters] ...\n89');
+      expect(result.stderr).toBe('ab\n... [truncated 6 characters] ...\nij');
     });
   });
 

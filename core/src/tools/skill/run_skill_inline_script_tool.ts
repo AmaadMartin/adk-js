@@ -10,6 +10,7 @@ import {isLlmAgent} from '../../agents/llm_agent.js';
 import {CodeExecutionLanguage} from '../../code_executors/code_execution_utils.js';
 import {experimental} from '../../utils/experimental.js';
 import {materializeFiles} from '../../utils/file_utils.js';
+import {truncateMiddle} from '../../utils/truncate_utils.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
 import {SkillToolset} from './skill_toolset.js';
 
@@ -140,10 +141,14 @@ export class RunSkillInlineScriptTool extends BaseTool {
         },
       });
 
-      // Final filename could be different if there was a collision, so update the result.
-      result.outputFiles = await materializeFiles(result.outputFiles);
-
-      return result;
+      const maxOutputChars = this.toolset.maxOutputChars;
+      return {
+        ...result,
+        stdout: truncateMiddle(result.stdout, maxOutputChars),
+        stderr: truncateMiddle(result.stderr, maxOutputChars),
+        // Final filename could be different if there was a collision, so update the result.
+        outputFiles: await materializeFiles(result.outputFiles),
+      };
     } catch (e: unknown) {
       return {
         error: `Failed to execute inline script: ${(e as Error).message}`,
