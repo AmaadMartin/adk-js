@@ -461,6 +461,7 @@ export type {
   RouteValue,
   RoutingMap,
   RunNodeOptions,
+  RunnableNode,
   ScheduleDynamicNode,
   ScheduleDynamicNodeOptions,
   ToolNodeConfig,
