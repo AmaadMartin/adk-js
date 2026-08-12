@@ -18,10 +18,27 @@ import {
   UnsafeLocalCodeExecutor,
 } from '@google/adk';
 import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
 import * as path from 'node:path';
-import {describe, expect, it} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', () => {
+  let materializeDir: string;
+
+  beforeEach(async () => {
+    materializeDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'run_skill_inline_script_tool_test_'),
+    );
+    // The tool materializes output files into the process working directory;
+    // redirect it so a failing assertion cannot leave an artifact in the repo.
+    vi.spyOn(process, 'cwd').mockReturnValue(materializeDir);
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await fs.rm(materializeDir, {recursive: true, force: true});
+  });
+
   // These integration tests exercise real code execution, which is gated behind
   // a human-in-the-loop confirmation. Supply an already-confirmed confirmation
   // so the tool proceeds to execute (see run_skill_inline_script_tool.ts).
@@ -169,7 +186,7 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
     expect(outputFile).toBeDefined();
 
     // Verify file was created in process.cwd()
-    const fullPath = path.join(process.cwd(), testFileName);
+    const fullPath = path.join(materializeDir, testFileName);
     const exists = await fs
       .access(fullPath)
       .then(() => true)
@@ -178,9 +195,6 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
 
     const content = await fs.readFile(fullPath, 'utf-8');
     expect(content).toBe(testFileContent);
-
-    // Clean up
-    await fs.unlink(fullPath);
   });
 
   it('successfully passes array arguments to a JavaScript inline script', async () => {
@@ -228,7 +242,7 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
     const testFileContent = 'hello from output file';
 
     // Pre-create the target file to force a collision
-    const targetFile = path.join(process.cwd(), testFileName);
+    const targetFile = path.join(materializeDir, testFileName);
     await fs.writeFile(targetFile, 'existing content');
 
     const result = (await tool.runAsync({
@@ -249,7 +263,7 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
     expect(outputFile).toBeDefined();
 
     // Verify collision file was created in process.cwd()
-    const fullPath = path.join(process.cwd(), expectedName);
+    const fullPath = path.join(materializeDir, expectedName);
     const exists = await fs
       .access(fullPath)
       .then(() => true)
@@ -258,9 +272,5 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
 
     const content = await fs.readFile(fullPath, 'utf-8');
     expect(content).toBe(testFileContent);
-
-    // Clean up both files
-    await fs.unlink(targetFile);
-    await fs.unlink(fullPath);
   });
 });
