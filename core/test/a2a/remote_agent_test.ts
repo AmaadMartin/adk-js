@@ -245,6 +245,62 @@ describe('A2ARemoteAgent', () => {
     expect(events[0].content?.parts![0].text).toBe('static response');
   });
 
+  it('completes the turn on an auth-required task and extracts the long-running tool id', async () => {
+    const card: AgentCard = {
+      name: 'Remote',
+      description: 'test',
+      protocolVersion: '1.0',
+      defaultInputModes: [],
+      defaultOutputModes: [],
+      capabilities: {streaming: false},
+      skills: [],
+      url: 'https://example.com',
+      version: '1.0',
+    };
+
+    const agent = new RemoteA2AAgent({
+      name: 'test-agent',
+      agentCard: card,
+      clientFactory: mockClientFactory,
+    });
+
+    const task: Task = {
+      kind: 'task',
+      id: 'task1',
+      contextId: 'context1',
+      status: {
+        state: 'auth-required',
+        message: {
+          kind: 'message',
+          messageId: 'msg1',
+          role: 'agent',
+          parts: [
+            {
+              kind: 'data',
+              data: {id: 'call_1', name: 'adk_request_credential', args: {}},
+              metadata: {
+                'adk_is_long_running': true,
+                'adk_type': 'function_call',
+              },
+            },
+          ],
+        },
+      },
+    };
+    vi.mocked(mockClient.sendMessage).mockResolvedValue(task);
+
+    const context = createMockContext();
+    const events: AdkEvent[] = [];
+
+    for await (const event of agent.runAsync(context)) {
+      events.push(event);
+    }
+
+    expect(events.length).toBe(1);
+    expect(events[0].turnComplete).toBe(true);
+    expect(events[0].longRunningToolIds).toEqual(['call_1']);
+  });
+
   it('sets branch from the local invocation context, ignoring a peer-forged adk_branch (streaming)', async () => {
     const card: AgentCard = {
       name: 'Remote',

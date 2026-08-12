@@ -172,6 +172,109 @@ describe('event_processor_utils', () => {
       expect(parts?.length).toBe(1);
       expect((parts?.[0] as DataPart)?.data?.id).toBe('call_1');
     });
+
+    it('returns an auth-required status update when the pending long-running call is the credential request', () => {
+      const events: AdkEvent[] = [
+        createEvent({
+          longRunningToolIds: ['call_1'],
+          content: {
+            parts: [
+              {
+                functionCall: {
+                  id: 'call_1',
+                  name: 'adk_request_credential',
+                  args: {},
+                },
+              },
+            ],
+          },
+        }),
+      ];
+      const result = getFinalTaskStatusUpdate(events, mockContext);
+
+      expect(result.status?.state).toBe('auth-required');
+      expect(result.final).toBe(true);
+
+      const parts = result.status?.message?.parts;
+      expect((parts?.[0] as DataPart)?.data?.id).toBe('call_1');
+      expect(result.metadata).toEqual(
+        expect.objectContaining({
+          adk_session_id: 'test-session',
+          adk_app_name: 'test-app',
+          adk_user_id: 'test-user',
+        }),
+      );
+    });
+
+    it('returns auth-required when any pending long-running call is the credential request', () => {
+      const events: AdkEvent[] = [
+        createEvent({
+          longRunningToolIds: ['call_1'],
+          content: {
+            parts: [{functionCall: {id: 'call_1', name: 'myFunc', args: {}}}],
+          },
+        }),
+        createEvent({
+          longRunningToolIds: ['call_2'],
+          content: {
+            parts: [
+              {
+                functionCall: {
+                  id: 'call_2',
+                  name: 'adk_request_credential',
+                  args: {},
+                },
+              },
+            ],
+          },
+        }),
+      ];
+      const result = getFinalTaskStatusUpdate(events, mockContext);
+
+      expect(result.status?.state).toBe('auth-required');
+
+      const parts = result.status?.message?.parts;
+      expect(parts?.length).toBe(2);
+      expect((parts?.[0] as DataPart)?.data?.id).toBe('call_1');
+      expect((parts?.[1] as DataPart)?.data?.id).toBe('call_2');
+    });
+
+    it('keeps input-required when only a credential function response is pending', () => {
+      const events: AdkEvent[] = [
+        createEvent({
+          longRunningToolIds: ['call_1'],
+          content: {
+            parts: [
+              {
+                functionResponse: {
+                  id: 'call_1',
+                  name: 'adk_request_credential',
+                  response: {},
+                },
+              },
+            ],
+          },
+        }),
+      ];
+      const result = getFinalTaskStatusUpdate(events, mockContext);
+
+      expect(result.status?.state).toBe('input-required');
+    });
+
+    it('keeps input-required for a non-credential long-running call', () => {
+      const events: AdkEvent[] = [
+        createEvent({
+          longRunningToolIds: ['call_1'],
+          content: {
+            parts: [{functionCall: {id: 'call_1', name: 'myFunc', args: {}}}],
+          },
+        }),
+      ];
+      const result = getFinalTaskStatusUpdate(events, mockContext);
+
+      expect(result.status?.state).toBe('input-required');
+      expect(result.final).toBe(true);
+    });
   });
 
   describe('getTaskInputRequiredEvent', () => {
@@ -257,6 +360,80 @@ describe('event_processor_utils', () => {
         'No input provided for function call id call_1',
       );
       expect(parts![1].metadata?.validation_error).toBe(true);
+    });
+
+    it('keeps an auth-required task in auth-required when the response is missing', () => {
+      const taskParts = toA2AParts([
+        {
+          functionCall: {
+            id: 'call_1',
+            name: 'adk_request_credential',
+            args: {},
+          },
+        },
+      ]);
+      const task = {
+        id: 'taskId1',
+        contextId: 'contextId1',
+        kind: 'task',
+        status: {
+          state: 'auth-required',
+          message: {
+            parts: taskParts,
+          },
+        },
+      } as Task;
+      const genAIContent = {
+        parts: [{text: 'I can not do that.'}],
+      } as GenAIContent;
+
+      const result = getTaskInputRequiredEvent(task, genAIContent);
+      expect(result).toBeDefined();
+      expect(result!.status?.state).toBe('auth-required');
+
+      const parts = result!.status?.message?.parts;
+      expect(parts).toBeDefined();
+      expect(parts!.length).toBe(2);
+      expect((parts![1] as TextPart)?.text).toContain(
+        'No input provided for function call id call_1',
+      );
+      expect(parts![1].metadata?.validation_error).toBe(true);
+    });
+
+    it('returns undefined for an auth-required task resumed with the matching response', () => {
+      const taskParts = toA2AParts([
+        {
+          functionCall: {
+            id: 'call_1',
+            name: 'adk_request_credential',
+            args: {},
+          },
+        },
+      ]);
+      const task = {
+        id: 'taskId1',
+        contextId: 'contextId1',
+        kind: 'task',
+        status: {
+          state: 'auth-required',
+          message: {
+            parts: taskParts,
+          },
+        },
+      } as Task;
+      const genAIContent = {
+        parts: [
+          {
+            functionResponse: {
+              id: 'call_1',
+              name: 'adk_request_credential',
+              response: {},
+            },
+          },
+        ],
+      } as GenAIContent;
+
+      expect(getTaskInputRequiredEvent(task, genAIContent)).toBeUndefined();
     });
 
     it('returns undefined if status message has no functionCall parts', () => {

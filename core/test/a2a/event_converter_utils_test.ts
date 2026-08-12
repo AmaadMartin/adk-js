@@ -622,6 +622,37 @@ describe('event_converter_utils', () => {
         expect(event!.turnComplete).toBe(true);
         expect(event!.longRunningToolIds).toEqual(['inputTool']);
       });
+
+      it('converts auth-required task and extracts longRunningToolIds', () => {
+        const task: Task = {
+          kind: 'task',
+          id: 'task1',
+          contextId: 'context1',
+          status: {
+            state: 'auth-required',
+            message: {
+              kind: 'message',
+              messageId: 'msg1',
+              role: 'agent',
+              parts: [
+                {
+                  kind: 'data',
+                  data: {id: 'inputTool', name: 'inputTool', args: {}},
+                  metadata: {
+                    'adk_is_long_running': true,
+                    'adk_type': 'function_call',
+                  },
+                },
+              ],
+            },
+          },
+        };
+
+        const event = toAdkEvent(task, 'inv1', 'agent1');
+        expect(event).toBeDefined();
+        expect(event!.turnComplete).toBe(true);
+        expect(event!.longRunningToolIds).toEqual(['inputTool']);
+      });
     });
   });
 });

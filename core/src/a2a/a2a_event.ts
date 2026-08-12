@@ -32,6 +32,7 @@ export enum TaskState {
   CANCELED = 'canceled',
   REJECTED = 'rejected',
   INPUT_REQUIRED = 'input-required',
+  AUTH_REQUIRED = 'auth-required',
 }
 
 /**
@@ -116,12 +117,21 @@ export function isTerminalTaskStatusUpdateEvent(event: unknown): boolean {
 }
 
 /**
- * Checks if the event is an input required task status update event.
+ * The states a task is in while it waits on the user.
  */
-export function isInputRequiredTaskStatusUpdateEvent(event: unknown): boolean {
+export type PausedTaskState =
+  | TaskState.INPUT_REQUIRED
+  | TaskState.AUTH_REQUIRED;
+
+/**
+ * Checks if the event is a paused task status update event, meaning the task
+ * waits on the user before it can continue.
+ */
+export function isPausedTaskStatusUpdateEvent(event: unknown): boolean {
   return (
     (isTaskStatusUpdateEvent(event) || isTask(event)) &&
-    event.status.state === TaskState.INPUT_REQUIRED
+    (event.status.state === TaskState.INPUT_REQUIRED ||
+      event.status.state === TaskState.AUTH_REQUIRED)
   );
 }
 
@@ -330,18 +340,21 @@ export function createTaskFailedEvent({
 }
 
 /**
- * Creates an input required event.
+ * Creates an event that pauses a task to wait on the user.
  */
-export function createTaskInputRequiredEvent({
+export function createPausedTaskEvent({
   taskId,
   contextId,
   parts,
   metadata,
+  state = TaskState.INPUT_REQUIRED,
 }: {
   taskId: string;
   contextId: string;
   parts: A2APart[];
   metadata?: Record<string, unknown>;
+  /** The paused state to put the task in. */
+  state?: PausedTaskState;
 }): TaskStatusUpdateEvent {
   return {
     kind: 'status-update',
@@ -349,7 +362,7 @@ export function createTaskInputRequiredEvent({
     contextId,
     final: true,
     status: {
-      state: TaskState.INPUT_REQUIRED,
+      state,
       message: {
         kind: 'message',
         messageId: randomUUID(),
@@ -372,29 +385,14 @@ export function createInputMissingErrorEvent({
   contextId,
   parts,
   metadata,
+  state = TaskState.INPUT_REQUIRED,
 }: {
   parts: A2APart[];
   taskId: string;
   contextId: string;
   metadata?: Record<string, unknown>;
+  /** The paused state to keep the task in. */
+  state?: PausedTaskState;
 }): TaskStatusUpdateEvent {
-  return {
-    kind: 'status-update',
-    taskId,
-    contextId,
-    final: true,
-    status: {
-      state: TaskState.INPUT_REQUIRED,
-      message: {
-        kind: 'message',
-        messageId: randomUUID(),
-        role: 'agent',
-        taskId,
-        contextId,
-        parts,
-      },
-      timestamp: new Date().toISOString(),
-    },
-    metadata,
-  };
+  return createPausedTaskEvent({taskId, contextId, parts, metadata, state});
 }
