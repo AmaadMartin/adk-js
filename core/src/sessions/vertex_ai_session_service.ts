@@ -586,13 +586,7 @@ function toApiActions(
   } as ApiEventActions;
 }
 
-/**
- * The `_compaction` payload this service stores under `customMetadata`.
- *
- * Derived from {@link CompactedEvent} so the stored shape cannot drift from the
- * public contract: `appendEvent` writes these fields off a narrowed
- * `CompactedEvent` and `_fromApiEvent` reads them straight back onto one.
- */
+/** The `_compaction` payload this service stores under `customMetadata`. */
 type CompactionMetadata = Pick<
   CompactedEvent,
   'startTime' | 'endTime' | 'compactedContent'
@@ -604,11 +598,6 @@ interface ExtendedEventActions extends EventActions {
 
 /** An {@link Event} as this service reconstructs it from the API response. */
 interface ExtendedEvent extends Event {
-  actions: ExtendedEventActions;
-}
-
-/** A compacted {@link Event} as this service reconstructs it. */
-interface ExtendedCompactedEvent extends CompactedEvent {
   actions: ExtendedEventActions;
 }
 
@@ -697,9 +686,15 @@ function _fromApiEvent(apiEventObj: VertexAiSessionEvent): Event {
       usageMetadataData as unknown as GenerateContentResponseUsageMetadata,
   };
 
-  let result: ExtendedEvent | ExtendedCompactedEvent = event;
+  let result: ExtendedEvent | CompactedEvent = event;
   if (compactionData) {
-    result = {...event, isCompacted: true, ...compactionData};
+    result = {
+      ...event,
+      isCompacted: true,
+      startTime: compactionData.startTime,
+      endTime: compactionData.endTime,
+      compactedContent: compactionData.compactedContent,
+    };
   }
 
   if (workflowData) {
