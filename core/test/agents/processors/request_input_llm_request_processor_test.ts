@@ -72,7 +72,7 @@ function userTextEvent(text: string): Event {
 async function resumeInputsFor(
   replies: Event[],
   responseSchema?: SchemaLike,
-): Promise<Record<string, unknown>> {
+): Promise<unknown> {
   const {handleFunctionCallList} =
     await import('../../../src/agents/functions.js');
   const spy = vi.mocked(handleFunctionCallList);
@@ -109,7 +109,7 @@ async function resumeInputsFor(
   }
   const confirmation: ToolConfirmation =
     call.toolConfirmationDict[TOOL_CALL_ID];
-  return confirmation.payload as Record<string, unknown>;
+  return confirmation.payload;
 }
 
 describe('RequestInputLlmRequestProcessor — plain-text resume', () => {
