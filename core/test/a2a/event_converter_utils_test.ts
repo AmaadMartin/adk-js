@@ -13,7 +13,12 @@ import {
 import {createEvent, createEventActions} from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
 import {A2AEvent} from '../../src/a2a/a2a_event.js';
-import {toA2AMessage, toAdkEvent} from '../../src/a2a/event_converter_utils.js';
+import {
+  MOCK_FUNCTION_CALL_FOR_REQUIRED_USER_AUTH,
+  MOCK_FUNCTION_CALL_FOR_REQUIRED_USER_INPUT,
+  toA2AMessage,
+  toAdkEvent,
+} from '../../src/a2a/event_converter_utils.js';
 import * as envAwareUtils from '../../src/utils/env_aware_utils.js';
 
 vi.mock('../../src/utils/env_aware_utils.js', async (importOriginal) => {
@@ -374,6 +379,99 @@ describe('event_converter_utils', () => {
 
         expect(toAdkEvent(nonFinalUpdate, 'inv1', 'agent1')).toBeUndefined();
       });
+
+      it('synthesizes an input-required function call on a final status update', () => {
+        vi.mocked(envAwareUtils.randomUUID).mockReturnValue('mock-fc-id');
+        const finalUpdate: TaskStatusUpdateEvent = {
+          kind: 'status-update',
+          taskId: 'task1',
+          contextId: 'context1',
+          status: {
+            state: 'input-required',
+            message: {
+              kind: 'message',
+              messageId: 'msg1',
+              role: 'agent',
+              parts: [{kind: 'text', text: 'need input'}],
+            },
+          },
+          final: true,
+        };
+
+        const event = toAdkEvent(finalUpdate, 'inv1', 'agent1');
+        expect(event).toBeDefined();
+        expect(event!.content?.parts).toEqual([
+          {
+            functionCall: {
+              id: 'mock-fc-id',
+              name: MOCK_FUNCTION_CALL_FOR_REQUIRED_USER_INPUT,
+              args: {'input_required': 'need input'},
+            },
+          },
+        ]);
+        expect(event!.longRunningToolIds).toEqual(['mock-fc-id']);
+        expect(event!.turnComplete).toBe(true);
+      });
+
+      it('synthesizes an auth-required function call on a final status update', () => {
+        vi.mocked(envAwareUtils.randomUUID).mockReturnValue('mock-fc-id');
+        const finalUpdate: TaskStatusUpdateEvent = {
+          kind: 'status-update',
+          taskId: 'task1',
+          contextId: 'context1',
+          status: {
+            state: 'auth-required',
+            message: {
+              kind: 'message',
+              messageId: 'msg1',
+              role: 'agent',
+              parts: [{kind: 'text', text: 'need auth'}],
+            },
+          },
+          final: true,
+        };
+
+        const event = toAdkEvent(finalUpdate, 'inv1', 'agent1');
+        expect(event).toBeDefined();
+        expect(event!.content?.parts).toEqual([
+          {
+            functionCall: {
+              id: 'mock-fc-id',
+              name: MOCK_FUNCTION_CALL_FOR_REQUIRED_USER_AUTH,
+              args: {'auth_required': 'need auth'},
+            },
+          },
+        ]);
+        expect(event!.longRunningToolIds).toEqual(['mock-fc-id']);
+        expect(event!.turnComplete).toBe(true);
+      });
+
+      it('does not synthesize on a non-final status update', () => {
+        vi.mocked(envAwareUtils.randomUUID).mockReturnValue('mock-fc-id');
+        const nonFinalUpdate: TaskStatusUpdateEvent = {
+          kind: 'status-update',
+          taskId: 'task1',
+          contextId: 'context1',
+          status: {
+            state: 'input-required',
+            message: {
+              kind: 'message',
+              messageId: 'msg1',
+              role: 'agent',
+              parts: [{kind: 'text', text: 'need input'}],
+            },
+          },
+          final: false,
+        };
+
+        const event = toAdkEvent(nonFinalUpdate, 'inv1', 'agent1');
+        expect(event).toBeDefined();
+        expect(event!.content?.parts).toEqual([
+          {text: 'need input', thought: false},
+        ]);
+        expect(event!.partial).toBe(true);
+        expect(event!.turnComplete).toBe(false);
+      });
     });
 
     describe('TaskArtifactUpdateEvent', () => {
@@ -621,6 +719,220 @@ describe('event_converter_utils', () => {
         expect(event).toBeDefined();
         expect(event!.turnComplete).toBe(true);
         expect(event!.longRunningToolIds).toEqual(['inputTool']);
+      });
+
+      it('synthesizes an input-required function call from the last text part', () => {
+        vi.mocked(envAwareUtils.randomUUID).mockReturnValue('mock-fc-id');
+        const task: Task = {
+          kind: 'task',
+          id: 'task1',
+          contextId: 'context1',
+          status: {
+            state: 'input-required',
+            message: {
+              kind: 'message',
+              messageId: 'msg1',
+              role: 'agent',
+              parts: [{kind: 'text', text: 'need input'}],
+            },
+          },
+        };
+
+        const event = toAdkEvent(task, 'inv1', 'agent1');
+        expect(event).toBeDefined();
+        expect(event!.content?.parts).toEqual([
+          {
+            functionCall: {
+              id: 'mock-fc-id',
+              name: MOCK_FUNCTION_CALL_FOR_REQUIRED_USER_INPUT,
+              args: {'input_required': 'need input'},
+            },
+          },
+        ]);
+        expect(event!.longRunningToolIds).toEqual(['mock-fc-id']);
+        expect(event!.turnComplete).toBe(true);
+      });
+
+      it('synthesizes an auth-required function call with the auth args key', () => {
+        vi.mocked(envAwareUtils.randomUUID).mockReturnValue('mock-fc-id');
+        const task: Task = {
+          kind: 'task',
+          id: 'task1',
+          contextId: 'context1',
+          status: {
+            state: 'auth-required',
+            message: {
+              kind: 'message',
+              messageId: 'msg1',
+              role: 'agent',
+              parts: [{kind: 'text', text: 'need auth'}],
+            },
+          },
+        };
+
+        const event = toAdkEvent(task, 'inv1', 'agent1');
+        expect(event).toBeDefined();
+        const functionCall = event!.content?.parts?.[0].functionCall;
+        expect(functionCall?.name).toBe(
+          MOCK_FUNCTION_CALL_FOR_REQUIRED_USER_AUTH,
+        );
+        expect(functionCall?.args).toEqual({'auth_required': 'need auth'});
+        expect(functionCall?.args).not.toHaveProperty('input_required');
+        expect(event!.longRunningToolIds).toEqual(['mock-fc-id']);
+        expect(event!.turnComplete).toBe(true);
+      });
+
+      it('replaces only the last text part', () => {
+        vi.mocked(envAwareUtils.randomUUID).mockReturnValue('mock-fc-id');
+        const task: Task = {
+          kind: 'task',
+          id: 'task1',
+          contextId: 'context1',
+          status: {
+            state: 'input-required',
+            message: {
+              kind: 'message',
+              messageId: 'msg1',
+              role: 'agent',
+              parts: [
+                {kind: 'text', text: 'Part 1'},
+                {kind: 'text', text: 'Part 2'},
+              ],
+            },
+          },
+        };
+
+        const event = toAdkEvent(task, 'inv1', 'agent1');
+        expect(event).toBeDefined();
+        expect(event!.content?.parts).toEqual([
+          {text: 'Part 1', thought: false},
+          {
+            functionCall: {
+              id: 'mock-fc-id',
+              name: MOCK_FUNCTION_CALL_FOR_REQUIRED_USER_INPUT,
+              args: {'input_required': 'Part 2'},
+            },
+          },
+        ]);
+      });
+
+      it('does not synthesize when the task already has long-running ids', () => {
+        vi.mocked(envAwareUtils.randomUUID).mockReturnValue('mock-fc-id');
+        const task: Task = {
+          kind: 'task',
+          id: 'task1',
+          contextId: 'context1',
+          status: {
+            state: 'input-required',
+            message: {
+              kind: 'message',
+              messageId: 'msg1',
+              role: 'agent',
+              parts: [
+                {
+                  kind: 'data',
+                  data: {id: 'inputTool', name: 'inputTool', args: {}},
+                  metadata: {
+                    'adk_is_long_running': true,
+                    'adk_type': 'function_call',
+                  },
+                },
+                {kind: 'text', text: 'confirm?'},
+              ],
+            },
+          },
+        };
+
+        const event = toAdkEvent(task, 'inv1', 'agent1');
+        expect(event).toBeDefined();
+        expect(event!.longRunningToolIds).toEqual(['inputTool']);
+        expect(event!.content?.parts).toEqual([
+          {functionCall: {id: 'inputTool', name: 'inputTool', args: {}}},
+          {text: 'confirm?', thought: false},
+        ]);
+      });
+
+      it('does not synthesize when no part carries a prompt', () => {
+        vi.mocked(envAwareUtils.randomUUID).mockReturnValue('mock-fc-id');
+        const task: Task = {
+          kind: 'task',
+          id: 'task1',
+          contextId: 'context1',
+          status: {
+            state: 'input-required',
+            message: {
+              kind: 'message',
+              messageId: 'msg1',
+              role: 'agent',
+              parts: [
+                {
+                  kind: 'file',
+                  file: {bytes: 'aGVsbG8=', mimeType: 'image/jpeg'},
+                },
+              ],
+            },
+          },
+        };
+
+        const event = toAdkEvent(task, 'inv1', 'agent1');
+        expect(event).toBeDefined();
+        expect(event!.content?.parts).toEqual([
+          {inlineData: {data: 'aGVsbG8=', mimeType: 'image/jpeg'}},
+        ]);
+        expect(event!.longRunningToolIds).toEqual([]);
+      });
+
+      it('does not synthesize for a completed task', () => {
+        vi.mocked(envAwareUtils.randomUUID).mockReturnValue('mock-fc-id');
+        const task: Task = {
+          kind: 'task',
+          id: 'task1',
+          contextId: 'context1',
+          status: {
+            state: 'completed',
+            message: {
+              kind: 'message',
+              messageId: 'msg1',
+              role: 'agent',
+              parts: [{kind: 'text', text: 'all done'}],
+            },
+          },
+        };
+
+        const event = toAdkEvent(task, 'inv1', 'agent1');
+        expect(event).toBeDefined();
+        expect(event!.content?.parts).toEqual([
+          {text: 'all done', thought: false},
+        ]);
+        expect(event!.longRunningToolIds).toEqual([]);
+      });
+
+      it('uses a data part JSON payload as the prompt', () => {
+        vi.mocked(envAwareUtils.randomUUID).mockReturnValue('mock-fc-id');
+        const data = {id: 'abc123', text: 'Please confirm'};
+        const task: Task = {
+          kind: 'task',
+          id: 'task1',
+          contextId: 'context1',
+          status: {
+            state: 'input-required',
+            message: {
+              kind: 'message',
+              messageId: 'msg1',
+              role: 'agent',
+              parts: [{kind: 'data', data}],
+            },
+          },
+        };
+
+        const event = toAdkEvent(task, 'inv1', 'agent1');
+        expect(event).toBeDefined();
+        // toGenAIPartData renders a data part with no `adk_type` as JSON text,
+        // so the prompt is the serialized payload rather than the object.
+        expect(event!.content?.parts?.[0].functionCall?.args).toEqual({
+          'input_required': JSON.stringify(data),
+        });
+        expect(event!.longRunningToolIds).toEqual(['mock-fc-id']);
       });
     });
   });

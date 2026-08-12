@@ -9,6 +9,7 @@ import {Part as GenAIPart} from '@google/genai';
 import {InvocationContext} from '../agents/invocation_context.js';
 import {Event as AdkEvent, createEvent} from '../events/event.js';
 import {Session} from '../sessions/session.js';
+import {PAUSE_FUNCTION_CALL_NAMES} from './event_converter_utils.js';
 import {AdkMetadataKeys} from './metadata_converter_utils.js';
 import {toA2AParts} from './part_converter_utils.js';
 
@@ -64,6 +65,30 @@ export function getUserFunctionCallAt(
   }
 
   return undefined;
+}
+
+/**
+ * Rewrites an answer to a synthesized pause function call as a plain text
+ * part. Every other part is returned untouched.
+ *
+ * The remote that paused never made the synthesized call, so it cannot read a
+ * function response addressed to it. adk-python does the same rewrite in
+ * `RemoteA2AAgent._create_a2a_request_for_user_function_response`, which
+ * assumes the answer arrives in the response's `result` field.
+ *
+ * @param parts - The parts of the user's function-response event.
+ * @returns The parts to send to the remote.
+ */
+export function unwrapPauseAnswers(parts: GenAIPart[]): GenAIPart[] {
+  return parts.map((part) => {
+    const {name, response} = part.functionResponse || {};
+    if (!name || !PAUSE_FUNCTION_CALL_NAMES.has(name)) {
+      return part;
+    }
+
+    const result = response?.['result'];
+    return result === undefined ? part : {text: String(result)};
+  });
 }
 
 /**

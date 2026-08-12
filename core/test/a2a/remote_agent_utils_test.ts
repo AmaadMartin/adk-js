@@ -12,7 +12,12 @@ import {
   isFunctionCallEvent,
   presentAsUserMessage,
   toMissingRemoteSessionParts,
+  unwrapPauseAnswers,
 } from '../../src/a2a/a2a_remote_agent_utils.js';
+import {
+  MOCK_FUNCTION_CALL_FOR_REQUIRED_USER_AUTH,
+  MOCK_FUNCTION_CALL_FOR_REQUIRED_USER_INPUT,
+} from '../../src/a2a/event_converter_utils.js';
 import {AdkMetadataKeys} from '../../src/a2a/metadata_converter_utils.js';
 import {BaseAgent} from '../../src/agents/base_agent.js';
 import {InvocationContext} from '../../src/agents/invocation_context.js';
@@ -193,6 +198,107 @@ describe('remote_agent_utils', () => {
       const result = presentAsUserMessage(mockCtx, agentEvent);
       expect(result.content?.parts![1].text).toContain('tool returned result');
       expect(result.content?.parts![1].text).toContain('{"y":2}');
+    });
+  });
+
+  describe('unwrapPauseAnswers', () => {
+    it('rewrites an input pause answer as text', () => {
+      const parts = unwrapPauseAnswers([
+        {
+          functionResponse: {
+            id: 'fc-1',
+            name: MOCK_FUNCTION_CALL_FOR_REQUIRED_USER_INPUT,
+            response: {'result': 'us-central1'},
+          },
+        },
+      ]);
+
+      expect(parts).toEqual([{text: 'us-central1'}]);
+    });
+
+    it('rewrites an auth pause answer as text', () => {
+      const parts = unwrapPauseAnswers([
+        {
+          functionResponse: {
+            id: 'fc-1',
+            name: MOCK_FUNCTION_CALL_FOR_REQUIRED_USER_AUTH,
+            response: {'result': 'token-abc'},
+          },
+        },
+      ]);
+
+      expect(parts).toEqual([{text: 'token-abc'}]);
+    });
+
+    it('stringifies a non-string result', () => {
+      const parts = unwrapPauseAnswers([
+        {
+          functionResponse: {
+            id: 'fc-1',
+            name: MOCK_FUNCTION_CALL_FOR_REQUIRED_USER_INPUT,
+            response: {'result': 42},
+          },
+        },
+      ]);
+
+      expect(parts).toEqual([{text: '42'}]);
+    });
+
+    it('keeps every other part untouched', () => {
+      const original = [
+        {text: 'Approved'},
+        {
+          functionResponse: {
+            id: 'fc-2',
+            name: 'request_approval',
+            response: {'result': 'yes'},
+          },
+        },
+        {
+          functionResponse: {
+            id: 'fc-1',
+            name: MOCK_FUNCTION_CALL_FOR_REQUIRED_USER_INPUT,
+            response: {'result': 'us-central1'},
+          },
+        },
+      ];
+
+      const parts = unwrapPauseAnswers(original);
+
+      expect(parts).toEqual([original[0], original[1], {text: 'us-central1'}]);
+    });
+
+    it('keeps a pause answer that carries no result', () => {
+      const original = [
+        {
+          functionResponse: {
+            id: 'fc-1',
+            name: MOCK_FUNCTION_CALL_FOR_REQUIRED_USER_INPUT,
+            response: {'status': 'approved'},
+          },
+        },
+      ];
+
+      expect(unwrapPauseAnswers(original)).toEqual(original);
+    });
+
+    it('keeps a pause answer with no response at all', () => {
+      const original = [
+        {
+          functionResponse: {
+            id: 'fc-1',
+            name: MOCK_FUNCTION_CALL_FOR_REQUIRED_USER_INPUT,
+          },
+        },
+      ];
+
+      expect(unwrapPauseAnswers(original)).toEqual(original);
+    });
+
+    it('keeps a part that is not a function response', () => {
+      const original = [{text: 'plain'}, {functionCall: {id: 'c', name: 'n'}}];
+
+      expect(unwrapPauseAnswers(original)).toEqual(original);
     });
   });
 
