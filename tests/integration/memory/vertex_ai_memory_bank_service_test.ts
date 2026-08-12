@@ -21,6 +21,7 @@ describe('VertexAiMemoryBankService Integration', () => {
   let mockMemories: {
     createInternal: ReturnType<typeof vi.fn>;
     generateInternal: ReturnType<typeof vi.fn>;
+    ingestEventsInternal: ReturnType<typeof vi.fn>;
     retrieveInternal: ReturnType<typeof vi.fn>;
   };
 
@@ -32,6 +33,9 @@ describe('VertexAiMemoryBankService Integration', () => {
       generateInternal: vi
         .fn()
         .mockResolvedValue({name: 'operations/generate-op', done: true}),
+      ingestEventsInternal: vi
+        .fn()
+        .mockResolvedValue({name: 'operations/ingest-op', done: true}),
       retrieveInternal: vi.fn().mockResolvedValue({
         retrievedMemories: [
           {
@@ -118,8 +122,14 @@ describe('VertexAiMemoryBankService Integration', () => {
     // Add the session context to memory
     await runner.memoryService!.addSessionToMemory(memorySession);
 
-    // Verify that generateInternal was called
-    expect(mockMemories.generateInternal).toHaveBeenCalled();
+    // Verify that the events were ingested
+    expect(mockMemories.ingestEventsInternal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'reasoningEngines/test-engine-id',
+        scope: {app_name: 'test_memory_app', user_id: 'test_user'},
+      }),
+    );
+    expect(mockMemories.generateInternal).not.toHaveBeenCalled();
 
     const session = await runner.sessionService.createSession({
       appName: 'test_memory_app',

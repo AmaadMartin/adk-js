@@ -40,6 +40,7 @@ describe('VertexAiMemoryBankService', () => {
   let mockMemories: {
     createInternal: ReturnType<typeof vi.fn>;
     generateInternal: ReturnType<typeof vi.fn>;
+    ingestEventsInternal: ReturnType<typeof vi.fn>;
     retrieveInternal: ReturnType<typeof vi.fn>;
   };
 
@@ -51,6 +52,9 @@ describe('VertexAiMemoryBankService', () => {
       generateInternal: vi
         .fn()
         .mockResolvedValue({name: 'operations/generate-op', done: true}),
+      ingestEventsInternal: vi
+        .fn()
+        .mockResolvedValue({name: 'operations/ingest-op', done: true}),
       retrieveInternal: vi.fn().mockResolvedValue({
         retrievedMemories: [
           {
@@ -154,7 +158,7 @@ describe('VertexAiMemoryBankService', () => {
   });
 
   describe('addSessionToMemory', () => {
-    it('calls generateInternal with events', async () => {
+    it('calls ingestEventsInternal with events', async () => {
       const session = createSession({
         id: 'test-session-id',
         appName: 'test-app',
@@ -162,25 +166,30 @@ describe('VertexAiMemoryBankService', () => {
         events: [],
         lastUpdateTime: Date.now(),
       });
-      session.events.push(
-        createEvent({
-          author: 'user',
-          content: {parts: [{text: 'event 1'}]},
-          timestamp: Date.now(),
-        }),
-      );
+      const event = createEvent({
+        author: 'user',
+        content: {parts: [{text: 'event 1'}]},
+        timestamp: Date.now(),
+      });
+      session.events.push(event);
 
       await service.addSessionToMemory(session);
 
-      expect(mockMemories.generateInternal).toHaveBeenCalledWith(
+      expect(mockMemories.ingestEventsInternal).toHaveBeenCalledWith(
         expect.objectContaining({
           name: 'reasoningEngines/test-engine-id',
           scope: {app_name: 'test-app', user_id: 'test-user'},
           directContentsSource: {
-            events: [{content: {parts: [{text: 'event 1'}]}}],
+            events: [
+              expect.objectContaining({
+                content: {parts: [{text: 'event 1'}]},
+                eventId: event.id,
+              }),
+            ],
           },
         }),
       );
+      expect(mockMemories.generateInternal).not.toHaveBeenCalled();
     });
 
     it('filters out events without text or data', async () => {
@@ -202,6 +211,9 @@ describe('VertexAiMemoryBankService', () => {
       await service.addSessionToMemory(session);
 
       expect(mockMemories.generateInternal).not.toHaveBeenCalled();
+      expect(mockMemories.ingestEventsInternal).toHaveBeenCalledWith(
+        expect.not.objectContaining({directContentsSource: expect.anything()}),
+      );
     });
   });
 
@@ -360,6 +372,8 @@ describe('VertexAiMemoryBankService', () => {
         userId: 'test-user',
         events,
         customMetadata: {
+          // ttl is generate-only, and keeps this case on the generate path.
+          ttl: '6000s',
           myBool: true,
           myNumber: 42,
           myString: 'hello',
@@ -409,6 +423,8 @@ describe('VertexAiMemoryBankService', () => {
         userId: 'test-user',
         events,
         customMetadata: {
+          // ttl is generate-only, and keeps this case on the generate path.
+          ttl: '6000s',
           myPreFormatted: {stringValue: 'already converted'},
         },
       });
@@ -447,6 +463,8 @@ describe('VertexAiMemoryBankService', () => {
         userId: 'test-user',
         events,
         customMetadata: {
+          // ttl is generate-only, and keeps this case on the generate path.
+          ttl: '6000s',
           mySymbol: mySymbol,
         },
       });
