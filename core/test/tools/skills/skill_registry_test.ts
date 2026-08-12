@@ -13,6 +13,7 @@ import {
   LoadSkillResourceTool,
   LoadSkillTool,
   RunSkillScriptTool,
+  SearchSkillsErrorCode,
   SearchSkillsTool,
   Skill,
   SkillToolset,
@@ -313,6 +314,13 @@ Instruction body`;
       })) as Record<string, unknown>;
       expect(res.error_code).toBe('REGISTRY_ERROR');
       expect(res.error).toContain('String error failure');
+    });
+
+    it('exposes stable string values for the error-code enum', () => {
+      // The error-code string values are part of the tool's response contract
+      // and must remain stable across releases.
+      expect(SearchSkillsErrorCode.INVALID_ARGUMENTS).toBe('INVALID_ARGUMENTS');
+      expect(SearchSkillsErrorCode.REGISTRY_ERROR).toBe('REGISTRY_ERROR');
     });
   });
 

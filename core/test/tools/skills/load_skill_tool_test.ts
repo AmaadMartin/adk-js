@@ -7,6 +7,7 @@
 import {
   Context,
   InvocationContext,
+  LoadSkillErrorCode,
   LoadSkillTool,
   Skill,
   SkillToolset,
@@ -75,6 +76,16 @@ describe('LoadSkillTool', () => {
     expect(result).toEqual({
       error: "Skill 'unknown-skill' not found.",
       error_code: 'SKILL_NOT_FOUND',
+    });
+  });
+
+  describe('error codes', () => {
+    it('exposes stable string values for the error-code enum', () => {
+      // The error-code string values are part of the tool's response contract
+      // and must remain stable across releases.
+      expect(LoadSkillErrorCode.MISSING_SKILL_NAME).toBe('MISSING_SKILL_NAME');
+      expect(LoadSkillErrorCode.REGISTRY_ERROR).toBe('REGISTRY_ERROR');
+      expect(LoadSkillErrorCode.SKILL_NOT_FOUND).toBe('SKILL_NOT_FOUND');
     });
   });
 });
