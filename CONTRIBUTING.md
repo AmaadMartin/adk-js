@@ -60,6 +60,12 @@ To maintain high code quality and consistency:
 The project uses `husky` and `lint-staged` to automatically lint and format
 your changes before each commit.
 
+### Agent skills
+
+Reusable skills for AI coding assistants working on this repository live in
+[`.agents/skills/`](.agents/skills/README.md), which indexes them and explains
+how to add one. [`AGENTS.md`](AGENTS.md) points agents at them.
+
 ### Sign our Contributor License Agreement
 
 Contributions to this project must be accompanied by a
