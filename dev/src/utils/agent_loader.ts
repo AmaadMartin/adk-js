@@ -471,24 +471,6 @@ export class AgentLoader {
     return Object.keys(this.preloadedAgents).sort();
   }
 
-  async listApps(): Promise<string[]> {
-    await this.preloadAgents();
-
-    const appNames: string[] = [];
-    for (const [name, agentFile] of Object.entries(this.preloadedAgents)) {
-      try {
-        const loaded = await agentFile.load();
-        if (isApp(loaded)) {
-          appNames.push(name);
-        }
-      } catch {
-        // Ignore loading errors when listing apps
-      }
-    }
-
-    return appNames.sort();
-  }
-
   async getAgentFile(agentName: string): Promise<AgentFile> {
     await this.preloadAgents();
 
@@ -511,10 +493,6 @@ export class AgentLoader {
       `Agent '${agentName}' not found in ${this.agentsDirPath}. ` +
         `Available agents: ${Object.keys(this.preloadedAgents).sort().join(', ') || '(none)'}`,
     );
-  }
-
-  async getAppFile(appName: string): Promise<AgentFile> {
-    return this.getAgentFile(appName);
   }
 
   async disposeAll(): Promise<void> {
