@@ -261,7 +261,9 @@ export class Runner {
                 `Session lookup failed: appName must be provided in runner constructor (or via app.name)`,
               );
             }
-            throw new Error(`Session not found: ${sessionId}`);
+            throw new Error(
+              `Session not found: ${sessionId} (appName=${this.appName}, userId=${userId})`,
+            );
           }
 
           if (runConfig.supportCfc && isLlmAgent(this.agent)) {
