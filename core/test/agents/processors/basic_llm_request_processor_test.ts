@@ -61,7 +61,6 @@ class MockRootAgent extends BaseAgent {
     super({name, subAgents});
   }
   protected async *runAsyncImpl(_context: InvocationContext) {}
-  protected async *runLiveImpl(_context: InvocationContext) {}
 }
 
 function createMockInvocationContext(
