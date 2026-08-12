@@ -32,6 +32,8 @@ import {
 type Callback = (error: Error | null, result?: unknown) => void;
 
 const A2A_TOKEN = 'test-a2a-token';
+const TEST_PROJECT = 'test-project';
+const TEST_REGION = 'us-central1';
 
 const execMock = vi.fn();
 const spawnMock =
@@ -80,8 +82,8 @@ vi.mock('../../src/utils/file_utils.js', async (importOriginal) => ({
 describe('createDockerFileContent', () => {
   const defaultOptions: CreateDockerFileContentOptions = {
     appName: 'test-app',
-    project: 'test-project',
-    region: 'us-central1',
+    project: TEST_PROJECT,
+    region: TEST_REGION,
     port: 8080,
     withUi: false,
     logLevel: 'info',
@@ -267,8 +269,8 @@ describe('deployToCloudRun', () => {
     serviceName: 'test-service',
     tempFolder: '/tmp/test-deploy',
     adkVersion: '1.0.0',
-    project: 'test-project',
-    region: 'us-central1',
+    project: TEST_PROJECT,
+    region: TEST_REGION,
     port: 8080,
     withUi: false,
     logLevel: 'info',
@@ -325,9 +327,9 @@ describe('deployToCloudRun', () => {
         'deploy',
         'test-service',
         '--project',
-        'test-project',
+        TEST_PROJECT,
         '--region',
-        'us-central1',
+        TEST_REGION,
       ]),
       expect.any(Object),
     );
