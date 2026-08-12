@@ -17,6 +17,7 @@ import {
   convertCodeExecutionParts,
   extractCodeAndTruncateContent,
   File,
+  getFileContentAsBase64,
 } from '../../code_executors/code_execution_utils.js';
 import {CodeExecutorContext} from '../../code_executors/code_executor_context.js';
 import {createEvent, Event} from '../../events/event.js';
@@ -505,7 +506,10 @@ async function postProcessCodeExecutionResult(
     const version = await invocationContext.artifactService.saveArtifact({
       filename: outputFile.name,
       artifact: {
-        inlineData: {data: outputFile.content, mimeType: outputFile.mimeType},
+        inlineData: {
+          data: getFileContentAsBase64(outputFile),
+          mimeType: outputFile.mimeType,
+        },
       },
     });
 
