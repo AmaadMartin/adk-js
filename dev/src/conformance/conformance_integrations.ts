@@ -139,7 +139,7 @@ export const reimburse = new FunctionTool({
     purpose: z.string(),
     amount: z.number(),
   }),
-  execute: ({purpose: _purpose, amount: _amount}) => {
+  execute: () => {
     return {
       status: 'ok',
     };
@@ -153,7 +153,7 @@ export const askForApproval = new LongRunningFunctionTool({
     purpose: z.string(),
     amount: z.number(),
   }),
-  execute: ({purpose: _purpose, amount}, _context) => {
+  execute: ({amount}) => {
     return {
       status: 'pending',
       amount: amount,
