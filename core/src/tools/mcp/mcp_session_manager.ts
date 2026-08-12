@@ -4,15 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Client} from '@modelcontextprotocol/sdk/client/index.js';
-import {
-  StdioClientTransport,
-  StdioServerParameters,
-} from '@modelcontextprotocol/sdk/client/stdio.js';
-import {
-  StreamableHTTPClientTransport,
-  StreamableHTTPClientTransportOptions,
-} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import type {Client} from '@modelcontextprotocol/sdk/client/index.js';
+import type {StdioServerParameters} from '@modelcontextprotocol/sdk/client/stdio.js';
+import type {StreamableHTTPClientTransportOptions} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
 import {formatError} from '../../utils/error_utils.js';
 import {logger} from '../../utils/logger.js';
@@ -87,6 +81,14 @@ export class MCPSessionManager {
   }
 
   async createSession(): Promise<Client> {
+    // Deferred: a process that imports `@google/adk` without ever opening an
+    // MCP session must not pay to evaluate the client and its transports.
+    const [{Client}, {StdioClientTransport}, {StreamableHTTPClientTransport}] =
+      await Promise.all([
+        import('@modelcontextprotocol/sdk/client/index.js'),
+        import('@modelcontextprotocol/sdk/client/stdio.js'),
+        import('@modelcontextprotocol/sdk/client/streamableHttp.js'),
+      ]);
     const client = new Client({name: 'MCPClient', version: '1.0.0'});
 
     try {
