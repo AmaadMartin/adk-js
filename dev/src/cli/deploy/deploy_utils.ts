@@ -9,6 +9,7 @@ import * as path from 'node:path';
 import {promisify} from 'node:util';
 import {AgentFileOptions, AgentLoader} from '../../utils/agent_loader.js';
 import {
+  isFileExists,
   loadFileData,
   saveToFile,
   tryToFindFileRecursively,
@@ -34,6 +35,17 @@ export const spawnAsync = (
 };
 
 export const REQUIRED_NPM_PACKAGES = ['@google/adk'];
+
+/** Levels walked upward when looking for a manifest; matches the agent loader's walk. */
+const MANIFEST_SEARCH_DEPTH = 10;
+
+interface PackageManifest {
+  dependencies?: Record<string, string>;
+  // Only tested for presence: it is the npm/yarn/bun marker for a workspace
+  // root. The agent is under that root by construction, because the search
+  // starts at the agent folder and walks upward.
+  workspaces?: string[] | {packages?: string[]};
+}
 
 export interface CreateDockerFileContentOptions {
   appName?: string;
@@ -207,41 +219,125 @@ export async function copyAgentFiles(
   }
 }
 
+function manifestDependencies(
+  manifest: PackageManifest | undefined,
+): Record<string, string> {
+  const dependencies = manifest?.dependencies;
+
+  return dependencies && typeof dependencies === 'object' ? dependencies : {};
+}
+
+/**
+ * Walks up from `startDir` for the first manifest declaring `workspaces`.
+ *
+ * A manifest that cannot be read or parsed is skipped: an unrelated broken
+ * manifest several levels above the agent must not mask the missing-dependency
+ * error this search exists to answer.
+ */
+async function findWorkspaceRootManifest(
+  startDir: string,
+): Promise<{path: string; manifest: PackageManifest} | undefined> {
+  let currentFolder = startDir;
+
+  for (let i = 0; i < MANIFEST_SEARCH_DEPTH; i++) {
+    const manifestPath = path.join(currentFolder, 'package.json');
+
+    if (await isFileExists(manifestPath)) {
+      try {
+        const manifest = await loadFileData<PackageManifest>(manifestPath);
+        if (manifest?.workspaces !== undefined) {
+          return {path: manifestPath, manifest};
+        }
+      } catch (_e: unknown) {
+        // Keep walking upward.
+      }
+    }
+
+    const parentFolder = path.dirname(currentFolder);
+    if (parentFolder === currentFolder) {
+      break;
+    }
+    currentFolder = parentFolder;
+  }
+
+  return undefined;
+}
+
+/**
+ * Resolves the dependencies written into the deployed manifest.
+ *
+ * The manifest nearest the agent is the base. Any required package it does not
+ * declare is taken from the nearest ancestor manifest declaring `workspaces`,
+ * which is where a monorepo declares the ADK runtime. Only the required
+ * packages are backfilled: the agent is deployed as an esbuild bundle, so the
+ * manifest exists to install the ADK runtime rather than to reproduce the whole
+ * dependency graph.
+ */
+async function resolveDeploymentDependencies(
+  sourceFolder: string,
+): Promise<Record<string, string>> {
+  const basePath = await tryToFindFileRecursively(
+    sourceFolder,
+    'package.json',
+    MANIFEST_SEARCH_DEPTH,
+  );
+  const dependencies = {
+    ...manifestDependencies(await loadFileData<PackageManifest>(basePath)),
+  };
+
+  let missing = REQUIRED_NPM_PACKAGES.filter((pkg) => !(pkg in dependencies));
+  if (missing.length === 0) {
+    return dependencies;
+  }
+
+  const workspaceRoot = await findWorkspaceRootManifest(
+    path.dirname(path.dirname(basePath)),
+  );
+  if (workspaceRoot) {
+    const rootDependencies = manifestDependencies(workspaceRoot.manifest);
+    const backfilled = missing.filter((pkg) => pkg in rootDependencies);
+
+    for (const pkg of backfilled) {
+      dependencies[pkg] = rootDependencies[pkg];
+    }
+    if (backfilled.length > 0) {
+      console.info(
+        `Resolved ${backfilled.map((pkg) => `"${pkg}"`).join(', ')} from the workspace root manifest:`,
+        workspaceRoot.path,
+      );
+    }
+    missing = missing.filter((pkg) => !(pkg in dependencies));
+  }
+
+  if (missing.length > 0) {
+    const consultedRoot = workspaceRoot
+      ? ` and ${workspaceRoot.path} (nearest ancestor declaring "workspaces")`
+      : `; no ancestor manifest declaring "workspaces" was found within ${MANIFEST_SEARCH_DEPTH} levels`;
+
+    throw new Error(
+      `Required npm package(s) not found for deployment: ${missing
+        .map((pkg) => `"${pkg}"`)
+        .join(
+          ', ',
+        )}. Consulted ${basePath} (nearest package.json to the agent)${consultedRoot}. ` +
+        `Declare them under "dependencies" in the agent's package.json, or in the workspace root manifest.`,
+    );
+  }
+
+  return dependencies;
+}
+
 export async function createPackageJson(
   sourceFolder: string,
   targetFolder: string,
 ) {
-  const packageJsonPath = await tryToFindFileRecursively(
-    sourceFolder,
-    'package.json',
-    3,
-  );
-  const packageJson = await loadFileData<{
-    dependencies: Record<string, string>;
-  }>(packageJsonPath);
-  if (!packageJson || !packageJson.dependencies) {
-    throw new Error(
-      `No dependencies found in package.json: ${packageJsonPath}`,
-    );
-  }
-  for (const requiredDep of REQUIRED_NPM_PACKAGES) {
-    if (!(requiredDep in packageJson.dependencies)) {
-      throw new Error(
-        `Package "${requiredDep}" is required but not found in package.json: ${
-          packageJsonPath
-        }`,
-      );
-    }
-  }
-
+  const dependencies = await resolveDeploymentDependencies(sourceFolder);
   const targetPackageJsonPath = path.join(targetFolder, 'package.json');
 
   await Promise.all([
-    fs.mkdir(path.join(targetFolder, 'node_modules')),
+    fs.mkdir(path.join(targetFolder, 'node_modules'), {recursive: true}),
     saveToFile(path.join(targetFolder, 'package-lock.json'), ''),
-    saveToFile(targetPackageJsonPath, {
-      dependencies: packageJson.dependencies,
-    }),
+    saveToFile(targetPackageJsonPath, {dependencies}),
   ]);
 }
 

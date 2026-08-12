@@ -60,6 +60,7 @@ vi.mock('../../src/utils/agent_loader.js', () => ({
 vi.mock('../../src/utils/file_utils.js', () => ({
   createTempDir: vi.fn(),
   isFile: vi.fn(),
+  isFileExists: vi.fn(),
   isFolderExists: vi.fn(),
   loadFileData: vi.fn(),
   saveToFile: vi.fn(),
@@ -372,7 +373,7 @@ describe('deployToCloudRun', () => {
     });
   });
 
-  it('should throw error if package.json has no dependencies', async () => {
+  it('should throw error if package.json declares no dependencies and no workspace root supplies them', async () => {
     const consoleErrorSpy = vi.spyOn(console, 'error');
     (loadFileData as Mock).mockResolvedValue({});
 
@@ -380,7 +381,9 @@ describe('deployToCloudRun', () => {
 
     expect(consoleErrorSpy).toHaveBeenCalledWith(
       expect.stringContaining('\x1b[31mFailed to deploy to Cloud Run:'),
-      expect.stringContaining('No dependencies found in package.json'),
+      expect.stringContaining(
+        'Required npm package(s) not found for deployment: "@google/adk"',
+      ),
       expect.stringContaining('\x1b[0m'),
     );
   });
@@ -398,7 +401,7 @@ describe('deployToCloudRun', () => {
     expect(consoleErrorSpy).toHaveBeenCalledWith(
       expect.stringContaining('\x1b[31mFailed to deploy to Cloud Run:'),
       expect.stringContaining(
-        'Package "@google/adk" is required but not found',
+        'Required npm package(s) not found for deployment: "@google/adk"',
       ),
       expect.stringContaining('\x1b[0m'),
     );
