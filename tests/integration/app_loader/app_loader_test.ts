@@ -74,10 +74,13 @@ describe('AgentLoader discovery and loading integration', () => {
   );
   let loader: AgentLoader;
 
-  beforeAll(async () => {
-    await execAsync('npm install', {cwd: projectPath});
+  // This fixture needs no install of its own. The loader runs in-process, so
+  // esbuild resolves `@google/adk` from the workspace-root `node_modules`. The
+  // fixture also has no `package.json`, so it inherits `"type": "module"` from
+  // the repository root and the loader compiles it to `.mjs`.
+  beforeAll(() => {
     loader = new AgentLoader(projectPath);
-  }, TEST_EXECUTION_TIMEOUT);
+  });
 
   it(
     'should discover apps vs agents across directories and standalone files',
@@ -102,6 +105,8 @@ describe('AgentLoader discovery and loading integration', () => {
     async () => {
       const appFile = await loader.getAppFile('service_alpha');
       const loaded = await appFile.load();
+      // Pins the module type the fixture inherits from the repository root.
+      expect(path.extname(appFile.getFilePath())).toBe('.mjs');
       expect(isApp(loaded)).toBe(true);
       expect((loaded as App).name).toBe('alpha_app');
 
@@ -129,14 +134,5 @@ describe('AgentLoader discovery and loading integration', () => {
 
   afterAll(async () => {
     await loader.disposeAll();
-    await fs
-      .rm(path.join(projectPath, 'node_modules'), {
-        recursive: true,
-        force: true,
-      })
-      .catch(() => {});
-    await fs
-      .unlink(path.join(projectPath, 'package-lock.json'))
-      .catch(() => {});
-  }, TEST_EXECUTION_TIMEOUT);
+  });
 });
