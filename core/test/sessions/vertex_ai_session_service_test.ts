@@ -476,7 +476,7 @@ describe('VertexAiSessionService', () => {
             _compaction: {
               startTime: 1600000000000,
               endTime: 1610000000000,
-              compactedContent: {role: 'user', parts: [{text: 'summary'}]},
+              compactedContent: 'summary',
             },
             _usage_metadata: {promptTokens: 10},
           },
@@ -1295,20 +1295,13 @@ describe('VertexAiSessionService', () => {
         userId: 'u1',
         events: [],
       } as unknown as Session;
-      const event = createEvent({
+      const event = createCompactedEvent({
         timestamp: Date.now(),
         content: {role: 'model', parts: []},
+        startTime: 1000,
+        endTime: 2000,
+        compactedContent: 'summary',
       });
-      const eventWithCompaction = event as unknown as {
-        isCompacted: boolean;
-        startTime: number;
-        endTime: number;
-        compactedContent: object;
-      };
-      eventWithCompaction.isCompacted = true;
-      eventWithCompaction.startTime = 1000;
-      eventWithCompaction.endTime = 2000;
-      eventWithCompaction.compactedContent = {role: 'user', parts: []};
 
       await service.appendEvent({session, event});
 
