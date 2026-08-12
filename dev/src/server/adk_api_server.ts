@@ -976,7 +976,11 @@ export class AdkApiServer {
             await using agentFile =
               await this.agentLoader.getAgentFile(appName);
             const loaded = await agentFile.load();
-            return fn(await this.getRunner(loaded, appName));
+            // `return await` is load-bearing: a bare `return` runs the
+            // `await using` disposal before the returned promise settles,
+            // so the compiled bundle is unlinked while the agent is still
+            // running and a lazy import of an external package fails.
+            return await fn(await this.getRunner(loaded, appName));
           },
           logger: this.logger,
         },

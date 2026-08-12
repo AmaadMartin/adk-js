@@ -43,13 +43,19 @@ interface Invocation {
   text: string;
 }
 
+/** Holds an invocation open so a test can observe what overlaps it. */
+type InvocationGate = (agent: RecordingAgent) => Promise<void>;
+
 /**
- * An agent that records what each invocation received and can be primed to
- * fail a fixed number of times before it succeeds.
+ * An agent that records what each invocation received, can be primed to fail a
+ * fixed number of times before it succeeds, and can be held mid-invocation.
  */
 class RecordingAgent extends LlmAgent {
   readonly invocations: Invocation[] = [];
   readonly failures: unknown[] = [];
+  gate?: InvocationGate;
+  running = 0;
+  peakConcurrency = 0;
 
   async *runAsyncImpl(
     context: InvocationContext,
@@ -59,20 +65,31 @@ class RecordingAgent extends LlmAgent {
       sessionId: context.session.id,
       text: context.userContent?.parts?.[0]?.text ?? '',
     });
-    const failure = this.failures.shift();
-    if (failure !== undefined) {
-      throw failure;
+    this.running++;
+    this.peakConcurrency = Math.max(this.peakConcurrency, this.running);
+    try {
+      if (this.gate) {
+        await this.gate(this);
+      }
+      const failure = this.failures.shift();
+      if (failure !== undefined) {
+        throw failure;
+      }
+      yield createEvent({
+        invocationId: context.invocationId,
+        author: this.name,
+        content: {role: 'model', parts: [{text: 'processed'}]},
+      });
+    } finally {
+      this.running--;
     }
-    yield createEvent({
-      invocationId: context.invocationId,
-      author: this.name,
-      content: {role: 'model', parts: [{text: 'processed'}]},
-    });
   }
 }
 
-/** An {@link AgentFile} that serves a fresh {@link RecordingAgent}. */
+/** An {@link AgentFile} that serves one {@link RecordingAgent} and records its disposal. */
 class StubAgentFile extends AgentFile {
+  wasDisposed = false;
+
   constructor(private readonly loaded: RecordingAgent) {
     super('trigger-routes-test-agent');
   }
@@ -80,10 +97,21 @@ class StubAgentFile extends AgentFile {
   override load(): Promise<RecordingAgent> {
     return Promise.resolve(this.loaded);
   }
+
+  override async dispose(): Promise<void> {
+    this.wasDisposed = true;
+  }
 }
 
 /** An {@link AgentLoader} that knows one app and rejects every other name. */
 class StubAgentLoader extends AgentLoader {
+  /** The file handed out by the most recent {@link getAgentFile} call. */
+  lastFile?: StubAgentFile;
+
+  constructor(private readonly gate?: InvocationGate) {
+    super();
+  }
+
   override listAgents(): Promise<string[]> {
     return Promise.resolve([TEST_APP]);
   }
@@ -92,14 +120,20 @@ class StubAgentLoader extends AgentLoader {
     if (agentName !== TEST_APP) {
       return Promise.reject(new Error(`App not found: ${agentName}`));
     }
-    return Promise.resolve(
-      new StubAgentFile(
-        new RecordingAgent({
-          name: 'recordingAgent',
-          description: 'records what each trigger invocation received',
-        }),
-      ),
-    );
+    const agent = new RecordingAgent({
+      name: 'recordingAgent',
+      description: 'records what each trigger invocation received',
+    });
+    agent.gate = this.gate;
+    this.lastFile = new StubAgentFile(agent);
+    return Promise.resolve(this.lastFile);
+  }
+}
+
+/** Resolves once `condition` holds, polling every millisecond. */
+async function until(condition: () => boolean): Promise<void> {
+  while (!condition()) {
+    await new Promise((resolve) => setTimeout(resolve, 1));
   }
 }
 
@@ -181,13 +215,17 @@ async function listen(
  * Runner and session service, so requests exercise the whole path.
  */
 async function startHarness(
-  options: TriggerRouterOptions & {failures?: unknown[]} = {},
+  options: TriggerRouterOptions & {
+    failures?: unknown[];
+    gate?: InvocationGate;
+  } = {},
 ): Promise<Harness> {
   const agent = new RecordingAgent({
     name: 'recordingAgent',
     description: 'records what each trigger invocation received',
   });
   agent.failures.push(...(options.failures ?? []));
+  agent.gate = options.gate;
   const sessionService = new InMemorySessionService();
   const logger = new RecordingLogger();
   const runner = new Runner({appName: TEST_APP, agent, sessionService});
@@ -828,6 +866,19 @@ describe('retry on transient errors', () => {
       'Transient error (attempt 1/2)',
     );
   });
+});
+
+describe('concurrency bound', () => {
+  /** Fires `count` Pub/Sub deliveries at once. */
+  function burst(url: string, count: number): Promise<HttpResult[]> {
+    return Promise.all(
+      Array.from({length: count}, (_value, index) =>
+        post(`${url}/apps/${TEST_APP}/trigger/pubsub`, {
+          message: {data: base64(`message ${index}`)},
+        }),
+      ),
+    );
+  }
 
   it('serves both routes concurrently under a single permit', async () => {
     harness = await startHarness({
@@ -846,6 +897,39 @@ describe('retry on transient errors', () => {
 
     expect(results.map((result) => result.status)).toEqual([200, 200]);
     expect(harness.agent.invocations).toHaveLength(2);
+  });
+
+  it('never runs two invocations at once under a single permit', async () => {
+    harness = await startHarness({
+      triggerSources: BOTH_SOURCES,
+      maxConcurrent: 1,
+      // Each invocation stays open long enough for the other three deliveries
+      // to reach the router.
+      gate: () => new Promise((resolve) => setTimeout(resolve, 20)),
+    });
+
+    const results = await burst(harness.url, 4);
+
+    expect(results.map((result) => result.status)).toEqual([
+      200, 200, 200, 200,
+    ]);
+    expect(harness.agent.invocations).toHaveLength(4);
+    expect(harness.agent.peakConcurrency).toBe(1);
+  });
+
+  it('runs up to the permit count at the same time', async () => {
+    // Both invocations wait until two have run at once, so this deadlocks and
+    // the test times out if the router admits them one at a time.
+    harness = await startHarness({
+      triggerSources: BOTH_SOURCES,
+      maxConcurrent: 2,
+      gate: (agent) => until(() => agent.peakConcurrency >= 2),
+    });
+
+    const results = await burst(harness.url, 2);
+
+    expect(results.map((result) => result.status)).toEqual([200, 200]);
+    expect(harness.agent.peakConcurrency).toBe(2);
   });
 });
 
@@ -1006,6 +1090,27 @@ describe('AdkApiServer trigger wiring', () => {
   afterEach(async () => {
     await server?.stop();
     server = undefined;
+  });
+
+  it('keeps the agent file alive until the invocation finishes', async () => {
+    let disposedDuringRun: boolean | undefined;
+    const loader: StubAgentLoader = new StubAgentLoader(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      disposedDuringRun = loader.lastFile?.wasDisposed;
+    });
+    server = new AdkApiServer({
+      agentLoader: loader,
+      triggerSources: ['pubsub'],
+    });
+    await server.start();
+
+    const result = await post(`${server.url}/apps/${TEST_APP}/trigger/pubsub`, {
+      message: {data: base64('hello')},
+    });
+
+    expect(result.status).toBe(200);
+    expect(disposedDuringRun).toBe(false);
+    expect(loader.lastFile?.wasDisposed).toBe(true);
   });
 
   it('mounts no trigger route by default', async () => {
