@@ -15,7 +15,7 @@ import {MikroORM} from '@mikro-orm/core';
 import {SqliteDriver} from '@mikro-orm/sqlite';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {isDatabaseConnectionString} from '../../src/sessions/database_session_service.js';
-import {validateDatabaseSchemaVersion} from '../../src/sessions/db/operations.js';
+import {validateDatabaseSchemaVersion} from '../../src/sessions/db/schema_version.js';
 
 describe('DatabaseSessionService', () => {
   let service: DatabaseSessionService;

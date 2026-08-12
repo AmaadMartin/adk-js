@@ -11,8 +11,6 @@ import {
   transformToSnakeCaseEvent,
 } from '../../events/event.js';
 
-export const SCHEMA_VERSION_KEY = 'schema_version';
-export const SCHEMA_VERSION_1_JSON = '1';
 export const STORAGE_KEY_COLUMN_LENGTH = 191;
 
 /**
