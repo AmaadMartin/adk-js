@@ -11,8 +11,10 @@
  * Instead of guessing what the user wants, the graph opens by asking, pauses,
  * and then routes the reply into the rest of the process.
  *
- * `responseSchema: z.string()` asks for a plain text reply. Nothing coerces the
- * human's answer into that shape; the schema tells a client what to collect.
+ * `responseSchema: z.string()` asks for a plain text reply, so whatever the
+ * human types passes through verbatim. A scalar schema is enforced on a typed
+ * reply: `z.number()` here would coerce "34" to the number 34, and reject
+ * "thirty-four".
  *
  * (The same docs section also covers tool-confirmation, an LlmAgent-level
  * mechanism rather than a graph node: set `requireConfirmation: true` on a

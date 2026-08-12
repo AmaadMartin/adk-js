@@ -33,10 +33,12 @@ export interface RequestInputParams {
   /**
    * The expected shape of the reply (Zod v3/v4 or genai `Schema`).
    *
-   * It tells a client what to collect, and a *structured* reply is checked
-   * against it on resume. Nothing coerces a human's answer into the shape: a
-   * plain-text reply is routed to the interrupt as-is and is not checked, so
-   * put an agent node after the pause if you need free text normalized.
+   * It tells a client what to collect, and the reply is checked against it on
+   * resume. A structured reply is checked against the whole schema. A
+   * plain-text reply is held to a scalar schema (`string`, `number`,
+   * `integer`, `boolean`), and numeric or boolean text is coerced to it. An
+   * object or array schema leaves typed text alone, so put an agent node after
+   * the pause if you need free text normalized into that shape.
    */
   responseSchema?: SchemaLike;
 }
@@ -49,8 +51,9 @@ export interface RequestInputParams {
  *
  * A client answers in one of two ways:
  *
- * - **Plain text.** A text turn is routed to every pending interrupt as-is.
- *   This is what the interactive CLI and the dev UI send.
+ * - **Plain text.** A text turn is routed to every pending interrupt. This is
+ *   what the interactive CLI and the dev UI send. It is held to a scalar
+ *   {@link RequestInputParams.responseSchema} only, and coerced to it.
  * - **A `functionResponse`** named `adk_request_input`, carrying the interrupt
  *   id. Wrap a bare value as `{result: <value>}` — that envelope is unwrapped
  *   for you. Any other object is delivered to the node unchanged, so it must

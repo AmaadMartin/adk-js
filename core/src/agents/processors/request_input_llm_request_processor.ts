@@ -16,6 +16,7 @@ import {AsyncQueue} from '../../utils/async_queue.js';
 import {isNodeTool} from '../../workflow/nodes/node_tool.js';
 import {
   REQUEST_INPUT_FUNCTION_CALL_NAME,
+  resolvePlainTextResponse,
   responseSchemasByInterruptId,
   validateInterruptResponse,
 } from '../../workflow/utils/hitl_utils.js';
@@ -135,7 +136,8 @@ export class RequestInputLlmRequestProcessor extends BaseLlmRequestProcessor {
 /**
  * Collects resume inputs from the session: structured `adk_request_input`
  * function responses take precedence; otherwise a plain-text reply is mapped to
- * every still-pending interrupt id.
+ * every still-pending interrupt id, held to the scalar `responseSchema` that
+ * interrupt declared.
  */
 function collectResumeInputs(events: Event[]): Record<string, unknown> {
   const responseSchemas = responseSchemasByInterruptId(events);
@@ -175,7 +177,7 @@ function collectResumeInputs(events: Event[]): Record<string, unknown> {
   const text = parts.map((p) => p.text).join('');
   const inputs: Record<string, unknown> = {};
   for (const id of pending) {
-    inputs[id] = text;
+    inputs[id] = resolvePlainTextResponse(id, text, responseSchemas.get(id));
   }
   return inputs;
 }
