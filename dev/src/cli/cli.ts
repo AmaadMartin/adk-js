@@ -19,7 +19,7 @@ import {runIntegrationTests} from '../integration/run_integration_tests.js';
 import {AdkApiServer} from '../server/adk_api_server.js';
 import {FileModuleType} from '../utils/agent_loader.js';
 import {getAbsolutePath} from '../utils/file_utils.js';
-import {AdkLogger} from '../utils/logger.js';
+import {AdkLogger, setDefaultLogLevel} from '../utils/logger.js';
 import {version} from '../version.js';
 import {createAgent} from './cli_create.js';
 import {runAgent} from './cli_run.js';
@@ -228,6 +228,7 @@ export function createProgram(): Command {
     .action(async (agentsDir: string, options: Record<string, string>) => {
       const logLevel = getLogLevelFromOptions(options);
       setAdkCoreLogLevel(logLevel);
+      setDefaultLogLevel(logLevel);
 
       try {
         const server = new AdkApiServer({
@@ -274,6 +275,7 @@ export function createProgram(): Command {
     .action(async (agentsDir: string, options: Record<string, string>) => {
       const logLevel = getLogLevelFromOptions(options);
       setAdkCoreLogLevel(logLevel);
+      setDefaultLogLevel(logLevel);
 
       try {
         const server = new AdkApiServer({
@@ -367,7 +369,9 @@ export function createProgram(): Command {
     .addOption(AGENT_FILE_MODULE_TYPE)
     .addOption(RELOAD_AGENTS_OPTION)
     .action(async (agentPath: string, options: Record<string, string>) => {
-      setAdkCoreLogLevel(getLogLevelFromOptions(options));
+      const logLevel = getLogLevelFromOptions(options);
+      setAdkCoreLogLevel(logLevel);
+      setDefaultLogLevel(logLevel);
 
       try {
         await runAgent({

@@ -12,6 +12,7 @@ import {runAgent} from '../../src/cli/cli_run.js';
 import {deployToAgentEngine} from '../../src/cli/deploy/cli_deploy_agent_engine.js';
 import {deployToCloudRun} from '../../src/cli/deploy/cli_deploy_cloud_run.js';
 import {AdkApiServer} from '../../src/server/adk_api_server.js';
+import {setDefaultLogLevel} from '../../src/utils/logger.js';
 
 vi.mock('../../src/server/adk_api_server', () => {
   return {
@@ -39,6 +40,13 @@ vi.mock('../../src/cli/cli_run', () => ({
 
 vi.mock('../../src/version', () => ({
   version: '1.0.0-test',
+}));
+
+// Only the one export is replaced: AdkLogger stays real for every other
+// module the CLI pulls in.
+vi.mock('../../src/utils/logger.js', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  setDefaultLogLevel: vi.fn(),
 }));
 
 vi.mock('@google/adk', async (importOriginal) => {
@@ -109,6 +117,14 @@ describe('CLI Entrypoint', () => {
       expect(setLogLevel).toHaveBeenCalledWith(LogLevel.DEBUG);
     });
 
+    it('applies the resolved level to the dev loggers', async () => {
+      // Without this the dev AdkLogger stays pinned at INFO and every
+      // `logger.debug` in the dev package is dead code.
+      await parse(['web', '--verbose']);
+
+      expect(setDefaultLogLevel).toHaveBeenCalledWith(LogLevel.DEBUG);
+    });
+
     it('falls back to INFO for an unrecognised --log_level', async () => {
       await parse(['web', '--log_level', 'not-a-level']);
       expect(setLogLevel).toHaveBeenCalledWith(LogLevel.INFO);
@@ -169,6 +185,12 @@ describe('CLI Entrypoint', () => {
   });
 
   describe('command: api_server', () => {
+    it('applies the resolved level to the dev loggers', async () => {
+      await parse(['api_server', '--verbose']);
+
+      expect(setDefaultLogLevel).toHaveBeenCalledWith(LogLevel.DEBUG);
+    });
+
     it('should start AdkApiServer with serveDebugUI: false', async () => {
       await parse(['api_server']);
 
@@ -237,6 +259,12 @@ describe('CLI Entrypoint', () => {
   });
 
   describe('command: run', () => {
+    it('applies the resolved level to the dev loggers', async () => {
+      await parse(['run', 'agent.ts', '--log_level', 'error']);
+
+      expect(setDefaultLogLevel).toHaveBeenCalledWith(LogLevel.ERROR);
+    });
+
     it('should call runAgent with required args', async () => {
       await parse(['run', 'agent.ts']);
 
