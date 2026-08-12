@@ -9,6 +9,7 @@ import {
   createSession,
   InvocationContext,
   LlmAgent,
+  MCPSessionManager,
   MCPToolset,
   PluginManager,
 } from '@google/adk';
@@ -38,10 +39,17 @@ function createToolContext(): Context {
  */
 describe('MCPToolset against a real MCP server', () => {
   let toolset: MCPToolset | undefined;
+  let manager: MCPSessionManager | undefined;
 
   afterEach(async () => {
     await toolset?.close();
     toolset = undefined;
+    if (manager) {
+      for (const session of manager.getActiveSessions()) {
+        await manager.closeSession(session);
+      }
+      manager = undefined;
+    }
   });
 
   it('discovers and calls a tool', async () => {
@@ -61,6 +69,21 @@ describe('MCPToolset against a real MCP server', () => {
     expect(result).toMatchObject({
       content: [{type: 'text', text: 'echo: hello'}],
     });
+  });
+
+  it('opens two sessions concurrently', async () => {
+    manager = new MCPSessionManager({
+      type: 'StdioConnectionParams',
+      serverParams: {command: process.execPath, args: [SERVER_PATH]},
+    });
+
+    const [first, second] = await Promise.all([
+      manager.createSession(),
+      manager.createSession(),
+    ]);
+
+    expect(second).not.toBe(first);
+    expect(manager.getActiveSessions()).toHaveLength(2);
   });
 
   it('reports a connection failure from a server that cannot start', async () => {

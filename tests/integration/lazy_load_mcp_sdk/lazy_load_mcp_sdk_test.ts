@@ -5,7 +5,7 @@
  */
 
 import type {StdioConnectionParams} from '@google/adk';
-import {beforeAll, describe, expect, it, vi} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 
 /**
  * Records which MCP SDK modules have been evaluated.
@@ -77,27 +77,6 @@ describe('lazy MCP SDK load', () => {
 
     const first = await manager.createSession();
     const second = await manager.createSession();
-
-    expect(second).not.toBe(first);
-    expect(manager.getActiveSessions()).toEqual([first, second]);
-  });
-});
-
-describe('lazy MCP SDK load, concurrent first calls', () => {
-  beforeAll(() => {
-    // A fresh module graph gives the manager an empty load memo, so the two
-    // calls below race it.
-    vi.resetModules();
-  });
-
-  it('resolves both calls that race the first load', async () => {
-    const {MCPSessionManager} = await import('@google/adk');
-    const manager = new MCPSessionManager(STDIO_PARAMS);
-
-    const [first, second] = await Promise.all([
-      manager.createSession(),
-      manager.createSession(),
-    ]);
 
     expect(second).not.toBe(first);
     expect(manager.getActiveSessions()).toEqual([first, second]);
