@@ -1256,6 +1256,57 @@ describe('AdkWebServer', () => {
     });
   });
 
+  describe('Shutdown', () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('should dispose an agent loader it created itself', async () => {
+      const disposeAll = vi.spyOn(AgentLoader.prototype, 'disposeAll');
+      const owningServer = new AdkApiServer({
+        agentsDir: 'tests/integration/a2a/basic/remote_a2a',
+        sessionService,
+        memoryService,
+        artifactService,
+      });
+      await owningServer.start();
+
+      await owningServer.stop();
+
+      expect(disposeAll).toHaveBeenCalledTimes(1);
+    });
+
+    it('should dispose and resolve when it never reached listen()', async () => {
+      const disposeAll = vi.spyOn(AgentLoader.prototype, 'disposeAll');
+      const unstartedServer = new AdkApiServer({
+        agentsDir: 'tests/integration/a2a/basic/remote_a2a',
+        sessionService,
+        memoryService,
+        artifactService,
+      });
+
+      await expect(unstartedServer.stop()).resolves.toBeUndefined();
+
+      expect(disposeAll).toHaveBeenCalledTimes(1);
+    });
+
+    it('should leave an injected agent loader to its owner', async () => {
+      const disposeAll = vi.fn().mockResolvedValue(undefined);
+      agentLoader.disposeAll = disposeAll;
+      const borrowingServer = new AdkApiServer({
+        agentLoader,
+        sessionService,
+        memoryService,
+        artifactService,
+      });
+      await borrowingServer.start();
+
+      await borrowingServer.stop();
+
+      expect(disposeAll).not.toHaveBeenCalled();
+    });
+  });
+
   describe('Internal caches keyed by request input', () => {
     // `appName` / `eventId` arrive straight off the request path. On a plain
     // object literal, inherited names such as `toString` make `key in cache`
