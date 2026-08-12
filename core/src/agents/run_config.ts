@@ -6,6 +6,7 @@
 
 import {
   AudioTranscriptionConfig,
+  HttpOptions,
   Modality,
   ProactivityConfig,
   RealtimeInputConfig,
@@ -107,6 +108,24 @@ export interface RunConfig {
    * decision; interactive front-ends (e.g. `adk run`) opt in explicitly.
    */
   plainTextToolConfirmation?: boolean;
+
+  /**
+   * HTTP options for this invocation, e.g. custom headers or a timeout.
+   *
+   * Merged over the agent's `generateContentConfig.httpOptions`; these options
+   * win on conflict. `baseUrl` and `apiVersion` only apply when the agent set
+   * no HTTP options at all.
+   */
+  httpOptions?: HttpOptions;
+
+  /**
+   * User labels for this invocation, e.g. for billing and telemetry
+   * attribution.
+   *
+   * Merged into the request config's labels, winning over the agent's own
+   * labels on conflict.
+   */
+  labels?: Record<string, string>;
 }
 
 /**

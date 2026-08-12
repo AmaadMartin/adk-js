@@ -307,6 +307,280 @@ describe('BasicLlmRequestProcessor', () => {
     expect(llmRequest.liveConnectConfig.speechConfig).toBeUndefined();
   });
 
+  describe('runConfig.httpOptions', () => {
+    it('should merge runConfig httpOptions over the agent httpOptions', async () => {
+      const agent = new LlmAgent({
+        name: 'test_agent',
+        model: 'test-basic-processor-model',
+        generateContentConfig: {
+          httpOptions: {timeout: 1000, headers: {'Agent-Header': 'agent-val'}},
+        },
+      });
+      const runConfig: RunConfig = {
+        httpOptions: {
+          timeout: 500,
+          headers: {
+            'RunConfig-Header': 'run-val',
+            'Agent-Header': 'run-val-override',
+          },
+        },
+      };
+      const llmRequest = makeLlmRequest();
+
+      await runProcessor(
+        createMockInvocationContext(agent, runConfig),
+        llmRequest,
+      );
+
+      expect(llmRequest.config?.httpOptions?.timeout).toBe(500);
+      expect(llmRequest.config?.httpOptions?.headers).toEqual({
+        'Agent-Header': 'run-val-override',
+        'RunConfig-Header': 'run-val',
+      });
+    });
+
+    it('should merge timeout, extraBody and retryOptions when the runConfig sets no headers', async () => {
+      const agent = new LlmAgent({
+        name: 'test_agent',
+        model: 'test-basic-processor-model',
+        generateContentConfig: {
+          httpOptions: {timeout: 1000, headers: {'Agent-Header': 'agent-val'}},
+        },
+      });
+      const runConfig: RunConfig = {
+        httpOptions: {
+          timeout: 500,
+          extraBody: {priority: 'high'},
+          retryOptions: {attempts: 3},
+        },
+      };
+      const llmRequest = makeLlmRequest();
+
+      await runProcessor(
+        createMockInvocationContext(agent, runConfig),
+        llmRequest,
+      );
+
+      expect(llmRequest.config?.httpOptions?.timeout).toBe(500);
+      expect(llmRequest.config?.httpOptions?.extraBody).toEqual({
+        priority: 'high',
+      });
+      expect(llmRequest.config?.httpOptions?.retryOptions).toEqual({
+        attempts: 3,
+      });
+      expect(llmRequest.config?.httpOptions?.headers).toEqual({
+        'Agent-Header': 'agent-val',
+      });
+    });
+
+    it('should take the runConfig httpOptions wholesale when the agent has none', async () => {
+      const agent = new LlmAgent({
+        name: 'test_agent',
+        model: 'test-basic-processor-model',
+      });
+      const runConfig: RunConfig = {
+        httpOptions: {
+          baseUrl: 'https://example.test',
+          apiVersion: 'v1',
+          headers: {A: 'b'},
+        },
+      };
+      const llmRequest = makeLlmRequest();
+
+      await runProcessor(
+        createMockInvocationContext(agent, runConfig),
+        llmRequest,
+      );
+
+      expect(llmRequest.config?.httpOptions).toEqual({
+        baseUrl: 'https://example.test',
+        apiVersion: 'v1',
+        headers: {A: 'b'},
+      });
+    });
+
+    it('should not let the runConfig baseUrl and apiVersion override the agent httpOptions', async () => {
+      const agent = new LlmAgent({
+        name: 'test_agent',
+        model: 'test-basic-processor-model',
+        generateContentConfig: {
+          httpOptions: {
+            baseUrl: 'https://agent.test',
+            apiVersion: 'v1beta',
+            timeout: 1000,
+          },
+        },
+      });
+      const runConfig: RunConfig = {
+        httpOptions: {
+          baseUrl: 'https://run.test',
+          apiVersion: 'v9',
+          timeout: 500,
+        },
+      };
+      const llmRequest = makeLlmRequest();
+
+      await runProcessor(
+        createMockInvocationContext(agent, runConfig),
+        llmRequest,
+      );
+
+      expect(llmRequest.config?.httpOptions?.baseUrl).toBe(
+        'https://agent.test',
+      );
+      expect(llmRequest.config?.httpOptions?.apiVersion).toBe('v1beta');
+      expect(llmRequest.config?.httpOptions?.timeout).toBe(500);
+    });
+
+    it('should leave the agent httpOptions untouched for a later invocation', async () => {
+      const agent = new LlmAgent({
+        name: 'test_agent',
+        model: 'test-basic-processor-model',
+        generateContentConfig: {
+          httpOptions: {timeout: 1000, headers: {'Agent-Header': 'agent-val'}},
+        },
+      });
+      const firstRunConfig: RunConfig = {
+        httpOptions: {timeout: 500, headers: {'RunConfig-Header': 'run-val'}},
+      };
+      const firstRequest = makeLlmRequest();
+      const secondRequest = makeLlmRequest();
+
+      await runProcessor(
+        createMockInvocationContext(agent, firstRunConfig),
+        firstRequest,
+      );
+      await runProcessor(createMockInvocationContext(agent, {}), secondRequest);
+
+      expect(agent.generateContentConfig?.httpOptions).toEqual({
+        timeout: 1000,
+        headers: {'Agent-Header': 'agent-val'},
+      });
+      expect(secondRequest.config?.httpOptions?.timeout).toBe(1000);
+      expect(
+        secondRequest.config?.httpOptions?.headers?.['RunConfig-Header'],
+      ).toBeUndefined();
+    });
+
+    it('should not alias the runConfig httpOptions headers into the request', async () => {
+      const agent = new LlmAgent({
+        name: 'test_agent',
+        model: 'test-basic-processor-model',
+      });
+      const runConfig: RunConfig = {
+        httpOptions: {headers: {'RunConfig-Header': 'run-val'}},
+      };
+      const llmRequest = makeLlmRequest();
+
+      await runProcessor(
+        createMockInvocationContext(agent, runConfig),
+        llmRequest,
+      );
+      const requestHeaders = llmRequest.config?.httpOptions?.headers;
+      if (!requestHeaders) {
+        expect.fail('expected the merged request to carry headers');
+      }
+      requestHeaders['Injected'] = 'x';
+
+      expect(runConfig.httpOptions?.headers).toEqual({
+        'RunConfig-Header': 'run-val',
+      });
+    });
+
+    it('should keep the agent httpOptions when the runConfig sets none', async () => {
+      const agent = new LlmAgent({
+        name: 'test_agent',
+        model: 'test-basic-processor-model',
+        generateContentConfig: {
+          httpOptions: {timeout: 1000, headers: {'Agent-Header': 'agent-val'}},
+        },
+      });
+      const llmRequest = makeLlmRequest();
+
+      await runProcessor(createMockInvocationContext(agent, {}), llmRequest);
+
+      expect(llmRequest.config?.httpOptions).toEqual({
+        timeout: 1000,
+        headers: {'Agent-Header': 'agent-val'},
+      });
+    });
+  });
+
+  describe('runConfig.labels', () => {
+    it('should merge runConfig labels into the request labels', async () => {
+      const agent = new LlmAgent({
+        name: 'test_agent',
+        model: 'test-basic-processor-model',
+        generateContentConfig: {labels: {agent_label: 'val1'}},
+      });
+      const runConfig: RunConfig = {
+        labels: {'goog-originating-logical-product-id': 'prod1'},
+      };
+      const llmRequest = makeLlmRequest();
+
+      await runProcessor(
+        createMockInvocationContext(agent, runConfig),
+        llmRequest,
+      );
+
+      expect(llmRequest.config?.labels).toEqual({
+        agent_label: 'val1',
+        'goog-originating-logical-product-id': 'prod1',
+      });
+    });
+
+    it('should let a runConfig label win over the agent label on key conflict', async () => {
+      const agent = new LlmAgent({
+        name: 'test_agent',
+        model: 'test-basic-processor-model',
+        generateContentConfig: {labels: {shared_label: 'agent-val'}},
+      });
+      const runConfig: RunConfig = {labels: {shared_label: 'run-val'}};
+      const llmRequest = makeLlmRequest();
+
+      await runProcessor(
+        createMockInvocationContext(agent, runConfig),
+        llmRequest,
+      );
+
+      expect(llmRequest.config?.labels).toEqual({shared_label: 'run-val'});
+    });
+
+    it('should set the labels when the agent has none', async () => {
+      const agent = new LlmAgent({
+        name: 'test_agent',
+        model: 'test-basic-processor-model',
+      });
+      const runConfig: RunConfig = {labels: {run_label: 'val'}};
+      const llmRequest = makeLlmRequest();
+
+      await runProcessor(
+        createMockInvocationContext(agent, runConfig),
+        llmRequest,
+      );
+
+      expect(llmRequest.config?.labels).toEqual({run_label: 'val'});
+    });
+
+    it('should not write the runConfig labels into the agent labels', async () => {
+      const agent = new LlmAgent({
+        name: 'test_agent',
+        model: 'test-basic-processor-model',
+        generateContentConfig: {labels: {}},
+      });
+      const runConfig: RunConfig = {labels: {run_label: 'val'}};
+      const llmRequest = makeLlmRequest();
+
+      await runProcessor(
+        createMockInvocationContext(agent, runConfig),
+        llmRequest,
+      );
+
+      expect(llmRequest.config?.labels).toEqual({run_label: 'val'});
+      expect(agent.generateContentConfig?.labels).toEqual({});
+    });
+  });
+
   it('should yield no events', async () => {
     const agent = new LlmAgent({
       name: 'test_agent',

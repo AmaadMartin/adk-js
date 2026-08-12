@@ -1059,3 +1059,70 @@ describe('LlmAgent outputSchema with tools', () => {
     expect(sessionAfterTurn2?.state?.['probe_counter']).toBe(2);
   });
 });
+
+class RequestCapturingLlm extends BaseLlm {
+  lastRequest: LlmRequest | undefined;
+
+  constructor() {
+    super({model: 'request-capturing-llm'});
+  }
+
+  async *generateContentAsync(
+    request: LlmRequest,
+  ): AsyncGenerator<LlmResponse, void, void> {
+    this.lastRequest = request;
+    yield {content: {role: 'model', parts: [{text: 'Done'}]}};
+  }
+
+  async connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
+    return new MockLlmConnection();
+  }
+}
+
+describe('RunConfig httpOptions and labels through the Runner', () => {
+  it('should reach the request the model receives', async () => {
+    const model = new RequestCapturingLlm();
+    const agent = new LlmAgent({
+      name: 'run_config_agent',
+      model,
+      generateContentConfig: {
+        httpOptions: {timeout: 1000, headers: {'Agent-Header': 'agent-val'}},
+        labels: {agent_label: 'agent-val'},
+      },
+    });
+    const sessionService = new InMemorySessionService();
+    const runner = new Runner({appName: 'test_app', agent, sessionService});
+    const session = await sessionService.createSession({
+      appName: 'test_app',
+      userId: 'test_user',
+      sessionId: 'test_session',
+    });
+
+    for await (const _event of runner.runAsync({
+      userId: session.userId,
+      sessionId: session.id,
+      newMessage: {role: 'user', parts: [{text: 'Hello'}]},
+      runConfig: {
+        httpOptions: {timeout: 500, headers: {'X-Request-Tier': 'interactive'}},
+        labels: {'goog-originating-logical-product-id': 'my-product'},
+      },
+    })) {
+      // Consume the stream.
+    }
+
+    const config = model.lastRequest?.config;
+    expect(config?.httpOptions?.timeout).toBe(500);
+    expect(config?.httpOptions?.headers).toMatchObject({
+      'Agent-Header': 'agent-val',
+      'X-Request-Tier': 'interactive',
+    });
+    expect(config?.labels).toMatchObject({
+      agent_label: 'agent-val',
+      'goog-originating-logical-product-id': 'my-product',
+    });
+    expect(agent.generateContentConfig?.httpOptions).toEqual({
+      timeout: 1000,
+      headers: {'Agent-Header': 'agent-val'},
+    });
+  });
+});

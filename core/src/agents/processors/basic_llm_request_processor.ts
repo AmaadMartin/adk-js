@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {HttpOptions} from '@google/genai';
 import {Event} from '../../events/event.js';
 import {LlmRequest, setOutputSchema} from '../../models/llm_request.js';
 import {canUseOutputSchemaWithTools} from '../../utils/output_schema_utils.js';
@@ -38,6 +39,21 @@ export class BasicLlmRequestProcessor extends BaseLlmRequestProcessor {
     llmRequest.model = agent.canonicalModel.model;
 
     llmRequest.config = {...(agent.generateContentConfig ?? {})};
+
+    const runConfig = invocationContext.runConfig;
+    if (runConfig?.httpOptions) {
+      llmRequest.config.httpOptions = mergeHttpOptions(
+        llmRequest.config.httpOptions,
+        runConfig.httpOptions,
+      );
+    }
+    if (runConfig?.labels) {
+      llmRequest.config.labels = {
+        ...llmRequest.config.labels,
+        ...runConfig.labels,
+      };
+    }
+
     // Models that cannot take an output schema alongside tools get the
     // prompt-based `set_model_response` workaround instead, injected by
     // `LlmAgent.runOneStepAsync` and the instructions processor.
@@ -70,6 +86,29 @@ export class BasicLlmRequestProcessor extends BaseLlmRequestProcessor {
         invocationContext.runConfig.proactivity;
     }
   }
+}
+
+/**
+ * Merges the run config's HTTP options over the agent's, run config winning.
+ *
+ * Returns a new object, and a new `headers` object, so that later request
+ * assembly cannot write through into the agent's shared
+ * `generateContentConfig` or into the caller's run config. The Gemini model
+ * appends tracking headers to `config.httpOptions.headers`.
+ *
+ * `baseUrl` and `apiVersion` are configuration-time settings rather than
+ * request-time ones, so they only apply when the agent set no options at all.
+ */
+function mergeHttpOptions(
+  agent: HttpOptions | undefined,
+  run: HttpOptions,
+): HttpOptions {
+  const merged: HttpOptions = {...(agent ?? run)};
+  if (run.timeout !== undefined) merged.timeout = run.timeout;
+  if (run.retryOptions !== undefined) merged.retryOptions = run.retryOptions;
+  if (run.extraBody !== undefined) merged.extraBody = run.extraBody;
+  if (run.headers) merged.headers = {...agent?.headers, ...run.headers};
+  return merged;
 }
 
 export const BASIC_LLM_REQUEST_PROCESSOR = new BasicLlmRequestProcessor();
