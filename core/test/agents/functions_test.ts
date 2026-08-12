@@ -28,6 +28,7 @@ import {
   generateClientFunctionCallId,
   getLongRunningFunctionCalls,
   mergeParallelFunctionResponseEvents,
+  normalizeToolResult,
 } from '../../src/agents/functions.js';
 
 // Get the test target function
@@ -114,6 +115,33 @@ function callFor(tool: BaseTool): FunctionCall {
   return {id: randomIdForTestingOnly(), name: tool.name, args: {}};
 }
 
+const nonObjectResults: Array<[string, unknown, Record<string, unknown>]> = [
+  ['a string', 'tool executed', {result: 'tool executed'}],
+  ['zero', 0, {result: 0}],
+  ['false', false, {result: false}],
+  ['null', null, {result: null}],
+  ['an array', ['item1', 'item2'], {result: ['item1', 'item2']}],
+];
+
+describe('normalizeToolResult', () => {
+  it.each(nonObjectResults)(
+    'wraps %s as a {result: value} object',
+    (_label, input, expected) => {
+      expect(normalizeToolResult(input)).toEqual(expected);
+    },
+  );
+
+  it('passes an object through unchanged', () => {
+    const toolResult = {summary: 'up 3%'};
+    expect(normalizeToolResult(toolResult)).toBe(toolResult);
+  });
+
+  it('passes an object through without inspecting its keys, matching adk-python', () => {
+    const toolResult = {1: 'a', 2: 'b'};
+    expect(normalizeToolResult(toolResult)).toBe(toolResult);
+  });
+});
+
 describe('handleFunctionCallList', () => {
   let invocationContext: InvocationContext;
   let pluginManager: PluginManager;
@@ -152,7 +180,7 @@ describe('handleFunctionCallList', () => {
     });
   });
 
-  it('should wrap array responses into a {results: array} object', async () => {
+  it('should wrap array responses into a {result: array} object for adk-python parity', async () => {
     const arrayTool = new FunctionTool({
       name: 'arrayTool',
       description: 'returns array',
@@ -179,7 +207,32 @@ describe('handleFunctionCallList', () => {
     expect(event).not.toBeNull();
     const definedEvent = event as Event;
     expect(definedEvent.content!.parts![0].functionResponse!.response).toEqual({
-      results: ['item1', 'item2'],
+      result: ['item1', 'item2'],
+    });
+  });
+
+  it('should leave an object tool response unwrapped', async () => {
+    const objectTool = new FunctionTool({
+      name: 'objectTool',
+      description: 'returns an object',
+      parameters: z.object({}),
+      execute: async () => {
+        return {summary: 'up 3%'};
+      },
+    });
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(objectTool)],
+      toolsDict: {'objectTool': objectTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event).not.toBeNull();
+    const definedEvent = event as Event;
+    expect(definedEvent.content!.parts![0].functionResponse!.response).toEqual({
+      summary: 'up 3%',
     });
   });
 

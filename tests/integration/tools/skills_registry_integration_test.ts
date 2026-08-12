@@ -219,7 +219,7 @@ describe('Skills Registry Integration', () => {
     expect(
       searchResponseEvent?.content?.parts?.[0]?.functionResponse?.response,
     ).toEqual({
-      results: [
+      result: [
         {
           name: 'remote-math-skill',
           description: 'A registry skill that handles math operations.',
