@@ -10,6 +10,9 @@ import {
   AgentEngineMemoryConfig,
   GenerateAgentEngineMemoriesConfig,
   GenerateMemoriesRequestDirectContentsSourceEvent,
+  IngestEventsRequestParameters,
+  IngestionDirectContentsSourceEvent,
+  MemoryGenerationTriggerConfig,
   MemoryMetadataValue,
 } from '@google-cloud/vertexai/build/src/genai/types.js';
 import {Content, createUserContent} from '@google/genai';
@@ -53,6 +56,20 @@ const CREATE_MEMORY_KNOWN_FIELDS = [
   'disableMemoryRevisions',
   'topics',
   'memoryId',
+];
+
+const INGEST_EVENTS_KNOWN_FIELDS = [
+  'forceFlush',
+  'generationTriggerConfig',
+  'streamId',
+];
+
+// `ttl` and `metadata` are handled separately by buildGenerateMemoriesConfig,
+// so they are absent from GENERATE_MEMORIES_KNOWN_FIELDS.
+const GENERATE_MEMORIES_ROUTING_FIELDS = [
+  ...GENERATE_MEMORIES_KNOWN_FIELDS,
+  'ttl',
+  'metadata',
 ];
 
 const ENABLE_CONSOLIDATION_KEY = 'enable_consolidation';
@@ -166,7 +183,14 @@ export class VertexAiMemoryBankService implements BaseMemoryService {
   }
 
   /**
-   * Adds events to Vertex AI Memory Bank via memories.generate.
+   * Adds events to Vertex AI Memory Bank.
+   *
+   * Uses `memories.ingestEvents` by default, which recognises the
+   * `streamId`, `forceFlush` and `generationTriggerConfig` keys of
+   * `customMetadata` and warns about every other key. When `customMetadata`
+   * carries a key the ingest request cannot express and `memories.generate`
+   * can, such as `ttl`, `revisionTtl`, `metadata` or `waitForCompletion`, the
+   * generate path is used instead.
    */
   async addEventsToMemory(request: {
     appName: string;
@@ -241,6 +265,10 @@ export class VertexAiMemoryBankService implements BaseMemoryService {
     eventsToProcess: Event[];
     customMetadata?: Record<string, unknown>;
   }): Promise<void> {
+    if (!shouldUseGenerateMemories(request.customMetadata)) {
+      return this.addEventsToMemoryViaIngest(request);
+    }
+
     const directEvents: GenerateMemoriesRequestDirectContentsSourceEvent[] = [];
     for (const event of request.eventsToProcess) {
       if (shouldFilterOutEvent(event.content)) {
@@ -269,6 +297,45 @@ export class VertexAiMemoryBankService implements BaseMemoryService {
     } else {
       logger.info('No events to add to memory.');
     }
+  }
+
+  private async addEventsToMemoryViaIngest(request: {
+    appName: string;
+    userId: string;
+    eventsToProcess: Event[];
+    customMetadata?: Record<string, unknown>;
+  }): Promise<void> {
+    const directEvents: IngestionDirectContentsSourceEvent[] = [];
+    for (const event of request.eventsToProcess) {
+      if (shouldFilterOutEvent(event.content)) {
+        continue;
+      }
+      directEvents.push({
+        content: JSON.parse(JSON.stringify(event.content)),
+        eventId: event.id,
+        // Event.timestamp is in milliseconds; the API expects RFC 3339.
+        ...(event.timestamp
+          ? {eventTime: new Date(event.timestamp).toISOString()}
+          : {}),
+      });
+    }
+
+    const params: IngestEventsRequestParameters = {
+      name: `reasoningEngines/${this.agentEngineId}`,
+      scope: {
+        app_name: request.appName,
+        user_id: request.userId,
+      },
+      ...ingestOptionsFromMetadata(request.customMetadata),
+    };
+    // A request without events is still valid: it updates the trigger config.
+    if (directEvents.length > 0) {
+      params.directContentsSource = {events: directEvents};
+    }
+
+    const operation = await this.memories.ingestEventsInternal(params);
+    logger.debug('Ingest events response received.');
+    logger.debug(`Ingest events response: ${JSON.stringify(operation)}`);
   }
 
   private async addMemoriesViaCreate(request: {
@@ -524,6 +591,78 @@ function buildGenerateMemoriesConfig(
   }
 
   return config as GenerateAgentEngineMemoriesConfig;
+}
+
+/**
+ * Returns whether customMetadata carries a key that memories.ingestEvents
+ * cannot express and memories.generate can. Every other event write goes
+ * through memories.ingestEvents.
+ */
+function shouldUseGenerateMemories(
+  customMetadata?: Record<string, unknown>,
+): boolean {
+  if (!customMetadata) {
+    return false;
+  }
+  return Object.keys(customMetadata).some((key) =>
+    GENERATE_MEMORIES_ROUTING_FIELDS.includes(key),
+  );
+}
+
+function ingestOptionsFromMetadata(
+  customMetadata?: Record<string, unknown>,
+): Partial<IngestEventsRequestParameters> {
+  if (!customMetadata) {
+    return {};
+  }
+
+  const options: Partial<IngestEventsRequestParameters> = {};
+  const {streamId, forceFlush, generationTriggerConfig} = customMetadata;
+
+  if (streamId !== undefined) {
+    if (typeof streamId === 'string') {
+      options.streamId = streamId;
+    } else {
+      logger.warn(
+        'Ignoring streamId because customMetadata["streamId"] is not a string.',
+      );
+    }
+  }
+
+  if (forceFlush !== undefined) {
+    if (typeof forceFlush === 'boolean') {
+      options.config = {forceFlush};
+    } else {
+      logger.warn(
+        'Ignoring forceFlush because customMetadata["forceFlush"] is not a boolean.',
+      );
+    }
+  }
+
+  if (generationTriggerConfig !== undefined) {
+    if (
+      typeof generationTriggerConfig === 'object' &&
+      generationTriggerConfig !== null &&
+      !Array.isArray(generationTriggerConfig)
+    ) {
+      options.generationTriggerConfig =
+        generationTriggerConfig as MemoryGenerationTriggerConfig;
+    } else {
+      logger.warn(
+        'Ignoring generationTriggerConfig because customMetadata["generationTriggerConfig"] is not an object.',
+      );
+    }
+  }
+
+  for (const key of Object.keys(customMetadata)) {
+    if (!INGEST_EVENTS_KNOWN_FIELDS.includes(key)) {
+      logger.warn(
+        `Ignoring custom metadata key ${key} because memories.ingestEvents does not support it.`,
+      );
+    }
+  }
+
+  return options;
 }
 
 function normalizeMemoriesForCreate(memories: MemoryEntry[]): MemoryEntry[] {
