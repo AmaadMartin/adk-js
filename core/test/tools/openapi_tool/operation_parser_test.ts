@@ -87,6 +87,17 @@ describe('OperationParser', () => {
     expect(params[0].paramSchema.type).toBe('string');
   });
 
+  it('should leave originalName empty for a typed scalar request body', () => {
+    const params = new OperationParser(
+      operationWithBody({type: 'string'}),
+    ).getParameters();
+
+    expect(params.length).toBe(1);
+    expect(params[0].originalName).toBe('');
+    expect(params[0].name).toBe('body');
+    expect(params[0].paramLocation).toBe('body');
+  });
+
   it('should emit no argument for an empty object request body', () => {
     const parser = new OperationParser(
       operationWithBody({type: 'object', properties: {}}),
