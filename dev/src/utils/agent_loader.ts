@@ -263,7 +263,7 @@ export class AgentFile {
       const rootApps = Object.values(jsModule).filter(isApp) as App[];
 
       if (rootApps.length > 1) {
-        console.warn(
+        logger.warn(
           `Multiple apps found in ${filePath}. Using the ${rootApps[0].name} as a root app.`,
         );
       }
@@ -290,7 +290,7 @@ export class AgentFile {
       ) as BaseAgent[];
 
       if (rootAgents.length > 1) {
-        console.warn(
+        logger.warn(
           `Multiple agents found in ${filePath}. Using the ${rootAgents[0].name} as a root agent.`,
         );
       }
