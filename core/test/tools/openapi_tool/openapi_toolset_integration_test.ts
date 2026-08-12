@@ -233,7 +233,7 @@ describe('OpenAPIToolset with a multi-schema spec', () => {
     if (!parameters?.properties) {
       expect.fail(`${tool.name} has no declared parameters`);
     }
-    return parameters;
+    return {...parameters, properties: parameters.properties};
   }
 
   it('creates one tool per operation across every path', async () => {
@@ -269,7 +269,7 @@ describe('OpenAPIToolset with a multi-schema spec', () => {
   it('flattens a $ref request body into snake_cased parameters', async () => {
     const parameters = declaredParameters(await getPetstoreTool('add_pet'));
 
-    expect(Object.keys(parameters.properties!)).toEqual([
+    expect(Object.keys(parameters.properties)).toEqual([
       'id',
       'name',
       'category',
@@ -283,7 +283,7 @@ describe('OpenAPIToolset with a multi-schema spec', () => {
   it('resolves $refs nested inside a referenced schema', async () => {
     const parameters = declaredParameters(await getPetstoreTool('add_pet'));
 
-    expect(parameters.properties!['category']).toMatchObject({
+    expect(parameters.properties['category']).toMatchObject({
       type: 'object',
       properties: {id: {type: 'integer'}, name: {type: 'string'}},
     });
