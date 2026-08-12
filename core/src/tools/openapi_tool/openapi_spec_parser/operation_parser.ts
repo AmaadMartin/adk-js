@@ -114,10 +114,8 @@ export class OperationParser {
           name: 'array',
         });
       } else {
-        // An empty originalName is how adk-python marks a parameter as the
-        // whole request body. It falls back to the literal 'body' when the
-        // schema declares no type of its own, so the parameter still has a
-        // name to derive the argument from.
+        // adk-python routes the whole body on an empty originalName, and keeps
+        // 'body' for a composed or untyped schema. rest_api_tool accepts both.
         const composedOrUntyped =
           !schema.type || !!schema.oneOf || !!schema.anyOf || !!schema.allOf;
         this.params.push({
