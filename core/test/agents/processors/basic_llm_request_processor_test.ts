@@ -293,6 +293,51 @@ describe('BasicLlmRequestProcessor', () => {
     expect(llmRequest.liveConnectConfig.enableAffectiveDialog).toBe(true);
   });
 
+  describe('affective dialog and proactivity gating', () => {
+    const LIVE_RUN_CONFIG: RunConfig = {
+      responseModalities: [Modality.AUDIO],
+      enableAffectiveDialog: true,
+      proactivity: {},
+    };
+
+    async function runWithModel(model: string): Promise<LlmRequest> {
+      const agent = new LlmAgent({
+        name: 'test_agent',
+        // A model instance is used so that `canonicalModel` resolves without
+        // credentials.
+        model: new TestLlmModel({model}),
+      });
+      const llmRequest = makeLlmRequest();
+
+      await runProcessor(
+        createMockInvocationContext(agent, LIVE_RUN_CONFIG),
+        llmRequest,
+      );
+
+      return llmRequest;
+    }
+
+    it('should drop both fields for a Gemini 3.x Live model', async () => {
+      const llmRequest = await runWithModel('gemini-3.1-flash-live');
+
+      expect(
+        llmRequest.liveConnectConfig.enableAffectiveDialog,
+      ).toBeUndefined();
+      expect(llmRequest.liveConnectConfig.proactivity).toBeUndefined();
+      // The gate is narrow: the other live settings still land.
+      expect(llmRequest.liveConnectConfig.responseModalities).toEqual([
+        'AUDIO',
+      ]);
+    });
+
+    it('should keep both fields for a non Gemini 3.x Live model', async () => {
+      const llmRequest = await runWithModel('gemini-2.5-flash');
+
+      expect(llmRequest.liveConnectConfig.enableAffectiveDialog).toBe(true);
+      expect(llmRequest.liveConnectConfig.proactivity).toEqual({});
+    });
+  });
+
   it('should not populate liveConnectConfig when runConfig is not set', async () => {
     const agent = new LlmAgent({
       name: 'test_agent',
