@@ -34,6 +34,7 @@ import * as http from 'node:http';
 import * as path from 'node:path';
 
 import {AgentFileOptions, AgentLoader} from '../utils/agent_loader.js';
+import {errorMessage} from '../utils/error_utils.js';
 import {AdkLogger} from '../utils/logger.js';
 import {
   ApiServerSpanExporter,
@@ -606,7 +607,7 @@ export class AdkApiServer {
 
           res.json(artifact);
         } catch (e: unknown) {
-          const error = `Failed to load artifact version: ${(e as Error).message}`;
+          const error = `Failed to load artifact version: ${errorMessage(e)}`;
 
           res.status(500).json({error});
           this.logger.error(error);
@@ -942,7 +943,7 @@ export class AdkApiServer {
       } catch (e: unknown) {
         if (res.headersSent) {
           if (!responseCompleted) {
-            const error = (e as Error).message;
+            const error = errorMessage(e);
             this.logger.error(error);
             try {
               res.end(`data: ${JSON.stringify({error})}\n\n`);

@@ -8,6 +8,7 @@ import * as path from 'node:path';
 
 import {A2A_AUTH_TOKEN_ENV_VAR} from '../../server/adk_api_server.js';
 import {AgentLoader} from '../../utils/agent_loader.js';
+import {errorMessage} from '../../utils/error_utils.js';
 import {createTempDir, isFile, isFolderExists} from '../../utils/file_utils.js';
 import {
   BaseDeployOptions,
@@ -216,7 +217,7 @@ export async function deployToCloudRun(options: DeployToCloudRunOptions) {
   } catch (e: unknown) {
     console.error(
       '\x1b[31mFailed to deploy to Cloud Run:',
-      (e as Error).message,
+      errorMessage(e),
       '\x1b[0m',
     );
   } finally {

@@ -15,6 +15,7 @@ import {createRequire} from 'node:module';
 import * as path from 'node:path';
 import {pathToFileURL} from 'node:url';
 
+import {errorMessage} from './error_utils.js';
 import {
   createTempDir,
   isFile,
@@ -430,7 +431,7 @@ export class AgentLoader {
         logger.warn('File watcher error:', err.message);
       });
     } catch (err) {
-      logger.warn('Could not start file watcher:', (err as Error).message);
+      logger.warn('Could not start file watcher:', errorMessage(err));
     }
   }
 
