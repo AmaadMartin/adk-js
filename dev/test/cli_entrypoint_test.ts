@@ -38,6 +38,7 @@ describe('cli_entrypoint', () => {
   let errorSpy: MockInstance<typeof console.error>;
   let unhandled: unknown[];
   let originalArgv: string[];
+  let originalExitCode: number | string | undefined;
 
   const onUnhandled = (reason: unknown) => {
     unhandled.push(reason);
@@ -45,6 +46,7 @@ describe('cli_entrypoint', () => {
 
   beforeEach(() => {
     originalArgv = process.argv;
+    originalExitCode = process.exitCode;
     unhandled = [];
     process.on('unhandledRejection', onUnhandled);
     errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -53,6 +55,9 @@ describe('cli_entrypoint', () => {
   afterEach(() => {
     process.off('unhandledRejection', onUnhandled);
     process.argv = originalArgv;
+    // A failing entrypoint sets `process.exitCode`, which would otherwise
+    // survive the test and fail the whole vitest run.
+    process.exitCode = originalExitCode;
     vi.restoreAllMocks();
     vi.resetModules();
   });
@@ -109,5 +114,75 @@ describe('cli_entrypoint', () => {
 
     expect(exitSpy).toHaveBeenCalledWith(0);
     expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  describe('exit code', () => {
+    it('exits non-zero when the action rejects', async () => {
+      const program = new Command('adk');
+      program.command('web').action(async () => {
+        await Promise.resolve();
+        throw new Error('web command failed');
+      });
+      createProgramMock.mockReturnValue(program);
+
+      await runEntrypoint(['web']);
+
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('exits non-zero on a synchronous parse failure', async () => {
+      const program = new Command('adk');
+      program.exitOverride().configureOutput({writeErr: () => {}});
+      program.command('web').action(async () => {});
+      createProgramMock.mockReturnValue(program);
+
+      await runEntrypoint(['web', '--nope']);
+
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('leaves the exit code alone when the action resolves', async () => {
+      const program = new Command('adk');
+      program.command('web').action(async () => {});
+      createProgramMock.mockReturnValue(program);
+
+      await runEntrypoint(['web']);
+
+      expect(process.exitCode).toBe(originalExitCode);
+    });
+
+    it('leaves the exit code alone for --help', async () => {
+      const program = new Command('adk');
+      program.configureOutput({writeOut: () => {}, writeErr: () => {}});
+      program.command('web').action(async () => {});
+      createProgramMock.mockReturnValue(program);
+      vi.spyOn(process, 'exit').mockImplementation(
+        vi.fn<typeof process.exit>(),
+      );
+
+      await runEntrypoint(['--help']);
+
+      expect(process.exitCode).toBe(originalExitCode);
+    });
+
+    it('leaves the exit code alone for --version', async () => {
+      const out: string[] = [];
+      const program = new Command('adk');
+      program
+        .version('1.0.0-test')
+        .configureOutput({writeOut: (s) => out.push(s), writeErr: () => {}});
+      program.command('web').action(async () => {});
+      createProgramMock.mockReturnValue(program);
+      const exitSpy = vi
+        .spyOn(process, 'exit')
+        .mockImplementation(vi.fn<typeof process.exit>());
+
+      await runEntrypoint(['--version']);
+
+      expect(out.join('')).toContain('1.0.0-test');
+      expect(exitSpy).toHaveBeenCalledWith(0);
+      expect(errorSpy).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(originalExitCode);
+    });
   });
 });

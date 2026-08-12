@@ -10,4 +10,6 @@ createProgram()
   .parseAsync(process.argv)
   .catch((e: unknown) => {
     console.error(e);
+    // `process.exit(1)` would truncate pending stdout/stderr writes on a pipe.
+    process.exitCode = 1;
   });
