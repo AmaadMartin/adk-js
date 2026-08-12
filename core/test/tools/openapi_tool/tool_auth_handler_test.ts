@@ -19,14 +19,14 @@ vi.mock(
   '../../../src/tools/openapi_tool/auth/credential_exchangers/auto_auth_credential_exchanger.js',
   () => {
     return {
-      AutoAuthCredentialExchanger: vi.fn().mockImplementation(() => ({
-        exchange: vi.fn().mockResolvedValue({
+      AutoAuthCredentialExchanger: vi.fn(() => ({
+        exchange: vi.fn(async () => ({
           credential: {
             authType: AuthCredentialTypes.HTTP,
             http: {scheme: 'bearer', credentials: {token: 'exchanged-token'}},
           },
           wasExchanged: true,
-        }),
+        })),
       })),
     };
   },

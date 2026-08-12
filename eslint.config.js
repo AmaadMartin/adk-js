@@ -4,11 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import js from "@eslint/js";
-import globals from "globals";
-import tseslint from "typescript-eslint";
-import { defineConfig } from "eslint/config";
+import js from '@eslint/js';
+import {defineConfig} from 'eslint/config';
+import globals from 'globals';
 import {builtinModules} from 'node:module';
+import tseslint from 'typescript-eslint';
 
 /**
  * Bare Node built-in specifiers (`fs`, `path`, `fs/promises`) are banned so
@@ -22,32 +22,52 @@ const bareNodeBuiltins = builtinModules
 
 export default defineConfig([
   {
-    ignores: ["**/dist/**"],
+    ignores: ['**/dist/**'],
   },
   tseslint.configs.recommended,
   {
-    files: ["**/*.ts"],
-    plugins: { js },
-    extends: ["js/recommended"],
+    files: ['**/*.ts'],
+    plugins: {js},
+    extends: ['js/recommended'],
     linterOptions: {
-      reportUnusedDisableDirectives: "error",
+      reportUnusedDisableDirectives: 'error',
     },
     languageOptions: {
       globals: {
         ...globals.node,
-        ...globals.vitest
+        ...globals.vitest,
       },
     },
     rules: {
-      "no-unused-vars": "off",
-      "@typescript-eslint/no-unused-vars": [
-        "error",
+      'no-unused-vars': 'off',
+      '@typescript-eslint/no-unused-vars': [
+        'error',
         {
-          "argsIgnorePattern": "^_",
-          "varsIgnorePattern": "^_",
-          "caughtErrorsIgnorePattern": "^_"
-        }
-      ]
+          'argsIgnorePattern': '^_',
+          'varsIgnorePattern': '^_',
+          'caughtErrorsIgnorePattern': '^_',
+        },
+      ],
+    },
+  },
+  {
+    files: ['**/test/**/*.ts', '**/tests/**/*.ts'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector:
+            "CallExpression[callee.object.name='vi'][callee.property.name=/^(mock|hoisted)$/] " +
+            'CallExpression[callee.property.name=/^mock(Implementation|ResolvedValue|ReturnValue|RejectedValue)$/]' +
+            "[callee.object.callee.object.name='vi'][callee.object.callee.property.name='fn']",
+          message:
+            'Inside a vi.mock() or vi.hoisted() factory, pass the implementation to vi.fn() ' +
+            'directly (vi.fn(impl), vi.fn(async () => value)). vi.restoreAllMocks() discards ' +
+            'an implementation attached with .mockImplementation()/.mockResolvedValue()/' +
+            '.mockReturnValue()/.mockRejectedValue(), so the module fake becomes an ' +
+            'undefined-returning stub for every test after the first.',
+        },
+      ],
     },
   },
   {

@@ -19,9 +19,9 @@ vi.hoisted(() => {
 
 vi.mock('@modelcontextprotocol/sdk/client/index.js', () => {
   return {
-    Client: vi.fn().mockImplementation(() => ({
-      connect: vi.fn().mockResolvedValue(undefined),
-      close: vi.fn().mockResolvedValue(undefined),
+    Client: vi.fn(() => ({
+      connect: vi.fn(async () => undefined),
+      close: vi.fn(async () => undefined),
     })),
   };
 });

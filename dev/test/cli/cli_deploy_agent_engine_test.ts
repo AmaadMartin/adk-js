@@ -26,7 +26,7 @@ declare global {
   var fsMockReaddir: Mock | undefined;
 }
 
-const mockReaddir = vi.hoisted(() => vi.fn().mockResolvedValue(['file1.js']));
+const mockReaddir = vi.hoisted(() => vi.fn(async () => ['file1.js']));
 
 type Callback = (error: Error | null, result?: unknown) => void;
 
@@ -55,7 +55,7 @@ vi.mock('node:fs/promises', async (importOriginal) => {
     );
   };
 
-  const mockCp = vi.fn().mockImplementation((src, dest, opts) => {
+  const mockCp = vi.fn((src, dest, opts) => {
     if (isCoveragePath(src) || isCoveragePath(dest)) {
       return actual.cp(src, dest, opts);
     }
@@ -67,14 +67,14 @@ vi.mock('node:fs/promises', async (importOriginal) => {
     return actual.cp(src, dest, opts);
   });
 
-  const mockMkdir = vi.fn().mockImplementation((path, opts) => {
+  const mockMkdir = vi.fn((path, opts) => {
     if (isCoveragePath(path)) {
       return actual.mkdir(path, opts);
     }
     return actual.mkdir(path, opts);
   });
 
-  const mockReaddir = vi.fn().mockImplementation((path, opts) => {
+  const mockReaddir = vi.fn((path, opts) => {
     if (isCoveragePath(path)) {
       return actual.readdir(path, opts);
     }
@@ -121,7 +121,7 @@ vi.mock('../../src/utils/agent_loader.js', () => ({
     getAgentFile: vi.fn(async () => ({
       getFilePath: vi.fn(() => 'path/to/agent1.ts'),
     })),
-    disposeAll: vi.fn(async () => {}),
+    disposeAll: vi.fn(async () => undefined),
   })),
 }));
 

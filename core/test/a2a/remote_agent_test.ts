@@ -34,14 +34,14 @@ type A2AStreamEventData =
 
 // Mock @a2a-js/sdk/client
 vi.mock('@a2a-js/sdk/client', () => {
-  const DefaultAgentCardResolver = vi.fn().mockImplementation(() => ({
+  const DefaultAgentCardResolver = vi.fn(() => ({
     resolve: vi.fn(),
   }));
-  const Client = vi.fn().mockImplementation(() => ({
+  const Client = vi.fn(() => ({
     sendMessageStream: vi.fn(),
     sendMessage: vi.fn(),
   }));
-  const ClientFactory = vi.fn().mockImplementation(() => ({
+  const ClientFactory = vi.fn(() => ({
     createFromAgentCard: vi.fn(),
   }));
   return {Client, ClientFactory, DefaultAgentCardResolver};

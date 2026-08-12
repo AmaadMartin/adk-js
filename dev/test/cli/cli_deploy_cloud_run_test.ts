@@ -49,9 +49,9 @@ vi.mock('node:child_process', () => ({
 // vi.restoreAllMocks() in afterEach.
 vi.mock('node:fs/promises', () => {
   const mockFs = {
-    cp: vi.fn(async () => {}),
-    mkdir: vi.fn(async () => {}),
-    rm: vi.fn(async () => {}),
+    cp: vi.fn(async () => undefined),
+    mkdir: vi.fn(async () => undefined),
+    rm: vi.fn(async () => undefined),
   };
   return {
     ...mockFs,
@@ -65,7 +65,7 @@ vi.mock('../../src/utils/agent_loader.js', () => ({
     getAgentFile: vi.fn(async () => ({
       getFilePath: vi.fn(() => 'path/to/agent1.ts'),
     })),
-    disposeAll: vi.fn(async () => {}),
+    disposeAll: vi.fn(async () => undefined),
   })),
 }));
 

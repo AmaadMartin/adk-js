@@ -28,7 +28,7 @@ vi.mock('@google/genai', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@google/genai')>();
   return {
     ...actual,
-    GoogleGenAI: vi.fn().mockImplementation((options) => ({
+    GoogleGenAI: vi.fn((options) => ({
       apiClient: {
         clientOptions: {
           httpOptions: options.httpOptions,
@@ -39,12 +39,12 @@ vi.mock('@google/genai', async (importOriginal) => {
         generateContent: vi.fn(),
       },
       live: {
-        connect: vi.fn().mockResolvedValue({
+        connect: vi.fn(async () => ({
           sendClientContent: vi.fn(),
           sendToolResponse: vi.fn(),
           sendRealtimeInput: vi.fn(),
           close: vi.fn(),
-        }),
+        })),
       },
       vertexai: options.vertexai || false,
     })),

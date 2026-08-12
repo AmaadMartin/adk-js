@@ -37,31 +37,31 @@ vi.mock('@google/adk', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@google/adk')>();
   return {
     ...actual,
-    Runner: vi.fn().mockImplementation(() => ({
-      runAsync: vi.fn().mockImplementation(async function* () {
+    Runner: vi.fn(() => ({
+      runAsync: vi.fn(async function* () {
         for (const event of runnerState.events) {
           yield event;
         }
       }),
     })),
     InMemoryArtifactService: vi.fn(),
-    InMemorySessionService: vi.fn().mockImplementation(() => ({
-      createSession: vi.fn().mockResolvedValue({
+    InMemorySessionService: vi.fn(() => ({
+      createSession: vi.fn(async () => ({
         id: 'session-123',
         appName: 'test-agent',
         userId: 'test_user',
         events: [],
-      }),
+      })),
       appendEvent: vi.fn(),
-      getSession: vi.fn().mockResolvedValue({
+      getSession: vi.fn(async () => ({
         id: 'session-123',
         appName: 'test-agent',
         userId: 'test_user',
         events: [],
-      }),
+      })),
     })),
     InMemoryMemoryService: vi.fn(),
-    isApp: vi.fn().mockReturnValue(false),
+    isApp: vi.fn(() => false),
   };
 });
 

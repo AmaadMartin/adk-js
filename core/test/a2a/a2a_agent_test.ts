@@ -33,11 +33,11 @@ import {beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {A2AEvent} from '../../src/a2a/a2a_event.js';
 
 vi.mock('@a2a-js/sdk/client', () => {
-  const Client = vi.fn().mockImplementation(() => ({
+  const Client = vi.fn(() => ({
     sendMessageStream: vi.fn(),
     sendMessage: vi.fn(),
   }));
-  const ClientFactory = vi.fn().mockImplementation(() => ({
+  const ClientFactory = vi.fn(() => ({
     createFromAgentCard: vi.fn(),
   }));
   return {Client, ClientFactory};

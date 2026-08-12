@@ -27,7 +27,7 @@ vi.mock('../../../src/utils/file_utils.js', async (importOriginal) => {
     await importOriginal<typeof import('../../../src/utils/file_utils.js')>();
   return {
     ...actual,
-    materializeFiles: vi.fn().mockImplementation((files) => files),
+    materializeFiles: vi.fn((files) => files),
   };
 });
 
