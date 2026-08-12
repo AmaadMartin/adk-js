@@ -148,7 +148,7 @@ export function extractCodeAndTruncateContent(
         !content.parts[i + 1].codeExecutionResult)
     ) {
       content.parts = content.parts.slice(0, i + 1);
-      return part.executableCode.code!;
+      return part.executableCode.code || '';
     }
   }
 
@@ -268,7 +268,7 @@ export function convertCodeExecutionParts(
     content.parts[content.parts.length - 1] = {
       text:
         codeBlockDelimiter[0] +
-        lastPart.executableCode.code +
+        (lastPart.executableCode.code || '') +
         codeBlockDelimiter[1],
     };
   } else if (content.parts.length == 1 && lastPart.codeExecutionResult) {
