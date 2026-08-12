@@ -26,6 +26,9 @@ declare global {
 }
 
 const mockReaddir = vi.hoisted(() => vi.fn().mockResolvedValue(['file1.js']));
+const mockRm = vi.hoisted(() => vi.fn());
+const actualFs =
+  await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
 
 type Callback = (error: Error | null, result?: unknown) => void;
 
@@ -104,6 +107,7 @@ vi.mock('node:fs/promises', async (importOriginal) => {
     cp: mockCp,
     mkdir: mockMkdir,
     readdir: mockReaddir,
+    rm: mockRm,
   };
 
   if (actual.default) {
@@ -112,6 +116,7 @@ vi.mock('node:fs/promises', async (importOriginal) => {
       cp: mockCp,
       mkdir: mockMkdir,
       readdir: mockReaddir,
+      rm: mockRm,
     };
   } else {
     mockFs.default = mockFs;
@@ -177,8 +182,10 @@ describe('deployToAgentEngine', () => {
     vi.clearAllMocks();
 
     mockReaddir.mockResolvedValue(['file1.js']);
+    mockRm.mockImplementation(actualFs.rm);
     vi.spyOn(console, 'info').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     // Default mock behavior
     (isFile as Mock).mockResolvedValue(false);
@@ -748,5 +755,90 @@ describe('deployToAgentEngine', () => {
     await expect(deployToAgentEngine(options)).rejects.toThrow(
       'Reasoning Engine update failed: [Code 404] Resource not found',
     );
+  });
+
+  it('should reject with the build failure, not the cleanup failure, when both fail', async () => {
+    const consoleWarnSpy = vi.spyOn(console, 'warn');
+    spawnMock.mockReturnValue({
+      on: vi.fn((event: string, cb: (code: number) => void) => {
+        if (event === 'close') {
+          process.nextTick(() => cb(1));
+        }
+      }),
+    });
+    mockRm.mockRejectedValueOnce(
+      new Error(`EBUSY: resource busy or locked, unlink '${tempFolder}'`),
+    );
+
+    // Exact-message match: the EBUSY cleanup error must not reach the caller.
+    await expect(deployToAgentEngine(defaultOptions)).rejects.toThrowError(
+      new Error('Command failed with exit code 1'),
+    );
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('EBUSY'),
+    );
+
+    await fs.rm(tempFolder, {recursive: true, force: true});
+  });
+
+  it('should reject with the Reasoning Engine error when disposing the agent loader also fails', async () => {
+    const consoleWarnSpy = vi.spyOn(console, 'warn');
+    (AgentLoader as Mock).mockImplementation(() => ({
+      listAgents: vi.fn().mockResolvedValue(['agent1']),
+      getAgentFile: vi.fn().mockResolvedValue({
+        getFilePath: vi.fn().mockReturnValue('path/to/agent1.ts'),
+      }),
+      disposeAll: vi.fn().mockRejectedValue(new Error('watcher close failed')),
+    }));
+    mockGetAgentOperationInternal.mockResolvedValue({
+      name: 'operations/test-operation',
+      done: true,
+      error: {
+        code: 404,
+        message: 'Resource not found',
+      },
+    });
+
+    await expect(deployToAgentEngine(defaultOptions)).rejects.toThrow(
+      'Reasoning Engine creation failed: [Code 404] Resource not found',
+    );
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('watcher close failed'),
+    );
+  });
+
+  it('should not fail a successful deploy when cleanup fails', async () => {
+    const consoleWarnSpy = vi.spyOn(console, 'warn');
+    mockRm.mockRejectedValueOnce(
+      new Error(`EBUSY: resource busy or locked, unlink '${tempFolder}'`),
+    );
+
+    await expect(deployToAgentEngine(defaultOptions)).resolves.toBeUndefined();
+
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('EBUSY'),
+    );
+
+    await fs.rm(tempFolder, {recursive: true, force: true});
+  });
+
+  it('should still dispose the agent loader when the temp folder cannot be removed', async () => {
+    const disposeAll = vi.fn().mockResolvedValue(undefined);
+    (AgentLoader as Mock).mockImplementation(() => ({
+      listAgents: vi.fn().mockResolvedValue(['agent1']),
+      getAgentFile: vi.fn().mockResolvedValue({
+        getFilePath: vi.fn().mockReturnValue('path/to/agent1.ts'),
+      }),
+      disposeAll,
+    }));
+    mockRm.mockRejectedValueOnce(
+      new Error(`EBUSY: resource busy or locked, unlink '${tempFolder}'`),
+    );
+
+    await expect(deployToAgentEngine(defaultOptions)).resolves.toBeUndefined();
+
+    expect(disposeAll).toHaveBeenCalled();
+
+    await fs.rm(tempFolder, {recursive: true, force: true});
   });
 });
