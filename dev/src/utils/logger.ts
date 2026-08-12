@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {LogLevel, Logger} from '@google/adk';
+import {formatLogArgs, Logger, LogLevel} from '@google/adk';
 import * as winston from 'winston';
 
 /**
@@ -82,7 +82,7 @@ export class AdkLogger implements Logger {
       return;
     }
 
-    this.logger.log(level.toString(), messages.join(' '));
+    this.logger.log(level.toString(), formatLogArgs(messages));
   }
 
   debug(...messages: unknown[]): void {
@@ -90,7 +90,7 @@ export class AdkLogger implements Logger {
       return;
     }
 
-    this.logger.debug(messages.join(' '));
+    this.logger.debug(formatLogArgs(messages));
   }
 
   info(...messages: unknown[]): void {
@@ -98,7 +98,7 @@ export class AdkLogger implements Logger {
       return;
     }
 
-    this.logger.info(messages.join(' '));
+    this.logger.info(formatLogArgs(messages));
   }
 
   warn(...messages: unknown[]): void {
@@ -106,7 +106,7 @@ export class AdkLogger implements Logger {
       return;
     }
 
-    this.logger.warn(messages.join(' '));
+    this.logger.warn(formatLogArgs(messages));
   }
 
   error(...messages: unknown[]): void {
@@ -114,6 +114,6 @@ export class AdkLogger implements Logger {
       return;
     }
 
-    this.logger.error(messages.join(' '));
+    this.logger.error(formatLogArgs(messages));
   }
 }

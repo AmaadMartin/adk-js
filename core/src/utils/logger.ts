@@ -3,6 +3,7 @@
  * Copyright 2025 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
+import {inspect} from 'node:util';
 import * as winston from 'winston';
 
 /** Log levels for the logger. */
@@ -28,6 +29,41 @@ export interface Logger {
   error(...args: unknown[]): void;
 
   setLogLevel(level: LogLevel): void;
+}
+
+/**
+ * Nesting depth rendered by {@link formatLogArgs} for a non-Error value.
+ * Node's default of 2 collapses anything deeper to `[Object]`, which loses the
+ * detail a log line exists to carry; 5 keeps a nested payload readable while
+ * still bounding log volume.
+ */
+const LOG_INSPECT_DEPTH = 5;
+
+/** Renders a single log argument. */
+function formatLogValue(value: unknown): string {
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (value instanceof Error) {
+    return value.stack ?? String(value);
+  }
+  return inspect(value, {depth: LOG_INSPECT_DEPTH});
+}
+
+/**
+ * Formats the variadic arguments of a log call into a single line.
+ *
+ * Each argument is rendered so that nothing is silently lost: an `Error`
+ * contributes its stack trace, a string is passed through unchanged, and any
+ * other value is structurally inspected, so an object never degrades to
+ * `[object Object]` and `undefined`/`null` never degrade to an empty string.
+ * Arguments are joined with a single space.
+ *
+ * @param args The values passed to a logger level method.
+ * @return A single string to hand to the underlying log transport.
+ */
+export function formatLogArgs(args: unknown[]): string {
+  return args.map(formatLogValue).join(' ');
 }
 
 class SimpleLogger implements Logger {
@@ -68,7 +104,7 @@ class SimpleLogger implements Logger {
       return;
     }
 
-    this.logger.log(level.toString(), messages.join(' '));
+    this.logger.log(level.toString(), formatLogArgs(messages));
   }
 
   debug(...messages: unknown[]): void {
@@ -76,7 +112,7 @@ class SimpleLogger implements Logger {
       return;
     }
 
-    this.logger.debug(messages.join(' '));
+    this.logger.debug(formatLogArgs(messages));
   }
 
   info(...messages: unknown[]): void {
@@ -84,7 +120,7 @@ class SimpleLogger implements Logger {
       return;
     }
 
-    this.logger.info(messages.join(' '));
+    this.logger.info(formatLogArgs(messages));
   }
 
   warn(...messages: unknown[]): void {
@@ -92,7 +128,7 @@ class SimpleLogger implements Logger {
       return;
     }
 
-    this.logger.warn(messages.join(' '));
+    this.logger.warn(formatLogArgs(messages));
   }
 
   error(...messages: unknown[]): void {
@@ -100,7 +136,7 @@ class SimpleLogger implements Logger {
       return;
     }
 
-    this.logger.error(messages.join(' '));
+    this.logger.error(formatLogArgs(messages));
   }
 }
 
