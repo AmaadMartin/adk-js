@@ -14,6 +14,7 @@ import {
   Part,
   Tool,
 } from '@google/genai';
+import {contentUnionToText} from '../utils/content_utils.js';
 import {logger} from '../utils/logger.js';
 import {LlmRequest} from './llm_request.js';
 import {LlmResponse} from './llm_response.js';
@@ -811,31 +812,7 @@ export function buildGenerationConfig(
 export function extractSystemInstruction(
   config: GenerateContentConfig,
 ): string | undefined {
-  const systemInstruction = config.systemInstruction;
-  if (!systemInstruction) {
-    return undefined;
-  }
-
-  if (typeof systemInstruction === 'string') {
-    return systemInstruction;
-  }
-
-  if (
-    typeof systemInstruction === 'object' &&
-    'parts' in systemInstruction &&
-    Array.isArray(systemInstruction.parts)
-  ) {
-    const texts: string[] = [];
-    for (const part of systemInstruction.parts) {
-      const p = part as Part;
-      if (p.text) {
-        texts.push(p.text);
-      }
-    }
-    return texts.length > 0 ? texts.join('\n') : undefined;
-  }
-
-  return undefined;
+  return contentUnionToText(config.systemInstruction);
 }
 
 /**
