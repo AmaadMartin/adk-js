@@ -20,6 +20,24 @@ const INTEGRATION_HOOK_TIMEOUT_MS = 120000;
  */
 const INTEGRATION_TEST_TIMEOUT_MS = 60000;
 
+/**
+ * Deletes the environment variables ADK reads, so a unit test result does not
+ * depend on the developer's shell. Only the unit projects load it; the
+ * `integration`, `e2e` and `cross-language` projects need the real values.
+ *
+ * The unit projects also set `unstubEnvs: true`. Vitest unstubs in
+ * `onBeforeTryTask`, which runs before each test and before that test's
+ * `beforeEach`, so a stub installed in a `beforeEach` still applies. A test
+ * that needs one value for a whole file must assign it in `beforeAll` rather
+ * than stub it.
+ *
+ * `restoreMocks` stays unset on purpose. Under Vitest 3.2.6
+ * `vi.restoreAllMocks()` resets the implementation of a `vi.fn()` declared in a
+ * `vi.mock` factory, which would degrade those fakes to no-ops from the second
+ * test of every file onwards.
+ */
+const UNIT_SETUP_FILE = './tests/unit_setup.ts';
+
 export default defineConfig({
   test: {
     poolOptions: {
@@ -35,7 +53,8 @@ export default defineConfig({
         test: {
           name: 'unit:core',
           environment: 'node',
-          setupFiles: ['./tests/test_setup.ts'],
+          setupFiles: ['./tests/test_setup.ts', UNIT_SETUP_FILE],
+          unstubEnvs: true,
           alias: {
             '@google/adk': path.resolve(__dirname, './core/src'),
             '@google/adk-integrations': path.resolve(
@@ -50,7 +69,8 @@ export default defineConfig({
         test: {
           name: 'unit:dev',
           environment: 'node',
-          setupFiles: ['./tests/test_setup.ts'],
+          setupFiles: ['./tests/test_setup.ts', UNIT_SETUP_FILE],
+          unstubEnvs: true,
           alias: {
             '@google/adk': path.resolve(__dirname, './core/src'),
             '@google/adk-integrations': path.resolve(
@@ -65,7 +85,8 @@ export default defineConfig({
         test: {
           name: 'unit:integrations',
           environment: 'node',
-          setupFiles: ['./tests/test_setup.ts'],
+          setupFiles: ['./tests/test_setup.ts', UNIT_SETUP_FILE],
+          unstubEnvs: true,
           alias: {
             '@google/adk': path.resolve(__dirname, './core/src'),
             '@google/adk-integrations': path.resolve(
