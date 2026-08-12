@@ -874,5 +874,72 @@ describe('AgentLoader', () => {
 
       await loader.disposeAll();
     });
+
+    /**
+     * The entrypoint each esbuild invocation compiled, in call order.
+     * Comparing the list against its distinct entries counts duplicated
+     * discovery work without hardcoding how many entrypoints the fixture has.
+     */
+    function compiledEntryPoints(): string[] {
+      return (esbuild.build as Mock).mock.calls.map(
+        (call) => (call[0] as {entryPoints: string[]}).entryPoints[0],
+      );
+    }
+
+    it('runs a single discovery pass for concurrent preloadAgents() calls', async () => {
+      const loader = new AgentLoader(tempAgentsDir);
+      await Promise.all([loader.preloadAgents(), loader.preloadAgents()]);
+
+      const compiled = compiledEntryPoints();
+      expect(compiled.length).toBe(new Set(compiled).size);
+      expect(await loader.listAgents()).toEqual(['agent1', 'agent2', 'agent3']);
+
+      await loader.disposeAll();
+    });
+
+    it('re-scans after a failed discovery pass instead of replaying its rejection', async () => {
+      const compileAgent = (esbuild.build as Mock).getMockImplementation();
+      let compilesFail = true;
+      (esbuild.build as Mock).mockImplementation(
+        async (options: {entryPoints: string[]; outfile: string}) => {
+          if (compilesFail) {
+            throw new Error('compile failed');
+          }
+
+          return compileAgent?.(options);
+        },
+      );
+
+      const loader = new AgentLoader(tempAgentsDir);
+      await expect(loader.preloadAgents()).rejects.toThrow('compile failed');
+
+      compilesFail = false;
+
+      await expect(loader.preloadAgents()).resolves.toBeUndefined();
+      expect(await loader.listAgents()).toEqual(['agent1', 'agent2', 'agent3']);
+
+      await loader.disposeAll();
+    });
+
+    it('starts a fresh scan when invalidateAll is called during a scan', async () => {
+      const loader = new AgentLoader(tempAgentsDir);
+      const invalidatedScan = loader.preloadAgents();
+
+      (loader as unknown as {invalidateAll: () => void}).invalidateAll();
+
+      await Promise.all([invalidatedScan, loader.preloadAgents()]);
+
+      // Every entrypoint is compiled once by the discarded scan and once by
+      // its replacement.
+      const compiled = compiledEntryPoints();
+      expect(compiled.length).toBe(2 * new Set(compiled).size);
+
+      // The replacement scan completed, so listing serves it from the cache
+      // instead of scanning a third time.
+      expect(await loader.listAgents()).toEqual(['agent1', 'agent2', 'agent3']);
+      expect(compiledEntryPoints().length).toBe(compiled.length);
+
+      await loader.disposeAll();
+    });
   });
 });
