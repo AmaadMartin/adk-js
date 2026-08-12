@@ -193,7 +193,7 @@ describe('OpenApiSpecParser', () => {
             },
           ],
           get: {
-            // operationId is missing, should be auto-generated as "get__users__id_"
+            // operationId is missing, so it is synthesized as "users_id_get"
             responses: {},
           },
         },
@@ -205,9 +205,67 @@ describe('OpenApiSpecParser', () => {
 
     expect(parsed.length).toBe(1);
     const op = parsed[0];
-    expect(op.name).toBe('get__users__id_');
+    expect(op.name).toBe('users_id_get');
     expect(op.parameters.length).toBe(1);
     expect(op.parameters[0].name).toBe('id');
+  });
+
+  it('should synthesize snake_case operationIds matching adk-python', () => {
+    const spec: OpenAPIV3.Document = {
+      openapi: '3.0.0',
+      info: {title: 'Synthesis API', version: '1.0.0'},
+      paths: {
+        '/userProfiles/{userId}': {get: {responses: {}}},
+        '/pets/{petId}/photos': {delete: {responses: {}}},
+        '/': {get: {responses: {}}},
+      },
+    };
+
+    const parsed = new OpenApiSpecParser().parse(spec);
+
+    expect(parsed.map((op) => op.operation.operationId)).toEqual([
+      'user_profiles_user_id_get',
+      'pets_pet_id_photos_delete',
+      'get',
+    ]);
+    expect(parsed.map((op) => op.name)).toEqual([
+      'user_profiles_user_id_get',
+      'pets_pet_id_photos_delete',
+      'get',
+    ]);
+  });
+
+  it('should synthesize distinct ids for each method on a path', () => {
+    const spec: OpenAPIV3.Document = {
+      openapi: '3.0.0',
+      info: {title: 'Methods API', version: '1.0.0'},
+      paths: {
+        '/test': {
+          get: {responses: {}},
+          post: {responses: {}},
+        },
+      },
+    };
+
+    const parsed = new OpenApiSpecParser().parse(spec);
+
+    expect(parsed.map((op) => op.name)).toEqual(['test_get', 'test_post']);
+  });
+
+  it('should not rewrite a declared operationId', () => {
+    const spec: OpenAPIV3.Document = {
+      openapi: '3.0.0',
+      info: {title: 'Declared API', version: '1.0.0'},
+      paths: {
+        '/test': {get: {operationId: 'testOp', responses: {}}},
+      },
+    };
+
+    const parsed = new OpenApiSpecParser().parse(spec);
+
+    expect(parsed.length).toBe(1);
+    expect(parsed[0].operation.operationId).toBe('testOp');
+    expect(parsed[0].name).toBe('test_op');
   });
 
   it('should resolve security schemes', () => {

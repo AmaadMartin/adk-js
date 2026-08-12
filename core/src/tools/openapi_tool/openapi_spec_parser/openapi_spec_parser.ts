@@ -5,6 +5,7 @@
  */
 
 import {OpenAPIV3} from 'openapi-types';
+import {snakeCase} from '../../../utils/case_utils.js';
 import {experimental} from '../../../utils/experimental.js';
 import {ApiParameter, OperationParser} from './operation_parser.js';
 
@@ -275,8 +276,7 @@ function collectOperations(
       operation.parameters = [...opParams, ...pathParams];
 
       if (!operation.operationId) {
-        // Generate operation ID if missing
-        operation.operationId = `${method}_${path.replace(/[^a-zA-Z0-9]/g, '_')}`;
+        operation.operationId = snakeCase(`${path}_${method}`);
       }
 
       const parser = new OperationParser(operation, {
