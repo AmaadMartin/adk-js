@@ -16,6 +16,41 @@ import {
 } from '../../src/artifacts/file_artifact_service.js';
 import {runArtifactServiceTests} from './artifact_service_test_utils.js';
 
+const ALIASED_KEY = {
+  appName: 'test-app',
+  userId: 'test-user',
+  sessionId: 'test-session',
+};
+
+/**
+ * Saves `Report.txt`, then rewrites the layout into the state a
+ * case-insensitive host presents: one directory reachable under either
+ * spelling, storing the key the artifact was saved under.
+ */
+async function saveAliasedArtifact(
+  service: FileArtifactService,
+  rootDir: string,
+): Promise<void> {
+  await service.saveArtifact({
+    ...ALIASED_KEY,
+    filename: 'Report.txt',
+    artifact: {text: 'first'},
+  });
+
+  const scopeRoot = getSessionArtifactsDir(
+    getUserRoot(rootDir, ALIASED_KEY.userId),
+    ALIASED_KEY.sessionId,
+  );
+  await fs.rename(
+    path.join(scopeRoot, 'Report.txt'),
+    path.join(scopeRoot, 'report.txt'),
+  );
+  await fs.rename(
+    path.join(scopeRoot, 'report.txt', 'versions', '0', 'Report.txt'),
+    path.join(scopeRoot, 'report.txt', 'versions', '0', 'report.txt'),
+  );
+}
+
 describe('FileArtifactService', () => {
   let rootDir: string;
 
@@ -78,51 +113,63 @@ describe('FileArtifactService', () => {
     });
   });
 
-  describe('case-insensitive filesystem aliasing', () => {
-    it('reports not found for a filename the artifact directory does not store', async () => {
+  describe('listArtifactKeys without stored metadata', () => {
+    it('recovers the key from the directory layout in each scope', async () => {
       rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-artifacts-test-'));
       const service = new FileArtifactService(rootDir);
-      const appName = 'test-app';
-      const userId = 'test-user';
-      const sessionId = 'test-session';
 
       try {
-        await service.saveArtifact({
-          appName,
-          userId,
-          sessionId,
-          filename: 'Report.txt',
-          artifact: {text: 'first'},
-        });
-
-        // Rewrite the layout into the state a case-insensitive host presents:
-        // one directory reachable under either spelling, storing the key it
-        // was saved under.
-        const scopeRoot = getSessionArtifactsDir(
-          getUserRoot(rootDir, userId),
-          sessionId,
+        const userRoot = getUserRoot(rootDir, ALIASED_KEY.userId);
+        const sessionRoot = getSessionArtifactsDir(
+          userRoot,
+          ALIASED_KEY.sessionId,
         );
-        await fs.rename(
-          path.join(scopeRoot, 'Report.txt'),
-          path.join(scopeRoot, 'report.txt'),
+        await fs.mkdir(
+          path.join(sessionRoot, 'nested', 'legacy.txt', 'versions', '0'),
+          {recursive: true},
         );
-        await fs.rename(
-          path.join(scopeRoot, 'report.txt', 'versions', '0', 'Report.txt'),
-          path.join(scopeRoot, 'report.txt', 'versions', '0', 'report.txt'),
+        await fs.mkdir(
+          path.join(userRoot, 'artifacts', 'legacy-user.txt', 'versions', '0'),
+          {recursive: true},
         );
 
-        const request = {appName, userId, sessionId, filename: 'report.txt'};
+        const keys = await service.listArtifactKeys(ALIASED_KEY);
+        expect(keys).toEqual(['nested/legacy.txt', 'user:legacy-user.txt']);
+      } finally {
+        await fs.rm(rootDir, {recursive: true, force: true});
+      }
+    });
+  });
+
+  describe('case-insensitive filesystem aliasing', () => {
+    const request = {...ALIASED_KEY, filename: 'report.txt'};
+
+    it('reports not found for reads addressed by the other spelling', async () => {
+      rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-artifacts-test-'));
+      const service = new FileArtifactService(rootDir);
+
+      try {
+        await saveAliasedArtifact(service, rootDir);
+
         expect(await service.loadArtifact(request)).toBeUndefined();
         expect(await service.listVersions(request)).toEqual([]);
         expect(await service.listArtifactVersions(request)).toEqual([]);
         expect(await service.getArtifactVersion(request)).toBeUndefined();
+      } finally {
+        await fs.rm(rootDir, {recursive: true, force: true});
+      }
+    });
+
+    it('keeps the stored artifact when deleting the other spelling', async () => {
+      rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-artifacts-test-'));
+      const service = new FileArtifactService(rootDir);
+
+      try {
+        await saveAliasedArtifact(service, rootDir);
 
         await service.deleteArtifact(request);
-        const keys = await service.listArtifactKeys({
-          appName,
-          userId,
-          sessionId,
-        });
+
+        const keys = await service.listArtifactKeys(ALIASED_KEY);
         expect(keys).toContain('Report.txt');
       } finally {
         await fs.rm(rootDir, {recursive: true, force: true});
