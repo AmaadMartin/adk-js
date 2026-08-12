@@ -131,11 +131,11 @@ describe('OperationParser', () => {
 
     const schema = new OperationParser(op).getJsonSchema();
 
-    expect(Object.keys(schema.properties as Record<string, unknown>)).toEqual([
-      'x_api_key',
-      'x_api_key_0',
-      'x_api_key_1',
-    ]);
+    expect(schema.properties).toEqual({
+      x_api_key: {},
+      x_api_key_0: {},
+      x_api_key_1: {},
+    });
   });
 
   it('should number each colliding name independently', () => {
