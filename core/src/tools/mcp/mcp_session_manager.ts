@@ -5,14 +5,8 @@
  */
 
 import type {Client} from '@modelcontextprotocol/sdk/client/index.js';
-import type {
-  StdioClientTransport,
-  StdioServerParameters,
-} from '@modelcontextprotocol/sdk/client/stdio.js';
-import type {
-  StreamableHTTPClientTransport,
-  StreamableHTTPClientTransportOptions,
-} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import type {StdioServerParameters} from '@modelcontextprotocol/sdk/client/stdio.js';
+import type {StreamableHTTPClientTransportOptions} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
 import {formatError} from '../../utils/error_utils.js';
 import {logger} from '../../utils/logger.js';
@@ -20,41 +14,6 @@ import {logger} from '../../utils/logger.js';
 /** Surfaces a background transport error that would otherwise be dropped. */
 function logTransportError(err: unknown): void {
   logger.error('MCP transport error: ' + formatError(err));
-}
-
-/** The MCP SDK constructors {@link MCPSessionManager} needs to open a session. */
-interface McpSdkModules {
-  Client: typeof Client;
-  StdioClientTransport: typeof StdioClientTransport;
-  StreamableHTTPClientTransport: typeof StreamableHTTPClientTransport;
-}
-
-let mcpSdkModules: Promise<McpSdkModules> | undefined;
-
-async function importMcpSdk(): Promise<McpSdkModules> {
-  const [client, stdio, streamableHttp] = await Promise.all([
-    import('@modelcontextprotocol/sdk/client/index.js'),
-    import('@modelcontextprotocol/sdk/client/stdio.js'),
-    import('@modelcontextprotocol/sdk/client/streamableHttp.js'),
-  ]);
-
-  return {
-    Client: client.Client,
-    StdioClientTransport: stdio.StdioClientTransport,
-    StreamableHTTPClientTransport: streamableHttp.StreamableHTTPClientTransport,
-  };
-}
-
-/**
- * Loads the MCP SDK on first use.
- *
- * Evaluating the client and its two transports costs roughly 0.3s, and a
- * process that imports `@google/adk` without ever opening an MCP session must
- * not pay it. The memo stores the promise, so concurrent callers share one
- * load.
- */
-function loadMcpSdk(): Promise<McpSdkModules> {
-  return (mcpSdkModules ??= importMcpSdk());
 }
 
 /**
@@ -122,8 +81,14 @@ export class MCPSessionManager {
   }
 
   async createSession(): Promise<Client> {
-    const {Client, StdioClientTransport, StreamableHTTPClientTransport} =
-      await loadMcpSdk();
+    // Deferred: a process that imports `@google/adk` without ever opening an
+    // MCP session must not pay to evaluate the client and its transports.
+    const [{Client}, {StdioClientTransport}, {StreamableHTTPClientTransport}] =
+      await Promise.all([
+        import('@modelcontextprotocol/sdk/client/index.js'),
+        import('@modelcontextprotocol/sdk/client/stdio.js'),
+        import('@modelcontextprotocol/sdk/client/streamableHttp.js'),
+      ]);
     const client = new Client({name: 'MCPClient', version: '1.0.0'});
 
     try {

@@ -30,10 +30,10 @@ interface StaticExternal {
 /**
  * Lists the packages the barrel loads at import time.
  *
- * `core/build.js` publishes the package with this same bundler and options, so
- * the traced graph is the graph the published build produces. Only
- * `import-statement` edges are followed: a `dynamic-import` edge is deferred
- * work, which is exactly what this guard protects.
+ * Traced with esbuild from the barrel with `packages: 'external'`, so every
+ * dependency stays an edge instead of being inlined. Only `import-statement`
+ * edges are followed: a `dynamic-import` edge is deferred work, which is
+ * exactly what this guard protects.
  *
  * A statement esbuild erased still appears in the metafile unless it is
  * written `import type`, so a type-only import of a package counts as static

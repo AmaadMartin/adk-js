@@ -12,7 +12,6 @@ import {
   MCPToolset,
   PluginManager,
 } from '@google/adk';
-import type {CallToolResult} from '@modelcontextprotocol/sdk/types.js';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {afterEach, describe, expect, it} from 'vitest';
@@ -54,12 +53,14 @@ describe('MCPToolset against a real MCP server', () => {
     const tools = await toolset.getTools();
     expect(tools.map((tool) => tool.name)).toEqual(['echo']);
 
-    const result = (await tools[0].runAsync({
+    const result = await tools[0].runAsync({
       args: {message: 'hello'},
       toolContext: createToolContext(),
-    })) as CallToolResult;
+    });
 
-    expect(result.content).toEqual([{type: 'text', text: 'echo: hello'}]);
+    expect(result).toMatchObject({
+      content: [{type: 'text', text: 'echo: hello'}],
+    });
   });
 
   it('reports a connection failure from a server that cannot start', async () => {
