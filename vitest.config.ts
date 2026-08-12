@@ -31,11 +31,18 @@ export default defineConfig({
       },
     },
     projects: [
+      // The unit projects load `./tests/unit_setup.ts`, which deletes the
+      // environment variables ADK reads so a test result does not depend on the
+      // developer's shell. `unstubEnvs` fires in `onBeforeTryTask`, before each
+      // test and before its `beforeEach`, so a stub installed in a `beforeEach`
+      // still applies. `restoreMocks` stays unset: under Vitest 3.2.6 it resets
+      // the implementation of every `vi.fn()` declared in a `vi.mock` factory.
       {
         test: {
           name: 'unit:core',
           environment: 'node',
-          setupFiles: ['./tests/test_setup.ts'],
+          setupFiles: ['./tests/test_setup.ts', './tests/unit_setup.ts'],
+          unstubEnvs: true,
           alias: {
             '@google/adk': path.resolve(__dirname, './core/src'),
             '@google/adk-integrations': path.resolve(
@@ -50,7 +57,8 @@ export default defineConfig({
         test: {
           name: 'unit:dev',
           environment: 'node',
-          setupFiles: ['./tests/test_setup.ts'],
+          setupFiles: ['./tests/test_setup.ts', './tests/unit_setup.ts'],
+          unstubEnvs: true,
           alias: {
             '@google/adk': path.resolve(__dirname, './core/src'),
             '@google/adk-integrations': path.resolve(
@@ -65,7 +73,8 @@ export default defineConfig({
         test: {
           name: 'unit:integrations',
           environment: 'node',
-          setupFiles: ['./tests/test_setup.ts'],
+          setupFiles: ['./tests/test_setup.ts', './tests/unit_setup.ts'],
+          unstubEnvs: true,
           alias: {
             '@google/adk': path.resolve(__dirname, './core/src'),
             '@google/adk-integrations': path.resolve(
