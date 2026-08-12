@@ -13,24 +13,17 @@ import {
   InvocationContext,
   PluginManager,
   Session,
+  createCompactedEvent,
+  createEvent,
   isScratchpadEvent,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
 class MockSummarizer implements BaseSummarizer {
   async summarize(events: Event[]): Promise<CompactedEvent> {
-    return {
+    return createCompactedEvent({
       id: 'mock-id',
-      invocationId: '',
       author: 'system',
-      actions: {
-        stateDelta: {},
-        artifactDelta: {},
-        requestedAuthConfigs: {},
-        requestedToolConfirmations: {},
-      },
-      timestamp: Date.now(),
-      isCompacted: true,
       startTime: events[0].timestamp,
       endTime: events[events.length - 1].timestamp,
       compactedContent: `Mock summary of ${events.length} events`,
@@ -38,7 +31,7 @@ class MockSummarizer implements BaseSummarizer {
         role: 'model',
         parts: [{text: `Mock summary of ${events.length} events`}],
       },
-    };
+    });
   }
 }
 
@@ -54,11 +47,11 @@ function createMockEvent(
   isFuncCall?: boolean,
   isFuncResp?: boolean,
 ): Event {
-  const event: Event = {
+  const event = createEvent({
     id,
     timestamp: Date.now(),
     content: {parts: []},
-  } as unknown as Event;
+  });
   if (tokenCount !== undefined) {
     event.usageMetadata = {promptTokenCount: tokenCount};
   }
@@ -78,15 +71,14 @@ function createMockScratchpadEvent(
   tokenCount?: number,
   contentStr?: string,
 ): CompactedEvent {
-  return {
+  return createCompactedEvent({
     ...createMockEvent(id, tokenCount),
-    isCompacted: true,
     isScratchpad: true,
     author: 'system',
     startTime: Date.now() - 10000,
     endTime: Date.now() - 5000,
     compactedContent: contentStr || 'Existing scratchpad content',
-  };
+  });
 }
 
 function createMockInvocationContext(events: Event[]): InvocationContext {
