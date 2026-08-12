@@ -213,13 +213,6 @@ export abstract class BaseSessionService {
 
 /**
  * Removes temporary state delta keys from the event.
- *
- * The null prototype below covers the map this function builds and a service
- * stores. It is not a guarantee about every copy of a state delta: a session
- * service may hand a caller a plain-prototype copy, and that is fine, because
- * every reader iterates `Object.entries` rather than looking a delta up by an
- * untrusted key. Unlike session state, which `mergeStates` keeps
- * null-prototype for exactly that reason.
  */
 export function trimTempDeltaState(event: Event): Event {
   if (!event.actions || !event.actions.stateDelta) {
@@ -251,9 +244,6 @@ export function trimTempDeltaState(event: Event): Event {
  * dropped and the new state object is re-parented onto the attacker's object.
  * `State.get`/`State.has` use the `in` operator, so every key on that object
  * would then read back as session state.
- *
- * `mergeStates` maintains this across the `cloneDeep` on the read path, so the
- * state a caller reads back keeps the null prototype too.
  */
 export function trimTempState(
   state: Record<string, unknown>,
@@ -270,10 +260,7 @@ export function trimTempState(
 /**
  * Merges app state, user state, and session state.
  *
- * The result is a null-prototype map, so the guarantee `trimTempState` makes
- * about the stored state also holds for the state a caller reads back. Only
- * this top-level map is covered; nested values stay as `cloneDeep` produced
- * them, because no caller looks them up by an untrusted key.
+ * The top-level result is a null-prototype map; nested values are unchanged.
  *
  * @param appState The application state.
  * @param userState The user state.
@@ -285,11 +272,8 @@ export function mergeStates(
   userState: Record<string, unknown> = {},
   sessionState: Record<string, unknown> = {},
 ) {
-  // `cloneDeep` does not preserve a null prototype: lodash's `initCloneObject`
-  // falls back to a bare `{}` whenever `constructor` is not a function, which
-  // is exactly the null-prototype case. `Object.assign` cannot reach an
-  // inherited `__proto__` setter on a null-prototype target, so an own
-  // `__proto__` key survives as an own data property.
+  // `cloneDeep` drops the null prototype: lodash's `initCloneObject` falls
+  // back to a bare `{}` when `constructor` is not a function.
   const merged: Record<string, unknown> = Object.assign(
     Object.create(null),
     cloneDeep(sessionState),

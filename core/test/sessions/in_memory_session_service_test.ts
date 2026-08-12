@@ -1011,11 +1011,7 @@ describe('InMemorySessionService', () => {
     });
 
     it('leaves the returned stateDelta as an ordinary object', async () => {
-      // The null-prototype guarantee is scoped to the state map, because that
-      // is the map read by caller-controlled key. A state delta handed back to
-      // a caller stays plain: every reader iterates `Object.entries`, and
-      // callers compare these events with prototype-sensitive deep equality.
-      // Widening the guarantee here is a deliberate decision, not a cleanup.
+      // Deliberate: only the state map is null-prototype, not the delta.
       const session = await service.createSession({
         appName: 'app1',
         userId: 'u1',
