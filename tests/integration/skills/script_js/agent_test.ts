@@ -93,16 +93,21 @@ describe('Agent with skills that generates JS script and runs it locally', () =>
   );
 
   afterAll(async () => {
-    // delete generated files
-    await fs
-      .rm(`${PROJECT_PATH}/ephemeral_entanglement.md`, {force: true})
-      .catch(() => {});
-    await fs.rm(`${PROJECT_PATH}/index.html`, {force: true}).catch(() => {});
-    await fs.rm(`${PROJECT_PATH}/sketch.js`, {force: true}).catch(() => {});
-
-    await fs
-      .rm(`${PROJECT_PATH}/node_modules`, {recursive: true, force: true})
-      .catch(() => {});
-    await fs.unlink(`${PROJECT_PATH}/package-lock.json`).catch(() => {});
+    // Reported, not thrown: a dirty fixture must be visible, but a failed
+    // teardown must not turn a green suite red. Each removal is independent so
+    // an early failure cannot skip the rest.
+    for (const target of [
+      'ephemeral_entanglement.md',
+      'index.html',
+      'sketch.js',
+      'node_modules',
+      'package-lock.json',
+    ]) {
+      await fs
+        .rm(`${PROJECT_PATH}/${target}`, {recursive: true, force: true})
+        .catch((error: unknown) =>
+          console.error(`Cleanup failed for ${PROJECT_PATH}/${target}:`, error),
+        );
+    }
   });
 });
