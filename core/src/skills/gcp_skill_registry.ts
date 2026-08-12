@@ -11,20 +11,14 @@ import {Frontmatter, Skill} from './skill.js';
 import {SkillRegistry} from './skill_registry.js';
 
 /**
- * Ceiling on a skill archive. Matches the limit adk-python puts on a skill
- * archive's contents in src/google/adk/skills/_utils.py; a stored member costs
- * the same compressed as uncompressed, so an archive above this can never fit
- * that ceiling once expanded.
+ * Ceiling on the base64-encoded skill archive: the encoded size of the 32 MiB
+ * uncompressed ceiling adk-python applies in src/google/adk/skills/_utils.py
+ * (`_MAX_ZIP_UNCOMPRESSED_BYTES`). Checked on the encoded field so an oversized
+ * payload is rejected before the decoded buffer is allocated; base64 padding or
+ * line breaks only make this a more conservative bound.
  */
-const MAX_ZIP_BYTES = 32 * 1024 * 1024;
-
-/**
- * The same ceiling expressed in base64 characters, since base64 carries three
- * bytes per four characters. Checked against the encoded field so an oversized
- * payload is rejected without allocating the decoded buffer. Padding or line
- * breaks only make this a more conservative estimate of the decoded size.
- */
-export const MAX_ENCODED_FILESYSTEM_LENGTH = Math.ceil(MAX_ZIP_BYTES / 3) * 4;
+export const MAX_ENCODED_FILESYSTEM_LENGTH =
+  Math.ceil((32 * 1024 * 1024) / 3) * 4;
 
 export interface GCPSkillRegistryOptions {
   projectId?: string;
