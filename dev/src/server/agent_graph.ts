@@ -17,6 +17,10 @@ import {
 } from '@google/adk';
 import {Digraph, Edge, Node, RootGraph, Subgraph, toDot} from 'ts-graphviz';
 
+import {AdkLogger} from '../utils/logger.js';
+
+const logger = new AdkLogger({label: 'AgentGraph', colorize: {all: true}});
+
 const DARK_GREEN = '#0F5223';
 const LIGHT_GREEN = '#69CB87';
 const LIGHT_GRAY = '#cccccc';
@@ -238,7 +242,7 @@ function getNodeName(toolOrAgent: BaseAgent | BaseTool): string {
 }
 
 // TODO: Support BaseRetrievalTool
-function getNodeCaption(toolOrAgent: BaseAgent | BaseTool): string {
+export function getNodeCaption(toolOrAgent: BaseAgent | BaseTool): string {
   if (isBaseAgent(toolOrAgent)) {
     return `🤖 ${toolOrAgent.name}`;
   }
@@ -255,13 +259,13 @@ function getNodeCaption(toolOrAgent: BaseAgent | BaseTool): string {
     return `🔧 ${toolOrAgent.name}`;
   }
 
-  console.warn(`Unsupported tool type: ${typeof toolOrAgent}`);
+  logger.warn(`Unsupported tool type: ${typeof toolOrAgent}`);
 
   return `❓ Unsupported tool type: ${typeof toolOrAgent}`;
 }
 
 // TODO: Support BaseRetrievalTool
-function getNodeShape(toolOrAgent: BaseAgent | BaseTool): string {
+export function getNodeShape(toolOrAgent: BaseAgent | BaseTool): string {
   if (isBaseAgent(toolOrAgent)) {
     return 'ellipse';
   }
@@ -274,7 +278,7 @@ function getNodeShape(toolOrAgent: BaseAgent | BaseTool): string {
     return 'box';
   }
 
-  console.warn(`Unsupported tool type: ${typeof toolOrAgent}`);
+  logger.warn(`Unsupported tool type: ${typeof toolOrAgent}`);
 
   return 'cylinder';
 }
