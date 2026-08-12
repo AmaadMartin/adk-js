@@ -18,6 +18,7 @@ import {
 import {mergeEventActions} from '../events/event_actions.js';
 import {BaseTool} from '../tools/base_tool.js';
 import {ToolConfirmation} from '../tools/tool_confirmation.js';
+import {rendersAsEmptyJsonObject} from '../utils/json_utils.js';
 import {logger} from '../utils/logger.js';
 import {Context} from './context.js';
 
@@ -293,6 +294,30 @@ function normalizeCallbackResponse(
 }
 
 /**
+ * Warns when a tool response will reach the model as an empty object.
+ *
+ * `FunctionResponse.response` is serialized as JSON, so a `Map`, a `Set`, a
+ * `RegExp` or an `Error` arrives empty and the tool's output is lost with no
+ * error anywhere. The exotic value may be the whole response or sit under one
+ * of its keys, so both are checked.
+ */
+function warnOnEmptyToolResponse(
+  toolName: string,
+  response: Record<string, unknown> | undefined,
+): void {
+  if (
+    rendersAsEmptyJsonObject(response) ||
+    Object.values(response ?? {}).some(rendersAsEmptyJsonObject)
+  ) {
+    logger.warn(
+      `Tool ${toolName} returned a value with no JSON representation ` +
+        `(for example a Map, Set, RegExp or Error). The model will ` +
+        `receive an empty object. Return a plain object or array instead.`,
+    );
+  }
+}
+
+/**
  * The underlying implementation of handleFunctionCalls, but takes a list of
  * function calls instead of an event.
  * This is also used by llm_agent execution flow in preprocessing.
@@ -450,6 +475,8 @@ export async function handleFunctionCallList({
     } else {
       functionResponse = normalizeCallbackResponse(functionResponse);
     }
+
+    warnOnEmptyToolResponse(tool.name, functionResponse);
 
     // Builds the function response event.
     const functionResponseEvent = createEvent({
