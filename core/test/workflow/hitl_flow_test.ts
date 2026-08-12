@@ -5,13 +5,14 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {Event} from '../../src/events/event.js';
+import {createEvent, Event} from '../../src/events/event.js';
 import {FunctionNode} from '../../src/workflow/nodes/function_node.js';
 import {RequestInput} from '../../src/workflow/request_input.js';
 import {
   hasRequestInputFunctionCall,
   REQUEST_INPUT_FUNCTION_CALL_NAME,
 } from '../../src/workflow/utils/hitl_utils.js';
+import {reconstructNodeStates} from '../../src/workflow/utils/rehydration_utils.js';
 import {Workflow} from '../../src/workflow/workflow.js';
 import {driveWorkflow} from './test_helpers.js';
 
@@ -140,5 +141,58 @@ describe('Phase 5 — HITL (pause / resume)', () => {
 
     const resumed = await drive(wf, undefined, {name: 'Ada'});
     expect(resumed.output).toBe('hello Ada');
+  });
+
+  it('rejects a wrongly-shaped reply to a session adk-python paused', () => {
+    const schema = {
+      type: 'object',
+      properties: {approved: {type: 'boolean'}},
+      required: ['approved'],
+    };
+    const events = [
+      createEvent({
+        author: 'gate',
+        nodeInfo: {path: 'wf.gate'},
+        content: {
+          role: 'model',
+          parts: [
+            {
+              functionCall: {
+                name: REQUEST_INPUT_FUNCTION_CALL_NAME,
+                id: 'gate-1',
+                // The envelope `create_request_input_event` writes: camelCase
+                // everywhere except the schema key.
+                args: {
+                  interruptId: 'gate-1',
+                  payload: null,
+                  message: 'Approve?',
+                  response_schema: schema,
+                },
+              },
+            },
+          ],
+        },
+        longRunningToolIds: ['gate-1'],
+      }),
+      createEvent({
+        author: 'user',
+        content: {
+          role: 'user',
+          parts: [
+            {
+              functionResponse: {
+                id: 'gate-1',
+                name: REQUEST_INPUT_FUNCTION_CALL_NAME,
+                response: {response: 'yes'},
+              },
+            },
+          ],
+        },
+      }),
+    ];
+
+    expect(() => reconstructNodeStates(events)).toThrow(
+      /does not match the responseSchema it declared/,
+    );
   });
 });

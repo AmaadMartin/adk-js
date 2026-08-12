@@ -53,8 +53,9 @@ export interface RequestInputParams {
  *   This is what the interactive CLI and the dev UI send.
  * - **A `functionResponse`** named `adk_request_input`, carrying the interrupt
  *   id. Wrap a bare value as `{result: <value>}` — that envelope is unwrapped
- *   for you. Any other object is delivered to the node unchanged, so it must
- *   already match {@link RequestInputParams.responseSchema} when one is set.
+ *   for you, and a wrapped string that parses as JSON arrives parsed. Any
+ *   other object is delivered to the node unchanged, so it must already match
+ *   {@link RequestInputParams.responseSchema} when one is set.
  *
  * Ported from `google/adk-python` `events/request_input.py`.
  */

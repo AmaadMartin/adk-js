@@ -426,6 +426,30 @@ describe('cli_run', () => {
       expect(output).toContain('Type your reply at the next prompt');
     });
 
+    it('renders the schema of a pause adk-python wrote', async () => {
+      const output = await runOneTurn({
+        author: 'step1',
+        content: {
+          parts: [
+            {
+              functionCall: {
+                name: 'adk_request_input',
+                id: 'interrupt-1',
+                args: {
+                  interruptId: 'interrupt-1',
+                  message: 'Enter a number:',
+                  payload: null,
+                  response_schema: {type: 'object'},
+                },
+              },
+            },
+          ],
+        },
+      });
+
+      expect(output).toContain('Expected response: {"type":"object"}');
+    });
+
     it('renders a credential pause with its auth scheme', async () => {
       const output = await runOneTurn({
         author: 'fetch_weather',

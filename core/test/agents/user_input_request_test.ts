@@ -77,6 +77,25 @@ describe('getUserInputRequests', () => {
     });
   });
 
+  it('reads the response_schema an adk-python interrupt declares', () => {
+    const [request] = getUserInputRequests(
+      requestInputEvent('i1', {response_schema: {type: 'object'}}),
+    );
+
+    expect(request.responseSchema).toEqual({type: 'object'});
+  });
+
+  it('prefers response_schema when an interrupt carries both keys', () => {
+    const [request] = getUserInputRequests(
+      requestInputEvent('i1', {
+        response_schema: {type: 'object'},
+        responseSchema: {type: 'string'},
+      }),
+    );
+
+    expect(request.responseSchema).toEqual({type: 'object'});
+  });
+
   it('summarizes a request for a credential', () => {
     const authConfig = {
       authScheme: {type: 'apiKey', in: 'header', name: 'X-Api-Key'},
