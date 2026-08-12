@@ -12,6 +12,7 @@ import {
   BaseSessionService,
   createEvent,
   createEventActions,
+  createSession,
   Runner,
   RunnerConfig,
   Session,
@@ -31,6 +32,22 @@ vi.mock('../../src/runner/runner.js', async (importOriginal) => {
     })),
   };
 });
+
+/**
+ * Points the mocked Runner class at `runAsync`.
+ *
+ * The module-level `vi.mock` above replaces Runner with a structurally partial
+ * double — the executor only reads `appName`, `sessionService` and `runAsync`
+ * from it, not `agent`, `pluginManager` or the runner brand symbol — so the
+ * cast to the full class is unavoidable and is confined to this one site.
+ */
+function stubRunner(runAsync: Runner['runAsync']): void {
+  vi.mocked(Runner).mockImplementation(((config: RunnerConfig) => ({
+    appName: config.appName,
+    sessionService: config.sessionService,
+    runAsync,
+  })) as unknown as () => Runner);
+}
 
 describe('A2AAgentExecutor', () => {
   let mockSessionService: Mocked<BaseSessionService>;
@@ -109,13 +126,7 @@ describe('A2AAgentExecutor', () => {
       }
     }
 
-    vi.mocked(Runner).mockImplementation(((config: RunnerConfig) => {
-      return {
-        appName: config?.appName,
-        sessionService: config?.sessionService,
-        runAsync: mockRunAsync,
-      } as unknown as Runner;
-    }) as unknown as () => Runner);
+    stubRunner(mockRunAsync);
 
     let beforeExecutedCalled = false;
     let afterEventCount = 0;
@@ -162,6 +173,39 @@ describe('A2AAgentExecutor', () => {
         kind: 'status-update',
       }),
     );
+  });
+
+  it('publishes a completed final status when the run only produces artifact updates', async () => {
+    mockSessionService.getSession.mockResolvedValue(
+      createSession({
+        id: 'session-id',
+        userId: 'test-user',
+        appName: 'test-app',
+      }),
+    );
+
+    async function* mockRunAsync() {
+      yield createEvent({
+        author: 'model',
+        content: {role: 'model', parts: [{text: 'the answer'}]},
+        partial: false,
+        actions: createEventActions(),
+      });
+    }
+
+    stubRunner(mockRunAsync);
+
+    const executor = new A2AAgentExecutor({
+      runner: {appName: 'test-app', sessionService: mockSessionService},
+    });
+
+    await executor.execute(createRequestContext(), mockEventBus);
+
+    const calls = mockEventBus.publish.mock.calls;
+    const finalEvent = calls[calls.length - 1][0] as TaskStatusUpdateEvent;
+    expect(finalEvent.kind).toBe('status-update');
+    expect(finalEvent.status.state).toBe('completed');
+    expect(finalEvent.final).toBe(true);
   });
 
   it('should return early with input required event if task needs input', async () => {
@@ -232,13 +276,7 @@ describe('A2AAgentExecutor', () => {
       throw new Error('LLM failed');
     }
 
-    vi.mocked(Runner).mockImplementation(((config: RunnerConfig) => {
-      return {
-        appName: config?.appName,
-        sessionService: config?.sessionService,
-        runAsync: mockRunAsyncWithError,
-      } as unknown as Runner;
-    }) as unknown as () => Runner);
+    stubRunner(mockRunAsyncWithError);
 
     const executor = new A2AAgentExecutor({
       runner: {
