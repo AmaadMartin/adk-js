@@ -4,36 +4,71 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Sessions} from '@google-cloud/vertexai/build/src/genai/sessions.js';
+import {Client} from '@google-cloud/vertexai';
 import {VertexAiSessionService} from '@google/adk';
-import {
-  ApiClient,
-  Auth,
-  NodeAuth,
-  NodeDownloader,
-  NodeUploader,
-} from '@google/genai/vertex_internal';
+import fs from 'node:fs';
 import http from 'node:http';
 import {AddressInfo} from 'node:net';
+import os from 'node:os';
+import path from 'node:path';
 import {json} from 'node:stream/consumers';
-import {afterAll, beforeAll, beforeEach, describe, expect, it} from 'vitest';
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
 
 const AGENT_ENGINE_ID = '12345';
+const PROJECT = 'test-project';
+const LOCATION = 'us-central1';
 
 /**
- * Builds the Agent Engine `Sessions` client from an `ApiClient`.
+ * Answers an Application Default Credentials metadata lookup with a fake token.
  *
- * `@google-cloud/vertexai` bundles its own nested copy of `@google/genai`
- * (1.52.0) while the repo root resolves `@google/genai` to 2.9.0, so the
- * `ApiClient` this test constructs is a structurally distinct class (its
- * private fields make the two nominally incompatible) from the one `Sessions`
- * declares. The instances are interchangeable at runtime -- the mismatch is a
- * duplicate-dependency artifact, not a real API difference -- so the cast is
- * confined to this one boundary.
+ * Returns true when the request was a metadata lookup and the response is now
+ * complete, so the caller returns instead of running its own handler.
  */
-function createSessionsClient(apiClient: ApiClient): Sessions {
-  return new Sessions(
-    apiClient as unknown as ConstructorParameters<typeof Sessions>[0],
+function serveMetadataToken(
+  request: http.IncomingMessage,
+  response: http.ServerResponse,
+): boolean {
+  if (!request.url?.startsWith('/computeMetadata/')) return false;
+  response.writeHead(200, {
+    'content-type': 'application/json',
+    'metadata-flavor': 'Google',
+  });
+  response.end(
+    request.url.includes('/token')
+      ? JSON.stringify({
+          access_token: 'not-a-real-token',
+          expires_in: 3600,
+          token_type: 'Bearer',
+        })
+      : JSON.stringify({}),
+  );
+  return true;
+}
+
+/**
+ * Points Application Default Credentials at the loopback server on `port`.
+ *
+ * `GoogleAuth` resolves credentials in the order
+ * `GOOGLE_APPLICATION_CREDENTIALS`, gcloud well-known file, GCE metadata.
+ * Clearing the first two forces the third on every machine, so a developer who
+ * is logged in with gcloud takes the same code path as CI instead of fetching a
+ * live token. `CLOUDSDK_CONFIG` relocates the well-known file on Linux, macOS
+ * and Windows, so one variable covers the whole matrix.
+ */
+function pointAdcAt(port: number): void {
+  vi.stubEnv('GCE_METADATA_HOST', `127.0.0.1:${port}`);
+  vi.stubEnv('GOOGLE_APPLICATION_CREDENTIALS', undefined);
+  vi.stubEnv(
+    'CLOUDSDK_CONFIG',
+    fs.mkdtempSync(path.join(os.tmpdir(), 'adk-no-adc-')),
   );
 }
 
@@ -47,37 +82,42 @@ function createSessionsClient(apiClient: ApiClient): Sessions {
  * The unit tests construct an `ApiError` directly, so they pin its shape but
  * not the translation of an HTTP response into it -- and misreading that
  * translation is what caused the bug this covers. Authentication is out of
- * scope: the client is wired with an API key so no credentials are needed.
+ * scope: the same loopback server answers the Application Default Credentials
+ * metadata lookup, so no real credentials are needed.
  */
 describe('VertexAiSessionService over the real Sessions HTTP client', () => {
   let server: http.Server;
   let service: VertexAiSessionService;
+  const requested: string[] = [];
 
   beforeAll(async () => {
-    server = http.createServer((_req, res) => {
-      res.writeHead(404, {'Content-Type': 'application/json'});
-      res.end(JSON.stringify({error: {code: 404, message: 'not found'}}));
+    server = http.createServer((request, response) => {
+      if (serveMetadataToken(request, response)) return;
+      requested.push(request.url!);
+      response.writeHead(404, {'Content-Type': 'application/json'});
+      response.end(JSON.stringify({error: {code: 404, message: 'not found'}}));
     });
     await new Promise<void>((resolve) =>
       server.listen(0, '127.0.0.1', resolve),
     );
 
     const {port} = server.address() as AddressInfo;
-    const apiClient = new ApiClient({
-      auth: new NodeAuth({apiKey: 'not-a-real-key'}),
-      uploader: new NodeUploader(),
-      downloader: new NodeDownloader(),
-      vertexai: true,
-      apiKey: 'not-a-real-key',
-      httpOptions: {baseUrl: `http://127.0.0.1:${port}`},
+    pointAdcAt(port);
+    const client = new Client({
+      project: PROJECT,
+      location: LOCATION,
+      apiEndpoint: `http://127.0.0.1:${port}`,
     });
     service = new VertexAiSessionService({
       agentEngineId: AGENT_ENGINE_ID,
-      sessions: createSessionsClient(apiClient),
+      sessions: client.agentEnginesInternal.sessions,
     });
   });
 
-  afterAll(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  afterAll(() => {
+    vi.unstubAllEnvs();
+    return new Promise<void>((resolve) => server.close(() => resolve()));
+  });
 
   it('resolves undefined when the backend reports the session is gone', async () => {
     const session = await service.getSession({
@@ -87,13 +127,14 @@ describe('VertexAiSessionService over the real Sessions HTTP client', () => {
     });
 
     expect(session).toBeUndefined();
+    // An auth failure also reports 404, which getSession maps to undefined, so
+    // this pins that the request reached the Sessions endpoint. getSession
+    // lists events concurrently, and that second request races the 404 here.
+    expect(requested).toContain(
+      `/v1beta1/projects/${PROJECT}/locations/${LOCATION}/reasoningEngines/${AGENT_ENGINE_ID}/sessions/missing-session`,
+    );
   });
 });
-
-/** A loopback server has no identity to assert, so requests go out unsigned. */
-const unauthenticated: Auth = {
-  async addAuthHeaders(): Promise<void> {},
-};
 
 /**
  * Drives createSession through the real Agent Engine Sessions client against a
@@ -108,6 +149,7 @@ describe('VertexAiSessionService session expiration over the wire', () => {
 
   beforeAll(async () => {
     server = http.createServer(async (request, response) => {
+      if (serveMetadataToken(request, response)) return;
       bodies.push(await json(request));
       response.writeHead(200, {'content-type': 'application/json'});
       response.end(
@@ -125,24 +167,23 @@ describe('VertexAiSessionService session expiration over the wire', () => {
       server.listen(0, '127.0.0.1', resolve),
     );
 
-    const apiClient = new ApiClient({
-      auth: unauthenticated,
-      uploader: new NodeUploader(),
-      downloader: new NodeDownloader(),
-      project: 'test-project',
-      location: 'us-central1',
-      vertexai: true,
-      httpOptions: {
-        baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
-      },
+    const {port} = server.address() as AddressInfo;
+    pointAdcAt(port);
+    const client = new Client({
+      project: PROJECT,
+      location: LOCATION,
+      apiEndpoint: `http://127.0.0.1:${port}`,
     });
     service = new VertexAiSessionService({
       agentEngineId: AGENT_ENGINE_ID,
-      sessions: createSessionsClient(apiClient),
+      sessions: client.agentEnginesInternal.sessions,
     });
   });
 
-  afterAll(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  afterAll(() => {
+    vi.unstubAllEnvs();
+    return new Promise<void>((resolve) => server.close(() => resolve()));
+  });
 
   beforeEach(() => {
     bodies = [];
