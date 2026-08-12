@@ -371,9 +371,9 @@ export class AgentFile {
     if (this.disposed) {
       return;
     }
+    this.disposed = true;
 
     if (this.cleanupFilePath) {
-      this.disposed = true;
       await fsPromises.unlink(this.cleanupFilePath);
       if (this.cleanupDirPath) {
         await removeFolder(this.cleanupDirPath);
