@@ -19,10 +19,10 @@ import {
 import {
   Event as AdkEvent,
   createEvent,
+  createSession,
   InvocationContext,
   RemoteA2AAgent,
   RemoteA2AAgentConfig,
-  Session,
 } from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 
@@ -76,7 +76,7 @@ describe('A2ARemoteAgent', () => {
   const createMockContext = (overrides = {}): InvocationContext => {
     return {
       invocationId: 'test-invocation',
-      session: {
+      session: createSession({
         id: 'test-session',
         userId: 'test-user',
         appName: 'test-app',
@@ -86,8 +86,7 @@ describe('A2ARemoteAgent', () => {
             content: {role: 'user', parts: [{text: 'hello'}]},
           }),
         ],
-        state: {},
-      } as unknown as Session,
+      }),
       ...overrides,
     } as unknown as InvocationContext;
   };
