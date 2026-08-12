@@ -73,7 +73,7 @@ Answering from your own client rather than the CLI, over `/run`, there are two
 shapes and the difference matters:
 
 ```jsonc
-// Plain text: routed to every pending interrupt, never schema-checked.
+// Plain text: routed to every pending interrupt, held to a scalar schema only.
 {"role": "user", "parts": [{"text": "21"}]}
 
 // Structured: name the interrupt, and wrap a bare value as {result: <value>}.
@@ -84,10 +84,14 @@ shapes and the difference matters:
 
 `{result: …}` is the only envelope that gets unwrapped. Any other object is
 handed to the next node exactly as sent — which is what makes a structured
-reply carrying an object (`{userResponse: …}` in `payload_and_schema`) work. If
-the interrupt declared a `responseSchema`, a structured reply is checked
-against it and a mismatch fails loudly; if it declared none, whatever you send
-is what the next node receives.
+reply carrying an object (`{userResponse: …}` in `payload_and_schema`) work.
+
+A `responseSchema` on the interrupt is enforced on both reply shapes, and a
+mismatch fails loudly. A structured reply is checked against the whole schema.
+A plain-text reply is held to a **scalar** schema (`string`, `number`,
+`integer`, `boolean`), and numeric or boolean text is coerced to it — so `"21"`
+answers `z.number()` as the number `21`. An object or array schema is left to a
+node after the pause, and no schema means no check.
 
 ## Samples
 
