@@ -122,6 +122,59 @@ describe('buildCodeExecutionResultPart', () => {
     expect(part.codeExecutionResult!.outcome).toBe(Outcome.OUTCOME_FAILED);
     expect(part.codeExecutionResult!.output).toBe('error occurred');
   });
+
+  it('omits the saved artifacts section when there are no output files', () => {
+    const part = buildCodeExecutionResultPart({
+      stdout: '42',
+      stderr: '',
+      outputFiles: [],
+    });
+    expect(part.codeExecutionResult!.outcome).toBe(Outcome.OUTCOME_OK);
+    expect(part.text).toBe('Code execution result:\n42\n');
+    expect(part.text).not.toContain('Saved artifacts');
+  });
+
+  it('reports a result header for a silent successful run', () => {
+    const part = buildCodeExecutionResultPart({
+      stdout: '',
+      stderr: '',
+      outputFiles: [],
+    });
+    expect(part.codeExecutionResult!.outcome).toBe(Outcome.OUTCOME_OK);
+    expect(part.text).toBe('Code execution result:\n\n');
+  });
+
+  it('omits the result header when there is no stdout but there are files', () => {
+    const part = buildCodeExecutionResultPart({
+      stdout: '',
+      stderr: '',
+      outputFiles: [
+        {name: 'a.csv', content: '', mimeType: 'text/csv'},
+        {name: 'b.png', content: '', mimeType: 'image/png'},
+      ],
+    });
+    expect(part.text).toBe('Saved artifacts:\n`a.csv`,`b.png`');
+  });
+
+  it('pins the exact text when stdout and output files are both present', () => {
+    const part = buildCodeExecutionResultPart({
+      stdout: 'done',
+      stderr: '',
+      outputFiles: [{name: 'a.csv', content: '', mimeType: 'text/csv'}],
+    });
+    expect(part.text).toBe(
+      'Code execution result:\ndone\n\n\nSaved artifacts:\n`a.csv`',
+    );
+  });
+
+  it('keeps a file name containing a comma unambiguous', () => {
+    const part = buildCodeExecutionResultPart({
+      stdout: '',
+      stderr: '',
+      outputFiles: [{name: 'a,b.csv', content: '', mimeType: 'text/csv'}],
+    });
+    expect(part.text).toBe('Saved artifacts:\n`a,b.csv`');
+  });
 });
 
 // ---------------------------------------------------------------------------
