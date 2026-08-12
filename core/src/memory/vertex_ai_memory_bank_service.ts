@@ -330,7 +330,7 @@ export class VertexAiMemoryBankService implements BaseMemoryService {
         config: config,
       };
       const operation = await this.memories.createInternal(params);
-      logger.info('Create memory response received.');
+      logger.debug('Create memory response received.');
       logger.debug(`Create memory response: ${JSON.stringify(operation)}`);
     }
   }
@@ -362,7 +362,7 @@ export class VertexAiMemoryBankService implements BaseMemoryService {
         config: config,
       };
       const operation = await this.memories.generateInternal(params);
-      logger.info('Generate direct memory response received.');
+      logger.debug('Generate direct memory response received.');
       logger.debug(
         `Generate direct memory response: ${JSON.stringify(operation)}`,
       );
