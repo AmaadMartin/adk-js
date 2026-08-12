@@ -155,16 +155,16 @@ export function resolvePlainTextResponse(
   text: string,
   jsonSchema: unknown,
 ): unknown {
-  const validator = compileJsonSchema(jsonSchema);
-  if (!validator) {
-    return text;
-  }
-  // Offering the raw text first is what keeps '42' a string for z.string().
-  if (validator.safeParse(text).success) {
-    return text;
-  }
   const scalarType = scalarSchemaType(jsonSchema);
-  if (scalarType === undefined) {
+  const validator = compileJsonSchema(jsonSchema);
+  // Nothing to enforce: no compilable contract, the text already satisfies it
+  // (which is what keeps '42' a string for `z.string()`), or the contract is
+  // wider than a scalar.
+  if (
+    !validator ||
+    validator.safeParse(text).success ||
+    scalarType === undefined
+  ) {
     return text;
   }
   const coerced = coerceScalar(text, scalarType);

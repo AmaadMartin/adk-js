@@ -5,10 +5,12 @@
  */
 
 import {describe, expect, it} from 'vitest';
+import {z} from 'zod';
 import {InvocationContext} from '../../src/agents/invocation_context.js';
 import {Event} from '../../src/events/event.js';
 import {PluginManager} from '../../src/plugins/plugin_manager.js';
 import {createSession} from '../../src/sessions/session.js';
+import type {SchemaLike} from '../../src/utils/schema.js';
 import {isBaseNode} from '../../src/workflow/base_node.js';
 import {node} from '../../src/workflow/node.js';
 import {NodeContext} from '../../src/workflow/node_context.js';
@@ -18,9 +20,9 @@ import {Workflow} from '../../src/workflow/workflow.js';
 import {WorkflowAgent} from '../../src/workflow/workflow_agent.js';
 
 /** A session event standing in for a node that raised an unresolved interrupt. */
-function pendingInterruptEvent(id: string): Event {
+function pendingInterruptEvent(id: string, responseSchema?: SchemaLike): Event {
   const event = createRequestInputEvent(
-    new RequestInput({interruptId: id, message: '?'}),
+    new RequestInput({interruptId: id, message: '?', responseSchema}),
   );
   event.author = id;
   // The engine stamps the emitting node's path onto every node event; carry it
@@ -38,6 +40,7 @@ function pendingInterruptEvent(id: string): Event {
 async function resumeInputsFor(
   pendingIds: string[],
   replyText: string,
+  schemas: Record<string, SchemaLike> = {},
 ): Promise<Record<string, unknown>> {
   let captured: Record<string, unknown> = {};
   const wf = new Workflow({
@@ -56,7 +59,7 @@ async function resumeInputsFor(
     lastUpdateTime: Date.now(),
   });
   for (const id of pendingIds) {
-    session.events.push(pendingInterruptEvent(id));
+    session.events.push(pendingInterruptEvent(id, schemas[id]));
   }
 
   const ic = new InvocationContext({
@@ -83,6 +86,33 @@ describe('WorkflowAgent — plain-text resume', () => {
     // user never gave it; the ambiguous case is dropped (structured function
     // responses are required to address a specific interrupt).
     expect(await resumeInputsFor(['first', 'second'], 'yes')).toEqual({});
+  });
+});
+
+describe('WorkflowAgent — plain-text resume held to the declared schema', () => {
+  it('delivers a number to a node that asked for one', async () => {
+    expect(await resumeInputsFor(['gate'], '42', {gate: z.number()})).toEqual({
+      gate: 42,
+    });
+  });
+
+  it('fails the run when the reply cannot be that number', async () => {
+    await expect(
+      resumeInputsFor(['gate'], 'abc', {gate: z.number()}),
+    ).rejects.toThrow(/reply to interrupt 'gate' does not match/i);
+  });
+
+  it('stores the text as typed when the interrupt declared no schema', async () => {
+    expect(await resumeInputsFor(['gate'], 'abc')).toEqual({gate: 'abc'});
+  });
+
+  it('stores the text as typed for an object schema', async () => {
+    // The documented flow for a structured prompt: a node after the pause
+    // normalizes what the human typed.
+    const schema = z.object({approved: z.boolean()});
+    expect(await resumeInputsFor(['gate'], 'yes', {gate: schema})).toEqual({
+      gate: 'yes',
+    });
   });
 });
 

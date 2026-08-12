@@ -18,6 +18,7 @@ import {
   Workflow,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
+import {z} from 'zod';
 import {
   collect,
   createWorkflowRunner,
@@ -56,5 +57,29 @@ describe('workflow integration — plain-text interactive resume', () => {
     // Turn 2: a plain-text reply resumes the pending interrupt.
     const turn2 = await collect(run('approve'));
     expect(finalOutput(turn2)).toBe('input=hello reply=approve');
+  });
+
+  it('delivers a number to a node whose interrupt asked for one', async () => {
+    const gate = node(
+      (ctx: NodeContext) => {
+        const reply = ctx.resumeInputs['age'];
+        if (reply === undefined) {
+          return new RequestInput({
+            interruptId: 'age',
+            message: 'how old?',
+            responseSchema: z.number(),
+          });
+        }
+        return createEvent({output: `${typeof reply}:${reply}`});
+      },
+      {name: 'gate', rerunOnResume: true},
+    );
+    const wf = new Workflow({name: 'typed_resume', edges: [['START', gate]]});
+    const {run} = await createWorkflowRunner(wf);
+
+    await collect(run('hello'));
+
+    const turn2 = await collect(run('42'));
+    expect(finalOutput(turn2)).toBe('number:42');
   });
 });
