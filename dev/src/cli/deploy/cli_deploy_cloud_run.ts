@@ -12,6 +12,7 @@ import {createTempDir, isFile, isFolderExists} from '../../utils/file_utils.js';
 import {
   BaseDeployOptions,
   CreateDockerFileContentOptions,
+  cleanupQuietly,
   copyAgentFiles,
   createDockerFile,
   createDockerFileContent,
@@ -221,8 +222,12 @@ export async function deployToCloudRun(options: DeployToCloudRunOptions) {
     );
   } finally {
     console.info('Cleaning up temporary files...');
-    await fs.rm(tempFolder, {recursive: true, force: true});
-    await agentLoader.disposeAll();
+    await cleanupQuietly(`remove the temporary folder ${tempFolder}`, () =>
+      fs.rm(tempFolder, {recursive: true, force: true}),
+    );
+    await cleanupQuietly('dispose the agent loader', () =>
+      agentLoader.disposeAll(),
+    );
     console.info('Temporary files cleaned up.');
   }
 }
