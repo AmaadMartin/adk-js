@@ -779,5 +779,24 @@ export function runArtifactServiceTests(
           ?.text,
       ).toBe('first');
     });
+
+    it('saves a filename with an interior space', async () => {
+      const filename = 'my report.txt';
+      await service.saveArtifact({
+        appName,
+        userId,
+        sessionId,
+        filename,
+        artifact: {text: 'interior'},
+      });
+
+      expect(
+        (await service.loadArtifact({appName, userId, sessionId, filename}))
+          ?.text,
+      ).toBe('interior');
+      expect(
+        await service.listArtifactKeys({appName, userId, sessionId}),
+      ).toContain(filename);
+    });
   });
 }
