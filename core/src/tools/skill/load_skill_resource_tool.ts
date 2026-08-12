@@ -57,16 +57,17 @@ export class LoadSkillResourceTool extends BaseTool {
     const skillName = args['skill_name'] as string;
     let resourcePath = args['path'] as string;
 
-    if (!skillName) {
+    if (!skillName || !resourcePath) {
+      const errors: string[] = [];
+      if (!skillName) {
+        errors.push("Argument 'skill_name' is required.");
+      }
+      if (!resourcePath) {
+        errors.push("Argument 'path' is required.");
+      }
       return {
-        error: 'Skill name is required.',
-        error_code: 'MISSING_SKILL_NAME',
-      };
-    }
-    if (!resourcePath) {
-      return {
-        error: 'Resource path is required.',
-        error_code: 'MISSING_RESOURCE_PATH',
+        error: errors.join('\n'),
+        error_code: 'INVALID_ARGUMENTS',
       };
     }
 

@@ -42,8 +42,8 @@ export class LoadSkillTool extends BaseTool {
     const skillName = args['name'] as string;
     if (!skillName) {
       return {
-        error: 'Skill name is required.',
-        error_code: 'MISSING_SKILL_NAME',
+        error: "Argument 'name' is required.",
+        error_code: 'INVALID_ARGUMENTS',
       };
     }
 

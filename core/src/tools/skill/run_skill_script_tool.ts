@@ -66,16 +66,17 @@ export class RunSkillScriptTool extends BaseTool {
     const scriptArgs =
       (args['args'] as Record<string, string | number | boolean>) || {};
 
-    if (!skillName) {
+    if (!skillName || !scriptPath) {
+      const errors: string[] = [];
+      if (!skillName) {
+        errors.push("Argument 'skill_name' is required.");
+      }
+      if (!scriptPath) {
+        errors.push("Argument 'script_path' is required.");
+      }
       return {
-        error: 'Skill name is required.',
-        errorCode: 'MISSING_SKILL_NAME',
-      };
-    }
-    if (!scriptPath) {
-      return {
-        error: 'Script path is required.',
-        errorCode: 'MISSING_SCRIPT_PATH',
+        error: errors.join('\n'),
+        error_code: 'INVALID_ARGUMENTS',
       };
     }
 
@@ -88,14 +89,14 @@ export class RunSkillScriptTool extends BaseTool {
     } catch (e: unknown) {
       return {
         error: `Failed to fetch skill '${skillName}' from registry: ${(e as Error).message || e}`,
-        errorCode: 'REGISTRY_ERROR',
+        error_code: 'REGISTRY_ERROR',
       };
     }
 
     if (!skill) {
       return {
         error: `Skill '${skillName}' not found.`,
-        errorCode: 'SKILL_NOT_FOUND',
+        error_code: 'SKILL_NOT_FOUND',
       };
     }
 
@@ -110,7 +111,7 @@ export class RunSkillScriptTool extends BaseTool {
     if (!script) {
       return {
         error: `Script '${scriptPath}' not found in skill '${skillName}'.`,
-        errorCode: 'SCRIPT_NOT_FOUND',
+        error_code: 'SCRIPT_NOT_FOUND',
       };
     }
 
@@ -125,7 +126,7 @@ export class RunSkillScriptTool extends BaseTool {
     if (!codeExecutor) {
       return {
         error: 'No code executor configured.',
-        errorCode: 'NO_CODE_EXECUTOR',
+        error_code: 'NO_CODE_EXECUTOR',
       };
     }
 
@@ -148,7 +149,7 @@ export class RunSkillScriptTool extends BaseTool {
     } catch (e: unknown) {
       return {
         error: `Failed to execute script '${scriptPath}': ${(e as Error).message}`,
-        errorCode: 'EXECUTION_ERROR',
+        error_code: 'EXECUTION_ERROR',
       };
     }
   }
