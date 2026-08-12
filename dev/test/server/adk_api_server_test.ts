@@ -20,6 +20,7 @@ import {
   LlmAgent,
   Runner,
   Session,
+  StreamingMode,
 } from '@google/adk';
 import {ReadableSpan} from '@opentelemetry/sdk-trace-base';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
@@ -650,7 +651,26 @@ describe('AdkWebServer', () => {
       expect(runAsyncParams.abortSignal).toBeDefined();
       expect(runAsyncParams.abortSignal).toBeInstanceOf(AbortSignal);
 
+      // The response has completed, so the disconnect listener must already be
+      // detached and the run can no longer be aborted.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(runAsyncParams.abortSignal?.aborted).toBe(false);
+
       spy.mockRestore();
+    });
+
+    it('should return 404 when the session ids are missing', async () => {
+      // Missing ids are normalised to '', so they reach the session lookup as
+      // empty strings rather than as `undefined`.
+      await expect(
+        client.post('/run', {
+          appName: 'testApp',
+          newMessage: {parts: [{text: 'Hello'}], role: 'user'},
+        }),
+      ).rejects.toMatchObject({
+        response: {status: 404},
+        message: 'Session not found: ',
+      });
     });
   });
 
@@ -791,6 +811,132 @@ describe('AdkWebServer', () => {
       expect(runAsyncParams.abortSignal).toBeInstanceOf(AbortSignal);
 
       spy.mockRestore();
+    });
+
+    it('should report a mid-stream failure as an in-band error frame', async () => {
+      await sessionService.createSession({
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: 'sessionId',
+      });
+
+      const spy = vi
+        .spyOn(Runner.prototype, 'runAsync')
+        .mockImplementation(async function* (): AsyncGenerator<
+          Event,
+          void,
+          undefined
+        > {
+          yield createEvent({
+            invocationId: 'invocationId',
+            author: 'testAgent',
+            content: {parts: [{text: 'Event 1'}], role: 'model'},
+          });
+          throw new Error('agent exploded');
+        });
+
+      try {
+        const response = await client.post('/run_sse', {
+          appName: 'testApp',
+          userId: 'testUser',
+          sessionId: 'sessionId',
+          newMessage: {parts: [{text: 'Hello test agent!'}], role: 'user'},
+        });
+
+        // The headers are already flushed, so the failure can only be
+        // reported in-band.
+        expect(response.status).toBe(200);
+        expect(response.text).toContain('"text":"Event 1"');
+        expect(response.text).toContain('data: {"error":"agent exploded"}');
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it('should request SSE streaming mode when streaming is enabled', async () => {
+      await sessionService.createSession({
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: 'sessionId',
+      });
+
+      const spy = vi.spyOn(Runner.prototype, 'runAsync');
+
+      const response = await client.post('/run_sse', {
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: 'sessionId',
+        newMessage: {parts: [{text: 'Hello test agent!'}], role: 'user'},
+        streaming: true,
+      });
+
+      expect(response.status).toBe(200);
+      expect(spy.mock.calls[0][0].runConfig?.streamingMode).toBe(
+        StreamingMode.SSE,
+      );
+
+      spy.mockRestore();
+    });
+
+    it('should abort the run when the client disconnects', async () => {
+      await sessionService.createSession({
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: 'sessionId',
+      });
+
+      let serverAbortSignal: AbortSignal | undefined;
+      const spy = vi
+        .spyOn(Runner.prototype, 'runAsync')
+        .mockImplementation(async function* (params): AsyncGenerator<
+          Event,
+          void,
+          undefined
+        > {
+          serverAbortSignal = params.abortSignal;
+          yield createEvent({
+            invocationId: 'invocationId',
+            author: 'testAgent',
+            content: {parts: [{text: 'Event 1'}], role: 'model'},
+          });
+          // Keep the run in flight until the server aborts it.
+          await new Promise<void>((resolve) => {
+            params.abortSignal?.addEventListener('abort', () => resolve(), {
+              once: true,
+            });
+          });
+        });
+
+      try {
+        const clientAbort = new AbortController();
+        const response = await fetch(`${server.url}/run_sse`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            appName: 'testApp',
+            userId: 'testUser',
+            sessionId: 'sessionId',
+            newMessage: {parts: [{text: 'Hello test agent!'}], role: 'user'},
+          }),
+          signal: clientAbort.signal,
+        });
+
+        const stream = response.body;
+        if (!stream) {
+          expect.fail('expected an SSE response body');
+        }
+        // Wait for the first frame so the run is in flight, then disconnect.
+        await stream.getReader().read();
+        clientAbort.abort();
+
+        await vi.waitFor(() => {
+          expect(serverAbortSignal?.aborted).toBe(true);
+        });
+      } finally {
+        // The stub blocks until it is aborted, so a leaked mock would hang
+        // every later test that runs an agent.
+        spy.mockRestore();
+      }
     });
   });
 
@@ -1151,6 +1297,69 @@ describe('AdkWebServer', () => {
         "Hello user! I'm streaming you events now!",
       );
     });
+
+    it('should apply default user and session ids', async () => {
+      const response = await client.post<{output: Event[]}>(
+        '/api/reasoning_engine',
+        {
+          appName: 'testApp',
+          newMessage: {parts: [{text: 'Hello'}], role: 'user'},
+        },
+      );
+
+      expect(response.status).toBe(200);
+      const session = await sessionService.getSession({
+        appName: 'testApp',
+        userId: 'default-user',
+        sessionId: 'default-session',
+      });
+      expect(session).toBeDefined();
+    });
+
+    it('should prefer input fields over top-level fields', async () => {
+      const response = await client.post<{output: Event[]}>(
+        '/api/reasoning_engine',
+        {
+          sessionId: 'topLevelSessionId',
+          input: {
+            appName: 'testApp',
+            userId: 'testUser',
+            sessionId: 'inputSessionId',
+            newMessage: {parts: [{text: 'Hello'}], role: 'user'},
+          },
+        },
+      );
+
+      expect(response.status).toBe(200);
+      const session = await sessionService.getSession({
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: 'inputSessionId',
+      });
+      expect(session?.events.length).toBeGreaterThan(0);
+      await expect(
+        sessionService.getSession({
+          appName: 'testApp',
+          userId: 'testUser',
+          sessionId: 'topLevelSessionId',
+        }),
+      ).resolves.toBeUndefined();
+    });
+
+    it.each(['not json', ''])(
+      'should return 400 for the unparseable raw body %j',
+      async (body) => {
+        const res = await fetch(`${server.url}/api/reasoning_engine`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json,application/json'},
+          body,
+        });
+
+        expect(res.status).toBe(400);
+        const data = (await res.json()) as {error: string};
+        expect(data.error).toBe('appName is required in input');
+      },
+    );
 
     it('should return 400 if appName is missing', async () => {
       try {
