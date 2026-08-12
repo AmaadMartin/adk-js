@@ -39,24 +39,24 @@ export const SCRUBBED_ENV_VARS: readonly string[] = [
 ];
 
 /**
- * Prefixes of environment variables ADK builds at runtime.
+ * Prefix of the environment variables ADK builds at runtime.
  *
  * `core/src/features/feature_registry.ts` derives `ADK_ENABLE_<feature>` and
  * `ADK_DISABLE_<feature>` from the feature name, so the family cannot be
  * enumerated.
  */
-export const SCRUBBED_ENV_PREFIXES: readonly string[] = ['ADK_'];
+export const SCRUBBED_ENV_PREFIX = 'ADK_';
 
 /** An environment: variable name to value, as `process.env` is shaped. */
 export type EnvVars = Record<string, string | undefined>;
 
 /** Deletes every scrubbed variable from `env`. Sets nothing. */
 export function scrubEnv(env: EnvVars): void {
-  for (const name of SCRUBBED_ENV_VARS) {
-    delete env[name];
-  }
   for (const name of Object.keys(env)) {
-    if (SCRUBBED_ENV_PREFIXES.some((prefix) => name.startsWith(prefix))) {
+    if (
+      SCRUBBED_ENV_VARS.includes(name) ||
+      name.startsWith(SCRUBBED_ENV_PREFIX)
+    ) {
       delete env[name];
     }
   }

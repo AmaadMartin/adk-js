@@ -21,7 +21,7 @@ import {FeatureName} from '@google/adk';
 import {afterAll, beforeAll, describe, expect, it, vi} from 'vitest';
 import {
   EnvVars,
-  SCRUBBED_ENV_PREFIXES,
+  SCRUBBED_ENV_PREFIX,
   SCRUBBED_ENV_VARS,
   scrubEnv,
 } from '../../tests/env_scrub.js';
@@ -90,7 +90,7 @@ describe('unit:core worker environment', () => {
 
   it('reads no variable with a scrubbed prefix', () => {
     const present = Object.keys(process.env).filter((name) =>
-      SCRUBBED_ENV_PREFIXES.some((prefix) => name.startsWith(prefix)),
+      name.startsWith(SCRUBBED_ENV_PREFIX),
     );
 
     expect(present).toEqual([]);

@@ -12,10 +12,7 @@
  */
 
 import {describe, expect, it, vi} from 'vitest';
-import {
-  SCRUBBED_ENV_PREFIXES,
-  SCRUBBED_ENV_VARS,
-} from '../../tests/env_scrub.js';
+import {SCRUBBED_ENV_PREFIX, SCRUBBED_ENV_VARS} from '../../tests/env_scrub.js';
 
 /** Probe name for the `unstubEnvs` pair below. */
 const STUB_PROBE_VAR = 'ADK_TEST_ENV_HERMETICITY_PROBE';
@@ -31,7 +28,7 @@ describe('unit:dev worker environment', () => {
 
   it('reads no variable with a scrubbed prefix', () => {
     const present = Object.keys(process.env).filter((name) =>
-      SCRUBBED_ENV_PREFIXES.some((prefix) => name.startsWith(prefix)),
+      name.startsWith(SCRUBBED_ENV_PREFIX),
     );
 
     expect(present).toEqual([]);
