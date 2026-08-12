@@ -78,6 +78,151 @@ describe('FileArtifactService', () => {
     });
   });
 
+  describe('deleteArtifact nested artifacts', () => {
+    it('keeps an artifact nested under the deleted one', async () => {
+      rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-artifacts-test-'));
+      const service = new FileArtifactService(rootDir);
+      const appName = 'test-app';
+      const userId = 'test-user';
+      const sessionId = 'test-session';
+
+      try {
+        await service.saveArtifact({
+          appName,
+          userId,
+          sessionId,
+          filename: 'doc',
+          artifact: {text: 'parent v0'},
+        });
+        await service.saveArtifact({
+          appName,
+          userId,
+          sessionId,
+          filename: 'doc/nested',
+          artifact: {text: 'nested v0'},
+        });
+
+        await service.deleteArtifact({
+          appName,
+          userId,
+          sessionId,
+          filename: 'doc',
+        });
+
+        const versions = await service.listVersions({
+          appName,
+          userId,
+          sessionId,
+          filename: 'doc',
+        });
+        expect(versions).toEqual([]);
+
+        const parent = await service.loadArtifact({
+          appName,
+          userId,
+          sessionId,
+          filename: 'doc',
+        });
+        expect(parent).toBeUndefined();
+
+        const nested = await service.loadArtifact({
+          appName,
+          userId,
+          sessionId,
+          filename: 'doc/nested',
+        });
+        expect(nested?.text).toBe('nested v0');
+      } finally {
+        await fs.rm(rootDir, {recursive: true, force: true});
+      }
+    });
+
+    it('removes the artifact directory when nothing is nested under it', async () => {
+      rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-artifacts-test-'));
+      const service = new FileArtifactService(rootDir);
+      const appName = 'test-app';
+      const userId = 'test-user';
+      const sessionId = 'test-session';
+
+      try {
+        await service.saveArtifact({
+          appName,
+          userId,
+          sessionId,
+          filename: 'a/b/c.txt',
+          artifact: {text: 'only artifact'},
+        });
+
+        await service.deleteArtifact({
+          appName,
+          userId,
+          sessionId,
+          filename: 'a/b/c.txt',
+        });
+
+        const artifactDir = path.join(
+          getSessionArtifactsDir(getUserRoot(rootDir, userId), sessionId),
+          'a',
+          'b',
+          'c.txt',
+        );
+        await expect(fs.access(artifactDir)).rejects.toThrow();
+      } finally {
+        await fs.rm(rootDir, {recursive: true, force: true});
+      }
+    });
+
+    it('keeps a nested user-scoped artifact', async () => {
+      rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-artifacts-test-'));
+      const service = new FileArtifactService(rootDir);
+      const appName = 'test-app';
+      const userId = 'test-user';
+      const sessionId = 'test-session';
+
+      try {
+        await service.saveArtifact({
+          appName,
+          userId,
+          sessionId,
+          filename: 'user:doc',
+          artifact: {text: 'parent v0'},
+        });
+        await service.saveArtifact({
+          appName,
+          userId,
+          sessionId,
+          filename: 'user:doc/nested',
+          artifact: {text: 'nested v0'},
+        });
+
+        await service.deleteArtifact({
+          appName,
+          userId,
+          sessionId,
+          filename: 'user:doc',
+        });
+
+        const versions = await service.listVersions({
+          appName,
+          userId,
+          sessionId,
+          filename: 'user:doc',
+        });
+        expect(versions).toEqual([]);
+
+        const nested = await service.loadArtifact({
+          appName,
+          userId,
+          sessionId,
+          filename: 'user:doc/nested',
+        });
+        expect(nested?.text).toBe('nested v0');
+      } finally {
+        await fs.rm(rootDir, {recursive: true, force: true});
+      }
+    });
+  });
+
   describe('path security', () => {
     it('rejects traversal attempts', async () => {
       rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-artifacts-test-'));
@@ -97,6 +242,43 @@ describe('FileArtifactService', () => {
         expect.fail('Should have thrown');
       } catch (e: unknown) {
         expect((e as Error).message).toContain('escapes storage directory');
+      } finally {
+        await fs.rm(rootDir, {recursive: true, force: true});
+      }
+    });
+
+    it('resolves without deleting anything for a traversal filename', async () => {
+      rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-artifacts-test-'));
+      const service = new FileArtifactService(rootDir);
+      const appName = 'test-app';
+      const userId = 'test-user';
+      const sessionId = 'test-session';
+
+      try {
+        await service.saveArtifact({
+          appName,
+          userId,
+          sessionId,
+          filename: 'keep.txt',
+          artifact: {text: 'keep'},
+        });
+
+        await expect(
+          service.deleteArtifact({
+            appName,
+            userId,
+            sessionId,
+            filename: '../../escape.txt',
+          }),
+        ).resolves.toBeUndefined();
+
+        const kept = await service.loadArtifact({
+          appName,
+          userId,
+          sessionId,
+          filename: 'keep.txt',
+        });
+        expect(kept?.text).toBe('keep');
       } finally {
         await fs.rm(rootDir, {recursive: true, force: true});
       }
