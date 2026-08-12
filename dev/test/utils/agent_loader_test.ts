@@ -4,9 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import esbuild from 'esbuild';
+import {Console} from 'node:console';
+import {EventEmitter} from 'node:events';
+import * as nodeFs from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import {Writable} from 'node:stream';
 import {pathToFileURL} from 'node:url';
 import {
   afterAll,
@@ -20,13 +24,14 @@ import {
   vi,
 } from 'vitest';
 
-import {App, isApp} from '@google/adk';
+import {App, isApp, LogLevel} from '@google/adk';
 import {
   AgentFile,
   AgentLoader,
   replaceDirnamePlugin,
 } from '../../src/utils/agent_loader.js';
 import * as fileUtils from '../../src/utils/file_utils.js';
+import {AdkLogger} from '../../src/utils/logger.js';
 
 vi.mock('../../src/utils/file_utils.js', () => ({
   createTempDir: vi.fn(),
@@ -36,6 +41,26 @@ vi.mock('../../src/utils/file_utils.js', () => ({
   removeFolder: vi.fn(),
   tryToFindFileRecursively: vi.fn(),
 }));
+
+/**
+ * The three-argument `fs.watch` overload the loader uses. Naming it keeps the
+ * mock typed: `vi.mocked()` normalizes an overloaded function to its last
+ * signature, which drops the listener the tests need.
+ */
+type WatchImpl = (
+  filename: nodeFs.PathLike,
+  options: nodeFs.WatchOptions,
+  listener: nodeFs.WatchListener<string>,
+) => nodeFs.FSWatcher;
+
+const {watchMock} = vi.hoisted(() => ({watchMock: vi.fn<WatchImpl>()}));
+
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  // Real watching stays the default; the watcher tests override it per call.
+  watchMock.mockImplementation(actual.watch);
+  return {...actual, watch: watchMock};
+});
 
 vi.mock('esbuild', async (importOriginal) => {
   const actual = await importOriginal<typeof import('esbuild')>();
@@ -138,6 +163,18 @@ class FakeAgentForApp extends BaseAgent {
 const agent = new FakeAgentForApp('agent_for_app_default');
 export default new App({ name: 'test_app_default', rootAgent: agent });
 `;
+
+/** Stands in for the real {@link nodeFs.FSWatcher} so watch events fire on demand. */
+class FakeWatcher extends EventEmitter {
+  close(): void {}
+  ref(): this {
+    return this;
+  }
+  unref(): this {
+    return this;
+  }
+  [Symbol.dispose](): void {}
+}
 
 describe('AgentLoader', () => {
   let tempAgentsDir: string;
@@ -873,6 +910,221 @@ describe('AgentLoader', () => {
       ).toBe(false);
 
       await loader.disposeAll();
+    });
+  });
+
+  /**
+   * The CLI resolves a level from `--log_level` / `--verbose`. These tests pin
+   * that the loader subsystem honours it, and that a loader built without a
+   * level keeps today's INFO behaviour.
+   */
+  describe('log level', () => {
+    let writes: string[];
+    let agentPath: string;
+    let originalConsole: Console;
+
+    beforeEach(async () => {
+      writes = [];
+      const sink = new Writable({
+        write(chunk: Buffer | string, _encoding, callback) {
+          writes.push(chunk.toString());
+          callback();
+        },
+      });
+      originalConsole = globalThis.console;
+      // winston's Console transport writes to `console._stdout`, which Vitest
+      // has already replaced with its own reporting stream. Swapping the whole
+      // console is what puts the records in reach.
+      globalThis.console = new Console({stdout: sink, stderr: sink});
+
+      // A fixture name no other test compiles: Node caches a successful
+      // `require.resolve` per path, which would stop the warn from firing.
+      agentPath = path.join(tempAgentsDir, 'log_level_agent.js');
+      await fs.writeFile(agentPath, agent1JsContent);
+
+      // Resolve without emitting the compiled file: AgentFile.load() then logs
+      // the require-cache warn and fails the dynamic import, which the loader
+      // reports as an error. One fixture, both levels, one logger.
+      (esbuild.build as Mock).mockResolvedValue(undefined);
+    });
+
+    afterEach(() => {
+      globalThis.console = originalConsole;
+      vi.restoreAllMocks();
+      (esbuild.build as Mock).mockReset();
+    });
+
+    /** Starts a watching loader and returns the change callback fs.watch got. */
+    async function startWatching(logLevel?: LogLevel): Promise<{
+      loader: AgentLoader;
+      watcher: FakeWatcher;
+      change: () => void;
+    }> {
+      const watcher = new FakeWatcher();
+      let onChange: nodeFs.WatchListener<string> | undefined;
+      watchMock.mockImplementationOnce((_path, _options, listener) => {
+        onChange = listener;
+        return watcher;
+      });
+
+      const loader = new AgentLoader(tempAgentsDir, undefined, true, logLevel);
+      await loader.listAgents();
+
+      if (!onChange) {
+        expect.fail('the loader never registered a watch listener');
+      }
+      const change = onChange;
+      return {
+        loader,
+        watcher,
+        change: () => change('change', 'log_level_agent.js'),
+      };
+    }
+
+    function flush(): Promise<void> {
+      return new Promise((resolve) => setImmediate(resolve));
+    }
+
+    it('configures its logger at the level it is given', async () => {
+      const setLogLevel = vi.spyOn(AdkLogger.prototype, 'setLogLevel');
+
+      const loader = new AgentLoader(
+        tempAgentsDir,
+        undefined,
+        false,
+        LogLevel.ERROR,
+      );
+
+      expect(setLogLevel).toHaveBeenCalledWith(LogLevel.ERROR);
+      await loader.disposeAll();
+    });
+
+    it('configures its logger at info when no level is given', async () => {
+      const setLogLevel = vi.spyOn(AdkLogger.prototype, 'setLogLevel');
+
+      const loader = new AgentLoader(tempAgentsDir);
+
+      expect(setLogLevel).toHaveBeenCalledWith(LogLevel.INFO);
+      await loader.disposeAll();
+    });
+
+    it('emits both the warn and the error at the default level', async () => {
+      const loader = new AgentLoader(tempAgentsDir);
+
+      await loader.listAgents();
+      await flush();
+      await loader.disposeAll();
+
+      const output = writes.join('');
+      expect(output).toContain('Failed to delete require cache');
+      expect(output).toContain('Failed to load agent');
+    });
+
+    it('suppresses the warn but keeps the error at LogLevel.ERROR', async () => {
+      const loader = new AgentLoader(
+        tempAgentsDir,
+        undefined,
+        false,
+        LogLevel.ERROR,
+      );
+
+      await loader.listAgents();
+      await flush();
+      await loader.disposeAll();
+
+      const output = writes.join('');
+      // The error is written after the warn would have been, through the same
+      // logger, so its presence proves the warn was suppressed and not merely
+      // late.
+      expect(output).toContain('Failed to load agent');
+      expect(output).not.toContain('Failed to delete require cache');
+    });
+
+    it('logs through the default logger when AgentFile gets no logger', async () => {
+      const agentFile = new AgentFile(agentPath);
+
+      await expect(agentFile.load()).rejects.toThrow();
+      await flush();
+
+      expect(writes.join('')).toContain('Failed to delete require cache');
+    });
+
+    it('emits the reload message at the default level', async () => {
+      const {loader, change} = await startWatching();
+
+      change();
+      await flush();
+      await loader.disposeAll();
+
+      expect(writes.join('')).toContain('Detected change');
+    });
+
+    it('suppresses the reload message at LogLevel.ERROR', async () => {
+      const {loader, change} = await startWatching(LogLevel.ERROR);
+      const buildsBefore = (esbuild.build as Mock).mock.calls.length;
+
+      change();
+      await flush();
+      // The callback also invalidates the cache, so a fresh scan proves it ran
+      // and the missing message is suppression rather than a lost event.
+      await loader.listAgents();
+      await loader.disposeAll();
+
+      expect((esbuild.build as Mock).mock.calls.length).toBeGreaterThan(
+        buildsBefore,
+      );
+      expect(writes.join('')).not.toContain('Detected change');
+    });
+
+    it('routes a watcher error through the loader logger', async () => {
+      const {loader, watcher} = await startWatching();
+
+      watcher.emit('error', new Error('watcher exploded'));
+      await flush();
+      await loader.disposeAll();
+
+      expect(writes.join('')).toContain('File watcher error');
+    });
+
+    it('suppresses a watcher error at LogLevel.ERROR', async () => {
+      const {loader, watcher} = await startWatching(LogLevel.ERROR);
+
+      watcher.emit('error', new Error('watcher exploded'));
+      await flush();
+      await loader.disposeAll();
+
+      expect(writes.join('')).not.toContain('File watcher error');
+    });
+
+    it('routes a failed watcher start through the loader logger', async () => {
+      watchMock.mockImplementationOnce(() => {
+        throw new Error('too many open files');
+      });
+
+      const loader = new AgentLoader(tempAgentsDir, undefined, true);
+      await loader.listAgents();
+      await flush();
+      await loader.disposeAll();
+
+      expect(writes.join('')).toContain('Could not start file watcher');
+    });
+
+    it('suppresses a failed watcher start at LogLevel.ERROR', async () => {
+      watchMock.mockImplementationOnce(() => {
+        throw new Error('too many open files');
+      });
+
+      const loader = new AgentLoader(
+        tempAgentsDir,
+        undefined,
+        true,
+        LogLevel.ERROR,
+      );
+      await loader.listAgents();
+      await flush();
+      await loader.disposeAll();
+
+      expect(writes.join('')).not.toContain('Could not start file watcher');
     });
   });
 });

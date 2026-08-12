@@ -18,10 +18,14 @@ import {
   InMemorySessionService,
   InvocationContext,
   LlmAgent,
+  LogLevel,
   Runner,
   Session,
 } from '@google/adk';
 import {ReadableSpan} from '@opentelemetry/sdk-trace-base';
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {z} from 'zod';
 
@@ -30,6 +34,7 @@ import {
   AdkApiServer,
 } from '../../src/server/adk_api_server.js';
 import {AgentLoader} from '../../src/utils/agent_loader.js';
+import {AdkLogger} from '../../src/utils/logger.js';
 
 interface JsonRpcResponse {
   result?: unknown;
@@ -1281,6 +1286,39 @@ describe('AdkWebServer', () => {
       for (const eventId of INHERITED_KEYS) {
         const response = await fetch(`${server.url}/debug/trace/${eventId}`);
         expect(response.status).toBe(404);
+      }
+    });
+  });
+
+  describe('Log level', () => {
+    let agentsDir: string;
+
+    beforeEach(async () => {
+      agentsDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-log-level'));
+    });
+
+    afterEach(async () => {
+      vi.restoreAllMocks();
+      await fs.rm(agentsDir, {recursive: true, force: true});
+    });
+
+    it('configures every logger it creates at the requested level', async () => {
+      const setLogLevel = vi.spyOn(AdkLogger.prototype, 'setLogLevel');
+
+      // No injected loader: the server builds a real AgentLoader, whose logger
+      // must get the same level as the server's own.
+      const levelledServer = new AdkApiServer({
+        agentsDir,
+        sessionService,
+        memoryService,
+        artifactService,
+        logLevel: LogLevel.ERROR,
+      });
+
+      expect(levelledServer).toBeInstanceOf(AdkApiServer);
+      expect(setLogLevel.mock.calls.length).toBeGreaterThanOrEqual(2);
+      for (const [level] of setLogLevel.mock.calls) {
+        expect(level).toBe(LogLevel.ERROR);
       }
     });
   });
