@@ -9,6 +9,8 @@ import {getBooleanEnvVar} from './env_aware_utils.js';
 const MODEL_NAME_PATTERN =
   '^projects/[^/]+/locations/[^/]+/publishers/[^/]+/models/(.+)$';
 
+const GEMINI_1_MODEL_PATTERN = /^gemini-1\.\d+/;
+
 /**
  * Extract the actual model name from either simple or path-based format.
  *
@@ -68,7 +70,7 @@ function parseVersion(versionString: string): ParsedVersion {
 export function isGemini1Model(modelString: string): boolean {
   const modelName = extractModelName(modelString);
 
-  return modelName.startsWith('gemini-1');
+  return GEMINI_1_MODEL_PATTERN.test(modelName);
 }
 
 /**
