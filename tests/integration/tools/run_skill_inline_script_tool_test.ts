@@ -9,14 +9,19 @@ import {
   CodeExecutionResult,
   Context,
   InvocationContext,
+  RunSkillInlineScriptErrorCode,
   RunSkillInlineScriptTool,
+  Skill,
   SkillToolset,
   ToolConfirmation,
   UnsafeLocalCodeExecutor,
 } from '@google/adk';
 import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import {describe, expect, it} from 'vitest';
+
+const IS_UNIX = os.platform() === 'linux' || os.platform() === 'darwin';
 
 describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', () => {
   // These integration tests exercise real code execution, which is gated behind
@@ -31,6 +36,27 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
       toolConfirmation: new ToolConfirmation({confirmed: true}),
     });
   }
+
+  const resourceSkill: Skill = {
+    frontmatter: {
+      name: 'resource-skill',
+      description: 'A skill whose resources back inline snippets',
+    },
+    instructions: 'Use the bundled resources.',
+    resources: {
+      references: {
+        'data.txt': 'hello from skill reference',
+      },
+      assets: {
+        'config.json': '{"mode":"test"}',
+      },
+      scripts: {
+        'helper.js': {
+          src: 'module.exports.greet = () => "hello from skill helper";',
+        },
+      },
+    },
+  };
 
   it('successfully executes a real JavaScript inline script', async () => {
     const executor = new UnsafeLocalCodeExecutor();
@@ -255,5 +281,123 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
     // Clean up both files
     await fs.unlink(targetFile);
     await fs.unlink(fullPath);
+  });
+
+  describe('skill_name', () => {
+    // UnsafeLocalCodeExecutor skips input files from its output scan by
+    // comparing `f.name` ('scripts/helper.js') to the path returned by a
+    // recursive readdir, which uses '\' on Windows. The skill's own resources
+    // would therefore come back as output files and be materialized into
+    // process.cwd(), writing into the repo's real top-level directories. Gate
+    // the cases that actually mount skill files to POSIX until that separator
+    // mismatch is fixed.
+    it.skipIf(!IS_UNIX)(
+      'reads a skill reference file from the script working directory',
+      async () => {
+        const executor = new UnsafeLocalCodeExecutor();
+        const toolset = new SkillToolset([resourceSkill], {
+          codeExecutor: executor,
+        });
+        const tool = new RunSkillInlineScriptTool(toolset);
+
+        const result = (await tool.runAsync({
+          args: {
+            script_content:
+              "console.log(require('node:fs').readFileSync('references/data.txt','utf8'));",
+            language: CodeExecutionLanguage.JAVASCRIPT,
+            skill_name: 'resource-skill',
+          },
+          toolContext: createMockContext(),
+        })) as CodeExecutionResult;
+
+        expect(result.stdout).toContain('hello from skill reference');
+      },
+    );
+
+    it('fails to read skill files when skill_name is omitted', async () => {
+      const executor = new UnsafeLocalCodeExecutor();
+      const toolset = new SkillToolset([resourceSkill], {
+        codeExecutor: executor,
+      });
+      const tool = new RunSkillInlineScriptTool(toolset);
+
+      const result = (await tool.runAsync({
+        args: {
+          script_content:
+            "console.log(require('node:fs').readFileSync('references/data.txt','utf8'));",
+          language: CodeExecutionLanguage.JAVASCRIPT,
+        },
+        toolContext: createMockContext(),
+      })) as CodeExecutionResult;
+
+      expect(result.stderr).toContain('ENOENT');
+    });
+
+    it.skipIf(!IS_UNIX)(
+      'requires a skill script from an inline snippet',
+      async () => {
+        const executor = new UnsafeLocalCodeExecutor();
+        const toolset = new SkillToolset([resourceSkill], {
+          codeExecutor: executor,
+        });
+        const tool = new RunSkillInlineScriptTool(toolset);
+
+        const result = (await tool.runAsync({
+          args: {
+            script_content:
+              "console.log(require('./scripts/helper.js').greet());",
+            language: CodeExecutionLanguage.JAVASCRIPT,
+            skill_name: 'resource-skill',
+          },
+          toolContext: createMockContext(),
+        })) as CodeExecutionResult;
+
+        expect(result.stdout).toContain('hello from skill helper');
+      },
+    );
+
+    it.skipIf(!IS_UNIX)(
+      'reads a skill asset from a Python inline script',
+      async () => {
+        const executor = new UnsafeLocalCodeExecutor();
+        const toolset = new SkillToolset([resourceSkill], {
+          codeExecutor: executor,
+        });
+        const tool = new RunSkillInlineScriptTool(toolset);
+
+        const result = (await tool.runAsync({
+          args: {
+            script_content: "print(open('assets/config.json').read())",
+            language: CodeExecutionLanguage.PYTHON,
+            skill_name: 'resource-skill',
+          },
+          toolContext: createMockContext(),
+        })) as CodeExecutionResult;
+
+        expect(result.stdout).toContain('"mode"');
+      },
+    );
+
+    it('returns SKILL_NOT_FOUND for an unknown skill with a real executor', async () => {
+      const executor = new UnsafeLocalCodeExecutor();
+      const toolset = new SkillToolset([resourceSkill], {
+        codeExecutor: executor,
+      });
+      const tool = new RunSkillInlineScriptTool(toolset);
+
+      const result = await tool.runAsync({
+        args: {
+          script_content: 'console.log("never runs");',
+          language: CodeExecutionLanguage.JAVASCRIPT,
+          skill_name: 'no-such-skill',
+        },
+        toolContext: createMockContext(),
+      });
+
+      expect(result).toEqual({
+        error: "Skill 'no-such-skill' not found.",
+        errorCode: RunSkillInlineScriptErrorCode.SKILL_NOT_FOUND,
+      });
+    });
   });
 });

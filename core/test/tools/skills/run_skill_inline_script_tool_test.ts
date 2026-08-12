@@ -12,12 +12,16 @@ import {
   ExecuteCodeParams,
   File,
   FileContentEncoding,
+  Frontmatter,
   InvocationContext,
   LlmAgent,
   RunSkillInlineScriptErrorCode,
   RunSkillInlineScriptTool,
+  Skill,
+  SkillRegistry,
   SkillToolset,
 } from '@google/adk';
+import {Type} from '@google/genai';
 import {describe, expect, it, vi} from 'vitest';
 import {ToolConfirmation} from '../../../src/tools/tool_confirmation.js';
 import {materializeFiles} from '../../../src/utils/file_utils.js';
@@ -43,6 +47,21 @@ class MockCodeExecutor extends BaseCodeExecutor {
       throw new Error('Mock execution failure');
     }
     return this.mockResult;
+  }
+}
+
+class StubSkillRegistry implements SkillRegistry {
+  getSkillCalls: string[] = [];
+
+  constructor(private readonly fetch: (name: string) => Promise<Skill>) {}
+
+  async getSkill(name: string): Promise<Skill> {
+    this.getSkillCalls.push(name);
+    return this.fetch(name);
+  }
+
+  async searchSkills(): Promise<Frontmatter[]> {
+    return [];
   }
 }
 
@@ -82,6 +101,26 @@ describe('RunSkillInlineScriptTool', () => {
   function confirmed(): ToolConfirmation {
     return new ToolConfirmation({confirmed: true});
   }
+
+  const mockSkill: Skill = {
+    frontmatter: {
+      name: 'test-skill',
+      description: 'A test skill',
+    },
+    instructions: 'Test instructions',
+    resources: {
+      scripts: {
+        'setup.js': {src: 'console.log("setup");'},
+        'run.sh': {src: 'echo "run";'},
+      },
+      references: {
+        'doc.txt': 'Doc content',
+      },
+      assets: {
+        'binary.dat': Buffer.from('hello', 'utf8'),
+      },
+    },
+  };
 
   it('returns error if script content is missing', async () => {
     const toolset = new SkillToolset([]);
@@ -382,6 +421,256 @@ describe('RunSkillInlineScriptTool', () => {
     });
   });
 
+  describe('skill_name', () => {
+    it("passes the skill's resource files as inputFiles when skill_name is given", async () => {
+      const mockExecutor = new MockCodeExecutor();
+      const toolset = new SkillToolset([mockSkill], {
+        codeExecutor: mockExecutor,
+      });
+      const tool = new RunSkillInlineScriptTool(toolset);
+
+      await tool.runAsync({
+        args: {
+          script_content: 'console.log("with skill");',
+          language: CodeExecutionLanguage.JAVASCRIPT,
+          skill_name: 'test-skill',
+        },
+        toolContext: createMockContext('test-agent', undefined, {
+          toolConfirmation: confirmed(),
+        }),
+      });
+
+      const input = mockExecutor.executeCodeParams?.codeExecutionInput;
+      expect(input?.inputFiles).toHaveLength(4);
+
+      const fileNames = input?.inputFiles?.map((f) => f.name);
+      expect(fileNames).toContain('scripts/setup.js');
+      expect(fileNames).toContain('scripts/run.sh');
+      expect(fileNames).toContain('references/doc.txt');
+      expect(fileNames).toContain('assets/binary.dat');
+
+      const binaryFile = input?.inputFiles?.find(
+        (f) => f.name === 'assets/binary.dat',
+      );
+      expect(binaryFile?.contentEncoding).toBe('base64');
+
+      // The snippet is still executed verbatim; unlike run_skill_script no
+      // wrapper code is generated around it.
+      expect(input?.code).toBe('console.log("with skill");');
+    });
+
+    it('keeps inputFiles empty when skill_name is an empty string', async () => {
+      const mockExecutor = new MockCodeExecutor();
+      const toolset = new SkillToolset([mockSkill], {
+        codeExecutor: mockExecutor,
+      });
+      const tool = new RunSkillInlineScriptTool(toolset);
+
+      await tool.runAsync({
+        args: {
+          script_content: 'console.log("no skill");',
+          language: CodeExecutionLanguage.JAVASCRIPT,
+          skill_name: '',
+        },
+        toolContext: createMockContext('test-agent', undefined, {
+          toolConfirmation: confirmed(),
+        }),
+      });
+
+      expect(
+        mockExecutor.executeCodeParams?.codeExecutionInput.inputFiles,
+      ).toEqual([]);
+    });
+
+    it('returns SKILL_NOT_FOUND for an unknown skill_name', async () => {
+      const mockExecutor = new MockCodeExecutor();
+      const toolset = new SkillToolset([mockSkill], {
+        codeExecutor: mockExecutor,
+      });
+      const tool = new RunSkillInlineScriptTool(toolset);
+
+      // Built without a functionCallId and without a confirmation: if the
+      // confirmation gate ran before skill resolution, requestConfirmation
+      // would throw 'functionCallId is not set.' instead of returning this
+      // error, so this also pins the resolution-before-gate ordering.
+      const result = (await tool.runAsync({
+        args: {
+          script_content: 'console.log("missing");',
+          language: CodeExecutionLanguage.JAVASCRIPT,
+          skill_name: 'unknown-skill',
+        },
+        toolContext: createMockContext(),
+      })) as ToolErrorResponse;
+
+      expect(result).toEqual({
+        error: "Skill 'unknown-skill' not found.",
+        errorCode: RunSkillInlineScriptErrorCode.SKILL_NOT_FOUND,
+      });
+      expect(mockExecutor.executeCodeParams).toBeUndefined();
+    });
+
+    it('returns REGISTRY_ERROR when the registry rejects', async () => {
+      const mockExecutor = new MockCodeExecutor();
+      const registry = new StubSkillRegistry(() =>
+        Promise.reject(new Error('boom')),
+      );
+      const toolset = new SkillToolset([], {
+        codeExecutor: mockExecutor,
+        registry,
+      });
+      const tool = new RunSkillInlineScriptTool(toolset);
+
+      const result = (await tool.runAsync({
+        args: {
+          script_content: 'console.log("registry");',
+          language: CodeExecutionLanguage.JAVASCRIPT,
+          skill_name: 'remote-skill',
+        },
+        toolContext: createMockContext('test-agent', undefined, {
+          toolConfirmation: confirmed(),
+        }),
+      })) as ToolErrorResponse;
+
+      expect(result).toEqual({
+        error: "Failed to fetch skill 'remote-skill' from registry: boom",
+        errorCode: RunSkillInlineScriptErrorCode.REGISTRY_ERROR,
+      });
+      expect(mockExecutor.executeCodeParams).toBeUndefined();
+    });
+
+    it('falls back to the raw rejection value when the registry rejects a non-Error', async () => {
+      const mockExecutor = new MockCodeExecutor();
+      const registry = new StubSkillRegistry(() => Promise.reject('kaboom'));
+      const toolset = new SkillToolset([], {
+        codeExecutor: mockExecutor,
+        registry,
+      });
+      const tool = new RunSkillInlineScriptTool(toolset);
+
+      const result = (await tool.runAsync({
+        args: {
+          script_content: 'console.log("registry");',
+          language: CodeExecutionLanguage.JAVASCRIPT,
+          skill_name: 'remote-skill',
+        },
+        toolContext: createMockContext('test-agent', undefined, {
+          toolConfirmation: confirmed(),
+        }),
+      })) as ToolErrorResponse;
+
+      expect(result).toEqual({
+        error: "Failed to fetch skill 'remote-skill' from registry: kaboom",
+        errorCode: RunSkillInlineScriptErrorCode.REGISTRY_ERROR,
+      });
+    });
+
+    it('surfaces the skill name in the confirmation hint and payload', async () => {
+      const mockExecutor = new MockCodeExecutor();
+      const toolset = new SkillToolset([mockSkill], {
+        codeExecutor: mockExecutor,
+      });
+      const tool = new RunSkillInlineScriptTool(toolset);
+
+      const mockToolContext = createMockContext('test-agent', undefined, {
+        functionCallId: 'fc-skill',
+      });
+
+      const result = (await tool.runAsync({
+        args: {
+          script_content: 'console.log("gated");',
+          language: CodeExecutionLanguage.JAVASCRIPT,
+          skill_name: 'test-skill',
+        },
+        toolContext: mockToolContext,
+      })) as {partial: string};
+
+      expect(mockExecutor.executeCodeParams).toBeUndefined();
+      expect(result).toEqual({
+        partial:
+          'This tool call needs external confirmation before completion.',
+      });
+
+      const requested =
+        mockToolContext.actions.requestedToolConfirmations['fc-skill'];
+      expect(requested).toBeDefined();
+      expect(requested.hint).toContain('test-skill');
+      expect(requested.payload).toEqual({
+        language: CodeExecutionLanguage.JAVASCRIPT,
+        scriptContent: 'console.log("gated");',
+        skillName: 'test-skill',
+      });
+    });
+
+    it('rejects a skill-scoped run when confirmation is refused', async () => {
+      const mockExecutor = new MockCodeExecutor();
+      const toolset = new SkillToolset([mockSkill], {
+        codeExecutor: mockExecutor,
+      });
+      const tool = new RunSkillInlineScriptTool(toolset);
+
+      const result = (await tool.runAsync({
+        args: {
+          script_content: 'console.log("refused");',
+          language: CodeExecutionLanguage.JAVASCRIPT,
+          skill_name: 'test-skill',
+        },
+        toolContext: createMockContext('test-agent', undefined, {
+          functionCallId: 'fc-refused',
+          toolConfirmation: new ToolConfirmation({confirmed: false}),
+        }),
+      })) as ToolErrorResponse;
+
+      expect(result).toEqual({
+        error: 'Inline script execution was not confirmed and was rejected.',
+        errorCode: RunSkillInlineScriptErrorCode.CONFIRMATION_REJECTED,
+      });
+      expect(mockExecutor.executeCodeParams).toBeUndefined();
+    });
+
+    it('resolves the skill through the registry when it is not local', async () => {
+      const mockExecutor = new MockCodeExecutor();
+      const registry = new StubSkillRegistry(() => Promise.resolve(mockSkill));
+      const toolset = new SkillToolset([], {
+        codeExecutor: mockExecutor,
+        registry,
+      });
+      const tool = new RunSkillInlineScriptTool(toolset);
+
+      await tool.runAsync({
+        args: {
+          script_content: 'console.log("remote");',
+          language: CodeExecutionLanguage.JAVASCRIPT,
+          skill_name: 'test-skill',
+        },
+        toolContext: createMockContext('test-agent', undefined, {
+          toolConfirmation: confirmed(),
+        }),
+      });
+
+      expect(registry.getSkillCalls).toEqual(['test-skill']);
+      expect(
+        mockExecutor.executeCodeParams?.codeExecutionInput.inputFiles?.map(
+          (f) => f.name,
+        ),
+      ).toContain('references/doc.txt');
+    });
+
+    it('declares skill_name as an optional parameter', () => {
+      const toolset = new SkillToolset([mockSkill]);
+      const tool = new RunSkillInlineScriptTool(toolset);
+
+      const declaration = tool._getDeclaration();
+
+      expect(declaration.parameters?.properties?.['skill_name']?.type).toBe(
+        Type.STRING,
+      );
+      expect(declaration.parameters?.required).toEqual([
+        'script_content',
+        'language',
+      ]);
+    });
+  });
+
   describe('error codes', () => {
     it('exposes stable string values for the error-code enum', () => {
       // The error-code string values are part of the tool's response contract
@@ -400,6 +689,15 @@ describe('RunSkillInlineScriptTool', () => {
       );
       expect(RunSkillInlineScriptErrorCode.CONFIRMATION_REJECTED).toBe(
         'CONFIRMATION_REJECTED',
+      );
+    });
+
+    it('exposes stable string values for the skill-resolution error codes', () => {
+      expect(RunSkillInlineScriptErrorCode.SKILL_NOT_FOUND).toBe(
+        'SKILL_NOT_FOUND',
+      );
+      expect(RunSkillInlineScriptErrorCode.REGISTRY_ERROR).toBe(
+        'REGISTRY_ERROR',
       );
     });
   });
