@@ -22,7 +22,7 @@ import {
   isFolderExists,
   loadFileData,
   removeFolder,
-  tryToFindFileRecursively,
+  tryToFindFolderRecursively,
 } from './file_utils.js';
 import {AdkLogger} from './logger.js';
 
@@ -32,6 +32,11 @@ const logger = new AdkLogger({label: 'AgentLoader', colorize: {all: true}});
  * Supported file extensions for JavaScript and TypeScript.
  */
 const JS_FILES_EXTENSIONS = ['.js', '.cjs', '.mjs', '.ts', '.mts', '.cts'];
+
+/**
+ * How many ancestor directories to search for a project's `node_modules`.
+ */
+const MAX_NODE_MODULES_LOOKUP_LEVELS = 10;
 
 /**
  * Supported JS/TS file module types.
@@ -698,21 +703,23 @@ async function linkProjectNodeModules(
   }
 }
 
+/**
+ * Find the `node_modules` a bundled agent should resolve its externals from.
+ *
+ * Mirrors Node's own upward `node_modules` walk, so a project whose own
+ * directory has a `package.json` but no `node_modules` — the npm/pnpm
+ * workspace layout, where dependencies are hoisted to the workspace root —
+ * still resolves. Returns `undefined` when nothing is found within the bound.
+ */
 async function getProjectNodeModulesDir(
   sourceDir: string,
 ): Promise<string | undefined> {
   try {
-    const packageJsonPath = await tryToFindFileRecursively(
+    return await tryToFindFolderRecursively(
       sourceDir,
-      'package.json',
-      10,
-    );
-    const nodeModulesDir = path.join(
-      path.dirname(packageJsonPath),
       'node_modules',
+      MAX_NODE_MODULES_LOOKUP_LEVELS,
     );
-
-    return (await isFolderExists(nodeModulesDir)) ? nodeModulesDir : undefined;
   } catch {
     return undefined;
   }

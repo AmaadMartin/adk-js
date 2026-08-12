@@ -15,6 +15,7 @@ import {
   loadFileData,
   saveToFile,
   tryToFindFileRecursively,
+  tryToFindFolderRecursively,
 } from '../../src/utils/file_utils.js';
 
 vi.mock('node:fs/promises', async () => {
@@ -154,6 +155,67 @@ describe('file_utils', () => {
     await expect(
       tryToFindFileRecursively('/a/b/c', 'target.txt', 2),
     ).rejects.toThrow(/No target.txt found/);
+  });
+
+  /** Makes `folderPaths` look like directories and everything else absent. */
+  function mockFoldersOnDisk(folderPaths: string[]) {
+    fsPromises.access.mockImplementation((p: string) =>
+      folderPaths.includes(p)
+        ? Promise.resolve()
+        : Promise.reject(new Error('not found')),
+    );
+    fsPromises.stat.mockImplementation((p: string) =>
+      folderPaths.includes(p)
+        ? Promise.resolve({isDirectory: () => true})
+        : Promise.reject(new Error('not found')),
+    );
+  }
+
+  it('tryToFindFolderRecursively finds a folder in the source folder itself', async () => {
+    const target = path.join('/a/b/c', 'node_modules');
+    mockFoldersOnDisk([target]);
+
+    await expect(
+      tryToFindFolderRecursively('/a/b/c', 'node_modules', 5),
+    ).resolves.toBe(target);
+  });
+
+  it('tryToFindFolderRecursively finds a folder several levels up', async () => {
+    const target = path.join('/a', 'node_modules');
+    mockFoldersOnDisk([target]);
+
+    await expect(
+      tryToFindFolderRecursively('/a/b/c', 'node_modules', 5),
+    ).resolves.toBe(target);
+  });
+
+  it('tryToFindFolderRecursively skips a same-named file and keeps walking up', async () => {
+    const decoyFile = path.join('/a/b/c', 'node_modules');
+    const target = path.join('/a', 'node_modules');
+    fsPromises.access.mockResolvedValue(undefined);
+    fsPromises.stat.mockImplementation((p: string) => {
+      if (p === decoyFile) {
+        return Promise.resolve({isDirectory: () => false});
+      }
+      if (p === target) {
+        return Promise.resolve({isDirectory: () => true});
+      }
+      return Promise.reject(new Error('not found'));
+    });
+
+    await expect(
+      tryToFindFolderRecursively('/a/b/c', 'node_modules', 5),
+    ).resolves.toBe(target);
+  });
+
+  it('tryToFindFolderRecursively throws when folder not found within maxIterations', async () => {
+    mockFoldersOnDisk([]);
+
+    await expect(
+      tryToFindFolderRecursively('/a/b/c', 'node_modules', 2),
+    ).rejects.toThrow(
+      'No node_modules found in /a/b/c or its parent folders up to 2 levels.',
+    );
   });
 
   it('listFiles returns entries', async () => {

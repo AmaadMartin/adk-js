@@ -34,7 +34,7 @@ vi.mock('../../src/utils/file_utils.js', () => ({
   isFileExists: vi.fn(),
   isFolderExists: vi.fn(),
   removeFolder: vi.fn(),
-  tryToFindFileRecursively: vi.fn(),
+  tryToFindFolderRecursively: vi.fn(),
 }));
 
 vi.mock('esbuild', async (importOriginal) => {
@@ -187,8 +187,8 @@ describe('AgentLoader', () => {
     (fileUtils.removeFolder as Mock).mockImplementation((folderPath) =>
       fs.rm(folderPath as string, {recursive: true, force: true}),
     );
-    (fileUtils.tryToFindFileRecursively as Mock).mockImplementation(
-      async (_sourceFolder, fileName) => path.join(tempAgentsDir, fileName),
+    (fileUtils.tryToFindFolderRecursively as Mock).mockImplementation(
+      async (_sourceFolder, folderName) => path.join(tempAgentsDir, folderName),
     );
   });
 
@@ -330,6 +330,54 @@ describe('AgentLoader', () => {
       );
       await agentFile.dispose();
       await expect(fs.access(compiledAgentPath)).rejects.toThrow();
+    });
+
+    it('links an ancestor node_modules into the compiled output directory', async () => {
+      const nestedDir = path.join(tempAgentsDir, 'nested');
+      await fs.mkdir(nestedDir, {recursive: true});
+      const agentPath = path.join(nestedDir, 'agent1.js');
+      await fs.writeFile(agentPath, agent1JsContent);
+
+      const compiledAgentPath = compiledPath('agent1.cjs');
+      (esbuild.build as Mock).mockImplementation(async () => {
+        await fs.writeFile(compiledAgentPath, agent1JsContent);
+        return Promise.resolve();
+      });
+
+      const agentFile = new AgentFile(agentPath);
+      await agentFile.load();
+
+      await expect(fs.readlink(compiledPath('node_modules'))).resolves.toBe(
+        path.join(tempAgentsDir, 'node_modules'),
+      );
+      expect(fileUtils.tryToFindFolderRecursively).toHaveBeenCalledWith(
+        nestedDir,
+        'node_modules',
+        10,
+      );
+
+      await agentFile.dispose();
+    });
+
+    it('skips the node_modules link when no ancestor has one', async () => {
+      (fileUtils.tryToFindFolderRecursively as Mock).mockRejectedValue(
+        new Error('No node_modules found in /nowhere'),
+      );
+      const agentPath = path.join(tempAgentsDir, 'agent1.js');
+      await fs.writeFile(agentPath, agent1JsContent);
+
+      const compiledAgentPath = compiledPath('agent1.cjs');
+      (esbuild.build as Mock).mockImplementation(async () => {
+        await fs.writeFile(compiledAgentPath, agent1JsContent);
+        return Promise.resolve();
+      });
+
+      const agentFile = new AgentFile(agentPath);
+      await agentFile.load();
+
+      await expect(fs.access(compiledPath('node_modules'))).rejects.toThrow();
+
+      await agentFile.dispose();
     });
 
     it('throws when getting file path if agent is not loaded', () => {

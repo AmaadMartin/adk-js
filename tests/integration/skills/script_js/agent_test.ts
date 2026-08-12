@@ -3,13 +3,12 @@
  * Copyright 2026 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
-import {exec, spawn} from 'node:child_process';
+import {spawn} from 'node:child_process';
 import * as fs from 'node:fs/promises';
-import {promisify} from 'node:util';
 import {afterAll, beforeAll, describe, expect, it} from 'vitest';
 import {normalizeLineEndings, sendInput} from '../../test_case_utils.js';
+import {assertWorkspaceAdkCliAvailable} from '../../workspace_cli.js';
 
-const execAsync = promisify(exec);
 const dirname = process.cwd();
 const PROJECT_PATH = `${dirname}/tests/integration/skills/script_js`;
 const TEST_EXECUTION_TIMEOUT = 60000;
@@ -24,14 +23,14 @@ const TEST_EXECUTION_TIMEOUT = 60000;
  * 3. Asserts that the agent's response matches the expected output, confirming it claims to have created the art and files.
  * 4. Verifies that the expected files (`ephemeral_entanglement.md`, `index.html`, `sketch.js`) were actually generated in the file system.
  * 5. Compares the content of these generated files with reference files in the `expected/` directory to ensure correctness.
- * 6. Cleans up the generated files and installed dependencies after execution.
+ * 6. Cleans up the generated files after execution.
  *
  * This test ensures the end-to-end flow of an agent using tools to generate and materialize files based on a high-level request.
  */
 describe('Agent with skills that generates JS script and runs it locally', () => {
   beforeAll(async () => {
-    await execAsync('npm install', {cwd: PROJECT_PATH});
-  }, TEST_EXECUTION_TIMEOUT);
+    await assertWorkspaceAdkCliAvailable();
+  });
 
   it(
     'should run agent with skills successfully',
@@ -99,10 +98,5 @@ describe('Agent with skills that generates JS script and runs it locally', () =>
       .catch(() => {});
     await fs.rm(`${PROJECT_PATH}/index.html`, {force: true}).catch(() => {});
     await fs.rm(`${PROJECT_PATH}/sketch.js`, {force: true}).catch(() => {});
-
-    await fs
-      .rm(`${PROJECT_PATH}/node_modules`, {recursive: true, force: true})
-      .catch(() => {});
-    await fs.unlink(`${PROJECT_PATH}/package-lock.json`).catch(() => {});
   });
 });
