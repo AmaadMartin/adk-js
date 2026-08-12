@@ -26,7 +26,7 @@ describe.each(['__dirname', '__filename', 'import_meta_url'])(
 
     beforeAll(async () => {
       await execAsync('npm install', {cwd: projectPath});
-    }, TEST_EXECUTION_TIMEOUT);
+    });
 
     it(
       'should run agent and load params from file nearby via package.json script',
@@ -56,6 +56,6 @@ describe.each(['__dirname', '__filename', 'import_meta_url'])(
       await fs
         .unlink(path.join(projectPath, 'package-lock.json'))
         .catch(() => {});
-    }, TEST_EXECUTION_TIMEOUT);
+    });
   },
 );
