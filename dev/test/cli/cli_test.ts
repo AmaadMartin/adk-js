@@ -154,9 +154,37 @@ describe('CLI Entrypoint', () => {
       const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
       expect(args.a2aAuthToken).toBe('tok');
     });
+
+    it('should leave triggerSources unset without --trigger_sources', async () => {
+      await parse(['web']);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.triggerSources).toBeUndefined();
+    });
+
+    it('should split --trigger_sources on commas', async () => {
+      await parse(['web', '--trigger_sources', 'pubsub, eventarc']);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.triggerSources).toEqual(['pubsub', 'eventarc']);
+    });
+
+    it('should drop empty entries from --trigger_sources', async () => {
+      await parse(['web', '--trigger_sources', 'pubsub,,']);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.triggerSources).toEqual(['pubsub']);
+    });
   });
 
   describe('command: api_server', () => {
+    it('should pass --trigger_sources through to AdkApiServer', async () => {
+      await parse(['api_server', '--trigger_sources', 'pubsub']);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.triggerSources).toEqual(['pubsub']);
+    });
+
     it('should start AdkApiServer with serveDebugUI: false', async () => {
       await parse(['api_server']);
 

@@ -47,6 +47,11 @@ export interface CreateDockerFileContentOptions {
   artifactServiceUri?: string;
   otelToCloud?: boolean;
   a2a?: boolean;
+  /**
+   * Event sources allowed to invoke the deployed agent over
+   * `/apps/<app>/trigger/*`. Empty or absent serves no trigger route.
+   */
+  triggerSources?: string[];
 }
 
 export interface BaseDeployOptions extends CreateDockerFileContentOptions {
@@ -143,6 +148,12 @@ export function createDockerFileContent(
 
   if (options.a2a) {
     adkServerOptions.push('--a2a');
+  }
+
+  if (options.triggerSources?.length) {
+    const triggerSources = options.triggerSources.join(',');
+    assertNoDockerfileNewline(triggerSources, 'triggerSources');
+    adkServerOptions.push(`--trigger_sources=${shellQuote(triggerSources)}`);
   }
 
   return `

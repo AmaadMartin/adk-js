@@ -82,6 +82,21 @@ function getAgentFileOptions(options: {
   };
 }
 
+/**
+ * Splits the comma-separated `--trigger_sources` value, dropping empty
+ * entries. Returns undefined when the flag is absent, which leaves every
+ * trigger route unmounted.
+ */
+function getTriggerSources(option?: string): string[] | undefined {
+  if (option === undefined) {
+    return undefined;
+  }
+  return option
+    .split(',')
+    .map((source) => source.trim())
+    .filter((source) => source.length > 0);
+}
+
 function getBoolean(option?: string | boolean): boolean {
   if (typeof option === 'boolean') {
     return option;
@@ -149,6 +164,14 @@ const A2A_AUTH_TOKEN_OPTION = new Option(
 const A2A_AUTH_TOKEN_DEPLOY_OPTION = new Option(
   '--a2a_auth_token <string>',
   'Optional. Shared bearer token used to authenticate the deployed A2A surface. Callers must send "Authorization: Bearer <token>". It is sent to Cloud Run as the ADK_A2A_AUTH_TOKEN environment variable and is never written into the image. If unset, the deployed A2A surface is served WITHOUT authentication.',
+);
+const TRIGGER_SOURCES_OPTION = new Option(
+  '--trigger_sources <string>',
+  'Optional. Comma-separated event sources allowed to invoke an agent over /apps/<app>/trigger/*. Supported sources: pubsub, eventarc. These endpoints accept unauthenticated work, so no trigger route is served unless this is set.',
+);
+const TRIGGER_SOURCES_DEPLOY_OPTION = new Option(
+  '--trigger_sources <string>',
+  'Optional. Comma-separated event sources allowed to invoke the deployed agent over /apps/<app>/trigger/*. Supported sources: pubsub, eventarc. These endpoints accept unauthenticated work, so no trigger route is served unless this is set.',
 );
 const RELOAD_AGENTS_OPTION = new Option(
   '--reload_agents [boolean]',
@@ -226,6 +249,7 @@ export function createProgram(): Command {
     .addOption(AGENT_FILE_MODULE_TYPE)
     .addOption(A2A_OPTION)
     .addOption(A2A_AUTH_TOKEN_OPTION)
+    .addOption(TRIGGER_SOURCES_OPTION)
     .addOption(RELOAD_AGENTS_OPTION)
     .action(async (agentsDir: string, options: Record<string, string>) => {
       const logLevel = getLogLevelFromOptions(options);
@@ -245,6 +269,7 @@ export function createProgram(): Command {
           agentFileLoadOptions: getAgentFileOptions(options),
           a2a: getBoolean(options['a2a']),
           a2aAuthToken: options['a2a_auth_token'],
+          triggerSources: getTriggerSources(options['trigger_sources']),
           reloadAgents: getBoolean(options['reload_agents']),
         });
 
@@ -272,6 +297,7 @@ export function createProgram(): Command {
     .addOption(AGENT_FILE_MODULE_TYPE)
     .addOption(A2A_OPTION)
     .addOption(A2A_AUTH_TOKEN_OPTION)
+    .addOption(TRIGGER_SOURCES_OPTION)
     .addOption(RELOAD_AGENTS_OPTION)
     .action(async (agentsDir: string, options: Record<string, string>) => {
       const logLevel = getLogLevelFromOptions(options);
@@ -291,6 +317,7 @@ export function createProgram(): Command {
           agentFileLoadOptions: getAgentFileOptions(options),
           a2a: getBoolean(options['a2a']),
           a2aAuthToken: options['a2a_auth_token'],
+          triggerSources: getTriggerSources(options['trigger_sources']),
           reloadAgents: getBoolean(options['reload_agents']),
         });
         await server.start();
@@ -423,6 +450,7 @@ export function createProgram(): Command {
     .addOption(AGENT_FILE_MODULE_TYPE)
     .addOption(A2A_OPTION)
     .addOption(A2A_AUTH_TOKEN_DEPLOY_OPTION)
+    .addOption(TRIGGER_SOURCES_DEPLOY_OPTION)
     .action(async (agentPath: string, options: Record<string, string>) => {
       const extraGcloudArgs = [];
       for (const arg of process.argv.slice(5)) {
@@ -454,6 +482,7 @@ export function createProgram(): Command {
           agentFileLoadOptions: getAgentFileOptions(options),
           a2a: getBoolean(options['a2a']),
           a2aAuthToken: options['a2a_auth_token'],
+          triggerSources: getTriggerSources(options['trigger_sources']),
           extraGcloudArgs,
         });
       } catch (error) {

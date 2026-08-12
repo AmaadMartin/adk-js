@@ -89,6 +89,27 @@ describe('createDockerFileContent', () => {
     expect(content).toContain('--a2a');
   });
 
+  it('should create Dockerfile content without --trigger_sources by default', () => {
+    const content = createDockerFileContent(defaultOptions);
+    expect(content).not.toContain('--trigger_sources');
+  });
+
+  it('should forward --trigger_sources as one comma-separated value', () => {
+    const content = createDockerFileContent({
+      ...defaultOptions,
+      triggerSources: ['pubsub', 'eventarc'],
+    });
+    expect(content).toContain("--trigger_sources='pubsub,eventarc'");
+  });
+
+  it('should omit --trigger_sources for an empty source list', () => {
+    const content = createDockerFileContent({
+      ...defaultOptions,
+      triggerSources: [],
+    });
+    expect(content).not.toContain('--trigger_sources');
+  });
+
   it('should use web command when withUi is true', () => {
     const content = createDockerFileContent({
       ...defaultOptions,
