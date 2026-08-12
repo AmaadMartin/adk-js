@@ -10,7 +10,12 @@ import {Client} from '@google-cloud/vertexai/build/src/genai/client.js';
 import {ReasoningEngine as VertexReasoningEngine} from '@google-cloud/vertexai/build/src/genai/types.js';
 
 import {AgentLoader} from '../../utils/agent_loader.js';
-import {createTempDir, isFile, isFolderExists} from '../../utils/file_utils.js';
+import {
+  createTempDir,
+  isFile,
+  isFolderExists,
+  removeFolderOnExit,
+} from '../../utils/file_utils.js';
 import {
   BaseDeployOptions,
   copyAgentFiles,
@@ -81,6 +86,8 @@ export async function deployToAgentEngine(options: DeployToAgentEngineOptions) {
 
   const tempFolder =
     options.tempFolder ?? (await createTempDir('agent_engine_deploy_src'));
+
+  const unregisterExitCleanup = removeFolderOnExit(tempFolder);
 
   if (options.tempFolder && (await isFolderExists(tempFolder))) {
     await fs.rm(tempFolder, {recursive: true, force: true});
@@ -218,5 +225,8 @@ export async function deployToAgentEngine(options: DeployToAgentEngineOptions) {
     await fs.rm(tempFolder, {recursive: true, force: true});
     await agentLoader.disposeAll();
     console.info('Temporary files cleaned up.');
+    // Disarmed last: an interrupt during the async removal above still needs
+    // the synchronous backstop.
+    unregisterExitCleanup();
   }
 }

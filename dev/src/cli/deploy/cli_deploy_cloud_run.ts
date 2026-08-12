@@ -8,7 +8,12 @@ import * as path from 'node:path';
 
 import {A2A_AUTH_TOKEN_ENV_VAR} from '../../server/adk_api_server.js';
 import {AgentLoader} from '../../utils/agent_loader.js';
-import {createTempDir, isFile, isFolderExists} from '../../utils/file_utils.js';
+import {
+  createTempDir,
+  isFile,
+  isFolderExists,
+  removeFolderOnExit,
+} from '../../utils/file_utils.js';
 import {
   BaseDeployOptions,
   CreateDockerFileContentOptions,
@@ -186,6 +191,8 @@ export async function deployToCloudRun(options: DeployToCloudRunOptions) {
     options.tempFolder ?? (await createTempDir('cloud_run_deploy_src'));
   gcloudCommands.push('--source', tempFolder);
 
+  const unregisterExitCleanup = removeFolderOnExit(tempFolder);
+
   if (options.tempFolder && (await isFolderExists(tempFolder))) {
     console.info('Cleaning up existing temporary files...');
     await fs.rm(tempFolder, {recursive: true, force: true});
@@ -224,5 +231,8 @@ export async function deployToCloudRun(options: DeployToCloudRunOptions) {
     await fs.rm(tempFolder, {recursive: true, force: true});
     await agentLoader.disposeAll();
     console.info('Temporary files cleaned up.');
+    // Disarmed last: an interrupt during the async removal above still needs
+    // the synchronous backstop.
+    unregisterExitCleanup();
   }
 }
