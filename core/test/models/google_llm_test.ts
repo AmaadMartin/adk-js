@@ -7,6 +7,7 @@
 import {
   Gemini,
   GeminiParams,
+  GoogleLLMVariant,
   LlmRequest,
   LlmResponse,
   geminiInitParams,
@@ -143,6 +144,56 @@ describe('GoogleLlm', () => {
         location: 'us-central1',
       }),
     );
+  });
+
+  describe('explicit vertexai: false', () => {
+    const setVertexEnv = () => {
+      process.env['GOOGLE_GENAI_USE_VERTEXAI'] = 'true';
+      process.env['GOOGLE_CLOUD_PROJECT'] = 'env-project';
+      process.env['GOOGLE_CLOUD_LOCATION'] = 'us-central1';
+    };
+
+    it('should keep the Gemini API backend and forward the flag to apiClient', () => {
+      setVertexEnv();
+      const llm = new TestGemini({
+        model: 'gemini-2.5-flash',
+        vertexai: false,
+        apiKey: 'test-key',
+      });
+
+      const spy = vi.mocked(GoogleGenAI);
+      spy.mockClear();
+
+      expect(llm.apiClient).toBeDefined();
+      expect(spy).toHaveBeenCalledWith(
+        expect.objectContaining({apiKey: 'test-key', vertexai: false}),
+      );
+      expect(llm.apiBackend).toBe(GoogleLLMVariant.GEMINI_API);
+    });
+
+    it('should forward the flag to liveApiClient', () => {
+      setVertexEnv();
+      const llm = new TestGemini({
+        model: 'gemini-2.5-flash',
+        vertexai: false,
+        apiKey: 'test-key',
+      });
+
+      const spy = vi.mocked(GoogleGenAI);
+      spy.mockClear();
+
+      expect(llm.liveApiClient).toBeDefined();
+      expect(spy).toHaveBeenCalledWith(
+        expect.objectContaining({vertexai: false}),
+      );
+    });
+
+    it('should throw the API key error instead of the VertexAI project error', () => {
+      process.env['GOOGLE_GENAI_USE_VERTEXAI'] = 'true';
+      expect(
+        () => new TestGemini({model: 'gemini-2.5-flash', vertexai: false}),
+      ).toThrow(/API key must be provided/);
+    });
   });
 
   describe('generateContentAsync streaming thoughtSignature propagation', () => {
@@ -342,6 +393,101 @@ describe('GoogleLlm', () => {
         location: 'us-central1',
       };
       expect(() => geminiInitParams(input)).toThrow(/VertexAI project/);
+    });
+
+    it('should let explicit vertexai false win over GOOGLE_GENAI_USE_VERTEXAI=true', () => {
+      process.env['GOOGLE_GENAI_USE_VERTEXAI'] = 'true';
+      const params = geminiInitParams({
+        model: 'gemini-1.5-flash',
+        vertexai: false,
+        apiKey: 'test-key',
+      });
+      expect(params.vertexai).toBe(false);
+      expect(params.apiKey).toBe('test-key');
+    });
+
+    it('should let explicit vertexai false win over GOOGLE_GENAI_USE_VERTEXAI=1', () => {
+      process.env['GOOGLE_GENAI_USE_VERTEXAI'] = '1';
+      const params = geminiInitParams({
+        model: 'gemini-1.5-flash',
+        vertexai: false,
+        apiKey: 'test-key',
+      });
+      expect(params.vertexai).toBe(false);
+    });
+
+    it('should not adopt Cloud project/location when vertexai is explicitly false', () => {
+      process.env['GOOGLE_GENAI_USE_VERTEXAI'] = 'true';
+      process.env['GOOGLE_CLOUD_PROJECT'] = 'env-project';
+      process.env['GOOGLE_CLOUD_LOCATION'] = 'env-location';
+      const params = geminiInitParams({
+        model: 'gemini-1.5-flash',
+        vertexai: false,
+        apiKey: 'test-key',
+      });
+      expect(params.vertexai).toBe(false);
+      expect(params.project).toBeUndefined();
+      expect(params.location).toBeUndefined();
+    });
+
+    it('should not throw the VertexAI project error when vertexai is explicitly false', () => {
+      process.env['GOOGLE_GENAI_USE_VERTEXAI'] = 'true';
+      const params = geminiInitParams({
+        model: 'gemini-1.5-flash',
+        vertexai: false,
+        apiKey: 'test-key',
+      });
+      expect(params.vertexai).toBe(false);
+    });
+
+    it('should still resolve apiKey from env when vertexai is explicitly false', () => {
+      process.env['GOOGLE_GENAI_USE_VERTEXAI'] = 'true';
+      process.env['GOOGLE_GENAI_API_KEY'] = 'env-api-key';
+      const params = geminiInitParams({
+        model: 'gemini-1.5-flash',
+        vertexai: false,
+      });
+      expect(params.vertexai).toBe(false);
+      expect(params.apiKey).toBe('env-api-key');
+    });
+
+    it('should let explicit vertexai true win when GOOGLE_GENAI_USE_VERTEXAI is unset', () => {
+      const params = geminiInitParams({
+        model: 'gemini-1.5-flash',
+        vertexai: true,
+        project: 'test-project',
+        location: 'us-central1',
+      });
+      expect(params.vertexai).toBe(true);
+    });
+
+    describe('in a browser', () => {
+      beforeEach(() => {
+        vi.stubGlobal('window', {});
+      });
+
+      afterEach(() => {
+        vi.unstubAllGlobals();
+      });
+
+      it('should ignore GOOGLE_GENAI_USE_VERTEXAI when vertexai is omitted', () => {
+        process.env['GOOGLE_GENAI_USE_VERTEXAI'] = 'true';
+        const params = geminiInitParams({
+          model: 'gemini-1.5-flash',
+          apiKey: 'test-key',
+        });
+        expect(params.vertexai).toBe(false);
+      });
+
+      it('should honor an explicit vertexai true', () => {
+        const params = geminiInitParams({
+          model: 'gemini-1.5-flash',
+          vertexai: true,
+          project: 'test-project',
+          location: 'us-central1',
+        });
+        expect(params.vertexai).toBe(true);
+      });
     });
   });
 

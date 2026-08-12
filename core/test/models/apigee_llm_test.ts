@@ -12,6 +12,7 @@ import {
   ApigeeLlmParams,
   BaseLlmConnection,
   Gemini,
+  GoogleLLMVariant,
   LLMRegistry,
   LlmRequest,
 } from '@google/adk';
@@ -77,6 +78,30 @@ describe('ApigeeLlm', () => {
         proxyUrl: defaultProxyUrl,
       });
       expect(llm['vertexai']).toBe(true);
+    });
+
+    it('explicit vertexai false opts out even if GOOGLE_GENAI_USE_VERTEXAI is true', () => {
+      process.env['GOOGLE_GENAI_USE_VERTEXAI'] = 'true';
+      process.env['GOOGLE_CLOUD_PROJECT'] = 'test-project';
+      process.env['GOOGLE_CLOUD_LOCATION'] = 'us-central1';
+      const llm = new ApigeeLlm({
+        model: 'apigee/gemini-1.5-flash',
+        vertexai: false,
+        proxyUrl: defaultProxyUrl,
+      });
+      expect(llm.apiBackend).toBe(GoogleLLMVariant.GEMINI_API);
+      expect(llm.liveApiVersion).toBe('v1alpha');
+    });
+
+    it('apigee/vertex_ai/ model string still wins over explicit vertexai false', () => {
+      process.env['GOOGLE_CLOUD_PROJECT'] = 'test-project';
+      process.env['GOOGLE_CLOUD_LOCATION'] = 'us-central1';
+      const llm = new ApigeeLlm({
+        model: vertexModelString,
+        vertexai: false,
+        proxyUrl: defaultProxyUrl,
+      });
+      expect(llm.apiBackend).toBe(GoogleLLMVariant.VERTEX_AI);
     });
 
     interface EnvVarTestCase {
