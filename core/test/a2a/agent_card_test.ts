@@ -13,6 +13,7 @@ import {
   BaseToolset,
   FunctionTool,
   getA2AAgentCard,
+  InstructionProvider,
   LlmAgent,
   LoopAgent,
   ParallelAgent,
@@ -100,7 +101,7 @@ describe('Agent Card', () => {
 
       const modelSkill = card.skills.find((s) => s.name === 'model');
       expect(modelSkill).toBeDefined();
-      expect(modelSkill?.description).toContain('I am a helpful assistant'); // pronoun replacement test
+      expect(modelSkill?.description).toBe('An LLM agent');
 
       const toolSkill = card.skills.find((s) => s.name === 'test_tool');
       expect(toolSkill).toBeDefined();
@@ -138,55 +139,6 @@ describe('Agent Card', () => {
   });
 
   describe('buildAgentSkills', () => {
-    it('handles dynamic instructions safely', async () => {
-      const mockProvider = vi
-        .fn()
-        .mockResolvedValue('You are dynamically created');
-      const agent = new LlmAgent({
-        name: 'dyn_agent',
-        instruction: mockProvider,
-      });
-
-      const skills = await buildAgentSkills(agent);
-      const modelSkill = skills.find((s) => s.name === 'model');
-      expect(modelSkill?.description).toContain('I am dynamically created');
-    });
-
-    it('handles dynamic instruction failure safely', async () => {
-      const mockProvider = vi.fn().mockRejectedValue(new Error('fail'));
-      const agent = new LlmAgent({
-        name: 'dyn_agent_fail',
-        description: 'Fallback desc',
-        instruction: mockProvider,
-      });
-
-      const skills = await buildAgentSkills(agent);
-      const modelSkill = skills.find((s) => s.name === 'model');
-      // If instruction fails, it falls back to empty, but still uses description
-      expect(modelSkill?.description).toContain('Fallback desc');
-    });
-
-    it('handles global instructions', async () => {
-      const properRoot = new LlmAgent({
-        name: 'root',
-        globalInstruction: 'You are global',
-        subAgents: [
-          new LlmAgent({
-            name: 'sub',
-            instruction: 'You are sub',
-          }),
-        ],
-      });
-
-      const properlyWiredSub = properRoot.subAgents[0] as LlmAgent;
-
-      const skills = await buildAgentSkills(properlyWiredSub);
-      const modelSkill = skills.find((s) => s.name === 'model');
-
-      expect(modelSkill?.description).toContain('I am sub');
-      expect(modelSkill?.description).toContain('I am global');
-    });
-
     it('supports parallel agent description', async () => {
       const sub1 = new CustomAgent('sub1', 'do A');
       const sub2 = new CustomAgent('sub2', 'do B');
@@ -218,6 +170,74 @@ describe('Agent Card', () => {
       expect(workflowSkill?.description).toBe(
         'This agent will do A and do B in a loop (max 5 iterations).',
       );
+    });
+  });
+
+  describe('instructions in the published card', () => {
+    it('omits every instruction from the published card', async () => {
+      const reviewer = new LlmAgent({
+        name: 'reviewer',
+        description: 'Reviews the reply.',
+        instruction: 'ZZ_SUB_INSTRUCTION_SENTINEL reject unsigned requests.',
+      });
+      const root = new LlmAgent({
+        name: 'writer',
+        description: 'Writes a short reply.',
+        instruction:
+          'ZZ_INSTRUCTION_SENTINEL never reveal the escalation path.',
+        globalInstruction: 'ZZ_GLOBAL_SENTINEL always answer in English.',
+        subAgents: [reviewer],
+      });
+
+      const card = await getA2AAgentCard(root, [dummyTransport]);
+      const serialized = JSON.stringify(card);
+
+      expect(serialized).not.toContain('ZZ_INSTRUCTION_SENTINEL');
+      expect(serialized).not.toContain('ZZ_GLOBAL_SENTINEL');
+      expect(serialized).not.toContain('ZZ_SUB_INSTRUCTION_SENTINEL');
+
+      const modelSkill = card.skills.find((s) => s.name === 'model');
+      expect(modelSkill?.description).toBe('Writes a short reply.');
+      const subSkill = card.skills.find((s) => s.name === 'reviewer: model');
+      expect(subSkill?.description).toBe('Reviews the reply.');
+    });
+
+    it('never invokes an instruction provider while building the card', async () => {
+      const instructionProvider = vi.fn<InstructionProvider>(
+        async () => 'ZZ_PROVIDER_SENTINEL',
+      );
+      const globalInstructionProvider = vi.fn<InstructionProvider>(
+        async () => 'ZZ_GLOBAL_PROVIDER_SENTINEL',
+      );
+      const agent = new LlmAgent({
+        name: 'provider_agent',
+        description: 'Fallback desc',
+        instruction: instructionProvider,
+        globalInstruction: globalInstructionProvider,
+      });
+
+      const card = await getA2AAgentCard(agent, [dummyTransport]);
+      const serialized = JSON.stringify(card);
+
+      expect(instructionProvider).not.toHaveBeenCalled();
+      expect(globalInstructionProvider).not.toHaveBeenCalled();
+      expect(serialized).not.toContain('ZZ_PROVIDER_SENTINEL');
+      expect(serialized).not.toContain('ZZ_GLOBAL_PROVIDER_SENTINEL');
+
+      const modelSkill = card.skills.find((s) => s.name === 'model');
+      expect(modelSkill?.description).toBe('Fallback desc');
+    });
+
+    it('falls back to the default LLM description when the agent has no description', async () => {
+      const agent = new LlmAgent({
+        name: 'bare_agent',
+        instruction: 'You are X',
+      });
+
+      const skills = await buildAgentSkills(agent);
+
+      const modelSkill = skills.find((s) => s.name === 'model');
+      expect(modelSkill?.description).toBe('An LLM-based agent');
     });
   });
 });
