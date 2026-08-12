@@ -50,6 +50,16 @@ import {getAgentGraphAsDot} from './agent_graph.js';
  */
 export const A2A_AUTH_TOKEN_ENV_VAR = 'ADK_A2A_AUTH_TOKEN';
 
+/** One entry of the `GET /list-app-errors` response. */
+export interface AppLoadError {
+  /** App name the agent would have been served under. */
+  name: string;
+  /** Absolute path of the file that failed to load. */
+  filePath: string;
+  /** `Error.message` of the failure; the stack is not exposed. */
+  error: string;
+}
+
 interface ServerOptions {
   agentsDir?: string;
   host?: string;
@@ -257,6 +267,27 @@ export class AdkApiServer {
         res.json(apps);
       } catch (e: unknown) {
         const error = `Failed to list apps: ${e}`;
+
+        res.status(500).json({error});
+        this.logger.error(error);
+
+        return;
+      }
+    });
+
+    // `/list-apps` omits the agents that failed to load, so an agent can drop
+    // out of the dev UI with no explanation in it. This says why.
+    app.get('/list-app-errors', async (req: Request, res: Response) => {
+      try {
+        const failures = await this.agentLoader.listLoadFailures();
+        const appErrors: AppLoadError[] = failures.map((failure) => ({
+          name: failure.name,
+          filePath: failure.filePath,
+          error: failure.error.message,
+        }));
+        res.json(appErrors);
+      } catch (e: unknown) {
+        const error = `Failed to list app errors: ${e}`;
 
         res.status(500).json({error});
         this.logger.error(error);
