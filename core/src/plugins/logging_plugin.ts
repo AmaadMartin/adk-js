@@ -18,6 +18,7 @@ import {
 import {LlmRequest} from '../models/llm_request.js';
 import {LlmResponse} from '../models/llm_response.js';
 import {BaseTool} from '../tools/base_tool.js';
+import {contentUnionToText} from '../utils/content_utils.js';
 import {logger} from '../utils/logger.js';
 
 import {BasePlugin} from './base_plugin.js';
@@ -169,8 +170,10 @@ export class LoggingPlugin extends BasePlugin {
     this.log(`   Model: ${llmRequest.model ?? 'default'}`);
     this.log(`   Agent: ${callbackContext.agentName}`);
 
-    if (llmRequest.config && llmRequest.config.systemInstruction) {
-      let sysInstruction = llmRequest.config.systemInstruction as string;
+    let sysInstruction = contentUnionToText(
+      llmRequest.config?.systemInstruction,
+    );
+    if (sysInstruction) {
       if (sysInstruction.length > 200) {
         sysInstruction = sysInstruction.substring(0, 200) + '...';
       }

@@ -2085,6 +2085,20 @@ describe('interactions_utils', () => {
       };
       expect(extractSystemInstruction(config)).toBeUndefined();
     });
+
+    it('should extract text from an array systemInstruction', () => {
+      const config: GenerateContentConfig = {
+        systemInstruction: ['line 1', {text: 'line 2'}],
+      };
+      expect(extractSystemInstruction(config)).toBe('line 1\nline 2');
+    });
+
+    it('should extract text from a bare Part systemInstruction', () => {
+      const config: GenerateContentConfig = {
+        systemInstruction: {text: 'be helpful'},
+      };
+      expect(extractSystemInstruction(config)).toBe('be helpful');
+    });
   });
 
   describe('generateContentViaInteractions extra streaming cases', () => {
