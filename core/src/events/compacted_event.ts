@@ -55,6 +55,15 @@ export function isScratchpadEvent(
   );
 }
 
+/**
+ * Creates a {@link CompactedEvent} from partial fields.
+ *
+ * Fills in the base {@link Event} defaults (id, invocationId, actions,
+ * timestamp) and marks the event as compacted.
+ *
+ * @param params The partial compacted event to create the event from.
+ * @returns The compacted event.
+ */
 export function createCompactedEvent(
   params: Partial<CompactedEvent> = {},
 ): CompactedEvent {
