@@ -754,6 +754,35 @@ describe('mergeParallelFunctionResponseEvents', () => {
     const merged = mergeParallelFunctionResponseEvents([event]);
     expect(merged).toBe(event);
   });
+
+  it('should keep the nested stateDelta keys written by both events', () => {
+    const event1 = createEvent({
+      invocationId: 'inv-1',
+      author: 'agent-1',
+      content: {
+        role: 'user',
+        parts: [
+          {functionResponse: {name: 'tool1', response: {result: 1}, id: 'id1'}},
+        ],
+      },
+      actions: createEventActions({stateDelta: {user: {name: 'a'}}}),
+    });
+    const event2 = createEvent({
+      invocationId: 'inv-1',
+      author: 'agent-1',
+      content: {
+        role: 'user',
+        parts: [
+          {functionResponse: {name: 'tool2', response: {result: 2}, id: 'id2'}},
+        ],
+      },
+      actions: createEventActions({stateDelta: {user: {age: 2}}}),
+    });
+
+    const merged = mergeParallelFunctionResponseEvents([event1, event2]);
+
+    expect(merged.actions.stateDelta).toEqual({user: {name: 'a', age: 2}});
+  });
 });
 
 describe('findEventByFunctionCallId', () => {

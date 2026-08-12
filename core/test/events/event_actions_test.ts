@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {AuthConfig, AuthCredentialTypes, ToolConfirmation} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 import {AuthConfig} from '../../src/auth/auth_tool.js';
 import {
@@ -210,5 +211,109 @@ describe('mergeEventActions', () => {
       createEventActions({stateDelta: {x: 1}}),
     ]);
     expect(result.stateDelta).toEqual({x: 1});
+  });
+
+  it('merges nested stateDelta objects instead of replacing them', () => {
+    const result = mergeEventActions([
+      createEventActions({stateDelta: {user: {name: 'a'}}}),
+      createEventActions({stateDelta: {user: {age: 2}}}),
+    ]);
+    expect(result.stateDelta).toEqual({user: {name: 'a', age: 2}});
+  });
+
+  it('lets a stateDelta scalar overwrite a nested object', () => {
+    const result = mergeEventActions([
+      createEventActions({stateDelta: {user: {name: 'a'}}}),
+      createEventActions({stateDelta: {user: 'gone'}}),
+    ]);
+    expect(result.stateDelta).toEqual({user: 'gone'});
+  });
+
+  it('lets a nested stateDelta object overwrite a scalar', () => {
+    const result = mergeEventActions([
+      createEventActions({stateDelta: {user: 'gone'}}),
+      createEventActions({stateDelta: {user: {name: 'a'}}}),
+    ]);
+    expect(result.stateDelta).toEqual({user: {name: 'a'}});
+  });
+
+  it('replaces stateDelta arrays rather than concatenating them', () => {
+    const result = mergeEventActions([
+      createEventActions({stateDelta: {items: [1, 2]}}),
+      createEventActions({stateDelta: {items: [3]}}),
+    ]);
+    expect(result.stateDelta).toEqual({items: [3]});
+  });
+
+  it('merges nested stateDelta objects cumulatively across three sources', () => {
+    const result = mergeEventActions([
+      createEventActions({stateDelta: {user: {name: 'a'}}}),
+      createEventActions({stateDelta: {user: {age: 2}}}),
+      createEventActions({stateDelta: {user: {city: 'zurich'}}}),
+    ]);
+    expect(result.stateDelta).toEqual({
+      user: {name: 'a', age: 2, city: 'zurich'},
+    });
+  });
+
+  it('leaves the source stateDelta objects untouched and unaliased', () => {
+    const first = createEventActions({stateDelta: {user: {name: 'a'}}});
+    const second = createEventActions({stateDelta: {user: {age: 2}}});
+
+    const result = mergeEventActions([first, second]);
+
+    expect(first.stateDelta).toEqual({user: {name: 'a'}});
+    expect(second.stateDelta).toEqual({user: {age: 2}});
+    expect(result.stateDelta['user']).not.toBe(first.stateDelta['user']);
+    expect(result.stateDelta['user']).not.toBe(second.stateDelta['user']);
+  });
+
+  it('keeps the last version when artifactDelta collides on a filename', () => {
+    const result = mergeEventActions([
+      createEventActions({artifactDelta: {'file.txt': 1}}),
+      createEventActions({artifactDelta: {'file.txt': 2}}),
+    ]);
+    expect(result.artifactDelta).toEqual({'file.txt': 2});
+  });
+
+  it('replaces a whole AuthConfig when two sources share a call id', () => {
+    const first: AuthConfig = {
+      authScheme: {type: 'apiKey', in: 'header', name: 'X-Api-Key'},
+      credentialKey: 'key-1',
+      rawAuthCredential: {
+        authType: AuthCredentialTypes.API_KEY,
+        apiKey: 'secret-1',
+      },
+    };
+    const second: AuthConfig = {
+      authScheme: {type: 'apiKey', in: 'query', name: 'api_key'},
+      credentialKey: 'key-2',
+    };
+
+    const result = mergeEventActions([
+      createEventActions({requestedAuthConfigs: {'call-1': first}}),
+      createEventActions({requestedAuthConfigs: {'call-1': second}}),
+    ]);
+
+    expect(result.requestedAuthConfigs['call-1']).toBe(second);
+    expect(
+      result.requestedAuthConfigs['call-1'].rawAuthCredential,
+    ).toBeUndefined();
+  });
+
+  it('replaces a ToolConfirmation by reference when a call id collides', () => {
+    const first = new ToolConfirmation({hint: 'first?', confirmed: false});
+    const second = new ToolConfirmation({confirmed: true});
+
+    const result = mergeEventActions([
+      createEventActions({requestedToolConfirmations: {'call-1': first}}),
+      createEventActions({requestedToolConfirmations: {'call-1': second}}),
+    ]);
+
+    expect(result.requestedToolConfirmations['call-1']).toBe(second);
+    expect(result.requestedToolConfirmations['call-1']).toBeInstanceOf(
+      ToolConfirmation,
+    );
+    expect(result.requestedToolConfirmations['call-1'].hint).toBe('');
   });
 });

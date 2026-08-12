@@ -6,6 +6,7 @@
 
 import {AuthConfig} from '../auth/auth_tool.js';
 import {ToolConfirmation} from '../tools/tool_confirmation.js';
+import {deepMerge} from '../utils/merge_utils.js';
 
 /**
  * Represents the actions attached to an event.
@@ -98,11 +99,16 @@ export function createEventActions(
  * {@link EventActions} object.
  *
  * Merge semantics:
- * 1. **Dictionary fields** (`stateDelta`, `artifactDelta`,
- *    `requestedAuthConfigs`, `requestedToolConfirmations`) — all entries from
- *    every source are combined via `Object.assign`. Later sources win on
- *    duplicate keys.
- * 2. **Scalar fields** (`skipSummarization`, `transferToAgent`, `escalate`) —
+ * 1. **`stateDelta`** — merged recursively, so two sources that write
+ *    different inner keys of the same nested object both survive. Only plain
+ *    objects recurse; on any other collision the later source wins, and
+ *    arrays are replaced rather than concatenated.
+ * 2. **The other dictionary fields** (`artifactDelta`,
+ *    `requestedAuthConfigs`, `requestedToolConfirmations`) — one level only,
+ *    later sources win on duplicate keys. `artifactDelta` holds version
+ *    numbers, and the other two are keyed by function call id, which is
+ *    unique per call, so nothing nested can collide.
+ * 3. **Scalar fields** (`skipSummarization`, `transferToAgent`, `escalate`) —
  *    last-writer-wins: the value from the last source that sets the field is
  *    kept.
  *
@@ -126,7 +132,7 @@ export function mergeEventActions(
     if (!source) continue;
 
     if (source.stateDelta) {
-      Object.assign(result.stateDelta, source.stateDelta);
+      result.stateDelta = deepMerge(result.stateDelta, source.stateDelta);
     }
     if (source.artifactDelta) {
       Object.assign(result.artifactDelta, source.artifactDelta);
