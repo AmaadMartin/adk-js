@@ -124,6 +124,7 @@ describe('OperationParser', () => {
 
     expect(params.length).toBe(1);
     expect(params[0].name).toBe('body');
+    expect(params[0].originalName).toBe('body');
     expect(params[0].paramLocation).toBe('body');
   });
 
@@ -135,6 +136,7 @@ describe('OperationParser', () => {
 
     expect(params.length).toBe(1);
     expect(params[0].name).toBe('body');
+    expect(params[0].originalName).toBe('body');
     expect(params[0].paramLocation).toBe('body');
   });
 
