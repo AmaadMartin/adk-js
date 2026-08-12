@@ -240,6 +240,241 @@ describe('VertexAiMemoryBankService', () => {
         }),
       );
     });
+
+    it('sends nothing when the generate path filters out every event', async () => {
+      const events = [{content: {parts: []} as Content} as Event];
+
+      await service.addEventsToMemory({
+        appName: 'test-app',
+        userId: 'test-user',
+        events,
+        customMetadata: {ttl: '3600s'},
+      });
+
+      expect(mockMemories.generateInternal).not.toHaveBeenCalled();
+      expect(mockMemories.ingestEventsInternal).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('addEventsToMemory via ingest', () => {
+    const ingestName = 'reasoningEngines/test-engine-id';
+    const ingestScope = {app_name: 'test-app', user_id: 'test-user'};
+
+    it('sends the event timestamp as an RFC 3339 event time', async () => {
+      const event = createEvent({
+        author: 'user',
+        content: {parts: [{text: 'event 1'}]},
+        timestamp: Date.UTC(2026, 3, 21, 12, 0, 0),
+      });
+
+      await service.addEventsToMemory({
+        appName: 'test-app',
+        userId: 'test-user',
+        events: [event],
+      });
+
+      expect(mockMemories.ingestEventsInternal).toHaveBeenCalledWith({
+        name: ingestName,
+        scope: ingestScope,
+        directContentsSource: {
+          events: [
+            {
+              content: {parts: [{text: 'event 1'}]},
+              eventId: event.id,
+              eventTime: '2026-04-21T12:00:00.000Z',
+            },
+          ],
+        },
+      });
+    });
+
+    it('puts forceFlush in the config and the other ingest keys at the top level', async () => {
+      const event = createEvent({
+        author: 'user',
+        content: {parts: [{text: 'event 1'}]},
+        timestamp: Date.UTC(2026, 3, 21, 12, 0, 0),
+      });
+
+      await service.addEventsToMemory({
+        appName: 'test-app',
+        userId: 'test-user',
+        events: [event],
+        customMetadata: {
+          streamId: 'stream-123',
+          forceFlush: true,
+          generationTriggerConfig: {generationRule: {idleDuration: '60s'}},
+        },
+      });
+
+      expect(mockMemories.ingestEventsInternal).toHaveBeenCalledWith({
+        name: ingestName,
+        scope: ingestScope,
+        directContentsSource: {
+          events: [
+            {
+              content: {parts: [{text: 'event 1'}]},
+              eventId: event.id,
+              eventTime: '2026-04-21T12:00:00.000Z',
+            },
+          ],
+        },
+        streamId: 'stream-123',
+        generationTriggerConfig: {generationRule: {idleDuration: '60s'}},
+        config: {forceFlush: true},
+      });
+      expect(mockMemories.generateInternal).not.toHaveBeenCalled();
+    });
+
+    it('ingests a trigger config update without events', async () => {
+      await service.addEventsToMemory({
+        appName: 'test-app',
+        userId: 'test-user',
+        events: [],
+        customMetadata: {
+          generationTriggerConfig: {generationRule: {eventCount: 10}},
+        },
+      });
+
+      expect(mockMemories.ingestEventsInternal).toHaveBeenCalledWith({
+        name: ingestName,
+        scope: ingestScope,
+        generationTriggerConfig: {generationRule: {eventCount: 10}},
+      });
+    });
+
+    it('ingests an empty session with the name and the scope only', async () => {
+      const session = createSession({
+        id: 'test-session-id',
+        appName: 'test-app',
+        userId: 'test-user',
+        events: [],
+        lastUpdateTime: Date.now(),
+      });
+
+      await service.addSessionToMemory(session);
+
+      expect(mockMemories.ingestEventsInternal).toHaveBeenCalledWith({
+        name: ingestName,
+        scope: ingestScope,
+      });
+    });
+
+    it.each([
+      ['ttl', {ttl: '6000s'}],
+      ['revisionTtl', {revisionTtl: '100s'}],
+      ['metadata', {metadata: {key: 'value'}}],
+      ['waitForCompletion', {waitForCompletion: true}],
+    ])('routes to generate for the generate-only key %s', async (_, meta) => {
+      await service.addEventsToMemory({
+        appName: 'test-app',
+        userId: 'test-user',
+        events: [{content: {parts: [{text: 'event 1'}]} as Content} as Event],
+        customMetadata: meta,
+      });
+
+      expect(mockMemories.generateInternal).toHaveBeenCalled();
+      expect(mockMemories.ingestEventsInternal).not.toHaveBeenCalled();
+    });
+
+    it('keeps an ingest key on the ingest path', async () => {
+      await service.addEventsToMemory({
+        appName: 'test-app',
+        userId: 'test-user',
+        events: [{content: {parts: [{text: 'event 1'}]} as Content} as Event],
+        customMetadata: {forceFlush: true},
+      });
+
+      expect(mockMemories.ingestEventsInternal).toHaveBeenCalledWith(
+        expect.objectContaining({config: {forceFlush: true}}),
+      );
+      expect(mockMemories.generateInternal).not.toHaveBeenCalled();
+    });
+
+    it('routes to generate when an ingest key and a generate-only key are mixed', async () => {
+      await service.addEventsToMemory({
+        appName: 'test-app',
+        userId: 'test-user',
+        events: [{content: {parts: [{text: 'event 1'}]} as Content} as Event],
+        customMetadata: {streamId: 'stream-123', ttl: '6000s'},
+      });
+
+      expect(mockMemories.generateInternal).toHaveBeenCalled();
+      expect(mockMemories.ingestEventsInternal).not.toHaveBeenCalled();
+    });
+
+    it('drops an unrecognised key and still ingests', async () => {
+      const event = createEvent({
+        author: 'user',
+        content: {parts: [{text: 'event 1'}]},
+        timestamp: Date.UTC(2026, 3, 21, 12, 0, 0),
+      });
+
+      await service.addEventsToMemory({
+        appName: 'test-app',
+        userId: 'test-user',
+        events: [event],
+        customMetadata: {someAppKey: 'value'},
+      });
+
+      expect(mockMemories.ingestEventsInternal).toHaveBeenCalledWith({
+        name: ingestName,
+        scope: ingestScope,
+        directContentsSource: {
+          events: [
+            {
+              content: {parts: [{text: 'event 1'}]},
+              eventId: event.id,
+              eventTime: '2026-04-21T12:00:00.000Z',
+            },
+          ],
+        },
+      });
+    });
+
+    it('skips wrong-typed ingest metadata and warns', async () => {
+      const loggerSpy = vi
+        .spyOn(getLogger(), 'warn')
+        .mockImplementation(() => {});
+
+      await service.addEventsToMemory({
+        appName: 'test-app',
+        userId: 'test-user',
+        events: [],
+        customMetadata: {
+          streamId: 42,
+          forceFlush: 'yes',
+          generationTriggerConfig: 'nope',
+        },
+      });
+
+      expect(mockMemories.ingestEventsInternal).toHaveBeenCalledWith({
+        name: ingestName,
+        scope: ingestScope,
+      });
+      expect(loggerSpy).toHaveBeenCalledWith(
+        'Ignoring streamId because customMetadata["streamId"] is not a string.',
+      );
+      expect(loggerSpy).toHaveBeenCalledWith(
+        'Ignoring forceFlush because customMetadata["forceFlush"] is not a boolean.',
+      );
+      expect(loggerSpy).toHaveBeenCalledWith(
+        'Ignoring generationTriggerConfig because customMetadata["generationTriggerConfig"] is not an object.',
+      );
+      loggerSpy.mockRestore();
+    });
+
+    it('propagates a rejected ingest request', async () => {
+      mockMemories.ingestEventsInternal.mockRejectedValue(new Error('boom'));
+      const session = createSession({
+        id: 'test-session-id',
+        appName: 'test-app',
+        userId: 'test-user',
+        events: [],
+        lastUpdateTime: Date.now(),
+      });
+
+      await expect(service.addSessionToMemory(session)).rejects.toThrow('boom');
+    });
   });
 
   describe('addMemory', () => {
