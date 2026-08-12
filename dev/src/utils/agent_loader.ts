@@ -4,7 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {App, BaseAgent, isApp, isBaseAgent} from '@google/adk';
+import {
+  App,
+  BaseAgent,
+  isApp,
+  isBaseAgent,
+  Logger,
+  LogLevel,
+} from '@google/adk';
 import esbuild from 'esbuild';
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore
@@ -26,7 +33,11 @@ import {
 } from './file_utils.js';
 import {AdkLogger} from './logger.js';
 
-const logger = new AdkLogger({label: 'AgentLoader', colorize: {all: true}});
+/** Fallback for an {@link AgentFile} constructed without a logger. */
+const defaultLogger = new AdkLogger({
+  label: 'AgentLoader',
+  colorize: {all: true},
+});
 
 /**
  * Supported file extensions for JavaScript and TypeScript.
@@ -156,6 +167,7 @@ export class AgentFile {
   constructor(
     private readonly filePath: string,
     private readonly options = DEFAULT_AGENT_FILE_OPTIONS,
+    private readonly logger: Logger = defaultLogger,
   ) {}
 
   async load(): Promise<BaseAgent | App> {
@@ -232,7 +244,7 @@ export class AgentFile {
     try {
       delete require.cache[require.resolve(filePath)];
     } catch {
-      logger.warn(`Failed to delete require cache for ${filePath}`);
+      this.logger.warn(`Failed to delete require cache for ${filePath}`);
     }
 
     const importUrl = `${pathToFileURL(filePath).href}?t=${Date.now()}_${Math.random().toString(36).slice(2)}`;
@@ -374,12 +386,17 @@ export class AgentLoader {
   private readonly preloadedAgents: Record<string, AgentFile> = {};
   private readonly loadFailures: Record<string, AgentLoadFailure> = {};
   private watcher?: fs.FSWatcher;
+  private readonly logger: AdkLogger;
 
   constructor(
     private readonly agentsDirPath: string = process.cwd(),
     private readonly options = DEFAULT_AGENT_FILE_OPTIONS,
     private readonly watchForChanges = false,
+    logLevel: LogLevel = LogLevel.INFO,
   ) {
+    this.logger = new AdkLogger({label: 'AgentLoader', colorize: {all: true}});
+    this.logger.setLogLevel(logLevel);
+
     // Do cleanups on exit
     const exitHandler = async ({
       exit,
@@ -420,17 +437,19 @@ export class AgentLoader {
         {recursive: true},
         (_event, filename) => {
           if (filename && isJsFile(path.extname(filename))) {
-            logger.info(`Detected change in ${filename}, reloading agents...`);
+            this.logger.info(
+              `Detected change in ${filename}, reloading agents...`,
+            );
             this.invalidateAll();
           }
         },
       );
 
       this.watcher.on('error', (err) => {
-        logger.warn('File watcher error:', err.message);
+        this.logger.warn('File watcher error:', err.message);
       });
     } catch (err) {
-      logger.warn('Could not start file watcher:', (err as Error).message);
+      this.logger.warn('Could not start file watcher:', (err as Error).message);
     }
   }
 
@@ -557,7 +576,7 @@ export class AgentLoader {
 
   private async loadAgentFromFile(file: FileMetadata): Promise<void> {
     try {
-      const agentFile = new AgentFile(file.path, this.options);
+      const agentFile = new AgentFile(file.path, this.options, this.logger);
       await agentFile.load();
       this.preloadedAgents[file.name] = agentFile;
     } catch (e) {
@@ -576,7 +595,11 @@ export class AgentLoader {
     }
 
     try {
-      const agentFile = new AgentFile(possibleEntryFile.path, this.options);
+      const agentFile = new AgentFile(
+        possibleEntryFile.path,
+        this.options,
+        this.logger,
+      );
       await agentFile.load();
       this.preloadedAgents[dir.name] = agentFile;
     } catch (e) {
@@ -595,7 +618,7 @@ export class AgentLoader {
 
     const error = e instanceof Error ? e : new Error(String(e));
     this.loadFailures[name] = {name, filePath, error};
-    logger.error(
+    this.logger.error(
       `Failed to load agent '${name}' from ${filePath}: ${error.message}. ` +
         `Skipping it; the other agents are unaffected.`,
     );

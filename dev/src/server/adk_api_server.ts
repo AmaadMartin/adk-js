@@ -120,6 +120,7 @@ export class AdkApiServer {
   private readonly a2aAuthToken?: string;
 
   constructor(options: ServerOptions) {
+    const logLevel = options.logLevel ?? LogLevel.INFO;
     this.host = options.host ?? 'localhost';
     this.port = options.port ?? 0; // 0 means random free port
     this.sessionService =
@@ -133,6 +134,7 @@ export class AdkApiServer {
         options.agentsDir,
         options.agentFileLoadOptions,
         options.reloadAgents ?? false,
+        logLevel,
       );
     this.serveDebugUI = options.serveDebugUI ?? false;
     this.allowOrigins = options.allowOrigins;
@@ -149,7 +151,7 @@ export class AdkApiServer {
           return `${info.level}: [${info.label}] ${info.timestamp} ${info.message}`;
         },
       });
-    this.logger.setLogLevel(options.logLevel ?? LogLevel.INFO);
+    this.logger.setLogLevel(logLevel);
     this.a2a = options.a2a ?? false;
     // An exported-but-empty value means "no token"; anything else is handed
     // to the authenticator, which rejects a token that is not usable.
