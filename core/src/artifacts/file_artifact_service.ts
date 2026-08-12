@@ -86,16 +86,14 @@ export class FileArtifactService implements BaseArtifactService {
       throw new Error('Artifact must have either inlineData or text content.');
     }
 
-    const artifactDir = getArtifactDir(
-      this.rootDir,
-      userId,
-      sessionId,
-      filename,
-    );
-
     const scopeRoot = getScopeRoot(this.rootDir, userId, sessionId, filename);
+    const artifactDir = getArtifactDir(scopeRoot, filename);
+
     assertNoCaseCollision(
-      await listKeysInScope(scopeRoot, keyPrefixForScope(sessionId, filename)),
+      await listKeysInScope(
+        scopeRoot,
+        isUserScoped(sessionId, filename) ? USER_NAMESPACE_PREFIX : '',
+      ),
       filename,
     );
 
@@ -129,13 +127,7 @@ export class FileArtifactService implements BaseArtifactService {
       mimeType = artifact.fileData!.mimeType;
     }
 
-    const canonicalUri = await getCanonicalUri(
-      this.rootDir,
-      userId,
-      sessionId,
-      filename,
-      nextVersion,
-    );
+    const canonicalUri = getCanonicalUri(artifactDir, nextVersion);
     const metadata: FileArtifactVersion = {
       fileName: filename,
       mimeType,
@@ -150,6 +142,39 @@ export class FileArtifactService implements BaseArtifactService {
     return nextVersion;
   }
 
+  /**
+   * Resolves the directory and versions of the artifact stored under a
+   * filename.
+   *
+   * A host filesystem that ignores case resolves two filenames that differ
+   * only in case to one directory. The key in the latest version's metadata
+   * decides which artifact the directory holds, so a directory holding another
+   * key resolves to nothing. An artifact saved before that metadata existed,
+   * and a directory holding no artifact, resolve as usual.
+   *
+   * @param userId The user ID.
+   * @param sessionId The session ID.
+   * @param filename The filename.
+   * @returns A promise that resolves to the artifact directory and its
+   *     versions, or undefined when the directory holds another artifact.
+   */
+  private async resolveStoredArtifact(
+    userId: string,
+    sessionId: string,
+    filename: string,
+  ): Promise<{artifactDir: string; versions: number[]} | undefined> {
+    const scopeRoot = getScopeRoot(this.rootDir, userId, sessionId, filename);
+    const artifactDir = getArtifactDir(scopeRoot, filename);
+    const versions = await getArtifactVersionsFromDir(artifactDir);
+    const metadata = await getLatestMetadata(artifactDir, versions);
+
+    if (metadata?.fileName && metadata.fileName !== filename) {
+      return undefined;
+    }
+
+    return {artifactDir, versions};
+  }
+
   async loadArtifact({
     userId,
     sessionId,
@@ -157,29 +182,20 @@ export class FileArtifactService implements BaseArtifactService {
     version,
   }: LoadArtifactRequest): Promise<Part | undefined> {
     try {
-      const artifactDir = getArtifactDir(
-        this.rootDir,
+      const stored = await this.resolveStoredArtifact(
         userId,
         sessionId,
         filename,
       );
-
-      if (!(await storedKeyMatches(artifactDir, filename))) {
+      if (!stored) {
         return undefined;
       }
 
-      try {
-        await fs.access(artifactDir);
-      } catch (e: unknown) {
+      const {artifactDir, versions} = stored;
+      if (versions.length === 0) {
         logger.warn(
           `[FileArtifactService] loadArtifact: Artifact ${filename} not found`,
-          e,
         );
-        return undefined;
-      }
-
-      const versions = await getArtifactVersionsFromDir(artifactDir);
-      if (versions.length === 0) {
         return undefined;
       }
 
@@ -283,18 +299,16 @@ export class FileArtifactService implements BaseArtifactService {
     filename,
   }: DeleteArtifactRequest): Promise<void> {
     try {
-      const artifactDir = getArtifactDir(
-        this.rootDir,
+      const stored = await this.resolveStoredArtifact(
         userId,
         sessionId,
         filename,
       );
-
-      if (!(await storedKeyMatches(artifactDir, filename))) {
+      if (!stored) {
         return;
       }
 
-      await fs.rm(artifactDir, {recursive: true, force: true});
+      await fs.rm(stored.artifactDir, {recursive: true, force: true});
     } catch (e) {
       logger.warn(
         `[FileArtifactService] deleteArtifact: Failed to delete artifact ${filename}`,
@@ -309,18 +323,13 @@ export class FileArtifactService implements BaseArtifactService {
     filename,
   }: ListVersionsRequest): Promise<number[]> {
     try {
-      const artifactDir = getArtifactDir(
-        this.rootDir,
+      const stored = await this.resolveStoredArtifact(
         userId,
         sessionId,
         filename,
       );
 
-      if (!(await storedKeyMatches(artifactDir, filename))) {
-        return [];
-      }
-
-      return await getArtifactVersionsFromDir(artifactDir);
+      return stored?.versions ?? [];
     } catch (e) {
       logger.warn(
         `[FileArtifactService] listVersions: Failed to list versions for artifact ${filename}`,
@@ -336,18 +345,16 @@ export class FileArtifactService implements BaseArtifactService {
     filename,
   }: ListVersionsRequest): Promise<ArtifactVersion[]> {
     try {
-      const artifactDir = getArtifactDir(
-        this.rootDir,
+      const stored = await this.resolveStoredArtifact(
         userId,
         sessionId,
         filename,
       );
-
-      if (!(await storedKeyMatches(artifactDir, filename))) {
+      if (!stored) {
         return [];
       }
 
-      const versions = await getArtifactVersionsFromDir(artifactDir);
+      const {artifactDir, versions} = stored;
       const artifactVersions: ArtifactVersion[] = [];
 
       for (const version of versions) {
@@ -383,18 +390,16 @@ export class FileArtifactService implements BaseArtifactService {
     version,
   }: LoadArtifactRequest): Promise<ArtifactVersion | undefined> {
     try {
-      const artifactDir = getArtifactDir(
-        this.rootDir,
+      const stored = await this.resolveStoredArtifact(
         userId,
         sessionId,
         filename,
       );
-
-      if (!(await storedKeyMatches(artifactDir, filename))) {
+      if (!stored) {
         return undefined;
       }
 
-      const versions = await getArtifactVersionsFromDir(artifactDir);
+      const {artifactDir, versions} = stored;
       if (versions.length === 0) {
         return undefined;
       }
@@ -498,26 +503,11 @@ function getScopeRoot(
 ): string {
   const userRoot = getUserRoot(rootDir, userId);
 
-  if (isUserScoped(sessionId, filename)) {
-    return getUserArtifactsDir(userRoot);
-  }
-  if (!sessionId) {
-    throw new Error(
-      'Session ID must be provided for session-scoped artifacts.',
-    );
-  }
-  return getSessionArtifactsDir(userRoot, sessionId);
-}
-
-/**
- * Gets the prefix that scope-relative artifact paths carry in artifact keys.
- *
- * @param sessionId The session ID.
- * @param filename The filename.
- * @returns The key prefix for the scope the filename belongs to.
- */
-function keyPrefixForScope(sessionId: string, filename: string): string {
-  return isUserScoped(sessionId, filename) ? USER_NAMESPACE_PREFIX : '';
+  // `isUserScoped` already covers an absent session ID, and
+  // `getSessionArtifactsDir` rejects one that is not a safe path segment.
+  return isUserScoped(sessionId, filename)
+    ? getUserArtifactsDir(userRoot)
+    : getSessionArtifactsDir(userRoot, sessionId);
 }
 
 /**
@@ -535,7 +525,8 @@ async function listKeysInScope(
   const filenames: string[] = [];
 
   for await (const artifactDir of iterateArtifactDirs(scopeRoot)) {
-    const metadata = await getLatestMetadata(artifactDir);
+    const versions = await getArtifactVersionsFromDir(artifactDir);
+    const metadata = await getLatestMetadata(artifactDir, versions);
     if (metadata?.fileName) {
       filenames.push(metadata.fileName);
     } else {
@@ -548,43 +539,13 @@ async function listKeysInScope(
 }
 
 /**
- * Checks whether an artifact directory stores the requested artifact key.
+ * Gets the artifact directory full path for an artifact filename.
  *
- * A host filesystem that ignores case resolves two filenames that differ only
- * in case to one directory. The stored key decides which artifact the
- * directory holds; an artifact saved before this metadata existed, and a
- * directory that holds no artifact, both match.
- *
- * @param artifactDir The artifact directory.
- * @param filename The requested filename.
- * @returns A promise that resolves to whether the directory stores the key.
- */
-async function storedKeyMatches(
-  artifactDir: string,
-  filename: string,
-): Promise<boolean> {
-  const metadata = await getLatestMetadata(artifactDir);
-
-  return !metadata?.fileName || metadata.fileName === filename;
-}
-
-/**
- * Gets the artifact directory full path for a given artifact keys.
- *
- * @param rootDir The root directory.
- * @param userId The user ID.
- * @param sessionId The session ID.
+ * @param scopeRoot The root directory of the artifact's scope.
  * @param filename The filename.
  * @returns The artifact directory path.
  */
-function getArtifactDir(
-  rootDir: string,
-  userId: string,
-  sessionId: string,
-  filename: string,
-): string {
-  const scopeRoot = getScopeRoot(rootDir, userId, sessionId, filename);
-
+function getArtifactDir(scopeRoot: string, filename: string): string {
   let cleanFilename = filename;
   if (cleanFilename.startsWith(USER_NAMESPACE_PREFIX)) {
     cleanFilename = cleanFilename.substring(USER_NAMESPACE_PREFIX.length);
@@ -636,26 +597,11 @@ async function getArtifactVersionsFromDir(
 /**
  * Gets the canonical URI for an artifact version.
  *
- * @param rootDir The root directory.
- * @param userId The user ID.
- * @param sessionId The session ID.
- * @param filename The filename.
+ * @param artifactDir The artifact directory.
  * @param version The version.
- * @returns A promise that resolves to the canonical URI.
+ * @returns The canonical URI.
  */
-async function getCanonicalUri(
-  rootDir: string,
-  userId: string,
-  sessionId: string,
-  filename: string,
-  version: number,
-): Promise<string> {
-  const artifactDir = await getArtifactDir(
-    rootDir,
-    userId,
-    sessionId,
-    filename,
-  );
+function getCanonicalUri(artifactDir: string, version: number): string {
   const storedFilename = path.basename(artifactDir);
   const versionsDir = getVersionsDir(artifactDir);
   const payloadPath = path.join(
@@ -696,12 +642,13 @@ async function readMetadata(
  * Gets the latest metadata for an artifact.
  *
  * @param artifactDir The artifact directory.
+ * @param versions The versions the artifact directory holds.
  * @returns A promise that resolves to the latest metadata.
  */
 async function getLatestMetadata(
   artifactDir: string,
+  versions: number[],
 ): Promise<FileArtifactVersion | undefined> {
-  const versions = await getArtifactVersionsFromDir(artifactDir);
   if (versions.length === 0) {
     return undefined;
   }
