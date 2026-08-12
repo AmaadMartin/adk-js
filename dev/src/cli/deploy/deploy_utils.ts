@@ -251,26 +251,3 @@ export async function resolveDefaultFromGcloudConfig(
   const {stdout} = await execAsync('gcloud config get-value ' + property);
   return stdout.trim();
 }
-
-/**
- * Runs one cleanup step and reports a failure as a warning.
- *
- * A `finally` block that throws discards the exception already propagating out
- * of its `try`, so an unguarded cleanup failure replaces the deploy failure the
- * caller needs. Guard each step on its own: a shared guard would let the first
- * failure skip the steps after it.
- *
- * @param description Lowercase verb phrase for the step, e.g. `remove the
- *     temporary folder /tmp/x`.
- * @param cleanup The cleanup step to run.
- */
-export async function cleanupQuietly(
-  description: string,
-  cleanup: () => Promise<void>,
-): Promise<void> {
-  try {
-    await cleanup();
-  } catch (e: unknown) {
-    console.warn(`Failed to ${description}: ${(e as Error).message}`);
-  }
-}

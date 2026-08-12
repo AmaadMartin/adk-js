@@ -12,7 +12,6 @@ import {createTempDir, isFile, isFolderExists} from '../../utils/file_utils.js';
 import {
   BaseDeployOptions,
   CreateDockerFileContentOptions,
-  cleanupQuietly,
   copyAgentFiles,
   createDockerFile,
   createDockerFileContent,
@@ -222,12 +221,20 @@ export async function deployToCloudRun(options: DeployToCloudRunOptions) {
     );
   } finally {
     console.info('Cleaning up temporary files...');
-    await cleanupQuietly(`remove the temporary folder ${tempFolder}`, () =>
+    // A `finally` block that throws discards the exception already propagating
+    // out of its `try`, so settle every cleanup step and only warn.
+    const [removed, disposed] = await Promise.allSettled([
       fs.rm(tempFolder, {recursive: true, force: true}),
-    );
-    await cleanupQuietly('dispose the agent loader', () =>
       agentLoader.disposeAll(),
-    );
+    ]);
+    if (removed.status === 'rejected') {
+      console.warn(
+        `Failed to remove the temporary folder ${tempFolder}: ${removed.reason}`,
+      );
+    }
+    if (disposed.status === 'rejected') {
+      console.warn(`Failed to dispose the agent loader: ${disposed.reason}`);
+    }
     console.info('Temporary files cleaned up.');
   }
 }

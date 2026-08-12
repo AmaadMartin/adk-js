@@ -526,8 +526,7 @@ describe('deployToCloudRun', () => {
       new Error(`EBUSY: resource busy or locked, unlink '/tmp/test-deploy'`),
     );
 
-    // deployToCloudRun swallows the deploy error today. The separate exit-code
-    // change flips this to rejects.toThrow('Command failed with exit code 1').
+    // deployToCloudRun swallows the deploy error today.
     await expect(deployToCloudRun(defaultOptions)).resolves.toBeUndefined();
 
     expect(consoleErrorSpy).toHaveBeenCalledWith(
