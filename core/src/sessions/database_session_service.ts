@@ -269,9 +269,17 @@ export class DatabaseSessionService extends BaseSessionService {
 
     const orderBy =
       order === 'asc'
-        ? {updateTime: 'ASC' as const, id: 'ASC' as const}
+        ? {
+            updateTime: 'ASC' as const,
+            userId: 'ASC' as const,
+            id: 'ASC' as const,
+          }
         : order === 'desc'
-          ? {updateTime: 'DESC' as const, id: 'ASC' as const}
+          ? {
+              updateTime: 'DESC' as const,
+              userId: 'ASC' as const,
+              id: 'ASC' as const,
+            }
           : undefined;
 
     let storageSessions;

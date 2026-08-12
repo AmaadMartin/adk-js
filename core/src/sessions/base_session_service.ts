@@ -57,7 +57,11 @@ export interface ListSessionsRequest {
   offset?: number;
   /** 1-based page number. Requires `limit`. Takes precedence over `offset`. */
   page?: number;
-  /** Sort direction by last update time. No ordering is applied if omitted. */
+  /**
+   * Sort direction by last update time. No ordering is applied if omitted.
+   * Ties are broken by ascending `userId` then ascending session id, in both
+   * directions, so a listing that spans users has one stable order.
+   */
   order?: 'asc' | 'desc';
 }
 

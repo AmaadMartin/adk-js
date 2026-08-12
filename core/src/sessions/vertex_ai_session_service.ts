@@ -360,12 +360,16 @@ export class VertexAiSessionService extends BaseSessionService {
     if (order === 'asc') {
       adkSessions.sort(
         (a, b) =>
-          a.lastUpdateTime - b.lastUpdateTime || a.id.localeCompare(b.id),
+          a.lastUpdateTime - b.lastUpdateTime ||
+          a.userId.localeCompare(b.userId) ||
+          a.id.localeCompare(b.id),
       );
     } else if (order === 'desc') {
       adkSessions.sort(
         (a, b) =>
-          b.lastUpdateTime - a.lastUpdateTime || a.id.localeCompare(b.id),
+          b.lastUpdateTime - a.lastUpdateTime ||
+          a.userId.localeCompare(b.userId) ||
+          a.id.localeCompare(b.id),
       );
     }
 
