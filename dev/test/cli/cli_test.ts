@@ -5,6 +5,7 @@
  */
 
 import {LogLevel, setLogLevel} from '@google/adk';
+import * as path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {createProgram} from '../../src/cli/cli.js';
 import {createAgent} from '../../src/cli/cli_create.js';
@@ -50,6 +51,7 @@ vi.mock('@google/adk', async (importOriginal) => {
 });
 
 describe('CLI Entrypoint', () => {
+  const AGENTS_DIR = path.join(process.cwd(), 'agents');
   let program: ReturnType<typeof createProgram>;
 
   beforeEach(() => {
@@ -153,18 +155,68 @@ describe('CLI Entrypoint', () => {
       expect(args.a2a).toBe(true);
     });
 
-    it('should start AdkApiServer with a2a: true when --a2a true is set', async () => {
-      await parse(['web', '--a2a', 'true']);
-
-      const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
-      expect(args.a2a).toBe(true);
-    });
-
     it('should pass a2aAuthToken when --a2a_auth_token is set', async () => {
       await parse(['web', '--a2a', '--a2a_auth_token', 'tok']);
 
       const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
       expect(args.a2aAuthToken).toBe('tok');
+    });
+
+    it('should serve the directory that follows --a2a', async () => {
+      await parse(['web', '--a2a', './agents']);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.agentsDir).toBe(AGENTS_DIR);
+      expect(args.a2a).toBe(true);
+    });
+
+    it('should serve the directory that follows --verbose', async () => {
+      await parse(['web', '--verbose', './agents']);
+
+      expect(setLogLevel).toHaveBeenCalledWith(LogLevel.DEBUG);
+      expect(vi.mocked(AdkApiServer).mock.calls[0][0].agentsDir).toBe(
+        AGENTS_DIR,
+      );
+    });
+
+    it('should serve the directory that follows --reload_agents', async () => {
+      await parse(['web', '--reload_agents', './agents']);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.agentsDir).toBe(AGENTS_DIR);
+      expect(args.reloadAgents).toBe(true);
+    });
+
+    it('should serve the directory that follows --otel_to_cloud', async () => {
+      await parse(['web', '--otel_to_cloud', './agents']);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.agentsDir).toBe(AGENTS_DIR);
+      expect(args.otelToCloud).toBe(true);
+    });
+
+    it('should serve the directory that follows --compile', async () => {
+      await parse(['web', '--compile', './agents']);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.agentsDir).toBe(AGENTS_DIR);
+      expect(args.agentFileLoadOptions?.compile).toBe(true);
+    });
+
+    it('should disable compilation with --no-compile and keep the directory', async () => {
+      await parse(['web', '--no-compile', './agents']);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.agentsDir).toBe(AGENTS_DIR);
+      expect(args.agentFileLoadOptions?.compile).toBe(false);
+    });
+
+    it('should disable bundling with --no-bundle and keep the directory', async () => {
+      await parse(['web', '--no-bundle', './agents']);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.agentsDir).toBe(AGENTS_DIR);
+      expect(args.agentFileLoadOptions?.bundle).toBe(false);
     });
   });
 
@@ -192,6 +244,22 @@ describe('CLI Entrypoint', () => {
 
       const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
       expect(args.a2aAuthToken).toBe('tok');
+    });
+
+    it('should serve the directory that follows --a2a', async () => {
+      await parse(['api_server', '--a2a', './agents']);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.agentsDir).toBe(AGENTS_DIR);
+      expect(args.a2a).toBe(true);
+    });
+
+    it('should serve the directory that follows --reload_agents', async () => {
+      await parse(['api_server', '--reload_agents', './agents']);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.agentsDir).toBe(AGENTS_DIR);
+      expect(args.reloadAgents).toBe(true);
     });
   });
 
@@ -271,6 +339,17 @@ describe('CLI Entrypoint', () => {
           inputFile: 'replay.json',
           savedSessionFile: 'resume.json',
           otelToCloud: true,
+        }),
+      );
+    });
+
+    it('should run the agent file that follows --save_session', async () => {
+      await parse(['run', '--save_session', 'agent.ts']);
+
+      expect(runAgent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agentPath: 'agent.ts',
+          saveSession: true,
         }),
       );
     });
@@ -355,6 +434,32 @@ describe('CLI Entrypoint', () => {
       // which gcloud would reject.
       expect(args.extraGcloudArgs).toEqual([]);
     });
+
+    it('should deploy the directory that follows --with_ui', async () => {
+      await parse(['deploy', 'cloud_run', '--with_ui', './my-agent-path']);
+
+      const args = vi.mocked(deployToCloudRun).mock.calls[0][0];
+      expect(args.agentPath).toEqual(expect.stringContaining('my-agent-path'));
+      expect(args.withUi).toBe(true);
+    });
+
+    it('should not forward --no-compile to gcloud', async () => {
+      // The action reads `process.argv.slice(5)` and `parse()` assigns
+      // process.argv verbatim, so --no-compile must sit at index 5 or later
+      // for the pass-through filter to see it at all.
+      await parse([
+        'deploy',
+        'cloud_run',
+        './my-agent-path',
+        '--project=my-proj',
+        '--region=us-west1',
+        '--no-compile',
+      ]);
+
+      const args = vi.mocked(deployToCloudRun).mock.calls[0][0];
+      expect(args.agentFileLoadOptions?.compile).toBe(false);
+      expect(args.extraGcloudArgs).toEqual([]);
+    });
   });
 
   describe('command: deploy agent_engine', () => {
@@ -420,6 +525,14 @@ describe('CLI Entrypoint', () => {
         agentEngineId: '12345',
       });
     });
+
+    it('should deploy the directory that follows --with_ui', async () => {
+      await parse(['deploy', 'agent_engine', '--with_ui', './my-agent-path']);
+
+      const args = vi.mocked(deployToAgentEngine).mock.calls[0][0];
+      expect(args.agentPath).toEqual(expect.stringContaining('my-agent-path'));
+      expect(args.withUi).toBe(true);
+    });
   });
 
   describe('command: deploy reasoning_engine', () => {
@@ -441,6 +554,25 @@ describe('CLI Entrypoint', () => {
       expect((deployToAgentEngine as Mock).mock.calls[0][0]).toMatchObject({
         agentEngineId: '12345',
       });
+    });
+  });
+
+  describe('option help text', () => {
+    const description = (long: string) => {
+      const web = program.commands.find((c) => c.name() === 'web')!;
+      return web.options.find((o) => o.long === long)!.description;
+    };
+
+    it('describes --bundle as bundling and minifying, not as compiling', () => {
+      expect(description('--bundle')).not.toBe(description('--compile'));
+      expect(description('--bundle')).toMatch(/bundle/i);
+      expect(description('--bundle')).toMatch(/minif/i);
+    });
+
+    it('describes --no-bundle as skipping the bundling', () => {
+      expect(description('--no-bundle')).not.toBe(description('--no-compile'));
+      expect(description('--no-bundle')).toMatch(/bundle/i);
+      expect(description('--no-bundle')).toMatch(/minif/i);
     });
   });
 });

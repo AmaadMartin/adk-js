@@ -74,22 +74,10 @@ function getAgentFileOptions(options: {
   file_type?: string;
 }) {
   return {
-    compile: getBoolean(options['compile']),
-    bundle: getBoolean(options['bundle']),
+    compile: !!options['compile'],
+    bundle: !!options['bundle'],
     moduleType: options['file_type'] as FileModuleType | undefined,
   };
-}
-
-function getBoolean(option?: string | boolean): boolean {
-  if (typeof option === 'boolean') {
-    return option;
-  }
-
-  if (typeof option === 'string') {
-    return option === 'true' || option === '1';
-  }
-
-  return false;
 }
 
 const AGENT_DIR_ARGUMENT = new Argument(
@@ -109,7 +97,7 @@ const ORIGINS_OPTION = new Option(
   'Optional. The allow origins of the server',
 ).default('');
 const VERBOSE_OPTION = new Option(
-  '-v, --verbose [boolean]',
+  '-v, --verbose',
   'Optional. The verbose level of the server',
 ).default(false);
 const LOG_LEVEL_OPTION = new Option(
@@ -125,19 +113,27 @@ const ARTIFACT_SERVICE_URI_OPTION = new Option(
   'Optional. The URI of the artifact service. Supported URIs: gs://<bucket name> for GCS artifact service.',
 );
 const OTEL_TO_CLOUD_OPTION = new Option(
-  '--otel_to_cloud [boolean]',
+  '--otel_to_cloud',
   'Optional. Whether to send otel traces to cloud.',
 ).default(false);
 const COMPILE_AGENT_FILE = new Option(
-  '--compile [boolean]',
+  '--compile',
   'Optional. Whether to compile ts agent file to js before execution',
 ).default(true);
+const NO_COMPILE_AGENT_FILE = new Option(
+  '--no-compile',
+  'Optional. Do not compile the ts agent file to js before execution',
+);
 const BUNDLE_AGENT_FILE = new Option(
-  '--bundle [boolean]',
-  'Optional. Whether to compile ts agent file to js before execution',
+  '--bundle',
+  'Optional. Whether to bundle the agent file dependencies into the single emitted file with esbuild and minify it before execution. Bundling implies compilation, so the esbuild step runs even with --no-compile.',
 ).default(true);
+const NO_BUNDLE_AGENT_FILE = new Option(
+  '--no-bundle',
+  'Optional. Do not bundle or minify the agent file; leave its imports intact.',
+);
 const A2A_OPTION = new Option(
-  '--a2a [boolean]',
+  '--a2a',
   'Optional. Whether to enable A2A for web/api server. Default: false',
 ).default(false);
 const A2A_AUTH_TOKEN_OPTION = new Option(
@@ -149,7 +145,7 @@ const A2A_AUTH_TOKEN_DEPLOY_OPTION = new Option(
   'Optional. Shared bearer token used to authenticate the deployed A2A surface. Callers must send "Authorization: Bearer <token>". It is sent to Cloud Run as the ADK_A2A_AUTH_TOKEN environment variable and is never written into the image. If unset, the deployed A2A surface is served WITHOUT authentication.',
 );
 const RELOAD_AGENTS_OPTION = new Option(
-  '--reload_agents [boolean]',
+  '--reload_agents',
   'Optional. Watch agent files for changes and automatically reload them. Default: false. To see any changes to your agent file, you need to initiate a new agent run.',
 ).default(false);
 const AGENT_FILE_MODULE_TYPE = new Option('--file_type <string>', 'Optional. ');
@@ -169,7 +165,7 @@ export const ADK_VERSION_OPTION = new Option(
   'Optional. ADK version to use. If not set, default to the latest version available on npm',
 ).default('latest');
 export const WITH_UI_OPTION = new Option(
-  '--with_ui [boolean]',
+  '--with_ui',
   'Optional. Deploy ADK Web UI if set. (default: deploy ADK API server only)',
 ).default(false);
 export const DISPLAY_NAME_OPTION = new Option(
@@ -220,7 +216,9 @@ export function createProgram(): Command {
     .addOption(ARTIFACT_SERVICE_URI_OPTION)
     .addOption(OTEL_TO_CLOUD_OPTION)
     .addOption(COMPILE_AGENT_FILE)
+    .addOption(NO_COMPILE_AGENT_FILE)
     .addOption(BUNDLE_AGENT_FILE)
+    .addOption(NO_BUNDLE_AGENT_FILE)
     .addOption(AGENT_FILE_MODULE_TYPE)
     .addOption(A2A_OPTION)
     .addOption(A2A_AUTH_TOKEN_OPTION)
@@ -241,9 +239,9 @@ export function createProgram(): Command {
           artifactService: getArtifactServiceFromOptions(options),
           otelToCloud: options['otel_to_cloud'] ? true : false,
           agentFileLoadOptions: getAgentFileOptions(options),
-          a2a: getBoolean(options['a2a']),
+          a2a: !!options['a2a'],
           a2aAuthToken: options['a2a_auth_token'],
-          reloadAgents: getBoolean(options['reload_agents']),
+          reloadAgents: !!options['reload_agents'],
         });
 
         await server.start();
@@ -266,7 +264,9 @@ export function createProgram(): Command {
     .addOption(ARTIFACT_SERVICE_URI_OPTION)
     .addOption(OTEL_TO_CLOUD_OPTION)
     .addOption(COMPILE_AGENT_FILE)
+    .addOption(NO_COMPILE_AGENT_FILE)
     .addOption(BUNDLE_AGENT_FILE)
+    .addOption(NO_BUNDLE_AGENT_FILE)
     .addOption(AGENT_FILE_MODULE_TYPE)
     .addOption(A2A_OPTION)
     .addOption(A2A_AUTH_TOKEN_OPTION)
@@ -287,9 +287,9 @@ export function createProgram(): Command {
           artifactService: getArtifactServiceFromOptions(options),
           otelToCloud: options['otel_to_cloud'] ? true : false,
           agentFileLoadOptions: getAgentFileOptions(options),
-          a2a: getBoolean(options['a2a']),
+          a2a: !!options['a2a'],
           a2aAuthToken: options['a2a_auth_token'],
-          reloadAgents: getBoolean(options['reload_agents']),
+          reloadAgents: !!options['reload_agents'],
         });
         await server.start();
       } catch (error) {
@@ -341,13 +341,13 @@ export function createProgram(): Command {
     .description('Runs agent')
     .argument('<agent>', 'Agent file path (.js or .ts)')
     .option(
-      '--save_session [boolean]',
+      '--save_session',
       'Optional. Whether to save the session to a json file on exit.',
       false,
     )
     .option(
       '--session_id <string>',
-      'Optional. The session ID to save the session to on exit when --save_session is set to true. User will be prompted to enter a session ID if not set.',
+      'Optional. The session ID to save the session to on exit when --save_session is set. User will be prompted to enter a session ID if not set.',
     )
     .option(
       '--replay <string>',
@@ -363,7 +363,9 @@ export function createProgram(): Command {
     .addOption(ARTIFACT_SERVICE_URI_OPTION)
     .addOption(OTEL_TO_CLOUD_OPTION)
     .addOption(COMPILE_AGENT_FILE)
+    .addOption(NO_COMPILE_AGENT_FILE)
     .addOption(BUNDLE_AGENT_FILE)
+    .addOption(NO_BUNDLE_AGENT_FILE)
     .addOption(AGENT_FILE_MODULE_TYPE)
     .addOption(RELOAD_AGENTS_OPTION)
     .action(async (agentPath: string, options: Record<string, string>) => {
@@ -374,13 +376,13 @@ export function createProgram(): Command {
           agentPath,
           inputFile: options['replay'],
           savedSessionFile: options['resume'],
-          saveSession: getBoolean(options['save_session']),
+          saveSession: !!options['save_session'],
           sessionId: options['session_id'],
           sessionService: getSessionServiceFromOptions(options),
           artifactService: getArtifactServiceFromOptions(options),
           otelToCloud: options['otel_to_cloud'] ? true : false,
           agentFileLoadOptions: getAgentFileOptions(options),
-          reloadAgents: getBoolean(options['reload_agents']),
+          reloadAgents: !!options['reload_agents'],
         });
       } catch (error) {
         logger.error('Error running agent:', (error as Error).message);
@@ -418,7 +420,9 @@ export function createProgram(): Command {
     .addOption(SESSION_SERVICE_URI_OPTION)
     .addOption(ARTIFACT_SERVICE_URI_OPTION)
     .addOption(COMPILE_AGENT_FILE)
+    .addOption(NO_COMPILE_AGENT_FILE)
     .addOption(BUNDLE_AGENT_FILE)
+    .addOption(NO_BUNDLE_AGENT_FILE)
     .addOption(AGENT_FILE_MODULE_TYPE)
     .addOption(A2A_OPTION)
     .addOption(A2A_AUTH_TOKEN_DEPLOY_OPTION)
@@ -429,7 +433,8 @@ export function createProgram(): Command {
         if (argName.includes('=')) {
           argName = argName.split('=')[0];
         }
-        if (argName in options) {
+        // Commander records `--no-compile` under the `compile` key.
+        if (argName.replace(/^no-/, '') in options) {
           continue;
         }
 
@@ -444,14 +449,14 @@ export function createProgram(): Command {
           serviceName: options['service_name'],
           tempFolder: options['temp_folder'],
           port: parseInt(options['port'], 10),
-          withUi: getBoolean(options['with_ui']),
+          withUi: !!options['with_ui'],
           logLevel: options['log_level'],
           adkVersion: options['adk_version'],
           allowOrigins: options['allow_origins'],
           sessionServiceUri: options['session_service_uri'],
           artifactServiceUri: options['artifact_service_uri'],
           agentFileLoadOptions: getAgentFileOptions(options),
-          a2a: getBoolean(options['a2a']),
+          a2a: !!options['a2a'],
           a2aAuthToken: options['a2a_auth_token'],
           extraGcloudArgs,
         });
@@ -482,7 +487,9 @@ export function createProgram(): Command {
       .addOption(SESSION_SERVICE_URI_OPTION)
       .addOption(ARTIFACT_SERVICE_URI_OPTION)
       .addOption(COMPILE_AGENT_FILE)
+      .addOption(NO_COMPILE_AGENT_FILE)
       .addOption(BUNDLE_AGENT_FILE)
+      .addOption(NO_BUNDLE_AGENT_FILE)
       .addOption(AGENT_FILE_MODULE_TYPE)
       .addOption(A2A_OPTION)
       .addOption(AGENT_ENGINE_ID_OPTION)
@@ -497,14 +504,14 @@ export function createProgram(): Command {
             repository: options['repository'],
             tempFolder: options['temp_folder'],
             port: 8080, // Agent Engine requires fixed port of 8080
-            withUi: getBoolean(options['with_ui']),
+            withUi: !!options['with_ui'],
             logLevel: options['log_level'],
             adkVersion: options['adk_version'],
             allowOrigins: options['allow_origins'],
             sessionServiceUri: options['session_service_uri'],
             artifactServiceUri: options['artifact_service_uri'],
             agentFileLoadOptions: getAgentFileOptions(options),
-            a2a: getBoolean(options['a2a']),
+            a2a: !!options['a2a'],
             agentEngineId: options['agent_engine_id'],
           });
         } catch (error) {
@@ -539,7 +546,7 @@ export function createProgram(): Command {
       runIntegrationTests({
         agentsDir: options['agents_dir'],
         testsDir: options['tests_dir'],
-        forceRunAll: getBoolean(options['force']),
+        forceRunAll: !!options['force'],
       });
     });
 
