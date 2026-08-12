@@ -36,7 +36,8 @@ export interface GeminiParams {
   model?: string;
   /**
    * The API key to use for the Gemini API. If not provided, it will look for
-   * the GOOGLE_GENAI_API_KEY or GEMINI_API_KEY environment variable.
+   * the GOOGLE_GENAI_API_KEY, GOOGLE_API_KEY or GEMINI_API_KEY environment
+   * variable, in that order.
    */
   apiKey?: string;
   /**
@@ -117,7 +118,7 @@ export class Gemini extends BaseLlm {
     });
     if (!params.vertexai && !params.apiKey) {
       throw new Error(
-        'API key must be provided via constructor or GOOGLE_GENAI_API_KEY or GEMINI_API_KEY environment variable.',
+        'API key must be provided via constructor or GOOGLE_GENAI_API_KEY, GOOGLE_API_KEY or GEMINI_API_KEY environment variable.',
       );
     }
     this.project = params.project;
@@ -395,8 +396,12 @@ export function geminiInitParams({
     }
   } else {
     if (!params.apiKey && !isBrowser()) {
+      // GOOGLE_API_KEY is what `adk create` writes and what @google/genai
+      // itself reads; it precedes GEMINI_API_KEY to match the SDK's ordering.
       params.apiKey =
-        process.env['GOOGLE_GENAI_API_KEY'] || process.env['GEMINI_API_KEY'];
+        process.env['GOOGLE_GENAI_API_KEY'] ||
+        process.env['GOOGLE_API_KEY'] ||
+        process.env['GEMINI_API_KEY'];
     }
   }
   return params;

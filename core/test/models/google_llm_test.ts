@@ -62,6 +62,7 @@ describe('GoogleLlm', () => {
     delete process.env['GOOGLE_CLOUD_PROJECT'];
     delete process.env['GOOGLE_CLOUD_LOCATION'];
     delete process.env['GOOGLE_GENAI_API_KEY'];
+    delete process.env['GOOGLE_API_KEY'];
     delete process.env['GEMINI_API_KEY'];
     delete process.env['GOOGLE_GENAI_USE_VERTEXAI'];
     delete process.env['GOOGLE_CLOUD_AGENT_ENGINE_ID'];
@@ -72,7 +73,21 @@ describe('GoogleLlm', () => {
 
   it('should throw error if apiKey is missing in constructor', () => {
     expect(() => new TestGemini({model: 'gemini-1.5-flash'})).toThrow(
-      /API key must be provided/,
+      /API key must be provided via constructor or GOOGLE_GENAI_API_KEY, GOOGLE_API_KEY or GEMINI_API_KEY environment variable\./,
+    );
+  });
+
+  it('should construct from the .env written by `adk create`', () => {
+    // The exact pair of lines generateEnvFile() emits for a Gemini API key in
+    // dev/src/cli/cli_create.ts.
+    process.env['GOOGLE_API_KEY'] = 'cli-key';
+    process.env['GOOGLE_GENAI_USE_VERTEXAI'] = '0';
+
+    const llm = new TestGemini({model: 'gemini-1.5-flash'});
+
+    expect(llm.apiClient.vertexai).toBe(false);
+    expect(vi.mocked(GoogleGenAI)).toHaveBeenLastCalledWith(
+      expect.objectContaining({apiKey: 'cli-key'}),
     );
   });
 
@@ -296,6 +311,69 @@ describe('GoogleLlm', () => {
         model: 'gemini-1.5-flash',
       };
       const params = geminiInitParams(input);
+      expect(params.apiKey).toBeUndefined();
+    });
+
+    // GOOGLE_API_KEY sits ahead of GEMINI_API_KEY to match the ordering
+    // @google/genai itself applies in getApiKeyFromEnv().
+    const apiKeyEnvPrecedence: Array<{
+      description: string;
+      env: Record<string, string>;
+      expected: string;
+    }> = [
+      {
+        description: 'GOOGLE_API_KEY when it is the only key set',
+        env: {'GOOGLE_API_KEY': 'google-api-key'},
+        expected: 'google-api-key',
+      },
+      {
+        description: 'GOOGLE_GENAI_API_KEY over GOOGLE_API_KEY',
+        env: {
+          'GOOGLE_GENAI_API_KEY': 'genai-api-key',
+          'GOOGLE_API_KEY': 'google-api-key',
+        },
+        expected: 'genai-api-key',
+      },
+      {
+        description: 'GOOGLE_API_KEY over GEMINI_API_KEY',
+        env: {
+          'GOOGLE_API_KEY': 'google-api-key',
+          'GEMINI_API_KEY': 'gemini-api-key',
+        },
+        expected: 'google-api-key',
+      },
+      {
+        description: 'GEMINI_API_KEY when it is the only key set',
+        env: {'GEMINI_API_KEY': 'gemini-api-key'},
+        expected: 'gemini-api-key',
+      },
+    ];
+
+    apiKeyEnvPrecedence.forEach(({description, env, expected}) => {
+      it(`should resolve ${description}`, () => {
+        Object.assign(process.env, env);
+        const params = geminiInitParams({model: 'gemini-1.5-flash'});
+        expect(params.apiKey).toBe(expected);
+      });
+    });
+
+    it('should prefer the constructor apiKey over GOOGLE_API_KEY', () => {
+      process.env['GOOGLE_API_KEY'] = 'google-api-key';
+      const params = geminiInitParams({
+        model: 'gemini-1.5-flash',
+        apiKey: 'explicit-key',
+      });
+      expect(params.apiKey).toBe('explicit-key');
+    });
+
+    it('should not use GOOGLE_API_KEY on the Vertex AI path', () => {
+      process.env['GOOGLE_API_KEY'] = 'google-api-key';
+      const params = geminiInitParams({
+        model: 'gemini-1.5-flash',
+        vertexai: true,
+        project: 'test-project',
+        location: 'us-central1',
+      });
       expect(params.apiKey).toBeUndefined();
     });
 

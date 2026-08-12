@@ -148,6 +148,10 @@ describe('createAgent', () => {
         apiKey: 'my-api-key',
       });
 
+      // Pins the API key env var name `adk create` writes. It MUST stay one of
+      // the names geminiInitParams() resolves in core/src/models/google_llm.ts,
+      // or the scaffolded agent cannot construct its own model; see the core
+      // test 'should construct from the .env written by `adk create`'.
       expect(saveToFile).toHaveBeenCalledWith(
         expect.stringContaining('.env'),
         expect.stringContaining('GOOGLE_GENAI_API_KEY=my-api-key'),
