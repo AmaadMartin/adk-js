@@ -22,7 +22,7 @@ const bareNodeBuiltins = builtinModules
 
 export default defineConfig([
   {
-    ignores: ["**/dist/**", "dev/src/browser/**"],
+    ignores: ["**/dist/**"],
   },
   tseslint.configs.recommended,
   {
