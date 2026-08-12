@@ -120,13 +120,17 @@ vi.mock('node:fs/promises', async (importOriginal) => {
   return mockFs;
 });
 
+// Each AgentLoader fake below passes its implementation as the `vi.fn()`
+// constructor argument. `vi.restoreAllMocks()` in `afterEach` drops a
+// `.mockImplementation()`/`.mockResolvedValue()` body for good but restores a
+// constructor-argument one, and a `vi.mock()` factory body runs only once.
 vi.mock('../../src/utils/agent_loader.js', () => ({
-  AgentLoader: vi.fn().mockImplementation(() => ({
-    listAgents: vi.fn().mockResolvedValue(['agent1']),
-    getAgentFile: vi.fn().mockResolvedValue({
-      getFilePath: vi.fn().mockReturnValue('path/to/agent1.ts'),
-    }),
-    disposeAll: vi.fn().mockResolvedValue(undefined),
+  AgentLoader: vi.fn(() => ({
+    listAgents: vi.fn(async () => ['agent1']),
+    getAgentFile: vi.fn(async () => ({
+      getFilePath: vi.fn(() => 'path/to/agent1.ts'),
+    })),
+    disposeAll: vi.fn(async () => {}),
   })),
 }));
 
@@ -191,14 +195,6 @@ describe('deployToAgentEngine', () => {
         '@google/adk': '^1.0.0',
       },
     });
-
-    (AgentLoader as Mock).mockImplementation(() => ({
-      listAgents: vi.fn().mockResolvedValue(['agent1']),
-      getAgentFile: vi.fn().mockResolvedValue({
-        getFilePath: vi.fn().mockReturnValue('path/to/agent1.ts'),
-      }),
-      disposeAll: vi.fn().mockResolvedValue(undefined),
-    }));
 
     execMock.mockImplementation((cmd: string, callback: Callback) => {
       if (cmd.includes('config get-value project')) {
@@ -748,5 +744,16 @@ describe('deployToAgentEngine', () => {
     await expect(deployToAgentEngine(options)).rejects.toThrow(
       'Reasoning Engine update failed: [Code 404] Resource not found',
     );
+  });
+
+  // The deploy path awaits `disposeAll()` in a `finally`, where a stubbed-out
+  // fake throws and masks whatever the test was actually asserting.
+  it('should keep the AgentLoader fake alive across a restore', async () => {
+    vi.restoreAllMocks();
+
+    const loader = new AgentLoader('path/to/agent');
+
+    await expect(loader.disposeAll()).resolves.toBeUndefined();
+    await expect(loader.listAgents()).resolves.toEqual(['agent1']);
   });
 });
