@@ -97,35 +97,18 @@ export class BasicLlmRequestProcessor extends BaseLlmRequestProcessor {
  * appends tracking headers to `config.httpOptions.headers`.
  *
  * `baseUrl` and `apiVersion` are configuration-time settings rather than
- * request-time ones, so they do not override options the agent already set.
+ * request-time ones, so they only apply when the agent set no options at all.
  */
 function mergeHttpOptions(
-  agentHttpOptions: HttpOptions | undefined,
-  runConfigHttpOptions: HttpOptions,
+  agent: HttpOptions | undefined,
+  run: HttpOptions,
 ): HttpOptions {
-  if (!agentHttpOptions) {
-    return {
-      ...runConfigHttpOptions,
-      ...(runConfigHttpOptions.headers && {
-        headers: {...runConfigHttpOptions.headers},
-      }),
-    };
-  }
-  return {
-    ...agentHttpOptions,
-    ...(runConfigHttpOptions.timeout !== undefined && {
-      timeout: runConfigHttpOptions.timeout,
-    }),
-    ...(runConfigHttpOptions.retryOptions !== undefined && {
-      retryOptions: runConfigHttpOptions.retryOptions,
-    }),
-    ...(runConfigHttpOptions.extraBody !== undefined && {
-      extraBody: runConfigHttpOptions.extraBody,
-    }),
-    ...(runConfigHttpOptions.headers && {
-      headers: {...agentHttpOptions.headers, ...runConfigHttpOptions.headers},
-    }),
-  };
+  const merged: HttpOptions = {...(agent ?? run)};
+  if (run.timeout !== undefined) merged.timeout = run.timeout;
+  if (run.retryOptions !== undefined) merged.retryOptions = run.retryOptions;
+  if (run.extraBody !== undefined) merged.extraBody = run.extraBody;
+  if (run.headers) merged.headers = {...agent?.headers, ...run.headers};
+  return merged;
 }
 
 export const BASIC_LLM_REQUEST_PROCESSOR = new BasicLlmRequestProcessor();
