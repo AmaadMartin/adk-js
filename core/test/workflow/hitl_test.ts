@@ -330,4 +330,15 @@ describe('validateInterruptResponse', () => {
       ),
     ).not.toThrow();
   });
+
+  it('rejects {result: "21"} against a string schema, as adk-python does', () => {
+    const stringSchema = toJsonSchema(z4.string());
+    expect(() =>
+      validateInterruptResponse(
+        'i1',
+        unwrapResponse({result: '21'}),
+        stringSchema,
+      ),
+    ).toThrow(/expected string, received number/i);
+  });
 });
