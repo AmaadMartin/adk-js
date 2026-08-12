@@ -1254,3 +1254,51 @@ describe('Runner artifact saving (`saveInputBlobsAsArtifacts`)', () => {
     ]);
   });
 });
+
+describe('Runner app name resolution', () => {
+  const APP_MODULE_NAME = 'app_from_module';
+  const ROUTE_KEY = 'route_key';
+
+  let sessionService: InMemorySessionService;
+  let app: App;
+
+  beforeEach(() => {
+    sessionService = new InMemorySessionService();
+    app = new App({
+      name: APP_MODULE_NAME,
+      rootAgent: new MockLlmAgent('test_agent'),
+    });
+  });
+
+  it('uses the explicit appName over the app name when both are provided', () => {
+    const runner = new Runner({app, appName: ROUTE_KEY, sessionService});
+
+    expect(runner.appName).toBe(ROUTE_KEY);
+  });
+
+  it('falls back to the app name when no appName is given', () => {
+    const runner = new Runner({app, sessionService});
+
+    expect(runner.appName).toBe(APP_MODULE_NAME);
+  });
+
+  it('runs against a session stored under the explicit appName', async () => {
+    const runner = new Runner({app, appName: ROUTE_KEY, sessionService});
+    const session = await sessionService.createSession({
+      appName: ROUTE_KEY,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    const events: Event[] = [];
+    for await (const event of runner.runAsync({
+      userId: session.userId,
+      sessionId: session.id,
+      newMessage: {role: 'user', parts: [{text: TEST_MESSAGE}]},
+    })) {
+      events.push(event);
+    }
+
+    expect(events.map((event) => event.author)).toContain('test_agent');
+  });
+});

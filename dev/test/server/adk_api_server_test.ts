@@ -6,6 +6,7 @@
 
 import {AGENT_CARD_PATH, AgentCard} from '@a2a-js/sdk';
 import {
+  App,
   BaseArtifactService,
   BaseMemoryService,
   BaseSessionService,
@@ -21,6 +22,7 @@ import {
   Runner,
   Session,
 } from '@google/adk';
+import {Part} from '@google/genai';
 import {ReadableSpan} from '@opentelemetry/sdk-trace-base';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {z} from 'zod';
@@ -29,7 +31,8 @@ import {
   A2A_AUTH_TOKEN_ENV_VAR,
   AdkApiServer,
 } from '../../src/server/adk_api_server.js';
-import {AgentLoader} from '../../src/utils/agent_loader.js';
+import {AgentFile, AgentLoader} from '../../src/utils/agent_loader.js';
+import {AdkLogger} from '../../src/utils/logger.js';
 
 interface JsonRpcResponse {
   result?: unknown;
@@ -212,6 +215,77 @@ const TEST_AGENT = new TestAgent({
     }),
   ],
 });
+
+const ARTIFACT_FILENAME = 'artifact.txt';
+const ARTIFACT_TEXT = 'content';
+const ARTIFACT_SAVED_TEXT = 'Saved the artifact';
+
+/** An agent that saves one artifact through the run's artifact service. */
+class ArtifactWritingAgent extends LlmAgent {
+  protected override async *runAsyncImpl(
+    context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    await context.artifactService?.saveArtifact({
+      filename: ARTIFACT_FILENAME,
+      artifact: {text: ARTIFACT_TEXT},
+    });
+
+    yield createEvent({
+      invocationId: context.invocationId,
+      author: this.name,
+      branch: context.branch,
+      content: {parts: [{text: ARTIFACT_SAVED_TEXT}], role: 'model'},
+    });
+  }
+}
+
+const APP_WITH_DIFFERENT_NAME = new App({
+  name: 'differentAppName',
+  rootAgent: new ArtifactWritingAgent({name: 'artifactWritingAgent'}),
+});
+
+/** An {@link AgentFile} that serves an already-constructed {@link App}. */
+class StaticAppFile extends AgentFile {
+  constructor(private readonly staticApp: App) {
+    super('app.ts');
+  }
+
+  override load(): Promise<App> {
+    return Promise.resolve(this.staticApp);
+  }
+}
+
+/**
+ * A loader that serves one app under a fixed key, so a test can drive the HTTP
+ * surface of an app whose own name differs from the key it is served under.
+ */
+class StaticAppLoader extends AgentLoader {
+  private readonly agentFile: StaticAppFile;
+
+  constructor(
+    private readonly appKey: string,
+    app: App,
+  ) {
+    super();
+    this.agentFile = new StaticAppFile(app);
+  }
+
+  override listAgents(): Promise<string[]> {
+    return Promise.resolve([this.appKey]);
+  }
+
+  override getAgentFile(): Promise<AgentFile> {
+    return Promise.resolve(this.agentFile);
+  }
+}
+
+const MISMATCHED_APP_LOADER = new StaticAppLoader(
+  'testApp',
+  APP_WITH_DIFFERENT_NAME,
+);
+
+/** A `run_sse` frame: either an event, or the stream's error report. */
+type SseFrame = Event | {error: string};
 
 describe('AdkWebServer', () => {
   let agentLoader: AgentLoader;
@@ -1253,6 +1327,121 @@ describe('AdkWebServer', () => {
       } finally {
         await specificServer.stop();
       }
+    });
+  });
+
+  describe('App named differently from the app key', () => {
+    let mismatchedServer: AdkApiServer;
+    let mismatchedClient: HttpClient;
+    let logger: AdkLogger;
+
+    beforeEach(async () => {
+      logger = new AdkLogger({label: 'test'});
+      vi.spyOn(logger, 'debug').mockImplementation(() => {});
+      mismatchedServer = new AdkApiServer({
+        agentLoader: MISMATCHED_APP_LOADER,
+        sessionService,
+        memoryService,
+        artifactService,
+        logger,
+      });
+      await mismatchedServer.start();
+      mismatchedClient = new HttpClient(mismatchedServer.url);
+      await mismatchedClient.post(
+        '/apps/testApp/users/testUser/sessions/sessionId',
+        {},
+      );
+    });
+
+    afterEach(async () => {
+      await mismatchedServer.stop();
+      vi.restoreAllMocks();
+    });
+
+    it('runs a session created under the app key', async () => {
+      const response = await mismatchedClient.post<Event[]>('/run', {
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: 'sessionId',
+        newMessage: {parts: [{text: 'Hello test agent!'}], role: 'user'},
+      });
+
+      expect(response.status).toBe(200);
+      expect(
+        response.data?.map((event) => event.content?.parts?.[0].text),
+      ).toContain(ARTIFACT_SAVED_TEXT);
+    });
+
+    it('appends run events to the session addressed by the app key', async () => {
+      await mismatchedClient.post('/run', {
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: 'sessionId',
+        newMessage: {parts: [{text: 'Hello test agent!'}], role: 'user'},
+      });
+
+      const response = await mismatchedClient.get<Session>(
+        '/apps/testApp/users/testUser/sessions/sessionId',
+      );
+
+      expect(response.data?.events.map((event) => event.author)).toContain(
+        'artifactWritingAgent',
+      );
+    });
+
+    it('streams events over run_sse for an app key that differs from the app name', async () => {
+      const response = await mismatchedClient.post('/run_sse', {
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: 'sessionId',
+        newMessage: {parts: [{text: 'Hello test agent!'}], role: 'user'},
+      });
+
+      expect(response.text).toBeDefined();
+      const rawFrames = (response.text ?? '').split('\n\n');
+      // Last element is always empty.
+      rawFrames.pop();
+      const frames = rawFrames.map(
+        (frame) => JSON.parse(frame.split('data: ')[1]) as SseFrame,
+      );
+
+      expect(frames.length).toBeGreaterThan(0);
+      expect(frames.some((frame) => 'error' in frame)).toBe(false);
+    });
+
+    it('serves artifacts written during the run from the app key namespace', async () => {
+      await mismatchedClient.post('/run', {
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: 'sessionId',
+        newMessage: {parts: [{text: 'Hello test agent!'}], role: 'user'},
+      });
+
+      const keys = await mismatchedClient.get<string[]>(
+        '/apps/testApp/users/testUser/sessions/sessionId/artifacts',
+      );
+      const artifact = await mismatchedClient.get<Part>(
+        `/apps/testApp/users/testUser/sessions/sessionId/artifacts/${ARTIFACT_FILENAME}`,
+      );
+
+      expect(keys.data).toEqual([ARTIFACT_FILENAME]);
+      expect(artifact.data?.text).toBe(ARTIFACT_TEXT);
+    });
+
+    it('reports the storage namespace it chose', async () => {
+      await mismatchedClient.post('/run', {
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: 'sessionId',
+        newMessage: {parts: [{text: 'Hello test agent!'}], role: 'user'},
+      });
+
+      expect(logger.debug).toHaveBeenCalledWith(
+        expect.stringContaining("App 'differentAppName'"),
+      );
+      expect(logger.debug).toHaveBeenCalledWith(
+        expect.stringContaining("stored under 'testApp'"),
+      );
     });
   });
 
