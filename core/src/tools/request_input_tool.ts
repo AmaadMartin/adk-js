@@ -18,7 +18,10 @@ export const requestInputTool = new LongRunningFunctionTool({
     'Presents a custom message to the user and awaits unstructured or structured input.',
   parameters: z.object({
     message: z.string().describe('The prompt for the user.'),
-    responseSchema: z
+    // snake_case, unlike the surrounding TypeScript: the model writes this
+    // straight into the `adk_request_input` args, where it is the same wire
+    // field `google/adk-python` `_request_input_func` declares.
+    response_schema: z
       .record(z.string(), z.unknown())
       .optional()
       .describe('Expected schema of the response.'),

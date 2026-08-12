@@ -10,7 +10,7 @@ import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
 import {AuthCredentialTypes} from '../../src/auth/auth_credential.js';
 import {AuthConfig} from '../../src/auth/auth_tool.js';
-import type {Event} from '../../src/events/event.js';
+import {createEvent, type Event} from '../../src/events/event.js';
 import {State} from '../../src/sessions/state.js';
 import {toJsonSchema} from '../../src/utils/schema.js';
 import {
@@ -33,6 +33,28 @@ import {unwrapResponse} from '../../src/workflow/utils/rehydration_utils.js';
 /** Extracts the first function-call args from an event. */
 function firstFunctionCall(event: Event) {
   return event.content?.parts?.[0]?.functionCall;
+}
+
+/**
+ * An `adk_request_input` interrupt with hand-written args, for the arg
+ * spellings `createRequestInputEvent` no longer produces.
+ */
+function interruptEventWithArgs(args: Record<string, unknown>): Event {
+  return createEvent({
+    content: {
+      role: 'model',
+      parts: [
+        {
+          functionCall: {
+            name: REQUEST_INPUT_FUNCTION_CALL_NAME,
+            id: 'i1',
+            args,
+          },
+        },
+      ],
+    },
+    longRunningToolIds: ['i1'],
+  });
 }
 
 describe('RequestInput', () => {
@@ -85,7 +107,7 @@ describe('createRequestInputEvent', () => {
       interruptId: 'i1',
       message: 'pick',
       payload: {x: 1},
-      responseSchema: null,
+      response_schema: null,
     });
     expect(event.longRunningToolIds).toEqual(['i1']);
     expect(hasRequestInputFunctionCall(event)).toBe(true);
@@ -100,7 +122,7 @@ describe('createRequestInputEvent', () => {
       string,
       unknown
     >;
-    expect(args.responseSchema).toMatchObject({type: 'object'});
+    expect(args.response_schema).toMatchObject({type: 'object'});
   });
 
   it('converts a Zod v3 responseSchema to a JSON schema', () => {
@@ -111,7 +133,7 @@ describe('createRequestInputEvent', () => {
       string,
       unknown
     >;
-    expect(args.responseSchema).toMatchObject({type: 'object'});
+    expect(args.response_schema).toMatchObject({type: 'object'});
   });
 
   it('converts a genai Schema responseSchema to a JSON schema', () => {
@@ -126,10 +148,34 @@ describe('createRequestInputEvent', () => {
     >;
     // Emitted in the same JSON Schema dialect as a Zod responseSchema, so a
     // client reading this field does not have to handle two type spellings.
-    expect(args.responseSchema).toEqual({
+    expect(args.response_schema).toEqual({
       type: 'object',
       properties: {answer: {type: 'string'}},
     });
+  });
+
+  it('writes the schema under response_schema only', () => {
+    const ri = new RequestInput({
+      responseSchema: z4.object({answer: z4.string()}),
+    });
+
+    const args = firstFunctionCall(createRequestInputEvent(ri))?.args;
+
+    expect(args).toHaveProperty('response_schema');
+    expect(args).not.toHaveProperty('responseSchema');
+  });
+
+  it('leaves every other arg key camelCase, as adk-python does', () => {
+    const ri = new RequestInput({interruptId: 'i1', message: 'pick'});
+
+    const args = firstFunctionCall(createRequestInputEvent(ri))?.args ?? {};
+
+    expect(Object.keys(args).sort()).toEqual([
+      'interruptId',
+      'message',
+      'payload',
+      'response_schema',
+    ]);
   });
 });
 
@@ -187,6 +233,51 @@ describe('responseSchemasByInterruptId', () => {
     const event = createRequestInputEvent(
       new RequestInput({interruptId: 'i1'}),
     );
+
+    expect(responseSchemasByInterruptId([event]).has('i1')).toBe(false);
+  });
+
+  it('recovers the schema from an interrupt adk-python wrote', () => {
+    const event = interruptEventWithArgs({
+      interruptId: 'i1',
+      payload: null,
+      message: null,
+      response_schema: {type: 'object'},
+    });
+
+    expect(responseSchemasByInterruptId([event]).get('i1')).toEqual({
+      type: 'object',
+    });
+  });
+
+  it('recovers the schema from an interrupt an older adk-js wrote', () => {
+    const event = interruptEventWithArgs({
+      interruptId: 'i1',
+      responseSchema: {type: 'object'},
+    });
+
+    expect(responseSchemasByInterruptId([event]).get('i1')).toEqual({
+      type: 'object',
+    });
+  });
+
+  it('prefers response_schema when an event carries both keys', () => {
+    const event = interruptEventWithArgs({
+      interruptId: 'i1',
+      response_schema: {type: 'object'},
+      responseSchema: {type: 'string'},
+    });
+
+    expect(responseSchemasByInterruptId([event]).get('i1')).toEqual({
+      type: 'object',
+    });
+  });
+
+  it('omits an interrupt whose response_schema is null', () => {
+    const event = interruptEventWithArgs({
+      interruptId: 'i1',
+      response_schema: null,
+    });
 
     expect(responseSchemasByInterruptId([event]).has('i1')).toBe(false);
   });

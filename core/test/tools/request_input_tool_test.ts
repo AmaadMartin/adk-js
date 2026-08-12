@@ -14,6 +14,16 @@ describe('requestInputTool', () => {
     expect(declaration?.description).toContain('Presents a custom message');
   });
 
+  it('declares the schema parameter as response_schema', () => {
+    const properties =
+      requestInputTool._getDeclaration()?.parameters?.properties ?? {};
+
+    expect(Object.keys(properties).sort()).toEqual([
+      'message',
+      'response_schema',
+    ]);
+  });
+
   it('sets skipSummarization flag on execution', async () => {
     const mockActions = createEventActions();
     const mockContext = {actions: mockActions} as unknown as Context;

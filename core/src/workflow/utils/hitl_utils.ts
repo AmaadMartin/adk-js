@@ -33,6 +33,17 @@ export {
 } from '../../agents/functions.js';
 
 /**
+ * Args key carrying the JSON Schema an `adk_request_input` call declares. It is
+ * snake_case while every sibling arg key is camelCase, because it is a wire
+ * field: `google/adk-python` `create_request_input_event` writes
+ * `response_schema`, and a paused session must resume under either runtime.
+ */
+const RESPONSE_SCHEMA_ARG_KEY = 'response_schema';
+
+/** The key `adk-js` wrote before it adopted the one above. Read only. */
+const LEGACY_RESPONSE_SCHEMA_ARG_KEY = 'responseSchema';
+
+/**
  * Creates an interrupt {@link Event} from a {@link RequestInput}. The event
  * carries an `adk_request_input` function call and marks the interrupt id as a
  * long-running tool id.
@@ -42,7 +53,7 @@ export function createRequestInputEvent(requestInput: RequestInput): Event {
     interruptId: requestInput.interruptId,
     payload: requestInput.payload ?? null,
     message: requestInput.message ?? null,
-    responseSchema: requestInput.responseSchema
+    [RESPONSE_SCHEMA_ARG_KEY]: requestInput.responseSchema
       ? toJsonSchema(requestInput.responseSchema)
       : null,
   };
@@ -65,7 +76,25 @@ export function createRequestInputEvent(requestInput: RequestInput): Event {
 }
 
 /**
- * Collects the `responseSchema` each pending interrupt declared, keyed by
+ * Reads the JSON Schema an `adk_request_input` call declared, from either
+ * spelling of the arg key.
+ *
+ * `response_schema` is the canonical key both runtimes write today.
+ * `responseSchema` is the key `adk-js` wrote before this change, so a session
+ * paused by an older `adk-js` still resumes.
+ */
+export function readResponseSchemaArg(
+  args: Record<string, unknown> | undefined,
+): unknown {
+  return (
+    args?.[RESPONSE_SCHEMA_ARG_KEY] ??
+    args?.[LEGACY_RESPONSE_SCHEMA_ARG_KEY] ??
+    undefined
+  );
+}
+
+/**
+ * Collects the `response_schema` each pending interrupt declared, keyed by
  * interrupt id, as the JSON Schema recorded on its `adk_request_input` call.
  *
  * The original {@link RequestInput} is long gone by the time a reply arrives —
@@ -82,9 +111,9 @@ export function responseSchemasByInterruptId(
       if (fc?.name !== REQUEST_INPUT_FUNCTION_CALL_NAME || !fc.id) {
         continue;
       }
-      const schema = (fc.args as Record<string, unknown> | undefined)?.[
-        'responseSchema'
-      ];
+      const schema = readResponseSchemaArg(
+        fc.args as Record<string, unknown> | undefined,
+      );
       if (schema) {
         schemas.set(fc.id, schema);
       }
