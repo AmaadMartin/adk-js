@@ -53,6 +53,26 @@ const IGNORED_EXTENSIONS = new Set([
   '.DS_Store',
 ]);
 
+// `ignoreBOM: true` means "do not strip a leading U+FEFF", which keeps
+// BOM-prefixed text byte-identical to what `Buffer.toString('utf-8')` returns.
+const UTF8_DECODER = new TextDecoder('utf-8', {fatal: true, ignoreBOM: true});
+
+/**
+ * Decodes `data` as UTF-8, returning the raw bytes when they are not valid
+ * UTF-8.
+ *
+ * `Buffer.prototype.toString('utf-8')` cannot be used for this: it never
+ * throws, it substitutes U+FFFD, so a binary resource would be stored as an
+ * unrecoverable mojibake string instead of a Buffer.
+ */
+function decodeUtf8OrBuffer(data: Buffer): string | Buffer {
+  try {
+    return UTF8_DECODER.decode(data);
+  } catch {
+    return data;
+  }
+}
+
 /**
  * Recursively loads files from a directory into a dictionary.
  *
@@ -82,12 +102,7 @@ async function loadDir(
         }
 
         const fileData = await fs.readFile(fullPath);
-
-        try {
-          files[relativePath] = fileData.toString('utf-8');
-        } catch (_e: unknown) {
-          files[relativePath] = fileData;
-        }
+        files[relativePath] = decodeUtf8OrBuffer(fileData);
       }
     }
   }
@@ -444,12 +459,7 @@ export function loadSkillFromZipBuffer(zipBuffer: Buffer): Skill {
         if (entry.entryName.includes('__pycache__')) continue;
         const relativePath = entry.entryName.substring(normPrefix.length);
         if (!relativePath) continue;
-        const data = entry.getData();
-        try {
-          res[relativePath] = data.toString('utf-8');
-        } catch (_e: unknown) {
-          res[relativePath] = data;
-        }
+        res[relativePath] = decodeUtf8OrBuffer(entry.getData());
       }
     }
     return res;
