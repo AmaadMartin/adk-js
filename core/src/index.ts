@@ -4,26 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export {AGENT_CARD_PATH, RemoteA2AAgent} from './a2a/a2a_remote_agent.js';
-export type {
-  A2AStreamEventData,
-  AfterA2ARequestCallback,
-  BeforeA2ARequestCallback,
-  RemoteA2AAgentConfig,
-} from './a2a/a2a_remote_agent.js';
-export {getA2AAgentCard} from './a2a/agent_card.js';
-export {A2AAgentExecutor} from './a2a/agent_executor.js';
-export type {
-  AfterEventCallback,
-  AfterExecuteCallback,
-  AgentExecutorConfig,
-  BeforeExecuteCallback,
-  RunnerOrRunnerConfig,
-} from './a2a/agent_executor.js';
-export {toA2a} from './a2a/agent_to_a2a.js';
-export type {A2aUserBuilder, ToA2aOptions} from './a2a/agent_to_a2a.js';
-export {bearerTokenUserBuilder} from './a2a/auth.js';
-export type {ExecutorContext} from './a2a/executor_context.js';
 export {InvocationContext} from './agents/invocation_context.js';
 export type {WorkflowInstructionScope} from './agents/invocation_context.js';
 export {FileArtifactService} from './artifacts/file_artifact_service.js';
@@ -59,10 +39,7 @@ export {
 } from './tools/skill/run_skill_inline_script_tool.js';
 export {RunSkillScriptTool} from './tools/skill/run_skill_script_tool.js';
 
+export * from './a2a/index.js';
 export * from './integrations/agent_registry/agent_registry.js';
-export * from './telemetry/google_cloud.js';
-export * from './telemetry/setup.js';
-export * from './tools/mcp/load_mcp_resource_tool.js';
-export * from './tools/mcp/mcp_session_manager.js';
-export * from './tools/mcp/mcp_tool.js';
-export * from './tools/mcp/mcp_toolset.js';
+export * from './telemetry/index.js';
+export * from './tools/mcp/index.js';

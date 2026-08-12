@@ -117,6 +117,29 @@ agents:
 
 <img src="https://raw.githubusercontent.com/google/adk-python/main/assets/adk-web-dev-ui-function-call.png"/>
 
+### Import surface
+
+`@google/adk` still exports every name in the table below, so existing imports
+keep working. Each subpath exports the same objects as the root, and a program
+that imports only `@google/adk/common` never loads the A2A, OpenTelemetry SDK,
+MCP, MikroORM or Cloud Storage graphs.
+
+| Import                                    | Contents                                                                |
+| ----------------------------------------- | ----------------------------------------------------------------------- |
+| `@google/adk`                             | Everything below.                                                       |
+| `@google/adk/common`                      | Agents, models, tools, runners, sessions, artifacts, memory, workflows. |
+| `@google/adk/a2a`                         | `toA2a`, `RemoteA2AAgent`, `A2AAgentExecutor` and the A2A callbacks.    |
+| `@google/adk/telemetry`                   | `maybeSetOtelProviders`, `getGcpExporters`, `getGcpResource`.           |
+| `@google/adk/tools/mcp`                   | `MCPToolset`, `MCPTool`, `MCPSessionManager`, `LoadMcpResourceTool`.    |
+| `@google/adk/sessions/database`           | `DatabaseSessionService`.                                               |
+| `@google/adk/artifacts/gcs`               | `GcsArtifactService`.                                                   |
+| `@google/adk/integrations/agent-registry` | `AgentRegistry`.                                                        |
+
+```typescript
+import {LlmAgent, InMemoryRunner} from '@google/adk/common';
+import {MCPToolset} from '@google/adk/tools/mcp';
+```
+
 ## 📚 Documentation
 
 - **Getting Started**: https://adk.dev/get-started/typescript

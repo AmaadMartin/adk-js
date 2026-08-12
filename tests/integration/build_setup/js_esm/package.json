@@ -7,7 +7,8 @@
   "scripts": {
     "start": "npx @google/adk-devtools run agent.js",
     "test:db": "node ./db_init_check.js",
-    "test:devtools": "node ./devtools_check.js"
+    "test:devtools": "node ./devtools_check.js",
+    "test:subpaths": "node ./subpath_check.js"
   },
   "keywords": [],
   "author": "",

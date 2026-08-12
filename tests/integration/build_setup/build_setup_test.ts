@@ -23,6 +23,15 @@ const TEST_EXECUTION_TIMEOUT = 20000;
 // Trade-off: a stuck hook now takes this long to surface.
 const HOOK_TIMEOUT = 120000;
 
+// The native-addon fixtures only ship a `start` script; the checks below need
+// the extra `test:*` scripts the other four fixtures declare.
+const SETUPS_WITH_CHECK_SCRIPTS = [
+  'js_commonjs',
+  'js_esm',
+  'ts_commonjs',
+  'ts_esm',
+];
+
 describe('Build setup', () => {
   describe.each([
     'js_commonjs',
@@ -71,9 +80,7 @@ describe('Build setup', () => {
       TEST_EXECUTION_TIMEOUT,
     );
 
-    it.skipIf(
-      !['js_commonjs', 'js_esm', 'ts_commonjs', 'ts_esm'].includes(buildSetup),
-    )(
+    it.skipIf(!SETUPS_WITH_CHECK_SCRIPTS.includes(buildSetup))(
       'should handle dynamic imports in DatabaseSessionService',
       async () => {
         const childProcess = spawn('npm', ['run', 'test:db'], {
@@ -87,9 +94,7 @@ describe('Build setup', () => {
       TEST_EXECUTION_TIMEOUT,
     );
 
-    it.skipIf(
-      !['js_commonjs', 'js_esm', 'ts_commonjs', 'ts_esm'].includes(buildSetup),
-    )(
+    it.skipIf(!SETUPS_WITH_CHECK_SCRIPTS.includes(buildSetup))(
       'should import devtools successfully',
       async () => {
         const childProcess = spawn('npm', ['run', 'test:devtools'], {
@@ -101,6 +106,34 @@ describe('Build setup', () => {
         expect(response.toString()).toContain(
           'Devtools verification successful',
         );
+      },
+      TEST_EXECUTION_TIMEOUT,
+    );
+
+    it.skipIf(!SETUPS_WITH_CHECK_SCRIPTS.includes(buildSetup))(
+      'should resolve the narrow subpath exports',
+      async () => {
+        const childProcess = spawn('npm', ['run', 'test:subpaths'], {
+          cwd: projectPath,
+          shell: true,
+        });
+
+        const response = await getResponse(childProcess);
+        expect(response.toString()).toContain('SUBPATH_EXPORTS_OK');
+      },
+      TEST_EXECUTION_TIMEOUT,
+    );
+
+    it.skipIf(buildSetup !== 'js_commonjs')(
+      'should not load the heavy subsystems when importing @google/adk/common',
+      async () => {
+        const childProcess = spawn('npm', ['run', 'test:subpaths'], {
+          cwd: projectPath,
+          shell: true,
+        });
+
+        const response = await getResponse(childProcess);
+        expect(response.toString()).toContain('SUBPATH_ISOLATION_OK');
       },
       TEST_EXECUTION_TIMEOUT,
     );
