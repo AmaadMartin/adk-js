@@ -41,6 +41,7 @@ describe('VertexAiMemoryBankService', () => {
     createInternal: ReturnType<typeof vi.fn>;
     generateInternal: ReturnType<typeof vi.fn>;
     retrieveInternal: ReturnType<typeof vi.fn>;
+    retrieveProfiles: ReturnType<typeof vi.fn>;
   };
 
   beforeEach(() => {
@@ -61,6 +62,11 @@ describe('VertexAiMemoryBankService', () => {
             distance: 0.1,
           },
         ],
+      }),
+      retrieveProfiles: vi.fn().mockResolvedValue({
+        profiles: {
+          'user-profile': {schemaId: 'user-profile', profile: {name: 'Kim'}},
+        },
       }),
     };
 
@@ -674,6 +680,75 @@ describe('VertexAiMemoryBankService', () => {
           }),
         }),
       );
+    });
+  });
+
+  describe('retrieveProfiles', () => {
+    it('calls retrieveProfiles with the scope and flattens the response', async () => {
+      const profiles = await service.retrieveProfiles({
+        appName: 'test-app',
+        userId: 'test-user',
+      });
+
+      expect(mockMemories.retrieveProfiles).toHaveBeenCalledWith({
+        name: 'reasoningEngines/test-engine-id',
+        scope: {app_name: 'test-app', user_id: 'test-user'},
+      });
+      expect(profiles).toEqual([
+        {schemaId: 'user-profile', profile: {name: 'Kim'}},
+      ]);
+    });
+
+    it('does not use the memory search endpoint', async () => {
+      await service.retrieveProfiles({
+        appName: 'test-app',
+        userId: 'test-user',
+      });
+
+      expect(mockMemories.retrieveInternal).not.toHaveBeenCalled();
+      expect(mockMemories.retrieveProfiles).toHaveBeenCalledWith(
+        expect.not.objectContaining({
+          similaritySearchParams: expect.anything(),
+        }),
+      );
+    });
+
+    it('searchMemory does not use the profiles endpoint', async () => {
+      await service.searchMemory({
+        appName: 'test-app',
+        userId: 'test-user',
+        query: 'find blue',
+      });
+
+      expect(mockMemories.retrieveProfiles).not.toHaveBeenCalled();
+    });
+
+    it('returns an empty list when the response carries no profiles', async () => {
+      mockMemories.retrieveProfiles.mockResolvedValue({});
+
+      await expect(
+        service.retrieveProfiles({appName: 'test-app', userId: 'test-user'}),
+      ).resolves.toEqual([]);
+    });
+
+    it('returns an empty list when the scope has no profiles', async () => {
+      mockMemories.retrieveProfiles.mockResolvedValue({profiles: {}});
+
+      await expect(
+        service.retrieveProfiles({appName: 'test-app', userId: 'test-user'}),
+      ).resolves.toEqual([]);
+    });
+
+    it('logs the number of retrieved profiles', async () => {
+      const loggerSpy = vi.spyOn(getLogger(), 'debug');
+
+      await service.retrieveProfiles({
+        appName: 'test-app',
+        userId: 'test-user',
+      });
+
+      expect(loggerSpy).toHaveBeenCalledWith('Retrieved 1 memory profiles.');
+      loggerSpy.mockRestore();
     });
   });
 });
