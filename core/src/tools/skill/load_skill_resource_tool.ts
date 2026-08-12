@@ -18,6 +18,16 @@ import {SkillToolset} from './skill_toolset.js';
 const BINARY_FILE_DETECTED_MSG =
   'Binary file detected. The content has been injected into the conversation history for you to analyze.';
 
+/** Status returned in place of an oversized binary resource. */
+function binaryTooLargeMsg(sizeBytes: number, limitBytes: number): string {
+  return (
+    `Binary file detected, but it was not injected into the conversation ` +
+    `history: it is ${sizeBytes} bytes, which exceeds the ${limitBytes} byte ` +
+    `limit for inline skill resources. Do not retry; process the file with a ` +
+    `skill script instead.`
+  );
+}
+
 @experimental
 export class LoadSkillResourceTool extends BaseTool {
   constructor(private toolset: SkillToolset) {
@@ -122,10 +132,14 @@ export class LoadSkillResourceTool extends BaseTool {
     }
 
     if (Buffer.isBuffer(content)) {
+      const limit = this.toolset.maxInlineResourceBytes;
       return {
         skill_name: skillName,
         path: resourcePath,
-        status: BINARY_FILE_DETECTED_MSG,
+        status:
+          content.byteLength > limit
+            ? binaryTooLargeMsg(content.byteLength, limit)
+            : BINARY_FILE_DETECTED_MSG,
       };
     }
 
@@ -182,7 +196,14 @@ export class LoadSkillResourceTool extends BaseTool {
               skillResources.assets?.[resourcePath.substring('assets/'.length)];
           }
 
-          if (Buffer.isBuffer(content)) {
+          // Re-checked here, not just in runAsync: this is the only place the
+          // payload actually enters the request, and a recorded function
+          // response can be replayed under a lower limit than the one it was
+          // produced with.
+          if (
+            Buffer.isBuffer(content) &&
+            content.byteLength <= this.toolset.maxInlineResourceBytes
+          ) {
             const mimeType = guessMimeType(resourcePath);
             llmRequest.contents.push({
               role: 'user',
