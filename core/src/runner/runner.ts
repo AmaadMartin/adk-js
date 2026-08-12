@@ -254,6 +254,7 @@ export class Runner {
             appName: this.appName,
             userId,
             sessionId,
+            config: runConfig.getSessionConfig,
           });
 
           if (params.abortSignal?.aborted) {

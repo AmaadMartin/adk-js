@@ -17,10 +17,11 @@ import {
   InvocationContext,
   isRoutableLlmAgent,
   LlmAgent,
+  RunConfig,
   Runner,
 } from '@google/adk';
 import {Content, FunctionCall, FunctionResponse} from '@google/genai';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {beforeEach, describe, expect, it, MockInstance, vi} from 'vitest';
 
 const TEST_APP_ID = 'test_app_id';
 const TEST_USER_ID = 'test_user_id';
@@ -50,6 +51,18 @@ class MockLlmAgent extends LlmAgent {
       author: this.name,
       content: {role: 'model', parts: [{text: 'Test LLM response'}]},
     });
+  }
+}
+
+/** Records how many session events the agent sees on each invocation. */
+class EventCountingAgent extends MockLlmAgent {
+  readonly seenEventCounts: number[] = [];
+
+  protected override async *runAsyncImpl(
+    context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    this.seenEventCounts.push(context.session.events.length);
+    yield* super.runAsyncImpl(context);
   }
 }
 
@@ -1252,5 +1265,108 @@ describe('Runner artifact saving (`saveInputBlobsAsArtifacts`)', () => {
     expect(userEvents[1].content!.parts).toEqual([
       {text: '[Uploaded Artifact: "file2.pdf"]'},
     ]);
+  });
+});
+
+describe('Runner getSessionConfig forwarding', () => {
+  const SEED_TIMESTAMPS = [1000, 1001, 1002];
+  const NEW_MESSAGE: Content = {role: 'user', parts: [{text: TEST_MESSAGE}]};
+
+  let sessionService: InMemorySessionService;
+  let agent: EventCountingAgent;
+  let runner: Runner;
+  let getSessionSpy: MockInstance<InMemorySessionService['getSession']>;
+
+  beforeEach(async () => {
+    sessionService = new InMemorySessionService();
+    agent = new EventCountingAgent('test_agent');
+    runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      artifactService: new InMemoryArtifactService(),
+    });
+
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+    for (const [index, timestamp] of SEED_TIMESTAMPS.entries()) {
+      await sessionService.appendEvent({
+        session,
+        event: createEvent({
+          invocationId: `seed-${index}`,
+          author: 'user',
+          timestamp,
+          content: {role: 'user', parts: [{text: `seed ${index}`}]},
+        }),
+      });
+    }
+
+    getSessionSpy = vi.spyOn(sessionService, 'getSession');
+  });
+
+  async function run(runConfig?: RunConfig): Promise<void> {
+    for await (const _event of runner.runAsync({
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      newMessage: NEW_MESSAGE,
+      runConfig,
+    })) {
+      // Consume stream
+    }
+  }
+
+  it('forwards getSessionConfig to the session service', async () => {
+    await run({getSessionConfig: {numRecentEvents: 1}});
+
+    expect(getSessionSpy).toHaveBeenCalledWith(
+      expect.objectContaining({config: {numRecentEvents: 1}}),
+    );
+  });
+
+  it('bounds the events loaded for the invocation', async () => {
+    await run({getSessionConfig: {numRecentEvents: 1}});
+
+    // The single fetched event plus the new user message.
+    expect(agent.seenEventCounts).toEqual([2]);
+  });
+
+  it('forwards afterTimestamp', async () => {
+    await run({getSessionConfig: {afterTimestamp: SEED_TIMESTAMPS[2]}});
+
+    expect(getSessionSpy).toHaveBeenCalledWith(
+      expect.objectContaining({config: {afterTimestamp: SEED_TIMESTAMPS[2]}}),
+    );
+    expect(agent.seenEventCounts).toEqual([2]);
+  });
+
+  it('does not truncate stored history', async () => {
+    await run({getSessionConfig: {numRecentEvents: 1}});
+    getSessionSpy.mockRestore();
+
+    const stored = await sessionService.getSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    expect(stored!.events).toHaveLength(SEED_TIMESTAMPS.length + 2);
+    expect(
+      stored!.events.filter(
+        (event) =>
+          event.author === 'user' &&
+          event.content?.parts?.[0].text === TEST_MESSAGE,
+      ),
+    ).toHaveLength(1);
+  });
+
+  it('leaves config undefined when getSessionConfig is absent', async () => {
+    await run();
+
+    expect(getSessionSpy.mock.calls[0][0].config).toBeUndefined();
+    // The full seeded history plus the new user message.
+    expect(agent.seenEventCounts).toEqual([SEED_TIMESTAMPS.length + 1]);
   });
 });
