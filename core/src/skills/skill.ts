@@ -79,6 +79,9 @@ export interface Script {
 
 /**
  * L3 skill content: additional instructions, assets, and scripts.
+ *
+ * Every key is a '/'-separated path relative to its resource directory, on
+ * every platform. A nested script is keyed 'sub/setup.js', never 'sub\\setup.js'.
  */
 export interface Resources {
   references?: Record<string, string | Buffer>;
