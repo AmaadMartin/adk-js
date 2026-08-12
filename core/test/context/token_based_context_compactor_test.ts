@@ -8,13 +8,18 @@ import {
   BaseAgent,
   BaseSummarizer,
   CompactedEvent,
+  createEvent,
+  createEventActions,
   Event,
   InvocationContext,
   PluginManager,
   Session,
   TokenBasedContextCompactor,
 } from '@google/adk';
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
+
+/** Text carried only by the invocation that gets rewound. */
+const REWOUND_TEXT = 'SECRET_REWOUND_CONTENT';
 
 class MockSummarizer implements BaseSummarizer {
   async summarize(events: Event[]): Promise<CompactedEvent> {
@@ -69,6 +74,31 @@ function createMockEvent(
     event.content!.parts!.push({text});
   }
   return event;
+}
+
+function createInvocationEvent(
+  invocationId: string,
+  text: string,
+  tokenCount?: number,
+): Event {
+  return createEvent({
+    invocationId,
+    author: 'user',
+    content: {role: 'user', parts: [{text}]},
+    usageMetadata:
+      tokenCount === undefined ? undefined : {promptTokenCount: tokenCount},
+  });
+}
+
+function createRewindMarkerEvent(
+  invocationId: string,
+  rewindBeforeInvocationId: string,
+): Event {
+  return createEvent({
+    invocationId,
+    author: 'user',
+    actions: createEventActions({rewindBeforeInvocationId}),
+  });
 }
 
 function createMockInvocationContext(events: Event[]): InvocationContext {
@@ -251,6 +281,54 @@ describe('TokenBasedContextCompactor', () => {
       createMockEvent('2'),
       createMockEvent('3'),
       createMockEvent('4'),
+    ]);
+
+    expect(await compactor.shouldCompact(context)).toBe(false);
+  });
+
+  it('should never hand a rewound invocation or the marker to the summarizer', async () => {
+    const summarizer = new MockSummarizer();
+    const summarizeSpy = vi.spyOn(summarizer, 'summarize');
+    const compactor = new TokenBasedContextCompactor({
+      tokenThreshold: 1,
+      eventRetentionSize: 1,
+      summarizer,
+    });
+
+    const context = createMockInvocationContext([
+      createInvocationEvent('inv1', 'hello'),
+      createInvocationEvent('inv1', 'hi'),
+      createInvocationEvent('inv_to_rewind', REWOUND_TEXT),
+      createInvocationEvent('inv_to_rewind', 'acknowledged'),
+      createRewindMarkerEvent('rewind_inv', 'inv_to_rewind'),
+      createInvocationEvent('inv3', 'next', 50),
+    ]);
+
+    await compactor.compact(context);
+
+    expect(summarizeSpy).toHaveBeenCalledOnce();
+    const summarized = summarizeSpy.mock.calls[0][0];
+    expect(summarized.map((event) => event.invocationId)).toEqual([
+      'inv1',
+      'inv1',
+    ]);
+  });
+
+  it('should not compact when only rewound events push the history past the retention size', async () => {
+    const compactor = new TokenBasedContextCompactor({
+      tokenThreshold: 10,
+      eventRetentionSize: 3,
+      summarizer: new MockSummarizer(),
+    });
+
+    // Five raw events, but only three survive the rewind, so the live history
+    // is exactly the retention size and there is nothing to compact.
+    const context = createMockInvocationContext([
+      createInvocationEvent('inv1', 'hello'),
+      createInvocationEvent('inv1', 'hi'),
+      createInvocationEvent('inv_to_rewind', REWOUND_TEXT),
+      createRewindMarkerEvent('rewind_inv', 'inv_to_rewind'),
+      createInvocationEvent('inv3', 'next', 50),
     ]);
 
     expect(await compactor.shouldCompact(context)).toBe(false);

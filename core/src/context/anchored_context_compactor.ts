@@ -7,6 +7,7 @@
 import {InvocationContext} from '../agents/invocation_context.js';
 import {CompactedEvent, isScratchpadEvent} from '../events/compacted_event.js';
 import {Event, getEventTokens} from '../events/event.js';
+import {applyRewinds} from '../events/rewind_events.js';
 import {BaseContextCompactor} from './base_context_compactor.js';
 import {calculateRetainStartIndex} from './compaction_utils.js';
 import {BaseSummarizer} from './summarizers/base_summarizer.js';
@@ -29,6 +30,12 @@ export interface AnchoredContextCompactorOptions {
  *
  * When compaction is triggered, it merges new raw events into the existing
  * Scratchpad event and discards them from the active history view.
+ *
+ * Events annulled by a rewind are excluded from the compactable history, so
+ * rewound content never enters the scratchpad. The in-place rebuild still
+ * works off stored positions rather than the filtered list, so a rewind marker
+ * that sits after the compacted window survives in `session.events` and goes
+ * on annulling its invocation.
  */
 export class AnchoredContextCompactor implements BaseContextCompactor {
   private readonly tokenThreshold: number;
@@ -70,14 +77,16 @@ export class AnchoredContextCompactor implements BaseContextCompactor {
     const activeEvents = this.getActiveEvents(events);
     const hasScratchpad =
       activeEvents.length > 0 && isScratchpadEvent(activeEvents[0]);
-    const rawEvents = hasScratchpad ? activeEvents.slice(1) : activeEvents;
+    const liveRawEvents = applyRewinds(
+      hasScratchpad ? activeEvents.slice(1) : activeEvents,
+    );
 
-    if (rawEvents.length <= this.eventRetentionSize) {
+    if (liveRawEvents.length <= this.eventRetentionSize) {
       return false;
     }
 
     const retainStartIndex = calculateRetainStartIndex(
-      rawEvents,
+      liveRawEvents,
       this.eventRetentionSize,
     );
     if (retainStartIndex === 0) {
@@ -98,13 +107,18 @@ export class AnchoredContextCompactor implements BaseContextCompactor {
     const hasScratchpad =
       activeEvents.length > 0 && isScratchpadEvent(activeEvents[0]);
     const rawEvents = hasScratchpad ? activeEvents.slice(1) : activeEvents;
+    // Rewinds are resolved over the whole window before anything is measured
+    // or sliced: a marker can sit past the compaction boundary while the
+    // invocation it annuls falls inside it, and the guards below have to bound
+    // the same list the summarizer receives or they stop bounding it at all.
+    const liveRawEvents = applyRewinds(rawEvents);
 
-    if (rawEvents.length <= this.eventRetentionSize) {
+    if (liveRawEvents.length <= this.eventRetentionSize) {
       return;
     }
 
     const retainStartIndex = calculateRetainStartIndex(
-      rawEvents,
+      liveRawEvents,
       this.eventRetentionSize,
     );
 
@@ -114,7 +128,7 @@ export class AnchoredContextCompactor implements BaseContextCompactor {
     }
 
     // Extract raw events to compact.
-    const rawEventsToCompact = rawEvents.slice(0, retainStartIndex);
+    const eventsToCompact = liveRawEvents.slice(0, retainStartIndex);
 
     let scratchpadEvent: CompactedEvent;
 
@@ -122,10 +136,10 @@ export class AnchoredContextCompactor implements BaseContextCompactor {
       const existingScratchpad = activeEvents[0] as CompactedEvent;
       scratchpadEvent = await this.summarizer.summarize([
         existingScratchpad,
-        ...rawEventsToCompact,
+        ...eventsToCompact,
       ]);
     } else {
-      scratchpadEvent = await this.summarizer.summarize(rawEventsToCompact);
+      scratchpadEvent = await this.summarizer.summarize(eventsToCompact);
     }
 
     // Ensure the event is marked as scratchpad and has system author.
@@ -137,7 +151,13 @@ export class AnchoredContextCompactor implements BaseContextCompactor {
 
     // Reconstruct the events list: inactive events + new scratchpad + active retained events
     const inactiveEvents = events.slice(0, events.indexOf(activeEvents[0]));
-    const retainedRawEvents = rawEvents.slice(retainStartIndex);
+    // Retain by stored position rather than by index into the filtered list,
+    // so a rewind marker past the compacted window stays in the session and
+    // goes on annulling its invocation.
+    const lastCompacted = eventsToCompact[eventsToCompact.length - 1];
+    const retainedRawEvents = rawEvents.slice(
+      rawEvents.indexOf(lastCompacted) + 1,
+    );
 
     const newEventsList = [
       ...inactiveEvents,
