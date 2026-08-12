@@ -13,18 +13,19 @@ import {
   PluginManager,
   Session,
   createEvent,
+  createSession,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
 function makeSession(): Session {
-  return {
+  return createSession({
     id: 'test-session',
     appName: 'test-app',
     userId: 'test-user',
     state: {},
     events: [],
     lastUpdateTime: Date.now(),
-  } as unknown as Session;
+  });
 }
 
 /**
