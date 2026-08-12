@@ -24,6 +24,8 @@ import {App, isApp} from '@google/adk';
 import {
   AgentFile,
   AgentLoader,
+  AgentNotFoundError,
+  isAgentNotFoundError,
   replaceDirnamePlugin,
 } from '../../src/utils/agent_loader.js';
 import * as fileUtils from '../../src/utils/file_utils.js';
@@ -778,6 +780,44 @@ describe('AgentLoader', () => {
           /Agent 'nope' not found[\s\S]*Available agents: agent1, agent2, agent3/,
         );
         await loader.disposeAll();
+      });
+
+      it('throws AgentNotFoundError when the name is unknown', async () => {
+        const loader = new AgentLoader(tempAgentsDir);
+
+        const error = await loader.getAgentFile('nope').catch((e) => e);
+
+        expect(error).toBeInstanceOf(AgentNotFoundError);
+        expect((error as Error).name).toBe('AgentNotFoundError');
+        expect(isAgentNotFoundError(error)).toBe(true);
+        await loader.disposeAll();
+      });
+
+      it('getAppFile throws AgentNotFoundError for an unknown app', async () => {
+        const loader = new AgentLoader(tempAgentsDir);
+
+        const error = await loader.getAppFile('nope').catch((e) => e);
+
+        expect(error).toBeInstanceOf(AgentNotFoundError);
+        expect(isAgentNotFoundError(error)).toBe(true);
+        await loader.disposeAll();
+      });
+
+      it('does not report a broken agent as not found', async () => {
+        const loader = new AgentLoader(tempAgentsDir);
+
+        const error = await loader.getAgentFile('broken').catch((e) => e);
+
+        expect(isAgentNotFoundError(error)).toBe(false);
+        expect(error).toBeInstanceOf(Error);
+        expect((error as Error).message).toContain('failed to load');
+        await loader.disposeAll();
+      });
+
+      it('isAgentNotFoundError rejects unrelated values', () => {
+        expect(isAgentNotFoundError(new Error('x'))).toBe(false);
+        expect(isAgentNotFoundError(undefined)).toBe(false);
+        expect(isAgentNotFoundError({name: 'AgentNotFoundError'})).toBe(false);
       });
     });
 
