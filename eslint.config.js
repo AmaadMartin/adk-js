@@ -29,6 +29,9 @@ export default defineConfig([
     files: ["**/*.ts"],
     plugins: { js },
     extends: ["js/recommended"],
+    linterOptions: {
+      reportUnusedDisableDirectives: "error",
+    },
     languageOptions: {
       globals: {
         ...globals.node,
