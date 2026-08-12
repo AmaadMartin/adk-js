@@ -77,7 +77,7 @@ export function isGemini1Model(modelString: string): boolean {
  * @param modelString Either a simple model name or path - based model name
  * @return true if it's a Gemini 2.x model, false otherwise.
  * @deprecated ADK no longer distinguishes Gemini versions internally, because
- *     Gemini 1.x is fully deprecated. Use {@link isGeminiModel} instead.
+ *     Gemini 1.x is fully deprecated. Use `isGeminiModel` instead.
  */
 export function isGemini2OrAbove(modelString: string): boolean {
   if (!modelString) {
