@@ -13,6 +13,8 @@ import {
   loadAllSkillsInDir,
   loadSkillFromDir,
   loadSkillFromZipBuffer,
+  MAX_ZIP_ENTRIES,
+  MAX_ZIP_UNCOMPRESSED_BYTES,
   parseSkillMdContent,
   validateSkillDir,
 } from '../../src/skills/loader.js';
@@ -610,6 +612,52 @@ Instruction body`;
       expect(skill.resources?.references?.['ref1.md']).toBe('ref content');
       expect(skill.resources?.assets?.['a.txt']).toBe('asset content');
       expect(skill.resources?.scripts?.['run.sh']?.src).toBe('echo hello');
+    });
+
+    /** Builds an archive of one SKILL.md plus `referenceCount` tiny members. */
+    function createZipWithReferenceCount(referenceCount: number): Buffer {
+      const zip = new AdmZip();
+      zip.addFile('SKILL.md', Buffer.from(validSkillMd, 'utf-8'));
+      for (let i = 0; i < referenceCount; i++) {
+        zip.addFile(`references/ref${i}.md`, Buffer.from('x', 'utf-8'));
+      }
+      return zip.toBuffer();
+    }
+
+    it('rejects an archive with too many entries', () => {
+      const zipBuffer = createZipWithReferenceCount(MAX_ZIP_ENTRIES);
+
+      expect(() => loadSkillFromZipBuffer(zipBuffer)).toThrow(
+        `Skill archive has too many entries: ${MAX_ZIP_ENTRIES + 1} exceeds the limit of ${MAX_ZIP_ENTRIES}.`,
+      );
+    });
+
+    it('accepts an archive at the entry-count limit', () => {
+      const zipBuffer = createZipWithReferenceCount(MAX_ZIP_ENTRIES - 1);
+
+      const skill = loadSkillFromZipBuffer(zipBuffer);
+
+      expect(skill.frontmatter.name).toBe('test-skill');
+      expect(Object.keys(skill.resources?.references ?? {})).toHaveLength(
+        MAX_ZIP_ENTRIES - 1,
+      );
+    });
+
+    it('rejects an archive that declares too many uncompressed bytes', () => {
+      const zip = new AdmZip();
+      zip.addFile('SKILL.md', Buffer.from(validSkillMd, 'utf-8'));
+      zip.addFile(
+        'references/big.md',
+        Buffer.alloc(MAX_ZIP_UNCOMPRESSED_BYTES + 1),
+      );
+      const declaredSize =
+        Buffer.byteLength(validSkillMd, 'utf-8') +
+        MAX_ZIP_UNCOMPRESSED_BYTES +
+        1;
+
+      expect(() => loadSkillFromZipBuffer(zip.toBuffer())).toThrow(
+        `Skill archive is too large decompressed: ${declaredSize} bytes exceeds the limit of ${MAX_ZIP_UNCOMPRESSED_BYTES} bytes.`,
+      );
     });
 
     it.each([

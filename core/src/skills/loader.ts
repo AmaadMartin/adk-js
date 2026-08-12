@@ -53,6 +53,15 @@ const IGNORED_EXTENSIONS = new Set([
   '.DS_Store',
 ]);
 
+// Bounds on a skill archive, which may come from a remote registry and is
+// untrusted until it has been loaded. adm-zip allocates each member's declared
+// uncompressed size up front and caps inflate output at that size, so capping
+// the declared total is what bounds the bytes this loader materialises. This
+// bounds memory only; it is not a sandbox. Mirrors adk-python's
+// _MAX_ZIP_ENTRIES and _MAX_ZIP_UNCOMPRESSED_BYTES in skills/_utils.py.
+export const MAX_ZIP_ENTRIES = 2000;
+export const MAX_ZIP_UNCOMPRESSED_BYTES = 32 * 1024 * 1024;
+
 /**
  * Recursively loads files from a directory into a dictionary.
  *
@@ -390,17 +399,39 @@ export async function loadAllSkillsInDir(
 /**
  * Loads a complete skill directly from in-memory zip file buffer.
  *
- * The whole archive is rejected if any member name escapes the extraction
- * root, and the skill name must be a bare path segment.
+ * The whole archive is rejected if it holds more than `MAX_ZIP_ENTRIES`
+ * members, if its members declare more than `MAX_ZIP_UNCOMPRESSED_BYTES`
+ * uncompressed bytes in total, or if any member name escapes the extraction
+ * root. The skill name must be a bare path segment. Both size limits are read
+ * from the central directory, so they reject an archive before any member is
+ * decompressed.
  *
  * @param zipBuffer - The raw Buffer of the zip file containing the skill.
  * @returns A Skill object with all components loaded.
- * @throws {Error} If a member name is a traversal path, if SKILL.md is missing,
- * or if the skill name is missing or is not a bare path segment.
+ * @throws {Error} If the archive holds too many entries, if its members declare
+ * too many uncompressed bytes, if a member name is a traversal path, if
+ * SKILL.md is missing, or if the skill name is missing or is not a bare path
+ * segment.
  */
 export function loadSkillFromZipBuffer(zipBuffer: Buffer): Skill {
   const zip = new AdmZip(zipBuffer);
   const entries = zip.getEntries();
+
+  if (entries.length > MAX_ZIP_ENTRIES) {
+    throw new Error(
+      `Skill archive has too many entries: ${entries.length} exceeds the limit of ${MAX_ZIP_ENTRIES}.`,
+    );
+  }
+
+  const declaredSize = entries.reduce(
+    (total, entry) => total + entry.header.size,
+    0,
+  );
+  if (declaredSize > MAX_ZIP_UNCOMPRESSED_BYTES) {
+    throw new Error(
+      `Skill archive is too large decompressed: ${declaredSize} bytes exceeds the limit of ${MAX_ZIP_UNCOMPRESSED_BYTES} bytes.`,
+    );
+  }
 
   for (const entry of entries) {
     if (isDangerousZipEntryName(entry.entryName)) {
