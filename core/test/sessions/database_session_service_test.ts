@@ -86,6 +86,25 @@ describe('DatabaseSessionService', () => {
     expect(session?.state['key']).toBe('value');
   });
 
+  it('should return a null-prototype state map from getSession', async () => {
+    await service.createSession({
+      appName: 'test-app',
+      userId: 'test-user',
+      sessionId: 'test-session-id',
+      state: {'key': 'value'},
+    });
+
+    const session = await service.getSession({
+      appName: 'test-app',
+      userId: 'test-user',
+      sessionId: 'test-session-id',
+    });
+
+    expect(Object.getPrototypeOf(session!.state)).toBeNull();
+    expect('toString' in session!.state).toBe(false);
+    expect(session!.state['key']).toBe('value');
+  });
+
   it('should list sessions', async () => {
     await service.createSession({
       appName: 'test-app',
