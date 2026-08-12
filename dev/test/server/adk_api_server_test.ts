@@ -1307,7 +1307,7 @@ describe('AdkWebServer', () => {
 
       // No injected loader: the server builds a real AgentLoader, whose logger
       // must get the same level as the server's own.
-      const levelledServer = new AdkApiServer({
+      new AdkApiServer({
         agentsDir,
         sessionService,
         memoryService,
@@ -1315,7 +1315,6 @@ describe('AdkWebServer', () => {
         logLevel: LogLevel.ERROR,
       });
 
-      expect(levelledServer).toBeInstanceOf(AdkApiServer);
       expect(setLogLevel.mock.calls.length).toBeGreaterThanOrEqual(2);
       for (const [level] of setLogLevel.mock.calls) {
         expect(level).toBe(LogLevel.ERROR);
