@@ -357,4 +357,37 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
     await fs.unlink(targetFile);
     await fs.unlink(fullPath);
   });
+
+  it('reports a missing argument under error_code', async () => {
+    const executor = new UnsafeLocalCodeExecutor();
+    const toolset = new SkillToolset([testSkill], {codeExecutor: executor});
+    const tool = new RunSkillScriptTool(toolset);
+
+    const result = await tool.runAsync({
+      args: {},
+      toolContext: createMockContext(),
+    });
+
+    expect(result).toEqual({
+      error:
+        "Argument 'skill_name' is required.\nArgument 'script_path' is required.",
+      error_code: 'INVALID_ARGUMENTS',
+    });
+  });
+
+  it('reports a missing script under error_code', async () => {
+    const executor = new UnsafeLocalCodeExecutor();
+    const toolset = new SkillToolset([testSkill], {codeExecutor: executor});
+    const tool = new RunSkillScriptTool(toolset);
+
+    const result = await tool.runAsync({
+      args: {skill_name: 'test-skill', script_path: 'scripts/missing.js'},
+      toolContext: createMockContext(),
+    });
+
+    expect(result).toEqual({
+      error: "Script 'scripts/missing.js' not found in skill 'test-skill'.",
+      error_code: 'SCRIPT_NOT_FOUND',
+    });
+  });
 });

@@ -48,7 +48,7 @@ class MockCodeExecutor extends BaseCodeExecutor {
 
 interface ToolErrorResponse {
   error: string;
-  errorCode: RunSkillInlineScriptErrorCode;
+  error_code: RunSkillInlineScriptErrorCode;
 }
 
 describe('RunSkillInlineScriptTool', () => {
@@ -92,8 +92,8 @@ describe('RunSkillInlineScriptTool', () => {
     })) as ToolErrorResponse;
 
     expect(result).toEqual({
-      error: 'Script content is required.',
-      errorCode: RunSkillInlineScriptErrorCode.MISSING_SCRIPT_CONTENT,
+      error: "Argument 'script_content' is required.",
+      error_code: RunSkillInlineScriptErrorCode.INVALID_ARGUMENTS,
     });
   });
 
@@ -106,8 +106,8 @@ describe('RunSkillInlineScriptTool', () => {
     })) as ToolErrorResponse;
 
     expect(result).toEqual({
-      error: 'Language is required.',
-      errorCode: RunSkillInlineScriptErrorCode.MISSING_LANGUAGE,
+      error: "Argument 'language' is required.",
+      error_code: RunSkillInlineScriptErrorCode.INVALID_ARGUMENTS,
     });
   });
 
@@ -124,7 +124,7 @@ describe('RunSkillInlineScriptTool', () => {
 
     expect(result).toEqual({
       error: 'No code executor configured.',
-      errorCode: RunSkillInlineScriptErrorCode.NO_CODE_EXECUTOR,
+      error_code: RunSkillInlineScriptErrorCode.NO_CODE_EXECUTOR,
     });
   });
 
@@ -174,7 +174,7 @@ describe('RunSkillInlineScriptTool', () => {
 
     expect(result).toEqual({
       error: 'Failed to execute inline script: Mock execution failure',
-      errorCode: RunSkillInlineScriptErrorCode.EXECUTION_ERROR,
+      error_code: RunSkillInlineScriptErrorCode.EXECUTION_ERROR,
     });
   });
 
@@ -344,7 +344,7 @@ describe('RunSkillInlineScriptTool', () => {
       expect(mockExecutor.executeCodeParams).toBeUndefined();
       expect(result).toEqual({
         error: 'Inline script execution was not confirmed and was rejected.',
-        errorCode: RunSkillInlineScriptErrorCode.CONFIRMATION_REJECTED,
+        error_code: RunSkillInlineScriptErrorCode.CONFIRMATION_REJECTED,
       });
     });
 
@@ -386,11 +386,8 @@ describe('RunSkillInlineScriptTool', () => {
     it('exposes stable string values for the error-code enum', () => {
       // The error-code string values are part of the tool's response contract
       // and must remain stable across releases.
-      expect(RunSkillInlineScriptErrorCode.MISSING_SCRIPT_CONTENT).toBe(
-        'MISSING_SCRIPT_CONTENT',
-      );
-      expect(RunSkillInlineScriptErrorCode.MISSING_LANGUAGE).toBe(
-        'MISSING_LANGUAGE',
+      expect(RunSkillInlineScriptErrorCode.INVALID_ARGUMENTS).toBe(
+        'INVALID_ARGUMENTS',
       );
       expect(RunSkillInlineScriptErrorCode.NO_CODE_EXECUTOR).toBe(
         'NO_CODE_EXECUTOR',

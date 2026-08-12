@@ -256,4 +256,21 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
     await fs.unlink(targetFile);
     await fs.unlink(fullPath);
   });
+
+  it('reports a missing argument under error_code', async () => {
+    const executor = new UnsafeLocalCodeExecutor();
+    const toolset = new SkillToolset([], {codeExecutor: executor});
+    const tool = new RunSkillInlineScriptTool(toolset);
+
+    const result = await tool.runAsync({
+      args: {},
+      toolContext: createMockContext(),
+    });
+
+    expect(result).toEqual({
+      error:
+        "Argument 'script_content' is required.\nArgument 'language' is required.",
+      error_code: 'INVALID_ARGUMENTS',
+    });
+  });
 });
