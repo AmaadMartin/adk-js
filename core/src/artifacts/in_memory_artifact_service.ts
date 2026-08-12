@@ -8,6 +8,7 @@ import {Part} from '@google/genai';
 
 import {logger} from '../utils/logger.js';
 
+import {assertNoCaseCollision} from './artifact_filename.js';
 import {
   ArtifactVersion,
   BaseArtifactService,
@@ -31,7 +32,7 @@ export class InMemoryArtifactService implements BaseArtifactService {
     {part: Part; metadata: ArtifactVersion}[]
   > = {};
 
-  saveArtifact({
+  async saveArtifact({
     appName,
     userId,
     sessionId,
@@ -40,10 +41,16 @@ export class InMemoryArtifactService implements BaseArtifactService {
     customMetadata,
   }: SaveArtifactRequest): Promise<number> {
     if (!artifact.inlineData && !artifact.text && !artifact.fileData) {
-      return Promise.reject(
-        new Error('Artifact must have either inlineData or text content.'),
-      );
+      throw new Error('Artifact must have either inlineData or text content.');
     }
+
+    assertNoCaseCollision(
+      keysInScope(
+        Object.keys(this.artifacts),
+        scopePrefix(appName, userId, sessionId, filename),
+      ),
+      filename,
+    );
 
     const path = artifactPath(appName, userId, sessionId, filename);
 
@@ -65,7 +72,7 @@ export class InMemoryArtifactService implements BaseArtifactService {
 
     this.artifacts[path].push({part: artifact, metadata});
 
-    return Promise.resolve(version);
+    return version;
   }
 
   loadArtifact({
@@ -101,17 +108,14 @@ export class InMemoryArtifactService implements BaseArtifactService {
     userId,
     sessionId,
   }: ListArtifactKeysRequest): Promise<string[]> {
-    const sessionPrefix = artifactPrefix('session', appName, userId, sessionId);
-    const userPrefix = artifactPrefix('user', appName, userId);
-    const filenames: string[] = [];
-
-    for (const path in this.artifacts) {
-      if (path.startsWith(sessionPrefix)) {
-        filenames.push(decodeURIComponent(path.slice(sessionPrefix.length)));
-      } else if (path.startsWith(userPrefix)) {
-        filenames.push(decodeURIComponent(path.slice(userPrefix.length)));
-      }
-    }
+    const paths = Object.keys(this.artifacts);
+    const filenames = [
+      ...keysInScope(
+        paths,
+        artifactPrefix('session', appName, userId, sessionId),
+      ),
+      ...keysInScope(paths, artifactPrefix('user', appName, userId)),
+    ];
 
     return Promise.resolve(filenames.sort());
   }
@@ -209,15 +213,52 @@ function artifactPath(
   sessionId: string,
   filename: string,
 ): string {
-  if (fileHasUserNamespace(filename)) {
-    return `${artifactPrefix('user', appName, userId)}${encodeURIComponent(filename)}`;
-  }
+  const prefix = scopePrefix(appName, userId, sessionId, filename);
 
-  return `${artifactPrefix('session', appName, userId, sessionId)}${encodeURIComponent(filename)}`;
+  return `${prefix}${encodeURIComponent(filename)}`;
+}
+
+/**
+ * Constructs the storage key prefix shared by every artifact in the scope the
+ * filename belongs to.
+ *
+ * @param appName The app name.
+ * @param userId The user ID.
+ * @param sessionId The session ID.
+ * @param filename The filename.
+ * @return The encoded storage key prefix for the scope.
+ */
+function scopePrefix(
+  appName: string,
+  userId: string,
+  sessionId: string,
+  filename: string,
+): string {
+  return fileHasUserNamespace(filename)
+    ? artifactPrefix('user', appName, userId)
+    : artifactPrefix('session', appName, userId, sessionId);
 }
 
 function artifactPrefix(scope: string, ...parts: string[]): string {
   return `${[scope, ...parts].map(encodeURIComponent).join('/')}/`;
+}
+
+/**
+ * Extracts the artifact filenames stored under a scope's storage key prefix.
+ *
+ * @param paths The storage keys to filter.
+ * @param prefix The scope's storage key prefix.
+ * @return The filenames of the artifacts stored in the scope.
+ */
+function keysInScope(paths: Iterable<string>, prefix: string): string[] {
+  const filenames: string[] = [];
+  for (const path of paths) {
+    if (path.startsWith(prefix)) {
+      filenames.push(decodeURIComponent(path.slice(prefix.length)));
+    }
+  }
+
+  return filenames;
 }
 
 /**

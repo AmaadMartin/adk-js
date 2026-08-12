@@ -11,6 +11,7 @@ import {fileURLToPath, pathToFileURL} from 'url';
 
 import {logger} from '../utils/logger.js';
 
+import {assertNoCaseCollision} from './artifact_filename.js';
 import {
   ArtifactVersion,
   BaseArtifactService,
@@ -55,6 +56,10 @@ interface FileArtifactVersion extends ArtifactVersion {
  * nested directories, and path traversal is rejected to keep the layout
  * portable across filesystems. `{artifactPath}` therefore mirrors the
  * sanitized, scope-relative path derived from each filename.
+ *
+ * A filename that differs only in case from an artifact already stored in the
+ * same scope is rejected, because the host filesystem resolves the directory
+ * name and NTFS and APFS resolve both names to one directory.
  */
 export class FileArtifactService implements BaseArtifactService {
   private readonly rootDir: string;
@@ -87,6 +92,13 @@ export class FileArtifactService implements BaseArtifactService {
       sessionId,
       filename,
     );
+
+    const scopeRoot = getScopeRoot(this.rootDir, userId, sessionId, filename);
+    assertNoCaseCollision(
+      await listKeysInScope(scopeRoot, keyPrefixForScope(sessionId, filename)),
+      filename,
+    );
+
     await fs.mkdir(artifactDir, {recursive: true});
 
     const versions = await getArtifactVersionsFromDir(artifactDir);
@@ -151,6 +163,10 @@ export class FileArtifactService implements BaseArtifactService {
         sessionId,
         filename,
       );
+
+      if (!(await storedKeyMatches(artifactDir, filename))) {
+        return undefined;
+      }
 
       try {
         await fs.access(artifactDir);
@@ -249,32 +265,14 @@ export class FileArtifactService implements BaseArtifactService {
     userId,
     sessionId,
   }: ListArtifactKeysRequest): Promise<string[]> {
-    const filenames: Set<string> = new Set();
     const userRoot = getUserRoot(this.rootDir, userId);
-
-    // Session artifacts
-    const sessionRoot = getSessionArtifactsDir(userRoot, sessionId);
-    for await (const artifactDir of iterateArtifactDirs(sessionRoot)) {
-      const metadata = await getLatestMetadata(artifactDir);
-      if (metadata?.fileName) {
-        filenames.add(metadata.fileName);
-      } else {
-        const rel = path.relative(sessionRoot, artifactDir);
-        filenames.add(asPosixPath(rel));
-      }
-    }
-
-    // User artifacts
-    const artifactsRoot = getUserArtifactsDir(userRoot);
-    for await (const artifactDir of iterateArtifactDirs(artifactsRoot)) {
-      const metadata = await getLatestMetadata(artifactDir);
-      if (metadata?.fileName) {
-        filenames.add(metadata.fileName);
-      } else {
-        const rel = path.relative(artifactsRoot, artifactDir);
-        filenames.add(`${USER_NAMESPACE_PREFIX}${asPosixPath(rel)}`);
-      }
-    }
+    const filenames = new Set([
+      ...(await listKeysInScope(getSessionArtifactsDir(userRoot, sessionId))),
+      ...(await listKeysInScope(
+        getUserArtifactsDir(userRoot),
+        USER_NAMESPACE_PREFIX,
+      )),
+    ]);
 
     return Array.from(filenames).sort();
   }
@@ -291,6 +289,11 @@ export class FileArtifactService implements BaseArtifactService {
         sessionId,
         filename,
       );
+
+      if (!(await storedKeyMatches(artifactDir, filename))) {
+        return;
+      }
+
       await fs.rm(artifactDir, {recursive: true, force: true});
     } catch (e) {
       logger.warn(
@@ -312,6 +315,11 @@ export class FileArtifactService implements BaseArtifactService {
         sessionId,
         filename,
       );
+
+      if (!(await storedKeyMatches(artifactDir, filename))) {
+        return [];
+      }
+
       return await getArtifactVersionsFromDir(artifactDir);
     } catch (e) {
       logger.warn(
@@ -334,6 +342,11 @@ export class FileArtifactService implements BaseArtifactService {
         sessionId,
         filename,
       );
+
+      if (!(await storedKeyMatches(artifactDir, filename))) {
+        return [];
+      }
+
       const versions = await getArtifactVersionsFromDir(artifactDir);
       const artifactVersions: ArtifactVersion[] = [];
 
@@ -376,6 +389,10 @@ export class FileArtifactService implements BaseArtifactService {
         sessionId,
         filename,
       );
+
+      if (!(await storedKeyMatches(artifactDir, filename))) {
+        return undefined;
+      }
 
       const versions = await getArtifactVersionsFromDir(artifactDir);
       if (versions.length === 0) {
@@ -465,6 +482,93 @@ function getVersionsDir(artifactDir: string): string {
 }
 
 /**
+ * Gets the root directory of the scope an artifact belongs to.
+ *
+ * @param rootDir The root directory.
+ * @param userId The user ID.
+ * @param sessionId The session ID.
+ * @param filename The filename.
+ * @returns The scope root directory path.
+ */
+function getScopeRoot(
+  rootDir: string,
+  userId: string,
+  sessionId: string,
+  filename: string,
+): string {
+  const userRoot = getUserRoot(rootDir, userId);
+
+  if (isUserScoped(sessionId, filename)) {
+    return getUserArtifactsDir(userRoot);
+  }
+  if (!sessionId) {
+    throw new Error(
+      'Session ID must be provided for session-scoped artifacts.',
+    );
+  }
+  return getSessionArtifactsDir(userRoot, sessionId);
+}
+
+/**
+ * Gets the prefix that scope-relative artifact paths carry in artifact keys.
+ *
+ * @param sessionId The session ID.
+ * @param filename The filename.
+ * @returns The key prefix for the scope the filename belongs to.
+ */
+function keyPrefixForScope(sessionId: string, filename: string): string {
+  return isUserScoped(sessionId, filename) ? USER_NAMESPACE_PREFIX : '';
+}
+
+/**
+ * Lists the artifact keys stored in one scope.
+ *
+ * @param scopeRoot The scope root directory.
+ * @param keyPrefix The prefix to prepend to keys recovered from the directory
+ *     layout. Keys recovered from stored metadata already carry it.
+ * @returns A promise that resolves to the artifact keys in the scope.
+ */
+async function listKeysInScope(
+  scopeRoot: string,
+  keyPrefix = '',
+): Promise<string[]> {
+  const filenames: string[] = [];
+
+  for await (const artifactDir of iterateArtifactDirs(scopeRoot)) {
+    const metadata = await getLatestMetadata(artifactDir);
+    if (metadata?.fileName) {
+      filenames.push(metadata.fileName);
+    } else {
+      const rel = path.relative(scopeRoot, artifactDir);
+      filenames.push(`${keyPrefix}${asPosixPath(rel)}`);
+    }
+  }
+
+  return filenames;
+}
+
+/**
+ * Checks whether an artifact directory stores the requested artifact key.
+ *
+ * A host filesystem that ignores case resolves two filenames that differ only
+ * in case to one directory. The stored key decides which artifact the
+ * directory holds; an artifact saved before this metadata existed, and a
+ * directory that holds no artifact, both match.
+ *
+ * @param artifactDir The artifact directory.
+ * @param filename The requested filename.
+ * @returns A promise that resolves to whether the directory stores the key.
+ */
+async function storedKeyMatches(
+  artifactDir: string,
+  filename: string,
+): Promise<boolean> {
+  const metadata = await getLatestMetadata(artifactDir);
+
+  return !metadata?.fileName || metadata.fileName === filename;
+}
+
+/**
  * Gets the artifact directory full path for a given artifact keys.
  *
  * @param rootDir The root directory.
@@ -479,19 +583,7 @@ function getArtifactDir(
   sessionId: string,
   filename: string,
 ): string {
-  const userRoot = getUserRoot(rootDir, userId);
-  let scopeRoot: string;
-
-  if (isUserScoped(sessionId, filename)) {
-    scopeRoot = getUserArtifactsDir(userRoot);
-  } else {
-    if (!sessionId) {
-      throw new Error(
-        'Session ID must be provided for session-scoped artifacts.',
-      );
-    }
-    scopeRoot = getSessionArtifactsDir(userRoot, sessionId);
-  }
+  const scopeRoot = getScopeRoot(rootDir, userId, sessionId, filename);
 
   let cleanFilename = filename;
   if (cleanFilename.startsWith(USER_NAMESPACE_PREFIX)) {

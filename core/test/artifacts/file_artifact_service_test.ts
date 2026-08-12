@@ -78,6 +78,58 @@ describe('FileArtifactService', () => {
     });
   });
 
+  describe('case-insensitive filesystem aliasing', () => {
+    it('reports not found for a filename the artifact directory does not store', async () => {
+      rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-artifacts-test-'));
+      const service = new FileArtifactService(rootDir);
+      const appName = 'test-app';
+      const userId = 'test-user';
+      const sessionId = 'test-session';
+
+      try {
+        await service.saveArtifact({
+          appName,
+          userId,
+          sessionId,
+          filename: 'Report.txt',
+          artifact: {text: 'first'},
+        });
+
+        // Rewrite the layout into the state a case-insensitive host presents:
+        // one directory reachable under either spelling, storing the key it
+        // was saved under.
+        const scopeRoot = getSessionArtifactsDir(
+          getUserRoot(rootDir, userId),
+          sessionId,
+        );
+        await fs.rename(
+          path.join(scopeRoot, 'Report.txt'),
+          path.join(scopeRoot, 'report.txt'),
+        );
+        await fs.rename(
+          path.join(scopeRoot, 'report.txt', 'versions', '0', 'Report.txt'),
+          path.join(scopeRoot, 'report.txt', 'versions', '0', 'report.txt'),
+        );
+
+        const request = {appName, userId, sessionId, filename: 'report.txt'};
+        expect(await service.loadArtifact(request)).toBeUndefined();
+        expect(await service.listVersions(request)).toEqual([]);
+        expect(await service.listArtifactVersions(request)).toEqual([]);
+        expect(await service.getArtifactVersion(request)).toBeUndefined();
+
+        await service.deleteArtifact(request);
+        const keys = await service.listArtifactKeys({
+          appName,
+          userId,
+          sessionId,
+        });
+        expect(keys).toContain('Report.txt');
+      } finally {
+        await fs.rm(rootDir, {recursive: true, force: true});
+      }
+    });
+  });
+
   describe('path security', () => {
     it('rejects traversal attempts', async () => {
       rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-artifacts-test-'));
