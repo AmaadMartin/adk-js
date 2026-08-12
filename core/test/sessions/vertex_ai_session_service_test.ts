@@ -621,6 +621,48 @@ describe('VertexAiSessionService', () => {
       expect(parsed.compactedContent).toBe(compacted.compactedContent);
     });
 
+    it('applies workflow metadata to a compacted event', async () => {
+      mockClient.events.listInternal.mockResolvedValue({
+        sessionEvents: [
+          {
+            name: 'projects/p/locations/l/sessions/s/events/e1',
+            invocationId: 'inv-1',
+            author: 'reviewer',
+            timestamp: '2026-04-09T13:00:00Z',
+            eventMetadata: {
+              customMetadata: {
+                _compaction: {
+                  startTime: 1000,
+                  endTime: 2000,
+                  compactedContent: 'a text summary',
+                },
+                _workflow: {
+                  output: {score: 7},
+                  route: 'approved',
+                  nodeInfo: {path: 'wf.reviewer', outputFor: '1'},
+                },
+              },
+            },
+          },
+        ],
+      });
+
+      const session = await service.getSession({
+        appName: '12345',
+        userId: 'testUser',
+        sessionId: 'my-session-id',
+      });
+
+      const parsed = session?.events[0];
+      if (!parsed || !isCompactedEvent(parsed)) {
+        expect.fail('the parsed event is not a CompactedEvent');
+      }
+      expect(parsed.compactedContent).toBe('a text summary');
+      expect(parsed.output).toEqual({score: 7});
+      expect(parsed.route).toBe('approved');
+      expect(parsed.nodeInfo).toEqual({path: 'wf.reviewer', outputFor: '1'});
+    });
+
     it('does not mark a non-compacted API event as compacted', async () => {
       mockClient.events.listInternal.mockResolvedValue({
         sessionEvents: [
