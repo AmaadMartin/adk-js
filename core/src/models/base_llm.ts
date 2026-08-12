@@ -7,6 +7,7 @@
 import {getClientLabels} from '../utils/client_labels.js';
 
 import {BaseLlmConnection} from './base_llm_connection.js';
+import {LlmCapabilities} from './capabilities.js';
 import {LlmRequest} from './llm_request.js';
 import {LlmResponse} from './llm_response.js';
 
@@ -55,6 +56,18 @@ export abstract class BaseLlm {
    * List of supported models in regex for LlmRegistry.
    */
   static readonly supportedModels: Array<string | RegExp> = [];
+
+  /**
+   * The capabilities of this model instance. A model that does not override
+   * this supports nothing beyond the defaults.
+   *
+   * Keep an override a plain getter rather than caching the result: a
+   * capability may depend on state that changes after construction, such as an
+   * environment variable or a reassigned `model`.
+   */
+  get capabilities(): LlmCapabilities {
+    return {outputSchemaAndTools: false};
+  }
 
   /**
    * Generates one content from the given contents and tools.
