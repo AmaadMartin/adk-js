@@ -19,6 +19,7 @@ import * as path from 'path';
 import {runIntegrationTests} from '../integration/run_integration_tests.js';
 import {AdkApiServer} from '../server/adk_api_server.js';
 import {FileModuleType} from '../utils/agent_loader.js';
+import {errorMessage} from '../utils/error_utils.js';
 import {AdkLogger} from '../utils/logger.js';
 import {version} from '../version.js';
 import {createAgent} from './cli_create.js';
@@ -250,7 +251,7 @@ export function createProgram(): Command {
 
         await server.start();
       } catch (error) {
-        logger.error('Error starting web server:', (error as Error).message);
+        logger.error('Error starting web server:', errorMessage(error));
         process.exit(1);
       }
     });
@@ -295,7 +296,7 @@ export function createProgram(): Command {
         });
         await server.start();
       } catch (error) {
-        logger.error('Error starting API server:', (error as Error).message);
+        logger.error('Error starting API server:', errorMessage(error));
         process.exit(1);
       }
     });
@@ -334,7 +335,7 @@ export function createProgram(): Command {
           language: options['language'],
         });
       } catch (error) {
-        logger.error('Error creating agent:', (error as Error).message);
+        logger.error('Error creating agent:', errorMessage(error));
       }
     });
 
@@ -385,7 +386,7 @@ export function createProgram(): Command {
           reloadAgents: getBoolean(options['reload_agents']),
         });
       } catch (error) {
-        logger.error('Error running agent:', (error as Error).message);
+        logger.error('Error running agent:', errorMessage(error));
       }
     });
 
@@ -457,7 +458,7 @@ export function createProgram(): Command {
           extraGcloudArgs,
         });
       } catch (error) {
-        logger.error('Error deploying agent:', (error as Error).message);
+        logger.error('Error deploying agent:', errorMessage(error));
       }
     });
 
@@ -509,7 +510,7 @@ export function createProgram(): Command {
             agentEngineId: options['agent_engine_id'],
           });
         } catch (error) {
-          logger.error('Error deploying agent:', (error as Error).message);
+          logger.error('Error deploying agent:', errorMessage(error));
         }
       });
   };
