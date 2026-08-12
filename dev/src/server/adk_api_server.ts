@@ -33,7 +33,11 @@ import express, {Request, Response} from 'express';
 import * as http from 'node:http';
 import * as path from 'node:path';
 
-import {AgentFileOptions, AgentLoader} from '../utils/agent_loader.js';
+import {
+  AgentFileOptions,
+  AgentLoader,
+  isAgentNotFoundError,
+} from '../utils/agent_loader.js';
 import {AdkLogger} from '../utils/logger.js';
 import {
   ApiServerSpanExporter,
@@ -386,10 +390,7 @@ export class AdkApiServer {
             dotSrc: await getAgentGraphAsDot(rootAgent!, [[event.author!, '']]),
           });
         } catch (e) {
-          const error = `Failed to get agent graph: ${e}`;
-
-          res.status(500).json({error});
-          this.logger.error(error);
+          this.sendAgentError(res, e, 'Failed to get agent graph');
           return;
         }
       },
@@ -804,10 +805,7 @@ export class AdkApiServer {
         responseCompleted = true;
         res.json(events);
       } catch (e: unknown) {
-        const error = `Failed to run agent: ${e}`;
-
-        res.status(500).json({error});
-        this.logger.error(error);
+        this.sendAgentError(res, e, 'Failed to run agent');
       }
     });
 
@@ -853,9 +851,11 @@ export class AdkApiServer {
           }
           res.json({output: events});
         } catch (e: unknown) {
-          const error = `Failed to run agent via Reasoning Engine API: ${e}`;
-          res.status(500).json({error});
-          this.logger.error(error);
+          this.sendAgentError(
+            res,
+            e,
+            'Failed to run agent via Reasoning Engine API',
+          );
         }
       };
 
@@ -917,24 +917,31 @@ export class AdkApiServer {
         }
       });
 
+      const events = this.executeAgentRun({
+        appName,
+        userId,
+        sessionId,
+        newMessage,
+        stateDelta,
+        runConfig: {
+          streamingMode: streaming ? StreamingMode.SSE : StreamingMode.NONE,
+        },
+        abortSignal: abortController.signal,
+      });
+
       try {
+        // Resolve the agent before the SSE headers go out. Once the stream has
+        // started the status line is on the wire, so an unknown app could only
+        // be reported as a data frame.
+        const first = await events.next();
+
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Content-Type', 'text/event-stream');
         res.setHeader('Connection', 'keep-alive');
         res.flushHeaders();
 
-        for await (const event of this.executeAgentRun({
-          appName,
-          userId,
-          sessionId,
-          newMessage,
-          stateDelta,
-          runConfig: {
-            streamingMode: streaming ? StreamingMode.SSE : StreamingMode.NONE,
-          },
-          abortSignal: abortController.signal,
-        })) {
-          res.write(`data: ${JSON.stringify(event)}\n\n`);
+        for (let next = first; !next.done; next = await events.next()) {
+          res.write(`data: ${JSON.stringify(next.value)}\n\n`);
         }
 
         responseCompleted = true;
@@ -951,11 +958,12 @@ export class AdkApiServer {
             }
           }
         } else {
-          const error = `Failed to run agent: ${e}`;
-
-          res.status(500).json({error});
-          this.logger.error(error);
+          this.sendAgentError(res, e, 'Failed to run agent');
         }
+      } finally {
+        // Closes the generator so its `await using` agent file is released even
+        // when the response fails part way through the stream.
+        await events.return(undefined);
       }
     });
   }
@@ -1015,6 +1023,22 @@ export class AdkApiServer {
         resolve();
       });
     });
+  }
+
+  /**
+   * An app name the loader never discovered is the caller's mistake (404);
+   * anything else is a real failure on our side (500).
+   */
+  private sendAgentError(
+    res: Response,
+    e: unknown,
+    fallbackPrefix: string,
+  ): void {
+    const notFound = isAgentNotFoundError(e);
+    const error = notFound ? e.message : `${fallbackPrefix}: ${e}`;
+
+    res.status(notFound ? 404 : 500).json({error});
+    this.logger.error(error);
   }
 
   private async getRunner(

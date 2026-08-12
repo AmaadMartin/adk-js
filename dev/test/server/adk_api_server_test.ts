@@ -29,7 +29,7 @@ import {
   A2A_AUTH_TOKEN_ENV_VAR,
   AdkApiServer,
 } from '../../src/server/adk_api_server.js';
-import {AgentLoader} from '../../src/utils/agent_loader.js';
+import {AgentLoader, AgentNotFoundError} from '../../src/utils/agent_loader.js';
 
 interface JsonRpcResponse {
   result?: unknown;
@@ -224,15 +224,21 @@ describe('AdkWebServer', () => {
   beforeEach(async () => {
     agentLoader = {
       listAgents: () => Promise.resolve(['testApp']),
-      getAgentFile: () =>
-        Promise.resolve({
-          load() {
-            return Promise.resolve(TEST_AGENT);
-          },
-          async [Symbol.asyncDispose](): Promise<void> {
-            return;
-          },
-        }),
+      getAgentFile: (name: string) =>
+        name === 'testApp'
+          ? Promise.resolve({
+              load() {
+                return Promise.resolve(TEST_AGENT);
+              },
+              async [Symbol.asyncDispose](): Promise<void> {
+                return;
+              },
+            })
+          : Promise.reject(
+              new AgentNotFoundError(
+                `Agent '${name}' not found in /agents. Available agents: testApp`,
+              ),
+            ),
     } as unknown as AgentLoader;
     sessionService = new InMemorySessionService();
     memoryService = new InMemoryMemoryService();
@@ -625,6 +631,28 @@ describe('AdkWebServer', () => {
       }
     });
 
+    it('should return 404 for an unknown appName', async () => {
+      expect.hasAssertions();
+      await sessionService.createSession({
+        appName: 'unknownApp',
+        userId: 'testUser',
+        sessionId: 'sessionId',
+      });
+
+      try {
+        await client.post('/run', {
+          appName: 'unknownApp',
+          userId: 'testUser',
+          sessionId: 'sessionId',
+          newMessage: {parts: [{text: 'Hello'}], role: 'user'},
+        });
+      } catch (e: unknown) {
+        const failure = e as {response: {status: number}; message: string};
+        expect(failure.response.status).toBe(404);
+        expect(failure.message).toContain("Agent 'unknownApp' not found");
+      }
+    });
+
     it('should pass abortSignal to Runner.runAsync in /run', async () => {
       await sessionService.createSession({
         appName: 'testApp',
@@ -762,6 +790,92 @@ describe('AdkWebServer', () => {
         expect((e as {response: {status: number}}).response.status).toBe(500);
       } finally {
         agentLoader.getAgentFile = originalGetAgentFile;
+      }
+    });
+
+    it('should return 404 for an unknown appName', async () => {
+      expect.hasAssertions();
+      await sessionService.createSession({
+        appName: 'unknownApp',
+        userId: 'testUser',
+        sessionId: 'sessionId',
+      });
+
+      try {
+        await client.post('/run_sse', {
+          appName: 'unknownApp',
+          userId: 'testUser',
+          sessionId: 'sessionId',
+          newMessage: {parts: [{text: 'Hello'}], role: 'user'},
+        });
+      } catch (e: unknown) {
+        const failure = e as {response: {status: number}; message: string};
+        expect(failure.response.status).toBe(404);
+        expect(failure.message).toContain("Agent 'unknownApp' not found");
+      }
+    });
+
+    it('should report a failure after the first event as an in-band error frame', async () => {
+      await sessionService.createSession({
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: 'sessionId',
+      });
+
+      const spy = vi
+        .spyOn(Runner.prototype, 'runAsync')
+        .mockImplementation(async function* () {
+          yield createEvent({
+            invocationId: 'invocationId',
+            author: 'testAgent',
+            content: {parts: [{text: 'Event 1'}], role: 'model'},
+          });
+          throw new Error('agent exploded');
+        });
+
+      try {
+        const response = await client.post('/run_sse', {
+          appName: 'testApp',
+          userId: 'testUser',
+          sessionId: 'sessionId',
+          newMessage: {parts: [{text: 'Hello'}], role: 'user'},
+        });
+
+        expect(response.status).toBe(200);
+        expect(response.text).toContain('Event 1');
+        expect(response.text).toMatch(
+          /data: \{"error":"agent exploded"\}\n\n$/,
+        );
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it('should end the stream with no events when the agent yields none', async () => {
+      await sessionService.createSession({
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: 'sessionId',
+      });
+
+      const spy = vi
+        .spyOn(Runner.prototype, 'runAsync')
+        .mockImplementation(async function* () {
+          yield* [];
+        });
+
+      try {
+        const response = await client.post('/run_sse', {
+          appName: 'testApp',
+          userId: 'testUser',
+          sessionId: 'sessionId',
+          newMessage: {parts: [{text: 'Hello'}], role: 'user'},
+        });
+
+        expect(response.status).toBe(200);
+        expect(response.text).toBe('');
+      } finally {
+        spy.mockRestore();
       }
     });
 
@@ -939,6 +1053,37 @@ describe('AdkWebServer', () => {
         );
       } catch (e: unknown) {
         expect((e as {response: {status: number}}).response.status).toBe(404);
+      }
+    });
+
+    it('should return 404 for an unknown appName', async () => {
+      expect.hasAssertions();
+      const originalGetSession = sessionService.getSession;
+      sessionService.getSession = async () =>
+        createSession({
+          id: 'fullSession',
+          appName: 'unknownApp',
+          userId: 'testUser',
+          events: [
+            createEvent({
+              id: 'event1',
+              author: 'model',
+              content: {parts: [{functionCall: {name: 'foo', args: {}}}]},
+              invocationId: 'inv-1',
+            }),
+          ],
+        });
+
+      try {
+        await client.get(
+          '/apps/unknownApp/users/testUser/sessions/fullSession/events/event1/graph',
+        );
+      } catch (e: unknown) {
+        const failure = e as {response: {status: number}; message: string};
+        expect(failure.response.status).toBe(404);
+        expect(failure.message).toContain("Agent 'unknownApp' not found");
+      } finally {
+        sessionService.getSession = originalGetSession;
       }
     });
   });
@@ -1186,6 +1331,23 @@ describe('AdkWebServer', () => {
         expect((e as {response: {status: number}}).response.status).toBe(500);
       } finally {
         agentLoader.getAgentFile = originalGetAgentFile;
+      }
+    });
+
+    it('should return 404 for an unknown appName', async () => {
+      try {
+        await client.post('/api/reasoning_engine', {
+          input: {
+            appName: 'unknownApp',
+            userId: 'testUser',
+            sessionId: 'sessionId',
+          },
+        });
+        expect.fail('Should fail with 404');
+      } catch (e: unknown) {
+        const failure = e as {response: {status: number}; message: string};
+        expect(failure.response.status).toBe(404);
+        expect(failure.message).toContain("Agent 'unknownApp' not found");
       }
     });
   });
