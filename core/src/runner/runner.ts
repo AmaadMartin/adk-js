@@ -5,7 +5,6 @@
  */
 
 import {Content, createPartFromText, Part} from '@google/genai';
-import {context, trace} from '@opentelemetry/api';
 
 import {BaseAgent} from '../agents/base_agent.js';
 import {findMatchingFunctionCall} from '../agents/functions.js';
@@ -32,10 +31,7 @@ import {BasePlugin} from '../plugins/base_plugin.js';
 import {PluginManager} from '../plugins/plugin_manager.js';
 import {BaseSessionService} from '../sessions/base_session_service.js';
 import {CompositeSessionKey, Session} from '../sessions/session.js';
-import {
-  runAsyncGeneratorWithOtelContext,
-  tracer,
-} from '../telemetry/tracing.js';
+import {runAsyncGeneratorInSpan} from '../telemetry/tracing.js';
 import {BaseToolset, isBaseToolset} from '../tools/base_toolset.js';
 import {logger} from '../utils/logger.js';
 import {isGemini2OrAbove} from '../utils/model_name.js';
@@ -243,11 +239,9 @@ export class Runner {
     // =========================================================================
     // Setup the session and invocation context
     // =========================================================================
-    const span = tracer.startSpan('invocation');
-    const ctx = trace.setSpan(context.active(), span);
     try {
-      yield* runAsyncGeneratorWithOtelContext<Runner, Event>(
-        ctx,
+      yield* runAsyncGeneratorInSpan<Runner, Event>(
+        'invocation',
         this,
         async function* () {
           const session = await this.sessionService.getSession({
@@ -452,7 +446,6 @@ export class Runner {
         },
       );
     } finally {
-      span.end();
       const toolsets = getAllToolsets(this.agent);
       await Promise.allSettled(toolsets.map((t) => t.close()));
     }
