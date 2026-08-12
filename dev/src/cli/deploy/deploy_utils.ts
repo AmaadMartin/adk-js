@@ -157,10 +157,7 @@ export function createDockerFileContent(
   // container must import it directly instead of running esbuild again on every
   // cold start. Both flags are required: AgentFile.load() runs esbuild when
   // either one is set.
-  const bundledByDeploy =
-    (options.agentFileLoadOptions ?? DEFAULT_AGENT_FILE_OPTIONS).bundle ===
-    true;
-  if (bundledByDeploy) {
+  if ((options.agentFileLoadOptions ?? DEFAULT_AGENT_FILE_OPTIONS).bundle) {
     adkServerOptions.push('--compile=false', '--bundle=false');
   }
 
