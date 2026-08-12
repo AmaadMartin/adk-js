@@ -62,6 +62,8 @@ export {RunSkillScriptTool} from './tools/skill/run_skill_script_tool.js';
 export * from './integrations/agent_registry/agent_registry.js';
 export * from './telemetry/google_cloud.js';
 export * from './telemetry/setup.js';
+export {toMcpServer} from './tools/mcp/agent_to_mcp.js';
+export type {ToMcpServerOptions} from './tools/mcp/agent_to_mcp.js';
 export * from './tools/mcp/load_mcp_resource_tool.js';
 export * from './tools/mcp/mcp_session_manager.js';
 export * from './tools/mcp/mcp_tool.js';
