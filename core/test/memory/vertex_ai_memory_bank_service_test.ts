@@ -402,7 +402,10 @@ describe('VertexAiMemoryBankService', () => {
       expect(mockMemories.ingestEventsInternal).not.toHaveBeenCalled();
     });
 
-    it('drops an unrecognised key and still ingests', async () => {
+    it('warns about an unrecognised key and still ingests', async () => {
+      const loggerSpy = vi
+        .spyOn(getLogger(), 'warn')
+        .mockImplementation(() => {});
       const event = createEvent({
         author: 'user',
         content: {parts: [{text: 'event 1'}]},
@@ -429,6 +432,26 @@ describe('VertexAiMemoryBankService', () => {
           ],
         },
       });
+      expect(loggerSpy).toHaveBeenCalledWith(
+        'Ignoring custom metadata key someAppKey because memories.ingestEvents does not support it.',
+      );
+      loggerSpy.mockRestore();
+    });
+
+    it('does not warn about a recognised ingest key', async () => {
+      const loggerSpy = vi
+        .spyOn(getLogger(), 'warn')
+        .mockImplementation(() => {});
+
+      await service.addEventsToMemory({
+        appName: 'test-app',
+        userId: 'test-user',
+        events: [],
+        customMetadata: {streamId: 'stream-123'},
+      });
+
+      expect(loggerSpy).not.toHaveBeenCalled();
+      loggerSpy.mockRestore();
     });
 
     it('skips wrong-typed ingest metadata and warns', async () => {
@@ -607,7 +630,7 @@ describe('VertexAiMemoryBankService', () => {
         userId: 'test-user',
         events,
         customMetadata: {
-          // ttl is generate-only, and keeps this case on the generate path.
+          // ttl keeps this pre-existing case on the generate path.
           ttl: '6000s',
           myBool: true,
           myNumber: 42,
@@ -658,7 +681,7 @@ describe('VertexAiMemoryBankService', () => {
         userId: 'test-user',
         events,
         customMetadata: {
-          // ttl is generate-only, and keeps this case on the generate path.
+          // ttl keeps this pre-existing case on the generate path.
           ttl: '6000s',
           myPreFormatted: {stringValue: 'already converted'},
         },
@@ -698,7 +721,7 @@ describe('VertexAiMemoryBankService', () => {
         userId: 'test-user',
         events,
         customMetadata: {
-          // ttl is generate-only, and keeps this case on the generate path.
+          // ttl keeps this pre-existing case on the generate path.
           ttl: '6000s',
           mySymbol: mySymbol,
         },
