@@ -16,7 +16,7 @@ import {
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {describe, expect, it} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 const IS_WINDOWS = os.platform() === 'win32';
 const IS_UNIX = os.platform() === 'linux' || os.platform() === 'darwin';
@@ -28,6 +28,22 @@ const IS_UNIX = os.platform() === 'linux' || os.platform() === 'darwin';
 const TEST_EXECUTION_TIMEOUT = 40000;
 
 describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
+  let materializeDir: string;
+
+  beforeEach(async () => {
+    materializeDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'run_skill_script_tool_test_'),
+    );
+    // The tool materializes output files into the process working directory;
+    // redirect it so a failing assertion cannot leave an artifact in the repo.
+    vi.spyOn(process, 'cwd').mockReturnValue(materializeDir);
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await fs.rm(materializeDir, {recursive: true, force: true});
+  });
+
   function createMockContext(agentName = 'test-agent') {
     return new Context({
       invocationContext: {
@@ -303,7 +319,7 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
     expect(outputFile).toBeDefined();
 
     // Verify file was created in process.cwd()
-    const fullPath = path.join(process.cwd(), 'output_from_script.txt');
+    const fullPath = path.join(materializeDir, 'output_from_script.txt');
     const exists = await fs
       .access(fullPath)
       .then(() => true)
@@ -312,9 +328,6 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
 
     const content = await fs.readFile(fullPath, 'utf-8');
     expect(content).toBe('hello from script file');
-
-    // Clean up
-    await fs.unlink(fullPath);
   });
 
   it('handles file collisions by appending a numeric suffix', async () => {
@@ -323,7 +336,7 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
     const tool = new RunSkillScriptTool(toolset);
 
     // Pre-create the target file to force a collision
-    const targetFile = path.join(process.cwd(), 'output_from_script.txt');
+    const targetFile = path.join(materializeDir, 'output_from_script.txt');
     await fs.writeFile(targetFile, 'existing content');
 
     const result = (await tool.runAsync({
@@ -343,7 +356,7 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
     expect(outputFile).toBeDefined();
 
     // Verify collision file was created in process.cwd()
-    const fullPath = path.join(process.cwd(), 'output_from_script_2.txt');
+    const fullPath = path.join(materializeDir, 'output_from_script_2.txt');
     const exists = await fs
       .access(fullPath)
       .then(() => true)
@@ -352,9 +365,5 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
 
     const content = await fs.readFile(fullPath, 'utf-8');
     expect(content).toBe('hello from script file');
-
-    // Clean up both files
-    await fs.unlink(targetFile);
-    await fs.unlink(fullPath);
   });
 });
