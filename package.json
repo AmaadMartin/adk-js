@@ -76,5 +76,10 @@
     "**/*.{json,md}": [
       "prettier --write"
     ]
+  },
+  "overrides": {
+    "google-gax": {
+      "google-auth-library": "^10.7.0"
+    }
   }
 }
