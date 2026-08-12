@@ -11,6 +11,7 @@ import {CodeExecutionLanguage} from '../../code_executors/code_execution_utils.j
 import {experimental} from '../../utils/experimental.js';
 import {materializeFiles} from '../../utils/file_utils.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
+import {missingArgumentsError} from './skill_tool_utils.js';
 import {SkillToolset} from './skill_toolset.js';
 
 /**
@@ -80,26 +81,20 @@ export class RunSkillInlineScriptTool extends BaseTool {
     args,
     toolContext,
   }: RunAsyncToolRequest): Promise<unknown> {
+    const invalidArguments = missingArgumentsError(args, [
+      'script_content',
+      'language',
+    ]);
+    if (invalidArguments) {
+      return invalidArguments;
+    }
+
     const inlineScriptContent = args['script_content'] as string;
     const language = args['language'] as string;
     const scriptArgs = args['args'] as
       | string[]
       | Record<string, string | number | boolean>
       | undefined;
-
-    if (!inlineScriptContent || !language) {
-      const errors: string[] = [];
-      if (!inlineScriptContent) {
-        errors.push("Argument 'script_content' is required.");
-      }
-      if (!language) {
-        errors.push("Argument 'language' is required.");
-      }
-      return {
-        error: errors.join('\n'),
-        error_code: RunSkillInlineScriptErrorCode.INVALID_ARGUMENTS,
-      };
-    }
 
     let codeExecutor = this.toolset?.codeExecutor;
     if (!codeExecutor) {

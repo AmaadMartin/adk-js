@@ -13,6 +13,7 @@ import {
   RunAsyncToolRequest,
   ToolProcessLlmRequest,
 } from '../base_tool.js';
+import {missingArgumentsError} from './skill_tool_utils.js';
 import {SkillToolset} from './skill_toolset.js';
 
 const BINARY_FILE_DETECTED_MSG =
@@ -54,22 +55,16 @@ export class LoadSkillResourceTool extends BaseTool {
     args,
     toolContext,
   }: RunAsyncToolRequest): Promise<unknown> {
+    const invalidArguments = missingArgumentsError(args, [
+      'skill_name',
+      'path',
+    ]);
+    if (invalidArguments) {
+      return invalidArguments;
+    }
+
     const skillName = args['skill_name'] as string;
     let resourcePath = args['path'] as string;
-
-    if (!skillName || !resourcePath) {
-      const errors: string[] = [];
-      if (!skillName) {
-        errors.push("Argument 'skill_name' is required.");
-      }
-      if (!resourcePath) {
-        errors.push("Argument 'path' is required.");
-      }
-      return {
-        error: errors.join('\n'),
-        error_code: 'INVALID_ARGUMENTS',
-      };
-    }
 
     resourcePath = path.posix.normalize(resourcePath);
 

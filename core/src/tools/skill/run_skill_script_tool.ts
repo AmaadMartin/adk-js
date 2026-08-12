@@ -19,6 +19,7 @@ import {
 } from '../../utils/file_extension_utils.js';
 import {materializeFiles} from '../../utils/file_utils.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
+import {missingArgumentsError} from './skill_tool_utils.js';
 import {SkillToolset} from './skill_toolset.js';
 
 @experimental
@@ -61,24 +62,18 @@ export class RunSkillScriptTool extends BaseTool {
     args,
     toolContext,
   }: RunAsyncToolRequest): Promise<unknown> {
+    const invalidArguments = missingArgumentsError(args, [
+      'skill_name',
+      'script_path',
+    ]);
+    if (invalidArguments) {
+      return invalidArguments;
+    }
+
     const skillName = args['skill_name'] as string;
     const scriptPath = args['script_path'] as string;
     const scriptArgs =
       (args['args'] as Record<string, string | number | boolean>) || {};
-
-    if (!skillName || !scriptPath) {
-      const errors: string[] = [];
-      if (!skillName) {
-        errors.push("Argument 'skill_name' is required.");
-      }
-      if (!scriptPath) {
-        errors.push("Argument 'script_path' is required.");
-      }
-      return {
-        error: errors.join('\n'),
-        error_code: 'INVALID_ARGUMENTS',
-      };
-    }
 
     let skill;
     try {
