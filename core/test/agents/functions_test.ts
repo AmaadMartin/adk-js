@@ -110,8 +110,45 @@ const falsyLongRunningTool = new FunctionTool({
   isLongRunning: true,
 });
 
+const voidLongRunningTool = new FunctionTool({
+  name: 'voidLongRunningTool',
+  description: 'long running tool with no return statement',
+  parameters: z.object({}),
+  execute: async () => {},
+  isLongRunning: true,
+});
+
+class GetterOnlyResult {
+  get value(): number {
+    return 1;
+  }
+}
+
+class OwnPropertyResult {
+  constructor(readonly a: number) {}
+}
+
 function callFor(tool: BaseTool): FunctionCall {
   return {id: randomIdForTestingOnly(), name: tool.name, args: {}};
+}
+
+/** Runs one tool and returns the `functionResponse.response` it produced. */
+async function responseFor(
+  invocationContext: InvocationContext,
+  tool: BaseTool,
+): Promise<Record<string, unknown>> {
+  const event = await handleFunctionCallList({
+    invocationContext,
+    functionCalls: [callFor(tool)],
+    toolsDict: {[tool.name]: tool},
+    beforeToolCallbacks: [],
+    afterToolCallbacks: [],
+  });
+  const response = event?.content?.parts?.[0].functionResponse?.response;
+  if (!response) {
+    expect.fail(`${tool.name} emitted no function response`);
+  }
+  return response;
 }
 
 describe('handleFunctionCallList', () => {
@@ -436,6 +473,135 @@ describe('handleFunctionCallList', () => {
         }),
       }),
     ]);
+  });
+
+  it('should wrap a Date response so the payload stays a JSON object', async () => {
+    const date = new Date('2020-01-02T03:04:05Z');
+    const dateTool = new FunctionTool({
+      name: 'dateTool',
+      description: 'returns a Date',
+      parameters: z.object({}),
+      execute: async () => date,
+    });
+
+    const response = await responseFor(invocationContext, dateTool);
+
+    expect(response).toStrictEqual({result: date});
+    expect(JSON.stringify(response)).toBe(
+      '{"result":"2020-01-02T03:04:05.000Z"}',
+    );
+  });
+
+  it('should wrap a Map response under result', async () => {
+    const map = new Map([['a', 1]]);
+    const mapTool = new FunctionTool({
+      name: 'mapTool',
+      description: 'returns a Map',
+      parameters: z.object({}),
+      execute: async () => map,
+    });
+
+    const response = await responseFor(invocationContext, mapTool);
+
+    expect(response.result).toBe(map);
+  });
+
+  it('should wrap a Set response under result', async () => {
+    const set = new Set([1, 2]);
+    const setTool = new FunctionTool({
+      name: 'setTool',
+      description: 'returns a Set',
+      parameters: z.object({}),
+      execute: async () => set,
+    });
+
+    const response = await responseFor(invocationContext, setTool);
+
+    expect(response.result).toBe(set);
+  });
+
+  it('should wrap a class instance whose state is behind getters', async () => {
+    const getterTool = new FunctionTool({
+      name: 'getterTool',
+      description: 'returns an instance with only getters',
+      parameters: z.object({}),
+      execute: async () => new GetterOnlyResult(),
+    });
+
+    const response = await responseFor(invocationContext, getterTool);
+
+    expect(response.result).toBeInstanceOf(GetterOnlyResult);
+    expect(JSON.stringify(response)).toBe('{"result":{}}');
+  });
+
+  it('should wrap a class instance rather than spreading its own properties', async () => {
+    const instanceTool = new FunctionTool({
+      name: 'instanceTool',
+      description: 'returns an instance with own properties',
+      parameters: z.object({}),
+      execute: async () => new OwnPropertyResult(1),
+    });
+
+    const response = await responseFor(invocationContext, instanceTool);
+
+    expect(response.result).toBeInstanceOf(OwnPropertyResult);
+    expect(JSON.stringify(response)).toBe('{"result":{"a":1}}');
+  });
+
+  it('should pass a null-prototype record through unchanged', async () => {
+    const nullProtoTool = new FunctionTool({
+      name: 'nullProtoTool',
+      description: 'returns a null-prototype record',
+      parameters: z.object({}),
+      execute: async () => Object.assign(Object.create(null), {k: 1}),
+    });
+
+    const response = await responseFor(invocationContext, nullProtoTool);
+
+    expect(JSON.stringify(response)).toBe('{"k":1}');
+  });
+
+  it('should pass an object literal through unchanged', async () => {
+    const recordTool = new FunctionTool({
+      name: 'recordTool',
+      description: 'returns an object literal',
+      parameters: z.object({}),
+      execute: async () => ({foo: 'bar'}),
+    });
+
+    const response = await responseFor(invocationContext, recordTool);
+
+    expect(response).toStrictEqual({foo: 'bar'});
+  });
+
+  it('should report a missing return value as {result: null}', async () => {
+    let called = false;
+    const voidTool = new FunctionTool({
+      name: 'voidTool',
+      description: 'tool with no return statement',
+      parameters: z.object({}),
+      execute: async () => {
+        called = true;
+      },
+    });
+
+    const response = await responseFor(invocationContext, voidTool);
+
+    expect(called).toBe(true);
+    expect(response).toStrictEqual({result: null});
+    expect(JSON.stringify(response)).toBe('{"result":null}');
+  });
+
+  it('should emit no event when a long-running tool has no return statement', async () => {
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(voidLongRunningTool)],
+      toolsDict: {voidLongRunningTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event).toBeNull();
   });
 });
 

@@ -19,6 +19,7 @@ import {mergeEventActions} from '../events/event_actions.js';
 import {BaseTool} from '../tools/base_tool.js';
 import {ToolConfirmation} from '../tools/tool_confirmation.js';
 import {logger} from '../utils/logger.js';
+import {isPlainObject} from '../utils/object_utils.js';
 import {Context} from './context.js';
 
 import {
@@ -203,14 +204,9 @@ function buildResponseEvent(
   toolContext: Context,
   invocationContext: InvocationContext,
 ): Event {
-  let responseResult: Record<string, unknown>;
-  if (typeof functionResult !== 'object' || functionResult == null) {
-    responseResult = {result: functionResult};
-  } else if (Array.isArray(functionResult)) {
-    responseResult = {results: functionResult};
-  } else {
-    responseResult = functionResult as Record<string, unknown>;
-  }
+  const responseResult = normalizeCallbackResponse(functionResult) ?? {
+    result: functionResult,
+  };
 
   const partFunctionResponse: Part = {
     functionResponse: {
@@ -276,6 +272,14 @@ export async function handleFunctionCallsAsync({
 
 /**
  * Normalizes callback and tool responses into a Record<string, unknown> or undefined.
+ *
+ * A plain record passes through; a `Date`, `Map`, `Set` or class instance is
+ * wrapped as `{result: value}`. Only a plain record survives the trip to the
+ * model intact: an object with a `toJSON` that returns a string makes
+ * `functionResponse.response` a non-object, which the API rejects, and an
+ * object whose state lives behind getters serializes to `{}`, which silently
+ * drops the tool's output. Mirrors `_normalize_tool_result` in adk-python
+ * `src/google/adk/flows/llm_flows/functions.py`.
  */
 function normalizeCallbackResponse(
   response: unknown,
@@ -283,13 +287,13 @@ function normalizeCallbackResponse(
   if (response == null) {
     return undefined;
   }
-  if (typeof response !== 'object') {
-    return {result: response};
-  }
   if (Array.isArray(response)) {
     return {results: response};
   }
-  return response as Record<string, unknown>;
+  if (isPlainObject(response)) {
+    return response;
+  }
+  return {result: response};
 }
 
 /**
@@ -446,7 +450,10 @@ export async function handleFunctionCallList({
     if (functionResponseError) {
       functionResponse = {error: functionResponseError};
     } else if (functionResponse == null) {
-      functionResponse = {result: functionResponse};
+      // `JSON.stringify` omits an `undefined`-valued key, which would put an
+      // empty object on the wire, so this arm writes `null`. adk-python emits
+      // `{'result': None}` here.
+      functionResponse = {result: null};
     } else {
       functionResponse = normalizeCallbackResponse(functionResponse);
     }
