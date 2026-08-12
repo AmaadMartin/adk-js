@@ -38,7 +38,10 @@ import {
 } from '../telemetry/tracing.js';
 import {BaseToolset, isBaseToolset} from '../tools/base_toolset.js';
 import {logger} from '../utils/logger.js';
-import {isGemini2OrAbove} from '../utils/model_name.js';
+import {
+  isGeminiModel,
+  isGeminiModelIdCheckDisabled,
+} from '../utils/model_name.js';
 
 /**
  * The configuration parameters for the Runner.
@@ -271,7 +274,9 @@ export class Runner {
 
           if (runConfig.supportCfc && isLlmAgent(this.agent)) {
             const modelName = this.agent.canonicalModel.model;
-            if (!isGemini2OrAbove(modelName)) {
+            // Only the Live API serves CFC, so the gate rules out model
+            // families that cannot run it, not older Gemini versions.
+            if (!isGeminiModel(modelName) && !isGeminiModelIdCheckDisabled()) {
               throw new Error(
                 `CFC is not supported for model: ${
                   modelName
