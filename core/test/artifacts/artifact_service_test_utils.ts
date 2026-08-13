@@ -613,4 +613,41 @@ export function runArtifactServiceTests(
       expect(keysAfterDelete).not.toContain(filename);
     });
   });
+
+  describe('app isolation', () => {
+    const appNameA = 'app-a';
+    const appNameB = 'app-b';
+
+    for (const filename of ['report.txt', 'user:profile.txt']) {
+      it(`keeps ${filename} scoped to its app`, async () => {
+        const scopeA = {appName: appNameA, userId, sessionId, filename};
+        const scopeB = {appName: appNameB, userId, sessionId, filename};
+
+        expect(
+          await service.saveArtifact({...scopeA, artifact: {text: 'secret-a'}}),
+        ).toBe(0);
+
+        expect(await service.loadArtifact(scopeB)).toBeUndefined();
+        expect(
+          await service.listArtifactKeys({
+            appName: appNameB,
+            userId,
+            sessionId,
+          }),
+        ).not.toContain(filename);
+        expect(await service.listVersions(scopeB)).toEqual([]);
+        expect(await service.listArtifactVersions(scopeB)).toEqual([]);
+        expect(await service.getArtifactVersion(scopeB)).toBeUndefined();
+
+        expect(
+          await service.saveArtifact({...scopeB, artifact: {text: 'secret-b'}}),
+        ).toBe(0);
+        expect((await service.loadArtifact(scopeA))?.text).toBe('secret-a');
+
+        await service.deleteArtifact(scopeB);
+        expect(await service.loadArtifact(scopeB)).toBeUndefined();
+        expect((await service.loadArtifact(scopeA))?.text).toBe('secret-a');
+      });
+    }
+  });
 }
