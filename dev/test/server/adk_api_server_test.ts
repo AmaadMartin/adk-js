@@ -6,6 +6,7 @@
 
 import {AGENT_CARD_PATH, AgentCard} from '@a2a-js/sdk';
 import {
+  BaseAgent,
   BaseArtifactService,
   BaseMemoryService,
   BaseSessionService,
@@ -269,8 +270,29 @@ const TEST_AGENT = new TestAgent({
   ],
 });
 
+/** Test double for the `AgentFile` the loader lends out. */
+interface AgentFileStub {
+  disposeCount: number;
+  load: () => Promise<BaseAgent>;
+  [Symbol.asyncDispose]: () => Promise<void>;
+}
+
+function createAgentFileStub(): AgentFileStub {
+  const stub: AgentFileStub = {
+    disposeCount: 0,
+    load: () => Promise.resolve(TEST_AGENT),
+    [Symbol.asyncDispose]: () => {
+      stub.disposeCount++;
+      return Promise.resolve();
+    },
+  };
+
+  return stub;
+}
+
 describe('AdkWebServer', () => {
   let agentLoader: AgentLoader;
+  let agentFile: AgentFileStub;
   let sessionService: BaseSessionService;
   let memoryService: BaseMemoryService;
   let artifactService: BaseArtifactService;
@@ -278,18 +300,12 @@ describe('AdkWebServer', () => {
   let client: HttpClient;
 
   beforeEach(async () => {
+    agentFile = createAgentFileStub();
     agentLoader = {
       listAgents: () => Promise.resolve(['testApp']),
       getAgentFile: (name: string) =>
         name === 'testApp'
-          ? Promise.resolve({
-              load() {
-                return Promise.resolve(TEST_AGENT);
-              },
-              async [Symbol.asyncDispose](): Promise<void> {
-                return;
-              },
-            })
+          ? Promise.resolve(agentFile)
           : Promise.reject(
               new AgentNotFoundError(
                 `Agent '${name}' not found in /agents. Available agents: testApp`,
@@ -1209,6 +1225,79 @@ describe('AdkWebServer', () => {
       } finally {
         sessionService.getSession = originalGetSession;
       }
+    });
+  });
+
+  describe('agent file lifecycle', () => {
+    const RUN_BODY = {
+      appName: 'testApp',
+      userId: 'testUser',
+      sessionId: 'sessionId',
+      newMessage: {parts: [{text: 'Hello test agent!'}], role: 'user'},
+    };
+    const GRAPH_PATH =
+      '/apps/testApp/users/testUser/sessions/fullSession/events/event1/graph';
+
+    async function postRun(): Promise<void> {
+      const response = await client.post<Event[]>('/run', RUN_BODY);
+
+      expect(response.status).toBe(200);
+    }
+
+    async function getGraph(times: number): Promise<void> {
+      const originalGetSession = sessionService.getSession;
+      sessionService.getSession = async () =>
+        createSession({
+          id: 'fullSession',
+          appName: 'testApp',
+          userId: 'testUser',
+          events: [
+            createEvent({
+              id: 'event1',
+              author: 'model',
+              content: {parts: [{functionCall: {name: 'foo', args: {}}}]},
+              invocationId: 'inv-1',
+            }),
+          ],
+        });
+
+      try {
+        for (let i = 0; i < times; i++) {
+          const response = await client.get<{dotSrc: string}>(GRAPH_PATH);
+
+          expect(response.status).toBe(200);
+        }
+      } finally {
+        sessionService.getSession = originalGetSession;
+      }
+    }
+
+    beforeEach(async () => {
+      await sessionService.createSession({
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: 'sessionId',
+      });
+    });
+
+    it('leaves the loader-owned agent file usable after two sequential run requests', async () => {
+      await postRun();
+      await postRun();
+
+      expect(agentFile.disposeCount).toBe(0);
+    });
+
+    it('leaves the loader-owned agent file usable after two sequential agent-graph requests', async () => {
+      await getGraph(2);
+
+      expect(agentFile.disposeCount).toBe(0);
+    });
+
+    it('does not dispose the loader-owned agent file when a run and a graph request share an app', async () => {
+      await postRun();
+      await getGraph(1);
+
+      expect(agentFile.disposeCount).toBe(0);
     });
   });
 
