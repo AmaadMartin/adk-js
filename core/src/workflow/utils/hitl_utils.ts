@@ -159,6 +159,45 @@ export function interruptResponseMismatch(
   );
 }
 
+/**
+ * The text of a plain-text reply — a turn whose every part is text — or
+ * `undefined` when the reply carries anything else.
+ *
+ * This is what an interactive client sends: `adk run` and the dev UI have only
+ * a chat box, so a reply that names its interrupt is not available to them.
+ */
+export function plainTextReply(parts: Part[] | undefined): string | undefined {
+  const list = parts ?? [];
+  if (list.length === 0 || !list.every((p) => typeof p.text === 'string')) {
+    return undefined;
+  }
+  return list.map((p) => p.text).join('');
+}
+
+/**
+ * Maps a plain-text reply to the one interrupt that is pending, or to nothing
+ * at all when the reply is ambiguous.
+ *
+ * A plain-text reply names no interrupt. With two or more pauses open it would
+ * be broadcast to every one of them, and at least one node would resume with
+ * data the user never gave it, so it resolves nothing instead. Addressing a
+ * specific pause in that situation requires a structured function response.
+ *
+ * Callers derive `pending` themselves, and should do so only once
+ * {@link plainTextReply} has returned text: deriving it is the expensive half,
+ * and in the workflow root it throws on a structured reply this rule ignores.
+ */
+export function singlePendingResumeInput(
+  text: string,
+  pending: Set<string>,
+): Record<string, unknown> {
+  if (pending.size !== 1) {
+    return {};
+  }
+  const [id] = pending;
+  return {[id]: text};
+}
+
 /** Returns whether an event contains a `request_input` function call. */
 export function hasRequestInputFunctionCall(event: Event): boolean {
   return (event.content?.parts ?? []).some(

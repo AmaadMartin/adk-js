@@ -12,6 +12,7 @@ import {AsyncQueue} from '../utils/async_queue.js';
 import {BaseNode, toContent} from './base_node.js';
 import type {RunnableNode} from './graph.js';
 import {NodeContext} from './node_context.js';
+import {plainTextReply, singlePendingResumeInput} from './utils/hitl_utils.js';
 import {
   eventsForCurrentRun,
   reconstructNodeStates,
@@ -134,22 +135,17 @@ export async function* runNodeAsInvocation(
  * the single pending interrupt id so an interactive client (e.g. `adk run`) can
  * resume a HITL/auth pause by simply typing a reply.
  *
- * If more than one interrupt is pending, a plain-text reply is ambiguous — it
- * would be broadcast to every pause and at least one node would resume with
- * data the user never gave it — so it is ignored here. Addressing a specific
- * pause in a multi-interrupt workflow requires structured function responses
- * (resolved by the workflow's own rehydration).
+ * The ambiguous case is declined; see {@link singlePendingResumeInput}.
+ * Addressing a specific pause in a multi-interrupt workflow requires structured
+ * function responses (resolved by the workflow's own rehydration).
  */
 function resumeInputsFromPlainText(
   ic: InvocationContext,
 ): Record<string, unknown> {
-  const parts = ic.userContent?.parts ?? [];
-  const isPlainText =
-    parts.length > 0 && parts.every((p) => typeof p.text === 'string');
-  if (!isPlainText) {
+  const text = plainTextReply(ic.userContent?.parts);
+  if (text === undefined) {
     return {};
   }
-  const text = parts.map((p) => p.text).join('');
 
   const pending = new Set<string>();
   // Scoped to the run still in progress: a pause belonging to a run that
@@ -163,12 +159,7 @@ function resumeInputsFromPlainText(
     }
   }
 
-  // Only the unambiguous single-pause case is resumable by plain text.
-  if (pending.size !== 1) {
-    return {};
-  }
-  const [id] = pending;
-  return {[id]: text};
+  return singlePendingResumeInput(text, pending);
 }
 
 /**
