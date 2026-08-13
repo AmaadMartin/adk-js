@@ -3,8 +3,6 @@
  * Copyright 2025 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
-import {inspect} from 'node:util';
-import * as winston from 'winston';
 
 /** Log levels for the logger. */
 export enum LogLevel {
@@ -33,11 +31,107 @@ export interface Logger {
 
 /**
  * Nesting depth rendered by {@link formatLogArgs} for a non-Error value.
- * Node's default of 2 collapses anything deeper to `[Object]`, which loses the
- * detail a log line exists to carry; 5 keeps a nested payload readable while
- * still bounding log volume.
+ * A depth of 2 collapses anything deeper to `[Object]`, which loses the detail
+ * a log line exists to carry; 5 keeps a nested payload readable while still
+ * bounding log volume.
  */
 const LOG_INSPECT_DEPTH = 5;
+
+/** A property key that needs no quotes. */
+const BARE_KEY = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+
+/** Renders a string as a quoted, escaped literal. */
+function quote(text: string): string {
+  const escaped = text
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/\n/g, '\\n');
+  return `'${escaped}'`;
+}
+
+/** Renders the members of an array, an object, a `Map` or a `Set`. */
+function joinMembers(open: string, members: string[], close: string): string {
+  if (members.length === 0) {
+    return `${open}${close}`;
+  }
+  return `${open} ${members.join(', ')} ${close}`;
+}
+
+/**
+ * Renders a value structurally, in the style of `util.inspect`.
+ *
+ * This module is reachable from the browser entry point, so it cannot import
+ * `node:util`. The renderer keeps `depth` levels of nesting, writes `[Object]`
+ * below that, and writes `[Circular]` for a value that contains itself.
+ *
+ * @param value The value to render.
+ * @param depth The number of nesting levels still to render.
+ * @param seen The values that enclose this one, which marks a cycle.
+ * @return The rendered value.
+ */
+function inspectValue(
+  value: unknown,
+  depth: number,
+  seen: Set<object>,
+): string {
+  if (typeof value === 'string') {
+    return quote(value);
+  }
+  if (typeof value === 'bigint') {
+    return `${value}n`;
+  }
+  if (typeof value === 'function') {
+    return `[Function: ${value.name || 'anonymous'}]`;
+  }
+  if (value === null || typeof value !== 'object') {
+    return String(value);
+  }
+  if (value instanceof Error) {
+    return value.stack ?? String(value);
+  }
+  if (seen.has(value)) {
+    return '[Circular]';
+  }
+  if (depth < 0) {
+    return Array.isArray(value) ? '[Array]' : '[Object]';
+  }
+
+  seen.add(value);
+  try {
+    if (Array.isArray(value)) {
+      const items = value.map((item) => inspectValue(item, depth - 1, seen));
+      return joinMembers('[', items, ']');
+    }
+    if (value instanceof Map) {
+      const entries = [...value].map(
+        ([key, item]) =>
+          `${inspectValue(key, depth - 1, seen)} => ` +
+          inspectValue(item, depth - 1, seen),
+      );
+      return `Map(${value.size}) ${joinMembers('{', entries, '}')}`;
+    }
+    if (value instanceof Set) {
+      const items = [...value].map((item) =>
+        inspectValue(item, depth - 1, seen),
+      );
+      return `Set(${value.size}) ${joinMembers('{', items, '}')}`;
+    }
+    // A Date, a RegExp or a URL renders itself through its own `toString`.
+    if (value.toString !== Object.prototype.toString) {
+      return String(value);
+    }
+    const className = value.constructor?.name;
+    const prefix = className && className !== 'Object' ? `${className} ` : '';
+    const entries = Object.entries(value).map(
+      ([key, item]) =>
+        `${BARE_KEY.test(key) ? key : quote(key)}: ` +
+        inspectValue(item, depth - 1, seen),
+    );
+    return prefix + joinMembers('{', entries, '}');
+  } finally {
+    seen.delete(value);
+  }
+}
 
 /** Renders a single log argument. */
 function formatLogValue(value: unknown): string {
@@ -47,7 +141,7 @@ function formatLogValue(value: unknown): string {
   if (value instanceof Error) {
     return value.stack ?? String(value);
   }
-  return inspect(value, {depth: LOG_INSPECT_DEPTH});
+  return inspectValue(value, LOG_INSPECT_DEPTH, new Set());
 }
 
 /**
@@ -66,34 +160,23 @@ export function formatLogArgs(args: unknown[]): string {
   return args.map(formatLogValue).join(' ');
 }
 
-class SimpleLogger implements Logger {
-  private readonly logger: winston.Logger;
-  private logLevel: LogLevel = LogLevel.INFO;
+/** The `console` method each level is written with. */
+const CONSOLE_METHOD = {
+  [LogLevel.DEBUG]: 'debug',
+  [LogLevel.INFO]: 'info',
+  [LogLevel.WARN]: 'warn',
+  [LogLevel.ERROR]: 'error',
+} as const;
 
-  constructor() {
-    this.logger = winston.createLogger({
-      levels: {
-        'debug': LogLevel.DEBUG,
-        'info': LogLevel.INFO,
-        'warn': LogLevel.WARN,
-        'error': LogLevel.ERROR,
-      },
-      level: 'error',
-      format: winston.format.combine(
-        winston.format.label({label: 'ADK'}),
-        winston.format((info) => {
-          info.level = info.level.toUpperCase();
-          return info;
-        })(),
-        winston.format.colorize(),
-        winston.format.timestamp(),
-        winston.format.printf((info) => {
-          return `${info.level}: [${info.label}] ${info.timestamp} ${info.message}`;
-        }),
-      ),
-      transports: [new winston.transports.Console()],
-    });
-  }
+/**
+ * The default logger. Writes through `console` so that it works unchanged in
+ * Node and in the browser. This module is reachable from the browser entry
+ * point, so it must not name a Node-only package; the Node entry point
+ * installs the winston-backed logger instead.
+ * See https://github.com/google/adk-js/issues/611.
+ */
+class SimpleLogger implements Logger {
+  private logLevel: LogLevel = LogLevel.INFO;
 
   setLogLevel(level: LogLevel): void {
     this.logLevel = level;
@@ -104,39 +187,26 @@ class SimpleLogger implements Logger {
       return;
     }
 
-    this.logger.log(level.toString(), formatLogArgs(messages));
+    const timestamp = new Date().toISOString();
+    const line = `${LogLevel[level]}: [ADK] ${timestamp} ${formatLogArgs(messages)}`;
+
+    console[CONSOLE_METHOD[level]](line);
   }
 
   debug(...messages: unknown[]): void {
-    if (this.logLevel > LogLevel.DEBUG) {
-      return;
-    }
-
-    this.logger.debug(formatLogArgs(messages));
+    this.log(LogLevel.DEBUG, ...messages);
   }
 
   info(...messages: unknown[]): void {
-    if (this.logLevel > LogLevel.INFO) {
-      return;
-    }
-
-    this.logger.info(formatLogArgs(messages));
+    this.log(LogLevel.INFO, ...messages);
   }
 
   warn(...messages: unknown[]): void {
-    if (this.logLevel > LogLevel.WARN) {
-      return;
-    }
-
-    this.logger.warn(formatLogArgs(messages));
+    this.log(LogLevel.WARN, ...messages);
   }
 
   error(...messages: unknown[]): void {
-    if (this.logLevel > LogLevel.ERROR) {
-      return;
-    }
-
-    this.logger.error(formatLogArgs(messages));
+    this.log(LogLevel.ERROR, ...messages);
   }
 }
 
@@ -169,7 +239,8 @@ export function getLogger(): Logger {
 }
 
 /**
- * Resets the logger to the default SimpleLogger.
+ * Resets the logger to the built-in console logger. On Node this replaces the
+ * winston-backed logger that the Node entry point installs.
  */
 export function resetLogger(): void {
   currentLogger = new SimpleLogger();

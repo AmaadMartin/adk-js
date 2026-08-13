@@ -13,9 +13,19 @@ import {
   setLogLevel,
 } from '@google/adk';
 import {Console} from 'node:console';
+import {readFile} from 'node:fs/promises';
 import {Writable} from 'node:stream';
-import {afterEach, beforeEach, describe, expect, it} from 'vitest';
+import {fileURLToPath} from 'node:url';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {resetLogger} from '../../src/utils/logger.js';
+
+/** Reads a module under `core/src/utils` as text. */
+function readCoreSource(name: string): Promise<string> {
+  return readFile(
+    fileURLToPath(new URL(`../../src/utils/${name}`, import.meta.url)),
+    'utf8',
+  );
+}
 
 describe('setLogger', () => {
   beforeEach(() => {
@@ -153,9 +163,9 @@ describe('setLogger', () => {
 });
 
 /**
- * A stream that keeps everything written to it. Winston's Console transport
- * writes straight to `console._stdout`, so a test reads a record by giving
- * `Console` streams that the test owns.
+ * A stream that keeps everything written to it. `SimpleLogger` writes through
+ * `console`, which sends a warning and an error to the stderr stream, so a
+ * test reads a record by giving `Console` a stream that the test owns.
  */
 class CaptureStream extends Writable {
   text = '';
@@ -172,11 +182,11 @@ class CaptureStream extends Writable {
 
 describe('SimpleLogger output formatting', () => {
   const realConsole = globalThis.console;
-  let stdout: CaptureStream;
+  let output: CaptureStream;
 
   beforeEach(() => {
-    stdout = new CaptureStream();
-    globalThis.console = new Console(stdout, new CaptureStream());
+    output = new CaptureStream();
+    globalThis.console = new Console(output, output);
     resetLogger();
     setLogLevel(LogLevel.DEBUG);
   });
@@ -189,8 +199,8 @@ describe('SimpleLogger output formatting', () => {
   it('logs the stack of an Error', () => {
     getLogger().error(new Error('boom'));
 
-    expect(stdout.text).toContain('Error: boom');
-    expect(stdout.text).toContain('at ');
+    expect(output.text).toContain('Error: boom');
+    expect(output.text).toContain('at ');
   });
 
   it('logs the stack of a subclassed Error under its own name', () => {
@@ -203,27 +213,27 @@ describe('SimpleLogger output formatting', () => {
 
     getLogger().error(new NamedError('sub-boom'));
 
-    expect(stdout.text).toContain('NamedError: sub-boom');
-    expect(stdout.text).toContain('at ');
+    expect(output.text).toContain('NamedError: sub-boom');
+    expect(output.text).toContain('at ');
   });
 
   it('logs the contents of a plain object', () => {
     getLogger().error({a: 1});
 
-    expect(stdout.text).toContain('{ a: 1 }');
-    expect(stdout.text).not.toContain('[object Object]');
+    expect(output.text).toContain('{ a: 1 }');
+    expect(output.text).not.toContain('[object Object]');
   });
 
   it('logs a string unchanged', () => {
     getLogger().error('plain message');
 
-    expect(stdout.text).toContain('plain message');
+    expect(output.text).toContain('plain message');
   });
 
   it('logs undefined as the word undefined', () => {
     getLogger().error(undefined);
 
-    expect(stdout.text).toContain('undefined');
+    expect(output.text).toContain('undefined');
   });
 
   it('formats the argument on the debug, info and warn methods', () => {
@@ -233,17 +243,17 @@ describe('SimpleLogger output formatting', () => {
     logger.info({level: 'info'});
     logger.warn({level: 'warn'});
 
-    expect(stdout.text).toContain("{ level: 'debug' }");
-    expect(stdout.text).toContain("{ level: 'info' }");
-    expect(stdout.text).toContain("{ level: 'warn' }");
-    expect(stdout.text).not.toContain('[object Object]');
+    expect(output.text).toContain("{ level: 'debug' }");
+    expect(output.text).toContain("{ level: 'info' }");
+    expect(output.text).toContain("{ level: 'warn' }");
+    expect(output.text).not.toContain('[object Object]');
   });
 
   it('joins a prefix and an Error with a single space', () => {
     getLogger().error('Error during startup:', new Error('boom'));
 
-    expect(stdout.text).toContain('Error during startup: Error: boom');
-    expect(stdout.text).toContain('at ');
+    expect(output.text).toContain('Error during startup: Error: boom');
+    expect(output.text).toContain('at ');
   });
 });
 
@@ -320,5 +330,140 @@ describe('formatLogArgs', () => {
 
   it('returns an empty string for no arguments', () => {
     expect(formatLogArgs([])).toBe('');
+  });
+});
+
+describe('SimpleLogger', () => {
+  const ISO_TIMESTAMP = String.raw`\d{4}-\d{2}-\d{2}T[\d:.]+Z`;
+
+  beforeEach(() => {
+    resetLogger();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    resetLogger();
+  });
+
+  it('emits a message at the configured level', () => {
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+    setLogLevel(LogLevel.INFO);
+
+    getLogger().info('hello');
+
+    expect(infoSpy).toHaveBeenCalledTimes(1);
+    expect(infoSpy).toHaveBeenCalledWith(
+      expect.stringMatching(
+        new RegExp(`^INFO: \\[ADK\\] ${ISO_TIMESTAMP} hello$`),
+      ),
+    );
+  });
+
+  it('suppresses a message below the configured level', () => {
+    const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    setLogLevel(LogLevel.WARN);
+
+    getLogger().debug('x');
+    getLogger().info('y');
+
+    expect(debugSpy).not.toHaveBeenCalled();
+    expect(infoSpy).not.toHaveBeenCalled();
+
+    getLogger().warn('z');
+
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('defaults to INFO', () => {
+    const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+
+    getLogger().debug('x');
+    getLogger().info('y');
+
+    expect(debugSpy).not.toHaveBeenCalled();
+    expect(infoSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('routes each level to its matching console method', () => {
+    const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    setLogLevel(LogLevel.DEBUG);
+
+    getLogger().debug('d');
+    getLogger().info('i');
+    getLogger().warn('w');
+    getLogger().error('e');
+
+    expect(debugSpy).toHaveBeenCalledTimes(1);
+    expect(debugSpy).toHaveBeenCalledWith(
+      expect.stringContaining('DEBUG: [ADK] '),
+    );
+    expect(infoSpy).toHaveBeenCalledTimes(1);
+    expect(infoSpy).toHaveBeenCalledWith(
+      expect.stringContaining('INFO: [ADK] '),
+    );
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('WARN: [ADK] '),
+    );
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('ERROR: [ADK] '),
+    );
+  });
+
+  it('joins arguments with a single space', () => {
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+    setLogLevel(LogLevel.INFO);
+
+    getLogger().info('a', 1, true);
+
+    expect(infoSpy).toHaveBeenCalledWith(
+      expect.stringMatching(
+        new RegExp(`^INFO: \\[ADK\\] ${ISO_TIMESTAMP} a 1 true$`),
+      ),
+    );
+  });
+
+  it('log() emits without throwing', () => {
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+    setLogLevel(LogLevel.INFO);
+
+    expect(() => getLogger().log(LogLevel.INFO, 'via log')).not.toThrow();
+    expect(infoSpy).toHaveBeenCalledTimes(1);
+    expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining('via log'));
+  });
+
+  it('formats the full line for a warning', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    setLogLevel(LogLevel.WARN);
+
+    getLogger().warn('boom');
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringMatching(
+        new RegExp(`^WARN: \\[ADK\\] ${ISO_TIMESTAMP} boom$`),
+      ),
+    );
+  });
+});
+
+describe('browser safety', () => {
+  it('keeps the browser-reachable logger free of imports', async () => {
+    const source = await readCoreSource('logger.ts');
+
+    expect(source).not.toMatch(/^\s*import\b/m);
+    expect(source).not.toMatch(/\bimport\(/);
+  });
+
+  it('keeps winston in the Node-only logger', async () => {
+    const source = await readCoreSource('logger_node.ts');
+
+    expect(source).toMatch(/from 'winston'/);
   });
 });

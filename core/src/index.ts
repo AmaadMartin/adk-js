@@ -4,6 +4,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {installNodeLogger} from './utils/logger_node.js';
+
+// The Node entry point installs the winston-backed logger. `utils/logger.ts`
+// itself must stay free of Node-only imports so that the browser entry point
+// can reach it; see https://github.com/google/adk-js/issues/611.
+// This call runs after the modules re-exported below are evaluated, so a module
+// must log through the `logger` facade instead of holding the result of
+// `getLogger()`.
+installNodeLogger();
+
 export {AGENT_CARD_PATH, RemoteA2AAgent} from './a2a/a2a_remote_agent.js';
 export type {
   A2AStreamEventData,
@@ -27,9 +37,9 @@ export type {A2aUserBuilder, ToA2aOptions} from './a2a/agent_to_a2a.js';
 export {bearerTokenUserBuilder} from './a2a/auth.js';
 export type {ExecutorContext} from './a2a/executor_context.js';
 export {
-  IntentMismatchReason,
   detectContextMutation,
   freezeIntent,
+  IntentMismatchReason,
   verifyIntent,
 } from './a2a/intent_binding.js';
 export type {
