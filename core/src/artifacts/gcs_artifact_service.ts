@@ -9,6 +9,12 @@ import {createPartFromBase64, createPartFromText, Part} from '@google/genai';
 import {logger} from '../utils/logger.js';
 
 import {
+  assertArtifactReferenceDepth,
+  isArtifactUri,
+  parseArtifactReference,
+  validatePathSegment,
+} from './artifact_util.js';
+import {
   ArtifactVersion,
   BaseArtifactService,
   DeleteArtifactRequest,
@@ -22,6 +28,22 @@ const GCS_FILE_URI_METADATA_KEY = 'adkFileUri';
 const GCS_FILE_MIME_TYPE_METADATA_KEY = 'adkFileMimeType';
 const GCS_DISPLAY_NAME_METADATA_KEY = 'adkDisplayName';
 const GCS_IS_TEXT_METADATA_KEY = 'adkIsText';
+const USER_NAMESPACE_PREFIX = 'user:';
+
+/**
+ * A stored blob, before it is turned back into a Part.
+ *
+ * A `reference` blob holds a file URI in its metadata and carries no bytes.
+ */
+type StoredArtifact =
+  | {kind: 'reference'; fileUri: string; mimeType?: string}
+  | {
+      kind: 'content';
+      data: Buffer;
+      contentType?: string;
+      displayName?: string;
+      isText: boolean;
+    };
 
 export class GcsArtifactService implements BaseArtifactService {
   private readonly bucket: Bucket;
@@ -81,6 +103,14 @@ export class GcsArtifactService implements BaseArtifactService {
       if (!fileUri) {
         throw new Error('Artifact fileData must have a fileUri.');
       }
+      if (isArtifactUri(fileUri)) {
+        parseArtifactReference({
+          appName: request.appName,
+          userId: request.userId,
+          sessionId: request.sessionId,
+          fileUri,
+        });
+      }
       // Store the URI and mime_type (if any) as blob metadata; no content to upload.
       customMetadata[GCS_FILE_URI_METADATA_KEY] = fileUri;
       if (fileData.mimeType) {
@@ -95,6 +125,71 @@ export class GcsArtifactService implements BaseArtifactService {
   }
 
   async loadArtifact(request: LoadArtifactRequest): Promise<Part | undefined> {
+    return this.loadArtifactAtDepth(request, 0);
+  }
+
+  private async loadArtifactAtDepth(
+    request: LoadArtifactRequest,
+    depth: number,
+  ): Promise<Part | undefined> {
+    // Runs outside readStoredArtifact so a rejection is not reported as a
+    // missing artifact.
+    validateBlobPathSegments(request);
+
+    const stored = await this.readStoredArtifact(request);
+    if (!stored) {
+      return undefined;
+    }
+
+    if (stored.kind === 'reference') {
+      const {fileUri, mimeType} = stored;
+      if (!isArtifactUri(fileUri)) {
+        return {fileData: {fileUri, mimeType}};
+      }
+
+      const parsedUri = parseArtifactReference({
+        appName: request.appName,
+        userId: request.userId,
+        sessionId: request.sessionId,
+        fileUri,
+      });
+      assertArtifactReferenceDepth(depth, fileUri);
+
+      return this.loadArtifactAtDepth(
+        {
+          appName: parsedUri.appName,
+          userId: parsedUri.userId,
+          sessionId: parsedUri.sessionId ?? request.sessionId,
+          filename: parsedUri.filename,
+          version: parsedUri.version,
+        },
+        depth + 1,
+      );
+    }
+
+    if (stored.displayName) {
+      return {
+        inlineData: {
+          data: stored.data.toString('base64'),
+          mimeType: stored.contentType,
+          displayName: stored.displayName,
+        },
+      };
+    }
+
+    if (stored.isText) {
+      return createPartFromText(stored.data.toString('utf-8'));
+    }
+
+    return createPartFromBase64(
+      stored.data.toString('base64'),
+      stored.contentType!,
+    );
+  }
+
+  private async readStoredArtifact(
+    request: LoadArtifactRequest,
+  ): Promise<StoredArtifact | undefined> {
     try {
       let version = request.version;
       if (version === undefined) {
@@ -120,39 +215,31 @@ export class GcsArtifactService implements BaseArtifactService {
         | undefined;
 
       if (fileUri) {
-        const mimeType =
-          (customMeta[GCS_FILE_MIME_TYPE_METADATA_KEY] as string | undefined) ??
-          metadata.contentType ??
-          undefined;
-        return {fileData: {fileUri, mimeType}};
+        return {
+          kind: 'reference',
+          fileUri,
+          mimeType:
+            (customMeta[GCS_FILE_MIME_TYPE_METADATA_KEY] as
+              | string
+              | undefined) ??
+            metadata.contentType ??
+            undefined,
+        };
       }
 
       const [rawDataBuffer] = await file.download();
 
-      const displayName = customMeta[GCS_DISPLAY_NAME_METADATA_KEY] as
-        | string
-        | undefined;
-      if (displayName) {
-        return {
-          inlineData: {
-            data: rawDataBuffer.toString('base64'),
-            mimeType: metadata.contentType,
-            displayName,
-          },
-        };
-      }
-
-      if (
-        customMeta[GCS_IS_TEXT_METADATA_KEY] === 'true' ||
-        metadata.contentType === 'text/plain'
-      ) {
-        return createPartFromText(rawDataBuffer.toString('utf-8'));
-      }
-
-      return createPartFromBase64(
-        rawDataBuffer.toString('base64'),
-        metadata.contentType!,
-      );
+      return {
+        kind: 'content',
+        data: rawDataBuffer,
+        contentType: metadata.contentType,
+        displayName: customMeta[GCS_DISPLAY_NAME_METADATA_KEY] as
+          | string
+          | undefined,
+        isText:
+          customMeta[GCS_IS_TEXT_METADATA_KEY] === 'true' ||
+          metadata.contentType === 'text/plain',
+      };
     } catch (e) {
       logger.warn(
         `[GcsArtifactService] loadArtifact: Failed to load artifact ${request.filename}`,
@@ -163,6 +250,10 @@ export class GcsArtifactService implements BaseArtifactService {
   }
 
   async listArtifactKeys(request: ListArtifactKeysRequest): Promise<string[]> {
+    validatePathSegment(request.appName, 'appName');
+    validatePathSegment(request.userId, 'userId');
+    validatePathSegment(request.sessionId, 'sessionId');
+
     const sessionPrefix = `${request.appName}/${request.userId}/${request.sessionId}/`;
     const usernamePrefix = `${request.appName}/${request.userId}/user/`;
     const [[sessionFiles], [userSessionFiles]] = await Promise.all([
@@ -270,15 +361,33 @@ export class GcsArtifactService implements BaseArtifactService {
   }
 }
 
-function getFileName({
+/**
+ * Rejects identifiers that would alter the blob name they are built into.
+ *
+ * @param request The request whose scope identifiers are about to be used.
+ */
+function validateBlobPathSegments({
   appName,
   userId,
   sessionId,
   filename,
-  version,
-}: LoadArtifactRequest): string {
-  const isUser = filename.startsWith('user:');
-  const cleanFilename = isUser ? filename.substring(5) : filename;
+}: LoadArtifactRequest): void {
+  validatePathSegment(appName, 'appName');
+  validatePathSegment(userId, 'userId');
+
+  if (!filename.startsWith(USER_NAMESPACE_PREFIX)) {
+    validatePathSegment(sessionId, 'sessionId');
+  }
+}
+
+function getFileName(request: LoadArtifactRequest): string {
+  validateBlobPathSegments(request);
+
+  const {appName, userId, sessionId, filename, version} = request;
+  const isUser = filename.startsWith(USER_NAMESPACE_PREFIX);
+  const cleanFilename = isUser
+    ? filename.substring(USER_NAMESPACE_PREFIX.length)
+    : filename;
 
   const prefix = isUser
     ? `${appName}/${userId}/user/${cleanFilename}`

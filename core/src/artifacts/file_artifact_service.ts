@@ -12,6 +12,11 @@ import {fileURLToPath, pathToFileURL} from 'url';
 import {logger} from '../utils/logger.js';
 
 import {
+  assertArtifactReferenceDepth,
+  isArtifactUri,
+  parseArtifactReference,
+} from './artifact_util.js';
+import {
   ArtifactVersion,
   BaseArtifactService,
   DeleteArtifactRequest,
@@ -30,6 +35,13 @@ interface FileArtifactVersion extends ArtifactVersion {
   fileName?: string;
   fileUri?: string;
 }
+
+/**
+ * A stored artifact version, before a reference is resolved.
+ */
+type StoredArtifact =
+  | {kind: 'reference'; fileUri: string; mimeType?: string}
+  | {kind: 'content'; part: Part};
 
 /**
  * Service for managing artifacts stored on the local filesystem.
@@ -71,6 +83,7 @@ export class FileArtifactService implements BaseArtifactService {
   }
 
   async saveArtifact({
+    appName,
     userId,
     sessionId,
     filename,
@@ -79,6 +92,20 @@ export class FileArtifactService implements BaseArtifactService {
   }: SaveArtifactRequest): Promise<number> {
     if (!artifact.inlineData && !artifact.text && !artifact.fileData) {
       throw new Error('Artifact must have either inlineData or text content.');
+    }
+
+    // Reject an out-of-scope reference before any directory is created.
+    const referenceUri =
+      !artifact.inlineData && artifact.text === undefined
+        ? artifact.fileData?.fileUri
+        : undefined;
+    if (isArtifactUri(referenceUri)) {
+      parseArtifactReference({
+        appName,
+        userId,
+        sessionId,
+        fileUri: referenceUri,
+      });
     }
 
     const artifactDir = getArtifactDir(
@@ -138,12 +165,54 @@ export class FileArtifactService implements BaseArtifactService {
     return nextVersion;
   }
 
-  async loadArtifact({
+  async loadArtifact(request: LoadArtifactRequest): Promise<Part | undefined> {
+    return this.loadArtifactAtDepth(request, 0);
+  }
+
+  private async loadArtifactAtDepth(
+    request: LoadArtifactRequest,
+    depth: number,
+  ): Promise<Part | undefined> {
+    const stored = await this.readStoredArtifact(request);
+    if (!stored) {
+      return undefined;
+    }
+
+    if (stored.kind === 'content') {
+      return stored.part;
+    }
+
+    const {fileUri, mimeType} = stored;
+    if (!isArtifactUri(fileUri)) {
+      return {fileData: {fileUri, mimeType}};
+    }
+
+    const parsedUri = parseArtifactReference({
+      appName: request.appName,
+      userId: request.userId,
+      sessionId: request.sessionId,
+      fileUri,
+    });
+    assertArtifactReferenceDepth(depth, fileUri);
+
+    return this.loadArtifactAtDepth(
+      {
+        appName: parsedUri.appName,
+        userId: parsedUri.userId,
+        sessionId: parsedUri.sessionId ?? request.sessionId,
+        filename: parsedUri.filename,
+        version: parsedUri.version,
+      },
+      depth + 1,
+    );
+  }
+
+  private async readStoredArtifact({
     userId,
     sessionId,
     filename,
     version,
-  }: LoadArtifactRequest): Promise<Part | undefined> {
+  }: LoadArtifactRequest): Promise<StoredArtifact | undefined> {
     try {
       const artifactDir = getArtifactDir(
         this.rootDir,
@@ -189,7 +258,9 @@ export class FileArtifactService implements BaseArtifactService {
 
       if (metadata.fileUri) {
         return {
-          fileData: {fileUri: metadata.fileUri, mimeType: metadata.mimeType},
+          kind: 'reference',
+          fileUri: metadata.fileUri,
+          mimeType: metadata.mimeType,
         };
       }
 
@@ -214,9 +285,12 @@ export class FileArtifactService implements BaseArtifactService {
         try {
           const data = await fs.readFile(contentPath);
           return {
-            inlineData: {
-              mimeType: metadata.mimeType,
-              data: data.toString('base64'),
+            kind: 'content',
+            part: {
+              inlineData: {
+                mimeType: metadata.mimeType,
+                data: data.toString('base64'),
+              },
             },
           };
         } catch {
@@ -229,7 +303,7 @@ export class FileArtifactService implements BaseArtifactService {
 
       try {
         const text = await fs.readFile(contentPath, 'utf-8');
-        return {text};
+        return {kind: 'content', part: {text}};
       } catch {
         logger.warn(
           `[FileArtifactService] loadArtifact: Text artifact ${filename} missing at ${contentPath}`,
