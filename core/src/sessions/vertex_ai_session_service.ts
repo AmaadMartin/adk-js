@@ -43,6 +43,12 @@ import {
   ListSessionsResponse,
   trimTempState,
 } from './base_session_service.js';
+import {
+  parseCompactionMetadata,
+  ParsedCompactionMetadata,
+  toAliasedCompactionMetadata,
+  toCompactionMetadata,
+} from './compaction_metadata.js';
 import {createSession, Session} from './session.js';
 
 const DEFAULT_MAX_ATTEMPTS = 30;
@@ -441,11 +447,7 @@ export class VertexAiSessionService extends BaseSessionService {
 
     const customMetadata: Record<string, unknown> = {...event.customMetadata};
     if (isCompactedEvent(event)) {
-      customMetadata._compaction = {
-        startTime: event.startTime,
-        endTime: event.endTime,
-        compactedContent: event.compactedContent,
-      };
+      customMetadata._compaction = toCompactionMetadata(event);
     }
     if (event.usageMetadata) {
       customMetadata._usage_metadata = event.usageMetadata;
@@ -475,10 +477,20 @@ export class VertexAiSessionService extends BaseSessionService {
         Object.keys(customMetadata).length > 0 ? customMetadata : undefined,
     };
 
-    config.rawEvent = JSON.parse(JSON.stringify(event)) as Record<
+    const rawEvent = JSON.parse(JSON.stringify(event)) as Record<
       string,
       unknown
     >;
+    if (isCompactedEvent(event)) {
+      // The js compaction fields stay at the top level of `rawEvent` for a
+      // js -> js round trip, but adk-python's `Event` ignores them, so mirror
+      // the payload where adk-python reads it.
+      rawEvent['actions'] = {
+        ...(rawEvent['actions'] as Record<string, unknown> | undefined),
+        compaction: toAliasedCompactionMetadata(event),
+      };
+    }
+    config.rawEvent = rawEvent;
 
     const params: AppendAgentEngineSessionEventRequestParameters = {
       name: `reasoningEngines/${reasoningEngineId}/sessions/${session.id}`,
@@ -570,8 +582,9 @@ function applyWorkflowMetadata(
 /**
  * Renames `transferToAgent` to the `transferAgent` the Agent Engine sessions
  * API actually defines, mirroring what `_fromApiEvent` reads back and what
- * adk-python writes. Returns a new object: `partialCopy` is shallow, so
- * rewriting the event's own `actions` in place would mutate the caller's event.
+ * adk-python writes, and drops the wire-only `compaction` key the API has no
+ * field for. Returns a new object: `partialCopy` is shallow, so rewriting the
+ * event's own `actions` in place would mutate the caller's event.
  */
 function toApiActions(
   actions: EventActions | undefined,
@@ -579,39 +592,80 @@ function toApiActions(
   if (!actions) {
     return undefined;
   }
-  const {transferToAgent, ...rest} = actions;
+  const {transferToAgent, ...rest}: WireEventActions = actions;
+  delete rest.compaction;
   return {
     ...rest,
     ...(transferToAgent !== undefined ? {transferAgent: transferToAgent} : {}),
   } as ApiEventActions;
 }
 
-interface ExtendedEventActions extends EventActions {
-  compaction?: {
-    startTime: number;
-    endTime: number;
-    compactedContent: string;
-  };
+/**
+ * `EventActions` as it can arrive on the wire. `compaction` is adk-python's
+ * canonical channel inside `rawEvent`; it is `unknown` because the payload is
+ * whatever an earlier SDK version wrote, and it never survives onto a
+ * reconstructed adk-js event.
+ */
+interface WireEventActions extends EventActions {
+  compaction?: unknown;
 }
 
 interface ExtendedEvent extends Event {
-  actions: ExtendedEventActions;
+  actions: WireEventActions;
   isCompacted?: boolean;
   startTime?: number;
   endTime?: number;
   compactedContent?: string;
 }
 
+/** Restores the adk-js compaction fields from a parsed payload. */
+function applyCompaction(
+  event: ExtendedEvent,
+  compaction: ParsedCompactionMetadata,
+): void {
+  event.isCompacted = true;
+  event.startTime = compaction.startTime;
+  event.endTime = compaction.endTime;
+  event.compactedContent = compaction.compactedContent;
+  if (!event.content && compaction.content) {
+    event.content = compaction.content;
+  }
+}
+
+/**
+ * Hydrates an event rebuilt from `rawEvent` out of `actions.compaction`, then
+ * drops that key so it stays wire-only.
+ *
+ * An event adk-js wrote already carries the compaction at the top level, and
+ * that copy is authoritative: its `compactedContent` is the exact string the
+ * producer chose, while the wire `Content` is a flattening of it.
+ */
+function applyRawEventCompaction(event: ExtendedEvent): void {
+  const payload = event.actions?.compaction;
+  if (payload === undefined) {
+    return;
+  }
+  delete event.actions.compaction;
+  if (event.isCompacted) {
+    return;
+  }
+  const compaction = parseCompactionMetadata(payload);
+  if (compaction) {
+    applyCompaction(event, compaction);
+  }
+}
+
 function _fromApiEvent(apiEventObj: VertexAiSessionEvent): Event {
   const rawEvent = apiEventObj.rawEvent;
   if (rawEvent) {
-    const event = JSON.parse(JSON.stringify(rawEvent)) as Event;
+    const event = JSON.parse(JSON.stringify(rawEvent)) as ExtendedEvent;
     event.id = apiEventObj.name?.split('/').pop() || '';
     event.invocationId = apiEventObj.invocationId || '';
     event.author = apiEventObj.author;
     if (apiEventObj.timestamp) {
       event.timestamp = new Date(apiEventObj.timestamp).getTime();
     }
+    applyRawEventCompaction(event);
     return event;
   }
 
@@ -621,22 +675,14 @@ function _fromApiEvent(apiEventObj: VertexAiSessionEvent): Event {
   let customMetadata = eventMetadata.customMetadata as
     | Record<string, unknown>
     | undefined;
-  let compactionData: {
-    startTime: number;
-    endTime: number;
-    compactedContent: string;
-  } | null = null;
+  let compactionData: ParsedCompactionMetadata | undefined;
   let usageMetadataData = null;
   let workflowData: WorkflowEventMetadata | undefined;
 
   if (customMetadata) {
     customMetadata = {...customMetadata};
     if (customMetadata._compaction) {
-      compactionData = customMetadata._compaction as {
-        startTime: number;
-        endTime: number;
-        compactedContent: string;
-      };
+      compactionData = parseCompactionMetadata(customMetadata._compaction);
       delete customMetadata._compaction;
     }
     if (customMetadata._usage_metadata) {
@@ -654,7 +700,7 @@ function _fromApiEvent(apiEventObj: VertexAiSessionEvent): Event {
     }
   }
 
-  const eventActions: ExtendedEventActions = {
+  const eventActions: EventActions = {
     stateDelta: (actions['stateDelta'] as {[key: string]: unknown}) || {},
     artifactDelta: (actions['artifactDelta'] as {[key: string]: number}) || {},
     requestedAuthConfigs:
@@ -666,7 +712,6 @@ function _fromApiEvent(apiEventObj: VertexAiSessionEvent): Event {
     skipSummarization: actions['skipSummarization'] as boolean | undefined,
     transferToAgent: actions['transferAgent'] as string | undefined,
     escalate: actions['escalate'] as boolean | undefined,
-    compaction: compactionData || undefined,
   };
 
   const event: ExtendedEvent = {
@@ -696,10 +741,7 @@ function _fromApiEvent(apiEventObj: VertexAiSessionEvent): Event {
   };
 
   if (compactionData) {
-    event.isCompacted = true;
-    event.startTime = compactionData.startTime;
-    event.endTime = compactionData.endTime;
-    event.compactedContent = compactionData.compactedContent;
+    applyCompaction(event, compactionData);
   }
 
   if (workflowData) {
