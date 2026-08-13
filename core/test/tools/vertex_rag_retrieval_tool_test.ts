@@ -152,7 +152,10 @@ describe('VertexRagRetrievalTool', () => {
       const tool = new VertexRagRetrievalTool({
         ragResources: [{ragCorpus: RAG_CORPUS}],
       });
-      const result = await tool.runAsync();
+      const result = await tool.runAsync({
+        args: {},
+        toolContext: makeToolContext(),
+      });
       expect(result).toBeUndefined();
     });
   });

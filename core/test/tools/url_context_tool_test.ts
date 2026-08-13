@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {LlmRequest, URL_CONTEXT, UrlContextTool} from '@google/adk';
+import {Context, LlmRequest, URL_CONTEXT, UrlContextTool} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 const MODEL_ID_CHECK_ENV_VAR = 'ADK_DISABLE_GEMINI_MODEL_ID_CHECK';
@@ -129,6 +129,13 @@ describe('UrlContextTool', () => {
         'URL context tool requires Gemini 2 or above, but got gemini-1.5-pro',
       );
     });
+  });
+
+  it('runAsync returns resolved promise', async () => {
+    const tool = new UrlContextTool();
+    await expect(
+      tool.runAsync({args: {}, toolContext: {} as Context}),
+    ).resolves.toBeUndefined();
   });
 
   it('has a global instance URL_CONTEXT', () => {

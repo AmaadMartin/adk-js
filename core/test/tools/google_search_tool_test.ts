@@ -4,7 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GOOGLE_SEARCH, GoogleSearchTool, LlmRequest} from '@google/adk';
+import {
+  Context,
+  GOOGLE_SEARCH,
+  GoogleSearchTool,
+  LlmRequest,
+} from '@google/adk';
 import {Tool} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
@@ -92,6 +97,13 @@ describe('GoogleSearchTool', () => {
 
       expect(req.config!.tools).toEqual([{googleSearch: {}}]);
     });
+  });
+
+  it('runAsync returns resolved promise', async () => {
+    const tool = new GoogleSearchTool();
+    await expect(
+      tool.runAsync({args: {}, toolContext: {} as Context}),
+    ).resolves.toBeUndefined();
   });
 
   it('has a global instance GOOGLE_SEARCH', () => {

@@ -5,6 +5,7 @@
  */
 
 import {
+  Context,
   GOOGLE_MAPS_GROUNDING,
   GoogleMapsGroundingTool,
   LlmRequest,
@@ -109,7 +110,9 @@ describe('GoogleMapsGroundingTool', () => {
 
     it('runAsync returns resolved promise', async () => {
       const tool = new GoogleMapsGroundingTool();
-      await expect(tool.runAsync()).resolves.toBeUndefined();
+      await expect(
+        tool.runAsync({args: {}, toolContext: {} as Context}),
+      ).resolves.toBeUndefined();
     });
   });
 

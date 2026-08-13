@@ -160,6 +160,13 @@ describe('VertexAiSearchTool', () => {
     );
   });
 
+  it('runAsync returns resolved promise', async () => {
+    const tool = new VertexAiSearchTool({dataStoreId: 'ds'});
+    await expect(
+      tool.runAsync({args: {}, toolContext: {} as Context}),
+    ).resolves.toBeUndefined();
+  });
+
   describe('with env override', () => {
     const originalEnv = process.env.ADK_DISABLE_GEMINI_MODEL_ID_CHECK;
 
