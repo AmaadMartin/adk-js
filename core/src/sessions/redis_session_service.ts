@@ -670,7 +670,7 @@ export class RedisSessionService extends BaseSessionService {
     return this.ttlSeconds > 0 ? {EX: this.ttlSeconds} : undefined;
   }
 
-  /** Merges `delta` into the scope map at `key`, if `delta` has any entries. */
+  /** Merges `delta` into the scope map at `key`, unless `delta` is empty. */
   private async syncScopeState(
     client: RedisClientLike,
     key: string,

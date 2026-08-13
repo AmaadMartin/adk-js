@@ -437,8 +437,10 @@ describe('RedisSessionService', () => {
     expect(session.state['temp:scratch']).toBe('temp_value');
 
     const raw = fake.rawValue(sessionKey(KEY_PREFIX, APP, 'u1', 's1'));
-    expect(raw).toBeDefined();
-    const stored = JSON.parse(raw as string);
+    if (raw === undefined) {
+      expect.fail('the session key holds nothing');
+    }
+    const stored = JSON.parse(raw);
     expect(stored.state).toEqual({topic: 'weather'});
     expect(stored.app_name).toBe(APP);
     expect(stored.user_id).toBe('u1');
@@ -840,8 +842,10 @@ describe('RedisSessionService', () => {
     });
 
     const raw = fake.rawValue(sessionKey(KEY_PREFIX, APP, 'u1', session.id));
-    expect(raw).toBeDefined();
-    const stored = JSON.parse(raw as string);
+    if (raw === undefined) {
+      expect.fail('the session key holds nothing');
+    }
+    const stored = JSON.parse(raw);
     expect(stored.events[0].invocation_id).toBe('inv-1');
     expect(stored.events[0].actions.state_delta).toEqual({
       'user:score': 100,
