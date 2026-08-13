@@ -35,31 +35,35 @@ describe('the @google/adk session surface', () => {
     }
   });
 
-  it('still publishes BaseSessionService and its request and response types', () => {
-    // The type annotations below are the assertion: `ts:check` and the Vitest
-    // transform both fail if the barrel stops resolving one of these types.
-    const session = adk.createSession({id: 's1', appName: 'app', userId: 'u1'});
-    const create: CreateSessionRequest = {appName: 'app', userId: 'u1'};
-    const key: DeleteSessionRequest = {...create, sessionId: session.id};
+  it('still publishes BaseSessionService and its request and response types', async () => {
+    // The annotations are what pin the type surface: `ts:check` fails if the
+    // barrel stops resolving one of these types. Vitest strips them, so each
+    // request also drives a real service to keep the assertions able to fail.
+    const service: adk.BaseSessionService = new adk.InMemorySessionService();
+    const create: CreateSessionRequest = {
+      appName: 'app',
+      userId: 'u1',
+      sessionId: 's1',
+    };
+    const created = await service.createSession(create);
+
+    const key: DeleteSessionRequest = {...create, sessionId: created.id};
     const config: GetSessionConfig = {numRecentEvents: 1};
     const get: GetSessionRequest = {...key, config};
-    const list: ListSessionsRequest = {appName: 'app', order: 'asc'};
-    const listed: ListSessionsResponse = {
-      sessions: [session],
-      page: 1,
-      limit: 1,
-      totalItems: 1,
-      totalPages: 1,
-    };
     const append: AppendEventRequest = {
-      session,
+      session: created,
       event: adk.createEvent({author: 'agent'}),
     };
+    await service.appendEvent(append);
+
+    const list: ListSessionsRequest = {appName: 'app', order: 'asc'};
+    const listed: ListSessionsResponse = await service.listSessions(list);
 
     expect(typeof adk.BaseSessionService).toBe('function');
-    expect(get.sessionId).toBe(session.id);
-    expect(get.config).toBe(config);
-    expect(list.order).toBe('asc');
-    expect(listed.sessions).toContain(append.session);
+    expect(listed.sessions.map((session) => session.id)).toEqual(['s1']);
+    expect((await service.getSession(get))?.events).toHaveLength(1);
+
+    await service.deleteSession(key);
+    expect(await service.getSession(get)).toBeUndefined();
   });
 });
