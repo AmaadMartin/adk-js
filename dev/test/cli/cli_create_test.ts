@@ -242,11 +242,20 @@ describe('createAgent', () => {
 
       await createAgent(getFreshOptions());
 
-      expect(text).toHaveBeenCalledWith(
-        expect.objectContaining({initialValue: 'env-project'}),
-      );
       // `gcloud config` is not consulted at all when the env supplies both.
       expect(execSync).not.toHaveBeenCalled();
+      expect(text).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: 'Enter the Google Cloud Project ID',
+          initialValue: 'env-project',
+        }),
+      );
+      expect(text).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: 'Enter the Google Cloud Region',
+          initialValue: 'env-region',
+        }),
+      );
     });
 
     it('should exit without writing files if project prompt is cancelled', async () => {
