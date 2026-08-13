@@ -474,7 +474,7 @@ describe('VertexAiSessionService', () => {
             _compaction: {
               startTime: 1600000000000,
               endTime: 1610000000000,
-              compactedContent: {role: 'user', parts: [{text: 'summary'}]},
+              compactedContent: 'summary',
             },
             _usage_metadata: {promptTokens: 10},
           },
