@@ -548,4 +548,96 @@ describe('cli_run', () => {
       expect(output).not.toContain('is waiting');
     });
   });
+
+  /**
+   * `Runner.runAsync` reports a model failure as an event, but anything thrown
+   * inside the invocation travels out of the `for await`. Unguarded, that ends
+   * the REPL and takes every earlier turn of the session with it.
+   */
+  describe('a turn that fails', () => {
+    /** Scripts the readline answers for the turns this test drives. */
+    function answerWith(...answers: string[]): void {
+      for (const answer of answers) {
+        (mockRl.question as Mock).mockImplementationOnce(
+          (_p: string, cb: (a: string) => void) => cb(answer),
+        );
+      }
+    }
+
+    /** Replaces the event stream the mocked Runner serves to every turn. */
+    function runnerStream(runAsync: () => AsyncGenerator<unknown>): void {
+      (Runner as unknown as Mock).mockImplementation(() => ({runAsync}));
+    }
+
+    /** Makes the first turn throw, and the second yield one text event. */
+    function failFirstTurn(thrown: unknown): void {
+      let turn = 0;
+      runnerStream(async function* () {
+        if (turn++ === 0) {
+          throw thrown;
+        }
+        yield {author: 'model', content: {parts: [{text: 'second turn'}]}};
+      });
+    }
+
+    /** Everything the CLI wrote to one console stream, as one string. */
+    function printedTo(stream: 'log' | 'error'): string {
+      return (console[stream] as Mock).mock.calls
+        .map((call) => call.join(' '))
+        .join('\n');
+    }
+
+    it('takes the next turn after one throws', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      failFirstTurn(new Error('boom'));
+      answerWith('first', 'second', 'exit');
+
+      await runAgent({
+        agentPath: 'agent.ts',
+        sessionService: createMockSessionService(),
+      });
+
+      expect(printedTo('error')).toContain('[test-agent] error: boom');
+      expect(printedTo('log')).toContain('[model]: second turn');
+      expect(mockRl.question).toHaveBeenCalledTimes(3);
+    });
+
+    it('prints what a turn produced before it failed', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      runnerStream(async function* () {
+        yield {author: 'model', content: {parts: [{text: 'partial'}]}};
+        throw new Error('boom');
+      });
+      answerWith('first', 'exit');
+
+      await runAgent({
+        agentPath: 'agent.ts',
+        sessionService: createMockSessionService(),
+      });
+
+      expect(printedTo('log')).toContain('[model]: partial');
+      expect(printedTo('error')).toContain('[test-agent] error: boom');
+    });
+
+    it('reports a thrown value that is not an Error', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      failFirstTurn('boom');
+      answerWith('first', 'exit');
+
+      await runAgent({
+        agentPath: 'agent.ts',
+        sessionService: createMockSessionService(),
+      });
+
+      expect(printedTo('error')).toContain('[test-agent] error: boom');
+    });
+
+    it('still ends the run when the agent fails to load', async () => {
+      (mockAgentFile.load as Mock).mockRejectedValue(new Error('bad agent'));
+
+      await expect(runAgent({agentPath: 'agent.ts'})).rejects.toThrow(
+        'bad agent',
+      );
+    });
+  });
 });
