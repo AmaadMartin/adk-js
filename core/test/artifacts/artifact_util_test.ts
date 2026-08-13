@@ -324,7 +324,6 @@ describe('validatePathSegment', () => {
       '.\\../',
       '..',
       '.',
-      'null\x00byte',
       '',
       '/etc/passwd',
       '/leading/slash',
@@ -337,6 +336,12 @@ describe('validatePathSegment', () => {
       'Z:relative',
     ])('rejects %s', (value) => {
       expect(() => validatePathSegment(value, fieldName)).toThrow();
+    });
+
+    it('rejects a value holding a null byte', () => {
+      expect(() => validatePathSegment('null\x00byte', fieldName)).toThrow(
+        `${fieldName} must not contain null bytes.`,
+      );
     });
   });
 
