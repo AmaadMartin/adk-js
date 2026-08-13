@@ -441,11 +441,15 @@ export class VertexAiSessionService extends BaseSessionService {
 
     const customMetadata: Record<string, unknown> = {...event.customMetadata};
     if (isCompactedEvent(event)) {
-      customMetadata._compaction = {
+      const compaction: CompactionMetadata = {
         startTime: event.startTime,
         endTime: event.endTime,
         compactedContent: event.compactedContent,
       };
+      if (event.isScratchpad !== undefined) {
+        compaction.isScratchpad = event.isScratchpad;
+      }
+      customMetadata._compaction = compaction;
     }
     if (event.usageMetadata) {
       customMetadata._usage_metadata = event.usageMetadata;
@@ -589,7 +593,7 @@ function toApiActions(
 /** The `_compaction` payload this service stores under `customMetadata`. */
 type CompactionMetadata = Pick<
   CompactedEvent,
-  'startTime' | 'endTime' | 'compactedContent'
+  'startTime' | 'endTime' | 'compactedContent' | 'isScratchpad'
 >;
 
 interface ExtendedEventActions extends EventActions {
@@ -694,6 +698,9 @@ function _fromApiEvent(apiEventObj: VertexAiSessionEvent): Event {
       startTime: compactionData.startTime,
       endTime: compactionData.endTime,
       compactedContent: compactionData.compactedContent,
+      ...(compactionData.isScratchpad !== undefined
+        ? {isScratchpad: compactionData.isScratchpad}
+        : {}),
     };
   }
 

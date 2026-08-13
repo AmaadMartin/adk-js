@@ -9,6 +9,7 @@ import {
   createEvent,
   createSession,
   isCompactedEvent,
+  isScratchpadEvent,
   State,
   VertexAiSessionService,
 } from '@google/adk';
@@ -146,6 +147,37 @@ describe('VertexAiSessionService', () => {
       sessions: mockClient as unknown as Sessions,
     });
   });
+
+  /**
+   * Replays an API event the way the real service sees it: the request is
+   * serialized on the wire, so anything that survives only by object
+   * identity (a `Date`, `Map` or `Set` inside `output`) must not survive
+   * here either.
+   */
+  const overTheWire = <T>(value: T): T =>
+    JSON.parse(JSON.stringify(value)) as T;
+
+  const readBackWithoutRawEvent = async (sessionId = 'wf-session') => {
+    const sent = mockClient.events.append.mock.calls.at(-1)![0];
+    const apiEvent = overTheWire({
+      name: `reasoningEngines/12345/sessions/${sessionId}/events/e1`,
+      author: sent.author,
+      invocationId: sent.invocationId,
+      timestamp: sent.timestamp,
+      content: sent.config.content,
+      actions: sent.config.actions,
+      eventMetadata: sent.config.eventMetadata,
+    });
+    mockClient.events.listInternal.mockResolvedValue({
+      sessionEvents: [apiEvent],
+    });
+    const session = await service.getSession({
+      appName: '12345',
+      userId: 'testUser',
+      sessionId,
+    });
+    return {apiEvent, event: session!.events[0]};
+  };
 
   it('can initialize without passing a client explicitly', () => {
     const defaultService = new VertexAiSessionService({
@@ -1541,37 +1573,6 @@ describe('VertexAiSessionService', () => {
         lastUpdateTime: Date.now(),
       }) as unknown as Session;
 
-    /**
-     * Replays an API event the way the real service sees it: the request is
-     * serialized on the wire, so anything that survives only by object
-     * identity (a `Date`, `Map` or `Set` inside `output`) must not survive
-     * here either.
-     */
-    const overTheWire = <T>(value: T): T =>
-      JSON.parse(JSON.stringify(value)) as T;
-
-    const readBackWithoutRawEvent = async () => {
-      const sent = mockClient.events.append.mock.calls.at(-1)![0];
-      const apiEvent = overTheWire({
-        name: 'reasoningEngines/12345/sessions/wf-session/events/e1',
-        author: sent.author,
-        invocationId: sent.invocationId,
-        timestamp: sent.timestamp,
-        content: sent.config.content,
-        actions: sent.config.actions,
-        eventMetadata: sent.config.eventMetadata,
-      });
-      mockClient.events.listInternal.mockResolvedValue({
-        sessionEvents: [apiEvent],
-      });
-      const session = await service.getSession({
-        appName: '12345',
-        userId: 'testUser',
-        sessionId: 'wf-session',
-      });
-      return {apiEvent, event: session!.events[0]};
-    };
-
     it('writes workflow fields into customMetadata', async () => {
       const event = createEvent({
         timestamp: 1620000000000,
@@ -1735,6 +1736,101 @@ describe('VertexAiSessionService', () => {
       expect(isFastForwardable(states.get('fetch')!)).toBe(true);
       expect([...states.get('gate')!.interruptIds]).toEqual(['gate-1']);
       expect(states.get('gate')?.input).toBe('A(x)');
+    });
+  });
+
+  describe('scratchpad compacted events', () => {
+    const SCRATCHPAD_SESSION_ID = 'scratchpad-session';
+
+    const scratchpadSession = () =>
+      createSession({
+        id: SCRATCHPAD_SESSION_ID,
+        appName: '12345',
+        userId: 'testUser',
+      });
+
+    const compactedEvent = (isScratchpad?: boolean) =>
+      createCompactedEvent({
+        timestamp: 1620000000000,
+        author: 'system',
+        invocationId: 'inv-1',
+        startTime: 1000,
+        endTime: 2000,
+        compactedContent: 'summary of the first turn',
+        isScratchpad,
+      });
+
+    const sentCompaction = () => {
+      const sent = mockClient.events.append.mock.calls.at(-1)![0];
+      const customMetadata = sent.config.eventMetadata.customMetadata as Record<
+        string,
+        unknown
+      >;
+      return customMetadata._compaction as Record<string, unknown>;
+    };
+
+    it('writes the scratchpad flag into the _compaction payload', async () => {
+      await service.appendEvent({
+        session: scratchpadSession(),
+        event: compactedEvent(true),
+      });
+
+      expect(sentCompaction().isScratchpad).toBe(true);
+    });
+
+    it('restores the scratchpad flag when rawEvent is absent', async () => {
+      await service.appendEvent({
+        session: scratchpadSession(),
+        event: compactedEvent(true),
+      });
+
+      const {event: readBack} = await readBackWithoutRawEvent(
+        SCRATCHPAD_SESSION_ID,
+      );
+
+      expect(isCompactedEvent(readBack)).toBe(true);
+      expect(isScratchpadEvent(readBack)).toBe(true);
+    });
+
+    it('leaves the flag off a non-scratchpad compacted event', async () => {
+      await service.appendEvent({
+        session: scratchpadSession(),
+        event: compactedEvent(),
+      });
+
+      expect('isScratchpad' in sentCompaction()).toBe(false);
+
+      const {event: readBack} = await readBackWithoutRawEvent(
+        SCRATCHPAD_SESSION_ID,
+      );
+
+      expect(isCompactedEvent(readBack)).toBe(true);
+      expect(isScratchpadEvent(readBack)).toBe(false);
+      expect('isScratchpad' in readBack).toBe(false);
+    });
+
+    it('keeps the scratchpad flag when the rawEvent append is refused', async () => {
+      const loggerSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      mockClient.events.append.mockRejectedValueOnce(
+        new ApiError({message: 'rawEvent is not supported', status: 400}),
+      );
+
+      await service.appendEvent({
+        session: scratchpadSession(),
+        event: compactedEvent(true),
+      });
+
+      expect(mockClient.events.append).toHaveBeenCalledTimes(2);
+      const retried = mockClient.events.append.mock.calls.at(-1)![0];
+      expect(retried.config.rawEvent).toBeUndefined();
+      expect(sentCompaction().isScratchpad).toBe(true);
+
+      const {event: readBack} = await readBackWithoutRawEvent(
+        SCRATCHPAD_SESSION_ID,
+      );
+
+      expect(isScratchpadEvent(readBack)).toBe(true);
+      loggerSpy.mockRestore();
     });
   });
 });
