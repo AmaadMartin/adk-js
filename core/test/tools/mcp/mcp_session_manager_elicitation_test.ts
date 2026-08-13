@@ -6,12 +6,15 @@
 
 import {
   Context,
+  createSession,
   ElicitationCallback,
   InvocationContext,
+  LlmAgent,
   MCPConnectionParams,
   MCPSessionManager,
   MCPSessionOptions,
   MCPToolset,
+  PluginManager,
 } from '@google/adk';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {InMemoryTransport} from '@modelcontextprotocol/sdk/inMemory.js';
@@ -183,10 +186,13 @@ describe('MCPSessionManager elicitation round trip', () => {
     const tools = await toolset.getTools();
     expect(tools.map((tool) => tool.name)).toEqual(['sign-in']);
 
-    const invocationContext = {
+    const invocationContext = new InvocationContext({
+      invocationId: 'test-invocation',
+      agent: new LlmAgent({name: 'test_agent'}),
+      session: createSession({id: 's1', appName: 'test-app'}),
+      pluginManager: new PluginManager([]),
       abortSignal: new AbortController().signal,
-      session: {state: {}},
-    } as unknown as InvocationContext;
+    });
     const result = await tools[0].runAsync({
       args: {},
       toolContext: new Context({invocationContext}),
