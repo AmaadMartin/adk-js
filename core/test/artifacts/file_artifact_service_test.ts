@@ -6,15 +6,60 @@
 
 import {FileArtifactService} from '@google/adk';
 import * as fs from 'fs/promises';
+import {pathToFileURL} from 'node:url';
 import * as os from 'os';
 import * as path from 'path';
-import {describe, expect, it} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {
   assertInsideRoot,
+  getBaseRoot,
   getSessionArtifactsDir,
-  getUserRoot,
 } from '../../src/artifacts/file_artifact_service.js';
 import {runArtifactServiceTests} from './artifact_service_test_utils.js';
+
+const SCOPE = {
+  userId: 'user',
+  sessionId: 'session',
+  filename: 'report.txt',
+};
+
+/**
+ * Writes an artifact in the layout used before storage was app-scoped.
+ *
+ * @param root The artifact root directory.
+ * @param texts The payload of each version, in version order.
+ * @returns The directory holding the artifact.
+ */
+async function writeUnscopedArtifact(
+  root: string,
+  ...texts: string[]
+): Promise<string> {
+  const artifactDir = path.join(
+    root,
+    'users',
+    SCOPE.userId,
+    'sessions',
+    SCOPE.sessionId,
+    'artifacts',
+    SCOPE.filename,
+  );
+  for (const [version, text] of texts.entries()) {
+    const versionDir = path.join(artifactDir, 'versions', String(version));
+    await fs.mkdir(versionDir, {recursive: true});
+    const payloadPath = path.join(versionDir, SCOPE.filename);
+    await fs.writeFile(payloadPath, text, 'utf-8');
+    await fs.writeFile(
+      path.join(versionDir, 'metadata.json'),
+      JSON.stringify({
+        fileName: SCOPE.filename,
+        version,
+        canonicalUri: pathToFileURL(payloadPath).toString(),
+      }),
+      'utf-8',
+    );
+  }
+  return artifactDir;
+}
 
 describe('FileArtifactService', () => {
   let rootDir: string;
@@ -55,7 +100,10 @@ describe('FileArtifactService', () => {
         });
 
         const versionDir = path.join(
-          getSessionArtifactsDir(getUserRoot(rootDir, userId), sessionId),
+          getSessionArtifactsDir(
+            getBaseRoot(rootDir, appName, userId),
+            sessionId,
+          ),
           'report.pdf',
           'versions',
           '0',
@@ -106,45 +154,52 @@ describe('FileArtifactService', () => {
 
     describe('assertSafeSegment - valid inputs', () => {
       it('allows a plain alphanumeric userId', () => {
-        expect(() => getUserRoot(ROOT, 'alice')).not.toThrow();
+        expect(() => getBaseRoot(ROOT, 'app', 'alice')).not.toThrow();
       });
       it('allows a UUID as userId', () => {
         expect(() =>
-          getUserRoot(ROOT, '550e8400-e29b-41d4-a716-446655440000'),
+          getBaseRoot(ROOT, 'app', '550e8400-e29b-41d4-a716-446655440000'),
         ).not.toThrow();
       });
       it('allows an email-style userId', () => {
-        expect(() => getUserRoot(ROOT, 'user.name@org')).not.toThrow();
+        expect(() => getBaseRoot(ROOT, 'app', 'user.name@org')).not.toThrow();
       });
       it('allows a plain alphanumeric sessionId', () => {
         expect(() =>
-          getSessionArtifactsDir(`${ROOT}/users/alice`, 'session-abc123'),
+          getSessionArtifactsDir(
+            `${ROOT}/apps/app/users/alice`,
+            'session-abc123',
+          ),
         ).not.toThrow();
       });
     });
 
     describe('assertSafeSegment - userId attacks', () => {
       it('blocks dot-dot-slash traversal in userId', () => {
-        expect(() => getUserRoot(ROOT, '../../etc')).toThrow('Invalid userId');
+        expect(() => getBaseRoot(ROOT, 'app', '../../etc')).toThrow(
+          'Invalid userId',
+        );
       });
       it('blocks forward slash in userId', () => {
-        expect(() => getUserRoot(ROOT, 'a/b')).toThrow('Invalid userId');
+        expect(() => getBaseRoot(ROOT, 'app', 'a/b')).toThrow('Invalid userId');
       });
       it('blocks percent-encoded slash in userId', () => {
-        expect(() => getUserRoot(ROOT, '..%2F..%2Fetc')).toThrow(
+        expect(() => getBaseRoot(ROOT, 'app', '..%2F..%2Fetc')).toThrow(
           'Invalid userId',
         );
       });
       it('blocks null byte in userId', () => {
-        expect(() => getUserRoot(ROOT, 'alice\x00')).toThrow('Invalid userId');
+        expect(() => getBaseRoot(ROOT, 'app', 'alice\x00')).toThrow(
+          'Invalid userId',
+        );
       });
       it('blocks empty string as userId', () => {
-        expect(() => getUserRoot(ROOT, '')).toThrow('Invalid userId');
+        expect(() => getBaseRoot(ROOT, 'app', '')).toThrow('Invalid userId');
       });
     });
 
     describe('assertSafeSegment - sessionId attacks', () => {
-      const base = `${ROOT}/users/alice`;
+      const base = `${ROOT}/apps/app/users/alice`;
       it('blocks dot-dot-slash traversal in sessionId', () => {
         expect(() => getSessionArtifactsDir(base, '../../../secret')).toThrow(
           'Invalid sessionId',
@@ -183,6 +238,145 @@ describe('FileArtifactService', () => {
           assertInsideRoot('/tmp/root/users/alice', '/tmp/root', 'test'),
         ).not.toThrow();
       });
+    });
+
+    describe('assertSafeSegment - appName attacks', () => {
+      it('blocks dot-dot-slash traversal in appName', () => {
+        expect(() => getBaseRoot(ROOT, '../../etc', 'alice')).toThrow(
+          'Invalid appName',
+        );
+      });
+      it('blocks forward slash in appName', () => {
+        expect(() => getBaseRoot(ROOT, 'a/b', 'alice')).toThrow(
+          'Invalid appName',
+        );
+      });
+      it('blocks empty string as appName', () => {
+        expect(() => getBaseRoot(ROOT, '', 'alice')).toThrow('Invalid appName');
+      });
+      it('reports an invalid appName before an invalid userId', () => {
+        expect(() => getBaseRoot(ROOT, 'a/b', 'c/d')).toThrow(
+          'Invalid appName',
+        );
+      });
+    });
+  });
+
+  describe('app-scoped storage', () => {
+    let root: string;
+    let service: FileArtifactService;
+
+    beforeEach(async () => {
+      root = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-app-scope-test-'));
+      service = new FileArtifactService(root);
+    });
+
+    afterEach(async () => {
+      await fs.rm(root, {recursive: true, force: true});
+    });
+
+    it('stores an artifact under apps/{appName}/users/{userId}', async () => {
+      await service.saveArtifact({
+        ...SCOPE,
+        appName: 'app-a',
+        artifact: {text: 'secret-a'},
+      });
+
+      const versionDir = path.join(
+        root,
+        'apps',
+        'app-a',
+        'users',
+        'user',
+        'sessions',
+        'session',
+        'artifacts',
+        'report.txt',
+        'versions',
+        '0',
+      );
+      expect(
+        await fs.readFile(path.join(versionDir, 'report.txt'), 'utf-8'),
+      ).toBe('secret-a');
+      const metadata = JSON.parse(
+        await fs.readFile(path.join(versionDir, 'metadata.json'), 'utf-8'),
+      ) as {fileName?: string};
+      expect(metadata.fileName).toBe('report.txt');
+    });
+
+    it('rejects a save whose appName traverses out of the root', async () => {
+      await expect(
+        service.saveArtifact({
+          ...SCOPE,
+          appName: '../../etc',
+          artifact: {text: 'secret-a'},
+        }),
+      ).rejects.toThrow('Invalid appName');
+    });
+
+    for (const appName of ['app-a', 'app-b']) {
+      it(`never serves the pre-app-scoped tree to ${appName}`, async () => {
+        await writeUnscopedArtifact(root, 'older', 'legacy');
+
+        expect(await service.loadArtifact({...SCOPE, appName})).toBeUndefined();
+        expect(await service.listVersions({...SCOPE, appName})).toEqual([]);
+        expect(await service.listArtifactVersions({...SCOPE, appName})).toEqual(
+          [],
+        );
+        expect(
+          await service.getArtifactVersion({...SCOPE, appName}),
+        ).toBeUndefined();
+        expect(
+          await service.listArtifactKeys({
+            appName,
+            userId: SCOPE.userId,
+            sessionId: SCOPE.sessionId,
+          }),
+        ).not.toContain(SCOPE.filename);
+      });
+    }
+
+    it('saves alongside the pre-app-scoped tree instead of extending it', async () => {
+      await writeUnscopedArtifact(root, 'older', 'legacy');
+
+      expect(
+        await service.saveArtifact({
+          ...SCOPE,
+          appName: 'app-a',
+          artifact: {text: 'current'},
+        }),
+      ).toBe(0);
+      await expect(
+        fs.access(path.join(root, 'apps', 'app-a', 'users', 'user')),
+      ).resolves.toBeUndefined();
+      expect(
+        (await service.loadArtifact({...SCOPE, appName: 'app-a'}))?.text,
+      ).toBe('current');
+      expect(await service.listVersions({...SCOPE, appName: 'app-a'})).toEqual([
+        0,
+      ]);
+      expect(
+        await service.loadArtifact({...SCOPE, appName: 'app-a', version: 1}),
+      ).toBeUndefined();
+    });
+
+    it('deletes only the calling app copy', async () => {
+      const unscopedDir = await writeUnscopedArtifact(root, 'legacy');
+      await service.saveArtifact({
+        ...SCOPE,
+        appName: 'app-a',
+        artifact: {text: 'secret-a'},
+      });
+
+      await service.deleteArtifact({...SCOPE, appName: 'app-b'});
+
+      await expect(fs.access(unscopedDir)).resolves.toBeUndefined();
+      expect(
+        (await service.loadArtifact({...SCOPE, appName: 'app-a'}))?.text,
+      ).toBe('secret-a');
+      expect(await service.listVersions({...SCOPE, appName: 'app-a'})).toEqual([
+        0,
+      ]);
     });
   });
 });
