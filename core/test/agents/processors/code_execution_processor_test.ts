@@ -6,6 +6,7 @@
 
 import {
   BaseAgent,
+  CODE_EXECUTION_RESPONSE_PROCESSOR,
   Event,
   FileArtifactService,
   InMemoryArtifactService,
@@ -358,5 +359,13 @@ describe('CodeExecutionResponseProcessor', () => {
         'hello from script',
       );
     });
+  });
+});
+
+describe('CODE_EXECUTION_RESPONSE_PROCESSOR', () => {
+  it('is exported from the package root as a usable response processor', () => {
+    expect(CODE_EXECUTION_RESPONSE_PROCESSOR).toBeInstanceOf(
+      CodeExecutionResponseProcessor,
+    );
   });
 });
