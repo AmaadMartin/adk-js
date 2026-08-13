@@ -16,7 +16,7 @@ import {
   VertexAiSessionService,
 } from '@google/adk';
 import {createCompactedEvent} from '@google/adk/events/compacted_event.js';
-import {Session} from '@google/adk/sessions/session.js';
+import {createSession, Session} from '@google/adk/sessions/session.js';
 import {ApiError, Content} from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {
@@ -1646,13 +1646,12 @@ describe('VertexAiSessionService', () => {
     }
 
     const compactionSession = () =>
-      ({
+      createSession({
         id: 'compaction-session',
         appName: '12345',
         userId: 'testUser',
-        events: [],
         lastUpdateTime: Date.now(),
-      }) as unknown as Session;
+      });
 
     const lastAppend = (): AppendedRequest =>
       mockClient.events.append.mock.calls.at(-1)![0] as AppendedRequest;
