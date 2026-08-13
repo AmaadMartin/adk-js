@@ -27,10 +27,24 @@ import {
   tracer,
   traceToolCall,
 } from '../telemetry/tracing.js';
+
 import {
   SingleAfterToolCallback,
   SingleBeforeToolCallback,
 } from './llm_agent.js';
+
+/**
+ * Author for an event this module creates.
+ *
+ * Normally the agent whose turn produced the tool call. A `ToolNode` in a
+ * workflow has no agent above it when the workflow is the runner's root, and
+ * the node runner stamps the node's own name onto any event that leaves without
+ * an author — so returning an empty string here defers to that rather than
+ * asserting an agent that legitimately is not there.
+ */
+function toolEventAuthor(invocationContext: InvocationContext): string {
+  return invocationContext.agent?.name ?? '';
+}
 
 export {
   AF_FUNCTION_CALL_ID_PREFIX,
@@ -107,7 +121,7 @@ export function generateAuthEvent(
 
   return createEvent({
     invocationId: invocationContext.invocationId,
-    author: invocationContext.agent.name,
+    author: toolEventAuthor(invocationContext),
     branch: invocationContext.branch,
     content: {
       parts: parts,
@@ -160,7 +174,7 @@ export function generateRequestConfirmationEvent({
   }
   return createEvent({
     invocationId: invocationContext.invocationId,
-    author: invocationContext.agent.name,
+    author: toolEventAuthor(invocationContext),
     branch: invocationContext.branch,
     content: {
       parts: parts,
@@ -228,7 +242,7 @@ function buildResponseEvent(
 
   return createEvent({
     invocationId: invocationContext.invocationId,
-    author: invocationContext.agent.name,
+    author: toolEventAuthor(invocationContext),
     content: content,
     actions: toolContext.actions,
     branch: invocationContext.branch,
@@ -481,7 +495,7 @@ export async function handleFunctionCallList({
     // Builds the function response event.
     const functionResponseEvent = createEvent({
       invocationId: invocationContext.invocationId,
-      author: invocationContext.agent.name,
+      author: toolEventAuthor(invocationContext),
       content: createUserContent({
         functionResponse: {
           id: toolContext.functionCallId,

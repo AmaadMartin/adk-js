@@ -21,7 +21,7 @@ import {
   TextContent,
 } from '@modelcontextprotocol/sdk/types.js';
 import {afterEach, describe, expect, it, vi} from 'vitest';
-import {BaseAgent} from '../../../src/agents/base_agent.js';
+import {BaseAgent, isBaseAgent} from '../../../src/agents/base_agent.js';
 import {InvocationContext} from '../../../src/agents/invocation_context.js';
 import {createEvent, Event} from '../../../src/events/event.js';
 import {Runner} from '../../../src/runner/runner.js';
@@ -84,6 +84,18 @@ function createRunner(events: Event[], appName = APP_NAME): Runner {
     agent: new ScriptedAgent({name: AGENT_NAME, events}),
     sessionService: new InMemorySessionService(),
   });
+}
+
+/**
+ * The runner's root as an agent. `Runner.agent` is a `RunnableRoot`, which a
+ * workflow also satisfies, and `toMcpServer` takes an agent.
+ */
+function rootAgent(runner: Runner): BaseAgent {
+  const agent = runner.agent;
+  if (!isBaseAgent(agent)) {
+    throw new Error('Expected the runner root to be an agent.');
+  }
+  return agent;
 }
 
 async function startSession(runner: Runner): Promise<string> {
@@ -254,7 +266,7 @@ describe('toMcpServer', () => {
     const runner = createRunner([textEvent('ok')], 'byo_runner_app');
     const createSession = vi.spyOn(runner.sessionService, 'createSession');
 
-    const client = await connect(toMcpServer(runner.agent, {runner}));
+    const client = await connect(toMcpServer(rootAgent(runner), {runner}));
     await client.callTool({name: AGENT_NAME, arguments: {request: 'hi'}});
 
     expect(createSession).toHaveBeenCalledTimes(1);
@@ -269,7 +281,7 @@ describe('toMcpServer', () => {
     const createSession = vi.spyOn(runner.sessionService, 'createSession');
     const runAsync = vi.spyOn(runner, 'runAsync');
 
-    const client = await connect(toMcpServer(runner.agent, {runner}));
+    const client = await connect(toMcpServer(rootAgent(runner), {runner}));
     await client.callTool({name: AGENT_NAME, arguments: {request: 'first'}});
     await client.callTool({name: AGENT_NAME, arguments: {request: 'second'}});
 
@@ -282,7 +294,7 @@ describe('toMcpServer', () => {
     const runner = createRunner([textEvent('ok')]);
     const createSession = vi.spyOn(runner.sessionService, 'createSession');
 
-    const client = await connect(toMcpServer(runner.agent, {runner}));
+    const client = await connect(toMcpServer(rootAgent(runner), {runner}));
     await Promise.all([
       client.callTool({name: AGENT_NAME, arguments: {request: 'first'}}),
       client.callTool({name: AGENT_NAME, arguments: {request: 'second'}}),
@@ -296,8 +308,10 @@ describe('toMcpServer', () => {
     const createSession = vi.spyOn(runner.sessionService, 'createSession');
     const runAsync = vi.spyOn(runner, 'runAsync');
 
-    const firstClient = await connect(toMcpServer(runner.agent, {runner}));
-    const secondClient = await connect(toMcpServer(runner.agent, {runner}));
+    const firstClient = await connect(toMcpServer(rootAgent(runner), {runner}));
+    const secondClient = await connect(
+      toMcpServer(rootAgent(runner), {runner}),
+    );
     await firstClient.callTool({name: AGENT_NAME, arguments: {request: 'a'}});
     await secondClient.callTool({name: AGENT_NAME, arguments: {request: 'b'}});
 
@@ -312,7 +326,7 @@ describe('toMcpServer', () => {
       .spyOn(runner.sessionService, 'createSession')
       .mockRejectedValueOnce(new Error('session store unavailable'));
 
-    const client = await connect(toMcpServer(runner.agent, {runner}));
+    const client = await connect(toMcpServer(rootAgent(runner), {runner}));
     const failed = toolResult(
       await client.callTool({name: AGENT_NAME, arguments: {request: 'first'}}),
     );
@@ -336,7 +350,7 @@ describe('toMcpServer', () => {
     ]);
     const reported: Array<string | undefined> = [];
 
-    const client = await connect(toMcpServer(runner.agent, {runner}));
+    const client = await connect(toMcpServer(rootAgent(runner), {runner}));
     const result = toolResult(
       await client.callTool(
         {name: AGENT_NAME, arguments: {request: 'hi'}},

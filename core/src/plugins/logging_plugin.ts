@@ -71,7 +71,7 @@ export class LoggingPlugin extends BasePlugin {
     this.log(`   Session ID: ${invocationContext.session.id}`);
     this.log(`   User ID: ${invocationContext.userId}`);
     this.log(`   App Name: ${invocationContext.appName}`);
-    this.log(`   Root Agent: ${invocationContext.agent.name ?? 'Unknown'}`);
+    this.log(`   Root Agent: ${invocationContext.agent?.name ?? 'Unknown'}`);
     this.log(`   User Content: ${this.formatContent(userMessage)}`);
     if (invocationContext.branch) {
       this.log(`   Branch: ${invocationContext.branch}`);
@@ -86,7 +86,9 @@ export class LoggingPlugin extends BasePlugin {
   }): Promise<Content | undefined> {
     this.log('🏃 INVOCATION STARTING');
     this.log(`   Invocation ID: ${invocationContext.invocationId}`);
-    this.log(`   Starting Agent: ${invocationContext.agent.name ?? 'Unknown'}`);
+    this.log(
+      `   Starting Agent: ${invocationContext.agent?.name ?? 'Unknown'}`,
+    );
     return undefined;
   }
 
@@ -128,7 +130,7 @@ export class LoggingPlugin extends BasePlugin {
   }): Promise<void> {
     this.log('✅ INVOCATION COMPLETED');
     this.log(`   Invocation ID: ${invocationContext.invocationId}`);
-    this.log(`   Final Agent: ${invocationContext.agent.name ?? 'Unknown'}`);
+    this.log(`   Final Agent: ${invocationContext.agent?.name ?? 'Unknown'}`);
     return undefined;
   }
 

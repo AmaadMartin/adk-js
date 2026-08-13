@@ -26,7 +26,7 @@ export {
   findMatchingFunctionCall,
   functionsExportedForTestingOnly,
 } from './agents/functions.js';
-export {InvocationContext} from './agents/invocation_context.js';
+export {InvocationContext, requireAgent} from './agents/invocation_context.js';
 export type {
   InvocationContextParams,
   WorkflowInstructionScope,
@@ -440,20 +440,18 @@ export {
   START,
   ToolNode,
   Workflow,
-  WorkflowAgent,
   WorkflowNode,
-  asRootAgent,
+  asRunnableRoot,
   commonPrefixOf,
   createNodeErrorEvent,
   createNodeState,
   createSubBranch,
-  isGraphWorkflowAgent,
   isNodeErrorEvent,
   isNodeSchemaValidationError,
   isNodeState,
   isNodeTimeoutError,
   isRequestInput,
-  isRootAgentLike,
+  isRunnableRoot,
   isWorkflow,
   node,
   normalizeRetryExceptions,
@@ -485,10 +483,10 @@ export type {
   RoutingMap,
   RunNodeOptions,
   RunnableNode,
+  RunnableRoot,
   ScheduleDynamicNode,
   ScheduleDynamicNodeOptions,
   ToolNodeConfig,
-  WorkflowAgentConfig,
   WorkflowConfig,
 } from './workflow/index.js';
 

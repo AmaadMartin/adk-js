@@ -6,12 +6,12 @@
 
 import {
   App,
-  BaseAgent,
   Event,
   InMemorySessionService,
   isApp,
   isBaseAgent,
-  isGraphWorkflowAgent,
+  isWorkflow,
+  RunnableRoot,
   Runner,
 } from '@google/adk';
 import {exec, spawn} from 'node:child_process';
@@ -28,8 +28,10 @@ import {
 
 const execAsync = promisify(exec);
 const dirname = process.cwd();
+const TEST_EXECUTION_TIMEOUT = 60000;
+const HOOK_TIMEOUT = 120000;
 
-async function runToCompletion(agent: BaseAgent): Promise<Event[]> {
+async function runToCompletion(agent: RunnableRoot): Promise<Event[]> {
   const sessionService = new InMemorySessionService();
   const session = await sessionService.createSession({
     appName: 'app_loader',
@@ -68,7 +70,7 @@ describe('App loader CLI integration', () => {
         // `npm install` does not clear, coupling this run to the last one.
         await removeInstallArtifacts(projectPath);
         await execAsync('npm install', {cwd: projectPath});
-      });
+      }, HOOK_TIMEOUT);
 
       it('should run app via package.json start script and get responses', async () => {
         const childProcess = spawn('npm', ['run', 'start'], {
@@ -87,7 +89,7 @@ describe('App loader CLI integration', () => {
         expect(response.toString()).toContain('');
       });
 
-      afterAll(() => cleanUpFixture(projectPath));
+      afterAll(() => cleanUpFixture(projectPath), HOOK_TIMEOUT);
     },
   );
 });
@@ -109,26 +111,48 @@ describe('AgentLoader discovery and loading integration', () => {
     // An earlier run can still leave a `node_modules` here, and it would
     // shadow the workspace-root resolution the loader depends on.
     await removeInstallArtifacts(projectPath);
-  });
 
-  it('should discover apps vs agents across directories and standalone files', async () => {
-    const apps = await loader.listApps();
-    expect(apps).toHaveLength(2);
-    expect(apps).toContain('service_alpha');
-    expect(apps).toContain('standalone_app');
+    // Discovery must skip `node_modules`, so the scan needs one to skip. It
+    // holds an agent file and nothing else: an installed `@google/adk` here
+    // would shadow the workspace-root resolution, so this fixture is written
+    // by hand rather than installed.
+    const nodeModulesDir = path.join(projectPath, 'node_modules');
+    await fs.mkdir(nodeModulesDir, {recursive: true});
+    await fs.writeFile(
+      path.join(nodeModulesDir, 'agent.js'),
+      `const {BaseAgent} = require('@google/adk');
+class NodeModulesAgent extends BaseAgent {
+  constructor() { super({ name: 'node_modules_agent' }); }
+}
+exports.rootAgent = new NodeModulesAgent();`,
+    );
+    await loader.preloadAgents();
+  }, HOOK_TIMEOUT);
 
-    const agentsAndApps = await loader.listAgents();
-    expect(agentsAndApps).toHaveLength(5);
-    expect(agentsAndApps).toContain('service_alpha');
-    expect(agentsAndApps).toContain('service_beta');
-    // Before a Workflow could be a root this was not an error, it was a
-    // silence: the file exported nothing matching `isBaseAgent`, so the
-    // directory simply did not show up.
-    expect(agentsAndApps).toContain('service_graph');
-    expect(agentsAndApps).toContain('standalone_agent');
-    expect(agentsAndApps).toContain('standalone_app');
-    expect(await loader.listLoadFailures()).toEqual([]);
-  });
+  it(
+    'should discover apps vs agents across directories and standalone files',
+    async () => {
+      const apps = await loader.listApps();
+      expect(apps).toHaveLength(2);
+      expect(apps).toContain('service_alpha');
+      expect(apps).toContain('standalone_app');
+
+      const agentsAndApps = await loader.listAgents();
+      expect(agentsAndApps).toHaveLength(5);
+      expect(agentsAndApps).toContain('service_alpha');
+      expect(agentsAndApps).toContain('service_beta');
+      // Before a Workflow could be a root this was not an error, it was a
+      // silence: the file exported nothing matching `isBaseAgent`, so the
+      // directory simply did not show up.
+      expect(agentsAndApps).toContain('service_graph');
+      expect(agentsAndApps).toContain('standalone_agent');
+      expect(agentsAndApps).toContain('standalone_app');
+      expect(agentsAndApps).not.toContain('.hidden');
+      expect(agentsAndApps).not.toContain('node_modules');
+      expect(await loader.listLoadFailures()).toEqual([]);
+    },
+    TEST_EXECUTION_TIMEOUT,
+  );
 
   it('should load App from directory entrypoint and expose App and rootAgent', async () => {
     const appFile = await loader.getAppFile('service_alpha');
@@ -163,19 +187,23 @@ describe('AgentLoader discovery and loading integration', () => {
    * `Symbol.for('google.adk.workflow.workflow')` brand exists for, and the case
    * an `instanceof` check would silently fail.
    */
-  it('should adapt a compiled Workflow export into a runnable root agent', async () => {
-    const agentFile = await loader.getAgentFile('service_graph');
-    const rootAgent = await agentFile.loadAgent();
+  it(
+    'should load a compiled Workflow export as the root, unwrapped',
+    async () => {
+      const agentFile = await loader.getAgentFile('service_graph');
+      const rootAgent = await agentFile.loadAgent();
 
-    expect(isBaseAgent(rootAgent)).toBe(true);
-    // Still a WorkflowAgent, which is what the dev server's graph renderer
-    // and the a2a card match on.
-    expect(isGraphWorkflowAgent(rootAgent)).toBe(true);
-    expect(rootAgent.name).toBe('graph_workflow');
-    expect(rootAgent.description).toBe(
-      'Normalizes the question, then answers it.',
-    );
-  });
+      // Held as the workflow it is, not dressed as an agent: `isWorkflow` is
+      // what the dev server's graph renderer and the a2a card match on.
+      expect(isBaseAgent(rootAgent)).toBe(false);
+      expect(isWorkflow(rootAgent)).toBe(true);
+      expect(rootAgent.name).toBe('graph_workflow');
+      expect(rootAgent.description).toBe(
+        'Normalizes the question, then answers it.',
+      );
+    },
+    TEST_EXECUTION_TIMEOUT,
+  );
 
   it('should run a loaded Workflow root through a real Runner', async () => {
     const agentFile = await loader.getAgentFile('service_graph');
@@ -221,5 +249,5 @@ describe('AgentLoader discovery and loading integration', () => {
     } finally {
       await cleanUpFixture(projectPath);
     }
-  });
+  }, HOOK_TIMEOUT);
 });
