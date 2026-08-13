@@ -489,16 +489,18 @@ async function postProcessCodeExecutionResult(
     parts: [buildCodeExecutionResultPart(codeExecutionResult)],
   };
 
-  const eventActions = createEventActions({
-    stateDelta: codeExecutorContext.getStateDelta(),
-  });
-
   // Handle code execution error retry
   if (codeExecutionResult.stderr) {
     codeExecutorContext.incrementErrorCount(invocationContext.invocationId);
   } else {
     codeExecutorContext.resetErrorCount(invocationContext.invocationId);
   }
+
+  // Snapshot the state after the retry bookkeeping so the error count reaches
+  // the event.
+  const eventActions = createEventActions({
+    stateDelta: codeExecutorContext.getStateDelta(),
+  });
 
   // Handle output files
   for (const outputFile of codeExecutionResult.outputFiles) {
