@@ -240,7 +240,7 @@ export class GcsArtifactService implements BaseArtifactService {
     return versioned.map(({version, file}) => ({
       version,
       mimeType: file.metadata.contentType,
-      customMetadata: file.metadata.metadata as Record<string, unknown>,
+      customMetadata: file.metadata.metadata,
       canonicalUri: file.publicUrl(),
     }));
   }
