@@ -133,7 +133,16 @@ export function getLogger(): Logger {
 }
 
 /**
- * Resets the logger to the default SimpleLogger.
+ * Restores the default ADK logger.
+ *
+ * This is the inverse of {@link setLogger}: it reinstates the built-in logger
+ * after a custom one has been installed. Prefer it over `setLogger(null)`,
+ * which installs a no-op logger that discards every message rather than
+ * restoring default output.
+ *
+ * The default logger is constructed fresh, so a log level previously applied
+ * with {@link setLogLevel} is discarded and the level returns to
+ * `LogLevel.INFO`.
  */
 export function resetLogger(): void {
   currentLogger = new SimpleLogger();

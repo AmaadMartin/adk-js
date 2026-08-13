@@ -4,9 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {getLogger, Logger, LogLevel, setLogger, setLogLevel} from '@google/adk';
+import {
+  getLogger,
+  Logger,
+  LogLevel,
+  resetLogger,
+  setLogger,
+  setLogLevel,
+} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
-import {resetLogger} from '../../src/utils/logger.js';
 
 describe('setLogger', () => {
   beforeEach(() => {
@@ -139,6 +145,34 @@ describe('setLogger', () => {
       const logger = getLogger();
 
       expect(logger.constructor.name).toBe('SimpleLogger');
+    });
+
+    it('restores the default after a custom logger', () => {
+      const customLogger: Logger = {
+        setLogLevel: () => {},
+        log: () => {},
+        debug: () => {},
+        info: () => {},
+        warn: () => {},
+        error: () => {},
+      };
+
+      setLogger(customLogger);
+      expect(getLogger()).toBe(customLogger);
+
+      resetLogger();
+
+      expect(getLogger()).not.toBe(customLogger);
+      expect(typeof getLogger().info).toBe('function');
+    });
+
+    it('installs a fresh default instance on each call', () => {
+      resetLogger();
+      const first = getLogger();
+
+      resetLogger();
+
+      expect(getLogger()).not.toBe(first);
     });
   });
 });
