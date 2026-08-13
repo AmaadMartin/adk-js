@@ -405,6 +405,28 @@ describe('UnsafeLocalCodeExecutor', () => {
       });
     });
 
+    it('hides the child console window and keeps the other spawn options', async () => {
+      await executor.executeCode({
+        invocationContext,
+        codeExecutionInput: {
+          code: 'console.log("hi");',
+          language: CodeExecutionLanguage.JAVASCRIPT,
+          inputFiles: [],
+        },
+      });
+
+      expect(spawnMock).toHaveBeenCalledWith(
+        process.execPath,
+        [expect.stringMatching(/script\.js$/)],
+        {
+          timeout: 30 * 1000,
+          killSignal: 'SIGKILL',
+          cwd: expect.stringContaining('adk_js_unsafe_code_executor_'),
+          windowsHide: true,
+        },
+      );
+    });
+
     it('should pass -NoProfile when shell code runs through powershell', async () => {
       const shellExecutor = new UnsafeLocalCodeExecutor({
         shellCommandPath: 'powershell',
