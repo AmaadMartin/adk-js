@@ -10,7 +10,11 @@ import {
   AuthCredentialTypes,
   Context,
   createRestApiTool,
+  createSession,
+  InvocationContext,
+  LlmAgent,
   OpenApiSpecParser,
+  PluginManager,
   RestApiTool,
   ToolAuthHandler,
 } from '@google/adk';
@@ -204,6 +208,58 @@ describe('RestApiTool', () => {
       expect.anything(),
       expect.objectContaining({
         body: JSON.stringify({user: {name: 'Alice'}}),
+      }),
+    );
+  });
+
+  it('should send an empty JSON object when no body property is supplied', async () => {
+    const endpoint = {
+      baseUrl: 'http://api.example.com',
+      path: '/test',
+      method: 'POST',
+    };
+    const operation: OpenAPIV3.OperationObject = {
+      responses: {},
+      requestBody: {
+        content: {
+          'application/json': {
+            schema: {type: 'object', properties: {name: {type: 'string'}}},
+          },
+        },
+      },
+    };
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      endpoint,
+      operation,
+    );
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      headers: {get: () => 'text/plain'},
+      text: async () => 'ok',
+    });
+
+    await tool.runAsync({
+      args: {},
+      toolContext: new Context({
+        invocationContext: new InvocationContext({
+          invocationId: 'invocation-1',
+          agent: new LlmAgent({name: 'test_agent'}),
+          session: createSession({id: 'session-1', appName: 'test_app'}),
+          pluginManager: new PluginManager(),
+        }),
+      }),
+    });
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        body: '{}',
+        headers: expect.objectContaining({
+          'Content-Type': 'application/json',
+        }),
       }),
     );
   });
@@ -1136,6 +1192,133 @@ describe('RestApiTool Utilities', () => {
       expect(headers).toEqual({
         'Content-Type': 'text/plain',
       });
+    });
+
+    it('should send an empty object for a JSON object body with no data', () => {
+      const requestBody: OpenAPIV3.RequestBodyObject = {
+        content: {
+          'application/json': {
+            schema: {type: 'object', properties: {name: {type: 'string'}}},
+          },
+        },
+      };
+      const headers = {};
+
+      const result = prepareRequestBody(requestBody, undefined, {}, headers);
+
+      expect(result).toBe('{}');
+      expect(headers).toEqual({'Content-Type': 'application/json'});
+    });
+
+    it('should still send the supplied properties of a JSON object body', () => {
+      const requestBody: OpenAPIV3.RequestBodyObject = {
+        content: {
+          'application/json': {
+            schema: {type: 'object', properties: {name: {type: 'string'}}},
+          },
+        },
+      };
+      const headers = {};
+
+      const result = prepareRequestBody(
+        requestBody,
+        undefined,
+        {name: 'Alice'},
+        headers,
+      );
+
+      expect(result).toBe(JSON.stringify({name: 'Alice'}));
+      expect(headers).toEqual({'Content-Type': 'application/json'});
+    });
+
+    it('should send an empty object for a +json object body with no data', () => {
+      const requestBody: OpenAPIV3.RequestBodyObject = {
+        content: {
+          'application/merge-patch+json': {
+            schema: {type: 'object', properties: {name: {type: 'string'}}},
+          },
+        },
+      };
+      const headers = {};
+
+      const result = prepareRequestBody(requestBody, undefined, {}, headers);
+
+      expect(result).toBe('{}');
+      expect(headers).toEqual({
+        'Content-Type': 'application/merge-patch+json',
+      });
+    });
+
+    it('should send nothing for a non-object JSON body with no data', () => {
+      const requestBody: OpenAPIV3.RequestBodyObject = {
+        content: {
+          'application/json': {
+            schema: {type: 'string'},
+          },
+        },
+      };
+      const headers = {};
+
+      const result = prepareRequestBody(requestBody, undefined, {}, headers);
+
+      expect(result).toBeUndefined();
+      expect(headers).toEqual({});
+    });
+
+    it('should send nothing for a text/plain object body with no data', () => {
+      const requestBody: OpenAPIV3.RequestBodyObject = {
+        content: {
+          'text/plain': {
+            schema: {type: 'object', properties: {name: {type: 'string'}}},
+          },
+        },
+      };
+      const headers = {};
+
+      const result = prepareRequestBody(requestBody, undefined, {}, headers);
+
+      expect(result).toBeUndefined();
+      expect(headers).toEqual({});
+    });
+
+    it('should send nothing for an unresolved $ref body with no data', () => {
+      const requestBody: OpenAPIV3.RequestBodyObject = {
+        content: {
+          'application/json': {
+            schema: {$ref: '#/components/schemas/Foo'},
+          },
+        },
+      };
+      const headers = {};
+
+      const result = prepareRequestBody(requestBody, undefined, {}, headers);
+
+      expect(result).toBeUndefined();
+      expect(headers).toEqual({});
+    });
+
+    it('should send nothing for a JSON body with no schema and no data', () => {
+      const requestBody: OpenAPIV3.RequestBodyObject = {
+        content: {
+          'application/json': {},
+        },
+      };
+      const headers = {};
+
+      const result = prepareRequestBody(requestBody, undefined, {}, headers);
+
+      expect(result).toBeUndefined();
+      expect(headers).toEqual({});
+    });
+
+    it('should send nothing for an empty content map with no data', () => {
+      const requestBody: OpenAPIV3.RequestBodyObject = {content: {}};
+      const headers = {};
+
+      const result = prepareRequestBody(requestBody, undefined, {}, headers);
+
+      expect(result).toBeUndefined();
+      expect(headers).toEqual({});
     });
 
     it('should fallback to JSON if requestBody has no content', () => {
