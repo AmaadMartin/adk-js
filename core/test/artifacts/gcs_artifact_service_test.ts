@@ -5,7 +5,7 @@
  */
 
 import {GcsArtifactService} from '@google/adk';
-import {describe, expect, it, vi} from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 import {runArtifactServiceTests} from './artifact_service_test_utils.js';
 
 const {StorageMock, storageMock} = vi.hoisted(() => {
@@ -47,8 +47,12 @@ const {StorageMock, storageMock} = vi.hoisted(() => {
       return [{contentType: file.contentType, metadata: file.metadata}];
     }
 
-    async delete(): Promise<void> {
-      this.bucket.files.delete(this.name);
+    async delete(options?: {ignoreNotFound?: boolean}): Promise<void> {
+      // Real GCS answers a delete of a missing object with a 404, which the
+      // storage client surfaces as a rejection unless ignoreNotFound is set.
+      if (!this.bucket.files.delete(this.name) && !options?.ignoreNotFound) {
+        throw new Error(`File not found: ${this.name}`);
+      }
     }
 
     publicUrl(): string {
@@ -361,6 +365,104 @@ describe('GcsArtifactService', () => {
       expect(loaded?.inlineData?.data).toBe(data);
       expect(loaded?.inlineData?.mimeType).toBe('image/png');
       expect(loaded?.inlineData?.displayName).toBe('photo.png');
+    });
+  });
+
+  describe('deleteArtifact concurrency', () => {
+    const sessionKey = {
+      appName: 'test-app',
+      userId: 'test-user',
+      sessionId: 'test-session',
+    };
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('does not issue a delete for an artifact that was never saved', async () => {
+      storageMock.buckets.clear();
+      const service = new GcsArtifactService(bucketName);
+      await service.saveArtifact({
+        ...sessionKey,
+        filename: 'keep.txt',
+        artifact: {text: 'keep me'},
+      });
+
+      await expect(
+        service.deleteArtifact({...sessionKey, filename: 'ghost.txt'}),
+      ).resolves.toBeUndefined();
+
+      expect([...storageMock.bucket(bucketName).files.keys()]).toEqual([
+        'test-app/test-user/test-session/keep.txt/0',
+      ]);
+    });
+
+    it('resolves when a listed version has already been deleted', async () => {
+      storageMock.buckets.clear();
+      const service = new GcsArtifactService(bucketName);
+      const bucket = storageMock.bucket(bucketName);
+      vi.spyOn(bucket, 'getFiles').mockResolvedValue([
+        [bucket.file('test-app/test-user/test-session/vanished.txt/0')],
+      ]);
+
+      await expect(
+        service.deleteArtifact({...sessionKey, filename: 'vanished.txt'}),
+      ).resolves.toBeUndefined();
+    });
+
+    it('deletes the versions that are still present when another is already gone', async () => {
+      storageMock.buckets.clear();
+      const service = new GcsArtifactService(bucketName);
+      await service.saveArtifact({
+        ...sessionKey,
+        filename: 'raced.txt',
+        artifact: {text: 'v0'},
+      });
+      await service.saveArtifact({
+        ...sessionKey,
+        filename: 'raced.txt',
+        artifact: {text: 'v1'},
+      });
+
+      const bucket = storageMock.bucket(bucketName);
+      const listed = await bucket.getFiles({
+        prefix: 'test-app/test-user/test-session/raced.txt/',
+      });
+      // Another caller removes version 0 after this list call returns.
+      bucket.files.delete('test-app/test-user/test-session/raced.txt/0');
+      vi.spyOn(bucket, 'getFiles').mockResolvedValue(listed);
+
+      await expect(
+        service.deleteArtifact({...sessionKey, filename: 'raced.txt'}),
+      ).resolves.toBeUndefined();
+
+      expect(
+        bucket.files.has('test-app/test-user/test-session/raced.txt/1'),
+      ).toBe(false);
+    });
+
+    it('still rejects when a delete fails for a reason other than not-found', async () => {
+      storageMock.buckets.clear();
+      const service = new GcsArtifactService(bucketName);
+      await service.saveArtifact({
+        ...sessionKey,
+        filename: 'locked.txt',
+        artifact: {text: 'locked'},
+      });
+
+      const bucket = storageMock.bucket(bucketName);
+      const createFile = bucket.file.bind(bucket);
+      vi.spyOn(bucket, 'file').mockImplementation((name: string) => {
+        const file = createFile(name);
+        vi.spyOn(file, 'delete').mockRejectedValue(
+          new Error('permission denied'),
+        );
+        return file;
+      });
+
+      await expect(
+        service.deleteArtifact({...sessionKey, filename: 'locked.txt'}),
+      ).rejects.toThrow('permission denied');
     });
   });
 });
