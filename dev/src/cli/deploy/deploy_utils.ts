@@ -41,10 +41,13 @@ const MANIFEST_SEARCH_DEPTH = 10;
 
 interface PackageManifest {
   dependencies?: Record<string, string>;
-  // Only tested for presence: it is the npm/yarn/bun marker for a workspace
-  // root. The agent is under that root by construction, because the search
-  // starts at the agent folder and walks upward.
-  workspaces?: string[] | {packages?: string[]};
+  /** Presence marks a workspace root; the value is never read. */
+  workspaces?: unknown;
+}
+
+interface WorkspaceRootManifest {
+  path: string;
+  manifest: PackageManifest;
 }
 
 export interface CreateDockerFileContentOptions {
@@ -219,6 +222,10 @@ export async function copyAgentFiles(
   }
 }
 
+function quote(packages: string[]): string {
+  return packages.map((pkg) => `"${pkg}"`).join(', ');
+}
+
 function manifestDependencies(
   manifest: PackageManifest | undefined,
 ): Record<string, string> {
@@ -236,7 +243,7 @@ function manifestDependencies(
  */
 async function findWorkspaceRootManifest(
   startDir: string,
-): Promise<{path: string; manifest: PackageManifest} | undefined> {
+): Promise<WorkspaceRootManifest | undefined> {
   let currentFolder = startDir;
 
   for (let i = 0; i < MANIFEST_SEARCH_DEPTH; i++) {
@@ -285,41 +292,38 @@ async function resolveDeploymentDependencies(
     ...manifestDependencies(await loadFileData<PackageManifest>(basePath)),
   };
 
-  let missing = REQUIRED_NPM_PACKAGES.filter((pkg) => !(pkg in dependencies));
-  if (missing.length === 0) {
-    return dependencies;
+  let workspaceRoot: WorkspaceRootManifest | undefined;
+  if (REQUIRED_NPM_PACKAGES.some((pkg) => !(pkg in dependencies))) {
+    workspaceRoot = await findWorkspaceRootManifest(
+      path.dirname(path.dirname(basePath)),
+    );
   }
-
-  const workspaceRoot = await findWorkspaceRootManifest(
-    path.dirname(path.dirname(basePath)),
-  );
   if (workspaceRoot) {
     const rootDependencies = manifestDependencies(workspaceRoot.manifest);
-    const backfilled = missing.filter((pkg) => pkg in rootDependencies);
+    const backfilled = REQUIRED_NPM_PACKAGES.filter(
+      (pkg) => !(pkg in dependencies) && pkg in rootDependencies,
+    );
 
     for (const pkg of backfilled) {
       dependencies[pkg] = rootDependencies[pkg];
     }
     if (backfilled.length > 0) {
       console.info(
-        `Resolved ${backfilled.map((pkg) => `"${pkg}"`).join(', ')} from the workspace root manifest:`,
+        `Resolved ${quote(backfilled)} from the workspace root manifest:`,
         workspaceRoot.path,
       );
     }
-    missing = missing.filter((pkg) => !(pkg in dependencies));
   }
 
+  const missing = REQUIRED_NPM_PACKAGES.filter((pkg) => !(pkg in dependencies));
   if (missing.length > 0) {
     const consultedRoot = workspaceRoot
       ? ` and ${workspaceRoot.path} (nearest ancestor declaring "workspaces")`
       : `; no ancestor manifest declaring "workspaces" was found within ${MANIFEST_SEARCH_DEPTH} levels`;
 
     throw new Error(
-      `Required npm package(s) not found for deployment: ${missing
-        .map((pkg) => `"${pkg}"`)
-        .join(
-          ', ',
-        )}. Consulted ${basePath} (nearest package.json to the agent)${consultedRoot}. ` +
+      `Required npm package(s) not found for deployment: ${quote(missing)}. ` +
+        `Consulted ${basePath} (nearest package.json to the agent)${consultedRoot}. ` +
         `Declare them under "dependencies" in the agent's package.json, or in the workspace root manifest.`,
     );
   }
