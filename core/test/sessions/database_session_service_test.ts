@@ -15,7 +15,12 @@ import {MikroORM} from '@mikro-orm/core';
 import {SqliteDriver} from '@mikro-orm/sqlite';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {isDatabaseConnectionString} from '../../src/sessions/database_session_service.js';
-import {validateDatabaseSchemaVersion} from '../../src/sessions/db/schema_version.js';
+import {ensureDatabaseCreated} from '../../src/sessions/db/operations.js';
+import {ENTITIES, StorageMetadata} from '../../src/sessions/db/schema.js';
+import {
+  SCHEMA_VERSION_KEY,
+  validateDatabaseSchemaVersion,
+} from '../../src/sessions/db/schema_version.js';
 
 /**
  * Reaches the service's private MikroORM handle.
@@ -41,11 +46,7 @@ describe('DatabaseSessionService', () => {
   });
 
   afterEach(async () => {
-    // MikroORM closing
-    const orm = ormOf(service);
-    if (orm) {
-      await orm.close();
-    }
+    await service.close();
   });
 
   it('should create a session', async () => {
@@ -468,31 +469,74 @@ describe('DatabaseSessionService', () => {
   });
 
   it('should fail with incompatible schema version', async () => {
-    const internalService = new DatabaseSessionService({
+    const orm = await MikroORM.init({
       dbName: ':memory:',
       driver: SqliteDriver,
       allowGlobalContext: true,
-    });
-    await internalService.init();
-    const orm = ormOf(internalService)!;
-
-    // Manually insert bad version
-    const em = orm.em.fork();
-    await em.nativeDelete('StorageMetadata', {key: 'schema_version'});
-    await em.insert('StorageMetadata', {
-      key: 'schema_version',
-      value: '999',
+      entities: ENTITIES,
     });
 
-    // Reuse the same ORM/DB connection if possible or create new one on same DB
-    // With :memory:, each new ORM instance is a new DB unless we share the connection.
-    // So we must reuse the service or simulate check on the same instance.
-    // Re-check schema version
-    await expect(validateDatabaseSchemaVersion(orm)).rejects.toThrow(
-      'ADK Database schema version 999 is not compatible',
-    );
+    try {
+      await ensureDatabaseCreated(orm);
 
-    await orm.close();
+      const em = orm.em.fork();
+      const badVersion = em.create(StorageMetadata, {
+        key: SCHEMA_VERSION_KEY,
+        value: '999',
+      });
+      await em.persist(badVersion).flush();
+
+      await expect(validateDatabaseSchemaVersion(orm)).rejects.toThrow(
+        'ADK Database schema version 999 is not compatible',
+      );
+    } finally {
+      await orm.close();
+    }
+  });
+
+  describe('close', () => {
+    let dbService: DatabaseSessionService;
+
+    beforeEach(() => {
+      dbService = new DatabaseSessionService({
+        dbName: ':memory:',
+        driver: SqliteDriver,
+        allowGlobalContext: true,
+      });
+    });
+
+    afterEach(async () => {
+      await dbService.close();
+    });
+
+    it('is safe to call twice', async () => {
+      await dbService.init();
+      await dbService.close();
+
+      await expect(dbService.close()).resolves.toBeUndefined();
+    });
+
+    it('resolves when the service was never initialized', async () => {
+      await expect(dbService.close()).resolves.toBeUndefined();
+    });
+
+    it('re-initializes after close', async () => {
+      await dbService.init();
+      await dbService.createSession({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 'before-close',
+      });
+      await dbService.close();
+
+      const session = await dbService.createSession({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 'after-close',
+      });
+
+      expect(session.id).toBe('after-close');
+    });
   });
 
   describe('listSessions pagination and sorting', () => {
@@ -791,11 +835,12 @@ describe('DatabaseSessionService', () => {
 
       await service.appendEvent({session, event});
 
-      const em = ormOf(service)!.em.fork();
-      const storedEvents = (await em.find('StorageEvent', {
+      const persisted = await service.getSession({
+        appName: 'test-app',
+        userId: 'test-user',
         sessionId: 's-temp',
-      })) as {sessionId: string; eventData: Event}[];
-      const eventData = storedEvents[0].eventData;
+      });
+      const eventData = persisted!.events[0];
 
       expect(eventData.actions?.stateDelta?.['keep']).toBe('me');
       expect(
@@ -817,12 +862,13 @@ describe('DatabaseSessionService', () => {
 
       expect(session.lastUpdateTime).toBe(timestamp);
 
-      const em = ormOf(service)!.em.fork();
-      const storedSession = (await em.findOne('StorageSession', {
-        id: 's-time',
-      })) as {id: string; updateTime: Date};
+      const persisted = await service.getSession({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 's-time',
+      });
 
-      expect(storedSession.updateTime.getTime()).toBe(timestamp);
+      expect(persisted!.lastUpdateTime).toBe(timestamp);
     });
   });
 });
