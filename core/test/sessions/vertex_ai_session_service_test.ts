@@ -1600,22 +1600,25 @@ describe('VertexAiSessionService', () => {
    * the historical adk-js shape that older sessions still hold.
    */
   describe('compaction wire format', () => {
-    const START_TIME = 1000;
-    const END_TIME = 2000;
+    /** Wire timestamps are seconds; an adk-js event counts milliseconds. */
+    const START_TIMESTAMP = 1000;
+    const END_TIMESTAMP = 2000;
+    const START_TIME = START_TIMESTAMP * 1000;
+    const END_TIME = END_TIMESTAMP * 1000;
     const SUMMARY = 'compacted summary';
     const SUMMARY_CONTENT = {role: 'model', parts: [{text: SUMMARY}]};
 
     /** The payload adk-python persists under `customMetadata._compaction`. */
     const CANONICAL_PAYLOAD = {
-      start_timestamp: START_TIME,
-      end_timestamp: END_TIME,
+      start_timestamp: START_TIMESTAMP,
+      end_timestamp: END_TIMESTAMP,
       compacted_content: SUMMARY_CONTENT,
     };
 
     /** The same payload as adk-python mirrors it into `rawEvent`. */
     const ALIASED_PAYLOAD = {
-      startTimestamp: START_TIME,
-      endTimestamp: END_TIME,
+      startTimestamp: START_TIMESTAMP,
+      endTimestamp: END_TIMESTAMP,
       compactedContent: SUMMARY_CONTENT,
     };
 
@@ -1842,7 +1845,7 @@ describe('VertexAiSessionService', () => {
       ['a string', 'nope'],
       [
         'a payload with no summary',
-        {start_timestamp: START_TIME, end_timestamp: END_TIME},
+        {start_timestamp: START_TIMESTAMP, end_timestamp: END_TIMESTAMP},
       ],
     ])(
       'leaves the event non-compacted for %s in customMetadata',
@@ -1866,7 +1869,7 @@ describe('VertexAiSessionService', () => {
           rawEvent: {
             invocationId: 'inv-1',
             author: 'user',
-            actions: {compaction: {startTimestamp: START_TIME}},
+            actions: {compaction: {startTimestamp: START_TIMESTAMP}},
           },
         }),
       );

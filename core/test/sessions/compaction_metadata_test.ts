@@ -13,20 +13,24 @@ import {
 import {describe, expect, it} from 'vitest';
 
 /**
- * The fixtures mirror `test_append_event_with_compaction` in adk-python's
+ * The wire fixtures mirror `test_append_event_with_compaction` in adk-python's
  * `tests/unittests/sessions/test_vertex_ai_session_service.py`, which is the
- * ground truth for the payload both SDKs must agree on.
+ * ground truth for the payload both SDKs must agree on. `EventCompaction`
+ * states its timestamps in seconds, so the adk-js event that produces them
+ * carries the same instants in milliseconds.
  */
 const START_TIMESTAMP = 1000;
 const END_TIMESTAMP = 2000;
+const START_TIME_MS = START_TIMESTAMP * 1000;
+const END_TIME_MS = END_TIMESTAMP * 1000;
 const SUMMARY = 'compacted summary';
 const SUMMARY_CONTENT = {role: 'model', parts: [{text: SUMMARY}]};
 
 describe('toCompactionMetadata', () => {
   it('emits only the snake_case keys adk-python persists', () => {
     const event = createCompactedEvent({
-      startTime: START_TIMESTAMP,
-      endTime: END_TIMESTAMP,
+      startTime: START_TIME_MS,
+      endTime: END_TIME_MS,
       compactedContent: SUMMARY,
       content: SUMMARY_CONTENT,
     });
@@ -44,8 +48,8 @@ describe('toCompactionMetadata', () => {
       parts: [{text: 'first '}, {text: 'second'}],
     };
     const event = createCompactedEvent({
-      startTime: START_TIMESTAMP,
-      endTime: END_TIMESTAMP,
+      startTime: START_TIME_MS,
+      endTime: END_TIME_MS,
       compactedContent: 'first second',
       content,
     });
@@ -55,8 +59,8 @@ describe('toCompactionMetadata', () => {
 
   it('synthesizes a model content when the event has none', () => {
     const event = createCompactedEvent({
-      startTime: START_TIMESTAMP,
-      endTime: END_TIMESTAMP,
+      startTime: START_TIME_MS,
+      endTime: END_TIME_MS,
       compactedContent: SUMMARY,
     });
 
@@ -69,8 +73,8 @@ describe('toCompactionMetadata', () => {
 describe('toAliasedCompactionMetadata', () => {
   it('emits only the camelCase alias keys adk-python mirrors into rawEvent', () => {
     const event = createCompactedEvent({
-      startTime: START_TIMESTAMP,
-      endTime: END_TIMESTAMP,
+      startTime: START_TIME_MS,
+      endTime: END_TIME_MS,
       compactedContent: SUMMARY,
       content: SUMMARY_CONTENT,
     });
@@ -92,8 +96,8 @@ describe('parseCompactionMetadata', () => {
         compacted_content: SUMMARY_CONTENT,
       }),
     ).toEqual({
-      startTime: START_TIMESTAMP,
-      endTime: END_TIMESTAMP,
+      startTime: START_TIME_MS,
+      endTime: END_TIME_MS,
       compactedContent: SUMMARY,
       content: SUMMARY_CONTENT,
     });
@@ -107,25 +111,42 @@ describe('parseCompactionMetadata', () => {
         compactedContent: SUMMARY_CONTENT,
       }),
     ).toEqual({
-      startTime: START_TIMESTAMP,
-      endTime: END_TIMESTAMP,
+      startTime: START_TIME_MS,
+      endTime: END_TIME_MS,
       compactedContent: SUMMARY,
       content: SUMMARY_CONTENT,
     });
   });
 
-  it('accepts the historical adk-js payload with a string summary', () => {
+  it('accepts the historical adk-js payload and keeps its milliseconds', () => {
     expect(
       parseCompactionMetadata({
-        startTime: START_TIMESTAMP,
-        endTime: END_TIMESTAMP,
+        startTime: START_TIME_MS,
+        endTime: END_TIME_MS,
         compactedContent: SUMMARY,
       }),
     ).toEqual({
-      startTime: START_TIMESTAMP,
-      endTime: END_TIMESTAMP,
+      startTime: START_TIME_MS,
+      endTime: END_TIME_MS,
       compactedContent: SUMMARY,
     });
+  });
+
+  it('recovers the exact millisecond an event carried', () => {
+    // A wall-clock timestamp is not a whole number of seconds, so the scaling
+    // has to survive the float division the wire format forces.
+    const startTime = 1620000000123;
+    const endTime = 1620000042987;
+    const event = createCompactedEvent({
+      startTime,
+      endTime,
+      compactedContent: SUMMARY,
+    });
+
+    const parsed = parseCompactionMetadata(toCompactionMetadata(event));
+
+    expect(parsed?.startTime).toBe(startTime);
+    expect(parsed?.endTime).toBe(endTime);
   });
 
   it('joins the text parts and skips the parts that carry none', () => {
@@ -143,16 +164,6 @@ describe('parseCompactionMetadata', () => {
     });
 
     expect(parsed?.compactedContent).toBe('first second');
-  });
-
-  it('reads a content with no parts as an empty summary', () => {
-    const parsed = parseCompactionMetadata({
-      start_timestamp: START_TIMESTAMP,
-      end_timestamp: END_TIMESTAMP,
-      compacted_content: {role: 'model'},
-    });
-
-    expect(parsed?.compactedContent).toBe('');
   });
 
   it.each([
@@ -180,8 +191,8 @@ describe('parseCompactionMetadata', () => {
     [
       'a legacy payload with a content summary',
       {
-        startTime: START_TIMESTAMP,
-        endTime: END_TIMESTAMP,
+        startTime: START_TIME_MS,
+        endTime: END_TIME_MS,
         compactedContent: SUMMARY_CONTENT,
       },
     ],
@@ -196,6 +207,29 @@ describe('parseCompactionMetadata', () => {
     [
       'a payload missing the end timestamp',
       {start_timestamp: START_TIMESTAMP, compacted_content: SUMMARY_CONTENT},
+    ],
+    [
+      'a content with no parts',
+      {
+        start_timestamp: START_TIMESTAMP,
+        end_timestamp: END_TIMESTAMP,
+        compacted_content: {role: 'model'},
+      },
+    ],
+    [
+      'a content whose parts carry no text',
+      {
+        start_timestamp: START_TIMESTAMP,
+        end_timestamp: END_TIMESTAMP,
+        compacted_content: {
+          role: 'model',
+          parts: [{inlineData: {mimeType: 'image/png', data: 'AAAA'}}],
+        },
+      },
+    ],
+    [
+      'a legacy payload with an empty summary',
+      {startTime: START_TIME_MS, endTime: END_TIME_MS, compactedContent: ''},
     ],
     [
       'a payload whose parts are not an array',

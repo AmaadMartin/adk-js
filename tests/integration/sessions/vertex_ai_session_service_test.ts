@@ -175,8 +175,11 @@ describe('VertexAiSessionService session expiration over the wire', () => {
 
 const SESSION_ID = 'session-1';
 const USER_ID = 'user-1';
+/** Wire timestamps are seconds; an adk-js event counts milliseconds. */
 const START_TIMESTAMP = 1000;
 const END_TIMESTAMP = 2000;
+const START_TIME_MS = START_TIMESTAMP * 1000;
+const END_TIME_MS = END_TIMESTAMP * 1000;
 const SUMMARY = 'compacted summary';
 const SUMMARY_CONTENT = {role: 'model', parts: [{text: SUMMARY}]};
 
@@ -292,8 +295,8 @@ describe('VertexAiSessionService compaction over the wire', () => {
       expect.fail('expected the parsed event to be a CompactedEvent');
     }
 
-    expect(event.startTime).toBe(START_TIMESTAMP);
-    expect(event.endTime).toBe(END_TIMESTAMP);
+    expect(event.startTime).toBe(START_TIME_MS);
+    expect(event.endTime).toBe(END_TIME_MS);
     expect(event.compactedContent).toBe(SUMMARY);
     expect(event.content).toEqual(SUMMARY_CONTENT);
   });
@@ -307,8 +310,8 @@ describe('VertexAiSessionService compaction over the wire', () => {
         timestamp: 1620000000000,
         author: 'user',
         invocationId: 'inv-compaction',
-        startTime: START_TIMESTAMP,
-        endTime: END_TIMESTAMP,
+        startTime: START_TIME_MS,
+        endTime: END_TIME_MS,
         compactedContent: SUMMARY,
         content: SUMMARY_CONTENT,
       }),

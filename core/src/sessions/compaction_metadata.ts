@@ -15,7 +15,8 @@ import {logger} from '../utils/logger.js';
  *
  * adk-python dumps `EventCompaction` without `by_alias`, so the persisted keys
  * are the model's snake_case field names and the summary is a full `Content`.
- * This is the canonical wire shape every ADK SDK writes.
+ * This is the canonical wire shape every ADK SDK writes. Its timestamps are
+ * seconds.
  */
 export interface CompactionMetadata {
   start_timestamp: number;
@@ -38,11 +39,8 @@ export interface AliasedCompactionMetadata {
 /**
  * The compaction fields a {@link CompactedEvent} is rebuilt from.
  *
- * `startTime` and `endTime` are copied verbatim from the payload. adk-js event
- * timestamps are milliseconds and adk-python's are seconds, so each SDK writes
- * its own unit into these fields; converting here would corrupt every adk-js
- * session, and a reader only compares a compaction's bounds against timestamps
- * from the same session.
+ * `startTime` and `endTime` are milliseconds, the unit of an adk-js
+ * `Event.timestamp`.
  */
 export interface ParsedCompactionMetadata {
   startTime: number;
@@ -50,6 +48,29 @@ export interface ParsedCompactionMetadata {
   compactedContent: string;
   /** The summary as a `Content`, absent for the legacy adk-js payload. */
   content?: Content;
+}
+
+/**
+ * `EventCompaction` declares its timestamps in seconds and adk-js measures an
+ * `Event.timestamp` in milliseconds, so the canonical payload is scaled on both
+ * sides. Both SDKs compare a compaction's bounds against raw event timestamps —
+ * `getActiveEvents` here, `_is_timestamp_compacted` and the compaction
+ * candidate filter in adk-python — so a payload in the wrong unit is restored
+ * but never matches anything.
+ *
+ * The historical adk-js payload keeps its milliseconds: adk-js wrote its own
+ * event timestamps into those keys, and rescaling them would break the sessions
+ * that already hold them.
+ */
+const MILLISECONDS_PER_SECOND = 1000;
+
+/** Rounds away the float error a seconds round trip leaves behind. */
+function toEventMilliseconds(seconds: number): number {
+  return Math.round(seconds * MILLISECONDS_PER_SECOND);
+}
+
+function toWireSeconds(milliseconds: number): number {
+  return milliseconds / MILLISECONDS_PER_SECOND;
 }
 
 /**
@@ -66,8 +87,8 @@ export function toCompactionMetadata(
   event: CompactedEvent,
 ): CompactionMetadata {
   return {
-    start_timestamp: event.startTime,
-    end_timestamp: event.endTime,
+    start_timestamp: toWireSeconds(event.startTime),
+    end_timestamp: toWireSeconds(event.endTime),
     compacted_content: toContent(event),
   };
 }
@@ -77,8 +98,8 @@ export function toAliasedCompactionMetadata(
   event: CompactedEvent,
 ): AliasedCompactionMetadata {
   return {
-    startTimestamp: event.startTime,
-    endTimestamp: event.endTime,
+    startTimestamp: toWireSeconds(event.startTime),
+    endTimestamp: toWireSeconds(event.endTime),
     compactedContent: toContent(event),
   };
 }
@@ -99,46 +120,67 @@ export function toAliasedCompactionMetadata(
 export function parseCompactionMetadata(
   value: unknown,
 ): ParsedCompactionMetadata | undefined {
-  if (isRecord(value)) {
-    const canonical = parseContentPayload(
+  const parsed = parsePayload(value);
+  // An empty summary is a payload this reader cannot use: it renders as a bare
+  // context header and still hides every event the compaction covered.
+  if (parsed && parsed.compactedContent !== '') {
+    return parsed;
+  }
+  logger.debug('Dropping a compaction payload with no readable summary.');
+  return undefined;
+}
+
+function parsePayload(value: unknown): ParsedCompactionMetadata | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  return (
+    parseCanonicalPayload(
       value,
       'start_timestamp',
       'end_timestamp',
       'compacted_content',
-    );
-    if (canonical) {
-      return canonical;
-    }
-    const aliased = parseContentPayload(
+    ) ??
+    parseCanonicalPayload(
       value,
       'startTimestamp',
       'endTimestamp',
       'compactedContent',
-    );
-    if (aliased) {
-      return aliased;
-    }
-    const legacy = parseTimestamps(value, 'startTime', 'endTime');
-    if (legacy && typeof value['compactedContent'] === 'string') {
-      return {...legacy, compactedContent: value['compactedContent']};
-    }
-  }
-  logger.debug('Dropping an unrecognized compaction payload.');
-  return undefined;
+    ) ??
+    parseLegacyPayload(value)
+  );
 }
 
-function parseContentPayload(
+/** Parses the canonical payload or its alias, whose timestamps are seconds. */
+function parseCanonicalPayload(
   value: Record<string, unknown>,
   startKey: string,
   endKey: string,
   contentKey: string,
 ): ParsedCompactionMetadata | undefined {
-  const timestamps = parseTimestamps(value, startKey, endKey);
+  const seconds = parseTimestamps(value, startKey, endKey);
   const content = value[contentKey];
-  if (!timestamps || !isContent(content)) {
+  if (!seconds || !isContent(content)) {
     return undefined;
   }
-  return {...timestamps, compactedContent: flattenContent(content), content};
+  return {
+    startTime: toEventMilliseconds(seconds.startTime),
+    endTime: toEventMilliseconds(seconds.endTime),
+    compactedContent: flattenContent(content),
+    content,
+  };
+}
+
+/** Parses the historical adk-js payload, whose timestamps are milliseconds. */
+function parseLegacyPayload(
+  value: Record<string, unknown>,
+): ParsedCompactionMetadata | undefined {
+  const milliseconds = parseTimestamps(value, 'startTime', 'endTime');
+  const compactedContent = value['compactedContent'];
+  if (!milliseconds || typeof compactedContent !== 'string') {
+    return undefined;
+  }
+  return {...milliseconds, compactedContent};
 }
 
 function parseTimestamps(
