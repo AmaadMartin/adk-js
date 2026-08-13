@@ -227,6 +227,8 @@ export {
   PARTS_RETURNED_BY_TOOLS_ID,
 } from './plugins/multimodal_tool_results_plugin.js';
 export {PluginManager} from './plugins/plugin_manager.js';
+export {SaveFilesAsArtifactsPlugin} from './plugins/save_files_as_artifacts_plugin.js';
+export type {SaveFilesAsArtifactsPluginOptions} from './plugins/save_files_as_artifacts_plugin.js';
 export {
   RESERVED_TOOL_CALL_ERROR_TYPE,
   ReflectAndRetryModelPlugin,
