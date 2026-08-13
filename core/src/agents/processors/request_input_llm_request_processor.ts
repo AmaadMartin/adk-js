@@ -49,8 +49,9 @@ export class RequestInputLlmRequestProcessor extends BaseLlmRequestProcessor {
     }
 
     // 1. Collect resume inputs (interruptId -> value): prefer structured
-    //    `adk_request_input` responses, else map a plain-text reply to any
-    //    pending interrupt (so an interactive client can resume by typing).
+    //    `adk_request_input` responses, else map a plain-text reply to the
+    //    single pending interrupt (so an interactive client can resume by
+    //    typing).
     const resumeInputs = collectResumeInputs(events);
     if (Object.keys(resumeInputs).length === 0) {
       return;
@@ -135,7 +136,12 @@ export class RequestInputLlmRequestProcessor extends BaseLlmRequestProcessor {
 /**
  * Collects resume inputs from the session: structured `adk_request_input`
  * function responses take precedence; otherwise a plain-text reply is mapped to
- * every still-pending interrupt id.
+ * the single pending interrupt.
+ *
+ * If more than one interrupt is pending, a plain-text reply is ambiguous — it
+ * would be broadcast to every pause and at least one node would resume with
+ * data the user never gave it — so it is ignored here. Addressing a specific
+ * pause in that situation requires a structured function response.
  *
  * A reply that does not match its interrupt's schema is rejected loudly while
  * it is the turn being processed, and skipped on later turns — it never
@@ -175,10 +181,14 @@ function collectResumeInputs(events: Event[]): Record<string, unknown> {
     isCurrentTurn = false;
   }
 
-  // Plain-text fallback: map the latest plain-text user turn to pending
-  // interrupts (mirrors a workflow root's interactive resume).
-  const pending = pendingInterruptIds(events, responseSchemas);
-  if (pending.size === 0) {
+  // Plain-text fallback: map the latest plain-text user turn to the single
+  // pending interrupt (mirrors a workflow root's interactive resume).
+  const pending = pendingInterruptIds(
+    eventsSincePreviousUserTurn(events),
+    responseSchemas,
+  );
+  // Only the unambiguous single-pause case is resumable by plain text.
+  if (pending.size !== 1) {
     return {};
   }
   const lastUser = [...events].reverse().find((e) => e.author === 'user');
@@ -189,11 +199,32 @@ function collectResumeInputs(events: Event[]): Record<string, unknown> {
     return {};
   }
   const text = parts.map((p) => p.text).join('');
-  const inputs: Record<string, unknown> = {};
-  for (const id of pending) {
-    inputs[id] = text;
+  const [id] = pending;
+  return {[id]: text};
+}
+
+/**
+ * Narrows session events to the agent turn that paused: everything after the
+ * user turn before the current one.
+ *
+ * A plain-text reply records no `functionResponse` for the interrupt it
+ * answered, so an interrupt resolved by typing stays unanswered in the session
+ * forever. Scoping to the latest agent turn drops those, which is also what the
+ * reply means: it answers the pauses the agent raised since the user last
+ * spoke, not every pause the session ever held.
+ */
+function eventsSincePreviousUserTurn(events: Event[]): Event[] {
+  let seenCurrentTurn = false;
+  for (let i = events.length - 1; i >= 0; i--) {
+    if (events[i].author !== 'user') {
+      continue;
+    }
+    if (seenCurrentTurn) {
+      return events.slice(i + 1);
+    }
+    seenCurrentTurn = true;
   }
-  return inputs;
+  return events;
 }
 
 /**

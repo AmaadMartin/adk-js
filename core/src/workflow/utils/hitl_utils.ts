@@ -114,9 +114,9 @@ export function responseSchemasByInterruptId(
  * rejected reply stays in the session forever, so a checker that threw on
  * sight would end the session rather than the turn.
  *
- * Only structured replies are checked. A plain-text reply is routed to every
- * pending interrupt as-is (the interactive CLI and the dev UI both rely on
- * that), and holding free text to an object schema would break it.
+ * Only structured replies are checked. A plain-text reply is routed to the
+ * single pending interrupt as-is (the interactive CLI and the dev UI both rely
+ * on that), and holding free text to an object schema would break it.
  *
  * A reply that unwraps to a bare scalar counts as plain text and is exempt for
  * the same reason: `{result: <text>}` is the envelope a client sends when it
