@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {GenerateContentConfig} from '@google/genai';
 import {Event} from '../../events/event.js';
 import {LlmRequest, setOutputSchema} from '../../models/llm_request.js';
 import {canUseOutputSchemaWithTools} from '../../utils/output_schema_utils.js';
@@ -37,7 +38,9 @@ export class BasicLlmRequestProcessor extends BaseLlmRequestProcessor {
     // set model string, not model instance.
     llmRequest.model = agent.canonicalModel.model;
 
-    llmRequest.config = {...(agent.generateContentConfig ?? {})};
+    llmRequest.config = copyRequestScopedFields(
+      agent.generateContentConfig ?? {},
+    );
     // Models that cannot take an output schema alongside tools get the
     // prompt-based `set_model_response` workaround instead, injected by
     // `LlmAgent.runOneStepAsync` and the instructions processor.
@@ -70,6 +73,34 @@ export class BasicLlmRequestProcessor extends BaseLlmRequestProcessor {
         invocationContext.runConfig.proactivity;
     }
   }
+}
+
+/**
+ * Copies the agent-config fields that request assembly goes on to mutate.
+ *
+ * A plain spread of the agent's config is shallow, so `labels` and
+ * `httpOptions` stay the agent's own objects. The agent-name label written in
+ * `LlmAgent` and the tracking headers written in `GoogleLlm` would then outlive
+ * the invocation and reach every later run of that agent.
+ *
+ * The copies stay shallow on purpose. `headers` is the only nested value
+ * assembly mutates in place, and a deep clone would also copy the
+ * `retryOptions` and `extraBody` objects that the caller still holds.
+ */
+function copyRequestScopedFields(
+  config: GenerateContentConfig,
+): GenerateContentConfig {
+  const copy: GenerateContentConfig = {...config};
+  if (copy.labels) {
+    copy.labels = {...copy.labels};
+  }
+  if (copy.httpOptions) {
+    copy.httpOptions = {...copy.httpOptions};
+    if (copy.httpOptions.headers) {
+      copy.httpOptions.headers = {...copy.httpOptions.headers};
+    }
+  }
+  return copy;
 }
 
 export const BASIC_LLM_REQUEST_PROCESSOR = new BasicLlmRequestProcessor();
