@@ -7,6 +7,14 @@
 import {Part} from '@google/genai';
 
 /**
+ * Helpers for the `artifact://` scheme, which lets one artifact reference
+ * another instead of storing a second copy.
+ *
+ * Every rejection here throws a plain Error, as the artifact services do. They
+ * should become InputValidationError once adk-js ports the typed error module.
+ */
+
+/**
  * The result of parsing an artifact URI.
  */
 export interface ParsedArtifactUri {
@@ -35,9 +43,6 @@ const USER_SCOPED_ARTIFACT_URI_RE =
  * at itself, so the chain needs a bound.
  */
 const MAX_ARTIFACT_REFERENCE_DEPTH = 10;
-
-// These rejections should become InputValidationError once adk-js ports the
-// typed error module; the services throw plain Error today.
 
 /**
  * Parses an artifact URI.
