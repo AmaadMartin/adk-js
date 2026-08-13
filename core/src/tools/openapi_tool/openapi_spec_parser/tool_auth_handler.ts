@@ -8,7 +8,10 @@ import {OpenAPIV3} from 'openapi-types';
 import {Context} from '../../../agents/context.js';
 import {AuthCredential} from '../../../auth/auth_credential.js';
 import {AuthConfig} from '../../../auth/auth_tool.js';
+import {ExchangeResult} from '../../../auth/exchanger/base_credential_exchanger.js';
+import {formatError} from '../../../utils/error_utils.js';
 import {experimental} from '../../../utils/experimental.js';
+import {logger} from '../../../utils/logger.js';
 import {AutoAuthCredentialExchanger} from '../auth/credential_exchangers/auto_auth_credential_exchanger.js';
 
 export interface AuthPreparationResult {
@@ -101,11 +104,10 @@ export class ToolAuthHandler {
       return {state: 'pending'};
     }
 
-    const exchanger = new AutoAuthCredentialExchanger();
-    const result = await exchanger.exchange({
-      authScheme: this.authScheme,
-      authCredential: credential,
-    });
+    const result = await exchangeCredential(this.authScheme, credential);
+    if (!result) {
+      return {state: 'done'};
+    }
 
     // Only cache what cannot cheaply be obtained again: an auth response is
     // readable once, and an exchange costs a round trip. A statically
@@ -118,5 +120,29 @@ export class ToolAuthHandler {
     }
 
     return {state: 'done', authCredential: result.credential};
+  }
+}
+
+/**
+ * Exchanges a credential, returning `undefined` when the exchange fails.
+ *
+ * A failure here is almost always environmental — expired application default
+ * credentials, an unreachable metadata server, a token endpoint that refused
+ * the request — and the tool can still make the call unauthenticated and
+ * report what the API says. Rejecting instead would abort the whole
+ * invocation. Mirrors `ToolAuthHandler._exchange_credential()` in adk-python.
+ */
+async function exchangeCredential(
+  authScheme: OpenAPIV3.SecuritySchemeObject,
+  authCredential: AuthCredential,
+): Promise<ExchangeResult | undefined> {
+  try {
+    return await new AutoAuthCredentialExchanger().exchange({
+      authScheme,
+      authCredential,
+    });
+  } catch (error: unknown) {
+    logger.error(`Failed to exchange credential: ${formatError(error)}`);
+    return undefined;
   }
 }
