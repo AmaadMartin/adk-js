@@ -19,6 +19,7 @@ import {
   createSession,
   Event,
   FunctionTool,
+  Gemini,
   InMemorySessionService,
   InvocationContext,
   LlmAgent,
@@ -30,7 +31,13 @@ import {
   Session,
   ToolProcessLlmRequest,
 } from '@google/adk';
-import {Content, Schema, Type} from '@google/genai';
+import {
+  Content,
+  GenerateContentConfig,
+  GenerateContentResponse,
+  Schema,
+  Type,
+} from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
@@ -1190,5 +1197,98 @@ describe('LlmAgent usage metadata on content-less responses', () => {
     const events = await runAndCollect();
 
     expect(events.find((e) => e.usageMetadata)).toBeUndefined();
+  });
+});
+
+/** Records the labels of every request the agent sends to the model. */
+class LabelCapturingLlm extends BaseLlm {
+  readonly labelsPerCall: Array<Record<string, string> | undefined> = [];
+
+  constructor() {
+    super({model: 'label-capturing-llm'});
+  }
+
+  async *generateContentAsync(
+    request: LlmRequest,
+  ): AsyncGenerator<LlmResponse, void, void> {
+    this.labelsPerCall.push(request.config?.labels);
+    yield {content: {role: 'model', parts: [{text: 'Done'}]}};
+  }
+
+  async connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
+    return new MockLlmConnection();
+  }
+}
+
+describe('agent generateContentConfig is not mutated by a run', () => {
+  async function runTwice(agent: LlmAgent): Promise<void> {
+    const sessionService = new InMemorySessionService();
+    const runner = new Runner({appName: 'test_app', agent, sessionService});
+    const session = await sessionService.createSession({
+      appName: 'test_app',
+      userId: 'test_user',
+      sessionId: 'test_session',
+    });
+
+    for (const turn of ['Turn 1', 'Turn 2']) {
+      for await (const _event of runner.runAsync({
+        userId: session.userId,
+        sessionId: session.id,
+        newMessage: {role: 'user', parts: [{text: turn}]},
+      })) {
+        // Consume the stream
+      }
+    }
+  }
+
+  it('keeps the agent-name label out of the agent labels', async () => {
+    const agentLabels = {team: 'search'};
+    const model = new LabelCapturingLlm();
+    const agent = new LlmAgent({
+      name: 'label_agent',
+      model,
+      generateContentConfig: {labels: agentLabels},
+    });
+
+    await runTwice(agent);
+
+    expect(agentLabels).toEqual({team: 'search'});
+    expect(agent.generateContentConfig?.labels).toBe(agentLabels);
+    expect(model.labelsPerCall).toEqual([
+      {team: 'search', adk_agent_name: 'label_agent'},
+      {team: 'search', adk_agent_name: 'label_agent'},
+    ]);
+  });
+
+  it('keeps the Gemini tracking headers out of the agent http options', async () => {
+    const agentHeaders = {'Agent-Header': 'agent-val'};
+    const agentHttpOptions = {timeout: 1000, headers: agentHeaders};
+    const model = new Gemini({apiKey: 'test-key'});
+    const modelResponse = new GenerateContentResponse();
+    modelResponse.candidates = [
+      {content: {role: 'model', parts: [{text: 'Done'}]}},
+    ];
+    const configPerCall: Array<GenerateContentConfig | undefined> = [];
+    model.apiClient.models.generateContent = async (params) => {
+      configPerCall.push(params.config);
+      return modelResponse;
+    };
+    const agent = new LlmAgent({
+      name: 'header_agent',
+      model,
+      generateContentConfig: {httpOptions: agentHttpOptions},
+    });
+
+    await runTwice(agent);
+
+    expect(agentHeaders).toEqual({'Agent-Header': 'agent-val'});
+    expect(agentHttpOptions.headers).toBe(agentHeaders);
+    expect(configPerCall).toHaveLength(2);
+    for (const config of configPerCall) {
+      expect(config?.httpOptions?.headers).toMatchObject({
+        'Agent-Header': 'agent-val',
+        'x-goog-api-client': expect.stringContaining('google-adk/'),
+      });
+    }
   });
 });
