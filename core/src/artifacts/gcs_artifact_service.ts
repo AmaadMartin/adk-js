@@ -271,21 +271,10 @@ export class GcsArtifactService implements BaseArtifactService {
   }
 }
 
-/**
- * Converts an RFC 3339 timestamp reported by GCS into Unix seconds.
- *
- * @param rfc3339 The timestamp to convert, if the object carries one.
- * @return The timestamp in seconds, or undefined when it is absent or
- *     unparseable.
- */
+/** Converts an RFC 3339 timestamp reported by GCS into Unix seconds. */
 function toEpochSeconds(rfc3339?: string): number | undefined {
-  if (!rfc3339) {
-    return undefined;
-  }
-
-  const milliseconds = Date.parse(rfc3339);
-
-  return isNaN(milliseconds) ? undefined : milliseconds / 1000;
+  const ms = rfc3339 ? Date.parse(rfc3339) : NaN;
+  return isNaN(ms) ? undefined : ms / 1000;
 }
 
 function getFileName({
