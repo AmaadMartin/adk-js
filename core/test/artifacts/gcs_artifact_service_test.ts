@@ -37,9 +37,19 @@ const {StorageMock, storageMock} = vi.hoisted(() => {
       return [file.data];
     }
 
+    /** Mirrors the real client, which populates metadata from the list call. */
+    get metadata(): {
+      contentType?: string;
+      metadata: Record<string, unknown>;
+    } {
+      const file = this.bucket.files.get(this.name);
+      return {contentType: file?.contentType, metadata: file?.metadata ?? {}};
+    }
+
     async getMetadata(): Promise<
       [{contentType?: string; metadata?: Record<string, unknown>}]
     > {
+      this.bucket.getMetadataCalls++;
       const file = this.bucket.files.get(this.name);
       if (!file) {
         throw new Error(`File not found: ${this.name}`);
@@ -66,6 +76,9 @@ const {StorageMock, storageMock} = vi.hoisted(() => {
       }
     >();
 
+    getFilesCalls = 0;
+    getMetadataCalls = 0;
+
     constructor(public name: string) {}
 
     file(name: string): FakeGcsFile {
@@ -73,6 +86,7 @@ const {StorageMock, storageMock} = vi.hoisted(() => {
     }
 
     async getFiles(options?: {prefix?: string}): Promise<[FakeGcsFile[]]> {
+      this.getFilesCalls++;
       let files = Array.from(this.files.keys()).map((name) => this.file(name));
       if (options?.prefix) {
         files = files.filter((f) => f.name.startsWith(options.prefix!));
@@ -460,6 +474,81 @@ describe('GcsArtifactService', () => {
         filename: 'doc/nested',
       });
       expect(nested?.text).toBe('nested v0');
+    });
+  });
+
+  describe('version listing request count', () => {
+    const sessionKey = {
+      appName: 'test-app',
+      userId: 'test-user',
+      sessionId: 'test-session',
+    };
+
+    it('builds every ArtifactVersion from one list request', async () => {
+      storageMock.buckets.clear();
+      const service = new GcsArtifactService(bucketName);
+      for (let i = 0; i < 3; i++) {
+        await service.saveArtifact({
+          ...sessionKey,
+          filename: 'versions.txt',
+          artifact: {text: `v${i}`},
+          customMetadata: {rev: `r${i}`},
+        });
+      }
+
+      const bucket = storageMock.bucket(bucketName);
+      bucket.getFilesCalls = 0;
+      bucket.getMetadataCalls = 0;
+
+      const versions = await service.listArtifactVersions({
+        ...sessionKey,
+        filename: 'versions.txt',
+      });
+
+      expect(bucket.getFilesCalls).toBe(1);
+      expect(bucket.getMetadataCalls).toBe(0);
+      expect(versions.map((v) => v.version)).toEqual([0, 1, 2]);
+      expect(versions.map((v) => v.mimeType)).toEqual([
+        'text/plain',
+        'text/plain',
+        'text/plain',
+      ]);
+      expect(versions.map((v) => v.customMetadata?.['rev'])).toEqual([
+        'r0',
+        'r1',
+        'r2',
+      ]);
+      expect(versions.map((v) => v.canonicalUri)).toEqual([
+        `https://storage.googleapis.com/${bucketName}/test-app/test-user/test-session/versions.txt/0`,
+        `https://storage.googleapis.com/${bucketName}/test-app/test-user/test-session/versions.txt/1`,
+        `https://storage.googleapis.com/${bucketName}/test-app/test-user/test-session/versions.txt/2`,
+      ]);
+    });
+
+    it('skips a blob whose version suffix is not a plain integer', async () => {
+      storageMock.buckets.clear();
+      const service = new GcsArtifactService(bucketName);
+      const bucket = storageMock.bucket(bucketName);
+      bucket.files.set('test-app/test-user/test-session/doc/0', {
+        data: Buffer.from('real version'),
+        metadata: {adkIsText: 'true'},
+        contentType: 'text/plain',
+      });
+      bucket.files.set('test-app/test-user/test-session/doc/3abc', {
+        data: Buffer.from('not a version'),
+        metadata: {},
+        contentType: 'text/plain',
+      });
+
+      expect(
+        await service.listVersions({...sessionKey, filename: 'doc'}),
+      ).toEqual([0]);
+
+      const versions = await service.listArtifactVersions({
+        ...sessionKey,
+        filename: 'doc',
+      });
+      expect(versions.map((v) => v.version)).toEqual([0]);
     });
   });
 });
