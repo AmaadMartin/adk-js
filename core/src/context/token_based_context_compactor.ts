@@ -4,16 +4,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {InvocationContext} from '../agents/invocation_context.js';
+import type {InvocationContext} from '../agents/invocation_context.js';
 import {getContents} from '../agents/processors/content_processor_utils.js';
 import {isCompactedEvent} from '../events/compacted_event.js';
-import {Event} from '../events/event.js';
-import {BaseContextCompactor} from './base_context_compactor.js';
+import type {Event} from '../events/event.js';
+import type {BaseContextCompactor} from './base_context_compactor.js';
 import {
   calculateRetainStartIndex,
   getActiveEvents,
 } from './compaction_utils.js';
-import {BaseSummarizer} from './summarizers/base_summarizer.js';
+import type {BaseSummarizer} from './summarizers/base_summarizer.js';
 
 /** Rough estimate used when no usage metadata is available. */
 const CHARS_PER_TOKEN = 4;

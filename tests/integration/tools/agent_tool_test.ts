@@ -13,10 +13,8 @@ import {
 } from '@google/adk';
 import {FinishReason} from '@google/genai';
 import {describe, expect, it} from 'vitest';
-import {
-  GeminiWithMockResponses,
-  RawGenerateContentResponse,
-} from '../test_case_utils.js';
+import type {RawGenerateContentResponse} from '../test_case_utils.js';
+import {GeminiWithMockResponses} from '../test_case_utils.js';
 
 describe('AgentTool', () => {
   it('propagates state changes from sub-agent to parent session', async () => {

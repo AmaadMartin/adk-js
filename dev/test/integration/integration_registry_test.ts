@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {BasePlugin, FunctionTool, SingleAgentCallback} from '@google/adk';
+import type {BasePlugin, SingleAgentCallback} from '@google/adk';
+import {FunctionTool} from '@google/adk';
 import {beforeEach, describe, expect, it} from 'vitest';
 import {IntegrationRegistry} from '../../src/integration/integration_registry.js';
 

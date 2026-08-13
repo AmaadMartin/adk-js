@@ -4,26 +4,22 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
+import type {
   AgentCard,
   Message,
   Task,
   TaskArtifactUpdateEvent,
   TaskStatusUpdateEvent,
 } from '@a2a-js/sdk';
-import {
-  Client,
-  ClientFactory,
-  DefaultAgentCardResolver,
-} from '@a2a-js/sdk/client';
-import {
+import type {Client} from '@a2a-js/sdk/client';
+import {ClientFactory, DefaultAgentCardResolver} from '@a2a-js/sdk/client';
+import type {
   Event as AdkEvent,
-  createEvent,
   InvocationContext,
-  RemoteA2AAgent,
   RemoteA2AAgentConfig,
   Session,
 } from '@google/adk';
+import {createEvent, RemoteA2AAgent} from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 
 type A2AStreamEventData =

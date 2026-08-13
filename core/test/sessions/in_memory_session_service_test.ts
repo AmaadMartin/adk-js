@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {Session} from '@google/adk';
 import {
   InMemorySessionService,
-  Session,
   State,
   createEvent,
   createEventActions,

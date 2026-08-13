@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {InvocationContext} from '../agents/invocation_context.js';
-import {ContextCompactionTrigger} from '../plugins/base_plugin.js';
+import type {InvocationContext} from '../agents/invocation_context.js';
+import type {ContextCompactionTrigger} from '../plugins/base_plugin.js';
 
 /**
  * Interface for compacting the context history in an agent session.

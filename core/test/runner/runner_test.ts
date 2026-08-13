@@ -4,22 +4,20 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {BaseAgent, Event, InvocationContext} from '@google/adk';
 import {
   App,
-  BaseAgent,
   BasePlugin,
   createEvent,
   createResumabilityConfig,
   determineAgentForResumption,
-  Event,
   InMemoryArtifactService,
   InMemorySessionService,
-  InvocationContext,
   isRoutableLlmAgent,
   LlmAgent,
   Runner,
 } from '@google/adk';
-import {Content, FunctionCall, FunctionResponse} from '@google/genai';
+import type {Content, FunctionCall, FunctionResponse} from '@google/genai';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 
 const TEST_APP_ID = 'test_app_id';

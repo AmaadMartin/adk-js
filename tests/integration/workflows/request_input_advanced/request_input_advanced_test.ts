@@ -10,7 +10,7 @@
  * for manager approval (structured RequestInput), resumed here by plain text.
  */
 
-import {Event} from '@google/adk';
+import type {Event} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 import {authors, runSample} from '../_harness/sample_harness.js';
 import {rootAgent} from './agent.js';

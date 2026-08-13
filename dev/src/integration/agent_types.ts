@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {StdioConnectionParams} from '@google/adk';
-import {GenerateContentConfig} from '@google/genai';
+import type {StdioConnectionParams} from '@google/adk';
+import type {GenerateContentConfig} from '@google/genai';
 
 /**
  * Define the YAML structure interfaces. These are derived from the existing YAML files.

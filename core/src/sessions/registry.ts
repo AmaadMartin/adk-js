@@ -5,7 +5,7 @@
  */
 
 import {redactUriPassword} from '../utils/redact_uri.js';
-import {BaseSessionService} from './base_session_service.js';
+import type {BaseSessionService} from './base_session_service.js';
 import {
   DatabaseSessionService,
   isDatabaseConnectionString,

@@ -4,17 +4,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {FunctionDeclaration} from '@google/genai';
-import {
+import type {FunctionDeclaration} from '@google/genai';
+import type {
   CallToolRequest,
   CallToolResult,
   Tool,
 } from '@modelcontextprotocol/sdk/types.js';
 
 import {toGeminiSchema} from '../../utils/gemini_schema_util.js';
-import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
+import type {RunAsyncToolRequest} from '../base_tool.js';
+import {BaseTool} from '../base_tool.js';
 
-import {MCPSessionManager} from './mcp_session_manager.js';
+import type {MCPSessionManager} from './mcp_session_manager.js';
 
 /**
  * Represents a tool exposed via the Model Context Protocol (MCP).

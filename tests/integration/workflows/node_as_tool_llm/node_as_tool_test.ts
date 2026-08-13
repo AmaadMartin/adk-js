@@ -11,11 +11,11 @@
  * becomes the tool result. Mirrors the `node_as_tool` sample.
  */
 
+import type {NodeContext} from '@google/adk';
 import {
   getFunctionResponses,
   InMemoryRunner,
   node,
-  NodeContext,
   Workflow,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';

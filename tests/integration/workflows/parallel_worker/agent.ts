@@ -17,13 +17,8 @@
  * Enter a topic, e.g. "databases".
  */
 
-import {
-  createEvent,
-  LlmAgent,
-  node,
-  NodeContext,
-  WorkflowAgent,
-} from '@google/adk';
+import type {NodeContext} from '@google/adk';
+import {createEvent, LlmAgent, node, WorkflowAgent} from '@google/adk';
 import {Type} from '@google/genai';
 import {z} from 'zod';
 

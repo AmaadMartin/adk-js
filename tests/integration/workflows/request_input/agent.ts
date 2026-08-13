@@ -22,11 +22,11 @@
  * Turn 1: type a complaint. Turn 2: type "approve", "reject", or feedback text.
  */
 
+import type {NodeContext} from '@google/adk';
 import {
   createEvent,
   LlmAgent,
   node,
-  NodeContext,
   RequestInput,
   WorkflowAgent,
 } from '@google/adk';

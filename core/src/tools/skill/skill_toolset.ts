@@ -4,13 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Context} from '../../agents/context.js';
-import {ReadonlyContext} from '../../agents/readonly_context.js';
-import {BaseCodeExecutor} from '../../code_executors/base_code_executor.js';
-import {appendInstructions, LlmRequest} from '../../models/llm_request.js';
+import type {Context} from '../../agents/context.js';
+import type {ReadonlyContext} from '../../agents/readonly_context.js';
+import type {BaseCodeExecutor} from '../../code_executors/base_code_executor.js';
+import type {LlmRequest} from '../../models/llm_request.js';
+import {appendInstructions} from '../../models/llm_request.js';
 import {formatSkillsAsXml} from '../../skills/prompt.js';
-import {Skill} from '../../skills/skill.js';
-import {SkillRegistry} from '../../skills/skill_registry.js';
+import type {Skill} from '../../skills/skill.js';
+import type {SkillRegistry} from '../../skills/skill_registry.js';
 import {experimental} from '../../utils/experimental.js';
 import {logger} from '../../utils/logger.js';
 import {BaseTool} from '../base_tool.js';

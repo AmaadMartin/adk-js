@@ -4,13 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  Gemini,
-  GoogleMapsGroundingTool,
-  LlmAgent,
-  LlmRequest,
-} from '@google/adk';
-import {GenerateContentResponse, GoogleGenAI} from '@google/genai';
+import type {LlmRequest} from '@google/adk';
+import {Gemini, GoogleMapsGroundingTool, LlmAgent} from '@google/adk';
+import type {GoogleGenAI} from '@google/genai';
+import {GenerateContentResponse} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {createRunner} from '../test_case_utils.js';
 

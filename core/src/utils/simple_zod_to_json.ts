@@ -4,18 +4,20 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Schema, Type} from '@google/genai';
-import {
+import type {Schema} from '@google/genai';
+import {Type} from '@google/genai';
+import type {
   JsonSchema7ArrayType,
   JsonSchema7BigintType,
   JsonSchema7EnumType,
   JsonSchema7NumberType,
   JsonSchema7ObjectType,
   JsonSchema7StringType,
-  zodToJsonSchema as toJSONSchemaV3,
 } from 'zod-to-json-schema';
-import {z as z3} from 'zod/v3';
-import {toJSONSchema as toJSONSchemaV4, z as z4} from 'zod/v4';
+import {zodToJsonSchema as toJSONSchemaV3} from 'zod-to-json-schema';
+import type {z as z3} from 'zod/v3';
+import type {z as z4} from 'zod/v4';
+import {toJSONSchema as toJSONSchemaV4} from 'zod/v4';
 
 type ZodSchema<T = unknown> = z3.ZodType<T> | z4.ZodType<T>;
 

@@ -5,8 +5,9 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {createEvent, Event} from '../../src/events/event.js';
-import {BaseNode} from '../../src/workflow/base_node.js';
+import type {Event} from '../../src/events/event.js';
+import {createEvent} from '../../src/events/event.js';
+import type {BaseNode} from '../../src/workflow/base_node.js';
 import {FunctionNode} from '../../src/workflow/nodes/function_node.js';
 import {JoinNode} from '../../src/workflow/nodes/join_node.js';
 import {Workflow} from '../../src/workflow/workflow.js';

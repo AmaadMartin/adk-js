@@ -9,9 +9,9 @@ import {InvocationContext} from '../../src/agents/invocation_context.js';
 import {BasePlugin} from '../../src/plugins/base_plugin.js';
 import {PluginManager} from '../../src/plugins/plugin_manager.js';
 import {createSession} from '../../src/sessions/session.js';
-import {BaseNode} from '../../src/workflow/base_node.js';
+import type {BaseNode} from '../../src/workflow/base_node.js';
 import {node} from '../../src/workflow/node.js';
-import {NodeContext} from '../../src/workflow/node_context.js';
+import type {NodeContext} from '../../src/workflow/node_context.js';
 import {Workflow} from '../../src/workflow/workflow.js';
 import {createIc, driveNode} from './test_helpers.js';
 

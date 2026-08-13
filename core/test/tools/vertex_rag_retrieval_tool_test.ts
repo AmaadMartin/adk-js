@@ -4,8 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Context, LlmRequest, VertexRagRetrievalTool} from '@google/adk';
-import {GenerateContentConfig, Tool} from '@google/genai';
+import type {Context, LlmRequest} from '@google/adk';
+import {VertexRagRetrievalTool} from '@google/adk';
+import type {GenerateContentConfig, Tool} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
 const RAG_CORPUS =

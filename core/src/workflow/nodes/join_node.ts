@@ -4,9 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {createEvent, Event} from '../../events/event.js';
+import type {Event} from '../../events/event.js';
+import {createEvent} from '../../events/event.js';
 import {BaseNode} from '../base_node.js';
-import {NodeContext} from '../node_context.js';
+import type {NodeContext} from '../node_context.js';
 
 /**
  * A fan-in barrier node: via {@link requiresAllPredecessors} the engine holds it

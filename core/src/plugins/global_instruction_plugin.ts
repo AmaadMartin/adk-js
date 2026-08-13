@@ -4,12 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Context} from '../agents/context.js';
+import type {Context} from '../agents/context.js';
 import {injectSessionState} from '../agents/instructions.js';
-import {InstructionProvider} from '../agents/llm_agent.js';
+import type {InstructionProvider} from '../agents/llm_agent.js';
 import {ReadonlyContext} from '../agents/readonly_context.js';
-import {LlmRequest} from '../models/llm_request.js';
-import {LlmResponse} from '../models/llm_response.js';
+import type {LlmRequest} from '../models/llm_request.js';
+import type {LlmResponse} from '../models/llm_response.js';
 import {BasePlugin} from './base_plugin.js';
 
 /**

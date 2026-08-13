@@ -5,7 +5,8 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {BaseNode, START} from '../../src/workflow/base_node.js';
+import type {BaseNode} from '../../src/workflow/base_node.js';
+import {START} from '../../src/workflow/base_node.js';
 import {ParallelWorker} from '../../src/workflow/nodes/parallel_worker.js';
 import {
   buildNode,

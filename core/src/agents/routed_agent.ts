@@ -4,9 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Event} from '../events/event.js';
-import {BaseAgent, BaseAgentConfig} from './base_agent.js';
-import {InvocationContext} from './invocation_context.js';
+import type {Event} from '../events/event.js';
+import type {BaseAgentConfig} from './base_agent.js';
+import {BaseAgent} from './base_agent.js';
+import type {InvocationContext} from './invocation_context.js';
 
 import {experimental} from '../utils/experimental.js';
 import {runWithRouting} from '../utils/failover_utils.js';

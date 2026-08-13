@@ -4,10 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {BaseTool, Context} from '@google/adk';
 import {
   BasePlugin,
-  BaseTool,
-  Context,
   InMemoryRunner,
   LlmAgent,
   LOAD_ARTIFACTS,

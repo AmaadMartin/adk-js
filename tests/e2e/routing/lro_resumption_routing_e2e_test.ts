@@ -4,16 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {Event, InvocationContext} from '@google/adk';
 import {
   BaseAgent,
   createEvent,
   createResumabilityConfig,
-  Event,
   InMemoryRunner,
   InMemorySessionService,
-  InvocationContext,
 } from '@google/adk';
-import {FunctionCall, FunctionResponse} from '@google/genai';
+import type {FunctionCall, FunctionResponse} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
 /**

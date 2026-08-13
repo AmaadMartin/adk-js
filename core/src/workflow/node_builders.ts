@@ -4,9 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {BaseAgent, isBaseAgent} from '../agents/base_agent.js';
-import {BaseTool, isBaseTool} from '../tools/base_tool.js';
-import {FunctionNode, FunctionNodeHandler} from './nodes/function_node.js';
+import type {BaseAgent} from '../agents/base_agent.js';
+import {isBaseAgent} from '../agents/base_agent.js';
+import type {BaseTool} from '../tools/base_tool.js';
+import {isBaseTool} from '../tools/base_tool.js';
+import type {FunctionNodeHandler} from './nodes/function_node.js';
+import {FunctionNode} from './nodes/function_node.js';
 import {isAgentLike, LLMAgentWrapper} from './nodes/llm_agent_wrapper.js';
 import {ParallelWorker} from './nodes/parallel_worker.js';
 import {ToolNode} from './nodes/tool_node.js';

@@ -12,15 +12,15 @@
  * back to the model. Mirrors the `node_as_tool` `calculate_discount` pattern.
  */
 
+import type {NodeContext} from '@google/adk';
 import {
   getFunctionCalls,
   getFunctionResponses,
   InMemoryRunner,
   node,
-  NodeContext,
   RequestInput,
 } from '@google/adk';
-import {Content} from '@google/genai';
+import type {Content} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {z} from 'zod';
 import {

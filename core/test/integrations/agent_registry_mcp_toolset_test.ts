@@ -9,7 +9,7 @@ import {
   AgentRegistrySingleMCPToolset,
   GCP_MCP_SERVER_DESTINATION_ID,
 } from '../../src/index.js';
-import {StreamableHTTPConnectionParams} from '../../src/tools/mcp/mcp_session_manager.js';
+import type {StreamableHTTPConnectionParams} from '../../src/tools/mcp/mcp_session_manager.js';
 import {logger} from '../../src/utils/logger.js';
 
 const mockListTools = vi.fn().mockResolvedValue({

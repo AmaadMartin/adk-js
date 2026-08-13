@@ -23,7 +23,8 @@
  * Turn 1: anything. Turn 2: e.g. "Lisbon, 34, cycling, liked the tram tour".
  */
 
-import {node, NodeContext, RequestInput, WorkflowAgent} from '@google/adk';
+import type {NodeContext} from '@google/adk';
+import {node, RequestInput, WorkflowAgent} from '@google/adk';
 import {z} from 'zod';
 
 /** Asks the user for itinerary information. */

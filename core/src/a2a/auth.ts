@@ -5,7 +5,7 @@
  */
 
 import {timingSafeEqual} from 'node:crypto';
-import {A2aUserBuilder} from './agent_to_a2a.js';
+import type {A2aUserBuilder} from './agent_to_a2a.js';
 
 /** A shared secret identifies a deployment, not an individual principal. */
 const AUTHENTICATED_USER_NAME = 'a2a-bearer-token';

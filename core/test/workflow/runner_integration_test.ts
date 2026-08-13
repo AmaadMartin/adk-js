@@ -5,12 +5,13 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {createEvent, Event} from '../../src/events/event.js';
+import type {Event} from '../../src/events/event.js';
+import {createEvent} from '../../src/events/event.js';
 import {Runner} from '../../src/runner/runner.js';
 import {InMemorySessionService} from '../../src/sessions/in_memory_session_service.js';
 import {DEFAULT_ROUTE} from '../../src/workflow/graph.js';
 import {node} from '../../src/workflow/node.js';
-import {NodeContext} from '../../src/workflow/node_context.js';
+import type {NodeContext} from '../../src/workflow/node_context.js';
 import {Workflow} from '../../src/workflow/workflow.js';
 import {WorkflowAgent} from '../../src/workflow/workflow_agent.js';
 

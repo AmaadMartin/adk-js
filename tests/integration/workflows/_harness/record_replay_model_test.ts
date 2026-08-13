@@ -15,12 +15,12 @@ import {BaseLlm, LLMRegistry} from '@google/adk';
 import {existsSync, readdirSync, readFileSync} from 'node:fs';
 import path from 'node:path';
 import {afterEach, describe, expect, it, vi} from 'vitest';
+import type {RecordedCall} from './record_replay_model.js';
 import {
   drainRecordedCalls,
   fingerprint,
   installRecordReplay,
   instructionAgnosticFingerprint,
-  RecordedCall,
   restoreRecordReplay,
 } from './record_replay_model.js';
 

@@ -4,12 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  AuthCredential,
-  AuthCredentialTypes,
-} from '../../../../auth/auth_credential.js';
-import {AuthScheme} from '../../../../auth/auth_schemes.js';
-import {
+import type {AuthCredential} from '../../../../auth/auth_credential.js';
+import {AuthCredentialTypes} from '../../../../auth/auth_credential.js';
+import type {AuthScheme} from '../../../../auth/auth_schemes.js';
+import type {
   BaseCredentialExchanger,
   ExchangeResult,
 } from '../../../../auth/exchanger/base_credential_exchanger.js';

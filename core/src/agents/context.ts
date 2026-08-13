@@ -4,17 +4,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Part} from '@google/genai';
+import type {Part} from '@google/genai';
 
-import {AuthCredential} from '../auth/auth_credential.js';
+import type {AuthCredential} from '../auth/auth_credential.js';
 import {AuthHandler} from '../auth/auth_handler.js';
-import {AuthConfig} from '../auth/auth_tool.js';
-import {createEventActions, EventActions} from '../events/event_actions.js';
-import {SearchMemoryResponse} from '../memory/base_memory_service.js';
+import type {AuthConfig} from '../auth/auth_tool.js';
+import type {EventActions} from '../events/event_actions.js';
+import {createEventActions} from '../events/event_actions.js';
+import type {SearchMemoryResponse} from '../memory/base_memory_service.js';
 import {State} from '../sessions/state.js';
 import {ToolConfirmation} from '../tools/tool_confirmation.js';
 
-import {InvocationContext} from './invocation_context.js';
+import type {InvocationContext} from './invocation_context.js';
 import {ReadonlyContext} from './readonly_context.js';
 
 /**

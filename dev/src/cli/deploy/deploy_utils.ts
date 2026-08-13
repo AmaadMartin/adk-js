@@ -3,11 +3,12 @@
  * Copyright 2026 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
-import {exec, spawn, SpawnOptions} from 'node:child_process';
+import type {SpawnOptions} from 'node:child_process';
+import {exec, spawn} from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import {promisify} from 'node:util';
-import {AgentFileOptions, AgentLoader} from '../../utils/agent_loader.js';
+import type {AgentFileOptions, AgentLoader} from '../../utils/agent_loader.js';
 import {
   loadFileData,
   saveToFile,

@@ -22,7 +22,8 @@
  *   npm run sample -- samples/workflows/dynamic/get_started/agent.ts
  */
 
-import {node, NodeContext, WorkflowAgent} from '@google/adk';
+import type {NodeContext} from '@google/adk';
+import {node, WorkflowAgent} from '@google/adk';
 
 const myNode = node(() => 'Hello World', {name: 'hello_node'});
 

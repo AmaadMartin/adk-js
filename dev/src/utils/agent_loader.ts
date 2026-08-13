@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {App, BaseAgent, isApp, isBaseAgent} from '@google/adk';
+import type {BaseAgent} from '@google/adk';
+import {App, isApp, isBaseAgent} from '@google/adk';
 import esbuild from 'esbuild';
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore

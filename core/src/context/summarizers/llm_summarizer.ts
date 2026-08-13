@@ -4,14 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  CompactedEvent,
-  createCompactedEvent,
-} from '../../events/compacted_event.js';
-import {Event, stringifyContent} from '../../events/event.js';
-import {BaseLlm} from '../../models/base_llm.js';
-import {LlmRequest} from '../../models/llm_request.js';
-import {BaseSummarizer} from './base_summarizer.js';
+import type {CompactedEvent} from '../../events/compacted_event.js';
+import {createCompactedEvent} from '../../events/compacted_event.js';
+import type {Event} from '../../events/event.js';
+import {stringifyContent} from '../../events/event.js';
+import type {BaseLlm} from '../../models/base_llm.js';
+import type {LlmRequest} from '../../models/llm_request.js';
+import type {BaseSummarizer} from './base_summarizer.js';
 
 /** Options for constructing an {@link LlmSummarizer}. */
 export interface LlmSummarizerOptions {

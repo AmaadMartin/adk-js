@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {InvocationContext} from '../agents/invocation_context.js';
+import type {InvocationContext} from '../agents/invocation_context.js';
 
-import {
+import type {
   CodeExecutionInput,
   CodeExecutionResult,
 } from './code_execution_utils.js';

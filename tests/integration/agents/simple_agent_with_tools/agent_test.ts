@@ -4,12 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Event} from '@google/adk';
+import type {Event} from '@google/adk';
 import {describe, it} from 'vitest';
-import {
-  RawGenerateContentResponse,
-  runTestCase,
-} from '../../test_case_utils.js';
+import type {RawGenerateContentResponse} from '../../test_case_utils.js';
+import {runTestCase} from '../../test_case_utils.js';
 import {rootAgent} from './agent.js';
 import turn1ExpectedEvents from './events_turn_1.json' with {type: 'json'};
 import turn2ExpectedEvents from './events_turn_2.json' with {type: 'json'};

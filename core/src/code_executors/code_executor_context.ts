@@ -5,9 +5,9 @@
  */
 import {cloneDeep} from 'lodash-es';
 
-import {State} from '../sessions/state.js';
+import type {State} from '../sessions/state.js';
 
-import {File} from './code_execution_utils.js';
+import type {File} from './code_execution_utils.js';
 
 const CONTEXT_KEY = '_code_execution_context';
 const SESSION_ID_KEY = 'execution_session_id';

@@ -4,11 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {ReadonlyContext} from '../agents/readonly_context.js';
-import {LlmRequest} from '../models/llm_request.js';
+import type {ReadonlyContext} from '../agents/readonly_context.js';
+import type {LlmRequest} from '../models/llm_request.js';
 
-import {Context} from '../agents/context.js';
-import {BaseTool} from './base_tool.js';
+import type {Context} from '../agents/context.js';
+import type {BaseTool} from './base_tool.js';
 
 /**
  * Function to decide whether a tool should be exposed to LLM. Toolset

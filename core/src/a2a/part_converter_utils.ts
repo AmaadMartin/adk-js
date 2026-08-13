@@ -4,16 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
+import type {
   DataPart as A2ADataPart,
   FilePart as A2AFilePart,
   Part as A2APart,
   TextPart as A2ATextPart,
   Message,
 } from '@a2a-js/sdk';
-import {
-  createModelContent,
-  createUserContent,
+import type {
   CodeExecutionResult as GenAICodeExecutionResult,
   Content as GenAIContent,
   ExecutableCode as GenAIExecutableCode,
@@ -22,6 +20,7 @@ import {
   Part as GenAIPart,
   VideoMetadata,
 } from '@google/genai';
+import {createModelContent, createUserContent} from '@google/genai';
 import {A2AMetadataKeys} from './metadata_converter_utils.js';
 
 /**

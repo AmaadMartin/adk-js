@@ -4,12 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {BaseContextCompactor} from '../../context/base_context_compactor.js';
-import {Event} from '../../events/event.js';
-import {LlmRequest} from '../../models/llm_request.js';
+import type {BaseContextCompactor} from '../../context/base_context_compactor.js';
+import type {Event} from '../../events/event.js';
+import type {LlmRequest} from '../../models/llm_request.js';
 import {ContextCompactionTrigger} from '../../plugins/base_plugin.js';
-import {InvocationContext} from '../invocation_context.js';
-import {BaseLlmRequestProcessor} from './base_llm_processor.js';
+import type {InvocationContext} from '../invocation_context.js';
+import type {BaseLlmRequestProcessor} from './base_llm_processor.js';
 
 /**
  * A processor that evaluates a set of compactors to optionally compact

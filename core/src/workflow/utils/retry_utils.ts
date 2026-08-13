@@ -10,8 +10,8 @@
  * Ported from `google/adk-python` `workflow/utils/_retry_utils.py`.
  */
 
-import {NodeState} from '../node_state.js';
-import {PreparedRetryConfig} from '../retry_config.js';
+import type {NodeState} from '../node_state.js';
+import type {PreparedRetryConfig} from '../retry_config.js';
 
 const DEFAULT_MAX_ATTEMPTS = 5;
 const DEFAULT_INITIAL_DELAY_SECONDS = 1.0;

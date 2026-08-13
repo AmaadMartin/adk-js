@@ -20,7 +20,8 @@
  * Turn 1: anything. Turn 2: type a number, e.g. "21".
  */
 
-import {node, NodeContext, RequestInput, WorkflowAgent} from '@google/adk';
+import type {NodeContext} from '@google/adk';
+import {node, RequestInput, WorkflowAgent} from '@google/adk';
 
 const step1 = node(
   async function* () {

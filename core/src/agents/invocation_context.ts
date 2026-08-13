@@ -4,22 +4,22 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content} from '@google/genai';
+import type {Content} from '@google/genai';
 
-import {SessionArtifactService} from '../artifacts/session_artifact_service.js';
-import {BaseCredentialService} from '../auth/credential_service/base_credential_service.js';
-import {Event} from '../events/event.js';
-import {BaseMemoryService} from '../memory/base_memory_service.js';
-import {PluginManager} from '../plugins/plugin_manager.js';
-import {BaseSessionService} from '../sessions/base_session_service.js';
-import {Session} from '../sessions/session.js';
-import {AsyncQueue} from '../utils/async_queue.js';
+import type {SessionArtifactService} from '../artifacts/session_artifact_service.js';
+import type {BaseCredentialService} from '../auth/credential_service/base_credential_service.js';
+import type {Event} from '../events/event.js';
+import type {BaseMemoryService} from '../memory/base_memory_service.js';
+import type {PluginManager} from '../plugins/plugin_manager.js';
+import type {BaseSessionService} from '../sessions/base_session_service.js';
+import type {Session} from '../sessions/session.js';
+import type {AsyncQueue} from '../utils/async_queue.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
 
-import {ActiveStreamingTool} from './active_streaming_tool.js';
-import {BaseAgent} from './base_agent.js';
-import {RunConfig} from './run_config.js';
-import {TranscriptionEntry} from './transcription_entry.js';
+import type {ActiveStreamingTool} from './active_streaming_tool.js';
+import type {BaseAgent} from './base_agent.js';
+import type {RunConfig} from './run_config.js';
+import type {TranscriptionEntry} from './transcription_entry.js';
 
 /**
  * Workflow: data exposed to `{Class.field}` and `<Class.field from source_node>`

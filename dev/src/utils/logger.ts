@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {LogLevel, Logger} from '@google/adk';
+import type {Logger} from '@google/adk';
+import {LogLevel} from '@google/adk';
 import * as winston from 'winston';
 
 /**

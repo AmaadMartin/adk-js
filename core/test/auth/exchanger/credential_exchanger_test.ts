@@ -4,9 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {AuthCredential, AuthCredentialTypes, AuthScheme} from '@google/adk';
+import type {AuthCredential, AuthScheme} from '@google/adk';
+import {AuthCredentialTypes} from '@google/adk';
 import {describe, expect, it} from 'vitest';
-import {
+import type {
   BaseCredentialExchanger,
   ExchangeResult,
 } from '../../../src/auth/exchanger/base_credential_exchanger.js';

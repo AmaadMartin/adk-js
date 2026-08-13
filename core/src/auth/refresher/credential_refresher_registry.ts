@@ -5,7 +5,7 @@
  */
 
 import {AuthCredentialTypes} from '../auth_credential.js';
-import {BaseCredentialRefresher} from './base_credential_refresher.js';
+import type {BaseCredentialRefresher} from './base_credential_refresher.js';
 
 /**
  * Registry for credential refresher instances.

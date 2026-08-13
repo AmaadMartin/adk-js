@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
+import type {
   AgentCard,
   Message,
   Task,
@@ -12,25 +12,28 @@ import {
   TaskStatusUpdateEvent,
 } from '@a2a-js/sdk';
 import {ClientFactory} from '@a2a-js/sdk/client';
-import {ExecutionEventBus, RequestContext} from '@a2a-js/sdk/server';
-import {
-  A2AAgentExecutor,
+import type {ExecutionEventBus, RequestContext} from '@a2a-js/sdk/server';
+import type {
   Event as AdkEvent,
   AfterA2ARequestCallback,
-  BaseAgent,
   BaseSessionService,
   BeforeA2ARequestCallback,
-  createEvent,
-  createEventActions,
   InvocationContext,
-  RemoteA2AAgent,
-  Runner,
   RunnerConfig,
   Session,
 } from '@google/adk';
+import {
+  A2AAgentExecutor,
+  BaseAgent,
+  createEvent,
+  createEventActions,
+  RemoteA2AAgent,
+  Runner,
+} from '@google/adk';
 import {Language, Outcome} from '@google/genai';
-import {beforeEach, describe, expect, it, Mock, vi} from 'vitest';
-import {A2AEvent} from '../../src/a2a/a2a_event.js';
+import type {Mock} from 'vitest';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
+import type {A2AEvent} from '../../src/a2a/a2a_event.js';
 
 vi.mock('@a2a-js/sdk/client', () => {
   const Client = vi.fn().mockImplementation(() => ({

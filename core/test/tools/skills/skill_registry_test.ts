@@ -4,17 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Client} from '@google-cloud/vertexai';
+import type {Client} from '@google-cloud/vertexai';
+import type {InvocationContext, LlmRequest, Skill} from '@google/adk';
 import {
   Context,
   GCPSkillRegistry,
-  InvocationContext,
-  LlmRequest,
   LoadSkillResourceTool,
   LoadSkillTool,
   RunSkillScriptTool,
   SearchSkillsTool,
-  Skill,
   SkillToolset,
   loadSkillFromZipBuffer,
 } from '@google/adk';

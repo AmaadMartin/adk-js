@@ -23,14 +23,8 @@
  * `confirm_vip_discount` interrupt, e.g. via the web UI).
  */
 
-import {
-  createEvent,
-  LlmAgent,
-  node,
-  NodeContext,
-  RequestInput,
-  Workflow,
-} from '@google/adk';
+import type {NodeContext} from '@google/adk';
+import {createEvent, LlmAgent, node, RequestInput, Workflow} from '@google/adk';
 import {z} from 'zod';
 
 const customerLookupArgs = z.object({

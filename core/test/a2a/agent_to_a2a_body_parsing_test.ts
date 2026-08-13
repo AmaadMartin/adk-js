@@ -4,14 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import express from 'express';
+import type express from 'express';
 import type {Server} from 'http';
 import type {AddressInfo} from 'net';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {toA2a} from '../../src/a2a/agent_to_a2a.js';
 import {BaseAgent} from '../../src/agents/base_agent.js';
-import {InvocationContext} from '../../src/agents/invocation_context.js';
-import {Event} from '../../src/events/event.js';
+import type {InvocationContext} from '../../src/agents/invocation_context.js';
+import type {Event} from '../../src/events/event.js';
 import {logger} from '../../src/utils/logger.js';
 
 // Bodies the A2A handlers saw, newest last; filled by the mock below.

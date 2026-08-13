@@ -5,18 +5,14 @@
  */
 
 import {logger} from '../../utils/logger.js';
-import {AuthCredential} from '../auth_credential.js';
-import {
-  AuthScheme,
-  getOAuthGrantTypeFromFlow,
-  OAuthGrantType,
-  OpenIdConnectWithConfig,
-} from '../auth_schemes.js';
-import {
+import type {AuthCredential} from '../auth_credential.js';
+import type {AuthScheme, OpenIdConnectWithConfig} from '../auth_schemes.js';
+import {getOAuthGrantTypeFromFlow, OAuthGrantType} from '../auth_schemes.js';
+import type {
   BaseCredentialExchanger,
-  CredentialExchangeError,
   ExchangeResult,
 } from '../exchanger/base_credential_exchanger.js';
+import {CredentialExchangeError} from '../exchanger/base_credential_exchanger.js';
 import {
   createOAuth2TokenRequestBody,
   fetchOAuth2Tokens,

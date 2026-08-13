@@ -5,22 +5,25 @@
  */
 import {cloneDeep} from 'lodash-es';
 
-import {Event} from '../events/event.js';
+import type {Event} from '../events/event.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
 import {logger} from '../utils/logger.js';
 
-import {
+import type {
   AppendEventRequest,
-  BaseSessionService,
   CreateSessionRequest,
   DeleteSessionRequest,
   GetSessionRequest,
   ListSessionsRequest,
   ListSessionsResponse,
+} from './base_session_service.js';
+import {
+  BaseSessionService,
   mergeStates,
   trimTempState,
 } from './base_session_service.js';
-import {createSession, Session} from './session.js';
+import type {Session} from './session.js';
+import {createSession} from './session.js';
 import {State} from './state.js';
 
 /**

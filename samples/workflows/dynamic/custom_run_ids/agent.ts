@@ -25,7 +25,8 @@
  *   npm run sample -- samples/workflows/dynamic/custom_run_ids/agent.ts
  */
 
-import {node, NodeContext, WorkflowAgent} from '@google/adk';
+import type {NodeContext} from '@google/adk';
+import {node, WorkflowAgent} from '@google/adk';
 
 interface Order {
   orderId: string;

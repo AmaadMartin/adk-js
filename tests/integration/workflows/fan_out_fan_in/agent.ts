@@ -14,13 +14,8 @@
  * Run (offline):  npm run sample -- samples/workflows/fan_out_fan_in/agent.ts
  */
 
-import {
-  createEvent,
-  JoinNode,
-  node,
-  NodeContext,
-  WorkflowAgent,
-} from '@google/adk';
+import type {NodeContext} from '@google/adk';
+import {createEvent, JoinNode, node, WorkflowAgent} from '@google/adk';
 
 const makeUppercase = node((_c: NodeContext, s: string) => s.toUpperCase(), {
   name: 'make_uppercase',

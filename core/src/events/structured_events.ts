@@ -4,14 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
+import type {
   CodeExecutionResult,
   ExecutableCode,
   FunctionCall,
   FunctionResponse,
 } from '@google/genai';
 import {isEmpty} from 'lodash-es';
-import {Event, isFinalResponse} from './event.js';
+import type {Event} from './event.js';
+import {isFinalResponse} from './event.js';
 
 /**
  * The types of events that can be parsed from a raw Event.

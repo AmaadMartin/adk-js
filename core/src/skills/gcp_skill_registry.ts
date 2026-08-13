@@ -7,8 +7,8 @@
 import {Client} from '@google-cloud/vertexai';
 import {experimental} from '../utils/experimental.js';
 import {loadSkillFromZipBuffer} from './loader.js';
-import {Frontmatter, Skill} from './skill.js';
-import {SkillRegistry} from './skill_registry.js';
+import type {Frontmatter, Skill} from './skill.js';
+import type {SkillRegistry} from './skill_registry.js';
 
 export interface GCPSkillRegistryOptions {
   projectId?: string;

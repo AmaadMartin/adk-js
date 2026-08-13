@@ -9,9 +9,11 @@ import * as path from 'node:path';
 import {A2A_AUTH_TOKEN_ENV_VAR} from '../../server/adk_api_server.js';
 import {AgentLoader} from '../../utils/agent_loader.js';
 import {createTempDir, isFile, isFolderExists} from '../../utils/file_utils.js';
-import {
+import type {
   BaseDeployOptions,
   CreateDockerFileContentOptions,
+} from './deploy_utils.js';
+import {
   copyAgentFiles,
   createDockerFile,
   createDockerFileContent,

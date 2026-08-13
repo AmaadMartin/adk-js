@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Event} from '../events/event.js';
+import type {Event} from '../events/event.js';
 
 /**
  * Represents a unified composite session key grouping application, user, and session identifiers.

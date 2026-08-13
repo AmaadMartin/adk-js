@@ -7,7 +7,8 @@
 import {lookup} from 'node:dns/promises';
 
 import {FunctionTool, LOAD_WEB_PAGE, loadWebPage} from '@google/adk';
-import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
+import type {Mock} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 vi.mock('node:dns/promises', () => ({
   lookup: vi.fn(),

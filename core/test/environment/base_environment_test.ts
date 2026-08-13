@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {BaseEnvironment, ExecutionResult} from '@google/adk';
+import type {ExecutionResult} from '@google/adk';
+import {BaseEnvironment} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
 const EMPTY_RESULT: ExecutionResult = {

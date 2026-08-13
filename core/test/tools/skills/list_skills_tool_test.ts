@@ -4,13 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  Context,
-  InvocationContext,
-  ListSkillsTool,
-  Skill,
-  SkillToolset,
-} from '@google/adk';
+import type {InvocationContext, Skill} from '@google/adk';
+import {Context, ListSkillsTool, SkillToolset} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
 describe('ListSkillsTool', () => {

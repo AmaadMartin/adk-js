@@ -4,13 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  Candidate,
-  FinishReason,
-  FunctionCall,
-  GenerateContentResponse,
-  Part,
-} from '@google/genai';
+import type {Candidate, FunctionCall, Part} from '@google/genai';
+import {FinishReason, GenerateContentResponse} from '@google/genai';
 import {describe, expect, it, vi} from 'vitest';
 import {
   isEmptyContentPart,

@@ -9,7 +9,7 @@ import {createUserContent} from '@google/genai';
 import * as dotenv from 'dotenv';
 import * as fs from 'fs';
 import * as http from 'http';
-import {OpenAPIV3} from 'openapi-types';
+import type {OpenAPIV3} from 'openapi-types';
 import * as path from 'path';
 import {afterAll, beforeAll, describe, expect, it} from 'vitest';
 

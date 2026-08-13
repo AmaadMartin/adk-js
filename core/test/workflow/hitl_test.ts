@@ -4,12 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Schema, Type} from '@google/genai';
+import type {Schema} from '@google/genai';
+import {Type} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
 import {AuthCredentialTypes} from '../../src/auth/auth_credential.js';
-import {AuthConfig} from '../../src/auth/auth_tool.js';
+import type {AuthConfig} from '../../src/auth/auth_tool.js';
 import type {Event} from '../../src/events/event.js';
 import {State} from '../../src/sessions/state.js';
 import {toJsonSchema} from '../../src/utils/schema.js';

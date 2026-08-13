@@ -7,8 +7,8 @@
 /**
  * Credential exchanger registry.
  */
-import {AuthCredentialTypes} from '../auth_credential.js';
-import {BaseCredentialExchanger} from './base_credential_exchanger.js';
+import type {AuthCredentialTypes} from '../auth_credential.js';
+import type {BaseCredentialExchanger} from './base_credential_exchanger.js';
 
 /**
  * Registry for credential exchanger instances.

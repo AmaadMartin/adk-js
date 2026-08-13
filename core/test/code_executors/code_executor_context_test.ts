@@ -5,7 +5,7 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {File} from '../../src/code_executors/code_execution_utils.js';
+import type {File} from '../../src/code_executors/code_execution_utils.js';
 import {CodeExecutorContext} from '../../src/code_executors/code_executor_context.js';
 import {State} from '../../src/sessions/state.js';
 

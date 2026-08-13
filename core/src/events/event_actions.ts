@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {AuthConfig} from '../auth/auth_tool.js';
-import {ToolConfirmation} from '../tools/tool_confirmation.js';
+import type {AuthConfig} from '../auth/auth_tool.js';
+import type {ToolConfirmation} from '../tools/tool_confirmation.js';
 
 /**
  * Represents the actions attached to an event.

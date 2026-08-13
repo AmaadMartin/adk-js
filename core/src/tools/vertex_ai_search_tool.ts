@@ -4,15 +4,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GenerateContentConfig, Tool} from '@google/genai';
-import {ReadonlyContext} from '../agents/readonly_context.js';
+import type {GenerateContentConfig, Tool} from '@google/genai';
+import type {ReadonlyContext} from '../agents/readonly_context.js';
 import {getLogger} from '../utils/logger.js';
 import {
   isGemini1Model,
   isGeminiModel,
   isGeminiModelIdCheckDisabled,
 } from '../utils/model_name.js';
-import {BaseTool, ToolProcessLlmRequest} from './base_tool.js';
+import type {ToolProcessLlmRequest} from './base_tool.js';
+import {BaseTool} from './base_tool.js';
 
 const logger = getLogger();
 

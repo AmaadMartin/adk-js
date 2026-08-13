@@ -10,7 +10,8 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import {experimental} from '../utils/experimental.js';
 import {logger} from '../utils/logger.js';
-import {BaseEnvironment, ExecutionResult} from './base_environment.js';
+import type {ExecutionResult} from './base_environment.js';
+import {BaseEnvironment} from './base_environment.js';
 
 /** Prefix for the temporary workspace created when no `workingDir` is given. */
 const TEMP_WORKSPACE_PREFIX = 'adk_workspace_';

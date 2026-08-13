@@ -6,10 +6,8 @@
 
 import {describe, expect, it} from 'vitest';
 import {z} from 'zod';
-import {
-  isNodeSchemaValidationError,
-  NodeSchemaValidationError,
-} from '../../src/workflow/errors.js';
+import type {NodeSchemaValidationError} from '../../src/workflow/errors.js';
+import {isNodeSchemaValidationError} from '../../src/workflow/errors.js';
 import {FunctionNode} from '../../src/workflow/nodes/function_node.js';
 import {driveNode} from './test_helpers.js';
 

@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {BaseAgent} from '@google/adk';
 import {
   AgentTool,
-  BaseAgent,
   LlmAgent,
   LoopAgent,
   MCPToolset,
@@ -14,13 +14,16 @@ import {
   SequentialAgent,
 } from '@google/adk';
 import * as path from 'node:path';
-import {
+import type {
   AgentToolArgs,
   LongRunningFunctionToolArgs,
   McpToolsetArgs,
   YamlAgentConfig,
 } from './agent_types.js';
-import {AnyFunctionTool, IntegrationRegistry} from './integration_registry.js';
+import type {
+  AnyFunctionTool,
+  IntegrationRegistry,
+} from './integration_registry.js';
 
 const BUILTIN_TOOLS = [
   'exit_loop',

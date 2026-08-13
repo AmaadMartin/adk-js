@@ -7,14 +7,13 @@
 import {Type} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
-import {
+import type {
   Context,
   LlmRequest,
-  LOAD_MEMORY,
-  LoadMemoryTool,
   MemoryEntry,
   SearchMemoryResponse,
 } from '@google/adk';
+import {LOAD_MEMORY, LoadMemoryTool} from '@google/adk';
 
 class StubToolContext {
   private memories: MemoryEntry[];

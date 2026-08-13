@@ -4,16 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {FunctionDeclaration, Type} from '@google/genai';
+import type {FunctionDeclaration} from '@google/genai';
+import {Type} from '@google/genai';
 import path from 'node:path';
 import {experimental} from '../../utils/experimental.js';
 import {guessMimeType} from '../../utils/file_utils.js';
-import {
-  BaseTool,
-  RunAsyncToolRequest,
-  ToolProcessLlmRequest,
-} from '../base_tool.js';
-import {SkillToolset} from './skill_toolset.js';
+import type {RunAsyncToolRequest, ToolProcessLlmRequest} from '../base_tool.js';
+import {BaseTool} from '../base_tool.js';
+import type {SkillToolset} from './skill_toolset.js';
 
 const BINARY_FILE_DETECTED_MSG =
   'Binary file detected. The content has been injected into the conversation history for you to analyze.';

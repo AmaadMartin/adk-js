@@ -3,11 +3,12 @@
  * Copyright 2025 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
-import {LlmRequest} from '../models/llm_request.js';
+import type {LlmRequest} from '../models/llm_request.js';
 import {isGemini2OrAbove} from '../utils/model_name.js';
 
-import {BaseCodeExecutor, ExecuteCodeParams} from './base_code_executor.js';
-import {CodeExecutionResult} from './code_execution_utils.js';
+import type {ExecuteCodeParams} from './base_code_executor.js';
+import {BaseCodeExecutor} from './base_code_executor.js';
+import type {CodeExecutionResult} from './code_execution_utils.js';
 
 /**
  * A unique symbol to identify BuiltInCodeExecutor classes.

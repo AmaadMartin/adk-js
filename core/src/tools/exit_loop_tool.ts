@@ -4,9 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {FunctionDeclaration} from '@google/genai';
+import type {FunctionDeclaration} from '@google/genai';
 
-import {BaseTool, RunAsyncToolRequest} from './base_tool.js';
+import type {RunAsyncToolRequest} from './base_tool.js';
+import {BaseTool} from './base_tool.js';
 
 /**
  * Tool for exiting execution of a {@link LoopAgent}.

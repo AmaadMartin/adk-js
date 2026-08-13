@@ -8,20 +8,17 @@ import {
   REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
   handleFunctionCallsAsync,
 } from '../agents/functions.js';
-import {InvocationContext} from '../agents/invocation_context.js';
+import type {InvocationContext} from '../agents/invocation_context.js';
 import {isLlmAgent} from '../agents/llm_agent.js';
 import {BaseLlmRequestProcessor} from '../agents/processors/base_llm_processor.js';
 import {ReadonlyContext} from '../agents/readonly_context.js';
-import {
-  Event,
-  getFunctionCalls,
-  getFunctionResponses,
-} from '../events/event.js';
+import type {Event} from '../events/event.js';
+import {getFunctionCalls, getFunctionResponses} from '../events/event.js';
 import {State} from '../sessions/state.js';
-import {BaseTool} from '../tools/base_tool.js';
+import type {BaseTool} from '../tools/base_tool.js';
 import {camelCaseKeys} from '../utils/case_utils.js';
 import {AuthHandler} from './auth_handler.js';
-import {AuthConfig} from './auth_tool.js';
+import type {AuthConfig} from './auth_tool.js';
 
 const TOOLSET_AUTH_CREDENTIAL_ID_PREFIX = '_adk_toolset_auth_';
 

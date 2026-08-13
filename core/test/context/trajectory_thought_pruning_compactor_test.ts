@@ -4,15 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {BaseAgent, Event, Session} from '@google/adk';
 import {
-  BaseAgent,
-  Event,
   InvocationContext,
   PluginManager,
-  Session,
   TrajectoryThoughtPruningCompactor,
 } from '@google/adk';
-import {FunctionCall, FunctionResponse} from '@google/genai';
+import type {FunctionCall, FunctionResponse} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
 function createMockEvent(

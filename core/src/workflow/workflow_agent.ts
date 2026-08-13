@@ -4,10 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content} from '@google/genai';
+import type {Content} from '@google/genai';
 import {BaseAgent} from '../agents/base_agent.js';
-import {InvocationContext} from '../agents/invocation_context.js';
-import {createEvent, Event} from '../events/event.js';
+import type {InvocationContext} from '../agents/invocation_context.js';
+import type {Event} from '../events/event.js';
+import {createEvent} from '../events/event.js';
 import {AsyncQueue} from '../utils/async_queue.js';
 import {experimental} from '../utils/experimental.js';
 import {isBaseNode, toContent} from './base_node.js';
@@ -16,7 +17,8 @@ import {
   eventsForCurrentRun,
   reconstructNodeStates,
 } from './utils/rehydration_utils.js';
-import {Workflow, WorkflowConfig} from './workflow.js';
+import type {WorkflowConfig} from './workflow.js';
+import {Workflow} from './workflow.js';
 
 /** Options for a {@link WorkflowAgent}. */
 export interface WorkflowAgentConfig {

@@ -4,15 +4,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  AgentControlledContextCompactor,
+import type {
   BaseAgent,
   BaseSummarizer,
   CompactedEvent,
   Event,
+  Session,
+} from '@google/adk';
+import {
+  AgentControlledContextCompactor,
   InvocationContext,
   PluginManager,
-  Session,
 } from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
 

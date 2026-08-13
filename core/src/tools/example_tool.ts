@@ -4,16 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {BaseExampleProvider} from '../examples/base_example_provider.js';
-import {Example} from '../examples/example.js';
+import type {BaseExampleProvider} from '../examples/base_example_provider.js';
+import type {Example} from '../examples/example.js';
 import {buildExampleSi} from '../examples/example_util.js';
 import {appendInstructions} from '../models/llm_request.js';
 
-import {
-  BaseTool,
-  RunAsyncToolRequest,
-  ToolProcessLlmRequest,
-} from './base_tool.js';
+import type {RunAsyncToolRequest, ToolProcessLlmRequest} from './base_tool.js';
+import {BaseTool} from './base_tool.js';
 
 /**
  * A tool that adds (few-shot) examples to the LLM request.

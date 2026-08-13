@@ -3,16 +3,15 @@
  * Copyright 2025 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
-import {Content, createUserContent} from '@google/genai';
+import type {Content} from '@google/genai';
+import {createUserContent} from '@google/genai';
 import {cloneDeep} from 'lodash-es';
 
-import {
-  CompactedEvent,
-  isCompactedEvent,
-} from '../../events/compacted_event.js';
+import type {CompactedEvent} from '../../events/compacted_event.js';
+import {isCompactedEvent} from '../../events/compacted_event.js';
+import type {Event} from '../../events/event.js';
 import {
   createEvent,
-  Event,
   getFunctionCalls,
   getFunctionResponses,
 } from '../../events/event.js';

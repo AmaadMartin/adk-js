@@ -4,17 +4,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {TaskArtifactUpdateEvent, TaskStatusUpdateEvent} from '@a2a-js/sdk';
-import {
+import type {TaskArtifactUpdateEvent, TaskStatusUpdateEvent} from '@a2a-js/sdk';
+import type {
   AgentExecutor,
   ExecutionEventBus,
   RequestContext,
 } from '@a2a-js/sdk/server';
-import {RunConfig} from '../agents/run_config.js';
-import {Event as AdkEvent} from '../events/event.js';
-import {isRunner, Runner, RunnerConfig} from '../runner/runner.js';
-import {BaseSessionService} from '../sessions/base_session_service.js';
-import {Session} from '../sessions/session.js';
+import type {RunConfig} from '../agents/run_config.js';
+import type {Event as AdkEvent} from '../events/event.js';
+import type {RunnerConfig} from '../runner/runner.js';
+import {isRunner, Runner} from '../runner/runner.js';
+import type {BaseSessionService} from '../sessions/base_session_service.js';
+import type {Session} from '../sessions/session.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
 import {logger} from '../utils/logger.js';
 import {
@@ -27,7 +28,8 @@ import {
   getFinalTaskStatusUpdate,
   getTaskInputRequiredEvent,
 } from './event_processor_utils.js';
-import {createExecutorContext, ExecutorContext} from './executor_context.js';
+import type {ExecutorContext} from './executor_context.js';
+import {createExecutorContext} from './executor_context.js';
 import {
   getA2AEventMetadata,
   getA2ASessionMetadata,

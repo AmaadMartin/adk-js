@@ -13,7 +13,7 @@
 import {FunctionTool, Workflow} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 import {z} from 'zod';
-import {RawGenerateContentResponse} from '../../test_case_utils.js';
+import type {RawGenerateContentResponse} from '../../test_case_utils.js';
 import {
   finalOutput,
   mockLlmAgent,

@@ -19,13 +19,13 @@
  * `find_orders` tool pauses for confirmation before running.
  */
 
+import type {NodeContext} from '@google/adk';
 import {
   createEvent,
   DEFAULT_ROUTE,
   FunctionTool,
   LlmAgent,
   node,
-  NodeContext,
   WorkflowAgent,
 } from '@google/adk';
 import {z} from 'zod';

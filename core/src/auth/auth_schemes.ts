@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {OpenAPIV3} from 'openapi-types';
+import type {OpenAPIV3} from 'openapi-types';
 
 type Oauth2Flow = OpenAPIV3.OAuth2SecurityScheme['flows'];
 

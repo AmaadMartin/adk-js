@@ -25,14 +25,16 @@
  * Turn 2: type any API key value; the node runs and echoes it back (masked).
  */
 
-import {
+import type {
   AuthConfig,
   AuthCredential,
-  AuthCredentialTypes,
   AuthScheme,
+  NodeContext,
+} from '@google/adk';
+import {
+  AuthCredentialTypes,
   createEvent,
   node,
-  NodeContext,
   WorkflowAgent,
 } from '@google/adk';
 

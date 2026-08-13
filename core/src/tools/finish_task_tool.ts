@@ -4,14 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {FunctionDeclaration, Schema, Type} from '@google/genai';
+import type {FunctionDeclaration, Schema} from '@google/genai';
+import {Type} from '@google/genai';
 
 import {appendInstructions} from '../models/llm_request.js';
-import {
-  BaseTool,
-  RunAsyncToolRequest,
-  ToolProcessLlmRequest,
-} from './base_tool.js';
+import type {RunAsyncToolRequest, ToolProcessLlmRequest} from './base_tool.js';
+import {BaseTool} from './base_tool.js';
 
 /** The name of the finish_task tool. */
 export const FINISH_TASK_TOOL_NAME = 'finish_task';

@@ -4,23 +4,22 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {BaseAgent, LlmRequest, Session} from '@google/adk';
 import {
-  BaseAgent,
   CONTENT_REQUEST_PROCESSOR,
   InvocationContext,
   LlmAgent,
-  LlmRequest,
   PluginManager,
-  Session,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
 import {
   getContents,
   getCurrentTurnContents,
 } from '../../src/agents/processors/content_processor_utils.js';
-import {createEvent, Event} from '../../src/events/event.js';
+import type {Event} from '../../src/events/event.js';
+import {createEvent} from '../../src/events/event.js';
 import {node} from '../../src/workflow/node.js';
-import {NodeContext} from '../../src/workflow/node_context.js';
+import type {NodeContext} from '../../src/workflow/node_context.js';
 import {JoinNode} from '../../src/workflow/nodes/join_node.js';
 import {Workflow} from '../../src/workflow/workflow.js';
 import {driveNode} from './test_helpers.js';

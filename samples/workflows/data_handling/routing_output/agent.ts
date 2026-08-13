@@ -18,13 +18,8 @@
  * Try "the app crashed" (BUG) or "where is my order?" (falls through).
  */
 
-import {
-  createEvent,
-  DEFAULT_ROUTE,
-  node,
-  NodeContext,
-  WorkflowAgent,
-} from '@google/adk';
+import type {NodeContext} from '@google/adk';
+import {createEvent, DEFAULT_ROUTE, node, WorkflowAgent} from '@google/adk';
 
 const router = node(
   (_ctx: NodeContext, nodeInput: string) =>

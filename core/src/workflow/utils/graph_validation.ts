@@ -12,8 +12,10 @@
  * intentionally deferred to their respective phases.
  */
 
-import {BaseNode, START} from '../base_node.js';
-import {DEFAULT_ROUTE, Edge} from '../graph.js';
+import type {BaseNode} from '../base_node.js';
+import {START} from '../base_node.js';
+import type {Edge} from '../graph.js';
+import {DEFAULT_ROUTE} from '../graph.js';
 
 function validateDuplicateNodeNames(nodes: BaseNode[]): Set<string> {
   const counts = new Map<string, number>();

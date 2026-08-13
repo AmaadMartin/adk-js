@@ -10,7 +10,7 @@
  * branch.
  */
 
-import {Event} from '@google/adk';
+import type {Event} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 import {allEvents, authors, runSample} from '../_harness/sample_harness.js';
 import {rootAgent} from './agent.js';

@@ -4,13 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
+import type {
   Content,
   GroundingMetadata,
   LiveServerMessage,
   Part,
 } from '@google/genai';
-import {LlmResponse} from '../models/llm_response.js';
+import type {LlmResponse} from '../models/llm_response.js';
 import {isGemini3xFlashLive} from './model_name.js';
 
 /**

@@ -4,9 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Part} from '@google/genai';
-import {ArtifactVersion, BaseArtifactService} from './base_artifact_service.js';
-import {
+import type {Part} from '@google/genai';
+import type {
+  ArtifactVersion,
+  BaseArtifactService,
+} from './base_artifact_service.js';
+import type {
   SessionArtifactService,
   SessionLoadArtifactRequest,
   SessionSaveArtifactRequest,

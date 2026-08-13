@@ -4,24 +4,27 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {AGENT_CARD_PATH, AgentCard} from '@a2a-js/sdk';
-import {
+import type {AgentCard} from '@a2a-js/sdk';
+import {AGENT_CARD_PATH} from '@a2a-js/sdk';
+import type {
   BaseArtifactService,
   BaseMemoryService,
   BaseSessionService,
+  Event,
+  InvocationContext,
+  Session,
+} from '@google/adk';
+import {
   createEvent,
   createSession,
-  Event,
   FunctionTool,
   InMemoryArtifactService,
   InMemoryMemoryService,
   InMemorySessionService,
-  InvocationContext,
   LlmAgent,
   Runner,
-  Session,
 } from '@google/adk';
-import {ReadableSpan} from '@opentelemetry/sdk-trace-base';
+import type {ReadableSpan} from '@opentelemetry/sdk-trace-base';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {z} from 'zod';
 
@@ -29,7 +32,7 @@ import {
   A2A_AUTH_TOKEN_ENV_VAR,
   AdkApiServer,
 } from '../../src/server/adk_api_server.js';
-import {AgentLoader} from '../../src/utils/agent_loader.js';
+import type {AgentLoader} from '../../src/utils/agent_loader.js';
 
 interface JsonRpcResponse {
   result?: unknown;

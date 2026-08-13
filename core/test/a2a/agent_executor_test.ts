@@ -4,19 +4,22 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {TaskStatusUpdateEvent, TextPart} from '@a2a-js/sdk';
-import {ExecutionEventBus, RequestContext} from '@a2a-js/sdk/server';
-import {
-  A2AAgentExecutor,
+import type {TaskStatusUpdateEvent, TextPart} from '@a2a-js/sdk';
+import type {ExecutionEventBus, RequestContext} from '@a2a-js/sdk/server';
+import type {
   Event as AdkEvent,
   BaseSessionService,
-  createEvent,
-  createEventActions,
-  Runner,
   RunnerConfig,
   Session,
 } from '@google/adk';
-import {beforeEach, describe, expect, it, Mocked, vi} from 'vitest';
+import {
+  A2AAgentExecutor,
+  createEvent,
+  createEventActions,
+  Runner,
+} from '@google/adk';
+import type {Mocked} from 'vitest';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
 
 // Mock the Runner to control its async generator
 vi.mock('../../src/runner/runner.js', async (importOriginal) => {

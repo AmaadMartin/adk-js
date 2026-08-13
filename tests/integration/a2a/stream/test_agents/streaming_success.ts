@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {BaseAgent, createEvent, Event} from '@google/adk';
+import type {Event} from '@google/adk';
+import {BaseAgent, createEvent} from '@google/adk';
 
 class StreamingSuccessAgent extends BaseAgent {
   constructor() {

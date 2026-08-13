@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GenerateContentConfig, Schema} from '@google/genai';
+import type {GenerateContentConfig, Schema} from '@google/genai';
 import {context, trace} from '@opentelemetry/api';
 import {FinishTaskTool} from '../tools/finish_task_tool.js';
 import {FunctionTool} from '../tools/function_tool.js';
@@ -12,30 +12,32 @@ import {AsyncQueue} from '../utils/async_queue.js';
 import {isBaseNode, type BaseNode} from '../workflow/base_node.js';
 import {NodeTool} from '../workflow/nodes/node_tool.js';
 
-import {z as z3} from 'zod/v3';
-import {z as z4} from 'zod/v4';
+import type {z as z3} from 'zod/v3';
+import type {z as z4} from 'zod/v4';
 
-import {BaseCodeExecutor} from '../code_executors/base_code_executor.js';
+import type {BaseCodeExecutor} from '../code_executors/base_code_executor.js';
 
+import type {Event} from '../events/event.js';
 import {
   createEvent,
   createNewEventId,
-  Event,
   getFunctionCalls,
   getFunctionResponses,
   isFinalResponse,
   populateClientFunctionCallId,
 } from '../events/event.js';
 
-import {BaseExampleProvider} from '../examples/base_example_provider.js';
-import {Example} from '../examples/example.js';
-import {BaseLlm, isBaseLlm} from '../models/base_llm.js';
-import {LlmRequest} from '../models/llm_request.js';
-import {LlmResponse} from '../models/llm_response.js';
+import type {BaseExampleProvider} from '../examples/base_example_provider.js';
+import type {Example} from '../examples/example.js';
+import type {BaseLlm} from '../models/base_llm.js';
+import {isBaseLlm} from '../models/base_llm.js';
+import type {LlmRequest} from '../models/llm_request.js';
+import type {LlmResponse} from '../models/llm_response.js';
 import {LLMRegistry} from '../models/registry.js';
 
-import {BaseTool, isBaseTool} from '../tools/base_tool.js';
-import {BaseToolset} from '../tools/base_toolset.js';
+import type {BaseTool} from '../tools/base_tool.js';
+import {isBaseTool} from '../tools/base_tool.js';
+import type {BaseToolset} from '../tools/base_toolset.js';
 
 import {logger} from '../utils/logger.js';
 import {canUseOutputSchemaWithTools} from '../utils/output_schema_utils.js';
@@ -46,10 +48,12 @@ import {
   traceCallLlm,
   tracer,
 } from '../telemetry/tracing.js';
-import {parseWithSchema, SchemaLike} from '../utils/schema.js';
+import type {SchemaLike} from '../utils/schema.js';
+import {parseWithSchema} from '../utils/schema.js';
 import {isZodObject, zodObjectToSchema} from '../utils/simple_zod_to_json.js';
-import {BaseAgent, BaseAgentConfig} from './base_agent.js';
-import {
+import type {BaseAgentConfig} from './base_agent.js';
+import {BaseAgent} from './base_agent.js';
+import type {
   BaseLlmRequestProcessor,
   BaseLlmResponseProcessor,
 } from './processors/base_llm_processor.js';
@@ -62,8 +66,8 @@ import {
 } from './functions.js';
 
 import {AUTH_PREPROCESSOR} from '../auth/auth_preprocessor.js';
-import {BaseContextCompactor} from '../context/base_context_compactor.js';
-import {InvocationContext} from './invocation_context.js';
+import type {BaseContextCompactor} from '../context/base_context_compactor.js';
+import type {InvocationContext} from './invocation_context.js';
 import {AGENT_TRANSFER_LLM_REQUEST_PROCESSOR} from './processors/agent_transfer_llm_request_processor.js';
 import {BASIC_LLM_REQUEST_PROCESSOR} from './processors/basic_llm_request_processor.js';
 import {CODE_EXECUTION_REQUEST_PROCESSOR} from './processors/code_execution_request_processor.js';

@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {LlmRequest} from '@google/adk';
 import {
   AgentTransferLlmRequestProcessor,
   BaseAgent,
@@ -11,7 +12,6 @@ import {
   createSession,
   InvocationContext,
   LlmAgent,
-  LlmRequest,
   PluginManager,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';

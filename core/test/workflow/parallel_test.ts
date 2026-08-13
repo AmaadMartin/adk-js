@@ -11,7 +11,7 @@ import {
   createSubBranch,
 } from '../../src/workflow/branch_path.js';
 import {node} from '../../src/workflow/node.js';
-import {NodeContext} from '../../src/workflow/node_context.js';
+import type {NodeContext} from '../../src/workflow/node_context.js';
 import {FunctionNode} from '../../src/workflow/nodes/function_node.js';
 import {ParallelWorker} from '../../src/workflow/nodes/parallel_worker.js';
 import {Workflow} from '../../src/workflow/workflow.js';

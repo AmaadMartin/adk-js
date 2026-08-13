@@ -4,29 +4,27 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Event} from '../events/event.js';
+import type {Event} from '../events/event.js';
 import {experimental} from '../utils/experimental.js';
-import {BaseNode, BaseNodeConfig} from './base_node.js';
+import type {BaseNodeConfig} from './base_node.js';
+import {BaseNode} from './base_node.js';
 import {commonPrefixOf} from './branch_path.js';
 import {DynamicNodeScheduler} from './dynamic_node_scheduler.js';
-import {
-  createGraphFromEdgeItems,
-  EdgeItem,
-  Graph,
-  RouteValue,
-} from './graph.js';
-import {NodeContext, NodeResult} from './node_context.js';
+import type {EdgeItem, Graph, RouteValue} from './graph.js';
+import {createGraphFromEdgeItems} from './graph.js';
+import type {NodeContext, NodeResult} from './node_context.js';
 import {executeChildNode} from './node_runner.js';
-import {createNodeState, NodeState} from './node_state.js';
+import type {NodeState} from './node_state.js';
+import {createNodeState} from './node_state.js';
 import {NodeStatus} from './node_status.js';
 import {DynamicNodeState} from './schedule_dynamic_node.js';
-import {Trigger} from './trigger.js';
+import type {Trigger} from './trigger.js';
+import type {RehydratedNode} from './utils/rehydration_utils.js';
 import {
   eventsForCurrentRun,
   isFastForwardable,
   makeFastForwardResult,
   reconstructNodeStates,
-  RehydratedNode,
 } from './utils/rehydration_utils.js';
 
 /**

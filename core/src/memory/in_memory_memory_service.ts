@@ -4,15 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Event} from '../events/event.js';
-import {Session} from '../sessions/session.js';
+import type {Event} from '../events/event.js';
+import type {Session} from '../sessions/session.js';
 
-import {
+import type {
   BaseMemoryService,
   SearchMemoryRequest,
   SearchMemoryResponse,
 } from './base_memory_service.js';
-import {MemoryEntry} from './memory_entry.js';
+import type {MemoryEntry} from './memory_entry.js';
 
 /**
  * An in-memory memory service for prototyping purpose only.

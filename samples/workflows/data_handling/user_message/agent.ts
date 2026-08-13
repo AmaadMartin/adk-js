@@ -19,7 +19,8 @@
  *   npm run sample -- samples/workflows/data_handling/user_message/agent.ts
  */
 
-import {createEvent, node, NodeContext, WorkflowAgent} from '@google/adk';
+import type {NodeContext} from '@google/adk';
+import {createEvent, node, WorkflowAgent} from '@google/adk';
 
 /** Emits a user-facing message: `content`, with no `output`. */
 const message = (text: string) =>

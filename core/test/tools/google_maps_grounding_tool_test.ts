@@ -4,11 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  GOOGLE_MAPS_GROUNDING,
-  GoogleMapsGroundingTool,
-  LlmRequest,
-} from '@google/adk';
+import type {LlmRequest} from '@google/adk';
+import {GOOGLE_MAPS_GROUNDING, GoogleMapsGroundingTool} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
 function makeRequest(model?: string, tools = []): LlmRequest {

@@ -4,12 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {CodeExecutionResult, InvocationContext, Skill} from '@google/adk';
 import {
-  CodeExecutionResult,
   Context,
-  InvocationContext,
   RunSkillScriptTool,
-  Skill,
   SkillToolset,
   UnsafeLocalCodeExecutor,
 } from '@google/adk';

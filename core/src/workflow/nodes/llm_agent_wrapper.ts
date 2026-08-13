@@ -4,16 +4,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content} from '@google/genai';
-import {BaseAgent} from '../../agents/base_agent.js';
-import {
+import type {Content} from '@google/genai';
+import type {BaseAgent} from '../../agents/base_agent.js';
+import type {
   InvocationContext,
   WorkflowInstructionScope,
 } from '../../agents/invocation_context.js';
-import {isLlmAgent, LlmAgent} from '../../agents/llm_agent.js';
+import type {LlmAgent} from '../../agents/llm_agent.js';
+import {isLlmAgent} from '../../agents/llm_agent.js';
+import type {Event} from '../../events/event.js';
 import {
   createEvent,
-  Event,
   getFunctionCalls,
   getFunctionResponses,
 } from '../../events/event.js';
@@ -21,8 +22,9 @@ import {
   FINISH_TASK_SUCCESS_RESULT,
   FINISH_TASK_TOOL_NAME,
 } from '../../tools/finish_task_tool.js';
-import {BaseNode, BaseNodeConfig, isContent} from '../base_node.js';
-import {NodeContext} from '../node_context.js';
+import type {BaseNodeConfig} from '../base_node.js';
+import {BaseNode, isContent} from '../base_node.js';
+import type {NodeContext} from '../node_context.js';
 
 /** Safety cap on chained `transfer_to_agent` hand-offs. */
 const MAX_TRANSFER_DEPTH = 10;

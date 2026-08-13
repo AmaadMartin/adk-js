@@ -5,12 +5,12 @@
  */
 
 import {describe, expect, it} from 'vitest';
+import type {ExecuteCodeParams} from '../../src/code_executors/base_code_executor.js';
 import {
   BaseCodeExecutor,
-  ExecuteCodeParams,
   isBaseCodeExecutor,
 } from '../../src/code_executors/base_code_executor.js';
-import {CodeExecutionResult} from '../../src/code_executors/code_execution_utils.js';
+import type {CodeExecutionResult} from '../../src/code_executors/code_execution_utils.js';
 
 class TestExecutor extends BaseCodeExecutor {
   async executeCode(_params: ExecuteCodeParams): Promise<CodeExecutionResult> {
