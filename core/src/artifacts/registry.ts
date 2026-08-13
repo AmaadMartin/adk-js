@@ -38,9 +38,10 @@ export function getArtifactServiceFromUri(uri: string): BaseArtifactService {
  * Extracts the bucket name from a `gs://` artifact service URI.
  *
  * Only the host component names the bucket, because a GCS bucket name cannot
- * contain a `/`. A path is accepted and ignored, but it is reported, because
- * artifacts are stored from the root of the bucket rather than under the path
- * the caller wrote.
+ * contain a `/`. This matches adk-python's gcs_artifact_factory, which takes
+ * `urlparse(uri).netloc`. A path is accepted and ignored, but it is reported,
+ * because artifacts are stored from the root of the bucket rather than under
+ * the path the caller wrote.
  *
  * @throws an Error naming the URI when it names no bucket, so the caller sees
  *     the value it passed rather than a later failure from the storage client.
