@@ -52,6 +52,17 @@ function safeJsonSerialize(obj: unknown): string {
   }
 }
 
+/**
+ * Whether the span writers below serialize real content for this invocation.
+ *
+ * @param invocationContext The invocation whose `runConfig.telemetry` overrides
+ *     the environment variable.
+ * @returns True when content goes on the span.
+ */
+function captureContent(invocationContext: InvocationContext): boolean {
+  return shouldAddContentToLegacySpans(invocationContext.runConfig?.telemetry);
+}
+
 export interface TraceAgentInvocationParams {
   agent: BaseAgent;
   invocationContext: InvocationContext;
@@ -95,11 +106,7 @@ export interface TraceToolCallParams {
   tool: BaseTool;
   args: Record<string, unknown>;
   functionResponseEvent: Event;
-  /**
-   * Optional invocation context; forwarded so its `runConfig.telemetry`
-   * overrides the env-var content toggle.
-   */
-  invocationContext?: InvocationContext;
+  invocationContext: InvocationContext;
 }
 
 /**
@@ -116,9 +123,7 @@ export function traceToolCall({
   const span = trace.getActiveSpan();
   if (!span) return;
 
-  const captureContent = shouldAddContentToLegacySpans(
-    invocationContext?.runConfig?.telemetry,
-  );
+  const capture = captureContent(invocationContext);
 
   span.setAttributes({
     [GEN_AI_OPERATION_NAME]: 'execute_tool',
@@ -130,9 +135,7 @@ export function traceToolCall({
     // applicable for tool_response.
     'gcp.vertex.agent.llm_request': '{}',
     'gcp.vertex.agent.llm_response': '{}',
-    'gcp.vertex.agent.tool_call_args': captureContent
-      ? safeJsonSerialize(args)
-      : '{}',
+    'gcp.vertex.agent.tool_call_args': capture ? safeJsonSerialize(args) : '{}',
   });
 
   // Tracing tool response
@@ -156,7 +159,7 @@ export function traceToolCall({
   span.setAttributes({
     [GEN_AI_TOOL_CALL_ID]: toolCallId,
     'gcp.vertex.agent.event_id': functionResponseEvent.id,
-    'gcp.vertex.agent.tool_response': captureContent
+    'gcp.vertex.agent.tool_response': capture
       ? safeJsonSerialize(toolResponse)
       : '{}',
   });
@@ -165,11 +168,7 @@ export function traceToolCall({
 export interface TraceMergedToolCallsParams {
   responseEventId: string;
   functionResponseEvent: Event;
-  /**
-   * Optional invocation context; forwarded so its `runConfig.telemetry`
-   * overrides the env-var content toggle.
-   */
-  invocationContext?: InvocationContext;
+  invocationContext: InvocationContext;
 }
 
 /**
@@ -188,9 +187,7 @@ export function traceMergedToolCalls({
   const span = trace.getActiveSpan();
   if (!span) return;
 
-  const captureContent = shouldAddContentToLegacySpans(
-    invocationContext?.runConfig?.telemetry,
-  );
+  const capture = captureContent(invocationContext);
 
   span.setAttributes({
     [GEN_AI_OPERATION_NAME]: 'execute_tool',
@@ -207,7 +204,7 @@ export function traceMergedToolCalls({
 
   span.setAttribute(
     'gcp.vertex.agent.tool_response',
-    captureContent ? safeJsonSerialize(functionResponseEvent) : '{}',
+    capture ? safeJsonSerialize(functionResponseEvent) : '{}',
   );
 }
 
@@ -237,9 +234,7 @@ export function traceCallLlm({
   const span = trace.getActiveSpan();
   if (!span) return;
 
-  const captureContent = shouldAddContentToLegacySpans(
-    invocationContext.runConfig?.telemetry,
-  );
+  const capture = captureContent(invocationContext);
 
   span.setAttributes({
     'gen_ai.system': 'gcp.vertex.agent',
@@ -248,7 +243,7 @@ export function traceCallLlm({
     'gcp.vertex.agent.session_id': invocationContext.session.id,
     'gcp.vertex.agent.event_id': eventId,
     // Consider removing once GenAI SDK provides a way to record this info.
-    'gcp.vertex.agent.llm_request': captureContent
+    'gcp.vertex.agent.llm_request': capture
       ? safeJsonSerialize(buildLlmRequestForTrace(llmRequest))
       : '{}',
   });
@@ -267,7 +262,7 @@ export function traceCallLlm({
 
   span.setAttribute(
     'gcp.vertex.agent.llm_response',
-    captureContent ? safeJsonSerialize(llmResponse) : '{}',
+    capture ? safeJsonSerialize(llmResponse) : '{}',
   );
 
   if (llmResponse.usageMetadata) {
@@ -319,9 +314,7 @@ export function traceSendData({
   const span = trace.getActiveSpan();
   if (!span) return;
 
-  const captureContent = shouldAddContentToLegacySpans(
-    invocationContext.runConfig?.telemetry,
-  );
+  const capture = captureContent(invocationContext);
 
   span.setAttributes({
     'gcp.vertex.agent.invocation_id': invocationContext.invocationId,
@@ -333,7 +326,7 @@ export function traceSendData({
 
   span.setAttribute(
     'gcp.vertex.agent.data',
-    captureContent ? safeJsonSerialize(data) : '{}',
+    capture ? safeJsonSerialize(data) : '{}',
   );
 }
 

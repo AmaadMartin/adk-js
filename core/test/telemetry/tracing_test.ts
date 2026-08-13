@@ -141,6 +141,7 @@ describe('Telemetry Tracing Functions', () => {
         tool: mockTool,
         args,
         functionResponseEvent: mockEvent,
+        invocationContext: mockInvocationContext,
       });
 
       // Assert
@@ -178,6 +179,7 @@ describe('Telemetry Tracing Functions', () => {
         tool: mockTool,
         args: {},
         functionResponseEvent: eventWithoutResponse,
+        invocationContext: mockInvocationContext,
       });
 
       // Assert
@@ -213,6 +215,7 @@ describe('Telemetry Tracing Functions', () => {
       traceMergedToolCalls({
         responseEventId: 'merged-event-id',
         functionResponseEvent: mockEventWithJson as unknown as Event,
+        invocationContext: mockInvocationContext,
       });
 
       // Assert - setAttributes is called without tool_response
@@ -368,11 +371,12 @@ describe('Telemetry Tracing Functions', () => {
       expect(attributeValue('gcp.vertex.agent.tool_response')).toBe('{}');
     });
 
-    it('keeps serializing the tool attributes with no invocation context', () => {
+    it('keeps serializing the tool attributes with no telemetry config', () => {
       traceToolCall({
         tool: mockTool,
         args: {param1: 'value1'},
         functionResponseEvent: mockEvent,
+        invocationContext: mockInvocationContext,
       });
 
       expect(attributeValue('gcp.vertex.agent.tool_call_args')).toContain(
