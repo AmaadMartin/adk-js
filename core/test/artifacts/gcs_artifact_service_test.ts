@@ -50,10 +50,6 @@ const {StorageMock, storageMock} = vi.hoisted(() => {
     async delete(): Promise<void> {
       this.bucket.files.delete(this.name);
     }
-
-    publicUrl(): string {
-      return `https://storage.googleapis.com/${this.bucket.name}/${this.name}`;
-    }
   }
 
   class FakeGcsBucket {
@@ -361,6 +357,141 @@ describe('GcsArtifactService', () => {
       expect(loaded?.inlineData?.data).toBe(data);
       expect(loaded?.inlineData?.mimeType).toBe('image/png');
       expect(loaded?.inlineData?.displayName).toBe('photo.png');
+    });
+  });
+
+  describe('canonicalUri', () => {
+    const sessionKey = {
+      appName: 'test-app',
+      userId: 'test-user',
+      sessionId: 'test-session',
+    };
+
+    it('returns a gs:// URI for a session-scoped artifact', async () => {
+      storageMock.buckets.clear();
+      const service = new GcsArtifactService(bucketName);
+      await service.saveArtifact({
+        ...sessionKey,
+        filename: 'note.txt',
+        artifact: {text: 'hello'},
+      });
+
+      const artifactVersion = await service.getArtifactVersion({
+        ...sessionKey,
+        filename: 'note.txt',
+        version: 0,
+      });
+
+      expect(artifactVersion?.canonicalUri).toBe(
+        'gs://test-bucket/test-app/test-user/test-session/note.txt/0',
+      );
+    });
+
+    it('never returns a public https URL', async () => {
+      storageMock.buckets.clear();
+      const service = new GcsArtifactService(bucketName);
+      await service.saveArtifact({
+        ...sessionKey,
+        filename: 'note.txt',
+        artifact: {text: 'hello'},
+      });
+
+      const artifactVersion = await service.getArtifactVersion({
+        ...sessionKey,
+        filename: 'note.txt',
+        version: 0,
+      });
+
+      expect(artifactVersion?.canonicalUri?.startsWith('https://')).toBe(false);
+    });
+
+    it('returns a gs:// URI under the user namespace', async () => {
+      storageMock.buckets.clear();
+      const service = new GcsArtifactService(bucketName);
+      await service.saveArtifact({
+        ...sessionKey,
+        filename: 'user:profile.png',
+        artifact: {text: 'avatar'},
+      });
+
+      const artifactVersion = await service.getArtifactVersion({
+        ...sessionKey,
+        filename: 'user:profile.png',
+        version: 0,
+      });
+
+      expect(artifactVersion?.canonicalUri).toBe(
+        'gs://test-bucket/test-app/test-user/user/profile.png/0',
+      );
+    });
+
+    it('carries the resolved version when the request omits one', async () => {
+      storageMock.buckets.clear();
+      const service = new GcsArtifactService(bucketName);
+      await service.saveArtifact({
+        ...sessionKey,
+        filename: 'note.txt',
+        artifact: {text: 'first'},
+      });
+      await service.saveArtifact({
+        ...sessionKey,
+        filename: 'note.txt',
+        artifact: {text: 'second'},
+      });
+
+      const artifactVersion = await service.getArtifactVersion({
+        ...sessionKey,
+        filename: 'note.txt',
+      });
+
+      expect(artifactVersion?.canonicalUri).toBe(
+        'gs://test-bucket/test-app/test-user/test-session/note.txt/1',
+      );
+    });
+
+    it('returns a gs:// URI for a nested filename', async () => {
+      storageMock.buckets.clear();
+      const service = new GcsArtifactService(bucketName);
+      await service.saveArtifact({
+        ...sessionKey,
+        filename: 'nested/dir/session.txt',
+        artifact: {text: 'nested'},
+      });
+
+      const artifactVersion = await service.getArtifactVersion({
+        ...sessionKey,
+        filename: 'nested/dir/session.txt',
+        version: 0,
+      });
+
+      expect(artifactVersion?.canonicalUri).toBe(
+        'gs://test-bucket/test-app/test-user/test-session/nested/dir/session.txt/0',
+      );
+    });
+
+    it('returns gs:// URIs for every version listed', async () => {
+      storageMock.buckets.clear();
+      const service = new GcsArtifactService(bucketName);
+      await service.saveArtifact({
+        ...sessionKey,
+        filename: 'note.txt',
+        artifact: {text: 'first'},
+      });
+      await service.saveArtifact({
+        ...sessionKey,
+        filename: 'note.txt',
+        artifact: {text: 'second'},
+      });
+
+      const versions = await service.listArtifactVersions({
+        ...sessionKey,
+        filename: 'note.txt',
+      });
+
+      expect(versions.map((v) => v.canonicalUri)).toEqual([
+        'gs://test-bucket/test-app/test-user/test-session/note.txt/0',
+        'gs://test-bucket/test-app/test-user/test-session/note.txt/1',
+      ]);
     });
   });
 });
