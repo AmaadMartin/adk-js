@@ -29,7 +29,9 @@ import {
   CodeExecutionLanguage,
   CodeExecutionResult,
 } from '../../../src/code_executors/code_execution_utils.js';
+import {CodeExecutorContext} from '../../../src/code_executors/code_executor_context.js';
 import {UnsafeLocalCodeExecutor} from '../../../src/code_executors/unsafe_local_code_executor.js';
+import {State} from '../../../src/sessions/state.js';
 import {base64Encode} from '../../../src/utils/env_aware_utils.js';
 
 class MockBaseAgent extends BaseAgent {
@@ -385,5 +387,36 @@ describe('CodeExecutionResponseProcessor with a real local executor', () => {
     const resultPart = events[1].content?.parts?.[0];
     expect(resultPart?.codeExecutionResult?.outcome).toBe(Outcome.OUTCOME_OK);
     expect(resultPart?.text).toContain('hello');
+  }, 60000);
+
+  it('reports a language the executor cannot run without ending the invocation', async () => {
+    const agent = new LlmAgent({
+      name: 'agent-unsupported-language',
+      model: 'gemini-2.5-flash',
+      codeExecutor: new UnsafeLocalCodeExecutor(),
+    });
+    const ctx = createMockInvocationContext(agent);
+
+    const events = await collectEvents(
+      responseProcessor.runAsync(ctx, {
+        partial: false,
+        content: {
+          role: 'model',
+          parts: [{text: '```typescript\nconst x: number = 1\n```'}],
+        },
+      }),
+    );
+
+    const resultPart = events[1].content?.parts?.[0];
+    expect(resultPart?.codeExecutionResult?.outcome).toBe(
+      Outcome.OUTCOME_FAILED,
+    );
+    expect(resultPart?.text).toContain('Unsupported language: typescript');
+    // The failure feeds the error retry loop rather than aborting the run.
+    expect(
+      new CodeExecutorContext(new State(ctx.session.state)).getErrorCount(
+        ctx.invocationId,
+      ),
+    ).toBe(1);
   }, 60000);
 });

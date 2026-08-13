@@ -71,16 +71,19 @@ export interface AgentEngineSandboxCodeExecutorOptions {
 }
 
 /**
- * A code executor that uses Agent Engine Code Execution Sandbox to execute code.
+ * Maps a code execution language to the sandbox API enum.
+ *
+ * @param lang The language to run.
+ * @return The sandbox language, or undefined when the sandbox cannot run it.
  */
-function mapLanguage(lang: CodeExecutionLanguage): Language {
+function mapLanguage(lang: CodeExecutionLanguage): Language | undefined {
   switch (lang) {
     case CodeExecutionLanguage.PYTHON:
       return Language.LANGUAGE_PYTHON;
     case CodeExecutionLanguage.JAVASCRIPT:
       return Language.LANGUAGE_JAVASCRIPT;
     default:
-      throw new Error(`Unsupported language for Agent Engine Sandbox: ${lang}`);
+      return undefined;
   }
 }
 
@@ -145,6 +148,16 @@ export class AgentEngineSandboxCodeExecutor extends BaseCodeExecutor {
     const {invocationContext, codeExecutionInput} = params;
 
     const language = mapLanguage(codeExecutionInput.language);
+
+    // Report an unrunnable language through stderr rather than throwing, so
+    // the caller can retry instead of losing the invocation.
+    if (!language) {
+      return {
+        stdout: '',
+        stderr: `Unsupported language for Agent Engine Sandbox: ${codeExecutionInput.language}`,
+        outputFiles: [],
+      };
+    }
 
     const agentEngineName = await this.getOrCreateAgentEngine();
     const sandboxName = await this.getOrCreateSandbox(
