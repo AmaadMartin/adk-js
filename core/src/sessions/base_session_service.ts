@@ -315,3 +315,54 @@ export function splitStateByScope(state: Record<string, unknown> = {}): {
 
   return {appState, userState, sessionState};
 }
+
+/**
+ * Applies the `limit`, `offset` and `page` fields of a list request to an
+ * already-ordered list of sessions, and reports the page metadata alongside
+ * the slice.
+ *
+ * `page` takes precedence over `offset`. A `limit` of `0` selects nothing and
+ * reports zero pages, matching a SQL `LIMIT 0`. When no `limit` is requested
+ * the whole list is one page, and `limit` reports the total instead.
+ *
+ * For a backend whose store cannot paginate server-side, and which therefore
+ * has the whole match set in memory already.
+ *
+ * @param sessions The sessions to page over, in their final order.
+ * @param request The list request carrying the pagination fields.
+ * @return The requested page and its metadata.
+ */
+export function paginateSessions(
+  sessions: Session[],
+  {limit, offset, page}: ListSessionsRequest,
+): ListSessionsResponse {
+  const totalItems = sessions.length;
+
+  if (limit !== undefined) {
+    const totalPages = limit === 0 ? 0 : Math.ceil(totalItems / limit);
+    let effectiveOffset: number;
+    let effectivePage: number;
+    if (page !== undefined) {
+      effectiveOffset = (page - 1) * limit;
+      effectivePage = page;
+    } else {
+      effectiveOffset = offset ?? 0;
+      effectivePage = limit === 0 ? 1 : Math.floor(effectiveOffset / limit) + 1;
+    }
+    return {
+      sessions: sessions.slice(effectiveOffset, effectiveOffset + limit),
+      page: effectivePage,
+      limit,
+      totalItems,
+      totalPages,
+    };
+  }
+
+  return {
+    sessions: offset ? sessions.slice(offset) : sessions,
+    page: 1,
+    limit: totalItems,
+    totalItems,
+    totalPages: totalItems === 0 ? 0 : 1,
+  };
+}

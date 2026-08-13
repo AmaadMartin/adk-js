@@ -21,6 +21,7 @@ import {
   ListSessionsRequest,
   ListSessionsResponse,
   mergeStates,
+  paginateSessions,
   splitStateByScope,
 } from './base_session_service.js';
 import {createSession, Session} from './session.js';
@@ -224,6 +225,24 @@ function parseStateMap(raw: string | null): Record<string, unknown> {
   return Object.assign(Object.create(null), raw ? JSON.parse(raw) : undefined);
 }
 
+/** Whether a parsed JSON value carries every field of a session envelope. */
+function isStoredSession(value: unknown): value is StoredSession {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+  const {id, app_name, user_id, state, events, last_update_time} =
+    value as Record<keyof StoredSession, unknown>;
+  return (
+    typeof id === 'string' &&
+    typeof app_name === 'string' &&
+    typeof user_id === 'string' &&
+    typeof state === 'object' &&
+    state !== null &&
+    Array.isArray(events) &&
+    typeof last_update_time === 'number'
+  );
+}
+
 /**
  * Reads a session envelope out of a raw Redis value, returning `undefined`
  * when the value is not one. `listSessions` scans by key pattern, so it can
@@ -236,60 +255,7 @@ function parseStoredSession(raw: string): StoredSession | undefined {
   } catch {
     return undefined;
   }
-  const candidate = parsed as Partial<StoredSession> | null;
-  if (
-    typeof candidate !== 'object' ||
-    candidate === null ||
-    typeof candidate.id !== 'string' ||
-    typeof candidate.app_name !== 'string' ||
-    typeof candidate.user_id !== 'string' ||
-    !Array.isArray(candidate.events)
-  ) {
-    return undefined;
-  }
-  return candidate as StoredSession;
-}
-
-/**
- * Applies the `limit` / `offset` / `page` fields of a list request to an
- * already-sorted list of sessions.
- *
- * `SCAN` cannot paginate server-side, so the whole match set is read, sorted
- * and then sliced.
- */
-function paginate(
-  sessions: Session[],
-  {limit, offset, page}: ListSessionsRequest,
-): ListSessionsResponse {
-  const totalItems = sessions.length;
-
-  if (limit !== undefined) {
-    const totalPages = limit === 0 ? 0 : Math.ceil(totalItems / limit);
-    let effectiveOffset: number;
-    let effectivePage: number;
-    if (page !== undefined) {
-      effectiveOffset = (page - 1) * limit;
-      effectivePage = page;
-    } else {
-      effectiveOffset = offset ?? 0;
-      effectivePage = limit === 0 ? 1 : Math.floor(effectiveOffset / limit) + 1;
-    }
-    return {
-      sessions: sessions.slice(effectiveOffset, effectiveOffset + limit),
-      page: effectivePage,
-      limit,
-      totalItems,
-      totalPages,
-    };
-  }
-
-  return {
-    sessions: offset ? sessions.slice(offset) : sessions,
-    page: 1,
-    limit: totalItems,
-    totalItems,
-    totalPages: totalItems === 0 ? 0 : 1,
-  };
+  return isStoredSession(parsed) ? parsed : undefined;
 }
 
 /**
@@ -575,7 +541,7 @@ export class RedisSessionService extends BaseSessionService {
     }
 
     sessions.sort((a, b) => compareSessions(a, b, order ?? 'desc'));
-    return paginate(sessions, request);
+    return paginateSessions(sessions, request);
   }
 
   async deleteSession({

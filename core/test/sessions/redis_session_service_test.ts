@@ -803,6 +803,18 @@ describe('RedisSessionService', () => {
     expect(warn).toHaveBeenCalledOnce();
   });
 
+  it('skips a key whose payload is JSON but not an object', async () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    await service.createSession({appName: APP, userId: 'u1', sessionId: 's1'});
+    await fake.set(sessionKey(KEY_PREFIX, APP, 'u1', 'number'), '42');
+    await fake.set(sessionKey(KEY_PREFIX, APP, 'u1', 'null'), 'null');
+
+    const listed = await service.listSessions({appName: APP, userId: 'u1'});
+
+    expect(listed.sessions.map((session) => session.id)).toEqual(['s1']);
+    expect(warn).toHaveBeenCalledTimes(2);
+  });
+
   it('skips a key whose payload is valid JSON but not a session', async () => {
     const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
     await service.createSession({
