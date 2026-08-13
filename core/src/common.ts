@@ -227,8 +227,6 @@ export {
   PARTS_RETURNED_BY_TOOLS_ID,
 } from './plugins/multimodal_tool_results_plugin.js';
 export {PluginManager} from './plugins/plugin_manager.js';
-export {SaveFilesAsArtifactsPlugin} from './plugins/save_files_as_artifacts_plugin.js';
-export type {SaveFilesAsArtifactsPluginOptions} from './plugins/save_files_as_artifacts_plugin.js';
 export {
   RESERVED_TOOL_CALL_ERROR_TYPE,
   ReflectAndRetryModelPlugin,
@@ -238,6 +236,8 @@ export {
   REFLECT_AND_RETRY_RESPONSE_TYPE,
   TrackingScope,
 } from './plugins/reflect_retry_utils.js';
+export {SaveFilesAsArtifactsPlugin} from './plugins/save_files_as_artifacts_plugin.js';
+export type {SaveFilesAsArtifactsPluginOptions} from './plugins/save_files_as_artifacts_plugin.js';
 export {
   InMemoryPolicyEngine,
   PolicyOutcome,
@@ -370,6 +370,7 @@ export {
   LoadSkillErrorCode,
   LoadSkillTool,
 } from './tools/skill/load_skill_tool.js';
+export type {SkillScriptResult} from './tools/skill/script_output_utils.js';
 export {
   SearchSkillsErrorCode,
   SearchSkillsTool,

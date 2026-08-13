@@ -10,36 +10,49 @@ import {File} from '../code_executors/code_execution_utils.js';
 import {getMimeTypeAndEncoding} from './file_extension_utils.js';
 
 /**
- * Reports whether resolvedPath is resolvedBaseDir itself, or a path nested
- * inside it.
+ * Reports whether `fullPath` is a strict descendant of `baseDir`. Both
+ * arguments must already be resolved absolute paths.
  *
- * A plain `resolvedPath.startsWith(resolvedBaseDir)` check is a path-separator-
- * unaware prefix match: it also accepts sibling directories whose name merely
- * starts with the same string, e.g. base dir `/tmp/agent` wrongly "contains"
- * `/tmp/agent-evil/x`. Requiring the trailing separator (or exact equality)
- * closes that gap.
+ * A plain `fullPath.startsWith(baseDir)` check is a path-separator-unaware
+ * prefix match: it also accepts sibling directories whose name merely starts
+ * with the same string, e.g. base dir `/tmp/agent` wrongly "contains"
+ * `/tmp/agent-evil/x`. A relative path with no `..` segment closes that gap.
  */
-function isInsideDir(resolvedPath: string, resolvedBaseDir: string): boolean {
+function isContained(baseDir: string, fullPath: string): boolean {
+  const rel = path.relative(baseDir, fullPath);
+
   return (
-    resolvedPath === resolvedBaseDir ||
-    resolvedPath.startsWith(resolvedBaseDir + path.sep)
+    rel !== '' && !path.isAbsolute(rel) && !rel.split(path.sep).includes('..')
   );
 }
 
 /**
- * Creates files with the given paths in the current working directory.
- * @param files The files to materialize.
+ * Writes the given in-memory files under `dir`, creating parent directories as
+ * needed. An existing file is never overwritten: a numeric suffix is appended
+ * instead (`report.txt` -> `report_2.txt` -> `report_3.txt`).
+ *
+ * A name that does not resolve to a strict descendant of `dir` is rejected with
+ * a `Path traversal detected` error. That containment check is a lexical
+ * comparison of resolved paths and is **not** a sandbox: it does not survive
+ * symlinks, hardlinks, bind mounts, or a TOCTOU race between the check and the
+ * write.
+ *
+ * @param files The files to materialize. `name` is updated in place when a
+ *     collision forces a rename.
+ * @param dir Base directory to write under.
+ * @returns The written files, each `name` rewritten to the final path relative
+ *     to `dir`.
  */
 export async function materializeFiles(
   files: File[],
-  dir = process.cwd(),
+  dir: string,
 ): Promise<File[]> {
   const resolvedBaseDir = path.resolve(dir);
   const createdFiles: File[] = [];
   for (const file of files) {
     const fullPath = path.resolve(dir, file.name);
 
-    if (!isInsideDir(fullPath, resolvedBaseDir)) {
+    if (!isContained(resolvedBaseDir, fullPath)) {
       throw new Error(
         `Path traversal detected: ${file.name} resolves outside of ${dir}`,
       );
@@ -69,7 +82,7 @@ export async function materializeFiles(
       }
     }
 
-    if (!isInsideDir(finalPath, resolvedBaseDir)) {
+    if (!isContained(resolvedBaseDir, finalPath)) {
       throw new Error(
         `Path traversal detected: ${file.name} resolves outside of ${dir}`,
       );

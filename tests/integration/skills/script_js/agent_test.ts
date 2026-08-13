@@ -5,6 +5,7 @@
  */
 import {exec, spawn} from 'node:child_process';
 import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import {promisify} from 'node:util';
 import {afterAll, beforeAll, describe, expect, it} from 'vitest';
@@ -16,10 +17,10 @@ const PROJECT_PATH = `${dirname}/tests/integration/skills/script_js`;
 const TEST_EXECUTION_TIMEOUT = 60000;
 
 /**
- * Files the skill script materializes into the fixture directory. The write
+ * Files the skill script materializes into the output directory. The write
  * path de-duplicates against existing files by appending `_2`, `_3`, ...
  * before the extension (materializeFiles in core/src/utils/file_utils.ts), so
- * a teardown keyed on these exact names leaves the variants behind.
+ * a check keyed on these exact names misses the variants.
  */
 const GENERATED_FILE_NAMES = [
   'ephemeral_entanglement.md',
@@ -34,13 +35,13 @@ function isGeneratedOutput(entry: string): boolean {
   return GENERATED_FILE_NAMES.includes(`${base.replace(/_\d+$/, '')}${ext}`);
 }
 
-/** Removes every generated output in the fixture directory, variants included. */
-async function removeGeneratedOutputs(): Promise<void> {
-  const entries = await fs.readdir(PROJECT_PATH);
+/** Removes every generated output in the given directory, variants included. */
+async function removeGeneratedOutputs(dir: string): Promise<void> {
+  const entries = await fs.readdir(dir);
   await Promise.all(
     entries
       .filter(isGeneratedOutput)
-      .map((entry) => fs.rm(path.join(PROJECT_PATH, entry), {force: true})),
+      .map((entry) => fs.rm(path.join(dir, entry), {force: true})),
   );
 }
 
@@ -52,16 +53,24 @@ async function removeGeneratedOutputs(): Promise<void> {
  * 1. Starts the agent by running `npm run start` in the test project directory.
  * 2. Simulates user interaction by sending a prompt: "Let's create algorithmic art."
  * 3. Asserts that the agent's response matches the expected output, confirming it claims to have created the art and files.
- * 4. Verifies that the expected files (`ephemeral_entanglement.md`, `index.html`, `sketch.js`) were actually generated in the file system.
+ * 4. Verifies that the expected files (`ephemeral_entanglement.md`, `index.html`, `sketch.js`) were generated in the output directory the agent was configured with, and not in its working directory.
  * 5. Compares the content of these generated files with reference files in the `expected/` directory to ensure correctness.
- * 6. Cleans up the generated files and installed dependencies after execution.
+ * 6. Cleans up the output directory and installed dependencies after execution.
+ *
+ * The output directory is created here and handed to the agent through
+ * `ADK_SKILL_OUTPUT_DIR` (see `agent.ts`), because skill script output is only
+ * written to a directory the application declares.
  *
  * This test ensures the end-to-end flow of an agent using tools to generate and materialize files based on a high-level request.
  */
 describe('Agent with skills that generates JS script and runs it locally', () => {
+  let outputDir: string;
+
   beforeAll(async () => {
-    // Start from a clean fixture dir; see GENERATED_FILE_NAMES.
-    await removeGeneratedOutputs();
+    outputDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-script-js-out-'));
+    // An older run wrote into the fixture dir; clear it so the assertions
+    // below see only what this run produced. See GENERATED_FILE_NAMES.
+    await removeGeneratedOutputs(PROJECT_PATH);
     await execAsync('npm install', {cwd: PROJECT_PATH});
   }, TEST_EXECUTION_TIMEOUT);
 
@@ -71,6 +80,7 @@ describe('Agent with skills that generates JS script and runs it locally', () =>
       const childProcess = spawn('npm', ['run', 'start'], {
         cwd: PROJECT_PATH,
         shell: true,
+        env: {...process.env, ADK_SKILL_OUTPUT_DIR: outputDir},
       });
 
       let response = await sendInput(
@@ -84,19 +94,30 @@ describe('Agent with skills that generates JS script and runs it locally', () =>
       response = await sendInput(childProcess, 'exit\n');
       expect(response.toString()).toContain('');
 
-      // verify that files were created and have the expected content
+      // verify that files were created in the declared output directory, and
+      // not in the agent's working directory, with the expected content
       const resultMdFile = await fs.readFile(
-        `${PROJECT_PATH}/ephemeral_entanglement.md`,
+        path.join(outputDir, 'ephemeral_entanglement.md'),
         'utf-8',
       );
       const resultScriptFile = await fs.readFile(
-        `${PROJECT_PATH}/sketch.js`,
+        path.join(outputDir, 'sketch.js'),
         'utf-8',
       );
       const resultHtmlFile = await fs.readFile(
-        `${PROJECT_PATH}/index.html`,
+        path.join(outputDir, 'index.html'),
         'utf-8',
       );
+
+      for (const name of [
+        'ephemeral_entanglement.md',
+        'sketch.js',
+        'index.html',
+      ]) {
+        await expect(fs.access(path.join(PROJECT_PATH, name))).rejects.toThrow(
+          /ENOENT/,
+        );
+      }
 
       const expectedMdFile = await fs.readFile(
         `${PROJECT_PATH}/expected/ephemeral_entanglement.md`,
@@ -122,17 +143,16 @@ describe('Agent with skills that generates JS script and runs it locally', () =>
       );
 
       // Fail loudly if the run produced a `_<n>` variant.
-      const generated = (await fs.readdir(PROJECT_PATH)).filter(
-        isGeneratedOutput,
-      );
+      const generated = (await fs.readdir(outputDir)).filter(isGeneratedOutput);
       expect(generated.sort()).toEqual([...GENERATED_FILE_NAMES].sort());
     },
     TEST_EXECUTION_TIMEOUT,
   );
 
   afterAll(async () => {
-    // By name shape, not exact name: variants must go too.
-    await removeGeneratedOutputs().catch(() => {});
+    await fs.rm(outputDir, {recursive: true, force: true}).catch(() => {});
+    // By name shape, not exact name: a variant in the fixture dir must go too.
+    await removeGeneratedOutputs(PROJECT_PATH).catch(() => {});
 
     await fs
       .rm(`${PROJECT_PATH}/node_modules`, {recursive: true, force: true})

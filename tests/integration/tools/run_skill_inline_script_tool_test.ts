@@ -13,6 +13,7 @@ import {
   LlmAgent,
   PluginManager,
   RunSkillInlineScriptTool,
+  SkillScriptResult,
   SkillToolset,
   ToolConfirmation,
   UnsafeLocalCodeExecutor,
@@ -20,7 +21,7 @@ import {
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {afterEach, describe, expect, it} from 'vitest';
 
 const IS_WINDOWS = os.platform() === 'win32';
 const IS_UNIX = os.platform() === 'linux' || os.platform() === 'darwin';
@@ -34,20 +35,18 @@ const IS_UNIX = os.platform() === 'linux' || os.platform() === 'darwin';
 const TEST_EXECUTION_TIMEOUT = 40000;
 
 describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', () => {
-  let materializeDir: string;
+  const scratchDirs: string[] = [];
 
-  beforeEach(async () => {
-    materializeDir = await fs.mkdtemp(
-      path.join(os.tmpdir(), 'run_skill_inline_script_tool_test_'),
-    );
-    // The tool materializes output files into the process working directory;
-    // redirect it so a failing assertion cannot leave an artifact in the repo.
-    vi.spyOn(process, 'cwd').mockReturnValue(materializeDir);
-  });
+  async function makeOutputDir(): Promise<string> {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-inline-out-'));
+    scratchDirs.push(dir);
+    return dir;
+  }
 
   afterEach(async () => {
-    vi.restoreAllMocks();
-    await fs.rm(materializeDir, {recursive: true, force: true});
+    while (scratchDirs.length > 0) {
+      await fs.rm(scratchDirs.pop()!, {recursive: true, force: true});
+    }
   });
 
   // These integration tests exercise real code execution, which is gated behind
@@ -276,9 +275,10 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
     TEST_EXECUTION_TIMEOUT,
   );
 
-  it('creates files in process.cwd returned from execution', async () => {
+  it('writes output files into the configured outputDir', async () => {
+    const outputDir = await makeOutputDir();
     const executor = new UnsafeLocalCodeExecutor();
-    const toolset = new SkillToolset([], {codeExecutor: executor});
+    const toolset = new SkillToolset([], {codeExecutor: executor, outputDir});
     const tool = new RunSkillInlineScriptTool(toolset);
 
     const testFileName = `test_output_${Date.now()}.txt`;
@@ -290,25 +290,20 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
         language: CodeExecutionLanguage.JAVASCRIPT,
       },
       toolContext: createMockContext(),
-    })) as CodeExecutionResult;
+    })) as SkillScriptResult;
 
-    expect(result).toBeDefined();
-    expect(result.outputFiles).toBeDefined();
-    expect(result.outputFiles?.length).toBeGreaterThan(0);
+    expect(result.outputDir).toBe(outputDir);
+    expect(result.outputFiles?.map((f) => f.name)).toContain(testFileName);
 
-    const outputFile = result.outputFiles?.find((f) => f.name === testFileName);
-    expect(outputFile).toBeDefined();
-
-    // Verify file was created in process.cwd()
-    const fullPath = path.join(materializeDir, testFileName);
-    const exists = await fs
-      .access(fullPath)
-      .then(() => true)
-      .catch(() => false);
-    expect(exists).toBe(true);
-
-    const content = await fs.readFile(fullPath, 'utf-8');
+    const content = await fs.readFile(
+      path.join(outputDir, testFileName),
+      'utf-8',
+    );
     expect(content).toBe(testFileContent);
+
+    await expect(
+      fs.access(path.join(process.cwd(), testFileName)),
+    ).rejects.toThrow(/ENOENT/);
   });
 
   it('successfully passes array arguments to a JavaScript inline script', async () => {
@@ -348,16 +343,16 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
   });
 
   it('handles file collisions by appending a numeric suffix', async () => {
+    const outputDir = await makeOutputDir();
     const executor = new UnsafeLocalCodeExecutor();
-    const toolset = new SkillToolset([], {codeExecutor: executor});
+    const toolset = new SkillToolset([], {codeExecutor: executor, outputDir});
     const tool = new RunSkillInlineScriptTool(toolset);
 
     const testFileName = `test_inline_output_${Date.now()}.txt`;
     const testFileContent = 'hello from output file';
 
     // Pre-create the target file to force a collision
-    const targetFile = path.join(materializeDir, testFileName);
-    await fs.writeFile(targetFile, 'existing content');
+    await fs.writeFile(path.join(outputDir, testFileName), 'existing content');
 
     const result = (await tool.runAsync({
       args: {
@@ -365,26 +360,15 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
         language: CodeExecutionLanguage.JAVASCRIPT,
       },
       toolContext: createMockContext(),
-    })) as CodeExecutionResult;
+    })) as SkillScriptResult;
 
-    expect(result).toBeDefined();
-    expect(result.outputFiles).toBeDefined();
+    const expectedName = `${path.basename(testFileName, '.txt')}_2.txt`;
+    expect(result.outputFiles?.map((f) => f.name)).toContain(expectedName);
 
-    const baseName = path.basename(testFileName, '.txt');
-    const expectedName = `${baseName}_2.txt`;
-
-    const outputFile = result.outputFiles?.find((f) => f.name === expectedName);
-    expect(outputFile).toBeDefined();
-
-    // Verify collision file was created in process.cwd()
-    const fullPath = path.join(materializeDir, expectedName);
-    const exists = await fs
-      .access(fullPath)
-      .then(() => true)
-      .catch(() => false);
-    expect(exists).toBe(true);
-
-    const content = await fs.readFile(fullPath, 'utf-8');
+    const content = await fs.readFile(
+      path.join(outputDir, expectedName),
+      'utf-8',
+    );
     expect(content).toBe(testFileContent);
   });
 });
