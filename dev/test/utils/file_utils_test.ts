@@ -189,22 +189,24 @@ describe('file_utils', () => {
     await expect(isFileExists('/dir')).resolves.toBe(false);
   });
 
+  it('createFolder creates the directory at the given path', async () => {
+    fsPromises.mkdir.mockResolvedValue(undefined);
+
+    await expect(createFolder('/some/dir')).resolves.toBeUndefined();
+    expect(fsPromises.mkdir).toHaveBeenCalledWith('/some/dir');
+  });
+
+  it('createFolder rejects with the original fs error instead of swallowing it', async () => {
+    const eacces = Object.assign(
+      new Error("EACCES: permission denied, mkdir '/ro/x'"),
+      {code: 'EACCES', syscall: 'mkdir', path: '/ro/x'},
+    );
+    fsPromises.mkdir.mockRejectedValue(eacces);
+
+    await expect(createFolder('/ro/x')).rejects.toBe(eacces);
+  });
+
   describe('failure diagnostics', () => {
-    it('createFolder logs the failure and resolves', async () => {
-      const errorSpy = vi
-        .spyOn(AdkLogger.prototype, 'error')
-        .mockImplementation(() => {});
-      const err = new Error("EACCES: permission denied, mkdir '/some/dir'");
-      fsPromises.mkdir.mockRejectedValue(err);
-
-      await expect(createFolder('/some/dir')).resolves.toBeUndefined();
-      expect(errorSpy).toHaveBeenCalledTimes(1);
-      expect(errorSpy).toHaveBeenCalledWith(
-        'Failed to create folder /some/dir',
-        err,
-      );
-    });
-
     it('removeFolder logs the failure and resolves', async () => {
       const errorSpy = vi
         .spyOn(AdkLogger.prototype, 'error')
