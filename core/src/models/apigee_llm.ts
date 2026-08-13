@@ -163,9 +163,16 @@ function apigeeToGeminiInitParams({
   location,
   apiKey,
 }: GeminiParams) {
-  const params = geminiInitParams({model, vertexai, project, location, apiKey});
-  params.vertexai =
-    params.vertexai || params.model?.startsWith('apigee/vertex_ai/');
+  // The provider baked into the model string has to be settled before
+  // geminiInitParams runs, or an apigee/vertex_ai/ model resolves its key
+  // through the non-Vertex branch and then re-enters as an Express Mode key.
+  const params = geminiInitParams({
+    model,
+    vertexai: vertexai || model?.startsWith('apigee/vertex_ai/'),
+    project,
+    location,
+    apiKey,
+  });
   if (params.vertexai) {
     return params;
   }

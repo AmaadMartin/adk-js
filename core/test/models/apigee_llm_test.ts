@@ -3,7 +3,16 @@
  * Copyright 2026 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
-import {afterAll, afterEach, beforeAll, describe, expect, it, vi} from 'vitest';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
 
 import {GoogleGenAI, HttpOptions} from '@google/genai';
 
@@ -12,6 +21,7 @@ import {
   ApigeeLlmParams,
   BaseLlmConnection,
   Gemini,
+  GoogleLLMVariant,
   LLMRegistry,
   LlmRequest,
 } from '@google/adk';
@@ -23,13 +33,18 @@ const TEST_PROJECT = 'test-project';
 const TEST_LOCATION = 'us-central1';
 
 describe('ApigeeLlm', () => {
-  afterEach(() => {
+  const clearEnv = () => {
     delete process.env['APIGEE_PROXY_URL'];
     delete process.env['GOOGLE_GENAI_API_KEY'];
+    delete process.env['GOOGLE_API_KEY'];
+    delete process.env['GEMINI_API_KEY'];
     delete process.env['GOOGLE_GENAI_USE_VERTEXAI'];
     delete process.env['GOOGLE_CLOUD_PROJECT'];
     delete process.env['GOOGLE_CLOUD_LOCATION'];
-  });
+  };
+
+  beforeEach(clearEnv);
+  afterEach(clearEnv);
 
   describe('constructor', () => {
     it('simple gemini model', () => {
@@ -123,6 +138,32 @@ describe('ApigeeLlm', () => {
           new ApigeeLlm({model: vertexModelString});
         }).toThrowError(expectedError);
       });
+    });
+
+    // A Gemini API key must not be mistaken for a Vertex AI Express Mode key
+    // just because the model string selects the Vertex AI provider.
+    ['GOOGLE_GENAI_API_KEY', 'GEMINI_API_KEY'].forEach((envVar) => {
+      it(`vertexai still requires a project when ${envVar} is set`, () => {
+        process.env[envVar] = 'gemini-api-key';
+
+        expect(() => {
+          new ApigeeLlm({
+            model: vertexModelString,
+            proxyUrl: defaultProxyUrl,
+          });
+        }).toThrowError(/GOOGLE_CLOUD_PROJECT/);
+      });
+    });
+
+    it('vertexai uses GOOGLE_API_KEY as an Express Mode key with no project', () => {
+      process.env['GOOGLE_API_KEY'] = 'express-key';
+
+      const llm = new ApigeeLlm({
+        model: vertexModelString,
+        proxyUrl: defaultProxyUrl,
+      });
+
+      expect(llm.apiBackend).toBe(GoogleLLMVariant.VERTEX_AI);
     });
   });
 
