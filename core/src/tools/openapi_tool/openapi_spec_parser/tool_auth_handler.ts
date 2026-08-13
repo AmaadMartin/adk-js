@@ -104,8 +104,19 @@ export class ToolAuthHandler {
       return {state: 'pending'};
     }
 
-    const result = await exchangeCredential(this.authScheme, credential);
-    if (!result) {
+    let result: ExchangeResult;
+    try {
+      result = await new AutoAuthCredentialExchanger().exchange({
+        authScheme: this.authScheme,
+        authCredential: credential,
+      });
+    } catch (error: unknown) {
+      // A failed exchange is almost always environmental — expired application
+      // default credentials, an unreachable metadata server, a token endpoint
+      // that refused the request. The tool can still call the API
+      // unauthenticated and report what the API says; rejecting would abort the
+      // whole invocation. Mirrors `_exchange_credential()` in adk-python.
+      logger.error(`Failed to exchange credential: ${formatError(error)}`);
       return {state: 'done'};
     }
 
@@ -120,29 +131,5 @@ export class ToolAuthHandler {
     }
 
     return {state: 'done', authCredential: result.credential};
-  }
-}
-
-/**
- * Exchanges a credential, returning `undefined` when the exchange fails.
- *
- * A failure here is almost always environmental — expired application default
- * credentials, an unreachable metadata server, a token endpoint that refused
- * the request — and the tool can still make the call unauthenticated and
- * report what the API says. Rejecting instead would abort the whole
- * invocation. Mirrors `ToolAuthHandler._exchange_credential()` in adk-python.
- */
-async function exchangeCredential(
-  authScheme: OpenAPIV3.SecuritySchemeObject,
-  authCredential: AuthCredential,
-): Promise<ExchangeResult | undefined> {
-  try {
-    return await new AutoAuthCredentialExchanger().exchange({
-      authScheme,
-      authCredential,
-    });
-  } catch (error: unknown) {
-    logger.error(`Failed to exchange credential: ${formatError(error)}`);
-    return undefined;
   }
 }
