@@ -25,6 +25,7 @@ import {LlmRequest} from '../models/llm_request.js';
 import {LlmResponse} from '../models/llm_response.js';
 import {BaseTool} from '../tools/base_tool.js';
 import {version} from '../version.js';
+import {shouldAddContentToLegacySpans} from './context.js';
 
 const GEN_AI_AGENT_DESCRIPTION = 'gen_ai.agent.description';
 const GEN_AI_AGENT_NAME = 'gen_ai.agent.name';
@@ -94,6 +95,11 @@ export interface TraceToolCallParams {
   tool: BaseTool;
   args: Record<string, unknown>;
   functionResponseEvent: Event;
+  /**
+   * Optional invocation context; forwarded so its `runConfig.telemetry`
+   * overrides the env-var content toggle.
+   */
+  invocationContext?: InvocationContext;
 }
 
 /**
@@ -105,9 +111,14 @@ export function traceToolCall({
   tool,
   args,
   functionResponseEvent,
+  invocationContext,
 }: TraceToolCallParams): void {
   const span = trace.getActiveSpan();
   if (!span) return;
+
+  const captureContent = shouldAddContentToLegacySpans(
+    invocationContext?.runConfig?.telemetry,
+  );
 
   span.setAttributes({
     [GEN_AI_OPERATION_NAME]: 'execute_tool',
@@ -119,7 +130,7 @@ export function traceToolCall({
     // applicable for tool_response.
     'gcp.vertex.agent.llm_request': '{}',
     'gcp.vertex.agent.llm_response': '{}',
-    'gcp.vertex.agent.tool_call_args': shouldAddRequestResponseToSpans()
+    'gcp.vertex.agent.tool_call_args': captureContent
       ? safeJsonSerialize(args)
       : '{}',
   });
@@ -145,7 +156,7 @@ export function traceToolCall({
   span.setAttributes({
     [GEN_AI_TOOL_CALL_ID]: toolCallId,
     'gcp.vertex.agent.event_id': functionResponseEvent.id,
-    'gcp.vertex.agent.tool_response': shouldAddRequestResponseToSpans()
+    'gcp.vertex.agent.tool_response': captureContent
       ? safeJsonSerialize(toolResponse)
       : '{}',
   });
@@ -154,6 +165,11 @@ export function traceToolCall({
 export interface TraceMergedToolCallsParams {
   responseEventId: string;
   functionResponseEvent: Event;
+  /**
+   * Optional invocation context; forwarded so its `runConfig.telemetry`
+   * overrides the env-var content toggle.
+   */
+  invocationContext?: InvocationContext;
 }
 
 /**
@@ -167,9 +183,14 @@ export interface TraceMergedToolCallsParams {
 export function traceMergedToolCalls({
   responseEventId,
   functionResponseEvent,
+  invocationContext,
 }: TraceMergedToolCallsParams): void {
   const span = trace.getActiveSpan();
   if (!span) return;
+
+  const captureContent = shouldAddContentToLegacySpans(
+    invocationContext?.runConfig?.telemetry,
+  );
 
   span.setAttributes({
     [GEN_AI_OPERATION_NAME]: 'execute_tool',
@@ -186,9 +207,7 @@ export function traceMergedToolCalls({
 
   span.setAttribute(
     'gcp.vertex.agent.tool_response',
-    shouldAddRequestResponseToSpans()
-      ? safeJsonSerialize(functionResponseEvent)
-      : '{}',
+    captureContent ? safeJsonSerialize(functionResponseEvent) : '{}',
   );
 }
 
@@ -218,6 +237,10 @@ export function traceCallLlm({
   const span = trace.getActiveSpan();
   if (!span) return;
 
+  const captureContent = shouldAddContentToLegacySpans(
+    invocationContext.runConfig?.telemetry,
+  );
+
   span.setAttributes({
     'gen_ai.system': 'gcp.vertex.agent',
     'gen_ai.request.model': llmRequest.model,
@@ -225,7 +248,7 @@ export function traceCallLlm({
     'gcp.vertex.agent.session_id': invocationContext.session.id,
     'gcp.vertex.agent.event_id': eventId,
     // Consider removing once GenAI SDK provides a way to record this info.
-    'gcp.vertex.agent.llm_request': shouldAddRequestResponseToSpans()
+    'gcp.vertex.agent.llm_request': captureContent
       ? safeJsonSerialize(buildLlmRequestForTrace(llmRequest))
       : '{}',
   });
@@ -244,7 +267,7 @@ export function traceCallLlm({
 
   span.setAttribute(
     'gcp.vertex.agent.llm_response',
-    shouldAddRequestResponseToSpans() ? safeJsonSerialize(llmResponse) : '{}',
+    captureContent ? safeJsonSerialize(llmResponse) : '{}',
   );
 
   if (llmResponse.usageMetadata) {
@@ -296,6 +319,10 @@ export function traceSendData({
   const span = trace.getActiveSpan();
   if (!span) return;
 
+  const captureContent = shouldAddContentToLegacySpans(
+    invocationContext.runConfig?.telemetry,
+  );
+
   span.setAttributes({
     'gcp.vertex.agent.invocation_id': invocationContext.invocationId,
     'gcp.vertex.agent.event_id': eventId,
@@ -306,7 +333,7 @@ export function traceSendData({
 
   span.setAttribute(
     'gcp.vertex.agent.data',
-    shouldAddRequestResponseToSpans() ? safeJsonSerialize(data) : '{}',
+    captureContent ? safeJsonSerialize(data) : '{}',
   );
 }
 
@@ -392,19 +419,4 @@ export function runAsyncGeneratorWithOtelContext<TThis, T>(
 ): AsyncGenerator<T, void, void> {
   const generator = generatorFn.call(generatorFnContext);
   return bindOtelContextToAsyncGenerator(otelContext, generator);
-}
-
-/**
- * Determines whether to add request/response content to spans.
- *
- * Defaults to true for now to preserve backward compatibility.
- * Once prompt and response logging is well established in ADK, we might start
- * a deprecation of request/response content in spans by switching the default
- * to false.
- *
- * @returns false only when ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS is explicitly set to 'false' or '0'
- */
-function shouldAddRequestResponseToSpans(): boolean {
-  const envValue = process.env.ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS || 'true';
-  return envValue === 'true' || envValue === '1';
 }
