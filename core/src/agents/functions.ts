@@ -492,7 +492,6 @@ export async function handleFunctionCallList({
 
     warnOnEmptyToolResponse(tool.name, functionResponse);
 
-    // Builds the function response event.
     const functionResponseEvent = createEvent({
       invocationId: invocationContext.invocationId,
       author: toolEventAuthor(invocationContext),

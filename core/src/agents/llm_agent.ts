@@ -9,7 +9,9 @@ import {FinishTaskTool} from '../tools/finish_task_tool.js';
 import {FunctionTool} from '../tools/function_tool.js';
 import {AsyncQueue} from '../utils/async_queue.js';
 import {isBaseNode, type BaseNode} from '../workflow/base_node.js';
+import {NodeContext} from '../workflow/node_context.js';
 import {NodeTool} from '../workflow/nodes/node_tool.js';
+import {runLlmAgentAsNode} from '../workflow/run_llm_agent_as_node.js';
 
 import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
@@ -752,6 +754,23 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     return parseWithSchema(this.outputSchemaSource ?? this.outputSchema, value);
   }
 
+  /**
+   * Runs this agent as a workflow node.
+   *
+   * Where {@link BaseAgent.runImpl} delegates straight to `runAsync`, an
+   * `LlmAgent` has a node input to inject into the conversation, instruction
+   * placeholders to resolve against it, a reply to promote to node output, and
+   * — in `task` mode — a `finish_task` round-trip to drive. All of that lives
+   * in `runLlmAgentAsNode`, mirroring adk-python's `LlmAgent._run_impl`
+   * delegating to `run_llm_agent_as_node`.
+   */
+  protected override async *runImpl(
+    ctx: NodeContext,
+    nodeInput: unknown,
+  ): AsyncGenerator<Event, void, void> {
+    yield* runLlmAgentAsNode(this, ctx, nodeInput);
+  }
+
   protected async *runAsyncImpl(
     context: InvocationContext,
   ): AsyncGenerator<Event, void, void> {
@@ -1140,7 +1159,6 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       return;
     }
 
-    // Yields the function response event.
     yield functionResponseEvent;
 
     // If model instruct to transfer to an agent, run the transferred agent.
@@ -1211,7 +1229,6 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       llmRequest.config.labels[ADK_AGENT_NAME_LABEL_KEY] = this.name;
     }
 
-    // Calls the LLM.
     const llm = this.canonicalModel;
     if (invocationContext.runConfig?.supportCfc) {
       // TODO - b/425992518: Implement CFC call path
@@ -1389,7 +1406,6 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
           }
 
           if (modelResponseEvent.actions) {
-            // We are yielding an Event
             yield createEvent({
               invocationId: invocationContext.invocationId,
               author: this.name,

@@ -120,7 +120,6 @@ describe('A2AAgentExecutor', () => {
   });
 
   it('should get or create a session, run the agent, and publish working and final status events', async () => {
-    // Setup Session
     const mockSession = createSession({
       id: 'session-id',
       userId: 'test-user',
@@ -128,7 +127,6 @@ describe('A2AAgentExecutor', () => {
     });
     mockSessionService.getSession.mockResolvedValue(mockSession);
 
-    // Setup Runner
     const adkEvents: AdkEvent[] = [
       createEvent({
         author: 'model',

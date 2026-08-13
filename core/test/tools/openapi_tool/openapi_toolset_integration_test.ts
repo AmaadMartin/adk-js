@@ -26,7 +26,6 @@ describe('OpenAPIToolset Integration', () => {
     const specPath = path.resolve(__dirname, 'fixtures/truanon.yaml');
     truanonSpec = fs.readFileSync(specPath, 'utf8');
 
-    // Mock global fetch
     globalThis.fetch = vi.fn();
   });
 
@@ -59,7 +58,6 @@ describe('OpenAPIToolset Integration', () => {
       }),
     );
 
-    // Mock context
     const mockContext = {
       getAuthResponse: vi.fn().mockReturnValue(undefined),
       requestCredential: vi.fn(),
