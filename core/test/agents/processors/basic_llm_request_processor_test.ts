@@ -30,6 +30,12 @@ import {BASIC_LLM_REQUEST_PROCESSOR} from '../../../src/agents/processors/basic_
 
 const VERTEX_ENV_VAR = 'GOOGLE_GENAI_USE_VERTEXAI';
 
+/** The label key `LlmAgent` writes onto the request config before each call. */
+const ADK_AGENT_NAME_LABEL_KEY = 'adk_agent_name';
+
+/** The header key `Gemini` writes onto the request config before each call. */
+const TRACKING_HEADER_KEY = 'x-goog-api-client';
+
 const OUTPUT_SCHEMA: Schema = {
   type: Type.OBJECT,
   properties: {answer: {type: Type.STRING}},
@@ -349,6 +355,122 @@ describe('BasicLlmRequestProcessor', () => {
 
     expect(llmRequest.liveConnectConfig.responseModalities).toBeUndefined();
     expect(llmRequest.liveConnectConfig.speechConfig).toBeUndefined();
+  });
+
+  describe('request-scoped config copies', () => {
+    it('should not write the agent-name label back into the agent config', async () => {
+      const agentLabels = {team: 'search'};
+      const agent = new LlmAgent({
+        name: 'test_agent',
+        model: 'test-basic-processor-model',
+        generateContentConfig: {labels: agentLabels},
+      });
+      const llmRequest = makeLlmRequest();
+
+      await runProcessor(createMockInvocationContext(agent), llmRequest);
+      llmRequest.config!.labels![ADK_AGENT_NAME_LABEL_KEY] = agent.name;
+
+      expect(agentLabels).toEqual({team: 'search'});
+      expect(llmRequest.config?.labels).not.toBe(agentLabels);
+    });
+
+    it('should not write tracking headers back into the agent http options', async () => {
+      const agentHttpOptions = {
+        timeout: 1000,
+        headers: {'Agent-Header': 'agent-val'},
+      };
+      const agent = new LlmAgent({
+        name: 'test_agent',
+        model: 'test-basic-processor-model',
+        generateContentConfig: {httpOptions: agentHttpOptions},
+      });
+      const llmRequest = makeLlmRequest();
+
+      await runProcessor(createMockInvocationContext(agent), llmRequest);
+      llmRequest.config!.httpOptions!.headers = {
+        ...llmRequest.config!.httpOptions!.headers,
+        [TRACKING_HEADER_KEY]: 'google-adk/test',
+      };
+
+      expect(agentHttpOptions.headers).toEqual({'Agent-Header': 'agent-val'});
+      expect(agentHttpOptions.timeout).toBe(1000);
+      expect(llmRequest.config?.httpOptions).not.toBe(agentHttpOptions);
+      expect(llmRequest.config?.httpOptions?.headers).not.toBe(
+        agentHttpOptions.headers,
+      );
+    });
+
+    it("should not leak the first invocation's writes into a second invocation", async () => {
+      const agent = new LlmAgent({
+        name: 'test_agent',
+        model: 'test-basic-processor-model',
+        generateContentConfig: {
+          labels: {team: 'search'},
+          httpOptions: {timeout: 1000, headers: {'Agent-Header': 'agent-val'}},
+        },
+      });
+      const firstRequest = makeLlmRequest();
+      const secondRequest = makeLlmRequest();
+
+      await runProcessor(createMockInvocationContext(agent), firstRequest);
+      firstRequest.config!.labels![ADK_AGENT_NAME_LABEL_KEY] = agent.name;
+      firstRequest.config!.httpOptions!.headers = {
+        ...firstRequest.config!.httpOptions!.headers,
+        [TRACKING_HEADER_KEY]: 'google-adk/test',
+      };
+      await runProcessor(createMockInvocationContext(agent), secondRequest);
+
+      expect(secondRequest.config?.labels).toEqual({team: 'search'});
+      expect(secondRequest.config?.httpOptions?.headers).toEqual({
+        'Agent-Header': 'agent-val',
+      });
+    });
+
+    it('should not materialize headers when the agent set http options without headers', async () => {
+      const agentHttpOptions = {timeout: 1000};
+      const agent = new LlmAgent({
+        name: 'test_agent',
+        model: 'test-basic-processor-model',
+        generateContentConfig: {httpOptions: agentHttpOptions},
+      });
+      const llmRequest = makeLlmRequest();
+
+      await runProcessor(createMockInvocationContext(agent), llmRequest);
+
+      expect(llmRequest.config?.httpOptions?.headers).toBeUndefined();
+      expect(llmRequest.config?.httpOptions?.timeout).toBe(1000);
+      expect(llmRequest.config?.httpOptions).not.toBe(agentHttpOptions);
+    });
+
+    it('should copy an empty labels object rather than alias it', async () => {
+      const agentLabels = {};
+      const agent = new LlmAgent({
+        name: 'test_agent',
+        model: 'test-basic-processor-model',
+        generateContentConfig: {labels: agentLabels},
+      });
+      const llmRequest = makeLlmRequest();
+
+      await runProcessor(createMockInvocationContext(agent), llmRequest);
+
+      expect(llmRequest.config?.labels).toEqual({});
+      expect(llmRequest.config?.labels).not.toBe(agentLabels);
+    });
+
+    it('should leave a config without labels or http options untouched', async () => {
+      const agent = new LlmAgent({
+        name: 'test_agent',
+        model: 'test-basic-processor-model',
+        generateContentConfig: {temperature: 0.5},
+      });
+      const llmRequest = makeLlmRequest();
+
+      await runProcessor(createMockInvocationContext(agent), llmRequest);
+
+      expect(llmRequest.config?.labels).toBeUndefined();
+      expect(llmRequest.config?.httpOptions).toBeUndefined();
+      expect(llmRequest.config?.temperature).toBe(0.5);
+    });
   });
 
   it('should yield no events', async () => {
