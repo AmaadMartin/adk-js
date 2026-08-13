@@ -44,7 +44,6 @@ import {canUseOutputSchemaWithTools} from '../utils/output_schema_utils.js';
 import {Context} from './context.js';
 
 import {
-  getElapsedS,
   recordClientOperationDuration,
   recordClientTokenUsage,
 } from '../telemetry/metrics.js';
@@ -1312,7 +1311,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       } finally {
         recordClientOperationDuration({
           agentName: this.name,
-          elapsedS: getElapsedS(undefined, startTime),
+          elapsedS: (performance.now() - startTime) / 1000,
           llmRequest,
           response: lastResponse,
           error,

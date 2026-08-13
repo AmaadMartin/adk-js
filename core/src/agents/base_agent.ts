@@ -10,7 +10,6 @@ import {context, trace} from '@opentelemetry/api';
 import {createEvent, Event} from '../events/event.js';
 
 import {
-  getElapsedS,
   recordAgentInvocationDuration,
   recordAgentRequestSize,
   recordAgentResponseSize,
@@ -60,37 +59,6 @@ export interface BaseAgentConfig extends BaseNodeConfig {
   subAgents?: BaseAgent[];
   beforeAgentCallback?: BeforeAgentCallback;
   afterAgentCallback?: AfterAgentCallback;
-}
-
-/**
- * The two scalars the agent-level metrics need from an invocation's event
- * stream. Accumulating them as the stream is yielded keeps `runAsync` from
- * retaining the events themselves, which for a streaming or long-running agent
- * would grow without bound.
- */
-interface AgentEventTally {
-  /** Number of events authored by the agent so far. */
-  stepCount: number;
-  /** Content of the most recent event authored by the agent, if any. */
-  lastContent?: Content;
-}
-
-/**
- * Folds one event into `tally`. Events authored by another agent (for example
- * a sub-agent) are not part of this agent's workflow and are ignored.
- */
-function tallyAgentEvent(
-  tally: AgentEventTally,
-  event: Event,
-  agentName: string,
-): void {
-  if (event.author !== agentName) {
-    return;
-  }
-  tally.stepCount++;
-  if (event.content) {
-    tally.lastContent = event.content;
-  }
 }
 
 /**
@@ -294,8 +262,21 @@ export abstract class BaseAgent<
     const ctx = trace.setSpan(context.active(), span);
     const startTime = performance.now();
     const agentName = this.name;
-    const tally: AgentEventTally = {stepCount: 0};
+    let stepCount = 0;
+    let lastContent: Content | undefined;
     let error: unknown;
+    // Folding each event into two scalars keeps a streaming or long-running
+    // agent from retaining its own event stream. Events authored by a
+    // sub-agent belong to that sub-agent's invocation, not this one.
+    const tally = (event: Event) => {
+      if (event.author !== agentName) {
+        return;
+      }
+      stepCount++;
+      if (event.content) {
+        lastContent = event.content;
+      }
+    };
     try {
       yield* runAsyncGeneratorWithOtelContext<BaseAgent, Event>(
         ctx,
@@ -308,7 +289,7 @@ export abstract class BaseAgent<
           const beforeAgentCallbackEvent =
             await this.handleBeforeAgentCallback(context);
           if (beforeAgentCallbackEvent) {
-            tallyAgentEvent(tally, beforeAgentCallbackEvent, agentName);
+            tally(beforeAgentCallbackEvent);
             yield beforeAgentCallbackEvent;
           }
 
@@ -318,7 +299,7 @@ export abstract class BaseAgent<
 
           traceAgentInvocation({agent: this, invocationContext: context});
           for await (const event of this.runAsyncImpl(context)) {
-            tallyAgentEvent(tally, event, agentName);
+            tally(event);
             yield event;
           }
 
@@ -329,7 +310,7 @@ export abstract class BaseAgent<
           const afterAgentCallbackEvent =
             await this.handleAfterAgentCallback(context);
           if (afterAgentCallbackEvent) {
-            tallyAgentEvent(tally, afterAgentCallbackEvent, agentName);
+            tally(afterAgentCallbackEvent);
             yield afterAgentCallbackEvent;
           }
         },
@@ -341,11 +322,11 @@ export abstract class BaseAgent<
       span.end();
       recordAgentInvocationDuration(
         agentName,
-        getElapsedS(span, startTime),
+        (performance.now() - startTime) / 1000,
         error,
       );
-      recordAgentWorkflowSteps(agentName, tally.stepCount);
-      recordAgentResponseSize(agentName, tally.lastContent);
+      recordAgentWorkflowSteps(agentName, stepCount);
+      recordAgentResponseSize(agentName, lastContent);
     }
   }
 

@@ -4,11 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  MeterProvider as ApiMeterProvider,
-  metrics,
-  trace,
-} from '@opentelemetry/api';
+import {MeterProvider as ApiMeterProvider, metrics} from '@opentelemetry/api';
 import {
   DataPoint,
   DataPointType,
@@ -17,13 +13,11 @@ import {
   MeterProvider,
   MetricReader,
 } from '@opentelemetry/sdk-metrics';
-import {BasicTracerProvider} from '@opentelemetry/sdk-trace-base';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {LlmRequest} from '../../src/models/llm_request.js';
 import {LlmResponse} from '../../src/models/llm_response.js';
 import {
-  getElapsedS,
   recordAgentInvocationDuration,
   recordAgentRequestSize,
   recordAgentResponseSize,
@@ -579,34 +573,5 @@ describe('telemetry metrics', () => {
         });
       }).not.toThrow();
     });
-  });
-});
-
-describe('getElapsedS', () => {
-  it('takes the duration from an ended span, to the nanosecond', () => {
-    const span = new BasicTracerProvider()
-      .getTracer('test')
-      .startSpan('op', {startTime: [10, 500_000_000]});
-    span.end([12, 750_000_000]);
-
-    expect(getElapsedS(span, performance.now())).toBeCloseTo(2.25, 9);
-  });
-
-  it('falls back to the monotonic clock for a span without timings', () => {
-    trace.disable();
-    const span = trace.getTracer('test').startSpan('op');
-    span.end();
-
-    const elapsed = getElapsedS(span, performance.now() - 1000);
-
-    expect(elapsed).toBeGreaterThanOrEqual(1);
-    expect(elapsed).toBeLessThan(60);
-  });
-
-  it('falls back to the monotonic clock when there is no span', () => {
-    const elapsed = getElapsedS(undefined, performance.now() - 2000);
-
-    expect(elapsed).toBeGreaterThanOrEqual(2);
-    expect(elapsed).toBeLessThan(60);
   });
 });
