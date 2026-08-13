@@ -360,7 +360,9 @@ export class VertexAiSessionService extends BaseSessionService {
       const response = await this.sessions.listInternal({
         name: `reasoningEngines/${reasoningEngineId}`,
         config: {
-          ...(userId ? {filter: `user_id=${quoteFilterLiteral(userId)}`} : {}),
+          ...(userId !== undefined
+            ? {filter: `user_id=${quoteFilterLiteral(userId)}`}
+            : {}),
           ...(pageToken ? {pageToken} : {}),
         },
       });
@@ -647,8 +649,7 @@ function _fromApiEvent(apiEventObj: VertexAiSessionEvent): Event {
   const eventMetadata = apiEventObj.eventMetadata || {};
 
   let customMetadata = eventMetadata.customMetadata as
-    | Record<string, unknown>
-    | undefined;
+    Record<string, unknown> | undefined;
   let compactionData: {
     startTime: number;
     endTime: number;
@@ -716,11 +717,9 @@ function _fromApiEvent(apiEventObj: VertexAiSessionEvent): Event {
     branch: eventMetadata['branch'] as string | undefined,
     customMetadata,
     longRunningToolIds: eventMetadata['longRunningToolIds'] as
-      | string[]
-      | undefined,
+      string[] | undefined,
     groundingMetadata: eventMetadata['groundingMetadata'] as
-      | GroundingMetadata
-      | undefined,
+      GroundingMetadata | undefined,
     usageMetadata:
       usageMetadataData as unknown as GenerateContentResponseUsageMetadata,
   };

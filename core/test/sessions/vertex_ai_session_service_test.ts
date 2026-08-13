@@ -763,10 +763,9 @@ describe('VertexAiSessionService', () => {
       });
     });
 
-    it('lists sessions without filter if userId is empty', async () => {
+    it('lists sessions without filter if userId is missing', async () => {
       await service.listSessions({
         appName: APP_NAME,
-        userId: '',
       });
 
       expect(mockClient.listInternal).toHaveBeenCalledWith(
@@ -774,6 +773,20 @@ describe('VertexAiSessionService', () => {
           config: {},
         }),
       );
+    });
+
+    it('sends a user_id filter for an empty userId rather than listing all users', async () => {
+      mockClient.listInternal.mockResolvedValue({sessions: []});
+
+      await service.listSessions({
+        appName: '12345',
+        userId: '',
+      });
+
+      expect(mockClient.listInternal).toHaveBeenCalledWith({
+        name: 'reasoningEngines/12345',
+        config: {filter: 'user_id=""'},
+      });
     });
 
     it('falls back to defaults in listSessions when state or updateTime is missing', async () => {

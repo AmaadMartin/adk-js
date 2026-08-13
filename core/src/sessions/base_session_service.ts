@@ -50,7 +50,11 @@ export interface GetSessionRequest extends CompositeSessionKey {
 export interface ListSessionsRequest {
   /** The name of the application. */
   appName: string;
-  /** The ID of the user. Sessions of every user are listed if omitted. */
+  /**
+   * The ID of the user. If omitted, sessions for all users of `appName` are
+   * listed. An empty string is a normal user ID and matches only sessions
+   * owned by it.
+   */
   userId?: string;
   /** Maximum number of sessions to return. */
   limit?: number;
@@ -168,10 +172,11 @@ export abstract class BaseSessionService {
   }
 
   /**
-   * Lists sessions for a user.
+   * Lists sessions for a user, or for every user of the app when
+   * `request.userId` is omitted.
    *
    * @param request The request to list sessions.
-   * @return A promise that resolves to a list of sessions for the user.
+   * @return A promise that resolves to a list of sessions.
    */
   abstract listSessions(
     request: ListSessionsRequest,

@@ -565,6 +565,76 @@ describe('InMemorySessionService', () => {
       expect(response.sessions.map((s) => s.id)).toEqual(['s3', 's4']);
       expect(response.page).toBe(2);
     });
+
+    it('lists sessions for all users when userId is omitted', async () => {
+      const appName = 'app';
+      await service.createSession({appName, userId: 'u1', sessionId: 's1'});
+      await service.createSession({appName, userId: 'u1', sessionId: 's2'});
+      await service.createSession({appName, userId: 'u2', sessionId: 's3'});
+      await service.createSession({
+        appName: 'other-app',
+        userId: 'u1',
+        sessionId: 's4',
+      });
+
+      const response = await service.listSessions({appName});
+
+      expect(response.sessions).toHaveLength(3);
+      expect(new Set(response.sessions.map((s) => s.id))).toEqual(
+        new Set(['s1', 's2', 's3']),
+      );
+      expect(new Set(response.sessions.map((s) => s.userId))).toEqual(
+        new Set(['u1', 'u2']),
+      );
+    });
+
+    it('returns an empty list when userId is omitted and the app is unknown', async () => {
+      const response = await service.listSessions({appName: 'nope'});
+
+      expect(response.sessions).toEqual([]);
+      expect(response.page).toBe(1);
+      expect(response.limit).toBe(0);
+      expect(response.totalItems).toBe(0);
+      expect(response.totalPages).toBe(0);
+    });
+
+    it('applies pagination across users when userId is omitted', async () => {
+      const appName = 'app';
+      for (let i = 1; i <= 5; i++) {
+        const s = await service.createSession({
+          appName,
+          userId: i % 2 === 1 ? 'u1' : 'u2',
+          sessionId: `s${i}`,
+        });
+        await service.appendEvent({
+          session: s,
+          event: createEvent({timestamp: i * 1000}),
+        });
+      }
+
+      const response = await service.listSessions({
+        appName,
+        limit: 2,
+        page: 2,
+        order: 'asc',
+      });
+
+      expect(response.sessions.map((s) => s.id)).toEqual(['s3', 's4']);
+      expect(response.sessions.map((s) => s.userId)).toEqual(['u1', 'u2']);
+      expect(response.page).toBe(2);
+      expect(response.limit).toBe(2);
+      expect(response.totalItems).toBe(5);
+      expect(response.totalPages).toBe(3);
+    });
+
+    it('treats an empty userId as a normal user id, not as all users', async () => {
+      const appName = 'app';
+      await service.createSession({appName, userId: 'u1', sessionId: 's1'});
+
+      const response = await service.listSessions({appName, userId: ''});
+
+      expect(response.sessions).toEqual([]);
+    });
   });
 
   describe('deleteSession', () => {

@@ -421,12 +421,69 @@ describe('DatabaseSessionService', () => {
     });
     expect(listU1.sessions.length).toBe(1);
     expect(listU1.sessions[0].id).toBe('s1');
+  });
 
-    const listAll = await service.listSessions({
+  it('lists sessions for all users in an app when userId is omitted', async () => {
+    await service.createSession({
       appName: 'app1',
       userId: 'u1',
+      sessionId: 's1',
     });
-    expect(listAll.sessions.length).toBe(1);
+    await service.createSession({
+      appName: 'app1',
+      userId: 'u2',
+      sessionId: 's2',
+    });
+    await service.createSession({
+      appName: 'app2', // Diff app
+      userId: 'u1',
+      sessionId: 's3',
+    });
+
+    const listAll = await service.listSessions({appName: 'app1'});
+
+    expect(new Set(listAll.sessions.map((s) => s.id))).toEqual(
+      new Set(['s1', 's2']),
+    );
+    expect(new Set(listAll.sessions.map((s) => s.userId))).toEqual(
+      new Set(['u1', 'u2']),
+    );
+  });
+
+  it("merges each session owner's user state when userId is omitted", async () => {
+    await service.createSession({
+      appName: 'app1',
+      userId: 'u1',
+      sessionId: 's1',
+      state: {[State.USER_PREFIX + 'pref']: 'A'},
+    });
+    await service.createSession({
+      appName: 'app1',
+      userId: 'u2',
+      sessionId: 's2',
+      state: {[State.USER_PREFIX + 'pref']: 'B'},
+    });
+
+    const listAll = await service.listSessions({appName: 'app1'});
+
+    const byId = new Map(listAll.sessions.map((s) => [s.id, s]));
+    expect(byId.get('s1')?.state[State.USER_PREFIX + 'pref']).toBe('A');
+    expect(byId.get('s2')?.state[State.USER_PREFIX + 'pref']).toBe('B');
+  });
+
+  it('treats an empty userId as a normal user id, not as all users', async () => {
+    await service.createSession({
+      appName: 'app1',
+      userId: 'u1',
+      sessionId: 's1',
+    });
+
+    const listEmpty = await service.listSessions({
+      appName: 'app1',
+      userId: '',
+    });
+
+    expect(listEmpty.sessions).toEqual([]);
   });
 
   it('should handle errors', async () => {
