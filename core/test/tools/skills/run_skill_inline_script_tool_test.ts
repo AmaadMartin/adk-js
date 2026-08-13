@@ -12,20 +12,38 @@ import {
   ExecuteCodeParams,
   File,
   FileContentEncoding,
+  InMemoryArtifactService,
   InvocationContext,
   LlmAgent,
   RunSkillInlineScriptErrorCode,
   RunSkillInlineScriptTool,
+  ScopedArtifactService,
+  SessionArtifactService,
+  SkillScriptResponse,
   SkillScriptResult,
   SkillToolset,
 } from '@google/adk';
+import * as fs from 'node:fs/promises';
 import {describe, expect, it, vi} from 'vitest';
 import {materializeScriptOutputs} from '../../../src/tools/skill/script_output_utils.js';
 import {ToolConfirmation} from '../../../src/tools/tool_confirmation.js';
 
-vi.mock('../../../src/tools/skill/script_output_utils.js', () => ({
-  materializeScriptOutputs: vi.fn((result: CodeExecutionResult) => result),
-}));
+// Only the materialize step is spied on, so the tests below can assert both
+// the `outputDir` the tool passes it and the artifacts the real save step
+// writes.
+vi.mock(
+  '../../../src/tools/skill/script_output_utils.js',
+  async (importOriginal) => {
+    const actual =
+      await importOriginal<
+        typeof import('../../../src/tools/skill/script_output_utils.js')
+      >();
+    return {
+      ...actual,
+      materializeScriptOutputs: vi.fn(actual.materializeScriptOutputs),
+    };
+  },
+);
 
 class MockCodeExecutor extends BaseCodeExecutor {
   mockResult: CodeExecutionResult = {
@@ -68,6 +86,7 @@ describe('RunSkillInlineScriptTool', () => {
     options: {
       functionCallId?: string;
       toolConfirmation?: ToolConfirmation;
+      artifactService?: SessionArtifactService;
     } = {},
   ): Context {
     const agentObj: Record<string | symbol, unknown> = {name: agentName};
@@ -80,6 +99,7 @@ describe('RunSkillInlineScriptTool', () => {
       invocationContext: {
         session: {state: {}},
         agent: agentObj as unknown as LlmAgent,
+        artifactService: options.artifactService,
       } as unknown as InvocationContext,
       functionCallId: options.functionCallId,
       toolConfirmation: options.toolConfirmation,
@@ -91,6 +111,32 @@ describe('RunSkillInlineScriptTool', () => {
    */
   function confirmed(): ToolConfirmation {
     return new ToolConfirmation({confirmed: true});
+  }
+
+  function createSessionArtifactService(): SessionArtifactService {
+    return new ScopedArtifactService(
+      new InMemoryArtifactService(),
+      'test-app',
+      'test-user',
+      'test-session',
+    );
+  }
+
+  function executorProducing(name: string): MockCodeExecutor {
+    const mockExecutor = new MockCodeExecutor();
+    mockExecutor.mockResult = {
+      stdout: 'script stdout',
+      stderr: '',
+      outputFiles: [
+        {
+          name,
+          content: 'hello',
+          contentEncoding: FileContentEncoding.UTF8,
+          mimeType: 'text/plain',
+        },
+      ],
+    };
+    return mockExecutor;
   }
 
   it('returns error if script content is missing', async () => {
@@ -230,19 +276,102 @@ describe('RunSkillInlineScriptTool', () => {
     });
   });
 
+  it('saves script output files to the artifact service and omits file bytes from the response', async () => {
+    const mockExecutor = executorProducing('output.txt');
+    const artifactService = createSessionArtifactService();
+    const toolContext = createMockContext('test-agent', undefined, {
+      toolConfirmation: confirmed(),
+      artifactService,
+    });
+    const toolset = new SkillToolset([], {codeExecutor: mockExecutor});
+    const tool = new RunSkillInlineScriptTool(toolset);
+
+    const result = (await tool.runAsync({
+      args: {
+        script_content: 'console.log("test");',
+        language: CodeExecutionLanguage.JAVASCRIPT,
+      },
+      toolContext,
+    })) as SkillScriptResponse;
+
+    expect(result).toEqual({
+      stdout: 'script stdout',
+      stderr: '',
+      outputFiles: [{name: 'output.txt', mimeType: 'text/plain'}],
+      // The file is also written to a directory of its own; see the
+      // `outputDir` tests below.
+      outputDir: expect.any(String),
+    });
+    const artifact = await artifactService.loadArtifact({
+      filename: 'output.txt',
+    });
+    expect(artifact?.inlineData?.data).toBe(
+      Buffer.from('hello', 'utf-8').toString('base64'),
+    );
+    expect(toolContext.actions.artifactDelta).toEqual({'output.txt': 0});
+  });
+
+  it('does not write script output files to the process working directory', async () => {
+    const mockExecutor = executorProducing('cwd_regression_inline_output.txt');
+    const toolset = new SkillToolset([], {codeExecutor: mockExecutor});
+    const tool = new RunSkillInlineScriptTool(toolset);
+    const before = (await fs.readdir(process.cwd())).sort();
+
+    const result = (await tool.runAsync({
+      args: {
+        script_content: 'console.log("test");',
+        language: CodeExecutionLanguage.JAVASCRIPT,
+      },
+      toolContext: createMockContext('test-agent', undefined, {
+        toolConfirmation: confirmed(),
+        artifactService: createSessionArtifactService(),
+      }),
+    })) as SkillScriptResponse;
+
+    expect((await fs.readdir(process.cwd())).sort()).toEqual(before);
+    expect(result.outputFiles).toEqual([
+      {name: 'cwd_regression_inline_output.txt', mimeType: 'text/plain'},
+    ]);
+  });
+
+  it('reports produced files with a warning when no artifact service is configured', async () => {
+    const mockExecutor = executorProducing('unsaved_output.txt');
+    const toolset = new SkillToolset([], {codeExecutor: mockExecutor});
+    const tool = new RunSkillInlineScriptTool(toolset);
+
+    const result = (await tool.runAsync({
+      args: {
+        script_content: 'console.log("test");',
+        language: CodeExecutionLanguage.JAVASCRIPT,
+      },
+      toolContext: createMockContext('test-agent', undefined, {
+        toolConfirmation: confirmed(),
+      }),
+    })) as SkillScriptResponse;
+
+    expect(result).toEqual({
+      stdout: 'script stdout',
+      stderr: '',
+      outputFiles: [{name: 'unsaved_output.txt', mimeType: 'text/plain'}],
+      outputDir: expect.any(String),
+      warning:
+        'No artifact service is configured; 1 output file(s) produced by the ' +
+        'script were not saved to the session.',
+    });
+  });
+
   it('materializes output files with no directory when none is configured', async () => {
     const mockExecutor = new MockCodeExecutor();
-    const testFile: File = {
-      name: 'output.txt',
-      content: 'hello',
-      contentEncoding: FileContentEncoding.UTF8,
-      mimeType: 'text/plain',
-    };
     mockExecutor.mockResult = {
       stdout: '',
       stderr: '',
-      outputFiles: [testFile],
+      outputFiles: [outputFile()],
     };
+    // Stubbed so the assertion is about the call, not about a directory this
+    // test would then have to clean up.
+    vi.mocked(materializeScriptOutputs).mockResolvedValueOnce(
+      mockExecutor.mockResult,
+    );
 
     const toolset = new SkillToolset([], {codeExecutor: mockExecutor});
     const tool = new RunSkillInlineScriptTool(toolset);
@@ -270,6 +399,9 @@ describe('RunSkillInlineScriptTool', () => {
       stderr: '',
       outputFiles: [outputFile()],
     };
+    vi.mocked(materializeScriptOutputs).mockResolvedValueOnce(
+      mockExecutor.mockResult,
+    );
 
     const toolset = new SkillToolset([], {
       codeExecutor: mockExecutor,

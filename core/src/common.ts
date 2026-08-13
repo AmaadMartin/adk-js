@@ -96,6 +96,7 @@ export type {
   SaveArtifactRequest,
 } from './artifacts/base_artifact_service.js';
 export {InMemoryArtifactService} from './artifacts/in_memory_artifact_service.js';
+export {ScopedArtifactService} from './artifacts/scoped_artifact_service.js';
 export type {
   SessionArtifactService,
   SessionLoadArtifactRequest,
@@ -374,7 +375,11 @@ export {
   LoadSkillErrorCode,
   LoadSkillTool,
 } from './tools/skill/load_skill_tool.js';
-export type {SkillScriptResult} from './tools/skill/script_output_utils.js';
+export type {
+  SavedOutputFile,
+  SkillScriptResponse,
+  SkillScriptResult,
+} from './tools/skill/script_output_utils.js';
 export {
   SearchSkillsErrorCode,
   SearchSkillsTool,

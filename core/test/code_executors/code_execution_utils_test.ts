@@ -69,6 +69,9 @@ describe('getFileContentAsBase64', () => {
   });
 
   it('treats a missing encoding as base64', () => {
+    // AgentEngineSandboxCodeExecutor omits contentEncoding on already-base64
+    // content; unlike getEncodedFileContent this must not sniff the payload,
+    // because plain text such as 'hello' is itself valid base64.
     const result = getFileContentAsBase64({
       name: 'plot.png',
       content: 'iVBORw0KGgo=',

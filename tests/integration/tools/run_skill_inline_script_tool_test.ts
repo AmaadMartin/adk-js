@@ -13,7 +13,8 @@ import {
   LlmAgent,
   PluginManager,
   RunSkillInlineScriptTool,
-  SkillScriptResult,
+  SessionArtifactService,
+  SkillScriptResponse,
   SkillToolset,
   ToolConfirmation,
   UnsafeLocalCodeExecutor,
@@ -22,6 +23,13 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {afterEach, describe, expect, it} from 'vitest';
+import {
+  createSessionArtifactService,
+  loadArtifactText,
+} from './artifact_service_test_utils.js';
+
+/** Content written by the output-file scripts under test. */
+const FILE_CONTENT = 'hello from output file';
 
 const IS_WINDOWS = os.platform() === 'win32';
 const IS_UNIX = os.platform() === 'linux' || os.platform() === 'darwin';
@@ -52,18 +60,47 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
   // These integration tests exercise real code execution, which is gated behind
   // a human-in-the-loop confirmation. Supply an already-confirmed confirmation
   // so the tool proceeds to execute (see run_skill_inline_script_tool.ts).
-  function createMockContext(agentName = 'test-agent') {
+  function createMockContext(
+    agentName = 'test-agent',
+    artifactService?: SessionArtifactService,
+  ) {
     const invocationContext = new InvocationContext({
       invocationId: 'test-invocation',
       agent: new LlmAgent({name: agentName}),
       session: createSession({id: 'test-session', appName: 'test-app'}),
       pluginManager: new PluginManager([]),
+      artifactService,
     });
 
     return new Context({
       invocationContext,
       toolConfirmation: new ToolConfirmation({confirmed: true}),
     });
+  }
+
+  async function cwdContains(filename: string): Promise<boolean> {
+    return fs
+      .access(path.join(process.cwd(), filename))
+      .then(() => true)
+      .catch(() => false);
+  }
+
+  /** A script that writes `hello from output file` to the given filename. */
+  function writeFileScript(filename: string): string {
+    return `const fs = require('fs'); fs.writeFileSync('${filename}', '${FILE_CONTENT}');`;
+  }
+
+  /**
+   * Registers a directory the tool chose for removal. Asserting containment
+   * before registering keeps a wrong `outputDir` a test failure rather than a
+   * recursive delete of whatever the tool named.
+   */
+  function trackToolOutputDir(dir: string | undefined): asserts dir is string {
+    if (dir === undefined) {
+      expect.fail('expected an outputDir on the tool result');
+    }
+    expect(path.dirname(dir)).toBe(os.tmpdir());
+    scratchDirs.push(dir);
   }
 
   it('successfully executes a real JavaScript inline script', async () => {
@@ -290,7 +327,7 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
         language: CodeExecutionLanguage.JAVASCRIPT,
       },
       toolContext: createMockContext(),
-    })) as SkillScriptResult;
+    })) as SkillScriptResponse;
 
     expect(result.outputDir).toBe(outputDir);
     expect(result.outputFiles?.map((f) => f.name)).toContain(testFileName);
@@ -360,7 +397,7 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
         language: CodeExecutionLanguage.JAVASCRIPT,
       },
       toolContext: createMockContext(),
-    })) as SkillScriptResult;
+    })) as SkillScriptResponse;
 
     const expectedName = `${path.basename(testFileName, '.txt')}_2.txt`;
     expect(result.outputFiles?.map((f) => f.name)).toContain(expectedName);
@@ -370,5 +407,86 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
       'utf-8',
     );
     expect(content).toBe(testFileContent);
+  });
+  it('saves script output files to the artifact service', async () => {
+    const executor = new UnsafeLocalCodeExecutor();
+    const toolset = new SkillToolset([], {codeExecutor: executor});
+    const tool = new RunSkillInlineScriptTool(toolset);
+    const artifactService = createSessionArtifactService();
+    const toolContext = createMockContext('test-agent', artifactService);
+    const testFileName = `test_output_${Date.now()}.txt`;
+
+    const result = (await tool.runAsync({
+      args: {
+        script_content: writeFileScript(testFileName),
+        language: CodeExecutionLanguage.JAVASCRIPT,
+      },
+      toolContext,
+    })) as SkillScriptResponse;
+    trackToolOutputDir(result.outputDir);
+
+    expect(result.outputFiles).toEqual([
+      {name: testFileName, mimeType: 'text/plain'},
+    ]);
+    expect(result.warning).toBeUndefined();
+    expect(await loadArtifactText(artifactService, testFileName)).toBe(
+      FILE_CONTENT,
+    );
+    expect(toolContext.actions.artifactDelta).toEqual({[testFileName]: 0});
+    expect(await cwdContains(testFileName)).toBe(false);
+  });
+
+  it('reports output files with a warning when no artifact service is configured', async () => {
+    const executor = new UnsafeLocalCodeExecutor();
+    const toolset = new SkillToolset([], {codeExecutor: executor});
+    const tool = new RunSkillInlineScriptTool(toolset);
+    const testFileName = `test_unsaved_output_${Date.now()}.txt`;
+
+    const result = (await tool.runAsync({
+      args: {
+        script_content: writeFileScript(testFileName),
+        language: CodeExecutionLanguage.JAVASCRIPT,
+      },
+      toolContext: createMockContext(),
+    })) as SkillScriptResponse;
+    trackToolOutputDir(result.outputDir);
+
+    expect(result.outputFiles).toEqual([
+      {name: testFileName, mimeType: 'text/plain'},
+    ]);
+    expect(result.warning).toMatch(/No artifact service is configured/);
+    expect(await cwdContains(testFileName)).toBe(false);
+  });
+
+  it('creates a new artifact version instead of a renamed file on repeat runs', async () => {
+    const executor = new UnsafeLocalCodeExecutor();
+    const toolset = new SkillToolset([], {codeExecutor: executor});
+    const tool = new RunSkillInlineScriptTool(toolset);
+    const artifactService = createSessionArtifactService();
+    const testFileName = `test_inline_artifact_${Date.now()}.txt`;
+    const args = {
+      script_content: writeFileScript(testFileName),
+      language: CodeExecutionLanguage.JAVASCRIPT,
+    };
+
+    const first = (await tool.runAsync({
+      args,
+      toolContext: createMockContext('test-agent', artifactService),
+    })) as SkillScriptResponse;
+    trackToolOutputDir(first.outputDir);
+    const result = (await tool.runAsync({
+      args,
+      toolContext: createMockContext('test-agent', artifactService),
+    })) as SkillScriptResponse;
+    trackToolOutputDir(result.outputDir);
+
+    expect(result.outputFiles).toEqual([
+      {name: testFileName, mimeType: 'text/plain'},
+    ]);
+    expect(await artifactService.listVersions(testFileName)).toEqual([0, 1]);
+    // Each run without a configured outputDir gets a directory of its own, so
+    // the second run collides with nothing and no file is renamed.
+    const collisionName = `${path.basename(testFileName, '.txt')}_2.txt`;
+    expect(await cwdContains(collisionName)).toBe(false);
   });
 });

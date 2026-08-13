@@ -12,8 +12,9 @@ import {
   LlmAgent,
   PluginManager,
   RunSkillScriptTool,
+  SessionArtifactService,
   Skill,
-  SkillScriptResult,
+  SkillScriptResponse,
   SkillToolset,
   UnsafeLocalCodeExecutor,
 } from '@google/adk';
@@ -21,6 +22,10 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {afterEach, describe, expect, it} from 'vitest';
+import {
+  createSessionArtifactService,
+  loadArtifactText,
+} from './artifact_service_test_utils.js';
 
 const IS_WINDOWS = os.platform() === 'win32';
 const IS_UNIX = os.platform() === 'linux' || os.platform() === 'darwin';
@@ -31,6 +36,18 @@ const IS_UNIX = os.platform() === 'linux' || os.platform() === 'darwin';
 // core/src/code_executors/unsafe_local_code_executor.ts. Only the four
 // it.skipIf(!IS_WINDOWS) tests pass it, where shell cold-start is slowest.
 const TEST_EXECUTION_TIMEOUT = 40000;
+
+/**
+ * The file `scripts/create_file.js` writes, as it appears on the tool response.
+ *
+ * Asserted by containment rather than equality: UnsafeLocalCodeExecutor skips
+ * input files by comparing `File.name` (which uses `/`) against an
+ * `fs.readdir({recursive: true})` entry (which uses `\` on Windows), so on
+ * Windows the skill's own input scripts are reported as outputs too. That is a
+ * separate executor defect, so these tests pin this tool's handling of the
+ * script's output rather than the executor's file count.
+ */
+const SCRIPT_OUTPUT = {name: 'output_from_script.txt', mimeType: 'text/plain'};
 
 describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
   const scratchDirs: string[] = [];
@@ -46,7 +63,10 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
    * before registering keeps a wrong `outputDir` a test failure rather than a
    * recursive delete of whatever the tool named.
    */
-  function trackToolOutputDir(dir: string): void {
+  function trackToolOutputDir(dir: string | undefined): asserts dir is string {
+    if (dir === undefined) {
+      expect.fail('expected an outputDir on the tool result');
+    }
     expect(path.dirname(dir)).toBe(os.tmpdir());
     scratchDirs.push(dir);
   }
@@ -57,15 +77,26 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
     }
   });
 
-  function createMockContext(agentName = 'test-agent') {
+  function createMockContext(
+    agentName = 'test-agent',
+    artifactService?: SessionArtifactService,
+  ) {
     const invocationContext = new InvocationContext({
       invocationId: 'test-invocation',
       agent: new LlmAgent({name: agentName}),
       session: createSession({id: 'test-session', appName: 'test-app'}),
       pluginManager: new PluginManager([]),
+      artifactService,
     });
 
     return new Context({invocationContext});
+  }
+
+  async function cwdContains(filename: string): Promise<boolean> {
+    return fs
+      .access(path.join(process.cwd(), filename))
+      .then(() => true)
+      .catch(() => false);
   }
 
   const testSkill: Skill = {
@@ -326,7 +357,7 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
         script_path: 'scripts/create_file.js',
       },
       toolContext: createMockContext(),
-    })) as SkillScriptResult;
+    })) as SkillScriptResponse;
 
     expect(result.outputDir).toBe(outputDir);
     expect(result.outputFiles?.map((f) => f.name)).toContain(
@@ -355,11 +386,8 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
         script_path: 'scripts/create_file.js',
       },
       toolContext: createMockContext(),
-    })) as SkillScriptResult;
+    })) as SkillScriptResponse;
 
-    if (!result.outputDir) {
-      expect.fail('expected an outputDir on the tool result');
-    }
     trackToolOutputDir(result.outputDir);
 
     await expect(
@@ -394,7 +422,7 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
         script_path: 'scripts/create_file.js',
       },
       toolContext: createMockContext(),
-    })) as SkillScriptResult;
+    })) as SkillScriptResponse;
 
     expect(result.outputFiles?.map((f) => f.name)).toContain(
       'output_from_script_2.txt',
@@ -405,5 +433,78 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
       'utf-8',
     );
     expect(content).toBe('hello from script file');
+  });
+  it('saves script output files to the artifact service', async () => {
+    const executor = new UnsafeLocalCodeExecutor();
+    const toolset = new SkillToolset([testSkill], {codeExecutor: executor});
+    const tool = new RunSkillScriptTool(toolset);
+    const artifactService = createSessionArtifactService();
+    const toolContext = createMockContext('test-agent', artifactService);
+
+    const result = (await tool.runAsync({
+      args: {
+        skill_name: 'test-skill',
+        script_path: 'scripts/create_file.js',
+      },
+      toolContext,
+    })) as SkillScriptResponse;
+    trackToolOutputDir(result.outputDir);
+
+    expect(result.outputFiles).toContainEqual(SCRIPT_OUTPUT);
+    expect(result.warning).toBeUndefined();
+    expect(
+      await loadArtifactText(artifactService, 'output_from_script.txt'),
+    ).toBe('hello from script file');
+    expect(toolContext.actions.artifactDelta['output_from_script.txt']).toBe(0);
+    expect(await cwdContains('output_from_script.txt')).toBe(false);
+  });
+
+  it('creates a new artifact version instead of a renamed file on repeat runs', async () => {
+    const executor = new UnsafeLocalCodeExecutor();
+    const toolset = new SkillToolset([testSkill], {codeExecutor: executor});
+    const tool = new RunSkillScriptTool(toolset);
+    const artifactService = createSessionArtifactService();
+    const args = {
+      skill_name: 'test-skill',
+      script_path: 'scripts/create_file.js',
+    };
+
+    const first = (await tool.runAsync({
+      args,
+      toolContext: createMockContext('test-agent', artifactService),
+    })) as SkillScriptResponse;
+    trackToolOutputDir(first.outputDir);
+    const result = (await tool.runAsync({
+      args,
+      toolContext: createMockContext('test-agent', artifactService),
+    })) as SkillScriptResponse;
+    trackToolOutputDir(result.outputDir);
+
+    expect(result.outputFiles).toContainEqual(SCRIPT_OUTPUT);
+    expect(
+      await artifactService.listVersions('output_from_script.txt'),
+    ).toEqual([0, 1]);
+    // Each run without a configured outputDir gets a directory of its own, so
+    // the second run collides with nothing and no file is renamed.
+    expect(await cwdContains('output_from_script_2.txt')).toBe(false);
+  });
+
+  it('reports output files with a warning when no artifact service is configured', async () => {
+    const executor = new UnsafeLocalCodeExecutor();
+    const toolset = new SkillToolset([testSkill], {codeExecutor: executor});
+    const tool = new RunSkillScriptTool(toolset);
+
+    const result = (await tool.runAsync({
+      args: {
+        skill_name: 'test-skill',
+        script_path: 'scripts/create_file.js',
+      },
+      toolContext: createMockContext(),
+    })) as SkillScriptResponse;
+    trackToolOutputDir(result.outputDir);
+
+    expect(result.outputFiles).toContainEqual(SCRIPT_OUTPUT);
+    expect(result.warning).toMatch(/No artifact service is configured/);
+    expect(await cwdContains('output_from_script.txt')).toBe(false);
   });
 });

@@ -10,7 +10,10 @@ import {isLlmAgent} from '../../agents/llm_agent.js';
 import {CodeExecutionLanguage} from '../../code_executors/code_execution_utils.js';
 import {experimental} from '../../utils/experimental.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
-import {materializeScriptOutputs} from './script_output_utils.js';
+import {
+  materializeScriptOutputs,
+  saveScriptOutputs,
+} from './script_output_utils.js';
 import {SkillToolset} from './skill_toolset.js';
 
 /**
@@ -140,7 +143,10 @@ export class RunSkillInlineScriptTool extends BaseTool {
         },
       });
 
-      return materializeScriptOutputs(result, this.toolset.outputDir);
+      return saveScriptOutputs(
+        toolContext,
+        await materializeScriptOutputs(result, this.toolset.outputDir),
+      );
     } catch (e: unknown) {
       return {
         error: `Failed to execute inline script: ${(e as Error).message}`,

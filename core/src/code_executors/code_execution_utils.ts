@@ -121,7 +121,7 @@ export function getEncodedFileContent(data: string): string {
  * `contentEncoding` is UTF8 holds raw text and must be encoded, one that is
  * already BASE64 is passed through so it is not encoded twice. A file that
  * declares no encoding is treated as base64, which is what the executors
- * predating `contentEncoding` emit.
+ * predating `contentEncoding` emit, `AgentEngineSandboxCodeExecutor` included.
  *
  * @param file The file whose content to encode.
  * @return The file content as base64.
