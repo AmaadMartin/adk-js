@@ -1291,4 +1291,24 @@ describe('agent generateContentConfig is not mutated by a run', () => {
       });
     }
   });
+
+  it('keeps a before-model callback header write out of the agent http options', async () => {
+    const agentHeaders = {'Agent-Header': 'agent-val'};
+    const model = new LabelCapturingLlm();
+    const agent = new LlmAgent({
+      name: 'callback_agent',
+      model,
+      generateContentConfig: {
+        httpOptions: {timeout: 1000, headers: agentHeaders},
+      },
+      beforeModelCallback: ({request}) => {
+        request.config!.httpOptions!.headers!['X-Callback'] = 'callback-val';
+        return undefined;
+      },
+    });
+
+    await runTwice(agent);
+
+    expect(agentHeaders).toEqual({'Agent-Header': 'agent-val'});
+  });
 });
