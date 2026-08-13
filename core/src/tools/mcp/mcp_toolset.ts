@@ -58,7 +58,7 @@ import {MCPTool} from './mcp_tool.js';
  * out-of-band flows such as auth challenges:
  *
  *   const mcpToolset = new MCPToolset(connectionParams, [], undefined, {
- *     elicitationCallback: async (request) => ({action: 'decline'}),
+ *     elicitationCallback: () => ({action: 'decline'}),
  *   });
  *
  */
