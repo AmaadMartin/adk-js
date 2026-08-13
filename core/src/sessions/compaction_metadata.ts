@@ -64,7 +64,10 @@ export interface ParsedCompactionMetadata {
  */
 const MILLISECONDS_PER_SECOND = 1000;
 
-/** Rounds away the float error a seconds round trip leaves behind. */
+/**
+ * Rounds because an adk-python timestamp carries microseconds, and an adk-js
+ * `Event.timestamp` is a whole number of milliseconds.
+ */
 function toEventMilliseconds(seconds: number): number {
   return Math.round(seconds * MILLISECONDS_PER_SECOND);
 }

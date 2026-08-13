@@ -149,6 +149,19 @@ describe('parseCompactionMetadata', () => {
     expect(parsed?.endTime).toBe(endTime);
   });
 
+  it('rounds an adk-python microsecond timestamp to whole milliseconds', () => {
+    // `datetime.now().timestamp()` carries microseconds, and an adk-js
+    // Event.timestamp is a whole number of milliseconds.
+    const parsed = parseCompactionMetadata({
+      start_timestamp: 1734005534.123456,
+      end_timestamp: 1734005599.987654,
+      compacted_content: SUMMARY_CONTENT,
+    });
+
+    expect(parsed?.startTime).toBe(1734005534123);
+    expect(parsed?.endTime).toBe(1734005599988);
+  });
+
   it('joins the text parts and skips the parts that carry none', () => {
     const parsed = parseCompactionMetadata({
       start_timestamp: START_TIMESTAMP,
