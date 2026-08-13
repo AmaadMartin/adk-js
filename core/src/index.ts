@@ -42,6 +42,13 @@ export * from './common.js';
 export {LocalEnvironment} from './environment/local_environment.js';
 export type {LocalEnvironmentOptions} from './environment/local_environment.js';
 export {DatabaseSessionService} from './sessions/database_session_service.js';
+export {RedisSessionService} from './sessions/redis_session_service.js';
+export type {
+  RedisClientLike,
+  RedisSessionServiceConfig,
+  RedisSessionServiceOptions,
+  RedisSetOptions,
+} from './sessions/redis_session_service.js';
 export {getSessionServiceFromUri} from './sessions/registry.js';
 export {VertexAiSessionService} from './sessions/vertex_ai_session_service.js';
 export type {

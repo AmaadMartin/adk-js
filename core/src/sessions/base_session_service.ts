@@ -279,3 +279,39 @@ export function mergeStates(
   }
   return merged;
 }
+
+/**
+ * Splits a state map into its app-scoped, user-scoped and session-scoped
+ * parts. The `app:` and `user:` prefixes are stripped and `temp:` keys are
+ * dropped, so that each bucket can be written to its own scope store.
+ *
+ * This is the inverse of {@link mergeStates}, which re-applies the prefixes
+ * when a session is read back.
+ *
+ * Each bucket is a null-prototype map, for the reason given on
+ * {@link trimTempState}.
+ *
+ * @param state The state to split. Defaults to an empty map.
+ * @return The app-scoped, user-scoped and session-scoped buckets.
+ */
+export function splitStateByScope(state: Record<string, unknown> = {}): {
+  appState: Record<string, unknown>;
+  userState: Record<string, unknown>;
+  sessionState: Record<string, unknown>;
+} {
+  const appState: Record<string, unknown> = Object.create(null);
+  const userState: Record<string, unknown> = Object.create(null);
+  const sessionState: Record<string, unknown> = Object.create(null);
+
+  for (const [key, value] of Object.entries(state)) {
+    if (key.startsWith(State.APP_PREFIX)) {
+      appState[key.slice(State.APP_PREFIX.length)] = value;
+    } else if (key.startsWith(State.USER_PREFIX)) {
+      userState[key.slice(State.USER_PREFIX.length)] = value;
+    } else if (!key.startsWith(State.TEMP_PREFIX)) {
+      sessionState[key] = value;
+    }
+  }
+
+  return {appState, userState, sessionState};
+}
