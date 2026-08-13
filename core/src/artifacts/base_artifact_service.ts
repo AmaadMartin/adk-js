@@ -80,8 +80,10 @@ export interface BaseArtifactService {
    * filename. After saving the artifact, a revision ID is returned to identify
    * the artifact version.
    *
-   * The filename must not have leading or trailing whitespace, and none of its
-   * path segments may end in a period, after any `user:` prefix.
+   * After any `user:` prefix, no path segment of the filename may have leading
+   * or trailing whitespace, end in a period, or be a Windows reserved device
+   * name such as `NUL` or `COM1`, and the filename must not contain a
+   * character Windows reserves (`< > : " | ? *` or a control character).
    * Implementations reject such a filename and store nothing.
    *
    * @param request The request to save an artifact.
