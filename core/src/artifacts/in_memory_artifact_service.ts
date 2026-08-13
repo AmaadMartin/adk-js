@@ -6,13 +6,13 @@
 
 import {Part} from '@google/genai';
 
+import {validatePathSegment} from '../utils/file_utils.js';
 import {logger} from '../utils/logger.js';
 
 import {
-  assertArtifactReferenceDepth,
   isArtifactUri,
-  parseArtifactReference,
-  validatePathSegment,
+  nextArtifactRequest,
+  validateArtifactReference,
 } from './artifact_util.js';
 import {
   ArtifactVersion,
@@ -50,33 +50,31 @@ export class InMemoryArtifactService implements BaseArtifactService {
     }
 
     const path = artifactPath(appName, userId, sessionId, filename);
-    const fileData =
-      !artifact.inlineData && artifact.text === undefined
-        ? artifact.fileData!
-        : undefined;
-    const fileUri = fileData?.fileUri;
-    const isReference = isArtifactUri(fileUri);
-
-    if (isReference) {
-      parseArtifactReference({appName, userId, sessionId, fileUri});
-    }
-
-    if (!this.artifacts[path]) {
-      this.artifacts[path] = [];
-    }
-
-    const version = this.artifacts[path].length;
+    const versions = this.artifacts[path] ?? [];
+    const version = versions.length;
     const metadata: ArtifactVersion = {
       version,
       customMetadata,
     };
 
-    // A reference carries no mime type of its own; it is known once resolved.
-    if (fileData && !isReference) {
-      metadata.mimeType = fileData.mimeType;
+    if (!artifact.inlineData && artifact.text === undefined) {
+      const fileData = artifact.fileData!;
+
+      if (isArtifactUri(fileData.fileUri)) {
+        // A reference carries no mime type; it is known once resolved.
+        validateArtifactReference({
+          appName,
+          userId,
+          sessionId,
+          fileUri: fileData.fileUri,
+        });
+      } else {
+        metadata.mimeType = fileData.mimeType;
+      }
     }
 
-    this.artifacts[path].push({part: artifact, metadata});
+    versions.push({part: artifact, metadata});
+    this.artifacts[path] = versions;
 
     return version;
   }
@@ -86,9 +84,11 @@ export class InMemoryArtifactService implements BaseArtifactService {
   }
 
   private async loadArtifactAtDepth(
-    {appName, userId, sessionId, filename, version}: LoadArtifactRequest,
+    request: LoadArtifactRequest,
     depth: number,
   ): Promise<Part | undefined> {
+    const {appName, userId, sessionId, filename} = request;
+    let {version} = request;
     const path = artifactPath(appName, userId, sessionId, filename);
     const versions = this.artifacts[path];
 
@@ -111,22 +111,8 @@ export class InMemoryArtifactService implements BaseArtifactService {
     const fileUri = part.fileData?.fileUri;
 
     if (isArtifactUri(fileUri)) {
-      const parsedUri = parseArtifactReference({
-        appName,
-        userId,
-        sessionId,
-        fileUri,
-      });
-      assertArtifactReferenceDepth(depth, fileUri);
-
       return this.loadArtifactAtDepth(
-        {
-          appName: parsedUri.appName,
-          userId: parsedUri.userId,
-          sessionId: parsedUri.sessionId ?? sessionId,
-          filename: parsedUri.filename,
-          version: parsedUri.version,
-        },
+        nextArtifactRequest(request, fileUri, depth),
         depth + 1,
       );
     }
