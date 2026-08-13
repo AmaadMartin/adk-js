@@ -21,6 +21,7 @@ import {
   copyAgentFiles,
   createDockerFile,
   createPackageJson,
+  loadAgentEnvConfig,
   resolveDefaultFromGcloudConfig,
   spawnAsync,
 } from './deploy_utils.js';
@@ -46,8 +47,22 @@ export interface DeployToAgentEngineOptions extends Omit<
 }
 
 export async function deployToAgentEngine(options: DeployToAgentEngineOptions) {
+  const isFileProvided = await isFile(options.agentPath);
+  const agentDir = isFileProvided
+    ? path.dirname(options.agentPath)
+    : options.agentPath;
+  const appName = isFileProvided
+    ? path.parse(options.agentPath).name
+    : path.basename(options.agentPath);
+
+  const displayName = options.displayName || appName;
+
+  const envConfig = await loadAgentEnvConfig(agentDir, options);
+
   const project =
-    options.project || (await resolveDefaultFromGcloudConfig('project'));
+    options.project ||
+    envConfig.project ||
+    (await resolveDefaultFromGcloudConfig('project'));
   if (!project || project === '(unset)') {
     throw new Error(
       'Project is not specified and default value for "project" is not set in gcloud config.',
@@ -58,7 +73,9 @@ export async function deployToAgentEngine(options: DeployToAgentEngineOptions) {
   }
 
   const region =
-    options.region || (await resolveDefaultFromGcloudConfig('run/region'));
+    options.region ||
+    envConfig.region ||
+    (await resolveDefaultFromGcloudConfig('run/region'));
   if (!region) {
     throw new Error(
       'Region is not specified and default value for "run/region" is not set in gcloud config.',
@@ -81,16 +98,6 @@ export async function deployToAgentEngine(options: DeployToAgentEngineOptions) {
     options.agentPath,
     options.agentFileLoadOptions,
   );
-
-  const isFileProvided = await isFile(options.agentPath);
-  const agentDir = isFileProvided
-    ? path.dirname(options.agentPath)
-    : options.agentPath;
-  const appName = isFileProvided
-    ? path.parse(options.agentPath).name
-    : path.basename(options.agentPath);
-
-  const displayName = options.displayName || appName;
 
   console.info('Starting deployment to Agent Engine...');
 
@@ -156,6 +163,10 @@ export async function deployToAgentEngine(options: DeployToAgentEngineOptions) {
       location: options.region,
     });
 
+    const envEntries = Object.entries(envConfig.envVars).map(
+      ([name, value]) => ({name, value}),
+    );
+
     const config = {
       displayName,
       description: options.description,
@@ -171,6 +182,7 @@ export async function deployToAgentEngine(options: DeployToAgentEngineOptions) {
             cpu: '1',
             memory: '2Gi',
           },
+          ...(envEntries.length ? {env: envEntries} : {}),
         },
       },
     };

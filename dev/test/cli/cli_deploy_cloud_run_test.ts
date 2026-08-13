@@ -24,6 +24,7 @@ import {A2A_AUTH_TOKEN_ENV_VAR} from '../../src/server/adk_api_server.js';
 import {
   createTempDir,
   isFile,
+  isFileExists,
   isFolderExists,
   loadFileData,
   tryToFindFileRecursively,
@@ -51,6 +52,7 @@ vi.mock('node:fs/promises', () => {
   const mockFs = {
     cp: vi.fn(async () => undefined),
     mkdir: vi.fn(async () => undefined),
+    readFile: vi.fn(),
     rm: vi.fn(async () => undefined),
   };
   return {
@@ -73,6 +75,7 @@ vi.mock('../../src/utils/file_utils.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../src/utils/file_utils.js')>()),
   createTempDir: vi.fn(),
   isFile: vi.fn(),
+  isFileExists: vi.fn(),
   isFolderExists: vi.fn(),
   loadFileData: vi.fn(),
   saveToFile: vi.fn(),
@@ -733,5 +736,126 @@ describe('deployToCloudRun', () => {
 
     const [value] = labelValues(spawnMock.mock.calls[0][1]);
     expect(value).toBe('created-by=adk,env=test,team=myteam');
+  });
+
+  describe('.env forwarding', () => {
+    /** Makes `path/to/agent/.env` readable with the given contents. */
+    function givenEnvFile(contents: string) {
+      (isFileExists as Mock).mockResolvedValue(true);
+      (fs.readFile as Mock).mockResolvedValue(contents);
+    }
+
+    /** The argument list the deploy passed to `gcloud`. */
+    function gcloudArgs(): string[] {
+      const call = spawnMock.mock.calls.find(
+        ([command]) => command === 'gcloud',
+      );
+      if (!call) {
+        expect.fail('gcloud was not spawned');
+      }
+      const args: unknown = call[1];
+      if (!Array.isArray(args)) {
+        expect.fail('gcloud was spawned without an argument list');
+      }
+      return args.map(String);
+    }
+
+    /** The value of the single `--update-env-vars` argument. */
+    function updateEnvVarsValue(): string | undefined {
+      const args = gcloudArgs();
+      expect(args.filter((arg) => arg === '--update-env-vars')).toHaveLength(1);
+      return args[args.indexOf('--update-env-vars') + 1];
+    }
+
+    it('should read the .env next to the agent and forward its variables', async () => {
+      givenEnvFile('A=1\nB=2\n');
+
+      await deployToCloudRun(defaultOptions);
+
+      expect(fs.readFile).toHaveBeenCalledWith(
+        path.join('path/to/agent', '.env'),
+        {encoding: 'utf-8'},
+      );
+      expect(updateEnvVarsValue()).toBe('A=1,B=2');
+    });
+
+    it('should send the .env variables and the A2A token in one flag', async () => {
+      // gcloud keeps only the last value of a repeated flag, so a second
+      // --update-env-vars would drop one of the two sets.
+      givenEnvFile('A=1\n');
+
+      await deployToCloudRun({
+        ...defaultOptions,
+        a2a: true,
+        a2aAuthToken: A2A_TOKEN,
+      });
+
+      expect(updateEnvVarsValue()).toBe(
+        `A=1,${A2A_AUTH_TOKEN_ENV_VAR}=${A2A_TOKEN}`,
+      );
+    });
+
+    it('should escape the gcloud delimiter when a value contains a comma', async () => {
+      givenEnvFile('FEATURE_FLAGS=alpha,beta\n');
+
+      await deployToCloudRun(defaultOptions);
+
+      expect(updateEnvVarsValue()).toBe('^@^FEATURE_FLAGS=alpha,beta');
+    });
+
+    it('should use project and region from .env when no flags are passed', async () => {
+      givenEnvFile(
+        'GOOGLE_CLOUD_PROJECT=env-project\nGOOGLE_CLOUD_LOCATION=env-region\nA=1\n',
+      );
+
+      await deployToCloudRun({...defaultOptions, project: '', region: ''});
+
+      const args = gcloudArgs();
+      expect(args[args.indexOf('--project') + 1]).toBe('env-project');
+      expect(args[args.indexOf('--region') + 1]).toBe('env-region');
+      expect(execMock).not.toHaveBeenCalled();
+      expect(updateEnvVarsValue()).toBe('A=1');
+      expect(console.info).not.toHaveBeenCalledWith(
+        '--project option is not provided, using default project from gcloud config:',
+        expect.anything(),
+      );
+      expect(console.info).not.toHaveBeenCalledWith(
+        '--region option is not provided, using default region from gcloud config:',
+        expect.anything(),
+      );
+    });
+
+    it('should keep the CLI project and region and warn when .env also sets them', async () => {
+      const consoleWarnSpy = vi
+        .spyOn(console, 'warn')
+        .mockImplementation(() => {});
+      givenEnvFile(
+        'GOOGLE_CLOUD_PROJECT=env-project\nGOOGLE_CLOUD_LOCATION=env-region\n',
+      );
+
+      await deployToCloudRun(defaultOptions);
+
+      const args = gcloudArgs();
+      expect(args[args.indexOf('--project') + 1]).toBe('test-project');
+      expect(args[args.indexOf('--region') + 1]).toBe('us-central1');
+      expect(args).not.toContain('--update-env-vars');
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Ignoring GOOGLE_CLOUD_PROJECT in .env'),
+      );
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Ignoring GOOGLE_CLOUD_LOCATION in .env'),
+      );
+    });
+
+    it('should reject a passthrough env-var argument that would clobber the .env', async () => {
+      givenEnvFile('A=1\n');
+
+      await expect(
+        deployToCloudRun({
+          ...defaultOptions,
+          extraGcloudArgs: ['--set-env-vars=FOO=bar'],
+        }),
+      ).rejects.toThrow(/conflict with ADK's automatic configuration/);
+    });
   });
 });

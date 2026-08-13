@@ -161,11 +161,11 @@ AGENT_FILE_MODULE_TYPE.argChoices = [FileModuleType.CJS, FileModuleType.ESM];
 // Reusable deployment CLI option constants
 export const PROJECT_DEPLOY_OPTION = new Option(
   '--project [string]',
-  'Optional. Google Cloud project to deploy the agent. If not set, default project from gcloud config is used',
+  "Optional. Google Cloud project to deploy the agent. If not set, GOOGLE_CLOUD_PROJECT from the agent's .env is used, then the default project from gcloud config",
 );
 export const REGION_DEPLOY_OPTION = new Option(
   '--region [string]',
-  'Optional. Google Cloud region to deploy the agent. If not set, default run/region from gcloud config is used',
+  "Optional. Google Cloud region to deploy the agent. If not set, GOOGLE_CLOUD_LOCATION from the agent's .env is used, then the default run/region from gcloud config",
 );
 export const ADK_VERSION_OPTION = new Option(
   '--adk_version [string]',

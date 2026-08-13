@@ -21,6 +21,8 @@ import {
   createDockerFile,
   createDockerFileContent,
   createPackageJson,
+  formatGcloudEnvVarsArg,
+  loadAgentEnvConfig,
   resolveDefaultFromGcloudConfig,
   spawnAsync,
 } from './deploy_utils.js';
@@ -98,7 +100,19 @@ function validateGcloudExtraArgs(
   }
 }
 
-function prepareGCloudArguments(options: DeployToCloudRunOptions): string[] {
+function prepareGCloudArguments(
+  options: DeployToCloudRunOptions,
+  envVars: Record<string, string>,
+): string[] {
+  // The A2A token is an environment variable like any other, so it travels in
+  // the same `--update-env-vars` dictionary. gcloud keeps only the last value
+  // of a repeated flag, so a second flag would drop one of the two sets.
+  const deployedEnvVars: Record<string, string> = {...envVars};
+  if (options.a2aAuthToken) {
+    // The flag wins over a variable of the same name in the agent's `.env`.
+    deployedEnvVars[A2A_AUTH_TOKEN_ENV_VAR] = options.a2aAuthToken;
+  }
+  const forwardsEnvVars = Object.keys(deployedEnvVars).length > 0;
   const regionOptions: string[] = options.region
     ? ['--region', options.region]
     : [];
@@ -106,8 +120,9 @@ function prepareGCloudArguments(options: DeployToCloudRunOptions): string[] {
   if (options.region) {
     adkManagedArgs.push('--region');
   }
-  if (options.a2aAuthToken) {
-    // Any gcloud env-var flag can drop the injected token, so claim them all.
+  if (forwardsEnvVars) {
+    // Any gcloud env-var flag can drop the forwarded variables, so claim them
+    // all.
     adkManagedArgs.push(
       '--update-env-vars',
       '--set-env-vars',
@@ -134,10 +149,10 @@ function prepareGCloudArguments(options: DeployToCloudRunOptions): string[] {
     options.logLevel.toLowerCase(),
   ];
 
-  if (options.a2aAuthToken) {
+  if (forwardsEnvVars) {
     gcloudCommands.push(
       '--update-env-vars',
-      `${A2A_AUTH_TOKEN_ENV_VAR}=${options.a2aAuthToken}`,
+      formatGcloudEnvVarsArg(deployedEnvVars),
     );
   }
 
@@ -151,8 +166,21 @@ function prepareGCloudArguments(options: DeployToCloudRunOptions): string[] {
 }
 
 export async function deployToCloudRun(options: DeployToCloudRunOptions) {
+  const isFileProvided = await isFile(options.agentPath);
+  const agentDir = isFileProvided
+    ? path.dirname(options.agentPath)
+    : options.agentPath;
+  const appName =
+    options.appName || isFileProvided
+      ? path.parse(options.agentPath).name
+      : path.basename(options.agentPath);
+
+  const envConfig = await loadAgentEnvConfig(agentDir, options);
+
   const project =
-    options.project || (await resolveDefaultFromGcloudConfig('project'));
+    options.project ||
+    envConfig.project ||
+    (await resolveDefaultFromGcloudConfig('project'));
   if (!project || project === '(unset)') {
     throw new Error(
       'Project is not specified and default value for "project" is not set in gcloud config. Please specify region with --project option or set default value running "gcloud config set project YOUR_PROJECT".',
@@ -160,14 +188,18 @@ export async function deployToCloudRun(options: DeployToCloudRunOptions) {
   }
   if (!options.project) {
     options.project = project;
-    console.info(
-      '--project option is not provided, using default project from gcloud config:',
-      project,
-    );
+    if (!envConfig.project) {
+      console.info(
+        '--project option is not provided, using default project from gcloud config:',
+        project,
+      );
+    }
   }
 
   const region =
-    options.region || (await resolveDefaultFromGcloudConfig('run/region'));
+    options.region ||
+    envConfig.region ||
+    (await resolveDefaultFromGcloudConfig('run/region'));
   if (!region) {
     throw new Error(
       'Region is not specified and default value for "run/region" is not set in gcloud config. Please specify region with --region option or set default value running "gcloud config set run/region YOUR_REGION".',
@@ -175,16 +207,18 @@ export async function deployToCloudRun(options: DeployToCloudRunOptions) {
   }
   if (!options.region) {
     options.region = region;
-    console.info(
-      '--region option is not provided, using default region from gcloud config:',
-      region,
-    );
+    if (!envConfig.region) {
+      console.info(
+        '--region option is not provided, using default region from gcloud config:',
+        region,
+      );
+    }
   }
 
   // Built before any directory is created: a conflicting extra gcloud arg
   // throws out of deployToCloudRun, and there is no `finally` this early to
   // remove a temp folder.
-  const gcloudCommands = prepareGCloudArguments(options);
+  const gcloudCommands = prepareGCloudArguments(options, envConfig.envVars);
 
   if (options.a2a && !options.a2aAuthToken) {
     console.warn(
@@ -201,15 +235,6 @@ export async function deployToCloudRun(options: DeployToCloudRunOptions) {
     options.agentPath,
     options.agentFileLoadOptions,
   );
-
-  const isFileProvided = await isFile(options.agentPath);
-  const agentDir = isFileProvided
-    ? path.dirname(options.agentPath)
-    : options.agentPath;
-  const appName =
-    options.appName || isFileProvided
-      ? path.parse(options.agentPath).name
-      : path.basename(options.agentPath);
 
   console.info('Starting deployment to Cloud Run...');
 

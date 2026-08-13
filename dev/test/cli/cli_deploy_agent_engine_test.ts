@@ -17,6 +17,7 @@ import {AgentLoader} from '../../src/utils/agent_loader.js';
 import {
   createTempDir,
   isFile,
+  isFileExists,
   isFolderExists,
   loadFileData,
   saveToFile,
@@ -130,6 +131,7 @@ vi.mock('../../src/utils/file_utils.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../src/utils/file_utils.js')>()),
   createTempDir: vi.fn(),
   isFile: vi.fn(),
+  isFileExists: vi.fn(),
   isFolderExists: vi.fn(),
   loadFileData: vi.fn(),
   saveToFile: vi.fn(),
@@ -901,5 +903,101 @@ describe('deployToAgentEngine', () => {
         }),
       }),
     );
+  });
+
+  describe('.env forwarding', () => {
+    let agentDir: string;
+
+    /** Writes a real `.env` next to the agent and points the deploy at it. */
+    async function givenEnvFile(contents: string) {
+      await fs.writeFile(path.join(agentDir, '.env'), contents, {
+        encoding: 'utf-8',
+      });
+      (isFileExists as Mock).mockResolvedValue(true);
+    }
+
+    /** The deploymentSpec the Reasoning Engine was created with. */
+    function createdDeploymentSpec(): Record<string, unknown> {
+      const [request] = mockCreateInternal.mock.calls[0] as [
+        {config: {spec: {deploymentSpec: Record<string, unknown>}}},
+      ];
+      return request.config.spec.deploymentSpec;
+    }
+
+    beforeEach(async () => {
+      agentDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-agent-env-'));
+      defaultOptions = {...defaultOptions, agentPath: agentDir};
+    });
+
+    afterEach(async () => {
+      await fs.rm(agentDir, {recursive: true, force: true});
+    });
+
+    it('should forward .env variables as deploymentSpec env vars', async () => {
+      await givenEnvFile('A=1\nB=2\n');
+
+      await deployToAgentEngine(defaultOptions);
+
+      expect(createdDeploymentSpec()).toEqual({
+        containerConcurrency: 9,
+        minInstances: 1,
+        maxInstances: 10,
+        resourceLimits: {cpu: '1', memory: '2Gi'},
+        env: [
+          {name: 'A', value: '1'},
+          {name: 'B', value: '2'},
+        ],
+      });
+    });
+
+    it('should omit env from deploymentSpec when there is no .env', async () => {
+      await deployToAgentEngine(defaultOptions);
+
+      expect(createdDeploymentSpec()).not.toHaveProperty('env');
+    });
+
+    it('should use project and region from .env when no flags are passed', async () => {
+      await givenEnvFile(
+        'GOOGLE_CLOUD_PROJECT=env-project\nGOOGLE_CLOUD_LOCATION=env-region\nA=1\n',
+      );
+      const appName = path.basename(agentDir);
+
+      await deployToAgentEngine({
+        ...defaultOptions,
+        project: '',
+        region: '',
+      });
+
+      expect(spawnMock).toHaveBeenCalledWith(
+        'gcloud',
+        expect.arrayContaining([
+          '--tag',
+          `env-region-docker.pkg.dev/env-project/agent-engine-repo/agent-engine-${appName}:latest`,
+          '--project',
+          'env-project',
+        ]),
+        expect.any(Object),
+      );
+      expect(execMock).not.toHaveBeenCalled();
+      expect(createdDeploymentSpec()['env']).toEqual([{name: 'A', value: '1'}]);
+    });
+
+    it('should forward .env variables when updating an existing Reasoning Engine', async () => {
+      await givenEnvFile('A=1\n');
+
+      await deployToAgentEngine({...defaultOptions, agentEngineId: '12345'});
+
+      expect(mockUpdateInternal).toHaveBeenCalledWith(
+        expect.objectContaining({
+          config: expect.objectContaining({
+            spec: expect.objectContaining({
+              deploymentSpec: expect.objectContaining({
+                env: [{name: 'A', value: '1'}],
+              }),
+            }),
+          }),
+        }),
+      );
+    });
   });
 });
