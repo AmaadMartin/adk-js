@@ -10,7 +10,11 @@ import {
   AuthCredentialTypes,
   Context,
   createRestApiTool,
+  createSession,
+  InvocationContext,
+  LlmAgent,
   OpenApiSpecParser,
+  PluginManager,
   RestApiTool,
   ToolAuthHandler,
 } from '@google/adk';
@@ -24,6 +28,42 @@ import {
   prepareRequestBody,
   prepareRequestParams,
 } from '../../../src/tools/openapi_tool/rest_api_tool.js';
+
+const TOKEN_URL = 'https://idp.example.com/token';
+const API_BASE_URL = 'https://api.example.com';
+const ACCESS_TOKEN = 'tok-123';
+
+function jsonResponse(body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: {'content-type': 'application/json'},
+  });
+}
+
+/**
+ * Installs a fetch mock that answers the token endpoint with an access token
+ * and every other request with an API body.
+ */
+function mockOAuth2Fetch() {
+  const fetchMock = vi.fn<typeof globalThis.fetch>(async (input) =>
+    String(input) === TOKEN_URL
+      ? jsonResponse({access_token: ACCESS_TOKEN, expires_in: 3600})
+      : jsonResponse({data: 'ok'}),
+  );
+  globalThis.fetch = fetchMock;
+  return fetchMock;
+}
+
+function createToolContext(): Context {
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'test-invocation',
+      agent: new LlmAgent({name: 'test_agent'}),
+      session: createSession({id: 'test-session', appName: 'test-app'}),
+      pluginManager: new PluginManager(),
+    }),
+  });
+}
 
 describe('RestApiTool', () => {
   afterEach(() => {
@@ -654,6 +694,86 @@ describe('RestApiTool', () => {
       authCredential,
       expect.anything(),
     );
+  });
+
+  it('sends the exchanged bearer token after an authorization_code exchange', async () => {
+    const authScheme: OpenAPIV3.SecuritySchemeObject = {
+      type: 'oauth2',
+      flows: {
+        authorizationCode: {
+          authorizationUrl: 'https://idp.example.com/auth',
+          tokenUrl: TOKEN_URL,
+          scopes: {},
+        },
+      },
+    };
+    const authCredential: AuthCredential = {
+      authType: AuthCredentialTypes.OAUTH2,
+      oauth2: {
+        clientId: 'client_id',
+        clientSecret: 'client_secret',
+        authCode: 'auth_code',
+      },
+    };
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      {baseUrl: API_BASE_URL, path: '/test', method: 'GET'},
+      {responses: {}},
+      authScheme,
+      authCredential,
+    );
+    const fetchMock = mockOAuth2Fetch();
+
+    const result = await tool.runAsync({
+      args: {},
+      toolContext: createToolContext(),
+    });
+
+    expect(fetchMock.mock.calls[0][0]).toBe(TOKEN_URL);
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      `${API_BASE_URL}/test`,
+      expect.objectContaining({
+        headers: {Authorization: `Bearer ${ACCESS_TOKEN}`},
+      }),
+    );
+    expect(result).toEqual({data: 'ok'});
+  });
+
+  it('sends the exchanged bearer token after a client_credentials exchange', async () => {
+    const authScheme: OpenAPIV3.SecuritySchemeObject = {
+      type: 'oauth2',
+      flows: {
+        clientCredentials: {tokenUrl: TOKEN_URL, scopes: {}},
+      },
+    };
+    const authCredential: AuthCredential = {
+      authType: AuthCredentialTypes.OAUTH2,
+      oauth2: {clientId: 'client_id', clientSecret: 'client_secret'},
+    };
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      {baseUrl: API_BASE_URL, path: '/test', method: 'GET'},
+      {responses: {}},
+      authScheme,
+      authCredential,
+    );
+    const fetchMock = mockOAuth2Fetch();
+
+    const result = await tool.runAsync({
+      args: {},
+      toolContext: createToolContext(),
+    });
+
+    expect(fetchMock.mock.calls[0][0]).toBe(TOKEN_URL);
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      `${API_BASE_URL}/test`,
+      expect.objectContaining({
+        headers: {Authorization: `Bearer ${ACCESS_TOKEN}`},
+      }),
+    );
+    expect(result).toEqual({data: 'ok'});
   });
 });
 
