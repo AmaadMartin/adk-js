@@ -42,6 +42,11 @@ import {canUseOutputSchemaWithTools} from '../utils/output_schema_utils.js';
 import {Context} from './context.js';
 
 import {
+  getElapsedS,
+  recordClientOperationDuration,
+  recordClientTokenUsage,
+} from '../telemetry/metrics.js';
+import {
   runAsyncGeneratorWithOtelContext,
   traceCallLlm,
   tracer,
@@ -1228,37 +1233,59 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       throw new Error('CFC is not yet supported in callLlmAsync');
     } else {
       invocationContext.incrementLlmCallCount();
-      const responsesGenerator = llm.generateContentAsync(
-        llmRequest,
-        /* stream= */ invocationContext.runConfig?.streamingMode ===
-          StreamingMode.SSE,
-        invocationContext.abortSignal,
-      );
-
-      for await (const llmResponse of responsesGenerator) {
-        traceCallLlm({
-          invocationContext,
-          eventId: modelResponseEvent.id,
+      const startTime = performance.now();
+      let lastResponse: LlmResponse | undefined;
+      let error: unknown;
+      try {
+        const responsesGenerator = llm.generateContentAsync(
           llmRequest,
-          llmResponse,
-        });
-
-        if (invocationContext.abortSignal?.aborted) {
-          return;
-        }
-
-        // Runs after_model_callback if it exists.
-        const alteredLlmResponse = await this.handleAfterModelCallback(
-          invocationContext,
-          llmResponse,
-          modelResponseEvent,
+          /* stream= */ invocationContext.runConfig?.streamingMode ===
+            StreamingMode.SSE,
+          invocationContext.abortSignal,
         );
 
-        if (invocationContext.abortSignal?.aborted) {
-          return;
-        }
+        for await (const llmResponse of responsesGenerator) {
+          lastResponse = llmResponse;
+          traceCallLlm({
+            invocationContext,
+            eventId: modelResponseEvent.id,
+            llmRequest,
+            llmResponse,
+          });
 
-        yield alteredLlmResponse ?? llmResponse;
+          if (invocationContext.abortSignal?.aborted) {
+            return;
+          }
+
+          // Runs after_model_callback if it exists.
+          const alteredLlmResponse = await this.handleAfterModelCallback(
+            invocationContext,
+            llmResponse,
+            modelResponseEvent,
+          );
+
+          if (invocationContext.abortSignal?.aborted) {
+            return;
+          }
+
+          yield alteredLlmResponse ?? llmResponse;
+        }
+      } catch (e) {
+        error = e;
+        throw e;
+      } finally {
+        recordClientOperationDuration({
+          agentName: this.name,
+          elapsedS: getElapsedS(undefined, startTime),
+          llmRequest,
+          response: lastResponse,
+          error,
+        });
+        recordClientTokenUsage({
+          agentName: this.name,
+          llmRequest,
+          response: lastResponse,
+        });
       }
     }
   }
