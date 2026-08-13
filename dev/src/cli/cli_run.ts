@@ -98,6 +98,14 @@ interface PrintEventOptions {
   announcePauses?: boolean;
 }
 
+/**
+ * Reports a failure the way an error carried on an event is reported, so a
+ * thrown failure and a reported one read alike.
+ */
+function printError(author: string, detail: string): void {
+  console.error(`[${author}] error: ${detail}`);
+}
+
 /** Prints one event's text, plus anything the user would otherwise not see. */
 function printEvent(event: Event, options: PrintEventOptions = {}): void {
   const {announcePauses = true} = options;
@@ -115,7 +123,7 @@ function printEvent(event: Event, options: PrintEventOptions = {}): void {
     const detail = [event.errorCode, event.errorMessage]
       .filter(Boolean)
       .join(': ');
-    console.error(`[${author}] error: ${detail}`);
+    printError(author, detail);
   }
 
   if (!announcePauses) {
@@ -256,15 +264,22 @@ async function runInteractively(
       break;
     }
 
-    for await (const event of runner.runAsync({
-      userId: options.session.userId,
-      sessionId: options.session.id,
-      newMessage: {role: 'user', parts: [{text: query}]},
-      // Interactive CLI: let a plain-text "yes"/"no" resolve a pending tool
-      // confirmation (opt-in; off by default on non-interactive surfaces).
-      runConfig: {plainTextToolConfirmation: true},
-    })) {
-      printEvent(event);
+    try {
+      for await (const event of runner.runAsync({
+        userId: options.session.userId,
+        sessionId: options.session.id,
+        newMessage: {role: 'user', parts: [{text: query}]},
+        // Interactive CLI: let a plain-text "yes"/"no" resolve a pending tool
+        // confirmation (opt-in; off by default on non-interactive surfaces).
+        runConfig: {plainTextToolConfirmation: true},
+      })) {
+        printEvent(event);
+      }
+    } catch (e: unknown) {
+      // A failed turn is not a reason to lose the conversation: the session
+      // survives and the cause is often something the user can retype. Errors
+      // raised before this loop stay fatal.
+      printError(currentAgent.name, e instanceof Error ? e.message : String(e));
     }
   }
 }
