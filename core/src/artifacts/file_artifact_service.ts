@@ -126,14 +126,7 @@ export class FileArtifactService implements BaseArtifactService {
       mimeType = artifact.fileData!.mimeType;
     }
 
-    const canonicalUri = await getCanonicalUri(
-      this.rootDir,
-      appName,
-      userId,
-      sessionId,
-      filename,
-      nextVersion,
-    );
+    const canonicalUri = pathToFileURL(contentPath).toString();
     const metadata: FileArtifactVersion = {
       fileName: filename,
       mimeType,
@@ -567,42 +560,6 @@ async function getArtifactVersionsFromDir(
     );
     return [];
   }
-}
-
-/**
- * Gets the canonical URI for an artifact version.
- *
- * @param rootDir The root directory.
- * @param appName The app name.
- * @param userId The user ID.
- * @param sessionId The session ID.
- * @param filename The filename.
- * @param version The version.
- * @returns A promise that resolves to the canonical URI.
- */
-async function getCanonicalUri(
-  rootDir: string,
-  appName: string,
-  userId: string,
-  sessionId: string,
-  filename: string,
-  version: number,
-): Promise<string> {
-  const artifactDir = await getArtifactDir(
-    rootDir,
-    appName,
-    userId,
-    sessionId,
-    filename,
-  );
-  const storedFilename = path.basename(artifactDir);
-  const versionsDir = getVersionsDir(artifactDir);
-  const payloadPath = path.join(
-    versionsDir,
-    version.toString(),
-    storedFilename,
-  );
-  return pathToFileURL(payloadPath).toString();
 }
 
 /**
