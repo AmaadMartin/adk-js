@@ -10,15 +10,13 @@
  * resume (mirrors the Python `workflows/auth_api_key` sample).
  */
 
-import {
+import type {
   AuthConfig,
   AuthCredential,
-  AuthCredentialTypes,
   AuthScheme,
-  FunctionNode,
   NodeContext,
-  Workflow,
 } from '@google/adk';
+import {AuthCredentialTypes, FunctionNode, Workflow} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 import {
   collect,

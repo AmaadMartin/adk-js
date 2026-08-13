@@ -4,10 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {OpenAPIV3} from 'openapi-types';
-import {Context} from '../../../agents/context.js';
-import {AuthCredential} from '../../../auth/auth_credential.js';
-import {AuthConfig} from '../../../auth/auth_tool.js';
+import type {OpenAPIV3} from 'openapi-types';
+import type {Context} from '../../../agents/context.js';
+import type {AuthCredential} from '../../../auth/auth_credential.js';
+import type {AuthConfig} from '../../../auth/auth_tool.js';
 import {experimental} from '../../../utils/experimental.js';
 import {AutoAuthCredentialExchanger} from '../auth/credential_exchangers/auto_auth_credential_exchanger.js';
 

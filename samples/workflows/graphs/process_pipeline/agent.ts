@@ -18,13 +18,8 @@
  * Try "the checkout page throws a 500" or "where is my parcel?".
  */
 
-import {
-  createEvent,
-  LlmAgent,
-  node,
-  NodeContext,
-  WorkflowAgent,
-} from '@google/adk';
+import type {NodeContext} from '@google/adk';
+import {createEvent, LlmAgent, node, WorkflowAgent} from '@google/adk';
 
 const processMessage = new LlmAgent({
   name: 'process_message',

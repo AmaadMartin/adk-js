@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import * as path from 'node:path';
-import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
+import type {Mock} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {
   createTempDir,

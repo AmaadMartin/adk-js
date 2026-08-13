@@ -4,10 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {CodeExecutionResult, ExecuteCodeParams} from '@google/adk';
 import {
   BaseCodeExecutor,
-  CodeExecutionResult,
-  ExecuteCodeParams,
   LlmAgent,
   loadSkillFromDir,
   SkillToolset,

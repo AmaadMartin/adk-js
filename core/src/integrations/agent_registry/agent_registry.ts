@@ -4,24 +4,23 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
+import type {
   AgentCapabilities,
   AgentCard,
   AgentSkill,
   TransportProtocol,
 } from '@a2a-js/sdk';
-import {Client, ClientFactory} from '@a2a-js/sdk/client';
+import type {Client, ClientFactory} from '@a2a-js/sdk/client';
 import {GoogleAuth} from 'google-auth-library';
 import {RemoteA2AAgent} from '../../a2a/a2a_remote_agent.js';
-import {ReadonlyContext} from '../../agents/readonly_context.js';
-import {AuthCredential} from '../../auth/auth_credential.js';
-import {AuthScheme} from '../../auth/auth_schemes.js';
-import {StreamableHTTPConnectionParams} from '../../tools/mcp/mcp_session_manager.js';
+import type {ReadonlyContext} from '../../agents/readonly_context.js';
+import type {AuthCredential} from '../../auth/auth_credential.js';
+import type {AuthScheme} from '../../auth/auth_schemes.js';
+import type {StreamableHTTPConnectionParams} from '../../tools/mcp/mcp_session_manager.js';
 import {logger} from '../../utils/logger.js';
 import {AgentRegistrySingleMCPToolset} from './agent_registry_mcp_toolset.js';
 import {cleanName, isGoogleApi} from './helpers.js';
-import {
-  AGENT_REGISTRY_BASE_URL,
+import type {
   AgentInfo,
   AgentSkillMetadata,
   ConnectionUriFilter,
@@ -33,8 +32,8 @@ import {
   ListEndpointsResponse,
   ListMcpServersResponse,
   McpServer,
-  ProtocolType,
 } from './types.js';
+import {AGENT_REGISTRY_BASE_URL, ProtocolType} from './types.js';
 
 export * from './agent_registry_mcp_toolset.js';
 export * from './helpers.js';

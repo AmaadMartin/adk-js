@@ -5,8 +5,8 @@
  */
 
 import {InvocationContext} from '../agents/invocation_context.js';
-import {Event} from '../events/event.js';
-import {BaseNode} from './base_node.js';
+import type {Event} from '../events/event.js';
+import type {BaseNode} from './base_node.js';
 import {createSubBranch} from './branch_path.js';
 import {
   InvocationAbortedError,

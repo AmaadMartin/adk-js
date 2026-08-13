@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {AuthScheme} from './auth_schemes.js';
-import {BaseAuthProvider} from './base_auth_provider.js';
+import type {AuthScheme} from './auth_schemes.js';
+import type {BaseAuthProvider} from './base_auth_provider.js';
 
 /**
  * Registry for auth provider instances.

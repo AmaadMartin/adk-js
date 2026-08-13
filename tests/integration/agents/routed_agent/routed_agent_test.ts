@@ -4,14 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  AgentRouter,
-  AgentTool,
-  BaseAgent,
-  InvocationContext,
-  LlmAgent,
-  RoutedAgent,
-} from '@google/adk';
+import type {AgentRouter, InvocationContext} from '@google/adk';
+import {AgentTool, BaseAgent, LlmAgent, RoutedAgent} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 import {createRunner, GeminiWithMockResponses} from '../../test_case_utils.js';
 

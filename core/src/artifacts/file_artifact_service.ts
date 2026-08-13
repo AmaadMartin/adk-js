@@ -4,14 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Part} from '@google/genai';
+import type {Part} from '@google/genai';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import {fileURLToPath, pathToFileURL} from 'url';
 
 import {logger} from '../utils/logger.js';
 
-import {
+import type {
   ArtifactVersion,
   BaseArtifactService,
   DeleteArtifactRequest,

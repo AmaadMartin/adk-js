@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Part} from '@google/genai';
-import {CompositeSessionKey} from '../sessions/session.js';
+import type {Part} from '@google/genai';
+import type {CompositeSessionKey} from '../sessions/session.js';
 
 /**
  * The parameters for `saveArtifact`.

@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Session} from '../sessions/session.js';
+import type {Session} from '../sessions/session.js';
 
-import {MemoryEntry} from './memory_entry.js';
+import type {MemoryEntry} from './memory_entry.js';
 
 /**
  * Represents the response from a memory search.

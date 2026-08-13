@@ -17,7 +17,8 @@
  *   npm run sample -- samples/workflows/data_handling/structured_output/agent.ts
  */
 
-import {createEvent, node, NodeContext, WorkflowAgent} from '@google/adk';
+import type {NodeContext} from '@google/adk';
+import {createEvent, node, WorkflowAgent} from '@google/adk';
 import {z} from 'zod';
 
 const cityInfoSchema = z.object({

@@ -4,16 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {Event, InvocationContext} from '@google/adk';
 import {
   createEvent,
-  Event,
   InMemoryArtifactService,
   InMemorySessionService,
-  InvocationContext,
   LlmAgent,
   Runner,
 } from '@google/adk';
-import {Content, Part} from '@google/genai';
+import type {Content, Part} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
 class SimulatedGcsArtifactService extends InMemoryArtifactService {

@@ -14,7 +14,8 @@
  * Enter a number between 0 and 10.
  */
 
-import {createEvent, node, NodeContext, WorkflowAgent} from '@google/adk';
+import type {NodeContext} from '@google/adk';
+import {createEvent, node, WorkflowAgent} from '@google/adk';
 
 const validateInput = node(
   function* (ctx: NodeContext, nodeInput: string) {

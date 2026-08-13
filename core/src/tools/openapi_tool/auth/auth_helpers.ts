@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {OpenAPIV3} from 'openapi-types';
-import {AuthCredential} from '../../../auth/auth_credential.js';
+import type {OpenAPIV3} from 'openapi-types';
+import type {AuthCredential} from '../../../auth/auth_credential.js';
 
 /**
  * Applies the given credential to the request headers and URL.

@@ -4,9 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GenerateContentConfig, VertexRagStore} from '@google/genai';
+import type {GenerateContentConfig, VertexRagStore} from '@google/genai';
 
-import {BaseTool, ToolProcessLlmRequest} from './base_tool.js';
+import type {ToolProcessLlmRequest} from './base_tool.js';
+import {BaseTool} from './base_tool.js';
 
 /**
  * A tool that retrieves relevant content from a Vertex AI RAG corpus to ground

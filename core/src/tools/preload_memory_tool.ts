@@ -6,11 +6,8 @@
 
 import {appendInstructions} from '../models/llm_request.js';
 import {logger} from '../utils/logger.js';
-import {
-  BaseTool,
-  RunAsyncToolRequest,
-  ToolProcessLlmRequest,
-} from './base_tool.js';
+import type {RunAsyncToolRequest, ToolProcessLlmRequest} from './base_tool.js';
+import {BaseTool} from './base_tool.js';
 
 /**
  * A tool that preloads the memory for the current user.

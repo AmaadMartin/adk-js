@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Event as AdkEvent, InMemoryRunner, RemoteA2AAgent} from '@google/adk';
+import type {Event as AdkEvent} from '@google/adk';
+import {InMemoryRunner, RemoteA2AAgent} from '@google/adk';
 import {createUserContent} from '@google/genai';
 import * as path from 'node:path';
 import {afterAll, beforeAll, describe, expect, it} from 'vitest';

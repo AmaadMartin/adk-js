@@ -14,7 +14,7 @@ import {
   PluginManager,
 } from '@google/adk';
 import * as fs from 'fs';
-import {OpenAPIV3} from 'openapi-types';
+import type {OpenAPIV3} from 'openapi-types';
 import * as path from 'path';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 

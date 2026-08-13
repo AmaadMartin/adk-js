@@ -4,17 +4,19 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Client} from '@google-cloud/vertexai';
+import type {Client} from '@google-cloud/vertexai';
+import type {
+  Event,
+  MemoryEntry,
+  VertexAiMemoryBankServiceOptions,
+} from '@google/adk';
 import {
   createEvent,
   createSession,
-  Event,
   getLogger,
-  MemoryEntry,
   VertexAiMemoryBankService,
-  VertexAiMemoryBankServiceOptions,
 } from '@google/adk';
-import {Content, Part} from '@google/genai';
+import type {Content, Part} from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 const clientConstructor = vi.hoisted(() => vi.fn());

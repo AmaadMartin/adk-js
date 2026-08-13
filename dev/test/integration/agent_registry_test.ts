@@ -4,16 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  AgentTool,
-  FunctionTool,
-  LlmAgent,
-  MCPToolset,
-  SingleAgentCallback,
-} from '@google/adk';
+import type {SingleAgentCallback} from '@google/adk';
+import {AgentTool, FunctionTool, LlmAgent, MCPToolset} from '@google/adk';
 import {beforeEach, describe, expect, it} from 'vitest';
 import {AgentRegistry} from '../../src/integration/agent_registry.js';
-import {YamlAgentConfig} from '../../src/integration/agent_types.js';
+import type {YamlAgentConfig} from '../../src/integration/agent_types.js';
 import {IntegrationRegistry} from '../../src/integration/integration_registry.js';
 
 describe('AgentRegistry', () => {

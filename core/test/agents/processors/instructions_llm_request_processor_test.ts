@@ -4,20 +4,23 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {
+  BaseLlmConnection,
+  LlmRequest,
+  LlmResponse,
+  ReadonlyContext,
+} from '@google/adk';
 import {
   BaseAgent,
   BaseLlm,
-  BaseLlmConnection,
   createSession,
   FunctionTool,
   InvocationContext,
   LlmAgent,
-  LlmRequest,
-  LlmResponse,
   PluginManager,
-  ReadonlyContext,
 } from '@google/adk';
-import {Schema, Type} from '@google/genai';
+import type {Schema} from '@google/genai';
+import {Type} from '@google/genai';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import {INSTRUCTIONS_LLM_REQUEST_PROCESSOR} from '../../../src/agents/processors/instructions_llm_request_processor.js';
 

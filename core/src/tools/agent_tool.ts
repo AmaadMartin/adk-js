@@ -4,11 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content, FunctionDeclaration, Type} from '@google/genai';
+import type {Content, FunctionDeclaration} from '@google/genai';
+import {Type} from '@google/genai';
 
-import {BaseAgent} from '../agents/base_agent.js';
+import type {BaseAgent} from '../agents/base_agent.js';
 import {isLlmAgent} from '../agents/llm_agent.js';
-import {Event} from '../events/event.js';
+import type {Event} from '../events/event.js';
 import {InMemoryMemoryService} from '../memory/in_memory_memory_service.js';
 import {Runner} from '../runner/runner.js';
 import {InMemorySessionService} from '../sessions/in_memory_session_service.js';
@@ -16,7 +17,8 @@ import {GoogleLLMVariant} from '../utils/variant_utils.js';
 
 import {State} from '../sessions/state.js';
 
-import {BaseTool, RunAsyncToolRequest} from './base_tool.js';
+import type {RunAsyncToolRequest} from './base_tool.js';
+import {BaseTool} from './base_tool.js';
 import {ForwardingArtifactService} from './forwarding_artifact_service.js';
 
 /**

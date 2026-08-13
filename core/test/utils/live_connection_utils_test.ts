@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GroundingMetadata, LiveServerGoAway} from '@google/genai';
+import type {GroundingMetadata, LiveServerGoAway} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {LiveResponseAggregator} from '../../src/utils/live_connection_utils.js';
 import {liveServerMessage} from './live_server_message_test_utils.js';

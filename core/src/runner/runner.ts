@@ -4,39 +4,43 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content, createPartFromText, Part} from '@google/genai';
+import type {Content, Part} from '@google/genai';
+import {createPartFromText} from '@google/genai';
 import {context, trace} from '@opentelemetry/api';
 
-import {BaseAgent} from '../agents/base_agent.js';
+import type {BaseAgent} from '../agents/base_agent.js';
 import {findMatchingFunctionCall} from '../agents/functions.js';
 import {
   InvocationContext,
   newInvocationContextId,
 } from '../agents/invocation_context.js';
 import {isLlmAgent} from '../agents/llm_agent.js';
-import {createRunConfig, RunConfig} from '../agents/run_config.js';
-import {App} from '../apps/app.js';
-import {ResumabilityConfig} from '../apps/resumability_config.js';
-import {BaseArtifactService} from '../artifacts/base_artifact_service.js';
+import type {RunConfig} from '../agents/run_config.js';
+import {createRunConfig} from '../agents/run_config.js';
+import type {App} from '../apps/app.js';
+import type {ResumabilityConfig} from '../apps/resumability_config.js';
+import type {BaseArtifactService} from '../artifacts/base_artifact_service.js';
 import {ScopedArtifactService} from '../artifacts/scoped_artifact_service.js';
 
-import {BaseCredentialService} from '../auth/credential_service/base_credential_service.js';
+import type {BaseCredentialService} from '../auth/credential_service/base_credential_service.js';
 import {
   BuiltInCodeExecutor,
   isBuiltInCodeExecutor,
 } from '../code_executors/built_in_code_executor.js';
-import {createEvent, Event} from '../events/event.js';
+import type {Event} from '../events/event.js';
+import {createEvent} from '../events/event.js';
 import {createEventActions} from '../events/event_actions.js';
-import {BaseMemoryService} from '../memory/base_memory_service.js';
-import {BasePlugin} from '../plugins/base_plugin.js';
+import type {BaseMemoryService} from '../memory/base_memory_service.js';
+import type {BasePlugin} from '../plugins/base_plugin.js';
 import {PluginManager} from '../plugins/plugin_manager.js';
-import {BaseSessionService} from '../sessions/base_session_service.js';
-import {CompositeSessionKey, Session} from '../sessions/session.js';
+import type {BaseSessionService} from '../sessions/base_session_service.js';
+import type {CompositeSessionKey, Session} from '../sessions/session.js';
 import {
   runAsyncGeneratorWithOtelContext,
   tracer,
 } from '../telemetry/tracing.js';
-import {BaseToolset, isBaseToolset} from '../tools/base_toolset.js';
+import type {BaseToolset} from '../tools/base_toolset.js';
+import {isBaseToolset} from '../tools/base_toolset.js';
 import {logger} from '../utils/logger.js';
 import {isGemini2OrAbove} from '../utils/model_name.js';
 

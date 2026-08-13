@@ -4,11 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content} from '@google/genai';
+import type {Content} from '@google/genai';
 
 import {State} from '../sessions/state.js';
 
-import {InvocationContext} from './invocation_context.js';
+import type {InvocationContext} from './invocation_context.js';
 
 /**
  * A readonly context represents the data of a single invocation of an agent.

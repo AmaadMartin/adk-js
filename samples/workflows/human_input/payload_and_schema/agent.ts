@@ -24,7 +24,8 @@
  * Turn 1: a city, e.g. "Lisbon". Turn 2: say which activities appeal to you.
  */
 
-import {node, NodeContext, RequestInput, WorkflowAgent} from '@google/adk';
+import type {NodeContext} from '@google/adk';
+import {node, RequestInput, WorkflowAgent} from '@google/adk';
 import {z} from 'zod';
 
 /**

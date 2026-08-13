@@ -4,9 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
+import type {
   Part as A2APart,
-  AGENT_CARD_PATH,
   AgentCard,
   Message,
   MessageSendConfiguration,
@@ -15,10 +14,14 @@ import {
   TaskArtifactUpdateEvent,
   TaskStatusUpdateEvent,
 } from '@a2a-js/sdk';
-import {Client, ClientFactory} from '@a2a-js/sdk/client';
-import {BaseAgent, BaseAgentConfig} from '../agents/base_agent.js';
-import {InvocationContext} from '../agents/invocation_context.js';
-import {Event as AdkEvent, createEvent} from '../events/event.js';
+import {AGENT_CARD_PATH} from '@a2a-js/sdk';
+import type {Client} from '@a2a-js/sdk/client';
+import {ClientFactory} from '@a2a-js/sdk/client';
+import type {BaseAgentConfig} from '../agents/base_agent.js';
+import {BaseAgent} from '../agents/base_agent.js';
+import type {InvocationContext} from '../agents/invocation_context.js';
+import type {Event as AdkEvent} from '../events/event.js';
+import {createEvent} from '../events/event.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
 import {logger} from '../utils/logger.js';
 import {MessageRole} from './a2a_event.js';

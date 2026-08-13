@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {InvocationContext} from '../agents/invocation_context.js';
-import {BaseContextCompactor} from './base_context_compactor.js';
+import type {InvocationContext} from '../agents/invocation_context.js';
+import type {BaseContextCompactor} from './base_context_compactor.js';
 
 export interface TruncatingContextCompactorOptions {
   /** The maximum number of events to retain in the session history. */

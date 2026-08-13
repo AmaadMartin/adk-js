@@ -4,9 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
+import type {
   CitationMetadata,
-  FinishReason,
   FunctionCall,
   GenerateContentResponse,
   GenerateContentResponseUsageMetadata,
@@ -14,10 +13,12 @@ import {
   Part,
   PartialArg,
 } from '@google/genai';
+import {FinishReason} from '@google/genai';
 import {JSONPath} from 'jsonpath-plus';
 import {generateClientFunctionCallId} from '../events/event.js';
 import {FeatureName, isFeatureEnabled} from '../features/feature_registry.js';
-import {createLlmResponse, LlmResponse} from '../models/llm_response.js';
+import type {LlmResponse} from '../models/llm_response.js';
+import {createLlmResponse} from '../models/llm_response.js';
 
 interface StreamingStrategy {
   processResponse(

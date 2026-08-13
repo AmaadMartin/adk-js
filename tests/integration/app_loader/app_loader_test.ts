@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {App, isApp, isBaseAgent} from '@google/adk';
+import type {App} from '@google/adk';
+import {isApp, isBaseAgent} from '@google/adk';
 import {exec, spawn} from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';

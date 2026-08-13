@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {AuthProviderRegistry, AuthScheme, BaseAuthProvider} from '@google/adk';
+import type {AuthScheme, BaseAuthProvider} from '@google/adk';
+import {AuthProviderRegistry} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
 // Mock auth provider for testing

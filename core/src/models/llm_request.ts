@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
+import type {
   Content,
   FunctionDeclaration,
   GenerateContentConfig,
@@ -12,7 +12,7 @@ import {
   SchemaUnion,
 } from '@google/genai';
 
-import {BaseTool} from '../tools/base_tool.js';
+import type {BaseTool} from '../tools/base_tool.js';
 
 /**
  * LLM request class that allows passing in tools, output schema and system

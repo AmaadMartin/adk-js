@@ -4,13 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {Session} from '@google/adk';
 import {
   createEventActions,
   functionsExportedForTestingOnly,
   InvocationContext,
   LlmAgent,
   PluginManager,
-  Session,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
 import {
@@ -18,8 +18,9 @@ import {
   getUserInputRequests,
   requiresUserInput,
 } from '../../src/agents/user_input_request.js';
-import {AuthConfig} from '../../src/auth/auth_tool.js';
-import {createEvent, Event} from '../../src/events/event.js';
+import type {AuthConfig} from '../../src/auth/auth_tool.js';
+import type {Event} from '../../src/events/event.js';
+import {createEvent} from '../../src/events/event.js';
 
 /** An `adk_request_input` interrupt, as raised by a workflow `RequestInput`. */
 function requestInputEvent(

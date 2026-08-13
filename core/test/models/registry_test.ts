@@ -4,22 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  BaseLlm,
-  BaseLlmConnection,
-  LlmAgent,
-  LLMRegistry,
-  LlmRequest,
-  LlmResponse,
-} from '@google/adk';
+import type {BaseLlmConnection, LlmRequest, LlmResponse} from '@google/adk';
+import {BaseLlm, LlmAgent, LLMRegistry} from '@google/adk';
 import {beforeAll, describe, expect, it} from 'vitest';
 
-import {
-  Blob,
-  Content,
-  createModelContent,
-  GenerateContentResponse,
-} from '@google/genai';
+import type {Blob, Content} from '@google/genai';
+import {createModelContent, GenerateContentResponse} from '@google/genai';
 
 class TestLlmConnection implements BaseLlmConnection {
   async sendHistory(_history: Content[]): Promise<void> {

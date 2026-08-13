@@ -4,11 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Part} from '@google/genai';
+import type {Part} from '@google/genai';
 import {describe, expect, it, vi} from 'vitest';
-import {BaseArtifactService} from '../../src/artifacts/base_artifact_service.js';
+import type {BaseArtifactService} from '../../src/artifacts/base_artifact_service.js';
 import {ScopedArtifactService} from '../../src/artifacts/scoped_artifact_service.js';
-import {
+import type {
   SessionLoadArtifactRequest,
   SessionSaveArtifactRequest,
 } from '../../src/artifacts/session_artifact_service.js';

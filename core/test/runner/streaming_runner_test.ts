@@ -4,25 +4,28 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
+import type {
   BaseAgent,
-  BaseLlm,
   BaseLlmConnection,
-  BaseTool,
-  createEvent,
   Event,
-  EventType,
-  InMemoryArtifactService,
-  InMemorySessionService,
   InvocationContext,
-  LlmAgent,
   LlmRequest,
   LlmResponse,
   RunAsyncToolRequest,
+} from '@google/adk';
+import {
+  BaseLlm,
+  BaseTool,
+  createEvent,
+  EventType,
+  InMemoryArtifactService,
+  InMemorySessionService,
+  LlmAgent,
   Runner,
   toStructuredEvents,
 } from '@google/adk';
-import {Content, Language, Outcome} from '@google/genai';
+import type {Content} from '@google/genai';
+import {Language, Outcome} from '@google/genai';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 
 const TEST_APP_ID = 'test_app_id';

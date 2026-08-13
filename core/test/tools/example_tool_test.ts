@@ -6,18 +6,16 @@
 
 import {describe, expect, it, vi} from 'vitest';
 
+import type {BaseAgent, Example, LlmRequest} from '@google/adk';
 import {
-  BaseAgent,
   BaseExampleProvider,
   Context,
   createSession,
-  Example,
   ExampleTool,
   InvocationContext,
-  LlmRequest,
   PluginManager,
 } from '@google/adk';
-import {Content} from '@google/genai';
+import type {Content} from '@google/genai';
 
 const SIMPLE_EXAMPLE: Example = {
   input: {parts: [{text: 'What is 2+2?'}]},

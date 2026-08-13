@@ -6,8 +6,12 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import {Client, ClientFactory} from '@a2a-js/sdk/client';
+import type {Client, ClientFactory} from '@a2a-js/sdk/client';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
+import type {
+  ReadonlyContext,
+  StreamableHTTPConnectionParams,
+} from '../../src/index.js';
 import {
   AgentRegistry,
   AgentRegistrySingleMCPToolset,
@@ -15,9 +19,7 @@ import {
   GCP_MCP_SERVER_DESTINATION_ID,
   isGoogleApi,
   ProtocolType,
-  ReadonlyContext,
   RemoteA2AAgent,
-  StreamableHTTPConnectionParams,
 } from '../../src/index.js';
 
 // Mock google-auth-library

@@ -4,12 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {InvocationContext} from '../agents/invocation_context.js';
+import type {InvocationContext} from '../agents/invocation_context.js';
 import {createEvent} from '../events/event.js';
 import {ContextCompactionTrigger} from '../plugins/base_plugin.js';
-import {BaseContextCompactor} from './base_context_compactor.js';
+import type {BaseContextCompactor} from './base_context_compactor.js';
 import {getActiveEvents} from './compaction_utils.js';
-import {BaseSummarizer} from './summarizers/base_summarizer.js';
+import type {BaseSummarizer} from './summarizers/base_summarizer.js';
 
 /**
  * A context compactor that triggers compaction when the agent explicitly

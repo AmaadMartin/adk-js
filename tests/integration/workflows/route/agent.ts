@@ -18,13 +18,8 @@
  * Try "What is ADK?" (question) or "ADK is great." (statement).
  */
 
-import {
-  createEvent,
-  LlmAgent,
-  node,
-  NodeContext,
-  WorkflowAgent,
-} from '@google/adk';
+import type {NodeContext} from '@google/adk';
+import {createEvent, LlmAgent, node, WorkflowAgent} from '@google/adk';
 import {z} from 'zod';
 
 const inputCategorySchema = z.object({

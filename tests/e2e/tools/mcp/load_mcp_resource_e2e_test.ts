@@ -4,12 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  Context,
-  LlmRequest,
-  LoadMcpResourceTool,
-  MCPToolset,
-} from '@google/adk';
+import type {Context, LlmRequest} from '@google/adk';
+import {LoadMcpResourceTool, MCPToolset} from '@google/adk';
 import {fileURLToPath} from 'node:url';
 import {afterEach, describe, expect, it} from 'vitest';
 

@@ -4,11 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Bucket, File, Storage, StorageOptions} from '@google-cloud/storage';
-import {createPartFromBase64, createPartFromText, Part} from '@google/genai';
+import type {Bucket, File, StorageOptions} from '@google-cloud/storage';
+import {Storage} from '@google-cloud/storage';
+import type {Part} from '@google/genai';
+import {createPartFromBase64, createPartFromText} from '@google/genai';
 import {logger} from '../utils/logger.js';
 
-import {
+import type {
   ArtifactVersion,
   BaseArtifactService,
   DeleteArtifactRequest,

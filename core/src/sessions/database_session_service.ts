@@ -4,23 +4,21 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  FilterQuery,
-  LockMode,
-  Options as MikroDBOptions,
-  MikroORM,
-} from '@mikro-orm/core';
+import type {FilterQuery, Options as MikroDBOptions} from '@mikro-orm/core';
+import {LockMode, MikroORM} from '@mikro-orm/core';
 
-import {Event} from '../events/event.js';
+import type {Event} from '../events/event.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
-import {
+import type {
   AppendEventRequest,
-  BaseSessionService,
   CreateSessionRequest,
   DeleteSessionRequest,
   GetSessionRequest,
   ListSessionsRequest,
   ListSessionsResponse,
+} from './base_session_service.js';
+import {
+  BaseSessionService,
   mergeStates,
   trimTempDeltaState,
 } from './base_session_service.js';
@@ -36,7 +34,8 @@ import {
   StorageSession,
   StorageUserState,
 } from './db/schema.js';
-import {createSession, Session} from './session.js';
+import type {Session} from './session.js';
+import {createSession} from './session.js';
 import {State} from './state.js';
 
 /**

@@ -4,17 +4,19 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content} from '@google/genai';
+import type {Content} from '@google/genai';
 import {context, trace} from '@opentelemetry/api';
 
-import {createEvent, Event} from '../events/event.js';
+import type {Event} from '../events/event.js';
+import {createEvent} from '../events/event.js';
 
 import {
   runAsyncGeneratorWithOtelContext,
   traceAgentInvocation,
   tracer,
 } from '../telemetry/tracing.js';
-import {BaseNode, BaseNodeConfig} from '../workflow/base_node.js';
+import type {BaseNodeConfig} from '../workflow/base_node.js';
+import {BaseNode} from '../workflow/base_node.js';
 import type {NodeContext} from '../workflow/node_context.js';
 import {Context} from './context.js';
 import {InvocationContext} from './invocation_context.js';

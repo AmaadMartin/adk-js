@@ -22,7 +22,8 @@
  *   npm run sample -- samples/workflows/dynamic/nodes/agent.ts
  */
 
-import {FunctionNode, node, NodeContext, WorkflowAgent} from '@google/adk';
+import type {NodeContext} from '@google/adk';
+import {FunctionNode, node, WorkflowAgent} from '@google/adk';
 
 /** The plain function both node forms wrap. */
 function myFunctionNode(_ctx: NodeContext, nodeInput: unknown): string {

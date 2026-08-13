@@ -4,9 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {OpenAPIV3} from 'openapi-types';
+import type {OpenAPIV3} from 'openapi-types';
 import {experimental} from '../../../utils/experimental.js';
-import {ApiParameter, OperationParser} from './operation_parser.js';
+import type {ApiParameter} from './operation_parser.js';
+import {OperationParser} from './operation_parser.js';
 
 const VALID_SCHEMA_TYPES = new Set([
   'array',

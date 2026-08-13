@@ -5,7 +5,7 @@
  */
 
 import {BaseNode} from '../base_node.js';
-import {NodeContext} from '../node_context.js';
+import type {NodeContext} from '../node_context.js';
 
 /**
  * Default concurrency when `maxParallelWorkers` is not set. Bounded so a

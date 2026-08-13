@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {LiveRequest, LiveRequestQueue} from '@google/adk';
+import type {LiveRequest} from '@google/adk';
+import {LiveRequestQueue} from '@google/adk';
 import {createUserContent} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 

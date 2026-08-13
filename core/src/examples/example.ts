@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content} from '@google/genai';
+import type {Content} from '@google/genai';
 
 /**
  * A few-shot example.

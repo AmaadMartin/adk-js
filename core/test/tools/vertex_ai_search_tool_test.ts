@@ -4,14 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GenerateContentConfig} from '@google/genai';
+import type {GenerateContentConfig} from '@google/genai';
 import {afterEach, describe, expect, it} from 'vitest';
-import {Context} from '../../src/agents/context.js';
-import {LlmRequest} from '../../src/models/llm_request.js';
-import {
-  VertexAiSearchTool,
-  VertexAiSearchToolParams,
-} from '../../src/tools/vertex_ai_search_tool.js';
+import type {Context} from '../../src/agents/context.js';
+import type {LlmRequest} from '../../src/models/llm_request.js';
+import type {VertexAiSearchToolParams} from '../../src/tools/vertex_ai_search_tool.js';
+import {VertexAiSearchTool} from '../../src/tools/vertex_ai_search_tool.js';
 
 interface TestTool {
   retrieval?: {

@@ -4,11 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Context} from '../../agents/context.js';
-import {AuthCredential} from '../auth_credential.js';
-import {AuthConfig} from '../auth_tool.js';
+import type {Context} from '../../agents/context.js';
+import type {AuthCredential} from '../auth_credential.js';
+import type {AuthConfig} from '../auth_tool.js';
 
-import {BaseCredentialService} from './base_credential_service.js';
+import type {BaseCredentialService} from './base_credential_service.js';
 
 /**
  * @experimental  (Experimental, subject to change) Class for in memory

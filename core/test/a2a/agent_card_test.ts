@@ -7,9 +7,9 @@
 import {describe, expect, it, vi} from 'vitest';
 import {buildAgentSkills} from '../../src/a2a/agent_card.js';
 
+import type {BaseTool} from '@google/adk';
 import {
   BaseAgent,
-  BaseTool,
   BaseToolset,
   FunctionTool,
   getA2AAgentCard,

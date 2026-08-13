@@ -23,11 +23,11 @@
  * Turn 2 (only if > 1 day): type "yes" or "no" to approve/deny.
  */
 
+import type {NodeContext} from '@google/adk';
 import {
   createEvent,
   LlmAgent,
   node,
-  NodeContext,
   RequestInput,
   WorkflowAgent,
 } from '@google/adk';

@@ -15,13 +15,8 @@
  * Enter a topic, e.g. "the ocean" (loops until the headline is tech-related).
  */
 
-import {
-  createEvent,
-  LlmAgent,
-  node,
-  NodeContext,
-  WorkflowAgent,
-} from '@google/adk';
+import type {NodeContext} from '@google/adk';
+import {createEvent, LlmAgent, node, WorkflowAgent} from '@google/adk';
 import {z} from 'zod';
 
 const feedbackSchema = z.object({

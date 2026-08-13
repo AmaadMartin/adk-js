@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {BaseLlmConnection, LlmResponse} from '@google/adk';
+import type {BaseLlmConnection, LlmResponse} from '@google/adk';
 
 export class MockLlmConnection implements BaseLlmConnection {
   async sendHistory(): Promise<void> {

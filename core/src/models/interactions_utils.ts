@@ -3,20 +3,20 @@
  * Copyright 2026 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
-import {
+import type {
   Content,
   FinishReason,
   GenerateContentConfig,
   GoogleGenAI,
   Interactions,
   Language,
-  Outcome,
   Part,
   Tool,
 } from '@google/genai';
+import {Outcome} from '@google/genai';
 import {logger} from '../utils/logger.js';
-import {LlmRequest} from './llm_request.js';
-import {LlmResponse} from './llm_response.js';
+import type {LlmRequest} from './llm_request.js';
+import type {LlmResponse} from './llm_response.js';
 
 // --- Helper Interfaces for Strong Typing ---
 

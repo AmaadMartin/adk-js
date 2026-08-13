@@ -5,17 +5,17 @@
  */
 
 import {GoogleAuth, JWT} from 'google-auth-library';
-import {
+import type {
   AuthCredential,
-  AuthCredentialTypes,
   ServiceAccount,
 } from '../../../../auth/auth_credential.js';
-import {AuthScheme} from '../../../../auth/auth_schemes.js';
-import {
+import {AuthCredentialTypes} from '../../../../auth/auth_credential.js';
+import type {AuthScheme} from '../../../../auth/auth_schemes.js';
+import type {
   BaseCredentialExchanger,
-  CredentialExchangeError,
   ExchangeResult,
 } from '../../../../auth/exchanger/base_credential_exchanger.js';
+import {CredentialExchangeError} from '../../../../auth/exchanger/base_credential_exchanger.js';
 import {experimental} from '../../../../utils/experimental.js';
 
 const DEFAULT_SCOPES = ['https://www.googleapis.com/auth/cloud-platform'];

@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {LlmAgent} from '@google/adk';
 import {
   AgentTool,
   Context,
@@ -12,7 +13,6 @@ import {
   createSession,
   InMemorySessionService,
   InvocationContext,
-  LlmAgent,
   PluginManager,
   Runner,
   State,

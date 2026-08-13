@@ -5,8 +5,8 @@
  */
 
 import {beforeEach, describe, expect, it, vi} from 'vitest';
-import {AuthCredential} from '../../../src/auth/auth_credential.js';
-import {AuthScheme} from '../../../src/auth/auth_schemes.js';
+import type {AuthCredential} from '../../../src/auth/auth_credential.js';
+import type {AuthScheme} from '../../../src/auth/auth_schemes.js';
 import {OAuth2CredentialRefresher} from '../../../src/auth/oauth2/oauth2_credential_refresher.js';
 import * as oauth2Utils from '../../../src/auth/oauth2/oauth2_utils.js';
 

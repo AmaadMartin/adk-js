@@ -5,7 +5,8 @@
  */
 
 import {describe, expect, it, vi} from 'vitest';
-import {Router, runWithRouting} from '../../src/utils/failover_utils.js';
+import type {Router} from '../../src/utils/failover_utils.js';
+import {runWithRouting} from '../../src/utils/failover_utils.js';
 
 type Context = {requestId: string};
 

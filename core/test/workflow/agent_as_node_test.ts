@@ -6,8 +6,9 @@
 
 import {describe, expect, it} from 'vitest';
 import {BaseAgent} from '../../src/agents/base_agent.js';
-import {InvocationContext} from '../../src/agents/invocation_context.js';
-import {createEvent, Event} from '../../src/events/event.js';
+import type {InvocationContext} from '../../src/agents/invocation_context.js';
+import type {Event} from '../../src/events/event.js';
+import {createEvent} from '../../src/events/event.js';
 import {node} from '../../src/workflow/node.js';
 import {LLMAgentWrapper} from '../../src/workflow/nodes/llm_agent_wrapper.js';
 import {createIc, driveNode, FnNode} from './test_helpers.js';

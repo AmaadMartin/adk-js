@@ -4,10 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Part} from '@google/genai';
+import type {Part} from '@google/genai';
 
-import {InvocationContext} from '../agents/invocation_context.js';
-import {
+import type {InvocationContext} from '../agents/invocation_context.js';
+import type {
   ArtifactVersion,
   BaseArtifactService,
   DeleteArtifactRequest,
@@ -16,9 +16,9 @@ import {
   LoadArtifactRequest,
   SaveArtifactRequest,
 } from '../artifacts/base_artifact_service.js';
-import {SessionArtifactService} from '../artifacts/session_artifact_service.js';
+import type {SessionArtifactService} from '../artifacts/session_artifact_service.js';
 
-import {Context} from '../agents/context.js';
+import type {Context} from '../agents/context.js';
 
 /**
  * Artifact service that forwards to the parent tool context.

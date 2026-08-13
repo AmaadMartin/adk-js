@@ -3,9 +3,8 @@
  * Copyright 2025 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
+import type {BaseAgent, BaseTool} from '@google/adk';
 import {
-  BaseAgent,
-  BaseTool,
   isAgentTool,
   isBaseAgent,
   isBaseTool,
@@ -15,7 +14,8 @@ import {
   isParallelAgent,
   isSequentialAgent,
 } from '@google/adk';
-import {Digraph, Edge, Node, RootGraph, Subgraph, toDot} from 'ts-graphviz';
+import type {RootGraph} from 'ts-graphviz';
+import {Digraph, Edge, Node, Subgraph, toDot} from 'ts-graphviz';
 
 const DARK_GREEN = '#0F5223';
 const LIGHT_GREEN = '#69CB87';

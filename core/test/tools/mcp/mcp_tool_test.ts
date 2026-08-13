@@ -4,14 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  Context,
-  InvocationContext,
-  MCPSessionManager,
-  MCPTool,
-} from '@google/adk';
-import {Client} from '@modelcontextprotocol/sdk/client/index.js';
-import {Tool} from '@modelcontextprotocol/sdk/types.js';
+import type {InvocationContext, MCPSessionManager} from '@google/adk';
+import {Context, MCPTool} from '@google/adk';
+import type {Client} from '@modelcontextprotocol/sdk/client/index.js';
+import type {Tool} from '@modelcontextprotocol/sdk/types.js';
 import {describe, expect, it, vi} from 'vitest';
 
 describe('MCPTool', () => {

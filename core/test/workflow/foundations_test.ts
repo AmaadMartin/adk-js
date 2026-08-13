@@ -13,11 +13,8 @@ import {
   NodeInterruptedError,
   NodeTimeoutError,
 } from '../../src/workflow/errors.js';
-import {
-  createNodeState,
-  isNodeState,
-  NodeState,
-} from '../../src/workflow/node_state.js';
+import type {NodeState} from '../../src/workflow/node_state.js';
+import {createNodeState, isNodeState} from '../../src/workflow/node_state.js';
 import {NodeStatus} from '../../src/workflow/node_status.js';
 import {
   normalizeRetryExceptions,

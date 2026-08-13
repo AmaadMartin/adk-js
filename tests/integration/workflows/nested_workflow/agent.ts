@@ -16,12 +16,12 @@
  * Enter a 4-digit year, e.g. "1955".
  */
 
+import type {NodeContext} from '@google/adk';
 import {
   createEvent,
   JoinNode,
   LlmAgent,
   node,
-  NodeContext,
   Workflow,
   WorkflowAgent,
 } from '@google/adk';

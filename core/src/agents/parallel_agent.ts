@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Event} from '../events/event.js';
+import type {Event} from '../events/event.js';
 
 import {BaseAgent} from './base_agent.js';
 import {InvocationContext} from './invocation_context.js';

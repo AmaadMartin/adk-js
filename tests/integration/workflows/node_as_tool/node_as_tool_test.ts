@@ -12,7 +12,7 @@
  */
 
 import {getFunctionCalls, getFunctionResponses} from '@google/adk';
-import {Content} from '@google/genai';
+import type {Content} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {allEvents, runSample} from '../_harness/sample_harness.js';
 import {rootAgent} from './agent.js';

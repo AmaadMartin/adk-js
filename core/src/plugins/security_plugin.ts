@@ -4,14 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {FunctionCall} from '@google/genai';
+import type {FunctionCall} from '@google/genai';
 
-import {Context} from '../agents/context.js';
+import type {Context} from '../agents/context.js';
 import {REQUEST_CONFIRMATION_FUNCTION_CALL_NAME} from '../agents/functions.js';
-import {Event} from '../events/event.js';
+import type {Event} from '../events/event.js';
 import {BasePlugin} from '../plugins/base_plugin.js';
-import {BaseTool} from '../tools/base_tool.js';
-import {ToolConfirmation} from '../tools/tool_confirmation.js';
+import type {BaseTool} from '../tools/base_tool.js';
+import type {ToolConfirmation} from '../tools/tool_confirmation.js';
 
 // Constants
 // Re-exported, not redefined: `agents/functions.ts` is the single definition.

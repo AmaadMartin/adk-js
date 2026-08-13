@@ -6,7 +6,7 @@
 
 import {describe, expect, it} from 'vitest';
 import {BaseExampleProvider} from '../../src/examples/base_example_provider.js';
-import {Example} from '../../src/examples/example.js';
+import type {Example} from '../../src/examples/example.js';
 import {
   buildExampleSi,
   convertExamplesToText,

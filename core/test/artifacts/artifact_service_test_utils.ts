@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {BaseArtifactService, CompositeSessionKey} from '@google/adk';
-import {Part} from '@google/genai';
+import type {BaseArtifactService, CompositeSessionKey} from '@google/adk';
+import type {Part} from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 
 /**

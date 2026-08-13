@@ -6,10 +6,8 @@
 
 import {FunctionTool, LlmAgent} from '@google/adk';
 import {z} from 'zod';
-import {
-  GeminiWithMockResponses,
-  RawGenerateContentResponse,
-} from '../../../test_case_utils.js';
+import type {RawGenerateContentResponse} from '../../../test_case_utils.js';
+import {GeminiWithMockResponses} from '../../../test_case_utils.js';
 import modelResponses from './model_responses.json' with {type: 'json'};
 
 interface ToolResult {

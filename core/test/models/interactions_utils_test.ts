@@ -6,17 +6,16 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import {
+import type {
   Content,
   FinishReason,
   FunctionCall,
   FunctionResponse,
   GenerateContentConfig,
   Interactions,
-  Language,
-  Outcome,
   Part,
 } from '@google/genai';
+import {Language, Outcome} from '@google/genai';
 import {describe, expect, it, vi} from 'vitest';
 import {
   convertContentToSteps,

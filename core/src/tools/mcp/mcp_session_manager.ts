@@ -5,14 +5,10 @@
  */
 
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
-import {
-  StdioClientTransport,
-  StdioServerParameters,
-} from '@modelcontextprotocol/sdk/client/stdio.js';
-import {
-  StreamableHTTPClientTransport,
-  StreamableHTTPClientTransportOptions,
-} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import type {StdioServerParameters} from '@modelcontextprotocol/sdk/client/stdio.js';
+import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
+import type {StreamableHTTPClientTransportOptions} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
 import {formatError} from '../../utils/error_utils.js';
 import {logger} from '../../utils/logger.js';

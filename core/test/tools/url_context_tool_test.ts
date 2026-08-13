@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {LlmRequest, URL_CONTEXT, UrlContextTool} from '@google/adk';
+import type {LlmRequest} from '@google/adk';
+import {URL_CONTEXT, UrlContextTool} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
 function makeRequest(model?: string, tools = []): LlmRequest {

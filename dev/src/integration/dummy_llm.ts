@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {BaseLlm, BaseLlmConnection, LlmRequest, LlmResponse} from '@google/adk';
+import type {BaseLlmConnection, LlmRequest, LlmResponse} from '@google/adk';
+import {BaseLlm} from '@google/adk';
 
 export class DummyLlm extends BaseLlm {
   constructor() {

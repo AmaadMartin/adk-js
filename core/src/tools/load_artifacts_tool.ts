@@ -4,16 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {FunctionDeclaration, Part, Type} from '@google/genai';
+import type {FunctionDeclaration, Part} from '@google/genai';
+import {Type} from '@google/genai';
 
-import {Context} from '../agents/context.js';
-import {appendInstructions, LlmRequest} from '../models/llm_request.js';
+import type {Context} from '../agents/context.js';
+import type {LlmRequest} from '../models/llm_request.js';
+import {appendInstructions} from '../models/llm_request.js';
 import {getLogger} from '../utils/logger.js';
-import {
-  BaseTool,
-  RunAsyncToolRequest,
-  ToolProcessLlmRequest,
-} from './base_tool.js';
+import type {RunAsyncToolRequest, ToolProcessLlmRequest} from './base_tool.js';
+import {BaseTool} from './base_tool.js';
 
 const logger = getLogger();
 

@@ -3,11 +3,11 @@
  * Copyright 2025 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
-import {Event} from '../events/event.js';
+import type {Event} from '../events/event.js';
 import {FunctionTool} from '../tools/function_tool.js';
 
 import {BaseAgent} from './base_agent.js';
-import {InvocationContext} from './invocation_context.js';
+import type {InvocationContext} from './invocation_context.js';
 import {isLlmAgent} from './llm_agent.js';
 import {ReadonlyContext} from './readonly_context.js';
 

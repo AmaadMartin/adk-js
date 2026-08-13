@@ -6,12 +6,12 @@
 
 import {describe, expect, it} from 'vitest';
 import {InvocationContext} from '../../src/agents/invocation_context.js';
-import {Event} from '../../src/events/event.js';
+import type {Event} from '../../src/events/event.js';
 import {PluginManager} from '../../src/plugins/plugin_manager.js';
 import {createSession} from '../../src/sessions/session.js';
 import {isBaseNode} from '../../src/workflow/base_node.js';
 import {node} from '../../src/workflow/node.js';
-import {NodeContext} from '../../src/workflow/node_context.js';
+import type {NodeContext} from '../../src/workflow/node_context.js';
 import {RequestInput} from '../../src/workflow/request_input.js';
 import {createRequestInputEvent} from '../../src/workflow/utils/hitl_utils.js';
 import {Workflow} from '../../src/workflow/workflow.js';

@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {getLogger, Logger, LogLevel, setLogger, setLogLevel} from '@google/adk';
+import type {Logger} from '@google/adk';
+import {getLogger, LogLevel, setLogger, setLogLevel} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {resetLogger} from '../../src/utils/logger.js';
 

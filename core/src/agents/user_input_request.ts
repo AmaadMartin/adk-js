@@ -14,8 +14,8 @@
  * shape so a caller need not know how each kind stores its id and prompt.
  */
 
-import {AuthConfig} from '../auth/auth_tool.js';
-import {Event} from '../events/event.js';
+import type {AuthConfig} from '../auth/auth_tool.js';
+import type {Event} from '../events/event.js';
 import {camelCaseKeys} from '../utils/case_utils.js';
 import {
   REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,

@@ -14,7 +14,8 @@
  * Run (offline):  npm run sample -- samples/workflows/retry/agent.ts
  */
 
-import {createEvent, node, NodeContext, WorkflowAgent} from '@google/adk';
+import type {NodeContext} from '@google/adk';
+import {createEvent, node, WorkflowAgent} from '@google/adk';
 
 const getWeather = node(
   async function* (ctx: NodeContext) {

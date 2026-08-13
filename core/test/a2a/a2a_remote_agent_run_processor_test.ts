@@ -5,9 +5,9 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {A2AEvent} from '../../src/a2a/a2a_event.js';
+import type {A2AEvent} from '../../src/a2a/a2a_event.js';
 import {A2ARemoteAgentRunProcessor} from '../../src/a2a/a2a_remote_agent_run_processor.js';
-import {InvocationContext} from '../../src/agents/invocation_context.js';
+import type {InvocationContext} from '../../src/agents/invocation_context.js';
 import {createEvent} from '../../src/events/event.js';
 
 describe('A2ARemoteAgentRunProcessor', () => {

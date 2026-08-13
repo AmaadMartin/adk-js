@@ -3,16 +3,17 @@
  * Copyright 2026 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
-import {GenerateContentConfig} from '@google/genai';
+import type {GenerateContentConfig} from '@google/genai';
 
-import {LlmRequest} from '../models/llm_request.js';
+import type {LlmRequest} from '../models/llm_request.js';
 import {
   isGemini1Model,
   isGeminiModel,
   isGeminiModelIdCheckDisabled,
 } from '../utils/model_name.js';
 
-import {BaseTool, ToolProcessLlmRequest} from './base_tool.js';
+import type {ToolProcessLlmRequest} from './base_tool.js';
+import {BaseTool} from './base_tool.js';
 
 /**
  * Appends the Enterprise Web Search built-in tool to the LLM request when the

@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {ExecuteCodeParams} from '@google/adk';
-import {BuiltInCodeExecutor, LlmRequest} from '@google/adk';
+import type {ExecuteCodeParams, LlmRequest} from '@google/adk';
+import {BuiltInCodeExecutor} from '@google/adk';
 import {beforeEach, describe, expect, it} from 'vitest';
 
 describe('BuiltInCodeExecutor', () => {

@@ -9,11 +9,11 @@
  * HITL interrupt raised inside a nested workflow.
  */
 
+import type {NodeContext} from '@google/adk';
 import {
   FunctionNode,
   FunctionTool,
   node,
-  NodeContext,
   RequestInput,
   ToolNode,
   Workflow,

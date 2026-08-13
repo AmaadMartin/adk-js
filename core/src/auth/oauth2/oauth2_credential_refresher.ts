@@ -5,9 +5,9 @@
  */
 
 import {logger} from '../../utils/logger.js';
-import {AuthCredential} from '../auth_credential.js';
-import {AuthScheme} from '../auth_schemes.js';
-import {BaseCredentialRefresher} from '../refresher/base_credential_refresher.js';
+import type {AuthCredential} from '../auth_credential.js';
+import type {AuthScheme} from '../auth_schemes.js';
+import type {BaseCredentialRefresher} from '../refresher/base_credential_refresher.js';
 import {
   fetchOAuth2Tokens,
   getTokenEndpoint,

@@ -4,17 +4,19 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {AuthScheme, OAuth2Auth} from '@google/adk';
+import type {AuthScheme, OAuth2Auth} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-import {
+import type {
   AuthorizationCodeParams,
   ClientCredentialsParams,
+  RefreshTokenParams,
+} from '../../../src/auth/oauth2/oauth2_utils.js';
+import {
   createOAuth2TokenRequestBody,
   fetchOAuth2Tokens,
   getTokenEndpoint,
   isTokenExpired,
   parseAuthorizationCode,
-  RefreshTokenParams,
 } from '../../../src/auth/oauth2/oauth2_utils.js';
 
 describe('oauth2_utils', () => {

@@ -4,36 +4,41 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
+import type {
   App,
   BaseAgent,
   BaseArtifactService,
   BaseMemoryService,
   BaseSessionService,
-  bearerTokenUserBuilder,
   Event,
+  Logger,
+  RunConfig,
+} from '@google/adk';
+import {
+  bearerTokenUserBuilder,
   getFunctionCalls,
   getFunctionResponses,
   InMemoryArtifactService,
   InMemoryMemoryService,
   InMemorySessionService,
   isApp,
-  Logger,
   LogLevel,
-  RunConfig,
   Runner,
   StreamingMode,
   toA2a,
 } from '@google/adk';
-import {Content} from '@google/genai';
-import {trace, TracerProvider} from '@opentelemetry/api';
+import type {Content} from '@google/genai';
+import type {TracerProvider} from '@opentelemetry/api';
+import {trace} from '@opentelemetry/api';
 import {SimpleSpanProcessor} from '@opentelemetry/sdk-trace-base';
 import cors from 'cors';
-import express, {Request, Response} from 'express';
-import * as http from 'node:http';
+import type {Request, Response} from 'express';
+import express from 'express';
+import type * as http from 'node:http';
 import * as path from 'node:path';
 
-import {AgentFileOptions, AgentLoader} from '../utils/agent_loader.js';
+import type {AgentFileOptions} from '../utils/agent_loader.js';
+import {AgentLoader} from '../utils/agent_loader.js';
 import {AdkLogger} from '../utils/logger.js';
 import {
   ApiServerSpanExporter,

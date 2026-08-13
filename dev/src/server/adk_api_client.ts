@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {Event} from '@google/adk';
-import {Session} from '@google/adk';
-import {Content, createUserContent} from '@google/genai';
+import type {Event, Session} from '@google/adk';
+import type {Content} from '@google/genai';
+import {createUserContent} from '@google/genai';
 
 /**
  * ADK web client config interface.

@@ -4,13 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {FunctionDeclaration} from '@google/genai';
+import type {FunctionDeclaration} from '@google/genai';
 
-import {
-  FunctionTool,
-  ToolInputParameters,
-  ToolOptions,
-} from './function_tool.js';
+import type {ToolInputParameters, ToolOptions} from './function_tool.js';
+import {FunctionTool} from './function_tool.js';
 
 const LONG_RUNNING_INSTRUCTION = `
 

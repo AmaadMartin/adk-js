@@ -4,11 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Event} from '../../events/event.js';
-import {LlmRequest} from '../../models/llm_request.js';
-import {BaseTool} from '../../tools/base_tool.js';
+import type {Event} from '../../events/event.js';
+import type {LlmRequest} from '../../models/llm_request.js';
+import type {BaseTool} from '../../tools/base_tool.js';
 import {Context} from '../context.js';
-import {InvocationContext} from '../invocation_context.js';
+import type {InvocationContext} from '../invocation_context.js';
 import {isLlmAgent} from '../llm_agent.js';
 import {ReadonlyContext} from '../readonly_context.js';
 import {BaseLlmRequestProcessor} from './base_llm_processor.js';

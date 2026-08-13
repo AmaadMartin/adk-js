@@ -5,8 +5,8 @@
  */
 
 import {Entity, JsonType, PrimaryKey, Property} from '@mikro-orm/core';
+import type {Event} from '../../events/event.js';
 import {
-  Event,
   transformToCamelCaseEvent,
   transformToSnakeCaseEvent,
 } from '../../events/event.js';

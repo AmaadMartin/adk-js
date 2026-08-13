@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {AgentCard, TransportProtocol} from '@a2a-js/sdk';
+import type {AgentCard, TransportProtocol} from '@a2a-js/sdk';
 
 export const AGENT_REGISTRY_BASE_URL =
   'https://agentregistry.googleapis.com/v1alpha';

@@ -6,14 +6,13 @@
 
 import {describe, expect, it} from 'vitest';
 
-import {
+import type {
   Context,
   LlmRequest,
   MemoryEntry,
-  PRELOAD_MEMORY,
-  PreloadMemoryTool,
   SearchMemoryResponse,
 } from '@google/adk';
+import {PRELOAD_MEMORY, PreloadMemoryTool} from '@google/adk';
 
 // We mock the logger.warn since we test a failing case
 import {vi} from 'vitest';

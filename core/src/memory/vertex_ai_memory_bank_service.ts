@@ -5,27 +5,28 @@
  */
 
 import {Client} from '@google-cloud/vertexai';
-import {Memories} from '@google-cloud/vertexai/build/src/genai/memories.js';
-import {
+import type {Memories} from '@google-cloud/vertexai/build/src/genai/memories.js';
+import type {
   AgentEngineMemoryConfig,
   GenerateAgentEngineMemoriesConfig,
   GenerateMemoriesRequestDirectContentsSourceEvent,
   MemoryMetadataValue,
 } from '@google-cloud/vertexai/build/src/genai/types.js';
-import {Content, createUserContent} from '@google/genai';
-import {Event} from '../events/event.js';
-import {Session} from '../sessions/session.js';
+import type {Content} from '@google/genai';
+import {createUserContent} from '@google/genai';
+import type {Event} from '../events/event.js';
+import type {Session} from '../sessions/session.js';
 import {logger} from '../utils/logger.js';
 import {
   EXPRESS_MODE_UNSUPPORTED_MESSAGE,
   getExpressModeApiKey,
 } from '../utils/vertex_ai_utils.js';
-import {
+import type {
   BaseMemoryService,
   SearchMemoryRequest,
   SearchMemoryResponse,
 } from './base_memory_service.js';
-import {MemoryEntry} from './memory_entry.js';
+import type {MemoryEntry} from './memory_entry.js';
 
 interface MemoryEntryWithMetadata extends MemoryEntry {
   customMetadata?: Record<string, unknown>;

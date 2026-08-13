@@ -5,9 +5,9 @@
  */
 
 import {logger} from '../../utils/logger.js';
-import {OAuth2Auth} from '../auth_credential.js';
+import type {OAuth2Auth} from '../auth_credential.js';
 
-import {AuthScheme, OpenIdConnectWithConfig} from '../auth_schemes.js';
+import type {AuthScheme, OpenIdConnectWithConfig} from '../auth_schemes.js';
 import {validateDiscoveryUrl} from './oauth2_discovery.js';
 
 /**

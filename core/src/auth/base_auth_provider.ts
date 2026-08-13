@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {AuthCredential} from './auth_credential.js';
-import {AuthConfig} from './auth_tool.js';
+import type {AuthCredential} from './auth_credential.js';
+import type {AuthConfig} from './auth_tool.js';
 
 /**
  * Abstract base interface for custom authentication providers.

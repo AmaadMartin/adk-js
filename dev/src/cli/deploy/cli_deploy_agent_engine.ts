@@ -7,12 +7,12 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
 import {Client} from '@google-cloud/vertexai/build/src/genai/client.js';
-import {ReasoningEngine as VertexReasoningEngine} from '@google-cloud/vertexai/build/src/genai/types.js';
+import type {ReasoningEngine as VertexReasoningEngine} from '@google-cloud/vertexai/build/src/genai/types.js';
 
 import {AgentLoader} from '../../utils/agent_loader.js';
 import {createTempDir, isFile, isFolderExists} from '../../utils/file_utils.js';
+import type {BaseDeployOptions} from './deploy_utils.js';
 import {
-  BaseDeployOptions,
   copyAgentFiles,
   createDockerFile,
   createPackageJson,

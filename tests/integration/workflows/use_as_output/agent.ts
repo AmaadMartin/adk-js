@@ -16,7 +16,8 @@
  * Paste some text to summarize.
  */
 
-import {LlmAgent, node, NodeContext, WorkflowAgent} from '@google/adk';
+import type {NodeContext} from '@google/adk';
+import {LlmAgent, node, WorkflowAgent} from '@google/adk';
 
 const summarizer = node(
   new LlmAgent({

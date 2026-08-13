@@ -6,7 +6,8 @@
 
 import fg from 'fast-glob';
 import * as fs from 'node:fs/promises';
-import {beforeEach, describe, expect, it, Mock, vi} from 'vitest';
+import type {Mock} from 'vitest';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {batchLoadYamlTestDefs} from '../../src/conformance/yaml_test_loader.js';
 
 // Mock fast-glob

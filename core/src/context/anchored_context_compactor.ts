@@ -4,12 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {InvocationContext} from '../agents/invocation_context.js';
-import {CompactedEvent, isScratchpadEvent} from '../events/compacted_event.js';
-import {Event, getEventTokens} from '../events/event.js';
-import {BaseContextCompactor} from './base_context_compactor.js';
+import type {InvocationContext} from '../agents/invocation_context.js';
+import type {CompactedEvent} from '../events/compacted_event.js';
+import {isScratchpadEvent} from '../events/compacted_event.js';
+import type {Event} from '../events/event.js';
+import {getEventTokens} from '../events/event.js';
+import type {BaseContextCompactor} from './base_context_compactor.js';
 import {calculateRetainStartIndex} from './compaction_utils.js';
-import {BaseSummarizer} from './summarizers/base_summarizer.js';
+import type {BaseSummarizer} from './summarizers/base_summarizer.js';
 
 export interface AnchoredContextCompactorOptions {
   /** The maximum number of tokens to retain in the session history before compaction. */

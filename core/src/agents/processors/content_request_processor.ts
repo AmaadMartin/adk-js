@@ -5,11 +5,11 @@
  */
 
 import {getActiveEvents} from '../../context/compaction_utils.js';
-import {Event} from '../../events/event.js';
-import {LlmRequest} from '../../models/llm_request.js';
-import {InvocationContext} from '../invocation_context.js';
+import type {Event} from '../../events/event.js';
+import type {LlmRequest} from '../../models/llm_request.js';
+import type {InvocationContext} from '../invocation_context.js';
 import {isLlmAgent} from '../llm_agent.js';
-import {BaseLlmRequestProcessor} from './base_llm_processor.js';
+import type {BaseLlmRequestProcessor} from './base_llm_processor.js';
 import {
   getContents,
   getCurrentTurnContents,

@@ -4,13 +4,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Session} from '@google/adk';
+import type {Session} from '@google/adk';
 import camelcaseKeys from 'camelcase-keys';
 import fg from 'fast-glob';
 import yaml from 'js-yaml';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import {Recordings, TestInfo, TestSpec} from '../integration/test_types.js';
+import type {
+  Recordings,
+  TestInfo,
+  TestSpec,
+} from '../integration/test_types.js';
 
 /**
  * batchLoadYamlTestDefs will recursively search the directory given

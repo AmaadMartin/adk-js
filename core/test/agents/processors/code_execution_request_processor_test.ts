@@ -4,11 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {LlmRequest} from '@google/adk';
 import {
   BaseAgent,
   InvocationContext,
   LlmAgent,
-  LlmRequest,
   PluginManager,
   createSession,
 } from '@google/adk';
@@ -17,11 +17,9 @@ import {
   CODE_EXECUTION_REQUEST_PROCESSOR,
   CodeExecutionResponseProcessor,
 } from '../../../src/agents/processors/code_execution_request_processor.js';
-import {
-  BaseCodeExecutor,
-  ExecuteCodeParams,
-} from '../../../src/code_executors/base_code_executor.js';
-import {CodeExecutionResult} from '../../../src/code_executors/code_execution_utils.js';
+import type {ExecuteCodeParams} from '../../../src/code_executors/base_code_executor.js';
+import {BaseCodeExecutor} from '../../../src/code_executors/base_code_executor.js';
+import type {CodeExecutionResult} from '../../../src/code_executors/code_execution_utils.js';
 
 class MockBaseAgent extends BaseAgent {
   constructor(name: string) {

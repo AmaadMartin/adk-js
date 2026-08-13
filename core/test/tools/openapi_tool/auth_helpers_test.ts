@@ -4,12 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {OpenAPIV3} from 'openapi-types';
+import type {OpenAPIV3} from 'openapi-types';
 import {describe, expect, it} from 'vitest';
-import {
-  AuthCredential,
-  AuthCredentialTypes,
-} from '../../../src/auth/auth_credential.js';
+import type {AuthCredential} from '../../../src/auth/auth_credential.js';
+import {AuthCredentialTypes} from '../../../src/auth/auth_credential.js';
 import {
   applyCredential,
   createApiKeyScheme,

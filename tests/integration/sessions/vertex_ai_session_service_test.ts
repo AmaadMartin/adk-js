@@ -6,15 +6,15 @@
 
 import {Sessions} from '@google-cloud/vertexai/build/src/genai/sessions.js';
 import {VertexAiSessionService} from '@google/adk';
+import type {Auth} from '@google/genai/vertex_internal';
 import {
   ApiClient,
-  Auth,
   NodeAuth,
   NodeDownloader,
   NodeUploader,
 } from '@google/genai/vertex_internal';
 import http from 'node:http';
-import {AddressInfo} from 'node:net';
+import type {AddressInfo} from 'node:net';
 import {json} from 'node:stream/consumers';
 import {afterAll, beforeAll, beforeEach, describe, expect, it} from 'vitest';
 

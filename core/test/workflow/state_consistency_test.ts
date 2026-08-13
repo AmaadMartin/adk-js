@@ -6,11 +6,11 @@
 
 import {describe, expect, it} from 'vitest';
 import {LlmAgent} from '../../src/agents/llm_agent.js';
-import {Event} from '../../src/events/event.js';
+import type {Event} from '../../src/events/event.js';
 import {BaseLlm} from '../../src/models/base_llm.js';
-import {BaseLlmConnection} from '../../src/models/base_llm_connection.js';
-import {LlmRequest} from '../../src/models/llm_request.js';
-import {LlmResponse} from '../../src/models/llm_response.js';
+import type {BaseLlmConnection} from '../../src/models/base_llm_connection.js';
+import type {LlmRequest} from '../../src/models/llm_request.js';
+import type {LlmResponse} from '../../src/models/llm_response.js';
 import {Runner} from '../../src/runner/runner.js';
 import {InMemorySessionService} from '../../src/sessions/in_memory_session_service.js';
 import {AsyncQueue} from '../../src/utils/async_queue.js';

@@ -9,10 +9,11 @@
  * classifier with an output schema drives conditional routing to branch agents.
  */
 
-import {createEvent, node, NodeContext, Workflow} from '@google/adk';
+import type {NodeContext} from '@google/adk';
+import {createEvent, node, Workflow} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 import {z} from 'zod';
-import {RawGenerateContentResponse} from '../../test_case_utils.js';
+import type {RawGenerateContentResponse} from '../../test_case_utils.js';
 import {
   finalOutput,
   mockLlmAgent,

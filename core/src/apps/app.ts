@@ -4,9 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {BaseAgent, isBaseAgent} from '../agents/base_agent.js';
-import {BasePlugin} from '../plugins/base_plugin.js';
-import {ResumabilityConfig} from './resumability_config.js';
+import type {BaseAgent} from '../agents/base_agent.js';
+import {isBaseAgent} from '../agents/base_agent.js';
+import type {BasePlugin} from '../plugins/base_plugin.js';
+import type {ResumabilityConfig} from './resumability_config.js';
 
 const VALID_APP_NAME_RE = /^[a-zA-Z][a-zA-Z0-9_-]*$/;
 

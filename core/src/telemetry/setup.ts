@@ -9,18 +9,17 @@ import {logs} from '@opentelemetry/api-logs';
 import {OTLPLogExporter} from '@opentelemetry/exporter-logs-otlp-http';
 import {OTLPMetricExporter} from '@opentelemetry/exporter-metrics-otlp-http';
 import {OTLPTraceExporter} from '@opentelemetry/exporter-trace-otlp-http';
-import {detectResources, Resource} from '@opentelemetry/resources';
-import {
-  BatchLogRecordProcessor,
-  LoggerProvider,
-  LogRecordProcessor,
-} from '@opentelemetry/sdk-logs';
+import type {Resource} from '@opentelemetry/resources';
+import {detectResources} from '@opentelemetry/resources';
+import type {LogRecordProcessor} from '@opentelemetry/sdk-logs';
+import {BatchLogRecordProcessor, LoggerProvider} from '@opentelemetry/sdk-logs';
+import type {MetricReader} from '@opentelemetry/sdk-metrics';
 import {
   MeterProvider,
-  MetricReader,
   PeriodicExportingMetricReader,
 } from '@opentelemetry/sdk-metrics';
-import {BatchSpanProcessor, SpanProcessor} from '@opentelemetry/sdk-trace-base';
+import type {SpanProcessor} from '@opentelemetry/sdk-trace-base';
+import {BatchSpanProcessor} from '@opentelemetry/sdk-trace-base';
 import {NodeTracerProvider} from '@opentelemetry/sdk-trace-node';
 
 export interface OtelExportersConfig {

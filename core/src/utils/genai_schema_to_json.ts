@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Schema} from '@google/genai';
+import type {Schema} from '@google/genai';
 
 /**
  * Keys of a genai `Schema` that carry a count/length bound. The genai (OpenAPI)

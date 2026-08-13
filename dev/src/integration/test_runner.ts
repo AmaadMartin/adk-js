@@ -3,21 +3,15 @@
  * Copyright 2026 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
-import {
-  BaseAgent,
-  Event,
-  InMemorySessionService,
-  isLlmAgent,
-  Runner,
-  Session,
-} from '@google/adk';
-import {Content} from '@google/genai';
+import type {BaseAgent, Event, Session} from '@google/adk';
+import {InMemorySessionService, isLlmAgent, Runner} from '@google/adk';
+import type {Content} from '@google/genai';
 import {cloneDeep} from 'lodash-es';
 import * as assert from 'node:assert';
-import {AgentRegistry} from './agent_registry.js';
+import type {AgentRegistry} from './agent_registry.js';
 import {DummyLlm} from './dummy_llm.js';
 import {ReplayPlugin} from './replay_plugin.js';
-import {
+import type {
   FilteredEvent,
   FilteredEventActions,
   FilteredPart,
