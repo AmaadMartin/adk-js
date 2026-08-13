@@ -13,6 +13,25 @@ import {
 import {OpenAPIV3} from 'openapi-types';
 import {describe, expect, it} from 'vitest';
 
+/** Returns the resolved `application/json` schema of the `200` response. */
+function jsonResponseSchema(
+  operation: OpenAPIV3.OperationObject,
+): OpenAPIV3.SchemaObject {
+  const response = operation.responses?.['200'];
+  if (!response || '$ref' in response) {
+    expect.fail(
+      `expected a resolved 200 response, got ${JSON.stringify(response)}`,
+    );
+  }
+  const schema = response.content?.['application/json']?.schema;
+  if (!schema || '$ref' in schema) {
+    expect.fail(
+      `expected a resolved response schema, got ${JSON.stringify(schema)}`,
+    );
+  }
+  return schema;
+}
+
 describe('OpenAPIToolset', () => {
   const mockSpec: OpenAPIV3.Document = {
     openapi: '3.0.0',
@@ -117,7 +136,10 @@ describe('OpenAPIToolset', () => {
     const toolset = new OpenAPIToolset({
       specDict: mockSpec,
       authScheme: {type: 'apiKey', name: 'key', in: 'header'},
-      authCredential: {authType: AuthCredentialTypes.API_KEY, apiKey: 'my-key'},
+      authCredential: {
+        authType: AuthCredentialTypes.API_KEY,
+        apiKey: 'my-key',
+      },
     });
     const tools = await toolset.getTools();
 
@@ -386,11 +408,7 @@ describe('OpenApiSpecParser', () => {
     const operations = parser.parse(specWithInvalidType);
 
     expect(operations.length).toBe(1);
-    const response = operations[0].operation.responses?.['200'] as
-      | OpenAPIV3.ResponseObject
-      | undefined;
-    const schema = response?.content?.['application/json']
-      ?.schema as OpenAPIV3.SchemaObject;
+    const schema = jsonResponseSchema(operations[0].operation);
     const invalidPropSchema = schema.properties?.[
       'invalidProp'
     ] as OpenAPIV3.SchemaObject;
@@ -433,11 +451,7 @@ describe('OpenApiSpecParser', () => {
     const operations = parser.parse(specWithInvalidArrayType);
 
     expect(operations.length).toBe(1);
-    const response = operations[0].operation.responses?.['200'] as
-      | OpenAPIV3.ResponseObject
-      | undefined;
-    const schema = response?.content?.['application/json']
-      ?.schema as OpenAPIV3.SchemaObject;
+    const schema = jsonResponseSchema(operations[0].operation);
     const multiPropSchema = schema.properties?.[
       'multiProp'
     ] as OpenAPIV3.SchemaObject;

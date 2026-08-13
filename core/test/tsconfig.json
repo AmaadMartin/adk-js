@@ -1,0 +1,19 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    // Mirrors the vitest `unit:core` alias for `@google/adk`. No wildcard
+    // entry: `core/package.json` declares only the `"."` export, so
+    // `@google/adk/<subpath>` does not resolve for a real consumer and must not
+    // be type-blessed here; internals are imported relatively instead.
+    "paths": {
+      "@google/adk": ["../src/index.ts"]
+    }
+  },
+  // Both keys are load-bearing. `exclude` is inherited through `extends`, and
+  // an inherited relative path resolves against the config that declared it, so
+  // omitting `exclude` here would inherit the root's `core/test` entry and
+  // leave this project with no inputs at all (TS18003).
+  "include": ["**/*.ts"],
+  "exclude": ["node_modules"]
+}

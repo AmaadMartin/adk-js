@@ -20,6 +20,7 @@ import {
   RemoteA2AAgentConfig,
   StreamableHTTPConnectionParams,
 } from '../../src/index.js';
+import {AgentInfo} from '../../src/integrations/agent_registry/types.js';
 
 const TEST_PROJECT = 'test-project';
 
@@ -586,7 +587,7 @@ describe('AgentRegistry', () => {
     });
 
     it('should construct RemoteA2AAgent from agent card content directly', async () => {
-      const agentInfo = {
+      const agentInfo: AgentInfo = {
         card: {
           type: 'A2A_AGENT_CARD',
           content: {

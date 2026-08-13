@@ -28,6 +28,18 @@ class DummyPlugin extends BasePlugin {
   }
 }
 
+/**
+ * Constructs an {@link App} from a `rootAgent` `AppOptions` cannot spell.
+ *
+ * `AppOptions.rootAgent` is typed `RunnableNode`, so the `undefined` and
+ * non-agent values the constructor guards against are unreachable through the
+ * typed API. They reach it from untyped JavaScript and config-driven callers,
+ * which is what this models.
+ */
+function newAppWithUnvalidatedRootAgent(rootAgent: unknown): App {
+  return new App({name: 'test_app', rootAgent: rootAgent as BaseAgent});
+}
+
 describe('validateAppName', () => {
   it('allows valid app names', () => {
     expect(() => validateAppName('my_app')).not.toThrow();
@@ -84,20 +96,12 @@ describe('App', () => {
   });
 
   it('throws if rootAgent is missing or not a BaseAgent', () => {
-    expect(
-      () =>
-        new App({
-          name: 'test_app',
-          rootAgent: undefined as unknown as BaseAgent,
-        }),
-    ).toThrow('rootAgent must be provided.');
-    expect(
-      () =>
-        new App({
-          name: 'test_app',
-          rootAgent: {name: 'fake'} as unknown as BaseAgent,
-        }),
-    ).toThrow(/expected a BaseAgent, a Workflow, or a node-like value/);
+    expect(() => newAppWithUnvalidatedRootAgent(undefined)).toThrow(
+      'rootAgent must be provided.',
+    );
+    expect(() => newAppWithUnvalidatedRootAgent({name: 'fake'})).toThrow(
+      /expected a BaseAgent, a Workflow, or a node-like value/,
+    );
   });
 
   it('accepts a bare Workflow as the root and adapts it', () => {

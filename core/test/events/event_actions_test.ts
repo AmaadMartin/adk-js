@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {AuthConfig, AuthCredentialTypes, ToolConfirmation} from '@google/adk';
+import {AuthCredentialTypes, ToolConfirmation} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 import {AuthConfig} from '../../src/auth/auth_tool.js';
 import {

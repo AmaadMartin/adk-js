@@ -13,18 +13,6 @@ import {
   VertexAiSearchToolParams,
 } from '../../src/tools/vertex_ai_search_tool.js';
 
-interface TestTool {
-  retrieval?: {
-    vertexAiSearch?: {
-      datastore?: string;
-      dataStoreSpecs?: Array<{dataStore?: string}>;
-      engine?: string;
-      filter?: string;
-      maxResults?: number;
-    };
-  };
-}
-
 /** The param combinations the constructor rejects at runtime. */
 interface LooseVertexAiSearchToolParams {
   dataStoreId?: string;
@@ -107,15 +95,16 @@ describe('VertexAiSearchTool', () => {
     await tool.processLlmRequest({toolContext, llmRequest});
 
     expect(llmRequest.config?.tools).toHaveLength(1);
-    expect(
-      (llmRequest.config?.tools?.[0] as unknown as TestTool).retrieval
-        ?.vertexAiSearch,
-    ).toEqual({
-      datastore: 'ds',
-      dataStoreSpecs: undefined,
-      engine: undefined,
-      filter: 'f',
-      maxResults: 10,
+    expect(llmRequest.config?.tools?.[0]).toEqual({
+      retrieval: {
+        vertexAiSearch: {
+          datastore: 'ds',
+          dataStoreSpecs: undefined,
+          engine: undefined,
+          filter: 'f',
+          maxResults: 10,
+        },
+      },
     });
   });
 

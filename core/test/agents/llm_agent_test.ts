@@ -27,6 +27,7 @@ import {
   PluginManager,
   RunAsyncToolRequest,
   Runner,
+  Session,
   ToolProcessLlmRequest,
 } from '@google/adk';
 import {Content, Schema, Type} from '@google/genai';

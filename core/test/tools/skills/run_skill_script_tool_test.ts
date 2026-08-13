@@ -204,7 +204,7 @@ describe('RunSkillScriptTool', () => {
     expect(fileNames).toContain('assets/binary.dat');
 
     const binaryFile = inputFiles?.find((f) => f.name === 'assets/binary.dat');
-    expect(binaryFile?.contentEncoding).toBe('base64');
+    expect(binaryFile?.contentEncoding).toBe(FileContentEncoding.BASE64);
   });
 
   it('sends a TypeScript script resource as UTF-8 text', async () => {

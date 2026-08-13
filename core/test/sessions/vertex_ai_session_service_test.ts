@@ -9,6 +9,7 @@ import {
   createEvent,
   createSession,
   isCompactedEvent,
+  Session,
   State,
   VertexAiSessionService,
 } from '@google/adk';
@@ -51,8 +52,8 @@ afterEach(() => {
 import {
   isVertexAiConnectionString,
   quoteFilterLiteral,
-} from '@google/adk/sessions/vertex_ai_session_service.js';
-import {logger} from '@google/adk/utils/logger.js';
+} from '../../src/sessions/vertex_ai_session_service.js';
+import {logger} from '../../src/utils/logger.js';
 
 /**
  * Vertex AI requires an app name that is digits or a full resource name.
@@ -762,9 +763,10 @@ describe('VertexAiSessionService', () => {
       });
     });
 
-    it('lists sessions without filter if userId is missing', async () => {
+    it('lists sessions without filter if userId is empty', async () => {
       await service.listSessions({
         appName: APP_NAME,
+        userId: '',
       });
 
       expect(mockClient.listInternal).toHaveBeenCalledWith(
@@ -781,6 +783,7 @@ describe('VertexAiSessionService', () => {
 
       const result = await service.listSessions({
         appName: APP_NAME,
+        userId: '',
       });
 
       expect(result.sessions[0].state).toEqual({});
@@ -792,6 +795,7 @@ describe('VertexAiSessionService', () => {
 
       const result = await service.listSessions({
         appName: APP_NAME,
+        userId: '',
       });
 
       expect(result.sessions).toEqual([]);
@@ -811,6 +815,7 @@ describe('VertexAiSessionService', () => {
 
       const result = await service.listSessions({
         appName: APP_NAME,
+        userId: '',
       });
 
       expect(result.sessions[0].state).toEqual({foo: 'bar'});

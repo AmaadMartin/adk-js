@@ -215,15 +215,13 @@ describe('GoogleLlm', () => {
   });
 
   describe('generateContentAsync streaming thoughtSignature propagation', () => {
-    function makeStreamingChunk(
-      parts: Record<string, unknown>[],
-    ): GenerateContentResponse {
+    function makeStreamingChunk(parts: Part[]): GenerateContentResponse {
       const response = new GenerateContentResponse();
       response.candidates = [
         {
           content: {
             role: 'model',
-            parts: parts as Part[],
+            parts,
           },
         },
       ];

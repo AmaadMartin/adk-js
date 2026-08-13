@@ -51,8 +51,8 @@ describe('VertexRagRetrievalTool', () => {
         toolContext: makeToolContext(),
       });
 
-      expect(llmRequest.config.tools).toHaveLength(1);
-      expect(llmRequest.config.tools![0]).toEqual({
+      expect(llmRequest.config?.tools).toHaveLength(1);
+      expect(llmRequest.config?.tools?.[0]).toEqual({
         retrieval: {
           vertexRagStore: {
             ragResources: [{ragCorpus: RAG_CORPUS}],
