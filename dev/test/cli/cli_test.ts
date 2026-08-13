@@ -25,7 +25,7 @@ vi.mock('../../src/server/adk_api_server', () => {
 
 // The real module removes the worker's signal listeners on install.
 vi.mock('../../src/utils/shutdown', () => ({
-  installShutdownHandlers: vi.fn(() => () => {}),
+  installShutdownHandlers: vi.fn(),
 }));
 
 vi.mock('../../src/cli/cli_create', () => ({

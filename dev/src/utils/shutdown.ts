@@ -29,23 +29,12 @@ export interface StoppableServer {
  * Call this once, after `start()` resolves. `stop()` runs at most once per
  * process: a second signal exits immediately instead of starting a second
  * teardown.
- *
- * @returns A closure that removes the handlers this call installed. It is
- *     idempotent, and the handlers call it themselves before they exit.
  */
 export function installShutdownHandlers(
   server: StoppableServer,
   logger: Logger,
-): () => void {
-  const installed = new Map<ShutdownSignal, () => void>();
+): void {
   let shuttingDown = false;
-
-  const uninstall = () => {
-    for (const [signal, listener] of installed) {
-      process.removeListener(signal, listener);
-    }
-    installed.clear();
-  };
 
   const shutdown = async (signal: ShutdownSignal) => {
     if (shuttingDown) {
@@ -66,7 +55,6 @@ export function installShutdownHandlers(
         exitCode = ABNORMAL_EXIT_CODE;
       }
 
-      uninstall();
       process.exit(exitCode);
     }
   };
@@ -79,12 +67,8 @@ export function installShutdownHandlers(
     // takes the signal over.
     process.removeAllListeners(signal);
 
-    const listener = () => {
+    process.on(signal, () => {
       void shutdown(signal);
-    };
-    installed.set(signal, listener);
-    process.on(signal, listener);
+    });
   }
-
-  return uninstall;
 }

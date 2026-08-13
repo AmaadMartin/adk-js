@@ -48,7 +48,6 @@ function deferred() {
 describe('installShutdownHandlers', () => {
   let logger: ReturnType<typeof createLogger>;
   let exit: MockInstance<typeof process.exit>;
-  let uninstall: (() => void) | undefined;
 
   beforeEach(() => {
     logger = createLogger();
@@ -62,8 +61,6 @@ describe('installShutdownHandlers', () => {
   });
 
   afterEach(() => {
-    uninstall?.();
-    uninstall = undefined;
     process.removeAllListeners('SIGINT');
     process.removeAllListeners('SIGTERM');
     vi.restoreAllMocks();
@@ -72,7 +69,7 @@ describe('installShutdownHandlers', () => {
   it('stops the server before it exits 130 on SIGINT', async () => {
     const stopped = deferred();
     const stop = vi.fn(() => stopped.promise);
-    uninstall = installShutdownHandlers({stop}, logger);
+    installShutdownHandlers({stop}, logger);
 
     process.emit('SIGINT', 'SIGINT');
 
@@ -92,7 +89,7 @@ describe('installShutdownHandlers', () => {
   it('stops the server before it exits 143 on SIGTERM', async () => {
     const stopped = deferred();
     const stop = vi.fn(() => stopped.promise);
-    uninstall = installShutdownHandlers({stop}, logger);
+    installShutdownHandlers({stop}, logger);
 
     process.emit('SIGTERM', 'SIGTERM');
 
@@ -109,7 +106,7 @@ describe('installShutdownHandlers', () => {
   it('exits at once on a second signal instead of stopping twice', async () => {
     const stopped = deferred();
     const stop = vi.fn(() => stopped.promise);
-    uninstall = installShutdownHandlers({stop}, logger);
+    installShutdownHandlers({stop}, logger);
 
     process.emit('SIGINT', 'SIGINT');
     process.emit('SIGINT', 'SIGINT');
@@ -128,7 +125,7 @@ describe('installShutdownHandlers', () => {
   it('logs a rejected stop() and exits 1', async () => {
     const failure = new Error('close failed');
     const stop = vi.fn(() => Promise.reject(failure));
-    uninstall = installShutdownHandlers({stop}, logger);
+    installShutdownHandlers({stop}, logger);
 
     process.emit('SIGINT', 'SIGINT');
 
@@ -145,7 +142,7 @@ describe('installShutdownHandlers', () => {
     const loaderListener = vi.fn<() => void>();
     process.on('SIGINT', loaderListener);
     const stop = vi.fn(() => Promise.resolve());
-    uninstall = installShutdownHandlers({stop}, logger);
+    installShutdownHandlers({stop}, logger);
 
     expect(process.listenerCount('SIGINT')).toBe(1);
 
@@ -155,32 +152,11 @@ describe('installShutdownHandlers', () => {
     await vi.waitFor(() => expect(stop).toHaveBeenCalledTimes(1));
   });
 
-  it('installs one listener per signal and removes both on uninstall', () => {
-    const stop = vi.fn(() => Promise.resolve());
-    const remove = installShutdownHandlers({stop}, logger);
-
-    expect(process.listenerCount('SIGINT')).toBe(1);
-    expect(process.listenerCount('SIGTERM')).toBe(1);
-
-    remove();
-
-    expect(process.listenerCount('SIGINT')).toBe(0);
-    expect(process.listenerCount('SIGTERM')).toBe(0);
-
-    remove();
-
-    expect(process.listenerCount('SIGINT')).toBe(0);
-    expect(process.listenerCount('SIGTERM')).toBe(0);
-  });
-
-  it('leaves no listener behind once teardown completes', async () => {
+  it('installs exactly one listener per signal', () => {
     const stop = vi.fn(() => Promise.resolve());
     installShutdownHandlers({stop}, logger);
 
-    process.emit('SIGINT', 'SIGINT');
-
-    await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(SIGINT_EXIT_CODE));
-    expect(process.listenerCount('SIGINT')).toBe(0);
-    expect(process.listenerCount('SIGTERM')).toBe(0);
+    expect(process.listenerCount('SIGINT')).toBe(1);
+    expect(process.listenerCount('SIGTERM')).toBe(1);
   });
 });
