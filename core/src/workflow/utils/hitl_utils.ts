@@ -114,9 +114,9 @@ export function responseSchemasByInterruptId(
  * rejected reply stays in the session forever, so a checker that threw on
  * sight would end the session rather than the turn.
  *
- * Only structured replies are checked. A plain-text reply is routed to every
- * pending interrupt as-is (the interactive CLI and the dev UI both rely on
- * that), and holding free text to an object schema would break it.
+ * Only structured replies are checked. A plain-text reply is routed to the
+ * single pending interrupt as-is (the interactive CLI and the dev UI both rely
+ * on that), and holding free text to an object schema would break it.
  *
  * A reply that unwraps to a bare scalar counts as plain text and is exempt for
  * the same reason: `{result: <text>}` is the envelope a client sends when it
@@ -157,6 +157,45 @@ export function interruptResponseMismatch(
     `plain-text reply is accepted as-is and is not checked. The interrupt is ` +
     `still waiting, so you can answer it again.`
   );
+}
+
+/**
+ * The text of a plain-text reply — a turn whose every part is text — or
+ * `undefined` when the reply carries anything else.
+ *
+ * This is what an interactive client sends: `adk run` and the dev UI have only
+ * a chat box, so a reply that names its interrupt is not available to them.
+ */
+export function plainTextReply(parts: Part[] | undefined): string | undefined {
+  const list = parts ?? [];
+  if (list.length === 0 || !list.every((p) => typeof p.text === 'string')) {
+    return undefined;
+  }
+  return list.map((p) => p.text).join('');
+}
+
+/**
+ * Maps a plain-text reply to the one interrupt that is pending, or to nothing
+ * at all when the reply is ambiguous.
+ *
+ * A plain-text reply names no interrupt. With two or more pauses open it would
+ * be broadcast to every one of them, and at least one node would resume with
+ * data the user never gave it, so it resolves nothing instead. Addressing a
+ * specific pause in that situation requires a structured function response.
+ *
+ * Callers derive `pending` themselves, and should do so only once
+ * {@link plainTextReply} has returned text: deriving it is the expensive half,
+ * and in the workflow root it throws on a structured reply this rule ignores.
+ */
+export function singlePendingResumeInput(
+  text: string,
+  pending: Set<string>,
+): Record<string, unknown> {
+  if (pending.size !== 1) {
+    return {};
+  }
+  const [id] = pending;
+  return {[id]: text};
 }
 
 /** Returns whether an event contains a `request_input` function call. */

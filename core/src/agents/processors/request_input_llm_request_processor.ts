@@ -16,8 +16,10 @@ import {AsyncQueue} from '../../utils/async_queue.js';
 import {isNodeTool} from '../../workflow/nodes/node_tool.js';
 import {
   interruptResponseMismatch,
+  plainTextReply,
   REQUEST_INPUT_FUNCTION_CALL_NAME,
   responseSchemasByInterruptId,
+  singlePendingResumeInput,
 } from '../../workflow/utils/hitl_utils.js';
 import {unwrapResponse} from '../../workflow/utils/rehydration_utils.js';
 import {handleFunctionCallList} from '../functions.js';
@@ -49,8 +51,9 @@ export class RequestInputLlmRequestProcessor extends BaseLlmRequestProcessor {
     }
 
     // 1. Collect resume inputs (interruptId -> value): prefer structured
-    //    `adk_request_input` responses, else map a plain-text reply to any
-    //    pending interrupt (so an interactive client can resume by typing).
+    //    `adk_request_input` responses, else map a plain-text reply to the
+    //    single pending interrupt (so an interactive client can resume by
+    //    typing).
     const resumeInputs = collectResumeInputs(events);
     if (Object.keys(resumeInputs).length === 0) {
       return;
@@ -135,7 +138,7 @@ export class RequestInputLlmRequestProcessor extends BaseLlmRequestProcessor {
 /**
  * Collects resume inputs from the session: structured `adk_request_input`
  * function responses take precedence; otherwise a plain-text reply is mapped to
- * every still-pending interrupt id.
+ * the single pending interrupt (see {@link singlePendingResumeInput}).
  *
  * A reply that does not match its interrupt's schema is rejected loudly while
  * it is the turn being processed, and skipped on later turns — it never
@@ -175,25 +178,30 @@ function collectResumeInputs(events: Event[]): Record<string, unknown> {
     isCurrentTurn = false;
   }
 
-  // Plain-text fallback: map the latest plain-text user turn to pending
-  // interrupts (mirrors a workflow root's interactive resume).
-  const pending = pendingInterruptIds(events, responseSchemas);
-  if (pending.size === 0) {
-    return {};
-  }
+  // Plain-text fallback, mirroring a workflow root's interactive resume.
   const lastUser = [...events].reverse().find((e) => e.author === 'user');
-  const parts = lastUser?.content?.parts ?? [];
-  const isPlainText =
-    parts.length > 0 && parts.every((p) => typeof p.text === 'string');
-  if (!isPlainText) {
+  const text = plainTextReply(lastUser?.content?.parts);
+  if (text === undefined) {
     return {};
   }
-  const text = parts.map((p) => p.text).join('');
-  const inputs: Record<string, unknown> = {};
-  for (const id of pending) {
-    inputs[id] = text;
-  }
-  return inputs;
+  return singlePendingResumeInput(
+    text,
+    pendingInterruptIds(eventsSincePreviousUserTurn(events), responseSchemas),
+  );
+}
+
+/**
+ * Narrows session events to the agent turn that paused: everything after the
+ * user turn before the current one.
+ *
+ * A plain-text reply records no `functionResponse` for the interrupt it
+ * answered, so an interrupt resolved by typing stays unanswered in the session
+ * forever, and every later typed reply would look ambiguous.
+ */
+function eventsSincePreviousUserTurn(events: Event[]): Event[] {
+  const userTurns = events.flatMap((e, i) => (e.author === 'user' ? [i] : []));
+  const previous = userTurns.at(-2);
+  return previous === undefined ? events : events.slice(previous + 1);
 }
 
 /**
