@@ -6,12 +6,24 @@
 
 import {
   getGcpExporters,
+  getGcpProjectId,
   getGcpResource,
   OtelExportersConfig,
 } from '@google/adk';
-import {detectResources, Resource} from '@opentelemetry/resources';
-import {GoogleAuth} from 'google-auth-library';
+import {CallCredentials, credentials, Metadata} from '@grpc/grpc-js';
+import {OTLPMetricExporter} from '@opentelemetry/exporter-metrics-otlp-grpc';
+import {gcpDetector} from '@opentelemetry/resource-detector-gcp';
+import {
+  detectResources,
+  envDetector,
+  Resource,
+  serviceInstanceIdDetector,
+} from '@opentelemetry/resources';
+import {PeriodicExportingMetricReader} from '@opentelemetry/sdk-metrics';
+import {GoogleAuth, OAuth2Client} from 'google-auth-library';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+
+import {logger} from '../../src/utils/logger.js';
 
 vi.hoisted(() => {
   vi.resetModules();
@@ -19,7 +31,7 @@ vi.hoisted(() => {
 // Mock Google Cloud modules
 vi.mock('google-auth-library');
 vi.mock('@google-cloud/opentelemetry-cloud-trace-exporter');
-vi.mock('@google-cloud/opentelemetry-cloud-monitoring-exporter');
+vi.mock('@opentelemetry/exporter-metrics-otlp-grpc');
 vi.mock('@opentelemetry/sdk-trace-base');
 vi.mock('@opentelemetry/sdk-metrics');
 vi.mock('@opentelemetry/sdk-logs');
@@ -107,6 +119,7 @@ describe('getGcpExporters', () => {
       it(description, async () => {
         const mockAuth = {
           getProjectId: vi.fn().mockResolvedValue('test-project'),
+          getClient: vi.fn().mockResolvedValue(new OAuth2Client()),
         };
         vi.mocked(GoogleAuth).mockImplementation(
           () => mockAuth as unknown as GoogleAuth,
@@ -150,6 +163,145 @@ describe('getGcpExporters', () => {
   });
 });
 
+const TELEMETRY_SERVICE_URL = 'https://telemetry.googleapis.com';
+
+const EXPORT_CALL_OPTIONS = {
+  method_name: 'Export',
+  service_url: TELEMETRY_SERVICE_URL,
+};
+
+/**
+ * Builds the metric exporter and returns the per-call credentials gRPC would
+ * attach to every export RPC.
+ */
+async function getExportCallCredentials(): Promise<CallCredentials> {
+  const combineSpy = vi.spyOn(credentials, 'combineChannelCredentials');
+
+  await getGcpExporters({enableMetrics: true});
+
+  expect(combineSpy).toHaveBeenCalledTimes(1);
+  const [, callCredentials] = combineSpy.mock.calls[0];
+  return callCredentials;
+}
+
+describe('getGcpExporters OTLP metric export', () => {
+  let authClient: OAuth2Client;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // The suite above swaps in its own GoogleAuth constructor implementation,
+    // which outlives clearAllMocks; reset it so `new GoogleAuth()` returns the
+    // automocked instance these tests configure through the prototype.
+    vi.mocked(GoogleAuth).mockReset();
+    authClient = new OAuth2Client();
+    vi.mocked(GoogleAuth.prototype.getProjectId).mockImplementation(() =>
+      Promise.resolve('test-project'),
+    );
+    vi.mocked(GoogleAuth.prototype.getClient).mockResolvedValue(authClient);
+    vi.mocked(authClient.getRequestHeaders).mockResolvedValue(new Headers());
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('exports metrics to the Cloud Telemetry OTLP endpoint', async () => {
+    await getGcpExporters({enableMetrics: true});
+
+    expect(OTLPMetricExporter).toHaveBeenCalledTimes(1);
+    const [exporterConfig] = vi.mocked(OTLPMetricExporter).mock.calls[0];
+    expect(exporterConfig?.url).toBe(TELEMETRY_SERVICE_URL);
+    expect(exporterConfig?.credentials).toBeDefined();
+  });
+
+  it('wraps the OTLP exporter in a 5s periodic reader', async () => {
+    await getGcpExporters({enableMetrics: true});
+
+    expect(PeriodicExportingMetricReader).toHaveBeenCalledTimes(1);
+    const [readerConfig] = vi.mocked(PeriodicExportingMetricReader).mock
+      .calls[0];
+    expect(readerConfig.exportIntervalMillis).toBe(5000);
+    expect(readerConfig.exporter).toBe(
+      vi.mocked(OTLPMetricExporter).mock.instances[0],
+    );
+  });
+
+  it('constructs no metric exporter when metrics are not enabled', async () => {
+    const hooks = await getGcpExporters();
+
+    expect(hooks.metricReaders).toEqual([]);
+    expect(OTLPMetricExporter).not.toHaveBeenCalled();
+    expect(PeriodicExportingMetricReader).not.toHaveBeenCalled();
+  });
+
+  it('mints gRPC metadata from ADC request headers', async () => {
+    vi.mocked(authClient.getRequestHeaders).mockResolvedValue(
+      new Headers({
+        authorization: 'Bearer test-token',
+        'x-goog-user-project': 'test-project',
+      }),
+    );
+
+    const callCredentials = await getExportCallCredentials();
+    const metadata: Metadata =
+      await callCredentials.generateMetadata(EXPORT_CALL_OPTIONS);
+
+    expect(authClient.getRequestHeaders).toHaveBeenCalledWith(
+      TELEMETRY_SERVICE_URL,
+    );
+    expect(metadata.get('authorization')).toEqual(['Bearer test-token']);
+    expect(metadata.get('x-goog-user-project')).toEqual(['test-project']);
+  });
+
+  it('forwards a credential Error to the export RPC', async () => {
+    const failure = new Error('token refresh failed');
+    vi.mocked(authClient.getRequestHeaders).mockRejectedValue(failure);
+
+    const callCredentials = await getExportCallCredentials();
+    const rejection = await callCredentials
+      .generateMetadata(EXPORT_CALL_OPTIONS)
+      .catch((e: unknown) => e);
+
+    expect(rejection).toBe(failure);
+  });
+
+  it('wraps a non-Error credential rejection before forwarding it', async () => {
+    vi.mocked(authClient.getRequestHeaders).mockRejectedValue('boom');
+
+    const callCredentials = await getExportCallCredentials();
+    const rejection = await callCredentials
+      .generateMetadata(EXPORT_CALL_OPTIONS)
+      .catch((e: unknown) => e);
+
+    expect(rejection).toBeInstanceOf(Error);
+    expect(rejection).toHaveProperty('message', 'boom');
+  });
+
+  it('disables metrics but keeps tracing when the auth client is unavailable', async () => {
+    vi.mocked(GoogleAuth.prototype.getClient).mockRejectedValue(
+      new Error('no ADC'),
+    );
+
+    const hooks = await getGcpExporters({
+      enableTracing: true,
+      enableMetrics: true,
+    });
+
+    expect(hooks.spanProcessors?.length).toBe(1);
+    expect(hooks.metricReaders).toEqual([]);
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('Application Default Credentials'),
+    );
+  });
+
+  it('constructs the exporter without performing network I/O', async () => {
+    await getGcpExporters({enableMetrics: true});
+
+    expect(OTLPMetricExporter).toHaveBeenCalledTimes(1);
+    expect(authClient.getRequestHeaders).not.toHaveBeenCalled();
+  });
+});
+
 describe('getGcpResource', () => {
   it('should detect GCP resources using gcpDetector', async () => {
     const mockDetectedResource = {attributes: {'cloud.provider': 'gcp'}};
@@ -159,9 +311,49 @@ describe('getGcpResource', () => {
 
     const result = await getGcpResource();
 
+    // Order is the contract: each detector overrides the ones before it.
     expect(detectResources).toHaveBeenCalledWith({
-      detectors: [expect.any(Object)],
+      detectors: [serviceInstanceIdDetector, envDetector, gcpDetector],
     });
     expect(result).toEqual(mockDetectedResource);
+  });
+});
+
+describe('getGcpProjectId', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(GoogleAuth).mockReset();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('resolves the project from Application Default Credentials', async () => {
+    vi.mocked(GoogleAuth.prototype.getProjectId).mockImplementation(() =>
+      Promise.resolve('adc-project'),
+    );
+
+    await expect(getGcpProjectId()).resolves.toBe('adc-project');
+  });
+
+  it('resolves undefined when the project cannot be determined', async () => {
+    vi.mocked(GoogleAuth.prototype.getProjectId).mockImplementation(() =>
+      Promise.reject(new Error('no ADC')),
+    );
+
+    await expect(getGcpProjectId()).resolves.toBeUndefined();
+  });
+
+  it('prefers injected credentials over the ambient default', async () => {
+    vi.mocked(GoogleAuth.prototype.getProjectId).mockImplementation(() =>
+      Promise.resolve('ambient-project'),
+    );
+    const injected = new GoogleAuth();
+    vi.spyOn(injected, 'getProjectId').mockImplementation(() =>
+      Promise.resolve('injected-project'),
+    );
+
+    await expect(getGcpProjectId(injected)).resolves.toBe('injected-project');
   });
 });
