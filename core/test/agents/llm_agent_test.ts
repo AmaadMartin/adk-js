@@ -390,6 +390,38 @@ describe('LlmAgent.callLlm', () => {
       response: originalLlmResponse,
     });
   });
+
+  it('records the last streamed response, not the first', async () => {
+    const spyDuration = vi
+      .spyOn(metrics, 'recordClientOperationDuration')
+      .mockClear();
+    const spyTokenUsage = vi
+      .spyOn(metrics, 'recordClientTokenUsage')
+      .mockClear();
+    // Streaming usage is cumulative, so the last chunk holds the call total.
+    const firstChunk: LlmResponse = {
+      content: {role: 'model', parts: [{text: 'chunk 1'}]},
+      usageMetadata: {promptTokenCount: 12, candidatesTokenCount: 1},
+    };
+    const lastChunk: LlmResponse = {
+      content: {role: 'model', parts: [{text: 'chunk 2'}]},
+      usageMetadata: {promptTokenCount: 12, candidatesTokenCount: 7},
+    };
+
+    agent.model = new StreamingMockLlm([firstChunk, lastChunk]);
+    await callLlmUnderTest();
+
+    expect(spyTokenUsage).toHaveBeenCalledTimes(1);
+    expect(spyTokenUsage).toHaveBeenCalledWith({
+      agentName: 'test_agent',
+      llmRequest,
+      response: lastChunk,
+    });
+    expect(spyDuration).toHaveBeenCalledTimes(1);
+    expect(spyDuration).toHaveBeenCalledWith(
+      expect.objectContaining({response: lastChunk}),
+    );
+  });
 });
 
 describe('LlmAgent Schema Initialization', () => {
