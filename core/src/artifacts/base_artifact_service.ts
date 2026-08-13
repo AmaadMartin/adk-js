@@ -110,8 +110,11 @@ export interface BaseArtifactService {
   /**
    * Deletes an artifact.
    *
+   * The postcondition is that the artifact does not exist. Deleting an
+   * artifact that is already absent is not an error.
+   *
    * @param request The request to delete an artifact.
-   * @return A promise that resolves when the artifact is deleted.
+   * @return A promise that resolves when the artifact does not exist.
    */
   deleteArtifact(request: DeleteArtifactRequest): Promise<void>;
 
