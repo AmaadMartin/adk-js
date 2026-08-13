@@ -236,68 +236,20 @@ export class AgentFile {
     }
 
     const importUrl = `${pathToFileURL(filePath).href}?t=${Date.now()}_${Math.random().toString(36).slice(2)}`;
-    const jsModule = await import(importUrl);
+    const jsModule: Record<string, unknown> = await import(importUrl);
 
-    if (jsModule) {
-      if (isApp(jsModule.app)) {
-        this.app = jsModule.app;
-        this.agent = jsModule.app.rootAgent;
-        return this.app!;
+    const root =
+      findRootExport(jsModule, filePath) ??
+      findRootExport(asExportNamespace(jsModule['default']), filePath);
+
+    if (root) {
+      if (isApp(root)) {
+        this.app = root;
+        this.agent = root.rootAgent;
+        return this.app;
       }
 
-      if (isApp(jsModule.rootApp)) {
-        this.app = jsModule.rootApp;
-        this.agent = jsModule.rootApp.rootAgent;
-        return this.app!;
-      }
-
-      const defaultApp = [jsModule.default, jsModule.default?.default].find(
-        isApp,
-      );
-      if (defaultApp) {
-        this.app = defaultApp;
-        this.agent = defaultApp.rootAgent;
-        return this.app!;
-      }
-
-      const rootApps = Object.values(jsModule).filter(isApp) as App[];
-
-      if (rootApps.length > 1) {
-        console.warn(
-          `Multiple apps found in ${filePath}. Using the ${rootApps[0].name} as a root app.`,
-        );
-      }
-
-      if (rootApps.length > 0) {
-        this.app = rootApps[0];
-        this.agent = rootApps[0].rootAgent;
-        return this.app!;
-      }
-
-      if (isBaseAgent(jsModule.rootAgent)) {
-        return (this.agent = jsModule.rootAgent);
-      }
-
-      const defaultAgent = [jsModule.default, jsModule.default?.default].find(
-        isBaseAgent,
-      );
-      if (defaultAgent) {
-        return (this.agent = defaultAgent);
-      }
-
-      const rootAgents = Object.values(jsModule).filter(
-        isBaseAgent,
-      ) as BaseAgent[];
-
-      if (rootAgents.length > 1) {
-        console.warn(
-          `Multiple agents found in ${filePath}. Using the ${rootAgents[0].name} as a root agent.`,
-        );
-      }
-
-      if (rootAgents.length > 0) {
-        return (this.agent = rootAgents[0]);
-      }
+      return (this.agent = root);
     }
 
     await this.dispose();
@@ -600,6 +552,83 @@ export class AgentLoader {
         `Skipping it; the other agents are unaffected.`,
     );
   }
+}
+
+/**
+ * Reads `value` as a namespace of exports, or an empty one when it holds none.
+ *
+ * Compiling a file that is already an esbuild CommonJS bundle produces a second
+ * bundle without the export annotation Node's CommonJS lexer reads. The import
+ * of such a file then yields a namespace whose only key is `default`, holding
+ * the real `module.exports` with every named export one level down.
+ */
+function asExportNamespace(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+/** Returns the root app or agent among a module's exports, if it has one. */
+function findRootExport(
+  jsModule: Record<string, unknown>,
+  filePath: string,
+): App | BaseAgent | undefined {
+  const app = jsModule['app'];
+  if (isApp(app)) {
+    return app;
+  }
+
+  const rootApp = jsModule['rootApp'];
+  if (isApp(rootApp)) {
+    return rootApp;
+  }
+
+  const defaultExport = jsModule['default'];
+  const defaultExports = [
+    defaultExport,
+    asExportNamespace(defaultExport)['default'],
+  ];
+
+  const defaultApp = defaultExports.find(isApp);
+  if (defaultApp) {
+    return defaultApp;
+  }
+
+  const rootApps = Object.values(jsModule).filter(isApp);
+
+  if (rootApps.length > 1) {
+    console.warn(
+      `Multiple apps found in ${filePath}. Using the ${rootApps[0].name} as a root app.`,
+    );
+  }
+
+  if (rootApps.length > 0) {
+    return rootApps[0];
+  }
+
+  const rootAgent = jsModule['rootAgent'];
+  if (isBaseAgent(rootAgent)) {
+    return rootAgent;
+  }
+
+  const defaultAgent = defaultExports.find(isBaseAgent);
+  if (defaultAgent) {
+    return defaultAgent;
+  }
+
+  const rootAgents = Object.values(jsModule).filter(isBaseAgent);
+
+  if (rootAgents.length > 1) {
+    console.warn(
+      `Multiple agents found in ${filePath}. Using the ${rootAgents[0].name} as a root agent.`,
+    );
+  }
+
+  if (rootAgents.length > 0) {
+    return rootAgents[0];
+  }
+
+  return undefined;
 }
 
 function isJsFile(fileExt?: string): boolean {
