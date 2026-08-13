@@ -29,13 +29,28 @@ const UNBANNERED_ARTIFACTS = [
   'integrations/dist/cjs/index.js',
 ];
 
-function readArtifact(artifact: string): Promise<string> {
-  return readFile(path.join(process.cwd(), artifact), 'utf8');
+/**
+ * The specifier lives inside a template literal in a build script, so it is
+ * plain text to ESLint rather than an `ImportDeclaration`, and no lint rule can
+ * guard it. Pin the source of the banner as well as the emitted output, so the
+ * bare specifier cannot come back in a tree that was never built.
+ */
+const BANNER_SOURCE =
+  "import {createRequire as topLevelCreateRequire} from 'node:module';";
+const BARE_SPECIFIER = "from 'module'";
+
+const BUILD_SCRIPTS = [
+  ['core', 'core/build.js'],
+  ['integrations', 'integrations/build.js'],
+] as const;
+
+function readRepoFile(file: string): Promise<string> {
+  return readFile(path.join(process.cwd(), file), 'utf8');
 }
 
 describe('generated ESM build banner', () => {
   it.each(BANNERED_ARTIFACTS)('imports node:module in %s', async (artifact) => {
-    const [firstLine] = (await readArtifact(artifact)).split('\n');
+    const [firstLine] = (await readRepoFile(artifact)).split('\n');
 
     const banner = BANNER_IMPORT.exec(firstLine);
     if (!banner) {
@@ -45,6 +60,15 @@ describe('generated ESM build banner', () => {
   });
 
   it.each(UNBANNERED_ARTIFACTS)('emits no banner in %s', async (artifact) => {
-    expect(await readArtifact(artifact)).not.toContain('topLevelCreateRequire');
+    expect(await readRepoFile(artifact)).not.toContain('topLevelCreateRequire');
+  });
+
+  describe.each(BUILD_SCRIPTS)('%s', (_workspace, buildScript) => {
+    it('imports the module builtin with the node: protocol', async () => {
+      const contents = await readRepoFile(buildScript);
+
+      expect(contents).toContain(BANNER_SOURCE);
+      expect(contents).not.toContain(BARE_SPECIFIER);
+    });
   });
 });
