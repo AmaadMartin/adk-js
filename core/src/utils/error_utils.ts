@@ -7,7 +7,8 @@
 /**
  * Helpers for turning arbitrary thrown values into readable, root-cause
  * messages, so that wrapped, aggregated or HTTP-flavoured failures are not
- * reduced to an empty or generic string when they are reported.
+ * reduced to an empty or generic string when they are reported, and for
+ * classifying them by the fields they carry.
  */
 
 /**
@@ -39,6 +40,31 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === 'object'
     ? (value as Record<string, unknown>)
     : undefined;
+}
+
+/**
+ * Whether `error` carries the given machine-readable `code`.
+ *
+ * Unlike `instanceof`, this still matches when two copies of the throwing
+ * package are resolved in one runtime.
+ */
+export function errorHasCode(error: unknown, code: string): boolean {
+  return asRecord(error)?.['code'] === code;
+}
+
+/**
+ * Whether `error` reports the given HTTP status. Both spellings are accepted:
+ * `status`, as `fetch` and axios responses use, and `statusCode`.
+ */
+export function errorHasStatus(error: unknown, status: number): boolean {
+  const record = asRecord(error);
+  return record?.['status'] === status || record?.['statusCode'] === status;
+}
+
+/** Whether `error`'s message contains `text`, compared case-insensitively. */
+export function errorMessageIncludes(error: unknown, text: string): boolean {
+  const message = asRecord(error)?.['message'];
+  return typeof message === 'string' && message.toLowerCase().includes(text);
 }
 
 /** Returns the first argument that is a string, or `undefined` if none are. */

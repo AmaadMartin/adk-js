@@ -5,7 +5,13 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {formatError, resolveErrorType} from '../../src/utils/error_utils.js';
+import {
+  errorHasCode,
+  errorHasStatus,
+  errorMessageIncludes,
+  formatError,
+  resolveErrorType,
+} from '../../src/utils/error_utils.js';
 
 const TRUNCATION_MARKER = '... [truncated]';
 const MAX_RESPONSE_BODY_LENGTH = 1000;
@@ -322,5 +328,52 @@ describe('resolveErrorType', () => {
 
   it('stringifies a thrown number', () => {
     expect(resolveErrorType(42)).toBe('42');
+  });
+});
+
+describe('errorHasCode', () => {
+  it('matches the code an error carries', () => {
+    expect(errorHasCode(new Error('boom'), 'FILE_NOT_FOUND')).toBe(false);
+    expect(
+      errorHasCode(
+        Object.assign(new Error('boom'), {code: 'FILE_NOT_FOUND'}),
+        'FILE_NOT_FOUND',
+      ),
+    ).toBe(true);
+  });
+
+  it('does not match a value that is not an object', () => {
+    expect(errorHasCode('FILE_NOT_FOUND', 'FILE_NOT_FOUND')).toBe(false);
+    expect(errorHasCode(null, 'FILE_NOT_FOUND')).toBe(false);
+  });
+});
+
+describe('errorHasStatus', () => {
+  it('reads the "status" field', () => {
+    expect(errorHasStatus({status: 404}, 404)).toBe(true);
+    expect(errorHasStatus({status: 500}, 404)).toBe(false);
+  });
+
+  it('reads the "statusCode" field', () => {
+    expect(errorHasStatus({statusCode: 409}, 409)).toBe(true);
+  });
+
+  it('does not match a value that is not an object', () => {
+    expect(errorHasStatus(404, 404)).toBe(false);
+  });
+});
+
+describe('errorMessageIncludes', () => {
+  it('matches case-insensitively', () => {
+    expect(errorMessageIncludes(new Error('Timeout occurred'), 'timeout')).toBe(
+      true,
+    );
+    expect(errorMessageIncludes(new Error('boom'), 'timeout')).toBe(false);
+  });
+
+  it('does not match when the message is absent or not a string', () => {
+    expect(errorMessageIncludes({code: 'TIMEOUT'}, 'timeout')).toBe(false);
+    expect(errorMessageIncludes({message: 42}, 'timeout')).toBe(false);
+    expect(errorMessageIncludes('timeout', 'timeout')).toBe(false);
   });
 });

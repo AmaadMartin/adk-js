@@ -71,6 +71,7 @@
     "zod-to-json-schema": "^3.25.1"
   },
   "devDependencies": {
+    "@daytona/sdk": "^0.204.0",
     "@mikro-orm/sqlite": "^6.6.6",
     "@opentelemetry/context-async-hooks": "^2.1.0",
     "@toolbox-sdk/adk": "^1.1.0",
@@ -80,6 +81,7 @@
     "openapi-types": "^12.1.3"
   },
   "peerDependencies": {
+    "@daytona/sdk": "^0.204.0",
     "@mikro-orm/mariadb": "^6.6.6",
     "@mikro-orm/mssql": "^6.6.6",
     "@mikro-orm/mysql": "^6.6.6",
@@ -88,6 +90,9 @@
     "@toolbox-sdk/adk": "^1.1.0"
   },
   "peerDependenciesMeta": {
+    "@daytona/sdk": {
+      "optional": true
+    },
     "@toolbox-sdk/adk": {
       "optional": true
     }
