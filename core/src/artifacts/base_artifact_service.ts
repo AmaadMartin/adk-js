@@ -65,6 +65,17 @@ export interface ArtifactVersion {
   canonicalUri?: string;
   /** Custom metadata associated with the artifact. */
   customMetadata?: Record<string, unknown>;
+  /**
+   * When this version was created, as a Unix timestamp in seconds, not
+   * milliseconds.
+   *
+   * Seconds, rather than the JS-idiomatic `Date.now()` milliseconds, for parity
+   * with adk-python's `ArtifactVersion.create_time`. Artifact stores are shared
+   * between the two SDKs, so the unit is part of the storage format.
+   *
+   * Undefined only for artifacts whose store recorded no creation time.
+   */
+  createTime?: number;
   /** The MIME type of the artifact. */
   mimeType?: string;
 }

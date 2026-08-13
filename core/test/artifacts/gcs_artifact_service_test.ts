@@ -26,6 +26,7 @@ const {StorageMock, storageMock} = vi.hoisted(() => {
         data: Buffer.isBuffer(data) ? data : Buffer.from(data),
         metadata: options?.metadata?.metadata || {},
         contentType: options?.metadata?.contentType ?? options?.contentType,
+        timeCreated: new Date().toISOString(),
       });
     }
 
@@ -38,13 +39,25 @@ const {StorageMock, storageMock} = vi.hoisted(() => {
     }
 
     async getMetadata(): Promise<
-      [{contentType?: string; metadata?: Record<string, unknown>}]
+      [
+        {
+          contentType?: string;
+          metadata?: Record<string, unknown>;
+          timeCreated?: string;
+        },
+      ]
     > {
       const file = this.bucket.files.get(this.name);
       if (!file) {
         throw new Error(`File not found: ${this.name}`);
       }
-      return [{contentType: file.contentType, metadata: file.metadata}];
+      return [
+        {
+          contentType: file.contentType,
+          metadata: file.metadata,
+          timeCreated: file.timeCreated,
+        },
+      ];
     }
 
     async delete(): Promise<void> {
@@ -63,6 +76,8 @@ const {StorageMock, storageMock} = vi.hoisted(() => {
         data: Buffer;
         metadata: Record<string, unknown>;
         contentType?: string;
+        // Optional so a test can seed an object that predates timeCreated.
+        timeCreated?: string;
       }
     >();
 
@@ -171,6 +186,82 @@ describe('GcsArtifactService', () => {
       });
       expect(loaded?.fileData).toBeUndefined();
       expect(loaded?.text).toBe('actual note content');
+    });
+  });
+
+  describe('createTime from blob metadata', () => {
+    it('reports an undefined createTime for a blob with no timeCreated', async () => {
+      storageMock.buckets.clear();
+      const service = new GcsArtifactService(bucketName);
+
+      storageMock
+        .bucket(bucketName)
+        .files.set('test-app/test-user/test-session/no_time.txt/0', {
+          data: Buffer.from('legacy'),
+          metadata: {},
+          contentType: 'text/plain',
+        });
+
+      const version = await service.getArtifactVersion({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 'test-session',
+        filename: 'no_time.txt',
+        version: 0,
+      });
+
+      expect(version?.version).toBe(0);
+      expect(version?.createTime).toBeUndefined();
+    });
+
+    it('reports an undefined createTime for an unparseable timeCreated', async () => {
+      storageMock.buckets.clear();
+      const service = new GcsArtifactService(bucketName);
+
+      storageMock
+        .bucket(bucketName)
+        .files.set('test-app/test-user/test-session/bad_time.txt/0', {
+          data: Buffer.from('legacy'),
+          metadata: {},
+          contentType: 'text/plain',
+          timeCreated: 'not a timestamp',
+        });
+
+      const version = await service.getArtifactVersion({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 'test-session',
+        filename: 'bad_time.txt',
+        version: 0,
+      });
+
+      expect(version?.createTime).toBeUndefined();
+    });
+
+    it('converts the RFC 3339 timeCreated to Unix seconds', async () => {
+      storageMock.buckets.clear();
+      const service = new GcsArtifactService(bucketName);
+
+      storageMock
+        .bucket(bucketName)
+        .files.set('test-app/test-user/test-session/known_time.txt/0', {
+          data: Buffer.from('content'),
+          metadata: {},
+          contentType: 'text/plain',
+          timeCreated: '2026-02-03T04:05:06.789Z',
+        });
+
+      const version = await service.getArtifactVersion({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 'test-session',
+        filename: 'known_time.txt',
+        version: 0,
+      });
+
+      expect(version?.createTime).toBe(
+        Date.parse('2026-02-03T04:05:06.789Z') / 1000,
+      );
     });
   });
 

@@ -4,7 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {BaseArtifactService, CompositeSessionKey} from '@google/adk';
+import {
+  ArtifactVersion,
+  BaseArtifactService,
+  CompositeSessionKey,
+} from '@google/adk';
 import {Part} from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 
@@ -569,6 +573,171 @@ export function runArtifactServiceTests(
         version,
       });
       expect(versionMetadata?.mimeType).not.toBe('image/png');
+    });
+  });
+
+  describe('createTime', () => {
+    const createTimeOf = (version: ArtifactVersion | undefined): number => {
+      if (version?.createTime === undefined) {
+        expect.fail('Expected an artifact version carrying a createTime.');
+      }
+      return version.createTime;
+    };
+
+    // A createTime in milliseconds is around 1.7e12, so a wall-clock bound in
+    // seconds catches the wrong unit as well as a missing value.
+    const expectInWallClockWindow = (
+      version: ArtifactVersion | undefined,
+      before: number,
+      after: number,
+    ) => {
+      const createTime = createTimeOf(version);
+      expect(createTime).toBeGreaterThanOrEqual(before - 1);
+      expect(createTime).toBeLessThanOrEqual(after + 1);
+    };
+
+    it('reports a creation time in seconds on getArtifactVersion', async () => {
+      const filename = 'create-time.txt';
+      const before = Date.now() / 1000;
+      await service.saveArtifact({
+        appName,
+        userId,
+        sessionId,
+        filename,
+        artifact: {text: '1'},
+      });
+      const after = Date.now() / 1000;
+
+      const version = await service.getArtifactVersion({
+        appName,
+        userId,
+        sessionId,
+        filename,
+        version: 0,
+      });
+
+      expectInWallClockWindow(version, before, after);
+    });
+
+    it('reports a creation time on every entry of listArtifactVersions', async () => {
+      const filename = 'create-time-list.txt';
+      const before = Date.now() / 1000;
+      for (const text of ['1', '2', '3']) {
+        await service.saveArtifact({
+          appName,
+          userId,
+          sessionId,
+          filename,
+          artifact: {text},
+        });
+      }
+      const after = Date.now() / 1000;
+
+      const versions = await service.listArtifactVersions({
+        appName,
+        userId,
+        sessionId,
+        filename,
+      });
+
+      expect(versions).toHaveLength(3);
+      for (const version of versions) {
+        expectInWallClockWindow(version, before, after);
+      }
+      expect(createTimeOf(versions[1])).toBeGreaterThanOrEqual(
+        createTimeOf(versions[0]),
+      );
+      expect(createTimeOf(versions[2])).toBeGreaterThanOrEqual(
+        createTimeOf(versions[1]),
+      );
+    });
+
+    it('reports the same creation time for a version on repeated reads', async () => {
+      const filename = 'create-time-stable.txt';
+      await service.saveArtifact({
+        appName,
+        userId,
+        sessionId,
+        filename,
+        artifact: {text: '1'},
+      });
+
+      const first = await service.getArtifactVersion({
+        appName,
+        userId,
+        sessionId,
+        filename,
+        version: 0,
+      });
+      const second = await service.getArtifactVersion({
+        appName,
+        userId,
+        sessionId,
+        filename,
+        version: 0,
+      });
+
+      expect(createTimeOf(second)).toBe(createTimeOf(first));
+    });
+
+    it('reports the same creation time from getArtifactVersion and listArtifactVersions', async () => {
+      const filename = 'create-time-agree.txt';
+      await service.saveArtifact({
+        appName,
+        userId,
+        sessionId,
+        filename,
+        artifact: {text: '1'},
+      });
+      await service.saveArtifact({
+        appName,
+        userId,
+        sessionId,
+        filename,
+        artifact: {text: '2'},
+      });
+
+      const listed = await service.listArtifactVersions({
+        appName,
+        userId,
+        sessionId,
+        filename,
+      });
+
+      expect(listed).toHaveLength(2);
+      for (const entry of listed) {
+        const fetched = await service.getArtifactVersion({
+          appName,
+          userId,
+          sessionId,
+          filename,
+          version: entry.version,
+        });
+        expect(createTimeOf(fetched)).toBe(createTimeOf(entry));
+      }
+    });
+
+    it('reports a creation time for a user-scoped artifact', async () => {
+      const filename = 'user:create-time.txt';
+      const before = Date.now() / 1000;
+      await service.saveArtifact({
+        appName,
+        userId,
+        sessionId,
+        filename,
+        artifact: {text: '1'},
+      });
+      const after = Date.now() / 1000;
+
+      const version = await service.getArtifactVersion({
+        appName,
+        userId,
+        sessionId,
+        filename,
+        version: 0,
+      });
+
+      expectInWallClockWindow(version, before, after);
     });
   });
 

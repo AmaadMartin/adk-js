@@ -259,6 +259,7 @@ export class GcsArtifactService implements BaseArtifactService {
         mimeType: metadata.contentType,
         customMetadata: metadata.metadata as Record<string, unknown>,
         canonicalUri: file.publicUrl(),
+        createTime: toEpochSeconds(metadata.timeCreated),
       };
     } catch (e) {
       logger.warn(
@@ -268,6 +269,23 @@ export class GcsArtifactService implements BaseArtifactService {
       return undefined;
     }
   }
+}
+
+/**
+ * Converts an RFC 3339 timestamp reported by GCS into Unix seconds.
+ *
+ * @param rfc3339 The timestamp to convert, if the object carries one.
+ * @return The timestamp in seconds, or undefined when it is absent or
+ *     unparseable.
+ */
+function toEpochSeconds(rfc3339?: string): number | undefined {
+  if (!rfc3339) {
+    return undefined;
+  }
+
+  const milliseconds = Date.parse(rfc3339);
+
+  return isNaN(milliseconds) ? undefined : milliseconds / 1000;
 }
 
 function getFileName({
