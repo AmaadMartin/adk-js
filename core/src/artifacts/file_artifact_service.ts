@@ -117,13 +117,7 @@ export class FileArtifactService implements BaseArtifactService {
       mimeType = artifact.fileData!.mimeType;
     }
 
-    const canonicalUri = await getCanonicalUri(
-      this.rootDir,
-      userId,
-      sessionId,
-      filename,
-      nextVersion,
-    );
+    const canonicalUri = canonicalUriForVersion(artifactDir, nextVersion);
     const metadata: FileArtifactVersion = {
       fileName: filename,
       mimeType,
@@ -194,21 +188,10 @@ export class FileArtifactService implements BaseArtifactService {
       }
 
       const storedFilename = path.basename(artifactDir);
-      let contentPath = path.join(versionDir, storedFilename);
-
-      if (metadata.canonicalUri) {
-        const uriPath = fileUriToPath(metadata.canonicalUri);
-        if (uriPath) {
-          try {
-            await fs.access(uriPath);
-            contentPath = uriPath;
-          } catch {
-            logger.warn(
-              `[FileArtifactService] loadArtifact: Artifact ${filename} missing at ${uriPath}, falling back to content path ${contentPath}`,
-            );
-          }
-        }
-      }
+      // Derived only from the storage layout. `metadata.json` lives inside the
+      // artifact tree, so honouring a `canonicalUri` from it would turn this
+      // into an arbitrary file read.
+      const contentPath = path.join(versionDir, storedFilename);
 
       if (metadata.mimeType) {
         try {
@@ -345,7 +328,9 @@ export class FileArtifactService implements BaseArtifactService {
         );
         try {
           const metadata = await readMetadata(metadataPath);
-          artifactVersions.push(metadata);
+          artifactVersions.push(
+            buildArtifactVersion(artifactDir, version, metadata),
+          );
         } catch (e) {
           logger.warn(
             `[FileArtifactService] listArtifactVersions: Failed to read artifact version ${version} at ${artifactDir}`,
@@ -397,7 +382,8 @@ export class FileArtifactService implements BaseArtifactService {
         versionToRead.toString(),
         'metadata.json',
       );
-      return await readMetadata(metadataPath);
+      const metadata = await readMetadata(metadataPath);
+      return buildArtifactVersion(artifactDir, versionToRead, metadata);
     } catch (e) {
       logger.warn(
         `[FileArtifactService] getArtifactVersion: Failed to get artifact version for userId: ${userId} sessionId: ${sessionId} filename: ${filename} version: ${version}`,
@@ -462,6 +448,49 @@ export function getSessionArtifactsDir(
 
 function getVersionsDir(artifactDir: string): string {
   return path.join(artifactDir, 'versions');
+}
+
+/**
+ * Builds the canonical `file://` URI of an artifact payload from the storage
+ * layout.
+ *
+ * @param artifactDir The artifact directory.
+ * @param version The version.
+ * @returns The canonical URI.
+ */
+function canonicalUriForVersion(artifactDir: string, version: number): string {
+  const payloadPath = path.join(
+    getVersionsDir(artifactDir),
+    version.toString(),
+    path.basename(artifactDir),
+  );
+  return pathToFileURL(payloadPath).toString();
+}
+
+/**
+ * Builds the artifact version record handed to callers.
+ *
+ * `version` and `canonicalUri` come from the storage layout rather than from
+ * the metadata document. That document lives in the artifact tree and is
+ * therefore untrusted input, so a tampered copy must not be able to dictate
+ * the identity callers see.
+ *
+ * @param artifactDir The artifact directory.
+ * @param version The version discovered in the directory listing.
+ * @param metadata The metadata document of that version.
+ * @returns The artifact version record.
+ */
+function buildArtifactVersion(
+  artifactDir: string,
+  version: number,
+  metadata: FileArtifactVersion,
+): ArtifactVersion {
+  return {
+    version,
+    canonicalUri: canonicalUriForVersion(artifactDir, version),
+    customMetadata: metadata.customMetadata,
+    mimeType: metadata.mimeType,
+  };
 }
 
 /**
@@ -539,39 +568,6 @@ async function getArtifactVersionsFromDir(
     );
     return [];
   }
-}
-
-/**
- * Gets the canonical URI for an artifact version.
- *
- * @param rootDir The root directory.
- * @param userId The user ID.
- * @param sessionId The session ID.
- * @param filename The filename.
- * @param version The version.
- * @returns A promise that resolves to the canonical URI.
- */
-async function getCanonicalUri(
-  rootDir: string,
-  userId: string,
-  sessionId: string,
-  filename: string,
-  version: number,
-): Promise<string> {
-  const artifactDir = await getArtifactDir(
-    rootDir,
-    userId,
-    sessionId,
-    filename,
-  );
-  const storedFilename = path.basename(artifactDir);
-  const versionsDir = getVersionsDir(artifactDir);
-  const payloadPath = path.join(
-    versionsDir,
-    version.toString(),
-    storedFilename,
-  );
-  return pathToFileURL(payloadPath).toString();
 }
 
 /**
@@ -658,25 +654,6 @@ async function* iterateArtifactDirs(dir: string): AsyncGenerator<string> {
     }
   } catch (_e: unknown) {
     // ignore access errors
-  }
-}
-
-/**
- * Converts a file URI to a path.
- *
- * @param uri The file URI.
- * @returns The path.
- */
-function fileUriToPath(uri: string): string | undefined {
-  try {
-    return fileURLToPath(uri);
-  } catch (e) {
-    logger.warn(
-      `[FileArtifactService] fileUriToPath: Failed to convert file URI to path: ${uri}`,
-      e,
-    );
-
-    return undefined;
   }
 }
 
