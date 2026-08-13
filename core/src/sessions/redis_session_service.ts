@@ -69,7 +69,10 @@ export interface RedisSetOptions {
  *
  * Depending on this structural type instead of node-redis's own client type
  * keeps `redis` out of the type graph of every consumer of `@google/adk`, and
- * lets a caller inject any client that provides these five commands.
+ * lets a caller inject any client that provides these four commands.
+ *
+ * `close` is deliberately absent: the service only ever closes a connection it
+ * opened itself, and an injected client belongs to its caller.
  */
 export interface RedisClientLike {
   /** Reads a key, resolving to `null` when it is absent or expired. */
@@ -86,9 +89,10 @@ export interface RedisClientLike {
     MATCH?: string;
     COUNT?: number;
   }): AsyncIterable<string[]>;
-  /** Releases the connection. Absent on clients that do not own one. */
-  close?(): Promise<void>;
 }
+
+/** A client this service opened, and is therefore responsible for closing. */
+type OwnedRedisClient = RedisClientLike & {close(): Promise<void>};
 
 /**
  * Connection and storage settings for {@link RedisSessionService}.
@@ -314,7 +318,7 @@ function compareSessions(
  */
 async function connectRedisClient(
   config: RedisSessionServiceConfig,
-): Promise<RedisClientLike> {
+): Promise<OwnedRedisClient> {
   let createClient: typeof import('redis').createClient;
   try {
     ({createClient} = await import('redis'));
@@ -392,7 +396,7 @@ export class RedisSessionService extends BaseSessionService {
   private readonly injectedClient?: RedisClientLike;
   private readonly ttlSeconds: number;
   private readonly keyPrefix: string;
-  private clientPromise?: Promise<RedisClientLike>;
+  private clientPromise?: Promise<OwnedRedisClient>;
 
   constructor({client, ...config}: RedisSessionServiceOptions = {}) {
     super();
@@ -638,20 +642,26 @@ export class RedisSessionService extends BaseSessionService {
     }
     this.clientPromise = undefined;
     const client = await pending;
-    await client.close?.();
+    await client.close();
   }
 
   /**
    * Returns the injected client, or builds and connects one on first use.
    *
    * The pending promise is memoised rather than the resolved client, so two
-   * concurrent callers share a single connect.
+   * concurrent callers share a single connect. A failed connect is forgotten,
+   * so the next call retries instead of replaying the failure forever.
    */
   private async getClient(): Promise<RedisClientLike> {
     if (this.injectedClient) {
       return this.injectedClient;
     }
-    this.clientPromise ??= connectRedisClient(this.config);
+    if (!this.clientPromise) {
+      this.clientPromise = connectRedisClient(this.config).catch((error) => {
+        this.clientPromise = undefined;
+        throw error;
+      });
+    }
     return this.clientPromise;
   }
 
