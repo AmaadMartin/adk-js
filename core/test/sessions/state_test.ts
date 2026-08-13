@@ -40,4 +40,39 @@ describe('State', () => {
       expect(value['key2']).toBe('value2');
     });
   });
+
+  describe('getDelta', () => {
+    it('returns an empty object for a fresh state', () => {
+      expect(new State().getDelta()).toEqual({});
+    });
+
+    it('returns the keys written through set', () => {
+      const state = new State();
+
+      state.set('key1', 'value1');
+      state.set('key2', {nested: true});
+
+      expect(state.getDelta()).toEqual({key1: 'value1', key2: {nested: true}});
+    });
+
+    it('returns a copy that does not write back into the state', () => {
+      const state = new State();
+      state.set('key', 'value');
+
+      const delta = state.getDelta();
+      delta['key'] = 'mutated';
+      delta['added'] = 'new';
+
+      expect(state.getDelta()).toEqual({key: 'value'});
+      expect(state.get('key')).toBe('value');
+    });
+
+    it('omits keys that exist only in the value', () => {
+      const state = new State({existing: 'fromValue'});
+
+      state.set('written', 'fromSet');
+
+      expect(state.getDelta()).toEqual({written: 'fromSet'});
+    });
+  });
 });
