@@ -264,6 +264,42 @@ describe('event_processor_utils', () => {
       expect(parts![1].metadata?.validation_error).toBe(true);
     });
 
+    it('returns an auth-required error event for an unanswered auth-required task', () => {
+      const taskParts = toA2AParts([
+        {
+          functionCall: {
+            id: 'call_1',
+            name: 'adk_request_credential',
+            args: {},
+          },
+        },
+      ]);
+      const task = {
+        id: 'taskId1',
+        contextId: 'contextId1',
+        kind: 'task',
+        status: {
+          state: 'auth-required',
+          message: {
+            parts: taskParts,
+          },
+        },
+      } as Task;
+      const genAIContent = {
+        parts: [{text: 'here you go'}],
+      } as GenAIContent;
+
+      const result = getTaskInputRequiredEvent(task, genAIContent);
+
+      expect(result).toBeDefined();
+      expect(result!.status?.state).toBe('auth-required');
+      const parts = result!.status?.message?.parts;
+      expect((parts![1] as TextPart)?.text).toContain(
+        'No input provided for function call id call_1',
+      );
+      expect(parts![1].metadata?.validation_error).toBe(true);
+    });
+
     it('returns undefined if status message has no functionCall parts', () => {
       const taskParts = toA2AParts([{text: 'Please answer'}]);
       const task = {

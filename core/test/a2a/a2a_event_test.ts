@@ -23,8 +23,8 @@ import {
   getEventMetadata,
   getFailedTaskStatusUpdateEventError,
   isFailedTaskStatusUpdateEvent,
-  isInputRequiredTaskStatusUpdateEvent,
   isMessage,
+  isPausedTaskStatusUpdateEvent,
   isTask,
   isTaskArtifactUpdateEvent,
   isTaskStatusUpdateEvent,
@@ -122,23 +122,51 @@ describe('a2a_event', () => {
       ).toBe(false);
     });
 
-    it('isInputRequiredTaskStatusUpdateEvent', () => {
+    it('isPausedTaskStatusUpdateEvent', () => {
       expect(
-        isInputRequiredTaskStatusUpdateEvent({
+        isPausedTaskStatusUpdateEvent({
           kind: 'status-update',
           status: {state: 'input-required'},
         }),
       ).toBe(true);
       expect(
-        isInputRequiredTaskStatusUpdateEvent({
-          kind: 'task',
-          status: {state: 'input-required'},
+        isPausedTaskStatusUpdateEvent({
+          kind: 'status-update',
+          status: {state: 'auth-required'},
         }),
       ).toBe(true);
       expect(
-        isInputRequiredTaskStatusUpdateEvent({
+        isPausedTaskStatusUpdateEvent({
+          kind: 'task',
+          status: {state: 'auth-required'},
+        }),
+      ).toBe(true);
+      expect(
+        isPausedTaskStatusUpdateEvent({
           kind: 'status-update',
           status: {state: 'working'},
+        }),
+      ).toBe(false);
+      expect(
+        isPausedTaskStatusUpdateEvent({
+          kind: 'status-update',
+          status: {state: 'completed'},
+        }),
+      ).toBe(false);
+      expect(
+        isPausedTaskStatusUpdateEvent({
+          kind: 'status-update',
+          status: {state: 'failed'},
+        }),
+      ).toBe(false);
+      expect(isPausedTaskStatusUpdateEvent(null)).toBe(false);
+    });
+
+    it('isTerminalTaskStatusUpdateEvent is false for a paused task', () => {
+      expect(
+        isTerminalTaskStatusUpdateEvent({
+          kind: 'status-update',
+          status: {state: 'auth-required'},
         }),
       ).toBe(false);
     });
@@ -525,6 +553,17 @@ describe('a2a_event', () => {
           timestamp: '2024-01-01T00:00:00.000Z',
         },
       });
+    });
+
+    it('createInputMissingErrorEvent keeps an explicit paused state', () => {
+      const event = createInputMissingErrorEvent({
+        parts: [{kind: 'text', text: 'no input provided'}],
+        taskId: 't1',
+        contextId: 'c1',
+        state: 'auth-required',
+      });
+
+      expect(event.status.state).toBe('auth-required');
     });
   });
 });

@@ -13,7 +13,7 @@ import {
   createTaskCompletedEvent,
   createTaskFailedEvent,
   createTaskInputRequiredEvent,
-  isInputRequiredTaskStatusUpdateEvent,
+  isPausedTaskStatusUpdateEvent,
 } from './a2a_event.js';
 import {ExecutorContext} from './executor_context.js';
 import {
@@ -162,11 +162,7 @@ export function getTaskInputRequiredEvent(
   task: Task,
   genAIContent: GenAIContent,
 ): TaskStatusUpdateEvent | undefined {
-  if (
-    !task ||
-    !isInputRequiredTaskStatusUpdateEvent(task) ||
-    !task.status.message
-  ) {
+  if (!task || !isPausedTaskStatusUpdateEvent(task) || !task.status.message) {
     return undefined;
   }
 
@@ -187,6 +183,7 @@ export function getTaskInputRequiredEvent(
       return createInputMissingErrorEvent({
         taskId: task.id,
         contextId: task.contextId,
+        state: task.status.state,
         parts: [
           ...statusMsg.parts.filter((p) => !p.metadata?.validation_error),
           {
