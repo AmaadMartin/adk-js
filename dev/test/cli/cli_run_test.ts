@@ -5,6 +5,8 @@
  */
 
 import {BaseAgent, BaseSessionService, Runner} from '@google/adk';
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import * as readline from 'node:readline';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
@@ -122,6 +124,7 @@ describe('cli_run', () => {
     expect(AgentFile).toHaveBeenCalledWith(
       expect.stringContaining('agent.ts'),
       undefined,
+      undefined,
     );
     expect(mockAgentFile.load).toHaveBeenCalled();
     expect(readline.createInterface).toHaveBeenCalled();
@@ -188,7 +191,23 @@ describe('cli_run', () => {
       sessionService: createMockSessionService(),
     });
 
-    expect(AgentFile).toHaveBeenCalledWith(absolute, undefined);
+    expect(AgentFile).toHaveBeenCalledWith(absolute, undefined, undefined);
+  });
+
+  it('marks the agent file reloadable when --reload_agents is set', async () => {
+    const agentPath = path.join(
+      await fs.mkdtemp(path.join(os.tmpdir(), 'cli-run-reload')),
+      'agent.ts',
+    );
+    await fs.writeFile(agentPath, '');
+
+    await runAgent({
+      agentPath,
+      reloadAgents: true,
+      sessionService: createMockSessionService(),
+    });
+
+    expect(AgentFile).toHaveBeenCalledWith(agentPath, undefined, true);
   });
 
   it('resolves a relative path against the working directory', async () => {
