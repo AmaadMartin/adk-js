@@ -139,7 +139,6 @@ describe('handleFunctionCallList', () => {
   });
 
   it('should execute tool with no callbacks or plugins', async () => {
-    const spy = vi.spyOn(metrics, 'recordToolExecutionDuration');
     const event = await handleFunctionCallList({
       invocationContext,
       functionCalls: [functionCall],
@@ -152,6 +151,19 @@ describe('handleFunctionCallList', () => {
     expect(definedEvent.content!.parts![0].functionResponse!.response).toEqual({
       result: 'tool executed',
     });
+  });
+
+  it('records the execution duration of a tool that succeeds', async () => {
+    const spy = vi.spyOn(metrics, 'recordToolExecutionDuration').mockClear();
+
+    await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [functionCall],
+      toolsDict,
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
     expect(spy).toHaveBeenCalledWith(
       'testTool',
       'FunctionTool',
@@ -336,7 +348,6 @@ describe('handleFunctionCallList', () => {
   });
 
   it('should return error message when error is thrown during tool execution, when no plugin onToolErrorCallback is provided', async () => {
-    const spy = vi.spyOn(metrics, 'recordToolExecutionDuration');
     const errorFunctionCall: FunctionCall = {
       id: randomIdForTestingOnly(),
       name: 'errorTool',
@@ -354,6 +365,24 @@ describe('handleFunctionCallList', () => {
     expect(event!.content!.parts![0].functionResponse!.response).toEqual({
       error: "Error in tool 'errorTool': tool error message content",
     });
+  });
+
+  it('records the error type of a tool that throws', async () => {
+    const spy = vi.spyOn(metrics, 'recordToolExecutionDuration').mockClear();
+    const errorFunctionCall: FunctionCall = {
+      id: randomIdForTestingOnly(),
+      name: 'errorTool',
+      args: {},
+    };
+
+    await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [errorFunctionCall],
+      toolsDict: {'errorTool': errorTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
     expect(spy).toHaveBeenCalledWith(
       'errorTool',
       'FunctionTool',

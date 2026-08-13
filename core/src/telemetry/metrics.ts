@@ -8,11 +8,9 @@ import {Content} from '@google/genai';
 import {
   Attributes,
   Histogram,
-  HrTime,
   MeterProvider,
   MetricAdvice,
   metrics,
-  Span,
 } from '@opentelemetry/api';
 
 import {LlmRequest} from '../models/llm_request.js';
@@ -22,19 +20,20 @@ import {resolveErrorType} from '../utils/error_utils.js';
 import {logger} from '../utils/logger.js';
 import {getGoogleLlmVariant, GoogleLLMVariant} from '../utils/variant_utils.js';
 import {version} from '../version.js';
-import {TokenUsage} from './token_usage.js';
+import {
+  ERROR_TYPE,
+  GEN_AI_AGENT_NAME,
+  GEN_AI_OPERATION_NAME,
+  GEN_AI_PROVIDER_NAME,
+  GEN_AI_REQUEST_MODEL,
+  GEN_AI_RESPONSE_MODEL,
+  GEN_AI_TOKEN_TYPE,
+  GEN_AI_TOOL_NAME,
+  GEN_AI_TOOL_TYPE,
+} from './semconv.js';
+import {inputTokenCount, outputTokenCount} from './token_usage.js';
 
 const METER_NAME = 'gcp.vertex.agent';
-
-const ERROR_TYPE = 'error.type';
-const GEN_AI_AGENT_NAME = 'gen_ai.agent.name';
-const GEN_AI_OPERATION_NAME = 'gen_ai.operation.name';
-const GEN_AI_PROVIDER_NAME = 'gen_ai.provider.name';
-const GEN_AI_REQUEST_MODEL = 'gen_ai.request.model';
-const GEN_AI_RESPONSE_MODEL = 'gen_ai.response.model';
-const GEN_AI_TOKEN_TYPE = 'gen_ai.token.type';
-const GEN_AI_TOOL_NAME = 'gen_ai.tool.name';
-const GEN_AI_TOOL_TYPE = 'gen_ai.tool.type';
 
 interface HistogramSpec {
   name: string;
@@ -320,68 +319,25 @@ export function recordClientTokenUsage(params: {
       return;
     }
 
-    const tokenUsage = new TokenUsage(response.usageMetadata);
-    const inputTokenCount = tokenUsage.inputTokenCount ?? 0;
-    const outputTokenCount = tokenUsage.outputTokenCount ?? 0;
+    const inputTokens = inputTokenCount(response.usageMetadata) ?? 0;
+    const outputTokens = outputTokenCount(response.usageMetadata) ?? 0;
     const attributes = clientAttributes(
       agentName,
       llmRequest,
       response.modelVersion || llmRequest.model,
     );
 
-    if (inputTokenCount > 0) {
-      histogram('clientTokenUsage').record(inputTokenCount, {
+    if (inputTokens > 0) {
+      histogram('clientTokenUsage').record(inputTokens, {
         ...attributes,
         [GEN_AI_TOKEN_TYPE]: 'input',
       });
     }
-    if (outputTokenCount > 0) {
-      histogram('clientTokenUsage').record(outputTokenCount, {
+    if (outputTokens > 0) {
+      histogram('clientTokenUsage').record(outputTokens, {
         ...attributes,
         [GEN_AI_TOKEN_TYPE]: 'output',
       });
     }
   });
-}
-
-/** A span whose implementation records the timings the SDK exposes. */
-interface TimedSpan extends Span {
-  startTime?: unknown;
-  endTime?: unknown;
-}
-
-function isHrTime(value: unknown): value is HrTime {
-  return (
-    Array.isArray(value) &&
-    value.length === 2 &&
-    typeof value[0] === 'number' &&
-    typeof value[1] === 'number'
-  );
-}
-
-/**
- * Returns the duration of an operation in seconds, from one consistent time
- * source.
- *
- * Note: this must be called with an ended span.
- *
- * @param span The ended span to take the duration from. The API `Span` type
- *     exposes no timings, so they are read off the SDK implementation when it
- *     provides them.
- * @param fallbackStartMs The start time in milliseconds, as returned by
- *     `performance.now()`, used when the span carries no readable timings.
- */
-export function getElapsedS(
-  span: Span | undefined,
-  fallbackStartMs: number,
-): number {
-  const timed: TimedSpan | undefined = span;
-  if (timed && isHrTime(timed.startTime) && isHrTime(timed.endTime)) {
-    return (
-      timed.endTime[0] -
-      timed.startTime[0] +
-      (timed.endTime[1] - timed.startTime[1]) / 1e9
-    );
-  }
-  return (performance.now() - fallbackStartMs) / 1000;
 }

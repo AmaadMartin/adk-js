@@ -21,10 +21,7 @@ import {ToolConfirmation} from '../tools/tool_confirmation.js';
 import {logger} from '../utils/logger.js';
 import {Context} from './context.js';
 
-import {
-  getElapsedS,
-  recordToolExecutionDuration,
-} from '../telemetry/metrics.js';
+import {recordToolExecutionDuration} from '../telemetry/metrics.js';
 import {
   traceMergedToolCalls,
   tracer,
@@ -210,7 +207,7 @@ async function callToolAsync(
         toolName,
         toolType,
         agentName,
-        getElapsedS(span, startTime),
+        (performance.now() - startTime) / 1000,
         error,
       );
     }
