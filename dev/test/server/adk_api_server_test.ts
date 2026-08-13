@@ -33,6 +33,7 @@ import {z} from 'zod';
 import {
   A2A_AUTH_TOKEN_ENV_VAR,
   AdkApiServer,
+  AppLoadError,
   toListenError,
 } from '../../src/server/adk_api_server.js';
 import {AgentLoader, AgentNotFoundError} from '../../src/utils/agent_loader.js';
@@ -304,6 +305,7 @@ describe('AdkWebServer', () => {
     agentFile = createAgentFileStub();
     agentLoader = {
       listAgents: () => Promise.resolve(['testApp']),
+      listLoadFailures: () => Promise.resolve([]),
       getAgentFile: (name: string) =>
         name === 'testApp'
           ? Promise.resolve(agentFile)
@@ -1008,6 +1010,71 @@ describe('AdkWebServer', () => {
         expect((e as {response: {status: number}}).response.status).toBe(500);
       } finally {
         agentLoader.listAgents = originalListAgents;
+      }
+    });
+  });
+
+  describe('List App Errors', () => {
+    const BROKEN_APP_FAILURE = {
+      name: 'brokenApp',
+      filePath: '/agents/brokenApp/agent.ts',
+      error: new Error('Graph validation failed.'),
+    };
+
+    it('should return no errors when every app loaded', async () => {
+      const response = await client.get<AppLoadError[]>('/list-app-errors');
+
+      expect(response.status).toBe(200);
+      expect(response.data).toEqual([]);
+    });
+
+    it('should report why an app is missing from the list', async () => {
+      const originalListLoadFailures = agentLoader.listLoadFailures;
+      agentLoader.listLoadFailures = () =>
+        Promise.resolve([BROKEN_APP_FAILURE]);
+
+      try {
+        const response = await client.get<AppLoadError[]>('/list-app-errors');
+
+        expect(response.status).toBe(200);
+        expect(response.data).toEqual([
+          {
+            name: 'brokenApp',
+            filePath: '/agents/brokenApp/agent.ts',
+            error: 'Graph validation failed.',
+          },
+        ]);
+      } finally {
+        agentLoader.listLoadFailures = originalListLoadFailures;
+      }
+    });
+
+    it('should return 500 if listing load failures fails', async () => {
+      const originalListLoadFailures = agentLoader.listLoadFailures;
+      agentLoader.listLoadFailures = () =>
+        Promise.reject(new Error('List failed'));
+
+      try {
+        await expect(client.get('/list-app-errors')).rejects.toMatchObject({
+          response: {status: 500},
+        });
+      } finally {
+        agentLoader.listLoadFailures = originalListLoadFailures;
+      }
+    });
+
+    it('should keep /list-apps a bare array while an app is broken', async () => {
+      const originalListLoadFailures = agentLoader.listLoadFailures;
+      agentLoader.listLoadFailures = () =>
+        Promise.resolve([BROKEN_APP_FAILURE]);
+
+      try {
+        const response = await client.get<string[]>('/list-apps');
+
+        expect(response.status).toBe(200);
+        expect(response.data).toEqual(['testApp']);
+      } finally {
+        agentLoader.listLoadFailures = originalListLoadFailures;
       }
     });
   });
