@@ -11,7 +11,7 @@ const POLLUTED_KEYS = ['polluted'];
 
 const clearPollution = () => {
   for (const key of POLLUTED_KEYS) {
-    delete (Object.prototype as Record<string, unknown>)[key];
+    Reflect.deleteProperty(Object.prototype, key);
   }
 };
 
@@ -107,7 +107,7 @@ describe('State', () => {
       expect(state.get('__proto__')).toBe(payload);
       expect(state.has('__proto__')).toBe(true);
       expect(state.hasDelta()).toBe(true);
-      expect(({} as Record<string, unknown>)['polluted']).toBeUndefined();
+      expect(Object.hasOwn(Object.prototype, 'polluted')).toBe(false);
     });
 
     it('stores __proto__ on a default-constructed state', () => {
@@ -119,7 +119,7 @@ describe('State', () => {
       expect(state.get('__proto__')).toBe(payload);
       expect(state.has('__proto__')).toBe(true);
       expect(state.hasDelta()).toBe(true);
-      expect(({} as Record<string, unknown>)['polluted']).toBeUndefined();
+      expect(Object.hasOwn(Object.prototype, 'polluted')).toBe(false);
     });
 
     it('writes an enumerable, writable, configurable data property', () => {
@@ -151,7 +151,7 @@ describe('State', () => {
       expect(state.get('__proto__')).toEqual({polluted: true});
       expect(state.get('ok')).toBe(1);
       expect(state.hasDelta()).toBe(true);
-      expect(({} as Record<string, unknown>)['polluted']).toBeUndefined();
+      expect(Object.hasOwn(Object.prototype, 'polluted')).toBe(false);
     });
 
     it('stores a __proto__ entry from update on a default-constructed state', () => {
@@ -162,7 +162,7 @@ describe('State', () => {
       expect(state.has('__proto__')).toBe(true);
       expect(state.get('__proto__')).toEqual({polluted: true});
       expect(state.get('ok')).toBe(1);
-      expect(({} as Record<string, unknown>)['polluted']).toBeUndefined();
+      expect(Object.hasOwn(Object.prototype, 'polluted')).toBe(false);
     });
 
     it('carries the __proto__ entry through toRecord', () => {
@@ -175,7 +175,7 @@ describe('State', () => {
       expect(record['__proto__']).toEqual({polluted: true});
       expect(record['ok']).toBe(1);
       expect(Object.hasOwn(record, 'polluted')).toBe(false);
-      expect(({} as Record<string, unknown>)['polluted']).toBeUndefined();
+      expect(Object.hasOwn(Object.prototype, 'polluted')).toBe(false);
     });
   });
 

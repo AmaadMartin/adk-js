@@ -838,6 +838,34 @@ describe('InMemorySessionService', () => {
       expect(stored?.state['__proto__']).toEqual({isAdmin: true});
     });
 
+    it('does not re-parent a caller-owned plain state map on commit', async () => {
+      // A caller can hand the service a session whose state is a plain object
+      // literal, which the commit in `BaseSessionService` writes through to.
+      const session: Session = {
+        id: 's1',
+        appName: 'app1',
+        userId: 'u1',
+        state: {},
+        events: [],
+        lastUpdateTime: 0,
+      };
+
+      await service.appendEvent({
+        session,
+        event: createEvent({
+          timestamp: Date.now(),
+          actions: createEventActions({
+            stateDelta: parseBody('{"__proto__": {"isAdmin": true}}'),
+          }),
+        }),
+      });
+
+      expect(Object.getPrototypeOf(session.state)).toBe(Object.prototype);
+      expect(Object.hasOwn(session.state, '__proto__')).toBe(true);
+      expect(new State(session.state).get('isAdmin')).toBeUndefined();
+      expect(Object.hasOwn(Object.prototype, 'isAdmin')).toBe(false);
+    });
+
     it('does not leak sessions across apps as phantom entries', async () => {
       await service.createSession({
         appName: '__proto__',

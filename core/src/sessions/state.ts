@@ -14,8 +14,12 @@ import {recordStateWrite} from './state_write_order.js';
  * map instead of storing the entry: the map's prototype becomes
  * caller-controlled and the entry is lost. `defineProperty` always creates an
  * own property.
+ *
+ * Exported for the session services, which apply a committed delta to
+ * `session.state` and need the same guarantee. `common.ts` re-exports `State`
+ * by name, so this stays internal to the package.
  */
-function defineStateEntry(
+export function defineStateEntry(
   target: Record<string, unknown>,
   key: string,
   value: unknown,
@@ -37,6 +41,9 @@ export class State {
   static readonly USER_PREFIX = 'user:';
   static readonly TEMP_PREFIX = 'temp:';
 
+  // The null-prototype defaults are belt and braces: the read and write paths
+  // below are already prototype-safe on a plain `{}`, and a caller-supplied map
+  // keeps whatever prototype the caller gave it.
   constructor(
     /** The current value of the state. */
     private value: Record<string, unknown> = Object.create(null),
