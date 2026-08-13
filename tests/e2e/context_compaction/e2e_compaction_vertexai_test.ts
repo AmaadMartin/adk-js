@@ -20,16 +20,20 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {describe, expect, it} from 'vitest';
 
-function createVertexAICompactionAgent(): LlmAgent {
+function createVertexAICompactionAgent(location: string): LlmAgent {
   const compactor = new TokenBasedContextCompactor({
     tokenThreshold: 50, // Artificially low token limit.
     eventRetentionSize: 2, // Keep the last 2 events uncompacted out of those triggered.
     summarizer: new LlmSummarizer({
-      llm: new Gemini({model: 'gemini-2.5-flash', vertexai: true}),
+      llm: new Gemini({model: 'gemini-2.5-flash', vertexai: true, location}),
     }),
   });
 
-  const agentModel = new Gemini({model: 'gemini-2.5-flash', vertexai: true});
+  const agentModel = new Gemini({
+    model: 'gemini-2.5-flash',
+    vertexai: true,
+    location,
+  });
   return new LlmAgent({
     name: 'compaction_agent',
     description: 'An agent configured to test live context compaction.',
@@ -48,17 +52,21 @@ describe('E2e Context Compaction (Vertex AI)', () => {
     dotenv.config({path: envPath});
   }
 
+  // The region is not defaulted: it has to be the region REASONING_ENGINE_ID
+  // was created in, and the models must agree with the session service.
   const hasRequiredEnv =
-    !!process.env.GOOGLE_CLOUD_PROJECT && !!process.env.REASONING_ENGINE_ID;
+    !!process.env.GOOGLE_CLOUD_PROJECT &&
+    !!process.env.GOOGLE_CLOUD_LOCATION &&
+    !!process.env.REASONING_ENGINE_ID;
 
   it.skipIf(!hasRequiredEnv)(
     'should hit token threshold and compact history using Vertex AI Sessions',
     async () => {
-      const agent = createVertexAICompactionAgent();
-
       const projectId = process.env.GOOGLE_CLOUD_PROJECT!;
-      const location = process.env.LOCATION || 'us-west1';
+      const location = process.env.GOOGLE_CLOUD_LOCATION!;
       const agentEngineId = process.env.REASONING_ENGINE_ID!;
+
+      const agent = createVertexAICompactionAgent(location);
 
       const sessionService = new VertexAiSessionService({
         projectId,
