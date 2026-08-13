@@ -257,10 +257,6 @@ function isJsonMimeType(mimeType: string): boolean {
 }
 
 /**
- * Reports whether an operation must send `{}` when the caller supplied no body
- * property: its first (and only processed) media type is JSON and declares an
- * object-typed schema.
- *
  * adk-python seeds an object-typed body with `{}` and sends it even when no
  * property was supplied, so an operation whose body properties are all optional
  * POSTs `{}` rather than no body at all. A `$ref` schema does not count as an
@@ -277,11 +273,9 @@ function sendsEmptyJsonObjectBody(
     return false;
   }
   const [mimeType, mediaType] = Object.entries(requestBody.content)[0] ?? [];
-  if (mimeType === undefined || mediaType === undefined) {
-    return false;
-  }
-  const schema = mediaType.schema;
+  const schema = mediaType?.schema;
   return (
+    mimeType !== undefined &&
     isJsonMimeType(mimeType) &&
     schema !== undefined &&
     !('$ref' in schema) &&
