@@ -1,2 +1,6 @@
 dist/
 node_modules/
+
+# Recorded conformance fixtures: generated data, not source. Reformatting
+# them makes every regeneration produce a spurious diff.
+conformance/fixtures.json

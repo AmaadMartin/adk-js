@@ -1,0 +1,35 @@
+name: conformance
+
+# Replays the adk-python conformance fixtures against this branch.
+#
+# Separate from the main test job on purpose. It answers a different question
+# -- "does this behave like adk-python" rather than "is this correct" -- and it
+# should be able to fail without blocking a change that is right on its own
+# terms while parity is still being built up.
+#
+# Pushes only, deliberately. On `pull_request` this would add a job to every
+# one of the 800-odd open pull requests on the fork the day it lands, to prove
+# something about a branch none of them target. Running it on the integration
+# branch answers the parity question once per pass, which is the cadence the
+# question actually changes at. Widen the trigger when it has been green and
+# fast for a while, not before.
+on:
+  push:
+    branches: [experimental]
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # No build step: the config aliases @google/adk to core/src, so the
+      # replay runs against the sources the PR actually changed and the job
+      # stays under a minute.
+      - name: Replay adk-python conformance fixtures
+        run: npx vitest run --config conformance/vitest.conformance.ts
