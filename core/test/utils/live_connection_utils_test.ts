@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GroundingMetadata, LiveServerGoAway} from '@google/genai';
+import {
+  LiveServerGoAway,
+  LiveServerSessionResumptionUpdate,
+} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {LiveResponseAggregator} from '../../src/utils/live_connection_utils.js';
 import {liveServerMessage} from './live_server_message_test_utils.js';
@@ -14,7 +17,7 @@ describe('LiveResponseAggregator', () => {
     const aggregator = new LiveResponseAggregator('gemini-2.5-flash');
     const usageMetadata = {
       promptTokenCount: 10,
-      candidatesTokenCount: 20,
+      responseTokenCount: 20,
       totalTokenCount: 30,
     };
 
@@ -62,7 +65,7 @@ describe('LiveResponseAggregator', () => {
           },
           turnComplete: true,
           interrupted: false,
-          groundingMetadata: {groundingChunks: []} as GroundingMetadata,
+          groundingMetadata: {groundingChunks: []},
         },
       }),
     );
@@ -265,7 +268,7 @@ describe('LiveResponseAggregator', () => {
               groundingChunks: [
                 {web: {uri: 'https://google.com', title: 'Google'}},
               ],
-            } as GroundingMetadata,
+            },
           },
         }),
       ),
@@ -347,7 +350,10 @@ describe('LiveResponseAggregator', () => {
 
   it('should yield session resumption update', () => {
     const aggregator = new LiveResponseAggregator('gemini-2.5-flash');
-    const resumptionUpdate = {resumable: true};
+    const resumptionUpdate: LiveServerSessionResumptionUpdate = {
+      resumable: true,
+      newHandle: 'handle-1',
+    };
 
     const res = Array.from(
       aggregator.processMessage(

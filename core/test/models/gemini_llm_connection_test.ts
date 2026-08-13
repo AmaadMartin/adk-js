@@ -7,7 +7,6 @@
 import {
   Blob,
   Content,
-  GroundingMetadata,
   LiveServerGoAway,
   LiveServerMessage,
   LiveServerSessionResumptionUpdate,
@@ -277,7 +276,7 @@ describe('GeminiLlmConnection', () => {
 
       const usageMetadata = {
         promptTokenCount: 10,
-        candidatesTokenCount: 20,
+        responseTokenCount: 20,
         totalTokenCount: 30,
       };
       messageQueue.push(liveServerMessage({usageMetadata}));
@@ -319,7 +318,7 @@ describe('GeminiLlmConnection', () => {
             },
             turnComplete: true,
             interrupted: false,
-            groundingMetadata: {groundingChunks: []} as GroundingMetadata,
+            groundingMetadata: {groundingChunks: []},
           },
         }),
       );
@@ -564,7 +563,7 @@ describe('GeminiLlmConnection', () => {
               groundingChunks: [
                 {web: {uri: 'https://google.com', title: 'Google'}},
               ],
-            } as GroundingMetadata,
+            },
           },
         }),
       );
@@ -600,7 +599,7 @@ describe('GeminiLlmConnection', () => {
               groundingChunks: [
                 {web: {uri: 'https://google.com', title: 'Google'}},
               ],
-            } as GroundingMetadata,
+            },
             turnComplete: false,
             interrupted: false,
           },
@@ -769,6 +768,7 @@ describe('GeminiLlmConnection', () => {
 
       const resumptionUpdate: LiveServerSessionResumptionUpdate = {
         resumable: true,
+        newHandle: 'handle-1',
       };
       messageQueue.push(
         liveServerMessage({sessionResumptionUpdate: resumptionUpdate}),

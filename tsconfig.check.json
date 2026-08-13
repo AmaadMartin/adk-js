@@ -19,7 +19,7 @@
     // way a user's project does, so the `paths` block above is wrong for it.
     // `npm run ts:check:samples` checks it against `samples/tsconfig.json`.
     "samples",
-    // Pre-existing failures, not fallout from the `paths` block above: all 33
+    // Pre-existing failures, not fallout from the `paths` block above: all 31
     // were verified to fail identically with and without that mapping. Delete
     // each entry as the file is fixed; the list only ever shrinks.
     "core/test/agents/processors/basic_llm_request_processor_test.ts",
@@ -37,7 +37,6 @@
     "core/test/events/structured_events_test.ts",
     "core/test/integrations/agent_registry_test.ts",
     "core/test/memory/vertex_ai_memory_bank_service_test.ts",
-    "core/test/models/gemini_llm_connection_test.ts",
     "core/test/models/google_llm_test.ts",
     "core/test/models/llm_response_test.ts",
     "core/test/plugins/global_instruction_plugin_test.ts",
@@ -53,7 +52,6 @@
     "core/test/tools/skills/run_skill_script_tool_test.ts",
     "core/test/tools/vertex_ai_search_tool_test.ts",
     "core/test/tools/vertex_rag_retrieval_tool_test.ts",
-    "core/test/utils/live_connection_utils_test.ts",
     "tests/integration/sessions/vertex_ai_session_service_test.ts"
   ]
 }
