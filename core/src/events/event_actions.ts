@@ -5,6 +5,7 @@
  */
 
 import {AuthConfig} from '../auth/auth_tool.js';
+import {carryDeltaStamps} from '../sessions/state_write_order.js';
 import {ToolConfirmation} from '../tools/tool_confirmation.js';
 import {deepMerge} from '../utils/merge_utils.js';
 
@@ -132,7 +133,14 @@ export function mergeEventActions(
     if (!source) continue;
 
     if (source.stateDelta) {
-      result.stateDelta = deepMerge(result.stateDelta, source.stateDelta);
+      const merged = deepMerge(result.stateDelta, source.stateDelta);
+      // The merged map is a new object; carry the write order of both inputs
+      // with the entries so a late commit can still tell it has been
+      // superseded. The source is carried last, because on a key both hold
+      // its write is the newer one.
+      carryDeltaStamps(result.stateDelta, merged);
+      carryDeltaStamps(source.stateDelta, merged);
+      result.stateDelta = merged;
     }
     if (source.artifactDelta) {
       Object.assign(result.artifactDelta, source.artifactDelta);
