@@ -66,7 +66,7 @@
               "functionCall": {
                 "name": "load_skill",
                 "args": {
-                  "name": "gws-calendar"
+                  "skill_name": "gws-calendar"
                 },
                 "id": "adk-bcea3bec-b368-4365-b85e-46a212165025"
               },
