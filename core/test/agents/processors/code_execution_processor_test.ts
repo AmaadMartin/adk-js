@@ -24,7 +24,7 @@ import {afterEach, describe, expect, it} from 'vitest';
 import {
   CODE_EXECUTION_REQUEST_PROCESSOR,
   CodeExecutionResponseProcessor,
-} from '../../../src/agents/processors/code_execution_request_processor.js';
+} from '../../../src/agents/processors/code_execution_processor.js';
 import {ScopedArtifactService} from '../../../src/artifacts/scoped_artifact_service.js';
 import {
   BaseCodeExecutor,
