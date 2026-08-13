@@ -158,13 +158,6 @@ export function getEncodedFileContent(data: string): string {
   return isBase64Encoded(data) ? data : base64Encode(data);
 }
 
-// Type to be used for regex matching of code blocks.
-interface CodeGroupMatch {
-  groups?: {prefix?: string; leading: string; codeStr?: string};
-  index?: number;
-  length?: number;
-}
-
 /**
  * Extracts the first code block from the content and truncate everything after
  * it.
@@ -219,9 +212,13 @@ export function extractCodeAndTruncateContent(
   const match = new RegExp(
     `(?<prefix>.*?)(?<leading>${leadingDelimiterPattern})(?<codeStr>.*?)(${trailingDelimiterPattern})(?<suffix>.*?)$`,
     's',
-  ).exec(responseText) as unknown as CodeGroupMatch | null;
+  ).exec(responseText);
 
-  const groups = match?.groups;
+  // `leading` is a mandatory element of the pattern, so a match always defines
+  // it, but `RegExpExecArray` only types groups as an index signature.
+  const groups = match?.groups as
+    | {prefix?: string; leading: string; codeStr?: string}
+    | undefined;
 
   if (!groups?.codeStr) {
     return undefined;

@@ -14,7 +14,7 @@ import {
   createSession,
 } from '@google/adk';
 import {Outcome} from '@google/genai';
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 import {
   CODE_EXECUTION_REQUEST_PROCESSOR,
   CodeExecutionResponseProcessor,
@@ -33,6 +33,14 @@ import {CodeExecutorContext} from '../../../src/code_executors/code_executor_con
 import {UnsafeLocalCodeExecutor} from '../../../src/code_executors/unsafe_local_code_executor.js';
 import {State} from '../../../src/sessions/state.js';
 import {base64Encode} from '../../../src/utils/env_aware_utils.js';
+
+/**
+ * Two cases in this file drive a real `UnsafeLocalCodeExecutor`, which spawns
+ * an interpreter. Budget by what is under test: that executor's own default
+ * timeout is 30s, and a harness that gives up sooner can never observe the
+ * behaviour it covers. This is a ceiling, not a delay.
+ */
+vi.setConfig({testTimeout: 30_000});
 
 class MockBaseAgent extends BaseAgent {
   constructor(name: string) {
@@ -387,7 +395,7 @@ describe('CodeExecutionResponseProcessor with a real local executor', () => {
     const resultPart = events[1].content?.parts?.[0];
     expect(resultPart?.codeExecutionResult?.outcome).toBe(Outcome.OUTCOME_OK);
     expect(resultPart?.text).toContain('hello');
-  }, 60000);
+  });
 
   it('reports a language the executor cannot run without ending the invocation', async () => {
     const agent = new LlmAgent({
@@ -418,5 +426,5 @@ describe('CodeExecutionResponseProcessor with a real local executor', () => {
         ctx.invocationId,
       ),
     ).toBe(1);
-  }, 60000);
+  });
 });
