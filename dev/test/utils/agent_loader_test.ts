@@ -183,6 +183,28 @@ const agent = new FakeAgentForApp('agent_for_app');
 exports.app = new App({ name: 'test_app', rootAgent: agent });
 `;
 
+/**
+ * The namespace an `export default <app>` module presents once esbuild bundles
+ * it to CommonJS: the app sits at `default.default`, beside a named agent that
+ * the CommonJS lexer exposes at the top level.
+ */
+const appUnderNestedDefaultContent = `
+import {App, BaseAgent} from '@google/adk';
+
+class FakeAgentBesideApp extends BaseAgent {
+  constructor(name) {
+    super({ name });
+  }
+}
+export const helper = new FakeAgentBesideApp('helper_agent');
+export default {
+  default: new App({
+    name: 'default_app',
+    rootAgent: new FakeAgentBesideApp('default_app_agent'),
+  }),
+};
+`;
+
 const appRootAppExportContent = `
 const {App, BaseAgent} = require('@google/adk');
 
@@ -588,6 +610,24 @@ describe('AgentLoader', () => {
       expect(isApp(loaded)).toBe(true);
       expect((loaded as App).name).toBe('test_app');
       expect((loaded as App).rootAgent.name).toBe('agent_for_app');
+      await agentFile.dispose();
+    });
+
+    it('prefers an app at default.default over a named agent export', async () => {
+      const appPath = path.join(tempAgentsDir, 'app_nested_default.js');
+      await fs.writeFile(appPath, appUnderNestedDefaultContent);
+
+      const compiledAppPath = compiledPath('app_nested_default.cjs');
+      (esbuild.build as Mock).mockImplementation(async () => {
+        await fs.writeFile(compiledAppPath, appUnderNestedDefaultContent);
+        return Promise.resolve();
+      });
+
+      const agentFile = new AgentFile(appPath);
+      const loaded = await agentFile.load();
+
+      expect(isApp(loaded)).toBe(true);
+      expect((loaded as App).name).toBe('default_app');
       await agentFile.dispose();
     });
 

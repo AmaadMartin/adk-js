@@ -238,9 +238,13 @@ export class AgentFile {
     const importUrl = `${pathToFileURL(filePath).href}?t=${Date.now()}_${Math.random().toString(36).slice(2)}`;
     const jsModule: Record<string, unknown> = await import(importUrl);
 
+    // Compiling a file that is already an esbuild CommonJS bundle produces a
+    // second bundle without the export annotation Node's CommonJS lexer reads.
+    // The import of such a file yields a namespace whose only key is `default`,
+    // holding the real `module.exports` with every named export one level down.
     const root =
       findRootExport(jsModule, filePath) ??
-      findRootExport(asExportNamespace(jsModule['default']), filePath);
+      findRootExport(jsModule['default'], filePath);
 
     if (root) {
       if (isApp(root)) {
@@ -554,14 +558,7 @@ export class AgentLoader {
   }
 }
 
-/**
- * Reads `value` as a namespace of exports, or an empty one when it holds none.
- *
- * Compiling a file that is already an esbuild CommonJS bundle produces a second
- * bundle without the export annotation Node's CommonJS lexer reads. The import
- * of such a file then yields a namespace whose only key is `default`, holding
- * the real `module.exports` with every named export one level down.
- */
+/** Reads `value` as a namespace of exports, or an empty one if it holds none. */
 function asExportNamespace(value: unknown): Record<string, unknown> {
   return typeof value === 'object' && value !== null
     ? (value as Record<string, unknown>)
@@ -570,9 +567,11 @@ function asExportNamespace(value: unknown): Record<string, unknown> {
 
 /** Returns the root app or agent among a module's exports, if it has one. */
 function findRootExport(
-  jsModule: Record<string, unknown>,
+  value: unknown,
   filePath: string,
 ): App | BaseAgent | undefined {
+  const jsModule = asExportNamespace(value);
+
   const app = jsModule['app'];
   if (isApp(app)) {
     return app;
