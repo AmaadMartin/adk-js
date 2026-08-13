@@ -52,17 +52,15 @@ describe('UrlContextTool', () => {
       expect(req.config!.tools).toEqual([{urlContext: {}}]);
     });
 
-    it('throws for Gemini 1.x model', async () => {
+    it('adds urlContext for a Gemini 1.x model', async () => {
       const tool = new UrlContextTool();
       const req = makeRequest('gemini-1.5-pro');
-      await expect(
-        tool.processLlmRequest({
-          llmRequest: req,
-          toolContext: {} as never,
-        }),
-      ).rejects.toThrow(
-        'URL context tool requires Gemini 2 or above, but got gemini-1.5-pro',
-      );
+      await tool.processLlmRequest({
+        llmRequest: req,
+        toolContext: {} as never,
+      });
+
+      expect(req.config!.tools).toEqual([{urlContext: {}}]);
     });
 
     it('throws for unsupported (non-Gemini) model', async () => {
