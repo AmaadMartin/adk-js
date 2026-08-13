@@ -21,21 +21,51 @@ import {LlmResponse} from './llm_response.js';
 
 // --- Helper Interfaces for Strong Typing ---
 
-export interface ExtendedInteraction extends Interactions.Interaction {
-  error?: {
-    code: string;
-    message: string;
-  };
+/**
+ * A media or text content block as received from the interactions API.
+ *
+ * `Interactions.Content` marks `TextContent.text` required and narrows
+ * `mime_type` per media kind; wire payloads omit both, so readers accept this
+ * relaxed shape and guard each field.
+ */
+export interface ReceivedContent {
+  type?: string;
+  text?: string;
+  data?: string;
+  uri?: string;
+  mime_type?: string;
 }
 
-export interface ExtendedInteractionStatusUpdate extends Omit<
-  Interactions.InteractionStatusUpdate,
-  'error'
-> {
-  error?: {
-    code: string;
-    message: string;
-  };
+/**
+ * A step as received from the interactions API.
+ *
+ * Steps arrive as JSON, so fields the SDK marks required can be absent
+ * (`arguments` has not streamed in yet on `step.start`, `call_id` is missing on
+ * code execution results) and `type` can name a step kind this SDK version does
+ * not model. Every reader narrows on `type` and guards the fields it touches.
+ */
+export interface ReceivedStep {
+  type?: string;
+  id?: string;
+  name?: string;
+  call_id?: string;
+  arguments?: Record<string, unknown>;
+  result?: unknown;
+  is_error?: boolean;
+  signature?: string;
+  content?: ReceivedContent[];
+}
+
+/**
+ * A streamed step delta as received from the interactions API.
+ */
+export interface ReceivedStepDelta extends ReceivedContent {
+  arguments?: string;
+  signature?: string;
+}
+
+export interface ExtendedInteraction extends Interactions.Interaction {
+  error?: Interactions.ErrorEvent.Error;
 }
 
 export interface ExtendedFunctionCallStep
@@ -50,23 +80,10 @@ export interface ExtendedInteractionSSEEvent extends Omit<
 > {
   event_type?: string;
   eventType?: string;
-  delta?: {
-    type: string;
-    text?: string;
-    name?: string;
-    id?: string;
-    arguments?: Record<string, unknown>;
-    thought_signature?: string;
-    signature?: string;
-    data?: string;
-    uri?: string;
-    mime_type: string;
-  };
+  step?: ReceivedStep;
+  delta?: ReceivedStepDelta;
   status?: string;
-  error?: {
-    code: string;
-    message: string;
-  };
+  error?: Interactions.ErrorEvent.Error;
   code?: string;
   message?: string;
   interaction_id?: string;
@@ -75,6 +92,16 @@ export interface ExtendedInteractionSSEEvent extends Omit<
     id: string;
   };
   id?: string;
+}
+
+/**
+ * The slice of the GenAI client used to drive the interactions API.
+ *
+ * Declared structurally so any object exposing `interactions.create` satisfies
+ * it, including `GoogleGenAI`.
+ */
+export interface InteractionsClient {
+  interactions: {create: GoogleGenAI['interactions']['create']};
 }
 
 // --- Helper Functions ---
@@ -280,9 +307,9 @@ export function convertContentToSteps(content: Content): Interactions.Step[] {
 }
 
 /**
- * Convert a media content (Interactions.Content) to a Part.
+ * Convert a media content (ReceivedContent) to a Part.
  */
-function convertMediaContentToPart(content: Interactions.Content): Part | null {
+function convertMediaContentToPart(content: ReceivedContent): Part | null {
   if (content.type === 'text') {
     return {text: content.text || ''};
   }
@@ -293,23 +320,18 @@ function convertMediaContentToPart(content: Interactions.Content): Part | null {
     content.type === 'video' ||
     content.type === 'document'
   ) {
-    const media = content as {
-      data?: string;
-      uri?: string;
-      mime_type?: string;
-    };
-    if (media.data) {
+    if (content.data) {
       return {
         inlineData: {
-          data: media.data,
-          mimeType: media.mime_type || '',
+          data: content.data,
+          mimeType: content.mime_type || '',
         },
       };
-    } else if (media.uri) {
+    } else if (content.uri) {
       return {
         fileData: {
-          fileUri: media.uri,
-          mimeType: media.mime_type || '',
+          fileUri: content.uri,
+          mimeType: content.mime_type || '',
         },
       };
     }
@@ -320,30 +342,19 @@ function convertMediaContentToPart(content: Interactions.Content): Part | null {
 /**
  * Convert a Step to a list of Parts.
  */
-export function convertStepToParts(step: Interactions.Step): Part[] {
+export function convertStepToParts(
+  step: ReceivedStep | null | undefined,
+): Part[] {
   if (!step || !step.type) {
     return [];
   }
 
   switch (step.type) {
-    case 'model_output': {
-      const modelOutputStep = step as Interactions.ModelOutputStep;
-      const parts: Part[] = [];
-      if (modelOutputStep.content) {
-        for (const content of modelOutputStep.content) {
-          const part = convertMediaContentToPart(content);
-          if (part) {
-            parts.push(part);
-          }
-        }
-      }
-      return parts;
-    }
+    case 'model_output':
     case 'user_input': {
-      const userInputStep = step as Interactions.UserInputStep;
       const parts: Part[] = [];
-      if (userInputStep.content) {
-        for (const content of userInputStep.content) {
+      if (step.content) {
+        for (const content of step.content) {
           const part = convertMediaContentToPart(content);
           if (part) {
             parts.push(part);
@@ -353,27 +364,25 @@ export function convertStepToParts(step: Interactions.Step): Part[] {
       return parts;
     }
     case 'function_call': {
-      const functionCallStep = step as ExtendedFunctionCallStep;
       const part: Part = {
         functionCall: {
-          id: functionCallStep.id,
-          name: functionCallStep.name,
-          args: functionCallStep.arguments || {},
+          id: step.id,
+          name: step.name,
+          args: step.arguments || {},
         },
       };
-      if (functionCallStep.signature) {
-        part.thoughtSignature = functionCallStep.signature;
+      if (step.signature) {
+        part.thoughtSignature = step.signature;
       }
       return [part];
     }
     case 'function_result': {
-      const functionResultStep = step as Interactions.FunctionResultStep;
-      const result = functionResultStep.result;
+      const result = step.result;
       return [
         {
           functionResponse: {
-            id: functionResultStep.call_id,
-            name: functionResultStep.name || '',
+            id: step.call_id,
+            name: step.name || '',
             response:
               typeof result === 'object' && result !== null
                 ? (result as Record<string, unknown>)
@@ -409,12 +418,11 @@ export function convertStepToParts(step: Interactions.Step): Part[] {
       ];
     }
     case 'thought': {
-      const thoughtStep = step as Interactions.ThoughtStep;
       const part: Part = {
         thought: true,
       };
-      if (thoughtStep.signature) {
-        part.thoughtSignature = thoughtStep.signature;
+      if (step.signature) {
+        part.thoughtSignature = step.signature;
       }
       return [part];
     }
@@ -596,14 +604,12 @@ export function convertInteractionEventToLlmResponse(
   const eventType = event.event_type || event.eventType;
 
   if (eventType === 'step.start') {
-    const stepStart = event as unknown as Interactions.StepStart;
-    const step = stepStart.step;
-    if (step.type === 'function_call') {
-      const fcStep = step as ExtendedFunctionCallStep;
+    const step = event.step;
+    if (step?.type === 'function_call') {
       const part: Part = {
         functionCall: {
-          id: fcStep.id,
-          name: fcStep.name,
+          id: step.id,
+          name: step.name,
           args: {},
         },
         partMetadata: {
@@ -611,13 +617,13 @@ export function convertInteractionEventToLlmResponse(
           isComplete: false,
         },
       };
-      if (fcStep.signature) {
-        part.thoughtSignature = fcStep.signature;
+      if (step.signature) {
+        part.thoughtSignature = step.signature;
       }
       aggregatedParts.push(part);
       return null;
     }
-    if (step.type === 'thought') {
+    if (step?.type === 'thought') {
       const part: Part = {
         thought: true,
         partMetadata: {
@@ -631,8 +637,7 @@ export function convertInteractionEventToLlmResponse(
       return null;
     }
   } else if (eventType === 'step.delta') {
-    const stepDelta = event as unknown as Interactions.StepDelta;
-    const delta = stepDelta.delta;
+    const delta = event.delta;
     if (!delta) {
       return null;
     }
@@ -680,7 +685,7 @@ export function convertInteractionEventToLlmResponse(
       delta.type === 'video' ||
       delta.type === 'document'
     ) {
-      const part = convertMediaContentToPart(delta as Interactions.Content);
+      const part = convertMediaContentToPart(delta);
       if (part) {
         aggregatedParts.push(part);
         return {
@@ -738,8 +743,7 @@ export function convertInteractionEventToLlmResponse(
       interactionId: interactionId,
     };
   } else if (eventType === 'interaction.status_update') {
-    const statusUpdate = event as unknown as ExtendedInteractionStatusUpdate;
-    const status = statusUpdate.status;
+    const status = event.status;
     if (status === 'completed' || status === 'requires_action') {
       return {
         content:
@@ -752,7 +756,7 @@ export function convertInteractionEventToLlmResponse(
         interactionId: interactionId,
       };
     } else if (status === 'failed') {
-      const error = statusUpdate.error;
+      const error = event.error;
       return {
         errorCode: error ? error.code : 'UNKNOWN_ERROR',
         errorMessage: error ? error.message : 'Unknown error',
@@ -840,7 +844,7 @@ function extractStreamInteractionId(
  * Generate content using the interactions API.
  */
 export async function* generateContentViaInteractions(
-  apiClient: GoogleGenAI,
+  apiClient: InteractionsClient,
   llmRequest: LlmRequest,
   stream: boolean,
 ): AsyncGenerator<LlmResponse, void, void> {
