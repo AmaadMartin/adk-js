@@ -6,6 +6,10 @@
 
 import {describe, expect, it, vi} from 'vitest';
 import {createRunConfig, StreamingMode} from '../../src/agents/run_config.js';
+import {
+  ContentCapturingMode,
+  TelemetryConfig,
+} from '../../src/telemetry/context.js';
 import {logger} from '../../src/utils/logger.js';
 
 describe('StreamingMode', () => {
@@ -75,5 +79,17 @@ describe('createRunConfig', () => {
     expect(() =>
       createRunConfig({maxLlmCalls: Number.MAX_SAFE_INTEGER + 1}),
     ).toThrow();
+  });
+
+  it('carries a supplied telemetry config through untouched', () => {
+    const telemetry: TelemetryConfig = {
+      captureMessageContent: ContentCapturingMode.NO_CONTENT,
+    };
+    const config = createRunConfig({telemetry});
+    expect(config.telemetry).toBe(telemetry);
+  });
+
+  it('leaves telemetry unset by default', () => {
+    expect(createRunConfig().telemetry).toBeUndefined();
   });
 });
