@@ -8,6 +8,8 @@ import {
   BaseAgent,
   CompactedEvent,
   CONTENT_REQUEST_PROCESSOR,
+  createEvent,
+  createEventActions,
   createSession,
   Event,
   EventActions,
@@ -17,6 +19,9 @@ import {
   PluginManager,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
+
+/** Text carried only by the invocation that gets rewound. */
+const REWOUND_TEXT = 'SECRET_REWOUND_CONTENT';
 
 function createMockEvent(id: string, timestamp: number, text: string): Event {
   return {
@@ -50,6 +55,45 @@ function createCompactedEvent(
     endTime,
     compactedContent,
   };
+}
+
+function createUserEvent(
+  invocationId: string,
+  timestamp: number,
+  text: string,
+): Event {
+  return createEvent({
+    invocationId,
+    author: 'user',
+    timestamp,
+    content: {role: 'user', parts: [{text}]},
+  });
+}
+
+function createAgentEvent(
+  invocationId: string,
+  timestamp: number,
+  text: string,
+): Event {
+  return createEvent({
+    invocationId,
+    author: 'test_agent',
+    timestamp,
+    content: {role: 'model', parts: [{text}]},
+  });
+}
+
+function createRewindMarkerEvent(
+  invocationId: string,
+  timestamp: number,
+  rewindBeforeInvocationId: string,
+): Event {
+  return createEvent({
+    invocationId,
+    author: 'test_agent',
+    timestamp,
+    actions: createEventActions({rewindBeforeInvocationId}),
+  });
 }
 
 function createMockInvocationContext(events: Event[]): InvocationContext {
@@ -182,5 +226,68 @@ describe('ContentRequestProcessor', () => {
     expect(llmRequest.contents[0].parts?.[0]?.text).toContain('Summary 1-3');
     // Followed by message 4
     expect(llmRequest.contents[1].parts?.[0]?.text).toContain('New message 4');
+  });
+
+  it('should drop the rewound invocation and the rewind marker', async () => {
+    const rawEvents: Event[] = [
+      createUserEvent('inv1', 1000, 'First message'),
+      createAgentEvent('inv1', 2000, 'First response'),
+      createUserEvent('inv2', 3000, REWOUND_TEXT),
+      createAgentEvent('inv2', 4000, 'Second response'),
+      createRewindMarkerEvent('rewind_inv', 5000, 'inv2'),
+      createUserEvent('inv3', 6000, 'Third message'),
+    ];
+
+    const invocationContext = createMockInvocationContext(rawEvents);
+    const llmRequest: LlmRequest = {
+      contents: [],
+      toolsDict: {},
+      liveConnectConfig: {},
+    };
+
+    for await (const _ of CONTENT_REQUEST_PROCESSOR.runAsync(
+      invocationContext,
+      llmRequest,
+    )) {
+      // intentionally empty
+    }
+
+    expect(llmRequest.contents).toEqual([
+      {role: 'user', parts: [{text: 'First message'}]},
+      {role: 'model', parts: [{text: 'First response'}]},
+      {role: 'user', parts: [{text: 'Third message'}]},
+    ]);
+  });
+
+  it('should honour a rewind when the history also contains a CompactedEvent', async () => {
+    const rawEvents: Event[] = [
+      createUserEvent('inv1', 1000, 'First message'),
+      createAgentEvent('inv1', 2000, 'First response'),
+      createCompactedEvent('c1', 2500, 1000, 2000, 'Summary of inv1'),
+      createUserEvent('inv2', 3000, REWOUND_TEXT),
+      createAgentEvent('inv2', 4000, 'Second response'),
+      createRewindMarkerEvent('rewind_inv', 5000, 'inv2'),
+      createUserEvent('inv3', 6000, 'Third message'),
+    ];
+
+    const invocationContext = createMockInvocationContext(rawEvents);
+    const llmRequest: LlmRequest = {
+      contents: [],
+      toolsDict: {},
+      liveConnectConfig: {},
+    };
+
+    for await (const _ of CONTENT_REQUEST_PROCESSOR.runAsync(
+      invocationContext,
+      llmRequest,
+    )) {
+      // intentionally empty
+    }
+
+    expect(llmRequest.contents.length).toBe(2);
+    expect(llmRequest.contents[0].parts?.[0]?.text).toContain(
+      'Summary of inv1',
+    );
+    expect(llmRequest.contents[1].parts?.[0]?.text).toBe('Third message');
   });
 });

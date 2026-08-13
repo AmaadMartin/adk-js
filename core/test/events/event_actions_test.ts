@@ -188,6 +188,14 @@ describe('mergeEventActions', () => {
     expect(result.escalate).toBe(true);
   });
 
+  it('uses last-writer-wins for rewindBeforeInvocationId', () => {
+    const result = mergeEventActions([
+      createEventActions({rewindBeforeInvocationId: 'inv1'}),
+      createEventActions({rewindBeforeInvocationId: 'inv2'}),
+    ]);
+    expect(result.rewindBeforeInvocationId).toBe('inv2');
+  });
+
   it('applies target as the base before merging sources', () => {
     const target = createEventActions({stateDelta: {base: 'val'}});
     const result = mergeEventActions(

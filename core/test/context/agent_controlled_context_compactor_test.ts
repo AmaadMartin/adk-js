@@ -9,6 +9,8 @@ import {
   BaseAgent,
   BaseSummarizer,
   CompactedEvent,
+  createEvent,
+  createEventActions,
   createSession,
   Event,
   getLogger,
@@ -56,6 +58,36 @@ function createMockEvent(
     event.content!.parts!.push({functionCall: {name: toolName, args: {}}});
   }
   return event;
+}
+
+function createInvocationEvent(invocationId: string, text: string): Event {
+  return createEvent({
+    invocationId,
+    author: 'user',
+    content: {role: 'user', parts: [{text}]},
+  });
+}
+
+function createConsolidateContextEvent(invocationId: string): Event {
+  return createEvent({
+    invocationId,
+    author: 'agent',
+    content: {
+      role: 'model',
+      parts: [{functionCall: {name: 'consolidate_context', args: {}}}],
+    },
+  });
+}
+
+function createRewindMarkerEvent(
+  invocationId: string,
+  rewindBeforeInvocationId: string,
+): Event {
+  return createEvent({
+    invocationId,
+    author: 'user',
+    actions: createEventActions({rewindBeforeInvocationId}),
+  });
 }
 
 function createMockInvocationContext(
@@ -213,5 +245,31 @@ describe('AgentControlledContextCompactor', () => {
 
     expect(errorSpy).toHaveBeenCalledWith('Compaction failed:', failure);
     errorSpy.mockRestore();
+  });
+
+  it('never hands a rewound invocation or the marker to the summarizer', async () => {
+    const summarizer = new MockSummarizer();
+    const summarizeSpy = vi.spyOn(summarizer, 'summarize');
+    const compactor = new AgentControlledContextCompactor({summarizer});
+
+    const events = [
+      createInvocationEvent('inv1', 'hello'),
+      createInvocationEvent('inv1', 'hi'),
+      createInvocationEvent('inv_to_rewind', 'SECRET_REWOUND_CONTENT'),
+      createInvocationEvent('inv_to_rewind', 'acknowledged'),
+      createRewindMarkerEvent('rewind_inv', 'inv_to_rewind'),
+      createConsolidateContextEvent('inv3'),
+    ];
+    const state = {'temp:consolidate_context': true};
+    const context = createMockInvocationContext(events, state);
+
+    await compactor.compact(context);
+
+    expect(summarizeSpy).toHaveBeenCalledOnce();
+    const summarized = summarizeSpy.mock.calls[0][0];
+    expect(summarized.map((event) => event.invocationId)).toEqual([
+      'inv1',
+      'inv1',
+    ]);
   });
 });

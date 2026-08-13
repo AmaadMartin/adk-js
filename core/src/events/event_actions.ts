@@ -41,6 +41,11 @@ export interface EventActions {
   escalate?: boolean;
 
   /**
+   * The invocation id to rewind to. This is only set for a rewind event.
+   */
+  rewindBeforeInvocationId?: string;
+
+  /**
    * Authentication configurations requested by tool responses.
    *
    * This field will only be set by a tool response event indicating tool
@@ -79,8 +84,8 @@ export interface EventActions {
  * @param state - Optional partial {@link EventActions} whose properties
  *   override the defaults. Dictionary fields (`stateDelta`, `artifactDelta`,
  *   `requestedAuthConfigs`, `requestedToolConfirmations`) default to `{}`;
- *   scalar fields (`skipSummarization`, `transferToAgent`, `escalate`) default
- *   to `undefined`.
+ *   scalar fields (`skipSummarization`, `transferToAgent`, `escalate`,
+ *   `rewindBeforeInvocationId`) default to `undefined`.
  * @returns A fully populated {@link EventActions} object.
  */
 export function createEventActions(
@@ -109,9 +114,9 @@ export function createEventActions(
  *    later sources win on duplicate keys. `artifactDelta` holds version
  *    numbers, and the other two are keyed by function call id, which is
  *    unique per call, so nothing nested can collide.
- * 3. **Scalar fields** (`skipSummarization`, `transferToAgent`, `escalate`) —
- *    last-writer-wins: the value from the last source that sets the field is
- *    kept.
+ * 3. **Scalar fields** (`skipSummarization`, `transferToAgent`, `escalate`,
+ *    `rewindBeforeInvocationId`) — last-writer-wins: the value from the last
+ *    source that sets the field is kept.
  *
  * @param sources - Ordered list of partial {@link EventActions} to merge.
  *   Falsy entries are silently skipped.
@@ -163,6 +168,9 @@ export function mergeEventActions(
     }
     if (source.escalate !== undefined) {
       result.escalate = source.escalate;
+    }
+    if (source.rewindBeforeInvocationId !== undefined) {
+      result.rewindBeforeInvocationId = source.rewindBeforeInvocationId;
     }
   }
   return result;
