@@ -214,6 +214,15 @@ export {GlobalInstructionPlugin} from './plugins/global_instruction_plugin.js';
 export {LoggingPlugin} from './plugins/logging_plugin.js';
 export {PluginManager} from './plugins/plugin_manager.js';
 export {
+  RESERVED_TOOL_CALL_ERROR_TYPE,
+  ReflectAndRetryModelPlugin,
+} from './plugins/reflect_retry_model_plugin.js';
+export type {ReflectAndRetryModelPluginOptions} from './plugins/reflect_retry_model_plugin.js';
+export {
+  REFLECT_AND_RETRY_RESPONSE_TYPE,
+  TrackingScope,
+} from './plugins/reflect_retry_utils.js';
+export {
   InMemoryPolicyEngine,
   PolicyOutcome,
   SecurityPlugin,
