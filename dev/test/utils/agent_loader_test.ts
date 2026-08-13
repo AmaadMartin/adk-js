@@ -102,6 +102,62 @@ class FakeAgentDefault extends BaseAgent {
 export default new FakeAgentDefault('agentDefault');
 `;
 
+/**
+ * A module whose exports sit one level under `default`. This is the namespace
+ * shape `import()` returns for an agent file that was compiled twice into a
+ * CommonJS bundle.
+ */
+const agentNestedUnderDefaultContent = `
+import {BaseAgent} from '@google/adk';
+
+class FakeNestedAgent extends BaseAgent {
+  constructor(name) {
+    super({name});
+  }
+}
+
+export default {rootAgent: new FakeNestedAgent('nested_agent')};
+`;
+
+/** An app nested under `default`, per {@link agentNestedUnderDefaultContent}. */
+const appNestedUnderDefaultContent = `
+import {App, BaseAgent} from '@google/adk';
+
+class FakeNestedAppAgent extends BaseAgent {
+  constructor(name) {
+    super({name});
+  }
+}
+
+export default {
+  app: new App({
+    name: 'nested_app',
+    rootAgent: new FakeNestedAppAgent('nested_app_agent'),
+  }),
+};
+`;
+
+/** Two agents nested under `default`, only one of them named `rootAgent`. */
+const agentsNestedUnderDefaultContent = `
+import {BaseAgent} from '@google/adk';
+
+class FakeNestedAgent extends BaseAgent {
+  constructor(name) {
+    super({name});
+  }
+}
+
+export default {
+  researcher: new FakeNestedAgent('researcher'),
+  rootAgent: new FakeNestedAgent('nested_root'),
+};
+`;
+
+/** A module with no `default` export to unwrap. */
+const namedExportOnlyContent = `
+export const notAnAgent = 1;
+`;
+
 const agentMultipleExportsContent = `;
 import {BaseAgent} from '@google/adk';
 
@@ -125,6 +181,64 @@ class FakeAgentForApp extends BaseAgent {
 }
 const agent = new FakeAgentForApp('agent_for_app');
 exports.app = new App({ name: 'test_app', rootAgent: agent });
+`;
+
+/**
+ * The namespace an `export default <app>` module presents once esbuild bundles
+ * it to CommonJS: the app sits at `default.default`, beside a named agent that
+ * the CommonJS lexer exposes at the top level.
+ */
+const appUnderNestedDefaultContent = `
+import {App, BaseAgent} from '@google/adk';
+
+class FakeAgentBesideApp extends BaseAgent {
+  constructor(name) {
+    super({ name });
+  }
+}
+export const helper = new FakeAgentBesideApp('helper_agent');
+export default {
+  default: new App({
+    name: 'default_app',
+    rootAgent: new FakeAgentBesideApp('default_app_agent'),
+  }),
+};
+`;
+
+const appRootAppExportContent = `
+const {App, BaseAgent} = require('@google/adk');
+
+class FakeAgentForRootApp extends BaseAgent {
+  constructor(name) {
+    super({ name });
+  }
+}
+exports.other = new App({
+  name: 'other_app',
+  rootAgent: new FakeAgentForRootApp('agent_for_other_app'),
+});
+exports.rootApp = new App({
+  name: 'test_root_app',
+  rootAgent: new FakeAgentForRootApp('agent_for_root_app'),
+});
+`;
+
+const appMultipleExportsContent = `
+const {App, BaseAgent} = require('@google/adk');
+
+class FakeAgentForApps extends BaseAgent {
+  constructor(name) {
+    super({ name });
+  }
+}
+exports.first = new App({
+  name: 'first_app',
+  rootAgent: new FakeAgentForApps('first_agent'),
+});
+exports.second = new App({
+  name: 'second_app',
+  rootAgent: new FakeAgentForApps('second_agent'),
+});
 `;
 
 const appDefaultExportContent = `
@@ -403,6 +517,83 @@ describe('AgentLoader', () => {
       await expect(fs.access(compiledAgentPath)).rejects.toThrow();
     });
 
+    it('loads an agent nested under a CommonJS default namespace', async () => {
+      const agentPath = path.join(tempAgentsDir, 'agent_nested.js');
+      await fs.writeFile(agentPath, agentNestedUnderDefaultContent);
+
+      const compiledAgentPath = compiledPath('agent_nested.cjs');
+      (esbuild.build as Mock).mockImplementation(async () => {
+        await fs.writeFile(compiledAgentPath, agentNestedUnderDefaultContent);
+        return Promise.resolve();
+      });
+
+      const agentFile = new AgentFile(agentPath);
+      const agent = await agentFile.load();
+
+      expect(agent.name).toEqual('nested_agent');
+      await agentFile.dispose();
+    });
+
+    it('loads an app nested under a CommonJS default namespace', async () => {
+      const appPath = path.join(tempAgentsDir, 'app_nested.js');
+      await fs.writeFile(appPath, appNestedUnderDefaultContent);
+
+      const compiledAppPath = compiledPath('app_nested.cjs');
+      (esbuild.build as Mock).mockImplementation(async () => {
+        await fs.writeFile(compiledAppPath, appNestedUnderDefaultContent);
+        return Promise.resolve();
+      });
+
+      const agentFile = new AgentFile(appPath);
+      const loaded = await agentFile.load();
+
+      expect(isApp(loaded)).toBe(true);
+      expect((loaded as App).name).toBe('nested_app');
+      expect(await agentFile.loadAgent()).toBe((loaded as App).rootAgent);
+      await agentFile.dispose();
+    });
+
+    it('prefers the nested rootAgent over another nested agent export', async () => {
+      const agentPath = path.join(tempAgentsDir, 'agents_nested.js');
+      await fs.writeFile(agentPath, agentsNestedUnderDefaultContent);
+
+      const compiledAgentPath = compiledPath('agents_nested.cjs');
+      (esbuild.build as Mock).mockImplementation(async () => {
+        await fs.writeFile(compiledAgentPath, agentsNestedUnderDefaultContent);
+        return Promise.resolve();
+      });
+
+      const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const agentFile = new AgentFile(agentPath);
+      const agent = await agentFile.load();
+
+      expect(agent.name).toEqual('nested_root');
+      expect(consoleSpy).not.toHaveBeenCalledWith(
+        expect.stringContaining('Multiple agents found'),
+      );
+      await agentFile.dispose();
+      consoleSpy.mockRestore();
+    });
+
+    it('throws when a module has no default namespace to unwrap', async () => {
+      const agentPath = path.join(tempAgentsDir, 'named_export_only.js');
+      await fs.writeFile(agentPath, namedExportOnlyContent);
+
+      const compiledAgentPath = compiledPath('named_export_only.cjs');
+      (esbuild.build as Mock).mockImplementation(async () => {
+        await fs.writeFile(compiledAgentPath, namedExportOnlyContent);
+        return Promise.resolve();
+      });
+
+      const agentFile = new AgentFile(agentPath);
+      await expect(agentFile.load()).rejects.toThrow(
+        `Failed to load agent ${
+          compiledAgentPath
+        }: No @google/adk BaseAgent class instance found. Please check that file is not empty and it has export of @google/adk BaseAgent class (e.g. LlmAgent) instance.`,
+      );
+      await agentFile.dispose();
+    });
+
     it('loads an app file and returns the app via load()', async () => {
       const appPath = path.join(tempAgentsDir, 'app1.js');
       await fs.writeFile(appPath, appJsContent);
@@ -420,6 +611,70 @@ describe('AgentLoader', () => {
       expect((loaded as App).name).toBe('test_app');
       expect((loaded as App).rootAgent.name).toBe('agent_for_app');
       await agentFile.dispose();
+    });
+
+    it('prefers an app at default.default over a named agent export', async () => {
+      const appPath = path.join(tempAgentsDir, 'app_nested_default.js');
+      await fs.writeFile(appPath, appUnderNestedDefaultContent);
+
+      const compiledAppPath = compiledPath('app_nested_default.cjs');
+      (esbuild.build as Mock).mockImplementation(async () => {
+        await fs.writeFile(compiledAppPath, appUnderNestedDefaultContent);
+        return Promise.resolve();
+      });
+
+      const agentFile = new AgentFile(appPath);
+      const loaded = await agentFile.load();
+
+      expect(isApp(loaded)).toBe(true);
+      expect((loaded as App).name).toBe('default_app');
+      await agentFile.dispose();
+    });
+
+    it('prefers the rootApp export over another exported app', async () => {
+      const appPath = path.join(tempAgentsDir, 'root_app.js');
+      await fs.writeFile(appPath, appRootAppExportContent);
+
+      const compiledAppPath = compiledPath('root_app.cjs');
+      (esbuild.build as Mock).mockImplementation(async () => {
+        await fs.writeFile(compiledAppPath, appRootAppExportContent);
+        return Promise.resolve();
+      });
+
+      const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const agentFile = new AgentFile(appPath);
+      const loaded = await agentFile.load();
+
+      expect(isApp(loaded)).toBe(true);
+      expect((loaded as App).name).toBe('test_root_app');
+      expect((loaded as App).rootAgent.name).toBe('agent_for_root_app');
+      expect(consoleSpy).not.toHaveBeenCalledWith(
+        expect.stringContaining('Multiple apps found'),
+      );
+      await agentFile.dispose();
+      consoleSpy.mockRestore();
+    });
+
+    it('loads the first app if multiple apps exported', async () => {
+      const appPath = path.join(tempAgentsDir, 'app_multiple.js');
+      await fs.writeFile(appPath, appMultipleExportsContent);
+
+      const compiledAppPath = compiledPath('app_multiple.cjs');
+      (esbuild.build as Mock).mockImplementation(async () => {
+        await fs.writeFile(compiledAppPath, appMultipleExportsContent);
+        return Promise.resolve();
+      });
+
+      const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const agentFile = new AgentFile(appPath);
+      const loaded = await agentFile.load();
+
+      expect((loaded as App).name).toBe('first_app');
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Multiple apps found'),
+      );
+      await agentFile.dispose();
+      consoleSpy.mockRestore();
     });
 
     it('loads an app via loadApp() and rootAgent via loadAgent()', async () => {
