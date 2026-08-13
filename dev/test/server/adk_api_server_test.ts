@@ -34,6 +34,7 @@ import {
   toListenError,
 } from '../../src/server/adk_api_server.js';
 import {AgentLoader, AgentNotFoundError} from '../../src/utils/agent_loader.js';
+import {version} from '../../src/version.js';
 
 interface JsonRpcResponse {
   result?: unknown;
@@ -311,6 +312,16 @@ describe('AdkWebServer', () => {
 
   afterEach(async () => {
     await server.stop();
+  });
+
+  describe('Version', () => {
+    it('reports the ADK version the server is running', async () => {
+      const response = await client.get<{version: string}>('/version');
+
+      expect(response.status).toBe(200);
+      expect(response.data?.version).toBe(version);
+      expect(response.data?.version).toMatch(/^\d+\.\d+\.\d+/);
+    });
   });
 
   describe('Sessions', () => {
