@@ -139,6 +139,61 @@ Instruction body`;
       );
     });
 
+    it.each([
+      '../../../projects/victim/locations/us-central1/skills/secret',
+      'my-skill/../other-skill',
+      '..%2f..%2fsecret',
+      'my-skill?alt=media',
+      'my-skill#fragment',
+      'my-skill/revisions/rev-123',
+      '/absolute-skill',
+      'My-Skill',
+      '',
+      'my-skill\n',
+    ])(
+      'getSkill rejects the unsafe name %j before any request',
+      async (unsafeName) => {
+        // The stub answers successfully, so a missing guard shows up as a
+        // resolved promise rather than as an unrelated transport error.
+        const request = vi.fn().mockResolvedValue({
+          json: vi.fn().mockResolvedValue({
+            zippedFilesystem: createValidZipBuffer().toString('base64'),
+          }),
+        });
+        const reg = new GCPSkillRegistry({
+          client: {apiClient: {request}} as unknown as Client,
+        });
+
+        await expect(reg.getSkill(unsafeName)).rejects.toThrow(
+          /Invalid skill name/,
+        );
+        expect(request).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(['my-skill', 'my_skill', 'skill2'])(
+      'getSkill requests exactly skills/%s for a legal name',
+      async (validName) => {
+        const request = vi.fn().mockResolvedValue({
+          json: vi.fn().mockResolvedValue({
+            zippedFilesystem: createValidZipBuffer().toString('base64'),
+          }),
+        });
+        const reg = new GCPSkillRegistry({
+          client: {apiClient: {request}} as unknown as Client,
+        });
+
+        await reg.getSkill(validName);
+
+        expect(request).toHaveBeenCalledTimes(1);
+        expect(request).toHaveBeenCalledWith({
+          path: `skills/${validName}`,
+          httpMethod: 'GET',
+          httpOptions: {apiVersion: 'v1beta1'},
+        });
+      },
+    );
+
     it('searchSkills retrieves and formats search results', async () => {
       const mockClient = {
         apiClient: {
