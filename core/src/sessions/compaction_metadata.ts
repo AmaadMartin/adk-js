@@ -125,12 +125,10 @@ export function parseCompactionMetadata(
   value: unknown,
 ): ParsedCompactionMetadata | undefined {
   const parsed = parsePayload(value);
-  // An empty summary is a payload this reader cannot use: it renders as a bare
-  // context header and still hides every event the compaction covered.
-  if (parsed && parsed.compactedContent !== '') {
+  if (parsed?.compactedContent) {
     return parsed;
   }
-  logger.debug('Dropping a compaction payload with no readable summary.');
+  logger.debug('Dropping an unusable compaction payload.');
   return undefined;
 }
 
