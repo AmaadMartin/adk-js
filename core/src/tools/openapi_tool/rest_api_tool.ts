@@ -191,7 +191,10 @@ export function prepareRequestParams(
   let body: unknown = undefined;
 
   const paramsMap = new Map(parameters.map((p) => [p.name, p]));
-  const pathParams: Record<string, string> = {};
+  // A Map, not a plain object: placeholder names come from the spec's path
+  // template, and an object lookup would resolve `{constructor}` against
+  // Object.prototype.
+  const pathParams = new Map<string, string>();
   const bodyData: Record<string, unknown> = {};
 
   for (const [argName, argValue] of Object.entries(args)) {
@@ -202,9 +205,9 @@ export function prepareRequestParams(
     const location = param.paramLocation;
 
     if (location === 'path') {
-      pathParams[originalName] = encodePathParamValue(
+      pathParams.set(
         originalName,
-        String(argValue),
+        encodePathParamValue(originalName, String(argValue)),
       );
     } else if (location === 'query') {
       queryParams.append(originalName, String(argValue));
@@ -224,12 +227,10 @@ export function prepareRequestParams(
   }
 
   // Placeholders are resolved against the path only, so a path parameter can
-  // never reach the host. `hasOwn`, because a spec may name a path parameter
-  // `constructor`, which a bare lookup would resolve off Object.prototype.
+  // never reach the host.
   const resolvedPath = endpoint.path.replace(
     /\{([^{}]+)\}/g,
-    (placeholder, name: string) =>
-      Object.hasOwn(pathParams, name) ? pathParams[name] : placeholder,
+    (placeholder, name: string) => pathParams.get(name) ?? placeholder,
   );
   let url = `${endpoint.baseUrl}${resolvedPath}`;
 
