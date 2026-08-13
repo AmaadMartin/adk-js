@@ -116,9 +116,10 @@ export function toAliasedCompactionMetadata(
  * is a flat string. The historical spelling stays accepted permanently so
  * sessions written by earlier adk-js versions keep their compaction.
  *
- * Returns `undefined` for anything else, which leaves the event non-compacted.
- * A partially populated `CompactedEvent` is worse than none: it renders the
- * summary as `undefined` and hides every event from the active window.
+ * Returns `undefined` for anything else, and for a payload that carries no
+ * summary text, which leaves the event non-compacted. A `CompactedEvent`
+ * without a summary is worse than none: it renders an empty context header and
+ * still hides every event from the active window.
  */
 export function parseCompactionMetadata(
   value: unknown,
