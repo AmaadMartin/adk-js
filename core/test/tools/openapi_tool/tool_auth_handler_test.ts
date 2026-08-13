@@ -267,6 +267,18 @@ describe('ToolAuthHandler', () => {
   });
 });
 
+/**
+ * Builds the Context surface ToolAuthHandler reads. The single cast is the
+ * pattern the tests above use; Context has no partial constructor.
+ */
+function createContext(state: State, authResponse?: AuthCredential): Context {
+  return {
+    state,
+    getAuthResponse: vi.fn().mockReturnValue(authResponse),
+    requestCredential: vi.fn(),
+  } as unknown as Context;
+}
+
 describe('ToolAuthHandler when the credential exchange fails', () => {
   const SERVICE_ACCOUNT_CREDENTIAL: AuthCredential = {
     authType: AuthCredentialTypes.SERVICE_ACCOUNT,
@@ -289,14 +301,9 @@ describe('ToolAuthHandler when the credential exchange fails', () => {
         'Failed to exchange default service account token: metadata server unreachable',
       ),
     );
-    const mockContext = {
-      state: new State(),
-      getAuthResponse: vi.fn().mockReturnValue(undefined),
-      requestCredential: vi.fn(),
-    } as unknown as Context;
 
     const result = await new ToolAuthHandler(
-      mockContext,
+      createContext(new State()),
       BEARER_SCHEME,
       SERVICE_ACCOUNT_CREDENTIAL,
     ).prepareAuthCredentials();
@@ -311,16 +318,12 @@ describe('ToolAuthHandler when the credential exchange fails', () => {
       new CredentialExchangeError('metadata server unreachable'),
     );
     const state = new State();
-    const mockContext = {
-      state,
-      // An auth response would have been cached on success, so this is the
-      // branch that must not write a half-finished exchange to the session.
-      getAuthResponse: vi.fn().mockReturnValue(SERVICE_ACCOUNT_CREDENTIAL),
-      requestCredential: vi.fn(),
-    } as unknown as Context;
+    // An auth response would have been cached on success, so this is the
+    // branch that must not write a half-finished exchange to the session.
+    const context = createContext(state, SERVICE_ACCOUNT_CREDENTIAL);
 
     const result = await new ToolAuthHandler(
-      mockContext,
+      context,
       BEARER_SCHEME,
     ).prepareAuthCredentials();
 
@@ -336,14 +339,9 @@ describe('ToolAuthHandler when the credential exchange fails', () => {
         'Failed to exchange default service account token: metadata server unreachable',
       ),
     );
-    const mockContext = {
-      state: new State(),
-      getAuthResponse: vi.fn().mockReturnValue(undefined),
-      requestCredential: vi.fn(),
-    } as unknown as Context;
 
     await new ToolAuthHandler(
-      mockContext,
+      createContext(new State()),
       BEARER_SCHEME,
       SERVICE_ACCOUNT_CREDENTIAL,
     ).prepareAuthCredentials();
@@ -357,14 +355,9 @@ describe('ToolAuthHandler when the credential exchange fails', () => {
 
   it('degrades on a rejection that is not a CredentialExchangeError', async () => {
     rejectExchangeOnceWith(new Error('boom'));
-    const mockContext = {
-      state: new State(),
-      getAuthResponse: vi.fn().mockReturnValue(undefined),
-      requestCredential: vi.fn(),
-    } as unknown as Context;
 
     const result = await new ToolAuthHandler(
-      mockContext,
+      createContext(new State()),
       BEARER_SCHEME,
       SERVICE_ACCOUNT_CREDENTIAL,
     ).prepareAuthCredentials();
@@ -376,22 +369,16 @@ describe('ToolAuthHandler when the credential exchange fails', () => {
   it('retries the exchange on the next tool call', async () => {
     rejectExchangeOnceWith(new CredentialExchangeError('transient failure'));
     const firstState = new State();
-    const firstContext = {
-      state: firstState,
-      getAuthResponse: vi.fn().mockReturnValue(SERVICE_ACCOUNT_CREDENTIAL),
-      requestCredential: vi.fn(),
-    } as unknown as Context;
     await new ToolAuthHandler(
-      firstContext,
+      createContext(firstState, SERVICE_ACCOUNT_CREDENTIAL),
       BEARER_SCHEME,
     ).prepareAuthCredentials();
 
     // The next tool call rebuilds State from what the session persisted.
-    const secondContext = {
-      state: new State(firstState.toRecord()),
-      getAuthResponse: vi.fn().mockReturnValue(SERVICE_ACCOUNT_CREDENTIAL),
-      requestCredential: vi.fn(),
-    } as unknown as Context;
+    const secondContext = createContext(
+      new State(firstState.toRecord()),
+      SERVICE_ACCOUNT_CREDENTIAL,
+    );
     const result = await new ToolAuthHandler(
       secondContext,
       BEARER_SCHEME,
