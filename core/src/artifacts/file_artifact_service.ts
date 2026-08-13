@@ -23,13 +23,8 @@ import {
 
 const USER_NAMESPACE_PREFIX = 'user:';
 
-/**
- * Name of the per-version metadata document.
- *
- * A payload is stored alongside it under the artifact directory's own name, so
- * an artifact directory named `metadata.json` would have its payload written
- * over the metadata document. Callers may not use the name.
- */
+// Per-version metadata document; see the class doc for why callers may not
+// use this name.
 const METADATA_FILENAME = 'metadata.json';
 
 /**
@@ -100,13 +95,11 @@ export class FileArtifactService implements BaseArtifactService {
     );
     // Enforced here rather than in `getArtifactDir`, which the read and delete
     // paths share: an artifact stored under this name before the name was
-    // rejected must stay readable and, above all, deletable.
-    if (isReservedArtifactName(path.basename(artifactDir))) {
+    // rejected must stay readable and, above all, deletable. The comparison is
+    // caseless because APFS and NTFS resolve both spellings to one file.
+    if (path.basename(artifactDir).toLowerCase() === METADATA_FILENAME) {
       throw new Error(
-        `Artifact filename ${filename} is reserved: an artifact may not be ` +
-          `named ${METADATA_FILENAME} (in any casing) because its payload is ` +
-          `stored under the artifact's own name and would overwrite the ` +
-          `metadata document.`,
+        `Artifact filename ${filename} is reserved: an artifact may not be named ${METADATA_FILENAME}, in any casing.`,
       );
     }
     await fs.mkdir(artifactDir, {recursive: true});
@@ -466,18 +459,6 @@ function isUserScoped(
   filename: string,
 ): boolean {
   return !sessionId || filename.startsWith(USER_NAMESPACE_PREFIX);
-}
-
-/**
- * Checks whether an artifact directory name collides with the metadata
- * document.
- *
- * The comparison is caseless because the filesystem decides the collision, and
- * the case-insensitive filesystems ADK supports (APFS, NTFS) resolve
- * `Metadata.json` and `metadata.json` to the same file.
- */
-function isReservedArtifactName(name: string): boolean {
-  return name.toLowerCase() === METADATA_FILENAME;
 }
 
 function getUserArtifactsDir(userRoot: string): string {
