@@ -572,6 +572,111 @@ export function runArtifactServiceTests(
     });
   });
 
+  describe('case-distinct filenames', () => {
+    it('rejects a filename that differs only in case from an existing artifact', async () => {
+      await service.saveArtifact({
+        appName,
+        userId,
+        sessionId,
+        filename: 'Report.txt',
+        artifact: {text: 'first'},
+      });
+
+      await expect(
+        service.saveArtifact({
+          appName,
+          userId,
+          sessionId,
+          filename: 'report.txt',
+          artifact: {text: 'second'},
+        }),
+      ).rejects.toThrow(/differs only in case/);
+    });
+
+    it('leaves the existing artifact intact after a rejected save', async () => {
+      await service.saveArtifact({
+        appName,
+        userId,
+        sessionId,
+        filename: 'Report.txt',
+        artifact: {text: 'first'},
+      });
+      await expect(
+        service.saveArtifact({
+          appName,
+          userId,
+          sessionId,
+          filename: 'report.txt',
+          artifact: {text: 'second'},
+        }),
+      ).rejects.toThrow(/differs only in case/);
+
+      const loaded = await service.loadArtifact({
+        appName,
+        userId,
+        sessionId,
+        filename: 'Report.txt',
+      });
+      expect(loaded?.text).toBe('first');
+
+      const versions = await service.listVersions({
+        appName,
+        userId,
+        sessionId,
+        filename: 'Report.txt',
+      });
+      expect(versions).toEqual([0]);
+
+      const keys = await service.listArtifactKeys({appName, userId, sessionId});
+      expect(keys).toContain('Report.txt');
+      expect(keys).not.toContain('report.txt');
+    });
+
+    it('rejects when only an interior path segment differs in case', async () => {
+      await service.saveArtifact({
+        appName,
+        userId,
+        sessionId,
+        filename: 'nested/dir/a.txt',
+        artifact: {text: 'first'},
+      });
+
+      await expect(
+        service.saveArtifact({
+          appName,
+          userId,
+          sessionId,
+          filename: 'nested/Dir/a.txt',
+          artifact: {text: 'second'},
+        }),
+      ).rejects.toThrow(/differs only in case/);
+    });
+
+    it('accepts a user-scoped filename that differs only in case from a session-scoped one', async () => {
+      const sessionVersion = await service.saveArtifact({
+        appName,
+        userId,
+        sessionId,
+        filename: 'Report.txt',
+        artifact: {text: 'session'},
+      });
+      const userVersion = await service.saveArtifact({
+        appName,
+        userId,
+        sessionId,
+        filename: 'user:report.txt',
+        artifact: {text: 'user'},
+      });
+
+      expect(sessionVersion).toBe(0);
+      expect(userVersion).toBe(0);
+
+      const keys = await service.listArtifactKeys({appName, userId, sessionId});
+      expect(keys).toContain('Report.txt');
+      expect(keys).toContain('user:report.txt');
+    });
+  });
+
   describe('CompositeSessionKey compatibility', () => {
     it('supports pre-constructed CompositeSessionKey for artifact operations', async () => {
       const sessionKey: CompositeSessionKey = {

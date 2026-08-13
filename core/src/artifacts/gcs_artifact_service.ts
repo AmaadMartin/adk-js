@@ -8,6 +8,7 @@ import {Bucket, File, Storage, StorageOptions} from '@google-cloud/storage';
 import {createPartFromBase64, createPartFromText, Part} from '@google/genai';
 import {logger} from '../utils/logger.js';
 
+import {assertNoCaseCollision} from './artifact_filename.js';
 import {
   ArtifactVersion,
   BaseArtifactService,
@@ -22,6 +23,7 @@ const GCS_FILE_URI_METADATA_KEY = 'adkFileUri';
 const GCS_FILE_MIME_TYPE_METADATA_KEY = 'adkFileMimeType';
 const GCS_DISPLAY_NAME_METADATA_KEY = 'adkDisplayName';
 const GCS_IS_TEXT_METADATA_KEY = 'adkIsText';
+const USER_NAMESPACE_PREFIX = 'user:';
 
 export class GcsArtifactService implements BaseArtifactService {
   private readonly bucket: Bucket;
@@ -39,7 +41,21 @@ export class GcsArtifactService implements BaseArtifactService {
       throw new Error('Artifact must have either inlineData or text content.');
     }
 
-    const versions = await this.listVersions(request);
+    const isUser = request.filename.startsWith(USER_NAMESPACE_PREFIX);
+    const prefix = getScopePrefix(request, isUser);
+    const [versions, [scopeFiles]] = await Promise.all([
+      this.listVersions(request),
+      this.bucket.getFiles({prefix}),
+    ]);
+    assertNoCaseCollision(
+      extractArtifactKeys(
+        scopeFiles,
+        prefix,
+        isUser ? USER_NAMESPACE_PREFIX : '',
+      ),
+      request.filename,
+    );
+
     const version = versions.length > 0 ? Math.max(...versions) + 1 : 0;
     const file = this.bucket.file(
       getFileName({
@@ -163,8 +179,8 @@ export class GcsArtifactService implements BaseArtifactService {
   }
 
   async listArtifactKeys(request: ListArtifactKeysRequest): Promise<string[]> {
-    const sessionPrefix = `${request.appName}/${request.userId}/${request.sessionId}/`;
-    const usernamePrefix = `${request.appName}/${request.userId}/user/`;
+    const sessionPrefix = getScopePrefix(request, false);
+    const usernamePrefix = getScopePrefix(request, true);
     const [[sessionFiles], [userSessionFiles]] = await Promise.all([
       this.bucket.getFiles({prefix: sessionPrefix}),
       this.bucket.getFiles({prefix: usernamePrefix}),
@@ -172,7 +188,11 @@ export class GcsArtifactService implements BaseArtifactService {
 
     return [
       ...extractArtifactKeys(sessionFiles, sessionPrefix),
-      ...extractArtifactKeys(userSessionFiles, usernamePrefix, 'user:'),
+      ...extractArtifactKeys(
+        userSessionFiles,
+        usernamePrefix,
+        USER_NAMESPACE_PREFIX,
+      ),
     ].sort((a, b) => a.localeCompare(b));
   }
 
@@ -270,21 +290,33 @@ export class GcsArtifactService implements BaseArtifactService {
   }
 }
 
-function getFileName({
-  appName,
-  userId,
-  sessionId,
-  filename,
-  version,
-}: LoadArtifactRequest): string {
-  const isUser = filename.startsWith('user:');
-  const cleanFilename = isUser ? filename.substring(5) : filename;
+function getFileName(request: LoadArtifactRequest): string {
+  const {filename, version} = request;
+  const isUser = filename.startsWith(USER_NAMESPACE_PREFIX);
+  const cleanFilename = isUser
+    ? filename.substring(USER_NAMESPACE_PREFIX.length)
+    : filename;
 
-  const prefix = isUser
-    ? `${appName}/${userId}/user/${cleanFilename}`
-    : `${appName}/${userId}/${sessionId}/${cleanFilename}`;
+  const prefix = `${getScopePrefix(request, isUser)}${cleanFilename}`;
 
   return version !== undefined ? `${prefix}/${version}` : prefix;
+}
+
+/**
+ * Builds the object name prefix shared by every artifact in one scope.
+ *
+ * @param key The app name, user ID and session ID the artifact belongs to.
+ * @param isUserScoped Whether the artifact is user-scoped rather than
+ *     session-scoped.
+ * @return The object name prefix for the scope.
+ */
+function getScopePrefix(
+  key: ListArtifactKeysRequest,
+  isUserScoped: boolean,
+): string {
+  return isUserScoped
+    ? `${key.appName}/${key.userId}/user/`
+    : `${key.appName}/${key.userId}/${key.sessionId}/`;
 }
 
 function extractArtifactKeys(

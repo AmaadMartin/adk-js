@@ -80,6 +80,11 @@ export interface BaseArtifactService {
    * filename. After saving the artifact, a revision ID is returned to identify
    * the artifact version.
    *
+   * A filename that differs only in case from an artifact already stored in
+   * the same scope is rejected, and nothing is stored. Filenames are keys, and
+   * a filesystem-backed implementation cannot keep two such keys apart on a
+   * host that ignores case.
+   *
    * @param request The request to save an artifact.
    * @return A promise that resolves to The revision ID. The first version of
    * the artifact has a revision ID of 0. This is incremented by 1 after each
@@ -91,7 +96,8 @@ export interface BaseArtifactService {
    * Gets an artifact from the artifact service storage.
    *
    * The artifact is a file identified by the app name, user ID, session ID, and
-   * filename.
+   * filename. A filename resolves only to the artifact stored under exactly
+   * that filename, never to one that differs from it in case.
    *
    * @param request The request to load an artifact.
    * @return A promise that resolves to the artifact or undefined if not found.
