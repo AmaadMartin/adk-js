@@ -20,16 +20,27 @@ on:
 jobs:
   conformance:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout code
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
+          persist-credentials: false
+
+      # Pinned and bare, matching validation.yaml. The first version of this
+      # job pinned a node version and enabled npm caching, and `npm ci` then
+      # failed the run with a registry 401 while every other workflow on the
+      # repo installed fine. Copy what works here rather than rediscovering
+      # why it works.
+      - name: Use Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+
+      - name: Install dependencies
+        run: npm install
+
       # No build step: the config aliases @google/adk to core/src, so the
-      # replay runs against the sources the PR actually changed and the job
-      # stays under a minute.
+      # replay runs against the sources the branch actually carries.
       - name: Replay adk-python conformance fixtures
         run: npx vitest run --config conformance/vitest.conformance.ts
