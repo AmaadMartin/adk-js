@@ -1254,3 +1254,154 @@ describe('Runner artifact saving (`saveInputBlobsAsArtifacts`)', () => {
     ]);
   });
 });
+
+describe('Runner internalized config', () => {
+  let sessionService: InMemorySessionService;
+  let artifactService: InMemoryArtifactService;
+  let agent: MockLlmAgent;
+
+  beforeEach(() => {
+    sessionService = new InMemorySessionService();
+    artifactService = new InMemoryArtifactService();
+    agent = new MockLlmAgent('test_agent');
+  });
+
+  it('should initialize with internalized userId, sessionId, and runConfig and use them in runAsync', async () => {
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      artifactService,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      runConfig: {saveInputBlobsAsArtifacts: true},
+    });
+
+    expect(runner.userId).toBe(TEST_USER_ID);
+    expect(runner.sessionId).toBe(TEST_SESSION_ID);
+    expect(runner.runConfig).toEqual({saveInputBlobsAsArtifacts: true});
+
+    await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    const events: Event[] = [];
+    for await (const event of runner.runAsync({
+      newMessage: {role: 'user', parts: [{text: 'Hello internalized!'}]},
+    })) {
+      events.push(event);
+    }
+
+    expect(events.length).toBeGreaterThan(0);
+    const updatedSession = await sessionService.getSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    expect(updatedSession).not.toBeNull();
+    const userEvent = updatedSession!.events[0];
+    expect(userEvent.author).toBe('user');
+    expect(userEvent.content?.parts?.[0]?.text).toBe('Hello internalized!');
+  });
+
+  it('should allow parameter override of internalized config in runAsync', async () => {
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      artifactService,
+      userId: 'default-user',
+      sessionId: 'default-session',
+    });
+
+    const overrideUserId = 'override-user';
+    const overrideSessionId = 'override-session';
+    await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: overrideUserId,
+      sessionId: overrideSessionId,
+    });
+
+    const events: Event[] = [];
+    for await (const event of runner.runAsync({
+      userId: overrideUserId,
+      sessionId: overrideSessionId,
+      newMessage: {role: 'user', parts: [{text: 'Hello override!'}]},
+    })) {
+      events.push(event);
+    }
+
+    expect(events.length).toBeGreaterThan(0);
+    const updatedSession = await sessionService.getSession({
+      appName: TEST_APP_ID,
+      userId: overrideUserId,
+      sessionId: overrideSessionId,
+    });
+    expect(updatedSession).not.toBeNull();
+    expect(updatedSession!.events[0].content?.parts?.[0]?.text).toBe(
+      'Hello override!',
+    );
+  });
+
+  it('should throw an error when userId is missing in both runAsync params and RunnerConfig', async () => {
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      artifactService,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    await expect(async () => {
+      for await (const _event of runner.runAsync({
+        newMessage: {role: 'user', parts: [{text: 'Hello'}]},
+      })) {
+        // consume events
+      }
+    }).rejects.toThrow(
+      'userId is required: provide it in runAsync params or configure it on Runner.',
+    );
+  });
+
+  it('should throw an error when sessionId is missing in both runAsync params and RunnerConfig', async () => {
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      artifactService,
+      userId: TEST_USER_ID,
+    });
+
+    await expect(async () => {
+      for await (const _event of runner.runAsync({
+        newMessage: {role: 'user', parts: [{text: 'Hello'}]},
+      })) {
+        // consume events
+      }
+    }).rejects.toThrow(
+      'sessionId is required: provide it in runAsync params or configure it on Runner.',
+    );
+  });
+
+  it('should throw an error when userId is missing in runEphemeral', async () => {
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      artifactService,
+    });
+
+    await expect(async () => {
+      for await (const _event of runner.runEphemeral({
+        newMessage: {role: 'user', parts: [{text: 'Hello'}]},
+      })) {
+        // consume events
+      }
+    }).rejects.toThrow(
+      'userId is required: provide it in runEphemeral params or configure it on Runner.',
+    );
+  });
+});

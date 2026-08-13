@@ -5,6 +5,7 @@
  */
 
 import {BaseAgent} from '../agents/base_agent.js';
+import {RunConfig} from '../agents/run_config.js';
 import {App} from '../apps/app.js';
 import {ResumabilityConfig} from '../apps/resumability_config.js';
 import {InMemoryArtifactService} from '../artifacts/in_memory_artifact_service.js';
@@ -43,6 +44,9 @@ export class InMemoryRunner extends Runner {
    * @param params.appName The application name. Defaults to `'InMemoryRunner'`.
    * @param params.plugins An optional list of plugins.
    * @param params.resumabilityConfig An optional resumability configuration.
+   * @param params.userId A default user ID for invocations that omit one.
+   * @param params.sessionId A default session ID for invocations that omit one.
+   * @param params.runConfig A default run config for invocations that omit one.
    */
   constructor(params: {
     app?: App;
@@ -50,6 +54,9 @@ export class InMemoryRunner extends Runner {
     appName?: string;
     plugins?: BasePlugin[];
     resumabilityConfig?: ResumabilityConfig;
+    userId?: string;
+    sessionId?: string;
+    runConfig?: RunConfig;
   }) {
     const {
       agent,
@@ -57,6 +64,9 @@ export class InMemoryRunner extends Runner {
       plugins = [],
       app,
       resumabilityConfig,
+      userId,
+      sessionId,
+      runConfig,
     } = params;
 
     super({
@@ -68,6 +78,9 @@ export class InMemoryRunner extends Runner {
       sessionService: new InMemorySessionService(),
       memoryService: new InMemoryMemoryService(),
       resumabilityConfig: app?.resumabilityConfig ?? resumabilityConfig,
+      userId,
+      sessionId,
+      runConfig,
     });
   }
 }

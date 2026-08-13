@@ -187,4 +187,44 @@ describe('InMemoryRunner', () => {
 
     expect(closeSpy).toHaveBeenCalled();
   });
+
+  it('should initialize with internalized userId, sessionId, and runConfig and execute runAsync and runEphemeral', async () => {
+    const agent = new MockAgent();
+    const runner = new InMemoryRunner({
+      agent,
+      userId: TEST_USER_ID,
+      sessionId: 'test_session_id',
+      runConfig: {saveInputBlobsAsArtifacts: false},
+    });
+
+    expect(runner.userId).toBe(TEST_USER_ID);
+    expect(runner.sessionId).toBe('test_session_id');
+    expect(runner.runConfig).toEqual({saveInputBlobsAsArtifacts: false});
+
+    await runner.sessionService.createSession({
+      appName: runner.appName,
+      userId: TEST_USER_ID,
+      sessionId: 'test_session_id',
+    });
+
+    const asyncEvents: Event[] = [];
+    for await (const event of runner.runAsync({
+      newMessage: {role: 'user', parts: [{text: 'Async hello!'}]},
+    })) {
+      asyncEvents.push(event);
+    }
+    expect(asyncEvents.length).toBeGreaterThan(0);
+    expect(asyncEvents.find((e) => e.author === 'mock_agent')).toBeDefined();
+
+    const ephemeralEvents: Event[] = [];
+    for await (const event of runner.runEphemeral({
+      newMessage: {role: 'user', parts: [{text: 'Ephemeral hello!'}]},
+    })) {
+      ephemeralEvents.push(event);
+    }
+    expect(ephemeralEvents.length).toBeGreaterThan(0);
+    expect(
+      ephemeralEvents.find((e) => e.author === 'mock_agent'),
+    ).toBeDefined();
+  });
 });
