@@ -15,6 +15,7 @@ import {
   Runner,
 } from '@google/adk';
 import {exec, spawn} from 'node:child_process';
+import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import {promisify} from 'node:util';
 import {afterAll, beforeAll, describe, expect, it} from 'vitest';
@@ -201,6 +202,16 @@ describe('AgentLoader discovery and loading integration', () => {
     await expect(agentFile.load()).rejects.toThrow(
       /No @google\/adk BaseAgent or Workflow instance found/,
     );
+  });
+
+  it('compiles an agent without embedding the ADK runtime', async () => {
+    const appFile = await loader.getAppFile('service_alpha');
+    await appFile.load();
+
+    // The ADK runtime is ~5.6MB minified, so an artifact this small can only
+    // be importing it rather than inlining a private copy of it.
+    const {size} = await fs.stat(appFile.getFilePath());
+    expect(size).toBeLessThan(64 * 1024);
   });
 
   afterAll(async () => {
