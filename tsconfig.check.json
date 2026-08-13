@@ -7,10 +7,12 @@
     "paths": {
       "@google/adk": ["./core/src/index.ts"],
       "@google/adk/*": ["./core/src/*"],
+      "@google/adk-devtools": ["./dev/src/index.ts"],
       "@google/adk-integrations": ["./integrations/src/index.ts"]
     }
   },
   "exclude": [
+    "node_modules",
     "**/dist",
     // `exclude` replaces the root config's list, so `samples` has to be
     // repeated here. A sample resolves `@google/adk` through node_modules, the

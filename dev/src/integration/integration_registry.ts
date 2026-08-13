@@ -4,24 +4,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  BasePlugin,
-  FunctionTool,
-  SingleAgentCallback,
-  ToolInputParameters,
-} from '@google/adk';
+import {BasePlugin, BaseTool, SingleAgentCallback} from '@google/adk';
 
 /**
- * A function tool of any parameter shape.
+ * The registry holds any tool, not only function tools.
  *
  * Bare `FunctionTool` means `FunctionTool<undefined>` — a tool that takes no
  * arguments — so it cannot hold the schema-carrying tools this registry is
  * given.
  */
-export type AnyFunctionTool = FunctionTool<ToolInputParameters>;
-
 export class IntegrationRegistry {
-  private tools = new Map<string, AnyFunctionTool>();
+  private tools = new Map<string, BaseTool>();
   private beforeAgentCallbacks = new Map<string, SingleAgentCallback>();
   private afterAgentCallbacks = new Map<string, SingleAgentCallback>();
   private plugins = new Map<string, BasePlugin>();
@@ -35,11 +28,11 @@ export class IntegrationRegistry {
     );
   }
 
-  registerTool(name: string, tool: AnyFunctionTool) {
+  registerTool(name: string, tool: BaseTool) {
     this.tools.set(name, tool);
   }
 
-  getTool(name: string): AnyFunctionTool | undefined {
+  getTool(name: string): BaseTool | undefined {
     return this.tools.get(name);
   }
 

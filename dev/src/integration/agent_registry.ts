@@ -7,6 +7,7 @@
 import {
   AgentTool,
   BaseAgent,
+  BaseTool,
   LlmAgent,
   LoopAgent,
   MCPToolset,
@@ -20,7 +21,7 @@ import {
   McpToolsetArgs,
   YamlAgentConfig,
 } from './agent_types.js';
-import {AnyFunctionTool, IntegrationRegistry} from './integration_registry.js';
+import {IntegrationRegistry} from './integration_registry.js';
 
 const BUILTIN_TOOLS = [
   'exit_loop',
@@ -72,7 +73,7 @@ export class AgentRegistry {
     this.configs.set(name, config);
   }
 
-  private findToolOrThrow(name: string): AnyFunctionTool {
+  private findToolOrThrow(name: string): BaseTool {
     const tool = this.integrationRegistry.getTool(name);
     if (!tool) {
       console.log('Tool not found in registry', name);

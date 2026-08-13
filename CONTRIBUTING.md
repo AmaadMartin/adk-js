@@ -50,6 +50,13 @@ To maintain high code quality and consistency:
    npm run format
    ```
 
+1. **Type checking**: Use `tsc` to type-check the whole repository, including
+   the test trees the per-workspace build does not cover.
+
+   ```bash
+   npm run ts:check
+   ```
+
 1. **License headers**: Every `.js` and `.ts` file needs the Apache-2.0 license
    header. To check the repository:
 

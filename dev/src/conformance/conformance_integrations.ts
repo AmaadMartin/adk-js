@@ -6,6 +6,7 @@
 
 import {
   BasePlugin,
+  BaseTool,
   Context,
   FunctionTool,
   LongRunningFunctionTool,
@@ -13,10 +14,7 @@ import {
 } from '@google/adk';
 import {Content} from '@google/genai';
 import {z} from 'zod';
-import {
-  AnyFunctionTool,
-  IntegrationRegistry,
-} from '../integration/integration_registry.js';
+import {IntegrationRegistry} from '../integration/integration_registry.js';
 
 export function registerConformanceIntegrations(registry: IntegrationRegistry) {
   // Plugins
@@ -60,7 +58,7 @@ export function registerConformanceIntegrations(registry: IntegrationRegistry) {
   }
 
   // Tools
-  const tools: {name: string; tool: AnyFunctionTool}[] = [
+  const tools: {name: string; tool: BaseTool}[] = [
     {name: 'tools_agent_009.tools.reimburse', tool: reimburse},
     {name: 'tools_agent_009.tools.ask_for_approval', tool: askForApproval},
     {name: 'tools_agent_004.tools.search_flights', tool: searchFlights},
