@@ -9,7 +9,7 @@ import {cloneDeep} from 'lodash-es';
 import {Event} from '../events/event.js';
 
 import {CompositeSessionKey, Session} from './session.js';
-import {State} from './state.js';
+import {defineStateEntry, State} from './state.js';
 import {carryDeltaStamps, shouldApplyDeltaWrite} from './state_write_order.js';
 
 /**
@@ -206,17 +206,7 @@ export abstract class BaseSessionService {
       ) {
         continue;
       }
-      // `session.state` is not always a null-prototype map — a caller can hand
-      // us a session whose state is a plain object literal — and on a plain
-      // object `state['__proto__'] = value` reaches the inherited `__proto__`
-      // setter, which replaces the object's prototype instead of storing the
-      // entry. `defineProperty` always creates an own property.
-      Object.defineProperty(session.state, key, {
-        value,
-        writable: true,
-        enumerable: true,
-        configurable: true,
-      });
+      defineStateEntry(session.state, key, value);
     }
   }
 }

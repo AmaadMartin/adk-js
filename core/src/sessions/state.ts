@@ -7,6 +7,32 @@
 import {recordStateWrite} from './state_write_order.js';
 
 /**
+ * Stores `key` on `target` as an own data property.
+ *
+ * Plain assignment reaches an inherited setter, and on an
+ * `Object.prototype`-parented map the key `__proto__` therefore re-parents the
+ * map instead of storing the entry: the map's prototype becomes
+ * caller-controlled and the entry is lost. `defineProperty` always creates an
+ * own property.
+ *
+ * Exported for the session services, which apply a committed delta to
+ * `session.state` and need the same guarantee. `common.ts` re-exports `State`
+ * by name, so this stays internal to the package.
+ */
+export function defineStateEntry(
+  target: Record<string, unknown>,
+  key: string,
+  value: unknown,
+): void {
+  Object.defineProperty(target, key, {
+    value,
+    writable: true,
+    enumerable: true,
+    configurable: true,
+  });
+}
+
+/**
  * A state mapping that maintains the current value and the pending-commit
  * delta.
  */
@@ -15,11 +41,14 @@ export class State {
   static readonly USER_PREFIX = 'user:';
   static readonly TEMP_PREFIX = 'temp:';
 
+  // The null-prototype defaults are belt and braces: the read and write paths
+  // below are already prototype-safe on a plain `{}`, and a caller-supplied map
+  // keeps whatever prototype the caller gave it.
   constructor(
     /** The current value of the state. */
-    private value: Record<string, unknown> = {},
+    private value: Record<string, unknown> = Object.create(null),
     /** The delta change to the current value that hasn't been committed. */
-    private delta: Record<string, unknown> = {},
+    private delta: Record<string, unknown> = Object.create(null),
   ) {}
 
   /**
@@ -31,11 +60,13 @@ export class State {
    *     not found.
    */
   get<T>(key: string, defaultValue?: T): T | undefined {
-    if (key in this.delta) {
+    // `hasOwn`, because a caller may name a state key `constructor`, which a
+    // bare lookup would resolve off Object.prototype.
+    if (Object.hasOwn(this.delta, key)) {
       return this.delta[key] as T;
     }
 
-    if (key in this.value) {
+    if (Object.hasOwn(this.value, key)) {
       return this.value[key] as T;
     }
 
@@ -49,8 +80,8 @@ export class State {
    * @param value The value to set.
    */
   set(key: string, value: unknown) {
-    this.value[key] = value;
-    this.delta[key] = value;
+    defineStateEntry(this.value, key, value);
+    defineStateEntry(this.delta, key, value);
     // Stamp the write so that committing this delta later cannot roll the key
     // back over a newer write. See `state_write_order.ts`.
     recordStateWrite(this.value, this.delta, key);
@@ -60,7 +91,7 @@ export class State {
    * Whether the state has pending delta.
    */
   has(key: string): boolean {
-    return key in this.value || key in this.delta;
+    return Object.hasOwn(this.value, key) || Object.hasOwn(this.delta, key);
   }
 
   /**
@@ -77,9 +108,9 @@ export class State {
    */
   update(delta: Record<string, unknown>) {
     // This should be revised while working on the parallel tool execution.
-    Object.assign(this.delta, delta);
-    Object.assign(this.value, delta);
-    for (const key of Object.keys(delta)) {
+    for (const [key, value] of Object.entries(delta)) {
+      defineStateEntry(this.delta, key, value);
+      defineStateEntry(this.value, key, value);
       recordStateWrite(this.value, this.delta, key);
     }
   }
