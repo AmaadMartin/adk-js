@@ -92,6 +92,11 @@ export {
   RunSkillScriptErrorCode,
   RunSkillScriptTool,
 } from './tools/skill/run_skill_script_tool.js';
+export {ToolboxToolset} from './tools/toolbox_toolset.js';
+export type {
+  ToolboxAuthTokenGetter,
+  ToolboxToolsetOptions,
+} from './tools/toolbox_toolset.js';
 
 export * from './integrations/agent_registry/agent_registry.js';
 export * from './telemetry/google_cloud.js';

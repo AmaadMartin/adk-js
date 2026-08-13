@@ -3,9 +3,14 @@
   "compilerOptions": {
     "rootDir": "src",
     "outDir": "dist/types",
-    // Reset the root config's test-only path aliases: a published build must
-    // resolve @google/adk through node_modules, not the sibling sources.
-    "paths": {}
+    // Replace the root config's test-only path aliases: a published build must
+    // resolve the sibling workspaces through node_modules, not their sources.
+    // The one alias that stays is this package's own. `@toolbox-sdk/adk`'s
+    // declarations import `@google/adk`, which the workspace symlink resolves
+    // to this package's build output. tsc then sees dist/types as both an
+    // input and an output and refuses to emit (TS5055) on every build after
+    // the first. Point that specifier at the sources instead.
+    "paths": {"@google/adk": ["./src/index.ts"]}
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]
