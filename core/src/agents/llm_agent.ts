@@ -380,6 +380,16 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   disallowTransferToParent: boolean;
   disallowTransferToPeers: boolean;
   includeContents: 'default' | 'none';
+
+  /**
+   * Whether {@link includeContents} was set by the caller rather than defaulted.
+   *
+   * A workflow node runs its agent for a single turn on the input the graph
+   * handed it, so the agent must not also read the surrounding conversation —
+   * unless the author asked for it. Mirrors Python checking
+   * `'include_contents' in agent.model_fields_set`.
+   */
+  readonly includeContentsExplicit: boolean;
   mode?: 'single_turn' | 'task';
   inputSchema?: Schema;
   outputSchema?: Schema;
@@ -408,7 +418,15 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   codeExecutor?: BaseCodeExecutor;
 
   constructor(config: LlmAgentConfig) {
-    super(config);
+    // Node defaults for an agent used in a graph, matching adk-python's
+    // `build_node`: an agent re-runs on resume (its turn is what the reply is
+    // addressed to), and a task-mode agent holds the graph until it produces an
+    // output, since a turn that only asks the user a question produces none.
+    super({
+      ...config,
+      rerunOnResume: config.rerunOnResume ?? true,
+      waitForOutput: config.waitForOutput ?? config.mode === 'task',
+    });
     this.model = config.model;
     this.instruction = config.instruction ?? '';
     this.globalInstruction = config.globalInstruction ?? '';
@@ -417,6 +435,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     this.disallowTransferToParent = config.disallowTransferToParent ?? false;
     this.disallowTransferToPeers = config.disallowTransferToPeers ?? false;
     this.includeContents = config.includeContents ?? 'default';
+    this.includeContentsExplicit = config.includeContents !== undefined;
     this.inputSchemaSource = config.inputSchema;
     this.outputSchemaSource = config.outputSchema;
     this.inputSchema = isZodObject(config.inputSchema)
