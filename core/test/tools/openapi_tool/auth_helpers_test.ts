@@ -114,6 +114,81 @@ describe('auth_helpers', () => {
       expect(result).toBe(url);
       expect(headers['Authorization']).toBe('Bearer my_token');
     });
+
+    it('should apply an exchanged OAuth2 access token as a bearer token', () => {
+      const url = 'http://example.com';
+      const headers: Record<string, string> = {};
+      const credential: AuthCredential = {
+        authType: AuthCredentialTypes.OAUTH2,
+        oauth2: {
+          clientId: 'client_id',
+          clientSecret: 'client_secret',
+          accessToken: 'oauth_token',
+        },
+      };
+
+      const result = applyCredential(url, headers, credential);
+
+      expect(result).toBe(url);
+      expect(headers['Authorization']).toBe('Bearer oauth_token');
+    });
+
+    it('should apply an OpenID Connect access token as a bearer token', () => {
+      const url = 'http://example.com';
+      const headers: Record<string, string> = {};
+      const credential: AuthCredential = {
+        authType: AuthCredentialTypes.OPEN_ID_CONNECT,
+        oauth2: {
+          clientId: 'client_id',
+          clientSecret: 'client_secret',
+          accessToken: 'oidc_token',
+        },
+      };
+
+      const result = applyCredential(url, headers, credential);
+
+      expect(result).toBe(url);
+      expect(headers['Authorization']).toBe('Bearer oidc_token');
+    });
+
+    it('should not set an Authorization header when the OAuth2 credential has no access token', () => {
+      const url = 'http://example.com';
+      const headers: Record<string, string> = {};
+      const credential: AuthCredential = {
+        authType: AuthCredentialTypes.OAUTH2,
+        oauth2: {
+          clientId: 'client_id',
+          clientSecret: 'client_secret',
+        },
+      };
+
+      const result = applyCredential(url, headers, credential);
+
+      expect(result).toBe(url);
+      expect(headers).toEqual({});
+    });
+
+    it('should prefer an http bearer token over an OAuth2 access token', () => {
+      const url = 'http://example.com';
+      const headers: Record<string, string> = {};
+      const credential: AuthCredential = {
+        authType: AuthCredentialTypes.HTTP,
+        http: {
+          scheme: 'bearer',
+          credentials: {token: 'http_token'},
+        },
+        oauth2: {
+          clientId: 'client_id',
+          clientSecret: 'client_secret',
+          accessToken: 'oauth_token',
+        },
+      };
+
+      const result = applyCredential(url, headers, credential);
+
+      expect(result).toBe(url);
+      expect(headers['Authorization']).toBe('Bearer http_token');
+    });
   });
 
   describe('createApiKeyScheme', () => {
