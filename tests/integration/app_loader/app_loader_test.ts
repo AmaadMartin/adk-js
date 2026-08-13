@@ -15,16 +15,18 @@ import {
   Runner,
 } from '@google/adk';
 import {exec, spawn} from 'node:child_process';
-import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import {promisify} from 'node:util';
 import {afterAll, beforeAll, describe, expect, it} from 'vitest';
 import {AgentFile, AgentLoader} from '../../../dev/src/utils/agent_loader.js';
-import {sendInput} from '../test_case_utils.js';
+import {
+  cleanUpFixture,
+  removeInstallArtifacts,
+  sendInput,
+} from '../test_case_utils.js';
 
 const execAsync = promisify(exec);
 const dirname = process.cwd();
-const TEST_EXECUTION_TIMEOUT = 60000;
 
 async function runToCompletion(agent: BaseAgent): Promise<Event[]> {
   const sessionService = new InMemorySessionService();
@@ -61,41 +63,30 @@ describe('App loader CLI integration', () => {
       );
 
       beforeAll(async () => {
+        // A run killed mid-install leaves a partial node_modules that
+        // `npm install` does not clear, coupling this run to the last one.
+        await removeInstallArtifacts(projectPath);
         await execAsync('npm install', {cwd: projectPath});
-      }, TEST_EXECUTION_TIMEOUT);
+      });
 
-      it(
-        'should run app via package.json start script and get responses',
-        async () => {
-          const childProcess = spawn('npm', ['run', 'start'], {
-            cwd: projectPath,
-            shell: true,
-          });
+      it('should run app via package.json start script and get responses', async () => {
+        const childProcess = spawn('npm', ['run', 'start'], {
+          cwd: projectPath,
+          shell: true,
+        });
 
-          let response = await sendInput(
-            childProcess,
-            'Tell me about the app.\n',
-          );
+        let response = await sendInput(
+          childProcess,
+          'Tell me about the app.\n',
+        );
 
-          expect(response.toString()).toContain('Hello from');
+        expect(response.toString()).toContain('Hello from');
 
-          response = await sendInput(childProcess, 'exit\n');
-          expect(response.toString()).toContain('');
-        },
-        TEST_EXECUTION_TIMEOUT,
-      );
+        response = await sendInput(childProcess, 'exit\n');
+        expect(response.toString()).toContain('');
+      });
 
-      afterAll(async () => {
-        await fs
-          .rm(path.join(projectPath, 'node_modules'), {
-            recursive: true,
-            force: true,
-          })
-          .catch(() => {});
-        await fs
-          .unlink(path.join(projectPath, 'package-lock.json'))
-          .catch(() => {});
-      }, TEST_EXECUTION_TIMEOUT);
+      afterAll(() => cleanUpFixture(projectPath));
     },
   );
 });
@@ -105,70 +96,62 @@ describe('AgentLoader discovery and loading integration', () => {
     dirname,
     'tests/integration/app_loader/discovery',
   );
-  let loader: AgentLoader;
+  // Constructed eagerly so no hook failure can leave `afterAll` with an
+  // undefined `loader`; the constructor touches no filesystem.
+  const loader = new AgentLoader(projectPath);
 
   // This fixture needs no install of its own. The loader runs in-process, so
   // esbuild resolves `@google/adk` from the workspace-root `node_modules`. The
   // fixture also has no `package.json`, so it inherits `"type": "module"` from
   // the repository root and the loader compiles it to `.mjs`.
-  beforeAll(() => {
-    loader = new AgentLoader(projectPath);
+  beforeAll(async () => {
+    // An earlier run can still leave a `node_modules` here, and it would
+    // shadow the workspace-root resolution the loader depends on.
+    await removeInstallArtifacts(projectPath);
   });
 
-  it(
-    'should discover apps vs agents across directories and standalone files',
-    async () => {
-      const apps = await loader.listApps();
-      expect(apps).toHaveLength(2);
-      expect(apps).toContain('service_alpha');
-      expect(apps).toContain('standalone_app');
+  it('should discover apps vs agents across directories and standalone files', async () => {
+    const apps = await loader.listApps();
+    expect(apps).toHaveLength(2);
+    expect(apps).toContain('service_alpha');
+    expect(apps).toContain('standalone_app');
 
-      const agentsAndApps = await loader.listAgents();
-      expect(agentsAndApps).toHaveLength(5);
-      expect(agentsAndApps).toContain('service_alpha');
-      expect(agentsAndApps).toContain('service_beta');
-      // Before a Workflow could be a root this was not an error, it was a
-      // silence: the file exported nothing matching `isBaseAgent`, so the
-      // directory simply did not show up.
-      expect(agentsAndApps).toContain('service_graph');
-      expect(agentsAndApps).toContain('standalone_agent');
-      expect(agentsAndApps).toContain('standalone_app');
-      expect(await loader.listLoadFailures()).toEqual([]);
-    },
-    TEST_EXECUTION_TIMEOUT,
-  );
+    const agentsAndApps = await loader.listAgents();
+    expect(agentsAndApps).toHaveLength(5);
+    expect(agentsAndApps).toContain('service_alpha');
+    expect(agentsAndApps).toContain('service_beta');
+    // Before a Workflow could be a root this was not an error, it was a
+    // silence: the file exported nothing matching `isBaseAgent`, so the
+    // directory simply did not show up.
+    expect(agentsAndApps).toContain('service_graph');
+    expect(agentsAndApps).toContain('standalone_agent');
+    expect(agentsAndApps).toContain('standalone_app');
+    expect(await loader.listLoadFailures()).toEqual([]);
+  });
 
-  it(
-    'should load App from directory entrypoint and expose App and rootAgent',
-    async () => {
-      const appFile = await loader.getAppFile('service_alpha');
-      const loaded = await appFile.load();
-      // Pins the module type the fixture inherits from the repository root.
-      expect(path.extname(appFile.getFilePath())).toBe('.mjs');
-      expect(isApp(loaded)).toBe(true);
-      expect((loaded as App).name).toBe('alpha_app');
+  it('should load App from directory entrypoint and expose App and rootAgent', async () => {
+    const appFile = await loader.getAppFile('service_alpha');
+    const loaded = await appFile.load();
+    // Pins the module type the fixture inherits from the repository root.
+    expect(path.extname(appFile.getFilePath())).toBe('.mjs');
+    expect(isApp(loaded)).toBe(true);
+    expect((loaded as App).name).toBe('alpha_app');
 
-      const rootAgent = await appFile.loadAgent();
-      expect(isBaseAgent(rootAgent)).toBe(true);
-      expect(rootAgent.name).toBe('alpha_agent');
-    },
-    TEST_EXECUTION_TIMEOUT,
-  );
+    const rootAgent = await appFile.loadAgent();
+    expect(isBaseAgent(rootAgent)).toBe(true);
+    expect(rootAgent.name).toBe('alpha_agent');
+  });
 
-  it(
-    'should synthesize App when loadApp() is called on BaseAgent file',
-    async () => {
-      const agentFile = await loader.getAppFile('service_beta');
-      const loaded = await agentFile.load();
-      expect(isBaseAgent(loaded)).toBe(true);
-      expect(isApp(loaded)).toBe(false);
+  it('should synthesize App when loadApp() is called on BaseAgent file', async () => {
+    const agentFile = await loader.getAppFile('service_beta');
+    const loaded = await agentFile.load();
+    expect(isBaseAgent(loaded)).toBe(true);
+    expect(isApp(loaded)).toBe(false);
 
-      const synthApp = await agentFile.loadApp();
-      expect(isApp(synthApp)).toBe(true);
-      expect(synthApp.rootAgent.name).toBe('beta_agent');
-    },
-    TEST_EXECUTION_TIMEOUT,
-  );
+    const synthApp = await agentFile.loadApp();
+    expect(isApp(synthApp)).toBe(true);
+    expect(synthApp.rootAgent.name).toBe('beta_agent');
+  });
 
   /**
    * Real compilation is the point of these cases. The loader's unit tests mock
@@ -179,64 +162,53 @@ describe('AgentLoader discovery and loading integration', () => {
    * `Symbol.for('google.adk.workflow.workflow')` brand exists for, and the case
    * an `instanceof` check would silently fail.
    */
-  it(
-    'should adapt a compiled Workflow export into a runnable root agent',
-    async () => {
-      const agentFile = await loader.getAgentFile('service_graph');
-      const rootAgent = await agentFile.loadAgent();
+  it('should adapt a compiled Workflow export into a runnable root agent', async () => {
+    const agentFile = await loader.getAgentFile('service_graph');
+    const rootAgent = await agentFile.loadAgent();
 
-      expect(isBaseAgent(rootAgent)).toBe(true);
-      // Still a WorkflowAgent, which is what the dev server's graph renderer
-      // and the a2a card match on.
-      expect(isGraphWorkflowAgent(rootAgent)).toBe(true);
-      expect(rootAgent.name).toBe('graph_workflow');
-      expect(rootAgent.description).toBe(
-        'Normalizes the question, then answers it.',
-      );
-    },
-    TEST_EXECUTION_TIMEOUT,
-  );
+    expect(isBaseAgent(rootAgent)).toBe(true);
+    // Still a WorkflowAgent, which is what the dev server's graph renderer
+    // and the a2a card match on.
+    expect(isGraphWorkflowAgent(rootAgent)).toBe(true);
+    expect(rootAgent.name).toBe('graph_workflow');
+    expect(rootAgent.description).toBe(
+      'Normalizes the question, then answers it.',
+    );
+  });
 
-  it(
-    'should run a loaded Workflow root through a real Runner',
-    async () => {
-      const agentFile = await loader.getAgentFile('service_graph');
-      const events = await runToCompletion(await agentFile.loadAgent());
+  it('should run a loaded Workflow root through a real Runner', async () => {
+    const agentFile = await loader.getAgentFile('service_graph');
+    const events = await runToCompletion(await agentFile.loadAgent());
 
-      // Both nodes ran, in order, on the user's message.
-      expect(
-        events.map((event) => event.output).filter((o) => o !== undefined),
-      ).toEqual(['hello graph', 'graph handled: hello graph']);
-    },
-    TEST_EXECUTION_TIMEOUT,
-  );
+    // Both nodes ran, in order, on the user's message.
+    expect(
+      events.map((event) => event.output).filter((o) => o !== undefined),
+    ).toEqual(['hello graph', 'graph handled: hello graph']);
+  });
 
-  it(
-    'should synthesize an App around a Workflow root',
-    async () => {
-      const appFile = await loader.getAppFile('service_graph');
-      const app = await appFile.loadApp();
+  it('should synthesize an App around a Workflow root', async () => {
+    const appFile = await loader.getAppFile('service_graph');
+    const app = await appFile.loadApp();
 
-      expect(isApp(app)).toBe(true);
-      expect(app.rootAgent.name).toBe('graph_workflow');
-    },
-    TEST_EXECUTION_TIMEOUT,
-  );
+    expect(isApp(app)).toBe(true);
+    expect(app.rootAgent.name).toBe('graph_workflow');
+  });
 
-  it(
-    'should still refuse a node that is not a Workflow',
-    async () => {
-      expect(await loader.listAgents()).not.toContain('lone_node');
+  it('should still refuse a node that is not a Workflow', async () => {
+    expect(await loader.listAgents()).not.toContain('lone_node');
 
-      const agentFile = new AgentFile(path.join(projectPath, 'lone_node.ts'));
-      await expect(agentFile.load()).rejects.toThrow(
-        /No @google\/adk BaseAgent or Workflow instance found/,
-      );
-    },
-    TEST_EXECUTION_TIMEOUT,
-  );
+    const agentFile = new AgentFile(path.join(projectPath, 'lone_node.ts'));
+    await expect(agentFile.load()).rejects.toThrow(
+      /No @google\/adk BaseAgent or Workflow instance found/,
+    );
+  });
 
   afterAll(async () => {
-    await loader.disposeAll();
+    // `finally` so a disposeAll() failure cannot skip the fixture cleanup.
+    try {
+      await loader.disposeAll();
+    } finally {
+      await cleanUpFixture(projectPath);
+    }
   });
 });
