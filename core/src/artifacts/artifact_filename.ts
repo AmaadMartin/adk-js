@@ -47,19 +47,15 @@ const WINDOWS_RESERVED_CHARACTERS = /[<>:"|?*\u0000-\u001f]/;
  * An artifact filename is a storage key. `FileArtifactService` maps a filename
  * onto a directory name, and Windows removes trailing spaces and periods from
  * a path component, so two such names collapse onto one directory there while
- * the in-memory and GCS backends keep them apart. Windows also refuses to
- * create a directory that uses a reserved device name or a reserved character,
- * so such a name is storable on POSIX and unstorable there. Every backend
- * rejects all four shapes instead, so the strictest host decides the accepted
- * set for every host: a name with leading or trailing whitespace, a name with
- * a path segment ending in a period, a name containing a reserved character,
- * and a name whose path segment is a reserved device name.
+ * the in-memory and GCS backends keep them apart. Windows also refuses a
+ * component that uses a reserved device name or a reserved character. Every
+ * backend applies the same checks, so the strictest host decides the accepted
+ * set for every host.
  *
- * The answer is host-independent by design. The check splits on `\` as well as
- * `/`, so a backslash-separated name is rejected on POSIX too, where a
- * backslash is a legal filename character. `.` and `..` are exempt: they are
- * navigation segments that `path.resolve` consumes before the host filesystem
- * sees them.
+ * The checks split on `\` as well as `/`, so each side of a backslash is
+ * checked as its own segment on POSIX too, where a backslash is a legal
+ * filename character. `.` and `..` are exempt: they are navigation segments
+ * that `path.resolve` consumes before the host filesystem sees them.
  *
  * See
  * https://learn.microsoft.com/en-us/dotnet/standard/io/file-path-formats#trim-characters
@@ -70,12 +66,12 @@ const WINDOWS_RESERVED_CHARACTERS = /[<>:"|?*\u0000-\u001f]/;
  */
 export function assertValidArtifactFilename(filename: string): void {
   const scoped = stripUserNamespace(filename);
-  if (scoped !== scoped.trim()) {
+  const segments = scoped.split(/[/\\]/);
+  if (segments.some((s) => s !== s.trim())) {
     throw new Error(
-      `Artifact filename ${JSON.stringify(filename)} must not have leading or trailing whitespace.`,
+      `Artifact filename ${JSON.stringify(filename)} must not have a path segment with leading or trailing whitespace.`,
     );
   }
-  const segments = scoped.split(/[/\\]/);
   if (segments.some((s) => s.endsWith('.') && s !== '.' && s !== '..')) {
     throw new Error(
       `Artifact filename ${JSON.stringify(filename)} must not have a path segment ending in a period.`,

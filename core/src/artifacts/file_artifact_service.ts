@@ -60,9 +60,7 @@ interface FileArtifactVersion extends ArtifactVersion {
  * sanitized, scope-relative path derived from each filename. Because a
  * filename becomes a directory name, a filename with leading or trailing
  * whitespace is rejected rather than silently normalized, and so is a filename
- * with a path segment ending in a period, a filename containing a character
- * Windows reserves, and a filename whose path segment is a Windows reserved
- * device name such as `NUL` or `COM1`.
+ * with a path segment ending in a period.
  */
 export class FileArtifactService implements BaseArtifactService {
   private readonly rootDir: string;

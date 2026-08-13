@@ -75,6 +75,12 @@ const REJECTED_CHARACTERS: Array<[label: string, filename: string]> = [
   ['a drive qualifier', 'C:/abs.txt'],
 ];
 
+const REJECTED_PADDED_SEGMENTS: Array<[label: string, filename: string]> = [
+  ['a trailing space on an interior segment', 'nested /report.txt'],
+  ['a leading space on the last segment', 'nested/ report.txt'],
+  ['a backslash-separated padded segment', 'nested\\report \\a.txt'],
+];
+
 const REJECTED_FILENAMES: Array<[label: string, filename: string]> = [
   ['a trailing period', 'a.'],
   ['two trailing periods', 'a..'],
@@ -102,6 +108,15 @@ describe('assertValidArtifactFilename', () => {
       'Artifact filename "user:trailing.dot." must not have a path segment ending in a period.',
     );
   });
+
+  it.each(REJECTED_PADDED_SEGMENTS)(
+    'rejects a filename with %s',
+    (_l, filename) => {
+      expect(() => assertValidArtifactFilename(filename)).toThrow(
+        /must not have a path segment with leading or trailing whitespace/,
+      );
+    },
+  );
 
   it.each(REJECTED_DEVICE_NAMES)(
     'rejects a filename with %s',
