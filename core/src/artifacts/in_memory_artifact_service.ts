@@ -169,8 +169,6 @@ export class InMemoryArtifactService implements BaseArtifactService {
       return;
     }
     delete this.artifacts[path];
-
-    return;
   }
 
   async listVersions({
