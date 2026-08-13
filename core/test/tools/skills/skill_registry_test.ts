@@ -413,7 +413,7 @@ Instruction body`;
       const tool = new LoadSkillTool(toolset);
 
       const res = (await tool.runAsync({
-        args: {name: 'test-registry-skill'},
+        args: {skill_name: 'test-registry-skill'},
         toolContext: createMockContext(),
       })) as Record<string, unknown>;
 
@@ -435,7 +435,7 @@ Instruction body`;
       const toolset = new SkillToolset([], {registry: mockRegistry});
       const tool = new LoadSkillTool(toolset);
       const res = (await tool.runAsync({
-        args: {name: 'error-skill'},
+        args: {skill_name: 'error-skill'},
         toolContext: createMockContext(),
       })) as Record<string, unknown>;
       expect(res.error_code).toBe('REGISTRY_ERROR');
@@ -445,7 +445,7 @@ Instruction body`;
       const toolset = new SkillToolset([], {registry: mockRegistry});
       const tool = new LoadSkillTool(toolset);
       const res = (await tool.runAsync({
-        args: {name: 'unknown-skill'},
+        args: {skill_name: 'unknown-skill'},
         toolContext: createMockContext(),
       })) as Record<string, unknown>;
       expect(res.error_code).toBe('SKILL_NOT_FOUND');
@@ -577,7 +577,7 @@ Instruction body`;
       const res = (await tool.runAsync({
         args: {
           skill_name: 'test-registry-skill',
-          script_path: 'scripts/test.js',
+          file_path: 'scripts/test.js',
         },
         toolContext: createMockContext(),
       })) as Record<string, unknown>;
@@ -589,7 +589,7 @@ Instruction body`;
       const toolset = new SkillToolset([], {registry: mockRegistry});
       const tool = new RunSkillScriptTool(toolset);
       let res = (await tool.runAsync({
-        args: {script_path: 'foo'},
+        args: {file_path: 'foo'},
         toolContext: createMockContext(),
       })) as Record<string, unknown>;
       expect(res.errorCode).toBe('MISSING_SKILL_NAME');
@@ -605,7 +605,7 @@ Instruction body`;
       const toolset = new SkillToolset([], {registry: mockRegistry});
       const tool = new RunSkillScriptTool(toolset);
       const res = (await tool.runAsync({
-        args: {skill_name: 'error-skill', script_path: 'scripts/test.js'},
+        args: {skill_name: 'error-skill', file_path: 'scripts/test.js'},
         toolContext: createMockContext(),
       })) as Record<string, unknown>;
       expect(res.errorCode).toBe('REGISTRY_ERROR');
@@ -615,7 +615,7 @@ Instruction body`;
       const toolset = new SkillToolset([], {registry: mockRegistry});
       const tool = new RunSkillScriptTool(toolset);
       const res = (await tool.runAsync({
-        args: {skill_name: 'unknown-skill', script_path: 'scripts/test.js'},
+        args: {skill_name: 'unknown-skill', file_path: 'scripts/test.js'},
         toolContext: createMockContext(),
       })) as Record<string, unknown>;
       expect(res.errorCode).toBe('SKILL_NOT_FOUND');
