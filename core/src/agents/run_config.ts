@@ -12,6 +12,7 @@ import {
   SpeechConfig,
 } from '@google/genai';
 
+import type {TelemetryConfig} from '../telemetry/context.js';
 import {logger} from '../utils/logger.js';
 
 /**
@@ -107,6 +108,21 @@ export interface RunConfig {
    * decision; interactive front-ends (e.g. `adk run`) opt in explicitly.
    */
   plainTextToolConfirmation?: boolean;
+
+  /**
+   * Per-request OpenTelemetry configuration.
+   *
+   * Overrides the process-global telemetry environment variables for the
+   * duration of this invocation. Each field left unset falls back to its
+   * corresponding environment variable, so a multi-tenant host can toggle
+   * telemetry per request without leaking configuration across concurrent
+   * invocations. Setting `ADK_TELEMETRY_IGNORE_RUN_CONFIG` to `1` or `true`
+   * makes the runtime ignore this field entirely.
+   *
+   * WARNING: This feature is **experimental** and its API or behavior may
+   * change in future releases.
+   */
+  telemetry?: TelemetryConfig;
 }
 
 /**

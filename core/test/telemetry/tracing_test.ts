@@ -10,10 +10,12 @@ import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   BaseAgent,
   BaseTool,
+  ContentCapturingMode,
   Event,
   InvocationContext,
   LlmRequest,
   LlmResponse,
+  RunConfig,
   Session,
   createEventActions,
 } from '@google/adk';
@@ -21,6 +23,7 @@ import {
   traceAgentInvocation,
   traceCallLlm,
   traceMergedToolCalls,
+  traceSendData,
   traceToolCall,
 } from '../../src/telemetry/tracing.js';
 
@@ -138,6 +141,7 @@ describe('Telemetry Tracing Functions', () => {
         tool: mockTool,
         args,
         functionResponseEvent: mockEvent,
+        invocationContext: mockInvocationContext,
       });
 
       // Assert
@@ -175,6 +179,7 @@ describe('Telemetry Tracing Functions', () => {
         tool: mockTool,
         args: {},
         functionResponseEvent: eventWithoutResponse,
+        invocationContext: mockInvocationContext,
       });
 
       // Assert
@@ -210,6 +215,7 @@ describe('Telemetry Tracing Functions', () => {
       traceMergedToolCalls({
         responseEventId: 'merged-event-id',
         functionResponseEvent: mockEventWithJson as unknown as Event,
+        invocationContext: mockInvocationContext,
       });
 
       // Assert - setAttributes is called without tool_response
@@ -287,6 +293,128 @@ describe('Telemetry Tracing Functions', () => {
         'gen_ai.request.max_tokens',
         expect.anything(),
       );
+    });
+  });
+
+  describe('per-request telemetry config', () => {
+    const ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS =
+      'ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS';
+
+    function contextWith(mode: ContentCapturingMode): InvocationContext {
+      const runConfig: RunConfig = {telemetry: {captureMessageContent: mode}};
+      return {...mockInvocationContext, runConfig} as InvocationContext;
+    }
+
+    function attributeValue(name: string): unknown {
+      const fromSetAttribute = mockSpan.setAttribute.mock.calls.find(
+        (call: unknown[]) => call[0] === name,
+      );
+      if (fromSetAttribute) return fromSetAttribute[1];
+      const fromSetAttributes = mockSpan.setAttributes.mock.calls.find(
+        (call: unknown[]) =>
+          typeof call[0] === 'object' &&
+          call[0] !== null &&
+          name in (call[0] as Record<string, unknown>),
+      );
+      return fromSetAttributes
+        ? (fromSetAttributes[0] as Record<string, unknown>)[name]
+        : undefined;
+    }
+
+    beforeEach(() => {
+      vi.mocked(trace.getActiveSpan).mockReturnValue(mockSpan);
+    });
+
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    it('empties the llm attributes when the request opts out', () => {
+      traceCallLlm({
+        invocationContext: contextWith(ContentCapturingMode.NO_CONTENT),
+        eventId: 'test-event-id',
+        llmRequest: mockLlmRequest,
+        llmResponse: mockLlmResponse,
+      });
+
+      expect(attributeValue('gcp.vertex.agent.llm_request')).toBe('{}');
+      expect(attributeValue('gcp.vertex.agent.llm_response')).toBe('{}');
+    });
+
+    it('lets the request field beat the env var that disables capture', () => {
+      vi.stubEnv(ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS, 'false');
+
+      traceCallLlm({
+        invocationContext: contextWith(ContentCapturingMode.SPAN_AND_EVENT),
+        eventId: 'test-event-id',
+        llmRequest: mockLlmRequest,
+        llmResponse: mockLlmResponse,
+      });
+
+      expect(attributeValue('gcp.vertex.agent.llm_request')).toContain(
+        'test-model',
+      );
+      expect(attributeValue('gcp.vertex.agent.llm_response')).toContain(
+        'test-response',
+      );
+    });
+
+    it('empties the tool attributes when the request opts out', () => {
+      traceToolCall({
+        tool: mockTool,
+        args: {param1: 'value1'},
+        functionResponseEvent: mockEvent,
+        invocationContext: contextWith(ContentCapturingMode.NO_CONTENT),
+      });
+
+      expect(attributeValue('gcp.vertex.agent.tool_call_args')).toBe('{}');
+      expect(attributeValue('gcp.vertex.agent.tool_response')).toBe('{}');
+    });
+
+    it('keeps serializing the tool attributes with no telemetry config', () => {
+      traceToolCall({
+        tool: mockTool,
+        args: {param1: 'value1'},
+        functionResponseEvent: mockEvent,
+        invocationContext: mockInvocationContext,
+      });
+
+      expect(attributeValue('gcp.vertex.agent.tool_call_args')).toContain(
+        'param1',
+      );
+      expect(attributeValue('gcp.vertex.agent.tool_response')).toContain(
+        'test-result',
+      );
+    });
+
+    it('empties the merged tool response when the request opts out', () => {
+      traceMergedToolCalls({
+        responseEventId: 'merged-event-id',
+        functionResponseEvent: mockEvent,
+        invocationContext: contextWith(ContentCapturingMode.NO_CONTENT),
+      });
+
+      expect(attributeValue('gcp.vertex.agent.tool_response')).toBe('{}');
+    });
+
+    it('empties the sent data when the request opts out', () => {
+      traceSendData({
+        invocationContext: contextWith(ContentCapturingMode.NO_CONTENT),
+        eventId: 'test-event-id',
+        data: [{role: 'user', parts: [{text: 'hello'}]}],
+      });
+
+      expect(attributeValue('gcp.vertex.agent.data')).toBe('{}');
+    });
+
+    it('serializes the sent data when the request opts in', () => {
+      traceSendData({
+        invocationContext: contextWith(ContentCapturingMode.SPAN_ONLY),
+        eventId: 'test-event-id',
+        data: [{role: 'user', parts: [{text: 'hello'}]}],
+      });
+
+      expect(attributeValue('gcp.vertex.agent.data')).toContain('hello');
     });
   });
 });
