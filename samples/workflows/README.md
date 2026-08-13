@@ -66,17 +66,19 @@ rest are function-only and run offline.
 
 The HITL samples **pause** mid-run (you will see an `adk_request_input`
 request). Just type your reply on the next turn — a plain-text reply is routed
-to the pending interrupt, so you can approve, reject, or supply a value
-interactively.
+to the pending interrupt when exactly one is pending, so you can approve,
+reject, or supply a value interactively.
 
 Answering from your own client rather than the CLI, over `/run`, there are two
 shapes and the difference matters:
 
 ```jsonc
-// Plain text: routed to every pending interrupt, never schema-checked.
+// Plain text: routed to the pending interrupt when exactly one is pending,
+// never schema-checked. It resolves nothing when two or more are pending.
 {"role": "user", "parts": [{"text": "21"}]}
 
 // Structured: name the interrupt, and wrap a bare value as {result: <value>}.
+// This is how you answer one pause out of several.
 {"role": "user", "parts": [{"functionResponse": {
   "id": "<interruptId>", "name": "adk_request_input",
   "response": {"result": "21"}}}]}
