@@ -1926,6 +1926,27 @@ describe('VertexAiSessionService', () => {
       expect(event.isScratchpad).toBe(true);
     });
 
+    it('keeps the exact summary string a multi-part compaction carried', async () => {
+      const original = compactedEvent({
+        compactedContent: 'first second',
+        content: {role: 'model', parts: [{text: 'first'}, {text: 'second'}]},
+      });
+      await service.appendEvent({
+        session: compactionSession(),
+        event: original,
+      });
+      const sent = lastAppend();
+
+      const event = await readBackCompacted(
+        apiEventWith({
+          rawEvent: sent.config.rawEvent,
+          eventMetadata: sent.config.eventMetadata,
+        }),
+      );
+
+      expect(event.compactedContent).toBe('first second');
+    });
+
     it('round-trips an appended compaction through customMetadata alone', async () => {
       const original = compactedEvent();
       await service.appendEvent({
