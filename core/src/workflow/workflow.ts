@@ -141,8 +141,8 @@ interface CompletedTask {
  *
  * Ported from `google/adk-python` `workflow/_workflow.py`. A resumed run
  * replays its recorded node-completion order through the shared
- * {@link ReplaySequenceBarrier}; checkpointing and task/chat isolation scopes
- * are not ported yet.
+ * `ReplaySequenceBarrier` (named rather than linked, because it is internal);
+ * checkpointing and task/chat isolation scopes are not ported yet.
  */
 @experimental
 export class Workflow extends BaseNode {
