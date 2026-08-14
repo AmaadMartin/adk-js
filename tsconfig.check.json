@@ -2,56 +2,36 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": true,
+    "baseUrl": ".",
     // Resolve workspace packages to source, mirroring vitest.config.ts:
     // core/dist/types is weaker, as declaration emit erases private types.
     "paths": {
       "@google/adk": ["./core/src/index.ts"],
       "@google/adk/*": ["./core/src/*"],
       "@google/adk-devtools": ["./dev/src/index.ts"],
-      "@google/adk-integrations": ["./integrations/src/index.ts"]
+      "@google/adk-devtools/*": ["./dev/src/*"],
+      "@google/adk-integrations": ["./integrations/src/index.ts"],
+      "@google/adk-integrations/*": ["./integrations/src/*"]
     }
   },
+  // This program checks sources only. Consumers are type-checked against the
+  // emitted declarations by tests/integration/build_setup/build_setup_test.ts,
+  // which runs `tsc` inside each ts_* fixture below (they depend on the built
+  // packages via `file:` links) and runs in CI as part of `npm run
+  // test:coverage`. Aliasing those fixtures to src would defeat their purpose.
   "exclude": [
     "node_modules",
     "**/dist",
+    "tests/integration/build_setup/ts_commonjs",
+    "tests/integration/build_setup/ts_esm",
+    "tests/integration/build_setup/ts_commonjs_native_addon",
+    "tests/integration/build_setup/ts_esm_native_addon",
     // `exclude` replaces the root config's list, so `samples` has to be
     // repeated here. A sample resolves `@google/adk` through node_modules, the
     // way a user's project does, so the `paths` block above is wrong for it.
     // `npm run ts:check:samples` checks it against `samples/tsconfig.json`.
-    "samples",
-    // Pre-existing failures, not fallout from the `paths` block above: all 31
-    // were verified to fail identically with and without that mapping. Delete
-    // each entry as the file is fixed; the list only ever shrinks.
-    "core/test/agents/processors/basic_llm_request_processor_test.ts",
-    "core/test/agents/processors/instructions_llm_request_processor_test.ts",
-    "core/test/agents/processors/request_confirmation_llm_request_processor_test.ts",
-    "core/test/agents/sequential_agent_test.ts",
-    "core/test/apps/app_test.ts",
-    "core/test/auth/exchanger/credential_exchanger_test.ts",
-    "core/test/code_executors/code_execution_utils_test.ts",
-    "core/test/code_executors/code_executor_context_test.ts",
-    "core/test/code_executors/unsafe_local_code_executor_test.ts",
-    "core/test/context/anchored_context_compactor_test.ts",
-    "core/test/context/token_based_context_compactor_test.ts",
-    "core/test/events/event_actions_test.ts",
-    "core/test/events/structured_events_test.ts",
-    "core/test/integrations/agent_registry_test.ts",
-    "core/test/memory/vertex_ai_memory_bank_service_test.ts",
-    "core/test/models/google_llm_test.ts",
-    "core/test/models/llm_response_test.ts",
-    "core/test/plugins/global_instruction_plugin_test.ts",
-    "core/test/plugins/security_plugin_test.ts",
-    "core/test/runner/runner_test.ts",
-    "core/test/sessions/vertex_ai_session_service_test.ts",
-    "core/test/tools/google_search_tool_test.ts",
-    "core/test/tools/openapi_tool/auth_helpers_test.ts",
-    "core/test/tools/openapi_tool/openapi_spec_parser_test.ts",
-    "core/test/tools/openapi_tool/openapi_toolset_integration_test.ts",
-    "core/test/tools/openapi_tool/openapi_toolset_test.ts",
-    "core/test/tools/openapi_tool/tool_auth_handler_test.ts",
-    "core/test/tools/skills/run_skill_script_tool_test.ts",
-    "core/test/tools/vertex_ai_search_tool_test.ts",
-    "core/test/tools/vertex_rag_retrieval_tool_test.ts",
-    "tests/integration/sessions/vertex_ai_session_service_test.ts"
+    "samples"
+    // No test file is excluded. The list of pre-existing failures this config
+    // once carried is empty: every file it named now type-checks against src.
   ]
 }

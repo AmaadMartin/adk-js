@@ -9,6 +9,7 @@ import {BaseAgent} from '../../src/agents/base_agent.js';
 import {InvocationContext} from '../../src/agents/invocation_context.js';
 import {App, isApp, validateAppName} from '../../src/apps/app.js';
 import {createResumabilityConfig} from '../../src/apps/resumability_config.js';
+import {Event} from '../../src/events/event.js';
 import {BasePlugin} from '../../src/plugins/base_plugin.js';
 import {node} from '../../src/workflow/node.js';
 import {Workflow} from '../../src/workflow/workflow.js';
@@ -17,8 +18,13 @@ class DummyAgent extends BaseAgent {
   constructor(name = 'dummy_agent') {
     super({name});
   }
-  protected async *runAsyncImpl(_context: InvocationContext) {}
-  protected async *runLiveImpl(_context: InvocationContext) {}
+
+  protected async *runAsyncImpl(
+    _context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {}
+  protected async *runLiveImpl(
+    _context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {}
 }
 
 class DummyPlugin extends BasePlugin {

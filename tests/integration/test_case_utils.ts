@@ -13,15 +13,25 @@ import {
   isLlmAgent,
 } from '@google/adk';
 import type {Candidate, UsageMetadata} from '@google/genai';
-import {
-  createUserContent,
-  GenerateContentResponse,
-  GoogleGenAI,
-} from '@google/genai';
+import {createUserContent, GenerateContentResponse} from '@google/genai';
 import {ChildProcessWithoutNullStreams} from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import {expect} from 'vitest';
+
+/**
+ * The genai client type as seen by `Gemini`, for typing `apiClient` overrides.
+ *
+ * Two copies of `@google/genai` are installed: v2.x under `core/node_modules`
+ * (declared by `core`) and v1.x hoisted to the root (required by
+ * `@google-cloud/vertexai`). Files under `tests/` resolve the bare specifier to
+ * the root v1 copy, so annotating an override with an imported `GoogleGenAI`
+ * names a different class than the base getter returns and fails with TS2416
+ * ("Type 'GoogleGenAI' is missing the following properties from type
+ * 'GoogleGenAI'"). Deriving the type from `Gemini` binds it to whichever copy
+ * `core/src` resolves, independent of the resolution at this file.
+ */
+export type GeminiApiClient = Gemini['apiClient'];
 
 /**
  * Represents a raw generate content response.
@@ -123,8 +133,8 @@ export class GeminiWithMockResponses extends Gemini {
     );
   }
 
-  override get apiClient(): GoogleGenAI {
-    return this._mockClient as unknown as GoogleGenAI;
+  override get apiClient(): GeminiApiClient {
+    return this._mockClient as unknown as GeminiApiClient;
   }
 }
 

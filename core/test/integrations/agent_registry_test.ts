@@ -597,10 +597,10 @@ describe('AgentRegistry', () => {
             url: 'https://agent.com',
             preferredTransport: 'JSONRPC',
             protocolVersion: '0.3.0',
-            skills: [],
             capabilities: {},
             defaultInputModes: [],
             defaultOutputModes: [],
+            skills: [],
           },
         },
       };
@@ -740,10 +740,10 @@ describe('AgentRegistry', () => {
             url: 'https://agent.com',
             preferredTransport: 'JSONRPC',
             protocolVersion: '0.3.0',
-            skills: [],
             capabilities: {},
             defaultInputModes: [],
             defaultOutputModes: [],
+            skills: [],
           },
         },
       };
