@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {GenerateContentConfig} from '@google/genai';
 import {Event} from '../../events/event.js';
 import {LlmRequest, setOutputSchema} from '../../models/llm_request.js';
 import {canUseOutputSchemaWithTools} from '../../utils/output_schema_utils.js';
@@ -37,7 +38,7 @@ export class BasicLlmRequestProcessor extends BaseLlmRequestProcessor {
     // set model string, not model instance.
     llmRequest.model = agent.canonicalModel.model;
 
-    llmRequest.config = {...(agent.generateContentConfig ?? {})};
+    llmRequest.config = copyRequestScopedFields(agent.generateContentConfig);
     // Models that cannot take an output schema alongside tools get the
     // prompt-based `set_model_response` workaround instead, injected by
     // `LlmAgent.runOneStepAsync` and the instructions processor.
@@ -70,6 +71,37 @@ export class BasicLlmRequestProcessor extends BaseLlmRequestProcessor {
         invocationContext.runConfig.proactivity;
     }
   }
+}
+
+/**
+ * Copies the agent-config fields that request assembly goes on to mutate.
+ *
+ * A plain spread of the agent's config is shallow, so `labels` and
+ * `httpOptions` stay the agent's own objects. `LlmAgent` writes the agent-name
+ * label straight into `labels`, so that write would outlive the invocation and
+ * reach every later run of that agent.
+ *
+ * `headers` gets its own copy too. `Gemini` replaces the whole property, which
+ * the `httpOptions` copy already absorbs, but a before-model callback receives
+ * the request and can write into the headers object itself.
+ *
+ * The copies stay shallow on purpose: a deep clone would also copy the
+ * `retryOptions` and `extraBody` objects that the caller still holds.
+ */
+function copyRequestScopedFields(
+  config?: GenerateContentConfig,
+): GenerateContentConfig {
+  const copy: GenerateContentConfig = {...config};
+  if (copy.labels) {
+    copy.labels = {...copy.labels};
+  }
+  if (copy.httpOptions) {
+    copy.httpOptions = {...copy.httpOptions};
+    if (copy.httpOptions.headers) {
+      copy.httpOptions.headers = {...copy.httpOptions.headers};
+    }
+  }
+  return copy;
 }
 
 export const BASIC_LLM_REQUEST_PROCESSOR = new BasicLlmRequestProcessor();
