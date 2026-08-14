@@ -744,6 +744,26 @@ describe('AgentLoader', () => {
       await agentLoader.disposeAll();
     });
 
+    it('loads the same agent instance the agent file holds', async () => {
+      const agentLoader = new AgentLoader(tempAgentsDir);
+
+      const loaded = await agentLoader.loadAgent('agent1');
+      const fromFile = await (await agentLoader.getAgentFile('agent1')).load();
+
+      expect(loaded.name).toEqual('agent1');
+      expect(loaded).toBe(fromFile);
+      await agentLoader.disposeAll();
+    });
+
+    it('rejects with the loader error when the agent name is unknown', async () => {
+      const agentLoader = new AgentLoader(tempAgentsDir);
+
+      await expect(agentLoader.loadAgent('nope')).rejects.toThrow(
+        /Agent 'nope' not found[\s\S]*Available agents: agent1, agent2, agent3/,
+      );
+      await agentLoader.disposeAll();
+    });
+
     /**
      * An agent whose module throws while constructing (a malformed workflow
      * graph, a bad config) must not stop the other agents from loading —

@@ -19,6 +19,7 @@ import {
   InvocationContext,
   LlmAgent,
   node,
+  RunnableRoot,
   Runner,
   Session,
   Workflow,
@@ -31,7 +32,7 @@ import {
   A2A_AUTH_TOKEN_ENV_VAR,
   AdkApiServer,
 } from '../../src/server/adk_api_server.js';
-import {AgentLoader} from '../../src/utils/agent_loader.js';
+import {BaseAgentLoader} from '../../src/utils/base_agent_loader.js';
 import {version} from '../../src/version.js';
 
 interface JsonRpcResponse {
@@ -216,8 +217,28 @@ const TEST_AGENT = new TestAgent({
   ],
 });
 
+/** Serves the agents held in a map, so no agent file reaches disk. */
+class InMemoryAgentLoader extends BaseAgentLoader {
+  constructor(private readonly agents: Map<string, RunnableRoot>) {
+    super();
+  }
+
+  async listAgents(): Promise<string[]> {
+    return [...this.agents.keys()].sort();
+  }
+
+  async loadAgent(agentName: string): Promise<RunnableRoot> {
+    const agent = this.agents.get(agentName);
+    if (!agent) {
+      throw new Error(`No agent named '${agentName}'`);
+    }
+
+    return agent;
+  }
+}
+
 describe('AdkWebServer', () => {
-  let agentLoader: AgentLoader;
+  let agentLoader: BaseAgentLoader;
   let sessionService: BaseSessionService;
   let memoryService: BaseMemoryService;
   let artifactService: BaseArtifactService;
@@ -225,18 +246,7 @@ describe('AdkWebServer', () => {
   let client: HttpClient;
 
   beforeEach(async () => {
-    agentLoader = {
-      listAgents: () => Promise.resolve(['testApp']),
-      getAgentFile: () =>
-        Promise.resolve({
-          load() {
-            return Promise.resolve(TEST_AGENT);
-          },
-          async [Symbol.asyncDispose](): Promise<void> {
-            return;
-          },
-        }),
-    } as unknown as AgentLoader;
+    agentLoader = new InMemoryAgentLoader(new Map([['testApp', TEST_AGENT]]));
     sessionService = new InMemorySessionService();
     memoryService = new InMemoryMemoryService();
     artifactService = new InMemoryArtifactService();
@@ -615,8 +625,8 @@ describe('AdkWebServer', () => {
     });
 
     it('should return 500 if execution fails', async () => {
-      const originalGetAgentFile = agentLoader.getAgentFile;
-      agentLoader.getAgentFile = () => Promise.reject(new Error('Load failed'));
+      const originalLoadAgent = agentLoader.loadAgent;
+      agentLoader.loadAgent = () => Promise.reject(new Error('Load failed'));
 
       await sessionService.createSession({
         appName: 'testApp',
@@ -634,7 +644,7 @@ describe('AdkWebServer', () => {
       } catch (e: unknown) {
         expect((e as {response: {status: number}}).response.status).toBe(500);
       } finally {
-        agentLoader.getAgentFile = originalGetAgentFile;
+        agentLoader.loadAgent = originalLoadAgent;
       }
     });
 
@@ -755,8 +765,8 @@ describe('AdkWebServer', () => {
     });
 
     it('should return 500 if execution fails', async () => {
-      const originalGetAgentFile = agentLoader.getAgentFile;
-      agentLoader.getAgentFile = () => Promise.reject(new Error('Load failed'));
+      const originalLoadAgent = agentLoader.loadAgent;
+      agentLoader.loadAgent = () => Promise.reject(new Error('Load failed'));
 
       await sessionService.createSession({
         appName: 'testApp',
@@ -774,7 +784,7 @@ describe('AdkWebServer', () => {
       } catch (e: unknown) {
         expect((e as {response: {status: number}}).response.status).toBe(500);
       } finally {
-        agentLoader.getAgentFile = originalGetAgentFile;
+        agentLoader.loadAgent = originalLoadAgent;
       }
     });
 
@@ -969,27 +979,21 @@ describe('AdkWebServer', () => {
     });
 
     it('should highlight the workflow node that produced the event', async () => {
-      const originalGetAgentFile = agentLoader.getAgentFile;
+      const originalLoadAgent = agentLoader.loadAgent;
       const originalGetSession = sessionService.getSession;
-      agentLoader.getAgentFile = (() =>
-        Promise.resolve({
-          load: () =>
-            Promise.resolve(
-              new Workflow({
-                name: 'wf',
-                edges: [
-                  [
-                    'START',
-                    node(async () => 'a', {name: 'one'}),
-                    node(async () => 'b', {name: 'two'}),
-                  ],
-                ],
-              }),
-            ),
-          async [Symbol.asyncDispose](): Promise<void> {
-            return;
-          },
-        })) as unknown as AgentLoader['getAgentFile'];
+      agentLoader.loadAgent = () =>
+        Promise.resolve(
+          new Workflow({
+            name: 'wf',
+            edges: [
+              [
+                'START',
+                node(async () => 'a', {name: 'one'}),
+                node(async () => 'b', {name: 'two'}),
+              ],
+            ],
+          }),
+        );
       sessionService.getSession = async () =>
         createSession({
           id: 'workflowSession',
@@ -1021,7 +1025,7 @@ describe('AdkWebServer', () => {
         expect(response.data!.dotSrc).toContain('#69CB87');
         expect(response.data!.dotSrc).toContain('#0F5223');
       } finally {
-        agentLoader.getAgentFile = originalGetAgentFile;
+        agentLoader.loadAgent = originalLoadAgent;
         sessionService.getSession = originalGetSession;
       }
     });
@@ -1054,14 +1058,8 @@ describe('AdkWebServer', () => {
 
   describe('Structure graph', () => {
     /** Points the loader at `agent` for the rest of the test. */
-    function loadInstead(agent: unknown) {
-      agentLoader.getAgentFile = (() =>
-        Promise.resolve({
-          load: () => Promise.resolve(agent),
-          async [Symbol.asyncDispose](): Promise<void> {
-            return;
-          },
-        })) as unknown as AgentLoader['getAgentFile'];
+    function loadInstead(agent: RunnableRoot) {
+      agentLoader.loadAgent = () => Promise.resolve(agent);
     }
 
     /** A workflow nesting another workflow, to exercise per-level paths. */
@@ -1489,8 +1487,8 @@ describe('AdkWebServer', () => {
     });
 
     it('should return 500 if execution fails', async () => {
-      const originalGetAgentFile = agentLoader.getAgentFile;
-      agentLoader.getAgentFile = () => Promise.reject(new Error('Load failed'));
+      const originalLoadAgent = agentLoader.loadAgent;
+      agentLoader.loadAgent = () => Promise.reject(new Error('Load failed'));
 
       try {
         await client.post('/api/reasoning_engine', {
@@ -1504,7 +1502,7 @@ describe('AdkWebServer', () => {
       } catch (e: unknown) {
         expect((e as {response: {status: number}}).response.status).toBe(500);
       } finally {
-        agentLoader.getAgentFile = originalGetAgentFile;
+        agentLoader.loadAgent = originalLoadAgent;
       }
     });
   });
@@ -1602,5 +1600,81 @@ describe('AdkWebServer', () => {
         expect(response.status).toBe(404);
       }
     });
+  });
+});
+
+describe('Custom agent loader', () => {
+  const REGISTRY_APP = 'registryApp';
+  const USER_ID = 'testUser';
+  const SESSION_ID = 'sessionId';
+
+  let sessionService: BaseSessionService;
+  let server: AdkApiServer;
+  let client: HttpClient;
+
+  beforeEach(async () => {
+    sessionService = new InMemorySessionService();
+    // No `agentsDir`: the loader is the only agent source the server has.
+    server = new AdkApiServer({
+      agentLoader: new InMemoryAgentLoader(
+        new Map([[REGISTRY_APP, TEST_AGENT]]),
+      ),
+      sessionService,
+    });
+    await server.start();
+
+    client = new HttpClient(server.url);
+  });
+
+  afterEach(async () => {
+    await server.stop();
+  });
+
+  it('lists the agents the injected loader reports', async () => {
+    const response = await client.get<string[]>('/list-apps');
+
+    expect(response.status).toBe(200);
+    expect(response.data).toEqual([REGISTRY_APP]);
+  });
+
+  it('runs an agent the injected loader holds in memory', async () => {
+    await sessionService.createSession({
+      appName: REGISTRY_APP,
+      userId: USER_ID,
+      sessionId: SESSION_ID,
+    });
+
+    const response = await client.post<Event[]>('/run', {
+      appName: REGISTRY_APP,
+      userId: USER_ID,
+      sessionId: SESSION_ID,
+      newMessage: {parts: [{text: 'Hello test agent!'}], role: 'user'},
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.data?.[0].author).toBe(TEST_AGENT.name);
+  });
+
+  it('answers 500 with the loader error for an app it does not hold', async () => {
+    await sessionService.createSession({
+      appName: 'missingApp',
+      userId: USER_ID,
+      sessionId: SESSION_ID,
+    });
+
+    try {
+      await client.post('/run', {
+        appName: 'missingApp',
+        userId: USER_ID,
+        sessionId: SESSION_ID,
+        newMessage: {parts: [{text: 'Hello'}], role: 'user'},
+      });
+      expect.fail('Should fail with 500');
+    } catch (e: unknown) {
+      expect((e as {response: {status: number}}).response.status).toBe(500);
+      expect((e as {message: string}).message).toContain(
+        "No agent named 'missingApp'",
+      );
+    }
   });
 });
