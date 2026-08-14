@@ -454,10 +454,6 @@ describe('LlmAgent Output Processing', () => {
   let invocationContext: InvocationContext;
   let validationSchema: Schema;
 
-  afterEach(() => {
-    resetTimeProvider();
-  });
-
   beforeEach(() => {
     validationSchema = {
       type: Type.OBJECT,
@@ -574,9 +570,9 @@ describe('LlmAgent model response timestamps', () => {
       timestamps.push(event.timestamp);
     }
 
-    // The second response carries the re-stamp the first one triggered.
-    expect(timestamps.length).toBeGreaterThan(1);
-    expect(timestamps).toEqual(timestamps.map(() => FROZEN_TIME_MS));
+    // Two chunks yield two events. The re-stamp runs before each yield, so the
+    // second event carries the value the first pass wrote.
+    expect(timestamps).toEqual([FROZEN_TIME_MS, FROZEN_TIME_MS]);
   });
 });
 

@@ -14,12 +14,18 @@
  */
 export type TimeProvider = () => number;
 
-const defaultTimeProvider: TimeProvider = () => Date.now();
-
-let timeProvider: TimeProvider = defaultTimeProvider;
+let timeProvider: TimeProvider = Date.now;
 
 /**
- * Installs `provider` as the source of time for every ADK timestamp.
+ * Installs `provider` as the source of time for the four timestamps that read
+ * this seam: `Event.timestamp`, the `lastUpdateTime` written by
+ * `InMemorySessionService` and by `DatabaseSessionService`, and the re-stamp
+ * `LlmAgent` applies to a model response event.
+ *
+ * Every other timestamp in the library keeps reading the wall clock, including
+ * the ORM column defaults in the session schema, the Vertex AI session service
+ * and the code executor context. A caller that installs a provider therefore
+ * sees a mix of provider-supplied and wall-clock values.
  *
  * The override is process-wide. It is not scoped to an async context, which is
  * how it differs from the `ContextVar` the Python counterpart uses: concurrent
@@ -39,15 +45,12 @@ export function setTimeProvider(provider: TimeProvider): void {
  * Safe to call when no provider was ever installed.
  */
 export function resetTimeProvider(): void {
-  timeProvider = defaultTimeProvider;
+  timeProvider = Date.now;
 }
 
 /**
  * Returns the current time in milliseconds since the Unix epoch, from the
  * active provider.
- *
- * The value is whatever the provider returns; ADK neither validates nor
- * corrects it, and an exception thrown by a provider reaches the caller.
  */
 export function getTime(): number {
   return timeProvider();
