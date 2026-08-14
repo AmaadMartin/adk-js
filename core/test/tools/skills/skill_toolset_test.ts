@@ -313,5 +313,128 @@ describe('skill_toolset', () => {
       expect(tools2.map((t) => t.name)).toContain('cached_tool');
       expect(mockInnerGetTools).toHaveBeenCalledTimes(1);
     });
+
+    describe('SkillToolset close - additional toolsets', () => {
+      class SpyToolset extends BaseToolset {
+        constructor(private readonly onClose: () => Promise<void>) {
+          super([]);
+        }
+        override async getTools() {
+          return [];
+        }
+        override async close(): Promise<void> {
+          await this.onClose();
+        }
+      }
+
+      it('closes every nested toolset exactly once', async () => {
+        const closeFirst = vi.fn().mockResolvedValue(undefined);
+        const closeSecond = vi.fn().mockResolvedValue(undefined);
+        const toolset = new SkillToolset([mockSkill], {
+          additionalTools: [
+            new SpyToolset(closeFirst),
+            new SpyToolset(closeSecond),
+          ],
+        });
+
+        await toolset.close();
+
+        expect(closeFirst).toHaveBeenCalledTimes(1);
+        expect(closeSecond).toHaveBeenCalledTimes(1);
+      });
+
+      it('leaves plain tools alone', async () => {
+        const toolClose = vi.fn().mockResolvedValue(undefined);
+        class ClosableTool extends BaseTool {
+          constructor() {
+            super({name: 'closable_tool', description: 'dummy'});
+          }
+          close = toolClose;
+          async runAsync() {
+            return 'dummy';
+          }
+        }
+        const toolsetClose = vi.fn().mockResolvedValue(undefined);
+        const toolset = new SkillToolset([mockSkill], {
+          additionalTools: [new ClosableTool(), new SpyToolset(toolsetClose)],
+        });
+
+        await toolset.close();
+
+        expect(toolClose).not.toHaveBeenCalled();
+        expect(toolsetClose).toHaveBeenCalledTimes(1);
+      });
+
+      it('keeps closing after one nested toolset rejects', async () => {
+        const closeFirst = vi.fn().mockResolvedValue(undefined);
+        const closeRejecting = vi.fn().mockRejectedValue(new Error('boom'));
+        const closeLast = vi.fn().mockResolvedValue(undefined);
+        const toolset = new SkillToolset([mockSkill], {
+          additionalTools: [
+            new SpyToolset(closeFirst),
+            new SpyToolset(closeRejecting),
+            new SpyToolset(closeLast),
+          ],
+        });
+
+        await expect(toolset.close()).resolves.toBeUndefined();
+
+        expect(closeFirst).toHaveBeenCalledTimes(1);
+        expect(closeRejecting).toHaveBeenCalledTimes(1);
+        expect(closeLast).toHaveBeenCalledTimes(1);
+      });
+
+      it('closes a toolset that carries the signature but is not an instance', async () => {
+        const foreignClose = vi.fn().mockResolvedValue(undefined);
+        // Stands in for a toolset built by a second copy of the ADK package,
+        // which fails `instanceof` but carries the shared toolset signature.
+        const foreignToolset = {
+          [Symbol.for('google.adk.baseToolset')]: true,
+          getTools: vi.fn().mockResolvedValue([]),
+          close: foreignClose,
+        } as unknown as BaseToolset;
+        const toolset = new SkillToolset([mockSkill], {
+          additionalTools: [foreignToolset],
+        });
+
+        await toolset.close();
+
+        expect(foreignClose).toHaveBeenCalledTimes(1);
+      });
+
+      it('still clears the fetched-skill cache when a nested close rejects', async () => {
+        const remoteSkill: Skill = {
+          frontmatter: {
+            name: 'remote-skill',
+            description: 'A remote skill',
+          },
+          instructions: 'Remote instructions',
+        };
+        const registry = {
+          getSkill: vi.fn().mockResolvedValue(remoteSkill),
+          searchSkills: vi.fn(),
+        };
+        const toolset = new SkillToolset([mockSkill], {
+          registry,
+          additionalTools: [
+            new SpyToolset(vi.fn().mockRejectedValue(new Error('boom'))),
+          ],
+        });
+
+        await toolset.getOrFetchSkill('remote-skill', 'inv-1');
+        expect(registry.getSkill).toHaveBeenCalledTimes(1);
+
+        await toolset.close();
+        await toolset.getOrFetchSkill('remote-skill', 'inv-1');
+
+        expect(registry.getSkill).toHaveBeenCalledTimes(2);
+      });
+
+      it('resolves when there are no additional tools', async () => {
+        const toolset = new SkillToolset([mockSkill]);
+
+        await expect(toolset.close()).resolves.toBeUndefined();
+      });
+    });
   });
 });

@@ -14,7 +14,7 @@ import {SkillRegistry} from '../../skills/skill_registry.js';
 import {experimental} from '../../utils/experimental.js';
 import {logger} from '../../utils/logger.js';
 import {BaseTool} from '../base_tool.js';
-import {BaseToolset} from '../base_toolset.js';
+import {BaseToolset, isBaseToolset} from '../base_toolset.js';
 import {ListSkillsTool} from './list_skills_tool.js';
 import {LoadSkillResourceTool} from './load_skill_resource_tool.js';
 import {LoadSkillTool} from './load_skill_tool.js';
@@ -98,6 +98,16 @@ export class SkillToolset extends BaseToolset {
 
   override async close(): Promise<void> {
     this.fetchedSkillCache.clear();
+    const results = await Promise.allSettled(
+      this.additionalTools
+        .filter(isBaseToolset)
+        .map((toolset) => toolset.close()),
+    );
+    for (const result of results) {
+      if (result.status === 'rejected') {
+        logger.warn(`Failed to close an additional toolset: ${result.reason}`);
+      }
+    }
   }
 
   getSkill(name: string): Skill | undefined {
