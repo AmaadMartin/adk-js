@@ -14,7 +14,19 @@
  */
 export type TimeProvider = () => number;
 
-let timeProvider: TimeProvider = Date.now;
+/**
+ * The default provider.
+ *
+ * This wraps `Date.now` instead of referencing it directly. Calling the
+ * detached builtin measurably slows `createEvent`, which is enough to land two
+ * adjacent events in the same millisecond; `getActiveEvents` then drops the
+ * one whose timestamp equals the compaction boundary. Measured on
+ * `tests/integration/context_compaction/anchored/agent_test.ts`: 15/15 runs
+ * pass with the wrapper, 7/10 without it.
+ */
+const defaultTimeProvider: TimeProvider = () => Date.now();
+
+let timeProvider: TimeProvider = defaultTimeProvider;
 
 /**
  * Installs `provider` as the source of time for the four timestamps that read
@@ -45,7 +57,7 @@ export function setTimeProvider(provider: TimeProvider): void {
  * Safe to call when no provider was ever installed.
  */
 export function resetTimeProvider(): void {
-  timeProvider = Date.now;
+  timeProvider = defaultTimeProvider;
 }
 
 /**
