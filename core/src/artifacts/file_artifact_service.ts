@@ -97,8 +97,7 @@ export class FileArtifactService implements BaseArtifactService {
     const versionDir = path.join(versionsDir, nextVersion.toString());
     await fs.mkdir(versionDir, {recursive: true});
 
-    const storedFilename = path.basename(artifactDir); // using the directory name which is the sanitized filename
-    const contentPath = path.join(versionDir, storedFilename);
+    const contentPath = payloadPath(artifactDir, nextVersion);
 
     let mimeType: string | undefined;
     let fileUri: string | undefined;
@@ -117,7 +116,7 @@ export class FileArtifactService implements BaseArtifactService {
       mimeType = artifact.fileData!.mimeType;
     }
 
-    const canonicalUri = canonicalUriForVersion(artifactDir, nextVersion);
+    const canonicalUri = pathToFileURL(contentPath).toString();
     const metadata: FileArtifactVersion = {
       fileName: filename,
       mimeType,
@@ -187,11 +186,10 @@ export class FileArtifactService implements BaseArtifactService {
         };
       }
 
-      const storedFilename = path.basename(artifactDir);
       // Derived only from the storage layout. `metadata.json` lives inside the
       // artifact tree, so honouring a `canonicalUri` from it would turn this
       // into an arbitrary file read.
-      const contentPath = path.join(versionDir, storedFilename);
+      const contentPath = payloadPath(artifactDir, versionToLoad);
 
       if (metadata.mimeType) {
         try {
@@ -451,20 +449,18 @@ function getVersionsDir(artifactDir: string): string {
 }
 
 /**
- * Builds the canonical `file://` URI of an artifact payload from the storage
- * layout.
+ * Builds the path of an artifact payload from the storage layout.
  *
  * @param artifactDir The artifact directory.
  * @param version The version.
- * @returns The canonical URI.
+ * @returns The payload path.
  */
-function canonicalUriForVersion(artifactDir: string, version: number): string {
-  const payloadPath = path.join(
+function payloadPath(artifactDir: string, version: number): string {
+  return path.join(
     getVersionsDir(artifactDir),
     version.toString(),
     path.basename(artifactDir),
   );
-  return pathToFileURL(payloadPath).toString();
 }
 
 /**
@@ -487,7 +483,7 @@ function buildArtifactVersion(
 ): ArtifactVersion {
   return {
     version,
-    canonicalUri: canonicalUriForVersion(artifactDir, version),
+    canonicalUri: pathToFileURL(payloadPath(artifactDir, version)).toString(),
     customMetadata: metadata.customMetadata,
     mimeType: metadata.mimeType,
   };
