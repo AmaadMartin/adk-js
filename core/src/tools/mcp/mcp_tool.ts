@@ -5,16 +5,48 @@
  */
 
 import {FunctionDeclaration} from '@google/genai';
+import {ProgressCallback} from '@modelcontextprotocol/sdk/shared/protocol.js';
 import {
   CallToolRequest,
   CallToolResult,
   Tool,
 } from '@modelcontextprotocol/sdk/types.js';
 
+import {Context} from '../../agents/context.js';
 import {toGeminiSchema} from '../../utils/gemini_schema_util.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
 
 import {MCPSessionManager} from './mcp_session_manager.js';
+
+/** Arguments handed to an {@link MCPProgressCallbackFactory}. */
+export interface MCPProgressCallbackFactoryRequest {
+  /** The ADK-visible tool name, including the toolset prefix when one is set. */
+  toolName: string;
+  /** The context of the current invocation; may read and write session state. */
+  callbackContext: Context;
+}
+
+/**
+ * Builds a progress callback for a single tool invocation, or returns
+ * `undefined` to receive no progress notifications for that invocation.
+ */
+export type MCPProgressCallbackFactory = (
+  request: MCPProgressCallbackFactoryRequest,
+) => ProgressCallback | undefined;
+
+/**
+ * Progress-notification options for {@link MCPTool} and {@link MCPToolset}.
+ *
+ * Supply at most one of the two fields. An MCP server reports progress for a
+ * long-running tool through `notifications/progress`; ADK only asks for those
+ * notifications when a callback is configured.
+ */
+export interface MCPProgressOptions {
+  /** A single callback used for every invocation. */
+  progressCallback?: ProgressCallback;
+  /** Builds a callback per invocation. Mutually exclusive with `progressCallback`. */
+  progressCallbackFactory?: MCPProgressCallbackFactory;
+}
 
 /**
  * Represents a tool exposed via the Model Context Protocol (MCP).
@@ -39,16 +71,26 @@ export class MCPTool extends BaseTool {
   private readonly mcpTool: Tool;
   private readonly mcpSessionManager: MCPSessionManager;
   private readonly originalName: string;
+  private readonly progressCallback?: ProgressCallback;
+  private readonly progressCallbackFactory?: MCPProgressCallbackFactory;
 
   constructor(
     mcpTool: Tool,
     mcpSessionManager: MCPSessionManager,
     originalName?: string,
+    options: MCPProgressOptions = {},
   ) {
     super({name: mcpTool.name, description: mcpTool.description || ''});
+    if (options.progressCallback && options.progressCallbackFactory) {
+      throw new Error(
+        'MCPTool accepts either progressCallback or progressCallbackFactory, not both.',
+      );
+    }
     this.mcpTool = mcpTool;
     this.mcpSessionManager = mcpSessionManager;
     this.originalName = originalName || mcpTool.name;
+    this.progressCallback = options.progressCallback;
+    this.progressCallbackFactory = options.progressCallbackFactory;
   }
 
   override _getDeclaration(): FunctionDeclaration {
@@ -68,8 +110,14 @@ export class MCPTool extends BaseTool {
     try {
       const callRequest: CallToolRequest = {} as CallToolRequest;
       callRequest.params = {name: this.originalName, arguments: request.args};
+      const onprogress =
+        this.progressCallbackFactory?.({
+          toolName: this.name,
+          callbackContext: request.toolContext,
+        }) ?? this.progressCallback;
       const result = await session.callTool(callRequest.params, undefined, {
         signal: request.toolContext.abortSignal,
+        ...(onprogress ? {onprogress} : {}),
       });
       return result as CallToolResult;
     } finally {

@@ -19,7 +19,7 @@ import {BaseTool} from '../base_tool.js';
 import {BaseToolset, ToolPredicate} from '../base_toolset.js';
 
 import {MCPConnectionParams, MCPSessionManager} from './mcp_session_manager.js';
-import {MCPTool} from './mcp_tool.js';
+import {MCPProgressOptions, MCPTool} from './mcp_tool.js';
 
 /**
  * A toolset that dynamically discovers and provides tools from a Model Context
@@ -49,17 +49,24 @@ import {MCPTool} from './mcp_tool.js';
  *   const mcpToolset = new MCPToolset(connectionParams);
  *   const tools = await mcpToolset.getTools();
  *
+ * Pass {@link MCPProgressOptions} to receive the `notifications/progress`
+ * messages that the server sends while a tool runs. The options are forwarded
+ * to every {@link MCPTool} the toolset builds.
+ *
  */
 export class MCPToolset extends BaseToolset {
   private readonly mcpSessionManager: MCPSessionManager;
+  private readonly progressOptions: MCPProgressOptions;
 
   constructor(
     connectionParams: MCPConnectionParams,
     toolFilter: ToolPredicate | string[] = [],
     prefix?: string,
+    options: MCPProgressOptions = {},
   ) {
     super(toolFilter, prefix);
     this.mcpSessionManager = new MCPSessionManager(connectionParams);
+    this.progressOptions = options;
   }
 
   async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {
@@ -82,7 +89,12 @@ export class MCPToolset extends BaseToolset {
         ...tool,
         name: this.prefix ? `${this.prefix}_${tool.name}` : tool.name,
       };
-      return new MCPTool(toolWithPrefix, this.mcpSessionManager, tool.name);
+      return new MCPTool(
+        toolWithPrefix,
+        this.mcpSessionManager,
+        tool.name,
+        this.progressOptions,
+      );
     });
 
     // Apply toolFilter when specified.
