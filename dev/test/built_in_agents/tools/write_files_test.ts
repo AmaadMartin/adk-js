@@ -168,6 +168,27 @@ describe('writeFiles', () => {
     await expect(fs.stat(target)).rejects.toThrow(/ENOENT/);
   });
 
+  it('writes through a symlink out of the root, which adk-python refuses', async () => {
+    const root = await tempDir();
+    const outside = await tempDir();
+    // `junction` keeps this runnable on Windows, where a symlink needs a
+    // privilege the test runner does not have.
+    await fs.symlink(outside, path.join(root, 'esc'), 'junction');
+
+    const result = await writeFiles(
+      {files: {'esc/planted.txt': 'PLANTED'}},
+      createTestContext({root_directory: root}),
+    );
+
+    // The containment check is lexical, so it never reads the link and the
+    // write lands outside the root. adk-python resolves the link and refuses.
+    // This pins the documented gap rather than endorsing it.
+    expect(result.success).toBe(true);
+    expect(await fs.readFile(path.join(outside, 'planted.txt'), 'utf-8')).toBe(
+      'PLANTED',
+    );
+  });
+
   it('creates no package marker next to a written Python file', async () => {
     const root = await tempDir();
 
