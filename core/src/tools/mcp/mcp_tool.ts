@@ -48,7 +48,10 @@ export class MCPTool extends BaseTool {
    * @param originalName The native name on the server, when it differs from
    *   the exposed name. Defaults to `mcpTool.name`.
    * @throws If the exposed name is one of the reserved ADK tool names, since
-   *   such a tool would shadow a framework function call.
+   *   such a tool would shadow a framework function call. `MCPTool` is public
+   *   API, so this holds for a caller that builds one straight from a server
+   *   listing. The bundled toolsets never reach it: they drop a reserved name
+   *   first, so one of them cannot fail a whole listing.
    */
   constructor(
     mcpTool: Tool,

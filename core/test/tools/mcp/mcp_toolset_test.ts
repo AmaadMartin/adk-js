@@ -44,6 +44,15 @@ vi.mock('@modelcontextprotocol/sdk/client/index.js', () => {
 /** A client method stub that resolves to nothing (connect/close). */
 const noop = () => vi.fn().mockResolvedValue(undefined);
 
+/**
+ * Builds a `Client` test double that stubs `connect` and `close` and takes the
+ * methods a test cares about in `overrides`. The cast is unavoidable: `Client`
+ * has a large surface and a test needs only a few of its methods.
+ */
+function mockClient(overrides: Partial<Client>): Client {
+  return {connect: noop(), close: noop(), ...overrides} as unknown as Client;
+}
+
 vi.mock('@modelcontextprotocol/sdk/client/stdio.js', () => {
   return {
     StdioClientTransport: vi.fn(),
@@ -137,19 +146,16 @@ describe('MCPToolset', () => {
     const advertise = async (names: string[]) => {
       const {Client} =
         await import('@modelcontextprotocol/sdk/client/index.js');
-      vi.mocked(Client).mockImplementationOnce(
-        () =>
-          ({
-            connect: noop(),
-            close: noop(),
-            listTools: vi.fn().mockResolvedValue({
-              tools: names.map((name) => ({
-                name,
-                description: name,
-                inputSchema: {},
-              })),
-            }),
-          }) as unknown as Client,
+      vi.mocked(Client).mockImplementationOnce(() =>
+        mockClient({
+          listTools: vi.fn().mockResolvedValue({
+            tools: names.map((name) => ({
+              name,
+              description: name,
+              inputSchema: {},
+            })),
+          }),
+        }),
       );
     };
 
