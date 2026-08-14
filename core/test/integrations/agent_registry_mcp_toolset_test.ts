@@ -7,7 +7,9 @@
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   AgentRegistrySingleMCPToolset,
+  Context,
   GCP_MCP_SERVER_DESTINATION_ID,
+  InvocationContext,
 } from '../../src/index.js';
 import {StreamableHTTPConnectionParams} from '../../src/tools/mcp/mcp_session_manager.js';
 import {logger} from '../../src/utils/logger.js';
@@ -21,12 +23,14 @@ const mockListTools = vi.fn().mockResolvedValue({
 
 const mockConnect = vi.fn().mockResolvedValue(undefined);
 const mockClose = vi.fn().mockResolvedValue(undefined);
+const mockCallTool = vi.fn().mockResolvedValue({content: []});
 
 vi.mock('@modelcontextprotocol/sdk/client/index.js', () => ({
   Client: vi.fn().mockImplementation(() => ({
     connect: mockConnect,
     close: mockClose,
     listTools: mockListTools,
+    callTool: mockCallTool,
   })),
 }));
 
@@ -38,6 +42,16 @@ const BASE_PARAMS: StreamableHTTPConnectionParams = {
   type: 'StreamableHTTPConnectionParams',
   url: 'https://example.com/mcp',
 };
+
+/** Builds the tool context a tool call needs. */
+function toolContext(): Context {
+  return new Context({
+    invocationContext: {
+      abortSignal: new AbortController().signal,
+      session: {state: {}},
+    } as unknown as InvocationContext,
+  });
+}
 
 describe('AgentRegistrySingleMCPToolset', () => {
   beforeEach(() => {
@@ -240,6 +254,45 @@ describe('AgentRegistrySingleMCPToolset', () => {
         connectionParams: BASE_PARAMS,
       });
       await expect(toolset.close()).resolves.toBeUndefined();
+    });
+
+    it('closes the session the resolved tools share', async () => {
+      const toolset = new AgentRegistrySingleMCPToolset({
+        connectionParams: BASE_PARAMS,
+      });
+      const tools = await toolset.getTools();
+      await tools[0].runAsync({args: {}, toolContext: toolContext()});
+      // Only the discovery session is closed so far.
+      expect(mockClose).toHaveBeenCalledOnce();
+
+      await toolset.close();
+
+      expect(mockClose).toHaveBeenCalledTimes(2);
+    });
+
+    it('closes a session left open by an earlier getTools call', async () => {
+      const toolset = new AgentRegistrySingleMCPToolset({
+        connectionParams: BASE_PARAMS,
+      });
+      const tools = await toolset.getTools();
+      await tools[0].runAsync({args: {}, toolContext: toolContext()});
+      await toolset.getTools();
+
+      await toolset.close();
+
+      expect(mockClose).toHaveBeenCalledTimes(3);
+    });
+
+    it('closes nothing extra when no tool opened a session', async () => {
+      const toolset = new AgentRegistrySingleMCPToolset({
+        connectionParams: BASE_PARAMS,
+      });
+      await toolset.getTools();
+      await toolset.getTools();
+
+      await toolset.close();
+
+      expect(mockClose).toHaveBeenCalledTimes(2);
     });
   });
 });

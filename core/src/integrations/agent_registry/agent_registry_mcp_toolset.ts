@@ -36,6 +36,8 @@ export class AgentRegistrySingleMCPToolset extends BaseToolset {
   ) => Promise<Record<string, string>> | Record<string, string>;
   readonly authScheme?: AuthScheme;
   readonly authCredential?: AuthCredential;
+  /** Session managers whose pooled session the resolved tools still share. */
+  private readonly sessionManagers = new Set<MCPSessionManager>();
 
   /**
    * @param options - Configuration for the MCP toolset.
@@ -105,6 +107,10 @@ export class AgentRegistrySingleMCPToolset extends BaseToolset {
 
     // Establish session using MCPSessionManager
     const sessionManager = new MCPSessionManager(connectionParamsCopy);
+    // The resolved tools share this manager's pooled session, so close() must
+    // be able to reach it. Every manager is retained: a tool from an earlier
+    // getTools() call can still open a session on its own manager.
+    this.sessionManagers.add(sessionManager);
     const session = await sessionManager.createSession();
 
     // Retrieve tools from the remote server and close the discovery session
@@ -151,5 +157,16 @@ export class AgentRegistrySingleMCPToolset extends BaseToolset {
     return tools.filter((t) => this.isToolSelected(t, context!));
   }
 
-  async close(): Promise<void> {}
+  /** Closes the MCP sessions held by the tools this toolset resolved. */
+  async close(): Promise<void> {
+    const managers = Array.from(this.sessionManagers);
+    this.sessionManagers.clear();
+    await Promise.allSettled(
+      managers.flatMap((manager) =>
+        manager
+          .getActiveSessions()
+          .map((session) => manager.closeSession(session)),
+      ),
+    );
+  }
 }
