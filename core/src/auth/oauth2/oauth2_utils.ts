@@ -47,6 +47,9 @@ export function getTokenEndpoint(authScheme: AuthScheme): string | undefined {
 /**
  * Reports whether an OAuth2 scheme declares a flow whose authorization or
  * token endpoint is blank.
+ *
+ * A scheme parsed out of an OpenAPI document is cast, not validated, so
+ * `flows` can be absent at runtime however the type declares it.
  */
 export function hasMissingOAuth2Endpoints(
   authScheme: AuthScheme | undefined,
@@ -56,6 +59,9 @@ export function hasMissingOAuth2Endpoints(
   }
 
   const flows = authScheme.flows;
+  if (!flows) {
+    return false;
+  }
 
   return Boolean(
     (flows.implicit && !flows.implicit.authorizationUrl) ||
@@ -84,6 +90,12 @@ export async function populateAuthScheme(
     return false;
   }
 
+  const flows = authScheme.flows;
+  if (!flows) {
+    logger.warn('The auth scheme declares no OAuth2 flow to populate.');
+    return false;
+  }
+
   const metadata = await discoveryManager.discoverAuthServerMetadata(
     authScheme.issuerUrl,
   );
@@ -91,8 +103,6 @@ export async function populateAuthScheme(
     logger.warn('Auto-discovery has failed to populate OAuth scheme info.');
     return false;
   }
-
-  const flows = authScheme.flows;
 
   if (flows.implicit && !flows.implicit.authorizationUrl) {
     flows.implicit.authorizationUrl = metadata.authorization_endpoint;

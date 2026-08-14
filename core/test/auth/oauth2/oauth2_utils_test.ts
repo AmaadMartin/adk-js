@@ -401,6 +401,13 @@ describe('oauth2_utils', () => {
     it('returns false for an undefined scheme', () => {
       expect(hasMissingOAuth2Endpoints(undefined)).toBe(false);
     });
+
+    it('returns false for an OAuth2 scheme that declares no flows', () => {
+      // A scheme parsed out of an OpenAPI document is cast, not validated, so
+      // `flows` can be missing however the type declares it.
+      const scheme = {type: 'oauth2'} as AuthScheme;
+      expect(hasMissingOAuth2Endpoints(scheme)).toBe(false);
+    });
   });
 
   describe('populateAuthScheme', () => {
@@ -594,6 +601,18 @@ describe('oauth2_utils', () => {
 
       expect(scheme.flows.authorizationCode?.authorizationUrl).toBe('');
       expect(scheme.flows.authorizationCode?.tokenUrl).toBe('');
+    });
+
+    it('returns false and discovers nothing when the scheme declares no flows', async () => {
+      const scheme = {
+        type: 'oauth2',
+        issuerUrl: 'https://auth.example.com',
+      } as AuthScheme;
+      const discovery = new StubDiscoveryManager(METADATA);
+
+      await expect(populateAuthScheme(scheme, discovery)).resolves.toBe(false);
+
+      expect(discovery.issuerUrls).toEqual([]);
     });
   });
 });

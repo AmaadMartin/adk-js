@@ -7,6 +7,7 @@
 import {
   AuthCredential,
   AuthCredentialTypes,
+  AuthScheme,
   Context,
   ExtendedOAuth2,
   OAuth2DiscoveryManager,
@@ -431,6 +432,26 @@ describe('ToolAuthHandler', () => {
       expect(result.authCredential?.http?.credentials.token).toBe(
         'cached-token',
       );
+      expect(discoverSpy).not.toHaveBeenCalled();
+    });
+
+    it('asks for a credential when an OAuth2 scheme declares no flows', async () => {
+      // A scheme parsed out of an OpenAPI document is cast, not validated, so
+      // `flows` can be missing however the type declares it.
+      const scheme = {type: 'oauth2'} as AuthScheme;
+      const mockContext = {
+        state: new State(),
+        getAuthResponse: vi.fn().mockReturnValue(undefined),
+        requestCredential: vi.fn(),
+      } as unknown as Context;
+
+      const result = await new ToolAuthHandler(
+        mockContext,
+        scheme,
+      ).prepareAuthCredentials();
+
+      expect(result.state).toBe('pending');
+      expect(mockContext.requestCredential).toHaveBeenCalled();
       expect(discoverSpy).not.toHaveBeenCalled();
     });
   });
