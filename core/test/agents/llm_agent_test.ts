@@ -25,15 +25,20 @@ import {
   LlmRequest,
   LlmResponse,
   PluginManager,
+  resetTimeProvider,
   RunAsyncToolRequest,
   Runner,
   Session,
+  setTimeProvider,
   ToolProcessLlmRequest,
 } from '@google/adk';
 import {Content, Schema, Type} from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
+
+/** A fixed instant used by the time-provider case. */
+const FROZEN_TIME_MS = 1_700_000_000_000;
 
 class MockLlmConnection implements BaseLlmConnection {
   sendHistory(_history: Content[]): Promise<void> {
@@ -449,6 +454,10 @@ describe('LlmAgent Output Processing', () => {
   let invocationContext: InvocationContext;
   let validationSchema: Schema;
 
+  afterEach(() => {
+    resetTimeProvider();
+  });
+
   beforeEach(() => {
     validationSchema = {
       type: Type.OBJECT,
@@ -531,6 +540,20 @@ describe('LlmAgent Output Processing', () => {
 
     const lastEvent = events[events.length - 1];
     expect(lastEvent.actions?.stateDelta?.['result']).toEqual({answer: 42});
+  });
+
+  it('re-stamps the model response event from the installed time provider', async () => {
+    setTimeProvider(() => FROZEN_TIME_MS);
+    agent.model = new MockLlm({
+      content: {parts: [{text: JSON.stringify({answer: '42'})}]},
+    });
+
+    const events: Event[] = [];
+    for await (const event of agent.runAsync(invocationContext)) {
+      events.push(event);
+    }
+
+    expect(events[events.length - 1].timestamp).toBe(FROZEN_TIME_MS);
   });
 });
 
