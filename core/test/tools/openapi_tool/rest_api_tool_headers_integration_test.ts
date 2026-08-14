@@ -5,6 +5,7 @@
  */
 
 import {
+  AuthCredentialTypes,
   Context,
   createSession,
   InvocationContext,
@@ -96,5 +97,20 @@ describe('RestApiTool headers on the wire', () => {
     expect(received.at(-1)?.['user-agent']).toBe(
       `google-adk/${version} (tool: echo_headers)`,
     );
+  });
+
+  it('should send the additional headers of a credential the spec declares no scheme for', async () => {
+    tool.configureAuthCredential({
+      authType: AuthCredentialTypes.HTTP,
+      http: {
+        scheme: 'bearer',
+        credentials: {token: 'test_token'},
+        additionalHeaders: {'x-goog-user-project': 'test-project'},
+      },
+    });
+
+    await tool.runAsync({args: {}, toolContext: createToolContext()});
+
+    expect(received.at(-1)?.['x-goog-user-project']).toBe('test-project');
   });
 });

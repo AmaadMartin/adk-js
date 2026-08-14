@@ -740,6 +740,88 @@ describe('RestApiTool request headers', () => {
     expectHeaders({'User-Agent': 'api-client'});
   });
 
+  function bearerCredential(
+    additionalHeaders: Record<string, string>,
+  ): AuthCredential {
+    return {
+      authType: AuthCredentialTypes.HTTP,
+      http: {
+        scheme: 'bearer',
+        credentials: {token: 'test_token'},
+        additionalHeaders,
+      },
+    };
+  }
+
+  it('should send the additional headers of a credential that has no auth scheme', async () => {
+    const tool = new RestApiTool('test_tool', 'description', endpoint, {
+      responses: {},
+    });
+    tool.configureAuthCredential(
+      bearerCredential({'x-goog-user-project': 'test-project'}),
+    );
+    mockFetch();
+
+    await tool.runAsync({args: {}, toolContext: createToolContext()});
+
+    expectHeaders({'x-goog-user-project': 'test-project'});
+  });
+
+  it('should let a header parameter override an additional header of the credential', async () => {
+    const operation: OpenAPIV3.OperationObject = {
+      responses: {},
+      parameters: [
+        {name: 'x-goog-user-project', in: 'header', schema: {type: 'string'}},
+      ],
+    };
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      endpoint,
+      operation,
+      undefined,
+      bearerCredential({'x-goog-user-project': 'from-credential'}),
+      {preservePropertyNames: true},
+    );
+    mockFetch();
+
+    await tool.runAsync({
+      args: {'x-goog-user-project': 'from-param'},
+      toolContext: createToolContext(),
+    });
+
+    expectHeaders({'x-goog-user-project': 'from-param'});
+  });
+
+  it('should keep the content type of the body over an additional header of the credential', async () => {
+    const operation: OpenAPIV3.OperationObject = {
+      responses: {},
+      requestBody: {
+        content: {
+          'application/json': {
+            schema: {type: 'object', properties: {foo: {type: 'string'}}},
+          },
+        },
+      },
+    };
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      endpoint,
+      operation,
+      undefined,
+      bearerCredential({'Content-Type': 'text/plain'}),
+    );
+    mockFetch();
+
+    await tool.runAsync({
+      args: {foo: 'bar'},
+      toolContext: createToolContext(),
+    });
+
+    expectHeaders({'Content-Type': 'application/json'});
+  });
+
   it('should send a default header', async () => {
     const tool = new RestApiTool('test_tool', 'description', endpoint, {
       responses: {},
@@ -911,7 +993,12 @@ describe('RestApiTool Utilities', () => {
         method: 'GET',
       };
 
-      const result = prepareRequestParams(endpoint, [], {}, 'my_tool');
+      const result = prepareRequestParams(
+        endpoint,
+        [],
+        {},
+        {toolName: 'my_tool'},
+      );
 
       expect(result.headers).toEqual({
         'User-Agent': `google-adk/${version} (tool: my_tool)`,
@@ -928,6 +1015,25 @@ describe('RestApiTool Utilities', () => {
       const result = prepareRequestParams(endpoint, [], {});
 
       expect(result.headers).toEqual({});
+    });
+
+    it('should seed the additional headers of the credential', () => {
+      const endpoint = {
+        baseUrl: 'http://api.example.com',
+        path: '/test',
+        method: 'GET',
+      };
+
+      const result = prepareRequestParams(
+        endpoint,
+        [],
+        {},
+        {additionalHeaders: {'x-goog-user-project': 'test-project'}},
+      );
+
+      expect(result.headers).toEqual({
+        'x-goog-user-project': 'test-project',
+      });
     });
 
     it('should ignore arguments that are not in parameters spec', () => {

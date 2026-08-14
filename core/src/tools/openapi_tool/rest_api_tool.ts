@@ -117,7 +117,13 @@ export class RestApiTool extends BaseTool {
       this.endpoint,
       this.operationParser.getParameters(),
       args,
-      this.name,
+      {
+        toolName: this.name,
+        // The credential this tool was configured with, not the one the auth
+        // handler resolved: the handler returns none when the tool declares no
+        // auth scheme, which would drop these headers.
+        additionalHeaders: this.authCredential?.http?.additionalHeaders,
+      },
     );
 
     // Handle body
@@ -211,22 +217,35 @@ function applyDefaultHeaders(
   }
 }
 
+export interface PrepareRequestParamsOptions {
+  /**
+   * Name of the calling tool. When set, the request carries the ADK
+   * User-Agent naming that tool.
+   */
+  toolName?: string;
+  /**
+   * Headers carried by the auth credential, from `HttpAuth.additionalHeaders`.
+   */
+  additionalHeaders?: Record<string, string>;
+}
+
 /**
  * Builds the URL, headers and body of one OpenAPI operation call.
  *
- * @param toolName Names the calling tool in the ADK User-Agent header. The
- *     request carries no User-Agent when it is absent.
+ * The seeded headers go in before the argument loop, so an OpenAPI header
+ * parameter overrides both the ADK User-Agent and a credential header.
  */
 export function prepareRequestParams(
   endpoint: OperationEndpoint,
   parameters: ApiParameter[],
   args: Record<string, unknown>,
-  toolName?: string,
+  options: PrepareRequestParamsOptions = {},
 ): PreparedParams {
   const headers: Record<string, string> = {};
-  if (toolName) {
-    headers['User-Agent'] = `google-adk/${version} (tool: ${toolName})`;
+  if (options.toolName) {
+    headers['User-Agent'] = `google-adk/${version} (tool: ${options.toolName})`;
   }
+  Object.assign(headers, options.additionalHeaders);
   const queryParams = new URLSearchParams();
   let body: unknown = undefined;
 
