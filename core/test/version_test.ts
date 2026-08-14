@@ -9,6 +9,8 @@ import {readFileSync} from 'node:fs';
 import {describe, expect, it} from 'vitest';
 
 describe('version', () => {
+  // Compared against package.json rather than a hardcoded literal so that a
+  // release-please bump keeps this green without ever editing the test.
   it('matches the version declared in package.json', () => {
     const pkg: {version: string} = JSON.parse(
       readFileSync(new URL('../package.json', import.meta.url), 'utf-8'),
