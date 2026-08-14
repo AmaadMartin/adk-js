@@ -21,9 +21,13 @@ import {afterEach} from 'vitest';
  * Builds a real tool context whose session carries `state`.
  *
  * @param state The initial session state.
+ * @param functionCallId The call id a confirmation request is keyed by.
  * @return A context the file tools can read the project root from.
  */
-export function createTestContext(state: Record<string, unknown>): Context {
+export function createTestContext(
+  state: Record<string, unknown>,
+  functionCallId?: string,
+): Context {
   return new Context({
     invocationContext: new InvocationContext({
       invocationId: 'test-invocation',
@@ -34,6 +38,7 @@ export function createTestContext(state: Record<string, unknown>): Context {
       }),
       pluginManager: new PluginManager([]),
     }),
+    functionCallId,
   });
 }
 
