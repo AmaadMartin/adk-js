@@ -191,6 +191,20 @@ describe('MCPToolset', () => {
       warnSpy.mockRestore();
     });
 
+    it('keeps a name that only starts with a reserved name', async () => {
+      await advertise(['transfer_to_agent_v2', 'adk_request_input_v2']);
+      const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+      const tools = await new MCPToolset(stdioParams).getTools();
+
+      expect(tools.map((tool) => tool.name)).toEqual([
+        'transfer_to_agent_v2',
+        'adk_request_input_v2',
+      ]);
+      expect(warnSpy).not.toHaveBeenCalled();
+      warnSpy.mockRestore();
+    });
+
     it('keeps a reserved server name that a prefix moves out of the way', async () => {
       await advertise(['transfer_to_agent']);
       const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
