@@ -218,10 +218,8 @@ const TEST_AGENT = new TestAgent({
 });
 
 /** Serves the agents held in a map, so no agent file reaches disk. */
-class InMemoryAgentLoader extends BaseAgentLoader {
-  constructor(private readonly agents: Map<string, RunnableRoot>) {
-    super();
-  }
+class InMemoryAgentLoader implements BaseAgentLoader {
+  constructor(private readonly agents: Map<string, RunnableRoot>) {}
 
   async listAgents(): Promise<string[]> {
     return [...this.agents.keys()].sort();

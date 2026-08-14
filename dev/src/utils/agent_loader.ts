@@ -371,7 +371,7 @@ export class AgentFile {
  * Agent/App file should have export of the rootAgent as instance of BaseAgent
  * (or a Workflow, which is adapted into one) or app/rootApp as instance of App.
  */
-export class AgentLoader extends BaseAgentLoader {
+export class AgentLoader implements BaseAgentLoader {
   private agentsAlreadyPreloaded = false;
   private readonly preloadedAgents: Record<string, AgentFile> = {};
   private readonly loadFailures: Record<string, AgentLoadFailure> = {};
@@ -382,8 +382,6 @@ export class AgentLoader extends BaseAgentLoader {
     private readonly options = DEFAULT_AGENT_FILE_OPTIONS,
     private readonly watchForChanges = false,
   ) {
-    super();
-
     // Do cleanups on exit
     const exitHandler = async ({
       exit,
@@ -480,9 +478,8 @@ export class AgentLoader extends BaseAgentLoader {
     // imported it. Returning the promise directly would dispose the file
     // while the dynamic import is still reading it.
     await using agentFile = await this.getAgentFile(agentName);
-    const loaded = await agentFile.load();
 
-    return loaded;
+    return await agentFile.load();
   }
 
   async listApps(): Promise<string[]> {
