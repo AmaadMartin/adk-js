@@ -351,6 +351,35 @@ describe('ToolAuthHandler', () => {
       expect(discoverSpy).not.toHaveBeenCalled();
     });
 
+    it('does not discover again once the issuer has filled the endpoints', async () => {
+      const scheme: ExtendedOAuth2 = {
+        type: 'oauth2',
+        issuerUrl: 'https://auth.example.com',
+        flows: {
+          clientCredentials: {
+            tokenUrl: 'https://auth.example.com/token',
+            scopes: {},
+          },
+        },
+      };
+      const mockContext = {
+        state: new State(),
+        getAuthResponse: vi.fn().mockReturnValue(undefined),
+        requestCredential: vi.fn(),
+      } as unknown as Context;
+
+      const result = await new ToolAuthHandler(
+        mockContext,
+        scheme,
+        OAUTH2_CREDENTIAL,
+      ).prepareAuthCredentials();
+
+      // The handler holds the scheme the tool was built with, so a filled
+      // scheme costs no further round trip on later invocations.
+      expect(result.state).toBe('done');
+      expect(discoverSpy).not.toHaveBeenCalled();
+    });
+
     it('still prepares the credential when discovery finds no metadata', async () => {
       const scheme: ExtendedOAuth2 = {
         type: 'oauth2',
