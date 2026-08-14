@@ -10,25 +10,37 @@ import {
   Context,
   ToolAuthHandler,
 } from '@google/adk';
-import {describe, expect, it, vi} from 'vitest';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  MockInstance,
+  vi,
+} from 'vitest';
 import {CredentialManager} from '../../../src/auth/credential_manager.js';
 import {State} from '../../../src/sessions/state.js';
 
-vi.mock('../../../src/auth/credential_manager.js', () => {
-  return {
-    CredentialManager: vi.fn().mockImplementation(() => ({
-      exchangeCredential: vi.fn().mockResolvedValue({
+describe('ToolAuthHandler', () => {
+  let exchangeCredential: MockInstance<CredentialManager['exchangeCredential']>;
+
+  beforeEach(() => {
+    exchangeCredential = vi
+      .spyOn(CredentialManager.prototype, 'exchangeCredential')
+      .mockResolvedValue({
         credential: {
           authType: AuthCredentialTypes.HTTP,
           http: {scheme: 'bearer', credentials: {token: 'exchanged-token'}},
         },
         wasExchanged: true,
-      }),
-    })),
-  };
-});
+      });
+  });
 
-describe('ToolAuthHandler', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('should return done if no auth scheme', async () => {
     const mockContext = {} as unknown as Context;
     const handler = new ToolAuthHandler(mockContext);
@@ -176,15 +188,10 @@ describe('ToolAuthHandler', () => {
     };
     // The real manager has no exchanger registered for apiKey/http, so it
     // hands the credential straight back.
-    vi.mocked(CredentialManager).mockImplementationOnce(
-      () =>
-        ({
-          exchangeCredential: vi.fn().mockResolvedValue({
-            credential: staticCredential,
-            wasExchanged: false,
-          }),
-        }) as unknown as CredentialManager,
-    );
+    exchangeCredential.mockResolvedValueOnce({
+      credential: staticCredential,
+      wasExchanged: false,
+    });
 
     const state = new State();
     const mockContext = {

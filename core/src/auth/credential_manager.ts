@@ -119,30 +119,18 @@ const OAUTH2_CREDENTIAL_TYPES: ReadonlySet<AuthCredentialTypes> = new Set([
  * const manager = new CredentialManager(authConfig);
  * const credential = await manager.getAuthCredential(context);
  * if (!credential) {
- *   manager.requestCredential(context);
+ *   context.requestCredential(authConfig);
  *   return 'Pending User Authorization.';
  * }
  * ```
  */
 @experimental
 export class CredentialManager {
-  private readonly authProviderRegistry: AuthProviderRegistry;
   private readonly exchangerRegistry = new CredentialExchangerRegistry();
   private readonly refresherRegistry = new CredentialRefresherRegistry();
 
-  /**
-   * @param authConfig The scheme and raw credential this manager owns.
-   * @param options.authProviderRegistry The registry to resolve providers
-   *   from. Defaults to the process-wide registry
-   *   {@link registerAuthProvider} writes to; pass one to scope providers to a
-   *   single manager.
-   */
-  constructor(
-    private readonly authConfig: AuthConfig,
-    options: {authProviderRegistry?: AuthProviderRegistry} = {},
-  ) {
-    this.authProviderRegistry = options.authProviderRegistry ?? registry;
-
+  /** @param authConfig The scheme and raw credential this manager owns. */
+  constructor(private readonly authConfig: AuthConfig) {
     const oauth2Exchanger = new OAuth2CredentialExchanger();
     this.exchangerRegistry.register(
       AuthCredentialTypes.OAUTH2,
@@ -176,26 +164,23 @@ export class CredentialManager {
     this.exchangerRegistry.register(credentialType, exchanger);
   }
 
-  /** Asks the client to collect the credential this manager needs. */
-  requestCredential(context: Context): void {
-    context.requestCredential(this.authConfig);
-  }
-
   /**
    * Resolves the credential to use for this invocation.
    *
+   * A `SERVICE_ACCOUNT` raw credential resolves to `undefined`: it is not
+   * ready, and only the client-credentials flow mints a token without the
+   * user. Exchange it through {@link exchangeCredential} instead.
+   *
    * @param context The context of the invocation that needs the credential.
    * @returns The credential, or `undefined` when the client must authorize
-   *   first. Call {@link requestCredential} to ask it to.
+   *   first. Pass the config to `Context.requestCredential` to ask it to.
    * @throws If the scheme and credential do not agree, or if a registered
    *   provider resolves to nothing. Exchange and refresh errors propagate.
    */
   async getAuthCredential(
     context: Context,
   ): Promise<AuthCredential | undefined> {
-    const provider = this.authProviderRegistry.getProvider(
-      this.authConfig.authScheme,
-    );
+    const provider = registry.getProvider(this.authConfig.authScheme);
     if (provider) {
       return this.resolveThroughProvider(provider, context);
     }

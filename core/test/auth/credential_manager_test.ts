@@ -8,7 +8,6 @@ import {
   AuthConfig,
   AuthCredential,
   AuthCredentialTypes,
-  AuthProviderRegistry,
   AuthScheme,
   BaseAuthProvider,
   BaseCredentialExchanger,
@@ -257,30 +256,27 @@ function makeToolContext(
 }
 
 /**
- * Builds a manager over an isolated provider registry, so a provider one test
- * registers is invisible to the next.
+ * `registerAuthProvider` writes to a process-wide registry with no reset, so
+ * these tests claim the `http` scheme type and no other test in this file uses
+ * it. One shared provider is registered once; each test programs its result.
  */
-function makeManager(
-  authConfig: AuthConfig,
-  authProviderRegistry = new AuthProviderRegistry(),
-): CredentialManager {
-  return new CredentialManager(authConfig, {authProviderRegistry});
-}
-
 describe('CredentialManager provider dispatch', () => {
+  const provider = new FakeAuthProvider(['http']);
+
+  beforeEach(() => {
+    registerAuthProvider(provider);
+    provider.getAuthCredential.mockReset().mockResolvedValue(CREDENTIAL);
+  });
+
   it('returns the credential from the provider registered for the scheme type', async () => {
-    const provider = new FakeAuthProvider(['apiKey']);
-    const providerRegistry = new AuthProviderRegistry();
-    providerRegistry.register('apiKey', provider);
     const authConfig: AuthConfig = {
-      authScheme: API_KEY_SCHEME,
+      authScheme: HTTP_SCHEME,
       credentialKey: 'provider_key',
     };
     const context = makeToolContext();
 
-    const credential = await makeManager(
+    const credential = await new CredentialManager(
       authConfig,
-      providerRegistry,
     ).getAuthCredential(context);
 
     expect(credential).toBe(CREDENTIAL);
@@ -295,18 +291,14 @@ describe('CredentialManager provider dispatch', () => {
       authType: AuthCredentialTypes.OAUTH2,
       oauth2: {authUri: 'https://example.com/auth?state=abc'},
     };
-    const provider = new FakeAuthProvider(['apiKey']);
     provider.getAuthCredential.mockResolvedValue(consentCredential);
-    const providerRegistry = new AuthProviderRegistry();
-    providerRegistry.register('apiKey', provider);
     const authConfig: AuthConfig = {
-      authScheme: API_KEY_SCHEME,
+      authScheme: HTTP_SCHEME,
       credentialKey: 'consent_key',
     };
 
-    const credential = await makeManager(
+    const credential = await new CredentialManager(
       authConfig,
-      providerRegistry,
     ).getAuthCredential(makeToolContext());
 
     expect(credential).toBeUndefined();
@@ -318,18 +310,14 @@ describe('CredentialManager provider dispatch', () => {
       authType: AuthCredentialTypes.OAUTH2,
       oauth2: {authUri: 'https://example.com/auth', accessToken: 'tok-live'},
     };
-    const provider = new FakeAuthProvider(['apiKey']);
     provider.getAuthCredential.mockResolvedValue(tokenCredential);
-    const providerRegistry = new AuthProviderRegistry();
-    providerRegistry.register('apiKey', provider);
     const authConfig: AuthConfig = {
-      authScheme: API_KEY_SCHEME,
+      authScheme: HTTP_SCHEME,
       credentialKey: 'token_key',
     };
 
-    const credential = await makeManager(
+    const credential = await new CredentialManager(
       authConfig,
-      providerRegistry,
     ).getAuthCredential(makeToolContext());
 
     expect(credential).toBe(tokenCredential);
@@ -337,54 +325,32 @@ describe('CredentialManager provider dispatch', () => {
   });
 
   it('throws when the registered provider resolves no credential', async () => {
-    const provider = new FakeAuthProvider(['apiKey']);
     provider.getAuthCredential.mockResolvedValue(undefined);
-    const providerRegistry = new AuthProviderRegistry();
-    providerRegistry.register('apiKey', provider);
 
     await expect(
-      makeManager(
-        {authScheme: API_KEY_SCHEME, credentialKey: 'empty_key'},
-        providerRegistry,
-      ).getAuthCredential(makeToolContext()),
+      new CredentialManager({
+        authScheme: HTTP_SCHEME,
+        credentialKey: 'empty_key',
+      }).getAuthCredential(makeToolContext()),
     ).rejects.toThrow('AuthProvider did not return a credential.');
   });
 
   it('runs the standard flow when no provider serves the scheme type', async () => {
-    const provider = new FakeAuthProvider(['someOtherScheme']);
-    const providerRegistry = new AuthProviderRegistry();
-    providerRegistry.register('someOtherScheme', provider);
-
-    const credential = await makeManager(
-      {
-        authScheme: API_KEY_SCHEME,
-        rawAuthCredential: API_KEY_CREDENTIAL,
-        credentialKey: 'fallback_key',
-      },
-      providerRegistry,
-    ).getAuthCredential(makeToolContext());
+    const credential = await new CredentialManager({
+      authScheme: API_KEY_SCHEME,
+      rawAuthCredential: API_KEY_CREDENTIAL,
+      credentialKey: 'fallback_key',
+    }).getAuthCredential(makeToolContext());
 
     expect(credential).toEqual(API_KEY_CREDENTIAL);
     expect(provider.getAuthCredential).not.toHaveBeenCalled();
-  });
-
-  it('resolves through the process-wide registry when none is injected', async () => {
-    const provider = new FakeAuthProvider(['http']);
-    registerAuthProvider(provider);
-
-    const credential = await new CredentialManager({
-      authScheme: HTTP_SCHEME,
-      credentialKey: 'process_wide_key',
-    }).getAuthCredential(makeToolContext());
-
-    expect(credential).toBe(CREDENTIAL);
   });
 });
 
 describe('CredentialManager validation', () => {
   it('throws when an oauth2 scheme has no raw credential', async () => {
     await expect(
-      makeManager({
+      new CredentialManager({
         authScheme: AUTHORIZATION_CODE_SCHEME,
         credentialKey: 'no_raw_oauth2',
       }).getAuthCredential(makeToolContext()),
@@ -395,7 +361,7 @@ describe('CredentialManager validation', () => {
 
   it('throws when an openIdConnect scheme has no raw credential', async () => {
     await expect(
-      makeManager({
+      new CredentialManager({
         authScheme: OIDC_SCHEME,
         credentialKey: 'no_raw_oidc',
       }).getAuthCredential(makeToolContext()),
@@ -407,7 +373,7 @@ describe('CredentialManager validation', () => {
   it('accepts an apiKey scheme with no raw credential and reports nothing available', async () => {
     const context = makeToolContext();
 
-    const credential = await makeManager({
+    const credential = await new CredentialManager({
       authScheme: API_KEY_SCHEME,
       credentialKey: 'no_raw_api_key',
     }).getAuthCredential(context);
@@ -417,7 +383,7 @@ describe('CredentialManager validation', () => {
 
   it('throws when an oauth2 raw credential carries no oauth2 block', async () => {
     await expect(
-      makeManager({
+      new CredentialManager({
         authScheme: AUTHORIZATION_CODE_SCHEME,
         rawAuthCredential: {authType: AuthCredentialTypes.OAUTH2},
         credentialKey: 'raw_without_oauth2',
@@ -437,24 +403,26 @@ describe('CredentialManager ready credentials', () => {
       credentialKey: 'ready_api_key',
     };
 
-    const credential = await makeManager(authConfig).getAuthCredential(
-      makeToolContext({credentialService}),
-    );
+    const credential = await new CredentialManager(
+      authConfig,
+    ).getAuthCredential(makeToolContext({credentialService}));
 
     expect(credential).toEqual(API_KEY_CREDENTIAL);
     expect(credential).not.toBe(API_KEY_CREDENTIAL);
     expect(credentialService.loadCredential).not.toHaveBeenCalled();
   });
 
-  it('returns a copy of an http raw credential', async () => {
+  it('returns a copy of an http raw credential on an oauth2 scheme', async () => {
+    // An OAuth2 tool handed a pre-minted bearer token: the readiness test is on
+    // the credential type, so the token short-circuits the OAuth2 flow.
     const rawCredential: AuthCredential = {
       authType: AuthCredentialTypes.HTTP,
       http: {scheme: 'bearer', credentials: {token: 'static-token'}},
     };
     const credentialService = new FakeCredentialService();
 
-    const credential = await makeManager({
-      authScheme: HTTP_SCHEME,
+    const credential = await new CredentialManager({
+      authScheme: AUTHORIZATION_CODE_SCHEME,
       rawAuthCredential: rawCredential,
       credentialKey: 'ready_http',
     }).getAuthCredential(makeToolContext({credentialService}));
@@ -484,7 +452,7 @@ describe('CredentialManager load, refresh and save', () => {
     const credentialService = new FakeCredentialService();
     credentialService.loadCredential.mockResolvedValue(stored);
 
-    const credential = await makeManager({
+    const credential = await new CredentialManager({
       authScheme: AUTHORIZATION_CODE_SCHEME,
       rawAuthCredential: OAUTH2_RAW_CREDENTIAL,
       credentialKey: 'stored_key',
@@ -510,7 +478,9 @@ describe('CredentialManager load, refresh and save', () => {
       state: {'temp:auth_response_key': fromClient},
     });
 
-    const credential = await makeManager(authConfig).getAuthCredential(context);
+    const credential = await new CredentialManager(
+      authConfig,
+    ).getAuthCredential(context);
 
     expect(credential).toBe(fromClient);
     expect(credentialService.saveCredential).toHaveBeenCalledWith(
@@ -528,7 +498,7 @@ describe('CredentialManager load, refresh and save', () => {
   it('reports nothing available on an authorization-code scheme and requests no credential', async () => {
     const context = makeToolContext();
 
-    const credential = await makeManager({
+    const credential = await new CredentialManager({
       authScheme: AUTHORIZATION_CODE_SCHEME,
       rawAuthCredential: OAUTH2_RAW_CREDENTIAL,
       credentialKey: 'pending_key',
@@ -554,7 +524,7 @@ describe('CredentialManager load, refresh and save', () => {
       rawAuthCredential: OAUTH2_RAW_CREDENTIAL,
       credentialKey: 'client_credentials_key',
     };
-    const manager = makeManager(authConfig);
+    const manager = new CredentialManager(authConfig);
     manager.registerCredentialExchanger(AuthCredentialTypes.OAUTH2, exchanger);
 
     const credential = await manager.getAuthCredential(
@@ -589,7 +559,7 @@ describe('CredentialManager load, refresh and save', () => {
       expiresAt: Date.now() + 3_600_000,
     });
 
-    const credential = await makeManager({
+    const credential = await new CredentialManager({
       authScheme: AUTHORIZATION_CODE_SCHEME,
       rawAuthCredential: OAUTH2_RAW_CREDENTIAL,
       credentialKey: 'refresh_key',
@@ -623,7 +593,7 @@ describe('CredentialManager load, refresh and save', () => {
       authType: AuthCredentialTypes.OAUTH2,
       oauth2: {clientId: 'client-id', clientSecret: 'client-secret'},
     });
-    const manager = makeManager({
+    const manager = new CredentialManager({
       authScheme: AUTHORIZATION_CODE_SCHEME,
       rawAuthCredential: OAUTH2_RAW_CREDENTIAL,
       credentialKey: 'no_double_pass_key',
@@ -642,7 +612,7 @@ describe('CredentialManager load, refresh and save', () => {
     const credentialService = new FakeCredentialService();
     credentialService.loadCredential.mockResolvedValue(API_KEY_CREDENTIAL);
 
-    const credential = await makeManager({
+    const credential = await new CredentialManager({
       authScheme: API_KEY_SCHEME,
       credentialKey: 'api_key_from_service',
     }).getAuthCredential(makeToolContext({credentialService}));
@@ -654,7 +624,7 @@ describe('CredentialManager load, refresh and save', () => {
 
 describe('CredentialManager.exchangeCredential', () => {
   it('returns the credential unchanged when no exchanger serves its type', async () => {
-    const result = await makeManager({
+    const result = await new CredentialManager({
       authScheme: API_KEY_SCHEME,
       credentialKey: 'no_exchanger_key',
     }).exchangeCredential(API_KEY_CREDENTIAL);
@@ -666,7 +636,7 @@ describe('CredentialManager.exchangeCredential', () => {
   });
 
   it('routes a service account credential to the service account exchanger', async () => {
-    const result = await makeManager({
+    const result = await new CredentialManager({
       authScheme: API_KEY_SCHEME,
       credentialKey: 'service_account_key',
     }).exchangeCredential({
@@ -688,7 +658,7 @@ describe('CredentialManager.exchangeCredential', () => {
       credential: overridden,
       wasExchanged: true,
     });
-    const manager = makeManager({
+    const manager = new CredentialManager({
       authScheme: API_KEY_SCHEME,
       credentialKey: 'override_key',
     });
@@ -706,16 +676,33 @@ describe('CredentialManager.exchangeCredential', () => {
   });
 });
 
-describe('CredentialManager.requestCredential', () => {
-  it('asks the client for the credential this manager owns', () => {
-    const authConfig: AuthConfig = {
+describe('CredentialManager service account handling', () => {
+  const SERVICE_ACCOUNT_CREDENTIAL: AuthCredential = {
+    authType: AuthCredentialTypes.SERVICE_ACCOUNT,
+    serviceAccount: {useDefaultCredential: true},
+  };
+
+  // This pair is why ToolAuthHandler calls exchangeCredential and not
+  // getAuthCredential. Routing it through getAuthCredential would strand every
+  // service-account tool in `pending`.
+  it('reports nothing available for a service account raw credential', async () => {
+    const credential = await new CredentialManager({
       authScheme: API_KEY_SCHEME,
-      credentialKey: 'request_key',
-    };
-    const context = makeToolContext();
+      rawAuthCredential: SERVICE_ACCOUNT_CREDENTIAL,
+      credentialKey: 'service_account_lifecycle_key',
+    }).getAuthCredential(makeToolContext());
 
-    makeManager(authConfig).requestCredential(context);
+    expect(credential).toBeUndefined();
+  });
 
-    expect(context.eventActions.requestedAuthConfigs['fc-1']).toBe(authConfig);
+  it('exchanges the same credential for a token through exchangeCredential', async () => {
+    const result = await new CredentialManager({
+      authScheme: API_KEY_SCHEME,
+      rawAuthCredential: SERVICE_ACCOUNT_CREDENTIAL,
+      credentialKey: 'service_account_lifecycle_key',
+    }).exchangeCredential(SERVICE_ACCOUNT_CREDENTIAL);
+
+    expect(result.wasExchanged).toBe(true);
+    expect(result.credential.http?.credentials.token).toBe('mock-adc-token');
   });
 });
