@@ -10,7 +10,11 @@ import {
   AuthCredentialTypes,
   Context,
   createRestApiTool,
+  createSession,
+  ExtendedOAuth2,
+  InvocationContext,
   OpenApiSpecParser,
+  PluginManager,
   RestApiTool,
   ToolAuthHandler,
 } from '@google/adk';
@@ -1150,6 +1154,99 @@ describe('RestApiTool Utilities', () => {
       expect(headers).toEqual({
         'Content-Type': 'application/json',
       });
+    });
+  });
+
+  describe('OAuth2 endpoint discovery', () => {
+    const ISSUER_URL = 'https://auth.example.com';
+    const AUTHORIZATION_ENDPOINT = 'https://auth.example.com/authorize';
+    const TOKEN_ENDPOINT = 'https://auth.example.com/token';
+    const API_URL = 'https://api.example.com/test';
+
+    function jsonResponse(body: unknown): Response {
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: {'content-type': 'application/json'},
+      });
+    }
+
+    function toolContext(): Context {
+      return new Context({
+        invocationContext: new InvocationContext({
+          invocationId: 'test-invocation',
+          session: createSession({
+            id: 'test-session',
+            appName: 'test-app',
+            userId: 'test-user',
+          }),
+          pluginManager: new PluginManager([]),
+        }),
+      });
+    }
+
+    function discoveryTool(): RestApiTool {
+      const authScheme: ExtendedOAuth2 = {
+        type: 'oauth2',
+        issuerUrl: ISSUER_URL,
+        flows: {clientCredentials: {tokenUrl: '', scopes: {}}},
+      };
+
+      return new RestApiTool(
+        'test_tool',
+        'description',
+        {baseUrl: 'https://api.example.com', path: '/test', method: 'GET'},
+        {responses: {}},
+        authScheme,
+        {
+          authType: AuthCredentialTypes.OAUTH2,
+          oauth2: {clientId: 'client-id', clientSecret: 'client-secret'},
+        },
+      );
+    }
+
+    it('exchanges the credential at the discovered token endpoint', async () => {
+      const requested: string[] = [];
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: string) => {
+          requested.push(input);
+          if (input.startsWith(`${ISSUER_URL}/.well-known/`)) {
+            return jsonResponse({
+              issuer: ISSUER_URL,
+              authorization_endpoint: AUTHORIZATION_ENDPOINT,
+              token_endpoint: TOKEN_ENDPOINT,
+            });
+          }
+          if (input === TOKEN_ENDPOINT) {
+            return jsonResponse({access_token: 'access-123', expires_in: 3600});
+          }
+          return jsonResponse({users: []});
+        }),
+      );
+
+      const result = await discoveryTool().runAsync({
+        args: {},
+        toolContext: toolContext(),
+      });
+
+      // The token request can only reach the discovered endpoint: the scheme
+      // was configured with an empty tokenUrl, which fails the exchange today.
+      expect(requested).toContain(TOKEN_ENDPOINT);
+      expect(requested[requested.length - 1]).toBe(API_URL);
+      expect(result).toEqual({users: []});
+    });
+
+    it('reports the exchange failure when the issuer serves no metadata', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => new Response(null, {status: 404})),
+      );
+
+      // Discovery degrades silently, so the tool still fails exactly where it
+      // failed before this feature, with the same error.
+      await expect(
+        discoveryTool().runAsync({args: {}, toolContext: toolContext()}),
+      ).rejects.toThrow('Token endpoint not found in auth scheme.');
     });
   });
 });

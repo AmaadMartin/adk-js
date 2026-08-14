@@ -4,10 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {OpenAPIV3} from 'openapi-types';
 import {Context} from '../../../agents/context.js';
 import {AuthCredential} from '../../../auth/auth_credential.js';
+import {AuthScheme} from '../../../auth/auth_schemes.js';
 import {AuthConfig} from '../../../auth/auth_tool.js';
+import {populateOAuth2Endpoints} from '../../../auth/oauth2/oauth2_utils.js';
 import {experimental} from '../../../utils/experimental.js';
 import {AutoAuthCredentialExchanger} from '../auth/credential_exchangers/auto_auth_credential_exchanger.js';
 
@@ -19,14 +20,12 @@ export interface AuthPreparationResult {
 class ToolContextCredentialStore {
   constructor(private readonly context: Context) {}
 
-  getCredentialKey(authScheme?: OpenAPIV3.SecuritySchemeObject): string {
+  getCredentialKey(authScheme?: AuthScheme): string {
     const schemeName = authScheme?.type || 'default';
     return `${schemeName}_existing_exchanged_credential`;
   }
 
-  getCredential(
-    authScheme?: OpenAPIV3.SecuritySchemeObject,
-  ): AuthCredential | undefined {
+  getCredential(authScheme?: AuthScheme): AuthCredential | undefined {
     const key = this.getCredentialKey(authScheme);
     // Read through the State API so we see values persisted from previous
     // tool calls. `context.state` is a `State` instance, not a plain object;
@@ -47,7 +46,7 @@ class ToolContextCredentialStore {
 export class ToolAuthHandler {
   constructor(
     private readonly context: Context,
-    private readonly authScheme?: OpenAPIV3.SecuritySchemeObject,
+    private readonly authScheme?: AuthScheme,
     private readonly authCredential?: AuthCredential,
     private readonly credentialKey?: string,
   ) {}
@@ -55,7 +54,7 @@ export class ToolAuthHandler {
   @experimental
   public static fromToolContext(
     context: Context,
-    authScheme?: OpenAPIV3.SecuritySchemeObject,
+    authScheme?: AuthScheme,
     authCredential?: AuthCredential,
     options: {credentialKey?: string} = {},
   ): ToolAuthHandler {
@@ -79,6 +78,10 @@ export class ToolAuthHandler {
     if (existingCredential) {
       return {state: 'done', authCredential: existingCredential};
     }
+
+    // Resolve an `ExtendedOAuth2` scheme's endpoints from its issuer URL before
+    // they are needed — by the credential request below, or by the exchange.
+    await populateOAuth2Endpoints(this.authScheme);
 
     const authConfig: AuthConfig = {
       authScheme: this.authScheme,

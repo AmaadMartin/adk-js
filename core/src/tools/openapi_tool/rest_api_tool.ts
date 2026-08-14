@@ -9,6 +9,7 @@ import {OpenAPIV3} from 'openapi-types';
 import {Context} from '../../agents/context.js';
 import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {AuthCredential} from '../../auth/auth_credential.js';
+import {AuthScheme} from '../../auth/auth_schemes.js';
 import {experimental} from '../../utils/experimental.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
 import {applyCredential} from './auth/auth_helpers.js';
@@ -32,7 +33,7 @@ export class RestApiTool extends BaseTool {
     description: string,
     private readonly endpoint: OperationEndpoint,
     private readonly operation: OpenAPIV3.OperationObject,
-    private authScheme?: OpenAPIV3.SecuritySchemeObject,
+    private authScheme?: AuthScheme,
     private authCredential?: AuthCredential,
     options: {
       preservePropertyNames?: boolean;
@@ -49,7 +50,7 @@ export class RestApiTool extends BaseTool {
   }
 
   @experimental
-  public configureAuthScheme(authScheme: OpenAPIV3.SecuritySchemeObject) {
+  public configureAuthScheme(authScheme: AuthScheme) {
     this.authScheme = authScheme;
   }
 
@@ -310,7 +311,7 @@ export function createRestApiTool(
     description: string;
     endpoint: OperationEndpoint;
     operation: OpenAPIV3.OperationObject;
-    authScheme?: OpenAPIV3.SecuritySchemeObject;
+    authScheme?: AuthScheme;
   },
   options: {
     preservePropertyNames?: boolean;

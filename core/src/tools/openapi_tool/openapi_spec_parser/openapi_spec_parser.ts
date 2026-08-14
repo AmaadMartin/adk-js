@@ -5,6 +5,7 @@
  */
 
 import {OpenAPIV3} from 'openapi-types';
+import {AuthScheme} from '../../../auth/auth_schemes.js';
 import {experimental} from '../../../utils/experimental.js';
 import {ApiParameter, OperationParser} from './operation_parser.js';
 
@@ -31,7 +32,7 @@ export interface ParsedOperation {
   operation: OpenAPIV3.OperationObject;
   parameters: ApiParameter[];
   returnValue?: ApiParameter;
-  authScheme?: OpenAPIV3.SecuritySchemeObject;
+  authScheme?: AuthScheme;
 }
 
 @experimental

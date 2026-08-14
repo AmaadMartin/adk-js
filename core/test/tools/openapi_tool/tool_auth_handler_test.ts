@@ -8,9 +8,13 @@ import {
   AuthCredential,
   AuthCredentialTypes,
   Context,
+  createSession,
+  ExtendedOAuth2,
+  InvocationContext,
+  PluginManager,
   ToolAuthHandler,
 } from '@google/adk';
-import {describe, expect, it, vi} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {State} from '../../../src/sessions/state.js';
 import {AutoAuthCredentialExchanger} from '../../../src/tools/openapi_tool/auth/credential_exchangers/auto_auth_credential_exchanger.js';
 
@@ -262,5 +266,112 @@ describe('ToolAuthHandler', () => {
       'oauth2_existing_exchanged_credential',
     );
     expect(stored?.http?.credentials.token).toBe('exchanged-token');
+  });
+
+  describe('OAuth2 endpoint discovery', () => {
+    const ISSUER_URL = 'https://auth.example.com';
+    const AUTHORIZATION_ENDPOINT = 'https://auth.example.com/authorize';
+    const TOKEN_ENDPOINT = 'https://auth.example.com/token';
+
+    function discoverableScheme(): ExtendedOAuth2 {
+      return {
+        type: 'oauth2',
+        issuerUrl: ISSUER_URL,
+        flows: {
+          authorizationCode: {authorizationUrl: '', tokenUrl: '', scopes: {}},
+        },
+      };
+    }
+
+    function toolContext(state: Record<string, unknown> = {}): Context {
+      return new Context({
+        invocationContext: new InvocationContext({
+          invocationId: 'test-invocation',
+          session: createSession({
+            id: 'test-session',
+            appName: 'test-app',
+            userId: 'test-user',
+            state,
+          }),
+          pluginManager: new PluginManager([]),
+        }),
+        functionCallId: 'test-call',
+      });
+    }
+
+    beforeEach(() => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(
+          async () =>
+            new Response(
+              JSON.stringify({
+                issuer: ISSUER_URL,
+                authorization_endpoint: AUTHORIZATION_ENDPOINT,
+                token_endpoint: TOKEN_ENDPOINT,
+              }),
+              {status: 200, headers: {'content-type': 'application/json'}},
+            ),
+        ),
+      );
+    });
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it('requests the credential with the discovered endpoints', async () => {
+      const context = toolContext();
+      // The credential request itself is out of scope here: an OAuth2 tool
+      // with no credential fails inside AuthHandler for an unrelated reason.
+      const requestCredential = vi
+        .spyOn(context, 'requestCredential')
+        .mockImplementation(() => {});
+      const authScheme = discoverableScheme();
+
+      const result = await new ToolAuthHandler(
+        context,
+        authScheme,
+      ).prepareAuthCredentials();
+
+      expect(result.state).toBe('pending');
+      expect(authScheme.flows.authorizationCode?.authorizationUrl).toBe(
+        AUTHORIZATION_ENDPOINT,
+      );
+      expect(authScheme.flows.authorizationCode?.tokenUrl).toBe(TOKEN_ENDPOINT);
+      expect(requestCredential).toHaveBeenCalledWith(
+        expect.objectContaining({authScheme}),
+      );
+    });
+
+    it('does not discover when a credential is already cached', async () => {
+      const context = toolContext({
+        'oauth2_existing_exchanged_credential': {
+          authType: AuthCredentialTypes.HTTP,
+          http: {scheme: 'bearer', credentials: {token: 'cached-token'}},
+        },
+      });
+      const authScheme = discoverableScheme();
+
+      const result = await new ToolAuthHandler(
+        context,
+        authScheme,
+      ).prepareAuthCredentials();
+
+      expect(result.state).toBe('done');
+      expect(fetch).not.toHaveBeenCalled();
+      expect(authScheme.flows.authorizationCode?.authorizationUrl).toBe('');
+    });
+
+    it('does not discover for a scheme that carries no issuer URL', async () => {
+      const result = await new ToolAuthHandler(toolContext(), {
+        type: 'apiKey',
+        name: 'X-API-Key',
+        in: 'header',
+      }).prepareAuthCredentials();
+
+      expect(result.state).toBe('pending');
+      expect(fetch).not.toHaveBeenCalled();
+    });
   });
 });
