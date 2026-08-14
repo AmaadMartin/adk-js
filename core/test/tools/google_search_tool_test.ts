@@ -20,6 +20,34 @@ function makeRequest(model?: string, tools: Tool[] = []): LlmRequest {
 
 describe('GoogleSearchTool', () => {
   describe('processLlmRequest', () => {
+    it('throws when the model is not set', async () => {
+      const tool = new GoogleSearchTool();
+      const req = makeRequest(undefined);
+      await expect(
+        tool.processLlmRequest({
+          llmRequest: req,
+          toolContext: {} as never,
+        }),
+      ).rejects.toThrow(
+        'Google search tool is not supported for model undefined',
+      );
+
+      expect(req.config?.tools).toEqual([]);
+    });
+
+    it('throws when the model is an empty string', async () => {
+      const tool = new GoogleSearchTool();
+      const req = makeRequest('');
+      await expect(
+        tool.processLlmRequest({
+          llmRequest: req,
+          toolContext: {} as never,
+        }),
+      ).rejects.toThrow(/^Google search tool is not supported for model $/);
+
+      expect(req.config?.tools).toEqual([]);
+    });
+
     it('adds googleSearchRetrieval for Gemini 1.x model', async () => {
       const tool = new GoogleSearchTool();
       const req = makeRequest('gemini-1.5-pro');

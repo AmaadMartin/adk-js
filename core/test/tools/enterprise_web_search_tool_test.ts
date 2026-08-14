@@ -24,6 +24,21 @@ function makeRequest(model?: string, tools: Tool[] = []): LlmRequest {
 
 describe('EnterpriseWebSearchTool', () => {
   describe('processLlmRequest', () => {
+    it('throws when the model is not set', async () => {
+      const tool = new EnterpriseWebSearchTool();
+      const req = makeRequest(undefined);
+      await expect(
+        tool.processLlmRequest({
+          llmRequest: req,
+          toolContext: {} as never,
+        }),
+      ).rejects.toThrow(
+        'Enterprise Web Search tool is not supported for model undefined',
+      );
+
+      expect(req.config?.tools).toEqual([]);
+    });
+
     it('adds enterpriseWebSearch for Gemini 2+ model', async () => {
       const tool = new EnterpriseWebSearchTool();
       const req = makeRequest('gemini-2.0-flash');
@@ -104,6 +119,28 @@ describe('EnterpriseWebSearchTool', () => {
     it('adds enterpriseWebSearch for non-Gemini model when check is disabled', async () => {
       const tool = new EnterpriseWebSearchTool();
       const req = makeRequest('internal-model-v1');
+
+      const originalValue = process.env.ADK_DISABLE_GEMINI_MODEL_ID_CHECK;
+      process.env.ADK_DISABLE_GEMINI_MODEL_ID_CHECK = 'true';
+
+      try {
+        await tool.processLlmRequest({
+          llmRequest: req,
+          toolContext: {} as never,
+        });
+        expect(req.config!.tools).toEqual([{enterpriseWebSearch: {}}]);
+      } finally {
+        if (originalValue === undefined) {
+          delete process.env.ADK_DISABLE_GEMINI_MODEL_ID_CHECK;
+        } else {
+          process.env.ADK_DISABLE_GEMINI_MODEL_ID_CHECK = originalValue;
+        }
+      }
+    });
+
+    it('adds enterpriseWebSearch when the model is not set and the check is disabled', async () => {
+      const tool = new EnterpriseWebSearchTool();
+      const req = makeRequest(undefined);
 
       const originalValue = process.env.ADK_DISABLE_GEMINI_MODEL_ID_CHECK;
       process.env.ADK_DISABLE_GEMINI_MODEL_ID_CHECK = 'true';

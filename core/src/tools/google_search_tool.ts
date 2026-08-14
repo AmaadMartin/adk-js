@@ -30,10 +30,6 @@ export class GoogleSearchTool extends BaseTool {
   override async processLlmRequest({
     llmRequest,
   }: ToolProcessLlmRequest): Promise<void> {
-    if (!llmRequest.model) {
-      return;
-    }
-
     llmRequest.config = llmRequest.config || ({} as GenerateContentConfig);
     llmRequest.config.tools = llmRequest.config.tools || [];
 

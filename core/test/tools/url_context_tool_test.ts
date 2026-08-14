@@ -19,6 +19,34 @@ function makeRequest(model?: string, tools = []): LlmRequest {
 
 describe('UrlContextTool', () => {
   describe('processLlmRequest', () => {
+    it('throws when the model is not set', async () => {
+      const tool = new UrlContextTool();
+      const req = makeRequest(undefined);
+      await expect(
+        tool.processLlmRequest({
+          llmRequest: req,
+          toolContext: {} as never,
+        }),
+      ).rejects.toThrow(
+        'URL context tool is not supported for model undefined',
+      );
+
+      expect(req.config?.tools).toEqual([]);
+    });
+
+    it('throws when the model is an empty string', async () => {
+      const tool = new UrlContextTool();
+      const req = makeRequest('');
+      await expect(
+        tool.processLlmRequest({
+          llmRequest: req,
+          toolContext: {} as never,
+        }),
+      ).rejects.toThrow(/^URL context tool is not supported for model $/);
+
+      expect(req.config?.tools).toEqual([]);
+    });
+
     it('adds urlContext for Gemini 2+ model', async () => {
       const tool = new UrlContextTool();
       const req = makeRequest('gemini-2.0-flash');

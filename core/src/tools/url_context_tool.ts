@@ -30,10 +30,6 @@ export class UrlContextTool extends BaseTool {
   override async processLlmRequest({
     llmRequest,
   }: ToolProcessLlmRequest): Promise<void> {
-    if (!llmRequest.model) {
-      return;
-    }
-
     if (!isGeminiModel(llmRequest.model)) {
       throw new Error(
         `URL context tool is not supported for model ${llmRequest.model}`,

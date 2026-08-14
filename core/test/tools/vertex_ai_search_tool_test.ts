@@ -44,7 +44,7 @@ function invalidParams(
 }
 
 function makeLlmRequest(
-  model: string,
+  model?: string,
   config?: GenerateContentConfig,
 ): LlmRequest {
   return {model, contents: [], toolsDict: {}, liveConnectConfig: {}, config};
@@ -160,6 +160,18 @@ describe('VertexAiSearchTool', () => {
     );
   });
 
+  it('should throw error when model is not set', async () => {
+    const tool = new VertexAiSearchTool({dataStoreId: 'ds'});
+    const llmRequest = makeLlmRequest(undefined);
+    const toolContext = {} as Context;
+
+    await expect(
+      tool.processLlmRequest({toolContext, llmRequest}),
+    ).rejects.toThrowError(
+      'Vertex AI search tool is not supported for model undefined',
+    );
+  });
+
   describe('with env override', () => {
     const originalEnv = process.env.ADK_DISABLE_GEMINI_MODEL_ID_CHECK;
 
@@ -175,6 +187,17 @@ describe('VertexAiSearchTool', () => {
       process.env.ADK_DISABLE_GEMINI_MODEL_ID_CHECK = 'true';
       const tool = new VertexAiSearchTool({dataStoreId: 'ds'});
       const llmRequest = makeLlmRequest('claude-3');
+      const toolContext = {} as Context;
+
+      await tool.processLlmRequest({toolContext, llmRequest});
+
+      expect(llmRequest.config?.tools).toHaveLength(1);
+    });
+
+    it('should add the tool when the model is not set and the check is disabled', async () => {
+      process.env.ADK_DISABLE_GEMINI_MODEL_ID_CHECK = 'true';
+      const tool = new VertexAiSearchTool({dataStoreId: 'ds'});
+      const llmRequest = makeLlmRequest(undefined);
       const toolContext = {} as Context;
 
       await tool.processLlmRequest({toolContext, llmRequest});
