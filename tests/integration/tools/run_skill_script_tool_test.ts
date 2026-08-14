@@ -255,6 +255,8 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
     expect(result.stderr).toContain('skill python error');
   });
 
+  // PowerShell cold start on Windows CI is slow, so these cases pass an
+  // explicit timeout instead of the project default.
   it.skipIf(!IS_WINDOWS)(
     'successfully executes a real PowerShell skill script',
     async () => {

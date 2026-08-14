@@ -295,6 +295,8 @@ describe('UnsafeLocalCodeExecutor', () => {
     expect(result.stderr).toBe('');
   });
 
+  // 60s: PowerShell cold start on Windows CI exceeds vitest's 5s default; also
+  // above the executor's own 30s budget so a real hang reports its own error.
   it('should execute shell code and return stdout', async () => {
     const params: ExecuteCodeParams = {
       invocationContext,
@@ -309,7 +311,7 @@ describe('UnsafeLocalCodeExecutor', () => {
 
     expect(result.stdout).toContain('Hello, Shell!');
     expect(result.stderr).toBe('');
-  });
+  }, 60000);
 
   // No process is created: executeCode returns at the language guard.
   it('should return error for unsupported language', async () => {

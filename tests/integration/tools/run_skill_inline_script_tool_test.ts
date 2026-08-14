@@ -121,6 +121,8 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
     expect(result.stderr).toBe('');
   });
 
+  // A shell interpreter cold start is slow on CI, so these cases pass an
+  // explicit timeout instead of the project default.
   it.skipIf(!IS_UNIX)(
     'successfully executes a real Shell inline script',
     async () => {
@@ -140,6 +142,7 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
       expect(result.stdout).toContain('hello from real sh');
       expect(result.stderr).toBe('');
     },
+    TEST_EXECUTION_TIMEOUT,
   );
 
   it('captures stderr from a real JavaScript inline script', async () => {
@@ -177,6 +180,7 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
       expect(result).toBeDefined();
       expect(result.stderr).toContain('some sh error');
     },
+    TEST_EXECUTION_TIMEOUT,
   );
 
   it.skipIf(!IS_WINDOWS)(
