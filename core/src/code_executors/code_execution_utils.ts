@@ -243,18 +243,70 @@ export function buildCodeExecutionResultPart(
 }
 
 /**
+ * The fence tag of a leading delimiter, i.e. the delimiter with its backticks
+ * and surrounding whitespace stripped: '```python\n' -> 'python'.
+ */
+function fenceTag(leadingDelimiter: string): string {
+  return leadingDelimiter.trim().replace(/^`+/, '').trim().toLowerCase();
+}
+
+/**
+ * The language tag an executable code part declares, or undefined when it
+ * declares none. `Language` values are compared case-insensitively and with a
+ * `LANGUAGE_` prefix stripped, so both 'PYTHON' and 'LANGUAGE_PYTHON' resolve
+ * to 'python'.
+ */
+function partLanguageTag(part: Part): string | undefined {
+  const language = part.executableCode?.language;
+  if (!language) {
+    return undefined;
+  }
+  const tag = String(language)
+    .toLowerCase()
+    .replace(/^language_/, '');
+  return tag && tag !== 'unspecified' ? tag : undefined;
+}
+
+/**
+ * Chooses the delimiter pair to render an executable code part with.
+ *
+ * The first pair is a fallback, not a default: `tool_code` leads the default
+ * list and names the tool-call protocol rather than a language, so rendering
+ * every block with it mislabels the code and hides the rest of the list from
+ * the model.
+ *
+ * @param part The executable code part being rendered.
+ * @param codeBlockDelimiters The executor's enclosing delimiters.
+ * @return The pair whose fence names the part's language, else the first pair.
+ */
+export function selectCodeBlockDelimiter(
+  part: Part,
+  codeBlockDelimiters: Array<[string, string]>,
+): [string, string] {
+  if (!codeBlockDelimiters.length) {
+    return ['', ''];
+  }
+  const tag = partLanguageTag(part);
+  const match = tag
+    ? codeBlockDelimiters.find((d) => fenceTag(d[0]) === tag)
+    : undefined;
+  return match ?? codeBlockDelimiters[0];
+}
+
+/**
  * Converts the code execution parts to text parts in a Content.
  *
  * @param content The mutable content to convert the code execution parts to
  *     text parts.
- * @param codeBlockDelimiter The delimiter to format the code block.
+ * @param codeBlockDelimiters The list of the enclosing delimiters to format the
+ *     code block. The pair whose fence names the code's language is used.
  * @param executionResultDelimiters The delimiter to format the code execution
  *     result.
  * @return The converted content.
  */
 export function convertCodeExecutionParts(
   content: Content,
-  codeBlockDelimiter: [string, string],
+  codeBlockDelimiters: Array<[string, string]>,
   executionResultDelimiters: [string, string],
 ) {
   if (!content.parts?.length) {
@@ -264,11 +316,12 @@ export function convertCodeExecutionParts(
   const lastPart = content.parts[content.parts.length - 1];
 
   if (lastPart.executableCode) {
+    const [open, close] = selectCodeBlockDelimiter(
+      lastPart,
+      codeBlockDelimiters,
+    );
     content.parts[content.parts.length - 1] = {
-      text:
-        codeBlockDelimiter[0] +
-        lastPart.executableCode.code +
-        codeBlockDelimiter[1],
+      text: open + lastPart.executableCode.code + close,
     };
   } else if (content.parts.length == 1 && lastPart.codeExecutionResult) {
     content.parts[content.parts.length - 1] = {
