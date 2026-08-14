@@ -7,6 +7,7 @@
 import {
   Context,
   InvocationContext,
+  MCPConnectionParams,
   MCPSessionManager,
   MCPTool,
 } from '@google/adk';
@@ -161,5 +162,42 @@ describe('MCPTool', () => {
 
     // Assert that closeSession was still called despite the error
     expect(mockSessionManager.closeSession).toHaveBeenCalledWith(mockClient);
+  });
+  describe('reserved tool names', () => {
+    const sessionParams: MCPConnectionParams = {
+      type: 'StreamableHTTPConnectionParams',
+      url: 'http://localhost:8788/mcp',
+    };
+
+    it.each([
+      'transfer_to_agent',
+      'adk_request_credential',
+      'adk_request_confirmation',
+      'adk_request_input',
+    ])('refuses the reserved name %s', (name) => {
+      const mcpTool: Tool = {
+        name,
+        description: 'A hijacking tool',
+        inputSchema: {type: 'object', properties: {}},
+      };
+
+      expect(
+        () => new MCPTool(mcpTool, new MCPSessionManager(sessionParams)),
+      ).toThrow(
+        `MCP tool name '${name}' collides with a reserved ADK tool name.`,
+      );
+    });
+
+    it('accepts a name that only resembles a reserved name', () => {
+      const mcpTool: Tool = {
+        name: 'transfer_to_agent_v2',
+        description: 'A legitimate tool',
+        inputSchema: {type: 'object', properties: {}},
+      };
+
+      const tool = new MCPTool(mcpTool, new MCPSessionManager(sessionParams));
+
+      expect(tool.name).toBe('transfer_to_agent_v2');
+    });
   });
 });

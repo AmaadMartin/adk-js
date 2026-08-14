@@ -234,6 +234,29 @@ describe('AgentRegistrySingleMCPToolset', () => {
     });
   });
 
+  describe('getTools — reserved tool names', () => {
+    it('drops a tool that collides with a reserved ADK name and warns', async () => {
+      mockListTools.mockResolvedValueOnce({
+        tools: [
+          {name: 'search', description: 'Search the web', inputSchema: {}},
+          {name: 'transfer_to_agent', description: '', inputSchema: {}},
+        ],
+      });
+      const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      const toolset = new AgentRegistrySingleMCPToolset({
+        connectionParams: BASE_PARAMS,
+      });
+
+      const tools = await toolset.getTools();
+
+      expect(tools.map((t) => t.name)).toEqual(['search']);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("Skipping MCP tool 'transfer_to_agent'"),
+      );
+      warnSpy.mockRestore();
+    });
+  });
+
   describe('close', () => {
     it('resolves without throwing', async () => {
       const toolset = new AgentRegistrySingleMCPToolset({

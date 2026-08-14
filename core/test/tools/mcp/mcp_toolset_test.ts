@@ -5,10 +5,21 @@
  */
 
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
-import {describe, expect, it, vi} from 'vitest';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  MockInstance,
+  vi,
+} from 'vitest';
 import {ReadonlyContext} from '../../../src/agents/readonly_context.js';
 import {MCPConnectionParams} from '../../../src/tools/mcp/mcp_session_manager.js';
 import {MCPToolset} from '../../../src/tools/mcp/mcp_toolset.js';
+// The logger singleton is internal (not part of the public API), so it is
+// imported from source to spy on the warnings the toolset emits.
+import {logger} from '../../../src/utils/logger.js';
 
 vi.hoisted(() => {
   vi.resetModules();
@@ -331,6 +342,103 @@ describe('MCPToolset', () => {
           0,
         );
       });
+    });
+  });
+  describe('reserved tool names', () => {
+    const RESERVED = [
+      'transfer_to_agent',
+      'adk_request_credential',
+      'adk_request_confirmation',
+      'adk_request_input',
+    ];
+
+    let warnSpy: MockInstance<(...args: unknown[]) => void>;
+
+    beforeEach(() => {
+      warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+      warnSpy.mockRestore();
+    });
+
+    /** Stubs the next session so tools/list advertises exactly `names`. */
+    function advertise(names: string[]): void {
+      const listTools = vi.fn().mockResolvedValue({
+        tools: names.map((name) => ({
+          name,
+          description: 'A tool',
+          inputSchema: {},
+        })),
+      });
+      vi.mocked(Client).mockImplementationOnce(
+        () =>
+          ({connect: noop(), close: noop(), listTools}) as unknown as Client,
+      );
+    }
+
+    it('drops the reserved tools and warns for each one', async () => {
+      advertise(['valid_tool', ...RESERVED]);
+
+      const tools = await new MCPToolset(stdioParams).getTools();
+
+      expect(tools.map((tool) => tool.name)).toEqual(['valid_tool']);
+      expect(warnSpy).toHaveBeenCalledTimes(RESERVED.length);
+      for (const dropped of RESERVED) {
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining(`Skipping MCP tool '${dropped}'`),
+        );
+      }
+    });
+
+    it('drops on the advertised name, so a prefix cannot revive them', async () => {
+      advertise(['valid_tool', ...RESERVED]);
+
+      const tools = await new MCPToolset(
+        stdioParams,
+        [],
+        'myprefix',
+      ).getTools();
+
+      expect(tools.map((tool) => tool.name)).toEqual(['myprefix_valid_tool']);
+    });
+
+    it('drops them even when a string-array filter names one', async () => {
+      advertise(['valid_tool', ...RESERVED]);
+
+      const tools = await new MCPToolset(stdioParams, [
+        'valid_tool',
+        'transfer_to_agent',
+      ]).getTools();
+
+      expect(tools.map((tool) => tool.name)).toEqual(['valid_tool']);
+    });
+
+    it('drops them even when a predicate filter admits everything', async () => {
+      advertise(['valid_tool', ...RESERVED]);
+
+      const tools = await new MCPToolset(stdioParams, () => true).getTools(
+        {} as ReadonlyContext,
+      );
+
+      expect(tools.map((tool) => tool.name)).toEqual(['valid_tool']);
+    });
+
+    it('drops them on the unfiltered path taken when no context is given', async () => {
+      advertise(['valid_tool', ...RESERVED]);
+
+      const tools = await new MCPToolset(stdioParams, () => true).getTools();
+
+      expect(tools.map((tool) => tool.name)).toEqual(['valid_tool']);
+    });
+
+    it('keeps a tool whose name only resembles a reserved name', async () => {
+      advertise(['transfer_to_agent_v2']);
+
+      const tools = await new MCPToolset(stdioParams).getTools();
+
+      expect(tools.map((tool) => tool.name)).toEqual(['transfer_to_agent_v2']);
+      expect(warnSpy).not.toHaveBeenCalled();
     });
   });
 });
