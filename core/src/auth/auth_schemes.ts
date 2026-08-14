@@ -24,12 +24,29 @@ export interface OpenIdConnectWithConfig
 }
 
 /**
+ * (Experimental, subject to change) An OAuth2 scheme that carries the
+ * provider's issuer URL so ADK can auto-discover the authorization and token
+ * endpoints (RFC 8414) instead of requiring them to be configured by hand.
+ */
+export interface ExtendedOAuth2 extends OpenAPIV3.OAuth2SecurityScheme {
+  issuerUrl?: string;
+}
+
+/**
  * AuthSchemes contains SecuritySchemes from OpenAPI 3.0 and an extra flattened
  * OpenIdConnectWithConfig.
  */
 export type AuthScheme =
   | OpenAPIV3.SecuritySchemeObject
-  | OpenIdConnectWithConfig;
+  | OpenIdConnectWithConfig
+  | ExtendedOAuth2;
+
+/**
+ * Whether the scheme is an OAuth2 scheme carrying an issuer URL.
+ */
+export function isExtendedOAuth2(scheme: AuthScheme): scheme is ExtendedOAuth2 {
+  return scheme.type === 'oauth2' && 'issuerUrl' in scheme;
+}
 
 /**
  * Represents the OAuth2 flow (or grant type).
