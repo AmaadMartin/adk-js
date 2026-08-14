@@ -12,9 +12,6 @@ import {AuthScheme} from './auth_schemes.js';
 import {AuthConfig} from './auth_tool.js';
 import {OAuth2CredentialExchanger} from './oauth2/oauth2_credential_exchanger.js';
 
-/** The HTTP scheme used when a scheme carries no value of its own. */
-const DEFAULT_HTTP_SCHEME = 'bearer';
-
 /**
  * The keys that mark a stored object as a credential.
  *
@@ -39,24 +36,19 @@ function isAuthCredential(value: unknown): value is AuthCredential {
   );
 }
 
-/**
- * Wraps a bare token string in the credential shape the auth scheme implies.
- *
- * The scheme can be absent at runtime, because an AuthConfig may arrive from
- * client-supplied function-call args.
- */
+/** Wraps a bare token string in the credential shape the auth scheme implies. */
 function buildCredentialFromString(
   token: string,
-  authScheme: AuthScheme | undefined,
+  authScheme: AuthScheme,
 ): AuthCredential {
-  if (authScheme?.type === 'apiKey') {
+  if (authScheme.type === 'apiKey') {
     return {authType: AuthCredentialTypes.API_KEY, apiKey: token};
   }
-  if (authScheme?.type === 'http') {
+  if (authScheme.type === 'http') {
     return {
       authType: AuthCredentialTypes.HTTP,
       http: {
-        scheme: authScheme.scheme || DEFAULT_HTTP_SCHEME,
+        scheme: authScheme.scheme || 'bearer',
         credentials: {token},
       },
     };
@@ -67,7 +59,7 @@ function buildCredentialFromString(
 /** Normalizes the value of one state slot into a credential. */
 function toAuthCredential(
   value: unknown,
-  authScheme: AuthScheme | undefined,
+  authScheme: AuthScheme,
 ): AuthCredential | undefined {
   if (typeof value === 'string') {
     return value ? buildCredentialFromString(value, authScheme) : undefined;
