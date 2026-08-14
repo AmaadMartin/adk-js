@@ -391,12 +391,18 @@ describe('A2ARemoteAgent', () => {
         agentCard: card,
         clientFactory: mockClientFactory,
       });
-      const mockStream = async function* () {
-        yield {
-          kind: 'artifact-update',
-          artifact: {parts: [{kind: 'text', text: 'response'}]},
-        } as A2AStreamEventData;
-      };
+      const mockStream =
+        async function* (): AsyncGenerator<A2AStreamEventData> {
+          yield {
+            kind: 'artifact-update',
+            taskId: 'test-task',
+            contextId: 'test-context',
+            artifact: {
+              artifactId: 'a1',
+              parts: [{kind: 'text', text: 'response'}],
+            },
+          };
+        };
       vi.mocked(mockClient.sendMessageStream).mockReturnValue(mockStream());
 
       for await (const _ of agent.runAsync(createMockContext())) {
