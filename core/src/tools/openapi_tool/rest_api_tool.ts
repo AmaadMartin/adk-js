@@ -9,6 +9,7 @@ import {OpenAPIV3} from 'openapi-types';
 import {Context} from '../../agents/context.js';
 import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {AuthCredential} from '../../auth/auth_credential.js';
+import {appendCookie, checkCookieValue} from '../../utils/cookie_utils.js';
 import {experimental} from '../../utils/experimental.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
 import {applyCredential} from './auth/auth_helpers.js';
@@ -210,6 +211,10 @@ export function prepareRequestParams(
       queryParams.append(originalName, String(argValue));
     } else if (location === 'header') {
       headers[originalName] = String(argValue);
+    } else if (location === 'cookie') {
+      const cookieValue = String(argValue);
+      checkCookieValue(originalName, cookieValue);
+      appendCookie(headers, originalName, cookieValue);
     } else if (location === 'body') {
       if (
         originalName === 'body' ||

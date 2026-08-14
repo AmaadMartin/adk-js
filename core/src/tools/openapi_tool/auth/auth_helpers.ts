@@ -6,6 +6,7 @@
 
 import {OpenAPIV3} from 'openapi-types';
 import {AuthCredential} from '../../../auth/auth_credential.js';
+import {appendCookie} from '../../../utils/cookie_utils.js';
 
 /**
  * Applies the given credential to the request headers and URL.
@@ -42,14 +43,7 @@ export function applyCredential(
       const separator = url.includes('?') ? '&' : '?';
       url += `${separator}${name}=${encodeURIComponent(credential.apiKey)}`;
     } else if (inLocation === 'cookie') {
-      // Reuse the existing cookie header as spelled: header names are
-      // case-insensitive, so a second entry would be joined with ', ', which
-      // is invalid cookie syntax.
-      const key =
-        Object.keys(headers).find((h) => h.toLowerCase() === 'cookie') ??
-        'Cookie';
-      const cookie = `${name}=${encodeURIComponent(credential.apiKey)}`;
-      headers[key] = headers[key] ? `${headers[key]}; ${cookie}` : cookie;
+      appendCookie(headers, name, credential.apiKey);
     } else if (inLocation === undefined) {
       // No apiKey scheme was supplied, so the location is unknown.
       headers['Authorization'] = credential.apiKey;

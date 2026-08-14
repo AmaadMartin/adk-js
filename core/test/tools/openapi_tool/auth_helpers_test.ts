@@ -138,12 +138,12 @@ describe('auth_helpers', () => {
       expect(headers['Cookie']).toBeUndefined();
     });
 
-    it('should percent-encode the cookie value', () => {
+    it('should send a padded API key verbatim', () => {
       const url = 'http://example.com';
       const headers: Record<string, string> = {};
       const credential: AuthCredential = {
         authType: AuthCredentialTypes.API_KEY,
-        apiKey: 'a b;c',
+        apiKey: 'dGVzdGtleQ==',
       };
       const authScheme: OpenAPIV3.SecuritySchemeObject = {
         type: 'apiKey',
@@ -153,7 +153,7 @@ describe('auth_helpers', () => {
 
       applyCredential(url, headers, credential, authScheme);
 
-      expect(headers['Cookie']).toBe('session_id=a%20b%3Bc');
+      expect(headers['Cookie']).toBe('session_id=dGVzdGtleQ==');
     });
 
     it('should apply API key in cookie for a scheme built by createApiKeyScheme', () => {
