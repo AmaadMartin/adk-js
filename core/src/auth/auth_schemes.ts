@@ -31,7 +31,7 @@ export interface OpenIdConnectWithConfig
 export interface ExtendedOAuth2 extends OpenAPIV3.OAuth2SecurityScheme {
   /**
    * Issuer URL of the authorization server. It is used to discover the
-   * endpoints that are left blank in {@link ExtendedOAuth2.flows}.
+   * endpoints that are left blank in `flows`.
    */
   issuerUrl?: string;
 }
