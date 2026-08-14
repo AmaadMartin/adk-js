@@ -293,11 +293,8 @@ function isWorkspaceLocalSpecifier(specifier: string): boolean {
   );
 }
 
-function describeDeclaration(
-  pkg: string,
-  dependencies: Record<string, string>,
-): string {
-  return `"${pkg}" ("${dependencies[pkg]}")`;
+function describeDeclaration(pkg: string, specifier: string): string {
+  return `"${pkg}" ("${specifier}")`;
 }
 
 /**
@@ -360,9 +357,8 @@ async function resolveDeploymentDependencies(
     );
   }
 
-  // A required package cannot be dropped the way a bundled sibling can: the
-  // container installs it from the registry to run the agent, so a container
-  // that builds and then fails to resolve it is worse than this error.
+  // A required package cannot be dropped: the container installs it from the
+  // registry to run the agent.
   const workspaceLocalRequired = REQUIRED_NPM_PACKAGES.filter((pkg) =>
     isWorkspaceLocalSpecifier(dependencies[pkg]),
   );
@@ -370,14 +366,13 @@ async function resolveDeploymentDependencies(
     const declarations = workspaceLocalRequired
       .map(
         (pkg) =>
-          `${describeDeclaration(pkg, dependencies)} in ${declaredIn.get(pkg) ?? basePath}`,
+          `${describeDeclaration(pkg, dependencies[pkg])} in ${declaredIn.get(pkg) ?? basePath}`,
       )
       .join(', ');
 
     throw new Error(
       `Required npm package(s) declared with a workspace-local specifier: ${declarations}. ` +
-        `Only a workspace-aware installer resolves such a specifier, and the deployed container has no workspace: ` +
-        `it installs these from the npm registry, so declare a published version range instead.`,
+        `Declare a published version range instead.`,
     );
   }
 
@@ -394,7 +389,7 @@ export async function createPackageJson(
 
   for (const [pkg, specifier] of Object.entries(resolved)) {
     if (isWorkspaceLocalSpecifier(specifier)) {
-      dropped.push(describeDeclaration(pkg, resolved));
+      dropped.push(describeDeclaration(pkg, specifier));
     } else {
       dependencies[pkg] = specifier;
     }
@@ -402,8 +397,7 @@ export async function createPackageJson(
   if (dropped.length > 0) {
     console.warn(
       `Skipping workspace-local dependencies that cannot be installed in the deployed container: ${dropped.join(', ')}. ` +
-        `Their code is bundled into the agent file, so the deployment does not need them. ` +
-        `If you deploy with --bundle false, publish them to a registry and depend on a published version range instead.`,
+        `Their code is bundled into the agent file. If you deploy with --bundle false, publish them to a registry and depend on a published version range instead.`,
     );
   }
 
