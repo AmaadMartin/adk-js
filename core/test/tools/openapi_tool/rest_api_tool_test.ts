@@ -10,7 +10,11 @@ import {
   AuthCredentialTypes,
   Context,
   createRestApiTool,
+  createSession,
+  InvocationContext,
+  LlmAgent,
   OpenApiSpecParser,
+  PluginManager,
   RestApiTool,
   ToolAuthHandler,
 } from '@google/adk';
@@ -24,6 +28,17 @@ import {
   prepareRequestBody,
   prepareRequestParams,
 } from '../../../src/tools/openapi_tool/rest_api_tool.js';
+
+function createToolContext(): Context {
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'invocation-1',
+      agent: new LlmAgent({name: 'test_agent'}),
+      session: createSession({id: 'session-1', appName: 'test_app'}),
+      pluginManager: new PluginManager(),
+    }),
+  });
+}
 
 describe('RestApiTool', () => {
   afterEach(() => {
@@ -626,7 +641,7 @@ describe('RestApiTool', () => {
 
     const result = await tool.runAsync({
       args: {},
-      toolContext: {} as unknown as Context,
+      toolContext: createToolContext(),
     });
 
     expect(result).toEqual({
@@ -665,7 +680,7 @@ describe('RestApiTool', () => {
 
     const result = await tool.runAsync({
       args: {},
-      toolContext: {} as unknown as Context,
+      toolContext: createToolContext(),
     });
 
     expect(result).not.toEqual({message: 'not found'});
@@ -699,7 +714,7 @@ describe('RestApiTool', () => {
 
     const result = await tool.runAsync({
       args: {},
-      toolContext: {} as unknown as Context,
+      toolContext: createToolContext(),
     });
 
     expect(result).toEqual({
@@ -733,7 +748,7 @@ describe('RestApiTool', () => {
 
     const result = await tool.runAsync({
       args: {},
-      toolContext: {} as unknown as Context,
+      toolContext: createToolContext(),
     });
 
     expect(result).toEqual({created: true});
