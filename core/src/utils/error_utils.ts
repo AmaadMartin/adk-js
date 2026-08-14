@@ -5,9 +5,10 @@
  */
 
 /**
- * Helpers for turning arbitrary thrown values into readable, root-cause
- * messages, so that wrapped, aggregated or HTTP-flavoured failures are not
- * reduced to an empty or generic string when they are reported.
+ * Helpers for inspecting arbitrary thrown values: turning them into readable,
+ * root-cause messages, so that wrapped, aggregated or HTTP-flavoured failures
+ * are not reduced to an empty or generic string when they are reported, and
+ * telling a cancellation apart from a real failure.
  */
 
 /**
@@ -26,6 +27,16 @@ const UNKNOWN_ERROR = 'Unknown error';
 /** Lowest and highest values treated as an HTTP status code. */
 const MIN_HTTP_STATUS = 100;
 const MAX_HTTP_STATUS = 599;
+
+/**
+ * Error `name` values that mean the caller cancelled the operation.
+ * `AbortError` is what an aborted `AbortSignal` produces; the workflow engine
+ * raises `InvocationAbortedError` for the same reason.
+ */
+const CANCELLATION_ERROR_NAMES = new Set([
+  'AbortError',
+  'InvocationAbortedError',
+]);
 
 /**
  * Narrows an arbitrary value to an indexable record, or `undefined` when it is
@@ -158,4 +169,48 @@ function formatErrorRecursive(err: unknown, seen: Set<unknown>): string {
  */
 export function formatError(err: unknown): string {
   return formatErrorRecursive(err, new Set<unknown>());
+}
+
+/**
+ * Recursively searches an error graph for a cancellation. `seen` guards
+ * against cyclic `cause`/`errors` graphs.
+ */
+function hasCancellationName(err: unknown, seen: Set<unknown>): boolean {
+  const record = asRecord(err);
+  if (record === undefined || seen.has(record)) {
+    return false;
+  }
+  seen.add(record);
+  const name = record['name'];
+  if (typeof name === 'string' && CANCELLATION_ERROR_NAMES.has(name)) {
+    return true;
+  }
+  const errors = record['errors'];
+  if (
+    Array.isArray(errors) &&
+    errors.some((sub) => hasCancellationName(sub, seen))
+  ) {
+    return true;
+  }
+  return hasCancellationName(record['cause'], seen);
+}
+
+/**
+ * Reports whether `err`, or anything reachable through its `cause` chain or
+ * its `AggregateError.errors`, is a cancellation.
+ *
+ * The whole graph is searched because cancellation is often translated into
+ * another error during teardown: an aborted MCP `connect`, for example,
+ * reaches the caller wrapped in a `Failed to create MCP session` error. The
+ * match is on the error `name` rather than on the class, so an error built by
+ * a second copy of a package still matches.
+ *
+ * Never throws, and is safe on `null`, `undefined`, primitives and cyclic
+ * error graphs.
+ *
+ * @param err The thrown or rejected value to classify.
+ * @return `true` when the value carries a cancellation.
+ */
+export function isAbortError(err: unknown): boolean {
+  return hasCancellationName(err, new Set<unknown>());
 }
