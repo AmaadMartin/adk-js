@@ -18,6 +18,7 @@ import {randomUUID} from '../utils/env_aware_utils.js';
 
 import {ActiveStreamingTool} from './active_streaming_tool.js';
 import {BaseAgent} from './base_agent.js';
+import {LiveRequestQueue} from './live_request_queue.js';
 import {RunConfig} from './run_config.js';
 import {TranscriptionEntry} from './transcription_entry.js';
 
@@ -57,6 +58,17 @@ export interface InvocationContextParams {
   isolationScope?: string;
   /** Nesting depth of node-as-tool executions; used to bound recursion. */
   nodeToolDepth?: number;
+
+  /**
+   * The queue that feeds client requests to a live (bidirectional) agent run.
+   */
+  liveRequestQueue?: LiveRequestQueue;
+
+  /**
+   * The session resumption handle received from the live server, used to
+   * transparently reconnect a dropped live connection.
+   */
+  liveSessionResumptionHandle?: string;
 }
 
 /**
@@ -243,6 +255,20 @@ export class InvocationContext {
   readonly nodeToolDepth: number;
 
   /**
+   * The queue that feeds client requests (content, audio blobs, activity
+   * signals) to a live (bidirectional) agent run. Only set for live runs.
+   */
+  readonly liveRequestQueue?: LiveRequestQueue;
+
+  /**
+   * The latest session resumption handle received from the live server.
+   *
+   * Mutable: the live flow updates it whenever the server sends a new handle,
+   * and reads it to reconnect a dropped connection to the same session.
+   */
+  liveSessionResumptionHandle?: string;
+
+  /**
    * @param params The parameters for creating an invocation context.
    */
   constructor(params: InvocationContextParams) {
@@ -264,6 +290,8 @@ export class InvocationContext {
     this.workflowInstructionScope = params.workflowInstructionScope;
     this.isolationScope = params.isolationScope;
     this.nodeToolDepth = params.nodeToolDepth ?? 0;
+    this.liveRequestQueue = params.liveRequestQueue;
+    this.liveSessionResumptionHandle = params.liveSessionResumptionHandle;
     // Inherit the parent invocation's cost manager when one is available.
 
     // Child contexts created for sub-agents, agent transfers and loop
