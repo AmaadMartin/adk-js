@@ -305,12 +305,11 @@ export class Runner {
 
           const invocationContext = new InvocationContext({
             artifactService: this.artifactService
-              ? new ScopedArtifactService(
-                  this.artifactService,
-                  this.appName,
+              ? new ScopedArtifactService(this.artifactService, {
+                  appName: this.appName,
                   userId,
                   sessionId,
-                )
+                })
               : undefined,
             sessionService: this.sessionService,
             memoryService: this.memoryService,
@@ -355,10 +354,20 @@ export class Runner {
             if (runConfig.saveInputBlobsAsArtifacts) {
               newMessage = await this.saveArtifacts(
                 invocationContext.invocationId,
-                session.userId,
-                session.id,
+                {
+                  appName: this.appName,
+                  userId: session.userId,
+                  sessionId: session.id,
+                },
                 newMessage,
               );
+              // `saveArtifacts` no longer edits the message in place, so the
+              // context built above still points at the pre-replacement
+              // message. Re-point it, otherwise the raw inline blob stays
+              // visible to everything reading `userContent` (tools,
+              // instruction providers) even though the session only ever sees
+              // the placeholder.
+              invocationContext.userContent = newMessage;
               if (params.abortSignal?.aborted) {
                 return;
               }
@@ -506,26 +515,23 @@ export class Runner {
    * Saves artifacts from the message parts and replaces the inline data with
    * a file name placeholder and optional file reference.
    *
+   * The input message is never mutated. When nothing is replaced - no part
+   * carries `inlineData`, or every save failed - the original message is
+   * returned by reference rather than a structurally equal copy.
+   *
    * @param invocationId The current invocation ID.
-   * @param userId The user ID of the session.
-   * @param sessionId The session ID of the session.
+   * @param sessionKey The composite key of the session owning the artifacts.
    * @param message The message containing parts to process.
    */
   private async saveArtifacts(
     invocationId: string,
-    userId: string,
-    sessionId: string,
+    sessionKey: CompositeSessionKey,
     message: Content,
   ): Promise<Content> {
     if (!this.artifactService || !message.parts?.length) {
       return message;
     }
 
-    const sessionKey: CompositeSessionKey = {
-      appName: this.appName,
-      userId,
-      sessionId,
-    };
     const newParts: Part[] = [];
     let modified = false;
 
