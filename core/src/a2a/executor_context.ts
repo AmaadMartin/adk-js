@@ -6,8 +6,8 @@
 
 import {RequestContext} from '@a2a-js/sdk/server';
 import {Content} from '@google/genai';
+import {BaseArtifactService} from '../artifacts/base_artifact_service.js';
 import {Event} from '../events/event.js';
-import {Runner} from '../runner/runner.js';
 import {Session} from '../sessions/session.js';
 
 /**
@@ -21,8 +21,8 @@ export interface ExecutorContext {
   events: Event[];
   userContent: Content;
   requestContext: RequestContext;
-  /** The runner executing this request, and the services it was built with. */
-  runner: Runner;
+  /** The artifact service the runner was built with, if it has one. */
+  artifactService?: BaseArtifactService;
 }
 
 /**
@@ -30,19 +30,19 @@ export interface ExecutorContext {
  * @param session The session.
  * @param userContent The content of the user.
  * @param requestContext The request context.
- * @param runner The runner executing this request.
+ * @param artifactService The artifact service the runner was built with.
  * @returns The A2A Agent Executor context.
  */
 export function createExecutorContext({
   session,
   userContent,
   requestContext,
-  runner,
+  artifactService,
 }: {
   session: Session;
   userContent: Content;
   requestContext: RequestContext;
-  runner: Runner;
+  artifactService?: BaseArtifactService;
 }): ExecutorContext {
   return {
     userId: session.userId,
@@ -52,6 +52,6 @@ export function createExecutorContext({
     events: session.events,
     userContent,
     requestContext,
-    runner,
+    artifactService,
   };
 }

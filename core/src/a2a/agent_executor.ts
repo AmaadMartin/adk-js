@@ -112,7 +112,7 @@ export class A2AAgentExecutor implements AgentExecutor {
       session,
       userContent: genAIUserMessage,
       requestContext: ctx,
-      runner: adkRunner,
+      artifactService: adkRunner.artifactService,
     });
 
     try {
@@ -176,7 +176,8 @@ export class A2AAgentExecutor implements AgentExecutor {
           a2aEvent,
         );
 
-        for (const event of eventsToPublish(a2aEvent, returned)) {
+        const published = returned ? [returned].flat() : [a2aEvent];
+        for (const event of published) {
           eventBus.publish(event);
         }
       }
@@ -264,20 +265,6 @@ export class A2AAgentExecutor implements AgentExecutor {
 
     eventBus.publish(event);
   }
-}
-
-/**
- * Resolves what an `afterEventCallback` returned into the events to publish.
- */
-function eventsToPublish(
-  converted: TaskArtifactUpdateEvent,
-  returned: void | AgentExecutionEvent | AgentExecutionEvent[],
-): AgentExecutionEvent[] {
-  if (!returned) {
-    return [converted];
-  }
-
-  return Array.isArray(returned) ? returned : [returned];
 }
 
 /**

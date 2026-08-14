@@ -13,29 +13,24 @@ import {createTaskArtifactUpdateEvent} from './a2a_event.js';
 import {ExecutorContext} from './executor_context.js';
 import {toA2APart} from './part_converter_utils.js';
 
-/** GenAI part fields carrying a payload `toA2APart` can represent. */
-const PAYLOAD_FIELDS = [
-  'text',
-  'fileData',
-  'functionCall',
-  'functionResponse',
-  'executableCode',
-  'codeExecutionResult',
-] as const;
-
 /**
  * Converts a stored artifact to an A2A part, or `undefined` when the artifact
  * carries nothing A2A can represent.
  *
- * `toA2APart` maps a part with no recognised payload to an empty data part,
- * which would be published as a meaningless artifact.
+ * `toA2APart` is total, so an unrepresentable artifact has to be recognised
+ * from what it converts to: a blob with no payload, or an empty data part.
+ * Publishing either would announce an artifact the peer cannot read.
  */
 function toArtifactPart(artifact: GenAIPart): A2APart | undefined {
-  const hasPayload =
-    artifact.inlineData?.data != null ||
-    PAYLOAD_FIELDS.some((field) => artifact[field] != null);
+  if (artifact.inlineData && artifact.inlineData.data == null) {
+    return undefined;
+  }
 
-  return hasPayload ? toA2APart(artifact) : undefined;
+  const part = toA2APart(artifact);
+
+  return part.kind === 'data' && Object.keys(part.data).length === 0
+    ? undefined
+    : part;
 }
 
 /**
@@ -85,7 +80,7 @@ async function toArtifactEvent(
  * the artifact service and the peer never learns about them.
  *
  * @param ctx The executor context, which supplies the artifact scope and the
- *     runner holding the artifact service.
+ *     artifact service.
  * @param adkEvent The ADK event that produced the converted A2A event.
  * @param a2aEvent The converted A2A event.
  * @returns The converted event followed by one artifact update per artifact,
@@ -100,7 +95,7 @@ export async function includeArtifactsInA2AEvent(
     return undefined;
   }
 
-  const artifactService = ctx.runner.artifactService;
+  const artifactService = ctx.artifactService;
   if (!artifactService) {
     return a2aEvent;
   }

@@ -32,20 +32,6 @@ const USER_ID = 'user-1';
 const SESSION_ID = 'session-1';
 const TASK_ID = 'task-1';
 
-class SilentAgent extends BaseAgent {
-  constructor() {
-    super({name: 'silent_agent'});
-  }
-
-  protected async *runAsyncImpl(
-    _context: InvocationContext,
-  ): AsyncGenerator<Event, void, void> {}
-
-  protected async *runLiveImpl(
-    _context: InvocationContext,
-  ): AsyncGenerator<Event, void, void> {}
-}
-
 function createRequestContext(): RequestContext {
   const message: Message = {
     kind: 'message',
@@ -73,13 +59,6 @@ function createConvertedEvent(): TaskArtifactUpdateEvent {
 }
 
 function createContext(artifactService?: BaseArtifactService): ExecutorContext {
-  const runner = new Runner({
-    appName: APP_NAME,
-    agent: new SilentAgent(),
-    sessionService: new InMemorySessionService(),
-    artifactService,
-  });
-
   return {
     userId: USER_ID,
     sessionId: SESSION_ID,
@@ -88,7 +67,7 @@ function createContext(artifactService?: BaseArtifactService): ExecutorContext {
     events: [],
     userContent: {role: 'user', parts: [{text: 'hello'}]},
     requestContext: createRequestContext(),
-    runner,
+    artifactService,
   };
 }
 
@@ -207,7 +186,7 @@ describe('includeArtifactsInA2AEvent', () => {
     expect(imageEvent.artifact.parts[0].kind).toBe('file');
   });
 
-  it('returns the converted event when the runner has no artifact service', async () => {
+  it('returns the converted event when there is no artifact service', async () => {
     const ctx = createContext();
     const a2aEvent = createConvertedEvent();
 
@@ -268,6 +247,25 @@ describe('includeArtifactsInA2AEvent', () => {
     );
 
     expect(result).toBe(a2aEvent);
+  });
+
+  it('publishes an inline blob whose data is empty', async () => {
+    const artifactService = new InMemoryArtifactService();
+    await saveArtifact(artifactService, 'zero.png', {
+      inlineData: {mimeType: 'image/png', data: ''},
+    });
+    const ctx = createContext(artifactService);
+
+    const result = await includeArtifactsInA2AEvent(
+      ctx,
+      adkEventWithDelta({'zero.png': 0}),
+      createConvertedEvent(),
+    );
+
+    const events = expectEvents(result, 2);
+    const artifactEvent = expectArtifactUpdate(events[1]);
+    expect(artifactEvent.artifact.artifactId).toBe('zero.png_0');
+    expect(artifactEvent.artifact.parts[0].kind).toBe('file');
   });
 
   it('skips a part with no payload at all', async () => {

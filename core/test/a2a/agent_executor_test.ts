@@ -13,9 +13,11 @@ import {ExecutionEventBus, RequestContext} from '@a2a-js/sdk/server';
 import {
   A2AAgentExecutor,
   Event as AdkEvent,
+  BaseArtifactService,
   BaseSessionService,
   createEvent,
   createEventActions,
+  createSession,
   includeArtifactsInA2AEvent,
   InMemoryArtifactService,
   Runner,
@@ -67,6 +69,38 @@ describe('A2AAgentExecutor', () => {
       ...overrides,
     } as unknown as RequestContext;
   };
+
+  const testSession = createSession({
+    id: 'session-id',
+    userId: 'test-user',
+    appName: 'test-app',
+  });
+
+  /**
+   * Points the mocked Runner constructor at the given generator. The suite
+   * replaces the Runner class with a factory, so the stand-in it returns
+   * cannot be a real instance.
+   */
+  const mockRunnerWith = (
+    runAsync: () => AsyncGenerator<AdkEvent, void, void>,
+  ): void => {
+    vi.mocked(Runner).mockImplementation(((config: RunnerConfig) => {
+      return {
+        appName: config?.appName,
+        sessionService: config?.sessionService,
+        artifactService: config?.artifactService,
+        runAsync,
+      } as unknown as Runner;
+    }) as unknown as () => Runner);
+  };
+
+  const runnerConfig = (
+    artifactService?: BaseArtifactService,
+  ): RunnerConfig => ({
+    appName: 'test-app',
+    sessionService: mockSessionService,
+    artifactService,
+  });
 
   it('should throw an error if no message is provided', async () => {
     const executor = new A2AAgentExecutor({
@@ -272,14 +306,7 @@ describe('A2AAgentExecutor', () => {
   });
 
   it('should publish the artifacts an event saved when the artifact callback is installed', async () => {
-    const mockSession = {
-      id: 'session-id',
-      userId: 'test-user',
-      appName: 'test-app',
-      events: [],
-      state: {},
-    } as unknown as Session;
-    mockSessionService.getSession.mockResolvedValue(mockSession);
+    mockSessionService.getSession.mockResolvedValue(testSession);
 
     const artifactService = new InMemoryArtifactService();
     await artifactService.saveArtifact({
@@ -306,21 +333,10 @@ describe('A2AAgentExecutor', () => {
       });
     }
 
-    vi.mocked(Runner).mockImplementation(((config: RunnerConfig) => {
-      return {
-        appName: config?.appName,
-        sessionService: config?.sessionService,
-        artifactService: config?.artifactService,
-        runAsync: mockRunAsync,
-      } as unknown as Runner;
-    }) as unknown as () => Runner);
+    mockRunnerWith(mockRunAsync);
 
     const executor = new A2AAgentExecutor({
-      runner: {
-        appName: 'test-app',
-        sessionService: mockSessionService,
-        artifactService,
-      } as unknown as RunnerConfig,
+      runner: runnerConfig(artifactService),
       afterEventCallback: includeArtifactsInA2AEvent,
     });
 
@@ -335,14 +351,7 @@ describe('A2AAgentExecutor', () => {
   });
 
   it('should publish every event a callback returns in an array', async () => {
-    const mockSession = {
-      id: 'session-id',
-      userId: 'test-user',
-      appName: 'test-app',
-      events: [],
-      state: {},
-    } as unknown as Session;
-    mockSessionService.getSession.mockResolvedValue(mockSession);
+    mockSessionService.getSession.mockResolvedValue(testSession);
 
     async function* mockRunAsync() {
       yield createEvent({
@@ -353,13 +362,7 @@ describe('A2AAgentExecutor', () => {
       });
     }
 
-    vi.mocked(Runner).mockImplementation(((config: RunnerConfig) => {
-      return {
-        appName: config?.appName,
-        sessionService: config?.sessionService,
-        runAsync: mockRunAsync,
-      } as unknown as Runner;
-    }) as unknown as () => Runner);
+    mockRunnerWith(mockRunAsync);
 
     const extraEvent: TaskArtifactUpdateEvent = {
       kind: 'artifact-update',
@@ -369,14 +372,9 @@ describe('A2AAgentExecutor', () => {
     };
 
     const executor = new A2AAgentExecutor({
-      runner: {
-        appName: 'test-app',
-        sessionService: mockSessionService,
-      } as unknown as RunnerConfig,
-      afterEventCallback: async (_ctx, _adkEvent, a2aEvent) => [
-        a2aEvent!,
-        extraEvent,
-      ],
+      runner: runnerConfig(),
+      afterEventCallback: async (_ctx, _adkEvent, a2aEvent) =>
+        a2aEvent ? [a2aEvent, extraEvent] : [extraEvent],
     });
 
     await executor.execute(createRequestContext(), mockEventBus);
@@ -387,14 +385,7 @@ describe('A2AAgentExecutor', () => {
   });
 
   it('should publish the single event a callback returns in place of the converted one', async () => {
-    const mockSession = {
-      id: 'session-id',
-      userId: 'test-user',
-      appName: 'test-app',
-      events: [],
-      state: {},
-    } as unknown as Session;
-    mockSessionService.getSession.mockResolvedValue(mockSession);
+    mockSessionService.getSession.mockResolvedValue(testSession);
 
     async function* mockRunAsync() {
       yield createEvent({
@@ -405,13 +396,7 @@ describe('A2AAgentExecutor', () => {
       });
     }
 
-    vi.mocked(Runner).mockImplementation(((config: RunnerConfig) => {
-      return {
-        appName: config?.appName,
-        sessionService: config?.sessionService,
-        runAsync: mockRunAsync,
-      } as unknown as Runner;
-    }) as unknown as () => Runner);
+    mockRunnerWith(mockRunAsync);
 
     const replacement: TaskArtifactUpdateEvent = {
       kind: 'artifact-update',
@@ -424,10 +409,7 @@ describe('A2AAgentExecutor', () => {
     };
 
     const executor = new A2AAgentExecutor({
-      runner: {
-        appName: 'test-app',
-        sessionService: mockSessionService,
-      } as unknown as RunnerConfig,
+      runner: runnerConfig(),
       afterEventCallback: async () => replacement,
     });
 
