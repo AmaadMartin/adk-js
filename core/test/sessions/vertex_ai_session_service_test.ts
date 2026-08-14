@@ -6,15 +6,17 @@
 
 import type {Sessions} from '@google-cloud/vertexai/build/src/genai/sessions.js';
 import type {AppendAgentEngineSessionEventRequestParameters} from '@google-cloud/vertexai/build/src/genai/types.js';
-import type {Session} from '@google/adk';
+import type {CompactedEvent, EventActions, Session} from '@google/adk';
 import {
   createEvent,
+  createEventActions,
   createSession,
   isCompactedEvent,
   State,
   VertexAiSessionService,
   type Event,
 } from '@google/adk';
+import type {Content} from '@google/genai';
 import {ApiError} from '@google/genai';
 import {
   afterEach,
@@ -25,6 +27,7 @@ import {
   vi,
   type MockInstance,
 } from 'vitest';
+import {createCompactedEvent} from '../../src/events/compacted_event.js';
 import {
   isFastForwardable,
   reconstructNodeStates,
@@ -569,7 +572,7 @@ describe('VertexAiSessionService', () => {
             _compaction: {
               startTime: 1600000000000,
               endTime: 1610000000000,
-              compactedContent: {role: 'user', parts: [{text: 'summary'}]},
+              compactedContent: 'summary',
             },
             _usage_metadata: {promptTokens: 10},
           },
@@ -2110,6 +2113,381 @@ describe('VertexAiSessionService', () => {
 
         expect(mockClient.events.append).toHaveBeenCalledTimes(2);
       });
+    });
+  });
+
+  /**
+   * The Agent Engine sessions API models no compaction field, so both SDKs
+   * stash the payload under `eventMetadata.customMetadata._compaction` and
+   * mirror it into `rawEvent`. The fixtures below are the shapes adk-python
+   * writes (`tests/unittests/sessions/test_vertex_ai_session_service.py`) and
+   * the historical adk-js shape that older sessions still hold.
+   */
+  describe('compaction wire format', () => {
+    /** Wire timestamps are seconds; an adk-js event counts milliseconds. */
+    const START_TIMESTAMP = 1000;
+    const END_TIMESTAMP = 2000;
+    const START_TIME = START_TIMESTAMP * 1000;
+    const END_TIME = END_TIMESTAMP * 1000;
+    const SUMMARY = 'compacted summary';
+    const SUMMARY_CONTENT = {role: 'model', parts: [{text: SUMMARY}]};
+
+    /** The payload adk-python persists under `customMetadata._compaction`. */
+    const CANONICAL_PAYLOAD = {
+      start_timestamp: START_TIMESTAMP,
+      end_timestamp: END_TIMESTAMP,
+      compacted_content: SUMMARY_CONTENT,
+    };
+
+    /** The same payload as adk-python mirrors it into `rawEvent`. */
+    const ALIASED_PAYLOAD = {
+      startTimestamp: START_TIMESTAMP,
+      endTimestamp: END_TIMESTAMP,
+      compactedContent: SUMMARY_CONTENT,
+    };
+
+    /** The payload adk-js wrote before it adopted the canonical shape. */
+    const LEGACY_PAYLOAD = {
+      startTime: START_TIME,
+      endTime: END_TIME,
+      compactedContent: SUMMARY,
+    };
+
+    interface AppendedRequest {
+      author: string;
+      invocationId: string;
+      timestamp: string;
+      config: {
+        content?: Content;
+        actions?: Record<string, unknown>;
+        eventMetadata: {customMetadata?: Record<string, unknown>};
+        rawEvent?: {
+          actions?: Record<string, unknown>;
+          isCompacted?: boolean;
+          startTime?: number;
+          endTime?: number;
+          compactedContent?: string;
+          isScratchpad?: boolean;
+        };
+      };
+    }
+
+    const compactionSession = () =>
+      createSession({
+        id: 'compaction-session',
+        appName: '12345',
+        userId: 'testUser',
+        lastUpdateTime: Date.now(),
+      });
+
+    const lastAppend = (): AppendedRequest =>
+      mockClient.events.append.mock.calls.at(-1)![0] as AppendedRequest;
+
+    /** Serializes an API event the way the transport does before a read. */
+    const overTheWire = <T>(value: T): T =>
+      JSON.parse(JSON.stringify(value)) as T;
+
+    const readBack = async (
+      apiEvent: Record<string, unknown>,
+    ): Promise<Event> => {
+      mockClient.events.listInternal.mockResolvedValue({
+        sessionEvents: [overTheWire(apiEvent)],
+      });
+      const session = await service.getSession({
+        appName: '12345',
+        userId: 'testUser',
+        sessionId: 'compaction-session',
+      });
+      return session!.events[0];
+    };
+
+    const readBackCompacted = async (
+      apiEvent: Record<string, unknown>,
+    ): Promise<CompactedEvent> => {
+      const event = await readBack(apiEvent);
+      if (!isCompactedEvent(event)) {
+        expect.fail('expected the parsed event to be a CompactedEvent');
+      }
+      return event;
+    };
+
+    const apiEventWith = (fields: Record<string, unknown>) => ({
+      name: 'reasoningEngines/12345/sessions/compaction-session/events/e1',
+      invocationId: 'inv-1',
+      author: 'user',
+      timestamp: '2026-04-09T13:00:00Z',
+      ...fields,
+    });
+
+    const compactedEvent = (overrides: Partial<CompactedEvent> = {}) =>
+      createCompactedEvent({
+        timestamp: 1620000000000,
+        author: 'user',
+        invocationId: 'inv-compaction',
+        startTime: START_TIME,
+        endTime: END_TIME,
+        compactedContent: SUMMARY,
+        content: SUMMARY_CONTENT,
+        ...overrides,
+      });
+
+    it('writes the canonical payload into customMetadata', async () => {
+      await service.appendEvent({
+        session: compactionSession(),
+        event: compactedEvent(),
+      });
+
+      expect(lastAppend().config.eventMetadata.customMetadata).toEqual({
+        _compaction: CANONICAL_PAYLOAD,
+      });
+    });
+
+    it('mirrors the alias payload into rawEvent.actions', async () => {
+      await service.appendEvent({
+        session: compactionSession(),
+        event: compactedEvent({isScratchpad: true}),
+      });
+
+      const rawEvent = lastAppend().config.rawEvent!;
+      expect(rawEvent.actions!['compaction']).toEqual(ALIASED_PAYLOAD);
+      expect(rawEvent.isCompacted).toBe(true);
+      expect(rawEvent.startTime).toBe(START_TIME);
+      expect(rawEvent.endTime).toBe(END_TIME);
+      expect(rawEvent.compactedContent).toBe(SUMMARY);
+      expect(rawEvent.isScratchpad).toBe(true);
+    });
+
+    it('leaves the appended event untouched', async () => {
+      const event = compactedEvent();
+      const before = JSON.stringify(event);
+
+      await service.appendEvent({session: compactionSession(), event});
+
+      expect(JSON.stringify(event)).toBe(before);
+      expect('compaction' in event.actions).toBe(false);
+    });
+
+    it('writes no compaction payload for an ordinary event', async () => {
+      const event = createEvent({
+        timestamp: 1620000000000,
+        author: 'agent',
+        invocationId: 'inv-1',
+        content: {role: 'model', parts: [{text: 'hi'}]},
+      });
+
+      await service.appendEvent({session: compactionSession(), event});
+
+      const sent = lastAppend();
+      expect(sent.config.eventMetadata.customMetadata).toBeUndefined();
+      expect(sent.config.rawEvent!.actions).not.toHaveProperty('compaction');
+    });
+
+    it('strips a compaction key from the actions sent to the API', async () => {
+      const actions: EventActions & {compaction: unknown} = {
+        ...createEventActions(),
+        compaction: ALIASED_PAYLOAD,
+      };
+      const event = createEvent({
+        timestamp: 1620000000000,
+        author: 'user',
+        invocationId: 'inv-1',
+        actions,
+      });
+
+      await service.appendEvent({session: compactionSession(), event});
+
+      expect(lastAppend().config.actions).not.toHaveProperty('compaction');
+    });
+
+    it('reads an adk-python compaction out of rawEvent', async () => {
+      const event = await readBackCompacted(
+        apiEventWith({
+          rawEvent: {
+            invocationId: 'inv-1',
+            author: 'user',
+            actions: {compaction: ALIASED_PAYLOAD},
+          },
+        }),
+      );
+
+      expect(event.startTime).toBe(START_TIME);
+      expect(event.endTime).toBe(END_TIME);
+      expect(event.compactedContent).toBe(SUMMARY);
+      expect(event.content).toEqual(SUMMARY_CONTENT);
+      expect('compaction' in event.actions).toBe(false);
+    });
+
+    it('reads an adk-python compaction out of customMetadata', async () => {
+      const event = await readBackCompacted(
+        apiEventWith({
+          eventMetadata: {customMetadata: {_compaction: CANONICAL_PAYLOAD}},
+        }),
+      );
+
+      expect(event.startTime).toBe(START_TIME);
+      expect(event.endTime).toBe(END_TIME);
+      expect(event.compactedContent).toBe(SUMMARY);
+      expect(event.content).toEqual(SUMMARY_CONTENT);
+    });
+
+    it('still reads the historical adk-js payload out of customMetadata', async () => {
+      const event = await readBackCompacted(
+        apiEventWith({
+          eventMetadata: {customMetadata: {_compaction: LEGACY_PAYLOAD}},
+        }),
+      );
+
+      expect(event.startTime).toBe(START_TIME);
+      expect(event.endTime).toBe(END_TIME);
+      expect(event.compactedContent).toBe(SUMMARY);
+    });
+
+    it('keeps the top-level fields of a rawEvent adk-js wrote', async () => {
+      const event = await readBackCompacted(
+        apiEventWith({
+          rawEvent: {
+            invocationId: 'inv-1',
+            author: 'user',
+            actions: {},
+            isCompacted: true,
+            startTime: START_TIME,
+            endTime: END_TIME,
+            compactedContent: SUMMARY,
+            isScratchpad: true,
+          },
+        }),
+      );
+
+      expect(event.startTime).toBe(START_TIME);
+      expect(event.endTime).toBe(END_TIME);
+      expect(event.compactedContent).toBe(SUMMARY);
+      expect(event.isScratchpad).toBe(true);
+    });
+
+    it.each([
+      ['an empty object', {}],
+      ['a string', 'nope'],
+      [
+        'a payload with no summary',
+        {start_timestamp: START_TIMESTAMP, end_timestamp: END_TIMESTAMP},
+      ],
+    ])(
+      'leaves the event non-compacted for %s in customMetadata',
+      async (_description, payload) => {
+        const event = await readBack(
+          apiEventWith({
+            eventMetadata: {customMetadata: {_compaction: payload}},
+          }),
+        );
+
+        expect(isCompactedEvent(event)).toBe(false);
+        expect(event).not.toHaveProperty('startTime');
+        expect(event).not.toHaveProperty('endTime');
+        expect(event).not.toHaveProperty('compactedContent');
+      },
+    );
+
+    it('leaves the event non-compacted for a malformed rawEvent payload', async () => {
+      const event = await readBack(
+        apiEventWith({
+          rawEvent: {
+            invocationId: 'inv-1',
+            author: 'user',
+            actions: {compaction: {startTimestamp: START_TIMESTAMP}},
+          },
+        }),
+      );
+
+      expect(isCompactedEvent(event)).toBe(false);
+      expect(event).not.toHaveProperty('compactedContent');
+      expect('compaction' in event.actions).toBe(false);
+    });
+
+    it('prefers the content the API event already carries', async () => {
+      const ownContent = {role: 'model', parts: [{text: 'the real content'}]};
+      const event = await readBackCompacted(
+        apiEventWith({
+          content: ownContent,
+          eventMetadata: {customMetadata: {_compaction: CANONICAL_PAYLOAD}},
+        }),
+      );
+
+      expect(event.content).toEqual(ownContent);
+      expect(event.compactedContent).toBe(SUMMARY);
+    });
+
+    it('keeps the compaction key out of user-visible customMetadata', async () => {
+      const event = await readBackCompacted(
+        apiEventWith({
+          eventMetadata: {
+            customMetadata: {
+              _compaction: CANONICAL_PAYLOAD,
+              user_key: 'user_value',
+            },
+          },
+        }),
+      );
+
+      expect(event.customMetadata).toEqual({user_key: 'user_value'});
+    });
+
+    it('round-trips an appended compaction through rawEvent', async () => {
+      const original = compactedEvent({isScratchpad: true});
+      await service.appendEvent({
+        session: compactionSession(),
+        event: original,
+      });
+      const sent = lastAppend();
+
+      const event = await readBackCompacted(
+        apiEventWith({
+          rawEvent: sent.config.rawEvent,
+          eventMetadata: sent.config.eventMetadata,
+        }),
+      );
+
+      expect(event.startTime).toBe(original.startTime);
+      expect(event.endTime).toBe(original.endTime);
+      expect(event.compactedContent).toBe(original.compactedContent);
+      expect(event.isScratchpad).toBe(true);
+    });
+
+    it('keeps the exact summary string a multi-part compaction carried', async () => {
+      const original = compactedEvent({
+        compactedContent: 'first second',
+        content: {role: 'model', parts: [{text: 'first'}, {text: 'second'}]},
+      });
+      await service.appendEvent({
+        session: compactionSession(),
+        event: original,
+      });
+      const sent = lastAppend();
+
+      const event = await readBackCompacted(
+        apiEventWith({
+          rawEvent: sent.config.rawEvent,
+          eventMetadata: sent.config.eventMetadata,
+        }),
+      );
+
+      expect(event.compactedContent).toBe('first second');
+    });
+
+    it('round-trips an appended compaction through customMetadata alone', async () => {
+      const original = compactedEvent();
+      await service.appendEvent({
+        session: compactionSession(),
+        event: original,
+      });
+      const sent = lastAppend();
+
+      const event = await readBackCompacted(
+        apiEventWith({eventMetadata: sent.config.eventMetadata}),
+      );
+
+      expect(event.startTime).toBe(original.startTime);
+      expect(event.endTime).toBe(original.endTime);
+      expect(event.compactedContent).toBe(original.compactedContent);
     });
   });
 });

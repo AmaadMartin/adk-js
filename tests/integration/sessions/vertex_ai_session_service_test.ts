@@ -5,7 +5,8 @@
  */
 
 import {Client} from '@google-cloud/vertexai';
-import {VertexAiSessionService} from '@google/adk';
+import {isCompactedEvent, VertexAiSessionService} from '@google/adk';
+import {createCompactedEvent} from '@google/adk/events/compacted_event.js';
 import fs from 'node:fs';
 import http from 'node:http';
 import type {AddressInfo} from 'node:net';
@@ -210,5 +211,159 @@ describe('VertexAiSessionService session expiration over the wire', () => {
     expect(bodies).toEqual([
       {userId: 'user-1', expireTime: '2026-10-01T00:00:00Z'},
     ]);
+  });
+});
+
+const SESSION_ID = 'session-1';
+const USER_ID = 'user-1';
+/** Wire timestamps are seconds; an adk-js event counts milliseconds. */
+const START_TIMESTAMP = 1000;
+const END_TIMESTAMP = 2000;
+const START_TIME_MS = START_TIMESTAMP * 1000;
+const END_TIME_MS = END_TIMESTAMP * 1000;
+const SUMMARY = 'compacted summary';
+const SUMMARY_CONTENT = {role: 'model', parts: [{text: SUMMARY}]};
+
+/** The `_compaction` payload adk-python persists under `customMetadata`. */
+const CANONICAL_PAYLOAD = {
+  start_timestamp: START_TIMESTAMP,
+  end_timestamp: END_TIMESTAMP,
+  compacted_content: SUMMARY_CONTENT,
+};
+
+/** The same payload as adk-python mirrors it into `rawEvent`. */
+const ALIASED_PAYLOAD = {
+  startTimestamp: START_TIMESTAMP,
+  endTimestamp: END_TIMESTAMP,
+  compactedContent: SUMMARY_CONTENT,
+};
+
+interface AppendedBody {
+  eventMetadata?: {customMetadata?: Record<string, unknown>};
+  rawEvent?: {actions?: Record<string, unknown>};
+}
+
+/**
+ * Drives the compaction wire format through the real Agent Engine Sessions
+ * client against a loopback server.
+ *
+ * The unit tests mock that client, so they cannot show that the payload
+ * survives the SDK's own request and response processing. These do: a
+ * compaction written by adk-python comes back as a usable `CompactedEvent`,
+ * and one written here reaches the wire in the shape adk-python reads.
+ */
+describe('VertexAiSessionService compaction over the wire', () => {
+  let server: http.Server;
+  let service: VertexAiSessionService;
+  let bodies: AppendedBody[];
+  let sessionEvents: unknown[];
+
+  beforeAll(async () => {
+    server = http.createServer(async (request, response) => {
+      if (serveMetadataToken(request, response)) return;
+      if (request.method === 'POST') {
+        bodies.push((await json(request)) as AppendedBody);
+        response.writeHead(200, {'content-type': 'application/json'});
+        response.end('{}');
+        return;
+      }
+      response.writeHead(200, {'content-type': 'application/json'});
+      response.end(
+        JSON.stringify(
+          request.url?.includes('/events')
+            ? {sessionEvents}
+            : {
+                name: `reasoningEngines/${AGENT_ENGINE_ID}/sessions/${SESSION_ID}`,
+                userId: USER_ID,
+                updateTime: '2026-01-01T00:00:00Z',
+              },
+        ),
+      );
+    });
+    await new Promise<void>((resolve) =>
+      server.listen(0, '127.0.0.1', resolve),
+    );
+
+    const {port} = server.address() as AddressInfo;
+    pointAdcAt(port);
+    const client = new Client({
+      project: PROJECT,
+      location: LOCATION,
+      apiEndpoint: `http://127.0.0.1:${port}`,
+    });
+    service = new VertexAiSessionService({
+      agentEngineId: AGENT_ENGINE_ID,
+      sessions: client.agentEnginesInternal.sessions,
+    });
+  });
+
+  afterAll(() => {
+    vi.unstubAllEnvs();
+    return new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+
+  beforeEach(() => {
+    bodies = [];
+    sessionEvents = [];
+  });
+
+  const getSession = () =>
+    service.getSession({
+      appName: AGENT_ENGINE_ID,
+      userId: USER_ID,
+      sessionId: SESSION_ID,
+    });
+
+  it('restores a compaction adk-python wrote', async () => {
+    sessionEvents = [
+      {
+        name: `reasoningEngines/${AGENT_ENGINE_ID}/sessions/${SESSION_ID}/events/e1`,
+        invocationId: 'inv-1',
+        author: 'user',
+        timestamp: '2026-01-01T00:00:00Z',
+        eventMetadata: {customMetadata: {_compaction: CANONICAL_PAYLOAD}},
+        rawEvent: {
+          invocationId: 'inv-1',
+          author: 'user',
+          actions: {compaction: ALIASED_PAYLOAD},
+        },
+      },
+    ];
+
+    const session = await getSession();
+    const event = session!.events[0];
+    if (!isCompactedEvent(event)) {
+      expect.fail('expected the parsed event to be a CompactedEvent');
+    }
+
+    expect(event.startTime).toBe(START_TIME_MS);
+    expect(event.endTime).toBe(END_TIME_MS);
+    expect(event.compactedContent).toBe(SUMMARY);
+    expect(event.content).toEqual(SUMMARY_CONTENT);
+  });
+
+  it('sends the canonical payload on both channels when appending', async () => {
+    const session = await getSession();
+
+    await service.appendEvent({
+      session: session!,
+      event: createCompactedEvent({
+        timestamp: 1620000000000,
+        author: 'user',
+        invocationId: 'inv-compaction',
+        startTime: START_TIME_MS,
+        endTime: END_TIME_MS,
+        compactedContent: SUMMARY,
+        content: SUMMARY_CONTENT,
+      }),
+    });
+
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0].eventMetadata?.customMetadata).toEqual({
+      _compaction: CANONICAL_PAYLOAD,
+    });
+    expect(bodies[0].rawEvent?.actions?.['compaction']).toEqual(
+      ALIASED_PAYLOAD,
+    );
   });
 });
