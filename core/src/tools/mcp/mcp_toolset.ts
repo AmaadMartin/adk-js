@@ -61,6 +61,17 @@ import {MCPTool} from './mcp_tool.js';
  *     elicitationCallback: () => ({action: 'decline'}),
  *   });
  *
+ * A `samplingCallback` answers `sampling/createMessage`, which servers use to
+ * run an LLM completion on the client's model:
+ *
+ *   const mcpToolset = new MCPToolset(connectionParams, [], undefined, {
+ *     samplingCallback: async (request) => ({
+ *       model: 'gemini-2.0-flash',
+ *       role: 'assistant',
+ *       content: {type: 'text', text: await complete(request.params.messages)},
+ *     }),
+ *   });
+ *
  */
 export class MCPToolset extends BaseToolset {
   private readonly mcpSessionManager: MCPSessionManager;
