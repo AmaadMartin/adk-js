@@ -139,6 +139,21 @@ describe('recordTestCase', () => {
     });
   });
 
+  it('writes empty goldens for a spec that has no user messages', async () => {
+    const files = await recordTestCase({
+      agent: scriptedAgent('greeter'),
+      spec: {description: 'Does nothing.', agent: 'greeter'},
+      testCaseDir,
+      streamingMode: StreamingMode.NONE,
+    });
+
+    expect(await loadYaml(files.recordingsFile)).toEqual({recordings: []});
+    expect(await loadYaml(files.sessionFile)).toMatchObject({
+      id: 'test-session',
+      events: [],
+    });
+  });
+
   it('writes only the sse goldens in sse mode', async () => {
     scriptedCalls = [textCall('hi there')];
 
@@ -297,6 +312,28 @@ describe('recordTestCase', () => {
               },
             ],
           },
+        }),
+      ]),
+    });
+  });
+
+  it('sends a spec content message that carries no function response', async () => {
+    scriptedCalls = [textCall('hi there')];
+
+    const files = await recordTestCase({
+      agent: scriptedAgent('greeter'),
+      spec: {
+        ...greetingSpec(),
+        userMessages: [{content: {parts: [{text: 'hello'}]}}],
+      },
+      testCaseDir,
+      streamingMode: StreamingMode.NONE,
+    });
+
+    expect(await loadYaml(files.sessionFile)).toMatchObject({
+      events: expect.arrayContaining([
+        expect.objectContaining({
+          content: {role: 'user', parts: [{text: 'hello'}]},
         }),
       ]),
     });
