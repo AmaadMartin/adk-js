@@ -381,13 +381,9 @@ describe('MCPSessionManager', () => {
         new Error('SSE error: Non-200 status code (403)'),
         {code: 403},
       );
-      vi.mocked(Client).mockImplementationOnce(
-        () =>
-          ({
-            connect: vi.fn().mockRejectedValue(original),
-            close: vi.fn().mockResolvedValue(undefined),
-          }) as unknown as Client,
-      );
+      const failingClient = new Client({name: 'MCPClient', version: '1.0.0'});
+      vi.spyOn(failingClient, 'connect').mockRejectedValue(original);
+      vi.mocked(Client).mockReturnValueOnce(failingClient);
 
       const manager = new MCPSessionManager({
         type: 'SseConnectionParams',
