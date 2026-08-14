@@ -354,6 +354,7 @@ export {
   RestApiTool,
   createRestApiTool,
 } from './tools/openapi_tool/rest_api_tool.js';
+export type {RestApiToolOptions} from './tools/openapi_tool/rest_api_tool.js';
 
 // Workflow (parity port of google/adk-python `google/adk/workflow`). Named
 // explicitly (not `export *`) so the top-level surface stays intentional and
