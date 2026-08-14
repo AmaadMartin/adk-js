@@ -62,9 +62,9 @@ function serveToolsOnce(names: string[]) {
         connect: noop(),
         close: noop(),
         listTools: vi.fn().mockResolvedValue({
-          tools: names.map((name) => ({
+          tools: names.map((name, index) => ({
             name,
-            description: `The ${name} tool`,
+            description: `tool ${index}`,
             inputSchema: {},
           })),
         }),
@@ -137,6 +137,25 @@ describe('MCPToolset', () => {
       const tools = await toolset.getTools({} as ReadonlyContext);
 
       expect(tools.map((tool) => tool.name)).toEqual(['alpha', 'charlie']);
+    });
+
+    it('keeps the input order of duplicate names', async () => {
+      serveToolsOnce(['bravo', 'alpha', 'bravo']);
+      const toolset = new MCPToolset(stdioParams);
+
+      const tools = await toolset.getTools();
+
+      expect(tools.map((tool) => tool.name)).toEqual([
+        'alpha',
+        'bravo',
+        'bravo',
+      ]);
+      // The two 'bravo' entries stay in the order the server sent them.
+      expect(tools.map((tool) => tool.description)).toEqual([
+        'tool 1',
+        'tool 0',
+        'tool 2',
+      ]);
     });
 
     it('sorts when a predicate filter has no context', async () => {
