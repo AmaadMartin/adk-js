@@ -353,7 +353,6 @@ export {
 export type {
   ApiKeyLocation,
   CredentialParam,
-  OpenIdConfig,
   OpenIdSchemeCredential,
   SchemeCredential,
   TokenType,

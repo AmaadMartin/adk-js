@@ -105,25 +105,6 @@ export type TokenType = 'apikey' | 'oauth2Token';
 /** Where an API key travels in a request. */
 export type ApiKeyLocation = 'header' | 'query' | 'cookie';
 
-/**
- * Represents OpenID Connect configuration.
- *
- * @example
- * const config: OpenIdConfig = {
- *   clientId: 'your_client_id',
- *   authUri: 'https://accounts.google.com/o/oauth2/auth',
- *   tokenUri: 'https://oauth2.googleapis.com/token',
- *   clientSecret: 'your_client_secret',
- * };
- */
-export interface OpenIdConfig {
-  clientId: string;
-  authUri: string;
-  tokenUri: string;
-  clientSecret: string;
-  redirectUri?: string;
-}
-
 /** An auth scheme and the credential that satisfies it. */
 export interface SchemeCredential {
   authScheme: AuthScheme;
@@ -162,36 +143,24 @@ const openIdConfigSchema = z.object({
   tokenEndpoint: z.string().min(1),
 });
 
-const oauth2ScopesSchema = z.record(z.string(), z.string()).default({});
+const oauth2FlowBase = {
+  refreshUrl: z.string().optional(),
+  scopes: z.record(z.string(), z.string()).default({}),
+};
 
 const oauth2FlowsSchema = z.object({
   implicit: z
-    .object({
-      authorizationUrl: z.string(),
-      refreshUrl: z.string().optional(),
-      scopes: oauth2ScopesSchema,
-    })
+    .object({authorizationUrl: z.string(), ...oauth2FlowBase})
     .optional(),
-  password: z
-    .object({
-      tokenUrl: z.string(),
-      refreshUrl: z.string().optional(),
-      scopes: oauth2ScopesSchema,
-    })
-    .optional(),
+  password: z.object({tokenUrl: z.string(), ...oauth2FlowBase}).optional(),
   clientCredentials: z
-    .object({
-      tokenUrl: z.string(),
-      refreshUrl: z.string().optional(),
-      scopes: oauth2ScopesSchema,
-    })
+    .object({tokenUrl: z.string(), ...oauth2FlowBase})
     .optional(),
   authorizationCode: z
     .object({
       authorizationUrl: z.string(),
       tokenUrl: z.string(),
-      refreshUrl: z.string().optional(),
-      scopes: oauth2ScopesSchema,
+      ...oauth2FlowBase,
     })
     .optional(),
 });
@@ -214,18 +183,6 @@ function describeIssues(error: z.ZodError): string {
   return error.issues
     .map((issue) => `${issue.path.join('.')}: ${issue.message}`)
     .join('; ');
-}
-
-/**
- * Converts the snake_case keys of a raw JSON object to camelCase. Callers hand
- * these factories objects taken straight from a service account key file or an
- * OpenID discovery document, so both cases must read the same, as they do in
- * adk-python.
- */
-function normalizeKeys(
-  config: Record<string, unknown>,
-): Record<string, unknown> {
-  return camelCaseKeys(config) as Record<string, unknown>;
 }
 
 function bearerJwtScheme(): OpenAPIV3.HttpSecurityScheme {
@@ -367,7 +324,9 @@ export function openidDictToSchemeCredential(
   scopes: string[],
   credentialDict: Record<string, unknown>,
 ): OpenIdSchemeCredential {
-  const config = normalizeKeys(configDict);
+  // Both cases must read the same, as they do in adk-python: a caller passes
+  // a discovery document or a client secret file exactly as it downloaded it.
+  const config = camelCaseKeys(configDict) as Record<string, unknown>;
   const parsedConfig = openIdConfigSchema.safeParse(config);
   if (!parsedConfig.success) {
     throw new Error(
@@ -392,7 +351,7 @@ export function openidDictToSchemeCredential(
 function openIdCredential(
   credentialDict: Record<string, unknown>,
 ): AuthCredential {
-  let credential = normalizeKeys(credentialDict);
+  let credential = camelCaseKeys(credentialDict) as Record<string, unknown>;
   // A client secret file downloaded from Google nests the client under a
   // single "web" or "installed" key.
   const [inner] = Object.values(credential);
