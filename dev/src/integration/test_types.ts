@@ -44,7 +44,12 @@ export interface TestSpec {
 
 export interface LlmRecording {
   llmRequest?: LlmRequest;
+  // A single response. The schema adk-python used before SSE recording landed;
+  // still read so goldens written against it keep replaying.
   llmResponse?: LlmResponse;
+  // Every response of one model call, in order. An SSE turn contributes
+  // several partial responses and one final response.
+  llmResponses?: LlmResponse[];
 }
 
 export interface ToolRecording {
