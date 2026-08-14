@@ -14,10 +14,11 @@
  *                   render richer context (here, the full itinerary)
  *   responseSchema  the shape the reply is expected to take
  *
- * Note on `responseSchema`: `RequestInput` does NOT reformat a human reply to
- * fit the schema — the reply must already be in that shape. For a good UX,
- * either collect structured data in your UI, or put an agent node after the
- * pause to normalize whatever the human typed.
+ * Note on `responseSchema`: this one is an **object** schema, and `RequestInput`
+ * does NOT reformat a human reply to fit it — the reply must already be in that
+ * shape. For a good UX, either collect structured data in your UI, or put an
+ * agent node after the pause to normalize whatever the human typed. Only a
+ * scalar schema (string, number, integer, boolean) is enforced on typed text.
  *
  * Run (offline, no API key):
  *   npm run sample -- samples/workflows/human_input/payload_and_schema/agent.ts

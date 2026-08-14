@@ -26,6 +26,7 @@ import {
   interruptResponseMismatch,
   processAuthResume,
   REQUEST_INPUT_FUNCTION_CALL_NAME,
+  resolvePlainTextResponse,
   responseSchemasByInterruptId,
 } from '../../src/workflow/utils/hitl_utils.js';
 import {unwrapResponse} from '../../src/workflow/utils/rehydration_utils.js';
@@ -301,5 +302,113 @@ describe('unwrapResponse', () => {
       result: 'a',
       hint: 'b',
     });
+  });
+});
+
+describe('resolvePlainTextResponse', () => {
+  it('returns the text when the interrupt declared no schema', () => {
+    expect(resolvePlainTextResponse('i1', 'abc', undefined)).toBe('abc');
+  });
+
+  it('returns the text when the schema cannot be compiled', () => {
+    expect(
+      resolvePlainTextResponse('i1', 'abc', {
+        $ref: 'https://example.com/unresolvable.json',
+      }),
+    ).toBe('abc');
+  });
+
+  it('returns the text when a scalar schema cannot be compiled', () => {
+    // A declared scalar type with nothing to enforce it: the type says
+    // 'number' but the external $ref stops the validator being built.
+    expect(
+      resolvePlainTextResponse('i1', 'abc', {
+        type: 'number',
+        $ref: 'https://example.com/unresolvable.json',
+      }),
+    ).toBe('abc');
+  });
+
+  it('leaves a string reply alone, so "42" stays a string', () => {
+    expect(
+      resolvePlainTextResponse('i1', '42', toJsonSchema(z4.string())),
+    ).toBe('42');
+  });
+
+  it('coerces numeric text to the number its schema declared', () => {
+    const numberSchema = toJsonSchema(z4.number());
+    expect(resolvePlainTextResponse('i1', '42', numberSchema)).toBe(42);
+    expect(resolvePlainTextResponse('i1', ' 42 ', numberSchema)).toBe(42);
+  });
+
+  it('coerces boolean text to the boolean its schema declared', () => {
+    const booleanSchema = toJsonSchema(z4.boolean());
+    expect(resolvePlainTextResponse('i1', 'true', booleanSchema)).toBe(true);
+    expect(resolvePlainTextResponse('i1', 'False', booleanSchema)).toBe(false);
+  });
+
+  it('rejects text that is not a number, naming the interrupt', () => {
+    expect(() =>
+      resolvePlainTextResponse('i1', 'abc', toJsonSchema(z4.number())),
+    ).toThrow(/reply to interrupt 'i1' does not match/i);
+  });
+
+  it('explains the scalar rule when it rejects a reply', () => {
+    expect(() =>
+      resolvePlainTextResponse('i1', 'abc', toJsonSchema(z4.number())),
+    ).toThrow(/held to a scalar schema \(string, number, integer, boolean\)/);
+  });
+
+  it('rejects blank text against a number schema', () => {
+    // `Number('   ')` is 0, so a blank reply would otherwise answer as zero.
+    expect(() =>
+      resolvePlainTextResponse('i1', '   ', toJsonSchema(z4.number())),
+    ).toThrow(/reply to interrupt 'i1' does not match/i);
+  });
+
+  it('rejects a boolean word it does not recognise', () => {
+    expect(() =>
+      resolvePlainTextResponse('i1', 'yes', toJsonSchema(z4.boolean())),
+    ).toThrow(/reply to interrupt 'i1' does not match/i);
+  });
+
+  it('rejects a fractional reply to an integer schema', () => {
+    expect(() =>
+      resolvePlainTextResponse('i1', '4.5', toJsonSchema(z4.int())),
+    ).toThrow(/reply to interrupt 'i1' does not match/i);
+  });
+
+  it('rejects text outside the values an enum declared', () => {
+    expect(() =>
+      resolvePlainTextResponse(
+        'i1',
+        'maybe',
+        toJsonSchema(z4.enum(['yes', 'no'])),
+      ),
+    ).toThrow(/reply to interrupt 'i1' does not match/i);
+  });
+
+  it('names the failed constraint in the message', () => {
+    expect(() =>
+      resolvePlainTextResponse('i1', 'abc', toJsonSchema(z4.number())),
+    ).toThrow(/expected number/i);
+  });
+
+  it('leaves the text alone for an object schema', () => {
+    const objectSchema = toJsonSchema(z4.object({userResponse: z4.string()}));
+    expect(resolvePlainTextResponse('i1', 'sounds good', objectSchema)).toBe(
+      'sounds good',
+    );
+  });
+
+  it('leaves the text alone for a schema that declares several types', () => {
+    expect(
+      resolvePlainTextResponse('i1', '42', {type: ['number', 'boolean']}),
+    ).toBe('42');
+  });
+
+  it('leaves the text alone for a schema with no declared type', () => {
+    const unionSchema = toJsonSchema(z4.union([z4.number(), z4.boolean()]));
+    expect(resolvePlainTextResponse('i1', '42', unionSchema)).toBe('42');
   });
 });

@@ -13,6 +13,10 @@ import {BaseNode, toContent} from './base_node.js';
 import type {RunnableNode} from './graph.js';
 import {NodeContext} from './node_context.js';
 import {
+  resolvePlainTextResponse,
+  responseSchemasByInterruptId,
+} from './utils/hitl_utils.js';
+import {
   eventsForCurrentRun,
   reconstructNodeStates,
 } from './utils/rehydration_utils.js';
@@ -139,6 +143,9 @@ export async function* runNodeAsInvocation(
  * data the user never gave it — so it is ignored here. Addressing a specific
  * pause in a multi-interrupt workflow requires structured function responses
  * (resolved by the workflow's own rehydration).
+ *
+ * The reply is held to the interrupt's `responseSchema` when that schema is a
+ * scalar one; see {@link resolvePlainTextResponse}.
  */
 function resumeInputsFromPlainText(
   ic: InvocationContext,
@@ -168,7 +175,8 @@ function resumeInputsFromPlainText(
     return {};
   }
   const [id] = pending;
-  return {[id]: text};
+  const schemas = responseSchemasByInterruptId(events);
+  return {[id]: resolvePlainTextResponse(id, text, schemas.get(id))};
 }
 
 /**

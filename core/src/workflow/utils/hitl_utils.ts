@@ -12,6 +12,7 @@
  */
 
 import {Part} from '@google/genai';
+import type {z as z4} from 'zod/v4';
 import {
   REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
   REQUEST_INPUT_FUNCTION_CALL_NAME,
@@ -114,9 +115,10 @@ export function responseSchemasByInterruptId(
  * rejected reply stays in the session forever, so a checker that threw on
  * sight would end the session rather than the turn.
  *
- * Only structured replies are checked. A plain-text reply is routed to the
- * single pending interrupt as-is (the interactive CLI and the dev UI both rely
- * on that), and holding free text to an object schema would break it.
+ * Only structured replies are checked here. A plain-text reply goes through
+ * {@link resolvePlainTextResponse} instead: it is held to a scalar schema
+ * only, since holding free text to an object schema would break the
+ * interactive CLI and the dev UI.
  *
  * A reply that unwraps to a bare scalar counts as plain text and is exempt for
  * the same reason: `{result: <text>}` is the envelope a client sends when it
@@ -144,19 +146,91 @@ export function interruptResponseMismatch(
   if (result.success) {
     return undefined;
   }
-  const issues = result.error.issues
+  return (
+    `The reply to interrupt '${interruptId}' does not match the ` +
+    `responseSchema it declared: ${formatSchemaIssues(result.error)}. A ` +
+    `structured reply must either match that schema, or wrap a bare value ` +
+    `as {result: <value>}; a plain-text reply is held to a scalar schema ` +
+    `only. The interrupt is still waiting, so you can answer it again.`
+  );
+}
+
+/**
+ * Resolves a plain-text reply against the `responseSchema` its interrupt
+ * declared, returning the value to store in `resumeInputs`.
+ *
+ * A typed reply is text, so it is held only to a *scalar* contract (string,
+ * number, integer, boolean), and numeric or boolean text is coerced to it
+ * first — otherwise `responseSchema: z.number()` could never be answered by
+ * typing. An object or array contract is returned untouched: a human typing
+ * prose at a structured prompt is the documented flow, normalized by a node
+ * after the pause.
+ *
+ * Throws when the text cannot satisfy a scalar contract.
+ */
+export function resolvePlainTextResponse(
+  interruptId: string,
+  text: string,
+  jsonSchema: unknown,
+): unknown {
+  const coerced = coerceScalar(text, jsonSchema);
+  const validator = compileJsonSchema(jsonSchema);
+  // Nothing to enforce: no compilable contract, or a contract wider than a
+  // scalar.
+  if (!validator || coerced === undefined) {
+    return text;
+  }
+  const result = validator.safeParse(coerced);
+  if (result.success) {
+    return coerced;
+  }
+  throw new Error(
+    `The plain-text reply to interrupt '${interruptId}' does not match the ` +
+      `responseSchema it declared: ${formatSchemaIssues(result.error)}. A ` +
+      `typed reply is held to a scalar schema (string, number, integer, ` +
+      `boolean) and numeric or boolean text is coerced to it; answer with a ` +
+      `value that matches, or send a structured functionResponse for this ` +
+      `interrupt.`,
+  );
+}
+
+/**
+ * Reads typed text as the scalar its schema declared, or `undefined` when the
+ * schema declares something wider — an object, an array, a union, or no type.
+ */
+function coerceScalar(text: string, jsonSchema: unknown): unknown {
+  const type =
+    typeof jsonSchema === 'object' &&
+    jsonSchema !== null &&
+    'type' in jsonSchema
+      ? jsonSchema.type
+      : undefined;
+  const trimmed = text.trim();
+  switch (type) {
+    case 'number':
+    case 'integer': {
+      const value = Number(trimmed);
+      return trimmed !== '' && Number.isFinite(value) ? value : text;
+    }
+    case 'boolean': {
+      const lower = trimmed.toLowerCase();
+      return lower === 'true' ? true : lower === 'false' ? false : text;
+    }
+    case 'string':
+      return text;
+    default:
+      return undefined;
+  }
+}
+
+/** Renders schema issues as one line, so both messages above read alike. */
+function formatSchemaIssues(error: z4.ZodError): string {
+  return error.issues
     .map((issue) => {
       const at = issue.path.length ? ` at '${issue.path.join('.')}'` : '';
       return `${issue.message}${at}`;
     })
     .join('; ');
-  return (
-    `The reply to interrupt '${interruptId}' does not match the ` +
-    `responseSchema it declared: ${issues}. A structured reply must either ` +
-    `match that schema, or wrap a bare value as {result: <value>}; a ` +
-    `plain-text reply is accepted as-is and is not checked. The interrupt is ` +
-    `still waiting, so you can answer it again.`
-  );
 }
 
 /** Returns whether an event contains a `request_input` function call. */

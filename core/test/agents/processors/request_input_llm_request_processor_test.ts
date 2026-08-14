@@ -17,6 +17,7 @@ import {
 import {describe, expect, it, vi} from 'vitest';
 import {z} from 'zod';
 import {REQUEST_INPUT_LLM_REQUEST_PROCESSOR} from '../../../src/agents/processors/request_input_llm_request_processor.js';
+import type {SchemaLike} from '../../../src/utils/schema.js';
 import {createRequestInputEvent} from '../../../src/workflow/utils/hitl_utils.js';
 
 vi.mock('../../../src/agents/functions.js', async (importOriginal) => {
@@ -24,7 +25,7 @@ vi.mock('../../../src/agents/functions.js', async (importOriginal) => {
     await importOriginal<typeof import('../../../src/agents/functions.js')>();
   return {
     ...original,
-    handleFunctionCallList: vi.fn().mockResolvedValue(null),
+    handleFunctionCallList: vi.fn(async () => null),
   };
 });
 
@@ -65,10 +66,14 @@ function nodeToolCall(invocationId: string, callId: string): Event {
  * An `adk_request_input` interrupt as the engine mints it: stamped with the
  * node's path, and carrying no invocation id of its own.
  */
-function interrupt(interruptId: string): Event {
+function interrupt(interruptId: string, responseSchema?: SchemaLike): Event {
   return {
     ...createRequestInputEvent(
-      new RequestInput({interruptId, message: `${interruptId}?`}),
+      new RequestInput({
+        interruptId,
+        message: `${interruptId}?`,
+        responseSchema,
+      }),
     ),
     author: TOOL_NAME,
     nodeInfo: {path: TOOL_NAME},
@@ -213,5 +218,75 @@ describe('RequestInputLlmRequestProcessor — plain-text resume', () => {
     ]);
 
     expect(payloadFor(spy, 'call-2')).toEqual({gate_b: 'sure'});
+  });
+});
+
+describe('RequestInputLlmRequestProcessor — plain-text resume held to the declared schema', () => {
+  /**
+   * Runs the processor over a session paused on one interrupt that declared
+   * `responseSchema`, and returns the resume inputs the reply produced.
+   */
+  async function resumeInputsFor(
+    replies: Event[],
+    responseSchema?: SchemaLike,
+  ): Promise<unknown> {
+    const {spy} = await runProcessor([
+      nodeToolCall(CURRENT_INVOCATION, 'call-1'),
+      interrupt('gate_a', responseSchema),
+      ...replies,
+    ]);
+    return payloadFor(spy, 'call-1');
+  }
+
+  it('delivers a number to an interrupt that asked for one', async () => {
+    expect(
+      await resumeInputsFor([userText(CURRENT_INVOCATION, '42')], z.number()),
+    ).toEqual({gate_a: 42});
+  });
+
+  it('fails the turn when the reply cannot be that number', async () => {
+    await expect(
+      resumeInputsFor([userText(CURRENT_INVOCATION, 'abc')], z.number()),
+    ).rejects.toThrow(/reply to interrupt 'gate_a' does not match/i);
+  });
+
+  it('stores the text as typed when the interrupt declared no schema', async () => {
+    expect(
+      await resumeInputsFor([userText(CURRENT_INVOCATION, 'abc')]),
+    ).toEqual({gate_a: 'abc'});
+  });
+
+  it('stores the text as typed for an object schema', async () => {
+    const schema = z.object({approved: z.boolean()});
+    expect(
+      await resumeInputsFor([userText(CURRENT_INVOCATION, 'yes')], schema),
+    ).toEqual({gate_a: 'yes'});
+  });
+
+  it('prefers a structured reply over the plain-text fallback', async () => {
+    // The trailing 'abc' turn would throw if the fallback ran, so this pins the
+    // precedence as well as the value.
+    const structured = createEvent({
+      invocationId: CURRENT_INVOCATION,
+      author: 'user',
+      content: {
+        role: 'user',
+        parts: [
+          {
+            functionResponse: {
+              id: 'gate_a',
+              name: 'adk_request_input',
+              response: {result: 7},
+            },
+          },
+        ],
+      },
+    });
+    expect(
+      await resumeInputsFor(
+        [structured, userText(CURRENT_INVOCATION, 'abc')],
+        z.number(),
+      ),
+    ).toEqual({gate_a: 7});
   });
 });

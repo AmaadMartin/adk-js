@@ -17,6 +17,7 @@ import {isNodeTool} from '../../workflow/nodes/node_tool.js';
 import {
   interruptResponseMismatch,
   REQUEST_INPUT_FUNCTION_CALL_NAME,
+  resolvePlainTextResponse,
   responseSchemasByInterruptId,
 } from '../../workflow/utils/hitl_utils.js';
 import {unwrapResponse} from '../../workflow/utils/rehydration_utils.js';
@@ -136,7 +137,8 @@ export class RequestInputLlmRequestProcessor extends BaseLlmRequestProcessor {
 /**
  * Collects resume inputs from the session: structured `adk_request_input`
  * function responses take precedence; otherwise a plain-text reply is mapped to
- * the single pending interrupt.
+ * the single pending interrupt, held to the scalar `responseSchema` that
+ * interrupt declared.
  *
  * If more than one interrupt is pending, a plain-text reply is ambiguous — it
  * would be broadcast to every pause and at least one node would resume with
@@ -200,7 +202,7 @@ function collectResumeInputs(events: Event[]): Record<string, unknown> {
   }
   const text = parts.map((p) => p.text).join('');
   const [id] = pending;
-  return {[id]: text};
+  return {[id]: resolvePlainTextResponse(id, text, responseSchemas.get(id))};
 }
 
 /**
