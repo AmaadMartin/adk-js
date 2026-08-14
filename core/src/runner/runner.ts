@@ -678,10 +678,6 @@ export class Runner {
 
   /**
    * Determines the next agent to run to continue the session. This is primarily
-   * used for session resumption.
-   */
-  /**
-   * Determines the next agent to run to continue the session. This is primarily
    * used for session resumption across tool and LRO boundaries.
    */
   private determineAgentForResumption(
@@ -710,6 +706,24 @@ export class Runner {
 /**
  * Determines the next agent to run to continue the session. This is primarily
  * used for session resumption across tool and LRO boundaries.
+ *
+ * Dynamic routing invariants and precedence rules:
+ * 1. **Function Response Precedence**: If the last event in the session contains
+ *    a function response matching a prior function call (`functionResponse.id`),
+ *    and the app is resumable, resumption prioritizes the agent that made the
+ *    original function call so it can process tool outputs.
+ * 2. **Transferable LLM Agent Fallback**: Otherwise, scans backward through the
+ *    session event history to find the most recent agent that emitted an event
+ *    and is transferable (`isRoutableLlmAgent(agent)`). To optimize performance
+ *    in long-running sessions, evaluated author names are memoized so tree
+ *    lookups and routability checks occur at most once per unique author.
+ * 3. **Root Agent Default**: If no suitable transferable agent is found in the
+ *    event history, defaults to `rootAgent`.
+ *
+ * @param session The active session containing historical events.
+ * @param rootAgent The root agent of the execution tree.
+ * @param resumabilityConfig The resumability configuration, if the app has one.
+ * @returns The `BaseAgent` responsible for handling the next turn.
  */
 export function determineAgentForResumption(
   session: Session,
@@ -739,8 +753,10 @@ export function determineAgentForResumption(
   // transferable across the agent tree.
   // =========================================================================
   // simplicity: O(N) backward event scan, upgrade to indexed lookups or map if N > 1000.
+  // Each author is evaluated once: a long session repeats a small set of
+  // authors, so the tree lookup and the routability check are memoized.
+  const visitedAuthors = new Set<string>();
   for (let i = session.events.length - 1; i >= 0; i--) {
-    logger.debug('event:', JSON.stringify(session.events[i]));
     const event = session.events[i];
     if (event.author === 'user' || !event.author) {
       continue;
@@ -749,6 +765,11 @@ export function determineAgentForResumption(
     if (event.author === rootAgent.name) {
       return rootAgent;
     }
+
+    if (visitedAuthors.has(event.author)) {
+      continue;
+    }
+    visitedAuthors.add(event.author);
 
     const agent = rootAgent.findSubAgent(event.author);
     if (!agent) {
