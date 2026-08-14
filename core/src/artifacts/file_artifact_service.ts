@@ -9,6 +9,8 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import {fileURLToPath, pathToFileURL} from 'url';
 
+import {CompositeSessionKey} from '../sessions/session.js';
+import {validatePathSegment} from '../utils/file_utils.js';
 import {logger} from '../utils/logger.js';
 
 import {
@@ -60,6 +62,17 @@ interface FileArtifactVersion extends ArtifactVersion {
  * nested directories, and path traversal is rejected to keep the layout
  * portable across filesystems. `{artifactPath}` therefore mirrors the
  * sanitized, scope-relative path derived from each filename.
+ *
+ * `appName`, `userId` and `sessionId` go through the same
+ * {@link validatePathSegment} deny-list as the in-memory and GCS services, so
+ * a scope this service accepts is a scope they accept. `appName` is validated
+ * but is not part of the layout above.
+ *
+ * That deny-list permits `/`, so two different scopes can still name one
+ * directory: `userId: 'alice/sessions/s1'` with a user-scoped filename lands
+ * where `userId: 'alice'` plus `sessionId: 's1'` lands. Containment inside the
+ * root is enforced separately by {@link assertInsideRoot}, which is a lexical
+ * check and not a sandbox: it does not survive symlinks or bind mounts.
  */
 export class FileArtifactService implements BaseArtifactService {
   private readonly rootDir: string;
@@ -89,8 +102,7 @@ export class FileArtifactService implements BaseArtifactService {
 
     const artifactDir = getArtifactDir(
       this.rootDir,
-      userId,
-      sessionId,
+      {appName, userId, sessionId},
       filename,
     );
     await fs.mkdir(artifactDir, {recursive: true});
@@ -128,8 +140,7 @@ export class FileArtifactService implements BaseArtifactService {
 
     const canonicalUri = await getCanonicalUri(
       this.rootDir,
-      userId,
-      sessionId,
+      {appName, userId, sessionId},
       filename,
       nextVersion,
     );
@@ -169,6 +180,7 @@ export class FileArtifactService implements BaseArtifactService {
   }
 
   private async readStoredArtifact({
+    appName,
     userId,
     sessionId,
     filename,
@@ -177,8 +189,7 @@ export class FileArtifactService implements BaseArtifactService {
     try {
       const artifactDir = getArtifactDir(
         this.rootDir,
-        userId,
-        sessionId,
+        {appName, userId, sessionId},
         filename,
       );
 
@@ -276,11 +287,12 @@ export class FileArtifactService implements BaseArtifactService {
   }
 
   async listArtifactKeys({
+    appName,
     userId,
     sessionId,
   }: ListArtifactKeysRequest): Promise<string[]> {
     const filenames: Set<string> = new Set();
-    const userRoot = getUserRoot(this.rootDir, userId);
+    const userRoot = getUserRoot(this.rootDir, appName, userId);
 
     // Session artifacts
     const sessionRoot = getSessionArtifactsDir(userRoot, sessionId);
@@ -310,6 +322,7 @@ export class FileArtifactService implements BaseArtifactService {
   }
 
   async deleteArtifact({
+    appName,
     userId,
     sessionId,
     filename,
@@ -317,8 +330,7 @@ export class FileArtifactService implements BaseArtifactService {
     try {
       const artifactDir = getArtifactDir(
         this.rootDir,
-        userId,
-        sessionId,
+        {appName, userId, sessionId},
         filename,
       );
       await fs.rm(artifactDir, {recursive: true, force: true});
@@ -331,6 +343,7 @@ export class FileArtifactService implements BaseArtifactService {
   }
 
   async listVersions({
+    appName,
     userId,
     sessionId,
     filename,
@@ -338,8 +351,7 @@ export class FileArtifactService implements BaseArtifactService {
     try {
       const artifactDir = getArtifactDir(
         this.rootDir,
-        userId,
-        sessionId,
+        {appName, userId, sessionId},
         filename,
       );
       return await getArtifactVersionsFromDir(artifactDir);
@@ -353,6 +365,7 @@ export class FileArtifactService implements BaseArtifactService {
   }
 
   async listArtifactVersions({
+    appName,
     userId,
     sessionId,
     filename,
@@ -360,8 +373,7 @@ export class FileArtifactService implements BaseArtifactService {
     try {
       const artifactDir = getArtifactDir(
         this.rootDir,
-        userId,
-        sessionId,
+        {appName, userId, sessionId},
         filename,
       );
       const versions = await getArtifactVersionsFromDir(artifactDir);
@@ -394,6 +406,7 @@ export class FileArtifactService implements BaseArtifactService {
   }
 
   async getArtifactVersion({
+    appName,
     userId,
     sessionId,
     filename,
@@ -402,8 +415,7 @@ export class FileArtifactService implements BaseArtifactService {
     try {
       const artifactDir = getArtifactDir(
         this.rootDir,
-        userId,
-        sessionId,
+        {appName, userId, sessionId},
         filename,
       );
 
@@ -438,16 +450,6 @@ export class FileArtifactService implements BaseArtifactService {
   }
 }
 
-const SAFE_SEGMENT_RE = /^[a-zA-Z0-9_@-][a-zA-Z0-9_.@-]{0,255}$/;
-
-export function assertSafeSegment(value: string, label: string): void {
-  if (!value || !SAFE_SEGMENT_RE.test(value)) {
-    throw new Error(
-      `[FileArtifactService] Invalid ${label}: value contains disallowed characters.`,
-    );
-  }
-}
-
 export function assertInsideRoot(
   resolvedPath: string,
   rootDir: string,
@@ -462,8 +464,19 @@ export function assertInsideRoot(
   }
 }
 
-export function getUserRoot(rootDir: string, userId: string): string {
-  assertSafeSegment(userId, 'userId');
+/**
+ * Resolves the storage root of one user.
+ *
+ * `appName` is validated but not joined: it is not part of this service's
+ * layout, and adding it would orphan every artifact already on disk.
+ */
+export function getUserRoot(
+  rootDir: string,
+  appName: string,
+  userId: string,
+): string {
+  validatePathSegment(appName, 'appName');
+  validatePathSegment(userId, 'userId');
   const result = path.join(rootDir, 'users', userId);
   assertInsideRoot(result, rootDir, 'userRoot');
   return result;
@@ -484,7 +497,7 @@ export function getSessionArtifactsDir(
   baseRoot: string,
   sessionId: string,
 ): string {
-  assertSafeSegment(sessionId, 'sessionId');
+  validatePathSegment(sessionId, 'sessionId');
   const result = path.join(baseRoot, 'sessions', sessionId, 'artifacts');
   assertInsideRoot(result, baseRoot, 'sessionArtifactsDir');
   return result;
@@ -498,18 +511,16 @@ function getVersionsDir(artifactDir: string): string {
  * Gets the artifact directory full path for a given artifact keys.
  *
  * @param rootDir The root directory.
- * @param userId The user ID.
- * @param sessionId The session ID.
+ * @param scope The app, user and session the artifact belongs to.
  * @param filename The filename.
  * @returns The artifact directory path.
  */
 function getArtifactDir(
   rootDir: string,
-  userId: string,
-  sessionId: string,
+  {appName, userId, sessionId}: CompositeSessionKey,
   filename: string,
 ): string {
-  const userRoot = getUserRoot(rootDir, userId);
+  const userRoot = getUserRoot(rootDir, appName, userId);
   let scopeRoot: string;
 
   if (isUserScoped(sessionId, filename)) {
@@ -575,25 +586,18 @@ async function getArtifactVersionsFromDir(
  * Gets the canonical URI for an artifact version.
  *
  * @param rootDir The root directory.
- * @param userId The user ID.
- * @param sessionId The session ID.
+ * @param scope The app, user and session the artifact belongs to.
  * @param filename The filename.
  * @param version The version.
  * @returns A promise that resolves to the canonical URI.
  */
 async function getCanonicalUri(
   rootDir: string,
-  userId: string,
-  sessionId: string,
+  scope: CompositeSessionKey,
   filename: string,
   version: number,
 ): Promise<string> {
-  const artifactDir = await getArtifactDir(
-    rootDir,
-    userId,
-    sessionId,
-    filename,
-  );
+  const artifactDir = getArtifactDir(rootDir, scope, filename);
   const storedFilename = path.basename(artifactDir);
   const versionsDir = getVersionsDir(artifactDir);
   const payloadPath = path.join(
