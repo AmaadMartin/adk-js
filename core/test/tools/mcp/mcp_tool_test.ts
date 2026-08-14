@@ -6,9 +6,11 @@
 
 import {
   Context,
+  createSession,
   InvocationContext,
   MCPSessionManager,
   MCPTool,
+  PluginManager,
 } from '@google/adk';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {Tool} from '@modelcontextprotocol/sdk/types.js';
@@ -182,10 +184,11 @@ describe('MCPTool', () => {
 
     const tool = new MCPTool(mockTool, mockSessionManager);
 
-    const invocationContext = {
-      abortSignal: new AbortController().signal,
-      session: {state: {}},
-    } as unknown as InvocationContext;
+    const invocationContext = new InvocationContext({
+      invocationId: 'inv-1',
+      session: createSession({id: 'session', appName: 'app', userId: 'user'}),
+      pluginManager: new PluginManager(),
+    });
 
     const toolContext = new Context({invocationContext});
 

@@ -9,6 +9,8 @@ import {describe, expect, it, vi} from 'vitest';
 import {Context} from '../../../src/agents/context.js';
 import {InvocationContext} from '../../../src/agents/invocation_context.js';
 import {ReadonlyContext} from '../../../src/agents/readonly_context.js';
+import {PluginManager} from '../../../src/plugins/plugin_manager.js';
+import {createSession} from '../../../src/sessions/session.js';
 import {MCPConnectionParams} from '../../../src/tools/mcp/mcp_session_manager.js';
 import {MCPToolset} from '../../../src/tools/mcp/mcp_toolset.js';
 
@@ -192,10 +194,11 @@ describe('MCPToolset', () => {
 
       const toolset = new MCPToolset(stdioParams);
       const tools = await toolset.getTools();
-      const invocationContext = {
-        abortSignal: new AbortController().signal,
-        session: {state: {}},
-      } as unknown as InvocationContext;
+      const invocationContext = new InvocationContext({
+        invocationId: 'inv-1',
+        session: createSession({id: 'session', appName: 'app', userId: 'user'}),
+        pluginManager: new PluginManager(),
+      });
       await tools[0].runAsync({
         args: {},
         toolContext: new Context({invocationContext}),

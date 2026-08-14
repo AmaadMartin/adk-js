@@ -8,8 +8,10 @@ import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   AgentRegistrySingleMCPToolset,
   Context,
+  createSession,
   GCP_MCP_SERVER_DESTINATION_ID,
   InvocationContext,
+  PluginManager,
 } from '../../src/index.js';
 import {StreamableHTTPConnectionParams} from '../../src/tools/mcp/mcp_session_manager.js';
 import {logger} from '../../src/utils/logger.js';
@@ -46,10 +48,11 @@ const BASE_PARAMS: StreamableHTTPConnectionParams = {
 /** Builds the tool context a tool call needs. */
 function toolContext(): Context {
   return new Context({
-    invocationContext: {
-      abortSignal: new AbortController().signal,
-      session: {state: {}},
-    } as unknown as InvocationContext,
+    invocationContext: new InvocationContext({
+      invocationId: 'inv-1',
+      session: createSession({id: 'session', appName: 'app', userId: 'user'}),
+      pluginManager: new PluginManager(),
+    }),
   });
 }
 
