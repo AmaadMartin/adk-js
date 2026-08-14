@@ -823,4 +823,82 @@ export function runArtifactServiceTests(
       expect(keysAfterDelete).not.toContain(filename);
     });
   });
+
+  // Every backend builds its storage key from appName, userId and sessionId,
+  // so every backend has to accept and reject the same values. Running these
+  // cases from the shared suite is what proves they agree.
+  describe('scope identifier validation', () => {
+    it('round-trips an artifact under a userId containing a slash', async () => {
+      const scope = {appName, userId: 'group/user123', sessionId};
+      const filename = 'report.txt';
+
+      const version = await service.saveArtifact({
+        ...scope,
+        filename,
+        artifact: {text: 'hello'},
+      });
+      expect(version).toBe(0);
+
+      const loaded = await service.loadArtifact({...scope, filename});
+      expect(loaded?.text).toBe('hello');
+    });
+
+    it('round-trips an artifact under a sessionId containing a slash', async () => {
+      const scope = {appName, userId, sessionId: 'has/slash'};
+      const filename = 'report.txt';
+
+      const version = await service.saveArtifact({
+        ...scope,
+        filename,
+        artifact: {text: 'hello'},
+      });
+      expect(version).toBe(0);
+
+      const loaded = await service.loadArtifact({...scope, filename});
+      expect(loaded?.text).toBe('hello');
+    });
+
+    const invalidScopes = [
+      {
+        label: 'a traversal userId',
+        scope: {appName, userId: '../escape', sessionId},
+        message: "userId '../escape' must not contain traversal segments.",
+      },
+      {
+        label: 'a drive-qualified appName',
+        scope: {appName: 'C:evil', userId, sessionId},
+        message: "appName 'C:evil' must not be drive-qualified.",
+      },
+      {
+        label: 'a dot-dot sessionId',
+        scope: {appName, userId, sessionId: '..'},
+        message: "sessionId '..' must not contain traversal segments.",
+      },
+      {
+        label: 'an empty userId',
+        scope: {appName, userId: '', sessionId},
+        message: 'userId must not be empty.',
+      },
+    ];
+
+    it.each(invalidScopes)(
+      'rejects $label on saveArtifact',
+      async ({scope, message}) => {
+        await expect(
+          service.saveArtifact({
+            ...scope,
+            filename: 'report.txt',
+            artifact: {text: 'hello'},
+          }),
+        ).rejects.toThrow(message);
+      },
+    );
+
+    it.each(invalidScopes)(
+      'rejects $label on listArtifactKeys',
+      async ({scope, message}) => {
+        await expect(service.listArtifactKeys(scope)).rejects.toThrow(message);
+      },
+    );
+  });
 }

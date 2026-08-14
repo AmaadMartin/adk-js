@@ -55,7 +55,10 @@ describe('FileArtifactService', () => {
         });
 
         const versionDir = path.join(
-          getSessionArtifactsDir(getUserRoot(rootDir, userId), sessionId),
+          getSessionArtifactsDir(
+            getUserRoot(rootDir, appName, userId),
+            sessionId,
+          ),
           'report.pdf',
           'versions',
           '0',
@@ -103,18 +106,19 @@ describe('FileArtifactService', () => {
     });
 
     const ROOT = '/tmp/adk-test-root';
+    const APP = 'test-app';
 
-    describe('assertSafeSegment - valid inputs', () => {
+    describe('validatePathSegment - valid inputs', () => {
       it('allows a plain alphanumeric userId', () => {
-        expect(() => getUserRoot(ROOT, 'alice')).not.toThrow();
+        expect(() => getUserRoot(ROOT, APP, 'alice')).not.toThrow();
       });
       it('allows a UUID as userId', () => {
         expect(() =>
-          getUserRoot(ROOT, '550e8400-e29b-41d4-a716-446655440000'),
+          getUserRoot(ROOT, APP, '550e8400-e29b-41d4-a716-446655440000'),
         ).not.toThrow();
       });
       it('allows an email-style userId', () => {
-        expect(() => getUserRoot(ROOT, 'user.name@org')).not.toThrow();
+        expect(() => getUserRoot(ROOT, APP, 'user.name@org')).not.toThrow();
       });
       it('allows a plain alphanumeric sessionId', () => {
         expect(() =>
@@ -123,46 +127,82 @@ describe('FileArtifactService', () => {
       });
     });
 
-    describe('assertSafeSegment - userId attacks', () => {
-      it('blocks dot-dot-slash traversal in userId', () => {
-        expect(() => getUserRoot(ROOT, '../../etc')).toThrow('Invalid userId');
+    describe('deny-list accepts what the allow-list rejected', () => {
+      it('allows a forward slash in userId', () => {
+        expect(() => getUserRoot(ROOT, APP, 'a/b')).not.toThrow();
       });
-      it('blocks forward slash in userId', () => {
-        expect(() => getUserRoot(ROOT, 'a/b')).toThrow('Invalid userId');
+      it('allows a percent-encoded slash in userId', () => {
+        expect(() => getUserRoot(ROOT, APP, '..%2F..%2Fetc')).not.toThrow();
       });
-      it('blocks percent-encoded slash in userId', () => {
-        expect(() => getUserRoot(ROOT, '..%2F..%2Fetc')).toThrow(
-          'Invalid userId',
-        );
+      it('allows a percent-encoded slash in sessionId', () => {
+        expect(() =>
+          getSessionArtifactsDir(
+            `${ROOT}/users/alice`,
+            '..%2F..%2F..%2Fsecret',
+          ),
+        ).not.toThrow();
       });
-      it('blocks null byte in userId', () => {
-        expect(() => getUserRoot(ROOT, 'alice\x00')).toThrow('Invalid userId');
+      it('allows a space in userId', () => {
+        expect(() => getUserRoot(ROOT, APP, 'user id')).not.toThrow();
       });
-      it('blocks empty string as userId', () => {
-        expect(() => getUserRoot(ROOT, '')).toThrow('Invalid userId');
+      it('allows a colon in sessionId', () => {
+        expect(() =>
+          getSessionArtifactsDir(`${ROOT}/users/alice`, 'sess:42'),
+        ).not.toThrow();
       });
     });
 
-    describe('assertSafeSegment - sessionId attacks', () => {
+    describe('validatePathSegment - appName attacks', () => {
+      it('blocks a traversal appName even though it is not joined into the path', () => {
+        expect(() => getUserRoot(ROOT, '../escape', 'alice')).toThrow(
+          "appName '../escape' must not contain traversal segments.",
+        );
+      });
+      it('blocks a drive-qualified appName', () => {
+        expect(() => getUserRoot(ROOT, 'C:evil', 'alice')).toThrow(
+          "appName 'C:evil' must not be drive-qualified.",
+        );
+      });
+    });
+
+    describe('validatePathSegment - userId attacks', () => {
+      it('blocks dot-dot-slash traversal in userId', () => {
+        expect(() => getUserRoot(ROOT, APP, '../../etc')).toThrow(
+          "userId '../../etc' must not contain traversal segments.",
+        );
+      });
+      it('blocks a leading slash in userId', () => {
+        expect(() => getUserRoot(ROOT, APP, '/etc/passwd')).toThrow(
+          "userId '/etc/passwd' must not be an absolute path or start with a slash.",
+        );
+      });
+      it('blocks null byte in userId', () => {
+        expect(() => getUserRoot(ROOT, APP, 'alice\x00')).toThrow(
+          'userId must not contain null bytes.',
+        );
+      });
+      it('blocks empty string as userId', () => {
+        expect(() => getUserRoot(ROOT, APP, '')).toThrow(
+          'userId must not be empty.',
+        );
+      });
+    });
+
+    describe('validatePathSegment - sessionId attacks', () => {
       const base = `${ROOT}/users/alice`;
       it('blocks dot-dot-slash traversal in sessionId', () => {
         expect(() => getSessionArtifactsDir(base, '../../../secret')).toThrow(
-          'Invalid sessionId',
+          "sessionId '../../../secret' must not contain traversal segments.",
         );
       });
-      it('blocks forward slash in sessionId', () => {
+      it('blocks forward slash traversal in sessionId', () => {
         expect(() => getSessionArtifactsDir(base, 'sess/../../etc')).toThrow(
-          'Invalid sessionId',
+          "sessionId 'sess/../../etc' must not contain traversal segments.",
         );
-      });
-      it('blocks percent-encoded slash in sessionId', () => {
-        expect(() =>
-          getSessionArtifactsDir(base, '..%2F..%2F..%2Fsecret'),
-        ).toThrow('Invalid sessionId');
       });
       it('blocks empty string as sessionId', () => {
         expect(() => getSessionArtifactsDir(base, '')).toThrow(
-          'Invalid sessionId',
+          'sessionId must not be empty.',
         );
       });
     });
