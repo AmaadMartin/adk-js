@@ -17,6 +17,7 @@
     "rebuild": "npm run clean:all && npm install && npm run build",
     "ts:check": "tsc -p tsconfig.check.json && npm run ts:check:core-test",
     "ts:check:core-test": "tsc --noEmit -p core/test/tsconfig.json",
+    "ts:check:published": "tsc -p tests/published_types/tsconfig.json",
     "ts:check:samples": "tsc --noEmit -p samples",
     "lint": "eslint \"**/*.ts\" --max-warnings 0",
     "lint:fix": "eslint --fix \"**/*.ts\"",

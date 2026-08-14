@@ -6,6 +6,7 @@
 
 import {LongRunningFunctionTool} from '@google/adk';
 import {describe, expect, it} from 'vitest';
+import {z} from 'zod';
 
 const LONG_RUNNING_INSTRUCTION = `\n\nNOTE: This is a long-running operation. Do not call this tool again if it has already returned some intermediate or pending status.`;
 
@@ -68,5 +69,29 @@ describe('LongRunningFunctionTool', () => {
     });
 
     expect(result).toBe(42);
+  });
+
+  describe('parameters', () => {
+    it('inherits the schema exposed by FunctionTool', () => {
+      const schema = z.object({purpose: z.string()});
+      const tool = new LongRunningFunctionTool({
+        name: 'ask_for_approval',
+        description: 'Asks for approval.',
+        parameters: schema,
+        execute: async ({purpose}) => purpose,
+      });
+
+      expect(tool.parameters).toBe(schema);
+    });
+
+    it('is undefined when no schema is supplied', () => {
+      const tool = new LongRunningFunctionTool({
+        name: 'my_tool',
+        description: 'Does something.',
+        execute: async () => 'done',
+      });
+
+      expect(tool.parameters).toBeUndefined();
+    });
   });
 });

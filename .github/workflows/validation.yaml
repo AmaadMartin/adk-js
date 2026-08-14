@@ -51,6 +51,9 @@ jobs:
       - name: Type-check core tests
         run: npm run ts:check:core-test
 
+      - name: Check published type surface
+        run: npm run ts:check:published
+
       - name: Run tests and check code coverage
         run: npm run test:coverage
 
