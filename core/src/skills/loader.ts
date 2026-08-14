@@ -329,8 +329,7 @@ async function loadSkillFile(skillDir: string): Promise<Skill> {
     );
   }
 
-  const {frontmatter: parsed, body} = parseSkillMdContent(content);
-  const frontmatter = FrontmatterSchema.parse(parsed);
+  const {frontmatter, body} = parseSkillMdContent(content);
   const dirName = path.basename(resolvedDir);
   if (dirName !== frontmatter.name) {
     throw new Error(
