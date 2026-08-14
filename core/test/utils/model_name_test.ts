@@ -232,6 +232,7 @@ describe('isGemini2OrAbove', () => {
       'gemini-2.5-flash-lite-preview-09-2025',
       'gemini-2.0-flash-001',
       'gemini-2.0-flash-lite-001',
+      'gemini-live-2.5-flash-native-audio',
     ];
 
     for (const model of validModels) {
@@ -243,7 +244,6 @@ describe('isGemini2OrAbove', () => {
 
   describe('invalid models', () => {
     const invalidModels = [
-      'gemini-live-2.5-flash-native-audio',
       'veo-3.1-generate-001',
       'veo-3.0-fast-generate-001',
       'imagen-4.0-ultra-generate-001',
@@ -399,6 +399,75 @@ describe('isGemini2OrAbove with extended model id forms', () => {
 
   for (const model of invalidModels) {
     it(`should return false for model: ${model}`, () => {
+      expect(isGemini2OrAbove(model)).toBe(false);
+    });
+  }
+});
+
+describe('isGemini2OrAbove with Gemini Live model ids', () => {
+  const validModels = [
+    'gemini-live-2.5-flash-preview',
+    'gemini-live-3.0-flash',
+    'projects/p/locations/l/publishers/google/models/gemini-live-2.5-flash-native-audio',
+    'apigee/vertex_ai/v1beta/gemini-live-2.5-flash-native-audio',
+    'models/gemini-live-2.5-flash-native-audio',
+    'gemini/gemini-live-2.5-flash-native-audio',
+  ];
+
+  for (const model of validModels) {
+    it(`should return true for model: ${model}`, () => {
+      expect(isGemini2OrAbove(model)).toBe(true);
+    });
+  }
+
+  const invalidModels = [
+    // The live marker does not lift the 2.0 floor.
+    'gemini-live-1.5-flash',
+    'projects/p/locations/l/publishers/google/models/gemini-live-1.5-flash',
+    'gemini-live',
+    'gemini-live-',
+    'gemini-live-2x',
+    'gemini-live-live-2.5-flash',
+  ];
+
+  for (const model of invalidModels) {
+    it(`should return false for model: ${model}`, () => {
+      expect(isGemini2OrAbove(model)).toBe(false);
+    });
+  }
+});
+
+describe('isGemini2OrAbove version token boundaries', () => {
+  const validModels = [
+    'gemini-2',
+    'gemini-2-pro',
+    'gemini-2.9-experimental',
+    'gemini-3.0-pro',
+    'gemini-2.0.1-flash',
+  ];
+
+  for (const model of validModels) {
+    it(`should return true for model: ${model}`, () => {
+      expect(isGemini2OrAbove(model)).toBe(true);
+    });
+  }
+
+  const invalidModels = [
+    'gemini-2x',
+    'gemini-2.',
+    'gemini-one',
+    'gemini-0.9-test',
+    'gemini-early-exp',
+    'my-gemini-2.5-model',
+    'custom-gemini-2.5-flash',
+    'gemini',
+    'gemini_2_5_flash',
+    'Gemini-2.5-pro',
+    '',
+  ];
+
+  for (const model of invalidModels) {
+    it(`should return false for model: ${model || '<empty string>'}`, () => {
       expect(isGemini2OrAbove(model)).toBe(false);
     });
   }

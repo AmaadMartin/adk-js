@@ -76,6 +76,30 @@ describe('UrlContextTool', () => {
       expect(req.config!.tools).toEqual([{urlContext: {}}]);
     });
 
+    it('adds urlContext for a Gemini Live model', async () => {
+      const tool = new UrlContextTool();
+      const req = makeRequest('gemini-live-2.5-flash-native-audio');
+      await tool.processLlmRequest({
+        llmRequest: req,
+        toolContext: makeToolContext(),
+      });
+
+      expect(req.config!.tools).toEqual([{urlContext: {}}]);
+    });
+
+    it('throws for a Gemini 1.x Live model', async () => {
+      const tool = new UrlContextTool();
+      const req = makeRequest('gemini-live-1.5-flash');
+      await expect(
+        tool.processLlmRequest({
+          llmRequest: req,
+          toolContext: makeToolContext(),
+        }),
+      ).rejects.toThrow(
+        'URL context tool requires Gemini 2 or above, but got gemini-live-1.5-flash',
+      );
+    });
+
     it('adds urlContext for an EAP model', async () => {
       const tool = new UrlContextTool();
       const req = makeRequest('gemini-flash-early-exp');
