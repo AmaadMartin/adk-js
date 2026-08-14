@@ -33,6 +33,9 @@ const TEST_SESSION_ID = 'test_session_id';
 const TEST_MESSAGE = 'test_message';
 
 class MockLlmAgent extends LlmAgent {
+  /** The context this agent was last run with, recorded for assertions. */
+  lastInvocationContext?: InvocationContext;
+
   constructor(
     name: string,
     disallowTransferToParent = false,
@@ -50,6 +53,7 @@ class MockLlmAgent extends LlmAgent {
   protected override async *runAsyncImpl(
     context: InvocationContext,
   ): AsyncGenerator<Event, void, void> {
+    this.lastInvocationContext = context;
     yield createEvent({
       invocationId: context.invocationId,
       author: this.name,
@@ -2032,5 +2036,201 @@ describe('Runner internalization and saveInputBlobsAsArtifacts', () => {
       sessionId: TEST_SESSION_ID,
     });
     expect(session!.events[0].content?.parts?.[0].inlineData).toBeDefined();
+  });
+});
+
+describe('Runner artifact scope and context propagation', () => {
+  let sessionService: InMemorySessionService;
+  let artifactService: InMemoryArtifactService;
+  let agent: MockLlmAgent;
+  let runner: Runner;
+
+  beforeEach(() => {
+    sessionService = new InMemorySessionService();
+    artifactService = new InMemoryArtifactService();
+    agent = new MockLlmAgent('test_agent');
+    runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      artifactService,
+    });
+  });
+
+  it('should pass the session composite key to saveArtifact', async () => {
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    const saveSpy = vi.spyOn(artifactService, 'saveArtifact');
+
+    for await (const _ of runner.runAsync({
+      userId: session.userId,
+      sessionId: session.id,
+      newMessage: {
+        role: 'user',
+        parts: [
+          {text: 'Check this image'},
+          {inlineData: {mimeType: 'image/png', data: 'aW1hZ2VkYXRh'}},
+        ],
+      },
+      runConfig: {saveInputBlobsAsArtifacts: true},
+    })) {
+      // consume generator
+    }
+
+    expect(saveSpy).toHaveBeenCalledTimes(1);
+    expect(saveSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        appName: TEST_APP_ID,
+        userId: TEST_USER_ID,
+        sessionId: TEST_SESSION_ID,
+        filename: expect.stringMatching(/^artifact_.*_1$/),
+        artifact: {inlineData: {mimeType: 'image/png', data: 'aW1hZ2VkYXRh'}},
+      }),
+    );
+  });
+
+  it('should expose the placeholder message, not the raw blob, as invocation userContent', async () => {
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    const originalMessage: Content = {
+      role: 'user',
+      parts: [
+        {text: 'Check this image'},
+        {inlineData: {mimeType: 'image/png', data: 'aW1hZ2VkYXRh'}},
+      ],
+    };
+
+    for await (const _ of runner.runAsync({
+      userId: session.userId,
+      sessionId: session.id,
+      newMessage: originalMessage,
+      runConfig: {saveInputBlobsAsArtifacts: true},
+    })) {
+      // consume generator
+    }
+
+    // The context the agent (and anything reading ReadonlyContext.userContent)
+    // sees must not still hold the base64 payload.
+    const userContent = agent.lastInvocationContext?.userContent;
+    expect(userContent).toBeDefined();
+    expect(userContent!.parts![1].inlineData).toBeUndefined();
+    expect(userContent!.parts![1].text).toMatch(
+      /^\[Uploaded Artifact: "artifact_.*_1"\]$/,
+    );
+  });
+
+  it('should not save artifacts or replace inlineData if saveInputBlobsAsArtifacts is false', async () => {
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    const saveSpy = vi.spyOn(artifactService, 'saveArtifact');
+
+    const originalMessage: Content = {
+      role: 'user',
+      parts: [{inlineData: {mimeType: 'image/png', data: 'aW1hZ2VkYXRh'}}],
+    };
+
+    const events: Event[] = [];
+    for await (const event of runner.runAsync({
+      userId: session.userId,
+      sessionId: session.id,
+      newMessage: originalMessage,
+      runConfig: {saveInputBlobsAsArtifacts: false},
+    })) {
+      events.push(event);
+    }
+
+    expect(saveSpy).not.toHaveBeenCalled();
+    const updatedSession = await sessionService.getSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+    const userEvent = updatedSession!.events[0];
+    expect(userEvent.content?.parts![0].inlineData).toBeDefined();
+  });
+
+  it('should return message unchanged when parts is empty or contains no inlineData', async () => {
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    const saveSpy = vi.spyOn(artifactService, 'saveArtifact');
+
+    const originalMessage: Content = {
+      role: 'user',
+      parts: [{text: 'Only text part'}],
+    };
+
+    for await (const _ of runner.runAsync({
+      userId: session.userId,
+      sessionId: session.id,
+      newMessage: originalMessage,
+      runConfig: {saveInputBlobsAsArtifacts: true},
+    })) {
+      // consume generator
+    }
+
+    expect(saveSpy).not.toHaveBeenCalled();
+    const updatedSession = await sessionService.getSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+    const userEvent = updatedSession!.events[0];
+    expect(userEvent.content?.parts![0]).toEqual({text: 'Only text part'});
+    // Nothing was replaced, so the very same object is handed back - no
+    // needless Content/parts allocation on the blob-free path.
+    expect(agent.lastInvocationContext?.userContent).toBe(originalMessage);
+  });
+
+  it('should return message unchanged when artifactService is not defined', async () => {
+    const runnerWithoutArtifacts = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      artifactService: undefined,
+    });
+
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    const originalMessage: Content = {
+      role: 'user',
+      parts: [{inlineData: {mimeType: 'image/png', data: 'aW1hZ2VkYXRh'}}],
+    };
+
+    for await (const _ of runnerWithoutArtifacts.runAsync({
+      userId: session.userId,
+      sessionId: session.id,
+      newMessage: originalMessage,
+      runConfig: {saveInputBlobsAsArtifacts: true},
+    })) {
+      // consume generator
+    }
+
+    const updatedSession = await sessionService.getSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+    const userEvent = updatedSession!.events[0];
+    expect(userEvent.content?.parts![0].inlineData).toBeDefined();
   });
 });

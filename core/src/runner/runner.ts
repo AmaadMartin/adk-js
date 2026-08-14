@@ -319,12 +319,11 @@ export class Runner {
 
           const invocationContext = new InvocationContext({
             artifactService: this.artifactService
-              ? new ScopedArtifactService(
-                  this.artifactService,
-                  this.appName,
+              ? new ScopedArtifactService(this.artifactService, {
+                  appName: this.appName,
                   userId,
                   sessionId,
-                )
+                })
               : undefined,
             sessionService: this.sessionService,
             memoryService: this.memoryService,
@@ -370,6 +369,13 @@ export class Runner {
                 invocationContext,
                 newMessage,
               );
+              // `saveArtifacts` no longer edits the message in place, so the
+              // context built above still points at the pre-replacement
+              // message. Re-point it, otherwise the raw inline blob stays
+              // visible to everything reading `userContent` (tools,
+              // instruction providers) even though the session only ever sees
+              // the placeholder.
+              invocationContext.userContent = newMessage;
               if (params.abortSignal?.aborted) {
                 return;
               }
@@ -598,6 +604,10 @@ export class Runner {
   /**
    * Saves artifacts from the message parts and replaces the inline data with
    * a file name placeholder and optional file reference.
+   *
+   * The input message is never mutated. When nothing is replaced - no part
+   * carries `inlineData`, or every save failed - the original message is
+   * returned by reference rather than a structurally equal copy.
    *
    * @param invocationContext The current invocation context. Its artifact
    *   service is already scoped to the app, user and session.
