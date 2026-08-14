@@ -27,16 +27,18 @@ import type {LlmResponse} from '../models/llm_response.js';
 import type {BaseTool} from '../tools/base_tool.js';
 import {resolveErrorType} from '../utils/error_utils.js';
 import {version} from '../version.js';
-
-const ERROR_TYPE = 'error.type';
-const GEN_AI_AGENT_DESCRIPTION = 'gen_ai.agent.description';
-const GEN_AI_AGENT_NAME = 'gen_ai.agent.name';
-const GEN_AI_CONVERSATION_ID = 'gen_ai.conversation.id';
-const GEN_AI_OPERATION_NAME = 'gen_ai.operation.name';
-const GEN_AI_TOOL_CALL_ID = 'gen_ai.tool.call.id';
-const GEN_AI_TOOL_DESCRIPTION = 'gen_ai.tool.description';
-const GEN_AI_TOOL_NAME = 'gen_ai.tool.name';
-const GEN_AI_TOOL_TYPE = 'gen_ai.tool.type';
+import {
+  ERROR_TYPE,
+  GEN_AI_AGENT_DESCRIPTION,
+  GEN_AI_AGENT_NAME,
+  GEN_AI_CONVERSATION_ID,
+  GEN_AI_OPERATION_NAME,
+  GEN_AI_TOOL_CALL_ID,
+  GEN_AI_TOOL_DESCRIPTION,
+  GEN_AI_TOOL_NAME,
+  GEN_AI_TOOL_TYPE,
+} from './semconv.js';
+import {tokenUsageAttributes} from './token_usage.js';
 
 const ADK_WORKFLOW_NAME = 'adk.workflow.name';
 const ADK_NODE_PATH = 'adk.node.path';
@@ -329,19 +331,7 @@ export function traceCallLlm({
     shouldAddRequestResponseToSpans() ? safeJsonSerialize(llmResponse) : '{}',
   );
 
-  if (llmResponse.usageMetadata) {
-    span.setAttribute(
-      'gen_ai.usage.input_tokens',
-      llmResponse.usageMetadata.promptTokenCount || 0,
-    );
-  }
-
-  if (llmResponse.usageMetadata?.candidatesTokenCount) {
-    span.setAttribute(
-      'gen_ai.usage.output_tokens',
-      llmResponse.usageMetadata.candidatesTokenCount,
-    );
-  }
+  span.setAttributes(tokenUsageAttributes(llmResponse.usageMetadata));
 
   if (llmResponse.finishReason) {
     // Convert enum to lowercase string array

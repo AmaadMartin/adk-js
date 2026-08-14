@@ -319,5 +319,46 @@ describe('Telemetry Tracing Functions', () => {
       expect(tracedRequest.config).not.toHaveProperty('responseSchema');
       expect(tracedRequest.config).toEqual({topP: 0.8, maxOutputTokens: 100});
     });
+
+    it('should set every token usage attribute the response reports', () => {
+      vi.mocked(trace.getActiveSpan).mockReturnValue(mockSpan);
+      const llmResponse: LlmResponse = {
+        ...mockLlmResponse,
+        usageMetadata: {
+          promptTokenCount: 10,
+          toolUsePromptTokenCount: 5,
+          candidatesTokenCount: 20,
+          thoughtsTokenCount: 8,
+          cachedContentTokenCount: 100,
+        },
+      };
+
+      traceCallLlm({
+        invocationContext: mockInvocationContext,
+        eventId: 'test-event-id',
+        llmRequest: mockLlmRequest,
+        llmResponse,
+      });
+
+      expect(mockSpan.setAttributes).toHaveBeenCalledWith({
+        'gen_ai.usage.input_tokens': 15,
+        'gen_ai.usage.output_tokens': 28,
+        'gen_ai.usage.cache_read.input_tokens': 100,
+        'gen_ai.usage.reasoning.output_tokens': 8,
+      });
+    });
+
+    it('should set no token usage attribute when the response reports none', () => {
+      vi.mocked(trace.getActiveSpan).mockReturnValue(mockSpan);
+
+      traceCallLlm({
+        invocationContext: mockInvocationContext,
+        eventId: 'test-event-id',
+        llmRequest: mockLlmRequest,
+        llmResponse: mockLlmResponse,
+      });
+
+      expect(mockSpan.setAttributes).toHaveBeenCalledWith({});
+    });
   });
 });

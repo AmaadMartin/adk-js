@@ -10,6 +10,12 @@ import type {Event} from '../events/event.js';
 import {createEvent} from '../events/event.js';
 
 import {
+  recordAgentInvocationDuration,
+  recordAgentRequestSize,
+  recordAgentResponseSize,
+  recordAgentWorkflowSteps,
+} from '../telemetry/metrics.js';
+import {
   runAsyncGeneratorInSpan,
   traceAgentInvocation,
 } from '../telemetry/tracing.js';
@@ -252,38 +258,73 @@ export abstract class BaseAgent<
   async *runAsync(
     parentContext: InvocationContext,
   ): AsyncGenerator<Event, void, void> {
-    yield* runAsyncGeneratorInSpan<BaseAgent, Event>(
-      `invoke_agent ${this.name}`,
-      this,
-      async function* () {
-        const context = this.createInvocationContext(parentContext);
+    const startTime = performance.now();
+    const agentName = this.name;
+    let stepCount = 0;
+    let lastContent: Content | undefined;
+    let error: unknown;
+    // Folding each event into two scalars keeps a streaming or long-running
+    // agent from retaining its own event stream. Events authored by a
+    // sub-agent belong to that sub-agent's invocation, not this one.
+    const tally = (event: Event) => {
+      if (event.author !== agentName) {
+        return;
+      }
+      stepCount++;
+      if (event.content) {
+        lastContent = event.content;
+      }
+    };
+    try {
+      yield* runAsyncGeneratorInSpan<BaseAgent, Event>(
+        `invoke_agent ${this.name}`,
+        this,
+        async function* () {
+          const context = this.createInvocationContext(parentContext);
 
-        const beforeAgentCallbackEvent =
-          await this.handleBeforeAgentCallback(context);
-        if (beforeAgentCallbackEvent) {
-          yield beforeAgentCallbackEvent;
-        }
+          recordAgentRequestSize(agentName, context.userContent);
 
-        if (context.endInvocation || parentContext.abortSignal?.aborted) {
-          return;
-        }
+          const beforeAgentCallbackEvent =
+            await this.handleBeforeAgentCallback(context);
+          if (beforeAgentCallbackEvent) {
+            tally(beforeAgentCallbackEvent);
+            yield beforeAgentCallbackEvent;
+          }
 
-        traceAgentInvocation({agent: this, invocationContext: context});
-        for await (const event of this.runAsyncImpl(context)) {
-          yield event;
-        }
+          if (context.endInvocation || parentContext.abortSignal?.aborted) {
+            return;
+          }
 
-        if (context.endInvocation || parentContext.abortSignal?.aborted) {
-          return;
-        }
+          traceAgentInvocation({agent: this, invocationContext: context});
+          for await (const event of this.runAsyncImpl(context)) {
+            tally(event);
+            yield event;
+          }
 
-        const afterAgentCallbackEvent =
-          await this.handleAfterAgentCallback(context);
-        if (afterAgentCallbackEvent) {
-          yield afterAgentCallbackEvent;
-        }
-      },
-    );
+          if (context.endInvocation || parentContext.abortSignal?.aborted) {
+            return;
+          }
+
+          const afterAgentCallbackEvent =
+            await this.handleAfterAgentCallback(context);
+          if (afterAgentCallbackEvent) {
+            tally(afterAgentCallbackEvent);
+            yield afterAgentCallbackEvent;
+          }
+        },
+      );
+    } catch (e) {
+      error = e;
+      throw e;
+    } finally {
+      recordAgentInvocationDuration(
+        agentName,
+        (performance.now() - startTime) / 1000,
+        error,
+      );
+      recordAgentWorkflowSteps(agentName, stepCount);
+      recordAgentResponseSize(agentName, lastContent);
+    }
   }
 
   /**

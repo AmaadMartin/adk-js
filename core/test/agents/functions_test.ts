@@ -30,6 +30,7 @@ import {
   generateClientFunctionCallId,
   mergeParallelFunctionResponseEvents,
 } from '../../src/agents/functions.js';
+import * as metrics from '../../src/telemetry/metrics.js';
 import {logger} from '../../src/utils/logger.js';
 
 // Get the test target function
@@ -203,6 +204,26 @@ describe('handleFunctionCallList', () => {
     expect(definedEvent.content!.parts![0].functionResponse!.response).toEqual({
       result: 'tool executed',
     });
+  });
+
+  it('records the execution duration of a tool that succeeds', async () => {
+    const spy = vi.spyOn(metrics, 'recordToolExecutionDuration').mockClear();
+
+    await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [functionCall],
+      toolsDict,
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(spy).toHaveBeenCalledWith(
+      'testTool',
+      'FunctionTool',
+      'test_agent',
+      expect.any(Number),
+      undefined,
+    );
   });
 
   it('should wrap array responses into a {results: array} object', async () => {
@@ -397,6 +418,31 @@ describe('handleFunctionCallList', () => {
     expect(event!.content!.parts![0].functionResponse!.response).toEqual({
       error: "Error in tool 'errorTool': tool error message content",
     });
+  });
+
+  it('records the error type of a tool that throws', async () => {
+    const spy = vi.spyOn(metrics, 'recordToolExecutionDuration').mockClear();
+    const errorFunctionCall: FunctionCall = {
+      id: randomIdForTestingOnly(),
+      name: 'errorTool',
+      args: {},
+    };
+
+    await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [errorFunctionCall],
+      toolsDict: {'errorTool': errorTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(spy).toHaveBeenCalledWith(
+      'errorTool',
+      'FunctionTool',
+      'test_agent',
+      expect.any(Number),
+      expect.any(Error),
+    );
   });
 
   it('should pass abortSignal to tool execution', async () => {

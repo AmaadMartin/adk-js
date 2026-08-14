@@ -42,6 +42,7 @@ import {GenerateContentResponse, Type} from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
+import * as metrics from '../../src/telemetry/metrics.js';
 
 const {generateAuthEvent, getLongRunningFunctionCalls} =
   llmAgentFunctionsExportedForTestingOnly;
@@ -353,6 +354,96 @@ describe('LlmAgent.callLlm', () => {
     agent.model = new MockLlm(null, modelError);
     const result = await callLlmUnderTest();
     expect(result).toEqual([{errorCode: '500', errorMessage: 'LLM error'}]);
+  });
+
+  it('stops generation early when abort signal is triggered', async () => {
+    class AbortTestLlm extends BaseLlm {
+      constructor() {
+        super({model: 'abort-test-llm'});
+      }
+      async *generateContentAsync(): AsyncGenerator<LlmResponse, void, void> {
+        yield originalLlmResponse;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        yield {
+          content: {role: 'model', parts: [{text: 'chunk 2'}]},
+        } as LlmResponse;
+      }
+      async connect(): Promise<BaseLlmConnection> {
+        return new MockLlmConnection();
+      }
+    }
+
+    const controller = new AbortController();
+    invocationContext = new InvocationContext({
+      invocationId: 'inv_123',
+      session: {} as Session,
+      agent: agent,
+      pluginManager,
+      abortSignal: controller.signal,
+    });
+
+    agent.model = new AbortTestLlm();
+
+    // Abort after 20ms (between chunk 1 and chunk 2)
+    setTimeout(() => {
+      controller.abort();
+    }, 20);
+
+    const result = await callLlmUnderTest();
+    expect(result).toEqual([originalLlmResponse]);
+  });
+
+  it('records client operation duration and token usage', async () => {
+    const spyDuration = vi.spyOn(metrics, 'recordClientOperationDuration');
+    const spyTokenUsage = vi.spyOn(metrics, 'recordClientTokenUsage');
+
+    agent.model = new MockLlm(originalLlmResponse);
+    await callLlmUnderTest();
+
+    expect(spyDuration).toHaveBeenCalledWith({
+      agentName: 'test_agent',
+      elapsedS: expect.any(Number),
+      llmRequest,
+      response: originalLlmResponse,
+      error: undefined,
+    });
+    expect(spyTokenUsage).toHaveBeenCalledWith({
+      agentName: 'test_agent',
+      llmRequest,
+      response: originalLlmResponse,
+    });
+  });
+
+  it('records the last streamed response, not the first', async () => {
+    const spyDuration = vi
+      .spyOn(metrics, 'recordClientOperationDuration')
+      .mockClear();
+    const spyTokenUsage = vi
+      .spyOn(metrics, 'recordClientTokenUsage')
+      .mockClear();
+    // Streaming usage is cumulative, so the last chunk holds the call total.
+    const firstChunk: LlmResponse = {
+      content: {role: 'model', parts: [{text: 'chunk 1'}]},
+      usageMetadata: {promptTokenCount: 12, candidatesTokenCount: 1},
+    };
+    const lastChunk: LlmResponse = {
+      content: {role: 'model', parts: [{text: 'chunk 2'}]},
+      usageMetadata: {promptTokenCount: 12, candidatesTokenCount: 7},
+    };
+
+    agent.model = new StreamingMockLlm([firstChunk, lastChunk]);
+    await callLlmUnderTest();
+
+    expect(spyTokenUsage).toHaveBeenCalledTimes(1);
+    expect(spyTokenUsage).toHaveBeenCalledWith({
+      agentName: 'test_agent',
+      llmRequest,
+      response: lastChunk,
+    });
+    expect(spyDuration).toHaveBeenCalledTimes(1);
+    expect(spyDuration).toHaveBeenCalledWith(
+      expect.objectContaining({response: lastChunk}),
+    );
   });
 });
 

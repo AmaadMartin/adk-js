@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {ApiError} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {
   errorHasCode,
@@ -296,10 +297,49 @@ describe('formatError', () => {
 /** A subclass that never assigns `this.name`. */
 class QuotaExceededError extends Error {}
 
+class ClassifiedError extends Error {
+  constructor(
+    message: string,
+    readonly errorType: string,
+  ) {
+    super(message);
+    this.name = 'ClassifiedError';
+  }
+}
+
 describe('resolveErrorType', () => {
+  it('prefers an error type the error classified itself with', () => {
+    expect(
+      resolveErrorType(new ClassifiedError('boom', 'MCP_TOOL_ERROR')),
+    ).toBe('MCP_TOOL_ERROR');
+  });
+
+  it('prefers a classified error type over an HTTP status', () => {
+    const error: Error & {errorType?: string} = new ApiError({
+      message: 'rate limited',
+      status: 429,
+    });
+    error.errorType = 'QUOTA_EXCEEDED';
+
+    expect(resolveErrorType(error)).toBe('QUOTA_EXCEEDED');
+  });
+
+  it('ignores an error type that is not a string', () => {
+    const error: Error & {errorType?: number} = new TypeError('boom');
+    error.errorType = 503;
+
+    expect(resolveErrorType(error)).toBe('TypeError');
+  });
+
   it('reports the HTTP status an ApiError-shaped error carries', () => {
     const err = Object.assign(new Error('Resource exhausted'), {status: 429});
     expect(resolveErrorType(err)).toBe('429');
+  });
+
+  it('reports the HTTP status of a genai API error', () => {
+    const error = new ApiError({message: 'rate limited', status: 429});
+
+    expect(resolveErrorType(error)).toBe('429');
   });
 
   it('reports the class name of a built-in error', () => {
@@ -310,6 +350,13 @@ describe('resolveErrorType', () => {
     expect(resolveErrorType(new QuotaExceededError('over'))).toBe(
       'QuotaExceededError',
     );
+  });
+
+  it('falls back to the class name when the name has been blanked out', () => {
+    const error = new TypeError('not a function');
+    error.name = '';
+
+    expect(resolveErrorType(error)).toBe('TypeError');
   });
 
   it('ignores a numeric status outside the HTTP range', () => {
@@ -328,6 +375,10 @@ describe('resolveErrorType', () => {
 
   it('stringifies a thrown number', () => {
     expect(resolveErrorType(42)).toBe('42');
+  });
+
+  it('stringifies a thrown null', () => {
+    expect(resolveErrorType(null)).toBe('null');
   });
 });
 
