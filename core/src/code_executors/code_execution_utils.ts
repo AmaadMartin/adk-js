@@ -251,23 +251,6 @@ function fenceTag(leadingDelimiter: string): string {
 }
 
 /**
- * The language tag an executable code part declares, or undefined when it
- * declares none. `Language` values are compared case-insensitively and with a
- * `LANGUAGE_` prefix stripped, so both 'PYTHON' and 'LANGUAGE_PYTHON' resolve
- * to 'python'.
- */
-function partLanguageTag(part: Part): string | undefined {
-  const language = part.executableCode?.language;
-  if (!language) {
-    return undefined;
-  }
-  const tag = String(language)
-    .toLowerCase()
-    .replace(/^language_/, '');
-  return tag && tag !== 'unspecified' ? tag : undefined;
-}
-
-/**
  * Chooses the delimiter pair to render an executable code part with.
  *
  * The first pair is a fallback, not a default: `tool_code` leads the default
@@ -286,11 +269,11 @@ export function selectCodeBlockDelimiter(
   if (!codeBlockDelimiters.length) {
     return ['', ''];
   }
-  const tag = partLanguageTag(part);
-  const match = tag
-    ? codeBlockDelimiters.find((d) => fenceTag(d[0]) === tag)
-    : undefined;
-  return match ?? codeBlockDelimiters[0];
+  const tag = part.executableCode?.language?.toLowerCase();
+  return (
+    codeBlockDelimiters.find((d) => fenceTag(d[0]) === tag) ??
+    codeBlockDelimiters[0]
+  );
 }
 
 /**

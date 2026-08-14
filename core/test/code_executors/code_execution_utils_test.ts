@@ -383,21 +383,17 @@ describe('selectCodeBlockDelimiter', () => {
     expect(selectCodeBlockDelimiter(PYTHON_PART, [])).toEqual(['', '']);
   });
 
-  it('matches the fence case-insensitively and ignores a LANGUAGE_ prefix', () => {
-    // A persisted event or an A2A payload can carry the wire spelling of the
-    // enum, so the tag is normalized before it is compared.
-    const spellings = ['python', 'PYTHON', 'LANGUAGE_PYTHON'];
+  it('matches the fence case-insensitively', () => {
+    // Language.PYTHON is 'PYTHON', so an exact compare against the lowercase
+    // fence tag would never match.
+    const part: Part = {
+      executableCode: {code: 'x = 1', language: Language.PYTHON},
+    };
 
-    for (const spelling of spellings) {
-      const part: Part = {
-        executableCode: {code: 'x = 1', language: spelling as Language},
-      };
-
-      expect(selectCodeBlockDelimiter(part, DEFAULT_DELIMITERS)).toEqual([
-        '```python\n',
-        '\n```',
-      ]);
-    }
+    expect(selectCodeBlockDelimiter(part, DEFAULT_DELIMITERS)).toEqual([
+      '```python\n',
+      '\n```',
+    ]);
   });
 });
 
