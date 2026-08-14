@@ -34,6 +34,11 @@ export interface RestApiToolOptions {
    * `new Agent({connect: {ca: corporateCaPem}})` from `undici`. Node's `fetch`
    * honours this; a browser has no equivalent hook and ignores it.
    *
+   * Node's `fetch` drives the dispatcher through its own built-in `undici`, so
+   * the `undici` release the dispatcher comes from must implement the same
+   * dispatch interface as the Node build in use. A mismatch rejects the
+   * request with `UND_ERR_INVALID_ARG`.
+   *
    * The caller owns the dispatcher's lifecycle. The tool never closes it,
    * because one dispatcher is normally shared across several tools.
    */
