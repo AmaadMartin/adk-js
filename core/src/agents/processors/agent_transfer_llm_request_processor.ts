@@ -14,6 +14,9 @@ import {InvocationContext} from '../invocation_context.js';
 import {isLlmAgent, LlmAgent} from '../llm_agent.js';
 import {BaseLlmRequestProcessor} from './base_llm_processor.js';
 
+/** The function call name ADK puts on the wire to hand off to another agent. */
+export const TRANSFER_TO_AGENT_FUNCTION_CALL_NAME = 'transfer_to_agent';
+
 /**
  * Augments the {@link LlmRequest} to support agent transfer. When the current
  * agent has reachable transfer targets (sub-agents, peer agents, or a parent
@@ -22,7 +25,7 @@ import {BaseLlmRequestProcessor} from './base_llm_processor.js';
  * hand off control.
  */
 export class AgentTransferLlmRequestProcessor extends BaseLlmRequestProcessor {
-  private readonly toolName = 'transfer_to_agent' as const;
+  private readonly toolName = TRANSFER_TO_AGENT_FUNCTION_CALL_NAME;
   private readonly tool = new FunctionTool({
     name: this.toolName,
     description:
