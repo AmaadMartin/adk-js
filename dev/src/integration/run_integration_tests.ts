@@ -4,11 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {registerConformanceIntegrations} from '../conformance/conformance_integrations.js';
-import {batchLoadYamlAgentConfig} from '../conformance/yaml_agent_loader.js';
+import {buildAgentRegistry} from '../conformance/yaml_agent_loader.js';
 import {batchLoadYamlTestDefs} from '../conformance/yaml_test_loader.js';
-import {AgentRegistry} from './agent_registry.js';
-import {IntegrationRegistry} from './integration_registry.js';
 import {TestRunner} from './test_runner.js';
 
 export async function runIntegrationTests({
@@ -20,21 +17,7 @@ export async function runIntegrationTests({
   testsDir: string;
   forceRunAll: boolean;
 }) {
-  console.log(`Loading agents from ${agentsDir}`);
-  const agentConfigs = await batchLoadYamlAgentConfig(agentsDir);
-  console.log(agentConfigs.size, 'agents found');
-
-  console.log('Registering conformance integrations.');
-  const registry = new IntegrationRegistry();
-  registerConformanceIntegrations(registry);
-  console.log(registry.summary());
-
-  console.log('Registering agents.');
-  const agentRegistry = new AgentRegistry(registry);
-  for (const [name, agentConfig] of agentConfigs) {
-    agentRegistry.registerAgentConfig(name, agentConfig);
-  }
-  console.log(agentRegistry.summary());
+  const agentRegistry = await buildAgentRegistry(agentsDir);
 
   console.log(`Loading tests from ${testsDir}`);
   const testSpecs = await batchLoadYamlTestDefs(testsDir);
