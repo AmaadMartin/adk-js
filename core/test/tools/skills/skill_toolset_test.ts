@@ -328,6 +328,24 @@ describe('skill_toolset', () => {
         }
       }
 
+      function skillActivating(toolName: string): Skill {
+        return {
+          frontmatter: {
+            name: 'skill-with-tools',
+            description: 'desc',
+            metadata: {adk_additional_tools: [toolName]},
+          },
+          instructions: 'instructions',
+        };
+      }
+
+      function activatedContext(): ReadonlyContext {
+        return {
+          agentName: 'test-agent',
+          state: {get: vi.fn().mockReturnValue(['skill-with-tools'])},
+        } as unknown as ReadonlyContext;
+      }
+
       it('closes every nested toolset exactly once', async () => {
         const closeFirst = vi.fn().mockResolvedValue(undefined);
         const closeSecond = vi.fn().mockResolvedValue(undefined);
@@ -482,6 +500,68 @@ describe('skill_toolset', () => {
         const toolset = new SkillToolset([mockSkill]);
 
         await expect(toolset.close()).resolves.toBeUndefined();
+      });
+
+      it('re-resolves the tools of a nested toolset after close', async () => {
+        class DummyTool extends BaseTool {
+          constructor() {
+            super({name: 'reresolved_tool', description: 'dummy'});
+          }
+          async runAsync() {
+            return 'dummy';
+          }
+        }
+        const nestedGetTools = vi.fn().mockResolvedValue([new DummyTool()]);
+        class SourceToolset extends BaseToolset {
+          constructor() {
+            super([]);
+          }
+          override getTools = nestedGetTools;
+          override async close() {}
+        }
+        const toolset = new SkillToolset([skillActivating('reresolved_tool')], {
+          additionalTools: [new SourceToolset()],
+        });
+        const context = activatedContext();
+
+        await toolset.getTools(context);
+        expect(nestedGetTools).toHaveBeenCalledTimes(1);
+
+        await toolset.close();
+        const tools = await toolset.getTools(context);
+
+        expect(nestedGetTools).toHaveBeenCalledTimes(2);
+        expect(tools.map((t) => t.name)).toContain('reresolved_tool');
+      });
+
+      it('resolves and closes a toolset that carries the signature but is not an instance', async () => {
+        class DummyTool extends BaseTool {
+          constructor() {
+            super({name: 'foreign_tool', description: 'dummy'});
+          }
+          async runAsync() {
+            return 'dummy';
+          }
+        }
+        const foreignClose = vi.fn().mockResolvedValue(undefined);
+        // Stands in for a toolset built by a second copy of the ADK package,
+        // which fails `instanceof` but carries the shared toolset signature.
+        // The cast is required because `BaseToolset` declares a protected
+        // member, so no object literal is structurally assignable to it.
+        const foreignToolset = {
+          [Symbol.for('google.adk.baseToolset')]: true,
+          getTools: vi.fn().mockResolvedValue([new DummyTool()]),
+          close: foreignClose,
+        } as unknown as BaseToolset;
+        const toolset = new SkillToolset([skillActivating('foreign_tool')], {
+          additionalTools: [foreignToolset],
+        });
+
+        const tools = await toolset.getTools(activatedContext());
+        await toolset.close();
+
+        expect(tools.map((t) => t.name)).toContain('foreign_tool');
+        expect(foreignClose).toHaveBeenCalledTimes(1);
       });
     });
   });
