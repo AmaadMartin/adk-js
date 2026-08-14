@@ -11,26 +11,22 @@ import {
   ToolAuthHandler,
 } from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
+import {CredentialManager} from '../../../src/auth/credential_manager.js';
 import {State} from '../../../src/sessions/state.js';
-import {AutoAuthCredentialExchanger} from '../../../src/tools/openapi_tool/auth/credential_exchangers/auto_auth_credential_exchanger.js';
 
-// Mock AutoAuthCredentialExchanger
-vi.mock(
-  '../../../src/tools/openapi_tool/auth/credential_exchangers/auto_auth_credential_exchanger.js',
-  () => {
-    return {
-      AutoAuthCredentialExchanger: vi.fn().mockImplementation(() => ({
-        exchange: vi.fn().mockResolvedValue({
-          credential: {
-            authType: AuthCredentialTypes.HTTP,
-            http: {scheme: 'bearer', credentials: {token: 'exchanged-token'}},
-          },
-          wasExchanged: true,
-        }),
-      })),
-    };
-  },
-);
+vi.mock('../../../src/auth/credential_manager.js', () => {
+  return {
+    CredentialManager: vi.fn().mockImplementation(() => ({
+      exchangeCredential: vi.fn().mockResolvedValue({
+        credential: {
+          authType: AuthCredentialTypes.HTTP,
+          http: {scheme: 'bearer', credentials: {token: 'exchanged-token'}},
+        },
+        wasExchanged: true,
+      }),
+    })),
+  };
+});
 
 describe('ToolAuthHandler', () => {
   it('should return done if no auth scheme', async () => {
@@ -178,16 +174,16 @@ describe('ToolAuthHandler', () => {
       authType: AuthCredentialTypes.API_KEY,
       apiKey: 'static-key',
     };
-    // The real exchanger has no exchanger registered for apiKey/http, so it
+    // The real manager has no exchanger registered for apiKey/http, so it
     // hands the credential straight back.
-    vi.mocked(AutoAuthCredentialExchanger).mockImplementationOnce(
+    vi.mocked(CredentialManager).mockImplementationOnce(
       () =>
         ({
-          exchange: vi.fn().mockResolvedValue({
+          exchangeCredential: vi.fn().mockResolvedValue({
             credential: staticCredential,
             wasExchanged: false,
           }),
-        }) as unknown as AutoAuthCredentialExchanger,
+        }) as unknown as CredentialManager,
     );
 
     const state = new State();

@@ -10,7 +10,6 @@ import {
   AuthCredential,
   AuthCredentialTypes,
 } from '../../../src/auth/auth_credential.js';
-import {AutoAuthCredentialExchanger} from '../../../src/tools/openapi_tool/auth/credential_exchangers/auto_auth_credential_exchanger.js';
 import {ServiceAccountCredentialExchanger} from '../../../src/tools/openapi_tool/auth/credential_exchangers/service_account_exchanger.js';
 
 // Mock google-auth-library
@@ -25,35 +24,6 @@ vi.mock('google-auth-library', () => {
       }),
     })),
   };
-});
-
-describe('AutoAuthCredentialExchanger', () => {
-  it('should return original credential if no exchanger registered', async () => {
-    const exchanger = new AutoAuthCredentialExchanger();
-    const credential = {authType: AuthCredentialTypes.API_KEY, apiKey: 'key'};
-
-    const result = await exchanger.exchange({authCredential: credential});
-
-    expect(result.wasExchanged).toBe(false);
-    expect(result.credential).toEqual(credential);
-  });
-
-  it('should use ServiceAccountCredentialExchanger for serviceAccount', async () => {
-    const exchanger = new AutoAuthCredentialExchanger();
-    const credential = {
-      authType: AuthCredentialTypes.SERVICE_ACCOUNT,
-      serviceAccount: {
-        useDefaultCredential: true,
-      },
-    };
-
-    const result = await exchanger.exchange({
-      authCredential: credential as unknown as AuthCredential,
-    });
-
-    expect(result.wasExchanged).toBe(true);
-    expect(result.credential.http?.credentials.token).toBe('mock-adc-token');
-  });
 });
 
 describe('ServiceAccountCredentialExchanger', () => {

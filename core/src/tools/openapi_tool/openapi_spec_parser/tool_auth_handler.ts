@@ -8,8 +8,8 @@ import {OpenAPIV3} from 'openapi-types';
 import {Context} from '../../../agents/context.js';
 import {AuthCredential} from '../../../auth/auth_credential.js';
 import {AuthConfig} from '../../../auth/auth_tool.js';
+import {CredentialManager} from '../../../auth/credential_manager.js';
 import {experimental} from '../../../utils/experimental.js';
-import {AutoAuthCredentialExchanger} from '../auth/credential_exchangers/auto_auth_credential_exchanger.js';
 
 export interface AuthPreparationResult {
   state: 'pending' | 'done';
@@ -101,11 +101,9 @@ export class ToolAuthHandler {
       return {state: 'pending'};
     }
 
-    const exchanger = new AutoAuthCredentialExchanger();
-    const result = await exchanger.exchange({
-      authScheme: this.authScheme,
-      authCredential: credential,
-    });
+    const result = await new CredentialManager(authConfig).exchangeCredential(
+      credential,
+    );
 
     // Only cache what cannot cheaply be obtained again: an auth response is
     // readable once, and an exchange costs a round trip. A statically
