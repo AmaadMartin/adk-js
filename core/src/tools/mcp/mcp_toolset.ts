@@ -63,16 +63,12 @@ export class MCPToolset extends BaseToolset {
     this.mcpSessionManager = new MCPSessionManager(connectionParams);
   }
 
-  /**
-   * Lists the server's tools, retrying the round trip once.
-   *
-   * Listing is a read-only request, so a second attempt cannot duplicate a
-   * side effect. The retry covers this round trip rather than the whole of
-   * {@link getTools} because the filtering that follows is pure, and the
-   * second attempt opens a fresh session.
-   */
-  private listTools(signal?: AbortSignal): Promise<ListToolsResult> {
-    return retryOnce(
+  async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {
+    // Listing is a read-only request, so a second attempt cannot duplicate a
+    // side effect. The retry covers the round trip rather than the whole
+    // method because the filtering that follows is pure, and the second
+    // attempt opens a fresh session.
+    const listResult = await retryOnce(
       async () => {
         const session = await this.mcpSessionManager.createSession();
         try {
@@ -81,15 +77,10 @@ export class MCPToolset extends BaseToolset {
           await this.mcpSessionManager.closeSession(session);
         }
       },
-      {signal, description: 'MCP tool listing'},
-    );
-  }
-
-  async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {
-    // `invocationContext` is optional-chained because callers construct a
-    // partial ReadonlyContext when only the tool filter needs one.
-    const listResult = await this.listTools(
-      context?.invocationContext?.abortSignal,
+      {
+        signal: context?.invocationContext.abortSignal,
+        description: 'MCP tool listing',
+      },
     );
 
     logger.debug(`number of tools: ${listResult.tools.length}`);

@@ -6,14 +6,16 @@
 
 import {
   Context,
+  createSession,
   InvocationContext,
   MCPConnectionParams,
   MCPSessionManager,
   MCPTool,
+  PluginManager,
 } from '@google/adk';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {Tool} from '@modelcontextprotocol/sdk/types.js';
-import {Mock, describe, expect, it, vi} from 'vitest';
+import {describe, expect, it, Mock, vi} from 'vitest';
 
 describe('MCPTool', () => {
   it('passes abort signal to callTool', async () => {
@@ -197,10 +199,16 @@ describe('MCPTool', () => {
 
     /** Builds a tool context carrying `signal`. */
     function contextWith(signal: AbortSignal): Context {
-      const invocationContext = {
+      const invocationContext = new InvocationContext({
+        invocationId: 'test-invocation',
+        session: createSession({
+          id: 'test-session',
+          appName: 'test-app',
+          userId: 'test-user',
+        }),
+        pluginManager: new PluginManager([]),
         abortSignal: signal,
-        session: {state: {}},
-      } as unknown as InvocationContext;
+      });
       return new Context({invocationContext});
     }
 

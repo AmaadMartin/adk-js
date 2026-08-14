@@ -5,7 +5,6 @@
  */
 
 import {FunctionDeclaration} from '@google/genai';
-import type {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {
   CallToolRequest,
   CallToolResult,
@@ -64,22 +63,17 @@ export class MCPTool extends BaseTool {
     };
   }
 
-  /**
-   * Opens a session, retrying once because nothing has been sent yet.
-   *
-   * Session setup happens before the tool call exists, so a failure here
-   * provably did not run anything on the server and can be retried without
-   * risking a duplicate side effect.
-   */
-  private createSession(signal?: AbortSignal): Promise<Client> {
-    return retryOnce(() => this.mcpSessionManager.createSession(), {
-      signal,
-      description: 'MCP session creation',
-    });
-  }
-
   override async runAsync(request: RunAsyncToolRequest): Promise<unknown> {
-    const session = await this.createSession(request.toolContext.abortSignal);
+    // Session setup happens before the tool call exists, so a failure here
+    // provably did not run anything on the server and can be retried without
+    // risking a duplicate side effect.
+    const session = await retryOnce(
+      () => this.mcpSessionManager.createSession(),
+      {
+        signal: request.toolContext.abortSignal,
+        description: 'MCP session creation',
+      },
+    );
 
     try {
       const callRequest: CallToolRequest = {} as CallToolRequest;
