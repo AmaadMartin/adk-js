@@ -803,6 +803,67 @@ describe('DatabaseSessionService', () => {
       );
     });
 
+    it('rejects a createSession handle after a concurrent writer backdated the row', async () => {
+      const created = await service.createSession({
+        appName,
+        userId,
+        sessionId: 's-created-marker',
+      });
+
+      const writer = await loadSession('s-created-marker');
+      await service.appendEvent({
+        session: writer,
+        event: createEvent({timestamp: created.lastUpdateTime - 5000}),
+      });
+
+      await expect(
+        service.appendEvent({session: created, event: createEvent()}),
+      ).rejects.toThrow(StaleSessionError);
+    });
+
+    it('rejects a getSession handle after a concurrent writer backdated the row', async () => {
+      await service.createSession({
+        appName,
+        userId,
+        sessionId: 's-loaded-marker',
+      });
+      const handleA = await loadSession('s-loaded-marker');
+      const handleB = await loadSession('s-loaded-marker');
+
+      await service.appendEvent({
+        session: handleB,
+        event: createEvent({timestamp: handleA.lastUpdateTime - 5000}),
+      });
+
+      await expect(
+        service.appendEvent({session: handleA, event: createEvent()}),
+      ).rejects.toThrow(StaleSessionError);
+    });
+
+    it('rejects a listSessions handle after a concurrent writer backdated the row', async () => {
+      await service.createSession({
+        appName,
+        userId,
+        sessionId: 's-listed-marker',
+      });
+
+      const listed = await service.listSessions({appName, userId});
+      const handle = listed.sessions.find((s) => s.id === 's-listed-marker');
+      if (!handle) {
+        expect.fail('listSessions did not return s-listed-marker');
+      }
+
+      const writer = await loadSession('s-listed-marker');
+      await service.appendEvent({
+        session: writer,
+        event: createEvent({timestamp: handle.lastUpdateTime - 5000}),
+      });
+
+      await expect(
+        service.appendEvent({session: handle, event: createEvent()}),
+      ).rejects.toThrow(StaleSessionError);
+    });
+
     it('accepts a marker-less handle that still holds the newest stored event', async () => {
       const session = await service.createSession({
         appName,
