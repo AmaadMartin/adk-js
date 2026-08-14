@@ -13,6 +13,7 @@ import {
 
 import {toGeminiSchema} from '../../utils/gemini_schema_util.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
+import {isReservedToolName} from '../reserved_tool_names.js';
 
 import {MCPSessionManager} from './mcp_session_manager.js';
 
@@ -34,6 +35,9 @@ import {MCPSessionManager} from './mcp_session_manager.js';
  * exposed by the MCP server. This is critical when the toolset applies a
  * prefix to tool names (e.g., for LLM namespace disambiguation), ensuring
  * the correct original name is used when executing on the server.
+ *
+ * @throws An {@link Error} when the tool name is one the ADK framework
+ *   reserves for its own function calls.
  */
 export class MCPTool extends BaseTool {
   private readonly mcpTool: Tool;
@@ -45,6 +49,11 @@ export class MCPTool extends BaseTool {
     mcpSessionManager: MCPSessionManager,
     originalName?: string,
   ) {
+    if (isReservedToolName(mcpTool.name)) {
+      throw new Error(
+        `MCP tool name '${mcpTool.name}' collides with a reserved ADK tool name.`,
+      );
+    }
     super({name: mcpTool.name, description: mcpTool.description || ''});
     this.mcpTool = mcpTool;
     this.mcpSessionManager = mcpSessionManager;

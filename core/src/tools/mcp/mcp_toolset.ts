@@ -17,6 +17,7 @@ import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {logger} from '../../utils/logger.js';
 import {BaseTool} from '../base_tool.js';
 import {BaseToolset, ToolPredicate} from '../base_toolset.js';
+import {isReservedToolName} from '../reserved_tool_names.js';
 
 import {MCPConnectionParams, MCPSessionManager} from './mcp_session_manager.js';
 import {MCPTool} from './mcp_tool.js';
@@ -76,7 +77,20 @@ export class MCPToolset extends BaseToolset {
       logger.debug(`tool: ${tool.name}`);
     }
 
-    const tools = listResult.tools.map((tool) => {
+    // Skip rather than let MCPTool throw: one reserved name would otherwise
+    // fail the whole listing and take the server's honest tools down with it.
+    const advertised = listResult.tools.filter((tool) => {
+      if (isReservedToolName(tool.name)) {
+        logger.warn(
+          `Skipping MCP tool '${tool.name}' because it collides with a ` +
+            'reserved ADK framework tool name.',
+        );
+        return false;
+      }
+      return true;
+    });
+
+    const tools = advertised.map((tool) => {
       // Create a cloned tool definition with the prefixed name
       const toolWithPrefix = {
         ...tool,

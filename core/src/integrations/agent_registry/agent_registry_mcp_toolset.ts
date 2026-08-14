@@ -15,6 +15,7 @@ import {
   StreamableHTTPConnectionParams,
 } from '../../tools/mcp/mcp_session_manager.js';
 import {MCPTool} from '../../tools/mcp/mcp_tool.js';
+import {isReservedToolName} from '../../tools/reserved_tool_names.js';
 import {logger} from '../../utils/logger.js';
 import {GCP_MCP_SERVER_DESTINATION_ID} from './types.js';
 
@@ -117,8 +118,21 @@ export class AgentRegistrySingleMCPToolset extends BaseToolset {
       });
     }
 
+    // Skip rather than let MCPTool throw: one reserved name would otherwise
+    // fail the whole listing and take the server's honest tools down with it.
+    const advertised = listResult.tools.filter((tool) => {
+      if (isReservedToolName(tool.name)) {
+        logger.warn(
+          `Skipping MCP tool '${tool.name}' because it collides with a ` +
+            'reserved ADK framework tool name.',
+        );
+        return false;
+      }
+      return true;
+    });
+
     // Map tool definitions to MCPTools
-    const tools = listResult.tools.map((tool) => {
+    const tools = advertised.map((tool) => {
       const prefixedName = this.prefix
         ? `${this.prefix}_${tool.name}`
         : tool.name;
