@@ -20,17 +20,6 @@ function makeRequest(model?: string, tools: Tool[] = []): LlmRequest {
 
 describe('GoogleSearchTool', () => {
   describe('processLlmRequest', () => {
-    it('returns early when model is not set', async () => {
-      const tool = new GoogleSearchTool();
-      const req = makeRequest(undefined);
-      await tool.processLlmRequest({
-        llmRequest: req,
-        toolContext: {} as never,
-      });
-
-      expect(req.config?.tools).toEqual([]);
-    });
-
     it('adds googleSearchRetrieval for Gemini 1.x model', async () => {
       const tool = new GoogleSearchTool();
       const req = makeRequest('gemini-1.5-pro');

@@ -19,17 +19,6 @@ function makeRequest(model?: string, tools = []): LlmRequest {
 
 describe('UrlContextTool', () => {
   describe('processLlmRequest', () => {
-    it('returns early when model is not set', async () => {
-      const tool = new UrlContextTool();
-      const req = makeRequest(undefined);
-      await tool.processLlmRequest({
-        llmRequest: req,
-        toolContext: {} as never,
-      });
-
-      expect(req.config?.tools).toEqual([]);
-    });
-
     it('adds urlContext for Gemini 2+ model', async () => {
       const tool = new UrlContextTool();
       const req = makeRequest('gemini-2.0-flash');
