@@ -15,6 +15,10 @@ import {
   isInMemoryConnectionString,
 } from './in_memory_session_service.js';
 import {
+  RedisSessionService,
+  isRedisConnectionString,
+} from './redis_session_service.js';
+import {
   VertexAiSessionService,
   isVertexAiConnectionString,
 } from './vertex_ai_session_service.js';
@@ -26,6 +30,10 @@ export function getSessionServiceFromUri(uri: string): BaseSessionService {
 
   if (isDatabaseConnectionString(uri)) {
     return new DatabaseSessionService(uri);
+  }
+
+  if (isRedisConnectionString(uri)) {
+    return new RedisSessionService({uri});
   }
 
   if (isVertexAiConnectionString(uri)) {
