@@ -13,9 +13,20 @@ import type {
   StreamableHTTPClientTransport,
   StreamableHTTPClientTransportOptions,
 } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import type {RequestHandlerExtra} from '@modelcontextprotocol/sdk/shared/protocol.js';
+import {
+  ElicitRequestSchema,
+  type ClientNotification,
+  type ClientRequest,
+  type ElicitRequest,
+  type ElicitResult,
+} from '@modelcontextprotocol/sdk/types.js';
 
 import {formatError} from '../../utils/error_utils.js';
 import {logger} from '../../utils/logger.js';
+
+/** Identifies ADK to every MCP server it connects to. */
+const CLIENT_INFO = {name: 'MCPClient', version: '1.0.0'};
 
 /** Surfaces a background transport error that would otherwise be dropped. */
 function logTransportError(err: unknown): void {
@@ -101,6 +112,32 @@ export type MCPConnectionParams =
   | StreamableHTTPConnectionParams;
 
 /**
+ * Handles a server-initiated `elicitation/create` request.
+ *
+ * The MCP SDK validates the request before the callback sees it and validates
+ * the returned result before it goes back to the server, so the callback only
+ * has to decide what to answer: `accept` (optionally with `content`), `decline`
+ * or `cancel`. An error thrown by the callback is returned to the server as a
+ * JSON-RPC error.
+ */
+export type ElicitationCallback = (
+  request: ElicitRequest,
+  extra: RequestHandlerExtra<ClientRequest, ClientNotification>,
+) => ElicitResult | Promise<ElicitResult>;
+
+/** Optional behaviour shared by every MCP client session ADK opens. */
+export interface MCPSessionOptions {
+  /**
+   * Handles server-initiated `elicitation/create` requests, including URL-mode
+   * elicitations used for out-of-band flows such as auth challenges.
+   *
+   * When supplied, the client advertises form- and URL-mode elicitation
+   * support; when omitted, no elicitation capability is advertised.
+   */
+  elicitationCallback?: ElicitationCallback;
+}
+
+/**
  * Manages Model Context Protocol (MCP) client sessions.
  *
  * This class is responsible for establishing and managing connections to MCP
@@ -116,17 +153,32 @@ export type MCPConnectionParams =
 export class MCPSessionManager {
   private readonly connectionParams: MCPConnectionParams;
   private readonly activeSessions = new Set<Client>();
+  private readonly elicitationCallback?: ElicitationCallback;
 
-  constructor(connectionParams: MCPConnectionParams) {
+  constructor(
+    connectionParams: MCPConnectionParams,
+    options?: MCPSessionOptions,
+  ) {
     this.connectionParams = connectionParams;
+    this.elicitationCallback = options?.elicitationCallback;
   }
 
   async createSession(): Promise<Client> {
     const {Client, StdioClientTransport, StreamableHTTPClientTransport} =
       await loadMcpSdk();
-    const client = new Client({name: 'MCPClient', version: '1.0.0'});
+    // The elicitation capability must be declared at construction: the SDK
+    // rejects `setRequestHandler(ElicitRequestSchema, ...)` without it, and
+    // capabilities can no longer be registered once the client is connected.
+    const client = this.elicitationCallback
+      ? new Client(CLIENT_INFO, {
+          capabilities: {elicitation: {form: {}, url: {}}},
+        })
+      : new Client(CLIENT_INFO);
 
     try {
+      if (this.elicitationCallback) {
+        client.setRequestHandler(ElicitRequestSchema, this.elicitationCallback);
+      }
       switch (this.connectionParams.type) {
         case 'StdioConnectionParams': {
           const transport = new StdioClientTransport(

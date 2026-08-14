@@ -19,7 +19,10 @@ import type {BaseTool} from '../base_tool.js';
 import type {ToolPredicate} from '../base_toolset.js';
 import {BaseToolset} from '../base_toolset.js';
 
-import type {MCPConnectionParams} from './mcp_session_manager.js';
+import type {
+  MCPConnectionParams,
+  MCPSessionOptions,
+} from './mcp_session_manager.js';
 import {MCPSessionManager} from './mcp_session_manager.js';
 import {MCPTool} from './mcp_tool.js';
 
@@ -51,6 +54,14 @@ import {MCPTool} from './mcp_tool.js';
  *   const mcpToolset = new MCPToolset(connectionParams);
  *   const tools = await mcpToolset.getTools();
  *
+ * Pass {@link MCPSessionOptions} to answer server-initiated requests. An
+ * `elicitationCallback` handles `elicitation/create`, which servers use for
+ * out-of-band flows such as auth challenges:
+ *
+ *   const mcpToolset = new MCPToolset(connectionParams, [], undefined, {
+ *     elicitationCallback: () => ({action: 'decline'}),
+ *   });
+ *
  */
 export class MCPToolset extends BaseToolset {
   private readonly mcpSessionManager: MCPSessionManager;
@@ -59,9 +70,10 @@ export class MCPToolset extends BaseToolset {
     connectionParams: MCPConnectionParams,
     toolFilter: ToolPredicate | string[] = [],
     prefix?: string,
+    options?: MCPSessionOptions,
   ) {
     super(toolFilter, prefix);
-    this.mcpSessionManager = new MCPSessionManager(connectionParams);
+    this.mcpSessionManager = new MCPSessionManager(connectionParams, options);
   }
 
   async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {

@@ -5,9 +5,13 @@
  */
 
 import type {Client} from '@modelcontextprotocol/sdk/client/index.js';
+import {ElicitRequestSchema} from '@modelcontextprotocol/sdk/types.js';
 import {describe, expect, it, vi} from 'vitest';
 import type {ReadonlyContext} from '../../../src/agents/readonly_context.js';
-import type {MCPConnectionParams} from '../../../src/tools/mcp/mcp_session_manager.js';
+import type {
+  ElicitationCallback,
+  MCPConnectionParams,
+} from '../../../src/tools/mcp/mcp_session_manager.js';
 import {MCPToolset} from '../../../src/tools/mcp/mcp_toolset.js';
 
 vi.hoisted(() => {
@@ -331,6 +335,59 @@ describe('MCPToolset', () => {
           0,
         );
       });
+    });
+  });
+
+  describe('elicitation', () => {
+    const elicitationCallback: ElicitationCallback = () => ({
+      action: 'decline',
+    });
+
+    /** Installs a discovery client double that records handler registration. */
+    async function mockClientOnce() {
+      const {Client} =
+        await import('@modelcontextprotocol/sdk/client/index.js');
+      const client = {
+        connect: noop(),
+        close: noop(),
+        listTools: vi.fn().mockResolvedValue({tools: []}),
+        setRequestHandler: vi.fn(),
+      };
+      vi.mocked(Client).mockImplementationOnce(
+        () => client as unknown as Client,
+      );
+      return client;
+    }
+
+    it('forwards the elicitation callback to the session manager', async () => {
+      const client = await mockClientOnce();
+      const toolset = new MCPToolset(stdioParams, [], undefined, {
+        elicitationCallback,
+      });
+
+      await toolset.getTools();
+
+      expect(client.setRequestHandler).toHaveBeenCalledOnce();
+      expect(client.setRequestHandler.mock.calls[0][0]).toBe(
+        ElicitRequestSchema,
+      );
+      expect(client.setRequestHandler.mock.calls[0][1]).toBe(
+        elicitationCallback,
+      );
+    });
+
+    it('constructs the client unchanged when no options are passed', async () => {
+      const {Client} =
+        await import('@modelcontextprotocol/sdk/client/index.js');
+      const client = await mockClientOnce();
+      const toolset = new MCPToolset(stdioParams, [], 'myprefix');
+
+      await toolset.getTools();
+
+      expect(client.setRequestHandler).not.toHaveBeenCalled();
+      expect(vi.mocked(Client).mock.calls.at(-1)).toEqual([
+        {name: 'MCPClient', version: '1.0.0'},
+      ]);
     });
   });
 });

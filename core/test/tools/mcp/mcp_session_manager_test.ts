@@ -4,11 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {MCPConnectionParams} from '@google/adk';
+import type {ElicitationCallback, MCPConnectionParams} from '@google/adk';
 import {MCPSessionManager} from '@google/adk';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import {ElicitRequestSchema} from '@modelcontextprotocol/sdk/types.js';
 import {describe, expect, it, vi} from 'vitest';
 // The logger singleton is internal (not part of the public API), so it is
 // imported via a relative path to spy on the exact instance the manager uses.
@@ -297,6 +298,87 @@ describe('MCPSessionManager', () => {
       );
 
       errorSpy.mockRestore();
+    });
+  });
+
+  describe('elicitation', () => {
+    const elicitationParams: MCPConnectionParams = {
+      type: 'StdioConnectionParams',
+      serverParams: {command: 'test-command'},
+    };
+
+    const elicitationCallback: ElicitationCallback = () => ({
+      action: 'decline',
+    });
+
+    /** Installs a client double that records handler registration. */
+    function mockClientOnce() {
+      const client = {
+        connect: vi.fn().mockResolvedValue(undefined),
+        close: vi.fn().mockResolvedValue(undefined),
+        setRequestHandler: vi.fn(),
+      };
+      vi.mocked(Client).mockImplementationOnce(
+        () => client as unknown as Client,
+      );
+      return client;
+    }
+
+    it('registers the elicitation handler when a callback is supplied', async () => {
+      const client = mockClientOnce();
+      const manager = new MCPSessionManager(elicitationParams, {
+        elicitationCallback,
+      });
+
+      await manager.createSession();
+
+      expect(client.setRequestHandler).toHaveBeenCalledOnce();
+      expect(client.setRequestHandler.mock.calls[0][0]).toBe(
+        ElicitRequestSchema,
+      );
+      expect(client.setRequestHandler.mock.calls[0][1]).toBe(
+        elicitationCallback,
+      );
+    });
+
+    it('declares form and URL elicitation capability when a callback is supplied', async () => {
+      mockClientOnce();
+      const manager = new MCPSessionManager(elicitationParams, {
+        elicitationCallback,
+      });
+
+      await manager.createSession();
+
+      expect(vi.mocked(Client).mock.calls.at(-1)).toEqual([
+        {name: 'MCPClient', version: '1.0.0'},
+        {capabilities: {elicitation: {form: {}, url: {}}}},
+      ]);
+    });
+
+    it('declares nothing and registers nothing when the option is omitted', async () => {
+      const client = mockClientOnce();
+      const manager = new MCPSessionManager(elicitationParams);
+
+      await manager.createSession();
+
+      expect(client.setRequestHandler).not.toHaveBeenCalled();
+      expect(vi.mocked(Client).mock.calls.at(-1)).toHaveLength(1);
+      expect(vi.mocked(Client).mock.calls.at(-1)).toEqual([
+        {name: 'MCPClient', version: '1.0.0'},
+      ]);
+    });
+
+    it('registers the handler before connecting', async () => {
+      const client = mockClientOnce();
+      const manager = new MCPSessionManager(elicitationParams, {
+        elicitationCallback,
+      });
+
+      await manager.createSession();
+
+      expect(client.setRequestHandler.mock.invocationCallOrder[0]).toBeLessThan(
+        client.connect.mock.invocationCallOrder[0],
+      );
     });
   });
 });
