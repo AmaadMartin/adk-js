@@ -4,11 +4,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {MCPConnectionParams, MCPSessionManager} from '@google/adk';
+import {
+  MCPConnectionParams,
+  MCPSessionManager,
+  StreamableHTTPConnectionParams,
+} from '@google/adk';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
-import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import {describe, expect, it, vi} from 'vitest';
+import {
+  StreamableHTTPClientTransport,
+  StreamableHTTPClientTransportOptions,
+} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 // The logger singleton is internal (not part of the public API), so it is
 // imported via a relative path to spy on the exact instance the manager uses.
 import {logger} from '../../../src/utils/logger.js';
@@ -296,6 +303,227 @@ describe('MCPSessionManager', () => {
       );
 
       errorSpy.mockRestore();
+    });
+  });
+
+  describe('streamable HTTP connection options', () => {
+    const STREAM_IDLE_TIMEOUT_SECONDS = 10;
+
+    beforeEach(() => {
+      vi.clearAllMocks();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    });
+
+    /** Options recorded by the most recent transport construction. */
+    function lastTransportOptions(): StreamableHTTPClientTransportOptions {
+      const options = vi
+        .mocked(StreamableHTTPClientTransport)
+        .mock.calls.at(-1)?.[1];
+      if (!options) expect.fail('the transport was built without options');
+      return options;
+    }
+
+    /** The transport instance the most recent session was built on. */
+    function lastTransport(): StreamableHTTPClientTransport {
+      const transport = vi
+        .mocked(StreamableHTTPClientTransport)
+        .mock.instances.at(-1);
+      if (!transport) expect.fail('no transport was constructed');
+      return transport;
+    }
+
+    /** An event-stream response whose body never produces a chunk. */
+    function stalledEventStreamResponse(): Response {
+      return new Response(new ReadableStream<Uint8Array>({start() {}}), {
+        headers: {'content-type': 'text/event-stream'},
+      });
+    }
+
+    it('applies the configured connect timeout to the initialize request', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+        timeout: 30,
+      });
+
+      const client = await manager.createSession();
+
+      expect(client.connect).toHaveBeenCalledWith(expect.anything(), {
+        timeout: 30000,
+      });
+    });
+
+    it('leaves the SDK default connect timeout when timeout is unset', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+      });
+
+      const client = await manager.createSession();
+
+      expect(client.connect).toHaveBeenCalledWith(expect.anything(), undefined);
+    });
+
+    it('ignores a non-positive connect timeout', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+        timeout: 0,
+      });
+
+      const client = await manager.createSession();
+
+      expect(client.connect).toHaveBeenCalledWith(expect.anything(), undefined);
+    });
+
+    it('does not install a fetch wrapper when sseReadTimeout is unset', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+      });
+
+      await manager.createSession();
+
+      expect(lastTransportOptions()).not.toHaveProperty('fetch');
+    });
+
+    it('fails a stalled event stream once sseReadTimeout elapses', async () => {
+      vi.useFakeTimers();
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(stalledEventStreamResponse()),
+      );
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+        sseReadTimeout: STREAM_IDLE_TIMEOUT_SECONDS,
+      });
+      await manager.createSession();
+
+      const wrappedFetch = lastTransportOptions().fetch;
+      if (!wrappedFetch) expect.fail('sseReadTimeout installed no fetch');
+      const response = await wrappedFetch('http://test-url');
+      const body = response.body;
+      if (!body) expect.fail('the wrapped response had no body');
+
+      const read = expect(body.getReader().read()).rejects.toThrow(
+        'Stream idle for more than 10000 ms',
+      );
+      await vi.advanceTimersByTimeAsync(STREAM_IDLE_TIMEOUT_SECONDS * 1000);
+
+      await read;
+    });
+
+    it('composes the configured transportOptions.fetch with the idle timeout', async () => {
+      const callerFetch = vi.fn().mockResolvedValue(new Response('{}'));
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+        sseReadTimeout: STREAM_IDLE_TIMEOUT_SECONDS,
+        transportOptions: {fetch: callerFetch},
+      });
+      await manager.createSession();
+
+      const wrappedFetch = lastTransportOptions().fetch;
+      if (!wrappedFetch) expect.fail('sseReadTimeout installed no fetch');
+      expect(wrappedFetch).not.toBe(callerFetch);
+      await wrappedFetch('http://test-url');
+
+      expect(callerFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not wrap the caller options again on a second session', async () => {
+      const params: StreamableHTTPConnectionParams = {
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+        sseReadTimeout: STREAM_IDLE_TIMEOUT_SECONDS,
+        transportOptions: {},
+      };
+      const manager = new MCPSessionManager(params);
+
+      await manager.createSession();
+      await manager.createSession();
+
+      expect(params.transportOptions).toEqual({});
+    });
+
+    it('terminates the server session on close when terminateOnClose is set', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+        terminateOnClose: true,
+      });
+      const client = await manager.createSession();
+      const terminateSession = vi.fn().mockResolvedValue(undefined);
+      lastTransport().terminateSession = terminateSession;
+
+      await manager.closeSession(client);
+
+      expect(terminateSession).toHaveBeenCalledTimes(1);
+      expect(terminateSession.mock.invocationCallOrder[0]).toBeLessThan(
+        vi.mocked(client.close).mock.invocationCallOrder[0],
+      );
+      expect(manager.getActiveSessions()).toEqual([]);
+    });
+
+    it('does not terminate the server session when terminateOnClose is unset', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+      });
+      const client = await manager.createSession();
+      const terminateSession = vi.fn().mockResolvedValue(undefined);
+      lastTransport().terminateSession = terminateSession;
+
+      await manager.closeSession(client);
+
+      expect(terminateSession).not.toHaveBeenCalled();
+      expect(client.close).toHaveBeenCalledTimes(1);
+    });
+
+    it('closes the client even when the termination request fails', async () => {
+      const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+        terminateOnClose: true,
+      });
+      const client = await manager.createSession();
+      lastTransport().terminateSession = vi
+        .fn()
+        .mockRejectedValue(new Error('DELETE refused'));
+
+      await manager.closeSession(client);
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to terminate MCP session'),
+      );
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('DELETE refused'),
+      );
+      expect(client.close).toHaveBeenCalledTimes(1);
+      expect(manager.getActiveSessions()).toEqual([]);
+      warnSpy.mockRestore();
+    });
+
+    it('does not attempt a termination request for a stdio session', async () => {
+      const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      const manager = new MCPSessionManager({
+        type: 'StdioConnectionParams',
+        serverParams: {command: 'test-command'},
+      });
+      const client = await manager.createSession();
+
+      await manager.closeSession(client);
+
+      expect(warnSpy).not.toHaveBeenCalled();
+      expect(client.close).toHaveBeenCalledTimes(1);
+      expect(manager.getActiveSessions()).toEqual([]);
+      warnSpy.mockRestore();
     });
   });
 });
