@@ -192,9 +192,7 @@ export function prepareRequestParams(
   const queryParams = new URLSearchParams();
   let body: unknown = undefined;
 
-  // The first media type only, matching OperationParser and prepareRequestBody.
-  // A `$ref` schema does not count as an object: OpenApiSpecParser resolves
-  // references before a tool is built, so an unresolved one carries no type.
+  // OperationParser.processRequestBody is the authority for this classification.
   const bodySchema =
     requestBody && 'content' in requestBody
       ? Object.values(requestBody.content)[0]?.schema
