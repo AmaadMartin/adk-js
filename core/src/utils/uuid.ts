@@ -9,14 +9,7 @@ import {randomUUID} from './env_aware_utils.js';
 /** A source of unique identifier strings. */
 export type IdProvider = () => string;
 
-/**
- * The default provider.
- *
- * This wraps `randomUUID` instead of referencing it directly, so the call is
- * resolved on every read. A detached reference would capture the binding once
- * at module load and escape the test interceptions that replace the
- * `env_aware_utils` module.
- */
+/** The default provider, which keeps the library's existing UUID source. */
 const defaultIdProvider: IdProvider = () => randomUUID();
 
 let idProvider: IdProvider = defaultIdProvider;
