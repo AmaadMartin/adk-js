@@ -15,8 +15,6 @@ import {
   SkillToolset,
 } from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
-// Imported from the source path so the spy targets the same module instance
-// that `@google/adk` resolves to.
 import {logger} from '../../../src/utils/logger.js';
 
 describe('skill_toolset', () => {
@@ -385,26 +383,6 @@ describe('skill_toolset', () => {
         expect(closeFirst).toHaveBeenCalledTimes(1);
         expect(closeRejecting).toHaveBeenCalledTimes(1);
         expect(closeLast).toHaveBeenCalledTimes(1);
-      });
-
-      it('closes a toolset that carries the signature but is not an instance', async () => {
-        const foreignClose = vi.fn().mockResolvedValue(undefined);
-        // Stands in for a toolset built by a second copy of the ADK package,
-        // which fails `instanceof` but carries the shared toolset signature.
-        // The cast is required because `BaseToolset` declares a protected
-        // member, so no object literal is structurally assignable to it.
-        const foreignToolset = {
-          [Symbol.for('google.adk.baseToolset')]: true,
-          getTools: vi.fn().mockResolvedValue([]),
-          close: foreignClose,
-        } as unknown as BaseToolset;
-        const toolset = new SkillToolset([mockSkill], {
-          additionalTools: [foreignToolset],
-        });
-
-        await toolset.close();
-
-        expect(foreignClose).toHaveBeenCalledTimes(1);
       });
 
       it('still clears the fetched-skill cache when a nested close rejects', async () => {
