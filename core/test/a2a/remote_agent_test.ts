@@ -22,9 +22,11 @@ import {
   InvocationContext,
   RemoteA2AAgent,
   RemoteA2AAgentConfig,
+  resetIdProvider,
   Session,
+  setIdProvider,
 } from '@google/adk';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 type A2AStreamEventData =
   | Message
@@ -365,5 +367,44 @@ describe('A2ARemoteAgent', () => {
         configuration: {acceptedOutputModes: ['custom']},
       }),
     );
+  });
+  describe('with an installed ID provider', () => {
+    afterEach(() => {
+      resetIdProvider();
+    });
+
+    it('takes the outbound messageId from the provider', async () => {
+      setIdProvider(() => 'provider-id');
+      const card: AgentCard = {
+        name: 'Remote',
+        description: 'test',
+        protocolVersion: '1.0',
+        defaultInputModes: [],
+        defaultOutputModes: [],
+        capabilities: {streaming: true},
+        skills: [],
+        url: 'https://example.com',
+        version: '1.0',
+      };
+      const agent = new RemoteA2AAgent({
+        name: 'test-agent',
+        agentCard: card,
+        clientFactory: mockClientFactory,
+      });
+      const mockStream = async function* () {
+        yield {
+          kind: 'artifact-update',
+          artifact: {parts: [{kind: 'text', text: 'response'}]},
+        } as A2AStreamEventData;
+      };
+      vi.mocked(mockClient.sendMessageStream).mockReturnValue(mockStream());
+
+      for await (const _ of agent.runAsync(createMockContext())) {
+        // Drain the stream so the request is sent.
+      }
+
+      const params = vi.mocked(mockClient.sendMessageStream).mock.calls[0][0];
+      expect(params.message.messageId).toBe('provider-id');
+    });
   });
 });
