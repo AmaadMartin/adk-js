@@ -6,7 +6,11 @@
 
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {describe, expect, it, vi} from 'vitest';
+import {Context} from '../../../src/agents/context.js';
+import {InvocationContext} from '../../../src/agents/invocation_context.js';
 import {ReadonlyContext} from '../../../src/agents/readonly_context.js';
+import {PluginManager} from '../../../src/plugins/plugin_manager.js';
+import {createSession} from '../../../src/sessions/session.js';
 import {MCPConnectionParams} from '../../../src/tools/mcp/mcp_session_manager.js';
 import {MCPToolset} from '../../../src/tools/mcp/mcp_toolset.js';
 
@@ -25,6 +29,18 @@ vi.mock('@modelcontextprotocol/sdk/client/index.js', () => {
           {name: 'other-tool', description: 'Another tool', inputSchema: {}},
         ],
       }),
+      callTool: vi
+        .fn()
+        .mockImplementation(
+          (
+            _params: unknown,
+            _schema: unknown,
+            options?: {onprogress?: (progress: {progress: number}) => void},
+          ) => {
+            options?.onprogress?.({progress: 1});
+            return Promise.resolve({content: []});
+          },
+        ),
       listResources: vi.fn().mockResolvedValue({
         resources: [
           {uri: 'file:///res1', name: 'res1'},
@@ -128,6 +144,40 @@ describe('MCPToolset', () => {
       const tools = await toolset.getTools();
 
       expect(tools).toHaveLength(2);
+    });
+  });
+
+  describe('progress notifications', () => {
+    /** A tool context backed by a real session. */
+    function createToolContext(): Context {
+      const invocationContext = new InvocationContext({
+        invocationId: 'test-invocation',
+        session: createSession({
+          id: 'test-session',
+          appName: 'test-app',
+          userId: 'test-user',
+        }),
+        pluginManager: new PluginManager([]),
+        abortSignal: new AbortController().signal,
+      });
+      return new Context({invocationContext});
+    }
+
+    it('forwards the progress options to the tools it builds', async () => {
+      const seen: Array<{toolName: string; progress: number}> = [];
+      const toolset = new MCPToolset(stdioParams, ['pfx_test-tool'], 'pfx', {
+        progressCallbackFactory:
+          ({toolName}) =>
+          (progress) => {
+            seen.push({toolName, progress: progress.progress});
+          },
+      });
+
+      const tools = await toolset.getTools();
+      expect(tools).toHaveLength(1);
+      await tools[0].runAsync({args: {}, toolContext: createToolContext()});
+
+      expect(seen).toEqual([{toolName: 'pfx_test-tool', progress: 1}]);
     });
   });
 
