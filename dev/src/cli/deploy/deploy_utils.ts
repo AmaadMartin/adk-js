@@ -270,6 +270,36 @@ async function findWorkspaceRootManifest(
   return undefined;
 }
 
+// Specifier protocols that only a workspace-aware installer resolves. The
+// deployed container has no workspace, so npm rejects the first four outright
+// (EUNSUPPORTEDPROTOCOL) and cannot find the path behind `file:` (ENOENT).
+const WORKSPACE_LOCAL_PROTOCOLS = [
+  'workspace:',
+  'link:',
+  'portal:',
+  'catalog:',
+  'file:',
+];
+
+// npm normalises a bare local path to `file:`, so it fails the same way. `~`
+// only starts a path with its separator: `~1.2.0` is a semver range.
+const LOCAL_PATH_SPECIFIER_RE = /^(\.\.?[/\\]|\/|~\/)/;
+
+function isWorkspaceLocalSpecifier(specifier: string): boolean {
+  return (
+    WORKSPACE_LOCAL_PROTOCOLS.some((protocol) =>
+      specifier.startsWith(protocol),
+    ) || LOCAL_PATH_SPECIFIER_RE.test(specifier)
+  );
+}
+
+function describeDeclaration(
+  pkg: string,
+  dependencies: Record<string, string>,
+): string {
+  return `"${pkg}" ("${dependencies[pkg]}")`;
+}
+
 /**
  * Resolves the dependencies written into the deployed manifest.
  *
@@ -293,6 +323,7 @@ async function resolveDeploymentDependencies(
   };
 
   let workspaceRoot: WorkspaceRootManifest | undefined;
+  const declaredIn = new Map<string, string>();
   if (REQUIRED_NPM_PACKAGES.some((pkg) => !(pkg in dependencies))) {
     workspaceRoot = await findWorkspaceRootManifest(
       path.dirname(path.dirname(basePath)),
@@ -306,6 +337,7 @@ async function resolveDeploymentDependencies(
 
     for (const pkg of backfilled) {
       dependencies[pkg] = rootDependencies[pkg];
+      declaredIn.set(pkg, workspaceRoot.path);
     }
     if (backfilled.length > 0) {
       console.info(
@@ -328,6 +360,27 @@ async function resolveDeploymentDependencies(
     );
   }
 
+  // A required package cannot be dropped the way a bundled sibling can: the
+  // container installs it from the registry to run the agent, so a container
+  // that builds and then fails to resolve it is worse than this error.
+  const workspaceLocalRequired = REQUIRED_NPM_PACKAGES.filter((pkg) =>
+    isWorkspaceLocalSpecifier(dependencies[pkg]),
+  );
+  if (workspaceLocalRequired.length > 0) {
+    const declarations = workspaceLocalRequired
+      .map(
+        (pkg) =>
+          `${describeDeclaration(pkg, dependencies)} in ${declaredIn.get(pkg) ?? basePath}`,
+      )
+      .join(', ');
+
+    throw new Error(
+      `Required npm package(s) declared with a workspace-local specifier: ${declarations}. ` +
+        `Only a workspace-aware installer resolves such a specifier, and the deployed container has no workspace: ` +
+        `it installs these from the npm registry, so declare a published version range instead.`,
+    );
+  }
+
   return dependencies;
 }
 
@@ -335,7 +388,25 @@ export async function createPackageJson(
   sourceFolder: string,
   targetFolder: string,
 ) {
-  const dependencies = await resolveDeploymentDependencies(sourceFolder);
+  const resolved = await resolveDeploymentDependencies(sourceFolder);
+  const dependencies: Record<string, string> = {};
+  const dropped: string[] = [];
+
+  for (const [pkg, specifier] of Object.entries(resolved)) {
+    if (isWorkspaceLocalSpecifier(specifier)) {
+      dropped.push(describeDeclaration(pkg, resolved));
+    } else {
+      dependencies[pkg] = specifier;
+    }
+  }
+  if (dropped.length > 0) {
+    console.warn(
+      `Skipping workspace-local dependencies that cannot be installed in the deployed container: ${dropped.join(', ')}. ` +
+        `Their code is bundled into the agent file, so the deployment does not need them. ` +
+        `If you deploy with --bundle false, publish them to a registry and depend on a published version range instead.`,
+    );
+  }
+
   const targetPackageJsonPath = path.join(targetFolder, 'package.json');
 
   await Promise.all([
