@@ -38,6 +38,23 @@ vi.mock('@modelcontextprotocol/sdk/client/streamableHttp.js', () => {
   };
 });
 
+const STDIO_PARAMS: MCPConnectionParams = {
+  type: 'StdioConnectionParams',
+  serverParams: {command: 'test-command'},
+};
+
+/**
+ * Builds the stub the mocked SDK constructor returns. The SDK `Client` cannot
+ * be constructed in a unit test, so the stub carries only the members the
+ * manager touches and is cast here instead of at every call site.
+ */
+function clientStub(connect: () => Promise<void>): Client {
+  return {
+    connect,
+    close: vi.fn().mockResolvedValue(undefined),
+  } as unknown as Client;
+}
+
 describe('MCPSessionManager', () => {
   it('creates an stdio client', async () => {
     const manager = new MCPSessionManager({
@@ -176,13 +193,130 @@ describe('MCPSessionManager', () => {
     const client1 = await manager.createSession();
     const client2 = await manager.createSession();
 
-    expect(manager.getActiveSessions()).toEqual([client1, client2]);
+    expect(client2).toBe(client1);
+    expect(manager.getActiveSessions()).toEqual([client1]);
 
     await manager.closeSession(client1);
-    expect(manager.getActiveSessions()).toEqual([client2]);
-
-    await manager.closeSession(client2);
     expect(manager.getActiveSessions()).toEqual([]);
+  });
+
+  describe('session pooling', () => {
+    it('reuses a pooled session across createSession calls', async () => {
+      vi.mocked(StdioClientTransport).mockClear();
+      const manager = new MCPSessionManager(STDIO_PARAMS);
+
+      const first = await manager.createSession();
+      const second = await manager.createSession();
+
+      expect(second).toBe(first);
+      expect(StdioClientTransport).toHaveBeenCalledOnce();
+    });
+
+    it('shares one connect across concurrent createSession calls', async () => {
+      vi.mocked(StdioClientTransport).mockClear();
+      const manager = new MCPSessionManager(STDIO_PARAMS);
+
+      const [first, second] = await Promise.all([
+        manager.createSession(),
+        manager.createSession(),
+      ]);
+
+      expect(second).toBe(first);
+      expect(StdioClientTransport).toHaveBeenCalledOnce();
+    });
+
+    it('rebuilds the session after the client reports it closed', async () => {
+      vi.mocked(StdioClientTransport).mockClear();
+      const manager = new MCPSessionManager(STDIO_PARAMS);
+
+      const first = await manager.createSession();
+      first.onclose?.();
+      const second = await manager.createSession();
+
+      expect(second).not.toBe(first);
+      expect(StdioClientTransport).toHaveBeenCalledTimes(2);
+      expect(manager.getActiveSessions()).toEqual([second]);
+    });
+
+    it('rebuilds the session after closeSession', async () => {
+      vi.mocked(StdioClientTransport).mockClear();
+      const manager = new MCPSessionManager(STDIO_PARAMS);
+
+      const first = await manager.createSession();
+      await manager.closeSession(first);
+      const second = await manager.createSession();
+
+      expect(first.close).toHaveBeenCalledOnce();
+      expect(second).not.toBe(first);
+      expect(StdioClientTransport).toHaveBeenCalledTimes(2);
+      expect(manager.getActiveSessions()).toEqual([second]);
+    });
+
+    it('closeSession on an already closed client is a no-op', async () => {
+      const manager = new MCPSessionManager(STDIO_PARAMS);
+
+      const client = await manager.createSession();
+      await manager.closeSession(client);
+      await manager.closeSession(client);
+
+      expect(client.close).toHaveBeenCalledOnce();
+      expect(manager.getActiveSessions()).toEqual([]);
+    });
+
+    it('does not pool a client whose connect failed', async () => {
+      vi.mocked(Client).mockImplementationOnce(() =>
+        clientStub(() => Promise.reject(new Error('connect refused'))),
+      );
+      const manager = new MCPSessionManager(STDIO_PARAMS);
+
+      await expect(manager.createSession()).rejects.toThrow(
+        'Failed to create MCP session',
+      );
+
+      const client = await manager.createSession();
+
+      expect(client.connect).toHaveBeenCalledOnce();
+      expect(manager.getActiveSessions()).toEqual([client]);
+    });
+
+    it('does not share a pooled session between managers', async () => {
+      vi.mocked(StreamableHTTPClientTransport).mockClear();
+      const managers = ['first-token', 'second-token'].map(
+        (token) =>
+          new MCPSessionManager({
+            type: 'StreamableHTTPConnectionParams',
+            url: 'http://test-url',
+            transportOptions: {requestInit: {headers: {authorization: token}}},
+          }),
+      );
+
+      const clients = await Promise.all(
+        managers.map((manager) => manager.createSession()),
+      );
+      const reused = await managers[0].createSession();
+
+      expect(clients[1]).not.toBe(clients[0]);
+      expect(reused).toBe(clients[0]);
+      expect(StreamableHTTPClientTransport).toHaveBeenCalledTimes(2);
+    });
+
+    it('reports the pooled session once in getActiveSessions', async () => {
+      const manager = new MCPSessionManager(STDIO_PARAMS);
+
+      await manager.createSession();
+      await manager.createSession();
+
+      expect(manager.getActiveSessions()).toHaveLength(1);
+    });
+
+    it('drops a session the peer closed from getActiveSessions', async () => {
+      const manager = new MCPSessionManager(STDIO_PARAMS);
+
+      const client = await manager.createSession();
+      client.onclose?.();
+
+      expect(manager.getActiveSessions()).toEqual([]);
+    });
   });
 
   it('does not connect for an unknown connection type', async () => {

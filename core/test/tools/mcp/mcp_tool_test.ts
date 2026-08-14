@@ -130,7 +130,7 @@ describe('MCPTool', () => {
     );
   });
 
-  it('closes session even when callTool throws an error', async () => {
+  it('leaves the pooled session open when callTool throws an error', async () => {
     const mockTool: Tool = {
       name: 'test-tool',
       description: 'A test tool',
@@ -159,7 +159,41 @@ describe('MCPTool', () => {
       'Call failed',
     );
 
-    // Assert that closeSession was still called despite the error
-    expect(mockSessionManager.closeSession).toHaveBeenCalledWith(mockClient);
+    // The session is owned by the manager, so a failed call must not close it.
+    expect(mockSessionManager.closeSession).not.toHaveBeenCalled();
+  });
+
+  it('leaves the pooled session open after a successful call', async () => {
+    const mockTool: Tool = {
+      name: 'test-tool',
+      description: 'A test tool',
+      inputSchema: {type: 'object', properties: {}},
+    };
+
+    const mockClient = {
+      callTool: vi.fn().mockResolvedValue({content: []}),
+      close: vi.fn().mockResolvedValue(undefined),
+    } as unknown as Client;
+
+    const mockSessionManager = {
+      createSession: vi.fn().mockResolvedValue(mockClient),
+      closeSession: vi.fn().mockResolvedValue(undefined),
+    } as unknown as MCPSessionManager;
+
+    const tool = new MCPTool(mockTool, mockSessionManager);
+
+    const invocationContext = {
+      abortSignal: new AbortController().signal,
+      session: {state: {}},
+    } as unknown as InvocationContext;
+
+    const toolContext = new Context({invocationContext});
+
+    await tool.runAsync({args: {}, toolContext});
+    await tool.runAsync({args: {}, toolContext});
+
+    expect(mockSessionManager.closeSession).not.toHaveBeenCalled();
+    expect(mockClient.close).not.toHaveBeenCalled();
+    expect(mockClient.callTool).toHaveBeenCalledTimes(2);
   });
 });
