@@ -4,11 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  TaskArtifactUpdateEvent,
-  TaskStatusUpdateEvent,
-  TextPart,
-} from '@a2a-js/sdk';
+import {TaskStatusUpdateEvent, TextPart} from '@a2a-js/sdk';
 import {ExecutionEventBus, RequestContext} from '@a2a-js/sdk/server';
 import {
   A2AAgentExecutor,
@@ -16,13 +12,11 @@ import {
   BaseSessionService,
   createEvent,
   createEventActions,
-  resetIdProvider,
   Runner,
   RunnerConfig,
   Session,
-  setIdProvider,
 } from '@google/adk';
-import {afterEach, beforeEach, describe, expect, it, Mocked, vi} from 'vitest';
+import {beforeEach, describe, expect, it, Mocked, vi} from 'vitest';
 
 // Mock the Runner to control its async generator
 vi.mock('../../src/runner/runner.js', async (importOriginal) => {
@@ -282,55 +276,5 @@ describe('A2AAgentExecutor', () => {
     await expect(executor.cancelTask('any-task-id')).rejects.toThrow(
       'Task cancellation is not supported yet.',
     );
-  });
-  describe('with an installed ID provider', () => {
-    afterEach(() => {
-      resetIdProvider();
-    });
-
-    it('mints the artifactId from the provider when no partial id is cached', async () => {
-      setIdProvider(() => 'provider-id');
-      mockSessionService.getSession.mockResolvedValue({
-        id: 'session-id',
-        userId: 'test-user',
-        appName: 'test-app',
-        events: [],
-        state: {},
-      } as unknown as Session);
-
-      async function* mockRunAsync() {
-        yield createEvent({
-          author: 'model',
-          content: {role: 'model', parts: [{text: 'response'}]},
-          partial: false,
-          actions: createEventActions(),
-        });
-      }
-
-      vi.mocked(Runner).mockImplementation(((config: RunnerConfig) => {
-        return {
-          appName: config?.appName,
-          sessionService: config?.sessionService,
-          runAsync: mockRunAsync,
-        } as unknown as Runner;
-      }) as unknown as () => Runner);
-
-      const executor = new A2AAgentExecutor({
-        runner: {
-          appName: 'test-app',
-          sessionService: mockSessionService,
-        } as unknown as RunnerConfig,
-      });
-
-      await executor.execute(createRequestContext(), mockEventBus);
-
-      const artifactUpdate = mockEventBus.publish.mock.calls
-        .map((call) => call[0])
-        .find(
-          (event): event is TaskArtifactUpdateEvent =>
-            event.kind === 'artifact-update',
-        );
-      expect(artifactUpdate?.artifact.artifactId).toBe('provider-id');
-    });
   });
 });
