@@ -290,4 +290,104 @@ describe('ContentRequestProcessor', () => {
     );
     expect(llmRequest.contents[1].parts?.[0]?.text).toBe('Third message');
   });
+
+  it('should forward includeForeignThoughts to getContents when includeContents is default', async () => {
+    const foreignEvent: Event = {
+      id: 'f1',
+      invocationId: 'test-invoc',
+      author: 'other_agent',
+      actions: {} as EventActions,
+      timestamp: 1000,
+      content: {
+        role: 'model',
+        parts: [{text: 'thinking process', thought: true}, {text: 'hello'}],
+      },
+    };
+
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: 'gemini-2.5-flash',
+      includeForeignThoughts: true,
+      includeContents: 'default',
+    });
+    const session = createSession({
+      id: 'test-session',
+      events: [foreignEvent],
+      appName: 'test-app',
+      userId: 'test-user',
+    });
+    const invocationContext = new InvocationContext({
+      invocationId: 'test-invocation',
+      agent: agent as BaseAgent,
+      session,
+      pluginManager: new PluginManager([]),
+    });
+    const llmRequest: LlmRequest = {
+      contents: [],
+      toolsDict: {},
+      liveConnectConfig: {},
+    };
+
+    for await (const _ of CONTENT_REQUEST_PROCESSOR.runAsync(
+      invocationContext,
+      llmRequest,
+    )) {
+      // intentionally empty
+    }
+
+    expect(llmRequest.contents).toHaveLength(1);
+    expect(llmRequest.contents[0].parts?.[1].text).toBe(
+      '[other_agent] thought: thinking process',
+    );
+  });
+
+  it('should forward includeForeignThoughts to getCurrentTurnContents when includeContents is not default', async () => {
+    const foreignEvent: Event = {
+      id: 'f1',
+      invocationId: 'test-invoc',
+      author: 'other_agent',
+      actions: {} as EventActions,
+      timestamp: 1000,
+      content: {
+        role: 'model',
+        parts: [{text: 'thinking process', thought: true}, {text: 'hello'}],
+      },
+    };
+
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: 'gemini-2.5-flash',
+      includeForeignThoughts: true,
+      includeContents: 'none',
+    });
+    const session = createSession({
+      id: 'test-session',
+      events: [foreignEvent],
+      appName: 'test-app',
+      userId: 'test-user',
+    });
+    const invocationContext = new InvocationContext({
+      invocationId: 'test-invocation',
+      agent: agent as BaseAgent,
+      session,
+      pluginManager: new PluginManager([]),
+    });
+    const llmRequest: LlmRequest = {
+      contents: [],
+      toolsDict: {},
+      liveConnectConfig: {},
+    };
+
+    for await (const _ of CONTENT_REQUEST_PROCESSOR.runAsync(
+      invocationContext,
+      llmRequest,
+    )) {
+      // intentionally empty
+    }
+
+    expect(llmRequest.contents).toHaveLength(1);
+    expect(llmRequest.contents[0].parts?.[1].text).toBe(
+      '[other_agent] thought: thinking process',
+    );
+  });
 });

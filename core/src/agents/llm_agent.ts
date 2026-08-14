@@ -311,6 +311,12 @@ export interface LlmAgentConfig extends BaseAgentConfig {
   /** Disallows LLM-controlled transferring to the peer agents. */
   disallowTransferToPeers?: boolean;
 
+  /**
+   * Whether to include reasoning thoughts when formatting events from other agents.
+   * Defaults to false.
+   */
+  includeForeignThoughts?: boolean;
+
   // TODO - b/425992518: consider more complex contex engineering mechanims.
   /**
    * Controls content inclusion in model requests.
@@ -439,6 +445,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   generateContentConfig?: GenerateContentConfig;
   disallowTransferToParent: boolean;
   disallowTransferToPeers: boolean;
+  includeForeignThoughts: boolean;
   includeContents: 'default' | 'none';
 
   /**
@@ -494,6 +501,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     this.generateContentConfig = config.generateContentConfig;
     this.disallowTransferToParent = config.disallowTransferToParent ?? false;
     this.disallowTransferToPeers = config.disallowTransferToPeers ?? false;
+    this.includeForeignThoughts = config.includeForeignThoughts ?? false;
     this.includeContents = config.includeContents ?? 'default';
     this.includeContentsExplicit = config.includeContents !== undefined;
     this.inputSchemaSource = config.inputSchema;

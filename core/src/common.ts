@@ -67,6 +67,7 @@ export {
   CODE_EXECUTION_RESPONSE_PROCESSOR,
   CodeExecutionResponseProcessor,
 } from './agents/processors/code_execution_processor.js';
+export type {GetContentsOptions} from './agents/processors/content_processor_utils.js';
 export {
   CONTENT_REQUEST_PROCESSOR,
   ContentRequestProcessor,

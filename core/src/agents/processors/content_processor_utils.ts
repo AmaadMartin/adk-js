@@ -44,12 +44,24 @@ export function removeClientFunctionCallId(content: Content): void {
 }
 
 /**
+ * Options for getting contents.
+ */
+export interface GetContentsOptions {
+  /**
+   * Whether to include reasoning thoughts when converting events from other agents.
+   * Defaults to false.
+   */
+  includeForeignThoughts?: boolean;
+}
+
+/**
  * Get the contents for the LLM request.
  *
  * @param events: A list of all session events.
  * @param agentName: The name of the agent.
  * @param currentBranch: The current branch of the agent.
  * @param currentIsolationScope: The isolation scope of the current node, if any.
+ * @param options: Options for processing contents.
  *
  * @returns A list of processed contents.
  */
@@ -58,6 +70,7 @@ export function getContents(
   agentName: string,
   currentBranch?: string,
   currentIsolationScope?: string,
+  options?: GetContentsOptions,
 ): Content[] {
   const filteredEvents: Event[] = [];
 
@@ -75,7 +88,7 @@ export function getContents(
 
     filteredEvents.push(
       isEventFromAnotherAgent(agentName, event)
-        ? convertForeignEvent(event)
+        ? convertForeignEvent(event, options)
         : event,
     );
   }
@@ -165,6 +178,8 @@ function isRequestInputEvent(event: Event): boolean {
  * @param events: A list of all session events.
  * @param agentName: The name of the agent.
  * @param currentBranch: The current branch of the agent.
+ * @param currentIsolationScope: The isolation scope of the current node, if any.
+ * @param options: Options for processing contents.
  *
  * @returns A list of contents for the current turn only, preserving context
  *     needed for proper tool execution while excluding conversation history.
@@ -174,6 +189,7 @@ export function getCurrentTurnContents(
   agentName: string,
   currentBranch?: string,
   currentIsolationScope?: string,
+  options?: GetContentsOptions,
 ): Content[] {
   // Find the latest event that starts the current turn and process from there.
   for (let i = events.length - 1; i >= 0; i--) {
@@ -189,6 +205,7 @@ export function getCurrentTurnContents(
         agentName,
         currentBranch,
         currentIsolationScope,
+        options,
       );
     }
   }
@@ -308,7 +325,10 @@ function isEventFromAnotherAgent(agentName: string, event: Event): boolean {
  *
  * @returns The converted event.
  */
-function convertForeignEvent(event: Event): Event {
+function convertForeignEvent(
+  event: Event,
+  options?: GetContentsOptions,
+): Event {
   if (!event.content?.parts?.length) {
     return event;
   }
@@ -323,9 +343,13 @@ function convertForeignEvent(event: Event): Event {
   };
 
   for (const part of event.content.parts) {
-    // Exclude thoughts from the context.
-    // TODO - b/425992518: filtring should be configurable.
-    if (part.text && !part.thought) {
+    if (part.thought) {
+      if (part.text && options?.includeForeignThoughts) {
+        content.parts?.push({
+          text: `[${event.author}] thought: ${part.text}`,
+        });
+      }
+    } else if (part.text) {
       content.parts?.push({
         text: `[${event.author}] said: ${part.text}`,
       });
