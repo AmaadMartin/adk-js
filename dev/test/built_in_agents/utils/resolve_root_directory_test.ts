@@ -6,7 +6,7 @@
 
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import {describe, expect, it} from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 
 import {
   resolveFilePath,
@@ -17,6 +17,10 @@ import {createTestContext, useTempDirs} from '../test_helpers.js';
 
 describe('resolveFilePath', () => {
   const tempDir = useTempDirs();
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
 
   it('allows a path within the root', async () => {
     const root = await tempDir();
@@ -57,15 +61,19 @@ describe('resolveFilePath', () => {
 
   it('resolves a relative root against the working directory', async () => {
     const root = await tempDir();
+    vi.spyOn(process, 'cwd').mockReturnValue(root);
 
-    expect(resolveFilePath('file.txt', 'project', root)).toBe(
+    expect(resolveFilePath('file.txt', 'project')).toBe(
       path.join(root, 'project', 'file.txt'),
     );
   });
 
-  it('resolves a relative root against the cwd by default', () => {
-    expect(resolveFilePath('file.txt', './')).toBe(
-      path.join(process.cwd(), 'file.txt'),
+  it('rejects a traversal out of a relative root', async () => {
+    const root = await tempDir();
+    vi.spyOn(process, 'cwd').mockReturnValue(root);
+
+    expect(() => resolveFilePath('../escape.txt', 'project')).toThrow(
+      'resolves outside the root directory',
     );
   });
 

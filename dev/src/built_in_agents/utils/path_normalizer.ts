@@ -10,23 +10,19 @@
  * Ported from `cli/built_in_agents/utils/path_normalizer.py` in adk-python.
  */
 
-/** Characters stripped from both ends of the path and of each path segment. */
-const BOUNDARY_CHARS = ' \t\r\n\'"`';
+/**
+ * Whitespace and quote characters at either end of a path or of one of its
+ * segments. Equivalent to the character set Python's `str.strip(chars)` is
+ * given in the reference.
+ */
+const BOUNDARY_PATTERN = /^[ \t\r\n'"`]+|[ \t\r\n'"`]+$/g;
 
 /** Splits a path on `/` and `\` while keeping the separators as segments. */
 const SEGMENT_SPLIT_PATTERN = /([/\\])/;
 
-/** Removes every leading and trailing {@link BOUNDARY_CHARS} character. */
+/** Removes every leading and trailing {@link BOUNDARY_PATTERN} character. */
 function stripBoundaryChars(value: string): string {
-  let start = 0;
-  let end = value.length;
-  while (start < end && BOUNDARY_CHARS.includes(value[start])) {
-    start++;
-  }
-  while (end > start && BOUNDARY_CHARS.includes(value[end - 1])) {
-    end--;
-  }
-  return value.slice(start, end);
+  return value.replace(BOUNDARY_PATTERN, '');
 }
 
 /**

@@ -60,25 +60,19 @@ export function rootDirectoryFromContext(context?: Context): string {
  * pins it.
  *
  * @param filePath Relative or absolute path supplied by the model.
- * @param rootDirectory The project root, absolute or relative.
- * @param workingDirectory Base for a relative root; defaults to the cwd.
+ * @param rootDirectory The project root, absolute or relative to the cwd.
  * @return The resolved absolute path, lexically inside the root.
  * @throws If the path resolves outside the root directory.
  */
 export function resolveFilePath(
   filePath: string,
   rootDirectory: string,
-  workingDirectory?: string,
 ): string {
   const normalizedPath = sanitizeGeneratedFilePath(filePath);
-
-  const resolvedRoot = path.isAbsolute(rootDirectory)
-    ? path.resolve(rootDirectory)
-    : path.resolve(workingDirectory ?? process.cwd(), rootDirectory);
-
-  const candidate = path.isAbsolute(normalizedPath)
-    ? path.resolve(normalizedPath)
-    : path.resolve(resolvedRoot, normalizedPath);
+  // `path.resolve` walks right to left until it has an absolute path, so an
+  // absolute root or an absolute file path already wins over what precedes it.
+  const resolvedRoot = path.resolve(rootDirectory);
+  const candidate = path.resolve(resolvedRoot, normalizedPath);
 
   const relative = path.relative(resolvedRoot, candidate);
   if (
@@ -100,17 +94,13 @@ export function resolveFilePath(
  * silently dropped.
  *
  * @param filePaths Relative or absolute paths supplied by the model.
- * @param rootDirectory The project root, absolute or relative.
- * @param workingDirectory Base for a relative root; defaults to the cwd.
+ * @param rootDirectory The project root, absolute or relative to the cwd.
  * @return The resolved absolute paths, in input order.
  * @throws If any path resolves outside the root directory.
  */
 export function resolveFilePaths(
   filePaths: string[],
   rootDirectory: string,
-  workingDirectory?: string,
 ): string[] {
-  return filePaths.map((filePath) =>
-    resolveFilePath(filePath, rootDirectory, workingDirectory),
-  );
+  return filePaths.map((filePath) => resolveFilePath(filePath, rootDirectory));
 }
