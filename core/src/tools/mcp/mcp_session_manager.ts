@@ -165,7 +165,13 @@ export class MCPSessionManager {
     this.samplingCapabilities = options?.samplingCapabilities;
   }
 
-  /** Declares only the capabilities that a supplied callback can answer. */
+  /**
+   * Declares only the capabilities that a supplied callback can answer.
+   *
+   * Returns `undefined` when there is nothing to declare, so a session without
+   * callbacks builds the client from a single argument, exactly as it did
+   * before these options existed.
+   */
   private declaredCapabilities(): ClientCapabilities | undefined {
     const capabilities: ClientCapabilities = {};
     if (this.elicitationCallback) {
