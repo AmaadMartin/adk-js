@@ -70,8 +70,11 @@ export const A2A_AUTH_TOKEN_ENV_VAR = 'ADK_A2A_AUTH_TOKEN';
 /** Directory the dev UI bundle is unpacked into at build time. */
 const WEB_ASSETS_DIR = path.join(__dirname, '../../browser');
 
-/** Path the dev UI fetches its runtime config from. */
-const RUNTIME_CONFIG_ROUTE = '/dev-ui/assets/config/runtime-config.json';
+/**
+ * Path the dev UI fetches its runtime config from. Derived from the bundle
+ * location, so the route cannot drift out of the static mount's shadow.
+ */
+const RUNTIME_CONFIG_ROUTE = `/dev-ui/${RUNTIME_CONFIG_RELATIVE_PATH}`;
 
 interface ServerOptions {
   agentsDir?: string;
@@ -246,8 +249,8 @@ export class AdkApiServer {
    * Reads the runtime config that ships with the dev UI bundle.
    *
    * A source checkout has no bundle at all, so an unreadable or unparseable
-   * file is reported once and treated as an empty config. Express 4 does not
-   * catch a rejected promise from an async handler, so this never rejects.
+   * file is reported and treated as an empty config rather than failing
+   * startup.
    */
   private async loadBundledConfig(): Promise<RuntimeConfig> {
     const configPath = path.join(WEB_ASSETS_DIR, RUNTIME_CONFIG_RELATIVE_PATH);
@@ -269,13 +272,15 @@ export class AdkApiServer {
     await this.setupTelemetry();
 
     if (this.serveDebugUI) {
+      const bundledConfig = await this.loadBundledConfig();
+
       app.get('/', (req: Request, res: Response) => {
         res.redirect('/dev-ui');
       });
       // Registered before the static mount so that it shadows the file that
       // ships inside the dev UI bundle.
-      app.get(RUNTIME_CONFIG_ROUTE, async (req: Request, res: Response) => {
-        res.json(buildRuntimeConfig(await this.loadBundledConfig(), this.logo));
+      app.get(RUNTIME_CONFIG_ROUTE, (req: Request, res: Response) => {
+        res.json(buildRuntimeConfig(bundledConfig, this.logo));
       });
       app.use(
         '/dev-ui',

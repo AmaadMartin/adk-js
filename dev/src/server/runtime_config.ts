@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import * as path from 'node:path';
-
 /** Logo block published to the dev UI, matching adk-python's JSON shape. */
 export interface LogoConfig {
   text: string;
@@ -15,15 +13,12 @@ export interface LogoConfig {
 /** Runtime configuration served to the dev UI. */
 export type RuntimeConfig = Record<string, unknown>;
 
-/** Location of the runtime config inside the bundled dev UI assets. */
-export const RUNTIME_CONFIG_RELATIVE_PATH = path.join(
-  'assets',
-  'config',
-  'runtime-config.json',
-);
-
-/** Key the dev UI reads the logo block from. */
-const LOGO_KEY = 'logo';
+/**
+ * Location of the runtime config inside the bundled dev UI assets. Forward
+ * slashes, so that the same constant builds the served URL and, once joined
+ * with the assets directory, the path `fs` reads on every platform.
+ */
+export const RUNTIME_CONFIG_RELATIVE_PATH = 'assets/config/runtime-config.json';
 
 /**
  * Validates a logo option pair and turns it into the block the dev UI reads.
@@ -68,9 +63,9 @@ export function buildRuntimeConfig(
   const config: RuntimeConfig = {...base};
 
   if (logo) {
-    config[LOGO_KEY] = logo;
+    config['logo'] = logo;
   } else {
-    delete config[LOGO_KEY];
+    delete config['logo'];
   }
 
   return config;

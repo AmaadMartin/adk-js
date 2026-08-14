@@ -8,7 +8,6 @@ import {describe, expect, it} from 'vitest';
 import {
   buildRuntimeConfig,
   resolveLogoConfig,
-  RUNTIME_CONFIG_RELATIVE_PATH,
 } from '../../src/server/runtime_config.js';
 
 const INCOMPLETE_LOGO_ERROR =
@@ -76,15 +75,5 @@ describe('buildRuntimeConfig', () => {
       backendUrl: '',
       logo: {text: 'old', imageUrl: 'old'},
     });
-  });
-});
-
-describe('RUNTIME_CONFIG_RELATIVE_PATH', () => {
-  it('points at the file the dev UI bundle ships', () => {
-    expect(RUNTIME_CONFIG_RELATIVE_PATH.split(/[\\/]/)).toEqual([
-      'assets',
-      'config',
-      'runtime-config.json',
-    ]);
   });
 });
