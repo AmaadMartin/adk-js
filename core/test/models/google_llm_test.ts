@@ -70,6 +70,13 @@ describe('GoogleLlm', () => {
     );
   });
 
+  it('should construct with only GOOGLE_API_KEY set', () => {
+    // GOOGLE_API_KEY used to be absent from the Gemini-path order entirely, so
+    // setting only it failed at construction rather than picking the key up.
+    process.env['GOOGLE_API_KEY'] = 'google-api-key';
+    expect(() => new TestGemini({model: 'gemini-1.5-flash'})).not.toThrow();
+  });
+
   it('should set tracking headers correctly when GOOGLE_CLOUD_AGENT_ENGINE_ID is not set', () => {
     const llm = new TestGemini({apiKey: 'test-key'});
     const headers = llm.getTrackingHeaders();
@@ -346,6 +353,28 @@ describe('GoogleLlm', () => {
       expect(params.apiKey).toBe('env-api-key');
     });
 
+    it('should use GOOGLE_API_KEY env var if apiKey is missing', () => {
+      process.env['GOOGLE_API_KEY'] = 'google-api-key';
+      const params = geminiInitParams({model: 'gemini-1.5-flash'});
+      expect(params.apiKey).toBe('google-api-key');
+    });
+
+    it('should prefer GOOGLE_API_KEY over GEMINI_API_KEY', () => {
+      // Matches @google/genai and adk-python. The SDK warns "Both ... are set.
+      // Using GOOGLE_API_KEY."; adk-js must not then use the other one.
+      process.env['GOOGLE_API_KEY'] = 'google-api-key';
+      process.env['GEMINI_API_KEY'] = 'gemini-api-key';
+      const params = geminiInitParams({model: 'gemini-1.5-flash'});
+      expect(params.apiKey).toBe('google-api-key');
+    });
+
+    it('should prefer GOOGLE_GENAI_API_KEY over GOOGLE_API_KEY', () => {
+      process.env['GOOGLE_GENAI_API_KEY'] = 'genai-api-key';
+      process.env['GOOGLE_API_KEY'] = 'google-api-key';
+      const params = geminiInitParams({model: 'gemini-1.5-flash'});
+      expect(params.apiKey).toBe('genai-api-key');
+    });
+
     it('should return undefined apiKey if missing', () => {
       const input = {
         model: 'gemini-1.5-flash',
@@ -543,7 +572,9 @@ describe('GoogleLlm', () => {
       });
     });
 
-    it('should leave the Gemini API branch untouched by GOOGLE_API_KEY', () => {
+    it('should read GOOGLE_API_KEY on the Gemini API branch as a plain key', () => {
+      // The Gemini API branch now consults GOOGLE_API_KEY. Express Mode must
+      // not escalate that key: the branch stays on the Gemini API.
       process.env['GOOGLE_API_KEY'] = 'env-express-key';
 
       const params = geminiInitParams({
@@ -552,7 +583,9 @@ describe('GoogleLlm', () => {
       });
 
       expect(params.vertexai).toBe(false);
-      expect(params.apiKey).toBeUndefined();
+      expect(params.apiKey).toBe('env-express-key');
+      expect(params.project).toBeUndefined();
+      expect(params.location).toBeUndefined();
     });
 
     it('should be idempotent for an express mode result', () => {
