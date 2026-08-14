@@ -33,20 +33,28 @@ describe('appendCookie', () => {
     expect(headers['Cookie']).toBeUndefined();
   });
 
-  it('percent-encodes the separators a value could use to forge a cookie', () => {
+  it('writes a base64 value verbatim', () => {
     const headers: Record<string, string> = {};
 
-    appendCookie(headers, 'session_id', 'a b;c=d,e');
+    appendCookie(headers, 'session_id', 'dGVzdHNlc3Npb24=');
 
-    expect(headers['Cookie']).toBe('session_id=a%20b%3Bc%3Dd%2Ce');
+    expect(headers['Cookie']).toBe('session_id=dGVzdHNlc3Npb24=');
   });
 
-  it('percent-encodes a non-ASCII value', () => {
+  it('does not re-encode a value that already carries percent escapes', () => {
+    const headers: Record<string, string> = {};
+
+    appendCookie(headers, 'session_id', 's%3Aabc.def');
+
+    expect(headers['Cookie']).toBe('session_id=s%3Aabc.def');
+  });
+
+  it('writes a non-ASCII value verbatim', () => {
     const headers: Record<string, string> = {};
 
     appendCookie(headers, 'greeting', 'héllo');
 
-    expect(headers['Cookie']).toBe('greeting=h%C3%A9llo');
+    expect(headers['Cookie']).toBe('greeting=héllo');
   });
 
   it('writes the cookie name verbatim', () => {

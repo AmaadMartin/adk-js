@@ -1192,12 +1192,36 @@ describe('RestApiTool Utilities', () => {
         expect(result.headers['Authorization']).toBeUndefined();
       });
 
-      it('should percent-encode a cookie value that contains a separator', () => {
+      it('should send a base64 cookie value verbatim', () => {
         const result = prepareRequestParams(dataEndpoint, sessionParameters, {
-          session_id: 'a b;c',
+          session_id: 'dGVzdHNlc3Npb24=',
         });
 
-        expect(result.headers['Cookie']).toBe('session_id=a%20b%3Bc');
+        expect(result.headers['Cookie']).toBe('session_id=dGVzdHNlc3Npb24=');
+      });
+
+      it('should reject a cookie value that would open a second cookie', () => {
+        expect(() =>
+          prepareRequestParams(dataEndpoint, sessionParameters, {
+            session_id: 'abc; admin=true',
+          }),
+        ).toThrow("Invalid value for cookie parameter 'session_id'");
+      });
+
+      it('should reject a cookie value that would split the header line', () => {
+        expect(() =>
+          prepareRequestParams(dataEndpoint, sessionParameters, {
+            session_id: 'abc\r\nX-Admin: true',
+          }),
+        ).toThrow("Invalid value for cookie parameter 'session_id'");
+      });
+
+      it('should reject a cookie value containing a NUL', () => {
+        expect(() =>
+          prepareRequestParams(dataEndpoint, sessionParameters, {
+            session_id: 'abc\0def',
+          }),
+        ).toThrow("Invalid value for cookie parameter 'session_id'");
       });
 
       it('should send the cookie under its original spec name', () => {

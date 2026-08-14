@@ -182,6 +182,28 @@ function encodePathParamValue(name: string, value: string): string {
   return encodeURIComponent(value);
 }
 
+const ILLEGAL_COOKIE_VALUE_CHARS = /[;\r\n\0]/;
+
+/**
+ * Rejects a cookie parameter value that would change the shape of the request.
+ *
+ * Cookie values come from the LLM and are therefore untrusted. A `;` opens a
+ * second cookie the spec never declared, and a carriage return, line feed or
+ * NUL splits the header line. They are rejected rather than encoded, because a
+ * server hands the cookie value to the application as written, so encoding
+ * would corrupt an ordinary value such as a base64 session token.
+ *
+ * @throws {Error} If the value contains `;`, CR, LF or NUL.
+ */
+function checkCookieValue(name: string, value: string): void {
+  if (ILLEGAL_COOKIE_VALUE_CHARS.test(value)) {
+    throw new Error(
+      `Invalid value for cookie parameter '${name}': ';', carriage return, ` +
+        `line feed and NUL are not allowed.`,
+    );
+  }
+}
+
 export function prepareRequestParams(
   endpoint: OperationEndpoint,
   parameters: ApiParameter[],
@@ -212,7 +234,9 @@ export function prepareRequestParams(
     } else if (location === 'header') {
       headers[originalName] = String(argValue);
     } else if (location === 'cookie') {
-      appendCookie(headers, originalName, String(argValue));
+      const cookieValue = String(argValue);
+      checkCookieValue(originalName, cookieValue);
+      appendCookie(headers, originalName, cookieValue);
     } else if (location === 'body') {
       if (
         originalName === 'body' ||
