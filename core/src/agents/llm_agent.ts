@@ -28,6 +28,7 @@ import {
   isFinalResponse,
   populateClientFunctionCallId,
 } from '../events/event.js';
+import {createEventActions, EventActions} from '../events/event_actions.js';
 
 import {BaseExampleProvider} from '../examples/base_example_provider.js';
 import {Example} from '../examples/example.js';
@@ -949,15 +950,10 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
 
     // Preprocess the request and register tools, reusing the non-live path.
     // The live flow creates one event per model response in
-    // `receiveFromModel`, so there is no single turn event yet. This one only
-    // holds the actions that tool preprocessors record while they build the
-    // request.
-    const preprocessEvent = createEvent({
-      invocationId: invocationContext.invocationId,
-      author: this.name,
-      branch: invocationContext.branch,
-    });
-    yield* this.preprocess(invocationContext, llmRequest, preprocessEvent);
+    // `receiveFromModel`, so there is no single turn event yet. These actions
+    // only hold what tool preprocessors record while they build the request.
+    const preprocessActions = createEventActions();
+    yield* this.preprocess(invocationContext, llmRequest, preprocessActions);
     if (
       invocationContext.endInvocation ||
       invocationContext.abortSignal?.aborted
@@ -1280,14 +1276,14 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
    * live ({@link LlmAgent.runLiveFlow}) flows so their preprocessing cannot
    * drift apart.
    *
-   * `modelResponseEvent` carries the turn's event actions. Each tool
-   * preprocessor gets a `Context` over those actions, so a tool can record an
-   * action on the turn while it builds the request.
+   * `eventActions` holds the turn's event actions. Each tool preprocessor gets
+   * a `Context` over those actions, so a tool can record an action on the turn
+   * while it builds the request.
    */
   private async *preprocess(
     invocationContext: InvocationContext,
     llmRequest: LlmRequest,
-    modelResponseEvent: Event,
+    eventActions: EventActions,
   ): AsyncGenerator<Event, void, void> {
     // Runs request processors.
     for (const processor of this.requestProcessors) {
@@ -1331,7 +1327,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     for (const toolUnion of allTools) {
       const toolContext = new Context({
         invocationContext,
-        eventActions: modelResponseEvent.actions,
+        eventActions,
       });
 
       // process all tools from this tool union
@@ -1373,14 +1369,12 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     // =========================================================================
     // Preprocess before calling the LLM
     // =========================================================================
-    // Collect turn metadata and event actions
-    // TODO - b/425992518: misleading, this is passing metadata.
-    const modelResponseEvent = createEvent({
-      invocationId: invocationContext.invocationId,
-      author: this.name,
-      branch: invocationContext.branch,
-    });
-    yield* this.preprocess(invocationContext, llmRequest, modelResponseEvent);
+    // Collect the turn's event id and event actions. Nothing mutable beyond
+    // these two values crosses a method boundary, so no callee can rewrite the
+    // turn's event.
+    let eventId = createNewEventId();
+    const eventActions = createEventActions();
+    yield* this.preprocess(invocationContext, llmRequest, eventActions);
 
     // =========================================================================
     // Global runtime interruption
@@ -1404,7 +1398,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
           for await (const llmResponse of this.callLlmAsync(
             invocationContext,
             llmRequest,
-            modelResponseEvent,
+            {eventId, eventActions},
           )) {
             if (invocationContext.abortSignal?.aborted) {
               return;
@@ -1417,15 +1411,14 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
               invocationContext,
               llmRequest,
               llmResponse,
-              modelResponseEvent,
+              {eventId, eventActions},
             )) {
               if (invocationContext.abortSignal?.aborted) {
                 return;
               }
 
-              // Update the mutable event id to avoid conflict
-              modelResponseEvent.id = createNewEventId();
-              modelResponseEvent.timestamp = new Date().getTime();
+              // Update the event id to avoid conflict for subsequent yields if any
+              eventId = createNewEventId();
               yield event;
             }
           }
@@ -1435,7 +1428,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
           responsesGenerator.call(this),
           invocationContext,
           llmRequest,
-          modelResponseEvent,
+          {eventActions},
         );
       },
     );
@@ -1445,7 +1438,10 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     invocationContext: InvocationContext,
     llmRequest: LlmRequest,
     llmResponse: LlmResponse,
-    modelResponseEvent: Event,
+    options: {
+      eventId: string;
+      eventActions: EventActions;
+    },
   ): AsyncGenerator<Event, void, void> {
     // =========================================================================
     // Runs response processors
@@ -1492,9 +1488,16 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       return;
     }
 
-    // Merge llm response with model response event.
+    // Merge llm response with model response event. The base event is built
+    // here, per response, from the turn's id and actions.
     const mergedEvent = buildMergedModelResponseEvent(
-      modelResponseEvent,
+      createEvent({
+        id: options.eventId,
+        invocationId: invocationContext.invocationId,
+        author: this.name,
+        branch: invocationContext.branch,
+        actions: options.eventActions,
+      }),
       llmResponse,
       llmRequest,
     );
@@ -1619,13 +1622,16 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   protected async *callLlmAsync(
     invocationContext: InvocationContext,
     llmRequest: LlmRequest,
-    modelResponseEvent: Event,
+    options: {
+      eventId: string;
+      eventActions: EventActions;
+    },
   ): AsyncGenerator<LlmResponse, void, void> {
     // Runs before_model_callback if it exists.
     const beforeModelResponse = await this.handleBeforeModelCallback(
       invocationContext,
       llmRequest,
-      modelResponseEvent,
+      options.eventActions,
     );
 
     if (invocationContext.abortSignal?.aborted) {
@@ -1664,7 +1670,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       for await (const llmResponse of responsesGenerator) {
         traceCallLlm({
           invocationContext,
-          eventId: modelResponseEvent.id,
+          eventId: options.eventId,
           llmRequest,
           llmResponse,
         });
@@ -1677,7 +1683,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         const alteredLlmResponse = await this.handleAfterModelCallback(
           invocationContext,
           llmResponse,
-          modelResponseEvent,
+          options.eventActions,
         );
 
         if (invocationContext.abortSignal?.aborted) {
@@ -1692,13 +1698,13 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   private async handleBeforeModelCallback(
     invocationContext: InvocationContext,
     llmRequest: LlmRequest,
-    modelResponseEvent: Event,
+    eventActions: EventActions,
   ): Promise<LlmResponse | undefined> {
     // TODO - b/425992518: Clean up eventActions from Context here as
     // modelResponseEvent.actions is always empty.
     const callbackContext = new Context({
       invocationContext,
-      eventActions: modelResponseEvent.actions,
+      eventActions: eventActions,
     });
 
     // Plugin callbacks before canonical callbacks
@@ -1736,11 +1742,11 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   private async handleAfterModelCallback(
     invocationContext: InvocationContext,
     llmResponse: LlmResponse,
-    modelResponseEvent: Event,
+    eventActions: EventActions,
   ): Promise<LlmResponse | undefined> {
     const callbackContext = new Context({
       invocationContext,
-      eventActions: modelResponseEvent.actions,
+      eventActions: eventActions,
     });
 
     // Plugin callbacks before canonical callbacks
@@ -1775,7 +1781,9 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     responseGenerator: AsyncGenerator<T, void, void>,
     invocationContext: InvocationContext,
     llmRequest: LlmRequest,
-    modelResponseEvent: Event,
+    options?: {
+      eventActions?: EventActions;
+    },
   ): AsyncGenerator<T, void, void> {
     try {
       for await (const response of responseGenerator) {
@@ -1790,7 +1798,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       // Note: this will cause agent to work better if there's a loop.
       const callbackContext = new Context({
         invocationContext,
-        eventActions: modelResponseEvent.actions,
+        eventActions: options?.eventActions,
       });
 
       // Wrapped LLM should throw Error-typed errors
@@ -1822,7 +1830,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
             // Ignore JSON parse error, use original message.
           }
 
-          if (modelResponseEvent.actions) {
+          if (options?.eventActions) {
             yield createEvent({
               invocationId: invocationContext.invocationId,
               author: this.name,
