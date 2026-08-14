@@ -289,6 +289,15 @@ export {BaseToolset, isBaseToolset} from './tools/base_toolset.js';
 export type {ToolPredicate} from './tools/base_toolset.js';
 export {ConsolidateContextTool} from './tools/consolidate_context_tool.js';
 export {
+  DiscoveryEngineSearchTool,
+  SearchResultMode,
+} from './tools/discovery_engine_search_tool.js';
+export type {
+  DiscoveryEngineSearchResult,
+  DiscoveryEngineSearchToolParams,
+  DiscoveryEngineSearchToolResult,
+} from './tools/discovery_engine_search_tool.js';
+export {
   ENTERPRISE_WEB_SEARCH,
   EnterpriseWebSearchTool,
 } from './tools/enterprise_web_search_tool.js';
