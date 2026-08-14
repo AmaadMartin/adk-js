@@ -11,6 +11,7 @@ import {
   ReadResourceResult,
   Resource,
   TextResourceContents,
+  Tool,
 } from '@modelcontextprotocol/sdk/types.js';
 
 import {ReadonlyContext} from '../../agents/readonly_context.js';
@@ -20,6 +21,12 @@ import {BaseToolset, ToolPredicate} from '../base_toolset.js';
 
 import {MCPConnectionParams, MCPSessionManager} from './mcp_session_manager.js';
 import {MCPTool} from './mcp_tool.js';
+
+/** A `tools/list` response and the epoch ms at which it stops being usable. */
+interface CachedToolList {
+  tools: Tool[];
+  expiresAt: number;
+}
 
 /**
  * A toolset that dynamically discovers and provides tools from a Model Context
@@ -52,31 +59,88 @@ import {MCPTool} from './mcp_tool.js';
  */
 export class MCPToolset extends BaseToolset {
   private readonly mcpSessionManager: MCPSessionManager;
+  private readonly toolListCacheTtlSeconds?: number;
+  private cachedToolList?: CachedToolList;
 
+  /**
+   * @param connectionParams How to reach the MCP server.
+   * @param toolFilter Selects the tools this toolset exposes.
+   * @param prefix Prepended as `${prefix}_` to every discovered tool name.
+   * @param toolListCacheTtlSeconds If set, reuse the MCP server's `tools/list`
+   *   response for this many seconds instead of listing on every
+   *   {@link getTools} call. ADK does not subscribe to
+   *   `notifications/tools/list_changed`, so a tool the server adds or removes
+   *   goes unnoticed until the entry expires. The cache lives on this toolset
+   *   instance, so sharing it means sharing the instance. Defaults to
+   *   undefined, which lists on every call.
+   * @throws If `toolListCacheTtlSeconds` is given and is not positive.
+   */
   constructor(
     connectionParams: MCPConnectionParams,
     toolFilter: ToolPredicate | string[] = [],
     prefix?: string,
+    toolListCacheTtlSeconds?: number,
   ) {
     super(toolFilter, prefix);
+    // The negated comparison also rejects NaN, which `<= 0` would admit and
+    // then silently disable caching forever.
+    if (
+      toolListCacheTtlSeconds !== undefined &&
+      !(toolListCacheTtlSeconds > 0)
+    ) {
+      throw new Error(
+        `toolListCacheTtlSeconds must be positive, got ${toolListCacheTtlSeconds}.`,
+      );
+    }
+    this.toolListCacheTtlSeconds = toolListCacheTtlSeconds;
     this.mcpSessionManager = new MCPSessionManager(connectionParams);
   }
 
-  async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {
-    const session = await this.mcpSessionManager.createSession();
-
-    let listResult: ListToolsResult;
-    try {
-      listResult = (await session.listTools()) as ListToolsResult;
-    } finally {
-      await this.mcpSessionManager.closeSession(session);
+  /** Returns the unexpired cached tool list, or undefined on a miss. */
+  private readCachedToolList(): Tool[] | undefined {
+    const entry = this.cachedToolList;
+    if (!entry) {
+      return undefined;
     }
-    logger.debug(`number of tools: ${listResult.tools.length}`);
-    for (const tool of listResult.tools) {
+    if (Date.now() >= entry.expiresAt) {
+      this.cachedToolList = undefined;
+      return undefined;
+    }
+    return entry.tools;
+  }
+
+  /** Caches a tool list, unless caching is off. */
+  private writeCachedToolList(tools: Tool[]): void {
+    if (this.toolListCacheTtlSeconds === undefined) {
+      return;
+    }
+    this.cachedToolList = {
+      tools: [...tools],
+      expiresAt: Date.now() + this.toolListCacheTtlSeconds * 1000,
+    };
+  }
+
+  async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {
+    let mcpTools = this.readCachedToolList();
+
+    if (!mcpTools) {
+      const session = await this.mcpSessionManager.createSession();
+
+      let listResult: ListToolsResult;
+      try {
+        listResult = (await session.listTools()) as ListToolsResult;
+      } finally {
+        await this.mcpSessionManager.closeSession(session);
+      }
+      mcpTools = listResult.tools;
+      this.writeCachedToolList(mcpTools);
+    }
+    logger.debug(`number of tools: ${mcpTools.length}`);
+    for (const tool of mcpTools) {
       logger.debug(`tool: ${tool.name}`);
     }
 
-    const tools = listResult.tools.map((tool) => {
+    const tools = mcpTools.map((tool) => {
       // Create a cloned tool definition with the prefixed name
       const toolWithPrefix = {
         ...tool,
@@ -182,6 +246,7 @@ export class MCPToolset extends BaseToolset {
   }
 
   async close(): Promise<void> {
+    this.cachedToolList = undefined;
     const sessions = this.mcpSessionManager.getActiveSessions();
     await Promise.allSettled(
       sessions.map((session) => this.mcpSessionManager.closeSession(session)),
