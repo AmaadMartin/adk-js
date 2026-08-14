@@ -35,6 +35,7 @@ import * as path from 'node:path';
 import {version} from '../version.js';
 
 import {AgentFileOptions, AgentLoader} from '../utils/agent_loader.js';
+import {loadFileData} from '../utils/file_utils.js';
 import {AdkLogger} from '../utils/logger.js';
 import {
   ApiServerSpanExporter,
@@ -50,6 +51,13 @@ import {
   serializeAgent,
   serializeAppInfo,
 } from './app_info.js';
+import {
+  buildRuntimeConfig,
+  LogoConfig,
+  resolveLogoConfig,
+  RUNTIME_CONFIG_RELATIVE_PATH,
+  RuntimeConfig,
+} from './runtime_config.js';
 import {renderStructureGraphAsDot} from './structure_graph.js';
 
 /**
@@ -58,6 +66,12 @@ import {renderStructureGraphAsDot} from './structure_graph.js';
  * command line.
  */
 export const A2A_AUTH_TOKEN_ENV_VAR = 'ADK_A2A_AUTH_TOKEN';
+
+/** Directory the dev UI bundle is unpacked into at build time. */
+const WEB_ASSETS_DIR = path.join(__dirname, '../../browser');
+
+/** Path the dev UI fetches its runtime config from. */
+const RUNTIME_CONFIG_ROUTE = '/dev-ui/assets/config/runtime-config.json';
 
 interface ServerOptions {
   agentsDir?: string;
@@ -80,6 +94,16 @@ interface ServerOptions {
    * `a2a` is enabled, the A2A surface is mounted WITHOUT authentication.
    */
   a2aAuthToken?: string;
+  /**
+   * Text of the custom logo shown by the dev UI. Must be set together with
+   * `logoImageUrl`; supplying only one of the two fails construction.
+   */
+  logoText?: string;
+  /**
+   * Image URL of the custom logo shown by the dev UI. Must be set together
+   * with `logoText`; supplying only one of the two fails construction.
+   */
+  logoImageUrl?: string;
   reloadAgents?: boolean;
   registerProcessors?: (tracerProvider: TracerProvider) => void;
 }
@@ -127,6 +151,7 @@ export class AdkApiServer {
   private readonly logger: Logger;
   private readonly a2a: boolean;
   private readonly a2aAuthToken?: string;
+  private readonly logo?: LogoConfig;
 
   constructor(options: ServerOptions) {
     this.host = options.host ?? 'localhost';
@@ -164,6 +189,9 @@ export class AdkApiServer {
     // to the authenticator, which rejects a token that is not usable.
     this.a2aAuthToken =
       options.a2aAuthToken || process.env[A2A_AUTH_TOKEN_ENV_VAR] || undefined;
+    // Validated here rather than in the route so that an incomplete pair
+    // fails startup instead of a page load.
+    this.logo = resolveLogoConfig(options.logoText, options.logoImageUrl);
     this.app = express();
   }
 
@@ -214,6 +242,28 @@ export class AdkApiServer {
     }
   }
 
+  /**
+   * Reads the runtime config that ships with the dev UI bundle.
+   *
+   * A source checkout has no bundle at all, so an unreadable or unparseable
+   * file is reported once and treated as an empty config. Express 4 does not
+   * catch a rejected promise from an async handler, so this never rejects.
+   */
+  private async loadBundledConfig(): Promise<RuntimeConfig> {
+    const configPath = path.join(WEB_ASSETS_DIR, RUNTIME_CONFIG_RELATIVE_PATH);
+
+    try {
+      return (await loadFileData<RuntimeConfig>(configPath)) ?? {};
+    } catch (e: unknown) {
+      this.logger.warn(
+        `Serving the dev UI runtime config without bundled defaults: ${
+          (e as Error).message
+        }`,
+      );
+      return {};
+    }
+  }
+
   private async init() {
     const app = this.app;
     await this.setupTelemetry();
@@ -222,9 +272,14 @@ export class AdkApiServer {
       app.get('/', (req: Request, res: Response) => {
         res.redirect('/dev-ui');
       });
+      // Registered before the static mount so that it shadows the file that
+      // ships inside the dev UI bundle.
+      app.get(RUNTIME_CONFIG_ROUTE, async (req: Request, res: Response) => {
+        res.json(buildRuntimeConfig(await this.loadBundledConfig(), this.logo));
+      });
       app.use(
         '/dev-ui',
-        express.static(path.join(__dirname, '../../browser'), {
+        express.static(WEB_ASSETS_DIR, {
           setHeaders: (res: Response, path: string) => {
             if (path.endsWith('.js')) {
               res.setHeader('Content-Type', 'text/javascript');

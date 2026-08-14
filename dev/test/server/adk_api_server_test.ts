@@ -24,6 +24,8 @@ import {
   Workflow,
 } from '@google/adk';
 import {ReadableSpan} from '@opentelemetry/sdk-trace-base';
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {z} from 'zod';
 
@@ -37,6 +39,34 @@ import {version} from '../../src/version.js';
 interface JsonRpcResponse {
   result?: unknown;
   error?: {code: number; message: string};
+}
+
+/** URL the dev UI fetches its runtime configuration from. */
+const RUNTIME_CONFIG_PATH = '/dev-ui/assets/config/runtime-config.json';
+
+/**
+ * Directory the server reads the dev UI bundle from. The build unpacks the
+ * bundle into `dev/dist/browser`, so this sibling of `dev/src` and `dev/test`
+ * only ever exists while a test puts a config file in it.
+ */
+const WEB_ASSETS_DIR = path.join(__dirname, '../../browser');
+
+/** Writes a runtime config where the server expects the bundled one. */
+async function writeBundledRuntimeConfig(config: unknown): Promise<void> {
+  const configPath = path.join(
+    WEB_ASSETS_DIR,
+    'assets',
+    'config',
+    'runtime-config.json',
+  );
+
+  await fs.mkdir(path.dirname(configPath), {recursive: true});
+  await fs.writeFile(configPath, JSON.stringify(config), {encoding: 'utf-8'});
+}
+
+/** Removes everything `writeBundledRuntimeConfig` created. */
+async function removeBundledWebAssets(): Promise<void> {
+  await fs.rm(WEB_ASSETS_DIR, {recursive: true, force: true});
 }
 
 /**
@@ -843,6 +873,164 @@ describe('AdkWebServer', () => {
       const response = await debugClient.get('/');
       expect(response.status).toBe(302);
       await debugServer.stop();
+    });
+
+    it('publishes the configured logo in the runtime config', async () => {
+      const debugServer = new AdkApiServer({
+        agentLoader,
+        sessionService,
+        memoryService,
+        artifactService,
+        serveDebugUI: true,
+        logoText: 'Acme Agents',
+        logoImageUrl: 'https://acme.example/logo.svg',
+      });
+      await debugServer.start();
+
+      try {
+        const response = await new HttpClient(debugServer.url).get<{
+          logo?: unknown;
+        }>(RUNTIME_CONFIG_PATH);
+
+        expect(response.status).toBe(200);
+        expect(response.data?.logo).toEqual({
+          text: 'Acme Agents',
+          imageUrl: 'https://acme.example/logo.svg',
+        });
+      } finally {
+        await debugServer.stop();
+      }
+    });
+
+    it('merges the logo into the config that ships with the bundle', async () => {
+      await writeBundledRuntimeConfig({backendUrl: '/api'});
+      const debugServer = new AdkApiServer({
+        agentLoader,
+        sessionService,
+        memoryService,
+        artifactService,
+        serveDebugUI: true,
+        logoText: 'Acme Agents',
+        logoImageUrl: 'https://acme.example/logo.svg',
+      });
+      await debugServer.start();
+
+      try {
+        const response = await new HttpClient(debugServer.url).get<
+          Record<string, unknown>
+        >(RUNTIME_CONFIG_PATH);
+
+        expect(response.data).toEqual({
+          backendUrl: '/api',
+          logo: {
+            text: 'Acme Agents',
+            imageUrl: 'https://acme.example/logo.svg',
+          },
+        });
+      } finally {
+        await debugServer.stop();
+        await removeBundledWebAssets();
+      }
+    });
+
+    it('publishes no logo key when neither option is set', async () => {
+      const debugServer = new AdkApiServer({
+        agentLoader,
+        sessionService,
+        memoryService,
+        artifactService,
+        serveDebugUI: true,
+      });
+      await debugServer.start();
+
+      try {
+        const response = await new HttpClient(debugServer.url).get<
+          Record<string, unknown>
+        >(RUNTIME_CONFIG_PATH);
+
+        expect(response.status).toBe(200);
+        expect('logo' in (response.data ?? {})).toBe(false);
+      } finally {
+        await debugServer.stop();
+      }
+    });
+
+    it('removes a stale logo that ships inside the bundle', async () => {
+      await writeBundledRuntimeConfig({
+        backendUrl: '',
+        logo: {text: 'bundled', imageUrl: 'https://bundled.example/logo.svg'},
+      });
+      const debugServer = new AdkApiServer({
+        agentLoader,
+        sessionService,
+        memoryService,
+        artifactService,
+        serveDebugUI: true,
+      });
+      await debugServer.start();
+
+      try {
+        const response = await new HttpClient(debugServer.url).get<
+          Record<string, unknown>
+        >(RUNTIME_CONFIG_PATH);
+
+        expect(response.data).toEqual({backendUrl: ''});
+      } finally {
+        await debugServer.stop();
+        await removeBundledWebAssets();
+      }
+    });
+
+    it('still publishes the logo when the bundled config holds null', async () => {
+      await writeBundledRuntimeConfig(null);
+      const debugServer = new AdkApiServer({
+        agentLoader,
+        sessionService,
+        memoryService,
+        artifactService,
+        serveDebugUI: true,
+        logoText: 'Acme Agents',
+        logoImageUrl: 'https://acme.example/logo.svg',
+      });
+      await debugServer.start();
+
+      try {
+        const response = await new HttpClient(debugServer.url).get<
+          Record<string, unknown>
+        >(RUNTIME_CONFIG_PATH);
+
+        expect(response.data).toEqual({
+          logo: {
+            text: 'Acme Agents',
+            imageUrl: 'https://acme.example/logo.svg',
+          },
+        });
+      } finally {
+        await debugServer.stop();
+        await removeBundledWebAssets();
+      }
+    });
+
+    it('fails construction when only one logo option is set', () => {
+      expect(
+        () =>
+          new AdkApiServer({
+            agentLoader,
+            sessionService,
+            memoryService,
+            artifactService,
+            serveDebugUI: true,
+            logoText: 'Acme Agents',
+          }),
+      ).toThrowError(
+        'Both logoText and logoImageUrl must be defined when using logo config.',
+      );
+    });
+
+    it('does not serve the runtime config when the debug UI is disabled', async () => {
+      const response = await fetch(`${server.url}${RUNTIME_CONFIG_PATH}`);
+
+      expect(response.status).toBe(404);
     });
   });
 
