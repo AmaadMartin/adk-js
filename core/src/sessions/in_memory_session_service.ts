@@ -6,8 +6,8 @@
 import {cloneDeep} from 'lodash-es';
 
 import {Event} from '../events/event.js';
-import {randomUUID} from '../utils/env_aware_utils.js';
 import {logger} from '../utils/logger.js';
+import {newUuid} from '../utils/uuid.js';
 
 import {
   AppendEventRequest,
@@ -70,7 +70,7 @@ export class InMemorySessionService extends BaseSessionService {
   }: CreateSessionRequest): Promise<Session> {
     const filteredState = state ? trimTempState(state) : undefined;
     const session = createSession({
-      id: sessionId || randomUUID(),
+      id: sessionId || newUuid(),
       appName,
       userId,
       state: filteredState,

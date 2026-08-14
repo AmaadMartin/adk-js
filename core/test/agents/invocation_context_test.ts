@@ -13,8 +13,11 @@ import {
   PluginManager,
   Session,
   createEvent,
+  resetIdProvider,
+  setIdProvider,
 } from '@google/adk';
-import {describe, expect, it} from 'vitest';
+import {afterEach, describe, expect, it} from 'vitest';
+import {newInvocationContextId} from '../../src/agents/invocation_context.js';
 
 function makeSession(): Session {
   return {
@@ -170,5 +173,17 @@ describe('InvocationContext LLM-call cost tracking', () => {
     // Exactly the 3 permitted iterations produced an event before the throw,
     // proving the counter is shared across the per-iteration child contexts.
     expect(events).toHaveLength(3);
+  });
+});
+
+describe('newInvocationContextId', () => {
+  afterEach(() => {
+    resetIdProvider();
+  });
+
+  it('mints the invocation id from the installed provider', () => {
+    setIdProvider(() => 'fixed');
+
+    expect(newInvocationContextId()).toBe('e-fixed');
   });
 });

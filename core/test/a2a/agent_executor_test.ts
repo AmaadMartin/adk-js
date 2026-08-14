@@ -4,19 +4,27 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {TaskStatusUpdateEvent, TextPart} from '@a2a-js/sdk';
+import {
+  TaskArtifactUpdateEvent,
+  TaskStatusUpdateEvent,
+  TextPart,
+} from '@a2a-js/sdk';
 import {ExecutionEventBus, RequestContext} from '@a2a-js/sdk/server';
 import {
   A2AAgentExecutor,
   Event as AdkEvent,
+  BaseAgent,
   BaseSessionService,
   createEvent,
   createEventActions,
+  InMemorySessionService,
+  resetIdProvider,
   Runner,
   RunnerConfig,
   Session,
+  setIdProvider,
 } from '@google/adk';
-import {beforeEach, describe, expect, it, Mocked, vi} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, Mocked, vi} from 'vitest';
 
 // Mock the Runner to control its async generator
 vi.mock('../../src/runner/runner.js', async (importOriginal) => {
@@ -276,5 +284,49 @@ describe('A2AAgentExecutor', () => {
     await expect(executor.cancelTask('any-task-id')).rejects.toThrow(
       'Task cancellation is not supported yet.',
     );
+  });
+  describe('with an installed ID provider', () => {
+    /** Emits one complete event, so the executor publishes one artifact update. */
+    class SingleEventAgent extends BaseAgent {
+      protected async *runAsyncImpl(): AsyncGenerator<AdkEvent, void, void> {
+        yield createEvent({
+          author: this.name,
+          content: {role: 'model', parts: [{text: 'response'}]},
+        });
+      }
+
+      protected async *runLiveImpl(): AsyncGenerator<AdkEvent, void, void> {
+        // The executor only drives the async path.
+      }
+    }
+
+    afterEach(() => {
+      resetIdProvider();
+    });
+
+    it('mints the artifactId from the provider when no partial id is cached', async () => {
+      setIdProvider(() => 'provider-id');
+      // A real runner, so the executor reaches the artifact-update path itself.
+      const {Runner: ActualRunner} = await vi.importActual<
+        typeof import('../../src/runner/runner.js')
+      >('../../src/runner/runner.js');
+      const executor = new A2AAgentExecutor({
+        runner: new ActualRunner({
+          appName: 'test-app',
+          agent: new SingleEventAgent({name: 'test_agent'}),
+          sessionService: new InMemorySessionService(),
+        }),
+      });
+
+      await executor.execute(createRequestContext(), mockEventBus);
+
+      const artifactUpdate = mockEventBus.publish.mock.calls
+        .map((call) => call[0])
+        .find(
+          (event): event is TaskArtifactUpdateEvent =>
+            event.kind === 'artifact-update',
+        );
+      expect(artifactUpdate?.artifact.artifactId).toBe('provider-id');
+    });
   });
 });

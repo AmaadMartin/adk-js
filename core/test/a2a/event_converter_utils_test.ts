@@ -10,8 +10,13 @@ import {
   TaskArtifactUpdateEvent,
   TaskStatusUpdateEvent,
 } from '@a2a-js/sdk';
-import {createEvent, createEventActions} from '@google/adk';
-import {describe, expect, it, vi} from 'vitest';
+import {
+  createEvent,
+  createEventActions,
+  resetIdProvider,
+  setIdProvider,
+} from '@google/adk';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 import {A2AEvent} from '../../src/a2a/a2a_event.js';
 import {toA2AMessage, toAdkEvent} from '../../src/a2a/event_converter_utils.js';
 import * as envAwareUtils from '../../src/utils/env_aware_utils.js';
@@ -27,6 +32,27 @@ vi.mock('../../src/utils/env_aware_utils.js', async (importOriginal) => {
 
 describe('event_converter_utils', () => {
   describe('toA2AMessage', () => {
+    afterEach(() => {
+      resetIdProvider();
+    });
+
+    it('takes the messageId from the installed ID provider', () => {
+      setIdProvider(() => 'provider-id');
+      const event = createEvent({
+        invocationId: 'inv1',
+        author: 'user',
+        content: {role: 'user', parts: [{text: 'hello'}]},
+      });
+
+      const message = toA2AMessage(event, {
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 'test-session',
+      });
+
+      expect(message.messageId).toBe('provider-id');
+    });
+
     it('converts a simple user event to an A2A message', () => {
       vi.mocked(envAwareUtils.randomUUID).mockReturnValue('test-uuid-1');
       const event = createEvent({

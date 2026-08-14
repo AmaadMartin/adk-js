@@ -11,7 +11,7 @@ import {
   TaskArtifactUpdateEvent,
   TaskStatusUpdateEvent,
 } from '@a2a-js/sdk';
-import {randomUUID} from '../utils/env_aware_utils.js';
+import {newUuid} from '../utils/uuid.js';
 
 /**
  * Message roles.
@@ -191,7 +191,7 @@ export function createTask({
 }): Task {
   return {
     kind: 'task',
-    id: taskId || randomUUID(),
+    id: taskId || newUuid(),
     contextId,
     history: [message],
     status: {
@@ -282,7 +282,7 @@ export function createTaskArtifactUpdateEvent({
     append,
     lastChunk,
     artifact: {
-      artifactId: artifactId || randomUUID(),
+      artifactId: artifactId || newUuid(),
       parts,
     },
     metadata,
@@ -312,7 +312,7 @@ export function createTaskFailedEvent({
       state: TaskState.FAILED,
       message: {
         kind: 'message',
-        messageId: randomUUID(),
+        messageId: newUuid(),
         role: 'agent',
         taskId,
         contextId,
@@ -352,7 +352,7 @@ export function createTaskInputRequiredEvent({
       state: TaskState.INPUT_REQUIRED,
       message: {
         kind: 'message',
-        messageId: randomUUID(),
+        messageId: newUuid(),
         role: 'agent',
         taskId,
         contextId,
@@ -387,7 +387,7 @@ export function createInputMissingErrorEvent({
       state: TaskState.INPUT_REQUIRED,
       message: {
         kind: 'message',
-        messageId: randomUUID(),
+        messageId: newUuid(),
         role: 'agent',
         taskId,
         contextId,

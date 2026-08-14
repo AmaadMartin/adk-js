@@ -14,10 +14,12 @@ import {
   hasTrailingCodeExecutionResult,
   isFinalResponse,
   pruneThoughts,
+  resetIdProvider,
+  setIdProvider,
   stringifyContent,
 } from '@google/adk';
 import {Outcome} from '@google/genai';
-import {describe, expect, it} from 'vitest';
+import {afterEach, describe, expect, it} from 'vitest';
 import {
   createNewEventId,
   generateClientFunctionCallId,
@@ -421,9 +423,19 @@ describe('Event Utils', () => {
   });
 
   describe('generateClientFunctionCallId', () => {
+    afterEach(() => {
+      resetIdProvider();
+    });
+
     it('should generate a valid ID with prefix', () => {
       const id = generateClientFunctionCallId();
       expect(id).toMatch(/^adk-/);
+    });
+
+    it('mints the id from the installed provider', () => {
+      setIdProvider(() => 'fixed');
+
+      expect(generateClientFunctionCallId()).toBe('adk-fixed');
     });
   });
 

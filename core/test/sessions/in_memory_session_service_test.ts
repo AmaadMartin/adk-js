@@ -10,6 +10,8 @@ import {
   State,
   createEvent,
   createEventActions,
+  resetIdProvider,
+  setIdProvider,
 } from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {isInMemoryConnectionString} from '../../src/sessions/in_memory_session_service.js';
@@ -84,6 +86,35 @@ describe('InMemorySessionService', () => {
       expect(session2.state).toEqual({
         [`${State.APP_PREFIX}appKey`]: 'appValue',
         [`${State.USER_PREFIX}userKey`]: 'userValue',
+      });
+    });
+
+    describe('with an installed ID provider', () => {
+      afterEach(() => {
+        resetIdProvider();
+      });
+
+      it('mints the session id from the provider', async () => {
+        setIdProvider(() => 'fixed');
+
+        const session = await service.createSession({
+          appName: 'app',
+          userId: 'user',
+        });
+
+        expect(session.id).toBe('fixed');
+      });
+
+      it('prefers an explicit sessionId over the provider', async () => {
+        setIdProvider(() => 'fixed');
+
+        const session = await service.createSession({
+          appName: 'app',
+          userId: 'user',
+          sessionId: 'explicit-session-id',
+        });
+
+        expect(session.id).toBe('explicit-session-id');
       });
     });
 

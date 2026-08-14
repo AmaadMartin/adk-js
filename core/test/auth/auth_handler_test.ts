@@ -4,8 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {AuthConfig, AuthCredentialTypes, AuthHandler, State} from '@google/adk';
-import {describe, expect, it, vi} from 'vitest';
+import {
+  AuthConfig,
+  AuthCredentialTypes,
+  AuthHandler,
+  resetIdProvider,
+  setIdProvider,
+  State,
+} from '@google/adk';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 
 vi.mock('../../src/auth/oauth2/oauth2_credential_exchanger.js', () => ({
   OAuth2CredentialExchanger: class {
@@ -402,6 +409,44 @@ describe('AuthHandler', () => {
 
       expect(uri).toBeDefined();
       expect(uri?.oauth2?.authUri).toContain('https://token.com');
+    });
+  });
+  describe('OAuth2 state and the ID provider', () => {
+    afterEach(() => {
+      resetIdProvider();
+    });
+
+    it('keeps the state parameter off the ID provider', () => {
+      setIdProvider(() => 'provider-id');
+      const handler = new AuthHandler({
+        credentialKey: 'testKey',
+        authScheme: {
+          type: 'oauth2',
+          flows: {
+            authorizationCode: {
+              authorizationUrl: 'https://auth.com',
+              tokenUrl: 'https://token.com',
+              scopes: {scope1: 'desc'},
+            },
+          },
+        },
+        rawAuthCredential: {
+          authType: AuthCredentialTypes.OAUTH2,
+          oauth2: {
+            clientId: 'id',
+            clientSecret: 'secret',
+            redirectUri: 'https://redirect.com',
+          },
+        },
+      });
+
+      const uri = handler.generateAuthUri();
+
+      // The state parameter is a CSRF token, so a caller-supplied provider
+      // must never be able to make it predictable.
+      expect(uri?.oauth2?.state).toBeDefined();
+      expect(uri?.oauth2?.state).not.toBe('provider-id');
+      expect(uri?.oauth2?.authUri).not.toContain('state=provider-id');
     });
   });
 });
