@@ -4,7 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Context, RestApiTool} from '@google/adk';
+import {
+  Context,
+  createSession,
+  InvocationContext,
+  LlmAgent,
+  PluginManager,
+  RestApiTool,
+} from '@google/adk';
 import * as http from 'node:http';
 import {OpenAPIV3} from 'openapi-types';
 import {afterAll, beforeAll, describe, expect, it} from 'vitest';
@@ -64,7 +71,15 @@ describe('RestApiTool HTTP error handling against a live server', () => {
       {baseUrl, path, method: 'GET'},
       operation,
     );
-    return tool.runAsync({args: {}, toolContext: {} as unknown as Context});
+    const toolContext = new Context({
+      invocationContext: new InvocationContext({
+        invocationId: 'invocation-1',
+        agent: new LlmAgent({name: 'test_agent'}),
+        session: createSession({id: 'session-1', appName: 'test_app'}),
+        pluginManager: new PluginManager(),
+      }),
+    });
+    return tool.runAsync({args: {}, toolContext});
   }
 
   it('should report a real 404 as an error payload carrying the body', async () => {
