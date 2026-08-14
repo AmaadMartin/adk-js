@@ -131,9 +131,11 @@ describe('StreamableHTTPConnectionParams (e2e, real HTTP servers)', () => {
 
     const error = await manager.createSession().catch((e: unknown) => e);
 
-    expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).toContain('Failed to create MCP session');
-    expect((error as Error).message).toMatch(/timed out/i);
+    if (!(error instanceof Error)) {
+      expect.fail('createSession resolved instead of rejecting');
+    }
+    expect(error.message).toContain('Failed to create MCP session');
+    expect(error.message).toMatch(/timed out/i);
     expect(manager.getActiveSessions()).toEqual([]);
   });
 

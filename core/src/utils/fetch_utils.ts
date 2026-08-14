@@ -4,13 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/** The init argument of the global `fetch`. */
-type FetchInit = Parameters<typeof fetch>[1];
-
-/** Structural form of `fetch`, so callers need no DOM/undici import. */
+/**
+ * Structural form of `fetch`. The init type is read off the global because the
+ * repo's `no-undef` lint rule rejects the bare `RequestInit` identifier.
+ */
 export type FetchFn = (
   url: string | URL,
-  init?: FetchInit,
+  init?: Parameters<typeof fetch>[1],
 ) => Promise<Response>;
 
 const EVENT_STREAM_CONTENT_TYPE = 'text/event-stream';
@@ -34,13 +34,6 @@ export function idleTimeoutStream(
   const reader = source.getReader();
   let timer: ReturnType<typeof setTimeout> | undefined;
 
-  function clearIdleTimer(): void {
-    if (timer !== undefined) {
-      clearTimeout(timer);
-      timer = undefined;
-    }
-  }
-
   return new ReadableStream<Uint8Array>({
     async pull(controller) {
       const idle = new Promise<typeof IDLE>((resolve) => {
@@ -61,11 +54,11 @@ export function idleTimeoutStream(
         await reader.cancel(err);
         controller.error(err);
       } finally {
-        clearIdleTimer();
+        clearTimeout(timer);
       }
     },
     async cancel(reason) {
-      clearIdleTimer();
+      clearTimeout(timer);
       await reader.cancel(reason);
     },
   });
