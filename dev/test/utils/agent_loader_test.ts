@@ -550,15 +550,12 @@ describe('AgentLoader', () => {
       with: {},
     });
 
-    const setupOnLoad = (
-      filePath: string,
-      originalDir: string,
-    ): OnLoadCallback => {
+    const setupOnLoad = (): OnLoadCallback => {
       const onLoad =
         vi.fn<
           (options: esbuild.OnLoadOptions, callback: OnLoadCallback) => void
         >();
-      replaceDirnamePlugin(filePath, originalDir).setup({onLoad});
+      replaceDirnamePlugin().setup({onLoad});
       return onLoad.mock.calls[0][1];
     };
 
@@ -595,7 +592,7 @@ describe('AgentLoader', () => {
     ])('$name', async ({content, expected}) => {
       const filePath = path.join(tempAgentsDir, 'test_agent.ts');
       const fileDir = path.dirname(filePath);
-      const plugin = replaceDirnamePlugin(filePath, fileDir);
+      const plugin = replaceDirnamePlugin();
 
       expect(plugin.name).toBe('replace-dirname');
 
@@ -623,7 +620,7 @@ describe('AgentLoader', () => {
     it('does not replace tokens in strings', async () => {
       const filePath = path.join(tempAgentsDir, 'test_agent.ts');
       const fileDir = path.dirname(filePath);
-      const plugin = replaceDirnamePlugin(filePath, fileDir);
+      const plugin = replaceDirnamePlugin();
 
       const mockBuild = {
         onLoad: vi.fn(),
@@ -651,7 +648,7 @@ describe('AgentLoader', () => {
         'index.js',
         'const url = import.meta.url;',
       );
-      const onLoadCallback = setupOnLoad(entryPath, tempAgentsDir);
+      const onLoadCallback = setupOnLoad();
 
       const result = await onLoadCallback(onLoadArgs(modulePath));
 
@@ -660,13 +657,12 @@ describe('AgentLoader', () => {
     });
 
     it('rewrites __dirname and __filename in a dependency to the dependency location', async () => {
-      const entryPath = path.join(tempAgentsDir, 'test_agent.ts');
       const modulePath = await writeDependency(
         'dirname-dep',
         'index.js',
         'const dir = __dirname;\nconst file = __filename;',
       );
-      const onLoadCallback = setupOnLoad(entryPath, tempAgentsDir);
+      const onLoadCallback = setupOnLoad();
 
       const result = await onLoadCallback(onLoadArgs(modulePath));
 
@@ -678,13 +674,12 @@ describe('AgentLoader', () => {
     });
 
     it('rewrites import.meta.dirname and import.meta.filename in a dependency', async () => {
-      const entryPath = path.join(tempAgentsDir, 'test_agent.ts');
       const modulePath = await writeDependency(
         'meta-dep',
         'index.js',
         'const dir = import.meta.dirname;\nconst file = import.meta.filename;',
       );
-      const onLoadCallback = setupOnLoad(entryPath, tempAgentsDir);
+      const onLoadCallback = setupOnLoad();
 
       const result = await onLoadCallback(onLoadArgs(modulePath));
 
@@ -696,13 +691,12 @@ describe('AgentLoader', () => {
     });
 
     it('does not replace tokens in strings in a dependency', async () => {
-      const entryPath = path.join(tempAgentsDir, 'test_agent.ts');
       const modulePath = await writeDependency(
         'string-dep',
         'index.js',
         `const str = "__dirname";\nconst code = __dirname;`,
       );
-      const onLoadCallback = setupOnLoad(entryPath, tempAgentsDir);
+      const onLoadCallback = setupOnLoad();
 
       const result = await onLoadCallback(onLoadArgs(modulePath));
 
@@ -712,27 +706,13 @@ describe('AgentLoader', () => {
       );
     });
 
-    it('keeps the entry file pointed at originalDir when it differs from the file directory', async () => {
-      const entryPath = path.join(tempAgentsDir, 'test_agent.ts');
-      const originalDir = path.join(tempAgentsDir, 'elsewhere');
-      await fs.writeFile(entryPath, 'const dir = __dirname;');
-      const onLoadCallback = setupOnLoad(entryPath, originalDir);
-
-      const result = await onLoadCallback(onLoadArgs(entryPath));
-
-      expect(result?.contents).toContain(JSON.stringify(originalDir));
-    });
-
     it('does not transform a module without location tokens', async () => {
       const modulePath = await writeDependency(
         'plain-dep',
         'index.js',
         'export const answer = 1;',
       );
-      const onLoadCallback = setupOnLoad(
-        path.join(tempAgentsDir, 'test_agent.ts'),
-        tempAgentsDir,
-      );
+      const onLoadCallback = setupOnLoad();
 
       const result = await onLoadCallback(onLoadArgs(modulePath));
 
@@ -750,10 +730,7 @@ describe('AgentLoader', () => {
           `index.${extension}`,
           `${contents}\nexport const node = <div className="x">hi</div>;`,
         );
-        const onLoadCallback = setupOnLoad(
-          path.join(tempAgentsDir, 'test_agent.ts'),
-          tempAgentsDir,
-        );
+        const onLoadCallback = setupOnLoad();
 
         const result = await onLoadCallback(onLoadArgs(modulePath));
 
@@ -775,10 +752,7 @@ describe('AgentLoader', () => {
           'export const dir = __dirname;',
         ].join('\n'),
       );
-      const onLoadCallback = setupOnLoad(
-        path.join(tempAgentsDir, 'test_agent.ts'),
-        tempAgentsDir,
-      );
+      const onLoadCallback = setupOnLoad();
 
       const result = await onLoadCallback(onLoadArgs(modulePath));
 
@@ -793,10 +767,7 @@ describe('AgentLoader', () => {
         'data.json',
         '{"key": "__dirname"}',
       );
-      const onLoadCallback = setupOnLoad(
-        path.join(tempAgentsDir, 'test_agent.ts'),
-        tempAgentsDir,
-      );
+      const onLoadCallback = setupOnLoad();
 
       const result = await onLoadCallback(onLoadArgs(modulePath));
 
@@ -809,10 +780,7 @@ describe('AgentLoader', () => {
         'index.js',
         'const dir = __dirname; const;',
       );
-      const onLoadCallback = setupOnLoad(
-        path.join(tempAgentsDir, 'test_agent.ts'),
-        tempAgentsDir,
-      );
+      const onLoadCallback = setupOnLoad();
 
       await expect(onLoadCallback(onLoadArgs(modulePath))).rejects.toThrow(
         modulePath,
@@ -826,10 +794,7 @@ describe('AgentLoader', () => {
         'absent-dep',
         'index.js',
       );
-      const onLoadCallback = setupOnLoad(
-        path.join(tempAgentsDir, 'test_agent.ts'),
-        tempAgentsDir,
-      );
+      const onLoadCallback = setupOnLoad();
 
       await expect(onLoadCallback(onLoadArgs(modulePath))).rejects.toThrow(
         'ENOENT',
@@ -838,8 +803,7 @@ describe('AgentLoader', () => {
 
     it('uses js loader for non-ts files', async () => {
       const filePath = path.join(tempAgentsDir, 'test_agent.js');
-      const fileDir = path.dirname(filePath);
-      const plugin = replaceDirnamePlugin(filePath, fileDir);
+      const plugin = replaceDirnamePlugin();
 
       const mockBuild = {
         onLoad: vi.fn(),
@@ -860,8 +824,7 @@ describe('AgentLoader', () => {
 
     it('returns js loader for mts files', async () => {
       const filePath = path.join(tempAgentsDir, 'test_agent.mts');
-      const fileDir = path.dirname(filePath);
-      const plugin = replaceDirnamePlugin(filePath, fileDir);
+      const plugin = replaceDirnamePlugin();
 
       const mockBuild = {
         onLoad: vi.fn(),
@@ -881,8 +844,7 @@ describe('AgentLoader', () => {
 
     it('returns js loader for cts files', async () => {
       const filePath = path.join(tempAgentsDir, 'test_agent.cts');
-      const fileDir = path.dirname(filePath);
-      const plugin = replaceDirnamePlugin(filePath, fileDir);
+      const plugin = replaceDirnamePlugin();
 
       const mockBuild = {
         onLoad: vi.fn(),

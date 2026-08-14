@@ -16,52 +16,47 @@ const dirname = process.cwd();
 const TEST_EXECUTION_TIMEOUT = 60000;
 const HOOK_TIMEOUT = 120000;
 
-/** Fixture directory names, each an agent project resolving a nearby file. */
-const TEST_CASES = [
-  '__dirname',
-  '__filename',
-  'import_meta_url',
-  'dependency_import_meta_url',
-];
+describe.each(['__dirname', '__filename', 'import_meta_url', 'dependency_url'])(
+  'Agent with %s',
+  (testCaseName: string) => {
+    const projectPath = path.join(
+      dirname,
+      'tests/integration/agent_loader',
+      testCaseName,
+    );
 
-describe.each(TEST_CASES)('Agent with %s', (testCaseName: string) => {
-  const projectPath = path.join(
-    dirname,
-    'tests/integration/agent_loader',
-    testCaseName,
-  );
+    beforeAll(async () => {
+      await execAsync('npm install', {cwd: projectPath});
+    }, HOOK_TIMEOUT);
 
-  beforeAll(async () => {
-    await execAsync('npm install', {cwd: projectPath});
-  }, HOOK_TIMEOUT);
+    it(
+      'should run agent and load params from file nearby via package.json script',
+      async () => {
+        const childProcess = spawn('npm', ['run', 'start'], {
+          cwd: projectPath,
+          shell: true,
+        });
 
-  it(
-    'should run agent and load params from file nearby via package.json script',
-    async () => {
-      const childProcess = spawn('npm', ['run', 'start'], {
-        cwd: projectPath,
-        shell: true,
-      });
+        let response = await sendInput(childProcess, 'Tell me a joke.\n');
 
-      let response = await sendInput(childProcess, 'Tell me a joke.\n');
+        expect(response.toString()).toContain("I'm stubby model response!");
 
-      expect(response.toString()).toContain("I'm stubby model response!");
+        response = await sendInput(childProcess, 'exit\n');
+        expect(response.toString()).toContain('');
+      },
+      TEST_EXECUTION_TIMEOUT,
+    );
 
-      response = await sendInput(childProcess, 'exit\n');
-      expect(response.toString()).toContain('');
-    },
-    TEST_EXECUTION_TIMEOUT,
-  );
-
-  afterAll(async () => {
-    await fs
-      .rm(path.join(projectPath, 'node_modules'), {
-        recursive: true,
-        force: true,
-      })
-      .catch(() => {});
-    await fs
-      .unlink(path.join(projectPath, 'package-lock.json'))
-      .catch(() => {});
-  }, HOOK_TIMEOUT);
-});
+    afterAll(async () => {
+      await fs
+        .rm(path.join(projectPath, 'node_modules'), {
+          recursive: true,
+          force: true,
+        })
+        .catch(() => {});
+      await fs
+        .unlink(path.join(projectPath, 'package-lock.json'))
+        .catch(() => {});
+    }, HOOK_TIMEOUT);
+  },
+);

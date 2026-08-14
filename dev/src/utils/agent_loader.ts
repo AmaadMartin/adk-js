@@ -45,11 +45,9 @@ const FILE_EXTENSION_LOADER_MAP: Readonly<Record<string, esbuild.Loader>> = {
 
 /**
  * Supported file extensions for JavaScript and TypeScript.
- *
- * Narrower than {@link FILE_EXTENSION_LOADER_MAP}, and deliberately separate
- * from it: this list decides which files {@link AgentLoader} offers as agents,
- * so it must not grow whenever the bundler learns to parse another extension.
  */
+// Not derived from FILE_EXTENSION_LOADER_MAP: .jsx/.tsx must never become
+// discoverable agent files.
 const JS_FILES_EXTENSIONS = ['.js', '.cjs', '.mjs', '.ts', '.mts', '.cts'];
 
 /**
@@ -130,14 +128,9 @@ const DEFAULT_AGENT_FILE_OPTIONS: AgentFileOptions = {
  * own source location, so a bundled dependency that reads a file next to
  * itself still finds it after the agent is compiled into a temp directory.
  *
- * The agent file itself gets `originalDir` and `filePath`, which callers may
- * set to a directory the agent file does not live in.
- *
- * @param filePath - The path to the agent file.
- * @param originalDir - The original directory path of the agent file.
  * @returns An esbuild plugin that replaces path and URL references in the bundle.
  */
-export function replaceDirnamePlugin(filePath: string, originalDir: string) {
+export function replaceDirnamePlugin() {
   return {
     name: 'replace-dirname',
     setup(build: Pick<esbuild.PluginBuild, 'onLoad'>) {
@@ -156,9 +149,7 @@ export function replaceDirnamePlugin(filePath: string, originalDir: string) {
             return undefined;
           }
 
-          const isJsx = loader === 'jsx' || loader === 'tsx';
-          const moduleDir =
-            args.path === filePath ? originalDir : path.dirname(args.path);
+          const moduleDir = path.dirname(args.path);
           const transformResult = await esbuild.transform(content, {
             loader,
             // Without it esbuild reports a syntax error against `<stdin>`
@@ -179,7 +170,7 @@ export function replaceDirnamePlugin(filePath: string, originalDir: string) {
 
           return {
             contents: transformResult.code,
-            loader: isJsx ? 'jsx' : 'js',
+            loader: loader === 'jsx' || loader === 'tsx' ? 'jsx' : 'js',
           };
         },
       );
@@ -234,7 +225,6 @@ export class AgentFile {
         outputDir,
         parsedPath.name + FILE_MODULE_TYPE_EXTENSION_MAP[moduleType],
       );
-      const originalDir = path.dirname(filePath);
       await linkProjectNodeModules(outputDir, parsedPath.dir);
 
       await esbuild.build({
@@ -246,7 +236,7 @@ export class AgentFile {
         packages: 'bundle',
         bundle: this.options.bundle,
         minify: this.options.bundle,
-        plugins: [replaceDirnamePlugin(filePath, originalDir), shimPlugin()],
+        plugins: [replaceDirnamePlugin(), shimPlugin()],
         // See http://mikro-orm.io/docs/deployment#deploy-a-bundle-of-entities-and-dependencies-with-esbuild for more details
         external: [
           'sqlite3',

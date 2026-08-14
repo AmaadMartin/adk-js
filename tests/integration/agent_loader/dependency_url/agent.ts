@@ -31,7 +31,7 @@ class MockLlm extends BaseLlm {
 LLMRegistry.register(MockLlm);
 
 export const rootAgent = new LlmAgent({
-  name: 'dependency_import_meta_agent',
+  name: 'dependency_url_agent',
   model: 'test-llm-model',
   description: 'Agent whose dependency reads an asset next to itself',
 });
