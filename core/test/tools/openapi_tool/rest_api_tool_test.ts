@@ -1153,3 +1153,207 @@ describe('RestApiTool Utilities', () => {
     });
   });
 });
+
+describe('RestApiTool required parameter defaults', () => {
+  const endpoint = {
+    baseUrl: 'http://api.example.com',
+    path: '/pet/findByStatus',
+    method: 'GET',
+  };
+
+  function mockFetch() {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      headers: {get: () => 'text/plain'},
+      text: async () => 'ok',
+    });
+  }
+
+  function queryParam(
+    name: string,
+    schema: OpenAPIV3.SchemaObject,
+    required = true,
+  ): OpenAPIV3.ParameterObject {
+    return {name, in: 'query', required, schema};
+  }
+
+  async function callWith(
+    operation: OpenAPIV3.OperationObject,
+    args: Record<string, unknown>,
+    operationEndpoint = endpoint,
+  ): Promise<string> {
+    mockFetch();
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      operationEndpoint,
+      operation,
+    );
+    await tool.runAsync({args, toolContext: {} as unknown as Context});
+    return vi.mocked(globalThis.fetch).mock.calls[0][0] as string;
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('sends the default of an omitted required query parameter', async () => {
+    const url = await callWith(
+      {
+        operationId: 'findPetsByStatus',
+        parameters: [
+          queryParam('status', {type: 'string', default: 'available'}),
+        ],
+        responses: {},
+      },
+      {},
+    );
+
+    expect(url).toBe(
+      'http://api.example.com/pet/findByStatus?status=available',
+    );
+  });
+
+  it('resolves a path placeholder from the default of an omitted required path parameter', async () => {
+    mockFetch();
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      {
+        baseUrl: 'https://example.com',
+        path: '/users/{userId}/messages',
+        method: 'GET',
+      },
+      {
+        operationId: 'listMessages',
+        parameters: [
+          {
+            name: 'userId',
+            in: 'path',
+            required: true,
+            schema: {type: 'string', default: 'me'},
+          },
+        ],
+        responses: {},
+      },
+    );
+
+    await tool.runAsync({args: {}, toolContext: {} as unknown as Context});
+
+    expect(vi.mocked(globalThis.fetch).mock.calls[0][0]).toBe(
+      'https://example.com/users/me/messages',
+    );
+  });
+
+  it('sends a default of false', async () => {
+    const url = await callWith(
+      {
+        operationId: 'findPetsByStatus',
+        parameters: [queryParam('flag', {type: 'boolean', default: false})],
+        responses: {},
+      },
+      {},
+    );
+
+    expect(url).toContain('flag=false');
+  });
+
+  it('sends a default of zero', async () => {
+    const url = await callWith(
+      {
+        operationId: 'findPetsByStatus',
+        parameters: [queryParam('page', {type: 'integer', default: 0})],
+        responses: {},
+      },
+      {},
+    );
+
+    expect(url).toContain('page=0');
+  });
+
+  it('sends the default of an omitted required body property', async () => {
+    mockFetch();
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      {...endpoint, method: 'POST'},
+      {
+        operationId: 'createPet',
+        requestBody: {
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['status'],
+                properties: {status: {type: 'string', default: 'available'}},
+              },
+            },
+          },
+        },
+        responses: {},
+      },
+    );
+
+    await tool.runAsync({args: {}, toolContext: {} as unknown as Context});
+
+    expect(vi.mocked(globalThis.fetch).mock.calls[0][1]).toMatchObject({
+      body: JSON.stringify({status: 'available'}),
+    });
+  });
+
+  it('drops an omitted required parameter that has no default', async () => {
+    const url = await callWith(
+      {
+        operationId: 'findPetsByStatus',
+        parameters: [queryParam('status', {type: 'string'})],
+        responses: {},
+      },
+      {},
+    );
+
+    expect(url).toBe('http://api.example.com/pet/findByStatus');
+  });
+
+  it('keeps a value the caller supplied over the default', async () => {
+    const url = await callWith(
+      {
+        operationId: 'findPetsByStatus',
+        parameters: [
+          queryParam('status', {type: 'string', default: 'available'}),
+        ],
+        responses: {},
+      },
+      {status: 'sold'},
+    );
+
+    expect(url).toBe('http://api.example.com/pet/findByStatus?status=sold');
+  });
+
+  it('drops an omitted optional parameter that has a default', async () => {
+    const url = await callWith(
+      {
+        operationId: 'findPetsByStatus',
+        parameters: [
+          queryParam('status', {type: 'string', default: 'available'}, false),
+        ],
+        responses: {},
+      },
+      {},
+    );
+
+    expect(url).toBe('http://api.example.com/pet/findByStatus');
+  });
+
+  it('drops an omitted required parameter whose default is null', async () => {
+    const url = await callWith(
+      {
+        operationId: 'findPetsByStatus',
+        parameters: [queryParam('status', {type: 'string', default: null})],
+        responses: {},
+      },
+      {},
+    );
+
+    expect(url).toBe('http://api.example.com/pet/findByStatus');
+  });
+});
