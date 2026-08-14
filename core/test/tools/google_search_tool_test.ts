@@ -4,7 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GOOGLE_SEARCH, GoogleSearchTool, LlmRequest} from '@google/adk';
+import {
+  Context,
+  GOOGLE_SEARCH,
+  GoogleSearchTool,
+  LlmRequest,
+} from '@google/adk';
 import {Tool} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
@@ -26,7 +31,7 @@ describe('GoogleSearchTool', () => {
       await expect(
         tool.processLlmRequest({
           llmRequest: req,
-          toolContext: {} as never,
+          toolContext: {} as Context,
         }),
       ).rejects.toThrow(
         'Google search tool is not supported for model undefined',
@@ -41,7 +46,7 @@ describe('GoogleSearchTool', () => {
       await expect(
         tool.processLlmRequest({
           llmRequest: req,
-          toolContext: {} as never,
+          toolContext: {} as Context,
         }),
       ).rejects.toThrow(/^Google search tool is not supported for model $/);
 

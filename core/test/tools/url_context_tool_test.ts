@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {LlmRequest, URL_CONTEXT, UrlContextTool} from '@google/adk';
+import {Context, LlmRequest, URL_CONTEXT, UrlContextTool} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
 function makeRequest(model?: string, tools = []): LlmRequest {
@@ -25,7 +25,7 @@ describe('UrlContextTool', () => {
       await expect(
         tool.processLlmRequest({
           llmRequest: req,
-          toolContext: {} as never,
+          toolContext: {} as Context,
         }),
       ).rejects.toThrow(
         'URL context tool is not supported for model undefined',
@@ -40,7 +40,7 @@ describe('UrlContextTool', () => {
       await expect(
         tool.processLlmRequest({
           llmRequest: req,
-          toolContext: {} as never,
+          toolContext: {} as Context,
         }),
       ).rejects.toThrow(/^URL context tool is not supported for model $/);
 

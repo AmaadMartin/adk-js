@@ -5,6 +5,7 @@
  */
 
 import {
+  Context,
   GOOGLE_MAPS_GROUNDING,
   GoogleMapsGroundingTool,
   LlmRequest,
@@ -29,7 +30,7 @@ describe('GoogleMapsGroundingTool', () => {
       await expect(
         tool.processLlmRequest({
           llmRequest: req,
-          toolContext: {} as never,
+          toolContext: {} as Context,
         }),
       ).rejects.toThrow(
         'Google maps tool is not supported for model undefined',
@@ -121,9 +122,9 @@ describe('GoogleMapsGroundingTool', () => {
       try {
         await tool.processLlmRequest({
           llmRequest: req,
-          toolContext: {} as never,
+          toolContext: {} as Context,
         });
-        expect(req.config!.tools).toEqual([{googleMaps: {}}]);
+        expect(req.config?.tools).toEqual([{googleMaps: {}}]);
       } finally {
         if (originalValue === undefined) {
           delete process.env.ADK_DISABLE_GEMINI_MODEL_ID_CHECK;

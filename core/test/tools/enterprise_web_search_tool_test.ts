@@ -5,6 +5,7 @@
  */
 
 import {
+  Context,
   ENTERPRISE_WEB_SEARCH,
   EnterpriseWebSearchTool,
   LlmRequest,
@@ -30,7 +31,7 @@ describe('EnterpriseWebSearchTool', () => {
       await expect(
         tool.processLlmRequest({
           llmRequest: req,
-          toolContext: {} as never,
+          toolContext: {} as Context,
         }),
       ).rejects.toThrow(
         'Enterprise Web Search tool is not supported for model undefined',
@@ -148,9 +149,9 @@ describe('EnterpriseWebSearchTool', () => {
       try {
         await tool.processLlmRequest({
           llmRequest: req,
-          toolContext: {} as never,
+          toolContext: {} as Context,
         });
-        expect(req.config!.tools).toEqual([{enterpriseWebSearch: {}}]);
+        expect(req.config?.tools).toEqual([{enterpriseWebSearch: {}}]);
       } finally {
         if (originalValue === undefined) {
           delete process.env.ADK_DISABLE_GEMINI_MODEL_ID_CHECK;
