@@ -48,6 +48,29 @@ import {createSession, Session} from './session.js';
 const DEFAULT_MAX_ATTEMPTS = 30;
 const GRPC_NOT_FOUND = 5;
 const HTTP_NOT_FOUND = 404;
+const HTTP_BAD_REQUEST = 400;
+
+/**
+ * Returns true when the Agent Engine Sessions API refused the `rawEvent` field
+ * itself, the only case where appending again without it is correct.
+ *
+ * Matched structurally rather than with `instanceof ApiError`: the error is
+ * raised by the `@google/genai` copy bundled inside `@google-cloud/vertexai`,
+ * a different module instance from this package's own, so constructor identity
+ * is unreliable. `ApiError.status` holds the numeric HTTP status, and the
+ * rejection names the field in its wire or camelCase spelling.
+ */
+export function isRawEventRejection(error: unknown): boolean {
+  const {status, message} = (error ?? {}) as {
+    status?: unknown;
+    message?: unknown;
+  };
+  return (
+    status === HTTP_BAD_REQUEST &&
+    typeof message === 'string' &&
+    /raw_?event/i.test(message)
+  );
+}
 
 /**
  * `eventMetadata.customMetadata` key carrying the workflow fields of an
@@ -521,20 +544,20 @@ export class VertexAiSessionService extends BaseSessionService {
     try {
       await this.sessions.events.append(params);
     } catch (error) {
+      if (!isRawEventRejection(error)) {
+        throw error;
+      }
       logger.warn(
-        'Failed to append event with rawEvent; retrying without it. The event ' +
-          'will be reconstructed from its structured fields and ' +
-          'customMetadata on read.',
+        'Agent Engine rejected the rawEvent field; retrying append without ' +
+          'it. The event will be reconstructed from its structured fields ' +
+          'and customMetadata on read.',
         error,
       );
+      // Retry with the same `params` so the request differs only by the
+      // dropped field: rebuilding it would re-evaluate `inv-${Date.now()}`
+      // and send a different synthesized invocationId.
       delete config.rawEvent;
-      await this.sessions.events.append({
-        name: `reasoningEngines/${reasoningEngineId}/sessions/${session.id}`,
-        author: event.author || 'user',
-        invocationId: event.invocationId || `inv-${Date.now()}`,
-        timestamp: new Date(event.timestamp).toISOString(),
-        config,
-      });
+      await this.sessions.events.append(params);
     }
 
     return event;
@@ -649,7 +672,8 @@ function _fromApiEvent(apiEventObj: VertexAiSessionEvent): Event {
   const eventMetadata = apiEventObj.eventMetadata || {};
 
   let customMetadata = eventMetadata.customMetadata as
-    Record<string, unknown> | undefined;
+    | Record<string, unknown>
+    | undefined;
   let compactionData: {
     startTime: number;
     endTime: number;
@@ -717,9 +741,11 @@ function _fromApiEvent(apiEventObj: VertexAiSessionEvent): Event {
     branch: eventMetadata['branch'] as string | undefined,
     customMetadata,
     longRunningToolIds: eventMetadata['longRunningToolIds'] as
-      string[] | undefined,
+      | string[]
+      | undefined,
     groundingMetadata: eventMetadata['groundingMetadata'] as
-      GroundingMetadata | undefined,
+      | GroundingMetadata
+      | undefined,
     usageMetadata:
       usageMetadataData as unknown as GenerateContentResponseUsageMetadata,
   };
