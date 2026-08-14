@@ -232,6 +232,7 @@ describe('isGemini2OrAbove', () => {
       'gemini-2.5-flash-lite-preview-09-2025',
       'gemini-2.0-flash-001',
       'gemini-2.0-flash-lite-001',
+      'gemini-live-2.5-flash-native-audio',
     ];
 
     for (const model of validModels) {
@@ -243,7 +244,6 @@ describe('isGemini2OrAbove', () => {
 
   describe('invalid models', () => {
     const invalidModels = [
-      'gemini-live-2.5-flash-native-audio',
       'veo-3.1-generate-001',
       'veo-3.0-fast-generate-001',
       'imagen-4.0-ultra-generate-001',
