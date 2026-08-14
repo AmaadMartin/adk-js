@@ -212,41 +212,36 @@ describe('AgentRegistrySingleMCPToolset', () => {
     });
   });
 
-  describe('getTools — session cleanup', () => {
-    it('closes the discovery session after listing tools', async () => {
+  describe('getTools — session lifetime', () => {
+    it('keeps the session open after listing tools', async () => {
       const toolset = new AgentRegistrySingleMCPToolset({
         connectionParams: BASE_PARAMS,
       });
 
       await toolset.getTools();
 
-      expect(mockClose).toHaveBeenCalledOnce();
+      expect(mockClose).not.toHaveBeenCalled();
     });
 
-    it('closes the discovery session when listing tools fails', async () => {
+    it('keeps the session open when listing tools fails', async () => {
       mockListTools.mockRejectedValueOnce(new Error('discovery failed'));
       const toolset = new AgentRegistrySingleMCPToolset({
         connectionParams: BASE_PARAMS,
       });
 
       await expect(toolset.getTools()).rejects.toThrow('discovery failed');
-      expect(mockClose).toHaveBeenCalledOnce();
+      expect(mockClose).not.toHaveBeenCalled();
     });
 
-    it('preserves the discovery error when closing also fails', async () => {
+    it('propagates the discovery error without logging over it', async () => {
       mockListTools.mockRejectedValueOnce(new Error('discovery failed'));
-      mockClose.mockRejectedValueOnce(new Error('close failed'));
       const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
       const toolset = new AgentRegistrySingleMCPToolset({
         connectionParams: BASE_PARAMS,
       });
 
       await expect(toolset.getTools()).rejects.toThrow('discovery failed');
-      expect(mockClose).toHaveBeenCalledOnce();
-      expect(warnSpy).toHaveBeenCalledWith(
-        'Failed to close MCP discovery session',
-        expect.objectContaining({message: 'close failed'}),
-      );
+      expect(warnSpy).not.toHaveBeenCalled();
       warnSpy.mockRestore();
     });
   });
@@ -265,33 +260,47 @@ describe('AgentRegistrySingleMCPToolset', () => {
       });
       const tools = await toolset.getTools();
       await tools[0].runAsync({args: {}, toolContext: toolContext()});
-      // Only the discovery session is closed so far.
+      expect(mockClose).not.toHaveBeenCalled();
+
+      await toolset.close();
+
       expect(mockClose).toHaveBeenCalledOnce();
-
-      await toolset.close();
-
-      expect(mockClose).toHaveBeenCalledTimes(2);
     });
 
-    it('closes a session left open by an earlier getTools call', async () => {
+    it('serves repeated getTools calls from one session', async () => {
+      const {Client} =
+        await import('@modelcontextprotocol/sdk/client/index.js');
       const toolset = new AgentRegistrySingleMCPToolset({
         connectionParams: BASE_PARAMS,
       });
-      const tools = await toolset.getTools();
-      await tools[0].runAsync({args: {}, toolContext: toolContext()});
+
       await toolset.getTools();
+      await toolset.getTools();
+
+      expect(Client).toHaveBeenCalledOnce();
+      expect(mockClose).not.toHaveBeenCalled();
 
       await toolset.close();
 
-      expect(mockClose).toHaveBeenCalledTimes(3);
+      expect(mockClose).toHaveBeenCalledOnce();
     });
 
-    it('closes nothing extra when no tool opened a session', async () => {
+    it('replaces the session when the resolved headers change', async () => {
+      const {Client} =
+        await import('@modelcontextprotocol/sdk/client/index.js');
+      let token = 'first-token';
       const toolset = new AgentRegistrySingleMCPToolset({
         connectionParams: BASE_PARAMS,
+        headerProvider: () => ({authorization: token}),
       });
+
       await toolset.getTools();
+      token = 'second-token';
       await toolset.getTools();
+
+      // The stale session is closed, and the refreshed headers get a new one.
+      expect(mockClose).toHaveBeenCalledOnce();
+      expect(Client).toHaveBeenCalledTimes(2);
 
       await toolset.close();
 

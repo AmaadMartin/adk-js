@@ -65,18 +65,6 @@ export type MCPConnectionParams =
   | StdioConnectionParams
   | StreamableHTTPConnectionParams;
 
-/** The pooled MCP session shared by every caller of `createSession()`. */
-interface PooledSession {
-  /**
-   * Resolves to the connected client. The pool holds the promise rather than
-   * the client so that concurrent `createSession()` calls share one connect
-   * instead of racing to build two.
-   */
-  readonly client: Promise<Client>;
-  /** Set once `client` resolves, so a client can be matched to its entry. */
-  resolved?: Client;
-}
-
 /**
  * Manages Model Context Protocol (MCP) client sessions.
  *
@@ -98,8 +86,14 @@ interface PooledSession {
  */
 export class MCPSessionManager {
   private readonly connectionParams: MCPConnectionParams;
-  private readonly activeSessions = new Set<Client>();
-  private pooledSession?: PooledSession;
+  /**
+   * The connect in flight or already settled. Held as the promise so that
+   * concurrent `createSession()` calls share one connect instead of racing to
+   * build two.
+   */
+  private pending?: Promise<Client>;
+  /** The pooled client, once its connect resolved. */
+  private pooled?: Client;
 
   constructor(connectionParams: MCPConnectionParams) {
     this.connectionParams = connectionParams;
@@ -112,27 +106,26 @@ export class MCPSessionManager {
    * or by the peer. Callers must not close it themselves.
    */
   async createSession(): Promise<Client> {
-    if (this.pooledSession) {
+    if (this.pending) {
       logger.debug('Reusing pooled MCP session');
-      return this.pooledSession.client;
+      return this.pending;
     }
 
-    const entry: PooledSession = {client: this.connect()};
-    this.pooledSession = entry;
+    const pending = this.connect();
+    this.pending = pending;
 
     let client: Client;
     try {
-      client = await entry.client;
+      client = await pending;
     } catch (err) {
-      if (this.pooledSession === entry) {
-        this.pooledSession = undefined;
+      if (this.pending === pending) {
+        this.pending = undefined;
       }
       throw err;
     }
 
-    entry.resolved = client;
+    this.pooled = client;
     client.onclose = () => this.evict(client);
-    this.activeSessions.add(client);
     logger.debug('Created new MCP session');
     return client;
   }
@@ -187,20 +180,20 @@ export class MCPSessionManager {
 
   /** Drops a client that can no longer be used, so it is never handed out again. */
   private evict(client: Client): void {
-    this.activeSessions.delete(client);
-    if (this.pooledSession?.resolved === client) {
-      this.pooledSession = undefined;
+    if (this.pooled === client) {
+      this.pooled = undefined;
+      this.pending = undefined;
     }
   }
 
   async closeSession(client: Client): Promise<void> {
-    if (this.activeSessions.has(client)) {
+    if (this.pooled === client) {
       this.evict(client);
       await client.close();
     }
   }
 
   getActiveSessions(): Client[] {
-    return Array.from(this.activeSessions);
+    return this.pooled ? [this.pooled] : [];
   }
 }

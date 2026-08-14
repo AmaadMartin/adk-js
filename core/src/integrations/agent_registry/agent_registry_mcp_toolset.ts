@@ -15,7 +15,6 @@ import {
   StreamableHTTPConnectionParams,
 } from '../../tools/mcp/mcp_session_manager.js';
 import {MCPTool} from '../../tools/mcp/mcp_tool.js';
-import {logger} from '../../utils/logger.js';
 import {GCP_MCP_SERVER_DESTINATION_ID} from './types.js';
 
 /**
@@ -36,8 +35,11 @@ export class AgentRegistrySingleMCPToolset extends BaseToolset {
   ) => Promise<Record<string, string>> | Record<string, string>;
   readonly authScheme?: AuthScheme;
   readonly authCredential?: AuthCredential;
-  /** Session managers whose pooled session the resolved tools still share. */
-  private readonly sessionManagers = new Set<MCPSessionManager>();
+  /**
+   * The manager whose pooled session the resolved tools share, kept with the
+   * header signature it was built for.
+   */
+  private sessionManager?: {signature: string; manager: MCPSessionManager};
 
   /**
    * @param options - Configuration for the MCP toolset.
@@ -91,37 +93,31 @@ export class AgentRegistrySingleMCPToolset extends BaseToolset {
     }
 
     // Merge resolved headers into transport request options
+    const mergedHeaders = {
+      ...this.connectionParams.transportOptions?.requestInit?.headers,
+      ...headers,
+    } as Record<string, string>;
     const connectionParamsCopy: StreamableHTTPConnectionParams = {
       ...this.connectionParams,
       transportOptions: {
         ...this.connectionParams.transportOptions,
         requestInit: {
           ...this.connectionParams.transportOptions?.requestInit,
-          headers: {
-            ...this.connectionParams.transportOptions?.requestInit?.headers,
-            ...headers,
-          } as Record<string, string>,
+          headers: mergedHeaders,
         },
       },
     };
 
     // Establish session using MCPSessionManager
-    const sessionManager = new MCPSessionManager(connectionParamsCopy);
-    // The resolved tools share this manager's pooled session, so close() must
-    // be able to reach it. Every manager is retained: a tool from an earlier
-    // getTools() call can still open a session on its own manager.
-    this.sessionManagers.add(sessionManager);
+    const sessionManager = await this.resolveSessionManager(
+      connectionParamsCopy,
+      mergedHeaders,
+    );
     const session = await sessionManager.createSession();
 
-    // Retrieve tools from the remote server and close the discovery session
-    let listResult: ListToolsResult;
-    try {
-      listResult = (await session.listTools()) as ListToolsResult;
-    } finally {
-      await sessionManager.closeSession(session).catch((e) => {
-        logger.warn('Failed to close MCP discovery session', e);
-      });
-    }
+    // Retrieve tools from the remote server. The session stays open: the tools
+    // resolved below share it, and close() releases it.
+    const listResult = (await session.listTools()) as ListToolsResult;
 
     // Map tool definitions to MCPTools
     const tools = listResult.tools.map((tool) => {
@@ -157,16 +153,37 @@ export class AgentRegistrySingleMCPToolset extends BaseToolset {
     return tools.filter((t) => this.isToolSelected(t, context!));
   }
 
-  /** Closes the MCP sessions held by the tools this toolset resolved. */
+  /**
+   * Returns the manager whose pooled session the tools will share, reusing the
+   * previous one while the resolved headers are unchanged. Refreshed headers
+   * need a new connection, so the previous session is closed first.
+   */
+  private async resolveSessionManager(
+    params: StreamableHTTPConnectionParams,
+    headers: Record<string, string>,
+  ): Promise<MCPSessionManager> {
+    const signature = JSON.stringify(Object.entries(headers).sort());
+    if (this.sessionManager?.signature === signature) {
+      return this.sessionManager.manager;
+    }
+
+    await this.close();
+    const manager = new MCPSessionManager(params);
+    this.sessionManager = {signature, manager};
+    return manager;
+  }
+
+  /** Closes the MCP session the resolved tools share. */
   async close(): Promise<void> {
-    const managers = Array.from(this.sessionManagers);
-    this.sessionManagers.clear();
+    const manager = this.sessionManager?.manager;
+    this.sessionManager = undefined;
+    if (!manager) {
+      return;
+    }
     await Promise.allSettled(
-      managers.flatMap((manager) =>
-        manager
-          .getActiveSessions()
-          .map((session) => manager.closeSession(session)),
-      ),
+      manager
+        .getActiveSessions()
+        .map((session) => manager.closeSession(session)),
     );
   }
 }

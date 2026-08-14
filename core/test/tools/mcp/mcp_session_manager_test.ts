@@ -9,6 +9,7 @@ import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import {describe, expect, it, vi} from 'vitest';
+import {clientStub} from './client_stub.js';
 // The logger singleton is internal (not part of the public API), so it is
 // imported via a relative path to spy on the exact instance the manager uses.
 import {logger} from '../../../src/utils/logger.js';
@@ -42,18 +43,6 @@ const STDIO_PARAMS: MCPConnectionParams = {
   type: 'StdioConnectionParams',
   serverParams: {command: 'test-command'},
 };
-
-/**
- * Builds the stub the mocked SDK constructor returns. The SDK `Client` cannot
- * be constructed in a unit test, so the stub carries only the members the
- * manager touches and is cast here instead of at every call site.
- */
-function clientStub(connect: () => Promise<void>): Client {
-  return {
-    connect,
-    close: vi.fn().mockResolvedValue(undefined),
-  } as unknown as Client;
-}
 
 describe('MCPSessionManager', () => {
   it('creates an stdio client', async () => {
@@ -265,7 +254,9 @@ describe('MCPSessionManager', () => {
 
     it('does not pool a client whose connect failed', async () => {
       vi.mocked(Client).mockImplementationOnce(() =>
-        clientStub(() => Promise.reject(new Error('connect refused'))),
+        clientStub({
+          connect: vi.fn().mockRejectedValue(new Error('connect refused')),
+        }),
       );
       const manager = new MCPSessionManager(STDIO_PARAMS);
 

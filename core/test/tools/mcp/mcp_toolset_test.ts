@@ -13,6 +13,7 @@ import {PluginManager} from '../../../src/plugins/plugin_manager.js';
 import {createSession} from '../../../src/sessions/session.js';
 import {MCPConnectionParams} from '../../../src/tools/mcp/mcp_session_manager.js';
 import {MCPToolset} from '../../../src/tools/mcp/mcp_toolset.js';
+import {clientStub} from './client_stub.js';
 
 vi.hoisted(() => {
   vi.resetModules();
@@ -174,22 +175,15 @@ describe('MCPToolset', () => {
         await import('@modelcontextprotocol/sdk/client/index.js');
       vi.mocked(Client).mockClear();
       const callTool = vi.fn().mockResolvedValue({content: []});
-      vi.mocked(Client).mockImplementationOnce(
-        () =>
-          ({
-            connect: noop(),
-            close: noop(),
-            listTools: vi.fn().mockResolvedValue({
-              tools: [
-                {
-                  name: 'test-tool',
-                  description: 'A test tool',
-                  inputSchema: {},
-                },
-              ],
-            }),
-            callTool,
-          }) as unknown as Client,
+      vi.mocked(Client).mockImplementationOnce(() =>
+        clientStub({
+          listTools: vi.fn().mockResolvedValue({
+            tools: [
+              {name: 'test-tool', description: 'A test tool', inputSchema: {}},
+            ],
+          }),
+          callTool,
+        }),
       );
 
       const toolset = new MCPToolset(stdioParams);
@@ -213,13 +207,11 @@ describe('MCPToolset', () => {
         await import('@modelcontextprotocol/sdk/client/index.js');
       vi.mocked(Client).mockClear();
       const close = vi.fn().mockResolvedValue(undefined);
-      vi.mocked(Client).mockImplementationOnce(
-        () =>
-          ({
-            connect: noop(),
-            close,
-            listTools: vi.fn().mockResolvedValue({tools: []}),
-          }) as unknown as Client,
+      vi.mocked(Client).mockImplementationOnce(() =>
+        clientStub({
+          close,
+          listTools: vi.fn().mockResolvedValue({tools: []}),
+        }),
       );
 
       const toolset = new MCPToolset(stdioParams);
@@ -263,16 +255,13 @@ describe('MCPToolset', () => {
       const readResource = vi.fn().mockResolvedValue({
         contents: [{uri: 'file:///res1', text: 'hello'}],
       });
-      vi.mocked(Client).mockImplementationOnce(
-        () =>
-          ({
-            connect: noop(),
-            close: noop(),
-            listResources: vi.fn().mockResolvedValue({
-              resources: [{uri: 'file:///res1', name: 'res1'}],
-            }),
-            readResource,
-          }) as unknown as Client,
+      vi.mocked(Client).mockImplementationOnce(() =>
+        clientStub({
+          listResources: vi.fn().mockResolvedValue({
+            resources: [{uri: 'file:///res1', name: 'res1'}],
+          }),
+          readResource,
+        }),
       );
 
       const toolset = new MCPToolset(stdioParams);
@@ -361,16 +350,13 @@ describe('MCPToolset', () => {
       it('keeps the session open even if the client readResource rejects', async () => {
         const {Client} =
           await import('@modelcontextprotocol/sdk/client/index.js');
-        vi.mocked(Client).mockImplementationOnce(
-          () =>
-            ({
-              connect: noop(),
-              close: noop(),
-              listResources: vi.fn().mockResolvedValue({
-                resources: [{uri: 'file:///res1', name: 'res1'}],
-              }),
-              readResource: vi.fn().mockRejectedValue(new Error('read boom')),
-            }) as unknown as Client,
+        vi.mocked(Client).mockImplementationOnce(() =>
+          clientStub({
+            listResources: vi.fn().mockResolvedValue({
+              resources: [{uri: 'file:///res1', name: 'res1'}],
+            }),
+            readResource: vi.fn().mockRejectedValue(new Error('read boom')),
+          }),
         );
 
         const toolset = new MCPToolset(stdioParams);
