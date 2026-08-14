@@ -262,6 +262,7 @@ export function createTaskArtifactUpdateEvent({
   taskId,
   contextId,
   artifactId,
+  name,
   parts = [],
   metadata,
   append,
@@ -270,6 +271,8 @@ export function createTaskArtifactUpdateEvent({
   taskId: string;
   contextId: string;
   artifactId?: string;
+  /** An optional, human-readable name for the artifact. */
+  name?: string;
   parts?: A2APart[];
   metadata?: Record<string, unknown>;
   append?: boolean;
@@ -283,6 +286,7 @@ export function createTaskArtifactUpdateEvent({
     lastChunk,
     artifact: {
       artifactId: artifactId || randomUUID(),
+      name,
       parts,
     },
     metadata,

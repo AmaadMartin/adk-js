@@ -24,6 +24,7 @@ export {toA2a} from './a2a/agent_to_a2a.js';
 export type {A2aUserBuilder, ToA2aOptions} from './a2a/agent_to_a2a.js';
 export {bearerTokenUserBuilder} from './a2a/auth.js';
 export type {ExecutorContext} from './a2a/executor_context.js';
+export {includeArtifactsInA2AEvent} from './a2a/include_artifacts_in_a2a_event.js';
 export {InvocationContext} from './agents/invocation_context.js';
 export type {WorkflowInstructionScope} from './agents/invocation_context.js';
 export {FileArtifactService} from './artifacts/file_artifact_service.js';
