@@ -15,10 +15,35 @@ import {
   UnsafeLocalCodeExecutor,
 } from '@google/adk';
 import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
 import * as path from 'node:path';
-import {describe, expect, it} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 
 describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', () => {
+  // RunSkillInlineScriptTool materializes a script's output files into
+  // process.cwd() (see materializeFiles in core/src/utils/file_utils.ts), which
+  // is the repo root when the suite runs. Run every test from a throwaway
+  // directory so a failed assertion can never leave a generated file in the
+  // working tree.
+  let originalCwd: string;
+  let workDir: string;
+
+  beforeEach(async () => {
+    originalCwd = process.cwd();
+    workDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'adk-run-skill-inline-script-'),
+    );
+    process.chdir(workDir);
+  });
+
+  afterEach(async () => {
+    // Restore the cwd first so a removal failure cannot strand the worker in a
+    // deleted directory, and so Windows does not refuse to remove a directory
+    // that is a live process's cwd.
+    process.chdir(originalCwd);
+    await fs.rm(workDir, {recursive: true, force: true});
+  });
+
   // These integration tests exercise real code execution, which is gated behind
   // a human-in-the-loop confirmation. Supply an already-confirmed confirmation
   // so the tool proceeds to execute (see run_skill_inline_script_tool.ts).
@@ -171,9 +196,6 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
 
     const content = await fs.readFile(fullPath, 'utf-8');
     expect(content).toBe(testFileContent);
-
-    // Clean up
-    await fs.unlink(fullPath);
   });
 
   it('successfully passes array arguments to a JavaScript inline script', async () => {
@@ -251,9 +273,5 @@ describe('RunSkillInlineScriptTool Integration with UnsafeLocalCodeExecutor', ()
 
     const content = await fs.readFile(fullPath, 'utf-8');
     expect(content).toBe(testFileContent);
-
-    // Clean up both files
-    await fs.unlink(targetFile);
-    await fs.unlink(fullPath);
   });
 });
