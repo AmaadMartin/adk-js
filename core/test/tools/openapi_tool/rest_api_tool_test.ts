@@ -16,9 +16,11 @@ import {
 } from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
 import {afterEach, describe, expect, it, vi} from 'vitest';
+import {State} from '../../../src/sessions/state.js';
 import {
   applyCredential,
   createApiKeyScheme,
+  createBearerScheme,
 } from '../../../src/tools/openapi_tool/auth/auth_helpers.js';
 import {
   prepareRequestBody,
@@ -527,6 +529,54 @@ describe('RestApiTool', () => {
       expect.anything(),
       expect.objectContaining({
         headers: expect.objectContaining({'X-API-Key': 'secret_key'}),
+      }),
+    );
+  });
+
+  it('should send the additional headers of the exchanged credential', async () => {
+    const endpoint = {
+      baseUrl: 'http://api.example.com',
+      path: '/test',
+      method: 'GET',
+    };
+    const operation: OpenAPIV3.OperationObject = {responses: {}};
+    const credential: AuthCredential = {
+      authType: AuthCredentialTypes.HTTP,
+      http: {
+        scheme: 'bearer',
+        credentials: {token: 'adc_token'},
+        additionalHeaders: {'x-goog-user-project': 'test-project'},
+      },
+    };
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      endpoint,
+      operation,
+      createBearerScheme(),
+      credential,
+    );
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      headers: {get: () => 'text/plain'},
+      text: async () => 'ok',
+    });
+
+    const toolContext = {
+      state: new State(),
+      getAuthResponse: () => undefined,
+    } as unknown as Context;
+
+    await tool.runAsync({args: {}, toolContext});
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          'Authorization': 'Bearer adc_token',
+          'x-goog-user-project': 'test-project',
+        }),
       }),
     );
   });

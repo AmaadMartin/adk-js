@@ -24,6 +24,11 @@ export function applyCredential(
 ): string {
   if (!credential) return url;
 
+  // Merged first so that an Authorization value set below always wins.
+  if (credential.http?.additionalHeaders) {
+    Object.assign(headers, credential.http.additionalHeaders);
+  }
+
   if (credential.apiKey) {
     let inLocation: string | undefined;
     let name = 'key';
