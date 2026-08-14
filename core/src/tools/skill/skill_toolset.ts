@@ -97,29 +97,21 @@ export class SkillToolset extends BaseToolset {
   }
 
   /**
-   * Releases this toolset and every toolset passed in `additionalTools`.
-   *
-   * The local cache is cleared first because a nested `close()` is remote I/O
-   * that can hang, and `Promise.allSettled` absorbs a rejection but not a hang.
-   * The nested closes settle instead of failing fast, so one broken toolset
-   * cannot orphan the others and cannot reject a caller that closes from a
-   * `finally` block.
-   *
-   * More than one holder can own the same nested toolset, so that toolset can
-   * receive `close()` more than once and must tolerate it.
+   * Closes this toolset and every toolset in `additionalTools`. A nested
+   * failure is logged, not thrown. Two holders can own one nested toolset, so
+   * it can receive `close()` more than once and must tolerate that.
    */
   override async close(): Promise<void> {
+    // Cleared first: a nested close is remote I/O that can hang, which would
+    // otherwise pin these entries for the life of the process.
     this.fetchedSkillCache.clear();
-    const results = await Promise.allSettled(
-      this.additionalTools
-        .filter(isBaseToolset)
-        .map((toolset) => toolset.close()),
+    await Promise.all(
+      this.additionalTools.filter(isBaseToolset).map((toolset) =>
+        toolset.close().catch((e: unknown) => {
+          logger.warn(`Failed to close an additional toolset: ${e}`);
+        }),
+      ),
     );
-    for (const result of results) {
-      if (result.status === 'rejected') {
-        logger.warn(`Failed to close an additional toolset: ${result.reason}`);
-      }
-    }
   }
 
   getSkill(name: string): Skill | undefined {
