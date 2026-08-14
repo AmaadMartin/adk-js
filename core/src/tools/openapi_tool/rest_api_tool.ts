@@ -6,6 +6,7 @@
 
 import {FunctionDeclaration} from '@google/genai';
 import {OpenAPIV3} from 'openapi-types';
+import type {Dispatcher} from 'undici-types';
 import {Context} from '../../agents/context.js';
 import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {AuthCredential} from '../../auth/auth_credential.js';
@@ -20,12 +21,40 @@ import {ToolAuthHandler} from './openapi_spec_parser/tool_auth_handler.js';
 
 import {OperationEndpoint} from './openapi_spec_parser/openapi_spec_parser.js';
 
+/**
+ * Options shared by {@link RestApiTool} and {@link createRestApiTool}.
+ */
+export interface RestApiToolOptions {
+  preservePropertyNames?: boolean;
+  headerProvider?: (context: ReadonlyContext) => Record<string, string>;
+  credentialKey?: string;
+  /**
+   * HTTP dispatcher used for the API call, for callers whose requests must go
+   * through a proxy or trust a private certificate authority — e.g.
+   * `new Agent({connect: {ca: corporateCaPem}})` from `undici`. Node's `fetch`
+   * honours this; a browser has no equivalent hook and ignores it.
+   *
+   * The caller owns the dispatcher's lifecycle. The tool never closes it,
+   * because one dispatcher is normally shared across several tools.
+   */
+  dispatcher?: Dispatcher;
+}
+
+/**
+ * `fetch` init options plus undici's non-standard `dispatcher`, which Node's
+ * `fetch` reads but the DOM `RequestInit` type does not declare.
+ */
+type FetchInit = NonNullable<Parameters<typeof globalThis.fetch>[1]> & {
+  dispatcher?: Dispatcher;
+};
+
 @experimental
 export class RestApiTool extends BaseTool {
   private operationParser: OperationParser;
 
   private headerProvider?: (context: ReadonlyContext) => Record<string, string>;
   private credentialKey?: string;
+  private dispatcher?: Dispatcher;
 
   constructor(
     name: string,
@@ -34,17 +63,14 @@ export class RestApiTool extends BaseTool {
     private readonly operation: OpenAPIV3.OperationObject,
     private authScheme?: OpenAPIV3.SecuritySchemeObject,
     private authCredential?: AuthCredential,
-    options: {
-      preservePropertyNames?: boolean;
-      headerProvider?: (context: ReadonlyContext) => Record<string, string>;
-      credentialKey?: string;
-    } = {},
+    options: RestApiToolOptions = {},
   ) {
     super({name, description});
     this.authScheme = authScheme;
     this.authCredential = authCredential;
     this.headerProvider = options.headerProvider;
     this.credentialKey = options.credentialKey;
+    this.dispatcher = options.dispatcher;
     this.operationParser = new OperationParser(operation, options);
   }
 
@@ -61,6 +87,11 @@ export class RestApiTool extends BaseTool {
   @experimental
   public configureCredentialKey(credentialKey: string) {
     this.credentialKey = credentialKey;
+  }
+
+  @experimental
+  public configureDispatcher(dispatcher: Dispatcher) {
+    this.dispatcher = dispatcher;
   }
 
   @experimental
@@ -130,13 +161,16 @@ export class RestApiTool extends BaseTool {
       Object.assign(headers, providerHeaders);
     }
 
+    const init: FetchInit = {
+      method,
+      headers,
+      // eslint-disable-next-line no-undef
+      body: body as BodyInit,
+      dispatcher: this.dispatcher,
+    };
+
     try {
-      const response = await globalThis.fetch(url, {
-        method,
-        headers,
-        // eslint-disable-next-line no-undef
-        body: body as BodyInit,
-      });
+      const response = await globalThis.fetch(url, init);
 
       const contentType = response.headers.get('content-type');
       if (contentType && contentType.includes('application/json')) {
@@ -312,11 +346,7 @@ export function createRestApiTool(
     operation: OpenAPIV3.OperationObject;
     authScheme?: OpenAPIV3.SecuritySchemeObject;
   },
-  options: {
-    preservePropertyNames?: boolean;
-    headerProvider?: (context: ReadonlyContext) => Record<string, string>;
-    credentialKey?: string;
-  } = {},
+  options: RestApiToolOptions = {},
 ): RestApiTool {
   return new RestApiTool(
     parsed.name,

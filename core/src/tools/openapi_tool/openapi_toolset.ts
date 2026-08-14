@@ -6,6 +6,7 @@
 
 import yaml from 'js-yaml';
 import {OpenAPIV3} from 'openapi-types';
+import type {Dispatcher} from 'undici-types';
 import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {AuthCredential} from '../../auth/auth_credential.js';
 import {experimental} from '../../utils/experimental.js';
@@ -30,6 +31,11 @@ export class OpenAPIToolset extends BaseToolset {
       authCredential?: AuthCredential;
       credentialKey?: string;
       headerProvider?: (context: ReadonlyContext) => Record<string, string>;
+      /**
+       * HTTP dispatcher given to every tool this toolset creates. See
+       * {@link RestApiToolOptions.dispatcher}.
+       */
+      dispatcher?: Dispatcher;
     } = {},
   ) {
     super(options.toolFilter || [], options.prefix);
@@ -73,6 +79,7 @@ export class OpenAPIToolset extends BaseToolset {
           preservePropertyNames: options.preservePropertyNames,
           headerProvider: options.headerProvider,
           credentialKey: options.credentialKey,
+          dispatcher: options.dispatcher,
         },
       );
 
