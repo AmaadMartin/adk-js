@@ -28,12 +28,15 @@ import {
   transformToSnakeCaseEvent,
 } from '../../src/events/event.js';
 
+const UUID_V4 =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
 describe('Event Utils', () => {
   describe('createEvent', () => {
     it('creates an event with default values', () => {
       const event = createEvent();
       expect(event.id).toBeDefined();
-      expect(event.id.length).toBe(8);
+      expect(event.id).toMatch(UUID_V4);
       expect(event.invocationId).toBe('');
       expect(event.author).toBeUndefined();
       expect(event.actions).toBeDefined();
@@ -304,10 +307,25 @@ describe('Event Utils', () => {
   });
 
   describe('createNewEventId', () => {
-    it('generates an 8-character string', () => {
+    afterEach(resetIdProvider);
+
+    it('generates a v4 UUID string', () => {
       const id = createNewEventId();
-      expect(id).toHaveLength(8);
+      expect(id).toMatch(UUID_V4);
       expect(typeof id).toBe('string');
+    });
+
+    it('takes the id from the installed provider', () => {
+      setIdProvider(() => 'provided-event-id');
+
+      expect(createNewEventId()).toBe('provided-event-id');
+      expect(createEvent().id).toBe('provided-event-id');
+    });
+
+    it('keeps a caller-supplied event id ahead of the provider', () => {
+      setIdProvider(() => 'provided-event-id');
+
+      expect(createEvent({id: 'caller-event-id'}).id).toBe('caller-event-id');
     });
   });
 
