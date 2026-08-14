@@ -541,19 +541,42 @@ describe('LlmAgent Output Processing', () => {
     const lastEvent = events[events.length - 1];
     expect(lastEvent.actions?.stateDelta?.['result']).toEqual({answer: 42});
   });
+});
 
-  it('re-stamps the model response event from the installed time provider', async () => {
+describe('LlmAgent model response timestamps', () => {
+  afterEach(() => {
+    resetTimeProvider();
+  });
+
+  it('re-stamps each streamed response from the installed time provider', async () => {
     setTimeProvider(() => FROZEN_TIME_MS);
-    agent.model = new MockLlm({
-      content: {parts: [{text: JSON.stringify({answer: '42'})}]},
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: new StreamingMockLlm([
+        {content: {parts: [{text: 'chunk 1'}]}},
+        {content: {parts: [{text: 'chunk 2'}]}},
+      ]),
+    });
+    const invocationContext = new InvocationContext({
+      invocationId: 'inv_123',
+      session: createSession({
+        id: 'sess_123',
+        events: [],
+        appName: 'test-app',
+        userId: 'test-user',
+      }),
+      agent,
+      pluginManager: new PluginManager(),
     });
 
-    const events: Event[] = [];
+    const timestamps: number[] = [];
     for await (const event of agent.runAsync(invocationContext)) {
-      events.push(event);
+      timestamps.push(event.timestamp);
     }
 
-    expect(events[events.length - 1].timestamp).toBe(FROZEN_TIME_MS);
+    // The second response carries the re-stamp the first one triggered.
+    expect(timestamps.length).toBeGreaterThan(1);
+    expect(timestamps).toEqual(timestamps.map(() => FROZEN_TIME_MS));
   });
 });
 
