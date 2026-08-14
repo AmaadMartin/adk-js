@@ -16,7 +16,7 @@
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 
 import {createPackageJson} from '../../src/cli/deploy/deploy_utils.js';
 
@@ -265,6 +265,135 @@ describe('createPackageJson', () => {
 
     expect(await readGeneratedDependencies()).toEqual({
       '@google/adk': '^1.6.0',
+    });
+  });
+
+  describe('workspace-local specifiers', () => {
+    beforeEach(() => {
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+    });
+
+    /**
+     * Writes a manifest declaring `@google/adk` plus `dependencies`, then
+     * stages it and returns the dependencies of the generated manifest.
+     */
+    async function generateFrom(
+      dependencies: Record<string, string>,
+    ): Promise<Record<string, string> | undefined> {
+      await writeManifest('.', {
+        dependencies: {'@google/adk': '^1.6.0', ...dependencies},
+      });
+      const agentDir = await makeAgentDir('agent');
+
+      await createPackageJson(agentDir, target);
+
+      return readGeneratedDependencies();
+    }
+
+    it.each([
+      'workspace:*',
+      'file:../shared',
+      'link:../shared',
+      'portal:../shared',
+      'catalog:default',
+    ])('omits a dependency declared as %s', async (specifier) => {
+      expect(await generateFrom({'@myco/shared': specifier})).toEqual({
+        '@google/adk': '^1.6.0',
+      });
+    });
+
+    it('omits dependencies declared as bare local paths', async () => {
+      expect(
+        await generateFrom({
+          a: '../shared',
+          b: './shared',
+          c: '/opt/shared',
+          d: '~/shared',
+          e: '..\\shared',
+        }),
+      ).toEqual({'@google/adk': '^1.6.0'});
+    });
+
+    it('keeps every specifier npm can install without a workspace', async () => {
+      const installable = {
+        x: '^1.0.0',
+        y: 'latest',
+        z: 'npm:other@^1.0.0',
+        g: 'github:owner/repo',
+        h: 'git+https://example.com/r.git',
+        t: 'https://example.com/p.tgz',
+      };
+
+      expect(await generateFrom(installable)).toEqual({
+        '@google/adk': '^1.6.0',
+        ...installable,
+      });
+    });
+
+    it('matches the specifier, not the dependency name', async () => {
+      const namedLikeProtocols = {
+        'link-checker': '^1.0.0',
+        'workspace-tools': '~2.0.0',
+        'file-type': '1.2.3',
+      };
+
+      expect(await generateFrom(namedLikeProtocols)).toEqual({
+        '@google/adk': '^1.6.0',
+        ...namedLikeProtocols,
+      });
+    });
+
+    it('warns once, naming every omitted dependency and its specifier', async () => {
+      await generateFrom({
+        '@myco/shared': 'workspace:*',
+        utils: 'file:../utils',
+      });
+
+      expect(console.warn).toHaveBeenCalledTimes(1);
+      const warning = String((console.warn as Mock).mock.calls[0][0]);
+      expect(warning).toContain('"@myco/shared" ("workspace:*")');
+      expect(warning).toContain('"utils" ("file:../utils")');
+      expect(warning).toContain('--bundle false');
+    });
+
+    it('stays silent when every dependency is installable', async () => {
+      expect(await generateFrom({zod: '^4.0.0'})).toEqual({
+        '@google/adk': '^1.6.0',
+        zod: '^4.0.0',
+      });
+      expect(console.warn).not.toHaveBeenCalled();
+    });
+
+    it.each(['workspace:*', 'file:../adk'])(
+      'rejects a required package declared as %s',
+      async (specifier) => {
+        const manifest = await writeManifest('.', {
+          dependencies: {'@google/adk': specifier},
+        });
+        const agentDir = await makeAgentDir('agent');
+
+        const error = await captureFailure(agentDir);
+
+        expect(error.message).toContain(`"@google/adk" ("${specifier}")`);
+        expect(error.message).toContain(manifest);
+        await expect(
+          fs.access(path.join(target, 'package.json')),
+        ).rejects.toThrow();
+      },
+    );
+
+    it('names the workspace root when the backfilled required package is local', async () => {
+      const rootManifest = await writeManifest('.', {
+        workspaces: ['packages/*'],
+        dependencies: {'@google/adk': 'workspace:*'},
+      });
+      await writeManifest('packages/my-agent', {name: 'my-agent'});
+      const agentDir = await makeAgentDir('packages/my-agent/src');
+
+      const error = await captureFailure(agentDir);
+
+      expect(error.message).toContain('"@google/adk" ("workspace:*")');
+      expect(error.message).toContain(rootManifest);
     });
   });
 });
