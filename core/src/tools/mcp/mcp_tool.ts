@@ -13,6 +13,7 @@ import {
 
 import {toGeminiSchema} from '../../utils/gemini_schema_util.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
+import {RESERVED_TOOL_NAMES} from '../reserved_tool_names.js';
 
 import {MCPSessionManager} from './mcp_session_manager.js';
 
@@ -40,11 +41,28 @@ export class MCPTool extends BaseTool {
   private readonly mcpSessionManager: MCPSessionManager;
   private readonly originalName: string;
 
+  /**
+   * @param mcpTool The tool definition, whose `name` is the exposed name the
+   *   model will call (already prefixed by the toolset, if it applies one).
+   * @param mcpSessionManager The session manager used to reach the server.
+   * @param originalName The native name on the server, when it differs from
+   *   the exposed name. Defaults to `mcpTool.name`.
+   * @throws If the exposed name is one of the reserved ADK tool names, since
+   *   such a tool would shadow a framework function call. `MCPTool` is public
+   *   API, so this holds for a caller that builds one straight from a server
+   *   listing. The bundled toolsets never reach it: they drop a reserved name
+   *   first, so one of them cannot fail a whole listing.
+   */
   constructor(
     mcpTool: Tool,
     mcpSessionManager: MCPSessionManager,
     originalName?: string,
   ) {
+    if (RESERVED_TOOL_NAMES.has(mcpTool.name)) {
+      throw new Error(
+        `MCP tool name '${mcpTool.name}' collides with a reserved ADK tool name.`,
+      );
+    }
     super({name: mcpTool.name, description: mcpTool.description || ''});
     this.mcpTool = mcpTool;
     this.mcpSessionManager = mcpSessionManager;

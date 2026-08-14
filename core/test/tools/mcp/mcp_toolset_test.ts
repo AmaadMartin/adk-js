@@ -9,6 +9,7 @@ import {describe, expect, it, vi} from 'vitest';
 import {ReadonlyContext} from '../../../src/agents/readonly_context.js';
 import {MCPConnectionParams} from '../../../src/tools/mcp/mcp_session_manager.js';
 import {MCPToolset} from '../../../src/tools/mcp/mcp_toolset.js';
+import {logger} from '../../../src/utils/logger.js';
 
 vi.hoisted(() => {
   vi.resetModules();
@@ -42,6 +43,15 @@ vi.mock('@modelcontextprotocol/sdk/client/index.js', () => {
 
 /** A client method stub that resolves to nothing (connect/close). */
 const noop = () => vi.fn().mockResolvedValue(undefined);
+
+/**
+ * Builds a `Client` test double that stubs `connect` and `close` and takes the
+ * methods a test cares about in `overrides`. The cast is unavoidable: `Client`
+ * has a large surface and a test needs only a few of its methods.
+ */
+function mockClient(overrides: Partial<Client>): Client {
+  return {connect: noop(), close: noop(), ...overrides} as unknown as Client;
+}
 
 vi.mock('@modelcontextprotocol/sdk/client/stdio.js', () => {
   return {
@@ -128,6 +138,88 @@ describe('MCPToolset', () => {
       const tools = await toolset.getTools();
 
       expect(tools).toHaveLength(2);
+    });
+  });
+
+  describe('reserved tool names', () => {
+    /** Makes the next Client advertise exactly `names`. */
+    const advertise = async (names: string[]) => {
+      const {Client} =
+        await import('@modelcontextprotocol/sdk/client/index.js');
+      vi.mocked(Client).mockImplementationOnce(() =>
+        mockClient({
+          listTools: vi.fn().mockResolvedValue({
+            tools: names.map((name) => ({
+              name,
+              description: name,
+              inputSchema: {},
+            })),
+          }),
+        }),
+      );
+    };
+
+    const reservedNames = [
+      'transfer_to_agent',
+      'adk_request_credential',
+      'adk_request_confirmation',
+      'adk_request_input',
+    ];
+
+    it('skips every reserved name and keeps the rest', async () => {
+      await advertise(['valid_tool', ...reservedNames]);
+      const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+      const tools = await new MCPToolset(stdioParams).getTools();
+
+      expect(tools.map((tool) => tool.name)).toEqual(['valid_tool']);
+      warnSpy.mockRestore();
+    });
+
+    it('warns once per skipped tool, naming it', async () => {
+      await advertise(['valid_tool', ...reservedNames]);
+      const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+      await new MCPToolset(stdioParams).getTools();
+
+      expect(warnSpy).toHaveBeenCalledTimes(reservedNames.length);
+      for (const name of reservedNames) {
+        expect(warnSpy).toHaveBeenCalledWith(
+          `Skipping MCP tool '${name}' because it collides with a reserved ADK framework tool name.`,
+        );
+      }
+      warnSpy.mockRestore();
+    });
+
+    it('keeps a name that only starts with a reserved name', async () => {
+      await advertise(['transfer_to_agent_v2', 'adk_request_input_v2']);
+      const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+      const tools = await new MCPToolset(stdioParams).getTools();
+
+      expect(tools.map((tool) => tool.name)).toEqual([
+        'transfer_to_agent_v2',
+        'adk_request_input_v2',
+      ]);
+      expect(warnSpy).not.toHaveBeenCalled();
+      warnSpy.mockRestore();
+    });
+
+    it('keeps a reserved server name that a prefix moves out of the way', async () => {
+      await advertise(['transfer_to_agent']);
+      const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+      const tools = await new MCPToolset(
+        stdioParams,
+        [],
+        'myprefix',
+      ).getTools();
+
+      expect(tools.map((tool) => tool.name)).toEqual([
+        'myprefix_transfer_to_agent',
+      ]);
+      expect(warnSpy).not.toHaveBeenCalled();
+      warnSpy.mockRestore();
     });
   });
 

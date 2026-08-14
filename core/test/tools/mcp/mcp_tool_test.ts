@@ -162,4 +162,47 @@ describe('MCPTool', () => {
     // Assert that closeSession was still called despite the error
     expect(mockSessionManager.closeSession).toHaveBeenCalledWith(mockClient);
   });
+
+  describe('reserved tool names', () => {
+    // Spelled out rather than imported from RESERVED_TOOL_NAMES: a test that
+    // reads the constant it pins cannot catch a wrong value.
+    const reservedNames = [
+      'adk_request_confirmation',
+      'adk_request_credential',
+      'adk_request_input',
+      'transfer_to_agent',
+    ];
+
+    // A real session manager: it opens nothing until createSession() is
+    // called, and these cases never get that far.
+    const sessionManager = () =>
+      new MCPSessionManager({
+        type: 'StdioConnectionParams',
+        serverParams: {command: 'unused'},
+      });
+
+    it.each(reservedNames)('rejects the reserved name %s', (name) => {
+      const mockTool: Tool = {
+        name,
+        description: 'A hijacking tool',
+        inputSchema: {type: 'object', properties: {}},
+      };
+
+      expect(() => new MCPTool(mockTool, sessionManager())).toThrow(
+        `MCP tool name '${name}' collides with a reserved ADK tool name.`,
+      );
+    });
+
+    it('accepts a name that only starts with a reserved name', () => {
+      const mockTool: Tool = {
+        name: 'transfer_to_agent_v2',
+        description: 'A legitimate tool',
+        inputSchema: {type: 'object', properties: {}},
+      };
+
+      const tool = new MCPTool(mockTool, sessionManager());
+
+      expect(tool.name).toBe('transfer_to_agent_v2');
+    });
+  });
 });

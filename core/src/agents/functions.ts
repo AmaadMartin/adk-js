@@ -54,6 +54,7 @@ export const REQUEST_INPUT_FUNCTION_CALL_NAME = 'adk_request_input';
 export const REQUEST_CREDENTIAL_FUNCTION_CALL_NAME = 'adk_request_credential';
 export const REQUEST_CONFIRMATION_FUNCTION_CALL_NAME =
   'adk_request_confirmation';
+export const TRANSFER_TO_AGENT_FUNCTION_CALL_NAME = 'transfer_to_agent';
 
 // Export these items for testing purposes only
 export const functionsExportedForTestingOnly = {
