@@ -5,6 +5,7 @@
  */
 
 import {isCancel, select, text} from '@clack/prompts';
+import {validateAppName} from '@google/adk';
 import {exec, execSync} from 'node:child_process';
 import * as path from 'node:path';
 import {promisify} from 'node:util';
@@ -200,6 +201,9 @@ async function generateFiles(options: AgentCreationOptions) {
 }
 
 export async function createAgent(options: AgentCreationOptions) {
+  // The agent name may be given as a path; ADK only ever sees the last segment.
+  validateAppName(path.basename(path.normalize(options.agentName)));
+
   const agentDir = getAbsolutePath(options.agentName);
   await generateAgentFolder(agentDir, options.forceYes);
 
