@@ -340,6 +340,20 @@ describe('oauth2_utils', () => {
       expect(hasMissingOAuth2Endpoints(scheme)).toBe(true);
     });
 
+    it('returns true when only the authorizationCode authorizationUrl is blank', () => {
+      const scheme: AuthScheme = {
+        type: 'oauth2',
+        flows: {
+          authorizationCode: {
+            authorizationUrl: '',
+            tokenUrl: 'https://auth.example.com/token',
+            scopes: {},
+          },
+        },
+      };
+      expect(hasMissingOAuth2Endpoints(scheme)).toBe(true);
+    });
+
     it('returns true when the implicit authorizationUrl is blank', () => {
       const scheme: AuthScheme = {
         type: 'oauth2',
