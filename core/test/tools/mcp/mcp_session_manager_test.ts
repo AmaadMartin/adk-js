@@ -8,7 +8,8 @@ import {MCPConnectionParams, MCPSessionManager} from '@google/adk';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import {describe, expect, it, vi} from 'vitest';
+import {ErrorCode, McpError} from '@modelcontextprotocol/sdk/types.js';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
 // The logger singleton is internal (not part of the public API), so it is
 // imported via a relative path to spy on the exact instance the manager uses.
 import {logger} from '../../../src/utils/logger.js';
@@ -296,6 +297,221 @@ describe('MCPSessionManager', () => {
       );
 
       errorSpy.mockRestore();
+    });
+  });
+  describe('round-trip deadline', () => {
+    const TIMEOUT_MS = 5000;
+
+    function stdioParams(timeout?: number): MCPConnectionParams {
+      return {
+        type: 'StdioConnectionParams',
+        serverParams: {command: 'test-command'},
+        timeout,
+      };
+    }
+
+    beforeEach(() => {
+      vi.clearAllMocks();
+    });
+
+    it('applies the configured deadline to the stdio handshake', async () => {
+      const manager = new MCPSessionManager(stdioParams(TIMEOUT_MS));
+
+      const client = await manager.createSession();
+
+      expect(client.connect).toHaveBeenCalledWith(expect.anything(), {
+        timeout: TIMEOUT_MS,
+      });
+    });
+
+    it('applies the configured deadline to the streamable HTTP handshake', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+        timeout: TIMEOUT_MS,
+      });
+
+      const client = await manager.createSession();
+
+      expect(client.connect).toHaveBeenCalledWith(expect.anything(), {
+        timeout: TIMEOUT_MS,
+      });
+    });
+
+    it('leaves the SDK default in force when no deadline is configured', async () => {
+      const manager = new MCPSessionManager(stdioParams());
+
+      const client = await manager.createSession();
+
+      expect(client.connect).toHaveBeenCalledWith(expect.anything(), undefined);
+    });
+
+    it('hands the configured deadline to the call', async () => {
+      const manager = new MCPSessionManager(stdioParams(TIMEOUT_MS));
+      const call = vi.fn().mockResolvedValue('tools');
+
+      await expect(manager.withTimeout('listTools', call)).resolves.toBe(
+        'tools',
+      );
+
+      expect(call).toHaveBeenCalledWith({timeout: TIMEOUT_MS});
+    });
+
+    it('hands empty options to the call when no deadline is configured', async () => {
+      const manager = new MCPSessionManager(stdioParams());
+      const call = vi.fn().mockResolvedValue('tools');
+
+      await manager.withTimeout('listTools', call);
+
+      expect(call).toHaveBeenCalledWith({});
+    });
+
+    it('names the operation and the deadline when the request times out', async () => {
+      const manager = new MCPSessionManager(stdioParams(TIMEOUT_MS));
+      const sdkError = new McpError(
+        ErrorCode.RequestTimeout,
+        'Request timed out',
+        {timeout: TIMEOUT_MS},
+      );
+
+      const rejection = manager.withTimeout('listTools', () =>
+        Promise.reject(sdkError),
+      );
+
+      await expect(rejection).rejects.toThrow(
+        'MCP listTools timed out after 5000ms',
+      );
+      await expect(rejection).rejects.toHaveProperty('cause', sdkError);
+    });
+
+    it('leaves an SDK timeout untouched when no deadline is configured', async () => {
+      const manager = new MCPSessionManager(stdioParams());
+      const sdkError = new McpError(
+        ErrorCode.RequestTimeout,
+        'Request timed out',
+      );
+
+      await expect(
+        manager.withTimeout('listTools', () => Promise.reject(sdkError)),
+      ).rejects.toBe(sdkError);
+    });
+
+    const nonTimeoutRejections: Array<[string, unknown]> = [
+      ['a plain error', new Error('boom')],
+      [
+        'an MCP error with another code',
+        new McpError(ErrorCode.InvalidParams, 'bad params'),
+      ],
+      ['a null rejection', null],
+      ['a string rejection', 'boom'],
+    ];
+
+    it.each(nonTimeoutRejections)(
+      'passes %s through untouched',
+      async (_label, rejection) => {
+        const manager = new MCPSessionManager(stdioParams(TIMEOUT_MS));
+
+        await expect(
+          manager.withTimeout('listTools', () => Promise.reject(rejection)),
+        ).rejects.toBe(rejection);
+      },
+    );
+  });
+
+  describe('server-side session termination', () => {
+    /** The transport instance the most recent session was built on. */
+    function lastTransport(): StreamableHTTPClientTransport {
+      const transport = vi
+        .mocked(StreamableHTTPClientTransport)
+        .mock.instances.at(-1);
+      if (!transport) expect.fail('no transport was constructed');
+      return transport;
+    }
+
+    const httpParams = (terminateOnClose?: boolean): MCPConnectionParams => ({
+      type: 'StreamableHTTPConnectionParams',
+      url: 'http://test-url',
+      terminateOnClose,
+    });
+
+    beforeEach(() => {
+      vi.clearAllMocks();
+    });
+
+    it('terminates the server session before closing the client by default', async () => {
+      const manager = new MCPSessionManager(httpParams());
+      const client = await manager.createSession();
+      const terminateSession = vi.fn().mockResolvedValue(undefined);
+      lastTransport().terminateSession = terminateSession;
+
+      await manager.closeSession(client);
+
+      expect(terminateSession).toHaveBeenCalledTimes(1);
+      expect(terminateSession.mock.invocationCallOrder[0]).toBeLessThan(
+        vi.mocked(client.close).mock.invocationCallOrder[0],
+      );
+      expect(manager.getActiveSessions()).toEqual([]);
+    });
+
+    it('skips termination when terminateOnClose is false', async () => {
+      const manager = new MCPSessionManager(httpParams(false));
+      const client = await manager.createSession();
+      const terminateSession = vi.fn().mockResolvedValue(undefined);
+      lastTransport().terminateSession = terminateSession;
+
+      await manager.closeSession(client);
+
+      expect(terminateSession).not.toHaveBeenCalled();
+      expect(client.close).toHaveBeenCalledTimes(1);
+    });
+
+    it('attempts no termination for a stdio session', async () => {
+      const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      const manager = new MCPSessionManager({
+        type: 'StdioConnectionParams',
+        serverParams: {command: 'test-command'},
+      });
+      const client = await manager.createSession();
+
+      await manager.closeSession(client);
+
+      expect(warnSpy).not.toHaveBeenCalled();
+      expect(client.close).toHaveBeenCalledTimes(1);
+      warnSpy.mockRestore();
+    });
+
+    it('closes the client even when the termination request fails', async () => {
+      const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      const manager = new MCPSessionManager(httpParams());
+      const client = await manager.createSession();
+      lastTransport().terminateSession = vi
+        .fn()
+        .mockRejectedValue(new Error('DELETE refused'));
+
+      await manager.closeSession(client);
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to terminate MCP session'),
+      );
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('DELETE refused'),
+      );
+      expect(client.close).toHaveBeenCalledTimes(1);
+      expect(manager.getActiveSessions()).toEqual([]);
+      warnSpy.mockRestore();
+    });
+
+    it('ignores a client that is not an active session', async () => {
+      const manager = new MCPSessionManager(httpParams());
+      const client = await manager.createSession();
+      const terminateSession = vi.fn().mockResolvedValue(undefined);
+      lastTransport().terminateSession = terminateSession;
+      await manager.closeSession(client);
+
+      await manager.closeSession(client);
+
+      expect(terminateSession).toHaveBeenCalledTimes(1);
+      expect(client.close).toHaveBeenCalledTimes(1);
     });
   });
 });
