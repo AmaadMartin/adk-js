@@ -39,6 +39,7 @@ describe('ApigeeLlm', () => {
     delete process.env['GOOGLE_API_KEY'];
     delete process.env['GEMINI_API_KEY'];
     delete process.env['GOOGLE_GENAI_USE_VERTEXAI'];
+    delete process.env['GOOGLE_GENAI_USE_ENTERPRISE'];
     delete process.env['GOOGLE_CLOUD_PROJECT'];
     delete process.env['GOOGLE_CLOUD_LOCATION'];
   };
