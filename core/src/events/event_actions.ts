@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {AuthConfig} from '../auth/auth_tool.js';
+import type {AuthConfig} from '../auth/auth_tool.js';
 import {carryDeltaStamps} from '../sessions/state_write_order.js';
-import {ToolConfirmation} from '../tools/tool_confirmation.js';
+import type {ToolConfirmation} from '../tools/tool_confirmation.js';
 import {deepMerge} from '../utils/merge_utils.js';
 
 /**

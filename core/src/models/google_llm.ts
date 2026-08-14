@@ -4,14 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
+import type {
   Blob,
-  createPartFromText,
   FileData,
-  GoogleGenAI,
   HttpOptions,
   LiveServerMessage,
 } from '@google/genai';
+import {createPartFromText, GoogleGenAI} from '@google/genai';
 
 import {contentUnionToText} from '../utils/content_utils.js';
 import {isBrowser, isEnterpriseModeEnabled} from '../utils/env_aware_utils.js';
@@ -22,12 +21,13 @@ import {GoogleLLMVariant} from '../utils/variant_utils.js';
 import {AsyncQueue} from '../utils/async_queue.js';
 import {StreamingResponseAggregator} from '../utils/streaming_utils.js';
 import {BaseLlm} from './base_llm.js';
-import {BaseLlmConnection} from './base_llm_connection.js';
-import {LlmCapabilities} from './capabilities.js';
+import type {BaseLlmConnection} from './base_llm_connection.js';
+import type {LlmCapabilities} from './capabilities.js';
 import {GeminiLlmConnection} from './gemini_llm_connection.js';
 import {generateContentViaInteractions} from './interactions_utils.js';
-import {LlmRequest} from './llm_request.js';
-import {createLlmResponse, LlmResponse} from './llm_response.js';
+import type {LlmRequest} from './llm_request.js';
+import type {LlmResponse} from './llm_response.js';
+import {createLlmResponse} from './llm_response.js';
 
 /**
  * The parameters for creating a Gemini instance.

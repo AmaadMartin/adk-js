@@ -8,7 +8,7 @@ import {Type} from '@google/genai';
 import {trace} from '@opentelemetry/api';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
-import {
+import type {
   BaseAgent,
   BaseTool,
   Event,
@@ -16,8 +16,8 @@ import {
   LlmRequest,
   LlmResponse,
   Session,
-  createEventActions,
 } from '@google/adk';
+import {createEventActions} from '@google/adk';
 import {
   traceAgentInvocation,
   traceCallLlm,

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GenerateContentConfig} from '@google/genai';
+import type {GenerateContentConfig} from '@google/genai';
 import {z} from 'zod';
 
 /** The model used for internal simulator LLM calls when none is configured. */

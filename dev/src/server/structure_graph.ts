@@ -4,9 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Color, Digraph, Edge, Node, toDot} from 'ts-graphviz';
+import type {Color} from 'ts-graphviz';
+import {Digraph, Edge, Node, toDot} from 'ts-graphviz';
 
-import {SerializedAgent, SerializedEdge} from './app_info.js';
+import type {SerializedAgent, SerializedEdge} from './app_info.js';
 
 /**
  * Renders ONE level of an app's structure, for the dev UI's graph tab.

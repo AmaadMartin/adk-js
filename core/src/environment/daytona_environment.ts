@@ -12,7 +12,8 @@ import {
   errorMessageIncludes,
 } from '../utils/error_utils.js';
 import {experimental} from '../utils/experimental.js';
-import {BaseEnvironment, ExecutionResult} from './base_environment.js';
+import type {ExecutionResult} from './base_environment.js';
+import {BaseEnvironment} from './base_environment.js';
 
 /** Working directory of every sandbox created by this environment. */
 const SANDBOX_HOME = '/workspaces';

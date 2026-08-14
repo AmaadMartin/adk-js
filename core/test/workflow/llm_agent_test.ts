@@ -5,13 +5,14 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {InvocationContext} from '../../src/agents/invocation_context.js';
+import type {InvocationContext} from '../../src/agents/invocation_context.js';
 import {LlmAgent} from '../../src/agents/llm_agent.js';
-import {createEvent, Event} from '../../src/events/event.js';
+import type {Event} from '../../src/events/event.js';
+import {createEvent} from '../../src/events/event.js';
 import {BaseLlm} from '../../src/models/base_llm.js';
-import {BaseLlmConnection} from '../../src/models/base_llm_connection.js';
-import {LlmRequest} from '../../src/models/llm_request.js';
-import {LlmResponse} from '../../src/models/llm_response.js';
+import type {BaseLlmConnection} from '../../src/models/base_llm_connection.js';
+import type {LlmRequest} from '../../src/models/llm_request.js';
+import type {LlmResponse} from '../../src/models/llm_response.js';
 import {AsyncQueue} from '../../src/utils/async_queue.js';
 import {node} from '../../src/workflow/node.js';
 import {NodeContext} from '../../src/workflow/node_context.js';

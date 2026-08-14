@@ -4,20 +4,21 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {createUserContent, Part} from '@google/genai';
+import type {Part} from '@google/genai';
+import {createUserContent} from '@google/genai';
 import {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
-import {RequestHandlerExtra} from '@modelcontextprotocol/sdk/shared/protocol.js';
-import {
+import type {RequestHandlerExtra} from '@modelcontextprotocol/sdk/shared/protocol.js';
+import type {
   ContentBlock,
   ServerNotification,
   ServerRequest,
 } from '@modelcontextprotocol/sdk/types.js';
 import {z} from 'zod';
 
-import {BaseAgent} from '../../agents/base_agent.js';
+import type {BaseAgent} from '../../agents/base_agent.js';
 import {isFinalResponse} from '../../events/event.js';
 import {InMemoryRunner} from '../../runner/in_memory_runner.js';
-import {Runner} from '../../runner/runner.js';
+import type {Runner} from '../../runner/runner.js';
 import {version} from '../../version.js';
 
 /** The synthetic ADK user id used for every MCP-driven conversation. */

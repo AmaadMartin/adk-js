@@ -4,18 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {FunctionCall} from '@google/genai';
-import {
-  Event,
-  getFunctionCalls,
-  getFunctionResponses,
-} from '../../events/event.js';
+import type {FunctionCall} from '@google/genai';
+import type {Event} from '../../events/event.js';
+import {getFunctionCalls, getFunctionResponses} from '../../events/event.js';
 import {ToolConfirmation} from '../../tools/tool_confirmation.js';
 import {
   REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
   handleFunctionCallList,
 } from '../functions.js';
-import {InvocationContext} from '../invocation_context.js';
+import type {InvocationContext} from '../invocation_context.js';
 import {isLlmAgent} from '../llm_agent.js';
 import {ReadonlyContext} from '../readonly_context.js';
 import {BaseLlmRequestProcessor} from './base_llm_processor.js';

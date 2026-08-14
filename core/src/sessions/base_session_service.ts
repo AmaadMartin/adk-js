@@ -6,9 +6,9 @@
 
 import {cloneDeep} from 'lodash-es';
 
-import {Event} from '../events/event.js';
+import type {Event} from '../events/event.js';
 
-import {CompositeSessionKey, Session} from './session.js';
+import type {CompositeSessionKey, Session} from './session.js';
 import {State} from './state.js';
 import {carryDeltaStamps, shouldApplyDeltaWrite} from './state_write_order.js';
 

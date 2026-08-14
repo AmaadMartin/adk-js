@@ -14,9 +14,11 @@ import {
   isFolderExists,
   removeFolderOnExit,
 } from '../../utils/file_utils.js';
-import {
+import type {
   BaseDeployOptions,
   CreateDockerFileContentOptions,
+} from './deploy_utils.js';
+import {
   copyAgentFiles,
   createDockerFile,
   createDockerFileContent,

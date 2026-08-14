@@ -4,10 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {BaseAgent, BaseSessionService, Runner} from '@google/adk';
+import type {BaseAgent, BaseSessionService} from '@google/adk';
+import {Runner} from '@google/adk';
 import * as path from 'node:path';
 import * as readline from 'node:readline';
-import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
+import type {Mock} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {runAgent} from '../../src/cli/cli_run.js';
 import {AgentFile} from '../../src/utils/agent_loader.js';
 import {loadFileData, saveToFile} from '../../src/utils/file_utils.js';

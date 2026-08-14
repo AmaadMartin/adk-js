@@ -4,10 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {Event} from '@google/adk';
 import {
   createEvent,
   createEventActions,
-  Event,
   InMemorySessionService,
 } from '@google/adk';
 import * as assert from 'node:assert';

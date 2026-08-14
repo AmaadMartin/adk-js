@@ -4,15 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {LlmRequest, Logger} from '@google/adk';
 import {
   Context,
   InMemoryArtifactService,
   InMemorySessionService,
   InvocationContext,
   LlmAgent,
-  LlmRequest,
   LOAD_ARTIFACTS,
-  Logger,
   LogLevel,
   PluginManager,
   setLogger,

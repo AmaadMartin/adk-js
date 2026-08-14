@@ -4,9 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {AuthCredential, AuthScheme} from '@google/adk';
 import {
-  AuthCredential,
-  AuthScheme,
   CredentialExchangeError,
   OAuth2CredentialExchanger,
   OAuthGrantType,

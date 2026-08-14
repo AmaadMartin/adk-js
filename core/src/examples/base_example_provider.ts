@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Example} from './example.js';
+import type {Example} from './example.js';
 
 /**
  * A unique symbol to identify ADK agent classes.

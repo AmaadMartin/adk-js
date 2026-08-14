@@ -5,7 +5,7 @@
  */
 
 import * as childProcess from 'node:child_process';
-import * as fs from 'node:fs';
+import type * as fs from 'node:fs';
 import * as path from 'node:path';
 import {describe, expect, it, vi} from 'vitest';
 import {AdkTsApiServer, assertAdkCliBuilt} from './test_api_server.js';

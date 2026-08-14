@@ -4,13 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {ReadonlyContext} from '@google/adk';
 import {
   AuthCredentialTypes,
   OpenApiSpecParser,
   OpenAPIToolset,
-  ReadonlyContext,
 } from '@google/adk';
-import {OpenAPIV3} from 'openapi-types';
+import type {OpenAPIV3} from 'openapi-types';
 import {describe, expect, it} from 'vitest';
 
 /** Returns the resolved `application/json` schema of the `200` response. */

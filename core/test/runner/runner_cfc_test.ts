@@ -4,16 +4,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
+import type {
   BaseCodeExecutor,
-  BaseLlm,
   BaseLlmConnection,
-  BuiltInCodeExecutor,
   Event,
-  InMemorySessionService,
-  LlmAgent,
   LlmRequest,
   LlmResponse,
+} from '@google/adk';
+import {
+  BaseLlm,
+  BuiltInCodeExecutor,
+  InMemorySessionService,
+  LlmAgent,
   Runner,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';

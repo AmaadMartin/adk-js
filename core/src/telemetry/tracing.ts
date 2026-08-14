@@ -15,21 +15,16 @@
  *    constructs of the framework that are not observable by the SDK.
  */
 
-import {Content} from '@google/genai';
-import {
-  context,
-  Context,
-  Span,
-  SpanStatusCode,
-  trace,
-} from '@opentelemetry/api';
+import type {Content} from '@google/genai';
+import type {Context, Span} from '@opentelemetry/api';
+import {context, SpanStatusCode, trace} from '@opentelemetry/api';
 
-import {BaseAgent} from '../agents/base_agent.js';
-import {InvocationContext} from '../agents/invocation_context.js';
-import {Event} from '../events/event.js';
-import {LlmRequest} from '../models/llm_request.js';
-import {LlmResponse} from '../models/llm_response.js';
-import {BaseTool} from '../tools/base_tool.js';
+import type {BaseAgent} from '../agents/base_agent.js';
+import type {InvocationContext} from '../agents/invocation_context.js';
+import type {Event} from '../events/event.js';
+import type {LlmRequest} from '../models/llm_request.js';
+import type {LlmResponse} from '../models/llm_response.js';
+import type {BaseTool} from '../tools/base_tool.js';
 import {resolveErrorType} from '../utils/error_utils.js';
 import {version} from '../version.js';
 

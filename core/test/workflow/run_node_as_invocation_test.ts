@@ -7,12 +7,12 @@
 import {describe, expect, it} from 'vitest';
 import {z} from 'zod';
 import {InvocationContext} from '../../src/agents/invocation_context.js';
-import {Event} from '../../src/events/event.js';
+import type {Event} from '../../src/events/event.js';
 import {PluginManager} from '../../src/plugins/plugin_manager.js';
 import {createSession} from '../../src/sessions/session.js';
 import type {SchemaLike} from '../../src/utils/schema.js';
 import {node} from '../../src/workflow/node.js';
-import {NodeContext} from '../../src/workflow/node_context.js';
+import type {NodeContext} from '../../src/workflow/node_context.js';
 import {RequestInput} from '../../src/workflow/request_input.js';
 import {
   asRunnableRoot,

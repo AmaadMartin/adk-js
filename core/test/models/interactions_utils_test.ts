@@ -4,35 +4,34 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
+import type {
   Content,
   FinishReason,
   FunctionCall,
   FunctionResponse,
   GenerateContentConfig,
-  GoogleGenAI,
   Interactions,
-  Language,
-  Outcome,
   Part,
-  Type,
 } from '@google/genai';
+import {GoogleGenAI, Language, Outcome, Type} from '@google/genai';
 import {afterEach, describe, expect, it, vi} from 'vitest';
+import type {
+  ExtendedInteraction,
+  ExtendedInteractionSSEEvent,
+  ReceivedStep,
+} from '../../src/models/interactions_utils.js';
 import {
   convertContentToSteps,
   convertInteractionEventToLlmResponse,
   convertInteractionToLlmResponse,
   convertStepToParts,
   convertToolsConfigToInteractionsFormat,
-  ExtendedInteraction,
-  ExtendedInteractionSSEEvent,
   extractSystemInstruction,
   generateContentViaInteractions,
   getLatestUserContents,
-  ReceivedStep,
 } from '../../src/models/interactions_utils.js';
-import {LlmRequest} from '../../src/models/llm_request.js';
-import {LlmResponse} from '../../src/models/llm_response.js';
+import type {LlmRequest} from '../../src/models/llm_request.js';
+import type {LlmResponse} from '../../src/models/llm_response.js';
 import {logger} from '../../src/utils/logger.js';
 
 function createLlmRequest(overrides: Partial<LlmRequest>): LlmRequest {

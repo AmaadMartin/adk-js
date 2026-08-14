@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {AuthCredential} from '../auth_credential.js';
-import {AuthScheme} from '../auth_schemes.js';
+import type {AuthCredential} from '../auth_credential.js';
+import type {AuthScheme} from '../auth_schemes.js';
 
 /**
  * Base exception for credential exchange errors.

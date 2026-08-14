@@ -14,7 +14,8 @@
 
 import {describe, expect, it} from 'vitest';
 import {LlmAgent} from '../../src/agents/llm_agent.js';
-import {createEvent, Event} from '../../src/events/event.js';
+import type {Event} from '../../src/events/event.js';
+import {createEvent} from '../../src/events/event.js';
 import {BaseLlm} from '../../src/models/base_llm.js';
 import type {BaseLlmConnection} from '../../src/models/base_llm_connection.js';
 import type {LlmRequest} from '../../src/models/llm_request.js';

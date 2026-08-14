@@ -7,18 +7,20 @@
 import {Type} from '@google/genai';
 import {describe, expect, it, vi} from 'vitest';
 
-import {
+import type {
   BaseAgent,
+  LlmRequest,
+  MemoryEntry,
+  SearchMemoryResponse,
+} from '@google/adk';
+import {
   Context,
   createSession,
   getLogger,
   InvocationContext,
-  LlmRequest,
   LOAD_MEMORY,
   LoadMemoryTool,
-  MemoryEntry,
   PluginManager,
-  SearchMemoryResponse,
 } from '@google/adk';
 
 class StubToolContext {

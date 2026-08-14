@@ -4,10 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Gemini, LlmAgent, LlmRequest, VertexAiSearchTool} from '@google/adk';
+import type {LlmRequest} from '@google/adk';
+import {Gemini, LlmAgent, VertexAiSearchTool} from '@google/adk';
 import {GenerateContentResponse} from '@google/genai';
 import {describe, expect, it} from 'vitest';
-import {createRunner, GeminiApiClient} from '../test_case_utils.js';
+import type {GeminiApiClient} from '../test_case_utils.js';
+import {createRunner} from '../test_case_utils.js';
 
 interface TestTool {
   retrieval?: {

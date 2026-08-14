@@ -24,7 +24,8 @@
  * Try "SFO to CDG on 2026-03-15 for 2 people".
  */
 
-import {FunctionTool, LlmAgent, node, NodeContext, Workflow} from '@google/adk';
+import type {NodeContext} from '@google/adk';
+import {FunctionTool, LlmAgent, node, Workflow} from '@google/adk';
 import {z} from 'zod';
 
 const flightSearchInputSchema = z.object({

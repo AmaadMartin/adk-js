@@ -4,44 +4,41 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {
+  AuthConfig,
+  BaseLlmConnection,
+  Context,
+  Event,
+  EventActions,
+  LlmRequest,
+  LlmResponse,
+  RunAsyncToolRequest,
+  Session,
+  ToolProcessLlmRequest,
+} from '@google/adk';
 import {
   AUTH_PREPROCESSOR,
-  AuthConfig,
   BaseLlm,
-  BaseLlmConnection,
   BaseLlmRequestProcessor,
   BaseLlmResponseProcessor,
   BasePlugin,
   BaseTool,
   CONTENT_REQUEST_PROCESSOR,
-  Context,
   ContextCompactorRequestProcessor,
   createEvent,
   createEventActions,
   createSession,
-  Event,
-  EventActions,
   FunctionTool,
   Gemini,
   InMemorySessionService,
   InvocationContext,
   LlmAgent,
   llmAgentFunctionsExportedForTestingOnly,
-  LlmRequest,
-  LlmResponse,
   PluginManager,
-  RunAsyncToolRequest,
   Runner,
-  Session,
-  ToolProcessLlmRequest,
 } from '@google/adk';
-import {
-  Content,
-  GenerateContentConfig,
-  GenerateContentResponse,
-  Schema,
-  Type,
-} from '@google/genai';
+import type {Content, GenerateContentConfig, Schema} from '@google/genai';
+import {GenerateContentResponse, Type} from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';

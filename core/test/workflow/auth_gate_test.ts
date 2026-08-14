@@ -5,16 +5,14 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {
-  AuthCredential,
-  AuthCredentialTypes,
-} from '../../src/auth/auth_credential.js';
-import {AuthScheme} from '../../src/auth/auth_schemes.js';
-import {AuthConfig} from '../../src/auth/auth_tool.js';
-import {Event} from '../../src/events/event.js';
+import type {AuthCredential} from '../../src/auth/auth_credential.js';
+import {AuthCredentialTypes} from '../../src/auth/auth_credential.js';
+import type {AuthScheme} from '../../src/auth/auth_schemes.js';
+import type {AuthConfig} from '../../src/auth/auth_tool.js';
+import type {Event} from '../../src/events/event.js';
 import {Runner} from '../../src/runner/runner.js';
 import {InMemorySessionService} from '../../src/sessions/in_memory_session_service.js';
-import {NodeContext} from '../../src/workflow/node_context.js';
+import type {NodeContext} from '../../src/workflow/node_context.js';
 import {FunctionNode} from '../../src/workflow/nodes/function_node.js';
 import {hasAuthRequestFunctionCall} from '../../src/workflow/utils/hitl_utils.js';
 import {Workflow} from '../../src/workflow/workflow.js';

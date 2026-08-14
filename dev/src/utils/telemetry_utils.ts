@@ -4,14 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {OTelHooks} from '@google/adk';
 import {
   getGcpExporters,
   getGcpResource,
   maybeSetOtelProviders,
-  OTelHooks,
 } from '@google/adk';
-import {HrTime} from '@opentelemetry/api';
-import {
+import type {HrTime} from '@opentelemetry/api';
+import type {
   ReadableSpan,
   SpanExporter,
   SpanProcessor,

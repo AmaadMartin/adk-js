@@ -4,20 +4,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {Event, ReadonlyContext} from '@google/adk';
 import {
   AgentRegistry,
   AgentRegistrySingleMCPToolset,
-  Event,
   GCP_MCP_SERVER_DESTINATION_ID,
   LlmAgent,
-  ReadonlyContext,
 } from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
-import {
-  createRunner,
-  GeminiWithMockResponses,
-  RawGenerateContentResponse,
-} from '../test_case_utils.js';
+import type {RawGenerateContentResponse} from '../test_case_utils.js';
+import {createRunner, GeminiWithMockResponses} from '../test_case_utils.js';
 
 vi.mock('google-auth-library', () => {
   return {

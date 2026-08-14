@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
+import type {
   CitationMetadata,
   Content,
   FinishReason,
@@ -16,7 +16,7 @@ import {
   Transcription,
 } from '@google/genai';
 
-import {CacheMetadata} from './cache_metadata.js';
+import type {CacheMetadata} from './cache_metadata.js';
 
 /**
  * LLM response class that provides the first candidate response from the

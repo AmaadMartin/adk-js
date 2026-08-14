@@ -5,9 +5,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {BaseArtifactService, BaseSessionService} from '@google/adk';
 import {
-  BaseArtifactService,
-  BaseSessionService,
   LogLevel,
   getArtifactServiceFromUri,
   getSessionServiceFromUri,

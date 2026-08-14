@@ -4,9 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Event as AdkEvent} from '../events/event.js';
-import {EventActions as AdkEventActions} from '../events/event_actions.js';
-import {A2AEvent, isTask} from './a2a_event.js';
+import type {Event as AdkEvent} from '../events/event.js';
+import type {EventActions as AdkEventActions} from '../events/event_actions.js';
+import type {A2AEvent} from './a2a_event.js';
+import {isTask} from './a2a_event.js';
 
 const ADK_METADATA_KEY_PREFIX = 'adk_';
 const A2A_METADATA_KEY_PREFIX = 'a2a:';

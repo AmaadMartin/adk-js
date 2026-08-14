@@ -4,12 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {FunctionDeclaration, Type} from '@google/genai';
+import type {FunctionDeclaration} from '@google/genai';
+import {Type} from '@google/genai';
 import {GoogleAuth} from 'google-auth-library';
 
 import {getLogger} from '../utils/logger.js';
-import {BaseTool, RunAsyncToolRequest} from './base_tool.js';
-import {VertexAISearchDataStoreSpec} from './vertex_ai_search_tool.js';
+import type {RunAsyncToolRequest} from './base_tool.js';
+import {BaseTool} from './base_tool.js';
+import type {VertexAISearchDataStoreSpec} from './vertex_ai_search_tool.js';
 
 const logger = getLogger();
 

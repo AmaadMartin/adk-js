@@ -4,13 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {App} from '../apps/app.js';
-import {ResumabilityConfig} from '../apps/resumability_config.js';
+import type {App} from '../apps/app.js';
+import type {ResumabilityConfig} from '../apps/resumability_config.js';
 import {InMemoryArtifactService} from '../artifacts/in_memory_artifact_service.js';
 import {InMemoryMemoryService} from '../memory/in_memory_memory_service.js';
-import {BasePlugin} from '../plugins/base_plugin.js';
+import type {BasePlugin} from '../plugins/base_plugin.js';
 import {InMemorySessionService} from '../sessions/in_memory_session_service.js';
-import {RunnableRoot} from '../workflow/run_node_as_invocation.js';
+import type {RunnableRoot} from '../workflow/run_node_as_invocation.js';
 
 import {Runner} from './runner.js';
 

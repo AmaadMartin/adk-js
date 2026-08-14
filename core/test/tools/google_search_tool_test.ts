@@ -4,13 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  Context,
-  GOOGLE_SEARCH,
-  GoogleSearchTool,
-  LlmRequest,
-} from '@google/adk';
-import {Tool} from '@google/genai';
+import type {Context, LlmRequest} from '@google/adk';
+import {GOOGLE_SEARCH, GoogleSearchTool} from '@google/adk';
+import type {Tool} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
 function makeRequest(model?: string, tools: Tool[] = []): LlmRequest {

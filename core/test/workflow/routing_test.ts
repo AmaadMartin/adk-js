@@ -6,8 +6,9 @@
 
 import {describe, expect, it} from 'vitest';
 import {createEvent} from '../../src/events/event.js';
-import {BaseNode} from '../../src/workflow/base_node.js';
-import {DEFAULT_ROUTE, Edge, RouteValue} from '../../src/workflow/graph.js';
+import type {BaseNode} from '../../src/workflow/base_node.js';
+import type {RouteValue} from '../../src/workflow/graph.js';
+import {DEFAULT_ROUTE, Edge} from '../../src/workflow/graph.js';
 import {JoinNode} from '../../src/workflow/nodes/join_node.js';
 import {Workflow} from '../../src/workflow/workflow.js';
 import {driveNode, FnNode} from './test_helpers.js';

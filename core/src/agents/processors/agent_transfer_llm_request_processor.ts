@@ -5,13 +5,15 @@
  */
 
 import {z} from 'zod';
-import {Event} from '../../events/event.js';
-import {appendInstructions, LlmRequest} from '../../models/llm_request.js';
+import type {Event} from '../../events/event.js';
+import type {LlmRequest} from '../../models/llm_request.js';
+import {appendInstructions} from '../../models/llm_request.js';
 import {FunctionTool} from '../../tools/function_tool.js';
-import {BaseAgent} from '../base_agent.js';
+import type {BaseAgent} from '../base_agent.js';
 import {Context} from '../context.js';
-import {InvocationContext} from '../invocation_context.js';
-import {isLlmAgent, LlmAgent} from '../llm_agent.js';
+import type {InvocationContext} from '../invocation_context.js';
+import type {LlmAgent} from '../llm_agent.js';
+import {isLlmAgent} from '../llm_agent.js';
 import {BaseLlmRequestProcessor} from './base_llm_processor.js';
 
 /**

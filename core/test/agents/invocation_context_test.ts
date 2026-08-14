@@ -4,16 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {BaseAgentConfig, Event, Session} from '@google/adk';
 import {
   BaseAgent,
-  BaseAgentConfig,
-  Event,
   InMemoryCredentialService,
   InvocationContext,
   LlmAgent,
   LoopAgent,
   PluginManager,
-  Session,
   createEvent,
   createRunConfig,
   createSession,

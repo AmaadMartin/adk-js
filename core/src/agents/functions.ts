@@ -4,20 +4,21 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content, createUserContent, FunctionCall, Part} from '@google/genai';
+import type {Content, FunctionCall, Part} from '@google/genai';
+import {createUserContent} from '@google/genai';
 import {isEmpty} from 'lodash-es';
 
-import {InvocationContext} from '../agents/invocation_context.js';
+import type {InvocationContext} from '../agents/invocation_context.js';
+import type {Event} from '../events/event.js';
 import {
   createEvent,
-  Event,
   generateClientFunctionCallId,
   getFunctionCalls,
   getFunctionResponses,
 } from '../events/event.js';
 import {mergeEventActions} from '../events/event_actions.js';
-import {BaseTool} from '../tools/base_tool.js';
-import {ToolConfirmation} from '../tools/tool_confirmation.js';
+import type {BaseTool} from '../tools/base_tool.js';
+import type {ToolConfirmation} from '../tools/tool_confirmation.js';
 import {rendersAsEmptyJsonObject} from '../utils/json_utils.js';
 import {logger} from '../utils/logger.js';
 import {Context} from './context.js';
@@ -28,7 +29,7 @@ import {
   traceToolCall,
 } from '../telemetry/tracing.js';
 
-import {
+import type {
   SingleAfterToolCallback,
   SingleBeforeToolCallback,
 } from './llm_agent.js';

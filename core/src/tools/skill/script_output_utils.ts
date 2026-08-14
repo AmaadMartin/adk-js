@@ -7,11 +7,9 @@
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {Context} from '../../agents/context.js';
-import {
-  CodeExecutionResult,
-  getFileContentAsBase64,
-} from '../../code_executors/code_execution_utils.js';
+import type {Context} from '../../agents/context.js';
+import type {CodeExecutionResult} from '../../code_executors/code_execution_utils.js';
+import {getFileContentAsBase64} from '../../code_executors/code_execution_utils.js';
 import {materializeFiles} from '../../utils/file_utils.js';
 import {logger} from '../../utils/logger.js';
 

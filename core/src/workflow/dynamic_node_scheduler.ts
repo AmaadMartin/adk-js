@@ -4,12 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {BaseNode} from './base_node.js';
-import {NodeContext, NodeResult} from './node_context.js';
+import type {BaseNode} from './base_node.js';
+import type {NodeContext, NodeResult} from './node_context.js';
 import {executeChildNode} from './node_runner.js';
 import {createNodeState} from './node_state.js';
 import {NodeStatus} from './node_status.js';
-import {
+import type {
   DynamicNodeRun,
   DynamicNodeState,
   ScheduleDynamicNode,

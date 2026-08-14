@@ -28,7 +28,8 @@
  * Enter a comma-separated list, e.g. "alpha, beta, gamma".
  */
 
-import {node, NodeContext, Workflow} from '@google/adk';
+import type {NodeContext} from '@google/adk';
+import {node, Workflow} from '@google/adk';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 

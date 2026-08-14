@@ -4,11 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {State} from '../sessions/state.js';
+import type {State} from '../sessions/state.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
 
-import {AuthCredential} from './auth_credential.js';
-import {AuthConfig} from './auth_tool.js';
+import type {AuthCredential} from './auth_credential.js';
+import type {AuthConfig} from './auth_tool.js';
 import {OAuth2CredentialExchanger} from './oauth2/oauth2_credential_exchanger.js';
 
 /**

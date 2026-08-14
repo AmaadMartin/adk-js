@@ -9,13 +9,13 @@
  * a parallel branch, and multi-trigger re-execution.
  */
 
+import type {NodeContext} from '@google/adk';
 import {
   createEvent,
   DEFAULT_ROUTE,
   FunctionNode,
   JoinNode,
   node,
-  NodeContext,
   Workflow,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';

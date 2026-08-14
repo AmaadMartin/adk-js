@@ -4,17 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
+import type {
   BaseAgent,
   BaseNode,
-  DEFAULT_ROUTE,
   RouteValue,
   Workflow,
   Graph as WorkflowGraph,
-  isBaseAgent,
-  isBaseTool,
-  isLlmAgent,
 } from '@google/adk';
+import {DEFAULT_ROUTE, isBaseAgent, isBaseTool, isLlmAgent} from '@google/adk';
 
 /**
  * Anything the dev UI's structure graph can sit on: an agent, or a node of a

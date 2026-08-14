@@ -17,7 +17,8 @@
  *   npm run sample -- samples/workflows/dynamic/sequence_route/agent.ts
  */
 
-import {LlmAgent, node, NodeContext, Workflow} from '@google/adk';
+import type {NodeContext} from '@google/adk';
+import {LlmAgent, node, Workflow} from '@google/adk';
 import {z} from 'zod';
 
 const cityTimeSchema = z.object({

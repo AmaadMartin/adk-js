@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content, ContentUnion, Part} from '@google/genai';
+import type {Content, ContentUnion, Part} from '@google/genai';
 
 /**
  * Distinguishes the two object arms of `ContentUnion`. Only `Content` carries

@@ -12,7 +12,8 @@
  *   npm run sample -- tests/integration/workflows/node_output/agent.ts
  */
 
-import {createEvent, LlmAgent, node, NodeContext, Workflow} from '@google/adk';
+import type {NodeContext} from '@google/adk';
+import {createEvent, LlmAgent, node, Workflow} from '@google/adk';
 import {z} from 'zod';
 
 const topicDetails = z.object({

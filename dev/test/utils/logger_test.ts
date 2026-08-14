@@ -9,11 +9,8 @@ import {Console} from 'node:console';
 import {EOL} from 'node:os';
 import {Writable} from 'node:stream';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-import {
-  AdkLogger,
-  AdkLoggerOptions,
-  setDefaultLogLevel,
-} from '../../src/utils/logger.js';
+import type {AdkLoggerOptions} from '../../src/utils/logger.js';
+import {AdkLogger, setDefaultLogLevel} from '../../src/utils/logger.js';
 
 /**
  * A stream that keeps everything written to it. Winston's Console transport

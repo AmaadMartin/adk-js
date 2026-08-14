@@ -4,15 +4,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {FunctionDeclaration, Schema, Type} from '@google/genai';
+import type {FunctionDeclaration, Schema} from '@google/genai';
+import {Type} from '@google/genai';
 
-import {Context} from '../../agents/context.js';
-import {BaseTool, RunAsyncToolRequest} from '../../tools/base_tool.js';
+import type {Context} from '../../agents/context.js';
+import type {RunAsyncToolRequest} from '../../tools/base_tool.js';
+import {BaseTool} from '../../tools/base_tool.js';
 import {
   isZodObject,
   zodObjectToSchema,
 } from '../../utils/simple_zod_to_json.js';
-import {BaseNode} from '../base_node.js';
+import type {BaseNode} from '../base_node.js';
 import {NodeContext} from '../node_context.js';
 import {executeChildNode} from '../node_runner.js';
 

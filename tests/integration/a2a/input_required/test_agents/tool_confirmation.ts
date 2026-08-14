@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {BaseAgent, createEvent, Event, InvocationContext} from '@google/adk';
+import type {Event, InvocationContext} from '@google/adk';
+import {BaseAgent, createEvent} from '@google/adk';
 
 class ToolConfirmationAgent extends BaseAgent {
   constructor() {

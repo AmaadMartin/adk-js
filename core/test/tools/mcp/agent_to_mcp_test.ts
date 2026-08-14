@@ -7,12 +7,11 @@
 import {toMcpServer as publicToMcpServer} from '@google/adk';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {InMemoryTransport} from '@modelcontextprotocol/sdk/inMemory.js';
-import {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
-import {RequestHandlerExtra} from '@modelcontextprotocol/sdk/shared/protocol.js';
-import {
+import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
+import type {RequestHandlerExtra} from '@modelcontextprotocol/sdk/shared/protocol.js';
+import type {
   AudioContent,
   CallToolResult,
-  CallToolResultSchema,
   ContentBlock,
   EmbeddedResource,
   ImageContent,
@@ -20,10 +19,12 @@ import {
   ServerRequest,
   TextContent,
 } from '@modelcontextprotocol/sdk/types.js';
+import {CallToolResultSchema} from '@modelcontextprotocol/sdk/types.js';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import {BaseAgent, isBaseAgent} from '../../../src/agents/base_agent.js';
-import {InvocationContext} from '../../../src/agents/invocation_context.js';
-import {createEvent, Event} from '../../../src/events/event.js';
+import type {InvocationContext} from '../../../src/agents/invocation_context.js';
+import type {Event} from '../../../src/events/event.js';
+import {createEvent} from '../../../src/events/event.js';
 import {Runner} from '../../../src/runner/runner.js';
 import {InMemorySessionService} from '../../../src/sessions/in_memory_session_service.js';
 import {

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Frontmatter, Skill} from './skill.js';
+import type {Frontmatter, Skill} from './skill.js';
 
 /**
  * Interface for a skill registry.

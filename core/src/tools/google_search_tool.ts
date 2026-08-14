@@ -3,15 +3,12 @@
  * Copyright 2025 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
-import {GenerateContentConfig} from '@google/genai';
+import type {GenerateContentConfig} from '@google/genai';
 
 import {isGemini1Model, isGeminiModel} from '../utils/model_name.js';
 
-import {
-  BaseTool,
-  RunAsyncToolRequest,
-  ToolProcessLlmRequest,
-} from './base_tool.js';
+import type {RunAsyncToolRequest, ToolProcessLlmRequest} from './base_tool.js';
+import {BaseTool} from './base_tool.js';
 
 /**
  * A built-in tool that is automatically invoked by Gemini 2 models to retrieve

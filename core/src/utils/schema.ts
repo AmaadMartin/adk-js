@@ -11,9 +11,9 @@
  * schema, not just an object) so it also fits value validation.
  */
 
-import {Schema} from '@google/genai';
+import type {Schema} from '@google/genai';
 import {zodToJsonSchema as toJSONSchemaV3} from 'zod-to-json-schema';
-import {z as z3} from 'zod/v3';
+import type {z as z3} from 'zod/v3';
 import {toJSONSchema as toJSONSchemaV4, z as z4} from 'zod/v4';
 
 import {genaiSchemaToJsonSchema} from './genai_schema_to_json.js';

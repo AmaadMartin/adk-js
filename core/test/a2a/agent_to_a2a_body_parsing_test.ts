@@ -5,14 +5,14 @@
  */
 
 import {DefaultRequestHandler} from '@a2a-js/sdk/server';
-import express from 'express';
+import type express from 'express';
 import type {Server} from 'node:http';
 import type {AddressInfo} from 'node:net';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {toA2a} from '../../src/a2a/agent_to_a2a.js';
 import {BaseAgent} from '../../src/agents/base_agent.js';
-import {InvocationContext} from '../../src/agents/invocation_context.js';
-import {Event} from '../../src/events/event.js';
+import type {InvocationContext} from '../../src/agents/invocation_context.js';
+import type {Event} from '../../src/events/event.js';
 import {logger} from '../../src/utils/logger.js';
 
 // Bodies the A2A handlers saw, newest last; filled by the mock below.

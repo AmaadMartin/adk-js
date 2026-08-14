@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {createEvent, CreateEventParams, Event} from '../events/event.js';
+import type {CreateEventParams, Event} from '../events/event.js';
+import {createEvent} from '../events/event.js';
 import {errorName} from './utils/retry_utils.js';
 
 export interface NodeErrorEvent extends Event {

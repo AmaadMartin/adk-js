@@ -3,16 +3,18 @@
  * Copyright 2025 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
-import {
+import type {
   BaseAgent,
   BaseNode,
   BaseTool,
-  DEFAULT_ROUTE,
   Event,
   RouteValue,
   RunnableRoot,
   Workflow,
   Graph as WorkflowGraph,
+} from '@google/adk';
+import {
+  DEFAULT_ROUTE,
   isAgentTool,
   isBaseAgent,
   isBaseTool,
@@ -23,15 +25,8 @@ import {
   isSequentialAgent,
   isWorkflow,
 } from '@google/adk';
-import {
-  Digraph,
-  Edge,
-  Node,
-  NodeAttributesObject,
-  RootGraph,
-  Subgraph,
-  toDot,
-} from 'ts-graphviz';
+import type {NodeAttributesObject, RootGraph} from 'ts-graphviz';
+import {Digraph, Edge, Node, Subgraph, toDot} from 'ts-graphviz';
 
 import {AdkLogger} from '../utils/logger.js';
 

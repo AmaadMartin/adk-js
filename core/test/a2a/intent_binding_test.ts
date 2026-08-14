@@ -4,22 +4,26 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {TaskState as A2ATaskState, AgentCard, Message, Task} from '@a2a-js/sdk';
-import {
+import type {
+  TaskState as A2ATaskState,
+  AgentCard,
+  Message,
+  Task,
+} from '@a2a-js/sdk';
+import type {
   AgentExecutor,
-  DefaultRequestHandler,
   ExecutionEventBus,
-  InMemoryTaskStore,
   RequestContext,
 } from '@a2a-js/sdk/server';
+import {DefaultRequestHandler, InMemoryTaskStore} from '@a2a-js/sdk/server';
+import type {ContextMutation} from '@google/adk';
 import {
-  ContextMutation,
   detectContextMutation,
   freezeIntent,
   IntentMismatchReason,
   verifyIntent,
 } from '@google/adk';
-import {FunctionCall, FunctionResponse} from '@google/genai';
+import type {FunctionCall, FunctionResponse} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {toA2AParts} from '../../src/a2a/part_converter_utils.js';
 

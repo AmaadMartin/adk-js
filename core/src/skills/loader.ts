@@ -10,13 +10,8 @@ import {isUtf8} from 'node:buffer';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import {logger} from '../utils/logger.js';
-import {
-  Frontmatter,
-  FrontmatterSchema,
-  Resources,
-  Script,
-  Skill,
-} from './skill.js';
+import type {Frontmatter, Resources, Script, Skill} from './skill.js';
+import {FrontmatterSchema} from './skill.js';
 
 const ALLOWED_FRONTMATTER_KEYS = new Set([
   'name',

@@ -6,8 +6,9 @@
 
 import {describe, expect, it} from 'vitest';
 import {AuthCredentialTypes} from '../../src/auth/auth_credential.js';
-import {AuthConfig} from '../../src/auth/auth_tool.js';
-import {BaseNode, START} from '../../src/workflow/base_node.js';
+import type {AuthConfig} from '../../src/auth/auth_tool.js';
+import type {BaseNode} from '../../src/workflow/base_node.js';
+import {START} from '../../src/workflow/base_node.js';
 import {FunctionNode} from '../../src/workflow/nodes/function_node.js';
 import {ParallelWorker} from '../../src/workflow/nodes/parallel_worker.js';
 import {

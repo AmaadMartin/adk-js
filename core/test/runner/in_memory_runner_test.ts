@@ -4,15 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {BaseTool, Event, InvocationContext} from '@google/adk';
 import {
   BaseAgent,
   BasePlugin,
-  BaseTool,
   BaseToolset,
   createEvent,
-  Event,
   InMemoryRunner,
-  InvocationContext,
   LlmAgent,
 } from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';

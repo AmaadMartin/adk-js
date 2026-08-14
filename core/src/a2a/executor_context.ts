@@ -4,11 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {RequestContext} from '@a2a-js/sdk/server';
-import {Content} from '@google/genai';
-import {Event} from '../events/event.js';
-import {Session} from '../sessions/session.js';
-import {ContextMutation, IntentBinding} from './intent_binding.js';
+import type {RequestContext} from '@a2a-js/sdk/server';
+import type {Content} from '@google/genai';
+import type {Event} from '../events/event.js';
+import type {Session} from '../sessions/session.js';
+import type {ContextMutation, IntentBinding} from './intent_binding.js';
 
 /**
  * The A2A Agent Executor context.

@@ -11,7 +11,8 @@
  * Run (offline):  npm run sample -- tests/integration/workflows/multi_triggers/agent.ts
  */
 
-import {createEvent, node, NodeContext, Workflow} from '@google/adk';
+import type {NodeContext} from '@google/adk';
+import {createEvent, node, Workflow} from '@google/adk';
 import {z} from 'zod';
 
 const makeUppercase = node((_c: NodeContext, s: string) => s.toUpperCase(), {

@@ -9,20 +9,18 @@ import {buildAgentSkills} from '../../src/a2a/agent_card.js';
 import {node} from '../../src/workflow/node.js';
 import {Workflow} from '../../src/workflow/workflow.js';
 
-import {AgentSkill} from '@a2a-js/sdk';
+import type {AgentSkill} from '@a2a-js/sdk';
+import type {BaseTool, Example, NodeContext} from '@google/adk';
 import {
   BaseAgent,
   BaseExampleProvider,
-  BaseTool,
   BaseToolset,
   BuiltInCodeExecutor,
-  Example,
   ExampleTool,
   FunctionTool,
   getA2AAgentCard,
   LlmAgent,
   LoopAgent,
-  NodeContext,
   ParallelAgent,
   SequentialAgent,
 } from '@google/adk';

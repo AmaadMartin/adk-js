@@ -8,11 +8,10 @@ import {existsSync, mkdirSync, rmSync, writeFileSync} from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
-import {
-  deployToAgentEngine,
-  DeployToAgentEngineOptions,
-} from '../../src/cli/deploy/cli_deploy_agent_engine.js';
+import type {Mock} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import type {DeployToAgentEngineOptions} from '../../src/cli/deploy/cli_deploy_agent_engine.js';
+import {deployToAgentEngine} from '../../src/cli/deploy/cli_deploy_agent_engine.js';
 import {AgentLoader} from '../../src/utils/agent_loader.js';
 import {
   createTempDir,

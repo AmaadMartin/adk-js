@@ -14,7 +14,8 @@
  * Enter a comma-separated list of topics, e.g. "space, oceans, volcanoes".
  */
 
-import {createEvent, LlmAgent, node, NodeContext, Workflow} from '@google/adk';
+import type {NodeContext} from '@google/adk';
+import {createEvent, LlmAgent, node, Workflow} from '@google/adk';
 
 // Worker agent to generate a headline for a single topic.
 const generator = new LlmAgent({

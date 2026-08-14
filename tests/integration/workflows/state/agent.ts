@@ -14,7 +14,8 @@
  * Run (offline):  npm run sample -- tests/integration/workflows/state/agent.ts
  */
 
-import {createEvent, Event, node, NodeContext, Workflow} from '@google/adk';
+import type {Event, NodeContext} from '@google/adk';
+import {createEvent, node, Workflow} from '@google/adk';
 
 function processInitialInput(ctx: NodeContext, nodeInput: string): string {
   // Set initial input in state via direct dictionary modification.

@@ -18,7 +18,8 @@
  *   npm run sample -- samples/workflows/routes/sequence/agent.ts
  */
 
-import {node, NodeContext, Workflow} from '@google/adk';
+import type {NodeContext} from '@google/adk';
+import {node, Workflow} from '@google/adk';
 
 const taskANode = node(
   (_ctx: NodeContext, nodeInput: string) => `Summary: ${nodeInput.trim()}`,

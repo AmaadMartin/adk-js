@@ -4,12 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  AnchoredContextCompactor,
+import type {
   BaseAgent,
   BaseSummarizer,
   CompactedEvent,
   Event,
+} from '@google/adk';
+import {
+  AnchoredContextCompactor,
   InvocationContext,
   PluginManager,
   createEvent,

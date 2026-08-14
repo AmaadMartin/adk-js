@@ -5,15 +5,14 @@
  */
 
 import type {ListToolsResult} from '@modelcontextprotocol/sdk/types.js';
-import {ReadonlyContext} from '../../agents/readonly_context.js';
-import {AuthCredential} from '../../auth/auth_credential.js';
-import {AuthScheme} from '../../auth/auth_schemes.js';
-import {BaseTool} from '../../tools/base_tool.js';
-import {BaseToolset, ToolPredicate} from '../../tools/base_toolset.js';
-import {
-  MCPSessionManager,
-  StreamableHTTPConnectionParams,
-} from '../../tools/mcp/mcp_session_manager.js';
+import type {ReadonlyContext} from '../../agents/readonly_context.js';
+import type {AuthCredential} from '../../auth/auth_credential.js';
+import type {AuthScheme} from '../../auth/auth_schemes.js';
+import type {BaseTool} from '../../tools/base_tool.js';
+import type {ToolPredicate} from '../../tools/base_toolset.js';
+import {BaseToolset} from '../../tools/base_toolset.js';
+import type {StreamableHTTPConnectionParams} from '../../tools/mcp/mcp_session_manager.js';
+import {MCPSessionManager} from '../../tools/mcp/mcp_session_manager.js';
 import {MCPTool} from '../../tools/mcp/mcp_tool.js';
 import {logger} from '../../utils/logger.js';
 import {GCP_MCP_SERVER_DESTINATION_ID} from './types.js';

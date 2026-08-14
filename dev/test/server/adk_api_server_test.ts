@@ -4,39 +4,43 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {AGENT_CARD_PATH, AgentCard} from '@a2a-js/sdk';
-import {
+import type {AgentCard} from '@a2a-js/sdk';
+import {AGENT_CARD_PATH} from '@a2a-js/sdk';
+import type {
   BaseAgent,
   BaseArtifactService,
   BaseMemoryService,
   BaseSessionService,
+  Event,
+  InvocationContext,
+  Session,
+} from '@google/adk';
+import {
   createEvent,
   createSession,
-  Event,
   FunctionTool,
   InMemoryArtifactService,
   InMemoryMemoryService,
   InMemorySessionService,
-  InvocationContext,
   LlmAgent,
   node,
   Runner,
-  Session,
   StreamingMode,
   Workflow,
 } from '@google/adk';
-import {ReadableSpan} from '@opentelemetry/sdk-trace-base';
+import type {ReadableSpan} from '@opentelemetry/sdk-trace-base';
 import * as http from 'node:http';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {z} from 'zod';
 
+import type {AppLoadError} from '../../src/server/adk_api_server.js';
 import {
   A2A_AUTH_TOKEN_ENV_VAR,
   AdkApiServer,
-  AppLoadError,
   toListenError,
 } from '../../src/server/adk_api_server.js';
-import {AgentLoader, AgentNotFoundError} from '../../src/utils/agent_loader.js';
+import type {AgentLoader} from '../../src/utils/agent_loader.js';
+import {AgentNotFoundError} from '../../src/utils/agent_loader.js';
 import {version} from '../../src/version.js';
 
 interface JsonRpcResponse {

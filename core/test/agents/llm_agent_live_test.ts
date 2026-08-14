@@ -4,24 +4,27 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {
+  BaseLlmConnection,
+  Event,
+  LlmRequest,
+  LlmResponse,
+  Session,
+  ToolUnion,
+} from '@google/adk';
 import {
   BaseLlm,
-  BaseLlmConnection,
   BaseLlmRequestProcessor,
   BaseLlmResponseProcessor,
   createEvent,
-  Event,
   FunctionTool,
   InvocationContext,
   LiveRequestQueue,
   LlmAgent,
-  LlmRequest,
-  LlmResponse,
   PluginManager,
-  Session,
-  ToolUnion,
 } from '@google/adk';
-import {Blob, Content, Type} from '@google/genai';
+import type {Blob, Content} from '@google/genai';
+import {Type} from '@google/genai';
 import {describe, expect, it, vi} from 'vitest';
 
 /**

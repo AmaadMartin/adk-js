@@ -22,14 +22,8 @@
  * `{"approved": true}`.
  */
 
-import {
-  createEvent,
-  LlmAgent,
-  node,
-  NodeContext,
-  RequestInput,
-  Workflow,
-} from '@google/adk';
+import type {NodeContext} from '@google/adk';
+import {createEvent, LlmAgent, node, RequestInput, Workflow} from '@google/adk';
 import {z} from 'zod';
 
 const timeOffRequestSchema = z.object({

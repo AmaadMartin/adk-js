@@ -4,11 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Part as A2APart} from '@a2a-js/sdk';
-import {Part as GenAIPart} from '@google/genai';
-import {InvocationContext, requireAgent} from '../agents/invocation_context.js';
-import {Event as AdkEvent, createEvent} from '../events/event.js';
-import {Session} from '../sessions/session.js';
+import type {Part as A2APart} from '@a2a-js/sdk';
+import type {Part as GenAIPart} from '@google/genai';
+import type {InvocationContext} from '../agents/invocation_context.js';
+import {requireAgent} from '../agents/invocation_context.js';
+import type {Event as AdkEvent} from '../events/event.js';
+import {createEvent} from '../events/event.js';
+import type {Session} from '../sessions/session.js';
 import {AdkMetadataKeys} from './metadata_converter_utils.js';
 import {toA2AParts} from './part_converter_utils.js';
 

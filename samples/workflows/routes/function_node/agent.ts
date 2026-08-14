@@ -26,10 +26,10 @@
  *   npm run sample -- samples/workflows/routes/function_node/agent.ts
  */
 
+import type {NodeContext} from '@google/adk';
 import {
   createEvent,
   node,
-  NodeContext,
   Workflow,
   type FunctionNodeHandler,
 } from '@google/adk';

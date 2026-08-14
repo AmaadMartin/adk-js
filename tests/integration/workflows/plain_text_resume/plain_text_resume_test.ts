@@ -10,13 +10,8 @@
  * drive HITL workflows by typing a message.
  */
 
-import {
-  createEvent,
-  node,
-  NodeContext,
-  RequestInput,
-  Workflow,
-} from '@google/adk';
+import type {NodeContext} from '@google/adk';
+import {createEvent, node, RequestInput, Workflow} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 import {z} from 'zod';
 import {

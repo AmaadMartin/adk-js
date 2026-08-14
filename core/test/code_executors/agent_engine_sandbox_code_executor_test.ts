@@ -4,12 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Client} from '@google-cloud/vertexai';
+import type {Client} from '@google-cloud/vertexai';
+import type {CodeExecutionResult, InvocationContext} from '@google/adk';
 import {
   AgentEngineSandboxCodeExecutor,
   CodeExecutionLanguage,
-  CodeExecutionResult,
-  InvocationContext,
 } from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 

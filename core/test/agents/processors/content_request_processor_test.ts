@@ -4,18 +4,20 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
+import type {
   BaseAgent,
   CompactedEvent,
+  Event,
+  EventActions,
+  LlmRequest,
+} from '@google/adk';
+import {
   CONTENT_REQUEST_PROCESSOR,
   createEvent,
   createEventActions,
   createSession,
-  Event,
-  EventActions,
   InvocationContext,
   LlmAgent,
-  LlmRequest,
   PluginManager,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';

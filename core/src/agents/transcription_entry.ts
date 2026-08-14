@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Blob, Content} from '@google/genai';
+import type {Blob, Content} from '@google/genai';
 
 /**
  * Store the data that can be used for transcription.

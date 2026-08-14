@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {AGENT_CARD_PATH, AgentCard} from '@a2a-js/sdk';
+import type {AgentCard} from '@a2a-js/sdk';
+import {AGENT_CARD_PATH} from '@a2a-js/sdk';
 import {DefaultRequestHandler, InMemoryTaskStore} from '@a2a-js/sdk/server';
 import {
   agentCardHandler,
@@ -14,13 +15,13 @@ import {
 } from '@a2a-js/sdk/server/express';
 import express from 'express';
 import {StreamingMode} from '../agents/run_config.js';
-import {BaseArtifactService} from '../artifacts/base_artifact_service.js';
-import {BaseMemoryService} from '../memory/base_memory_service.js';
-import {Runner} from '../runner/runner.js';
-import {BaseSessionService} from '../sessions/base_session_service.js';
+import type {BaseArtifactService} from '../artifacts/base_artifact_service.js';
+import type {BaseMemoryService} from '../memory/base_memory_service.js';
+import type {Runner} from '../runner/runner.js';
+import type {BaseSessionService} from '../sessions/base_session_service.js';
 import {InMemorySessionService} from '../sessions/in_memory_session_service.js';
 import {logger} from '../utils/logger.js';
-import {RunnableRoot} from '../workflow/run_node_as_invocation.js';
+import type {RunnableRoot} from '../workflow/run_node_as_invocation.js';
 import {getA2AAgentCard, resolveAgentCard} from './agent_card.js';
 import {A2AAgentExecutor} from './agent_executor.js';
 

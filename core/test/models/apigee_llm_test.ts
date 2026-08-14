@@ -14,17 +14,11 @@ import {
   vi,
 } from 'vitest';
 
-import {GoogleGenAI, HttpOptions} from '@google/genai';
+import type {HttpOptions} from '@google/genai';
+import {GoogleGenAI} from '@google/genai';
 
-import {
-  ApigeeLlm,
-  ApigeeLlmParams,
-  BaseLlmConnection,
-  Gemini,
-  GoogleLLMVariant,
-  LLMRegistry,
-  LlmRequest,
-} from '@google/adk';
+import type {ApigeeLlmParams, BaseLlmConnection, LlmRequest} from '@google/adk';
+import {ApigeeLlm, Gemini, GoogleLLMVariant, LLMRegistry} from '@google/adk';
 
 const geminiModelString = 'apigee/gemini/gemini-1.5-flash';
 const vertexModelString = 'apigee/vertex_ai/model-id';

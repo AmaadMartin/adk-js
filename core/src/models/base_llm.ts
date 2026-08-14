@@ -6,10 +6,10 @@
 
 import {getClientLabels} from '../utils/client_labels.js';
 
-import {BaseLlmConnection} from './base_llm_connection.js';
-import {LlmCapabilities} from './capabilities.js';
-import {LlmRequest} from './llm_request.js';
-import {LlmResponse} from './llm_response.js';
+import type {BaseLlmConnection} from './base_llm_connection.js';
+import type {LlmCapabilities} from './capabilities.js';
+import type {LlmRequest} from './llm_request.js';
+import type {LlmResponse} from './llm_response.js';
 
 /**
  * A unique symbol to identify BaseLlm classes.

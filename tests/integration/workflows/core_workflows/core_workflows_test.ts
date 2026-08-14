@@ -11,13 +11,13 @@
  * structured inputs are produced inside nodes rather than passed as the prompt.
  */
 
+import type {NodeContext} from '@google/adk';
 import {
   createEvent,
   DEFAULT_ROUTE,
   FunctionNode,
   JoinNode,
   node,
-  NodeContext,
   ParallelWorker,
   RequestInput,
   Workflow,

@@ -4,8 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Context, FunctionTool, isFunctionTool} from '@google/adk';
-import {Schema, Type} from '@google/genai';
+import type {Context} from '@google/adk';
+import {FunctionTool, isFunctionTool} from '@google/adk';
+import type {Schema} from '@google/genai';
+import {Type} from '@google/genai';
 import {beforeEach, describe, expect, it} from 'vitest';
 import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';

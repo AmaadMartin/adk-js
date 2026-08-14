@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Event, createEvent} from './event.js';
+import type {Event} from './event.js';
+import {createEvent} from './event.js';
 
 /**
  * A specialized Event type that represents a synthesized summary of past events.

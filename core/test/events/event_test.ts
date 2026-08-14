@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {AuthConfig} from '@google/adk';
 import {
-  AuthConfig,
   createEvent,
   createEventActions,
   getFunctionCalls,

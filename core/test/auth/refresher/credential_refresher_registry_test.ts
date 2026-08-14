@@ -4,12 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  AuthCredential,
-  AuthCredentialTypes,
-  BaseCredentialRefresher,
-  CredentialRefresherRegistry,
-} from '@google/adk';
+import type {AuthCredential, BaseCredentialRefresher} from '@google/adk';
+import {AuthCredentialTypes, CredentialRefresherRegistry} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
 class MockRefresher implements BaseCredentialRefresher {

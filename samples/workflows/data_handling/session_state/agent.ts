@@ -29,7 +29,8 @@
  *   npm run sample -- samples/workflows/data_handling/session_state/agent.ts
  */
 
-import {node, NodeContext, Workflow} from '@google/adk';
+import type {NodeContext} from '@google/adk';
+import {node, Workflow} from '@google/adk';
 
 const initStateNode = node(
   (ctx: NodeContext, nodeInput: string) => {

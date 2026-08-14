@@ -3,7 +3,8 @@
  * Copyright 2026 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
-import {node, NodeContext, Workflow} from '@google/adk';
+import type {NodeContext} from '@google/adk';
+import {node, Workflow} from '@google/adk';
 
 const normalize = node(
   (_ctx: NodeContext, question: string) => question.trim().toLowerCase(),

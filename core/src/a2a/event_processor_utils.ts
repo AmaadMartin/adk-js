@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Task, TaskStatusUpdateEvent} from '@a2a-js/sdk';
-import {Content as GenAIContent, Part as GenAIPart} from '@google/genai';
-import {Event as AdkEvent} from '../events/event.js';
+import type {Task, TaskStatusUpdateEvent} from '@a2a-js/sdk';
+import type {Content as GenAIContent, Part as GenAIPart} from '@google/genai';
+import type {Event as AdkEvent} from '../events/event.js';
 import {createEventActions} from '../events/event_actions.js';
 import {
   createInputMissingErrorEvent,
@@ -15,7 +15,7 @@ import {
   createTaskInputRequiredEvent,
   isPausedTaskStatusUpdateEvent,
 } from './a2a_event.js';
-import {ExecutorContext} from './executor_context.js';
+import type {ExecutorContext} from './executor_context.js';
 import {
   getA2AEventMetadata,
   getA2AEventMetadataFromActions,

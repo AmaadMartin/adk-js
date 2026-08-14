@@ -10,6 +10,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import {Writable} from 'node:stream';
 import {pathToFileURL} from 'node:url';
+import type {Mock} from 'vitest';
 import {
   afterAll,
   afterEach,
@@ -18,11 +19,11 @@ import {
   describe,
   expect,
   it,
-  Mock,
   vi,
 } from 'vitest';
 
-import {App, isApp, LogLevel} from '@google/adk';
+import type {App} from '@google/adk';
+import {isApp, LogLevel} from '@google/adk';
 import {
   AgentFile,
   AgentLoader,

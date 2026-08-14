@@ -4,12 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {AuthConfig} from '../../auth/auth_tool.js';
-import {SchemaLike} from '../../utils/schema.js';
-import {BaseNode, isBaseNode, START} from '../base_node.js';
-import {NodeLike} from '../graph.js';
+import type {AuthConfig} from '../../auth/auth_tool.js';
+import type {SchemaLike} from '../../utils/schema.js';
+import type {BaseNode} from '../base_node.js';
+import {isBaseNode, START} from '../base_node.js';
+import type {NodeLike} from '../graph.js';
 import {NODE_BUILDERS, PARALLEL_WORKER_FACTORY} from '../node_builders.js';
-import {prepareRetryConfig, RetryConfig} from '../retry_config.js';
+import type {RetryConfig} from '../retry_config.js';
+import {prepareRetryConfig} from '../retry_config.js';
 
 /**
  * Property overrides applied when building a node from a {@link NodeLike}.

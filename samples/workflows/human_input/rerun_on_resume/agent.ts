@@ -32,13 +32,8 @@
  * Turn 1: a complaint. Turn 2: "approve", "reject", or feedback to revise.
  */
 
-import {
-  createEvent,
-  node,
-  NodeContext,
-  RequestInput,
-  Workflow,
-} from '@google/adk';
+import type {NodeContext} from '@google/adk';
+import {createEvent, node, RequestInput, Workflow} from '@google/adk';
 
 // A plain-text reply is also a new user turn, so the entry node runs again on
 // resume. Seed the complaint once, or the reviewer's answer overwrites it.

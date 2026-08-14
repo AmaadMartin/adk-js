@@ -4,23 +4,25 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  AgentControlledContextCompactor,
+import type {
   BaseSummarizer,
   CompactedEvent,
+  Event,
+  EventActions,
+  LlmRequest,
+} from '@google/adk';
+import {
+  AgentControlledContextCompactor,
   CONTENT_REQUEST_PROCESSOR,
   createEvent,
   createEventActions,
   createSession,
-  Event,
-  EventActions,
   InvocationContext,
   LlmAgent,
-  LlmRequest,
   PluginManager,
   TokenBasedContextCompactor,
 } from '@google/adk';
-import {Content} from '@google/genai';
+import type {Content} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {applyRewinds} from '../../src/events/rewind_events.js';
 

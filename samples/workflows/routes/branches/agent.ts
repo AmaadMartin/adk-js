@@ -21,7 +21,8 @@
  * Try "tell me about graphs" (task B) or "give me 3 facts" (task C).
  */
 
-import {createEvent, LlmAgent, node, NodeContext, Workflow} from '@google/adk';
+import type {NodeContext} from '@google/adk';
+import {createEvent, LlmAgent, node, Workflow} from '@google/adk';
 
 const taskANode = node(
   (_ctx: NodeContext, nodeInput: string) => nodeInput.trim(),

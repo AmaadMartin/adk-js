@@ -31,16 +31,13 @@
  *   - "list my repos"
  */
 
-import {
+import type {
   AuthConfig,
   AuthCredential,
-  AuthCredentialTypes,
   AuthScheme,
-  createEvent,
-  node,
   NodeContext,
-  Workflow,
 } from '@google/adk';
+import {AuthCredentialTypes, createEvent, node, Workflow} from '@google/adk';
 
 const CREDENTIAL_KEY = 'github_oauth_token';
 

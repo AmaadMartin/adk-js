@@ -4,12 +4,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
+import type {
   App,
   BaseArtifactService,
   BaseMemoryService,
   BaseSessionService,
   Event,
+  RunnableRoot,
+  Session,
+  UserInputKind,
+  UserInputRequest,
+} from '@google/adk';
+import {
   getPendingUserInputRequests,
   getUserInputRequests,
   InMemoryArtifactService,
@@ -17,17 +23,14 @@ import {
   InMemorySessionService,
   isApp,
   requiresUserInput,
-  RunnableRoot,
   Runner,
-  Session,
-  UserInputKind,
-  UserInputRequest,
 } from '@google/adk';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as readline from 'node:readline';
 
-import {AgentFile, AgentFileOptions} from '../utils/agent_loader.js';
+import type {AgentFileOptions} from '../utils/agent_loader.js';
+import {AgentFile} from '../utils/agent_loader.js';
 import {
   getAbsolutePath,
   loadFileData,

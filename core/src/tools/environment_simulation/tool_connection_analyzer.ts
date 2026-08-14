@@ -4,21 +4,19 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GenerateContentConfig} from '@google/genai';
+import type {GenerateContentConfig} from '@google/genai';
 
-import {BaseLlm} from '../../models/base_llm.js';
+import type {BaseLlm} from '../../models/base_llm.js';
 import {LLMRegistry} from '../../models/registry.js';
 import {camelCaseKeys} from '../../utils/case_utils.js';
 import {experimental} from '../../utils/experimental.js';
 import {generateJsonText, parseFencedJson} from '../../utils/llm_utils.js';
 import {logger} from '../../utils/logger.js';
-import {BaseTool} from '../base_tool.js';
+import type {BaseTool} from '../base_tool.js';
 
 import {toolConnectionAnalysisPrompt} from './prompts.js';
-import {
-  ToolConnectionMap,
-  ToolConnectionMapSchema,
-} from './tool_connection_map.js';
+import type {ToolConnectionMap} from './tool_connection_map.js';
+import {ToolConnectionMapSchema} from './tool_connection_map.js';
 
 /**
  * Uses an LLM to analyze stateful connections between tools.

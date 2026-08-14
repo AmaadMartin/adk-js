@@ -4,16 +4,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {Event} from '@google/adk';
 import {
   createSession,
-  Event,
   FunctionTool,
   InvocationContext,
   LiveRequestQueue,
   LlmAgent,
   PluginManager,
 } from '@google/adk';
-import {Content, Type} from '@google/genai';
+import type {Content} from '@google/genai';
+import {Type} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
 import {MockLiveLlm, MockLlmConnection} from './mock_llm_connection.js';

@@ -4,16 +4,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  BaseSessionService,
+import type {
   CreateSessionRequest,
-  DatabaseSessionService,
   DeleteSessionRequest,
   GetSessionRequest,
-  InMemorySessionService,
   ListSessionsRequest,
   ListSessionsResponse,
   Session,
+} from '@google/adk';
+import {
+  BaseSessionService,
+  DatabaseSessionService,
+  InMemorySessionService,
   createEvent,
   createSession,
 } from '@google/adk';

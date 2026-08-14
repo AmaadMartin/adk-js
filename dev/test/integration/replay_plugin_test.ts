@@ -17,7 +17,7 @@ import {
   ReplayPlugin,
   transferTargetAgentName,
 } from '../../src/integration/replay_plugin.js';
-import {Recording} from '../../src/integration/test_types.js';
+import type {Recording} from '../../src/integration/test_types.js';
 
 const TRANSFER_TOOL_NAME = 'transfer_to_agent';
 

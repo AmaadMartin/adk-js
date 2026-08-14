@@ -4,14 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
+import type {
   AuthConfig,
   AuthCredential,
-  AuthCredentialTypes,
   AuthScheme,
   Context,
-  SessionStateCredentialService,
 } from '@google/adk';
+import {AuthCredentialTypes, SessionStateCredentialService} from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
 
 describe('SessionStateCredentialService', () => {

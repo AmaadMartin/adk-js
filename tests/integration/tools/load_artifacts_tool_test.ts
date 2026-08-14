@@ -5,7 +5,8 @@
  */
 
 import {InMemoryRunner, LlmAgent, LOAD_ARTIFACTS} from '@google/adk';
-import {Content, createUserContent} from '@google/genai';
+import type {Content} from '@google/genai';
+import {createUserContent} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {GeminiWithMockResponses} from '../test_case_utils.js';
 

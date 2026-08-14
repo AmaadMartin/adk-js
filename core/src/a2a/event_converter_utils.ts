@@ -4,26 +4,26 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
+import type {
   Part as A2APart,
   Message,
   Task,
   TaskArtifactUpdateEvent,
   TaskStatusUpdateEvent,
 } from '@a2a-js/sdk';
-import {
+import type {
   CitationMetadata,
-  createModelContent,
-  createUserContent,
   Part as GenAIPart,
   GroundingMetadata,
   UsageMetadata,
 } from '@google/genai';
-import {Event as AdkEvent, createEvent} from '../events/event.js';
+import {createModelContent, createUserContent} from '@google/genai';
+import type {Event as AdkEvent} from '../events/event.js';
+import {createEvent} from '../events/event.js';
 import {createEventActions} from '../events/event_actions.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
+import type {A2AEvent} from './a2a_event.js';
 import {
-  A2AEvent,
   getEventMetadata,
   getFailedTaskStatusUpdateEventError,
   isFailedTaskStatusUpdateEvent,

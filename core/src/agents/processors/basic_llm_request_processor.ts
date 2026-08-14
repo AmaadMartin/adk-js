@@ -4,12 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GenerateContentConfig} from '@google/genai';
-import {Event} from '../../events/event.js';
-import {LlmRequest, setOutputSchema} from '../../models/llm_request.js';
+import type {GenerateContentConfig} from '@google/genai';
+import type {Event} from '../../events/event.js';
+import type {LlmRequest} from '../../models/llm_request.js';
+import {setOutputSchema} from '../../models/llm_request.js';
 import {isGemini3xFlashLive} from '../../utils/model_name.js';
 import {canUseOutputSchemaWithTools} from '../../utils/output_schema_utils.js';
-import {InvocationContext} from '../invocation_context.js';
+import type {InvocationContext} from '../invocation_context.js';
 import {isLlmAgent} from '../llm_agent.js';
 import {BaseLlmRequestProcessor} from './base_llm_processor.js';
 

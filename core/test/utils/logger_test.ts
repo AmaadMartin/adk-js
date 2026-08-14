@@ -4,10 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {Logger} from '@google/adk';
 import {
   formatLogArgs,
   getLogger,
-  Logger,
   LogLevel,
   setLogger,
   setLogLevel,

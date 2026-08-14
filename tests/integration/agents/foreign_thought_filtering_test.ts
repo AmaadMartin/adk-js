@@ -4,14 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  createEvent,
-  Event,
-  InMemoryRunner,
-  LlmAgent,
-  LlmRequest,
-} from '@google/adk';
-import {Content, createUserContent} from '@google/genai';
+import type {Event, LlmRequest} from '@google/adk';
+import {createEvent, InMemoryRunner, LlmAgent} from '@google/adk';
+import type {Content} from '@google/genai';
+import {createUserContent} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {GeminiWithMockResponses} from '../test_case_utils.js';
 

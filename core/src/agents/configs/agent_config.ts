@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GenerateContentConfig} from '@google/genai';
+import type {GenerateContentConfig} from '@google/genai';
 import {z} from 'zod';
 
 import {camelCaseKeys} from '../../utils/case_utils.js';

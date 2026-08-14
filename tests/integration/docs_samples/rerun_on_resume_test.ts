@@ -15,7 +15,7 @@
  * plain-text reply re-triggers it.
  */
 
-import {Event} from '@google/adk';
+import type {Event} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 import {rootAgent} from '../../../samples/workflows/human_input/rerun_on_resume/agent.js';
 import {isPaused} from '../workflows/_harness/hitl.js';

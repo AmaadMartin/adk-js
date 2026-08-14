@@ -4,13 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  CodeExecutionLanguage,
+import type {
   CodeInterpreterExecuteResponse,
   CodeInterpreterExtension,
   InvocationContext,
-  VertexAiCodeExecutor,
 } from '@google/adk';
+import {CodeExecutionLanguage, VertexAiCodeExecutor} from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 
 // The reference does not read the invocation context; a minimal cast suffices.

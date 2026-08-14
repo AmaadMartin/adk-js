@@ -4,8 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Message, Task} from '@a2a-js/sdk';
-import {Event as AdkEvent, createEventActions} from '@google/adk';
+import type {Message, Task} from '@a2a-js/sdk';
+import type {Event as AdkEvent} from '@google/adk';
+import {createEventActions} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 import {toAdkEvent} from '../../src/a2a/event_converter_utils.js';
 import {

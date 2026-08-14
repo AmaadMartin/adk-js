@@ -10,9 +10,10 @@
  * reads through `ctx.state`.
  */
 
-import {Content} from '@google/genai';
+import type {Content} from '@google/genai';
 import {describe, expect, it} from 'vitest';
-import {createEvent, Event} from '../../src/events/event.js';
+import type {Event} from '../../src/events/event.js';
+import {createEvent} from '../../src/events/event.js';
 import {InMemoryRunner} from '../../src/runner/in_memory_runner.js';
 import {AsyncQueue} from '../../src/utils/async_queue.js';
 import {node} from '../../src/workflow/node.js';

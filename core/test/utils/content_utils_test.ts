@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content, Part} from '@google/genai';
+import type {Content, Part} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {contentUnionToText} from '../../src/utils/content_utils.js';
 

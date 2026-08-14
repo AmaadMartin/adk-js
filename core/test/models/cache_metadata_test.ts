@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {CacheMetadata} from '@google/adk';
 import {
-  CacheMetadata,
   cacheExpireSoon,
   cacheMetadataToString,
   createCacheMetadata,

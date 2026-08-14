@@ -4,13 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {FunctionCall, FunctionResponse} from '@google/genai';
+import type {FunctionCall, FunctionResponse} from '@google/genai';
 
-import {LlmResponse} from '../models/llm_response.js';
+import type {LlmResponse} from '../models/llm_response.js';
 
 import {randomUUID} from '../utils/env_aware_utils.js';
 import {toCamelCase, toSnakeCase} from '../utils/object_notation_utils.js';
-import {createEventActions, EventActions} from './event_actions.js';
+import type {EventActions} from './event_actions.js';
+import {createEventActions} from './event_actions.js';
 
 /**
  * A unique symbol identifying ADK Event objects.

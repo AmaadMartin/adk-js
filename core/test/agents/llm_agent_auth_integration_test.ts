@@ -4,21 +4,23 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  BaseLlm,
+import type {
   BaseLlmConnection,
   Event,
+  LlmRequest,
+  LlmResponse,
+} from '@google/adk';
+import {
+  BaseLlm,
   getFunctionCalls,
   getFunctionResponses,
   InMemorySessionService,
   LlmAgent,
-  LlmRequest,
-  LlmResponse,
   RestApiTool,
   Runner,
 } from '@google/adk';
 import * as http from 'http';
-import {OpenAPIV3} from 'openapi-types';
+import type {OpenAPIV3} from 'openapi-types';
 import {
   afterAll,
   afterEach,

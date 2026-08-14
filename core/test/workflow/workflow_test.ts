@@ -8,7 +8,7 @@ import {describe, expect, it} from 'vitest';
 import {createEvent} from '../../src/events/event.js';
 import {BaseNode} from '../../src/workflow/base_node.js';
 import {DEFAULT_ROUTE} from '../../src/workflow/graph.js';
-import {NodeContext} from '../../src/workflow/node_context.js';
+import type {NodeContext} from '../../src/workflow/node_context.js';
 import {Workflow} from '../../src/workflow/workflow.js';
 import {driveWorkflow, FnNode} from './test_helpers.js';
 

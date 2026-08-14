@@ -14,10 +14,11 @@ import {
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
+import type {Mock} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import type {CreateDockerFileContentOptions} from '../../src/cli/deploy/cli_deploy_cloud_run.js';
 import {
   createDockerFileContent,
-  CreateDockerFileContentOptions,
   deployToCloudRun,
 } from '../../src/cli/deploy/cli_deploy_cloud_run.js';
 import {A2A_AUTH_TOKEN_ENV_VAR} from '../../src/server/adk_api_server.js';

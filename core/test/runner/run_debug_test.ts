@@ -4,25 +4,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {Event, InvocationContext, RunConfig} from '@google/adk';
 import {
   createEvent,
-  Event,
   InMemoryRunner,
-  InvocationContext,
   LlmAgent,
-  RunConfig,
   StreamingMode,
 } from '@google/adk';
-import {Part} from '@google/genai';
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  MockInstance,
-  vi,
-} from 'vitest';
+import type {Part} from '@google/genai';
+import type {MockInstance} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {logger} from '../../src/utils/logger.js';
 

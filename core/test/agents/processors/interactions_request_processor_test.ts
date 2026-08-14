@@ -6,17 +6,14 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+import type {BaseAgent, Event, EventActions, LlmRequest} from '@google/adk';
 import {
-  BaseAgent,
   BaseLlm,
   createSession,
-  Event,
-  EventActions,
   Gemini,
   INTERACTIONS_REQUEST_PROCESSOR,
   InvocationContext,
   LlmAgent,
-  LlmRequest,
   PluginManager,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';

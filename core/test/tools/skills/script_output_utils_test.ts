@@ -13,12 +13,12 @@ import {InvocationContext} from '../../../src/agents/invocation_context.js';
 import {LlmAgent} from '../../../src/agents/llm_agent.js';
 import {InMemoryArtifactService} from '../../../src/artifacts/in_memory_artifact_service.js';
 import {ScopedArtifactService} from '../../../src/artifacts/scoped_artifact_service.js';
-import {SessionArtifactService} from '../../../src/artifacts/session_artifact_service.js';
-import {
+import type {SessionArtifactService} from '../../../src/artifacts/session_artifact_service.js';
+import type {
   CodeExecutionResult,
   File,
-  FileContentEncoding,
 } from '../../../src/code_executors/code_execution_utils.js';
+import {FileContentEncoding} from '../../../src/code_executors/code_execution_utils.js';
 import {PluginManager} from '../../../src/plugins/plugin_manager.js';
 import {createSession} from '../../../src/sessions/session.js';
 import {

@@ -22,7 +22,8 @@
  *   npm run sample -- samples/workflows/routes/fan_out_join/agent.ts
  */
 
-import {JoinNode, node, NodeContext, Workflow} from '@google/adk';
+import type {NodeContext} from '@google/adk';
+import {JoinNode, node, Workflow} from '@google/adk';
 
 const parallelTaskA = node(
   (_ctx: NodeContext, text: string) => text.toUpperCase(),

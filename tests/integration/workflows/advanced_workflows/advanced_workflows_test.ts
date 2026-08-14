@@ -10,12 +10,11 @@
  * re-execution, and a conditional dynamic loop.
  */
 
+import type {Event, NodeContext} from '@google/adk';
 import {
-  Event,
   FunctionNode,
   JoinNode,
   node,
-  NodeContext,
   RequestInput,
   Workflow,
 } from '@google/adk';

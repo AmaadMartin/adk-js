@@ -5,8 +5,9 @@
  */
 
 import {LogLevel, setLogLevel} from '@google/adk';
-import {Command} from 'commander';
-import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
+import type {Command} from 'commander';
+import type {Mock} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {createProgram} from '../../src/cli/cli.js';
 import {createAgent} from '../../src/cli/cli_create.js';
 import {runAgent} from '../../src/cli/cli_run.js';

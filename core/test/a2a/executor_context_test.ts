@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {RequestContext} from '@a2a-js/sdk/server';
+import type {RequestContext} from '@a2a-js/sdk/server';
 import {createEvent, createSession} from '@google/adk';
-import {Content} from '@google/genai';
+import type {Content} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {createExecutorContext} from '../../src/a2a/executor_context.js';
 

@@ -4,12 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
+import type {
   TaskState as A2ATaskState,
   Message,
   TaskStatusUpdateEvent,
 } from '@a2a-js/sdk';
-import {A2AEvent, isTaskStatusUpdateEvent, TaskState} from './a2a_event.js';
+import type {A2AEvent} from './a2a_event.js';
+import {isTaskStatusUpdateEvent, TaskState} from './a2a_event.js';
 
 /**
  * Folds the task status updates emitted during one agent run into a single

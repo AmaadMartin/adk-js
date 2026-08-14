@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {ActivityEnd, ActivityStart, Blob, Content} from '@google/genai';
+import type {ActivityEnd, ActivityStart, Blob, Content} from '@google/genai';
 
 /**
  * Request sent to live agents.

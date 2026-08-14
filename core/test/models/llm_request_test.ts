@@ -4,9 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {ContentUnion} from '@google/genai';
+import type {ContentUnion} from '@google/genai';
 import {describe, expect, it} from 'vitest';
-import {appendInstructions, LlmRequest} from '../../src/models/llm_request.js';
+import type {LlmRequest} from '../../src/models/llm_request.js';
+import {appendInstructions} from '../../src/models/llm_request.js';
 
 /** Builds a request whose `systemInstruction` starts on the given arm. */
 function requestWith(systemInstruction: ContentUnion): LlmRequest {

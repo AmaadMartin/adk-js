@@ -11,22 +11,21 @@
  * `workflow/utils/_workflow_hitl_utils.py`.
  */
 
-import {Part} from '@google/genai';
+import type {Part} from '@google/genai';
 import type {z as z4} from 'zod/v4';
 import {
   REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
   REQUEST_INPUT_FUNCTION_CALL_NAME,
 } from '../../agents/functions.js';
-import {
-  AuthCredential,
-  AuthCredentialTypes,
-} from '../../auth/auth_credential.js';
+import type {AuthCredential} from '../../auth/auth_credential.js';
+import {AuthCredentialTypes} from '../../auth/auth_credential.js';
 import {AuthHandler} from '../../auth/auth_handler.js';
-import {AuthConfig} from '../../auth/auth_tool.js';
-import {createEvent, Event} from '../../events/event.js';
-import {State} from '../../sessions/state.js';
+import type {AuthConfig} from '../../auth/auth_tool.js';
+import type {Event} from '../../events/event.js';
+import {createEvent} from '../../events/event.js';
+import type {State} from '../../sessions/state.js';
 import {compileJsonSchema, toJsonSchema} from '../../utils/schema.js';
-import {RequestInput} from '../request_input.js';
+import type {RequestInput} from '../request_input.js';
 
 export {
   REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {AgentCard} from '@a2a-js/sdk';
+import type {AgentCard} from '@a2a-js/sdk';
 import {DefaultRequestHandler} from '@a2a-js/sdk/server';
 import {
   agentCardHandler,
@@ -15,12 +15,13 @@ import express from 'express';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {getA2AAgentCard, resolveAgentCard} from '../../src/a2a/agent_card.js';
 import {A2AAgentExecutor} from '../../src/a2a/agent_executor.js';
-import {A2aUserBuilder, toA2a} from '../../src/a2a/agent_to_a2a.js';
+import type {A2aUserBuilder} from '../../src/a2a/agent_to_a2a.js';
+import {toA2a} from '../../src/a2a/agent_to_a2a.js';
 import {BaseAgent} from '../../src/agents/base_agent.js';
-import {InvocationContext} from '../../src/agents/invocation_context.js';
-import {Event} from '../../src/events/event.js';
-import {Runner} from '../../src/runner/runner.js';
-import {BaseSessionService} from '../../src/sessions/base_session_service.js';
+import type {InvocationContext} from '../../src/agents/invocation_context.js';
+import type {Event} from '../../src/events/event.js';
+import type {Runner} from '../../src/runner/runner.js';
+import type {BaseSessionService} from '../../src/sessions/base_session_service.js';
 import {logger} from '../../src/utils/logger.js';
 
 class TestAgent extends BaseAgent {

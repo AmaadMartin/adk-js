@@ -4,21 +4,23 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
+import type {
   BaseAgent,
-  BaseLlm,
   BaseLlmConnection,
+  LlmRequest,
+  LlmResponse,
+  RunAsyncToolRequest,
+  Session,
+} from '@google/adk';
+import {
+  BaseLlm,
   BaseTool,
   Context,
   InvocationContext,
   LLMRegistry,
-  LlmRequest,
-  LlmResponse,
   PluginManager,
-  RunAsyncToolRequest,
-  Session,
 } from '@google/adk';
-import {FunctionDeclaration} from '@google/genai';
+import type {FunctionDeclaration} from '@google/genai';
 import {expect, vi} from 'vitest';
 
 /** A model that replays canned responses and records the requests it got. */

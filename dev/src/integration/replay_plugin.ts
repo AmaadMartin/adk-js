@@ -4,14 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  BasePlugin,
-  BaseTool,
-  Context,
-  LlmRequest,
-  LlmResponse,
-} from '@google/adk';
-import {Recording} from './test_types.js';
+import type {BaseTool, Context, LlmRequest, LlmResponse} from '@google/adk';
+import {BasePlugin} from '@google/adk';
+import type {Recording} from './test_types.js';
 
 /**
  * Reads the target agent from recorded `transfer_to_agent` arguments.

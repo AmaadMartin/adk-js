@@ -4,14 +4,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
+import type {
   BaseAgent,
   BaseSummarizer,
   CompactedEvent,
+  Event,
+} from '@google/adk';
+import {
   createEvent,
   createEventActions,
   createSession,
-  Event,
   InvocationContext,
   PluginManager,
   TokenBasedContextCompactor,

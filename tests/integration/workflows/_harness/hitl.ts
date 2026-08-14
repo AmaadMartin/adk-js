@@ -10,8 +10,9 @@
  * known once the previous turn has run.
  */
 
-import {Event, getFunctionCalls} from '@google/adk';
-import {Content} from '@google/genai';
+import type {Event} from '@google/adk';
+import {getFunctionCalls} from '@google/adk';
+import type {Content} from '@google/genai';
 
 /** The id of the last pending call to `name` across the turns run so far. */
 export function pendingCallId(turns: Event[][], name: string): string {

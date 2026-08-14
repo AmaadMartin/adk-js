@@ -11,12 +11,10 @@ import * as path from 'node:path';
 import {getMimeTypeAndEncoding} from '../utils/file_extension_utils.js';
 import {materializeFiles} from '../utils/file_utils.js';
 import {logger} from '../utils/logger.js';
-import {BaseCodeExecutor, ExecuteCodeParams} from './base_code_executor.js';
-import {
-  CodeExecutionLanguage,
-  CodeExecutionResult,
-  File,
-} from './code_execution_utils.js';
+import type {ExecuteCodeParams} from './base_code_executor.js';
+import {BaseCodeExecutor} from './base_code_executor.js';
+import type {CodeExecutionResult, File} from './code_execution_utils.js';
+import {CodeExecutionLanguage} from './code_execution_utils.js';
 
 const IS_WINDOWS = os.platform() === 'win32';
 

@@ -12,7 +12,8 @@
  *   npm run sample -- tests/integration/workflows/retry/agent.ts
  */
 
-import {createEvent, node, NodeContext, Workflow} from '@google/adk';
+import type {NodeContext} from '@google/adk';
+import {createEvent, node, Workflow} from '@google/adk';
 
 /**
  * Stands in for Python's `urllib.error.HTTPError`, so the failure event carries

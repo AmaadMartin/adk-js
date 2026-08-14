@@ -15,14 +15,8 @@
  * Turn 1: type a complaint. Turn 2: type "approve", "reject", or feedback text.
  */
 
-import {
-  createEvent,
-  LlmAgent,
-  node,
-  NodeContext,
-  RequestInput,
-  Workflow,
-} from '@google/adk';
+import type {NodeContext} from '@google/adk';
+import {createEvent, LlmAgent, node, RequestInput, Workflow} from '@google/adk';
 
 /** Python's `Event(message=...)` content shape (role `user`). */
 const message = (text: string) =>

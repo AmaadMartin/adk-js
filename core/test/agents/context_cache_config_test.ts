@@ -4,14 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {ContextCacheConfig} from '@google/adk';
 import {
-  ContextCacheConfig,
   DEFAULT_CONTEXT_CACHE_CONFIG,
   contextCacheConfigToString,
   createContextCacheConfig,
   ttlString,
 } from '@google/adk';
-import {HttpOptions} from '@google/genai';
+import type {HttpOptions} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
 describe('ContextCacheConfig', () => {

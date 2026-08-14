@@ -4,20 +4,22 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {
+  Event,
+  LlmRequest,
+  LlmResponse,
+  Session,
+  SessionArtifactService,
+} from '@google/adk';
 import {
   BaseAgent,
   CODE_EXECUTION_RESPONSE_PROCESSOR,
-  Event,
   FileArtifactService,
   InMemoryArtifactService,
   InMemorySessionService,
   InvocationContext,
   LlmAgent,
-  LlmRequest,
-  LlmResponse,
   PluginManager,
-  Session,
-  SessionArtifactService,
   createSession,
 } from '@google/adk';
 import * as fs from 'node:fs/promises';
@@ -29,15 +31,13 @@ import {
   CodeExecutionResponseProcessor,
 } from '../../../src/agents/processors/code_execution_processor.js';
 import {ScopedArtifactService} from '../../../src/artifacts/scoped_artifact_service.js';
-import {
-  BaseCodeExecutor,
-  ExecuteCodeParams,
-} from '../../../src/code_executors/base_code_executor.js';
-import {
+import type {ExecuteCodeParams} from '../../../src/code_executors/base_code_executor.js';
+import {BaseCodeExecutor} from '../../../src/code_executors/base_code_executor.js';
+import type {
   CodeExecutionResult,
   File,
-  FileContentEncoding,
 } from '../../../src/code_executors/code_execution_utils.js';
+import {FileContentEncoding} from '../../../src/code_executors/code_execution_utils.js';
 
 const APP_NAME = 'test-app';
 const USER_ID = 'test-user';

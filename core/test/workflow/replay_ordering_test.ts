@@ -14,8 +14,9 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {createEvent, Event} from '../../src/events/event.js';
-import {NodeContext} from '../../src/workflow/node_context.js';
+import type {Event} from '../../src/events/event.js';
+import {createEvent} from '../../src/events/event.js';
+import type {NodeContext} from '../../src/workflow/node_context.js';
 import {FunctionNode} from '../../src/workflow/nodes/function_node.js';
 import {RequestInput} from '../../src/workflow/request_input.js';
 import {Workflow} from '../../src/workflow/workflow.js';

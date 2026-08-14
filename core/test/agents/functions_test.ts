@@ -3,23 +3,25 @@
  * Copyright 2025 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
+import type {
+  Event,
+  Session,
+  SingleAfterToolCallback,
+  SingleBeforeToolCallback,
+} from '@google/adk';
 import {
   BasePlugin,
   BaseTool,
   createEvent,
   createEventActions,
-  Event,
   functionsExportedForTestingOnly,
   FunctionTool,
   InvocationContext,
   LlmAgent,
   PluginManager,
-  Session,
-  SingleAfterToolCallback,
-  SingleBeforeToolCallback,
   ToolConfirmation,
 } from '@google/adk';
-import {FunctionCall} from '@google/genai';
+import type {FunctionCall} from '@google/genai';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {z} from 'zod';
 import {

@@ -4,12 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  Context,
-  createEventActions,
-  EXIT_LOOP,
-  ExitLoopTool,
-} from '@google/adk';
+import type {Context} from '@google/adk';
+import {createEventActions, EXIT_LOOP, ExitLoopTool} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
 describe('ExitLoopTool', () => {

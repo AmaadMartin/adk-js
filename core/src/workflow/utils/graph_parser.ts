@@ -10,16 +10,15 @@
  * Ported from `google/adk-python` `workflow/utils/_graph_parser.py`.
  */
 
-import {BaseNode} from '../base_node.js';
-import {
+import type {BaseNode} from '../base_node.js';
+import type {
   ChainElement,
-  Edge,
   EdgeItem,
-  isEdge,
   NodeLike,
   RouteValue,
   RoutingMap,
 } from '../graph.js';
+import {Edge, isEdge} from '../graph.js';
 import {buildNode, isNodeLike, isPlainObject} from './workflow_graph_utils.js';
 
 /**

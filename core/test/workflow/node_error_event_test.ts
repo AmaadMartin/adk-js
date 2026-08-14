@@ -6,17 +6,15 @@
 
 import {describe, expect, it} from 'vitest';
 import {InvocationContext} from '../../src/agents/invocation_context.js';
-import {Event} from '../../src/events/event.js';
+import type {Event} from '../../src/events/event.js';
 import {PluginManager} from '../../src/plugins/plugin_manager.js';
 import {createSession} from '../../src/sessions/session.js';
 import {AsyncQueue} from '../../src/utils/async_queue.js';
-import {BaseNode} from '../../src/workflow/base_node.js';
+import type {BaseNode} from '../../src/workflow/base_node.js';
 import {isNodeTimeoutError} from '../../src/workflow/errors.js';
 import {NodeContext} from '../../src/workflow/node_context.js';
-import {
-  isNodeErrorEvent,
-  NodeErrorEvent,
-} from '../../src/workflow/node_error_event.js';
+import type {NodeErrorEvent} from '../../src/workflow/node_error_event.js';
+import {isNodeErrorEvent} from '../../src/workflow/node_error_event.js';
 import {FunctionNode} from '../../src/workflow/nodes/function_node.js';
 import {runNodeAsInvocation} from '../../src/workflow/run_node_as_invocation.js';
 import {Workflow} from '../../src/workflow/workflow.js';

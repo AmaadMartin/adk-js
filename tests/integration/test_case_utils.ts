@@ -4,17 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {Event, RunConfig} from '@google/adk';
-import {
-  BaseAgent,
-  BasePlugin,
-  Gemini,
-  InMemoryRunner,
-  isLlmAgent,
-} from '@google/adk';
+import type {BaseAgent, BasePlugin, Event, RunConfig} from '@google/adk';
+import {Gemini, InMemoryRunner, isLlmAgent} from '@google/adk';
 import type {Candidate, UsageMetadata} from '@google/genai';
 import {createUserContent, GenerateContentResponse} from '@google/genai';
-import {ChildProcessWithoutNullStreams} from 'node:child_process';
+import type {ChildProcessWithoutNullStreams} from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import {expect} from 'vitest';

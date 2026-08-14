@@ -6,9 +6,9 @@
 
 import {describe, expect, it} from 'vitest';
 import {z} from 'zod/v4';
+import type {Event} from '../../src/events/event.js';
 import {
   createEvent,
-  Event,
   transformToCamelCaseEvent,
   transformToSnakeCaseEvent,
 } from '../../src/events/event.js';
@@ -16,7 +16,7 @@ import {createEventActions} from '../../src/events/event_actions.js';
 import {Runner} from '../../src/runner/runner.js';
 import {InMemorySessionService} from '../../src/sessions/in_memory_session_service.js';
 import {node} from '../../src/workflow/node.js';
-import {NodeContext} from '../../src/workflow/node_context.js';
+import type {NodeContext} from '../../src/workflow/node_context.js';
 import {RequestInput} from '../../src/workflow/request_input.js';
 import {
   createRequestInputEvent,

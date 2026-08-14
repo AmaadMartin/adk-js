@@ -14,12 +14,12 @@
  * constraining consumers.
  */
 
-import {
+import type {
   FunctionTool,
   LongRunningFunctionTool,
   ToolInputParameters,
 } from '@google/adk';
-import {z} from 'zod';
+import type {z} from 'zod';
 
 type Params = z.ZodObject<{a: z.ZodString}>;
 

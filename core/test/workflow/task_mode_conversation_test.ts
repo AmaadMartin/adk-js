@@ -11,10 +11,10 @@
  * running on with nothing.
  */
 
-import {Content} from '@google/genai';
+import type {Content} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {LlmAgent} from '../../src/agents/llm_agent.js';
-import {Event} from '../../src/events/event.js';
+import type {Event} from '../../src/events/event.js';
 import {BaseLlm} from '../../src/models/base_llm.js';
 import type {BaseLlmConnection} from '../../src/models/base_llm_connection.js';
 import type {LlmRequest} from '../../src/models/llm_request.js';
@@ -22,7 +22,7 @@ import type {LlmResponse} from '../../src/models/llm_response.js';
 import {LLMRegistry} from '../../src/models/registry.js';
 import {InMemoryRunner} from '../../src/runner/in_memory_runner.js';
 import {node} from '../../src/workflow/node.js';
-import {NodeContext} from '../../src/workflow/node_context.js';
+import type {NodeContext} from '../../src/workflow/node_context.js';
 import {Workflow} from '../../src/workflow/workflow.js';
 
 /** Asks once, then finishes on the next turn. */

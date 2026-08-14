@@ -4,18 +4,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {Context, LlmRequest, LlmResponse} from '@google/adk';
 import {
-  Context,
   FunctionTool,
-  LlmRequest,
-  LlmResponse,
   PluginManager,
   REFLECT_AND_RETRY_RESPONSE_TYPE,
   ReflectAndRetryModelPlugin,
   RESERVED_TOOL_CALL_ERROR_TYPE,
   TrackingScope,
 } from '@google/adk';
-import {FinishReason, FunctionCall} from '@google/genai';
+import type {FunctionCall} from '@google/genai';
+import {FinishReason} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
 const LLM_AGENT_SIGNATURE_SYMBOL = Symbol.for('google.adk.llmAgent');

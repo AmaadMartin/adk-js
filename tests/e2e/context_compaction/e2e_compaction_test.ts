@@ -4,13 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  BasePlugin,
-  ContextCompactionTrigger,
-  InMemoryRunner,
-  InvocationContext,
-  isCompactedEvent,
-} from '@google/adk';
+import type {ContextCompactionTrigger, InvocationContext} from '@google/adk';
+import {BasePlugin, InMemoryRunner, isCompactedEvent} from '@google/adk';
 import {createUserContent} from '@google/genai';
 import * as dotenv from 'dotenv';
 import * as fs from 'node:fs';

@@ -4,11 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {Event} from '@google/adk';
 import {
   createEvent,
   createEventActions,
   DatabaseSessionService,
-  Event,
   State,
 } from '@google/adk';
 import {MikroORM} from '@mikro-orm/core';

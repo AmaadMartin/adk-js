@@ -5,9 +5,9 @@
  */
 
 import type {BaseAgent} from '../agents/base_agent.js';
-import {BaseTool} from '../tools/base_tool.js';
+import type {BaseTool} from '../tools/base_tool.js';
 import {logger} from '../utils/logger.js';
-import {BaseNode} from './base_node.js';
+import type {BaseNode} from './base_node.js';
 import {parseEdgeItems} from './utils/graph_parser.js';
 import {validateGraph} from './utils/graph_validation.js';
 

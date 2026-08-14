@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {HttpOptions} from '@google/genai';
+import type {HttpOptions} from '@google/genai';
 
 /** Default maximum invocations to reuse a cache before refreshing it. */
 const DEFAULT_CACHE_INTERVALS = 10;

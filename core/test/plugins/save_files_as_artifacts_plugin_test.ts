@@ -4,22 +4,24 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
+import type {
   BaseAgent,
+  InvocationContext,
+  Logger,
+  SessionArtifactService,
+} from '@google/adk';
+import {
   BasePlugin,
   Context,
   createEvent,
   getLogger,
   InMemorySessionService,
-  InvocationContext,
-  Logger,
   PluginManager,
   SaveFilesAsArtifactsPlugin,
-  SessionArtifactService,
   setLogger,
   State,
 } from '@google/adk';
-import {Blob, Content, Part} from '@google/genai';
+import type {Blob, Content, Part} from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 /**

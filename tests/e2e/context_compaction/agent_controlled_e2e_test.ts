@@ -4,11 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {InvocationContext} from '@google/adk';
 import {
   BasePlugin,
   ContextCompactionTrigger,
   InMemoryRunner,
-  InvocationContext,
   isCompactedEvent,
 } from '@google/adk';
 import {createUserContent} from '@google/genai';

@@ -4,15 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  BaseLlm,
+import type {
   BaseLlmConnection,
   Event,
   LlmRequest,
   LlmResponse,
-  LlmSummarizer,
-  createEvent,
 } from '@google/adk';
+import {BaseLlm, LlmSummarizer, createEvent} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
 class MockLlm extends BaseLlm {

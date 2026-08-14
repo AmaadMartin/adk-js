@@ -7,14 +7,15 @@
 import {MetricExporter} from '@google-cloud/opentelemetry-cloud-monitoring-exporter';
 import {TraceExporter} from '@google-cloud/opentelemetry-cloud-trace-exporter';
 import {gcpDetector} from '@opentelemetry/resource-detector-gcp';
-import {detectResources, Resource} from '@opentelemetry/resources';
+import type {Resource} from '@opentelemetry/resources';
+import {detectResources} from '@opentelemetry/resources';
 import {PeriodicExportingMetricReader} from '@opentelemetry/sdk-metrics';
 import {BatchSpanProcessor} from '@opentelemetry/sdk-trace-base';
 import {GoogleAuth} from 'google-auth-library';
 
 import {logger} from '../utils/logger.js';
 
-import {OtelExportersConfig, OTelHooks} from './setup.js';
+import type {OtelExportersConfig, OTelHooks} from './setup.js';
 
 const GCP_PROJECT_ERROR_MESSAGE =
   'Cannot determine GCP Project. OTel GCP Exporters cannot be set up. ' +

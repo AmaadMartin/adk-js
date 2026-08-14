@@ -4,23 +4,23 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {AgentCard, AgentInterface, AgentSkill} from '@a2a-js/sdk';
+import type {AgentCard, AgentInterface, AgentSkill} from '@a2a-js/sdk';
 import {DefaultAgentCardResolver} from '@a2a-js/sdk/client';
 import * as fs from 'node:fs/promises';
-import {BaseAgent} from '../agents/base_agent.js';
-import {
-  InvocationContext,
-  InvocationContextParams,
-} from '../agents/invocation_context.js';
-import {isLlmAgent, LlmAgent} from '../agents/llm_agent.js';
-import {isLoopAgent, LoopAgent} from '../agents/loop_agent.js';
+import type {BaseAgent} from '../agents/base_agent.js';
+import type {InvocationContextParams} from '../agents/invocation_context.js';
+import {InvocationContext} from '../agents/invocation_context.js';
+import type {LlmAgent} from '../agents/llm_agent.js';
+import {isLlmAgent} from '../agents/llm_agent.js';
+import type {LoopAgent} from '../agents/loop_agent.js';
+import {isLoopAgent} from '../agents/loop_agent.js';
 import {isParallelAgent} from '../agents/parallel_agent.js';
 import {ReadonlyContext} from '../agents/readonly_context.js';
 import {isSequentialAgent} from '../agents/sequential_agent.js';
-import {BaseTool} from '../tools/base_tool.js';
+import type {BaseTool} from '../tools/base_tool.js';
 import {isExampleTool} from '../tools/example_tool.js';
 import {logger} from '../utils/logger.js';
-import {RunnableRoot} from '../workflow/run_node_as_invocation.js';
+import type {RunnableRoot} from '../workflow/run_node_as_invocation.js';
 import {isWorkflow} from '../workflow/workflow.js';
 
 /**

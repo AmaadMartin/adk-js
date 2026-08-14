@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Schema, Type} from '@google/genai';
+import type {Schema} from '@google/genai';
+import {Type} from '@google/genai';
 import {z} from 'zod';
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars

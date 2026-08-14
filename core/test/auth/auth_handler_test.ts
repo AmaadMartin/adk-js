@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {AuthConfig, AuthCredentialTypes, AuthHandler, State} from '@google/adk';
+import type {AuthConfig} from '@google/adk';
+import {AuthCredentialTypes, AuthHandler, State} from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
 
 vi.mock('../../src/auth/oauth2/oauth2_credential_exchanger.js', () => ({

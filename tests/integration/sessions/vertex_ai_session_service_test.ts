@@ -8,7 +8,7 @@ import {Client} from '@google-cloud/vertexai';
 import {VertexAiSessionService} from '@google/adk';
 import fs from 'node:fs';
 import http from 'node:http';
-import {AddressInfo} from 'node:net';
+import type {AddressInfo} from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import {json} from 'node:stream/consumers';

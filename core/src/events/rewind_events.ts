@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Event} from './event.js';
+import type {Event} from './event.js';
 
 /**
  * Returns `events` with rewound invocations removed.

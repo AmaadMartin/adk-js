@@ -4,8 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {CompactedEvent, createEvent} from '@google/adk';
-import {Content} from '@google/genai';
+import type {CompactedEvent} from '@google/adk';
+import {createEvent} from '@google/adk';
+import type {Content} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {
   getContents,

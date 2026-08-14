@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {BaseTool} from '@google/adk';
 import {
-  BaseTool,
   Context,
   createSession,
   InvocationContext,
@@ -14,7 +14,7 @@ import {
   PluginManager,
 } from '@google/adk';
 import * as http from 'node:http';
-import {OpenAPIV3} from 'openapi-types';
+import type {OpenAPIV3} from 'openapi-types';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 
 interface ReceivedRequest {

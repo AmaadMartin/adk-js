@@ -8,7 +8,8 @@ import {Type} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
-import {createEvent, Event} from '../../src/events/event.js';
+import type {Event} from '../../src/events/event.js';
+import {createEvent} from '../../src/events/event.js';
 import {AsyncQueue} from '../../src/utils/async_queue.js';
 import {BaseNode} from '../../src/workflow/base_node.js';
 import {

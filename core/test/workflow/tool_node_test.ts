@@ -7,7 +7,8 @@
 import {describe, expect, it} from 'vitest';
 import {getFunctionResponses} from '../../src/events/event.js';
 import {BasePlugin} from '../../src/plugins/base_plugin.js';
-import {BaseTool, RunAsyncToolRequest} from '../../src/tools/base_tool.js';
+import type {RunAsyncToolRequest} from '../../src/tools/base_tool.js';
+import {BaseTool} from '../../src/tools/base_tool.js';
 import {ToolNode} from '../../src/workflow/nodes/tool_node.js';
 import {createIc, driveNode} from './test_helpers.js';
 

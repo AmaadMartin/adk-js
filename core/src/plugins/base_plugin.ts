@@ -4,15 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content} from '@google/genai';
+import type {Content} from '@google/genai';
 
-import {BaseAgent} from '../agents/base_agent.js';
-import {Context} from '../agents/context.js';
-import {InvocationContext} from '../agents/invocation_context.js';
-import {Event} from '../events/event.js';
-import {LlmRequest} from '../models/llm_request.js';
-import {LlmResponse} from '../models/llm_response.js';
-import {BaseTool} from '../tools/base_tool.js';
+import type {BaseAgent} from '../agents/base_agent.js';
+import type {Context} from '../agents/context.js';
+import type {InvocationContext} from '../agents/invocation_context.js';
+import type {Event} from '../events/event.js';
+import type {LlmRequest} from '../models/llm_request.js';
+import type {LlmResponse} from '../models/llm_response.js';
+import type {BaseTool} from '../tools/base_tool.js';
 import {experimental} from '../utils/experimental.js';
 import type {BaseNode} from '../workflow/base_node.js';
 import type {NodeContext} from '../workflow/node_context.js';

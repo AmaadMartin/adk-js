@@ -4,12 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  AuthCredential,
-  AuthCredentialTypes,
-  Context,
-  ToolAuthHandler,
-} from '@google/adk';
+import type {AuthCredential, Context} from '@google/adk';
+import {AuthCredentialTypes, ToolAuthHandler} from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
 import {State} from '../../../src/sessions/state.js';
 import {createApiKeyScheme} from '../../../src/tools/openapi_tool/auth/auth_helpers.js';

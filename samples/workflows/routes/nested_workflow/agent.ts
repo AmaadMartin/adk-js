@@ -20,7 +20,8 @@
  * Try "hello there" (workflow B) or "HELLO THERE" (workflow C).
  */
 
-import {createEvent, node, NodeContext, Workflow} from '@google/adk';
+import type {NodeContext} from '@google/adk';
+import {createEvent, node, Workflow} from '@google/adk';
 
 const taskA1 = node(
   (_ctx: NodeContext, nodeInput: string) => nodeInput.trim(),

@@ -4,17 +4,19 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  BaseLlm,
+import type {
   BaseLlmConnection,
   Context,
-  GlobalInstructionPlugin,
-  InMemoryRunner,
   InvocationContext,
-  LlmAgent,
   LlmRequest,
   LlmResponse,
   ReadonlyContext,
+} from '@google/adk';
+import {
+  BaseLlm,
+  GlobalInstructionPlugin,
+  InMemoryRunner,
+  LlmAgent,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
 import {appendInstructions} from '../../src/models/llm_request.js';

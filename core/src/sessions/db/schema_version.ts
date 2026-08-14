@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {MikroORM, Options as MikroORMOptions} from '@mikro-orm/core';
+import type {Options as MikroORMOptions} from '@mikro-orm/core';
+import {MikroORM} from '@mikro-orm/core';
 import {logger} from '../../utils/logger.js';
 import {
   ensureDatabaseCreated,

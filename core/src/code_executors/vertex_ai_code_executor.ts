@@ -8,8 +8,9 @@ import {experimental} from '../utils/experimental.js';
 import {guessMimeType} from '../utils/file_utils.js';
 import {logger} from '../utils/logger.js';
 
-import {BaseCodeExecutor, ExecuteCodeParams} from './base_code_executor.js';
-import {CodeExecutionResult, File} from './code_execution_utils.js';
+import type {ExecuteCodeParams} from './base_code_executor.js';
+import {BaseCodeExecutor} from './base_code_executor.js';
+import type {CodeExecutionResult, File} from './code_execution_utils.js';
 
 const SUPPORTED_IMAGE_TYPES = ['png', 'jpg', 'jpeg'];
 const SUPPORTED_DATA_FILE_TYPES = ['csv'];

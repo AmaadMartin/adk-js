@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Part} from '@google/genai';
+import type {Part} from '@google/genai';
 import {describe, expect, it, vi} from 'vitest';
-import {
+import type {
   DeleteArtifactRequest,
   ListArtifactKeysRequest,
   ListVersionsRequest,

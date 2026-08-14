@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Gemini, LlmRequest} from '@google/adk';
+import type {LlmRequest} from '@google/adk';
+import {Gemini} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 const EXPRESS_MODE_API_KEY = 'test-express-mode-key';

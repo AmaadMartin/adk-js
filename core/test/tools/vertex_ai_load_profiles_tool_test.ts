@@ -4,12 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {LlmRequest} from '@google/adk';
 import {
   Context,
   createSession,
   InvocationContext,
   LlmAgent,
-  LlmRequest,
   PluginManager,
   VertexAiLoadProfilesTool,
   VertexAiMemoryBankService,

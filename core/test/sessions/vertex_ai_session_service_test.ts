@@ -4,13 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Sessions} from '@google-cloud/vertexai/build/src/genai/sessions.js';
-import {AppendAgentEngineSessionEventRequestParameters} from '@google-cloud/vertexai/build/src/genai/types.js';
+import type {Sessions} from '@google-cloud/vertexai/build/src/genai/sessions.js';
+import type {AppendAgentEngineSessionEventRequestParameters} from '@google-cloud/vertexai/build/src/genai/types.js';
+import type {Session} from '@google/adk';
 import {
   createEvent,
   createSession,
   isCompactedEvent,
-  Session,
   State,
   VertexAiSessionService,
   type Event,

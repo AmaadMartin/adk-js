@@ -4,14 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {BaseTool, Context, LlmRequest} from '@google/adk';
 import {
-  BaseTool,
-  Context,
-  LlmRequest,
   MultimodalToolResultsPlugin,
   PARTS_RETURNED_BY_TOOLS_ID,
 } from '@google/adk';
-import {Content, Part} from '@google/genai';
+import type {Content, Part} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
 /**

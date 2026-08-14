@@ -6,14 +6,14 @@
 
 import {describe, expect, it} from 'vitest';
 import {InvocationContext} from '../../src/agents/invocation_context.js';
-import {Event} from '../../src/events/event.js';
+import type {Event} from '../../src/events/event.js';
 import {PluginManager} from '../../src/plugins/plugin_manager.js';
 import {createSession} from '../../src/sessions/session.js';
 import {AsyncQueue} from '../../src/utils/async_queue.js';
-import {BaseNode} from '../../src/workflow/base_node.js';
+import type {BaseNode} from '../../src/workflow/base_node.js';
 import {NodeContext} from '../../src/workflow/node_context.js';
 import {FunctionNode} from '../../src/workflow/nodes/function_node.js';
-import {RehydratedNode} from '../../src/workflow/utils/rehydration_utils.js';
+import type {RehydratedNode} from '../../src/workflow/utils/rehydration_utils.js';
 import {
   checkInterception,
   interceptedResult,

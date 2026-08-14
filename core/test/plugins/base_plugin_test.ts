@@ -4,18 +4,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
+import type {
   BaseAgent,
-  BasePlugin,
   BaseTool,
   Context,
-  createEvent,
   Event,
   InvocationContext,
   LlmRequest,
   LlmResponse,
 } from '@google/adk';
-import {Content} from '@google/genai';
+import {BasePlugin, createEvent} from '@google/adk';
+import type {Content} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {ContextCompactionTrigger} from '../../src/plugins/base_plugin.js';
 import {resetLogger, setLogger} from '../../src/utils/logger.js';

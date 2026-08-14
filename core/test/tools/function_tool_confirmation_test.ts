@@ -4,20 +4,19 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {Event, RunConfig} from '@google/adk';
 import {
   Context,
-  Event,
   FunctionTool,
   InvocationContext,
   LlmAgent,
   PluginManager,
   REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
-  RunConfig,
   ToolConfirmation,
   createEvent,
   createSession,
 } from '@google/adk';
-import {FunctionCall} from '@google/genai';
+import type {FunctionCall} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {z} from 'zod/v3';
 import {REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR} from '../../src/agents/processors/request_confirmation_llm_request_processor.js';

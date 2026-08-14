@@ -6,7 +6,7 @@
 
 import {State} from '../sessions/state.js';
 import type {WorkflowInstructionScope} from './invocation_context.js';
-import {ReadonlyContext} from './readonly_context.js';
+import type {ReadonlyContext} from './readonly_context.js';
 
 const ARTIFACT_PREFIX = 'artifact.';
 

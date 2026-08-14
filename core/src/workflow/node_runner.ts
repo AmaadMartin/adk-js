@@ -6,10 +6,10 @@
 
 import {context, type Span, SpanStatusCode, trace} from '@opentelemetry/api';
 import {InvocationContext} from '../agents/invocation_context.js';
-import {Event} from '../events/event.js';
+import type {Event} from '../events/event.js';
 import {traceNodeExecution, tracer} from '../telemetry/tracing.js';
 import {formatError} from '../utils/error_utils.js';
-import {BaseNode} from './base_node.js';
+import type {BaseNode} from './base_node.js';
 import {createSubBranch} from './branch_path.js';
 import {
   InvocationAbortedError,
@@ -17,7 +17,8 @@ import {
   NodeTimeoutError,
 } from './errors.js';
 import {NodeContext} from './node_context.js';
-import {createNodeState, NodeState} from './node_state.js';
+import type {NodeState} from './node_state.js';
+import {createNodeState} from './node_state.js';
 import {NodeStatus} from './node_status.js';
 import {getRetryDelaySeconds, shouldRetryNode} from './utils/retry_utils.js';
 

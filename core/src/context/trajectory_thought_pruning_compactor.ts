@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {InvocationContext} from '../agents/invocation_context.js';
+import type {InvocationContext} from '../agents/invocation_context.js';
 import {hasThoughts, pruneThoughts} from '../events/event.js';
-import {BaseContextCompactor} from './base_context_compactor.js';
+import type {BaseContextCompactor} from './base_context_compactor.js';
 
 /**
  * Options for TrajectoryThoughtPruningCompactor.

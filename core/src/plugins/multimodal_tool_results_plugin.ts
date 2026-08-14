@@ -4,12 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Part} from '@google/genai';
+import type {Part} from '@google/genai';
 
-import {Context} from '../agents/context.js';
-import {LlmRequest} from '../models/llm_request.js';
-import {LlmResponse} from '../models/llm_response.js';
-import {BaseTool} from '../tools/base_tool.js';
+import type {Context} from '../agents/context.js';
+import type {LlmRequest} from '../models/llm_request.js';
+import type {LlmResponse} from '../models/llm_response.js';
+import type {BaseTool} from '../tools/base_tool.js';
 import {BasePlugin} from './base_plugin.js';
 
 /**

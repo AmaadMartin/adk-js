@@ -4,10 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Event} from '../../events/event.js';
-import {LlmRequest} from '../../models/llm_request.js';
-import {LlmResponse} from '../../models/llm_response.js';
-import {InvocationContext} from '../invocation_context.js';
+import type {Event} from '../../events/event.js';
+import type {LlmRequest} from '../../models/llm_request.js';
+import type {LlmResponse} from '../../models/llm_response.js';
+import type {InvocationContext} from '../invocation_context.js';
 
 /**
  * Base class for LLM request processors. Implementations mutate or augment

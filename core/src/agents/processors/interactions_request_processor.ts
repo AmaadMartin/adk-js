@@ -4,12 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Event} from '../../events/event.js';
+import type {Event} from '../../events/event.js';
 import {isGemini} from '../../models/google_llm.js';
-import {LlmRequest} from '../../models/llm_request.js';
-import {InvocationContext} from '../invocation_context.js';
+import type {LlmRequest} from '../../models/llm_request.js';
+import type {InvocationContext} from '../invocation_context.js';
 import {isLlmAgent} from '../llm_agent.js';
-import {BaseLlmRequestProcessor} from './base_llm_processor.js';
+import type {BaseLlmRequestProcessor} from './base_llm_processor.js';
 
 /**
  * Request processor for Gemini Interactions API.

@@ -5,7 +5,7 @@
  */
 
 import {OpenApiSpecParser} from '@google/adk';
-import {OpenAPIV3} from 'openapi-types';
+import type {OpenAPIV3} from 'openapi-types';
 import {describe, expect, it} from 'vitest';
 import {prepareRequestParams} from '../../../src/tools/openapi_tool/rest_api_tool.js';
 

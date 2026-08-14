@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
+import type {
   Blob,
   Content,
   FunctionResponse,
@@ -16,8 +16,8 @@ import {LiveResponseAggregator} from '../utils/live_connection_utils.js';
 import {logger} from '../utils/logger.js';
 import {isGemini3xFlashLive} from '../utils/model_name.js';
 
-import {BaseLlmConnection} from './base_llm_connection.js';
-import {LlmResponse} from './llm_response.js';
+import type {BaseLlmConnection} from './base_llm_connection.js';
+import type {LlmResponse} from './llm_response.js';
 
 /** The Gemini model connection. */
 export class GeminiLlmConnection implements BaseLlmConnection {

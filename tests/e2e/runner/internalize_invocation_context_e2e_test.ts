@@ -4,19 +4,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {Event, InvocationContext} from '@google/adk';
 import {
   BaseAgent,
   createEvent,
-  Event,
   InMemoryArtifactService,
   InMemoryRunner,
   InMemorySessionService,
-  InvocationContext,
   LlmAgent,
   LOAD_ARTIFACTS,
   Runner,
 } from '@google/adk';
-import {Content} from '@google/genai';
+import type {Content} from '@google/genai';
 import * as dotenv from 'dotenv';
 import * as fs from 'fs';
 import * as path from 'path';

@@ -5,7 +5,7 @@
  */
 
 import {Task} from '../utils/task.js';
-import {LiveRequestQueue} from './live_request_queue.js';
+import type {LiveRequestQueue} from './live_request_queue.js';
 
 /**
  * The parameters for creating an ActiveStreamingTool.

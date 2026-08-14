@@ -4,11 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Event} from '../events/event.js';
+import type {Event} from '../events/event.js';
 
 import {deprecated} from '../utils/deprecated.js';
-import {BaseAgent, BaseAgentConfig} from './base_agent.js';
-import {InvocationContext} from './invocation_context.js';
+import type {BaseAgentConfig} from './base_agent.js';
+import {BaseAgent} from './base_agent.js';
+import type {InvocationContext} from './invocation_context.js';
 
 /**
  * The configuration options for creating a loop agent.

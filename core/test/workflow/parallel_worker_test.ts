@@ -5,10 +5,10 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {Event} from '../../src/events/event.js';
+import type {Event} from '../../src/events/event.js';
 import {Runner} from '../../src/runner/runner.js';
 import {InMemorySessionService} from '../../src/sessions/in_memory_session_service.js';
-import {NodeContext} from '../../src/workflow/node_context.js';
+import type {NodeContext} from '../../src/workflow/node_context.js';
 import {FunctionNode} from '../../src/workflow/nodes/function_node.js';
 import {JoinNode} from '../../src/workflow/nodes/join_node.js';
 import {ParallelWorker} from '../../src/workflow/nodes/parallel_worker.js';

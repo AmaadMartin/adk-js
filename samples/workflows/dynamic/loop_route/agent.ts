@@ -25,7 +25,8 @@
  * empty, and the loop exits before the fixer ever runs.
  */
 
-import {LlmAgent, node, NodeContext, Workflow} from '@google/adk';
+import type {NodeContext} from '@google/adk';
+import {LlmAgent, node, Workflow} from '@google/adk';
 
 /** Safety bound on the refine loop. */
 const MAX_FIX_ROUNDS = 3;

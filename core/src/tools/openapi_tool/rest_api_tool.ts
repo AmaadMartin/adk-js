@@ -4,20 +4,19 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {FunctionDeclaration} from '@google/genai';
-import {OpenAPIV3} from 'openapi-types';
-import {ReadonlyContext} from '../../agents/readonly_context.js';
-import {AuthCredential} from '../../auth/auth_credential.js';
+import type {FunctionDeclaration} from '@google/genai';
+import type {OpenAPIV3} from 'openapi-types';
+import type {ReadonlyContext} from '../../agents/readonly_context.js';
+import type {AuthCredential} from '../../auth/auth_credential.js';
 import {experimental} from '../../utils/experimental.js';
-import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
+import type {RunAsyncToolRequest} from '../base_tool.js';
+import {BaseTool} from '../base_tool.js';
 import {applyCredential} from './auth/auth_helpers.js';
-import {
-  ApiParameter,
-  OperationParser,
-} from './openapi_spec_parser/operation_parser.js';
+import type {ApiParameter} from './openapi_spec_parser/operation_parser.js';
+import {OperationParser} from './openapi_spec_parser/operation_parser.js';
 import {ToolAuthHandler} from './openapi_spec_parser/tool_auth_handler.js';
 
-import {OperationEndpoint} from './openapi_spec_parser/openapi_spec_parser.js';
+import type {OperationEndpoint} from './openapi_spec_parser/openapi_spec_parser.js';
 
 @experimental
 export class RestApiTool extends BaseTool {

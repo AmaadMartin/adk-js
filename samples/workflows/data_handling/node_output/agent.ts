@@ -25,7 +25,8 @@
  *   npm run sample -- samples/workflows/data_handling/node_output/agent.ts
  */
 
-import {createEvent, node, NodeContext, Workflow} from '@google/adk';
+import type {NodeContext} from '@google/adk';
+import {createEvent, node, Workflow} from '@google/adk';
 
 // 1. A bare return value.
 const returnRawValue = node(

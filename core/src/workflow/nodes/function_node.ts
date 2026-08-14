@@ -4,11 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {AuthConfig} from '../../auth/auth_tool.js';
-import {createEvent, Event, isEvent} from '../../events/event.js';
+import type {AuthConfig} from '../../auth/auth_tool.js';
+import type {Event} from '../../events/event.js';
+import {createEvent, isEvent} from '../../events/event.js';
 import {carryDeltaStamp} from '../../sessions/state_write_order.js';
-import {BaseNode, BaseNodeConfig, isContent, toContent} from '../base_node.js';
-import {NodeContext} from '../node_context.js';
+import type {BaseNodeConfig} from '../base_node.js';
+import {BaseNode, isContent, toContent} from '../base_node.js';
+import type {NodeContext} from '../node_context.js';
 import {
   createAuthRequestEvent,
   hasAuthCredential,

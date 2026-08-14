@@ -6,7 +6,7 @@
 
 import type {BaseNode} from './base_node.js';
 import type {NodeContext, NodeResult} from './node_context.js';
-import {NodeState} from './node_state.js';
+import type {NodeState} from './node_state.js';
 import {ReplayManager} from './utils/replay_manager.js';
 
 /**

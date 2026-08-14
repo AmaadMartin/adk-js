@@ -4,17 +4,19 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {FunctionDeclaration, Type} from '@google/genai';
-import {Context} from '../../agents/context.js';
+import type {FunctionDeclaration} from '@google/genai';
+import {Type} from '@google/genai';
+import type {Context} from '../../agents/context.js';
 import {isLlmAgent} from '../../agents/llm_agent.js';
 import {CodeExecutionLanguage} from '../../code_executors/code_execution_utils.js';
 import {experimental} from '../../utils/experimental.js';
-import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
+import type {RunAsyncToolRequest} from '../base_tool.js';
+import {BaseTool} from '../base_tool.js';
 import {
   materializeScriptOutputs,
   saveScriptOutputs,
 } from './script_output_utils.js';
-import {SkillToolset} from './skill_toolset.js';
+import type {SkillToolset} from './skill_toolset.js';
 
 /**
  * Error codes returned by {@link RunSkillInlineScriptTool} when a call cannot

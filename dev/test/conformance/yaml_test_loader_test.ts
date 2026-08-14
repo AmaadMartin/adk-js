@@ -7,9 +7,10 @@
 import fg from 'fast-glob';
 import * as fs from 'node:fs/promises';
 import {Readable} from 'node:stream';
-import {beforeEach, describe, expect, it, Mock, vi} from 'vitest';
+import type {Mock} from 'vitest';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {batchLoadYamlTestDefs} from '../../src/conformance/yaml_test_loader.js';
-import {TestInfo} from '../../src/integration/test_types.js';
+import type {TestInfo} from '../../src/integration/test_types.js';
 
 vi.mock('fast-glob', () => ({
   default: {

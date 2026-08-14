@@ -4,12 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content} from '@google/genai';
-import {BaseAgent, isBaseAgent} from '../agents/base_agent.js';
-import {InvocationContext} from '../agents/invocation_context.js';
-import {createEvent, Event} from '../events/event.js';
+import type {Content} from '@google/genai';
+import type {BaseAgent} from '../agents/base_agent.js';
+import {isBaseAgent} from '../agents/base_agent.js';
+import type {InvocationContext} from '../agents/invocation_context.js';
+import type {Event} from '../events/event.js';
+import {createEvent} from '../events/event.js';
 import {AsyncQueue} from '../utils/async_queue.js';
-import {BaseNode, toContent} from './base_node.js';
+import type {BaseNode} from './base_node.js';
+import {toContent} from './base_node.js';
 import type {RunnableNode} from './graph.js';
 import {NodeContext} from './node_context.js';
 import {

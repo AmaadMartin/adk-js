@@ -4,11 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {FunctionDeclaration, Type} from '@google/genai';
+import type {FunctionDeclaration} from '@google/genai';
+import {Type} from '@google/genai';
 import {requireAgent} from '../../agents/invocation_context.js';
 import {experimental} from '../../utils/experimental.js';
-import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
-import {SkillToolset} from './skill_toolset.js';
+import type {RunAsyncToolRequest} from '../base_tool.js';
+import {BaseTool} from '../base_tool.js';
+import type {SkillToolset} from './skill_toolset.js';
 
 /**
  * Error codes returned by {@link LoadSkillTool} when a call cannot be

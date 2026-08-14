@@ -6,10 +6,12 @@
 
 import type {FunctionCall} from '@google/genai';
 import {handleFunctionCallList} from '../../agents/functions.js';
-import {Event, getFunctionResponses} from '../../events/event.js';
-import {BaseTool} from '../../tools/base_tool.js';
-import {BaseNode, BaseNodeConfig, isContent} from '../base_node.js';
-import {NodeContext} from '../node_context.js';
+import type {Event} from '../../events/event.js';
+import {getFunctionResponses} from '../../events/event.js';
+import type {BaseTool} from '../../tools/base_tool.js';
+import type {BaseNodeConfig} from '../base_node.js';
+import {BaseNode, isContent} from '../base_node.js';
+import type {NodeContext} from '../node_context.js';
 
 /** Options for a {@link ToolNode}. */
 export interface ToolNodeConfig extends Partial<Omit<BaseNodeConfig, 'name'>> {

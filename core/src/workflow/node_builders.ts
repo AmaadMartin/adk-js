@@ -4,8 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {BaseTool, isBaseTool} from '../tools/base_tool.js';
-import {FunctionNode, FunctionNodeHandler} from './nodes/function_node.js';
+import type {BaseTool} from '../tools/base_tool.js';
+import {isBaseTool} from '../tools/base_tool.js';
+import type {FunctionNodeHandler} from './nodes/function_node.js';
+import {FunctionNode} from './nodes/function_node.js';
 import {ParallelWorker} from './nodes/parallel_worker.js';
 import {ToolNode} from './nodes/tool_node.js';
 import type {

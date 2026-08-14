@@ -3,15 +3,16 @@
  * Copyright 2026 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
-import {HttpOptions} from '@google/genai';
+import type {HttpOptions} from '@google/genai';
 
 import {isBrowser} from '../utils/env_aware_utils.js';
 import {logger} from '../utils/logger.js';
 
-import {BaseLlmConnection} from './base_llm_connection.js';
-import {Gemini, geminiInitParams, GeminiParams} from './google_llm.js';
-import {LlmRequest} from './llm_request.js';
-import {LlmResponse} from './llm_response.js';
+import type {BaseLlmConnection} from './base_llm_connection.js';
+import type {GeminiParams} from './google_llm.js';
+import {Gemini, geminiInitParams} from './google_llm.js';
+import type {LlmRequest} from './llm_request.js';
+import type {LlmResponse} from './llm_response.js';
 
 const APIGEE_PROXY_URL_ENV_VARIABLE_NAME = 'APIGEE_PROXY_URL';
 

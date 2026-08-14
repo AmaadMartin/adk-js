@@ -4,13 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  BaseLlm,
-  BaseLlmConnection,
-  LlmAgent,
-  LLMRegistry,
-  LlmResponse,
-} from '@google/adk';
+import type {BaseLlmConnection, LlmResponse} from '@google/adk';
+import {BaseLlm, LlmAgent, LLMRegistry} from '@google/adk';
 import {createModelContent} from '@google/genai';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';

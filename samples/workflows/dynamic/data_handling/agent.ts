@@ -18,7 +18,8 @@
  * Try "a short paragraph about why graphs beat long prompts".
  */
 
-import {LlmAgent, node, NodeContext, Workflow} from '@google/adk';
+import type {NodeContext} from '@google/adk';
+import {LlmAgent, node, Workflow} from '@google/adk';
 
 const draftAgent = new LlmAgent({
   name: 'draft_agent',

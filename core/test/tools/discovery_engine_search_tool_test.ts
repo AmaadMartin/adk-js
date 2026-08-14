@@ -4,14 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
+import type {
   Context,
   DiscoveryEngineSearchResult,
-  DiscoveryEngineSearchTool,
   DiscoveryEngineSearchToolResult,
-  SearchResultMode,
   VertexAISearchDataStoreSpec,
 } from '@google/adk';
+import {DiscoveryEngineSearchTool, SearchResultMode} from '@google/adk';
 import {Type} from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 

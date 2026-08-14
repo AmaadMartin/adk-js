@@ -6,8 +6,13 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import {Client, ClientFactory} from '@a2a-js/sdk/client';
+import type {Client, ClientFactory} from '@a2a-js/sdk/client';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
+import type {
+  ReadonlyContext,
+  RemoteA2AAgentConfig,
+  StreamableHTTPConnectionParams,
+} from '../../src/index.js';
 import {
   AgentRegistry,
   AgentRegistrySingleMCPToolset,
@@ -15,12 +20,9 @@ import {
   GCP_MCP_SERVER_DESTINATION_ID,
   isGoogleApi,
   ProtocolType,
-  ReadonlyContext,
   RemoteA2AAgent,
-  RemoteA2AAgentConfig,
-  StreamableHTTPConnectionParams,
 } from '../../src/index.js';
-import {AgentInfo} from '../../src/integrations/agent_registry/types.js';
+import type {AgentInfo} from '../../src/integrations/agent_registry/types.js';
 
 const TEST_PROJECT = 'test-project';
 

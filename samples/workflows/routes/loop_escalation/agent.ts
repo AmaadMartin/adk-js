@@ -30,7 +30,8 @@
  *   npm run sample -- samples/workflows/routes/loop_escalation/agent.ts
  */
 
-import {createEvent, node, NodeContext, Workflow} from '@google/adk';
+import type {NodeContext} from '@google/adk';
+import {createEvent, node, Workflow} from '@google/adk';
 
 interface Draft {
   topic: string;

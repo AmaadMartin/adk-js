@@ -4,18 +4,20 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {MessageSendParams} from '@a2a-js/sdk';
-import {
+import type {MessageSendParams} from '@a2a-js/sdk';
+import type {
   CitationMetadata,
-  createModelContent,
   Part as GenAIPart,
   GenerateContentResponseUsageMetadata,
   GroundingMetadata,
 } from '@google/genai';
-import {InvocationContext, requireAgent} from '../agents/invocation_context.js';
-import {Event as AdkEvent, createEvent} from '../events/event.js';
+import {createModelContent} from '@google/genai';
+import type {InvocationContext} from '../agents/invocation_context.js';
+import {requireAgent} from '../agents/invocation_context.js';
+import type {Event as AdkEvent} from '../events/event.js';
+import {createEvent} from '../events/event.js';
+import type {A2AEvent} from './a2a_event.js';
 import {
-  A2AEvent,
   getEventMetadata,
   isTask,
   isTaskArtifactUpdateEvent,

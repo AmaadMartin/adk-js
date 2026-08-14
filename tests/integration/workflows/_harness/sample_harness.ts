@@ -13,15 +13,16 @@
  * calls the live model and writes that fixture.
  */
 
-import {App, Event, InMemoryRunner, RunConfig, RunnableRoot} from '@google/adk';
-import {Content} from '@google/genai';
+import type {App, Event, RunConfig, RunnableRoot} from '@google/adk';
+import {InMemoryRunner} from '@google/adk';
+import type {Content} from '@google/genai';
 import {existsSync, readFileSync, writeFileSync} from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
+import type {RecordedCall} from './record_replay_model.js';
 import {
   drainRecordedCalls,
   installRecordReplay,
-  RecordedCall,
   restoreRecordReplay,
 } from './record_replay_model.js';
 

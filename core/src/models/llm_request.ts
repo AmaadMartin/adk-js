@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
+import type {
   Content,
   FunctionDeclaration,
   GenerateContentConfig,
@@ -12,10 +12,10 @@ import {
   SchemaUnion,
 } from '@google/genai';
 
-import {ContextCacheConfig} from '../agents/context_cache_config.js';
-import {BaseTool} from '../tools/base_tool.js';
+import type {ContextCacheConfig} from '../agents/context_cache_config.js';
+import type {BaseTool} from '../tools/base_tool.js';
 import {contentUnionToText} from '../utils/content_utils.js';
-import {CacheMetadata} from './cache_metadata.js';
+import type {CacheMetadata} from './cache_metadata.js';
 
 /**
  * LLM request class that allows passing in tools, output schema and system

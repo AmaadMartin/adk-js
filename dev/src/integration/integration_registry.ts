@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {BasePlugin, BaseTool, SingleAgentCallback} from '@google/adk';
+import type {BasePlugin, BaseTool, SingleAgentCallback} from '@google/adk';
 
 /**
  * The registry holds any tool, not only function tools.

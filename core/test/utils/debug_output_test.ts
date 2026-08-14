@@ -4,8 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {createEvent, Event} from '@google/adk';
-import {Language, Part} from '@google/genai';
+import type {Event} from '@google/adk';
+import {createEvent} from '@google/adk';
+import type {Part} from '@google/genai';
+import {Language} from '@google/genai';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 
 import {formatEventLines, printEvent} from '../../src/utils/debug_output.js';

@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Session, createSession} from '@google/adk';
+import type {Session} from '@google/adk';
+import {createSession} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {AdkApiClient} from '../../src/server/adk_api_client.js';

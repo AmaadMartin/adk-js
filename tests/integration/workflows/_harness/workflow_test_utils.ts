@@ -4,18 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  Event,
-  InMemoryRunner,
-  LlmAgent,
-  LlmAgentConfig,
-  Workflow,
-} from '@google/adk';
-import {Content, FinishReason} from '@google/genai';
-import {
-  GeminiWithMockResponses,
-  RawGenerateContentResponse,
-} from '../../test_case_utils.js';
+import type {Event, LlmAgentConfig, Workflow} from '@google/adk';
+import {InMemoryRunner, LlmAgent} from '@google/adk';
+import type {Content} from '@google/genai';
+import {FinishReason} from '@google/genai';
+import type {RawGenerateContentResponse} from '../../test_case_utils.js';
+import {GeminiWithMockResponses} from '../../test_case_utils.js';
 
 /**
  * Builds a raw generate-content response that returns plain model text.

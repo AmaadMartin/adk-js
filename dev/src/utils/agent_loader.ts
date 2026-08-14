@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {App, isApp, isRunnableRoot, RunnableRoot} from '@google/adk';
+import type {RunnableRoot} from '@google/adk';
+import {App, isApp, isRunnableRoot} from '@google/adk';
 import esbuild from 'esbuild';
 import {shimPlugin} from 'esbuild-shim-plugin';
 import * as fs from 'node:fs';

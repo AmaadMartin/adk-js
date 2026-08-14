@@ -17,7 +17,8 @@
  *   npm run sample -- tests/integration/workflows/dynamic_nodes/agent.ts
  */
 
-import {createEvent, LlmAgent, node, NodeContext, Workflow} from '@google/adk';
+import type {NodeContext} from '@google/adk';
+import {createEvent, LlmAgent, node, Workflow} from '@google/adk';
 import {z} from 'zod';
 
 const feedbackSchema = z.object({

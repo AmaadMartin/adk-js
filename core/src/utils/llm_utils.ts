@@ -4,10 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GenerateContentConfig} from '@google/genai';
+import type {GenerateContentConfig} from '@google/genai';
 
-import {BaseLlm} from '../models/base_llm.js';
-import {LlmRequest} from '../models/llm_request.js';
+import type {BaseLlm} from '../models/base_llm.js';
+import type {LlmRequest} from '../models/llm_request.js';
 
 /** Parameters for {@link generateJsonText}. */
 export interface GenerateJsonTextParams {

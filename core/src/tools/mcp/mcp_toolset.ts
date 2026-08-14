@@ -13,12 +13,14 @@ import type {
   TextResourceContents,
 } from '@modelcontextprotocol/sdk/types.js';
 
-import {ReadonlyContext} from '../../agents/readonly_context.js';
+import type {ReadonlyContext} from '../../agents/readonly_context.js';
 import {logger} from '../../utils/logger.js';
-import {BaseTool} from '../base_tool.js';
-import {BaseToolset, ToolPredicate} from '../base_toolset.js';
+import type {BaseTool} from '../base_tool.js';
+import type {ToolPredicate} from '../base_toolset.js';
+import {BaseToolset} from '../base_toolset.js';
 
-import {MCPConnectionParams, MCPSessionManager} from './mcp_session_manager.js';
+import type {MCPConnectionParams} from './mcp_session_manager.js';
+import {MCPSessionManager} from './mcp_session_manager.js';
 import {MCPTool} from './mcp_tool.js';
 
 /**

@@ -4,13 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {Event, InvocationContext} from '@google/adk';
 import {
   BasePlugin,
   createEvent,
-  Event,
   InMemoryArtifactService,
   InMemorySessionService,
-  InvocationContext,
   LlmAgent,
   Runner,
 } from '@google/adk';

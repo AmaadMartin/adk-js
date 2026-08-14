@@ -17,16 +17,9 @@
  * and it is precisely what a ported unit test asserting Python's internal
  * call graph would not check.
  */
-import {
-  BaseLlm,
-  BaseLlmConnection,
-  FunctionTool,
-  InMemoryRunner,
-  LlmAgent,
-  LlmRequest,
-  LlmResponse,
-} from '@google/adk';
-import {Content} from '@google/genai';
+import type {BaseLlmConnection, LlmRequest, LlmResponse} from '@google/adk';
+import {BaseLlm, FunctionTool, InMemoryRunner, LlmAgent} from '@google/adk';
+import type {Content} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import fixtures from './fixtures.json' with {type: 'json'};
 

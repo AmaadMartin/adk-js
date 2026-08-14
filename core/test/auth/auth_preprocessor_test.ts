@@ -4,10 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {BaseAgent, Event} from '@google/adk';
 import {
   AUTH_PREPROCESSOR,
-  BaseAgent,
-  Event,
   InvocationContext,
   LlmAgent,
   PluginManager,
@@ -15,7 +14,8 @@ import {
   createEvent,
   createSession,
 } from '@google/adk';
-import {Mock, describe, expect, it, vi} from 'vitest';
+import type {Mock} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 import {REQUEST_CREDENTIAL_FUNCTION_CALL_NAME} from '../../src/agents/functions.js';
 
 vi.mock('../../src/agents/functions.js', async (importOriginal) => {

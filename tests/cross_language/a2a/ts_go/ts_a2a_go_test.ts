@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Event, RemoteA2AAgent} from '@google/adk';
+import type {Event} from '@google/adk';
+import {RemoteA2AAgent} from '@google/adk';
 import * as path from 'node:path';
 import {afterAll, beforeAll, describe, expect, it} from 'vitest';
 import {createRunner} from '../../../integration/test_case_utils.js';

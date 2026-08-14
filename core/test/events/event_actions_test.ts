@@ -6,7 +6,7 @@
 
 import {AuthCredentialTypes, ToolConfirmation} from '@google/adk';
 import {describe, expect, it} from 'vitest';
-import {AuthConfig} from '../../src/auth/auth_tool.js';
+import type {AuthConfig} from '../../src/auth/auth_tool.js';
 import {
   createEventActions,
   mergeEventActions,

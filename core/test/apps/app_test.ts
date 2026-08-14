@@ -6,10 +6,10 @@
 
 import {describe, expect, it} from 'vitest';
 import {BaseAgent} from '../../src/agents/base_agent.js';
-import {InvocationContext} from '../../src/agents/invocation_context.js';
+import type {InvocationContext} from '../../src/agents/invocation_context.js';
 import {App, isApp, validateAppName} from '../../src/apps/app.js';
 import {createResumabilityConfig} from '../../src/apps/resumability_config.js';
-import {Event} from '../../src/events/event.js';
+import type {Event} from '../../src/events/event.js';
 import {BasePlugin} from '../../src/plugins/base_plugin.js';
 import {node} from '../../src/workflow/node.js';
 import {Workflow} from '../../src/workflow/workflow.js';

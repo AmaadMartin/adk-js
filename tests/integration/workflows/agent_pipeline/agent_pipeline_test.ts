@@ -12,7 +12,7 @@
 
 import {FunctionNode, Workflow} from '@google/adk';
 import {describe, expect, it} from 'vitest';
-import {RawGenerateContentResponse} from '../../test_case_utils.js';
+import type {RawGenerateContentResponse} from '../../test_case_utils.js';
 import {
   finalOutput,
   mockLlmAgent,

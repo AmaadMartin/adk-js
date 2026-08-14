@@ -4,34 +4,36 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content, Part} from '@google/genai';
+import type {Content, Part} from '@google/genai';
 import {cloneDeep} from 'lodash-es';
 
 import {isBaseCodeExecutor} from '../../code_executors/base_code_executor.js';
 import {isBuiltInCodeExecutor} from '../../code_executors/built_in_code_executor.js';
+import type {
+  CodeExecutionResult,
+  File,
+} from '../../code_executors/code_execution_utils.js';
 import {
   buildCodeExecutionResultPart,
   buildExecutableCodePart,
   CodeExecutionLanguage,
-  CodeExecutionResult,
   convertCodeExecutionParts,
   extractCodeAndTruncateContent,
-  File,
   getFileContentAsBase64,
 } from '../../code_executors/code_execution_utils.js';
 import {CodeExecutorContext} from '../../code_executors/code_executor_context.js';
-import {createEvent, Event} from '../../events/event.js';
+import type {Event} from '../../events/event.js';
+import {createEvent} from '../../events/event.js';
 import {createEventActions} from '../../events/event_actions.js';
-import {LlmRequest} from '../../models/llm_request.js';
-import {LlmResponse} from '../../models/llm_response.js';
+import type {LlmRequest} from '../../models/llm_request.js';
+import type {LlmResponse} from '../../models/llm_response.js';
 import {State} from '../../sessions/state.js';
 import {base64Decode} from '../../utils/env_aware_utils.js';
-import {InvocationContext, requireAgent} from '../invocation_context.js';
+import type {InvocationContext} from '../invocation_context.js';
+import {requireAgent} from '../invocation_context.js';
 import {isLlmAgent} from '../llm_agent.js';
-import {
-  BaseLlmRequestProcessor,
-  BaseLlmResponseProcessor,
-} from './base_llm_processor.js';
+import type {BaseLlmResponseProcessor} from './base_llm_processor.js';
+import {BaseLlmRequestProcessor} from './base_llm_processor.js';
 
 /**
  * Processes code execution requests.

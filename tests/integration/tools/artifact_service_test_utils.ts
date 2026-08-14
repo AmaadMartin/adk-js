@@ -4,11 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  InMemoryArtifactService,
-  ScopedArtifactService,
-  SessionArtifactService,
-} from '@google/adk';
+import type {SessionArtifactService} from '@google/adk';
+import {InMemoryArtifactService, ScopedArtifactService} from '@google/adk';
 
 /**
  * Builds the session-scoped in-memory artifact service that an invocation

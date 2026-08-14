@@ -6,10 +6,10 @@
 
 import {describe, expect, it} from 'vitest';
 import {z} from 'zod';
-import {Event} from '../../src/events/event.js';
+import type {Event} from '../../src/events/event.js';
 import {BaseTool} from '../../src/tools/base_tool.js';
 import {AsyncQueue} from '../../src/utils/async_queue.js';
-import {BaseNode} from '../../src/workflow/base_node.js';
+import type {BaseNode} from '../../src/workflow/base_node.js';
 import {node, WorkflowNode} from '../../src/workflow/node.js';
 import {NodeContext} from '../../src/workflow/node_context.js';
 import {FunctionNode} from '../../src/workflow/nodes/function_node.js';

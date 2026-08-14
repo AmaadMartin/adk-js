@@ -4,14 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {DataPart, Task, TextPart} from '@a2a-js/sdk';
-import {
-  Event as AdkEvent,
-  ExecutorContext,
-  createEvent,
-  createEventActions,
-} from '@google/adk';
-import {Content as GenAIContent} from '@google/genai';
+import type {DataPart, Task, TextPart} from '@a2a-js/sdk';
+import type {Event as AdkEvent, ExecutorContext} from '@google/adk';
+import {createEvent, createEventActions} from '@google/adk';
+import type {Content as GenAIContent} from '@google/genai';
 import {describe, expect, it, vi} from 'vitest';
 import {
   getFinalTaskStatusUpdate,

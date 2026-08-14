@@ -4,12 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content, Part} from '@google/genai';
+import type {Content, Part} from '@google/genai';
 
-import {BaseAgent} from '../agents/base_agent.js';
-import {Context} from '../agents/context.js';
-import {InvocationContext} from '../agents/invocation_context.js';
-import {SessionArtifactService} from '../artifacts/session_artifact_service.js';
+import type {BaseAgent} from '../agents/base_agent.js';
+import type {Context} from '../agents/context.js';
+import type {InvocationContext} from '../agents/invocation_context.js';
+import type {SessionArtifactService} from '../artifacts/session_artifact_service.js';
 import {State} from '../sessions/state.js';
 import {logger} from '../utils/logger.js';
 

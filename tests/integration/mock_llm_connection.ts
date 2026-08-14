@@ -4,8 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {BaseLlm, BaseLlmConnection, LlmRequest, LlmResponse} from '@google/adk';
-import {Blob, Content} from '@google/genai';
+import type {BaseLlmConnection, LlmRequest, LlmResponse} from '@google/adk';
+import {BaseLlm} from '@google/adk';
+import type {Blob, Content} from '@google/genai';
 
 /** Options controlling the scripted behavior of {@link MockLlmConnection}. */
 export interface MockLlmConnectionOptions {

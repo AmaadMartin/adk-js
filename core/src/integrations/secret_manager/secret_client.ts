@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GoogleAuth, JWT, JWTInput, OAuth2Client} from 'google-auth-library';
+import type {JWTInput} from 'google-auth-library';
+import {GoogleAuth, JWT, OAuth2Client} from 'google-auth-library';
 import {version} from '../../version.js';
 
 const DEFAULT_SCOPES = ['https://www.googleapis.com/auth/cloud-platform'];

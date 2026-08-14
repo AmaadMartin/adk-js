@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Client} from '@google-cloud/vertexai';
-import {Sessions} from '@google-cloud/vertexai/build/src/genai/sessions.js';
+import type {Client} from '@google-cloud/vertexai';
+import type {Sessions} from '@google-cloud/vertexai/build/src/genai/sessions.js';
 import {
   AgentTool,
   LlmAgent,
@@ -15,10 +15,8 @@ import {
 } from '@google/adk';
 import {FinishReason} from '@google/genai';
 import {describe, expect, it, vi} from 'vitest';
-import {
-  GeminiWithMockResponses,
-  RawGenerateContentResponse,
-} from '../test_case_utils.js';
+import type {RawGenerateContentResponse} from '../test_case_utils.js';
+import {GeminiWithMockResponses} from '../test_case_utils.js';
 
 const TEST_PROJECT_ID = 'test-project';
 const TEST_LOCATION = 'us-west1';

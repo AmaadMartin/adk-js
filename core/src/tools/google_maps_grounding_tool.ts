@@ -3,20 +3,17 @@
  * Copyright 2026 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
-import {GenerateContentConfig} from '@google/genai';
+import type {GenerateContentConfig} from '@google/genai';
 
-import {LlmRequest} from '../models/llm_request.js';
+import type {LlmRequest} from '../models/llm_request.js';
 import {
   isGemini1Model,
   isGeminiModel,
   isGeminiModelIdCheckDisabled,
 } from '../utils/model_name.js';
 
-import {
-  BaseTool,
-  RunAsyncToolRequest,
-  ToolProcessLlmRequest,
-} from './base_tool.js';
+import type {RunAsyncToolRequest, ToolProcessLlmRequest} from './base_tool.js';
+import {BaseTool} from './base_tool.js';
 
 /**
  * Applies Google Maps grounding to the LLM request if supported.

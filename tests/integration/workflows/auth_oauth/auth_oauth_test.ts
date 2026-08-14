@@ -14,7 +14,8 @@
  * a turn-2 assertion would need a live token and a network round trip.
  */
 
-import {Event, getFunctionCalls} from '@google/adk';
+import type {Event} from '@google/adk';
+import {getFunctionCalls} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 import {authors, runSample} from '../_harness/sample_harness.js';
 import {rootAgent} from './agent.js';

@@ -23,15 +23,13 @@ const SANDBOX_PATTERN =
 const ENGINE_PATTERN =
   /^projects\/([a-zA-Z0-9-_]+)\/locations\/([a-zA-Z0-9-_]+)\/reasoningEngines\/(\d+)$/;
 
-import {InvocationContext} from '../agents/invocation_context.js';
+import type {InvocationContext} from '../agents/invocation_context.js';
 import {logger} from '../utils/logger.js';
 
-import {BaseCodeExecutor, ExecuteCodeParams} from './base_code_executor.js';
-import {
-  CodeExecutionLanguage,
-  CodeExecutionResult,
-  File,
-} from './code_execution_utils.js';
+import type {ExecuteCodeParams} from './base_code_executor.js';
+import {BaseCodeExecutor} from './base_code_executor.js';
+import type {CodeExecutionResult, File} from './code_execution_utils.js';
+import {CodeExecutionLanguage} from './code_execution_utils.js';
 
 const DEFAULT_OPERATION_TIMEOUT_SECONDS = 180;
 const DEFAULT_SANDBOX_TTL = '31536000s';

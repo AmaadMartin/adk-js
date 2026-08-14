@@ -12,18 +12,20 @@
  * the invocation's state through the tool and model callbacks within a turn.
  */
 
-import {
+import type {
   BaseAgent,
   BaseTool,
-  Context,
-  InvocationContext,
   LlmRequest,
-  MultimodalToolResultsPlugin,
-  PARTS_RETURNED_BY_TOOLS_ID,
   PluginManager,
   Session,
 } from '@google/adk';
-import {Part} from '@google/genai';
+import {
+  Context,
+  InvocationContext,
+  MultimodalToolResultsPlugin,
+  PARTS_RETURNED_BY_TOOLS_ID,
+} from '@google/adk';
+import type {Part} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
 function createContext(): Context {

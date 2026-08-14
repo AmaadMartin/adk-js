@@ -5,9 +5,9 @@
  */
 
 import {BaseLlm} from './base_llm.js';
-import {BaseLlmConnection} from './base_llm_connection.js';
-import {LlmRequest} from './llm_request.js';
-import {LlmResponse} from './llm_response.js';
+import type {BaseLlmConnection} from './base_llm_connection.js';
+import type {LlmRequest} from './llm_request.js';
+import type {LlmResponse} from './llm_response.js';
 
 import {experimental} from '../utils/experimental.js';
 import {runWithRouting} from '../utils/failover_utils.js';

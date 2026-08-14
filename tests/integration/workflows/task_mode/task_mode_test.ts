@@ -11,7 +11,8 @@
  * next node. Mirrors the `agent_in_workflow` intake pattern.
  */
 
-import {node, NodeContext, Workflow} from '@google/adk';
+import type {NodeContext} from '@google/adk';
+import {node, Workflow} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 import {z} from 'zod';
 import {

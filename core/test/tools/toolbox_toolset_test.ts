@@ -6,6 +6,7 @@
 
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 
+import type {RunAsyncToolRequest, ToolboxAuthTokenGetter} from '@google/adk';
 import {
   BaseTool,
   Context,
@@ -15,12 +16,11 @@ import {
   isBaseToolset,
   PluginManager,
   ReadonlyContext,
-  RunAsyncToolRequest,
   SequentialAgent,
-  ToolboxAuthTokenGetter,
   ToolboxToolset,
 } from '@google/adk';
-import {FunctionDeclaration, Type} from '@google/genai';
+import type {FunctionDeclaration} from '@google/genai';
+import {Type} from '@google/genai';
 
 const SERVER_URL = 'http://127.0.0.1:5000';
 

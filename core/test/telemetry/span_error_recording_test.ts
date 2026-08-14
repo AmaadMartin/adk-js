@@ -4,28 +4,30 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {
+  BaseLlmConnection,
+  Context,
+  Event,
+  LlmRequest,
+  LlmResponse,
+} from '@google/adk';
 import {
   BaseAgent,
   BaseLlm,
-  BaseLlmConnection,
   BasePlugin,
-  Context,
   createEvent,
   createSession,
-  Event,
   InMemorySessionService,
   InvocationContext,
   LlmAgent,
-  LlmRequest,
-  LlmResponse,
   PluginManager,
   Runner,
 } from '@google/adk';
-import {Content} from '@google/genai';
+import type {Content} from '@google/genai';
 import {SpanStatusCode, trace} from '@opentelemetry/api';
+import type {ReadableSpan} from '@opentelemetry/sdk-trace-base';
 import {
   InMemorySpanExporter,
-  ReadableSpan,
   SimpleSpanProcessor,
 } from '@opentelemetry/sdk-trace-base';
 import {NodeTracerProvider} from '@opentelemetry/sdk-trace-node';

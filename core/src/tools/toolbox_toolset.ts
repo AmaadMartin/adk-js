@@ -9,9 +9,9 @@ import type {
   ToolboxTool as ToolboxSdkTool,
 } from '@toolbox-sdk/adk';
 
-import {ReadonlyContext} from '../agents/readonly_context.js';
+import type {ReadonlyContext} from '../agents/readonly_context.js';
 
-import {BaseTool} from './base_tool.js';
+import type {BaseTool} from './base_tool.js';
 import {BaseToolset} from './base_toolset.js';
 
 /**

@@ -4,12 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {BaseTool, Event} from '@google/adk';
 import {
-  BaseTool,
   createEvent,
   DEFAULT_ROUTE,
   Edge,
-  Event,
   FunctionTool,
   JoinNode,
   LlmAgent,
@@ -20,15 +19,8 @@ import {
   Workflow,
 } from '@google/adk';
 import {parse} from 'ts-graphviz/ast';
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  MockInstance,
-  vi,
-} from 'vitest';
+import type {MockInstance} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {
   getAgentGraphAsDot,

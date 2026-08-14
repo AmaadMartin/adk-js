@@ -15,7 +15,8 @@
  */
 
 import * as winston from 'winston';
-import {formatLogArgs, Logger, LogLevel, setLogger} from './logger.js';
+import type {Logger} from './logger.js';
+import {formatLogArgs, LogLevel, setLogger} from './logger.js';
 
 /** The default logger on Node. Writes through winston. */
 export class WinstonLogger implements Logger {

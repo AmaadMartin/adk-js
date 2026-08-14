@@ -4,27 +4,30 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {
+  AppendEventRequest,
+  BaseCredentialService,
+  Event,
+  InvocationContext,
+  RunConfig,
+} from '@google/adk';
 import {
   App,
-  AppendEventRequest,
   BaseAgent,
-  BaseCredentialService,
   BasePlugin,
   createEvent,
   createResumabilityConfig,
   determineAgentForResumption,
-  Event,
   InMemoryArtifactService,
   InMemoryCredentialService,
   InMemorySessionService,
-  InvocationContext,
   isRoutableLlmAgent,
   LlmAgent,
-  RunConfig,
   Runner,
 } from '@google/adk';
-import {Content, FunctionCall, FunctionResponse} from '@google/genai';
-import {beforeEach, describe, expect, it, MockInstance, vi} from 'vitest';
+import type {Content, FunctionCall, FunctionResponse} from '@google/genai';
+import type {MockInstance} from 'vitest';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {logger} from '../../src/utils/logger.js';
 
 const TEST_APP_ID = 'test_app_id';

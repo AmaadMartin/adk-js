@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {Event} from '@google/adk';
 import {
-  Event,
   FunctionTool,
   InMemoryRunner,
   LlmAgent,
@@ -14,10 +14,8 @@ import {
 import {createUserContent, FinishReason} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {z} from 'zod';
-import {
-  GeminiWithMockResponses,
-  RawGenerateContentResponse,
-} from '../test_case_utils.js';
+import type {RawGenerateContentResponse} from '../test_case_utils.js';
+import {GeminiWithMockResponses} from '../test_case_utils.js';
 
 const mockForecastTool = new FunctionTool({
   name: 'showForecastChart',

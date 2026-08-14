@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Gemini, LlmRequest} from '@google/adk';
+import type {LlmRequest} from '@google/adk';
+import {Gemini} from '@google/adk';
 import {Modality} from '@google/genai';
 import * as dotenv from 'dotenv';
 import {fileURLToPath} from 'node:url';

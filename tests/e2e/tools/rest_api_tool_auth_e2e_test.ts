@@ -10,7 +10,7 @@ import * as dotenv from 'dotenv';
 import * as fs from 'node:fs';
 import * as http from 'node:http';
 import * as path from 'node:path';
-import {OpenAPIV3} from 'openapi-types';
+import type {OpenAPIV3} from 'openapi-types';
 import {afterAll, beforeAll, describe, expect, it} from 'vitest';
 
 describe('RestApiTool Auth E2E', () => {

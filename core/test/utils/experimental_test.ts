@@ -6,7 +6,8 @@
 
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {experimental} from '../../src/utils/experimental.js';
-import {Logger, resetLogger, setLogger} from '../../src/utils/logger.js';
+import type {Logger} from '../../src/utils/logger.js';
+import {resetLogger, setLogger} from '../../src/utils/logger.js';
 
 describe('experimental decorator', () => {
   let warnCalls: string[] = [];

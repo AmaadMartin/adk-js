@@ -25,7 +25,7 @@
  * shape.
  */
 
-import {Event} from '@google/adk';
+import type {Event} from '@google/adk';
 import {readdirSync, statSync} from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';

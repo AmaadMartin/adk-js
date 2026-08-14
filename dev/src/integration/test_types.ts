@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {LlmRequest, LlmResponse, Session} from '@google/adk';
-import {
+import type {LlmRequest, LlmResponse, Session} from '@google/adk';
+import type {
   Blob,
   CodeExecutionResult,
   Content,

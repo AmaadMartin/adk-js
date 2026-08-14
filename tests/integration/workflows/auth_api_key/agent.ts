@@ -22,16 +22,13 @@
  * Turn 2: type any API key value; the node runs and echoes it back (masked).
  */
 
-import {
+import type {
   AuthConfig,
   AuthCredential,
-  AuthCredentialTypes,
   AuthScheme,
-  createEvent,
-  node,
   NodeContext,
-  Workflow,
 } from '@google/adk';
+import {AuthCredentialTypes, createEvent, node, Workflow} from '@google/adk';
 
 const CREDENTIAL_KEY = 'weather_api_key';
 

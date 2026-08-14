@@ -5,15 +5,8 @@
  */
 
 import {Command} from 'commander';
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  MockInstance,
-  vi,
-} from 'vitest';
+import type {MockInstance} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 const {createProgramMock} = vi.hoisted(() => ({
   createProgramMock: vi.fn<() => Command>(),

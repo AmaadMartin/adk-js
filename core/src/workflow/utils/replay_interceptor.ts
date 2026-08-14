@@ -18,7 +18,8 @@
 import type {BaseNode} from '../base_node.js';
 import type {RouteValue} from '../graph.js';
 import type {NodeContext, NodeResult} from '../node_context.js';
-import {isFastForwardable, RehydratedNode} from './rehydration_utils.js';
+import type {RehydratedNode} from './rehydration_utils.js';
+import {isFastForwardable} from './rehydration_utils.js';
 
 /** What a resumed workflow should do with one node. */
 export interface InterceptionResult {

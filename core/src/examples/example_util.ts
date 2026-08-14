@@ -4,13 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {FunctionCall, Part} from '@google/genai';
+import type {FunctionCall, Part} from '@google/genai';
 
-import {
-  BaseExampleProvider,
-  isBaseExampleProvider,
-} from './base_example_provider.js';
-import {Example} from './example.js';
+import type {BaseExampleProvider} from './base_example_provider.js';
+import {isBaseExampleProvider} from './base_example_provider.js';
+import type {Example} from './example.js';
 
 const EXAMPLES_INTRO =
   '<EXAMPLES>\nBegin few-shot\nThe following are examples of user queries and' +

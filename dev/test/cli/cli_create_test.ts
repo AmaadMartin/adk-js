@@ -6,7 +6,8 @@
 
 import {isCancel, select, text} from '@clack/prompts';
 import {execSync} from 'node:child_process';
-import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
+import type {Mock} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {createAgent} from '../../src/cli/cli_create.js';
 import {
   createFolder,

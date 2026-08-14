@@ -5,7 +5,7 @@
  */
 
 import {ToolConnectionAnalyzer} from '@google/adk';
-import {FunctionDeclaration} from '@google/genai';
+import type {FunctionDeclaration} from '@google/genai';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 
 import {logger} from '../../../src/utils/logger.js';

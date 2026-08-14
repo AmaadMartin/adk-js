@@ -4,18 +4,20 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {
+  BaseLlmConnection,
+  LlmRequest,
+  LlmResponse,
+  ToolProcessLlmRequest,
+} from '@google/adk';
 import {
   BaseLlm,
-  BaseLlmConnection,
   BaseTool,
   InMemoryArtifactService,
   InMemorySessionService,
   LlmAgent,
-  LlmRequest,
-  LlmResponse,
   LoadArtifactsTool,
   Runner,
-  ToolProcessLlmRequest,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
 

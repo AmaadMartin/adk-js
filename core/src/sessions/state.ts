@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {objectSchemaFields, SchemaLike} from '../utils/schema.js';
+import type {SchemaLike} from '../utils/schema.js';
+import {objectSchemaFields} from '../utils/schema.js';
 import {recordStateWrite} from './state_write_order.js';
 
 /** Raised when a state mutation violates the declared state schema. */

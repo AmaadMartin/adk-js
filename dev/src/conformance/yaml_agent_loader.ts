@@ -9,7 +9,10 @@ import fg from 'fast-glob';
 import yaml from 'js-yaml';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import {AgentToolArgs, YamlAgentConfig} from '../integration/agent_types.js';
+import type {
+  AgentToolArgs,
+  YamlAgentConfig,
+} from '../integration/agent_types.js';
 
 /**
  * batchLoadYamlAgentConfig will recursively search the directory given

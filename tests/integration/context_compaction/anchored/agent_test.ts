@@ -4,12 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  CompactedEvent,
-  Event,
-  InMemoryRunner,
-  isScratchpadEvent,
-} from '@google/adk';
+import type {CompactedEvent, Event} from '@google/adk';
+import {InMemoryRunner, isScratchpadEvent} from '@google/adk';
 import {createUserContent} from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {GeminiWithMockResponses} from '../../test_case_utils.js';

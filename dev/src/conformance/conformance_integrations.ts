@@ -4,17 +4,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
+import type {
   BasePlugin,
   BaseTool,
   Context,
-  FunctionTool,
-  LongRunningFunctionTool,
   SingleAgentCallback,
 } from '@google/adk';
-import {Content} from '@google/genai';
+import {FunctionTool, LongRunningFunctionTool} from '@google/adk';
+import type {Content} from '@google/genai';
 import {z} from 'zod';
-import {IntegrationRegistry} from '../integration/integration_registry.js';
+import type {IntegrationRegistry} from '../integration/integration_registry.js';
 
 export function registerConformanceIntegrations(registry: IntegrationRegistry) {
   // Plugins

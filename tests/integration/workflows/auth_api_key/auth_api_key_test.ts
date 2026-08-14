@@ -11,8 +11,9 @@
  * the Python golden `contributing/samples/workflows/auth_api_key/tests/go.json`.
  */
 
-import {Event, getFunctionCalls} from '@google/adk';
-import {Content} from '@google/genai';
+import type {Event} from '@google/adk';
+import {getFunctionCalls} from '@google/adk';
+import type {Content} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {allEvents, authors, runSample} from '../_harness/sample_harness.js';
 import {rootAgent} from './agent.js';

@@ -14,7 +14,7 @@
  * differently, so an index here would have no reader.
  */
 
-import {Event} from '../../events/event.js';
+import type {Event} from '../../events/event.js';
 import type {NodeContext} from '../node_context.js';
 import {
   closesRun,

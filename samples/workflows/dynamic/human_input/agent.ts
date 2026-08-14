@@ -24,7 +24,8 @@
  * Turn 1: describe a request. Turn 2: type "yes" or "no".
  */
 
-import {node, NodeContext, RequestInput, Workflow} from '@google/adk';
+import type {NodeContext} from '@google/adk';
+import {node, RequestInput, Workflow} from '@google/adk';
 
 /**
  * Pauses the workflow and waits for user input.

@@ -48,6 +48,23 @@ export default defineConfig([
           'caughtErrorsIgnorePattern': '^_',
         },
       ],
+      // esbuild erases a type-only import from the emitted JavaScript, but it
+      // still records the statement in `metafile.inputs` as a static edge that
+      // is byte-identical to a real runtime dependency. Only a top-level
+      // `import type` drops the edge; `import {type Foo}` does not. So require
+      // "separate-type-imports" and keep the reported import graph honest.
+      '@typescript-eslint/consistent-type-imports': [
+        'error',
+        {
+          'fixStyle': 'separate-type-imports',
+          // Leave `import()` type annotations alone. A type-position
+          // `import()` contributes nothing to `metafile.inputs`, so banning it
+          // buys no build-graph accuracy, and every site in the repo is the
+          // idiomatic `importOriginal<typeof import("...")>()` of a `vi.mock`
+          // factory.
+          'disallowTypeAnnotations': false,
+        },
+      ],
     },
   },
   {

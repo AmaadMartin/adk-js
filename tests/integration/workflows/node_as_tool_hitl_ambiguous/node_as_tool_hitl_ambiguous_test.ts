@@ -13,12 +13,12 @@
  * typing, turn after turn.
  */
 
+import type {NodeContext} from '@google/adk';
 import {
   getFunctionCalls,
   getFunctionResponses,
   InMemoryRunner,
   node,
-  NodeContext,
   RequestInput,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';

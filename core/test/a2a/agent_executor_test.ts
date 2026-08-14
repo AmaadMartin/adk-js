@@ -4,29 +4,32 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
+import type {
   TaskState as A2ATaskState,
   Message,
   Task,
   TaskStatusUpdateEvent,
   TextPart,
 } from '@a2a-js/sdk';
-import {ExecutionEventBus, RequestContext} from '@a2a-js/sdk/server';
-import {
-  A2AAgentExecutor,
+import type {ExecutionEventBus, RequestContext} from '@a2a-js/sdk/server';
+import type {
   Event as AdkEvent,
   BaseSessionService,
+  ExecutorContext,
+  IntentVerification,
+  RunnerConfig,
+} from '@google/adk';
+import {
+  A2AAgentExecutor,
   createEvent,
   createEventActions,
   createSession,
-  ExecutorContext,
   IntentMismatchReason,
-  IntentVerification,
   Runner,
-  RunnerConfig,
 } from '@google/adk';
-import {FunctionCall, FunctionResponse} from '@google/genai';
-import {beforeEach, describe, expect, it, Mocked, vi} from 'vitest';
+import type {FunctionCall, FunctionResponse} from '@google/genai';
+import type {Mocked} from 'vitest';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {toA2AParts} from '../../src/a2a/part_converter_utils.js';
 
 // Mock the Runner to control its async generator

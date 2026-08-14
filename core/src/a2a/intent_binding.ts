@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {TaskState as A2ATaskState, Message, Task} from '@a2a-js/sdk';
-import {FunctionResponse as GenAIFunctionResponse} from '@google/genai';
+import type {TaskState as A2ATaskState, Message, Task} from '@a2a-js/sdk';
+import type {FunctionResponse as GenAIFunctionResponse} from '@google/genai';
 import {createHash} from 'node:crypto';
 import {isPausedTaskStatusUpdateEvent} from './a2a_event.js';
 import {toGenAIParts} from './part_converter_utils.js';

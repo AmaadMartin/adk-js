@@ -6,7 +6,7 @@
 
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import {File} from '../code_executors/code_execution_utils.js';
+import type {File} from '../code_executors/code_execution_utils.js';
 import {getMimeTypeAndEncoding} from './file_extension_utils.js';
 
 /**

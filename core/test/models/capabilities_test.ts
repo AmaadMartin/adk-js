@@ -4,16 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  ApigeeLlm,
-  BaseLlm,
+import type {
   BaseLlmConnection,
-  Gemini,
-  getLogger,
   LlmCapabilities,
   LlmRequest,
   LlmResponse,
 } from '@google/adk';
+import {ApigeeLlm, BaseLlm, Gemini, getLogger} from '@google/adk';
 import {
   afterEach,
   beforeEach,

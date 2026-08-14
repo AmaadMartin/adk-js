@@ -4,15 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {Event, LlmRequest} from '@google/adk';
 import {
   BaseLlmRequestProcessor,
   createSession,
-  Event,
   Gemini,
   InvocationContext,
   LiveRequestQueue,
   LlmAgent,
-  LlmRequest,
   PluginManager,
 } from '@google/adk';
 import {Modality} from '@google/genai';

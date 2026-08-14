@@ -4,13 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
+import type {
   DataPart as A2ADataPart,
   FilePart as A2AFilePart,
   Part as A2APart,
   TextPart as A2ATextPart,
 } from '@a2a-js/sdk';
-import {Part as GenAIPart, Language, Outcome} from '@google/genai';
+import type {Part as GenAIPart} from '@google/genai';
+import {Language, Outcome} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {
   toA2ADataPart,

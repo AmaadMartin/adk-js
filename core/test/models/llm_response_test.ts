@@ -4,11 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  BlockedReason,
-  FinishReason,
-  GenerateContentResponse,
-} from '@google/genai';
+import type {GenerateContentResponse} from '@google/genai';
+import {BlockedReason, FinishReason} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {createLlmResponse} from '../../src/models/llm_response.js';
 

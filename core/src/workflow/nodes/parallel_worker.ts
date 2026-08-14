@@ -5,8 +5,8 @@
  */
 
 import {BaseNode} from '../base_node.js';
-import {RunnableNode} from '../graph.js';
-import {NodeContext} from '../node_context.js';
+import type {RunnableNode} from '../graph.js';
+import type {NodeContext} from '../node_context.js';
 import {buildNode} from '../utils/workflow_graph_utils.js';
 
 /**

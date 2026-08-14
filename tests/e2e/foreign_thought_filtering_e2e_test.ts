@@ -4,15 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  createEvent,
-  Event,
-  Gemini,
-  InMemoryRunner,
-  LlmAgent,
-  LlmRequest,
-} from '@google/adk';
-import {Content, createUserContent} from '@google/genai';
+import type {Event, LlmRequest} from '@google/adk';
+import {createEvent, Gemini, InMemoryRunner, LlmAgent} from '@google/adk';
+import type {Content} from '@google/genai';
+import {createUserContent} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
 describe('Foreign Thought Filtering Manual E2E Test (No Mocks)', () => {

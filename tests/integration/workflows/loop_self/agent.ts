@@ -16,7 +16,8 @@
  * Enter a number between 0 and 10.
  */
 
-import {createEvent, node, NodeContext, Workflow} from '@google/adk';
+import type {NodeContext} from '@google/adk';
+import {createEvent, node, Workflow} from '@google/adk';
 
 /** Python's `Event(message=...)` content shape (role `user`). */
 const message = (text: string) =>

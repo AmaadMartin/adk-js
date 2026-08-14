@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {BaseLlm, Gemini, LlmRequest, RoutedLlm} from '@google/adk';
+import type {BaseLlm, LlmRequest} from '@google/adk';
+import {Gemini, RoutedLlm} from '@google/adk';
 import * as dotenv from 'dotenv';
 import * as fs from 'node:fs';
 import * as path from 'node:path';

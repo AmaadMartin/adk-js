@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {TextPart} from '@a2a-js/sdk';
+import type {TextPart} from '@a2a-js/sdk';
 import {describe, expect, it} from 'vitest';
 import {
   getFunctionResponseCallId,
@@ -14,8 +14,8 @@ import {
   toMissingRemoteSessionParts,
 } from '../../src/a2a/a2a_remote_agent_utils.js';
 import {AdkMetadataKeys} from '../../src/a2a/metadata_converter_utils.js';
-import {BaseAgent} from '../../src/agents/base_agent.js';
-import {InvocationContext} from '../../src/agents/invocation_context.js';
+import type {BaseAgent} from '../../src/agents/base_agent.js';
+import type {InvocationContext} from '../../src/agents/invocation_context.js';
 import {createEvent} from '../../src/events/event.js';
 import {createSession} from '../../src/sessions/session.js';
 

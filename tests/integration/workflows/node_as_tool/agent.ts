@@ -22,13 +22,13 @@
  * `confirm_vip_discount` interrupt, e.g. via the web UI).
  */
 
+import type {NodeContext} from '@google/adk';
 import {
   App,
   createEvent,
   createResumabilityConfig,
   LlmAgent,
   node,
-  NodeContext,
   RequestInput,
   Workflow,
 } from '@google/adk';

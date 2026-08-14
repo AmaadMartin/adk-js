@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Request} from 'express';
-import {IncomingHttpHeaders} from 'node:http';
+import type {Request} from 'express';
+import type {IncomingHttpHeaders} from 'node:http';
 import {describe, expect, it} from 'vitest';
 import {bearerTokenUserBuilder} from '../../src/a2a/auth.js';
 

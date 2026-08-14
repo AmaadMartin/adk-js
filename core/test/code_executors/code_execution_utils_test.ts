@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content, Language, Outcome, Part} from '@google/genai';
+import type {Content, Part} from '@google/genai';
+import {Language, Outcome} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {
   CodeExecutionLanguage,

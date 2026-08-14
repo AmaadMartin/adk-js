@@ -5,14 +5,16 @@
  */
 
 import yaml from 'js-yaml';
-import {OpenAPIV3} from 'openapi-types';
-import {ReadonlyContext} from '../../agents/readonly_context.js';
-import {AuthCredential} from '../../auth/auth_credential.js';
+import type {OpenAPIV3} from 'openapi-types';
+import type {ReadonlyContext} from '../../agents/readonly_context.js';
+import type {AuthCredential} from '../../auth/auth_credential.js';
 import {experimental} from '../../utils/experimental.js';
-import {BaseTool} from '../base_tool.js';
-import {BaseToolset, ToolPredicate} from '../base_toolset.js';
+import type {BaseTool} from '../base_tool.js';
+import type {ToolPredicate} from '../base_toolset.js';
+import {BaseToolset} from '../base_toolset.js';
 import {OpenApiSpecParser} from './openapi_spec_parser/openapi_spec_parser.js';
-import {createRestApiTool, RestApiTool} from './rest_api_tool.js';
+import type {RestApiTool} from './rest_api_tool.js';
+import {createRestApiTool} from './rest_api_tool.js';
 
 @experimental
 export class OpenAPIToolset extends BaseToolset {

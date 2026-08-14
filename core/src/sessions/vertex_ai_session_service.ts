@@ -5,8 +5,8 @@
  */
 
 import {Client} from '@google-cloud/vertexai';
-import {Sessions} from '@google-cloud/vertexai/build/src/genai/sessions.js';
-import {
+import type {Sessions} from '@google-cloud/vertexai/build/src/genai/sessions.js';
+import type {
   EventActions as ApiEventActions,
   AppendAgentEngineSessionEventConfig,
   AppendAgentEngineSessionEventRequestParameters,
@@ -14,7 +14,7 @@ import {
   Session as VertexAiSession,
   SessionEvent as VertexAiSessionEvent,
 } from '@google-cloud/vertexai/build/src/genai/types.js';
-import {
+import type {
   Content,
   GenerateContentResponseUsageMetadata,
   GroundingMetadata,
@@ -22,10 +22,10 @@ import {
 import {isCompactedEvent} from '../events/compacted_event.js';
 import {experimental} from '../utils/experimental.js';
 
-import {AuthConfig} from '../auth/auth_tool.js';
-import {Event, NodeInfo, Route} from '../events/event.js';
-import {EventActions} from '../events/event_actions.js';
-import {ToolConfirmation} from '../tools/tool_confirmation.js';
+import type {AuthConfig} from '../auth/auth_tool.js';
+import type {Event, NodeInfo, Route} from '../events/event.js';
+import type {EventActions} from '../events/event_actions.js';
+import type {ToolConfirmation} from '../tools/tool_confirmation.js';
 import {logger} from '../utils/logger.js';
 import {
   EXPRESS_MODE_UNSUPPORTED_MESSAGE,
@@ -33,17 +33,17 @@ import {
 } from '../utils/vertex_ai_utils.js';
 
 import {partialCopy} from '../utils/partial_copy.js';
-import {
+import type {
   AppendEventRequest,
-  BaseSessionService,
   CreateSessionRequest,
   DeleteSessionRequest,
   GetSessionRequest,
   ListSessionsRequest,
   ListSessionsResponse,
-  trimTempState,
 } from './base_session_service.js';
-import {createSession, Session} from './session.js';
+import {BaseSessionService, trimTempState} from './base_session_service.js';
+import type {Session} from './session.js';
+import {createSession} from './session.js';
 
 const DEFAULT_MAX_ATTEMPTS = 30;
 const GRPC_NOT_FOUND = 5;

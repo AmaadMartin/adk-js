@@ -5,10 +5,8 @@
  */
 
 import {describe, expect, it, vi} from 'vitest';
-import {
-  isReplayDivergenceError,
-  ReplayDivergenceError,
-} from '../../src/workflow/errors.js';
+import type {ReplayDivergenceError} from '../../src/workflow/errors.js';
+import {isReplayDivergenceError} from '../../src/workflow/errors.js';
 import {ReplaySequenceBarrier} from '../../src/workflow/utils/replay_sequence_barrier.js';
 
 /** Lets every already-resolved promise settle without advancing the clock. */

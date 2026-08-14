@@ -13,14 +13,8 @@
  * Enter a 4-digit year, e.g. "1955".
  */
 
-import {
-  createEvent,
-  JoinNode,
-  LlmAgent,
-  node,
-  NodeContext,
-  Workflow,
-} from '@google/adk';
+import type {NodeContext} from '@google/adk';
+import {createEvent, JoinNode, LlmAgent, node, Workflow} from '@google/adk';
 
 const processInput = node(
   function* (ctx: NodeContext, nodeInput: string) {

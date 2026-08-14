@@ -4,15 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {Event, InvocationContext} from '@google/adk';
 import {
   BaseAgent,
   createEvent,
-  Event,
   InMemoryRunner,
-  InvocationContext,
   SaveFilesAsArtifactsPlugin,
 } from '@google/adk';
-import {Content} from '@google/genai';
+import type {Content} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
 const APP_NAME = 'save_files_e2e';

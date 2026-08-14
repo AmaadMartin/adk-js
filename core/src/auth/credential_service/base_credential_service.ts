@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Context} from '../../agents/context.js';
-import {AuthCredential} from '../auth_credential.js';
-import {AuthConfig} from '../auth_tool.js';
+import type {Context} from '../../agents/context.js';
+import type {AuthCredential} from '../auth_credential.js';
+import type {AuthConfig} from '../auth_tool.js';
 
 /**
  * Abstract class for Service that loads / saves tool credentials from / to the

@@ -4,12 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {InvocationContext, Skill} from '@google/adk';
 import {
   Context,
-  InvocationContext,
   LoadSkillErrorCode,
   LoadSkillTool,
-  Skill,
   SkillToolset,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';

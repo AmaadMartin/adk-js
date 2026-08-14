@@ -15,8 +15,8 @@
  */
 
 import {requiresUserInput} from '../../agents/user_input_request.js';
-import {Event} from '../../events/event.js';
-import {RouteValue} from '../graph.js';
+import type {Event} from '../../events/event.js';
+import type {RouteValue} from '../graph.js';
 import {
   interruptResponseMismatch,
   responseSchemasByInterruptId,

@@ -6,7 +6,7 @@
 
 import {logger} from '../utils/logger.js';
 import {redactUriPassword} from '../utils/redact_uri.js';
-import {BaseArtifactService} from './base_artifact_service.js';
+import type {BaseArtifactService} from './base_artifact_service.js';
 import {FileArtifactService} from './file_artifact_service.js';
 import {GcsArtifactService} from './gcs_artifact_service.js';
 import {

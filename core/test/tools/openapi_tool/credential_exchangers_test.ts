@@ -6,10 +6,8 @@
 
 import {JWT} from 'google-auth-library';
 import {describe, expect, it, vi} from 'vitest';
-import {
-  AuthCredential,
-  AuthCredentialTypes,
-} from '../../../src/auth/auth_credential.js';
+import type {AuthCredential} from '../../../src/auth/auth_credential.js';
+import {AuthCredentialTypes} from '../../../src/auth/auth_credential.js';
 import {AutoAuthCredentialExchanger} from '../../../src/tools/openapi_tool/auth/credential_exchangers/auto_auth_credential_exchanger.js';
 import {ServiceAccountCredentialExchanger} from '../../../src/tools/openapi_tool/auth/credential_exchangers/service_account_exchanger.js';
 

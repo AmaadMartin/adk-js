@@ -4,14 +4,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {
+  CompactedEvent,
+  ContextCompactionTrigger,
+  InvocationContext,
+} from '@google/adk';
 import {
   AnchoredContextCompactor,
   BasePlugin,
-  CompactedEvent,
-  ContextCompactionTrigger,
   Gemini,
   InMemoryRunner,
-  InvocationContext,
   isCompactedEvent,
   isScratchpadEvent,
   LlmAgent,

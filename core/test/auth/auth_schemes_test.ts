@@ -4,12 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  AuthProviderRegistry,
-  AuthScheme,
-  BaseAuthProvider,
-  OAuthGrantType,
-} from '@google/adk';
+import type {AuthScheme, BaseAuthProvider} from '@google/adk';
+import {AuthProviderRegistry, OAuthGrantType} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 import {getOAuthGrantTypeFromFlow} from '../../src/auth/auth_schemes.js';
 import {getTokenEndpoint} from '../../src/auth/oauth2/oauth2_utils.js';

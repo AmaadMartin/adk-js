@@ -6,7 +6,7 @@
 
 import {LlmAgent, OpenAPIToolset} from '@google/adk';
 import * as http from 'node:http';
-import {OpenAPIV3} from 'openapi-types';
+import type {OpenAPIV3} from 'openapi-types';
 import {afterAll, beforeAll, describe, expect, it} from 'vitest';
 import {createRunner, GeminiWithMockResponses} from '../test_case_utils.js';
 

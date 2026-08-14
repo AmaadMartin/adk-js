@@ -6,7 +6,7 @@
 
 import {describe, expect, it} from 'vitest';
 import {formatSkillsAsXml} from '../../src/skills/prompt.js';
-import {Frontmatter, Skill} from '../../src/skills/skill.js';
+import type {Frontmatter, Skill} from '../../src/skills/skill.js';
 
 describe('prompt', () => {
   describe('formatSkillsAsXml', () => {

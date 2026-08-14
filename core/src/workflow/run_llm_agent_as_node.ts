@@ -4,15 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content} from '@google/genai';
-import {
+import type {Content} from '@google/genai';
+import type {
   InvocationContext,
   WorkflowInstructionScope,
 } from '../agents/invocation_context.js';
-import {LlmAgent} from '../agents/llm_agent.js';
+import type {LlmAgent} from '../agents/llm_agent.js';
+import type {Event} from '../events/event.js';
 import {
   createEvent,
-  Event,
   getFunctionCalls,
   getFunctionResponses,
 } from '../events/event.js';
@@ -21,7 +21,7 @@ import {
   FINISH_TASK_TOOL_NAME,
 } from '../tools/finish_task_tool.js';
 import {isContent} from './base_node.js';
-import {NodeContext} from './node_context.js';
+import type {NodeContext} from './node_context.js';
 
 /**
  * Runs an {@link LlmAgent} as a workflow node: the node input is appended as a

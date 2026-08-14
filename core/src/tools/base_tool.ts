@@ -4,12 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {FunctionDeclaration, Tool} from '@google/genai';
+import type {FunctionDeclaration, Tool} from '@google/genai';
 
-import {LlmRequest} from '../models/llm_request.js';
+import type {LlmRequest} from '../models/llm_request.js';
 import {getGoogleLlmVariant} from '../utils/variant_utils.js';
 
-import {Context} from '../agents/context.js';
+import type {Context} from '../agents/context.js';
 
 /**
  * The parameters for `runAsync`.

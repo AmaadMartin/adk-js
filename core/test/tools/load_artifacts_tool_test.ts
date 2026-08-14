@@ -4,13 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  Context,
-  LOAD_ARTIFACTS,
-  LlmRequest,
-  LoadArtifactsTool,
-} from '@google/adk';
-import {Blob, Part, Type} from '@google/genai';
+import type {Context, LlmRequest} from '@google/adk';
+import {LOAD_ARTIFACTS, LoadArtifactsTool} from '@google/adk';
+import type {Blob, Part} from '@google/genai';
+import {Type} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
 class StubToolContext {

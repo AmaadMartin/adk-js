@@ -4,14 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  BaseAgent,
-  Gemini,
-  InMemoryRunner,
-  InvocationContext,
-  LlmAgent,
-  RoutedAgent,
-} from '@google/adk';
+import type {BaseAgent, InvocationContext} from '@google/adk';
+import {Gemini, InMemoryRunner, LlmAgent, RoutedAgent} from '@google/adk';
 import * as dotenv from 'dotenv';
 import * as fs from 'node:fs';
 import * as path from 'node:path';

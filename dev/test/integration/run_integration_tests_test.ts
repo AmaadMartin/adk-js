@@ -9,7 +9,7 @@ import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {batchLoadYamlTestDefs} from '../../src/conformance/yaml_test_loader.js';
 import {runIntegrationTests} from '../../src/integration/run_integration_tests.js';
 import {TestRunner} from '../../src/integration/test_runner.js';
-import {TestInfo} from '../../src/integration/test_types.js';
+import type {TestInfo} from '../../src/integration/test_types.js';
 
 vi.mock('../../src/conformance/yaml_agent_loader.js', () => ({
   batchLoadYamlAgentConfig: vi.fn(async () => new Map()),

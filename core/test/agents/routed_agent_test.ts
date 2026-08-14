@@ -4,20 +4,23 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  BaseAgent,
+import type {
   BaseAgentConfig,
   Event,
-  InvocationContext,
   InvocationContextParams,
+  Session,
+} from '@google/adk';
+import {
+  BaseAgent,
+  InvocationContext,
   LlmAgent,
   RoutedAgent,
-  Session,
   createEvent,
   isRoutedAgent,
 } from '@google/adk';
 import {beforeEach, describe, expect, it} from 'vitest';
-import {Logger, setLogger} from '../../src/utils/logger.js';
+import type {Logger} from '../../src/utils/logger.js';
+import {setLogger} from '../../src/utils/logger.js';
 
 class MockAgent extends BaseAgent {
   constructor(name: string) {

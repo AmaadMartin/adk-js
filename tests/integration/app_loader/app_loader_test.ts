@@ -4,14 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {App, Event, RunnableRoot} from '@google/adk';
 import {
-  App,
-  Event,
   InMemorySessionService,
   isApp,
   isBaseAgent,
   isWorkflow,
-  RunnableRoot,
   Runner,
 } from '@google/adk';
 import {spawn} from 'node:child_process';

@@ -4,17 +4,19 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
+import type {
   CodeExecutionResult,
+  SessionArtifactService,
+  Skill,
+  SkillScriptResponse,
+} from '@google/adk';
+import {
   Context,
   createSession,
   InvocationContext,
   LlmAgent,
   PluginManager,
   RunSkillScriptTool,
-  SessionArtifactService,
-  Skill,
-  SkillScriptResponse,
   SkillToolset,
   UnsafeLocalCodeExecutor,
 } from '@google/adk';

@@ -4,15 +4,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {LlmRequest} from '@google/adk';
 import {
   BaseAgent,
   InvocationContext,
   LlmAgent,
-  LlmRequest,
   PluginManager,
   createSession,
 } from '@google/adk';
-import {Schema, Type} from '@google/genai';
+import type {Schema} from '@google/genai';
+import {Type} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {IDENTITY_LLM_REQUEST_PROCESSOR} from '../../../src/agents/processors/identity_llm_request_processor.js';
 

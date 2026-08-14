@@ -4,12 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {BasePlugin} from '../plugins/base_plugin.js';
-import {
-  asRunnableRoot,
-  RunnableRoot,
-} from '../workflow/run_node_as_invocation.js';
-import {ResumabilityConfig} from './resumability_config.js';
+import type {BasePlugin} from '../plugins/base_plugin.js';
+import type {RunnableRoot} from '../workflow/run_node_as_invocation.js';
+import {asRunnableRoot} from '../workflow/run_node_as_invocation.js';
+import type {ResumabilityConfig} from './resumability_config.js';
 
 const VALID_APP_NAME_RE = /^[a-zA-Z][a-zA-Z0-9_-]*$/;
 
