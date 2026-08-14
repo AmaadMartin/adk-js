@@ -10,7 +10,11 @@ import {
   AuthCredentialTypes,
   Context,
   createRestApiTool,
+  createSession,
+  InvocationContext,
+  LlmAgent,
   OpenApiSpecParser,
+  PluginManager,
   RestApiTool,
   ToolAuthHandler,
 } from '@google/adk';
@@ -1169,6 +1173,23 @@ describe('RestApiTool required parameter defaults', () => {
     });
   }
 
+  function toolContext(): Context {
+    return new Context({
+      invocationContext: new InvocationContext({
+        invocationId: 'invocation-1',
+        agent: new LlmAgent({name: 'test_agent'}),
+        session: createSession({id: 'session-1', appName: 'test_app'}),
+        pluginManager: new PluginManager(),
+      }),
+    });
+  }
+
+  function requestedUrl(): string {
+    const [url] = vi.mocked(globalThis.fetch).mock.calls[0];
+    if (typeof url !== 'string') expect.fail('fetch was not called with a URL');
+    return url;
+  }
+
   function queryParam(
     name: string,
     schema: OpenAPIV3.SchemaObject,
@@ -1177,20 +1198,18 @@ describe('RestApiTool required parameter defaults', () => {
     return {name, in: 'query', required, schema};
   }
 
-  async function callWith(
-    operation: OpenAPIV3.OperationObject,
+  async function callQueryOperation(
+    parameter: OpenAPIV3.ParameterObject,
     args: Record<string, unknown>,
-    operationEndpoint = endpoint,
   ): Promise<string> {
     mockFetch();
-    const tool = new RestApiTool(
-      'test_tool',
-      'description',
-      operationEndpoint,
-      operation,
-    );
-    await tool.runAsync({args, toolContext: {} as unknown as Context});
-    return vi.mocked(globalThis.fetch).mock.calls[0][0] as string;
+    const tool = new RestApiTool('test_tool', 'description', endpoint, {
+      operationId: 'findPetsByStatus',
+      parameters: [parameter],
+      responses: {},
+    });
+    await tool.runAsync({args, toolContext: toolContext()});
+    return requestedUrl();
   }
 
   afterEach(() => {
@@ -1198,14 +1217,8 @@ describe('RestApiTool required parameter defaults', () => {
   });
 
   it('sends the default of an omitted required query parameter', async () => {
-    const url = await callWith(
-      {
-        operationId: 'findPetsByStatus',
-        parameters: [
-          queryParam('status', {type: 'string', default: 'available'}),
-        ],
-        responses: {},
-      },
+    const url = await callQueryOperation(
+      queryParam('status', {type: 'string', default: 'available'}),
       {},
     );
 
@@ -1238,20 +1251,14 @@ describe('RestApiTool required parameter defaults', () => {
       },
     );
 
-    await tool.runAsync({args: {}, toolContext: {} as unknown as Context});
+    await tool.runAsync({args: {}, toolContext: toolContext()});
 
-    expect(vi.mocked(globalThis.fetch).mock.calls[0][0]).toBe(
-      'https://example.com/users/me/messages',
-    );
+    expect(requestedUrl()).toBe('https://example.com/users/me/messages');
   });
 
   it('sends a default of false', async () => {
-    const url = await callWith(
-      {
-        operationId: 'findPetsByStatus',
-        parameters: [queryParam('flag', {type: 'boolean', default: false})],
-        responses: {},
-      },
+    const url = await callQueryOperation(
+      queryParam('flag', {type: 'boolean', default: false}),
       {},
     );
 
@@ -1259,12 +1266,8 @@ describe('RestApiTool required parameter defaults', () => {
   });
 
   it('sends a default of zero', async () => {
-    const url = await callWith(
-      {
-        operationId: 'findPetsByStatus',
-        parameters: [queryParam('page', {type: 'integer', default: 0})],
-        responses: {},
-      },
+    const url = await callQueryOperation(
+      queryParam('page', {type: 'integer', default: 0}),
       {},
     );
 
@@ -1294,7 +1297,7 @@ describe('RestApiTool required parameter defaults', () => {
       },
     );
 
-    await tool.runAsync({args: {}, toolContext: {} as unknown as Context});
+    await tool.runAsync({args: {}, toolContext: toolContext()});
 
     expect(vi.mocked(globalThis.fetch).mock.calls[0][1]).toMatchObject({
       body: JSON.stringify({status: 'available'}),
@@ -1302,12 +1305,8 @@ describe('RestApiTool required parameter defaults', () => {
   });
 
   it('drops an omitted required parameter that has no default', async () => {
-    const url = await callWith(
-      {
-        operationId: 'findPetsByStatus',
-        parameters: [queryParam('status', {type: 'string'})],
-        responses: {},
-      },
+    const url = await callQueryOperation(
+      queryParam('status', {type: 'string'}),
       {},
     );
 
@@ -1315,14 +1314,8 @@ describe('RestApiTool required parameter defaults', () => {
   });
 
   it('keeps a value the caller supplied over the default', async () => {
-    const url = await callWith(
-      {
-        operationId: 'findPetsByStatus',
-        parameters: [
-          queryParam('status', {type: 'string', default: 'available'}),
-        ],
-        responses: {},
-      },
+    const url = await callQueryOperation(
+      queryParam('status', {type: 'string', default: 'available'}),
       {status: 'sold'},
     );
 
@@ -1330,14 +1323,8 @@ describe('RestApiTool required parameter defaults', () => {
   });
 
   it('drops an omitted optional parameter that has a default', async () => {
-    const url = await callWith(
-      {
-        operationId: 'findPetsByStatus',
-        parameters: [
-          queryParam('status', {type: 'string', default: 'available'}, false),
-        ],
-        responses: {},
-      },
+    const url = await callQueryOperation(
+      queryParam('status', {type: 'string', default: 'available'}, false),
       {},
     );
 
@@ -1345,12 +1332,8 @@ describe('RestApiTool required parameter defaults', () => {
   });
 
   it('drops an omitted required parameter whose default is null', async () => {
-    const url = await callWith(
-      {
-        operationId: 'findPetsByStatus',
-        parameters: [queryParam('status', {type: 'string', default: null})],
-        responses: {},
-      },
+    const url = await callQueryOperation(
+      queryParam('status', {type: 'string', default: null}),
       {},
     );
 
