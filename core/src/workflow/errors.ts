@@ -167,3 +167,42 @@ export function isNodeSchemaValidationError(
 ): e is NodeSchemaValidationError {
   return e instanceof Error && e.name === 'NodeSchemaValidationError';
 }
+
+/**
+ * Raised when a replayed node waits past its deadline for the recorded
+ * completion that should release it: the replay diverged from the recording.
+ *
+ * Proceeding instead would emit this turn's events in an order the session does
+ * not record, which is the failure the replay barrier exists to prevent — so
+ * the wait fails loudly rather than continuing.
+ */
+export class ReplayDivergenceError extends Error {
+  /** The barrier key whose gate never opened. */
+  readonly sequenceKey: string;
+  /** The deadline, in milliseconds, that was exceeded. */
+  readonly timeoutMs: number;
+
+  /**
+   * @param options.sequenceKey The barrier key that was waited on.
+   * @param options.timeoutMs The deadline, in milliseconds, that was exceeded.
+   */
+  constructor(options: {sequenceKey: string; timeoutMs: number}) {
+    // Wording matches `google/adk-python`'s so the two runtimes are greppable
+    // together.
+    super(
+      `Replay divergence detected: Timed out waiting for sequence key ` +
+        `'${options.sequenceKey}' to be unblocked.`,
+    );
+    this.name = 'ReplayDivergenceError';
+    this.sequenceKey = options.sequenceKey;
+    this.timeoutMs = options.timeoutMs;
+    Object.setPrototypeOf(this, ReplayDivergenceError.prototype);
+  }
+}
+
+/** Type guard for {@link ReplayDivergenceError} (name-based; see above). */
+export function isReplayDivergenceError(
+  e: unknown,
+): e is ReplayDivergenceError {
+  return e instanceof Error && e.name === 'ReplayDivergenceError';
+}

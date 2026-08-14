@@ -17,20 +17,20 @@ import {
 } from './schedule_dynamic_node.js';
 import {
   eventsForCurrentRun,
-  isFastForwardable,
-  makeFastForwardResult,
   reconstructNodeStatesByPath,
-  type RehydratedNode,
 } from './utils/rehydration_utils.js';
+import {
+  checkInterception,
+  interceptedResult,
+} from './utils/replay_interceptor.js';
+import {sequenceKey} from './utils/replay_manager.js';
 
 /**
- * Handles `ctx.runNode()` calls for a {@link Workflow} subtree.
+ * Handles `ctx.runNode()` calls for a {@link Workflow} subtree: fresh
+ * execution, deduplication of concurrent calls to the same node path, and
+ * resumption from session events in the recorded completion order.
  *
- * Ported (Phase 4 subset) from `google/adk-python`
- * `workflow/_dynamic_node_scheduler.py`. Implemented now: fresh execution and
- * deduplication of concurrent calls to the same node path. Resumption from
- * session events (rehydration + replay interception) is added in Phase 5 at the
- * marked hook point.
+ * Ported from `google/adk-python` `workflow/_dynamic_node_scheduler.py`.
  */
 export class DynamicNodeScheduler implements ScheduleDynamicNode {
   /**
@@ -52,10 +52,46 @@ export class DynamicNodeScheduler implements ScheduleDynamicNode {
   ): Promise<NodeContext | NodeResult> {
     const name = options.nodeName ?? node.name;
     const runId = options.runId;
-    const nodePath = ctx.nodePath
-      ? `${ctx.nodePath}.${name}@${runId}`
-      : `${name}@${runId}`;
+    // A dynamic child's path segment carries its run id, so it names exactly
+    // one run and the barrier's run number for it is always 1.
+    const segment = `${name}@${runId}`;
+    const nodePath = ctx.nodePath ? `${ctx.nodePath}.${segment}` : segment;
 
+    if (ctx.nodePath) {
+      this.state.replayManager.prepareParentSequenceBarrier(ctx, ctx.nodePath);
+    }
+
+    const result = await this.resolveRun(ctx, node, input, {
+      name,
+      runId,
+      segment,
+      nodePath,
+      options,
+    });
+    // Every successful schedule releases the next child in the recorded order.
+    // A child that threw does not: the workflow tears down on a dynamic node
+    // failure anyway.
+    this.state.replayManager.advanceSequence(
+      ctx.nodePath,
+      sequenceKey(segment, 1),
+    );
+    return result;
+  }
+
+  /** Dedups, replays, or freshly runs one `ctx.runNode()` call. */
+  private async resolveRun(
+    ctx: NodeContext,
+    node: BaseNode,
+    input: unknown,
+    run: {
+      name: string;
+      runId: string;
+      segment: string;
+      nodePath: string;
+      options: ScheduleDynamicNodeOptions;
+    },
+  ): Promise<NodeContext | NodeResult> {
+    const {name, runId, segment, nodePath, options} = run;
     const existing = this.state.runs.get(nodePath);
     if (existing?.task) {
       // Deduplicate concurrent calls: await the in-flight task.
@@ -69,57 +105,42 @@ export class DynamicNodeScheduler implements ScheduleDynamicNode {
 
     // Cross-turn resume: rehydrate this dynamic run from the events of the run
     // still in progress (a run that already completed must not be replayed).
-    if (!this.state.runs.has(nodePath)) {
-      const prior = reconstructNodeStatesByPath(
-        eventsForCurrentRun(ctx.session?.events ?? [], ctx.invocationId),
-      ).get(nodePath);
-      if (prior && isFastForwardable(prior)) {
-        // Completed in a prior turn -> return cached output, do not re-execute.
-        // `rerunOnResume` is deliberately not consulted, as in the static twin
-        // (`Workflow.scheduleNode`): it says what to do with an interrupt the
-        // node is still waiting on, and `isFastForwardable` has already ruled
-        // a waiting node out. Consulted here it would replay the whole run.
-        return this.completeWithoutRunning(
-          ctx,
-          {nodePath, runId, options},
-          makeFastForwardResult(ctx, prior),
-        );
-      }
-      // Resume with rerunOnResume=false: a child that interrupted last turn
-      // (raised interrupts, produced no output) does NOT re-run its body. It
-      // completes with the resolved resume value(s) as its output, which
-      // `ctx.runNode()` hands back to the caller. Mirrors the static-graph
-      // handoff in `Workflow.scheduleNode`; without it such a child re-runs,
-      // raises a brand-new interrupt, and the workflow can never resume.
-      const handoff = this.resumeHandoff(ctx, node, prior);
-      if (handoff) {
-        return this.completeWithoutRunning(
-          ctx,
-          {nodePath, runId, options},
-          handoff,
-        );
-      }
-      // Otherwise (waiting/unresolved): resume inputs were already merged into
-      // ctx.resumeInputs by the Workflow; fall through to a fresh run.
+    const prior = reconstructNodeStatesByPath(
+      eventsForCurrentRun(ctx.session?.events ?? [], ctx.invocationId),
+    ).get(nodePath);
+    const decision = checkInterception({
+      node,
+      prior,
+      resumeInputs: ctx.resumeInputs,
+    });
+    if (!decision.shouldRun) {
+      return this.completeWithoutRunning(
+        ctx,
+        {nodePath, segment, runId, options},
+        interceptedResult(ctx, decision),
+      );
     }
-
+    // Otherwise (fresh, or waiting on an unresolved interrupt): resume inputs
+    // were already merged into ctx.resumeInputs by the Workflow.
     return this.runFresh(ctx, node, input, name, runId, nodePath, options);
   }
 
   /**
    * Books a dynamic run that completed WITHOUT executing its body — either
    * fast-forwarded from a cached output or handed the resolved resume value —
-   * and returns `result` for `ctx.runNode()` to give back to the caller.
+   * and returns `result` for `ctx.runNode()` to give back to the caller, once
+   * the recorded order reaches it.
    */
-  private completeWithoutRunning(
+  private async completeWithoutRunning(
     ctx: NodeContext,
     run: {
       nodePath: string;
+      segment: string;
       runId: string;
       options: ScheduleDynamicNodeOptions;
     },
     result: NodeResult,
-  ): NodeResult {
+  ): Promise<NodeResult> {
     this.state.runs.set(run.nodePath, {
       state: createNodeState({
         status: NodeStatus.COMPLETED,
@@ -129,6 +150,10 @@ export class DynamicNodeScheduler implements ScheduleDynamicNode {
       output: result.output,
       result,
     });
+    await this.state.replayManager.waitSequence(
+      ctx.nodePath,
+      sequenceKey(run.segment, 1),
+    );
     return this.handBack(ctx, result, run.options);
   }
 
@@ -146,36 +171,6 @@ export class DynamicNodeScheduler implements ScheduleDynamicNode {
       ctx.route = result.route;
     }
     return result;
-  }
-
-  /**
-   * Builds the completion result for a child that interrupted in a prior turn
-   * and whose interrupts are now all resolved, or `undefined` when the child is
-   * not in that state (so the caller falls through to a fresh run).
-   */
-  private resumeHandoff(
-    ctx: NodeContext,
-    node: BaseNode,
-    prior: RehydratedNode | undefined,
-  ): NodeResult | undefined {
-    if (
-      !prior ||
-      node.rerunOnResume ||
-      prior.output !== undefined ||
-      prior.interruptIds.size === 0
-    ) {
-      return undefined;
-    }
-    const values = [...prior.interruptIds].map((id) => ctx.resumeInputs[id]);
-    if (!values.every((value) => value !== undefined)) {
-      return undefined;
-    }
-    return {
-      output: values.length === 1 ? values[0] : values,
-      route: undefined,
-      branch: prior.branch ?? ctx.branch,
-      interruptIds: [],
-    };
   }
 
   private async runFresh(

@@ -30,12 +30,16 @@ import {DynamicNodeState} from './schedule_dynamic_node.js';
 import {Trigger} from './trigger.js';
 import {
   eventsForCurrentRun,
-  isFastForwardable,
-  makeFastForwardResult,
   reconstructNodeRuns,
   RehydratedNode,
   resolvedInterruptResponses,
 } from './utils/rehydration_utils.js';
+import {
+  checkInterception,
+  interceptedResult,
+} from './utils/replay_interceptor.js';
+import {sequenceKey} from './utils/replay_manager.js';
+import {ReplaySequenceBarrier} from './utils/replay_sequence_barrier.js';
 
 /**
  * A unique symbol branding {@link Workflow} instances.
@@ -90,8 +94,7 @@ export type WorkflowConfig = BaseNodeConfig & {
 
 /**
  * Mutable, in-memory state for a single {@link Workflow} run. Not persisted;
- * discarded when `runImpl` returns. (Replay/checkpoint fields are added in
- * Phase 5.)
+ * discarded when `runImpl` returns.
  */
 class LoopState {
   readonly nodes = new Map<string, NodeState>();
@@ -102,6 +105,13 @@ class LoopState {
   readonly interruptIds = new Set<string>();
   /** Per-node state reconstructed from prior session events (resume). */
   rehydrated: Map<string, RehydratedNode[]> = new Map();
+
+  /**
+   * The recorded completion order this run replays. Empty until `orchestrate`
+   * scans the session, and empty for a first run — an empty barrier never
+   * blocks anything.
+   */
+  sequenceBarrier: ReplaySequenceBarrier = new ReplaySequenceBarrier([]);
 
   /** Nodes already activated in this turn, so a repeat activation is visible. */
   activated: Set<string> = new Set();
@@ -129,9 +139,10 @@ interface CompletedTask {
  * SETUP (seed START triggers) → LOOP (schedule ready nodes, handle
  * completions) → FINALIZE (collect the terminal output).
  *
- * Ported (Phase 2 subset) from `google/adk-python` `workflow/_workflow.py`.
- * Replay/checkpointing, dynamic scheduling, and task/chat isolation scopes are
- * added in later phases; hook points are marked with TODO(phase-N).
+ * Ported from `google/adk-python` `workflow/_workflow.py`. A resumed run
+ * replays its recorded node-completion order through the shared
+ * `ReplaySequenceBarrier` (named rather than linked, because it is internal);
+ * checkpointing and task/chat isolation scopes are not ported yet.
  */
 @experimental
 export class Workflow extends BaseNode {
@@ -242,6 +253,7 @@ export class Workflow extends BaseNode {
 
     const loop = new LoopState();
     loop.rehydrated = rehydrated;
+    loop.sequenceBarrier = dynamicState.replayManager.scanWorkflowEvents(ctx);
     loop.abortSignal = abortController.signal;
 
     this.seedStartTriggers(loop, nodeInput);
@@ -329,6 +341,7 @@ export class Workflow extends BaseNode {
 
       const result = await Promise.race(loop.pending.values());
       loop.pending.delete(result.name);
+      this.advanceSequence(loop, result.name);
 
       if (result.error) {
         const nodeState = loop.nodes.get(result.name);
@@ -437,56 +450,33 @@ export class Workflow extends BaseNode {
     const repeatActivation = loop.activated.has(nodeName);
     loop.activated.add(nodeName);
 
-    // Resume: fast-forward a node that already completed in a prior run
-    // (cached output, all interrupts resolved). `rerunOnResume` governs an
-    // interrupt the node is still waiting on, not a run that already produced
-    // its result, and `isFastForwardable` excludes a waiting node — so the flag
-    // is not consulted here. Python reaches its cached-result case first too.
     const prior = loop.rehydrated.get(nodeName)?.shift();
-    if (prior && isFastForwardable(prior)) {
-      loop.pending.set(
-        nodeName,
-        Promise.resolve({
-          name: nodeName,
-          childCtx: makeFastForwardResult(ctx, prior),
-        }),
-      );
-      return;
-    }
 
-    // Resume with rerun_on_resume=false: a node that interrupted last turn
-    // (raised interrupts, produced no output) does NOT re-run its body. Instead
-    // it completes with the resolved resume value(s) as its output, feeding the
-    // next node. This is Python's two-node request-input pattern, where one node
-    // yields RequestInput and its successor receives the human's reply as input.
-    if (
-      prior &&
-      !node.rerunOnResume &&
-      prior.output === undefined &&
-      prior.interruptIds.size > 0
-    ) {
-      const values = [...prior.interruptIds].map((id) => ctx.resumeInputs[id]);
-      if (values.every((v) => v !== undefined)) {
-        const output = values.length === 1 ? values[0] : values;
-        const resumeResult: NodeResult = {
-          output,
-          route: undefined,
-          branch: prior.branch ?? ctx.branch,
-          interruptIds: [],
-        };
-        loop.pending.set(
-          nodeName,
-          Promise.resolve({name: nodeName, childCtx: resumeResult}),
-        );
-        return;
-      }
-    }
-
+    // Every activation consumes a run number, replayed or not, so `runId` is
+    // the activation index: the same index the `shift()` above consumes, and
+    // the run number the barrier key below must name. Assigned before the
+    // hand-back so a replayed activation does not leave the next one reusing
+    // its number.
     let runId = nodeState.runId;
     if (!runId) {
       nodeState.runCounter += 1;
       runId = String(nodeState.runCounter);
       nodeState.runId = runId;
+    }
+
+    const decision = checkInterception({
+      node,
+      prior,
+      resumeInputs: ctx.resumeInputs,
+    });
+    if (!decision.shouldRun) {
+      this.handBackInRecordedOrder(
+        loop,
+        nodeName,
+        runId,
+        interceptedResult(ctx, decision),
+      );
+      return;
     }
 
     // On resume, a waiting node (it interrupted last turn) re-runs with its
@@ -518,6 +508,41 @@ export class Workflow extends BaseNode {
       (error) => ({name: nodeName, error}),
     );
     loop.pending.set(nodeName, task);
+  }
+
+  /**
+   * Books a replayed node's cached result behind the replay barrier, so it
+   * completes in the position the session records rather than the position the
+   * scheduler happens to produce.
+   *
+   * Only a node that is NOT executing waits: a node running its body has no
+   * recorded position to hold, and waiting for one would deadlock a graph whose
+   * recording is incomplete.
+   */
+  private handBackInRecordedOrder(
+    loop: LoopState,
+    nodeName: string,
+    runId: string,
+    result: NodeResult,
+  ): void {
+    const key = sequenceKey(nodeName, Number(runId));
+    const gated: Promise<CompletedTask> = (async () => {
+      await loop.sequenceBarrier.wait(key);
+      return {name: nodeName, childCtx: result};
+    })().catch((error: unknown) => ({name: nodeName, error}));
+    loop.pending.set(nodeName, gated);
+  }
+
+  /**
+   * Releases whichever node the recording expects to complete after this one.
+   *
+   * Runs for a failed node too: the failure ends that node's recorded position,
+   * and leaving the gate shut would hold a replayed sibling — and so the
+   * workflow's teardown — until the divergence deadline.
+   */
+  private advanceSequence(loop: LoopState, nodeName: string): void {
+    const {runId} = loop.nodes.get(nodeName)!;
+    loop.sequenceBarrier.checkAndAdvance(sequenceKey(nodeName, Number(runId)));
   }
 
   // --- Completion handling ---
