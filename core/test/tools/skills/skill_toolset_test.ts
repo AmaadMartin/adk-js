@@ -15,6 +15,9 @@ import {
   SkillToolset,
 } from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
+// Imported from the source path so the spy targets the same module instance
+// that `@google/adk` resolves to.
+import {logger} from '../../../src/utils/logger.js';
 
 describe('skill_toolset', () => {
   const mockSkill: Skill = {
@@ -428,6 +431,71 @@ describe('skill_toolset', () => {
         await toolset.getOrFetchSkill('remote-skill', 'inv-1');
 
         expect(registry.getSkill).toHaveBeenCalledTimes(2);
+      });
+
+      it('reports a nested toolset that fails to close', async () => {
+        const toolset = new SkillToolset([mockSkill], {
+          additionalTools: [
+            new SpyToolset(vi.fn().mockResolvedValue(undefined)),
+            new SpyToolset(vi.fn().mockRejectedValue(new Error('boom'))),
+          ],
+        });
+        const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+        try {
+          await toolset.close();
+
+          expect(warn).toHaveBeenCalledTimes(1);
+          expect(warn.mock.calls[0][0]).toContain('boom');
+        } finally {
+          warn.mockRestore();
+        }
+      });
+
+      it('clears the fetched-skill cache before it awaits a nested close', async () => {
+        const remoteSkill: Skill = {
+          frontmatter: {
+            name: 'remote-skill',
+            description: 'A remote skill',
+          },
+          instructions: 'Remote instructions',
+        };
+        const registry = {
+          getSkill: vi.fn().mockResolvedValue(remoteSkill),
+          searchSkills: vi.fn(),
+        };
+        let releaseNestedClose!: () => void;
+        const nestedClose = new Promise<void>((resolve) => {
+          releaseNestedClose = resolve;
+        });
+        const toolset = new SkillToolset([mockSkill], {
+          registry,
+          additionalTools: [new SpyToolset(() => nestedClose)],
+        });
+
+        await toolset.getOrFetchSkill('remote-skill', 'inv-1');
+        await toolset.getOrFetchSkill('remote-skill', 'inv-1');
+        expect(registry.getSkill).toHaveBeenCalledTimes(1);
+
+        const closed = toolset.close();
+        await toolset.getOrFetchSkill('remote-skill', 'inv-1');
+
+        expect(registry.getSkill).toHaveBeenCalledTimes(2);
+
+        releaseNestedClose();
+        await expect(closed).resolves.toBeUndefined();
+      });
+
+      it('is safe to call twice', async () => {
+        const nestedClose = vi.fn().mockResolvedValue(undefined);
+        const toolset = new SkillToolset([mockSkill], {
+          additionalTools: [new SpyToolset(nestedClose)],
+        });
+
+        await expect(toolset.close()).resolves.toBeUndefined();
+        await expect(toolset.close()).resolves.toBeUndefined();
+
+        expect(nestedClose).toHaveBeenCalledTimes(2);
       });
 
       it('resolves when there are no additional tools', async () => {

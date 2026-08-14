@@ -96,6 +96,18 @@ export class SkillToolset extends BaseToolset {
     return [...this.tools, ...dynamicTools];
   }
 
+  /**
+   * Releases this toolset and every toolset passed in `additionalTools`.
+   *
+   * The local cache is cleared first because a nested `close()` is remote I/O
+   * that can hang, and `Promise.allSettled` absorbs a rejection but not a hang.
+   * The nested closes settle instead of failing fast, so one broken toolset
+   * cannot orphan the others and cannot reject a caller that closes from a
+   * `finally` block.
+   *
+   * More than one holder can own the same nested toolset, so that toolset can
+   * receive `close()` more than once and must tolerate it.
+   */
   override async close(): Promise<void> {
     this.fetchedSkillCache.clear();
     const results = await Promise.allSettled(
