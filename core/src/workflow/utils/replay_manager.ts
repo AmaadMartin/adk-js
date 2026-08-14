@@ -123,5 +123,5 @@ export class ReplayManager {
 
 /** The session events describing the workflow run still in progress. */
 function recordedEvents(ctx: NodeContext): Event[] {
-  return eventsForCurrentRun(ctx.session?.events ?? [], ctx.invocationId);
+  return eventsForCurrentRun(ctx.session.events, ctx.invocationId);
 }

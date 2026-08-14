@@ -23,19 +23,21 @@ const DEFAULT_REPLAY_TIMEOUT_MS = 15_000;
 /** A one-way gate: shut until {@link open}, then open forever. */
 class Gate {
   opened = false;
-  readonly promise: Promise<void>;
-  private release: () => void = () => {};
+  private readonly waiters: Array<() => void> = [];
 
-  constructor() {
-    // The executor runs synchronously, so `release` is assigned before use.
-    this.promise = new Promise<void>((resolve) => {
-      this.release = resolve;
+  /** Resolves when the gate opens. Only called while the gate is shut. */
+  waitForOpen(): Promise<void> {
+    return new Promise<void>((resolve) => {
+      this.waiters.push(resolve);
     });
   }
 
   open(): void {
     this.opened = true;
-    this.release();
+    for (const resolve of this.waiters) {
+      resolve();
+    }
+    this.waiters.length = 0;
   }
 }
 
@@ -99,7 +101,7 @@ export class ReplaySequenceBarrier {
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       await Promise.race([
-        gate.promise,
+        gate.waitForOpen(),
         // Never resolves, so the race is settled by the gate or by the
         // deadline. The timer is cleared on both exits.
         new Promise<never>((_, reject) => {
