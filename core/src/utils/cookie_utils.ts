@@ -14,9 +14,8 @@
  *
  * The value is written verbatim. Servers do not percent-decode cookie values,
  * so encoding here would hand the application a different value than the
- * caller supplied — a base64 session token is the common casualty. Callers
- * that accept an untrusted value must reject the separators first; see
- * `checkCookieValue` in `rest_api_tool.ts`.
+ * caller supplied — a base64 session token is the common casualty. A caller
+ * whose value is untrusted passes it through `checkCookieValue` first.
  *
  * @param headers The request headers, mutated in place.
  * @param name The cookie name, written verbatim.
@@ -33,4 +32,26 @@ export function appendCookie(
     Object.keys(headers).find((h) => h.toLowerCase() === 'cookie') ?? 'Cookie';
   const cookie = `${name}=${value}`;
   headers[key] = headers[key] ? `${headers[key]}; ${cookie}` : cookie;
+}
+
+const ILLEGAL_COOKIE_VALUE_CHARS = /[;\r\n\0]/;
+
+/**
+ * Rejects a cookie value that would change the shape of the request.
+ *
+ * A `;` opens a second cookie the caller never declared, and a carriage
+ * return, line feed or NUL splits the header line. They are rejected rather
+ * than encoded, because `appendCookie` writes the value verbatim.
+ *
+ * @param name The cookie name, used to name the offender in the error.
+ * @param value The untrusted cookie value.
+ * @throws {Error} If the value contains `;`, CR, LF or NUL.
+ */
+export function checkCookieValue(name: string, value: string): void {
+  if (ILLEGAL_COOKIE_VALUE_CHARS.test(value)) {
+    throw new Error(
+      `Invalid value for cookie parameter '${name}': ';', carriage return, ` +
+        `line feed and NUL are not allowed.`,
+    );
+  }
 }

@@ -5,7 +5,7 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {appendCookie} from '../../src/utils/cookie_utils.js';
+import {appendCookie, checkCookieValue} from '../../src/utils/cookie_utils.js';
 
 describe('appendCookie', () => {
   it('writes the first cookie under the canonical Cookie key', () => {
@@ -86,5 +86,24 @@ describe('appendCookie', () => {
     appendCookie(headers, 'session_id', 'abc');
 
     expect(headers['Cookie']).toBe('session_id=abc');
+  });
+});
+
+describe('checkCookieValue', () => {
+  it('accepts a value that carries no separator', () => {
+    expect(() =>
+      checkCookieValue('session_id', 'dGVzdHNlc3Npb24='),
+    ).not.toThrow();
+  });
+
+  it.each([
+    ['a semicolon', 'abc; admin=true'],
+    ['a carriage return', 'abc\rX-Admin: true'],
+    ['a line feed', 'abc\nX-Admin: true'],
+    ['a NUL', 'abc\0def'],
+  ])('rejects a value containing %s', (_label, value) => {
+    expect(() => checkCookieValue('session_id', value)).toThrow(
+      "Invalid value for cookie parameter 'session_id'",
+    );
   });
 });
