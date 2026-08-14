@@ -13,7 +13,14 @@ import {
 } from '@google/adk';
 import {MikroORM} from '@mikro-orm/core';
 import {SqliteDriver} from '@mikro-orm/sqlite';
-import {afterEach, beforeEach, describe, expect, it} from 'vitest';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  onTestFinished,
+} from 'vitest';
 import {isDatabaseConnectionString} from '../../src/sessions/database_session_service.js';
 import {ensureDatabaseCreated} from '../../src/sessions/db/operations.js';
 import {ENTITIES, StorageMetadata} from '../../src/sessions/db/schema.js';
@@ -396,6 +403,56 @@ describe('DatabaseSessionService', () => {
     });
     expect(after2?.events.length).toBe(1);
     expect(after2?.events[0].id).toBe(e3.id);
+  });
+
+  it('should not query the events table when numRecentEvents is 0', async () => {
+    const queries: string[] = [];
+    const loggingService = new DatabaseSessionService({
+      dbName: ':memory:',
+      driver: SqliteDriver,
+      allowGlobalContext: true,
+      debug: ['query'],
+      logger: (message: string) => queries.push(message),
+    });
+    onTestFinished(() => loggingService.close());
+    await loggingService.init();
+
+    const session = await loggingService.createSession({
+      appName: 'test-app',
+      userId: 'user1',
+      sessionId: 's1',
+      state: {
+        [State.APP_PREFIX + 'theme']: 'dark',
+        [State.USER_PREFIX + 'pref']: 'A',
+        'local': 'x',
+      },
+    });
+
+    const now = Date.now();
+    for (const timestamp of [now - 1000, now, now + 1000]) {
+      await loggingService.appendEvent({
+        session,
+        event: createEvent({timestamp}),
+      });
+    }
+
+    queries.length = 0;
+
+    const probed = await loggingService.getSession({
+      appName: 'test-app',
+      userId: 'user1',
+      sessionId: 's1',
+      config: {numRecentEvents: 0},
+    });
+
+    expect(probed?.events.length).toBe(0);
+    expect(probed?.state[State.APP_PREFIX + 'theme']).toBe('dark');
+    expect(probed?.state[State.USER_PREFIX + 'pref']).toBe('A');
+    expect(probed?.state['local']).toBe('x');
+    expect(probed?.lastUpdateTime).toBeDefined();
+    // The session read still happens, so an empty log cannot pass this test.
+    expect(queries.some((q) => q.includes('`sessions`'))).toBe(true);
+    expect(queries.some((q) => q.includes('`events`'))).toBe(false);
   });
 
   it('should filter sessions by userId in listSessions', async () => {
