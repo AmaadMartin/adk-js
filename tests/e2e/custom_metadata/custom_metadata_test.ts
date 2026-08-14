@@ -11,6 +11,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import {fileURLToPath} from 'url';
 import {describe, expect, it} from 'vitest';
+import {hasModelCredentials} from '../utils/model_credentials.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -29,10 +30,7 @@ for (const envPath of envPaths) {
   }
 }
 
-const hasAKey =
-  !!process.env.GEMINI_API_KEY ||
-  !!process.env.GOOGLE_GENAI_API_KEY ||
-  !!process.env.GOOGLE_CLOUD_PROJECT;
+const hasAKey = hasModelCredentials();
 
 describe.skipIf(!hasAKey)('E2e customMetadata Support', () => {
   it('should propagate customMetadata through a real run and attach to user event', async () => {

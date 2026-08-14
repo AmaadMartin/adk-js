@@ -76,6 +76,15 @@ describe('GoogleLlm', () => {
     );
   });
 
+  it('should throw when only GOOGLE_CLOUD_PROJECT is set', () => {
+    // GOOGLE_CLOUD_PROJECT does not select the Vertex path; only
+    // GOOGLE_GENAI_USE_VERTEXAI does. So the API key branch still applies.
+    process.env['GOOGLE_CLOUD_PROJECT'] = 'env-project';
+    expect(() => new TestGemini({model: 'gemini-1.5-flash'})).toThrow(
+      /API key must be provided/,
+    );
+  });
+
   it('should set tracking headers correctly when GOOGLE_CLOUD_AGENT_ENGINE_ID is not set', () => {
     const llm = new TestGemini({apiKey: 'test-key'});
     const headers = llm.getTrackingHeaders();

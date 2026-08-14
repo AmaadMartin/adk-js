@@ -16,6 +16,7 @@ import * as dotenv from 'dotenv';
 import * as fs from 'fs';
 import * as path from 'path';
 import {describe, expect, it} from 'vitest';
+import {hasModelCredentials} from '../utils/model_credentials.js';
 import {createAgentControlledCompactionAgent} from './agent.js';
 
 class TestCompactionPlugin extends BasePlugin {
@@ -54,10 +55,7 @@ describe('E2e Context Compaction Agent-Controlled', () => {
     }
   }
 
-  const hasAKey =
-    !!process.env.GEMINI_API_KEY ||
-    !!process.env.GOOGLE_GENAI_API_KEY ||
-    !!process.env.GOOGLE_CLOUD_PROJECT;
+  const hasAKey = hasModelCredentials();
 
   it.skipIf(!hasAKey)(
     'should compact history when agent calls consolidate_context using Gemini API',

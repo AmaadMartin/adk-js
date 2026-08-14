@@ -10,6 +10,7 @@ import * as dotenv from 'dotenv';
 import * as fs from 'fs';
 import * as path from 'path';
 import {describe, expect, it} from 'vitest';
+import {hasModelCredentials} from '../utils/model_credentials.js';
 
 describe('E2E AgentTool State Filtering', () => {
   const envPath = path.resolve(__dirname, '../../.env');
@@ -19,10 +20,7 @@ describe('E2E AgentTool State Filtering', () => {
     dotenv.config({path: envPath});
   }
 
-  const hasAKey =
-    !!process.env.GEMINI_API_KEY ||
-    !!process.env.GOOGLE_GENAI_API_KEY ||
-    !!process.env.GOOGLE_CLOUD_PROJECT;
+  const hasAKey = hasModelCredentials();
 
   it('should always pass (dummy test for vitest)', () => {
     expect(true).toBe(true);

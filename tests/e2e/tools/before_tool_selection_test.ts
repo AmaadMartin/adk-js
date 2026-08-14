@@ -17,6 +17,7 @@ import * as dotenv from 'dotenv';
 import * as fs from 'fs';
 import * as path from 'path';
 import {describe, expect, it} from 'vitest';
+import {hasModelCredentials} from '../utils/model_credentials.js';
 
 class FilterPlugin extends BasePlugin {
   constructor() {
@@ -45,10 +46,7 @@ describe('E2E beforeToolSelection', () => {
     dotenv.config({path: envPath});
   }
 
-  const hasAKey =
-    !!process.env.GEMINI_API_KEY ||
-    !!process.env.GOOGLE_GENAI_API_KEY ||
-    !!process.env.GOOGLE_CLOUD_PROJECT;
+  const hasAKey = hasModelCredentials();
 
   it.skipIf(!hasAKey)(
     'should filter out LOAD_ARTIFACTS tool and fail to answer',
