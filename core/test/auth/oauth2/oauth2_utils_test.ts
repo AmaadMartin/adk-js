@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {AuthScheme, OAuth2Auth} from '@google/adk';
+import {AuthScheme, ExtendedOAuth2, OAuth2Auth} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   AuthorizationCodeParams,
@@ -14,6 +14,7 @@ import {
   getTokenEndpoint,
   isTokenExpired,
   parseAuthorizationCode,
+  populateOAuth2Endpoints,
   RefreshTokenParams,
 } from '../../../src/auth/oauth2/oauth2_utils.js';
 
@@ -67,6 +68,254 @@ describe('oauth2_utils', () => {
         flows: {},
       } as AuthScheme;
       expect(getTokenEndpoint(scheme)).toBeUndefined();
+    });
+  });
+
+  describe('populateOAuth2Endpoints', () => {
+    const ISSUER_URL = 'https://auth.example.com';
+    const AUTHORIZATION_ENDPOINT = 'https://auth.example.com/authorize';
+    const TOKEN_ENDPOINT = 'https://auth.example.com/token';
+    const PRESET_URL = 'https://preset.example/token';
+
+    function discoveryResponse(): Response {
+      return new Response(
+        JSON.stringify({
+          issuer: ISSUER_URL,
+          authorization_endpoint: AUTHORIZATION_ENDPOINT,
+          token_endpoint: TOKEN_ENDPOINT,
+        }),
+        {status: 200, headers: {'content-type': 'application/json'}},
+      );
+    }
+
+    function scheme(
+      flows: ExtendedOAuth2['flows'],
+      issuerUrl = ISSUER_URL,
+    ): ExtendedOAuth2 {
+      return {type: 'oauth2', issuerUrl, flows};
+    }
+
+    beforeEach(() => {
+      vi.stubGlobal('fetch', vi.fn());
+    });
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it('fills both authorization-code endpoints from the discovered metadata', async () => {
+      vi.mocked(fetch).mockImplementation(async () => discoveryResponse());
+      const authScheme = scheme({
+        authorizationCode: {authorizationUrl: '', tokenUrl: '', scopes: {}},
+      });
+
+      await expect(populateOAuth2Endpoints(authScheme)).resolves.toBe(true);
+      expect(authScheme.flows.authorizationCode?.authorizationUrl).toBe(
+        AUTHORIZATION_ENDPOINT,
+      );
+      expect(authScheme.flows.authorizationCode?.tokenUrl).toBe(TOKEN_ENDPOINT);
+    });
+
+    it('fills every empty slot of every configured flow', async () => {
+      vi.mocked(fetch).mockImplementation(async () => discoveryResponse());
+      const authScheme = scheme({
+        implicit: {authorizationUrl: '', scopes: {}},
+        password: {tokenUrl: '', scopes: {}},
+        clientCredentials: {tokenUrl: '', scopes: {}},
+        authorizationCode: {authorizationUrl: '', tokenUrl: '', scopes: {}},
+      });
+
+      await expect(populateOAuth2Endpoints(authScheme)).resolves.toBe(true);
+      expect(authScheme.flows.implicit?.authorizationUrl).toBe(
+        AUTHORIZATION_ENDPOINT,
+      );
+      expect(authScheme.flows.password?.tokenUrl).toBe(TOKEN_ENDPOINT);
+      expect(authScheme.flows.clientCredentials?.tokenUrl).toBe(TOKEN_ENDPOINT);
+      expect(authScheme.flows.authorizationCode?.authorizationUrl).toBe(
+        AUTHORIZATION_ENDPOINT,
+      );
+      expect(authScheme.flows.authorizationCode?.tokenUrl).toBe(TOKEN_ENDPOINT);
+    });
+
+    it('keeps an endpoint the user configured and fills only the empty one', async () => {
+      vi.mocked(fetch).mockImplementation(async () => discoveryResponse());
+      const authScheme = scheme({
+        authorizationCode: {
+          authorizationUrl: '',
+          tokenUrl: PRESET_URL,
+          scopes: {},
+        },
+      });
+
+      await expect(populateOAuth2Endpoints(authScheme)).resolves.toBe(true);
+      expect(authScheme.flows.authorizationCode?.authorizationUrl).toBe(
+        AUTHORIZATION_ENDPOINT,
+      );
+      expect(authScheme.flows.authorizationCode?.tokenUrl).toBe(PRESET_URL);
+    });
+
+    it('keeps the configured slots of a partly configured set of flows', async () => {
+      vi.mocked(fetch).mockImplementation(async () => discoveryResponse());
+      const authScheme = scheme({
+        implicit: {authorizationUrl: PRESET_URL, scopes: {}},
+        password: {tokenUrl: '', scopes: {}},
+        clientCredentials: {tokenUrl: PRESET_URL, scopes: {}},
+        authorizationCode: {
+          authorizationUrl: '',
+          tokenUrl: PRESET_URL,
+          scopes: {},
+        },
+      });
+
+      await expect(populateOAuth2Endpoints(authScheme)).resolves.toBe(true);
+      expect(authScheme.flows.implicit?.authorizationUrl).toBe(PRESET_URL);
+      expect(authScheme.flows.password?.tokenUrl).toBe(TOKEN_ENDPOINT);
+      expect(authScheme.flows.clientCredentials?.tokenUrl).toBe(PRESET_URL);
+      expect(authScheme.flows.authorizationCode?.authorizationUrl).toBe(
+        AUTHORIZATION_ENDPOINT,
+      );
+      expect(authScheme.flows.authorizationCode?.tokenUrl).toBe(PRESET_URL);
+    });
+
+    it('fills the password flow with the token endpoint', async () => {
+      vi.mocked(fetch).mockImplementation(async () => discoveryResponse());
+      const authScheme = scheme({password: {tokenUrl: '', scopes: {}}});
+
+      await expect(populateOAuth2Endpoints(authScheme)).resolves.toBe(true);
+      expect(authScheme.flows.password?.tokenUrl).toBe(TOKEN_ENDPOINT);
+    });
+
+    it('fills the client-credentials flow with the token endpoint', async () => {
+      vi.mocked(fetch).mockImplementation(async () => discoveryResponse());
+      const authScheme = scheme({
+        clientCredentials: {tokenUrl: '', scopes: {}},
+      });
+
+      await expect(populateOAuth2Endpoints(authScheme)).resolves.toBe(true);
+      expect(authScheme.flows.clientCredentials?.tokenUrl).toBe(TOKEN_ENDPOINT);
+    });
+
+    it('fills an authorization-code flow that is missing only its token URL', async () => {
+      vi.mocked(fetch).mockImplementation(async () => discoveryResponse());
+      const authScheme = scheme({
+        authorizationCode: {
+          authorizationUrl: PRESET_URL,
+          tokenUrl: '',
+          scopes: {},
+        },
+      });
+
+      await expect(populateOAuth2Endpoints(authScheme)).resolves.toBe(true);
+      expect(authScheme.flows.authorizationCode?.authorizationUrl).toBe(
+        PRESET_URL,
+      );
+      expect(authScheme.flows.authorizationCode?.tokenUrl).toBe(TOKEN_ENDPOINT);
+    });
+
+    it('leaves the endpoints empty when the provider serves no metadata', async () => {
+      vi.mocked(fetch).mockImplementation(
+        async () => new Response(null, {status: 404}),
+      );
+      const authScheme = scheme({
+        authorizationCode: {authorizationUrl: '', tokenUrl: '', scopes: {}},
+      });
+
+      await expect(populateOAuth2Endpoints(authScheme)).resolves.toBe(false);
+      expect(authScheme.flows.authorizationCode?.authorizationUrl).toBe('');
+      expect(authScheme.flows.authorizationCode?.tokenUrl).toBe('');
+    });
+
+    it('resolves instead of rejecting when the discovery request fails', async () => {
+      vi.mocked(fetch).mockRejectedValue(new Error('network unreachable'));
+      const authScheme = scheme({
+        authorizationCode: {authorizationUrl: '', tokenUrl: '', scopes: {}},
+      });
+
+      await expect(populateOAuth2Endpoints(authScheme)).resolves.toBe(false);
+      expect(authScheme.flows.authorizationCode?.authorizationUrl).toBe('');
+    });
+
+    it('does not discover when every configured flow is already populated', async () => {
+      const authScheme = scheme({
+        implicit: {authorizationUrl: PRESET_URL, scopes: {}},
+        password: {tokenUrl: PRESET_URL, scopes: {}},
+        clientCredentials: {tokenUrl: PRESET_URL, scopes: {}},
+        authorizationCode: {
+          authorizationUrl: PRESET_URL,
+          tokenUrl: PRESET_URL,
+          scopes: {},
+        },
+      });
+
+      await expect(populateOAuth2Endpoints(authScheme)).resolves.toBe(false);
+      expect(fetch).not.toHaveBeenCalled();
+    });
+
+    it('does not discover when the only configured flow is populated', async () => {
+      const authScheme = scheme({
+        implicit: {authorizationUrl: PRESET_URL, scopes: {}},
+      });
+
+      await expect(populateOAuth2Endpoints(authScheme)).resolves.toBe(false);
+      expect(fetch).not.toHaveBeenCalled();
+    });
+
+    it('does not discover for an OAuth2 scheme that carries no issuer URL', async () => {
+      const authScheme: AuthScheme = {
+        type: 'oauth2',
+        flows: {
+          authorizationCode: {authorizationUrl: '', tokenUrl: '', scopes: {}},
+        },
+      };
+
+      await expect(populateOAuth2Endpoints(authScheme)).resolves.toBe(false);
+      expect(fetch).not.toHaveBeenCalled();
+    });
+
+    it('does not discover for an empty issuer URL', async () => {
+      const authScheme = scheme(
+        {authorizationCode: {authorizationUrl: '', tokenUrl: '', scopes: {}}},
+        '',
+      );
+
+      await expect(populateOAuth2Endpoints(authScheme)).resolves.toBe(false);
+      expect(fetch).not.toHaveBeenCalled();
+    });
+
+    it('does not discover for a scheme whose configuration declares no flows', async () => {
+      // User configuration is parsed at runtime, so `flows` can be absent even
+      // though the OpenAPI type declares it.
+      const authScheme: AuthScheme = JSON.parse(
+        '{"type":"oauth2","issuerUrl":"https://auth.example.com"}',
+      );
+
+      await expect(populateOAuth2Endpoints(authScheme)).resolves.toBe(false);
+      expect(fetch).not.toHaveBeenCalled();
+    });
+
+    it('does not discover from an issuer URL the SSRF gate rejects', async () => {
+      const authScheme = scheme(
+        {authorizationCode: {authorizationUrl: '', tokenUrl: '', scopes: {}}},
+        'http://auth.example.com',
+      );
+
+      await expect(populateOAuth2Endpoints(authScheme)).resolves.toBe(false);
+      expect(fetch).not.toHaveBeenCalled();
+      expect(authScheme.flows.authorizationCode?.authorizationUrl).toBe('');
+    });
+
+    it('discovers once and reuses the endpoints it wrote onto the scheme', async () => {
+      vi.mocked(fetch).mockImplementation(async () => discoveryResponse());
+      const authScheme = scheme({
+        authorizationCode: {authorizationUrl: '', tokenUrl: '', scopes: {}},
+      });
+
+      await expect(populateOAuth2Endpoints(authScheme)).resolves.toBe(true);
+      const callsAfterFirst = vi.mocked(fetch).mock.calls.length;
+
+      await expect(populateOAuth2Endpoints(authScheme)).resolves.toBe(false);
+      expect(vi.mocked(fetch).mock.calls.length).toBe(callsAfterFirst);
+      expect(authScheme.flows.authorizationCode?.tokenUrl).toBe(TOKEN_ENDPOINT);
     });
   });
 

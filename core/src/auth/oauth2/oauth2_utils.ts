@@ -7,8 +7,16 @@
 import {logger} from '../../utils/logger.js';
 import {OAuth2Auth} from '../auth_credential.js';
 
-import {AuthScheme, OpenIdConnectWithConfig} from '../auth_schemes.js';
-import {validateDiscoveryUrl} from './oauth2_discovery.js';
+import {
+  AuthScheme,
+  ExtendedOAuth2,
+  isExtendedOAuth2,
+  OpenIdConnectWithConfig,
+} from '../auth_schemes.js';
+import {
+  OAuth2DiscoveryManager,
+  validateDiscoveryUrl,
+} from './oauth2_discovery.js';
 
 /**
  * Returns the token endpoint for the given auth scheme.
@@ -35,6 +43,78 @@ export function getTokenEndpoint(authScheme: AuthScheme): string | undefined {
   }
 
   return undefined;
+}
+
+/**
+ * Whether any configured flow is still missing an authorization or token URL.
+ */
+function hasMissingEndpoints(flows: ExtendedOAuth2['flows']): boolean {
+  const {implicit, password, clientCredentials, authorizationCode} = flows;
+
+  return Boolean(
+    (implicit && !implicit.authorizationUrl) ||
+    (password && !password.tokenUrl) ||
+    (clientCredentials && !clientCredentials.tokenUrl) ||
+    (authorizationCode &&
+      (!authorizationCode.authorizationUrl || !authorizationCode.tokenUrl)),
+  );
+}
+
+/**
+ * Fills the flow endpoints an `ExtendedOAuth2` scheme left empty from the
+ * authorization server metadata published by its issuer (RFC 8414).
+ *
+ * The scheme is mutated in place, so a tool discovers its endpoints once
+ * rather than on every invocation. An endpoint the user configured is never
+ * overwritten, and a failed discovery leaves the scheme unchanged instead of
+ * throwing.
+ *
+ * @returns Whether metadata was discovered and applied to the scheme.
+ */
+export async function populateOAuth2Endpoints(
+  authScheme: AuthScheme,
+): Promise<boolean> {
+  if (
+    !isExtendedOAuth2(authScheme) ||
+    !authScheme.issuerUrl ||
+    // A scheme read from user configuration can reach here without any flows,
+    // even though the OpenAPI type declares the field as required.
+    !authScheme.flows ||
+    !hasMissingEndpoints(authScheme.flows)
+  ) {
+    return false;
+  }
+
+  const metadata =
+    await new OAuth2DiscoveryManager().discoverAuthServerMetadata(
+      authScheme.issuerUrl,
+    );
+  if (!metadata) {
+    logger.warn(
+      `OAuth2 endpoint discovery failed for issuer ${authScheme.issuerUrl}.`,
+    );
+    return false;
+  }
+
+  const {implicit, password, clientCredentials, authorizationCode} =
+    authScheme.flows;
+  if (implicit && !implicit.authorizationUrl) {
+    implicit.authorizationUrl = metadata.authorization_endpoint;
+  }
+  if (password && !password.tokenUrl) {
+    password.tokenUrl = metadata.token_endpoint;
+  }
+  if (clientCredentials && !clientCredentials.tokenUrl) {
+    clientCredentials.tokenUrl = metadata.token_endpoint;
+  }
+  if (authorizationCode && !authorizationCode.authorizationUrl) {
+    authorizationCode.authorizationUrl = metadata.authorization_endpoint;
+  }
+  if (authorizationCode && !authorizationCode.tokenUrl) {
+    authorizationCode.tokenUrl = metadata.token_endpoint;
+  }
+
+  return true;
 }
 
 interface OAuth2TokenResponse {
