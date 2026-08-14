@@ -29,9 +29,28 @@ import {AdkLogger} from './logger.js';
 const logger = new AdkLogger({label: 'AgentLoader', colorize: {all: true}});
 
 /**
+ * Maps a supported JavaScript/TypeScript extension to the esbuild loader that
+ * parses it.
+ */
+const FILE_EXTENSION_LOADER_MAP: Readonly<Record<string, esbuild.Loader>> = {
+  '.js': 'js',
+  '.cjs': 'js',
+  '.mjs': 'js',
+  '.ts': 'ts',
+  '.mts': 'ts',
+  '.cts': 'ts',
+};
+
+/**
  * Supported file extensions for JavaScript and TypeScript.
  */
-const JS_FILES_EXTENSIONS = ['.js', '.cjs', '.mjs', '.ts', '.mts', '.cts'];
+const JS_FILES_EXTENSIONS = Object.keys(FILE_EXTENSION_LOADER_MAP);
+
+/**
+ * Matches the location tokens that {@link replaceDirnamePlugin} rewrites. A
+ * module without any of them keeps esbuild's own loading path.
+ */
+const LOCATION_TOKEN_PATTERN = /import\.meta|__dirname|__filename/;
 
 /**
  * Supported JS/TS file module types.
@@ -99,43 +118,54 @@ const DEFAULT_AGENT_FILE_OPTIONS: AgentFileOptions = {
 };
 
 /**
- * Returns an esbuild plugin that replaces `__dirname`, `__filename`, and `import.meta.url`
- * with the original directory path, file path, and file URL in the agent file.
- * This plugin is needed to ensure that the agent file has access to its original
- * location context after compilation.
+ * Returns an esbuild plugin that replaces `__dirname`, `__filename`,
+ * `import.meta.url`, `import.meta.dirname` and `import.meta.filename` with the
+ * location of the module that reads them. Every module in the bundle keeps its
+ * own source location, so a bundled dependency that reads a file next to
+ * itself still finds it after the agent is compiled into a temp directory.
+ *
+ * The agent file itself gets `originalDir` and `filePath`, which callers may
+ * set to a directory the agent file does not live in.
  *
  * @param filePath - The path to the agent file.
  * @param originalDir - The original directory path of the agent file.
- * @returns An esbuild plugin that replaces path and URL references in the agent file.
+ * @returns An esbuild plugin that replaces path and URL references in the bundle.
  */
 export function replaceDirnamePlugin(filePath: string, originalDir: string) {
   return {
     name: 'replace-dirname',
-    setup(build: esbuild.PluginBuild) {
+    setup(build: Pick<esbuild.PluginBuild, 'onLoad'>) {
       build.onLoad({filter: /.*/}, async (args: esbuild.OnLoadArgs) => {
-        if (args.path === filePath) {
-          const content = await fsPromises.readFile(args.path, 'utf8');
-          const fileUrl = pathToFileURL(filePath).href;
-          const loader = ['.ts', '.mts', '.cts'].includes(
-            path.extname(filePath),
-          )
-            ? 'ts'
-            : 'js';
-          const transformResult = await esbuild.transform(content, {
-            loader: loader,
-            define: {
-              '__dirname': JSON.stringify(originalDir),
-              '__filename': JSON.stringify(filePath),
-              'import.meta.url': JSON.stringify(fileUrl),
-            },
-          });
-
-          return {
-            contents: transformResult.code,
-            loader: 'js',
-          };
+        const loader = FILE_EXTENSION_LOADER_MAP[path.extname(args.path)];
+        if (!loader) {
+          return undefined;
         }
-        return undefined;
+
+        const content = await fsPromises.readFile(args.path, 'utf8');
+        if (!LOCATION_TOKEN_PATTERN.test(content)) {
+          return undefined;
+        }
+
+        const moduleDir =
+          args.path === filePath ? originalDir : path.dirname(args.path);
+        const transformResult = await esbuild.transform(content, {
+          loader,
+          // Without it esbuild reports a syntax error against `<stdin>`
+          // instead of the module it came from.
+          sourcefile: args.path,
+          define: {
+            '__dirname': JSON.stringify(moduleDir),
+            '__filename': JSON.stringify(args.path),
+            'import.meta.url': JSON.stringify(pathToFileURL(args.path).href),
+            'import.meta.dirname': JSON.stringify(moduleDir),
+            'import.meta.filename': JSON.stringify(args.path),
+          },
+        });
+
+        return {
+          contents: transformResult.code,
+          loader: 'js',
+        };
       });
     },
   };
