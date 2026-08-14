@@ -231,7 +231,13 @@ export function prepareRequestParams(
     (placeholder, name: string) =>
       Object.hasOwn(pathParams, name) ? pathParams[name] : placeholder,
   );
-  let url = `${endpoint.baseUrl}${resolvedPath}`;
+  // A server URL may legally end with a slash, and the path always starts with
+  // one, so the two concatenate into a double slash. Exactly one character is
+  // removed, never every trailing slash, to match adk-python.
+  const baseUrl = endpoint.baseUrl.endsWith('/')
+    ? endpoint.baseUrl.slice(0, -1)
+    : endpoint.baseUrl;
+  let url = `${baseUrl}${resolvedPath}`;
 
   // Extract query parameters from path if any
   const urlParts = url.split('?');
