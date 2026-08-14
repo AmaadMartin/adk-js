@@ -147,20 +147,141 @@ describe('MCPToolset', () => {
 
       const {Client} =
         await import('@modelcontextprotocol/sdk/client/index.js');
-      const mockClientInstance = {
-        connect: vi.fn().mockResolvedValue(undefined),
-        close: vi.fn().mockResolvedValue(undefined),
-        listTools: vi.fn().mockRejectedValue(new Error('List tools failed')),
-      };
-      vi.mocked(Client).mockImplementationOnce(
-        () => mockClientInstance as unknown as Client,
-      );
+      const failingClient = () =>
+        ({
+          connect: vi.fn().mockResolvedValue(undefined),
+          close: vi.fn().mockResolvedValue(undefined),
+          listTools: vi.fn().mockRejectedValue(new Error('List tools failed')),
+        }) as unknown as Client;
+      // Both attempts fail: getTools() retries the listing round trip once.
+      vi.mocked(Client)
+        .mockImplementationOnce(failingClient)
+        .mockImplementationOnce(failingClient);
 
       const spy = vi.spyOn(toolset['mcpSessionManager'], 'closeSession');
 
       await expect(toolset.getTools()).rejects.toThrow('List tools failed');
-      expect(spy).toHaveBeenCalledOnce();
+      expect(spy).toHaveBeenCalledTimes(2);
       expect(toolset['mcpSessionManager'].getActiveSessions()).toHaveLength(0);
+    });
+  });
+
+  describe('tool listing retry', () => {
+    it('retries the listing once when the first connect rejects', async () => {
+      const {Client} =
+        await import('@modelcontextprotocol/sdk/client/index.js');
+      vi.mocked(Client)
+        .mockClear()
+        .mockImplementationOnce(
+          () =>
+            ({
+              connect: vi.fn().mockRejectedValue(new Error('ECONNREFUSED')),
+              close: noop(),
+            }) as unknown as Client,
+        );
+
+      const toolset = new MCPToolset(stdioParams);
+      const tools = await toolset.getTools();
+
+      expect(tools).toHaveLength(2);
+      expect(vi.mocked(Client)).toHaveBeenCalledTimes(2);
+    });
+
+    it('rejects when both connect attempts reject', async () => {
+      const {Client} =
+        await import('@modelcontextprotocol/sdk/client/index.js');
+      vi.mocked(Client)
+        .mockClear()
+        .mockImplementationOnce(
+          () =>
+            ({
+              connect: vi.fn().mockRejectedValue(new Error('first refused')),
+              close: noop(),
+            }) as unknown as Client,
+        )
+        .mockImplementationOnce(
+          () =>
+            ({
+              connect: vi.fn().mockRejectedValue(new Error('second refused')),
+              close: noop(),
+            }) as unknown as Client,
+        );
+
+      const toolset = new MCPToolset(stdioParams);
+
+      await expect(toolset.getTools()).rejects.toThrow('second refused');
+      expect(vi.mocked(Client)).toHaveBeenCalledTimes(2);
+    });
+
+    it('closes the failed attempt session before retrying a rejected listTools', async () => {
+      const {Client} =
+        await import('@modelcontextprotocol/sdk/client/index.js');
+      vi.mocked(Client)
+        .mockClear()
+        .mockImplementationOnce(
+          () =>
+            ({
+              connect: noop(),
+              close: noop(),
+              listTools: vi.fn().mockRejectedValue(new Error('list boom')),
+            }) as unknown as Client,
+        );
+
+      const toolset = new MCPToolset(stdioParams);
+      const spy = vi.spyOn(toolset['mcpSessionManager'], 'closeSession');
+      const tools = await toolset.getTools();
+
+      expect(tools).toHaveLength(2);
+      expect(spy).toHaveBeenCalledTimes(2);
+      expect(toolset['mcpSessionManager'].getActiveSessions()).toHaveLength(0);
+    });
+
+    it('does not retry when listTools rejects with an AbortError', async () => {
+      const {Client} =
+        await import('@modelcontextprotocol/sdk/client/index.js');
+      vi.mocked(Client)
+        .mockClear()
+        .mockImplementationOnce(
+          () =>
+            ({
+              connect: noop(),
+              close: noop(),
+              listTools: vi
+                .fn()
+                .mockRejectedValue(new DOMException('aborted', 'AbortError')),
+            }) as unknown as Client,
+        );
+
+      const toolset = new MCPToolset(stdioParams);
+
+      await expect(toolset.getTools()).rejects.toThrow('aborted');
+      expect(vi.mocked(Client)).toHaveBeenCalledOnce();
+      expect(toolset['mcpSessionManager'].getActiveSessions()).toHaveLength(0);
+    });
+
+    it('passes the invocation abort signal through to the retry', async () => {
+      const {Client} =
+        await import('@modelcontextprotocol/sdk/client/index.js');
+      vi.mocked(Client)
+        .mockClear()
+        .mockImplementationOnce(
+          () =>
+            ({
+              connect: vi.fn().mockRejectedValue(new Error('refused')),
+              close: noop(),
+            }) as unknown as Client,
+        );
+
+      const controller = new AbortController();
+      controller.abort();
+      const context = {
+        invocationContext: {abortSignal: controller.signal},
+      } as unknown as ReadonlyContext;
+
+      const toolset = new MCPToolset(stdioParams);
+
+      await expect(toolset.getTools(context)).rejects.toThrow('refused');
+      expect(vi.mocked(Client)).toHaveBeenCalledOnce();
     });
   });
 
