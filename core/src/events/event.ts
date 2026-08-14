@@ -324,9 +324,6 @@ export function pruneThoughts(event: Event): Event {
   };
 }
 
-const ASCII_LETTERS_AND_NUMBERS =
-  'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-
 /**
  * Type guard to check if an object is an instance of Event.
  *
@@ -347,16 +344,7 @@ export function isEvent(obj: unknown): obj is Event {
  * Generates a new unique ID for the event.
  */
 export function createNewEventId(): string {
-  let id = '';
-
-  for (let i = 0; i < 8; i++) {
-    id +=
-      ASCII_LETTERS_AND_NUMBERS[
-        Math.floor(Math.random() * ASCII_LETTERS_AND_NUMBERS.length)
-      ];
-  }
-
-  return id;
+  return newUuid();
 }
 
 /**

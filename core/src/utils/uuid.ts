@@ -16,8 +16,8 @@ let idProvider: IdProvider = defaultIdProvider;
 
 /**
  * Installs `provider` as the source of the identifiers ADK mints for
- * invocations, client function calls, sessions and A2A messages, tasks and
- * artifacts.
+ * invocations, client function calls, sessions, events, and A2A messages,
+ * tasks and artifacts.
  *
  * Every other identifier in the library keeps its own source, so a caller sees
  * a mix of provider-supplied and generated identifiers. The OAuth2 `state`

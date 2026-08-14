@@ -7,8 +7,8 @@
 /**
  * Deterministic PRNG (mulberry32) for tests that stub `Math.random`. Samples
  * like `retry` and `loop_self` are model-free but use `Math.random`; seeding it
- * makes them reproducible. A seeded generator (rather than a constant) keeps the
- * engine's own random event-id generation varied, so ids don't collide.
+ * makes them reproducible. A seeded generator (rather than a constant) keeps
+ * each draw the sample makes distinct.
  */
 export function mulberry32(seed: number): () => number {
   let a = seed >>> 0;

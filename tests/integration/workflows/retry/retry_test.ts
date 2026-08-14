@@ -10,10 +10,6 @@
  * `contributing/samples/workflows/retry/tests/go.json`, which mocks
  * `random.random` to force exactly three attempts; here `Math.random` is
  * seeded to a value that produces the same three attempts.
- *
- * The seed cannot be chosen to reproduce Python's exact draws: the engine's
- * event-id generator draws from `Math.random` too (8 draws per event), so the
- * sample's own draws are interleaved with it.
  */
 
 import {afterEach, describe, expect, it, vi} from 'vitest';
@@ -27,7 +23,7 @@ afterEach(() => {
 
 describe('workflow sample: retry', () => {
   it('retries the failing node and reports the weather once it succeeds', async () => {
-    vi.spyOn(Math, 'random').mockImplementation(mulberry32(2));
+    vi.spyOn(Math, 'random').mockImplementation(mulberry32(9));
 
     const perTurn = await runSample({
       name: 'retry',
