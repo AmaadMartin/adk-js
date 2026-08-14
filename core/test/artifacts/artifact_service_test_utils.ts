@@ -879,26 +879,57 @@ export function runArtifactServiceTests(
         scope: {appName, userId: '', sessionId},
         message: 'userId must not be empty.',
       },
+      {
+        label: 'an empty sessionId',
+        scope: {appName, userId, sessionId: ''},
+        message: 'sessionId must not be empty.',
+      },
     ];
 
+    // Every method that builds a storage key has to reject, not just the two
+    // that never swallowed errors. A read path that catches its own validation
+    // failure reports a rejected scope as "artifact not found".
     it.each(invalidScopes)(
-      'rejects $label on saveArtifact',
+      'rejects $label on every operation',
       async ({scope, message}) => {
+        const filename = 'report.txt';
+
         await expect(
-          service.saveArtifact({
-            ...scope,
-            filename: 'report.txt',
-            artifact: {text: 'hello'},
-          }),
+          service.saveArtifact({...scope, filename, artifact: {text: 'hello'}}),
+        ).rejects.toThrow(message);
+        await expect(service.listArtifactKeys(scope)).rejects.toThrow(message);
+        await expect(
+          service.loadArtifact({...scope, filename}),
+        ).rejects.toThrow(message);
+        await expect(
+          service.deleteArtifact({...scope, filename}),
+        ).rejects.toThrow(message);
+        await expect(
+          service.listVersions({...scope, filename}),
+        ).rejects.toThrow(message);
+        await expect(
+          service.listArtifactVersions({...scope, filename}),
+        ).rejects.toThrow(message);
+        await expect(
+          service.getArtifactVersion({...scope, filename}),
         ).rejects.toThrow(message);
       },
     );
 
-    it.each(invalidScopes)(
-      'rejects $label on listArtifactKeys',
-      async ({scope, message}) => {
-        await expect(service.listArtifactKeys(scope)).rejects.toThrow(message);
-      },
-    );
+    it('does not widen an empty sessionId into the user scope', async () => {
+      await expect(
+        service.saveArtifact({
+          appName,
+          userId,
+          sessionId: '',
+          filename: 'secret.txt',
+          artifact: {text: 'session-scoped'},
+        }),
+      ).rejects.toThrow('sessionId must not be empty.');
+
+      const keys = await service.listArtifactKeys({appName, userId, sessionId});
+      expect(keys).not.toContain('secret.txt');
+      expect(keys).not.toContain('user:secret.txt');
+    });
   });
 }

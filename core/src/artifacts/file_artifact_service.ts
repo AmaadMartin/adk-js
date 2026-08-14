@@ -166,6 +166,10 @@ export class FileArtifactService implements BaseArtifactService {
     request: LoadArtifactRequest,
     depth: number,
   ): Promise<Part | undefined> {
+    // Runs outside readStoredArtifact so a rejection is not reported as a
+    // missing artifact.
+    validateScopePathSegments(request);
+
     const part = await this.readStoredArtifact(request);
     const fileUri = part?.fileData?.fileUri;
 
@@ -327,6 +331,8 @@ export class FileArtifactService implements BaseArtifactService {
     sessionId,
     filename,
   }: DeleteArtifactRequest): Promise<void> {
+    validateScopePathSegments({appName, userId, sessionId, filename});
+
     try {
       const artifactDir = getArtifactDir(
         this.rootDir,
@@ -348,6 +354,8 @@ export class FileArtifactService implements BaseArtifactService {
     sessionId,
     filename,
   }: ListVersionsRequest): Promise<number[]> {
+    validateScopePathSegments({appName, userId, sessionId, filename});
+
     try {
       const artifactDir = getArtifactDir(
         this.rootDir,
@@ -370,6 +378,8 @@ export class FileArtifactService implements BaseArtifactService {
     sessionId,
     filename,
   }: ListVersionsRequest): Promise<ArtifactVersion[]> {
+    validateScopePathSegments({appName, userId, sessionId, filename});
+
     try {
       const artifactDir = getArtifactDir(
         this.rootDir,
@@ -412,6 +422,8 @@ export class FileArtifactService implements BaseArtifactService {
     filename,
     version,
   }: LoadArtifactRequest): Promise<ArtifactVersion | undefined> {
+    validateScopePathSegments({appName, userId, sessionId, filename});
+
     try {
       const artifactDir = getArtifactDir(
         this.rootDir,
@@ -482,11 +494,26 @@ export function getUserRoot(
   return result;
 }
 
-function isUserScoped(
-  sessionId: string | undefined,
-  filename: string,
-): boolean {
-  return !sessionId || filename.startsWith(USER_NAMESPACE_PREFIX);
+/**
+ * Rejects identifiers that would alter the path they are joined into.
+ *
+ * `sessionId` is only checked for a session-scoped filename, which is the rule
+ * the in-memory and GCS services apply.
+ *
+ * @param request The request whose scope identifiers are about to be used.
+ */
+function validateScopePathSegments({
+  appName,
+  userId,
+  sessionId,
+  filename,
+}: LoadArtifactRequest): void {
+  validatePathSegment(appName, 'appName');
+  validatePathSegment(userId, 'userId');
+
+  if (!filename.startsWith(USER_NAMESPACE_PREFIX)) {
+    validatePathSegment(sessionId, 'sessionId');
+  }
 }
 
 function getUserArtifactsDir(userRoot: string): string {
@@ -521,18 +548,12 @@ function getArtifactDir(
   filename: string,
 ): string {
   const userRoot = getUserRoot(rootDir, appName, userId);
-  let scopeRoot: string;
-
-  if (isUserScoped(sessionId, filename)) {
-    scopeRoot = getUserArtifactsDir(userRoot);
-  } else {
-    if (!sessionId) {
-      throw new Error(
-        'Session ID must be provided for session-scoped artifacts.',
-      );
-    }
-    scopeRoot = getSessionArtifactsDir(userRoot, sessionId);
-  }
+  // Only the filename decides the scope. Routing an empty sessionId to the
+  // user scope would silently widen the caller's scope; getSessionArtifactsDir
+  // rejects it instead, as the other two services do.
+  const scopeRoot = filename.startsWith(USER_NAMESPACE_PREFIX)
+    ? getUserArtifactsDir(userRoot)
+    : getSessionArtifactsDir(userRoot, sessionId);
 
   let cleanFilename = filename;
   if (cleanFilename.startsWith(USER_NAMESPACE_PREFIX)) {

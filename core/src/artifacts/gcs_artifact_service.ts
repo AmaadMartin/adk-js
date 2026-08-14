@@ -281,6 +281,10 @@ export class GcsArtifactService implements BaseArtifactService {
   async getArtifactVersion(
     request: LoadArtifactRequest,
   ): Promise<ArtifactVersion | undefined> {
+    // Runs outside the catch so a rejection is not reported as a missing
+    // artifact version.
+    validateBlobPathSegments(request);
+
     try {
       let version = request.version;
       if (version === undefined) {
