@@ -6,13 +6,43 @@
 
 import {
   Context,
+  createSession,
   InvocationContext,
   MCPSessionManager,
   MCPTool,
+  PluginManager,
 } from '@google/adk';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {Tool} from '@modelcontextprotocol/sdk/types.js';
 import {describe, expect, it, vi} from 'vitest';
+import {clientStub} from './client_stub.js';
+
+const TEST_TOOL: Tool = {
+  name: 'test-tool',
+  description: 'A test tool',
+  inputSchema: {type: 'object', properties: {}},
+};
+
+/** A real manager whose session methods are stubbed, so nothing is spawned. */
+function stubbedSessionManager(client: Client): MCPSessionManager {
+  const manager = new MCPSessionManager({
+    type: 'StdioConnectionParams',
+    serverParams: {command: 'never-spawned'},
+  });
+  vi.spyOn(manager, 'createSession').mockResolvedValue(client);
+  vi.spyOn(manager, 'closeSession').mockResolvedValue(undefined);
+  return manager;
+}
+
+function toolContext(): Context {
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'inv-1',
+      session: createSession({id: 'session', appName: 'app', userId: 'user'}),
+      pluginManager: new PluginManager(),
+    }),
+  });
+}
 
 describe('MCPTool', () => {
   it('passes abort signal to callTool', async () => {
@@ -130,36 +160,33 @@ describe('MCPTool', () => {
     );
   });
 
-  it('closes session even when callTool throws an error', async () => {
-    const mockTool: Tool = {
-      name: 'test-tool',
-      description: 'A test tool',
-      inputSchema: {type: 'object', properties: {}},
-    };
-
-    const mockClient = {
+  it('leaves the pooled session open when callTool throws an error', async () => {
+    const client = clientStub({
       callTool: vi.fn().mockRejectedValue(new Error('Call failed')),
-    } as unknown as Client;
+    });
+    const sessionManager = stubbedSessionManager(client);
+    const tool = new MCPTool(TEST_TOOL, sessionManager);
 
-    const mockSessionManager = {
-      createSession: vi.fn().mockResolvedValue(mockClient),
-      closeSession: vi.fn().mockResolvedValue(undefined),
-    } as unknown as MCPSessionManager;
+    await expect(
+      tool.runAsync({args: {}, toolContext: toolContext()}),
+    ).rejects.toThrow('Call failed');
 
-    const tool = new MCPTool(mockTool, mockSessionManager);
+    // The session is owned by the manager, so a failed call must not close it.
+    expect(sessionManager.closeSession).not.toHaveBeenCalled();
+  });
 
-    const invocationContext = {
-      abortSignal: new AbortController().signal,
-      session: {state: {}},
-    } as unknown as InvocationContext;
+  it('leaves the pooled session open after a successful call', async () => {
+    const client = clientStub({
+      callTool: vi.fn().mockResolvedValue({content: []}),
+    });
+    const sessionManager = stubbedSessionManager(client);
+    const tool = new MCPTool(TEST_TOOL, sessionManager);
 
-    const toolContext = new Context({invocationContext});
+    await tool.runAsync({args: {}, toolContext: toolContext()});
+    await tool.runAsync({args: {}, toolContext: toolContext()});
 
-    await expect(tool.runAsync({args: {}, toolContext})).rejects.toThrow(
-      'Call failed',
-    );
-
-    // Assert that closeSession was still called despite the error
-    expect(mockSessionManager.closeSession).toHaveBeenCalledWith(mockClient);
+    expect(sessionManager.closeSession).not.toHaveBeenCalled();
+    expect(client.close).not.toHaveBeenCalled();
+    expect(client.callTool).toHaveBeenCalledTimes(2);
   });
 });

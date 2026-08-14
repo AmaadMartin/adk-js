@@ -5,11 +5,7 @@
  */
 
 import {FunctionDeclaration} from '@google/genai';
-import {
-  CallToolRequest,
-  CallToolResult,
-  Tool,
-} from '@modelcontextprotocol/sdk/types.js';
+import {Tool} from '@modelcontextprotocol/sdk/types.js';
 
 import {toGeminiSchema} from '../../utils/gemini_schema_util.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
@@ -26,9 +22,9 @@ import {MCPSessionManager} from './mcp_session_manager.js';
  * {@link MCPSessionManager}.
  *
  * When an LLM decides to call this tool, the `runAsync` method will be
- * invoked, which in turn establishes an MCP session, sends a `callTool`
- * request with the provided arguments, and returns the result from the
- * remote tool.
+ * invoked, which in turn acquires the manager's pooled MCP session, sends a
+ * `callTool` request with the provided arguments, and returns the result from
+ * the remote tool. The tool does not own the session and never closes it.
  *
  * The originalName parameter allows the tool to track the native tool name
  * exposed by the MCP server. This is critical when the toolset applies a
@@ -65,15 +61,10 @@ export class MCPTool extends BaseTool {
   override async runAsync(request: RunAsyncToolRequest): Promise<unknown> {
     const session = await this.mcpSessionManager.createSession();
 
-    try {
-      const callRequest: CallToolRequest = {} as CallToolRequest;
-      callRequest.params = {name: this.originalName, arguments: request.args};
-      const result = await session.callTool(callRequest.params, undefined, {
-        signal: request.toolContext.abortSignal,
-      });
-      return result as CallToolResult;
-    } finally {
-      await this.mcpSessionManager.closeSession(session);
-    }
+    return session.callTool(
+      {name: this.originalName, arguments: request.args},
+      undefined,
+      {signal: request.toolContext.abortSignal},
+    );
   }
 }
