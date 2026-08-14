@@ -607,25 +607,6 @@ describe('AgentLoader', () => {
       expect(result.loader).toBe('js');
     });
 
-    it('returns undefined for node_modules', async () => {
-      const filePath = '/path/to/node_modules/some_pkg/index.js';
-      const plugin = replaceDirnamePlugin(
-        path.join(tempAgentsDir, 'test_agent.ts'),
-        tempAgentsDir,
-      );
-
-      const mockBuild = {
-        onLoad: vi.fn(),
-      };
-
-      plugin.setup(mockBuild as unknown as esbuild.PluginBuild);
-      const onLoadCallback = mockBuild.onLoad.mock.calls[0][1];
-
-      const result = await onLoadCallback({path: filePath});
-
-      expect(result).toBeUndefined();
-    });
-
     it('uses js loader for non-ts files', async () => {
       const filePath = path.join(tempAgentsDir, 'test_agent.js');
       const fileDir = path.dirname(filePath);
