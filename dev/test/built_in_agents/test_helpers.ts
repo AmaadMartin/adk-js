@@ -63,3 +63,20 @@ export function useTempDirs(): () => Promise<string> {
     return dir;
   };
 }
+
+/**
+ * Creates every named file under `root`, along with its parent directories.
+ *
+ * @param root The directory the paths are relative to.
+ * @param relativePaths Slash-separated paths of the files to create.
+ */
+export async function writeTree(
+  root: string,
+  relativePaths: string[],
+): Promise<void> {
+  for (const relativePath of relativePaths) {
+    const target = path.join(root, ...relativePath.split('/'));
+    await fs.mkdir(path.dirname(target), {recursive: true});
+    await fs.writeFile(target, 'x');
+  }
+}
