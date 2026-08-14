@@ -10,9 +10,13 @@ import {
   AuthCredentialTypes,
   Context,
   createRestApiTool,
+  createSession,
+  InvocationContext,
   OpenApiSpecParser,
+  PluginManager,
   RestApiTool,
   ToolAuthHandler,
+  version,
 } from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
 import {afterEach, describe, expect, it, vi} from 'vitest';
@@ -657,6 +661,180 @@ describe('RestApiTool', () => {
   });
 });
 
+describe('RestApiTool request headers', () => {
+  const endpoint = {
+    baseUrl: 'http://api.example.com',
+    path: '/test',
+    method: 'POST',
+  };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function mockFetch() {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      headers: {get: () => 'text/plain'},
+      text: async () => 'ok',
+    });
+  }
+
+  function createToolContext(): Context {
+    return new Context({
+      invocationContext: new InvocationContext({
+        invocationId: 'test-invocation',
+        session: createSession({
+          id: 'test-session',
+          appName: 'test-app',
+          userId: 'test-user',
+        }),
+        pluginManager: new PluginManager([]),
+      }),
+    });
+  }
+
+  function expectHeaders(headers: Record<string, unknown>) {
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({headers: expect.objectContaining(headers)}),
+    );
+  }
+
+  it('should name itself in the ADK user agent', async () => {
+    const tool = new RestApiTool('test_tool', 'description', endpoint, {
+      responses: {},
+    });
+    mockFetch();
+
+    await tool.runAsync({args: {}, toolContext: createToolContext()});
+
+    expectHeaders({
+      'User-Agent': `google-adk/${version} (tool: test_tool)`,
+    });
+  });
+
+  it('should let a User-Agent header parameter override the ADK user agent', async () => {
+    const operation: OpenAPIV3.OperationObject = {
+      responses: {},
+      parameters: [
+        {name: 'User-Agent', in: 'header', schema: {type: 'string'}},
+      ],
+    };
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      endpoint,
+      operation,
+      undefined,
+      undefined,
+      {preservePropertyNames: true},
+    );
+    mockFetch();
+
+    await tool.runAsync({
+      args: {'User-Agent': 'api-client'},
+      toolContext: createToolContext(),
+    });
+
+    expectHeaders({'User-Agent': 'api-client'});
+  });
+
+  it('should send a default header', async () => {
+    const tool = new RestApiTool('test_tool', 'description', endpoint, {
+      responses: {},
+    });
+    tool.setDefaultHeaders({'developer-token': 'token'});
+    mockFetch();
+
+    await tool.runAsync({args: {}, toolContext: createToolContext()});
+
+    expectHeaders({'developer-token': 'token'});
+  });
+
+  it('should keep the content type of the body over a default', async () => {
+    const operation: OpenAPIV3.OperationObject = {
+      responses: {},
+      requestBody: {
+        content: {
+          'application/json': {
+            schema: {type: 'object', properties: {foo: {type: 'string'}}},
+          },
+        },
+      },
+    };
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      endpoint,
+      operation,
+    );
+    tool.setDefaultHeaders({'Content-Type': 'text/plain'});
+    mockFetch();
+
+    await tool.runAsync({
+      args: {foo: 'bar'},
+      toolContext: createToolContext(),
+    });
+
+    expectHeaders({'Content-Type': 'application/json'});
+  });
+
+  it('should keep a credential header over a default', async () => {
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      endpoint,
+      {responses: {}},
+      createApiKeyScheme('X-API-Key', 'header'),
+      {authType: AuthCredentialTypes.API_KEY, apiKey: 'secret_key'},
+    );
+    tool.setDefaultHeaders({'X-API-Key': 'default_key'});
+    mockFetch();
+
+    await tool.runAsync({args: {}, toolContext: createToolContext()});
+
+    expectHeaders({'X-API-Key': 'secret_key'});
+  });
+
+  it('should keep a header provider header over a default', async () => {
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      endpoint,
+      {responses: {}},
+      undefined,
+      undefined,
+      {headerProvider: () => ({'X-Custom-Header': 'provided'})},
+    );
+    tool.setDefaultHeaders({'X-Custom-Header': 'default'});
+    mockFetch();
+
+    await tool.runAsync({args: {}, toolContext: createToolContext()});
+
+    expectHeaders({'X-Custom-Header': 'provided'});
+  });
+
+  it('should replace the default headers of an earlier call', async () => {
+    const tool = new RestApiTool('test_tool', 'description', endpoint, {
+      responses: {},
+    });
+    tool.setDefaultHeaders({'first-token': 'first'});
+    tool.setDefaultHeaders({'second-token': 'second'});
+    mockFetch();
+
+    await tool.runAsync({args: {}, toolContext: createToolContext()});
+
+    expectHeaders({'second-token': 'second'});
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        headers: expect.not.objectContaining({'first-token': 'first'}),
+      }),
+    );
+  });
+});
+
 describe('RestApiTool Utilities', () => {
   describe('createRestApiTool', () => {
     it('should successfully create a RestApiTool instance', () => {
@@ -724,6 +902,32 @@ describe('RestApiTool Utilities', () => {
       expect(result.headers).toEqual({
         'X-Trace-Id': 'trace-456',
       });
+    });
+
+    it('should name the tool in the ADK user agent', () => {
+      const endpoint = {
+        baseUrl: 'http://api.example.com',
+        path: '/test',
+        method: 'GET',
+      };
+
+      const result = prepareRequestParams(endpoint, [], {}, 'my_tool');
+
+      expect(result.headers).toEqual({
+        'User-Agent': `google-adk/${version} (tool: my_tool)`,
+      });
+    });
+
+    it('should omit the user agent when no tool name is given', () => {
+      const endpoint = {
+        baseUrl: 'http://api.example.com',
+        path: '/test',
+        method: 'GET',
+      };
+
+      const result = prepareRequestParams(endpoint, [], {});
+
+      expect(result.headers).toEqual({});
     });
 
     it('should ignore arguments that are not in parameters spec', () => {
