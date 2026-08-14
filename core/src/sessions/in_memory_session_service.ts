@@ -70,7 +70,7 @@ export class InMemorySessionService extends BaseSessionService {
   }: CreateSessionRequest): Promise<Session> {
     const filteredState = state ? trimTempState(state) : undefined;
     const session = createSession({
-      id: sessionId || randomUUID(),
+      id: sessionId?.trim() || randomUUID(),
       appName,
       userId,
       state: filteredState,
