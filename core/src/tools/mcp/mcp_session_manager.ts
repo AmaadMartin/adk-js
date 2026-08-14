@@ -6,6 +6,10 @@
 
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {
+  SSEClientTransport,
+  SSEClientTransportOptions,
+} from '@modelcontextprotocol/sdk/client/sse.js';
+import {
   StdioClientTransport,
   StdioServerParameters,
 } from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -59,11 +63,32 @@ export interface StreamableHTTPConnectionParams {
 }
 
 /**
+ * Defines the parameters for establishing a connection to an MCP server over
+ * the HTTP+SSE transport, where the server streams messages on a long-lived
+ * GET and the client posts messages back on a separate endpoint.
+ *
+ * Prefer {@link StreamableHTTPConnectionParams} for servers that support it;
+ * these params exist for servers that only expose HTTP+SSE.
+ *
+ * Usage:
+ *  const connectionParams: SseConnectionParams = {
+ *    type: 'SseConnectionParams',
+ *    url: 'http://localhost:8788/sse'
+ *  };
+ */
+export interface SseConnectionParams {
+  type: 'SseConnectionParams';
+  url: string;
+  transportOptions?: SSEClientTransportOptions;
+}
+
+/**
  * A union of all supported MCP connection parameter types.
  */
 export type MCPConnectionParams =
   | StdioConnectionParams
-  | StreamableHTTPConnectionParams;
+  | StreamableHTTPConnectionParams
+  | SseConnectionParams;
 
 /**
  * Manages Model Context Protocol (MCP) client sessions.
@@ -114,6 +139,15 @@ export class MCPSessionManager {
           const transport = new StreamableHTTPClientTransport(
             new URL(this.connectionParams.url),
             options,
+          );
+          transport.onerror = logTransportError;
+          await client.connect(transport);
+          break;
+        }
+        case 'SseConnectionParams': {
+          const transport = new SSEClientTransport(
+            new URL(this.connectionParams.url),
+            this.connectionParams.transportOptions,
           );
           transport.onerror = logTransportError;
           await client.connect(transport);
