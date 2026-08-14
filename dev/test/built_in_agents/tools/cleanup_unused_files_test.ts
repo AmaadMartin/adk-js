@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import {describe, expect, it} from 'vitest';
 
@@ -88,6 +89,24 @@ describe('cleanupUnusedFiles', () => {
       'b.yaml',
       path.join('pkg', 'a.yaml'),
     ]);
+  });
+
+  it('matches nothing for a pattern that reaches out of the root', async () => {
+    const parent = await tempDir();
+    const root = path.join(parent, 'project');
+    await fs.mkdir(root);
+    await writeTree(parent, ['reachable.py']);
+    await writeTree(root, ['inside.py']);
+
+    const result = await cleanupUnusedFiles(
+      {used_files: ['inside.py'], file_patterns: ['../*.py']},
+      createTestContext({root_directory: root}),
+    );
+
+    // Python's rglob('../*.py') lists reachable.py in the parent directory.
+    // The rewrite to a globstar pattern keeps the scan inside the project.
+    expect(result.success).toBe(true);
+    expect(result.unused_files).toEqual([]);
   });
 
   it('matches a used file spelled a different way', async () => {

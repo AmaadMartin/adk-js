@@ -77,10 +77,13 @@ function emptyResult(errors: string[]): CleanupUnusedFilesResult {
 }
 
 /**
- * Rewrites a pattern so it matches at any depth, the way `pathlib` does.
+ * Rewrites a pattern so it matches at any depth under the root.
  *
  * `Path.rglob(p)` walks the whole tree, and `Path.match(p)` matches from the
- * right, so both behave like a pattern prefixed with a globstar.
+ * right, so both behave like a pattern prefixed with a globstar. The rewrite
+ * is stricter than `rglob` in one case: a pattern that starts with `..` lists
+ * files outside the root in Python, and matches nothing here. A model-supplied
+ * pattern that reaches out of the project is not behaviour worth reproducing.
  */
 function anyDepth(pattern: string): string {
   return pattern.startsWith('**/') ? pattern : `**/${pattern}`;
