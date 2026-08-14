@@ -9,12 +9,14 @@ import {
   BaseArtifactService,
   BaseSessionService,
   LogLevel,
+  StreamingMode,
   getArtifactServiceFromUri,
   getSessionServiceFromUri,
   setLogLevel as setAdkCoreLogLevel,
 } from '@google/adk';
 import {Argument, Command, Option} from 'commander';
 import dotenv from 'dotenv';
+import {recordConformanceTests} from '../conformance/record_conformance_tests.js';
 import {runIntegrationTests} from '../integration/run_integration_tests.js';
 import {AdkApiServer} from '../server/adk_api_server.js';
 import {FileModuleType} from '../utils/agent_loader.js';
@@ -116,6 +118,12 @@ const LOG_LEVEL_OPTION = new Option(
   '--log_level <string>',
   'Optional. The log level of the server',
 ).default('info');
+const STREAMING_MODE_OPTION = new Option(
+  '--streaming_mode <mode>',
+  'Optional. The streaming mode the conformance goldens are recorded in',
+)
+  .choices([StreamingMode.NONE, StreamingMode.SSE])
+  .default(StreamingMode.NONE);
 const SESSION_SERVICE_URI_OPTION = new Option(
   '--session_service_uri <string>',
   'Optional. The URI of the session service. Supported URIs: memory:// for in-memory session service.',
@@ -540,6 +548,33 @@ export function createProgram(): Command {
         agentsDir: options['agents_dir'],
         testsDir: options['tests_dir'],
         forceRunAll: getBoolean(options['force']),
+      });
+    });
+
+  CONFORMANCE_COMMAND.command('record')
+    .description(
+      'Record the conformance goldens of every test case with a spec.yaml. This calls the real model named in each agent definition, so it needs credentials and it costs money.',
+    )
+    .addOption(VERBOSE_OPTION)
+    .addOption(LOG_LEVEL_OPTION)
+    .option(
+      '--agents_dir [dir]',
+      'Directory of conformance test agent definitions. Recursively searched for .yaml files with agent definitions.',
+      process.cwd(),
+    )
+    .option(
+      '--tests_dir [dir]',
+      'Directory of conformance test definitions. Recursively searched for spec.yaml files.',
+      process.cwd(),
+    )
+    .addOption(STREAMING_MODE_OPTION)
+    .action(async (options: Record<string, string>) => {
+      setAdkCoreLogLevel(getLogLevelFromOptions(options));
+
+      await recordConformanceTests({
+        agentsDir: options['agents_dir'],
+        testsDir: options['tests_dir'],
+        streamingMode: options['streaming_mode'] as StreamingMode,
       });
     });
 
