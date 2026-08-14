@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import {describe, expect, it} from 'vitest';
 
@@ -83,6 +84,22 @@ describe('resolveFilePath', () => {
 
     expect(() => resolveFilePath(target, root)).toThrow(
       'resolves outside the root directory',
+    );
+  });
+
+  it('follows a symlink out of the root, which adk-python refuses', async () => {
+    const root = await tempDir();
+    const outside = await tempDir();
+    // `junction` keeps this runnable on Windows, where a symlink needs a
+    // privilege the test runner does not have.
+    await fs.symlink(outside, path.join(root, 'esc'), 'junction');
+    await fs.writeFile(path.join(outside, 'secret.txt'), 'TOKEN=abc');
+
+    // The lexical check never reads the link, so the escape is allowed here.
+    // Python's `Path.resolve()` follows it and raises. This pins the gap the
+    // doc comment describes.
+    expect(resolveFilePath('esc/secret.txt', root)).toBe(
+      path.join(root, 'esc', 'secret.txt'),
     );
   });
 

@@ -53,14 +53,16 @@ export function rootDirectoryFromContext(context?: Context): string {
  *
  * This diverges from the reference in one way: Python's `Path.resolve()`
  * resolves symlinks, `path.resolve()` does not. A symlink inside the root that
- * points outside it is therefore contained by adk-python and refused here.
- * Calling `fs.realpath` to close that gap would add an asynchronous filesystem
- * round-trip and still lose the TOCTOU race, so it is left as is.
+ * points outside it is therefore **refused by adk-python and allowed here**,
+ * so a caller can read, write or delete the file the link points at. Calling
+ * `fs.realpath` to close that gap would add an asynchronous filesystem
+ * round-trip and still lose the TOCTOU race, so the gap stays open and a test
+ * pins it.
  *
  * @param filePath Relative or absolute path supplied by the model.
  * @param rootDirectory The project root, absolute or relative.
  * @param workingDirectory Base for a relative root; defaults to the cwd.
- * @return The resolved absolute path, guaranteed inside the root.
+ * @return The resolved absolute path, lexically inside the root.
  * @throws If the path resolves outside the root directory.
  */
 export function resolveFilePath(
