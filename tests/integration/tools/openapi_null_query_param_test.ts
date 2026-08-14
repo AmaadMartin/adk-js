@@ -22,7 +22,7 @@ describe('OpenAPI null query parameter', () => {
 
   beforeAll(async () => {
     server = http.createServer((req, res) => {
-      requestedUrls.push(req.url!);
+      requestedUrls.push(req.url ?? '');
       res.writeHead(200, {'Content-Type': 'application/json'});
       res.end(JSON.stringify({items: []}));
     });
