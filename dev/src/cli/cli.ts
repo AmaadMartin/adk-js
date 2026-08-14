@@ -152,6 +152,16 @@ const RELOAD_AGENTS_OPTION = new Option(
   '--reload_agents [boolean]',
   'Optional. Watch agent files for changes and automatically reload them. Default: false. To see any changes to your agent file, you need to initiate a new agent run.',
 ).default(false);
+// Kebab-case, unlike the snake_case options above, because adk-python spells
+// these two flags that way and the CLI surface is part of the parity contract.
+const LOGO_TEXT_OPTION = new Option(
+  '--logo-text <string>',
+  'Optional. The text to display in the logo of the web UI.',
+);
+const LOGO_IMAGE_URL_OPTION = new Option(
+  '--logo-image-url <string>',
+  'Optional. The URL of the image to display in the logo of the web UI.',
+);
 const AGENT_FILE_MODULE_TYPE = new Option('--file_type <string>', 'Optional. ');
 AGENT_FILE_MODULE_TYPE.argChoices = [FileModuleType.CJS, FileModuleType.ESM];
 
@@ -225,6 +235,8 @@ export function createProgram(): Command {
     .addOption(A2A_OPTION)
     .addOption(A2A_AUTH_TOKEN_OPTION)
     .addOption(RELOAD_AGENTS_OPTION)
+    .addOption(LOGO_TEXT_OPTION)
+    .addOption(LOGO_IMAGE_URL_OPTION)
     .action(async (agentsDir: string, options: Record<string, string>) => {
       const logLevel = getLogLevelFromOptions(options);
       setAdkCoreLogLevel(logLevel);
@@ -244,6 +256,10 @@ export function createProgram(): Command {
           a2a: getBoolean(options['a2a']),
           a2aAuthToken: options['a2a_auth_token'],
           reloadAgents: getBoolean(options['reload_agents']),
+          // Commander camelCases a dashed flag, so `--logo-text` arrives as
+          // `logoText` rather than as the literal option name.
+          logoText: options['logoText'],
+          logoImageUrl: options['logoImageUrl'],
         });
 
         await server.start();
