@@ -15,9 +15,28 @@ import {OAuth2CredentialExchanger} from './oauth2/oauth2_credential_exchanger.js
 /** The HTTP scheme used when a scheme carries no value of its own. */
 const DEFAULT_HTTP_SCHEME = 'bearer';
 
+/**
+ * The keys that mark a stored object as a credential.
+ *
+ * `authType` alone is too strict: a client answering an
+ * `adk_request_credential` call may send only the payload, so
+ * `parseAndStoreAuthResponse` stores a credential such as `{apiKey: '...'}`.
+ */
+const CREDENTIAL_KEYS: ReadonlyArray<keyof AuthCredential> = [
+  'authType',
+  'apiKey',
+  'http',
+  'oauth2',
+  'serviceAccount',
+];
+
 /** Whether a state value is shaped like a stored credential. */
 function isAuthCredential(value: unknown): value is AuthCredential {
-  return typeof value === 'object' && value !== null && 'authType' in value;
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    CREDENTIAL_KEYS.some((key) => key in value)
+  );
 }
 
 /**

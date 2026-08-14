@@ -236,6 +236,14 @@ describe('AuthHandler', () => {
       expect(handler.getAuthResponse(state)).toBe(credential);
     });
 
+    it('returns a stored credential that carries only a payload key', () => {
+      const credential = {apiKey: 'client_supplied_key'};
+      const handler = new AuthHandler(oauth2Config('testKey'));
+      const state = new State({'temp:testKey': credential});
+
+      expect(handler.getAuthResponse(state)).toBe(credential);
+    });
+
     it('returns undefined when a slot holds an object that is not a credential', () => {
       const handler = new AuthHandler(oauth2Config('testKey'));
       const state = new State({'temp:testKey': {foo: 'bar'}});
