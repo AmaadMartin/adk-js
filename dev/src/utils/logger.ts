@@ -30,11 +30,28 @@ export interface AdkLoggerOptions {
 }
 
 /**
+ * Level for every {@link AdkLogger} that was not given one of its own. Module
+ * loggers are constructed at import time, before the CLI has parsed
+ * `--verbose` / `--log_level`, so the level is read per call rather than
+ * captured in the constructor.
+ */
+let defaultLogLevel = LogLevel.INFO;
+
+/** Sets the level for AdkLoggers with no explicit level of their own. */
+export function setDefaultLogLevel(level: LogLevel): void {
+  defaultLogLevel = level;
+}
+
+/**
  * Logger implementation for the ADK CLI.
  */
 export class AdkLogger implements Logger {
   private readonly logger: winston.Logger;
-  private logLevel: LogLevel = LogLevel.INFO;
+  private logLevel?: LogLevel;
+
+  private get level(): LogLevel {
+    return this.logLevel ?? defaultLogLevel;
+  }
 
   constructor(options: AdkLoggerOptions) {
     const formats = [
@@ -78,7 +95,7 @@ export class AdkLogger implements Logger {
   }
 
   log(level: LogLevel, ...messages: unknown[]): void {
-    if (this.logLevel > level) {
+    if (this.level > level) {
       return;
     }
 
@@ -86,7 +103,7 @@ export class AdkLogger implements Logger {
   }
 
   debug(...messages: unknown[]): void {
-    if (this.logLevel > LogLevel.DEBUG) {
+    if (this.level > LogLevel.DEBUG) {
       return;
     }
 
@@ -94,7 +111,7 @@ export class AdkLogger implements Logger {
   }
 
   info(...messages: unknown[]): void {
-    if (this.logLevel > LogLevel.INFO) {
+    if (this.level > LogLevel.INFO) {
       return;
     }
 
@@ -102,7 +119,7 @@ export class AdkLogger implements Logger {
   }
 
   warn(...messages: unknown[]): void {
-    if (this.logLevel > LogLevel.WARN) {
+    if (this.level > LogLevel.WARN) {
       return;
     }
 
@@ -110,7 +127,7 @@ export class AdkLogger implements Logger {
   }
 
   error(...messages: unknown[]): void {
-    if (this.logLevel > LogLevel.ERROR) {
+    if (this.level > LogLevel.ERROR) {
       return;
     }
 

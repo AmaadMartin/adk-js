@@ -4,9 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import esbuild from 'esbuild';
+import {Console} from 'node:console';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import {Writable} from 'node:stream';
 import {pathToFileURL} from 'node:url';
 import {
   afterAll,
@@ -20,7 +22,7 @@ import {
   vi,
 } from 'vitest';
 
-import {App, isApp} from '@google/adk';
+import {App, isApp, LogLevel} from '@google/adk';
 import {
   AgentFile,
   AgentLoader,
@@ -30,7 +32,7 @@ import {
   replaceDirnamePlugin,
 } from '../../src/utils/agent_loader.js';
 import * as fileUtils from '../../src/utils/file_utils.js';
-import {AdkLogger} from '../../src/utils/logger.js';
+import {AdkLogger, setDefaultLogLevel} from '../../src/utils/logger.js';
 
 vi.mock('../../src/utils/file_utils.js', () => ({
   createTempDir: vi.fn(),
@@ -1011,6 +1013,29 @@ describe('AgentLoader', () => {
     });
 
     /**
+     * A helper module beside the agents is skipped, not broken, so logging the
+     * skip must not promote it to a load failure.
+     */
+    it('keeps a skipped non-agent file out of the load failures', async () => {
+      await fs.writeFile(
+        path.join(tempAgentsDir, 'helper.js'),
+        'exports.notAnAgent = 42;',
+      );
+      const loader = new AgentLoader(tempAgentsDir);
+
+      await expect(loader.listAgents()).resolves.toEqual([
+        'agent1',
+        'agent2',
+        'agent3',
+      ]);
+      await expect(loader.listLoadFailures()).resolves.toEqual([]);
+      await expect(loader.getAgentFile('helper')).rejects.toThrow(
+        /Agent 'helper' not found[\s\S]*Available agents: agent1, agent2, agent3/,
+      );
+      await loader.disposeAll();
+    });
+
+    /**
      * An agent whose module throws while constructing (a malformed workflow
      * graph, a bad config) must not stop the other agents from loading —
      * otherwise a single broken file takes the whole server down with it.
@@ -1331,6 +1356,89 @@ describe('AgentLoader', () => {
       );
 
       await first.dispose();
+    });
+  });
+  /**
+   * The scan is silent by default and inspectable at debug level, so a file
+   * that was skipped can be told apart from a file that was never scanned.
+   */
+  describe('skipped files', () => {
+    let writes: string[];
+    let compiled: string[];
+    let originalConsole: Console;
+
+    beforeEach(() => {
+      writes = [];
+      compiled = [];
+      const sink = new Writable({
+        write(chunk: Buffer | string, _encoding, callback) {
+          writes.push(chunk.toString());
+          callback();
+        },
+      });
+      originalConsole = globalThis.console;
+      // winston's Console transport writes to `console._stdout`, which Vitest
+      // has already replaced with its own reporting stream. Swapping the whole
+      // console is what puts the records in reach.
+      globalThis.console = new Console({stdout: sink, stderr: sink});
+    });
+
+    afterEach(() => {
+      globalThis.console = originalConsole;
+      setDefaultLogLevel(LogLevel.INFO);
+      (esbuild.build as Mock).mockReset();
+    });
+
+    /** Writes a module that exports no agent, compiled through verbatim. */
+    async function writeNonAgentFile(name: string): Promise<string> {
+      const filePath = path.join(tempAgentsDir, `${name}.js`);
+      await fs.writeFile(filePath, 'exports.notAnAgent = 42;');
+      (esbuild.build as Mock).mockImplementation(
+        async (options: {entryPoints: string[]; outfile: string}) => {
+          compiled.push(options.entryPoints[0]);
+          await fs.writeFile(
+            options.outfile,
+            await fs.readFile(options.entryPoints[0], 'utf8'),
+          );
+        },
+      );
+      return filePath;
+    }
+
+    function flush(): Promise<void> {
+      return new Promise((resolve) => setImmediate(resolve));
+    }
+
+    it('names the skipped file at debug level', async () => {
+      const helperPath = await writeNonAgentFile('debug_helper');
+      setDefaultLogLevel(LogLevel.DEBUG);
+      const loader = new AgentLoader(tempAgentsDir);
+
+      const agents = await loader.listAgents();
+      await flush();
+      await loader.disposeAll();
+
+      expect(agents).not.toContain('debug_helper');
+      const output = writes.join('');
+      expect(output).toContain(`Skipped ${helperPath}`);
+      expect(output).toContain(
+        'No @google/adk BaseAgent or Workflow instance found',
+      );
+    });
+
+    it('says nothing about the skipped file at the default level', async () => {
+      const helperPath = await writeNonAgentFile('quiet_helper');
+      const loader = new AgentLoader(tempAgentsDir);
+
+      const agents = await loader.listAgents();
+      await flush();
+      await loader.disposeAll();
+
+      expect(agents).not.toContain('quiet_helper');
+      // The loader compiled the file, so the missing line is silence about a
+      // scanned file rather than a file the scan never reached.
+      expect(compiled).toContain(helperPath);
+      expect(writes.join('')).not.toContain('Skipped ');
     });
   });
 });

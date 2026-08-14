@@ -66,8 +66,9 @@ interface FileMetadata {
 /**
  * Signals "this file is not an agent file" (missing, empty, or exporting no
  * agent), which is normal in a directory that also holds helper modules, so it
- * is swallowed silently. Any OTHER error means the file *is* an agent that
- * failed to construct — see {@link AgentLoadFailure}.
+ * is skipped rather than recorded as a failure; the skip is logged at debug
+ * level. Any OTHER error means the file *is* an agent that failed to
+ * construct — see {@link AgentLoadFailure}.
  */
 class AgentFileLoadingError extends Error {}
 
@@ -665,6 +666,9 @@ export class AgentLoader {
    */
   private recordLoadFailure(name: string, filePath: string, e: unknown): void {
     if (e instanceof AgentFileLoadingError) {
+      // The source path is in the message because the error names the compiled
+      // artifact instead.
+      logger.debug(`Skipped ${filePath}: ${e.message}`);
       return;
     }
 
