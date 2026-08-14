@@ -10,13 +10,13 @@
  *
  * Ported (static-graph subset) from `google/adk-python`
  * `workflow/utils/_rehydration_utils.py`. The chronological sequence barrier
- * for deterministic parallel/dynamic replay is a Phase 5b continuation.
+ * that replays those nodes in their recorded order lives alongside, in
+ * `replay_manager.ts` and `replay_sequence_barrier.ts`.
  */
 
 import {requiresUserInput} from '../../agents/user_input_request.js';
 import {Event} from '../../events/event.js';
 import {RouteValue} from '../graph.js';
-import type {NodeContext, NodeResult} from '../node_context.js';
 import {
   interruptResponseMismatch,
   responseSchemasByInterruptId,
@@ -254,12 +254,32 @@ function keyFn(parentPath?: string): (event: Event) => string | undefined {
     event.nodeInfo?.path ? nodeNameFromPath(event.nodeInfo.path) : event.author;
 }
 
+/**
+ * The one rule for "this run is over": it produced an output, a route, or an
+ * interrupt. {@link isRunClosed} applies it to an accumulated run and
+ * {@link closesRun} to a single event, so the two cannot drift — the replay
+ * barrier's run numbers only line up with {@link reconstructNodeRuns}'s
+ * positional runs while they agree.
+ */
+function isTerminalOutcome(
+  output: unknown,
+  route: unknown,
+  interruptCount: number,
+): boolean {
+  return output !== undefined || route !== undefined || interruptCount > 0;
+}
+
 /** Whether a run has reached a terminal result, so the next event is a new run. */
 function isRunClosed(node: RehydratedNode): boolean {
-  return (
-    node.output !== undefined ||
-    node.route !== undefined ||
-    node.interruptIds.size > 0
+  return isTerminalOutcome(node.output, node.route, node.interruptIds.size);
+}
+
+/** Whether `event` is the one that closes the run it belongs to. */
+export function closesRun(event: Event): boolean {
+  return isTerminalOutcome(
+    event.output,
+    event.route,
+    event.longRunningToolIds?.length ?? 0,
   );
 }
 
@@ -393,28 +413,35 @@ export function isFastForwardable(node: RehydratedNode): boolean {
   return true;
 }
 
-/**
- * Builds the completion result for a fast-forwarded (cached) node on resume.
- * The node's body is not re-run and its events are NOT re-emitted (they already
- * exist in the session), so this returns a bare {@link NodeResult} rather than a
- * live {@link NodeContext} — the honest type for "cached output, no behaviour".
- */
-export function makeFastForwardResult(
-  parent: NodeContext,
-  prior: RehydratedNode,
-): NodeResult {
-  return {
-    output: prior.output,
-    route: prior.route,
-    branch: prior.branch ?? parent.branch,
-    interruptIds: [],
-  };
-}
-
 /** Extracts the node name (leaf, without run id) from a dotted node path. */
 export function nodeNameFromPath(path: string): string {
   const leaf = path.split(/[./]/).pop() ?? path;
   return leaf.split('@')[0];
+}
+
+/**
+ * Returns the trailing path segment if `path` is a DIRECT child of `parentPath`
+ * (e.g. `parent.child` -> `child`, `parent.child@2` -> `child@2`), or
+ * `undefined` for a non-descendant or a deeper descendant (e.g.
+ * `parent.sub.child`).
+ *
+ * The run id is kept, unlike {@link directChildName}: it is what distinguishes
+ * two dynamic (`ctx.runNode`) runs of the same node, so it is what the replay
+ * barrier keys on.
+ */
+export function directChildSegment(
+  path: string,
+  parentPath: string,
+): string | undefined {
+  const prefix = `${parentPath}.`;
+  if (!path.startsWith(prefix)) {
+    return undefined;
+  }
+  const rest = path.slice(prefix.length);
+  if (rest.includes('.')) {
+    return undefined; // a deeper descendant, not a direct child
+  }
+  return rest;
 }
 
 /**
@@ -424,15 +451,7 @@ export function nodeNameFromPath(path: string): string {
  * scope rehydration to a single workflow's own nodes.
  */
 function directChildName(path: string, parentPath: string): string | undefined {
-  const prefix = `${parentPath}.`;
-  if (!path.startsWith(prefix)) {
-    return undefined;
-  }
-  const rest = path.slice(prefix.length);
-  if (rest.includes('.')) {
-    return undefined; // a deeper descendant, not a direct child
-  }
-  return rest.split('@')[0];
+  return directChildSegment(path, parentPath)?.split('@')[0];
 }
 
 /** Narrows an unknown value to a plain (non-array) record. */
