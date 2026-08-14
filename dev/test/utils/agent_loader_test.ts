@@ -538,6 +538,43 @@ describe('AgentLoader', () => {
   });
 
   describe('replaceDirnamePlugin', () => {
+    type OnLoadCallback = (
+      args: esbuild.OnLoadArgs,
+    ) => Promise<esbuild.OnLoadResult | undefined>;
+
+    const onLoadArgs = (modulePath: string): esbuild.OnLoadArgs => ({
+      path: modulePath,
+      namespace: 'file',
+      suffix: '',
+      pluginData: undefined,
+      with: {},
+    });
+
+    const setupOnLoad = (
+      filePath: string,
+      originalDir: string,
+    ): OnLoadCallback => {
+      const onLoad =
+        vi.fn<
+          (options: esbuild.OnLoadOptions, callback: OnLoadCallback) => void
+        >();
+      replaceDirnamePlugin(filePath, originalDir).setup({onLoad});
+      return onLoad.mock.calls[0][1];
+    };
+
+    /** Writes a module inside an installed package and returns its path. */
+    const writeDependency = async (
+      packageName: string,
+      fileName: string,
+      contents: string,
+    ): Promise<string> => {
+      const packageDir = path.join(tempAgentsDir, 'node_modules', packageName);
+      await fs.mkdir(packageDir, {recursive: true});
+      const modulePath = path.join(packageDir, fileName);
+      await fs.writeFile(modulePath, contents);
+      return modulePath;
+    };
+
     it.each([
       {
         name: 'replaces __dirname with original directory',
@@ -605,6 +642,150 @@ describe('AgentLoader', () => {
       expect(result.contents).toContain('const str = "__dirname"');
       expect(result.contents).toContain(JSON.stringify(fileDir));
       expect(result.loader).toBe('js');
+    });
+
+    it('rewrites import.meta.url in a dependency to the dependency URL', async () => {
+      const entryPath = path.join(tempAgentsDir, 'test_agent.ts');
+      const modulePath = await writeDependency(
+        'url-dep',
+        'index.js',
+        'const url = import.meta.url;',
+      );
+      const onLoadCallback = setupOnLoad(entryPath, tempAgentsDir);
+
+      const result = await onLoadCallback(onLoadArgs(modulePath));
+
+      expect(result?.contents).toContain(pathToFileURL(modulePath).href);
+      expect(result?.contents).not.toContain(pathToFileURL(entryPath).href);
+    });
+
+    it('rewrites __dirname and __filename in a dependency to the dependency location', async () => {
+      const entryPath = path.join(tempAgentsDir, 'test_agent.ts');
+      const modulePath = await writeDependency(
+        'dirname-dep',
+        'index.js',
+        'const dir = __dirname;\nconst file = __filename;',
+      );
+      const onLoadCallback = setupOnLoad(entryPath, tempAgentsDir);
+
+      const result = await onLoadCallback(onLoadArgs(modulePath));
+
+      expect(result?.contents).toContain(
+        JSON.stringify(path.dirname(modulePath)),
+      );
+      expect(result?.contents).toContain(JSON.stringify(modulePath));
+      expect(result?.contents).not.toContain(JSON.stringify(tempAgentsDir));
+    });
+
+    it('rewrites import.meta.dirname and import.meta.filename in a dependency', async () => {
+      const entryPath = path.join(tempAgentsDir, 'test_agent.ts');
+      const modulePath = await writeDependency(
+        'meta-dep',
+        'index.js',
+        'const dir = import.meta.dirname;\nconst file = import.meta.filename;',
+      );
+      const onLoadCallback = setupOnLoad(entryPath, tempAgentsDir);
+
+      const result = await onLoadCallback(onLoadArgs(modulePath));
+
+      expect(result?.contents).toContain(
+        JSON.stringify(path.dirname(modulePath)),
+      );
+      expect(result?.contents).toContain(JSON.stringify(modulePath));
+      expect(result?.contents).not.toContain('import.meta');
+    });
+
+    it('does not replace tokens in strings in a dependency', async () => {
+      const entryPath = path.join(tempAgentsDir, 'test_agent.ts');
+      const modulePath = await writeDependency(
+        'string-dep',
+        'index.js',
+        `const str = "__dirname";\nconst code = __dirname;`,
+      );
+      const onLoadCallback = setupOnLoad(entryPath, tempAgentsDir);
+
+      const result = await onLoadCallback(onLoadArgs(modulePath));
+
+      expect(result?.contents).toContain('const str = "__dirname"');
+      expect(result?.contents).toContain(
+        JSON.stringify(path.dirname(modulePath)),
+      );
+    });
+
+    it('keeps the entry file pointed at originalDir when it differs from the file directory', async () => {
+      const entryPath = path.join(tempAgentsDir, 'test_agent.ts');
+      const originalDir = path.join(tempAgentsDir, 'elsewhere');
+      await fs.writeFile(entryPath, 'const dir = __dirname;');
+      const onLoadCallback = setupOnLoad(entryPath, originalDir);
+
+      const result = await onLoadCallback(onLoadArgs(entryPath));
+
+      expect(result?.contents).toContain(JSON.stringify(originalDir));
+    });
+
+    it('does not transform a module without location tokens', async () => {
+      const modulePath = await writeDependency(
+        'plain-dep',
+        'index.js',
+        'export const answer = 1;',
+      );
+      const onLoadCallback = setupOnLoad(
+        path.join(tempAgentsDir, 'test_agent.ts'),
+        tempAgentsDir,
+      );
+
+      const result = await onLoadCallback(onLoadArgs(modulePath));
+
+      expect(result).toBeUndefined();
+    });
+
+    it('does not transform a non-JavaScript file', async () => {
+      const modulePath = await writeDependency(
+        'json-dep',
+        'data.json',
+        '{"key": "__dirname"}',
+      );
+      const onLoadCallback = setupOnLoad(
+        path.join(tempAgentsDir, 'test_agent.ts'),
+        tempAgentsDir,
+      );
+
+      const result = await onLoadCallback(onLoadArgs(modulePath));
+
+      expect(result).toBeUndefined();
+    });
+
+    it('reports a syntax error against the module that holds it', async () => {
+      const modulePath = await writeDependency(
+        'broken-dep',
+        'index.js',
+        'const dir = __dirname; const;',
+      );
+      const onLoadCallback = setupOnLoad(
+        path.join(tempAgentsDir, 'test_agent.ts'),
+        tempAgentsDir,
+      );
+
+      await expect(onLoadCallback(onLoadArgs(modulePath))).rejects.toThrow(
+        modulePath,
+      );
+    });
+
+    it('fails when a module cannot be read', async () => {
+      const modulePath = path.join(
+        tempAgentsDir,
+        'node_modules',
+        'absent-dep',
+        'index.js',
+      );
+      const onLoadCallback = setupOnLoad(
+        path.join(tempAgentsDir, 'test_agent.ts'),
+        tempAgentsDir,
+      );
+
+      await expect(onLoadCallback(onLoadArgs(modulePath))).rejects.toThrow(
+        'ENOENT',
+      );
     });
 
     it('uses js loader for non-ts files', async () => {
