@@ -19,14 +19,10 @@ let idProvider: IdProvider = defaultIdProvider;
  * invocations, client function calls, sessions and A2A messages, tasks and
  * artifacts.
  *
- * Every other identifier in the library keeps its own source, including the
- * OAuth2 `state` parameter in `AuthHandler`, the `interruptId` of a workflow
- * input request, and the event id from `createNewEventId`. A caller that
- * installs a provider therefore sees a mix of provider-supplied and generated
- * identifiers.
- *
- * The provider carries no cryptographic guarantee, which is why the OAuth2
- * `state` parameter stays off this seam.
+ * Every other identifier in the library keeps its own source, so a caller sees
+ * a mix of provider-supplied and generated identifiers. The OAuth2 `state`
+ * parameter deliberately stays off this seam, because a caller-supplied
+ * provider carries no cryptographic guarantee.
  *
  * The override is process-wide. It is not scoped to an async context, which is
  * how it differs from the `ContextVar` the Python counterpart uses: concurrent
