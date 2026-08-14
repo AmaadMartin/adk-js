@@ -5,17 +5,9 @@
  */
 
 import {describe, expect, it, vi} from 'vitest';
-import {
-  isReplayDivergenceError,
-  ReplayDivergenceError,
-} from '../../src/workflow/errors.js';
+import {isReplayDivergenceError} from '../../src/workflow/errors.js';
 import {ReplaySequenceBarrier} from '../../src/workflow/utils/replay_sequence_barrier.js';
-
-/** Lets every already-resolved promise settle without advancing the clock. */
-async function flushMicrotasks(): Promise<void> {
-  await Promise.resolve();
-  await Promise.resolve();
-}
+import {flushMicrotasks} from './test_helpers.js';
 
 describe('ReplaySequenceBarrier', () => {
   it('opens only the first key of the recorded sequence', () => {
@@ -96,14 +88,15 @@ describe('ReplaySequenceBarrier', () => {
 
     const error = await barrier.wait('NodeB@1').catch((e: unknown) => e);
 
-    expect(isReplayDivergenceError(error)).toBe(true);
-    const divergence = error as ReplayDivergenceError;
-    expect(divergence.message).toBe(
+    if (!isReplayDivergenceError(error)) {
+      expect.fail(`expected a ReplayDivergenceError, got ${String(error)}`);
+    }
+    expect(error.message).toBe(
       'Replay divergence detected: Timed out waiting for sequence key ' +
         "'NodeB@1' to be unblocked.",
     );
-    expect(divergence.sequenceKey).toBe('NodeB@1');
-    expect(divergence.timeoutMs).toBe(10);
+    expect(error.sequenceKey).toBe('NodeB@1');
+    expect(error.timeoutMs).toBe(10);
   });
 
   it('clears its deadline timer once the gate opens', async () => {

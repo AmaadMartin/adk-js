@@ -253,7 +253,11 @@ export class Workflow extends BaseNode {
 
     const loop = new LoopState();
     loop.rehydrated = rehydrated;
-    loop.sequenceBarrier = dynamicState.replayManager.scanWorkflowEvents(ctx);
+    loop.sequenceBarrier =
+      dynamicState.replayManager.prepareParentSequenceBarrier(
+        ctx,
+        ctx.nodePath,
+      );
     loop.abortSignal = abortController.signal;
 
     this.seedStartTriggers(loop, nodeInput);

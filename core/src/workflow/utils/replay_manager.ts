@@ -65,35 +65,22 @@ export function completionSequence(
 }
 
 /**
- * Owns a workflow's replay barriers: one for the static graph, and one per
- * parent path for dynamic (`ctx.runNode`) children.
+ * Owns one replay barrier per parent path, so a workflow's static graph loop
+ * and its dynamic (`ctx.runNode`) children replay against the same recorded
+ * order when they share a parent.
  *
  * Stateful with a lifecycle, so a class rather than loose functions; the
  * stateless {@link completionSequence} and {@link sequenceKey} stay at module
  * level.
  */
 export class ReplayManager {
-  private barrier?: ReplaySequenceBarrier;
   private readonly parentBarriers = new Map<string, ReplaySequenceBarrier>();
 
-  /** The static graph's barrier, once {@link scanWorkflowEvents} has run. */
-  get sequenceBarrier(): ReplaySequenceBarrier | undefined {
-    return this.barrier;
-  }
-
-  /** Builds and stores the static graph's barrier for `ctx.nodePath`. */
-  scanWorkflowEvents(ctx: NodeContext): ReplaySequenceBarrier {
-    this.barrier = new ReplaySequenceBarrier(
-      completionSequence(recordedEvents(ctx), ctx.nodePath),
-    );
-    return this.barrier;
-  }
-
   /**
-   * The barrier for dynamic children of `parentPath`, built on first use.
+   * The barrier for the direct children of `parentPath`, built on first use.
    *
-   * Memoised before the events are read, because every `ctx.runNode()` call
-   * under the same parent lands here.
+   * Memoised before the events are read, because every scheduled child under
+   * the same parent lands here.
    */
   prepareParentSequenceBarrier(
     ctx: NodeContext,
