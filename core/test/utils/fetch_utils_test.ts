@@ -66,6 +66,7 @@ describe('idleTimeoutStream', () => {
     }
 
     expect(chunks).toEqual([new Uint8Array([1]), new Uint8Array([2])]);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it('restarts the idle budget on every chunk', async () => {
