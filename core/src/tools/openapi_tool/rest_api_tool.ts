@@ -10,6 +10,7 @@ import {Context} from '../../agents/context.js';
 import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {AuthCredential} from '../../auth/auth_credential.js';
 import {experimental} from '../../utils/experimental.js';
+import {logger} from '../../utils/logger.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
 import {applyCredential} from './auth/auth_helpers.js';
 import {
@@ -137,6 +138,24 @@ export class RestApiTool extends BaseTool {
         // eslint-disable-next-line no-undef
         body: body as BodyInit,
       });
+
+      if (!response.ok) {
+        // The body is surfaced verbatim, and the wording is byte-identical to
+        // adk-python's RestApiTool.call, so a model gets the same signal from
+        // either SDK.
+        const errorDetails = await response.text();
+        logger.warn(
+          `API call failed for tool ${this.name}: Status ` +
+            `${response.status} - ${errorDetails}`,
+        );
+        return {
+          error:
+            `Tool ${this.name} execution failed. Analyze this execution ` +
+            'error and your inputs. Retry with adjustments if applicable. ' +
+            "But make sure don't retry more than 3 times. Execution Error: " +
+            `Status Code: ${response.status}, ${errorDetails}`,
+        };
+      }
 
       const contentType = response.headers.get('content-type');
       if (contentType && contentType.includes('application/json')) {
