@@ -15,11 +15,24 @@ import {
 } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
 import {formatError} from '../../utils/error_utils.js';
+import {withStreamIdleTimeout} from '../../utils/fetch_utils.js';
 import {logger} from '../../utils/logger.js';
+
+const MS_PER_SECOND = 1000;
 
 /** Surfaces a background transport error that would otherwise be dropped. */
 function logTransportError(err: unknown): void {
   logger.error('MCP transport error: ' + formatError(err));
+}
+
+/**
+ * Converts a timeout in seconds to milliseconds. Returns `undefined` for an
+ * unset or non-positive value, which leaves the corresponding mechanism off.
+ */
+function toMillis(seconds: number | undefined): number | undefined {
+  return typeof seconds === 'number' && seconds > 0
+    ? seconds * MS_PER_SECOND
+    : undefined;
 }
 
 /**
@@ -52,8 +65,27 @@ export interface StreamableHTTPConnectionParams {
    * This field will be ignored if transportOptions is provided even if no headers are specified in transportOptions.
    */
   header?: Record<string, unknown>;
+  /**
+   * Deadline in **seconds** for establishing the session, i.e. for the
+   * `initialize` request. It does not bound later tool calls. Unset, zero and
+   * negative values keep the MCP SDK default of 60 seconds.
+   */
   timeout?: number;
+  /**
+   * Maximum idle gap in **seconds** between two chunks of a streamed
+   * (`text/event-stream`) response. The budget restarts on every chunk. Unset,
+   * zero and negative values leave a stalled stream unbounded.
+   */
   sseReadTimeout?: number;
+  /**
+   * Sends an HTTP `DELETE` for the MCP session when the client closes, so the
+   * server can release it immediately.
+   *
+   * This defaults to off, while adk-python's `terminate_on_close` defaults to
+   * `True`. A session is created and closed per tool listing and per tool
+   * call, so defaulting it on would add an HTTP request to each of those for
+   * every existing caller.
+   */
   terminateOnClose?: boolean;
   transportOptions?: StreamableHTTPClientTransportOptions;
 }
@@ -81,6 +113,11 @@ export type MCPConnectionParams =
 export class MCPSessionManager {
   private readonly connectionParams: MCPConnectionParams;
   private readonly activeSessions = new Set<Client>();
+  /** Sessions whose server side must be terminated when the client closes. */
+  private readonly transportsToTerminate = new Map<
+    Client,
+    StreamableHTTPClientTransport
+  >();
 
   constructor(connectionParams: MCPConnectionParams) {
     this.connectionParams = connectionParams;
@@ -100,23 +137,39 @@ export class MCPSessionManager {
           break;
         }
         case 'StreamableHTTPConnectionParams': {
-          const options = this.connectionParams.transportOptions ?? {};
+          const params = this.connectionParams;
+          const options: StreamableHTTPClientTransportOptions = {
+            ...params.transportOptions,
+          };
 
-          if (
-            !options.requestInit &&
-            this.connectionParams.header !== undefined
-          ) {
+          if (!options.requestInit && params.header !== undefined) {
             options.requestInit = {
-              headers: this.connectionParams.header as Record<string, string>,
+              headers: params.header as Record<string, string>,
             };
           }
 
+          const idleTimeoutMs = toMillis(params.sseReadTimeout);
+          if (idleTimeoutMs !== undefined) {
+            options.fetch = withStreamIdleTimeout(idleTimeoutMs, options.fetch);
+          }
+
           const transport = new StreamableHTTPClientTransport(
-            new URL(this.connectionParams.url),
+            new URL(params.url),
             options,
           );
           transport.onerror = logTransportError;
-          await client.connect(transport);
+
+          const connectTimeoutMs = toMillis(params.timeout);
+          await client.connect(
+            transport,
+            connectTimeoutMs === undefined
+              ? undefined
+              : {timeout: connectTimeoutMs},
+          );
+
+          if (params.terminateOnClose) {
+            this.transportsToTerminate.set(client, transport);
+          }
           break;
         }
         default: {
@@ -138,6 +191,17 @@ export class MCPSessionManager {
   async closeSession(client: Client): Promise<void> {
     if (this.activeSessions.has(client)) {
       this.activeSessions.delete(client);
+
+      const transport = this.transportsToTerminate.get(client);
+      if (transport) {
+        this.transportsToTerminate.delete(client);
+        try {
+          await transport.terminateSession();
+        } catch (err) {
+          logger.warn('Failed to terminate MCP session: ' + formatError(err));
+        }
+      }
+
       await client.close();
     }
   }
