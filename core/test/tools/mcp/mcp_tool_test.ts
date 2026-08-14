@@ -7,12 +7,13 @@
 import {
   Context,
   InvocationContext,
+  MCPConnectionParams,
   MCPSessionManager,
   MCPTool,
 } from '@google/adk';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {Tool} from '@modelcontextprotocol/sdk/types.js';
-import {describe, expect, it, vi} from 'vitest';
+import {Mock, describe, expect, it, vi} from 'vitest';
 
 describe('MCPTool', () => {
   it('passes abort signal to callTool', async () => {
@@ -170,12 +171,28 @@ describe('MCPTool', () => {
       inputSchema: {type: 'object', properties: {}},
     };
 
-    /** A client whose callTool always succeeds. */
-    function workingClient(): Client {
+    const connectionParams: MCPConnectionParams = {
+      type: 'StdioConnectionParams',
+      serverParams: {command: 'never-spawned'},
+    };
+
+    /** A client exposing only the two methods MCPTool.runAsync calls. */
+    function fakeClient(callTool: Mock): Client {
       return {
-        callTool: vi.fn().mockResolvedValue({content: []}),
+        callTool,
         close: vi.fn().mockResolvedValue(undefined),
       } as unknown as Client;
+    }
+
+    /**
+     * A real session manager whose transport calls are replaced by spies, so
+     * no process is spawned and no connection is opened.
+     */
+    function fakeSessionManager(createSession: Mock): MCPSessionManager {
+      const manager = new MCPSessionManager(connectionParams);
+      vi.spyOn(manager, 'createSession').mockImplementation(createSession);
+      vi.spyOn(manager, 'closeSession').mockResolvedValue(undefined);
+      return manager;
     }
 
     /** Builds a tool context carrying `signal`. */
@@ -188,72 +205,59 @@ describe('MCPTool', () => {
     }
 
     it('retries session creation once and calls callTool exactly once', async () => {
-      const client = workingClient();
-      const mockSessionManager = {
-        createSession: vi
-          .fn()
-          .mockRejectedValueOnce(new Error('Failed to create MCP session'))
-          .mockResolvedValue(client),
-        closeSession: vi.fn().mockResolvedValue(undefined),
-      } as unknown as MCPSessionManager;
+      const callTool = vi.fn().mockResolvedValue({content: []});
+      const createSession = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('Failed to create MCP session'))
+        .mockResolvedValue(fakeClient(callTool));
 
-      const tool = new MCPTool(retryTool, mockSessionManager);
+      const tool = new MCPTool(retryTool, fakeSessionManager(createSession));
       const toolContext = contextWith(new AbortController().signal);
 
       await expect(tool.runAsync({args: {}, toolContext})).resolves.toEqual({
         content: [],
       });
-      expect(mockSessionManager.createSession).toHaveBeenCalledTimes(2);
-      expect(client.callTool).toHaveBeenCalledOnce();
+      expect(createSession).toHaveBeenCalledTimes(2);
+      expect(callTool).toHaveBeenCalledOnce();
     });
 
     it('rejects with the second error and never calls callTool when both session attempts fail', async () => {
-      const client = workingClient();
-      const mockSessionManager = {
-        createSession: vi
-          .fn()
-          .mockRejectedValueOnce(new Error('first failure'))
-          .mockRejectedValue(new Error('second failure')),
-        closeSession: vi.fn().mockResolvedValue(undefined),
-      } as unknown as MCPSessionManager;
+      const callTool = vi.fn().mockResolvedValue({content: []});
+      const createSession = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('first failure'))
+        .mockRejectedValue(new Error('second failure'));
 
-      const tool = new MCPTool(retryTool, mockSessionManager);
+      const tool = new MCPTool(retryTool, fakeSessionManager(createSession));
       const toolContext = contextWith(new AbortController().signal);
 
       await expect(tool.runAsync({args: {}, toolContext})).rejects.toThrow(
         'second failure',
       );
-      expect(mockSessionManager.createSession).toHaveBeenCalledTimes(2);
-      expect(client.callTool).not.toHaveBeenCalled();
+      expect(createSession).toHaveBeenCalledTimes(2);
+      expect(callTool).not.toHaveBeenCalled();
     });
 
     it('issues the tool call at most once when callTool rejects', async () => {
-      const client = {
-        callTool: vi.fn().mockRejectedValue(new Error('Call failed')),
-        close: vi.fn().mockResolvedValue(undefined),
-      } as unknown as Client;
-      const mockSessionManager = {
-        createSession: vi.fn().mockResolvedValue(client),
-        closeSession: vi.fn().mockResolvedValue(undefined),
-      } as unknown as MCPSessionManager;
+      const callTool = vi.fn().mockRejectedValue(new Error('Call failed'));
+      const createSession = vi.fn().mockResolvedValue(fakeClient(callTool));
 
-      const tool = new MCPTool(retryTool, mockSessionManager);
+      const tool = new MCPTool(retryTool, fakeSessionManager(createSession));
       const toolContext = contextWith(new AbortController().signal);
 
       await expect(tool.runAsync({args: {}, toolContext})).rejects.toThrow(
         'Call failed',
       );
-      expect(mockSessionManager.createSession).toHaveBeenCalledOnce();
-      expect(client.callTool).toHaveBeenCalledOnce();
+      expect(createSession).toHaveBeenCalledOnce();
+      expect(callTool).toHaveBeenCalledOnce();
     });
 
     it('does not retry session creation when the invocation is already aborted', async () => {
-      const mockSessionManager = {
-        createSession: vi.fn().mockRejectedValue(new Error('connect failed')),
-        closeSession: vi.fn().mockResolvedValue(undefined),
-      } as unknown as MCPSessionManager;
+      const createSession = vi
+        .fn()
+        .mockRejectedValue(new Error('connect failed'));
 
-      const tool = new MCPTool(retryTool, mockSessionManager);
+      const tool = new MCPTool(retryTool, fakeSessionManager(createSession));
       const controller = new AbortController();
       controller.abort();
       const toolContext = contextWith(controller.signal);
@@ -261,7 +265,7 @@ describe('MCPTool', () => {
       await expect(tool.runAsync({args: {}, toolContext})).rejects.toThrow(
         'connect failed',
       );
-      expect(mockSessionManager.createSession).toHaveBeenCalledOnce();
+      expect(createSession).toHaveBeenCalledOnce();
     });
   });
 });
