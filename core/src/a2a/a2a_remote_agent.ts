@@ -19,8 +19,8 @@ import {Client, ClientFactory} from '@a2a-js/sdk/client';
 import {BaseAgent, BaseAgentConfig} from '../agents/base_agent.js';
 import {InvocationContext} from '../agents/invocation_context.js';
 import {Event as AdkEvent, createEvent} from '../events/event.js';
-import {randomUUID} from '../utils/env_aware_utils.js';
 import {logger} from '../utils/logger.js';
+import {newUuid} from '../utils/uuid.js';
 import {MessageRole} from './a2a_event.js';
 import {A2ARemoteAgentRunProcessor} from './a2a_remote_agent_run_processor.js';
 import {
@@ -183,7 +183,7 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
 
       const message: Message = {
         kind: 'message',
-        messageId: randomUUID(),
+        messageId: newUuid(),
         role: MessageRole.USER,
         parts,
         metadata: getA2ASessionMetadata({

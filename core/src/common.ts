@@ -316,6 +316,8 @@ export type {SchemaLike} from './utils/schema.js';
 export {zodObjectToSchema} from './utils/simple_zod_to_json.js';
 export {Task} from './utils/task.js';
 export type {TaskExecutable} from './utils/task.js';
+export {newUuid, resetIdProvider, setIdProvider} from './utils/uuid.js';
+export type {IdProvider} from './utils/uuid.js';
 export {GoogleLLMVariant} from './utils/variant_utils.js';
 export {version} from './version.js';
 
