@@ -104,29 +104,17 @@ export class MCPTool extends BaseTool {
     };
   }
 
-  /**
-   * Returns the progress callback for one invocation, or `undefined` when the
-   * host configured none.
-   */
-  private resolveProgressCallback(
-    toolContext: Context,
-  ): ProgressCallback | undefined {
-    if (this.progressCallbackFactory) {
-      return this.progressCallbackFactory({
-        toolName: this.name,
-        callbackContext: toolContext,
-      });
-    }
-    return this.progressCallback;
-  }
-
   override async runAsync(request: RunAsyncToolRequest): Promise<unknown> {
     const session = await this.mcpSessionManager.createSession();
 
     try {
       const callRequest: CallToolRequest = {} as CallToolRequest;
       callRequest.params = {name: this.originalName, arguments: request.args};
-      const onprogress = this.resolveProgressCallback(request.toolContext);
+      const onprogress =
+        this.progressCallbackFactory?.({
+          toolName: this.name,
+          callbackContext: request.toolContext,
+        }) ?? this.progressCallback;
       const result = await session.callTool(callRequest.params, undefined, {
         signal: request.toolContext.abortSignal,
         ...(onprogress ? {onprogress} : {}),
