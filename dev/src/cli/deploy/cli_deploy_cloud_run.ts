@@ -195,8 +195,7 @@ export async function deployToCloudRun(options: DeployToCloudRunOptions) {
     console.info('Copying agent source files...');
     await copyAgentFiles(agentLoader, path.join(tempFolder, 'agents', appName));
 
-    console.info('Creating package.json...');
-    const {hasLockfile} = await stageDependencyFiles(agentDir, tempFolder);
+    const hasLockfile = await stageDependencyFiles(agentDir, tempFolder);
 
     console.info('Creating Dockerfile...');
     await createDockerFile(tempFolder, {

@@ -86,6 +86,7 @@ describe('createDockerFileContent', () => {
     withUi: false,
     logLevel: 'info',
     adkVersion: 'latest',
+    hasLockfile: false,
   };
 
   it('should create Dockerfile content without --a2a by default', () => {

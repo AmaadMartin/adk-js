@@ -13,13 +13,6 @@ import {stageDependencyFiles} from '../../../dev/src/cli/deploy/deploy_utils.js'
 
 const execAsync = promisify(exec);
 
-/**
- * The install budget (ms) for the two npm runs. Both resolve a single local
- * `file:` dependency and never reach the network, but a loaded machine still
- * needs more than vitest's default per-test timeout.
- */
-const INSTALL_TIMEOUT = 60000;
-
 describe('Deploy dependency staging', () => {
   let root: string;
   let projectDir: string;
@@ -63,45 +56,35 @@ describe('Deploy dependency staging', () => {
     await fs.rm(root, {recursive: true, force: true});
   });
 
-  it(
-    'installs the staged files with npm ci',
-    async () => {
-      const staged = await stageDependencyFiles(projectDir, stagingDir);
+  it('installs the staged files with npm ci', async () => {
+    const staged = await stageDependencyFiles(projectDir, stagingDir);
 
-      expect(staged).toEqual({hasLockfile: true});
-      await expect(
-        fs.readFile(path.join(stagingDir, 'package-lock.json'), 'utf8'),
-      ).resolves.toEqual(
-        await fs.readFile(path.join(projectDir, 'package-lock.json'), 'utf8'),
-      );
-      expect(
-        JSON.parse(
-          await fs.readFile(path.join(stagingDir, 'package.json'), 'utf8'),
-        ),
-      ).toEqual({dependencies: {'@google/adk': 'file:../stub'}});
+    expect(staged).toBe(true);
+    await expect(
+      fs.readFile(path.join(stagingDir, 'package-lock.json'), 'utf8'),
+    ).resolves.toEqual(
+      await fs.readFile(path.join(projectDir, 'package-lock.json'), 'utf8'),
+    );
+    expect(
+      JSON.parse(
+        await fs.readFile(path.join(stagingDir, 'package.json'), 'utf8'),
+      ),
+    ).toEqual({dependencies: {'@google/adk': 'file:../stub'}});
 
-      // Also proves the project's `prepare: exit 7` was not staged: npm ci
-      // runs the root package's prepare script and would fail here.
-      await execAsync('npm ci --omit=dev --no-audit --no-fund', {
-        cwd: stagingDir,
-      });
+    // Also proves the project's `prepare: exit 7` was not staged: npm ci
+    // runs the root package's prepare script and would fail here.
+    await execAsync('npm ci --omit=dev --no-audit --no-fund', {
+      cwd: stagingDir,
+    });
 
-      const installed = JSON.parse(
-        await fs.readFile(
-          path.join(
-            stagingDir,
-            'node_modules',
-            '@google',
-            'adk',
-            'package.json',
-          ),
-          'utf8',
-        ),
-      );
-      expect(installed).toMatchObject({name: '@google/adk', version: '1.0.0'});
-    },
-    INSTALL_TIMEOUT,
-  );
+    const installed = JSON.parse(
+      await fs.readFile(
+        path.join(stagingDir, 'node_modules', '@google', 'adk', 'package.json'),
+        'utf8',
+      ),
+    );
+    expect(installed).toMatchObject({name: '@google/adk', version: '1.0.0'});
+  });
 
   it('stages no lock file when the project has none', async () => {
     const noLockProject = path.join(root, 'no-lock-project');
@@ -118,7 +101,7 @@ describe('Deploy dependency staging', () => {
 
     const staged = await stageDependencyFiles(noLockProject, noLockStaging);
 
-    expect(staged).toEqual({hasLockfile: false});
+    expect(staged).toBe(false);
     await expect(
       fs.access(path.join(noLockStaging, 'package-lock.json')),
     ).rejects.toThrow();

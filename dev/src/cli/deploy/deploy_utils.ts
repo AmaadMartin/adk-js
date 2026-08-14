@@ -46,11 +46,6 @@ interface ProjectPackageJson {
   workspaces?: unknown;
 }
 
-/** What {@link stageDependencyFiles} staged, so the Dockerfile can match it. */
-export interface StagedDependencies {
-  hasLockfile: boolean;
-}
-
 export interface CreateDockerFileContentOptions {
   appName?: string;
   project: string;
@@ -66,10 +61,15 @@ export interface CreateDockerFileContentOptions {
   /** Version range the devtools package is installed at. */
   adkVersion: string;
   /** Whether a package-lock.json was staged next to the package.json. */
-  hasLockfile?: boolean;
+  hasLockfile: boolean;
 }
 
-export interface BaseDeployOptions extends CreateDockerFileContentOptions {
+// hasLockfile is omitted: the deploy commands stage the lock file themselves
+// and pass the result on to createDockerFile, so a caller cannot supply it.
+export interface BaseDeployOptions extends Omit<
+  CreateDockerFileContentOptions,
+  'hasLockfile'
+> {
   agentPath: string;
   /**
    * Directory the generated deployment sources are staged in. When omitted, the
@@ -247,11 +247,13 @@ export async function copyAgentFiles(
  * lifecycle scripts are dropped on purpose: `npm ci` runs the root package's
  * `prepare` script, and a `prepare` that needs the developer's checkout fails
  * the image build.
+ *
+ * @returns whether the project's package-lock.json was staged with it.
  */
 export async function stageDependencyFiles(
   sourceFolder: string,
   targetFolder: string,
-): Promise<StagedDependencies> {
+): Promise<boolean> {
   const packageJsonPath = await tryToFindFileRecursively(
     sourceFolder,
     'package.json',
@@ -291,7 +293,7 @@ export async function stageDependencyFiles(
       `No package-lock.json beside ${packageJsonPath}.`,
       unpinnedConsequence,
     );
-    return {hasLockfile: false};
+    return false;
   }
 
   // A workspace root's lock describes member packages by directory link. Those
@@ -302,7 +304,7 @@ export async function stageDependencyFiles(
       `${packageJsonPath} is a workspace root, and its package-lock.json describes packages that will not exist in the image.`,
       unpinnedConsequence,
     );
-    return {hasLockfile: false};
+    return false;
   }
 
   await fs.cp(lockfilePath, path.join(targetFolder, 'package-lock.json'));
@@ -311,7 +313,7 @@ export async function stageDependencyFiles(
     lockfilePath,
     '- the image build fails if this lock file is out of sync with package.json. Run `npm install` to refresh it.',
   );
-  return {hasLockfile: true};
+  return true;
 }
 
 export async function resolveDefaultFromGcloudConfig(
