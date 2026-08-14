@@ -31,10 +31,7 @@ export class OpenAPIToolset extends BaseToolset {
       authCredential?: AuthCredential;
       credentialKey?: string;
       headerProvider?: (context: ReadonlyContext) => Record<string, string>;
-      /**
-       * HTTP dispatcher given to every tool this toolset creates. See
-       * {@link RestApiToolOptions.dispatcher}.
-       */
+      /** HTTP dispatcher given to every tool this toolset creates. */
       dispatcher?: Dispatcher;
     } = {},
   ) {

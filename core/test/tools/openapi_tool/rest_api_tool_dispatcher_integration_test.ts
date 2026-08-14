@@ -13,14 +13,19 @@ import {
   PluginManager,
   RestApiTool,
 } from '@google/adk';
-import * as https from 'node:https';
+import * as fs from 'node:fs/promises';
+import * as http from 'node:http';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import {OpenAPIV3} from 'openapi-types';
-import {generate} from 'selfsigned';
 import {Agent} from 'undici';
 import {afterAll, beforeAll, describe, expect, it} from 'vitest';
 
-/** Generous enough for RSA key generation and TLS setup on a loaded runner. */
-const HOOK_TIMEOUT_MS = 30000;
+/**
+ * A host DNS can never resolve, reserved for this purpose by RFC 6761 section
+ * 6.4. The default dispatcher therefore cannot reach the test server.
+ */
+const BASE_URL = 'http://adk-dispatcher-test.invalid';
 
 interface ReceivedRequest {
   method: string;
@@ -40,68 +45,55 @@ function createToolContext(): Context {
 }
 
 /**
- * Drives the injected dispatcher against a real HTTPS server whose certificate
- * no CA store trusts. Without the dispatcher the handshake fails and the
- * request never reaches the server, so the contrast between the two proves the
- * option is honoured. Nothing here is mocked.
+ * Drives the injected dispatcher against a real HTTP server bound to a local
+ * socket that no DNS name points at. Only a dispatcher carrying the socket
+ * path can reach it, so the contrast between the two proves the option is
+ * honoured. Nothing here is mocked.
  */
 describe('RestApiTool dispatcher', () => {
-  let server: https.Server;
-  let baseUrl: string;
+  let server: http.Server;
+  let socketDir: string | undefined;
   let agent: Agent;
   const received: ReceivedRequest[] = [];
 
   const operation: OpenAPIV3.OperationObject = {responses: {}};
 
   beforeAll(async () => {
-    // Generated at run time: a committed key or certificate would fail the
-    // repository's secretlint check.
-    const pems = await generate([{name: 'commonName', value: 'localhost'}], {
-      keySize: 2048,
-      algorithm: 'sha256',
-      extensions: [
-        {
-          name: 'subjectAltName',
-          altNames: [
-            {type: 2, value: 'localhost'},
-            {type: 7, ip: '127.0.0.1'},
-          ],
-        },
-      ],
-    });
-    server = https.createServer(
-      {key: pems.private, cert: pems.cert},
-      (req, res) => {
-        received.push({method: req.method ?? '', path: req.url ?? ''});
-        res.writeHead(200, {'content-type': 'application/json'});
-        res.end(JSON.stringify({status: 'ok'}));
-      },
-    );
-    await new Promise<void>((resolve) => {
-      server.listen(0, '127.0.0.1', resolve);
-    });
-
-    const address = server.address();
-    if (address === null || typeof address === 'string') {
-      expect.fail('the test server did not bind to a TCP port');
+    let socketPath: string;
+    if (process.platform === 'win32') {
+      socketPath = path.join('\\\\.\\pipe', `adk-dispatcher-${process.pid}`);
+    } else {
+      socketDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-dispatcher-'));
+      socketPath = path.join(socketDir, 'api.sock');
     }
-    baseUrl = `https://127.0.0.1:${address.port}`;
 
-    agent = new Agent({connect: {ca: pems.cert}});
-  }, HOOK_TIMEOUT_MS);
+    server = http.createServer((req, res) => {
+      received.push({method: req.method ?? '', path: req.url ?? ''});
+      res.writeHead(200, {'content-type': 'application/json'});
+      res.end(JSON.stringify({status: 'ok'}));
+    });
+    await new Promise<void>((resolve) => {
+      server.listen(socketPath, resolve);
+    });
+
+    agent = new Agent({connect: {socketPath}});
+  });
 
   afterAll(async () => {
     await agent.close();
     await new Promise<void>((resolve, reject) => {
       server.close((error) => (error ? reject(error) : resolve()));
     });
+    if (socketDir) {
+      await fs.rm(socketDir, {recursive: true, force: true});
+    }
   });
 
-  it('reaches an endpoint the default dispatcher cannot verify', async () => {
+  it('reaches an endpoint the default dispatcher cannot resolve', async () => {
     const tool = new RestApiTool(
       'get_status',
       'Reads the status.',
-      {baseUrl, path: '/status', method: 'get'},
+      {baseUrl: BASE_URL, path: '/status', method: 'get'},
       operation,
       undefined,
       undefined,
@@ -121,7 +113,7 @@ describe('RestApiTool dispatcher', () => {
     const tool = new RestApiTool(
       'get_status',
       'Reads the status.',
-      {baseUrl, path: '/unreachable', method: 'get'},
+      {baseUrl: BASE_URL, path: '/unreachable', method: 'get'},
       operation,
     );
 
@@ -143,7 +135,7 @@ describe('RestApiTool dispatcher', () => {
     const tool = new RestApiTool(
       'get_status',
       'Reads the status.',
-      {baseUrl, path: '/configured', method: 'get'},
+      {baseUrl: BASE_URL, path: '/configured', method: 'get'},
       operation,
     );
 
@@ -161,7 +153,7 @@ describe('RestApiTool dispatcher', () => {
     const spec: OpenAPIV3.Document = {
       openapi: '3.0.3',
       info: {title: 'Status API', version: '1.0.0'},
-      servers: [{url: baseUrl}],
+      servers: [{url: BASE_URL}],
       paths: {
         '/toolset': {
           get: {
