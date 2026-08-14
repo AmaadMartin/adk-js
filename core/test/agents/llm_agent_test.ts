@@ -6,6 +6,7 @@
 
 import {
   AUTH_PREPROCESSOR,
+  AuthConfig,
   BaseLlm,
   BaseLlmConnection,
   BaseLlmRequestProcessor,
@@ -16,6 +17,7 @@ import {
   Context,
   ContextCompactorRequestProcessor,
   createEvent,
+  createEventActions,
   createSession,
   Event,
   FunctionTool,
@@ -23,6 +25,7 @@ import {
   InMemorySessionService,
   InvocationContext,
   LlmAgent,
+  llmAgentFunctionsExportedForTestingOnly,
   LlmRequest,
   LlmResponse,
   PluginManager,
@@ -41,6 +44,9 @@ import {
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
+
+const {generateAuthEvent, getLongRunningFunctionCalls} =
+  llmAgentFunctionsExportedForTestingOnly;
 
 class MockLlmConnection implements BaseLlmConnection {
   sendHistory(_history: Content[]): Promise<void> {
@@ -1292,5 +1298,106 @@ describe('agent generateContentConfig is not mutated by a run', () => {
     await runTwice(agent);
 
     expect(agentHeaders).toEqual({'Agent-Header': 'agent-val'});
+  });
+});
+
+describe('generateAuthEvent', () => {
+  let invocationContext: InvocationContext;
+  let pluginManager: PluginManager;
+
+  beforeEach(() => {
+    pluginManager = new PluginManager();
+    const agent = new LlmAgent({name: 'test_agent', model: 'test_model'});
+    invocationContext = new InvocationContext({
+      invocationId: 'inv_123',
+      session: {} as Session,
+      agent,
+      pluginManager,
+    });
+  });
+
+  it('should return undefined if no requestedAuthConfigs', () => {
+    const functionResponseEvent = createEvent({
+      content: {role: 'model', parts: []},
+    });
+
+    const event = generateAuthEvent(invocationContext, functionResponseEvent);
+    expect(event).toBeUndefined();
+  });
+
+  it('should return undefined if requestedAuthConfigs is empty', () => {
+    const functionResponseEvent = createEvent({
+      content: {role: 'model', parts: []},
+    });
+
+    const event = generateAuthEvent(invocationContext, functionResponseEvent);
+    expect(event).toBeUndefined();
+  });
+
+  it('should return auth event if requestedAuthConfigs is present', () => {
+    const authConfig1: AuthConfig = {
+      credentialKey: 'call_1',
+      authScheme: {type: 'apiKey', name: 'testKey', in: 'header'},
+    };
+    const authConfig2: AuthConfig = {
+      credentialKey: 'call_2',
+      authScheme: {type: 'apiKey', name: 'testKey', in: 'header'},
+    };
+    const functionResponseEvent = createEvent({
+      actions: createEventActions({
+        requestedAuthConfigs: {
+          'call_1': authConfig1,
+          'call_2': authConfig2,
+        },
+      }),
+      content: {role: 'model', parts: []},
+    });
+
+    const event = generateAuthEvent(invocationContext, functionResponseEvent);
+    expect(event).toBeDefined();
+    expect(event!.invocationId).toBe('inv_123');
+    expect(event!.author).toBe('test_agent');
+    expect(event!.content!.parts!.length).toBe(2);
+
+    const parts = event!.content!.parts!;
+    const call1 = parts.find(
+      (p) => p.functionCall?.args?.['function_call_id'] === 'call_1',
+    );
+    expect(call1).toBeDefined();
+    expect(call1!.functionCall!.name).toBe('adk_request_credential');
+    expect(call1!.functionCall!.args!['auth_config']).toBe(authConfig1);
+
+    const call2 = parts.find(
+      (p) => p.functionCall?.args?.['function_call_id'] === 'call_2',
+    );
+    expect(call2).toBeDefined();
+    expect(call2!.functionCall!.name).toBe('adk_request_credential');
+    expect(call2!.functionCall!.args!['auth_config']).toBe(authConfig2);
+  });
+});
+
+describe('getLongRunningFunctionCalls', () => {
+  it('should return IDs of long running function calls', () => {
+    const functionCalls = [
+      {name: 'longTool', id: 'call-1'},
+      {name: 'shortTool', id: 'call-2'},
+    ];
+    const toolsDict: Record<string, BaseTool> = {
+      'longTool': new FunctionTool({
+        name: 'longTool',
+        description: 'long',
+        execute: async () => ({}),
+        isLongRunning: true,
+      }),
+      'shortTool': new FunctionTool({
+        name: 'shortTool',
+        description: 'short',
+        execute: async () => ({}),
+        isLongRunning: false,
+      }),
+    };
+    const result = getLongRunningFunctionCalls(functionCalls, toolsDict);
+    expect(result.has('call-1')).toBe(true);
+    expect(result.has('call-2')).toBe(false);
   });
 });

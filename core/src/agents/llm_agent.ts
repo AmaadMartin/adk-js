@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GenerateContentConfig, Schema} from '@google/genai';
+import {FunctionCall, GenerateContentConfig, Part, Schema} from '@google/genai';
+import {isEmpty} from 'lodash-es';
 import {FinishTaskTool} from '../tools/finish_task_tool.js';
 import {FunctionTool} from '../tools/function_tool.js';
 import {AsyncQueue} from '../utils/async_queue.js';
@@ -58,10 +59,11 @@ import {
 } from './processors/base_llm_processor.js';
 
 import {
-  generateAuthEvent,
+  generateClientFunctionCallId,
   generateRequestConfirmationEvent,
-  getLongRunningFunctionCalls,
   handleFunctionCallsAsync,
+  REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
+  toolEventAuthor,
 } from './functions.js';
 
 import {AUTH_PREPROCESSOR} from '../auth/auth_preprocessor.js';
@@ -1850,3 +1852,76 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   // - code_executor
   // - configurable agents by yaml config
 }
+
+/**
+ * Returns a set of function call ids of the long running tools.
+ */
+export function getLongRunningFunctionCalls(
+  functionCalls: FunctionCall[],
+  toolsDict: Record<string, BaseTool>,
+): Set<string> {
+  const longRunningToolIds = new Set<string>();
+  for (const functionCall of functionCalls) {
+    if (
+      functionCall.name &&
+      functionCall.name in toolsDict &&
+      toolsDict[functionCall.name].isLongRunning &&
+      functionCall.id
+    ) {
+      longRunningToolIds.add(functionCall.id);
+    }
+  }
+  return longRunningToolIds;
+}
+
+// The auth part of function calling is a bit hacky, need to to clarify.
+/**
+ * Generates an authentication event.
+ *
+ * It iterates through requested auth configurations in a function response
+ * event and creates a new function call for each.
+ */
+export function generateAuthEvent(
+  invocationContext: InvocationContext,
+  functionResponseEvent: Event,
+): Event | undefined {
+  if (
+    !functionResponseEvent.actions?.requestedAuthConfigs ||
+    isEmpty(functionResponseEvent.actions.requestedAuthConfigs)
+  ) {
+    return undefined;
+  }
+  const parts: Part[] = [];
+  const longRunningToolIds = new Set<string>();
+  for (const [functionCallId, authConfig] of Object.entries(
+    functionResponseEvent.actions.requestedAuthConfigs,
+  )) {
+    const requestCredentialFunctionCall: FunctionCall = {
+      name: REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
+      args: {
+        'function_call_id': functionCallId,
+        'auth_config': authConfig,
+      },
+      id: generateClientFunctionCallId(),
+    };
+    longRunningToolIds.add(requestCredentialFunctionCall.id!);
+    parts.push({functionCall: requestCredentialFunctionCall});
+  }
+
+  return createEvent({
+    invocationId: invocationContext.invocationId,
+    author: toolEventAuthor(invocationContext),
+    branch: invocationContext.branch,
+    content: {
+      parts: parts,
+      role: functionResponseEvent.content!.role,
+    },
+    longRunningToolIds: Array.from(longRunningToolIds),
+  });
+}
+
+// Export these items for testing purposes only
+export const llmAgentFunctionsExportedForTestingOnly = {
+  getLongRunningFunctionCalls,
+  generateAuthEvent,
+};

@@ -34,7 +34,7 @@ import {
 } from './llm_agent.js';
 
 /**
- * Author for an event this module creates.
+ * Author for an event the tool and auth flow creates.
  *
  * Normally the agent whose turn produced the tool call. A `ToolNode` in a
  * workflow has no agent above it when the workflow is the runner's root, and
@@ -42,7 +42,7 @@ import {
  * an author — so returning an empty string here defers to that rather than
  * asserting an agent that legitimately is not there.
  */
-function toolEventAuthor(invocationContext: InvocationContext): string {
+export function toolEventAuthor(invocationContext: InvocationContext): string {
   return invocationContext.agent?.name ?? '';
 }
 
@@ -59,77 +59,8 @@ export const REQUEST_CONFIRMATION_FUNCTION_CALL_NAME =
 // Export these items for testing purposes only
 export const functionsExportedForTestingOnly = {
   handleFunctionCallList,
-  generateAuthEvent,
   generateRequestConfirmationEvent,
 };
-// TODO - b/425992518: consider internalize as part of llm_agent's runtime.
-/**
- * Returns a set of function call ids of the long running tools.
- */
-export function getLongRunningFunctionCalls(
-  functionCalls: FunctionCall[],
-  toolsDict: Record<string, BaseTool>,
-): Set<string> {
-  const longRunningToolIds = new Set<string>();
-  for (const functionCall of functionCalls) {
-    if (
-      functionCall.name &&
-      functionCall.name in toolsDict &&
-      toolsDict[functionCall.name].isLongRunning &&
-      functionCall.id
-    ) {
-      longRunningToolIds.add(functionCall.id);
-    }
-  }
-  return longRunningToolIds;
-}
-
-// TODO - b/425992518: consider internalize as part of llm_agent's runtime.
-// The auth part of function calling is a bit hacky, need to to clarify.
-/**
- * Generates an authentication event.
- *
- * It iterates through requested auth configurations in a function response
- * event and creates a new function call for each.
- */
-export function generateAuthEvent(
-  invocationContext: InvocationContext,
-  functionResponseEvent: Event,
-): Event | undefined {
-  if (
-    !functionResponseEvent.actions?.requestedAuthConfigs ||
-    isEmpty(functionResponseEvent.actions.requestedAuthConfigs)
-  ) {
-    return undefined;
-  }
-  const parts: Part[] = [];
-  const longRunningToolIds = new Set<string>();
-  for (const [functionCallId, authConfig] of Object.entries(
-    functionResponseEvent.actions.requestedAuthConfigs,
-  )) {
-    const requestCredentialFunctionCall: FunctionCall = {
-      name: REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
-      args: {
-        'function_call_id': functionCallId,
-        'auth_config': authConfig,
-      },
-      id: generateClientFunctionCallId(),
-    };
-    longRunningToolIds.add(requestCredentialFunctionCall.id!);
-    parts.push({functionCall: requestCredentialFunctionCall});
-  }
-
-  return createEvent({
-    invocationId: invocationContext.invocationId,
-    author: toolEventAuthor(invocationContext),
-    branch: invocationContext.branch,
-    content: {
-      parts: parts,
-      role: functionResponseEvent.content!.role,
-    },
-    longRunningToolIds: Array.from(longRunningToolIds),
-  });
-}
 
 /**
  * Generates a request confirmation event from a function response event.

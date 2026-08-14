@@ -6,9 +6,9 @@
 
 import {
   createEventActions,
-  functionsExportedForTestingOnly,
   InvocationContext,
   LlmAgent,
+  llmAgentFunctionsExportedForTestingOnly,
   PluginManager,
   Session,
 } from '@google/adk';
@@ -124,7 +124,7 @@ describe('getUserInputRequests', () => {
       }),
       content: {role: 'model', parts: []},
     });
-    const event = functionsExportedForTestingOnly.generateAuthEvent(
+    const event = llmAgentFunctionsExportedForTestingOnly.generateAuthEvent(
       new InvocationContext({
         invocationId: 'inv_123',
         session: {} as Session,

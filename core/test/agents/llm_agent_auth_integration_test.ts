@@ -71,7 +71,7 @@ describe('LlmAgent Auth Integration', () => {
       }
     });
     return new Promise<void>((resolve) => {
-      server.listen(0, () => {
+      server.listen(0, '127.0.0.1', () => {
         const address = server.address();
         if (address && typeof address !== 'string') {
           port = address.port;
