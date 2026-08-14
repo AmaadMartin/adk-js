@@ -364,17 +364,15 @@ describe('MCPToolset', () => {
 
     /** Stubs the next session so tools/list advertises exactly `names`. */
     function advertise(names: string[]): void {
-      const listTools = vi.fn().mockResolvedValue({
+      const client = new Client({name: 'test-client', version: '1.0.0'});
+      client.listTools = vi.fn().mockResolvedValue({
         tools: names.map((name) => ({
           name,
           description: 'A tool',
           inputSchema: {},
         })),
       });
-      vi.mocked(Client).mockImplementationOnce(
-        () =>
-          ({connect: noop(), close: noop(), listTools}) as unknown as Client,
-      );
+      vi.mocked(Client).mockImplementationOnce(() => client);
     }
 
     it('drops the reserved tools and warns for each one', async () => {
