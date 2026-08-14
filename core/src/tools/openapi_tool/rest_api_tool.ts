@@ -207,7 +207,13 @@ export function prepareRequestParams(
         String(argValue),
       );
     } else if (location === 'query') {
-      queryParams.append(originalName, String(argValue));
+      // A model routinely emits an explicit null for an optional parameter it
+      // has no value for, so the parameter must be absent from the URL instead
+      // of being sent as the literal string 'null'. The test is against null
+      // and undefined only, because false, 0 and '' are valid query values.
+      if (argValue !== null && argValue !== undefined) {
+        queryParams.append(originalName, String(argValue));
+      }
     } else if (location === 'header') {
       headers[originalName] = String(argValue);
     } else if (location === 'body') {
