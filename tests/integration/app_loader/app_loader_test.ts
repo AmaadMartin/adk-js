@@ -14,10 +14,9 @@ import {
   RunnableRoot,
   Runner,
 } from '@google/adk';
-import {exec, spawn} from 'node:child_process';
+import {spawn} from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import {promisify} from 'node:util';
 import {afterAll, beforeAll, describe, expect, it} from 'vitest';
 import {AgentFile, AgentLoader} from '../../../dev/src/utils/agent_loader.js';
 import {
@@ -25,8 +24,8 @@ import {
   removeInstallArtifacts,
   sendInput,
 } from '../test_case_utils.js';
+import {assertWorkspaceAdkCliAvailable} from '../workspace_cli.js';
 
-const execAsync = promisify(exec);
 const dirname = process.cwd();
 const TEST_EXECUTION_TIMEOUT = 60000;
 const HOOK_TIMEOUT = 120000;
@@ -65,12 +64,11 @@ describe('App loader CLI integration', () => {
         testCaseName,
       );
 
+      // The fixture installs nothing: its `start` script runs the CLI built at
+      // the workspace root, so the only precondition is that build.
       beforeAll(async () => {
-        // A run killed mid-install leaves a partial node_modules that
-        // `npm install` does not clear, coupling this run to the last one.
-        await removeInstallArtifacts(projectPath);
-        await execAsync('npm install', {cwd: projectPath});
-      }, HOOK_TIMEOUT);
+        await assertWorkspaceAdkCliAvailable();
+      });
 
       it('should run app via package.json start script and get responses', async () => {
         const childProcess = spawn('npm', ['run', 'start'], {
@@ -88,8 +86,6 @@ describe('App loader CLI integration', () => {
         response = await sendInput(childProcess, 'exit\n');
         expect(response.toString()).toContain('');
       });
-
-      afterAll(() => cleanUpFixture(projectPath), HOOK_TIMEOUT);
     },
   );
 });
@@ -108,6 +104,10 @@ describe('AgentLoader discovery and loading integration', () => {
   // fixture also has no `package.json`, so it inherits `"type": "module"` from
   // the repository root and the loader compiles it to `.mjs`.
   beforeAll(async () => {
+    // The loader compiles against the workspace-root build, so fail fast when
+    // it is missing rather than on a confusing load error.
+    await assertWorkspaceAdkCliAvailable();
+
     // An earlier run can still leave a `node_modules` here, and it would
     // shadow the workspace-root resolution the loader depends on.
     await removeInstallArtifacts(projectPath);

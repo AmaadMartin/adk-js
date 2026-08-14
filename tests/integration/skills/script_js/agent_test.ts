@@ -3,15 +3,14 @@
  * Copyright 2026 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
-import {exec, spawn} from 'node:child_process';
+import {spawn} from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {promisify} from 'node:util';
 import {afterAll, beforeAll, describe, expect, it} from 'vitest';
 import {normalizeLineEndings, sendInput} from '../../test_case_utils.js';
+import {assertWorkspaceAdkCliAvailable} from '../../workspace_cli.js';
 
-const execAsync = promisify(exec);
 const dirname = process.cwd();
 const PROJECT_PATH = `${dirname}/tests/integration/skills/script_js`;
 const TEST_EXECUTION_TIMEOUT = 60000;
@@ -88,7 +87,7 @@ async function removeGeneratedOutputs(dir: string): Promise<void> {
  * 3. Asserts that the agent's response matches the expected output, confirming it claims to have created the art and files.
  * 4. Verifies that the expected files (`ephemeral_entanglement.md`, `index.html`, `sketch.js`) were generated in the output directory the agent was configured with, were saved to the artifact service, and were not written into the directory the agent process was started from.
  * 5. Compares the content of these generated files and saved artifacts with reference files in the `expected/` directory to ensure correctness.
- * 6. Cleans up the output directory, the artifact store and the installed dependencies after execution.
+ * 6. Cleans up the output directory and the artifact store after execution.
  *
  * The output directory is created here and handed to the agent through
  * `ADK_SKILL_OUTPUT_DIR` (see `agent.ts`), because skill script output is only
@@ -100,12 +99,13 @@ describe('Agent with skills that generates JS script and runs it locally', () =>
   let outputDir: string;
 
   beforeAll(async () => {
+    // The fixture's `start` script runs the CLI built at the workspace root.
+    await assertWorkspaceAdkCliAvailable();
     outputDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-script-js-out-'));
     artifactRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-artifacts-'));
     // An older run wrote into the fixture dir; clear it so the assertions
     // below see only what this run produced. See GENERATED_FILE_NAMES.
     await removeGeneratedOutputs(PROJECT_PATH);
-    await execAsync('npm install', {cwd: PROJECT_PATH});
   }, TEST_EXECUTION_TIMEOUT);
 
   it(
@@ -208,10 +208,5 @@ describe('Agent with skills that generates JS script and runs it locally', () =>
     await fs.rm(artifactRoot, {recursive: true, force: true}).catch(() => {});
     // By name shape, not exact name: a variant in the fixture dir must go too.
     await removeGeneratedOutputs(PROJECT_PATH).catch(() => {});
-
-    await fs
-      .rm(`${PROJECT_PATH}/node_modules`, {recursive: true, force: true})
-      .catch(() => {});
-    await fs.unlink(`${PROJECT_PATH}/package-lock.json`).catch(() => {});
   });
 });
