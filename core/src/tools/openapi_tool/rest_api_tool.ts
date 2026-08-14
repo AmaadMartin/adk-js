@@ -10,6 +10,7 @@ import {Context} from '../../agents/context.js';
 import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {AuthCredential} from '../../auth/auth_credential.js';
 import {experimental} from '../../utils/experimental.js';
+import {version} from '../../version.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
 import {applyCredential} from './auth/auth_helpers.js';
 import {
@@ -26,6 +27,7 @@ export class RestApiTool extends BaseTool {
 
   private headerProvider?: (context: ReadonlyContext) => Record<string, string>;
   private credentialKey?: string;
+  private defaultHeaders: Record<string, string> = {};
 
   constructor(
     name: string,
@@ -61,6 +63,15 @@ export class RestApiTool extends BaseTool {
   @experimental
   public configureCredentialKey(credentialKey: string) {
     this.credentialKey = credentialKey;
+  }
+
+  /**
+   * Sets the headers this tool sends when the request does not already carry
+   * them. The map replaces any map set by an earlier call.
+   */
+  @experimental
+  public setDefaultHeaders(headers: Record<string, string>) {
+    this.defaultHeaders = headers;
   }
 
   @experimental
@@ -106,6 +117,7 @@ export class RestApiTool extends BaseTool {
       this.endpoint,
       this.operationParser.getParameters(),
       args,
+      this.name,
     );
 
     // Handle body
@@ -129,6 +141,8 @@ export class RestApiTool extends BaseTool {
       const providerHeaders = this.headerProvider(context);
       Object.assign(headers, providerHeaders);
     }
+
+    applyDefaultHeaders(headers, this.defaultHeaders);
 
     try {
       const response = await globalThis.fetch(url, {
@@ -181,12 +195,38 @@ function encodePathParamValue(name: string, value: string): string {
   return encodeURIComponent(value);
 }
 
+/**
+ * Fills in the headers the request does not already carry. An explicitly
+ * supplied header - an OpenAPI header parameter, the body's Content-Type, a
+ * credential, or the header provider - wins over a default.
+ */
+function applyDefaultHeaders(
+  headers: Record<string, string>,
+  defaults: Record<string, string>,
+): void {
+  for (const [key, value] of Object.entries(defaults)) {
+    if (!Object.hasOwn(headers, key)) {
+      headers[key] = value;
+    }
+  }
+}
+
+/**
+ * Builds the URL, headers and body of one OpenAPI operation call.
+ *
+ * @param toolName Names the calling tool in the ADK User-Agent header. The
+ *     request carries no User-Agent when it is absent.
+ */
 export function prepareRequestParams(
   endpoint: OperationEndpoint,
   parameters: ApiParameter[],
   args: Record<string, unknown>,
+  toolName?: string,
 ): PreparedParams {
   const headers: Record<string, string> = {};
+  if (toolName) {
+    headers['User-Agent'] = `google-adk/${version} (tool: ${toolName})`;
+  }
   const queryParams = new URLSearchParams();
   let body: unknown = undefined;
 
