@@ -577,6 +577,56 @@ describe('RestApiTool', () => {
     );
   });
 
+  it('should send a spec-declared cookie parameter as a Cookie header', async () => {
+    const spec: OpenAPIV3.Document = {
+      openapi: '3.0.0',
+      info: {title: 'Data API', version: '1.0.0'},
+      servers: [{url: 'http://api.example.com'}],
+      paths: {
+        '/v1/data': {
+          get: {
+            operationId: 'getData',
+            parameters: [
+              {
+                name: 'session_id',
+                in: 'cookie',
+                required: true,
+                schema: {type: 'string'},
+              },
+            ],
+            responses: {},
+          },
+        },
+      },
+    };
+    const tool = createRestApiTool(new OpenApiSpecParser().parse(spec)[0]);
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      headers: {get: () => 'text/plain'},
+      text: async () => 'ok',
+    });
+
+    await tool.runAsync({
+      args: {session_id: 'abc123'},
+      toolContext: new Context({
+        invocationContext: new InvocationContext({
+          invocationId: 'invocation-1',
+          agent: new LlmAgent({name: 'test_agent'}),
+          session: createSession({id: 'session-1', appName: 'test_app'}),
+          pluginManager: new PluginManager(),
+        }),
+      }),
+    });
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'http://api.example.com/v1/data',
+      expect.objectContaining({
+        headers: expect.objectContaining({Cookie: 'session_id=abc123'}),
+      }),
+    );
+  });
+
   it('should fallback to JSON if no requestBody in spec', async () => {
     const endpoint = {
       baseUrl: 'http://api.example.com',
@@ -1075,6 +1125,107 @@ describe('RestApiTool Utilities', () => {
 
         expect(result.url).toBe('http://api.example.com/v1/users/%252e%252e');
         expect(new URL(result.url).pathname).toBe('/v1/users/%252e%252e');
+      });
+    });
+
+    describe('cookie parameters', () => {
+      const dataEndpoint = {
+        baseUrl: 'http://api.example.com',
+        path: '/v1/data',
+        method: 'GET',
+      };
+      const sessionParameters: ApiParameter[] = [
+        {
+          name: 'session_id',
+          originalName: 'session_id',
+          paramLocation: 'cookie',
+          paramSchema: {},
+          required: true,
+        },
+      ];
+
+      it('should send a cookie parameter as a Cookie header', () => {
+        const result = prepareRequestParams(dataEndpoint, sessionParameters, {
+          session_id: 'abc123',
+        });
+
+        expect(result.headers).toEqual({Cookie: 'session_id=abc123'});
+        expect(result.url).toBe('http://api.example.com/v1/data');
+      });
+
+      it('should join two cookie parameters into one Cookie header', () => {
+        const parameters: ApiParameter[] = [
+          ...sessionParameters,
+          {
+            name: 'tenant',
+            originalName: 'tenant',
+            paramLocation: 'cookie',
+            paramSchema: {},
+            required: false,
+          },
+        ];
+
+        const result = prepareRequestParams(dataEndpoint, parameters, {
+          session_id: 'abc',
+          tenant: 'acme',
+        });
+
+        expect(result.headers).toEqual({Cookie: 'session_id=abc; tenant=acme'});
+      });
+
+      it('should keep a cookie parameter and a cookie credential in one header', () => {
+        const result = prepareRequestParams(dataEndpoint, sessionParameters, {
+          session_id: 'abc',
+        });
+
+        const url = applyCredential(
+          result.url,
+          result.headers,
+          {authType: AuthCredentialTypes.API_KEY, apiKey: 'secret_key'},
+          createApiKeyScheme('auth_key', 'cookie'),
+        );
+
+        expect(url).toBe('http://api.example.com/v1/data');
+        expect(result.headers['Cookie']).toBe(
+          'session_id=abc; auth_key=secret_key',
+        );
+        expect(result.headers['Authorization']).toBeUndefined();
+      });
+
+      it('should percent-encode a cookie value that contains a separator', () => {
+        const result = prepareRequestParams(dataEndpoint, sessionParameters, {
+          session_id: 'a b;c',
+        });
+
+        expect(result.headers['Cookie']).toBe('session_id=a%20b%3Bc');
+      });
+
+      it('should send the cookie under its original spec name', () => {
+        const parameters: ApiParameter[] = [
+          {
+            name: 'session_id',
+            originalName: 'sessionId',
+            paramLocation: 'cookie',
+            paramSchema: {},
+            required: true,
+          },
+        ];
+
+        const result = prepareRequestParams(dataEndpoint, parameters, {
+          session_id: 'abc',
+        });
+
+        expect(result.headers['Cookie']).toBe('sessionId=abc');
+      });
+
+      it('should set no Cookie header when no cookie argument is supplied', () => {
+        const result = prepareRequestParams(
+          dataEndpoint,
+          sessionParameters,
+          {},
+        );
+
+        expect(result.headers).toEqual({});
       });
     });
   });
