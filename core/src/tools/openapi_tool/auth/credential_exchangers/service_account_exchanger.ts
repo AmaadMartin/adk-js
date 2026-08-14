@@ -20,6 +20,9 @@ import {experimental} from '../../../../utils/experimental.js';
 
 const DEFAULT_SCOPES = ['https://www.googleapis.com/auth/cloud-platform'];
 
+/** Header that attributes quota and billing to the caller's project. */
+const QUOTA_PROJECT_HEADER = 'x-goog-user-project';
+
 /**
  * Fetches credentials for Google Service Account.
  * Ported from Python implementation.
@@ -66,12 +69,26 @@ export class ServiceAccountCredentialExchanger implements BaseCredentialExchange
         throw new Error('Failed to get access token from default credentials');
       }
 
+      let quotaProjectId = client.quotaProjectId;
+      if (!quotaProjectId) {
+        try {
+          // getProjectId() fails, rather than resolving nullish, when no
+          // project is detected.
+          quotaProjectId = await auth.getProjectId();
+        } catch {
+          quotaProjectId = undefined;
+        }
+      }
+
       return {
         credential: {
           authType: AuthCredentialTypes.HTTP,
           http: {
             scheme: 'bearer',
             credentials: {token},
+            ...(quotaProjectId
+              ? {additionalHeaders: {[QUOTA_PROJECT_HEADER]: quotaProjectId}}
+              : {}),
           },
         },
         wasExchanged: true,
