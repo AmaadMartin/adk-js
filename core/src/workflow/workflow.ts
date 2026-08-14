@@ -341,6 +341,7 @@ export class Workflow extends BaseNode {
 
       const result = await Promise.race(loop.pending.values());
       loop.pending.delete(result.name);
+      this.advanceSequence(loop, result.name);
 
       if (result.error) {
         const nodeState = loop.nodes.get(result.name);
@@ -353,7 +354,6 @@ export class Workflow extends BaseNode {
         throw result.error;
       }
 
-      this.advanceSequence(loop, result.name);
       await this.handleCompletion(loop, result.name, result.childCtx!);
     }
   }
@@ -453,10 +453,10 @@ export class Workflow extends BaseNode {
     const prior = loop.rehydrated.get(nodeName)?.shift();
 
     // Every activation consumes a run number, replayed or not, so `runId` is
-    // the activation index and lines up with the recorded run the barrier keys
-    // on. Assigned before the hand-back below returns, or a replayed
-    // activation would leave the next one emitting under a path the recording
-    // already used.
+    // the activation index: the same index the `shift()` above consumes, and
+    // the run number the barrier key below must name. Assigned before the
+    // hand-back so a replayed activation does not leave the next one reusing
+    // its number.
     let runId = nodeState.runId;
     if (!runId) {
       nodeState.runCounter += 1;
@@ -533,9 +533,15 @@ export class Workflow extends BaseNode {
     loop.pending.set(nodeName, gated);
   }
 
-  /** Releases whichever node the recording expects to complete after this one. */
+  /**
+   * Releases whichever node the recording expects to complete after this one.
+   *
+   * Runs for a failed node too: the failure ends that node's recorded position,
+   * and leaving the gate shut would hold a replayed sibling — and so the
+   * workflow's teardown — until the divergence deadline.
+   */
   private advanceSequence(loop: LoopState, nodeName: string): void {
-    const runId = loop.nodes.get(nodeName)?.runId;
+    const {runId} = loop.nodes.get(nodeName)!;
     loop.sequenceBarrier.checkAndAdvance(sequenceKey(nodeName, Number(runId)));
   }
 

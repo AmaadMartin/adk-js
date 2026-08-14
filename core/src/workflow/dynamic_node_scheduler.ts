@@ -62,6 +62,8 @@ export class DynamicNodeScheduler implements ScheduleDynamicNode {
     }
 
     const result = await this.resolveRun(ctx, node, input, {
+      name,
+      runId,
       segment,
       nodePath,
       options,
@@ -82,12 +84,14 @@ export class DynamicNodeScheduler implements ScheduleDynamicNode {
     node: BaseNode,
     input: unknown,
     run: {
+      name: string;
+      runId: string;
       segment: string;
       nodePath: string;
       options: ScheduleDynamicNodeOptions;
     },
   ): Promise<NodeContext | NodeResult> {
-    const {segment, nodePath, options} = run;
+    const {name, runId, segment, nodePath, options} = run;
     const existing = this.state.runs.get(nodePath);
     if (existing?.task) {
       // Deduplicate concurrent calls: await the in-flight task.
@@ -112,21 +116,13 @@ export class DynamicNodeScheduler implements ScheduleDynamicNode {
     if (!decision.shouldRun) {
       return this.completeWithoutRunning(
         ctx,
-        {nodePath, segment, runId: options.runId, options},
+        {nodePath, segment, runId, options},
         interceptedResult(ctx, decision),
       );
     }
     // Otherwise (fresh, or waiting on an unresolved interrupt): resume inputs
     // were already merged into ctx.resumeInputs by the Workflow.
-    return this.runFresh(
-      ctx,
-      node,
-      input,
-      options.nodeName ?? node.name,
-      options.runId,
-      nodePath,
-      options,
-    );
+    return this.runFresh(ctx, node, input, name, runId, nodePath, options);
   }
 
   /**
