@@ -84,6 +84,21 @@ export abstract class BaseTool {
   customMetadata?: Record<string, unknown>;
 
   /**
+   * Whether this tool produces its `FunctionResponse` elsewhere: when true, the
+   * automatic function-response event is skipped if the resolved tool response
+   * is nullish, because some other orchestrator supplies the matching response
+   * later in the conversation.
+   *
+   * Distinct from {@link BaseTool.isLongRunning}, which skips identically but
+   * also records the call in `event.longRunningToolIds`, affecting A2A task
+   * state, plugin logging and session metadata.
+   *
+   * Subclasses opt in with `override readonly defersResponse = true;`, which
+   * only compiles because of the explicit `boolean` annotation below.
+   */
+  readonly defersResponse: boolean = false;
+
+  /**
    * Base constructor for a tool.
    *
    * @param params The parameters for `BaseTool`.
