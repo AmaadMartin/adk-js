@@ -299,7 +299,7 @@ describe('ServiceAccountCredentialExchanger ID token', () => {
 
     await expect(
       exchanger.exchange({authCredential: credential}),
-    ).rejects.toThrow('Service account credentials are missing.');
+    ).rejects.toThrow(/^Service account credentials are missing\.$/);
   });
 
   it('should prefer default credentials over explicit keys', async () => {
