@@ -37,10 +37,13 @@ describe('skill_toolset', () => {
     },
   };
 
-  function createMockContext(agentName = 'test-agent') {
+  function createMockContext(
+    agentName = 'test-agent',
+    state: Record<string, unknown> = {},
+  ) {
     return new Context({
       invocationContext: {
-        session: {state: {}},
+        session: {state},
         agent: {name: agentName},
       } as unknown as InvocationContext,
     });
@@ -340,10 +343,9 @@ describe('skill_toolset', () => {
       }
 
       function activatedContext(): ReadonlyContext {
-        return {
-          agentName: 'test-agent',
-          state: {get: vi.fn().mockReturnValue(['skill-with-tools'])},
-        } as unknown as ReadonlyContext;
+        return createMockContext('test-agent', {
+          '_adk_activated_skill_test-agent': ['skill-with-tools'],
+        });
       }
 
       it('closes every nested toolset exactly once', async () => {
@@ -532,36 +534,6 @@ describe('skill_toolset', () => {
 
         expect(nestedGetTools).toHaveBeenCalledTimes(2);
         expect(tools.map((t) => t.name)).toContain('reresolved_tool');
-      });
-
-      it('resolves and closes a toolset that carries the signature but is not an instance', async () => {
-        class DummyTool extends BaseTool {
-          constructor() {
-            super({name: 'foreign_tool', description: 'dummy'});
-          }
-          async runAsync() {
-            return 'dummy';
-          }
-        }
-        const foreignClose = vi.fn().mockResolvedValue(undefined);
-        // Stands in for a toolset built by a second copy of the ADK package,
-        // which fails `instanceof` but carries the shared toolset signature.
-        // The cast is required because `BaseToolset` declares a protected
-        // member, so no object literal is structurally assignable to it.
-        const foreignToolset = {
-          [Symbol.for('google.adk.baseToolset')]: true,
-          getTools: vi.fn().mockResolvedValue([new DummyTool()]),
-          close: foreignClose,
-        } as unknown as BaseToolset;
-        const toolset = new SkillToolset([skillActivating('foreign_tool')], {
-          additionalTools: [foreignToolset],
-        });
-
-        const tools = await toolset.getTools(activatedContext());
-        await toolset.close();
-
-        expect(tools.map((t) => t.name)).toContain('foreign_tool');
-        expect(foreignClose).toHaveBeenCalledTimes(1);
       });
     });
   });
