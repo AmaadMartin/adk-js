@@ -4,14 +4,22 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {TaskStatusUpdateEvent, TextPart} from '@a2a-js/sdk';
+import {
+  TaskArtifactUpdateEvent,
+  TaskStatusUpdateEvent,
+  TextPart,
+} from '@a2a-js/sdk';
 import {ExecutionEventBus, RequestContext} from '@a2a-js/sdk/server';
 import {
   A2AAgentExecutor,
   Event as AdkEvent,
+  BaseArtifactService,
   BaseSessionService,
   createEvent,
   createEventActions,
+  createSession,
+  includeArtifactsInA2AEvent,
+  InMemoryArtifactService,
   Runner,
   RunnerConfig,
   Session,
@@ -61,6 +69,38 @@ describe('A2AAgentExecutor', () => {
       ...overrides,
     } as unknown as RequestContext;
   };
+
+  const testSession = createSession({
+    id: 'session-id',
+    userId: 'test-user',
+    appName: 'test-app',
+  });
+
+  /**
+   * Points the mocked Runner constructor at the given generator. The suite
+   * replaces the Runner class with a factory, so the stand-in it returns
+   * cannot be a real instance.
+   */
+  const mockRunnerWith = (
+    runAsync: () => AsyncGenerator<AdkEvent, void, void>,
+  ): void => {
+    vi.mocked(Runner).mockImplementation(((config: RunnerConfig) => {
+      return {
+        appName: config?.appName,
+        sessionService: config?.sessionService,
+        artifactService: config?.artifactService,
+        runAsync,
+      } as unknown as Runner;
+    }) as unknown as () => Runner);
+  };
+
+  const runnerConfig = (
+    artifactService?: BaseArtifactService,
+  ): RunnerConfig => ({
+    appName: 'test-app',
+    sessionService: mockSessionService,
+    artifactService,
+  });
 
   it('should throw an error if no message is provided', async () => {
     const executor = new A2AAgentExecutor({
@@ -263,6 +303,121 @@ describe('A2AAgentExecutor', () => {
     expect(lastCallArg.status.state).toBe('failed');
     const firstPart = lastCallArg.status.message!.parts[0] as TextPart;
     expect(firstPart.text).toContain('LLM failed');
+  });
+
+  it('should publish the artifacts an event saved when the artifact callback is installed', async () => {
+    mockSessionService.getSession.mockResolvedValue(testSession);
+
+    const artifactService = new InMemoryArtifactService();
+    await artifactService.saveArtifact({
+      appName: 'test-app',
+      userId: 'test-user',
+      sessionId: 'session-id',
+      filename: 'chart.png',
+      artifact: {text: 'placeholder'},
+    });
+    await artifactService.saveArtifact({
+      appName: 'test-app',
+      userId: 'test-user',
+      sessionId: 'session-id',
+      filename: 'chart.png',
+      artifact: {inlineData: {mimeType: 'image/png', data: 'aGk='}},
+    });
+
+    async function* mockRunAsync() {
+      yield createEvent({
+        author: 'model',
+        content: {role: 'model', parts: [{text: 'here is your chart'}]},
+        partial: false,
+        actions: createEventActions({artifactDelta: {'chart.png': 1}}),
+      });
+    }
+
+    mockRunnerWith(mockRunAsync);
+
+    const executor = new A2AAgentExecutor({
+      runner: runnerConfig(artifactService),
+      afterEventCallback: includeArtifactsInA2AEvent,
+    });
+
+    await executor.execute(createRequestContext(), mockEventBus);
+
+    // Task + Working + converted artifact update + artifact update + final.
+    expect(mockEventBus.publish).toHaveBeenCalledTimes(5);
+    const artifactEvent = mockEventBus.publish.mock
+      .calls[3][0] as TaskArtifactUpdateEvent;
+    expect(artifactEvent.artifact.artifactId).toBe('chart.png_1');
+    expect(artifactEvent.artifact.name).toBe('chart.png');
+  });
+
+  it('should publish every event a callback returns in an array', async () => {
+    mockSessionService.getSession.mockResolvedValue(testSession);
+
+    async function* mockRunAsync() {
+      yield createEvent({
+        author: 'model',
+        content: {role: 'model', parts: [{text: 'response'}]},
+        partial: false,
+        actions: createEventActions(),
+      });
+    }
+
+    mockRunnerWith(mockRunAsync);
+
+    const extraEvent: TaskArtifactUpdateEvent = {
+      kind: 'artifact-update',
+      taskId: 'test-task',
+      contextId: 'test-context',
+      artifact: {artifactId: 'extra', parts: [{kind: 'text', text: 'extra'}]},
+    };
+
+    const executor = new A2AAgentExecutor({
+      runner: runnerConfig(),
+      afterEventCallback: async (_ctx, _adkEvent, a2aEvent) =>
+        a2aEvent ? [a2aEvent, extraEvent] : [extraEvent],
+    });
+
+    await executor.execute(createRequestContext(), mockEventBus);
+
+    // Task + Working + converted artifact update + extra event + final.
+    expect(mockEventBus.publish).toHaveBeenCalledTimes(5);
+    expect(mockEventBus.publish.mock.calls[3][0]).toBe(extraEvent);
+  });
+
+  it('should publish the single event a callback returns in place of the converted one', async () => {
+    mockSessionService.getSession.mockResolvedValue(testSession);
+
+    async function* mockRunAsync() {
+      yield createEvent({
+        author: 'model',
+        content: {role: 'model', parts: [{text: 'response'}]},
+        partial: false,
+        actions: createEventActions(),
+      });
+    }
+
+    mockRunnerWith(mockRunAsync);
+
+    const replacement: TaskArtifactUpdateEvent = {
+      kind: 'artifact-update',
+      taskId: 'test-task',
+      contextId: 'test-context',
+      artifact: {
+        artifactId: 'replacement',
+        parts: [{kind: 'text', text: 'replacement'}],
+      },
+    };
+
+    const executor = new A2AAgentExecutor({
+      runner: runnerConfig(),
+      afterEventCallback: async () => replacement,
+    });
+
+    await executor.execute(createRequestContext(), mockEventBus);
+
+    // Task + Working + replacement event + final.
+    expect(mockEventBus.publish).toHaveBeenCalledTimes(4);
+    expect(mockEventBus.publish.mock.calls[2][0]).toBe(replacement);
   });
 
   it('should fail cancelTask because it is not implemented', async () => {

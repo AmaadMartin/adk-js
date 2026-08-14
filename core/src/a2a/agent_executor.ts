@@ -6,6 +6,7 @@
 
 import {TaskArtifactUpdateEvent, TaskStatusUpdateEvent} from '@a2a-js/sdk';
 import {
+  AgentExecutionEvent,
   AgentExecutor,
   ExecutionEventBus,
   RequestContext,
@@ -50,12 +51,15 @@ export type BeforeExecuteCallback = (reqCtx: RequestContext) => Promise<void>;
 
 /**
  * Callback called after an ADK event is converted to an A2A event.
+ *
+ * Return an event, or several, to replace what is published. A callback that
+ * returns nothing leaves the converted event to be published unchanged.
  */
 export type AfterEventCallback = (
   ctx: ExecutorContext,
   adkEvent: AdkEvent,
   a2aEvent?: TaskArtifactUpdateEvent,
-) => Promise<void>;
+) => Promise<void | AgentExecutionEvent | AgentExecutionEvent[]>;
 
 /**
  * Callback called after execution resolved into a completed or failed task.
@@ -108,6 +112,7 @@ export class A2AAgentExecutor implements AgentExecutor {
       session,
       userContent: genAIUserMessage,
       requestContext: ctx,
+      artifactService: adkRunner.artifactService,
     });
 
     try {
@@ -165,13 +170,16 @@ export class A2AAgentExecutor implements AgentExecutor {
           continue;
         }
 
-        await this.config.afterEventCallback?.(
+        const returned = await this.config.afterEventCallback?.(
           executorContext,
           adkEvent,
           a2aEvent,
         );
 
-        eventBus.publish(a2aEvent);
+        const published = returned ? [returned].flat() : [a2aEvent];
+        for (const event of published) {
+          eventBus.publish(event);
+        }
       }
 
       await this.publishFinalTaskStatus({

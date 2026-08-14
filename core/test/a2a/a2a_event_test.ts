@@ -430,6 +430,30 @@ describe('a2a_event', () => {
       });
     });
 
+    it('createTaskArtifactUpdateEvent with an artifact name', () => {
+      expect(
+        createTaskArtifactUpdateEvent({
+          taskId: 't1',
+          contextId: 'c1',
+          artifactId: 'report.md_0',
+          name: 'report.md',
+          parts: [{kind: 'text', text: 'part'}],
+        }),
+      ).toEqual({
+        kind: 'artifact-update',
+        taskId: 't1',
+        contextId: 'c1',
+        append: undefined,
+        lastChunk: undefined,
+        artifact: {
+          artifactId: 'report.md_0',
+          name: 'report.md',
+          parts: [{kind: 'text', text: 'part'}],
+        },
+        metadata: undefined,
+      });
+    });
+
     it('createTaskFailedEvent', () => {
       expect(
         createTaskFailedEvent({

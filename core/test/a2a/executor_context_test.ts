@@ -5,7 +5,7 @@
  */
 
 import {RequestContext} from '@a2a-js/sdk/server';
-import {Session} from '@google/adk';
+import {createSession, InMemoryArtifactService, Session} from '@google/adk';
 import {Content} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {createExecutorContext} from '../../src/a2a/executor_context.js';
@@ -40,5 +40,23 @@ describe('createExecutorContext', () => {
       userContent: mockUserContent,
       requestContext: mockRequestContext,
     });
+  });
+
+  it('carries the artifact service it was given', () => {
+    const session = createSession({
+      id: 'session-123',
+      userId: 'user-1',
+      appName: 'agent-1',
+    });
+    const artifactService = new InMemoryArtifactService();
+
+    const context = createExecutorContext({
+      session,
+      userContent: mockUserContent,
+      requestContext: mockRequestContext,
+      artifactService,
+    });
+
+    expect(context.artifactService).toBe(artifactService);
   });
 });
