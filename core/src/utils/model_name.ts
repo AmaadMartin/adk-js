@@ -30,6 +30,13 @@ const EAP_MODEL_NAME_PATTERN =
 const GEMINI_1_MODEL_NAME_PATTERN = /^gemini-1\.\d+/;
 
 /**
+ * Captures the numeric version of a Gemini name. The Live naming convention
+ * puts the `live` marker before the version, as in
+ * `gemini-live-2.5-flash-native-audio`, so the marker is optional here.
+ */
+const GEMINI_VERSION_PATTERN = /^gemini-(?:live-)?(\d+(?:\.\d+)*)(?:-|$)/;
+
+/**
  * Extract the actual model name from a simple, path-based, `models/`-prefixed
  * or provider-prefixed model string.
  *
@@ -88,27 +95,6 @@ export function isGeminiModel(modelString: string): boolean {
   return modelName.startsWith('gemini-');
 }
 
-interface ParsedVersion {
-  valid: boolean;
-  major: number;
-  minor: number;
-  patch: number;
-}
-
-function parseVersion(versionString: string): ParsedVersion {
-  if (!/^\d+(\.\d+)*$/.test(versionString)) {
-    return {valid: false, major: 0, minor: 0, patch: 0};
-  }
-  const parts = versionString.split('.').map((part) => parseInt(part, 10));
-
-  return {
-    valid: true,
-    major: parts[0],
-    minor: parts.length > 1 ? parts[1] : 0,
-    patch: parts.length > 2 ? parts[2] : 0,
-  };
-}
-
 /**
  * Check if the model is a Gemini 1.x model using regex patterns.
  *
@@ -122,6 +108,9 @@ export function isGemini1Model(modelString: string): boolean {
 /**
  * Check if the model is a Gemini 2.x model using regex patterns.
  *
+ * Live names such as `gemini-live-2.5-flash-native-audio` are matched on the
+ * same terms as `gemini-2.5-flash`.
+ *
  * EAP models are deliberately not matched here: they carry no numeric version.
  * Use {@link isGeminiEapOr2OrAbove} where they should be accepted.
  *
@@ -133,16 +122,9 @@ export function isGemini2OrAbove(modelString: string): boolean {
     return false;
   }
 
-  const modelName = extractModelName(modelString);
+  const match = extractModelName(modelString).match(GEMINI_VERSION_PATTERN);
 
-  if (!modelName.startsWith('gemini-')) {
-    return false;
-  }
-
-  const versionString = modelName.slice('gemini-'.length).split('-', 1)[0];
-
-  const parsedVersion = parseVersion(versionString);
-  return parsedVersion.valid && parsedVersion.major >= 2;
+  return match !== null && parseInt(match[1], 10) >= 2;
 }
 
 /**
