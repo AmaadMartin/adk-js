@@ -118,10 +118,6 @@ export function isGemini1Model(modelString: string): boolean {
  * @return true if it's a Gemini 2.x model, false otherwise.
  */
 export function isGemini2OrAbove(modelString: string): boolean {
-  if (!modelString) {
-    return false;
-  }
-
   const match = extractModelName(modelString).match(GEMINI_VERSION_PATTERN);
 
   return match !== null && parseInt(match[1], 10) >= 2;
