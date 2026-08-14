@@ -32,6 +32,9 @@ import {MCPTool} from './mcp_tool.js';
  * The toolset can be configured with a filter to selectively expose a subset
  * of the tools provided by the MCP server.
  *
+ * One MCP session is shared by tool discovery and by every tool call, so the
+ * caller must call {@link close} to release the MCP server.
+ *
  * It can also be configured with a prefix. If provided, all tools discovered
  * from the MCP server will have their names prefixed with `${prefix}_`. When the
  * LLM invokes the prefixed tool, this toolset transparently strips the prefix
@@ -64,13 +67,7 @@ export class MCPToolset extends BaseToolset {
 
   async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {
     const session = await this.mcpSessionManager.createSession();
-
-    let listResult: ListToolsResult;
-    try {
-      listResult = (await session.listTools()) as ListToolsResult;
-    } finally {
-      await this.mcpSessionManager.closeSession(session);
-    }
+    const listResult = (await session.listTools()) as ListToolsResult;
     logger.debug(`number of tools: ${listResult.tools.length}`);
     for (const tool of listResult.tools) {
       logger.debug(`tool: ${tool.name}`);
@@ -118,12 +115,8 @@ export class MCPToolset extends BaseToolset {
    */
   async listResources(): Promise<string[]> {
     const session = await this.mcpSessionManager.createSession();
-    try {
-      const result = (await session.listResources()) as ListResourcesResult;
-      return result.resources.map((resource) => resource.name);
-    } finally {
-      await this.mcpSessionManager.closeSession(session);
-    }
+    const result = (await session.listResources()) as ListResourcesResult;
+    return result.resources.map((resource) => resource.name);
   }
 
   /**
@@ -135,12 +128,7 @@ export class MCPToolset extends BaseToolset {
    */
   async getResourceInfo(name: string): Promise<Resource> {
     const session = await this.mcpSessionManager.createSession();
-    let result: ListResourcesResult;
-    try {
-      result = (await session.listResources()) as ListResourcesResult;
-    } finally {
-      await this.mcpSessionManager.closeSession(session);
-    }
+    const result = (await session.listResources()) as ListResourcesResult;
 
     const resource = result.resources.find(
       (candidate) => candidate.name === name,
@@ -171,14 +159,10 @@ export class MCPToolset extends BaseToolset {
     }
 
     const session = await this.mcpSessionManager.createSession();
-    try {
-      const result = (await session.readResource({
-        uri: resourceInfo.uri,
-      })) as ReadResourceResult;
-      return result.contents;
-    } finally {
-      await this.mcpSessionManager.closeSession(session);
-    }
+    const result = (await session.readResource({
+      uri: resourceInfo.uri,
+    })) as ReadResourceResult;
+    return result.contents;
   }
 
   async close(): Promise<void> {

@@ -65,6 +65,18 @@ export type MCPConnectionParams =
   | StdioConnectionParams
   | StreamableHTTPConnectionParams;
 
+/** The pooled MCP session shared by every caller of `createSession()`. */
+interface PooledSession {
+  /**
+   * Resolves to the connected client. The pool holds the promise rather than
+   * the client so that concurrent `createSession()` calls share one connect
+   * instead of racing to build two.
+   */
+  readonly client: Promise<Client>;
+  /** Set once `client` resolves, so a client can be matched to its entry. */
+  resolved?: Client;
+}
+
 /**
  * Manages Model Context Protocol (MCP) client sessions.
  *
@@ -77,16 +89,55 @@ export type MCPConnectionParams =
  * session creation and connection handling, providing a simple interface for
  * creating new MCP client instances that can be used to interact with
  * remote tools.
+ *
+ * One session is pooled and reused, so N operations against a server cost one
+ * connection rather than N. The session therefore outlives a single operation
+ * and belongs to whoever owns the manager: the owner must call
+ * {@link closeSession} for every client {@link getActiveSessions} reports to
+ * release the MCP server. `MCPToolset.close()` does this for a toolset.
  */
 export class MCPSessionManager {
   private readonly connectionParams: MCPConnectionParams;
   private readonly activeSessions = new Set<Client>();
+  private pooledSession?: PooledSession;
 
   constructor(connectionParams: MCPConnectionParams) {
     this.connectionParams = connectionParams;
   }
 
+  /**
+   * Returns the pooled session, connecting a new one when the pool is empty.
+   *
+   * The returned client stays open until it is closed by {@link closeSession}
+   * or by the peer. Callers must not close it themselves.
+   */
   async createSession(): Promise<Client> {
+    if (this.pooledSession) {
+      logger.debug('Reusing pooled MCP session');
+      return this.pooledSession.client;
+    }
+
+    const entry: PooledSession = {client: this.connect()};
+    this.pooledSession = entry;
+
+    let client: Client;
+    try {
+      client = await entry.client;
+    } catch (err) {
+      if (this.pooledSession === entry) {
+        this.pooledSession = undefined;
+      }
+      throw err;
+    }
+
+    entry.resolved = client;
+    client.onclose = () => this.evict(client);
+    this.activeSessions.add(client);
+    logger.debug('Created new MCP session');
+    return client;
+  }
+
+  private async connect(): Promise<Client> {
     const client = new Client({name: 'MCPClient', version: '1.0.0'});
 
     try {
@@ -131,13 +182,20 @@ export class MCPSessionManager {
       });
     }
 
-    this.activeSessions.add(client);
     return client;
+  }
+
+  /** Drops a client that can no longer be used, so it is never handed out again. */
+  private evict(client: Client): void {
+    this.activeSessions.delete(client);
+    if (this.pooledSession?.resolved === client) {
+      this.pooledSession = undefined;
+    }
   }
 
   async closeSession(client: Client): Promise<void> {
     if (this.activeSessions.has(client)) {
-      this.activeSessions.delete(client);
+      this.evict(client);
       await client.close();
     }
   }
