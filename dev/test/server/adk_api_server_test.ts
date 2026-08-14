@@ -598,6 +598,29 @@ describe('AdkWebServer', () => {
       expect(session?.state).toEqual({foo: 'bar', baz: 'qux'});
     });
 
+    it('should return an empty event list when newMessage is omitted', async () => {
+      await sessionService.createSession({
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: 'sessionId',
+      });
+
+      const response = await client.post<Event[]>('/run', {
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: 'sessionId',
+      });
+
+      expect(response.status).toBe(200);
+      expect(response.data).toEqual([]);
+      const session = await sessionService.getSession({
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: 'sessionId',
+      });
+      expect(session!.events).toEqual([]);
+    });
+
     it('should return 404 if session not found', async () => {
       try {
         await client.post('/run', {

@@ -1433,3 +1433,167 @@ describe('Runner artifact saving (`saveInputBlobsAsArtifacts`)', () => {
     ]);
   });
 });
+
+describe('Runner.runAsync without newMessage', () => {
+  let plugin: MockPlugin;
+  let agent: MockLlmAgent;
+  let sessionService: InMemorySessionService;
+  let runner: Runner;
+
+  beforeEach(() => {
+    plugin = new MockPlugin();
+    agent = new MockLlmAgent('test_agent');
+    sessionService = new InMemorySessionService();
+    runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      artifactService: new InMemoryArtifactService(),
+      plugins: [plugin],
+    });
+  });
+
+  /** Drains `runAsync` into an array so rejections surface as a failed promise. */
+  async function collect(params: {
+    userId: string;
+    sessionId: string;
+    newMessage?: Content;
+    stateDelta?: Record<string, unknown>;
+  }): Promise<Event[]> {
+    const events: Event[] = [];
+    for await (const event of runner.runAsync(params)) {
+      events.push(event);
+    }
+    return events;
+  }
+
+  function getTestSession() {
+    return sessionService.getSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+  }
+
+  it('completes without yielding events when newMessage is omitted', async () => {
+    await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    // Omitting `newMessage` is also the compile-time assertion for this change:
+    // it does not typecheck while `newMessage` is a required property.
+    const events = await collect({
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    expect(events).toEqual([]);
+    expect((await getTestSession())!.events).toEqual([]);
+  });
+
+  it('treats an explicitly undefined newMessage the same as an omitted one', async () => {
+    await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    // The shape the dev API server produces when spreading an `express` body
+    // that carries no `newMessage`.
+    const events = await collect({
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      newMessage: undefined,
+    });
+
+    expect(events).toEqual([]);
+    expect((await getTestSession())!.events).toEqual([]);
+  });
+
+  it('does not invoke the agent when newMessage is omitted', async () => {
+    await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+    const agentRunAsync = vi.spyOn(agent, 'runAsync');
+
+    await collect({userId: TEST_USER_ID, sessionId: TEST_SESSION_ID});
+
+    expect(agentRunAsync).not.toHaveBeenCalled();
+  });
+
+  it('does not apply stateDelta when newMessage is omitted', async () => {
+    await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      state: {foo: 'bar'},
+    });
+
+    await collect({
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      stateDelta: {baz: 'qux'},
+    });
+
+    // Intentional, and matches adk-python: `state_delta` rides on the appended
+    // user event, so no message means no state change. Do not "fix" this.
+    expect((await getTestSession())!.state).toEqual({foo: 'bar'});
+  });
+
+  it('does not invoke onUserMessageCallback plugins when newMessage is omitted', async () => {
+    await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+    const onUserMessageCallback = vi.spyOn(plugin, 'onUserMessageCallback');
+
+    await collect({userId: TEST_USER_ID, sessionId: TEST_SESSION_ID});
+
+    expect(onUserMessageCallback).not.toHaveBeenCalled();
+  });
+
+  it('still invokes onUserMessageCallback when newMessage is present', async () => {
+    await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+    const onUserMessageCallback = vi.spyOn(plugin, 'onUserMessageCallback');
+
+    await collect({
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      newMessage: {role: 'user', parts: [{text: TEST_MESSAGE}]},
+    });
+
+    expect(onUserMessageCallback).toHaveBeenCalledTimes(1);
+  });
+
+  it('still throws when newMessage is present with no parts', async () => {
+    await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    // "Absent" and "empty" stay different inputs with different outcomes.
+    await expect(
+      collect({
+        userId: TEST_USER_ID,
+        sessionId: TEST_SESSION_ID,
+        newMessage: {role: 'user', parts: []},
+      }),
+    ).rejects.toThrow('No parts in the newMessage.');
+  });
+
+  it('still throws Session not found when newMessage is omitted', async () => {
+    await expect(
+      collect({userId: TEST_USER_ID, sessionId: 'non_existent_session_id'}),
+    ).rejects.toThrow('Session not found: non_existent_session_id');
+  });
+});

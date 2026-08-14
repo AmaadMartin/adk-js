@@ -1180,7 +1180,7 @@ export class AdkApiServer {
     appName: string;
     userId: string;
     sessionId: string;
-    newMessage: Content;
+    newMessage?: Content;
     stateDelta?: Record<string, unknown>;
     runConfig?: RunConfig;
     abortSignal: AbortSignal;
