@@ -30,7 +30,14 @@ const DEFAULT_FILE_PATTERNS = ['*.py'];
 /** Patterns never reported as unused when the caller names none. */
 const DEFAULT_EXCLUDE_PATTERNS = ['__init__.py', '*_test.py', 'test_*.py'];
 
-/** Result payload of the `cleanup_unused_files` tool. */
+/**
+ * Result payload of the `cleanup_unused_files` tool.
+ *
+ * `deleted_files`, `backup_files` and `total_freed_space` are always empty:
+ * the scan reports files and removes none. They are kept because the model
+ * sees this payload and the reference returns the same three keys, always
+ * empty as well. See {@link emptyReport}.
+ */
 export interface CleanupUnusedFilesResult {
   success: boolean;
   /** Absolute paths of the files that no listed file references. */
@@ -64,14 +71,14 @@ export type CleanupUnusedFilesInput = z.infer<
   typeof cleanupUnusedFilesParameters
 >;
 
-/** Empty result, used for every failure shape. */
-function emptyResult(errors: string[]): CleanupUnusedFilesResult {
+/** The report every return path starts from: nothing found, nothing removed. */
+function emptyReport(): CleanupUnusedFilesResult {
   return {
     success: false,
     unused_files: [],
     deleted_files: [],
     backup_files: [],
-    errors,
+    errors: [],
     total_freed_space: 0,
   };
 }
@@ -121,7 +128,10 @@ export async function cleanupUnusedFiles(
     );
 
     if ((await fs.stat(rootPath).catch(() => undefined)) === undefined) {
-      return emptyResult([`Root directory does not exist: ${rootPath}`]);
+      return {
+        ...emptyReport(),
+        errors: [`Root directory does not exist: ${rootPath}`],
+      };
     }
 
     // `onlyFiles` narrows the reference behaviour: `rglob('*.py')` also returns
@@ -136,17 +146,17 @@ export async function cleanupUnusedFiles(
     });
 
     return {
+      ...emptyReport(),
       success: true,
       unused_files: matches
         .map((match) => path.resolve(match))
         .filter((match) => !resolvedUsedFiles.has(match)),
-      deleted_files: [],
-      backup_files: [],
-      errors: [],
-      total_freed_space: 0,
     };
   } catch (error: unknown) {
-    return emptyResult([`Cleanup scan failed: ${errorMessage(error)}`]);
+    return {
+      ...emptyReport(),
+      errors: [`Cleanup scan failed: ${errorMessage(error)}`],
+    };
   }
 }
 

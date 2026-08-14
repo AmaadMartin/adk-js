@@ -31,6 +31,9 @@ const IGNORED_TREE_ENTRIES = ['__pycache__', 'node_modules'];
 /** Agent class assumed when a configuration does not name one. */
 const DEFAULT_AGENT_CLASS = 'LlmAgent';
 
+/** Extensions of the agent configuration files reported from the root. */
+const CONFIG_EXTENSIONS = ['.yaml', '.yml'];
+
 /** Basic facts about the project directory. */
 export interface ProjectInfo {
   name: string;
@@ -236,14 +239,14 @@ async function findExistingConfigs(
   const configs: ExistingConfig[] = [];
 
   try {
-    const entries = await fs.readdir(rootPath, {withFileTypes: true});
-    for (const extension of ['.yaml', '.yml']) {
-      for (const entry of entries) {
-        if (entry.isFile() && path.extname(entry.name) === extension) {
-          configs.push(
-            await analyzeConfigFile(path.join(rootPath, entry.name), rootPath),
-          );
-        }
+    for (const entry of await fs.readdir(rootPath, {withFileTypes: true})) {
+      if (
+        entry.isFile() &&
+        CONFIG_EXTENSIONS.includes(path.extname(entry.name))
+      ) {
+        configs.push(
+          await analyzeConfigFile(path.join(rootPath, entry.name), rootPath),
+        );
       }
     }
     configs.sort((left, right) => (left.filename < right.filename ? -1 : 1));
@@ -302,21 +305,9 @@ async function buildTree(
   return node;
 }
 
-/** Describes one directory the assistant may create under the project root. */
-async function suggestDirectory(
-  rootPath: string,
-  name: string,
-  purpose: string,
-  exampleFiles: string[],
-): Promise<DirectorySuggestion> {
-  return {
-    path: name,
-    exists:
-      (await fs.stat(path.join(rootPath, name)).catch(() => undefined)) !==
-      undefined,
-    purpose,
-    example_files: exampleFiles,
-  };
+/** Reports whether `filePath` can be seen on disk. */
+async function pathExists(filePath: string): Promise<boolean> {
+  return (await fs.stat(filePath).catch(() => undefined)) !== undefined;
 }
 
 /** Suggests where new agent configurations and directories should go. */
@@ -329,16 +320,18 @@ async function generatePathSuggestions(
       config.agent_class !== DEFAULT_AGENT_CLASS || !config.has_sub_agents,
   );
 
-  const [tools, callbacks] = await Promise.all([
-    suggestDirectory(rootPath, 'tools', 'Custom tool implementations', [
-      'custom_email.py',
-      'database_connector.py',
-    ]),
-    suggestDirectory(rootPath, 'callbacks', 'Custom callback functions', [
-      'logging.py',
-      'security.py',
-    ]),
-  ]);
+  const tools: DirectorySuggestion = {
+    path: 'tools',
+    exists: await pathExists(path.join(rootPath, 'tools')),
+    purpose: 'Custom tool implementations',
+    example_files: ['custom_email.py', 'database_connector.py'],
+  };
+  const callbacks: DirectorySuggestion = {
+    path: 'callbacks',
+    exists: await pathExists(path.join(rootPath, 'callbacks')),
+    purpose: 'Custom callback functions',
+    example_files: ['logging.py', 'security.py'],
+  };
 
   return {
     root_agent_configs: suggestRootAgent ? ['root_agent.yaml'] : [],
