@@ -290,8 +290,9 @@ describe('DatabaseSessionService', () => {
       sessionId: 's1',
       config: {afterTimestamp: now},
     });
-    expect(after2?.events.length).toBe(1);
-    expect(after2?.events[0].id).toBe(e3.id);
+    expect(after2?.events.length).toBe(2);
+    expect(after2?.events[0].id).toBe(e2.id);
+    expect(after2?.events[1].id).toBe(e3.id);
   });
 
   it('should filter sessions by userId in listSessions', async () => {
