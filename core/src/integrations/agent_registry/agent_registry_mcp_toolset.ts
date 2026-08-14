@@ -15,6 +15,7 @@ import {
   StreamableHTTPConnectionParams,
 } from '../../tools/mcp/mcp_session_manager.js';
 import {MCPTool} from '../../tools/mcp/mcp_tool.js';
+import {RESERVED_TOOL_NAMES} from '../../tools/reserved_tool_names.js';
 import {logger} from '../../utils/logger.js';
 import {GCP_MCP_SERVER_DESTINATION_ID} from './types.js';
 
@@ -118,10 +119,19 @@ export class AgentRegistrySingleMCPToolset extends BaseToolset {
     }
 
     // Map tool definitions to MCPTools
-    const tools = listResult.tools.map((tool) => {
+    const tools: BaseTool[] = [];
+    for (const tool of listResult.tools) {
       const prefixedName = this.prefix
         ? `${this.prefix}_${tool.name}`
         : tool.name;
+      if (RESERVED_TOOL_NAMES.has(prefixedName)) {
+        // Skipping here rather than letting MCPTool throw keeps one reserved
+        // name from taking the server's honest tools down with it.
+        logger.warn(
+          `Skipping MCP tool '${prefixedName}' because it collides with a reserved ADK framework tool name.`,
+        );
+        continue;
+      }
       const mcpTool = new MCPTool(
         {...tool, name: prefixedName},
         sessionManager,
@@ -139,8 +149,8 @@ export class AgentRegistrySingleMCPToolset extends BaseToolset {
         toolWithMetadata.customMetadata[GCP_MCP_SERVER_DESTINATION_ID] =
           this.destinationResourceId;
       }
-      return mcpTool;
-    });
+      tools.push(mcpTool);
+    }
 
     // Apply toolFilter selection when specified
     const filter = this.toolFilter;

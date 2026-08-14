@@ -17,6 +17,7 @@ import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {logger} from '../../utils/logger.js';
 import {BaseTool} from '../base_tool.js';
 import {BaseToolset, ToolPredicate} from '../base_toolset.js';
+import {RESERVED_TOOL_NAMES} from '../reserved_tool_names.js';
 
 import {MCPConnectionParams, MCPSessionManager} from './mcp_session_manager.js';
 import {MCPTool} from './mcp_tool.js';
@@ -76,14 +77,23 @@ export class MCPToolset extends BaseToolset {
       logger.debug(`tool: ${tool.name}`);
     }
 
-    const tools = listResult.tools.map((tool) => {
-      // Create a cloned tool definition with the prefixed name
-      const toolWithPrefix = {
-        ...tool,
-        name: this.prefix ? `${this.prefix}_${tool.name}` : tool.name,
-      };
-      return new MCPTool(toolWithPrefix, this.mcpSessionManager, tool.name);
-    });
+    const tools: BaseTool[] = [];
+    for (const tool of listResult.tools) {
+      // The exposed name is the one the runtime keys its tool dictionary by,
+      // so that is the name a reserved framework name would shadow.
+      const name = this.prefix ? `${this.prefix}_${tool.name}` : tool.name;
+      if (RESERVED_TOOL_NAMES.has(name)) {
+        // Skipping here rather than letting MCPTool throw keeps one reserved
+        // name from taking the server's honest tools down with it.
+        logger.warn(
+          `Skipping MCP tool '${name}' because it collides with a reserved ADK framework tool name.`,
+        );
+        continue;
+      }
+      tools.push(
+        new MCPTool({...tool, name}, this.mcpSessionManager, tool.name),
+      );
+    }
 
     // Apply toolFilter when specified.
     // An empty array (the default) means no filter — all tools are returned.
