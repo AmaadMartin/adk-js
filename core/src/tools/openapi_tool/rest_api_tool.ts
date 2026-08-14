@@ -193,19 +193,16 @@ function encodePathParamValue(name: string, value: string): string {
  *
  * The caller keeps ownership of `args`, so this returns a copy.
  */
-export function applyRequiredDefaults(
+function applyRequiredDefaults(
   parameters: ApiParameter[],
   args: Record<string, unknown>,
 ): Record<string, unknown> {
   const result = {...args};
   for (const param of parameters) {
-    // `hasOwn`, because a spec may name a parameter `constructor`, which a
-    // bare lookup would resolve off Object.prototype.
+    // hasOwn: see the path-placeholder note below.
     if (!param.required || Object.hasOwn(result, param.name)) continue;
-    const defaultValue: unknown = param.paramSchema?.default;
-    if (defaultValue !== undefined && defaultValue !== null) {
-      result[param.name] = defaultValue;
-    }
+    const defaultValue: unknown = param.paramSchema.default;
+    if (defaultValue != null) result[param.name] = defaultValue;
   }
   return result;
 }
