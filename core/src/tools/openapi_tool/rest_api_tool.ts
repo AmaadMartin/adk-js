@@ -117,13 +117,6 @@ export class RestApiTool extends BaseTool {
       this.endpoint,
       this.operationParser.getParameters(),
       args,
-      {
-        toolName: this.name,
-        // The credential this tool was configured with, not the one the auth
-        // handler resolved: the handler returns none when the tool declares no
-        // auth scheme, which would drop these headers.
-        additionalHeaders: this.authCredential?.http?.additionalHeaders,
-      },
     );
 
     // Handle body
@@ -148,7 +141,15 @@ export class RestApiTool extends BaseTool {
       Object.assign(headers, providerHeaders);
     }
 
-    applyDefaultHeaders(headers, this.defaultHeaders);
+    // Highest priority first: each call fills only what the request still
+    // lacks. The credential this tool was configured with, not the one the
+    // auth handler resolved, because the handler returns none when the tool
+    // declares no auth scheme.
+    fillMissingHeaders(headers, this.authCredential?.http?.additionalHeaders);
+    fillMissingHeaders(headers, {
+      'User-Agent': `google-adk/${version} (tool: ${this.name})`,
+    });
+    fillMissingHeaders(headers, this.defaultHeaders);
 
     try {
       const response = await globalThis.fetch(url, {
@@ -202,50 +203,29 @@ function encodePathParamValue(name: string, value: string): string {
 }
 
 /**
- * Fills in the headers the request does not already carry. An explicitly
- * supplied header - an OpenAPI header parameter, the body's Content-Type, a
- * credential, or the header provider - wins over a default.
+ * Adds the headers the request does not already carry, leaving the ones it
+ * does. Names are compared without case, because `fetch` appends rather than
+ * replaces when a record holds two spellings of one header name.
  */
-function applyDefaultHeaders(
+function fillMissingHeaders(
   headers: Record<string, string>,
-  defaults: Record<string, string>,
+  additions: Record<string, string> = {},
 ): void {
-  for (const [key, value] of Object.entries(defaults)) {
-    if (!Object.hasOwn(headers, key)) {
+  const present = new Set(Object.keys(headers).map((key) => key.toLowerCase()));
+  for (const [key, value] of Object.entries(additions)) {
+    if (!present.has(key.toLowerCase())) {
       headers[key] = value;
+      present.add(key.toLowerCase());
     }
   }
 }
 
-export interface PrepareRequestParamsOptions {
-  /**
-   * Name of the calling tool. When set, the request carries the ADK
-   * User-Agent naming that tool.
-   */
-  toolName?: string;
-  /**
-   * Headers carried by the auth credential, from `HttpAuth.additionalHeaders`.
-   */
-  additionalHeaders?: Record<string, string>;
-}
-
-/**
- * Builds the URL, headers and body of one OpenAPI operation call.
- *
- * The seeded headers go in before the argument loop, so an OpenAPI header
- * parameter overrides both the ADK User-Agent and a credential header.
- */
 export function prepareRequestParams(
   endpoint: OperationEndpoint,
   parameters: ApiParameter[],
   args: Record<string, unknown>,
-  options: PrepareRequestParamsOptions = {},
 ): PreparedParams {
   const headers: Record<string, string> = {};
-  if (options.toolName) {
-    headers['User-Agent'] = `google-adk/${version} (tool: ${options.toolName})`;
-  }
-  Object.assign(headers, options.additionalHeaders);
   const queryParams = new URLSearchParams();
   let body: unknown = undefined;
 

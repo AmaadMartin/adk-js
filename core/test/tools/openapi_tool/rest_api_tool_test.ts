@@ -701,6 +701,11 @@ describe('RestApiTool request headers', () => {
     );
   }
 
+  /** Every header of the last request, to assert one is absent. */
+  function sentHeaders() {
+    return vi.mocked(globalThis.fetch).mock.calls.at(-1)?.[1]?.headers;
+  }
+
   it('should name itself in the ADK user agent', async () => {
     const tool = new RestApiTool('test_tool', 'description', endpoint, {
       responses: {},
@@ -820,6 +825,92 @@ describe('RestApiTool request headers', () => {
     });
 
     expectHeaders({'Content-Type': 'application/json'});
+  });
+
+  it('should not add a second spelling of a header parameter name', async () => {
+    const operation: OpenAPIV3.OperationObject = {
+      responses: {},
+      parameters: [
+        {name: 'user-agent', in: 'header', schema: {type: 'string'}},
+      ],
+    };
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      endpoint,
+      operation,
+      undefined,
+      undefined,
+      {preservePropertyNames: true},
+    );
+    mockFetch();
+
+    await tool.runAsync({
+      args: {'user-agent': 'api-client'},
+      toolContext: createToolContext(),
+    });
+
+    expect(sentHeaders()).toEqual({'user-agent': 'api-client'});
+  });
+
+  it('should not add a second spelling of the content type the body set', async () => {
+    const operation: OpenAPIV3.OperationObject = {
+      responses: {},
+      requestBody: {
+        content: {
+          'application/json': {
+            schema: {type: 'object', properties: {foo: {type: 'string'}}},
+          },
+        },
+      },
+    };
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      endpoint,
+      operation,
+    );
+    tool.setDefaultHeaders({'content-type': 'text/plain'});
+    mockFetch();
+
+    await tool.runAsync({
+      args: {foo: 'bar'},
+      toolContext: createToolContext(),
+    });
+
+    expectHeaders({'Content-Type': 'application/json'});
+    expect(sentHeaders()).not.toHaveProperty('content-type');
+  });
+
+  it('should send one spelling when the credential carries two', async () => {
+    const tool = new RestApiTool('test_tool', 'description', endpoint, {
+      responses: {},
+    });
+    tool.configureAuthCredential(
+      bearerCredential({
+        'x-goog-user-project': 'first',
+        'X-Goog-User-Project': 'second',
+      }),
+    );
+    mockFetch();
+
+    await tool.runAsync({args: {}, toolContext: createToolContext()});
+
+    expectHeaders({'x-goog-user-project': 'first'});
+    expect(sentHeaders()).not.toHaveProperty('X-Goog-User-Project');
+  });
+
+  it('should not add a second spelling of a header the credential set', async () => {
+    const tool = new RestApiTool('test_tool', 'description', endpoint, {
+      responses: {},
+    });
+    tool.configureAuthCredential(bearerCredential({'User-Agent': 'from-cred'}));
+    tool.setDefaultHeaders({'user-agent': 'from-default'});
+    mockFetch();
+
+    await tool.runAsync({args: {}, toolContext: createToolContext()});
+
+    expect(sentHeaders()).toEqual({'User-Agent': 'from-cred'});
   });
 
   it('should send a default header', async () => {
@@ -983,56 +1074,6 @@ describe('RestApiTool Utilities', () => {
       );
       expect(result.headers).toEqual({
         'X-Trace-Id': 'trace-456',
-      });
-    });
-
-    it('should name the tool in the ADK user agent', () => {
-      const endpoint = {
-        baseUrl: 'http://api.example.com',
-        path: '/test',
-        method: 'GET',
-      };
-
-      const result = prepareRequestParams(
-        endpoint,
-        [],
-        {},
-        {toolName: 'my_tool'},
-      );
-
-      expect(result.headers).toEqual({
-        'User-Agent': `google-adk/${version} (tool: my_tool)`,
-      });
-    });
-
-    it('should omit the user agent when no tool name is given', () => {
-      const endpoint = {
-        baseUrl: 'http://api.example.com',
-        path: '/test',
-        method: 'GET',
-      };
-
-      const result = prepareRequestParams(endpoint, [], {});
-
-      expect(result.headers).toEqual({});
-    });
-
-    it('should seed the additional headers of the credential', () => {
-      const endpoint = {
-        baseUrl: 'http://api.example.com',
-        path: '/test',
-        method: 'GET',
-      };
-
-      const result = prepareRequestParams(
-        endpoint,
-        [],
-        {},
-        {additionalHeaders: {'x-goog-user-project': 'test-project'}},
-      );
-
-      expect(result.headers).toEqual({
-        'x-goog-user-project': 'test-project',
       });
     });
 
