@@ -1218,6 +1218,26 @@ describe('RestApiTool Utilities', () => {
         expect(result.headers['Cookie']).toBe('sessionId=abc');
       });
 
+      it('should merge into a header parameter already spelled cookie', () => {
+        const parameters: ApiParameter[] = [
+          ...sessionParameters,
+          {
+            name: 'cookie',
+            originalName: 'cookie',
+            paramLocation: 'header',
+            paramSchema: {},
+            required: false,
+          },
+        ];
+
+        const result = prepareRequestParams(dataEndpoint, parameters, {
+          cookie: 'theme=dark',
+          session_id: 'abc',
+        });
+
+        expect(result.headers).toEqual({cookie: 'theme=dark; session_id=abc'});
+      });
+
       it('should set no Cookie header when no cookie argument is supplied', () => {
         const result = prepareRequestParams(
           dataEndpoint,
