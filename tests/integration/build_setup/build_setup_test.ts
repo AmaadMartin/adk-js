@@ -13,8 +13,9 @@ const execAsync = promisify(exec);
 const dirname = process.cwd();
 
 // Hooks do the install/build; each test only runs a short command inside the
-// installed fixture. Per-test budget, not an install budget.
-const TEST_EXECUTION_TIMEOUT = 20000;
+// installed fixture. Per-test budget, not an install budget. Windows CI is slow
+// enough to need the wide margin.
+const TEST_EXECUTION_TIMEOUT = 120000;
 
 describe('Build setup', () => {
   describe.each([
@@ -45,7 +46,7 @@ describe('Build setup', () => {
         expect(buildResult.stderr).toBe('');
         expect(buildResult.stdout).toContain('\nBuild complete');
       }
-    });
+    }, 300000);
 
     it(
       'should build and run agent successfully',
@@ -129,6 +130,6 @@ describe('Build setup', () => {
             );
           });
       }
-    });
+    }, 120000);
   });
 });

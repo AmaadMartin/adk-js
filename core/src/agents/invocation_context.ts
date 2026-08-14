@@ -307,15 +307,29 @@ export class InvocationContext {
   /**
    * The app name of the current session.
    */
-  get appName() {
+  get appName(): string {
     return this.session.appName;
   }
 
   /**
    * The user ID of the current session.
    */
-  get userId() {
+  get userId(): string {
     return this.session.userId;
+  }
+
+  /**
+   * The session ID of the current session.
+   */
+  get sessionId(): string {
+    return this.session.id;
+  }
+
+  /**
+   * The state of the current session.
+   */
+  get state(): Record<string, unknown> {
+    return this.session.state;
   }
 
   /**
