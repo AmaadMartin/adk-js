@@ -68,11 +68,12 @@ interface FileArtifactVersion extends ArtifactVersion {
  * a scope this service accepts is a scope they accept. `appName` is validated
  * but is not part of the layout above.
  *
- * That deny-list permits `/`, so two different scopes can still name one
- * directory: `userId: 'alice/sessions/s1'` with a user-scoped filename lands
- * where `userId: 'alice'` plus `sessionId: 's1'` lands. Containment inside the
- * root is enforced separately by {@link assertInsideRoot}, which is a lexical
- * check and not a sandbox: it does not survive symlinks or bind mounts.
+ * That deny-list permits `/`, so each identifier is escaped to one path
+ * segment before it is joined. Without that, `userId: 'alice/sessions/s1'`
+ * with a user-scoped filename would name the directory that `userId: 'alice'`
+ * plus `sessionId: 's1'` names. Containment inside the root is enforced
+ * separately by {@link assertInsideRoot}, which is a lexical check and not a
+ * sandbox: it does not survive symlinks or bind mounts.
  */
 export class FileArtifactService implements BaseArtifactService {
   private readonly rootDir: string;
@@ -166,10 +167,6 @@ export class FileArtifactService implements BaseArtifactService {
     request: LoadArtifactRequest,
     depth: number,
   ): Promise<Part | undefined> {
-    // Runs outside readStoredArtifact so a rejection is not reported as a
-    // missing artifact.
-    validateScopePathSegments(request);
-
     const part = await this.readStoredArtifact(request);
     const fileUri = part?.fileData?.fileUri;
 
@@ -190,13 +187,15 @@ export class FileArtifactService implements BaseArtifactService {
     filename,
     version,
   }: LoadArtifactRequest): Promise<Part | undefined> {
-    try {
-      const artifactDir = getArtifactDir(
-        this.rootDir,
-        {appName, userId, sessionId},
-        filename,
-      );
+    // Resolved outside the catch so a rejected scope is not reported as a
+    // missing artifact.
+    const artifactDir = getArtifactDir(
+      this.rootDir,
+      {appName, userId, sessionId},
+      filename,
+    );
 
+    try {
       try {
         await fs.access(artifactDir);
       } catch (e: unknown) {
@@ -295,8 +294,10 @@ export class FileArtifactService implements BaseArtifactService {
     userId,
     sessionId,
   }: ListArtifactKeysRequest): Promise<string[]> {
+    validatePathSegment(appName, 'appName');
+
     const filenames: Set<string> = new Set();
-    const userRoot = getUserRoot(this.rootDir, appName, userId);
+    const userRoot = getUserRoot(this.rootDir, userId);
 
     // Session artifacts
     const sessionRoot = getSessionArtifactsDir(userRoot, sessionId);
@@ -331,14 +332,13 @@ export class FileArtifactService implements BaseArtifactService {
     sessionId,
     filename,
   }: DeleteArtifactRequest): Promise<void> {
-    validateScopePathSegments({appName, userId, sessionId, filename});
+    const artifactDir = getArtifactDir(
+      this.rootDir,
+      {appName, userId, sessionId},
+      filename,
+    );
 
     try {
-      const artifactDir = getArtifactDir(
-        this.rootDir,
-        {appName, userId, sessionId},
-        filename,
-      );
       await fs.rm(artifactDir, {recursive: true, force: true});
     } catch (e) {
       logger.warn(
@@ -354,14 +354,13 @@ export class FileArtifactService implements BaseArtifactService {
     sessionId,
     filename,
   }: ListVersionsRequest): Promise<number[]> {
-    validateScopePathSegments({appName, userId, sessionId, filename});
+    const artifactDir = getArtifactDir(
+      this.rootDir,
+      {appName, userId, sessionId},
+      filename,
+    );
 
     try {
-      const artifactDir = getArtifactDir(
-        this.rootDir,
-        {appName, userId, sessionId},
-        filename,
-      );
       return await getArtifactVersionsFromDir(artifactDir);
     } catch (e) {
       logger.warn(
@@ -378,14 +377,13 @@ export class FileArtifactService implements BaseArtifactService {
     sessionId,
     filename,
   }: ListVersionsRequest): Promise<ArtifactVersion[]> {
-    validateScopePathSegments({appName, userId, sessionId, filename});
+    const artifactDir = getArtifactDir(
+      this.rootDir,
+      {appName, userId, sessionId},
+      filename,
+    );
 
     try {
-      const artifactDir = getArtifactDir(
-        this.rootDir,
-        {appName, userId, sessionId},
-        filename,
-      );
       const versions = await getArtifactVersionsFromDir(artifactDir);
       const artifactVersions: ArtifactVersion[] = [];
 
@@ -422,15 +420,13 @@ export class FileArtifactService implements BaseArtifactService {
     filename,
     version,
   }: LoadArtifactRequest): Promise<ArtifactVersion | undefined> {
-    validateScopePathSegments({appName, userId, sessionId, filename});
+    const artifactDir = getArtifactDir(
+      this.rootDir,
+      {appName, userId, sessionId},
+      filename,
+    );
 
     try {
-      const artifactDir = getArtifactDir(
-        this.rootDir,
-        {appName, userId, sessionId},
-        filename,
-      );
-
       const versions = await getArtifactVersionsFromDir(artifactDir);
       if (versions.length === 0) {
         return undefined;
@@ -476,44 +472,30 @@ export function assertInsideRoot(
   }
 }
 
+const SEPARATOR_ESCAPES: Record<string, string> = {
+  '%': '%25',
+  '/': '%2F',
+  '\\': '%5C',
+};
+
 /**
- * Resolves the storage root of one user.
+ * Confines a scope identifier to a single path segment.
  *
- * `appName` is validated but not joined: it is not part of this service's
- * layout, and adding it would orphan every artifact already on disk.
+ * `validatePathSegment` permits `/`, so joining an identifier raw would let
+ * `userId: 'alice/sessions/s1'` name the directory that `userId: 'alice'` plus
+ * `sessionId: 's1'` names, and each could then read and overwrite the other's
+ * artifacts. No value the previous allow-list accepted contains `%`, `/` or
+ * `\`, so nothing already on disk moves.
  */
-export function getUserRoot(
-  rootDir: string,
-  appName: string,
-  userId: string,
-): string {
-  validatePathSegment(appName, 'appName');
-  validatePathSegment(userId, 'userId');
-  const result = path.join(rootDir, 'users', userId);
-  assertInsideRoot(result, rootDir, 'userRoot');
-  return result;
+function escapeSegment(value: string): string {
+  return value.replace(/[%/\\]/g, (char) => SEPARATOR_ESCAPES[char]);
 }
 
-/**
- * Rejects identifiers that would alter the path they are joined into.
- *
- * `sessionId` is only checked for a session-scoped filename, which is the rule
- * the in-memory and GCS services apply.
- *
- * @param request The request whose scope identifiers are about to be used.
- */
-function validateScopePathSegments({
-  appName,
-  userId,
-  sessionId,
-  filename,
-}: LoadArtifactRequest): void {
-  validatePathSegment(appName, 'appName');
+export function getUserRoot(rootDir: string, userId: string): string {
   validatePathSegment(userId, 'userId');
-
-  if (!filename.startsWith(USER_NAMESPACE_PREFIX)) {
-    validatePathSegment(sessionId, 'sessionId');
-  }
+  const result = path.join(rootDir, 'users', escapeSegment(userId));
+  assertInsideRoot(result, rootDir, 'userRoot');
+  return result;
 }
 
 function getUserArtifactsDir(userRoot: string): string {
@@ -525,7 +507,12 @@ export function getSessionArtifactsDir(
   sessionId: string,
 ): string {
   validatePathSegment(sessionId, 'sessionId');
-  const result = path.join(baseRoot, 'sessions', sessionId, 'artifacts');
+  const result = path.join(
+    baseRoot,
+    'sessions',
+    escapeSegment(sessionId),
+    'artifacts',
+  );
   assertInsideRoot(result, baseRoot, 'sessionArtifactsDir');
   return result;
 }
@@ -547,7 +534,11 @@ function getArtifactDir(
   {appName, userId, sessionId}: CompositeSessionKey,
   filename: string,
 ): string {
-  const userRoot = getUserRoot(rootDir, appName, userId);
+  // Validated but not joined: appName is not part of this service's layout,
+  // and adding it would orphan every artifact already on disk.
+  validatePathSegment(appName, 'appName');
+
+  const userRoot = getUserRoot(rootDir, userId);
   // Only the filename decides the scope. Routing an empty sessionId to the
   // user scope would silently widen the caller's scope; getSessionArtifactsDir
   // rejects it instead, as the other two services do.

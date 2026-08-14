@@ -55,10 +55,7 @@ describe('FileArtifactService', () => {
         });
 
         const versionDir = path.join(
-          getSessionArtifactsDir(
-            getUserRoot(rootDir, appName, userId),
-            sessionId,
-          ),
+          getSessionArtifactsDir(getUserRoot(rootDir, userId), sessionId),
           'report.pdf',
           'versions',
           '0',
@@ -106,19 +103,18 @@ describe('FileArtifactService', () => {
     });
 
     const ROOT = '/tmp/adk-test-root';
-    const APP = 'test-app';
 
     describe('validatePathSegment - valid inputs', () => {
       it('allows a plain alphanumeric userId', () => {
-        expect(() => getUserRoot(ROOT, APP, 'alice')).not.toThrow();
+        expect(() => getUserRoot(ROOT, 'alice')).not.toThrow();
       });
       it('allows a UUID as userId', () => {
         expect(() =>
-          getUserRoot(ROOT, APP, '550e8400-e29b-41d4-a716-446655440000'),
+          getUserRoot(ROOT, '550e8400-e29b-41d4-a716-446655440000'),
         ).not.toThrow();
       });
       it('allows an email-style userId', () => {
-        expect(() => getUserRoot(ROOT, APP, 'user.name@org')).not.toThrow();
+        expect(() => getUserRoot(ROOT, 'user.name@org')).not.toThrow();
       });
       it('allows a plain alphanumeric sessionId', () => {
         expect(() =>
@@ -127,12 +123,52 @@ describe('FileArtifactService', () => {
       });
     });
 
+    describe('layout is unchanged for identifiers the allow-list accepted', () => {
+      it('joins an email-style userId verbatim', () => {
+        expect(getUserRoot(ROOT, 'user.name@org')).toBe(
+          path.join(ROOT, 'users', 'user.name@org'),
+        );
+      });
+      it('joins a UUID sessionId verbatim', () => {
+        expect(
+          getSessionArtifactsDir(`${ROOT}/users/alice`, 'session-abc123'),
+        ).toBe(
+          path.join(
+            ROOT,
+            'users',
+            'alice',
+            'sessions',
+            'session-abc123',
+            'artifacts',
+          ),
+        );
+      });
+    });
+
     describe('deny-list accepts what the allow-list rejected', () => {
-      it('allows a forward slash in userId', () => {
-        expect(() => getUserRoot(ROOT, APP, 'a/b')).not.toThrow();
+      it('keeps a forward-slashed userId in one path segment', () => {
+        expect(getUserRoot(ROOT, 'a/b')).toBe(
+          path.join(ROOT, 'users', 'a%2Fb'),
+        );
+      });
+      it('keeps a back-slashed userId in one path segment', () => {
+        expect(getUserRoot(ROOT, 'a\\b')).toBe(
+          path.join(ROOT, 'users', 'a%5Cb'),
+        );
+      });
+      it('escapes a literal percent so an escape cannot be forged', () => {
+        expect(getUserRoot(ROOT, 'a%2Fb')).toBe(
+          path.join(ROOT, 'users', 'a%252Fb'),
+        );
+        expect(getUserRoot(ROOT, 'a%2Fb')).not.toBe(getUserRoot(ROOT, 'a/b'));
       });
       it('allows a percent-encoded slash in userId', () => {
-        expect(() => getUserRoot(ROOT, APP, '..%2F..%2Fetc')).not.toThrow();
+        expect(() => getUserRoot(ROOT, '..%2F..%2Fetc')).not.toThrow();
+      });
+      it('keeps a forward-slashed sessionId in one path segment', () => {
+        expect(getSessionArtifactsDir(`${ROOT}/users/alice`, 'a/b')).toBe(
+          path.join(ROOT, 'users', 'alice', 'sessions', 'a%2Fb', 'artifacts'),
+        );
       });
       it('allows a percent-encoded slash in sessionId', () => {
         expect(() =>
@@ -143,7 +179,7 @@ describe('FileArtifactService', () => {
         ).not.toThrow();
       });
       it('allows a space in userId', () => {
-        expect(() => getUserRoot(ROOT, APP, 'user id')).not.toThrow();
+        expect(() => getUserRoot(ROOT, 'user id')).not.toThrow();
       });
       it('allows a colon in sessionId', () => {
         expect(() =>
@@ -152,37 +188,50 @@ describe('FileArtifactService', () => {
       });
     });
 
-    describe('validatePathSegment - appName attacks', () => {
-      it('blocks a traversal appName even though it is not joined into the path', () => {
-        expect(() => getUserRoot(ROOT, '../escape', 'alice')).toThrow(
-          "appName '../escape' must not contain traversal segments.",
-        );
-      });
-      it('blocks a drive-qualified appName', () => {
-        expect(() => getUserRoot(ROOT, 'C:evil', 'alice')).toThrow(
-          "appName 'C:evil' must not be drive-qualified.",
-        );
-      });
+    it('does not let a slash-bearing userId read another scope', async () => {
+      rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-artifacts-test-'));
+      const service = new FileArtifactService(rootDir);
+
+      try {
+        await service.saveArtifact({
+          appName: 'test-app',
+          userId: 'alice',
+          sessionId: 's1',
+          filename: 'secret.txt',
+          artifact: {text: 'session-scoped secret'},
+        });
+
+        const stolen = await service.loadArtifact({
+          appName: 'test-app',
+          userId: 'alice/sessions/s1',
+          sessionId: 'unused',
+          filename: 'user:secret.txt',
+        });
+
+        expect(stolen).toBeUndefined();
+      } finally {
+        await fs.rm(rootDir, {recursive: true, force: true});
+      }
     });
 
     describe('validatePathSegment - userId attacks', () => {
       it('blocks dot-dot-slash traversal in userId', () => {
-        expect(() => getUserRoot(ROOT, APP, '../../etc')).toThrow(
+        expect(() => getUserRoot(ROOT, '../../etc')).toThrow(
           "userId '../../etc' must not contain traversal segments.",
         );
       });
       it('blocks a leading slash in userId', () => {
-        expect(() => getUserRoot(ROOT, APP, '/etc/passwd')).toThrow(
+        expect(() => getUserRoot(ROOT, '/etc/passwd')).toThrow(
           "userId '/etc/passwd' must not be an absolute path or start with a slash.",
         );
       });
       it('blocks null byte in userId', () => {
-        expect(() => getUserRoot(ROOT, APP, 'alice\x00')).toThrow(
+        expect(() => getUserRoot(ROOT, 'alice\x00')).toThrow(
           'userId must not contain null bytes.',
         );
       });
       it('blocks empty string as userId', () => {
-        expect(() => getUserRoot(ROOT, APP, '')).toThrow(
+        expect(() => getUserRoot(ROOT, '')).toThrow(
           'userId must not be empty.',
         );
       });
