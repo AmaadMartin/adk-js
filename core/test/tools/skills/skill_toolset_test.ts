@@ -391,6 +391,8 @@ describe('skill_toolset', () => {
         const foreignClose = vi.fn().mockResolvedValue(undefined);
         // Stands in for a toolset built by a second copy of the ADK package,
         // which fails `instanceof` but carries the shared toolset signature.
+        // The cast is required because `BaseToolset` declares a protected
+        // member, so no object literal is structurally assignable to it.
         const foreignToolset = {
           [Symbol.for('google.adk.baseToolset')]: true,
           getTools: vi.fn().mockResolvedValue([]),
