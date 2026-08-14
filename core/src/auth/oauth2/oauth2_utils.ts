@@ -63,12 +63,14 @@ export function hasMissingOAuth2Endpoints(
     return false;
   }
 
+  const {implicit, password, clientCredentials, authorizationCode} = flows;
+
   return Boolean(
-    (flows.implicit && !flows.implicit.authorizationUrl) ||
-    (flows.password && !flows.password.tokenUrl) ||
-    (flows.clientCredentials && !flows.clientCredentials.tokenUrl) ||
-    (flows.authorizationCode && !flows.authorizationCode.authorizationUrl) ||
-    (flows.authorizationCode && !flows.authorizationCode.tokenUrl),
+    (implicit && !implicit.authorizationUrl) ||
+    (password && !password.tokenUrl) ||
+    (clientCredentials && !clientCredentials.tokenUrl) ||
+    (authorizationCode &&
+      (!authorizationCode.authorizationUrl || !authorizationCode.tokenUrl)),
   );
 }
 
@@ -104,20 +106,14 @@ export async function populateAuthScheme(
     return false;
   }
 
-  if (flows.implicit && !flows.implicit.authorizationUrl) {
-    flows.implicit.authorizationUrl = metadata.authorization_endpoint;
-  }
-  if (flows.password && !flows.password.tokenUrl) {
-    flows.password.tokenUrl = metadata.token_endpoint;
-  }
-  if (flows.clientCredentials && !flows.clientCredentials.tokenUrl) {
-    flows.clientCredentials.tokenUrl = metadata.token_endpoint;
-  }
-  if (flows.authorizationCode && !flows.authorizationCode.authorizationUrl) {
-    flows.authorizationCode.authorizationUrl = metadata.authorization_endpoint;
-  }
-  if (flows.authorizationCode && !flows.authorizationCode.tokenUrl) {
-    flows.authorizationCode.tokenUrl = metadata.token_endpoint;
+  const {implicit, password, clientCredentials, authorizationCode} = flows;
+
+  if (implicit) implicit.authorizationUrl ||= metadata.authorization_endpoint;
+  if (password) password.tokenUrl ||= metadata.token_endpoint;
+  if (clientCredentials) clientCredentials.tokenUrl ||= metadata.token_endpoint;
+  if (authorizationCode) {
+    authorizationCode.authorizationUrl ||= metadata.authorization_endpoint;
+    authorizationCode.tokenUrl ||= metadata.token_endpoint;
   }
 
   return true;

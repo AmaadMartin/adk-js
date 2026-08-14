@@ -285,6 +285,13 @@ describe('ToolAuthHandler', () => {
       OAuth2DiscoveryManager['discoverAuthServerMetadata']
     >;
 
+    const newContext = () =>
+      ({
+        state: new State(),
+        getAuthResponse: vi.fn().mockReturnValue(undefined),
+        requestCredential: vi.fn(),
+      }) as unknown as Context;
+
     beforeEach(() => {
       discoverSpy = vi
         .spyOn(OAuth2DiscoveryManager.prototype, 'discoverAuthServerMetadata')
@@ -306,11 +313,7 @@ describe('ToolAuthHandler', () => {
         issuerUrl: 'https://auth.example.com',
         flows: {clientCredentials: {tokenUrl: '', scopes: {}}},
       };
-      const mockContext = {
-        state: new State(),
-        getAuthResponse: vi.fn().mockReturnValue(undefined),
-        requestCredential: vi.fn(),
-      } as unknown as Context;
+      const mockContext = newContext();
 
       const result = await new ToolAuthHandler(
         mockContext,
@@ -328,11 +331,7 @@ describe('ToolAuthHandler', () => {
     });
 
     it('does not discover when the scheme already names its endpoints', async () => {
-      const mockContext = {
-        state: new State(),
-        getAuthResponse: vi.fn().mockReturnValue(undefined),
-        requestCredential: vi.fn(),
-      } as unknown as Context;
+      const mockContext = newContext();
 
       const result = await new ToolAuthHandler(
         mockContext,
@@ -363,11 +362,7 @@ describe('ToolAuthHandler', () => {
           },
         },
       };
-      const mockContext = {
-        state: new State(),
-        getAuthResponse: vi.fn().mockReturnValue(undefined),
-        requestCredential: vi.fn(),
-      } as unknown as Context;
+      const mockContext = newContext();
 
       const result = await new ToolAuthHandler(
         mockContext,
@@ -387,11 +382,7 @@ describe('ToolAuthHandler', () => {
         issuerUrl: 'https://auth.example.com',
         flows: {clientCredentials: {tokenUrl: '', scopes: {}}},
       };
-      const mockContext = {
-        state: new State(),
-        getAuthResponse: vi.fn().mockReturnValue(undefined),
-        requestCredential: vi.fn(),
-      } as unknown as Context;
+      const mockContext = newContext();
 
       const result = await new ToolAuthHandler(
         mockContext,
@@ -439,11 +430,7 @@ describe('ToolAuthHandler', () => {
       // A scheme parsed out of an OpenAPI document is cast, not validated, so
       // `flows` can be missing however the type declares it.
       const scheme = {type: 'oauth2'} as AuthScheme;
-      const mockContext = {
-        state: new State(),
-        getAuthResponse: vi.fn().mockReturnValue(undefined),
-        requestCredential: vi.fn(),
-      } as unknown as Context;
+      const mockContext = newContext();
 
       const result = await new ToolAuthHandler(
         mockContext,
