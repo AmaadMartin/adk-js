@@ -54,6 +54,24 @@ function getLogLevelFromOptions(options: {
   return LogLevel.INFO;
 }
 
+/**
+ * The streaming modes `adk integration record` can write goldens for. It is
+ * both the allowed set of `--streaming_mode` and the lookup that resolves the
+ * flag, so the two cannot drift.
+ */
+const RECORDABLE_STREAMING_MODES: Record<string, StreamingMode> = {
+  [StreamingMode.NONE]: StreamingMode.NONE,
+  [StreamingMode.SSE]: StreamingMode.SSE,
+};
+
+function getStreamingModeFromOptions(options: {
+  streaming_mode?: string;
+}): StreamingMode {
+  return RECORDABLE_STREAMING_MODES[
+    options['streaming_mode'] ?? StreamingMode.NONE
+  ];
+}
+
 function getSessionServiceFromOptions(options: {
   session_service_uri?: string;
 }): BaseSessionService {
@@ -118,11 +136,15 @@ const LOG_LEVEL_OPTION = new Option(
   '--log_level <string>',
   'Optional. The log level of the server',
 ).default('info');
+const AGENTS_DIR_OPTION = new Option(
+  '--agents_dir [dir]',
+  'Directory of conformance test agent definitions. Recursively searched for .yaml files with agent definitions.',
+).default(process.cwd());
 const STREAMING_MODE_OPTION = new Option(
   '--streaming_mode <mode>',
   'Optional. The streaming mode the conformance goldens are recorded in',
 )
-  .choices([StreamingMode.NONE, StreamingMode.SSE])
+  .choices(Object.keys(RECORDABLE_STREAMING_MODES))
   .default(StreamingMode.NONE);
 const SESSION_SERVICE_URI_OPTION = new Option(
   '--session_service_uri <string>',
@@ -532,11 +554,7 @@ export function createProgram(): Command {
     .description('Run ADK conformance tests')
     .addOption(VERBOSE_OPTION)
     .addOption(LOG_LEVEL_OPTION)
-    .option(
-      '--agents_dir [dir]',
-      'Directory of conformance test agent definitions. Recursively searched for .yaml files with agent definitions.',
-      process.cwd(),
-    )
+    .addOption(AGENTS_DIR_OPTION)
     .option(
       '--tests_dir [dir]',
       'Directory of conformance test definitions. Recursively searched for .yaml files with test definitions.',
@@ -557,11 +575,7 @@ export function createProgram(): Command {
     )
     .addOption(VERBOSE_OPTION)
     .addOption(LOG_LEVEL_OPTION)
-    .option(
-      '--agents_dir [dir]',
-      'Directory of conformance test agent definitions. Recursively searched for .yaml files with agent definitions.',
-      process.cwd(),
-    )
+    .addOption(AGENTS_DIR_OPTION)
     .option(
       '--tests_dir [dir]',
       'Directory of conformance test definitions. Recursively searched for spec.yaml files.',
@@ -574,7 +588,7 @@ export function createProgram(): Command {
       await recordConformanceTests({
         agentsDir: options['agents_dir'],
         testsDir: options['tests_dir'],
-        streamingMode: options['streaming_mode'] as StreamingMode,
+        streamingMode: getStreamingModeFromOptions(options),
       });
     });
 

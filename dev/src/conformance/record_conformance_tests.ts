@@ -9,22 +9,16 @@ import {
   Event,
   InMemorySessionService,
   Runner,
-  Session,
   StreamingMode,
 } from '@google/adk';
 import {Content, Part} from '@google/genai';
-import camelcaseKeys from 'camelcase-keys';
-import fg from 'fast-glob';
-import yaml from 'js-yaml';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import {AgentRegistry} from '../integration/agent_registry.js';
-import {IntegrationRegistry} from '../integration/integration_registry.js';
 import {RecordingPlugin} from '../integration/recording_plugin.js';
 import {TestSpec, UserMessage} from '../integration/test_types.js';
-import {registerConformanceIntegrations} from './conformance_integrations.js';
 import {generatedFileNames, writeGeneratedYaml} from './generated_files.js';
-import {batchLoadYamlAgentConfig} from './yaml_agent_loader.js';
+import {buildAgentRegistry} from './yaml_agent_loader.js';
+import {loadTestSpec, streamSpecFiles} from './yaml_test_loader.js';
 
 /**
  * The session identity a recorded golden carries. It matches the identity
@@ -34,13 +28,6 @@ import {batchLoadYamlAgentConfig} from './yaml_agent_loader.js';
 const APP_NAME = 'test-runner';
 const USER_ID = 'test-user';
 const SESSION_ID = 'test-session';
-
-/**
- * The key adk-python's server-side recorder writes into session state to arm
- * itself. It is harness bookkeeping rather than test data, so it is kept out
- * of the generated session the same way `cli_record.py` keeps it out.
- */
-const RECORDINGS_CONFIG_KEY = '_adk_recordings_config';
 
 /**
  * Records the conformance goldens of every test case under `testsDir`.
@@ -64,21 +51,7 @@ export async function recordConformanceTests({
   // Reject an unsupported streaming mode before doing any work.
   generatedFileNames(streamingMode);
 
-  console.log(`Loading agents from ${agentsDir}`);
-  const agentConfigs = await batchLoadYamlAgentConfig(agentsDir);
-  console.log(agentConfigs.size, 'agents found');
-
-  console.log('Registering conformance integrations.');
-  const integrationRegistry = new IntegrationRegistry();
-  registerConformanceIntegrations(integrationRegistry);
-  console.log(integrationRegistry.summary());
-
-  console.log('Registering agents.');
-  const agentRegistry = new AgentRegistry(integrationRegistry);
-  for (const [name, agentConfig] of agentConfigs) {
-    agentRegistry.registerAgentConfig(name, agentConfig);
-  }
-  console.log(agentRegistry.summary());
+  const agentRegistry = await buildAgentRegistry(agentsDir);
 
   console.log(`Loading test specs from ${testsDir}`);
   const specs = await loadTestSpecs(testsDir);
@@ -184,7 +157,7 @@ export async function recordTestCase({
     throw new Error('Session not found after recording');
   }
 
-  await writeGeneratedYaml(sessionFile, withoutHarnessState(session));
+  await writeGeneratedYaml(sessionFile, session);
   await writeGeneratedYaml(recordingsFile, {
     recordings: recordingPlugin.recordings,
   });
@@ -202,22 +175,10 @@ export async function recordTestCase({
  */
 async function loadTestSpecs(testsDir: string): Promise<Map<string, TestSpec>> {
   const specs = new Map<string, TestSpec>();
-  const files = fg.stream('**/spec.{yaml,yml}', {
-    cwd: testsDir,
-    absolute: true,
-  });
 
-  for await (const file of files) {
-    // Normalize paths to POSIX to ensure consistent behavior across platforms
-    // and when handling Windows paths.
-    const specFile = (file as string).replaceAll('\\', '/');
+  for await (const specFile of streamSpecFiles(testsDir)) {
     try {
-      const parsed = yaml.load(await fs.readFile(specFile, 'utf-8'));
-      if (typeof parsed !== 'object' || parsed === null) {
-        throw new Error('Spec file must be a YAML mapping');
-      }
-      const spec = camelcaseKeys(parsed, {deep: true}) as TestSpec;
-      specs.set(path.posix.dirname(specFile), spec);
+      specs.set(path.posix.dirname(specFile), await loadTestSpec(specFile));
       console.log('loaded test spec from', specFile);
     } catch (error: unknown) {
       console.error(`Failed to load ${specFile}: ${errorMessage(error)}`);
@@ -283,28 +244,6 @@ function rememberFunctionCallIds(
       functionCallIds.set(functionCall.name, functionCall.id);
     }
   }
-}
-
-function withoutHarnessState(session: Session): Session {
-  return {
-    ...session,
-    state: withoutRecordingsConfig(session.state),
-    events: session.events.map((event) => ({
-      ...event,
-      actions: {
-        ...event.actions,
-        stateDelta: withoutRecordingsConfig(event.actions.stateDelta),
-      },
-    })),
-  };
-}
-
-function withoutRecordingsConfig(
-  state: Record<string, unknown>,
-): Record<string, unknown> {
-  const remaining = {...state};
-  delete remaining[RECORDINGS_CONFIG_KEY];
-  return remaining;
 }
 
 function errorMessage(error: unknown): string {

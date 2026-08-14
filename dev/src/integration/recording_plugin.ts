@@ -72,7 +72,6 @@ export class RecordingPlugin extends BasePlugin {
       llmRecording: {llmRequest, llmResponses},
     });
     this.openLlmResponses.set(callbackContext.agentName, llmResponses);
-    return;
   }
 
   override async afterModelCallback({
@@ -94,7 +93,6 @@ export class RecordingPlugin extends BasePlugin {
     if (!llmResponse.partial) {
       this.openLlmResponses.delete(agentName);
     }
-    return;
   }
 
   override async beforeToolCallback({
@@ -120,7 +118,6 @@ export class RecordingPlugin extends BasePlugin {
       toolRecording,
     });
     this.openToolRecordings.set(functionCallId, toolRecording);
-    return;
   }
 
   override async afterToolCallback({
@@ -149,6 +146,5 @@ export class RecordingPlugin extends BasePlugin {
       name: tool.name,
       response: result,
     };
-    return;
   }
 }

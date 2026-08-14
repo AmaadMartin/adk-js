@@ -13,6 +13,44 @@ import * as path from 'node:path';
 import {Recordings, TestInfo, TestSpec} from '../integration/test_types.js';
 
 /**
+ * Loads the human-authored half of a test case, its `spec.yaml`.
+ *
+ * `adk integration record` needs this on its own: it writes the two generated
+ * files `batchLoadYamlTestDefs` also reads, so it cannot use that loader on a
+ * test case nobody has recorded yet.
+ */
+export async function loadTestSpec(specFile: string): Promise<TestSpec> {
+  const content = await fs.readFile(specFile, 'utf-8');
+  const parsedSpec = yaml.load(content);
+  if (typeof parsedSpec !== 'object' || parsedSpec === null) {
+    throw new Error('Spec file must be a YAML mapping');
+  }
+  return camelcaseKeys(parsedSpec, {
+    deep: true,
+  }) as TestSpec;
+}
+
+/**
+ * Recursively finds every `spec.{yaml,yml}` under `directory`, as absolute
+ * POSIX paths. Both conformance commands treat a directory holding one as a
+ * test case.
+ */
+export async function* streamSpecFiles(
+  directory: string,
+): AsyncGenerator<string> {
+  const files = fg.stream('**/spec.{yaml,yml}', {
+    cwd: directory,
+    absolute: true,
+  });
+
+  for await (const file of files) {
+    // Normalize paths to POSIX to ensure consistent behavior across platforms
+    // and when handling Windows paths.
+    yield (file as string).replaceAll('\\', '/');
+  }
+}
+
+/**
  * batchLoadYamlTestDefs will recursively search the directory given
  * and load all of the YAML files into in-memory config.
  */
@@ -26,31 +64,14 @@ export async function batchLoadYamlTestDefs(
   // 3. generated-session.yaml - the recorded session information
   //
   // Assume any directory with a spec.yaml is a test with all 3 files
-  const files = fg.stream('**/spec.{yaml,yml}', {
-    cwd: directory,
-    absolute: true,
-  });
   const tests = new Map<string, TestInfo>();
 
-  for await (const file of files) {
-    // Normalize paths to POSIX to ensure consistent behavior across platforms
-    // and when handling Windows paths.
-    const normalizedFile = (file as string).replaceAll('\\', '/');
-
+  for await (const normalizedFile of streamSpecFiles(directory)) {
     // Test directory
     const baseDir = path.posix.dirname(normalizedFile);
 
     // Spec file
-    const specFile = path.posix.join(baseDir, 'spec.yaml');
-    const filePath = specFile;
-    const content = await fs.readFile(filePath, 'utf-8');
-    const parsedSpec = yaml.load(content);
-    if (typeof parsedSpec !== 'object' || parsedSpec === null) {
-      throw new Error('Spec file must be a YAML mapping');
-    }
-    const testSpec = camelcaseKeys(parsedSpec, {
-      deep: true,
-    }) as TestSpec;
+    const testSpec = await loadTestSpec(path.posix.join(baseDir, 'spec.yaml'));
 
     // Session file
     const sessionFile = path.posix.join(baseDir, 'generated-session.yaml');
