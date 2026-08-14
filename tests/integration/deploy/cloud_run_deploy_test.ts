@@ -14,7 +14,7 @@
  * runs the real staging pipeline instead, in two layers:
  *
  * - **Layer 1 — staging consistency (always runs, no Docker).** Drives the
- *   unmocked `AgentLoader`, `copyAgentFiles`, `createPackageJson` and
+ *   unmocked `AgentLoader`, `copyAgentFiles`, `stageDependencyFiles` and
  *   `createDockerFile` over a real fixture agent, then asserts the staged
  *   folder and the generated `Dockerfile` agree with each other.
  * - **Layer 2 — container smoke test (opt-in, Docker-gated).** Reuses the same
@@ -57,7 +57,7 @@ import {afterAll, beforeAll, describe, expect, it} from 'vitest';
 import {
   copyAgentFiles,
   createDockerFile,
-  createPackageJson,
+  stageDependencyFiles,
 } from '../../../dev/src/cli/deploy/deploy_utils.js';
 import {AgentLoader} from '../../../dev/src/utils/agent_loader.js';
 
@@ -75,6 +75,8 @@ const APP_NAME = path.basename(FIXTURE_DIR);
 const SERVED_APP_NAME = 'agent';
 const CONTAINER_PORT = 8080;
 const LOG_LEVEL = 'info';
+/** The devtools version the image installs, as the CLI defaults it. */
+const ADK_VERSION = 'latest';
 
 /** A full `docker build` log comfortably exceeds execFile's 1 MB default. */
 const DOCKER_MAX_BUFFER = 32 * 1024 * 1024;
@@ -191,13 +193,16 @@ let agentLoader: AgentLoader | undefined;
 let stagedDir: string;
 let bundlePath: string;
 let dockerfile: string;
+/** Whether the fixture's package-lock.json was staged. It is gitignored, so
+ * a fresh checkout has none and the image installs unpinned. */
+let hasLockfile: boolean;
 
 beforeAll(async () => {
   // Mirrors deployToCloudRun, stopping short of the `gcloud run deploy` call.
   stagedDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-deploy-test-'));
   agentLoader = new AgentLoader(FIXTURE_DIR);
   await copyAgentFiles(agentLoader, path.join(stagedDir, 'agents', APP_NAME));
-  await createPackageJson(FIXTURE_DIR, stagedDir);
+  hasLockfile = await stageDependencyFiles(FIXTURE_DIR, stagedDir);
   await createDockerFile(stagedDir, {
     appName: APP_NAME,
     project: 'test-project',
@@ -205,6 +210,8 @@ beforeAll(async () => {
     port: CONTAINER_PORT,
     withUi: false,
     logLevel: LOG_LEVEL,
+    adkVersion: ADK_VERSION,
+    hasLockfile,
   });
 
   bundlePath = path.join(stagedDir, 'agents', APP_NAME, 'agent.mjs');
@@ -244,14 +251,16 @@ describe('Cloud Run deployment staging', () => {
     );
   });
 
-  it('creates the package-lock.json and node_modules the Dockerfile expects', async () => {
-    const lockStats = await fs.stat(path.join(stagedDir, 'package-lock.json'));
-    expect(lockStats.isFile()).toBe(true);
+  it('stages a lock file only when the project has one, and never node_modules', async () => {
+    const lockStats = await fs
+      .stat(path.join(stagedDir, 'package-lock.json'))
+      .catch(() => undefined);
+    expect(lockStats?.isFile() ?? false).toBe(hasLockfile);
 
-    const nodeModulesStats = await fs.stat(
-      path.join(stagedDir, 'node_modules'),
-    );
-    expect(nodeModulesStats.isDirectory()).toBe(true);
+    // The image installs its own tree, so a host node_modules is never copied.
+    await expect(
+      fs.stat(path.join(stagedDir, 'node_modules')),
+    ).rejects.toThrow();
   });
 
   it('stages every file the generated Dockerfile copies', async () => {
@@ -276,11 +285,14 @@ describe('Cloud Run deployment staging', () => {
   });
 
   it('points the container command at the staged app', () => {
-    expect(dockerfile).toContain('FROM node:lts-alpine');
-    expect(dockerfile).toContain('RUN npm install --production');
+    expect(dockerfile).toContain('FROM node:24-alpine');
+    expect(dockerfile).toContain(
+      hasLockfile ? 'RUN npm ci --omit=dev' : 'RUN npm install --omit=dev',
+    );
+    // The server options are shell-quoted: the CMD line is read by /bin/sh.
     expect(dockerfile).toContain(
       `CMD npx adk api_server /app/agents/${APP_NAME} ` +
-        `--port=${CONTAINER_PORT} --host=0.0.0.0 --log_level=${LOG_LEVEL}`,
+        `--port=${CONTAINER_PORT} --host=0.0.0.0 --log_level='${LOG_LEVEL}'`,
     );
   });
 });
