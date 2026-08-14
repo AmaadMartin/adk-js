@@ -50,6 +50,7 @@ import {
 } from '../telemetry/tracing.js';
 import {parseWithSchema, SchemaLike} from '../utils/schema.js';
 import {isZodObject, zodObjectToSchema} from '../utils/simple_zod_to_json.js';
+import {getTime} from '../utils/time.js';
 import {BaseAgent, BaseAgentConfig} from './base_agent.js';
 import {
   BaseLlmRequestProcessor,
@@ -1016,7 +1017,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
 
               // Update the mutable event id to avoid conflict
               modelResponseEvent.id = createNewEventId();
-              modelResponseEvent.timestamp = new Date().getTime();
+              modelResponseEvent.timestamp = getTime();
               yield event;
             }
           }

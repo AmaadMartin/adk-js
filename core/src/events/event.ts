@@ -10,6 +10,7 @@ import {LlmResponse} from '../models/llm_response.js';
 
 import {randomUUID} from '../utils/env_aware_utils.js';
 import {toCamelCase, toSnakeCase} from '../utils/object_notation_utils.js';
+import {getTime} from '../utils/time.js';
 import {createEventActions, EventActions} from './event_actions.js';
 
 /**
@@ -178,7 +179,7 @@ export function createEvent(params: CreateEventParams = {}): Event {
     actions: createEventActions(params.actions),
     longRunningToolIds: params.longRunningToolIds || [],
     branch: params.branch,
-    timestamp: params.timestamp || Date.now(),
+    timestamp: params.timestamp || getTime(),
   };
 }
 

@@ -13,6 +13,7 @@ import {
 
 import {Event} from '../events/event.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
+import {getTime} from '../utils/time.js';
 import {
   AppendEventRequest,
   BaseSessionService,
@@ -110,7 +111,7 @@ export class DatabaseSessionService extends BaseSessionService {
     const em = this.orm!.em.fork();
 
     const id = sessionId || randomUUID();
-    const now = new Date();
+    const now = new Date(getTime());
     const existing = await em.findOne(StorageSession, {
       id,
       appName,
