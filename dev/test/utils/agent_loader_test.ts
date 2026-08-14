@@ -606,7 +606,7 @@ describe('AgentLoader', () => {
       plugin.setup(mockBuild as unknown as esbuild.PluginBuild);
 
       expect(mockBuild.onLoad).toHaveBeenCalledWith(
-        {filter: /.*/},
+        {filter: /.*/, namespace: 'file'},
         expect.any(Function),
       );
 
@@ -737,6 +737,54 @@ describe('AgentLoader', () => {
       const result = await onLoadCallback(onLoadArgs(modulePath));
 
       expect(result).toBeUndefined();
+    });
+
+    it.each([
+      ['tsx', 'const url: string = import.meta.url;'],
+      ['jsx', 'const url = import.meta.url;'],
+    ])(
+      'rewrites a .%s dependency and leaves its JSX for the build',
+      async (extension: string, contents: string) => {
+        const modulePath = await writeDependency(
+          `${extension}-dep`,
+          `index.${extension}`,
+          `${contents}\nexport const node = <div className="x">hi</div>;`,
+        );
+        const onLoadCallback = setupOnLoad(
+          path.join(tempAgentsDir, 'test_agent.ts'),
+          tempAgentsDir,
+        );
+
+        const result = await onLoadCallback(onLoadArgs(modulePath));
+
+        expect(result?.contents).toContain(pathToFileURL(modulePath).href);
+        expect(result?.contents).toContain('<div className="x">hi</div>');
+        expect(result?.loader).toBe('jsx');
+      },
+    );
+
+    it('does not replace a location token that the module declares itself', async () => {
+      const modulePath = await writeDependency(
+        'shim-dep',
+        'index.js',
+        [
+          'import {fileURLToPath} from "node:url";',
+          'import * as path from "node:path";',
+          'const __filename = fileURLToPath(import.meta.url);',
+          'const __dirname = path.dirname(__filename);',
+          'export const dir = __dirname;',
+        ].join('\n'),
+      );
+      const onLoadCallback = setupOnLoad(
+        path.join(tempAgentsDir, 'test_agent.ts'),
+        tempAgentsDir,
+      );
+
+      const result = await onLoadCallback(onLoadArgs(modulePath));
+
+      expect(result?.contents).toContain('const __filename = fileURLToPath(');
+      expect(result?.contents).toContain('const __dirname = path.dirname(');
+      expect(result?.contents).toContain(pathToFileURL(modulePath).href);
     });
 
     it('does not transform a non-JavaScript file', async () => {

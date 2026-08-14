@@ -36,15 +36,21 @@ const FILE_EXTENSION_LOADER_MAP: Readonly<Record<string, esbuild.Loader>> = {
   '.js': 'js',
   '.cjs': 'js',
   '.mjs': 'js',
+  '.jsx': 'jsx',
   '.ts': 'ts',
   '.mts': 'ts',
   '.cts': 'ts',
+  '.tsx': 'tsx',
 };
 
 /**
  * Supported file extensions for JavaScript and TypeScript.
+ *
+ * Narrower than {@link FILE_EXTENSION_LOADER_MAP}, and deliberately separate
+ * from it: this list decides which files {@link AgentLoader} offers as agents,
+ * so it must not grow whenever the bundler learns to parse another extension.
  */
-const JS_FILES_EXTENSIONS = Object.keys(FILE_EXTENSION_LOADER_MAP);
+const JS_FILES_EXTENSIONS = ['.js', '.cjs', '.mjs', '.ts', '.mts', '.cts'];
 
 /**
  * Matches the location tokens that {@link replaceDirnamePlugin} rewrites. A
@@ -135,38 +141,48 @@ export function replaceDirnamePlugin(filePath: string, originalDir: string) {
   return {
     name: 'replace-dirname',
     setup(build: Pick<esbuild.PluginBuild, 'onLoad'>) {
-      build.onLoad({filter: /.*/}, async (args: esbuild.OnLoadArgs) => {
-        const loader = FILE_EXTENSION_LOADER_MAP[path.extname(args.path)];
-        if (!loader) {
-          return undefined;
-        }
+      // Only the `file` namespace: a path owned by another plugin is virtual
+      // and has nothing to read on disk.
+      build.onLoad(
+        {filter: /.*/, namespace: 'file'},
+        async (args: esbuild.OnLoadArgs) => {
+          const loader = FILE_EXTENSION_LOADER_MAP[path.extname(args.path)];
+          if (!loader) {
+            return undefined;
+          }
 
-        const content = await fsPromises.readFile(args.path, 'utf8');
-        if (!LOCATION_TOKEN_PATTERN.test(content)) {
-          return undefined;
-        }
+          const content = await fsPromises.readFile(args.path, 'utf8');
+          if (!LOCATION_TOKEN_PATTERN.test(content)) {
+            return undefined;
+          }
 
-        const moduleDir =
-          args.path === filePath ? originalDir : path.dirname(args.path);
-        const transformResult = await esbuild.transform(content, {
-          loader,
-          // Without it esbuild reports a syntax error against `<stdin>`
-          // instead of the module it came from.
-          sourcefile: args.path,
-          define: {
-            '__dirname': JSON.stringify(moduleDir),
-            '__filename': JSON.stringify(args.path),
-            'import.meta.url': JSON.stringify(pathToFileURL(args.path).href),
-            'import.meta.dirname': JSON.stringify(moduleDir),
-            'import.meta.filename': JSON.stringify(args.path),
-          },
-        });
+          const isJsx = loader === 'jsx' || loader === 'tsx';
+          const moduleDir =
+            args.path === filePath ? originalDir : path.dirname(args.path);
+          const transformResult = await esbuild.transform(content, {
+            loader,
+            // Without it esbuild reports a syntax error against `<stdin>`
+            // instead of the module it came from.
+            sourcefile: args.path,
+            // Leave the JSX to the outer build, which reads the project's
+            // tsconfig. Compiling it here would apply esbuild's own defaults
+            // and break the automatic JSX runtime.
+            jsx: 'preserve',
+            define: {
+              '__dirname': JSON.stringify(moduleDir),
+              '__filename': JSON.stringify(args.path),
+              'import.meta.url': JSON.stringify(pathToFileURL(args.path).href),
+              'import.meta.dirname': JSON.stringify(moduleDir),
+              'import.meta.filename': JSON.stringify(args.path),
+            },
+          });
 
-        return {
-          contents: transformResult.code,
-          loader: 'js',
-        };
-      });
+          return {
+            contents: transformResult.code,
+            loader: isJsx ? 'jsx' : 'js',
+          };
+        },
+      );
     },
   };
 }
