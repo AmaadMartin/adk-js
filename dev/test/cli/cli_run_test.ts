@@ -77,6 +77,7 @@ describe('cli_run', () => {
   let mockAgentFile: AgentFile;
   let mockRootAgent: BaseAgent;
   let mockRl: readline.Interface;
+  let closeHandlers: Array<() => void>;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -107,11 +108,24 @@ describe('cli_run', () => {
 
     (AgentFile as unknown as Mock).mockImplementation(() => mockAgentFile);
 
+    // Faithful to `readline.Interface`: `close()` emits 'close' synchronously,
+    // which is the ordering the end-of-input handling depends on.
+    closeHandlers = [];
     mockRl = {
+      on: vi.fn((event: string, handler: () => void) => {
+        if (event === 'close') {
+          closeHandlers.push(handler);
+        }
+        return mockRl;
+      }),
       question: vi.fn((query: string, cb: (answer: string) => void) => {
         cb('exit');
       }),
-      close: vi.fn(),
+      close: vi.fn(() => {
+        for (const handler of closeHandlers.splice(0)) {
+          handler();
+        }
+      }),
     } as unknown as readline.Interface;
     (readline.createInterface as Mock).mockReturnValue(mockRl);
   });
@@ -119,6 +133,16 @@ describe('cli_run', () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
+
+  /**
+   * Makes every later prompt hit end of input: the interface closes itself and
+   * `question` never calls back, exactly as readline behaves on Ctrl-D.
+   */
+  function answerWithEof() {
+    (mockRl.question as Mock).mockImplementation(() => {
+      mockRl.close();
+    });
+  }
 
   it('should run interactively by default', async () => {
     await runAgent({agentPath: 'agent.ts'});
@@ -453,6 +477,105 @@ describe('cli_run', () => {
       expect.stringContaining('prompted-session-id.session.json'),
       expect.anything(),
     );
+  });
+
+  /**
+   * readline closes the interface at end of input without ever calling back
+   * into `question`. The prompt then never settled, which abandoned the rest
+   * of the run and lost the saved session.
+   */
+  describe('end of input', () => {
+    /** Everything the run printed, as one string. */
+    function consoleOutput(): string {
+      return (console.log as Mock).mock.calls
+        .map((call) => call.join(' '))
+        .join('\n');
+    }
+
+    /** Runs `body` against a replaced `process.stdin`, then restores it. */
+    async function withStdin(
+      stub: Partial<typeof process.stdin>,
+      body: () => Promise<void>,
+    ): Promise<void> {
+      const original = Object.getOwnPropertyDescriptor(process, 'stdin')!;
+      Object.defineProperty(process, 'stdin', {
+        value: stub,
+        configurable: true,
+      });
+      try {
+        await body();
+      } finally {
+        Object.defineProperty(process, 'stdin', original);
+      }
+    }
+
+    it('leaves the interactive loop when stdin reaches EOF', async () => {
+      answerWithEof();
+
+      await runAgent({
+        agentPath: 'agent.ts',
+        sessionService: createMockSessionService(),
+      });
+
+      expect(readline.createInterface).toHaveBeenCalled();
+      expect(consoleOutput()).not.toContain('Response from model');
+    });
+
+    it('saves the session under the live id when the save prompt hits EOF', async () => {
+      answerWithEof();
+
+      await runAgent({
+        agentPath: 'agent.ts',
+        saveSession: true,
+        sessionService: createMockSessionService(),
+      });
+
+      expect(saveToFile).toHaveBeenCalledWith(
+        expect.stringContaining('session-123.session.json'),
+        expect.anything(),
+      );
+    });
+
+    it('does not raise a prompt once stdin has already ended', async () => {
+      await withStdin({readableEnded: true, destroyed: false}, () =>
+        runAgent({
+          agentPath: 'agent.ts',
+          saveSession: true,
+          sessionService: createMockSessionService(),
+        }),
+      );
+
+      expect(readline.createInterface).not.toHaveBeenCalled();
+      expect(saveToFile).toHaveBeenCalledWith(
+        expect.stringContaining('session-123.session.json'),
+        expect.anything(),
+      );
+    });
+
+    it('does not raise a prompt once stdin has been destroyed', async () => {
+      await withStdin({readableEnded: false, destroyed: true}, () =>
+        runAgent({
+          agentPath: 'agent.ts',
+          sessionService: createMockSessionService(),
+        }),
+      );
+
+      expect(readline.createInterface).not.toHaveBeenCalled();
+    });
+
+    it('still processes a query typed before EOF', async () => {
+      (mockRl.question as Mock).mockImplementationOnce(
+        (prompt: string, cb: (answer: string) => void) => cb('hello'),
+      );
+      answerWithEof();
+
+      await runAgent({
+        agentPath: 'agent.ts',
+        sessionService: createMockSessionService(),
+      });
+
+      expect(consoleOutput()).toContain('Response from model');
+    });
   });
 
   /**

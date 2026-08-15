@@ -79,8 +79,7 @@ function renderUserInputRequest(request: UserInputRequest): string {
   }
 
   const scheme = request.authConfig?.authScheme as
-    | {type?: string; in?: string; name?: string}
-    | undefined;
+    {type?: string; in?: string; name?: string} | undefined;
   if (scheme?.type) {
     const where =
       scheme.in && scheme.name ? ` (${scheme.in} ${scheme.name})` : '';
@@ -143,16 +142,32 @@ interface InputFile {
   queries: string[];
 }
 
-async function getUserInput(prompt: string): Promise<string> {
+/**
+ * Prompts for one line on stdin. Resolves to `undefined` at end of input —
+ * Ctrl-D on a terminal, or a redirected stream that has run out — which
+ * callers treat the way they treat `exit`. An empty string stays distinct: it
+ * means the user pressed Enter on an empty line.
+ */
+async function getUserInput(prompt: string): Promise<string | undefined> {
+  // An interface attached to a stream that has already ended never emits
+  // 'close', so a prompt raised after end of input would wait forever.
+  if (process.stdin.readableEnded || process.stdin.destroyed) {
+    return undefined;
+  }
+
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
   });
 
-  return new Promise<string>((resolve) => {
+  return new Promise<string | undefined>((resolve) => {
+    // End of input closes the interface without ever calling back into
+    // `question`. Resolve the answer before `close()` emits 'close', because
+    // the first call to `resolve` is the one that settles the promise.
+    rl.on('close', () => resolve(undefined));
     rl.question(prompt, (answer) => {
-      rl.close();
       resolve(answer);
+      rl.close();
     });
   });
 }
@@ -258,6 +273,12 @@ async function runInteractively(
 
   while (true) {
     const query = await getUserInput('[user]: ');
+
+    // End of input ends the conversation, the same as `exit`.
+    if (query === undefined) {
+      break;
+    }
+
     const trimmed = query.trim();
 
     if (!trimmed) {
@@ -412,8 +433,12 @@ export async function runAgent(options: RunAgentOptions): Promise<void> {
   }
 
   if (options.saveSession) {
+    // `||` rather than `??`: an empty answer at the prompt writes a file named
+    // `.session.json`, so it falls back to the live id too.
     const sessionId =
-      options.sessionId || (await getUserInput('Session ID to save: '));
+      options.sessionId ||
+      (await getUserInput('Session ID to save: ')) ||
+      session.id;
     // Sibling of the agent file, not inside it: joining onto the agent path
     // itself yields `<cwd>/agent.ts/<id>.session.json`, and saveToFile does
     // no mkdir, so the write failed with ENOTDIR.
