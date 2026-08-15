@@ -213,25 +213,18 @@ export function mergeEventOverride(original: Event, override: Event): Event {
     invocationId: original.invocationId,
     timestamp: original.timestamp,
     author: override.author || original.author,
-    branch: override.branch ?? original.branch,
-    actions: mergeOverrideActions(original.actions, override.actions),
+    actions: {
+      // mergeEventActions owns the dictionary fields: it allocates fresh maps
+      // and carries their state write-order stamps. The spreads underneath it
+      // carry the fields it does not enumerate, such as `agentState` and
+      // `endOfAgent`.
+      ...original.actions,
+      ...definedFields(override.actions),
+      ...mergeEventActions([original.actions, override.actions]),
+    },
     longRunningToolIds: override.longRunningToolIds?.length
       ? override.longRunningToolIds
       : original.longRunningToolIds,
-  };
-}
-
-function mergeOverrideActions(
-  original: EventActions,
-  override: EventActions,
-): EventActions {
-  // mergeEventActions owns the dictionary fields: it allocates fresh maps and
-  // carries their state write-order stamps. The spreads underneath it carry the
-  // fields it does not enumerate, such as `agentState` and `endOfAgent`.
-  return {
-    ...original,
-    ...definedFields(override),
-    ...mergeEventActions([original, override]),
   };
 }
 

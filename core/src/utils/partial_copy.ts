@@ -40,13 +40,7 @@ export function partialCopy<TDest extends object>(
  * @returns A new object holding only the defined entries of `source`.
  */
 export function definedFields<T extends object>(source: T): Partial<T> {
-  const result: Partial<T> = {};
-
-  for (const key of Object.keys(source) as Array<keyof T>) {
-    if (source[key] !== undefined) {
-      result[key] = source[key];
-    }
-  }
-
-  return result;
+  return Object.fromEntries(
+    Object.entries(source).filter(([, value]) => value !== undefined),
+  ) as Partial<T>;
 }

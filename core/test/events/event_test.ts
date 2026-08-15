@@ -575,6 +575,15 @@ describe('mergeEventOverride', () => {
     expect(merged.author).toBe('test_agent');
   });
 
+  it('takes the branch the override sets', () => {
+    const merged = mergeEventOverride(
+      originalEvent(),
+      createEvent({branch: 'root.other'}),
+    );
+
+    expect(merged.branch).toBe('root.other');
+  });
+
   it('takes the author the override sets', () => {
     const merged = mergeEventOverride(
       originalEvent(),
