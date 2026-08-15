@@ -343,7 +343,23 @@ describe('MCPSessionManager', () => {
 
       const client = await manager.createSession();
 
-      expect(client.connect).toHaveBeenCalledWith(expect.anything(), undefined);
+      expect(client.connect).toHaveBeenCalledWith(expect.anything(), {});
+    });
+
+    it('reaches neither the transport nor the request for sseReadTimeout', async () => {
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+        sseReadTimeout: 300000,
+      });
+
+      const client = await manager.createSession();
+
+      expect(StreamableHTTPClientTransport).toHaveBeenCalledWith(
+        new URL('http://test-url'),
+        {},
+      );
+      expect(client.connect).toHaveBeenCalledWith(expect.anything(), {});
     });
 
     it('hands the configured deadline to the call', async () => {

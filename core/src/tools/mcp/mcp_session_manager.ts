@@ -88,6 +88,13 @@ export interface StreamableHTTPConnectionParams {
    */
   timeout?: number;
   /**
+   * @deprecated
+   * Has no effect. The MCP SDK exposes no SSE read deadline, neither on the
+   * transport options nor on the request options, so nothing reads this.
+   * Use `timeout` to bound a round trip.
+   */
+  sseReadTimeout?: number;
+  /**
    * Whether to terminate the server-side session when the client session is
    * closed. Defaults to true, matching adk-python. Servers that issue no
    * session id are unaffected, because the transport then sends no request.
@@ -118,11 +125,10 @@ export type MCPConnectionParams =
  */
 export class MCPSessionManager {
   private readonly connectionParams: MCPConnectionParams;
-  private readonly activeSessions = new Set<Client>();
-  /** Transports whose server-side session must be terminated on close. */
-  private readonly transportsToTerminate = new Map<
+  /** Active sessions, each mapped to the transport to terminate on close. */
+  private readonly activeSessions = new Map<
     Client,
-    StreamableHTTPClientTransport
+    StreamableHTTPClientTransport | undefined
   >();
 
   constructor(connectionParams: MCPConnectionParams) {
@@ -130,12 +136,12 @@ export class MCPSessionManager {
   }
 
   /**
-   * Request options for the `initialize` handshake, or `undefined` to leave
-   * the MCP SDK's own request timeout in force.
+   * Request options carrying the configured deadline. Empty when none is
+   * configured, which leaves the MCP SDK's own request timeout in force.
    */
-  private connectOptions(): RequestOptions | undefined {
+  private requestOptions(): RequestOptions {
     const {timeout} = this.connectionParams;
-    return timeout === undefined ? undefined : {timeout};
+    return timeout === undefined ? {} : {timeout};
   }
 
   /**
@@ -152,7 +158,7 @@ export class MCPSessionManager {
   ): Promise<T> {
     const {timeout} = this.connectionParams;
     try {
-      return await call(timeout === undefined ? {} : {timeout});
+      return await call(this.requestOptions());
     } catch (err: unknown) {
       if (timeout !== undefined && isRequestTimeout(err)) {
         throw new Error(`MCP ${operation} timed out after ${timeout}ms`, {
@@ -165,6 +171,7 @@ export class MCPSessionManager {
 
   async createSession(): Promise<Client> {
     const client = new Client({name: 'MCPClient', version: '1.0.0'});
+    let transportToTerminate: StreamableHTTPClientTransport | undefined;
 
     try {
       switch (this.connectionParams.type) {
@@ -173,7 +180,7 @@ export class MCPSessionManager {
             this.connectionParams.serverParams,
           );
           transport.onerror = logTransportError;
-          await client.connect(transport, this.connectOptions());
+          await client.connect(transport, this.requestOptions());
           break;
         }
         case 'StreamableHTTPConnectionParams': {
@@ -193,10 +200,10 @@ export class MCPSessionManager {
             options,
           );
           transport.onerror = logTransportError;
-          await client.connect(transport, this.connectOptions());
+          await client.connect(transport, this.requestOptions());
 
           if (this.connectionParams.terminateOnClose !== false) {
-            this.transportsToTerminate.set(client, transport);
+            transportToTerminate = transport;
           }
           break;
         }
@@ -212,17 +219,16 @@ export class MCPSessionManager {
       });
     }
 
-    this.activeSessions.add(client);
+    this.activeSessions.set(client, transportToTerminate);
     return client;
   }
 
   async closeSession(client: Client): Promise<void> {
     if (!this.activeSessions.has(client)) return;
+    const transport = this.activeSessions.get(client);
     this.activeSessions.delete(client);
 
-    const transport = this.transportsToTerminate.get(client);
     if (transport) {
-      this.transportsToTerminate.delete(client);
       try {
         // Must precede close(), which aborts the signal terminateSession uses.
         await transport.terminateSession();
@@ -235,6 +241,6 @@ export class MCPSessionManager {
   }
 
   getActiveSessions(): Client[] {
-    return Array.from(this.activeSessions);
+    return Array.from(this.activeSessions.keys());
   }
 }
