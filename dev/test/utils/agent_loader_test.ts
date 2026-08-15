@@ -888,6 +888,20 @@ describe('AgentLoader', () => {
       });
     });
 
+    it('does not leave a temp directory behind for a broken top-level agent file', async () => {
+      await fs.writeFile(
+        path.join(tempAgentsDir, 'broken.js'),
+        `throw new Error('boom during construction');`,
+      );
+      const loader = new AgentLoader(tempAgentsDir);
+
+      const failures = await loader.listLoadFailures();
+
+      expect(failures.map((f) => f.name)).toEqual(['broken']);
+      expect(await fs.readdir(tempLoaderDir)).toHaveLength(3);
+      await loader.disposeAll();
+    });
+
     it('disposes all agent files', async () => {
       const agentLoader = new AgentLoader(tempAgentsDir);
       await agentLoader.listAgents();
