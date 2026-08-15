@@ -25,6 +25,9 @@ function makeBaseArtifactServiceStub(): BaseArtifactService {
   };
 }
 
+/** Unix seconds for 2025-01-01T12:00:00Z, as a delegate would report it. */
+const DELEGATE_CREATE_TIME = 1735732800;
+
 describe('ScopedArtifactService', () => {
   const appName = 'test-app';
   const userId = 'test-user';
@@ -179,6 +182,23 @@ describe('ScopedArtifactService', () => {
       });
       expect(result).toEqual(versions);
     });
+
+    it('propagates createTime from the delegate', async () => {
+      const delegate = makeBaseArtifactServiceStub();
+      vi.mocked(delegate.listArtifactVersions).mockResolvedValue([
+        {version: 0, createTime: DELEGATE_CREATE_TIME},
+      ]);
+      const service = new ScopedArtifactService(
+        delegate,
+        appName,
+        userId,
+        sessionId,
+      );
+
+      const result = await service.listArtifactVersions('file.txt');
+
+      expect(result[0].createTime).toBe(DELEGATE_CREATE_TIME);
+    });
   });
 
   describe('getArtifactVersion', () => {
@@ -208,6 +228,27 @@ describe('ScopedArtifactService', () => {
         version: 1,
       });
       expect(result).toBe(version);
+    });
+
+    it('propagates createTime from the delegate', async () => {
+      const delegate = makeBaseArtifactServiceStub();
+      vi.mocked(delegate.getArtifactVersion).mockResolvedValue({
+        version: 0,
+        createTime: DELEGATE_CREATE_TIME,
+      });
+      const service = new ScopedArtifactService(
+        delegate,
+        appName,
+        userId,
+        sessionId,
+      );
+
+      const result = await service.getArtifactVersion({
+        filename: 'file.txt',
+        version: 0,
+      });
+
+      expect(result?.createTime).toBe(DELEGATE_CREATE_TIME);
     });
   });
 });
