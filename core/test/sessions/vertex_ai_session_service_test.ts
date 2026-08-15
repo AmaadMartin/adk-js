@@ -1289,11 +1289,6 @@ describe('VertexAiSessionService', () => {
     });
 
     describe('unsupported part fields', () => {
-      /** A `Part` serialized by an SDK that uses snake_case keys. */
-      interface PartWithLegacyMetadata extends Part {
-        part_metadata?: Record<string, unknown>;
-      }
-
       /** The subset of the append call these assertions read. */
       interface AppendedEvent {
         config: {
@@ -1313,10 +1308,9 @@ describe('VertexAiSessionService', () => {
       const lastAppendedEvent = (): AppendedEvent =>
         mockClient.events.append.mock.calls.at(-1)![0];
 
-      const expectNoUnsupportedFields = (parts: Part[]) => {
+      const expectNoPartMetadata = (parts: Part[]) => {
         for (const part of parts) {
           expect('partMetadata' in part).toBe(false);
-          expect('part_metadata' in part).toBe(false);
         }
       };
 
@@ -1344,31 +1338,8 @@ describe('VertexAiSessionService', () => {
           'world',
         ]);
         expect(rawParts.map((part) => part.text)).toEqual(['hello', 'world']);
-        expectNoUnsupportedFields(contentParts);
-        expectNoUnsupportedFields(rawParts);
-      });
-
-      it('strips the snake_case part_metadata spelling', async () => {
-        const legacyPart: PartWithLegacyMetadata = {
-          text: 'hello',
-          part_metadata: {source: 'portal'},
-        };
-        const event = createEvent({
-          timestamp: 1620000000000,
-          author: 'agent',
-          invocationId: 'inv-1',
-          content: {role: 'model', parts: [legacyPart]},
-        });
-
-        await service.appendEvent({session: metadataSession(), event});
-
-        const sent = lastAppendedEvent();
-        const contentParts = sent.config.content?.parts ?? [];
-        const rawParts = sent.config.rawEvent?.content?.parts ?? [];
-        expect(contentParts.map((part) => part.text)).toEqual(['hello']);
-        expect(rawParts.map((part) => part.text)).toEqual(['hello']);
-        expectNoUnsupportedFields(contentParts);
-        expectNoUnsupportedFields(rawParts);
+        expectNoPartMetadata(contentParts);
+        expectNoPartMetadata(rawParts);
       });
 
       it('leaves the caller event untouched', async () => {

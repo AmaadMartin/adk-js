@@ -18,7 +18,6 @@ import {
   Content,
   GenerateContentResponseUsageMetadata,
   GroundingMetadata,
-  Part,
 } from '@google/genai';
 import {isCompactedEvent} from '../events/compacted_event.js';
 import {experimental} from '../utils/experimental.js';
@@ -457,7 +456,7 @@ export class VertexAiSessionService extends BaseSessionService {
     }
 
     const sanitizedEvent = event.content
-      ? {...event, content: withoutUnsupportedPartFields(event.content)}
+      ? {...event, content: withoutPartMetadata(event.content)}
       : event;
 
     const config = partialCopy<AppendAgentEngineSessionEventConfig>(
@@ -590,28 +589,8 @@ function toApiActions(
   } as ApiEventActions;
 }
 
-/** Part fields the Agent Engine sessions API rejects. */
-const UNSUPPORTED_PART_FIELDS = ['partMetadata', 'part_metadata'] as const;
-
-/** A `Part` that survived serialization by an SDK using snake_case keys. */
-interface PartWithLegacyMetadata extends Part {
-  part_metadata?: Record<string, unknown>;
-}
-
-function hasUnsupportedPartFields(part: Part): boolean {
-  return UNSUPPORTED_PART_FIELDS.some((field) => field in part);
-}
-
-function stripUnsupportedPartFields(part: PartWithLegacyMetadata): Part {
-  const stripped = {...part};
-  for (const field of UNSUPPORTED_PART_FIELDS) {
-    delete stripped[field];
-  }
-  return stripped;
-}
-
 /**
- * Returns `content` without the Part fields the Agent Engine sessions API
+ * Returns `content` without the `partMetadata` the Agent Engine sessions API
  * rejects.
  *
  * `partMetadata` is a Gemini Developer API-only field. The sessions API does
@@ -621,13 +600,19 @@ function stripUnsupportedPartFields(part: PartWithLegacyMetadata): Part {
  * `partialCopy` is shallow, so a delete would strip the event the caller still
  * holds.
  */
-function withoutUnsupportedPartFields(content: Content): Content {
+function withoutPartMetadata(content: Content): Content {
   // TODO: remove once the Agent Engine sessions API accepts partMetadata.
-  const parts = content.parts;
-  if (!parts?.some(hasUnsupportedPartFields)) {
+  if (!content.parts?.some((part) => 'partMetadata' in part)) {
     return content;
   }
-  return {...content, parts: parts.map(stripUnsupportedPartFields)};
+  return {
+    ...content,
+    parts: content.parts.map((part) => {
+      const stripped = {...part};
+      delete stripped.partMetadata;
+      return stripped;
+    }),
+  };
 }
 
 interface ExtendedEventActions extends EventActions {
