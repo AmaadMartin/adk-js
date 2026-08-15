@@ -31,7 +31,14 @@ const logger = new AdkLogger({label: 'AgentLoader', colorize: {all: true}});
 /**
  * Supported file extensions for JavaScript and TypeScript.
  */
-const JS_FILES_EXTENSIONS = ['.js', '.cjs', '.mjs', '.ts', '.mts', '.cts'];
+export const JS_FILES_EXTENSIONS = [
+  '.js',
+  '.cjs',
+  '.mjs',
+  '.ts',
+  '.mts',
+  '.cts',
+];
 
 /**
  * Supported JS/TS file module types.
@@ -93,7 +100,7 @@ export interface AgentFileOptions {
  *
  * Compile and bundle only .ts files.
  */
-const DEFAULT_AGENT_FILE_OPTIONS: AgentFileOptions = {
+export const DEFAULT_AGENT_FILE_OPTIONS: AgentFileOptions = {
   compile: true,
   bundle: true,
 };
@@ -142,6 +149,100 @@ export function replaceDirnamePlugin(filePath: string, originalDir: string) {
 }
 
 /**
+ * The result of compiling a JS/TS file into a temporary directory. The caller
+ * owns the directory and must remove it.
+ */
+export interface CompiledFile {
+  compiledFilePath: string;
+  tempDirPath: string;
+}
+
+/**
+ * Compiles a JS/TS file into a temporary directory with esbuild.
+ */
+export async function compileFile(
+  filePath: string,
+  options: AgentFileOptions,
+): Promise<CompiledFile> {
+  const moduleType = options.moduleType || (await getFileModuleType(filePath));
+  const parsedPath = path.parse(filePath);
+  const outputDir = await createTempDir('adk_agent_loader');
+  const compiledFilePath = path.join(
+    outputDir,
+    parsedPath.name + FILE_MODULE_TYPE_EXTENSION_MAP[moduleType],
+  );
+  const originalDir = path.dirname(filePath);
+  await linkProjectNodeModules(outputDir, parsedPath.dir);
+
+  await esbuild.build({
+    entryPoints: [filePath],
+    outfile: compiledFilePath,
+    target: 'node16',
+    platform: 'node',
+    format: moduleType,
+    packages: 'bundle',
+    bundle: options.bundle,
+    minify: options.bundle,
+    plugins: [replaceDirnamePlugin(filePath, originalDir), shimPlugin()],
+    // See http://mikro-orm.io/docs/deployment#deploy-a-bundle-of-entities-and-dependencies-with-esbuild for more details
+    external: [
+      'sqlite3',
+      'better-sqlite3',
+      'mysql',
+      'mysql2',
+      // Native addons must remain external so Node can resolve their
+      // platform-specific assets at runtime.
+      'onnxruntime-node',
+      'oracledb',
+      'pg-native',
+      'pg-query-stream',
+      'tedious',
+      'libsql',
+      // Optional peer dependencies of vite and eslint that are not
+      // installed and MUST NOT be bundled.
+      'lightningcss',
+      'jiti',
+      'jiti/package.json',
+    ],
+  });
+
+  return {compiledFilePath, tempDirPath: outputDir};
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+/**
+ * The `default` export of a module and, for a CommonJS bundle, the `default`
+ * nested inside it.
+ */
+function defaultExports(jsModule: Record<string, unknown>): unknown[] {
+  const value = jsModule['default'];
+
+  return [value, isRecord(value) ? value['default'] : undefined];
+}
+
+/**
+ * Imports a JS file, bypassing both module caches so a reload picks up an
+ * edited file.
+ */
+export async function importFile(
+  filePath: string,
+): Promise<Record<string, unknown>> {
+  const require = createRequire(import.meta.url);
+  try {
+    delete require.cache[require.resolve(filePath)];
+  } catch {
+    logger.warn(`Failed to delete require cache for ${filePath}`);
+  }
+
+  const importUrl = `${pathToFileURL(filePath).href}?t=${Date.now()}_${Math.random().toString(36).slice(2)}`;
+
+  return import(importUrl);
+}
+
+/**
  * Wrapper class which loads file that contains base agent or app (support both .js and
  * .ts) and has a dispose function to cleanup the compiled artifact after file
  * usage.
@@ -180,63 +281,14 @@ export class AgentFile {
     const shouldCompile = this.options.compile || this.options.bundle;
 
     if (shouldCompile) {
-      const moduleType =
-        this.options.moduleType || (await getFileModuleType(filePath));
-      const parsedPath = path.parse(filePath);
-      const outputDir = await createTempDir('adk_agent_loader');
-      const compiledFilePath = path.join(
-        outputDir,
-        parsedPath.name + FILE_MODULE_TYPE_EXTENSION_MAP[moduleType],
-      );
-      const originalDir = path.dirname(filePath);
-      await linkProjectNodeModules(outputDir, parsedPath.dir);
+      const compiled = await compileFile(filePath, this.options);
 
-      await esbuild.build({
-        entryPoints: [filePath],
-        outfile: compiledFilePath,
-        target: 'node16',
-        platform: 'node',
-        format: moduleType,
-        packages: 'bundle',
-        bundle: this.options.bundle,
-        minify: this.options.bundle,
-        plugins: [replaceDirnamePlugin(filePath, originalDir), shimPlugin()],
-        // See http://mikro-orm.io/docs/deployment#deploy-a-bundle-of-entities-and-dependencies-with-esbuild for more details
-        external: [
-          'sqlite3',
-          'better-sqlite3',
-          'mysql',
-          'mysql2',
-          // Native addons must remain external so Node can resolve their
-          // platform-specific assets at runtime.
-          'onnxruntime-node',
-          'oracledb',
-          'pg-native',
-          'pg-query-stream',
-          'tedious',
-          'libsql',
-          // Optional peer dependencies of vite and eslint that are not
-          // installed and MUST NOT be bundled.
-          'lightningcss',
-          'jiti',
-          'jiti/package.json',
-        ],
-      });
-
-      this.cleanupDirPath = outputDir;
-      this.cleanupFilePath = compiledFilePath;
-      filePath = compiledFilePath;
+      this.cleanupDirPath = compiled.tempDirPath;
+      this.cleanupFilePath = compiled.compiledFilePath;
+      filePath = compiled.compiledFilePath;
     }
 
-    const require = createRequire(import.meta.url);
-    try {
-      delete require.cache[require.resolve(filePath)];
-    } catch {
-      logger.warn(`Failed to delete require cache for ${filePath}`);
-    }
-
-    const importUrl = `${pathToFileURL(filePath).href}?t=${Date.now()}_${Math.random().toString(36).slice(2)}`;
-    const jsModule = await import(importUrl);
+    const jsModule = await importFile(filePath);
 
     if (jsModule) {
       if (isApp(jsModule.app)) {
@@ -251,9 +303,7 @@ export class AgentFile {
         return this.app!;
       }
 
-      const defaultApp = [jsModule.default, jsModule.default?.default].find(
-        isApp,
-      );
+      const defaultApp = defaultExports(jsModule).find(isApp);
       if (defaultApp) {
         this.app = defaultApp;
         this.agent = defaultApp.rootAgent;
@@ -278,9 +328,7 @@ export class AgentFile {
         return (this.agent = jsModule.rootAgent);
       }
 
-      const defaultAgent = [jsModule.default, jsModule.default?.default].find(
-        isBaseAgent,
-      );
+      const defaultAgent = defaultExports(jsModule).find(isBaseAgent);
       if (defaultAgent) {
         return (this.agent = defaultAgent);
       }
