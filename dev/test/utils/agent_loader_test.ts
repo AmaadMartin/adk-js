@@ -527,6 +527,70 @@ describe('AgentLoader', () => {
       await agentFile.dispose();
     });
 
+    it('omits esbuild "external" when bundling is disabled', async () => {
+      const agentPath = path.join(tempAgentsDir, 'agent2.ts');
+      await fs.writeFile(agentPath, agent2TsContent);
+
+      (esbuild.build as Mock).mockImplementation(async () => {
+        await fs.writeFile(compiledPath('agent2.cjs'), agent2CjsContentMocked);
+        return Promise.resolve();
+      });
+
+      const agentFile = new AgentFile(agentPath, {
+        compile: true,
+        bundle: false,
+      });
+      const agent = await agentFile.load();
+
+      expect(agent.name).toEqual('agent2');
+      const buildOptions = (esbuild.build as Mock).mock.calls[0][0];
+      expect(buildOptions).not.toHaveProperty('external');
+      expect(buildOptions).toMatchObject({bundle: false, minify: false});
+
+      await agentFile.dispose();
+    });
+
+    it('omits esbuild "external" when bundle option is not provided', async () => {
+      const agentPath = path.join(tempAgentsDir, 'agent2.ts');
+      await fs.writeFile(agentPath, agent2TsContent);
+
+      (esbuild.build as Mock).mockImplementation(async () => {
+        await fs.writeFile(compiledPath('agent2.cjs'), agent2CjsContentMocked);
+        return Promise.resolve();
+      });
+
+      const agentFile = new AgentFile(agentPath, {compile: true});
+      const agent = await agentFile.load();
+
+      expect(agent.name).toEqual('agent2');
+      expect((esbuild.build as Mock).mock.calls[0][0]).not.toHaveProperty(
+        'external',
+      );
+
+      await agentFile.dispose();
+    });
+
+    it('compiles and loads a .ts agent with real esbuild when bundle is disabled', async () => {
+      const {build: realEsbuildBuild} =
+        await vi.importActual<typeof import('esbuild')>('esbuild');
+      (esbuild.build as Mock).mockImplementationOnce(realEsbuildBuild);
+
+      const agentPath = path.join(tempAgentsDir, 'agent2.ts');
+      await fs.writeFile(agentPath, agent2TsContent);
+
+      const agentFile = new AgentFile(agentPath, {
+        compile: true,
+        bundle: false,
+      });
+      const agent = await agentFile.load();
+
+      expect(agent.name).toEqual('agent2');
+      const compiled = await fs.readFile(compiledPath('agent2.cjs'), 'utf8');
+      expect(compiled).toContain('require("@google/adk")');
+
+      await agentFile.dispose();
+    });
+
     it('throws specific error if file does not exist', async () => {
       const agentPath = path.join(tempAgentsDir, 'non_existent.js');
       const agentFile = new AgentFile(agentPath);
