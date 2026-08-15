@@ -4,10 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {StreamingMode} from '@google/adk';
 import fg from 'fast-glob';
 import * as fs from 'node:fs/promises';
 import {beforeEach, describe, expect, it, Mock, vi} from 'vitest';
-import {batchLoadYamlTestDefs} from '../../src/conformance/yaml_test_loader.js';
+import {
+  batchLoadYamlTestDefs,
+  goldenFileNames,
+} from '../../src/conformance/yaml_test_loader.js';
 
 vi.mock('fast-glob', () => ({
   default: {
@@ -44,11 +48,34 @@ recordings:
   - user_message_index: 0
     agent_name: test-agent
     llm_recording:
-      llm_response:
-        content:
-          parts:
-            - text: hi
+      llm_responses:
+        - content:
+            parts:
+              - text: hi
 `;
+
+const SSE_RECORDINGS_YAML = `
+recordings:
+  - user_message_index: 0
+    agent_name: test-agent
+    llm_recording:
+      llm_responses:
+        - partial: true
+          content:
+            parts:
+              - text: 'h'
+        - content:
+            parts:
+              - text: hi
+`;
+
+/** A rejection shaped like the one node:fs raises for a missing file. */
+function fileNotFoundError(filePath: string): Error {
+  return Object.assign(
+    new Error(`ENOENT: no such file or directory, open '${filePath}'`),
+    {code: 'ENOENT'},
+  );
+}
 
 describe('batchLoadYamlTestDefs', () => {
   beforeEach(() => {
@@ -71,7 +98,7 @@ describe('batchLoadYamlTestDefs', () => {
       throw new Error(`File not found: ${filePath}`);
     });
 
-    const tests = await batchLoadYamlTestDefs(rootDir);
+    const tests = await batchLoadYamlTestDefs(rootDir, StreamingMode.NONE);
 
     expect(fg.stream).toHaveBeenCalledWith('**/spec.{yaml,yml}', {
       cwd: rootDir,
@@ -112,7 +139,7 @@ describe('batchLoadYamlTestDefs', () => {
     (fg.stream as unknown as Mock).mockReturnValue(mockFiles);
     (fs.readFile as Mock).mockResolvedValue('{}');
 
-    const tests = await batchLoadYamlTestDefs(rootDir);
+    const tests = await batchLoadYamlTestDefs(rootDir, StreamingMode.NONE);
     expect(tests.size).toBe(2);
     expect(tests.has('t1')).toBe(true);
     expect(tests.has('t2')).toBe(true);
@@ -132,7 +159,7 @@ describe('batchLoadYamlTestDefs', () => {
       throw new Error(`File not found: ${filePath}`);
     });
 
-    const tests = await batchLoadYamlTestDefs(rootDir);
+    const tests = await batchLoadYamlTestDefs(rootDir, StreamingMode.NONE);
 
     expect(fg.stream).toHaveBeenCalledWith('**/spec.{yaml,yml}', {
       cwd: rootDir,
@@ -154,8 +181,83 @@ describe('batchLoadYamlTestDefs', () => {
     ]);
     (fs.readFile as Mock).mockRejectedValue(new Error('File not found'));
 
-    await expect(batchLoadYamlTestDefs(rootDir)).rejects.toThrow(
-      'File not found',
+    await expect(
+      batchLoadYamlTestDefs(rootDir, StreamingMode.NONE),
+    ).rejects.toThrow('File not found');
+  });
+
+  it('should load the -sse goldens in SSE mode', async () => {
+    const rootDir = '/root/tests';
+    (fg.stream as unknown as Mock).mockReturnValue([
+      '/root/tests/category/test1/spec.yaml',
+    ]);
+
+    const readPaths: string[] = [];
+    (fs.readFile as Mock).mockImplementation(async (filePath: string) => {
+      readPaths.push(filePath);
+      if (filePath.endsWith('spec.yaml')) return SPEC_YAML;
+      if (filePath.endsWith('generated-session-sse.yaml')) return SESSION_YAML;
+      if (filePath.endsWith('generated-recordings-sse.yaml'))
+        return SSE_RECORDINGS_YAML;
+      throw fileNotFoundError(filePath);
+    });
+
+    const tests = await batchLoadYamlTestDefs(rootDir, StreamingMode.SSE);
+
+    expect(readPaths).toEqual([
+      '/root/tests/category/test1/spec.yaml',
+      '/root/tests/category/test1/generated-session-sse.yaml',
+      '/root/tests/category/test1/generated-recordings-sse.yaml',
+    ]);
+    expect(
+      tests.get('category/test1')?.recordings.recordings[0].llmRecording
+        ?.llmResponses,
+    ).toEqual([
+      {partial: true, content: {parts: [{text: 'h'}]}},
+      {content: {parts: [{text: 'hi'}]}},
+    ]);
+  });
+
+  it('should skip a test whose goldens for the selected mode are missing', async () => {
+    const rootDir = '/root/tests';
+    (fg.stream as unknown as Mock).mockReturnValue([
+      '/root/tests/t1/spec.yaml',
+      '/root/tests/t2/spec.yaml',
+    ]);
+
+    (fs.readFile as Mock).mockImplementation(async (filePath: string) => {
+      if (filePath.endsWith('spec.yaml')) return SPEC_YAML;
+      if (filePath.startsWith('/root/tests/t1/')) {
+        throw fileNotFoundError(filePath);
+      }
+      if (filePath.endsWith('generated-session-sse.yaml')) return SESSION_YAML;
+      return SSE_RECORDINGS_YAML;
+    });
+
+    const tests = await batchLoadYamlTestDefs(rootDir, StreamingMode.SSE);
+
+    expect([...tests.keys()]).toEqual(['t2']);
+  });
+});
+
+describe('goldenFileNames', () => {
+  it('should name the -sse goldens for SSE', () => {
+    expect(goldenFileNames(StreamingMode.SSE)).toEqual({
+      recordings: 'generated-recordings-sse.yaml',
+      session: 'generated-session-sse.yaml',
+    });
+  });
+
+  it('should name the plain goldens for NONE', () => {
+    expect(goldenFileNames(StreamingMode.NONE)).toEqual({
+      recordings: 'generated-recordings.yaml',
+      session: 'generated-session.yaml',
+    });
+  });
+
+  it('should reject a mode that has no goldens', () => {
+    expect(() => goldenFileNames(StreamingMode.BIDI)).toThrow(
+      'Unsupported streaming mode: bidi',
     );
   });
 });

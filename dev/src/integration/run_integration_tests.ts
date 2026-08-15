@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {StreamingMode} from '@google/adk';
 import {registerConformanceIntegrations} from '../conformance/conformance_integrations.js';
 import {batchLoadYamlAgentConfig} from '../conformance/yaml_agent_loader.js';
 import {batchLoadYamlTestDefs} from '../conformance/yaml_test_loader.js';
@@ -15,10 +16,12 @@ export async function runIntegrationTests({
   agentsDir,
   testsDir,
   forceRunAll,
+  streamingMode,
 }: {
   agentsDir: string;
   testsDir: string;
   forceRunAll: boolean;
+  streamingMode: StreamingMode;
 }) {
   console.log(`Loading agents from ${agentsDir}`);
   const agentConfigs = await batchLoadYamlAgentConfig(agentsDir);
@@ -36,15 +39,15 @@ export async function runIntegrationTests({
   }
   console.log(agentRegistry.summary());
 
-  console.log(`Loading tests from ${testsDir}`);
-  const testSpecs = await batchLoadYamlTestDefs(testsDir);
+  console.log(`Loading tests from ${testsDir} in ${streamingMode} mode`);
+  const testSpecs = await batchLoadYamlTestDefs(testsDir, streamingMode);
   console.log(testSpecs.size, 'tests found.');
 
   console.log('Running tests.');
   const successfulTests = [];
   const skippedTests = [];
   const failedTests = [];
-  const testRunner = new TestRunner(agentRegistry);
+  const testRunner = new TestRunner(agentRegistry, streamingMode);
 
   for (const [name, testInfo] of testSpecs) {
     console.log('\x1b[33mRunning test', name, '\x1b[0m\n');

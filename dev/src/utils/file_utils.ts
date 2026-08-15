@@ -20,6 +20,22 @@ export function getAbsolutePath(p: string): string {
   return path.resolve(process.cwd(), p);
 }
 
+/**
+ * Reports whether a rejected file operation failed because the path is
+ * missing.
+ *
+ * Callers that treat a missing file as "nothing to do" use this so that every
+ * other failure (a permission error, a bad descriptor) keeps propagating.
+ */
+export function isFileNotFoundError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    error.code === 'ENOENT'
+  );
+}
+
 /** Check if the given folder exists. */
 export async function isFolderExists(folderPath: string): Promise<boolean> {
   try {

@@ -43,6 +43,15 @@ export class AgentRegistry {
     this.agents.set(name, agent);
   }
 
+  /**
+   * Every agent instantiated so far, including ones reachable only through an
+   * AgentTool. A sub-agent tree walk misses those, because `AgentTool.agent`
+   * is private.
+   */
+  instantiatedAgents(): BaseAgent[] {
+    return [...this.agents.values()];
+  }
+
   getAgent(name: string): BaseAgent | undefined {
     if (this.agents.has(name)) {
       return this.agents.get(name);

@@ -10,6 +10,7 @@ import {
   createTempDir,
   isFile,
   isFileExists,
+  isFileNotFoundError,
   isFolderExists,
   listFiles,
   loadFileData,
@@ -183,5 +184,22 @@ describe('file_utils', () => {
   it('isFileExists returns false for directories', async () => {
     fsPromises.stat.mockResolvedValue({isFile: () => false});
     await expect(isFileExists('/dir')).resolves.toBe(false);
+  });
+
+  it('isFileNotFoundError recognises an ENOENT rejection', () => {
+    const error = Object.assign(new Error('missing'), {code: 'ENOENT'});
+
+    expect(isFileNotFoundError(error)).toBe(true);
+    expect(isFileNotFoundError({code: 'ENOENT'})).toBe(true);
+  });
+
+  it('isFileNotFoundError rejects any other failure', () => {
+    const denied = Object.assign(new Error('denied'), {code: 'EACCES'});
+
+    expect(isFileNotFoundError(denied)).toBe(false);
+    expect(isFileNotFoundError(new Error('plain'))).toBe(false);
+    expect(isFileNotFoundError(null)).toBe(false);
+    expect(isFileNotFoundError(undefined)).toBe(false);
+    expect(isFileNotFoundError('ENOENT')).toBe(false);
   });
 });

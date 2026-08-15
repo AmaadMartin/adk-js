@@ -201,6 +201,33 @@ describe('AgentRegistry', () => {
     );
   });
 
+  it('should list an agent reachable only through an AgentTool', () => {
+    const subConfig = {
+      name: 'sub_agent',
+      model: 'model',
+      description: 'desc',
+      instruction: 'inst',
+      agentClass: 'LlmAgent',
+    } as unknown as YamlAgentConfig;
+    const parentConfig = {
+      name: 'parent_agent',
+      model: 'model',
+      description: 'desc',
+      instruction: 'inst',
+      agentClass: 'LlmAgent',
+      tools: [{name: 'AgentTool', args: {agent: {configPath: 'sub_path'}}}],
+    } as unknown as YamlAgentConfig;
+
+    agentRegistry.registerAgentConfig('sub_path', subConfig);
+    agentRegistry.registerAgentConfig('parent_path', parentConfig);
+    const parent = agentRegistry.getAgent('parent_path');
+
+    expect(parent?.subAgents).toEqual([]);
+    expect(
+      agentRegistry.instantiatedAgents().map((agent) => agent.name),
+    ).toEqual(['sub_agent', 'parent_agent']);
+  });
+
   it('should instantiate MCPToolset', () => {
     const config = {
       name: 'mcp_agent',
