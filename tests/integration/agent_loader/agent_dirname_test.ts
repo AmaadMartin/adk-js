@@ -13,7 +13,7 @@ import {assertWorkspaceAdkCliAvailable} from '../workspace_cli.js';
 const dirname = process.cwd();
 const TEST_EXECUTION_TIMEOUT = 60000;
 
-describe.each(['__dirname', '__filename', 'import_meta_url'])(
+describe.each(['__dirname', '__filename', 'import_meta_url', 'dependency_url'])(
   'Agent with %s',
   (testCaseName: string) => {
     const projectPath = path.join(
