@@ -12,7 +12,6 @@ import {
 } from '@a2a-js/sdk';
 import {Client, ClientFactory} from '@a2a-js/sdk/client';
 import {GoogleAuth} from 'google-auth-library';
-import type {Dispatcher} from 'undici';
 import {RemoteA2AAgent} from '../../a2a/a2a_remote_agent.js';
 import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {AuthCredential} from '../../auth/auth_credential.js';
@@ -20,9 +19,9 @@ import {AuthScheme} from '../../auth/auth_schemes.js';
 import {StreamableHTTPConnectionParams} from '../../tools/mcp/mcp_session_manager.js';
 import {logger} from '../../utils/logger.js';
 import {
-  createMtlsDispatcher,
-  effectiveGoogleapisEndpoint,
   FetchInitWithDispatcher,
+  MtlsRequest,
+  resolveMtlsRequest,
 } from '../../utils/mtls_utils.js';
 import {AgentRegistrySingleMCPToolset} from './agent_registry_mcp_toolset.js';
 import {cleanName, isGoogleApi} from './helpers.js';
@@ -52,25 +51,6 @@ const TRANSPORT_MAPPING: Record<string, TransportProtocol> = {
   'GRPC': 'GRPC',
 };
 
-/** The endpoint and transport a registry instance sends its requests through. */
-interface MtlsTransport {
-  baseUrl: string;
-  /** Presents the client certificate, when one was configured and loaded. */
-  dispatcher?: Dispatcher;
-}
-
-/** Loads the client certificate when one is configured and picks the host. */
-async function resolveMtlsTransport(): Promise<MtlsTransport> {
-  const dispatcher = await createMtlsDispatcher();
-  return {
-    baseUrl: effectiveGoogleapisEndpoint(
-      AGENT_REGISTRY_BASE_URL,
-      dispatcher !== undefined,
-    ),
-    dispatcher,
-  };
-}
-
 /**
  * Client for interacting with the Google Cloud Agent Registry service.
  *
@@ -89,7 +69,7 @@ export class AgentRegistry {
     context: ReadonlyContext,
   ) => Record<string, string>;
   private readonly auth: GoogleAuth;
-  private mtlsTransportPromise?: Promise<MtlsTransport>;
+  private mtlsRequestPromise?: Promise<MtlsRequest | undefined>;
 
   constructor(options: {
     projectId?: string | null;
@@ -157,15 +137,15 @@ export class AgentRegistry {
   }
 
   /**
-   * Resolves the mTLS transport once per instance. The in-flight promise is
+   * Resolves the mTLS request once per instance. The in-flight promise is
    * memoized rather than its result, so concurrent first calls share a single
    * certificate load.
    */
-  private mtlsTransport(): Promise<MtlsTransport> {
-    if (!this.mtlsTransportPromise) {
-      this.mtlsTransportPromise = resolveMtlsTransport();
+  private mtlsRequest(): Promise<MtlsRequest | undefined> {
+    if (!this.mtlsRequestPromise) {
+      this.mtlsRequestPromise = resolveMtlsRequest(AGENT_REGISTRY_BASE_URL);
     }
-    return this.mtlsTransportPromise;
+    return this.mtlsRequestPromise;
   }
 
   /**
@@ -176,7 +156,8 @@ export class AgentRegistry {
     path: string,
     params?: Record<string, string>,
   ): Promise<T> {
-    const {baseUrl, dispatcher} = await this.mtlsTransport();
+    const mtls = await this.mtlsRequest();
+    const baseUrl = mtls?.url ?? AGENT_REGISTRY_BASE_URL;
     let url: string;
     // Support absolute resource paths (starting with projects/) or relative paths (resolved inside base path)
     if (path.startsWith('projects/')) {
@@ -195,7 +176,7 @@ export class AgentRegistry {
       const init: FetchInitWithDispatcher = {
         method: 'GET',
         headers,
-        ...(dispatcher ? {dispatcher} : {}),
+        ...(mtls ? {dispatcher: mtls.dispatcher} : {}),
       };
       const res = await fetch(url, init);
       if (!res.ok) {

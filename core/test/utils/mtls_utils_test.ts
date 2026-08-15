@@ -19,8 +19,6 @@ import {
 import {logger} from '../../src/utils/logger.js';
 import {
   createMtlsDispatcher,
-  effectiveGoogleapisEndpoint,
-  MtlsEndpointSetting,
   resolveMtlsRequest,
 } from '../../src/utils/mtls_utils.js';
 
@@ -107,15 +105,15 @@ describe('mtls_utils', () => {
     vi.restoreAllMocks();
   });
 
-  it('keeps the setting values adk-python writes on the wire', () => {
-    expect(Object.values(MtlsEndpointSetting)).toEqual([
-      'auto',
-      'always',
-      'never',
-    ]);
-  });
+  describe('endpoint rewriting', () => {
+    // The rewrite is only observable through the one exported entry point, so
+    // every row arms a certificate and asserts the resolved request.
+    beforeEach(() => {
+      process.env['GOOGLE_API_USE_CLIENT_CERTIFICATE'] = 'true';
+      process.env['GOOGLE_API_CERTIFICATE_CONFIG'] = CONFIG_PATH;
+      mockCertificateFiles(CONFIG_PATH);
+    });
 
-  describe('effectiveGoogleapisEndpoint', () => {
     it.each([
       [
         'https://oauth2.googleapis.com/token',
@@ -133,8 +131,8 @@ describe('mtls_utils', () => {
         'https://iam.googleapis.com:8443/v1/x#frag',
         'https://iam.mtls.googleapis.com:8443/v1/x#frag',
       ],
-    ])('rewrites %s to %s', (url, expected) => {
-      expect(effectiveGoogleapisEndpoint(url, true)).toBe(expected);
+    ])('rewrites %s to %s', async (url, expected) => {
+      expect((await resolveMtlsRequest(url))?.url).toBe(expected);
     });
 
     it.each([
@@ -150,72 +148,58 @@ describe('mtls_utils', () => {
       // Unparseable input is passed through untouched.
       '',
       'not a url',
-    ])('leaves %s unchanged', (url) => {
-      expect(effectiveGoogleapisEndpoint(url, true)).toBe(url);
+    ])('leaves %s unchanged', async (url) => {
+      await expect(resolveMtlsRequest(url)).resolves.toBeUndefined();
     });
 
-    it('rewrites for "always" even without a certificate', () => {
-      process.env['GOOGLE_API_USE_MTLS_ENDPOINT'] = 'always';
-      expect(
-        effectiveGoogleapisEndpoint(
-          'https://oauth2.googleapis.com/token',
-          false,
-        ),
-      ).toBe('https://oauth2.mtls.googleapis.com/token');
-    });
-
-    it('does not rewrite for "never" even with a certificate', () => {
-      process.env['GOOGLE_API_USE_MTLS_ENDPOINT'] = 'never';
-      expect(
-        effectiveGoogleapisEndpoint(
-          'https://oauth2.googleapis.com/token',
-          true,
-        ),
-      ).toBe('https://oauth2.googleapis.com/token');
-    });
-
-    it('does not rewrite for "auto" without a certificate', () => {
-      process.env['GOOGLE_API_USE_MTLS_ENDPOINT'] = 'auto';
-      expect(
-        effectiveGoogleapisEndpoint(
-          'https://oauth2.googleapis.com/token',
-          false,
-        ),
-      ).toBe('https://oauth2.googleapis.com/token');
-    });
-
-    it('treats an unrecognised setting as "auto"', () => {
+    it('treats an unrecognised setting as the default', async () => {
       process.env['GOOGLE_API_USE_MTLS_ENDPOINT'] = 'invalid';
+
       expect(
-        effectiveGoogleapisEndpoint(
-          'https://oauth2.googleapis.com/token',
-          true,
-        ),
+        (await resolveMtlsRequest('https://oauth2.googleapis.com/token'))?.url,
       ).toBe('https://oauth2.mtls.googleapis.com/token');
-      expect(
-        effectiveGoogleapisEndpoint(
-          'https://oauth2.googleapis.com/token',
-          false,
-        ),
-      ).toBe('https://oauth2.googleapis.com/token');
     });
 
-    it('matches the setting case-insensitively', () => {
-      process.env['GOOGLE_API_USE_MTLS_ENDPOINT'] = 'ALWAYS';
+    it.each(['never', 'Never', 'NEVER'])(
+      'matches the "%s" opt-out case-insensitively',
+      async (value) => {
+        process.env['GOOGLE_API_USE_MTLS_ENDPOINT'] = value;
+
+        await expect(
+          resolveMtlsRequest('https://oauth2.googleapis.com/token'),
+        ).resolves.toBeUndefined();
+      },
+    );
+
+    it('rewrites a host the caller spelled in mixed case', async () => {
       expect(
-        effectiveGoogleapisEndpoint(
-          'https://oauth2.googleapis.com/token',
-          false,
-        ),
+        (await resolveMtlsRequest('https://OAuth2.GoogleAPIs.com/token'))?.url,
       ).toBe('https://oauth2.mtls.googleapis.com/token');
-      process.env['GOOGLE_API_USE_MTLS_ENDPOINT'] = 'Never';
-      expect(
-        effectiveGoogleapisEndpoint(
-          'https://oauth2.googleapis.com/token',
-          true,
-        ),
-      ).toBe('https://oauth2.googleapis.com/token');
     });
+
+    it('leaves the host name in a query parameter alone', async () => {
+      expect(
+        (
+          await resolveMtlsRequest(
+            'https://oauth2.googleapis.com/token?aud=https%3A%2F%2Fiam.googleapis.com%2Fx',
+          )
+        )?.url,
+      ).toBe(
+        'https://oauth2.mtls.googleapis.com/token?aud=https%3A%2F%2Fiam.googleapis.com%2Fx',
+      );
+    });
+
+    it.each(['always', 'ALWAYS'])(
+      'rewrites for "%s" when a certificate is available',
+      async (value) => {
+        process.env['GOOGLE_API_USE_MTLS_ENDPOINT'] = value;
+
+        expect(
+          (await resolveMtlsRequest('https://oauth2.googleapis.com/token'))
+            ?.url,
+        ).toBe('https://oauth2.mtls.googleapis.com/token');
+      },
+    );
   });
 
   describe('createMtlsDispatcher', () => {
@@ -427,36 +411,13 @@ describe('mtls_utils', () => {
     });
   });
 
-  describe('effectiveGoogleapisEndpoint rewrites the hostname only', () => {
-    it('treats a missing process.env as the default "auto" setting', () => {
+  describe('a runtime with no environment', () => {
+    it('resolves to no mTLS request instead of throwing', async () => {
       Reflect.set(process, 'env', undefined);
 
-      expect(
-        effectiveGoogleapisEndpoint(
-          'https://oauth2.googleapis.com/token',
-          true,
-        ),
-      ).toBe('https://oauth2.mtls.googleapis.com/token');
-    });
-
-    it('rewrites a host the caller spelled in mixed case', () => {
-      expect(
-        effectiveGoogleapisEndpoint(
-          'https://OAuth2.GoogleAPIs.com/token',
-          true,
-        ),
-      ).toBe('https://oauth2.mtls.googleapis.com/token');
-    });
-
-    it('leaves the host name in a query parameter alone', () => {
-      expect(
-        effectiveGoogleapisEndpoint(
-          'https://oauth2.googleapis.com/token?aud=https%3A%2F%2Fiam.googleapis.com%2Fx',
-          true,
-        ),
-      ).toBe(
-        'https://oauth2.mtls.googleapis.com/token?aud=https%3A%2F%2Fiam.googleapis.com%2Fx',
-      );
+      await expect(
+        resolveMtlsRequest('https://oauth2.googleapis.com/token'),
+      ).resolves.toBeUndefined();
     });
   });
 

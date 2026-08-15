@@ -48,13 +48,6 @@ const KEY_BLOCK_PATTERN =
   /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]+-----END [A-Z ]*PRIVATE KEY-----\r?\n?/;
 const PASSPHRASE_BLOCK_HEADER = '-----BEGIN PASSPHRASE-----';
 
-/** Values of the `GOOGLE_API_USE_MTLS_ENDPOINT` environment variable. */
-export enum MtlsEndpointSetting {
-  AUTO = 'auto',
-  ALWAYS = 'always',
-  NEVER = 'never',
-}
-
 /**
  * The subset of `certificate_config.json` this module reads. The snake_case
  * keys are the on-disk format written by gcloud and must not be camelCased.
@@ -100,48 +93,32 @@ export interface FetchInitWithDispatcher extends FetchInit {
 }
 
 /**
- * Reads `GOOGLE_API_USE_MTLS_ENDPOINT`, defaulting to `AUTO`. `oauth2_utils.ts`
- * calls this from the browser bundle, where there is no environment, so the
- * read is guarded the way `getBooleanEnvVar` guards its own.
+ * True when the operator opted out with `GOOGLE_API_USE_MTLS_ENDPOINT=never`.
+ *
+ * `always` and `auto` are not distinguished, because `resolveMtlsRequest`
+ * rewrites an endpoint only once a certificate is in hand and the mTLS host
+ * rejects a connection that presents none. The read is guarded the way
+ * `getBooleanEnvVar` guards its own: `oauth2_utils.ts` reaches this from the
+ * browser bundle, where there is no environment.
  */
-function mtlsEndpointSetting(): MtlsEndpointSetting {
-  if (!process.env) {
-    return MtlsEndpointSetting.AUTO;
-  }
-  switch ((process.env['GOOGLE_API_USE_MTLS_ENDPOINT'] ?? '').toLowerCase()) {
-    case MtlsEndpointSetting.ALWAYS:
-      return MtlsEndpointSetting.ALWAYS;
-    case MtlsEndpointSetting.NEVER:
-      return MtlsEndpointSetting.NEVER;
-    default:
-      return MtlsEndpointSetting.AUTO;
-  }
+function mtlsEndpointRefused(): boolean {
+  return (
+    (process.env?.['GOOGLE_API_USE_MTLS_ENDPOINT'] ?? '').toLowerCase() ===
+    'never'
+  );
 }
 
 /**
- * Returns the endpoint `url` should actually be called on: its
- * `*.mtls.googleapis.com` variant when the environment calls for mTLS, and
- * `url` unchanged otherwise.
+ * Returns the endpoint `url` should be called on once a client certificate is
+ * available: its `*.mtls.googleapis.com` variant, or `url` unchanged.
  *
- * The host is rewritten only when `GOOGLE_API_USE_MTLS_ENDPOINT` is `always`,
- * or is `auto` (the default) and `hasClientCert` is true. Scheme, port, path,
- * query and fragment are preserved. Hosts that are not `*.googleapis.com`
- * hosts, and hosts that are already mTLS hosts, are returned unchanged, so
- * non-Google providers are never affected.
- *
- * Unlike adk-python's `effective_googleapis_endpoint`, this takes the
- * certificate state as an argument rather than leaving it to a separate
- * predicate, so the policy is applied in exactly one place.
+ * Scheme, port, path, query and fragment are preserved. A host that is not a
+ * `*.googleapis.com` host, a host that is already an mTLS host, and the
+ * `never` opt-out are all returned unchanged, so a non-Google provider is
+ * never affected.
  */
-export function effectiveGoogleapisEndpoint(
-  url: string,
-  hasClientCert: boolean,
-): string {
-  const setting = mtlsEndpointSetting();
-  const useMtls =
-    setting === MtlsEndpointSetting.ALWAYS ||
-    (setting === MtlsEndpointSetting.AUTO && hasClientCert);
-  if (!useMtls) {
+function effectiveGoogleapisEndpoint(url: string): string {
+  if (mtlsEndpointRefused()) {
     return url;
   }
   let parsed: URL;
@@ -366,7 +343,8 @@ export interface MtlsRequest {
 
 /**
  * Resolves the mTLS form of `url`, or `undefined` to leave the request exactly
- * as it is today.
+ * as it is today. This is the only entry point: every caller gets the same
+ * policy, so no two of them can disagree about when a certificate is sent.
  *
  * The certificate is presented only to a host this rewrote, so a non-Google
  * endpoint, an endpoint that is already an mTLS host, and the
@@ -374,17 +352,13 @@ export interface MtlsRequest {
  * endpoint is likewise rewritten only once a certificate is in hand, because
  * the mTLS host rejects a connection that presents none. Nothing is read from
  * the filesystem unless `url` is a rewritable endpoint.
- *
- * This suits a caller that must not degrade, such as a credential exchange.
- * `createMtlsDispatcher` and `effectiveGoogleapisEndpoint` remain available to
- * a caller that wants the two decisions separately.
  */
 export async function resolveMtlsRequest(
   url: string,
 ): Promise<MtlsRequest | undefined> {
   // Asks what the endpoint would become given a certificate, before paying to
   // load one.
-  const mtlsUrl = effectiveGoogleapisEndpoint(url, true);
+  const mtlsUrl = effectiveGoogleapisEndpoint(url);
   if (mtlsUrl === url) {
     return undefined;
   }
