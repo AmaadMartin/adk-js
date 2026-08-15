@@ -9,6 +9,7 @@ import type {Part} from '@google/genai';
 import {validatePathSegment} from '../utils/file_utils.js';
 import {logger} from '../utils/logger.js';
 
+import {hasArtifactContent} from './artifact_content_utils.js';
 import {
   isArtifactUri,
   nextArtifactRequest,
@@ -45,7 +46,7 @@ export class InMemoryArtifactService implements BaseArtifactService {
     artifact,
     customMetadata,
   }: SaveArtifactRequest): Promise<number> {
-    if (!artifact.inlineData && !artifact.text && !artifact.fileData) {
+    if (!hasArtifactContent(artifact)) {
       throw new Error('Artifact must have either inlineData or text content.');
     }
 
@@ -64,7 +65,7 @@ export class InMemoryArtifactService implements BaseArtifactService {
       customMetadata,
     };
 
-    if (!artifact.inlineData && artifact.text === undefined) {
+    if (!artifact.inlineData && artifact.text == null) {
       const fileData = artifact.fileData!;
 
       if (isArtifactUri(fileData.fileUri)) {

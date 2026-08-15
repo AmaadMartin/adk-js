@@ -11,6 +11,7 @@ import {createPartFromBase64, createPartFromText} from '@google/genai';
 import {validatePathSegment} from '../utils/file_utils.js';
 import {logger} from '../utils/logger.js';
 
+import {hasArtifactContent} from './artifact_content_utils.js';
 import {
   isArtifactUri,
   nextArtifactRequest,
@@ -40,11 +41,7 @@ export class GcsArtifactService implements BaseArtifactService {
   }
 
   async saveArtifact(request: SaveArtifactRequest): Promise<number> {
-    if (
-      !request.artifact.inlineData &&
-      !request.artifact.text &&
-      !request.artifact.fileData
-    ) {
+    if (!hasArtifactContent(request.artifact)) {
       throw new Error('Artifact must have either inlineData or text content.');
     }
 
@@ -75,7 +72,7 @@ export class GcsArtifactService implements BaseArtifactService {
       );
 
       return version;
-    } else if (request.artifact.text !== undefined) {
+    } else if (request.artifact.text != null) {
       await file.save(request.artifact.text, {
         contentType: 'text/plain',
         metadata: {
@@ -160,8 +157,7 @@ export class GcsArtifactService implements BaseArtifactService {
       const [metadata] = await file.getMetadata();
       const customMeta = (metadata.metadata ?? {}) as Record<string, unknown>;
       const fileUri = customMeta[GCS_FILE_URI_METADATA_KEY] as
-        | string
-        | undefined;
+        string | undefined;
 
       if (fileUri) {
         const mimeType =
@@ -174,8 +170,7 @@ export class GcsArtifactService implements BaseArtifactService {
       const [rawDataBuffer] = await file.download();
 
       const displayName = customMeta[GCS_DISPLAY_NAME_METADATA_KEY] as
-        | string
-        | undefined;
+        string | undefined;
       if (displayName) {
         return {
           inlineData: {
