@@ -129,10 +129,7 @@ describe('VertexAiSearchTool', () => {
     await tool.processLlmRequest({toolContext, llmRequest});
 
     expect(llmRequest.config?.tools).toHaveLength(2);
-    expect(
-      (llmRequest.config?.tools?.[1] as unknown as TestTool).retrieval
-        ?.vertexAiSearch?.datastore,
-    ).toBe('ds');
+    expect(llmRequest.config?.tools?.[0]).toEqual({functionDeclarations: []});
   });
 
   it('still accepts bypassMultiToolsLimit and appends the retrieval config', async () => {
