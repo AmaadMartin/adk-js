@@ -21,6 +21,8 @@ import {
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 
 const vertexAiConstructor = vi.hoisted(() => vi.fn());
+const databaseConstructor = vi.hoisted(() => vi.fn());
+const gcsConstructor = vi.hoisted(() => vi.fn());
 
 // The real constructor opens a Vertex AI client, so only this class is faked.
 // importOriginal keeps every other export of the module real.
@@ -43,12 +45,56 @@ vi.mock(
   },
 );
 
+// The two classes below are real; the subclass only records the argument the
+// factory built it from, so the test needs no cast into a private field.
+vi.mock(
+  '../../src/sessions/database_session_service.js',
+  async (importOriginal) => {
+    const original =
+      await importOriginal<
+        typeof import('../../src/sessions/database_session_service.js')
+      >();
+
+    return {
+      ...original,
+      DatabaseSessionService: class extends original.DatabaseSessionService {
+        constructor(connectionString: string) {
+          super(connectionString);
+          databaseConstructor(connectionString);
+        }
+      },
+    };
+  },
+);
+
+vi.mock(
+  '../../src/artifacts/gcs_artifact_service.js',
+  async (importOriginal) => {
+    const original =
+      await importOriginal<
+        typeof import('../../src/artifacts/gcs_artifact_service.js')
+      >();
+
+    return {
+      ...original,
+      GcsArtifactService: class extends original.GcsArtifactService {
+        constructor(bucket: string) {
+          super(bucket);
+          gcsConstructor(bucket);
+        }
+      },
+    };
+  },
+);
+
 describe('ServiceRegistry', () => {
   let registry: ServiceRegistry;
 
   beforeEach(() => {
     registry = new ServiceRegistry();
     vertexAiConstructor.mockClear();
+    databaseConstructor.mockClear();
+    gcsConstructor.mockClear();
   });
 
   describe('built-in session schemes', () => {
@@ -66,21 +112,19 @@ describe('ServiceRegistry', () => {
       'mssql://user:pass@localhost:1433/db',
       'sqlite:///tmp/sessions.db',
     ])('serves %s with a DatabaseSessionService for the whole URI', (uri) => {
-      const service = registry.createSessionService(uri);
-
-      expect(service).toBeInstanceOf(DatabaseSessionService);
-      expect(
-        (service as unknown as {connectionString: string}).connectionString,
-      ).toBe(uri);
+      expect(registry.createSessionService(uri)).toBeInstanceOf(
+        DatabaseSessionService,
+      );
+      expect(databaseConstructor).toHaveBeenCalledExactlyOnceWith(uri);
     });
 
     it('serves "sqlite://:memory:", which is not a parseable URL', () => {
-      const service = registry.createSessionService('sqlite://:memory:');
-
-      expect(service).toBeInstanceOf(DatabaseSessionService);
-      expect(
-        (service as unknown as {connectionString: string}).connectionString,
-      ).toBe('sqlite://:memory:');
+      expect(registry.createSessionService('sqlite://:memory:')).toBeInstanceOf(
+        DatabaseSessionService,
+      );
+      expect(databaseConstructor).toHaveBeenCalledExactlyOnceWith(
+        'sqlite://:memory:',
+      );
     });
 
     it('serves "vertexai://" with a VertexAiSessionService built from {}', () => {
@@ -101,12 +145,10 @@ describe('ServiceRegistry', () => {
     });
 
     it('serves "gs://" with a GcsArtifactService for the bucket', () => {
-      const service = registry.createArtifactService('gs://my-bucket');
-
-      expect(service).toBeInstanceOf(GcsArtifactService);
-      expect((service as unknown as {bucket: {name: string}}).bucket.name).toBe(
-        'my-bucket',
+      expect(registry.createArtifactService('gs://my-bucket')).toBeInstanceOf(
+        GcsArtifactService,
       );
+      expect(gcsConstructor).toHaveBeenCalledExactlyOnceWith('my-bucket');
     });
 
     it('serves "file://" with a FileArtifactService', () => {
