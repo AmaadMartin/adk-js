@@ -549,12 +549,8 @@ async function getArtifactVersionsFromDir(
 /**
  * Removes a version directory left behind by a save that did not complete.
  *
- * A version is only ever observable as complete or absent: one holding a
- * payload but no metadata document is indistinguishable from a valid version
- * on the read path, and an empty one is still reported by `listVersions` and
- * surfaces as a phantom key in `listArtifactKeys`. The enclosing directories
- * are pruned with a non-recursive `rmdir`, which refuses a non-empty directory
- * and so leaves earlier versions untouched.
+ * The enclosing directories are pruned with a non-recursive `rmdir`, which
+ * refuses a non-empty directory and so leaves earlier versions untouched.
  *
  * @param artifactDir The artifact directory.
  * @param version The version to discard.
