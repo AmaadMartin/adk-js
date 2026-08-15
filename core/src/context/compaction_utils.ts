@@ -15,10 +15,7 @@ import {
  * Filters the events to return only the active events since the latest event
  * matching `isAnchor`. If no such event exists, returns all events.
  *
- * The boundary is `retainFromEventId`, the id of the first event the anchor
- * retained. A comparison against `endTime` cannot express it: `endTime` is the
- * timestamp of the last compacted event, so a retained event created in the
- * same millisecond is indistinguishable from it.
+ * The boundary is {@link CompactedEvent.retainFromEventId}.
  *
  * @param events The full history of events.
  * @param isAnchor Identifies the compacted events this boundary applies to.
