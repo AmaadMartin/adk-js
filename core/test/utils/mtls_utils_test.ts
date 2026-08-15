@@ -21,6 +21,7 @@ import {
   createMtlsDispatcher,
   effectiveGoogleapisEndpoint,
   MtlsEndpointSetting,
+  resolveMtlsRequest,
 } from '../../src/utils/mtls_utils.js';
 
 const {agentCtor} = vi.hoisted(() => ({agentCtor: vi.fn()}));
@@ -423,6 +424,97 @@ describe('mtls_utils', () => {
       expect(message).not.toContain('cert-material');
       expect(message).not.toContain('key-material');
       expect(message).toContain('dispatcher construction failed');
+    });
+  });
+
+  describe('effectiveGoogleapisEndpoint without an environment', () => {
+    it('treats a missing process.env as the default "auto" setting', () => {
+      Reflect.set(process, 'env', undefined);
+
+      expect(
+        effectiveGoogleapisEndpoint(
+          'https://oauth2.googleapis.com/token',
+          true,
+        ),
+      ).toBe('https://oauth2.mtls.googleapis.com/token');
+    });
+  });
+
+  describe('resolveMtlsRequest', () => {
+    /** Arms the certificate the workload config points at. */
+    function enableClientCertificate() {
+      process.env['GOOGLE_API_USE_CLIENT_CERTIFICATE'] = 'true';
+      process.env['GOOGLE_API_CERTIFICATE_CONFIG'] = CONFIG_PATH;
+      mockCertificateFiles(CONFIG_PATH);
+    }
+
+    it('rewrites the endpoint and supplies the dispatcher', async () => {
+      enableClientCertificate();
+
+      const request = await resolveMtlsRequest(
+        'https://oauth2.googleapis.com/token',
+      );
+
+      expect(request?.url).toBe('https://oauth2.mtls.googleapis.com/token');
+      expect(request?.dispatcher).toBe(agentCtor.mock.instances[0]);
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it('keeps the endpoint and reads nothing when the certificate is off', async () => {
+      const request = await resolveMtlsRequest(
+        'https://oauth2.googleapis.com/token',
+      );
+
+      expect(request).toBeUndefined();
+      expect(readFile).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      // A non-Google provider must never see the certificate.
+      'https://example.com/token',
+      // A Google host that is not a googleapis.com host.
+      'https://accounts.google.com/o/oauth2/token',
+      // An endpoint that is already an mTLS host is not rewritten again.
+      'https://oauth2.mtls.googleapis.com/token',
+    ])('keeps %s and reads nothing even with a certificate', async (url) => {
+      enableClientCertificate();
+
+      await expect(resolveMtlsRequest(url)).resolves.toBeUndefined();
+
+      expect(readFile).not.toHaveBeenCalled();
+    });
+
+    it('keeps the endpoint and reads nothing when the setting is "never"', async () => {
+      enableClientCertificate();
+      process.env['GOOGLE_API_USE_MTLS_ENDPOINT'] = 'never';
+
+      await expect(
+        resolveMtlsRequest('https://oauth2.googleapis.com/token'),
+      ).resolves.toBeUndefined();
+
+      expect(readFile).not.toHaveBeenCalled();
+    });
+
+    it('keeps the endpoint under "always" when no certificate is configured', async () => {
+      process.env['GOOGLE_API_USE_MTLS_ENDPOINT'] = 'always';
+
+      await expect(
+        resolveMtlsRequest('https://oauth2.googleapis.com/token'),
+      ).resolves.toBeUndefined();
+
+      expect(readFile).not.toHaveBeenCalled();
+    });
+
+    it('keeps the endpoint and warns when the certificate cannot be loaded', async () => {
+      process.env['GOOGLE_API_USE_CLIENT_CERTIFICATE'] = 'true';
+      process.env['GOOGLE_API_CERTIFICATE_CONFIG'] = CONFIG_PATH;
+      vi.mocked(readFile).mockRejectedValue(new Error('ENOENT'));
+
+      await expect(
+        resolveMtlsRequest('https://oauth2.googleapis.com/token'),
+      ).resolves.toBeUndefined();
+
+      expect(warnSpy).toHaveBeenCalledTimes(1);
     });
   });
 });
