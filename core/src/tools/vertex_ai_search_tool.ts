@@ -30,6 +30,10 @@ export interface VertexAISearchConfig {
 export interface BaseVertexAiSearchToolParams {
   filter?: string;
   maxResults?: number;
+  /**
+   * Has no effect yet. adk-python reads this one level up, to swap the tool
+   * for `DiscoveryEngineSearchTool`, which adk-js has not ported.
+   */
   bypassMultiToolsLimit?: boolean;
 }
 
@@ -56,7 +60,6 @@ export class VertexAiSearchTool extends BaseTool {
   readonly searchEngineId?: string;
   readonly filter?: string;
   readonly maxResults?: number;
-  /** Accepted for API compatibility; adk-js imposes no multi-tool limit. */
   readonly bypassMultiToolsLimit: boolean;
 
   constructor(params: VertexAiSearchToolParams) {

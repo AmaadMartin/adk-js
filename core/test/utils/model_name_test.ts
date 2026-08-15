@@ -6,8 +6,6 @@
 
 import {isGemini2OrAbove, isGemini3xFlashLive} from '@google/adk';
 import {describe, expect, it} from 'vitest';
-// isGemini1Model is internal, so it is not reachable from '@google/adk'.
-import {isGemini1Model} from '../../src/utils/model_name.js';
 
 describe('isGemini2OrAbove', () => {
   describe('valid models', () => {
@@ -80,15 +78,5 @@ describe('isGemini3xFlashLive', () => {
     expect(isGemini3xFlashLive('gemini-3.0-flash')).toBe(false);
     expect(isGemini3xFlashLive(undefined)).toBe(false);
     expect(isGemini3xFlashLive('')).toBe(false);
-  });
-});
-
-describe('isGemini1Model (deprecated)', () => {
-  it('should return true for a Gemini 1.x model', () => {
-    expect(isGemini1Model('gemini-1.5-pro')).toBe(true);
-  });
-
-  it('should return false for a Gemini 2.x model', () => {
-    expect(isGemini1Model('gemini-2.0-flash')).toBe(false);
   });
 });
