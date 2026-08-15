@@ -11,7 +11,29 @@ import {
   LlmRequest,
   LlmResponse,
 } from '@google/adk';
+import {isEqual} from 'lodash-es';
 import {Recording} from './test_types.js';
+
+/** Raised when a replayed run diverges from what was recorded. */
+export class ReplayVerificationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ReplayVerificationError';
+    // Restore prototype chain for `instanceof` across transpilation targets.
+    Object.setPrototypeOf(this, ReplayVerificationError.prototype);
+  }
+}
+
+/** A recording carrying the replay-local consumption marker. */
+type ConsumableRecording = Recording & {_consumed?: boolean};
+
+function isConsumed(recording: Recording): boolean {
+  return (recording as ConsumableRecording)._consumed === true;
+}
+
+function markConsumed(recording: Recording): void {
+  (recording as ConsumableRecording)._consumed = true;
+}
 
 export class ReplayPlugin extends BasePlugin {
   constructor(
@@ -56,23 +78,44 @@ export class ReplayPlugin extends BasePlugin {
   }): Promise<Record<string, unknown> | undefined> {
     const agentName = params.toolContext.invocationContext.agent?.name ?? '';
     const toolName = params.tool.name;
+    const userMessageIndex = this.context.userMessageIndex;
 
-    const index = this.recordings.findIndex(
+    const agentRecordings = this.recordings.filter(
       (r) =>
-        r.userMessageIndex === this.context.userMessageIndex &&
+        r.userMessageIndex === userMessageIndex &&
         r.agentName === agentName &&
-        r.toolRecording?.toolCall?.name === toolName &&
-        !(r as unknown as {_consumed: boolean})._consumed,
+        r.toolRecording?.toolCall,
     );
 
+    const index = agentRecordings.findIndex((r) => !isConsumed(r));
     if (index === -1) {
-      throw new Error(
-        `No tool recording found for agent ${agentName}, tool ${toolName} at turn ${this.context.userMessageIndex}`,
+      throw new ReplayVerificationError(
+        `Runtime sent more tool requests than expected for agent ` +
+          `'${agentName}' at user_message_index ${userMessageIndex}. Expected ` +
+          `${agentRecordings.length}, but got request at index ` +
+          `${agentRecordings.length}`,
       );
     }
 
-    const rec = this.recordings[index];
-    (rec as unknown as {_consumed: boolean})._consumed = true;
+    const rec = agentRecordings[index];
+    markConsumed(rec);
+
+    const recordedCall = rec.toolRecording!.toolCall!;
+    if (recordedCall.name !== toolName) {
+      throw new ReplayVerificationError(
+        `Tool name mismatch for agent '${agentName}' at index ${index}:\n` +
+          `recorded: '${recordedCall.name}'\ncurrent: '${toolName}'`,
+      );
+    }
+
+    const recordedArgs = recordedCall.args ?? {};
+    if (!isEqual(recordedArgs, params.toolArgs)) {
+      throw new ReplayVerificationError(
+        `Tool args mismatch for agent '${agentName}' at index ${index}:\n` +
+          `recorded: ${JSON.stringify(recordedArgs)}\n` +
+          `current: ${JSON.stringify(params.toolArgs)}`,
+      );
+    }
 
     // Handle side effects for built-in tools that modify EventActions
     if (toolName === 'transfer_to_agent') {
