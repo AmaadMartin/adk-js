@@ -12,14 +12,21 @@ import {
   createResumabilityConfig,
   determineAgentForResumption,
   Event,
+  EventActions,
   InMemoryArtifactService,
   InMemorySessionService,
   InvocationContext,
   isRoutableLlmAgent,
   LlmAgent,
   Runner,
+  Session,
 } from '@google/adk';
-import {Content, FunctionCall, FunctionResponse} from '@google/genai';
+import {
+  Content,
+  FunctionCall,
+  FunctionResponse,
+  GenerateContentResponseUsageMetadata,
+} from '@google/genai';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {logger} from '../../src/utils/logger.js';
 
@@ -50,6 +57,34 @@ class MockLlmAgent extends LlmAgent {
       invocationId: context.invocationId,
       author: this.name,
       content: {role: 'model', parts: [{text: 'Test LLM response'}]},
+    });
+  }
+}
+
+class EmittingLlmAgent extends LlmAgent {
+  constructor(private readonly emittedEvent: Event) {
+    super({name: 'test_agent', model: 'gemini-2.5-flash'});
+  }
+
+  protected override async *runAsyncImpl(
+    context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    yield {...this.emittedEvent, invocationId: context.invocationId};
+  }
+}
+
+class StateDeltaPlugin extends BasePlugin {
+  constructor(private readonly stateDelta: Record<string, unknown>) {
+    super('state_delta_plugin');
+  }
+
+  override async onEventCallback(): Promise<Event | undefined> {
+    return createEvent({
+      content: {
+        role: 'model',
+        parts: [{text: MockPlugin.ON_EVENT_CALLBACK_MSG}],
+      },
+      actions: {stateDelta: this.stateDelta},
     });
   }
 }
@@ -890,6 +925,162 @@ describe('Runner with plugins', () => {
     });
     expect(session!.events.length).toBe(2);
     expect(session!.events[1].author).toBe('test_agent');
+  });
+});
+
+describe('Runner plugin event override', () => {
+  let plugin: BasePlugin;
+  let sessionService: InMemorySessionService;
+
+  beforeEach(() => {
+    const mockPlugin = new MockPlugin();
+    mockPlugin.enableEventCallback = true;
+    plugin = mockPlugin;
+    sessionService = new InMemorySessionService();
+  });
+
+  async function runEmitting(emittedEvent: Event): Promise<Event[]> {
+    await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent: new EmittingLlmAgent(emittedEvent),
+      sessionService,
+      artifactService: new InMemoryArtifactService(),
+      plugins: [plugin],
+    });
+    const events: Event[] = [];
+    for await (const event of runner.runAsync({
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      newMessage: {role: 'user', parts: [{text: TEST_MESSAGE}]},
+    })) {
+      events.push(event);
+    }
+    return events;
+  }
+
+  async function readSession(): Promise<Session> {
+    const session = await sessionService.getSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+    if (!session) {
+      expect.fail('session was not created');
+    }
+    return session;
+  }
+
+  function agentEvent(params: {
+    actions?: Partial<EventActions>;
+    longRunningToolIds?: string[];
+    partial?: boolean;
+    usageMetadata?: GenerateContentResponseUsageMetadata;
+  }): Event {
+    return createEvent({
+      author: 'test_agent',
+      content: {role: 'model', parts: [{text: 'original'}]},
+      ...params,
+    });
+  }
+
+  it('should keep the state delta of the event the plugin replaced', async () => {
+    const events = await runEmitting(
+      agentEvent({actions: {stateDelta: {counter: 1}}}),
+    );
+
+    expect(events[0].content!.parts![0].text).toEqual(
+      MockPlugin.ON_EVENT_CALLBACK_MSG,
+    );
+    expect(events[0].actions.stateDelta).toEqual({counter: 1});
+
+    const session = await readSession();
+    expect(session.events[1].actions.stateDelta).toEqual({counter: 1});
+    expect(session.state['counter']).toBe(1);
+  });
+
+  it('should keep the artifact delta of the event the plugin replaced', async () => {
+    const events = await runEmitting(
+      agentEvent({actions: {artifactDelta: {'report.txt': 3}}}),
+    );
+
+    expect(events[0].actions.artifactDelta).toEqual({'report.txt': 3});
+
+    const session = await readSession();
+    expect(session.events[1].actions.artifactDelta).toEqual({'report.txt': 3});
+  });
+
+  it('should keep the agent transfer of the event the plugin replaced', async () => {
+    const events = await runEmitting(
+      agentEvent({actions: {transferToAgent: 'other_agent'}}),
+    );
+
+    expect(events[0].actions.transferToAgent).toBe('other_agent');
+
+    const session = await readSession();
+    expect(session.events[1].actions.transferToAgent).toBe('other_agent');
+  });
+
+  it('should keep the usage metadata of the event the plugin replaced', async () => {
+    const events = await runEmitting(
+      agentEvent({usageMetadata: {totalTokenCount: 42}}),
+    );
+
+    expect(events[0].usageMetadata).toEqual({totalTokenCount: 42});
+
+    const session = await readSession();
+    expect(session.events[1].usageMetadata).toEqual({totalTokenCount: 42});
+  });
+
+  it('should keep the long running tool ids of the event the plugin replaced', async () => {
+    const events = await runEmitting(
+      agentEvent({longRunningToolIds: ['call-1']}),
+    );
+
+    expect(events[0].longRunningToolIds).toEqual(['call-1']);
+
+    const session = await readSession();
+    expect(session.events[1].longRunningToolIds).toEqual(['call-1']);
+  });
+
+  it('should keep the partial flag of the event the plugin replaced', async () => {
+    const events = await runEmitting(agentEvent({partial: true}));
+
+    expect(events[0].partial).toBe(true);
+
+    const session = await readSession();
+    expect(session.events.length).toBe(1);
+    expect(session.events[0].author).toBe('user');
+  });
+
+  it('should let the plugin override a state delta key and keep the rest', async () => {
+    plugin = new StateDeltaPlugin({counter: 2});
+
+    const events = await runEmitting(
+      agentEvent({actions: {stateDelta: {counter: 1, other: 'keep'}}}),
+    );
+
+    expect(events[0].actions.stateDelta).toEqual({counter: 2, other: 'keep'});
+
+    const session = await readSession();
+    expect(session.state['counter']).toBe(2);
+    expect(session.state['other']).toBe('keep');
+  });
+
+  it('should keep one identity for the streamed and the persisted event', async () => {
+    const events = await runEmitting(agentEvent({}));
+
+    const session = await readSession();
+    const persisted = session.events[1];
+    expect(persisted.id).toBe(events[0].id);
+    expect(persisted.invocationId).toBe(events[0].invocationId);
+    expect(persisted.timestamp).toBe(events[0].timestamp);
+    expect(persisted.author).toBe('test_agent');
+    expect(events[0].author).toBe('test_agent');
   });
 });
 
