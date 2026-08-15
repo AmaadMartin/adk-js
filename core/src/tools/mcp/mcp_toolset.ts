@@ -16,7 +16,7 @@ import {
 import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {logger} from '../../utils/logger.js';
 import {BaseTool} from '../base_tool.js';
-import {BaseToolset, ToolPredicate} from '../base_toolset.js';
+import {BaseToolset, ToolPredicate, sortToolsByName} from '../base_toolset.js';
 
 import {MCPConnectionParams, MCPSessionManager} from './mcp_session_manager.js';
 import {MCPTool} from './mcp_tool.js';
@@ -30,7 +30,8 @@ import {MCPTool} from './mcp_tool.js';
  * to seamlessly use tools from an external MCP-compliant service.
  *
  * The toolset can be configured with a filter to selectively expose a subset
- * of the tools provided by the MCP server.
+ * of the tools provided by the MCP server. {@link MCPToolset.getTools} returns
+ * the tools ordered by name, whatever order the server listed them in.
  *
  * It can also be configured with a prefix. If provided, all tools discovered
  * from the MCP server will have their names prefixed with `${prefix}_`. When the
@@ -76,7 +77,7 @@ export class MCPToolset extends BaseToolset {
       logger.debug(`tool: ${tool.name}`);
     }
 
-    const tools = listResult.tools.map((tool) => {
+    const discoveredTools = listResult.tools.map((tool) => {
       // Create a cloned tool definition with the prefixed name
       const toolWithPrefix = {
         ...tool,
@@ -88,7 +89,7 @@ export class MCPToolset extends BaseToolset {
     // The MCP spec does not make tools/list order contractual. A server that
     // reorders between calls would change the declaration order sent to the
     // model every turn and invalidate the context cache, so pin it here.
-    tools.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    const tools = sortToolsByName(discoveredTools);
 
     // Apply toolFilter when specified.
     // An empty array (the default) means no filter — all tools are returned.

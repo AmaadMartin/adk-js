@@ -36,6 +36,22 @@ export function isBaseToolset(obj: unknown): obj is BaseToolset {
 }
 
 /**
+ * Returns `tools` ordered by name, without modifying the given array.
+ *
+ * A remote tool source is under no obligation to list its tools in a stable
+ * order. An order that shifts between turns rewrites the tool declarations in
+ * every request and invalidates the model's context cache. Comparison is by
+ * code unit rather than by locale, so the result does not depend on the host's
+ * locale data. `Array.prototype.sort` is stable, so tools that share a name
+ * keep the order the source gave them.
+ */
+export function sortToolsByName<T extends BaseTool>(tools: T[]): T[] {
+  return [...tools].sort((a, b) =>
+    a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
+  );
+}
+
+/**
  * Base class for toolset.
  *
  * A toolset is a collection of tools that can be used by an agent.
