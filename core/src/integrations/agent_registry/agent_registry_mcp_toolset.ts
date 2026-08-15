@@ -9,7 +9,11 @@ import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {AuthCredential} from '../../auth/auth_credential.js';
 import {AuthScheme} from '../../auth/auth_schemes.js';
 import {BaseTool} from '../../tools/base_tool.js';
-import {BaseToolset, ToolPredicate} from '../../tools/base_toolset.js';
+import {
+  BaseToolset,
+  ToolPredicate,
+  sortToolsByName,
+} from '../../tools/base_toolset.js';
 import {
   MCPSessionManager,
   StreamableHTTPConnectionParams,
@@ -77,7 +81,8 @@ export class AgentRegistrySingleMCPToolset extends BaseToolset {
    * connection is established so that tokens are always fresh.
    *
    * @param context - Optional readonly agent context passed to the header provider.
-   * @returns The resolved and optionally filtered list of {@link MCPTool} instances.
+   * @returns The resolved and optionally filtered list of {@link MCPTool}
+   *   instances, ordered by tool name.
    */
   async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {
     const headers: Record<string, string> = {};
@@ -144,11 +149,15 @@ export class AgentRegistrySingleMCPToolset extends BaseToolset {
 
     // Apply toolFilter selection when specified
     const filter = this.toolFilter;
-    if (!filter || (Array.isArray(filter) && filter.length === 0)) {
-      return tools;
-    }
+    const selected =
+      !filter || (Array.isArray(filter) && filter.length === 0)
+        ? tools
+        : tools.filter((t) => this.isToolSelected(t, context!));
 
-    return tools.filter((t) => this.isToolSelected(t, context!));
+    // The MCP spec does not make tools/list order contractual. A server that
+    // reorders between calls would change the declaration order sent to the
+    // model every turn and invalidate the context cache, so pin it here.
+    return sortToolsByName(selected);
   }
 
   async close(): Promise<void> {}
