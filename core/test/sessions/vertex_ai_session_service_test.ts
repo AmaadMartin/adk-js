@@ -12,7 +12,7 @@ import {
   VertexAiSessionService,
 } from '@google/adk';
 import {Session} from '@google/adk/sessions/session.js';
-import {ApiError} from '@google/genai';
+import {ApiError, Content, Part} from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   isFastForwardable,
@@ -1285,6 +1285,147 @@ describe('VertexAiSessionService', () => {
           }),
         }),
       );
+    });
+
+    describe('unsupported part fields', () => {
+      /** A `Part` serialized by an SDK that uses snake_case keys. */
+      interface PartWithLegacyMetadata extends Part {
+        part_metadata?: Record<string, unknown>;
+      }
+
+      /** The subset of the append call these assertions read. */
+      interface AppendedEvent {
+        config: {
+          content?: Content;
+          rawEvent?: {content?: Content};
+        };
+      }
+
+      const metadataSession = () =>
+        ({
+          id: 'metadata-session',
+          appName: '12345',
+          userId: 'testUser',
+          events: [],
+          lastUpdateTime: Date.now(),
+        }) as unknown as Session;
+
+      const lastAppendedEvent = (): AppendedEvent =>
+        mockClient.events.append.mock.calls.at(-1)![0];
+
+      const expectNoUnsupportedFields = (parts: Part[]) => {
+        for (const part of parts) {
+          expect('partMetadata' in part).toBe(false);
+          expect('part_metadata' in part).toBe(false);
+        }
+      };
+
+      it('strips partMetadata from content and rawEvent', async () => {
+        const event = createEvent({
+          timestamp: 1620000000000,
+          author: 'agent',
+          invocationId: 'inv-1',
+          content: {
+            role: 'model',
+            parts: [
+              {text: 'hello', partMetadata: {source: 'portal'}},
+              {text: 'world', partMetadata: {source: 'portal'}},
+            ],
+          },
+        });
+
+        await service.appendEvent({session: metadataSession(), event});
+
+        const sent = lastAppendedEvent();
+        const contentParts = sent.config.content?.parts ?? [];
+        const rawParts = sent.config.rawEvent?.content?.parts ?? [];
+        expect(contentParts.map((part) => part.text)).toEqual([
+          'hello',
+          'world',
+        ]);
+        expect(rawParts.map((part) => part.text)).toEqual(['hello', 'world']);
+        expectNoUnsupportedFields(contentParts);
+        expectNoUnsupportedFields(rawParts);
+      });
+
+      it('strips the snake_case part_metadata spelling', async () => {
+        const legacyPart: PartWithLegacyMetadata = {
+          text: 'hello',
+          part_metadata: {source: 'portal'},
+        };
+        const event = createEvent({
+          timestamp: 1620000000000,
+          author: 'agent',
+          invocationId: 'inv-1',
+          content: {role: 'model', parts: [legacyPart]},
+        });
+
+        await service.appendEvent({session: metadataSession(), event});
+
+        const sent = lastAppendedEvent();
+        const contentParts = sent.config.content?.parts ?? [];
+        const rawParts = sent.config.rawEvent?.content?.parts ?? [];
+        expect(contentParts.map((part) => part.text)).toEqual(['hello']);
+        expect(rawParts.map((part) => part.text)).toEqual(['hello']);
+        expectNoUnsupportedFields(contentParts);
+        expectNoUnsupportedFields(rawParts);
+      });
+
+      it('leaves the caller event untouched', async () => {
+        const partMetadata = {source: 'portal'};
+        const event = createEvent({
+          timestamp: 1620000000000,
+          author: 'agent',
+          invocationId: 'inv-1',
+          content: {role: 'model', parts: [{text: 'hello', partMetadata}]},
+        });
+
+        await service.appendEvent({session: metadataSession(), event});
+
+        expect(event.content?.parts?.[0]).toEqual({
+          text: 'hello',
+          partMetadata,
+        });
+      });
+
+      it('passes a part without partMetadata through unchanged', async () => {
+        const content: Content = {
+          role: 'model',
+          parts: [{text: 'hello', thought: true, thoughtSignature: 'sig'}],
+        };
+        const event = createEvent({
+          timestamp: 1620000000000,
+          author: 'agent',
+          invocationId: 'inv-1',
+          content,
+        });
+
+        await service.appendEvent({session: metadataSession(), event});
+
+        const sent = lastAppendedEvent();
+        expect(sent.config.content).toBe(content);
+        expect(sent.config.rawEvent?.content).toEqual(content);
+      });
+
+      it.each([
+        ['no content', undefined],
+        ['no parts', {role: 'model'}],
+        ['empty parts', {role: 'model', parts: []}],
+      ])('appends an event with %s', async (_name, content) => {
+        const event = createEvent({
+          timestamp: 1620000000000,
+          author: 'agent',
+          invocationId: 'inv-1',
+          content,
+        });
+
+        await service.appendEvent({session: metadataSession(), event});
+
+        const sent = lastAppendedEvent();
+        expect(mockClient.events.append).toHaveBeenCalledTimes(1);
+        expect(sent.config.content).toBe(content);
+        expect(sent.config.rawEvent?.content).toEqual(content);
+      });
     });
 
     describe('agent transfer action', () => {
