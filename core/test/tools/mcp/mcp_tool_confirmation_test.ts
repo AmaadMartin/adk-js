@@ -15,14 +15,16 @@ import {
   createSession,
 } from '@google/adk';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
-import {Tool} from '@modelcontextprotocol/sdk/types.js';
+import {CallToolResult, Tool} from '@modelcontextprotocol/sdk/types.js';
 import {describe, expect, it, vi} from 'vitest';
 
 const REQUIRES_CONFIRMATION = {
   error: 'This tool call requires confirmation, please approve or reject.',
 };
 const REJECTED = {error: 'This tool call is rejected.'};
-const SERVER_RESULT = {content: [{type: 'text', text: 'deleted'}]};
+const SERVER_RESULT: CallToolResult = {
+  content: [{type: 'text', text: 'deleted'}],
+};
 
 const DESTRUCTIVE_ARGS = {path: '/etc'};
 const BENIGN_ARGS = {path: '/tmp/scratch'};
@@ -51,18 +53,24 @@ function makeContext(options: {
   return new Context({invocationContext, ...options});
 }
 
-/** A session manager whose session and calls are directly assertable. */
+/**
+ * A real session manager whose transport-touching methods are stubbed, so a
+ * test can assert the server is not contacted, and the stubs stay checked
+ * against the real signatures.
+ */
 function makeSessionManager() {
-  const callTool = vi.fn().mockResolvedValue(SERVER_RESULT);
-  const client = {
-    callTool,
-    close: vi.fn().mockResolvedValue(undefined),
-  } as unknown as Client;
-  const createMcpSession = vi.fn().mockResolvedValue(client);
-  const sessionManager = {
-    createSession: createMcpSession,
-    closeSession: vi.fn().mockResolvedValue(undefined),
-  } as unknown as MCPSessionManager;
+  const client = new Client({name: 'test-client', version: '1.0.0'});
+  const callTool = vi
+    .spyOn(client, 'callTool')
+    .mockResolvedValue(SERVER_RESULT);
+  const sessionManager = new MCPSessionManager({
+    type: 'StdioConnectionParams',
+    serverParams: {command: 'never-spawned'},
+  });
+  const createMcpSession = vi
+    .spyOn(sessionManager, 'createSession')
+    .mockResolvedValue(client);
+  vi.spyOn(sessionManager, 'closeSession').mockResolvedValue(undefined);
   return {sessionManager, createMcpSession, callTool};
 }
 
