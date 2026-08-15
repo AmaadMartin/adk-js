@@ -96,12 +96,8 @@ interface ServerOptions {
  * appended to the session, so a mutation here would corrupt session history.
  */
 function splitArtifactDeltaEvent(event: Event): Event[] {
-  const artifactDelta = event.actions?.artifactDelta;
-  if (
-    !artifactDelta ||
-    Object.keys(artifactDelta).length === 0 ||
-    !event.content?.parts?.length
-  ) {
+  const {artifactDelta} = event.actions;
+  if (!Object.keys(artifactDelta).length || !event.content?.parts?.length) {
     return [event];
   }
 
