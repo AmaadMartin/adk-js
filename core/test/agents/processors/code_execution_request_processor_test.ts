@@ -126,6 +126,13 @@ function seedInputFiles(ctx: InvocationContext, files: File[]): void {
   new CodeExecutorContext(new State(ctx.session.state)).addInputFiles(files);
 }
 
+/** The names of the input files handed to the executor, across every call. */
+function executedFileNames(executor: RecordingCodeExecutor): string[] {
+  return executor.executions.flatMap((execution) =>
+    (execution.inputFiles ?? []).map((file) => file.name),
+  );
+}
+
 function createLlmRequest(overrides: Partial<LlmRequest> = {}): LlmRequest {
   return {
     contents: [],
@@ -352,6 +359,99 @@ describe('CodeExecutionRequestProcessor', () => {
         'notes.txt',
         'data_1_1.csv',
       ]);
+    });
+  });
+
+  describe('unsupported data files', () => {
+    it('skips a stored unsupported file and still preprocesses the CSV behind it', async () => {
+      const {agent, executor} = createDataFileAgent();
+      const ctx = createMockInvocationContext(
+        agent,
+        createScopedArtifactService(),
+      );
+      seedInputFiles(ctx, [NOTES_FILE]);
+      const llmRequest = createLlmRequest({contents: [csvUserContent()]});
+
+      const events = await collectEvents(
+        CODE_EXECUTION_REQUEST_PROCESSOR.runAsync(ctx, llmRequest),
+      );
+
+      expect(events).toHaveLength(2);
+      expect(events[0].content?.parts?.[0].text).toBe(
+        'Processing input file: `data_1_1.csv`',
+      );
+      const code = events[0].content?.parts?.[1].executableCode?.code;
+      expect(code).toContain('explore_df');
+      expect(code).toContain("pd.read_csv('data_1_1.csv')");
+      expect(executedFileNames(executor)).toEqual(['data_1_1.csv']);
+    });
+
+    it('preprocesses the CSVs on both sides of an unsupported file', async () => {
+      const {agent, executor} = createDataFileAgent();
+      const ctx = createMockInvocationContext(
+        agent,
+        createScopedArtifactService(),
+      );
+      seedInputFiles(ctx, [
+        {name: 'first.csv', content: 'a,b\n1,2\n', mimeType: 'text/csv'},
+        NOTES_FILE,
+      ]);
+      const llmRequest = createLlmRequest({contents: [csvUserContent()]});
+
+      const events = await collectEvents(
+        CODE_EXECUTION_REQUEST_PROCESSOR.runAsync(ctx, llmRequest),
+      );
+
+      expect(events).toHaveLength(4);
+      expect(events[0].content?.parts?.[0].text).toBe(
+        'Processing input file: `first.csv`',
+      );
+      expect(events[2].content?.parts?.[0].text).toBe(
+        'Processing input file: `data_1_1.csv`',
+      );
+      expect(executedFileNames(executor)).toEqual([
+        'first.csv',
+        'data_1_1.csv',
+      ]);
+    });
+
+    it('yields nothing when every input file is unsupported', async () => {
+      const {agent, executor} = createDataFileAgent();
+      const ctx = createMockInvocationContext(
+        agent,
+        createScopedArtifactService(),
+      );
+      seedInputFiles(ctx, [NOTES_FILE]);
+      const llmRequest = createLlmRequest({
+        contents: [{role: 'user', parts: [{text: 'hello'}]}],
+      });
+
+      const events = await collectEvents(
+        CODE_EXECUTION_REQUEST_PROCESSOR.runAsync(ctx, llmRequest),
+      );
+
+      expect(events).toHaveLength(0);
+      expect(executor.executions).toHaveLength(0);
+    });
+
+    it('does not mark the skipped file as processed', async () => {
+      const {agent} = createDataFileAgent();
+      const ctx = createMockInvocationContext(
+        agent,
+        createScopedArtifactService(),
+      );
+      seedInputFiles(ctx, [NOTES_FILE]);
+      const llmRequest = createLlmRequest({contents: [csvUserContent()]});
+
+      const events = await collectEvents(
+        CODE_EXECUTION_REQUEST_PROCESSOR.runAsync(ctx, llmRequest),
+      );
+
+      expect(events).toHaveLength(2);
+      const published = new CodeExecutorContext(
+        new State(events[1].actions.stateDelta),
+      );
+      expect(published.getProcessedFileNames()).toEqual(['data_1_1.csv']);
     });
   });
 });

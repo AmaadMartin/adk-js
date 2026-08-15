@@ -232,7 +232,7 @@ async function* runPreProcessor(
 
     // Skip for unsupported file or executor types
     if (!codeStr) {
-      return;
+      continue;
     }
 
     // Emit the code to execute, and add it to the LLM request
