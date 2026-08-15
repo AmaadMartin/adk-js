@@ -510,11 +510,14 @@ export class VertexAiSessionService extends BaseSessionService {
       customMetadata[WORKFLOW_CUSTOM_METADATA_KEY] = workflowMetadata;
     }
 
-    const config = partialCopy<AppendAgentEngineSessionEventConfig>(event, [
-      'content',
-      'errorCode',
-      'errorMessage',
-    ]);
+    const sanitizedEvent = event.content
+      ? {...event, content: withoutPartMetadata(event.content)}
+      : event;
+
+    const config = partialCopy<AppendAgentEngineSessionEventConfig>(
+      sanitizedEvent,
+      ['content', 'errorCode', 'errorMessage'],
+    );
     config.actions = toApiActions(event.actions);
 
     config.eventMetadata = {
@@ -530,7 +533,7 @@ export class VertexAiSessionService extends BaseSessionService {
         Object.keys(customMetadata).length > 0 ? customMetadata : undefined,
     };
 
-    const rawEvent = JSON.parse(JSON.stringify(event)) as Record<
+    const rawEvent = JSON.parse(JSON.stringify(sanitizedEvent)) as Record<
       string,
       unknown
     >;
@@ -654,6 +657,32 @@ function toApiActions(
 }
 
 /**
+ * Returns `content` without the `partMetadata` the Agent Engine sessions API
+ * rejects.
+ *
+ * `partMetadata` is a Gemini Developer API-only field. The sessions API does
+ * not model it and fails `appendEvent` with `400 INVALID_ARGUMENT` (`Unknown
+ * name "part_metadata"`), and the streaming Interactions path sets it while
+ * it accumulates function-call arguments. Copies instead of deleting in place:
+ * `partialCopy` is shallow, so a delete would strip the event the caller still
+ * holds.
+ */
+function withoutPartMetadata(content: Content): Content {
+  // TODO: remove once the Agent Engine sessions API accepts partMetadata.
+  if (!content.parts?.some((part) => 'partMetadata' in part)) {
+    return content;
+  }
+  return {
+    ...content,
+    parts: content.parts.map((part) => {
+      const stripped = {...part};
+      delete stripped.partMetadata;
+      return stripped;
+    }),
+  };
+}
+
+/**
  * `EventActions` as it can arrive on the wire. `compaction` is adk-python's
  * canonical channel inside `rawEvent`; it is `unknown` because the payload is
  * whatever an earlier SDK version wrote, and it never survives onto a
@@ -726,8 +755,7 @@ function _fromApiEvent(apiEventObj: VertexAiSessionEvent): Event {
   const eventMetadata = apiEventObj.eventMetadata || {};
 
   let customMetadata = eventMetadata.customMetadata as
-    | Record<string, unknown>
-    | undefined;
+    Record<string, unknown> | undefined;
   let compactionData: ParsedCompactionMetadata | undefined;
   let usageMetadataData = null;
   let workflowData: WorkflowEventMetadata | undefined;
@@ -786,11 +814,9 @@ function _fromApiEvent(apiEventObj: VertexAiSessionEvent): Event {
     branch: eventMetadata['branch'] as string | undefined,
     customMetadata,
     longRunningToolIds: eventMetadata['longRunningToolIds'] as
-      | string[]
-      | undefined,
+      string[] | undefined,
     groundingMetadata: eventMetadata['groundingMetadata'] as
-      | GroundingMetadata
-      | undefined,
+      GroundingMetadata | undefined,
     usageMetadata:
       usageMetadataData as unknown as GenerateContentResponseUsageMetadata,
   };
