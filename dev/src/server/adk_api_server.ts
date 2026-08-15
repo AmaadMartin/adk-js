@@ -50,6 +50,7 @@ import {
   serializeAgent,
   serializeAppInfo,
 } from './app_info.js';
+import {buildSseErrorPayload} from './sse_error.js';
 import {renderStructureGraphAsDot} from './structure_graph.js';
 
 /**
@@ -125,6 +126,7 @@ export class AdkApiServer {
     Object.create(null);
   private memoryExporter: InMemoryExporter;
   private readonly logger: Logger;
+  private readonly logLevel: LogLevel;
   private readonly a2a: boolean;
   private readonly a2aAuthToken?: string;
 
@@ -158,7 +160,8 @@ export class AdkApiServer {
           return `${info.level}: [${info.label}] ${info.timestamp} ${info.message}`;
         },
       });
-    this.logger.setLogLevel(options.logLevel ?? LogLevel.INFO);
+    this.logLevel = options.logLevel ?? LogLevel.INFO;
+    this.logger.setLogLevel(this.logLevel);
     this.a2a = options.a2a ?? false;
     // An exported-but-empty value means "no token"; anything else is handed
     // to the authenticator, which rejects a token that is not usable.
@@ -1059,10 +1062,13 @@ export class AdkApiServer {
       } catch (e: unknown) {
         if (res.headersSent) {
           if (!responseCompleted) {
-            const error = (e as Error).message;
-            this.logger.error(error);
+            const payload = buildSseErrorPayload(
+              e,
+              this.logLevel <= LogLevel.DEBUG,
+            );
+            this.logger.error(payload.error);
             try {
-              res.end(`data: ${JSON.stringify({error})}\n\n`);
+              res.end(`data: ${JSON.stringify(payload)}\n\n`);
             } catch {
               // Ignore errors from res.end when the response has already been sent.
             }

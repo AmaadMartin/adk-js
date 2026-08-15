@@ -18,6 +18,7 @@ import {
   InMemorySessionService,
   InvocationContext,
   LlmAgent,
+  LogLevel,
   node,
   Runner,
   Session,
@@ -215,6 +216,91 @@ const TEST_AGENT = new TestAgent({
     }),
   ],
 });
+
+/**
+ * Stands in for `InvocationAbortedError`, which sets `this.name` but is not
+ * re-exported from `@google/adk`. The server reads `name`, so this reaches the
+ * same path.
+ */
+class TestAbortError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'InvocationAbortedError';
+  }
+}
+
+/** The `/run_sse` error frame, as a client parses it off the wire. */
+interface SseErrorFrame {
+  error: string;
+  error_details: {
+    error_type: string;
+    error_message: string;
+    timestamp: number;
+    stacktrace?: string;
+  };
+}
+
+/** Prefix of every `data:` frame of an SSE stream. */
+const SSE_DATA_PREFIX = 'data: ';
+
+/** Builds a run that yields one event and then throws `error`. */
+function failingRun(
+  error: Error,
+): () => AsyncGenerator<Event, void, undefined> {
+  return async function* () {
+    yield createEvent({
+      invocationId: 'failingInvocation',
+      author: 'testAgent',
+      content: {parts: [{text: 'Partial answer'}], role: 'model'},
+    });
+    throw error;
+  };
+}
+
+/**
+ * Posts to `/run_sse` against a run that yields one event and then throws
+ * `error`, and splits the response into the streamed events and the final
+ * error frame.
+ */
+async function postFailingRunSse(
+  httpClient: HttpClient,
+  sessionService: BaseSessionService,
+  error: Error,
+): Promise<{status: number; events: Event[]; errorFrame: SseErrorFrame}> {
+  await sessionService.createSession({
+    appName: 'testApp',
+    userId: 'testUser',
+    sessionId: 'sessionId',
+  });
+
+  const spy = vi
+    .spyOn(Runner.prototype, 'runAsync')
+    .mockImplementation(failingRun(error));
+
+  try {
+    const response = await httpClient.post('/run_sse', {
+      appName: 'testApp',
+      userId: 'testUser',
+      sessionId: 'sessionId',
+      newMessage: {parts: [{text: 'Hello test agent!'}], role: 'user'},
+    });
+
+    const payloads = response
+      .text!.split('\n\n')
+      .filter((frame) => frame !== '')
+      .map((frame) => frame.slice(SSE_DATA_PREFIX.length));
+
+    return {
+      status: response.status,
+      events: payloads
+        .slice(0, -1)
+        .map((payload) => JSON.parse(payload) as Event),
+      errorFrame: JSON.parse(payloads[payloads.length - 1]!) as SseErrorFrame,
+    };
+  } finally {
+    spy.mockRestore();
+  }
+}
 
 describe('AdkWebServer', () => {
   let agentLoader: AgentLoader;
@@ -804,6 +890,62 @@ describe('AdkWebServer', () => {
       expect(runAsyncParams.abortSignal).toBeInstanceOf(AbortSignal);
 
       spy.mockRestore();
+    });
+
+    it('ends a stream that fails mid-way with an error_details frame', async () => {
+      const {status, events, errorFrame} = await postFailingRunSse(
+        client,
+        sessionService,
+        new TypeError('model exploded'),
+      );
+
+      expect(status).toBe(200);
+      expect(events).toHaveLength(1);
+      expect(events[0]!.content?.parts?.[0].text).toBe('Partial answer');
+      expect(errorFrame.error).toBe('TypeError: model exploded');
+      expect(errorFrame.error_details.error_type).toBe('TypeError');
+      expect(errorFrame.error_details.error_message).toBe('model exploded');
+      expect(typeof errorFrame.error_details.timestamp).toBe('number');
+      expect(errorFrame.error_details.stacktrace).toBeUndefined();
+    });
+
+    it('includes the stacktrace in the error frame under debug logging', async () => {
+      const debugServer = new AdkApiServer({
+        agentLoader,
+        sessionService,
+        memoryService,
+        artifactService,
+        logLevel: LogLevel.DEBUG,
+      });
+      await debugServer.start();
+
+      try {
+        const {errorFrame} = await postFailingRunSse(
+          new HttpClient(debugServer.url),
+          sessionService,
+          new TypeError('model exploded'),
+        );
+
+        expect(typeof errorFrame.error_details.stacktrace).toBe('string');
+        expect(errorFrame.error_details.stacktrace).toContain('model exploded');
+      } finally {
+        await debugServer.stop();
+      }
+    });
+
+    it('reports the error type of an aborted invocation', async () => {
+      const {errorFrame} = await postFailingRunSse(
+        client,
+        sessionService,
+        new TestAbortError('Invocation aborted.'),
+      );
+
+      expect(errorFrame.error).toBe(
+        'InvocationAbortedError: Invocation aborted.',
+      );
+      expect(errorFrame.error_details.error_type).toBe(
+        'InvocationAbortedError',
+      );
     });
   });
 
