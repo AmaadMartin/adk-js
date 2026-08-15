@@ -21,18 +21,7 @@ import {MCPSessionManager} from './mcp_session_manager.js';
 /**
  * Whether an {@link MCPTool} call requires user confirmation before it is sent
  * to the MCP server: a boolean, or a predicate over the call arguments and the
- * tool context.
- *
- * The gate is enforced when the tool is invoked through an `LlmAgent` turn:
- * `agents/functions.ts` surfaces an `adk_request_confirmation` interrupt from
- * the tool's `requestedToolConfirmations`, and the call only reaches the MCP
- * server once the user approves (via the
- * `RequestConfirmationLlmRequestProcessor`).
- *
- * NOTE: a workflow `ToolNode` does not yet route through that path, so a gated
- * tool used directly as a node does not pause — it returns the "requires
- * confirmation" error as its node output. This limitation is shared with
- * `FunctionTool`.
+ * tool context. See {@link ToolOptions.requireConfirmation}.
  */
 export type MCPRequireConfirmation =
   | boolean
