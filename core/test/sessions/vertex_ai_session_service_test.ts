@@ -7,6 +7,7 @@
 import {Sessions} from '@google-cloud/vertexai/build/src/genai/sessions.js';
 import {
   createEvent,
+  createSession,
   isCompactedEvent,
   State,
   VertexAiSessionService,
@@ -1302,13 +1303,12 @@ describe('VertexAiSessionService', () => {
       }
 
       const metadataSession = () =>
-        ({
+        createSession({
           id: 'metadata-session',
           appName: '12345',
           userId: 'testUser',
-          events: [],
           lastUpdateTime: Date.now(),
-        }) as unknown as Session;
+        });
 
       const lastAppendedEvent = (): AppendedEvent =>
         mockClient.events.append.mock.calls.at(-1)![0];
