@@ -45,6 +45,19 @@ interface OAuth2TokenResponse {
 }
 
 /**
+ * Bound on a single OAuth2 token request. A token endpoint that accepts the
+ * connection but never answers would otherwise hold the awaiting agent turn
+ * for minutes under undici's defaults. Matches adk-python's
+ * `_TOKEN_REQUEST_TIMEOUT_SECONDS`.
+ */
+const TOKEN_REQUEST_TIMEOUT_MS = 10_000;
+
+/** True for the `TimeoutError` `fetch` raises when an `AbortSignal.timeout` fires. */
+function isTimeoutError(e: unknown): boolean {
+  return e instanceof Error && e.name === 'TimeoutError';
+}
+
+/**
  * Fetches OAuth2 tokens from the endpoint using the given body.
  */
 export async function fetchOAuth2Tokens(
@@ -70,6 +83,7 @@ export async function fetchOAuth2Tokens(
       // this credential-bearing POST (client_secret/refresh_token) to a
       // private/cloud-metadata address (CWE-918).
       redirect: 'error',
+      signal: AbortSignal.timeout(TOKEN_REQUEST_TIMEOUT_MS),
     });
 
     if (!response.ok) {
@@ -88,8 +102,13 @@ export async function fetchOAuth2Tokens(
         : undefined,
     };
   } catch (e) {
-    logger.error(`Failed to fetch OAuth2 tokens: ${e}`);
-    throw e;
+    const error = isTimeoutError(e)
+      ? new Error(
+          `OAuth2 token request to '${endpoint}' timed out after ${TOKEN_REQUEST_TIMEOUT_MS}ms`,
+        )
+      : e;
+    logger.error(`Failed to fetch OAuth2 tokens: ${error}`);
+    throw error;
   }
 }
 
@@ -141,9 +160,7 @@ export interface RefreshTokenParams {
  * Parameters for creating an OAuth2 token request body.
  */
 export type OAuth2TokenRequestParams =
-  | ClientCredentialsParams
-  | AuthorizationCodeParams
-  | RefreshTokenParams;
+  ClientCredentialsParams | AuthorizationCodeParams | RefreshTokenParams;
 
 /**
  * Creates URLSearchParams for an OAuth2 token request.
