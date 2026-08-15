@@ -4,33 +4,24 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {
+  getServiceRegistry,
+  ServiceFactoryOptions,
+} from '../services/service_registry.js';
 import {redactUriPassword} from '../utils/redact_uri.js';
 import {BaseArtifactService} from './base_artifact_service.js';
-import {FileArtifactService} from './file_artifact_service.js';
-import {GcsArtifactService} from './gcs_artifact_service.js';
-import {
-  InMemoryArtifactService,
-  isInMemoryConnectionString,
-} from './in_memory_artifact_service.js';
 
-export function getArtifactServiceFromUri(uri: string): BaseArtifactService {
-  if (isInMemoryConnectionString(uri)) {
-    return new InMemoryArtifactService();
+export function getArtifactServiceFromUri(
+  uri: string,
+  options?: ServiceFactoryOptions,
+): BaseArtifactService {
+  const service = getServiceRegistry().createArtifactService(uri, options);
+
+  if (!service) {
+    throw new Error(
+      `Unsupported artifact service URI: ${redactUriPassword(uri)}`,
+    );
   }
 
-  if (uri.startsWith('gs://')) {
-    const bucket = uri.split('://')[1];
-
-    return new GcsArtifactService(bucket);
-  }
-
-  if (uri.startsWith('file://')) {
-    const rootDir = uri.split('://')[1];
-
-    return new FileArtifactService(rootDir);
-  }
-
-  throw new Error(
-    `Unsupported artifact service URI: ${redactUriPassword(uri)}`,
-  );
+  return service;
 }

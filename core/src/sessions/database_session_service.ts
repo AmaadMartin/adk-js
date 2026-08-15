@@ -40,6 +40,18 @@ import {createSession, Session} from './session.js';
 import {State} from './state.js';
 
 /**
+ * The URI schemes {@link DatabaseSessionService} connects to.
+ */
+export const DATABASE_URI_SCHEMES = [
+  'postgres',
+  'postgresql',
+  'mysql',
+  'mariadb',
+  'mssql',
+  'sqlite',
+] as const;
+
+/**
  * Checks if a URI is a database connection URI.
  *
  * @param uri The URI to check.
@@ -50,14 +62,7 @@ export function isDatabaseConnectionString(uri?: string): boolean {
     return false;
   }
 
-  return (
-    uri.startsWith('postgres://') ||
-    uri.startsWith('postgresql://') ||
-    uri.startsWith('mysql://') ||
-    uri.startsWith('mariadb://') ||
-    uri.startsWith('mssql://') ||
-    uri.startsWith('sqlite://')
-  );
+  return DATABASE_URI_SCHEMES.some((scheme) => uri.startsWith(`${scheme}://`));
 }
 
 /**

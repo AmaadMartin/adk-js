@@ -5,8 +5,10 @@
  */
 
 import {
+  BaseMemoryService,
   getLogger,
   getMemoryServiceFromUri,
+  getServiceRegistry,
   InMemoryMemoryService,
   VertexAiMemoryBankService,
 } from '@google/adk';
@@ -153,6 +155,36 @@ describe('getMemoryServiceFromUri', () => {
       getMemoryServiceFromUri('unsupported://localhost:5432/mydb'),
     ).toThrow(
       'Unsupported memory service URI: unsupported://localhost:5432/mydb',
+    );
+  });
+});
+
+describe('getMemoryServiceFromUri with a registered scheme', () => {
+  // The process-wide registry has no unregister API, so this scheme is unique
+  // to this file.
+  const CUSTOM_SCHEME = 'custommemorytest';
+
+  it('serves the scheme and hands the factory the uri and options', () => {
+    const service = {} as BaseMemoryService;
+    const factory = vi.fn().mockReturnValue(service);
+    getServiceRegistry().registerMemoryService(CUSTOM_SCHEME, factory);
+
+    const resolved = getMemoryServiceFromUri(`${CUSTOM_SCHEME}://bank/x`, {
+      agentsDir: '/agents',
+    });
+
+    expect(resolved).toBe(service);
+    expect(factory).toHaveBeenCalledExactlyOnceWith(
+      `${CUSTOM_SCHEME}://bank/x`,
+      {agentsDir: '/agents'},
+    );
+  });
+
+  it('redacts a password in the unsupported uri message', () => {
+    expect(() =>
+      getMemoryServiceFromUri('unsupported://user:hunter2@host/bank'),
+    ).toThrow(
+      'Unsupported memory service URI: unsupported://user:***@host/bank',
     );
   });
 });

@@ -70,3 +70,51 @@ export function parseAgentEngineResourceName(
 
   return {projectId: parts[1], location: parts[2], agentEngineId: parts[3]};
 }
+
+/**
+ * Resolves an agent engine resource to its project, location and id.
+ *
+ * The resource is either a bare agent engine id, in which case the project and
+ * the location come from the environment, or a fully qualified resource name.
+ * Both forms resolve to the bare id, because the callers address the agent
+ * engine by id rather than by path.
+ *
+ * @param resource The bare id or the full resource name.
+ * @returns The resolved components.
+ */
+export function resolveAgentEngineResource(
+  resource: string,
+): AgentEngineResourceName {
+  if (!resource) {
+    throw new Error(
+      'Agent engine resource name or resource id cannot be empty.',
+    );
+  }
+
+  if (!resource.includes('/')) {
+    const projectId = process.env.GOOGLE_CLOUD_PROJECT;
+    const location = process.env.GOOGLE_CLOUD_LOCATION;
+
+    if (!projectId || !location) {
+      throw new Error(
+        'GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION must both be set to ' +
+          'use an agent engine resource id. Use the full resource name ' +
+          'projects/{project}/locations/{location}/reasoningEngines/{id} to ' +
+          'avoid that requirement.',
+      );
+    }
+
+    return {projectId, location, agentEngineId: resource};
+  }
+
+  const parsed = parseAgentEngineResourceName(resource);
+
+  if (!parsed) {
+    throw new Error(
+      'Agent engine resource name is mal-formatted. It should be of format: ' +
+        'projects/{project}/locations/{location}/reasoningEngines/{id}',
+    );
+  }
+
+  return parsed;
+}

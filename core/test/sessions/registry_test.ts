@@ -4,8 +4,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {InMemorySessionService, getSessionServiceFromUri} from '@google/adk';
-import {describe, expect, it} from 'vitest';
+import {
+  BaseSessionService,
+  InMemorySessionService,
+  getServiceRegistry,
+  getSessionServiceFromUri,
+} from '@google/adk';
+import {describe, expect, it, vi} from 'vitest';
+
+// The process-wide registry has no unregister API, so this scheme is unique to
+// this file.
+const CUSTOM_SCHEME = 'customsessiontest';
 
 describe('Registry', () => {
   describe('getSessionServiceFromUri', () => {
@@ -19,6 +28,30 @@ describe('Registry', () => {
         getSessionServiceFromUri('unsupported://localhost:5432/mydb'),
       ).to.throw(
         'Unsupported session service URI: unsupported://localhost:5432/mydb',
+      );
+    });
+
+    it('should serve a scheme registered on the process-wide registry', () => {
+      const service = {} as BaseSessionService;
+      const factory = vi.fn().mockReturnValue(service);
+      getServiceRegistry().registerSessionService(CUSTOM_SCHEME, factory);
+
+      const resolved = getSessionServiceFromUri(`${CUSTOM_SCHEME}://db/x`, {
+        agentsDir: '/agents',
+      });
+
+      expect(resolved).toBe(service);
+      expect(factory).toHaveBeenCalledExactlyOnceWith(
+        `${CUSTOM_SCHEME}://db/x`,
+        {agentsDir: '/agents'},
+      );
+    });
+
+    it('should redact a password in the unsupported uri message', () => {
+      expect(() =>
+        getSessionServiceFromUri('unsupported://user:hunter2@localhost/db'),
+      ).to.throw(
+        'Unsupported session service URI: unsupported://user:***@localhost/db',
       );
     });
   });
