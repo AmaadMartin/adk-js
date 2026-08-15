@@ -29,3 +29,24 @@ export function partialCopy<TDest extends object>(
 
   return result;
 }
+
+/**
+ * Copies the entries of `source` whose value is not `undefined`.
+ *
+ * Lets one object's explicitly-provided fields be applied over another's
+ * without an absent field blanking the value underneath it.
+ *
+ * @param source The source object.
+ * @returns A new object holding only the defined entries of `source`.
+ */
+export function definedFields<T extends object>(source: T): Partial<T> {
+  const result: Partial<T> = {};
+
+  for (const key of Object.keys(source) as Array<keyof T>) {
+    if (source[key] !== undefined) {
+      result[key] = source[key];
+    }
+  }
+
+  return result;
+}
