@@ -8,7 +8,10 @@ import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   AgentRegistrySingleMCPToolset,
   GCP_MCP_SERVER_DESTINATION_ID,
+  InvocationContext,
+  PluginManager,
   ReadonlyContext,
+  createSession,
 } from '../../src/index.js';
 import {StreamableHTTPConnectionParams} from '../../src/tools/mcp/mcp_session_manager.js';
 import {logger} from '../../src/utils/logger.js';
@@ -39,6 +42,15 @@ const BASE_PARAMS: StreamableHTTPConnectionParams = {
   type: 'StreamableHTTPConnectionParams',
   url: 'https://example.com/mcp',
 };
+
+/** A context that carries no state, for filters that do not read one. */
+const EMPTY_CONTEXT = new ReadonlyContext(
+  new InvocationContext({
+    invocationId: 'test-invocation',
+    session: createSession({id: 'test-session', appName: 'test-app'}),
+    pluginManager: new PluginManager([]),
+  }),
+);
 
 describe('AgentRegistrySingleMCPToolset', () => {
   beforeEach(() => {
@@ -190,7 +202,7 @@ describe('AgentRegistrySingleMCPToolset', () => {
         toolFilter: (tool) => tool.name !== 'mike',
       });
 
-      const tools = await toolset.getTools({} as ReadonlyContext);
+      const tools = await toolset.getTools(EMPTY_CONTEXT);
 
       expect(tools.map((t) => t.name)).toEqual(['alpha', 'zulu']);
     });

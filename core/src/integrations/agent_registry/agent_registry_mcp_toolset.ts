@@ -123,41 +123,39 @@ export class AgentRegistrySingleMCPToolset extends BaseToolset {
     }
 
     // Map tool definitions to MCPTools
-    const tools = listResult.tools.map((tool) => {
-      const prefixedName = this.prefix
-        ? `${this.prefix}_${tool.name}`
-        : tool.name;
-      const mcpTool = new MCPTool(
-        {...tool, name: prefixedName},
-        sessionManager,
-        tool.name,
-      );
+    const tools = sortToolsByName(
+      listResult.tools.map((tool) => {
+        const prefixedName = this.prefix
+          ? `${this.prefix}_${tool.name}`
+          : tool.name;
+        const mcpTool = new MCPTool(
+          {...tool, name: prefixedName},
+          sessionManager,
+          tool.name,
+        );
 
-      // Inject gcp.mcp.server.destination.id telemetry key for tracing tools execution
-      const toolWithMetadata = mcpTool as unknown as {
-        customMetadata?: Record<string, string>;
-      };
-      if (this.destinationResourceId) {
-        if (!toolWithMetadata.customMetadata) {
-          toolWithMetadata.customMetadata = {};
+        // Inject gcp.mcp.server.destination.id telemetry key for tracing tools execution
+        const toolWithMetadata = mcpTool as unknown as {
+          customMetadata?: Record<string, string>;
+        };
+        if (this.destinationResourceId) {
+          if (!toolWithMetadata.customMetadata) {
+            toolWithMetadata.customMetadata = {};
+          }
+          toolWithMetadata.customMetadata[GCP_MCP_SERVER_DESTINATION_ID] =
+            this.destinationResourceId;
         }
-        toolWithMetadata.customMetadata[GCP_MCP_SERVER_DESTINATION_ID] =
-          this.destinationResourceId;
-      }
-      return mcpTool;
-    });
+        return mcpTool;
+      }),
+    );
 
     // Apply toolFilter selection when specified
     const filter = this.toolFilter;
-    const selected =
-      !filter || (Array.isArray(filter) && filter.length === 0)
-        ? tools
-        : tools.filter((t) => this.isToolSelected(t, context!));
+    if (!filter || (Array.isArray(filter) && filter.length === 0)) {
+      return tools;
+    }
 
-    // The MCP spec does not make tools/list order contractual. A server that
-    // reorders between calls would change the declaration order sent to the
-    // model every turn and invalidate the context cache, so pin it here.
-    return sortToolsByName(selected);
+    return tools.filter((t) => this.isToolSelected(t, context!));
   }
 
   async close(): Promise<void> {}

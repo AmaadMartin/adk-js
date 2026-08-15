@@ -77,19 +77,16 @@ export class MCPToolset extends BaseToolset {
       logger.debug(`tool: ${tool.name}`);
     }
 
-    const discoveredTools = listResult.tools.map((tool) => {
-      // Create a cloned tool definition with the prefixed name
-      const toolWithPrefix = {
-        ...tool,
-        name: this.prefix ? `${this.prefix}_${tool.name}` : tool.name,
-      };
-      return new MCPTool(toolWithPrefix, this.mcpSessionManager, tool.name);
-    });
-
-    // The MCP spec does not make tools/list order contractual. A server that
-    // reorders between calls would change the declaration order sent to the
-    // model every turn and invalidate the context cache, so pin it here.
-    const tools = sortToolsByName(discoveredTools);
+    const tools = sortToolsByName(
+      listResult.tools.map((tool) => {
+        // Create a cloned tool definition with the prefixed name
+        const toolWithPrefix = {
+          ...tool,
+          name: this.prefix ? `${this.prefix}_${tool.name}` : tool.name,
+        };
+        return new MCPTool(toolWithPrefix, this.mcpSessionManager, tool.name);
+      }),
+    );
 
     // Apply toolFilter when specified.
     // An empty array (the default) means no filter — all tools are returned.
