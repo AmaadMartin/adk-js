@@ -17,11 +17,11 @@ import {Content, GenerateContentResponseUsageMetadata} from '@google/genai';
 import {isCompactedEvent} from '../events/compacted_event.js';
 import {experimental} from '../utils/experimental.js';
 
+import {newInvocationContextId} from '../agents/invocation_context.js';
 import {AuthConfig} from '../auth/auth_tool.js';
 import {Event} from '../events/event.js';
 import {EventActions} from '../events/event_actions.js';
 import {ToolConfirmation} from '../tools/tool_confirmation.js';
-import {randomUUID} from '../utils/env_aware_utils.js';
 import {logger} from '../utils/logger.js';
 import {getExpressModeApiKey} from '../utils/vertex_ai_utils.js';
 
@@ -443,9 +443,7 @@ export class VertexAiSessionService extends BaseSessionService {
     const params: AppendAgentEngineSessionEventRequestParameters = {
       name: `reasoningEngines/${reasoningEngineId}/sessions/${session.id}`,
       author: event.author || 'user',
-      // Inlined rather than calling newInvocationContextId(): its module
-      // imports base_session_service.js, so importing it here closes a cycle.
-      invocationId: event.invocationId || `e-${randomUUID()}`,
+      invocationId: event.invocationId || newInvocationContextId(),
       timestamp: new Date(event.timestamp).toISOString(),
       config,
     };
