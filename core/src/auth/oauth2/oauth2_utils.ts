@@ -31,9 +31,8 @@ export function getTokenEndpoint(authScheme: AuthScheme): string | undefined {
       flows.authorizationCode,
       flows.clientCredentials,
       flows.password,
-      flows.implicit,
     ]) {
-      if (flow && 'tokenUrl' in flow && flow.tokenUrl) {
+      if (flow?.tokenUrl) {
         return flow.tokenUrl;
       }
     }

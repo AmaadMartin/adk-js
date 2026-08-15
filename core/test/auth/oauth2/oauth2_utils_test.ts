@@ -136,7 +136,6 @@ describe('oauth2_utils', () => {
           },
         },
       } as AuthScheme;
-      expect(getTokenEndpoint(scheme)).not.toBe('');
       expect(getTokenEndpoint(scheme)).toBeUndefined();
     });
   });
