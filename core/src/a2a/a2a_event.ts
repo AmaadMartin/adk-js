@@ -6,6 +6,7 @@
 
 import {
   Part as A2APart,
+  TaskState as A2ATaskState,
   Message,
   Task,
   TaskArtifactUpdateEvent,
@@ -32,6 +33,7 @@ export enum TaskState {
   CANCELED = 'canceled',
   REJECTED = 'rejected',
   INPUT_REQUIRED = 'input-required',
+  AUTH_REQUIRED = 'auth-required',
 }
 
 /**
@@ -116,12 +118,15 @@ export function isTerminalTaskStatusUpdateEvent(event: unknown): boolean {
 }
 
 /**
- * Checks if the event is an input required task status update event.
+ * Checks if the event is a paused task status update event, meaning the task
+ * waits for a human before it can continue.
  */
-export function isInputRequiredTaskStatusUpdateEvent(event: unknown): boolean {
+export function isPausedTaskStatusUpdateEvent(event: unknown): boolean {
   return (
     (isTaskStatusUpdateEvent(event) || isTask(event)) &&
-    event.status.state === TaskState.INPUT_REQUIRED
+    [TaskState.INPUT_REQUIRED, TaskState.AUTH_REQUIRED].includes(
+      event.status.state as TaskState,
+    )
   );
 }
 
@@ -372,11 +377,14 @@ export function createInputMissingErrorEvent({
   contextId,
   parts,
   metadata,
+  state = TaskState.INPUT_REQUIRED,
 }: {
   parts: A2APart[];
   taskId: string;
   contextId: string;
   metadata?: Record<string, unknown>;
+  /** The paused state to keep the task in. */
+  state?: A2ATaskState;
 }): TaskStatusUpdateEvent {
   return {
     kind: 'status-update',
@@ -384,7 +392,7 @@ export function createInputMissingErrorEvent({
     contextId,
     final: true,
     status: {
-      state: TaskState.INPUT_REQUIRED,
+      state,
       message: {
         kind: 'message',
         messageId: randomUUID(),
