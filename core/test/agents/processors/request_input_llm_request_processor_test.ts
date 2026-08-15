@@ -185,8 +185,17 @@ describe('RequestInputLlmRequestProcessor — plain-text resume record', () => {
       userText('approve'),
     ]);
 
+    expect(yielded).toHaveLength(1);
     expect(yielded[0].invocationId).toBe('inv-current');
     expect(yielded[0].branch).toBe('gate_agent');
+  });
+
+  it('threads the value a replay of the record recovers', async () => {
+    await runProcessor([nodeToolCall(), interrupt('A'), userText('42')]);
+
+    // `42` is the number the equivalent client reply `{result: "42"}` unwraps
+    // to, so the live turn and a later replay agree.
+    expect(await threadedResumeInputs()).toEqual({A: 42});
   });
 
   it('records nothing for a structured reply, which is already recorded', async () => {
@@ -211,6 +220,8 @@ describe('RequestInputLlmRequestProcessor — plain-text resume record', () => {
       userText('second answer'),
     ]);
 
+    expect(await threadedResumeInputs()).toEqual({B: 'second answer'});
+    expect(yielded).toHaveLength(1);
     expect(getFunctionResponses(yielded[0])).toEqual([
       {
         id: 'B',
@@ -218,7 +229,6 @@ describe('RequestInputLlmRequestProcessor — plain-text resume record', () => {
         response: {result: 'second answer'},
       },
     ]);
-    expect(await threadedResumeInputs()).toEqual({B: 'second answer'});
   });
 
   it('records nothing when no interrupt is pending', async () => {

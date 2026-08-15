@@ -28,6 +28,7 @@ import {
   REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
   REQUEST_INPUT_FUNCTION_CALL_NAME,
 } from '../../src/workflow/utils/hitl_utils.js';
+import {unwrapResponse} from '../../src/workflow/utils/rehydration_utils.js';
 import {Workflow} from '../../src/workflow/workflow.js';
 
 const APP_NAME = 'marker_app';
@@ -127,6 +128,20 @@ describe('plain-text HITL resume — session record', () => {
     const marker = events.find((e) => getFunctionResponses(e).length > 0);
     expect(marker?.author).toBe('user');
     expect(marker?.content?.role).toBe('user');
+  });
+
+  it('delivers live the value a replay of the record recovers', async () => {
+    const wf = new Workflow({
+      name: 'json_reply',
+      edges: [['START', gate('gate_a', 'A')]],
+    });
+
+    const {turns, events} = await typedTurns(wf, ['start', '42']);
+
+    // `42` is the number the equivalent client reply `{result: "42"}` unwraps
+    // to, so the live turn and a later replay agree.
+    expect(finalOutput(turns[1])).toBe('start|A=42');
+    expect(unwrapResponse(responses(events)[0].response)).toBe(42);
   });
 
   it('reports no pending request once the pause is answered by typing', async () => {

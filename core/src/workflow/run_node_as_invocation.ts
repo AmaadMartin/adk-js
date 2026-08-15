@@ -16,7 +16,6 @@ import {createPlainTextResumeEvents} from './utils/hitl_utils.js';
 import {
   eventsForCurrentRun,
   reconstructNodeStates,
-  unwrapResponse,
 } from './utils/rehydration_utils.js';
 import {buildNode, isNodeLike} from './utils/workflow_graph_utils.js';
 import {isWorkflow, Workflow} from './workflow.js';
@@ -182,9 +181,10 @@ function plainTextResume(ic: InvocationContext): PlainTextResume | undefined {
     return undefined;
   }
   const [id] = pending;
-  // Read the value back out of the envelope the marker records, so this turn
-  // delivers exactly what a later replay of that marker delivers.
-  return {text, inputs: {[id]: unwrapResponse({result: text})}};
+  // Only a seed: `Workflow.applyResumeInputs` reads the marker recorded below
+  // back out of the session and overwrites this with the unwrapped value, so
+  // the node gets exactly what a later replay of that marker gives it.
+  return {text, inputs: {[id]: text}};
 }
 
 /**
