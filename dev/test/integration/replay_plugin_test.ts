@@ -189,7 +189,7 @@ describe('ReplayPlugin.beforeToolCallback', () => {
       /more tool requests than expected for agent 'agent_a' at user_message_index 0/,
     );
     await expect(extra).rejects.toThrow(
-      /Expected 1, but got request at index 1/,
+      /called 'roll_die', but only 1 tool recording\(s\) exist/,
     );
   });
 
@@ -272,7 +272,9 @@ describe('ReplayPlugin.beforeToolCallback', () => {
       toolArgs: {sides: 6},
       toolContext,
     });
-    await expect(turnZeroCall).rejects.toThrow(/Expected 1/);
+    await expect(turnZeroCall).rejects.toThrow(
+      /but only 1 tool recording\(s\) exist/,
+    );
   });
 
   it('matches a recording with no recorded args', async () => {

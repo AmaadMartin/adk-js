@@ -11,7 +11,7 @@ import {
   LlmRequest,
   LlmResponse,
 } from '@google/adk';
-import {isEqual} from 'lodash-es';
+import {isDeepStrictEqual} from 'node:util';
 import {Recording} from './test_types.js';
 
 /** Raised when a replayed run diverges from what was recorded. */
@@ -24,18 +24,10 @@ export class ReplayVerificationError extends Error {
   }
 }
 
-/** A recording carrying the replay-local consumption marker. */
-type ConsumableRecording = Recording & {_consumed?: boolean};
-
-function isConsumed(recording: Recording): boolean {
-  return (recording as ConsumableRecording)._consumed === true;
-}
-
-function markConsumed(recording: Recording): void {
-  (recording as ConsumableRecording)._consumed = true;
-}
-
 export class ReplayPlugin extends BasePlugin {
+  /** Tool recordings already replayed, tracked by identity. */
+  private readonly consumedToolRecordings = new Set<Recording>();
+
   constructor(
     private recordings: Recording[],
     private context: {userMessageIndex: number},
@@ -87,18 +79,20 @@ export class ReplayPlugin extends BasePlugin {
         r.toolRecording?.toolCall,
     );
 
-    const index = agentRecordings.findIndex((r) => !isConsumed(r));
+    const index = agentRecordings.findIndex(
+      (r) => !this.consumedToolRecordings.has(r),
+    );
     if (index === -1) {
       throw new ReplayVerificationError(
         `Runtime sent more tool requests than expected for agent ` +
-          `'${agentName}' at user_message_index ${userMessageIndex}. Expected ` +
-          `${agentRecordings.length}, but got request at index ` +
-          `${agentRecordings.length}`,
+          `'${agentName}' at user_message_index ${userMessageIndex}: called ` +
+          `'${toolName}', but only ${agentRecordings.length} tool ` +
+          `recording(s) exist`,
       );
     }
 
     const rec = agentRecordings[index];
-    markConsumed(rec);
+    this.consumedToolRecordings.add(rec);
 
     const recordedCall = rec.toolRecording!.toolCall!;
     if (recordedCall.name !== toolName) {
@@ -109,7 +103,7 @@ export class ReplayPlugin extends BasePlugin {
     }
 
     const recordedArgs = recordedCall.args ?? {};
-    if (!isEqual(recordedArgs, params.toolArgs)) {
+    if (!isDeepStrictEqual(recordedArgs, params.toolArgs)) {
       throw new ReplayVerificationError(
         `Tool args mismatch for agent '${agentName}' at index ${index}:\n` +
           `recorded: ${JSON.stringify(recordedArgs)}\n` +
