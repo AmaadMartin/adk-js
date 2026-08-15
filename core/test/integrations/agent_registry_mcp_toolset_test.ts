@@ -8,6 +8,10 @@ import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   AgentRegistrySingleMCPToolset,
   GCP_MCP_SERVER_DESTINATION_ID,
+  InvocationContext,
+  PluginManager,
+  ReadonlyContext,
+  createSession,
 } from '../../src/index.js';
 import {StreamableHTTPConnectionParams} from '../../src/tools/mcp/mcp_session_manager.js';
 import {logger} from '../../src/utils/logger.js';
@@ -39,6 +43,15 @@ const BASE_PARAMS: StreamableHTTPConnectionParams = {
   url: 'https://example.com/mcp',
 };
 
+/** A context that carries no state, for filters that do not read one. */
+const EMPTY_CONTEXT = new ReadonlyContext(
+  new InvocationContext({
+    invocationId: 'test-invocation',
+    session: createSession({id: 'test-session', appName: 'test-app'}),
+    pluginManager: new PluginManager([]),
+  }),
+);
+
 describe('AgentRegistrySingleMCPToolset', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -56,7 +69,7 @@ describe('AgentRegistrySingleMCPToolset', () => {
         connectionParams: BASE_PARAMS,
       });
       const tools = await toolset.getTools();
-      expect(tools.map((t) => t.name)).toEqual(['search', 'fetch']);
+      expect(tools.map((t) => t.name)).toEqual(['fetch', 'search']);
     });
 
     it('prefixes tool names with the configured prefix', async () => {
@@ -66,8 +79,8 @@ describe('AgentRegistrySingleMCPToolset', () => {
       });
       const tools = await toolset.getTools();
       expect(tools.map((t) => t.name)).toEqual([
-        'my_server_search',
         'my_server_fetch',
+        'my_server_search',
       ]);
     });
   });
@@ -141,6 +154,57 @@ describe('AgentRegistrySingleMCPToolset', () => {
       });
       const tools = await toolset.getTools();
       expect(tools).toHaveLength(0);
+    });
+  });
+
+  describe('getTools — ordering', () => {
+    /** Makes the next listTools() call advertise `names`, in that order. */
+    function serveToolsOnce(names: string[]) {
+      mockListTools.mockResolvedValueOnce({
+        tools: names.map((name) => ({
+          name,
+          description: `tool ${name}`,
+          inputSchema: {},
+        })),
+      });
+    }
+
+    it('returns tools sorted by name', async () => {
+      serveToolsOnce(['zulu', 'alpha', 'mike']);
+      const toolset = new AgentRegistrySingleMCPToolset({
+        connectionParams: BASE_PARAMS,
+      });
+
+      const tools = await toolset.getTools();
+
+      expect(tools.map((t) => t.name)).toEqual(['alpha', 'mike', 'zulu']);
+    });
+
+    it('sorts when a prefix and a string-array filter are applied', async () => {
+      serveToolsOnce(['zulu', 'alpha', 'mike']);
+      const toolset = new AgentRegistrySingleMCPToolset({
+        connectionParams: BASE_PARAMS,
+        prefix: 'srv',
+        // Listed out of order on purpose: the result order comes from the
+        // sort, not from the filter.
+        toolFilter: ['srv_zulu', 'srv_alpha'],
+      });
+
+      const tools = await toolset.getTools();
+
+      expect(tools.map((t) => t.name)).toEqual(['srv_alpha', 'srv_zulu']);
+    });
+
+    it('sorts when a predicate filter is applied', async () => {
+      serveToolsOnce(['zulu', 'alpha', 'mike']);
+      const toolset = new AgentRegistrySingleMCPToolset({
+        connectionParams: BASE_PARAMS,
+        toolFilter: (tool) => tool.name !== 'mike',
+      });
+
+      const tools = await toolset.getTools(EMPTY_CONTEXT);
+
+      expect(tools.map((t) => t.name)).toEqual(['alpha', 'zulu']);
     });
   });
 

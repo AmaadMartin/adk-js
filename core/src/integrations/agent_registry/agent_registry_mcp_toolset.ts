@@ -9,7 +9,11 @@ import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {AuthCredential} from '../../auth/auth_credential.js';
 import {AuthScheme} from '../../auth/auth_schemes.js';
 import {BaseTool} from '../../tools/base_tool.js';
-import {BaseToolset, ToolPredicate} from '../../tools/base_toolset.js';
+import {
+  BaseToolset,
+  ToolPredicate,
+  sortToolsByName,
+} from '../../tools/base_toolset.js';
 import {
   MCPSessionManager,
   StreamableHTTPConnectionParams,
@@ -77,7 +81,8 @@ export class AgentRegistrySingleMCPToolset extends BaseToolset {
    * connection is established so that tokens are always fresh.
    *
    * @param context - Optional readonly agent context passed to the header provider.
-   * @returns The resolved and optionally filtered list of {@link MCPTool} instances.
+   * @returns The resolved and optionally filtered list of {@link MCPTool}
+   *   instances, ordered by tool name.
    */
   async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {
     const headers: Record<string, string> = {};
@@ -118,29 +123,31 @@ export class AgentRegistrySingleMCPToolset extends BaseToolset {
     }
 
     // Map tool definitions to MCPTools
-    const tools = listResult.tools.map((tool) => {
-      const prefixedName = this.prefix
-        ? `${this.prefix}_${tool.name}`
-        : tool.name;
-      const mcpTool = new MCPTool(
-        {...tool, name: prefixedName},
-        sessionManager,
-        tool.name,
-      );
+    const tools = sortToolsByName(
+      listResult.tools.map((tool) => {
+        const prefixedName = this.prefix
+          ? `${this.prefix}_${tool.name}`
+          : tool.name;
+        const mcpTool = new MCPTool(
+          {...tool, name: prefixedName},
+          sessionManager,
+          tool.name,
+        );
 
-      // Inject gcp.mcp.server.destination.id telemetry key for tracing tools execution
-      const toolWithMetadata = mcpTool as unknown as {
-        customMetadata?: Record<string, string>;
-      };
-      if (this.destinationResourceId) {
-        if (!toolWithMetadata.customMetadata) {
-          toolWithMetadata.customMetadata = {};
+        // Inject gcp.mcp.server.destination.id telemetry key for tracing tools execution
+        const toolWithMetadata = mcpTool as unknown as {
+          customMetadata?: Record<string, string>;
+        };
+        if (this.destinationResourceId) {
+          if (!toolWithMetadata.customMetadata) {
+            toolWithMetadata.customMetadata = {};
+          }
+          toolWithMetadata.customMetadata[GCP_MCP_SERVER_DESTINATION_ID] =
+            this.destinationResourceId;
         }
-        toolWithMetadata.customMetadata[GCP_MCP_SERVER_DESTINATION_ID] =
-          this.destinationResourceId;
-      }
-      return mcpTool;
-    });
+        return mcpTool;
+      }),
+    );
 
     // Apply toolFilter selection when specified
     const filter = this.toolFilter;

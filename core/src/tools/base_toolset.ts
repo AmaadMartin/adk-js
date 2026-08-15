@@ -36,6 +36,18 @@ export function isBaseToolset(obj: unknown): obj is BaseToolset {
 }
 
 /**
+ * Returns `tools` ordered by name, without modifying the given array.
+ *
+ * A tool source that reorders its list between calls rewrites the tool
+ * declarations in every request and invalidates the model's context cache.
+ */
+export function sortToolsByName(tools: BaseTool[]): BaseTool[] {
+  return [...tools].sort((a, b) =>
+    a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
+  );
+}
+
+/**
  * Base class for toolset.
  *
  * A toolset is a collection of tools that can be used by an agent.
