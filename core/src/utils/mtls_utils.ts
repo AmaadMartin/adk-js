@@ -18,12 +18,12 @@
  * - `GOOGLE_API_CERTIFICATE_CONFIG`: path to `certificate_config.json`,
  *   overriding the well-known gcloud location.
  *
- * This module is Node-only and is deliberately not part of the browser bundle.
+ * Certificate loading is Node-only, so every Node built-in is imported lazily
+ * from behind the `GOOGLE_API_USE_CLIENT_CERTIFICATE` gate. That keeps this
+ * module importable from `oauth2_utils.ts`, which the browser bundle re-exports
+ * through `common.ts`.
  */
 
-import {readFile} from 'node:fs/promises';
-import {platform} from 'node:os';
-import {join} from 'node:path';
 import type {Dispatcher} from 'undici';
 import {getBooleanEnvVar} from './env_aware_utils.js';
 import {logger} from './logger.js';
@@ -121,11 +121,13 @@ export function effectiveGoogleapisEndpoint(
 }
 
 /** Returns the gcloud configuration directory for the current platform. */
-function gcloudConfigDir(): string {
+async function gcloudConfigDir(): Promise<string> {
   const cloudSdkConfig = process.env['CLOUDSDK_CONFIG'];
   if (cloudSdkConfig) {
     return cloudSdkConfig;
   }
+  const {platform} = await import('node:os');
+  const {join} = await import('node:path');
   if (platform().startsWith('win')) {
     return join(process.env['APPDATA'] ?? '', 'gcloud');
   }
@@ -137,17 +139,20 @@ function gcloudConfigDir(): string {
  * `GOOGLE_API_CERTIFICATE_CONFIG` override over the well-known gcloud
  * location. Mirrors the resolution order used by `google-auth-library`.
  */
-function certificateConfigPath(): string {
-  return (
-    process.env['GOOGLE_API_CERTIFICATE_CONFIG'] ||
-    join(gcloudConfigDir(), CERTIFICATE_CONFIG_FILENAME)
-  );
+async function certificateConfigPath(): Promise<string> {
+  const override = process.env['GOOGLE_API_CERTIFICATE_CONFIG'];
+  if (override) {
+    return override;
+  }
+  const {join} = await import('node:path');
+  return join(await gcloudConfigDir(), CERTIFICATE_CONFIG_FILENAME);
 }
 
 /** Reads the workload client certificate described by `configPath`. */
 async function readClientCertificate(
   configPath: string,
 ): Promise<{cert: Buffer; key: Buffer}> {
+  const {readFile} = await import('node:fs/promises');
   const config = JSON.parse(
     await readFile(configPath, 'utf8'),
   ) as CertificateConfigFile;
@@ -177,7 +182,7 @@ export async function createMtlsDispatcher(): Promise<Dispatcher | undefined> {
   if (!getBooleanEnvVar('GOOGLE_API_USE_CLIENT_CERTIFICATE')) {
     return undefined;
   }
-  const configPath = certificateConfigPath();
+  const configPath = await certificateConfigPath();
   try {
     const {cert, key} = await readClientCertificate(configPath);
     // Imported lazily so that the default path never pays for undici, and so
