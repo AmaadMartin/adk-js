@@ -13,6 +13,7 @@ import {
   InvocationContext,
   PluginManager,
   Session,
+  createEvent,
   isScratchpadEvent,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
@@ -47,11 +48,11 @@ function createMockEvent(
   isFuncCall?: boolean,
   isFuncResp?: boolean,
 ): Event {
-  const event: Event = {
+  const event = createEvent({
     id,
     timestamp: Date.now(),
     content: {parts: []},
-  } as unknown as Event;
+  });
   if (tokenCount !== undefined) {
     event.usageMetadata = {promptTokenCount: tokenCount};
   }
@@ -71,15 +72,14 @@ function createMockScratchpadEvent(
   tokenCount?: number,
   contentStr?: string,
 ): CompactedEvent {
-  return {
+  return createCompactedEvent({
     ...createMockEvent(id, tokenCount),
-    isCompacted: true,
     isScratchpad: true,
     author: 'system',
     startTime: Date.now() - 10000,
     endTime: Date.now() - 5000,
     compactedContent: contentStr || 'Existing scratchpad content',
-  };
+  });
 }
 
 function createMockInvocationContext(events: Event[]): InvocationContext {

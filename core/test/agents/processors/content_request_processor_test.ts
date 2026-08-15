@@ -8,8 +8,8 @@ import {
   BaseAgent,
   CompactedEvent,
   CONTENT_REQUEST_PROCESSOR,
+  createEvent,
   Event,
-  EventActions,
   InvocationContext,
   LlmAgent,
   LlmRequest,
@@ -21,17 +21,16 @@ import {describe, expect, it} from 'vitest';
 import {createCompactedEvent} from '../../../src/events/compacted_event.js';
 
 function createMockEvent(id: string, timestamp: number, text: string): Event {
-  return {
+  return createEvent({
     id,
     invocationId: 'test-invoc',
     author: 'user',
-    actions: {} as EventActions,
     timestamp,
     content: {
       role: 'user',
       parts: [{text}],
     },
-  };
+  });
 }
 
 function createMockCompactedEvent(
