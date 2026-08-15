@@ -15,7 +15,7 @@ import {
   Session,
   isScratchpadEvent,
 } from '@google/adk';
-import {describe, expect, it} from 'vitest';
+import {assert, describe, expect, it} from 'vitest';
 
 class MockSummarizer implements BaseSummarizer {
   async summarize(events: Event[]): Promise<CompactedEvent> {
@@ -163,17 +163,19 @@ describe('AnchoredContextCompactor', () => {
 
     await compactor.compact(context);
 
-    // Should compact '1' and '2' (index 0 and 1) into scratchpad.
-    // Kept events should be '3' and '4' (index 2 and 3).
-    // Result events array should be [scratchpad, '3', '4'].
-    expect(context.session.events.length).toBe(3);
-    const firstEvent = context.session.events[0];
-    expect(isScratchpadEvent(firstEvent)).toBe(true);
-    expect((firstEvent as CompactedEvent).compactedContent).toBe(
-      'Mock summary of 2 events',
-    );
-    expect(context.session.events[1].id).toBe('3');
-    expect(context.session.events[2].id).toBe('4');
+    // Should compact '1' and '2' (index 0 and 1) into the scratchpad, which is
+    // appended: [1, 2, 3, 4, scratchpad]. '3' and '4' stay active because they
+    // are newer than the scratchpad's endTime.
+    expect(context.session.events.map((e) => e.id)).toEqual([
+      '1',
+      '2',
+      '3',
+      '4',
+      'mock-id',
+    ]);
+    const scratchpad = context.session.events[4];
+    assert(isScratchpadEvent(scratchpad), 'the last event is the scratchpad');
+    expect(scratchpad.compactedContent).toBe('Mock summary of 2 events');
   });
 
   it('should compact if token threshold exceeded (subsequent compaction - merges into existing scratchpad)', async () => {
@@ -198,17 +200,23 @@ describe('AnchoredContextCompactor', () => {
 
     await compactor.compact(context);
 
-    // Should merge scratchpad, '1', and '2' (3 events in total) into a new scratchpad.
-    // Kept events should be '3' and '4'.
-    // Result events array: [new_scratchpad, '3', '4'].
-    expect(context.session.events.length).toBe(3);
-    const firstEvent = context.session.events[0];
-    expect(isScratchpadEvent(firstEvent)).toBe(true);
-    expect((firstEvent as CompactedEvent).compactedContent).toBe(
-      'Mock summary of 3 events',
+    // Should merge the scratchpad, '1' and '2' (3 events in total) into a new
+    // scratchpad, which is appended. The superseded scratchpad stays in the
+    // array: [scratchpad, 1, 2, 3, 4, new_scratchpad].
+    expect(context.session.events.map((e) => e.id)).toEqual([
+      'scratchpad',
+      '1',
+      '2',
+      '3',
+      '4',
+      'mock-id',
+    ]);
+    const newScratchpad = context.session.events[5];
+    assert(
+      isScratchpadEvent(newScratchpad),
+      'the last event is the new scratchpad',
     );
-    expect(context.session.events[1].id).toBe('3');
-    expect(context.session.events[2].id).toBe('4');
+    expect(newScratchpad.compactedContent).toBe('Mock summary of 3 events');
   });
 
   it('should not split tool call and responses', async () => {
@@ -231,14 +239,17 @@ describe('AnchoredContextCompactor', () => {
 
     await compactor.compact(context);
 
-    expect(context.session.events.length).toBe(4); // scratchpad, '2', '3', '4'
-    expect(isScratchpadEvent(context.session.events[0])).toBe(true);
-    expect((context.session.events[0] as CompactedEvent).compactedContent).toBe(
-      'Mock summary of 1 events',
-    );
-    expect(context.session.events[1].id).toBe('2');
-    expect(context.session.events[2].id).toBe('3');
-    expect(context.session.events[3].id).toBe('4');
+    // Only '1' is summarized, so '2' (the call) stays out of the scratchpad.
+    expect(context.session.events.map((e) => e.id)).toEqual([
+      '1',
+      '2',
+      '3',
+      '4',
+      'mock-id',
+    ]);
+    const scratchpad = context.session.events[4];
+    assert(isScratchpadEvent(scratchpad), 'the last event is the scratchpad');
+    expect(scratchpad.compactedContent).toBe('Mock summary of 1 events');
   });
 
   it('should not mutate history if summarizer fails', async () => {
