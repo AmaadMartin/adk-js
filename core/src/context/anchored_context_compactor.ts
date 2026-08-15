@@ -134,18 +134,6 @@ export class AnchoredContextCompactor implements BaseContextCompactor {
       author: 'system',
     } as CompactedEvent;
 
-    // Reconstruct the events list: inactive events + new scratchpad + active retained events
-    const inactiveEvents = events.slice(0, events.indexOf(activeEvents[0]));
-    const retainedRawEvents = rawEvents.slice(retainStartIndex);
-
-    const newEventsList = [
-      ...inactiveEvents,
-      updatedScratchpad,
-      ...retainedRawEvents,
-    ];
-
-    // Mutate the original session events array.
-    events.length = 0;
-    events.push(...newEventsList);
+    events.push(updatedScratchpad);
   }
 }
