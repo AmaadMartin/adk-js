@@ -139,6 +139,28 @@ export class State {
   }
 
   /**
+   * Returns the value stored under `key`, writing `defaultValue` first when
+   * there is none.
+   *
+   * The write goes through {@link State.set}, so it is validated against the
+   * state schema, lands in both the value and the pending delta, and is
+   * stamped for write ordering. A key that is already present is returned
+   * untouched — including when it holds `0`, `''`, `false` or `null` — and is
+   * never validated, matching adk-python's `State.setdefault`.
+   *
+   * @param key The key to read, or to seed when it is absent.
+   * @param defaultValue The value to store when `key` is absent.
+   * @return The existing value, or `defaultValue` when there was none.
+   */
+  setDefault<T>(key: string, defaultValue: T): T {
+    if (this.has(key)) {
+      return this.get(key) as T;
+    }
+    this.set(key, defaultValue);
+    return defaultValue;
+  }
+
+  /**
    * Updates the state dict with the given delta.
    *
    * @param delta The delta to update the state with.
