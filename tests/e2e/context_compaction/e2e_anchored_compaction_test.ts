@@ -125,25 +125,20 @@ describe('E2e Anchored Context Compaction', () => {
       const compactedEvents = events.filter(isCompactedEvent);
       expect(compactedEvents.length).toBeGreaterThan(0);
 
-      // A session service only appends, so the stored log keeps the events the
-      // scratchpad summarizes and every scratchpad the run produced.
       const scratchpads = events.filter(isScratchpadEvent);
-      expect(scratchpads.length).toBeGreaterThanOrEqual(1);
-
       const latestScratchpad = scratchpads[scratchpads.length - 1];
       expect(latestScratchpad.author).toBe('system');
       expect(latestScratchpad.compactedContent).toBeTruthy();
 
-      // The active view is the latest scratchpad plus the raw events newer than
-      // the range it covers, so it elides part of the stored log.
-      const activeEvents = [
-        latestScratchpad,
-        ...events.filter(
+      // A session service only appends, so the scratchpad follows the events it
+      // summarizes and those events stay in the stored log.
+      expect(events.indexOf(latestScratchpad)).toBeGreaterThan(0);
+      expect(
+        events.some(
           (e) =>
-            !isScratchpadEvent(e) && e.timestamp > latestScratchpad.endTime,
+            !isScratchpadEvent(e) && e.timestamp <= latestScratchpad.endTime,
         ),
-      ];
-      expect(activeEvents.length).toBeLessThan(events.length);
+      ).toBe(true);
 
       // Verify that the plugin callbacks were called
       expect(plugin.beforeCalled).toBe(true);
