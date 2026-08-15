@@ -397,7 +397,9 @@ function extractAndReplaceInlineFiles(
   codeExecutorContext: CodeExecutorContext,
   llmRequest: LlmRequest,
 ): File[] {
-  const allInputFiles = codeExecutorContext.getInputFiles();
+  // A copy: `getInputFiles` hands back the stored array, which
+  // `addInputFiles` below already pushes into.
+  const allInputFiles = [...codeExecutorContext.getInputFiles()];
   const savedFileNames = new Set(allInputFiles.map((f) => f.name));
 
   // [Step 1] Process input files from LlmRequest and cache them in CodeExecutor
