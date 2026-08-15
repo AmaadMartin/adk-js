@@ -57,6 +57,10 @@ const RAW_EVENT_REJECTION = apiError(
   unknownFieldBody('rawEvent', 'event'),
 );
 
+/** The `e-<uuid>` shape every invocation id in this repository carries. */
+const INVOCATION_ID_REGEX =
+  /^e-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
 describe('isVertexAiConnectionString', () => {
   it('returns true for vertexai://', () => {
     expect(isVertexAiConnectionString('vertexai://projects/abc')).toBe(true);
@@ -1038,7 +1042,7 @@ describe('VertexAiSessionService', () => {
       expect(mockClient.events.append).toHaveBeenCalledWith({
         name: 'reasoningEngines/12345/sessions/append-session',
         author: 'user',
-        invocationId: 'inv-1700000000000',
+        invocationId: expect.stringMatching(INVOCATION_ID_REGEX),
         timestamp: new Date(1620000000000).toISOString(),
         config: {
           content: {role: 'model', parts: [{text: 'hello'}]},
@@ -1218,8 +1222,8 @@ describe('VertexAiSessionService', () => {
               : Promise.resolve({});
           },
         );
-        // Distinct values so a retry that rebuilt `inv-${Date.now()}` instead
-        // of re-sending the original request would be visible below.
+        // Distinct clock readings so a retry that rebuilt a time-derived
+        // field instead of re-sending the original request would be visible.
         const dateSpy = vi
           .spyOn(Date, 'now')
           .mockReturnValueOnce(1700000000000)
@@ -1235,7 +1239,7 @@ describe('VertexAiSessionService', () => {
         expect(sent[1].config).not.toHaveProperty('rawEvent');
         expect(sent[1].name).toBe(sent[0].name);
         expect(sent[1].author).toBe(sent[0].author);
-        expect(sent[1].invocationId).toBe('inv-1700000000000');
+        expect(sent[1].invocationId).toBe(sent[0].invocationId);
         expect(sent[1].timestamp).toBe(sent[0].timestamp);
         expect(warnSpy).toHaveBeenCalledTimes(1);
       });
