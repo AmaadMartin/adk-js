@@ -427,7 +427,7 @@ describe('mtls_utils', () => {
     });
   });
 
-  describe('effectiveGoogleapisEndpoint without an environment', () => {
+  describe('effectiveGoogleapisEndpoint rewrites the hostname only', () => {
     it('treats a missing process.env as the default "auto" setting', () => {
       Reflect.set(process, 'env', undefined);
 
@@ -437,6 +437,26 @@ describe('mtls_utils', () => {
           true,
         ),
       ).toBe('https://oauth2.mtls.googleapis.com/token');
+    });
+
+    it('rewrites a host the caller spelled in mixed case', () => {
+      expect(
+        effectiveGoogleapisEndpoint(
+          'https://OAuth2.GoogleAPIs.com/token',
+          true,
+        ),
+      ).toBe('https://oauth2.mtls.googleapis.com/token');
+    });
+
+    it('leaves the host name in a query parameter alone', () => {
+      expect(
+        effectiveGoogleapisEndpoint(
+          'https://oauth2.googleapis.com/token?aud=https%3A%2F%2Fiam.googleapis.com%2Fx',
+          true,
+        ),
+      ).toBe(
+        'https://oauth2.mtls.googleapis.com/token?aud=https%3A%2F%2Fiam.googleapis.com%2Fx',
+      );
     });
   });
 
