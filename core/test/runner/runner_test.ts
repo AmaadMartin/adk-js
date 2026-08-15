@@ -17,6 +17,7 @@ import {
   InvocationContext,
   isRoutableLlmAgent,
   LlmAgent,
+  RunConfig,
   Runner,
 } from '@google/adk';
 import {Content, FunctionCall, FunctionResponse} from '@google/genai';
@@ -1077,6 +1078,306 @@ describe('Runner customMetadata support', () => {
     const userEvent = updatedSession!.events[0];
     expect(userEvent.author).toBe('user');
     expect(userEvent.content?.role).toBe('user');
+  });
+});
+
+class MockMultiEventAgent extends LlmAgent {
+  static EVENT_TEXTS = ['first', 'second', 'third'];
+
+  constructor(name: string) {
+    super({name, model: 'gemini-2.5-flash', subAgents: []});
+  }
+
+  protected override async *runAsyncImpl(
+    context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    for (const text of MockMultiEventAgent.EVENT_TEXTS) {
+      yield createEvent({
+        invocationId: context.invocationId,
+        author: this.name,
+        content: {role: 'model', parts: [{text}]},
+      });
+    }
+  }
+}
+
+class MockAgentWithMetadata extends LlmAgent {
+  static EVENT_METADATA = {eventKey: 'event_value', requestId: 'from-event'};
+
+  constructor(name: string) {
+    super({name, model: 'gemini-2.5-flash', subAgents: []});
+  }
+
+  protected override async *runAsyncImpl(
+    context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    yield createEvent({
+      invocationId: context.invocationId,
+      author: this.name,
+      content: {role: 'model', parts: [{text: 'Test LLM response'}]},
+      customMetadata: {...MockAgentWithMetadata.EVENT_METADATA},
+    });
+  }
+}
+
+class MetadataPlugin extends BasePlugin {
+  static REPLACEMENT_MSG = 'Replacement event from MetadataPlugin';
+  static EARLY_EXIT_MSG = 'Early exit from MetadataPlugin';
+
+  enableEventCallback = false;
+  enableBeforeRunCallback = false;
+  observedEventMetadata: Array<Event['customMetadata']> = [];
+
+  constructor() {
+    super('metadata_plugin');
+  }
+
+  override async onEventCallback({
+    event,
+  }: {
+    invocationContext: InvocationContext;
+    event: Event;
+  }): Promise<Event | undefined> {
+    this.observedEventMetadata.push(event.customMetadata);
+    if (!this.enableEventCallback) {
+      return undefined;
+    }
+    return createEvent({
+      invocationId: event.invocationId,
+      author: event.author,
+      content: {
+        role: 'model',
+        parts: [{text: MetadataPlugin.REPLACEMENT_MSG}],
+      },
+      customMetadata: {pluginKey: 'plugin_value'},
+    });
+  }
+
+  override async beforeRunCallback(_params: {
+    invocationContext: InvocationContext;
+  }): Promise<Content | undefined> {
+    if (!this.enableBeforeRunCallback) {
+      return undefined;
+    }
+    return {role: 'model', parts: [{text: MetadataPlugin.EARLY_EXIT_MSG}]};
+  }
+}
+
+describe('Runner RunConfig.customMetadata', () => {
+  let sessionService: InMemorySessionService;
+  let artifactService: InMemoryArtifactService;
+  let plugin: MetadataPlugin;
+
+  beforeEach(() => {
+    sessionService = new InMemorySessionService();
+    artifactService = new InMemoryArtifactService();
+    plugin = new MetadataPlugin();
+  });
+
+  function createRunner(agent: BaseAgent): Runner {
+    return new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      artifactService,
+      plugins: [plugin],
+    });
+  }
+
+  async function run(
+    runner: Runner,
+    params: {
+      runConfig?: RunConfig;
+      customMetadata?: Record<string, unknown>;
+    } = {},
+  ): Promise<Event[]> {
+    await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+    const events: Event[] = [];
+    for await (const event of runner.runAsync({
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      newMessage: {role: 'user', parts: [{text: TEST_MESSAGE}]},
+      ...params,
+    })) {
+      events.push(event);
+    }
+    return events;
+  }
+
+  async function persistedEvents(): Promise<Event[]> {
+    const session = await sessionService.getSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+    if (!session) {
+      expect.fail(`Session ${TEST_SESSION_ID} was not found`);
+    }
+    return session.events;
+  }
+
+  it('stamps every yielded and persisted event', async () => {
+    const runner = createRunner(new MockMultiEventAgent('multi_agent'));
+
+    const events = await run(runner, {
+      runConfig: {customMetadata: {requestId: 'req-1'}},
+    });
+
+    expect(events).toHaveLength(MockMultiEventAgent.EVENT_TEXTS.length);
+    for (const event of events) {
+      expect(event.customMetadata).toEqual({requestId: 'req-1'});
+    }
+
+    const stored = await persistedEvents();
+    expect(stored).toHaveLength(MockMultiEventAgent.EVENT_TEXTS.length + 1);
+    expect(stored[0].author).toBe('user');
+    for (const event of stored) {
+      expect(event.customMetadata).toEqual({requestId: 'req-1'});
+    }
+  });
+
+  it("keeps the event's own value when a key collides", async () => {
+    const runner = createRunner(new MockAgentWithMetadata('metadata_agent'));
+
+    const events = await run(runner, {
+      runConfig: {customMetadata: {requestId: 'req-1', tenant: 't-1'}},
+    });
+
+    expect(events).toHaveLength(1);
+    expect(events[0].customMetadata).toEqual({
+      eventKey: 'event_value',
+      requestId: 'from-event',
+      tenant: 't-1',
+    });
+  });
+
+  it('leaves customMetadata undefined when the field is absent', async () => {
+    const runner = createRunner(new MockMultiEventAgent('multi_agent'));
+
+    const events = await run(runner);
+
+    for (const event of events) {
+      expect(event.customMetadata).toBeUndefined();
+    }
+    const stored = await persistedEvents();
+    expect(stored[0].customMetadata).toBeUndefined();
+  });
+
+  it('leaves customMetadata undefined when the field is an empty object', async () => {
+    const runner = createRunner(new MockMultiEventAgent('multi_agent'));
+
+    const events = await run(runner, {runConfig: {customMetadata: {}}});
+
+    for (const event of events) {
+      expect(event.customMetadata).toBeUndefined();
+    }
+    const stored = await persistedEvents();
+    for (const event of stored) {
+      expect(event.customMetadata).toBeUndefined();
+    }
+  });
+
+  it('lets the top-level customMetadata param win on the user event only', async () => {
+    const runner = createRunner(new MockMultiEventAgent('multi_agent'));
+
+    const events = await run(runner, {
+      runConfig: {customMetadata: {requestId: 'from-config', tenant: 't-1'}},
+      customMetadata: {requestId: 'from-param'},
+    });
+
+    for (const event of events) {
+      expect(event.customMetadata).toEqual({
+        requestId: 'from-config',
+        tenant: 't-1',
+      });
+    }
+
+    const stored = await persistedEvents();
+    expect(stored[0].author).toBe('user');
+    expect(stored[0].customMetadata).toEqual({
+      requestId: 'from-param',
+      tenant: 't-1',
+    });
+  });
+
+  it('stamps an event before the onEventCallback reads it', async () => {
+    const runner = createRunner(new MockMultiEventAgent('multi_agent'));
+
+    await run(runner, {runConfig: {customMetadata: {requestId: 'req-1'}}});
+
+    expect(plugin.observedEventMetadata).toEqual(
+      MockMultiEventAgent.EVENT_TEXTS.map(() => ({requestId: 'req-1'})),
+    );
+  });
+
+  it('stamps a replacement event returned by a plugin', async () => {
+    plugin.enableEventCallback = true;
+    const runner = createRunner(new MockAgentWithMetadata('metadata_agent'));
+
+    const events = await run(runner, {
+      runConfig: {customMetadata: {requestId: 'req-1'}},
+    });
+
+    expect(events).toHaveLength(1);
+    expect(events[0].content!.parts).toEqual([
+      {text: MetadataPlugin.REPLACEMENT_MSG},
+    ]);
+    expect(events[0].customMetadata).toEqual({
+      requestId: 'req-1',
+      pluginKey: 'plugin_value',
+    });
+
+    const stored = await persistedEvents();
+    expect(stored[1].customMetadata).toEqual({
+      requestId: 'req-1',
+      pluginKey: 'plugin_value',
+    });
+  });
+
+  it('stamps the early-exit event of a beforeRunCallback', async () => {
+    plugin.enableBeforeRunCallback = true;
+    const runner = createRunner(new MockMultiEventAgent('multi_agent'));
+
+    const events = await run(runner, {
+      runConfig: {customMetadata: {requestId: 'req-1'}},
+    });
+
+    expect(events).toHaveLength(1);
+    expect(events[0].content!.parts).toEqual([
+      {text: MetadataPlugin.EARLY_EXIT_MSG},
+    ]);
+    expect(events[0].customMetadata).toEqual({requestId: 'req-1'});
+  });
+
+  it('stamps every event of a runEphemeral run', async () => {
+    const runner = createRunner(new MockMultiEventAgent('multi_agent'));
+    const appendEventSpy = vi.spyOn(sessionService, 'appendEvent');
+
+    const events: Event[] = [];
+    for await (const event of runner.runEphemeral({
+      userId: TEST_USER_ID,
+      newMessage: {role: 'user', parts: [{text: TEST_MESSAGE}]},
+      runConfig: {customMetadata: {requestId: 'req-1'}},
+    })) {
+      events.push(event);
+    }
+
+    expect(events).toHaveLength(MockMultiEventAgent.EVENT_TEXTS.length);
+    for (const event of events) {
+      expect(event.customMetadata).toEqual({requestId: 'req-1'});
+    }
+    expect(appendEventSpy.mock.calls).toHaveLength(
+      MockMultiEventAgent.EVENT_TEXTS.length + 1,
+    );
+    for (const call of appendEventSpy.mock.calls) {
+      expect(call[0].event.customMetadata).toEqual({requestId: 'req-1'});
+    }
+
+    appendEventSpy.mockRestore();
   });
 });
 
