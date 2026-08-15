@@ -31,7 +31,10 @@ vi.mock('@modelcontextprotocol/sdk/client/index.js', () => ({
 }));
 
 vi.mock('@modelcontextprotocol/sdk/client/streamableHttp.js', () => ({
-  StreamableHTTPClientTransport: vi.fn().mockImplementation(() => ({})),
+  StreamableHTTPClientTransport: vi.fn().mockImplementation(() => ({
+    // Closing a streamable HTTP session now terminates it server-side.
+    terminateSession: vi.fn().mockResolvedValue(undefined),
+  })),
 }));
 
 const BASE_PARAMS: StreamableHTTPConnectionParams = {
@@ -240,6 +243,27 @@ describe('AgentRegistrySingleMCPToolset', () => {
         connectionParams: BASE_PARAMS,
       });
       await expect(toolset.close()).resolves.toBeUndefined();
+    });
+  });
+  describe('getTools — round-trip deadline', () => {
+    it('bounds listTools with the configured deadline', async () => {
+      const toolset = new AgentRegistrySingleMCPToolset({
+        connectionParams: {...BASE_PARAMS, timeout: 5000},
+      });
+
+      await toolset.getTools();
+
+      expect(mockListTools).toHaveBeenCalledWith(undefined, {timeout: 5000});
+    });
+
+    it('leaves listTools unbounded when no deadline is configured', async () => {
+      const toolset = new AgentRegistrySingleMCPToolset({
+        connectionParams: BASE_PARAMS,
+      });
+
+      await toolset.getTools();
+
+      expect(mockListTools).toHaveBeenCalledWith(undefined, {});
     });
   });
 });

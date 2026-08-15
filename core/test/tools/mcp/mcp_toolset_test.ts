@@ -5,6 +5,7 @@
  */
 
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
+import {ErrorCode, McpError} from '@modelcontextprotocol/sdk/types.js';
 import {describe, expect, it, vi} from 'vitest';
 import {ReadonlyContext} from '../../../src/agents/readonly_context.js';
 import {MCPConnectionParams} from '../../../src/tools/mcp/mcp_session_manager.js';
@@ -219,7 +220,7 @@ describe('MCPToolset', () => {
       const toolset = new MCPToolset(stdioParams);
       const contents = await toolset.readResource('res1');
 
-      expect(readResource).toHaveBeenCalledWith({uri: 'file:///res1'});
+      expect(readResource).toHaveBeenCalledWith({uri: 'file:///res1'}, {});
       expect(contents).toEqual([{uri: 'file:///res1', text: 'hello'}]);
     });
 
@@ -331,6 +332,78 @@ describe('MCPToolset', () => {
           0,
         );
       });
+    });
+  });
+  describe('round-trip deadline', () => {
+    const TIMEOUT_MS = 5000;
+
+    const timedParams: MCPConnectionParams = {
+      type: 'StdioConnectionParams',
+      serverParams: {command: 'test'},
+      timeout: TIMEOUT_MS,
+    };
+
+    /** The client the toolset built for its most recent session. */
+    async function lastClient(): Promise<Client> {
+      const {Client} =
+        await import('@modelcontextprotocol/sdk/client/index.js');
+      const client = vi.mocked(Client).mock.results.at(-1)?.value;
+      if (!client) expect.fail('no client was constructed');
+      return client as Client;
+    }
+
+    it('bounds listTools with the configured deadline', async () => {
+      const toolset = new MCPToolset(timedParams);
+
+      await toolset.getTools();
+
+      expect((await lastClient()).listTools).toHaveBeenCalledWith(undefined, {
+        timeout: TIMEOUT_MS,
+      });
+    });
+
+    it('bounds listResources with the configured deadline', async () => {
+      const toolset = new MCPToolset(timedParams);
+
+      await toolset.listResources();
+
+      expect((await lastClient()).listResources).toHaveBeenCalledWith(
+        undefined,
+        {timeout: TIMEOUT_MS},
+      );
+    });
+
+    it('bounds readResource with the configured deadline', async () => {
+      const toolset = new MCPToolset(timedParams);
+
+      await toolset.readResource('res1');
+
+      expect((await lastClient()).readResource).toHaveBeenCalledWith(
+        {uri: 'file:///res1'},
+        {timeout: TIMEOUT_MS},
+      );
+    });
+
+    it('names listTools and the deadline when the server is too slow', async () => {
+      const {Client} =
+        await import('@modelcontextprotocol/sdk/client/index.js');
+      vi.mocked(Client).mockImplementationOnce(
+        () =>
+          ({
+            connect: noop(),
+            close: noop(),
+            listTools: vi
+              .fn()
+              .mockRejectedValue(
+                new McpError(ErrorCode.RequestTimeout, 'Request timed out'),
+              ),
+          }) as unknown as Client,
+      );
+      const toolset = new MCPToolset(timedParams);
+
+      await expect(toolset.getTools()).rejects.toThrow(
+        'MCP listTools timed out after 5000ms',
+      );
     });
   });
 });
