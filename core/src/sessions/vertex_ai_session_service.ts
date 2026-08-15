@@ -18,6 +18,7 @@ import {
   Content,
   GenerateContentResponseUsageMetadata,
   GroundingMetadata,
+  Part,
 } from '@google/genai';
 import {isCompactedEvent} from '../events/compacted_event.js';
 import {experimental} from '../utils/experimental.js';
@@ -455,11 +456,14 @@ export class VertexAiSessionService extends BaseSessionService {
       customMetadata[WORKFLOW_CUSTOM_METADATA_KEY] = workflowMetadata;
     }
 
-    const config = partialCopy<AppendAgentEngineSessionEventConfig>(event, [
-      'content',
-      'errorCode',
-      'errorMessage',
-    ]);
+    const sanitizedEvent = event.content
+      ? {...event, content: withoutUnsupportedPartFields(event.content)}
+      : event;
+
+    const config = partialCopy<AppendAgentEngineSessionEventConfig>(
+      sanitizedEvent,
+      ['content', 'errorCode', 'errorMessage'],
+    );
     config.actions = toApiActions(event.actions);
 
     config.eventMetadata = {
@@ -475,7 +479,7 @@ export class VertexAiSessionService extends BaseSessionService {
         Object.keys(customMetadata).length > 0 ? customMetadata : undefined,
     };
 
-    config.rawEvent = JSON.parse(JSON.stringify(event)) as Record<
+    config.rawEvent = JSON.parse(JSON.stringify(sanitizedEvent)) as Record<
       string,
       unknown
     >;
@@ -584,6 +588,46 @@ function toApiActions(
     ...rest,
     ...(transferToAgent !== undefined ? {transferAgent: transferToAgent} : {}),
   } as ApiEventActions;
+}
+
+/** Part fields the Agent Engine sessions API rejects. */
+const UNSUPPORTED_PART_FIELDS = ['partMetadata', 'part_metadata'] as const;
+
+/** A `Part` that survived serialization by an SDK using snake_case keys. */
+interface PartWithLegacyMetadata extends Part {
+  part_metadata?: Record<string, unknown>;
+}
+
+function hasUnsupportedPartFields(part: Part): boolean {
+  return UNSUPPORTED_PART_FIELDS.some((field) => field in part);
+}
+
+function stripUnsupportedPartFields(part: PartWithLegacyMetadata): Part {
+  const stripped = {...part};
+  for (const field of UNSUPPORTED_PART_FIELDS) {
+    delete stripped[field];
+  }
+  return stripped;
+}
+
+/**
+ * Returns `content` without the Part fields the Agent Engine sessions API
+ * rejects.
+ *
+ * `partMetadata` is a Gemini Developer API-only field. The sessions API does
+ * not model it and fails `appendEvent` with `400 INVALID_ARGUMENT` (`Unknown
+ * name "part_metadata"`), and the streaming Interactions path sets it while
+ * it accumulates function-call arguments. Copies instead of deleting in place:
+ * `partialCopy` is shallow, so a delete would strip the event the caller still
+ * holds.
+ */
+function withoutUnsupportedPartFields(content: Content): Content {
+  // TODO: remove once the Agent Engine sessions API accepts partMetadata.
+  const parts = content.parts;
+  if (!parts?.some(hasUnsupportedPartFields)) {
+    return content;
+  }
+  return {...content, parts: parts.map(stripUnsupportedPartFields)};
 }
 
 interface ExtendedEventActions extends EventActions {
