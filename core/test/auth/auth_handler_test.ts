@@ -510,6 +510,31 @@ describe('AuthHandler', () => {
       expect(uri?.oauth2?.authUri).toContain('https://pw-token.com');
     });
 
+    it('resolves a password-only scheme to its tokenUrl and scopes', () => {
+      const authConfig: AuthConfig = {
+        credentialKey: 'testKey',
+        authScheme: {
+          type: 'oauth2',
+          flows: {
+            password: {
+              tokenUrl: 'https://pw-token.com',
+              scopes: {read: 'Read access'},
+            },
+          },
+        },
+        rawAuthCredential: {
+          authType: AuthCredentialTypes.OAUTH2,
+          oauth2: {clientId: 'id'},
+        },
+      };
+      const handler = new AuthHandler(authConfig);
+
+      const uri = handler.generateAuthUri();
+
+      expect(uri?.oauth2?.authUri).toContain('https://pw-token.com');
+      expect(uri?.oauth2?.authUri).toContain('scope=read');
+    });
+
     it('prefers the implicit authorizationUrl over a later flow', () => {
       const authConfig: AuthConfig = {
         credentialKey: 'testKey',
