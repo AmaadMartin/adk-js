@@ -19,7 +19,6 @@ import {
 } from '../../src/workflow/request_input.js';
 import {
   createAuthRequestEvent,
-  createInterruptResponse,
   createPlainTextResumeEvents,
   createRequestInputEvent,
   createRequestInputResponse,
@@ -159,22 +158,6 @@ describe('createRequestInputResponse', () => {
       id: 'i1',
       name: REQUEST_INPUT_FUNCTION_CALL_NAME,
       response: {value: 5},
-    });
-  });
-});
-
-describe('createInterruptResponse', () => {
-  it('mirrors the name of the call that raised the interrupt', () => {
-    const part = createInterruptResponse(
-      'testKey',
-      REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
-      {result: 'my-key'},
-    );
-
-    expect(part.functionResponse).toEqual({
-      id: 'testKey',
-      name: REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
-      response: {result: 'my-key'},
     });
   });
 });

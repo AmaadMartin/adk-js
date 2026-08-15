@@ -186,21 +186,6 @@ export function getRequestInputInterruptIds(event: Event): string[] {
 }
 
 /**
- * Creates a `FunctionResponse` part answering the interrupt `interruptId`,
- * raised by a call named `name`.
- *
- * The response must mirror the raising call's name, or the pair is invalid and
- * every consumer keeps reporting the interrupt as unanswered.
- */
-export function createInterruptResponse(
-  interruptId: string,
-  name: string,
-  response: Record<string, unknown>,
-): Part {
-  return {functionResponse: {id: interruptId, name, response}};
-}
-
-/**
  * Creates a `FunctionResponse` part answering a `request_input` interrupt,
  * suitable for appending to a session as the user's resume response.
  */
@@ -208,11 +193,13 @@ export function createRequestInputResponse(
   interruptId: string,
   response: Record<string, unknown>,
 ): Part {
-  return createInterruptResponse(
-    interruptId,
-    REQUEST_INPUT_FUNCTION_CALL_NAME,
-    response,
-  );
+  return {
+    functionResponse: {
+      id: interruptId,
+      name: REQUEST_INPUT_FUNCTION_CALL_NAME,
+      response,
+    },
+  };
 }
 
 /** The calls that raise an interrupt the user can answer. */
@@ -222,7 +209,7 @@ const INTERRUPT_CALL_NAMES: ReadonlySet<string> = new Set([
 ]);
 
 /** Parameters for {@link createPlainTextResumeEvents}. */
-export interface CreatePlainTextResumeEventsParams {
+interface CreatePlainTextResumeEventsParams {
   /** The interrupts the reply resolves. */
   interruptIds: Iterable<string>;
   /** The text the user typed. */
@@ -270,7 +257,15 @@ export function createPlainTextResumeEvents({
         branch,
         content: {
           role: 'user',
-          parts: [createInterruptResponse(interruptId, name, {result: text})],
+          parts: [
+            {
+              functionResponse: {
+                id: interruptId,
+                name,
+                response: {result: text},
+              },
+            },
+          ],
         },
       }),
     );

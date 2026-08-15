@@ -16,6 +16,7 @@ import {createPlainTextResumeEvents} from './utils/hitl_utils.js';
 import {
   eventsForCurrentRun,
   reconstructNodeStates,
+  unwrapResponse,
 } from './utils/rehydration_utils.js';
 import {buildNode, isNodeLike} from './utils/workflow_graph_utils.js';
 import {isWorkflow, Workflow} from './workflow.js';
@@ -66,15 +67,25 @@ export async function* runNodeAsInvocation(
     channel,
     nodePath: '',
     runId: author,
-    resumeInputs: resume?.inputs ?? {},
+    resumeInputs: resume
+      ? {[resume.interruptId]: unwrapResponse({result: resume.text})}
+      : {},
   });
 
   const input = extractNodeInput(ic.userContent);
 
   // Record the resolution before the node reads it. The runner appends every
-  // yielded event to the session, so yielding here puts the marker in
+  // yielded event to the session, so yielding here puts the record in
   // `session.events` ahead of the rehydration that scans them.
-  yield* plainTextResumeMarkers(resume, ic);
+  if (resume) {
+    yield* createPlainTextResumeEvents({
+      interruptIds: [resume.interruptId],
+      text: resume.text,
+      events: ic.session.events,
+      invocationId: ic.invocationId,
+      branch: ic.branch,
+    });
+  }
 
   let interrupted = false;
   const settle = (async () => {
@@ -135,12 +146,12 @@ export async function* runNodeAsInvocation(
   }
 }
 
-/** A plain-text reply, and the interrupt values it resolves. */
+/** A plain-text reply, and the single interrupt it resolves. */
 interface PlainTextResume {
+  /** The interrupt the reply resolves. */
+  interruptId: string;
   /** The text the user typed. */
   text: string;
-  /** interruptId -> the value handed to the waiting node. */
-  inputs: Record<string, unknown>;
 }
 
 /**
@@ -180,31 +191,8 @@ function plainTextResume(ic: InvocationContext): PlainTextResume | undefined {
   if (pending.size !== 1) {
     return undefined;
   }
-  const [id] = pending;
-  // Only a seed: `Workflow.applyResumeInputs` reads the marker recorded below
-  // back out of the session and overwrites this with the unwrapped value, so
-  // the node gets exactly what a later replay of that marker gives it.
-  return {text, inputs: {[id]: text}};
-}
-
-/**
- * The session records for the interrupts a typed reply resolved: one `user`
- * event per id, the same message an interactive client would have sent.
- */
-function plainTextResumeMarkers(
-  resume: PlainTextResume | undefined,
-  ic: InvocationContext,
-): Event[] {
-  if (!resume) {
-    return [];
-  }
-  return createPlainTextResumeEvents({
-    interruptIds: Object.keys(resume.inputs),
-    text: resume.text,
-    events: ic.session.events,
-    invocationId: ic.invocationId,
-    branch: ic.branch,
-  });
+  const [interruptId] = pending;
+  return {interruptId, text};
 }
 
 /**
