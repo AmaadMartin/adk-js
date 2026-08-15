@@ -41,6 +41,7 @@ vi.mock('@modelcontextprotocol/sdk/client/index.js', () => {
           {uri: 'file:///res1', mimeType: 'text/plain', text: 'hello'},
         ],
       }),
+      callTool: vi.fn().mockResolvedValue({content: []}),
     })),
   };
 });
@@ -341,10 +342,11 @@ describe('MCPToolset', () => {
 
   describe('requireConfirmation', () => {
     /**
-     * Serves the same client to the discovery session and the call session, so
-     * a discovered tool can be run and its `callTool` asserted.
+     * Serves one client to the next `sessions` sessions, so a discovered tool
+     * can be run and its `callTool` asserted. A gated call opens no session,
+     * so the count is exact: a spare stub would leak into the next test.
      */
-    async function stubClientTwice() {
+    async function stubClient(sessions: number) {
       const callTool = vi.fn().mockResolvedValue({content: []});
       const {Client} =
         await import('@modelcontextprotocol/sdk/client/index.js');
@@ -356,9 +358,9 @@ describe('MCPToolset', () => {
         }),
         callTool,
       } as unknown as Client;
-      vi.mocked(Client)
-        .mockImplementationOnce(() => client)
-        .mockImplementationOnce(() => client);
+      for (let i = 0; i < sessions; i++) {
+        vi.mocked(Client).mockImplementationOnce(() => client);
+      }
       return {callTool};
     }
 
@@ -373,7 +375,8 @@ describe('MCPToolset', () => {
     }
 
     it('gates a discovered tool when requireConfirmation is set', async () => {
-      const {callTool} = await stubClientTwice();
+      // A gated call opens no session, so discovery is the only one.
+      const {callTool} = await stubClient(1);
       const toolset = new MCPToolset(stdioParams, [], undefined, true);
       const tools = await toolset.getTools();
 
@@ -390,7 +393,7 @@ describe('MCPToolset', () => {
     });
 
     it('leaves a discovered tool unguarded by default', async () => {
-      const {callTool} = await stubClientTwice();
+      const {callTool} = await stubClient(2);
       const toolset = new MCPToolset(stdioParams);
       const tools = await toolset.getTools();
 
