@@ -6,7 +6,7 @@
 
 import type {BaseTool, Context, LlmRequest, LlmResponse} from '@google/adk';
 import {BasePlugin} from '@google/adk';
-import type {Recording} from './test_types.js';
+import type {LlmRecording, Recording} from './test_types.js';
 
 /**
  * Reads the target agent from recorded `transfer_to_agent` arguments.
@@ -19,6 +19,26 @@ export function transferTargetAgentName(
 ): string | undefined {
   const agentName = toolArgs['agent_name'];
   return typeof agentName === 'string' ? agentName : undefined;
+}
+
+/**
+ * Returns the response an LLM recording replays, or `undefined` when it holds
+ * none.
+ *
+ * A recording written by adk-python carries `llm_responses`, which lists every
+ * response of one model call. An SSE turn contributes several partial
+ * responses followed by the complete one, and only the complete one is the
+ * turn's answer. `llmResponse` is the older singular field, kept so goldens
+ * written before the list landed keep replaying.
+ */
+export function recordedLlmResponse(
+  llmRecording?: LlmRecording,
+): LlmResponse | undefined {
+  const responses = llmRecording?.llmResponses;
+  if (responses?.length) {
+    return responses.find((response) => !response.partial);
+  }
+  return llmRecording?.llmResponse;
 }
 
 export class ReplayPlugin extends BasePlugin {
@@ -40,7 +60,7 @@ export class ReplayPlugin extends BasePlugin {
       (r) =>
         r.userMessageIndex === this.context.userMessageIndex &&
         r.agentName === agentName &&
-        r.llmRecording?.llmResponse &&
+        recordedLlmResponse(r.llmRecording) &&
         // replay internal flag to mark event as consumed
         !(r as unknown as {_consumed: boolean})._consumed,
     );
@@ -54,7 +74,7 @@ export class ReplayPlugin extends BasePlugin {
     const rec = this.recordings[index];
     (rec as unknown as {_consumed: boolean})._consumed = true;
 
-    return rec.llmRecording!.llmResponse!;
+    return recordedLlmResponse(rec.llmRecording)!;
   }
 
   override async beforeToolCallback(params: {
