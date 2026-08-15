@@ -465,7 +465,10 @@ Instruction body`;
       const tool = new LoadSkillResourceTool(toolset);
 
       const res = (await tool.runAsync({
-        args: {skill_name: 'test-registry-skill', path: 'references/doc.md'},
+        args: {
+          skill_name: 'test-registry-skill',
+          file_path: 'references/doc.md',
+        },
         toolContext: createMockContext(),
       })) as Record<string, unknown>;
 
@@ -476,7 +479,7 @@ Instruction body`;
       const toolset = new SkillToolset([], {registry: mockRegistry});
       const tool = new LoadSkillResourceTool(toolset);
       let res = (await tool.runAsync({
-        args: {path: 'foo'},
+        args: {file_path: 'foo'},
         toolContext: createMockContext(),
       })) as Record<string, unknown>;
       expect(res.error_code).toBe('MISSING_SKILL_NAME');
@@ -492,7 +495,7 @@ Instruction body`;
       const toolset = new SkillToolset([], {registry: mockRegistry});
       const tool = new LoadSkillResourceTool(toolset);
       const res = (await tool.runAsync({
-        args: {skill_name: 'error-skill', path: 'references/doc.md'},
+        args: {skill_name: 'error-skill', file_path: 'references/doc.md'},
         toolContext: createMockContext(),
       })) as Record<string, unknown>;
       expect(res.error_code).toBe('REGISTRY_ERROR');
@@ -502,7 +505,7 @@ Instruction body`;
       const toolset = new SkillToolset([], {registry: mockRegistry});
       const tool = new LoadSkillResourceTool(toolset);
       const res = (await tool.runAsync({
-        args: {skill_name: 'unknown-skill', path: 'references/doc.md'},
+        args: {skill_name: 'unknown-skill', file_path: 'references/doc.md'},
         toolContext: createMockContext(),
       })) as Record<string, unknown>;
       expect(res.error_code).toBe('SKILL_NOT_FOUND');
@@ -524,7 +527,7 @@ Instruction body`;
                     status:
                       'Binary file detected. The content has been injected into the conversation history for you to analyze.',
                     skill_name: 'test-registry-skill',
-                    path: 'assets/img.png',
+                    file_path: 'assets/img.png',
                   },
                 },
               },
@@ -561,7 +564,7 @@ Instruction body`;
                     status:
                       'Binary file detected. The content has been injected into the conversation history for you to analyze.',
                     skill_name: 'error-skill',
-                    path: 'assets/img.png',
+                    file_path: 'assets/img.png',
                   },
                 },
               },

@@ -18,7 +18,7 @@
             "name": "load_skill_resource",
             "args": {
               "skill_name": "internal-comms",
-              "path": "references/3p_updates_guideline.md"
+              "file_path": "references/3p_updates_guideline.md"
             },
             "id": "adk-7e0d9ee5-55f7-48c5-a201-d60ec623d52c"
           },

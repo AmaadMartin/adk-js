@@ -46,12 +46,12 @@ describe('LoadSkillResourceTool', () => {
     const toolset = new SkillToolset([mockSkill]);
     const tool = new LoadSkillResourceTool(toolset);
     const result = await tool.runAsync({
-      args: {skill_name: 'test-skill', path: 'references/doc.md'},
+      args: {skill_name: 'test-skill', file_path: 'references/doc.md'},
       toolContext: createMockContext(),
     });
     expect(result).toEqual({
       skill_name: 'test-skill',
-      path: 'references/doc.md',
+      file_path: 'references/doc.md',
       content: 'Doc content',
     });
   });
@@ -60,12 +60,12 @@ describe('LoadSkillResourceTool', () => {
     const toolset = new SkillToolset([mockSkill]);
     const tool = new LoadSkillResourceTool(toolset);
     const result = await tool.runAsync({
-      args: {skill_name: 'test-skill', path: 'scripts/run.sh'},
+      args: {skill_name: 'test-skill', file_path: 'scripts/run.sh'},
       toolContext: createMockContext(),
     });
     expect(result).toEqual({
       skill_name: 'test-skill',
-      path: 'scripts/run.sh',
+      file_path: 'scripts/run.sh',
       content: 'echo hello',
     });
   });
@@ -74,12 +74,12 @@ describe('LoadSkillResourceTool', () => {
     const toolset = new SkillToolset([mockSkill]);
     const tool = new LoadSkillResourceTool(toolset);
     const result = await tool.runAsync({
-      args: {skill_name: 'test-skill', path: 'assets/image.png'},
+      args: {skill_name: 'test-skill', file_path: 'assets/image.png'},
       toolContext: createMockContext(),
     });
     expect(result).toEqual({
       skill_name: 'test-skill',
-      path: 'assets/image.png',
+      file_path: 'assets/image.png',
       status:
         'Binary file detected. The content has been injected into the conversation history for you to analyze.',
     });
@@ -89,7 +89,7 @@ describe('LoadSkillResourceTool', () => {
     const toolset = new SkillToolset([mockSkill]);
     const tool = new LoadSkillResourceTool(toolset);
     const result = await tool.runAsync({
-      args: {skill_name: 'test-skill', path: 'invalid/path.md'},
+      args: {skill_name: 'test-skill', file_path: 'invalid/path.md'},
       toolContext: createMockContext(),
     });
     expect(result).toEqual({
@@ -102,7 +102,7 @@ describe('LoadSkillResourceTool', () => {
     const toolset = new SkillToolset([mockSkill]);
     const tool = new LoadSkillResourceTool(toolset);
     const result = await tool.runAsync({
-      args: {skill_name: 'test-skill', path: 'references/nonexistent.md'},
+      args: {skill_name: 'test-skill', file_path: 'references/nonexistent.md'},
       toolContext: createMockContext(),
     });
     expect(result).toEqual({
@@ -118,13 +118,13 @@ describe('LoadSkillResourceTool', () => {
     const result = await tool.runAsync({
       args: {
         skill_name: 'test-skill',
-        path: 'references/../references/doc.md',
+        file_path: 'references/../references/doc.md',
       },
       toolContext: createMockContext(),
     });
     expect(result).toEqual({
       skill_name: 'test-skill',
-      path: 'references/doc.md',
+      file_path: 'references/doc.md',
       content: 'Doc content',
     });
   });
@@ -135,13 +135,13 @@ describe('LoadSkillResourceTool', () => {
     const result = await tool.runAsync({
       args: {
         skill_name: 'test-skill',
-        path: 'references/../assets/image.png',
+        file_path: 'references/../assets/image.png',
       },
       toolContext: createMockContext(),
     });
     expect(result).toEqual({
       skill_name: 'test-skill',
-      path: 'assets/image.png',
+      file_path: 'assets/image.png',
       status:
         'Binary file detected. The content has been injected into the conversation history for you to analyze.',
     });
@@ -151,7 +151,10 @@ describe('LoadSkillResourceTool', () => {
     const toolset = new SkillToolset([mockSkill]);
     const tool = new LoadSkillResourceTool(toolset);
     const result = await tool.runAsync({
-      args: {skill_name: 'test-skill', path: 'references/../../secrets.txt'},
+      args: {
+        skill_name: 'test-skill',
+        file_path: 'references/../../secrets.txt',
+      },
       toolContext: createMockContext(),
     });
     expect(result).toEqual({
@@ -174,7 +177,7 @@ describe('LoadSkillResourceTool', () => {
                 name: 'load_skill_resource',
                 response: {
                   skill_name: 'test-skill',
-                  path: 'assets/image.png',
+                  file_path: 'assets/image.png',
                   status:
                     'Binary file detected. The content has been injected into the conversation history for you to analyze.',
                 },
@@ -225,7 +228,7 @@ describe('LoadSkillResourceTool', () => {
                 name: 'load_skill_resource',
                 response: {
                   skill_name: 'test-skill',
-                  path: 'assets/file.unknown',
+                  file_path: 'assets/file.unknown',
                   status:
                     'Binary file detected. The content has been injected into the conversation history for you to analyze.',
                 },
@@ -246,6 +249,87 @@ describe('LoadSkillResourceTool', () => {
     expect(llmRequest.contents[1]?.parts?.[1]?.inlineData?.mimeType).toBe(
       'application/octet-stream',
     );
+  });
+
+  it('declares file_path as the resource argument', () => {
+    const toolset = new SkillToolset([mockSkill]);
+    const tool = new LoadSkillResourceTool(toolset);
+
+    const parameters = tool._getDeclaration().parameters;
+
+    expect(parameters?.properties).toHaveProperty('file_path');
+    expect(parameters?.properties).not.toHaveProperty('path');
+    expect(parameters?.required).toEqual(['skill_name', 'file_path']);
+  });
+
+  it('rejects the legacy path argument', async () => {
+    const toolset = new SkillToolset([mockSkill]);
+    const tool = new LoadSkillResourceTool(toolset);
+    const result = await tool.runAsync({
+      args: {skill_name: 'test-skill', path: 'references/doc.md'},
+      toolContext: createMockContext(),
+    });
+    expect(result).toEqual({
+      error: "Argument 'file_path' is required.",
+      error_code: LoadSkillResourceErrorCode.MISSING_RESOURCE_PATH,
+    });
+  });
+
+  function binaryFunctionResponse(
+    response: Record<string, unknown>,
+  ): LlmRequest {
+    return {
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            {
+              functionResponse: {
+                name: 'load_skill_resource',
+                response: {
+                  ...response,
+                  status:
+                    'Binary file detected. The content has been injected into the conversation history for you to analyze.',
+                },
+              },
+            },
+          ],
+        },
+      ],
+      toolsDict: {},
+      liveConnectConfig: {},
+    };
+  }
+
+  it('ignores a legacy path key in processLlmRequest', async () => {
+    const toolset = new SkillToolset([mockSkill]);
+    const tool = new LoadSkillResourceTool(toolset);
+    const llmRequest = binaryFunctionResponse({
+      skill_name: 'test-skill',
+      path: 'assets/image.png',
+    });
+
+    await tool.processLlmRequest({
+      toolContext: createMockContext(),
+      llmRequest,
+    });
+
+    expect(llmRequest.contents.length).toBe(1);
+  });
+
+  it('ignores a response without a skill_name in processLlmRequest', async () => {
+    const toolset = new SkillToolset([mockSkill]);
+    const tool = new LoadSkillResourceTool(toolset);
+    const llmRequest = binaryFunctionResponse({
+      file_path: 'assets/image.png',
+    });
+
+    await tool.processLlmRequest({
+      toolContext: createMockContext(),
+      llmRequest,
+    });
+
+    expect(llmRequest.contents.length).toBe(1);
   });
 
   describe('error codes', () => {
