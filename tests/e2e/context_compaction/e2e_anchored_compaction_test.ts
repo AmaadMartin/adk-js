@@ -7,7 +7,6 @@
 import {
   AnchoredContextCompactor,
   BasePlugin,
-  CompactedEvent,
   ContextCompactionTrigger,
   Gemini,
   InMemoryRunner,
@@ -82,7 +81,7 @@ describe('E2e Anchored Context Compaction', () => {
     !!process.env.GOOGLE_CLOUD_PROJECT;
 
   it.skipIf(!hasAKey)(
-    'should hit token threshold and maintain a persistent scratchpad at index 0',
+    'should hit token threshold and maintain a persistent scratchpad',
     async () => {
       const agent = createAnchoredCompactionAgent();
       const plugin = new TestCompactionPlugin();
@@ -126,15 +125,25 @@ describe('E2e Anchored Context Compaction', () => {
       const compactedEvents = events.filter(isCompactedEvent);
       expect(compactedEvents.length).toBeGreaterThan(0);
 
-      // In AnchoredContextCompactor, the scratchpad should be at index 0
-      const firstEvent = events[0];
-      expect(isScratchpadEvent(firstEvent)).toBe(true);
-      expect(firstEvent.author).toBe('system');
-      expect((firstEvent as CompactedEvent).compactedContent).toBeTruthy();
-
-      // Verify that there is at most one scratchpad event
+      // A session service only appends, so the stored log keeps the events the
+      // scratchpad summarizes and every scratchpad the run produced.
       const scratchpads = events.filter(isScratchpadEvent);
-      expect(scratchpads.length).toBe(1);
+      expect(scratchpads.length).toBeGreaterThanOrEqual(1);
+
+      const latestScratchpad = scratchpads[scratchpads.length - 1];
+      expect(latestScratchpad.author).toBe('system');
+      expect(latestScratchpad.compactedContent).toBeTruthy();
+
+      // The active view is the latest scratchpad plus the raw events newer than
+      // the range it covers, so it elides part of the stored log.
+      const activeEvents = [
+        latestScratchpad,
+        ...events.filter(
+          (e) =>
+            !isScratchpadEvent(e) && e.timestamp > latestScratchpad.endTime,
+        ),
+      ];
+      expect(activeEvents.length).toBeLessThan(events.length);
 
       // Verify that the plugin callbacks were called
       expect(plugin.beforeCalled).toBe(true);
