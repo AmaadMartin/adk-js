@@ -12,9 +12,11 @@ import {AsyncQueue} from '../utils/async_queue.js';
 import {BaseNode, toContent} from './base_node.js';
 import type {RunnableNode} from './graph.js';
 import {NodeContext} from './node_context.js';
+import {createPlainTextResumeEvents} from './utils/hitl_utils.js';
 import {
   eventsForCurrentRun,
   reconstructNodeStates,
+  unwrapResponse,
 } from './utils/rehydration_utils.js';
 import {buildNode, isNodeLike} from './utils/workflow_graph_utils.js';
 import {isWorkflow, Workflow} from './workflow.js';
@@ -55,19 +57,35 @@ export async function* runNodeAsInvocation(
 ): AsyncGenerator<Event, void, void> {
   const author = options.author ?? node.name;
   const channel = new AsyncQueue<Event>();
+  // Interactive resume: if the node is paused on an interrupt and the user
+  // replies with plain text (not a structured function response), feed that
+  // text to the pending interrupt. Structured function responses are still
+  // resolved by the workflow's own rehydration.
+  const resume = plainTextResume(ic);
   const root = new NodeContext({
     invocationContext: ic,
     channel,
     nodePath: '',
     runId: author,
-    // Interactive resume: if the node is paused on an interrupt and the user
-    // replies with plain text (not a structured function response), feed that
-    // text to the pending interrupt(s). Structured function responses are still
-    // resolved by the workflow's own rehydration.
-    resumeInputs: resumeInputsFromPlainText(ic),
+    resumeInputs: resume
+      ? {[resume.interruptId]: unwrapResponse({result: resume.text})}
+      : {},
   });
 
   const input = extractNodeInput(ic.userContent);
+
+  // Record the resolution before the node reads it. The runner appends every
+  // yielded event to the session, so yielding here puts the record in
+  // `session.events` ahead of the rehydration that scans them.
+  if (resume) {
+    yield* createPlainTextResumeEvents({
+      interruptIds: [resume.interruptId],
+      text: resume.text,
+      events: ic.session.events,
+      invocationId: ic.invocationId,
+      branch: ic.branch,
+    });
+  }
 
   let interrupted = false;
   const settle = (async () => {
@@ -128,6 +146,14 @@ export async function* runNodeAsInvocation(
   }
 }
 
+/** A plain-text reply, and the single interrupt it resolves. */
+interface PlainTextResume {
+  /** The interrupt the reply resolves. */
+  interruptId: string;
+  /** The text the user typed. */
+  text: string;
+}
+
 /**
  * When the run is paused on exactly one unresolved interrupt and the incoming
  * message is plain text (not a structured function response), maps that text to
@@ -140,14 +166,12 @@ export async function* runNodeAsInvocation(
  * pause in a multi-interrupt workflow requires structured function responses
  * (resolved by the workflow's own rehydration).
  */
-function resumeInputsFromPlainText(
-  ic: InvocationContext,
-): Record<string, unknown> {
+function plainTextResume(ic: InvocationContext): PlainTextResume | undefined {
   const parts = ic.userContent?.parts ?? [];
   const isPlainText =
     parts.length > 0 && parts.every((p) => typeof p.text === 'string');
   if (!isPlainText) {
-    return {};
+    return undefined;
   }
   const text = parts.map((p) => p.text).join('');
 
@@ -165,10 +189,10 @@ function resumeInputsFromPlainText(
 
   // Only the unambiguous single-pause case is resumable by plain text.
   if (pending.size !== 1) {
-    return {};
+    return undefined;
   }
-  const [id] = pending;
-  return {[id]: text};
+  const [interruptId] = pending;
+  return {interruptId, text};
 }
 
 /**

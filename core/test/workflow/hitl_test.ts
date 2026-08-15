@@ -10,7 +10,7 @@ import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
 import {AuthCredentialTypes} from '../../src/auth/auth_credential.js';
 import {AuthConfig} from '../../src/auth/auth_tool.js';
-import type {Event} from '../../src/events/event.js';
+import {createEvent, type Event} from '../../src/events/event.js';
 import {State} from '../../src/sessions/state.js';
 import {toJsonSchema} from '../../src/utils/schema.js';
 import {
@@ -18,6 +18,8 @@ import {
   RequestInput,
 } from '../../src/workflow/request_input.js';
 import {
+  createAuthRequestEvent,
+  createPlainTextResumeEvents,
   createRequestInputEvent,
   createRequestInputResponse,
   getRequestInputInterruptIds,
@@ -25,6 +27,7 @@ import {
   hasRequestInputFunctionCall,
   interruptResponseMismatch,
   processAuthResume,
+  REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
   REQUEST_INPUT_FUNCTION_CALL_NAME,
   responseSchemasByInterruptId,
 } from '../../src/workflow/utils/hitl_utils.js';
@@ -156,6 +159,121 @@ describe('createRequestInputResponse', () => {
       name: REQUEST_INPUT_FUNCTION_CALL_NAME,
       response: {value: 5},
     });
+  });
+});
+
+describe('createPlainTextResumeEvents', () => {
+  /** An `adk_request_input` raise, as a workflow node mints it. */
+  const raise = (interruptId: string): Event =>
+    createRequestInputEvent(new RequestInput({interruptId}));
+
+  /** An `adk_request_credential` raise, as the workflow auth gate mints it. */
+  const raiseCredential = (credentialKey: string): Event =>
+    createAuthRequestEvent(
+      {
+        credentialKey,
+        authScheme: {type: 'apiKey', name: credentialKey, in: 'header'},
+        rawAuthCredential: {authType: AuthCredentialTypes.API_KEY},
+      },
+      credentialKey,
+    );
+
+  /** The function-response a marker carries. */
+  const responsePart = (event: Event) =>
+    event.content?.parts?.[0]?.functionResponse;
+
+  it('records a typed reply as the user message a client would have sent', () => {
+    const [marker] = createPlainTextResumeEvents({
+      interruptIds: ['i1'],
+      text: 'approve',
+      events: [raise('i1')],
+    });
+
+    expect(marker.author).toBe('user');
+    expect(marker.content?.role).toBe('user');
+    expect(marker.content?.parts).toHaveLength(1);
+    expect(responsePart(marker)).toEqual({
+      id: 'i1',
+      name: REQUEST_INPUT_FUNCTION_CALL_NAME,
+      response: {result: 'approve'},
+    });
+  });
+
+  it('names an auth-gate raise adk_request_credential', () => {
+    const [marker] = createPlainTextResumeEvents({
+      interruptIds: ['testKey'],
+      text: 'my-key',
+      events: [raiseCredential('testKey')],
+    });
+
+    expect(responsePart(marker)).toEqual({
+      id: 'testKey',
+      name: REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
+      response: {result: 'my-key'},
+    });
+  });
+
+  it('records nothing for an id no call in the events raised', () => {
+    expect(
+      createPlainTextResumeEvents({
+        interruptIds: ['never-raised'],
+        text: 'approve',
+        events: [raise('i1')],
+      }),
+    ).toEqual([]);
+  });
+
+  it('records nothing when the id belongs to an ordinary tool call', () => {
+    const toolCall = createEvent({
+      content: {
+        role: 'model',
+        parts: [{functionCall: {id: 'i1', name: 'gate', args: {}}}],
+      },
+    });
+
+    expect(
+      createPlainTextResumeEvents({
+        interruptIds: ['i1'],
+        text: 'approve',
+        events: [toolCall],
+      }),
+    ).toEqual([]);
+  });
+
+  it('records one marker per resolved interrupt, skipping unraised ids', () => {
+    const markers = createPlainTextResumeEvents({
+      interruptIds: ['i1', 'ghost', 'i2'],
+      text: 'approve',
+      events: [raise('i1'), raise('i2')],
+    });
+
+    expect(markers.map((m) => responsePart(m)?.id)).toEqual(['i1', 'i2']);
+  });
+
+  it('carries the invocation and branch the reply arrived on', () => {
+    const [marker] = createPlainTextResumeEvents({
+      interruptIds: ['i1'],
+      text: 'approve',
+      events: [raise('i1')],
+      invocationId: 'inv-1',
+      branch: 'wf.gate',
+    });
+
+    expect(marker.invocationId).toBe('inv-1');
+    expect(marker.branch).toBe('wf.gate');
+  });
+
+  it('unwraps to the value the resume path delivers, digits included', () => {
+    const [marker] = createPlainTextResumeEvents({
+      interruptIds: ['i1'],
+      text: '42',
+      events: [raise('i1')],
+    });
+
+    // The live turn hands the node `unwrapResponse({result: text})`, so
+    // replaying this marker on a later turn recovers the same value.
+    expect(unwrapResponse(responsePart(marker)?.response)).toBe(42);
+    expect(unwrapResponse({result: '42'})).toBe(42);
   });
 });
 
