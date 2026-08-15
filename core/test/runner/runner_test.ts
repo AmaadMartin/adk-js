@@ -1126,6 +1126,7 @@ class MetadataPlugin extends BasePlugin {
 
   enableEventCallback = false;
   enableBeforeRunCallback = false;
+  observedEventMetadata: Array<Event['customMetadata']> = [];
 
   constructor() {
     super('metadata_plugin');
@@ -1137,6 +1138,7 @@ class MetadataPlugin extends BasePlugin {
     invocationContext: InvocationContext;
     event: Event;
   }): Promise<Event | undefined> {
+    this.observedEventMetadata.push(event.customMetadata);
     if (!this.enableEventCallback) {
       return undefined;
     }
@@ -1300,6 +1302,16 @@ describe('Runner RunConfig.customMetadata', () => {
       requestId: 'from-param',
       tenant: 't-1',
     });
+  });
+
+  it('stamps an event before the onEventCallback reads it', async () => {
+    const runner = createRunner(new MockMultiEventAgent('multi_agent'));
+
+    await run(runner, {runConfig: {customMetadata: {requestId: 'req-1'}}});
+
+    expect(plugin.observedEventMetadata).toEqual(
+      MockMultiEventAgent.EVENT_TEXTS.map(() => ({requestId: 'req-1'})),
+    );
   });
 
   it('stamps a replacement event returned by a plugin', async () => {
