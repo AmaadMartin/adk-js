@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {mkdir, readFile, rename, writeFile} from 'node:fs/promises';
+import {mkdir, readFile, writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
 
@@ -64,8 +64,7 @@ const target = path.join(destination, asset);
 try {
   await mkdir(destination, {recursive: true});
   const tarball = await fetchTarball(url);
-  await writeFile(`${target}.tmp`, tarball);
-  await rename(`${target}.tmp`, target);
+  await writeFile(target, tarball);
   process.stdout.write(`Prefetched ${url} (${tarball.length} bytes)\n`);
 } catch (error) {
   warn(
