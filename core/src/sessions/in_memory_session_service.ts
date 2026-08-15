@@ -18,10 +18,9 @@ import {
   ListSessionsRequest,
   ListSessionsResponse,
   mergeStates,
-  trimTempState,
 } from './base_session_service.js';
 import {createSession, Session} from './session.js';
-import {extractStateDelta} from './state_utils.js';
+import {extractStateDelta, StateDeltas} from './state_utils.js';
 
 /**
  * Checks if the given URI is an in-memory memory service URI.
@@ -34,23 +33,52 @@ export function isInMemoryConnectionString(uri?: string): boolean {
  * An in-memory implementation of the session service.
  */
 export class InMemorySessionService extends BaseSessionService {
+  // Every level of the three maps below is keyed by untrusted input: the app
+  // name, the user id, the session id and state keys all arrive off the
+  // request path or body on a dev server. On a plain object a key of
+  // `__proto__` resolves to the inherited accessor, so a write through it
+  // lands on `Object.prototype` instead of creating an own property. A
+  // null-prototype map has no such accessor, so every level uses one.
+
   /**
    * A map from app name to a map from user ID to a map from session ID to
    * session.
    */
   private sessions: Record<string, Record<string, Record<string, Session>>> =
-    {};
+    Object.create(null);
 
   /**
    * A map from app name to a map from user ID to a map from key to the value.
    */
   private userState: Record<string, Record<string, Record<string, unknown>>> =
-    {};
+    Object.create(null);
 
   /**
    * A map from app name to a map from key to the value.
    */
-  private appState: Record<string, Record<string, unknown>> = {};
+  private appState: Record<string, Record<string, unknown>> =
+    Object.create(null);
+
+  /**
+   * Merges app- and user-scoped deltas into the stores shared across sessions.
+   *
+   * Empty deltas are skipped so that apps and users which never set scoped
+   * state gain no entry at all.
+   */
+  private applyScopedDeltas(
+    appName: string,
+    userId: string,
+    {app, user}: StateDeltas,
+  ): void {
+    if (Object.keys(app).length > 0) {
+      Object.assign((this.appState[appName] ??= Object.create(null)), app);
+    }
+
+    if (Object.keys(user).length > 0) {
+      const users = (this.userState[appName] ??= Object.create(null));
+      Object.assign((users[userId] ??= Object.create(null)), user);
+    }
+  }
 
   async createSession({
     appName,
@@ -58,21 +86,24 @@ export class InMemorySessionService extends BaseSessionService {
     state,
     sessionId,
   }: CreateSessionRequest): Promise<Session> {
-    const filteredState = state ? trimTempState(state) : undefined;
+    const deltas = extractStateDelta(state);
+    // Must precede the mergeStates() below, which re-reads the scope stores.
+    this.applyScopedDeltas(appName, userId, deltas);
+
     const session = createSession({
       id: sessionId || randomUUID(),
       appName,
       userId,
-      state: filteredState,
+      state: deltas.session,
       events: [],
       lastUpdateTime: Date.now(),
     });
 
     if (!this.sessions[appName]) {
-      this.sessions[appName] = {};
+      this.sessions[appName] = Object.create(null);
     }
     if (!this.sessions[appName][userId]) {
-      this.sessions[appName][userId] = {};
+      this.sessions[appName][userId] = Object.create(null);
     }
 
     this.sessions[appName][userId][session.id] = session;
@@ -275,21 +306,11 @@ export class InMemorySessionService extends BaseSessionService {
     if (event.actions && event.actions.stateDelta) {
       // The session bucket is deliberately ignored: session state is applied by
       // super.appendEvent(), which keeps the `app:`/`user:` prefixes on the key.
-      const {app: appDelta, user: userDelta} = extractStateDelta(
-        event.actions.stateDelta,
+      this.applyScopedDeltas(
+        appName,
+        userId,
+        extractStateDelta(event.actions.stateDelta),
       );
-
-      if (Object.keys(appDelta).length > 0) {
-        this.appState[appName] = {...this.appState[appName], ...appDelta};
-      }
-
-      if (Object.keys(userDelta).length > 0) {
-        this.userState[appName] = this.userState[appName] || {};
-        this.userState[appName][userId] = {
-          ...this.userState[appName][userId],
-          ...userDelta,
-        };
-      }
     }
 
     const storageSession: Session = this.sessions[appName][userId][sessionId];

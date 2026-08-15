@@ -11,7 +11,7 @@ import {
   createEvent,
   createEventActions,
 } from '@google/adk';
-import {beforeEach, describe, expect, it} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {isInMemoryConnectionString} from '../../src/sessions/in_memory_session_service.js';
 
 describe('isInMemoryConnectionString', () => {
@@ -99,6 +99,141 @@ describe('InMemorySessionService', () => {
 
       expect(session.state).toHaveProperty('normalKey', 'value');
       expect(session.state).not.toHaveProperty(`${State.TEMP_PREFIX}tempKey`);
+    });
+
+    it('shares app: state from initial state with other sessions of the same app', async () => {
+      const appName = 'app';
+      await service.createSession({
+        appName,
+        userId: 'user1',
+        state: {[`${State.APP_PREFIX}config`]: 'dark-mode'},
+      });
+
+      const session2 = await service.createSession({appName, userId: 'user2'});
+
+      expect(session2.state).toHaveProperty(
+        `${State.APP_PREFIX}config`,
+        'dark-mode',
+      );
+    });
+
+    it('shares user: state from initial state with other sessions of the same user', async () => {
+      const appName = 'app';
+      const userId = 'user1';
+      await service.createSession({
+        appName,
+        userId,
+        state: {[`${State.USER_PREFIX}pref`]: 'A'},
+      });
+
+      const session2 = await service.createSession({appName, userId});
+
+      expect(session2.state).toHaveProperty(`${State.USER_PREFIX}pref`, 'A');
+    });
+
+    it('does not share user: state from initial state with a different user', async () => {
+      const appName = 'app';
+      await service.createSession({
+        appName,
+        userId: 'user1',
+        state: {[`${State.USER_PREFIX}pref`]: 'A'},
+      });
+
+      const session2 = await service.createSession({appName, userId: 'user2'});
+
+      expect(session2.state).not.toHaveProperty(`${State.USER_PREFIX}pref`);
+    });
+
+    it('keeps unprefixed initial state scoped to the session that created it', async () => {
+      const appName = 'app';
+      const userId = 'user';
+      const session1 = await service.createSession({
+        appName,
+        userId,
+        state: {sessionKey: 'value'},
+      });
+
+      const session2 = await service.createSession({appName, userId});
+      const retrieved = await service.getSession({
+        appName,
+        userId,
+        sessionId: session1.id,
+      });
+
+      expect(retrieved?.state).toEqual({sessionKey: 'value'});
+      expect(session2.state).not.toHaveProperty('sessionKey');
+    });
+
+    it('drops temp: keys from initial state instead of promoting them', async () => {
+      const appName = 'app';
+      const session1 = await service.createSession({
+        appName,
+        userId: 'user1',
+        state: {
+          [`${State.TEMP_PREFIX}scratch`]: 'dropped',
+          [`${State.APP_PREFIX}kept`]: 1,
+        },
+      });
+
+      const session2 = await service.createSession({appName, userId: 'user2'});
+
+      expect(session1.state).toEqual({[`${State.APP_PREFIX}kept`]: 1});
+      expect(session2.state).toEqual({[`${State.APP_PREFIX}kept`]: 1});
+    });
+
+    it('lets app: initial state overwrite an existing app value', async () => {
+      const appName = 'app';
+      const userId = 'user';
+      const session1 = await service.createSession({
+        appName,
+        userId,
+        state: {[`${State.APP_PREFIX}config`]: 'dark-mode'},
+      });
+
+      const session2 = await service.createSession({
+        appName,
+        userId,
+        state: {[`${State.APP_PREFIX}config`]: 'light-mode'},
+      });
+      const retrieved = await service.getSession({
+        appName,
+        userId,
+        sessionId: session1.id,
+      });
+
+      expect(session2.state).toHaveProperty(
+        `${State.APP_PREFIX}config`,
+        'light-mode',
+      );
+      expect(retrieved?.state).toHaveProperty(
+        `${State.APP_PREFIX}config`,
+        'light-mode',
+      );
+    });
+
+    it('merges initial app: state with app state set by an event', async () => {
+      const appName = 'app';
+      const session1 = await service.createSession({
+        appName,
+        userId: 'user1',
+        state: {[`${State.APP_PREFIX}k1`]: 'v1'},
+      });
+      await service.appendEvent({
+        session: session1,
+        event: createEvent({
+          timestamp: Date.now(),
+          actions: createEventActions({
+            stateDelta: {[`${State.APP_PREFIX}k2`]: 'v2'},
+          }),
+        }),
+      });
+
+      const session2 = await service.createSession({appName, userId: 'user2'});
+
+      expect(session2.state).toEqual({
+        [`${State.APP_PREFIX}k1`]: 'v1',
+        [`${State.APP_PREFIX}k2`]: 'v2',
+      });
     });
   });
 
@@ -739,6 +874,105 @@ describe('InMemorySessionService', () => {
       // Should just log warnings and return event
       const returnedEvent = await service.appendEvent({session, event});
       expect(returnedEvent).toBe(event);
+    });
+  });
+
+  describe('createSession scope-store prototype safety', () => {
+    // Every key these tests can plant on `Object.prototype` when the fix is
+    // reverted, so that reverting it fails these tests instead of corrupting
+    // the ones that run afterwards.
+    const POLLUTED_KEYS = ['protoUser', 'protoSid', 'pwned', 'pref'];
+
+    const clearPollution = () => {
+      for (const key of POLLUTED_KEYS) {
+        delete (Object.prototype as Record<string, unknown>)[key];
+      }
+    };
+
+    beforeEach(clearPollution);
+    afterEach(clearPollution);
+
+    it('keeps a __proto__ app state key as an own property', async () => {
+      await service.createSession({
+        appName: 'app1',
+        userId: 'u1',
+        state: {
+          [`${State.APP_PREFIX}__proto__`]: {baseUrl: 'https://evil.test'},
+        },
+      });
+
+      // Read the key back through a sibling session: the creating session's
+      // merged view would pass even if the write never reached the app store.
+      const sibling = await service.createSession({
+        appName: 'app1',
+        userId: 'u2',
+      });
+      expect(sibling.state[`${State.APP_PREFIX}__proto__`]).toEqual({
+        baseUrl: 'https://evil.test',
+      });
+    });
+
+    it('keeps a __proto__ user state key as an own property', async () => {
+      await service.createSession({
+        appName: 'app1',
+        userId: 'u1',
+        state: {
+          [`${State.USER_PREFIX}__proto__`]: {baseUrl: 'https://evil.test'},
+        },
+      });
+
+      const sibling = await service.createSession({
+        appName: 'app1',
+        userId: 'u1',
+      });
+      expect(sibling.state[`${State.USER_PREFIX}__proto__`]).toEqual({
+        baseUrl: 'https://evil.test',
+      });
+    });
+
+    it('does not pollute Object.prototype via appName in the initial user state', async () => {
+      await service.createSession({
+        appName: '__proto__',
+        userId: 'protoUser',
+        sessionId: 'protoSid',
+        state: {[`${State.USER_PREFIX}pref`]: 'attacker-value'},
+      });
+
+      // `userState['__proto__']` resolves to `Object.prototype` on a plain
+      // map, so the user id itself is what lands there.
+      expect(({} as Record<string, unknown>)['protoUser']).toBeUndefined();
+    });
+
+    it('does not re-parent the app store via appName in the initial app state', async () => {
+      await service.createSession({
+        appName: '__proto__',
+        userId: 'protoUser',
+        sessionId: 'protoSid',
+        state: {[`${State.APP_PREFIX}pwned`]: 'attacker-value'},
+      });
+
+      // A re-parented app store hands the attacker's value to any app whose
+      // name matches one of their state keys.
+      const other = await service.createSession({
+        appName: 'pwned',
+        userId: 'u1',
+      });
+      expect(other.state).toEqual({});
+    });
+
+    it('does not re-parent the user store via userId in the initial user state', async () => {
+      await service.createSession({
+        appName: 'app1',
+        userId: '__proto__',
+        sessionId: 'protoSid',
+        state: {[`${State.USER_PREFIX}pref`]: 'attacker-value'},
+      });
+
+      const other = await service.createSession({
+        appName: 'app1',
+        userId: 'pref',
+      });
+      expect(other.state).toEqual({});
     });
   });
 });

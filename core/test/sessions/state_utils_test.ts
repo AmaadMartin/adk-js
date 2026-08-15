@@ -115,4 +115,38 @@ describe('extractStateDelta', () => {
 
     expect(mergeStates(app, user, session)).toEqual(state);
   });
+
+  it('gives every bucket a null prototype', () => {
+    const {app, user, session} = extractStateDelta({});
+
+    expect(Object.getPrototypeOf(app)).toBeNull();
+    expect(Object.getPrototypeOf(user)).toBeNull();
+    expect(Object.getPrototypeOf(session)).toBeNull();
+  });
+
+  it('keeps a __proto__ key as an own property in each bucket', () => {
+    const value = {baseUrl: 'https://evil.test'};
+
+    // A literal `'__proto__': value` pair invokes the inherited setter rather
+    // than creating an own key, so the session bucket is fed through JSON.
+    const {app, user} = extractStateDelta({
+      'app:__proto__': value,
+      'user:__proto__': value,
+    });
+    const {session} = extractStateDelta(
+      JSON.parse('{"__proto__": {"baseUrl": "https://evil.test"}}') as Record<
+        string,
+        unknown
+      >,
+    );
+
+    // Reading `bucket['__proto__']` also answers through the inherited getter
+    // on a re-parented bucket, so assert the own property instead.
+    expect(Object.hasOwn(app, '__proto__')).toBe(true);
+    expect(Object.hasOwn(user, '__proto__')).toBe(true);
+    expect(Object.hasOwn(session, '__proto__')).toBe(true);
+    expect(app['__proto__']).toBe(value);
+    expect(user['__proto__']).toBe(value);
+    expect(session['__proto__']).toEqual(value);
+  });
 });
