@@ -166,6 +166,32 @@ describe('CLI Entrypoint', () => {
       const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
       expect(args.a2aAuthToken).toBe('tok');
     });
+
+    it('should pass the logo options when both flags are set', async () => {
+      // Commander camelCases a dashed flag, so reading `options['logo-text']`
+      // in the action would hand the server `undefined` instead.
+      await parse([
+        'web',
+        '--logo-text',
+        'Acme Agents',
+        '--logo-image-url',
+        'https://acme.example/logo.svg',
+      ]);
+
+      const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
+      expect(args).toMatchObject({
+        logoText: 'Acme Agents',
+        logoImageUrl: 'https://acme.example/logo.svg',
+      });
+    });
+
+    it('should leave the logo options unset when the flags are absent', async () => {
+      await parse(['web']);
+
+      const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
+      expect(args.logoText).toBeUndefined();
+      expect(args.logoImageUrl).toBeUndefined();
+    });
   });
 
   describe('command: api_server', () => {
@@ -192,6 +218,23 @@ describe('CLI Entrypoint', () => {
 
       const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
       expect(args.a2aAuthToken).toBe('tok');
+    });
+
+    it('should reject the logo flags, which belong to web only', async () => {
+      const apiServer = program.commands.find((c) => c.name() === 'api_server');
+      if (!apiServer) {
+        expect.fail('the api_server command is not registered');
+      }
+      // `exitOverride` is inherited when a subcommand is created, and the
+      // suite calls it on the program afterwards, so this subcommand would
+      // still call `process.exit` on a parse error.
+      apiServer.exitOverride();
+      apiServer.configureOutput({writeErr: () => {}});
+
+      await expect(
+        parse(['api_server', '--logo-text', 'Acme Agents']),
+      ).rejects.toMatchObject({code: 'commander.unknownOption'});
+      expect(AdkApiServer).not.toHaveBeenCalled();
     });
   });
 
