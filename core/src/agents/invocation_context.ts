@@ -50,6 +50,13 @@ export interface InvocationContextParams {
   endInvocation?: boolean;
   transcriptionCache?: TranscriptionEntry[];
   runConfig?: RunConfig;
+  /**
+   * The invocation-scoped custom-metadata store. Normally omitted: a root
+   * context seeds it from `runConfig.customMetadata`, and child contexts
+   * (`clone`, `createInvocationContext`) carry the same object over so the
+   * whole invocation shares one store.
+   */
+  customMetadata?: Record<string, unknown>;
   activeStreamingTools?: Record<string, ActiveStreamingTool>;
   pluginManager: PluginManager;
   abortSignal?: AbortSignal;
@@ -193,6 +200,15 @@ export class InvocationContext {
   runConfig?: RunConfig;
 
   /**
+   * Custom metadata for this invocation, seeded from
+   * {@link RunConfig.customMetadata}.
+   *
+   * Shared by every context of the invocation, so a write by one holder is
+   * visible to all. Exposed read-only through `ReadonlyContext.customMetadata`.
+   */
+  readonly customMetadata: Record<string, unknown>;
+
+  /**
    * A container to keep track of different kinds of costs incurred as a part of
    * this invocation.
    *
@@ -257,6 +273,12 @@ export class InvocationContext {
     this.endInvocation = params.endInvocation || false;
     this.transcriptionCache = params.transcriptionCache;
     this.runConfig = params.runConfig;
+    // A supplied store is shared as-is, so every context of one invocation
+    // reads the same object; seeding copies, so the store never writes back
+    // into the caller's RunConfig.
+    this.customMetadata = params.customMetadata ?? {
+      ...params.runConfig?.customMetadata,
+    };
     this.activeStreamingTools = params.activeStreamingTools;
     this.pluginManager = params.pluginManager;
     this.abortSignal = params.abortSignal;

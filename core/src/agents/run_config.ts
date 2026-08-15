@@ -114,6 +114,15 @@ export interface RunConfig {
    * decision; interactive front-ends (e.g. `adk run`) opt in explicitly.
    */
   plainTextToolConfirmation?: boolean;
+
+  /**
+   * Custom metadata for the current invocation.
+   *
+   * Seeds the invocation-scoped metadata store, which instruction providers,
+   * toolsets and callbacks read as a read-only view through
+   * `ReadonlyContext.customMetadata`. Must be JSON-serializable.
+   */
+  customMetadata?: Record<string, unknown>;
 }
 
 /**
