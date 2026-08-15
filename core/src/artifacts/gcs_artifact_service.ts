@@ -8,11 +8,11 @@ import {Bucket, File, Storage, StorageOptions} from '@google-cloud/storage';
 import {createPartFromBase64, createPartFromText, Part} from '@google/genai';
 import {logger} from '../utils/logger.js';
 
-import {hasArtifactContent} from './artifact_content_utils.js';
 import {
   ArtifactVersion,
   BaseArtifactService,
   DeleteArtifactRequest,
+  hasArtifactContent,
   ListArtifactKeysRequest,
   ListVersionsRequest,
   LoadArtifactRequest,

@@ -8,7 +8,6 @@ import {Part} from '@google/genai';
 
 import {logger} from '../utils/logger.js';
 
-import {hasArtifactContent} from './artifact_content_utils.js';
 import {
   ArtifactVersion,
   BaseArtifactService,
@@ -17,6 +16,7 @@ import {
   ListVersionsRequest,
   LoadArtifactRequest,
   SaveArtifactRequest,
+  hasArtifactContent,
 } from './base_artifact_service.js';
 
 export function isInMemoryConnectionString(uri: string): boolean {
@@ -58,7 +58,7 @@ export class InMemoryArtifactService implements BaseArtifactService {
       customMetadata,
     };
 
-    if (!artifact.inlineData && artifact.text == null) {
+    if (artifact.inlineData == null && artifact.text == null) {
       const fileData = artifact.fileData!;
 
       metadata.mimeType = fileData.mimeType;

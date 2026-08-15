@@ -11,7 +11,6 @@ import {fileURLToPath, pathToFileURL} from 'url';
 
 import {logger} from '../utils/logger.js';
 
-import {hasArtifactContent} from './artifact_content_utils.js';
 import {
   ArtifactVersion,
   BaseArtifactService,
@@ -20,6 +19,7 @@ import {
   ListVersionsRequest,
   LoadArtifactRequest,
   SaveArtifactRequest,
+  hasArtifactContent,
 } from './base_artifact_service.js';
 
 const USER_NAMESPACE_PREFIX = 'user:';
