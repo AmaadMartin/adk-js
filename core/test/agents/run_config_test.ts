@@ -77,4 +77,13 @@ describe('createRunConfig', () => {
       createRunConfig({maxLlmCalls: Number.MAX_SAFE_INTEGER + 1}),
     ).toThrow();
   });
+
+  it('passes customMetadata through and leaves it undefined by default', () => {
+    const metadata = {tenant: 'acme'};
+
+    expect(createRunConfig({customMetadata: metadata}).customMetadata).toBe(
+      metadata,
+    );
+    expect(createRunConfig().customMetadata).toBeUndefined();
+  });
 });

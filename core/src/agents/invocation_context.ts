@@ -50,6 +50,8 @@ export interface InvocationContextParams {
   endInvocation?: boolean;
   transcriptionCache?: TranscriptionEntry[];
   runConfig?: RunConfig;
+  /** Shared metadata store; omit on a root context to seed from `runConfig`. */
+  customMetadata?: Record<string, unknown>;
   activeStreamingTools?: Record<string, ActiveStreamingTool>;
   pluginManager: PluginManager;
   abortSignal?: AbortSignal;
@@ -193,6 +195,15 @@ export class InvocationContext {
   runConfig?: RunConfig;
 
   /**
+   * Custom metadata for this invocation, seeded from
+   * {@link RunConfig.customMetadata}.
+   *
+   * Shared by every context of the invocation, so a write by one holder is
+   * visible to all. Exposed read-only through `ReadonlyContext.customMetadata`.
+   */
+  readonly customMetadata: Record<string, unknown>;
+
+  /**
    * A container to keep track of different kinds of costs incurred as a part of
    * this invocation.
    *
@@ -257,6 +268,9 @@ export class InvocationContext {
     this.endInvocation = params.endInvocation || false;
     this.transcriptionCache = params.transcriptionCache;
     this.runConfig = params.runConfig;
+    this.customMetadata = params.customMetadata ?? {
+      ...params.runConfig?.customMetadata,
+    };
     this.activeStreamingTools = params.activeStreamingTools;
     this.pluginManager = params.pluginManager;
     this.abortSignal = params.abortSignal;
