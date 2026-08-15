@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {FinishReason} from '@google/genai';
+import {Content, FinishReason} from '@google/genai';
 import {trace} from '@opentelemetry/api';
 import {Mock, afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
@@ -22,6 +22,7 @@ import {
   traceAgentInvocation,
   traceCallLlm,
   traceMergedToolCalls,
+  traceSendData,
   traceToolCall,
 } from '../../src/telemetry/tracing.js';
 
@@ -403,6 +404,132 @@ describe('Telemetry Tracing Functions', () => {
           parts: [{inlineData: {mimeType: 'audio/pcm', data: AUDIO_BASE64}}],
         },
       });
+
+      expect(attribute).toBe('{}');
+    });
+  });
+
+  describe('traceSendData', () => {
+    // 'dGVzdF9kYXRh' is the base64 of the 9-byte 'test_data'.
+    const AUDIO_BASE64 = 'dGVzdF9kYXRh';
+
+    beforeEach(() => {
+      vi.stubEnv('ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS', 'true');
+    });
+
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    function traceData(data: Content[]): string {
+      vi.mocked(trace.getActiveSpan).mockReturnValue(mockSpan);
+      traceSendData({
+        invocationContext: mockInvocationContext,
+        eventId: 'test-event-id',
+        data,
+      });
+      return attributeValue(mockSpan, 'gcp.vertex.agent.data');
+    }
+
+    it('summarizes inline binary parts instead of copying the payload', () => {
+      const attribute = traceData([
+        {
+          role: 'user',
+          parts: [
+            {text: 'hi'},
+            {inlineData: {mimeType: 'audio/pcm', data: AUDIO_BASE64}},
+          ],
+        },
+      ]);
+
+      expect(attribute).not.toContain(AUDIO_BASE64);
+      expect(attribute).not.toContain('inlineData');
+      expect(attribute).toContain('hi');
+      expect(attribute).toContain('<inline_data: audio/pcm, 9 bytes>');
+    });
+
+    it('describes a blob with no mime type or data', () => {
+      const attribute = traceData([
+        {role: 'user'},
+        {role: 'user', parts: [{inlineData: {}}]},
+      ]);
+
+      expect(attribute).toContain('<inline_data: unknown, 0 bytes>');
+      expect(attribute).not.toContain('inlineData');
+      expect(JSON.parse(attribute)[0]).toEqual({role: 'user', parts: []});
+    });
+
+    it('counts padded base64 payloads correctly', () => {
+      // 'YQ==' is the base64 of the 1-byte 'a', 'YWI=' of the 2-byte 'ab'.
+      const attribute = traceData([
+        {
+          role: 'user',
+          parts: [
+            {inlineData: {mimeType: 'image/png', data: 'YQ=='}},
+            {inlineData: {mimeType: 'image/png', data: 'YWI='}},
+          ],
+        },
+      ]);
+
+      expect(attribute).toContain('<inline_data: image/png, 1 bytes>');
+      expect(attribute).toContain('<inline_data: image/png, 2 bytes>');
+    });
+
+    it('does not mutate the content passed in', () => {
+      const data: Content[] = [
+        {
+          role: 'user',
+          parts: [
+            {text: 'hi'},
+            {inlineData: {mimeType: 'audio/pcm', data: AUDIO_BASE64}},
+          ],
+        },
+      ];
+      const before = structuredClone(data);
+
+      traceData(data);
+
+      expect(data).toEqual(before);
+      expect(data[0].parts?.[1].inlineData?.data).toBe(AUDIO_BASE64);
+    });
+
+    it('leaves parts without inline data untouched', () => {
+      const attribute = traceData([
+        {
+          role: 'user',
+          parts: [
+            {functionCall: {name: 'f', args: {}}},
+            {inlineData: {mimeType: 'audio/pcm', data: AUDIO_BASE64}},
+          ],
+        },
+      ]);
+
+      expect(attribute).toContain('"name":"f"');
+      expect(attribute).toContain('<inline_data: audio/pcm, 9 bytes>');
+    });
+
+    it('records nothing when there is no active span', () => {
+      vi.mocked(trace.getActiveSpan).mockReturnValue(undefined);
+
+      traceSendData({
+        invocationContext: mockInvocationContext,
+        eventId: 'test-event-id',
+        data: [{role: 'user', parts: [{text: 'hi'}]}],
+      });
+
+      expect(mockSpan.setAttribute).not.toHaveBeenCalled();
+      expect(mockSpan.setAttributes).not.toHaveBeenCalled();
+    });
+
+    it('omits the data when content capture is disabled', () => {
+      vi.stubEnv('ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS', 'false');
+
+      const attribute = traceData([
+        {
+          role: 'user',
+          parts: [{inlineData: {mimeType: 'audio/pcm', data: AUDIO_BASE64}}],
+        },
+      ]);
 
       expect(attribute).toBe('{}');
     });

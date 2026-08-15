@@ -364,7 +364,9 @@ export function traceSendData({
 
   span.setAttribute(
     'gcp.vertex.agent.data',
-    shouldAddRequestResponseToSpans() ? safeJsonSerialize(data) : '{}',
+    shouldAddRequestResponseToSpans()
+      ? safeJsonSerialize(data.map(summarizeContentInlineData))
+      : '{}',
   );
 }
 
@@ -405,18 +407,28 @@ function buildLlmRequestForTrace(
 /**
  * Returns `response` with inline binary parts reduced to a description.
  *
- * `Blob.data` is a base64 string, so serializing a part copies its payload
- * verbatim; a live session's audio chunks would otherwise land wholesale on a
- * span attribute. Only the mime type and byte count are kept.
- *
  * @param response The response to summarize.
  * @returns A copy of `response` whose inline binary parts carry a text
  *     description instead of the payload.
  */
 function summarizeInlineData(response: LlmResponse): LlmResponse {
-  const content = response.content;
-  if (!content) return response;
+  return response.content
+    ? {...response, content: summarizeContentInlineData(response.content)}
+    : response;
+}
 
+/**
+ * Returns `content` with inline binary parts reduced to a description.
+ *
+ * `Blob.data` is a base64 string, so serializing a part copies its payload
+ * verbatim; a live session's audio chunks would otherwise land wholesale on a
+ * span attribute. Only the mime type and byte count are kept.
+ *
+ * @param content The content to summarize.
+ * @returns A copy of `content` whose inline binary parts carry a text
+ *     description instead of the payload.
+ */
+function summarizeContentInlineData(content: Content): Content {
   const parts = (content.parts ?? []).map((part) => {
     const blob = part.inlineData;
     if (!blob) return part;
@@ -429,7 +441,7 @@ function summarizeInlineData(response: LlmResponse): LlmResponse {
       text: `<inline_data: ${blob.mimeType || 'unknown'}, ${size} bytes>`,
     };
   });
-  return {...response, content: {role: content.role, parts}};
+  return {role: content.role, parts};
 }
 
 /**
