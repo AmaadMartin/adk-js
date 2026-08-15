@@ -17,6 +17,7 @@ import {Content, GenerateContentResponseUsageMetadata} from '@google/genai';
 import {isCompactedEvent} from '../events/compacted_event.js';
 import {experimental} from '../utils/experimental.js';
 
+import {newInvocationContextId} from '../agents/invocation_context.js';
 import {AuthConfig} from '../auth/auth_tool.js';
 import {Event} from '../events/event.js';
 import {EventActions} from '../events/event_actions.js';
@@ -442,7 +443,7 @@ export class VertexAiSessionService extends BaseSessionService {
     const params: AppendAgentEngineSessionEventRequestParameters = {
       name: `reasoningEngines/${reasoningEngineId}/sessions/${session.id}`,
       author: event.author || 'user',
-      invocationId: event.invocationId || `inv-${Date.now()}`,
+      invocationId: event.invocationId || newInvocationContextId(),
       timestamp: new Date(event.timestamp).toISOString(),
       config,
     };
@@ -458,8 +459,8 @@ export class VertexAiSessionService extends BaseSessionService {
         error,
       );
       // Retry with the same `params` so the request differs only by the
-      // dropped field: rebuilding it would re-evaluate `inv-${Date.now()}`
-      // and send a different synthesized invocationId.
+      // dropped field: rebuilding it would mint a second fallback
+      // invocationId and split one event across two invocations.
       delete config.rawEvent;
       await this.sessions.events.append(params);
     }
