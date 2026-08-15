@@ -35,6 +35,7 @@ import {ScopedArtifactService} from '../../../src/artifacts/scoped_artifact_serv
 import type {ExecuteCodeParams} from '../../../src/code_executors/base_code_executor.js';
 import {BaseCodeExecutor} from '../../../src/code_executors/base_code_executor.js';
 import type {
+  CodeExecutionInput,
   CodeExecutionResult,
   File,
 } from '../../../src/code_executors/code_execution_utils.js';
@@ -44,6 +45,12 @@ const APP_NAME = 'test-app';
 const USER_ID = 'test-user';
 const SESSION_ID = 'test-session';
 const INVOCATION_ID = 'test-invocation';
+
+/** Base64 of 'user input'. */
+const USER_CSV_DATA = 'dXNlciBpbnB1dA==';
+
+/** Base64 of 'model output'. */
+const MODEL_CSV_DATA = 'bW9kZWwgb3V0cHV0';
 
 class MockBaseAgent extends BaseAgent {
   constructor(name: string) {
@@ -65,6 +72,17 @@ class OutputFileCodeExecutor extends BaseCodeExecutor {
 
   async executeCode(_params: ExecuteCodeParams): Promise<CodeExecutionResult> {
     return {stdout: 'done', stderr: '', outputFiles: this.outputFiles};
+  }
+}
+
+/** A data-file executor that records every code execution it is asked for. */
+class RecordingCodeExecutor extends BaseCodeExecutor {
+  override optimizeDataFile = true;
+  readonly executions: CodeExecutionInput[] = [];
+
+  async executeCode(params: ExecuteCodeParams): Promise<CodeExecutionResult> {
+    this.executions.push(params.codeExecutionInput);
+    return {stdout: '', stderr: '', outputFiles: []};
   }
 }
 
@@ -246,6 +264,148 @@ describe('CodeExecutionRequestProcessor', () => {
       executor.codeBlockDelimiters = [];
 
       expect(await renderPythonPart(executor)).toBe('x = 1');
+    });
+  });
+
+  describe('inline data file extraction', () => {
+    function createDataFileAgent(): {
+      agent: LlmAgent;
+      executor: RecordingCodeExecutor;
+    } {
+      const executor = new RecordingCodeExecutor();
+      return {
+        executor,
+        agent: new LlmAgent({
+          name: 'agent-with-data-executor',
+          model: 'gemini-2.5-flash',
+          codeExecutor: executor,
+        }),
+      };
+    }
+
+    it('replaces a user inline data part with a text-only part', async () => {
+      const {agent} = createDataFileAgent();
+      const ctx = createMockInvocationContext(agent, {
+        artifactService: createScopedArtifactService(),
+      });
+      const llmRequest = createLlmRequest({
+        contents: [
+          {
+            role: 'model',
+            parts: [{inlineData: {data: MODEL_CSV_DATA, mimeType: 'text/csv'}}],
+          },
+          {
+            role: 'user',
+            parts: [{inlineData: {data: USER_CSV_DATA, mimeType: 'text/csv'}}],
+          },
+        ],
+      });
+
+      const events = await collectEvents(
+        CODE_EXECUTION_REQUEST_PROCESSOR.runAsync(ctx, llmRequest),
+      );
+
+      const userPart = llmRequest.contents[1].parts?.[0];
+      expect(userPart).toEqual({text: '\nAvailable file: `data_2_1.csv`\n'});
+      expect(userPart?.inlineData).toBeUndefined();
+      expect(events).toHaveLength(2);
+    });
+
+    it('leaves model-role content untouched', async () => {
+      const {agent} = createDataFileAgent();
+      const ctx = createMockInvocationContext(agent, {
+        artifactService: createScopedArtifactService(),
+      });
+      const modelPart = {
+        inlineData: {data: MODEL_CSV_DATA, mimeType: 'text/csv'},
+      };
+      const llmRequest = createLlmRequest({
+        contents: [
+          {role: 'model', parts: [modelPart]},
+          {
+            role: 'user',
+            parts: [{inlineData: {data: USER_CSV_DATA, mimeType: 'text/csv'}}],
+          },
+        ],
+      });
+
+      await collectEvents(
+        CODE_EXECUTION_REQUEST_PROCESSOR.runAsync(ctx, llmRequest),
+      );
+
+      expect(llmRequest.contents[0].parts?.[0]).toBe(modelPart);
+      expect(modelPart.inlineData.data).toBe(MODEL_CSV_DATA);
+    });
+
+    it('hands the extracted file to the executor', async () => {
+      const {agent, executor} = createDataFileAgent();
+      const ctx = createMockInvocationContext(agent, {
+        artifactService: createScopedArtifactService(),
+      });
+      const llmRequest = createLlmRequest({
+        contents: [
+          {
+            role: 'model',
+            parts: [{inlineData: {data: MODEL_CSV_DATA, mimeType: 'text/csv'}}],
+          },
+          {
+            role: 'user',
+            parts: [{inlineData: {data: USER_CSV_DATA, mimeType: 'text/csv'}}],
+          },
+        ],
+      });
+
+      await collectEvents(
+        CODE_EXECUTION_REQUEST_PROCESSOR.runAsync(ctx, llmRequest),
+      );
+
+      expect(executor.executions).toHaveLength(1);
+      expect(executor.executions[0].inputFiles).toEqual([
+        {name: 'data_2_1.csv', mimeType: 'text/csv', content: 'user input'},
+      ]);
+    });
+
+    it('leaves unsupported mime types untouched', async () => {
+      const {agent, executor} = createDataFileAgent();
+      const ctx = createMockInvocationContext(agent, {
+        artifactService: createScopedArtifactService(),
+      });
+      const userPart = {
+        inlineData: {data: USER_CSV_DATA, mimeType: 'image/png'},
+      };
+      const llmRequest = createLlmRequest({
+        contents: [{role: 'user', parts: [userPart]}],
+      });
+
+      await collectEvents(
+        CODE_EXECUTION_REQUEST_PROCESSOR.runAsync(ctx, llmRequest),
+      );
+
+      expect(llmRequest.contents[0].parts?.[0]).toBe(userPart);
+      expect(userPart).toEqual({
+        inlineData: {data: USER_CSV_DATA, mimeType: 'image/png'},
+      });
+      expect(executor.executions).toHaveLength(0);
+    });
+
+    it('skips an inline data part with no data', async () => {
+      const {agent, executor} = createDataFileAgent();
+      const ctx = createMockInvocationContext(agent, {
+        artifactService: createScopedArtifactService(),
+      });
+      const userPart = {inlineData: {mimeType: 'text/csv'}};
+      const llmRequest = createLlmRequest({
+        contents: [{role: 'user', parts: [userPart]}],
+      });
+
+      const events = await collectEvents(
+        CODE_EXECUTION_REQUEST_PROCESSOR.runAsync(ctx, llmRequest),
+      );
+
+      expect(llmRequest.contents[0].parts?.[0]).toBe(userPart);
+      expect(userPart).toEqual({inlineData: {mimeType: 'text/csv'}});
+      expect(executor.executions).toHaveLength(0);
+      expect(events).toHaveLength(0);
     });
   });
 });
