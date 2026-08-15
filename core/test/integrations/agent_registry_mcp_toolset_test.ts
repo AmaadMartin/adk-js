@@ -56,7 +56,7 @@ describe('AgentRegistrySingleMCPToolset', () => {
         connectionParams: BASE_PARAMS,
       });
       const tools = await toolset.getTools();
-      expect(tools.map((t) => t.name)).toEqual(['search', 'fetch']);
+      expect(tools.map((t) => t.name)).toEqual(['fetch', 'search']);
     });
 
     it('prefixes tool names with the configured prefix', async () => {
@@ -66,8 +66,8 @@ describe('AgentRegistrySingleMCPToolset', () => {
       });
       const tools = await toolset.getTools();
       expect(tools.map((t) => t.name)).toEqual([
-        'my_server_search',
         'my_server_fetch',
+        'my_server_search',
       ]);
     });
   });
