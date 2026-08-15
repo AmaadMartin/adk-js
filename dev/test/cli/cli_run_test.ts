@@ -125,6 +125,10 @@ describe('cli_run', () => {
     (readline.createInterface as Mock).mockReturnValue(mockRl);
   });
 
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   /**
    * Makes every later prompt hit end of input: the interface closes itself and
    * `question` never calls back, exactly as readline behaves on Ctrl-D.
@@ -134,10 +138,6 @@ describe('cli_run', () => {
       mockRl.close();
     });
   }
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
 
   it('should run interactively by default', async () => {
     await runAgent({agentPath: 'agent.ts'});
@@ -399,9 +399,9 @@ describe('cli_run', () => {
   });
 
   /**
-   * End of input — Ctrl-D, or a redirected stream that runs out — used to hang
-   * the run forever, because readline closes the interface without ever
-   * calling back into `question`.
+   * readline closes the interface at end of input without ever calling back
+   * into `question`. The prompt then never settled, which abandoned the rest
+   * of the run and lost the saved session.
    */
   describe('end of input', () => {
     /** Everything the run printed, as one string. */
