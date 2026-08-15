@@ -26,18 +26,16 @@ export interface SseErrorPayload {
 const DEFAULT_ERROR_TYPE = 'Error';
 
 /**
- * Narrows an arbitrary value to an indexable record, or `undefined` when it is
- * not a non-null object, so a duck-typed throw can be read without `any`.
+ * Reads `key` off a duck-typed thrown value, without `any`. Returns
+ * `undefined` unless the value is a non-null object carrying a non-empty
+ * string there.
  */
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return value !== null && typeof value === 'object'
-    ? (value as Record<string, unknown>)
-    : undefined;
-}
-
-/** Returns `value` when it is a non-empty string, else `undefined`. */
-function nonEmptyString(value: unknown): string | undefined {
-  return typeof value === 'string' && value !== '' ? value : undefined;
+function stringProp(value: unknown, key: string): string | undefined {
+  const prop =
+    typeof value === 'object' && value !== null
+      ? (value as Record<string, unknown>)[key]
+      : undefined;
+  return typeof prop === 'string' && prop !== '' ? prop : undefined;
 }
 
 /**
@@ -53,12 +51,9 @@ export function buildSseErrorPayload(
   e: unknown,
   includeStacktrace: boolean,
 ): SseErrorPayload {
-  const record = asRecord(e);
-  const errorType = nonEmptyString(record?.['name']) ?? DEFAULT_ERROR_TYPE;
+  const errorType = stringProp(e, 'name') ?? DEFAULT_ERROR_TYPE;
   const errorMessage = e instanceof Error ? e.message : String(e);
-  const stacktrace = includeStacktrace
-    ? nonEmptyString(record?.['stack'])
-    : undefined;
+  const stacktrace = includeStacktrace ? stringProp(e, 'stack') : undefined;
 
   return {
     error: `${errorType}: ${errorMessage}`,
