@@ -383,6 +383,76 @@ describe('AgentLoader', () => {
       );
     });
 
+    it('marks an uncompiled agent file as disposed', async () => {
+      const agentPath = path.join(tempAgentsDir, 'agent1.js');
+      await fs.writeFile(agentPath, agent1JsContent);
+
+      const agentFile = new AgentFile(agentPath, {
+        compile: false,
+        bundle: false,
+      });
+      await agentFile.load();
+      await agentFile.dispose();
+
+      expect(() => agentFile.getFilePath()).toThrow(
+        'Agent is disposed and can not be used',
+      );
+      expect(fileUtils.removeFolder).not.toHaveBeenCalled();
+    });
+
+    it('disposes the temp directory when the compiled file is already gone', async () => {
+      const agentPath = path.join(tempAgentsDir, 'agent2.ts');
+      await fs.writeFile(agentPath, agent2TsContent);
+
+      const compiledAgentPath = compiledPath('agent2.cjs');
+      (esbuild.build as Mock).mockImplementation(async () => {
+        await fs.writeFile(compiledAgentPath, agent2CjsContentMocked);
+        return Promise.resolve();
+      });
+
+      const agentFile = new AgentFile(agentPath);
+      await agentFile.load();
+      await fs.rm(compiledAgentPath);
+
+      await expect(agentFile.dispose()).resolves.toBeUndefined();
+      expect(fileUtils.removeFolder).toHaveBeenCalledWith(tempLoaderDir);
+    });
+
+    it('disposes the temp directory only once when disposed twice', async () => {
+      const agentPath = path.join(tempAgentsDir, 'agent2.ts');
+      await fs.writeFile(agentPath, agent2TsContent);
+
+      const compiledAgentPath = compiledPath('agent2.cjs');
+      (esbuild.build as Mock).mockImplementation(async () => {
+        await fs.writeFile(compiledAgentPath, agent2CjsContentMocked);
+        return Promise.resolve();
+      });
+
+      const agentFile = new AgentFile(agentPath);
+      await agentFile.load();
+
+      await agentFile.dispose();
+      await expect(agentFile.dispose()).resolves.toBeUndefined();
+      expect(fileUtils.removeFolder).toHaveBeenCalledTimes(1);
+    });
+
+    it('removes the temp directory when compilation fails', async () => {
+      const agentPath = path.join(tempAgentsDir, 'agent2.ts');
+      await fs.writeFile(agentPath, agent2TsContent);
+
+      (esbuild.build as Mock).mockRejectedValue(
+        new Error('Transform failed with 1 error'),
+      );
+
+      const agentFile = new AgentFile(agentPath);
+      await expect(agentFile.load()).rejects.toThrow(
+        'Transform failed with 1 error',
+      );
+      await agentFile.dispose();
+
+      expect(fileUtils.removeFolder).toHaveBeenCalledWith(tempLoaderDir);
+    });
+
     it('returns cleanup file path if compiled', async () => {
       const agentPath = path.join(tempAgentsDir, 'agent2.ts');
       const compiledAgentPath = compiledPath('agent2.cjs');
@@ -804,6 +874,16 @@ describe('AgentLoader', () => {
         await expect(loader.getAgentFile('nope')).rejects.toThrow(
           /Agent 'nope' not found[\s\S]*Available agents: agent1, agent2, agent3/,
         );
+        await loader.disposeAll();
+      });
+
+      it('does not leave a temp directory behind for the agent that failed', async () => {
+        const loader = new AgentLoader(tempAgentsDir);
+
+        await loader.listLoadFailures();
+
+        // One directory per healthy agent; the broken agent's is gone.
+        expect(await fs.readdir(tempLoaderDir)).toHaveLength(3);
         await loader.disposeAll();
       });
     });
