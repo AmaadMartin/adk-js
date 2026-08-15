@@ -18,6 +18,7 @@ import {
   PluginManager,
   Session,
   createEvent,
+  createSession,
   isScratchpadEvent,
 } from '@google/adk';
 import {assert, describe, expect, it} from 'vitest';
@@ -140,13 +141,14 @@ function createInvocationContext(session: Session): InvocationContext {
 }
 
 function createMockInvocationContext(events: Event[]): InvocationContext {
-  const session = {
-    id: 'test-session',
-    events,
-    appName: APP_NAME,
-    userId: USER_ID,
-  } as unknown as Session;
-  return createInvocationContext(session);
+  return createInvocationContext(
+    createSession({
+      id: 'test-session',
+      appName: APP_NAME,
+      userId: USER_ID,
+      events,
+    }),
+  );
 }
 
 describe('AnchoredContextCompactor', () => {
