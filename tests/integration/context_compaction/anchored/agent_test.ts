@@ -24,12 +24,14 @@ function getActiveEvents(events: Event[]): Event[] {
     }
   }
   if (!scratchpad) return events;
-  return [
-    scratchpad,
-    ...events.filter(
-      (e) => !isScratchpadEvent(e) && e.timestamp > scratchpad!.endTime,
-    ),
-  ];
+  const startIndex = events.findIndex(
+    (e) => e.id === scratchpad!.retainFromEventId,
+  );
+  const raw =
+    startIndex >= 0
+      ? events.slice(startIndex)
+      : events.filter((e) => e.timestamp > scratchpad!.endTime);
+  return [scratchpad, ...raw.filter((e) => !isScratchpadEvent(e))];
 }
 
 describe('Anchored Context Compaction', () => {

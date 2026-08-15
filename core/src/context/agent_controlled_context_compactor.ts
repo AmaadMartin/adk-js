@@ -52,6 +52,9 @@ export class AgentControlledContextCompactor implements BaseContextCompactor {
     // We compact everything BEFORE the consolidate_context tool call.
     const eventsToCompact = activeEvents.slice(0, consolidateToolCallIndex);
 
+    // The tool call is the first event this compaction retains.
+    const retainFromEventId = activeEvents[consolidateToolCallIndex].id;
+
     const detail = invocationContext.session.state[
       'temp:consolidate_context_detail'
     ] as string | undefined;
@@ -75,6 +78,7 @@ export class AgentControlledContextCompactor implements BaseContextCompactor {
 
     try {
       const compactedEvent = await this.summarizer.summarize(eventsToCompact);
+      compactedEvent.retainFromEventId = retainFromEventId;
       invocationContext.session.events.push(compactedEvent);
     } catch (error) {
       // If the summarizer fails, log the error, clear the flags, and proceed without compaction.

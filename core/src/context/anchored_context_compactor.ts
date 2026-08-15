@@ -6,9 +6,12 @@
 
 import {InvocationContext} from '../agents/invocation_context.js';
 import {CompactedEvent, isScratchpadEvent} from '../events/compacted_event.js';
-import {Event, getEventTokens} from '../events/event.js';
+import {getEventTokens} from '../events/event.js';
 import {BaseContextCompactor} from './base_context_compactor.js';
-import {calculateRetainStartIndex} from './compaction_utils.js';
+import {
+  calculateRetainStartIndex,
+  getActiveEventsSince,
+} from './compaction_utils.js';
 import {BaseSummarizer} from './summarizers/base_summarizer.js';
 
 export interface AnchoredContextCompactorOptions {
@@ -41,33 +44,11 @@ export class AnchoredContextCompactor implements BaseContextCompactor {
     this.summarizer = options.summarizer;
   }
 
-  private getActiveEvents(events: Event[]): Event[] {
-    let latestScratchpad: CompactedEvent | undefined = undefined;
-
-    for (let i = events.length - 1; i >= 0; i--) {
-      const e = events[i];
-      if (isScratchpadEvent(e)) {
-        latestScratchpad = e;
-        break;
-      }
-    }
-
-    if (!latestScratchpad) {
-      return events;
-    }
-
-    const activeRawEvents = events.filter(
-      (e) => e.timestamp > latestScratchpad!.endTime && !isScratchpadEvent(e),
-    );
-
-    return [latestScratchpad, ...activeRawEvents];
-  }
-
   shouldCompact(
     invocationContext: InvocationContext,
   ): boolean | Promise<boolean> {
     const events = invocationContext.session.events;
-    const activeEvents = this.getActiveEvents(events);
+    const activeEvents = getActiveEventsSince(events, isScratchpadEvent);
     const hasScratchpad =
       activeEvents.length > 0 && isScratchpadEvent(activeEvents[0]);
     const rawEvents = hasScratchpad ? activeEvents.slice(1) : activeEvents;
@@ -94,7 +75,7 @@ export class AnchoredContextCompactor implements BaseContextCompactor {
 
   async compact(invocationContext: InvocationContext): Promise<void> {
     const events = invocationContext.session.events;
-    const activeEvents = this.getActiveEvents(events);
+    const activeEvents = getActiveEventsSince(events, isScratchpadEvent);
     const hasScratchpad =
       activeEvents.length > 0 && isScratchpadEvent(activeEvents[0]);
     const rawEvents = hasScratchpad ? activeEvents.slice(1) : activeEvents;
@@ -132,6 +113,7 @@ export class AnchoredContextCompactor implements BaseContextCompactor {
       ...scratchpadEvent,
       isScratchpad: true,
       author: 'system',
+      retainFromEventId: rawEvents[retainStartIndex]?.id,
     } as CompactedEvent;
 
     // Reconstruct the events list: inactive events + new scratchpad + active retained events
