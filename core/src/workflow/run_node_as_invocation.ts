@@ -201,7 +201,7 @@ function plainTextResumeMarkers(
   return createPlainTextResumeEvents({
     interruptIds: Object.keys(resume.inputs),
     text: resume.text,
-    events: ic.session?.events ?? [],
+    events: ic.session.events,
     invocationId: ic.invocationId,
     branch: ic.branch,
   });
