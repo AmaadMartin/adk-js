@@ -36,20 +36,31 @@ export class InMemorySessionService extends BaseSessionService {
   /**
    * A map from app name to a map from user ID to a map from session ID to
    * session.
+   *
+   * Null-prototype at every level, as for {@link appState}.
    */
   private sessions: Record<string, Record<string, Record<string, Session>>> =
-    {};
+    Object.create(null);
 
   /**
    * A map from app name to a map from user ID to a map from key to the value.
+   *
+   * Null-prototype at every level, as for {@link appState}.
    */
   private userState: Record<string, Record<string, Record<string, unknown>>> =
-    {};
+    Object.create(null);
 
   /**
    * A map from app name to a map from key to the value.
+   *
+   * Every level is keyed by untrusted input: `appName`, `userId` and state
+   * keys arrive off the request path or body on a dev server. On a plain
+   * object a key of `__proto__` resolves to the inherited accessor, so
+   * `map[appName][userId] = ...` writes onto `Object.prototype` instead of
+   * creating an own property. A null-prototype map has no such accessor.
    */
-  private appState: Record<string, Record<string, unknown>> = {};
+  private appState: Record<string, Record<string, unknown>> =
+    Object.create(null);
 
   /**
    * Merges app- and user-scoped deltas into the stores shared across sessions.
@@ -63,15 +74,15 @@ export class InMemorySessionService extends BaseSessionService {
     {app, user}: StateDeltas,
   ): void {
     if (Object.keys(app).length > 0) {
-      this.appState[appName] = {...this.appState[appName], ...app};
+      this.appState[appName] = this.appState[appName] || Object.create(null);
+      Object.assign(this.appState[appName], app);
     }
 
     if (Object.keys(user).length > 0) {
-      this.userState[appName] = this.userState[appName] || {};
-      this.userState[appName][userId] = {
-        ...this.userState[appName][userId],
-        ...user,
-      };
+      this.userState[appName] = this.userState[appName] || Object.create(null);
+      this.userState[appName][userId] =
+        this.userState[appName][userId] || Object.create(null);
+      Object.assign(this.userState[appName][userId], user);
     }
   }
 
@@ -95,10 +106,10 @@ export class InMemorySessionService extends BaseSessionService {
     });
 
     if (!this.sessions[appName]) {
-      this.sessions[appName] = {};
+      this.sessions[appName] = Object.create(null);
     }
     if (!this.sessions[appName][userId]) {
-      this.sessions[appName][userId] = {};
+      this.sessions[appName][userId] = Object.create(null);
     }
 
     this.sessions[appName][userId][session.id] = session;

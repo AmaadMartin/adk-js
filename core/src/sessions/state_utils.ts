@@ -25,15 +25,17 @@ export interface StateDeltas {
  * The inverse of {@link mergeStates}, which re-applies the prefixes.
  *
  * @param state The state to split. Undefined or empty yields empty buckets.
- * @return Freshly allocated app, user and session buckets. Values are carried
- *     over by reference; `state` itself is never mutated.
+ * @return Freshly allocated app, user and session buckets, each with a null
+ *     prototype so that a `__proto__` key becomes an own property instead of
+ *     re-parenting the bucket and losing the entry. Values are carried over by
+ *     reference; `state` itself is never mutated.
  */
 export function extractStateDelta(
   state: Record<string, unknown> | undefined,
 ): StateDeltas {
-  const app: Record<string, unknown> = {};
-  const user: Record<string, unknown> = {};
-  const session: Record<string, unknown> = {};
+  const app: Record<string, unknown> = Object.create(null);
+  const user: Record<string, unknown> = Object.create(null);
+  const session: Record<string, unknown> = Object.create(null);
 
   for (const [key, value] of Object.entries(state ?? {})) {
     if (key.startsWith(State.APP_PREFIX)) {
