@@ -5,24 +5,9 @@
  */
 
 import {BaseLlm, BaseLlmConnection, LlmRequest, LlmResponse} from '@google/adk';
-import {LlmRecording, Recording} from './test_types.js';
+import {Recording} from './test_types.js';
 
 const REPLAY_MODEL_NAME = 'replay-llm';
-
-/** The LLM recordings of one agent within one user turn, in recorded order. */
-function llmRecordingsFor(
-  recordings: Recording[],
-  agentName: string,
-  userMessageIndex: number,
-): LlmRecording[] {
-  return recordings.flatMap((recording) =>
-    recording.agentName === agentName &&
-    recording.userMessageIndex === userMessageIndex &&
-    recording.llmRecording
-      ? [recording.llmRecording]
-      : [],
-  );
-}
 
 /**
  * A model that replays recorded responses instead of calling a real one.
@@ -57,29 +42,41 @@ export class ReplayLlm extends BaseLlm {
     );
   }
 
+  /**
+   * The responses recorded for this agent within one user turn, one entry per
+   * model call, in recorded order. A recording that holds no response is not a
+   * call the runtime may make, so it is left out and the runtime reaching it
+   * fails as an unrecorded call.
+   */
+  private turnResponses(userMessageIndex: number): LlmResponse[][] {
+    return this.recordings.flatMap((recording) =>
+      recording.agentName === this.agentName &&
+      recording.userMessageIndex === userMessageIndex &&
+      recording.llmRecording?.llmResponses?.length
+        ? [recording.llmRecording.llmResponses]
+        : [],
+    );
+  }
+
   async *generateContentAsync(
     _llmRequest: LlmRequest,
     _stream?: boolean,
     _abortSignal?: AbortSignal,
   ): AsyncGenerator<LlmResponse, void> {
     const userMessageIndex = this.context.userMessageIndex;
-    const turnRecordings = llmRecordingsFor(
-      this.recordings,
-      this.agentName,
-      userMessageIndex,
-    );
+    const recorded = this.turnResponses(userMessageIndex);
     const index = this.nextIndexByTurn.get(userMessageIndex) ?? 0;
 
-    if (index >= turnRecordings.length) {
+    if (index >= recorded.length) {
       throw new Error(
         `Runtime sent more LLM requests than expected for agent ` +
           `'${this.agentName}' at user message index ${userMessageIndex}. ` +
-          `Expected ${turnRecordings.length}, but got request at index ${index}.`,
+          `Expected ${recorded.length}, but got request at index ${index}.`,
       );
     }
     this.nextIndexByTurn.set(userMessageIndex, index + 1);
 
-    for (const response of turnRecordings[index].llmResponses ?? []) {
+    for (const response of recorded[index]) {
       yield response;
     }
   }

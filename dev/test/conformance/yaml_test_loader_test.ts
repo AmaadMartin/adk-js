@@ -8,7 +8,7 @@ import {StreamingMode} from '@google/adk';
 import fg from 'fast-glob';
 import * as fs from 'node:fs/promises';
 import {Readable} from 'node:stream';
-import {beforeEach, describe, expect, it, Mock, vi} from 'vitest';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   batchLoadYamlTestDefs,
   goldenFileNames,
@@ -89,9 +89,10 @@ describe('batchLoadYamlTestDefs', () => {
     const rootDir = '/root/tests';
     const mockFiles = ['/root/tests/category/test1/spec.yaml'];
 
-    (fg.stream as unknown as Mock).mockReturnValue(mockFiles);
+    vi.mocked(fg.stream).mockReturnValue(Readable.from(mockFiles));
 
-    (fs.readFile as Mock).mockImplementation(async (filePath: string) => {
+    vi.mocked(fs.readFile).mockImplementation(async (target) => {
+      const filePath = String(target);
       if (filePath.endsWith('spec.yaml')) return SPEC_YAML;
       if (filePath.endsWith('generated-session.yaml')) return SESSION_YAML;
       if (filePath.endsWith('generated-recordings.yaml'))
@@ -137,8 +138,8 @@ describe('batchLoadYamlTestDefs', () => {
     const rootDir = '/root/tests';
     const mockFiles = ['/root/tests/t1/spec.yaml', '/root/tests/t2/spec.yaml'];
 
-    (fg.stream as unknown as Mock).mockReturnValue(mockFiles);
-    (fs.readFile as Mock).mockResolvedValue('{}');
+    vi.mocked(fg.stream).mockReturnValue(Readable.from(mockFiles));
+    vi.mocked(fs.readFile).mockResolvedValue('{}');
 
     const tests = await batchLoadYamlTestDefs(rootDir, StreamingMode.NONE);
     expect(tests.size).toBe(2);
@@ -150,9 +151,10 @@ describe('batchLoadYamlTestDefs', () => {
     const rootDir = 'C:\\root\\tests';
     const mockFiles = ['C:\\root\\tests\\category\\test1\\spec.yaml'];
 
-    (fg.stream as unknown as Mock).mockReturnValue(mockFiles);
+    vi.mocked(fg.stream).mockReturnValue(Readable.from(mockFiles));
 
-    (fs.readFile as Mock).mockImplementation(async (filePath: string) => {
+    vi.mocked(fs.readFile).mockImplementation(async (target) => {
+      const filePath = String(target);
       if (filePath.includes('spec.yaml')) return SPEC_YAML;
       if (filePath.includes('generated-session.yaml')) return SESSION_YAML;
       if (filePath.includes('generated-recordings.yaml'))
@@ -177,10 +179,10 @@ describe('batchLoadYamlTestDefs', () => {
 
   it('should throw an error if a required file is missing', async () => {
     const rootDir = '/root/tests';
-    (fg.stream as unknown as Mock).mockReturnValue([
-      '/root/tests/t1/spec.yaml',
-    ]);
-    (fs.readFile as Mock).mockRejectedValue(new Error('File not found'));
+    vi.mocked(fg.stream).mockReturnValue(
+      Readable.from(['/root/tests/t1/spec.yaml']),
+    );
+    vi.mocked(fs.readFile).mockRejectedValue(new Error('File not found'));
 
     await expect(
       batchLoadYamlTestDefs(rootDir, StreamingMode.NONE),
@@ -192,14 +194,17 @@ describe('batchLoadYamlTestDefs', () => {
     vi.mocked(fg.stream).mockReturnValue(
       Readable.from(['/root/tests/t1/spec.yaml']),
     );
-    (fs.readFile as Mock).mockImplementation(async (filePath: string) => {
+    vi.mocked(fs.readFile).mockImplementation(async (target) => {
+      const filePath = String(target);
       if (filePath.endsWith('spec.yaml')) return SPEC_YAML;
       return 'just a string';
     });
 
     await expect(
       batchLoadYamlTestDefs(rootDir, StreamingMode.NONE),
-    ).rejects.toThrow('Session file must be a YAML mapping');
+    ).rejects.toThrow(
+      '/root/tests/t1/generated-session.yaml must be a YAML mapping',
+    );
   });
 
   it('should load the -sse goldens in SSE mode', async () => {
@@ -209,7 +214,8 @@ describe('batchLoadYamlTestDefs', () => {
     );
 
     const readPaths: string[] = [];
-    (fs.readFile as Mock).mockImplementation(async (filePath: string) => {
+    vi.mocked(fs.readFile).mockImplementation(async (target) => {
+      const filePath = String(target);
       readPaths.push(filePath);
       if (filePath.endsWith('spec.yaml')) return SPEC_YAML;
       if (filePath.endsWith('generated-session-sse.yaml')) return SESSION_YAML;
@@ -240,7 +246,8 @@ describe('batchLoadYamlTestDefs', () => {
       Readable.from(['/root/tests/t1/spec.yaml']),
     );
 
-    (fs.readFile as Mock).mockImplementation(async (filePath: string) => {
+    vi.mocked(fs.readFile).mockImplementation(async (target) => {
+      const filePath = String(target);
       if (filePath.endsWith('spec.yaml')) return SPEC_YAML;
       throw Object.assign(new Error('permission denied'), {code: 'EACCES'});
     });
@@ -256,7 +263,8 @@ describe('batchLoadYamlTestDefs', () => {
       Readable.from(['/root/tests/t1/spec.yaml', '/root/tests/t2/spec.yaml']),
     );
 
-    (fs.readFile as Mock).mockImplementation(async (filePath: string) => {
+    vi.mocked(fs.readFile).mockImplementation(async (target) => {
+      const filePath = String(target);
       if (filePath.endsWith('spec.yaml')) return SPEC_YAML;
       if (filePath.startsWith('/root/tests/t1/')) {
         throw fileNotFoundError(filePath);

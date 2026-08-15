@@ -41,11 +41,11 @@ export function goldenFileNames(streamingMode: StreamingMode): {
 }
 
 /** Reads a YAML file and camel-cases its keys. */
-async function loadYamlMapping<T>(filePath: string, label: string): Promise<T> {
+async function loadYamlMapping<T>(filePath: string): Promise<T> {
   const content = await fs.readFile(filePath, 'utf-8');
   const parsed = yaml.load(content);
   if (typeof parsed !== 'object' || parsed === null) {
-    throw new Error(`${label} must be a YAML mapping`);
+    throw new Error(`${filePath} must be a YAML mapping`);
   }
   return camelcaseKeys(parsed, {deep: true}) as T;
 }
@@ -91,7 +91,6 @@ export async function batchLoadYamlTestDefs(
     // Spec file
     const testSpec = await loadYamlMapping<TestSpec>(
       path.posix.join(baseDir, 'spec.yaml'),
-      'Spec file',
     );
 
     let session: Session;
@@ -99,11 +98,9 @@ export async function batchLoadYamlTestDefs(
     try {
       session = await loadYamlMapping<Session>(
         path.posix.join(baseDir, goldens.session),
-        'Session file',
       );
       recordings = await loadYamlMapping<Recordings>(
         path.posix.join(baseDir, goldens.recordings),
-        'Recording file',
       );
     } catch (error: unknown) {
       if (isFileNotFoundError(error)) {

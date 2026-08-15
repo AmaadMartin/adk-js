@@ -108,6 +108,15 @@ describe('ReplayLlm', () => {
     await expect(collect(llm)).resolves.toEqual([textResponse('mine')]);
   });
 
+  it('ignores a recording left behind by the pre-rename schema', async () => {
+    const llm = replayLlm([
+      llmRecording('agent-a', 0, []),
+      llmRecording('agent-a', 0, [textResponse('mine')]),
+    ]);
+
+    await expect(collect(llm)).resolves.toEqual([textResponse('mine')]);
+  });
+
   it('restarts at the first recording of the next turn', async () => {
     const context = {userMessageIndex: 0};
     const llm = replayLlm(
@@ -146,10 +155,12 @@ describe('ReplayLlm', () => {
     );
   });
 
-  it('yields nothing for a recording with no responses', async () => {
+  it('rejects a recording that holds no responses', async () => {
     const llm = replayLlm([llmRecording('agent-a', 0)]);
 
-    await expect(collect(llm)).resolves.toEqual([]);
+    await expect(collect(llm)).rejects.toThrow(
+      'Expected 0, but got request at index 0.',
+    );
   });
 
   it('rejects a live connection', async () => {
