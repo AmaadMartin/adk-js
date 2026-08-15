@@ -45,6 +45,13 @@ describe('createRunConfig', () => {
     expect(config.maxLlmCalls).toBe(100);
   });
 
+  it('passes customMetadata through and leaves it undefined by default', () => {
+    expect(createRunConfig({customMetadata: {a: 1}}).customMetadata).toEqual({
+      a: 1,
+    });
+    expect(createRunConfig().customMetadata).toBeUndefined();
+  });
+
   it('throws when streamingMode is StreamingMode.BIDI', () => {
     expect(() => createRunConfig({streamingMode: StreamingMode.BIDI})).toThrow(
       'StreamingMode.BIDI is not supported; use StreamingMode.SSE.',

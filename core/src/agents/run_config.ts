@@ -126,6 +126,15 @@ export interface RunConfig {
    * history on every invocation.
    */
   getSessionConfig?: GetSessionConfig;
+
+  /**
+   * Custom metadata for the current invocation.
+   *
+   * Merged into every event the run produces: these keys are applied
+   * underneath the event's own `customMetadata`, so an event that already
+   * defines a key keeps its own value. Must be JSON-serializable.
+   */
+  customMetadata?: Record<string, unknown>;
 }
 
 /**
