@@ -5,6 +5,7 @@
  */
 
 import {InMemoryMemoryService, LogLevel, setLogLevel} from '@google/adk';
+import * as path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {createProgram} from '../../src/cli/cli.js';
 import {createAgent} from '../../src/cli/cli_create.js';
@@ -12,6 +13,7 @@ import {runAgent} from '../../src/cli/cli_run.js';
 import {deployToAgentEngine} from '../../src/cli/deploy/cli_deploy_agent_engine.js';
 import {deployToCloudRun} from '../../src/cli/deploy/cli_deploy_cloud_run.js';
 import {AdkApiServer} from '../../src/server/adk_api_server.js';
+import {loadServicesModule} from '../../src/utils/services_loader.js';
 
 vi.mock('../../src/server/adk_api_server', () => {
   return {
@@ -35,6 +37,10 @@ vi.mock('../../src/cli/deploy/cli_deploy_cloud_run', () => ({
 
 vi.mock('../../src/cli/cli_run', () => ({
   runAgent: vi.fn(),
+}));
+
+vi.mock('../../src/utils/services_loader', () => ({
+  loadServicesModule: vi.fn(),
 }));
 
 vi.mock('../../src/version', () => ({
@@ -289,6 +295,53 @@ describe('CLI Entrypoint', () => {
 
       const args = vi.mocked(runAgent).mock.calls[0][0];
       expect(args.memoryService).toBeInstanceOf(InMemoryMemoryService);
+    });
+  });
+
+  describe('service registrations', () => {
+    const resolved = (segment: string) => path.join(process.cwd(), segment);
+
+    it('loads the services module before web builds its services', async () => {
+      await parse(['web', './agents']);
+
+      expect(loadServicesModule).toHaveBeenCalledWith(
+        resolved('agents'),
+        expect.objectContaining({compile: true, bundle: true}),
+      );
+      expect(
+        vi.mocked(loadServicesModule).mock.invocationCallOrder[0],
+      ).toBeLessThan(vi.mocked(AdkApiServer).mock.invocationCallOrder[0]);
+    });
+
+    it('loads the services module before api_server builds its services', async () => {
+      await parse(['api_server', './agents']);
+
+      expect(loadServicesModule).toHaveBeenCalledWith(
+        resolved('agents'),
+        expect.anything(),
+      );
+      expect(
+        vi.mocked(loadServicesModule).mock.invocationCallOrder[0],
+      ).toBeLessThan(vi.mocked(AdkApiServer).mock.invocationCallOrder[0]);
+    });
+
+    it('loads the services module from the agent file directory for run', async () => {
+      await parse(['run', './agents/agent.ts']);
+
+      expect(loadServicesModule).toHaveBeenCalledWith(
+        resolved('agents'),
+        expect.anything(),
+      );
+      expect(
+        vi.mocked(loadServicesModule).mock.invocationCallOrder[0],
+      ).toBeLessThan(vi.mocked(runAgent).mock.invocationCallOrder[0]);
+    });
+
+    it('passes the resolved agents directory to the service factories', async () => {
+      await parse(['web', './agents']);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.agentsDir).toBe(resolved('agents'));
     });
   });
 
