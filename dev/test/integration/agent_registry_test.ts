@@ -13,7 +13,10 @@ import {
 } from '@google/adk';
 import {beforeEach, describe, expect, it} from 'vitest';
 import {AgentRegistry} from '../../src/integration/agent_registry.js';
-import {YamlAgentConfig} from '../../src/integration/agent_types.js';
+import {
+  AgentClass,
+  YamlAgentConfig,
+} from '../../src/integration/agent_types.js';
 import {IntegrationRegistry} from '../../src/integration/integration_registry.js';
 
 describe('AgentRegistry', () => {
@@ -202,21 +205,23 @@ describe('AgentRegistry', () => {
   });
 
   it('should list an agent reachable only through an AgentTool', () => {
-    const subConfig = {
+    const subConfig: YamlAgentConfig = {
       name: 'sub_agent',
       model: 'model',
       description: 'desc',
       instruction: 'inst',
-      agentClass: 'LlmAgent',
-    } as unknown as YamlAgentConfig;
-    const parentConfig = {
+      agentClass: AgentClass.LlmAgent,
+      isRootAgent: false,
+    };
+    const parentConfig: YamlAgentConfig = {
       name: 'parent_agent',
       model: 'model',
       description: 'desc',
       instruction: 'inst',
-      agentClass: 'LlmAgent',
+      agentClass: AgentClass.LlmAgent,
+      isRootAgent: true,
       tools: [{name: 'AgentTool', args: {agent: {configPath: 'sub_path'}}}],
-    } as unknown as YamlAgentConfig;
+    };
 
     agentRegistry.registerAgentConfig('sub_path', subConfig);
     agentRegistry.registerAgentConfig('parent_path', parentConfig);

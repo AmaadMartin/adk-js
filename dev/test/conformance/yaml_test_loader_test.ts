@@ -7,6 +7,7 @@
 import {StreamingMode} from '@google/adk';
 import fg from 'fast-glob';
 import * as fs from 'node:fs/promises';
+import {Readable} from 'node:stream';
 import {beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {
   batchLoadYamlTestDefs,
@@ -188,9 +189,9 @@ describe('batchLoadYamlTestDefs', () => {
 
   it('should throw an error if a golden is not a YAML mapping', async () => {
     const rootDir = '/root/tests';
-    (fg.stream as unknown as Mock).mockReturnValue([
-      '/root/tests/t1/spec.yaml',
-    ]);
+    vi.mocked(fg.stream).mockReturnValue(
+      Readable.from(['/root/tests/t1/spec.yaml']),
+    );
     (fs.readFile as Mock).mockImplementation(async (filePath: string) => {
       if (filePath.endsWith('spec.yaml')) return SPEC_YAML;
       return 'just a string';
@@ -203,9 +204,9 @@ describe('batchLoadYamlTestDefs', () => {
 
   it('should load the -sse goldens in SSE mode', async () => {
     const rootDir = '/root/tests';
-    (fg.stream as unknown as Mock).mockReturnValue([
-      '/root/tests/category/test1/spec.yaml',
-    ]);
+    vi.mocked(fg.stream).mockReturnValue(
+      Readable.from(['/root/tests/category/test1/spec.yaml']),
+    );
 
     const readPaths: string[] = [];
     (fs.readFile as Mock).mockImplementation(async (filePath: string) => {
@@ -235,9 +236,9 @@ describe('batchLoadYamlTestDefs', () => {
 
   it('should propagate a golden read failure that is not ENOENT', async () => {
     const rootDir = '/root/tests';
-    (fg.stream as unknown as Mock).mockReturnValue([
-      '/root/tests/t1/spec.yaml',
-    ]);
+    vi.mocked(fg.stream).mockReturnValue(
+      Readable.from(['/root/tests/t1/spec.yaml']),
+    );
 
     (fs.readFile as Mock).mockImplementation(async (filePath: string) => {
       if (filePath.endsWith('spec.yaml')) return SPEC_YAML;
@@ -251,10 +252,9 @@ describe('batchLoadYamlTestDefs', () => {
 
   it('should skip a test whose goldens for the selected mode are missing', async () => {
     const rootDir = '/root/tests';
-    (fg.stream as unknown as Mock).mockReturnValue([
-      '/root/tests/t1/spec.yaml',
-      '/root/tests/t2/spec.yaml',
-    ]);
+    vi.mocked(fg.stream).mockReturnValue(
+      Readable.from(['/root/tests/t1/spec.yaml', '/root/tests/t2/spec.yaml']),
+    );
 
     (fs.readFile as Mock).mockImplementation(async (filePath: string) => {
       if (filePath.endsWith('spec.yaml')) return SPEC_YAML;
