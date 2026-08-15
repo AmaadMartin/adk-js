@@ -455,11 +455,14 @@ export class VertexAiSessionService extends BaseSessionService {
       customMetadata[WORKFLOW_CUSTOM_METADATA_KEY] = workflowMetadata;
     }
 
-    const config = partialCopy<AppendAgentEngineSessionEventConfig>(event, [
-      'content',
-      'errorCode',
-      'errorMessage',
-    ]);
+    const sanitizedEvent = event.content
+      ? {...event, content: withoutPartMetadata(event.content)}
+      : event;
+
+    const config = partialCopy<AppendAgentEngineSessionEventConfig>(
+      sanitizedEvent,
+      ['content', 'errorCode', 'errorMessage'],
+    );
     config.actions = toApiActions(event.actions);
 
     config.eventMetadata = {
@@ -475,7 +478,7 @@ export class VertexAiSessionService extends BaseSessionService {
         Object.keys(customMetadata).length > 0 ? customMetadata : undefined,
     };
 
-    config.rawEvent = JSON.parse(JSON.stringify(event)) as Record<
+    config.rawEvent = JSON.parse(JSON.stringify(sanitizedEvent)) as Record<
       string,
       unknown
     >;
@@ -584,6 +587,32 @@ function toApiActions(
     ...rest,
     ...(transferToAgent !== undefined ? {transferAgent: transferToAgent} : {}),
   } as ApiEventActions;
+}
+
+/**
+ * Returns `content` without the `partMetadata` the Agent Engine sessions API
+ * rejects.
+ *
+ * `partMetadata` is a Gemini Developer API-only field. The sessions API does
+ * not model it and fails `appendEvent` with `400 INVALID_ARGUMENT` (`Unknown
+ * name "part_metadata"`), and the streaming Interactions path sets it while
+ * it accumulates function-call arguments. Copies instead of deleting in place:
+ * `partialCopy` is shallow, so a delete would strip the event the caller still
+ * holds.
+ */
+function withoutPartMetadata(content: Content): Content {
+  // TODO: remove once the Agent Engine sessions API accepts partMetadata.
+  if (!content.parts?.some((part) => 'partMetadata' in part)) {
+    return content;
+  }
+  return {
+    ...content,
+    parts: content.parts.map((part) => {
+      const stripped = {...part};
+      delete stripped.partMetadata;
+      return stripped;
+    }),
+  };
 }
 
 interface ExtendedEventActions extends EventActions {
