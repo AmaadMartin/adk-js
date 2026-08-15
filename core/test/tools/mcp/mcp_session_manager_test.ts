@@ -6,11 +6,13 @@
 
 import type {ElicitationCallback, MCPConnectionParams} from '@google/adk';
 import {MCPSessionManager} from '@google/adk';
+import type {OAuthClientProvider} from '@modelcontextprotocol/sdk/client/auth.js';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
+import {SSEClientTransport} from '@modelcontextprotocol/sdk/client/sse.js';
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import {ElicitRequestSchema} from '@modelcontextprotocol/sdk/types.js';
-import {describe, expect, it, vi} from 'vitest';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
 // The logger singleton is internal (not part of the public API), so it is
 // imported via a relative path to spy on the exact instance the manager uses.
 import {logger} from '../../../src/utils/logger.js';
@@ -37,6 +39,12 @@ vi.mock('@modelcontextprotocol/sdk/client/stdio.js', () => {
 vi.mock('@modelcontextprotocol/sdk/client/streamableHttp.js', () => {
   return {
     StreamableHTTPClientTransport: vi.fn(),
+  };
+});
+
+vi.mock('@modelcontextprotocol/sdk/client/sse.js', () => {
+  return {
+    SSEClientTransport: vi.fn(),
   };
 });
 
@@ -379,6 +387,124 @@ describe('MCPSessionManager', () => {
       expect(client.setRequestHandler.mock.invocationCallOrder[0]).toBeLessThan(
         client.connect.mock.invocationCallOrder[0],
       );
+    });
+  });
+
+  describe('SSE transport', () => {
+    /** A typed no-op provider; the SDK transport is mocked and never calls it. */
+    const authProvider: OAuthClientProvider = {
+      redirectUrl: 'http://localhost/callback',
+      clientMetadata: {redirect_uris: ['http://localhost/callback']},
+      clientInformation: () => undefined,
+      tokens: () => undefined,
+      saveTokens: () => {},
+      redirectToAuthorization: () => {},
+      saveCodeVerifier: () => {},
+      codeVerifier: () => 'test-verifier',
+    };
+
+    beforeEach(() => {
+      vi.clearAllMocks();
+    });
+
+    it('creates an sse client', async () => {
+      const manager = new MCPSessionManager({
+        type: 'SseConnectionParams',
+        url: 'http://test-url/sse',
+      });
+
+      const client = await manager.createSession();
+
+      expect(Client).toHaveBeenCalledWith({
+        name: 'MCPClient',
+        version: '1.0.0',
+      });
+      expect(SSEClientTransport).toHaveBeenCalledWith(
+        new URL('http://test-url/sse'),
+        undefined,
+      );
+      expect(client.connect).toHaveBeenCalled();
+    });
+
+    it('passes transport options through to the sse transport', async () => {
+      const transportOptions = {
+        requestInit: {headers: {'x-test-header': 'test-value'}},
+        authProvider,
+      };
+
+      const manager = new MCPSessionManager({
+        type: 'SseConnectionParams',
+        url: 'http://test-url/sse',
+        transportOptions,
+      });
+
+      await manager.createSession();
+
+      expect(SSEClientTransport).toHaveBeenCalledWith(
+        new URL('http://test-url/sse'),
+        transportOptions,
+      );
+    });
+
+    it('selects only the sse transport', async () => {
+      const manager = new MCPSessionManager({
+        type: 'SseConnectionParams',
+        url: 'http://test-url/sse',
+      });
+
+      await manager.createSession();
+
+      expect(SSEClientTransport).toHaveBeenCalledTimes(1);
+      expect(StreamableHTTPClientTransport).not.toHaveBeenCalled();
+      expect(StdioClientTransport).not.toHaveBeenCalled();
+    });
+
+    it('wraps an sse connection failure', async () => {
+      const original = Object.assign(
+        new Error('SSE error: Non-200 status code (403)'),
+        {code: 403},
+      );
+      const failingClient = new Client({name: 'MCPClient', version: '1.0.0'});
+      vi.spyOn(failingClient, 'connect').mockRejectedValue(original);
+      vi.mocked(Client).mockReturnValueOnce(failingClient);
+
+      const manager = new MCPSessionManager({
+        type: 'SseConnectionParams',
+        url: 'http://test-url/sse',
+      });
+
+      const error = await manager.createSession().catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain(
+        'Failed to create MCP session',
+      );
+      expect((error as Error).message).toContain('403');
+      expect((error as Error).message).toContain('Non-200 status code');
+      expect((error as Error).cause).toBe(original);
+      expect(manager.getActiveSessions()).toEqual([]);
+    });
+
+    it('logs a formatted message for a background sse transport error', async () => {
+      const errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
+
+      const manager = new MCPSessionManager({
+        type: 'SseConnectionParams',
+        url: 'http://test-url/sse',
+      });
+      await manager.createSession();
+
+      const transport = vi.mocked(SSEClientTransport).mock.instances.at(-1);
+      expect(transport?.onerror).toBeTypeOf('function');
+      transport?.onerror?.(new Error('sse stream died'));
+
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('MCP transport error'),
+      );
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('sse stream died'),
+      );
+
+      errorSpy.mockRestore();
     });
   });
 });

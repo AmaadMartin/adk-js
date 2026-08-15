@@ -6,6 +6,10 @@
 
 import type {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import type {
+  SSEClientTransport,
+  SSEClientTransportOptions,
+} from '@modelcontextprotocol/sdk/client/sse.js';
+import type {
   StdioClientTransport,
   StdioServerParameters,
 } from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -38,28 +42,31 @@ interface McpSdkModules {
   Client: typeof Client;
   StdioClientTransport: typeof StdioClientTransport;
   StreamableHTTPClientTransport: typeof StreamableHTTPClientTransport;
+  SSEClientTransport: typeof SSEClientTransport;
 }
 
 let mcpSdkModules: Promise<McpSdkModules> | undefined;
 
 async function importMcpSdk(): Promise<McpSdkModules> {
-  const [client, stdio, streamableHttp] = await Promise.all([
+  const [client, stdio, streamableHttp, sse] = await Promise.all([
     import('@modelcontextprotocol/sdk/client/index.js'),
     import('@modelcontextprotocol/sdk/client/stdio.js'),
     import('@modelcontextprotocol/sdk/client/streamableHttp.js'),
+    import('@modelcontextprotocol/sdk/client/sse.js'),
   ]);
 
   return {
     Client: client.Client,
     StdioClientTransport: stdio.StdioClientTransport,
     StreamableHTTPClientTransport: streamableHttp.StreamableHTTPClientTransport,
+    SSEClientTransport: sse.SSEClientTransport,
   };
 }
 
 /**
  * Loads the MCP SDK on first use.
  *
- * Evaluating the client and its two transports costs roughly 0.3s, and a
+ * Evaluating the client and its three transports costs roughly 0.3s, and a
  * process that imports `@google/adk` without ever opening an MCP session must
  * not pay it. The memo stores the promise, so concurrent callers share one
  * load.
@@ -105,11 +112,30 @@ export interface StreamableHTTPConnectionParams {
 }
 
 /**
+ * Defines the parameters for establishing a connection to an MCP server over
+ * the HTTP+SSE transport, where the server streams messages on a long-lived
+ * GET and the client posts messages back on a separate endpoint.
+ *
+ * Prefer {@link StreamableHTTPConnectionParams} for servers that support it;
+ * these params exist for servers that only expose HTTP+SSE.
+ *
+ * Usage:
+ *  const connectionParams: SseConnectionParams = {
+ *    type: 'SseConnectionParams',
+ *    url: 'http://localhost:8788/sse'
+ *  };
+ */
+export interface SseConnectionParams {
+  type: 'SseConnectionParams';
+  url: string;
+  transportOptions?: SSEClientTransportOptions;
+}
+
+/**
  * A union of all supported MCP connection parameter types.
  */
 export type MCPConnectionParams =
-  | StdioConnectionParams
-  | StreamableHTTPConnectionParams;
+  StdioConnectionParams | StreamableHTTPConnectionParams | SseConnectionParams;
 
 /**
  * Handles a server-initiated `elicitation/create` request.
@@ -164,8 +190,12 @@ export class MCPSessionManager {
   }
 
   async createSession(): Promise<Client> {
-    const {Client, StdioClientTransport, StreamableHTTPClientTransport} =
-      await loadMcpSdk();
+    const {
+      Client,
+      StdioClientTransport,
+      StreamableHTTPClientTransport,
+      SSEClientTransport,
+    } = await loadMcpSdk();
     // The elicitation capability must be declared at construction: the SDK
     // rejects `setRequestHandler(ElicitRequestSchema, ...)` without it, and
     // capabilities can no longer be registered once the client is connected.
@@ -203,6 +233,15 @@ export class MCPSessionManager {
           const transport = new StreamableHTTPClientTransport(
             new URL(this.connectionParams.url),
             options,
+          );
+          transport.onerror = logTransportError;
+          await client.connect(transport);
+          break;
+        }
+        case 'SseConnectionParams': {
+          const transport = new SSEClientTransport(
+            new URL(this.connectionParams.url),
+            this.connectionParams.transportOptions,
           );
           transport.onerror = logTransportError;
           await client.connect(transport);
