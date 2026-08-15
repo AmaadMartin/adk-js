@@ -30,13 +30,6 @@ function makeInvocationContext(runConfig?: RunConfig): InvocationContext {
   });
 }
 
-/** The mutable alias of the view's type, to exercise the runtime guard. */
-function asMutable(
-  view: Readonly<Record<string, unknown>>,
-): Record<string, unknown> {
-  return view as Record<string, unknown>;
-}
-
 describe('ReadonlyContext.customMetadata', () => {
   it('reads the metadata seeded from the run config', () => {
     const ic = makeInvocationContext(
@@ -67,9 +60,7 @@ describe('ReadonlyContext.customMetadata', () => {
     );
     const view = new ReadonlyContext(ic).customMetadata;
 
-    expect(() => {
-      asMutable(view)['injected'] = 'value';
-    }).toThrow(TypeError);
+    expect(() => Reflect.set(view, 'injected', 'value')).toThrow(TypeError);
     expect(ic.customMetadata).not.toHaveProperty('injected');
   });
 
@@ -79,22 +70,32 @@ describe('ReadonlyContext.customMetadata', () => {
     );
     const view = new ReadonlyContext(ic).customMetadata;
 
-    expect(() => {
-      delete asMutable(view)['tenant'];
-    }).toThrow(TypeError);
+    expect(() => Reflect.deleteProperty(view, 'tenant')).toThrow(TypeError);
     expect(ic.customMetadata['tenant']).toBe('acme');
+  });
+
+  it('throws on a defineProperty and leaves the store untouched', () => {
+    const ic = makeInvocationContext(
+      createRunConfig({customMetadata: {tenant: 'acme'}}),
+    );
+    const view = new ReadonlyContext(ic).customMetadata;
+
+    expect(() =>
+      Object.defineProperty(view, 'injected', {value: 'value'}),
+    ).toThrow(TypeError);
+    expect(ic.customMetadata).not.toHaveProperty('injected');
   });
 
   it('names the key but not the value in the write error', () => {
     const ic = makeInvocationContext();
     const view = new ReadonlyContext(ic).customMetadata;
 
-    expect(() => {
-      asMutable(view)['apiKey'] = 'super-secret';
-    }).toThrow(/'apiKey'/);
-    expect(() => {
-      asMutable(view)['apiKey'] = 'super-secret';
-    }).not.toThrow(/super-secret/);
+    expect(() => Reflect.set(view, 'apiKey', 'super-secret')).toThrow(
+      /'apiKey'/,
+    );
+    expect(() => Reflect.set(view, 'apiKey', 'super-secret')).not.toThrow(
+      /super-secret/,
+    );
   });
 
   it('reads a value written to the store after the view was taken', () => {
@@ -154,9 +155,9 @@ describe('ReadonlyContext.customMetadata', () => {
     const ctx = new Context({invocationContext: ic});
 
     expect(ctx.customMetadata['tenant']).toBe('acme');
-    expect(() => {
-      asMutable(ctx.customMetadata)['tenant'] = 'other';
-    }).toThrow(TypeError);
+    expect(() => Reflect.set(ctx.customMetadata, 'tenant', 'other')).toThrow(
+      TypeError,
+    );
   });
 });
 

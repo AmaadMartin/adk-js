@@ -16,23 +16,26 @@ import {InvocationContext, requireAgent} from './invocation_context.js';
  * A view rather than a snapshot, so a value a legitimate writer puts into the
  * underlying record later is visible here. The view is shallow: a nested
  * object read out of it is the live object and stays mutable.
+ *
+ * Every trap that can reach the record throws, so a plain-JavaScript caller
+ * without the type cannot corrupt a store the whole invocation shares.
  */
 function readonlyView(
   record: Record<string, unknown>,
 ): Readonly<Record<string, unknown>> {
+  const reject = (
+    _target: Record<string, unknown>,
+    key: string | symbol,
+  ): never => {
+    throw new TypeError(
+      `Cannot modify '${String(key)}': ReadonlyContext.customMetadata is a ` +
+        'read-only view of the invocation metadata.',
+    );
+  };
   return new Proxy(record, {
-    set(_target, key) {
-      throw new TypeError(
-        `Cannot set '${String(key)}': ReadonlyContext.customMetadata is a ` +
-          'read-only view of the invocation metadata.',
-      );
-    },
-    deleteProperty(_target, key) {
-      throw new TypeError(
-        `Cannot delete '${String(key)}': ReadonlyContext.customMetadata is ` +
-          'a read-only view of the invocation metadata.',
-      );
-    },
+    set: reject,
+    deleteProperty: reject,
+    defineProperty: reject,
   });
 }
 

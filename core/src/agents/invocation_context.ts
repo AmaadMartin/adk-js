@@ -50,12 +50,7 @@ export interface InvocationContextParams {
   endInvocation?: boolean;
   transcriptionCache?: TranscriptionEntry[];
   runConfig?: RunConfig;
-  /**
-   * The invocation-scoped custom-metadata store. Normally omitted: a root
-   * context seeds it from `runConfig.customMetadata`, and child contexts
-   * (`clone`, `createInvocationContext`) carry the same object over so the
-   * whole invocation shares one store.
-   */
+  /** Shared metadata store; omit on a root context to seed from `runConfig`. */
   customMetadata?: Record<string, unknown>;
   activeStreamingTools?: Record<string, ActiveStreamingTool>;
   pluginManager: PluginManager;
@@ -273,9 +268,6 @@ export class InvocationContext {
     this.endInvocation = params.endInvocation || false;
     this.transcriptionCache = params.transcriptionCache;
     this.runConfig = params.runConfig;
-    // A supplied store is shared as-is, so every context of one invocation
-    // reads the same object; seeding copies, so the store never writes back
-    // into the caller's RunConfig.
     this.customMetadata = params.customMetadata ?? {
       ...params.runConfig?.customMetadata,
     };

@@ -121,6 +121,11 @@ export interface RunConfig {
    * Seeds the invocation-scoped metadata store, which instruction providers,
    * toolsets and callbacks read as a read-only view through
    * `ReadonlyContext.customMetadata`. Must be JSON-serializable.
+   *
+   * Distinct from `Runner.runAsync`'s own `customMetadata` parameter, which
+   * stamps the run's user event and never reaches a context. Set this field
+   * to make a value readable for the whole invocation, and that parameter to
+   * label the event.
    */
   customMetadata?: Record<string, unknown>;
 }
