@@ -11,10 +11,24 @@ import {
   Tool,
 } from '@modelcontextprotocol/sdk/types.js';
 
+import type {Context} from '../../agents/context.js';
 import {toGeminiSchema} from '../../utils/gemini_schema_util.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
+import {checkToolConfirmation} from '../tool_confirmation.js';
 
 import {MCPSessionManager} from './mcp_session_manager.js';
+
+/**
+ * Whether an {@link MCPTool} call requires user confirmation before it is sent
+ * to the MCP server: a boolean, or a predicate over the call arguments and the
+ * tool context. See {@link ToolOptions.requireConfirmation}.
+ */
+export type MCPRequireConfirmation =
+  | boolean
+  | ((
+      args: Record<string, unknown>,
+      toolContext: Context,
+    ) => boolean | Promise<boolean>);
 
 /**
  * Represents a tool exposed via the Model Context Protocol (MCP).
@@ -34,21 +48,28 @@ import {MCPSessionManager} from './mcp_session_manager.js';
  * exposed by the MCP server. This is critical when the toolset applies a
  * prefix to tool names (e.g., for LLM namespace disambiguation), ensuring
  * the correct original name is used when executing on the server.
+ *
+ * An MCP server is third-party code and can advertise destructive tools, so
+ * `requireConfirmation` holds the call for user approval before it reaches the
+ * server. Mirrors Python's `McpTool(require_confirmation=...)`.
  */
 export class MCPTool extends BaseTool {
   private readonly mcpTool: Tool;
   private readonly mcpSessionManager: MCPSessionManager;
   private readonly originalName: string;
+  private readonly requireConfirmation: MCPRequireConfirmation;
 
   constructor(
     mcpTool: Tool,
     mcpSessionManager: MCPSessionManager,
     originalName?: string,
+    requireConfirmation: MCPRequireConfirmation = false,
   ) {
     super({name: mcpTool.name, description: mcpTool.description || ''});
     this.mcpTool = mcpTool;
     this.mcpSessionManager = mcpSessionManager;
     this.originalName = originalName || mcpTool.name;
+    this.requireConfirmation = requireConfirmation;
   }
 
   override _getDeclaration(): FunctionDeclaration {
@@ -63,6 +84,19 @@ export class MCPTool extends BaseTool {
   }
 
   override async runAsync(request: RunAsyncToolRequest): Promise<unknown> {
+    // The gate runs before createSession(): opening a session is itself a side
+    // effect, since a stdio transport spawns the server process.
+    const requireConfirmation =
+      typeof this.requireConfirmation === 'function'
+        ? await this.requireConfirmation(request.args, request.toolContext)
+        : this.requireConfirmation;
+    if (requireConfirmation) {
+      const pending = checkToolConfirmation(this.name, request.toolContext);
+      if (pending !== undefined) {
+        return pending;
+      }
+    }
+
     const session = await this.mcpSessionManager.createSession();
 
     try {

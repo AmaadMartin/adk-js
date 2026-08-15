@@ -19,7 +19,7 @@ import {BaseTool} from '../base_tool.js';
 import {BaseToolset, ToolPredicate} from '../base_toolset.js';
 
 import {MCPConnectionParams, MCPSessionManager} from './mcp_session_manager.js';
-import {MCPTool} from './mcp_tool.js';
+import {MCPRequireConfirmation, MCPTool} from './mcp_tool.js';
 
 /**
  * A toolset that dynamically discovers and provides tools from a Model Context
@@ -49,17 +49,23 @@ import {MCPTool} from './mcp_tool.js';
  *   const mcpToolset = new MCPToolset(connectionParams);
  *   const tools = await mcpToolset.getTools();
  *
+ * Pass `requireConfirmation` to hold every discovered tool for user approval
+ * before the call reaches the server. Mirrors Python's
+ * `McpToolset(require_confirmation=...)`.
  */
 export class MCPToolset extends BaseToolset {
   private readonly mcpSessionManager: MCPSessionManager;
+  private readonly requireConfirmation: MCPRequireConfirmation;
 
   constructor(
     connectionParams: MCPConnectionParams,
     toolFilter: ToolPredicate | string[] = [],
     prefix?: string,
+    requireConfirmation: MCPRequireConfirmation = false,
   ) {
     super(toolFilter, prefix);
     this.mcpSessionManager = new MCPSessionManager(connectionParams);
+    this.requireConfirmation = requireConfirmation;
   }
 
   async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {
@@ -82,7 +88,12 @@ export class MCPToolset extends BaseToolset {
         ...tool,
         name: this.prefix ? `${this.prefix}_${tool.name}` : tool.name,
       };
-      return new MCPTool(toolWithPrefix, this.mcpSessionManager, tool.name);
+      return new MCPTool(
+        toolWithPrefix,
+        this.mcpSessionManager,
+        tool.name,
+        this.requireConfirmation,
+      );
     });
 
     // Apply toolFilter when specified.

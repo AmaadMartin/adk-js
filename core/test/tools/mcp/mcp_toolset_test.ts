@@ -6,7 +6,12 @@
 
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {describe, expect, it, vi} from 'vitest';
+import {Context} from '../../../src/agents/context.js';
+import {InvocationContext} from '../../../src/agents/invocation_context.js';
+import {LlmAgent} from '../../../src/agents/llm_agent.js';
 import {ReadonlyContext} from '../../../src/agents/readonly_context.js';
+import {PluginManager} from '../../../src/plugins/plugin_manager.js';
+import {createSession} from '../../../src/sessions/session.js';
 import {MCPConnectionParams} from '../../../src/tools/mcp/mcp_session_manager.js';
 import {MCPToolset} from '../../../src/tools/mcp/mcp_toolset.js';
 
@@ -36,6 +41,7 @@ vi.mock('@modelcontextprotocol/sdk/client/index.js', () => {
           {uri: 'file:///res1', mimeType: 'text/plain', text: 'hello'},
         ],
       }),
+      callTool: vi.fn().mockResolvedValue({content: []}),
     })),
   };
 });
@@ -331,6 +337,73 @@ describe('MCPToolset', () => {
           0,
         );
       });
+    });
+  });
+
+  describe('requireConfirmation', () => {
+    /**
+     * Serves one client to the next `sessions` sessions, so a discovered tool
+     * can be run and its `callTool` asserted. A gated call opens no session,
+     * so the count is exact: a spare stub would leak into the next test.
+     */
+    async function stubClient(sessions: number) {
+      const callTool = vi.fn().mockResolvedValue({content: []});
+      const {Client} =
+        await import('@modelcontextprotocol/sdk/client/index.js');
+      const client = {
+        connect: noop(),
+        close: noop(),
+        listTools: vi.fn().mockResolvedValue({
+          tools: [{name: 'delete-file', description: '', inputSchema: {}}],
+        }),
+        callTool,
+      } as unknown as Client;
+      for (let i = 0; i < sessions; i++) {
+        vi.mocked(Client).mockImplementationOnce(() => client);
+      }
+      return {callTool};
+    }
+
+    function makeToolContext(): Context {
+      const invocationContext = new InvocationContext({
+        invocationId: 'inv-1',
+        agent: new LlmAgent({name: 'a', model: 'gemini-2.5-flash'}),
+        session: createSession({id: 's1', appName: 'app', userId: 'u1'}),
+        pluginManager: new PluginManager([]),
+      });
+      return new Context({invocationContext, functionCallId: 'fc-1'});
+    }
+
+    it('gates a discovered tool when requireConfirmation is set', async () => {
+      // A gated call opens no session, so discovery is the only one.
+      const {callTool} = await stubClient(1);
+      const toolset = new MCPToolset(stdioParams, [], undefined, true);
+      const tools = await toolset.getTools();
+
+      const result = await tools[0].runAsync({
+        args: {path: '/etc'},
+        toolContext: makeToolContext(),
+      });
+
+      expect(result).toEqual({
+        error:
+          'This tool call requires confirmation, please approve or reject.',
+      });
+      expect(callTool).not.toHaveBeenCalled();
+    });
+
+    it('leaves a discovered tool unguarded by default', async () => {
+      const {callTool} = await stubClient(2);
+      const toolset = new MCPToolset(stdioParams);
+      const tools = await toolset.getTools();
+
+      const result = await tools[0].runAsync({
+        args: {path: '/etc'},
+        toolContext: makeToolContext(),
+      });
+
+      expect(result).toEqual({content: []});
+      expect(callTool).toHaveBeenCalledTimes(1);
     });
   });
 });
