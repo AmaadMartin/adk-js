@@ -57,6 +57,15 @@ const RAW_EVENT_REJECTION = apiError(
   unknownFieldBody('rawEvent', 'event'),
 );
 
+/** Builds an out-of-contract event that leaves `invocationId` unset. */
+function eventWithoutInvocationId(text: string): Event {
+  return createEvent({
+    timestamp: 1620000000000,
+    invocationId: '',
+    content: {role: 'model', parts: [{text}]},
+  });
+}
+
 /** The `e-<uuid>` shape every invocation id in this repository carries. */
 const INVOCATION_ID_REGEX =
   /^e-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
@@ -1198,11 +1207,7 @@ describe('VertexAiSessionService', () => {
           appName: '12345',
           userId: 'testUser',
         });
-        event = createEvent({
-          timestamp: 1620000000000,
-          invocationId: '',
-          content: {role: 'model', parts: [{text: 'hello'}]},
-        });
+        event = eventWithoutInvocationId('hello');
       });
 
       afterEach(() => {
@@ -1275,6 +1280,65 @@ describe('VertexAiSessionService', () => {
         );
 
         expect(mockClient.events.append).toHaveBeenCalledTimes(2);
+      });
+    });
+
+    describe('synthetic invocationId', () => {
+      let session: Session;
+
+      beforeEach(() => {
+        session = createSession({
+          id: 'append-session',
+          appName: '12345',
+          userId: 'testUser',
+        });
+      });
+
+      function sentInvocationId(call: number): string {
+        const sent: AppendAgentEngineSessionEventRequestParameters =
+          mockClient.events.append.mock.calls[call][0];
+        return sent.invocationId;
+      }
+
+      it('mints a distinct e-<uuid> for two events appended in one millisecond', async () => {
+        const dateSpy = vi.spyOn(Date, 'now').mockReturnValue(1700000000000);
+
+        await service.appendEvent({
+          session,
+          event: eventWithoutInvocationId('a'),
+        });
+        await service.appendEvent({
+          session,
+          event: eventWithoutInvocationId('b'),
+        });
+        dateSpy.mockRestore();
+
+        expect(sentInvocationId(1)).not.toBe(sentInvocationId(0));
+        expect(sentInvocationId(0)).toMatch(INVOCATION_ID_REGEX);
+        expect(sentInvocationId(1)).toMatch(INVOCATION_ID_REGEX);
+      });
+
+      it("leaves the caller's event unmutated when it mints a fallback", async () => {
+        const event = eventWithoutInvocationId('a');
+
+        await service.appendEvent({session, event});
+
+        expect(event.invocationId).toBe('');
+      });
+
+      it('sends the minted e-<uuid> again when retrying without rawEvent', async () => {
+        const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+        mockClient.events.append.mockRejectedValueOnce(RAW_EVENT_REJECTION);
+
+        await service.appendEvent({
+          session,
+          event: eventWithoutInvocationId('a'),
+        });
+        warnSpy.mockRestore();
+
+        expect(mockClient.events.append).toHaveBeenCalledTimes(2);
+        expect(sentInvocationId(0)).toMatch(INVOCATION_ID_REGEX);
+        expect(sentInvocationId(1)).toBe(sentInvocationId(0));
       });
     });
   });
