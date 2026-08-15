@@ -15,7 +15,7 @@ import {
   vi,
 } from 'vitest';
 import {AgentRegistry} from '../../src/index.js';
-import {createMtlsDispatcher} from '../../src/utils/mtls_utils.js';
+import {resolveMtlsRequest} from '../../src/utils/mtls_utils.js';
 
 vi.mock('google-auth-library', () => ({
   GoogleAuth: vi.fn().mockImplementation(() => ({
@@ -27,11 +27,12 @@ vi.mock('google-auth-library', () => ({
   })),
 }));
 
-// Only the certificate loading is faked; the endpoint-resolution helpers run
-// for real so the tests exercise the actual rewrite rules.
+// `resolveMtlsRequest` is the single entry point and owns the policy; its own
+// suite covers the rewrite rules. These tests cover what AgentRegistry does
+// with the answer.
 vi.mock('../../src/utils/mtls_utils.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../src/utils/mtls_utils.js')>()),
-  createMtlsDispatcher: vi.fn(),
+  resolveMtlsRequest: vi.fn(),
 }));
 
 const PLAIN_BASE_URL = 'https://agentregistry.googleapis.com/v1alpha';
@@ -58,7 +59,7 @@ describe('AgentRegistry mTLS', () => {
     delete env['GOOGLE_API_USE_CLIENT_CERTIFICATE'];
     process.env = env;
 
-    vi.mocked(createMtlsDispatcher).mockResolvedValue(undefined);
+    vi.mocked(resolveMtlsRequest).mockResolvedValue(undefined);
     fetchMock.mockImplementation(async () => new Response('{"agents": []}'));
     global.fetch = fetchMock;
 
@@ -85,56 +86,47 @@ describe('AgentRegistry mTLS', () => {
   });
 
   it('uses the mTLS host and attaches the dispatcher when a certificate is available', async () => {
-    vi.mocked(createMtlsDispatcher).mockResolvedValue(dispatcher);
+    vi.mocked(resolveMtlsRequest).mockResolvedValue({
+      url: MTLS_BASE_URL,
+      dispatcher,
+    });
 
     await registry.listAgents();
 
     const {url, init} = fetchCall(0);
     expect(url.startsWith(MTLS_BASE_URL)).toBe(true);
-    expect(init).toHaveProperty('dispatcher', dispatcher);
-  });
-
-  it('uses the mTLS host without a dispatcher when the setting is "always"', async () => {
-    process.env['GOOGLE_API_USE_MTLS_ENDPOINT'] = 'always';
-
-    await registry.listAgents();
-
-    const {url, init} = fetchCall(0);
-    expect(url.startsWith(MTLS_BASE_URL)).toBe(true);
-    expect(init).not.toHaveProperty('dispatcher');
-  });
-
-  it('keeps the plain host when the setting is "never" despite a certificate', async () => {
-    process.env['GOOGLE_API_USE_MTLS_ENDPOINT'] = 'never';
-    vi.mocked(createMtlsDispatcher).mockResolvedValue(dispatcher);
-
-    await registry.listAgents();
-
-    const {url, init} = fetchCall(0);
-    expect(url.startsWith(PLAIN_BASE_URL)).toBe(true);
     expect(init).toHaveProperty('dispatcher', dispatcher);
   });
 
   it('loads the certificate once across sequential requests', async () => {
-    vi.mocked(createMtlsDispatcher).mockResolvedValue(dispatcher);
+    vi.mocked(resolveMtlsRequest).mockResolvedValue({
+      url: MTLS_BASE_URL,
+      dispatcher,
+    });
 
     await registry.listAgents();
     await registry.listAgents();
 
-    expect(createMtlsDispatcher).toHaveBeenCalledTimes(1);
+    expect(resolveMtlsRequest).toHaveBeenCalledTimes(1);
     expect(fetchCall(1).url.startsWith(MTLS_BASE_URL)).toBe(true);
   });
 
   it('loads the certificate once across concurrent first requests', async () => {
-    vi.mocked(createMtlsDispatcher).mockResolvedValue(dispatcher);
+    vi.mocked(resolveMtlsRequest).mockResolvedValue({
+      url: MTLS_BASE_URL,
+      dispatcher,
+    });
 
     await Promise.all([registry.listAgents(), registry.listAgents()]);
 
-    expect(createMtlsDispatcher).toHaveBeenCalledTimes(1);
+    expect(resolveMtlsRequest).toHaveBeenCalledTimes(1);
   });
 
   it('loads the certificate per instance', async () => {
-    vi.mocked(createMtlsDispatcher).mockResolvedValue(dispatcher);
+    vi.mocked(resolveMtlsRequest).mockResolvedValue({
+      url: MTLS_BASE_URL,
+      dispatcher,
+    });
 
     await registry.listAgents();
     await new AgentRegistry({
@@ -142,6 +134,6 @@ describe('AgentRegistry mTLS', () => {
       location: 'global',
     }).listAgents();
 
-    expect(createMtlsDispatcher).toHaveBeenCalledTimes(2);
+    expect(resolveMtlsRequest).toHaveBeenCalledTimes(2);
   });
 });

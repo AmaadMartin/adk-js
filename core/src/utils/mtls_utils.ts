@@ -18,12 +18,12 @@
  * - `GOOGLE_API_CERTIFICATE_CONFIG`: path to `certificate_config.json`,
  *   overriding the well-known gcloud location.
  *
- * This module is Node-only and is deliberately not part of the browser bundle.
+ * Certificate loading is Node-only, so every Node built-in is imported lazily
+ * from behind the `GOOGLE_API_USE_CLIENT_CERTIFICATE` gate. That keeps this
+ * module importable from `oauth2_utils.ts`, which the browser bundle re-exports
+ * through `common.ts`.
  */
 
-import {readFile} from 'node:fs/promises';
-import {platform} from 'node:os';
-import {join} from 'node:path';
 import type {Dispatcher} from 'undici';
 import {getBooleanEnvVar} from './env_aware_utils.js';
 import {logger} from './logger.js';
@@ -31,13 +31,22 @@ import {logger} from './logger.js';
 const GOOGLEAPIS_SUFFIX = '.googleapis.com';
 const MTLS_GOOGLEAPIS_SUFFIX = '.mtls.googleapis.com';
 const CERTIFICATE_CONFIG_FILENAME = 'certificate_config.json';
+const SECURE_CONNECT_DIRNAME = '.secureConnect';
+const SECURE_CONNECT_METADATA_FILENAME = 'context_aware_metadata.json';
 
-/** Values of the `GOOGLE_API_USE_MTLS_ENDPOINT` environment variable. */
-export enum MtlsEndpointSetting {
-  AUTO = 'auto',
-  ALWAYS = 'always',
-  NEVER = 'never',
-}
+/** How long `cert_provider_command` may run before it is killed. */
+const CERT_PROVIDER_TIMEOUT_MS = 10_000;
+
+/** Cap on the output `cert_provider_command` may write; a certificate chain
+ * plus a key is a few kilobytes. */
+const MAX_CERT_PROVIDER_OUTPUT_BYTES = 1024 * 1024;
+
+/** The PEM blocks `cert_provider_command` writes, as `google-auth` matches them. */
+const CERT_BLOCK_PATTERN =
+  /-----BEGIN CERTIFICATE-----[\s\S]+-----END CERTIFICATE-----\r?\n?/;
+const KEY_BLOCK_PATTERN =
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]+-----END [A-Z ]*PRIVATE KEY-----\r?\n?/;
+const PASSPHRASE_BLOCK_HEADER = '-----BEGIN PASSPHRASE-----';
 
 /**
  * The subset of `certificate_config.json` this module reads. The snake_case
@@ -45,6 +54,25 @@ export enum MtlsEndpointSetting {
  */
 interface CertificateConfigFile {
   cert_configs?: {workload?: {cert_path?: string; key_path?: string}};
+}
+
+/**
+ * The subset of `context_aware_metadata.json` this module reads. The
+ * snake_case key is the on-disk format written by Secure Connect.
+ */
+interface ContextAwareMetadata {
+  cert_provider_command?: string[];
+}
+
+/** A PEM-encoded client certificate and its unencrypted private key. */
+interface ClientCertificate {
+  cert: string | Buffer;
+  key: string | Buffer;
+}
+
+/** Returns the message of a value thrown from an unknown source. */
+function errorMessage(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
 }
 
 /**
@@ -64,42 +92,33 @@ export interface FetchInitWithDispatcher extends FetchInit {
   dispatcher?: Dispatcher;
 }
 
-/** Reads `GOOGLE_API_USE_MTLS_ENDPOINT`, defaulting to `AUTO`. */
-function mtlsEndpointSetting(): MtlsEndpointSetting {
-  switch ((process.env['GOOGLE_API_USE_MTLS_ENDPOINT'] ?? '').toLowerCase()) {
-    case MtlsEndpointSetting.ALWAYS:
-      return MtlsEndpointSetting.ALWAYS;
-    case MtlsEndpointSetting.NEVER:
-      return MtlsEndpointSetting.NEVER;
-    default:
-      return MtlsEndpointSetting.AUTO;
-  }
+/**
+ * True when the operator opted out with `GOOGLE_API_USE_MTLS_ENDPOINT=never`.
+ *
+ * `always` and `auto` are not distinguished, because `resolveMtlsRequest`
+ * rewrites an endpoint only once a certificate is in hand and the mTLS host
+ * rejects a connection that presents none. The read is guarded the way
+ * `getBooleanEnvVar` guards its own: `oauth2_utils.ts` reaches this from the
+ * browser bundle, where there is no environment.
+ */
+function mtlsEndpointRefused(): boolean {
+  return (
+    (process.env?.['GOOGLE_API_USE_MTLS_ENDPOINT'] ?? '').toLowerCase() ===
+    'never'
+  );
 }
 
 /**
- * Returns the endpoint `url` should actually be called on: its
- * `*.mtls.googleapis.com` variant when the environment calls for mTLS, and
- * `url` unchanged otherwise.
+ * Returns the endpoint `url` should be called on once a client certificate is
+ * available: its `*.mtls.googleapis.com` variant, or `url` unchanged.
  *
- * The host is rewritten only when `GOOGLE_API_USE_MTLS_ENDPOINT` is `always`,
- * or is `auto` (the default) and `hasClientCert` is true. Scheme, port, path,
- * query and fragment are preserved. Hosts that are not `*.googleapis.com`
- * hosts, and hosts that are already mTLS hosts, are returned unchanged, so
- * non-Google providers are never affected.
- *
- * Unlike adk-python's `effective_googleapis_endpoint`, this takes the
- * certificate state as an argument rather than leaving it to a separate
- * predicate, so the policy is applied in exactly one place.
+ * Scheme, port, path, query and fragment are preserved. A host that is not a
+ * `*.googleapis.com` host, a host that is already an mTLS host, and the
+ * `never` opt-out are all returned unchanged, so a non-Google provider is
+ * never affected.
  */
-export function effectiveGoogleapisEndpoint(
-  url: string,
-  hasClientCert: boolean,
-): string {
-  const setting = mtlsEndpointSetting();
-  const useMtls =
-    setting === MtlsEndpointSetting.ALWAYS ||
-    (setting === MtlsEndpointSetting.AUTO && hasClientCert);
-  if (!useMtls) {
+function effectiveGoogleapisEndpoint(url: string): string {
+  if (mtlsEndpointRefused()) {
     return url;
   }
   let parsed: URL;
@@ -121,11 +140,13 @@ export function effectiveGoogleapisEndpoint(
 }
 
 /** Returns the gcloud configuration directory for the current platform. */
-function gcloudConfigDir(): string {
+async function gcloudConfigDir(): Promise<string> {
   const cloudSdkConfig = process.env['CLOUDSDK_CONFIG'];
   if (cloudSdkConfig) {
     return cloudSdkConfig;
   }
+  const {platform} = await import('node:os');
+  const {join} = await import('node:path');
   if (platform().startsWith('win')) {
     return join(process.env['APPDATA'] ?? '', 'gcloud');
   }
@@ -137,29 +158,150 @@ function gcloudConfigDir(): string {
  * `GOOGLE_API_CERTIFICATE_CONFIG` override over the well-known gcloud
  * location. Mirrors the resolution order used by `google-auth-library`.
  */
-function certificateConfigPath(): string {
-  return (
-    process.env['GOOGLE_API_CERTIFICATE_CONFIG'] ||
-    join(gcloudConfigDir(), CERTIFICATE_CONFIG_FILENAME)
-  );
+async function certificateConfigPath(): Promise<string> {
+  const override = process.env['GOOGLE_API_CERTIFICATE_CONFIG'];
+  if (override) {
+    return override;
+  }
+  const {join} = await import('node:path');
+  return join(await gcloudConfigDir(), CERTIFICATE_CONFIG_FILENAME);
 }
 
-/** Reads the workload client certificate described by `configPath`. */
-async function readClientCertificate(
-  configPath: string,
-): Promise<{cert: Buffer; key: Buffer}> {
-  const config = JSON.parse(
-    await readFile(configPath, 'utf8'),
-  ) as CertificateConfigFile;
+/** Reads and parses a JSON file, naming it in any failure. */
+async function readJsonFile<T>(path: string): Promise<T> {
+  const {readFile} = await import('node:fs/promises');
+  try {
+    return JSON.parse(await readFile(path, 'utf8')) as T;
+  } catch (e: unknown) {
+    throw new Error(`${path}: ${errorMessage(e)}`);
+  }
+}
+
+/** Reads the workload client certificate named by `certificate_config.json`. */
+async function readWorkloadCertificate(): Promise<ClientCertificate> {
+  const configPath = await certificateConfigPath();
+  const config = await readJsonFile<CertificateConfigFile>(configPath);
   const workload = config.cert_configs?.workload;
   if (!workload?.cert_path || !workload.key_path) {
-    throw new Error('cert_configs.workload is missing cert_path or key_path');
+    throw new Error(
+      `${configPath}: cert_configs.workload is missing cert_path or key_path`,
+    );
   }
+  const {readFile} = await import('node:fs/promises');
   const [cert, key] = await Promise.all([
     readFile(workload.cert_path),
     readFile(workload.key_path),
   ]);
   return {cert, key};
+}
+
+/**
+ * Reads the client certificate from the Secure Connect provider command named
+ * by `~/.secureConnect/context_aware_metadata.json`.
+ *
+ * Running that command is the documented Secure Connect mechanism and carries
+ * the trust model gcloud uses: the operator both sets
+ * `GOOGLE_API_USE_CLIENT_CERTIFICATE` and writes the command into a file in
+ * their own home directory.
+ */
+async function readSecureConnectCertificate(): Promise<ClientCertificate> {
+  const {homedir} = await import('node:os');
+  const {join} = await import('node:path');
+  const metadataPath = join(
+    homedir(),
+    SECURE_CONNECT_DIRNAME,
+    SECURE_CONNECT_METADATA_FILENAME,
+  );
+  const metadata = await readJsonFile<ContextAwareMetadata>(metadataPath);
+  const argv = metadata.cert_provider_command;
+  if (!argv?.length) {
+    throw new Error(`${metadataPath}: no cert_provider_command`);
+  }
+  return parseClientCertificate(await runCertProviderCommand(argv));
+}
+
+/**
+ * Extracts the certificate chain and its private key from the standard output
+ * of a `cert_provider_command`. Both patterns are greedy, matching
+ * `google-auth`'s, so a chain of certificates is one block. Only an
+ * unencrypted key can be presented, so a protected key is rejected here rather
+ * than failing later inside the TLS stack.
+ */
+function parseClientCertificate(stdout: string): ClientCertificate {
+  const cert = CERT_BLOCK_PATTERN.exec(stdout)?.[0];
+  const key = KEY_BLOCK_PATTERN.exec(stdout)?.[0];
+  if (!cert || !key) {
+    throw new Error(
+      'cert_provider_command wrote no certificate block or no private key block',
+    );
+  }
+  if (key.includes('ENCRYPTED') || stdout.includes(PASSPHRASE_BLOCK_HEADER)) {
+    throw new Error('cert_provider_command wrote an encrypted private key');
+  }
+  return {cert, key};
+}
+
+/** Runs the operator's `cert_provider_command` and returns its standard output. */
+async function runCertProviderCommand(argv: string[]): Promise<string> {
+  const {spawn} = await import('node:child_process');
+  return new Promise<string>((resolve, reject) => {
+    // No shell: the argv comes from a config file and must not be re-parsed.
+    const child = spawn(argv[0], argv.slice(1), {shell: false});
+    let stdout = '';
+    const fail = (message: string) => {
+      clearTimeout(timer);
+      child.kill();
+      reject(new Error(message));
+    };
+    const timer = setTimeout(
+      () =>
+        fail(
+          `cert_provider_command timed out after ${CERT_PROVIDER_TIMEOUT_MS}ms`,
+        ),
+      CERT_PROVIDER_TIMEOUT_MS,
+    );
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk: string) => {
+      stdout += chunk;
+      if (stdout.length > MAX_CERT_PROVIDER_OUTPUT_BYTES) {
+        fail(
+          `cert_provider_command wrote more than ${MAX_CERT_PROVIDER_OUTPUT_BYTES} bytes`,
+        );
+      }
+    });
+    child.on('error', (e: Error) => fail(errorMessage(e)));
+    child.on('close', (code: number | null) => {
+      clearTimeout(timer);
+      if (code === 0) {
+        resolve(stdout);
+      } else {
+        reject(new Error(`cert_provider_command exited with code ${code}`));
+      }
+    });
+  });
+}
+
+/** The certificate sources, in the order `google-auth` consults them. */
+const CERTIFICATE_SOURCES = [
+  readWorkloadCertificate,
+  readSecureConnectCertificate,
+];
+
+/**
+ * Loads the client certificate from the first source that supplies one.
+ * Throws with every source's failure when none does, so an operator who
+ * enabled mTLS sees why no certificate was found.
+ */
+async function loadClientCertificate(): Promise<ClientCertificate> {
+  const failures: string[] = [];
+  for (const source of CERTIFICATE_SOURCES) {
+    try {
+      return await source();
+    } catch (e: unknown) {
+      failures.push(errorMessage(e));
+    }
+  }
+  throw new Error(failures.join('; '));
 }
 
 /**
@@ -177,9 +319,8 @@ export async function createMtlsDispatcher(): Promise<Dispatcher | undefined> {
   if (!getBooleanEnvVar('GOOGLE_API_USE_CLIENT_CERTIFICATE')) {
     return undefined;
   }
-  const configPath = certificateConfigPath();
   try {
-    const {cert, key} = await readClientCertificate(configPath);
+    const {cert, key} = await loadClientCertificate();
     // Imported lazily so that the default path never pays for undici, and so
     // that this module stays importable on runtimes below undici's engine
     // floor.
@@ -187,10 +328,40 @@ export async function createMtlsDispatcher(): Promise<Dispatcher | undefined> {
     return new Agent({connect: {cert, key}});
   } catch (e: unknown) {
     logger.warn(
-      `Could not load the client certificate configured by ${configPath}; ` +
-        `falling back to a non-mTLS request: ` +
-        `${e instanceof Error ? e.message : String(e)}`,
+      `Could not load a client certificate; falling back to a non-mTLS ` +
+        `request: ${errorMessage(e)}`,
     );
     return undefined;
   }
+}
+
+/** An mTLS endpoint and the dispatcher that presents a certificate to it. */
+export interface MtlsRequest {
+  url: string;
+  dispatcher: Dispatcher;
+}
+
+/**
+ * Resolves the mTLS form of `url`, or `undefined` to leave the request exactly
+ * as it is today. This is the only entry point: every caller gets the same
+ * policy, so no two of them can disagree about when a certificate is sent.
+ *
+ * The certificate is presented only to a host this rewrote, so a non-Google
+ * endpoint, an endpoint that is already an mTLS host, and the
+ * `GOOGLE_API_USE_MTLS_ENDPOINT=never` opt-out all keep the plain request. The
+ * endpoint is likewise rewritten only once a certificate is in hand, because
+ * the mTLS host rejects a connection that presents none. Nothing is read from
+ * the filesystem unless `url` is a rewritable endpoint.
+ */
+export async function resolveMtlsRequest(
+  url: string,
+): Promise<MtlsRequest | undefined> {
+  // Asks what the endpoint would become given a certificate, before paying to
+  // load one.
+  const mtlsUrl = effectiveGoogleapisEndpoint(url);
+  if (mtlsUrl === url) {
+    return undefined;
+  }
+  const dispatcher = await createMtlsDispatcher();
+  return dispatcher ? {url: mtlsUrl, dispatcher} : undefined;
 }

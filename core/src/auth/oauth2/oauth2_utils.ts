@@ -5,6 +5,10 @@
  */
 
 import {logger} from '../../utils/logger.js';
+import {
+  FetchInitWithDispatcher,
+  resolveMtlsRequest,
+} from '../../utils/mtls_utils.js';
 import {OAuth2Auth} from '../auth_credential.js';
 
 import {AuthScheme, OpenIdConnectWithConfig} from '../auth_schemes.js';
@@ -51,26 +55,35 @@ export async function fetchOAuth2Tokens(
   endpoint: string,
   body: URLSearchParams,
 ): Promise<OAuth2Auth> {
+  // Present the enterprise client certificate to Google's token endpoint when
+  // the environment asks for it, so a context-aware access policy binds the
+  // token it issues. Returns undefined for every other endpoint and
+  // configuration, leaving the request below untouched.
+  const mtls = await resolveMtlsRequest(endpoint);
+  const url = mtls?.url ?? endpoint;
+
   // Guard against SSRF: apply the same blocklist used in oauth2_discovery.ts
   // so callers can't point tokenUrl at a private/cloud-metadata address.
-  if (!validateDiscoveryUrl(endpoint)) {
+  if (!validateDiscoveryUrl(url)) {
     throw new Error(
-      `SSRF protection: OAuth2 token endpoint '${endpoint}' is not allowed. Must use HTTPS and must not target private/loopback/cloud-metadata addresses.`,
+      `SSRF protection: OAuth2 token endpoint '${url}' is not allowed. Must use HTTPS and must not target private/loopback/cloud-metadata addresses.`,
     );
   }
+  const init: FetchInitWithDispatcher = {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: body.toString(),
+    // Never follow redirects: the SSRF blocklist only validates `endpoint`,
+    // so a validated host that responds with a 3xx could otherwise redirect
+    // this credential-bearing POST (client_secret/refresh_token) to a
+    // private/cloud-metadata address (CWE-918).
+    redirect: 'error',
+    ...(mtls ? {dispatcher: mtls.dispatcher} : {}),
+  };
   try {
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: body.toString(),
-      // Never follow redirects: the SSRF blocklist only validates `endpoint`,
-      // so a validated host that responds with a 3xx could otherwise redirect
-      // this credential-bearing POST (client_secret/refresh_token) to a
-      // private/cloud-metadata address (CWE-918).
-      redirect: 'error',
-    });
+    const response = await fetch(url, init);
 
     if (!response.ok) {
       throw new Error(`Token request failed with status ${response.status}`);
