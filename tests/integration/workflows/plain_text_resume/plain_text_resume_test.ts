@@ -11,7 +11,13 @@
  */
 
 import type {NodeContext} from '@google/adk';
-import {createEvent, node, RequestInput, Workflow} from '@google/adk';
+import {
+  createEvent,
+  getFunctionResponses,
+  node,
+  RequestInput,
+  Workflow,
+} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 import {z} from 'zod';
 import {
@@ -76,5 +82,38 @@ describe('workflow integration — plain-text interactive resume', () => {
 
     const turn2 = await collect(run('42'));
     expect(finalOutput(turn2)).toBe('number:42');
+  });
+
+  it('resumes two sequential HITL pauses, one typed reply each', async () => {
+    /** A gate that pauses once on `interruptId`, then reports its reply. */
+    const gate = (name: string, interruptId: string) =>
+      node(
+        (ctx: NodeContext, input: string) => {
+          const reply = ctx.resumeInputs[interruptId];
+          if (reply === undefined) {
+            return new RequestInput({interruptId, message: `${interruptId}?`});
+          }
+          return createEvent({output: `${input}|${interruptId}=${reply}`});
+        },
+        {name, rerunOnResume: true},
+      );
+    const wf = new Workflow({
+      name: 'sequential_plain_text_resume',
+      edges: [['START', gate('gate_a', 'A'), gate('gate_b', 'B')]],
+    });
+    const {run} = await createWorkflowRunner(wf);
+
+    const turn1 = await collect(run('hello'));
+    const turn2 = await collect(run('first answer'));
+    const turn3 = await collect(run('second answer'));
+
+    // The second pause resumes because the first is recorded as answered.
+    expect(finalOutput(turn3)).toBe('hello|A=first answer|B=second answer');
+    expect(
+      [...turn1, ...turn2, ...turn3].flatMap((e) => getFunctionResponses(e)),
+    ).toEqual([
+      {id: 'A', name: 'adk_request_input', response: {result: 'first answer'}},
+      {id: 'B', name: 'adk_request_input', response: {result: 'second answer'}},
+    ]);
   });
 });

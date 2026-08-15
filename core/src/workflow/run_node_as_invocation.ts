@@ -16,6 +16,7 @@ import {toContent} from './base_node.js';
 import type {RunnableNode} from './graph.js';
 import {NodeContext} from './node_context.js';
 import {
+  createPlainTextResumeEvents,
   resolvePlainTextResponse,
   responseSchemasByInterruptId,
 } from './utils/hitl_utils.js';
@@ -62,19 +63,25 @@ export async function* runNodeAsInvocation(
 ): AsyncGenerator<Event, void, void> {
   const author = options.author ?? node.name;
   const channel = new AsyncQueue<Event>();
+  // Interactive resume: if the node is paused on an interrupt and the user
+  // replies with plain text (not a structured function response), feed that
+  // text to the pending interrupt. Structured function responses are still
+  // resolved by the workflow's own rehydration.
+  const resume = plainTextResume(ic);
   const root = new NodeContext({
     invocationContext: ic,
     channel,
     nodePath: '',
     runId: author,
-    // Interactive resume: if the node is paused on an interrupt and the user
-    // replies with plain text (not a structured function response), feed that
-    // text to the pending interrupt(s). Structured function responses are still
-    // resolved by the workflow's own rehydration.
-    resumeInputs: resumeInputsFromPlainText(ic),
+    resumeInputs: resume?.inputs ?? {},
   });
 
   const input = extractNodeInput(ic.userContent);
+
+  // Record the resolution before the node reads it. The runner appends every
+  // yielded event to the session, so yielding here puts the marker in
+  // `session.events` ahead of the rehydration that scans them.
+  yield* plainTextResumeMarkers(resume, ic);
 
   let interrupted = false;
   const settle = (async () => {
@@ -135,6 +142,14 @@ export async function* runNodeAsInvocation(
   }
 }
 
+/** A plain-text reply, and the interrupt values it resolves. */
+interface PlainTextResume {
+  /** The value the typed reply resolved to. */
+  value: unknown;
+  /** interruptId -> the value handed to the waiting node. */
+  inputs: Record<string, unknown>;
+}
+
 /**
  * When the run is paused on exactly one unresolved interrupt and the incoming
  * message is plain text (not a structured function response), maps that text to
@@ -150,14 +165,12 @@ export async function* runNodeAsInvocation(
  * The reply is held to the interrupt's `responseSchema` when that schema is a
  * scalar one; see {@link resolvePlainTextResponse}.
  */
-function resumeInputsFromPlainText(
-  ic: InvocationContext,
-): Record<string, unknown> {
+function plainTextResume(ic: InvocationContext): PlainTextResume | undefined {
   const parts = ic.userContent?.parts ?? [];
   const isPlainText =
     parts.length > 0 && parts.every((p) => typeof p.text === 'string');
   if (!isPlainText) {
-    return {};
+    return undefined;
   }
   const text = parts.map((p) => p.text).join('');
 
@@ -175,11 +188,36 @@ function resumeInputsFromPlainText(
 
   // Only the unambiguous single-pause case is resumable by plain text.
   if (pending.size !== 1) {
-    return {};
+    return undefined;
   }
   const [id] = pending;
   const schemas = responseSchemasByInterruptId(events);
-  return {[id]: resolvePlainTextResponse(id, text, schemas.get(id))};
+  const value = resolvePlainTextResponse(id, text, schemas.get(id));
+  // `inputs` is only a seed: `Workflow.applyResumeInputs` reads the marker
+  // recorded below back out of the session and overwrites it with the
+  // unwrapped value, so the node gets exactly what a later replay of that
+  // marker gives it.
+  return {value, inputs: {[id]: value}};
+}
+
+/**
+ * The session records for the interrupts a typed reply resolved: one `user`
+ * event per id, the same message an interactive client would have sent.
+ */
+function plainTextResumeMarkers(
+  resume: PlainTextResume | undefined,
+  ic: InvocationContext,
+): Event[] {
+  if (!resume) {
+    return [];
+  }
+  return createPlainTextResumeEvents({
+    interruptIds: Object.keys(resume.inputs),
+    value: resume.value,
+    events: ic.session.events,
+    invocationId: ic.invocationId,
+    branch: ic.branch,
+  });
 }
 
 /**

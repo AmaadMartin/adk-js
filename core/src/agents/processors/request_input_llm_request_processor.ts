@@ -12,6 +12,7 @@ import {ToolConfirmation} from '../../tools/tool_confirmation.js';
 import {AsyncQueue} from '../../utils/async_queue.js';
 import {isNodeTool} from '../../workflow/nodes/node_tool.js';
 import {
+  createPlainTextResumeEvents,
   interruptResponseMismatch,
   REQUEST_INPUT_FUNCTION_CALL_NAME,
   resolvePlainTextResponse,
@@ -50,8 +51,8 @@ export class RequestInputLlmRequestProcessor extends BaseLlmRequestProcessor {
     //    `adk_request_input` responses, else map a plain-text reply to the
     //    single pending interrupt (so an interactive client can resume by
     //    typing).
-    const resumeInputs = collectResumeInputs(events);
-    if (Object.keys(resumeInputs).length === 0) {
+    const resume = collectResumeInputs(events);
+    if (Object.keys(resume.inputs).length === 0) {
       return;
     }
 
@@ -93,13 +94,26 @@ export class RequestInputLlmRequestProcessor extends BaseLlmRequestProcessor {
       return;
     }
 
-    // 4. Re-run each pending node-tool, threading the resume inputs through the
+    // 4. Record each interrupt a typed reply resolved, before the node-tool
+    //    re-runs and rehydrates from the session. A structured reply is the
+    //    client's own message and is already recorded.
+    if (resume.plainText) {
+      yield* createPlainTextResumeEvents({
+        interruptIds: Object.keys(resume.inputs),
+        value: resume.plainText.value,
+        events,
+        invocationId: invocationContext.invocationId,
+        branch: invocationContext.branch,
+      });
+    }
+
+    // 5. Re-run each pending node-tool, threading the resume inputs through the
     //    tool confirmation payload (read by NodeTool as the node's resumeInputs).
     const toolConfirmationDict: Record<string, ToolConfirmation> = {};
     for (const id of Object.keys(pending)) {
       toolConfirmationDict[id] = new ToolConfirmation({
         confirmed: true,
-        payload: resumeInputs,
+        payload: resume.inputs,
       });
     }
 
@@ -131,8 +145,20 @@ export class RequestInputLlmRequestProcessor extends BaseLlmRequestProcessor {
   }
 }
 
+/** The resume inputs a turn supplies, and the typed reply behind them. */
+interface ResumeInputs {
+  /** interruptId -> the value handed to the waiting node. */
+  inputs: Record<string, unknown>;
+  /**
+   * The value a plain-text reply resolved to, when `inputs` came from one.
+   * `undefined` for a structured reply, whose own message already records the
+   * resolution.
+   */
+  plainText?: {value: unknown};
+}
+
 /**
- * Collects resume inputs from the session: structured `adk_request_input`
+ * Collects resume inputs from the current turn: structured `adk_request_input`
  * function responses take precedence; otherwise a plain-text reply is mapped to
  * the single pending interrupt, held to the scalar `responseSchema` that
  * interrupt declared.
@@ -146,38 +172,12 @@ export class RequestInputLlmRequestProcessor extends BaseLlmRequestProcessor {
  * it is the turn being processed, and skipped on later turns — it never
  * resolved its interrupt, so the pause is still open for the next answer.
  */
-function collectResumeInputs(events: Event[]): Record<string, unknown> {
+function collectResumeInputs(events: Event[]): ResumeInputs {
   const responseSchemas = responseSchemasByInterruptId(events);
-  let isCurrentTurn = true;
-  for (let i = events.length - 1; i >= 0; i--) {
-    const event = events[i];
-    if (event.author !== 'user') {
-      continue;
-    }
-    const structured: Record<string, unknown> = {};
-    let found = false;
-    for (const fr of getFunctionResponses(event)) {
-      if (fr.name === REQUEST_INPUT_FUNCTION_CALL_NAME && fr.id) {
-        const response = unwrapResponse(fr.response);
-        const mismatch = interruptResponseMismatch(
-          fr.id,
-          response,
-          responseSchemas.get(fr.id),
-        );
-        if (mismatch) {
-          if (isCurrentTurn) {
-            throw new Error(mismatch);
-          }
-          continue;
-        }
-        structured[fr.id] = response;
-        found = true;
-      }
-    }
-    if (found) {
-      return structured;
-    }
-    isCurrentTurn = false;
+  const lastUser = [...events].reverse().find((e) => e.author === 'user');
+  const structured = structuredResumeInputs(lastUser, responseSchemas);
+  if (structured) {
+    return {inputs: structured};
   }
 
   // Plain-text fallback: map the latest plain-text user turn to the single
@@ -188,29 +188,35 @@ function collectResumeInputs(events: Event[]): Record<string, unknown> {
   );
   // Only the unambiguous single-pause case is resumable by plain text.
   if (pending.size !== 1) {
-    return {};
+    return {inputs: {}};
   }
-  const lastUser = [...events].reverse().find((e) => e.author === 'user');
   const parts = lastUser?.content?.parts ?? [];
   const isPlainText =
     parts.length > 0 && parts.every((p) => typeof p.text === 'string');
   if (!isPlainText) {
-    return {};
+    return {inputs: {}};
   }
   const text = parts.map((p) => p.text).join('');
   const [id] = pending;
-  return {[id]: resolvePlainTextResponse(id, text, responseSchemas.get(id))};
+  // Hold the reply to the scalar schema its interrupt declared, then read the
+  // value back out of the envelope the marker records, so this turn delivers
+  // exactly what a later replay of that marker delivers.
+  const value = resolvePlainTextResponse(id, text, responseSchemas.get(id));
+  return {
+    inputs: {[id]: unwrapResponse({result: value})},
+    plainText: {value},
+  };
 }
 
 /**
  * Narrows session events to the agent turn that paused: everything after the
  * user turn before the current one.
  *
- * A plain-text reply records no `functionResponse` for the interrupt it
- * answered, so an interrupt resolved by typing stays unanswered in the session
- * forever. Scoping to the latest agent turn drops those, which is also what the
- * reply means: it answers the pauses the agent raised since the user last
- * spoke, not every pause the session ever held.
+ * A typed reply answers the pauses the agent raised since the user last spoke,
+ * not every pause the session ever held. Scoping to the latest agent turn is
+ * also what lets a session recorded before {@link createPlainTextResumeEvents}
+ * resume: those turns left no `functionResponse` behind, so their interrupts
+ * read as pending forever.
  */
 function eventsSincePreviousUserTurn(events: Event[]): Event[] {
   let seenCurrentTurn = false;
@@ -224,6 +230,47 @@ function eventsSincePreviousUserTurn(events: Event[]): Event[] {
     seenCurrentTurn = true;
   }
   return events;
+}
+
+/**
+ * The structured `adk_request_input` replies the current turn's user event
+ * carries, or `undefined` when it carries none.
+ *
+ * Only that one event is read. An earlier turn's replies already resolved their
+ * interrupts, and a typed reply now records a reply of its own, so a backward
+ * scan would resume the node with the previous turn's answer.
+ *
+ * @throws if a reply does not match the schema its interrupt declared. The
+ *   reply is the one that just arrived, so the client hears about it once;
+ *   later replays skip it in {@link pendingInterruptIds}, leaving the pause
+ *   open for the next answer.
+ */
+function structuredResumeInputs(
+  userEvent: Event | undefined,
+  responseSchemas: Map<string, unknown>,
+): Record<string, unknown> | undefined {
+  if (!userEvent) {
+    return undefined;
+  }
+  const structured: Record<string, unknown> = {};
+  let found = false;
+  for (const fr of getFunctionResponses(userEvent)) {
+    if (fr.name !== REQUEST_INPUT_FUNCTION_CALL_NAME || !fr.id) {
+      continue;
+    }
+    const response = unwrapResponse(fr.response);
+    const mismatch = interruptResponseMismatch(
+      fr.id,
+      response,
+      responseSchemas.get(fr.id),
+    );
+    if (mismatch) {
+      throw new Error(mismatch);
+    }
+    structured[fr.id] = response;
+    found = true;
+  }
+  return found ? structured : undefined;
 }
 
 /**

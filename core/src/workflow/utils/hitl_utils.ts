@@ -259,6 +259,21 @@ export function getRequestInputInterruptIds(event: Event): string[] {
 }
 
 /**
+ * Creates a `FunctionResponse` part answering the interrupt `interruptId`,
+ * raised by a call named `name`.
+ *
+ * The response must mirror the raising call's name, or the pair is invalid and
+ * every consumer keeps reporting the interrupt as unanswered.
+ */
+export function createInterruptResponse(
+  interruptId: string,
+  name: string,
+  response: Record<string, unknown>,
+): Part {
+  return {functionResponse: {id: interruptId, name, response}};
+}
+
+/**
  * Creates a `FunctionResponse` part answering a `request_input` interrupt,
  * suitable for appending to a session as the user's resume response.
  */
@@ -266,13 +281,97 @@ export function createRequestInputResponse(
   interruptId: string,
   response: Record<string, unknown>,
 ): Part {
-  return {
-    functionResponse: {
-      id: interruptId,
-      name: REQUEST_INPUT_FUNCTION_CALL_NAME,
-      response,
-    },
-  };
+  return createInterruptResponse(
+    interruptId,
+    REQUEST_INPUT_FUNCTION_CALL_NAME,
+    response,
+  );
+}
+
+/** The calls that raise an interrupt the user can answer. */
+const INTERRUPT_CALL_NAMES: ReadonlySet<string> = new Set([
+  REQUEST_INPUT_FUNCTION_CALL_NAME,
+  REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
+]);
+
+/** Parameters for {@link createPlainTextResumeEvents}. */
+export interface CreatePlainTextResumeEventsParams {
+  /** The interrupts the reply resolves. */
+  interruptIds: Iterable<string>;
+  /**
+   * The value the typed reply resolved to, against the `responseSchema` its
+   * interrupt declared. Usually the text as typed.
+   */
+  value: unknown;
+  /** Session events, searched for the call that raised each interrupt. */
+  events: Event[];
+  /** The invocation the reply arrived in. */
+  invocationId?: string;
+  /** The branch the reply arrived on. */
+  branch?: string;
+}
+
+/**
+ * Records a typed reply as the client message it stands for: one `user` event
+ * per resolved interrupt, carrying a `functionResponse` for that interrupt id
+ * with the resolved value wrapped as `{result: value}`.
+ *
+ * An interactive client (`adk run`, or a dev UI with only a chat box) answers
+ * an interrupt by typing, and typed text names no interrupt. Every consumer
+ * that answers "what is this session waiting on?" reads the call/response
+ * pairing, so without this record an answered pause stays pending forever.
+ *
+ * Each response mirrors the *raising* call's name — `adk_request_input` for a
+ * {@link RequestInput}, `adk_request_credential` for the workflow auth gate —
+ * because that is what makes the pair valid. An id that `events` holds no such
+ * call for is skipped: this is bookkeeping, and it must never fail a run.
+ */
+export function createPlainTextResumeEvents({
+  interruptIds,
+  value,
+  events,
+  invocationId,
+  branch,
+}: CreatePlainTextResumeEventsParams): Event[] {
+  const markers: Event[] = [];
+  for (const interruptId of interruptIds) {
+    const name = interruptCallName(events, interruptId);
+    if (name === undefined) {
+      continue;
+    }
+    markers.push(
+      createEvent({
+        author: 'user',
+        invocationId,
+        branch,
+        content: {
+          role: 'user',
+          parts: [createInterruptResponse(interruptId, name, {result: value})],
+        },
+      }),
+    );
+  }
+  return markers;
+}
+
+/** The name of the interrupt call that raised `interruptId`, if any. */
+function interruptCallName(
+  events: Event[],
+  interruptId: string,
+): string | undefined {
+  for (const event of events) {
+    for (const part of event.content?.parts ?? []) {
+      const name = part.functionCall?.name;
+      if (
+        part.functionCall?.id === interruptId &&
+        name !== undefined &&
+        INTERRUPT_CALL_NAMES.has(name)
+      ) {
+        return name;
+      }
+    }
+  }
+  return undefined;
 }
 
 // ---------------------------------------------------------------------------
