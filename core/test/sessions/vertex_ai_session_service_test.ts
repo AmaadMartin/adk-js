@@ -7,6 +7,7 @@
 import {Sessions} from '@google-cloud/vertexai/build/src/genai/sessions.js';
 import {
   createEvent,
+  createSession,
   isCompactedEvent,
   State,
   VertexAiSessionService,
@@ -14,6 +15,7 @@ import {
 import {Session} from '@google/adk/sessions/session.js';
 import {ApiError} from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {createCompactedEvent} from '../../src/events/compacted_event.js';
 import {
   isFastForwardable,
   reconstructNodeStates,
@@ -474,7 +476,7 @@ describe('VertexAiSessionService', () => {
             _compaction: {
               startTime: 1600000000000,
               endTime: 1610000000000,
-              compactedContent: {role: 'user', parts: [{text: 'summary'}]},
+              compactedContent: 'summary',
             },
             _usage_metadata: {promptTokens: 10},
           },
@@ -529,6 +531,165 @@ describe('VertexAiSessionService', () => {
       });
 
       expect(session?.events[0].groundingMetadata).toEqual(groundingMetadata);
+    });
+
+    it('restores the compaction fields verbatim from custom metadata', async () => {
+      mockClient.events.listInternal.mockResolvedValue({
+        sessionEvents: [
+          {
+            name: 'projects/p/locations/l/sessions/s/events/e1',
+            invocationId: 'inv-1',
+            author: 'system',
+            timestamp: '2026-04-09T13:00:00Z',
+            eventMetadata: {
+              customMetadata: {
+                _compaction: {
+                  startTime: 1600000000000,
+                  endTime: 1610000000000,
+                  compactedContent: 'a text summary',
+                },
+              },
+            },
+          },
+        ],
+      });
+
+      const session = await service.getSession({
+        appName: '12345',
+        userId: 'testUser',
+        sessionId: 'my-session-id',
+      });
+
+      const parsed = session?.events[0];
+      if (!parsed || !isCompactedEvent(parsed)) {
+        expect.fail('the parsed event is not a CompactedEvent');
+      }
+      expect(parsed.startTime).toBe(1600000000000);
+      expect(parsed.endTime).toBe(1610000000000);
+      expect(parsed.compactedContent).toBe('a text summary');
+    });
+
+    it('round-trips a compacted event through append and read', async () => {
+      const compacted = createCompactedEvent({
+        author: 'system',
+        startTime: 1000,
+        endTime: 2000,
+        compactedContent: 'summary of the first turn',
+      });
+
+      await service.appendEvent({
+        session: createSession({
+          id: 'my-session-id',
+          appName: '12345',
+          userId: 'testUser',
+        }),
+        event: compacted,
+      });
+
+      const [appended] = mockClient.events.append.mock.calls[0] as [
+        {config: {eventMetadata: {customMetadata: Record<string, unknown>}}},
+      ];
+      mockClient.events.listInternal.mockResolvedValue({
+        sessionEvents: [
+          {
+            name: 'projects/p/locations/l/sessions/s/events/e1',
+            invocationId: 'inv-1',
+            author: 'system',
+            timestamp: '2026-04-09T13:00:00Z',
+            eventMetadata: {
+              customMetadata: {
+                _compaction:
+                  appended.config.eventMetadata.customMetadata._compaction,
+              },
+            },
+          },
+        ],
+      });
+
+      const session = await service.getSession({
+        appName: '12345',
+        userId: 'testUser',
+        sessionId: 'my-session-id',
+      });
+
+      const parsed = session?.events[0];
+      if (!parsed || !isCompactedEvent(parsed)) {
+        expect.fail('the compacted event did not survive the round trip');
+      }
+      expect(parsed.startTime).toBe(compacted.startTime);
+      expect(parsed.endTime).toBe(compacted.endTime);
+      expect(parsed.compactedContent).toBe(compacted.compactedContent);
+    });
+
+    it('applies workflow metadata to a compacted event', async () => {
+      mockClient.events.listInternal.mockResolvedValue({
+        sessionEvents: [
+          {
+            name: 'projects/p/locations/l/sessions/s/events/e1',
+            invocationId: 'inv-1',
+            author: 'reviewer',
+            timestamp: '2026-04-09T13:00:00Z',
+            eventMetadata: {
+              customMetadata: {
+                _compaction: {
+                  startTime: 1000,
+                  endTime: 2000,
+                  compactedContent: 'a text summary',
+                },
+                _workflow: {
+                  output: {score: 7},
+                  route: 'approved',
+                  nodeInfo: {path: 'wf.reviewer', outputFor: '1'},
+                },
+              },
+            },
+          },
+        ],
+      });
+
+      const session = await service.getSession({
+        appName: '12345',
+        userId: 'testUser',
+        sessionId: 'my-session-id',
+      });
+
+      const parsed = session?.events[0];
+      if (!parsed || !isCompactedEvent(parsed)) {
+        expect.fail('the parsed event is not a CompactedEvent');
+      }
+      expect(parsed.compactedContent).toBe('a text summary');
+      expect(parsed.output).toEqual({score: 7});
+      expect(parsed.route).toBe('approved');
+      expect(parsed.nodeInfo).toEqual({path: 'wf.reviewer', outputFor: '1'});
+    });
+
+    it('does not mark a non-compacted API event as compacted', async () => {
+      mockClient.events.listInternal.mockResolvedValue({
+        sessionEvents: [
+          {
+            name: 'projects/p/locations/l/sessions/s/events/e1',
+            invocationId: 'inv-1',
+            author: 'user',
+            timestamp: '2026-04-09T13:00:00Z',
+            eventMetadata: {
+              customMetadata: {_usage_metadata: {promptTokens: 3}},
+            },
+          },
+        ],
+      });
+
+      const session = await service.getSession({
+        appName: '12345',
+        userId: 'testUser',
+        sessionId: 'my-session-id',
+      });
+
+      const parsed = session?.events[0];
+      if (!parsed) {
+        expect.fail('getSession returned no event');
+      }
+      expect(isCompactedEvent(parsed)).toBe(false);
+      expect('isCompacted' in parsed).toBe(false);
     });
 
     it('slices events based on numRecentEvents', async () => {
@@ -1176,20 +1337,13 @@ describe('VertexAiSessionService', () => {
         userId: 'u1',
         events: [],
       } as unknown as Session;
-      const event = createEvent({
+      const event = createCompactedEvent({
         timestamp: Date.now(),
         content: {role: 'model', parts: []},
+        startTime: 1000,
+        endTime: 2000,
+        compactedContent: 'summary',
       });
-      const eventWithCompaction = event as unknown as {
-        isCompacted: boolean;
-        startTime: number;
-        endTime: number;
-        compactedContent: object;
-      };
-      eventWithCompaction.isCompacted = true;
-      eventWithCompaction.startTime = 1000;
-      eventWithCompaction.endTime = 2000;
-      eventWithCompaction.compactedContent = {role: 'user', parts: []};
 
       await service.appendEvent({session, event});
 

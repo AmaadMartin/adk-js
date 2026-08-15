@@ -19,7 +19,7 @@ import {
   GenerateContentResponseUsageMetadata,
   GroundingMetadata,
 } from '@google/genai';
-import {isCompactedEvent} from '../events/compacted_event.js';
+import {CompactedEvent, isCompactedEvent} from '../events/compacted_event.js';
 import {experimental} from '../utils/experimental.js';
 
 import {AuthConfig} from '../auth/auth_tool.js';
@@ -586,20 +586,19 @@ function toApiActions(
   } as ApiEventActions;
 }
 
+/** The `_compaction` payload this service stores under `customMetadata`. */
+type CompactionMetadata = Pick<
+  CompactedEvent,
+  'startTime' | 'endTime' | 'compactedContent'
+>;
+
 interface ExtendedEventActions extends EventActions {
-  compaction?: {
-    startTime: number;
-    endTime: number;
-    compactedContent: string;
-  };
+  compaction?: CompactionMetadata;
 }
 
+/** An {@link Event} as this service reconstructs it from the API response. */
 interface ExtendedEvent extends Event {
   actions: ExtendedEventActions;
-  isCompacted?: boolean;
-  startTime?: number;
-  endTime?: number;
-  compactedContent?: string;
 }
 
 function _fromApiEvent(apiEventObj: VertexAiSessionEvent): Event {
@@ -621,22 +620,14 @@ function _fromApiEvent(apiEventObj: VertexAiSessionEvent): Event {
   let customMetadata = eventMetadata.customMetadata as
     | Record<string, unknown>
     | undefined;
-  let compactionData: {
-    startTime: number;
-    endTime: number;
-    compactedContent: string;
-  } | null = null;
+  let compactionData: CompactionMetadata | null = null;
   let usageMetadataData = null;
   let workflowData: WorkflowEventMetadata | undefined;
 
   if (customMetadata) {
     customMetadata = {...customMetadata};
     if (customMetadata._compaction) {
-      compactionData = customMetadata._compaction as {
-        startTime: number;
-        endTime: number;
-        compactedContent: string;
-      };
+      compactionData = customMetadata._compaction as CompactionMetadata;
       delete customMetadata._compaction;
     }
     if (customMetadata._usage_metadata) {
@@ -695,16 +686,20 @@ function _fromApiEvent(apiEventObj: VertexAiSessionEvent): Event {
       usageMetadataData as unknown as GenerateContentResponseUsageMetadata,
   };
 
+  let result: ExtendedEvent | CompactedEvent = event;
   if (compactionData) {
-    event.isCompacted = true;
-    event.startTime = compactionData.startTime;
-    event.endTime = compactionData.endTime;
-    event.compactedContent = compactionData.compactedContent;
+    result = {
+      ...event,
+      isCompacted: true,
+      startTime: compactionData.startTime,
+      endTime: compactionData.endTime,
+      compactedContent: compactionData.compactedContent,
+    };
   }
 
   if (workflowData) {
-    applyWorkflowMetadata(event, workflowData);
+    applyWorkflowMetadata(result, workflowData);
   }
 
-  return event;
+  return result;
 }
