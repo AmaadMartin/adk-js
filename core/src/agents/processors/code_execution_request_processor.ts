@@ -414,16 +414,10 @@ function extractAndReplaceInlineFiles(
     for (let j = 0; j < parts.length; j++) {
       const inlineData = parts[j].inlineData;
       const mimeType = inlineData?.mimeType;
+      const data = inlineData?.data;
 
-      // Skip if the inline data is not supported
-      if (!inlineData || !mimeType || !DATA_FILE_UTIL_MAP[mimeType]) {
-        continue;
-      }
-
-      // Read the bytes out before the part is replaced
-      const data = inlineData.data;
-
-      if (data === undefined) {
+      // Skip unsupported mime types and inline data with no bytes
+      if (data === undefined || !mimeType || !DATA_FILE_UTIL_MAP[mimeType]) {
         continue;
       }
 
