@@ -22,8 +22,8 @@ import {BaseAgent} from '../agents/base_agent.js';
 import type {InvocationContext} from '../agents/invocation_context.js';
 import type {Event as AdkEvent} from '../events/event.js';
 import {createEvent} from '../events/event.js';
-import {randomUUID} from '../utils/env_aware_utils.js';
 import {logger} from '../utils/logger.js';
+import {newUuid} from '../utils/uuid.js';
 import {MessageRole} from './a2a_event.js';
 import {A2ARemoteAgentRunProcessor} from './a2a_remote_agent_run_processor.js';
 import {
@@ -41,10 +41,7 @@ export {AGENT_CARD_PATH};
  * Type alias for A2A stream event data.
  */
 export type A2AStreamEventData =
-  | Message
-  | Task
-  | TaskStatusUpdateEvent
-  | TaskArtifactUpdateEvent;
+  Message | Task | TaskStatusUpdateEvent | TaskArtifactUpdateEvent;
 
 /**
  * Callback called before sending a request to the remote agent.
@@ -186,7 +183,7 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
 
       const message: Message = {
         kind: 'message',
-        messageId: randomUUID(),
+        messageId: newUuid(),
         role: MessageRole.USER,
         parts,
         metadata: getA2ASessionMetadata({

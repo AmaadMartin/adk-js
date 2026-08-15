@@ -18,14 +18,17 @@ import type {
   InvocationContext,
   RemoteA2AAgentConfig,
 } from '@google/adk';
-import {createEvent, createSession, RemoteA2AAgent} from '@google/adk';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {
+  createEvent,
+  createSession,
+  RemoteA2AAgent,
+  resetIdProvider,
+  setIdProvider,
+} from '@google/adk';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 type A2AStreamEventData =
-  | Message
-  | Task
-  | TaskStatusUpdateEvent
-  | TaskArtifactUpdateEvent;
+  Message | Task | TaskStatusUpdateEvent | TaskArtifactUpdateEvent;
 
 vi.mock('@a2a-js/sdk/client', () => {
   const DefaultAgentCardResolver = vi.fn(() => ({
@@ -359,5 +362,50 @@ describe('A2ARemoteAgent', () => {
         configuration: {acceptedOutputModes: ['custom']},
       }),
     );
+  });
+  describe('with an installed ID provider', () => {
+    afterEach(() => {
+      resetIdProvider();
+    });
+
+    it('takes the outbound messageId from the provider', async () => {
+      setIdProvider(() => 'provider-id');
+      const card: AgentCard = {
+        name: 'Remote',
+        description: 'test',
+        protocolVersion: '1.0',
+        defaultInputModes: [],
+        defaultOutputModes: [],
+        capabilities: {streaming: true},
+        skills: [],
+        url: 'https://example.com',
+        version: '1.0',
+      };
+      const agent = new RemoteA2AAgent({
+        name: 'test-agent',
+        agentCard: card,
+        clientFactory: mockClientFactory,
+      });
+      const mockStream =
+        async function* (): AsyncGenerator<A2AStreamEventData> {
+          yield {
+            kind: 'artifact-update',
+            taskId: 'test-task',
+            contextId: 'test-context',
+            artifact: {
+              artifactId: 'a1',
+              parts: [{kind: 'text', text: 'response'}],
+            },
+          };
+        };
+      vi.mocked(mockClient.sendMessageStream).mockReturnValue(mockStream());
+
+      for await (const _ of agent.runAsync(createMockContext())) {
+        // Drain the stream so the request is sent.
+      }
+
+      const params = vi.mocked(mockClient.sendMessageStream).mock.calls[0][0];
+      expect(params.message.messageId).toBe('provider-id');
+    });
   });
 });

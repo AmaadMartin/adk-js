@@ -14,7 +14,7 @@ import type {PluginManager} from '../plugins/plugin_manager.js';
 import type {BaseSessionService} from '../sessions/base_session_service.js';
 import type {Session} from '../sessions/session.js';
 import type {AsyncQueue} from '../utils/async_queue.js';
-import {randomUUID} from '../utils/env_aware_utils.js';
+import {newUuid} from '../utils/uuid.js';
 
 import type {ActiveStreamingTool} from './active_streaming_tool.js';
 import type {BaseAgent} from './base_agent.js';
@@ -361,7 +361,7 @@ export class InvocationContext {
 }
 
 export function newInvocationContextId(): string {
-  return `e-${randomUUID()}`;
+  return `e-${newUuid()}`;
 }
 
 /**

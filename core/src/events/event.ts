@@ -8,8 +8,8 @@ import type {FunctionCall, FunctionResponse} from '@google/genai';
 
 import type {LlmResponse} from '../models/llm_response.js';
 
-import {randomUUID} from '../utils/env_aware_utils.js';
 import {toCamelCase, toSnakeCase} from '../utils/object_notation_utils.js';
+import {newUuid} from '../utils/uuid.js';
 import type {EventActions} from './event_actions.js';
 import {createEventActions} from './event_actions.js';
 
@@ -223,7 +223,7 @@ export function getFunctionCalls(event: Event): FunctionCall[] {
 export const AF_FUNCTION_CALL_ID_PREFIX = 'adk-';
 
 export function generateClientFunctionCallId(): string {
-  return `${AF_FUNCTION_CALL_ID_PREFIX}${randomUUID()}`;
+  return `${AF_FUNCTION_CALL_ID_PREFIX}${newUuid()}`;
 }
 
 /**

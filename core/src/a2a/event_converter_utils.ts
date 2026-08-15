@@ -21,7 +21,7 @@ import {createModelContent, createUserContent} from '@google/genai';
 import type {Event as AdkEvent} from '../events/event.js';
 import {createEvent} from '../events/event.js';
 import {createEventActions} from '../events/event_actions.js';
-import {randomUUID} from '../utils/env_aware_utils.js';
+import {newUuid} from '../utils/uuid.js';
 import type {A2AEvent} from './a2a_event.js';
 import {
   getEventMetadata,
@@ -60,7 +60,7 @@ export function toA2AMessage(
 ): Message {
   return {
     kind: 'message',
-    messageId: randomUUID(),
+    messageId: newUuid(),
     role:
       event.author === MessageRole.USER ? MessageRole.USER : MessageRole.AGENT,
     parts: toA2AParts(event.content?.parts || [], event.longRunningToolIds),

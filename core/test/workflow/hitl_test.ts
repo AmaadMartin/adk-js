@@ -4,9 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {resetIdProvider, setIdProvider} from '@google/adk';
 import type {Schema} from '@google/genai';
 import {Type} from '@google/genai';
-import {describe, expect, it} from 'vitest';
+import {afterEach, describe, expect, it} from 'vitest';
 import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
 import {AuthCredentialTypes} from '../../src/auth/auth_credential.js';
@@ -38,6 +39,10 @@ function firstFunctionCall(event: Event) {
 }
 
 describe('RequestInput', () => {
+  afterEach(() => {
+    resetIdProvider();
+  });
+
   it('auto-generates an interrupt id when omitted', () => {
     const ri = new RequestInput();
     expect(typeof ri.interruptId).toBe('string');
@@ -45,6 +50,13 @@ describe('RequestInput', () => {
     expect(ri.payload).toBeUndefined();
     expect(ri.message).toBeUndefined();
     expect(ri.responseSchema).toBeUndefined();
+  });
+
+  it('keeps the interrupt id off the ID provider', () => {
+    setIdProvider(() => 'provider-id');
+
+    // `events/request_input.py` mints this id directly, not through the seam.
+    expect(new RequestInput().interruptId).not.toBe('provider-id');
   });
 
   it('keeps the provided fields', () => {

@@ -8,7 +8,7 @@ import type {FilterQuery, Options as MikroDBOptions} from '@mikro-orm/core';
 import {LockMode, MikroORM} from '@mikro-orm/core';
 
 import type {Event} from '../events/event.js';
-import {randomUUID} from '../utils/env_aware_utils.js';
+import {newUuid} from '../utils/uuid.js';
 import type {
   AppendEventRequest,
   CreateSessionRequest,
@@ -126,7 +126,7 @@ export class DatabaseSessionService extends BaseSessionService {
     await this.init();
     const em = this.orm!.em.fork();
 
-    const id = sessionId || randomUUID();
+    const id = sessionId || newUuid();
     const now = new Date();
     const existing = await em.findOne(StorageSession, {
       id,

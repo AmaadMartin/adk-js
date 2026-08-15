@@ -15,8 +15,10 @@ import {
   createEvent,
   createRunConfig,
   createSession,
+  resetIdProvider,
+  setIdProvider,
 } from '@google/adk';
-import {describe, expect, it} from 'vitest';
+import {afterEach, describe, expect, it} from 'vitest';
 import {newInvocationContextId} from '../../src/agents/invocation_context.js';
 
 function makeSession(): Session {
@@ -318,5 +320,17 @@ describe('InvocationContext session getters', () => {
     expect(id1).toMatch(/^e-/);
     expect(id2).toMatch(/^e-/);
     expect(id1).not.toBe(id2);
+  });
+});
+
+describe('newInvocationContextId', () => {
+  afterEach(() => {
+    resetIdProvider();
+  });
+
+  it('mints the invocation id from the installed provider', () => {
+    setIdProvider(() => 'fixed');
+
+    expect(newInvocationContextId()).toBe('e-fixed');
   });
 });

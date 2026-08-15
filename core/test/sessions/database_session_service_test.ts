@@ -9,6 +9,8 @@ import {
   createEvent,
   createEventActions,
   DatabaseSessionService,
+  resetIdProvider,
+  setIdProvider,
   State,
 } from '@google/adk';
 import {MikroORM} from '@mikro-orm/core';
@@ -68,6 +70,35 @@ describe('DatabaseSessionService', () => {
     expect(session.appName).toBe('test-app');
     expect(session.userId).toBe('test-user');
     expect(session.state['foo']).toBe('bar');
+  });
+
+  describe('with an installed ID provider', () => {
+    afterEach(() => {
+      resetIdProvider();
+    });
+
+    it('mints the session id from the provider', async () => {
+      setIdProvider(() => 'fixed');
+
+      const session = await service.createSession({
+        appName: 'test-app',
+        userId: 'test-user',
+      });
+
+      expect(session.id).toBe('fixed');
+    });
+
+    it('prefers an explicit sessionId over the provider', async () => {
+      setIdProvider(() => 'fixed');
+
+      const session = await service.createSession({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 'explicit-session-id',
+      });
+
+      expect(session.id).toBe('explicit-session-id');
+    });
   });
 
   it('should filter out temporary state keys prefixed with temp: on creation', async () => {

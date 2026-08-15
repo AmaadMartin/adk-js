@@ -10,7 +10,16 @@ import type {
   TaskArtifactUpdateEvent,
   TaskStatusUpdateEvent,
 } from '@a2a-js/sdk';
-import {afterAll, beforeAll, describe, expect, it, vi} from 'vitest';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
 import {
   createInputMissingErrorEvent,
   createTask,
@@ -30,10 +39,14 @@ import {
   isTaskStatusUpdateEvent,
   isTerminalTaskStatusUpdateEvent,
 } from '../../src/a2a/a2a_event.js';
+import {resetIdProvider, setIdProvider} from '../../src/utils/uuid.js';
 
 vi.mock('../../src/utils/env_aware_utils.js', () => ({
   randomUUID: () => 'mock-uuid',
 }));
+
+/** Distinct from the mocked default so the two sources cannot be confused. */
+const PROVIDER_ID = 'provider-id';
 
 describe('a2a_event', () => {
   describe('type guards', () => {
@@ -564,6 +577,67 @@ describe('a2a_event', () => {
       });
 
       expect(event.status.state).toBe('auth-required');
+    });
+  });
+  describe('event creators with an installed ID provider', () => {
+    const message: Message = {
+      kind: 'message',
+      messageId: 'm1',
+      role: 'user',
+      parts: [{kind: 'text', text: 'hello'}],
+    };
+
+    beforeEach(() => {
+      setIdProvider(() => PROVIDER_ID);
+    });
+
+    afterEach(() => {
+      resetIdProvider();
+    });
+
+    it('createTask falls back to the provider', () => {
+      const task = createTask({taskId: '', contextId: 'c1', message});
+
+      expect(task.id).toBe(PROVIDER_ID);
+    });
+
+    it('createTaskArtifactUpdateEvent falls back to the provider', () => {
+      const event = createTaskArtifactUpdateEvent({
+        taskId: 't1',
+        contextId: 'c1',
+      });
+
+      expect(event.artifact.artifactId).toBe(PROVIDER_ID);
+    });
+
+    it('createTaskFailedEvent takes its messageId from the provider', () => {
+      const event = createTaskFailedEvent({
+        taskId: 't1',
+        contextId: 'c1',
+        error: new Error('boom'),
+      });
+
+      expect(event.status.message?.messageId).toBe(PROVIDER_ID);
+    });
+
+    it('createTaskInputRequiredEvent takes its messageId from the provider', () => {
+      const event = createTaskInputRequiredEvent({
+        taskId: 't1',
+        contextId: 'c1',
+        parts: [{kind: 'text', text: 'more input'}],
+      });
+
+      expect(event.status.message?.messageId).toBe(PROVIDER_ID);
+    });
+
+    it('createInputMissingErrorEvent takes its messageId from the provider', () => {
+      const event = createInputMissingErrorEvent({
+        taskId: 't1',
+        contextId: 'c1',
+        parts: [{kind: 'text', text: 'valid input'}],
+      });
+
+      expect(event.status.message?.messageId).toBe(PROVIDER_ID);
     });
   });
 });

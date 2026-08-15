@@ -20,8 +20,8 @@ import type {RunnerConfig} from '../runner/runner.js';
 import {isRunner, Runner} from '../runner/runner.js';
 import type {BaseSessionService} from '../sessions/base_session_service.js';
 import type {Session} from '../sessions/session.js';
-import {randomUUID} from '../utils/env_aware_utils.js';
 import {logger} from '../utils/logger.js';
+import {newUuid} from '../utils/uuid.js';
 import {
   createTask,
   createTaskArtifactUpdateEvent,
@@ -273,7 +273,7 @@ export class A2AAgentExecutor implements AgentExecutor {
     }
 
     const artifactId =
-      this.agentPartialArtifactIdsMap[adkEvent.author!] || randomUUID();
+      this.agentPartialArtifactIdsMap[adkEvent.author!] || newUuid();
 
     const a2aEvent = createTaskArtifactUpdateEvent({
       taskId: executorContext.requestContext.taskId,
