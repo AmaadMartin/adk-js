@@ -149,7 +149,9 @@ describe('mtls_utils cert_provider_command', () => {
     });
   });
 
-  it('prefers the workload certificate over the provider command', async () => {
+  it('prefers the workload certificate when both sources are configured', async () => {
+    const workloadCert = Buffer.from('-----BEGIN CERTIFICATE----- workload');
+    const workloadKey = Buffer.from('-----BEGIN PRIVATE KEY----- workload');
     vi.mocked(readFile).mockImplementation(async (file) => {
       switch (file) {
         case CONFIG_PATH:
@@ -159,16 +161,22 @@ describe('mtls_utils cert_provider_command', () => {
             },
           });
         case '/certs/w.pem':
-          return Buffer.from(LEAF_CERT);
+          return workloadCert;
         case '/certs/w.key':
-          return Buffer.from(PRIVATE_KEY);
+          return workloadKey;
+        case METADATA_PATH:
+          return JSON.stringify({cert_provider_command: PROVIDER_ARGV});
         default:
           throw new Error(`ENOENT: '${file}'`);
       }
     });
+    respondWith(LEAF_CERT + PRIVATE_KEY);
 
-    await expect(createMtlsDispatcher()).resolves.toBeDefined();
+    await createMtlsDispatcher();
 
+    expect(agentCtor).toHaveBeenCalledWith({
+      connect: {cert: workloadCert, key: workloadKey},
+    });
     expect(spawnMock).not.toHaveBeenCalled();
   });
 
