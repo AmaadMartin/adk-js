@@ -33,31 +33,28 @@ export function isInMemoryConnectionString(uri?: string): boolean {
  * An in-memory implementation of the session service.
  */
 export class InMemorySessionService extends BaseSessionService {
+  // Every level of the three maps below is keyed by untrusted input: the app
+  // name, the user id, the session id and state keys all arrive off the
+  // request path or body on a dev server. On a plain object a key of
+  // `__proto__` resolves to the inherited accessor, so a write through it
+  // lands on `Object.prototype` instead of creating an own property. A
+  // null-prototype map has no such accessor, so every level uses one.
+
   /**
    * A map from app name to a map from user ID to a map from session ID to
    * session.
-   *
-   * Null-prototype at every level, as for {@link appState}.
    */
   private sessions: Record<string, Record<string, Record<string, Session>>> =
     Object.create(null);
 
   /**
    * A map from app name to a map from user ID to a map from key to the value.
-   *
-   * Null-prototype at every level, as for {@link appState}.
    */
   private userState: Record<string, Record<string, Record<string, unknown>>> =
     Object.create(null);
 
   /**
    * A map from app name to a map from key to the value.
-   *
-   * Every level is keyed by untrusted input: `appName`, `userId` and state
-   * keys arrive off the request path or body on a dev server. On a plain
-   * object a key of `__proto__` resolves to the inherited accessor, so
-   * `map[appName][userId] = ...` writes onto `Object.prototype` instead of
-   * creating an own property. A null-prototype map has no such accessor.
    */
   private appState: Record<string, Record<string, unknown>> =
     Object.create(null);
@@ -74,15 +71,12 @@ export class InMemorySessionService extends BaseSessionService {
     {app, user}: StateDeltas,
   ): void {
     if (Object.keys(app).length > 0) {
-      this.appState[appName] = this.appState[appName] || Object.create(null);
-      Object.assign(this.appState[appName], app);
+      Object.assign((this.appState[appName] ??= Object.create(null)), app);
     }
 
     if (Object.keys(user).length > 0) {
-      this.userState[appName] = this.userState[appName] || Object.create(null);
-      this.userState[appName][userId] =
-        this.userState[appName][userId] || Object.create(null);
-      Object.assign(this.userState[appName][userId], user);
+      const users = (this.userState[appName] ??= Object.create(null));
+      Object.assign((users[userId] ??= Object.create(null)), user);
     }
   }
 
