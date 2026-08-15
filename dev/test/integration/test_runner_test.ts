@@ -10,11 +10,15 @@ import {
   isBaseLlm,
   isLlmAgent,
   LlmResponse,
+  Runner,
   StreamingMode,
 } from '@google/adk';
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 import {AgentRegistry} from '../../src/integration/agent_registry.js';
-import {YamlAgentConfig} from '../../src/integration/agent_types.js';
+import {
+  AgentClass,
+  YamlAgentConfig,
+} from '../../src/integration/agent_types.js';
 import {IntegrationRegistry} from '../../src/integration/integration_registry.js';
 import {TestRunner} from '../../src/integration/test_runner.js';
 import {Recording, TestInfo} from '../../src/integration/test_types.js';
@@ -24,14 +28,14 @@ const SUB_AGENT_CONFIG_PATH = 'dice_agent/tool_agent.yaml';
 
 function agentConfig(overrides: Partial<YamlAgentConfig>): YamlAgentConfig {
   return {
-    agentClass: 'LlmAgent',
+    agentClass: AgentClass.LlmAgent,
     name: 'dice_agent',
     model: 'gemini-2.0-flash',
     description: 'desc',
     instruction: 'inst',
     isRootAgent: true,
     ...overrides,
-  } as YamlAgentConfig;
+  };
 }
 
 function textResponse(text: string, partial?: boolean): LlmResponse {
@@ -100,6 +104,28 @@ describe('TestRunner', () => {
     ).resolves.toBe(false);
   });
 
+  it('runs the agent in the streaming mode of the goldens', async () => {
+    const registry = new AgentRegistry(new IntegrationRegistry());
+    registry.registerAgentConfig(AGENT_CONFIG_PATH, agentConfig({}));
+    const runAsync = vi.spyOn(Runner.prototype, 'runAsync');
+
+    const recordings: Recording[] = [
+      {
+        userMessageIndex: 0,
+        agentName: 'dice_agent',
+        llmRecording: {llmResponses: [textResponse('I rolled a 4')]},
+      },
+    ];
+
+    const runner = new TestRunner(registry, StreamingMode.SSE);
+    await runner.run(testInfo(recordings, 'roll a die', 'I rolled a 4'), false);
+
+    expect(runAsync.mock.calls[0][0].runConfig).toEqual({
+      streamingMode: StreamingMode.SSE,
+    });
+    runAsync.mockRestore();
+  });
+
   it('fails when the recorded response does not match the golden session', async () => {
     const registry = new AgentRegistry(new IntegrationRegistry());
     registry.registerAgentConfig(AGENT_CONFIG_PATH, agentConfig({}));
@@ -117,6 +143,35 @@ describe('TestRunner', () => {
     await expect(
       runner.run(testInfo(recordings, 'roll a die', 'I rolled a 4'), false),
     ).rejects.toThrow();
+  });
+
+  it('leaves a registered workflow agent alone', async () => {
+    const registry = new AgentRegistry(new IntegrationRegistry());
+    registry.registerAgentConfig(AGENT_CONFIG_PATH, agentConfig({}));
+    registry.registerAgentConfig(
+      SUB_AGENT_CONFIG_PATH,
+      agentConfig({
+        agentClass: AgentClass.SequentialAgent,
+        name: 'workflow_agent',
+        isRootAgent: false,
+      }),
+    );
+    const workflowAgent = registry.getAgent(SUB_AGENT_CONFIG_PATH);
+
+    const recordings: Recording[] = [
+      {
+        userMessageIndex: 0,
+        agentName: 'dice_agent',
+        llmRecording: {llmResponses: [textResponse('I rolled a 4')]},
+      },
+    ];
+
+    const runner = new TestRunner(registry, StreamingMode.NONE);
+
+    await expect(
+      runner.run(testInfo(recordings, 'roll a die', 'I rolled a 4'), false),
+    ).resolves.toBe(false);
+    expect(isLlmAgent(workflowAgent)).toBe(false);
   });
 
   it('gives a replay model to an agent reachable only through an AgentTool', async () => {

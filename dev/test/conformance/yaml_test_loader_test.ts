@@ -186,6 +186,21 @@ describe('batchLoadYamlTestDefs', () => {
     ).rejects.toThrow('File not found');
   });
 
+  it('should throw an error if a golden is not a YAML mapping', async () => {
+    const rootDir = '/root/tests';
+    (fg.stream as unknown as Mock).mockReturnValue([
+      '/root/tests/t1/spec.yaml',
+    ]);
+    (fs.readFile as Mock).mockImplementation(async (filePath: string) => {
+      if (filePath.endsWith('spec.yaml')) return SPEC_YAML;
+      return 'just a string';
+    });
+
+    await expect(
+      batchLoadYamlTestDefs(rootDir, StreamingMode.NONE),
+    ).rejects.toThrow('Session file must be a YAML mapping');
+  });
+
   it('should load the -sse goldens in SSE mode', async () => {
     const rootDir = '/root/tests';
     (fg.stream as unknown as Mock).mockReturnValue([
@@ -216,6 +231,22 @@ describe('batchLoadYamlTestDefs', () => {
       {partial: true, content: {parts: [{text: 'h'}]}},
       {content: {parts: [{text: 'hi'}]}},
     ]);
+  });
+
+  it('should propagate a golden read failure that is not ENOENT', async () => {
+    const rootDir = '/root/tests';
+    (fg.stream as unknown as Mock).mockReturnValue([
+      '/root/tests/t1/spec.yaml',
+    ]);
+
+    (fs.readFile as Mock).mockImplementation(async (filePath: string) => {
+      if (filePath.endsWith('spec.yaml')) return SPEC_YAML;
+      throw Object.assign(new Error('permission denied'), {code: 'EACCES'});
+    });
+
+    await expect(
+      batchLoadYamlTestDefs(rootDir, StreamingMode.NONE),
+    ).rejects.toThrow('permission denied');
   });
 
   it('should skip a test whose goldens for the selected mode are missing', async () => {
