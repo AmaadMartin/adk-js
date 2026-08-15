@@ -8,6 +8,7 @@ import {Part} from '@google/genai';
 
 import {logger} from '../utils/logger.js';
 
+import {hasArtifactContent} from './artifact_content_utils.js';
 import {
   ArtifactVersion,
   BaseArtifactService,
@@ -39,7 +40,7 @@ export class InMemoryArtifactService implements BaseArtifactService {
     artifact,
     customMetadata,
   }: SaveArtifactRequest): Promise<number> {
-    if (!artifact.inlineData && !artifact.text && !artifact.fileData) {
+    if (!hasArtifactContent(artifact)) {
       return Promise.reject(
         new Error('Artifact must have either inlineData or text content.'),
       );
@@ -57,7 +58,7 @@ export class InMemoryArtifactService implements BaseArtifactService {
       customMetadata,
     };
 
-    if (!artifact.inlineData && artifact.text === undefined) {
+    if (!artifact.inlineData && artifact.text == null) {
       const fileData = artifact.fileData!;
 
       metadata.mimeType = fileData.mimeType;
