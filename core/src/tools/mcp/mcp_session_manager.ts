@@ -17,9 +17,13 @@ import type {
   StreamableHTTPClientTransport,
   StreamableHTTPClientTransportOptions,
 } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import type {RequestHandlerExtra} from '@modelcontextprotocol/sdk/shared/protocol.js';
+import type {
+  RequestHandlerExtra,
+  RequestOptions,
+} from '@modelcontextprotocol/sdk/shared/protocol.js';
 import {
   ElicitRequestSchema,
+  ErrorCode,
   type ClientNotification,
   type ClientRequest,
   type ElicitRequest,
@@ -76,6 +80,20 @@ function loadMcpSdk(): Promise<McpSdkModules> {
 }
 
 /**
+ * Reports whether `err` is the MCP SDK's own request-timeout rejection. The
+ * JSON-RPC error code is matched instead of the error class, so the check
+ * still holds when two copies of the SDK share one runtime.
+ */
+function isRequestTimeout(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    'code' in err &&
+    err.code === ErrorCode.RequestTimeout
+  );
+}
+
+/**
  * Defines the parameters for establishing a connection to an MCP server using
  * standard input/output (stdio). This is typically used for running MCP servers
  * as local child processes.
@@ -83,6 +101,15 @@ function loadMcpSdk(): Promise<McpSdkModules> {
 export interface StdioConnectionParams {
   type: 'StdioConnectionParams';
   serverParams: StdioServerParameters;
+  /**
+   * Deadline in milliseconds for each MCP round trip: the `initialize`
+   * handshake, every tool listing, every tool call and every resource read.
+   * The MCP SDK's own request timeout applies when this is unset.
+   *
+   * adk-python expresses the same option in seconds. adk-js keeps
+   * milliseconds, the unit every JavaScript timeout API and the MCP SDK
+   * itself use.
+   */
   timeout?: number;
 }
 
@@ -105,8 +132,28 @@ export interface StreamableHTTPConnectionParams {
    * This field will be ignored if transportOptions is provided even if no headers are specified in transportOptions.
    */
   header?: Record<string, unknown>;
+  /**
+   * Deadline in milliseconds for each MCP round trip: the `initialize`
+   * handshake, every tool listing, every tool call and every resource read.
+   * The MCP SDK's own request timeout applies when this is unset.
+   *
+   * adk-python expresses the same option in seconds. adk-js keeps
+   * milliseconds, the unit every JavaScript timeout API and the MCP SDK
+   * itself use.
+   */
   timeout?: number;
+  /**
+   * @deprecated
+   * Has no effect. The MCP SDK exposes no SSE read deadline, neither on the
+   * transport options nor on the request options, so nothing reads this.
+   * Use `timeout` to bound a round trip.
+   */
   sseReadTimeout?: number;
+  /**
+   * Whether to terminate the server-side session when the client session is
+   * closed. Defaults to true, matching adk-python. Servers that issue no
+   * session id are unaffected, because the transport then sends no request.
+   */
   terminateOnClose?: boolean;
   transportOptions?: StreamableHTTPClientTransportOptions;
 }
@@ -178,7 +225,11 @@ export interface MCPSessionOptions {
  */
 export class MCPSessionManager {
   private readonly connectionParams: MCPConnectionParams;
-  private readonly activeSessions = new Set<Client>();
+  /** Active sessions, each mapped to the transport to terminate on close. */
+  private readonly activeSessions = new Map<
+    Client,
+    StreamableHTTPClientTransport | undefined
+  >();
   private readonly elicitationCallback?: ElicitationCallback;
 
   constructor(
@@ -187,6 +238,51 @@ export class MCPSessionManager {
   ) {
     this.connectionParams = connectionParams;
     this.elicitationCallback = options?.elicitationCallback;
+  }
+
+  /**
+   * The configured deadline in milliseconds, or `undefined` when there is
+   * none. The HTTP+SSE params declare no deadline, so they always report
+   * `undefined`.
+   */
+  private get timeout(): number | undefined {
+    return 'timeout' in this.connectionParams
+      ? this.connectionParams.timeout
+      : undefined;
+  }
+
+  /**
+   * Request options carrying the configured deadline. Empty when none is
+   * configured, which leaves the MCP SDK's own request timeout in force.
+   */
+  private requestOptions(): RequestOptions {
+    const {timeout} = this;
+    return timeout === undefined ? {} : {timeout};
+  }
+
+  /**
+   * Runs one MCP round trip under the configured deadline.
+   *
+   * `call` receives the request options to forward to the client method. When
+   * the deadline expires, the SDK's generic timeout rejection is replaced by
+   * one that names `operation`, keeping the original error as its `cause`.
+   * Every other rejection passes through untouched.
+   */
+  async withTimeout<T>(
+    operation: string,
+    call: (options: RequestOptions) => Promise<T>,
+  ): Promise<T> {
+    const {timeout} = this;
+    try {
+      return await call(this.requestOptions());
+    } catch (err: unknown) {
+      if (timeout !== undefined && isRequestTimeout(err)) {
+        throw new Error(`MCP ${operation} timed out after ${timeout}ms`, {
+          cause: err,
+        });
+      }
+      throw err;
+    }
   }
 
   async createSession(): Promise<Client> {
@@ -204,6 +300,7 @@ export class MCPSessionManager {
           capabilities: {elicitation: {form: {}, url: {}}},
         })
       : new Client(CLIENT_INFO);
+    let transportToTerminate: StreamableHTTPClientTransport | undefined;
 
     try {
       if (this.elicitationCallback) {
@@ -215,7 +312,7 @@ export class MCPSessionManager {
             this.connectionParams.serverParams,
           );
           transport.onerror = logTransportError;
-          await client.connect(transport);
+          await client.connect(transport, this.requestOptions());
           break;
         }
         case 'StreamableHTTPConnectionParams': {
@@ -235,7 +332,11 @@ export class MCPSessionManager {
             options,
           );
           transport.onerror = logTransportError;
-          await client.connect(transport);
+          await client.connect(transport, this.requestOptions());
+
+          if (this.connectionParams.terminateOnClose !== false) {
+            transportToTerminate = transport;
+          }
           break;
         }
         case 'SseConnectionParams': {
@@ -259,18 +360,28 @@ export class MCPSessionManager {
       });
     }
 
-    this.activeSessions.add(client);
+    this.activeSessions.set(client, transportToTerminate);
     return client;
   }
 
   async closeSession(client: Client): Promise<void> {
-    if (this.activeSessions.has(client)) {
-      this.activeSessions.delete(client);
-      await client.close();
+    if (!this.activeSessions.has(client)) return;
+    const transport = this.activeSessions.get(client);
+    this.activeSessions.delete(client);
+
+    if (transport) {
+      try {
+        // Must precede close(), which aborts the signal terminateSession uses.
+        await transport.terminateSession();
+      } catch (err) {
+        logger.warn('Failed to terminate MCP session: ' + formatError(err));
+      }
     }
+
+    await client.close();
   }
 
   getActiveSessions(): Client[] {
-    return Array.from(this.activeSessions);
+    return Array.from(this.activeSessions.keys());
   }
 }
