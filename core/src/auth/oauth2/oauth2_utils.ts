@@ -52,11 +52,6 @@ interface OAuth2TokenResponse {
  */
 const TOKEN_REQUEST_TIMEOUT_MS = 10_000;
 
-/** True for the `TimeoutError` `fetch` raises when an `AbortSignal.timeout` fires. */
-function isTimeoutError(e: unknown): boolean {
-  return e instanceof Error && e.name === 'TimeoutError';
-}
-
 /**
  * Fetches OAuth2 tokens from the endpoint using the given body.
  */
@@ -102,11 +97,13 @@ export async function fetchOAuth2Tokens(
         : undefined,
     };
   } catch (e) {
-    const error = isTimeoutError(e)
-      ? new Error(
-          `OAuth2 token request to '${endpoint}' timed out after ${TOKEN_REQUEST_TIMEOUT_MS}ms`,
-        )
-      : e;
+    // `fetch` raises a `TimeoutError` when the abort signal above fires.
+    const error =
+      e instanceof Error && e.name === 'TimeoutError'
+        ? new Error(
+            `OAuth2 token request to '${endpoint}' timed out after ${TOKEN_REQUEST_TIMEOUT_MS}ms`,
+          )
+        : e;
     logger.error(`Failed to fetch OAuth2 tokens: ${error}`);
     throw error;
   }

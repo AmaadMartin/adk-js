@@ -14,8 +14,6 @@ import {
   MockInstance,
   vi,
 } from 'vitest';
-// The logger singleton is internal (not part of the public API), so it is
-// imported by path.
 import {
   AuthorizationCodeParams,
   ClientCredentialsParams,
