@@ -298,10 +298,17 @@ export function traceCallLlm({
     );
   }
 
-  span.setAttribute(
-    'gcp.vertex.agent.llm_response',
-    shouldAddRequestResponseToSpans() ? safeJsonSerialize(llmResponse) : '{}',
-  );
+  if (shouldAddRequestResponseToSpans()) {
+    const responseForTrace: LlmResponse = llmResponse.content
+      ? {...llmResponse, content: summarizeInlineData(llmResponse.content)}
+      : llmResponse;
+    span.setAttribute(
+      'gcp.vertex.agent.llm_response',
+      safeJsonSerialize(responseForTrace),
+    );
+  } else {
+    span.setAttribute('gcp.vertex.agent.llm_response', '{}');
+  }
 
   if (llmResponse.usageMetadata) {
     span.setAttribute(
@@ -398,6 +405,44 @@ function buildLlmRequestForTrace(
   }));
 
   return result;
+}
+
+/**
+ * Returns `content` with inline binary parts reduced to a description.
+ *
+ * `Blob.data` is a base64 string, so serializing a part copies its payload
+ * verbatim; a live session's audio chunks would otherwise land wholesale on a
+ * span attribute. Only the mime type and byte count are kept.
+ *
+ * @param content The content to summarize.
+ * @returns A copy of `content` whose inline binary parts carry a text
+ *     description instead of the payload.
+ */
+function summarizeInlineData(content: Content): Content {
+  const parts = (content.parts ?? []).map((part) => {
+    const blob = part.inlineData;
+    if (!blob) return part;
+    const size = base64ByteLength(blob.data);
+    return {
+      text: `<inline_data: ${blob.mimeType || 'unknown'}, ${size} bytes>`,
+    };
+  });
+  return {role: content.role, parts};
+}
+
+/**
+ * Returns the number of bytes a base64 payload decodes to.
+ *
+ * Derived from the string length instead of by decoding: the payload can be
+ * megabytes of media, and `Buffer` is unavailable in the browser build.
+ *
+ * @param data The base64-encoded payload, if any.
+ * @returns The decoded size in bytes, or 0 when there is no payload.
+ */
+function base64ByteLength(data?: string): number {
+  if (!data) return 0;
+  const unpadded = data.replace(/=+$/, '').length;
+  return Math.floor((unpadded * 3) / 4);
 }
 
 /**
