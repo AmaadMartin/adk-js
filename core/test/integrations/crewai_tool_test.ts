@@ -4,9 +4,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Context, CrewaiBaseTool, CrewaiTool} from '@google/adk';
-import {Type} from '@google/genai';
+import {
+  Context,
+  CrewaiBaseTool,
+  CrewaiTool,
+  InMemorySessionService,
+  LlmAgent,
+  Runner,
+} from '@google/adk';
+import {FunctionResponse, Type} from '@google/genai';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {ScriptedLlm} from '../workflow/test_helpers.js';
 
 const ARGS_SCHEMA: NonNullable<CrewaiBaseTool['argsSchema']> = {
   type: 'object',
@@ -222,6 +230,64 @@ describe('CrewaiTool', () => {
       await expect(
         tool.runAsync({args: {}, toolContext: emptyContext}),
       ).rejects.toThrow('crewai failure');
+    });
+  });
+
+  describe('in an agent run', () => {
+    it('runs the wrapped tool when the model calls its normalised name', async () => {
+      const queries: string[] = [];
+      const crewaiTool = createCrewaiTool({
+        name: 'Serper Dev Tool',
+        description: 'Search the internet with Serper',
+        run: (args: Record<string, unknown>) => {
+          queries.push(String(args['search_query']));
+          return {results: ['adk-js']};
+        },
+      });
+      const agent = new LlmAgent({
+        name: 'researcher',
+        model: new ScriptedLlm([
+          {
+            functionCall: {
+              name: 'serper_dev_tool',
+              args: {search_query: 'what is adk'},
+            },
+          },
+          {text: 'adk-js'},
+        ]),
+        tools: [new CrewaiTool(crewaiTool, {})],
+      });
+      const sessionService = new InMemorySessionService();
+      const session = await sessionService.createSession({
+        appName: 'crewai_app',
+        userId: 'u1',
+      });
+      const runner = new Runner({
+        appName: 'crewai_app',
+        agent,
+        sessionService,
+      });
+
+      const responses: FunctionResponse[] = [];
+      for await (const event of runner.runAsync({
+        userId: 'u1',
+        sessionId: session.id,
+        newMessage: {role: 'user', parts: [{text: 'what is adk'}]},
+      })) {
+        for (const part of event.content?.parts ?? []) {
+          if (part.functionResponse) {
+            responses.push(part.functionResponse);
+          }
+        }
+      }
+
+      expect(queries).toEqual(['what is adk']);
+      expect(responses).toEqual([
+        expect.objectContaining({
+          name: 'serper_dev_tool',
+          response: {results: ['adk-js']},
+        }),
+      ]);
     });
   });
 });
