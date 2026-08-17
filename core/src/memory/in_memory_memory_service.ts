@@ -8,11 +8,15 @@ import {Event} from '../events/event.js';
 import {Session} from '../sessions/session.js';
 
 import {
+  AddEventsToMemoryRequest,
   BaseMemoryService,
   SearchMemoryRequest,
   SearchMemoryResponse,
 } from './base_memory_service.js';
 import {MemoryEntry} from './memory_entry.js';
+
+/** Bucket used when a delta is added without a session ID. */
+const UNKNOWN_SESSION_ID = '__unknown_session_id__';
 
 /**
  * An in-memory memory service for prototyping purpose only.
@@ -44,6 +48,24 @@ export class InMemoryMemoryService implements BaseMemoryService {
     this.sessionEvents[userKey][session.id] = session.events.filter(
       (event) => (event.content?.parts?.length ?? 0) > 0,
     );
+  }
+
+  async addEventsToMemory(request: AddEventsToMemoryRequest): Promise<void> {
+    const userKey = getUserKey(request.appName, request.userId);
+    const sessionId = request.sessionId || UNKNOWN_SESSION_ID;
+    if (!this.sessionEvents[userKey]) {
+      this.sessionEvents[userKey] = Object.create(null);
+    }
+    const storedEvents = this.sessionEvents[userKey][sessionId] ?? [];
+    const storedIds = new Set(storedEvents.map((event) => event.id));
+    for (const event of request.events) {
+      if (!event.content?.parts?.length || storedIds.has(event.id)) {
+        continue;
+      }
+      storedEvents.push(event);
+      storedIds.add(event.id);
+    }
+    this.sessionEvents[userKey][sessionId] = storedEvents;
   }
 
   async searchMemory(req: SearchMemoryRequest): Promise<SearchMemoryResponse> {

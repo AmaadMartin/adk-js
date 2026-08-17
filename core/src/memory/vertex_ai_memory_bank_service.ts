@@ -21,6 +21,7 @@ import {
   getExpressModeApiKey,
 } from '../utils/vertex_ai_utils.js';
 import {
+  AddEventsToMemoryRequest,
   BaseMemoryService,
   SearchMemoryRequest,
   SearchMemoryResponse,
@@ -167,14 +168,11 @@ export class VertexAiMemoryBankService implements BaseMemoryService {
 
   /**
    * Adds events to Vertex AI Memory Bank via memories.generate.
+   *
+   * `request.sessionId` is accepted for interface conformance and currently
+   * unused, matching adk-python's Memory Bank service.
    */
-  async addEventsToMemory(request: {
-    appName: string;
-    userId: string;
-    events: Event[];
-    sessionId?: string;
-    customMetadata?: Record<string, unknown>;
-  }): Promise<void> {
+  async addEventsToMemory(request: AddEventsToMemoryRequest): Promise<void> {
     await this.addEventsToMemoryFromEvents({
       appName: request.appName,
       userId: request.userId,
