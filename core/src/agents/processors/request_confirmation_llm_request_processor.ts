@@ -5,6 +5,7 @@
  */
 
 import {FunctionCall} from '@google/genai';
+import {isEqual} from 'lodash-es';
 import {
   Event,
   getFunctionCalls,
@@ -120,6 +121,8 @@ export class RequestConfirmationLlmRequestProcessor extends BaseLlmRequestProces
       return;
     }
 
+    const historyCalls = indexFunctionCallsById(events);
+
     // Step 2: Find the system generated FunctionCall event requesting the tool
     // confirmation
     for (let i = confirmationEventIndex - 1; i >= 0; i--) {
@@ -129,37 +132,38 @@ export class RequestConfirmationLlmRequestProcessor extends BaseLlmRequestProces
         continue;
       }
 
-      const toolsToResumeWithConfirmation: {[key: string]: ToolConfirmation} =
-        {};
-      const toolsToResumeWithArgs: {[key: string]: FunctionCall} = {};
+      const candidates = new Map<string, ConfirmationTarget>();
 
       for (const functionCall of functionCalls) {
         if (
+          functionCall.name !== REQUEST_CONFIRMATION_FUNCTION_CALL_NAME ||
           !functionCall.id ||
           !(functionCall.id in requestConfirmationFunctionResponses)
         ) {
           continue;
         }
 
-        const args = functionCall.args;
-        if (!args || !('originalFunctionCall' in args)) {
+        const originalFunctionCall = parseOriginalFunctionCall(
+          functionCall.args?.['originalFunctionCall'],
+        );
+        if (!originalFunctionCall) {
           continue;
         }
-        const originalFunctionCall = args[
-          'originalFunctionCall'
-        ] as FunctionCall;
 
-        if (originalFunctionCall.id) {
-          toolsToResumeWithConfirmation[originalFunctionCall.id] =
-            requestConfirmationFunctionResponses[functionCall.id];
-          toolsToResumeWithArgs[originalFunctionCall.id] = originalFunctionCall;
-        }
+        candidates.set(originalFunctionCall.id, {
+          call: originalFunctionCall,
+          confirmation: requestConfirmationFunctionResponses[functionCall.id],
+        });
       }
-      if (Object.keys(toolsToResumeWithConfirmation).length === 0) {
+      if (candidates.size === 0) {
         continue;
       }
 
       // Step 3: Remove the tools that have already been confirmed AND resumed.
+      // This runs before validation because the processor re-runs on every LLM
+      // step of the turn while the approval stays the last user event: a
+      // consumed confirmation must be dropped rather than re-validated against
+      // state that has already moved on.
       for (let j = events.length - 1; j > confirmationEventIndex; j--) {
         const eventToCheck = events[j];
         const functionResponses = getFunctionResponses(eventToCheck);
@@ -168,17 +172,26 @@ export class RequestConfirmationLlmRequestProcessor extends BaseLlmRequestProces
         }
 
         for (const fr of functionResponses) {
-          if (fr.id && fr.id in toolsToResumeWithConfirmation) {
-            delete toolsToResumeWithConfirmation[fr.id];
-            delete toolsToResumeWithArgs[fr.id];
+          if (fr.id) {
+            candidates.delete(fr.id);
           }
         }
-        if (Object.keys(toolsToResumeWithConfirmation).length === 0) {
+        if (candidates.size === 0) {
           break;
         }
       }
 
-      if (Object.keys(toolsToResumeWithConfirmation).length === 0) {
+      if (candidates.size === 0) {
+        continue;
+      }
+
+      // Step 4: Validate each confirmation against session history.
+      const toolsToResume = resolveConfirmationTargets(
+        candidates,
+        historyCalls,
+        agent.name,
+      );
+      if (toolsToResume.size === 0) {
         continue;
       }
 
@@ -191,12 +204,14 @@ export class RequestConfirmationLlmRequestProcessor extends BaseLlmRequestProces
 
       const functionResponseEvent = await handleFunctionCallList({
         invocationContext: invocationContext,
-        functionCalls: Object.values(toolsToResumeWithArgs),
+        functionCalls: [...toolsToResume.values()].map((target) => target.call),
         toolsDict: toolsDict,
         beforeToolCallbacks: agent.canonicalBeforeToolCallbacks,
         afterToolCallbacks: agent.canonicalAfterToolCallbacks,
-        filters: new Set(Object.keys(toolsToResumeWithConfirmation)),
-        toolConfirmationDict: toolsToResumeWithConfirmation,
+        filters: new Set(toolsToResume.keys()),
+        toolConfirmationDict: Object.fromEntries(
+          [...toolsToResume].map(([id, target]) => [id, target.confirmation]),
+        ),
       });
 
       if (functionResponseEvent) {
@@ -225,6 +240,118 @@ export class RequestConfirmationLlmRequestProcessor extends BaseLlmRequestProces
       return;
     }
   }
+}
+
+/** An `originalFunctionCall` payload proven to carry an id and a name. */
+type OriginalFunctionCall = FunctionCall & {id: string; name: string};
+
+/** A tool call waiting to resume, with the decision the user gave for it. */
+interface ConfirmationTarget {
+  call: FunctionCall;
+  confirmation: ToolConfirmation;
+}
+
+/** A function call recorded in session history, with the author that made it. */
+interface HistoryCall {
+  call: FunctionCall;
+  author?: string;
+}
+
+/** Whether `value` is a plain object rather than an array or a primitive. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Narrows the `originalFunctionCall` payload read off a confirmation call.
+ * The payload is client-supplied, so nothing about its shape is assumed.
+ *
+ * @param value - The raw `originalFunctionCall` entry of the confirmation call.
+ * @returns The payload, or `undefined` when it is absent or malformed.
+ */
+function parseOriginalFunctionCall(
+  value: unknown,
+): OriginalFunctionCall | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const {id, name, args} = value;
+  if (typeof id !== 'string' || !id || typeof name !== 'string' || !name) {
+    return undefined;
+  }
+  if (args !== undefined && !isRecord(args)) {
+    return undefined;
+  }
+  return {id, name, args};
+}
+
+/**
+ * Indexes every function call in the session by its id, so a confirmation can
+ * be checked against the call the model actually issued. Confirmation requests
+ * are excluded: they are never themselves resumable.
+ *
+ * @param events - The session event history.
+ * @returns The last call recorded for each function call id.
+ */
+function indexFunctionCallsById(events: Event[]): Map<string, HistoryCall> {
+  const historyCalls = new Map<string, HistoryCall>();
+  for (const event of events) {
+    for (const call of getFunctionCalls(event)) {
+      if (call.id && call.name !== REQUEST_CONFIRMATION_FUNCTION_CALL_NAME) {
+        historyCalls.set(call.id, {call, author: event.author});
+      }
+    }
+  }
+  return historyCalls;
+}
+
+/**
+ * Validates each pending confirmation against session history and returns the
+ * calls that may resume, keyed by original function call id. A call authored by
+ * another agent is dropped, so that agent's processor resumes it instead.
+ *
+ * @param candidates - Pending confirmations keyed by original function call id.
+ * @param historyCalls - The function calls recorded in the session.
+ * @param agentName - The name of the agent running this processor.
+ * @returns The confirmations that may resume, carrying the historical call.
+ * @throws Error when a payload names a call that is absent from history, or
+ *   describes it differently from the way the model issued it.
+ */
+function resolveConfirmationTargets(
+  candidates: Map<string, ConfirmationTarget>,
+  historyCalls: Map<string, HistoryCall>,
+  agentName: string,
+): Map<string, ConfirmationTarget> {
+  const targets = new Map<string, ConfirmationTarget>();
+  for (const [id, candidate] of candidates) {
+    const historyCall = historyCalls.get(id);
+    if (!historyCall) {
+      throw new Error(
+        `Original function call for ID '${id}' not found in session history.`,
+      );
+    }
+    if (historyCall.author !== agentName) {
+      continue;
+    }
+    if (historyCall.call.name !== candidate.call.name) {
+      throw new Error(
+        `Function call name mismatch for ID '${id}': history has ` +
+          `'${historyCall.call.name}', confirmation has ` +
+          `'${candidate.call.name}'.`,
+      );
+    }
+    // Arguments can carry user data, so the message names only the id.
+    if (!isEqual(historyCall.call.args ?? {}, candidate.call.args ?? {})) {
+      throw new Error(`Function call arguments mismatch for ID '${id}'.`);
+    }
+    // The payload is now proven equal to the historical call on id, name and
+    // args. Resuming the historical one keeps payload-only fields off the tool.
+    targets.set(id, {
+      call: historyCall.call,
+      confirmation: candidate.confirmation,
+    });
+  }
+  return targets;
 }
 
 /** Words interpreted as an approval when a user confirms by plain text. */
