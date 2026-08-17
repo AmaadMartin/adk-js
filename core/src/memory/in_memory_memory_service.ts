@@ -58,7 +58,13 @@ export class InMemoryMemoryService implements BaseMemoryService {
       return Promise.resolve({memories: []});
     }
 
-    const wordsInQuery = extractWordsLower(req.query);
+    const wordsInQuery = [...extractWordsLower(req.query)];
+    // A non-ASCII query word also matches as a substring, because scripts such
+    // as Japanese have no word delimiters and tokenize to one run. Only such a
+    // word reads the lowercased event text, so only then is it built.
+    const substringWords = new Set(
+      wordsInQuery.filter((word) => !isAscii(word)),
+    );
     const scoredMemories: Array<{matchedWords: number; memory: MemoryEntry}> =
       [];
 
@@ -77,18 +83,14 @@ export class InMemoryMemoryService implements BaseMemoryService {
           continue;
         }
 
-        // A non-ASCII query word also matches as a substring, because scripts
-        // such as Japanese have no word delimiters and tokenize to one run.
-        const eventTextLower = joinedText.toLowerCase();
-        let matchedWords = 0;
-        for (const queryWord of wordsInQuery) {
-          if (
-            wordsInEvent.has(queryWord) ||
-            (!isAscii(queryWord) && eventTextLower.includes(queryWord))
-          ) {
-            matchedWords++;
-          }
-        }
+        const eventTextLower = substringWords.size
+          ? joinedText.toLowerCase()
+          : '';
+        const matchedWords = wordsInQuery.filter(
+          (word) =>
+            wordsInEvent.has(word) ||
+            (substringWords.has(word) && eventTextLower.includes(word)),
+        ).length;
         if (matchedWords) {
           scoredMemories.push({
             matchedWords,
