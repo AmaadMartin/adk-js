@@ -59,7 +59,7 @@ export enum OciRole {
 }
 
 /** OCI `ChatContent.type` discriminators. */
-export enum OciContentType {
+enum OciContentType {
   Text = 'TEXT',
   Image = 'IMAGE',
   Audio = 'AUDIO',
@@ -68,14 +68,14 @@ export enum OciContentType {
 }
 
 /** OCI `ResponseFormat.type` discriminators. */
-export enum OciResponseFormatType {
+enum OciResponseFormatType {
   Text = 'TEXT',
   JsonObject = 'JSON_OBJECT',
   JsonSchema = 'JSON_SCHEMA',
 }
 
 /** OCI `ServingMode.servingType` discriminators. */
-export enum OciServingType {
+enum OciServingType {
   OnDemand = 'ON_DEMAND',
   Dedicated = 'DEDICATED',
 }
@@ -191,13 +191,6 @@ interface StreamedToolCall {
   id: string;
   name: string;
   arguments: string;
-}
-
-/** Token counts of a whole response. */
-interface TokenCounts {
-  promptTokens: number;
-  completionTokens: number;
-  reasoningTokens: number;
 }
 
 /**
@@ -676,7 +669,7 @@ export function ociResponseToLlmResponse(
 
   return {
     content: {role: 'model', parts},
-    usageMetadata: toUsageMetadata(toTokenCounts(chatResponse.usage)),
+    usageMetadata: toUsageMetadata(chatResponse.usage),
   };
 }
 
@@ -690,7 +683,7 @@ async function* streamLlmResponses(
 ): AsyncGenerator<LlmResponse, void> {
   const toolCalls = new Map<number, StreamedToolCall>();
   let text = '';
-  let counts = toTokenCounts(undefined);
+  let usage: OciUsage | undefined;
 
   for await (const data of readSseData(stream, abortSignal)) {
     if (data === STREAM_DONE_SENTINEL) {
@@ -698,7 +691,7 @@ async function* streamLlmResponses(
     }
     const chunk = parseStreamChunk(data);
     if (chunk?.usage) {
-      counts = toTokenCounts(chunk.usage);
+      usage = chunk.usage;
       continue;
     }
     const message = chunk?.message;
@@ -722,7 +715,7 @@ async function* streamLlmResponses(
 
   yield {
     content: {role: 'model', parts: streamedParts(text, toolCalls)},
-    usageMetadata: toUsageMetadata(counts),
+    usageMetadata: toUsageMetadata(usage),
     partial: false,
   };
 }
@@ -758,23 +751,17 @@ function streamedParts(
 ): Part[] {
   const parts: Part[] = text ? [{text}] : [];
   for (const call of [...toolCalls.values()].sort(byName)) {
-    parts.push({
-      functionCall: {
-        id: call.id,
-        name: call.name,
-        args: parseJsonObject(call.arguments),
-      },
-    });
+    parts.push(functionCallPart(call));
   }
   return parts;
 }
 
-/** Orders assembled tool calls by name, as adk-python does. */
+/**
+ * Orders assembled tool calls by name. The comparison is on code units, as
+ * adk-python's sort is; `localeCompare` would order them differently.
+ */
 function byName(left: StreamedToolCall, right: StreamedToolCall): number {
-  if (left.name === right.name) {
-    return 0;
-  }
-  return left.name < right.name ? -1 : 1;
+  return left.name < right.name ? -1 : left.name > right.name ? 1 : 0;
 }
 
 /** The value when it really is a list, and an empty list otherwise. */
@@ -871,7 +858,12 @@ function textContent(text: string): models.TextContent {
   return {type: OciContentType.Text, text};
 }
 
-function functionCallPart(call: models.FunctionCall): Part {
+/** Builds a function-call part from a tool call of a response or a stream. */
+function functionCallPart(call: {
+  id?: string;
+  name?: string;
+  arguments?: string;
+}): Part {
   return {
     functionCall: {
       id: call.id,
@@ -881,22 +873,17 @@ function functionCallPart(call: models.FunctionCall): Part {
   };
 }
 
-function toTokenCounts(usage?: OciUsage): TokenCounts {
-  return {
-    promptTokens: usage?.promptTokens ?? 0,
-    completionTokens: usage?.completionTokens ?? 0,
-    reasoningTokens: usage?.completionTokensDetails?.reasoningTokens ?? 0,
-  };
-}
-
 function toUsageMetadata(
-  counts: TokenCounts,
+  usage?: OciUsage,
 ): GenerateContentResponseUsageMetadata {
+  const promptTokens = usage?.promptTokens ?? 0;
+  const completionTokens = usage?.completionTokens ?? 0;
   return {
-    promptTokenCount: counts.promptTokens,
-    candidatesTokenCount: counts.completionTokens,
-    totalTokenCount: counts.promptTokens + counts.completionTokens,
-    thoughtsTokenCount: counts.reasoningTokens || undefined,
+    promptTokenCount: promptTokens,
+    candidatesTokenCount: completionTokens,
+    totalTokenCount: promptTokens + completionTokens,
+    thoughtsTokenCount:
+      usage?.completionTokensDetails?.reasoningTokens || undefined,
   };
 }
 
