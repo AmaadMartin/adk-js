@@ -184,6 +184,22 @@ async function guidepostMuted(): Promise<Harness> {
   return h;
 }
 
+async function guidepostStaysMuted(): Promise<Harness> {
+  const h = new Harness();
+  await h.at(0).start('r1');
+  await h.at(9000).end('r1');
+  await h.at(9000).start('r2');
+  // The guidepost at 10000 is muted, so it does not fire at a later start
+  // either: the next guidepost is 20000.
+  await h.at(10000).start('r3');
+  await h.at(12500).start('r4');
+  await h.at(13000).end('r2');
+  await h.at(14000).end('r3');
+  await h.at(15000).end('r4');
+  expect(h.collects).toEqual([9000, 15000]);
+  return h;
+}
+
 async function inferenceBackstop(): Promise<Harness> {
   const h = new Harness();
   await h.at(0).start('r1');
@@ -227,6 +243,7 @@ const SCENARIOS: Array<[string, () => Promise<Harness>]> = [
   ['guidepost_consumed_by_drain', guidepostConsumedByDrain],
   ['guidepost_fires_at_start', guidepostFiresAtStart],
   ['guidepost_muted', guidepostMuted],
+  ['guidepost_stays_muted', guidepostStaysMuted],
   ['inference_backstop', inferenceBackstop],
   ['short_first_request_not_preempted', shortFirstRequestNotPreempted],
   ['subfloor_skip', subfloorSkip],

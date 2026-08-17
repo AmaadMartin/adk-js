@@ -311,6 +311,7 @@ export class RequestDrivenMetricReader
     }
   }
 
+  /** Collects on demand and flushes the exporter. */
   protected async onForceFlush(): Promise<void> {
     await this.submitCollect();
     await this.exporter.forceFlush();
@@ -337,6 +338,7 @@ export class MetricsFlushingSpanProcessor implements SpanProcessor {
     private readonly operation: string = INFERENCE_SPAN_NAME,
   ) {}
 
+  /** Collects when an inference span starts, if the reader is due one. */
   onStart(span: Span): void {
     // `adk-python` also matches the `gen_ai.operation.name` attribute. ADK JS
     // sets that attribute after the span starts, so the bag is empty here.
@@ -354,6 +356,7 @@ export class MetricsFlushingSpanProcessor implements SpanProcessor {
     }
   }
 
+  /** Nothing to do: the reader is driven by span starts only. */
   onEnd(): void {}
 
   shutdown(): Promise<void> {
