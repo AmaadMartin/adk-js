@@ -21,6 +21,7 @@ import {A2A_SESSION_STATE_CONTEXT_KEY} from '../../src/a2a/remote_agent_config.j
 import {BaseAgent} from '../../src/agents/base_agent.js';
 import {InvocationContext} from '../../src/agents/invocation_context.js';
 import {createEvent} from '../../src/events/event.js';
+import {PluginManager} from '../../src/plugins/plugin_manager.js';
 import {createSession, Session} from '../../src/sessions/session.js';
 
 describe('remote_agent_utils', () => {
@@ -33,8 +34,7 @@ describe('remote_agent_utils', () => {
     invocationId: 'test-invocation-id',
   } as unknown as InvocationContext;
 
-  const sessionCtx = {
-    agent: mockAgent,
+  const sessionCtx = new InvocationContext({
     invocationId: 'test-invocation-id',
     session: createSession({
       id: 'test-session',
@@ -42,7 +42,8 @@ describe('remote_agent_utils', () => {
       userId: 'test-user',
       state: {token: 'secret'},
     }),
-  } as unknown as InvocationContext;
+    pluginManager: new PluginManager(),
+  });
 
   describe('getFunctionResponseCallId', () => {
     it('should return undefined if no content', () => {

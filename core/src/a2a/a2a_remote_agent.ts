@@ -249,7 +249,7 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
       // agent without them keeps today's exact call shape.
       const interceptors = this.a2aConfig.requestInterceptors;
       let sendOptions: RequestOptions | undefined;
-      let requestMetadata: {[key: string]: unknown} | undefined;
+      let requestMetadata: Record<string, unknown> | undefined;
       if (interceptors?.length) {
         const [intercepted, interceptorParams] =
           await runBeforeRequestInterceptors(interceptors, context, message);
