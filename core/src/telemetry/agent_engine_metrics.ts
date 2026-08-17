@@ -142,9 +142,10 @@ export class RequestDrivenMetricReader
   /**
    * Start of the current busy period, stamped when in-flight goes 0 to 1. A
    * collect from a long-past busy period must not make a short request look
-   * overdue, so `overdue15` measures from here.
+   * overdue, so `overdue15` measures from here. Only read while a request is
+   * in flight, which is exactly when it has been stamped.
    */
-  private busyStart?: number;
+  private busyStart: number;
   private collecting = false;
   private nextDue: number;
   private shuttingDown = false;
@@ -175,7 +176,8 @@ export class RequestDrivenMetricReader
         GOOGLE_CLOUD_AGENT_ENGINE_METRICS_COLLECTION_INTERVAL_FLOOR_MS,
         MIN_EXPORT_INTERVAL_MS,
       );
-    this.nextDue = this.now() + this.periodMs;
+    this.busyStart = this.now();
+    this.nextDue = this.busyStart + this.periodMs;
   }
 
   private due(now: number): boolean {
@@ -198,9 +200,6 @@ export class RequestDrivenMetricReader
    * carries the points.
    */
   private overdue15(now: number): boolean {
-    if (this.busyStart === undefined) {
-      return false;
-    }
     const ref = Math.max(this.busyStart, this.lastCollect ?? this.busyStart);
     return now - ref >= OVERDUE_PERIOD_MULTIPLIER * this.periodMs;
   }

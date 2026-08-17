@@ -15,6 +15,10 @@ import {metrics} from '@opentelemetry/api';
 import {ExportResult, ExportResultCode} from '@opentelemetry/core';
 import {Resource, resourceFromAttributes} from '@opentelemetry/resources';
 import {
+  AggregationOption,
+  AggregationTemporality,
+  AggregationType,
+  InstrumentType,
   MeterProvider,
   PushMetricExporter,
   ResourceMetrics,
@@ -54,6 +58,12 @@ class RecordingExporter implements PushMetricExporter {
   async shutdown(): Promise<void> {
     this.shutdownCalls += 1;
   }
+
+  selectAggregationTemporality?: (
+    instrumentType: InstrumentType,
+  ) => AggregationTemporality;
+
+  selectAggregation?: (instrumentType: InstrumentType) => AggregationOption;
 }
 
 /** Drives a reader with a fake clock, recording collects and request windows. */
@@ -332,6 +342,28 @@ describe('RequestDrivenMetricReader floor configuration', () => {
   });
 });
 
+describe('RequestDrivenMetricReader configuration', () => {
+  it('defers temporality and aggregation to the exporter', () => {
+    const exporter = new RecordingExporter(() => 0);
+    const aggregation: AggregationOption = {
+      type: AggregationType.LAST_VALUE,
+    };
+    exporter.selectAggregationTemporality = () => AggregationTemporality.DELTA;
+    exporter.selectAggregation = () => aggregation;
+
+    const reader = new RequestDrivenMetricReader({
+      exporter,
+      exportTimeoutMillis: 1234,
+      now: () => 0,
+    });
+
+    expect(reader.selectAggregationTemporality(InstrumentType.COUNTER)).toBe(
+      AggregationTemporality.DELTA,
+    );
+    expect(reader.selectAggregation(InstrumentType.COUNTER)).toBe(aggregation);
+  });
+});
+
 describe('RequestDrivenMetricReader export', () => {
   it('exports nothing when no instrument has recorded', async () => {
     const exporter = new RecordingExporter(() => 0);
@@ -493,13 +525,12 @@ describe('RequestDrivenMetricReader export', () => {
   });
 
   it('reports a final collect failure on shutdown without rejecting', async () => {
-    const h = new Harness();
-    await h.at(0).start('r1');
-    await h.at(5000).end('r1');
-    // The base reader refuses to collect after its own shutdown, so a second
-    // reader shutdown via the provider makes the final collect throw.
-    await h.meterProvider.shutdown();
-    await expect(h.reader.shutdown()).resolves.toBeUndefined();
+    const exporter = new RecordingExporter(() => 0);
+    // The reader is bound to no MeterProvider, so the final collect throws.
+    const reader = new RequestDrivenMetricReader({exporter, now: () => 0});
+    await expect(reader.shutdown()).resolves.toBeUndefined();
+    expect(exporter.times).toEqual([]);
+    expect(exporter.shutdownCalls).toBe(1);
   });
 });
 
