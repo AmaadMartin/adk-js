@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {LogLevel, setLogLevel} from '@google/adk';
+import {InMemoryMemoryService, LogLevel, setLogLevel} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {createProgram} from '../../src/cli/cli.js';
 import {createAgent} from '../../src/cli/cli_create.js';
@@ -146,6 +146,20 @@ describe('CLI Entrypoint', () => {
       expect(args.artifactService).toBeDefined();
     });
 
+    it('should handle memory service uri', async () => {
+      await parse(['web', '--memory_service_uri', 'memory://']);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.memoryService).toBeInstanceOf(InMemoryMemoryService);
+    });
+
+    it('should default the memory service when no uri is given', async () => {
+      await parse(['web']);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.memoryService).toBeInstanceOf(InMemoryMemoryService);
+    });
+
     it('should start AdkApiServer with a2a: true when --a2a is set', async () => {
       await parse(['web', '--a2a']);
 
@@ -192,6 +206,13 @@ describe('CLI Entrypoint', () => {
 
       const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
       expect(args.a2aAuthToken).toBe('tok');
+    });
+
+    it('should handle memory service uri', async () => {
+      await parse(['api_server', '--memory_service_uri', 'memory://']);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.memoryService).toBeInstanceOf(InMemoryMemoryService);
     });
   });
 
@@ -287,6 +308,13 @@ describe('CLI Entrypoint', () => {
         }),
       );
     });
+
+    it('should handle memory service uri', async () => {
+      await parse(['run', 'agent.ts', '--memory_service_uri', 'memory://']);
+
+      const args = vi.mocked(runAgent).mock.calls[0][0];
+      expect(args.memoryService).toBeInstanceOf(InMemoryMemoryService);
+    });
   });
 
   describe('command: deploy cloud_run', () => {
@@ -368,6 +396,22 @@ describe('CLI Entrypoint', () => {
       // which gcloud would reject.
       expect(args.extraGcloudArgs).toEqual([]);
     });
+
+    it('should pass memoryServiceUri to deployToCloudRun when --memory_service_uri is set', async () => {
+      await parse([
+        'deploy',
+        'cloud_run',
+        './my-agent-path',
+        '--memory_service_uri=agentengine://1234567890',
+      ]);
+
+      const args = (deployToCloudRun as Mock).mock.calls[0][0];
+      expect(args).toMatchObject({
+        memoryServiceUri: 'agentengine://1234567890',
+      });
+      // The flag is recognised here, so it must not also reach gcloud.
+      expect(args.extraGcloudArgs).toEqual([]);
+    });
   });
 
   describe('command: deploy agent_engine', () => {
@@ -433,6 +477,19 @@ describe('CLI Entrypoint', () => {
         agentEngineId: '12345',
       });
     });
+
+    it('should pass memoryServiceUri to deployToAgentEngine when --memory_service_uri is set', async () => {
+      await parse([
+        'deploy',
+        'agent_engine',
+        '--memory_service_uri',
+        'agentengine://1234567890',
+      ]);
+
+      expect((deployToAgentEngine as Mock).mock.calls[0][0]).toMatchObject({
+        memoryServiceUri: 'agentengine://1234567890',
+      });
+    });
   });
 
   describe('command: deploy reasoning_engine', () => {
@@ -453,6 +510,19 @@ describe('CLI Entrypoint', () => {
 
       expect((deployToAgentEngine as Mock).mock.calls[0][0]).toMatchObject({
         agentEngineId: '12345',
+      });
+    });
+
+    it('should pass memoryServiceUri to deployToAgentEngine for reasoning_engine', async () => {
+      await parse([
+        'deploy',
+        'reasoning_engine',
+        '--memory_service_uri',
+        'agentengine://1234567890',
+      ]);
+
+      expect((deployToAgentEngine as Mock).mock.calls[0][0]).toMatchObject({
+        memoryServiceUri: 'agentengine://1234567890',
       });
     });
   });
