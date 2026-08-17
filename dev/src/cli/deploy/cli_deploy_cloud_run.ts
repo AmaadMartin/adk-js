@@ -207,6 +207,7 @@ export async function deployToCloudRun(options: DeployToCloudRunOptions) {
       withUi: options.withUi,
       logLevel: options.logLevel,
       allowOrigins: options.allowOrigins,
+      memoryServiceUri: options.memoryServiceUri,
       otelToCloud: options.otelToCloud,
       a2a: options.a2a,
     });
