@@ -4,18 +4,126 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Part as A2APart} from '@a2a-js/sdk';
+import {Part as A2APart, Message} from '@a2a-js/sdk';
+import {ClientCallContext} from '@a2a-js/sdk/client';
 import {Part as GenAIPart} from '@google/genai';
 import {InvocationContext, requireAgent} from '../agents/invocation_context.js';
 import {Event as AdkEvent, createEvent} from '../events/event.js';
 import {Session} from '../sessions/session.js';
+import {A2AEvent, isMessage} from './a2a_event.js';
 import {AdkMetadataKeys} from './metadata_converter_utils.js';
 import {toA2AParts} from './part_converter_utils.js';
+import {
+  A2A_SESSION_STATE_CONTEXT_KEY,
+  A2ACardRequestInterceptor,
+  A2ARequestInterceptor,
+  A2ARequestParameters,
+} from './remote_agent_config.js';
 
 export interface UserFunctionCall {
   response: AdkEvent;
   taskId: string;
   contextId: string;
+}
+
+/**
+ * Collects the HTTP headers that the card request interceptors contribute.
+ *
+ * @param interceptors - The configured card request interceptors.
+ * @param ctx - The current invocation context. When `undefined`, no
+ *   interceptor runs, because there is no session to derive credentials from.
+ * @returns The merged headers, or `undefined` when no header was contributed.
+ *   Headers merge in list order, so a later interceptor wins a key conflict.
+ */
+export async function runBeforeCardRequestInterceptors(
+  interceptors: A2ACardRequestInterceptor[] | undefined,
+  ctx: InvocationContext | undefined,
+): Promise<Record<string, string> | undefined> {
+  if (!interceptors || !ctx) {
+    return undefined;
+  }
+
+  const headers: Record<string, string> = {};
+  for (const interceptor of interceptors) {
+    if (!interceptor.beforeRequest) {
+      continue;
+    }
+    const config = await interceptor.beforeRequest(ctx);
+    Object.assign(headers, config.headers);
+  }
+
+  return Object.keys(headers).length > 0 ? headers : undefined;
+}
+
+/**
+ * Runs the request interceptors in list order before the request is sent.
+ *
+ * @param interceptors - The configured request interceptors.
+ * @param ctx - The current invocation context.
+ * @param request - The A2A message about to be sent.
+ * @returns The message to send and the accumulated parameters. When an
+ *   interceptor returns an ADK event, that event is returned instead of a
+ *   message and the remaining interceptors do not run.
+ */
+export async function runBeforeRequestInterceptors(
+  interceptors: A2ARequestInterceptor[] | undefined,
+  ctx: InvocationContext,
+  request: Message,
+): Promise<[Message | AdkEvent, A2ARequestParameters]> {
+  let params: A2ARequestParameters = {
+    clientCallContext: ClientCallContext.create(
+      A2A_SESSION_STATE_CONTEXT_KEY.set(ctx.session.state),
+    ),
+  };
+
+  let message = request;
+  for (const interceptor of interceptors ?? []) {
+    if (!interceptor.beforeRequest) {
+      continue;
+    }
+    const [result, nextParams] = await interceptor.beforeRequest(
+      ctx,
+      message,
+      params,
+    );
+    params = nextParams;
+    if (!isMessage(result)) {
+      return [result, params];
+    }
+    message = result;
+  }
+
+  return [message, params];
+}
+
+/**
+ * Runs the request interceptors in reverse list order on a converted event.
+ *
+ * @param interceptors - The configured request interceptors.
+ * @param ctx - The current invocation context.
+ * @param response - The raw A2A response the event was converted from.
+ * @param event - The converted ADK event.
+ * @returns The event to emit, or `undefined` once an interceptor drops it.
+ */
+export async function runAfterRequestInterceptors(
+  interceptors: A2ARequestInterceptor[] | undefined,
+  ctx: InvocationContext,
+  response: A2AEvent,
+  event: AdkEvent,
+): Promise<AdkEvent | undefined> {
+  let current = event;
+  for (const interceptor of [...(interceptors ?? [])].reverse()) {
+    if (!interceptor.afterRequest) {
+      continue;
+    }
+    const result = await interceptor.afterRequest(ctx, response, current);
+    if (!result) {
+      return undefined;
+    }
+    current = result;
+  }
+
+  return current;
 }
 
 /**

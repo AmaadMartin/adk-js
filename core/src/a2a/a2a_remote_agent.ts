@@ -15,22 +15,29 @@ import {
   TaskArtifactUpdateEvent,
   TaskStatusUpdateEvent,
 } from '@a2a-js/sdk';
-import {Client, ClientFactory} from '@a2a-js/sdk/client';
+import {Client, ClientFactory, RequestOptions} from '@a2a-js/sdk/client';
 import {BaseAgent, BaseAgentConfig} from '../agents/base_agent.js';
 import {InvocationContext} from '../agents/invocation_context.js';
 import {Event as AdkEvent, createEvent} from '../events/event.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
 import {logger} from '../utils/logger.js';
-import {MessageRole} from './a2a_event.js';
+import {isMessage, MessageRole} from './a2a_event.js';
 import {A2ARemoteAgentRunProcessor} from './a2a_remote_agent_run_processor.js';
 import {
   getUserFunctionCallAt,
+  runAfterRequestInterceptors,
+  runBeforeCardRequestInterceptors,
+  runBeforeRequestInterceptors,
   toMissingRemoteSessionParts,
 } from './a2a_remote_agent_utils.js';
-import {resolveAgentCard} from './agent_card.js';
+import {isAgentCardUrl, resolveAgentCard} from './agent_card.js';
 import {toAdkEvent} from './event_converter_utils.js';
 import {getA2ASessionMetadata} from './metadata_converter_utils.js';
 import {toA2AParts} from './part_converter_utils.js';
+import {
+  A2ACardRequestInterceptor,
+  A2ARequestInterceptor,
+} from './remote_agent_config.js';
 
 export {AGENT_CARD_PATH};
 
@@ -105,6 +112,14 @@ export interface RemoteA2AAgentConfig extends BaseAgentConfig {
    * Callbacks run after receiving a response chunk or event, before conversion.
    */
   afterRequestCallbacks?: AfterA2ARequestCallback[];
+  /**
+   * Interceptors around the remote agent invocation call.
+   */
+  requestInterceptors?: A2ARequestInterceptor[];
+  /**
+   * Interceptors contributing headers to the agent card fetch.
+   */
+  cardRequestInterceptors?: A2ACardRequestInterceptor[];
 }
 
 /**
@@ -139,18 +154,53 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
       this.card = await resolveAgentCard(this.a2aConfig.agentCard);
 
       if (!this.client) {
-        const factory = this.a2aConfig.clientFactory || new ClientFactory();
-        this.client = await factory.createFromAgentCard(this.card);
+        this.client = await this.createClient(this.card);
       }
     }
 
     this.isInitialized = true;
   }
 
+  private createClient(card: AgentCard): Promise<Client> {
+    const factory = this.a2aConfig.clientFactory || new ClientFactory();
+    return factory.createFromAgentCard(card);
+  }
+
+  /**
+   * Resolves the client and card to use for one invocation.
+   *
+   * @remarks
+   * An authenticated (extended) agent card is scoped to the session that
+   * fetched it, so when card request interceptors are configured against a URL
+   * source the card and client are resolved per invocation and returned as
+   * locals. Caching them would serve one session's card to another.
+   */
+  private async resolveClient(
+    context: InvocationContext,
+  ): Promise<{client: Client; card?: AgentCard}> {
+    const source = this.a2aConfig.agentCard;
+    if (
+      this.a2aConfig.cardRequestInterceptors?.length &&
+      source !== undefined &&
+      isAgentCardUrl(source)
+    ) {
+      const headers = await runBeforeCardRequestInterceptors(
+        this.a2aConfig.cardRequestInterceptors,
+        context,
+      );
+      const card = await resolveAgentCard(source, headers);
+      const client = this.a2aConfig.client ?? (await this.createClient(card));
+      return {client, card};
+    }
+
+    await this.init();
+    return {client: this.client!, card: this.card};
+  }
+
   protected async *runAsyncImpl(
     context: InvocationContext,
   ): AsyncGenerator<AdkEvent, void, void> {
-    await this.init();
+    const {client, card} = await this.resolveClient(context);
 
     try {
       // 1. Convert current ADK state to A2A Message
@@ -181,7 +231,7 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
         contextId = missing.contextId;
       }
 
-      const message: Message = {
+      let message: Message = {
         kind: 'message',
         messageId: randomUUID(),
         role: MessageRole.USER,
@@ -195,10 +245,32 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
       if (taskId) message.taskId = taskId;
       if (contextId) message.contextId = contextId;
 
+      // The whole interceptor block is skipped when none is configured, so an
+      // agent without them keeps today's exact call shape.
+      const interceptors = this.a2aConfig.requestInterceptors;
+      let sendOptions: RequestOptions | undefined;
+      let requestMetadata: {[key: string]: unknown} | undefined;
+      if (interceptors?.length) {
+        const [intercepted, interceptorParams] =
+          await runBeforeRequestInterceptors(interceptors, context, message);
+        if (!isMessage(intercepted)) {
+          yield intercepted;
+          return;
+        }
+        message = intercepted;
+        requestMetadata = interceptorParams.requestMetadata;
+        sendOptions = interceptorParams.clientCallContext
+          ? {context: interceptorParams.clientCallContext}
+          : undefined;
+      }
+
       const params: MessageSendParams = {
         message,
         configuration: this.a2aConfig.messageSendConfig,
       };
+      if (requestMetadata) {
+        params.metadata = requestMetadata;
+      }
 
       const processor = new A2ARemoteAgentRunProcessor(params);
 
@@ -208,11 +280,12 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
         }
       }
 
-      const useStreaming = this.card
-        ? this.card.capabilities?.streaming !== false
-        : true;
+      const useStreaming = card ? card.capabilities?.streaming !== false : true;
       if (useStreaming) {
-        for await (const chunk of this.client!.sendMessageStream(params)) {
+        const stream = sendOptions
+          ? client.sendMessageStream(params, sendOptions)
+          : client.sendMessageStream(params);
+        for await (const chunk of stream) {
           if (this.a2aConfig.afterRequestCallbacks) {
             for (const callback of this.a2aConfig.afterRequestCallbacks) {
               await callback(context, chunk);
@@ -229,19 +302,33 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
             continue;
           }
 
-          processor.updateCustomMetadata(adkEvent, chunk);
+          const finalEvent = interceptors?.length
+            ? await runAfterRequestInterceptors(
+                interceptors,
+                context,
+                chunk,
+                adkEvent,
+              )
+            : adkEvent;
+          if (!finalEvent) {
+            continue;
+          }
+
+          processor.updateCustomMetadata(finalEvent, chunk);
 
           const eventsToEmit = processor.aggregatePartial(
             context,
             chunk,
-            adkEvent,
+            finalEvent,
           );
           for (const ev of eventsToEmit) {
             yield ev;
           }
         }
       } else {
-        const result = await this.client!.sendMessage(params);
+        const result = sendOptions
+          ? await client.sendMessage(params, sendOptions)
+          : await client.sendMessage(params);
         if (this.a2aConfig.afterRequestCallbacks) {
           for (const callback of this.a2aConfig.afterRequestCallbacks) {
             await callback(context, result);
@@ -253,10 +340,24 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
           this.name,
           context.branch,
         );
-        if (adkEvent) {
-          processor.updateCustomMetadata(adkEvent, result);
-          yield adkEvent;
+        if (!adkEvent) {
+          return;
         }
+
+        const finalEvent = interceptors?.length
+          ? await runAfterRequestInterceptors(
+              interceptors,
+              context,
+              result,
+              adkEvent,
+            )
+          : adkEvent;
+        if (!finalEvent) {
+          return;
+        }
+
+        processor.updateCustomMetadata(finalEvent, result);
+        yield finalEvent;
       }
     } catch (e: unknown) {
       const error = e as Error;
