@@ -14,8 +14,6 @@ import {A2AEvent} from './a2a_event.js';
  * Per-call parameters carried alongside an outbound A2A request.
  */
 export interface A2ARequestParameters {
-  /** Metadata sent as `MessageSendParams.metadata`. */
-  requestMetadata?: Record<string, unknown>;
   /** Context handed to the A2A client for this call. */
   clientCallContext?: ClientCallContext;
 }

@@ -470,28 +470,6 @@ describe('A2ARemoteAgent', () => {
       expect(mockResolver.resolve).toHaveBeenCalledTimes(1);
     });
 
-    it('sends the request metadata an interceptor sets', async () => {
-      const agent = new RemoteA2AAgent({
-        name: 'test-agent',
-        agentCard: streamingCard,
-        clientFactory: mockClientFactory,
-        requestInterceptors: [
-          {
-            beforeRequest: async (_ctx, request, params) => [
-              request,
-              {...params, requestMetadata: {tenant: 'acme'}},
-            ],
-          },
-        ],
-      });
-      vi.mocked(mockClient.sendMessageStream).mockReturnValue(streamOf());
-
-      await collect(agent, createMockContext());
-
-      const [params] = vi.mocked(mockClient.sendMessageStream).mock.calls[0];
-      expect(params.metadata).toEqual({tenant: 'acme'});
-    });
-
     it('omits the options argument when no call context survives', async () => {
       const agent = new RemoteA2AAgent({
         name: 'test-agent',
@@ -704,15 +682,21 @@ describe('A2ARemoteAgent', () => {
         author: 'test-agent',
         content: {role: 'model', parts: [{text: 'observed'}]},
       });
+      const substitute: Message = {
+        kind: 'message',
+        messageId: 'substituted',
+        role: 'user',
+        parts: [{kind: 'text', text: 'rewritten'}],
+      };
       const agent = new RemoteA2AAgent({
         name: 'test-agent',
         agentCard: nonStreamingCard,
         clientFactory: mockClientFactory,
         requestInterceptors: [
           {
-            beforeRequest: async (_ctx, request, params) => [
-              request,
-              {...params, requestMetadata: {tenant: 'acme'}},
+            beforeRequest: async (_ctx, _request, params) => [
+              substitute,
+              params,
             ],
             afterRequest: async () => replacement,
           },
@@ -724,7 +708,7 @@ describe('A2ARemoteAgent', () => {
 
       expect(events).toEqual([replacement]);
       const [params, options] = vi.mocked(mockClient.sendMessage).mock.calls[0];
-      expect(params.metadata).toEqual({tenant: 'acme'});
+      expect(params.message).toBe(substitute);
       if (!options?.context) {
         expect.fail('sendMessage got no client call context');
       }

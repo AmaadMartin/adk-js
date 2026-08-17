@@ -5,7 +5,9 @@
  */
 
 import {Message, TextPart} from '@a2a-js/sdk';
+import {ClientCallContext} from '@a2a-js/sdk/client';
 import {describe, expect, it, vi} from 'vitest';
+import {A2A_SESSION_STATE_CONTEXT_KEY} from '../../src/a2a/a2a_remote_agent_config.js';
 import {
   getFunctionResponseCallId,
   getUserFunctionCallAt,
@@ -17,7 +19,6 @@ import {
   toMissingRemoteSessionParts,
 } from '../../src/a2a/a2a_remote_agent_utils.js';
 import {AdkMetadataKeys} from '../../src/a2a/metadata_converter_utils.js';
-import {A2A_SESSION_STATE_CONTEXT_KEY} from '../../src/a2a/remote_agent_config.js';
 import {BaseAgent} from '../../src/agents/base_agent.js';
 import {InvocationContext} from '../../src/agents/invocation_context.js';
 import {createEvent} from '../../src/events/event.js';
@@ -269,19 +270,8 @@ describe('remote_agent_utils', () => {
   describe('runBeforeCardRequestInterceptors', () => {
     it('should return undefined without interceptors', async () => {
       expect(
-        await runBeforeCardRequestInterceptors(undefined, mockCtx),
-      ).toBeUndefined();
-      expect(
         await runBeforeCardRequestInterceptors([], mockCtx),
       ).toBeUndefined();
-    });
-
-    it('should return undefined without a context', async () => {
-      const beforeRequest = vi.fn();
-      expect(
-        await runBeforeCardRequestInterceptors([{beforeRequest}], undefined),
-      ).toBeUndefined();
-      expect(beforeRequest).not.toHaveBeenCalled();
     });
 
     it('should return undefined when no interceptor contributes a header', async () => {
@@ -313,22 +303,24 @@ describe('remote_agent_utils', () => {
     };
 
     it('should return the request and publish session state without interceptors', async () => {
-      for (const interceptors of [undefined, []]) {
-        const [result, params] = await runBeforeRequestInterceptors(
-          interceptors,
-          sessionCtx,
-          request,
-        );
-        expect(result).toBe(request);
-        expect(
-          A2A_SESSION_STATE_CONTEXT_KEY.get(params.clientCallContext!),
-        ).toEqual({token: 'secret'});
+      const [result, params] = await runBeforeRequestInterceptors(
+        [],
+        sessionCtx,
+        request,
+      );
+
+      expect(result).toBe(request);
+      if (!params.clientCallContext) {
+        expect.fail('the params carry no client call context');
       }
+      expect(
+        A2A_SESSION_STATE_CONTEXT_KEY.get(params.clientCallContext),
+      ).toEqual({token: 'secret'});
     });
 
     it('should apply the message and params an interceptor returns', async () => {
       const replacement: Message = {...request, messageId: 'msg-2'};
-      const returnedParams = {requestMetadata: {tenant: 'acme'}};
+      const returnedParams = {clientCallContext: ClientCallContext.create()};
 
       const [result, params] = await runBeforeRequestInterceptors(
         [{beforeRequest: async () => [replacement, returnedParams]}],
@@ -377,16 +369,9 @@ describe('remote_agent_utils', () => {
 
     it('should return the event unchanged without interceptors', async () => {
       const event = createEvent({author: 'test-agent'});
-      for (const interceptors of [undefined, []]) {
-        expect(
-          await runAfterRequestInterceptors(
-            interceptors,
-            sessionCtx,
-            response,
-            event,
-          ),
-        ).toBe(event);
-      }
+      expect(
+        await runAfterRequestInterceptors([], sessionCtx, response, event),
+      ).toBe(event);
     });
 
     it('should run interceptors in reverse list order', async () => {

@@ -22,6 +22,10 @@ import {Event as AdkEvent, createEvent} from '../events/event.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
 import {logger} from '../utils/logger.js';
 import {isMessage, MessageRole} from './a2a_event.js';
+import {
+  A2ACardRequestInterceptor,
+  A2ARequestInterceptor,
+} from './a2a_remote_agent_config.js';
 import {A2ARemoteAgentRunProcessor} from './a2a_remote_agent_run_processor.js';
 import {
   getUserFunctionCallAt,
@@ -34,10 +38,6 @@ import {isAgentCardUrl, resolveAgentCard} from './agent_card.js';
 import {toAdkEvent} from './event_converter_utils.js';
 import {getA2ASessionMetadata} from './metadata_converter_utils.js';
 import {toA2AParts} from './part_converter_utils.js';
-import {
-  A2ACardRequestInterceptor,
-  A2ARequestInterceptor,
-} from './remote_agent_config.js';
 
 export {AGENT_CARD_PATH};
 
@@ -194,7 +194,10 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
     }
 
     await this.init();
-    return {client: this.client!, card: this.card};
+    if (!this.client) {
+      throw new Error('RemoteA2AAgent has no client');
+    }
+    return {client: this.client, card: this.card};
   }
 
   protected async *runAsyncImpl(
@@ -249,7 +252,6 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
       // agent without them keeps today's exact call shape.
       const interceptors = this.a2aConfig.requestInterceptors;
       let sendOptions: RequestOptions | undefined;
-      let requestMetadata: Record<string, unknown> | undefined;
       if (interceptors?.length) {
         const [intercepted, interceptorParams] =
           await runBeforeRequestInterceptors(interceptors, context, message);
@@ -258,7 +260,6 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
           return;
         }
         message = intercepted;
-        requestMetadata = interceptorParams.requestMetadata;
         sendOptions = interceptorParams.clientCallContext
           ? {context: interceptorParams.clientCallContext}
           : undefined;
@@ -268,9 +269,6 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
         message,
         configuration: this.a2aConfig.messageSendConfig,
       };
-      if (requestMetadata) {
-        params.metadata = requestMetadata;
-      }
 
       const processor = new A2ARemoteAgentRunProcessor(params);
 

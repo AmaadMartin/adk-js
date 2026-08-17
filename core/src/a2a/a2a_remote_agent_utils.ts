@@ -11,14 +11,14 @@ import {InvocationContext, requireAgent} from '../agents/invocation_context.js';
 import {Event as AdkEvent, createEvent} from '../events/event.js';
 import {Session} from '../sessions/session.js';
 import {A2AEvent, isMessage} from './a2a_event.js';
-import {AdkMetadataKeys} from './metadata_converter_utils.js';
-import {toA2AParts} from './part_converter_utils.js';
 import {
   A2A_SESSION_STATE_CONTEXT_KEY,
   A2ACardRequestInterceptor,
   A2ARequestInterceptor,
   A2ARequestParameters,
-} from './remote_agent_config.js';
+} from './a2a_remote_agent_config.js';
+import {AdkMetadataKeys} from './metadata_converter_utils.js';
+import {toA2AParts} from './part_converter_utils.js';
 
 export interface UserFunctionCall {
   response: AdkEvent;
@@ -30,19 +30,14 @@ export interface UserFunctionCall {
  * Collects the HTTP headers that the card request interceptors contribute.
  *
  * @param interceptors - The configured card request interceptors.
- * @param ctx - The current invocation context. When `undefined`, no
- *   interceptor runs, because there is no session to derive credentials from.
+ * @param ctx - The current invocation context.
  * @returns The merged headers, or `undefined` when no header was contributed.
  *   Headers merge in list order, so a later interceptor wins a key conflict.
  */
 export async function runBeforeCardRequestInterceptors(
-  interceptors: A2ACardRequestInterceptor[] | undefined,
-  ctx: InvocationContext | undefined,
+  interceptors: A2ACardRequestInterceptor[],
+  ctx: InvocationContext,
 ): Promise<Record<string, string> | undefined> {
-  if (!interceptors || !ctx) {
-    return undefined;
-  }
-
   const headers: Record<string, string> = {};
   for (const interceptor of interceptors) {
     if (!interceptor.beforeRequest) {
@@ -66,7 +61,7 @@ export async function runBeforeCardRequestInterceptors(
  *   message and the remaining interceptors do not run.
  */
 export async function runBeforeRequestInterceptors(
-  interceptors: A2ARequestInterceptor[] | undefined,
+  interceptors: A2ARequestInterceptor[],
   ctx: InvocationContext,
   request: Message,
 ): Promise<[Message | AdkEvent, A2ARequestParameters]> {
@@ -77,7 +72,7 @@ export async function runBeforeRequestInterceptors(
   };
 
   let message = request;
-  for (const interceptor of interceptors ?? []) {
+  for (const interceptor of interceptors) {
     if (!interceptor.beforeRequest) {
       continue;
     }
@@ -106,13 +101,13 @@ export async function runBeforeRequestInterceptors(
  * @returns The event to emit, or `undefined` once an interceptor drops it.
  */
 export async function runAfterRequestInterceptors(
-  interceptors: A2ARequestInterceptor[] | undefined,
+  interceptors: A2ARequestInterceptor[],
   ctx: InvocationContext,
   response: A2AEvent,
   event: AdkEvent,
 ): Promise<AdkEvent | undefined> {
   let current = event;
-  for (const interceptor of [...(interceptors ?? [])].reverse()) {
+  for (const interceptor of [...interceptors].reverse()) {
     if (!interceptor.afterRequest) {
       continue;
     }
