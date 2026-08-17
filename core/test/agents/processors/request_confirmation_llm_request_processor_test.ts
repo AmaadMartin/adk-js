@@ -12,6 +12,7 @@ import {
   LlmAgent,
   PluginManager,
   REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
+  ToolConfirmation,
   createEvent,
   createSession,
 } from '@google/adk';
@@ -65,6 +66,53 @@ function createOriginalCallEvent(
     author,
     content: {role: 'model', parts: [{functionCall}]},
   });
+}
+
+/** The engine-emitted confirmation request carrying an arbitrary payload. */
+function createConfirmationRequestEvent(
+  confirmId: string,
+  originalFunctionCall: unknown,
+  name: string = REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
+) {
+  return createEvent({
+    invocationId: 'test-invocation',
+    author: 'test_agent',
+    content: {
+      role: 'model',
+      parts: [
+        {functionCall: {id: confirmId, name, args: {originalFunctionCall}}},
+      ],
+    },
+  });
+}
+
+/** A structured user approval addressed to `confirmId`. */
+function createUserApprovalEvent(confirmId: string) {
+  return createEvent({
+    invocationId: 'test-invocation',
+    author: 'user',
+    content: {
+      role: 'user',
+      parts: [
+        {
+          functionResponse: {
+            id: confirmId,
+            name: REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
+            response: {confirmed: true, hint: 'ok'},
+          },
+        },
+      ],
+    },
+  });
+}
+
+/** The mocked `handleFunctionCallList`, with its previous calls forgotten. */
+async function freshMockFunctionCallList() {
+  const {handleFunctionCallList} =
+    await import('../../../src/agents/functions.js');
+  const mockFunctionCallList = vi.mocked(handleFunctionCallList);
+  mockFunctionCallList.mockClear();
+  return mockFunctionCallList;
 }
 
 async function collectEvents(invocationContext: InvocationContext) {
@@ -491,5 +539,295 @@ describe('RequestConfirmationLlmRequestProcessor', () => {
     // Since the original tool was already resumed, processor yields nothing
     const events = await collectEvents(invocationContext);
     expect(events).toHaveLength(0);
+  });
+
+  it('throws when the original function call is not in session history', async () => {
+    const mockFunctionCallList = await freshMockFunctionCallList();
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: 'gemini-2.5-flash',
+    });
+
+    const invocationContext = createMockInvocationContext(agent, [
+      createConfirmationRequestEvent('fc-confirm-5', {
+        id: 'orig-missing',
+        name: 'my_tool',
+        args: {param: 'value'},
+      }),
+      createUserApprovalEvent('fc-confirm-5'),
+    ]);
+
+    await expect(collectEvents(invocationContext)).rejects.toThrow(
+      /Original function call for ID 'orig-missing' not found in session history/,
+    );
+    expect(mockFunctionCallList).not.toHaveBeenCalled();
+  });
+
+  it('throws when the confirmation payload names a different tool', async () => {
+    const mockFunctionCallList = await freshMockFunctionCallList();
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: 'gemini-2.5-flash',
+    });
+
+    const invocationContext = createMockInvocationContext(agent, [
+      createOriginalCallEvent({
+        id: 'orig-6',
+        name: 'my_tool',
+        args: {param: 'value'},
+      }),
+      createConfirmationRequestEvent('fc-confirm-6', {
+        id: 'orig-6',
+        name: 'other_tool',
+        args: {param: 'value'},
+      }),
+      createUserApprovalEvent('fc-confirm-6'),
+    ]);
+
+    await expect(collectEvents(invocationContext)).rejects.toThrow(
+      /Function call name mismatch for ID 'orig-6'/,
+    );
+    expect(mockFunctionCallList).not.toHaveBeenCalled();
+  });
+
+  it('throws when the confirmation payload carries different arguments', async () => {
+    const mockFunctionCallList = await freshMockFunctionCallList();
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: 'gemini-2.5-flash',
+    });
+
+    const invocationContext = createMockInvocationContext(agent, [
+      createOriginalCallEvent({
+        id: 'orig-7',
+        name: 'my_tool',
+        args: {param: 'value'},
+      }),
+      createConfirmationRequestEvent('fc-confirm-7', {
+        id: 'orig-7',
+        name: 'my_tool',
+        args: {param: 'tampered'},
+      }),
+      createUserApprovalEvent('fc-confirm-7'),
+    ]);
+
+    await expect(collectEvents(invocationContext)).rejects.toThrow(
+      /Function call arguments mismatch for ID 'orig-7'/,
+    );
+    expect(mockFunctionCallList).not.toHaveBeenCalled();
+  });
+
+  it('does not resume a call authored by another agent', async () => {
+    const mockFunctionCallList = await freshMockFunctionCallList();
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: 'gemini-2.5-flash',
+    });
+    const originalFunctionCall = {
+      id: 'orig-8',
+      name: 'my_tool',
+      args: {param: 'value'},
+    };
+
+    const invocationContext = createMockInvocationContext(agent, [
+      createOriginalCallEvent(originalFunctionCall, 'other_agent'),
+      createConfirmationRequestEvent('fc-confirm-8', originalFunctionCall),
+      createUserApprovalEvent('fc-confirm-8'),
+    ]);
+
+    const events = await collectEvents(invocationContext);
+
+    expect(events).toHaveLength(0);
+    expect(mockFunctionCallList).not.toHaveBeenCalled();
+  });
+
+  it('ignores a confirmation-shaped call that is not adk_request_confirmation', async () => {
+    const mockFunctionCallList = await freshMockFunctionCallList();
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: 'gemini-2.5-flash',
+    });
+    const originalFunctionCall = {
+      id: 'orig-9',
+      name: 'my_tool',
+      args: {param: 'value'},
+    };
+
+    const invocationContext = createMockInvocationContext(agent, [
+      createOriginalCallEvent(originalFunctionCall),
+      createConfirmationRequestEvent(
+        'fc-confirm-9',
+        originalFunctionCall,
+        'some_other_tool',
+      ),
+      createUserApprovalEvent('fc-confirm-9'),
+    ]);
+
+    const events = await collectEvents(invocationContext);
+
+    expect(events).toHaveLength(0);
+    expect(mockFunctionCallList).not.toHaveBeenCalled();
+  });
+
+  it('resumes a confirmation whose payload matches history', async () => {
+    const mockFunctionCallList = await freshMockFunctionCallList();
+    const fakeResponseEvent = createEvent({
+      invocationId: 'test-invocation',
+      author: 'test_agent',
+      content: {
+        role: 'model',
+        parts: [
+          {
+            functionResponse: {
+              id: 'orig-10',
+              name: 'my_tool',
+              response: {result: 'ok'},
+            },
+          },
+        ],
+      },
+    });
+    mockFunctionCallList.mockResolvedValueOnce(fakeResponseEvent);
+
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: 'gemini-2.5-flash',
+    });
+    vi.spyOn(agent, 'canonicalTools').mockResolvedValue([]);
+    const originalFunctionCall = {
+      id: 'orig-10',
+      name: 'my_tool',
+      args: {param: 'value'},
+    };
+
+    const invocationContext = createMockInvocationContext(agent, [
+      createOriginalCallEvent(originalFunctionCall),
+      createConfirmationRequestEvent('fc-confirm-10', originalFunctionCall),
+      createUserApprovalEvent('fc-confirm-10'),
+    ]);
+
+    const events = await collectEvents(invocationContext);
+
+    expect(events).toEqual([fakeResponseEvent]);
+    expect(mockFunctionCallList).toHaveBeenCalledTimes(1);
+    const resumed = mockFunctionCallList.mock.calls[0][0];
+    expect(resumed.functionCalls).toEqual([originalFunctionCall]);
+    expect(resumed.filters).toEqual(new Set(['orig-10']));
+    expect(resumed.toolConfirmationDict).toEqual({
+      'orig-10': new ToolConfirmation({confirmed: true, hint: 'ok'}),
+    });
+  });
+
+  it('compares arguments by value rather than by key order', async () => {
+    const mockFunctionCallList = await freshMockFunctionCallList();
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: 'gemini-2.5-flash',
+    });
+    vi.spyOn(agent, 'canonicalTools').mockResolvedValue([]);
+
+    const invocationContext = createMockInvocationContext(agent, [
+      createOriginalCallEvent({
+        id: 'orig-11',
+        name: 'my_tool',
+        args: {a: 1, b: 2},
+      }),
+      createConfirmationRequestEvent('fc-confirm-11', {
+        id: 'orig-11',
+        name: 'my_tool',
+        args: {b: 2, a: 1},
+      }),
+      createUserApprovalEvent('fc-confirm-11'),
+    ]);
+
+    await collectEvents(invocationContext);
+
+    expect(mockFunctionCallList).toHaveBeenCalledTimes(1);
+    expect(mockFunctionCallList.mock.calls[0][0].functionCalls).toEqual([
+      {id: 'orig-11', name: 'my_tool', args: {a: 1, b: 2}},
+    ]);
+  });
+
+  it('resumes a call that was recorded without arguments', async () => {
+    const mockFunctionCallList = await freshMockFunctionCallList();
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: 'gemini-2.5-flash',
+    });
+    vi.spyOn(agent, 'canonicalTools').mockResolvedValue([]);
+    const originalFunctionCall = {id: 'orig-15', name: 'my_tool'};
+
+    const invocationContext = createMockInvocationContext(agent, [
+      createOriginalCallEvent(originalFunctionCall),
+      createConfirmationRequestEvent('fc-confirm-15', originalFunctionCall),
+      createUserApprovalEvent('fc-confirm-15'),
+    ]);
+
+    await collectEvents(invocationContext);
+
+    expect(mockFunctionCallList).toHaveBeenCalledTimes(1);
+    expect(mockFunctionCallList.mock.calls[0][0].functionCalls).toEqual([
+      originalFunctionCall,
+    ]);
+  });
+
+  it('ignores a payload whose id or name is missing', async () => {
+    const mockFunctionCallList = await freshMockFunctionCallList();
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: 'gemini-2.5-flash',
+    });
+
+    const invocationContext = createMockInvocationContext(agent, [
+      createConfirmationRequestEvent('fc-confirm-12', {
+        args: {param: 'value'},
+      }),
+      createUserApprovalEvent('fc-confirm-12'),
+    ]);
+
+    const events = await collectEvents(invocationContext);
+
+    expect(events).toHaveLength(0);
+    expect(mockFunctionCallList).not.toHaveBeenCalled();
+  });
+
+  it('ignores a payload that is not an object', async () => {
+    const mockFunctionCallList = await freshMockFunctionCallList();
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: 'gemini-2.5-flash',
+    });
+
+    for (const payload of [null, 'orig-13']) {
+      const invocationContext = createMockInvocationContext(agent, [
+        createConfirmationRequestEvent('fc-confirm-13', payload),
+        createUserApprovalEvent('fc-confirm-13'),
+      ]);
+
+      expect(await collectEvents(invocationContext)).toHaveLength(0);
+    }
+    expect(mockFunctionCallList).not.toHaveBeenCalled();
+  });
+
+  it('ignores a payload whose args are not an object', async () => {
+    const mockFunctionCallList = await freshMockFunctionCallList();
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: 'gemini-2.5-flash',
+    });
+
+    const invocationContext = createMockInvocationContext(agent, [
+      createConfirmationRequestEvent('fc-confirm-14', {
+        id: 'orig-14',
+        name: 'my_tool',
+        args: ['param'],
+      }),
+      createUserApprovalEvent('fc-confirm-14'),
+    ]);
+
+    const events = await collectEvents(invocationContext);
+
+    expect(events).toHaveLength(0);
+    expect(mockFunctionCallList).not.toHaveBeenCalled();
   });
 });
