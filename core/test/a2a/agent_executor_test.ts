@@ -4,7 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {TaskStatusUpdateEvent, TextPart} from '@a2a-js/sdk';
+import {
+  TaskArtifactUpdateEvent,
+  TaskStatusUpdateEvent,
+  TextPart,
+} from '@a2a-js/sdk';
 import {ExecutionEventBus, RequestContext} from '@a2a-js/sdk/server';
 import {
   A2AAgentExecutor,
@@ -12,6 +16,8 @@ import {
   BaseSessionService,
   createEvent,
   createEventActions,
+  createSession,
+  ExecutorContext,
   Runner,
   RunnerConfig,
   Session,
@@ -276,5 +282,528 @@ describe('A2AAgentExecutor', () => {
     await expect(executor.cancelTask('any-task-id')).rejects.toThrow(
       'Task cancellation is not supported yet.',
     );
+  });
+
+  describe('converter slots and execute interceptors', () => {
+    /**
+     * Installs a mocked runner yielding `adkEvents`, then failing with `error`
+     * if one is given. Returns the `runAsync` spy so a test can assert what the
+     * executor passed to it. The module-level `vi.mock` above replaces the
+     * `Runner` class, so the stand-in it returns cannot be a real instance.
+     */
+    const mockRunnerYielding = (adkEvents: AdkEvent[], error?: Error) => {
+      const runAsync = vi.fn(async function* () {
+        for (const adkEvent of adkEvents) {
+          yield adkEvent;
+        }
+        if (error) {
+          throw error;
+        }
+      });
+
+      vi.mocked(Runner).mockImplementation(((config: RunnerConfig) => {
+        return {
+          appName: config?.appName,
+          sessionService: config?.sessionService,
+          runAsync,
+        } as unknown as Runner;
+      }) as unknown as () => Runner);
+
+      return runAsync;
+    };
+
+    const runnerConfig = (): RunnerConfig => ({
+      appName: 'test-app',
+      sessionService: mockSessionService,
+    });
+
+    const modelEvent = (text: string, partial: boolean) =>
+      createEvent({
+        invocationId: 'inv1',
+        author: 'model',
+        content: {role: 'model', parts: [{text}]},
+        partial,
+        actions: createEventActions(),
+      });
+
+    const publishedEvents = () =>
+      mockEventBus.publish.mock.calls.map(([event]) => event);
+
+    beforeEach(() => {
+      mockSessionService.getSession.mockResolvedValue(
+        createSession({
+          id: 'session-id',
+          userId: 'test-user',
+          appName: 'test-app',
+        }),
+      );
+    });
+
+    it('publishes the same event sequence as before when no config is supplied', async () => {
+      mockRunnerYielding([
+        modelEvent('response part 1', true),
+        modelEvent('response part 2', false),
+      ]);
+      const executor = new A2AAgentExecutor({runner: runnerConfig()});
+
+      await executor.execute(createRequestContext(), mockEventBus);
+
+      const events = publishedEvents();
+      expect(events.map((event) => event.kind)).toEqual([
+        'task',
+        'status-update',
+        'artifact-update',
+        'artifact-update',
+        'status-update',
+      ]);
+      const [task, working, first, second, final] = events;
+      expect(task).toMatchObject({
+        id: 'test-task',
+        contextId: 'test-context',
+        status: {state: 'submitted'},
+      });
+      expect(working).toMatchObject({
+        taskId: 'test-task',
+        final: false,
+        status: {state: 'working'},
+      });
+      expect(first).toMatchObject({
+        taskId: 'test-task',
+        contextId: 'test-context',
+        append: true,
+        lastChunk: false,
+        artifact: {parts: [{kind: 'text', text: 'response part 1'}]},
+        metadata: {
+          'adk_app_name': 'test-app',
+          'adk_user_id': 'test-user',
+          'adk_session_id': 'session-id',
+          'adk_invocation_id': 'inv1',
+          'adk_author': 'model',
+          'adk_partial': true,
+          'adk_is_long_running': false,
+        },
+      });
+      expect(second).toMatchObject({
+        append: false,
+        lastChunk: true,
+        artifact: {parts: [{kind: 'text', text: 'response part 2'}]},
+        metadata: {'adk_partial': false},
+      });
+      // Both chunks belong to one streamed artifact.
+      const firstArtifactId = (first as TaskArtifactUpdateEvent).artifact
+        .artifactId;
+      expect((second as TaskArtifactUpdateEvent).artifact.artifactId).toBe(
+        firstArtifactId,
+      );
+      expect(final).toMatchObject({
+        taskId: 'test-task',
+        final: true,
+        status: {state: 'completed'},
+      });
+    });
+
+    it('uses a custom requestConverter for the session and the runner call', async () => {
+      const runAsync = mockRunnerYielding([]);
+      const executor = new A2AAgentExecutor({
+        runner: runnerConfig(),
+        requestConverter: () => ({
+          userId: 'custom-user',
+          sessionId: 'custom-session',
+          newMessage: {role: 'user', parts: [{text: 'custom message'}]},
+        }),
+      });
+
+      await executor.execute(createRequestContext(), mockEventBus);
+
+      expect(mockSessionService.getSession).toHaveBeenCalledWith({
+        appName: 'test-app',
+        userId: 'custom-user',
+        sessionId: 'custom-session',
+      });
+      expect(runAsync).toHaveBeenCalledWith({
+        userId: 'custom-user',
+        sessionId: 'custom-session',
+        newMessage: {role: 'user', parts: [{text: 'custom message'}]},
+        runConfig: undefined,
+      });
+    });
+
+    it('uses a custom a2aPartConverter for the content sent to the runner', async () => {
+      const runAsync = mockRunnerYielding([]);
+      const executor = new A2AAgentExecutor({
+        runner: runnerConfig(),
+        a2aPartConverter: (a2aPart) => ({text: `converted:${a2aPart.kind}`}),
+      });
+
+      await executor.execute(createRequestContext(), mockEventBus);
+
+      expect(runAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          newMessage: {role: 'user', parts: [{text: 'converted:text'}]},
+        }),
+      );
+    });
+
+    it('uses a custom genAIPartConverter for the published artifact parts', async () => {
+      mockRunnerYielding([modelEvent('response', false)]);
+      const executor = new A2AAgentExecutor({
+        runner: runnerConfig(),
+        genAIPartConverter: (part) => ({
+          kind: 'text',
+          text: `converted:${part.text}`,
+        }),
+      });
+
+      await executor.execute(createRequestContext(), mockEventBus);
+
+      expect(publishedEvents()[2]).toMatchObject({
+        kind: 'artifact-update',
+        artifact: {parts: [{kind: 'text', text: 'converted:response'}]},
+      });
+    });
+
+    it('uses a custom eventConverter for the published event', async () => {
+      mockRunnerYielding([modelEvent('response', false)]);
+      const executor = new A2AAgentExecutor({
+        runner: runnerConfig(),
+        eventConverter: (adkEvent, executorContext) => ({
+          kind: 'artifact-update',
+          taskId: executorContext.requestContext.taskId,
+          contextId: executorContext.requestContext.contextId,
+          artifact: {
+            artifactId: 'converter-artifact',
+            parts: [{kind: 'text', text: `converted:${adkEvent.author}`}],
+          },
+        }),
+      });
+
+      await executor.execute(createRequestContext(), mockEventBus);
+
+      expect(publishedEvents()[2]).toEqual({
+        kind: 'artifact-update',
+        taskId: 'test-task',
+        contextId: 'test-context',
+        artifact: {
+          artifactId: 'converter-artifact',
+          parts: [{kind: 'text', text: 'converted:model'}],
+        },
+      });
+    });
+
+    it('skips the ADK event when a custom eventConverter returns undefined', async () => {
+      mockRunnerYielding([modelEvent('response', false)]);
+      const executor = new A2AAgentExecutor({
+        runner: runnerConfig(),
+        eventConverter: () => undefined,
+      });
+
+      await executor.execute(createRequestContext(), mockEventBus);
+
+      expect(publishedEvents().map((event) => event.kind)).toEqual([
+        'task',
+        'status-update',
+        'status-update',
+      ]);
+    });
+
+    it('runs each hook once at its own point in the execution', async () => {
+      mockRunnerYielding([modelEvent('response', false)]);
+      const calls: string[] = [];
+      const ctx = createRequestContext();
+
+      const executor = new A2AAgentExecutor({
+        runner: runnerConfig(),
+        executeInterceptors: [
+          {
+            beforeAgent: async (requestContext) => {
+              calls.push(`beforeAgent:${requestContext.taskId}`);
+              return requestContext;
+            },
+            afterEvent: async (_executorContext, a2aEvent, adkEvent) => {
+              calls.push(`afterEvent:${a2aEvent.kind}:${adkEvent.author}`);
+              return a2aEvent;
+            },
+            afterAgent: async (_executorContext, finalEvent) => {
+              calls.push(`afterAgent:${finalEvent.status.state}`);
+              return finalEvent;
+            },
+          },
+        ],
+      });
+
+      await executor.execute(ctx, mockEventBus);
+
+      expect(calls).toEqual([
+        'beforeAgent:test-task',
+        'afterEvent:artifact-update:model',
+        'afterAgent:completed',
+      ]);
+    });
+
+    it('runs the rest of the execution against the context beforeAgent returned', async () => {
+      const runAsync = mockRunnerYielding([]);
+      const executor = new A2AAgentExecutor({
+        runner: runnerConfig(),
+        executeInterceptors: [
+          {
+            beforeAgent: async () =>
+              createRequestContext({
+                contextId: 'replaced-context',
+                taskId: 'replaced-task',
+                userMessage: {
+                  kind: 'message',
+                  messageId: 'replaced-message',
+                  role: 'user',
+                  parts: [{kind: 'text', text: 'replaced'}],
+                },
+              }),
+          },
+        ],
+      });
+
+      await executor.execute(createRequestContext(), mockEventBus);
+
+      expect(runAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'A2A_USER_replaced-context',
+          sessionId: 'replaced-context',
+          newMessage: {
+            role: 'user',
+            parts: [{text: 'replaced', thought: false}],
+          },
+        }),
+      );
+      expect(publishedEvents()[0]).toMatchObject({
+        kind: 'task',
+        id: 'replaced-task',
+        contextId: 'replaced-context',
+      });
+    });
+
+    it('rejects and publishes nothing when beforeAgent throws', async () => {
+      mockRunnerYielding([modelEvent('response', false)]);
+      const executor = new A2AAgentExecutor({
+        runner: runnerConfig(),
+        executeInterceptors: [
+          {
+            beforeAgent: async () => {
+              throw new Error('interceptor rejected the request');
+            },
+          },
+        ],
+      });
+
+      await expect(
+        executor.execute(createRequestContext(), mockEventBus),
+      ).rejects.toThrow('interceptor rejected the request');
+      expect(mockEventBus.publish).not.toHaveBeenCalled();
+    });
+
+    it('throws when beforeAgent removes the user message', async () => {
+      mockRunnerYielding([]);
+      const executor = new A2AAgentExecutor({
+        runner: runnerConfig(),
+        executeInterceptors: [
+          {
+            beforeAgent: async () =>
+              createRequestContext({userMessage: undefined}),
+          },
+        ],
+      });
+
+      await expect(
+        executor.execute(createRequestContext(), mockEventBus),
+      ).rejects.toThrow('message not provided');
+      expect(mockEventBus.publish).not.toHaveBeenCalled();
+    });
+
+    it('does not publish an event that afterEvent drops', async () => {
+      mockRunnerYielding([modelEvent('response', false)]);
+      const executor = new A2AAgentExecutor({
+        runner: runnerConfig(),
+        executeInterceptors: [{afterEvent: async () => undefined}],
+      });
+
+      await executor.execute(createRequestContext(), mockEventBus);
+
+      expect(publishedEvents().map((event) => event.kind)).toEqual([
+        'task',
+        'status-update',
+        'status-update',
+      ]);
+    });
+
+    it('publishes every event afterEvent fans out, in order', async () => {
+      mockRunnerYielding([modelEvent('response', false)]);
+      const executor = new A2AAgentExecutor({
+        runner: runnerConfig(),
+        executeInterceptors: [
+          {
+            afterEvent: async (_executorContext, a2aEvent) => [
+              a2aEvent,
+              {
+                kind: 'artifact-update',
+                taskId: 'test-task',
+                contextId: 'test-context',
+                artifact: {
+                  artifactId: 'audit-artifact',
+                  parts: [{kind: 'text', text: 'audit'}],
+                },
+              },
+            ],
+          },
+        ],
+      });
+
+      await executor.execute(createRequestContext(), mockEventBus);
+
+      const events = publishedEvents();
+      expect(events.map((event) => event.kind)).toEqual([
+        'task',
+        'status-update',
+        'artifact-update',
+        'artifact-update',
+        'status-update',
+      ]);
+      expect(events[3]).toMatchObject({
+        artifact: {artifactId: 'audit-artifact'},
+      });
+    });
+
+    it('publishes the terminal event that the reversed afterAgent chain returns', async () => {
+      mockRunnerYielding([]);
+      const seen: string[] = [];
+      const stamp = (name: string) => ({
+        afterAgent: async (
+          _executorContext: ExecutorContext,
+          finalEvent: TaskStatusUpdateEvent,
+        ) => {
+          seen.push(`${name}:${finalEvent.metadata?.['stamp'] ?? 'none'}`);
+          return {
+            ...finalEvent,
+            metadata: {...finalEvent.metadata, stamp: name},
+          };
+        },
+      });
+
+      const executor = new A2AAgentExecutor({
+        runner: runnerConfig(),
+        executeInterceptors: [stamp('outer'), stamp('inner')],
+      });
+
+      await executor.execute(createRequestContext(), mockEventBus);
+
+      expect(seen).toEqual(['inner:none', 'outer:inner']);
+      expect(publishedEvents().at(-1)).toMatchObject({
+        status: {state: 'completed'},
+        metadata: {stamp: 'outer'},
+      });
+    });
+
+    it('does not run afterAgent on the input-required early return', async () => {
+      mockRunnerYielding([]);
+      const executor = new A2AAgentExecutor({
+        runner: runnerConfig(),
+        executeInterceptors: [
+          {
+            afterAgent: async () =>
+              expect.fail('afterAgent must not run on the early return'),
+          },
+        ],
+      });
+
+      await executor.execute(
+        createRequestContext({
+          task: {
+            kind: 'task',
+            id: 'test-task',
+            contextId: 'test-context',
+            status: {
+              state: 'input-required',
+              message: {
+                role: 'agent',
+                parts: [
+                  {
+                    kind: 'data',
+                    metadata: {'adk_type': 'function_call'},
+                    data: {id: 'fc-123', name: 'mockFunction'},
+                  },
+                ],
+              },
+            },
+          },
+        }),
+        mockEventBus,
+      );
+
+      expect(publishedEvents()).toHaveLength(1);
+      expect(publishedEvents()[0]).toMatchObject({
+        status: {state: 'input-required'},
+      });
+    });
+
+    it('does not run afterAgent when the runner throws', async () => {
+      mockRunnerYielding([], new Error('LLM failed'));
+
+      const executor = new A2AAgentExecutor({
+        runner: runnerConfig(),
+        executeInterceptors: [
+          {
+            afterAgent: async () =>
+              expect.fail('afterAgent must not run on the failure path'),
+          },
+        ],
+      });
+
+      await executor.execute(createRequestContext(), mockEventBus);
+
+      const final = publishedEvents().at(-1) as TaskStatusUpdateEvent;
+      expect(final.status.state).toBe('failed');
+      expect((final.status.message!.parts[0] as TextPart).text).toContain(
+        'LLM failed',
+      );
+    });
+
+    it('runs the existing callbacks alongside the interceptors', async () => {
+      mockRunnerYielding([modelEvent('response', false)]);
+      const calls: string[] = [];
+      const record = (name: string) => async () => {
+        calls.push(name);
+      };
+
+      const executor = new A2AAgentExecutor({
+        runner: runnerConfig(),
+        beforeExecuteCallback: record('beforeExecuteCallback'),
+        afterEventCallback: record('afterEventCallback'),
+        afterExecuteCallback: record('afterExecuteCallback'),
+        executeInterceptors: [
+          {
+            beforeAgent: async (requestContext) => {
+              calls.push('beforeAgent');
+              return requestContext;
+            },
+            afterEvent: async (_executorContext, a2aEvent) => {
+              calls.push('afterEvent');
+              return a2aEvent;
+            },
+            afterAgent: async (_executorContext, finalEvent) => {
+              calls.push('afterAgent');
+              return finalEvent;
+            },
+          },
+        ],
+      });
+
+      await executor.execute(createRequestContext(), mockEventBus);
+
+      expect(calls).toEqual([
+        'beforeAgent',
+        'beforeExecuteCallback',
+        'afterEventCallback',
+        'afterEvent',
+        'afterAgent',
+        'afterExecuteCallback',
+      ]);
+    });
   });
 });

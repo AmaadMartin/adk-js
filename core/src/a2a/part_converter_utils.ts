@@ -35,17 +35,37 @@ enum DataPartType {
 }
 
 /**
+ * Converts a single A2A part to a GenAI part.
+ *
+ * The default implementation is `toGenAIPart`.
+ */
+export type A2APartToGenAIPartConverter = (a2aPart: A2APart) => GenAIPart;
+
+/**
+ * Converts a single GenAI part to an A2A part.
+ *
+ * The default implementation is `toA2APart`.
+ */
+export type GenAIPartToA2APartConverter = (
+  part: GenAIPart,
+  longRunningToolIds?: string[],
+) => A2APart;
+
+/**
  * Converts an array of GenAI Parts to A2A Parts.
  *
  * @param parts - The GenAI parts to convert. Defaults to an empty array.
  * @param longRunningToolIDs - IDs of function calls that are long-running.
+ * @param genAIPartConverter - Converts a single part. Defaults to
+ *   `toA2APart`.
  * @returns An array of A2A parts.
  */
 export function toA2AParts(
   parts: GenAIPart[] = [],
   longRunningToolIDs: string[] = [],
+  genAIPartConverter: GenAIPartToA2APartConverter = toA2APart,
 ): A2APart[] {
-  return parts.map((part) => toA2APart(part, longRunningToolIDs));
+  return parts.map((part) => genAIPartConverter(part, longRunningToolIDs));
 }
 
 /**
@@ -195,10 +215,15 @@ export function toA2ADataPart(
  * Converts an A2A Message to a GenAI Content object.
  *
  * @param a2aMessage - The A2A message to convert.
+ * @param a2aPartConverter - Converts a single part. Defaults to
+ *   `toGenAIPart`.
  * @returns A GenAI user or model content object based on the message role.
  */
-export function toGenAIContent(a2aMessage: Message): GenAIContent {
-  const parts = toGenAIParts(a2aMessage.parts);
+export function toGenAIContent(
+  a2aMessage: Message,
+  a2aPartConverter: A2APartToGenAIPartConverter = toGenAIPart,
+): GenAIContent {
+  const parts = toGenAIParts(a2aMessage.parts, a2aPartConverter);
 
   return a2aMessage.role === 'user'
     ? createUserContent(parts)
@@ -209,10 +234,15 @@ export function toGenAIContent(a2aMessage: Message): GenAIContent {
  * Converts an array of A2A Parts to GenAI Parts.
  *
  * @param a2aParts - The A2A parts to convert.
+ * @param a2aPartConverter - Converts a single part. Defaults to
+ *   `toGenAIPart`.
  * @returns An array of GenAI parts.
  */
-export function toGenAIParts(a2aParts: A2APart[]): GenAIPart[] {
-  return a2aParts.map((a2aPart) => toGenAIPart(a2aPart));
+export function toGenAIParts(
+  a2aParts: A2APart[],
+  a2aPartConverter: A2APartToGenAIPartConverter = toGenAIPart,
+): GenAIPart[] {
+  return a2aParts.map((a2aPart) => a2aPartConverter(a2aPart));
 }
 
 /**

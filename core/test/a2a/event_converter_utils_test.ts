@@ -10,10 +10,15 @@ import {
   TaskArtifactUpdateEvent,
   TaskStatusUpdateEvent,
 } from '@a2a-js/sdk';
-import {createEvent, createEventActions} from '@google/adk';
+import {RequestContext} from '@a2a-js/sdk/server';
+import {createEvent, createEventActions, ExecutorContext} from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
 import {A2AEvent} from '../../src/a2a/a2a_event.js';
-import {toA2AMessage, toAdkEvent} from '../../src/a2a/event_converter_utils.js';
+import {
+  toA2AArtifactUpdateEvent,
+  toA2AMessage,
+  toAdkEvent,
+} from '../../src/a2a/event_converter_utils.js';
 import * as envAwareUtils from '../../src/utils/env_aware_utils.js';
 
 vi.mock('../../src/utils/env_aware_utils.js', async (importOriginal) => {
@@ -95,6 +100,128 @@ describe('event_converter_utils', () => {
           },
         },
       });
+    });
+  });
+
+  describe('toA2AArtifactUpdateEvent', () => {
+    const executorContext: ExecutorContext = {
+      appName: 'test-app',
+      userId: 'test-user',
+      sessionId: 'test-session',
+      readonlyState: {},
+      events: [],
+      userContent: {role: 'user', parts: [{text: 'hello'}]},
+      requestContext: new RequestContext(
+        {
+          kind: 'message',
+          messageId: 'message-1',
+          role: 'user',
+          parts: [{kind: 'text', text: 'hello'}],
+        },
+        'task-1',
+        'ctx-1',
+      ),
+    };
+
+    const streamedEvent = (text: string, partial: boolean) =>
+      createEvent({
+        invocationId: 'inv1',
+        author: 'agent1',
+        content: {role: 'model', parts: [{text}]},
+        partial,
+      });
+
+    it('returns undefined when the ADK event has no parts', () => {
+      const partialArtifactIds: Record<string, string> = {};
+
+      expect(
+        toA2AArtifactUpdateEvent(
+          createEvent({invocationId: 'inv1', author: 'agent1'}),
+          executorContext,
+          partialArtifactIds,
+        ),
+      ).toBe(undefined);
+      expect(partialArtifactIds).toEqual({});
+    });
+
+    it('marks a partial event for appending and records its artifact id', () => {
+      vi.mocked(envAwareUtils.randomUUID).mockReturnValue('artifact-1');
+      const partialArtifactIds: Record<string, string> = {};
+
+      const event = toA2AArtifactUpdateEvent(
+        streamedEvent('chunk 1', true),
+        executorContext,
+        partialArtifactIds,
+      );
+
+      expect(event).toMatchObject({
+        kind: 'artifact-update',
+        taskId: 'task-1',
+        contextId: 'ctx-1',
+        append: true,
+        lastChunk: false,
+        artifact: {
+          artifactId: 'artifact-1',
+          parts: [{kind: 'text', text: 'chunk 1'}],
+        },
+      });
+      expect(partialArtifactIds).toEqual({'agent1': 'artifact-1'});
+    });
+
+    it('reuses the recorded artifact id for a following partial event', () => {
+      vi.mocked(envAwareUtils.randomUUID).mockReturnValue('unused-artifact');
+      const partialArtifactIds: Record<string, string> = {
+        'agent1': 'artifact-1',
+      };
+
+      const event = toA2AArtifactUpdateEvent(
+        streamedEvent('chunk 2', true),
+        executorContext,
+        partialArtifactIds,
+      );
+
+      expect(event!.artifact.artifactId).toBe('artifact-1');
+      expect(partialArtifactIds).toEqual({'agent1': 'artifact-1'});
+    });
+
+    it('closes the artifact and forgets its id on a non-partial event', () => {
+      const partialArtifactIds: Record<string, string> = {
+        'agent1': 'artifact-1',
+      };
+
+      const event = toA2AArtifactUpdateEvent(
+        streamedEvent('last chunk', false),
+        executorContext,
+        partialArtifactIds,
+      );
+
+      expect(event).toMatchObject({
+        append: false,
+        lastChunk: true,
+        artifact: {artifactId: 'artifact-1'},
+      });
+      expect(partialArtifactIds).toEqual({});
+    });
+
+    it('applies a custom part converter to every part', () => {
+      vi.mocked(envAwareUtils.randomUUID).mockReturnValue('artifact-2');
+
+      const event = toA2AArtifactUpdateEvent(
+        createEvent({
+          invocationId: 'inv1',
+          author: 'agent1',
+          content: {role: 'model', parts: [{text: 'first'}, {text: 'second'}]},
+          partial: false,
+        }),
+        executorContext,
+        {},
+        (part) => ({kind: 'text', text: `converted:${part.text}`}),
+      );
+
+      expect(event!.artifact.parts).toEqual([
+        {kind: 'text', text: 'converted:first'},
+        {kind: 'text', text: 'converted:second'},
+      ]);
     });
   });
 
