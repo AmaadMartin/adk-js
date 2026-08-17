@@ -333,10 +333,7 @@ export class RequestDrivenMetricReader
 
 /** Fires a fire-and-forget collect on each inference span start. */
 export class MetricsFlushingSpanProcessor implements SpanProcessor {
-  constructor(
-    private readonly reader: InferenceMetricsDriver,
-    private readonly operation: string = INFERENCE_SPAN_NAME,
-  ) {}
+  constructor(private readonly reader: InferenceMetricsDriver) {}
 
   /** Collects when an inference span starts, if the reader is due one. */
   onStart(span: Span): void {
@@ -344,7 +341,7 @@ export class MetricsFlushingSpanProcessor implements SpanProcessor {
     // sets that attribute after the span starts, so the bag is empty here.
     try {
       if (
-        span.name.startsWith(this.operation) &&
+        span.name.startsWith(INFERENCE_SPAN_NAME) &&
         this.reader.noteInferenceStart()
       ) {
         void this.reader.submitCollect();
@@ -376,20 +373,6 @@ export interface MetricsState {
   spanProcessor: SpanProcessor;
 }
 
-/**
- * Builds the request-driven reader and the span processor that drives it.
- *
- * This sets no global provider. The caller installs `reader` on a
- * `MeterProvider` and `spanProcessor` on the `TracerProvider`, and drives the
- * reader from the request path.
- */
-export function buildRequestDrivenMetrics(
-  exporter: PushMetricExporter,
-): MetricsState {
-  const reader = new RequestDrivenMetricReader({exporter});
-  return {reader, spanProcessor: new MetricsFlushingSpanProcessor(reader)};
-}
-
 let cachedState: MetricsState | undefined;
 let evaluated = false;
 
@@ -416,7 +399,10 @@ function buildAgentEngineMetrics(
     return undefined;
   }
   try {
-    return buildRequestDrivenMetrics(createExporter());
+    // No global provider is set here: `getGcpExporters` installs the reader on
+    // the `MeterProvider` and the processor on the `TracerProvider`.
+    const reader = new RequestDrivenMetricReader({exporter: createExporter()});
+    return {reader, spanProcessor: new MetricsFlushingSpanProcessor(reader)};
   } catch (e: unknown) {
     logger.warn(
       'Failed to set up request-driven metric export on Agent Engine.',

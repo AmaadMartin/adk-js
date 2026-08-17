@@ -5,7 +5,6 @@
  */
 
 import {
-  buildRequestDrivenMetrics,
   getRequestDrivenMetricsState,
   MetricsFlushingSpanProcessor,
   MIN_EXPORT_INTERVAL_MS,
@@ -620,24 +619,6 @@ describe('MetricsFlushingSpanProcessor', () => {
   });
 });
 
-describe('buildRequestDrivenMetrics', () => {
-  it('returns a reader that drains into the given exporter', async () => {
-    const exporter = new RecordingExporter(() => 0);
-    const state = buildRequestDrivenMetrics(exporter);
-    expect(state.reader).toBeInstanceOf(RequestDrivenMetricReader);
-    expect(state.spanProcessor).toBeInstanceOf(MetricsFlushingSpanProcessor);
-
-    const provider = new MeterProvider({readers: [state.reader]});
-    provider.getMeter('test').createCounter('c').add(1);
-    state.reader.noteRequestStart();
-    if (state.reader.noteRequestEnd()) {
-      await state.reader.submitCollect();
-    }
-    expect(exporter.times.length).toBe(1);
-    await provider.shutdown();
-  });
-});
-
 describe('getAgentEngineMetricsSetup', () => {
   /** Imports a fresh copy, so the module-level memo is reset. */
   async function freshModule() {
@@ -673,6 +654,16 @@ describe('getAgentEngineMetricsSetup', () => {
       mod.MetricsFlushingSpanProcessor,
     );
     expect(mod.getRequestDrivenMetricsState()).toBe(state);
+
+    // The reader drains into the exporter the factory returned.
+    const provider = new MeterProvider({readers: [state.reader]});
+    provider.getMeter('test').createCounter('c').add(1);
+    state.reader.noteRequestStart();
+    if (state.reader.noteRequestEnd()) {
+      await state.reader.submitCollect();
+    }
+    expect(exporter.times.length).toBe(1);
+    await provider.shutdown();
   });
 
   it('evaluates the gate once', async () => {

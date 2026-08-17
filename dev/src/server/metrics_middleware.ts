@@ -6,44 +6,23 @@
 
 import {RequestMetricsDriver} from '@google/adk';
 import {RequestHandler} from 'express';
+import type {EventEmitter} from 'node:events';
 
 import {AdkLogger} from '../utils/logger.js';
 
 const logger = new AdkLogger({label: 'Metrics', colorize: {all: true}});
 
-/** The response completion events the drain hooks onto. */
-export interface ResponseCompletion {
-  once(event: 'finish' | 'close', listener: () => void): unknown;
-}
-
-/**
- * Runs the drain collect once a request is over.
- *
- * It is awaited so the export completes while the request still holds CPU.
- */
-export async function drainMetrics(
-  reader: RequestMetricsDriver,
-): Promise<void> {
-  try {
-    if (reader.noteRequestEnd()) {
-      await reader.submitCollect();
-    }
-  } catch (e: unknown) {
-    logger.warn('Failed to flush metrics on request end', e);
-  }
-}
-
 /**
  * Drives `reader` from one request: a collect on entry, a drain on completion.
  *
- * The entry collect is not awaited, so it never adds latency to the response.
+ * Neither collect is awaited, so metrics never add latency to the response.
  * The drain runs on `finish` for a normal response and on `close` for a client
  * abort or a handler that threw. Either way it runs exactly once, so the
  * in-flight count cannot leak.
  */
 export function driveRequestMetrics(
   reader: RequestMetricsDriver,
-  res: ResponseCompletion,
+  res: EventEmitter,
 ): void {
   // A metrics failure must never break the request it rides on.
   try {
@@ -59,7 +38,13 @@ export function driveRequestMetrics(
       return;
     }
     drained = true;
-    void drainMetrics(reader);
+    try {
+      if (reader.noteRequestEnd()) {
+        void reader.submitCollect();
+      }
+    } catch (e: unknown) {
+      logger.warn('Failed to flush metrics on request end', e);
+    }
   };
   res.once('finish', drain);
   res.once('close', drain);

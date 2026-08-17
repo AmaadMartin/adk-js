@@ -7,7 +7,6 @@
 import {RequestMetricsDriver} from '@google/adk';
 import express from 'express';
 import {EventEmitter} from 'node:events';
-import {AddressInfo} from 'node:net';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 
 import {
@@ -147,9 +146,12 @@ describe('metricsFlushingMiddleware', () => {
 
     server = app.listen(0);
     await new Promise<void>((resolve) => server?.once('listening', resolve));
-    const {port} = server.address() as AddressInfo;
+    const address = server.address();
+    if (address === null || typeof address === 'string') {
+      expect.fail('server did not bind a TCP port');
+    }
 
-    const response = await fetch(`http://127.0.0.1:${port}/ping`);
+    const response = await fetch(`http://127.0.0.1:${address.port}/ping`);
     expect(await response.text()).toBe('pong');
 
     await waitForDrain(reader);
