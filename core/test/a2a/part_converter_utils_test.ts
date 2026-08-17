@@ -11,8 +11,9 @@ import {
   TextPart as A2ATextPart,
 } from '@a2a-js/sdk';
 import {Part as GenAIPart, Language, Outcome} from '@google/genai';
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 import {
+  GenAIPartToA2APartConverter,
   toA2ADataPart,
   toA2AFilePart,
   toA2APart,
@@ -290,6 +291,45 @@ describe('part_converter_utils', () => {
       expect(toA2AParts(genAiParts, ['long_running_function_call_id'])).toEqual(
         expected,
       );
+    });
+
+    it('maps every part through a supplied converter, in order', () => {
+      const genAiParts: GenAIPart[] = [
+        {text: 'first'},
+        {text: 'second'},
+        {text: 'third'},
+      ];
+      const converter: GenAIPartToA2APartConverter = (part) => ({
+        kind: 'text',
+        text: `converted:${part.text}`,
+      });
+
+      expect(toA2AParts(genAiParts, [], converter)).toEqual([
+        {kind: 'text', text: 'converted:first'},
+        {kind: 'text', text: 'converted:second'},
+        {kind: 'text', text: 'converted:third'},
+      ]);
+    });
+
+    it('forwards longRunningToolIDs to a supplied converter', () => {
+      const genAiParts: GenAIPart[] = [{text: 'hello'}];
+      const converter = vi
+        .fn<GenAIPartToA2APartConverter>()
+        .mockReturnValue({kind: 'text', text: 'stub'});
+
+      toA2AParts(genAiParts, ['call-1'], converter);
+
+      expect(converter).toHaveBeenCalledExactlyOnceWith({text: 'hello'}, [
+        'call-1',
+      ]);
+    });
+
+    it('falls back to the default converter when given undefined', () => {
+      const genAiParts: GenAIPart[] = [{text: 'hello'}];
+
+      expect(toA2AParts(genAiParts, [], undefined)).toEqual([
+        {kind: 'text', text: 'hello'},
+      ]);
     });
   });
 

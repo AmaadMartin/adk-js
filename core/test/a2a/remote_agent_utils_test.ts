@@ -5,7 +5,7 @@
  */
 
 import {TextPart} from '@a2a-js/sdk';
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 import {
   getFunctionResponseCallId,
   getUserFunctionCallAt,
@@ -14,6 +14,7 @@ import {
   toMissingRemoteSessionParts,
 } from '../../src/a2a/a2a_remote_agent_utils.js';
 import {AdkMetadataKeys} from '../../src/a2a/metadata_converter_utils.js';
+import {GenAIPartToA2APartConverter} from '../../src/a2a/part_converter_utils.js';
 import {BaseAgent} from '../../src/agents/base_agent.js';
 import {InvocationContext} from '../../src/agents/invocation_context.js';
 import {createEvent} from '../../src/events/event.js';
@@ -247,6 +248,74 @@ describe('remote_agent_utils', () => {
       expect((result.parts[1] as TextPart).text).toBe(
         '[other-agent] said: other response',
       );
+    });
+
+    it('routes history parts through a supplied converter and keeps the contextId', () => {
+      const remoteResponse = createEvent({
+        author: 'test-agent',
+        content: {role: 'model', parts: [{text: 'response'}]},
+        customMetadata: {
+          [AdkMetadataKeys.CONTEXT_ID]: 'ctx-remote',
+        },
+      });
+      const userMessage = createEvent({
+        author: 'user',
+        content: {role: 'user', parts: [{text: 'new message'}]},
+      });
+      const otherAgentMessage = createEvent({
+        author: 'other-agent',
+        content: {role: 'model', parts: [{text: 'other response'}]},
+      });
+      const session = {
+        events: [remoteResponse, userMessage, otherAgentMessage],
+      } as unknown as Session;
+      const converter: GenAIPartToA2APartConverter = (part) => ({
+        kind: 'text',
+        text: `converted:${part.text}`,
+      });
+
+      const result = toMissingRemoteSessionParts(mockCtx, session, converter);
+
+      expect(result.parts).toEqual([
+        {kind: 'text', text: 'converted:new message'},
+        {kind: 'text', text: 'converted:For context:'},
+        {kind: 'text', text: 'converted:[other-agent] said: other response'},
+      ]);
+      expect(result.contextId).toBe('ctx-remote');
+    });
+
+    it('forwards the event longRunningToolIds to a supplied converter', () => {
+      const userMessage = createEvent({
+        author: 'user',
+        content: {
+          role: 'user',
+          parts: [{functionResponse: {id: 'call-1', name: 'tool'}}],
+        },
+        longRunningToolIds: ['call-1'],
+      });
+      const session = {events: [userMessage]} as unknown as Session;
+      const converter = vi
+        .fn<GenAIPartToA2APartConverter>()
+        .mockReturnValue({kind: 'text', text: 'stub'});
+
+      toMissingRemoteSessionParts(mockCtx, session, converter);
+
+      expect(converter).toHaveBeenCalledExactlyOnceWith(
+        {functionResponse: {id: 'call-1', name: 'tool'}},
+        ['call-1'],
+      );
+    });
+
+    it('falls back to the default converter when given undefined', () => {
+      const userMessage = createEvent({
+        author: 'user',
+        content: {role: 'user', parts: [{text: 'hello'}]},
+      });
+      const session = {events: [userMessage]} as unknown as Session;
+
+      const result = toMissingRemoteSessionParts(mockCtx, session, undefined);
+
+      expect(result.parts).toEqual([{kind: 'text', text: 'hello'}]);
     });
   });
 });

@@ -19,10 +19,12 @@ import {
 import {
   Event as AdkEvent,
   createEvent,
+  GenAIPartToA2APartConverter,
   InvocationContext,
   RemoteA2AAgent,
   RemoteA2AAgentConfig,
   Session,
+  toA2APart,
 } from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 
@@ -363,6 +365,181 @@ describe('A2ARemoteAgent', () => {
     expect(mockClient.sendMessageStream).toHaveBeenCalledWith(
       expect.objectContaining({
         configuration: {acceptedOutputModes: ['custom']},
+      }),
+    );
+  });
+
+  const streamingCard: AgentCard = {
+    name: 'Remote',
+    description: 'test',
+    protocolVersion: '1.0',
+    defaultInputModes: [],
+    defaultOutputModes: [],
+    capabilities: {streaming: true},
+    skills: [],
+    url: 'https://example.com',
+    version: '1.0',
+  };
+
+  const stampTenant: GenAIPartToA2APartConverter = (
+    part,
+    longRunningToolIds,
+  ) => ({
+    ...toA2APart(part, longRunningToolIds),
+    metadata: {tenant: 'acme'},
+  });
+
+  const createFunctionResponseContext = (): InvocationContext =>
+    createMockContext({
+      session: {
+        id: 'test-session',
+        userId: 'test-user',
+        appName: 'test-app',
+        events: [
+          createEvent({
+            author: 'test-agent',
+            content: {
+              role: 'model',
+              parts: [{functionCall: {id: 'call-1', name: 'tool', args: {}}}],
+            },
+            customMetadata: {
+              'a2a:task_id': 'task-1',
+              'a2a:context_id': 'ctx-1',
+            },
+          }),
+          createEvent({
+            author: 'user',
+            content: {
+              role: 'user',
+              parts: [
+                {functionResponse: {id: 'call-1', name: 'tool', response: {}}},
+              ],
+            },
+            longRunningToolIds: ['call-1'],
+          }),
+        ],
+        state: {},
+      } as unknown as Session,
+    });
+
+  it('applies genAIPartConverter to the session history parts (streaming)', async () => {
+    const agent = new RemoteA2AAgent({
+      name: 'test-agent',
+      agentCard: streamingCard,
+      clientFactory: mockClientFactory,
+      genAIPartConverter: stampTenant,
+    });
+    vi.mocked(mockClient.sendMessageStream).mockReturnValue(
+      (async function* () {})(),
+    );
+
+    for await (const _ of agent.runAsync(createMockContext())) {
+      // drain the stream
+    }
+
+    expect(mockClient.sendMessageStream).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.objectContaining({
+          parts: [{kind: 'text', text: 'hello', metadata: {tenant: 'acme'}}],
+        }),
+      }),
+    );
+  });
+
+  it('applies genAIPartConverter to a user function response, keeping task and context ids', async () => {
+    const converter = vi
+      .fn<GenAIPartToA2APartConverter>()
+      .mockImplementation(stampTenant);
+    const agent = new RemoteA2AAgent({
+      name: 'test-agent',
+      agentCard: streamingCard,
+      clientFactory: mockClientFactory,
+      genAIPartConverter: converter,
+    });
+    vi.mocked(mockClient.sendMessageStream).mockReturnValue(
+      (async function* () {})(),
+    );
+
+    for await (const _ of agent.runAsync(createFunctionResponseContext())) {
+      // drain the stream
+    }
+
+    expect(converter).toHaveBeenCalledExactlyOnceWith(
+      {functionResponse: {id: 'call-1', name: 'tool', response: {}}},
+      ['call-1'],
+    );
+    expect(mockClient.sendMessageStream).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.objectContaining({
+          taskId: 'task-1',
+          contextId: 'ctx-1',
+          parts: [
+            {
+              kind: 'data',
+              data: {id: 'call-1', name: 'tool', response: {}},
+              metadata: {tenant: 'acme'},
+            },
+          ],
+        }),
+      }),
+    );
+  });
+
+  it('applies genAIPartConverter on the non-streaming path', async () => {
+    const agent = new RemoteA2AAgent({
+      name: 'test-agent',
+      agentCard: {...streamingCard, capabilities: {streaming: false}},
+      clientFactory: mockClientFactory,
+      genAIPartConverter: stampTenant,
+    });
+    vi.mocked(mockClient.sendMessage).mockResolvedValue({
+      kind: 'message',
+      messageId: 'test-message-id',
+      role: 'agent',
+      parts: [{kind: 'text', text: 'static response'}],
+    });
+
+    for await (const _ of agent.runAsync(createMockContext())) {
+      // drain the response
+    }
+
+    expect(mockClient.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.objectContaining({
+          parts: [{kind: 'text', text: 'hello', metadata: {tenant: 'acme'}}],
+        }),
+      }),
+    );
+  });
+
+  it('sends the default parts when no genAIPartConverter is configured', async () => {
+    const agent = new RemoteA2AAgent({
+      name: 'test-agent',
+      agentCard: streamingCard,
+      clientFactory: mockClientFactory,
+    });
+    vi.mocked(mockClient.sendMessageStream).mockReturnValue(
+      (async function* () {})(),
+    );
+
+    for await (const _ of agent.runAsync(createFunctionResponseContext())) {
+      // drain the stream
+    }
+
+    expect(mockClient.sendMessageStream).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.objectContaining({
+          parts: [
+            {
+              kind: 'data',
+              data: {id: 'call-1', name: 'tool', response: {}},
+              metadata: {
+                'adk_type': 'function_response',
+                'adk_is_long_running': true,
+              },
+            },
+          ],
+        }),
       }),
     );
   });
