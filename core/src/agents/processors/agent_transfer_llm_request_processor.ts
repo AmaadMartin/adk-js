@@ -18,9 +18,10 @@ import {BaseLlmRequestProcessor} from './base_llm_processor.js';
  * Whether an agent is configured as a workflow node.
  *
  * A node is driven by the workflow graph rather than by the model's transfer
- * decision, so it is neither offered as a transfer target nor told that it may
- * transfer. Only {@link LlmAgent} carries `mode`; any other agent type is a
- * normal transfer participant. Mirrors adk-python's
+ * decision, so it is not offered as a transfer target and is given no transfer
+ * instructions. The `transfer_to_agent` tool is still registered — adk-python
+ * suppresses only the instruction text. Only {@link LlmAgent} carries `mode`;
+ * any other agent type is a normal transfer participant. Mirrors adk-python's
  * `mode not in ('single_turn', 'task')` check — adk-js has no `'chat'` mode, so
  * a set `mode` is exactly a node.
  */
