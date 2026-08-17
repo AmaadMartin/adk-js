@@ -10,11 +10,15 @@ import {
   AuthCredentialTypes,
   AuthScheme,
   BaseCredentialService,
+  BaseMemoryService,
   Context,
   InMemoryCredentialService,
+  InMemoryMemoryService,
   InvocationContext,
   LoopAgent,
   PluginManager,
+  Session,
+  createEvent,
   createSession,
 } from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
@@ -53,6 +57,44 @@ function createContext(credentialService?: BaseCredentialService): Context {
   });
 }
 
+function createMemoryContext(memoryService?: BaseMemoryService): {
+  context: Context;
+  session: Session;
+} {
+  const session = createSession({
+    id: 'test-session',
+    appName: 'test-app',
+    userId: 'test-user',
+    events: [
+      createEvent({
+        author: 'user',
+        content: {role: 'user', parts: [{text: 'my favourite colour is teal'}]},
+      }),
+    ],
+  });
+  const context = new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'test-invocation',
+      agent: new LoopAgent({name: 'root'}),
+      session,
+      pluginManager: new PluginManager(),
+      memoryService,
+    }),
+  });
+  return {context, session};
+}
+
+function createStubMemoryService() {
+  return {
+    addSessionToMemory: vi.fn<BaseMemoryService['addSessionToMemory']>(
+      async () => {},
+    ),
+    searchMemory: vi.fn<BaseMemoryService['searchMemory']>(async () => ({
+      memories: [],
+    })),
+  };
+}
+
 function createStubCredentialService(loaded?: AuthCredential) {
   return {
     loadCredential: vi.fn<BaseCredentialService['loadCredential']>(
@@ -63,6 +105,58 @@ function createStubCredentialService(loaded?: AuthCredential) {
     ),
   };
 }
+
+describe('Context.addSessionToMemory', () => {
+  it('forwards the invocation session to the memory service', async () => {
+    const service = createStubMemoryService();
+    const {context, session} = createMemoryContext(service);
+
+    await context.addSessionToMemory();
+
+    expect(service.addSessionToMemory).toHaveBeenCalledTimes(1);
+    expect(service.addSessionToMemory.mock.calls[0][0]).toBe(session);
+  });
+
+  it('throws when no memory service is configured', () => {
+    const {context} = createMemoryContext();
+
+    expect(() => context.addSessionToMemory()).toThrowError(
+      'Memory service is not initialized.',
+    );
+  });
+
+  it('propagates an error raised by the service', async () => {
+    const service = createStubMemoryService();
+    service.addSessionToMemory.mockRejectedValue(
+      new Error('memory bank unavailable'),
+    );
+    const {context} = createMemoryContext(service);
+
+    await expect(context.addSessionToMemory()).rejects.toThrow(
+      'memory bank unavailable',
+    );
+  });
+});
+
+describe('Context memory round trip through InMemoryMemoryService', () => {
+  it('searches back an event from the session a previous add stored', async () => {
+    const {context} = createMemoryContext(new InMemoryMemoryService());
+
+    await context.addSessionToMemory();
+
+    const response = await context.searchMemory('teal');
+    expect(response.memories).toHaveLength(1);
+    expect(response.memories[0].content.parts?.[0].text).toBe(
+      'my favourite colour is teal',
+    );
+  });
+
+  it('finds nothing before the session is added', async () => {
+    const {context} = createMemoryContext(new InMemoryMemoryService());
+
+    expect((await context.searchMemory('teal')).memories).toEqual([]);
+  });
+});
 
 describe('Context.saveCredential', () => {
   it('forwards the auth config and this context to the service', async () => {
