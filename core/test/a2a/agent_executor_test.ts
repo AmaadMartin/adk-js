@@ -16,6 +16,7 @@ import {
   BaseSessionService,
   createEvent,
   createEventActions,
+  createSession,
   ExecutorContext,
   Runner,
   RunnerConfig,
@@ -311,11 +312,10 @@ describe('A2AAgentExecutor', () => {
       return runAsync;
     };
 
-    const runnerConfig = () =>
-      ({
-        appName: 'test-app',
-        sessionService: mockSessionService,
-      }) as unknown as RunnerConfig;
+    const runnerConfig = (): RunnerConfig => ({
+      appName: 'test-app',
+      sessionService: mockSessionService,
+    });
 
     const modelEvent = (text: string, partial: boolean) =>
       createEvent({
@@ -330,13 +330,13 @@ describe('A2AAgentExecutor', () => {
       mockEventBus.publish.mock.calls.map(([event]) => event);
 
     beforeEach(() => {
-      mockSessionService.getSession.mockResolvedValue({
-        id: 'session-id',
-        userId: 'test-user',
-        appName: 'test-app',
-        events: [],
-        state: {},
-      } as unknown as Session);
+      mockSessionService.getSession.mockResolvedValue(
+        createSession({
+          id: 'session-id',
+          userId: 'test-user',
+          appName: 'test-app',
+        }),
+      );
     });
 
     it('publishes the same event sequence as before when no config is supplied', async () => {
