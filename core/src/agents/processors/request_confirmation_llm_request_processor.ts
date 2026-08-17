@@ -340,8 +340,8 @@ function resolveConfirmationTargets(
           `'${candidate.call.name}'.`,
       );
     }
-    // Arguments can carry user data, so the message names only the id.
     if (!isEqual(historyCall.call.args ?? {}, candidate.call.args ?? {})) {
+      // Arguments can carry user data, so the message names only the id.
       throw new Error(`Function call arguments mismatch for ID '${id}'.`);
     }
     // The payload is now proven equal to the historical call on id, name and
