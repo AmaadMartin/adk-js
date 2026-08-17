@@ -188,6 +188,11 @@ describe('toJsonSchema', () => {
     expect(toJsonSchema(asSchema(document))).toEqual(document);
   });
 
+  it("returns the caller's own object for a JSON Schema document", () => {
+    const document = {type: 'object', properties: {city: {type: 'string'}}};
+    expect(toJsonSchema(asSchema(document))).toBe(document);
+  });
+
   it('keeps JSON Schema constructs the genai dialect has no equivalent for', () => {
     const document = {
       $defs: {city: {type: 'string', minLength: 1}},
