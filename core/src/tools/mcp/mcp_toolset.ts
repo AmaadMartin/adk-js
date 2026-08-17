@@ -32,10 +32,11 @@ import {MCPTool} from './mcp_tool.js';
  * The toolset can be configured with a filter to selectively expose a subset
  * of the tools provided by the MCP server.
  *
- * It can also be configured with a prefix. If provided, all tools discovered
- * from the MCP server will have their names prefixed with `${prefix}_`. When the
- * LLM invokes the prefixed tool, this toolset transparently strips the prefix
- * before sending the request to the underlying MCP server.
+ * It can also be configured with a prefix. If provided,
+ * {@link BaseToolset.getToolsWithPrefix} names every discovered tool
+ * `${prefix}_${name}`, while this toolset keeps calling the MCP server with the
+ * name the server advertised. `getTools()` returns the unprefixed tools, and a
+ * string-array `toolFilter` therefore matches unprefixed names.
  *
  * Usage:
  *   import { MCPToolset } from '@google/adk';
@@ -76,14 +77,9 @@ export class MCPToolset extends BaseToolset {
       logger.debug(`tool: ${tool.name}`);
     }
 
-    const tools = listResult.tools.map((tool) => {
-      // Create a cloned tool definition with the prefixed name
-      const toolWithPrefix = {
-        ...tool,
-        name: this.prefix ? `${this.prefix}_${tool.name}` : tool.name,
-      };
-      return new MCPTool(toolWithPrefix, this.mcpSessionManager, tool.name);
-    });
+    const tools = listResult.tools.map(
+      (tool) => new MCPTool(tool, this.mcpSessionManager, tool.name),
+    );
 
     // Apply toolFilter when specified.
     // An empty array (the default) means no filter — all tools are returned.
@@ -93,7 +89,6 @@ export class MCPToolset extends BaseToolset {
     }
 
     if (Array.isArray(filter)) {
-      // String-array filter: match against the (possibly-prefixed) tool name.
       return tools.filter((tool) => (filter as string[]).includes(tool.name));
     }
 

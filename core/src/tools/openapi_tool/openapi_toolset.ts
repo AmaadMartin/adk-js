@@ -56,14 +56,9 @@ export class OpenAPIToolset extends BaseToolset {
     const parsedOperations = parser.parse(spec);
 
     for (const op of parsedOperations) {
-      let toolName = op.name;
-      if (this.prefix) {
-        toolName = `${this.prefix}_${toolName}`;
-      }
-
       const tool = createRestApiTool(
         {
-          name: toolName,
+          name: op.name,
           description: op.description,
           endpoint: op.endpoint,
           operation: op.operation,

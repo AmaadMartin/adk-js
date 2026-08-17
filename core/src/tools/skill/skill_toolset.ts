@@ -65,7 +65,10 @@ export class SkillToolset extends BaseToolset {
       allowInlineScripts?: boolean;
     } = {},
   ) {
-    super([], 'adk_skill_toolset');
+    super([]);
+    // The exposed skill tools change within an invocation as the model loads
+    // skills, so the per-invocation tool cache must stay off.
+    this.useInvocationCache = false;
     this.skills = Array.isArray(skills)
       ? Object.fromEntries(skills.map((s) => [s.frontmatter.name, s]))
       : skills;
@@ -198,7 +201,7 @@ export class SkillToolset extends BaseToolset {
 
         candidateTools[toolUnion.name] = toolUnion;
       } else if (toolUnion instanceof BaseToolset) {
-        const tsTools = await toolUnion.getTools(context);
+        const tsTools = await toolUnion.getToolsWithPrefix(context);
 
         for (const t of tsTools) {
           if (candidateTools[t.name]) {
