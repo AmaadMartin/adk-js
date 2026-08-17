@@ -4,7 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Context, LlmRequest, MCPToolset} from '@google/adk';
+import {
+  Context,
+  InvocationContext,
+  LlmRequest,
+  MCPToolset,
+  PluginManager,
+  createSession,
+} from '@google/adk';
 import {Tool, ToolUnion} from '@google/genai';
 import {fileURLToPath} from 'node:url';
 import {afterEach, describe, expect, it} from 'vitest';
@@ -21,8 +28,17 @@ const SERVER_PATH = fileURLToPath(
   new URL('./mcp_search_server.mjs', import.meta.url),
 );
 
-/** A throwaway tool context; the MCP tool only reads its abort signal. */
-const toolContext = {} as unknown as Context;
+const toolContext = new Context({
+  invocationContext: new InvocationContext({
+    invocationId: 'e2e-invocation',
+    session: createSession({
+      id: 'e2e-session',
+      appName: 'e2e-app',
+      userId: 'e2e-user',
+    }),
+    pluginManager: new PluginManager(),
+  }),
+});
 
 function isDeclaredTool(tool: ToolUnion): tool is Tool {
   return 'functionDeclarations' in tool;

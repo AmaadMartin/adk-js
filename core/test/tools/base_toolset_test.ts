@@ -235,19 +235,21 @@ class UncachedToolset extends RecordingToolset {
   }
 }
 
-function readonlyContext(invocationId: string): ReadonlyContext {
-  return new ReadonlyContext(
-    new InvocationContext({
-      invocationId,
-      session: createSession({
-        id: 'test-session',
-        events: [],
-        appName: 'test-app',
-        userId: 'test-user',
-      }),
-      pluginManager: new PluginManager(),
+function invocationContext(invocationId: string): InvocationContext {
+  return new InvocationContext({
+    invocationId,
+    session: createSession({
+      id: 'test-session',
+      events: [],
+      appName: 'test-app',
+      userId: 'test-user',
     }),
-  );
+    pluginManager: new PluginManager(),
+  });
+}
+
+function readonlyContext(invocationId: string): ReadonlyContext {
+  return new ReadonlyContext(invocationContext(invocationId));
 }
 
 describe('BaseToolset.getToolsWithPrefix', () => {
@@ -394,7 +396,7 @@ describe('BaseToolset.getToolsWithPrefix', () => {
       liveConnectConfig: {},
     };
     const context = new Context({
-      invocationContext: {session: {state: {}}} as unknown as InvocationContext,
+      invocationContext: invocationContext('invocation-1'),
     });
 
     for (const toolset of [webToolset, docsToolset]) {
