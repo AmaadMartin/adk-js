@@ -16,7 +16,7 @@
  */
 
 import {Content} from '@google/genai';
-import {context, Context, trace} from '@opentelemetry/api';
+import {Attributes, context, Context, trace} from '@opentelemetry/api';
 
 import {BaseAgent} from '../agents/base_agent.js';
 import {InvocationContext} from '../agents/invocation_context.js';
@@ -246,6 +246,66 @@ export function traceMergedToolCalls({
       ? safeJsonSerialize(functionResponseEvent)
       : '{}',
   );
+}
+
+export interface BuildCompactionAttributesParams {
+  sessionId: string;
+  trigger: string;
+  summarizerType: string;
+  eventCount: number;
+  compactionInterval: number;
+  overlapSize: number;
+}
+
+/**
+ * Builds the span attributes describing a session event compaction attempt.
+ *
+ * The keys are observable outside the process, so they match
+ * `google/adk-python` `_build_compaction_attributes` exactly.
+ *
+ * @param params The session, trigger and window settings the attempt ran with.
+ * @returns The attributes to set on the compaction span.
+ */
+export function buildCompactionAttributes({
+  sessionId,
+  trigger,
+  summarizerType,
+  eventCount,
+  compactionInterval,
+  overlapSize,
+}: BuildCompactionAttributesParams): Attributes {
+  return {
+    [GEN_AI_OPERATION_NAME]: 'compact_events',
+    [GEN_AI_CONVERSATION_ID]: sessionId,
+    'gen_ai.compaction.trigger': trigger,
+    'gen_ai.compaction.summarizer_type': summarizerType,
+    'gen_ai.compaction.event_count': eventCount,
+    'gen_ai.compaction.compaction_interval': compactionInterval,
+    'gen_ai.compaction.overlap_size': overlapSize,
+  };
+}
+
+/**
+ * Builds the span attributes describing what a compaction produced.
+ *
+ * Matches `google/adk-python` `_build_compaction_result_attributes`; an attempt
+ * that produced no summary contributes no attributes.
+ *
+ * @param compactedEvent The compaction event, if the summarizer produced one.
+ * @returns The result attributes to set on the compaction span.
+ */
+export function buildCompactionResultAttributes(
+  compactedEvent: Event | undefined,
+): Attributes {
+  const compaction = compactedEvent?.actions?.compaction;
+  if (!compactedEvent || !compaction) {
+    return {};
+  }
+  return {
+    'gen_ai.compaction.result_event_id': compactedEvent.id,
+    'gen_ai.compaction.start_timestamp': compaction.startTimestamp,
+    'gen_ai.compaction.end_timestamp': compaction.endTimestamp,
+  };
 }
 
 export interface TraceCallLlmParams {

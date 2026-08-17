@@ -9,6 +9,10 @@ import {
   asRunnableRoot,
   RunnableRoot,
 } from '../workflow/run_node_as_invocation.js';
+import {
+  EventsCompactionConfig,
+  validateEventsCompactionConfig,
+} from './events_compaction_config.js';
 import {ResumabilityConfig} from './resumability_config.js';
 
 const VALID_APP_NAME_RE = /^[a-zA-Z][a-zA-Z0-9_-]*$/;
@@ -60,6 +64,12 @@ export interface AppOptions {
   rootAgent: RunnableRoot;
   plugins?: BasePlugin[];
   resumabilityConfig?: ResumabilityConfig;
+  /**
+   * Enables session-level event compaction. After an invocation finishes, the
+   * runner summarizes a window of past events and persists that summary back
+   * into the session.
+   */
+  eventsCompactionConfig?: EventsCompactionConfig;
 }
 
 /**
@@ -80,9 +90,15 @@ export class App {
   readonly rootAgent: RunnableRoot;
   readonly plugins: BasePlugin[];
   readonly resumabilityConfig?: ResumabilityConfig;
+  readonly eventsCompactionConfig?: EventsCompactionConfig;
 
   constructor(options: AppOptions) {
     validateAppName(options.name);
+    if (options.eventsCompactionConfig) {
+      // Validated here as well as in the factory, so a hand-written literal
+      // cannot smuggle an unusable window past the check.
+      validateEventsCompactionConfig(options.eventsCompactionConfig);
+    }
 
     if (options.rootAgent === undefined || options.rootAgent === null) {
       throw new Error('rootAgent must be provided.');
@@ -94,5 +110,6 @@ export class App {
     this.rootAgent = asRunnableRoot(options.rootAgent);
     this.plugins = options.plugins ?? [];
     this.resumabilityConfig = options.resumabilityConfig;
+    this.eventsCompactionConfig = options.eventsCompactionConfig;
   }
 }

@@ -77,6 +77,11 @@ export type {
   UserInputKind,
   UserInputRequest,
 } from './agents/user_input_request.js';
+export type {BaseEventsSummarizer} from './apps/base_events_summarizer.js';
+export {createEventsCompactionConfig} from './apps/events_compaction_config.js';
+export type {EventsCompactionConfig} from './apps/events_compaction_config.js';
+export {LlmEventSummarizer} from './apps/llm_event_summarizer.js';
+export type {LlmEventSummarizerOptions} from './apps/llm_event_summarizer.js';
 export {createResumabilityConfig} from './apps/resumability_config.js';
 export type {ResumabilityConfig} from './apps/resumability_config.js';
 export type {
