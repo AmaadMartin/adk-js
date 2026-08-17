@@ -12,6 +12,7 @@ import {
   getArtifactServiceFromUri,
   getSessionServiceFromUri,
   setLogLevel as setAdkCoreLogLevel,
+  setLogger,
 } from '@google/adk';
 import {Argument, Command, Option} from 'commander';
 import dotenv from 'dotenv';
@@ -19,6 +20,7 @@ import {runIntegrationTests} from '../integration/run_integration_tests.js';
 import {AdkApiServer} from '../server/adk_api_server.js';
 import {FileModuleType} from '../utils/agent_loader.js';
 import {getAbsolutePath} from '../utils/file_utils.js';
+import {logToTmpFolder} from '../utils/log_to_tmp_folder.js';
 import {AdkLogger} from '../utils/logger.js';
 import {version} from '../version.js';
 import {createAgent} from './cli_create.js';
@@ -367,7 +369,16 @@ export function createProgram(): Command {
     .addOption(AGENT_FILE_MODULE_TYPE)
     .addOption(RELOAD_AGENTS_OPTION)
     .action(async (agentPath: string, options: Record<string, string>) => {
+      // `adk run` paints a chat transcript on stdout, so its logs go to a file
+      // rather than interleaving with it. `setLogger` runs before
+      // `setAdkCoreLogLevel`, which proxies to whichever logger is current.
+      const {logFilePath, latestLogPath} = logToTmpFolder();
+      setLogger(new AdkLogger({label: 'ADK'}));
       setAdkCoreLogLevel(getLogLevelFromOptions(options));
+      console.log(`Log setup complete: ${logFilePath}`);
+      console.log(
+        `To access latest log: tail -F ${latestLogPath ?? logFilePath}`,
+      );
 
       try {
         await runAgent({
@@ -383,7 +394,11 @@ export function createProgram(): Command {
           reloadAgents: getBoolean(options['reload_agents']),
         });
       } catch (error) {
-        logger.error('Error running agent:', (error as Error).message);
+        const message = (error as Error).message;
+        logger.error('Error running agent:', message);
+        // The logger no longer reaches the terminal, so exiting on this path
+        // would be silent without this line.
+        console.error(`Error running agent: ${message} (see ${logFilePath})`);
         process.exit(1);
       }
     });
