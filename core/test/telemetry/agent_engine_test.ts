@@ -10,7 +10,13 @@ import {
   isAgentEngine,
   TopSpanProcessor,
 } from '@google/adk';
-import {Context, context, propagation, trace} from '@opentelemetry/api';
+import {
+  Context,
+  context,
+  propagation,
+  trace,
+  TraceFlags,
+} from '@opentelemetry/api';
 import {
   BasicTracerProvider,
   InMemorySpanExporter,
@@ -29,6 +35,9 @@ const CHILD_SPAN = 'child';
 const TRACE_ID = '4bf92f3577b34da6a3ce929d0e0e4736';
 const REMOTE_SPAN_ID = '00f067aa0ba902b7';
 const WELL_FORMED_TRACEPARENT = `00-${TRACE_ID}-${REMOTE_SPAN_ID}-01`;
+
+const CALLER_TRACE_ID = '11111111111111111111111111111111';
+const CALLER_SPAN_ID = '2222222222222222';
 
 /**
  * Values the trace context propagator refuses, either because they do not
@@ -169,6 +178,21 @@ describe('getPropagatedContext', () => {
     expect(baggageValue(ctx, TRACEPARENT_HEADER)).toBeUndefined();
     expect(spans[TOP_SPAN].parentSpanContext).toBeUndefined();
     expect(spans[TOP_SPAN].attributes).not.toHaveProperty(SUPPORT_ID_ATTRIBUTE);
+  });
+
+  it('keeps the parent span when the header is rejected', () => {
+    // The propagator returns the parent unchanged for a rejected header, so a
+    // parent that already carries a valid span must not be read as acceptance.
+    const parent = trace.setSpanContext(context.active(), {
+      traceId: CALLER_TRACE_ID,
+      spanId: CALLER_SPAN_ID,
+      traceFlags: TraceFlags.SAMPLED,
+    });
+
+    const ctx = getPropagatedContext({[AE_TRACEPARENT_HEADER]: 'x'}, parent);
+
+    expect(baggageValue(ctx, TRACEPARENT_HEADER)).toBeUndefined();
+    expect(trace.getSpanContext(ctx)?.spanId).toBe(CALLER_SPAN_ID);
   });
 
   it('builds on an explicitly supplied parent context', () => {
