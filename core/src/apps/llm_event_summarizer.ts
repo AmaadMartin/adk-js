@@ -48,6 +48,17 @@ export function truncate(text: string, limit = MAX_TOOL_CONTENT_CHARS): string {
 }
 
 /**
+ * Renders a tool call's args or a tool response's payload for the prompt.
+ *
+ * Both are optional in the `@google/genai` types, and `JSON.stringify` returns
+ * `undefined` rather than a string when handed one, so an absent payload
+ * renders as empty rather than crashing the summarizer.
+ */
+function renderToolPayload(payload: unknown): string {
+  return truncate(JSON.stringify(payload) ?? '');
+}
+
+/**
  * Renders events as prompt text, including thoughts and tool traffic.
  *
  * Thoughts carry the agent's analysis of tool responses, and tool calls and
@@ -73,15 +84,13 @@ export function formatEventsForPrompt(events: Event[]): string {
         lines.push(`${event.author}: ${part.text}`);
       }
       if (part.functionCall) {
-        const args = truncate(JSON.stringify(part.functionCall.args));
+        const args = renderToolPayload(part.functionCall.args);
         lines.push(
           `${event.author} called tool: ${part.functionCall.name}(${args})`,
         );
       }
       if (part.functionResponse) {
-        const response = truncate(
-          JSON.stringify(part.functionResponse.response),
-        );
+        const response = renderToolPayload(part.functionResponse.response);
         lines.push(
           `Tool response from ${part.functionResponse.name}: ${response}`,
         );

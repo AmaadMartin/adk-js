@@ -286,6 +286,30 @@ describe('formatEventsForPrompt', () => {
     expect(formatted.length).toBeLessThan(large.length);
   });
 
+  it('renders a tool call that carries no args', () => {
+    const events = [
+      createEvent({
+        timestamp: 1000,
+        author: 'model',
+        content: {parts: [{functionCall: {id: 'c1', name: 'now'}}]},
+      }),
+    ];
+
+    expect(formatEventsForPrompt(events)).toBe('model called tool: now()');
+  });
+
+  it('renders a tool response that carries no payload', () => {
+    const events = [
+      createEvent({
+        timestamp: 1000,
+        author: 'model',
+        content: {parts: [{functionResponse: {id: 'c1', name: 'now'}}]},
+      }),
+    ];
+
+    expect(formatEventsForPrompt(events)).toBe('Tool response from now: ');
+  });
+
   it('truncates oversized tool call args', () => {
     const large = 'y'.repeat(2500);
     const events = [
