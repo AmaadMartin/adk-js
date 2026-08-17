@@ -116,9 +116,10 @@ export async function validateDatabaseSchemaVersion(orm: MikroORM) {
  * Returns the state row matching `where`, inserting `data` when it is missing.
  *
  * Two callers can both read a missing row and both insert it, which breaks the
- * loser's whole unit of work with a primary-key violation. The insert is
- * therefore conflict-tolerant, and the row is re-read afterwards so the loser
+ * loser's whole unit of work with a primary-key violation. The insert therefore
+ * ignores a conflict, and MikroORM re-reads the row afterwards, so the loser
  * works with the winner's values instead of the empty row it tried to write.
+ * `merge`, the default conflict action, would overwrite them instead.
  *
  * @param em The entity manager to read and write through.
  * @param entity The entity class to load.
@@ -137,14 +138,5 @@ export async function getOrCreateStateRow<T extends object>(
     return existing;
   }
 
-  await em.upsert(entity, data, {onConflictAction: 'ignore'});
-
-  // `refresh` re-hydrates the identity-map entity from the winner's row. Without
-  // it the entity keeps the values the ignored insert carried, and the next
-  // flush writes them over the winner's row.
-  const row = await em.findOne(entity, where, {refresh: true});
-  if (!row) {
-    throw new Error(`Failed to load the ${entity.name} row after insert.`);
-  }
-  return row;
+  return em.upsert(entity, data, {onConflictAction: 'ignore'});
 }

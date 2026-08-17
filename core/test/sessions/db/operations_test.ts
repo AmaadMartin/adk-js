@@ -248,15 +248,18 @@ describe('operations', () => {
 
     it('returns the existing app state row and inserts nothing', async () => {
       await seedAppState({k: 'v'});
+      const em = orm.em.fork();
+      const upsert = vi.spyOn(em, 'upsert');
 
       const row = await getOrCreateStateRow(
-        orm.em.fork(),
+        em,
         StorageAppState,
         {appName},
         {appName, state: {}, updateTime: new Date()},
       );
 
       expect(row.state).toEqual({k: 'v'});
+      expect(upsert).not.toHaveBeenCalled();
       expect(await orm.em.fork().count(StorageAppState, {})).toBe(1);
     });
 
@@ -276,7 +279,7 @@ describe('operations', () => {
     it("returns the winner's app state row when the insert conflicts", async () => {
       await seedAppState({keep: 'me'});
       const loser = orm.em.fork();
-      const findOne = vi.spyOn(loser, 'findOne').mockResolvedValueOnce(null);
+      vi.spyOn(loser, 'findOne').mockResolvedValueOnce(null);
 
       const row = await getOrCreateStateRow(
         loser,
@@ -286,7 +289,6 @@ describe('operations', () => {
       );
 
       expect(row.state).toEqual({keep: 'me'});
-      expect(findOne).toHaveBeenCalledTimes(2);
 
       row.state = {...row.state, added: 1};
       await loser.flush();
@@ -345,20 +347,6 @@ describe('operations', () => {
         .fork()
         .findOne(StorageUserState, {appName, userId});
       expect(persisted?.state).toEqual({keep: 'me', added: 1});
-    });
-
-    it('throws when the row disappears between the insert and the re-read', async () => {
-      const em = orm.em.fork();
-      vi.spyOn(em, 'findOne').mockResolvedValue(null);
-
-      await expect(
-        getOrCreateStateRow(
-          em,
-          StorageAppState,
-          {appName},
-          {appName, state: {}, updateTime: new Date()},
-        ),
-      ).rejects.toThrow('Failed to load the StorageAppState row after insert.');
     });
   });
 });
