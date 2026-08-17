@@ -491,6 +491,24 @@ describe('part_converter_utils', () => {
       ];
       expect(toGenAIParts(a2aParts)).toEqual(expected);
     });
+
+    it('maps every part through a supplied converter, in order', () => {
+      const a2aParts: A2APart[] = [
+        {kind: 'text', text: 'first'},
+        {kind: 'text', text: 'second'},
+      ];
+      const seen: A2APart[] = [];
+      const converter = (a2aPart: A2APart): GenAIPart => {
+        seen.push(a2aPart);
+        return {text: `converted-${seen.length}`};
+      };
+
+      expect(toGenAIParts(a2aParts, converter)).toEqual([
+        {text: 'converted-1'},
+        {text: 'converted-2'},
+      ]);
+      expect(seen).toEqual(a2aParts);
+    });
   });
 
   describe('end-to-end conversion', () => {

@@ -23,6 +23,7 @@ import {
   RemoteA2AAgent,
   RemoteA2AAgentConfig,
   Session,
+  toGenAIPart,
 } from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 
@@ -326,6 +327,191 @@ describe('A2ARemoteAgent', () => {
 
     expect(events.length).toBe(1);
     expect(events[0].branch).toBe('coordinator.sub_agent_a');
+  });
+
+  describe('converter overrides', () => {
+    const streamingCard: AgentCard = {
+      name: 'Remote',
+      description: 'test',
+      protocolVersion: '1.0',
+      defaultInputModes: [],
+      defaultOutputModes: [],
+      capabilities: {streaming: true},
+      skills: [],
+      url: 'https://example.com',
+      version: '1.0',
+    };
+
+    it('routes a streaming task chunk through a2aTaskConverter', async () => {
+      const converted = createEvent({
+        author: 'test-agent',
+        invocationId: 'test-invocation',
+        content: {role: 'model', parts: [{text: 'converted'}]},
+      });
+      const a2aTaskConverter = vi.fn().mockReturnValue(converted);
+      const a2aPartConverter = vi.fn(toGenAIPart);
+
+      const agent = new RemoteA2AAgent({
+        name: 'test-agent',
+        agentCard: streamingCard,
+        clientFactory: mockClientFactory,
+        a2aTaskConverter,
+        a2aPartConverter,
+      });
+
+      const chunk = {
+        kind: 'task',
+        id: 'task-1',
+        contextId: 'ctx-1',
+        status: {state: 'completed'},
+      } as A2AStreamEventData;
+      vi.mocked(mockClient.sendMessageStream).mockReturnValue(
+        (async function* () {
+          yield chunk;
+        })(),
+      );
+
+      const context = createMockContext({branch: 'coordinator.remote'});
+      const events: AdkEvent[] = [];
+      for await (const event of agent.runAsync(context)) {
+        events.push(event);
+      }
+
+      expect(events.length).toBe(1);
+      expect(events[0].content?.parts![0].text).toBe('converted');
+      expect(a2aTaskConverter).toHaveBeenCalledTimes(1);
+      expect(a2aTaskConverter).toHaveBeenCalledWith(
+        chunk,
+        'test-invocation',
+        'test-agent',
+        'coordinator.remote',
+        a2aPartConverter,
+      );
+    });
+
+    it('routes a non-streaming message response through a2aMessageConverter', async () => {
+      const converted = createEvent({
+        author: 'test-agent',
+        invocationId: 'test-invocation',
+        content: {role: 'model', parts: [{text: 'converted'}]},
+      });
+      const a2aMessageConverter = vi.fn().mockReturnValue(converted);
+      const a2aPartConverter = vi.fn(toGenAIPart);
+
+      const agent = new RemoteA2AAgent({
+        name: 'test-agent',
+        agentCard: {...streamingCard, capabilities: {streaming: false}},
+        clientFactory: mockClientFactory,
+        a2aMessageConverter,
+        a2aPartConverter,
+      });
+
+      const response: Message = {
+        kind: 'message',
+        messageId: 'msg-1',
+        role: 'agent',
+        parts: [{kind: 'text', text: 'static response'}],
+      };
+      vi.mocked(mockClient.sendMessage).mockResolvedValue(response);
+
+      const context = createMockContext({branch: 'coordinator.remote'});
+      const events: AdkEvent[] = [];
+      for await (const event of agent.runAsync(context)) {
+        events.push(event);
+      }
+
+      expect(events.length).toBe(1);
+      expect(events[0].content?.parts![0].text).toBe('converted');
+      expect(a2aMessageConverter).toHaveBeenCalledTimes(1);
+      expect(a2aMessageConverter).toHaveBeenCalledWith(
+        response,
+        'test-invocation',
+        'test-agent',
+        'coordinator.remote',
+        a2aPartConverter,
+      );
+    });
+
+    it('emits nothing for a chunk whose converter returns undefined and keeps later chunks', async () => {
+      const a2aStatusUpdateConverter = vi.fn().mockReturnValue(undefined);
+
+      const agent = new RemoteA2AAgent({
+        name: 'test-agent',
+        agentCard: streamingCard,
+        clientFactory: mockClientFactory,
+        a2aStatusUpdateConverter,
+      });
+
+      vi.mocked(mockClient.sendMessageStream).mockReturnValue(
+        (async function* () {
+          yield {
+            kind: 'status-update',
+            taskId: 'task-1',
+            contextId: 'ctx-1',
+            status: {
+              state: 'working',
+              message: {
+                kind: 'message',
+                messageId: 'msg-status',
+                role: 'agent',
+                parts: [{kind: 'text', text: 'suppressed'}],
+              },
+            },
+            final: false,
+          } as A2AStreamEventData;
+          yield {
+            kind: 'message',
+            messageId: 'msg-after',
+            role: 'agent',
+            parts: [{kind: 'text', text: 'still flowing'}],
+          } as A2AStreamEventData;
+        })(),
+      );
+
+      const context = createMockContext();
+      const events: AdkEvent[] = [];
+      for await (const event of agent.runAsync(context)) {
+        events.push(event);
+      }
+
+      expect(a2aStatusUpdateConverter).toHaveBeenCalledTimes(1);
+      expect(events.length).toBe(1);
+      expect(events[0].content?.parts![0].text).toBe('still flowing');
+    });
+
+    it('applies a2aPartConverter to a streaming chunk when no event converter is set', async () => {
+      const agent = new RemoteA2AAgent({
+        name: 'test-agent',
+        agentCard: streamingCard,
+        clientFactory: mockClientFactory,
+        a2aPartConverter: (a2aPart) => {
+          const genAIPart = toGenAIPart(a2aPart);
+          return genAIPart.text
+            ? {...genAIPart, text: genAIPart.text.toUpperCase()}
+            : genAIPart;
+        },
+      });
+
+      vi.mocked(mockClient.sendMessageStream).mockReturnValue(
+        (async function* () {
+          yield {
+            kind: 'message',
+            messageId: 'msg-part',
+            role: 'agent',
+            parts: [{kind: 'text', text: 'shout'}],
+          } as A2AStreamEventData;
+        })(),
+      );
+
+      const context = createMockContext();
+      const events: AdkEvent[] = [];
+      for await (const event of agent.runAsync(context)) {
+        events.push(event);
+      }
+
+      expect(events.length).toBe(1);
+      expect(events[0].content?.parts![0].text).toBe('SHOUT');
+    });
   });
 
   it('should trigger beforeRequestCallbacks', async () => {
