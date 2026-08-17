@@ -12,7 +12,7 @@ import {
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {Mock, afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {createProgram} from '../../src/cli/cli.js';
 import {AdkApiServer} from '../../src/server/adk_api_server.js';
@@ -81,8 +81,7 @@ describe('CLI local storage wiring', () => {
     await program.parseAsync(['node', 'cli_entrypoint.js', ...args]);
   };
 
-  const serverOptions = () =>
-    (AdkApiServer as unknown as Mock).mock.calls[0][0];
+  const serverOptions = () => vi.mocked(AdkApiServer).mock.calls[0][0];
 
   it('gives adk web per-agent local storage by default', async () => {
     await parse(['web', agentsDir]);
@@ -111,10 +110,11 @@ describe('CLI local storage wiring', () => {
     await fs.writeFile(agentFile, '');
 
     await parse(['web', agentFile]);
-    await serverOptions().sessionService.createSession({
-      appName: 'weather',
-      userId: 'u1',
-    });
+    const sessionService = serverOptions().sessionService;
+    if (!sessionService) {
+      expect.fail('adk web started without a session service');
+    }
+    await sessionService.createSession({appName: 'weather', userId: 'u1'});
 
     expect(serverOptions().agentsDir).toBe(agentFile);
     expect(
