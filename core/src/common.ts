@@ -297,6 +297,10 @@ export {
 } from './tools/preload_memory_tool.js';
 export {requestInputTool} from './tools/request_input_tool.js';
 export {ToolConfirmation} from './tools/tool_confirmation.js';
+export {
+  TRANSFER_TO_AGENT_TOOL_NAME,
+  TransferToAgentTool,
+} from './tools/transfer_to_agent_tool.js';
 export {URL_CONTEXT, UrlContextTool} from './tools/url_context_tool.js';
 export {VertexAiSearchTool} from './tools/vertex_ai_search_tool.js';
 export type {

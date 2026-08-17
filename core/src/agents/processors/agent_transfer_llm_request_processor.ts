@@ -4,38 +4,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {z} from 'zod';
 import {Event} from '../../events/event.js';
 import {appendInstructions, LlmRequest} from '../../models/llm_request.js';
-import {FunctionTool} from '../../tools/function_tool.js';
+import {
+  TRANSFER_TO_AGENT_TOOL_NAME,
+  TransferToAgentTool,
+} from '../../tools/transfer_to_agent_tool.js';
 import {BaseAgent} from '../base_agent.js';
 import {Context} from '../context.js';
 import {InvocationContext} from '../invocation_context.js';
 import {isLlmAgent, LlmAgent} from '../llm_agent.js';
 import {BaseLlmRequestProcessor} from './base_llm_processor.js';
-
-/** The name the model calls to hand off control to another agent. */
-export const TRANSFER_TO_AGENT_TOOL_NAME = 'transfer_to_agent';
-
-/**
- * The synthetic tool that performs an agent transfer. Its declaration does not
- * depend on the available targets, so one instance serves every agent.
- */
-export const TRANSFER_TO_AGENT_TOOL = new FunctionTool({
-  name: TRANSFER_TO_AGENT_TOOL_NAME,
-  description:
-    'Transfer the question to another agent. This tool hands off control to another agent when it is more suitable to answer the user question according to the agent description.',
-  parameters: z.object({
-    agentName: z.string().describe('the agent name to transfer to.'),
-  }),
-  execute: function (args: {agentName: string}, toolContext?: Context) {
-    if (!toolContext) {
-      throw new Error('toolContext is required.');
-    }
-    toolContext.actions.transferToAgent = args.agentName;
-    return 'Transfer queued';
-  },
-});
 
 /**
  * Collects the agents the given agent may transfer to: its sub-agents, and —
@@ -104,7 +83,9 @@ export class AgentTransferLlmRequestProcessor extends BaseLlmRequestProcessor {
     ]);
 
     const toolContext = new Context({invocationContext});
-    await TRANSFER_TO_AGENT_TOOL.processLlmRequest({toolContext, llmRequest});
+    await new TransferToAgentTool(
+      transferTargets.map((target) => target.name),
+    ).processLlmRequest({toolContext, llmRequest});
   }
 
   private buildTargetAgentsInfo(targetAgent: BaseAgent): string {
@@ -118,6 +99,10 @@ Agent description: ${targetAgent.description}
     agent: LlmAgent,
     targetAgents: BaseAgent[],
   ): string {
+    const availableAgentNames = targetAgents
+      .map((targetAgent) => `\`${targetAgent.name}\``)
+      .join(', ');
+
     let instructions = `
 You have a list of other agents to transfer to:
 
@@ -130,6 +115,9 @@ If another agent is better for answering the question according to its
 description, call \`${TRANSFER_TO_AGENT_TOOL_NAME}\` function to transfer the
 question to that agent. When transferring, do not generate any text other than
 the function call.
+
+**NOTE**: the only available agents for \`${TRANSFER_TO_AGENT_TOOL_NAME}\` function are
+${availableAgentNames}.
 `;
 
     if (agent.parentAgent && !agent.disallowTransferToParent) {

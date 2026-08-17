@@ -45,6 +45,52 @@ function createMockInvocationContext(agent: BaseAgent): InvocationContext {
   });
 }
 
+function createLlmRequest(): LlmRequest {
+  return {contents: [], toolsDict: {}, liveConnectConfig: {}};
+}
+
+async function runProcessor(
+  invocationContext: InvocationContext,
+  llmRequest: LlmRequest,
+): Promise<void> {
+  for await (const _ of AGENT_TRANSFER_LLM_REQUEST_PROCESSOR.runAsync(
+    invocationContext,
+    llmRequest,
+  )) {
+    // The processor only mutates the request; it yields no events.
+  }
+}
+
+function transferDeclarationEnum(llmRequest: LlmRequest): string[] | undefined {
+  const tool = llmRequest.config?.tools?.[0];
+  if (!tool || !('functionDeclarations' in tool)) {
+    return expect.fail('the request declares no function tool');
+  }
+  const declaration = tool.functionDeclarations?.[0];
+  return declaration?.parameters?.properties?.['agentName'].enum;
+}
+
+/**
+ * Builds an agent whose targets are a sub-agent, its parent and a peer, named
+ * so that their target order differs from their alphabetical order.
+ */
+function createAgentWithThreeTargets(): LlmAgent {
+  const agent = new LlmAgent({
+    name: 'test_agent',
+    model: 'gemini-2.5-flash',
+    subAgents: [new LlmAgent({name: 'zeta_agent', model: 'gemini-2.5-flash'})],
+  });
+  new LlmAgent({
+    name: 'mid_agent',
+    model: 'gemini-2.5-flash',
+    subAgents: [
+      agent,
+      new LlmAgent({name: 'alpha_agent', model: 'gemini-2.5-flash'}),
+    ],
+  });
+  return agent;
+}
+
 describe('AgentTransferLlmRequestProcessor', () => {
   it('should do nothing if agent is not an LlmAgent', async () => {
     const agent = new MockRootAgent('test_agent');
@@ -263,5 +309,93 @@ describe('AgentTransferLlmRequestProcessor', () => {
 
     expect(result).toEqual('Transfer queued');
     expect(toolContext.actions.transferToAgent).toEqual('sub_agent');
+  });
+
+  it('constrains the declared agentName to the transfer targets', async () => {
+    const invocationContext = createMockInvocationContext(
+      createAgentWithThreeTargets(),
+    );
+    const llmRequest = createLlmRequest();
+
+    await runProcessor(invocationContext, llmRequest);
+
+    expect(transferDeclarationEnum(llmRequest)).toEqual([
+      'zeta_agent',
+      'mid_agent',
+      'alpha_agent',
+    ]);
+  });
+
+  it('registers the tool that declares those transfer targets', async () => {
+    const invocationContext = createMockInvocationContext(
+      createAgentWithThreeTargets(),
+    );
+    const llmRequest = createLlmRequest();
+
+    await runProcessor(invocationContext, llmRequest);
+
+    const tool = llmRequest.toolsDict['transfer_to_agent'];
+    expect(
+      tool._getDeclaration()?.parameters?.properties?.['agentName'].enum,
+    ).toEqual(['zeta_agent', 'mid_agent', 'alpha_agent']);
+  });
+
+  it('declares no transfer tool when there are no transfer targets', async () => {
+    const agent = new LlmAgent({
+      name: 'lone_agent',
+      model: 'gemini-2.5-flash',
+      disallowTransferToParent: true,
+      disallowTransferToPeers: true,
+    });
+    const llmRequest = createLlmRequest();
+
+    await runProcessor(createMockInvocationContext(agent), llmRequest);
+
+    expect(llmRequest.toolsDict['transfer_to_agent']).toBeUndefined();
+    expect(llmRequest.config?.tools).toBeUndefined();
+  });
+
+  it('names the same agents in the instructions and the declaration', async () => {
+    const invocationContext = createMockInvocationContext(
+      createAgentWithThreeTargets(),
+    );
+    const llmRequest = createLlmRequest();
+
+    await runProcessor(invocationContext, llmRequest);
+
+    expect(llmRequest.config?.systemInstruction).toContain(
+      '**NOTE**: the only available agents for `transfer_to_agent` function are\n' +
+        '`zeta_agent`, `mid_agent`, `alpha_agent`.',
+    );
+    expect(transferDeclarationEnum(llmRequest)).toEqual([
+      'zeta_agent',
+      'mid_agent',
+      'alpha_agent',
+    ]);
+  });
+
+  it('declares a separate target list for each agent', async () => {
+    const firstAgent = new LlmAgent({
+      name: 'first_root',
+      model: 'gemini-2.5-flash',
+      subAgents: [
+        new LlmAgent({name: 'first_child', model: 'gemini-2.5-flash'}),
+      ],
+    });
+    const secondAgent = new LlmAgent({
+      name: 'second_root',
+      model: 'gemini-2.5-flash',
+      subAgents: [
+        new LlmAgent({name: 'second_child', model: 'gemini-2.5-flash'}),
+      ],
+    });
+    const firstRequest = createLlmRequest();
+    const secondRequest = createLlmRequest();
+
+    await runProcessor(createMockInvocationContext(firstAgent), firstRequest);
+    await runProcessor(createMockInvocationContext(secondAgent), secondRequest);
+
+    expect(transferDeclarationEnum(firstRequest)).toEqual(['first_child']);
+    expect(transferDeclarationEnum(secondRequest)).toEqual(['second_child']);
   });
 });
