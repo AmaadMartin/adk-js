@@ -28,7 +28,7 @@ import {
   toMissingRemoteSessionParts,
 } from './a2a_remote_agent_utils.js';
 import {resolveAgentCard} from './agent_card.js';
-import {toAdkEvent} from './event_converter_utils.js';
+import {A2AEventConverters, toAdkEvent} from './event_converter_utils.js';
 import {getA2ASessionMetadata} from './metadata_converter_utils.js';
 import {toA2AParts} from './part_converter_utils.js';
 
@@ -77,8 +77,13 @@ export type AfterA2ARequestCallback = (
 
 /**
  * Configuration for the A2ARemoteAgent.
+ *
+ * @remarks
+ * The {@link A2AEventConverters} fields let a caller reshape how a remote
+ * response becomes an ADK event without subclassing the agent.
  */
-export interface RemoteA2AAgentConfig extends BaseAgentConfig {
+export interface RemoteA2AAgentConfig
+  extends BaseAgentConfig, A2AEventConverters {
   /**
    * Loaded AgentCard or URL to AgentCard.
    */
@@ -224,6 +229,7 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
             context.invocationId,
             this.name,
             context.branch,
+            this.a2aConfig,
           );
           if (!adkEvent) {
             continue;
@@ -252,6 +258,7 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
           context.invocationId,
           this.name,
           context.branch,
+          this.a2aConfig,
         );
         if (adkEvent) {
           processor.updateCustomMetadata(adkEvent, result);

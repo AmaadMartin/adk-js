@@ -5,20 +5,29 @@
  */
 
 import {
+  Part as A2APart,
   Message,
   Task,
   TaskArtifactUpdateEvent,
   TaskStatusUpdateEvent,
 } from '@a2a-js/sdk';
 import {RequestContext} from '@a2a-js/sdk/server';
-import {createEvent, createEventActions, ExecutorContext} from '@google/adk';
+import {
+  Event as AdkEvent,
+  createEvent,
+  createEventActions,
+  ExecutorContext,
+} from '@google/adk';
+import {Part as GenAIPart} from '@google/genai';
 import {describe, expect, it, vi} from 'vitest';
 import {A2AEvent} from '../../src/a2a/a2a_event.js';
 import {
+  statusUpdateToAdkEvent,
   toA2AArtifactUpdateEvent,
   toA2AMessage,
   toAdkEvent,
 } from '../../src/a2a/event_converter_utils.js';
+import {toGenAIPart} from '../../src/a2a/part_converter_utils.js';
 import * as envAwareUtils from '../../src/utils/env_aware_utils.js';
 
 vi.mock('../../src/utils/env_aware_utils.js', async (importOriginal) => {
@@ -749,6 +758,397 @@ describe('event_converter_utils', () => {
         expect(event!.turnComplete).toBe(true);
         expect(event!.longRunningToolIds).toEqual(['inputTool']);
       });
+    });
+  });
+
+  describe('converter overrides', () => {
+    const message: Message = {
+      kind: 'message',
+      messageId: 'msg-override',
+      role: 'agent',
+      parts: [{kind: 'text', text: 'hello'}],
+    };
+
+    const task: Task = {
+      kind: 'task',
+      id: 'task-override',
+      contextId: 'ctx-override',
+      status: {
+        state: 'completed',
+        message: {
+          kind: 'message',
+          messageId: 'msg-in-task',
+          role: 'agent',
+          parts: [{kind: 'text', text: 'from task'}],
+        },
+      },
+    };
+
+    const artifactUpdate: TaskArtifactUpdateEvent = {
+      kind: 'artifact-update',
+      taskId: 'task-override',
+      contextId: 'ctx-override',
+      artifact: {
+        artifactId: 'art-override',
+        parts: [{kind: 'text', text: 'from artifact'}],
+      },
+    };
+
+    const statusUpdate: TaskStatusUpdateEvent = {
+      kind: 'status-update',
+      taskId: 'task-override',
+      contextId: 'ctx-override',
+      status: {
+        state: 'working',
+        message: {
+          kind: 'message',
+          messageId: 'msg-in-status',
+          role: 'agent',
+          parts: [{kind: 'text', text: 'from status'}],
+        },
+      },
+      final: false,
+    };
+
+    const upperCasePartConverter = (a2aPart: A2APart): GenAIPart => {
+      const genAIPart = toGenAIPart(a2aPart);
+      return genAIPart.text
+        ? {...genAIPart, text: genAIPart.text.toUpperCase()}
+        : genAIPart;
+    };
+
+    it('routes a Message to a2aMessageConverter', () => {
+      const converted = createEvent({author: 'agent1', invocationId: 'inv1'});
+      const a2aMessageConverter = vi.fn().mockReturnValue(converted);
+      const a2aPartConverter = vi.fn(toGenAIPart);
+
+      const event = toAdkEvent(message, 'inv1', 'agent1', 'branch1', {
+        a2aMessageConverter,
+        a2aPartConverter,
+      });
+
+      expect(event).toBe(converted);
+      expect(a2aMessageConverter).toHaveBeenCalledTimes(1);
+      expect(a2aMessageConverter).toHaveBeenCalledWith(
+        message,
+        'inv1',
+        'agent1',
+        'branch1',
+        a2aPartConverter,
+      );
+    });
+
+    it('routes a Task to a2aTaskConverter', () => {
+      const converted = createEvent({author: 'agent1', invocationId: 'inv1'});
+      const a2aTaskConverter = vi.fn().mockReturnValue(converted);
+      const a2aPartConverter = vi.fn(toGenAIPart);
+
+      const event = toAdkEvent(task, 'inv1', 'agent1', 'branch1', {
+        a2aTaskConverter,
+        a2aPartConverter,
+      });
+
+      expect(event).toBe(converted);
+      expect(a2aTaskConverter).toHaveBeenCalledTimes(1);
+      expect(a2aTaskConverter).toHaveBeenCalledWith(
+        task,
+        'inv1',
+        'agent1',
+        'branch1',
+        a2aPartConverter,
+      );
+    });
+
+    it('routes an artifact update to a2aArtifactUpdateConverter', () => {
+      const converted = createEvent({author: 'agent1', invocationId: 'inv1'});
+      const a2aArtifactUpdateConverter = vi.fn().mockReturnValue(converted);
+      const a2aPartConverter = vi.fn(toGenAIPart);
+
+      const event = toAdkEvent(artifactUpdate, 'inv1', 'agent1', 'branch1', {
+        a2aArtifactUpdateConverter,
+        a2aPartConverter,
+      });
+
+      expect(event).toBe(converted);
+      expect(a2aArtifactUpdateConverter).toHaveBeenCalledTimes(1);
+      expect(a2aArtifactUpdateConverter).toHaveBeenCalledWith(
+        artifactUpdate,
+        'inv1',
+        'agent1',
+        'branch1',
+        a2aPartConverter,
+      );
+    });
+
+    it('routes a status update to a2aStatusUpdateConverter', () => {
+      const converted = createEvent({author: 'agent1', invocationId: 'inv1'});
+      const a2aStatusUpdateConverter = vi.fn().mockReturnValue(converted);
+      const a2aPartConverter = vi.fn(toGenAIPart);
+
+      const event = toAdkEvent(statusUpdate, 'inv1', 'agent1', 'branch1', {
+        a2aStatusUpdateConverter,
+        a2aPartConverter,
+      });
+
+      expect(event).toBe(converted);
+      expect(a2aStatusUpdateConverter).toHaveBeenCalledTimes(1);
+      expect(a2aStatusUpdateConverter).toHaveBeenCalledWith(
+        statusUpdate,
+        'inv1',
+        'agent1',
+        'branch1',
+        a2aPartConverter,
+      );
+    });
+
+    it('does not route a Message to the Task converter', () => {
+      const a2aTaskConverter = vi.fn();
+
+      const event = toAdkEvent(message, 'inv1', 'agent1', undefined, {
+        a2aTaskConverter,
+      });
+
+      expect(a2aTaskConverter).not.toHaveBeenCalled();
+      expect(event!.content?.parts).toEqual([{text: 'hello', thought: false}]);
+    });
+
+    it('emits no event when an override returns undefined', () => {
+      const a2aStatusUpdateConverter = vi.fn().mockReturnValue(undefined);
+
+      const event = toAdkEvent(statusUpdate, 'inv1', 'agent1', undefined, {
+        a2aStatusUpdateConverter,
+      });
+
+      expect(event).toBeUndefined();
+      expect(a2aStatusUpdateConverter).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns undefined for an unknown kind even with converters supplied', () => {
+      const a2aMessageConverter = vi.fn();
+      const a2aTaskConverter = vi.fn();
+
+      const event = toAdkEvent(
+        {kind: 'unknown'} as unknown as A2AEvent,
+        'inv1',
+        'agent1',
+        undefined,
+        {a2aMessageConverter, a2aTaskConverter},
+      );
+
+      expect(event).toBeUndefined();
+      expect(a2aMessageConverter).not.toHaveBeenCalled();
+      expect(a2aTaskConverter).not.toHaveBeenCalled();
+    });
+
+    it('reaches the built-in Message converter with a2aPartConverter alone', () => {
+      const event = toAdkEvent(message, 'inv1', 'agent1', undefined, {
+        a2aPartConverter: upperCasePartConverter,
+      });
+
+      expect(event!.content?.parts).toEqual([{text: 'HELLO', thought: false}]);
+    });
+
+    it('reaches the built-in Task converter with a2aPartConverter alone', () => {
+      const taskWithArtifact: Task = {
+        ...task,
+        artifacts: [
+          {
+            artifactId: 'art-in-task',
+            parts: [{kind: 'text', text: 'from artifact'}],
+          },
+        ],
+      };
+
+      const event = toAdkEvent(taskWithArtifact, 'inv1', 'agent1', undefined, {
+        a2aPartConverter: upperCasePartConverter,
+      });
+
+      expect(event!.content?.parts).toEqual([
+        {text: 'FROM ARTIFACT', thought: false},
+        {text: 'FROM TASK', thought: false},
+      ]);
+    });
+
+    it('reaches the built-in artifact update converter with a2aPartConverter alone', () => {
+      const event = toAdkEvent(artifactUpdate, 'inv1', 'agent1', undefined, {
+        a2aPartConverter: upperCasePartConverter,
+      });
+
+      expect(event!.content?.parts).toEqual([
+        {text: 'FROM ARTIFACT', thought: false},
+      ]);
+    });
+
+    it('reaches the built-in partial status update converter with a2aPartConverter alone', () => {
+      const event = toAdkEvent(statusUpdate, 'inv1', 'agent1', undefined, {
+        a2aPartConverter: upperCasePartConverter,
+      });
+
+      expect(event!.content?.parts).toEqual([
+        {text: 'FROM STATUS', thought: false},
+      ]);
+    });
+
+    it('reaches the built-in final status update converter with a2aPartConverter alone', () => {
+      const event = toAdkEvent(
+        {...statusUpdate, final: true},
+        'inv1',
+        'agent1',
+        undefined,
+        {a2aPartConverter: upperCasePartConverter},
+      );
+
+      expect(event!.content?.parts).toEqual([
+        {text: 'FROM STATUS', thought: false},
+      ]);
+      expect(event!.turnComplete).toBe(true);
+    });
+
+    it('uses a2aPartConverter to detect long-running tool ids', () => {
+      const longRunningUpdate: TaskArtifactUpdateEvent = {
+        kind: 'artifact-update',
+        taskId: 'task-override',
+        contextId: 'ctx-override',
+        artifact: {
+          artifactId: 'art-long-running',
+          parts: [
+            {
+              kind: 'data',
+              data: {id: 'origTool', name: 'origTool', args: {}},
+              metadata: {
+                'adk_is_long_running': true,
+                'adk_type': 'function_call',
+              },
+            },
+          ],
+        },
+      };
+      const renamingPartConverter = (a2aPart: A2APart): GenAIPart => {
+        const genAIPart = toGenAIPart(a2aPart);
+        return genAIPart.functionCall
+          ? {
+              ...genAIPart,
+              functionCall: {...genAIPart.functionCall, id: 'renamedTool'},
+            }
+          : genAIPart;
+      };
+
+      const event = toAdkEvent(longRunningUpdate, 'inv1', 'agent1', undefined, {
+        a2aPartConverter: renamingPartConverter,
+      });
+
+      expect(event!.longRunningToolIds).toEqual(['renamedTool']);
+    });
+
+    it('uses a2aPartConverter to detect long-running tool ids on a Task', () => {
+      const longRunningTask: Task = {
+        kind: 'task',
+        id: 'task-long-running',
+        contextId: 'ctx-override',
+        status: {
+          state: 'completed',
+          message: {
+            kind: 'message',
+            messageId: 'msg-long-running',
+            role: 'agent',
+            parts: [
+              {
+                kind: 'data',
+                data: {id: 'statusTool', name: 'statusTool', args: {}},
+                metadata: {
+                  'adk_is_long_running': true,
+                  'adk_type': 'function_call',
+                },
+              },
+            ],
+          },
+        },
+        artifacts: [
+          {
+            artifactId: 'art-long-running',
+            parts: [
+              {
+                kind: 'data',
+                data: {id: 'artifactTool', name: 'artifactTool', args: {}},
+                metadata: {
+                  'adk_is_long_running': true,
+                  'adk_type': 'function_call',
+                },
+              },
+            ],
+          },
+        ],
+      };
+      const prefixingPartConverter = (a2aPart: A2APart): GenAIPart => {
+        const genAIPart = toGenAIPart(a2aPart);
+        return genAIPart.functionCall
+          ? {
+              ...genAIPart,
+              functionCall: {
+                ...genAIPart.functionCall,
+                id: `pre-${genAIPart.functionCall.id}`,
+              },
+            }
+          : genAIPart;
+      };
+
+      const event = toAdkEvent(longRunningTask, 'inv1', 'agent1', undefined, {
+        a2aPartConverter: prefixingPartConverter,
+      });
+
+      expect(event!.longRunningToolIds).toEqual([
+        'pre-artifactTool',
+        'pre-statusTool',
+      ]);
+    });
+
+    it('produces the default event when no converter is supplied', () => {
+      // `id` and `timestamp` are minted per call, so they never match across
+      // two conversions of the same input.
+      const stable = (event: AdkEvent | undefined) =>
+        event && {...event, id: 'stable', timestamp: 0};
+
+      for (const a2aEvent of [message, task, artifactUpdate, statusUpdate]) {
+        expect(
+          stable(toAdkEvent(a2aEvent, 'inv1', 'agent1', 'branch1', {})),
+        ).toEqual(stable(toAdkEvent(a2aEvent, 'inv1', 'agent1', 'branch1')));
+      }
+    });
+  });
+
+  describe('statusUpdateToAdkEvent', () => {
+    const baseStatusUpdate: TaskStatusUpdateEvent = {
+      kind: 'status-update',
+      taskId: 'task-dispatch',
+      contextId: 'ctx-dispatch',
+      status: {
+        state: 'working',
+        message: {
+          kind: 'message',
+          messageId: 'msg-dispatch',
+          role: 'agent',
+          parts: [{kind: 'text', text: 'progress'}],
+        },
+      },
+      final: false,
+    };
+
+    it('produces a terminal event when final is true', () => {
+      const event = statusUpdateToAdkEvent(
+        {...baseStatusUpdate, final: true},
+        'inv1',
+        'agent1',
+      );
+
+      expect(event!.turnComplete).toBe(true);
+      expect(event!.partial).toBeUndefined();
+    });
+
+    it('produces a partial event when final is false', () => {
+      const event = statusUpdateToAdkEvent(baseStatusUpdate, 'inv1', 'agent1');
+
+      expect(event!.turnComplete).toBe(false);
+      expect(event!.partial).toBe(true);
     });
   });
 });
