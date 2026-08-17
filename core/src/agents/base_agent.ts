@@ -10,6 +10,12 @@ import {context, trace} from '@opentelemetry/api';
 import {createEvent, Event} from '../events/event.js';
 
 import {
+  recordAgentInvocationDuration,
+  recordAgentRequestSize,
+  recordAgentResponseSize,
+  recordAgentWorkflowSteps,
+} from '../telemetry/metrics.js';
+import {
   runAsyncGeneratorWithOtelContext,
   traceAgentInvocation,
   tracer,
@@ -254,6 +260,23 @@ export abstract class BaseAgent<
   ): AsyncGenerator<Event, void, void> {
     const span = tracer.startSpan(`invoke_agent ${this.name}`);
     const ctx = trace.setSpan(context.active(), span);
+    const startTime = performance.now();
+    const agentName = this.name;
+    let stepCount = 0;
+    let lastContent: Content | undefined;
+    let error: unknown;
+    // Folding each event into two scalars keeps a streaming or long-running
+    // agent from retaining its own event stream. Events authored by a
+    // sub-agent belong to that sub-agent's invocation, not this one.
+    const tally = (event: Event) => {
+      if (event.author !== agentName) {
+        return;
+      }
+      stepCount++;
+      if (event.content) {
+        lastContent = event.content;
+      }
+    };
     try {
       yield* runAsyncGeneratorWithOtelContext<BaseAgent, Event>(
         ctx,
@@ -261,9 +284,12 @@ export abstract class BaseAgent<
         async function* () {
           const context = this.createInvocationContext(parentContext);
 
+          recordAgentRequestSize(agentName, context.userContent);
+
           const beforeAgentCallbackEvent =
             await this.handleBeforeAgentCallback(context);
           if (beforeAgentCallbackEvent) {
+            tally(beforeAgentCallbackEvent);
             yield beforeAgentCallbackEvent;
           }
 
@@ -273,6 +299,7 @@ export abstract class BaseAgent<
 
           traceAgentInvocation({agent: this, invocationContext: context});
           for await (const event of this.runAsyncImpl(context)) {
+            tally(event);
             yield event;
           }
 
@@ -283,12 +310,23 @@ export abstract class BaseAgent<
           const afterAgentCallbackEvent =
             await this.handleAfterAgentCallback(context);
           if (afterAgentCallbackEvent) {
+            tally(afterAgentCallbackEvent);
             yield afterAgentCallbackEvent;
           }
         },
       );
+    } catch (e) {
+      error = e;
+      throw e;
     } finally {
       span.end();
+      recordAgentInvocationDuration(
+        agentName,
+        (performance.now() - startTime) / 1000,
+        error,
+      );
+      recordAgentWorkflowSteps(agentName, stepCount);
+      recordAgentResponseSize(agentName, lastContent);
     }
   }
 
