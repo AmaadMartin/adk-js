@@ -104,31 +104,3 @@ export interface BaseMemoryService {
    */
   searchMemory(request: SearchMemoryRequest): Promise<SearchMemoryResponse>;
 }
-
-/** The error message reported when a service cannot ingest an event delta. */
-export const EVENT_DELTAS_UNSUPPORTED_MESSAGE =
-  'This memory service does not support adding event deltas. ' +
-  'Call addSessionToMemory(session) to ingest the full session.';
-
-/**
- * Adds an event delta to `service`, rejecting when the service does not accept
- * deltas.
- *
- * `addEventsToMemory` is optional on {@link BaseMemoryService}, so calling it
- * through `service.addEventsToMemory?.(...)` turns a service's opt-out into a
- * silent no-op and the write is lost. Callers that need the write to happen go
- * through this instead.
- *
- * @param service The memory service to write to.
- * @param request The request to add events to the memory.
- * @return A promise that resolves when the events are added to the memory.
- */
-export async function addEventsToMemory(
-  service: BaseMemoryService,
-  request: AddEventsToMemoryRequest,
-): Promise<void> {
-  if (!service.addEventsToMemory) {
-    throw new Error(EVENT_DELTAS_UNSUPPORTED_MESSAGE);
-  }
-  await service.addEventsToMemory(request);
-}
