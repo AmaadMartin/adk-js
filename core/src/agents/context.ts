@@ -24,7 +24,7 @@ import {ReadonlyContext} from './readonly_context.js';
  * access to the invocation context, function call ID, event actions, and
  * authentication response. It also provides methods for requesting credentials,
  * retrieving authentication responses, loading and saving artifacts, and
- * searching memory.
+ * reading and writing memory.
  */
 export class Context extends ReadonlyContext {
   private readonly _state: State;
@@ -184,6 +184,32 @@ export class Context extends ReadonlyContext {
     }
 
     return this.invocationContext.artifactService.listArtifactKeys();
+  }
+
+  /**
+   * Adds the current session to the memory of the current user.
+   *
+   * Hands the invocation's session to the configured memory service so that
+   * later invocations can recall this conversation.
+   *
+   * @return A promise that resolves when the session has been added to memory.
+   * @throws If no memory service is configured for this invocation.
+   *
+   * @example
+   * ```ts
+   * const afterAgentCallback = async (ctx: Context) => {
+   *   await ctx.addSessionToMemory();
+   * };
+   * ```
+   */
+  addSessionToMemory(): Promise<void> {
+    if (!this.invocationContext.memoryService) {
+      throw new Error('Memory service is not initialized.');
+    }
+
+    return this.invocationContext.memoryService.addSessionToMemory(
+      this.invocationContext.session,
+    );
   }
 
   /**
