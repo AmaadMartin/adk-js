@@ -36,6 +36,7 @@ const state = vi.hoisted(() => ({
   createdClients: [] as Array<{endpoint: string; authParams: unknown}>,
   authProviders: [] as string[],
   configFileArgs: [] as Array<{file?: string; profile?: string}>,
+  failNextAuth: false,
 }));
 
 // Only the client and the credential providers are faked: the model namespace
@@ -58,6 +59,10 @@ vi.mock('oci-common', async (importOriginal) => {
   const actual = await importOriginal<typeof import('oci-common')>();
   class ConfigFileAuthenticationDetailsProvider {
     constructor(file?: string, profile?: string) {
+      if (state.failNextAuth) {
+        state.failNextAuth = false;
+        throw new Error('config file is unreadable');
+      }
       state.authProviders.push('API_KEY');
       state.configFileArgs.push({file, profile});
     }
@@ -242,6 +247,7 @@ describe('OciGenAiLlm', () => {
     state.createdClients.length = 0;
     state.authProviders.length = 0;
     state.configFileArgs.length = 0;
+    state.failNextAuth = false;
   });
 
   afterEach(() => {
@@ -640,6 +646,15 @@ describe('OciGenAiLlm', () => {
       });
     });
 
+    it('ignores an empty JSON Schema declaration', () => {
+      const tool = functionDeclarationToOciTool({
+        name: 'ping',
+        parametersJsonSchema: null,
+      });
+
+      expect(tool.parameters).toEqual({type: 'object', properties: {}});
+    });
+
     it('passes a JSON Schema declaration through untouched', () => {
       const parametersJsonSchema = {
         type: 'object',
@@ -902,14 +917,33 @@ describe('OciGenAiLlm', () => {
       });
     });
 
-    it('ignores a system instruction that is not a plain string', async () => {
+    it('sends the text of a Content system instruction', async () => {
       state.chatMock.mockResolvedValue(chatResponse({text: 'hi'}));
 
       await collect(
         newLlm().generateContentAsync(
           newRequest({
-            config: {systemInstruction: {parts: [{text: 'Be concise.'}]}},
+            config: {
+              systemInstruction: {
+                parts: [{text: 'Be concise.'}, {text: 'Be kind.'}],
+              },
+            },
           }),
+        ),
+      );
+
+      expect(sentChatRequest().messages?.[0]).toEqual({
+        role: 'SYSTEM',
+        content: [{type: 'TEXT', text: 'Be concise.\nBe kind.'}],
+      });
+    });
+
+    it('sends no system message when the instruction holds no text', async () => {
+      state.chatMock.mockResolvedValue(chatResponse({text: 'hi'}));
+
+      await collect(
+        newLlm().generateContentAsync(
+          newRequest({config: {systemInstruction: {parts: []}}}),
         ),
       );
 
@@ -1357,6 +1391,20 @@ describe('OciGenAiLlm', () => {
       expect(responses[0].content?.parts).toEqual([]);
     });
 
+    it.each([
+      ['content', {message: {content: 7}}],
+      ['toolCalls', {message: {toolCalls: {name: 'oops'}}}],
+    ])('skips an event whose %s field is not a list', async (_field, bad) => {
+      state.chatMock.mockResolvedValue(sseStream([bad, textChunk('ok')]));
+
+      const responses = await collect(
+        newLlm().generateContentAsync(newRequest(), true),
+      );
+
+      expect(responses).toHaveLength(2);
+      expect(responses[1].content?.parts).toEqual([{text: 'ok'}]);
+    });
+
     it('stops reading once the signal is aborted', async () => {
       const stream = new ReadableStream<Uint8Array>({
         start(controller) {
@@ -1571,6 +1619,20 @@ describe('OciGenAiLlm', () => {
         expect(state.authProviders).toEqual([authType]);
       },
     );
+
+    it('retries the client build after a transient failure', async () => {
+      state.failNextAuth = true;
+      state.chatMock.mockResolvedValue(chatResponse({text: 'hi'}));
+      const llm = newLlm();
+
+      await expect(
+        collect(llm.generateContentAsync(newRequest())),
+      ).rejects.toThrow(/config file is unreadable/);
+      const responses = await collect(llm.generateContentAsync(newRequest()));
+
+      expect(responses[0].content?.parts).toEqual([{text: 'hi'}]);
+      expect(state.createdClients).toHaveLength(1);
+    });
   });
 
   describe('connect', () => {

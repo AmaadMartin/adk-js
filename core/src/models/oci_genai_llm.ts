@@ -24,6 +24,7 @@ import {readSseData} from '../utils/sse_utils.js';
 
 import {BaseLlm} from './base_llm.js';
 import {BaseLlmConnection} from './base_llm_connection.js';
+import {extractSystemInstruction} from './interactions_utils.js';
 import {LlmRequest} from './llm_request.js';
 import {LlmResponse} from './llm_response.js';
 
@@ -299,9 +300,16 @@ export class OciGenAiLlm extends BaseLlm {
     );
   }
 
-  /** Loads the OCI SDK and builds the client once per instance. */
+  /**
+   * Loads the OCI SDK and builds the client once per instance. A failed build
+   * is not cached, so a transient one — an unreadable config file, a metadata
+   * service blip — does not disable the instance for the rest of its life.
+   */
   private getSdk(): Promise<OciSdk> {
-    this.sdk ??= this.loadSdk();
+    this.sdk ??= this.loadSdk().catch((error: unknown) => {
+      this.sdk = undefined;
+      throw error;
+    });
     return this.sdk;
   }
 
@@ -350,8 +358,8 @@ export class OciGenAiLlm extends BaseLlm {
   ): models.ChatDetails {
     const config = llmRequest.config;
     const messages: models.Message[] = [];
-    const instruction = config?.systemInstruction;
-    if (typeof instruction === 'string' && instruction) {
+    const instruction = config && extractSystemInstruction(config);
+    if (instruction) {
       const systemMessage: models.SystemMessage = {
         role: OciRole.System,
         content: [textContent(instruction)],
@@ -583,7 +591,7 @@ export function functionDeclarationToOciTool(
  * is what OCI expects in `FunctionDefinition.parameters`.
  */
 function toolParameters(fn: FunctionDeclaration): unknown {
-  if (fn.parametersJsonSchema !== undefined) {
+  if (fn.parametersJsonSchema) {
     return fn.parametersJsonSchema;
   }
   const properties = fn.parameters?.properties;
@@ -697,7 +705,9 @@ async function* streamLlmResponses(
     if (!message) {
       continue;
     }
-    for (const block of message.content ?? []) {
+    // A stream event is untrusted input, so a field of the wrong shape has to
+    // be skipped rather than iterated.
+    for (const block of asArray(message.content)) {
       if (block.type !== OciContentType.Text || !block.text) {
         continue;
       }
@@ -707,7 +717,7 @@ async function* streamLlmResponses(
         partial: true,
       };
     }
-    accumulateToolCalls(toolCalls, message.toolCalls ?? []);
+    accumulateToolCalls(toolCalls, asArray(message.toolCalls));
   }
 
   yield {
@@ -765,6 +775,11 @@ function byName(left: StreamedToolCall, right: StreamedToolCall): number {
     return 0;
   }
   return left.name < right.name ? -1 : 1;
+}
+
+/** The value when it really is a list, and an empty list otherwise. */
+function asArray<T>(value: T[] | undefined): T[] {
+  return Array.isArray(value) ? value : [];
 }
 
 /** Parses one event payload, or skips it when the payload is not JSON. */
