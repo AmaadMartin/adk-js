@@ -264,4 +264,147 @@ describe('A2AAgentExecutor', () => {
     const firstPart = lastCallArg.status.message!.parts[0] as TextPart;
     expect(firstPart.text).toContain('LLM failed');
   });
+
+  it('should publish a terminal canceled event for an in-flight task', async () => {
+    const mockSession = {
+      id: 'session-id',
+      userId: 'test-user',
+      appName: 'test-app',
+      events: [],
+      state: {},
+    } as unknown as Session;
+    mockSessionService.getSession.mockResolvedValue(mockSession);
+
+    let started!: () => void;
+    const runnerStarted = new Promise<void>((resolve) => (started = resolve));
+    let release!: () => void;
+    const finishRun = new Promise<void>((resolve) => (release = resolve));
+
+    async function* mockRunAsync() {
+      started();
+      await finishRun;
+      yield createEvent({
+        author: 'model',
+        content: {role: 'model', parts: [{text: 'late response'}]},
+        partial: false,
+        actions: createEventActions(),
+      });
+    }
+
+    vi.mocked(Runner).mockImplementation(((config: RunnerConfig) => {
+      return {
+        appName: config?.appName,
+        sessionService: config?.sessionService,
+        runAsync: mockRunAsync,
+      } as unknown as Runner;
+    }) as unknown as () => Runner);
+
+    const executor = new A2AAgentExecutor({
+      runner: {
+        appName: 'test-app',
+        sessionService: mockSessionService,
+      } as unknown as RunnerConfig,
+    });
+
+    const ctx = createRequestContext();
+    const executePromise = executor.execute(ctx, mockEventBus);
+    await runnerStarted;
+
+    await executor.cancelTask(ctx.taskId, mockEventBus);
+
+    const canceled = mockEventBus.publish.mock.calls.at(-1)![0] as
+      | TaskStatusUpdateEvent
+      | undefined;
+    if (!canceled) {
+      expect.fail('cancelTask published no event');
+    }
+    expect(canceled.kind).toBe('status-update');
+    expect(canceled.status.state).toBe('canceled');
+    expect(canceled.final).toBe(true);
+    expect(canceled.taskId).toBe('test-task');
+    expect(canceled.contextId).toBe('test-context');
+    expect(canceled.status.message).toBeUndefined();
+    expect(canceled.metadata).toBeUndefined();
+
+    release();
+    await executePromise;
+  });
+
+  it('should reject cancelTask and publish nothing when the task id is empty', async () => {
+    const executor = new A2AAgentExecutor({
+      runner: {
+        appName: 'test-app',
+        sessionService: mockSessionService,
+      } as unknown as RunnerConfig,
+    });
+
+    await expect(executor.cancelTask('', mockEventBus)).rejects.toThrow(
+      'A2A cancellation must have a task ID',
+    );
+    expect(mockEventBus.publish).not.toHaveBeenCalled();
+  });
+
+  it('should still publish a terminal canceled event when no execution is in flight', async () => {
+    const executor = new A2AAgentExecutor({
+      runner: {
+        appName: 'test-app',
+        sessionService: mockSessionService,
+      } as unknown as RunnerConfig,
+    });
+
+    await executor.cancelTask('unknown-task', mockEventBus);
+
+    expect(mockEventBus.publish).toHaveBeenCalledTimes(1);
+    const event = mockEventBus.publish.mock
+      .calls[0][0] as TaskStatusUpdateEvent;
+    expect(event.status.state).toBe('canceled');
+    expect(event.final).toBe(true);
+    expect(event.taskId).toBe('unknown-task');
+    expect(event.contextId).toBe('');
+  });
+
+  it('should forget the context id once the execution finishes', async () => {
+    const mockSession = {
+      id: 'session-id',
+      userId: 'test-user',
+      appName: 'test-app',
+      events: [],
+      state: {},
+    } as unknown as Session;
+    mockSessionService.getSession.mockResolvedValue(mockSession);
+
+    async function* mockRunAsync() {
+      yield createEvent({
+        author: 'model',
+        content: {role: 'model', parts: [{text: 'done'}]},
+        partial: false,
+        actions: createEventActions(),
+      });
+    }
+
+    vi.mocked(Runner).mockImplementation(((config: RunnerConfig) => {
+      return {
+        appName: config?.appName,
+        sessionService: config?.sessionService,
+        runAsync: mockRunAsync,
+      } as unknown as Runner;
+    }) as unknown as () => Runner);
+
+    const executor = new A2AAgentExecutor({
+      runner: {
+        appName: 'test-app',
+        sessionService: mockSessionService,
+      } as unknown as RunnerConfig,
+    });
+
+    const ctx = createRequestContext();
+    await executor.execute(ctx, mockEventBus);
+    mockEventBus.publish.mockClear();
+
+    await executor.cancelTask(ctx.taskId, mockEventBus);
+
+    const event = mockEventBus.publish.mock
+      .calls[0][0] as TaskStatusUpdateEvent;
+    expect(event.contextId).toBe('');
+  });
 });

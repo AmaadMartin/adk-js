@@ -20,6 +20,7 @@ import {logger} from '../utils/logger.js';
 import {
   createTask,
   createTaskArtifactUpdateEvent,
+  createTaskCanceledEvent,
   createTaskFailedEvent,
   createTaskWorkingEvent,
 } from './a2a_event.js';
@@ -82,6 +83,7 @@ export interface AgentExecutorConfig {
  */
 export class A2AAgentExecutor implements AgentExecutor {
   private agentPartialArtifactIdsMap: Record<string, string> = {};
+  private readonly contextIdsByTaskId = new Map<string, string>();
 
   constructor(private readonly config: AgentExecutorConfig) {}
 
@@ -110,6 +112,7 @@ export class A2AAgentExecutor implements AgentExecutor {
       requestContext: ctx,
     });
 
+    this.contextIdsByTaskId.set(ctx.taskId, ctx.contextId);
     try {
       if (this.config.beforeExecuteCallback) {
         await this.config.beforeExecuteCallback(ctx);
@@ -193,12 +196,30 @@ export class A2AAgentExecutor implements AgentExecutor {
           metadata: getA2ASessionMetadata(executorContext),
         }),
       });
+    } finally {
+      this.contextIdsByTaskId.delete(ctx.taskId);
     }
   }
 
-  // Task cancellation is not supported in this implementation yet.
-  async cancelTask(_taskId: string): Promise<void> {
-    throw new Error('Task cancellation is not supported yet.');
+  async cancelTask(taskId: string, eventBus: ExecutionEventBus): Promise<void> {
+    if (!taskId) {
+      throw new Error('A2A cancellation must have a task ID');
+    }
+
+    // @a2a-js/sdk passes cancelTask only the task id, so the context id has to
+    // come from the execution this instance is running. `final` is
+    // load-bearing on 0.3.x: the SDK drains the bus until a terminal status
+    // update arrives.
+    const contextId = this.contextIdsByTaskId.get(taskId);
+    if (contextId === undefined) {
+      logger.warn(
+        `Canceling task ${taskId} with no in-flight execution; publishing the terminal event without a context id.`,
+      );
+    }
+
+    eventBus.publish(
+      createTaskCanceledEvent({taskId, contextId: contextId ?? ''}),
+    );
   }
 
   private convertAdkEventToA2AEvent(
