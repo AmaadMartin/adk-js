@@ -5,10 +5,13 @@
  */
 
 import {
+  AddMemoryRequest,
   BaseMemoryService,
+  DIRECT_MEMORY_WRITES_UNSUPPORTED_MESSAGE,
   EVENT_DELTAS_UNSUPPORTED_MESSAGE,
   InMemoryMemoryService,
   addEventsToMemory,
+  addMemory,
   createEvent,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
@@ -53,5 +56,53 @@ describe('addEventsToMemory', () => {
     });
 
     expect(result.memories).toHaveLength(1);
+  });
+});
+
+describe('addMemory', () => {
+  it('rejects when the service does not implement addMemory', async () => {
+    const service: BaseMemoryService = {
+      async addSessionToMemory() {},
+      async searchMemory() {
+        return {memories: []};
+      },
+    };
+
+    await expect(
+      addMemory(service, {appName: 'myApp', userId: 'alice', memories: []}),
+    ).rejects.toThrow(DIRECT_MEMORY_WRITES_UNSUPPORTED_MESSAGE);
+  });
+
+  it('rejects for InMemoryMemoryService', async () => {
+    const service = new InMemoryMemoryService();
+
+    await expect(
+      addMemory(service, {appName: 'myApp', userId: 'alice', memories: []}),
+    ).rejects.toThrow(DIRECT_MEMORY_WRITES_UNSUPPORTED_MESSAGE);
+  });
+
+  it('forwards the request to a service that implements it', async () => {
+    let received: AddMemoryRequest | undefined;
+    const service: BaseMemoryService = {
+      async addSessionToMemory() {},
+      async searchMemory() {
+        return {memories: []};
+      },
+      async addMemory(request) {
+        received = request;
+      },
+    };
+    const request: AddMemoryRequest = {
+      appName: 'myApp',
+      userId: 'alice',
+      memories: [
+        {content: {role: 'user', parts: [{text: 'prefers window seats'}]}},
+      ],
+      customMetadata: {enable_consolidation: true},
+    };
+
+    await addMemory(service, request);
+
+    expect(received).toEqual(request);
   });
 });
