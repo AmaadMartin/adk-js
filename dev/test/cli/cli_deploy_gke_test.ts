@@ -68,12 +68,32 @@ vi.mock('../../src/utils/file_utils.js', () => ({
   tryToFindFileRecursively: vi.fn(),
 }));
 
-/** Parsed shape of the generated manifest, as `yaml.loadAll` returns it. */
+/**
+ * Parsed shape of the generated manifest, as `yaml.loadAll` returns it.
+ *
+ * `spec` merges the Deployment and Service arms, so the fields specific to
+ * either are optional.
+ */
 interface ManifestDocument {
   apiVersion: string;
   kind: string;
   metadata: {name: string; labels?: Record<string, string>};
-  spec: Record<string, unknown>;
+  spec: {
+    replicas?: number;
+    selector?: {app?: string; matchLabels?: {app: string}};
+    template?: {
+      metadata: {labels: Record<string, string>};
+      spec: {
+        containers: Array<{
+          name: string;
+          image: string;
+          ports: Array<{containerPort: number}>;
+        }>;
+      };
+    };
+    type?: string;
+    ports?: Array<{port: number; targetPort: number}>;
+  };
 }
 
 function loadManifest(manifest: string): ManifestDocument[] {
@@ -177,7 +197,7 @@ describe('createDeploymentManifest', () => {
       }),
     );
 
-    expect(service.spec['type']).toBe('LoadBalancer');
+    expect(service.spec.type).toBe('LoadBalancer');
   });
 
   it.each([
@@ -204,12 +224,7 @@ describe('createDeploymentManifest', () => {
     );
 
     expect(documents).toHaveLength(2);
-    const containers = (
-      (documents[0].spec['template'] as ManifestDocument['spec'])[
-        'spec'
-      ] as Record<string, Array<{image: string}>>
-    )['containers'];
-    expect(containers[0].image).toBe(image);
+    expect(documents[0].spec.template?.spec.containers[0].image).toBe(image);
   });
 
   it.each([
@@ -500,7 +515,7 @@ describe('deployToGke', () => {
     await deployToGke({...defaultOptions, serviceType: 'LoadBalancer'});
 
     const {documents} = savedManifest();
-    expect(documents[1].spec['type']).toBe('LoadBalancer');
+    expect(documents[1].spec.type).toBe('LoadBalancer');
   });
 
   it('creates a private staging folder when none is supplied', async () => {

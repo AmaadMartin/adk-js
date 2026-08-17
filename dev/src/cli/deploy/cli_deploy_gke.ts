@@ -17,10 +17,11 @@ import {
 } from '../../utils/file_utils.js';
 import {
   BaseDeployOptions,
+  assertMatches,
   copyAgentFiles,
   createDockerFile,
   createPackageJson,
-  resolveDefaultFromGcloudConfig,
+  resolveRequiredGcloudDefault,
   spawnAsync,
 } from './deploy_utils.js';
 
@@ -46,33 +47,17 @@ export interface DeploymentManifestOptions {
 /** Port the generated Service listens on, as in adk-python. */
 const SERVICE_PORT = 80;
 
-const MAX_LABEL_LENGTH = 63;
 const MIN_PORT = 1;
 const MAX_PORT = 65535;
 
 // A Service name must be an RFC 1035 label and a label value must match the
-// Kubernetes label grammar. `yaml.dump` already keeps any value inside the
-// document it belongs to, so these checks are not the escaping mechanism:
-// they turn a name the API server would reject into a local error with the
-// offending value in it.
-const RFC_1035_LABEL_RE = /^[a-z]([-a-z0-9]*[a-z0-9])?$/;
-const LABEL_VALUE_RE = /^[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?$/;
-
-function assertRfc1035Label(value: string, label: string): void {
-  if (value.length > MAX_LABEL_LENGTH || !RFC_1035_LABEL_RE.test(value)) {
-    throw new Error(
-      `Invalid ${label} ${JSON.stringify(value)}: must be at most ${MAX_LABEL_LENGTH} characters and match ${RFC_1035_LABEL_RE} to be a valid Kubernetes resource name.`,
-    );
-  }
-}
-
-function assertLabelValue(value: string, label: string): void {
-  if (value.length > MAX_LABEL_LENGTH || !LABEL_VALUE_RE.test(value)) {
-    throw new Error(
-      `Invalid ${label} ${JSON.stringify(value)}: must be at most ${MAX_LABEL_LENGTH} characters and match ${LABEL_VALUE_RE} to be a valid Kubernetes label value.`,
-    );
-  }
-}
+// Kubernetes label grammar, each bounded to 63 characters by the leading
+// lookahead. `yaml.dump` already keeps any value inside the document it
+// belongs to, so these patterns are not the escaping mechanism: they turn a
+// name the API server would reject into a local error naming the offending
+// value.
+const RFC_1035_LABEL_RE = /^(?=.{1,63}$)[a-z]([-a-z0-9]*[a-z0-9])?$/;
+const LABEL_VALUE_RE = /^(?=.{1,63}$)[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?$/;
 
 function assertPort(port: number): void {
   if (!Number.isInteger(port) || port < MIN_PORT || port > MAX_PORT) {
@@ -108,8 +93,18 @@ export function parseGkeServiceType(value: string): GkeServiceType {
 export function createDeploymentManifest(
   options: DeploymentManifestOptions,
 ): string {
-  assertRfc1035Label(options.serviceName, 'serviceName');
-  assertLabelValue(options.adkVersion, 'adkVersion');
+  assertMatches(
+    options.serviceName,
+    'serviceName',
+    RFC_1035_LABEL_RE,
+    `must match ${RFC_1035_LABEL_RE} to be a valid Kubernetes resource name.`,
+  );
+  assertMatches(
+    options.adkVersion,
+    'adkVersion',
+    LABEL_VALUE_RE,
+    `must match ${LABEL_VALUE_RE} to be a valid Kubernetes label value.`,
+  );
   assertPort(options.port);
 
   const labels = {
@@ -163,35 +158,19 @@ export async function deployToGke(options: DeployToGkeOptions) {
     );
   }
 
-  const project =
-    options.project || (await resolveDefaultFromGcloudConfig('project'));
-  if (!project || project === '(unset)') {
-    throw new Error(
-      'Project is not specified and default value for "project" is not set in gcloud config. Please specify project with --project option or set default value running "gcloud config set project YOUR_PROJECT".',
-    );
-  }
-  if (!options.project) {
-    options.project = project;
-    console.info(
-      '--project option is not provided, using default project from gcloud config:',
-      project,
-    );
-  }
-
-  const region =
-    options.region || (await resolveDefaultFromGcloudConfig('compute/region'));
-  if (!region || region === '(unset)') {
-    throw new Error(
-      'Region is not specified and default value for "compute/region" is not set in gcloud config. Please specify region with --region option or set default value running "gcloud config set compute/region YOUR_REGION".',
-    );
-  }
-  if (!options.region) {
-    options.region = region;
-    console.info(
-      '--region option is not provided, using default region from gcloud config:',
-      region,
-    );
-  }
+  options.project = await resolveRequiredGcloudDefault(
+    options.project,
+    'project',
+    'project',
+  );
+  // compute/region is the gcloud property for GKE, as run/region is for
+  // Cloud Run.
+  const region = await resolveRequiredGcloudDefault(
+    options.region,
+    'compute/region',
+    'region',
+  );
+  options.region = region;
 
   const agentLoader = new AgentLoader(
     options.agentPath,
@@ -287,7 +266,7 @@ export async function deployToGke(options: DeployToGkeOptions) {
         'get-credentials',
         options.clusterName,
         '--region',
-        options.region,
+        region,
         '--project',
         options.project,
       ],

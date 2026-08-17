@@ -70,12 +70,32 @@ export interface BaseDeployOptions extends CreateDockerFileContentOptions {
 // anything outside this set.
 const SAFE_DOCKERFILE_TOKEN_RE = /^[A-Za-z0-9_.-]{1,128}$/;
 
-function assertSafeDockerfileToken(value: string, label: string): void {
-  if (!SAFE_DOCKERFILE_TOKEN_RE.test(value)) {
+/**
+ * Throws unless `value` matches `pattern`.
+ *
+ * @param label How the value is named in the error message.
+ * @param requirement What the value must satisfy, phrased as "must ...".
+ */
+export function assertMatches(
+  value: string,
+  label: string,
+  pattern: RegExp,
+  requirement: string,
+): void {
+  if (!pattern.test(value)) {
     throw new Error(
-      `Invalid ${label} ${JSON.stringify(value)}: must match ${SAFE_DOCKERFILE_TOKEN_RE} to be safely embedded in the generated Dockerfile.`,
+      `Invalid ${label} ${JSON.stringify(value)}: ${requirement}`,
     );
   }
+}
+
+function assertSafeDockerfileToken(value: string, label: string): void {
+  assertMatches(
+    value,
+    label,
+    SAFE_DOCKERFILE_TOKEN_RE,
+    `must match ${SAFE_DOCKERFILE_TOKEN_RE} to be safely embedded in the generated Dockerfile.`,
+  );
 }
 
 // logLevel, allowOrigins, sessionServiceUri and artifactServiceUri are
@@ -250,4 +270,40 @@ export async function resolveDefaultFromGcloudConfig(
 ): Promise<string | undefined> {
   const {stdout} = await execAsync('gcloud config get-value ' + property);
   return stdout.trim();
+}
+
+/** What `gcloud config get-value` prints for a property with no default. */
+const UNSET_GCLOUD_VALUE = '(unset)';
+
+/**
+ * Returns `explicit`, or the gcloud config default for `property`.
+ *
+ * @param property The gcloud config property, e.g. `compute/region`.
+ * @param label The deploy option the value fills, e.g. `region`. Also names
+ *     the `--<label>` flag in the error message.
+ * @throws Error if neither is set.
+ */
+export async function resolveRequiredGcloudDefault(
+  explicit: string | undefined,
+  property: string,
+  label: string,
+): Promise<string> {
+  if (explicit) {
+    return explicit;
+  }
+
+  const resolved = await resolveDefaultFromGcloudConfig(property);
+  if (!resolved || resolved === UNSET_GCLOUD_VALUE) {
+    const title = `${label[0].toUpperCase()}${label.slice(1)}`;
+    throw new Error(
+      `${title} is not specified and default value for "${property}" is not set in gcloud config. Please specify ${label} with --${label} option or set default value running "gcloud config set ${property} YOUR_${label.toUpperCase()}".`,
+    );
+  }
+
+  console.info(
+    `--${label} option is not provided, using default ${label} from gcloud config:`,
+    resolved,
+  );
+
+  return resolved;
 }

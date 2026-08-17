@@ -35,13 +35,12 @@ vi.mock('../../src/cli/deploy/cli_deploy_cloud_run', () => ({
   deployToCloudRun: vi.fn(),
 }));
 
-vi.mock('../../src/cli/deploy/cli_deploy_gke', async (importOriginal) => {
-  const actual = await importOriginal();
-  return {
-    ...(actual as object),
-    deployToGke: vi.fn(),
-  };
-});
+vi.mock('../../src/cli/deploy/cli_deploy_gke', async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import('../../src/cli/deploy/cli_deploy_gke.js')
+  >()),
+  deployToGke: vi.fn(),
+}));
 
 vi.mock('../../src/cli/cli_run', () => ({
   runAgent: vi.fn(),
