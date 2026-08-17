@@ -64,7 +64,6 @@ describe('CrewaiTool', () => {
           name: 'Serper Dev Tool',
           description: 'Search the internet with Serper',
         }),
-        {},
       );
 
       expect(tool.name).toBe('serper_dev_tool');
@@ -80,19 +79,19 @@ describe('CrewaiTool', () => {
     });
 
     it('replaces every space in the display name, not just the first', () => {
-      const tool = new CrewaiTool(createCrewaiTool({name: 'A  B Tool'}), {});
+      const tool = new CrewaiTool(createCrewaiTool({name: 'A  B Tool'}));
 
       expect(tool.name).toBe('a__b_tool');
     });
 
     it('falls back to an empty description when neither source has one', () => {
-      const tool = new CrewaiTool(createCrewaiTool({description: ''}), {});
+      const tool = new CrewaiTool(createCrewaiTool({description: ''}));
 
       expect(tool.description).toBe('');
     });
 
     it('throws when neither the options nor the tool supply a name', () => {
-      expect(() => new CrewaiTool(createCrewaiTool({name: ''}), {})).toThrow(
+      expect(() => new CrewaiTool(createCrewaiTool({name: ''}))).toThrow(
         'Tool name cannot be empty. Either provide a `name` option or set a name on the CrewAI tool.',
       );
     });
@@ -119,10 +118,7 @@ describe('CrewaiTool', () => {
     });
 
     it('omits the parameters when the tool declares no argument schema', () => {
-      const tool = new CrewaiTool(
-        createCrewaiTool({argsSchema: undefined}),
-        {},
-      );
+      const tool = new CrewaiTool(createCrewaiTool({argsSchema: undefined}));
 
       expect(tool._getDeclaration().parameters).toBeUndefined();
     });
@@ -130,7 +126,6 @@ describe('CrewaiTool', () => {
     it('omits the parameters when the argument schema has no properties', () => {
       const tool = new CrewaiTool(
         createCrewaiTool({argsSchema: {type: 'object', properties: {}}}),
-        {},
       );
 
       expect(tool._getDeclaration().parameters).toBeUndefined();
@@ -255,7 +250,7 @@ describe('CrewaiTool', () => {
           },
           {text: 'adk-js'},
         ]),
-        tools: [new CrewaiTool(crewaiTool, {})],
+        tools: [new CrewaiTool(crewaiTool)],
       });
       const sessionService = new InMemorySessionService();
       const session = await sessionService.createSession({

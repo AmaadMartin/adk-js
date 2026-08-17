@@ -71,13 +71,6 @@ function resolveName(tool: CrewaiBaseTool, options: CrewaiToolOptions): string {
   );
 }
 
-function resolveDescription(
-  tool: CrewaiBaseTool,
-  options: CrewaiToolOptions,
-): string {
-  return options.description || tool.description || '';
-}
-
 /**
  * Wraps a CrewAI tool so an ADK agent can call it.
  *
@@ -91,7 +84,7 @@ function resolveDescription(
  * const agent = new LlmAgent({
  *   name: 'researcher',
  *   model: 'gemini-2.5-flash',
- *   tools: [new CrewaiTool(serperDevTool, {})],
+ *   tools: [new CrewaiTool(serperDevTool)],
  * });
  * ```
  */
@@ -99,10 +92,10 @@ export class CrewaiTool extends BaseTool {
   /** The wrapped CrewAI tool. */
   readonly tool: CrewaiBaseTool;
 
-  constructor(tool: CrewaiBaseTool, options: CrewaiToolOptions) {
+  constructor(tool: CrewaiBaseTool, options: CrewaiToolOptions = {}) {
     super({
       name: resolveName(tool, options),
-      description: resolveDescription(tool, options),
+      description: options.description || tool.description || '',
     });
     this.tool = tool;
   }
