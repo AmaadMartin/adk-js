@@ -62,13 +62,28 @@ function fileLogFormat(label: string): winston.Logform.Format {
   );
 }
 
+/** Returns every AdkLogger to the console and yields the retired transport. */
+function detachFileTransport():
+  | winston.transports.FileTransportInstance
+  | undefined {
+  const transport = fileTransport;
+  if (!transport) {
+    return undefined;
+  }
+  fileTransport = undefined;
+  for (const swap of transportSwaps) {
+    swap(undefined);
+  }
+  return transport;
+}
+
 /**
  * Sends every AdkLogger to `filePath` instead of the console, for the rest of
  * the process or until `resetFileLogTarget` is called. The file is truncated
  * on open, so one run leaves one file, as adk-python's `mode='w'` does.
  */
 export function setFileLogTarget(filePath: string): void {
-  resetFileLogTarget();
+  detachFileTransport()?.end();
   fileTransport = new winston.transports.File({
     filename: filePath,
     options: {flags: 'w'},
@@ -79,17 +94,19 @@ export function setFileLogTarget(filePath: string): void {
 }
 
 /**
- * Returns every AdkLogger to the console and releases the log file handle.
+ * Returns every AdkLogger to the console and waits for the log file to receive
+ * what was written to it. `process.exit` drops buffered writes, so a caller
+ * about to exit has to await this or lose the last records.
  */
-export function resetFileLogTarget(): void {
-  if (!fileTransport) {
-    return;
+export function resetFileLogTarget(): Promise<void> {
+  const transport = detachFileTransport();
+  if (!transport) {
+    return Promise.resolve();
   }
-  for (const swap of transportSwaps) {
-    swap(undefined);
-  }
-  fileTransport.end();
-  fileTransport = undefined;
+  return new Promise((resolve) => {
+    transport.once('finish', () => resolve());
+    transport.end();
+  });
 }
 
 /**

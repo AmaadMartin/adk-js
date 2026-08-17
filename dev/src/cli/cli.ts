@@ -21,7 +21,7 @@ import {AdkApiServer} from '../server/adk_api_server.js';
 import {FileModuleType} from '../utils/agent_loader.js';
 import {getAbsolutePath} from '../utils/file_utils.js';
 import {logToTmpFolder} from '../utils/log_to_tmp_folder.js';
-import {AdkLogger} from '../utils/logger.js';
+import {AdkLogger, resetFileLogTarget} from '../utils/logger.js';
 import {version} from '../version.js';
 import {createAgent} from './cli_create.js';
 import {runAgent} from './cli_run.js';
@@ -399,6 +399,9 @@ export function createProgram(): Command {
         // The logger no longer reaches the terminal, so exiting on this path
         // would be silent without this line.
         console.error(`Error running agent: ${message} (see ${logFilePath})`);
+        // `process.exit` drops buffered writes, which would cost the log file
+        // the very failure the line above sends the user to it for.
+        await resetFileLogTarget();
         process.exit(1);
       }
     });

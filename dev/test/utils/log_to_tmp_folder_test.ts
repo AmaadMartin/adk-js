@@ -39,7 +39,7 @@ describe('logToTmpFolder', () => {
   afterEach(async () => {
     // Release the log file before deleting it: Windows refuses to unlink a
     // file that still has an open write handle.
-    resetFileLogTarget();
+    await resetFileLogTarget();
     vi.restoreAllMocks();
     for (const dir of createdDirs.splice(0)) {
       await fs.rm(dir, {
@@ -128,6 +128,19 @@ describe('logToTmpFolder', () => {
       expect((await fs.stat(first.logFilePath)).isFile()).toBe(true);
     },
   );
+
+  it('flushes the log file, so a caller may exit right after resetting', async () => {
+    const {logFilePath} = logToTmpFolder({subFolder: trackedSubFolder()});
+    new AdkLogger({label: 'Exiting'}).info('last words');
+
+    await resetFileLogTarget();
+
+    expect(await fs.readFile(logFilePath, 'utf8')).toContain(
+      ' - INFO - Exiting - last words',
+    );
+    // A second reset has nothing left to release.
+    await expect(resetFileLogTarget()).resolves.toBeUndefined();
+  });
 
   it('warns and keeps running when a file occupies agent.latest.log', async () => {
     const folder = trackedSubFolder();
