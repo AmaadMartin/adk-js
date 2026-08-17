@@ -18,9 +18,11 @@ import {
   bearerTokenUserBuilder,
   getFunctionCalls,
   getFunctionResponses,
+  getPropagatedContext,
   InMemoryArtifactService,
   InMemoryMemoryService,
   InMemorySessionService,
+  isAgentEngine,
   isApp,
   LogLevel,
   Runner,
@@ -29,7 +31,7 @@ import {
 } from '@google/adk';
 import type {Content} from '@google/genai';
 import type {TracerProvider} from '@opentelemetry/api';
-import {trace} from '@opentelemetry/api';
+import {context, trace} from '@opentelemetry/api';
 import {SimpleSpanProcessor} from '@opentelemetry/sdk-trace-base';
 import cors from 'cors';
 import type {Request, Response} from 'express';
@@ -74,6 +76,15 @@ export interface AppLoadError {
   error: string;
 }
 
+/**
+ * The part of {@link AgentLoader} the server uses, so a caller can supply a
+ * loader of its own without extending the class.
+ */
+export type ServerAgentLoader = Pick<
+  AgentLoader,
+  'listAgents' | 'getAgentFile' | 'listLoadFailures'
+>;
+
 interface ServerOptions {
   agentsDir?: string;
   host?: string;
@@ -81,7 +92,7 @@ interface ServerOptions {
   sessionService?: BaseSessionService;
   memoryService?: BaseMemoryService;
   artifactService?: BaseArtifactService;
-  agentLoader?: AgentLoader;
+  agentLoader?: ServerAgentLoader;
   agentFileLoadOptions?: AgentFileOptions;
   serveDebugUI?: boolean;
   allowOrigins?: string;
@@ -257,7 +268,7 @@ export class AdkApiServer {
   }
 
   readonly app: express.Application;
-  private readonly agentLoader: AgentLoader;
+  private readonly agentLoader: ServerAgentLoader;
   /**
    * Caches below are keyed by request path parameters (`appName`, `eventId`,
    * `sessionId`), so each is created with `Object.create(null)`. On an
@@ -375,6 +386,14 @@ export class AdkApiServer {
   private async init() {
     const app = this.app;
     await this.setupTelemetry();
+
+    // Registered before every route so an Agent Engine caller's trace context
+    // covers the whole request.
+    if (isAgentEngine()) {
+      app.use((req: Request, _res: Response, next: express.NextFunction) => {
+        context.with(getPropagatedContext(req.headers), next);
+      });
+    }
 
     if (this.serveDebugUI) {
       app.get('/', (req: Request, res: Response) => {
