@@ -13,11 +13,13 @@ import {
   metrics,
 } from '@opentelemetry/api';
 
+import type {InvocationContext} from '../agents/invocation_context.js';
 import {LlmRequest} from '../models/llm_request.js';
 import {LlmResponse} from '../models/llm_response.js';
 import {contentSize} from '../utils/content_size_utils.js';
 import {resolveErrorType} from '../utils/error_utils.js';
 import {logger} from '../utils/logger.js';
+import {extractModelName, isGeminiModel} from '../utils/model_name.js';
 import {getGoogleLlmVariant, GoogleLLMVariant} from '../utils/variant_utils.js';
 import {version} from '../version.js';
 import {
@@ -30,10 +32,40 @@ import {
   GEN_AI_TOKEN_TYPE,
   GEN_AI_TOOL_NAME,
   GEN_AI_TOOL_TYPE,
+  GEN_AI_WORKFLOW_NAME,
+  GEN_AI_WORKFLOW_NESTED,
 } from './semconv.js';
 import {inputTokenCount, outputTokenCount} from './token_usage.js';
 
 const METER_NAME = 'gcp.vertex.agent';
+
+/**
+ * Bucket boundaries shared by the two per-invocation call-count histograms.
+ * They count whole calls, so the buckets are dense over the first handful and
+ * then widen.
+ */
+const CALL_COUNT_BOUNDARIES = [0, 1, 2, 3, 4, 5, 6, 8, 12, 16, 24, 32, 64];
+
+/**
+ * Anthropic models reach ADK either as a bare `claude-*` id or, on Model
+ * Garden, as a `claude.*` one.
+ */
+const ANTHROPIC_MODEL_PATTERN = /^claude[-.]/i;
+
+/**
+ * Leading segments of a resource-path model id, e.g. a Model Garden path like
+ * `projects/<p>/locations/<l>/publishers/<pub>/models/<m>` or a tuned-model id
+ * like `tunedModels/<id>`. They name a resource collection, never a provider,
+ * so the provider-prefix rule must not read one as one.
+ */
+const RESOURCE_COLLECTION_SEGMENTS = new Set([
+  'endpoints',
+  'locations',
+  'models',
+  'projects',
+  'publishers',
+  'tunedmodels',
+]);
 
 interface HistogramSpec {
   name: string;
@@ -62,6 +94,11 @@ const HISTOGRAMS = {
       ],
     },
   },
+  workflowInvocationDuration: {
+    name: 'gen_ai.invoke_workflow.duration',
+    unit: 's',
+    description: 'Duration of workflow invocations.',
+  },
   toolExecutionDuration: {
     name: 'gen_ai.execute_tool.duration',
     unit: 's',
@@ -82,6 +119,18 @@ const HISTOGRAMS = {
     name: 'gen_ai.client.token.usage',
     unit: '{token}',
     description: 'Number of input and output tokens used.',
+  },
+  invokeAgentInferenceCalls: {
+    name: 'gen_ai.invoke_agent.inference_calls',
+    unit: '1',
+    description: 'Number of inference (model) calls per agent invocation.',
+    advice: {explicitBucketBoundaries: CALL_COUNT_BOUNDARIES},
+  },
+  invokeAgentToolCalls: {
+    name: 'gen_ai.invoke_agent.tool_calls',
+    unit: '1',
+    description: 'Number of tool calls per agent invocation.',
+    advice: {explicitBucketBoundaries: CALL_COUNT_BOUNDARIES},
   },
   agentRequestSize: {
     name: 'gen_ai.agent.request.size',
@@ -146,10 +195,40 @@ function safeRecord(what: string, record: () => void): void {
   }
 }
 
-function getProviderName(): string {
+/** The provider name to report when the model id names no provider. */
+function guessGeminiProvider(): string {
   return getGoogleLlmVariant() === GoogleLLMVariant.VERTEX_AI
     ? 'vertex_ai'
     : 'gemini';
+}
+
+/**
+ * Returns the `gen_ai.provider.name` value for a model.
+ *
+ * The name has to follow the model actually being served, otherwise every
+ * provider is reported as Gemini. A LiteLLM-style `<provider>/<model>` id
+ * carries the provider in its prefix. The prefix is read off the bare model
+ * name so that a resource path, whose leading segments describe where the
+ * model lives rather than who serves it, is not mistaken for one.
+ *
+ * @param model The model id the request is being served by, if known.
+ */
+function resolveProviderName(model?: string): string {
+  if (!model || isGeminiModel(model)) {
+    return guessGeminiProvider();
+  }
+  const modelName = extractModelName(model);
+  if (ANTHROPIC_MODEL_PATTERN.test(modelName)) {
+    return 'anthropic';
+  }
+  const separatorIndex = modelName.indexOf('/');
+  if (separatorIndex > 0) {
+    const provider = modelName.slice(0, separatorIndex).toLowerCase();
+    if (!RESOURCE_COLLECTION_SEGMENTS.has(provider)) {
+      return provider;
+    }
+  }
+  return guessGeminiProvider();
 }
 
 /**
@@ -166,7 +245,7 @@ function clientAttributes(
   const attributes: Attributes = {
     [GEN_AI_AGENT_NAME]: agentName,
     [GEN_AI_OPERATION_NAME]: 'generate_content',
-    [GEN_AI_PROVIDER_NAME]: getProviderName(),
+    [GEN_AI_PROVIDER_NAME]: resolveProviderName(llmRequest.model),
   };
   if (llmRequest.model) {
     attributes[GEN_AI_REQUEST_MODEL] = llmRequest.model;
@@ -189,6 +268,120 @@ export function recordAgentInvocationDuration(
       attributes[ERROR_TYPE] = resolveErrorType(error);
     }
     histogram('agentInvocationDuration').record(elapsedS, attributes);
+  });
+}
+
+/** Records how many model calls one agent invocation made. */
+export function recordInvokeAgentInferenceCalls(
+  agentName: string,
+  count: number,
+): void {
+  safeRecord('invoke agent inference calls', () => {
+    histogram('invokeAgentInferenceCalls').record(count, {
+      [GEN_AI_AGENT_NAME]: agentName,
+    });
+  });
+}
+
+/** Records how many tool calls one agent invocation made. */
+export function recordInvokeAgentToolCalls(
+  agentName: string,
+  count: number,
+): void {
+  safeRecord('invoke agent tool calls', () => {
+    histogram('invokeAgentToolCalls').record(count, {
+      [GEN_AI_AGENT_NAME]: agentName,
+    });
+  });
+}
+
+/** The model and tool calls one agent invocation has made so far. */
+interface InvocationTally {
+  inferenceCalls: number;
+  toolCalls: number;
+}
+
+/**
+ * Call counts keyed by the invocation they belong to.
+ *
+ * adk-python carries this tally on an OpenTelemetry context key, which adk-js
+ * cannot do: a context key reads back as unset unless a `ContextManager` is
+ * registered, and one is only installed as a side effect of enabling tracing.
+ * A metrics-only deployment would then report zero calls forever. Keying on
+ * the invocation object gives the same innermost-wins scoping, because an
+ * agent builds a fresh `InvocationContext` per invocation and threads that one
+ * object down to its model and tool calls. The map is weak so an abandoned
+ * invocation is not retained.
+ */
+const tallies = new WeakMap<InvocationContext, InvocationTally>();
+
+/** Starts counting the model and tool calls of one agent invocation. */
+export function beginAgentInvocationTally(ctx: InvocationContext): void {
+  tallies.set(ctx, {inferenceCalls: 0, toolCalls: 0});
+}
+
+/** Counts one model call against its invocation, if it is being tallied. */
+export function countInferenceCall(ctx: InvocationContext): void {
+  const tally = tallies.get(ctx);
+  if (tally) {
+    tally.inferenceCalls++;
+  }
+}
+
+/** Counts one tool call against its invocation, if it is being tallied. */
+export function countToolCall(ctx: InvocationContext): void {
+  const tally = tallies.get(ctx);
+  if (tally) {
+    tally.toolCalls++;
+  }
+}
+
+/**
+ * Records the call counts of a finished agent invocation and stops tallying
+ * it. Zero is a real observation, so an invocation that called nothing still
+ * records a point on both histograms.
+ */
+export function flushAgentInvocationTally(
+  ctx: InvocationContext,
+  agentName: string,
+): void {
+  const tally = tallies.get(ctx);
+  if (!tally) {
+    return;
+  }
+  tallies.delete(ctx);
+  recordInvokeAgentInferenceCalls(agentName, tally.inferenceCalls);
+  recordInvokeAgentToolCalls(agentName, tally.toolCalls);
+}
+
+/**
+ * Records the duration of a workflow invocation, in seconds.
+ *
+ * @param params.nested Whether the workflow ran below another node. A root
+ *     workflow omits the attribute entirely rather than reporting `false`, so
+ *     that a query for nested runs does not have to exclude the roots.
+ */
+export function recordWorkflowInvocationDuration(params: {
+  workflowName: string;
+  elapsedS: number;
+  nested: boolean;
+  error?: unknown;
+}): void {
+  safeRecord('workflow invocation duration', () => {
+    const {workflowName, elapsedS, nested, error} = params;
+    const attributes: Attributes = {
+      [GEN_AI_OPERATION_NAME]: 'invoke_workflow',
+    };
+    if (nested) {
+      attributes[GEN_AI_WORKFLOW_NESTED] = true;
+    }
+    if (error !== undefined) {
+      attributes[ERROR_TYPE] = resolveErrorType(error);
+    }
+    if (workflowName) {
+      attributes[GEN_AI_WORKFLOW_NAME] = workflowName;
+    }
+    histogram('workflowInvocationDuration').record(elapsedS, attributes);
   });
 }
 
@@ -242,13 +435,21 @@ export function recordAgentWorkflowSteps(
   });
 }
 
-/** Records the duration of a tool execution, in seconds. */
+/**
+ * Records the duration of a tool execution, in seconds.
+ *
+ * @param error The value the tool threw, if it threw one.
+ * @param errorType A failure a tool reported in its response without throwing.
+ *     A thrown error describes the failure better, so it wins when both are
+ *     present.
+ */
 export function recordToolExecutionDuration(
   toolName: string,
   toolType: string,
   agentName: string,
   elapsedS: number,
   error?: unknown,
+  errorType?: string,
 ): void {
   safeRecord('tool execution duration', () => {
     const attributes: Attributes = {
@@ -258,6 +459,8 @@ export function recordToolExecutionDuration(
     };
     if (error !== undefined) {
       attributes[ERROR_TYPE] = resolveErrorType(error);
+    } else if (errorType !== undefined) {
+      attributes[ERROR_TYPE] = errorType;
     }
     histogram('toolExecutionDuration').record(elapsedS, attributes);
   });

@@ -21,7 +21,10 @@ import {ToolConfirmation} from '../tools/tool_confirmation.js';
 import {logger} from '../utils/logger.js';
 import {Context} from './context.js';
 
-import {recordToolExecutionDuration} from '../telemetry/metrics.js';
+import {
+  countToolCall,
+  recordToolExecutionDuration,
+} from '../telemetry/metrics.js';
 import {
   traceMergedToolCalls,
   tracer,
@@ -217,6 +220,9 @@ async function callToolAsync(
       throw e;
     } finally {
       span.end();
+      // Counted even when the tool failed, so the per-invocation tally
+      // reflects the calls the agent attempted.
+      countToolCall(toolContext.invocationContext);
       recordToolExecutionDuration(
         toolName,
         toolType,

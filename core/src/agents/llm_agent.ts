@@ -44,6 +44,7 @@ import {canUseOutputSchemaWithTools} from '../utils/output_schema_utils.js';
 import {Context} from './context.js';
 
 import {
+  countInferenceCall,
   recordClientOperationDuration,
   recordClientTokenUsage,
 } from '../telemetry/metrics.js';
@@ -1268,6 +1269,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       throw new Error('CFC is not yet supported in callLlmAsync');
     } else {
       invocationContext.incrementLlmCallCount();
+      countInferenceCall(invocationContext);
       const startTime = performance.now();
       let lastResponse: LlmResponse | undefined;
       let error: unknown;
