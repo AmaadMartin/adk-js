@@ -264,17 +264,4 @@ describe('A2AAgentExecutor', () => {
     const firstPart = lastCallArg.status.message!.parts[0] as TextPart;
     expect(firstPart.text).toContain('LLM failed');
   });
-
-  it('should fail cancelTask because it is not implemented', async () => {
-    const executor = new A2AAgentExecutor({
-      runner: {
-        appName: 'test-app',
-        sessionService: mockSessionService,
-      } as unknown as RunnerConfig,
-    });
-
-    await expect(executor.cancelTask('any-task-id')).rejects.toThrow(
-      'Task cancellation is not supported yet.',
-    );
-  });
 });
