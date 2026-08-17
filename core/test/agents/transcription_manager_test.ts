@@ -11,9 +11,11 @@ import {
   LlmAgent,
   PluginManager,
   Session,
-  TranscriptionManager,
   createEvent,
   createSession,
+  getTranscriptionStats,
+  handleInputTranscription,
+  handleOutputTranscription,
 } from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
 
@@ -47,13 +49,12 @@ function makeAgentlessContext(): InvocationContext {
   });
 }
 
-describe('TranscriptionManager.handleInputTranscription', () => {
+describe('handleInputTranscription', () => {
   it('authors the event as the user and carries the transcription by reference', () => {
-    const manager = new TranscriptionManager();
     const context = makeContext();
     const transcription = {text: 'what is the weather in Zurich'};
 
-    const event = manager.handleInputTranscription(context, transcription);
+    const event = handleInputTranscription(context, transcription);
 
     expect(event.author).toBe('user');
     expect(event.invocationId).toBe(INVOCATION_ID);
@@ -62,13 +63,9 @@ describe('TranscriptionManager.handleInputTranscription', () => {
   });
 
   it('leaves the transcription fields unmodified', () => {
-    const manager = new TranscriptionManager();
     const transcription = {text: 'test transcription content', finished: true};
 
-    const event = manager.handleInputTranscription(
-      makeContext(),
-      transcription,
-    );
+    const event = handleInputTranscription(makeContext(), transcription);
 
     expect(event.inputTranscription).toEqual({
       text: 'test transcription content',
@@ -77,29 +74,21 @@ describe('TranscriptionManager.handleInputTranscription', () => {
   });
 
   it('accepts a transcription that carries no text', () => {
-    const manager = new TranscriptionManager();
     const transcription = {};
 
-    const event = manager.handleInputTranscription(
-      makeContext(),
-      transcription,
-    );
+    const event = handleInputTranscription(makeContext(), transcription);
 
     expect(event.inputTranscription).toBe(transcription);
   });
 
   it('does not mark the event partial', () => {
-    const manager = new TranscriptionManager();
-
-    const event = manager.handleInputTranscription(makeContext(), {text: 'hi'});
+    const event = handleInputTranscription(makeContext(), {text: 'hi'});
 
     expect(event.partial).toBeUndefined();
   });
 
   it('succeeds when the invocation has no agent', () => {
-    const manager = new TranscriptionManager();
-
-    const event = manager.handleInputTranscription(makeAgentlessContext(), {
+    const event = handleInputTranscription(makeAgentlessContext(), {
       text: 'hello from a node',
     });
 
@@ -107,13 +96,12 @@ describe('TranscriptionManager.handleInputTranscription', () => {
   });
 });
 
-describe('TranscriptionManager.handleOutputTranscription', () => {
+describe('handleOutputTranscription', () => {
   it('authors the event as the agent and carries the transcription by reference', () => {
-    const manager = new TranscriptionManager();
     const context = makeContext();
     const transcription = {text: 'it is 18 degrees and clear'};
 
-    const event = manager.handleOutputTranscription(context, transcription);
+    const event = handleOutputTranscription(context, transcription);
 
     expect(event.author).toBe(AGENT_NAME);
     expect(event.invocationId).toBe(INVOCATION_ID);
@@ -122,9 +110,7 @@ describe('TranscriptionManager.handleOutputTranscription', () => {
   });
 
   it('does not mark the event partial', () => {
-    const manager = new TranscriptionManager();
-
-    const event = manager.handleOutputTranscription(makeContext(), {
+    const event = handleOutputTranscription(makeContext(), {
       text: 'hi',
     });
 
@@ -132,17 +118,14 @@ describe('TranscriptionManager.handleOutputTranscription', () => {
   });
 
   it('throws when the invocation has no agent', () => {
-    const manager = new TranscriptionManager();
-
     expect(() =>
-      manager.handleOutputTranscription(makeAgentlessContext(), {text: 'hi'}),
+      handleOutputTranscription(makeAgentlessContext(), {text: 'hi'}),
     ).toThrow(/InvocationContext.agent is not set/);
   });
 });
 
-describe('TranscriptionManager session side effects', () => {
+describe('transcription manager session side effects', () => {
   it('never writes the event to the session', async () => {
-    const manager = new TranscriptionManager();
     const sessionService = new InMemorySessionService();
     const session = await sessionService.createSession({
       appName: 'test-app',
@@ -157,8 +140,8 @@ describe('TranscriptionManager session side effects', () => {
       pluginManager: new PluginManager(),
     });
 
-    manager.handleInputTranscription(context, {text: 'from the user'});
-    manager.handleOutputTranscription(context, {text: 'from the model'});
+    handleInputTranscription(context, {text: 'from the user'});
+    handleOutputTranscription(context, {text: 'from the model'});
 
     expect(appendEvent).not.toHaveBeenCalled();
     expect(session.events).toEqual([]);
@@ -171,15 +154,14 @@ describe('TranscriptionManager session side effects', () => {
   });
 
   it('keeps repeated calls independent', () => {
-    const manager = new TranscriptionManager();
     const context = makeContext();
 
     const events = [
-      manager.handleInputTranscription(context, {text: 'user 0'}),
-      manager.handleInputTranscription(context, {text: 'user 1'}),
-      manager.handleInputTranscription(context, {text: 'user 2'}),
-      manager.handleOutputTranscription(context, {text: 'model 0'}),
-      manager.handleOutputTranscription(context, {text: 'model 1'}),
+      handleInputTranscription(context, {text: 'user 0'}),
+      handleInputTranscription(context, {text: 'user 1'}),
+      handleInputTranscription(context, {text: 'user 2'}),
+      handleOutputTranscription(context, {text: 'model 0'}),
+      handleOutputTranscription(context, {text: 'model 1'}),
     ];
 
     expect(events.map((event) => event.author)).toEqual([
@@ -194,11 +176,9 @@ describe('TranscriptionManager session side effects', () => {
   });
 });
 
-describe('TranscriptionManager.getTranscriptionStats', () => {
+describe('getTranscriptionStats', () => {
   it('counts nothing in an empty session', () => {
-    const manager = new TranscriptionManager();
-
-    expect(manager.getTranscriptionStats(makeContext())).toEqual({
+    expect(getTranscriptionStats(makeContext())).toEqual({
       inputTranscriptions: 0,
       outputTranscriptions: 0,
       totalTranscriptions: 0,
@@ -206,7 +186,6 @@ describe('TranscriptionManager.getTranscriptionStats', () => {
   });
 
   it('counts input and output transcriptions across a mixed session', () => {
-    const manager = new TranscriptionManager();
     const context = makeContext([
       createEvent({inputTranscription: {text: 'user 1'}}),
       createEvent({outputTranscription: {text: 'model response'}}),
@@ -214,7 +193,7 @@ describe('TranscriptionManager.getTranscriptionStats', () => {
       createEvent({content: {role: 'user', parts: [{text: 'typed'}]}}),
     ]);
 
-    expect(manager.getTranscriptionStats(context)).toEqual({
+    expect(getTranscriptionStats(context)).toEqual({
       inputTranscriptions: 2,
       outputTranscriptions: 1,
       totalTranscriptions: 3,
@@ -222,10 +201,9 @@ describe('TranscriptionManager.getTranscriptionStats', () => {
   });
 
   it('counts nothing when no event carries a transcription', () => {
-    const manager = new TranscriptionManager();
     const context = makeContext([createEvent({}), createEvent({})]);
 
-    expect(manager.getTranscriptionStats(context)).toEqual({
+    expect(getTranscriptionStats(context)).toEqual({
       inputTranscriptions: 0,
       outputTranscriptions: 0,
       totalTranscriptions: 0,
@@ -233,13 +211,12 @@ describe('TranscriptionManager.getTranscriptionStats', () => {
   });
 
   it('counts a transcription that carries no text', () => {
-    const manager = new TranscriptionManager();
     const context = makeContext([
       createEvent({inputTranscription: {text: ''}}),
       createEvent({outputTranscription: {}}),
     ]);
 
-    expect(manager.getTranscriptionStats(context)).toEqual({
+    expect(getTranscriptionStats(context)).toEqual({
       inputTranscriptions: 1,
       outputTranscriptions: 1,
       totalTranscriptions: 2,
@@ -247,7 +224,6 @@ describe('TranscriptionManager.getTranscriptionStats', () => {
   });
 
   it('counts an event carrying both transcriptions once in each bucket', () => {
-    const manager = new TranscriptionManager();
     const context = makeContext([
       createEvent({
         inputTranscription: {text: 'user'},
@@ -255,7 +231,7 @@ describe('TranscriptionManager.getTranscriptionStats', () => {
       }),
     ]);
 
-    expect(manager.getTranscriptionStats(context)).toEqual({
+    expect(getTranscriptionStats(context)).toEqual({
       inputTranscriptions: 1,
       outputTranscriptions: 1,
       totalTranscriptions: 2,
@@ -263,13 +239,12 @@ describe('TranscriptionManager.getTranscriptionStats', () => {
   });
 
   it('leaves the session unchanged when called twice', () => {
-    const manager = new TranscriptionManager();
     const context = makeContext([
       createEvent({inputTranscription: {text: 'user'}}),
     ]);
 
-    const first = manager.getTranscriptionStats(context);
-    const second = manager.getTranscriptionStats(context);
+    const first = getTranscriptionStats(context);
+    const second = getTranscriptionStats(context);
 
     expect(second).toEqual(first);
     expect(context.session.events).toHaveLength(1);
