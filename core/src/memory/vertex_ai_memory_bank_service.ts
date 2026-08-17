@@ -22,6 +22,7 @@ import {
 } from '../utils/vertex_ai_utils.js';
 import {
   AddEventsToMemoryRequest,
+  AddMemoryRequest,
   BaseMemoryService,
   SearchMemoryRequest,
   SearchMemoryResponse,
@@ -184,12 +185,7 @@ export class VertexAiMemoryBankService implements BaseMemoryService {
   /**
    * Adds explicit memory items using Vertex Memory Bank.
    */
-  async addMemory(request: {
-    appName: string;
-    userId: string;
-    memories: MemoryEntry[];
-    customMetadata?: Record<string, unknown>;
-  }): Promise<void> {
+  async addMemory(request: AddMemoryRequest): Promise<void> {
     if (isConsolidationEnabled(request.customMetadata)) {
       return this.addMemoriesViaGenerateDirectMemoriesSource(request);
     }
