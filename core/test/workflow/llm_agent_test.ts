@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {Type} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {InvocationContext} from '../../src/agents/invocation_context.js';
 import {LlmAgent} from '../../src/agents/llm_agent.js';
@@ -110,6 +111,19 @@ describe('LlmAgent as a node (single_turn)', () => {
     expect(output).toBe('echo:hello');
     // The agent's model event streamed through, authored by the agent.
     expect(events.some((e) => e.author === 'echo')).toBe(true);
+  });
+
+  it('parses a node output the model wrapped in a markdown code fence', async () => {
+    const agent = new LlmAgent({
+      name: 'fenced',
+      outputSchema: {
+        type: Type.OBJECT,
+        properties: {answer: {type: Type.STRING}},
+      },
+      model: new ScriptedLlm(() => '```json\n{"answer":"42"}\n```'),
+    });
+    const wf = new Workflow({name: 'fenced_wf', edges: [['START', agent]]});
+    expect((await driveWorkflow(wf, 'hello')).output).toEqual({answer: '42'});
   });
 
   it('lets an agent be used directly in edges, feeding a downstream node (baseline bug #3)', async () => {
