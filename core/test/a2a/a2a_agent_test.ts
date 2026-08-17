@@ -23,6 +23,7 @@ import {
   createEvent,
   createEventActions,
   InvocationContext,
+  PluginManager,
   RemoteA2AAgent,
   Runner,
   RunnerConfig,
@@ -728,6 +729,7 @@ describe('A2A Remote Agent', () => {
   const createMockContext = (overrides = {}): InvocationContext => {
     return {
       invocationId: 'test-invocation',
+      pluginManager: new PluginManager([]),
       session: {
         id: 'test-session',
         userId: 'test-user',
