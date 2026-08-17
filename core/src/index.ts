@@ -77,6 +77,12 @@ export {
   SecretManagerClient,
   type SecretManagerClientOptions,
 } from './integrations/secret_manager/secret_client.js';
+export {OciGenAiLlm} from './models/oci_genai_llm.js';
+export type {
+  OciAuthType,
+  OciGenAiLlmParams,
+  OciReasoningEffort,
+} from './models/oci_genai_llm.js';
 export {DatabaseSessionService} from './sessions/database_session_service.js';
 export {upgradeSessionDatabaseSchema} from './sessions/db/schema_version.js';
 export {getSessionServiceFromUri} from './sessions/registry.js';
