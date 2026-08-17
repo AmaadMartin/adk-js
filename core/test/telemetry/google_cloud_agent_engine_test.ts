@@ -5,10 +5,15 @@
  */
 
 import {PeriodicExportingMetricReader} from '@opentelemetry/sdk-metrics';
-import {GoogleAuth} from 'google-auth-library';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 
-vi.mock('google-auth-library');
+vi.mock('google-auth-library', () => ({
+  GoogleAuth: class {
+    getProjectId(): Promise<string> {
+      return Promise.resolve('test-project');
+    }
+  },
+}));
 vi.mock('@google-cloud/opentelemetry-cloud-trace-exporter');
 vi.mock('@google-cloud/opentelemetry-cloud-monitoring-exporter');
 
@@ -20,12 +25,6 @@ const AGENT_ENGINE_ID_ENV_VAR = 'GOOGLE_CLOUD_AGENT_ENGINE_ID';
  */
 async function freshModules() {
   vi.resetModules();
-  vi.mocked(GoogleAuth).mockImplementation(
-    () =>
-      ({
-        getProjectId: vi.fn().mockResolvedValue('test-project'),
-      }) as unknown as GoogleAuth,
-  );
   return {
     googleCloud: await import('../../src/telemetry/google_cloud.js'),
     metrics: await import('../../src/telemetry/agent_engine_metrics.js'),
