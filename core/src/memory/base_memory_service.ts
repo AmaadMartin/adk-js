@@ -105,7 +105,7 @@ export interface BaseMemoryService {
   searchMemory(request: SearchMemoryRequest): Promise<SearchMemoryResponse>;
 }
 
-/** Thrown when a memory service cannot ingest an event delta. */
+/** The error message reported when a service cannot ingest an event delta. */
 export const EVENT_DELTAS_UNSUPPORTED_MESSAGE =
   'This memory service does not support adding event deltas. ' +
   'Call addSessionToMemory(session) to ingest the full session.';
