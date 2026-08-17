@@ -72,7 +72,7 @@ function transferDeclarationEnum(llmRequest: LlmRequest): string[] | undefined {
 
 /**
  * Builds an agent whose targets are a sub-agent, its parent and a peer, named
- * so that their natural order differs from their alphabetical order.
+ * so that their target order differs from their alphabetical order.
  */
 function createAgentWithThreeTargets(): LlmAgent {
   const agent = new LlmAgent({
@@ -355,7 +355,7 @@ describe('AgentTransferLlmRequestProcessor', () => {
     expect(llmRequest.config?.tools).toBeUndefined();
   });
 
-  it('names the available agents in the instructions, sorted', async () => {
+  it('names the same agents in the instructions and the declaration', async () => {
     const invocationContext = createMockInvocationContext(
       createAgentWithThreeTargets(),
     );
@@ -365,8 +365,13 @@ describe('AgentTransferLlmRequestProcessor', () => {
 
     expect(llmRequest.config?.systemInstruction).toContain(
       '**NOTE**: the only available agents for `transfer_to_agent` function are\n' +
-        '`alpha_agent`, `mid_agent`, `zeta_agent`.',
+        '`zeta_agent`, `mid_agent`, `alpha_agent`.',
     );
+    expect(transferDeclarationEnum(llmRequest)).toEqual([
+      'zeta_agent',
+      'mid_agent',
+      'alpha_agent',
+    ]);
   });
 
   it('declares a separate target list for each agent', async () => {

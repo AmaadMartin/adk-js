@@ -17,18 +17,6 @@ import {isLlmAgent, LlmAgent} from '../llm_agent.js';
 import {BaseLlmRequestProcessor} from './base_llm_processor.js';
 
 /**
- * Builds the transfer tool offering the given agents as targets.
- *
- * @param transferTargets - The agents that can be transferred to.
- * @returns A tool whose declaration accepts only those agent names.
- */
-export function buildTransferTool(
-  transferTargets: BaseAgent[],
-): TransferToAgentTool {
-  return new TransferToAgentTool(transferTargets.map((target) => target.name));
-}
-
-/**
  * Collects the agents the given agent may transfer to: its sub-agents, and —
  * unless disallowed — its parent agent and its peers.
  *
@@ -95,10 +83,9 @@ export class AgentTransferLlmRequestProcessor extends BaseLlmRequestProcessor {
     ]);
 
     const toolContext = new Context({invocationContext});
-    await buildTransferTool(transferTargets).processLlmRequest({
-      toolContext,
-      llmRequest,
-    });
+    await new TransferToAgentTool(
+      transferTargets.map((target) => target.name),
+    ).processLlmRequest({toolContext, llmRequest});
   }
 
   private buildTargetAgentsInfo(targetAgent: BaseAgent): string {
@@ -113,9 +100,7 @@ Agent description: ${targetAgent.description}
     targetAgents: BaseAgent[],
   ): string {
     const availableAgentNames = targetAgents
-      .map((targetAgent) => targetAgent.name)
-      .sort()
-      .map((name) => `\`${name}\``)
+      .map((targetAgent) => `\`${targetAgent.name}\``)
       .join(', ');
 
     let instructions = `

@@ -11,7 +11,10 @@ import {
   getFunctionResponses,
 } from '../../events/event.js';
 import {ToolConfirmation} from '../../tools/tool_confirmation.js';
-import {TRANSFER_TO_AGENT_TOOL_NAME} from '../../tools/transfer_to_agent_tool.js';
+import {
+  TRANSFER_TO_AGENT_TOOL_NAME,
+  TransferToAgentTool,
+} from '../../tools/transfer_to_agent_tool.js';
 import {
   handleFunctionCallList,
   REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
@@ -19,10 +22,7 @@ import {
 import {InvocationContext} from '../invocation_context.js';
 import {isLlmAgent} from '../llm_agent.js';
 import {ReadonlyContext} from '../readonly_context.js';
-import {
-  buildTransferTool,
-  getTransferTargets,
-} from './agent_transfer_llm_request_processor.js';
+import {getTransferTargets} from './agent_transfer_llm_request_processor.js';
 import {BaseLlmRequestProcessor} from './base_llm_processor.js';
 
 /**
@@ -199,8 +199,9 @@ export class RequestConfirmationLlmRequestProcessor extends BaseLlmRequestProces
       // transfer needs it registered here too.
       const transferTargets = getTransferTargets(agent);
       if (transferTargets.length) {
-        toolsDict[TRANSFER_TO_AGENT_TOOL_NAME] =
-          buildTransferTool(transferTargets);
+        toolsDict[TRANSFER_TO_AGENT_TOOL_NAME] = new TransferToAgentTool(
+          transferTargets.map((target) => target.name),
+        );
       }
 
       const functionResponseEvent = await handleFunctionCallList({
