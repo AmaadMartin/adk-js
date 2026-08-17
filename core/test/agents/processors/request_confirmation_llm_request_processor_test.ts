@@ -124,6 +124,65 @@ async function collectEvents(invocationContext: InvocationContext) {
   return events;
 }
 
+/** The gated `transfer_to_agent` call that the resume has to re-invoke. */
+const TRANSFER_FUNCTION_CALL = {
+  id: 'fc-transfer',
+  name: 'transfer_to_agent',
+  args: {agentName: 'sub_agent'},
+};
+
+/**
+ * Builds the three events a gated `transfer_to_agent` call leaves in the
+ * session: the model's transfer call, the system confirmation request, and the
+ * user's answer to it.
+ */
+function createTransferConfirmationEvents(confirmed: boolean) {
+  return [
+    createOriginalCallEvent(TRANSFER_FUNCTION_CALL, 'orchestrator'),
+    createEvent({
+      invocationId: 'test-invocation',
+      author: 'orchestrator',
+      content: {
+        role: 'model',
+        parts: [
+          {
+            functionCall: {
+              id: 'fc-confirm-transfer',
+              name: REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
+              args: {originalFunctionCall: TRANSFER_FUNCTION_CALL},
+            },
+          },
+        ],
+      },
+    }),
+    createEvent({
+      invocationId: 'test-invocation',
+      author: 'user',
+      content: {
+        role: 'user',
+        parts: [
+          {
+            functionResponse: {
+              id: 'fc-confirm-transfer',
+              name: REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
+              response: {confirmed, hint: ''},
+            },
+          },
+        ],
+      },
+    }),
+  ];
+}
+
+/** An orchestrator whose single sub-agent is a reachable transfer target. */
+function createOrchestratorAgent() {
+  return new LlmAgent({
+    name: 'orchestrator',
+    model: 'gemini-2.5-flash',
+    subAgents: [new LlmAgent({name: 'sub_agent', model: 'gemini-2.5-flash'})],
+  });
+}
+
 describe('RequestConfirmationLlmRequestProcessor', () => {
   it('should do nothing if agent is not an LlmAgent', async () => {
     const agent = new MockRootAgent('test_agent');
@@ -539,7 +598,6 @@ describe('RequestConfirmationLlmRequestProcessor', () => {
     const events = await collectEvents(invocationContext);
     expect(events).toHaveLength(0);
   });
-
   it('throws when the original function call is not in session history', async () => {
     const mockFunctionCallList = await freshMockFunctionCallList();
     const agent = new LlmAgent({
@@ -828,5 +886,116 @@ describe('RequestConfirmationLlmRequestProcessor', () => {
 
     expect(events).toHaveLength(0);
     expect(mockFunctionCallList).not.toHaveBeenCalled();
+  });
+  it('should register the transfer tool when the agent has transfer targets', async () => {
+    const mockFunctionCallList = await freshMockFunctionCallList();
+
+    const agent = createOrchestratorAgent();
+    vi.spyOn(agent, 'canonicalTools').mockResolvedValue([]);
+    const invocationContext = createMockInvocationContext(
+      agent,
+      createTransferConfirmationEvents(true),
+    );
+
+    await collectEvents(invocationContext);
+
+    expect(mockFunctionCallList).toHaveBeenCalledTimes(1);
+    const {toolsDict, functionCalls} = mockFunctionCallList.mock.calls[0][0];
+    expect(toolsDict['transfer_to_agent']).toBeDefined();
+    expect(functionCalls).toEqual([TRANSFER_FUNCTION_CALL]);
+  });
+
+  it('should register the transfer tool when the transfer is rejected', async () => {
+    const mockFunctionCallList = await freshMockFunctionCallList();
+
+    const agent = createOrchestratorAgent();
+    vi.spyOn(agent, 'canonicalTools').mockResolvedValue([]);
+    const invocationContext = createMockInvocationContext(
+      agent,
+      createTransferConfirmationEvents(false),
+    );
+
+    await collectEvents(invocationContext);
+
+    expect(mockFunctionCallList).toHaveBeenCalledTimes(1);
+    const {toolsDict, toolConfirmationDict} =
+      mockFunctionCallList.mock.calls[0][0];
+    expect(toolsDict['transfer_to_agent']).toBeDefined();
+    expect(toolConfirmationDict?.['fc-transfer'].confirmed).toBe(false);
+  });
+
+  it('should not register the transfer tool when the agent has no transfer targets', async () => {
+    const mockFunctionCallList = await freshMockFunctionCallList();
+
+    const fakeResponseEvent = createEvent({
+      invocationId: 'test-invocation',
+      author: 'lonely_agent',
+      content: {
+        role: 'model',
+        parts: [
+          {
+            functionResponse: {
+              id: 'fc-plain',
+              name: 'my_tool',
+              response: {result: 'ok'},
+            },
+          },
+        ],
+      },
+    });
+    mockFunctionCallList.mockResolvedValueOnce(fakeResponseEvent);
+
+    const agent = new LlmAgent({
+      name: 'lonely_agent',
+      model: 'gemini-2.5-flash',
+    });
+    vi.spyOn(agent, 'canonicalTools').mockResolvedValue([]);
+
+    const originalFunctionCall = {id: 'fc-plain', name: 'my_tool', args: {}};
+    const confirmationCallEvent = createEvent({
+      invocationId: 'test-invocation',
+      author: 'lonely_agent',
+      content: {
+        role: 'model',
+        parts: [
+          {
+            functionCall: {
+              id: 'fc-confirm-plain',
+              name: REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
+              args: {originalFunctionCall},
+            },
+          },
+        ],
+      },
+    });
+    const userConfirmationEvent = createEvent({
+      invocationId: 'test-invocation',
+      author: 'user',
+      content: {
+        role: 'user',
+        parts: [
+          {
+            functionResponse: {
+              id: 'fc-confirm-plain',
+              name: REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
+              response: {confirmed: true, hint: ''},
+            },
+          },
+        ],
+      },
+    });
+
+    const invocationContext = createMockInvocationContext(agent, [
+      createOriginalCallEvent(originalFunctionCall, 'lonely_agent'),
+      confirmationCallEvent,
+      userConfirmationEvent,
+    ]);
+
+    const events = await collectEvents(invocationContext);
+
+    expect(events).toEqual([fakeResponseEvent]);
+    expect(mockFunctionCallList).toHaveBeenCalledTimes(1);
+    const {toolsDict} = mockFunctionCallList.mock.calls[0][0];
+    expect(toolsDict).not.toHaveProperty('transfer_to_agent');
   });
 });
