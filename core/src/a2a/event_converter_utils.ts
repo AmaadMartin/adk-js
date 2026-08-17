@@ -144,56 +144,40 @@ export function toA2AArtifactUpdateEvent(
 }
 
 /**
- * Converts an A2A Message into an ADK event.
+ * Converts one inbound A2A event into an ADK event.
  *
- * The default implementation is {@link messageToAdkEvent}.
+ * @remarks
+ * `partConverter` is the part converter the caller configured, so an override
+ * can hand it to the built-in converter it delegates to. Returning `undefined`
+ * emits no event.
  */
-export type A2AMessageToEventConverter = (
-  msg: Message,
+export type A2AToAdkEventConverter<T> = (
+  event: T,
   invocationId: string,
   agentName: string,
   branch?: string,
   partConverter?: A2APartToGenAIPartConverter,
 ) => AdkEvent | undefined;
 
-/**
- * Converts an A2A Task into an ADK event.
- *
- * The default implementation is {@link taskToAdkEvent}.
- */
-export type A2ATaskToEventConverter = (
-  a2aTask: Task,
-  invocationId: string,
-  agentName: string,
-  branch?: string,
-  partConverter?: A2APartToGenAIPartConverter,
-) => AdkEvent | undefined;
+/** Converts an A2A Message. Defaults to {@link messageToAdkEvent}. */
+export type A2AMessageToEventConverter = A2AToAdkEventConverter<Message>;
+
+/** Converts an A2A Task. Defaults to {@link taskToAdkEvent}. */
+export type A2ATaskToEventConverter = A2AToAdkEventConverter<Task>;
 
 /**
- * Converts an A2A task status update into an ADK event.
- *
- * The default implementation is {@link statusUpdateToAdkEvent}.
+ * Converts an A2A task status update. Defaults to
+ * {@link statusUpdateToAdkEvent}.
  */
-export type A2AStatusUpdateToEventConverter = (
-  a2aEvent: TaskStatusUpdateEvent,
-  invocationId: string,
-  agentName: string,
-  branch?: string,
-  partConverter?: A2APartToGenAIPartConverter,
-) => AdkEvent | undefined;
+export type A2AStatusUpdateToEventConverter =
+  A2AToAdkEventConverter<TaskStatusUpdateEvent>;
 
 /**
- * Converts an A2A task artifact update into an ADK event.
- *
- * The default implementation is {@link artifactUpdateToAdkEvent}.
+ * Converts an A2A task artifact update. Defaults to
+ * {@link artifactUpdateToAdkEvent}.
  */
-export type A2AArtifactUpdateToEventConverter = (
-  a2aEvent: TaskArtifactUpdateEvent,
-  invocationId: string,
-  agentName: string,
-  branch?: string,
-  partConverter?: A2APartToGenAIPartConverter,
-) => AdkEvent | undefined;
+export type A2AArtifactUpdateToEventConverter =
+  A2AToAdkEventConverter<TaskArtifactUpdateEvent>;
 
 /**
  * Converter overrides for the A2A to ADK event conversion.
@@ -249,45 +233,35 @@ export function toAdkEvent(
   branch?: string,
   converters: A2AEventConverters = {},
 ): AdkEvent | undefined {
-  const partConverter = converters.a2aPartConverter;
+  const rest = [
+    invocationId,
+    agentName,
+    branch,
+    converters.a2aPartConverter,
+  ] as const;
 
   if (isMessage(event)) {
     return (converters.a2aMessageConverter ?? messageToAdkEvent)(
       event,
-      invocationId,
-      agentName,
-      branch,
-      partConverter,
+      ...rest,
     );
   }
 
   if (isTask(event)) {
-    return (converters.a2aTaskConverter ?? taskToAdkEvent)(
-      event,
-      invocationId,
-      agentName,
-      branch,
-      partConverter,
-    );
+    return (converters.a2aTaskConverter ?? taskToAdkEvent)(event, ...rest);
   }
 
   if (isTaskArtifactUpdateEvent(event)) {
     return (converters.a2aArtifactUpdateConverter ?? artifactUpdateToAdkEvent)(
       event,
-      invocationId,
-      agentName,
-      branch,
-      partConverter,
+      ...rest,
     );
   }
 
   if (isTaskStatusUpdateEvent(event)) {
     return (converters.a2aStatusUpdateConverter ?? statusUpdateToAdkEvent)(
       event,
-      invocationId,
-      agentName,
-      branch,
-      partConverter,
+      ...rest,
     );
   }
 
