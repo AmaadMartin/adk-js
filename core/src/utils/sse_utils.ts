@@ -16,9 +16,10 @@ const DATA_FIELD_PREFIX = 'data:';
  * is emitted verbatim: interpreting a sentinel such as `[DONE]` is the
  * caller's protocol concern.
  *
- * The reader is released on every exit path, including an abort and an early
- * `break` by the consumer. Aborting also cancels a read that is already in
- * flight, so a stalled server cannot hold the connection open.
+ * The reader is released on every exit path: a clean end, an abort, an early
+ * `break` by the consumer, and a stream that fails mid-body. Aborting also
+ * cancels a read that is already in flight, so a stalled server cannot hold
+ * the connection open. A stream failure reaches the caller as a rejection.
  *
  * @param stream The raw `text/event-stream` body.
  * @param abortSignal Stops the generator when it fires.
@@ -28,7 +29,13 @@ export async function* readSseData(
   abortSignal?: AbortSignal,
 ): AsyncGenerator<string, void> {
   const reader = stream.getReader();
-  const onAbort = () => void reader.cancel();
+  // A reader of a failed stream rejects `cancel()` with that failure, and both
+  // call sites below have to discard it: the abort listener would leave the
+  // rejection unhandled and end the process, and the cleanup would skip
+  // `releaseLock()`. The caller still learns of the failure, because `read()`
+  // rejects with it too.
+  const cancel = () => reader.cancel().catch(() => undefined);
+  const onAbort = () => void cancel();
   abortSignal?.addEventListener('abort', onAbort, {once: true});
 
   const decoder = new TextDecoder();
@@ -54,7 +61,7 @@ export async function* readSseData(
     }
   } finally {
     abortSignal?.removeEventListener('abort', onAbort);
-    await reader.cancel();
+    await cancel();
     reader.releaseLock();
   }
 }

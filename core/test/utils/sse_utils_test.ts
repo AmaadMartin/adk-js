@@ -138,6 +138,48 @@ describe('readSseData', () => {
     expect(stream.locked).toBe(false);
   });
 
+  it('reports a stream failure and still releases the reader', async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.error(new Error('ECONNRESET'));
+      },
+    });
+
+    await expect(collect(readSseData(stream))).rejects.toThrow('ECONNRESET');
+    expect(stream.locked).toBe(false);
+  });
+
+  it('leaves no unhandled rejection when an abort races a stream failure', async () => {
+    const rejections: unknown[] = [];
+    const onUnhandledRejection = (reason: unknown) => rejections.push(reason);
+    process.on('unhandledRejection', onUnhandledRejection);
+
+    try {
+      let failStream!: (error: Error) => void;
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          failStream = (error) => controller.error(error);
+          controller.enqueue(encoder.encode('data: one\n\n'));
+        },
+      });
+      const controller = new AbortController();
+      const received: string[] = [];
+
+      for await (const event of readSseData(stream, controller.signal)) {
+        received.push(event);
+        failStream(new Error('ECONNRESET'));
+        controller.abort();
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(received).toEqual(['one']);
+      expect(rejections).toEqual([]);
+      expect(stream.locked).toBe(false);
+    } finally {
+      process.off('unhandledRejection', onUnhandledRejection);
+    }
+  });
+
   it('releases the reader when the consumer breaks out early', async () => {
     const stream = streamOf('data: one\n\ndata: two\n\n');
     const received: string[] = [];
