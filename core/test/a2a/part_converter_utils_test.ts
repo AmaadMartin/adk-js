@@ -291,6 +291,45 @@ describe('part_converter_utils', () => {
         expected,
       );
     });
+
+    it('applies a supplied converter to every part', () => {
+      const calls: Array<[GenAIPart, string[] | undefined]> = [];
+      const genAiParts: GenAIPart[] = [{text: 'one'}, {text: 'two'}];
+
+      const result = toA2AParts(
+        genAiParts,
+        ['lrt-1'],
+        (part, longRunningToolIds) => {
+          calls.push([part, longRunningToolIds]);
+          return {kind: 'text', text: `converted:${part.text}`};
+        },
+      );
+
+      expect(calls).toEqual([
+        [{text: 'one'}, ['lrt-1']],
+        [{text: 'two'}, ['lrt-1']],
+      ]);
+      expect(result).toEqual([
+        {kind: 'text', text: 'converted:one'},
+        {kind: 'text', text: 'converted:two'},
+      ]);
+    });
+
+    it('falls back to toA2APart when no converter is supplied', () => {
+      const genAiParts: GenAIPart[] = [
+        {text: 'one'},
+        {inlineData: {data: 'AAA', mimeType: 'image/png'}},
+      ];
+
+      expect(toA2AParts(genAiParts)).toEqual([
+        {kind: 'text', text: 'one'},
+        {
+          kind: 'file',
+          file: {bytes: 'AAA', mimeType: 'image/png'},
+          metadata: {},
+        },
+      ]);
+    });
   });
 
   // Now the backward conversions

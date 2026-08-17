@@ -5,6 +5,7 @@
  */
 
 import {TextPart} from '@a2a-js/sdk';
+import {Part as GenAIPart} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {
   getFunctionResponseCallId,
@@ -17,7 +18,7 @@ import {AdkMetadataKeys} from '../../src/a2a/metadata_converter_utils.js';
 import {BaseAgent} from '../../src/agents/base_agent.js';
 import {InvocationContext} from '../../src/agents/invocation_context.js';
 import {createEvent} from '../../src/events/event.js';
-import {Session} from '../../src/sessions/session.js';
+import {createSession, Session} from '../../src/sessions/session.js';
 
 describe('remote_agent_utils', () => {
   const mockAgent = {
@@ -247,6 +248,67 @@ describe('remote_agent_utils', () => {
       expect((result.parts[1] as TextPart).text).toBe(
         '[other-agent] said: other response',
       );
+    });
+
+    it('should apply a supplied converter to every part', () => {
+      const calls: Array<[GenAIPart, string[] | undefined]> = [];
+      const event = createEvent({
+        author: 'user',
+        content: {role: 'user', parts: [{text: 'one'}, {text: 'two'}]},
+        longRunningToolIds: ['lrt-1'],
+      });
+      const session = createSession({
+        id: 'test-session',
+        appName: 'test-app',
+        events: [event],
+      });
+
+      const result = toMissingRemoteSessionParts(
+        mockCtx,
+        session,
+        (part, longRunningToolIds) => {
+          calls.push([part, longRunningToolIds]);
+          return {kind: 'text', text: `converted:${part.text}`};
+        },
+      );
+
+      expect(calls).toEqual([
+        [{text: 'one'}, ['lrt-1']],
+        [{text: 'two'}, ['lrt-1']],
+      ]);
+      expect(result.parts).toEqual([
+        {kind: 'text', text: 'converted:one'},
+        {kind: 'text', text: 'converted:two'},
+      ]);
+    });
+
+    it('should use the default converter when none is supplied', () => {
+      const event = createEvent({
+        author: 'user',
+        content: {
+          role: 'user',
+          parts: [
+            {text: 'one'},
+            {inlineData: {data: 'AAA', mimeType: 'image/png'}},
+          ],
+        },
+      });
+      const session = createSession({
+        id: 'test-session',
+        appName: 'test-app',
+        events: [event],
+      });
+
+      const result = toMissingRemoteSessionParts(mockCtx, session);
+
+      expect(result.parts).toEqual([
+        {kind: 'text', text: 'one'},
+        {
+          kind: 'file',
+          file: {bytes: 'AAA', mimeType: 'image/png'},
+          metadata: {},
+        },
+      ]);
     });
   });
 });

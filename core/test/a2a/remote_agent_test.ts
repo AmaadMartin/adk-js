@@ -5,6 +5,7 @@
  */
 
 import {
+  Part as A2APart,
   AgentCard,
   Message,
   Task,
@@ -19,11 +20,14 @@ import {
 import {
   Event as AdkEvent,
   createEvent,
+  createSession,
+  GenAIPartToA2APartConverter,
   InvocationContext,
   RemoteA2AAgent,
   RemoteA2AAgentConfig,
   Session,
 } from '@google/adk';
+import {Part as GenAIPart} from '@google/genai';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 
 type A2AStreamEventData =
@@ -365,5 +369,110 @@ describe('A2ARemoteAgent', () => {
         configuration: {acceptedOutputModes: ['custom']},
       }),
     );
+  });
+
+  describe('genaiPartConverter', () => {
+    const streamingCard: AgentCard = {
+      name: 'Remote',
+      description: 'test',
+      protocolVersion: '1.0',
+      defaultInputModes: [],
+      defaultOutputModes: [],
+      capabilities: {streaming: true},
+      skills: [],
+      url: 'https://example.com',
+      version: '1.0',
+    };
+
+    const functionResponsePart: GenAIPart = {
+      functionResponse: {id: 'call-1', name: 'tool', response: {ok: true}},
+    };
+
+    /** A session whose last event is a user response to an agent tool call. */
+    const createFunctionResponseContext = (): InvocationContext =>
+      createMockContext({
+        session: createSession({
+          id: 'test-session',
+          userId: 'test-user',
+          appName: 'test-app',
+          events: [
+            createEvent({
+              author: 'test-agent',
+              content: {
+                role: 'model',
+                parts: [{functionCall: {id: 'call-1', name: 'tool', args: {}}}],
+              },
+            }),
+            createEvent({
+              author: 'user',
+              content: {role: 'user', parts: [functionResponsePart]},
+            }),
+          ],
+        }),
+      });
+
+    const runAgent = async (
+      context: InvocationContext,
+      genaiPartConverter?: GenAIPartToA2APartConverter,
+    ): Promise<A2APart[]> => {
+      const agent = new RemoteA2AAgent({
+        name: 'test-agent',
+        agentCard: streamingCard,
+        clientFactory: mockClientFactory,
+        genaiPartConverter,
+      });
+      vi.mocked(mockClient.sendMessageStream).mockReturnValue(
+        (async function* () {})(),
+      );
+
+      for await (const _ of agent.runAsync(context)) {
+        // empty
+      }
+
+      return vi.mocked(mockClient.sendMessageStream).mock.calls[0][0].message
+        .parts;
+    };
+
+    it('applies the converter on the user function-response branch', async () => {
+      const seen: GenAIPart[] = [];
+
+      const parts = await runAgent(createFunctionResponseContext(), (part) => {
+        seen.push(part);
+        return {kind: 'data', data: {redacted: true}};
+      });
+
+      expect(seen).toEqual([functionResponsePart]);
+      expect(parts).toEqual([{kind: 'data', data: {redacted: true}}]);
+    });
+
+    it('keeps the default encoding on the user function-response branch', async () => {
+      const parts = await runAgent(createFunctionResponseContext());
+
+      expect(parts).toEqual([
+        {
+          kind: 'data',
+          data: {id: 'call-1', name: 'tool', response: {ok: true}},
+          metadata: {'adk_type': 'function_response'},
+        },
+      ]);
+    });
+
+    it('applies the converter on the session-history branch', async () => {
+      const seen: GenAIPart[] = [];
+
+      const parts = await runAgent(createMockContext(), (part) => {
+        seen.push(part);
+        return {kind: 'text', text: 'converted'};
+      });
+
+      expect(seen).toEqual([{text: 'hello'}]);
+      expect(parts).toEqual([{kind: 'text', text: 'converted'}]);
+    });
+
+    it('keeps the default encoding on the session-history branch', async () => {
+      const parts = await runAgent(createMockContext());
+
+      expect(parts).toEqual([{kind: 'text', text: 'hello'}]);
+    });
   });
 });
