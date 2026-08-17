@@ -11,7 +11,12 @@ import {z as z4} from 'zod/v4';
 import {isZodObject, zodObjectToSchema} from '../utils/simple_zod_to_json.js';
 
 import {Context} from '../agents/context.js';
-import {BaseTool, RunAsyncToolRequest} from './base_tool.js';
+import {
+  BaseTool,
+  CheckRequireConfirmationRequest,
+  RunAsyncToolRequest,
+} from './base_tool.js';
+import {checkToolConfirmation} from './tool_confirmation.js';
 
 /**
  * Input parameters of the function tool.
@@ -191,10 +196,7 @@ export class FunctionTool<
         validatedArgs = this.parameters.parse(req.args);
       }
 
-      const pending = await this.checkConfirmation(
-        validatedArgs as ToolExecuteArgument<TParameters>,
-        req.toolContext,
-      );
+      const pending = await this.checkConfirmation(req.args, req.toolContext);
       if (pending !== undefined) {
         return pending;
       }
@@ -211,43 +213,57 @@ export class FunctionTool<
   }
 
   /**
+   * Reports whether this call needs approval, honouring the tool's
+   * `requireConfirmation` option.
+   *
+   * Arguments that fail the parameter schema are never gated: `runAsync`
+   * refuses the call before it could run, so there is nothing to approve.
+   * `adk-python` validates its mandatory arguments before consulting the hook
+   * for the same reason.
+   */
+  override async checkRequireConfirmation({
+    args,
+    toolContext,
+  }: CheckRequireConfirmationRequest): Promise<boolean> {
+    if (!this.requireConfirmation) {
+      return false;
+    }
+    let input = args as ToolExecuteArgument<TParameters>;
+    if (isZodObject(this.parameters)) {
+      const parsed = this.parameters.safeParse(args);
+      if (!parsed.success) {
+        return false;
+      }
+      input = parsed.data as ToolExecuteArgument<TParameters>;
+    }
+    return typeof this.requireConfirmation === 'function'
+      ? await this.requireConfirmation(input, toolContext)
+      : true;
+  }
+
+  /**
    * Evaluates the confirmation gate. Returns `undefined` if the tool may
    * proceed; otherwise returns the function response payload to surface instead
    * of running (a request-for-confirmation on the first pass, or a rejection
    * once the user declined).
    */
   private async checkConfirmation(
-    input: ToolExecuteArgument<TParameters>,
+    args: Record<string, unknown>,
     toolContext?: Context,
   ): Promise<{error: string} | undefined> {
-    const requireConfirmation =
-      typeof this.requireConfirmation === 'function'
-        ? await this.requireConfirmation(input, toolContext)
-        : this.requireConfirmation;
-    if (!requireConfirmation) {
-      return undefined;
-    }
     if (!toolContext) {
+      // The hook needs a context. Without one, keep the historical behaviour of
+      // ignoring an absent context unless the tool actually gates.
+      if (!this.requireConfirmation) {
+        return undefined;
+      }
       throw new Error(
         `Tool '${this.name}' requires confirmation but no tool context was provided.`,
       );
     }
-    if (!toolContext.toolConfirmation) {
-      toolContext.requestConfirmation({
-        hint:
-          `Please approve or reject the tool call ${this.name}() by ` +
-          'responding with a FunctionResponse with an expected ' +
-          'ToolConfirmation payload.',
-      });
-      toolContext.actions.skipSummarization = true;
-      return {
-        error:
-          'This tool call requires confirmation, please approve or reject.',
-      };
+    if (!(await this.checkRequireConfirmation({args, toolContext}))) {
+      return undefined;
     }
-    if (!toolContext.toolConfirmation.confirmed) {
-      return {error: 'This tool call is rejected.'};
-    }
-    return undefined;
+    return checkToolConfirmation(this.name, toolContext);
   }
 }

@@ -20,6 +20,14 @@ export interface RunAsyncToolRequest {
 }
 
 /**
+ * The parameters for `checkRequireConfirmation`.
+ */
+export interface CheckRequireConfirmationRequest {
+  args: Record<string, unknown>;
+  toolContext: Context;
+}
+
+/**
  * The parameters for `processLlmRequest`.
  */
 export interface ToolProcessLlmRequest {
@@ -143,6 +151,27 @@ export abstract class BaseTool {
         functionDeclarations: [functionDeclaration],
       });
     }
+  }
+
+  /**
+   * Returns whether this call requires user confirmation before the tool runs.
+   *
+   * The decision is made per call and from the actual arguments, so a tool can
+   * gate a destructive argument set while letting a harmless one through.
+   * Returning `true` routes the call through the confirmation flow: the
+   * invocation pauses with an `adk_request_confirmation` interrupt and resumes
+   * only once the user approves.
+   *
+   * The implementation must be free of side effects, because the framework may
+   * consult it more than once for a single call.
+   *
+   * @return A promise that resolves to `true` when the arguments and context of
+   *     the current call need approval.
+   */
+  async checkRequireConfirmation(
+    _request: CheckRequireConfirmationRequest,
+  ): Promise<boolean> {
+    return false;
   }
 
   /**

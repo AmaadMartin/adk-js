@@ -17,7 +17,10 @@ import {
 } from '../events/event.js';
 import {mergeEventActions} from '../events/event_actions.js';
 import {BaseTool} from '../tools/base_tool.js';
-import {ToolConfirmation} from '../tools/tool_confirmation.js';
+import {
+  checkToolConfirmation,
+  ToolConfirmation,
+} from '../tools/tool_confirmation.js';
 import {logger} from '../utils/logger.js';
 import {Context} from './context.js';
 
@@ -193,7 +196,10 @@ async function callToolAsync(
   return tracer.startActiveSpan(`execute_tool ${tool.name}`, async (span) => {
     try {
       logger.debug(`callToolAsync ${tool.name}`);
-      const result = await tool.runAsync({args, toolContext});
+      const gated = (await tool.checkRequireConfirmation({args, toolContext}))
+        ? checkToolConfirmation(tool.name, toolContext)
+        : undefined;
+      const result = gated ?? (await tool.runAsync({args, toolContext}));
       traceToolCall({
         tool,
         args,

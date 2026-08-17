@@ -252,6 +252,7 @@ export type {AgentToolConfig} from './tools/agent_tool.js';
 export {BaseTool, isBaseTool} from './tools/base_tool.js';
 export type {
   BaseToolParams,
+  CheckRequireConfirmationRequest,
   RunAsyncToolRequest,
   ToolProcessLlmRequest,
 } from './tools/base_tool.js';
