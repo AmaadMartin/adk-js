@@ -203,7 +203,6 @@ export class RequestConfirmationLlmRequestProcessor extends BaseLlmRequestProces
         dynamicallyRequestedIds,
         toolsDict,
         invocationContext,
-        agentName: agent.name,
       });
       if (toolsToResume.size === 0) {
         continue;
@@ -351,32 +350,24 @@ function collectDynamicallyRequestedIds(events: Event[]): Set<string> {
  * The checks run in the order `adk-python` applies them, because the error a
  * caller sees is behaviour the two SDKs share.
  *
- * @param params.candidates - Pending confirmations keyed by original call id.
- * @param params.historyCalls - The function calls recorded in the session.
- * @param params.dynamicallyRequestedIds - The ids gated at run time.
- * @param params.toolsDict - The tools registered for this turn, by name.
- * @param params.invocationContext - The current invocation context.
  * @returns The confirmations that may resume, carrying the historical call.
  * @throws Error when a payload names a call that is absent from history, names
  *   a tool that is unregistered or ungated, or describes the call differently
  *   from the way the model issued it.
  */
-async function resolveConfirmationTargets(params: {
+async function resolveConfirmationTargets({
+  candidates,
+  historyCalls,
+  dynamicallyRequestedIds,
+  toolsDict,
+  invocationContext,
+}: {
   candidates: Map<string, ConfirmationCandidate>;
   historyCalls: Map<string, HistoryCall>;
   dynamicallyRequestedIds: Set<string>;
   toolsDict: Record<string, BaseTool>;
   invocationContext: InvocationContext;
-  agentName: string;
 }): Promise<Map<string, ConfirmationTarget>> {
-  const {
-    candidates,
-    historyCalls,
-    dynamicallyRequestedIds,
-    toolsDict,
-    invocationContext,
-    agentName,
-  } = params;
   const targets = new Map<string, ConfirmationTarget>();
   for (const [id, candidate] of candidates) {
     const historyCall = historyCalls.get(id);
@@ -385,7 +376,7 @@ async function resolveConfirmationTargets(params: {
         `Original function call for ID '${id}' not found in session history.`,
       );
     }
-    if (historyCall.author !== agentName) {
+    if (historyCall.author !== invocationContext.agent?.name) {
       continue;
     }
     const toolName = candidate.call.name;
@@ -397,6 +388,10 @@ async function resolveConfirmationTargets(params: {
       args: candidate.call.args ?? {},
       toolContext: new Context({invocationContext, functionCallId: id}),
     });
+    // A genuine gate leaves its trace in `dynamicallyRequestedIds`, because
+    // running the gate records the request on the tool response the framework
+    // persists. This throw therefore fires when that response is missing from
+    // history: a forged confirmation, or a session compacted past it.
     if (!requiresConfirmation && !dynamicallyRequestedIds.has(id)) {
       throw new Error(`Tool '${toolName}' does not require confirmation.`);
     }
