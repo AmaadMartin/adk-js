@@ -469,12 +469,58 @@ describe('InMemoryMemoryService', () => {
     });
   });
 
+  describe('user key isolation', () => {
+    it('does not return memories across a slash in appName', async () => {
+      const event = createEvent({
+        author: 'user',
+        content: {role: 'user', parts: [{text: 'This is a secret.'}]},
+      });
+      const session = await sessionService.createSession({
+        appName: 'app/other-user',
+        userId: 'user',
+      });
+      await sessionService.appendEvent({session, event});
+
+      await service.addSessionToMemory(session);
+
+      const result = await service.searchMemory({
+        appName: 'app',
+        userId: 'other-user/user',
+        query: 'secret',
+      });
+
+      expect(result.memories).toHaveLength(0);
+    });
+
+    it('does not return memories across a slash in userId', async () => {
+      const event = createEvent({
+        author: 'user',
+        content: {role: 'user', parts: [{text: 'This is a secret.'}]},
+      });
+      const session = await sessionService.createSession({
+        appName: 'app',
+        userId: 'other-user/user',
+      });
+      await sessionService.appendEvent({session, event});
+
+      await service.addSessionToMemory(session);
+
+      const result = await service.searchMemory({
+        appName: 'app/other-user',
+        userId: 'user',
+        query: 'secret',
+      });
+
+      expect(result.memories).toHaveLength(0);
+    });
+  });
+
   describe('prototype pollution', () => {
     it('indexes a session whose id is __proto__', async () => {
-      // `session.id` comes off the request path and holds no `/`, so unlike
-      // the user key it can be exactly `__proto__`. On a plain inner map that
-      // key re-parents the map instead of creating an own property, and the
-      // `Object.values` scan in `searchMemory` then steps over the session.
+      // `session.id` comes off the request path, so it can be exactly
+      // `__proto__`. On a plain inner map that key re-parents the map instead
+      // of creating an own property, and the `Object.values` scan in
+      // `searchMemory` then steps over the session.
       const event = createEvent({
         author: 'user',
         content: {role: 'user', parts: [{text: 'hello world'}]},
@@ -495,6 +541,53 @@ describe('InMemoryMemoryService', () => {
       });
 
       expect(result.memories).toHaveLength(1);
+    });
+
+    it('does not pollute Object.prototype for a userId of __proto__', async () => {
+      const event = createEvent({
+        author: 'user',
+        content: {role: 'user', parts: [{text: 'hello world'}]},
+      });
+      const session = await sessionService.createSession({
+        appName: 'myApp',
+        userId: '__proto__',
+        sessionId: 'proto-user-session',
+      });
+      await sessionService.appendEvent({session, event});
+
+      await service.addSessionToMemory(session);
+
+      const result = await service.searchMemory({
+        appName: 'myApp',
+        userId: '__proto__',
+        query: 'hello',
+      });
+
+      expect(result.memories).toHaveLength(1);
+      expect('proto-user-session' in {}).toBe(false);
+    });
+
+    it('does not pollute Object.prototype for an appName of __proto__', async () => {
+      const event = createEvent({
+        author: 'user',
+        content: {role: 'user', parts: [{text: 'hello world'}]},
+      });
+      const session = await sessionService.createSession({
+        appName: '__proto__',
+        userId: 'proto-app-user',
+      });
+      await sessionService.appendEvent({session, event});
+
+      await service.addSessionToMemory(session);
+
+      const result = await service.searchMemory({
+        appName: '__proto__',
+        userId: 'proto-app-user',
+        query: 'hello',
+      });
+
+      expect(result.memories).toHaveLength(1);
+      expect('proto-app-user' in {}).toBe(false);
     });
   });
 });

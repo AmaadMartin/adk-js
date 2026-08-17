@@ -28,33 +28,39 @@ const MAX_SEARCH_RESULTS = 10;
 export class InMemoryMemoryService implements BaseMemoryService {
   private readonly memories: MemoryEntry[] = [];
   /**
-   * A map from user key to a map from session ID to events.
+   * A map from app name to a map from user ID to a map from session ID to
+   * events.
    *
-   * The inner map is keyed by `session.id`, which arrives off the request path
-   * and contains no `/`, so it can be exactly `__proto__`. On a plain object
-   * literal that key would reach the inherited `__proto__` setter and
-   * re-parent the map instead of creating an own property, silently dropping
-   * the session from the `Object.values` scan in `searchMemory`. The outer key
-   * always contains a `/` (see `getUserKey`) and cannot collide, but is
-   * created the same way for consistency.
+   * Nesting the three keys, instead of joining them into one string, keeps two
+   * distinct `(appName, userId)` pairs in two distinct buckets whatever
+   * characters the identifiers hold.
+   *
+   * Every level is keyed by untrusted input, so each is created with
+   * `Object.create(null)`. On an ordinary `{}` literal a key of `__proto__`
+   * resolves to the inherited `__proto__` accessor rather than creating an own
+   * property, so nested assignment pollutes every object in the process.
    */
-  private readonly sessionEvents: {
-    [userKey: string]: {[sessionId: string]: Event[]};
-  } = Object.create(null);
+  private readonly sessionEvents: Record<
+    string,
+    Record<string, Record<string, Event[]>>
+  > = Object.create(null);
 
   async addSessionToMemory(session: Session): Promise<void> {
-    const userKey = getUserKey(session.appName, session.userId);
-    if (!this.sessionEvents[userKey]) {
-      this.sessionEvents[userKey] = Object.create(null);
+    const {appName, userId} = session;
+    if (!this.sessionEvents[appName]) {
+      this.sessionEvents[appName] = Object.create(null);
     }
-    this.sessionEvents[userKey][session.id] = session.events.filter(
+    if (!this.sessionEvents[appName][userId]) {
+      this.sessionEvents[appName][userId] = Object.create(null);
+    }
+    this.sessionEvents[appName][userId][session.id] = session.events.filter(
       (event) => (event.content?.parts?.length ?? 0) > 0,
     );
   }
 
   async searchMemory(req: SearchMemoryRequest): Promise<SearchMemoryResponse> {
-    const userKey = getUserKey(req.appName, req.userId);
-    if (!this.sessionEvents[userKey]) {
+    const userSessions = this.sessionEvents[req.appName]?.[req.userId];
+    if (!userSessions) {
       return Promise.resolve({memories: []});
     }
 
@@ -68,7 +74,7 @@ export class InMemoryMemoryService implements BaseMemoryService {
     const scoredMemories: Array<{matchedWords: number; memory: MemoryEntry}> =
       [];
 
-    for (const sessionEvents of Object.values(this.sessionEvents[userKey])) {
+    for (const sessionEvents of Object.values(userSessions)) {
       for (const event of sessionEvents) {
         if (!event.content?.parts?.length) {
           continue;
@@ -116,17 +122,6 @@ export class InMemoryMemoryService implements BaseMemoryService {
         .map((scored) => scored.memory),
     };
   }
-}
-
-/**
- * Constructs the user key from the app name and user ID.
- *
- * @param appName The app name.
- * @param userId The user ID.
- * @return The user key.
- */
-function getUserKey(appName: string, userId: string): string {
-  return `${appName}/${userId}`;
 }
 
 /**
