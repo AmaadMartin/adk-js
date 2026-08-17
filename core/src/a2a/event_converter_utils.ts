@@ -42,6 +42,7 @@ import {
   getA2AEventMetadata,
 } from './metadata_converter_utils.js';
 import {
+  A2APartToGenAIPartConverter,
   GenAIPartToA2APartConverter,
   toA2APart,
   toA2AParts,
@@ -143,6 +144,90 @@ export function toA2AArtifactUpdateEvent(
 }
 
 /**
+ * Converts an A2A Message into an ADK event.
+ *
+ * The default implementation is {@link messageToAdkEvent}.
+ */
+export type A2AMessageToEventConverter = (
+  msg: Message,
+  invocationId: string,
+  agentName: string,
+  branch?: string,
+  partConverter?: A2APartToGenAIPartConverter,
+) => AdkEvent | undefined;
+
+/**
+ * Converts an A2A Task into an ADK event.
+ *
+ * The default implementation is {@link taskToAdkEvent}.
+ */
+export type A2ATaskToEventConverter = (
+  a2aTask: Task,
+  invocationId: string,
+  agentName: string,
+  branch?: string,
+  partConverter?: A2APartToGenAIPartConverter,
+) => AdkEvent | undefined;
+
+/**
+ * Converts an A2A task status update into an ADK event.
+ *
+ * The default implementation is {@link statusUpdateToAdkEvent}.
+ */
+export type A2AStatusUpdateToEventConverter = (
+  a2aEvent: TaskStatusUpdateEvent,
+  invocationId: string,
+  agentName: string,
+  branch?: string,
+  partConverter?: A2APartToGenAIPartConverter,
+) => AdkEvent | undefined;
+
+/**
+ * Converts an A2A task artifact update into an ADK event.
+ *
+ * The default implementation is {@link artifactUpdateToAdkEvent}.
+ */
+export type A2AArtifactUpdateToEventConverter = (
+  a2aEvent: TaskArtifactUpdateEvent,
+  invocationId: string,
+  agentName: string,
+  branch?: string,
+  partConverter?: A2APartToGenAIPartConverter,
+) => AdkEvent | undefined;
+
+/**
+ * Converter overrides for the A2A to ADK event conversion.
+ *
+ * @remarks
+ * Every field is optional. An omitted field falls back to the built-in
+ * converter, so an empty bag reproduces the default conversion exactly. An
+ * override owns the whole conversion for its A2A event kind: it may delegate
+ * to the built-in converter and adjust the result, or return `undefined` to
+ * emit no event at all.
+ */
+export interface A2AEventConverters {
+  /** Converts an A2A Message. Defaults to {@link messageToAdkEvent}. */
+  a2aMessageConverter?: A2AMessageToEventConverter;
+  /** Converts an A2A Task. Defaults to {@link taskToAdkEvent}. */
+  a2aTaskConverter?: A2ATaskToEventConverter;
+  /**
+   * Converts an A2A task status update. Defaults to
+   * {@link statusUpdateToAdkEvent}.
+   */
+  a2aStatusUpdateConverter?: A2AStatusUpdateToEventConverter;
+  /**
+   * Converts an A2A task artifact update. Defaults to
+   * {@link artifactUpdateToAdkEvent}.
+   */
+  a2aArtifactUpdateConverter?: A2AArtifactUpdateToEventConverter;
+  /**
+   * Converts an individual A2A part. Handed to whichever converter above
+   * runs, including the built-in ones. Defaults to `toGenAIPart`.
+   */
+  a2aPartConverter?: A2APartToGenAIPartConverter;
+}
+
+/**
  * Converts an A2A Event to an ADK Session Event.
  *
  * @param event - The A2A event to convert (message, task, artifact update, or
@@ -152,6 +237,8 @@ export function toA2AArtifactUpdateEvent(
  * @param branch - The local invocation's branch to attach to the resulting
  *   event. Must come from the caller's own `InvocationContext`, never from
  *   the A2A peer: see the comment on `createAdkEventFromMetadata` for why.
+ * @param converters - Converter overrides. Defaults to the built-in
+ *   converters.
  * @returns The converted ADK event, or `undefined` if the A2A event type
  *   produces no content.
  */
@@ -160,35 +247,108 @@ export function toAdkEvent(
   invocationId: string,
   agentName: string,
   branch?: string,
+  converters: A2AEventConverters = {},
 ): AdkEvent | undefined {
+  const partConverter = converters.a2aPartConverter;
+
   if (isMessage(event)) {
-    return messageToAdkEvent(event, invocationId, agentName, branch);
+    return (converters.a2aMessageConverter ?? messageToAdkEvent)(
+      event,
+      invocationId,
+      agentName,
+      branch,
+      partConverter,
+    );
   }
 
   if (isTask(event)) {
-    return taskToAdkEvent(event, invocationId, agentName, branch);
+    return (converters.a2aTaskConverter ?? taskToAdkEvent)(
+      event,
+      invocationId,
+      agentName,
+      branch,
+      partConverter,
+    );
   }
 
   if (isTaskArtifactUpdateEvent(event)) {
-    return artifactUpdateToAdkEvent(event, invocationId, agentName, branch);
+    return (converters.a2aArtifactUpdateConverter ?? artifactUpdateToAdkEvent)(
+      event,
+      invocationId,
+      agentName,
+      branch,
+      partConverter,
+    );
   }
 
   if (isTaskStatusUpdateEvent(event)) {
-    return event.final
-      ? finalTaskStatusUpdateToAdkEvent(event, invocationId, agentName, branch)
-      : taskStatusUpdateToAdkEvent(event, invocationId, agentName, branch);
+    return (converters.a2aStatusUpdateConverter ?? statusUpdateToAdkEvent)(
+      event,
+      invocationId,
+      agentName,
+      branch,
+      partConverter,
+    );
   }
 
   return undefined;
 }
 
-function messageToAdkEvent(
+/**
+ * Converts an A2A task status update to an ADK event.
+ *
+ * @param a2aEvent - The status update to convert.
+ * @param invocationId - The ADK invocation ID to attach to the resulting event.
+ * @param agentName - The name of the agent to use as the event author.
+ * @param branch - The local invocation's branch to attach to the resulting
+ *   event.
+ * @param partConverter - Converts a single part. Defaults to `toGenAIPart`.
+ * @returns The converted ADK event, or `undefined` if the update carries no
+ *   content.
+ */
+export function statusUpdateToAdkEvent(
+  a2aEvent: TaskStatusUpdateEvent,
+  invocationId: string,
+  agentName: string,
+  branch?: string,
+  partConverter?: A2APartToGenAIPartConverter,
+): AdkEvent | undefined {
+  return a2aEvent.final
+    ? finalTaskStatusUpdateToAdkEvent(
+        a2aEvent,
+        invocationId,
+        agentName,
+        branch,
+        partConverter,
+      )
+    : taskStatusUpdateToAdkEvent(
+        a2aEvent,
+        invocationId,
+        agentName,
+        branch,
+        partConverter,
+      );
+}
+
+/**
+ * Converts an A2A Message to an ADK event.
+ *
+ * @param msg - The message to convert.
+ * @param invocationId - The ADK invocation ID to attach to the resulting event.
+ * @param agentName - The name of the agent to use as the event author.
+ * @param branch - The local invocation's branch to attach to the resulting
+ *   event.
+ * @param partConverter - Converts a single part. Defaults to `toGenAIPart`.
+ * @returns The converted ADK event.
+ */
+export function messageToAdkEvent(
   msg: Message,
   invocationId: string,
   agentName: string,
   branch?: string,
+  partConverter?: A2APartToGenAIPartConverter,
 ): AdkEvent {
-  const parts = toGenAIParts(msg.parts);
+  const parts = toGenAIParts(msg.parts, partConverter);
   const content =
     parts.length === 0
       ? undefined
@@ -207,11 +367,24 @@ function messageToAdkEvent(
   };
 }
 
-function artifactUpdateToAdkEvent(
+/**
+ * Converts an A2A task artifact update to an ADK event.
+ *
+ * @param a2aEvent - The artifact update to convert.
+ * @param invocationId - The ADK invocation ID to attach to the resulting event.
+ * @param agentName - The name of the agent to use as the event author.
+ * @param branch - The local invocation's branch to attach to the resulting
+ *   event.
+ * @param partConverter - Converts a single part. Defaults to `toGenAIPart`.
+ * @returns The converted ADK event, or `undefined` if the artifact carries no
+ *   parts.
+ */
+export function artifactUpdateToAdkEvent(
   a2aEvent: TaskArtifactUpdateEvent,
   invocationId: string,
   agentName: string,
   branch?: string,
+  partConverter?: A2APartToGenAIPartConverter,
 ): AdkEvent | undefined {
   const partsToConvert = a2aEvent.artifact?.parts || [];
   if (partsToConvert.length === 0) {
@@ -228,8 +401,8 @@ function artifactUpdateToAdkEvent(
     invocationId,
     author: agentName,
     branch,
-    content: createModelContent(toGenAIParts(partsToConvert)),
-    longRunningToolIds: getLongRunningToolIDs(partsToConvert),
+    content: createModelContent(toGenAIParts(partsToConvert, partConverter)),
+    longRunningToolIds: getLongRunningToolIDs(partsToConvert, partConverter),
     partial,
   };
 }
@@ -239,13 +412,14 @@ function finalTaskStatusUpdateToAdkEvent(
   invocationId: string,
   agentName: string,
   branch?: string,
+  partConverter?: A2APartToGenAIPartConverter,
 ): AdkEvent | undefined {
   const partsToConvert = a2aEvent.status.message?.parts || [];
   if (partsToConvert.length === 0) {
     return undefined;
   }
 
-  const parts = toGenAIParts(partsToConvert);
+  const parts = toGenAIParts(partsToConvert, partConverter);
   const isFailedTask = isFailedTaskStatusUpdateEvent(a2aEvent);
   const hasContent = !isFailedTask && parts.length > 0;
 
@@ -258,7 +432,7 @@ function finalTaskStatusUpdateToAdkEvent(
       ? getFailedTaskStatusUpdateEventError(a2aEvent)
       : undefined,
     content: hasContent ? createModelContent(parts) : undefined,
-    longRunningToolIds: getLongRunningToolIDs(partsToConvert),
+    longRunningToolIds: getLongRunningToolIDs(partsToConvert, partConverter),
     turnComplete: true,
   };
 }
@@ -268,13 +442,14 @@ function taskStatusUpdateToAdkEvent(
   invocationId: string,
   agentName: string,
   branch?: string,
+  partConverter?: A2APartToGenAIPartConverter,
 ): AdkEvent | undefined {
   const msg = a2aEvent.status.message;
   if (!msg) {
     return undefined;
   }
 
-  const parts = toGenAIParts(msg.parts);
+  const parts = toGenAIParts(msg.parts, partConverter);
   if (parts.length === 0) {
     return undefined;
   }
@@ -290,11 +465,24 @@ function taskStatusUpdateToAdkEvent(
   };
 }
 
-function taskToAdkEvent(
+/**
+ * Converts an A2A Task to an ADK event.
+ *
+ * @param a2aTask - The task to convert.
+ * @param invocationId - The ADK invocation ID to attach to the resulting event.
+ * @param agentName - The name of the agent to use as the event author.
+ * @param branch - The local invocation's branch to attach to the resulting
+ *   event.
+ * @param partConverter - Converts a single part. Defaults to `toGenAIPart`.
+ * @returns The converted ADK event, or `undefined` if the task carries no
+ *   content and did not fail.
+ */
+export function taskToAdkEvent(
   a2aTask: Task,
   invocationId: string,
   agentName: string,
   branch?: string,
+  partConverter?: A2APartToGenAIPartConverter,
 ): AdkEvent | undefined {
   const parts: GenAIPart[] = [];
   const longRunningToolIds: string[] = [];
@@ -302,19 +490,21 @@ function taskToAdkEvent(
   if (a2aTask.artifacts) {
     for (const artifact of a2aTask.artifacts) {
       if (artifact.parts?.length > 0) {
-        const artifactParts = toGenAIParts(artifact.parts);
+        const artifactParts = toGenAIParts(artifact.parts, partConverter);
         parts.push(...artifactParts);
-        longRunningToolIds.push(...getLongRunningToolIDs(artifact.parts));
+        longRunningToolIds.push(
+          ...getLongRunningToolIDs(artifact.parts, partConverter),
+        );
       }
     }
   }
 
   if (a2aTask.status?.message) {
     const a2aParts = a2aTask.status.message.parts;
-    const genAIParts = toGenAIParts(a2aParts);
+    const genAIParts = toGenAIParts(a2aParts, partConverter);
 
     parts.push(...genAIParts);
-    longRunningToolIds.push(...getLongRunningToolIDs(a2aParts));
+    longRunningToolIds.push(...getLongRunningToolIDs(a2aParts, partConverter));
   }
 
   const isTerminal =
@@ -391,12 +581,15 @@ function createAdkEventFromMetadata(a2aEvent: A2AEvent): AdkEvent {
   });
 }
 
-function getLongRunningToolIDs(parts: A2APart[]): string[] {
+function getLongRunningToolIDs(
+  parts: A2APart[],
+  partConverter: A2APartToGenAIPartConverter = toGenAIPart,
+): string[] {
   const ids: string[] = [];
 
   for (const a2aPart of parts) {
     if (a2aPart.metadata && a2aPart.metadata[A2AMetadataKeys.IS_LONG_RUNNING]) {
-      const genAIPart = toGenAIPart(a2aPart);
+      const genAIPart = partConverter(a2aPart);
       if (genAIPart.functionCall && genAIPart.functionCall.id) {
         ids.push(genAIPart.functionCall.id);
       }
