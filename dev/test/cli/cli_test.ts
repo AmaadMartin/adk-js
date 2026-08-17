@@ -5,12 +5,14 @@
  */
 
 import {LogLevel, setLogLevel} from '@google/adk';
+import {Command} from 'commander';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {createProgram} from '../../src/cli/cli.js';
 import {createAgent} from '../../src/cli/cli_create.js';
 import {runAgent} from '../../src/cli/cli_run.js';
 import {deployToAgentEngine} from '../../src/cli/deploy/cli_deploy_agent_engine.js';
 import {deployToCloudRun} from '../../src/cli/deploy/cli_deploy_cloud_run.js';
+import {deployToGke} from '../../src/cli/deploy/cli_deploy_gke.js';
 import {AdkApiServer} from '../../src/server/adk_api_server.js';
 
 vi.mock('../../src/server/adk_api_server', () => {
@@ -32,6 +34,14 @@ vi.mock('../../src/cli/deploy/cli_deploy_agent_engine', () => ({
 vi.mock('../../src/cli/deploy/cli_deploy_cloud_run', () => ({
   deployToCloudRun: vi.fn(),
 }));
+
+vi.mock('../../src/cli/deploy/cli_deploy_gke', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...(actual as object),
+    deployToGke: vi.fn(),
+  };
+});
 
 vi.mock('../../src/cli/cli_run', () => ({
   runAgent: vi.fn(),
@@ -367,6 +377,129 @@ describe('CLI Entrypoint', () => {
       // A recognised flag must not also be passed through as an unknown one,
       // which gcloud would reject.
       expect(args.extraGcloudArgs).toEqual([]);
+    });
+  });
+
+  describe('command: deploy gke', () => {
+    // `program.exitOverride()` in the shared setup only covers the root
+    // command, so a usage error raised by a subcommand still calls
+    // `process.exit`. Applying it to the whole tree turns those into throws
+    // the test can assert on.
+    const applyExitOverride = (command: Command) => {
+      command.exitOverride();
+      command.configureOutput({writeErr: () => {}});
+      command.commands.forEach(applyExitOverride);
+    };
+
+    const parseStrict = async (args: string[]) => {
+      const strict = createProgram();
+      applyExitOverride(strict);
+      process.argv = args;
+      await strict.parseAsync(['node', 'cli_entrypoint.js', ...args]);
+    };
+
+    it('should call deployToGke with defaults', async () => {
+      await parse(['deploy', 'gke', '--cluster_name=my-cluster']);
+
+      expect(deployToGke).toHaveBeenCalledWith(
+        expect.objectContaining({
+          clusterName: 'my-cluster',
+          serviceName: 'adk-default-service-name',
+          serviceType: 'ClusterIP',
+          port: 8000,
+          adkVersion: 'latest',
+          withUi: false,
+          otelToCloud: false,
+        }),
+      );
+    });
+
+    it('should leave tempFolder unset so no temp directory is created eagerly', async () => {
+      await parse(['deploy', 'gke', '--cluster_name=my-cluster']);
+
+      expect((deployToGke as Mock).mock.calls[0][0].tempFolder).toBeUndefined();
+    });
+
+    it('should pass every flag to deployToGke', async () => {
+      await parse([
+        'deploy',
+        'gke',
+        './my-agent-path',
+        '--project=my-proj',
+        '--region=us-west1',
+        '--cluster_name=my-cluster',
+        '--service_name=my-service',
+        '--app_name=my-app',
+        '--service_type=LoadBalancer',
+        '--port=9090',
+        '--with_ui',
+        '--otel_to_cloud',
+        '--adk_version=1.0.0',
+        '--log_level=debug',
+        '--allow_origins=http://example.com',
+        '--session_service_uri=memory://',
+        '--artifact_service_uri=gs://my-bucket',
+        '--temp_folder=/tmp/my-staging',
+      ]);
+
+      expect((deployToGke as Mock).mock.calls[0][0]).toMatchObject({
+        agentPath: expect.stringContaining('my-agent-path'),
+        project: 'my-proj',
+        region: 'us-west1',
+        clusterName: 'my-cluster',
+        serviceName: 'my-service',
+        appName: 'my-app',
+        serviceType: 'LoadBalancer',
+        port: 9090,
+        withUi: true,
+        otelToCloud: true,
+        adkVersion: '1.0.0',
+        logLevel: 'debug',
+        allowOrigins: 'http://example.com',
+        sessionServiceUri: 'memory://',
+        artifactServiceUri: 'gs://my-bucket',
+        tempFolder: '/tmp/my-staging',
+      });
+    });
+
+    it('should reject a missing --cluster_name', async () => {
+      await expect(parseStrict(['deploy', 'gke'])).rejects.toThrow(
+        /required option .*--cluster_name/,
+      );
+
+      expect(deployToGke).not.toHaveBeenCalled();
+    });
+
+    it('should reject an unsupported --service_type', async () => {
+      await expect(
+        parseStrict([
+          'deploy',
+          'gke',
+          '--cluster_name=my-cluster',
+          '--service_type=NodePort',
+        ]),
+      ).rejects.toThrow(/--service_type/);
+
+      expect(deployToGke).not.toHaveBeenCalled();
+    });
+
+    it('should reject an unknown option', async () => {
+      await expect(
+        parseStrict(['deploy', 'gke', '--cluster_name=my-cluster', '--nope=1']),
+      ).rejects.toThrow(/unknown option/);
+
+      expect(deployToGke).not.toHaveBeenCalled();
+    });
+
+    it('exits non-zero when the deploy fails', async () => {
+      (deployToGke as Mock).mockRejectedValueOnce(new Error('boom'));
+      const exit = vi
+        .spyOn(process, 'exit')
+        .mockImplementation((() => undefined) as never);
+
+      await parse(['deploy', 'gke', '--cluster_name=my-cluster']);
+
+      expect(exit).toHaveBeenCalledWith(1);
     });
   });
 
