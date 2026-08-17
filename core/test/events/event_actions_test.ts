@@ -7,6 +7,7 @@
 import {AuthCredentialTypes, ToolConfirmation} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 import type {AuthConfig} from '../../src/auth/auth_tool.js';
+import type {EventCompaction} from '../../src/events/event_actions.js';
 import {
   createEventActions,
   mergeEventActions,
@@ -323,5 +324,43 @@ describe('mergeEventActions', () => {
       ToolConfirmation,
     );
     expect(result.requestedToolConfirmations['call-1'].hint).toBe('');
+  });
+});
+
+describe('EventActions.compaction', () => {
+  const summary: EventCompaction = {
+    startTimestamp: 1000,
+    endTimestamp: 4000,
+    compactedContent: {role: 'model', parts: [{text: 'Summary 1-4'}]},
+  };
+
+  it('survives createEventActions', () => {
+    const actions = createEventActions({compaction: summary});
+    expect(actions.compaction).toEqual(summary);
+  });
+
+  it('defaults to undefined', () => {
+    expect(createEventActions().compaction).toBeUndefined();
+  });
+
+  it('merges last-writer-wins', () => {
+    const newer: EventCompaction = {
+      startTimestamp: 4000,
+      endTimestamp: 9000,
+      compactedContent: {role: 'model', parts: [{text: 'Summary 4-9'}]},
+    };
+    const result = mergeEventActions([
+      createEventActions({compaction: summary}),
+      createEventActions({compaction: newer}),
+    ]);
+    expect(result.compaction).toEqual(newer);
+  });
+
+  it('keeps an earlier compaction when a later source omits it', () => {
+    const result = mergeEventActions([
+      createEventActions({compaction: summary}),
+      createEventActions({escalate: true}),
+    ]);
+    expect(result.compaction).toEqual(summary);
   });
 });

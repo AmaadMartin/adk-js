@@ -648,7 +648,7 @@ function toApiActions(
   if (!actions) {
     return undefined;
   }
-  const {transferToAgent, ...rest}: WireEventActions = actions;
+  const {transferToAgent, ...rest}: EventActions = actions;
   delete rest.compaction;
   return {
     ...rest,
@@ -682,18 +682,8 @@ function withoutPartMetadata(content: Content): Content {
   };
 }
 
-/**
- * `EventActions` as it can arrive on the wire. `compaction` is adk-python's
- * canonical channel inside `rawEvent`; it is `unknown` because the payload is
- * whatever an earlier SDK version wrote, and it never survives onto a
- * reconstructed adk-js event.
- */
-interface WireEventActions extends EventActions {
-  compaction?: unknown;
-}
-
 interface ExtendedEvent extends Event {
-  actions: WireEventActions;
+  actions: EventActions;
   isCompacted?: boolean;
   startTime?: number;
   endTime?: number;
