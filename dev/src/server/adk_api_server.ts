@@ -13,6 +13,7 @@ import {
   Event,
   getFunctionCalls,
   getFunctionResponses,
+  getRequestDrivenMetricsState,
   InMemoryArtifactService,
   InMemoryMemoryService,
   InMemorySessionService,
@@ -50,6 +51,7 @@ import {
   serializeAgent,
   serializeAppInfo,
 } from './app_info.js';
+import {metricsFlushingMiddleware} from './metrics_middleware.js';
 import {renderStructureGraphAsDot} from './structure_graph.js';
 
 /**
@@ -217,6 +219,14 @@ export class AdkApiServer {
   private async init() {
     const app = this.app;
     await this.setupTelemetry();
+
+    // The state only exists once `getGcpExporters` has built the Agent Engine
+    // reader, so its presence is the whole gate: no cloud telemetry and no
+    // Agent Engine both leave it undefined.
+    const metricsState = getRequestDrivenMetricsState();
+    if (metricsState) {
+      app.use(metricsFlushingMiddleware(metricsState.reader));
+    }
 
     if (this.serveDebugUI) {
       app.get('/', (req: Request, res: Response) => {
