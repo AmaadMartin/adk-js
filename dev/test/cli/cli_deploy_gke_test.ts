@@ -6,6 +6,7 @@
 
 import yaml from 'js-yaml';
 import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {
   createDeploymentManifest,
@@ -258,12 +259,13 @@ describe('createDeploymentManifest', () => {
 });
 
 describe('deployToGke', () => {
+  const TEMP_FOLDER = '/tmp/test-deploy';
   const defaultOptions: DeployToGkeOptions = {
     agentPath: 'path/to/agent',
     clusterName: 'test-cluster',
     serviceName: 'test-service',
     serviceType: 'ClusterIP',
-    tempFolder: '/tmp/test-deploy',
+    tempFolder: TEMP_FOLDER,
     adkVersion: '1.0.0',
     project: 'test-project',
     region: 'us-central1',
@@ -412,7 +414,7 @@ describe('deployToGke', () => {
         'gcr.io/test-project/test-service',
         '--verbosity',
         'info',
-        '/tmp/test-deploy',
+        TEMP_FOLDER,
       ],
       expect.any(Object),
     );
@@ -444,7 +446,7 @@ describe('deployToGke', () => {
     expect(spawnMock).toHaveBeenNthCalledWith(
       3,
       'kubectl',
-      ['apply', '-f', '/tmp/test-deploy/deployment.yaml'],
+      ['apply', '-f', path.join(TEMP_FOLDER, 'deployment.yaml')],
       expect.any(Object),
     );
     expect(spawnCalls()).toEqual([
@@ -458,7 +460,7 @@ describe('deployToGke', () => {
     await deployToGke(defaultOptions);
 
     const {path: manifestPath, documents} = savedManifest();
-    expect(manifestPath).toBe('/tmp/test-deploy/deployment.yaml');
+    expect(manifestPath).toBe(path.join(TEMP_FOLDER, 'deployment.yaml'));
     expect(documents.map((document) => document.kind)).toEqual([
       'Deployment',
       'Service',
@@ -518,7 +520,7 @@ describe('deployToGke', () => {
     await deployToGke(defaultOptions);
 
     expect(fs.rm).toHaveBeenCalledTimes(2);
-    expect(fs.rm).toHaveBeenCalledWith('/tmp/test-deploy', {
+    expect(fs.rm).toHaveBeenCalledWith(TEMP_FOLDER, {
       recursive: true,
       force: true,
     });
@@ -608,7 +610,7 @@ describe('deployToGke', () => {
 
     await deployToGke(defaultOptions);
 
-    expect(fs.rm).toHaveBeenCalledWith('/tmp/test-deploy', {
+    expect(fs.rm).toHaveBeenCalledWith(TEMP_FOLDER, {
       recursive: true,
       force: true,
     });
@@ -634,7 +636,7 @@ describe('deployToGke', () => {
 
     await expect(deployToGke(defaultOptions)).rejects.toThrow();
 
-    expect(fs.rm).toHaveBeenCalledWith('/tmp/test-deploy', {
+    expect(fs.rm).toHaveBeenCalledWith(TEMP_FOLDER, {
       recursive: true,
       force: true,
     });
