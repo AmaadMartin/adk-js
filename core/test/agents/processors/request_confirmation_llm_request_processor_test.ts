@@ -15,6 +15,7 @@ import {
   createEvent,
   createSession,
 } from '@google/adk';
+import {FunctionCall} from '@google/genai';
 import {describe, expect, it, vi} from 'vitest';
 import {REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR} from '../../../src/agents/processors/request_confirmation_llm_request_processor.js';
 
@@ -51,6 +52,18 @@ function createMockInvocationContext(
     }),
     sessionService,
     pluginManager: new PluginManager([]),
+  });
+}
+
+/** The agent-authored event recording the call the model actually issued. */
+function createOriginalCallEvent(
+  functionCall: FunctionCall,
+  author = 'test_agent',
+) {
+  return createEvent({
+    invocationId: 'test-invocation',
+    author,
+    content: {role: 'model', parts: [{functionCall}]},
   });
 }
 
@@ -237,6 +250,7 @@ describe('RequestConfirmationLlmRequestProcessor', () => {
     });
 
     const invocationContext = createMockInvocationContext(agent, [
+      createOriginalCallEvent(originalFunctionCall),
       systemFunctionCallEvent,
       userConfirmationEvent,
     ]);
@@ -281,6 +295,12 @@ describe('RequestConfirmationLlmRequestProcessor', () => {
     });
     vi.spyOn(agent, 'canonicalTools').mockResolvedValue([]);
 
+    const originalFunctionCall = {
+      id: 'original-fc-4',
+      name: 'my_tool',
+      args: {param: 'value'},
+    };
+
     const systemFunctionCallEvent = createEvent({
       invocationId: 'test-invocation',
       author: 'test_agent',
@@ -291,13 +311,7 @@ describe('RequestConfirmationLlmRequestProcessor', () => {
             functionCall: {
               id: 'fc-confirm-4',
               name: REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
-              args: {
-                originalFunctionCall: {
-                  id: 'original-fc-4',
-                  name: 'my_tool',
-                  args: {param: 'value'},
-                },
-              },
+              args: {originalFunctionCall},
             },
           },
         ],
@@ -325,7 +339,11 @@ describe('RequestConfirmationLlmRequestProcessor', () => {
     const appendEvent = vi.spyOn(sessionService, 'appendEvent');
     const invocationContext = createMockInvocationContext(
       agent,
-      [systemFunctionCallEvent, userConfirmationEvent],
+      [
+        createOriginalCallEvent(originalFunctionCall),
+        systemFunctionCallEvent,
+        userConfirmationEvent,
+      ],
       sessionService,
     );
 
@@ -389,6 +407,7 @@ describe('RequestConfirmationLlmRequestProcessor', () => {
     });
 
     const invocationContext = createMockInvocationContext(agent, [
+      createOriginalCallEvent(originalFunctionCall),
       systemFunctionCallEvent,
       userConfirmationEvent,
     ]);

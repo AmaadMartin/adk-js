@@ -183,6 +183,15 @@ function makeGatedTool() {
   return {tool, calls};
 }
 
+/** The agent turn recording the call the model actually issued. */
+function originalCallEvent(functionCall: FunctionCall): Event {
+  return createEvent({
+    invocationId: 'inv-1',
+    author: 'agent',
+    content: {role: 'model', parts: [{functionCall}]},
+  });
+}
+
 /** The engine-emitted `adk_request_confirmation` call wrapping the original. */
 function confirmationRequestEvent(
   confirmId: string,
@@ -274,6 +283,7 @@ describe('RequestConfirmation resume round-trip', () => {
   it('re-invokes the tool when a structured approval arrives', async () => {
     const {tool, calls} = makeGatedTool();
     const out = await resume(tool, [
+      originalCallEvent(originalCall),
       confirmationRequestEvent('confirm-1', originalCall),
       structuredConfirmationEvent('confirm-1', true),
     ]);
@@ -286,6 +296,7 @@ describe('RequestConfirmation resume round-trip', () => {
   it('does not run the tool when the structured decision is a denial', async () => {
     const {tool, calls} = makeGatedTool();
     await resume(tool, [
+      originalCallEvent(originalCall),
       confirmationRequestEvent('confirm-1', originalCall),
       structuredConfirmationEvent('confirm-1', false),
     ]);
@@ -296,6 +307,7 @@ describe('RequestConfirmation resume round-trip', () => {
     const {tool, calls} = makeGatedTool();
     // Same yes reply, but plainTextToolConfirmation is not set.
     await resume(tool, [
+      originalCallEvent(originalCall),
       confirmationRequestEvent('confirm-1', originalCall),
       plainTextEvent('yes'),
     ]);
@@ -307,6 +319,7 @@ describe('RequestConfirmation resume round-trip', () => {
     const out = await resume(
       tool,
       [
+        originalCallEvent(originalCall),
         confirmationRequestEvent('confirm-1', originalCall),
         plainTextEvent('yes'),
       ],
@@ -321,6 +334,7 @@ describe('RequestConfirmation resume round-trip', () => {
     const out = await resume(
       tool,
       [
+        originalCallEvent(originalCall),
         confirmationRequestEvent('confirm-1', originalCall),
         plainTextEvent('what does that do?'),
       ],
@@ -344,7 +358,9 @@ describe('RequestConfirmation resume round-trip', () => {
     const out = await resume(
       tool,
       [
+        originalCallEvent(originalCall),
         confirmationRequestEvent('confirm-1', originalCall),
+        originalCallEvent(secondCall),
         confirmationRequestEvent('confirm-2', secondCall),
         plainTextEvent('yes'),
       ],
