@@ -49,6 +49,91 @@ const getTypeFromArrayItem = (
   return mcpType?.type?.toLowerCase?.();
 };
 
+/** A JSON Schema node as received; any key may be present. */
+type JsonSchemaNode = Record<string, unknown>;
+
+function isJsonSchemaNode(value: unknown): value is JsonSchemaNode {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Merges the definition blocks of both JSON Schema dialects. Draft 2019-09 and
+ * later spell the block `$defs`, draft-07 spells it `definitions`, and an MCP
+ * server may send either. `$defs` wins on a key collision.
+ */
+function collectDefinitions(root: JsonSchemaNode): JsonSchemaNode {
+  const definitions = root['definitions'];
+  const defs = root['$defs'];
+  return {
+    ...(isJsonSchemaNode(definitions) ? definitions : {}),
+    ...(isJsonSchemaNode(defs) ? defs : {}),
+  };
+}
+
+function resolveRefsInValue(
+  value: unknown,
+  defs: JsonSchemaNode,
+  pathRefs: ReadonlySet<string>,
+): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => resolveRefsInValue(item, defs, pathRefs));
+  }
+  if (isJsonSchemaNode(value)) {
+    return resolveRefsInNode(value, defs, pathRefs);
+  }
+  return value;
+}
+
+function resolveRefsInNode(
+  node: JsonSchemaNode,
+  defs: JsonSchemaNode,
+  pathRefs: ReadonlySet<string>,
+): JsonSchemaNode {
+  const refUri = node['$ref'];
+  // A property can legitimately be named `$ref`, in which case its value is a
+  // schema and not a pointer.
+  if (typeof refUri !== 'string') {
+    return Object.fromEntries(
+      Object.entries(node).map(([key, value]) => [
+        key,
+        resolveRefsInValue(value, defs, pathRefs),
+      ]),
+    );
+  }
+
+  const refKey = refUri.slice(refUri.lastIndexOf('/') + 1);
+  // The set carries the refs on the current path only. A global set would
+  // report a definition reused in two sibling positions as a cycle.
+  if (pathRefs.has(refUri)) {
+    return {type: 'object', description: `Circular ref to ${refKey}`};
+  }
+
+  const definition = defs[refKey];
+  if (!isJsonSchemaNode(definition)) {
+    // Gemini has no `$ref`, but an unresolvable pointer stays in place so the
+    // inference below still reports the node as an object. The copy keeps the
+    // conversion from writing to the caller's schema.
+    return {...node};
+  }
+
+  const {$ref: _ref, ...siblings} = node;
+  return resolveRefsInNode(
+    {...definition, ...siblings},
+    defs,
+    new Set([...pathRefs, refUri]),
+  );
+}
+
+/** Inlines every resolvable local `$ref` and drops the definition blocks. */
+function dereferenceSchema(schema: JsonSchemaNode): JsonSchemaNode {
+  const defs = collectDefinitions(schema);
+  const resolved = resolveRefsInNode(schema, defs, new Set<string>());
+  // Stripped last: a root that is itself a `$ref` re-acquires the block through
+  // the sibling merge above.
+  const {$defs: _defs, definitions: _definitions, ...stripped} = resolved;
+  return stripped;
+}
+
 export function toGeminiSchema(mcpSchema?: MCPToolSchema): Schema | undefined {
   if (!mcpSchema) {
     return undefined;
@@ -157,5 +242,5 @@ export function toGeminiSchema(mcpSchema?: MCPToolSchema): Schema | undefined {
     }
     return geminiSchema;
   }
-  return recursiveConvert(mcpSchema);
+  return recursiveConvert(dereferenceSchema(mcpSchema));
 }
