@@ -10,7 +10,10 @@ import {InvocationContext, requireAgent} from '../agents/invocation_context.js';
 import {Event as AdkEvent, createEvent} from '../events/event.js';
 import {Session} from '../sessions/session.js';
 import {AdkMetadataKeys} from './metadata_converter_utils.js';
-import {toA2AParts} from './part_converter_utils.js';
+import {
+  GenAIPartToA2APartConverter,
+  toA2AParts,
+} from './part_converter_utils.js';
 
 export interface UserFunctionCall {
   response: AdkEvent;
@@ -109,11 +112,13 @@ export function getFunctionResponseCallId(event: AdkEvent): string | undefined {
  * @param ctx - The current invocation context, used to identify the remote
  *   agent's authored events.
  * @param session - The local session whose event history to diff.
+ * @param genaiPartConverter - Converts a single part. Defaults to `toA2APart`.
  * @returns An object with the missing `parts` and an optional `contextId`.
  */
 export function toMissingRemoteSessionParts(
   ctx: InvocationContext,
   session: Session,
+  genaiPartConverter?: GenAIPartToA2APartConverter,
 ): {parts: A2APart[]; contextId?: string} {
   const events = session.events;
   let contextId: string | undefined = undefined;
@@ -145,7 +150,11 @@ export function toMissingRemoteSessionParts(
       continue;
     }
 
-    const parts = toA2AParts(event.content.parts, event.longRunningToolIds);
+    const parts = toA2AParts(
+      event.content.parts,
+      event.longRunningToolIds,
+      genaiPartConverter,
+    );
     missingParts.push(...parts);
   }
 
