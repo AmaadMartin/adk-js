@@ -13,9 +13,11 @@ import {
   Event,
   getFunctionCalls,
   getFunctionResponses,
+  getPropagatedContext,
   InMemoryArtifactService,
   InMemoryMemoryService,
   InMemorySessionService,
+  isAgentEngine,
   isApp,
   Logger,
   LogLevel,
@@ -26,7 +28,7 @@ import {
   toA2a,
 } from '@google/adk';
 import {Content} from '@google/genai';
-import {trace, TracerProvider} from '@opentelemetry/api';
+import {context, trace, TracerProvider} from '@opentelemetry/api';
 import {SimpleSpanProcessor} from '@opentelemetry/sdk-trace-base';
 import cors from 'cors';
 import express, {Request, Response} from 'express';
@@ -217,6 +219,14 @@ export class AdkApiServer {
   private async init() {
     const app = this.app;
     await this.setupTelemetry();
+
+    // Registered before every route so an Agent Engine caller's trace context
+    // covers the whole request.
+    if (isAgentEngine()) {
+      app.use((req: Request, _res: Response, next: express.NextFunction) => {
+        context.with(getPropagatedContext(req.headers), next);
+      });
+    }
 
     if (this.serveDebugUI) {
       app.get('/', (req: Request, res: Response) => {
