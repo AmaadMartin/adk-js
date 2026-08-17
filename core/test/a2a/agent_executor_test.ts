@@ -12,6 +12,7 @@ import {
   BaseSessionService,
   createEvent,
   createEventActions,
+  createSession,
   Runner,
   RunnerConfig,
   Session,
@@ -31,6 +32,31 @@ vi.mock('../../src/runner/runner.js', async (importOriginal) => {
     })),
   };
 });
+
+function createTestSession(): Session {
+  return createSession({
+    id: 'session-id',
+    appName: 'test-app',
+    userId: 'test-user',
+  });
+}
+
+/**
+ * Points the mocked `Runner` at `runAsync`. The returned double carries only
+ * the three members `A2AAgentExecutor` reads, so it cannot satisfy `Runner`
+ * structurally and the mock has to be cast onto the class type.
+ */
+function mockRunnerWith(
+  runAsync: () => AsyncGenerator<AdkEvent, void, void>,
+): void {
+  vi.mocked(Runner).mockImplementation(((config: RunnerConfig) => {
+    return {
+      appName: config?.appName,
+      sessionService: config?.sessionService,
+      runAsync,
+    } as unknown as Runner;
+  }) as unknown as () => Runner);
+}
 
 describe('A2AAgentExecutor', () => {
   let mockSessionService: Mocked<BaseSessionService>;
@@ -266,14 +292,7 @@ describe('A2AAgentExecutor', () => {
   });
 
   it('should publish a terminal canceled event for an in-flight task', async () => {
-    const mockSession = {
-      id: 'session-id',
-      userId: 'test-user',
-      appName: 'test-app',
-      events: [],
-      state: {},
-    } as unknown as Session;
-    mockSessionService.getSession.mockResolvedValue(mockSession);
+    mockSessionService.getSession.mockResolvedValue(createTestSession());
 
     let started!: () => void;
     const runnerStarted = new Promise<void>((resolve) => (started = resolve));
@@ -291,19 +310,10 @@ describe('A2AAgentExecutor', () => {
       });
     }
 
-    vi.mocked(Runner).mockImplementation(((config: RunnerConfig) => {
-      return {
-        appName: config?.appName,
-        sessionService: config?.sessionService,
-        runAsync: mockRunAsync,
-      } as unknown as Runner;
-    }) as unknown as () => Runner);
+    mockRunnerWith(mockRunAsync);
 
     const executor = new A2AAgentExecutor({
-      runner: {
-        appName: 'test-app',
-        sessionService: mockSessionService,
-      } as unknown as RunnerConfig,
+      runner: {appName: 'test-app', sessionService: mockSessionService},
     });
 
     const ctx = createRequestContext();
@@ -332,10 +342,7 @@ describe('A2AAgentExecutor', () => {
 
   it('should reject cancelTask and publish nothing when the task id is empty', async () => {
     const executor = new A2AAgentExecutor({
-      runner: {
-        appName: 'test-app',
-        sessionService: mockSessionService,
-      } as unknown as RunnerConfig,
+      runner: {appName: 'test-app', sessionService: mockSessionService},
     });
 
     await expect(executor.cancelTask('', mockEventBus)).rejects.toThrow(
@@ -346,10 +353,7 @@ describe('A2AAgentExecutor', () => {
 
   it('should still publish a terminal canceled event when no execution is in flight', async () => {
     const executor = new A2AAgentExecutor({
-      runner: {
-        appName: 'test-app',
-        sessionService: mockSessionService,
-      } as unknown as RunnerConfig,
+      runner: {appName: 'test-app', sessionService: mockSessionService},
     });
 
     await executor.cancelTask('unknown-task', mockEventBus);
@@ -364,14 +368,7 @@ describe('A2AAgentExecutor', () => {
   });
 
   it('should forget the context id once the execution finishes', async () => {
-    const mockSession = {
-      id: 'session-id',
-      userId: 'test-user',
-      appName: 'test-app',
-      events: [],
-      state: {},
-    } as unknown as Session;
-    mockSessionService.getSession.mockResolvedValue(mockSession);
+    mockSessionService.getSession.mockResolvedValue(createTestSession());
 
     async function* mockRunAsync() {
       yield createEvent({
@@ -382,19 +379,10 @@ describe('A2AAgentExecutor', () => {
       });
     }
 
-    vi.mocked(Runner).mockImplementation(((config: RunnerConfig) => {
-      return {
-        appName: config?.appName,
-        sessionService: config?.sessionService,
-        runAsync: mockRunAsync,
-      } as unknown as Runner;
-    }) as unknown as () => Runner);
+    mockRunnerWith(mockRunAsync);
 
     const executor = new A2AAgentExecutor({
-      runner: {
-        appName: 'test-app',
-        sessionService: mockSessionService,
-      } as unknown as RunnerConfig,
+      runner: {appName: 'test-app', sessionService: mockSessionService},
     });
 
     const ctx = createRequestContext();
