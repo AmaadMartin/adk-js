@@ -24,21 +24,18 @@ const MAX_SEARCH_RESULTS = 10;
  *
  * Uses keyword matching instead of semantic search. A search returns at most
  * ten memories, the ones sharing the most words with the query.
+ *
+ * Every map below is keyed by untrusted input — `appName`, `userId` and
+ * `sessionId` all arrive straight off the request path on a dev server — so
+ * each is created with `Object.create(null)`. On an ordinary `{}` literal a
+ * key of `__proto__` resolves to the inherited `__proto__` accessor instead of
+ * creating an own property, so nested assignment pollutes every object in the
+ * process.
  */
 export class InMemoryMemoryService implements BaseMemoryService {
-  private readonly memories: MemoryEntry[] = [];
   /**
    * A map from app name to a map from user ID to a map from session ID to
    * events.
-   *
-   * Nesting the three keys, instead of joining them into one string, keeps two
-   * distinct `(appName, userId)` pairs in two distinct buckets whatever
-   * characters the identifiers hold.
-   *
-   * Every level is keyed by untrusted input, so each is created with
-   * `Object.create(null)`. On an ordinary `{}` literal a key of `__proto__`
-   * resolves to the inherited `__proto__` accessor rather than creating an own
-   * property, so nested assignment pollutes every object in the process.
    */
   private readonly sessionEvents: Record<
     string,
