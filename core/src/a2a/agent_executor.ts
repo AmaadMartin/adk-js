@@ -15,11 +15,9 @@ import {Event as AdkEvent} from '../events/event.js';
 import {isRunner, Runner, RunnerConfig} from '../runner/runner.js';
 import {BaseSessionService} from '../sessions/base_session_service.js';
 import {Session} from '../sessions/session.js';
-import {randomUUID} from '../utils/env_aware_utils.js';
 import {logger} from '../utils/logger.js';
 import {
   createTask,
-  createTaskArtifactUpdateEvent,
   createTaskFailedEvent,
   createTaskWorkingEvent,
 } from './a2a_event.js';
@@ -27,12 +25,18 @@ import {
   getFinalTaskStatusUpdate,
   getTaskInputRequiredEvent,
 } from './event_processor_utils.js';
+import {
+  A2AAgentExecutorConfig,
+  resolveConverters,
+  ResolvedConverters,
+} from './executor_config.js';
 import {createExecutorContext, ExecutorContext} from './executor_context.js';
 import {
-  getA2AEventMetadata,
-  getA2ASessionMetadata,
-} from './metadata_converter_utils.js';
-import {toA2AParts, toGenAIContent} from './part_converter_utils.js';
+  runAfterAgentInterceptors,
+  runAfterEventInterceptors,
+  runBeforeAgentInterceptors,
+} from './executor_interceptor_utils.js';
+import {getA2ASessionMetadata} from './metadata_converter_utils.js';
 
 /**
  * Represents a runner or a configuration for a runner.
@@ -69,7 +73,7 @@ export type AfterExecuteCallback = (
 /**
  * Configuration for the Executor.
  */
-export interface AgentExecutorConfig {
+export interface AgentExecutorConfig extends A2AAgentExecutorConfig {
   runner: RunnerOrRunnerConfig;
   runConfig?: RunConfig;
   beforeExecuteCallback?: BeforeExecuteCallback;
@@ -82,43 +86,57 @@ export interface AgentExecutorConfig {
  */
 export class A2AAgentExecutor implements AgentExecutor {
   private agentPartialArtifactIdsMap: Record<string, string> = {};
+  private readonly converters: ResolvedConverters;
 
-  constructor(private readonly config: AgentExecutorConfig) {}
+  constructor(private readonly config: AgentExecutorConfig) {
+    this.converters = resolveConverters(config);
+  }
 
   async execute(
     ctx: RequestContext,
     eventBus: ExecutionEventBus,
   ): Promise<void> {
-    const a2aUserMessage = ctx.userMessage;
+    if (!ctx.userMessage) {
+      throw new Error('message not provided');
+    }
+
+    // Runs outside the try block: a throwing hook must reach the caller
+    // instead of being reported to the peer as a failed task.
+    const reqCtx = await runBeforeAgentInterceptors(
+      ctx,
+      this.config.executeInterceptors,
+    );
+    const a2aUserMessage = reqCtx.userMessage;
     if (!a2aUserMessage) {
       throw new Error('message not provided');
     }
 
-    const userId = `A2A_USER_${ctx.contextId}`;
-    const sessionId = ctx.contextId;
-    const genAIUserMessage = toGenAIContent(a2aUserMessage);
+    const request = this.converters.requestConverter(
+      reqCtx,
+      this.converters.a2aPartConverter,
+    );
     const adkRunner = await getAdkRunner(this.config.runner);
     const session = await getAdkSession(
-      userId,
-      sessionId,
+      request.userId,
+      request.sessionId,
       adkRunner.sessionService,
       adkRunner.appName,
     );
     const executorContext = createExecutorContext({
       session,
-      userContent: genAIUserMessage,
-      requestContext: ctx,
+      userContent: request.newMessage,
+      requestContext: reqCtx,
     });
 
     try {
       if (this.config.beforeExecuteCallback) {
-        await this.config.beforeExecuteCallback(ctx);
+        await this.config.beforeExecuteCallback(reqCtx);
       }
 
-      if (ctx.task) {
+      if (reqCtx.task) {
         const inputRequiredEvent = getTaskInputRequiredEvent(
-          ctx.task,
-          genAIUserMessage,
+          reqCtx.task,
+          request.newMessage,
         );
         if (inputRequiredEvent) {
           await this.publishFinalTaskStatus({
@@ -131,11 +149,11 @@ export class A2AAgentExecutor implements AgentExecutor {
         }
       }
 
-      if (!ctx.task) {
+      if (!reqCtx.task) {
         eventBus.publish(
           createTask({
-            taskId: ctx.taskId,
-            contextId: ctx.contextId,
+            taskId: reqCtx.taskId,
+            contextId: reqCtx.contextId,
             message: a2aUserMessage,
           }),
         );
@@ -143,23 +161,23 @@ export class A2AAgentExecutor implements AgentExecutor {
 
       eventBus.publish(
         createTaskWorkingEvent({
-          taskId: ctx.taskId,
-          contextId: ctx.contextId,
+          taskId: reqCtx.taskId,
+          contextId: reqCtx.contextId,
         }),
       );
 
       const adkEvents: AdkEvent[] = [];
       for await (const adkEvent of adkRunner.runAsync({
-        userId,
-        sessionId,
-        newMessage: genAIUserMessage,
+        ...request,
         runConfig: this.config.runConfig,
       })) {
         adkEvents.push(adkEvent);
 
-        const a2aEvent = this.convertAdkEventToA2AEvent(
+        const a2aEvent = this.converters.eventConverter(
           adkEvent,
           executorContext,
+          this.agentPartialArtifactIdsMap,
+          this.converters.genAIPartConverter,
         );
         if (!a2aEvent) {
           continue;
@@ -171,13 +189,27 @@ export class A2AAgentExecutor implements AgentExecutor {
           a2aEvent,
         );
 
-        eventBus.publish(a2aEvent);
+        const a2aEvents = await runAfterEventInterceptors(
+          a2aEvent,
+          executorContext,
+          adkEvent,
+          this.config.executeInterceptors,
+        );
+        for (const event of a2aEvents) {
+          eventBus.publish(event);
+        }
       }
 
+      // `afterAgent` runs only on this path: a failed run and an
+      // input-required return publish their terminal event unmodified.
       await this.publishFinalTaskStatus({
         executorContext,
         eventBus,
-        event: getFinalTaskStatusUpdate(adkEvents, executorContext),
+        event: await runAfterAgentInterceptors(
+          executorContext,
+          getFinalTaskStatusUpdate(adkEvents, executorContext),
+          this.config.executeInterceptors,
+        ),
       });
     } catch (e: unknown) {
       const error = e as Error;
@@ -187,8 +219,8 @@ export class A2AAgentExecutor implements AgentExecutor {
         eventBus,
         error,
         event: createTaskFailedEvent({
-          taskId: ctx.taskId,
-          contextId: ctx.contextId,
+          taskId: reqCtx.taskId,
+          contextId: reqCtx.contextId,
           error: new Error(`Agent run failed: ${error.message}`),
           metadata: getA2ASessionMetadata(executorContext),
         }),
@@ -199,40 +231,6 @@ export class A2AAgentExecutor implements AgentExecutor {
   // Task cancellation is not supported in this implementation yet.
   async cancelTask(_taskId: string): Promise<void> {
     throw new Error('Task cancellation is not supported yet.');
-  }
-
-  private convertAdkEventToA2AEvent(
-    adkEvent: AdkEvent,
-    executorContext: ExecutorContext,
-  ): TaskArtifactUpdateEvent | undefined {
-    const a2aParts = toA2AParts(
-      adkEvent.content?.parts,
-      adkEvent.longRunningToolIds,
-    );
-    if (a2aParts.length === 0) {
-      return undefined;
-    }
-
-    const artifactId =
-      this.agentPartialArtifactIdsMap[adkEvent.author!] || randomUUID();
-
-    const a2aEvent = createTaskArtifactUpdateEvent({
-      taskId: executorContext.requestContext.taskId,
-      contextId: executorContext.requestContext.contextId,
-      artifactId,
-      parts: a2aParts,
-      metadata: getA2AEventMetadata(adkEvent, executorContext),
-      append: adkEvent.partial,
-      lastChunk: !adkEvent.partial,
-    });
-
-    if (adkEvent.partial) {
-      this.agentPartialArtifactIdsMap[adkEvent.author!] = artifactId;
-    } else {
-      delete this.agentPartialArtifactIdsMap[adkEvent.author!];
-    }
-
-    return a2aEvent;
   }
 
   /**

@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+export type {A2AEvent} from './a2a/a2a_event.js';
 export {AGENT_CARD_PATH, RemoteA2AAgent} from './a2a/a2a_remote_agent.js';
 export type {
   A2AStreamEventData,
@@ -23,6 +24,15 @@ export type {
 export {toA2a} from './a2a/agent_to_a2a.js';
 export type {A2aUserBuilder, ToA2aOptions} from './a2a/agent_to_a2a.js';
 export {bearerTokenUserBuilder} from './a2a/auth.js';
+export type {
+  A2AAgentExecutorConfig,
+  A2APartToGenAIPartConverter,
+  A2ARequestToAgentRunRequestConverter,
+  AdkEventToA2AEventConverter,
+  AgentRunRequest,
+  ExecuteInterceptor,
+  GenAIPartToA2APartConverter,
+} from './a2a/executor_config.js';
 export type {ExecutorContext} from './a2a/executor_context.js';
 export {InvocationContext} from './agents/invocation_context.js';
 export type {WorkflowInstructionScope} from './agents/invocation_context.js';

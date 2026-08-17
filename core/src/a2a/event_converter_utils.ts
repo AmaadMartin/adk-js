@@ -24,6 +24,7 @@ import {createEventActions} from '../events/event_actions.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
 import {
   A2AEvent,
+  createTaskArtifactUpdateEvent,
   getEventMetadata,
   getFailedTaskStatusUpdateEventError,
   isFailedTaskStatusUpdateEvent,
@@ -35,11 +36,18 @@ import {
   isTerminalTaskStatusUpdateEvent,
   MessageRole,
 } from './a2a_event.js';
+import {ExecutorContext} from './executor_context.js';
 import {
   A2AMetadataKeys,
   getA2AEventMetadata,
 } from './metadata_converter_utils.js';
-import {toA2AParts, toGenAIPart, toGenAIParts} from './part_converter_utils.js';
+import {
+  GenAIPartToA2APartConverter,
+  toA2APart,
+  toA2AParts,
+  toGenAIPart,
+  toGenAIParts,
+} from './part_converter_utils.js';
 
 /**
  * Converts a session Event to an A2A Message.
@@ -66,6 +74,72 @@ export function toA2AMessage(
     parts: toA2AParts(event.content?.parts || [], event.longRunningToolIds),
     metadata: getA2AEventMetadata(event, {appName, userId, sessionId}),
   };
+}
+
+/**
+ * Converts an ADK event into the A2A artifact update event that carries its
+ * content.
+ *
+ * The default implementation is `toA2AArtifactUpdateEvent`.
+ */
+export type AdkEventToA2AEventConverter = (
+  adkEvent: AdkEvent,
+  executorContext: ExecutorContext,
+  partialArtifactIds: Record<string, string>,
+  genAIPartConverter: GenAIPartToA2APartConverter,
+) => TaskArtifactUpdateEvent | undefined;
+
+/**
+ * Converts an ADK event to an A2A artifact update event.
+ *
+ * Consecutive partial events from one author share an artifact id so the peer
+ * can append the chunks to a single artifact. `partialArtifactIds` holds that
+ * id between calls: the converter records it while the author streams, and
+ * removes it once the author emits a complete event.
+ *
+ * @param adkEvent - The ADK event to convert.
+ * @param executorContext - The context of the running A2A request.
+ * @param partialArtifactIds - The artifact id currently streaming, per author.
+ *   Mutated by this function.
+ * @param genAIPartConverter - Converts a single part. Defaults to
+ *   `toA2APart`.
+ * @returns The artifact update event, or `undefined` if the ADK event has no
+ *   convertible content.
+ */
+export function toA2AArtifactUpdateEvent(
+  adkEvent: AdkEvent,
+  executorContext: ExecutorContext,
+  partialArtifactIds: Record<string, string>,
+  genAIPartConverter: GenAIPartToA2APartConverter = toA2APart,
+): TaskArtifactUpdateEvent | undefined {
+  const a2aParts = toA2AParts(
+    adkEvent.content?.parts,
+    adkEvent.longRunningToolIds,
+    genAIPartConverter,
+  );
+  if (a2aParts.length === 0) {
+    return undefined;
+  }
+
+  const artifactId = partialArtifactIds[adkEvent.author!] || randomUUID();
+
+  const a2aEvent = createTaskArtifactUpdateEvent({
+    taskId: executorContext.requestContext.taskId,
+    contextId: executorContext.requestContext.contextId,
+    artifactId,
+    parts: a2aParts,
+    metadata: getA2AEventMetadata(adkEvent, executorContext),
+    append: adkEvent.partial,
+    lastChunk: !adkEvent.partial,
+  });
+
+  if (adkEvent.partial) {
+    partialArtifactIds[adkEvent.author!] = artifactId;
+  } else {
+    delete partialArtifactIds[adkEvent.author!];
+  }
+
+  return a2aEvent;
 }
 
 /**
