@@ -11,7 +11,9 @@ import {
   getFunctionCalls,
   getFunctionResponses,
 } from '../../events/event.js';
+import {BaseTool} from '../../tools/base_tool.js';
 import {ToolConfirmation} from '../../tools/tool_confirmation.js';
+import {Context} from '../context.js';
 import {
   REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
   handleFunctionCallList,
@@ -122,6 +124,7 @@ export class RequestConfirmationLlmRequestProcessor extends BaseLlmRequestProces
     }
 
     const historyCalls = indexFunctionCallsById(events);
+    const dynamicallyRequestedIds = collectDynamicallyRequestedIds(events);
 
     // Step 2: Find the system generated FunctionCall event requesting the tool
     // confirmation
@@ -132,7 +135,7 @@ export class RequestConfirmationLlmRequestProcessor extends BaseLlmRequestProces
         continue;
       }
 
-      const candidates = new Map<string, ConfirmationTarget>();
+      const candidates = new Map<string, ConfirmationCandidate>();
 
       for (const functionCall of functionCalls) {
         if (
@@ -185,22 +188,26 @@ export class RequestConfirmationLlmRequestProcessor extends BaseLlmRequestProces
         continue;
       }
 
-      // Step 4: Validate each confirmation against session history.
-      const toolsToResume = resolveConfirmationTargets(
-        candidates,
-        historyCalls,
-        agent.name,
-      );
-      if (toolsToResume.size === 0) {
-        continue;
-      }
-
       const toolsList = await agent.canonicalTools(
         new ReadonlyContext(invocationContext),
       );
       const toolsDict = Object.fromEntries(
         toolsList.map((tool) => [tool.name, tool]),
       );
+
+      // Step 4: Validate each confirmation against session history and the
+      // tools registered for this turn.
+      const toolsToResume = await resolveConfirmationTargets({
+        candidates,
+        historyCalls,
+        dynamicallyRequestedIds,
+        toolsDict,
+        invocationContext,
+        agentName: agent.name,
+      });
+      if (toolsToResume.size === 0) {
+        continue;
+      }
 
       const functionResponseEvent = await handleFunctionCallList({
         invocationContext: invocationContext,
@@ -249,6 +256,11 @@ type OriginalFunctionCall = FunctionCall & {id: string; name: string};
 interface ConfirmationTarget {
   call: FunctionCall;
   confirmation: ToolConfirmation;
+}
+
+/** A target whose payload has been proven to carry an id and a tool name. */
+interface ConfirmationCandidate extends ConfirmationTarget {
+  call: OriginalFunctionCall;
 }
 
 /** A function call recorded in session history, with the author that made it. */
@@ -306,22 +318,65 @@ function indexFunctionCallsById(events: Event[]): Map<string, HistoryCall> {
 }
 
 /**
- * Validates each pending confirmation against session history and returns the
- * calls that may resume, keyed by original function call id. A call authored by
- * another agent is dropped, so that agent's processor resumes it instead.
+ * Collects the ids of calls that a tool gated at run time by calling
+ * `Context.requestConfirmation`, rather than through a static tool option.
  *
- * @param candidates - Pending confirmations keyed by original function call id.
- * @param historyCalls - The function calls recorded in the session.
- * @param agentName - The name of the agent running this processor.
- * @returns The confirmations that may resume, carrying the historical call.
- * @throws Error when a payload names a call that is absent from history, or
- *   describes it differently from the way the model issued it.
+ * Ids accumulate over every event rather than only the most recent one that
+ * carries each id: once the confirmed tool re-executes it emits a second
+ * function response with the same id and no `requestedToolConfirmations`, which
+ * would otherwise shadow the original request.
+ *
+ * @param events - The session event history.
+ * @returns The ids of the calls that were gated at run time.
  */
-function resolveConfirmationTargets(
-  candidates: Map<string, ConfirmationTarget>,
-  historyCalls: Map<string, HistoryCall>,
-  agentName: string,
-): Map<string, ConfirmationTarget> {
+function collectDynamicallyRequestedIds(events: Event[]): Set<string> {
+  const dynamicallyRequestedIds = new Set<string>();
+  for (const event of events) {
+    const requested = event.actions.requestedToolConfirmations;
+    for (const fr of getFunctionResponses(event)) {
+      if (fr.id && fr.id in requested) {
+        dynamicallyRequestedIds.add(fr.id);
+      }
+    }
+  }
+  return dynamicallyRequestedIds;
+}
+
+/**
+ * Validates each pending confirmation against session history and the tool
+ * registry, and returns the calls that may resume, keyed by original function
+ * call id. A call authored by another agent is dropped, so that agent's
+ * processor resumes it instead.
+ *
+ * The checks run in the order `adk-python` applies them, because the error a
+ * caller sees is behaviour the two SDKs share.
+ *
+ * @param params.candidates - Pending confirmations keyed by original call id.
+ * @param params.historyCalls - The function calls recorded in the session.
+ * @param params.dynamicallyRequestedIds - The ids gated at run time.
+ * @param params.toolsDict - The tools registered for this turn, by name.
+ * @param params.invocationContext - The current invocation context.
+ * @returns The confirmations that may resume, carrying the historical call.
+ * @throws Error when a payload names a call that is absent from history, names
+ *   a tool that is unregistered or ungated, or describes the call differently
+ *   from the way the model issued it.
+ */
+async function resolveConfirmationTargets(params: {
+  candidates: Map<string, ConfirmationCandidate>;
+  historyCalls: Map<string, HistoryCall>;
+  dynamicallyRequestedIds: Set<string>;
+  toolsDict: Record<string, BaseTool>;
+  invocationContext: InvocationContext;
+  agentName: string;
+}): Promise<Map<string, ConfirmationTarget>> {
+  const {
+    candidates,
+    historyCalls,
+    dynamicallyRequestedIds,
+    toolsDict,
+    invocationContext,
+    agentName,
+  } = params;
   const targets = new Map<string, ConfirmationTarget>();
   for (const [id, candidate] of candidates) {
     const historyCall = historyCalls.get(id);
@@ -332,6 +387,18 @@ function resolveConfirmationTargets(
     }
     if (historyCall.author !== agentName) {
       continue;
+    }
+    const toolName = candidate.call.name;
+    const tool = toolsDict[toolName];
+    if (!tool) {
+      throw new Error(`Tool '${toolName}' is not registered.`);
+    }
+    const requiresConfirmation = await tool.checkRequireConfirmation({
+      args: candidate.call.args ?? {},
+      toolContext: new Context({invocationContext, functionCallId: id}),
+    });
+    if (!requiresConfirmation && !dynamicallyRequestedIds.has(id)) {
+      throw new Error(`Tool '${toolName}' does not require confirmation.`);
     }
     if (historyCall.call.name !== candidate.call.name) {
       throw new Error(

@@ -7,6 +7,7 @@
 import {
   BaseAgent,
   BaseSessionService,
+  FunctionTool,
   InMemorySessionService,
   InvocationContext,
   LlmAgent,
@@ -103,6 +104,25 @@ function createUserApprovalEvent(confirmId: string) {
         },
       ],
     },
+  });
+}
+
+/** A tool registered for the turn. Only a gated tool may be resumed. */
+function createTool(name: string, requireConfirmation: boolean) {
+  return new FunctionTool({
+    name,
+    description: `The ${name} tool.`,
+    requireConfirmation,
+    execute: async () => ({ok: true}),
+  });
+}
+
+/** An agent that registers each of `toolNames` as a gated tool. */
+function createAgentWithGatedTools(...toolNames: string[]) {
+  return new LlmAgent({
+    name: 'test_agent',
+    model: 'gemini-2.5-flash',
+    tools: toolNames.map((name) => createTool(name, true)),
   });
 }
 
@@ -249,11 +269,7 @@ describe('RequestConfirmationLlmRequestProcessor', () => {
     });
     mockFunctionCallList.mockResolvedValueOnce(fakeResponseEvent);
 
-    const agent = new LlmAgent({
-      name: 'test_agent',
-      model: 'gemini-2.5-flash',
-    });
-    vi.spyOn(agent, 'canonicalTools').mockResolvedValue([]);
+    const agent = createAgentWithGatedTools('my_tool');
 
     const originalFunctionCall = {
       id: 'original-fc-1',
@@ -337,11 +353,7 @@ describe('RequestConfirmationLlmRequestProcessor', () => {
     });
     mockFunctionCallList.mockResolvedValueOnce(fakeResponseEvent);
 
-    const agent = new LlmAgent({
-      name: 'test_agent',
-      model: 'gemini-2.5-flash',
-    });
-    vi.spyOn(agent, 'canonicalTools').mockResolvedValue([]);
+    const agent = createAgentWithGatedTools('my_tool');
 
     const originalFunctionCall = {
       id: 'original-fc-4',
@@ -408,11 +420,7 @@ describe('RequestConfirmationLlmRequestProcessor', () => {
     const mockFunctionCallList = vi.mocked(handleFunctionCallList);
     mockFunctionCallList.mockResolvedValueOnce(null);
 
-    const agent = new LlmAgent({
-      name: 'test_agent',
-      model: 'gemini-2.5-flash',
-    });
-    vi.spyOn(agent, 'canonicalTools').mockResolvedValue([]);
+    const agent = createAgentWithGatedTools('my_tool');
 
     const originalFunctionCall = {
       id: 'original-fc-2',
@@ -565,10 +573,7 @@ describe('RequestConfirmationLlmRequestProcessor', () => {
 
   it('throws when the confirmation payload names a different tool', async () => {
     const mockFunctionCallList = await freshMockFunctionCallList();
-    const agent = new LlmAgent({
-      name: 'test_agent',
-      model: 'gemini-2.5-flash',
-    });
+    const agent = createAgentWithGatedTools('my_tool', 'other_tool');
 
     const invocationContext = createMockInvocationContext(agent, [
       createOriginalCallEvent({
@@ -592,10 +597,7 @@ describe('RequestConfirmationLlmRequestProcessor', () => {
 
   it('throws when the confirmation payload carries different arguments', async () => {
     const mockFunctionCallList = await freshMockFunctionCallList();
-    const agent = new LlmAgent({
-      name: 'test_agent',
-      model: 'gemini-2.5-flash',
-    });
+    const agent = createAgentWithGatedTools('my_tool');
 
     const invocationContext = createMockInvocationContext(agent, [
       createOriginalCallEvent({
@@ -689,11 +691,7 @@ describe('RequestConfirmationLlmRequestProcessor', () => {
     });
     mockFunctionCallList.mockResolvedValueOnce(fakeResponseEvent);
 
-    const agent = new LlmAgent({
-      name: 'test_agent',
-      model: 'gemini-2.5-flash',
-    });
-    vi.spyOn(agent, 'canonicalTools').mockResolvedValue([]);
+    const agent = createAgentWithGatedTools('my_tool');
     const originalFunctionCall = {
       id: 'orig-10',
       name: 'my_tool',
@@ -720,11 +718,7 @@ describe('RequestConfirmationLlmRequestProcessor', () => {
 
   it('compares arguments by value rather than by key order', async () => {
     const mockFunctionCallList = await freshMockFunctionCallList();
-    const agent = new LlmAgent({
-      name: 'test_agent',
-      model: 'gemini-2.5-flash',
-    });
-    vi.spyOn(agent, 'canonicalTools').mockResolvedValue([]);
+    const agent = createAgentWithGatedTools('my_tool');
 
     const invocationContext = createMockInvocationContext(agent, [
       createOriginalCallEvent({
@@ -750,11 +744,7 @@ describe('RequestConfirmationLlmRequestProcessor', () => {
 
   it('resumes a call that was recorded without arguments', async () => {
     const mockFunctionCallList = await freshMockFunctionCallList();
-    const agent = new LlmAgent({
-      name: 'test_agent',
-      model: 'gemini-2.5-flash',
-    });
-    vi.spyOn(agent, 'canonicalTools').mockResolvedValue([]);
+    const agent = createAgentWithGatedTools('my_tool');
     const originalFunctionCall = {id: 'orig-15', name: 'my_tool'};
 
     const invocationContext = createMockInvocationContext(agent, [
