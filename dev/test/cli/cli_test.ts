@@ -493,11 +493,17 @@ describe('CLI Entrypoint', () => {
 
     it('exits non-zero when the deploy fails', async () => {
       (deployToGke as Mock).mockRejectedValueOnce(new Error('boom'));
+      // Throwing types the stub as `never` without a cast, and stops the
+      // action where the real `process.exit` would stop it.
       const exit = vi
         .spyOn(process, 'exit')
-        .mockImplementation((() => undefined) as never);
+        .mockImplementation((code): never => {
+          throw new Error(`process.exit(${code})`);
+        });
 
-      await parse(['deploy', 'gke', '--cluster_name=my-cluster']);
+      await expect(
+        parse(['deploy', 'gke', '--cluster_name=my-cluster']),
+      ).rejects.toThrow('process.exit(1)');
 
       expect(exit).toHaveBeenCalledWith(1);
     });
