@@ -306,15 +306,18 @@ describe('operations', () => {
         updateTime: new Date(),
       });
       await seed.flush();
+      const em = orm.em.fork();
+      const upsert = vi.spyOn(em, 'upsert');
 
       const row = await getOrCreateStateRow(
-        orm.em.fork(),
+        em,
         StorageUserState,
         {appName, userId},
         {appName, userId, state: {}, updateTime: new Date()},
       );
 
       expect(row.state).toEqual({k: 'v'});
+      expect(upsert).not.toHaveBeenCalled();
       expect(await orm.em.fork().count(StorageUserState, {})).toBe(1);
     });
 
