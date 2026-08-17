@@ -96,10 +96,6 @@ export class A2AAgentExecutor implements AgentExecutor {
     ctx: RequestContext,
     eventBus: ExecutionEventBus,
   ): Promise<void> {
-    if (!ctx.userMessage) {
-      throw new Error('message not provided');
-    }
-
     // Runs outside the try block: a throwing hook must reach the caller
     // instead of being reported to the peer as a failed task.
     const reqCtx = await runBeforeAgentInterceptors(

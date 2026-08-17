@@ -24,21 +24,15 @@ import {
   toAgentRunRequest,
 } from './request_converter_utils.js';
 
-export type {AdkEventToA2AEventConverter} from './event_converter_utils.js';
-export type {
-  A2APartToGenAIPartConverter,
-  GenAIPartToA2APartConverter,
-} from './part_converter_utils.js';
-export type {
-  A2ARequestToAgentRunRequestConverter,
-  AgentRunRequest,
-} from './request_converter_utils.js';
-
 /**
  * Hooks that observe or rewrite one A2A execution.
  *
  * Every hook is optional; an interceptor that omits one is skipped at that
  * point of the run.
+ *
+ * Each hook pairs with a callback on `AgentExecutorConfig` that only observes:
+ * `beforeAgent` runs before `beforeExecuteCallback`, `afterEvent` runs after
+ * `afterEventCallback`, and `afterAgent` runs before `afterExecuteCallback`.
  */
 export interface ExecuteInterceptor {
   /**

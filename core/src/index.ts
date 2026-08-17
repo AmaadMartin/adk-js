@@ -24,16 +24,20 @@ export type {
 export {toA2a} from './a2a/agent_to_a2a.js';
 export type {A2aUserBuilder, ToA2aOptions} from './a2a/agent_to_a2a.js';
 export {bearerTokenUserBuilder} from './a2a/auth.js';
+export type {AdkEventToA2AEventConverter} from './a2a/event_converter_utils.js';
 export type {
   A2AAgentExecutorConfig,
-  A2APartToGenAIPartConverter,
-  A2ARequestToAgentRunRequestConverter,
-  AdkEventToA2AEventConverter,
-  AgentRunRequest,
   ExecuteInterceptor,
-  GenAIPartToA2APartConverter,
 } from './a2a/executor_config.js';
 export type {ExecutorContext} from './a2a/executor_context.js';
+export type {
+  A2APartToGenAIPartConverter,
+  GenAIPartToA2APartConverter,
+} from './a2a/part_converter_utils.js';
+export type {
+  A2ARequestToAgentRunRequestConverter,
+  AgentRunRequest,
+} from './a2a/request_converter_utils.js';
 export {InvocationContext} from './agents/invocation_context.js';
 export type {WorkflowInstructionScope} from './agents/invocation_context.js';
 export {FileArtifactService} from './artifacts/file_artifact_service.js';

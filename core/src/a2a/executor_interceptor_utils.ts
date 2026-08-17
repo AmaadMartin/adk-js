@@ -75,9 +75,6 @@ export async function runAfterEventInterceptors(
     }
 
     events = nextEvents;
-    if (events.length === 0) {
-      return [];
-    }
   }
 
   return events;
