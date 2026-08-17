@@ -16,6 +16,7 @@ import {
   getFunctionCalls,
   getFunctionResponses,
 } from '../../events/event.js';
+import {applyEventCompactions} from '../../events/event_compaction_utils.js';
 import {isSegmentPrefix} from '../../utils/branch_trie.js';
 
 import {
@@ -59,28 +60,31 @@ export function getContents(
   currentBranch?: string,
   currentIsolationScope?: string,
 ): Content[] {
-  const filteredEvents: Event[] = [];
+  const filteredEvents = events.filter(
+    (event) =>
+      isCompactedEvent(event) ||
+      shouldIncludeEventInContext(event, currentBranch, currentIsolationScope),
+  );
 
-  for (const event of events) {
+  // Session-level compaction runs before the per-event conversions below, so a
+  // summary replaces the raw events it covers rather than being converted
+  // alongside them.
+  const compactedEvents = filteredEvents.some(
+    (event) => event.actions?.compaction,
+  )
+    ? applyEventCompactions(filteredEvents, agentName)
+    : filteredEvents;
+
+  const convertedEvents = compactedEvents.map((event) => {
     if (isCompactedEvent(event)) {
-      filteredEvents.push(convertCompactedEvent(event));
-      continue;
+      return convertCompactedEvent(event);
     }
+    return isEventFromAnotherAgent(agentName, event)
+      ? convertForeignEvent(event)
+      : event;
+  });
 
-    if (
-      !shouldIncludeEventInContext(event, currentBranch, currentIsolationScope)
-    ) {
-      continue;
-    }
-
-    filteredEvents.push(
-      isEventFromAnotherAgent(agentName, event)
-        ? convertForeignEvent(event)
-        : event,
-    );
-  }
-
-  let resultEvents = rearrangeEventsForLatestFunctionResponse(filteredEvents);
+  let resultEvents = rearrangeEventsForLatestFunctionResponse(convertedEvents);
   resultEvents =
     rearrangeEventsForAsyncFunctionResponsesInHistory(resultEvents);
   const contents = [];
@@ -107,6 +111,11 @@ function shouldIncludeEventInContext(
   currentBranch?: string,
   currentIsolationScope?: string,
 ): boolean {
+  // A compaction event holds its summary in `actions`, not in `content`, so the
+  // content checks below would drop it before it can be materialized.
+  if (event.actions?.compaction) {
+    return true;
+  }
   if (!event.content?.role || event.content.parts?.[0]?.text === '') {
     return false;
   }
