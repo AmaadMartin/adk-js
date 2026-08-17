@@ -77,12 +77,13 @@ export class AgentTransferLlmRequestProcessor extends BaseLlmRequestProcessor {
       return;
     }
 
-    const instructions = this.buildTargetAgentsInstructions(
-      invocationContext.agent,
-      transferTargets,
-    );
-    if (instructions) {
-      appendInstructions(llmRequest, [instructions]);
+    if (!isWorkflowNodeAgent(invocationContext.agent)) {
+      appendInstructions(llmRequest, [
+        this.buildTargetAgentsInstructions(
+          invocationContext.agent,
+          transferTargets,
+        ),
+      ]);
     }
 
     // The tool stays registered even for a workflow node agent, which gets no
@@ -103,10 +104,6 @@ Agent description: ${targetAgent.description}
     agent: LlmAgent,
     targetAgents: BaseAgent[],
   ): string {
-    if (isWorkflowNodeAgent(agent)) {
-      return '';
-    }
-
     let instructions = `
 You have a list of other agents to transfer to:
 
