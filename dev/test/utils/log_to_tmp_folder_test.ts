@@ -10,6 +10,7 @@
 // log_to_tmp_folder_symlink_failure_test.ts.
 
 import {randomUUID} from 'node:crypto';
+import {readFileSync} from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -135,7 +136,9 @@ describe('logToTmpFolder', () => {
 
     await resetFileLogTarget();
 
-    expect(await fs.readFile(logFilePath, 'utf8')).toContain(
+    // A synchronous read, because an awaited one would hand the pending write
+    // the extra ticks that `process.exit` denies it.
+    expect(readFileSync(logFilePath, 'utf8')).toContain(
       ' - INFO - Exiting - last words',
     );
     // A second reset has nothing left to release.
