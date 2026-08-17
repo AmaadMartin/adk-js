@@ -35,9 +35,6 @@ export function isBaseToolset(obj: unknown): obj is BaseToolset {
   );
 }
 
-/** The separator placed between a toolset prefix and a tool name. */
-const PREFIX_SEPARATOR = '_';
-
 /**
  * Returns a copy of `tool` that answers to `prefixedName`.
  *
@@ -123,9 +120,7 @@ export abstract class BaseToolset {
     const tools = await this.getTools(context);
     const prefix = this.prefix;
     this.cachedTools = prefix
-      ? tools.map((tool) =>
-          withPrefixedName(tool, `${prefix}${PREFIX_SEPARATOR}${tool.name}`),
-        )
+      ? tools.map((tool) => withPrefixedName(tool, `${prefix}_${tool.name}`))
       : tools;
     this.cachedInvocationId = invocationId;
     return this.cachedTools;

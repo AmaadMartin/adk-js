@@ -338,7 +338,7 @@ describe('AgentRegistry', () => {
       vi.spyOn(registry, 'getMcpServer').mockResolvedValue(serverDetails);
 
       const toolset = await registry.getMcpToolset('mcpServers/bigquery');
-      const tools = await toolset.getToolsWithPrefix({} as ReadonlyContext);
+      const tools = await toolset.getToolsWithPrefix();
 
       expect(tools[0].name).toBe('My_BigQuery_Server_tool1');
       if (!hasCustomMetadata(tools[0])) {
