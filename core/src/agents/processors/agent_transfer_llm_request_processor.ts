@@ -40,15 +40,33 @@ export const TRANSFER_TO_AGENT_TOOL = new FunctionTool({
 });
 
 /**
+ * Whether the agent is a workflow node rather than a conversational agent.
+ *
+ * A `single_turn` or `task` agent runs once against the input the graph hands
+ * it and then finishes, so it neither services a conversation handed to it nor
+ * hands its own away. An agent with no mode — every non-LlmAgent, and every
+ * conversational LlmAgent — is not a workflow node.
+ *
+ * @param agent - The agent to classify.
+ * @returns True when the agent is a workflow node.
+ */
+function isWorkflowNodeAgent(agent: BaseAgent): boolean {
+  return (
+    isLlmAgent(agent) && (agent.mode === 'single_turn' || agent.mode === 'task')
+  );
+}
+
+/**
  * Collects the agents the given agent may transfer to: its sub-agents, and —
- * unless disallowed — its parent agent and its peers.
+ * unless disallowed — its parent agent and its peers. Workflow node agents are
+ * never targets, because they run once against the input the graph hands them.
  *
  * @param agent - The agent that would perform the transfer.
  * @returns The reachable transfer targets, empty when there are none.
  */
 export function getTransferTargets(agent: LlmAgent): BaseAgent[] {
   const targets: BaseAgent[] = [];
-  targets.push(...agent.subAgents);
+  targets.push(...agent.subAgents.filter((sub) => !isWorkflowNodeAgent(sub)));
 
   if (!agent.parentAgent || !isLlmAgent(agent.parentAgent)) {
     return targets;
@@ -61,7 +79,8 @@ export function getTransferTargets(agent: LlmAgent): BaseAgent[] {
   if (!agent.disallowTransferToPeers) {
     targets.push(
       ...agent.parentAgent.subAgents.filter(
-        (peerAgent) => peerAgent.name !== agent.name,
+        (peerAgent) =>
+          peerAgent.name !== agent.name && !isWorkflowNodeAgent(peerAgent),
       ),
     );
   }
@@ -98,13 +117,17 @@ export class AgentTransferLlmRequestProcessor extends BaseLlmRequestProcessor {
       return;
     }
 
-    appendInstructions(llmRequest, [
-      this.buildTargetAgentsInstructions(
-        invocationContext.agent,
-        transferTargets,
-      ),
-    ]);
+    const instructions = this.buildTargetAgentsInstructions(
+      invocationContext.agent,
+      transferTargets,
+    );
+    if (instructions) {
+      appendInstructions(llmRequest, [instructions]);
+    }
 
+    // The tool stays registered even for a workflow node agent, which gets no
+    // instructions: adk-python registers it unconditionally, and the
+    // confirmation-resume path re-injects it.
     const toolContext = new Context({invocationContext});
     await TRANSFER_TO_AGENT_TOOL.processLlmRequest({toolContext, llmRequest});
   }
@@ -120,6 +143,10 @@ Agent description: ${targetAgent.description}
     agent: LlmAgent,
     targetAgents: BaseAgent[],
   ): string {
+    if (isWorkflowNodeAgent(agent)) {
+      return '';
+    }
+
     let instructions = `
 You have a list of other agents to transfer to:
 
