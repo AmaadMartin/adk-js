@@ -19,6 +19,7 @@ import {
 } from '@google/adk';
 import {FunctionCall} from '@google/genai';
 import {describe, expect, it, vi} from 'vitest';
+import {z} from 'zod/v3';
 import {REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR} from '../../../src/agents/processors/request_confirmation_llm_request_processor.js';
 
 vi.mock('../../../src/agents/functions.js', async (importOriginal) => {
@@ -123,6 +124,60 @@ function createAgentWithGatedTools(...toolNames: string[]) {
     name: 'test_agent',
     model: 'gemini-2.5-flash',
     tools: toolNames.map((name) => createTool(name, true)),
+  });
+}
+
+/** An agent whose one registered tool declares no confirmation gate. */
+function createAgentWithUngatedTool(name: string) {
+  return new LlmAgent({
+    name: 'test_agent',
+    model: 'gemini-2.5-flash',
+    tools: [createTool(name, false)],
+  });
+}
+
+/** A tool response asking for confirmation of `callId` at run time. */
+function createRunTimeRequestEvent(callId: string, toolName: string) {
+  return createEvent({
+    invocationId: 'test-invocation',
+    author: 'test_agent',
+    content: {
+      role: 'model',
+      parts: [
+        {
+          functionResponse: {
+            id: callId,
+            name: toolName,
+            response: {error: 'This tool call requires confirmation.'},
+          },
+        },
+      ],
+    },
+    actions: {
+      requestedToolConfirmations: {
+        [callId]: new ToolConfirmation({confirmed: false, hint: 'approve?'}),
+      },
+    },
+  });
+}
+
+/** A plain tool response for `callId` that repeats no confirmation request. */
+function createToolResponseEvent(callId: string, toolName: string) {
+  return createEvent({
+    invocationId: 'test-invocation',
+    author: 'test_agent',
+    content: {
+      role: 'model',
+      parts: [
+        {
+          functionResponse: {
+            id: callId,
+            name: toolName,
+            response: {result: 'ok'},
+          },
+        },
+      ],
+    },
   });
 }
 
@@ -818,6 +873,135 @@ describe('RequestConfirmationLlmRequestProcessor', () => {
     const events = await collectEvents(invocationContext);
 
     expect(events).toHaveLength(0);
+    expect(mockFunctionCallList).not.toHaveBeenCalled();
+  });
+
+  it('throws when the named tool is not registered for the turn', async () => {
+    const mockFunctionCallList = await freshMockFunctionCallList();
+    const agent = createAgentWithGatedTools();
+    const originalFunctionCall = {
+      id: 'orig-16',
+      name: 'my_tool',
+      args: {param: 'value'},
+    };
+
+    const invocationContext = createMockInvocationContext(agent, [
+      createOriginalCallEvent(originalFunctionCall),
+      createConfirmationRequestEvent('fc-confirm-16', originalFunctionCall),
+      createUserApprovalEvent('fc-confirm-16'),
+    ]);
+
+    await expect(collectEvents(invocationContext)).rejects.toThrow(
+      /Tool 'my_tool' is not registered\./,
+    );
+    expect(mockFunctionCallList).not.toHaveBeenCalled();
+  });
+
+  it('throws when the named tool declares no confirmation gate', async () => {
+    const mockFunctionCallList = await freshMockFunctionCallList();
+    const agent = createAgentWithUngatedTool('my_tool');
+    const originalFunctionCall = {
+      id: 'orig-17',
+      name: 'my_tool',
+      args: {param: 'value'},
+    };
+
+    const invocationContext = createMockInvocationContext(agent, [
+      createOriginalCallEvent(originalFunctionCall),
+      createConfirmationRequestEvent('fc-confirm-17', originalFunctionCall),
+      createUserApprovalEvent('fc-confirm-17'),
+    ]);
+
+    await expect(collectEvents(invocationContext)).rejects.toThrow(
+      /Tool 'my_tool' does not require confirmation\./,
+    );
+    expect(mockFunctionCallList).not.toHaveBeenCalled();
+  });
+
+  it('resumes an ungated tool that asked for confirmation at run time', async () => {
+    const mockFunctionCallList = await freshMockFunctionCallList();
+    const agent = createAgentWithUngatedTool('my_tool');
+    const originalFunctionCall = {
+      id: 'orig-18',
+      name: 'my_tool',
+      args: {param: 'value'},
+    };
+
+    const invocationContext = createMockInvocationContext(agent, [
+      createOriginalCallEvent(originalFunctionCall),
+      createRunTimeRequestEvent('orig-18', 'my_tool'),
+      createConfirmationRequestEvent('fc-confirm-18', originalFunctionCall),
+      createUserApprovalEvent('fc-confirm-18'),
+    ]);
+
+    await collectEvents(invocationContext);
+
+    expect(mockFunctionCallList).toHaveBeenCalledTimes(1);
+    expect(mockFunctionCallList.mock.calls[0][0].functionCalls).toEqual([
+      originalFunctionCall,
+    ]);
+  });
+
+  it('keeps a run-time request that a later tool response does not repeat', async () => {
+    const mockFunctionCallList = await freshMockFunctionCallList();
+    const agent = createAgentWithUngatedTool('my_tool');
+    const originalFunctionCall = {
+      id: 'orig-19',
+      name: 'my_tool',
+      args: {param: 'value'},
+    };
+
+    const invocationContext = createMockInvocationContext(agent, [
+      createOriginalCallEvent(originalFunctionCall),
+      createRunTimeRequestEvent('orig-19', 'my_tool'),
+      createToolResponseEvent('orig-19', 'my_tool'),
+      createConfirmationRequestEvent('fc-confirm-19', originalFunctionCall),
+      createUserApprovalEvent('fc-confirm-19'),
+    ]);
+
+    await collectEvents(invocationContext);
+
+    expect(mockFunctionCallList).toHaveBeenCalledTimes(1);
+    expect(mockFunctionCallList.mock.calls[0][0].functionCalls).toEqual([
+      originalFunctionCall,
+    ]);
+  });
+
+  it('throws when the payload arguments fail the tool schema', async () => {
+    const mockFunctionCallList = await freshMockFunctionCallList();
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: 'gemini-2.5-flash',
+      tools: [
+        new FunctionTool({
+          name: 'my_tool',
+          description: 'The my_tool tool.',
+          parameters: z.object({param: z.string()}),
+          requireConfirmation: true,
+          execute: async () => ({ok: true}),
+        }),
+      ],
+    });
+
+    const invocationContext = createMockInvocationContext(agent, [
+      createOriginalCallEvent({
+        id: 'orig-20',
+        name: 'my_tool',
+        args: {param: 'value'},
+      }),
+      createConfirmationRequestEvent('fc-confirm-20', {
+        id: 'orig-20',
+        name: 'my_tool',
+        args: {param: 42},
+      }),
+      createUserApprovalEvent('fc-confirm-20'),
+    ]);
+
+    // A tool reports no gate for arguments its schema rejects, so the gate
+    // check refuses the call before the argument comparison reaches it.
+    await expect(collectEvents(invocationContext)).rejects.toThrow(
+      /Tool 'my_tool' does not require confirmation\./,
+    );
     expect(mockFunctionCallList).not.toHaveBeenCalled();
   });
 });
