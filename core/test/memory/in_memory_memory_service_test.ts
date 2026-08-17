@@ -223,16 +223,63 @@ describe('InMemoryMemoryService', () => {
         userId: 'alice',
         events: [
           createEvent({
+            id: 'e1',
             author: 'user',
             content: {role: 'user', parts: [{text: 'hello world'}]},
           }),
         ],
       });
+
       await service.addEventsToMemory({
         appName: 'myApp',
         userId: 'alice',
         events: [
           createEvent({
+            id: 'e1',
+            author: 'user',
+            content: {role: 'user', parts: [{text: 'hello again'}]},
+          }),
+          createEvent({
+            id: 'e2',
+            author: 'user',
+            content: {role: 'user', parts: [{text: 'hello there'}]},
+          }),
+        ],
+      });
+
+      const result = await service.searchMemory({
+        appName: 'myApp',
+        userId: 'alice',
+        query: 'hello',
+      });
+
+      // Both deltas share one bucket, so the repeated `e1` is deduped against
+      // the first delta rather than stored a second time.
+      expect(new Set(memoryTexts(result))).toEqual(
+        new Set(['hello world', 'hello there']),
+      );
+    });
+
+    it('treats an empty sessionId as no sessionId', async () => {
+      await service.addEventsToMemory({
+        appName: 'myApp',
+        userId: 'alice',
+        sessionId: '',
+        events: [
+          createEvent({
+            id: 'e1',
+            author: 'user',
+            content: {role: 'user', parts: [{text: 'hello world'}]},
+          }),
+        ],
+      });
+
+      await service.addEventsToMemory({
+        appName: 'myApp',
+        userId: 'alice',
+        events: [
+          createEvent({
+            id: 'e1',
             author: 'user',
             content: {role: 'user', parts: [{text: 'hello again'}]},
           }),
@@ -245,9 +292,7 @@ describe('InMemoryMemoryService', () => {
         query: 'hello',
       });
 
-      expect(new Set(memoryTexts(result))).toEqual(
-        new Set(['hello world', 'hello again']),
-      );
+      expect(memoryTexts(result)).toEqual(['hello world']);
     });
 
     it('scopes the delta to the app name and user ID', async () => {
