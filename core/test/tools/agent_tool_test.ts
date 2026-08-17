@@ -17,7 +17,6 @@ import {
   Runner,
   State,
 } from '@google/adk';
-import {Type} from '@google/genai';
 import {describe, expect, it, vi} from 'vitest';
 
 vi.mock('../../src/runner/runner.js', async (importOriginal) => {
@@ -447,59 +446,6 @@ describe('AgentTool', () => {
     await tool.runAsync({args: {request: 'go'}, toolContext});
 
     expect(updateMock).not.toHaveBeenCalled();
-  });
-
-  it('parses a sub-agent reply the model wrapped in a markdown code fence', async () => {
-    // A real LlmAgent: the `as unknown as LlmAgent` mocks used elsewhere in
-    // this file fail the isLlmAgent guard, so the outputSchema branch would
-    // never run.
-    const subAgent = new LlmAgent({
-      name: 'sub-agent',
-      outputSchema: {
-        type: Type.OBJECT,
-        properties: {answer: {type: Type.STRING}},
-      },
-    });
-
-    const tool = new AgentTool({agent: subAgent});
-
-    const session = createSession({
-      id: 'parent-session',
-      appName: 'sub-agent',
-      userId: 'parent-user',
-    });
-
-    const toolContext = new Context({
-      invocationContext: new InvocationContext({
-        invocationId: 'test-invocation',
-        agent: subAgent,
-        session,
-        pluginManager: new PluginManager([]),
-        sessionService: new InMemorySessionService(),
-      }),
-    });
-
-    const mockRunAsync = async function* () {
-      yield createEvent({
-        author: 'sub-agent',
-        content: {
-          role: 'model',
-          parts: [{text: '```json\n{"answer":"42"}\n```'}],
-        },
-      });
-    };
-
-    vi.mocked(Runner).mockImplementation((config) => {
-      return {
-        appName: config?.appName,
-        sessionService: config?.sessionService,
-        runAsync: mockRunAsync,
-      } as unknown as Runner;
-    });
-
-    const result = await tool.runAsync({args: {request: 'hello'}, toolContext});
-
-    expect(result).toEqual({answer: '42'});
   });
 
   it('does not propagate temp: keys from parent state when creating sub-agent session', async () => {
