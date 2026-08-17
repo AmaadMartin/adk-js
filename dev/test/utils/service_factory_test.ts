@@ -24,7 +24,6 @@ import {
 } from '../../src/utils/service_factory.js';
 
 const MANAGED_ENV_VARS = [
-  'ADK_DISABLE_LOCAL_STORAGE',
   'ADK_FORCE_LOCAL_STORAGE',
   'K_SERVICE',
   'KUBERNETES_SERVICE_HOST',
@@ -119,18 +118,6 @@ describe('service factory', () => {
       ).toEqual({useLocalStorage: true});
     });
 
-    it('lets ADK_DISABLE_LOCAL_STORAGE beat a writable directory', async () => {
-      process.env['ADK_DISABLE_LOCAL_STORAGE'] = '1';
-
-      const decision = await resolveUseLocalStorage({
-        baseDir: agentsRoot,
-        requested: true,
-      });
-
-      expect(decision.useLocalStorage).toBe(false);
-      expect(decision.warning).toContain('ADK_DISABLE_LOCAL_STORAGE');
-    });
-
     it.each(['K_SERVICE', 'KUBERNETES_SERVICE_HOST'])(
       'refuses local storage when %s is set',
       async (name) => {
@@ -205,6 +192,18 @@ describe('service factory', () => {
       });
 
       expect(service).toBeInstanceOf(PerAgentDatabaseSessionService);
+    });
+
+    it('warns and serves from memory in a detected container', async () => {
+      process.env['K_SERVICE'] = 'some-service';
+
+      const service = await createSessionServiceFromOptions({
+        baseDir: agentsRoot,
+      });
+      await service.createSession({appName: 'weather_agent', userId: 'u1'});
+
+      expect(service).toBeInstanceOf(InMemorySessionService);
+      expect(await exists(path.join(agentsRoot, 'weather_agent'))).toBe(false);
     });
 
     it('uses the URI service and creates no .adk folder', async () => {

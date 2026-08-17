@@ -25,7 +25,6 @@ import {AdkLogger} from './logger.js';
 
 const logger = new AdkLogger({label: 'ServiceFactory', colorize: {all: true}});
 
-const DISABLE_LOCAL_STORAGE_ENV = 'ADK_DISABLE_LOCAL_STORAGE';
 const FORCE_LOCAL_STORAGE_ENV = 'ADK_FORCE_LOCAL_STORAGE';
 const CLOUD_RUN_SERVICE_ENV = 'K_SERVICE';
 const KUBERNETES_HOST_ENV = 'KUBERNETES_SERVICE_HOST';
@@ -61,25 +60,14 @@ export interface LocalStorageDecision {
 /**
  * Decides whether the CLI may persist to `<agent>/.adk`.
  *
- * The branch order is the behaviour: `ADK_DISABLE_LOCAL_STORAGE` beats
- * everything, and `ADK_FORCE_LOCAL_STORAGE` deliberately skips the container
- * check so an operator can opt a container back in.
+ * The branch order is the behaviour: `ADK_FORCE_LOCAL_STORAGE` deliberately
+ * skips the container check, so an operator can opt a container back in.
  */
 export async function resolveUseLocalStorage(options: {
   baseDir: string;
   requested: boolean;
 }): Promise<LocalStorageDecision> {
   const {baseDir, requested} = options;
-
-  if (isEnvFlagEnabled(DISABLE_LOCAL_STORAGE_ENV)) {
-    return {
-      useLocalStorage: false,
-      warning:
-        `Local storage is disabled by ${DISABLE_LOCAL_STORAGE_ENV}; using ` +
-        `in-memory services. Set --session_service_uri and ` +
-        `--artifact_service_uri for production deployments.`,
-    };
-  }
 
   if (isEnvFlagEnabled(FORCE_LOCAL_STORAGE_ENV)) {
     if (await isDirWritable(baseDir)) {

@@ -7,29 +7,10 @@
 import * as path from 'node:path';
 
 const DOT_ADK_DIR_NAME = '.adk';
-const ARTIFACTS_DIR_NAME = 'artifacts';
-const SESSION_DB_FILE_NAME = 'session.db';
 
-/** Resolves the paths ADK persists under a single agent's `.adk` folder. */
-export class DotAdkFolder {
-  /** The agent directory that holds the `.adk` folder. */
-  readonly agentDir: string;
-
-  constructor(agentDir: string) {
-    this.agentDir = path.resolve(agentDir);
-  }
-
-  get dotAdkDir(): string {
-    return path.join(this.agentDir, DOT_ADK_DIR_NAME);
-  }
-
-  get artifactsDir(): string {
-    return path.join(this.dotAdkDir, ARTIFACTS_DIR_NAME);
-  }
-
-  get sessionDbPath(): string {
-    return path.join(this.dotAdkDir, SESSION_DB_FILE_NAME);
-  }
+/** Returns the `.adk` folder that holds one agent's persisted data. */
+export function dotAdkDir(agentDir: string): string {
+  return path.join(agentDir, DOT_ADK_DIR_NAME);
 }
 
 /** Returns true when `appName` names one directory entry and nothing else. */
@@ -80,12 +61,4 @@ export function resolveAgentDir(options: {
   }
 
   return agentDir;
-}
-
-/** Creates a `DotAdkFolder` for one agent rooted under `agentsRoot`. */
-export function dotAdkFolderForAgent(options: {
-  agentsRoot: string;
-  appName: string;
-}): DotAdkFolder {
-  return new DotAdkFolder(resolveAgentDir(options));
 }

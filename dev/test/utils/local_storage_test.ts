@@ -62,7 +62,7 @@ describe('local storage', () => {
   describe('createLocalDatabaseSessionService', () => {
     it('creates the .adk folder and a usable session store', async () => {
       const baseDir = path.join(agentsRoot, 'weather_agent');
-      const service = await createLocalDatabaseSessionService({baseDir});
+      const service = await createLocalDatabaseSessionService(baseDir);
       const session = await service.createSession({
         appName: 'weather_agent',
         userId: USER_ID,
@@ -76,7 +76,7 @@ describe('local storage', () => {
   describe('createLocalArtifactService', () => {
     it('creates the artifacts folder and a usable artifact store', async () => {
       const baseDir = path.join(agentsRoot, 'weather_agent');
-      const service = await createLocalArtifactService({baseDir});
+      const service = await createLocalArtifactService(baseDir);
       await service.saveArtifact({
         appName: 'weather_agent',
         userId: USER_ID,
@@ -205,26 +205,22 @@ describe('local storage', () => {
 
     // POSIX only: a Windows directory stays writable after `chmod`.
     it.skipIf(process.platform === 'win32')(
-      'serves the app from memory when the disk denies the .adk folder',
+      'reports a permission failure instead of losing the data',
       async () => {
         await fs.chmod(agentsRoot, 0o500);
         const service = new PerAgentDatabaseSessionService({agentsRoot});
 
-        const session = await service.createSession({
-          appName: 'weather_agent',
-          userId: USER_ID,
-        });
-
-        expect(session.appName).toBe('weather_agent');
+        await expect(
+          service.createSession({appName: 'weather_agent', userId: USER_ID}),
+        ).rejects.toThrow(/EACCES/);
         expect(await exists(path.join(agentsRoot, 'weather_agent'))).toBe(
           false,
         );
       },
     );
 
-    it('reports a disk failure it must not downgrade', async () => {
-      // A file where the agent directory belongs: `mkdir` fails, but not with
-      // a permission code, so the failure has to surface.
+    it('reports a disk failure instead of losing the data', async () => {
+      // A file sits where the agent directory belongs, so `mkdir` fails.
       await fs.writeFile(path.join(agentsRoot, 'weather_agent'), 'not a dir');
       const service = new PerAgentDatabaseSessionService({agentsRoot});
 

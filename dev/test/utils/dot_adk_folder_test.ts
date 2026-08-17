@@ -7,34 +7,15 @@
 import * as path from 'node:path';
 import {describe, expect, it} from 'vitest';
 
-import {
-  DotAdkFolder,
-  dotAdkFolderForAgent,
-  resolveAgentDir,
-} from '../../src/utils/dot_adk_folder.js';
+import {dotAdkDir, resolveAgentDir} from '../../src/utils/dot_adk_folder.js';
 
 const AGENTS_ROOT = path.resolve(path.join('base', 'agents'));
 
-describe('DotAdkFolder', () => {
-  it('puts .adk, artifacts and session.db under the agent directory', () => {
+describe('dotAdkDir', () => {
+  it('puts the .adk folder inside the agent directory', () => {
     const agentDir = path.join(AGENTS_ROOT, 'weather_agent');
-    const folder = new DotAdkFolder(agentDir);
 
-    expect(folder.agentDir).toBe(agentDir);
-    expect(folder.dotAdkDir).toBe(path.join(agentDir, '.adk'));
-    expect(folder.artifactsDir).toBe(path.join(agentDir, '.adk', 'artifacts'));
-    expect(folder.sessionDbPath).toBe(
-      path.join(agentDir, '.adk', 'session.db'),
-    );
-  });
-
-  it('resolves a relative agent directory', () => {
-    const folder = new DotAdkFolder(path.join('agents', 'weather_agent'));
-
-    expect(path.isAbsolute(folder.agentDir)).toBe(true);
-    expect(folder.agentDir).toBe(
-      path.resolve(path.join('agents', 'weather_agent')),
-    );
+    expect(dotAdkDir(agentDir)).toBe(path.join(agentDir, '.adk'));
   });
 });
 
@@ -86,25 +67,5 @@ describe('resolveAgentDir', () => {
     ).toThrow(
       "Invalid app name '../escape_attempt': resolves outside the agents directory",
     );
-  });
-});
-
-describe('dotAdkFolderForAgent', () => {
-  it('returns a folder scoped to the agent', () => {
-    const folder = dotAdkFolderForAgent({
-      agentsRoot: AGENTS_ROOT,
-      appName: 'valid_agent',
-    });
-
-    expect(folder.agentDir).toBe(path.join(AGENTS_ROOT, 'valid_agent'));
-    expect(folder.sessionDbPath).toBe(
-      path.join(AGENTS_ROOT, 'valid_agent', '.adk', 'session.db'),
-    );
-  });
-
-  it('rejects an app name that escapes the agents root', () => {
-    expect(() =>
-      dotAdkFolderForAgent({agentsRoot: AGENTS_ROOT, appName: '../evil'}),
-    ).toThrow(/Invalid app name/);
   });
 });

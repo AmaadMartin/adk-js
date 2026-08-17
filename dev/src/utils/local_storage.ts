@@ -16,8 +16,6 @@ import {
   Event,
   FileArtifactService,
   GetSessionRequest,
-  InMemoryArtifactService,
-  InMemorySessionService,
   ListArtifactKeysRequest,
   ListSessionsRequest,
   ListSessionsResponse,
@@ -30,37 +28,23 @@ import {Part} from '@google/genai';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
-import {DotAdkFolder, resolveAgentDir} from './dot_adk_folder.js';
+import {dotAdkDir, resolveAgentDir} from './dot_adk_folder.js';
 import {AdkLogger} from './logger.js';
 
 const logger = new AdkLogger({label: 'LocalStorage', colorize: {all: true}});
 
-/** Filesystem error codes that mean the disk refuses local storage. */
-const STORAGE_DENIED_ERROR_CODES = new Set(['EACCES', 'EPERM', 'EROFS']);
-
-/** Returns true when `e` is a filesystem error that denies local storage. */
-function isStorageDenied(e: unknown): boolean {
-  return (
-    typeof e === 'object' &&
-    e !== null &&
-    'code' in e &&
-    typeof e.code === 'string' &&
-    STORAGE_DENIED_ERROR_CODES.has(e.code)
-  );
-}
-
 /** Creates a SQLite-backed session service at `<baseDir>/.adk/session.db`. */
-export async function createLocalDatabaseSessionService(options: {
-  baseDir: string;
-}): Promise<BaseSessionService> {
-  const folder = new DotAdkFolder(options.baseDir);
+export async function createLocalDatabaseSessionService(
+  baseDir: string,
+): Promise<BaseSessionService> {
+  const folder = dotAdkDir(baseDir);
   // MikroORM creates the database file but not the directory that holds it.
-  await fs.mkdir(folder.dotAdkDir, {recursive: true});
-  logger.debug(`Using local session storage at ${folder.sessionDbPath}`);
+  await fs.mkdir(folder, {recursive: true});
 
-  const service = new DatabaseSessionService(
-    `sqlite://${folder.sessionDbPath}`,
-  );
+  const sessionDbPath = path.join(folder, 'session.db');
+  logger.debug(`Using local session storage at ${sessionDbPath}`);
+
+  const service = new DatabaseSessionService(`sqlite://${sessionDbPath}`);
   // `init()` marks itself done only after it has created the schema, so two
   // concurrent first requests would each try to create the tables. Run it here,
   // where the caller caches this one promise for the whole app.
@@ -70,60 +54,14 @@ export async function createLocalDatabaseSessionService(options: {
 }
 
 /** Creates a file-backed artifact service at `<baseDir>/.adk/artifacts`. */
-export async function createLocalArtifactService(options: {
-  baseDir: string;
-}): Promise<BaseArtifactService> {
-  const folder = new DotAdkFolder(options.baseDir);
-  await fs.mkdir(folder.artifactsDir, {recursive: true});
-  logger.debug(`Using local artifact storage at ${folder.artifactsDir}`);
-
-  return new FileArtifactService(folder.artifactsDir);
-}
-
-/**
- * Falls back to `inMemory()` when the disk refuses the agent's `.adk` folder.
- *
- * Any other failure is rethrown: a full or corrupt disk must not be downgraded
- * to a store that silently loses the data written to it.
- */
-async function withInMemoryFallback<T>(
-  baseDir: string,
-  create: () => Promise<T>,
-  inMemory: () => T,
-): Promise<T> {
-  try {
-    return await create();
-  } catch (e: unknown) {
-    if (!isStorageDenied(e)) {
-      throw e;
-    }
-    logger.warn(
-      `Cannot write local storage under ${baseDir}; using an in-memory ` +
-        `service for this agent. Its data is lost when the process exits.`,
-    );
-
-    return inMemory();
-  }
-}
-
-function createAgentSessionService(
-  baseDir: string,
-): Promise<BaseSessionService> {
-  return withInMemoryFallback(
-    baseDir,
-    () => createLocalDatabaseSessionService({baseDir}),
-    () => new InMemorySessionService(),
-  );
-}
-
-function createAgentArtifactService(
+export async function createLocalArtifactService(
   baseDir: string,
 ): Promise<BaseArtifactService> {
-  return withInMemoryFallback(
-    baseDir,
-    () => createLocalArtifactService({baseDir}),
-    () => new InMemoryArtifactService(),
-  );
+  const artifactsDir = path.join(dotAdkDir(baseDir), 'artifacts');
+  await fs.mkdir(artifactsDir, {recursive: true});
+  logger.debug(`Using local artifact storage at ${artifactsDir}`);
+
+  return new FileArtifactService(artifactsDir);
 }
 
 /**
@@ -156,7 +94,7 @@ export class PerAgentDatabaseSessionService extends BaseSessionService {
 
   constructor(options: {agentsRoot: string}) {
     super();
-    this.agentsRoot = path.resolve(options.agentsRoot);
+    this.agentsRoot = options.agentsRoot;
   }
 
   async createSession(request: CreateSessionRequest): Promise<Session> {
@@ -200,7 +138,7 @@ export class PerAgentDatabaseSessionService extends BaseSessionService {
       this.services,
       this.agentsRoot,
       appName,
-      createAgentSessionService,
+      createLocalDatabaseSessionService,
     );
   }
 }
@@ -211,7 +149,7 @@ export class PerAgentFileArtifactService implements BaseArtifactService {
   private readonly services = new Map<string, Promise<BaseArtifactService>>();
 
   constructor(options: {agentsRoot: string}) {
-    this.agentsRoot = path.resolve(options.agentsRoot);
+    this.agentsRoot = options.agentsRoot;
   }
 
   async saveArtifact(request: SaveArtifactRequest): Promise<number> {
@@ -265,7 +203,7 @@ export class PerAgentFileArtifactService implements BaseArtifactService {
       this.services,
       this.agentsRoot,
       appName,
-      createAgentArtifactService,
+      createLocalArtifactService,
     );
   }
 }

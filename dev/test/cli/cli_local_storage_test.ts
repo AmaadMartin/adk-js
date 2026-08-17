@@ -31,7 +31,6 @@ vi.mock('../../src/server/adk_api_server', () => {
 
 const MANAGED_ENV_VARS = [
   'DATABASE_URL',
-  'ADK_DISABLE_LOCAL_STORAGE',
   'ADK_FORCE_LOCAL_STORAGE',
   'K_SERVICE',
   'KUBERNETES_SERVICE_HOST',
@@ -162,20 +161,6 @@ describe('CLI local storage wiring', () => {
 
   it('keeps both services in memory for --use_local_storage false', async () => {
     await parse(['web', agentsDir, '--use_local_storage', 'false']);
-
-    expect(serverOptions().sessionService).toBeInstanceOf(
-      InMemorySessionService,
-    );
-    expect(serverOptions().artifactService).toBeInstanceOf(
-      InMemoryArtifactService,
-    );
-    expect(await fs.readdir(agentsDir)).toEqual([]);
-  });
-
-  it('keeps both services in memory for ADK_DISABLE_LOCAL_STORAGE', async () => {
-    process.env['ADK_DISABLE_LOCAL_STORAGE'] = '1';
-
-    await parse(['web', agentsDir]);
 
     expect(serverOptions().sessionService).toBeInstanceOf(
       InMemorySessionService,
