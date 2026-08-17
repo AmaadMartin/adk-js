@@ -111,7 +111,7 @@ export interface RemoteA2AAgentConfig extends BaseAgentConfig {
   /**
    * Converts each outgoing GenAI part to an A2A part. Defaults to `toA2APart`.
    */
-  genaiPartConverter?: GenAIPartToA2APartConverter;
+  genAIPartConverter?: GenAIPartToA2APartConverter;
 }
 
 /**
@@ -179,7 +179,7 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
         parts = toA2AParts(
           event.content?.parts || [],
           event.longRunningToolIds,
-          this.a2aConfig.genaiPartConverter,
+          this.a2aConfig.genAIPartConverter,
         );
         taskId = userFnCall.taskId;
         contextId = userFnCall.contextId;
@@ -187,7 +187,7 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
         const missing = toMissingRemoteSessionParts(
           context,
           context.session,
-          this.a2aConfig.genaiPartConverter,
+          this.a2aConfig.genAIPartConverter,
         );
         parts = missing.parts;
         contextId = missing.contextId;

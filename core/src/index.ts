@@ -30,6 +30,7 @@ export type {
   ExecuteInterceptor,
 } from './a2a/executor_config.js';
 export type {ExecutorContext} from './a2a/executor_context.js';
+export {toA2APart, toGenAIPart} from './a2a/part_converter_utils.js';
 export type {
   A2APartToGenAIPartConverter,
   GenAIPartToA2APartConverter,

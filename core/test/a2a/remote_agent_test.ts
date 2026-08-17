@@ -26,6 +26,7 @@ import {
   RemoteA2AAgent,
   RemoteA2AAgentConfig,
   Session,
+  toA2APart,
 } from '@google/adk';
 import {Part as GenAIPart} from '@google/genai';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
@@ -371,7 +372,7 @@ describe('A2ARemoteAgent', () => {
     );
   });
 
-  describe('genaiPartConverter', () => {
+  describe('genAIPartConverter', () => {
     const streamingCard: AgentCard = {
       name: 'Remote',
       description: 'test',
@@ -413,13 +414,13 @@ describe('A2ARemoteAgent', () => {
 
     const runAgent = async (
       context: InvocationContext,
-      genaiPartConverter?: GenAIPartToA2APartConverter,
+      genAIPartConverter?: GenAIPartToA2APartConverter,
     ): Promise<A2APart[]> => {
       const agent = new RemoteA2AAgent({
         name: 'test-agent',
         agentCard: streamingCard,
         clientFactory: mockClientFactory,
-        genaiPartConverter,
+        genAIPartConverter,
       });
       vi.mocked(mockClient.sendMessageStream).mockReturnValue(
         (async function* () {})(),
@@ -473,6 +474,39 @@ describe('A2ARemoteAgent', () => {
       const parts = await runAgent(createMockContext());
 
       expect(parts).toEqual([{kind: 'text', text: 'hello'}]);
+    });
+
+    it('lets a converter delegate the parts it does not handle to toA2APart', async () => {
+      const context = createMockContext({
+        session: createSession({
+          id: 'test-session',
+          userId: 'test-user',
+          appName: 'test-app',
+          events: [
+            createEvent({
+              author: 'user',
+              content: {
+                role: 'user',
+                parts: [
+                  {inlineData: {data: 'AAA', mimeType: 'image/png'}},
+                  {text: 'hello'},
+                ],
+              },
+            }),
+          ],
+        }),
+      });
+
+      const parts = await runAgent(context, (part, longRunningToolIDs) =>
+        part.inlineData
+          ? {kind: 'data', data: {redacted: part.inlineData.mimeType ?? ''}}
+          : toA2APart(part, longRunningToolIDs),
+      );
+
+      expect(parts).toEqual([
+        {kind: 'data', data: {redacted: 'image/png'}},
+        {kind: 'text', text: 'hello'},
+      ]);
     });
   });
 });
