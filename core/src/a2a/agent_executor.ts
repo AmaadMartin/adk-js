@@ -126,10 +126,7 @@ export class A2AAgentExecutor implements AgentExecutor {
             eventBus,
             event: {
               ...inputRequiredEvent,
-              metadata: {
-                ...inputRequiredEvent.metadata,
-                ...getA2ASessionMetadata(executorContext),
-              },
+              metadata: getA2ASessionMetadata(executorContext),
             },
           });
 
