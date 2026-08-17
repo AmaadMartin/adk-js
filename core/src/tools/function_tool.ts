@@ -11,7 +11,12 @@ import {z as z4} from 'zod/v4';
 import {isZodObject, zodObjectToSchema} from '../utils/simple_zod_to_json.js';
 
 import {Context} from '../agents/context.js';
-import {BaseTool, RunAsyncToolRequest} from './base_tool.js';
+import {
+  BaseTool,
+  CheckRequireConfirmationRequest,
+  RunAsyncToolRequest,
+} from './base_tool.js';
+import {checkToolConfirmation} from './tool_confirmation.js';
 
 /**
  * Input parameters of the function tool.
@@ -191,12 +196,16 @@ export class FunctionTool<
         validatedArgs = this.parameters.parse(req.args);
       }
 
-      const pending = await this.checkConfirmation(
-        validatedArgs as ToolExecuteArgument<TParameters>,
-        req.toolContext,
-      );
-      if (pending !== undefined) {
-        return pending;
+      if (await this.checkRequireConfirmation(req)) {
+        if (!req.toolContext) {
+          throw new Error(
+            `Tool '${this.name}' requires confirmation but no tool context was provided.`,
+          );
+        }
+        const pending = checkToolConfirmation(this.name, req.toolContext);
+        if (pending !== undefined) {
+          return pending;
+        }
       }
 
       return await this.execute(
@@ -211,43 +220,31 @@ export class FunctionTool<
   }
 
   /**
-   * Evaluates the confirmation gate. Returns `undefined` if the tool may
-   * proceed; otherwise returns the function response payload to surface instead
-   * of running (a request-for-confirmation on the first pass, or a rejection
-   * once the user declined).
+   * Reports whether this call needs approval, honouring the tool's
+   * `requireConfirmation` option.
+   *
+   * Arguments that fail the parameter schema are never gated: `runAsync`
+   * refuses the call before it could run, so there is nothing to approve.
+   * `adk-python` validates its mandatory arguments before consulting the hook
+   * for the same reason.
    */
-  private async checkConfirmation(
-    input: ToolExecuteArgument<TParameters>,
-    toolContext?: Context,
-  ): Promise<{error: string} | undefined> {
-    const requireConfirmation =
-      typeof this.requireConfirmation === 'function'
-        ? await this.requireConfirmation(input, toolContext)
-        : this.requireConfirmation;
-    if (!requireConfirmation) {
-      return undefined;
+  override async checkRequireConfirmation({
+    args,
+    toolContext,
+  }: CheckRequireConfirmationRequest): Promise<boolean> {
+    if (!this.requireConfirmation) {
+      return false;
     }
-    if (!toolContext) {
-      throw new Error(
-        `Tool '${this.name}' requires confirmation but no tool context was provided.`,
-      );
+    let input = args as ToolExecuteArgument<TParameters>;
+    if (isZodObject(this.parameters)) {
+      const parsed = this.parameters.safeParse(args);
+      if (!parsed.success) {
+        return false;
+      }
+      input = parsed.data as ToolExecuteArgument<TParameters>;
     }
-    if (!toolContext.toolConfirmation) {
-      toolContext.requestConfirmation({
-        hint:
-          `Please approve or reject the tool call ${this.name}() by ` +
-          'responding with a FunctionResponse with an expected ' +
-          'ToolConfirmation payload.',
-      });
-      toolContext.actions.skipSummarization = true;
-      return {
-        error:
-          'This tool call requires confirmation, please approve or reject.',
-      };
-    }
-    if (!toolContext.toolConfirmation.confirmed) {
-      return {error: 'This tool call is rejected.'};
-    }
-    return undefined;
+    return typeof this.requireConfirmation === 'function'
+      ? await this.requireConfirmation(input, toolContext)
+      : true;
   }
 }

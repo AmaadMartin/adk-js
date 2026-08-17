@@ -5,6 +5,7 @@
  */
 
 import {
+  CheckRequireConfirmationRequest,
   Context,
   Event,
   FunctionTool,
@@ -156,6 +157,68 @@ describe('FunctionTool require_confirmation', () => {
       error: 'This tool call requires confirmation, please approve or reject.',
     });
     expect(ran).toBe(false);
+  });
+});
+
+describe('FunctionTool.checkRequireConfirmation', () => {
+  it('gates when a subclass overrides the hook instead of setting the option', async () => {
+    class TransferTool extends FunctionTool<
+      z.ZodObject<{amount: z.ZodNumber}>
+    > {
+      override async checkRequireConfirmation({
+        args,
+      }: CheckRequireConfirmationRequest): Promise<boolean> {
+        return Number(args['amount']) > 100;
+      }
+    }
+    let ran = false;
+    const tool = new TransferTool({
+      name: 'transfer',
+      description: 'Transfers money.',
+      parameters: z.object({amount: z.number()}),
+      execute: () => {
+        ran = true;
+        return 'sent';
+      },
+    });
+
+    const small = await tool.runAsync({
+      args: {amount: 10},
+      toolContext: makeContext({functionCallId: 'fc-small'}),
+    });
+    expect(small).toBe('sent');
+    expect(ran).toBe(true);
+
+    ran = false;
+    const largeContext = makeContext({functionCallId: 'fc-large'});
+    const large = await tool.runAsync({
+      args: {amount: 1000},
+      toolContext: largeContext,
+    });
+    expect(large).toEqual({
+      error: 'This tool call requires confirmation, please approve or reject.',
+    });
+    expect(ran).toBe(false);
+    expect(
+      largeContext.actions.requestedToolConfirmations['fc-large'],
+    ).toBeDefined();
+  });
+
+  it('answers from the predicate when no tool context is supplied', async () => {
+    const tool = new FunctionTool({
+      name: 'transfer',
+      description: 'Transfers money.',
+      parameters: z.object({amount: z.number()}),
+      execute: () => 'sent',
+      requireConfirmation: (input) => input.amount > 100,
+    });
+
+    expect(await tool.checkRequireConfirmation({args: {amount: 10}})).toBe(
+      false,
+    );
+    expect(await tool.checkRequireConfirmation({args: {amount: 1000}})).toBe(
+      true,
+    );
   });
 });
 
