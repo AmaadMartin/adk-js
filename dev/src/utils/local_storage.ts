@@ -58,7 +58,15 @@ export async function createLocalDatabaseSessionService(options: {
   await fs.mkdir(folder.dotAdkDir, {recursive: true});
   logger.debug(`Using local session storage at ${folder.sessionDbPath}`);
 
-  return new DatabaseSessionService(`sqlite://${folder.sessionDbPath}`);
+  const service = new DatabaseSessionService(
+    `sqlite://${folder.sessionDbPath}`,
+  );
+  // `init()` marks itself done only after it has created the schema, so two
+  // concurrent first requests would each try to create the tables. Run it here,
+  // where the caller caches this one promise for the whole app.
+  await service.init();
+
+  return service;
 }
 
 /** Creates a file-backed artifact service at `<baseDir>/.adk/artifacts`. */
