@@ -16,8 +16,9 @@ import {
   PluginManager,
 } from '@google/adk';
 import {Content} from '@google/genai';
-import {beforeEach, describe, expect, it} from 'vitest';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {ContextCompactionTrigger} from '../../src/plugins/base_plugin.js';
+import {logger} from '../../src/utils/logger.js';
 
 type PluginCallbackName = keyof BasePlugin;
 
@@ -146,6 +147,21 @@ class TestPlugin extends BasePlugin {
     return (await this.handleCallback('onModelErrorCallback')) as
       | LlmResponse
       | undefined;
+  }
+
+  override async onAgentErrorCallback(_params: {
+    agent: BaseAgent;
+    callbackContext: Context;
+    error: Error;
+  }): Promise<void> {
+    await this.handleCallback('onAgentErrorCallback');
+  }
+
+  override async onRunErrorCallback(_params: {
+    invocationContext: InvocationContext;
+    error: Error;
+  }): Promise<void> {
+    await this.handleCallback('onRunErrorCallback');
   }
 
   override async beforeContextCompaction(_params: {
@@ -331,5 +347,85 @@ describe('PluginManager', () => {
       'afterContextCompaction',
     ];
     expect(plugin1.callLog.sort()).toEqual(expectedCallbacks.sort());
+  });
+
+  describe('notification error callbacks', () => {
+    it('should notify every plugin of an agent error', async () => {
+      service.registerPlugin(plugin1);
+      service.registerPlugin(plugin2);
+
+      await service.runOnAgentErrorCallback({
+        agent: mockAgent,
+        callbackContext: mockCallbackContext,
+        error: mockError,
+      });
+
+      expect(plugin1.callLog).toEqual(['onAgentErrorCallback']);
+      expect(plugin2.callLog).toEqual(['onAgentErrorCallback']);
+    });
+
+    it('should notify every plugin of a run error', async () => {
+      service.registerPlugin(plugin1);
+      service.registerPlugin(plugin2);
+
+      await service.runOnRunErrorCallback({
+        invocationContext: mockInvocationContext,
+        error: mockError,
+      });
+
+      expect(plugin1.callLog).toEqual(['onRunErrorCallback']);
+      expect(plugin2.callLog).toEqual(['onRunErrorCallback']);
+    });
+
+    it('should keep notifying after a plugin agent hook throws', async () => {
+      const error = vi.spyOn(logger, 'error').mockImplementation(() => {});
+      plugin1.exceptionsToRaise['onAgentErrorCallback'] = new Error(
+        'plugin blew up',
+      );
+      service.registerPlugin(plugin1);
+      service.registerPlugin(plugin2);
+
+      try {
+        await expect(
+          service.runOnAgentErrorCallback({
+            agent: mockAgent,
+            callbackContext: mockCallbackContext,
+            error: mockError,
+          }),
+        ).resolves.toBeUndefined();
+
+        expect(plugin2.callLog).toEqual(['onAgentErrorCallback']);
+        expect(error).toHaveBeenCalledWith(
+          "Error in plugin 'plugin1' during 'onAgentErrorCallback' callback: plugin blew up",
+        );
+      } finally {
+        error.mockRestore();
+      }
+    });
+
+    it('should keep notifying after a plugin run hook throws', async () => {
+      const error = vi.spyOn(logger, 'error').mockImplementation(() => {});
+      plugin1.exceptionsToRaise['onRunErrorCallback'] = new Error(
+        'plugin blew up',
+      );
+      service.registerPlugin(plugin1);
+      service.registerPlugin(plugin2);
+
+      try {
+        await expect(
+          service.runOnRunErrorCallback({
+            invocationContext: mockInvocationContext,
+            error: mockError,
+          }),
+        ).resolves.toBeUndefined();
+
+        expect(plugin2.callLog).toEqual(['onRunErrorCallback']);
+        expect(error).toHaveBeenCalledWith(
+          "Error in plugin 'plugin1' during 'onRunErrorCallback' callback: plugin blew up",
+        );
+      } finally {
+        error.mockRestore();
+      }
+    });
   });
 });
