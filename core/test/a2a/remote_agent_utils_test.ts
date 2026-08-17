@@ -18,7 +18,7 @@ import {GenAIPartToA2APartConverter} from '../../src/a2a/part_converter_utils.js
 import {BaseAgent} from '../../src/agents/base_agent.js';
 import {InvocationContext} from '../../src/agents/invocation_context.js';
 import {createEvent} from '../../src/events/event.js';
-import {Session} from '../../src/sessions/session.js';
+import {createSession, Session} from '../../src/sessions/session.js';
 
 describe('remote_agent_utils', () => {
   const mockAgent = {
@@ -266,9 +266,11 @@ describe('remote_agent_utils', () => {
         author: 'other-agent',
         content: {role: 'model', parts: [{text: 'other response'}]},
       });
-      const session = {
+      const session = createSession({
+        id: 'test-session',
+        appName: 'test-app',
         events: [remoteResponse, userMessage, otherAgentMessage],
-      } as unknown as Session;
+      });
       const converter: GenAIPartToA2APartConverter = (part) => ({
         kind: 'text',
         text: `converted:${part.text}`,
@@ -293,7 +295,11 @@ describe('remote_agent_utils', () => {
         },
         longRunningToolIds: ['call-1'],
       });
-      const session = {events: [userMessage]} as unknown as Session;
+      const session = createSession({
+        id: 'test-session',
+        appName: 'test-app',
+        events: [userMessage],
+      });
       const converter = vi
         .fn<GenAIPartToA2APartConverter>()
         .mockReturnValue({kind: 'text', text: 'stub'});
@@ -311,7 +317,11 @@ describe('remote_agent_utils', () => {
         author: 'user',
         content: {role: 'user', parts: [{text: 'hello'}]},
       });
-      const session = {events: [userMessage]} as unknown as Session;
+      const session = createSession({
+        id: 'test-session',
+        appName: 'test-app',
+        events: [userMessage],
+      });
 
       const result = toMissingRemoteSessionParts(mockCtx, session, undefined);
 

@@ -19,6 +19,7 @@ import {
 import {
   Event as AdkEvent,
   createEvent,
+  createSession,
   GenAIPartToA2APartConverter,
   InvocationContext,
   RemoteA2AAgent,
@@ -391,7 +392,7 @@ describe('A2ARemoteAgent', () => {
 
   const createFunctionResponseContext = (): InvocationContext =>
     createMockContext({
-      session: {
+      session: createSession({
         id: 'test-session',
         userId: 'test-user',
         appName: 'test-app',
@@ -419,7 +420,7 @@ describe('A2ARemoteAgent', () => {
           }),
         ],
         state: {},
-      } as unknown as Session,
+      }),
     });
 
   it('applies genAIPartConverter to the session history parts (streaming)', async () => {
