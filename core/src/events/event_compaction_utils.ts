@@ -86,10 +86,10 @@ function isCompactionSubsumed(
  * Substitutes compaction summaries for the raw events they cover.
  *
  * Each non-subsumed summary is materialized as an event at its end timestamp,
- * and every raw event inside a kept range is dropped. Subsumed summaries are
- * dropped outright, so an older narrower summary never doubles up with the
- * wider one that replaced it. The result is sorted by timestamp with the
- * original position as tie-breaker, so events sharing a timestamp keep their
+ * and every earlier raw event inside a kept range is dropped. Subsumed
+ * summaries are dropped outright, so an older narrower summary never doubles up
+ * with the wider one that replaced it. The result is sorted by timestamp with
+ * the original position as tie-breaker, so events sharing a timestamp keep their
  * original order.
  *
  * The transform is idempotent: running it over its own output changes nothing,
@@ -126,14 +126,21 @@ export function applyEventCompactions(
       }),
     }));
 
-  const isInKeptRange = (timestamp: number): boolean =>
+  // A compaction only ever covered events that were already in the session when
+  // it ran, so an event must also precede it in the stream to be covered by it.
+  // `Event.timestamp` is integer milliseconds and a turn appended right after a
+  // compaction can share its end timestamp; without the position test that turn
+  // would be silently dropped from the prompt.
+  const isCovered = (timestamp: number, index: number): boolean =>
     kept.some(
-      ({startTimestamp, endTimestamp}) =>
-        startTimestamp <= timestamp && timestamp <= endTimestamp,
+      (compaction) =>
+        index < compaction.index &&
+        compaction.startTimestamp <= timestamp &&
+        timestamp <= compaction.endTimestamp,
     );
 
   events.forEach((event, index) => {
-    if (event.actions?.compaction || isInKeptRange(event.timestamp)) {
+    if (event.actions?.compaction || isCovered(event.timestamp, index)) {
       return;
     }
     processed.push({timestamp: event.timestamp, index, event});

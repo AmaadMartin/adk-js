@@ -300,6 +300,43 @@ describe('applyEventCompactions', () => {
     expect(materialized.timestamp).toBe(1);
   });
 
+  it('keeps a later event that shares the compaction end timestamp', () => {
+    // Event.timestamp is integer milliseconds, so a turn appended right after a
+    // compaction can share its end timestamp. It was never in the window.
+    const events = [
+      textEvent(1, 'inv1', 'Event 1'),
+      textEvent(4, 'inv2', 'Event 2'),
+      compactionEvent({
+        startTimestamp: 1,
+        endTimestamp: 4,
+        summaryText: 'Summary 1-2',
+      }),
+      textEvent(4, 'inv3', 'Event 3'),
+    ];
+
+    expect(texts(applyEventCompactions(events))).toEqual([
+      'Summary 1-2',
+      'Event 3',
+    ]);
+  });
+
+  it('keeps a later event that shares the compaction start timestamp', () => {
+    const events = [
+      textEvent(1, 'inv1', 'Event 1'),
+      compactionEvent({
+        startTimestamp: 1,
+        endTimestamp: 1,
+        summaryText: 'Summary 1',
+      }),
+      textEvent(1, 'inv2', 'Event 2'),
+    ];
+
+    expect(texts(applyEventCompactions(events))).toEqual([
+      'Summary 1',
+      'Event 2',
+    ]);
+  });
+
   it('is idempotent over its own output', () => {
     const events = [
       textEvent(1, 'inv1', 'Event 1'),

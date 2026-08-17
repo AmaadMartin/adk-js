@@ -1271,6 +1271,33 @@ describe('getContents with session-level compaction', () => {
     expect(contents.map((c) => c.parts?.[0]?.text)).toEqual(['Summary 1-2']);
   });
 
+  it('withholds a compaction event tagged to another isolation scope', () => {
+    const scoped = compactionEvent(1, 2, 'Summary 1-2');
+    scoped.isolationScope = 'task-a';
+
+    const contents = getContents(
+      [textEvent(3, 'Event 3'), scoped],
+      '',
+      undefined,
+      undefined,
+    );
+
+    expect(contents.map((c) => c.parts?.[0]?.text)).toEqual(['Event 3']);
+  });
+
+  it('withholds a compaction event from an unrelated branch', () => {
+    const offBranch = compactionEvent(1, 2, 'Summary 1-2');
+    offBranch.branch = 'other.child';
+
+    const contents = getContents(
+      [textEvent(3, 'Event 3'), offBranch],
+      '',
+      'root',
+    );
+
+    expect(contents.map((c) => c.parts?.[0]?.text)).toEqual(['Event 3']);
+  });
+
   it('attributes the summary to the requesting agent so it is not foreign', () => {
     const contents = getContents(
       [textEvent(1, 'Event 1'), compactionEvent(1, 1, 'Summary 1')],

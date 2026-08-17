@@ -111,14 +111,6 @@ function shouldIncludeEventInContext(
   currentBranch?: string,
   currentIsolationScope?: string,
 ): boolean {
-  // A compaction event holds its summary in `actions`, not in `content`, so the
-  // content checks below would drop it before it can be materialized.
-  if (event.actions?.compaction) {
-    return true;
-  }
-  if (!event.content?.role || event.content.parts?.[0]?.text === '') {
-    return false;
-  }
   if (
     currentBranch &&
     event.branch &&
@@ -127,6 +119,15 @@ function shouldIncludeEventInContext(
     return false;
   }
   if (isOutsideIsolationScope(event, currentIsolationScope)) {
+    return false;
+  }
+  // A compaction event holds its summary in `actions`, not in `content`, so it
+  // is exempt from the emptiness check alone — every other filter still applies.
+  // Mirrors the carve-out in Python's `_contains_empty_content`.
+  if (
+    !event.actions?.compaction &&
+    (!event.content?.role || event.content.parts?.[0]?.text === '')
+  ) {
     return false;
   }
   return (
