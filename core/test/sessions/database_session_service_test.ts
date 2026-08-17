@@ -702,6 +702,67 @@ describe('DatabaseSessionService', () => {
       expect(storedSession.updateTime.getTime()).toBe(timestamp);
     });
   });
+
+  describe('concurrent createSession', () => {
+    const sessionIds = ['s0', 's1', 's2', 's3', 's4'];
+
+    it('creates every session when calls race for one app and user', async () => {
+      const appName = 'race-app';
+      const userId = 'race-user';
+
+      const created = await Promise.all(
+        sessionIds.map((sessionId) =>
+          service.createSession({appName, userId, sessionId}),
+        ),
+      );
+
+      expect(created.map((s) => s.id).sort()).toEqual(sessionIds);
+      const listed = await service.listSessions({appName, userId});
+      expect(listed.sessions.map((s) => s.id).sort()).toEqual(sessionIds);
+    });
+
+    it('creates every session when calls race for one app across users', async () => {
+      const appName = 'race-app-multi-user';
+
+      const created = await Promise.all(
+        sessionIds.map((sessionId, index) =>
+          service.createSession({
+            appName,
+            userId: `user${index}`,
+            sessionId,
+          }),
+        ),
+      );
+
+      expect(created.map((s) => s.id).sort()).toEqual(sessionIds);
+      const listed = await service.listSessions({appName});
+      expect(listed.sessions.map((s) => s.id).sort()).toEqual(sessionIds);
+    });
+
+    it('initialises once when calls race on a fresh service', async () => {
+      const appName = 'race-app-cold';
+      const userId = 'race-user';
+      const coldService = new DatabaseSessionService({
+        dbName: ':memory:',
+        driver: SqliteDriver,
+        allowGlobalContext: true,
+      });
+
+      try {
+        await Promise.all(
+          sessionIds.map((sessionId) =>
+            coldService.createSession({appName, userId, sessionId}),
+          ),
+        );
+
+        const listed = await coldService.listSessions({appName, userId});
+        expect(listed.sessions.map((s) => s.id).sort()).toEqual(sessionIds);
+      } finally {
+        // The service owns its ORM and exposes no way to close it yet.
+        await (coldService as unknown as {orm: MikroORM}).orm.close();
+      }
+    });
+  });
 });
 
 describe('isDatabaseConnectionString', () => {

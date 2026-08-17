@@ -10,6 +10,7 @@ import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   ensureDatabaseCreated,
   getConnectionOptionsFromUri,
+  getOrCreateStateRow,
   validateDatabaseSchemaVersion,
 } from '../../../src/sessions/db/operations.js';
 import {
@@ -17,8 +18,10 @@ import {
   SCHEMA_VERSION_1_JSON,
   SCHEMA_VERSION_KEY,
   STORAGE_KEY_COLUMN_LENGTH,
+  StorageAppState,
   StorageEvent,
   StorageMetadata,
+  StorageUserState,
 } from '../../../src/sessions/db/schema.js';
 
 // Mock dynamic imports for drivers that might not be installed in dev
@@ -216,6 +219,146 @@ describe('operations', () => {
       await expect(validateDatabaseSchemaVersion(orm)).rejects.toThrow(
         'ADK Database schema version 999 is not compatible',
       );
+    });
+  });
+
+  describe('getOrCreateStateRow', () => {
+    const appName = 'race-app';
+    const userId = 'race-user';
+    let orm: MikroORM;
+
+    beforeEach(async () => {
+      orm = await MikroORM.init({
+        dbName: ':memory:',
+        driver: SqliteDriver,
+        entities: ENTITIES,
+      });
+      await orm.schema.updateSchema();
+    });
+
+    afterEach(async () => {
+      await orm.close();
+    });
+
+    async function seedAppState(state: Record<string, unknown>) {
+      const em = orm.em.fork();
+      em.create(StorageAppState, {appName, state, updateTime: new Date()});
+      await em.flush();
+    }
+
+    it('returns the existing app state row and inserts nothing', async () => {
+      await seedAppState({k: 'v'});
+
+      const row = await getOrCreateStateRow(
+        orm.em.fork(),
+        StorageAppState,
+        {appName},
+        {appName, state: {}, updateTime: new Date()},
+      );
+
+      expect(row.state).toEqual({k: 'v'});
+      expect(await orm.em.fork().count(StorageAppState, {})).toBe(1);
+    });
+
+    it('creates the app state row when it is missing', async () => {
+      const row = await getOrCreateStateRow(
+        orm.em.fork(),
+        StorageAppState,
+        {appName},
+        {appName, state: {created: true}, updateTime: new Date()},
+      );
+
+      expect(row.appName).toBe(appName);
+      const persisted = await orm.em.fork().findOne(StorageAppState, {appName});
+      expect(persisted?.state).toEqual({created: true});
+    });
+
+    it("returns the winner's app state row when the insert conflicts", async () => {
+      await seedAppState({keep: 'me'});
+      const loser = orm.em.fork();
+      const findOne = vi.spyOn(loser, 'findOne').mockResolvedValueOnce(null);
+
+      const row = await getOrCreateStateRow(
+        loser,
+        StorageAppState,
+        {appName},
+        {appName, state: {}, updateTime: new Date()},
+      );
+
+      expect(row.state).toEqual({keep: 'me'});
+      expect(findOne).toHaveBeenCalledTimes(2);
+
+      row.state = {...row.state, added: 1};
+      await loser.flush();
+
+      const persisted = await orm.em.fork().findOne(StorageAppState, {appName});
+      expect(persisted?.state).toEqual({keep: 'me', added: 1});
+    });
+
+    it('returns the existing user state row on a composite key', async () => {
+      const seed = orm.em.fork();
+      seed.create(StorageUserState, {
+        appName,
+        userId,
+        state: {k: 'v'},
+        updateTime: new Date(),
+      });
+      await seed.flush();
+
+      const row = await getOrCreateStateRow(
+        orm.em.fork(),
+        StorageUserState,
+        {appName, userId},
+        {appName, userId, state: {}, updateTime: new Date()},
+      );
+
+      expect(row.state).toEqual({k: 'v'});
+      expect(await orm.em.fork().count(StorageUserState, {})).toBe(1);
+    });
+
+    it("returns the winner's user state row when the insert conflicts", async () => {
+      const winner = orm.em.fork();
+      winner.create(StorageUserState, {
+        appName,
+        userId,
+        state: {keep: 'me'},
+        updateTime: new Date(),
+      });
+      await winner.flush();
+
+      const loser = orm.em.fork();
+      vi.spyOn(loser, 'findOne').mockResolvedValueOnce(null);
+
+      const row = await getOrCreateStateRow(
+        loser,
+        StorageUserState,
+        {appName, userId},
+        {appName, userId, state: {}, updateTime: new Date()},
+      );
+
+      expect(row.state).toEqual({keep: 'me'});
+
+      row.state = {...row.state, added: 1};
+      await loser.flush();
+
+      const persisted = await orm.em
+        .fork()
+        .findOne(StorageUserState, {appName, userId});
+      expect(persisted?.state).toEqual({keep: 'me', added: 1});
+    });
+
+    it('throws when the row disappears between the insert and the re-read', async () => {
+      const em = orm.em.fork();
+      vi.spyOn(em, 'findOne').mockResolvedValue(null);
+
+      await expect(
+        getOrCreateStateRow(
+          em,
+          StorageAppState,
+          {appName},
+          {appName, state: {}, updateTime: new Date()},
+        ),
+      ).rejects.toThrow('Failed to load the StorageAppState row after insert.');
     });
   });
 });
