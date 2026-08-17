@@ -21,10 +21,14 @@ export interface RunAsyncToolRequest {
 
 /**
  * The parameters for `checkRequireConfirmation`.
+ *
+ * `toolContext` is optional because a tool decides from its arguments, and a
+ * caller outside the agent loop may have no context to offer. It matches the
+ * optional context of `FunctionTool`'s `requireConfirmation` predicate.
  */
 export interface CheckRequireConfirmationRequest {
   args: Record<string, unknown>;
-  toolContext: Context;
+  toolContext?: Context;
 }
 
 /**

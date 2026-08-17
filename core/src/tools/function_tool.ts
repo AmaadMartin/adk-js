@@ -196,9 +196,16 @@ export class FunctionTool<
         validatedArgs = this.parameters.parse(req.args);
       }
 
-      const pending = await this.checkConfirmation(req.args, req.toolContext);
-      if (pending !== undefined) {
-        return pending;
+      if (await this.checkRequireConfirmation(req)) {
+        if (!req.toolContext) {
+          throw new Error(
+            `Tool '${this.name}' requires confirmation but no tool context was provided.`,
+          );
+        }
+        const pending = checkToolConfirmation(this.name, req.toolContext);
+        if (pending !== undefined) {
+          return pending;
+        }
       }
 
       return await this.execute(
@@ -239,31 +246,5 @@ export class FunctionTool<
     return typeof this.requireConfirmation === 'function'
       ? await this.requireConfirmation(input, toolContext)
       : true;
-  }
-
-  /**
-   * Evaluates the confirmation gate. Returns `undefined` if the tool may
-   * proceed; otherwise returns the function response payload to surface instead
-   * of running (a request-for-confirmation on the first pass, or a rejection
-   * once the user declined).
-   */
-  private async checkConfirmation(
-    args: Record<string, unknown>,
-    toolContext?: Context,
-  ): Promise<{error: string} | undefined> {
-    if (!toolContext) {
-      // The hook needs a context. Without one, keep the historical behaviour of
-      // ignoring an absent context unless the tool actually gates.
-      if (!this.requireConfirmation) {
-        return undefined;
-      }
-      throw new Error(
-        `Tool '${this.name}' requires confirmation but no tool context was provided.`,
-      );
-    }
-    if (!(await this.checkRequireConfirmation({args, toolContext}))) {
-      return undefined;
-    }
-    return checkToolConfirmation(this.name, toolContext);
   }
 }

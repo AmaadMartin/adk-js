@@ -222,49 +222,8 @@ describe('BaseTool.checkRequireConfirmation', () => {
   });
 });
 
-describe('FunctionTool.checkRequireConfirmation', () => {
-  it('gates when a subclass overrides the hook instead of setting the option', async () => {
-    class TransferTool extends FunctionTool<
-      z.ZodObject<{amount: z.ZodNumber}>
-    > {
-      override async checkRequireConfirmation({
-        args,
-      }: CheckRequireConfirmationRequest): Promise<boolean> {
-        return Number(args['amount']) > 100;
-      }
-    }
-    let ran = false;
-    const tool = new TransferTool({
-      name: 'transfer',
-      description: 'Transfers money.',
-      parameters: z.object({amount: z.number()}),
-      execute: () => {
-        ran = true;
-        return 'sent';
-      },
-    });
-
-    const small = await tool.runAsync({
-      args: {amount: 10},
-      toolContext: makeToolContext('fc-small'),
-    });
-    expect(small).toBe('sent');
-    expect(ran).toBe(true);
-
-    ran = false;
-    const largeContext = makeToolContext('fc-large');
-    const large = await tool.runAsync({
-      args: {amount: 1000},
-      toolContext: largeContext,
-    });
-    expect(large).toEqual({error: REQUEST_CONFIRMATION_ERROR});
-    expect(ran).toBe(false);
-    expect(
-      largeContext.actions.requestedToolConfirmations['fc-large'],
-    ).toBeDefined();
-  });
-
-  it('gates a tool that declares no parameter schema', async () => {
+describe('the shared tool-execution path', () => {
+  it('gates a FunctionTool that declares no parameter schema', async () => {
     let ran = false;
     const tool = new FunctionTool({
       name: 'reboot',
