@@ -200,6 +200,24 @@ export abstract class BasePlugin {
   }
 
   /**
+   * Callback executed when an unhandled error escapes the runner.
+   *
+   * This is a notification-only callback: the error is always rethrown after
+   * every registered plugin has been notified, and any value this callback
+   * returns is ignored. A plugin cannot recover the invocation here. A thrown
+   * value that is not an `Error` does not reach this callback.
+   *
+   * @param _params.invocationContext The context for the entire invocation.
+   * @param _params.error The error that escaped the runner.
+   */
+  async onRunErrorCallback(_params: {
+    invocationContext: InvocationContext;
+    error: Error;
+  }): Promise<void> {
+    return;
+  }
+
+  /**
    * Callback executed before an agent's primary logic is invoked.
    *
    * This callback can be used for logging, setup, or to short-circuit the
@@ -236,6 +254,26 @@ export abstract class BasePlugin {
     agent: BaseAgent;
     callbackContext: Context;
   }): Promise<Content | undefined> {
+    return;
+  }
+
+  /**
+   * Callback executed when an unhandled error escapes an agent's execution.
+   *
+   * This is a notification-only callback: the error is always rethrown after
+   * every registered plugin has been notified, and any value this callback
+   * returns is ignored. A plugin cannot recover the agent here. A thrown value
+   * that is not an `Error` does not reach this callback.
+   *
+   * @param _params.agent The agent whose execution threw.
+   * @param _params.callbackContext The context for the agent invocation.
+   * @param _params.error The error that escaped the agent.
+   */
+  async onAgentErrorCallback(_params: {
+    agent: BaseAgent;
+    callbackContext: Context;
+    error: Error;
+  }): Promise<void> {
     return;
   }
 

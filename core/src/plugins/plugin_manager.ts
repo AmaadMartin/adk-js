@@ -13,6 +13,7 @@ import {Event} from '../events/event.js';
 import {LlmRequest} from '../models/llm_request.js';
 import {LlmResponse} from '../models/llm_response.js';
 import {BaseTool} from '../tools/base_tool.js';
+import {formatError} from '../utils/error_utils.js';
 import {logger} from '../utils/logger.js';
 import type {BaseNode} from '../workflow/base_node.js';
 import type {NodeContext} from '../workflow/node_context.js';
@@ -123,6 +124,34 @@ export class PluginManager {
   }
 
   /**
+   * Runs a notification-only callback for every plugin, best-effort.
+   *
+   * Error callbacks cannot use {@link runCallbacks}: they must reach every
+   * plugin, so a returned value must not exit early, and a failing plugin must
+   * not mask the error the plugins are being told about. Both are logged and
+   * ignored here instead.
+   *
+   * @param callback A closure containing the callback method to run on each
+   *     plugin.
+   * @param callbackName The name of the function being called in the closure
+   *     above. Used for logging purposes.
+   */
+  private async runNotificationCallbacks(
+    callback: (plugin: BasePlugin) => Promise<void>,
+    callbackName: string,
+  ): Promise<void> {
+    for (const plugin of this.plugins) {
+      try {
+        await callback(plugin);
+      } catch (e: unknown) {
+        logger.error(
+          `Error in plugin '${plugin.name}' during '${callbackName}' callback: ${formatError(e)}`,
+        );
+      }
+    }
+  }
+
+  /**
    * Runs the `onUserMessageCallback` for all plugins.
    */
   async runOnUserMessageCallback({
@@ -167,6 +196,26 @@ export class PluginManager {
       this.plugins,
       (plugin: BasePlugin) => plugin.afterRunCallback({invocationContext}),
       'afterRunCallback',
+    );
+  }
+
+  /**
+   * Runs the `onRunErrorCallback` for all plugins.
+   *
+   * Notification-only: every plugin is notified and the caller rethrows the
+   * error.
+   */
+  async runOnRunErrorCallback({
+    invocationContext,
+    error,
+  }: {
+    invocationContext: InvocationContext;
+    error: Error;
+  }): Promise<void> {
+    await this.runNotificationCallbacks(
+      (plugin: BasePlugin) =>
+        plugin.onRunErrorCallback({invocationContext, error}),
+      'onRunErrorCallback',
     );
   }
 
@@ -222,6 +271,28 @@ export class PluginManager {
         plugin.afterAgentCallback({agent, callbackContext}),
       'afterAgentCallback',
     )) as Content | undefined;
+  }
+
+  /**
+   * Runs the `onAgentErrorCallback` for all plugins.
+   *
+   * Notification-only: every plugin is notified and the caller rethrows the
+   * error.
+   */
+  async runOnAgentErrorCallback({
+    agent,
+    callbackContext,
+    error,
+  }: {
+    agent: BaseAgent;
+    callbackContext: Context;
+    error: Error;
+  }): Promise<void> {
+    await this.runNotificationCallbacks(
+      (plugin: BasePlugin) =>
+        plugin.onAgentErrorCallback({agent, callbackContext, error}),
+      'onAgentErrorCallback',
+    );
   }
 
   /**

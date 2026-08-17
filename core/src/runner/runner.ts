@@ -400,73 +400,88 @@ export class Runner {
             // =========================================================================
             // Run the agent with the plugins (aka hooks to apply in the lifecycle)
             // =========================================================================
-            // Step 1: Run the before_run callbacks to see if we should early exit.
-            const beforeRunCallbackResponse =
-              await this.pluginManager.runBeforeRunCallback({
-                invocationContext,
-              });
-            if (params.abortSignal?.aborted) {
-              return;
-            }
-
-            if (beforeRunCallbackResponse) {
-              const earlyExitEvent = createEvent({
-                invocationId: invocationContext.invocationId,
-                author: 'model',
-                content: beforeRunCallbackResponse,
-              });
-              // TODO: b/447446338 - In the future, do *not* save live call audio
-              // content to session This is a feature in Python ADK
-              await this.sessionService.appendEvent({
-                session,
-                event: earlyExitEvent,
-              });
+            try {
+              // Step 1: Run the before_run callbacks to see if we should early exit.
+              const beforeRunCallbackResponse =
+                await this.pluginManager.runBeforeRunCallback({
+                  invocationContext,
+                });
               if (params.abortSignal?.aborted) {
                 return;
               }
 
-              yield earlyExitEvent;
-            } else {
-              // Step 2: Otherwise continue with normal execution
-              for await (const event of this.runRoot(invocationContext)) {
+              if (beforeRunCallbackResponse) {
+                const earlyExitEvent = createEvent({
+                  invocationId: invocationContext.invocationId,
+                  author: 'model',
+                  content: beforeRunCallbackResponse,
+                });
+                // TODO: b/447446338 - In the future, do *not* save live call audio
+                // content to session This is a feature in Python ADK
+                await this.sessionService.appendEvent({
+                  session,
+                  event: earlyExitEvent,
+                });
                 if (params.abortSignal?.aborted) {
                   return;
                 }
 
-                // Step 3: Run the on_event callbacks before persisting so callback
-                // changes are stored in the session and match the streamed event.
-                const modifiedEvent =
-                  await this.pluginManager.runOnEventCallback({
-                    invocationContext,
-                    event,
-                  });
-                const outputEvent = modifiedEvent
-                  ? {
-                      ...modifiedEvent,
-                      id: event.id,
-                      invocationId: event.invocationId,
-                      timestamp: event.timestamp,
-                      author: modifiedEvent.author || event.author,
-                      branch: modifiedEvent.branch ?? event.branch,
-                    }
-                  : event;
-                if (!event.partial) {
-                  await this.sessionService.appendEvent({
-                    session,
-                    event: outputEvent,
-                  });
+                yield earlyExitEvent;
+              } else {
+                // Step 2: Otherwise continue with normal execution
+                for await (const event of this.runRoot(invocationContext)) {
+                  if (params.abortSignal?.aborted) {
+                    return;
+                  }
+
+                  // Step 3: Run the on_event callbacks before persisting so callback
+                  // changes are stored in the session and match the streamed event.
+                  const modifiedEvent =
+                    await this.pluginManager.runOnEventCallback({
+                      invocationContext,
+                      event,
+                    });
+                  const outputEvent = modifiedEvent
+                    ? {
+                        ...modifiedEvent,
+                        id: event.id,
+                        invocationId: event.invocationId,
+                        timestamp: event.timestamp,
+                        author: modifiedEvent.author || event.author,
+                        branch: modifiedEvent.branch ?? event.branch,
+                      }
+                    : event;
+                  if (!event.partial) {
+                    await this.sessionService.appendEvent({
+                      session,
+                      event: outputEvent,
+                    });
+                  }
+                  if (params.abortSignal?.aborted) {
+                    return;
+                  }
+
+                  yield outputEvent;
                 }
+                // Step 4: Run the after_run callbacks to optionally modify the context.
+                await this.pluginManager.runAfterRunCallback({
+                  invocationContext,
+                });
                 if (params.abortSignal?.aborted) {
                   return;
                 }
-
-                yield outputEvent;
               }
-              // Step 4: Run the after_run callbacks to optionally modify the context.
-              await this.pluginManager.runAfterRunCallback({invocationContext});
-              if (params.abortSignal?.aborted) {
-                return;
+            } catch (e: unknown) {
+              // Notification-only, so the error is always rethrown. The session
+              // lookup above stays outside: an invocation that never started
+              // has nothing to report, matching adk-python.
+              if (e instanceof Error) {
+                await this.pluginManager.runOnRunErrorCallback({
+                  invocationContext,
+                  error: e,
+                });
               }
+              throw e;
             }
           }
         },
