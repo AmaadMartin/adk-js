@@ -210,15 +210,11 @@ export class A2AAgentExecutor implements AgentExecutor {
     // come from the execution this instance is running. `final` is
     // load-bearing on 0.3.x: the SDK drains the bus until a terminal status
     // update arrives.
-    const contextId = this.contextIdsByTaskId.get(taskId);
-    if (contextId === undefined) {
-      logger.warn(
-        `Canceling task ${taskId} with no in-flight execution; publishing the terminal event without a context id.`,
-      );
-    }
-
     eventBus.publish(
-      createTaskCanceledEvent({taskId, contextId: contextId ?? ''}),
+      createTaskCanceledEvent({
+        taskId,
+        contextId: this.contextIdsByTaskId.get(taskId) ?? '',
+      }),
     );
   }
 

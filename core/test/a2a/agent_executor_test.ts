@@ -133,13 +133,7 @@ describe('A2AAgentExecutor', () => {
       }
     }
 
-    vi.mocked(Runner).mockImplementation(((config: RunnerConfig) => {
-      return {
-        appName: config?.appName,
-        sessionService: config?.sessionService,
-        runAsync: mockRunAsync,
-      } as unknown as Runner;
-    }) as unknown as () => Runner);
+    mockRunnerWith(mockRunAsync);
 
     let beforeExecutedCalled = false;
     let afterEventCount = 0;
@@ -256,13 +250,7 @@ describe('A2AAgentExecutor', () => {
       throw new Error('LLM failed');
     }
 
-    vi.mocked(Runner).mockImplementation(((config: RunnerConfig) => {
-      return {
-        appName: config?.appName,
-        sessionService: config?.sessionService,
-        runAsync: mockRunAsyncWithError,
-      } as unknown as Runner;
-    }) as unknown as () => Runner);
+    mockRunnerWith(mockRunAsyncWithError);
 
     const executor = new A2AAgentExecutor({
       runner: {
@@ -322,19 +310,13 @@ describe('A2AAgentExecutor', () => {
 
     await executor.cancelTask(ctx.taskId, mockEventBus);
 
-    const canceled = mockEventBus.publish.mock.calls.at(-1)![0] as
-      | TaskStatusUpdateEvent
-      | undefined;
-    if (!canceled) {
-      expect.fail('cancelTask published no event');
-    }
-    expect(canceled.kind).toBe('status-update');
-    expect(canceled.status.state).toBe('canceled');
-    expect(canceled.final).toBe(true);
-    expect(canceled.taskId).toBe('test-task');
-    expect(canceled.contextId).toBe('test-context');
-    expect(canceled.status.message).toBeUndefined();
-    expect(canceled.metadata).toBeUndefined();
+    expect(mockEventBus.publish).toHaveBeenLastCalledWith({
+      kind: 'status-update',
+      taskId: 'test-task',
+      contextId: 'test-context',
+      final: true,
+      status: {state: 'canceled', timestamp: expect.any(String)},
+    });
 
     release();
     await executePromise;
@@ -359,12 +341,13 @@ describe('A2AAgentExecutor', () => {
     await executor.cancelTask('unknown-task', mockEventBus);
 
     expect(mockEventBus.publish).toHaveBeenCalledTimes(1);
-    const event = mockEventBus.publish.mock
-      .calls[0][0] as TaskStatusUpdateEvent;
-    expect(event.status.state).toBe('canceled');
-    expect(event.final).toBe(true);
-    expect(event.taskId).toBe('unknown-task');
-    expect(event.contextId).toBe('');
+    expect(mockEventBus.publish).toHaveBeenLastCalledWith({
+      kind: 'status-update',
+      taskId: 'unknown-task',
+      contextId: '',
+      final: true,
+      status: {state: 'canceled', timestamp: expect.any(String)},
+    });
   });
 
   it('should forget the context id once the execution finishes', async () => {
@@ -391,8 +374,8 @@ describe('A2AAgentExecutor', () => {
 
     await executor.cancelTask(ctx.taskId, mockEventBus);
 
-    const event = mockEventBus.publish.mock
-      .calls[0][0] as TaskStatusUpdateEvent;
-    expect(event.contextId).toBe('');
+    expect(mockEventBus.publish).toHaveBeenLastCalledWith(
+      expect.objectContaining({taskId: 'test-task', contextId: ''}),
+    );
   });
 });
