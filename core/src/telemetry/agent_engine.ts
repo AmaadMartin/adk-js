@@ -5,7 +5,6 @@
  */
 
 import {
-  Baggage,
   Context,
   context,
   defaultTextMapGetter,
@@ -20,7 +19,13 @@ const AGENT_ENGINE_TRACEPARENT_HEADER = 'google-agent-engine-traceparent';
 /** Header carrying the support identifier of the caller's request. */
 const TRACEPARENT_HEADER = 'traceparent';
 
-/** Baggage key holding the accepted Agent Engine trace context. */
+/**
+ * Baggage key holding the accepted Agent Engine trace context.
+ *
+ * Nothing in this process reads it. It is written for parity with adk-python,
+ * which puts the accepted header here so the default W3C baggage propagator
+ * carries it to the services the run calls.
+ */
 const TRACEPARENT_BAGGAGE_KEY = 'traceparent';
 
 /** Baggage key holding the support identifier. */
@@ -30,7 +35,7 @@ const GOOGLE_TRACEPARENT_BAGGAGE_KEY = 'google_traceparent';
 const SUPPORT_ID_ATTRIBUTE = 'supportID';
 
 /** Environment variable Agent Engine sets on the serving container. */
-export const AGENT_ENGINE_ID_ENV_VAR = 'GOOGLE_CLOUD_AGENT_ENGINE_ID';
+const AGENT_ENGINE_ID_ENV_VAR = 'GOOGLE_CLOUD_AGENT_ENGINE_ID';
 
 const TRACE_CONTEXT_PROPAGATOR = new W3CTraceContextPropagator();
 
@@ -43,21 +48,18 @@ export function isAgentEngine(): boolean {
 }
 
 /**
- * Reads a header by its lowercase name, case-insensitively.
+ * Reads a header by its lowercase name.
  *
- * A repeated header arrives as an array, of which only the first value is
- * used.
+ * Node lowercases the name of every header it parses, so `name` is looked up
+ * as given. A repeated header arrives as an array, of which only the first
+ * value is used.
  */
 function getHeader(
   headers: TraceContextHeaders,
   name: string,
 ): string | undefined {
-  for (const [key, value] of Object.entries(headers)) {
-    if (key.toLowerCase() === name) {
-      return Array.isArray(value) ? value[0] : value;
-    }
-  }
-  return undefined;
+  const value = headers[name];
+  return Array.isArray(value) ? value[0] : value;
 }
 
 function setBaggageEntry(ctx: Context, key: string, value: string): Context {
@@ -75,13 +77,9 @@ function setBaggageEntry(ctx: Context, key: string, value: string): Context {
  * unchanged.
  *
  * @param headers inbound request headers, e.g. Express's `req.headers`.
- * @param parent context to build on. Defaults to the active context.
  */
-export function getPropagatedContext(
-  headers: TraceContextHeaders,
-  parent?: Context,
-): Context {
-  let ctx = parent ?? context.active();
+export function getPropagatedContext(headers: TraceContextHeaders): Context {
+  let ctx = context.active();
 
   const supportId = getHeader(headers, TRACEPARENT_HEADER);
   if (supportId !== undefined) {
@@ -110,29 +108,12 @@ export function getPropagatedContext(
  * Returns true when the span is the first span of a run.
  *
  * A top span either has no parent, or its parent is the span the caller
- * propagated in the `Google-Agent-Engine-Traceparent` header. The SDK leaves
- * `parentSpanContext` undefined on a root span, so an invalid parent needs no
- * separate check.
+ * propagated in the `Google-Agent-Engine-Traceparent` header. The propagator
+ * marks that parent remote, and the SDK leaves `parentSpanContext` undefined
+ * on a root span.
  */
-function isTopSpan(span: Span, baggage?: Baggage): boolean {
-  const parentSpanContext = span.parentSpanContext;
-  if (!parentSpanContext) {
-    return true;
-  }
-
-  const traceparent = baggage?.getEntry(TRACEPARENT_BAGGAGE_KEY)?.value;
-  if (traceparent === undefined) {
-    return false;
-  }
-
-  const parts = traceparent.split('-');
-  if (parts.length < 3) {
-    return false;
-  }
-
-  // A span id is 16 hex digits, which exceeds Number.MAX_SAFE_INTEGER, so two
-  // distinct ids can parse to the same number. Compare the hex strings.
-  return parts[2].toLowerCase() === parentSpanContext.spanId.toLowerCase();
+function isTopSpan(span: Span): boolean {
+  return !span.parentSpanContext || span.parentSpanContext.isRemote === true;
 }
 
 /**
@@ -147,7 +128,7 @@ export class TopSpanProcessor implements SpanProcessor {
   onStart(span: Span, parentContext: Context): void {
     const baggage = propagation.getBaggage(parentContext);
     const supportId = baggage?.getEntry(GOOGLE_TRACEPARENT_BAGGAGE_KEY)?.value;
-    if (supportId !== undefined && isTopSpan(span, baggage)) {
+    if (supportId !== undefined && isTopSpan(span)) {
       span.setAttribute(SUPPORT_ID_ATTRIBUTE, supportId);
     }
   }

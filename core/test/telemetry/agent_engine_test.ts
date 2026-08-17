@@ -5,7 +5,6 @@
  */
 
 import {
-  AGENT_ENGINE_ID_ENV_VAR,
   getPropagatedContext,
   isAgentEngine,
   TopSpanProcessor,
@@ -17,14 +16,16 @@ import {
   trace,
   TraceFlags,
 } from '@opentelemetry/api';
+import {AsyncLocalStorageContextManager} from '@opentelemetry/context-async-hooks';
 import {
   BasicTracerProvider,
   InMemorySpanExporter,
   ReadableSpan,
   SimpleSpanProcessor,
 } from '@opentelemetry/sdk-trace-base';
-import {afterEach, describe, expect, it, vi} from 'vitest';
+import {afterAll, afterEach, beforeAll, describe, expect, it, vi} from 'vitest';
 
+const AGENT_ENGINE_ID_ENV_VAR = 'GOOGLE_CLOUD_AGENT_ENGINE_ID';
 const AE_TRACEPARENT_HEADER = 'google-agent-engine-traceparent';
 const TRACEPARENT_HEADER = 'traceparent';
 const SUPPORT_ID_ATTRIBUTE = 'supportID';
@@ -53,6 +54,17 @@ const REJECTED_TRACEPARENT_VALUES = [
   `00-${'0'.repeat(32)}-${REMOTE_SPAN_ID}-01`,
   `ff-${TRACE_ID}-${REMOTE_SPAN_ID}-01`,
 ];
+
+const contextManager = new AsyncLocalStorageContextManager();
+
+beforeAll(() => {
+  context.setGlobalContextManager(contextManager.enable());
+});
+
+afterAll(() => {
+  context.disable();
+  contextManager.disable();
+});
 
 /** Traces a child span under a top span in `ctx`, keyed by span name. */
 function recordSpans(ctx: Context): Record<string, ReadableSpan> {
@@ -151,14 +163,6 @@ describe('getPropagatedContext', () => {
     );
   });
 
-  it('reads the header case-insensitively', () => {
-    const ctx = getPropagatedContext({
-      'Google-Agent-Engine-Traceparent': WELL_FORMED_TRACEPARENT,
-    });
-
-    expect(baggageValue(ctx, TRACEPARENT_HEADER)).toBe(WELL_FORMED_TRACEPARENT);
-  });
-
   it('uses the first value of a repeated header', () => {
     const spans = recordSpans(
       getPropagatedContext({
@@ -189,18 +193,19 @@ describe('getPropagatedContext', () => {
       traceFlags: TraceFlags.SAMPLED,
     });
 
-    const ctx = getPropagatedContext({[AE_TRACEPARENT_HEADER]: 'x'}, parent);
+    const ctx = context.with(parent, () =>
+      getPropagatedContext({[AE_TRACEPARENT_HEADER]: 'x'}),
+    );
 
     expect(baggageValue(ctx, TRACEPARENT_HEADER)).toBeUndefined();
     expect(trace.getSpanContext(ctx)?.spanId).toBe(CALLER_SPAN_ID);
   });
 
-  it('builds on an explicitly supplied parent context', () => {
+  it('builds on the active context', () => {
     const parent = withBaggage(context.active(), 'tenant', 'acme');
 
-    const ctx = getPropagatedContext(
-      {[TRACEPARENT_HEADER]: SUPPORT_ID_VALUE},
-      parent,
+    const ctx = context.with(parent, () =>
+      getPropagatedContext({[TRACEPARENT_HEADER]: SUPPORT_ID_VALUE}),
     );
 
     expect(baggageValue(ctx, 'tenant')).toBe('acme');
@@ -239,29 +244,6 @@ describe('TopSpanProcessor', () => {
       );
     },
   );
-
-  it('does not mark a span whose parent id only collides numerically', () => {
-    // Both span ids exceed Number.MAX_SAFE_INTEGER and round to the same
-    // double, so a numeric comparison would wrongly report a top span.
-    const parentSpanId = 'fffffffffffffffe';
-    const collidingSpanId = 'ffffffffffffffff';
-    const ctx = withBaggage(
-      getPropagatedContext({
-        [AE_TRACEPARENT_HEADER]: `00-${TRACE_ID}-${parentSpanId}-01`,
-        [TRACEPARENT_HEADER]: SUPPORT_ID_VALUE,
-      }),
-      TRACEPARENT_HEADER,
-      `00-${TRACE_ID}-${collidingSpanId}-01`,
-    );
-
-    const spans = recordSpans(ctx);
-
-    expect(spans[TOP_SPAN].parentSpanContext?.spanId).toBe(parentSpanId);
-    expect(spans[TOP_SPAN].attributes).not.toHaveProperty(SUPPORT_ID_ATTRIBUTE);
-    expect(spans[CHILD_SPAN].attributes).not.toHaveProperty(
-      SUPPORT_ID_ATTRIBUTE,
-    );
-  });
 
   it('resolves forceFlush and shutdown', async () => {
     const processor = new TopSpanProcessor();

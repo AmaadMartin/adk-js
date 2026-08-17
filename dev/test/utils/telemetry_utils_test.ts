@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {AGENT_ENGINE_ID_ENV_VAR, getPropagatedContext} from '@google/adk';
+import {getPropagatedContext} from '@google/adk';
 import {context, propagation, trace} from '@opentelemetry/api';
 import {
   InMemorySpanExporter,
@@ -15,6 +15,7 @@ import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {setupTelemetry} from '../../src/utils/telemetry_utils.js';
 
+const AGENT_ENGINE_ID_ENV_VAR = 'GOOGLE_CLOUD_AGENT_ENGINE_ID';
 const SUPPORT_ID_ATTRIBUTE = 'supportID';
 const SUPPORT_ID_VALUE = 'support-id-value';
 

@@ -61,6 +61,15 @@ import {renderStructureGraphAsDot} from './structure_graph.js';
  */
 export const A2A_AUTH_TOKEN_ENV_VAR = 'ADK_A2A_AUTH_TOKEN';
 
+/**
+ * The part of {@link AgentLoader} the server uses, so a caller can supply a
+ * loader of its own without extending the class.
+ */
+export type ServerAgentLoader = Pick<
+  AgentLoader,
+  'listAgents' | 'getAgentFile'
+>;
+
 interface ServerOptions {
   agentsDir?: string;
   host?: string;
@@ -68,7 +77,7 @@ interface ServerOptions {
   sessionService?: BaseSessionService;
   memoryService?: BaseMemoryService;
   artifactService?: BaseArtifactService;
-  agentLoader?: AgentLoader;
+  agentLoader?: ServerAgentLoader;
   agentFileLoadOptions?: AgentFileOptions;
   serveDebugUI?: boolean;
   allowOrigins?: string;
@@ -101,7 +110,7 @@ export class AdkApiServer {
   }
 
   readonly app: express.Application;
-  private readonly agentLoader: AgentLoader;
+  private readonly agentLoader: ServerAgentLoader;
   /**
    * Caches below are keyed by request path parameters (`appName`, `eventId`,
    * `sessionId`), so each is created with `Object.create(null)`. On an

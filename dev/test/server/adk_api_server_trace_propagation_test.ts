@@ -5,7 +5,6 @@
  */
 
 import {
-  AGENT_ENGINE_ID_ENV_VAR,
   createEvent,
   Event,
   InMemoryArtifactService,
@@ -23,9 +22,13 @@ import {
 } from '@opentelemetry/sdk-trace-base';
 import {afterAll, afterEach, beforeAll, describe, expect, it, vi} from 'vitest';
 
-import {AdkApiServer} from '../../src/server/adk_api_server.js';
-import {AgentLoader} from '../../src/utils/agent_loader.js';
+import {
+  AdkApiServer,
+  ServerAgentLoader,
+} from '../../src/server/adk_api_server.js';
+import {AgentFile} from '../../src/utils/agent_loader.js';
 
+const AGENT_ENGINE_ID_ENV_VAR = 'GOOGLE_CLOUD_AGENT_ENGINE_ID';
 const APP_NAME = 'testApp';
 const INVOCATION_SPAN = 'invocation';
 const AE_TRACEPARENT_HEADER = 'Google-Agent-Engine-Traceparent';
@@ -51,6 +54,17 @@ const TEST_AGENT = new TestAgent({
   description: 'test agent',
 });
 
+/** Serves the agent from memory, so no file is compiled or cleaned up. */
+class TestAgentFile extends AgentFile {
+  constructor() {
+    super('unused.ts');
+  }
+
+  override load(): Promise<LlmAgent> {
+    return Promise.resolve(TEST_AGENT);
+  }
+}
+
 const exporter = new InMemorySpanExporter();
 const provider = new BasicTracerProvider({
   spanProcessors: [new SimpleSpanProcessor(exporter)],
@@ -70,16 +84,10 @@ afterAll(async () => {
 });
 
 async function startServer(): Promise<AdkApiServer> {
-  const agentLoader = {
+  const agentLoader: ServerAgentLoader = {
     listAgents: () => Promise.resolve([APP_NAME]),
-    getAgentFile: () =>
-      Promise.resolve({
-        load: () => Promise.resolve(TEST_AGENT),
-        async [Symbol.asyncDispose](): Promise<void> {
-          return;
-        },
-      }),
-  } as unknown as AgentLoader;
+    getAgentFile: () => Promise.resolve(new TestAgentFile()),
+  };
 
   const server = new AdkApiServer({
     agentLoader,
