@@ -15,6 +15,7 @@ import {
   createInputMissingErrorEvent,
   createTask,
   createTaskArtifactUpdateEvent,
+  createTaskCanceledEvent,
   createTaskCompletedEvent,
   createTaskFailedEvent,
   createTaskInputRequiredEvent,
@@ -383,6 +384,19 @@ describe('a2a_event', () => {
           metadata: undefined,
         },
       );
+    });
+
+    it('createTaskCanceledEvent', () => {
+      expect(createTaskCanceledEvent({taskId: 't1', contextId: 'c1'})).toEqual({
+        kind: 'status-update',
+        taskId: 't1',
+        contextId: 'c1',
+        final: true,
+        status: {
+          state: 'canceled',
+          timestamp: '2024-01-01T00:00:00.000Z',
+        },
+      });
     });
 
     it('createTaskArtifactUpdateEvent', () => {

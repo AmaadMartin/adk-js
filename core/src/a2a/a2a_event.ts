@@ -256,6 +256,32 @@ export function createTaskCompletedEvent({
 }
 
 /**
+ * Creates a task canceled event.
+ *
+ * The event carries no status message and no metadata, which matches the
+ * canceled event adk-python publishes in
+ * `src/google/adk/a2a/executor/utils.py`.
+ */
+export function createTaskCanceledEvent({
+  taskId,
+  contextId,
+}: {
+  taskId: string;
+  contextId: string;
+}): TaskStatusUpdateEvent {
+  return {
+    kind: 'status-update',
+    taskId,
+    contextId,
+    final: true,
+    status: {
+      state: TaskState.CANCELED,
+      timestamp: new Date().toISOString(),
+    },
+  };
+}
+
+/**
  * Creates an artifact update event.
  */
 export function createTaskArtifactUpdateEvent({
