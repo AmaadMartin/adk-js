@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+export type {A2AEvent} from './a2a/a2a_event.js';
 export {AGENT_CARD_PATH, RemoteA2AAgent} from './a2a/a2a_remote_agent.js';
 export type {
   A2AStreamEventData,
