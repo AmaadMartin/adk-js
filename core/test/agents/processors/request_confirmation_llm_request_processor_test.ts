@@ -473,4 +473,150 @@ describe('RequestConfirmationLlmRequestProcessor', () => {
     const events = await collectEvents(invocationContext);
     expect(events).toHaveLength(0);
   });
+
+  it('should register the transfer tool when the agent has transfer targets', async () => {
+    const {handleFunctionCallList} =
+      await import('../../../src/agents/functions.js');
+    const mockFunctionCallList = vi.mocked(handleFunctionCallList);
+    mockFunctionCallList.mockClear();
+
+    const agent = new LlmAgent({
+      name: 'orchestrator',
+      model: 'gemini-2.5-flash',
+      subAgents: [new LlmAgent({name: 'sub_agent', model: 'gemini-2.5-flash'})],
+    });
+    vi.spyOn(agent, 'canonicalTools').mockResolvedValue([]);
+
+    const confirmationCallEvent = createEvent({
+      invocationId: 'test-invocation',
+      author: 'orchestrator',
+      content: {
+        role: 'model',
+        parts: [
+          {
+            functionCall: {
+              id: 'fc-confirm-transfer',
+              name: REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
+              args: {
+                originalFunctionCall: {
+                  id: 'fc-transfer',
+                  name: 'transfer_to_agent',
+                  args: {agentName: 'sub_agent'},
+                },
+              },
+            },
+          },
+        ],
+      },
+    });
+    const userConfirmationEvent = createEvent({
+      invocationId: 'test-invocation',
+      author: 'user',
+      content: {
+        role: 'user',
+        parts: [
+          {
+            functionResponse: {
+              id: 'fc-confirm-transfer',
+              name: REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
+              response: {response: JSON.stringify({confirmed: true})},
+            },
+          },
+        ],
+      },
+    });
+
+    const invocationContext = createMockInvocationContext(agent, [
+      confirmationCallEvent,
+      userConfirmationEvent,
+    ]);
+
+    await collectEvents(invocationContext);
+
+    expect(mockFunctionCallList).toHaveBeenCalledTimes(1);
+    const {toolsDict} = mockFunctionCallList.mock.calls[0][0];
+    expect(toolsDict['transfer_to_agent']).toBeDefined();
+  });
+
+  it('should not register the transfer tool when the agent has no transfer targets', async () => {
+    const {handleFunctionCallList} =
+      await import('../../../src/agents/functions.js');
+    const mockFunctionCallList = vi.mocked(handleFunctionCallList);
+    mockFunctionCallList.mockClear();
+
+    const fakeResponseEvent = createEvent({
+      invocationId: 'test-invocation',
+      author: 'lonely_agent',
+      content: {
+        role: 'model',
+        parts: [
+          {
+            functionResponse: {
+              id: 'fc-plain',
+              name: 'my_tool',
+              response: {result: 'ok'},
+            },
+          },
+        ],
+      },
+    });
+    mockFunctionCallList.mockResolvedValueOnce(fakeResponseEvent);
+
+    const agent = new LlmAgent({
+      name: 'lonely_agent',
+      model: 'gemini-2.5-flash',
+    });
+    vi.spyOn(agent, 'canonicalTools').mockResolvedValue([]);
+
+    const confirmationCallEvent = createEvent({
+      invocationId: 'test-invocation',
+      author: 'lonely_agent',
+      content: {
+        role: 'model',
+        parts: [
+          {
+            functionCall: {
+              id: 'fc-confirm-plain',
+              name: REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
+              args: {
+                originalFunctionCall: {
+                  id: 'fc-plain',
+                  name: 'my_tool',
+                  args: {},
+                },
+              },
+            },
+          },
+        ],
+      },
+    });
+    const userConfirmationEvent = createEvent({
+      invocationId: 'test-invocation',
+      author: 'user',
+      content: {
+        role: 'user',
+        parts: [
+          {
+            functionResponse: {
+              id: 'fc-confirm-plain',
+              name: REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
+              response: {response: JSON.stringify({confirmed: true})},
+            },
+          },
+        ],
+      },
+    });
+
+    const invocationContext = createMockInvocationContext(agent, [
+      confirmationCallEvent,
+      userConfirmationEvent,
+    ]);
+
+    const events = await collectEvents(invocationContext);
+
+    expect(events).toEqual([fakeResponseEvent]);
+    expect(mockFunctionCallList).toHaveBeenCalledTimes(1);
+    const {toolsDict} = mockFunctionCallList.mock.calls[0][0];
+    expect(toolsDict).not.toHaveProperty('transfer_to_agent');
+  });
 });
