@@ -30,6 +30,22 @@ async function exists(target: string): Promise<boolean> {
   }
 }
 
+/**
+ * Removes the temporary tree, tolerating a file the process still holds open.
+ *
+ * `DatabaseSessionService` exposes no `close()`, so its SQLite handle stays
+ * open for the life of the test process. Windows refuses to unlink an open
+ * file, and a cleanup failure must not fail a test that already passed. The
+ * operating system reclaims the temporary directory.
+ */
+async function removeTempTree(root: string): Promise<void> {
+  try {
+    await fs.rm(root, {recursive: true, force: true});
+  } catch (_e: unknown) {
+    return;
+  }
+}
+
 describe('local storage', () => {
   let agentsRoot: string;
 
@@ -40,7 +56,7 @@ describe('local storage', () => {
   afterEach(async () => {
     // A test that drops the write bit still has to leave a removable tree.
     await fs.chmod(agentsRoot, 0o700);
-    await fs.rm(agentsRoot, {recursive: true, force: true});
+    await removeTempTree(agentsRoot);
   });
 
   describe('createLocalDatabaseSessionService', () => {
