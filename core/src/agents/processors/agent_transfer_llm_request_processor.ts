@@ -14,6 +14,59 @@ import {InvocationContext} from '../invocation_context.js';
 import {isLlmAgent, LlmAgent} from '../llm_agent.js';
 import {BaseLlmRequestProcessor} from './base_llm_processor.js';
 
+/** The name the model calls to hand off control to another agent. */
+export const TRANSFER_TO_AGENT_TOOL_NAME = 'transfer_to_agent';
+
+/**
+ * The synthetic tool that performs an agent transfer. Its declaration does not
+ * depend on the available targets, so one instance serves every agent.
+ */
+export const TRANSFER_TO_AGENT_TOOL = new FunctionTool({
+  name: TRANSFER_TO_AGENT_TOOL_NAME,
+  description:
+    'Transfer the question to another agent. This tool hands off control to another agent when it is more suitable to answer the user question according to the agent description.',
+  parameters: z.object({
+    agentName: z.string().describe('the agent name to transfer to.'),
+  }),
+  execute: function (args: {agentName: string}, toolContext?: Context) {
+    if (!toolContext) {
+      throw new Error('toolContext is required.');
+    }
+    toolContext.actions.transferToAgent = args.agentName;
+    return 'Transfer queued';
+  },
+});
+
+/**
+ * Collects the agents the given agent may transfer to: its sub-agents, and —
+ * unless disallowed — its parent agent and its peers.
+ *
+ * @param agent - The agent that would perform the transfer.
+ * @returns The reachable transfer targets, empty when there are none.
+ */
+export function getTransferTargets(agent: LlmAgent): BaseAgent[] {
+  const targets: BaseAgent[] = [];
+  targets.push(...agent.subAgents);
+
+  if (!agent.parentAgent || !isLlmAgent(agent.parentAgent)) {
+    return targets;
+  }
+
+  if (!agent.disallowTransferToParent) {
+    targets.push(agent.parentAgent);
+  }
+
+  if (!agent.disallowTransferToPeers) {
+    targets.push(
+      ...agent.parentAgent.subAgents.filter(
+        (peerAgent) => peerAgent.name !== agent.name,
+      ),
+    );
+  }
+
+  return targets;
+}
+
 /**
  * Augments the {@link LlmRequest} to support agent transfer. When the current
  * agent has reachable transfer targets (sub-agents, peer agents, or a parent
@@ -22,23 +75,6 @@ import {BaseLlmRequestProcessor} from './base_llm_processor.js';
  * hand off control.
  */
 export class AgentTransferLlmRequestProcessor extends BaseLlmRequestProcessor {
-  private readonly toolName = 'transfer_to_agent' as const;
-  private readonly tool = new FunctionTool({
-    name: this.toolName,
-    description:
-      'Transfer the question to another agent. This tool hands off control to another agent when it is more suitable to answer the user question according to the agent description.',
-    parameters: z.object({
-      agentName: z.string().describe('the agent name to transfer to.'),
-    }),
-    execute: function (args: {agentName: string}, toolContext?: Context) {
-      if (!toolContext) {
-        throw new Error('toolContext is required.');
-      }
-      toolContext.actions.transferToAgent = args.agentName;
-      return 'Transfer queued';
-    },
-  });
-
   /**
    * Appends transfer instructions and registers the `transfer_to_agent` tool
    * when the agent has reachable transfer targets.
@@ -55,7 +91,7 @@ export class AgentTransferLlmRequestProcessor extends BaseLlmRequestProcessor {
       return;
     }
 
-    const transferTargets = this.getTransferTargets(invocationContext.agent);
+    const transferTargets = getTransferTargets(invocationContext.agent);
     if (!transferTargets.length) {
       return;
     }
@@ -68,7 +104,7 @@ export class AgentTransferLlmRequestProcessor extends BaseLlmRequestProcessor {
     ]);
 
     const toolContext = new Context({invocationContext});
-    await this.tool.processLlmRequest({toolContext, llmRequest});
+    await TRANSFER_TO_AGENT_TOOL.processLlmRequest({toolContext, llmRequest});
   }
 
   private buildTargetAgentsInfo(targetAgent: BaseAgent): string {
@@ -91,7 +127,7 @@ If you are the best to answer the question according to your description, you
 can answer it.
 
 If another agent is better for answering the question according to its
-description, call \`${this.toolName}\` function to transfer the
+description, call \`${TRANSFER_TO_AGENT_TOOL_NAME}\` function to transfer the
 question to that agent. When transferring, do not generate any text other than
 the function call.
 `;
@@ -104,29 +140,6 @@ to your parent agent.
 `;
     }
     return instructions;
-  }
-
-  private getTransferTargets(agent: LlmAgent): BaseAgent[] {
-    const targets: BaseAgent[] = [];
-    targets.push(...agent.subAgents);
-
-    if (!agent.parentAgent || !isLlmAgent(agent.parentAgent)) {
-      return targets;
-    }
-
-    if (!agent.disallowTransferToParent) {
-      targets.push(agent.parentAgent);
-    }
-
-    if (!agent.disallowTransferToPeers) {
-      targets.push(
-        ...agent.parentAgent.subAgents.filter(
-          (peerAgent) => peerAgent.name !== agent.name,
-        ),
-      );
-    }
-
-    return targets;
   }
 }
 
