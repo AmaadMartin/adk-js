@@ -12,12 +12,16 @@ import {
 } from '../../events/event.js';
 import {ToolConfirmation} from '../../tools/tool_confirmation.js';
 import {
-  REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
   handleFunctionCallList,
+  REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
 } from '../functions.js';
 import {InvocationContext} from '../invocation_context.js';
 import {isLlmAgent} from '../llm_agent.js';
 import {ReadonlyContext} from '../readonly_context.js';
+import {
+  getTransferTargets,
+  TRANSFER_TO_AGENT_TOOL,
+} from './agent_transfer_llm_request_processor.js';
 import {BaseLlmRequestProcessor} from './base_llm_processor.js';
 
 /**
@@ -188,6 +192,13 @@ export class RequestConfirmationLlmRequestProcessor extends BaseLlmRequestProces
       const toolsDict = Object.fromEntries(
         toolsList.map((tool) => [tool.name, tool]),
       );
+
+      // `transfer_to_agent` is synthesized by the agent-transfer processor
+      // rather than returned by `canonicalTools`, so resuming a confirmed
+      // transfer needs it registered here too.
+      if (getTransferTargets(agent).length) {
+        toolsDict[TRANSFER_TO_AGENT_TOOL.name] = TRANSFER_TO_AGENT_TOOL;
+      }
 
       const functionResponseEvent = await handleFunctionCallList({
         invocationContext: invocationContext,
