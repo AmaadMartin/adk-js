@@ -396,6 +396,22 @@ describe('CLI Entrypoint', () => {
       // which gcloud would reject.
       expect(args.extraGcloudArgs).toEqual([]);
     });
+
+    it('should pass memoryServiceUri to deployToCloudRun when --memory_service_uri is set', async () => {
+      await parse([
+        'deploy',
+        'cloud_run',
+        './my-agent-path',
+        '--memory_service_uri=agentengine://1234567890',
+      ]);
+
+      const args = (deployToCloudRun as Mock).mock.calls[0][0];
+      expect(args).toMatchObject({
+        memoryServiceUri: 'agentengine://1234567890',
+      });
+      // The flag is recognised here, so it must not also reach gcloud.
+      expect(args.extraGcloudArgs).toEqual([]);
+    });
   });
 
   describe('command: deploy agent_engine', () => {
@@ -461,6 +477,19 @@ describe('CLI Entrypoint', () => {
         agentEngineId: '12345',
       });
     });
+
+    it('should pass memoryServiceUri to deployToAgentEngine when --memory_service_uri is set', async () => {
+      await parse([
+        'deploy',
+        'agent_engine',
+        '--memory_service_uri',
+        'agentengine://1234567890',
+      ]);
+
+      expect((deployToAgentEngine as Mock).mock.calls[0][0]).toMatchObject({
+        memoryServiceUri: 'agentengine://1234567890',
+      });
+    });
   });
 
   describe('command: deploy reasoning_engine', () => {
@@ -481,6 +510,19 @@ describe('CLI Entrypoint', () => {
 
       expect((deployToAgentEngine as Mock).mock.calls[0][0]).toMatchObject({
         agentEngineId: '12345',
+      });
+    });
+
+    it('should pass memoryServiceUri to deployToAgentEngine for reasoning_engine', async () => {
+      await parse([
+        'deploy',
+        'reasoning_engine',
+        '--memory_service_uri',
+        'agentengine://1234567890',
+      ]);
+
+      expect((deployToAgentEngine as Mock).mock.calls[0][0]).toMatchObject({
+        memoryServiceUri: 'agentengine://1234567890',
       });
     });
   });
