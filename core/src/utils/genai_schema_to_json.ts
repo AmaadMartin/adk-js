@@ -84,8 +84,9 @@ function hasGenaiDialectValue(container: unknown): boolean {
  * is to say whether {@link convertGenaiSchema} would change it.
  *
  * Each marker below stands for one transformation the conversion performs, so
- * a document carrying none of them is already JSON Schema. Total over
- * arbitrary runtime input: a malformed node is not a genai node.
+ * a document carrying none of them is already JSON Schema. A schema can arrive
+ * from JSON or YAML, so a node of any shape has to answer `false` rather than
+ * throw.
  */
 function isGenaiDialect(schema: unknown): boolean {
   if (schema === null || typeof schema !== 'object') {
