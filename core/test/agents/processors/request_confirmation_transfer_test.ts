@@ -84,7 +84,7 @@ function createTransferConfirmationEvents(confirmed: boolean): Event[] {
           functionResponse: {
             id: 'fc-confirm-transfer',
             name: REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
-            response: {response: JSON.stringify({confirmed})},
+            response: {confirmed, hint: ''},
           },
         },
       ],
@@ -97,11 +97,14 @@ function createTransferConfirmationEvents(confirmed: boolean): Event[] {
 function createInvocationContext(
   events: Event[],
   plugins: BasePlugin[] = [],
+  subAgents: LlmAgent[] = [
+    new LlmAgent({name: 'sub_agent', model: 'gemini-2.5-flash'}),
+  ],
 ): InvocationContext {
   const agent = new LlmAgent({
     name: 'orchestrator',
     model: 'gemini-2.5-flash',
-    subAgents: [new LlmAgent({name: 'sub_agent', model: 'gemini-2.5-flash'})],
+    subAgents,
   });
 
   return new InvocationContext({
@@ -158,5 +161,20 @@ describe('RequestConfirmationLlmRequestProcessor transfer resume', () => {
     expect(responses).toHaveLength(1);
     expect(responses[0].response).toEqual({error: REJECTION_ERROR});
     expect(events[0].actions.transferToAgent).toBeUndefined();
+  });
+
+  // An agent with no targets is never offered `transfer_to_agent`, so the
+  // resume keeps the unchanged behaviour rather than registering a tool the
+  // agent cannot use. adk-python guards the injection the same way.
+  it('should throw for a transfer confirmation when the agent has no transfer targets', async () => {
+    const invocationContext = createInvocationContext(
+      createTransferConfirmationEvents(true),
+      [],
+      [],
+    );
+
+    await expect(collectEvents(invocationContext)).rejects.toThrow(
+      'Function transfer_to_agent is not found in the toolsDict.',
+    );
   });
 });
