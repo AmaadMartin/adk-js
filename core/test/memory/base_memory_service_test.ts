@@ -60,6 +60,13 @@ describe('addEventsToMemory', () => {
 });
 
 describe('addMemory', () => {
+  it('reports the same wording as adk-python', () => {
+    expect(DIRECT_MEMORY_WRITES_UNSUPPORTED_MESSAGE).toBe(
+      'This memory service does not support direct memory writes. ' +
+        'Call addEventsToMemory(...) or addSessionToMemory(session) instead.',
+    );
+  });
+
   it('rejects when the service does not implement addMemory', async () => {
     const service: BaseMemoryService = {
       async addSessionToMemory() {},
