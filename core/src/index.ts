@@ -60,6 +60,11 @@ export {
 export {RunSkillScriptTool} from './tools/skill/run_skill_script_tool.js';
 
 export * from './integrations/agent_registry/agent_registry.js';
+export {CrewaiTool} from './integrations/crewai/crewai_tool.js';
+export type {
+  CrewaiBaseTool,
+  CrewaiToolOptions,
+} from './integrations/crewai/crewai_tool.js';
 export * from './telemetry/google_cloud.js';
 export * from './telemetry/setup.js';
 export * from './tools/mcp/load_mcp_resource_tool.js';
