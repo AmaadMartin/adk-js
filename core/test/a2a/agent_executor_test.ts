@@ -19,6 +19,7 @@ import type {
   ExecutorContext,
   IntentVerification,
   RunnerConfig,
+  Session,
 } from '@google/adk';
 import {
   A2AAgentExecutor,
@@ -50,6 +51,14 @@ vi.mock('../../src/runner/runner.js', async (importOriginal) => {
     })),
   };
 });
+
+function createTestSession(): Session {
+  return createSession({
+    id: 'session-id',
+    appName: 'test-app',
+    userId: 'test-user',
+  });
+}
 
 /**
  * Points the mocked Runner class at `runAsync`.
@@ -715,16 +724,103 @@ describe('A2AAgentExecutor', () => {
     });
   });
 
-  it('should fail cancelTask because it is not implemented', async () => {
+  it('should publish a terminal canceled event for an in-flight task', async () => {
+    mockSessionService.getSession.mockResolvedValue(createTestSession());
+
+    let started!: () => void;
+    const runnerStarted = new Promise<void>((resolve) => (started = resolve));
+    let release!: () => void;
+    const finishRun = new Promise<void>((resolve) => (release = resolve));
+
+    async function* mockRunAsync() {
+      started();
+      await finishRun;
+      yield createEvent({
+        author: 'model',
+        content: {role: 'model', parts: [{text: 'late response'}]},
+        partial: false,
+        actions: createEventActions(),
+      });
+    }
+
+    stubRunner(mockRunAsync);
+
     const executor = new A2AAgentExecutor({
-      runner: {
-        appName: 'test-app',
-        sessionService: mockSessionService,
-      } as unknown as RunnerConfig,
+      runner: {appName: 'test-app', sessionService: mockSessionService},
     });
 
-    await expect(executor.cancelTask('any-task-id')).rejects.toThrow(
-      'Task cancellation is not supported yet.',
+    const ctx = createRequestContext();
+    const executePromise = executor.execute(ctx, mockEventBus);
+    await runnerStarted;
+
+    await executor.cancelTask(ctx.taskId, mockEventBus);
+
+    expect(mockEventBus.publish).toHaveBeenLastCalledWith({
+      kind: 'status-update',
+      taskId: 'test-task',
+      contextId: 'test-context',
+      final: true,
+      status: {state: 'canceled', timestamp: expect.any(String)},
+    });
+
+    release();
+    await executePromise;
+  });
+
+  it('should reject cancelTask and publish nothing when the task id is empty', async () => {
+    const executor = new A2AAgentExecutor({
+      runner: {appName: 'test-app', sessionService: mockSessionService},
+    });
+
+    await expect(executor.cancelTask('', mockEventBus)).rejects.toThrow(
+      'A2A cancellation must have a task ID',
+    );
+    expect(mockEventBus.publish).not.toHaveBeenCalled();
+  });
+
+  it('should still publish a terminal canceled event when no execution is in flight', async () => {
+    const executor = new A2AAgentExecutor({
+      runner: {appName: 'test-app', sessionService: mockSessionService},
+    });
+
+    await executor.cancelTask('unknown-task', mockEventBus);
+
+    expect(mockEventBus.publish).toHaveBeenCalledTimes(1);
+    expect(mockEventBus.publish).toHaveBeenLastCalledWith({
+      kind: 'status-update',
+      taskId: 'unknown-task',
+      contextId: '',
+      final: true,
+      status: {state: 'canceled', timestamp: expect.any(String)},
+    });
+  });
+
+  it('should forget the context id once the execution finishes', async () => {
+    mockSessionService.getSession.mockResolvedValue(createTestSession());
+
+    async function* mockRunAsync() {
+      yield createEvent({
+        author: 'model',
+        content: {role: 'model', parts: [{text: 'done'}]},
+        partial: false,
+        actions: createEventActions(),
+      });
+    }
+
+    stubRunner(mockRunAsync);
+
+    const executor = new A2AAgentExecutor({
+      runner: {appName: 'test-app', sessionService: mockSessionService},
+    });
+
+    const ctx = createRequestContext();
+    await executor.execute(ctx, mockEventBus);
+    mockEventBus.publish.mockClear();
+
+    await executor.cancelTask(ctx.taskId, mockEventBus);
+
+    expect(mockEventBus.publish).toHaveBeenLastCalledWith(
+      expect.objectContaining({taskId: 'test-task', contextId: ''}),
     );
   });
   describe('with an installed ID provider', () => {
