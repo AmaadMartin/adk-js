@@ -47,7 +47,7 @@ describe('createLatestLogLink when the platform refuses a symlink', () => {
   it('returns no pointer path instead of throwing', () => {
     const logFilePath = path.join(logDir, 'agent.20260817_081102.log');
 
-    expect(createLatestLogLink(logDir, 'agent', logFilePath)).toBeUndefined();
+    expect(createLatestLogLink(logDir, logFilePath)).toBeUndefined();
   });
 
   it('emits no warning, matching the silent OSError path in adk-python', () => {
@@ -55,11 +55,7 @@ describe('createLatestLogLink when the platform refuses a symlink', () => {
       .spyOn(process, 'emitWarning')
       .mockImplementation(() => {});
 
-    createLatestLogLink(
-      logDir,
-      'agent',
-      path.join(logDir, 'agent.20260817_081102.log'),
-    );
+    createLatestLogLink(logDir, path.join(logDir, 'agent.20260817_081102.log'));
 
     expect(emitWarning).not.toHaveBeenCalled();
   });

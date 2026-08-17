@@ -21,9 +21,6 @@ const WINSTON_LEVELS: Record<string, LogLevel> = {
 
 const PASS_THROUGH_LEVEL = 'error';
 
-/** Shape of the `asctime` field in adk-python's `LOGGING_FORMAT`. */
-const FILE_TIMESTAMP_FORMAT = 'YYYY-MM-DD HH:mm:ss,SSS';
-
 /**
  * Re-points one live logger at `transport`, or back at the console when
  * `transport` is `undefined`.
@@ -50,31 +47,13 @@ let fileTransport: winston.transports.FileTransportInstance | undefined;
  */
 function fileLogFormat(label: string): winston.Logform.Format {
   return winston.format.combine(
-    winston.format((info) => {
-      info.level = info.level.toUpperCase();
-      return info;
-    })(),
-    winston.format.timestamp({format: FILE_TIMESTAMP_FORMAT}),
+    // The `asctime` field of adk-python's `LOGGING_FORMAT`.
+    winston.format.timestamp({format: 'YYYY-MM-DD HH:mm:ss,SSS'}),
     winston.format.printf(
       (info) =>
-        `${info.timestamp} - ${info.level} - ${label} - ${info.message}`,
+        `${info.timestamp} - ${info.level.toUpperCase()} - ${label} - ${info.message}`,
     ),
   );
-}
-
-/** Returns every AdkLogger to the console and yields the retired transport. */
-function detachFileTransport():
-  | winston.transports.FileTransportInstance
-  | undefined {
-  const transport = fileTransport;
-  if (!transport) {
-    return undefined;
-  }
-  fileTransport = undefined;
-  for (const swap of transportSwaps) {
-    swap(undefined);
-  }
-  return transport;
 }
 
 /**
@@ -83,7 +62,7 @@ function detachFileTransport():
  * on open, so one run leaves one file, as adk-python's `mode='w'` does.
  */
 export function setFileLogTarget(filePath: string): void {
-  detachFileTransport()?.end();
+  fileTransport?.end();
   fileTransport = new winston.transports.File({
     filename: filePath,
     options: {flags: 'w'},
@@ -99,9 +78,13 @@ export function setFileLogTarget(filePath: string): void {
  * about to exit has to await this or lose the last records.
  */
 export function resetFileLogTarget(): Promise<void> {
-  const transport = detachFileTransport();
+  const transport = fileTransport;
   if (!transport) {
     return Promise.resolve();
+  }
+  fileTransport = undefined;
+  for (const swap of transportSwaps) {
+    swap(undefined);
   }
   return new Promise((resolve) => {
     transport.once('finish', () => resolve());

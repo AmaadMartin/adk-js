@@ -28,8 +28,6 @@ export interface TmpFolderLog {
 export interface LogToTmpFolderOptions {
   /** Directory under the system temp root. Default `'agents_log'`. */
   subFolder?: string;
-  /** Log file prefix. Default `'agent'`. */
-  logFilePrefix?: string;
   /** Timestamp segment. Default `YYYYMMDD_HHmmss` of the current local time. */
   logFileTimestamp?: string;
 }
@@ -37,20 +35,12 @@ export interface LogToTmpFolderOptions {
 /** Local-time `YYYYMMDD_HHmmss`, matching Python's `%Y%m%d_%H%M%S`. */
 function formatLogTimestamp(date: Date): string {
   const pad = (value: number) => String(value).padStart(2, '0');
-  return [
-    date.getFullYear(),
-    pad(date.getMonth() + 1),
-    pad(date.getDate()),
-    '_',
-    pad(date.getHours()),
-    pad(date.getMinutes()),
-    pad(date.getSeconds()),
-  ].join('');
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}_${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
 }
 
 /**
- * Points `<prefix>.latest.log` at `logFilePath` so `tail -F` survives a
- * restart, and returns the link path.
+ * Points `agent.latest.log` at `logFilePath` so `tail -F` survives a restart,
+ * and returns the link path.
  *
  * Returns undefined and keeps running when the link cannot be made: a real
  * file already occupies the path, or the platform refuses symlinks (Windows
@@ -58,10 +48,9 @@ function formatLogTimestamp(date: Date): string {
  */
 export function createLatestLogLink(
   logDir: string,
-  logFilePrefix: string,
   logFilePath: string,
 ): string | undefined {
-  const linkPath = path.join(logDir, `${logFilePrefix}.latest.log`);
+  const linkPath = path.join(logDir, `${LOG_FILE_PREFIX}.latest.log`);
   const existing = fs.lstatSync(linkPath, {throwIfNoEntry: false});
   if (existing?.isSymbolicLink()) {
     fs.unlinkSync(linkPath);
@@ -96,14 +85,13 @@ export function logToTmpFolder(
 ): TmpFolderLog {
   const {
     subFolder = LOG_SUB_FOLDER,
-    logFilePrefix = LOG_FILE_PREFIX,
     logFileTimestamp = formatLogTimestamp(new Date()),
   } = options;
 
   const logDir = path.join(os.tmpdir(), subFolder);
   const logFilePath = path.join(
     logDir,
-    `${logFilePrefix}.${logFileTimestamp}.log`,
+    `${LOG_FILE_PREFIX}.${logFileTimestamp}.log`,
   );
 
   fs.mkdirSync(logDir, {recursive: true});
@@ -115,6 +103,6 @@ export function logToTmpFolder(
 
   return {
     logFilePath,
-    latestLogPath: createLatestLogLink(logDir, logFilePrefix, logFilePath),
+    latestLogPath: createLatestLogLink(logDir, logFilePath),
   };
 }
