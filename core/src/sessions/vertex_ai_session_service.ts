@@ -586,16 +586,8 @@ function toApiActions(
   } as ApiEventActions;
 }
 
-interface ExtendedEventActions extends EventActions {
-  compaction?: {
-    startTime: number;
-    endTime: number;
-    compactedContent: string;
-  };
-}
-
 interface ExtendedEvent extends Event {
-  actions: ExtendedEventActions;
+  actions: EventActions;
   isCompacted?: boolean;
   startTime?: number;
   endTime?: number;
@@ -654,7 +646,7 @@ function _fromApiEvent(apiEventObj: VertexAiSessionEvent): Event {
     }
   }
 
-  const eventActions: ExtendedEventActions = {
+  const eventActions: EventActions = {
     stateDelta: (actions['stateDelta'] as {[key: string]: unknown}) || {},
     artifactDelta: (actions['artifactDelta'] as {[key: string]: number}) || {},
     requestedAuthConfigs:
@@ -666,7 +658,6 @@ function _fromApiEvent(apiEventObj: VertexAiSessionEvent): Event {
     skipSummarization: actions['skipSummarization'] as boolean | undefined,
     transferToAgent: actions['transferAgent'] as string | undefined,
     escalate: actions['escalate'] as boolean | undefined,
-    compaction: compactionData || undefined,
   };
 
   const event: ExtendedEvent = {

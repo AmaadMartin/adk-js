@@ -1205,3 +1205,105 @@ describe('removeClientFunctionCallId', () => {
     expect(() => removeClientFunctionCallId(noParts)).not.toThrow();
   });
 });
+
+describe('getContents with session-level compaction', () => {
+  function textEvent(timestamp: number, text: string) {
+    return createEvent({
+      timestamp,
+      invocationId: `inv${timestamp}`,
+      author: 'user',
+      content: {role: 'user', parts: [{text}]},
+    });
+  }
+
+  function compactionEvent(
+    startTimestamp: number,
+    endTimestamp: number,
+    summaryText: string,
+  ) {
+    return createEvent({
+      timestamp: endTimestamp,
+      invocationId: 'compaction-inv',
+      author: 'compactor',
+      actions: {
+        compaction: {
+          startTimestamp,
+          endTimestamp,
+          compactedContent: {role: 'model', parts: [{text: summaryText}]},
+        },
+      },
+    });
+  }
+
+  it('substitutes the summary for the events it covers', () => {
+    const contents = getContents(
+      [
+        textEvent(1, 'Event 1'),
+        textEvent(2, 'Event 2'),
+        compactionEvent(1, 2, 'Summary 1-2'),
+        textEvent(3, 'Event 3'),
+      ],
+      '',
+    );
+
+    expect(contents.map((c) => c.parts?.[0]?.text)).toEqual([
+      'Summary 1-2',
+      'Event 3',
+    ]);
+  });
+
+  it('materializes a compaction event that carries no content of its own', () => {
+    const contentless = createEvent({
+      timestamp: 2,
+      invocationId: 'compaction-inv',
+      author: 'user',
+      actions: {
+        compaction: {
+          startTimestamp: 1,
+          endTimestamp: 2,
+          compactedContent: {role: 'model', parts: [{text: 'Summary 1-2'}]},
+        },
+      },
+    });
+
+    const contents = getContents([textEvent(1, 'Event 1'), contentless], '');
+
+    expect(contents.map((c) => c.parts?.[0]?.text)).toEqual(['Summary 1-2']);
+  });
+
+  it('withholds a compaction event tagged to another isolation scope', () => {
+    const scoped = compactionEvent(1, 2, 'Summary 1-2');
+    scoped.isolationScope = 'task-a';
+
+    const contents = getContents(
+      [textEvent(3, 'Event 3'), scoped],
+      '',
+      undefined,
+      undefined,
+    );
+
+    expect(contents.map((c) => c.parts?.[0]?.text)).toEqual(['Event 3']);
+  });
+
+  it('withholds a compaction event from an unrelated branch', () => {
+    const offBranch = compactionEvent(1, 2, 'Summary 1-2');
+    offBranch.branch = 'other.child';
+
+    const contents = getContents(
+      [textEvent(3, 'Event 3'), offBranch],
+      '',
+      'root',
+    );
+
+    expect(contents.map((c) => c.parts?.[0]?.text)).toEqual(['Event 3']);
+  });
+
+  it('attributes the summary to the requesting agent so it is not foreign', () => {
+    const contents = getContents(
+      [textEvent(1, 'Event 1'), compactionEvent(1, 1, 'Summary 1')],
+      'researcher',
+    );
+
+    expect(contents.map((c) => c.parts?.[0]?.text)).toEqual(['Summary 1']);
+  });
+});

@@ -8,6 +8,7 @@ import {describe, expect, it} from 'vitest';
 import {AuthConfig} from '../../src/auth/auth_tool.js';
 import {
   createEventActions,
+  EventCompaction,
   mergeEventActions,
 } from '../../src/events/event_actions.js';
 
@@ -210,5 +211,43 @@ describe('mergeEventActions', () => {
       createEventActions({stateDelta: {x: 1}}),
     ]);
     expect(result.stateDelta).toEqual({x: 1});
+  });
+});
+
+describe('EventActions.compaction', () => {
+  const summary: EventCompaction = {
+    startTimestamp: 1000,
+    endTimestamp: 4000,
+    compactedContent: {role: 'model', parts: [{text: 'Summary 1-4'}]},
+  };
+
+  it('survives createEventActions', () => {
+    const actions = createEventActions({compaction: summary});
+    expect(actions.compaction).toEqual(summary);
+  });
+
+  it('defaults to undefined', () => {
+    expect(createEventActions().compaction).toBeUndefined();
+  });
+
+  it('merges last-writer-wins', () => {
+    const newer: EventCompaction = {
+      startTimestamp: 4000,
+      endTimestamp: 9000,
+      compactedContent: {role: 'model', parts: [{text: 'Summary 4-9'}]},
+    };
+    const result = mergeEventActions([
+      createEventActions({compaction: summary}),
+      createEventActions({compaction: newer}),
+    ]);
+    expect(result.compaction).toEqual(newer);
+  });
+
+  it('keeps an earlier compaction when a later source omits it', () => {
+    const result = mergeEventActions([
+      createEventActions({compaction: summary}),
+      createEventActions({escalate: true}),
+    ]);
+    expect(result.compaction).toEqual(summary);
   });
 });

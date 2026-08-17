@@ -4,9 +4,35 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {Content} from '@google/genai';
+
 import {AuthConfig} from '../auth/auth_tool.js';
 import {carryDeltaStamps} from '../sessions/state_write_order.js';
 import {ToolConfirmation} from '../tools/tool_confirmation.js';
+
+/**
+ * A summary that stands in for a contiguous range of session events.
+ *
+ * An event carrying this in its {@link EventActions.compaction} is the
+ * persisted record of a compaction: the raw events it covers stay in the
+ * session, and prompt assembly substitutes this summary for them.
+ *
+ * Mirrors `google/adk-python` `EventCompaction`, whose wire field names are
+ * camelCase.
+ */
+export interface EventCompaction {
+  /**
+   * Timestamp of the first compacted event, in the same units as
+   * `Event.timestamp` (milliseconds).
+   */
+  startTimestamp: number;
+
+  /** Timestamp of the last compacted event. */
+  endTimestamp: number;
+
+  /** The summary that stands in for the compacted range. */
+  compactedContent: Content;
+}
 
 /**
  * Represents the actions attached to an event.
@@ -69,6 +95,14 @@ export interface EventActions {
    * execution for this invocation. Mirrors Python `EventActions.end_of_agent`.
    */
   endOfAgent?: boolean;
+
+  /**
+   * Marks this event as the summary of a range of earlier session events.
+   *
+   * Set by session-level event compaction. Prompt assembly materializes the
+   * summary in place of the raw events the range covers.
+   */
+  compaction?: EventCompaction;
 }
 
 /**
@@ -103,9 +137,9 @@ export function createEventActions(
  *    `requestedAuthConfigs`, `requestedToolConfirmations`) — all entries from
  *    every source are combined via `Object.assign`. Later sources win on
  *    duplicate keys.
- * 2. **Scalar fields** (`skipSummarization`, `transferToAgent`, `escalate`) —
- *    last-writer-wins: the value from the last source that sets the field is
- *    kept.
+ * 2. **Scalar fields** (`skipSummarization`, `transferToAgent`, `escalate`,
+ *    `compaction`) — last-writer-wins: the value from the last source that sets
+ *    the field is kept.
  *
  * @param sources - Ordered list of partial {@link EventActions} to merge.
  *   Falsy entries are silently skipped.
@@ -153,6 +187,9 @@ export function mergeEventActions(
     }
     if (source.escalate !== undefined) {
       result.escalate = source.escalate;
+    }
+    if (source.compaction !== undefined) {
+      result.compaction = source.compaction;
     }
   }
   return result;
