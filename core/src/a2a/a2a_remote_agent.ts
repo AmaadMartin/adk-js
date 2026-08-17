@@ -30,7 +30,10 @@ import {
 import {resolveAgentCard} from './agent_card.js';
 import {toAdkEvent} from './event_converter_utils.js';
 import {getA2ASessionMetadata} from './metadata_converter_utils.js';
-import {toA2AParts} from './part_converter_utils.js';
+import {
+  GenAIPartToA2APartConverter,
+  toA2AParts,
+} from './part_converter_utils.js';
 
 export {AGENT_CARD_PATH};
 
@@ -97,6 +100,11 @@ export interface RemoteA2AAgentConfig extends BaseAgentConfig {
    * Optional default configuration for sending messages.
    */
   messageSendConfig?: MessageSendConfiguration;
+  /**
+   * Converts a single GenAI part into the A2A part sent to the remote agent.
+   * Defaults to `toA2APart`.
+   */
+  genAIPartConverter?: GenAIPartToA2APartConverter;
   /**
    * Callbacks run before the remote request is sent.
    */
@@ -172,11 +180,16 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
         parts = toA2AParts(
           event.content?.parts || [],
           event.longRunningToolIds,
+          this.a2aConfig.genAIPartConverter,
         );
         taskId = userFnCall.taskId;
         contextId = userFnCall.contextId;
       } else {
-        const missing = toMissingRemoteSessionParts(context, context.session);
+        const missing = toMissingRemoteSessionParts(
+          context,
+          context.session,
+          this.a2aConfig.genAIPartConverter,
+        );
         parts = missing.parts;
         contextId = missing.contextId;
       }
