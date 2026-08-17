@@ -143,6 +143,7 @@ function isTopSpan(span: Span, baggage?: Baggage): boolean {
  * its spans.
  */
 export class TopSpanProcessor implements SpanProcessor {
+  /** Records the support identifier when the span starting is a top span. */
   onStart(span: Span, parentContext: Context): void {
     const baggage = propagation.getBaggage(parentContext);
     const supportId = baggage?.getEntry(GOOGLE_TRACEPARENT_BAGGAGE_KEY)?.value;
@@ -151,6 +152,7 @@ export class TopSpanProcessor implements SpanProcessor {
     }
   }
 
+  /** Does nothing: the support identifier is set when a span starts. */
   onEnd(): void {}
 
   shutdown(): Promise<void> {
