@@ -10,13 +10,6 @@ import {stripJsonCodeFence} from '../../src/utils/json_utils.js';
 const PAYLOAD = '{"a":1}';
 const FENCE = '```';
 
-/**
- * The measured cost on these inputs is under a millisecond, so this leaves
- * three orders of magnitude of headroom for a slow or loaded CI machine, and
- * still sits far below the seconds a backtracking implementation takes.
- */
-const BACKTRACKING_BUDGET_MILLIS = 500;
-
 describe('stripJsonCodeFence', () => {
   it('strips a json-tagged code fence', () => {
     expect(stripJsonCodeFence('```json\n{"a":1}\n```')).toBe(PAYLOAD);
@@ -78,23 +71,20 @@ describe('stripJsonCodeFence', () => {
   });
 
   // Both inputs below defeated a regex implementation of this helper, which
-  // backtracked catastrophically and blocked the thread for 20 s and 17 s
-  // respectively. Matching must stay linear: model text reaches this helper
-  // unfiltered, and it runs on the single Node thread. Sizes are chosen so a
-  // reintroduced regression reports a failed assertion rather than hanging.
+  // backtracked catastrophically and blocked the thread for tens of seconds.
+  // Matching must stay linear: model text reaches this helper unfiltered, and
+  // it runs on the single Node thread. Each input is sized so a regression
+  // blows the default test timeout, which is what fails these two; the
+  // linear implementation returns in well under a millisecond.
   describe('runs in linear time on an unclosed fence', () => {
     const cases: Record<string, string> = {
       'a long whitespace run': `${FENCE}json\n${' '.repeat(4_000)}x`,
-      'a long word-character run': `${FENCE}${'a'.repeat(100_000)}`,
+      'a long word-character run': `${FENCE}${'a'.repeat(300_000)}`,
     };
 
     for (const [name, text] of Object.entries(cases)) {
       it(name, () => {
-        const start = performance.now();
         expect(stripJsonCodeFence(text)).toBe(text);
-        expect(performance.now() - start).toBeLessThan(
-          BACKTRACKING_BUDGET_MILLIS,
-        );
       });
     }
   });

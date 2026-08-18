@@ -22,11 +22,6 @@ const FENCE_OPENER = /^```\w*/;
  * the schema constraint becomes best-effort. Well-formed JSON never starts
  * with a fence, so this is a no-op on valid input.
  *
- * Model text is attacker-influenced, so the payload is located by string
- * search rather than by one regex spanning it. A single pattern of the form
- * `fence, tag, lazy body, fence` backtracks catastrophically on a fence that
- * is never closed.
- *
  * @param text Model-produced text that is about to be parsed as JSON.
  * @return The fence-free payload, or `text` unchanged when it is not a whole
  *     fenced block.
