@@ -62,12 +62,6 @@ const STRING_ENCODED_BOUNDS = [
   'maxProperties',
 ] as const;
 
-/** Bounds the genai `Schema` spells and types the same way JSON Schema does. */
-const NUMERIC_BOUNDS = ['minimum', 'maximum'] as const;
-
-/** String keywords the genai `Schema` spells the same way JSON Schema does. */
-const STRING_KEYWORDS = ['pattern', 'title'] as const;
-
 /** The `format` values Gemini accepts, keyed by the type of the node. */
 const SUPPORTED_FORMATS: Partial<Record<Type, readonly string[]>> = {
   [Type.INTEGER]: ['int32', 'int64'],
@@ -92,15 +86,11 @@ interface ConstrainedNode {
   propertyOrdering?: string[];
 }
 
-function isPresent<T>(value: T): value is NonNullable<T> {
-  return value !== undefined && value !== null;
-}
-
 /**
  * Copies the constraint keywords a JSON Schema node declares into a genai
- * `Schema`, so the model is told what the tool will accept. A keyword outside
- * the table above stays dropped, because Gemini rejects a schema carrying a
- * keyword it does not model.
+ * `Schema`, so the model is told what the tool will accept. A keyword this
+ * function does not name stays dropped, because Gemini rejects a schema
+ * carrying a keyword it does not model.
  *
  * A `format` survives only where Gemini supports it for `declaredType`, which
  * is the type the node itself declares.
@@ -110,30 +100,30 @@ function forwardConstraints(node: ConstrainedNode, declaredType: Type): Schema {
 
   for (const key of STRING_ENCODED_BOUNDS) {
     const value = node[key];
-    if (isPresent(value)) {
+    if (value != null) {
       constraints[key] = String(value);
     }
   }
-  for (const key of NUMERIC_BOUNDS) {
-    const value = node[key];
-    if (isPresent(value)) {
-      constraints[key] = value;
-    }
+  if (node.minimum != null) {
+    constraints.minimum = node.minimum;
   }
-  for (const key of STRING_KEYWORDS) {
-    const value = node[key];
-    if (isPresent(value)) {
-      constraints[key] = value;
-    }
+  if (node.maximum != null) {
+    constraints.maximum = node.maximum;
   }
-  if (isPresent(node.default)) {
+  if (node.pattern != null) {
+    constraints.pattern = node.pattern;
+  }
+  if (node.title != null) {
+    constraints.title = node.title;
+  }
+  if (node.default != null) {
     constraints.default = node.default;
   }
-  if (isPresent(node.propertyOrdering)) {
+  if (node.propertyOrdering != null) {
     constraints.propertyOrdering = node.propertyOrdering;
   }
   if (
-    isPresent(node.format) &&
+    node.format != null &&
     SUPPORTED_FORMATS[declaredType]?.includes(node.format)
   ) {
     constraints.format = node.format;
