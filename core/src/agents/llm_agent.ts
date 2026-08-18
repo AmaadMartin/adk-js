@@ -370,35 +370,31 @@ const GOOGLE_SEARCH_AGENT_TOOL_NAME = 'google_search_agent';
  *
  * @param agent The agent that produced the response.
  * @param invocationContext The invocation context.
- * @param llmResponse The model's original response.
- * @param callbackResponse The plugin or callback override, if any.
- * @returns The response to return from the after-model handling.
+ * @param response The response the after-model handling is about to return.
+ * @returns The same response, with the citations attached when they apply.
  */
 async function maybeAddGroundingMetadata(
   agent: LlmAgent,
   invocationContext: InvocationContext,
-  llmResponse: LlmResponse,
-  callbackResponse?: LlmResponse,
-): Promise<LlmResponse | undefined> {
-  const groundingMetadata = invocationContext.session.state?.[
-    GROUNDING_METADATA_STATE_KEY
-  ] as GroundingMetadata | undefined;
+  response: LlmResponse,
+): Promise<LlmResponse> {
+  const readonlyContext = new ReadonlyContext(invocationContext);
+  const groundingMetadata = readonlyContext.state.get<GroundingMetadata>(
+    GROUNDING_METADATA_STATE_KEY,
+  );
   // An empty object counts as absent, matching adk-python's falsy check.
   if (!groundingMetadata || Object.keys(groundingMetadata).length === 0) {
-    return callbackResponse;
+    return response;
   }
 
   // adk-python checks the tools first because it caches them on the invocation
   // context. adk-js has no such cache and this runs once per streamed chunk, so
   // the cheap state read gates the toolset resolution instead.
-  const tools = await agent.canonicalTools(
-    new ReadonlyContext(invocationContext),
-  );
+  const tools = await agent.canonicalTools(readonlyContext);
   if (!tools.some((tool) => tool.name === GOOGLE_SEARCH_AGENT_TOOL_NAME)) {
-    return callbackResponse;
+    return response;
   }
 
-  const response = callbackResponse ?? llmResponse;
   response.groundingMetadata = groundingMetadata;
   return response;
 }
@@ -1417,7 +1413,6 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       return maybeAddGroundingMetadata(
         this,
         invocationContext,
-        llmResponse,
         afterModelCallbackResponse,
       );
     }
@@ -1437,7 +1432,6 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         return maybeAddGroundingMetadata(
           this,
           invocationContext,
-          llmResponse,
           callbackResponse,
         );
       }
