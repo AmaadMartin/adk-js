@@ -27,6 +27,7 @@ import {
 import {
   ensureDatabaseCreated,
   getConnectionOptionsFromUri,
+  getOrCreateStateRow,
   validateDatabaseSchemaVersion,
 } from './db/operations.js';
 import {
@@ -65,7 +66,7 @@ export function isDatabaseConnectionString(uri?: string): boolean {
  */
 export class DatabaseSessionService extends BaseSessionService {
   private orm?: MikroORM;
-  private initialized = false;
+  private initPromise?: Promise<void>;
   private options?: MikroDBOptions;
   private connectionString?: string;
 
@@ -85,11 +86,34 @@ export class DatabaseSessionService extends BaseSessionService {
     }
   }
 
-  async init() {
-    if (this.initialized) {
-      return;
-    }
+  /**
+   * Connects to the database, at most once per service.
+   *
+   * Concurrent callers await the same connection. A boolean guard would let
+   * them all pass it, because it can only be set after the awaits below, and
+   * every extra `MikroORM.init` leaks a connection pool and overwrites
+   * `this.orm` while earlier callers still write through their own fork.
+   */
+  async init(): Promise<void> {
+    this.initPromise ??= this.connect().catch((error: unknown) => {
+      this.initPromise = undefined;
+      throw error;
+    });
 
+    return this.initPromise;
+  }
+
+  /**
+   * Closes the database connection pool.
+   *
+   * The service reconnects on the next call, so a closed service stays usable.
+   */
+  async close(): Promise<void> {
+    await this.orm?.close();
+    this.initPromise = undefined;
+  }
+
+  private async connect(): Promise<void> {
     if (this.connectionString && (!this.options || !this.options.driver)) {
       this.options = await getConnectionOptionsFromUri(this.connectionString);
     }
@@ -97,7 +121,6 @@ export class DatabaseSessionService extends BaseSessionService {
     this.orm = await MikroORM.init(this.options!);
     await ensureDatabaseCreated(this.orm!);
     await validateDatabaseSchemaVersion(this.orm!);
-    this.initialized = true;
   }
 
   async createSession({
@@ -120,25 +143,19 @@ export class DatabaseSessionService extends BaseSessionService {
       throw new Error(`Session with id ${id} already exists.`);
     }
 
-    let appStateModel = await em.findOne(StorageAppState, {appName});
-    if (!appStateModel) {
-      appStateModel = em.create(StorageAppState, {
-        appName,
-        state: {},
-        updateTime: now,
-      });
-      em.persist(appStateModel);
-    }
+    const appStateModel = await getOrCreateStateRow(
+      em,
+      StorageAppState,
+      {appName},
+      {appName, state: {}, updateTime: now},
+    );
 
-    let userStateModel = await em.findOne(StorageUserState, {appName, userId});
-    if (!userStateModel) {
-      userStateModel = em.create(StorageUserState, {
-        appName,
-        userId,
-        state: {},
-      });
-      em.persist(userStateModel);
-    }
+    const userStateModel = await getOrCreateStateRow(
+      em,
+      StorageUserState,
+      {appName, userId},
+      {appName, userId, state: {}, updateTime: now},
+    );
 
     const appStateDelta: Record<string, unknown> = {};
     const userStateDelta: Record<string, unknown> = {};

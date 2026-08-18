@@ -4,7 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {MikroORM, Options as MikroORMOptions} from '@mikro-orm/core';
+import {
+  EntityClass,
+  EntityData,
+  EntityManager,
+  FilterQuery,
+  MikroORM,
+  Options as MikroORMOptions,
+} from '@mikro-orm/core';
 import {redactUriPassword} from '../../utils/redact_uri.js';
 import {
   ENTITIES,
@@ -103,4 +110,33 @@ export async function validateDatabaseSchemaVersion(orm: MikroORM) {
   });
 
   await em.persist(newVersion).flush();
+}
+
+/**
+ * Returns the state row matching `where`, inserting `data` when it is missing.
+ *
+ * Two callers can both read a missing row and both insert it, which breaks the
+ * loser's whole unit of work with a primary-key violation. The insert therefore
+ * ignores a conflict, and MikroORM re-reads the row afterwards, so the loser
+ * works with the winner's values instead of the empty row it tried to write.
+ * `merge`, the default conflict action, would overwrite them instead.
+ *
+ * @param em The entity manager to read and write through.
+ * @param entity The entity class to load.
+ * @param where The primary-key filter identifying the row.
+ * @param data The row to insert when `where` matches nothing.
+ * @returns The managed row, holding the values that are in the database.
+ */
+export async function getOrCreateStateRow<T extends object>(
+  em: EntityManager,
+  entity: EntityClass<T>,
+  where: FilterQuery<T>,
+  data: EntityData<T>,
+): Promise<T> {
+  const existing = await em.findOne(entity, where);
+  if (existing) {
+    return existing;
+  }
+
+  return em.upsert(entity, data, {onConflictAction: 'ignore'});
 }

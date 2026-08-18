@@ -13,6 +13,9 @@ import {
 } from '@google/adk';
 import {MikroORM} from '@mikro-orm/core';
 import {SqliteDriver} from '@mikro-orm/sqlite';
+import {mkdir, mkdtemp, rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {isDatabaseConnectionString} from '../../src/sessions/database_session_service.js';
 import {validateDatabaseSchemaVersion} from '../../src/sessions/db/operations.js';
@@ -30,11 +33,7 @@ describe('DatabaseSessionService', () => {
   });
 
   afterEach(async () => {
-    // MikroORM closing
-    const orm = (service as unknown as {orm: MikroORM}).orm;
-    if (orm) {
-      await orm.close();
-    }
+    await service.close();
   });
 
   it('should create a session', async () => {
@@ -700,6 +699,129 @@ describe('DatabaseSessionService', () => {
       })) as {id: string; updateTime: Date};
 
       expect(storedSession.updateTime.getTime()).toBe(timestamp);
+    });
+  });
+
+  describe('close', () => {
+    function newService() {
+      return new DatabaseSessionService({
+        dbName: ':memory:',
+        driver: SqliteDriver,
+        allowGlobalContext: true,
+      });
+    }
+
+    it('closes a service that never connected', async () => {
+      await expect(newService().close()).resolves.toBeUndefined();
+    });
+
+    it('reconnects on the next call after a close', async () => {
+      const reopened = newService();
+
+      try {
+        await reopened.createSession({
+          appName: 'reopen-app',
+          userId: 'u1',
+          sessionId: 's0',
+        });
+        await reopened.close();
+
+        const session = await reopened.createSession({
+          appName: 'reopen-app',
+          userId: 'u1',
+          sessionId: 's1',
+        });
+
+        expect(session.id).toBe('s1');
+      } finally {
+        await reopened.close();
+      }
+    });
+  });
+
+  describe('concurrent createSession', () => {
+    const sessionIds = ['s0', 's1', 's2', 's3', 's4'];
+
+    it('creates every session when calls race for one app and user', async () => {
+      const appName = 'race-app';
+      const userId = 'race-user';
+
+      const created = await Promise.all(
+        sessionIds.map((sessionId) =>
+          service.createSession({appName, userId, sessionId}),
+        ),
+      );
+
+      expect(created.map((s) => s.id).sort()).toEqual(sessionIds);
+      const listed = await service.listSessions({appName, userId});
+      expect(listed.sessions.map((s) => s.id).sort()).toEqual(sessionIds);
+    });
+
+    it('creates every session when calls race for one app across users', async () => {
+      const appName = 'race-app-multi-user';
+
+      const created = await Promise.all(
+        sessionIds.map((sessionId, index) =>
+          service.createSession({
+            appName,
+            userId: `user${index}`,
+            sessionId,
+          }),
+        ),
+      );
+
+      expect(created.map((s) => s.id).sort()).toEqual(sessionIds);
+      const listed = await service.listSessions({appName});
+      expect(listed.sessions.map((s) => s.id).sort()).toEqual(sessionIds);
+    });
+
+    it('allows init to be retried after the connection fails', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'adk-session-race-'));
+      const dbPath = join(root, 'session.db');
+      // A directory in the database file's place makes the first connection
+      // fail; removing it lets the retry succeed.
+      await mkdir(dbPath);
+      const retryService = new DatabaseSessionService(`sqlite://${dbPath}`);
+
+      try {
+        await expect(retryService.init()).rejects.toThrow();
+
+        await rm(dbPath, {recursive: true});
+        await retryService.init();
+        const session = await retryService.createSession({
+          appName: 'race-app-retry',
+          userId: 'race-user',
+          sessionId: 's0',
+        });
+
+        expect(session.id).toBe('s0');
+      } finally {
+        await retryService.close();
+        await rm(root, {recursive: true, force: true});
+      }
+    });
+
+    it('initialises once when calls race on a fresh service', async () => {
+      const appName = 'race-app-cold';
+      const userId = 'race-user';
+      const coldService = new DatabaseSessionService({
+        dbName: ':memory:',
+        driver: SqliteDriver,
+        allowGlobalContext: true,
+      });
+
+      try {
+        await Promise.all(
+          sessionIds.map((sessionId) =>
+            coldService.createSession({appName, userId, sessionId}),
+          ),
+        );
+
+        const listed = await coldService.listSessions({appName, userId});
+        expect(listed.sessions.map((s) => s.id).sort()).toEqual(sessionIds);
+      } finally {
+        await coldService.close();
+      }
     });
   });
 });
