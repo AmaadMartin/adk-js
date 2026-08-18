@@ -219,8 +219,11 @@ function compileField(
 
 /**
  * Resolves a local JSON Pointer (`#/properties/foo`) against `document`.
+ *
+ * Throws when the pointer is external or dangling. Exported for other
+ * converters in this package; not part of the public API.
  */
-function resolvePointer(document: unknown, ref: string): unknown {
+export function resolvePointer(document: unknown, ref: string): unknown {
   if (!ref.startsWith('#')) {
     throw UNRESOLVABLE_REF;
   }

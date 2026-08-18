@@ -8,11 +8,11 @@ import {Type} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {toGeminiSchema} from '../../src/utils/gemini_schema_util.js';
 
-interface MCPToolSchema {
+type MCPToolSchema = {
   type: 'object';
   properties?: Record<string, unknown>;
   required?: string[];
-}
+};
 
 describe('toGeminiSchema', () => {
   it('converts a simple object schema with explicit type', () => {
@@ -502,9 +502,7 @@ describe('toGeminiSchema', () => {
   }
 
   it('resolves a $defs $ref to the referenced definition', () => {
-    const schema = toGeminiSchema(
-      domainPayloadSchema() as unknown as MCPToolSchema,
-    );
+    const schema = toGeminiSchema(domainPayloadSchema());
 
     expect(schema?.properties?.['payload']).toEqual(expectedDomainPayload);
   });
@@ -542,7 +540,7 @@ describe('toGeminiSchema', () => {
       type: 'object',
     };
 
-    const schema = toGeminiSchema(input as unknown as MCPToolSchema);
+    const schema = toGeminiSchema(input);
 
     expect(schema?.properties?.['payload']).toEqual(expectedDomainPayload);
   });
@@ -554,7 +552,7 @@ describe('toGeminiSchema', () => {
       items: {$ref: '#/$defs/Item'},
     };
 
-    const schema = toGeminiSchema(input as unknown as MCPToolSchema);
+    const schema = toGeminiSchema(input);
 
     expect(schema).toEqual({type: Type.ARRAY, items: {type: Type.STRING}});
   });
@@ -566,7 +564,7 @@ describe('toGeminiSchema', () => {
       properties: {a: {$ref: '#/$defs/Thing', description: 'from sibling'}},
     };
 
-    const schema = toGeminiSchema(input as unknown as MCPToolSchema);
+    const schema = toGeminiSchema(input);
 
     expect(schema?.properties?.['a']).toEqual({
       type: Type.STRING,
@@ -581,11 +579,9 @@ describe('toGeminiSchema', () => {
       properties: {a: {$ref: '#/$defs/Missing'}},
     };
 
-    expect(() =>
-      toGeminiSchema(input as unknown as MCPToolSchema),
-    ).not.toThrow();
+    expect(() => toGeminiSchema(input)).not.toThrow();
 
-    const schema = toGeminiSchema(input as unknown as MCPToolSchema);
+    const schema = toGeminiSchema(input);
 
     expect(schema?.properties?.['a']).toEqual({
       type: Type.OBJECT,
@@ -608,7 +604,7 @@ describe('toGeminiSchema', () => {
       type: 'object',
     };
 
-    const schema = toGeminiSchema(input as unknown as MCPToolSchema);
+    const schema = toGeminiSchema(input);
 
     expect(schema?.properties?.['tree']).toEqual({
       type: Type.OBJECT,
@@ -648,7 +644,7 @@ describe('toGeminiSchema', () => {
       type: 'object',
     };
 
-    const schema = toGeminiSchema(input as unknown as MCPToolSchema);
+    const schema = toGeminiSchema(input);
 
     expect(schema?.properties?.['root']).toEqual({
       anyOf: [
@@ -695,7 +691,7 @@ describe('toGeminiSchema', () => {
       type: 'object',
     };
 
-    const schema = toGeminiSchema(input as unknown as MCPToolSchema);
+    const schema = toGeminiSchema(input);
 
     expect(schema?.properties?.['a']).toEqual({
       type: Type.OBJECT,
@@ -707,23 +703,54 @@ describe('toGeminiSchema', () => {
     });
   });
 
-  it('prefers $defs over definitions on a key collision', () => {
+  it('resolves each dialect block through its own pointer', () => {
     const input = {
       $defs: {Shared: {type: 'integer'}},
       definitions: {Shared: {type: 'string'}},
       type: 'object',
-      properties: {a: {$ref: '#/definitions/Shared'}},
+      properties: {
+        a: {$ref: '#/$defs/Shared'},
+        b: {$ref: '#/definitions/Shared'},
+      },
     };
 
-    const schema = toGeminiSchema(input as unknown as MCPToolSchema);
+    const schema = toGeminiSchema(input);
 
     expect(schema?.properties?.['a']).toEqual({type: Type.INTEGER});
+    expect(schema?.properties?.['b']).toEqual({type: Type.STRING});
+  });
+
+  it('leaves an external $ref untouched', () => {
+    const input = {
+      type: 'object',
+      properties: {a: {$ref: 'https://example.com/schema.json#/Thing'}},
+    };
+
+    const schema = toGeminiSchema(input);
+
+    expect(schema?.properties?.['a']).toEqual({
+      type: Type.OBJECT,
+      properties: {},
+    });
+  });
+
+  it('leaves a $ref that points at a non-schema value untouched', () => {
+    const input = {
+      type: 'object',
+      title: 'not a schema',
+      properties: {a: {$ref: '#/title'}},
+    };
+
+    const schema = toGeminiSchema(input);
+
+    expect(schema?.properties?.['a']).toEqual({
+      type: Type.OBJECT,
+      properties: {},
+    });
   });
 
   it('drops the definition blocks from the returned schema', () => {
-    const schema = toGeminiSchema(
-      domainPayloadSchema() as unknown as MCPToolSchema,
-    );
+    const schema = toGeminiSchema(domainPayloadSchema());
 
     if (!schema) {
       expect.fail('toGeminiSchema returned undefined');
@@ -736,23 +763,27 @@ describe('toGeminiSchema', () => {
     const input = domainPayloadSchema();
     const snapshot = structuredClone(input);
 
-    toGeminiSchema(input as unknown as MCPToolSchema);
+    toGeminiSchema(input);
 
     expect(input).toEqual(snapshot);
   });
 
-  it('treats a property named $ref as a schema, not a pointer', () => {
+  it('traverses a property named $ref instead of resolving it', () => {
     const input = {
+      $defs: {Thing: {type: 'string'}},
       type: 'object',
-      properties: {$ref: {type: 'string'}},
+      properties: {
+        $ref: {type: 'object', properties: {inner: {$ref: '#/$defs/Thing'}}},
+      },
     };
 
-    expect(() =>
-      toGeminiSchema(input as unknown as MCPToolSchema),
-    ).not.toThrow();
+    expect(() => toGeminiSchema(input)).not.toThrow();
 
-    const schema = toGeminiSchema(input as unknown as MCPToolSchema);
+    const schema = toGeminiSchema(input);
 
-    expect(schema?.properties?.['$ref']).toEqual({type: Type.STRING});
+    expect(schema?.properties?.['$ref']).toEqual({
+      type: Type.OBJECT,
+      properties: {inner: {type: Type.STRING}},
+    });
   });
 });

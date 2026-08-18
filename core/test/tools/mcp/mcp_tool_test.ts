@@ -182,15 +182,13 @@ describe('MCPTool', () => {
       },
     };
 
-    const mockSessionManager = {
-      createSession: vi.fn(),
-      closeSession: vi.fn(),
-    } as unknown as MCPSessionManager;
+    // A real session manager: building a declaration never opens a session.
+    const sessionManager = new MCPSessionManager({
+      type: 'StreamableHTTPConnectionParams',
+      url: 'http://localhost/mcp',
+    });
 
-    const declaration = new MCPTool(
-      mockTool,
-      mockSessionManager,
-    )._getDeclaration();
+    const declaration = new MCPTool(mockTool, sessionManager)._getDeclaration();
 
     expect(declaration.parameters?.properties?.['payload']).toEqual({
       type: Type.OBJECT,
