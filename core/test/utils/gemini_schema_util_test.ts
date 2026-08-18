@@ -439,7 +439,7 @@ describe('toGeminiSchema', () => {
     });
   });
 
-  it('yields an empty enum when every string enum member is null', () => {
+  it('omits the enum when every string enum member is null', () => {
     const input = {
       type: 'string' as const,
       enum: [null],
@@ -449,7 +449,6 @@ describe('toGeminiSchema', () => {
 
     expect(schema).toEqual({
       type: Type.STRING,
-      enum: [],
     });
   });
 
@@ -464,6 +463,60 @@ describe('toGeminiSchema', () => {
     expect(schema).toEqual({
       type: Type.INTEGER,
       enum: ['1', '2'],
+    });
+  });
+
+  it('drops a null member from an enum whose type stays unspecified', () => {
+    const input = {
+      enum: ['a', null],
+    };
+
+    const schema = toGeminiSchema(input as unknown as MCPToolSchema);
+
+    // The null member still counts toward the mixed-type inference, so the
+    // schema is not narrowed to STRING.
+    expect(schema).toEqual({
+      type: Type.TYPE_UNSPECIFIED,
+      enum: ['a'],
+    });
+  });
+
+  it('drops an undefined member from an enum whose type stays unspecified', () => {
+    const input = {
+      enum: ['a', undefined],
+    };
+
+    const schema = toGeminiSchema(input as unknown as MCPToolSchema);
+
+    expect(schema).toEqual({
+      type: Type.TYPE_UNSPECIFIED,
+      enum: ['a'],
+    });
+  });
+
+  it('drops a null member from an unspecified enum on array items', () => {
+    const input = {
+      type: 'array' as const,
+      items: {enum: ['a', null]},
+    };
+
+    const schema = toGeminiSchema(input as unknown as MCPToolSchema);
+
+    expect(schema).toEqual({
+      type: Type.ARRAY,
+      items: {type: Type.TYPE_UNSPECIFIED, enum: ['a']},
+    });
+  });
+
+  it('omits the enum on a const-only schema with a null value', () => {
+    const input = {
+      const: null,
+    };
+
+    const schema = toGeminiSchema(input as unknown as MCPToolSchema);
+
+    expect(schema).toEqual({
+      type: Type.TYPE_UNSPECIFIED,
     });
   });
 
