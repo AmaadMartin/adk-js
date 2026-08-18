@@ -10,6 +10,7 @@ import {
   createEvent,
   createEventActions,
   createSession,
+  Event,
   InMemorySessionService,
   InvocationContext,
   LlmAgent,
@@ -31,6 +32,36 @@ vi.mock('../../src/runner/runner.js', async (importOriginal) => {
     })),
   };
 });
+
+/** Makes the mocked sub-agent run yield `events`, in order. */
+function mockSubAgentRun(events: Event[]) {
+  vi.mocked(Runner).mockImplementation(
+    (config) =>
+      ({
+        appName: config?.appName,
+        sessionService: config?.sessionService,
+        runAsync: async function* () {
+          yield* events;
+        },
+      }) as unknown as Runner,
+  );
+}
+
+/** A tool context whose parent invocation runs `agent`. */
+function createToolContext(agent: LlmAgent): Context {
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'test-invocation',
+      agent,
+      session: createSession({
+        id: 'parent-session',
+        appName: agent.name,
+        userId: 'parent-user',
+      }),
+      pluginManager: new PluginManager([]),
+    }),
+  });
+}
 
 describe('AgentTool', () => {
   it('propagates session context and state delta', async () => {
@@ -513,55 +544,24 @@ describe('AgentTool', () => {
   });
 
   it('returns the last content when a state-only event ends the run', async () => {
-    const mockAgent = {
-      name: 'sub-agent',
-    } as unknown as LlmAgent;
-
-    const tool = new AgentTool({agent: mockAgent});
-
-    const session = createSession({
-      id: 'parent-session',
-      appName: 'sub-agent',
-      userId: 'parent-user',
-    });
-
-    const invocationContext = new InvocationContext({
-      invocationId: 'test-invocation',
-      agent: mockAgent,
-      session,
-      pluginManager: new PluginManager([]),
-    });
-
-    const toolContext = new Context({
-      invocationContext,
-    });
-
+    const agent = new LlmAgent({name: 'sub-agent'});
+    const toolContext = createToolContext(agent);
     vi.spyOn(toolContext.state, 'update');
 
     // The trailing event has the shape BaseAgent emits when an after-agent
     // callback only mutates state.
-    const mockRunAsync = async function* () {
-      yield createEvent({
+    mockSubAgentRun([
+      createEvent({
         author: 'sub-agent',
         content: {role: 'model', parts: [{text: 'the real answer'}]},
-      });
-      yield createEvent({
+      }),
+      createEvent({
         author: 'sub-agent',
-        actions: createEventActions({
-          stateDelta: {reviewed: 'true'},
-        }),
-      });
-    };
+        actions: createEventActions({stateDelta: {reviewed: 'true'}}),
+      }),
+    ]);
 
-    vi.mocked(Runner).mockImplementation((config) => {
-      return {
-        appName: config?.appName,
-        sessionService: config?.sessionService,
-        runAsync: mockRunAsync,
-      } as unknown as Runner;
-    });
-
-    const result = await tool.runAsync({
+    const result = await new AgentTool({agent}).runAsync({
       args: {request: 'hello'},
       toolContext,
     });
@@ -571,151 +571,59 @@ describe('AgentTool', () => {
   });
 
   it('returns the last content when an error-message event ends the run', async () => {
-    const mockAgent = {
-      name: 'sub-agent',
-    } as unknown as LlmAgent;
-
-    const tool = new AgentTool({agent: mockAgent});
-
-    const session = createSession({
-      id: 'parent-session',
-      appName: 'sub-agent',
-      userId: 'parent-user',
-    });
-
-    const invocationContext = new InvocationContext({
-      invocationId: 'test-invocation',
-      agent: mockAgent,
-      session,
-      pluginManager: new PluginManager([]),
-    });
-
-    const toolContext = new Context({
-      invocationContext,
-    });
-
-    const mockRunAsync = async function* () {
-      yield createEvent({
+    const agent = new LlmAgent({name: 'sub-agent'});
+    mockSubAgentRun([
+      createEvent({
         author: 'sub-agent',
         content: {role: 'model', parts: [{text: 'the real answer'}]},
-      });
-      yield createEvent({
+      }),
+      createEvent({
         author: 'sub-agent',
         errorMessage: 'MALFORMED_FUNCTION_CALL',
-      });
-    };
+      }),
+    ]);
 
-    vi.mocked(Runner).mockImplementation((config) => {
-      return {
-        appName: config?.appName,
-        sessionService: config?.sessionService,
-        runAsync: mockRunAsync,
-      } as unknown as Runner;
-    });
-
-    const result = await tool.runAsync({
+    const result = await new AgentTool({agent}).runAsync({
       args: {request: 'hello'},
-      toolContext,
+      toolContext: createToolContext(agent),
     });
 
     expect(result).toBe('the real answer');
   });
 
   it('returns an empty string when no event carried content', async () => {
-    const mockAgent = {
-      name: 'sub-agent',
-    } as unknown as LlmAgent;
-
-    const tool = new AgentTool({agent: mockAgent});
-
-    const session = createSession({
-      id: 'parent-session',
-      appName: 'sub-agent',
-      userId: 'parent-user',
-    });
-
-    const invocationContext = new InvocationContext({
-      invocationId: 'test-invocation',
-      agent: mockAgent,
-      session,
-      pluginManager: new PluginManager([]),
-    });
-
-    const toolContext = new Context({
-      invocationContext,
-    });
-
-    const mockRunAsync = async function* () {
-      yield createEvent({
+    const agent = new LlmAgent({name: 'sub-agent'});
+    mockSubAgentRun([
+      createEvent({
         author: 'sub-agent',
-        actions: createEventActions({
-          stateDelta: {reviewed: 'true'},
-        }),
-      });
-    };
+        actions: createEventActions({stateDelta: {reviewed: 'true'}}),
+      }),
+    ]);
 
-    vi.mocked(Runner).mockImplementation((config) => {
-      return {
-        appName: config?.appName,
-        sessionService: config?.sessionService,
-        runAsync: mockRunAsync,
-      } as unknown as Runner;
-    });
-
-    const result = await tool.runAsync({
+    const result = await new AgentTool({agent}).runAsync({
       args: {request: 'hello'},
-      toolContext,
+      toolContext: createToolContext(agent),
     });
 
     expect(result).toBe('');
   });
 
   it('returns the newer content when two content events end the run', async () => {
-    const mockAgent = {
-      name: 'sub-agent',
-    } as unknown as LlmAgent;
-
-    const tool = new AgentTool({agent: mockAgent});
-
-    const session = createSession({
-      id: 'parent-session',
-      appName: 'sub-agent',
-      userId: 'parent-user',
-    });
-
-    const invocationContext = new InvocationContext({
-      invocationId: 'test-invocation',
-      agent: mockAgent,
-      session,
-      pluginManager: new PluginManager([]),
-    });
-
-    const toolContext = new Context({
-      invocationContext,
-    });
-
-    const mockRunAsync = async function* () {
-      yield createEvent({
+    const agent = new LlmAgent({name: 'sub-agent'});
+    mockSubAgentRun([
+      createEvent({
         author: 'sub-agent',
         content: {role: 'model', parts: [{text: 'first answer'}]},
-      });
-      yield createEvent({
+      }),
+      createEvent({
         author: 'sub-agent',
         content: {role: 'model', parts: [{text: 'second answer'}]},
-      });
-    };
+      }),
+    ]);
 
-    vi.mocked(Runner).mockImplementation((config) => {
-      return {
-        appName: config?.appName,
-        sessionService: config?.sessionService,
-        runAsync: mockRunAsync,
-      } as unknown as Runner;
-    });
-
-    const result = await tool.runAsync({
+    const result = await new AgentTool({agent}).runAsync({
       args: {request: 'hello'},
-      toolContext,
+      toolContext: createToolContext(agent),
     });
 
     expect(result).toBe('second answer');
