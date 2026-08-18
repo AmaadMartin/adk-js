@@ -197,22 +197,18 @@ export class AgentTool extends BaseTool {
       lastEvent = event;
     }
 
-    // An error message tells the calling model why the sub-agent produced
-    // nothing, so it is preferred over an empty result.
-    if (!lastEvent?.content?.parts?.length) {
-      return lastErrorMessage ?? '';
-    }
-
     const hasOutputSchema = isLlmAgent(this.agent) && this.agent.outputSchema;
     // Exclude thoughts from the merged text.
-    const mergedText = lastEvent.content.parts
+    const mergedText = (lastEvent?.content?.parts ?? [])
       .filter((part) => !part.thought)
       .map((part) => part.text)
       .filter((text) => text)
       .join('\n');
 
-    if (!mergedText && lastErrorMessage) {
-      return lastErrorMessage;
+    // An error message tells the calling model why the sub-agent produced
+    // nothing, so it is preferred over an empty result.
+    if (!mergedText) {
+      return lastErrorMessage ?? '';
     }
 
     // TODO - b/425992518: In case of output schema, the output should be

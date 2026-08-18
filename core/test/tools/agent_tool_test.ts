@@ -18,6 +18,7 @@ import {
   State,
 } from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
+import {z} from 'zod';
 
 vi.mock('../../src/runner/runner.js', async (importOriginal) => {
   const actual =
@@ -698,5 +699,52 @@ describe('AgentTool', () => {
     });
 
     expect(result).toBe('final answer');
+  });
+
+  it('returns an empty string for empty output under an output schema', async () => {
+    const subAgent = new LlmAgent({
+      name: 'sub-agent',
+      model: 'gemini-2.5-flash',
+      outputSchema: z.object({answer: z.string()}),
+    });
+
+    const tool = new AgentTool({agent: subAgent});
+
+    const session = createSession({
+      id: 'parent-session',
+      appName: 'sub-agent',
+      userId: 'parent-user',
+    });
+
+    const invocationContext = new InvocationContext({
+      invocationId: 'test-invocation',
+      agent: subAgent,
+      session,
+      pluginManager: new PluginManager([]),
+    });
+
+    const toolContext = new Context({invocationContext});
+
+    const mockRunAsync = async function* () {
+      yield createEvent({
+        author: 'sub-agent',
+        content: {role: 'model', parts: [{text: 'thinking', thought: true}]},
+      });
+    };
+
+    vi.mocked(Runner).mockImplementation((config) => {
+      return {
+        appName: config?.appName,
+        sessionService: config?.sessionService,
+        runAsync: mockRunAsync,
+      } as unknown as Runner;
+    });
+
+    const result = await tool.runAsync({
+      args: {request: 'hello'},
+      toolContext,
+    });
+
+    expect(result).toBe('');
   });
 });
