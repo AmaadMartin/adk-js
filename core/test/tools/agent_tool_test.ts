@@ -605,9 +605,10 @@ describe('AgentTool', () => {
 
     const forwarded = await captureNestedRunConfig(tool, toolContext);
 
+    expect(forwarded).toEqual({supportCfc: false, maxLlmCalls: 7});
+    expect(forwarded).not.toBe(callerRunConfig);
     expect(toolContext.invocationContext.runConfig).toBe(callerRunConfig);
     expect(callerRunConfig.supportCfc).toBe(true);
-    expect(forwarded).not.toBe(callerRunConfig);
   });
 
   it('omits runConfig when the caller has none', async () => {
