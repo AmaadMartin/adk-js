@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {Event} from '@google/adk';
+import type {Event, RunConfig} from '@google/adk';
 import {
   AgentTool,
   Context,
@@ -18,6 +18,7 @@ import {
   Runner,
   SequentialAgent,
   State,
+  StreamingMode,
 } from '@google/adk';
 import type {Content, Schema} from '@google/genai';
 import {Type} from '@google/genai';
@@ -51,8 +52,48 @@ function mockSubAgentRun(events: Event[]) {
   );
 }
 
-/** A tool context whose parent invocation runs `agent`. */
-function createToolContext(agent: LlmAgent): Context {
+/**
+ * Runs `tool` with a stubbed nested Runner and returns the RunConfig that
+ * `AgentTool` handed to that Runner.
+ */
+async function captureNestedRunConfig(
+  tool: AgentTool,
+  toolContext: Context,
+): Promise<RunConfig | undefined> {
+  let captured: RunConfig | undefined;
+
+  vi.mocked(Runner).mockImplementation(
+    (config) =>
+      ({
+        appName: config?.appName,
+        sessionService: config?.sessionService,
+        async *runAsync(params: {runConfig?: RunConfig}) {
+          captured = params.runConfig;
+          yield createEvent({
+            author: 'sub-agent',
+            content: {role: 'model', parts: [{text: 'done'}]},
+          });
+        },
+      }) as unknown as Runner,
+  );
+
+  await tool.runAsync({args: {request: 'go'}, toolContext});
+
+  return captured;
+}
+
+/** Builds an AgentTool over a stub sub-agent. */
+function createAgentTool(): AgentTool {
+  return new AgentTool({agent: createSubAgent()});
+}
+
+/** A stub sub-agent. AgentTool only reads its name. */
+function createSubAgent(): LlmAgent {
+  return new LlmAgent({name: 'sub-agent'});
+}
+
+/** A tool context whose parent invocation runs `agent` with `runConfig`. */
+function createToolContext(agent: LlmAgent, runConfig?: RunConfig): Context {
   return new Context({
     invocationContext: new InvocationContext({
       invocationId: 'test-invocation',
@@ -63,6 +104,8 @@ function createToolContext(agent: LlmAgent): Context {
         userId: 'parent-user',
       }),
       pluginManager: new PluginManager([]),
+      sessionService: new InMemorySessionService(),
+      runConfig,
     }),
   });
 }
@@ -866,6 +909,61 @@ describe('AgentTool', () => {
     });
 
     expect(result).toBe('second answer');
+  });
+
+  it("forwards the caller's run config to the nested runner", async () => {
+    const tool = createAgentTool();
+    const callerRunConfig: RunConfig = {
+      maxLlmCalls: 7,
+      streamingMode: StreamingMode.SSE,
+    };
+
+    const forwarded = await captureNestedRunConfig(
+      tool,
+      createToolContext(createSubAgent(), callerRunConfig),
+    );
+
+    expect(forwarded).toMatchObject({
+      maxLlmCalls: 7,
+      streamingMode: StreamingMode.SSE,
+    });
+  });
+
+  it('does not forward supportCfc to the nested runner', async () => {
+    const tool = createAgentTool();
+    const callerRunConfig: RunConfig = {supportCfc: true, maxLlmCalls: 7};
+
+    const forwarded = await captureNestedRunConfig(
+      tool,
+      createToolContext(createSubAgent(), callerRunConfig),
+    );
+
+    expect(forwarded?.supportCfc).toBe(false);
+    expect(forwarded?.maxLlmCalls).toBe(7);
+  });
+
+  it("leaves the caller's run config unmutated", async () => {
+    const tool = createAgentTool();
+    const callerRunConfig: RunConfig = {supportCfc: true, maxLlmCalls: 7};
+    const toolContext = createToolContext(createSubAgent(), callerRunConfig);
+
+    const forwarded = await captureNestedRunConfig(tool, toolContext);
+
+    expect(forwarded).toEqual({supportCfc: false, maxLlmCalls: 7});
+    expect(forwarded).not.toBe(callerRunConfig);
+    expect(toolContext.invocationContext.runConfig).toBe(callerRunConfig);
+    expect(callerRunConfig.supportCfc).toBe(true);
+  });
+
+  it('forwards only supportCfc: false when the caller has no run config', async () => {
+    const tool = createAgentTool();
+
+    const forwarded = await captureNestedRunConfig(
+      tool,
+      createToolContext(createSubAgent()),
+    );
+
+    expect(forwarded).toEqual({supportCfc: false});
   });
 });
 
