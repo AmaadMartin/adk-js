@@ -71,7 +71,7 @@ function createAgentTool(): AgentTool {
 
 /** A stub sub-agent. AgentTool only reads its name. */
 function createSubAgent(): LlmAgent {
-  return {name: 'sub-agent'} as unknown as LlmAgent;
+  return new LlmAgent({name: 'sub-agent'});
 }
 
 /** Builds a tool context whose invocation carries `runConfig`. */
@@ -616,11 +616,11 @@ describe('AgentTool', () => {
     expect(callerRunConfig.supportCfc).toBe(true);
   });
 
-  it('omits runConfig when the caller has none', async () => {
+  it('forwards only supportCfc: false when the caller has no run config', async () => {
     const tool = createAgentTool();
 
     const forwarded = await captureNestedRunConfig(tool, createToolContext());
 
-    expect(forwarded).toBeUndefined();
+    expect(forwarded).toEqual({supportCfc: false});
   });
 });
