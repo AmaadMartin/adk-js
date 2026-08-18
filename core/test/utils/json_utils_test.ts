@@ -8,6 +8,14 @@ import {describe, expect, it} from 'vitest';
 import {stripJsonCodeFence} from '../../src/utils/json_utils.js';
 
 const PAYLOAD = '{"a":1}';
+const FENCE = '```';
+
+/**
+ * The measured cost on these inputs is under a millisecond, so this leaves
+ * three orders of magnitude of headroom for a slow or loaded CI machine, and
+ * still sits far below the seconds a backtracking implementation takes.
+ */
+const BACKTRACKING_BUDGET_MILLIS = 500;
 
 describe('stripJsonCodeFence', () => {
   it('strips a json-tagged code fence', () => {
@@ -59,5 +67,35 @@ describe('stripJsonCodeFence', () => {
 
   it('returns an empty string for an empty fence', () => {
     expect(stripJsonCodeFence('```\n```')).toBe('');
+  });
+
+  it('returns a fence closed by only three backticks', () => {
+    expect(stripJsonCodeFence('``````')).toBe('');
+  });
+
+  it('returns a lone fence delimiter unchanged', () => {
+    expect(stripJsonCodeFence(FENCE)).toBe(FENCE);
+  });
+
+  // Both inputs below defeated a regex implementation of this helper, which
+  // backtracked catastrophically and blocked the thread for 20 s and 17 s
+  // respectively. Matching must stay linear: model text reaches this helper
+  // unfiltered, and it runs on the single Node thread. Sizes are chosen so a
+  // reintroduced regression reports a failed assertion rather than hanging.
+  describe('runs in linear time on an unclosed fence', () => {
+    const cases: Record<string, string> = {
+      'a long whitespace run': `${FENCE}json\n${' '.repeat(4_000)}x`,
+      'a long word-character run': `${FENCE}${'a'.repeat(100_000)}`,
+    };
+
+    for (const [name, text] of Object.entries(cases)) {
+      it(name, () => {
+        const start = performance.now();
+        expect(stripJsonCodeFence(text)).toBe(text);
+        expect(performance.now() - start).toBeLessThan(
+          BACKTRACKING_BUDGET_MILLIS,
+        );
+      });
+    }
   });
 });
