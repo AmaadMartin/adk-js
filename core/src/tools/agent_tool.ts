@@ -197,7 +197,7 @@ export class AgentTool extends BaseTool {
       return '';
     }
 
-    const hasOutputSchema = isLlmAgent(this.agent) && this.agent.outputSchema;
+    const subAgent = isLlmAgent(this.agent) ? this.agent : undefined;
     // Exclude thoughts from the merged text.
     const mergedText = lastEvent.content.parts
       .filter((part) => !part.thought)
@@ -205,8 +205,25 @@ export class AgentTool extends BaseTool {
       .filter((text) => text)
       .join('\n');
 
-    // TODO - b/425992518: In case of output schema, the output should be
-    // validated. Consider similar logic to one we have in Python ADK.
-    return hasOutputSchema ? JSON.parse(mergedText) : mergedText;
+    if (!subAgent?.outputSchema) {
+      return mergedText;
+    }
+
+    // `JSON.parse` stays outside the try below: malformed JSON is a different
+    // failure from a well-formed reply that breaks the schema.
+    const parsed = JSON.parse(mergedText);
+    try {
+      return subAgent.validateOutput(parsed);
+    } catch (error) {
+      // A reply that violates the declared schema fails the tool call, so the
+      // calling model gets an error response instead of data the declaration
+      // promised was schema-shaped. Mirrors adk-python's `validate_schema` in
+      // `src/google/adk/tools/agent_tool.py`.
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `Output of tool '${this.name}' does not satisfy its output schema: ${message}`,
+        {cause: error},
+      );
+    }
   }
 }
