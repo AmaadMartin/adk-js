@@ -439,7 +439,7 @@ describe('toGeminiSchema', () => {
     });
   });
 
-  it('yields an empty enum when every string enum member is null', () => {
+  it('omits the enum when every string enum member is null', () => {
     const input = {
       type: 'string' as const,
       enum: [null],
@@ -449,7 +449,6 @@ describe('toGeminiSchema', () => {
 
     expect(schema).toEqual({
       type: Type.STRING,
-      enum: [],
     });
   });
 
@@ -509,7 +508,7 @@ describe('toGeminiSchema', () => {
     });
   });
 
-  it('handles const-only schema with null value', () => {
+  it('omits the enum on a const-only schema with a null value', () => {
     const input = {
       const: null,
     };
@@ -518,7 +517,6 @@ describe('toGeminiSchema', () => {
 
     expect(schema).toEqual({
       type: Type.TYPE_UNSPECIFIED,
-      enum: [],
     });
   });
 
