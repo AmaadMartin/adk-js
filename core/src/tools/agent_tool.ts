@@ -169,6 +169,7 @@ export class AgentTool extends BaseTool {
     }
 
     let lastEvent: Event | undefined;
+    let lastErrorMessage: string | undefined;
     for await (const event of runner.runAsync({
       userId: session.userId,
       sessionId: session.id,
@@ -190,11 +191,16 @@ export class AgentTool extends BaseTool {
         }
       }
 
+      if (event.errorMessage) {
+        lastErrorMessage = event.errorMessage;
+      }
       lastEvent = event;
     }
 
+    // An error message tells the calling model why the sub-agent produced
+    // nothing, so it is preferred over an empty result.
     if (!lastEvent?.content?.parts?.length) {
-      return '';
+      return lastErrorMessage ?? '';
     }
 
     const hasOutputSchema = isLlmAgent(this.agent) && this.agent.outputSchema;
@@ -204,6 +210,10 @@ export class AgentTool extends BaseTool {
       .map((part) => part.text)
       .filter((text) => text)
       .join('\n');
+
+    if (!mergedText && lastErrorMessage) {
+      return lastErrorMessage;
+    }
 
     // TODO - b/425992518: In case of output schema, the output should be
     // validated. Consider similar logic to one we have in Python ADK.

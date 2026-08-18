@@ -511,4 +511,192 @@ describe('AgentTool', () => {
       `${State.TEMP_PREFIX}tempKey`,
     );
   });
+
+  it('returns the error message when the final event has no content parts', async () => {
+    const mockAgent = {
+      name: 'sub-agent',
+    } as unknown as LlmAgent;
+
+    const tool = new AgentTool({agent: mockAgent});
+
+    const session = createSession({
+      id: 'parent-session',
+      appName: 'sub-agent',
+      userId: 'parent-user',
+    });
+
+    const invocationContext = new InvocationContext({
+      invocationId: 'test-invocation',
+      agent: mockAgent,
+      session,
+      pluginManager: new PluginManager([]),
+    });
+
+    const toolContext = new Context({invocationContext});
+
+    const mockRunAsync = async function* () {
+      yield createEvent({
+        author: 'sub-agent',
+        errorMessage: 'A2A request failed: 503',
+      });
+    };
+
+    vi.mocked(Runner).mockImplementation((config) => {
+      return {
+        appName: config?.appName,
+        sessionService: config?.sessionService,
+        runAsync: mockRunAsync,
+      } as unknown as Runner;
+    });
+
+    const result = await tool.runAsync({
+      args: {request: 'hello'},
+      toolContext,
+    });
+
+    expect(result).toBe('A2A request failed: 503');
+  });
+
+  it('returns the error message when the final content is only thoughts', async () => {
+    const mockAgent = {
+      name: 'sub-agent',
+    } as unknown as LlmAgent;
+
+    const tool = new AgentTool({agent: mockAgent});
+
+    const session = createSession({
+      id: 'parent-session',
+      appName: 'sub-agent',
+      userId: 'parent-user',
+    });
+
+    const invocationContext = new InvocationContext({
+      invocationId: 'test-invocation',
+      agent: mockAgent,
+      session,
+      pluginManager: new PluginManager([]),
+    });
+
+    const toolContext = new Context({invocationContext});
+
+    const mockRunAsync = async function* () {
+      yield createEvent({
+        author: 'sub-agent',
+        errorMessage: 'A2A request failed: 503',
+      });
+      yield createEvent({
+        author: 'sub-agent',
+        content: {
+          role: 'model',
+          parts: [{text: 'thinking', thought: true}, {text: ''}],
+        },
+      });
+    };
+
+    vi.mocked(Runner).mockImplementation((config) => {
+      return {
+        appName: config?.appName,
+        sessionService: config?.sessionService,
+        runAsync: mockRunAsync,
+      } as unknown as Runner;
+    });
+
+    const result = await tool.runAsync({
+      args: {request: 'hello'},
+      toolContext,
+    });
+
+    expect(result).toBe('A2A request failed: 503');
+  });
+
+  it('returns an empty string when there is no content and no error message', async () => {
+    const mockAgent = {
+      name: 'sub-agent',
+    } as unknown as LlmAgent;
+
+    const tool = new AgentTool({agent: mockAgent});
+
+    const session = createSession({
+      id: 'parent-session',
+      appName: 'sub-agent',
+      userId: 'parent-user',
+    });
+
+    const invocationContext = new InvocationContext({
+      invocationId: 'test-invocation',
+      agent: mockAgent,
+      session,
+      pluginManager: new PluginManager([]),
+    });
+
+    const toolContext = new Context({invocationContext});
+
+    const mockRunAsync = async function* () {
+      yield createEvent({author: 'sub-agent'});
+    };
+
+    vi.mocked(Runner).mockImplementation((config) => {
+      return {
+        appName: config?.appName,
+        sessionService: config?.sessionService,
+        runAsync: mockRunAsync,
+      } as unknown as Runner;
+    });
+
+    const result = await tool.runAsync({
+      args: {request: 'hello'},
+      toolContext,
+    });
+
+    expect(result).toBe('');
+  });
+
+  it("prefers the sub-agent's content over an earlier error message", async () => {
+    const mockAgent = {
+      name: 'sub-agent',
+    } as unknown as LlmAgent;
+
+    const tool = new AgentTool({agent: mockAgent});
+
+    const session = createSession({
+      id: 'parent-session',
+      appName: 'sub-agent',
+      userId: 'parent-user',
+    });
+
+    const invocationContext = new InvocationContext({
+      invocationId: 'test-invocation',
+      agent: mockAgent,
+      session,
+      pluginManager: new PluginManager([]),
+    });
+
+    const toolContext = new Context({invocationContext});
+
+    const mockRunAsync = async function* () {
+      yield createEvent({
+        author: 'sub-agent',
+        errorMessage: 'transient model error',
+      });
+      yield createEvent({
+        author: 'sub-agent',
+        content: {role: 'model', parts: [{text: 'final answer'}]},
+      });
+    };
+
+    vi.mocked(Runner).mockImplementation((config) => {
+      return {
+        appName: config?.appName,
+        sessionService: config?.sessionService,
+        runAsync: mockRunAsync,
+      } as unknown as Runner;
+    });
+
+    const result = await tool.runAsync({
+      args: {request: 'hello'},
+      toolContext,
+    });
+
+    expect(result).toBe('final answer');
+  });
 });
