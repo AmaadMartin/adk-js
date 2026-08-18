@@ -10,6 +10,7 @@ import {
   MCPSessionManager,
   MCPTool,
 } from '@google/adk';
+import {Type} from '@google/genai';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {Tool} from '@modelcontextprotocol/sdk/types.js';
 import {describe, expect, it, vi} from 'vitest';
@@ -161,5 +162,37 @@ describe('MCPTool', () => {
 
     // Assert that closeSession was still called despite the error
     expect(mockSessionManager.closeSession).toHaveBeenCalledWith(mockClient);
+  });
+
+  it('declares oneOf branches and a default array item type', () => {
+    const mcpTool: Tool = {
+      name: 'search',
+      description: 'A test tool',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          filter: {oneOf: [{type: 'string'}, {type: 'integer'}]},
+          tags: {type: 'array'},
+        },
+        required: ['filter'],
+      },
+    };
+
+    const tool = new MCPTool(
+      mcpTool,
+      new MCPSessionManager({
+        type: 'StdioConnectionParams',
+        serverParams: {command: 'test-server'},
+      }),
+    );
+
+    expect(tool._getDeclaration().parameters).toEqual({
+      type: Type.OBJECT,
+      properties: {
+        filter: {anyOf: [{type: Type.STRING}, {type: Type.INTEGER}]},
+        tags: {type: Type.ARRAY, items: {type: Type.STRING}},
+      },
+      required: ['filter'],
+    });
   });
 });
