@@ -17,8 +17,22 @@ import {
   LlmResponse,
   PluginManager,
 } from '@google/adk';
+import {trace} from '@opentelemetry/api';
 import {MeterProvider} from '@opentelemetry/sdk-metrics';
-import {afterEach, beforeEach, describe, expect, it} from 'vitest';
+import {
+  BasicTracerProvider,
+  InMemorySpanExporter,
+  SimpleSpanProcessor,
+} from '@opentelemetry/sdk-trace-base';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+} from 'vitest';
 import {z} from 'zod';
 
 import {Workflow} from '../../src/workflow/workflow.js';
@@ -115,10 +129,27 @@ async function sumsByAgent(name: string): Promise<Map<string, number>> {
   return sums;
 }
 
+const spanExporter = new InMemorySpanExporter();
+const tracerProvider = new BasicTracerProvider({
+  spanProcessors: [new SimpleSpanProcessor(spanExporter)],
+});
+
 describe('metric recording sites', () => {
   let provider: MeterProvider;
 
+  // The tracer resolved by `tracing.ts` caches its delegate the first time it
+  // is used, so the provider has to be in place before any span is taken.
+  beforeAll(() => {
+    trace.setGlobalTracerProvider(tracerProvider);
+  });
+
+  afterAll(async () => {
+    await tracerProvider.shutdown();
+    trace.disable();
+  });
+
   beforeEach(() => {
+    spanExporter.reset();
     provider = installMeterProvider();
   });
 
@@ -300,5 +331,23 @@ describe('metric recording sites', () => {
       'broken_workflow',
     );
     expect(dataPoint.attributes['error.type']).toBeDefined();
+  });
+
+  it('emits both the invoke_workflow span and its duration metric', async () => {
+    const workflow = new Workflow({
+      name: 'traced_workflow',
+      edges: [['START', new FnNode('leaf', () => 'done')]],
+    });
+
+    await driveWorkflow(workflow);
+
+    expect(spanExporter.getFinishedSpans().map((span) => span.name)).toContain(
+      'invoke_workflow traced_workflow',
+    );
+    expect(
+      (await collectDataPoint('gen_ai.invoke_workflow.duration')).attributes[
+        'gen_ai.workflow.name'
+      ],
+    ).toBe('traced_workflow');
   });
 });

@@ -195,7 +195,8 @@ async function callToolAsync(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
 ): Promise<any> {
   const startTime = performance.now();
-  const agentName = toolContext.invocationContext.agent.name;
+  // A node can run without an agent, and telemetry must not break that run.
+  const agentName = toolContext.invocationContext.agent?.name ?? '';
   const toolName = tool.name;
   // e.g. FunctionTool, matching the gen_ai.tool.type span attribute.
   const toolType = tool.constructor.name;
