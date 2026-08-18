@@ -64,14 +64,22 @@ async function captureNestedRunConfig(
   return captured;
 }
 
+/** Builds an AgentTool over a stub sub-agent. */
+function createAgentTool(): AgentTool {
+  return new AgentTool({agent: createSubAgent()});
+}
+
+/** A stub sub-agent. AgentTool only reads its name. */
+function createSubAgent(): LlmAgent {
+  return {name: 'sub-agent'} as unknown as LlmAgent;
+}
+
 /** Builds a tool context whose invocation carries `runConfig`. */
 function createToolContext(runConfig?: RunConfig): Context {
-  const mockAgent = {name: 'sub-agent'} as unknown as LlmAgent;
-
   return new Context({
     invocationContext: new InvocationContext({
       invocationId: 'test-invocation',
-      agent: mockAgent,
+      agent: createSubAgent(),
       session: createSession({
         id: 'parent-session',
         appName: 'sub-agent',
@@ -565,8 +573,7 @@ describe('AgentTool', () => {
   });
 
   it("forwards the caller's run config to the nested runner", async () => {
-    const mockAgent = {name: 'sub-agent'} as unknown as LlmAgent;
-    const tool = new AgentTool({agent: mockAgent});
+    const tool = createAgentTool();
     const callerRunConfig: RunConfig = {
       maxLlmCalls: 7,
       streamingMode: StreamingMode.SSE,
@@ -584,8 +591,7 @@ describe('AgentTool', () => {
   });
 
   it('does not forward supportCfc to the nested runner', async () => {
-    const mockAgent = {name: 'sub-agent'} as unknown as LlmAgent;
-    const tool = new AgentTool({agent: mockAgent});
+    const tool = createAgentTool();
     const callerRunConfig: RunConfig = {supportCfc: true, maxLlmCalls: 7};
 
     const forwarded = await captureNestedRunConfig(
@@ -598,8 +604,7 @@ describe('AgentTool', () => {
   });
 
   it("leaves the caller's run config unmutated", async () => {
-    const mockAgent = {name: 'sub-agent'} as unknown as LlmAgent;
-    const tool = new AgentTool({agent: mockAgent});
+    const tool = createAgentTool();
     const callerRunConfig: RunConfig = {supportCfc: true, maxLlmCalls: 7};
     const toolContext = createToolContext(callerRunConfig);
 
@@ -612,8 +617,7 @@ describe('AgentTool', () => {
   });
 
   it('omits runConfig when the caller has none', async () => {
-    const mockAgent = {name: 'sub-agent'} as unknown as LlmAgent;
-    const tool = new AgentTool({agent: mockAgent});
+    const tool = createAgentTool();
 
     const forwarded = await captureNestedRunConfig(tool, createToolContext());
 
