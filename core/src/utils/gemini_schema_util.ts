@@ -131,12 +131,11 @@ export function toGeminiSchema(mcpSchema?: MCPToolSchema): Schema | undefined {
     }
 
     if (mcp.enum) {
-      const members = mcp.enum as unknown[];
-      // A null member of a string enum carries nullability, not a value.
-      // Rendering it would offer the model the literal string 'null'.
-      geminiSchema.enum = (
-        geminiType === Type.STRING ? members.filter((v) => v != null) : members
-      ).map(String);
+      // A null member carries nullability, not a value, whatever the resolved
+      // type is. Rendering it would offer the model the literal string 'null'.
+      geminiSchema.enum = (mcp.enum as unknown[])
+        .filter((v) => v !== null && v !== undefined)
+        .map(String);
     }
 
     if (isNullable && mcp.type !== 'null') {

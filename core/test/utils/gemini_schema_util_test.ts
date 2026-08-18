@@ -467,6 +467,61 @@ describe('toGeminiSchema', () => {
     });
   });
 
+  it('drops a null member from an enum whose type stays unspecified', () => {
+    const input = {
+      enum: ['a', null],
+    };
+
+    const schema = toGeminiSchema(input as unknown as MCPToolSchema);
+
+    // The null member still counts toward the mixed-type inference, so the
+    // schema is not narrowed to STRING.
+    expect(schema).toEqual({
+      type: Type.TYPE_UNSPECIFIED,
+      enum: ['a'],
+    });
+  });
+
+  it('drops an undefined member from an enum whose type stays unspecified', () => {
+    const input = {
+      enum: ['a', undefined],
+    };
+
+    const schema = toGeminiSchema(input as unknown as MCPToolSchema);
+
+    expect(schema).toEqual({
+      type: Type.TYPE_UNSPECIFIED,
+      enum: ['a'],
+    });
+  });
+
+  it('drops a null member from an unspecified enum on array items', () => {
+    const input = {
+      type: 'array' as const,
+      items: {enum: ['a', null]},
+    };
+
+    const schema = toGeminiSchema(input as unknown as MCPToolSchema);
+
+    expect(schema).toEqual({
+      type: Type.ARRAY,
+      items: {type: Type.TYPE_UNSPECIFIED, enum: ['a']},
+    });
+  });
+
+  it('handles const-only schema with null value', () => {
+    const input = {
+      const: null,
+    };
+
+    const schema = toGeminiSchema(input as unknown as MCPToolSchema);
+
+    expect(schema).toEqual({
+      type: Type.TYPE_UNSPECIFIED,
+      enum: [],
+    });
+  });
+
   it('handles const-only schema with string value', () => {
     const input = {
       const: 'fixed-value',
