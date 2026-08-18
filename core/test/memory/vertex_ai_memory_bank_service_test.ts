@@ -6,6 +6,8 @@
 
 import {Client} from '@google-cloud/vertexai';
 import {
+  addMemory,
+  BaseMemoryService,
   createEvent,
   createSession,
   Event,
@@ -321,6 +323,23 @@ describe('VertexAiMemoryBankService', () => {
           memories: [{content: {parts: [{text: '   '}]} as Content}],
         }),
       ).rejects.toThrow('must include non-whitespace text.');
+    });
+
+    it('writes through the addMemory helper', async () => {
+      const memoryService: BaseMemoryService = service;
+
+      await addMemory(memoryService, {
+        appName: 'test-app',
+        userId: 'test-user',
+        memories: [{content: {parts: [{text: 'fact 1'}]}}],
+      });
+
+      expect(mockMemories.createInternal).toHaveBeenCalledWith(
+        expect.objectContaining({
+          fact: 'fact 1',
+          scope: {app_name: 'test-app', user_id: 'test-user'},
+        }),
+      );
     });
   });
 

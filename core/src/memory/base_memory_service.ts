@@ -63,6 +63,26 @@ export interface AddEventsToMemoryRequest {
 }
 
 /**
+ * The parameters for `addMemory`.
+ */
+export interface AddMemoryRequest {
+  /** The app name the memory is scoped to. */
+  appName: string;
+
+  /** The user ID the memory is scoped to. */
+  userId: string;
+
+  /** The explicit memory items to write. */
+  memories: MemoryEntry[];
+
+  /**
+   * Optional, portable metadata for the memory write. Supported keys are
+   * defined by each memory service.
+   */
+  customMetadata?: Record<string, unknown>;
+}
+
+/**
  * Base interface for memory services.
  *
  * The service provides functionalities to ingest sessions into memory so that
@@ -94,6 +114,21 @@ export interface BaseMemoryService {
    * @return A promise that resolves when the events are added to the memory.
    */
   addEventsToMemory?(request: AddEventsToMemoryRequest): Promise<void>;
+
+  /**
+   * Adds explicit memory items directly to the memory.
+   *
+   * Intended for services that support direct memory writes in addition to
+   * event-based memory generation.
+   *
+   * Optional: a service that cannot take a direct write opts out by not
+   * implementing it, mirroring the `NotImplementedError` default in
+   * adk-python's `BaseMemoryService.add_memory`.
+   *
+   * @param request The request to add memories.
+   * @return A promise that resolves when the memories are added.
+   */
+  addMemory?(request: AddMemoryRequest): Promise<void>;
 
   /**
    * Searches for sessions that match the query.
@@ -131,4 +166,32 @@ export async function addEventsToMemory(
     throw new Error(EVENT_DELTAS_UNSUPPORTED_MESSAGE);
   }
   await service.addEventsToMemory(request);
+}
+
+/** The error message reported when a service cannot take a direct write. */
+export const DIRECT_MEMORY_WRITES_UNSUPPORTED_MESSAGE =
+  'This memory service does not support direct memory writes. ' +
+  'Call addEventsToMemory(...) or addSessionToMemory(session) instead.';
+
+/**
+ * Writes memories to `service`, rejecting when the service does not accept
+ * direct writes.
+ *
+ * `addMemory` is optional on {@link BaseMemoryService}, so calling it through
+ * `service.addMemory?.(...)` turns a service's opt-out into a silent no-op and
+ * the write is lost. Callers that need the write to happen go through this
+ * instead.
+ *
+ * @param service The memory service to write to.
+ * @param request The request to add memories.
+ * @return A promise that resolves when the memories are added.
+ */
+export async function addMemory(
+  service: BaseMemoryService,
+  request: AddMemoryRequest,
+): Promise<void> {
+  if (!service.addMemory) {
+    throw new Error(DIRECT_MEMORY_WRITES_UNSUPPORTED_MESSAGE);
+  }
+  await service.addMemory(request);
 }

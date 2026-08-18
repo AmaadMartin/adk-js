@@ -189,11 +189,14 @@ export {
 } from './examples/base_example_provider.js';
 export type {Example} from './examples/example.js';
 export {
+  DIRECT_MEMORY_WRITES_UNSUPPORTED_MESSAGE,
   EVENT_DELTAS_UNSUPPORTED_MESSAGE,
   addEventsToMemory,
+  addMemory,
 } from './memory/base_memory_service.js';
 export type {
   AddEventsToMemoryRequest,
+  AddMemoryRequest,
   BaseMemoryService,
   SearchMemoryRequest,
   SearchMemoryResponse,
