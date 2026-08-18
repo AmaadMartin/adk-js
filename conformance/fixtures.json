@@ -184,11 +184,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [
       {
         "author": "user",
@@ -2173,13 +2169,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null,
-        null,
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [],
     "expectsError": null,
     "skipReason": "multi-agent (3 authors); topology not recorded",
@@ -4234,7 +4224,7 @@
     },
     "priorEvents": [],
     "expectsError": null,
-    "skipReason": "known divergence: adk-python merges a text part into the tool-response event; adk-js emits functionResponse alone",
+    "skipReason": "tool-response event carries extra parts; an AgentTool a FunctionTool stub cannot reproduce",
     "replayable": false
   },
   {
@@ -4986,12 +4976,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null,
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [
       {
         "author": "user",
@@ -6253,10 +6238,6 @@
       }
     ],
     "toolResponses": {
-      "transfer_to_agent": [
-        null,
-        null
-      ],
       "roll_die": [
         {
           "result": 2
@@ -6562,12 +6543,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null,
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [],
     "expectsError": null,
     "skipReason": "multi-agent (2 authors); topology not recorded",
@@ -8782,12 +8758,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null,
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [],
     "expectsError": null,
     "skipReason": "multi-agent (3 authors); topology not recorded",
@@ -11654,11 +11625,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [
       {
         "author": "user",
@@ -12102,11 +12069,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [],
     "expectsError": null,
     "skipReason": "multi-agent (2 authors); topology not recorded",
@@ -12655,7 +12618,7 @@
       }
     ],
     "expectsError": null,
-    "skipReason": "known divergence: tool dispatch and turn shape both differ after a tool result",
+    "skipReason": "known divergence: undiagnosed: turn shape and tool dispatch differ after a tool result (increase_by_one)",
     "replayable": false
   },
   {
@@ -15916,13 +15879,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null,
-        null,
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [],
     "expectsError": {
       "msg": "Cannot transfer from 'sub_agent_1_1' to unrelated agent 'sub_agent_2'.\nAvailable agents: root_agent, sub_agent_1, sub_agent_1_1, sub_agent_2",
@@ -16591,11 +16548,7 @@
         "output": "custom: None"
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [],
     "expectsError": null,
     "skipReason": "topology not recoverable from the trace (Workflow)",
@@ -17389,11 +17342,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [
       {
         "author": "user",
@@ -18881,12 +18830,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null,
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [
       {
         "author": "user",
@@ -22185,40 +22129,6 @@
         {
           "result": 2
         }
-      ],
-      "adk_request_credential": [
-        {
-          "authScheme": {
-            "flows": {
-              "authorizationCode": {
-                "authorizationUrl": "https://accounts.google.com/o/oauth2/auth",
-                "scopes": {
-                  "https://www.googleapis.com/auth/calendar": "See, edit, share, and permanently delete all the calendars you can access using Google Calendar"
-                },
-                "tokenUrl": "https://oauth2.googleapis.com/token"
-              }
-            },
-            "type": "SecuritySchemeType.oauth2"
-          },
-          "credentialKey": "adk_oauth2_940bec0684e5c82f_oauth2_94feefa6a3df4bac",
-          "exchangedAuthCredential": {
-            "authType": "oauth2",
-            "oauth2": {
-              "accessToken": "token1",
-              "clientId": "oauth_client_id_1",
-              "clientSecret": "oauth_client_secret1",
-              "tokenEndpointAuthMethod": "client_secret_basic"
-            }
-          },
-          "rawAuthCredential": {
-            "authType": "oauth2",
-            "oauth2": {
-              "clientId": "oauth_client_id_1",
-              "clientSecret": "oauth_client_secret1",
-              "tokenEndpointAuthMethod": "client_secret_basic"
-            }
-          }
-        }
       ]
     },
     "priorEvents": [
@@ -22536,7 +22446,7 @@
       }
     ],
     "expectsError": null,
-    "skipReason": "known divergence: adk-python merges a text part into the tool-response event; adk-js emits functionResponse alone",
+    "skipReason": "known divergence: undiagnosed: turn shape differs; adk_request_credential appears in the seeded history but is not called in this invocation",
     "replayable": false
   },
   {
@@ -24465,12 +24375,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null,
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [],
     "expectsError": {
       "msg": "Agent 'sub_agent_1' cannot transfer to itself.",
@@ -24769,11 +24674,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [],
     "expectsError": null,
     "skipReason": "multi-agent (2 authors); topology not recorded",
@@ -25175,9 +25076,6 @@
       }
     ],
     "toolResponses": {
-      "transfer_to_agent": [
-        null
-      ],
       "sub_agent_tool": [
         {
           "result": "ok"
@@ -25830,11 +25728,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [],
     "expectsError": null,
     "skipReason": "multi-agent (2 authors); topology not recorded",
@@ -27240,12 +27134,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null,
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [],
     "expectsError": null,
     "skipReason": "multi-agent (3 authors); topology not recorded",
@@ -27441,9 +27330,6 @@
       }
     ],
     "toolResponses": {
-      "transfer_to_agent": [
-        null
-      ],
       "exit_loop": [
         null
       ]
@@ -27669,7 +27555,7 @@
       }
     ],
     "expectsError": null,
-    "skipReason": "known divergence: tool dispatch and turn shape both differ after a tool result",
+    "skipReason": "known divergence: undiagnosed: turn shape and tool dispatch differ after a tool result (increase_by_one)",
     "replayable": false
   },
   {
@@ -32038,9 +31924,6 @@
       }
     ],
     "toolResponses": {
-      "transfer_to_agent": [
-        null
-      ],
       "exit_loop": [
         null
       ]
@@ -32615,9 +32498,6 @@
       }
     ],
     "toolResponses": {
-      "transfer_to_agent": [
-        null
-      ],
       "sub_agent_tool": [
         {
           "result": "ok"
@@ -32781,12 +32661,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null,
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [],
     "expectsError": null,
     "skipReason": "multi-agent (3 authors); topology not recorded",
@@ -34206,12 +34081,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null,
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [],
     "expectsError": null,
     "skipReason": "multi-agent (5 authors); topology not recorded",
@@ -34413,7 +34283,7 @@
       }
     ],
     "expectsError": null,
-    "skipReason": "known divergence: tool dispatch and turn shape both differ after a tool result",
+    "skipReason": "known divergence: undiagnosed: turn shape and tool dispatch differ after a tool result (increase_by_one)",
     "replayable": false
   },
   {
@@ -35723,7 +35593,7 @@
       }
     ],
     "expectsError": null,
-    "skipReason": "known divergence: tool dispatch and turn shape both differ after a tool result",
+    "skipReason": "known divergence: undiagnosed: turn shape and tool dispatch differ after a tool result (increase_by_one)",
     "replayable": false
   },
   {
@@ -37117,13 +36987,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null,
-        null,
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [],
     "expectsError": null,
     "skipReason": "multi-agent (3 authors); topology not recorded",
@@ -38336,12 +38200,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null,
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [],
     "expectsError": null,
     "skipReason": "multi-agent (3 authors); topology not recorded",
@@ -44007,12 +43866,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null,
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [
       {
         "author": "user",
@@ -44575,12 +44429,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null,
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [
       {
         "author": "user",
@@ -46395,11 +46244,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [
       {
         "author": "user",
@@ -47569,7 +47414,7 @@
       }
     ],
     "expectsError": null,
-    "skipReason": "known divergence: turn shape differs after a tool result",
+    "skipReason": "known divergence: undiagnosed: turn shape differs after a tool result (call_external_api1/2)",
     "replayable": false
   },
   {
@@ -48554,11 +48399,6 @@
         {
           "result": "Account ACC123 closed successfully."
         }
-      ],
-      "adk_request_confirmation": [
-        {
-          "confirmed": true
-        }
       ]
     },
     "priorEvents": [
@@ -48758,7 +48598,7 @@
       }
     ],
     "expectsError": null,
-    "skipReason": "known divergence: turn shape differs after a tool result",
+    "skipReason": "known divergence: undiagnosed: turn shape differs; adk_request_confirmation appears in the seeded history but is not called in this invocation",
     "replayable": false
   },
   {
@@ -53513,7 +53353,7 @@
       }
     ],
     "expectsError": null,
-    "skipReason": "known divergence: turn shape differs after a tool result",
+    "skipReason": "known divergence: undiagnosed: turn shape differs after a tool result (transfer_funds/close_account)",
     "replayable": false
   },
   {
@@ -55247,13 +55087,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null,
-        null,
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [
       {
         "author": "user",
@@ -55841,11 +55675,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [
       {
         "author": "user",
@@ -56922,10 +56752,6 @@
       }
     ],
     "toolResponses": {
-      "transfer_to_agent": [
-        null,
-        null
-      ],
       "get_account_status": [
         {
           "result": "Account ACC-123 is active."
@@ -56982,12 +56808,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null,
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [
       {
         "author": "user",
@@ -57564,11 +57385,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [
       {
         "author": "user",
@@ -57954,14 +57771,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null,
-        null,
-        null,
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [
       {
         "author": "user",
@@ -60578,13 +60388,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null,
-        null,
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [],
     "expectsError": null,
     "skipReason": "multi-agent (4 authors); topology not recorded",
@@ -65572,11 +65376,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [
       {
         "author": "user",
@@ -67398,12 +67198,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null,
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [
       {
         "author": "user",
@@ -67804,7 +67599,7 @@
       }
     ],
     "expectsError": null,
-    "skipReason": "known divergence: tool dispatch and turn shape both differ after a tool result",
+    "skipReason": "known divergence: undiagnosed: turn shape and tool dispatch differ after a tool result (increase_by_one)",
     "replayable": false
   },
   {
@@ -69476,12 +69271,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null,
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [],
     "expectsError": null,
     "skipReason": "multi-agent (3 authors); topology not recorded",
@@ -69960,9 +69750,6 @@
       }
     ],
     "toolResponses": {
-      "transfer_to_agent": [
-        null
-      ],
       "get_account_status": [
         {
           "result": "Account ACC-123 is active."
@@ -70638,11 +70425,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [],
     "expectsError": null,
     "skipReason": "multi-agent (2 authors); topology not recorded",
@@ -71707,7 +71490,7 @@
     },
     "priorEvents": [],
     "expectsError": null,
-    "skipReason": "known divergence: turn shape differs after a tool result",
+    "skipReason": "tool-response event carries extra parts; an AgentTool a FunctionTool stub cannot reproduce",
     "replayable": false
   },
   {
@@ -72767,9 +72550,6 @@
       }
     ],
     "toolResponses": {
-      "transfer_to_agent": [
-        null
-      ],
       "exit_loop": [
         null
       ]
@@ -74410,11 +74190,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [],
     "expectsError": null,
     "skipReason": "multi-agent (3 authors); topology not recorded",
@@ -75148,11 +74924,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [],
     "expectsError": null,
     "skipReason": "multi-agent (4 authors); topology not recorded",
@@ -75487,7 +75259,7 @@
     },
     "priorEvents": [],
     "expectsError": null,
-    "skipReason": "known divergence: turn shape differs after a tool result",
+    "skipReason": "tool-response event carries extra parts; an AgentTool a FunctionTool stub cannot reproduce",
     "replayable": false
   },
   {
@@ -75873,7 +75645,7 @@
       }
     ],
     "expectsError": null,
-    "skipReason": "known divergence: tool dispatch and turn shape both differ after a tool result",
+    "skipReason": "known divergence: undiagnosed: turn shape and tool dispatch differ after a tool result (increase_by_one)",
     "replayable": false
   },
   {
@@ -75925,13 +75697,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null,
-        null,
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [
       {
         "author": "user",
@@ -78559,11 +78325,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [],
     "expectsError": null,
     "skipReason": "multi-agent (2 authors); topology not recorded",
@@ -78773,11 +78535,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [
       {
         "author": "user",
@@ -79594,12 +79352,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null,
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [],
     "expectsError": null,
     "skipReason": "multi-agent (3 authors); topology not recorded",
@@ -79946,12 +79699,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null,
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [
       {
         "author": "user",
@@ -85978,12 +85726,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null,
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [
       {
         "author": "user",
@@ -86251,11 +85994,6 @@
         },
         {
           "result": "confirmed=True"
-        }
-      ],
-      "adk_request_confirmation": [
-        {
-          "confirmed": true
         }
       ]
     },
@@ -88185,12 +87923,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null,
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [
       {
         "author": "user",
@@ -88448,11 +88181,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [
       {
         "author": "user",
@@ -88621,11 +88350,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [],
     "expectsError": null,
     "skipReason": "multi-agent (2 authors); topology not recorded",
@@ -90327,10 +90052,6 @@
       }
     ],
     "toolResponses": {
-      "transfer_to_agent": [
-        null,
-        null
-      ],
       "get_account_status": [
         {
           "result": "Account ACC-123 is active."
@@ -91291,11 +91012,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [],
     "expectsError": null,
     "skipReason": "multi-agent (2 authors); topology not recorded",
@@ -91794,12 +91511,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null,
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [],
     "expectsError": null,
     "skipReason": "multi-agent (2 authors); topology not recorded",
@@ -91984,12 +91696,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null,
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [],
     "expectsError": null,
     "skipReason": "multi-agent (3 authors); topology not recorded",
@@ -92480,12 +92187,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null,
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [
       {
         "author": "user",
@@ -94220,9 +93922,6 @@
       }
     ],
     "toolResponses": {
-      "transfer_to_agent": [
-        null
-      ],
       "roll_die": [
         {
           "result": 2
@@ -95364,9 +95063,6 @@
       }
     ],
     "toolResponses": {
-      "transfer_to_agent": [
-        null
-      ],
       "exit_loop": [
         null
       ]
@@ -96672,13 +96368,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null,
-        null,
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [],
     "expectsError": null,
     "skipReason": "multi-agent (3 authors); topology not recorded",
@@ -98019,9 +97709,6 @@
     "toolResponses": {
       "update_session_state": [
         null,
-        null
-      ],
-      "transfer_to_agent": [
         null
       ]
     },
@@ -99832,11 +99519,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [
       {
         "author": "user",
@@ -101359,12 +101042,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null,
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [],
     "expectsError": null,
     "skipReason": "multi-agent (3 authors); topology not recorded",
@@ -101701,13 +101379,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null,
-        null,
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [
       {
         "author": "user",
@@ -102139,12 +101811,7 @@
         }
       }
     ],
-    "toolResponses": {
-      "transfer_to_agent": [
-        null,
-        null
-      ]
-    },
+    "toolResponses": {},
     "priorEvents": [],
     "expectsError": null,
     "skipReason": "multi-agent (6 authors); topology not recorded",
