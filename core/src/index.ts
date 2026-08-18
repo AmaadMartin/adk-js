@@ -117,6 +117,7 @@ export type {
   CrewaiToolOptions,
 } from './integrations/crewai/crewai_tool.js';
 export * from './telemetry/agent_engine.js';
+export * from './telemetry/agent_engine_metrics.js';
 export * from './telemetry/google_cloud.js';
 export * from './telemetry/setup.js';
 export {toMcpServer} from './tools/mcp/agent_to_mcp.js';
