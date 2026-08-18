@@ -238,10 +238,6 @@ export class AgentTool extends BaseTool {
       .filter((text) => text)
       .join('\n');
 
-    // TODO - b/425992518: In case of output schema, the output should be
-    // validated. Consider similar logic to one we have in Python ADK.
-    const result = hasOutputSchema ? JSON.parse(mergedText) : mergedText;
-
     if (this.propagateGroundingMetadata && lastGroundingMetadata) {
       toolContext.state.set(
         GROUNDING_METADATA_STATE_KEY,
@@ -249,6 +245,8 @@ export class AgentTool extends BaseTool {
       );
     }
 
-    return result;
+    // TODO - b/425992518: In case of output schema, the output should be
+    // validated. Consider similar logic to one we have in Python ADK.
+    return hasOutputSchema ? JSON.parse(mergedText) : mergedText;
   }
 }
