@@ -95,14 +95,22 @@ export class DatabaseSessionService extends BaseSessionService {
    * `this.orm` while earlier callers still write through their own fork.
    */
   async init(): Promise<void> {
-    if (!this.initPromise) {
-      this.initPromise = this.connect().catch((error: unknown) => {
-        this.initPromise = undefined;
-        throw error;
-      });
-    }
+    this.initPromise ??= this.connect().catch((error: unknown) => {
+      this.initPromise = undefined;
+      throw error;
+    });
 
     return this.initPromise;
+  }
+
+  /**
+   * Closes the database connection pool.
+   *
+   * The service reconnects on the next call, so a closed service stays usable.
+   */
+  async close(): Promise<void> {
+    await this.orm?.close();
+    this.initPromise = undefined;
   }
 
   private async connect(): Promise<void> {

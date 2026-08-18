@@ -33,11 +33,7 @@ describe('DatabaseSessionService', () => {
   });
 
   afterEach(async () => {
-    // MikroORM closing
-    const orm = (service as unknown as {orm: MikroORM}).orm;
-    if (orm) {
-      await orm.close();
-    }
+    await service.close();
   });
 
   it('should create a session', async () => {
@@ -706,6 +702,43 @@ describe('DatabaseSessionService', () => {
     });
   });
 
+  describe('close', () => {
+    function newService() {
+      return new DatabaseSessionService({
+        dbName: ':memory:',
+        driver: SqliteDriver,
+        allowGlobalContext: true,
+      });
+    }
+
+    it('closes a service that never connected', async () => {
+      await expect(newService().close()).resolves.toBeUndefined();
+    });
+
+    it('reconnects on the next call after a close', async () => {
+      const reopened = newService();
+
+      try {
+        await reopened.createSession({
+          appName: 'reopen-app',
+          userId: 'u1',
+          sessionId: 's0',
+        });
+        await reopened.close();
+
+        const session = await reopened.createSession({
+          appName: 'reopen-app',
+          userId: 'u1',
+          sessionId: 's1',
+        });
+
+        expect(session.id).toBe('s1');
+      } finally {
+        await reopened.close();
+      }
+    });
+  });
+
   describe('concurrent createSession', () => {
     const sessionIds = ['s0', 's1', 's2', 's3', 's4'];
 
@@ -763,10 +796,7 @@ describe('DatabaseSessionService', () => {
 
         expect(session.id).toBe('s0');
       } finally {
-        const orm = (retryService as unknown as {orm?: MikroORM}).orm;
-        if (orm) {
-          await orm.close();
-        }
+        await retryService.close();
         await rm(root, {recursive: true, force: true});
       }
     });
@@ -790,8 +820,7 @@ describe('DatabaseSessionService', () => {
         const listed = await coldService.listSessions({appName, userId});
         expect(listed.sessions.map((s) => s.id).sort()).toEqual(sessionIds);
       } finally {
-        // The service owns its ORM and exposes no way to close it yet.
-        await (coldService as unknown as {orm: MikroORM}).orm.close();
+        await coldService.close();
       }
     });
   });
