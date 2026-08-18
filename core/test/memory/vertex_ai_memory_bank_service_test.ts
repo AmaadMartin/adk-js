@@ -331,7 +331,7 @@ describe('VertexAiMemoryBankService', () => {
       await addMemory(memoryService, {
         appName: 'test-app',
         userId: 'test-user',
-        memories: [{content: {parts: [{text: 'fact 1'}]} as Content}],
+        memories: [{content: {parts: [{text: 'fact 1'}]}}],
       });
 
       expect(mockMemories.createInternal).toHaveBeenCalledWith(

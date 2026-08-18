@@ -123,9 +123,7 @@ export interface BaseMemoryService {
    *
    * Optional: a service that cannot take a direct write opts out by not
    * implementing it, mirroring the `NotImplementedError` default in
-   * adk-python's `BaseMemoryService.add_memory`. A caller that needs the write
-   * to land must handle the opt-out rather than call through `?.`, which drops
-   * it silently.
+   * adk-python's `BaseMemoryService.add_memory`.
    *
    * @param request The request to add memories.
    * @return A promise that resolves when the memories are added.
