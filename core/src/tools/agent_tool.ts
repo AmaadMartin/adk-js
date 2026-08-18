@@ -13,6 +13,7 @@ import type {Event} from '../events/event.js';
 import {InMemoryMemoryService} from '../memory/in_memory_memory_service.js';
 import {Runner} from '../runner/runner.js';
 import {InMemorySessionService} from '../sessions/in_memory_session_service.js';
+import {stripJsonCodeFence} from '../utils/json_utils.js';
 import {GoogleLLMVariant} from '../utils/variant_utils.js';
 
 import {State} from '../sessions/state.js';
@@ -209,6 +210,8 @@ export class AgentTool extends BaseTool {
 
     // TODO - b/425992518: In case of output schema, the output should be
     // validated. Consider similar logic to one we have in Python ADK.
-    return hasOutputSchema ? JSON.parse(mergedText) : mergedText;
+    return hasOutputSchema
+      ? JSON.parse(stripJsonCodeFence(mergedText))
+      : mergedText;
   }
 }
