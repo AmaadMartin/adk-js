@@ -39,6 +39,7 @@ import {LLMRegistry} from '../models/registry.js';
 import {BaseTool, isBaseTool} from '../tools/base_tool.js';
 import {BaseToolset} from '../tools/base_toolset.js';
 
+import {stripJsonCodeFence} from '../utils/json_utils.js';
 import {logger} from '../utils/logger.js';
 import {canUseOutputSchemaWithTools} from '../utils/output_schema_utils.js';
 import {Context} from './context.js';
@@ -737,7 +738,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       }
       let parsed: unknown;
       try {
-        parsed = JSON.parse(resultStr);
+        parsed = JSON.parse(stripJsonCodeFence(resultStr));
       } catch (e) {
         // A model can return malformed JSON. Log and keep the raw text so the
         // failure is visible without dropping the response, exactly as this

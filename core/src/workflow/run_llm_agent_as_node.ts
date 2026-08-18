@@ -20,6 +20,7 @@ import {
   FINISH_TASK_SUCCESS_RESULT,
   FINISH_TASK_TOOL_NAME,
 } from '../tools/finish_task_tool.js';
+import {stripJsonCodeFence} from '../utils/json_utils.js';
 import {isContent} from './base_node.js';
 import {NodeContext} from './node_context.js';
 
@@ -169,7 +170,7 @@ function maybeSetOutput(agent: LlmAgent, event: Event): void {
   let output: unknown = text;
   if (agent.outputSchema && text.trim()) {
     try {
-      output = JSON.parse(text);
+      output = JSON.parse(stripJsonCodeFence(text));
     } catch {
       output = text;
     }
