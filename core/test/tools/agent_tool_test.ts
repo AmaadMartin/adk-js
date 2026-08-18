@@ -621,6 +621,55 @@ describe('AgentTool', () => {
     expect(result).toBe('the real answer');
   });
 
+  it('returns an empty string when no event carried content', async () => {
+    const mockAgent = {
+      name: 'sub-agent',
+    } as unknown as LlmAgent;
+
+    const tool = new AgentTool({agent: mockAgent});
+
+    const session = createSession({
+      id: 'parent-session',
+      appName: 'sub-agent',
+      userId: 'parent-user',
+    });
+
+    const invocationContext = new InvocationContext({
+      invocationId: 'test-invocation',
+      agent: mockAgent,
+      session,
+      pluginManager: new PluginManager([]),
+    });
+
+    const toolContext = new Context({
+      invocationContext,
+    });
+
+    const mockRunAsync = async function* () {
+      yield createEvent({
+        author: 'sub-agent',
+        actions: createEventActions({
+          stateDelta: {reviewed: 'true'},
+        }),
+      });
+    };
+
+    vi.mocked(Runner).mockImplementation((config) => {
+      return {
+        appName: config?.appName,
+        sessionService: config?.sessionService,
+        runAsync: mockRunAsync,
+      } as unknown as Runner;
+    });
+
+    const result = await tool.runAsync({
+      args: {request: 'hello'},
+      toolContext,
+    });
+
+    expect(result).toBe('');
+  });
+
   it('returns the newer content when two content events end the run', async () => {
     const mockAgent = {
       name: 'sub-agent',
