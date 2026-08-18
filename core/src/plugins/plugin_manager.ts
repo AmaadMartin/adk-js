@@ -77,7 +77,7 @@ export class PluginManager {
     if (this.registeredPlugins.has(plugin)) {
       throw new Error(`Plugin '${plugin.name}' already registered.`);
     }
-    if (Array.from(this.registeredPlugins).some((p) => p.name === plugin.name)) {
+    if (this.plugins.some((p) => p.name === plugin.name)) {
       throw new Error(`Plugin with name '${plugin.name}' already registered.`);
     }
 
@@ -94,7 +94,7 @@ export class PluginManager {
    */
   getPlugin(pluginName: string): BasePlugin | undefined {
     // Set operates on strict equality, we only want to match by name
-    return Array.from(this.registeredPlugins).find((p) => p.name === pluginName);
+    return this.plugins.find((p) => p.name === pluginName);
   }
 
   /**
