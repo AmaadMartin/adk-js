@@ -47,21 +47,14 @@ const METER_NAME = 'gcp.vertex.agent';
 const CALL_COUNT_BOUNDARIES = [0, 1, 2, 3, 4, 5, 6, 8, 12, 16, 24, 32, 64];
 
 /**
- * Anthropic models reach ADK either as a bare `claude-*` id or, on Model
- * Garden, as a `claude.*` one.
- */
-const ANTHROPIC_MODEL_PATTERN = /^claude[-.]/i;
-
-/**
- * Leading segments of a resource-path model id, e.g. a Model Garden path like
- * `projects/<p>/locations/<l>/publishers/<pub>/models/<m>` or a tuned-model id
- * like `tunedModels/<id>`. They name a resource collection, never a provider,
- * so the provider-prefix rule must not read one as one.
+ * Segments that can lead a resource-path model id once
+ * {@link extractModelName} has stripped the full Model Garden form, e.g. an
+ * endpoint path `projects/<p>/locations/<l>/endpoints/<id>`, a partial
+ * `publishers/<pub>/models/<m>`, or a tuned-model id `tunedModels/<id>`. They
+ * name a resource collection, never a provider, so the provider-prefix rule
+ * must not read one as one.
  */
 const RESOURCE_COLLECTION_SEGMENTS = new Set([
-  'endpoints',
-  'locations',
-  'models',
   'projects',
   'publishers',
   'tunedmodels',
@@ -218,9 +211,6 @@ function resolveProviderName(model?: string): string {
     return guessGeminiProvider();
   }
   const modelName = extractModelName(model);
-  if (ANTHROPIC_MODEL_PATTERN.test(modelName)) {
-    return 'anthropic';
-  }
   const separatorIndex = modelName.indexOf('/');
   if (separatorIndex > 0) {
     const provider = modelName.slice(0, separatorIndex).toLowerCase();
@@ -268,30 +258,6 @@ export function recordAgentInvocationDuration(
       attributes[ERROR_TYPE] = resolveErrorType(error);
     }
     histogram('agentInvocationDuration').record(elapsedS, attributes);
-  });
-}
-
-/** Records how many model calls one agent invocation made. */
-export function recordInvokeAgentInferenceCalls(
-  agentName: string,
-  count: number,
-): void {
-  safeRecord('invoke agent inference calls', () => {
-    histogram('invokeAgentInferenceCalls').record(count, {
-      [GEN_AI_AGENT_NAME]: agentName,
-    });
-  });
-}
-
-/** Records how many tool calls one agent invocation made. */
-export function recordInvokeAgentToolCalls(
-  agentName: string,
-  count: number,
-): void {
-  safeRecord('invoke agent tool calls', () => {
-    histogram('invokeAgentToolCalls').record(count, {
-      [GEN_AI_AGENT_NAME]: agentName,
-    });
   });
 }
 
@@ -350,8 +316,14 @@ export function flushAgentInvocationTally(
     return;
   }
   tallies.delete(ctx);
-  recordInvokeAgentInferenceCalls(agentName, tally.inferenceCalls);
-  recordInvokeAgentToolCalls(agentName, tally.toolCalls);
+  safeRecord('invoke agent call counts', () => {
+    const attributes: Attributes = {[GEN_AI_AGENT_NAME]: agentName};
+    histogram('invokeAgentInferenceCalls').record(
+      tally.inferenceCalls,
+      attributes,
+    );
+    histogram('invokeAgentToolCalls').record(tally.toolCalls, attributes);
+  });
 }
 
 /**
@@ -435,21 +407,13 @@ export function recordAgentWorkflowSteps(
   });
 }
 
-/**
- * Records the duration of a tool execution, in seconds.
- *
- * @param error The value the tool threw, if it threw one.
- * @param errorType A failure a tool reported in its response without throwing.
- *     A thrown error describes the failure better, so it wins when both are
- *     present.
- */
+/** Records the duration of a tool execution, in seconds. */
 export function recordToolExecutionDuration(
   toolName: string,
   toolType: string,
   agentName: string,
   elapsedS: number,
   error?: unknown,
-  errorType?: string,
 ): void {
   safeRecord('tool execution duration', () => {
     const attributes: Attributes = {
@@ -459,8 +423,6 @@ export function recordToolExecutionDuration(
     };
     if (error !== undefined) {
       attributes[ERROR_TYPE] = resolveErrorType(error);
-    } else if (errorType !== undefined) {
-      attributes[ERROR_TYPE] = errorType;
     }
     histogram('toolExecutionDuration').record(elapsedS, attributes);
   });

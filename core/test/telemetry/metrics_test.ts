@@ -21,8 +21,6 @@ import {
   recordAgentWorkflowSteps,
   recordClientOperationDuration,
   recordClientTokenUsage,
-  recordInvokeAgentInferenceCalls,
-  recordInvokeAgentToolCalls,
   recordToolExecutionDuration,
   recordWorkflowInvocationDuration,
 } from '../../src/telemetry/metrics.js';
@@ -47,6 +45,25 @@ const llmRequest = (model?: string): LlmRequest => ({
   liveConnectConfig: {},
   toolsDict: {},
 });
+
+/**
+ * Records one agent invocation's call counts through the tally, which is the
+ * only path `base_agent.ts` uses to reach the two call-count histograms.
+ */
+function tallyCalls(
+  agentName: string,
+  counts: {inference: number; tool: number},
+): void {
+  const invocation = createIc();
+  beginAgentInvocationTally(invocation);
+  for (let i = 0; i < counts.inference; i++) {
+    countInferenceCall(invocation);
+  }
+  for (let i = 0; i < counts.tool; i++) {
+    countToolCall(invocation);
+  }
+  flushAgentInvocationTally(invocation, agentName);
+}
 
 describe('telemetry metrics', () => {
   beforeEach(() => {
@@ -124,14 +141,14 @@ describe('telemetry metrics', () => {
         unit: '1',
         description: 'Number of inference (model) calls per agent invocation.',
         boundaries: CALL_COUNT_BOUNDARIES,
-        record: () => recordInvokeAgentInferenceCalls('an-agent', 1),
+        record: () => tallyCalls('an-agent', {inference: 1, tool: 0}),
       },
       {
         name: 'gen_ai.invoke_agent.tool_calls',
         unit: '1',
         description: 'Number of tool calls per agent invocation.',
         boundaries: CALL_COUNT_BOUNDARIES,
-        record: () => recordInvokeAgentToolCalls('an-agent', 1),
+        record: () => tallyCalls('an-agent', {inference: 0, tool: 1}),
       },
       {
         name: 'gen_ai.agent.request.size',
@@ -553,47 +570,21 @@ describe('telemetry metrics', () => {
     });
   });
 
-  describe('recordToolExecutionDuration with a reported error type', () => {
-    it('uses an error type the tool reported without throwing', async () => {
-      recordToolExecutionDuration(
-        'test_tool',
-        'test_tool_type',
-        'test_agent',
-        0.5,
-        undefined,
-        'ToolReportedFailure',
-      );
-
-      const dataPoint = await collectDataPoint('gen_ai.execute_tool.duration');
-      expect(dataPoint.attributes['error.type']).toBe('ToolReportedFailure');
-    });
-
-    it('prefers the thrown error over the reported error type', async () => {
-      recordToolExecutionDuration(
-        'test_tool',
-        'test_tool_type',
-        'test_agent',
-        0.5,
-        new TypeError('tool failed'),
-        'ToolReportedFailure',
-      );
-
-      const dataPoint = await collectDataPoint('gen_ai.execute_tool.duration');
-      expect(dataPoint.attributes['error.type']).toBe('TypeError');
-    });
-  });
-
   describe('provider name resolution', () => {
     it.each([
-      {model: 'claude-sonnet-4-5', provider: 'anthropic'},
       {model: 'anthropic/claude-sonnet-4-5', provider: 'anthropic'},
       {model: 'openai/gpt-4o', provider: 'openai'},
       {model: 'gemini-2.0-flash', provider: 'gemini'},
       {model: 'test-model', provider: 'gemini'},
       {model: 'tunedModels/abc123', provider: 'gemini'},
+      {model: 'publishers/google/models/gemma-3', provider: 'gemini'},
+      {
+        model: 'projects/p/locations/l/endpoints/123',
+        provider: 'gemini',
+      },
       {
         model: 'projects/p/locations/l/publishers/anthropic/models/claude-3',
-        provider: 'anthropic',
+        provider: 'gemini',
       },
     ])('reports $model as $provider', async ({model, provider}) => {
       recordClientOperationDuration({
@@ -626,8 +617,7 @@ describe('telemetry metrics', () => {
 
   describe('per-invocation call counts', () => {
     it('records each count against its own agent', async () => {
-      recordInvokeAgentInferenceCalls('test_agent', 3);
-      recordInvokeAgentToolCalls('test_agent', 2);
+      tallyCalls('test_agent', {inference: 3, tool: 2});
 
       const inferenceCalls = await collectDataPoint(
         'gen_ai.invoke_agent.inference_calls',

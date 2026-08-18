@@ -722,12 +722,6 @@ export function isWorkflow(value: unknown): value is Workflow {
 }
 
 /**
- * Creates the workflow-scoped {@link AbortController} that cancels in-flight
- * nodes when the workflow shuts down on error. It is chained to the invocation's
- * own abort signal (if any) so an invocation-level cancel still propagates to
- * nodes; `dispose` detaches that listener to avoid a leak.
- */
-/**
  * Returns whether a workflow is running below something else rather than as
  * the run's root.
  *
@@ -742,6 +736,12 @@ function isNestedWorkflow(ctx: NodeContext): boolean {
   return ctx.nodePath.includes('.') || ctx.invocationContext.nodeToolDepth > 0;
 }
 
+/**
+ * Creates the workflow-scoped {@link AbortController} that cancels in-flight
+ * nodes when the workflow shuts down on error. It is chained to the invocation's
+ * own abort signal (if any) so an invocation-level cancel still propagates to
+ * nodes; `dispose` detaches that listener to avoid a leak.
+ */
 function createWorkflowAbort(parentSignal?: AbortSignal): {
   controller: AbortController;
   dispose: () => void;
