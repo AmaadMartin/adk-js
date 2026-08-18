@@ -30,7 +30,7 @@ import {
   Session,
   ToolProcessLlmRequest,
 } from '@google/adk';
-import {Content, Schema, Type} from '@google/genai';
+import {Content, GroundingMetadata, Schema, Type} from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
@@ -1190,5 +1190,151 @@ describe('LlmAgent usage metadata on content-less responses', () => {
     const events = await runAndCollect();
 
     expect(events.find((e) => e.usageMetadata)).toBeUndefined();
+  });
+});
+
+// Pending cleanup: these pin a temporary workaround that copies a search
+// sub-agent's citations onto the parent agent's response.
+describe('LlmAgent google_search_agent grounding metadata', () => {
+  const stateKey = 'temp:_adk_grounding_metadata';
+  const stateGrounding: GroundingMetadata = {
+    searchEntryPoint: {renderedContent: 'sources'},
+  };
+
+  let agent: TestLlmAgent;
+  let invocationContext: InvocationContext;
+  let llmRequest: LlmRequest;
+  let modelResponseEvent: Event;
+  let pluginManager: PluginManager;
+  let modelResponse: LlmResponse;
+
+  beforeEach(() => {
+    // A fresh response per test: the workaround mutates it in place, so a
+    // shared object would leak grounding metadata between cases.
+    modelResponse = {content: {parts: [{text: 'summary'}]}};
+    llmRequest = {contents: [], liveConnectConfig: {}, toolsDict: {}};
+    modelResponseEvent = {id: 'evt_grounding'} as Event;
+    pluginManager = new PluginManager();
+  });
+
+  function buildAgent(tools: BaseTool[], state: Record<string, unknown>): void {
+    agent = new TestLlmAgent({name: 'grounding_agent', tools});
+    agent.model = new MockLlm(modelResponse);
+    invocationContext = new InvocationContext({
+      invocationId: 'inv_grounding',
+      session: createSession({id: 'sess_grounding', appName: 'app', state}),
+      agent,
+      pluginManager,
+    });
+  }
+
+  async function callLlmUnderTest(): Promise<LlmResponse[]> {
+    const responses: LlmResponse[] = [];
+    for await (const response of agent.testCallLlmAsync(
+      invocationContext,
+      llmRequest,
+      modelResponseEvent,
+    )) {
+      responses.push(response);
+    }
+    return responses;
+  }
+
+  it('attaches the metadata when no callback overrides the response', async () => {
+    buildAgent([new MockTool('google_search_agent')], {
+      [stateKey]: stateGrounding,
+    });
+
+    const result = await callLlmUnderTest();
+
+    expect(result).toHaveLength(1);
+    expect(result[0].groundingMetadata).toEqual(stateGrounding);
+  });
+
+  it('attaches the metadata to a plugin-supplied response', async () => {
+    const pluginResponse: LlmResponse = {
+      content: {parts: [{text: 'from plugin'}]},
+    };
+    const plugin = new MockPlugin('grounding_plugin');
+    plugin.afterModelResponse = pluginResponse;
+    pluginManager.registerPlugin(plugin);
+    buildAgent([new MockTool('google_search_agent')], {
+      [stateKey]: stateGrounding,
+    });
+
+    const result = await callLlmUnderTest();
+
+    expect(result[0]).toBe(pluginResponse);
+    expect(result[0].groundingMetadata).toEqual(stateGrounding);
+    expect(modelResponse.groundingMetadata).toBeUndefined();
+  });
+
+  it('attaches the metadata to a canonical-callback-supplied response', async () => {
+    const callbackResponse: LlmResponse = {
+      content: {parts: [{text: 'from callback'}]},
+    };
+    buildAgent([new MockTool('google_search_agent')], {
+      [stateKey]: stateGrounding,
+    });
+    agent.afterModelCallback = async () => callbackResponse;
+
+    const result = await callLlmUnderTest();
+
+    expect(result[0]).toBe(callbackResponse);
+    expect(result[0].groundingMetadata).toEqual(stateGrounding);
+    expect(modelResponse.groundingMetadata).toBeUndefined();
+  });
+
+  it('leaves the response alone when the search tool is absent', async () => {
+    buildAgent([new MockTool('some_other_tool')], {
+      [stateKey]: stateGrounding,
+    });
+
+    const result = await callLlmUnderTest();
+
+    expect(result[0].groundingMetadata).toBeUndefined();
+  });
+
+  it('leaves the response alone when the state key is absent', async () => {
+    buildAgent([new MockTool('google_search_agent')], {});
+
+    const result = await callLlmUnderTest();
+
+    expect(result[0].groundingMetadata).toBeUndefined();
+  });
+
+  // adk-python's `if not ground_metadata` treats {} as absent. A bare
+  // `if (!groundingMetadata)` in TypeScript would attach it instead.
+  it('leaves the response alone when the state value is empty', async () => {
+    buildAgent([new MockTool('google_search_agent')], {[stateKey]: {}});
+
+    const result = await callLlmUnderTest();
+
+    expect(result[0].groundingMetadata).toBeUndefined();
+  });
+
+  // adk-python assigns unconditionally once both gates pass, so the state value
+  // wins over metadata the model already reported.
+  it('overwrites grounding metadata the response already carries', async () => {
+    modelResponse = {
+      content: {parts: [{text: 'summary'}]},
+      groundingMetadata: {searchEntryPoint: {renderedContent: 'stale'}},
+    };
+    buildAgent([new MockTool('google_search_agent')], {
+      [stateKey]: stateGrounding,
+    });
+
+    const result = await callLlmUnderTest();
+
+    expect(result[0].groundingMetadata).toEqual(stateGrounding);
+  });
+
+  it('does not resolve the toolset when the state key is absent', async () => {
+    buildAgent([new MockTool('google_search_agent')], {});
+    const canonicalTools = vi.spyOn(agent, 'canonicalTools');
+
+    await callLlmUnderTest();
+
+    expect(canonicalTools).not.toHaveBeenCalled();
   });
 });
