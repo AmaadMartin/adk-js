@@ -10,6 +10,8 @@ import {context, trace} from '@opentelemetry/api';
 import {createEvent, Event} from '../events/event.js';
 
 import {
+  beginAgentInvocationTally,
+  flushAgentInvocationTally,
   recordAgentInvocationDuration,
   recordAgentRequestSize,
   recordAgentResponseSize,
@@ -66,6 +68,29 @@ export interface BaseAgentConfig extends BaseNodeConfig {
  * Defined once and shared by all BaseAgent instances.
  */
 const BASE_AGENT_SIGNATURE_SYMBOL = Symbol.for('google.adk.baseAgent');
+
+/**
+ * Records the metrics both entry points share once an invocation has ended.
+ *
+ * @param agentContext The context the agent ran with, absent when the
+ *     invocation ended before one was built. Its call counts are flushed even
+ *     when they are zero, because zero calls is a real observation.
+ */
+function recordInvocationMetrics(
+  agentName: string,
+  startTime: number,
+  agentContext: InvocationContext | undefined,
+  error: unknown,
+): void {
+  recordAgentInvocationDuration(
+    agentName,
+    (performance.now() - startTime) / 1000,
+    error,
+  );
+  if (agentContext) {
+    flushAgentInvocationTally(agentContext, agentName);
+  }
+}
 
 /**
  * Type guard to check if an object is an instance of BaseAgent.
@@ -265,6 +290,7 @@ export abstract class BaseAgent<
     let stepCount = 0;
     let lastContent: Content | undefined;
     let error: unknown;
+    let agentContext: InvocationContext | undefined;
     // Folding each event into two scalars keeps a streaming or long-running
     // agent from retaining its own event stream. Events authored by a
     // sub-agent belong to that sub-agent's invocation, not this one.
@@ -283,6 +309,8 @@ export abstract class BaseAgent<
         this,
         async function* () {
           const context = this.createInvocationContext(parentContext);
+          agentContext = context;
+          beginAgentInvocationTally(context);
 
           recordAgentRequestSize(agentName, context.userContent);
 
@@ -320,11 +348,7 @@ export abstract class BaseAgent<
       throw e;
     } finally {
       span.end();
-      recordAgentInvocationDuration(
-        agentName,
-        (performance.now() - startTime) / 1000,
-        error,
-      );
+      recordInvocationMetrics(agentName, startTime, agentContext, error);
       recordAgentWorkflowSteps(agentName, stepCount);
       recordAgentResponseSize(agentName, lastContent);
     }
@@ -371,12 +395,18 @@ export abstract class BaseAgent<
   ): AsyncGenerator<Event, void, void> {
     const span = tracer.startSpan(`invoke_agent ${this.name}`);
     const ctx = trace.setSpan(context.active(), span);
+    const startTime = performance.now();
+    const agentName = this.name;
+    let error: unknown;
+    let agentContext: InvocationContext | undefined;
     try {
       yield* runAsyncGeneratorWithOtelContext<BaseAgent, Event>(
         ctx,
         this,
         async function* () {
           const context = this.createInvocationContext(parentContext);
+          agentContext = context;
+          beginAgentInvocationTally(context);
 
           const beforeAgentCallbackEvent =
             await this.handleBeforeAgentCallback(context);
@@ -403,8 +433,12 @@ export abstract class BaseAgent<
           }
         },
       );
+    } catch (e) {
+      error = e;
+      throw e;
     } finally {
       span.end();
+      recordInvocationMetrics(agentName, startTime, agentContext, error);
     }
   }
 

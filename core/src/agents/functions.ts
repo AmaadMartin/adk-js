@@ -21,7 +21,10 @@ import {ToolConfirmation} from '../tools/tool_confirmation.js';
 import {logger} from '../utils/logger.js';
 import {Context} from './context.js';
 
-import {recordToolExecutionDuration} from '../telemetry/metrics.js';
+import {
+  countToolCall,
+  recordToolExecutionDuration,
+} from '../telemetry/metrics.js';
 import {
   traceMergedToolCalls,
   tracer,
@@ -192,7 +195,8 @@ async function callToolAsync(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
 ): Promise<any> {
   const startTime = performance.now();
-  const agentName = toolContext.invocationContext.agent.name;
+  // A node can run without an agent, and telemetry must not break that run.
+  const agentName = toolContext.invocationContext.agent?.name ?? '';
   const toolName = tool.name;
   // e.g. FunctionTool, matching the gen_ai.tool.type span attribute.
   const toolType = tool.constructor.name;
@@ -217,6 +221,9 @@ async function callToolAsync(
       throw e;
     } finally {
       span.end();
+      // Counted even when the tool failed, so the per-invocation tally
+      // reflects the calls the agent attempted.
+      countToolCall(toolContext.invocationContext);
       recordToolExecutionDuration(
         toolName,
         toolType,

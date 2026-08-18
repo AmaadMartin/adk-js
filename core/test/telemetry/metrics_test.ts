@@ -5,19 +5,16 @@
  */
 
 import {MeterProvider as ApiMeterProvider, metrics} from '@opentelemetry/api';
-import {
-  DataPoint,
-  DataPointType,
-  Histogram,
-  HistogramMetricData,
-  MeterProvider,
-  MetricReader,
-} from '@opentelemetry/sdk-metrics';
+import {MeterProvider} from '@opentelemetry/sdk-metrics';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {LlmRequest} from '../../src/models/llm_request.js';
 import {LlmResponse} from '../../src/models/llm_response.js';
 import {
+  beginAgentInvocationTally,
+  countInferenceCall,
+  countToolCall,
+  flushAgentInvocationTally,
   recordAgentInvocationDuration,
   recordAgentRequestSize,
   recordAgentResponseSize,
@@ -25,56 +22,22 @@ import {
   recordClientOperationDuration,
   recordClientTokenUsage,
   recordToolExecutionDuration,
+  recordWorkflowInvocationDuration,
 } from '../../src/telemetry/metrics.js';
 import {logger} from '../../src/utils/logger.js';
+import {createIc} from '../workflow/test_helpers.js';
+import {
+  collectDataPoint,
+  collectHistogram,
+  collectHistograms,
+  installMeterProvider,
+  SDK_DEFAULT_BOUNDARIES,
+} from './test_helpers.js';
 
-/** Bucket boundaries the SDK applies when an instrument gives no advisory. */
-const SDK_DEFAULT_BOUNDARIES = [
-  0, 5, 10, 25, 50, 75, 100, 250, 500, 750, 1000, 2500, 5000, 7500, 10000,
-];
+/** Bucket boundaries both per-invocation call-count histograms declare. */
+const CALL_COUNT_BOUNDARIES = [0, 1, 2, 3, 4, 5, 6, 8, 12, 16, 24, 32, 64];
 
-class InMemoryMetricReader extends MetricReader {
-  protected async onForceFlush(): Promise<void> {}
-  protected async onShutdown(): Promise<void> {}
-}
-
-let reader: InMemoryMetricReader;
 let provider: MeterProvider;
-
-function installMeterProvider(): MeterProvider {
-  reader = new InMemoryMetricReader();
-  const installed = new MeterProvider({readers: [reader]});
-  metrics.disable();
-  metrics.setGlobalMeterProvider(installed);
-  return installed;
-}
-
-async function collectHistograms(): Promise<Map<string, HistogramMetricData>> {
-  const {resourceMetrics} = await reader.collect();
-  const byName = new Map<string, HistogramMetricData>();
-  for (const scopeMetric of resourceMetrics.scopeMetrics) {
-    for (const metric of scopeMetric.metrics) {
-      if (metric.dataPointType === DataPointType.HISTOGRAM) {
-        byName.set(metric.descriptor.name, metric);
-      }
-    }
-  }
-  return byName;
-}
-
-async function collectHistogram(name: string): Promise<HistogramMetricData> {
-  const metric = (await collectHistograms()).get(name);
-  if (!metric) {
-    expect.fail(`no measurement recorded for ${name}`);
-  }
-  return metric;
-}
-
-async function collectDataPoint(name: string): Promise<DataPoint<Histogram>> {
-  const metric = await collectHistogram(name);
-  expect(metric.dataPoints).toHaveLength(1);
-  return metric.dataPoints[0];
-}
 
 const llmRequest = (model?: string): LlmRequest => ({
   model,
@@ -82,6 +45,25 @@ const llmRequest = (model?: string): LlmRequest => ({
   liveConnectConfig: {},
   toolsDict: {},
 });
+
+/**
+ * Records one agent invocation's call counts through the tally, which is the
+ * only path `base_agent.ts` uses to reach the two call-count histograms.
+ */
+function tallyCalls(
+  agentName: string,
+  counts: {inference: number; tool: number},
+): void {
+  const invocation = createIc();
+  beginAgentInvocationTally(invocation);
+  for (let i = 0; i < counts.inference; i++) {
+    countInferenceCall(invocation);
+  }
+  for (let i = 0; i < counts.tool; i++) {
+    countToolCall(invocation);
+  }
+  flushAgentInvocationTally(invocation, agentName);
+}
 
 describe('telemetry metrics', () => {
   beforeEach(() => {
@@ -141,6 +123,32 @@ describe('telemetry metrics', () => {
             llmRequest: llmRequest('a-model'),
             response: {usageMetadata: {promptTokenCount: 1}},
           }),
+      },
+      {
+        name: 'gen_ai.invoke_workflow.duration',
+        unit: 's',
+        description: 'Duration of workflow invocations.',
+        boundaries: SDK_DEFAULT_BOUNDARIES,
+        record: () =>
+          recordWorkflowInvocationDuration({
+            workflowName: 'a-workflow',
+            elapsedS: 1,
+            nested: false,
+          }),
+      },
+      {
+        name: 'gen_ai.invoke_agent.inference_calls',
+        unit: '1',
+        description: 'Number of inference (model) calls per agent invocation.',
+        boundaries: CALL_COUNT_BOUNDARIES,
+        record: () => tallyCalls('an-agent', {inference: 1, tool: 0}),
+      },
+      {
+        name: 'gen_ai.invoke_agent.tool_calls',
+        unit: '1',
+        description: 'Number of tool calls per agent invocation.',
+        boundaries: CALL_COUNT_BOUNDARIES,
+        record: () => tallyCalls('an-agent', {inference: 0, tool: 1}),
       },
       {
         name: 'gen_ai.agent.request.size',
@@ -506,6 +514,205 @@ describe('telemetry metrics', () => {
       expect((await collectHistograms()).has('gen_ai.client.token.usage')).toBe(
         false,
       );
+    });
+  });
+
+  describe('recordWorkflowInvocationDuration', () => {
+    it('omits the nested flag for a root workflow', async () => {
+      recordWorkflowInvocationDuration({
+        workflowName: 'test_workflow',
+        elapsedS: 1.5,
+        nested: false,
+      });
+
+      const dataPoint = await collectDataPoint(
+        'gen_ai.invoke_workflow.duration',
+      );
+      expect(dataPoint.value.sum).toBe(1.5);
+      expect(dataPoint.attributes).toEqual({
+        'gen_ai.operation.name': 'invoke_workflow',
+        'gen_ai.workflow.name': 'test_workflow',
+      });
+    });
+
+    it('flags a nested workflow and its error', async () => {
+      recordWorkflowInvocationDuration({
+        workflowName: 'test_workflow',
+        elapsedS: 0.5,
+        nested: true,
+        error: new RangeError('workflow failed'),
+      });
+
+      const dataPoint = await collectDataPoint(
+        'gen_ai.invoke_workflow.duration',
+      );
+      expect(dataPoint.attributes).toEqual({
+        'gen_ai.operation.name': 'invoke_workflow',
+        'gen_ai.workflow.nested': true,
+        'gen_ai.workflow.name': 'test_workflow',
+        'error.type': 'RangeError',
+      });
+    });
+
+    it('omits the workflow name when it is empty', async () => {
+      recordWorkflowInvocationDuration({
+        workflowName: '',
+        elapsedS: 0.5,
+        nested: false,
+      });
+
+      const dataPoint = await collectDataPoint(
+        'gen_ai.invoke_workflow.duration',
+      );
+      expect(dataPoint.attributes).toEqual({
+        'gen_ai.operation.name': 'invoke_workflow',
+      });
+    });
+  });
+
+  describe('provider name resolution', () => {
+    it.each([
+      {model: 'anthropic/claude-sonnet-4-5', provider: 'anthropic'},
+      {model: 'openai/gpt-4o', provider: 'openai'},
+      {model: 'gemini-2.0-flash', provider: 'gemini'},
+      {model: 'test-model', provider: 'gemini'},
+      {model: 'tunedModels/abc123', provider: 'gemini'},
+      {model: 'publishers/google/models/gemma-3', provider: 'gemini'},
+      {
+        model: 'projects/p/locations/l/endpoints/123',
+        provider: 'gemini',
+      },
+      {
+        model: 'projects/p/locations/l/publishers/anthropic/models/claude-3',
+        provider: 'gemini',
+      },
+    ])('reports $model as $provider', async ({model, provider}) => {
+      recordClientOperationDuration({
+        agentName: 'test_agent',
+        elapsedS: 0.1,
+        llmRequest: llmRequest(model),
+      });
+
+      const dataPoint = await collectDataPoint(
+        'gen_ai.client.operation.duration',
+      );
+      expect(dataPoint.attributes['gen_ai.provider.name']).toBe(provider);
+    });
+
+    it('keeps a third-party provider when the Vertex variant is on', async () => {
+      vi.stubEnv('GOOGLE_GENAI_USE_VERTEXAI', 'true');
+
+      recordClientOperationDuration({
+        agentName: 'test_agent',
+        elapsedS: 0.1,
+        llmRequest: llmRequest('openai/gpt-4o'),
+      });
+
+      const dataPoint = await collectDataPoint(
+        'gen_ai.client.operation.duration',
+      );
+      expect(dataPoint.attributes['gen_ai.provider.name']).toBe('openai');
+    });
+  });
+
+  describe('per-invocation call counts', () => {
+    it('records each count against its own agent', async () => {
+      tallyCalls('test_agent', {inference: 3, tool: 2});
+
+      const inferenceCalls = await collectDataPoint(
+        'gen_ai.invoke_agent.inference_calls',
+      );
+      const toolCalls = await collectDataPoint(
+        'gen_ai.invoke_agent.tool_calls',
+      );
+      expect(inferenceCalls.value.sum).toBe(3);
+      expect(inferenceCalls.attributes).toEqual({
+        'gen_ai.agent.name': 'test_agent',
+      });
+      expect(toolCalls.value.sum).toBe(2);
+      expect(toolCalls.attributes).toEqual({'gen_ai.agent.name': 'test_agent'});
+    });
+
+    it('flushes the calls counted against an invocation', async () => {
+      const invocation = createIc();
+      beginAgentInvocationTally(invocation);
+      countInferenceCall(invocation);
+      countInferenceCall(invocation);
+      countToolCall(invocation);
+
+      flushAgentInvocationTally(invocation, 'test_agent');
+
+      expect(
+        (await collectDataPoint('gen_ai.invoke_agent.inference_calls')).value
+          .sum,
+      ).toBe(2);
+      expect(
+        (await collectDataPoint('gen_ai.invoke_agent.tool_calls')).value.sum,
+      ).toBe(1);
+    });
+
+    it('records zero for an invocation that called nothing', async () => {
+      const invocation = createIc();
+      beginAgentInvocationTally(invocation);
+
+      flushAgentInvocationTally(invocation, 'test_agent');
+
+      const inferenceCalls = await collectDataPoint(
+        'gen_ai.invoke_agent.inference_calls',
+      );
+      const toolCalls = await collectDataPoint(
+        'gen_ai.invoke_agent.tool_calls',
+      );
+      expect(inferenceCalls.value.count).toBe(1);
+      expect(inferenceCalls.value.sum).toBe(0);
+      expect(toolCalls.value.count).toBe(1);
+      expect(toolCalls.value.sum).toBe(0);
+    });
+
+    it('counts nothing for an invocation that is not being tallied', async () => {
+      const invocation = createIc();
+
+      countInferenceCall(invocation);
+      countToolCall(invocation);
+      flushAgentInvocationTally(invocation, 'test_agent');
+
+      const histograms = await collectHistograms();
+      expect(histograms.has('gen_ai.invoke_agent.inference_calls')).toBe(false);
+      expect(histograms.has('gen_ai.invoke_agent.tool_calls')).toBe(false);
+    });
+
+    it('records one point per invocation even if flushed twice', async () => {
+      const invocation = createIc();
+      beginAgentInvocationTally(invocation);
+      countToolCall(invocation);
+
+      flushAgentInvocationTally(invocation, 'test_agent');
+      flushAgentInvocationTally(invocation, 'test_agent');
+
+      expect(
+        (await collectDataPoint('gen_ai.invoke_agent.tool_calls')).value.count,
+      ).toBe(1);
+    });
+
+    it('tallies each invocation separately', async () => {
+      const parent = createIc();
+      const child = createIc();
+      beginAgentInvocationTally(parent);
+      beginAgentInvocationTally(child);
+      countToolCall(child);
+
+      flushAgentInvocationTally(parent, 'parent_agent');
+      flushAgentInvocationTally(child, 'child_agent');
+
+      const metric = await collectHistogram('gen_ai.invoke_agent.tool_calls');
+      const byAgent = new Map(
+        metric.dataPoints.map((dataPoint) => [
+          dataPoint.attributes['gen_ai.agent.name'],
+          dataPoint.value.sum,
+        ]),
+      );
+      expect(byAgent.get('parent_agent')).toBe(0);
+      expect(byAgent.get('child_agent')).toBe(1);
     });
   });
 

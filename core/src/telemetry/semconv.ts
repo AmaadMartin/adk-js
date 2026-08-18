@@ -29,6 +29,8 @@ export const GEN_AI_TOOL_CALL_ID = 'gen_ai.tool.call.id';
 export const GEN_AI_TOOL_DESCRIPTION = 'gen_ai.tool.description';
 export const GEN_AI_TOOL_NAME = 'gen_ai.tool.name';
 export const GEN_AI_TOOL_TYPE = 'gen_ai.tool.type';
+export const GEN_AI_WORKFLOW_NAME = 'gen_ai.workflow.name';
+export const GEN_AI_WORKFLOW_NESTED = 'gen_ai.workflow.nested';
 
 export const GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS =
   'gen_ai.usage.cache_read.input_tokens';

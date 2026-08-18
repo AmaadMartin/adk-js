@@ -6,6 +6,7 @@
 
 import {context, trace} from '@opentelemetry/api';
 import {Event} from '../events/event.js';
+import {recordWorkflowInvocationDuration} from '../telemetry/metrics.js';
 import {tracer, traceWorkflowInvocation} from '../telemetry/tracing.js';
 import {experimental} from '../utils/experimental.js';
 import {BaseNode, BaseNodeConfig} from './base_node.js';
@@ -192,6 +193,8 @@ export class Workflow extends BaseNode {
     );
 
     const span = tracer.startSpan(`invoke_workflow ${this.name}`);
+    const startTime = performance.now();
+    let error: unknown;
     try {
       // Sync callback returning the promise, not `async () => await …`: the
       // wrapper must not insert microtask hops around the orchestration loop
@@ -203,9 +206,18 @@ export class Workflow extends BaseNode {
         });
         return this.orchestrate(ctx, nodeInput, dynamicState, abort.controller);
       });
+    } catch (e) {
+      error = e;
+      throw e;
     } finally {
       abort.dispose();
       span.end();
+      recordWorkflowInvocationDuration({
+        workflowName: this.name,
+        elapsedS: (performance.now() - startTime) / 1000,
+        nested: isNestedWorkflow(ctx),
+        error,
+      });
     }
   }
 
@@ -707,6 +719,21 @@ export function isWorkflow(value: unknown): value is Workflow {
     WORKFLOW_SIGNATURE_SYMBOL in value &&
     value[WORKFLOW_SIGNATURE_SYMBOL] === true
   );
+}
+
+/**
+ * Returns whether a workflow is running below something else rather than as
+ * the run's root.
+ *
+ * The node runner names a child by appending to its parent's path, so a
+ * workflow that has a parent node carries a dotted path while the run's root
+ * workflow carries a single segment. One nested case has a single segment
+ * anyway: a workflow reached through a `NodeTool` starts a fresh path but runs
+ * inside the invocation that called the tool, which the raised node-tool depth
+ * records.
+ */
+function isNestedWorkflow(ctx: NodeContext): boolean {
+  return ctx.nodePath.includes('.') || ctx.invocationContext.nodeToolDepth > 0;
 }
 
 /**
