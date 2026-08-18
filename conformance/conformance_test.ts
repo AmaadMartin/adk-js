@@ -17,7 +17,12 @@
  * and it is precisely what a ported unit test asserting Python's internal
  * call graph would not check.
  */
-import type {BaseLlmConnection, LlmRequest, LlmResponse} from '@google/adk';
+import type {
+  BaseLlmConnection,
+  Event,
+  LlmRequest,
+  LlmResponse,
+} from '@google/adk';
 import {BaseLlm, FunctionTool, InMemoryRunner, LlmAgent} from '@google/adk';
 import type {Content} from '@google/genai';
 import {describe, expect, it} from 'vitest';
@@ -32,6 +37,8 @@ interface Fixture {
   modelScript: Content[][];
   expectedEvents: Array<Record<string, unknown>>;
   toolResponses: Record<string, unknown[]>;
+  /** Events the session already held when this invocation began. */
+  priorEvents: Array<Record<string, unknown>>;
   expectsError?: {type: string; msg: string} | null;
   replayable: boolean;
   skipReason: string;
@@ -146,6 +153,40 @@ async function replay(f: Fixture): Promise<Array<Record<string, unknown>>> {
   });
   const runner = new InMemoryRunner({agent, appName: 'conformance'});
   const out: Array<Record<string, unknown>> = [];
+
+  // A fixture whose stimulus is a tool result answers a call from an earlier
+  // invocation. Replaying it against an empty session hands adk-js a response
+  // to a function call it never saw, and it correctly refuses with "No
+  // function call event found for function responses ids". Seeding the
+  // recorded history is what lets those replay at all.
+  if (f.priorEvents?.length) {
+    const session = await runner.sessionService.createSession({
+      appName: 'conformance',
+      userId: 'conformance_user',
+    });
+    const seeded: Event[] = [];
+    f.priorEvents.forEach((raw, i) => {
+      seeded.push({...raw, id: `seed-${i}`} as unknown as Event);
+    });
+    for (const event of seeded) {
+      // Each seeded event needs a distinct `id`. `appendEvent` de-duplicates
+      // with `findIndex(e => e.id === event.id)`, and the recorded event ids
+      // are stripped as noise, so without this every append matched the
+      // previous `undefined` and replaced it -- the session ended up holding
+      // exactly one event and the function call the stimulus answers was
+      // never in it.
+      await runner.sessionService.appendEvent({session, event});
+    }
+    for await (const event of runner.runAsync({
+      userId: 'conformance_user',
+      sessionId: session.id,
+      newMessage: f.newMessage,
+    })) {
+      out.push(event as unknown as Record<string, unknown>);
+    }
+    return out;
+  }
+
   for await (const event of runner.runEphemeral({
     userId: 'conformance_user',
     newMessage: f.newMessage,

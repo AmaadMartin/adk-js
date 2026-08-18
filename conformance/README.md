@@ -1,7 +1,7 @@
 # adk-python conformance suite
 
-109 fixtures recorded from adk-python's own test suite at the `Runner`
-boundary, with no changes to those tests. 71 are replayed against adk-js; 38
+986 fixtures recorded from adk-python's own test suite at the `Runner`
+boundary, with no changes to those tests. 251 are replayed against adk-js; 735
 are held, each with a stated reason.
 
     npx vitest run --config conformance/vitest.conformance.ts
@@ -33,7 +33,7 @@ adk-js were run against it:
 | `role` on the auth branch of `functions.ts` | 0               |
 
 The third is the honest one: that path is never reached by these fixtures, so
-the suite is blind to it. Coverage is 71 invocations of one agent shape, not
+the suite is blind to it. Coverage is 251 invocations of one agent shape, not
 adk-js as a whole.
 
 ## Known divergence, deliberately not asserted
@@ -41,7 +41,7 @@ adk-js as a whole.
 adk-python closes an invocation with a contentless bookkeeping event carrying
 `end_of_agent`; adk-js emits no equivalent. Contentless events are therefore
 dropped before comparison. It is a real difference, recorded here rather than
-asserted 71 times, because left in it fails every multi-turn fixture for one
+asserted 251 times, because left in it fails every multi-turn fixture for one
 reason and buries everything worth reading.
 
 ## Why held fixtures are listed, not dropped
