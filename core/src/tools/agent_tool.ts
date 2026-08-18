@@ -167,7 +167,7 @@ export class AgentTool extends BaseTool {
         new InMemoryMemoryService(),
       credentialService: toolContext.invocationContext.credentialService,
       plugins: this.includePlugins
-        ? toolContext.invocationContext.pluginManager?.plugins
+        ? toolContext.invocationContext.pluginManager.getPlugins()
         : undefined,
     });
 

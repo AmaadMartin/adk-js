@@ -34,21 +34,11 @@ import {BasePlugin, ContextCompactionTrigger} from './base_plugin.js';
  * runs, tool calls, or model requests.
  */
 export class PluginManager {
-  private readonly registeredPlugins: Set<BasePlugin> = new Set();
+  private readonly plugins: Set<BasePlugin> = new Set();
 
   /** Whether any plugin is registered. */
   get hasPlugins(): boolean {
-    return this.registeredPlugins.size > 0;
-  }
-
-  /**
-   * The registered plugins, in registration order.
-   *
-   * Returns a fresh array on each read, so a caller cannot change the registry
-   * through it.
-   */
-  get plugins(): BasePlugin[] {
-    return Array.from(this.registeredPlugins);
+    return this.plugins.size > 0;
   }
 
   /**
@@ -74,14 +64,14 @@ export class PluginManager {
    */
   registerPlugin(plugin: BasePlugin): void {
     // Short circuit for duplicate objects or duplicate names
-    if (this.registeredPlugins.has(plugin)) {
+    if (this.plugins.has(plugin)) {
       throw new Error(`Plugin '${plugin.name}' already registered.`);
     }
-    if (this.plugins.some((p) => p.name === plugin.name)) {
+    if (Array.from(this.plugins).some((p) => p.name === plugin.name)) {
       throw new Error(`Plugin with name '${plugin.name}' already registered.`);
     }
 
-    this.registeredPlugins.add(plugin);
+    this.plugins.add(plugin);
 
     logger.info(`Plugin '${plugin.name}' registered.`);
   }
@@ -94,7 +84,17 @@ export class PluginManager {
    */
   getPlugin(pluginName: string): BasePlugin | undefined {
     // Set operates on strict equality, we only want to match by name
-    return this.plugins.find((p) => p.name === pluginName);
+    return Array.from(this.plugins).find((p) => p.name === pluginName);
+  }
+
+  /**
+   * Retrieves the registered plugins, in registration order.
+   *
+   * @returns A fresh array on each call, so a caller cannot change the
+   *     registry through it.
+   */
+  getPlugins(): BasePlugin[] {
+    return Array.from(this.plugins);
   }
 
   /**
@@ -143,7 +143,7 @@ export class PluginManager {
     invocationContext: InvocationContext;
   }): Promise<Content | undefined> {
     return (await this.runCallbacks(
-      this.registeredPlugins,
+      this.plugins,
       (plugin: BasePlugin) =>
         plugin.onUserMessageCallback({userMessage, invocationContext}),
       'onUserMessageCallback',
@@ -159,7 +159,7 @@ export class PluginManager {
     invocationContext: InvocationContext;
   }): Promise<Content | undefined> {
     return (await this.runCallbacks(
-      this.registeredPlugins,
+      this.plugins,
       (plugin: BasePlugin) => plugin.beforeRunCallback({invocationContext}),
       'beforeRunCallback',
     )) as Content | undefined;
@@ -174,7 +174,7 @@ export class PluginManager {
     invocationContext: InvocationContext;
   }): Promise<void> {
     await this.runCallbacks(
-      this.registeredPlugins,
+      this.plugins,
       (plugin: BasePlugin) => plugin.afterRunCallback({invocationContext}),
       'afterRunCallback',
     );
@@ -191,7 +191,7 @@ export class PluginManager {
     event: Event;
   }): Promise<Event | undefined> {
     return (await this.runCallbacks(
-      this.registeredPlugins,
+      this.plugins,
       (plugin: BasePlugin) =>
         plugin.onEventCallback({invocationContext, event}),
       'onEventCallback',
@@ -209,7 +209,7 @@ export class PluginManager {
     callbackContext: Context;
   }): Promise<Content | undefined> {
     return (await this.runCallbacks(
-      this.registeredPlugins,
+      this.plugins,
       (plugin: BasePlugin) =>
         plugin.beforeAgentCallback({agent, callbackContext}),
       'beforeAgentCallback',
@@ -227,7 +227,7 @@ export class PluginManager {
     callbackContext: Context;
   }): Promise<Content | undefined> {
     return (await this.runCallbacks(
-      this.registeredPlugins,
+      this.plugins,
       (plugin: BasePlugin) =>
         plugin.afterAgentCallback({agent, callbackContext}),
       'afterAgentCallback',
@@ -247,7 +247,7 @@ export class PluginManager {
     input: unknown;
   }): Promise<unknown> {
     return this.runCallbacks(
-      this.registeredPlugins,
+      this.plugins,
       (plugin: BasePlugin) =>
         plugin.beforeNodeCallback({node, nodeContext, input}),
       'beforeNodeCallback',
@@ -267,7 +267,7 @@ export class PluginManager {
     output: unknown;
   }): Promise<unknown> {
     return this.runCallbacks(
-      this.registeredPlugins,
+      this.plugins,
       (plugin: BasePlugin) =>
         plugin.afterNodeCallback({node, nodeContext, output}),
       'afterNodeCallback',
@@ -285,7 +285,7 @@ export class PluginManager {
     tools: Readonly<Record<string, BaseTool>>;
   }): Promise<Readonly<Record<string, BaseTool>> | undefined> {
     return (await this.runCallbacks(
-      this.registeredPlugins,
+      this.plugins,
       (plugin: BasePlugin) =>
         plugin.beforeToolSelection({callbackContext, tools}),
       'beforeToolSelection',
@@ -303,7 +303,7 @@ export class PluginManager {
     trigger: ContextCompactionTrigger;
   }): Promise<void> {
     await this.runCallbacks(
-      this.registeredPlugins,
+      this.plugins,
       (plugin: BasePlugin) =>
         plugin.beforeContextCompaction({invocationContext, trigger}),
       'beforeContextCompaction',
@@ -321,7 +321,7 @@ export class PluginManager {
     trigger: ContextCompactionTrigger;
   }): Promise<void> {
     await this.runCallbacks(
-      this.registeredPlugins,
+      this.plugins,
       (plugin: BasePlugin) =>
         plugin.afterContextCompaction({invocationContext, trigger}),
       'afterContextCompaction',
@@ -341,7 +341,7 @@ export class PluginManager {
     toolContext: Context;
   }): Promise<Record<string, unknown> | undefined> {
     return (await this.runCallbacks(
-      this.registeredPlugins,
+      this.plugins,
       (plugin: BasePlugin) =>
         plugin.beforeToolCallback({tool, toolArgs, toolContext}),
       'beforeToolCallback',
@@ -363,7 +363,7 @@ export class PluginManager {
     result: Record<string, unknown>;
   }): Promise<Record<string, unknown> | undefined> {
     return (await this.runCallbacks(
-      this.registeredPlugins,
+      this.plugins,
       (plugin: BasePlugin) =>
         plugin.afterToolCallback({tool, toolArgs, toolContext, result}),
       'afterToolCallback',
@@ -383,7 +383,7 @@ export class PluginManager {
     error: Error;
   }): Promise<LlmResponse | undefined> {
     return (await this.runCallbacks(
-      this.registeredPlugins,
+      this.plugins,
       (plugin: BasePlugin) =>
         plugin.onModelErrorCallback({callbackContext, llmRequest, error}),
       'onModelErrorCallback',
@@ -401,7 +401,7 @@ export class PluginManager {
     llmRequest: LlmRequest;
   }): Promise<LlmResponse | undefined> {
     return (await this.runCallbacks(
-      this.registeredPlugins,
+      this.plugins,
       (plugin: BasePlugin) =>
         plugin.beforeModelCallback({callbackContext, llmRequest}),
       'beforeModelCallback',
@@ -419,7 +419,7 @@ export class PluginManager {
     llmResponse: LlmResponse;
   }): Promise<LlmResponse | undefined> {
     return (await this.runCallbacks(
-      this.registeredPlugins,
+      this.plugins,
       (plugin: BasePlugin) =>
         plugin.afterModelCallback({callbackContext, llmResponse}),
       'afterModelCallback',
@@ -441,7 +441,7 @@ export class PluginManager {
     error: Error;
   }): Promise<Record<string, unknown> | undefined> {
     return (await this.runCallbacks(
-      this.registeredPlugins,
+      this.plugins,
       (plugin: BasePlugin) =>
         plugin.onToolErrorCallback({tool, toolArgs, toolContext, error}),
       'onToolErrorCallback',

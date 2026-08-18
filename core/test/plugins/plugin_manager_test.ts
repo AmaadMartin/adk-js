@@ -193,16 +193,19 @@ describe('PluginManager', () => {
     service.registerPlugin(plugin1);
     service.registerPlugin(plugin2);
 
-    expect(service.plugins.map((p) => p.name)).toEqual(['plugin1', 'plugin2']);
+    expect(service.getPlugins().map((p) => p.name)).toEqual([
+      'plugin1',
+      'plugin2',
+    ]);
   });
 
   it('should return a snapshot that cannot change the registry', () => {
     service.registerPlugin(plugin1);
     service.registerPlugin(plugin2);
 
-    service.plugins.pop();
+    service.getPlugins().pop();
 
-    expect(service.plugins).toHaveLength(2);
+    expect(service.getPlugins()).toHaveLength(2);
   });
 
   it('should throw an error when registering a duplicate plugin object', () => {

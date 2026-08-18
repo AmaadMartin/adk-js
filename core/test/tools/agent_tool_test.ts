@@ -136,9 +136,11 @@ describe('AgentTool', () => {
     });
 
     expect(result).toBe('sub-agent answer');
-    expect(subRunner().pluginManager.plugins.map((p) => p.name)).toEqual([
-      'recording_plugin',
-    ]);
+    expect(
+      subRunner()
+        .pluginManager.getPlugins()
+        .map((p) => p.name),
+    ).toEqual(['recording_plugin']);
     expect(plugin.beforeRunAgentNames).toEqual(['sub-agent']);
     expect(plugin.seenEventAuthors).toContain('sub-agent');
   });
@@ -155,7 +157,7 @@ describe('AgentTool', () => {
     });
 
     expect(result).toBe('sub-agent answer');
-    expect(subRunner().pluginManager.plugins).toEqual([]);
+    expect(subRunner().pluginManager.getPlugins()).toEqual([]);
     expect(subRunner().pluginManager.hasPlugins).toBe(false);
     expect(plugin.beforeRunAgentNames).toEqual([]);
     expect(plugin.seenEventAuthors).toEqual([]);
@@ -493,6 +495,7 @@ describe('AgentTool', () => {
         userId: 'parent-user',
         session: {id: 'parent-session'},
         sessionService: mockSessionService,
+        pluginManager: new PluginManager([]),
       },
       state: {
         toRecord: () => ({}),
@@ -543,6 +546,7 @@ describe('AgentTool', () => {
         userId: 'parent-user',
         session: {id: 'parent-session'},
         sessionService: mockSessionService,
+        pluginManager: new PluginManager([]),
       },
       state: {
         toRecord: () => ({}),
