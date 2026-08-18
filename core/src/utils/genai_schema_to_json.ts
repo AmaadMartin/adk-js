@@ -84,9 +84,14 @@ function hasGenaiDialectValue(container: unknown): boolean {
  * is to say whether {@link convertGenaiSchema} would change it.
  *
  * Each marker below stands for one transformation the conversion performs, so
- * a document carrying none of them is already JSON Schema. A schema can arrive
- * from JSON or YAML, so a node of any shape has to answer `false` rather than
- * throw.
+ * a document carrying none of them needs no conversion — and must not be given
+ * one. `convertGenaiSchema` walks a document as the genai `Schema` shape and
+ * corrupts any JSON Schema construct that shape has no room for: it turns a
+ * tuple `items: [A, B]` into `items: {0: A, 1: B}`, and a boolean subschema
+ * (`properties: {x: true}`) into `{}`.
+ *
+ * A schema can arrive from JSON or YAML, so a node of any shape has to answer
+ * `false` rather than throw.
  */
 function isGenaiDialect(schema: unknown): boolean {
   if (schema === null || typeof schema !== 'object') {
@@ -96,7 +101,7 @@ function isGenaiDialect(schema: unknown): boolean {
   return (
     isGenaiTypeName(node['type']) ||
     node['nullable'] !== undefined ||
-    node['propertyOrdering'] !== undefined ||
+    [...NON_JSON_SCHEMA_KEYS].some((key) => node[key] !== undefined) ||
     node['format'] === 'enum' ||
     NUMERIC_STRING_KEYS.some((key) => typeof node[key] === 'string') ||
     isGenaiDialect(node['items']) ||
@@ -123,9 +128,10 @@ function isGenaiDialect(schema: unknown): boolean {
  * `minimum`, `maximum`, `format`) is already JSON-Schema-shaped and passes
  * through, with `items`, `properties` and `anyOf` converted recursively.
  *
- * A document already written in JSON Schema is returned as it was given — the
- * caller's own object, not a copy — the way `adk-python`'s
- * `schema_to_json_schema` returns a raw dict.
+ * A document that carries no genai marker is already JSON Schema and is
+ * returned as it was given — the caller's own object, not a copy — so that a
+ * construct this conversion cannot represent survives. See
+ * {@link isGenaiDialect}.
  */
 export function genaiSchemaToJsonSchema(
   schema: Schema,

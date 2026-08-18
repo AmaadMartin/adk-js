@@ -188,9 +188,17 @@ describe('toJsonSchema', () => {
     expect(toJsonSchema(asSchema(document))).toEqual(document);
   });
 
-  it("returns the caller's own object for a JSON Schema document", () => {
-    const document = {type: 'object', properties: {city: {type: 'string'}}};
-    expect(toJsonSchema(asSchema(document))).toBe(document);
+  it('keeps a construct the genai conversion cannot represent', () => {
+    // Converted, a tuple `items` comes back as `{0: ..., 1: ...}` and a
+    // boolean subschema as `{}`.
+    const document = {
+      type: 'object',
+      properties: {
+        pair: {type: 'array', items: [{type: 'string'}, {type: 'number'}]},
+        flag: true,
+      },
+    };
+    expect(toJsonSchema(asSchema(document))).toEqual(document);
   });
 
   it('keeps JSON Schema constructs the genai dialect has no equivalent for', () => {
@@ -251,6 +259,17 @@ describe('toJsonSchema', () => {
         }),
       ),
     ).toEqual({type: 'object', properties: {city: {type: 'string'}}});
+  });
+
+  it('drops example whichever dialect declares the type', () => {
+    // The genai-only keys are dropped for both spellings, so one document does
+    // not convert two ways.
+    expect(toJsonSchema(asSchema({type: 'string', example: 'LON'}))).toEqual({
+      type: 'string',
+    });
+    expect(toJsonSchema(asSchema({type: 'STRING', example: 'LON'}))).toEqual({
+      type: 'string',
+    });
   });
 
   it('coerces a bound that is encoded as a string', () => {
