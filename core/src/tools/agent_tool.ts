@@ -55,13 +55,9 @@ export function isAgentTool(obj: unknown): obj is AgentTool {
 }
 
 /**
- * Resolves the input schema an `AgentTool` should advertise for `agent`.
- *
- * An `LlmAgent` answers for itself. A composite agent — `SequentialAgent`,
- * `ParallelAgent`, `LoopAgent`, `RoutedAgent` — is entered through its first
- * sub-agent, which is the one the tool's arguments are handed to, so the schema
- * is resolved recursively from there. Mirrors `_get_input_schema` in
- * adk-python's `src/google/adk/tools/agent_tool.py`.
+ * Resolves the input schema an `AgentTool` should advertise for `agent`: an
+ * `LlmAgent` answers for itself, any other agent resolves through its first
+ * sub-agent. Mirrors `_get_input_schema` in adk-python's `agent_tool.py`.
  */
 function resolveInputSchema(agent: BaseAgent): Schema | undefined {
   if (isLlmAgent(agent)) {
