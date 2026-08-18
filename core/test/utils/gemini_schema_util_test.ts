@@ -459,8 +459,8 @@ describe('toGeminiSchema', () => {
   });
 
   it('converts a oneOf property and drops unsupported keywords', () => {
-    const input = {
-      type: 'object' as const,
+    const input: MCPToolSchema = {
+      type: 'object',
       properties: {
         body: {
           oneOf: [
@@ -474,7 +474,7 @@ describe('toGeminiSchema', () => {
       },
     };
 
-    const schema = toGeminiSchema(input as unknown as MCPToolSchema);
+    const schema = toGeminiSchema(input);
 
     expect(schema).toEqual({
       type: Type.OBJECT,
@@ -582,14 +582,14 @@ describe('toGeminiSchema', () => {
   });
 
   it('defaults items to string for a nested array property without items', () => {
-    const input = {
-      type: 'object' as const,
+    const input: MCPToolSchema = {
+      type: 'object',
       properties: {
         tags: {type: 'array'},
       },
     };
 
-    const schema = toGeminiSchema(input as unknown as MCPToolSchema);
+    const schema = toGeminiSchema(input);
 
     expect(schema).toEqual({
       type: Type.OBJECT,
