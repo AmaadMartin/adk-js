@@ -66,6 +66,12 @@ export interface RunnerConfig {
   plugins?: BasePlugin[];
 
   /**
+   * The budget, in milliseconds, given to each plugin individually when
+   * {@link Runner.close} closes them. Defaults to 5000.
+   */
+  pluginCloseTimeoutMs?: number;
+
+  /**
    * An optional service for storing and retrieving artifacts.
    */
   artifactService?: BaseArtifactService;
@@ -166,7 +172,10 @@ export class Runner {
     this.agent = agent;
     const appPlugins = input.app?.plugins ?? [];
     const configPlugins = input.plugins ?? [];
-    this.pluginManager = new PluginManager([...appPlugins, ...configPlugins]);
+    this.pluginManager = new PluginManager(
+      [...appPlugins, ...configPlugins],
+      input.pluginCloseTimeoutMs,
+    );
     this.artifactService = input.artifactService;
     this.sessionService = input.sessionService;
     this.memoryService = input.memoryService;
@@ -466,6 +475,9 @@ export class Runner {
    * registered plugin. Safe to call more than once; subsequent calls are
    * no-ops. Toolsets are also closed at the end of each invocation, but the
    * plugins are not, so a caller that never closes a runner leaks them.
+   *
+   * Each plugin gets its own `pluginCloseTimeoutMs` budget, so one plugin that
+   * hangs cannot strand the ones registered after it.
    *
    * @throws An `AggregateError` if one or more plugins fail to close. Every
    *     plugin is still closed before the error is raised. Toolset failures
