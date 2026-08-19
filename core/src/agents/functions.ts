@@ -30,6 +30,7 @@ import {
 import {
   SingleAfterToolCallback,
   SingleBeforeToolCallback,
+  SingleOnToolErrorCallback,
 } from './llm_agent.js';
 
 /**
@@ -265,6 +266,7 @@ export async function handleFunctionCallsAsync({
   toolsDict,
   beforeToolCallbacks,
   afterToolCallbacks,
+  onToolErrorCallbacks,
   filters,
   toolConfirmationDict,
 }: {
@@ -273,6 +275,7 @@ export async function handleFunctionCallsAsync({
   toolsDict: Record<string, BaseTool>;
   beforeToolCallbacks: SingleBeforeToolCallback[];
   afterToolCallbacks: SingleAfterToolCallback[];
+  onToolErrorCallbacks?: SingleOnToolErrorCallback[];
   filters?: Set<string>;
   toolConfirmationDict?: Record<string, ToolConfirmation>;
 }): Promise<Event | null> {
@@ -283,6 +286,7 @@ export async function handleFunctionCallsAsync({
     toolsDict: toolsDict,
     beforeToolCallbacks: beforeToolCallbacks,
     afterToolCallbacks: afterToolCallbacks,
+    onToolErrorCallbacks: onToolErrorCallbacks,
     filters: filters,
     toolConfirmationDict: toolConfirmationDict,
   });
@@ -317,6 +321,7 @@ export async function handleFunctionCallList({
   toolsDict,
   beforeToolCallbacks,
   afterToolCallbacks,
+  onToolErrorCallbacks,
   filters,
   toolConfirmationDict,
 }: {
@@ -325,6 +330,7 @@ export async function handleFunctionCallList({
   toolsDict: Record<string, BaseTool>;
   beforeToolCallbacks: SingleBeforeToolCallback[];
   afterToolCallbacks: SingleAfterToolCallback[];
+  onToolErrorCallbacks?: SingleOnToolErrorCallback[];
   filters?: Set<string>;
   toolConfirmationDict?: Record<string, ToolConfirmation>;
 }): Promise<Event | null> {
@@ -390,13 +396,30 @@ export async function handleFunctionCallList({
         functionResponse = await callToolAsync(tool, functionArgs, toolContext);
       } catch (e: unknown) {
         if (e instanceof Error) {
-          const onToolErrorResponse =
+          let onToolErrorResponse =
             await invocationContext.pluginManager.runOnToolErrorCallback({
               tool: tool,
               toolArgs: functionArgs,
               toolContext: toolContext,
               error: e,
             });
+
+          // A plugin response wins; the agent callbacks only run when every
+          // plugin declined, matching adk-python's
+          // `_run_on_tool_error_callbacks`.
+          if (onToolErrorResponse == null) {
+            for (const callback of onToolErrorCallbacks ?? []) {
+              onToolErrorResponse = await callback({
+                tool: tool,
+                args: functionArgs,
+                context: toolContext,
+                error: e,
+              });
+              if (onToolErrorResponse != null) {
+                break;
+              }
+            }
+          }
 
           // Set function response to the result of the error callback and
           // continue execution, do not shortcut

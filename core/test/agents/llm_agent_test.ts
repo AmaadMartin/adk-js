@@ -28,6 +28,7 @@ import {
   RunAsyncToolRequest,
   Runner,
   Session,
+  SingleOnToolErrorCallback,
   ToolProcessLlmRequest,
 } from '@google/adk';
 import {Content, Schema, Type} from '@google/genai';
@@ -1190,5 +1191,37 @@ describe('LlmAgent usage metadata on content-less responses', () => {
     const events = await runAndCollect();
 
     expect(events.find((e) => e.usageMetadata)).toBeUndefined();
+  });
+});
+
+describe('LlmAgent.canonicalOnToolErrorCallbacks', () => {
+  const firstCallback: SingleOnToolErrorCallback = () => ({result: 'first'});
+  const secondCallback: SingleOnToolErrorCallback = () => ({result: 'second'});
+
+  it('is empty when onToolErrorCallback is unset', () => {
+    const agent = new LlmAgent({name: 'test_agent', model: 'test_model'});
+
+    expect(agent.canonicalOnToolErrorCallbacks).toEqual([]);
+  });
+
+  it('wraps a single callback in an array', () => {
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: 'test_model',
+      onToolErrorCallback: firstCallback,
+    });
+
+    expect(agent.canonicalOnToolErrorCallbacks).toEqual([firstCallback]);
+  });
+
+  it('returns a list of callbacks unchanged', () => {
+    const callbacks = [firstCallback, secondCallback];
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: 'test_model',
+      onToolErrorCallback: callbacks,
+    });
+
+    expect(agent.canonicalOnToolErrorCallbacks).toEqual(callbacks);
   });
 });

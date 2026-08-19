@@ -17,6 +17,7 @@ import {
   Session,
   SingleAfterToolCallback,
   SingleBeforeToolCallback,
+  SingleOnToolErrorCallback,
   ToolConfirmation,
 } from '@google/adk';
 import {FunctionCall} from '@google/genai';
@@ -344,6 +345,189 @@ describe('handleFunctionCallList', () => {
     expect(event!.content!.parts![0].functionResponse!.response).toEqual({
       error: "Error in tool 'errorTool': tool error message content",
     });
+  });
+
+  it('should call an agent onToolErrorCallback when no plugin handles the error', async () => {
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(errorTool)],
+      toolsDict: {'errorTool': errorTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+      onToolErrorCallbacks: [
+        async () => ({result: 'agent onToolError executed'}),
+      ],
+    });
+
+    expect(event!.content!.parts![0].functionResponse!.response).toEqual({
+      result: 'agent onToolError executed',
+    });
+  });
+
+  it('should pass the tool, args and error to an agent onToolErrorCallback', async () => {
+    const received: Array<{
+      toolName: string;
+      args: Record<string, unknown>;
+      message: string;
+    }> = [];
+    const agentCallback: SingleOnToolErrorCallback = ({tool, args, error}) => {
+      received.push({toolName: tool.name, args, message: error.message});
+      return {result: 'handled'};
+    };
+
+    await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [
+        {id: randomIdForTestingOnly(), name: 'errorTool', args: {city: 'nyc'}},
+      ],
+      toolsDict: {'errorTool': errorTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+      onToolErrorCallbacks: [agentCallback],
+    });
+
+    expect(received).toEqual([
+      {
+        toolName: 'errorTool',
+        args: {city: 'nyc'},
+        message: "Error in tool 'errorTool': tool error message content",
+      },
+    ]);
+  });
+
+  it('should prefer the plugin onToolErrorCallback over an agent onToolErrorCallback', async () => {
+    const plugin = new TestPlugin('testPlugin');
+    plugin.onToolErrorCallbackResponse = {
+      result: 'plugin onToolError executed',
+    };
+    pluginManager.registerPlugin(plugin);
+    const agentCallback = vi.fn(async () => ({
+      result: 'agent onToolError executed',
+    }));
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(errorTool)],
+      toolsDict: {'errorTool': errorTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+      onToolErrorCallbacks: [agentCallback],
+    });
+
+    expect(event!.content!.parts![0].functionResponse!.response).toEqual({
+      result: 'plugin onToolError executed',
+    });
+    expect(agentCallback).not.toHaveBeenCalled();
+  });
+
+  it('should use the first agent onToolErrorCallback that returns a response', async () => {
+    const declining = vi.fn(async () => undefined);
+    const handling = vi.fn(async () => ({result: 'second'}));
+    const unreached = vi.fn(async () => ({result: 'third'}));
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(errorTool)],
+      toolsDict: {'errorTool': errorTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+      onToolErrorCallbacks: [declining, handling, unreached],
+    });
+
+    expect(event!.content!.parts![0].functionResponse!.response).toEqual({
+      result: 'second',
+    });
+    expect(declining).toHaveBeenCalledOnce();
+    expect(handling).toHaveBeenCalledOnce();
+    expect(unreached).not.toHaveBeenCalled();
+  });
+
+  it('should accept a synchronous agent onToolErrorCallback', async () => {
+    const syncCallback: SingleOnToolErrorCallback = () => ({
+      result: 'sync agent onToolError executed',
+    });
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(errorTool)],
+      toolsDict: {'errorTool': errorTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+      onToolErrorCallbacks: [syncCallback],
+    });
+
+    expect(event!.content!.parts![0].functionResponse!.response).toEqual({
+      result: 'sync agent onToolError executed',
+    });
+  });
+
+  it('should keep the error response when every agent onToolErrorCallback declines', async () => {
+    const declining = vi.fn(async () => undefined);
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(errorTool)],
+      toolsDict: {'errorTool': errorTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+      onToolErrorCallbacks: [declining],
+    });
+
+    expect(event!.content!.parts![0].functionResponse!.response).toEqual({
+      error: "Error in tool 'errorTool': tool error message content",
+    });
+    expect(declining).toHaveBeenCalledOnce();
+  });
+
+  it('should keep the error response when onToolErrorCallbacks is empty', async () => {
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(errorTool)],
+      toolsDict: {'errorTool': errorTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+      onToolErrorCallbacks: [],
+    });
+
+    expect(event!.content!.parts![0].functionResponse!.response).toEqual({
+      error: "Error in tool 'errorTool': tool error message content",
+    });
+  });
+
+  it('should run afterToolCallbacks over an agent onToolErrorCallback response', async () => {
+    const afterToolCallback: SingleAfterToolCallback = ({response}) => ({
+      wrapped: response,
+    });
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(errorTool)],
+      toolsDict: {'errorTool': errorTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [afterToolCallback],
+      onToolErrorCallbacks: [async () => ({result: 'recovered'})],
+    });
+
+    expect(event!.content!.parts![0].functionResponse!.response).toEqual({
+      wrapped: {result: 'recovered'},
+    });
+  });
+
+  it('should propagate an error raised by an agent onToolErrorCallback', async () => {
+    await expect(
+      handleFunctionCallList({
+        invocationContext,
+        functionCalls: [callFor(errorTool)],
+        toolsDict: {'errorTool': errorTool},
+        beforeToolCallbacks: [],
+        afterToolCallbacks: [],
+        onToolErrorCallbacks: [
+          async () => {
+            throw new Error('callback blew up');
+          },
+        ],
+      }),
+    ).rejects.toThrow('callback blew up');
   });
 
   it('should pass abortSignal to tool execution', async () => {
