@@ -248,6 +248,12 @@ describe('LlmAgent.callLlm', () => {
   const onModelErrorPluginResponse: LlmResponse = {
     content: {parts: [{text: 'on model error plugin'}]},
   };
+  const onModelErrorCallbackResponse: LlmResponse = {
+    content: {parts: [{text: 'on model error callback'}]},
+  };
+  const secondOnModelErrorCallbackResponse: LlmResponse = {
+    content: {parts: [{text: 'second on model error callback'}]},
+  };
   const modelError = new Error(
     JSON.stringify({
       error: {
@@ -330,6 +336,121 @@ describe('LlmAgent.callLlm', () => {
     agent.model = new MockLlm(null, modelError);
     const result = await callLlmUnderTest();
     expect(result).toEqual([{errorCode: '500', errorMessage: 'LLM error'}]);
+  });
+
+  it('prefers the plugin on model error callback over the agent callback', async () => {
+    pluginManager.registerPlugin(mockPlugin);
+    agent.model = new MockLlm(null, modelError);
+    mockPlugin.onModelErrorResponse = onModelErrorPluginResponse;
+    const agentCallback = vi.fn(async () => onModelErrorCallbackResponse);
+    agent.onModelErrorCallback = agentCallback;
+
+    const result = await callLlmUnderTest();
+
+    expect(result).toEqual([onModelErrorPluginResponse]);
+    expect(agentCallback).not.toHaveBeenCalled();
+  });
+
+  it('uses canonical on model error callback when plugin returns undefined', async () => {
+    pluginManager.registerPlugin(mockPlugin);
+    agent.model = new MockLlm(null, modelError);
+    agent.onModelErrorCallback = async () => onModelErrorCallbackResponse;
+
+    const result = await callLlmUnderTest();
+
+    expect(result).toEqual([onModelErrorCallbackResponse]);
+  });
+
+  it('uses the first canonical on model error callback that returns a response', async () => {
+    agent.model = new MockLlm(null, modelError);
+    const first = vi.fn(async () => undefined);
+    const second = vi.fn(async () => secondOnModelErrorCallbackResponse);
+    const third = vi.fn(async () => onModelErrorCallbackResponse);
+    agent.onModelErrorCallback = [first, second, third];
+
+    const result = await callLlmUnderTest();
+
+    expect(result).toEqual([secondOnModelErrorCallbackResponse]);
+    expect(first).toHaveBeenCalled();
+    expect(second).toHaveBeenCalled();
+    expect(third).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the error response when every canonical callback returns undefined', async () => {
+    agent.model = new MockLlm(null, modelError);
+    const callback = vi.fn(async () => undefined);
+    agent.onModelErrorCallback = callback;
+
+    const result = await callLlmUnderTest();
+
+    expect(callback).toHaveBeenCalled();
+    expect(result).toEqual([{errorCode: '500', errorMessage: 'LLM error'}]);
+  });
+
+  it('passes the error and the request to the canonical on model error callback', async () => {
+    agent.model = new MockLlm(null, modelError);
+    let params:
+      | {context: Context; request: LlmRequest; error: Error}
+      | undefined;
+    agent.onModelErrorCallback = async (callbackParams) => {
+      params = callbackParams;
+      return onModelErrorCallbackResponse;
+    };
+
+    const result = await callLlmUnderTest();
+
+    expect(result).toEqual([onModelErrorCallbackResponse]);
+    if (!params) {
+      expect.fail('the on model error callback was not called');
+    }
+    expect(params.error).toBe(modelError);
+    expect(params.request).toBe(llmRequest);
+    expect(params.context).toBeInstanceOf(Context);
+  });
+
+  it('yields an error event when the model response event carries actions', async () => {
+    agent.model = new MockLlm(null, modelError);
+    agent.onModelErrorCallback = async () => undefined;
+    modelResponseEvent = createEvent({id: 'evt_123', author: 'test_agent'});
+
+    const result = await callLlmUnderTest();
+
+    expect(result).toEqual([
+      expect.objectContaining({
+        author: 'test_agent',
+        invocationId: 'inv_123',
+        errorCode: '500',
+        errorMessage: 'LLM error',
+      }),
+    ]);
+  });
+});
+
+describe('LlmAgent canonicalOnModelErrorCallbacks', () => {
+  const firstResponse: LlmResponse = {content: {parts: [{text: 'first'}]}};
+  const secondResponse: LlmResponse = {content: {parts: [{text: 'second'}]}};
+  const first = async () => firstResponse;
+  const second = async () => secondResponse;
+
+  it('resolves to an empty list when the field is unset', () => {
+    const agent = new LlmAgent({name: 'test_agent'});
+    expect(agent.canonicalOnModelErrorCallbacks).toEqual([]);
+  });
+
+  it('wraps a single callback in a list', () => {
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      onModelErrorCallback: first,
+    });
+    expect(agent.canonicalOnModelErrorCallbacks).toEqual([first]);
+  });
+
+  it('keeps the order of a list of callbacks', () => {
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      onModelErrorCallback: [first, second],
+    });
+    expect(agent.canonicalOnModelErrorCallbacks).toEqual([first, second]);
   });
 });
 
@@ -1190,5 +1311,91 @@ describe('LlmAgent usage metadata on content-less responses', () => {
     const events = await runAndCollect();
 
     expect(events.find((e) => e.usageMetadata)).toBeUndefined();
+  });
+});
+
+describe('LlmAgent onModelErrorCallback through Runner', () => {
+  const recoveryText = 'the model is busy, try again shortly';
+
+  async function runAgent(
+    agent: LlmAgent,
+    plugins?: BasePlugin[],
+  ): Promise<Event[]> {
+    const sessionService = new InMemorySessionService();
+    const runner = new Runner({
+      appName: 'test_app',
+      agent,
+      sessionService,
+      plugins,
+    });
+    const session = await sessionService.createSession({
+      appName: 'test_app',
+      userId: 'test_user',
+    });
+
+    const events: Event[] = [];
+    for await (const event of runner.runAsync({
+      userId: session.userId,
+      sessionId: session.id,
+      newMessage: {role: 'user', parts: [{text: 'hello'}]},
+    })) {
+      events.push(event);
+    }
+    return events;
+  }
+
+  function failingModel(): MockLlm {
+    return new MockLlm(
+      null,
+      new Error(JSON.stringify({error: {message: 'quota', code: 429}})),
+    );
+  }
+
+  it('replaces the failed model call with the callback response', async () => {
+    const events = await runAgent(
+      new LlmAgent({
+        name: 'recovering_agent',
+        model: failingModel(),
+        onModelErrorCallback: () => ({
+          content: {role: 'model', parts: [{text: recoveryText}]},
+        }),
+      }),
+    );
+
+    expect(events.map((e) => e.content?.parts?.[0]?.text)).toContain(
+      recoveryText,
+    );
+    expect(events.find((e) => e.errorCode)).toBeUndefined();
+  });
+
+  it('emits the error event when no callback is registered', async () => {
+    const events = await runAgent(
+      new LlmAgent({name: 'plain_agent', model: failingModel()}),
+    );
+
+    expect(events.map((e) => e.content?.parts?.[0]?.text)).not.toContain(
+      recoveryText,
+    );
+    expect(events.find((e) => e.errorCode)).toMatchObject({
+      errorCode: '429',
+      errorMessage: 'quota',
+    });
+  });
+
+  it('replaces the failed model call with the plugin response', async () => {
+    const plugin = new MockPlugin('recovery_plugin');
+    plugin.onModelErrorResponse = {
+      content: {role: 'model', parts: [{text: recoveryText}]},
+    };
+
+    const events = await runAgent(
+      new LlmAgent({name: 'plugin_agent', model: failingModel()}),
+      [plugin],
+    );
+
+    expect(events.map((e) => e.content?.parts?.[0]?.text)).toContain(
+      recoveryText,
+    );
+    expect(events.find((e) => e.errorCode)).toBeUndefined();
   });
 });
