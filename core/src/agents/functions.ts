@@ -55,22 +55,24 @@ export const REQUEST_CREDENTIAL_FUNCTION_CALL_NAME = 'adk_request_credential';
 export const REQUEST_CONFIRMATION_FUNCTION_CALL_NAME =
   'adk_request_confirmation';
 
-const TOOL_NOT_FOUND_DESCRIPTION = 'Tool not found';
-const UNNAMED_TOOL_NAME = '<unnamed>';
-
 /**
  * Stands in for a tool the model named but that is not registered, so the
  * tool-error callbacks receive a real `BaseTool` and can identify what was
- * asked for. It is never executed: the call is answered by a callback or the
- * lookup error is re-thrown.
+ * asked for. It carries the lookup failure it stands for: the call is either
+ * answered by a callback or `error` is thrown.
  */
 class ToolNotFound extends BaseTool {
-  constructor(name: string) {
-    super({name, description: TOOL_NOT_FOUND_DESCRIPTION});
+  readonly error: Error;
+
+  constructor(requestedName: string | undefined) {
+    super({name: requestedName || '<unnamed>', description: 'Tool not found'});
+    this.error = new Error(
+      `Function ${requestedName} is not found in the toolsDict.`,
+    );
   }
 
   override async runAsync(): Promise<never> {
-    throw new Error(`Function ${this.name} is not found in the toolsDict.`);
+    throw this.error;
   }
 }
 
@@ -360,30 +362,25 @@ export async function handleFunctionCallList({
       toolConfirmation = toolConfirmationDict[functionCall.id];
     }
 
-    const toolContext = createToolContext({
+    const toolContext = new Context({
       invocationContext,
-      functionCall,
+      functionCallId: functionCall.id || undefined,
       toolConfirmation,
     });
     const functionArgs = functionCall.args ?? {};
 
-    const tool = getTool(functionCall, toolsDict);
+    const tool = functionCall.name ? toolsDict[functionCall.name] : undefined;
     if (!tool) {
-      const toolError = new Error(
-        `Function ${functionCall.name} is not found in the toolsDict.`,
-      );
-      const placeholder = new ToolNotFound(
-        functionCall.name || UNNAMED_TOOL_NAME,
-      );
+      const placeholder = new ToolNotFound(functionCall.name);
       const errorResponse =
         await invocationContext.pluginManager.runOnToolErrorCallback({
           tool: placeholder,
           toolArgs: functionArgs,
           toolContext,
-          error: toolError,
+          error: placeholder.error,
         });
       if (errorResponse == null) {
-        throw toolError;
+        throw placeholder.error;
       }
       functionResponseEvents.push(
         buildResponseEvent(
@@ -561,34 +558,6 @@ export async function handleFunctionCallList({
     });
   }
   return mergedEvent;
-}
-
-function createToolContext({
-  invocationContext,
-  functionCall,
-  toolConfirmation,
-}: {
-  invocationContext: InvocationContext;
-  functionCall: FunctionCall;
-  toolConfirmation?: ToolConfirmation;
-}): Context {
-  return new Context({
-    invocationContext: invocationContext,
-    functionCallId: functionCall.id || undefined,
-    toolConfirmation,
-  });
-}
-
-/** Returns the registered tool for a call, or `undefined` if there is none. */
-function getTool(
-  functionCall: FunctionCall,
-  toolsDict: Record<string, BaseTool>,
-): BaseTool | undefined {
-  if (!functionCall.name) {
-    return undefined;
-  }
-
-  return toolsDict[functionCall.name];
 }
 
 /**

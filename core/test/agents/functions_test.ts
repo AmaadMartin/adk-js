@@ -545,9 +545,9 @@ describe('handleFunctionCallList', () => {
     plugin.onToolErrorCallbackResponse = {reflection: 'name a tool'};
     pluginManager.registerPlugin(plugin);
 
-    await handleFunctionCallList({
+    const event = await handleFunctionCallList({
       invocationContext,
-      functionCalls: [{id: randomIdForTestingOnly()}],
+      functionCalls: [{}],
       toolsDict,
       beforeToolCallbacks: [],
       afterToolCallbacks: [],
@@ -555,6 +555,10 @@ describe('handleFunctionCallList', () => {
 
     expect(plugin.capturedParams?.tool.name).toBe('<unnamed>');
     expect(plugin.capturedParams?.toolArgs).toEqual({});
+    expect(plugin.capturedParams?.error.message).toBe(
+      'Function undefined is not found in the toolsDict.',
+    );
+    expect(event?.content?.parts?.[0].functionResponse?.id).toBeUndefined();
   });
 
   it('should skip the after-tool callbacks for an unknown tool', async () => {
