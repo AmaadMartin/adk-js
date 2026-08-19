@@ -12,11 +12,12 @@ import {
   BaseSessionService,
   createEvent,
   createEventActions,
+  createSession,
   Runner,
   RunnerConfig,
   Session,
 } from '@google/adk';
-import {beforeEach, describe, expect, it, Mocked, vi} from 'vitest';
+import {beforeEach, describe, expect, it, Mock, Mocked, vi} from 'vitest';
 
 // Mock the Runner to control its async generator
 vi.mock('../../src/runner/runner.js', async (importOriginal) => {
@@ -28,9 +29,12 @@ vi.mock('../../src/runner/runner.js', async (importOriginal) => {
       appName: config?.appName,
       sessionService: config?.sessionService,
       runAsync: vi.fn(),
+      close: vi.fn(),
     })),
   };
 });
+
+type AdkRun = () => AsyncGenerator<AdkEvent, void, void>;
 
 describe('A2AAgentExecutor', () => {
   let mockSessionService: Mocked<BaseSessionService>;
@@ -114,6 +118,7 @@ describe('A2AAgentExecutor', () => {
         appName: config?.appName,
         sessionService: config?.sessionService,
         runAsync: mockRunAsync,
+        close: vi.fn(),
       } as unknown as Runner;
     }) as unknown as () => Runner);
 
@@ -237,6 +242,7 @@ describe('A2AAgentExecutor', () => {
         appName: config?.appName,
         sessionService: config?.sessionService,
         runAsync: mockRunAsyncWithError,
+        close: vi.fn(),
       } as unknown as Runner;
     }) as unknown as () => Runner);
 
@@ -265,6 +271,91 @@ describe('A2AAgentExecutor', () => {
     expect(lastCallArg.status.state).toBe('failed');
     const firstPart = lastCallArg.status.message!.parts[0] as TextPart;
     expect(firstPart.text).toContain('LLM failed');
+  });
+
+  /** Stubs the session lookup the executor performs before it runs. */
+  function stubSession(): void {
+    mockSessionService.getSession.mockResolvedValue(
+      createSession({
+        id: 'session-id',
+        userId: 'test-user',
+        appName: 'test-app',
+      }),
+    );
+  }
+
+  /** Mocks the Runner constructor and returns its close spy. */
+  function mockRunnerClose(runAsync: AdkRun = async function* () {}): Mock {
+    const close = vi.fn();
+    vi.mocked(Runner).mockImplementation(((config: RunnerConfig) => {
+      return {
+        appName: config?.appName,
+        sessionService: config?.sessionService,
+        runAsync,
+        close,
+      } as unknown as Runner;
+    }) as unknown as () => Runner);
+    return close;
+  }
+
+  it('closes a runner it built from a config', async () => {
+    stubSession();
+    const close = mockRunnerClose();
+    const executor = new A2AAgentExecutor({
+      runner: {
+        appName: 'test-app',
+        sessionService: mockSessionService,
+      } as unknown as RunnerConfig,
+    });
+
+    await executor.execute(createRequestContext(), mockEventBus);
+
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes a runner it built even when the run fails', async () => {
+    stubSession();
+    const close = mockRunnerClose(async function* () {
+      yield createEvent({
+        author: 'model',
+        content: {role: 'model', parts: [{text: 'some part'}]},
+        partial: false,
+        actions: createEventActions(),
+      });
+      throw new Error('LLM failed');
+    });
+    const executor = new A2AAgentExecutor({
+      runner: {
+        appName: 'test-app',
+        sessionService: mockSessionService,
+      } as unknown as RunnerConfig,
+    });
+
+    await executor.execute(createRequestContext(), mockEventBus);
+
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not close a runner supplied by the caller', async () => {
+    stubSession();
+    const built = mockRunnerClose();
+    const close = vi.fn();
+    async function* emptyRun() {}
+    // isRunner() keys off the runner signature symbol, so a caller-supplied
+    // runner must carry it to be recognised rather than treated as a config.
+    const callerRunner = {
+      [Symbol.for('google.adk.runner')]: true,
+      appName: 'test-app',
+      sessionService: mockSessionService,
+      runAsync: emptyRun,
+      close,
+    } as unknown as Runner;
+    const executor = new A2AAgentExecutor({runner: callerRunner});
+
+    await executor.execute(createRequestContext(), mockEventBus);
+
+    expect(close).not.toHaveBeenCalled();
+    expect(built).not.toHaveBeenCalled();
   });
 
   it('should fail cancelTask because it is not implemented', async () => {

@@ -81,45 +81,51 @@ export class TestRunner {
     const userId = 'test-user';
     const sessionId = 'test-session';
 
-    // Create the session explicitly
-    await sessionService.createSession({
-      appName: 'test-runner',
-      userId,
-      sessionId,
-    });
-
-    const userMessages = testInfo.spec.userMessages!;
-
-    for (let i = 0; i < userMessages.length; i++) {
-      context.userMessageIndex = i;
-      const userMsg = userMessages[i];
-      const content = userMessageToContent(userMsg);
-
-      const iterator = runner.runAsync({
+    // This runner lives for one test, so it must release the agent's toolsets
+    // before the next test builds its own runner over the same registry.
+    try {
+      // Create the session explicitly
+      await sessionService.createSession({
+        appName: 'test-runner',
         userId,
         sessionId,
-        newMessage: content,
-        stateDelta: i === 0 ? testInfo.spec.initialState : undefined,
       });
 
-      for await (const _ of iterator) {
-        // Consume events
+      const userMessages = testInfo.spec.userMessages!;
+
+      for (let i = 0; i < userMessages.length; i++) {
+        context.userMessageIndex = i;
+        const userMsg = userMessages[i];
+        const content = userMessageToContent(userMsg);
+
+        const iterator = runner.runAsync({
+          userId,
+          sessionId,
+          newMessage: content,
+          stateDelta: i === 0 ? testInfo.spec.initialState : undefined,
+        });
+
+        for await (const _ of iterator) {
+          // Consume events
+        }
       }
+
+      const session = await sessionService.getSession({
+        appName: 'test-runner',
+        userId,
+        sessionId,
+      });
+
+      if (!session) {
+        throw new Error('Session not found after execution');
+      }
+
+      validateSession(session, testInfo.session);
+
+      return false;
+    } finally {
+      await runner.close();
     }
-
-    const session = await sessionService.getSession({
-      appName: 'test-runner',
-      userId,
-      sessionId,
-    });
-
-    if (!session) {
-      throw new Error('Session not found after execution');
-    }
-
-    validateSession(session, testInfo.session);
-
-    return false;
   }
 }
 

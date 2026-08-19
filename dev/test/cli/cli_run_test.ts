@@ -40,6 +40,7 @@ vi.mock('@google/adk', async (importOriginal) => {
           yield event;
         }
       }),
+      close: vi.fn(),
     })),
     InMemoryArtifactService: vi.fn(),
     InMemorySessionService: vi.fn().mockImplementation(() => ({
@@ -87,6 +88,7 @@ describe('cli_run', () => {
           yield event;
         }
       },
+      close: vi.fn(),
     }));
 
     mockRootAgent = {
@@ -142,6 +144,20 @@ describe('cli_run', () => {
       }),
     }) as unknown as BaseSessionService;
 
+  /** Mocks the Runner constructor and returns its close spy. */
+  const mockRunnerClose = (): Mock => {
+    const close = vi.fn();
+    (Runner as unknown as Mock).mockImplementation(() => ({
+      runAsync: async function* () {
+        for (const event of runnerState.events) {
+          yield event;
+        }
+      },
+      close,
+    }));
+    return close;
+  };
+
   it('should run from input file', async () => {
     const inputFileContent = {
       state: {foo: 'bar'},
@@ -160,6 +176,33 @@ describe('cli_run', () => {
       expect.stringContaining('input.json'),
     );
     expect(mockSessionService.createSession).toHaveBeenCalled();
+  });
+
+  it('closes the runner after an interactive session ends', async () => {
+    const close = mockRunnerClose();
+
+    await runAgent({
+      agentPath: 'agent.ts',
+      sessionService: createMockSessionService(),
+    });
+
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes the runner after a scripted run', async () => {
+    (loadFileData as Mock).mockResolvedValue({
+      state: {},
+      queries: ['Hello'],
+    });
+    const close = mockRunnerClose();
+
+    await runAgent({
+      agentPath: 'agent.ts',
+      inputFile: 'input.json',
+      sessionService: createMockSessionService(),
+    });
+
+    expect(close).toHaveBeenCalledTimes(1);
   });
 
   it('should handle missing input file', async () => {

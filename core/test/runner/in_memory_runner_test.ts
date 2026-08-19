@@ -145,7 +145,7 @@ describe('InMemoryRunner', () => {
     expect(events2.length).toBeGreaterThan(0);
   });
 
-  it('automatically closes stateful toolsets at the end of runAsync', async () => {
+  it('keeps stateful toolsets open until the runner is closed', async () => {
     const closeSpy = vi.fn().mockResolvedValue(undefined);
 
     class CustomToolset extends BaseToolset {
@@ -182,9 +182,13 @@ describe('InMemoryRunner', () => {
         // consume events
       }
     } catch (_e: unknown) {
-      // Ignore any model-related errors because we only care that finally block closes the toolset!
+      // Ignore any model-related errors; only the toolset lifetime matters.
     }
 
-    expect(closeSpy).toHaveBeenCalled();
+    expect(closeSpy).not.toHaveBeenCalled();
+
+    await runner.close();
+
+    expect(closeSpy).toHaveBeenCalledTimes(1);
   });
 });

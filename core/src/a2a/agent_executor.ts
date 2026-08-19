@@ -97,7 +97,9 @@ export class A2AAgentExecutor implements AgentExecutor {
     const userId = `A2A_USER_${ctx.contextId}`;
     const sessionId = ctx.contextId;
     const genAIUserMessage = toGenAIContent(a2aUserMessage);
-    const adkRunner = await getAdkRunner(this.config.runner);
+    const {runner: adkRunner, owned: ownsRunner} = await getAdkRunner(
+      this.config.runner,
+    );
     const session = await getAdkSession(
       userId,
       sessionId,
@@ -193,6 +195,12 @@ export class A2AAgentExecutor implements AgentExecutor {
           metadata: getA2ASessionMetadata(executorContext),
         }),
       });
+    } finally {
+      // A runner built from a config lives for one request, so only this
+      // executor can release its toolsets. A caller-supplied runner is theirs.
+      if (ownsRunner) {
+        await adkRunner.close();
+      }
     }
   }
 
@@ -284,12 +292,19 @@ async function getAdkSession(
   });
 }
 
+/** A resolved runner, and whether this executor built it. */
+interface ResolvedRunner {
+  runner: Runner;
+  /** True when the executor built the runner and must therefore close it. */
+  owned: boolean;
+}
+
 /**
  * Resolves the runner from the provided runner or runner config.
  */
 async function getAdkRunner(
   runnerOrConfig: RunnerOrRunnerConfig,
-): Promise<Runner> {
+): Promise<ResolvedRunner> {
   if (typeof runnerOrConfig === 'function') {
     const result = await runnerOrConfig();
 
@@ -297,8 +312,8 @@ async function getAdkRunner(
   }
 
   if (isRunner(runnerOrConfig)) {
-    return runnerOrConfig;
+    return {runner: runnerOrConfig, owned: false};
   }
 
-  return new Runner(runnerOrConfig);
+  return {runner: new Runner(runnerOrConfig), owned: true};
 }
