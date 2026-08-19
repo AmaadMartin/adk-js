@@ -13,6 +13,7 @@ import {
   TaskStatusUpdateEvent,
 } from '@a2a-js/sdk';
 import {describe, expect, it} from 'vitest';
+import {A2AEvent} from '../../src/a2a/a2a_event.js';
 import {
   buildA2ARequestLog,
   buildA2AResponseLog,
@@ -24,6 +25,15 @@ const SEPARATOR = '-'.repeat(59);
 /** A file reference that can point back at itself, to force a JSON cycle. */
 interface SelfReferencingFile extends FileWithUri {
   self?: SelfReferencingFile;
+}
+
+/**
+ * Builds an event the way the JSON-RPC transport does: the parsed response
+ * body is used as-is, with no schema validation, so a field the protocol marks
+ * required can still be missing.
+ */
+function parseWireEvent(payload: string): A2AEvent {
+  return JSON.parse(payload);
 }
 
 function createMessage(overrides: Partial<Message> = {}): Message {
@@ -175,6 +185,24 @@ describe('buildMessagePartLog', () => {
     const part: A2APart = {kind: 'text', text: 'hello', metadata: {}};
 
     expect(buildMessagePartLog(part)).toBe('TextPart: hello');
+  });
+
+  it('reports an unserializable data part instead of throwing', () => {
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    const part: A2APart = {kind: 'data', data: {payload: cyclic}};
+
+    expect(buildMessagePartLog(part)).toBe('DataPart: <unserializable>');
+  });
+
+  it('reports unserializable part metadata instead of throwing', () => {
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    const part: A2APart = {kind: 'text', text: 'hello', metadata: cyclic};
+
+    expect(buildMessagePartLog(part)).toBe(
+      'TextPart: hello\n    Part Metadata: <unserializable>',
+    );
   });
 
   it('reports an unserializable file part instead of throwing', () => {
@@ -413,6 +441,84 @@ describe('buildA2AResponseLog', () => {
       'Artifact ID: art-3',
       'Parts Count: 1',
     ]);
+  });
+
+  it('reports a message that arrived without a parts array', () => {
+    const log = buildA2AResponseLog(
+      parseWireEvent('{"kind":"message","messageId":"m-1","role":"agent"}'),
+    );
+
+    expect(sectionLines(log, 'Result Details:')).toEqual([
+      '  ID: m-1',
+      '  Role: agent',
+      '  Task ID: undefined',
+      '  Context ID: undefined',
+      '  Message Parts:',
+      '  No parts',
+    ]);
+  });
+
+  it('reports a status message that arrived without a parts array', () => {
+    const log = buildA2AResponseLog(
+      parseWireEvent(
+        '{"kind":"status-update","taskId":"t-1","contextId":"c-1","final":true,' +
+          '"status":{"state":"completed","message":{"kind":"message",' +
+          '"messageId":"s-1","role":"agent"}}}',
+      ),
+    );
+
+    expect(sectionLines(log, 'Status Message:')).toEqual([
+      'ID: s-1',
+      'Role: agent',
+      'Task ID: undefined',
+      'Context ID: undefined',
+      'Message Parts:',
+      'No parts',
+    ]);
+  });
+
+  it('reports an artifact update that arrived without an artifact', () => {
+    const log = buildA2AResponseLog(
+      parseWireEvent(
+        '{"kind":"artifact-update","taskId":"t-2","contextId":"c-2"}',
+      ),
+    );
+
+    expect(sectionLines(log, 'Result Details:')).toEqual([
+      'Task ID: t-2',
+      'Context ID: c-2',
+      'Artifact ID: undefined',
+      'Parts Count: 0',
+    ]);
+  });
+
+  it('reports an artifact that arrived without a parts array', () => {
+    const log = buildA2AResponseLog(
+      parseWireEvent(
+        '{"kind":"artifact-update","taskId":"t-3","contextId":"c-3",' +
+          '"artifact":{"artifactId":"a-3"}}',
+      ),
+    );
+
+    expect(sectionLines(log, 'Result Details:')).toEqual([
+      'Task ID: t-3',
+      'Context ID: c-3',
+      'Artifact ID: a-3',
+      'Parts Count: 0',
+    ]);
+  });
+
+  it('dumps an event whose kind it does not know', () => {
+    const event = {kind: 'thought-update', taskId: 't-4'};
+
+    const log = buildA2AResponseLog(event);
+
+    expect(log).toContain('Result Type: Unknown');
+    expect(sectionLines(log, 'Result Details:')).toEqual([
+      'JSON Data: {"kind":"thought-update","taskId":"t-4"}',
+    ]);
+    expect(sectionLines(log, 'Status Message:')).toEqual(['None']);
+    expect(sectionLines(log, 'History:')).toEqual(['No history']);
   });
 
   it('redacts file bytes carried by a history message', () => {

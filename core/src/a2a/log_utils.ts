@@ -15,6 +15,7 @@ import {
   A2AEvent,
   isMessage,
   isTask,
+  isTaskArtifactUpdateEvent,
   isTaskStatusUpdateEvent,
 } from './a2a_event.js';
 
@@ -25,16 +26,40 @@ const MAX_TEXT_LENGTH = 100;
 const MAX_DATA_VALUE_LENGTH = 100;
 const REDACTED_FILE_BYTES = '<bytes redacted>';
 const UNSERIALIZABLE = '<unserializable>';
+const UNKNOWN_RESULT_TYPE = 'Unknown';
 
 /**
- * Labels used for the `Result Type` line of a response log.
+ * Labels used for the `Result Type` line of a response log. A remote peer can
+ * send a kind this version does not know, so the lookup is not exhaustive.
  */
-const RESULT_TYPE_LABELS: Record<A2AEvent['kind'], string> = {
+const RESULT_TYPE_LABELS: Record<string, string> = {
   'task': 'Task',
   'message': 'Message',
   'status-update': 'TaskStatusUpdateEvent',
   'artifact-update': 'TaskArtifactUpdateEvent',
-};
+} satisfies Record<A2AEvent['kind'], string>;
+
+/**
+ * An event whose `kind` this version does not know. The JSON-RPC transport
+ * yields the response body with no schema validation, so a newer peer can send
+ * one and the log must still render it.
+ */
+interface UnknownA2AEvent {
+  kind: string;
+}
+
+/**
+ * Serializes a value for the log. A response arrives unvalidated, so a value
+ * that JSON cannot represent must degrade to a marker instead of aborting the
+ * agent run.
+ */
+function stringifyForLog(value: unknown, space?: number): string {
+  try {
+    return JSON.stringify(value, null, space);
+  } catch {
+    return UNSERIALIZABLE;
+  }
+}
 
 /**
  * Re-indents the continuation lines of a multi-line block.
@@ -61,7 +86,7 @@ function formatMetadata(
   if (!hasEntries(metadata)) {
     return undefined;
   }
-  const json = indentLines(JSON.stringify(metadata, null, 2), indent);
+  const json = indentLines(stringifyForLog(metadata, 2), indent);
   return `${indent}${label}:\n${indent}${json}`;
 }
 
@@ -72,7 +97,7 @@ function summarizeDataValue(value: unknown): unknown {
   if (value === null || typeof value !== 'object') {
     return value;
   }
-  if (JSON.stringify(value).length <= MAX_DATA_VALUE_LENGTH) {
+  if (stringifyForLog(value).length <= MAX_DATA_VALUE_LENGTH) {
     return value;
   }
   return Array.isArray(value) ? '<array>' : '<object>';
@@ -87,11 +112,7 @@ function buildFilePartLog(part: FilePart): string {
     'bytes' in part.file
       ? {...part.file, bytes: REDACTED_FILE_BYTES}
       : part.file;
-  try {
-    return `FilePart: ${JSON.stringify({kind: part.kind, file})}`;
-  } catch {
-    return `FilePart: ${UNSERIALIZABLE}`;
-  }
+  return `FilePart: ${stringifyForLog({kind: part.kind, file})}`;
 }
 
 function buildPartContentLog(part: A2APart): string {
@@ -107,7 +128,7 @@ function buildPartContentLog(part: A2APart): string {
           summarizeDataValue(value),
         ]),
       );
-      return `DataPart: ${JSON.stringify(summary, null, 2)}`;
+      return `DataPart: ${stringifyForLog(summary, 2)}`;
     }
     case 'file':
       return buildFilePartLog(part);
@@ -127,7 +148,7 @@ export function buildMessagePartLog(part: A2APart): string {
     return content;
   }
   const json = indentLines(
-    JSON.stringify(part.metadata, null, 2),
+    stringifyForLog(part.metadata, 2),
     PART_METADATA_INDENT,
   );
   return `${content}\n${PART_METADATA_INDENT}Part Metadata: ${json}`;
@@ -137,8 +158,8 @@ export function buildMessagePartLog(part: A2APart): string {
  * Renders the numbered `Part i:` block of a message, indenting each part's
  * continuation lines so a multi-part message stays readable.
  */
-function buildPartsLog(parts: A2APart[], indent: string): string {
-  if (parts.length === 0) {
+function buildPartsLog(parts: A2APart[] | undefined, indent: string): string {
+  if (!parts?.length) {
     return `${indent}No parts`;
   }
   const contentIndent = indent + NESTED_INDENT;
@@ -193,7 +214,7 @@ ${SEPARATOR}
 `;
 }
 
-function buildResultDetailsLog(resp: A2AEvent): string {
+function buildResultDetailsLog(resp: A2AEvent | UnknownA2AEvent): string {
   if (isTask(resp)) {
     const details = [
       `Task ID: ${resp.id}`,
@@ -223,15 +244,19 @@ function buildResultDetailsLog(resp: A2AEvent): string {
     ].join('\n');
   }
 
-  return [
-    `Task ID: ${resp.taskId}`,
-    `Context ID: ${resp.contextId}`,
-    `Artifact ID: ${resp.artifact.artifactId}`,
-    `Parts Count: ${resp.artifact.parts.length}`,
-  ].join('\n');
+  if (isTaskArtifactUpdateEvent(resp)) {
+    return [
+      `Task ID: ${resp.taskId}`,
+      `Context ID: ${resp.contextId}`,
+      `Artifact ID: ${resp.artifact?.artifactId}`,
+      `Parts Count: ${resp.artifact?.parts?.length ?? 0}`,
+    ].join('\n');
+  }
+
+  return `JSON Data: ${stringifyForLog(resp)}`;
 }
 
-function buildStatusMessageLog(resp: A2AEvent): string {
+function buildStatusMessageLog(resp: A2AEvent | UnknownA2AEvent): string {
   const message =
     isTask(resp) || isTaskStatusUpdateEvent(resp)
       ? resp.status.message
@@ -239,7 +264,7 @@ function buildStatusMessageLog(resp: A2AEvent): string {
   return message ? buildMessageLog(message, '') : 'None';
 }
 
-function buildHistoryLog(resp: A2AEvent): string {
+function buildHistoryLog(resp: A2AEvent | UnknownA2AEvent): string {
   if (!isTask(resp) || !resp.history?.length) {
     return 'No history';
   }
@@ -254,14 +279,15 @@ function buildHistoryLog(resp: A2AEvent): string {
 /**
  * Builds a structured log representation of an inbound A2A stream event.
  *
- * @param resp - The A2A event received from the remote agent.
+ * @param resp - The A2A event received from the remote agent, as it came
+ *   off the wire and therefore unvalidated.
  * @returns A formatted, multi-line representation of the event.
  */
-export function buildA2AResponseLog(resp: A2AEvent): string {
+export function buildA2AResponseLog(resp: A2AEvent | UnknownA2AEvent): string {
   return `
 A2A Response:
 ${SEPARATOR}
-Result Type: ${RESULT_TYPE_LABELS[resp.kind]}
+Result Type: ${RESULT_TYPE_LABELS[resp.kind] ?? UNKNOWN_RESULT_TYPE}
 ${SEPARATOR}
 Result Details:
 ${buildResultDetailsLog(resp)}
