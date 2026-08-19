@@ -19,8 +19,14 @@ import {LlmResponse} from './llm_response.js';
  */
 const BASE_MODEL_SYMBOL = Symbol.for('google.adk.baseModel');
 
-/** Class names already warned about, so the fallback warns once per subclass. */
-const warnedNameBasedModels = new Set<string>();
+/**
+ * Subclasses already warned about, so the fallback warns once for each.
+ *
+ * Keyed on the constructor itself, not on its name: a minifier rewrites the
+ * name, which both collides across unrelated subclasses and makes the warning
+ * unreadable. Weak so a class that goes out of scope is collected.
+ */
+const warnedNameBasedModels = new WeakSet<object>();
 
 /**
  * Type guard to check if an object is an instance of BaseLlm.
@@ -65,16 +71,14 @@ export abstract class BaseLlm {
   /**
    * The capabilities of this model instance.
    *
-   * Subclasses override this to declare what they support. Build on the parent
-   * snapshot with a spread, `{...super.capabilities, outputSchemaAndTools:
-   * true}`, so a capability the override does not name keeps the parent's
-   * value. A subclass that extends `BaseLlm` directly should declare every
-   * field outright instead, because spreading `super.capabilities` routes
-   * through the deprecated fallback below.
+   * Subclasses override this to declare what they support. Extending a shipped
+   * model spreads the parent snapshot, `{...super.capabilities, ...}`, so
+   * capabilities the override does not name keep the parent's value; extending
+   * `BaseLlm` directly declares every field, since `super` here is the
+   * deprecated fallback below.
    *
    * Keep an override a plain getter rather than caching the result: a
-   * capability may depend on state that changes after construction, such as an
-   * environment variable or a reassigned `model`.
+   * capability may depend on state that changes after construction.
    */
   get capabilities(): LlmCapabilities {
     return {outputSchemaAndTools: this.legacyOutputSchemaAndTools()};
@@ -94,13 +98,12 @@ export abstract class BaseLlm {
     if (!geminiOutputSchemaAndTools(this.model)) {
       return false;
     }
-    const className = this.constructor.name;
-    if (!warnedNameBasedModels.has(className)) {
-      warnedNameBasedModels.add(className);
+    if (!warnedNameBasedModels.has(this.constructor)) {
+      warnedNameBasedModels.add(this.constructor);
       logger.warn(
-        `${className} relies on name-based detection of outputSchemaAndTools. ` +
-          'Override BaseLlm.capabilities to declare it explicitly; this ' +
-          'fallback will be removed in a future release.',
+        `Model ${this.model} relies on name-based detection of ` +
+          'outputSchemaAndTools. Override BaseLlm.capabilities to declare it ' +
+          'explicitly; this fallback will be removed in a future release.',
       );
     }
     return true;

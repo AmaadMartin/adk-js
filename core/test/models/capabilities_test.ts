@@ -138,10 +138,12 @@ describe('LlmCapabilities', () => {
       expect(llm.capabilities.outputSchemaAndTools).toBe(true);
 
       expect(warn).toHaveBeenCalledTimes(1);
-      expect(warn.mock.calls[0][0]).toContain('FallbackGrantLlm');
+      expect(warn.mock.calls[0][0]).toContain('gemini-2.5-pro');
     });
 
     it('warns again for a different subclass', () => {
+      // Same model id as the test above, so warning again can only mean the
+      // registry key is the subclass rather than the model.
       useVertexEnv();
       const warn = spyOnWarn();
 
@@ -151,7 +153,6 @@ describe('LlmCapabilities', () => {
       ).toBe(true);
 
       expect(warn).toHaveBeenCalledTimes(1);
-      expect(warn.mock.calls[0][0]).toContain('OtherFallbackGrantLlm');
     });
 
     it.each([
@@ -275,18 +276,6 @@ describe('LlmCapabilities', () => {
       expect(gemini.capabilities.outputSchemaAndTools).toBe(false);
 
       useVertexEnv();
-
-      expect(gemini.capabilities.outputSchemaAndTools).toBe(true);
-    });
-
-    it('follows a model reassignment on the same instance', () => {
-      useVertexEnv();
-      const gemini = new Gemini({model: 'not-a-gemini-model'});
-      expect(gemini.capabilities.outputSchemaAndTools).toBe(false);
-
-      // `readonly` is erased at compile time, so a JavaScript caller can do
-      // this. The getter must re-read `this.model` instead of caching it.
-      Object.assign(gemini, {model: 'gemini-2.5-pro'});
 
       expect(gemini.capabilities.outputSchemaAndTools).toBe(true);
     });

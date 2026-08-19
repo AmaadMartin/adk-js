@@ -12,12 +12,8 @@ import {getGoogleLlmVariant, GoogleLLMVariant} from './variant_utils.js';
  * same time as tools, which is strictly more reliable than the prompt-based
  * `set_model_response` workaround.
  *
- * This is the Gemini-specific rule, not the general question. Callers that
- * want to know whether an arbitrary model supports the pairing read
- * `model.capabilities.outputSchemaAndTools` instead. Two callers share this
- * function so the two cannot drift: `Gemini.capabilities`, which is Gemini's
- * permanent self-report, and the deprecated name-based fallback on
- * `BaseLlm.capabilities`.
+ * This is the Gemini-specific rule, not the general question. Ask an arbitrary
+ * model through `model.capabilities.outputSchemaAndTools` instead.
  *
  * Early Access Program model names encode no numeric version, so
  * `isGemini2OrAbove` rejects them even on Vertex AI. The Python
