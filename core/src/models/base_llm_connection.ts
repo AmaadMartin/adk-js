@@ -31,8 +31,12 @@ export interface BaseLlmConnection {
    * responses.
    *
    * @param content The content to send to the model.
+   * @param options.partial If true, the content is appended to the current
+   *     model turn without completing it, so the model does not respond.
+   *     Implementations that cannot express a non-completing update may
+   *     ignore this option.
    */
-  sendContent(content: Content): Promise<void>;
+  sendContent(content: Content, options?: {partial?: boolean}): Promise<void>;
 
   /**
    * Sends a chunk of audio or a frame of video to the model in realtime.

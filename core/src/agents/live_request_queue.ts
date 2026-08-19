@@ -20,6 +20,11 @@ export interface LiveRequest {
   activityEnd?: ActivityEnd;
   /** If set, close the queue. */
   close?: boolean;
+  /**
+   * If set, the content is a partial turn update that does not complete the
+   * current model turn.
+   */
+  partial?: boolean;
 }
 
 /** Function type for resolving a Promise with a LiveRequest. */
@@ -119,9 +124,11 @@ export class LiveRequestQueue {
   /**
    * Sends a content object to the queue.
    * @param content The content to send.
+   * @param options.partial If true, the content is appended to the current
+   *     model turn without completing it, so the model does not respond.
    */
-  sendContent(content: Content) {
-    this.send({content});
+  sendContent(content: Content, options?: {partial?: boolean}) {
+    this.send({content, partial: options?.partial});
   }
 
   /**
