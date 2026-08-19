@@ -17,7 +17,7 @@ import {
   getFunctionResponses,
 } from '../events/event.js';
 import {mergeEventActions} from '../events/event_actions.js';
-import type {BaseTool} from '../tools/base_tool.js';
+import {BaseTool} from '../tools/base_tool.js';
 import type {ToolConfirmation} from '../tools/tool_confirmation.js';
 import {rendersAsEmptyJsonObject} from '../utils/json_utils.js';
 import {logger} from '../utils/logger.js';
@@ -57,6 +57,25 @@ export const REQUEST_INPUT_FUNCTION_CALL_NAME = 'adk_request_input';
 export const REQUEST_CREDENTIAL_FUNCTION_CALL_NAME = 'adk_request_credential';
 export const REQUEST_CONFIRMATION_FUNCTION_CALL_NAME =
   'adk_request_confirmation';
+
+const TOOL_NOT_FOUND_DESCRIPTION = 'Tool not found';
+const UNNAMED_TOOL_NAME = '<unnamed>';
+
+/**
+ * Stands in for a tool the model named but that is not registered, so the
+ * tool-error callbacks receive a real `BaseTool` and can identify what was
+ * asked for. It is never executed: the call is answered by a callback or the
+ * lookup error is re-thrown.
+ */
+class ToolNotFound extends BaseTool {
+  constructor(name: string) {
+    super({name, description: TOOL_NOT_FOUND_DESCRIPTION});
+  }
+
+  override async runAsync(): Promise<never> {
+    throw new Error(`Function ${this.name} is not found in the toolsDict.`);
+  }
+}
 
 // Export these items for testing purposes only
 export const functionsExportedForTestingOnly = {
@@ -315,16 +334,44 @@ export async function handleFunctionCallList({
       toolConfirmation = toolConfirmationDict[functionCall.id];
     }
 
-    const {tool, toolContext} = getToolAndContext({
+    const toolContext = createToolContext({
       invocationContext,
       functionCall,
-      toolsDict,
       toolConfirmation,
     });
+    const functionArgs = functionCall.args ?? {};
+
+    const tool = getTool(functionCall, toolsDict);
+    if (!tool) {
+      const toolError = new Error(
+        `Function ${functionCall.name} is not found in the toolsDict.`,
+      );
+      const placeholder = new ToolNotFound(
+        functionCall.name || UNNAMED_TOOL_NAME,
+      );
+      const errorResponse =
+        await invocationContext.pluginManager.runOnToolErrorCallback({
+          tool: placeholder,
+          toolArgs: functionArgs,
+          toolContext,
+          error: toolError,
+        });
+      if (errorResponse == null) {
+        throw toolError;
+      }
+      functionResponseEvents.push(
+        buildResponseEvent(
+          placeholder,
+          errorResponse,
+          toolContext,
+          invocationContext,
+        ),
+      );
+      continue;
+    }
 
     // TODO - b/436079721: implement [tracer.start_as_current_span]
     logger.debug(`execute_tool ${tool.name}`);
-    const functionArgs = functionCall.args ?? {};
 
     // Step 1: Check if plugin before_tool_callback overrides the function
     // response.
@@ -497,33 +544,32 @@ export async function handleFunctionCallList({
   return mergedEvent;
 }
 
-// TODO - b/425992518: consider inline, which is much cleaner.
-function getToolAndContext({
+function createToolContext({
   invocationContext,
   functionCall,
-  toolsDict,
   toolConfirmation,
 }: {
   invocationContext: InvocationContext;
   functionCall: FunctionCall;
-  toolsDict: Record<string, BaseTool>;
   toolConfirmation?: ToolConfirmation;
-}): {tool: BaseTool; toolContext: Context} {
-  if (!functionCall.name || !(functionCall.name in toolsDict)) {
-    throw new Error(
-      `Function ${functionCall.name} is not found in the toolsDict.`,
-    );
-  }
-
-  const toolContext = new Context({
+}): Context {
+  return new Context({
     invocationContext: invocationContext,
     functionCallId: functionCall.id || undefined,
     toolConfirmation,
   });
+}
 
-  const tool = toolsDict[functionCall.name];
+/** Returns the registered tool for a call, or `undefined` if there is none. */
+function getTool(
+  functionCall: FunctionCall,
+  toolsDict: Record<string, BaseTool>,
+): BaseTool | undefined {
+  if (!functionCall.name) {
+    return undefined;
+  }
 
-  return {tool, toolContext};
+  return toolsDict[functionCall.name];
 }
 
 /**
