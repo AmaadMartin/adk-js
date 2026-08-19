@@ -8,6 +8,7 @@ import {
   AUTH_PREPROCESSOR,
   Event,
   InvocationContext,
+  SingleOnToolErrorCallback,
   createEvent,
 } from '@google/adk';
 import {Mock, describe, expect, it, vi} from 'vitest';
@@ -502,5 +503,78 @@ describe('AuthPreprocessor', () => {
     const result = await generator.next();
 
     expect(result.done).toBe(true);
+  });
+
+  it("forwards the agent's onToolErrorCallbacks when resuming tools", async () => {
+    const {handleFunctionCallsAsync} =
+      await import('../../src/agents/functions.js');
+    const mockHandleFunctionCallsAsync = vi.mocked(handleFunctionCallsAsync);
+    mockHandleFunctionCallsAsync.mockClear();
+
+    const onToolErrorCallback: SingleOnToolErrorCallback = () => ({
+      result: 'recovered',
+    });
+    const invocationContext = {
+      agent: {
+        [LLM_AGENT_SYMBOL]: true,
+        canonicalTools: vi.fn().mockResolvedValue([{name: 'someTool'}]),
+        canonicalBeforeToolCallbacks: [],
+        canonicalAfterToolCallbacks: [],
+        canonicalOnToolErrorCallbacks: [onToolErrorCallback],
+      },
+      session: {
+        state: {},
+        events: [
+          createEvent({
+            author: 'agent',
+            content: {
+              parts: [
+                {functionCall: {id: 'toolFc1', name: 'someTool', args: {}}},
+              ],
+            },
+          }),
+          createEvent({
+            author: 'agent',
+            id: 'originalEvent',
+            content: {
+              parts: [
+                {
+                  functionCall: {
+                    id: 'fc1',
+                    name: REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
+                    args: {
+                      authConfig: {credentialKey: 'testKey'},
+                      functionCallId: 'toolFc1',
+                    },
+                  },
+                },
+              ],
+            },
+          }),
+          createEvent({
+            author: 'user',
+            content: {
+              parts: [
+                {
+                  functionResponse: {
+                    id: 'fc1',
+                    name: REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
+                    response: {authType: 'apiKey', apiKey: 'test'},
+                  },
+                },
+              ],
+            },
+          }),
+        ],
+      },
+    } as unknown as InvocationContext;
+
+    for await (const _event of AUTH_PREPROCESSOR.runAsync(invocationContext)) {
+      // drain
+    }
+
+    expect(mockHandleFunctionCallsAsync).toHaveBeenCalledWith(
+      expect.objectContaining({onToolErrorCallbacks: [onToolErrorCallback]}),
+    );
   });
 });
