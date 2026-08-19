@@ -195,6 +195,7 @@ export class RequestConfirmationLlmRequestProcessor extends BaseLlmRequestProces
         toolsDict: toolsDict,
         beforeToolCallbacks: agent.canonicalBeforeToolCallbacks,
         afterToolCallbacks: agent.canonicalAfterToolCallbacks,
+        onToolErrorCallbacks: agent.canonicalOnToolErrorCallbacks,
         filters: new Set(Object.keys(toolsToResumeWithConfirmation)),
         toolConfirmationDict: toolsToResumeWithConfirmation,
       });

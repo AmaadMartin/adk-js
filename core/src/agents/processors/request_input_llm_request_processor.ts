@@ -114,6 +114,7 @@ export class RequestInputLlmRequestProcessor extends BaseLlmRequestProcessor {
           toolsDict,
           beforeToolCallbacks: agent.canonicalBeforeToolCallbacks,
           afterToolCallbacks: agent.canonicalAfterToolCallbacks,
+          onToolErrorCallbacks: agent.canonicalOnToolErrorCallbacks,
           filters: new Set(Object.keys(pending)),
           toolConfirmationDict,
         });

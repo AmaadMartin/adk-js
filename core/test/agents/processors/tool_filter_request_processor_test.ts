@@ -219,6 +219,7 @@ describe('ToolFilterRequestProcessor', () => {
         toolsDict: llmRequest.toolsDict,
         beforeToolCallbacks: [],
         afterToolCallbacks: [],
+        onToolErrorCallbacks: [],
       }),
     ).rejects.toThrow('Function tool1 is not found in the toolsDict.');
   });

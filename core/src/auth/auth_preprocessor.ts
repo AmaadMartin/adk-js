@@ -181,6 +181,7 @@ export class AuthPreprocessor extends BaseLlmRequestProcessor {
           toolsDict,
           beforeToolCallbacks: agent.canonicalBeforeToolCallbacks,
           afterToolCallbacks: agent.canonicalAfterToolCallbacks,
+          onToolErrorCallbacks: agent.canonicalOnToolErrorCallbacks,
           filters: toolsToResume,
         });
 

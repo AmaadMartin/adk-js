@@ -7,10 +7,16 @@
 import {
   AUTH_PREPROCESSOR,
   Event,
+  FunctionTool,
   InvocationContext,
+  LlmAgent,
+  PluginManager,
+  SingleOnToolErrorCallback,
   createEvent,
+  createSession,
 } from '@google/adk';
 import {Mock, describe, expect, it, vi} from 'vitest';
+import {z} from 'zod';
 import {REQUEST_CREDENTIAL_FUNCTION_CALL_NAME} from '../../src/agents/functions.js';
 
 vi.mock('../../src/agents/functions.js', async (importOriginal) => {
@@ -502,5 +508,89 @@ describe('AuthPreprocessor', () => {
     const result = await generator.next();
 
     expect(result.done).toBe(true);
+  });
+
+  it("forwards the agent's onToolErrorCallbacks when resuming tools", async () => {
+    const {handleFunctionCallsAsync} =
+      await import('../../src/agents/functions.js');
+    const mockHandleFunctionCallsAsync = vi.mocked(handleFunctionCallsAsync);
+    mockHandleFunctionCallsAsync.mockClear();
+
+    const onToolErrorCallback: SingleOnToolErrorCallback = () => ({
+      result: 'recovered',
+    });
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: 'gemini-2.5-flash',
+      tools: [
+        new FunctionTool({
+          name: 'someTool',
+          description: 'some tool',
+          parameters: z.object({}),
+          execute: async () => ({result: 'ok'}),
+        }),
+      ],
+      onToolErrorCallback,
+    });
+    const invocationContext = new InvocationContext({
+      invocationId: 'test-invocation',
+      agent,
+      pluginManager: new PluginManager([]),
+      session: createSession({
+        id: 'test-session',
+        appName: 'test-app',
+        userId: 'test-user',
+        events: [
+          createEvent({
+            author: 'agent',
+            content: {
+              parts: [
+                {functionCall: {id: 'toolFc1', name: 'someTool', args: {}}},
+              ],
+            },
+          }),
+          createEvent({
+            author: 'agent',
+            id: 'originalEvent',
+            content: {
+              parts: [
+                {
+                  functionCall: {
+                    id: 'fc1',
+                    name: REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
+                    args: {
+                      authConfig: {credentialKey: 'testKey'},
+                      functionCallId: 'toolFc1',
+                    },
+                  },
+                },
+              ],
+            },
+          }),
+          createEvent({
+            author: 'user',
+            content: {
+              parts: [
+                {
+                  functionResponse: {
+                    id: 'fc1',
+                    name: REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
+                    response: {authType: 'apiKey', apiKey: 'test'},
+                  },
+                },
+              ],
+            },
+          }),
+        ],
+      }),
+    });
+
+    for await (const _event of AUTH_PREPROCESSOR.runAsync(invocationContext)) {
+      // drain
+    }
+
+    expect(mockHandleFunctionCallsAsync).toHaveBeenCalledWith(
+      expect.objectContaining({onToolErrorCallbacks: [onToolErrorCallback]}),
+    );
   });
 });

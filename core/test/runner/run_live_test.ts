@@ -16,6 +16,7 @@ import {
   LlmAgent,
   LlmRequest,
   LlmResponse,
+  OnToolErrorCallback,
   RunAsyncToolRequest,
   Runner,
 } from '@google/adk';
@@ -160,6 +161,18 @@ class EchoTool extends BaseTool {
   }
   override async runAsync(request: RunAsyncToolRequest): Promise<unknown> {
     return {echoed: request.args};
+  }
+}
+
+class ThrowingTool extends BaseTool {
+  constructor() {
+    super({name: 'boom', description: 'Always throws.'});
+  }
+  override _getDeclaration(): FunctionDeclaration | undefined {
+    return {name: this.name, description: this.description};
+  }
+  override async runAsync(_request: RunAsyncToolRequest): Promise<unknown> {
+    throw new Error('live tool failed');
   }
 }
 
@@ -439,6 +452,52 @@ describe('Runner.runLive', () => {
     expect(llm.connection!.contentCalls.length).toBe(1);
     const sentBack = llm.connection!.contentCalls[0];
     expect(sentBack.parts?.[0]?.functionResponse?.name).toBe('echo');
+  });
+
+  /** Runs an agent whose only tool throws, and returns the response the model saw. */
+  async function runLiveWithThrowingTool(
+    onToolErrorCallback?: OnToolErrorCallback,
+  ): Promise<Record<string, unknown> | undefined> {
+    const llm = new FakeLiveLlm([
+      {content: {role: 'model', parts: [{functionCall: {name: 'boom'}}]}},
+      {turnComplete: true},
+    ]);
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent: new LlmAgent({
+        name: 'agent',
+        model: llm,
+        tools: [new ThrowingTool()],
+        onToolErrorCallback,
+      }),
+      sessionService,
+      artifactService,
+    });
+    const queue = new LiveRequestQueue();
+    queue.close();
+    for await (const _event of runner.runLive({
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      liveRequestQueue: queue,
+    })) {
+      // drain
+    }
+    return llm.connection!.contentCalls[0]?.parts?.[0]?.functionResponse
+      ?.response;
+  }
+
+  it('uses an agent onToolErrorCallback when a live tool throws', async () => {
+    const response = await runLiveWithThrowingTool(async () => ({
+      result: 'live fallback',
+    }));
+
+    expect(response).toEqual({result: 'live fallback'});
+  });
+
+  it('sends the tool error back when the live agent declares no callback', async () => {
+    expect(await runLiveWithThrowingTool()).toEqual({
+      error: 'live tool failed',
+    });
   });
 
   it('captures sessionResumptionUpdate handles into invocation context', async () => {

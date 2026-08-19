@@ -276,6 +276,36 @@ export type AfterToolCallback =
   | SingleAfterToolCallback
   | SingleAfterToolCallback[];
 
+/**
+ * A callback that runs when a tool call raises an error.
+ *
+ * @param params.tool The tool that was called.
+ * @param params.args The arguments to the tool.
+ * @param params.context Context for the tool call.
+ * @param params.error The error raised by the tool call.
+ * @returns When present, the returned record is used as the tool result and
+ *     the error is not surfaced to the model.
+ */
+export type SingleOnToolErrorCallback = (params: {
+  tool: BaseTool;
+  args: Record<string, unknown>;
+  context: Context;
+  error: Error;
+}) =>
+  | Record<string, unknown>
+  | undefined
+  | Promise<Record<string, unknown> | undefined>;
+
+/**
+ * A single callback or a list of callbacks.
+ *
+ * When a list of callbacks is provided, the callbacks will be called in the
+ * order they are listed until a callback does not return undefined.
+ */
+export type OnToolErrorCallback =
+  | SingleOnToolErrorCallback
+  | SingleOnToolErrorCallback[];
+
 /** A list of examples or an example provider. */
 export type ExamplesUnion = Example[] | BaseExampleProvider;
 
@@ -392,6 +422,11 @@ export interface LlmAgentConfig extends BaseAgentConfig {
   afterToolCallback?: AfterToolCallback;
 
   /**
+   * Callbacks to be called when a tool call raises an error.
+   */
+  onToolErrorCallback?: OnToolErrorCallback;
+
+  /**
    * Processors to run before the LLM request is sent.
    */
   requestProcessors?: BaseLlmRequestProcessor[];
@@ -497,6 +532,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   afterModelCallback?: AfterModelCallback;
   beforeToolCallback?: BeforeToolCallback;
   afterToolCallback?: AfterToolCallback;
+  onToolErrorCallback?: OnToolErrorCallback;
   requestProcessors: BaseLlmRequestProcessor[];
   responseProcessors: BaseLlmResponseProcessor[];
   codeExecutor?: BaseCodeExecutor;
@@ -534,6 +570,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     this.afterModelCallback = config.afterModelCallback;
     this.beforeToolCallback = config.beforeToolCallback;
     this.afterToolCallback = config.afterToolCallback;
+    this.onToolErrorCallback = config.onToolErrorCallback;
     this.codeExecutor = config.codeExecutor;
 
     // TODO - b/425992518: Define these processor arrays.
@@ -762,6 +799,16 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
    */
   get canonicalAfterToolCallbacks(): SingleAfterToolCallback[] {
     return LlmAgent.normalizeCallbackArray(this.afterToolCallback);
+  }
+
+  /**
+   * The resolved onToolErrorCallback field as a list of
+   * SingleOnToolErrorCallback.
+   *
+   * This method is only for use by Agent Development Kit.
+   */
+  get canonicalOnToolErrorCallbacks(): SingleOnToolErrorCallback[] {
+    return LlmAgent.normalizeCallbackArray(this.onToolErrorCallback);
   }
 
   /**
@@ -1429,6 +1476,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       toolsDict: llmRequest.toolsDict,
       beforeToolCallbacks: this.canonicalBeforeToolCallbacks,
       afterToolCallbacks: this.canonicalAfterToolCallbacks,
+      onToolErrorCallbacks: this.canonicalOnToolErrorCallbacks,
     });
     if (!functionResponseEvent) {
       return;
@@ -1704,6 +1752,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
           toolsDict: llmRequest.toolsDict,
           beforeToolCallbacks: this.canonicalBeforeToolCallbacks,
           afterToolCallbacks: this.canonicalAfterToolCallbacks,
+          onToolErrorCallbacks: this.canonicalOnToolErrorCallbacks,
         });
         return {event};
       } catch (error) {

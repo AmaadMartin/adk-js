@@ -12,6 +12,7 @@ import {
   LlmAgent,
   PluginManager,
   REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
+  SingleOnToolErrorCallback,
   createEvent,
   createSession,
 } from '@google/adk';
@@ -245,6 +246,75 @@ describe('RequestConfirmationLlmRequestProcessor', () => {
 
     expect(events).toHaveLength(1);
     expect(events[0]).toBe(fakeResponseEvent);
+  });
+
+  it("should forward the agent's onToolErrorCallbacks when resuming", async () => {
+    const {handleFunctionCallList} =
+      await import('../../../src/agents/functions.js');
+    const mockFunctionCallList = vi.mocked(handleFunctionCallList);
+    mockFunctionCallList.mockClear();
+    mockFunctionCallList.mockResolvedValueOnce(null);
+
+    const onToolErrorCallback: SingleOnToolErrorCallback = () => ({
+      result: 'recovered',
+    });
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: 'gemini-2.5-flash',
+      onToolErrorCallback,
+    });
+    vi.spyOn(agent, 'canonicalTools').mockResolvedValue([]);
+
+    const originalFunctionCall = {
+      id: 'original-fc-2',
+      name: 'my_tool',
+      args: {param: 'value'},
+    };
+    const systemFunctionCallEvent = createEvent({
+      invocationId: 'test-invocation',
+      author: 'test_agent',
+      content: {
+        role: 'model',
+        parts: [
+          {
+            functionCall: {
+              id: 'fc-confirm-2',
+              name: REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
+              args: {originalFunctionCall},
+            },
+          },
+        ],
+      },
+    });
+    const userConfirmationEvent = createEvent({
+      invocationId: 'test-invocation',
+      author: 'user',
+      content: {
+        role: 'user',
+        parts: [
+          {
+            functionResponse: {
+              id: 'fc-confirm-2',
+              name: REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
+              response: {
+                response: JSON.stringify({confirmed: true, hint: 'ok'}),
+              },
+            },
+          },
+        ],
+      },
+    });
+
+    await collectEvents(
+      createMockInvocationContext(agent, [
+        systemFunctionCallEvent,
+        userConfirmationEvent,
+      ]),
+    );
+
+    expect(mockFunctionCallList).toHaveBeenCalledWith(
+      expect.objectContaining({onToolErrorCallbacks: [onToolErrorCallback]}),
+    );
   });
 
   it('should stage the tool response in the session without writing it', async () => {

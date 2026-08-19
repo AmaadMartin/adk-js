@@ -28,6 +28,7 @@ import {
   RunAsyncToolRequest,
   Runner,
   Session,
+  SingleOnToolErrorCallback,
   ToolProcessLlmRequest,
 } from '@google/adk';
 import {Content, Schema, Type} from '@google/genai';
@@ -1190,5 +1191,142 @@ describe('LlmAgent usage metadata on content-less responses', () => {
     const events = await runAndCollect();
 
     expect(events.find((e) => e.usageMetadata)).toBeUndefined();
+  });
+});
+
+describe('LlmAgent.canonicalOnToolErrorCallbacks', () => {
+  const firstCallback: SingleOnToolErrorCallback = () => ({result: 'first'});
+  const secondCallback: SingleOnToolErrorCallback = () => ({result: 'second'});
+
+  it('is empty when onToolErrorCallback is unset', () => {
+    const agent = new LlmAgent({name: 'test_agent', model: 'test_model'});
+
+    expect(agent.canonicalOnToolErrorCallbacks).toEqual([]);
+  });
+
+  it('wraps a single callback in an array', () => {
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: 'test_model',
+      onToolErrorCallback: firstCallback,
+    });
+
+    expect(agent.canonicalOnToolErrorCallbacks).toEqual([firstCallback]);
+  });
+
+  it('returns a list of callbacks unchanged', () => {
+    const callbacks = [firstCallback, secondCallback];
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: 'test_model',
+      onToolErrorCallback: callbacks,
+    });
+
+    expect(agent.canonicalOnToolErrorCallbacks).toEqual(callbacks);
+  });
+});
+
+describe('LlmAgent onToolErrorCallback end to end', () => {
+  const flakyTool = new FunctionTool({
+    name: 'flaky_tool',
+    description: 'a tool that always throws',
+    parameters: z4.object({}),
+    execute: async () => {
+      throw new Error('upstream is down');
+    },
+  });
+
+  /** Yields a call to `flaky_tool` first, then a plain text answer. */
+  class ScriptedLlm extends BaseLlm {
+    private turn = 0;
+
+    constructor() {
+      super({model: 'scripted-mock-llm'});
+    }
+
+    async *generateContentAsync(
+      _request: LlmRequest,
+    ): AsyncGenerator<LlmResponse, void, void> {
+      this.turn += 1;
+      if (this.turn === 1) {
+        yield {
+          content: {
+            role: 'model',
+            parts: [{functionCall: {id: 'fc_1', name: 'flaky_tool', args: {}}}],
+          },
+        };
+        return;
+      }
+      yield {content: {role: 'model', parts: [{text: 'all done'}]}};
+    }
+
+    async connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
+      return new MockLlmConnection();
+    }
+  }
+
+  async function runAgent(agent: LlmAgent): Promise<Event[]> {
+    const sessionService = new InMemorySessionService();
+    const runner = new Runner({appName: 'test_app', agent, sessionService});
+    const session = await sessionService.createSession({
+      appName: 'test_app',
+      userId: 'test_user',
+      sessionId: 'test_session',
+    });
+
+    const events: Event[] = [];
+    for await (const event of runner.runAsync({
+      userId: session.userId,
+      sessionId: session.id,
+      newMessage: {role: 'user', parts: [{text: 'call the tool'}]},
+    })) {
+      events.push(event);
+    }
+    return events;
+  }
+
+  function toolResponse(events: Event[]): Record<string, unknown> | undefined {
+    for (const event of events) {
+      for (const part of event.content?.parts ?? []) {
+        if (part.functionResponse?.name === 'flaky_tool') {
+          return part.functionResponse.response;
+        }
+      }
+    }
+    return undefined;
+  }
+
+  it('replaces a thrown tool error with the callback response', async () => {
+    const agent = new LlmAgent({
+      name: 'recovering_agent',
+      model: new ScriptedLlm(),
+      tools: [flakyTool],
+      onToolErrorCallback: async ({tool}) => {
+        if (tool.name !== 'flaky_tool') {
+          return undefined;
+        }
+        return {result: 'cached answer'};
+      },
+    });
+
+    const events = await runAgent(agent);
+
+    expect(toolResponse(events)).toEqual({result: 'cached answer'});
+    const finalText = events.at(-1)?.content?.parts?.[0]?.text;
+    expect(finalText).toBe('all done');
+  });
+
+  it('reports the tool error when the agent declares no callback', async () => {
+    const agent = new LlmAgent({
+      name: 'plain_agent',
+      model: new ScriptedLlm(),
+      tools: [flakyTool],
+    });
+
+    const events = await runAgent(agent);
+
+    expect(toolResponse(events)).toEqual({
+      error: "Error in tool 'flaky_tool': upstream is down",
+    });
   });
 });
