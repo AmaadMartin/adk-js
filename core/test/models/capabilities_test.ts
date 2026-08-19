@@ -49,6 +49,32 @@ class DeclaredLlm extends BareLlm {
   }
 }
 
+// The fallback's warn-once registry is module-global and keyed by class name,
+// so a class that warns in one test must not be reused by another.
+
+/** Reaches the fallback and is granted the capability by it. */
+class FallbackGrantLlm extends BareLlm {}
+
+/** A second granted subclass, proving the registry key is the class name. */
+class OtherFallbackGrantLlm extends BareLlm {}
+
+// One denied subclass per case. Sharing a class here would let an earlier test
+// register the name, after which "stays silent" would hold for any fallback.
+class DenyNotGeminiLlm extends BareLlm {}
+class DenyDefaultVariantLlm extends BareLlm {}
+class DenyVertexFalseLlm extends BareLlm {}
+class DenyGemini1Llm extends BareLlm {}
+
+/** Declares every field outright, so it never reaches the fallback. */
+class OutrightLlm extends BareLlm {
+  override get capabilities(): LlmCapabilities {
+    return {outputSchemaAndTools: true};
+  }
+}
+
+/** Stands in for `ApigeeLlm`, which cannot carry a bare Gemini model id. */
+class InheritingGeminiLlm extends Gemini {}
+
 describe('LlmCapabilities', () => {
   const clearEnv = () => {
     delete process.env[VERTEX_ENV_VAR];
@@ -64,6 +90,10 @@ describe('LlmCapabilities', () => {
     process.env['GOOGLE_CLOUD_PROJECT'] = TEST_PROJECT;
     process.env['GOOGLE_CLOUD_LOCATION'] = TEST_LOCATION;
   };
+
+  /** Silences the fallback's warning and captures its calls. */
+  const spyOnWarn = () =>
+    vi.spyOn(getLogger(), 'warn').mockImplementation(() => {});
 
   beforeEach(clearEnv);
 
@@ -96,29 +126,86 @@ describe('LlmCapabilities', () => {
     });
   });
 
-  describe('BaseLlm defaults', () => {
-    it('denies a Gemini-named model, and logs nothing', () => {
-      // adk-python resolves this exact combination through a deprecated
-      // name-based fallback that grants the capability and warns. adk-js
-      // carries no fallback, so the base class reports the default and stays
-      // silent.
+  describe('the deprecated name-based fallback', () => {
+    it('grants a Gemini-named model on Vertex AI, and warns once', () => {
+      // A model that does not override `capabilities` keeps resolving from its
+      // name, which is how it behaved before `capabilities` existed.
       useVertexEnv();
-      const activeLogger = getLogger();
-      const logSpies = [
-        vi.spyOn(activeLogger, 'debug'),
-        vi.spyOn(activeLogger, 'info'),
-        vi.spyOn(activeLogger, 'warn'),
-        vi.spyOn(activeLogger, 'error'),
-      ];
+      const warn = spyOnWarn();
+      const llm = new FallbackGrantLlm({model: 'gemini-2.5-pro'});
 
-      const llm = new BareLlm({model: 'gemini-2.5-pro'});
+      expect(llm.capabilities.outputSchemaAndTools).toBe(true);
+      expect(llm.capabilities.outputSchemaAndTools).toBe(true);
 
-      expect(llm.capabilities.outputSchemaAndTools).toBe(false);
-      for (const spy of logSpies) {
-        expect(spy).not.toHaveBeenCalled();
-      }
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0][0]).toContain('gemini-2.5-pro');
     });
 
+    it('warns again for a different subclass', () => {
+      // Same model id as the test above, so warning again can only mean the
+      // registry key is the subclass rather than the model.
+      useVertexEnv();
+      const warn = spyOnWarn();
+
+      expect(
+        new OtherFallbackGrantLlm({model: 'gemini-2.5-pro'}).capabilities
+          .outputSchemaAndTools,
+      ).toBe(true);
+
+      expect(warn).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      {
+        Llm: DenyNotGeminiLlm,
+        model: 'not-a-gemini-model',
+        vertexEnv: '1',
+        why: 'it is not a Gemini model',
+      },
+      {
+        Llm: DenyDefaultVariantLlm,
+        model: 'gemini-2.5-pro',
+        vertexEnv: undefined,
+        why: 'the Gemini API variant is the default',
+      },
+      {
+        Llm: DenyVertexFalseLlm,
+        model: 'gemini-2.5-pro',
+        vertexEnv: 'false',
+        why: 'the variant is not Vertex AI',
+      },
+      {
+        Llm: DenyGemini1Llm,
+        model: 'gemini-1.5-pro',
+        vertexEnv: '1',
+        why: 'adk-js requires major version 2 or above, unlike adk-python',
+      },
+    ])(
+      'denies "$model" and stays silent, because $why',
+      ({Llm, model, vertexEnv}) => {
+        if (vertexEnv !== undefined) {
+          process.env[VERTEX_ENV_VAR] = vertexEnv;
+        }
+        const warn = spyOnWarn();
+
+        expect(new Llm({model}).capabilities.outputSchemaAndTools).toBe(false);
+        expect(warn).not.toHaveBeenCalled();
+      },
+    );
+
+    it('is bypassed by a subclass that declares the capability outright', () => {
+      useVertexEnv();
+      const warn = spyOnWarn();
+
+      expect(
+        new OutrightLlm({model: 'gemini-2.5-pro'}).capabilities
+          .outputSchemaAndTools,
+      ).toBe(true);
+      expect(warn).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('BaseLlm defaults', () => {
     it('keeps capabilities off the instance and out of its JSON form', () => {
       const llm = new BareLlm({model: 'gemini-2.5-pro'});
 
@@ -157,6 +244,30 @@ describe('LlmCapabilities', () => {
       },
     );
 
+    it('declares the capability instead of reaching the fallback', () => {
+      // The fallback grants this same combination, so only the absence of its
+      // warning separates a declaration from a fallback.
+      useVertexEnv();
+      const warn = spyOnWarn();
+
+      expect(
+        new Gemini({model: 'gemini-2.5-pro'}).capabilities.outputSchemaAndTools,
+      ).toBe(true);
+      expect(warn).not.toHaveBeenCalled();
+    });
+
+    it('passes the declaration down to a subclass', () => {
+      // `ApigeeLlm extends Gemini` relies on this and adds no override.
+      useVertexEnv();
+      const warn = spyOnWarn();
+
+      expect(
+        new InheritingGeminiLlm({model: 'gemini-2.5-pro'}).capabilities
+          .outputSchemaAndTools,
+      ).toBe(true);
+      expect(warn).not.toHaveBeenCalled();
+    });
+
     it('follows a backend variant change on the same instance', () => {
       const gemini = new Gemini({
         model: 'gemini-2.5-pro',
@@ -165,18 +276,6 @@ describe('LlmCapabilities', () => {
       expect(gemini.capabilities.outputSchemaAndTools).toBe(false);
 
       useVertexEnv();
-
-      expect(gemini.capabilities.outputSchemaAndTools).toBe(true);
-    });
-
-    it('follows a model reassignment on the same instance', () => {
-      useVertexEnv();
-      const gemini = new Gemini({model: 'not-a-gemini-model'});
-      expect(gemini.capabilities.outputSchemaAndTools).toBe(false);
-
-      // `readonly` is erased at compile time, so a JavaScript caller can do
-      // this. The getter must re-read `this.model` instead of caching it.
-      Object.assign(gemini, {model: 'gemini-2.5-pro'});
 
       expect(gemini.capabilities.outputSchemaAndTools).toBe(true);
     });

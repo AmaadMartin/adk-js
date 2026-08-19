@@ -5,6 +5,8 @@
  */
 
 import {getClientLabels} from '../utils/client_labels.js';
+import {logger} from '../utils/logger.js';
+import {geminiOutputSchemaAndTools} from '../utils/output_schema_utils.js';
 
 import {BaseLlmConnection} from './base_llm_connection.js';
 import {LlmCapabilities} from './capabilities.js';
@@ -16,6 +18,15 @@ import {LlmResponse} from './llm_response.js';
  * Defined once and shared by all BaseLlm instances.
  */
 const BASE_MODEL_SYMBOL = Symbol.for('google.adk.baseModel');
+
+/**
+ * Subclasses already warned about, so the fallback warns once for each.
+ *
+ * Keyed on the constructor itself, not on its name: a minifier rewrites the
+ * name, which both collides across unrelated subclasses and makes the warning
+ * unreadable. Weak so a class that goes out of scope is collected.
+ */
+const warnedNameBasedModels = new WeakSet<object>();
 
 /**
  * Type guard to check if an object is an instance of BaseLlm.
@@ -58,15 +69,44 @@ export abstract class BaseLlm {
   static readonly supportedModels: Array<string | RegExp> = [];
 
   /**
-   * The capabilities of this model instance. A model that does not override
-   * this supports nothing beyond the defaults.
+   * The capabilities of this model instance.
+   *
+   * Subclasses override this to declare what they support. Extending a shipped
+   * model spreads the parent snapshot, `{...super.capabilities, ...}`, so
+   * capabilities the override does not name keep the parent's value; extending
+   * `BaseLlm` directly declares every field, since `super` here is the
+   * deprecated fallback below.
    *
    * Keep an override a plain getter rather than caching the result: a
-   * capability may depend on state that changes after construction, such as an
-   * environment variable or a reassigned `model`.
+   * capability may depend on state that changes after construction.
    */
   get capabilities(): LlmCapabilities {
-    return {outputSchemaAndTools: false};
+    return {outputSchemaAndTools: this.legacyOutputSchemaAndTools()};
+  }
+
+  /**
+   * Resolves `outputSchemaAndTools` from the model name.
+   *
+   * Warns once per subclass, and only when it grants the capability, because
+   * those are the models whose behaviour changes when the fallback goes.
+   *
+   * @deprecated A model that does not override {@link BaseLlm.capabilities}
+   * keeps resolving the way it did before capabilities existed. This fallback
+   * is removed once such models declare the capability explicitly.
+   */
+  private legacyOutputSchemaAndTools(): boolean {
+    if (!geminiOutputSchemaAndTools(this.model)) {
+      return false;
+    }
+    if (!warnedNameBasedModels.has(this.constructor)) {
+      warnedNameBasedModels.add(this.constructor);
+      logger.warn(
+        `Model ${this.model} relies on name-based detection of ` +
+          'outputSchemaAndTools. Override BaseLlm.capabilities to declare it ' +
+          'explicitly; this fallback will be removed in a future release.',
+      );
+    }
+    return true;
   }
 
   /**
