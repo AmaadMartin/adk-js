@@ -58,6 +58,13 @@ class FallbackGrantLlm extends BareLlm {}
 /** A second granted subclass, proving the registry key is the class name. */
 class OtherFallbackGrantLlm extends BareLlm {}
 
+// One denied subclass per case. Sharing a class here would let an earlier test
+// register the name, after which "stays silent" would hold for any fallback.
+class DenyNotGeminiLlm extends BareLlm {}
+class DenyDefaultVariantLlm extends BareLlm {}
+class DenyVertexFalseLlm extends BareLlm {}
+class DenyGemini1Llm extends BareLlm {}
+
 /** Declares every field outright, so it never reaches the fallback. */
 class OutrightLlm extends BareLlm {
   override get capabilities(): LlmCapabilities {
@@ -149,36 +156,38 @@ describe('LlmCapabilities', () => {
 
     it.each([
       {
+        Llm: DenyNotGeminiLlm,
         model: 'not-a-gemini-model',
         vertexEnv: '1',
         why: 'it is not a Gemini model',
       },
       {
+        Llm: DenyDefaultVariantLlm,
         model: 'gemini-2.5-pro',
         vertexEnv: undefined,
         why: 'the Gemini API variant is the default',
       },
       {
+        Llm: DenyVertexFalseLlm,
         model: 'gemini-2.5-pro',
         vertexEnv: 'false',
         why: 'the variant is not Vertex AI',
       },
       {
+        Llm: DenyGemini1Llm,
         model: 'gemini-1.5-pro',
         vertexEnv: '1',
         why: 'adk-js requires major version 2 or above, unlike adk-python',
       },
     ])(
       'denies "$model" and stays silent, because $why',
-      ({model, vertexEnv}) => {
+      ({Llm, model, vertexEnv}) => {
         if (vertexEnv !== undefined) {
           process.env[VERTEX_ENV_VAR] = vertexEnv;
         }
         const warn = spyOnWarn();
 
-        expect(new BareLlm({model}).capabilities.outputSchemaAndTools).toBe(
-          false,
-        );
+        expect(new Llm({model}).capabilities.outputSchemaAndTools).toBe(false);
         expect(warn).not.toHaveBeenCalled();
       },
     );
