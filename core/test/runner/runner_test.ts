@@ -1468,7 +1468,7 @@ describe('Runner.close', () => {
     await expect(runner.close()).resolves.toBeUndefined();
   });
 
-  it('closes toolsets at the end of an invocation without close()', async () => {
+  it('keeps toolsets open across invocations until close()', async () => {
     const toolset = new RecordingToolset(closeLog, 'root');
     const rootAgent = new ToolsetAgent('root_agent', [toolset]);
     const runner = createRunner(rootAgent);
@@ -1478,13 +1478,19 @@ describe('Runner.close', () => {
       sessionId: TEST_SESSION_ID,
     });
 
-    for await (const _ of runner.runAsync({
-      userId: session.userId,
-      sessionId: session.id,
-      newMessage: {role: 'user', parts: [{text: TEST_MESSAGE}]},
-    })) {
-      // Drain the stream.
+    for (const text of ['first turn', 'second turn']) {
+      for await (const _ of runner.runAsync({
+        userId: session.userId,
+        sessionId: session.id,
+        newMessage: {role: 'user', parts: [{text}]},
+      })) {
+        // Drain the stream.
+      }
     }
+
+    expect(toolset.closeCount).toEqual(0);
+
+    await runner.close();
 
     expect(toolset.closeCount).toEqual(1);
   });
