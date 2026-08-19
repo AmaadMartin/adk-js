@@ -204,11 +204,12 @@ export abstract class BasePlugin {
    *
    * This is a notification-only callback: the error is always rethrown after
    * every registered plugin has been notified, and any value this callback
-   * returns is ignored. A plugin cannot recover the invocation here. A thrown
-   * value that is not an `Error` does not reach this callback.
+   * returns is ignored. A plugin cannot recover the invocation here.
    *
    * @param _params.invocationContext The context for the entire invocation.
-   * @param _params.error The error that escaped the runner.
+   * @param _params.error The error that escaped the runner. A thrown value
+   *     that is not an `Error` is wrapped in one, so this callback sees every
+   *     failure; the runner still rethrows the original value.
    */
   async onRunErrorCallback(_params: {
     invocationContext: InvocationContext;
@@ -262,12 +263,13 @@ export abstract class BasePlugin {
    *
    * This is a notification-only callback: the error is always rethrown after
    * every registered plugin has been notified, and any value this callback
-   * returns is ignored. A plugin cannot recover the agent here. A thrown value
-   * that is not an `Error` does not reach this callback.
+   * returns is ignored. A plugin cannot recover the agent here.
    *
    * @param _params.agent The agent whose execution threw.
    * @param _params.callbackContext The context for the agent invocation.
-   * @param _params.error The error that escaped the agent.
+   * @param _params.error The error that escaped the agent. A thrown value that
+   *     is not an `Error` is wrapped in one, so this callback sees every
+   *     failure; the agent still rethrows the original value.
    */
   async onAgentErrorCallback(_params: {
     agent: BaseAgent;

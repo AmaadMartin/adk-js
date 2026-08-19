@@ -287,9 +287,7 @@ export abstract class BaseAgent<
               yield afterAgentCallbackEvent;
             }
           } catch (e: unknown) {
-            if (e instanceof Error) {
-              await this.handleAgentErrorCallback(context, e);
-            }
+            await this.handleAgentErrorCallback(context, e);
             throw e;
           }
         },
@@ -372,9 +370,7 @@ export abstract class BaseAgent<
               yield afterAgentCallbackEvent;
             }
           } catch (e: unknown) {
-            if (e instanceof Error) {
-              await this.handleAgentErrorCallback(context, e);
-            }
+            await this.handleAgentErrorCallback(context, e);
             throw e;
           }
         },
@@ -547,21 +543,23 @@ export abstract class BaseAgent<
   /**
    * Notifies the plugins that an error escaped this agent's execution.
    *
-   * Notification-only: the caller always rethrows the error, and
+   * Notification-only: the caller always rethrows the value it caught, and
    * `PluginManager` swallows a failure from a plugin's own hook, so this can
-   * never mask the error it reports.
+   * never mask the error it reports. A thrown value that is not an `Error` is
+   * wrapped for the plugins, so the hook has no blind spot; the caller still
+   * rethrows the original value.
    *
    * @param invocationContext The invocation context of the agent.
-   * @param error The error that escaped the agent.
+   * @param error The value that escaped the agent.
    */
   protected async handleAgentErrorCallback(
     invocationContext: InvocationContext,
-    error: Error,
+    error: unknown,
   ): Promise<void> {
     await invocationContext.pluginManager.runOnAgentErrorCallback({
       agent: this,
       callbackContext: new Context({invocationContext}),
-      error,
+      error: error instanceof Error ? error : new Error(String(error)),
     });
   }
 

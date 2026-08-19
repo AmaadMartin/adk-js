@@ -472,15 +472,13 @@ export class Runner {
                 }
               }
             } catch (e: unknown) {
-              // Notification-only, so the error is always rethrown. The session
-              // lookup above stays outside: an invocation that never started
-              // has nothing to report, matching adk-python.
-              if (e instanceof Error) {
-                await this.pluginManager.runOnRunErrorCallback({
-                  invocationContext,
-                  error: e,
-                });
-              }
+              // Notification-only, so the caught value is always rethrown. The
+              // session lookup above stays outside: an invocation that never
+              // started has nothing to report, matching adk-python.
+              await this.pluginManager.runOnRunErrorCallback({
+                invocationContext,
+                error: e instanceof Error ? e : new Error(String(e)),
+              });
               throw e;
             }
           }

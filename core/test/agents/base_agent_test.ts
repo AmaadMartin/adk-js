@@ -244,7 +244,7 @@ describe('BaseAgent', () => {
       expect(plugin.notifications).toHaveLength(1);
     });
 
-    it('rethrows a non-Error failure without notifying', async () => {
+    it('wraps a non-Error failure for the plugin and rethrows the original', async () => {
       const plugin = new AgentErrorPlugin();
       const agent = new ThrowingAgent({name: 'crashing_agent'});
       agent.failure = NON_ERROR_FAILURE;
@@ -257,7 +257,10 @@ describe('BaseAgent', () => {
         NON_ERROR_FAILURE,
       );
 
-      expect(plugin.notifications).toEqual([]);
+      expect(plugin.notifications).toHaveLength(1);
+      expect(plugin.notifications[0].agentName).toBe('crashing_agent');
+      expect(plugin.notifications[0].error).toBeInstanceOf(Error);
+      expect(plugin.notifications[0].error.message).toBe(NON_ERROR_FAILURE);
     });
 
     it('notifies no plugin on a successful run', async () => {

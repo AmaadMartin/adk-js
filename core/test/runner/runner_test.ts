@@ -1022,7 +1022,7 @@ describe('Runner error notification callbacks', () => {
     expect(plugin.agentErrors).toEqual([]);
   });
 
-  it('rethrows a non-Error failure without notifying either layer', async () => {
+  it('wraps a non-Error failure for both layers and rethrows the original', async () => {
     const agent = new CrashingLlmAgent('crashing_agent');
     agent.failure = NON_ERROR_FAILURE;
     const runner = createRunner(agent);
@@ -1034,8 +1034,12 @@ describe('Runner error notification callbacks', () => {
 
     await expect(run(runner)).rejects.toBe(NON_ERROR_FAILURE);
 
-    expect(plugin.agentErrors).toEqual([]);
-    expect(plugin.runErrors).toEqual([]);
+    expect(plugin.agentErrors).toHaveLength(1);
+    expect(plugin.agentErrors[0]).toBeInstanceOf(Error);
+    expect(plugin.agentErrors[0].message).toBe(NON_ERROR_FAILURE);
+    expect(plugin.runErrors).toHaveLength(1);
+    expect(plugin.runErrors[0]).toBeInstanceOf(Error);
+    expect(plugin.runErrors[0].message).toBe(NON_ERROR_FAILURE);
   });
 
   it('notifies neither layer on a successful run', async () => {
