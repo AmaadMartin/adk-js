@@ -29,6 +29,7 @@ import {
 } from './a2a_remote_agent_utils.js';
 import {resolveAgentCard} from './agent_card.js';
 import {toAdkEvent} from './event_converter_utils.js';
+import {buildA2ARequestLog, buildA2AResponseLog} from './log_utils.js';
 import {getA2ASessionMetadata} from './metadata_converter_utils.js';
 import {toA2AParts} from './part_converter_utils.js';
 
@@ -208,6 +209,9 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
         }
       }
 
+      // Logged after the callbacks so the record shows what goes on the wire.
+      logger.debug(buildA2ARequestLog(params.message));
+
       const useStreaming = this.card
         ? this.card.capabilities?.streaming !== false
         : true;
@@ -218,6 +222,8 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
               await callback(context, chunk);
             }
           }
+
+          logger.debug(buildA2AResponseLog(chunk));
 
           const adkEvent = toAdkEvent(
             chunk,
@@ -247,6 +253,8 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
             await callback(context, result);
           }
         }
+        logger.debug(buildA2AResponseLog(result));
+
         const adkEvent = toAdkEvent(
           result,
           context.invocationId,
