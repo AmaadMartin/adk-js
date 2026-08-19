@@ -922,9 +922,25 @@ describe('Runner error notification callbacks', () => {
     readonly runErrors: Error[] = [];
     afterRunCallbackCalled = false;
     failInBeforeRun = false;
+    failInUserMessage = false;
+    closeCount = 0;
 
     constructor() {
       super('error_notification_plugin');
+    }
+
+    override async close(): Promise<void> {
+      this.closeCount++;
+    }
+
+    override async onUserMessageCallback(_params: {
+      invocationContext: InvocationContext;
+      userMessage: Content;
+    }): Promise<Content | undefined> {
+      if (this.failInUserMessage) {
+        throw new Error('user-message hook exploded');
+      }
+      return undefined;
     }
 
     override async beforeRunCallback(_params: {
@@ -1003,6 +1019,31 @@ describe('Runner error notification callbacks', () => {
     expect(plugin.agentErrors).toEqual([AGENT_FAILURE]);
     expect(plugin.runErrors).toEqual([AGENT_FAILURE]);
     expect(plugin.afterRunCallbackCalled).toBe(false);
+  });
+
+  it('notifies the run layer when the user-message hook throws', async () => {
+    plugin.failInUserMessage = true;
+    const runner = createRunner(new MockLlmAgent('test_agent'));
+    await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    await expect(run(runner)).rejects.toThrow(
+      "Error in plugin 'error_notification_plugin' during 'onUserMessageCallback' callback",
+    );
+
+    expect(plugin.runErrors).toHaveLength(1);
+    expect(plugin.agentErrors).toEqual([]);
+  });
+
+  it('closes every registered plugin through Runner.close', async () => {
+    const runner = createRunner(new MockLlmAgent('test_agent'));
+
+    await expect(runner.close()).resolves.toBeUndefined();
+
+    expect(plugin.closeCount).toBe(1);
   });
 
   it('notifies the run layer when a before-run callback throws', async () => {

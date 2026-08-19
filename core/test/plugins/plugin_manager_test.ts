@@ -179,6 +179,24 @@ class TestPlugin extends BasePlugin {
   }
 }
 
+/** Records the order in which it was closed, and can fail on purpose. */
+class ClosablePlugin extends BasePlugin {
+  constructor(
+    name: string,
+    private readonly closeLog: string[],
+    private readonly failure?: Error,
+  ) {
+    super(name);
+  }
+
+  override async close(): Promise<void> {
+    this.closeLog.push(this.name);
+    if (this.failure) {
+      throw this.failure;
+    }
+  }
+}
+
 describe('PluginManager', () => {
   let service: PluginManager;
   let plugin1: TestPlugin;
@@ -426,6 +444,40 @@ describe('PluginManager', () => {
       } finally {
         error.mockRestore();
       }
+    });
+  });
+
+  describe('close', () => {
+    it('should close every registered plugin in registration order', async () => {
+      const closeLog: string[] = [];
+      const manager = new PluginManager([
+        new ClosablePlugin('plugin1', closeLog),
+        new ClosablePlugin('plugin2', closeLog),
+        new ClosablePlugin('plugin3', closeLog),
+      ]);
+
+      await expect(manager.close()).resolves.toBeUndefined();
+
+      expect(closeLog).toEqual(['plugin1', 'plugin2', 'plugin3']);
+    });
+
+    it('should resolve for a manager with no plugins', async () => {
+      await expect(new PluginManager().close()).resolves.toBeUndefined();
+    });
+
+    it('should close the later plugins and report every failure together', async () => {
+      const closeLog: string[] = [];
+      const manager = new PluginManager([
+        new ClosablePlugin('plugin_bad1', closeLog, new Error('first boom')),
+        new ClosablePlugin('plugin_good', closeLog),
+        new ClosablePlugin('plugin_bad2', closeLog, new Error('second boom')),
+      ]);
+
+      await expect(manager.close()).rejects.toThrowError(
+        "Failed to close plugins: 'plugin_bad1': first boom, 'plugin_bad2': second boom",
+      );
+
+      expect(closeLog).toEqual(['plugin_bad1', 'plugin_good', 'plugin_bad2']);
     });
   });
 });

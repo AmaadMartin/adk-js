@@ -324,83 +324,83 @@ export class Runner {
             abortSignal: params.abortSignal,
           });
 
-          // =========================================================================
-          // Preprocess plugins on user message
-          // =========================================================================
-          const pluginUserMessage =
-            await this.pluginManager.runOnUserMessageCallback({
-              userMessage: newMessage,
-              invocationContext,
-            });
+          try {
+            // =========================================================================
+            // Preprocess plugins on user message
+            // =========================================================================
+            const pluginUserMessage =
+              await this.pluginManager.runOnUserMessageCallback({
+                userMessage: newMessage,
+                invocationContext,
+              });
 
-          if (params.abortSignal?.aborted) {
-            return;
-          }
-
-          if (pluginUserMessage) {
-            newMessage = pluginUserMessage as Content;
-          }
-
-          // =========================================================================
-          // Append user message to session
-          // =========================================================================
-          if (newMessage) {
-            if (!newMessage.parts?.length) {
-              throw new Error('No parts in the newMessage.');
+            if (params.abortSignal?.aborted) {
+              return;
             }
 
-            // Directly saves the artifacts (if applicable) in the user message and
-            // replaces the artifact data with a file name placeholder.
-            // TODO - b/425992518: fix Runner<>>ArtifactService leaky abstraction.
-            if (runConfig.saveInputBlobsAsArtifacts) {
-              newMessage = await this.saveArtifacts(
-                invocationContext.invocationId,
-                session.userId,
-                session.id,
-                newMessage,
-              );
+            if (pluginUserMessage) {
+              newMessage = pluginUserMessage as Content;
+            }
+
+            // =========================================================================
+            // Append user message to session
+            // =========================================================================
+            if (newMessage) {
+              if (!newMessage.parts?.length) {
+                throw new Error('No parts in the newMessage.');
+              }
+
+              // Directly saves the artifacts (if applicable) in the user message and
+              // replaces the artifact data with a file name placeholder.
+              // TODO - b/425992518: fix Runner<>>ArtifactService leaky abstraction.
+              if (runConfig.saveInputBlobsAsArtifacts) {
+                newMessage = await this.saveArtifacts(
+                  invocationContext.invocationId,
+                  session.userId,
+                  session.id,
+                  newMessage,
+                );
+                if (params.abortSignal?.aborted) {
+                  return;
+                }
+              }
+              // Append the user message to the session with optional state delta.
+              await this.sessionService.appendEvent({
+                session,
+                event: createEvent({
+                  invocationId: invocationContext.invocationId,
+                  author: 'user',
+                  actions: stateDelta
+                    ? createEventActions({stateDelta})
+                    : undefined,
+                  content: newMessage,
+                  customMetadata: params.customMetadata,
+                }),
+              });
               if (params.abortSignal?.aborted) {
                 return;
               }
             }
-            // Append the user message to the session with optional state delta.
-            await this.sessionService.appendEvent({
-              session,
-              event: createEvent({
-                invocationId: invocationContext.invocationId,
-                author: 'user',
-                actions: stateDelta
-                  ? createEventActions({stateDelta})
-                  : undefined,
-                content: newMessage,
-                customMetadata: params.customMetadata,
-              }),
-            });
-            if (params.abortSignal?.aborted) {
-              return;
+
+            // =========================================================================
+            // Determine which agent should handle the workflow resumption.
+            // =========================================================================
+            // Only meaningful for an agent root: this resolves an event author
+            // against the agent tree, and a node subtree is not in that tree.
+            if (isBaseAgent(this.agent)) {
+              invocationContext.agent = this.determineAgentForResumption(
+                session,
+                this.agent,
+              );
             }
-          }
 
-          // =========================================================================
-          // Determine which agent should handle the workflow resumption.
-          // =========================================================================
-          // Only meaningful for an agent root: this resolves an event author
-          // against the agent tree, and a node subtree is not in that tree.
-          if (isBaseAgent(this.agent)) {
-            invocationContext.agent = this.determineAgentForResumption(
-              session,
-              this.agent,
-            );
-          }
-
-          // =========================================================================
-          // Run the agent with the plugins (aka hooks to apply in the lifecycle)
-          // =========================================================================
-          if (newMessage) {
             // =========================================================================
             // Run the agent with the plugins (aka hooks to apply in the lifecycle)
             // =========================================================================
-            try {
+            if (newMessage) {
+              // =========================================================================
+              // Run the agent with the plugins (aka hooks to apply in the lifecycle)
+              // =========================================================================
               // Step 1: Run the before_run callbacks to see if we should early exit.
               const beforeRunCallbackResponse =
                 await this.pluginManager.runBeforeRunCallback({
@@ -471,16 +471,17 @@ export class Runner {
                   return;
                 }
               }
-            } catch (e: unknown) {
-              // Notification-only, so the caught value is always rethrown. The
-              // session lookup above stays outside: an invocation that never
-              // started has nothing to report, matching adk-python.
-              await this.pluginManager.runOnRunErrorCallback({
-                invocationContext,
-                error: e instanceof Error ? e : new Error(String(e)),
-              });
-              throw e;
             }
+          } catch (e: unknown) {
+            // Notification-only, so the caught value is always rethrown.
+            // The session lookup and code-executor validation above stay
+            // outside: they run before `invocationContext` exists, so there
+            // is nothing to notify with. This matches adk-python.
+            await this.pluginManager.runOnRunErrorCallback({
+              invocationContext,
+              error: e instanceof Error ? e : new Error(String(e)),
+            });
+            throw e;
           }
         },
       );
@@ -491,6 +492,19 @@ export class Runner {
         : [];
       await Promise.allSettled(toolsets.map((t) => t.close()));
     }
+  }
+
+  /**
+   * Closes this runner, releasing the resources held by its plugins.
+   *
+   * Only the plugins are closed. The toolsets reachable from the agent are
+   * already closed at the end of every invocation, so closing them again here
+   * would double-close them.
+   *
+   * @throws If one or more plugins failed to close.
+   */
+  async close(): Promise<void> {
+    return this.pluginManager.close();
   }
 
   /**

@@ -200,6 +200,16 @@ export abstract class BasePlugin {
   }
 
   /**
+   * Method executed when the runner is closed.
+   *
+   * This method is used for cleanup tasks such as closing network connections
+   * or releasing resources.
+   */
+  async close(): Promise<void> {
+    return;
+  }
+
+  /**
    * Callback executed when an unhandled error escapes the runner.
    *
    * This is a notification-only callback: the error is always rethrown after

@@ -372,6 +372,25 @@ describe('BasePlugin', () => {
     ).toBeUndefined();
   });
 
+  it('default close should resolve to undefined', async () => {
+    const plugin = new TestablePlugin('default_close_plugin');
+
+    await expect(plugin.close()).resolves.toBeUndefined();
+  });
+
+  it('close can be overridden', async () => {
+    let closed = false;
+    class ClosingPlugin extends BasePlugin {
+      override async close(): Promise<void> {
+        closed = true;
+      }
+    }
+
+    await new ClosingPlugin('closing_plugin').close();
+
+    expect(closed).toBe(true);
+  });
+
   it('error callbacks can be overridden and receive their arguments', async () => {
     const plugin = new ErrorHookPlugin();
 
