@@ -55,11 +55,31 @@ export const REQUEST_CREDENTIAL_FUNCTION_CALL_NAME = 'adk_request_credential';
 export const REQUEST_CONFIRMATION_FUNCTION_CALL_NAME =
   'adk_request_confirmation';
 
+const TOOL_NOT_FOUND_DESCRIPTION = 'Tool not found';
+const UNNAMED_TOOL_NAME = '<unnamed>';
+
+/**
+ * Stands in for a tool the model named but that is not registered, so the
+ * tool-error callbacks receive a real `BaseTool` and can identify what was
+ * asked for. It is never executed: the call is answered by a callback or the
+ * lookup error is re-thrown.
+ */
+class ToolNotFound extends BaseTool {
+  constructor(name: string) {
+    super({name, description: TOOL_NOT_FOUND_DESCRIPTION});
+  }
+
+  override async runAsync(): Promise<never> {
+    throw new Error(`Function ${this.name} is not found in the toolsDict.`);
+  }
+}
+
 // Export these items for testing purposes only
 export const functionsExportedForTestingOnly = {
   handleFunctionCallList,
   generateAuthEvent,
   generateRequestConfirmationEvent,
+  ToolNotFound,
 };
 // TODO - b/425992518: consider internalize as part of llm_agent's runtime.
 /**
@@ -341,16 +361,46 @@ export async function handleFunctionCallList({
       toolConfirmation = toolConfirmationDict[functionCall.id];
     }
 
-    const {tool, toolContext} = getToolAndContext({
+    const toolContext = createToolContext({
       invocationContext,
       functionCall,
-      toolsDict,
       toolConfirmation,
     });
+    const functionArgs = functionCall.args ?? {};
+
+    let tool: BaseTool;
+    try {
+      tool = getTool(functionCall, toolsDict);
+    } catch (toolError: unknown) {
+      if (!(toolError instanceof Error)) {
+        throw toolError;
+      }
+      const placeholder = new ToolNotFound(
+        functionCall.name || UNNAMED_TOOL_NAME,
+      );
+      const errorResponse =
+        await invocationContext.pluginManager.runOnToolErrorCallback({
+          tool: placeholder,
+          toolArgs: functionArgs,
+          toolContext,
+          error: toolError,
+        });
+      if (errorResponse == null) {
+        throw toolError;
+      }
+      functionResponseEvents.push(
+        buildResponseEvent(
+          placeholder,
+          errorResponse,
+          toolContext,
+          invocationContext,
+        ),
+      );
+      continue;
+    }
 
     // TODO - b/436079721: implement [tracer.start_as_current_span]
     logger.debug(`execute_tool ${tool.name}`);
-    const functionArgs = functionCall.args ?? {};
 
     // Step 1: Check if plugin before_tool_callback overrides the function
     // response.
@@ -516,33 +566,33 @@ export async function handleFunctionCallList({
   return mergedEvent;
 }
 
-// TODO - b/425992518: consider inline, which is much cleaner.
-function getToolAndContext({
+function createToolContext({
   invocationContext,
   functionCall,
-  toolsDict,
   toolConfirmation,
 }: {
   invocationContext: InvocationContext;
   functionCall: FunctionCall;
-  toolsDict: Record<string, BaseTool>;
   toolConfirmation?: ToolConfirmation;
-}): {tool: BaseTool; toolContext: Context} {
+}): Context {
+  return new Context({
+    invocationContext: invocationContext,
+    functionCallId: functionCall.id || undefined,
+    toolConfirmation,
+  });
+}
+
+function getTool(
+  functionCall: FunctionCall,
+  toolsDict: Record<string, BaseTool>,
+): BaseTool {
   if (!functionCall.name || !(functionCall.name in toolsDict)) {
     throw new Error(
       `Function ${functionCall.name} is not found in the toolsDict.`,
     );
   }
 
-  const toolContext = new Context({
-    invocationContext: invocationContext,
-    functionCallId: functionCall.id || undefined,
-    toolConfirmation,
-  });
-
-  const tool = toolsDict[functionCall.name];
-
-  return {tool, toolContext};
+  return toolsDict[functionCall.name];
 }
 
 /**

@@ -90,6 +90,18 @@ class TestPlugin extends BasePlugin {
   }
 }
 
+/** Records the parameters `onToolErrorCallback` was called with. */
+class RecordingErrorPlugin extends TestPlugin {
+  capturedParams?: Parameters<BasePlugin['onToolErrorCallback']>[0];
+
+  override async onToolErrorCallback(
+    params: Parameters<BasePlugin['onToolErrorCallback']>[0],
+  ): Promise<Record<string, unknown> | undefined> {
+    this.capturedParams = params;
+    return this.onToolErrorCallbackResponse;
+  }
+}
+
 function randomIdForTestingOnly(): string {
   return (Math.random() * 100).toString();
 }
@@ -436,6 +448,159 @@ describe('handleFunctionCallList', () => {
         }),
       }),
     ]);
+  });
+
+  it('should reject for an unknown tool when no plugin handles the error', async () => {
+    await expect(
+      handleFunctionCallList({
+        invocationContext,
+        functionCalls: [
+          {id: randomIdForTestingOnly(), name: 'unknownTool', args: {}},
+        ],
+        toolsDict,
+        beforeToolCallbacks: [],
+        afterToolCallbacks: [],
+      }),
+    ).rejects.toThrow('Function unknownTool is not found in the toolsDict.');
+  });
+
+  it('should answer an unknown tool with the onToolErrorCallback response', async () => {
+    const plugin = new TestPlugin('testPlugin');
+    plugin.onToolErrorCallbackResponse = {reflection: 'use "testTool"'};
+    pluginManager.registerPlugin(plugin);
+    const unknownCall: FunctionCall = {
+      id: randomIdForTestingOnly(),
+      name: 'unknownTool',
+      args: {},
+    };
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [unknownCall],
+      toolsDict,
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    const functionResponse = event?.content?.parts?.[0].functionResponse;
+    expect(functionResponse?.response).toEqual({reflection: 'use "testTool"'});
+    expect(functionResponse?.name).toBe('unknownTool');
+    expect(functionResponse?.id).toBe(unknownCall.id);
+  });
+
+  it('should hand a placeholder tool and the lookup error to the callback', async () => {
+    const plugin = new RecordingErrorPlugin('recordingPlugin');
+    plugin.onToolErrorCallbackResponse = {reflection: 'use "testTool"'};
+    pluginManager.registerPlugin(plugin);
+
+    await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [
+        {id: randomIdForTestingOnly(), name: 'unknownTool', args: {x: 1}},
+      ],
+      toolsDict,
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    const captured = plugin.capturedParams;
+    expect(captured?.tool.name).toBe('unknownTool');
+    expect(captured?.tool.description).toBe('Tool not found');
+    expect(captured?.toolArgs).toEqual({x: 1});
+    expect(captured?.error.message).toBe(
+      'Function unknownTool is not found in the toolsDict.',
+    );
+  });
+
+  it('should name the placeholder <unnamed> for a nameless function call', async () => {
+    const plugin = new RecordingErrorPlugin('recordingPlugin');
+    plugin.onToolErrorCallbackResponse = {reflection: 'name a tool'};
+    pluginManager.registerPlugin(plugin);
+
+    await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [{id: randomIdForTestingOnly(), args: {}}],
+      toolsDict,
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(plugin.capturedParams?.tool.name).toBe('<unnamed>');
+  });
+
+  it('should skip the after-tool callbacks for an unknown tool', async () => {
+    const plugin = new TestPlugin('testPlugin');
+    plugin.onToolErrorCallbackResponse = {reflection: 'use "testTool"'};
+    plugin.afterToolCallbackResponse = {result: 'plugin override'};
+    pluginManager.registerPlugin(plugin);
+    const afterToolCallback = vi.fn<SingleAfterToolCallback>(async () => ({
+      result: 'canonical override',
+    }));
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [
+        {id: randomIdForTestingOnly(), name: 'unknownTool', args: {}},
+      ],
+      toolsDict,
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [afterToolCallback],
+    });
+
+    expect(event?.content?.parts?.[0].functionResponse?.response).toEqual({
+      reflection: 'use "testTool"',
+    });
+    expect(afterToolCallback).not.toHaveBeenCalled();
+  });
+
+  it('should still run a known tool called alongside an unknown one', async () => {
+    const plugin = new TestPlugin('testPlugin');
+    plugin.onToolErrorCallbackResponse = {reflection: 'use "testTool"'};
+    pluginManager.registerPlugin(plugin);
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [
+        functionCall,
+        {id: randomIdForTestingOnly(), name: 'unknownTool', args: {}},
+      ],
+      toolsDict,
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event?.content?.parts).toEqual([
+      expect.objectContaining({
+        functionResponse: expect.objectContaining({
+          name: 'testTool',
+          response: {result: 'tool executed'},
+        }),
+      }),
+      expect.objectContaining({
+        functionResponse: expect.objectContaining({
+          name: 'unknownTool',
+          response: {reflection: 'use "testTool"'},
+        }),
+      }),
+    ]);
+  });
+});
+
+describe('ToolNotFound', () => {
+  const {ToolNotFound} = functionsExportedForTestingOnly;
+
+  it('should describe itself as the tool the model asked for', () => {
+    const tool = new ToolNotFound('unknownTool');
+    expect(tool.name).toBe('unknownTool');
+    expect(tool.description).toBe('Tool not found');
+    expect(tool.isLongRunning).toBe(false);
+  });
+
+  it('should reject when it is run', async () => {
+    const tool = new ToolNotFound('unknownTool');
+    await expect(tool.runAsync()).rejects.toThrow(
+      'Function unknownTool is not found in the toolsDict.',
+    );
   });
 });
 
