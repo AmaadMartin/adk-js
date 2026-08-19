@@ -38,10 +38,12 @@ export type {
   InstructionProvider,
   LlmAgentConfig,
   LlmAgentSchema,
+  OnModelErrorCallback,
   SingleAfterModelCallback,
   SingleAfterToolCallback,
   SingleBeforeModelCallback,
   SingleBeforeToolCallback,
+  SingleOnModelErrorCallback,
   ToolUnion,
 } from './agents/llm_agent.js';
 export {LoopAgent, isLoopAgent} from './agents/loop_agent.js';

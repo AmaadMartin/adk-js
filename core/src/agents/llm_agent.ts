@@ -220,6 +220,31 @@ export type AfterModelCallback =
   | SingleAfterModelCallback[];
 
 /**
+ * A callback that runs when a model call raises an error.
+ *
+ * @param params.context The current callback context.
+ * @param params.request The raw model request that failed.
+ * @param params.error The error raised by the model call.
+ * @returns The content to return to the user. When present, the error is
+ *     ignored and the provided content will be returned to user.
+ */
+export type SingleOnModelErrorCallback = (params: {
+  context: Context;
+  request: LlmRequest;
+  error: Error;
+}) => LlmResponse | undefined | Promise<LlmResponse | undefined>;
+
+/**
+ * A single callback or a list of callbacks.
+ *
+ * When a list of callbacks is provided, the callbacks will be called in the
+ * order they are listed until a callback does not return None.
+ */
+export type OnModelErrorCallback =
+  | SingleOnModelErrorCallback
+  | SingleOnModelErrorCallback[];
+
+/**
  * A callback that runs before a tool is called.
  *
  * @param params.tool The tool to be called.
@@ -382,6 +407,11 @@ export interface LlmAgentConfig extends BaseAgentConfig {
   afterModelCallback?: AfterModelCallback;
 
   /**
+   * Callbacks to be called when a model call raises an error.
+   */
+  onModelErrorCallback?: OnModelErrorCallback;
+
+  /**
    * Callbacks to be called before calling the tool.
    */
   beforeToolCallback?: BeforeToolCallback;
@@ -495,6 +525,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   private _finishTaskTool?: FinishTaskTool;
   beforeModelCallback?: BeforeModelCallback;
   afterModelCallback?: AfterModelCallback;
+  onModelErrorCallback?: OnModelErrorCallback;
   beforeToolCallback?: BeforeToolCallback;
   afterToolCallback?: AfterToolCallback;
   requestProcessors: BaseLlmRequestProcessor[];
@@ -532,6 +563,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     this.outputKey = config.outputKey;
     this.beforeModelCallback = config.beforeModelCallback;
     this.afterModelCallback = config.afterModelCallback;
+    this.onModelErrorCallback = config.onModelErrorCallback;
     this.beforeToolCallback = config.beforeToolCallback;
     this.afterToolCallback = config.afterToolCallback;
     this.codeExecutor = config.codeExecutor;
@@ -743,6 +775,16 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
    */
   get canonicalAfterModelCallbacks(): SingleAfterModelCallback[] {
     return LlmAgent.normalizeCallbackArray(this.afterModelCallback);
+  }
+
+  /**
+   * The resolved onModelErrorCallback field as a list of
+   * SingleOnModelErrorCallback.
+   *
+   * This method is only for use by Agent Development Kit.
+   */
+  get canonicalOnModelErrorCallbacks(): SingleOnModelErrorCallback[] {
+    return LlmAgent.normalizeCallbackArray(this.onModelErrorCallback);
   }
 
   /**
@@ -1942,6 +1984,43 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     return undefined;
   }
 
+  private async handleOnModelErrorCallback(
+    invocationContext: InvocationContext,
+    llmRequest: LlmRequest,
+    error: Error,
+    modelResponseEvent: Event,
+  ): Promise<LlmResponse | undefined> {
+    const callbackContext = new Context({
+      invocationContext,
+      eventActions: modelResponseEvent.actions,
+    });
+
+    // Plugin callbacks before canonical callbacks
+    const onModelErrorCallbackResponse =
+      await invocationContext.pluginManager.runOnModelErrorCallback({
+        callbackContext,
+        llmRequest,
+        error,
+      });
+    if (onModelErrorCallbackResponse) {
+      return onModelErrorCallbackResponse;
+    }
+
+    // If no override was returned from the plugins, run the canonical callbacks
+    for (const callback of this.canonicalOnModelErrorCallbacks) {
+      const callbackResponse = await callback({
+        context: callbackContext,
+        request: llmRequest,
+        error,
+      });
+
+      if (callbackResponse) {
+        return callbackResponse;
+      }
+    }
+    return undefined;
+  }
+
   protected async *runAndHandleError<T extends LlmResponse | Event>(
     responseGenerator: AsyncGenerator<T, void, void>,
     invocationContext: InvocationContext,
@@ -1959,25 +2038,21 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     } catch (modelError: unknown) {
       // Return an LlmResponse with error details.
       // Note: this will cause agent to work better if there's a loop.
-      const callbackContext = new Context({
-        invocationContext,
-        eventActions: modelResponseEvent.actions,
-      });
-
       // Wrapped LLM should throw Error-typed errors
       if (modelError instanceof Error) {
-        // Try plugins to recover from the error
+        // Try plugins, then the agent callbacks, to recover from the error
         const onModelErrorCallbackResponse =
-          await invocationContext.pluginManager.runOnModelErrorCallback({
-            callbackContext: callbackContext,
-            llmRequest: llmRequest,
-            error: modelError as Error,
-          });
+          await this.handleOnModelErrorCallback(
+            invocationContext,
+            llmRequest,
+            modelError,
+            modelResponseEvent,
+          );
 
         if (onModelErrorCallbackResponse) {
           yield onModelErrorCallbackResponse as T;
         } else {
-          // If no plugins, just return the message.
+          // If nothing recovered from the error, just return the message.
           let errorCode = 'UNKNOWN_ERROR';
           let errorMessage = modelError.message;
 
