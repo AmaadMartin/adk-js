@@ -151,7 +151,10 @@ export async function getTestFiles(folder: string): Promise<AgentTestCase[]> {
   });
 
   const testCases: AgentTestCase[] = [];
-  for (const testFile of testFiles.sort()) {
+  for (const match of testFiles.sort()) {
+    // fast-glob returns POSIX separators on every platform, so the reported
+    // paths would not be the ones the user sees on Windows.
+    const testFile = path.resolve(match);
     const agentDir = path.dirname(path.dirname(testFile));
     const entryFile = await findAgentEntryFile(agentDir);
     if (!entryFile) {
