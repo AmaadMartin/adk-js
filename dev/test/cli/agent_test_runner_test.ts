@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {createEvent, Event, LlmResponse} from '@google/adk';
+import {Context, createEvent, Event, LlmResponse} from '@google/adk';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -251,6 +251,19 @@ describe('getTestFiles', () => {
     expect(await getTestFiles(tempDir)).toEqual([]);
   });
 
+  it('prefers app over agent, in any extension the loader accepts', async () => {
+    // Discovery shares AgentLoader's lookup, so it reaches every extension the
+    // dev server can load rather than a shorter list of its own.
+    const agentDir = await writeAgent('top', REPLAY_AGENT_SOURCE, {
+      'a.json': DICE_FIXTURE,
+    });
+    await fs.writeFile(path.join(agentDir, 'app.mts'), REPLAY_AGENT_SOURCE);
+
+    const [testCase] = await getTestFiles(tempDir);
+
+    expect(testCase.entryFile).toBe(path.join(agentDir, 'app.mts'));
+  });
+
   it('ignores a non-json file in a tests directory', async () => {
     await writeAgent('top', REPLAY_AGENT_SOURCE);
     await fs.writeFile(path.join(tempDir, 'top', 'tests', 'notes.md'), 'hello');
@@ -317,15 +330,16 @@ describe('RecordedModelPlugin', () => {
   });
 
   /**
-   * The callback only reads its own counter, so the request and context it is
-   * handed never matter; an empty parameter object keeps that explicit.
+   * The callback only reads its own counter, so an empty request and a bare
+   * context stand in for what a real run would pass.
    */
   function callPlugin(
     plugin: RecordedModelPlugin,
   ): Promise<LlmResponse | undefined> {
-    return plugin.beforeModelCallback(
-      {} as Parameters<RecordedModelPlugin['beforeModelCallback']>[0],
-    );
+    return plugin.beforeModelCallback({
+      callbackContext: {} as Context,
+      llmRequest: {contents: [], liveConnectConfig: {}, toolsDict: {}},
+    });
   }
 });
 

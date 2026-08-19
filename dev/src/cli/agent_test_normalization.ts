@@ -27,7 +27,7 @@ export type JsonObject = Record<string, unknown>;
 export type NormalizableEvent = Partial<Event> | JsonObject;
 
 /** Separator between the segments of a node path and of a branch. */
-const PATH_SEPARATOR = '.';
+export const PATH_SEPARATOR = '.';
 
 /** Function call names that make an event a human-in-the-loop request. */
 const HITL_FUNCTION_CALL_NAMES: ReadonlySet<string> = new Set([
@@ -36,14 +36,7 @@ const HITL_FUNCTION_CALL_NAMES: ReadonlySet<string> = new Set([
   REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
 ]);
 
-/**
- * Event fields that differ between two runs of the same conversation.
- *
- * Recorded fixtures may come from an `adk-python` export, so each field is
- * excluded under both spellings. `avgLogprobs`, `cacheMetadata` and
- * `logprobsResult` are not on the adk-js `LlmResponse`; they are listed for
- * those imported fixtures.
- */
+/** Event fields that differ between two runs of the same conversation. */
 const EXCLUDED_EVENT_FIELDS: readonly string[] = [
   'id',
   'timestamp',
@@ -51,13 +44,10 @@ const EXCLUDED_EVENT_FIELDS: readonly string[] = [
   'modelVersion',
   'finishReason',
   'usageMetadata',
-  'avgLogprobs',
-  'cacheMetadata',
-  'logprobsResult',
   'citationMetadata',
   'interactionId',
   'turnComplete',
-].flatMap((field) => [field, toSnakeCaseKey(field)]);
+];
 
 /**
  * Event fields dropped when a fixture is rebuilt.
@@ -70,9 +60,6 @@ const REBUILD_EXCLUDED_EVENT_FIELDS: readonly string[] = [
   'timestamp',
   'usageMetadata',
   'modelVersion',
-  'avgLogprobs',
-  'cacheMetadata',
-  'logprobsResult',
   'citationMetadata',
   'interactionId',
   'turnComplete',
@@ -80,10 +67,6 @@ const REBUILD_EXCLUDED_EVENT_FIELDS: readonly string[] = [
 
 /** Suffix of the `stateDelta` keys that hold parallel-join bookkeeping. */
 const JOIN_STATE_SUFFIX = '_join_state';
-
-function toSnakeCaseKey(key: string): string {
-  return key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
-}
 
 /**
  * Narrows a value to a plain JSON object, or `undefined` when it is an array,

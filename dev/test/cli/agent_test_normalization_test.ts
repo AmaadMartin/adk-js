@@ -28,7 +28,6 @@ describe('normalizeEvents', () => {
       id: 'e-1',
       timestamp: 1234.5,
       invocationId: 'i-1',
-      invocation_id: 'i-1',
       usageMetadata: {totalTokenCount: 7},
       interactionId: 'server-token',
       turnComplete: true,
@@ -36,8 +35,8 @@ describe('normalizeEvents', () => {
       output: null,
     };
 
-    // Everything that differs between two identical runs has to go, in either
-    // naming convention, and null-valued keys must not survive either.
+    // Everything that differs between two identical runs has to go, and
+    // null-valued keys must not survive either.
     expect(normalizeEvents([event])).toEqual([{author: 'agent'}]);
   });
 

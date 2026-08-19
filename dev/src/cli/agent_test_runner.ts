@@ -33,19 +33,19 @@ import {Content, Part} from '@google/genai';
 import fg from 'fast-glob';
 import * as assert from 'node:assert';
 import * as path from 'node:path';
-import {AgentFile, AgentFileOptions} from '../utils/agent_loader.js';
 import {
-  isFileExists,
-  isFolderExists,
-  loadFileData,
-  saveToFile,
-} from '../utils/file_utils.js';
+  AgentFile,
+  AgentFileOptions,
+  findAgentEntryFile,
+} from '../utils/agent_loader.js';
+import {isFolderExists, loadFileData, saveToFile} from '../utils/file_utils.js';
 import {
   compareSortKeys,
   JsonObject,
   normalizeEvents,
   normalizeIds,
   normalizeRebuiltEvents,
+  PATH_SEPARATOR,
   sortKeysDeep,
 } from './agent_test_normalization.js';
 import {RecordedModelPlugin} from './recorded_model_plugin.js';
@@ -111,15 +111,8 @@ type RecordedFixture = {
 /** Fixture file name suffix marking an expected failure. */
 const XFAIL_SUFFIX = '_xfail';
 
-/** Entry file names an agent directory may use, in precedence order. */
-const AGENT_ENTRY_BASE_NAMES = ['app', 'agent'];
-const AGENT_ENTRY_EXTENSIONS = ['.ts', '.js', '.mjs', '.cjs'];
-
 /** The user a replayed or rebuilt conversation runs as. */
 const TEST_USER_ID = 'test_user';
-
-/** Separator between the segments of a workflow node path. */
-const NODE_PATH_SEPARATOR = '.';
 
 /**
  * Name of the tool a recorded conversation uses to declare the model's
@@ -169,20 +162,6 @@ export async function getTestFiles(folder: string): Promise<AgentTestCase[]> {
     });
   }
   return testCases;
-}
-
-async function findAgentEntryFile(
-  agentDir: string,
-): Promise<string | undefined> {
-  for (const baseName of AGENT_ENTRY_BASE_NAMES) {
-    for (const extension of AGENT_ENTRY_EXTENSIONS) {
-      const candidate = path.join(agentDir, `${baseName}${extension}`);
-      if (await isFileExists(candidate)) {
-        return candidate;
-      }
-    }
-  }
-  return undefined;
 }
 
 /**
@@ -296,8 +275,8 @@ async function replay(
     return {name: testCase.name, status: 'skipped', message: skipReason};
   }
 
-  const openingMessage = openingUserMessage(events[0]);
-  if (openingMessage === undefined) {
+  const opening = extractUserContent(events[0]);
+  if (!opening?.parts[0]?.text) {
     return {
       name: testCase.name,
       status: 'skipped',
@@ -319,10 +298,7 @@ async function replay(
 
   const mapper = new FunctionCallIdMapper(recordedFunctionCallIds(events));
   const actual: Event[] = [];
-  const firstTurn = await runTurn(runner, session, {
-    role: 'user',
-    parts: [{text: openingMessage}],
-  });
+  const firstTurn = await runTurn(runner, session, opening);
   mapper.absorb(firstTurn);
   actual.push(...firstTurn);
 
@@ -412,15 +388,6 @@ function replaySkipReason(
     return 'the fixture relies on recorded RNG mocks, which are not supported';
   }
   return undefined;
-}
-
-/** The opening user message, or `undefined` when the fixture has none. */
-function openingUserMessage(event: RecordedEvent): string | undefined {
-  if (event.author !== 'user') {
-    return undefined;
-  }
-  const text = event.content?.parts?.[0]?.text;
-  return text ? text : undefined;
 }
 
 async function createTestRunner(
@@ -525,7 +492,7 @@ function isFrameworkRequest(event: RecordedEvent, content: Content): boolean {
       case REQUEST_CREDENTIAL_FUNCTION_CALL_NAME:
         return true;
       case REQUEST_INPUT_FUNCTION_CALL_NAME:
-        return nodePath.includes(NODE_PATH_SEPARATOR);
+        return nodePath.includes(PATH_SEPARATOR);
       default:
         return false;
     }
