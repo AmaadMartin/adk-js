@@ -7,11 +7,16 @@
 import {
   AUTH_PREPROCESSOR,
   Event,
+  FunctionTool,
   InvocationContext,
+  LlmAgent,
+  PluginManager,
   SingleOnToolErrorCallback,
   createEvent,
+  createSession,
 } from '@google/adk';
 import {Mock, describe, expect, it, vi} from 'vitest';
+import {z} from 'zod';
 import {REQUEST_CREDENTIAL_FUNCTION_CALL_NAME} from '../../src/agents/functions.js';
 
 vi.mock('../../src/agents/functions.js', async (importOriginal) => {
@@ -514,16 +519,27 @@ describe('AuthPreprocessor', () => {
     const onToolErrorCallback: SingleOnToolErrorCallback = () => ({
       result: 'recovered',
     });
-    const invocationContext = {
-      agent: {
-        [LLM_AGENT_SYMBOL]: true,
-        canonicalTools: vi.fn().mockResolvedValue([{name: 'someTool'}]),
-        canonicalBeforeToolCallbacks: [],
-        canonicalAfterToolCallbacks: [],
-        canonicalOnToolErrorCallbacks: [onToolErrorCallback],
-      },
-      session: {
-        state: {},
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: 'gemini-2.5-flash',
+      tools: [
+        new FunctionTool({
+          name: 'someTool',
+          description: 'some tool',
+          parameters: z.object({}),
+          execute: async () => ({result: 'ok'}),
+        }),
+      ],
+      onToolErrorCallback,
+    });
+    const invocationContext = new InvocationContext({
+      invocationId: 'test-invocation',
+      agent,
+      pluginManager: new PluginManager([]),
+      session: createSession({
+        id: 'test-session',
+        appName: 'test-app',
+        userId: 'test-user',
         events: [
           createEvent({
             author: 'agent',
@@ -566,8 +582,8 @@ describe('AuthPreprocessor', () => {
             },
           }),
         ],
-      },
-    } as unknown as InvocationContext;
+      }),
+    });
 
     for await (const _event of AUTH_PREPROCESSOR.runAsync(invocationContext)) {
       // drain
