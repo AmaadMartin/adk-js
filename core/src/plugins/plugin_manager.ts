@@ -65,14 +65,13 @@ async function closePluginWithTimeout(
   plugin: BasePlugin,
   timeoutMs: number,
 ): Promise<void> {
-  const closePromise = (async () => plugin.close())();
-  // Claim the abandoned promise up front so a late rejection cannot escape as
-  // an unhandled rejection once the race has settled on the timeout.
-  closePromise.catch(() => {});
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
+    // `Promise.race` subscribes to every input, so an abandoned close that
+    // rejects after the timeout is already handled. Abandoning it any other
+    // way needs its own `.catch`, or Node reports an unhandled rejection.
     await Promise.race([
-      closePromise,
+      (async () => plugin.close())(),
       new Promise<never>((_, reject) => {
         timer = setTimeout(
           () =>
