@@ -20,11 +20,16 @@ import {
   Event as AdkEvent,
   createEvent,
   InvocationContext,
+  Logger,
+  LogLevel,
   RemoteA2AAgent,
   RemoteA2AAgentConfig,
   Session,
+  setLogger,
+  setLogLevel,
 } from '@google/adk';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {resetLogger} from '../../src/utils/logger.js';
 
 type A2AStreamEventData =
   | Message
@@ -365,5 +370,133 @@ describe('A2ARemoteAgent', () => {
         configuration: {acceptedOutputModes: ['custom']},
       }),
     );
+  });
+
+  describe('A2A debug logging', () => {
+    let debugRecords: string[];
+
+    const createCard = (streaming: boolean): AgentCard => ({
+      name: 'Remote',
+      description: 'test',
+      protocolVersion: '1.0',
+      defaultInputModes: [],
+      defaultOutputModes: [],
+      capabilities: {streaming},
+      skills: [],
+      url: 'https://example.com',
+      version: '1.0',
+    });
+
+    beforeEach(() => {
+      debugRecords = [];
+      const capturingLogger: Logger = {
+        setLogLevel: () => {},
+        log: () => {},
+        debug: (...args: unknown[]) => debugRecords.push(args.join(' ')),
+        info: () => {},
+        warn: () => {},
+        error: () => {},
+      };
+      setLogger(capturingLogger);
+      setLogLevel(LogLevel.DEBUG);
+    });
+
+    afterEach(() => {
+      resetLogger();
+      setLogLevel(LogLevel.ERROR);
+    });
+
+    it('logs the request and every response chunk when streaming', async () => {
+      const agent = new RemoteA2AAgent({
+        name: 'test-agent',
+        agentCard: createCard(true),
+        clientFactory: mockClientFactory,
+      });
+
+      const mockStream = async function* () {
+        yield {
+          kind: 'message',
+          messageId: 'remote-msg',
+          role: 'agent',
+          parts: [{kind: 'text', text: 'streamed response'}],
+        } as A2AStreamEventData;
+      };
+      vi.mocked(mockClient.sendMessageStream).mockReturnValue(mockStream());
+
+      for await (const _ of agent.runAsync(createMockContext())) {
+        // Drain the stream so both log statements run.
+      }
+
+      expect(
+        debugRecords.filter((record) =>
+          record.includes('A2A Send Message Request:'),
+        ),
+      ).toHaveLength(1);
+      const responses = debugRecords.filter((record) =>
+        record.includes('A2A Response:'),
+      );
+      expect(responses).toHaveLength(1);
+      expect(responses[0]).toContain('Result Type: Message');
+      expect(responses[0]).toContain('Part 0: TextPart: streamed response');
+    });
+
+    it('logs the request and the response when not streaming', async () => {
+      const agent = new RemoteA2AAgent({
+        name: 'test-agent',
+        agentCard: createCard(false),
+        clientFactory: mockClientFactory,
+      });
+
+      vi.mocked(mockClient.sendMessage).mockResolvedValue({
+        kind: 'message',
+        messageId: 'static-msg',
+        role: 'agent',
+        parts: [{kind: 'text', text: 'static response'}],
+      });
+
+      for await (const _ of agent.runAsync(createMockContext())) {
+        // Drain the stream so both log statements run.
+      }
+
+      expect(
+        debugRecords.some((record) =>
+          record.includes('A2A Send Message Request:'),
+        ),
+      ).toBe(true);
+      expect(
+        debugRecords.some((record) =>
+          record.includes('Part 0: TextPart: static response'),
+        ),
+      ).toBe(true);
+    });
+
+    it('logs the message a beforeRequestCallback replaced', async () => {
+      const agent = new RemoteA2AAgent({
+        name: 'test-agent',
+        agentCard: createCard(true),
+        clientFactory: mockClientFactory,
+        beforeRequestCallbacks: [
+          (_ctx, params) => {
+            params.message = {
+              ...params.message,
+              parts: [{kind: 'text', text: 'mutated'}],
+            };
+          },
+        ],
+      });
+      vi.mocked(mockClient.sendMessageStream).mockReturnValue(
+        (async function* () {})(),
+      );
+
+      for await (const _ of agent.runAsync(createMockContext())) {
+        // Drain the stream so the request log runs.
+      }
+
+      const request = debugRecords.find((record) =>
+        record.includes('A2A Send Message Request:'),
+      );
+      expect(request).toBeDefined();
+      expect(request).toContain('Part 0: TextPart: mutated');
+    });
   });
 });
