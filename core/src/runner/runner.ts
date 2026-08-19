@@ -479,7 +479,15 @@ export class Runner {
       return;
     }
     this.closed = true;
-    await closeToolsets(this.agent);
+    await Promise.all(
+      getAllToolsets(this.agent).map((toolset) =>
+        toolset
+          .close()
+          .catch((e: unknown) =>
+            logger.warn(`Failed to close toolset: ${formatError(e)}`),
+          ),
+      ),
+    );
     await this.pluginManager.close();
   }
 
@@ -723,21 +731,4 @@ function getAllToolsets(agent: BaseAgent): BaseToolset[] {
 
   traverse(agent);
   return toolsets;
-}
-
-/**
- * Closes every toolset reachable from the agent tree.
- *
- * A toolset that fails to close is logged and skipped so that the remaining
- * toolsets are still closed.
- */
-async function closeToolsets(agent: BaseAgent): Promise<void> {
-  const results = await Promise.allSettled(
-    getAllToolsets(agent).map((toolset) => toolset.close()),
-  );
-  for (const result of results) {
-    if (result.status === 'rejected') {
-      logger.warn(`Failed to close toolset: ${formatError(result.reason)}`);
-    }
-  }
 }

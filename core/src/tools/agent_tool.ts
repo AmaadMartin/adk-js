@@ -157,8 +157,9 @@ export class AgentTool extends BaseTool {
       credentialService: toolContext.invocationContext.credentialService,
     });
 
-    // This runner exists only for this tool call, so it owns the sub-agent's
-    // toolsets and must release them on every exit path.
+    // Nothing else releases this per-call runner: getAllToolsets does not
+    // descend into an AgentTool, so the parent runner never reaches the
+    // sub-agent's toolsets. Their lifetime stays per call, as in adk-python.
     try {
       const session = await runner.sessionService.getOrCreateSession({
         appName: this.agent.name,

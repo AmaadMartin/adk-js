@@ -174,35 +174,39 @@ async function runFromInputFile(
   const runner = new Runner(options);
   let waitingOnUser = false;
 
-  for (const query of fileContent.queries) {
-    console.log(`[user]: ${query}`);
+  try {
+    for (const query of fileContent.queries) {
+      console.log(`[user]: ${query}`);
 
-    const runOptions = {
-      userId: session.userId,
-      sessionId: session.id,
-      newMessage: {role: 'user', parts: [{text: query}]},
-      // Interactive CLI: let a plain-text "yes"/"no" resolve a pending tool
-      // confirmation (opt-in; off by default on non-interactive surfaces).
-      runConfig: {plainTextToolConfirmation: true},
-    };
+      const runOptions = {
+        userId: session.userId,
+        sessionId: session.id,
+        newMessage: {role: 'user', parts: [{text: query}]},
+        // Interactive CLI: let a plain-text "yes"/"no" resolve a pending tool
+        // confirmation (opt-in; off by default on non-interactive surfaces).
+        runConfig: {plainTextToolConfirmation: true},
+      };
 
-    waitingOnUser = false;
-    for await (const event of runner.runAsync(runOptions)) {
-      printEvent(event);
-      // A scripted run has no prompt to answer at: whatever the pause asked
-      // for has to be the next query in the file.
-      waitingOnUser = requiresUserInput(event) || waitingOnUser;
+      waitingOnUser = false;
+      for await (const event of runner.runAsync(runOptions)) {
+        printEvent(event);
+        // A scripted run has no prompt to answer at: whatever the pause asked
+        // for has to be the next query in the file.
+        waitingOnUser = requiresUserInput(event) || waitingOnUser;
+      }
     }
-  }
 
-  if (waitingOnUser) {
-    console.error(
-      'The run ended while still waiting for user input. ' +
-        'Add the answer as the next query in the input file.',
-    );
-  }
+    if (waitingOnUser) {
+      console.error(
+        'The run ended while still waiting for user input. ' +
+          'Add the answer as the next query in the input file.',
+      );
+    }
 
-  return session;
+    return session;
+  } finally {
+    await runner.close();
+  }
 }
 
 interface RunInteractivelyOptions {
@@ -228,6 +232,9 @@ async function runInteractively(
   });
 
   options.onAgentFileReloaded?.((newAgent: BaseAgent) => {
+    // The reload callback is synchronous, so release the replaced runner's
+    // toolsets in the background rather than orphaning them.
+    const replaced = runner;
     currentAgent = newAgent;
     runner = new Runner({
       appName: newAgent.name,
@@ -236,6 +243,11 @@ async function runInteractively(
       sessionService: options.sessionService,
       memoryService: options.memoryService,
     });
+    void replaced
+      .close()
+      .catch((e: unknown) =>
+        console.warn('Failed to close the replaced runner:', e),
+      );
     console.log(`Agent reloaded. New runner created with existing session.`);
   });
 
@@ -261,6 +273,8 @@ async function runInteractively(
       printEvent(event);
     }
   }
+
+  await runner.close();
 }
 
 /**
