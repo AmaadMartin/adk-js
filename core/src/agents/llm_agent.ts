@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GenerateContentConfig, Schema} from '@google/genai';
+import {GenerateContentConfig, GroundingMetadata, Schema} from '@google/genai';
 import {context, trace} from '@opentelemetry/api';
 import {FinishTaskTool} from '../tools/finish_task_tool.js';
 import {FunctionTool} from '../tools/function_tool.js';
@@ -426,6 +426,56 @@ async function convertToolUnionToTools(
     return [new NodeTool(toolUnion)];
   }
   return await toolUnion.getTools(context);
+}
+
+/**
+ * Session state key that a `google_search_agent` tool writes its citations to.
+ * This literal is a contract shared with adk-python and with the tool that
+ * writes it, so it must not be renamed or rebuilt from a prefix constant.
+ */
+const GROUNDING_METADATA_STATE_KEY = 'temp:_adk_grounding_metadata';
+
+/**
+ * Name of the search sub-agent tool whose citations belong on the parent
+ * response. Also a cross-language contract with adk-python.
+ */
+const GOOGLE_SEARCH_AGENT_TOOL_NAME = 'google_search_agent';
+
+/**
+ * Copies a `google_search_agent` sub-agent's citations onto the parent agent's
+ * response, so a client that reads citations from the parent's events sees
+ * them. This is a temporary workaround and should be removed once the search
+ * sub-agent reports its grounding metadata through the normal response path.
+ *
+ * @param agent The agent that produced the response.
+ * @param invocationContext The invocation context.
+ * @param response The response the after-model handling is about to return.
+ * @returns The same response, with the citations attached when they apply.
+ */
+async function maybeAddGroundingMetadata(
+  agent: LlmAgent,
+  invocationContext: InvocationContext,
+  response: LlmResponse,
+): Promise<LlmResponse> {
+  const readonlyContext = new ReadonlyContext(invocationContext);
+  const groundingMetadata = readonlyContext.state.get<GroundingMetadata>(
+    GROUNDING_METADATA_STATE_KEY,
+  );
+  // An empty object counts as absent, matching adk-python's falsy check.
+  if (!groundingMetadata || Object.keys(groundingMetadata).length === 0) {
+    return response;
+  }
+
+  // adk-python checks the tools first because it caches them on the invocation
+  // context. adk-js has no such cache and this runs once per streamed chunk, so
+  // the cheap state read gates the toolset resolution instead.
+  const tools = await agent.canonicalTools(readonlyContext);
+  if (!tools.some((tool) => tool.name === GOOGLE_SEARCH_AGENT_TOOL_NAME)) {
+    return response;
+  }
+
+  response.groundingMetadata = groundingMetadata;
+  return response;
 }
 
 /**
@@ -1925,7 +1975,11 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         llmResponse,
       });
     if (afterModelCallbackResponse) {
-      return afterModelCallbackResponse;
+      return maybeAddGroundingMetadata(
+        this,
+        invocationContext,
+        afterModelCallbackResponse,
+      );
     }
 
     // If no override was returned from the plugins, run the canonical callbacks
@@ -1940,10 +1994,14 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       }
 
       if (callbackResponse) {
-        return callbackResponse;
+        return maybeAddGroundingMetadata(
+          this,
+          invocationContext,
+          callbackResponse,
+        );
       }
     }
-    return undefined;
+    return maybeAddGroundingMetadata(this, invocationContext, llmResponse);
   }
 
   protected async *runAndHandleError<T extends LlmResponse | Event>(
