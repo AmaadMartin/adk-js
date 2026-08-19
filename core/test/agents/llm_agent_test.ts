@@ -1313,3 +1313,89 @@ describe('LlmAgent usage metadata on content-less responses', () => {
     expect(events.find((e) => e.usageMetadata)).toBeUndefined();
   });
 });
+
+describe('LlmAgent onModelErrorCallback through Runner', () => {
+  const recoveryText = 'the model is busy, try again shortly';
+
+  async function runAgent(
+    agent: LlmAgent,
+    plugins?: BasePlugin[],
+  ): Promise<Event[]> {
+    const sessionService = new InMemorySessionService();
+    const runner = new Runner({
+      appName: 'test_app',
+      agent,
+      sessionService,
+      plugins,
+    });
+    const session = await sessionService.createSession({
+      appName: 'test_app',
+      userId: 'test_user',
+    });
+
+    const events: Event[] = [];
+    for await (const event of runner.runAsync({
+      userId: session.userId,
+      sessionId: session.id,
+      newMessage: {role: 'user', parts: [{text: 'hello'}]},
+    })) {
+      events.push(event);
+    }
+    return events;
+  }
+
+  function failingModel(): MockLlm {
+    return new MockLlm(
+      null,
+      new Error(JSON.stringify({error: {message: 'quota', code: 429}})),
+    );
+  }
+
+  it('replaces the failed model call with the callback response', async () => {
+    const events = await runAgent(
+      new LlmAgent({
+        name: 'recovering_agent',
+        model: failingModel(),
+        onModelErrorCallback: () => ({
+          content: {role: 'model', parts: [{text: recoveryText}]},
+        }),
+      }),
+    );
+
+    expect(events.map((e) => e.content?.parts?.[0]?.text)).toContain(
+      recoveryText,
+    );
+    expect(events.find((e) => e.errorCode)).toBeUndefined();
+  });
+
+  it('emits the error event when no callback is registered', async () => {
+    const events = await runAgent(
+      new LlmAgent({name: 'plain_agent', model: failingModel()}),
+    );
+
+    expect(events.map((e) => e.content?.parts?.[0]?.text)).not.toContain(
+      recoveryText,
+    );
+    expect(events.find((e) => e.errorCode)).toMatchObject({
+      errorCode: '429',
+      errorMessage: 'quota',
+    });
+  });
+
+  it('replaces the failed model call with the plugin response', async () => {
+    const plugin = new MockPlugin('recovery_plugin');
+    plugin.onModelErrorResponse = {
+      content: {role: 'model', parts: [{text: recoveryText}]},
+    };
+
+    const events = await runAgent(
+      new LlmAgent({name: 'plugin_agent', model: failingModel()}),
+      [plugin],
+    );
+
+    expect(events.map((e) => e.content?.parts?.[0]?.text)).toContain(
+      recoveryText,
+    );
+    expect(events.find((e) => e.errorCode)).toBeUndefined();
+  });
+});

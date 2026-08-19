@@ -2050,7 +2050,17 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
           );
 
         if (onModelErrorCallbackResponse) {
-          yield onModelErrorCallbackResponse as T;
+          // The caller consumes events, so a recovery response has to be
+          // merged into the pending event the way postprocess merges a
+          // successful one.
+          yield (
+            modelResponseEvent.actions
+              ? createEvent({
+                  ...modelResponseEvent,
+                  ...onModelErrorCallbackResponse,
+                })
+              : onModelErrorCallbackResponse
+          ) as T;
         } else {
           // If nothing recovered from the error, just return the message.
           let errorCode = 'UNKNOWN_ERROR';
