@@ -5,9 +5,9 @@
  */
 
 import {afterEach, describe, expect, it, vi} from 'vitest';
-// `canUseOutputSchemaWithTools` is internal and deliberately not exported from
+// `geminiOutputSchemaAndTools` is internal and deliberately not exported from
 // the package barrel.
-import {canUseOutputSchemaWithTools} from '../../src/utils/output_schema_utils.js';
+import {geminiOutputSchemaAndTools} from '../../src/utils/output_schema_utils.js';
 
 const VERTEX_ENV_VAR = 'GOOGLE_GENAI_USE_VERTEXAI';
 
@@ -87,7 +87,7 @@ const TEST_CASES: TestCase[] = [
   },
 ];
 
-describe('canUseOutputSchemaWithTools', () => {
+describe('geminiOutputSchemaAndTools', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
   });
@@ -97,7 +97,7 @@ describe('canUseOutputSchemaWithTools', () => {
     it(`returns ${expected} for "${model}" with ${VERTEX_ENV_VAR} ${envLabel}: ${why}`, () => {
       vi.stubEnv(VERTEX_ENV_VAR, vertexEnv);
 
-      expect(canUseOutputSchemaWithTools(model)).toBe(expected);
+      expect(geminiOutputSchemaAndTools(model)).toBe(expected);
     });
   }
 });

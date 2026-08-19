@@ -15,7 +15,7 @@ import {
 
 import {getBooleanEnvVar, isBrowser} from '../utils/env_aware_utils.js';
 import {logger} from '../utils/logger.js';
-import {canUseOutputSchemaWithTools} from '../utils/output_schema_utils.js';
+import {geminiOutputSchemaAndTools} from '../utils/output_schema_utils.js';
 import {GoogleLLMVariant} from '../utils/variant_utils.js';
 
 import {AsyncQueue} from '../utils/async_queue.js';
@@ -150,7 +150,7 @@ export class Gemini extends BaseLlm {
   private _liveApiClient?: GoogleGenAI;
 
   override get capabilities(): LlmCapabilities {
-    return {outputSchemaAndTools: canUseOutputSchemaWithTools(this.model)};
+    return {outputSchemaAndTools: geminiOutputSchemaAndTools(this.model)};
   }
 
   /**

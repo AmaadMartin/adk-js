@@ -6,7 +6,7 @@
 
 import {getClientLabels} from '../utils/client_labels.js';
 import {logger} from '../utils/logger.js';
-import {canUseOutputSchemaWithTools} from '../utils/output_schema_utils.js';
+import {geminiOutputSchemaAndTools} from '../utils/output_schema_utils.js';
 
 import {BaseLlmConnection} from './base_llm_connection.js';
 import {LlmCapabilities} from './capabilities.js';
@@ -91,7 +91,7 @@ export abstract class BaseLlm {
    * is removed once such models declare the capability explicitly.
    */
   private legacyOutputSchemaAndTools(): boolean {
-    if (!canUseOutputSchemaWithTools(this.model)) {
+    if (!geminiOutputSchemaAndTools(this.model)) {
       return false;
     }
     const className = this.constructor.name;
