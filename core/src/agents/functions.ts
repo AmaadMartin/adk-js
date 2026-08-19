@@ -55,6 +55,27 @@ export const REQUEST_CREDENTIAL_FUNCTION_CALL_NAME = 'adk_request_credential';
 export const REQUEST_CONFIRMATION_FUNCTION_CALL_NAME =
   'adk_request_confirmation';
 
+/**
+ * Stands in for a tool the model named but that is not registered, so the
+ * tool-error callbacks receive a real `BaseTool` and can identify what was
+ * asked for. It carries the lookup failure it stands for: the call is either
+ * answered by a callback or `error` is thrown.
+ */
+class ToolNotFound extends BaseTool {
+  readonly error: Error;
+
+  constructor(requestedName: string | undefined) {
+    super({name: requestedName || '<unnamed>', description: 'Tool not found'});
+    this.error = new Error(
+      `Function ${requestedName} is not found in the toolsDict.`,
+    );
+  }
+
+  override async runAsync(): Promise<never> {
+    throw this.error;
+  }
+}
+
 // Export these items for testing purposes only
 export const functionsExportedForTestingOnly = {
   handleFunctionCallList,
@@ -341,16 +362,39 @@ export async function handleFunctionCallList({
       toolConfirmation = toolConfirmationDict[functionCall.id];
     }
 
-    const {tool, toolContext} = getToolAndContext({
+    const toolContext = new Context({
       invocationContext,
-      functionCall,
-      toolsDict,
+      functionCallId: functionCall.id || undefined,
       toolConfirmation,
     });
+    const functionArgs = functionCall.args ?? {};
+
+    const tool = functionCall.name ? toolsDict[functionCall.name] : undefined;
+    if (!tool) {
+      const placeholder = new ToolNotFound(functionCall.name);
+      const errorResponse =
+        await invocationContext.pluginManager.runOnToolErrorCallback({
+          tool: placeholder,
+          toolArgs: functionArgs,
+          toolContext,
+          error: placeholder.error,
+        });
+      if (errorResponse == null) {
+        throw placeholder.error;
+      }
+      functionResponseEvents.push(
+        buildResponseEvent(
+          placeholder,
+          errorResponse,
+          toolContext,
+          invocationContext,
+        ),
+      );
+      continue;
+    }
 
     // TODO - b/436079721: implement [tracer.start_as_current_span]
     logger.debug(`execute_tool ${tool.name}`);
-    const functionArgs = functionCall.args ?? {};
 
     // Step 1: Check if plugin before_tool_callback overrides the function
     // response.
@@ -514,35 +558,6 @@ export async function handleFunctionCallList({
     });
   }
   return mergedEvent;
-}
-
-// TODO - b/425992518: consider inline, which is much cleaner.
-function getToolAndContext({
-  invocationContext,
-  functionCall,
-  toolsDict,
-  toolConfirmation,
-}: {
-  invocationContext: InvocationContext;
-  functionCall: FunctionCall;
-  toolsDict: Record<string, BaseTool>;
-  toolConfirmation?: ToolConfirmation;
-}): {tool: BaseTool; toolContext: Context} {
-  if (!functionCall.name || !(functionCall.name in toolsDict)) {
-    throw new Error(
-      `Function ${functionCall.name} is not found in the toolsDict.`,
-    );
-  }
-
-  const toolContext = new Context({
-    invocationContext: invocationContext,
-    functionCallId: functionCall.id || undefined,
-    toolConfirmation,
-  });
-
-  const tool = toolsDict[functionCall.name];
-
-  return {tool, toolContext};
 }
 
 /**
