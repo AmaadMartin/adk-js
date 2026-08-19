@@ -6,6 +6,7 @@
 
 import {
   AgentTool,
+  BasePlugin,
   Context,
   createEvent,
   createEventActions,
@@ -20,8 +21,6 @@ import {
 } from '@google/adk';
 import {Content} from '@google/genai';
 import {describe, expect, it, vi} from 'vitest';
-
-import {BasePlugin} from '../../src/plugins/base_plugin.js';
 
 vi.mock('../../src/runner/runner.js', async (importOriginal) => {
   const actual =
