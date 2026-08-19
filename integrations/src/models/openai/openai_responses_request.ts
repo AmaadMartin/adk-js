@@ -155,19 +155,9 @@ class ResponseInputItemsBuilder {
   }
 }
 
-/** Returns a Part's text, or the empty string when it carries none. */
-function partText(part: Part): string {
-  return part.text ?? '';
-}
-
 /** Narrows a {@link ContentUnion} member to a {@link Content}. */
 function isContent(value: Content | PartUnion): value is Content {
   return typeof value !== 'string' && 'parts' in value;
-}
-
-/** Concatenates the text of one system-instruction element. */
-function instructionElementText(value: PartUnion): string {
-  return typeof value === 'string' ? value : partText(value);
 }
 
 /**
@@ -182,15 +172,18 @@ export function serializeSystemInstruction(
   if (!systemInstruction) {
     return undefined;
   }
-  let text: string;
-  if (Array.isArray(systemInstruction)) {
-    text = systemInstruction.map(instructionElementText).join('');
-  } else if (isContent(systemInstruction)) {
-    text = (systemInstruction.parts ?? []).map(partText).join('');
-  } else {
-    text = instructionElementText(systemInstruction);
-  }
-  return text || undefined;
+  const elements: PartUnion[] = Array.isArray(systemInstruction)
+    ? systemInstruction
+    : isContent(systemInstruction)
+      ? (systemInstruction.parts ?? [])
+      : [systemInstruction];
+  return (
+    elements
+      .map((element) =>
+        typeof element === 'string' ? element : (element.text ?? ''),
+      )
+      .join('') || undefined
+  );
 }
 
 /**
@@ -598,14 +591,9 @@ function responseInput(llmRequest: LlmRequest): ResponseInput {
  * Responses API, so the unset ones are dropped rather than serialized.
  */
 function withoutUndefinedValues<T extends object>(body: T): T {
-  const result: Partial<T> = {};
-  for (const key of Object.keys(body) as Array<keyof T>) {
-    const value = body[key];
-    if (value !== undefined) {
-      result[key] = value;
-    }
-  }
-  return result as T;
+  return Object.fromEntries(
+    Object.entries(body).filter(([, value]) => value !== undefined),
+  ) as T;
 }
 
 /** Builds the Responses API request body for one ADK request. */

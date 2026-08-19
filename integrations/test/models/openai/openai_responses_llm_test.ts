@@ -323,17 +323,6 @@ describe('OpenAiResponsesLlm', () => {
       'Bearer dynamic-key',
     );
   });
-
-  it('rejects an asynchronous api key provider', async () => {
-    const llm = new OpenAiResponsesLlm({
-      model: 'gpt-5',
-      apiKey: () => Promise.resolve('late'),
-    });
-
-    await expect(collect(llm)).rejects.toThrow(
-      /Async api_key providers are not supported/,
-    );
-  });
 });
 
 describe('AzureOpenAiResponsesLlm', () => {
@@ -400,14 +389,5 @@ describe('AzureOpenAiResponsesLlm', () => {
     expect(fake.requests[0].headers.get('authorization')).toBe(
       'Bearer explicit-key',
     );
-  });
-
-  it('falls back to the default base URL without an Azure endpoint', async () => {
-    process.env['AZURE_OPENAI_API_KEY'] = 'env-key';
-    const fake = fakeJsonFetch(EMPTY_RESPONSE);
-
-    await collectAzure({model: 'my-deployment'}, fake);
-
-    expect(fake.requests[0].url).toBe('https://api.openai.com/v1/responses');
   });
 });

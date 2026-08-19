@@ -25,6 +25,9 @@ import {
 } from './openai_responses_response.js';
 import {JsonObject} from './openai_schema.js';
 
+/** The index of a text run that arrived without a fragment number. */
+const UNNUMBERED = -1;
+
 /** A function call assembled from the events that describe it. */
 interface AccumulatedCall {
   name: string;
@@ -32,12 +35,7 @@ interface AccumulatedCall {
   args: string;
 }
 
-/**
- * One output item under construction.
- *
- * Text arrives either as one run or as indexed fragments, depending on which
- * event carries it, so both forms are kept and joined at the end.
- */
+/** One output item under construction. */
 interface AccumulatedItem {
   type?: string;
   text: TextBuffer;
@@ -45,49 +43,49 @@ interface AccumulatedItem {
   doneItem?: ResponseOutputItem;
 }
 
-/** The fields of a stream event the accumulator reads. */
-interface EventInfo {
+/**
+ * The event fields the accumulator reads, spelled as the stream events spell
+ * them.
+ *
+ * Every event that identifies an output item carries `output_index`. The rest
+ * appear only on the events that carry them, so an event that numbers nothing
+ * reads as unnumbered.
+ */
+interface StreamEventFields {
   type: string;
-  outputIndex: number;
-  itemId?: string;
-  summaryIndex?: number;
+  output_index: number;
+  item_id?: string;
+  content_index?: number;
+  summary_index?: number;
 }
 
 /**
  * Text assembled from stream events.
  *
- * Some events number their fragments and some do not, so an unnumbered run is
- * kept separately and prefixes the numbered ones.
+ * A fragment is numbered by the event that carries it, or unnumbered; an
+ * unnumbered run sorts ahead of every numbered one.
  */
 class TextBuffer {
-  private run = '';
-  private fragments?: Map<number, string>;
+  private readonly fragments = new Map<number, string>();
 
   append(index: number | undefined, delta: string): void {
-    if (index === undefined) {
-      this.run += delta;
-      return;
-    }
-    this.fragments ??= new Map();
-    this.fragments.set(index, (this.fragments.get(index) ?? '') + delta);
+    const key = index ?? UNNUMBERED;
+    this.fragments.set(key, (this.fragments.get(key) ?? '') + delta);
   }
 
   set(index: number | undefined, text: string): void {
     if (index === undefined) {
-      this.run = text;
-      this.fragments = undefined;
-      return;
+      // An unnumbered run is the whole text, so it replaces what came before.
+      this.fragments.clear();
     }
-    this.fragments ??= new Map();
-    this.fragments.set(index, text);
+    this.fragments.set(index ?? UNNUMBERED, text);
   }
 
   assemble(): string {
-    if (!this.fragments) {
-      return this.run;
-    }
-    const ordered = [...this.fragments.entries()].sort(([a], [b]) => a - b);
-    return this.run + ordered.map(([, text]) => text).join('');
+    return [...this.fragments.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(([, text]) => text)
+      .join('');
   }
 }
 
@@ -120,91 +118,32 @@ export class StreamAccumulator {
         return [];
 
       case 'response.output_text.delta':
-        return this.appendMessageText(
-          eventInfo(event.type, event.output_index, event.item_id),
-          event.content_index,
-          event.delta,
-        );
+        return this.appendMessageText(event, event.delta);
 
       case 'response.reasoning_summary_text.delta':
-        return this.appendReasoningText(
-          event.output_index,
-          event.summary_index,
-          event.delta,
-        );
       case 'response.reasoning_text.delta':
-        return this.appendReasoningText(
-          event.output_index,
-          undefined,
-          event.delta,
-        );
+        return this.appendReasoningText(event, event.delta);
 
       case 'response.output_text.done':
-        return this.finishMessageText(
-          eventInfo(event.type, event.output_index, event.item_id),
-          event.content_index,
-          event.text,
-        );
+        return this.finishMessageText(event, event.text);
       case 'response.content_part.done':
-        return this.finishMessageText(
-          eventInfo(event.type, event.output_index, event.item_id),
-          event.content_index,
-          contentPartText(event.part),
-        );
+        return this.finishMessageText(event, contentPartText(event.part));
 
       case 'response.reasoning_summary_text.done':
-        return this.finishReasoningText(
-          eventInfo(
-            event.type,
-            event.output_index,
-            event.item_id,
-            event.summary_index,
-          ),
-          event.summary_index,
-          event.text,
-        );
-      case 'response.reasoning_summary_part.done':
-        return this.finishReasoningText(
-          eventInfo(
-            event.type,
-            event.output_index,
-            event.item_id,
-            event.summary_index,
-          ),
-          event.summary_index,
-          event.part.text,
-        );
       case 'response.reasoning_text.done':
-        return this.finishReasoningText(
-          eventInfo(event.type, event.output_index, event.item_id),
-          undefined,
-          event.text,
-        );
+        return this.finishReasoningText(event, event.text);
+      case 'response.reasoning_summary_part.done':
+        return this.finishReasoningText(event, event.part.text);
 
       case 'response.output_item.added':
-        return this.trackOutputItem(
-          eventInfo(event.type, event.output_index),
-          event.item,
-          false,
-        );
+        return this.trackOutputItem(event, event.item, false);
       case 'response.output_item.done':
-        return this.trackOutputItem(
-          eventInfo(event.type, event.output_index),
-          event.item,
-          true,
-        );
+        return this.trackOutputItem(event, event.item, true);
 
       case 'response.function_call_arguments.delta':
-        return this.appendCallArguments(
-          eventInfo(event.type, event.output_index, event.item_id),
-          event.delta,
-        );
+        return this.appendCallArguments(event, event.delta);
       case 'response.function_call_arguments.done':
-        return this.replaceCallArguments(
-          eventInfo(event.type, event.output_index, event.item_id),
-          event.arguments,
-          event.name,
-        );
+        return this.replaceCallArguments(event, event.arguments, event.name);
 
       case 'response.completed':
       case 'response.incomplete':
@@ -252,87 +191,85 @@ export class StreamAccumulator {
   }
 
   private appendMessageText(
-    info: EventInfo,
-    contentIndex: number,
+    event: StreamEventFields,
     delta: string,
   ): LlmResponse[] {
-    const closing = this.closeReasoningStream(info);
-    this.ensureItem(info.outputIndex, 'message').text.append(
-      contentIndex,
+    const closing = this.closeReasoningStream(event);
+    this.ensureItem(event.output_index, 'message').text.append(
+      event.content_index,
       delta,
     );
     return [...closing, this.partialResponse({text: delta})];
   }
 
   private appendReasoningText(
-    outputIndex: number,
-    summaryIndex: number | undefined,
+    event: StreamEventFields,
     delta: string,
   ): LlmResponse[] {
     this.reasoningOpen = true;
-    this.ensureItem(outputIndex, 'reasoning').reasoning.append(
-      summaryIndex,
+    this.ensureItem(event.output_index, 'reasoning').reasoning.append(
+      event.summary_index,
       delta,
     );
     return [this.partialResponse({text: delta, thought: true})];
   }
 
   private finishMessageText(
-    info: EventInfo,
-    contentIndex: number,
+    event: StreamEventFields,
     text: string,
   ): LlmResponse[] {
-    const closing = this.closeReasoningStream(info);
-    const item = this.ensureItem(info.outputIndex, 'message');
+    const closing = this.closeReasoningStream(event);
+    const item = this.ensureItem(event.output_index, 'message');
     if (text) {
-      item.text.set(contentIndex, text);
+      item.text.set(event.content_index, text);
     }
     return closing;
   }
 
   private finishReasoningText(
-    info: EventInfo,
-    summaryIndex: number | undefined,
+    event: StreamEventFields,
     text: string,
   ): LlmResponse[] {
-    const item = this.ensureItem(info.outputIndex, 'reasoning');
+    const item = this.ensureItem(event.output_index, 'reasoning');
     if (text) {
-      item.reasoning.set(summaryIndex, text);
+      item.reasoning.set(event.summary_index, text);
     }
-    return this.closeReasoningStream(info);
+    return this.closeReasoningStream(event);
   }
 
   private trackOutputItem(
-    info: EventInfo,
+    event: StreamEventFields,
     item: ResponseOutputItem,
     done: boolean,
   ): LlmResponse[] {
     const closing =
-      item.type === 'reasoning' ? [] : this.closeReasoningStream(info);
-    const accumulated = this.ensureItem(info.outputIndex, item.type);
+      item.type === 'reasoning' ? [] : this.closeReasoningStream(event);
+    const accumulated = this.ensureItem(event.output_index, item.type);
     if (done) {
       accumulated.doneItem = item;
     }
     if (item.type === 'function_call') {
-      this.mergeFunctionCall(info.outputIndex, item);
+      this.mergeFunctionCall(event.output_index, item);
     }
     return closing;
   }
 
-  private appendCallArguments(info: EventInfo, delta: string): LlmResponse[] {
-    const closing = this.closeReasoningStream(info);
-    const call = this.ensureCall(info.outputIndex, '');
-    call.args += delta;
+  private appendCallArguments(
+    event: StreamEventFields,
+    delta: string,
+  ): LlmResponse[] {
+    const closing = this.closeReasoningStream(event);
+    this.ensureCall(event.output_index, '').args += delta;
     return closing;
   }
 
   private replaceCallArguments(
-    info: EventInfo,
+    event: StreamEventFields,
     args: string,
     name: string,
   ): LlmResponse[] {
-    const closing = this.closeReasoningStream(info);
-    this.ensureCall(info.outputIndex, name).args = args;
+    const closing = this.closeReasoningStream(event);
+    this.ensureCall(event.output_index, name).args = args;
     return closing;
   }
 
@@ -373,7 +310,7 @@ export class StreamAccumulator {
    * Both arrive as partial responses, so without the marker a consumer cannot
    * tell where the model stopped thinking and started answering.
    */
-  private closeReasoningStream(info: EventInfo): LlmResponse[] {
+  private closeReasoningStream(event: StreamEventFields): LlmResponse[] {
     if (!this.reasoningOpen) {
       return [];
     }
@@ -382,15 +319,15 @@ export class StreamAccumulator {
       return [];
     }
     const streamEvent: JsonObject = {
-      type: info.type,
+      type: event.type,
       reasoning_done: true,
-      output_index: info.outputIndex,
+      output_index: event.output_index,
     };
-    if (info.itemId !== undefined) {
-      streamEvent['item_id'] = info.itemId;
+    if (event.item_id !== undefined) {
+      streamEvent['item_id'] = event.item_id;
     }
-    if (info.summaryIndex !== undefined) {
-      streamEvent['summary_index'] = info.summaryIndex;
+    if (event.summary_index !== undefined) {
+      streamEvent['summary_index'] = event.summary_index;
     }
     return [
       {
@@ -434,11 +371,7 @@ export class StreamAccumulator {
 
   /** Rebuilds the response parts from the items, in the order they arrived. */
   private assembleParts(): Part[] {
-    const parts: Part[] = [];
-    for (const outputIndex of this.order) {
-      parts.push(...this.itemParts(outputIndex));
-    }
-    return parts;
+    return this.order.flatMap((outputIndex) => this.itemParts(outputIndex));
   }
 
   /** Returns the parts of one accumulated output item. */
@@ -472,16 +405,6 @@ export class StreamAccumulator {
     }
     return [];
   }
-}
-
-/** Collects the event fields the accumulator needs into one record. */
-function eventInfo(
-  type: string,
-  outputIndex: number,
-  itemId?: string,
-  summaryIndex?: number,
-): EventInfo {
-  return {type, outputIndex, itemId, summaryIndex};
 }
 
 /** Returns the text of a finished content part, if it carries any. */

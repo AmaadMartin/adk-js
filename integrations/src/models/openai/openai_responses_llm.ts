@@ -28,14 +28,8 @@ const AZURE_OPENAI_V1_PATH = '/openai/v1/';
 export interface OpenAiResponsesLlmParams {
   /** The model, or on Azure the deployment name. Defaults to `gpt-5`. */
   model?: string;
-  /**
-   * The API key, or a synchronous provider that returns one.
-   *
-   * The provider's return type is `unknown` because an asynchronous provider
-   * is rejected when it is called rather than when it is written, matching
-   * adk-python; see {@link OpenAiResponsesLlm.resolveApiKey}.
-   */
-  apiKey?: string | (() => unknown);
+  /** The API key, or a synchronous provider that returns one. */
+  apiKey?: string | (() => string);
   /** A pre-configured client. Takes precedence over {@link apiKey}. */
   client?: OpenAI;
   /** Whether the API retains the response. */
@@ -59,7 +53,7 @@ export interface OpenAiResponsesLlmParams {
 /** Settings for the Azure-hosted Responses provider. */
 export interface AzureOpenAiResponsesLlmParams extends OpenAiResponsesLlmParams {
   /** The Azure resource endpoint, e.g. `https://example.openai.azure.com/`. */
-  azureEndpoint?: string;
+  azureEndpoint: string;
 }
 
 /**
@@ -94,15 +88,9 @@ export class OpenAiResponsesLlm extends BaseLlm {
   ): AsyncGenerator<LlmResponse, void> {
     const includeResponseMetadata = this.params.includeResponseMetadata ?? true;
     const body = buildResponsesRequest(llmRequest, {
+      ...this.params,
       model: this.model,
       stream,
-      store: this.params.store,
-      include: this.params.include,
-      reasoning: this.params.reasoning,
-      parallelToolCalls: this.params.parallelToolCalls,
-      truncation: this.params.truncation,
-      serviceTier: this.params.serviceTier,
-      extraRequestArgs: this.params.extraRequestArgs,
     });
 
     if (!stream) {
@@ -145,24 +133,10 @@ export class OpenAiResponsesLlm extends BaseLlm {
     return new OpenAI({apiKey: this.resolveApiKey()});
   }
 
-  /**
-   * Resolves the configured API key.
-   *
-   * @throws when the key provider is asynchronous.
-   */
+  /** Resolves the configured API key. */
   protected resolveApiKey(): string | undefined {
     const apiKey = this.params.apiKey;
-    if (typeof apiKey !== 'function') {
-      return apiKey;
-    }
-    const resolved: unknown = apiKey();
-    if (typeof resolved !== 'string') {
-      throw new Error(
-        'Async api_key providers are not supported; provide a sync callable' +
-          ' that returns a string, or a string.',
-      );
-    }
-    return resolved;
+    return typeof apiKey === 'function' ? apiKey() : apiKey;
   }
 }
 
@@ -177,21 +151,18 @@ export class OpenAiResponsesLlm extends BaseLlm {
  * deployment name.
  */
 export class AzureOpenAiResponsesLlm extends OpenAiResponsesLlm {
-  private readonly azureEndpoint?: string;
+  private readonly azureEndpoint: string;
 
-  constructor(params: AzureOpenAiResponsesLlmParams = {}) {
+  constructor(params: AzureOpenAiResponsesLlmParams) {
     super(params);
     this.azureEndpoint = params.azureEndpoint;
   }
 
   protected override buildClient(): OpenAI {
-    const apiKey = this.resolveApiKey();
-    if (!this.azureEndpoint) {
-      return new OpenAI({apiKey});
-    }
-    const baseURL =
-      this.azureEndpoint.replace(/\/+$/, '') + AZURE_OPENAI_V1_PATH;
-    return new OpenAI({apiKey, baseURL});
+    return new OpenAI({
+      apiKey: this.resolveApiKey(),
+      baseURL: this.azureEndpoint.replace(/\/+$/, '') + AZURE_OPENAI_V1_PATH,
+    });
   }
 
   protected override resolveApiKey(): string | undefined {
