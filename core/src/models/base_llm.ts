@@ -5,6 +5,8 @@
  */
 
 import {getClientLabels} from '../utils/client_labels.js';
+import {logger} from '../utils/logger.js';
+import {canUseOutputSchemaWithTools} from '../utils/output_schema_utils.js';
 
 import {BaseLlmConnection} from './base_llm_connection.js';
 import {LlmCapabilities} from './capabilities.js';
@@ -16,6 +18,9 @@ import {LlmResponse} from './llm_response.js';
  * Defined once and shared by all BaseLlm instances.
  */
 const BASE_MODEL_SYMBOL = Symbol.for('google.adk.baseModel');
+
+/** Class names already warned about, so the fallback warns once per subclass. */
+const warnedNameBasedModels = new Set<string>();
 
 /**
  * Type guard to check if an object is an instance of BaseLlm.
@@ -58,15 +63,47 @@ export abstract class BaseLlm {
   static readonly supportedModels: Array<string | RegExp> = [];
 
   /**
-   * The capabilities of this model instance. A model that does not override
-   * this supports nothing beyond the defaults.
+   * The capabilities of this model instance.
+   *
+   * Subclasses override this to declare what they support. Build on the parent
+   * snapshot with a spread, `{...super.capabilities, outputSchemaAndTools:
+   * true}`, so a capability the override does not name keeps the parent's
+   * value. A subclass that extends `BaseLlm` directly should declare every
+   * field outright instead, because spreading `super.capabilities` routes
+   * through the deprecated fallback below.
    *
    * Keep an override a plain getter rather than caching the result: a
    * capability may depend on state that changes after construction, such as an
    * environment variable or a reassigned `model`.
    */
   get capabilities(): LlmCapabilities {
-    return {outputSchemaAndTools: false};
+    return {outputSchemaAndTools: this.legacyOutputSchemaAndTools()};
+  }
+
+  /**
+   * Resolves `outputSchemaAndTools` from the model name.
+   *
+   * Warns once per subclass, and only when it grants the capability, because
+   * those are the models whose behaviour changes when the fallback goes.
+   *
+   * @deprecated A model that does not override {@link BaseLlm.capabilities}
+   * keeps resolving the way it did before capabilities existed. This fallback
+   * is removed once such models declare the capability explicitly.
+   */
+  private legacyOutputSchemaAndTools(): boolean {
+    if (!canUseOutputSchemaWithTools(this.model)) {
+      return false;
+    }
+    const className = this.constructor.name;
+    if (!warnedNameBasedModels.has(className)) {
+      warnedNameBasedModels.add(className);
+      logger.warn(
+        `${className} relies on name-based detection of outputSchemaAndTools. ` +
+          'Override BaseLlm.capabilities to declare it explicitly; this ' +
+          'fallback will be removed in a future release.',
+      );
+    }
+    return true;
   }
 
   /**
