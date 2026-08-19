@@ -201,9 +201,6 @@ export class PluginManager {
 
   /**
    * Runs the `onRunErrorCallback` for all plugins.
-   *
-   * Notification-only: every plugin is notified and the caller rethrows the
-   * error.
    */
   async runOnRunErrorCallback({
     invocationContext,
@@ -275,9 +272,6 @@ export class PluginManager {
 
   /**
    * Runs the `onAgentErrorCallback` for all plugins.
-   *
-   * Notification-only: every plugin is notified and the caller rethrows the
-   * error.
    */
   async runOnAgentErrorCallback({
     agent,

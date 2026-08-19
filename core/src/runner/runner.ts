@@ -473,10 +473,9 @@ export class Runner {
               }
             }
           } catch (e: unknown) {
-            // Notification-only, so the caught value is always rethrown.
             // The session lookup and code-executor validation above stay
             // outside: they run before `invocationContext` exists, so there
-            // is nothing to notify with. This matches adk-python.
+            // is nothing to notify with.
             await this.pluginManager.runOnRunErrorCallback({
               invocationContext,
               error: e instanceof Error ? e : new Error(String(e)),
