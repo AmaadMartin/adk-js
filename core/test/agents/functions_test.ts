@@ -145,6 +145,7 @@ describe('handleFunctionCallList', () => {
       toolsDict,
       beforeToolCallbacks: [],
       afterToolCallbacks: [],
+      onToolErrorCallbacks: [],
     });
     expect(event).not.toBeNull();
     const definedEvent = event as Event;
@@ -175,6 +176,7 @@ describe('handleFunctionCallList', () => {
       toolsDict: {'arrayTool': arrayTool},
       beforeToolCallbacks: [],
       afterToolCallbacks: [],
+      onToolErrorCallbacks: [],
     });
 
     expect(event).not.toBeNull();
@@ -194,6 +196,7 @@ describe('handleFunctionCallList', () => {
       toolsDict,
       beforeToolCallbacks: [beforeToolCallback],
       afterToolCallbacks: [],
+      onToolErrorCallbacks: [],
     });
     expect(event).not.toBeNull();
     const definedEvent = event as Event;
@@ -215,6 +218,7 @@ describe('handleFunctionCallList', () => {
       toolsDict,
       beforeToolCallbacks: [beforeToolCallback1, beforeToolCallback2],
       afterToolCallbacks: [],
+      onToolErrorCallbacks: [],
     });
     expect(event).not.toBeNull();
     const definedEvent = event as Event;
@@ -233,6 +237,7 @@ describe('handleFunctionCallList', () => {
       toolsDict,
       beforeToolCallbacks: [],
       afterToolCallbacks: [afterToolCallback],
+      onToolErrorCallbacks: [],
     });
     expect(event).not.toBeNull();
     const definedEvent = event as Event;
@@ -254,6 +259,7 @@ describe('handleFunctionCallList', () => {
       toolsDict,
       beforeToolCallbacks: [],
       afterToolCallbacks: [afterToolCallback1, afterToolCallback2],
+      onToolErrorCallbacks: [],
     });
     expect(event).not.toBeNull();
     const definedEvent = event as Event;
@@ -274,6 +280,7 @@ describe('handleFunctionCallList', () => {
       toolsDict,
       beforeToolCallbacks: [],
       afterToolCallbacks: [],
+      onToolErrorCallbacks: [],
     });
     expect(event).not.toBeNull();
     const definedEvent = event as Event;
@@ -294,6 +301,7 @@ describe('handleFunctionCallList', () => {
       toolsDict,
       beforeToolCallbacks: [],
       afterToolCallbacks: [],
+      onToolErrorCallbacks: [],
     });
     expect(event).not.toBeNull();
     const definedEvent = event as Event;
@@ -319,6 +327,7 @@ describe('handleFunctionCallList', () => {
       toolsDict: {'errorTool': errorTool},
       beforeToolCallbacks: [],
       afterToolCallbacks: [],
+      onToolErrorCallbacks: [],
     });
     expect(event).not.toBeNull();
     const definedEvent = event as Event;
@@ -340,6 +349,7 @@ describe('handleFunctionCallList', () => {
       toolsDict: {'errorTool': errorTool},
       beforeToolCallbacks: [],
       afterToolCallbacks: [],
+      onToolErrorCallbacks: [],
     });
 
     expect(event!.content!.parts![0].functionResponse!.response).toEqual({
@@ -556,6 +566,7 @@ describe('handleFunctionCallList', () => {
       toolsDict: {'mockTool': mockTool},
       beforeToolCallbacks: [],
       afterToolCallbacks: [],
+      onToolErrorCallbacks: [],
     });
 
     expect(runAsyncSpy).toHaveBeenCalledWith(
@@ -581,6 +592,7 @@ describe('handleFunctionCallList', () => {
       toolsDict: {'nullTool': nullTool},
       beforeToolCallbacks: [],
       afterToolCallbacks: [],
+      onToolErrorCallbacks: [],
     });
     expect(event).not.toBeNull();
     expect(event?.content?.parts?.[0].functionResponse?.response).toStrictEqual(
@@ -597,6 +609,7 @@ describe('handleFunctionCallList', () => {
       toolsDict: {silentLongRunningTool},
       beforeToolCallbacks: [],
       afterToolCallbacks: [],
+      onToolErrorCallbacks: [],
     });
     expect(event).toBeNull();
   });
@@ -611,6 +624,7 @@ describe('handleFunctionCallList', () => {
       toolsDict: {silentLongRunningTool, falsyLongRunningTool},
       beforeToolCallbacks: [],
       afterToolCallbacks: [],
+      onToolErrorCallbacks: [],
     });
     expect(event?.content?.parts).toEqual([
       expect.objectContaining({

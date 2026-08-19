@@ -16,6 +16,7 @@ import {
   LlmAgent,
   LlmRequest,
   LlmResponse,
+  OnToolErrorCallback,
   RunAsyncToolRequest,
   Runner,
 } from '@google/adk';
@@ -453,12 +454,22 @@ describe('Runner.runLive', () => {
     expect(sentBack.parts?.[0]?.functionResponse?.name).toBe('echo');
   });
 
+  /** Runs an agent whose only tool throws, and returns the response the model saw. */
   async function runLiveWithThrowingTool(
-    agent: LlmAgent,
+    onToolErrorCallback?: OnToolErrorCallback,
   ): Promise<Record<string, unknown> | undefined> {
+    const llm = new FakeLiveLlm([
+      {content: {role: 'model', parts: [{functionCall: {name: 'boom'}}]}},
+      {turnComplete: true},
+    ]);
     const runner = new Runner({
       appName: TEST_APP_ID,
-      agent,
+      agent: new LlmAgent({
+        name: 'agent',
+        model: llm,
+        tools: [new ThrowingTool()],
+        onToolErrorCallback,
+      }),
       sessionService,
       artifactService,
     });
@@ -471,41 +482,20 @@ describe('Runner.runLive', () => {
     })) {
       // drain
     }
-    const llm = agent.model as FakeLiveLlm;
     return llm.connection!.contentCalls[0]?.parts?.[0]?.functionResponse
       ?.response;
   }
 
-  function boomCall(): Array<LlmResponse | Error> {
-    return [
-      {
-        content: {role: 'model', parts: [{functionCall: {name: 'boom'}}]},
-      },
-      {turnComplete: true},
-    ];
-  }
-
   it('uses an agent onToolErrorCallback when a live tool throws', async () => {
-    const agent = new LlmAgent({
-      name: 'agent',
-      model: new FakeLiveLlm(boomCall()),
-      tools: [new ThrowingTool()],
-      onToolErrorCallback: async () => ({result: 'live fallback'}),
-    });
-
-    expect(await runLiveWithThrowingTool(agent)).toEqual({
+    const response = await runLiveWithThrowingTool(async () => ({
       result: 'live fallback',
-    });
+    }));
+
+    expect(response).toEqual({result: 'live fallback'});
   });
 
   it('sends the tool error back when the live agent declares no callback', async () => {
-    const agent = new LlmAgent({
-      name: 'agent',
-      model: new FakeLiveLlm(boomCall()),
-      tools: [new ThrowingTool()],
-    });
-
-    expect(await runLiveWithThrowingTool(agent)).toEqual({
+    expect(await runLiveWithThrowingTool()).toEqual({
       error: 'live tool failed',
     });
   });

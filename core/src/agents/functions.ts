@@ -275,7 +275,7 @@ export async function handleFunctionCallsAsync({
   toolsDict: Record<string, BaseTool>;
   beforeToolCallbacks: SingleBeforeToolCallback[];
   afterToolCallbacks: SingleAfterToolCallback[];
-  onToolErrorCallbacks?: SingleOnToolErrorCallback[];
+  onToolErrorCallbacks: SingleOnToolErrorCallback[];
   filters?: Set<string>;
   toolConfirmationDict?: Record<string, ToolConfirmation>;
 }): Promise<Event | null> {
@@ -330,7 +330,7 @@ export async function handleFunctionCallList({
   toolsDict: Record<string, BaseTool>;
   beforeToolCallbacks: SingleBeforeToolCallback[];
   afterToolCallbacks: SingleAfterToolCallback[];
-  onToolErrorCallbacks?: SingleOnToolErrorCallback[];
+  onToolErrorCallbacks: SingleOnToolErrorCallback[];
   filters?: Set<string>;
   toolConfirmationDict?: Record<string, ToolConfirmation>;
 }): Promise<Event | null> {
@@ -408,7 +408,7 @@ export async function handleFunctionCallList({
           // plugin declined, matching adk-python's
           // `_run_on_tool_error_callbacks`.
           if (onToolErrorResponse == null) {
-            for (const callback of onToolErrorCallbacks ?? []) {
+            for (const callback of onToolErrorCallbacks) {
               onToolErrorResponse = await callback({
                 tool: tool,
                 args: functionArgs,

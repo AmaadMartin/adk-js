@@ -78,6 +78,7 @@ export class ToolNode extends BaseNode {
       // no agent-level tool-callback list on a workflow node.
       beforeToolCallbacks: [],
       afterToolCallbacks: [],
+      onToolErrorCallbacks: [],
     });
 
     if (!responseEvent) {
