@@ -16,8 +16,10 @@ import {
   PluginManager,
 } from '@google/adk';
 import {Content} from '@google/genai';
-import {beforeEach, describe, expect, it} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {ContextCompactionTrigger} from '../../src/plugins/base_plugin.js';
+import {isPluginCloseTimeoutError} from '../../src/plugins/plugin_manager.js';
+import {resetLogger, setLogger} from '../../src/utils/logger.js';
 
 type PluginCallbackName = keyof BasePlugin;
 
@@ -391,9 +393,256 @@ describe('PluginManager.close', () => {
       secondFailure,
     ]);
     expect((error as AggregateError).message).toEqual(
-      'Failed to close plugins: plugin_bad1, plugin_bad2',
+      "Failed to close plugins: 'plugin_bad1': Error, 'plugin_bad2': Error",
     );
     expect(healthy.closeCount).toEqual(1);
     expect(closeLog).toEqual(['plugin_bad1', 'plugin_bad2', 'plugin_good']);
+  });
+});
+
+/** A promise together with the handles that settle it from a test. */
+interface Deferred {
+  promise: Promise<void>;
+  resolve: () => void;
+  reject: (error: Error) => void;
+}
+
+function createDeferred(): Deferred {
+  let resolve: () => void = () => {};
+  let reject: (error: Error) => void = () => {};
+  const promise = new Promise<void>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return {promise, resolve, reject};
+}
+
+/** A plugin whose `close()` finishes only when the test settles its gate. */
+class GatedClosePlugin extends BasePlugin {
+  closeCount = 0;
+
+  constructor(
+    name: string,
+    private readonly gate: Promise<void>,
+  ) {
+    super(name);
+  }
+
+  override async close(): Promise<void> {
+    this.closeCount++;
+    await this.gate;
+  }
+}
+
+/** A plugin whose `close()` spans a real timer, so concurrency is observable. */
+class DelayedClosePlugin extends BasePlugin {
+  constructor(
+    name: string,
+    private readonly closeLog: string[],
+    private readonly delayMs: number,
+  ) {
+    super(name);
+  }
+
+  override async close(): Promise<void> {
+    this.closeLog.push(`${this.name}:start`);
+    await new Promise((resolve) => setTimeout(resolve, this.delayMs));
+    this.closeLog.push(`${this.name}:end`);
+  }
+}
+
+/** A plugin that rejects with a value that is not an `Error`. */
+class NonErrorClosePlugin extends BasePlugin {
+  override async close(): Promise<void> {
+    throw 'plain string failure';
+  }
+}
+
+const SHORT_CLOSE_TIMEOUT_MS = 20;
+
+describe('PluginManager.close timeout', () => {
+  const gates: Deferred[] = [];
+
+  function createGatedPlugin(name: string): GatedClosePlugin {
+    const gate = createDeferred();
+    gates.push(gate);
+    return new GatedClosePlugin(name, gate.promise);
+  }
+
+  afterEach(() => {
+    // Release every hung close so no worker is held open past its test.
+    for (const gate of gates.splice(0)) {
+      gate.resolve();
+    }
+  });
+
+  it('should close the later plugins when an earlier one hangs past its budget', async () => {
+    const closeLog: string[] = [];
+    const hangs = createGatedPlugin('hangs');
+    const healthy = new ClosablePlugin('healthy', closeLog);
+    const manager = new PluginManager([hangs, healthy], SHORT_CLOSE_TIMEOUT_MS);
+
+    const error = await manager.close().catch((e: unknown) => e);
+
+    if (!(error instanceof AggregateError)) {
+      expect.fail(`expected an AggregateError, got ${String(error)}`);
+    }
+    expect(error.errors).toHaveLength(1);
+    expect(healthy.closeCount).toEqual(1);
+    expect(closeLog).toEqual(['healthy']);
+  });
+
+  it('should report a plugin that overruns its budget as a timeout', async () => {
+    const manager = new PluginManager(
+      [createGatedPlugin('slow')],
+      SHORT_CLOSE_TIMEOUT_MS,
+    );
+
+    const error = await manager.close().catch((e: unknown) => e);
+
+    if (!(error instanceof AggregateError)) {
+      expect.fail(`expected an AggregateError, got ${String(error)}`);
+    }
+    expect(error.message).toEqual(
+      "Failed to close plugins: 'slow': PluginCloseTimeoutError",
+    );
+    const [cause] = error.errors;
+    if (!isPluginCloseTimeoutError(cause)) {
+      expect.fail(`expected a timeout error, got ${String(cause)}`);
+    }
+    expect(cause.pluginName).toEqual('slow');
+    expect(cause.timeoutMs).toEqual(SHORT_CLOSE_TIMEOUT_MS);
+    expect(cause.message).toEqual(
+      `Plugin 'slow' did not close within ${SHORT_CLOSE_TIMEOUT_MS} ms.`,
+    );
+  });
+
+  it('should not emit an unhandled rejection when an abandoned close later rejects', async () => {
+    const gate = createDeferred();
+    const manager = new PluginManager(
+      [new GatedClosePlugin('slow', gate.promise)],
+      SHORT_CLOSE_TIMEOUT_MS,
+    );
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => {
+      unhandled.push(reason);
+    };
+    process.on('unhandledRejection', onUnhandled);
+
+    try {
+      await expect(manager.close()).rejects.toBeInstanceOf(AggregateError);
+      gate.reject(new Error('late boom'));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+
+    expect(unhandled).toEqual([]);
+  });
+
+  it('should close plugins one at a time rather than concurrently', async () => {
+    const closeLog: string[] = [];
+    const manager = new PluginManager([
+      new DelayedClosePlugin('p1', closeLog, 30),
+      new DelayedClosePlugin('p2', closeLog, 20),
+      new DelayedClosePlugin('p3', closeLog, 10),
+    ]);
+
+    await manager.close();
+
+    expect(closeLog).toEqual([
+      'p1:start',
+      'p1:end',
+      'p2:start',
+      'p2:end',
+      'p3:start',
+      'p3:end',
+    ]);
+  });
+
+  it('should name every failing plugin and its error type', async () => {
+    const closeLog: string[] = [];
+    const firstFailure = new TypeError('bad type');
+    const thirdFailure = new RangeError('bad range');
+    const manager = new PluginManager([
+      new ClosablePlugin('plugin1', closeLog, firstFailure),
+      new ClosablePlugin('plugin2', closeLog),
+      new ClosablePlugin('plugin3', closeLog, thirdFailure),
+    ]);
+
+    const error = await manager.close().catch((e: unknown) => e);
+
+    if (!(error instanceof AggregateError)) {
+      expect.fail(`expected an AggregateError, got ${String(error)}`);
+    }
+    expect(error.message).toEqual(
+      "Failed to close plugins: 'plugin1': TypeError, 'plugin3': RangeError",
+    );
+    expect(error.errors).toEqual([firstFailure, thirdFailure]);
+    expect(closeLog).toEqual(['plugin1', 'plugin2', 'plugin3']);
+  });
+
+  it('should wrap a rejection that is not an Error', async () => {
+    const manager = new PluginManager([new NonErrorClosePlugin('rude')]);
+
+    const error = await manager.close().catch((e: unknown) => e);
+
+    if (!(error instanceof AggregateError)) {
+      expect.fail(`expected an AggregateError, got ${String(error)}`);
+    }
+    expect(error.message).toEqual("Failed to close plugins: 'rude': Error");
+    const [cause] = error.errors;
+    if (!(cause instanceof Error)) {
+      expect.fail(`expected an Error, got ${String(cause)}`);
+    }
+    expect(cause.message).toEqual('plain string failure');
+  });
+
+  it('should log a timeout at warn and any other failure at error', async () => {
+    const closeLog: string[] = [];
+    const manager = new PluginManager(
+      [
+        createGatedPlugin('slow'),
+        new ClosablePlugin('broken', closeLog, new Error('boom')),
+      ],
+      SHORT_CLOSE_TIMEOUT_MS,
+    );
+    const warnCalls: string[] = [];
+    const errorCalls: string[] = [];
+    setLogger({
+      setLogLevel: () => {},
+      log: () => {},
+      debug: () => {},
+      info: () => {},
+      warn: (...args: unknown[]) => {
+        warnCalls.push(args.map((a) => String(a)).join(' '));
+      },
+      error: (...args: unknown[]) => {
+        errorCalls.push(args.map((a) => String(a)).join(' '));
+      },
+    });
+
+    try {
+      await expect(manager.close()).rejects.toBeInstanceOf(AggregateError);
+    } finally {
+      resetLogger();
+    }
+
+    expect(warnCalls).toEqual([
+      `Failed to close plugin 'slow': Plugin 'slow' did not close within ${SHORT_CLOSE_TIMEOUT_MS} ms.`,
+    ]);
+    expect(errorCalls).toEqual(["Failed to close plugin 'broken': boom"]);
+  });
+
+  it('should keep the plugins registered and re-close them on a second call', async () => {
+    const closeLog: string[] = [];
+    const plugin = new ClosablePlugin('plugin1', closeLog);
+    const manager = new PluginManager([plugin]);
+
+    await manager.close();
+    await manager.close();
+
+    expect(plugin.closeCount).toEqual(2);
+    expect(manager.getPlugin('plugin1')).toBe(plugin);
   });
 });

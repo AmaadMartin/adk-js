@@ -42,6 +42,8 @@ export class InMemoryRunner extends Runner {
    * @param params.agent The root agent to run.
    * @param params.appName The application name. Defaults to `'InMemoryRunner'`.
    * @param params.plugins An optional list of plugins.
+   * @param params.pluginCloseTimeoutMs The budget, in milliseconds, given to
+   *     each plugin individually when the runner is closed.
    * @param params.resumabilityConfig An optional resumability configuration.
    */
   constructor(params: {
@@ -49,12 +51,14 @@ export class InMemoryRunner extends Runner {
     agent?: BaseAgent;
     appName?: string;
     plugins?: BasePlugin[];
+    pluginCloseTimeoutMs?: number;
     resumabilityConfig?: ResumabilityConfig;
   }) {
     const {
       agent,
       appName = 'InMemoryRunner',
       plugins = [],
+      pluginCloseTimeoutMs,
       app,
       resumabilityConfig,
     } = params;
@@ -64,6 +68,7 @@ export class InMemoryRunner extends Runner {
       appName,
       agent,
       plugins,
+      pluginCloseTimeoutMs,
       artifactService: new InMemoryArtifactService(),
       sessionService: new InMemorySessionService(),
       memoryService: new InMemoryMemoryService(),

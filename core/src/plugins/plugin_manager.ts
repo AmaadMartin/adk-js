@@ -17,6 +17,76 @@ import {logger} from '../utils/logger.js';
 
 import {BasePlugin, ContextCompactionTrigger} from './base_plugin.js';
 
+/** Default per-plugin budget, in milliseconds, for {@link PluginManager.close}. */
+const DEFAULT_CLOSE_TIMEOUT_MS = 5000;
+
+/** Raised when a plugin's `close()` exceeds the manager's per-plugin budget. */
+export class PluginCloseTimeoutError extends Error {
+  readonly pluginName: string;
+  readonly timeoutMs: number;
+
+  /**
+   * @param options.pluginName The name of the plugin that overran its budget.
+   * @param options.timeoutMs The budget, in milliseconds, that was exceeded.
+   */
+  constructor(options: {pluginName: string; timeoutMs: number}) {
+    super(
+      `Plugin '${options.pluginName}' did not close within ${options.timeoutMs} ms.`,
+    );
+    this.name = 'PluginCloseTimeoutError';
+    this.pluginName = options.pluginName;
+    this.timeoutMs = options.timeoutMs;
+    Object.setPrototypeOf(this, PluginCloseTimeoutError.prototype);
+  }
+}
+
+/**
+ * Type guard for {@link PluginCloseTimeoutError}.
+ *
+ * Matches on `name` rather than `instanceof <subclass>` so it stays correct when
+ * errors cross a package boundary (two copies of adk-js in one runtime would
+ * fail an `instanceof` check between them).
+ */
+export function isPluginCloseTimeoutError(
+  e: unknown,
+): e is PluginCloseTimeoutError {
+  return e instanceof Error && e.name === 'PluginCloseTimeoutError';
+}
+
+/**
+ * Closes one plugin under a budget, rejecting with a
+ * {@link PluginCloseTimeoutError} once `timeoutMs` elapses.
+ *
+ * JavaScript cannot cancel a pending promise, so a plugin that overruns its
+ * budget is abandoned rather than interrupted: its `close()` keeps running and
+ * its eventual result, including a late rejection, is discarded.
+ */
+async function closePluginWithTimeout(
+  plugin: BasePlugin,
+  timeoutMs: number,
+): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    // `Promise.race` subscribes to every input, so an abandoned close that
+    // rejects after the timeout is already handled. Abandoning it any other
+    // way needs its own `.catch`, or Node reports an unhandled rejection.
+    await Promise.race([
+      plugin.close(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () =>
+            reject(
+              new PluginCloseTimeoutError({pluginName: plugin.name, timeoutMs}),
+            ),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
  * Manages the registration and execution of plugins.
  *
@@ -33,13 +103,21 @@ import {BasePlugin, ContextCompactionTrigger} from './base_plugin.js';
  */
 export class PluginManager {
   private readonly plugins: Set<BasePlugin> = new Set();
+  private readonly closeTimeoutMs: number;
+
   /**
    * Initializes the plugin service.
    *
    * @param plugins An optional list of plugins to register upon
    *     initialization.
+   * @param closeTimeoutMs The budget, in milliseconds, given to each plugin
+   *     individually by {@link close}.
    */
-  constructor(plugins?: BasePlugin[]) {
+  constructor(
+    plugins?: BasePlugin[],
+    closeTimeoutMs: number = DEFAULT_CLOSE_TIMEOUT_MS,
+  ) {
+    this.closeTimeoutMs = closeTimeoutMs;
     if (plugins) {
       for (const plugin of plugins) {
         this.registerPlugin(plugin);
@@ -393,25 +471,41 @@ export class PluginManager {
   /**
    * Closes every registered plugin.
    *
-   * Plugins are closed sequentially in registration order. A plugin that
-   * throws does not prevent the remaining plugins from being closed; all
-   * failures are collected and raised together once the loop completes.
+   * Plugins are closed sequentially in registration order, each under its own
+   * budget. A plugin that throws or overruns its budget does not prevent the
+   * remaining plugins from being closed; all failures are collected and raised
+   * together once the loop completes. Closing does not deregister a plugin.
+   *
+   * A plugin that overruns its budget is abandoned rather than interrupted,
+   * because JavaScript cannot cancel a pending promise: its `close()` keeps
+   * running and its eventual result is discarded.
    *
    * @throws An `AggregateError` naming every plugin that failed to close.
    */
   async close(): Promise<void> {
-    const failures: Array<[string, unknown]> = [];
+    const failures = new Map<string, Error>();
     for (const plugin of this.plugins) {
       try {
-        await plugin.close();
+        await closePluginWithTimeout(plugin, this.closeTimeoutMs);
       } catch (e: unknown) {
-        failures.push([plugin.name, e]);
+        const error = e instanceof Error ? e : new Error(String(e));
+        failures.set(plugin.name, error);
+        const message = `Failed to close plugin '${plugin.name}': ${error.message}`;
+        if (isPluginCloseTimeoutError(error)) {
+          logger.warn(message);
+        } else {
+          logger.error(message);
+        }
       }
     }
-    if (failures.length > 0) {
+    if (failures.size > 0) {
+      const summary = Array.from(
+        failures,
+        ([name, error]) => `'${name}': ${error.name}`,
+      ).join(', ');
       throw new AggregateError(
-        failures.map(([, error]) => error),
-        `Failed to close plugins: ${failures.map(([name]) => name).join(', ')}`,
+        Array.from(failures.values()),
+        `Failed to close plugins: ${summary}`,
       );
     }
   }

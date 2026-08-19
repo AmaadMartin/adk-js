@@ -15,7 +15,7 @@ import {
   InvocationContext,
   LlmAgent,
 } from '@google/adk';
-import {describe, expect, it, vi} from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 
 const TEST_USER_ID = 'test_user_id';
 const TEST_MESSAGE = 'Hello, agent!';
@@ -186,5 +186,54 @@ describe('InMemoryRunner', () => {
     }
 
     expect(closeSpy).toHaveBeenCalled();
+  });
+});
+
+/** A plugin whose `close()` finishes only when the test settles its gate. */
+class HangingPlugin extends BasePlugin {
+  closeCount = 0;
+
+  constructor(
+    name: string,
+    private readonly gate: Promise<void>,
+  ) {
+    super(name);
+  }
+
+  override async close(): Promise<void> {
+    this.closeCount++;
+    await this.gate;
+  }
+}
+
+describe('InMemoryRunner pluginCloseTimeoutMs', () => {
+  let releaseGate: () => void = () => {};
+
+  afterEach(() => {
+    // Release the hung close so no worker is held open past its test.
+    releaseGate();
+  });
+
+  it('should forward the budget to the plugin manager', async () => {
+    const gate = new Promise<void>((resolve) => {
+      releaseGate = resolve;
+    });
+    const runner = new InMemoryRunner({
+      agent: new MockAgent(),
+      plugins: [new HangingPlugin('hangs', gate)],
+      pluginCloseTimeoutMs: 20,
+    });
+
+    const startedAt = Date.now();
+    const error = await runner.close().catch((e: unknown) => e);
+
+    if (!(error instanceof AggregateError)) {
+      expect.fail(`expected an AggregateError, got ${String(error)}`);
+    }
+    expect(error.message).toEqual(
+      "Failed to close plugins: 'hangs': PluginCloseTimeoutError",
+    );
+    // Far below the 5000 ms default, so the configured budget was the one used.
+    expect(Date.now() - startedAt).toBeLessThan(1000);
   });
 });

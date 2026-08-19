@@ -24,7 +24,7 @@ import {
   ToolUnion,
 } from '@google/adk';
 import {Content, FunctionCall, FunctionResponse} from '@google/genai';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {resetLogger, setLogger} from '../../src/utils/logger.js';
 
 const TEST_APP_ID = 'test_app_id';
@@ -1506,5 +1506,57 @@ describe('Runner.close', () => {
 
     expect(closeLog).toEqual(['afterRun:probe', 'plugin:probe']);
     expect(plugin.closeCount).toEqual(1);
+  });
+});
+
+/** A plugin whose `close()` finishes only when the test settles its gate. */
+class HangingPlugin extends BasePlugin {
+  closeCount = 0;
+
+  constructor(
+    name: string,
+    private readonly gate: Promise<void>,
+  ) {
+    super(name);
+  }
+
+  override async close(): Promise<void> {
+    this.closeCount++;
+    await this.gate;
+  }
+}
+
+describe('Runner pluginCloseTimeoutMs', () => {
+  let releaseGate: () => void = () => {};
+
+  afterEach(() => {
+    // Release the hung close so no worker is held open past its test.
+    releaseGate();
+  });
+
+  it('gives each plugin the configured budget instead of the default', async () => {
+    const gate = new Promise<void>((resolve) => {
+      releaseGate = resolve;
+    });
+    const hangs = new HangingPlugin('hangs', gate);
+    const healthy = new RecordingPlugin('healthy', []);
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent: new ToolsetAgent('root_agent', []),
+      plugins: [hangs, healthy],
+      pluginCloseTimeoutMs: 20,
+      sessionService: new InMemorySessionService(),
+    });
+
+    const startedAt = Date.now();
+    const error = await runner.close().catch((e: unknown) => e);
+
+    if (!(error instanceof AggregateError)) {
+      expect.fail(`expected an AggregateError, got ${String(error)}`);
+    }
+    expect(error.message).toContain("'hangs'");
+    // Far below the 5000 ms default, so the configured budget was the one used.
+    expect(Date.now() - startedAt).toBeLessThan(1000);
+    expect(healthy.closeCount).toEqual(1);
   });
 });
