@@ -102,6 +102,31 @@ import {ReadonlyContext} from './readonly_context.js';
 import {StreamingMode} from './run_config.js';
 
 /**
+ * Delay before closing the parent connection on agent transfer. Gives the
+ * server-side model a moment to flush any pending audio for the final turn
+ * before teardown. Mirrors `DEFAULT_TRANSFER_AGENT_DELAY` (1.0s) in the Python
+ * ADK live flow; the value is an empirical heuristic, not a guarantee.
+ */
+const TRANSFER_AGENT_DELAY_MS = 1000;
+
+/**
+ * Thrown by the receive step when the server sends `goAway`, i.e. asks the
+ * client to reconnect with its resumption handle. The live flow treats it like
+ * any other connection drop: it reconnects when a handle is available, and
+ * propagates the error when there is none.
+ */
+class LiveReconnectSignal extends Error {
+  constructor(readonly reason: string) {
+    super(`live reconnect requested: ${reason}`);
+    this.name = 'LiveReconnectSignal';
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
  * Input/output schema type for agent.
  */
 export type LlmAgentSchema =
@@ -232,12 +257,6 @@ const ADK_AGENT_NAME_LABEL_KEY = 'adk_agent_name';
  * `DEFAULT_MAX_RECONNECT_ATTEMPTS`.
  */
 const MAX_LIVE_RECONNECT_ATTEMPTS = 5;
-
-/**
- * Sentinel event compared by reference inside {@link LlmAgent.runLiveFlow} to
- * signal that the receive step wants a reconnect. It is never yielded to callers.
- */
-const LIVE_RECONNECT_SENTINEL: Event = createEvent();
 
 /**
  * Returns whether an error is an `AbortError`, i.e. a wait cancelled via an
@@ -991,14 +1010,17 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     // reliable numeric close codes (1000/1006/1011). Recovery is therefore
     // gated on the presence of a session resumption handle plus an attempt cap
     // rather than on error-code inspection.
-    let attempt = 1;
+    let reconnectAttempts = 0;
     while (true) {
       const sendAbort = new AbortController();
       let connection: BaseLlmConnection | undefined;
+      let connected = false;
       let sendTask: Promise<void> | undefined;
       let sendError: unknown;
       let shouldReconnect = false;
       let receiveError: unknown;
+      let transferToAgent: string | undefined;
+      let taskCompleted = false;
       const resuming = !!invocationContext.liveSessionResumptionHandle;
 
       try {
@@ -1006,16 +1028,15 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
           llmRequest.liveConnectConfig.sessionResumption = {
             ...(llmRequest.liveConnectConfig.sessionResumption ?? {}),
             handle: invocationContext.liveSessionResumptionHandle,
+            transparent: true,
           };
           logger.info(
-            `Reconnecting live connection for agent ${this.name} (attempt ${attempt}).`,
+            `Reconnecting live connection for agent ${this.name} (attempt ${reconnectAttempts}).`,
           );
         }
 
         connection = await llm.connect(llmRequest);
-        // Reset after a successful connect so every healthy connection gets the
-        // full reconnect budget for its own subsequent drops.
-        attempt = 1;
+        connected = true;
 
         // Skip history on a resumed reconnect: the server already holds the
         // conversation state associated with the resumption handle.
@@ -1055,39 +1076,72 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
           if (invocationContext.abortSignal?.aborted) {
             break;
           }
-          if (event === LIVE_RECONNECT_SENTINEL) {
-            shouldReconnect = true;
+          yield event;
+          const functionResponses = getFunctionResponses(event);
+          // Send tool results back to the live model so it can continue. They
+          // go straight down the connection rather than through the queue: the
+          // queue rejects sends once it is closed, and callers close it at end
+          // of input, before the model has ferried the tool results back.
+          if (event.content && functionResponses.length > 0) {
+            await connection.sendContent(event.content);
+          }
+          // The task tool ends the live turn. Let the model flush the audio it
+          // has already produced before the teardown closes the connection.
+          if (functionResponses.some((r) => r.name === 'task_completed')) {
+            taskCompleted = true;
+            await sleep(TRANSFER_AGENT_DELAY_MS);
             break;
           }
-          yield event;
-          // Echo tool results back to the live model so it can continue.
-          if (event.content && getFunctionResponses(event).length > 0) {
-            queue.sendContent(event.content);
+          // The transfer tool hands the live session to a sub-agent. The same
+          // delay lets the model finish the in-flight turn; the teardown below
+          // then stops this agent's send loop, so the two agents never read the
+          // shared queue at the same time.
+          if (event.actions?.transferToAgent) {
+            transferToAgent = event.actions.transferToAgent;
+            await sleep(TRANSFER_AGENT_DELAY_MS);
+            break;
           }
         }
       } catch (error: unknown) {
         receiveError = error;
       }
 
-      // Tear down: abort the send task, then close the connection. Both are
-      // awaited and their errors swallowed; close() tolerates a double close.
+      // Tear down: abort the send task, close the connection, then drain the
+      // send task. Closing first fails a send that is already in flight instead
+      // of letting it land after teardown. Errors are swallowed; close()
+      // tolerates a double close.
       sendAbort.abort();
+      if (connection) {
+        await connection.close().catch(() => {});
+      }
       if (sendTask) {
         await sendTask.catch(() => {});
       }
-      if (connection) {
-        await connection.close().catch(() => {});
+
+      if (invocationContext.abortSignal?.aborted) {
+        return;
       }
 
       // A send failure is treated like a connection drop (parity with Python,
       // where the send task's error surfaces when it is awaited on teardown).
       const error = receiveError ?? sendError;
       if (error) {
-        if (
-          invocationContext.liveSessionResumptionHandle &&
-          attempt <= MAX_LIVE_RECONNECT_ATTEMPTS
-        ) {
-          attempt++;
+        if (invocationContext.liveSessionResumptionHandle) {
+          reconnectAttempts++;
+          if (reconnectAttempts > MAX_LIVE_RECONNECT_ATTEMPTS) {
+            logger.error(
+              `Max live reconnection attempts reached (${reconnectAttempts}) for agent ${this.name}.`,
+              error,
+            );
+            // A connection that never opened surfaces its own failure; a
+            // connection that dropped surfaces the exhausted budget.
+            if (!connected) {
+              throw error;
+            }
+            throw new Error(
+              `Max live reconnection attempts reached (${reconnectAttempts}).`,
+            );
+          }
           shouldReconnect = true;
           logger.info(
             `Live connection dropped for agent ${this.name}; reconnecting with session handle.`,
@@ -1099,6 +1153,31 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
           );
           throw error;
         }
+      }
+
+      if (taskCompleted) {
+        return;
+      }
+
+      // Hand the live session to the sub-agent the model transferred to. It
+      // opens its own connection, so the parent's resumption handle is put
+      // aside for the duration of the sub-agent's run.
+      if (transferToAgent) {
+        const subAgent =
+          requireAgent(invocationContext).rootAgent.findAgent(transferToAgent);
+        if (subAgent) {
+          const previousAgent = invocationContext.agent;
+          const previousHandle = invocationContext.liveSessionResumptionHandle;
+          invocationContext.agent = subAgent;
+          invocationContext.liveSessionResumptionHandle = undefined;
+          try {
+            yield* subAgent.runLive(invocationContext);
+          } finally {
+            invocationContext.agent = previousAgent;
+            invocationContext.liveSessionResumptionHandle = previousHandle;
+          }
+        }
+        return;
       }
 
       if (shouldReconnect && !invocationContext.abortSignal?.aborted) {
@@ -1152,8 +1231,8 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   /**
    * Receives model responses from the connection and converts them into events.
    *
-   * Yields {@link LIVE_RECONNECT_SENTINEL} (never surfaced to callers) when the
-   * server signals `goAway`, so the caller can reconnect.
+   * Throws a {@link LiveReconnectSignal} when the server signals `goAway`, so
+   * the caller reconnects with the session resumption handle.
    */
   private async *receiveFromModel(
     connection: BaseLlmConnection,
@@ -1170,8 +1249,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       }
       if (llmResponse.goAway) {
         logger.info(`Received go away signal for agent ${this.name}.`);
-        yield LIVE_RECONNECT_SENTINEL;
-        return;
+        throw new LiveReconnectSignal('goAway');
       }
       // Input transcriptions and user-role content are authored by the user;
       // everything else by the agent.

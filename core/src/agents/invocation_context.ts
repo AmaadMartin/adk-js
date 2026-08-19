@@ -261,7 +261,8 @@ export class InvocationContext {
 
   /**
    * The queue that feeds client requests (content, audio blobs, activity
-   * signals) to a live (bidirectional) agent run. Only set for live runs.
+   * signals) to a live (bidirectional) agent run. Set only for invocations
+   * started via `runner.runLive`.
    */
   readonly liveRequestQueue?: LiveRequestQueue;
 
@@ -269,7 +270,8 @@ export class InvocationContext {
    * The latest session resumption handle received from the live server.
    *
    * Mutable: the live flow updates it whenever the server sends a new handle,
-   * and reads it to reconnect a dropped connection to the same session.
+   * and reads it to reconnect a dropped connection. The server restores its
+   * state from the handle instead of replaying history.
    */
   liveSessionResumptionHandle?: string;
 
@@ -307,6 +309,8 @@ export class InvocationContext {
     this.invocationCostManager =
       (params as {invocationCostManager?: InvocationCostManager})
         .invocationCostManager ?? new InvocationCostManager();
+    this.liveRequestQueue = params.liveRequestQueue;
+    this.liveSessionResumptionHandle = params.liveSessionResumptionHandle;
   }
 
   /**

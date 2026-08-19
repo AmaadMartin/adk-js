@@ -25,7 +25,7 @@ import {
 } from '@google/adk';
 import type {Blob, Content} from '@google/genai';
 import {Type} from '@google/genai';
-import {describe, expect, it, vi} from 'vitest';
+import {describe, expect, it} from 'vitest';
 
 /**
  * Parity with the private `MAX_LIVE_RECONNECT_ATTEMPTS` constant in
@@ -378,7 +378,7 @@ describe('LlmAgent.runLiveFlow', () => {
     );
   });
 
-  it('executes tools and echoes function responses back to the queue', async () => {
+  it('executes tools and sends function responses back to the model', async () => {
     const echoTool = new FunctionTool({
       name: 'echo',
       description: 'Echoes the provided value.',
@@ -399,7 +399,6 @@ describe('LlmAgent.runLiveFlow', () => {
       },
     ]);
     const queue = new LiveRequestQueue();
-    const sendContentSpy = vi.spyOn(queue, 'sendContent');
     const agent = createAgent(new MockLiveLlm([connection]), {
       tools: [echoTool],
     });
@@ -418,8 +417,10 @@ describe('LlmAgent.runLiveFlow', () => {
     expect(responseEvent!.content?.parts?.[0].functionResponse?.name).toBe(
       'echo',
     );
-    // The function response is echoed back so the live model receives it.
-    expect(sendContentSpy).toHaveBeenCalledWith(responseEvent!.content);
+    // The function response goes back down the connection so the live model
+    // receives it. It does not go through the queue, which rejects sends once
+    // the caller has closed it at end of input.
+    expect(connection.sentContents).toContainEqual(responseEvent!.content);
   });
 
   it('renders a set_model_response function call as structured output', async () => {

@@ -67,6 +67,8 @@ export class BasicLlmRequestProcessor extends BaseLlmRequestProcessor {
         invocationContext.runConfig.inputAudioTranscription;
       llmRequest.liveConnectConfig.realtimeInputConfig =
         invocationContext.runConfig.realtimeInputConfig;
+      llmRequest.liveConnectConfig.contextWindowCompression =
+        invocationContext.runConfig.contextWindowCompression;
       // Gemini 3.x Live models reject these two fields.
       if (!isGemini3xFlashLive(llmRequest.model)) {
         llmRequest.liveConnectConfig.enableAffectiveDialog =
