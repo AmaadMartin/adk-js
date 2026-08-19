@@ -504,12 +504,40 @@ describe('handleFunctionCallList', () => {
     });
 
     const captured = plugin.capturedParams;
-    expect(captured?.tool.name).toBe('unknownTool');
-    expect(captured?.tool.description).toBe('Tool not found');
-    expect(captured?.toolArgs).toEqual({x: 1});
-    expect(captured?.error.message).toBe(
+    if (!captured) {
+      expect.fail('onToolErrorCallback was not called');
+    }
+    expect(captured.tool.name).toBe('unknownTool');
+    expect(captured.tool.description).toBe('Tool not found');
+    expect(captured.tool.isLongRunning).toBe(false);
+    expect(captured.toolArgs).toEqual({x: 1});
+    expect(captured.error.message).toBe(
       'Function unknownTool is not found in the toolsDict.',
     );
+  });
+
+  it('should refuse to run the placeholder handed to the callback', async () => {
+    const plugin = new RecordingErrorPlugin('recordingPlugin');
+    plugin.onToolErrorCallbackResponse = {reflection: 'use "testTool"'};
+    pluginManager.registerPlugin(plugin);
+
+    await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [
+        {id: randomIdForTestingOnly(), name: 'unknownTool', args: {}},
+      ],
+      toolsDict,
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    const captured = plugin.capturedParams;
+    if (!captured) {
+      expect.fail('onToolErrorCallback was not called');
+    }
+    await expect(
+      captured.tool.runAsync({args: {}, toolContext: captured.toolContext}),
+    ).rejects.toThrow('Function unknownTool is not found in the toolsDict.');
   });
 
   it('should name the placeholder <unnamed> for a nameless function call', async () => {
@@ -584,24 +612,6 @@ describe('handleFunctionCallList', () => {
         }),
       }),
     ]);
-  });
-});
-
-describe('ToolNotFound', () => {
-  const {ToolNotFound} = functionsExportedForTestingOnly;
-
-  it('should describe itself as the tool the model asked for', () => {
-    const tool = new ToolNotFound('unknownTool');
-    expect(tool.name).toBe('unknownTool');
-    expect(tool.description).toBe('Tool not found');
-    expect(tool.isLongRunning).toBe(false);
-  });
-
-  it('should reject when it is run', async () => {
-    const tool = new ToolNotFound('unknownTool');
-    await expect(tool.runAsync()).rejects.toThrow(
-      'Function unknownTool is not found in the toolsDict.',
-    );
   });
 });
 
