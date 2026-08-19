@@ -575,8 +575,13 @@ function recordedFunctionCallIds(events: readonly RecordedEvent[]): string[] {
  * Pairs the function-call ids a fixture recorded with the ids the live run
  * generates, in call order, so a recorded `functionResponse` is replayed
  * against the call the run actually made.
+ *
+ * A call the model made keeps the recorded id, because the recorded response
+ * carries it. The pairing is what covers the calls the framework raises
+ * itself — a confirmation or credential request — whose id is generated fresh
+ * on every run.
  */
-class FunctionCallIdMapper {
+export class FunctionCallIdMapper {
   private readonly idMap = new Map<string, string>();
   private consumed = 0;
 

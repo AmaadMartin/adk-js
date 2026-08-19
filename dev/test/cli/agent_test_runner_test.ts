@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {LlmResponse} from '@google/adk';
+import {createEvent, Event, LlmResponse} from '@google/adk';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -14,9 +14,11 @@ import {JsonObject} from '../../src/cli/agent_test_normalization.js';
 import {
   buildRecordedResponses,
   extractUserContent,
+  FunctionCallIdMapper,
   getTestFiles,
   rebuildAgentTests,
   RecordedEvent,
+  RecordedUserMessage,
   runAgentTests,
 } from '../../src/cli/agent_test_runner.js';
 import {RecordedModelPlugin} from '../../src/cli/recorded_model_plugin.js';
@@ -381,6 +383,45 @@ describe('buildRecordedResponses', () => {
       nodeInfo: nodePath ? {path: nodePath} : undefined,
       content: {role: 'model', parts: [{functionCall: {name, args: {}}}]},
     };
+  }
+});
+
+describe('FunctionCallIdMapper', () => {
+  it('replays a response against the id the live call actually used', () => {
+    const mapper = new FunctionCallIdMapper(['rec-1', 'rec-2']);
+    mapper.absorb([
+      callEvent('roll_dice', 'live-1'),
+      callEvent('adk_request_confirmation', 'live-2'),
+    ]);
+    const message = userMessage('adk_request_confirmation', 'rec-2');
+
+    mapper.remap(message);
+
+    expect(message.parts[0].functionResponse?.id).toBe('live-2');
+  });
+
+  it('leaves a response alone once the recorded ids run out', () => {
+    const mapper = new FunctionCallIdMapper(['rec-1']);
+    mapper.absorb([
+      callEvent('roll_dice', 'live-1'),
+      callEvent('roll_dice', 'live-2'),
+    ]);
+    const message = userMessage('roll_dice', 'unpaired');
+
+    mapper.remap(message);
+
+    expect(message.parts[0].functionResponse?.id).toBe('unpaired');
+  });
+
+  function callEvent(name: string, id: string): Event {
+    return createEvent({
+      author: 'agent',
+      content: {role: 'model', parts: [{functionCall: {id, name, args: {}}}]},
+    });
+  }
+
+  function userMessage(name: string, id: string): RecordedUserMessage {
+    return {role: 'user', parts: [{functionResponse: {id, name}}]};
   }
 });
 
