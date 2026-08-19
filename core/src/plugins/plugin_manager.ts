@@ -71,7 +71,7 @@ async function closePluginWithTimeout(
     // rejects after the timeout is already handled. Abandoning it any other
     // way needs its own `.catch`, or Node reports an unhandled rejection.
     await Promise.race([
-      (async () => plugin.close())(),
+      plugin.close(),
       new Promise<never>((_, reject) => {
         timer = setTimeout(
           () =>
@@ -104,7 +104,6 @@ async function closePluginWithTimeout(
 export class PluginManager {
   private readonly plugins: Set<BasePlugin> = new Set();
   private readonly closeTimeoutMs: number;
-  private skipClosingPlugins = false;
 
   /**
    * Initializes the plugin service.
@@ -124,18 +123,6 @@ export class PluginManager {
         this.registerPlugin(plugin);
       }
     }
-  }
-
-  /**
-   * Controls whether {@link close} closes the registered plugins.
-   *
-   * Set this to `true` when another component owns the plugins and is
-   * responsible for closing them, so this manager does not close them twice.
-   *
-   * @param value `true` to make {@link close} a no-op.
-   */
-  setSkipClosingPlugins(value: boolean): void {
-    this.skipClosingPlugins = value;
   }
 
   /**
@@ -493,15 +480,9 @@ export class PluginManager {
    * because JavaScript cannot cancel a pending promise: its `close()` keeps
    * running and its eventual result is discarded.
    *
-   * Does nothing when {@link setSkipClosingPlugins} was set to `true`.
-   *
    * @throws An `AggregateError` naming every plugin that failed to close.
    */
   async close(): Promise<void> {
-    if (this.skipClosingPlugins) {
-      logger.debug('Skipping plugin close: the plugins are owned elsewhere.');
-      return;
-    }
     const failures = new Map<string, Error>();
     for (const plugin of this.plugins) {
       try {
