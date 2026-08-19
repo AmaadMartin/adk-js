@@ -578,6 +578,9 @@ function enrichEvent({
   if (!event.author) {
     event.author = nodeName;
   }
+  if (!event.invocationId) {
+    event.invocationId = child.invocationId;
+  }
   // Engine-owned: always stamp the true node path (see doc above).
   event.nodeInfo = {...(event.nodeInfo ?? {}), path: child.nodePath};
   if (event.output !== undefined) {

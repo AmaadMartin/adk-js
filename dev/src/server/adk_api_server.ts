@@ -1100,15 +1100,17 @@ export class AdkApiServer {
         return;
       }
 
+      // `events` is declared outside the try so a failed run can still report
+      // the events it produced before it stopped.
+      const events: Event[] = [];
       try {
-        const events: Event[] = [];
         for await (const event of this.runAgentEvents(res, request)) {
           events.push(event);
         }
 
         res.json(events);
       } catch (e: unknown) {
-        this.sendAgentError(res, e, 'Failed to run agent');
+        this.sendAgentError(res, e, 'Failed to run agent', {events});
       }
     });
 
@@ -1125,6 +1127,9 @@ export class AdkApiServer {
         return;
       }
 
+      // `events` is declared outside the try so a failed run can still report
+      // the events it produced before it stopped.
+      const events: Event[] = [];
       try {
         // Reasoning Engine clients do not manage sessions, so this endpoint
         // creates one on demand instead of returning the 404 the others do.
@@ -1135,7 +1140,6 @@ export class AdkApiServer {
           state: {},
         });
 
-        const events: Event[] = [];
         for await (const event of this.runAgentEvents(res, request)) {
           events.push(event);
         }
@@ -1146,6 +1150,7 @@ export class AdkApiServer {
           res,
           e,
           'Failed to run agent via Reasoning Engine API',
+          {output: events},
         );
       }
     });
@@ -1267,16 +1272,20 @@ export class AdkApiServer {
   /**
    * An app name the loader never discovered is the caller's mistake (404);
    * anything else is a real failure on our side (500).
+   *
+   * `body` carries the events the run produced before it failed, under the key
+   * the endpoint uses for them, so a caller can see how far the run got.
    */
   private sendAgentError(
     res: Response,
     e: unknown,
     fallbackPrefix: string,
+    body: Record<string, Event[]> = {},
   ): void {
     const notFound = isAgentNotFoundError(e);
     const error = notFound ? e.message : `${fallbackPrefix}: ${e}`;
 
-    res.status(notFound ? 404 : 500).json({error});
+    res.status(notFound ? 404 : 500).json({error, ...body});
     this.logger.error(error);
   }
 

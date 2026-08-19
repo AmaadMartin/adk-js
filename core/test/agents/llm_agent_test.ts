@@ -43,6 +43,7 @@ import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
 import * as metrics from '../../src/telemetry/metrics.js';
+import {logger} from '../../src/utils/logger.js';
 
 const {generateAuthEvent, getLongRunningFunctionCalls} =
   llmAgentFunctionsExportedForTestingOnly;
@@ -555,6 +556,37 @@ describe('LlmAgent Schema Initialization', () => {
     });
     expect(agent.disallowTransferToParent).toBe(true);
     expect(agent.disallowTransferToPeers).toBe(true);
+  });
+
+  it('warns about transfer only when transfer was asked for explicitly', () => {
+    const outputSchema: Schema = {type: Type.OBJECT};
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+    const quiet = new LlmAgent({name: 'quiet', outputSchema});
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect(quiet.disallowTransferToParent).toBe(true);
+    expect(quiet.disallowTransferToPeers).toBe(true);
+
+    new LlmAgent({
+      name: 'loud',
+      outputSchema,
+      disallowTransferToPeers: false,
+    });
+    expect(warnSpy).toHaveBeenCalledOnce();
+
+    warnSpy.mockRestore();
+  });
+
+  it('warns about transfer when outputSchema co-exists with subAgents', () => {
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    const agent = new LlmAgent({
+      name: 'parent',
+      outputSchema: {type: Type.OBJECT},
+      subAgents: [new LlmAgent({name: 'child'})],
+    });
+    expect(warnSpy).toHaveBeenCalledOnce();
+    expect(agent.disallowTransferToPeers).toBe(true);
+    warnSpy.mockRestore();
   });
 });
 
