@@ -1223,7 +1223,9 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         if (request.content.parts?.some((part) => part.functionCall)) {
           throw new Error('User message cannot contain function calls.');
         }
-        await connection.sendContent(request.content);
+        await connection.sendContent(request.content, {
+          partial: request.partial,
+        });
       }
     }
   }
