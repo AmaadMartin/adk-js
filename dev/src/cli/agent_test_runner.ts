@@ -535,7 +535,9 @@ function isFrameworkRequest(event: RecordedEvent, content: Content): boolean {
  * An agent-emitted user-role event carries a node path; re-feeding one to the
  * runner would trigger an extra model call, so it is not a user turn.
  */
-export function extractUserContent(event: RecordedEvent): Content | undefined {
+export function extractUserContent(
+  event: RecordedEvent,
+): RecordedUserMessage | undefined {
   if (event.author !== 'user' || event.nodeInfo?.path) {
     return undefined;
   }
