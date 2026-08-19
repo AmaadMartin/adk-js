@@ -12,8 +12,11 @@ import {fileURLToPath} from 'node:url';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {JsonObject} from '../../src/cli/agent_test_normalization.js';
 import {
+  buildRecordedResponses,
+  extractUserContent,
   getTestFiles,
   rebuildAgentTests,
+  RecordedEvent,
   runAgentTests,
 } from '../../src/cli/agent_test_runner.js';
 import {RecordedModelPlugin} from '../../src/cli/recorded_model_plugin.js';
@@ -64,6 +67,13 @@ export const rootAgent = new LlmAgent({
     }),
   ],
 });
+`;
+
+/** The same agent wrapped in an `App`, the other shape an entry file exports. */
+const REPLAY_APP_SOURCE = `${REPLAY_AGENT_SOURCE}
+import {App} from '@google/adk';
+
+export const app = new App({name: 'dice_app', rootAgent});
 `;
 
 /** An agent with a scripted model, so that a rebuild is reproducible. */
@@ -130,8 +140,17 @@ const DICE_FIXTURE: JsonObject = {
   ],
 };
 
+const MOCKS_SKIP_REASON =
+  'the fixture relies on recorded RNG mocks, which are not supported';
+const NO_OPENING_MESSAGE_SKIP_REASON =
+  'the fixture does not open with a user text message';
+
 function userEvent(text: string): JsonObject {
   return {author: 'user', content: {role: 'user', parts: [{text}]}};
+}
+
+function skipped(name: string, message: string) {
+  return {name, status: 'skipped', message};
 }
 
 let tempDir: string;
@@ -308,6 +327,111 @@ describe('RecordedModelPlugin', () => {
   }
 });
 
+describe('buildRecordedResponses', () => {
+  it('keeps model events and ignores every other role', () => {
+    const responses = buildRecordedResponses([
+      {content: {role: 'model', parts: [{text: 'kept'}]}},
+      {content: {role: 'user', parts: [{text: 'ignored'}]}},
+      {content: {role: 'user'}},
+      {content: {role: 'model'}},
+      {content: {parts: [{text: 'ignored, no role'}]}},
+      {author: 'agent'},
+    ]);
+
+    expect(responses).toEqual([
+      {content: {role: 'model', parts: [{text: 'kept'}]}},
+      {content: {role: 'model'}},
+    ]);
+  });
+
+  it('skips the synthesized response that follows set_model_response', () => {
+    const responses = buildRecordedResponses([
+      {
+        content: {
+          role: 'user',
+          parts: [{functionResponse: {name: 'set_model_response'}}],
+        },
+      },
+      {content: {role: 'model', parts: [{text: 'synthesized'}]}},
+      {content: {role: 'model', parts: [{text: 'a real call'}]}},
+    ]);
+
+    expect(responses).toEqual([
+      {content: {role: 'model', parts: [{text: 'a real call'}]}},
+    ]);
+  });
+
+  it('skips the human-in-the-loop requests the framework raises', () => {
+    const responses = buildRecordedResponses([
+      hitlRequest('adk_request_confirmation'),
+      hitlRequest('adk_request_credential'),
+      hitlRequest('adk_request_input', 'wf.node'),
+      // A request_input at the root of the tree IS a model call.
+      hitlRequest('adk_request_input'),
+    ]);
+
+    expect(responses).toEqual(
+      [hitlRequest('adk_request_input').content].map((content) => ({content})),
+    );
+  });
+
+  function hitlRequest(name: string, nodePath?: string): RecordedEvent {
+    return {
+      author: 'agent',
+      nodeInfo: nodePath ? {path: nodePath} : undefined,
+      content: {role: 'model', parts: [{functionCall: {name, args: {}}}]},
+    };
+  }
+});
+
+describe('extractUserContent', () => {
+  it('keeps the text, function call and function response parts', () => {
+    const content = extractUserContent({
+      author: 'user',
+      content: {
+        role: 'user',
+        parts: [
+          {functionResponse: {id: 'fr-1', name: 'roll', response: {result: 4}}},
+          {text: 'and again'},
+          {functionCall: {id: 'fc-1', name: 'roll', args: {}}},
+          {inlineData: {mimeType: 'image/png', data: 'AAAA'}},
+        ],
+      },
+    });
+
+    expect(content).toEqual({
+      role: 'user',
+      parts: [
+        {functionResponse: {id: 'fr-1', name: 'roll', response: {result: 4}}},
+        {text: 'and again'},
+        {functionCall: {id: 'fc-1', name: 'roll', args: {}}},
+      ],
+    });
+  });
+
+  it('rejects an agent-emitted user-role event', () => {
+    // Re-feeding one of these to the runner would trigger an extra model call.
+    expect(
+      extractUserContent({
+        author: 'user',
+        nodeInfo: {path: 'wf.node'},
+        content: {role: 'user', parts: [{text: 'synthesized'}]},
+      }),
+    ).toBeUndefined();
+  });
+
+  it('rejects an event that is not a user turn or carries no usable part', () => {
+    expect(extractUserContent({author: 'agent'})).toBeUndefined();
+    expect(extractUserContent({author: 'user'})).toBeUndefined();
+    expect(
+      extractUserContent({
+        author: 'user',
+        content: {role: 'user', parts: [{inlineData: {data: 'AAAA'}}]},
+      }),
+    ).toBeUndefined();
+  });
+});
+
 describe('runAgentTests', () => {
   it('passes when the agent reproduces the recorded conversation', async () => {
     await writeAgent('dice', REPLAY_AGENT_SOURCE, {'roll.json': DICE_FIXTURE});
@@ -388,6 +512,78 @@ describe('runAgentTests', () => {
     );
   });
 
+  it('replays an entry file that exports an App', async () => {
+    await writeAgent('dice', REPLAY_APP_SOURCE, {'roll.json': DICE_FIXTURE});
+
+    const results = await runAgentTests({
+      folder: tempDir,
+      agentFileLoadOptions: UNCOMPILED,
+    });
+
+    expect(results).toEqual([{name: 'dice/roll.json', status: 'passed'}]);
+  });
+
+  it('fails a fixture whose recorded function call carries no id', async () => {
+    // Without an id the recorded call cannot be paired with the live one, so
+    // the run must report the mismatch instead of quietly passing.
+    const fixture = JSON.parse(JSON.stringify(DICE_FIXTURE)) as JsonObject;
+    const events = fixture['events'] as JsonObject[];
+    const parts = (events[1]['content'] as JsonObject)['parts'] as JsonObject[];
+    delete (parts[0]['functionCall'] as JsonObject)['id'];
+    await writeAgent('dice', REPLAY_AGENT_SOURCE, {'roll.json': fixture});
+
+    const [result] = await runAgentTests({
+      folder: tempDir,
+      agentFileLoadOptions: UNCOMPILED,
+    });
+
+    expect(result.status).toBe('failed');
+    expect(result.message).toContain('dice/roll.json');
+  });
+
+  it('replays a user turn that carries a recorded function response', async () => {
+    // The recorded response id names a call the live run remade under a new
+    // id, so the message only lines up if the id map is applied to it.
+    const fixture = JSON.parse(JSON.stringify(DICE_FIXTURE)) as JsonObject;
+    (fixture['events'] as JsonObject[])[4] = {
+      author: 'user',
+      content: {
+        role: 'user',
+        parts: [
+          {
+            functionResponse: {
+              id: 'fc-1',
+              name: 'roll_dice',
+              response: {result: 4},
+            },
+          },
+        ],
+      },
+    };
+    await writeAgent('dice', REPLAY_AGENT_SOURCE, {'roll.json': fixture});
+
+    const [result] = await runAgentTests({
+      folder: tempDir,
+      agentFileLoadOptions: UNCOMPILED,
+    });
+
+    expect(result).toEqual({name: 'dice/roll.json', status: 'passed'});
+  });
+
+  it('reports an agent that throws a value which is not an Error', async () => {
+    await writeAgent('broken', 'throw "a bare string";', {
+      'a.json': DICE_FIXTURE,
+    });
+
+    const [result] = await runAgentTests({
+      folder: tempDir,
+      agentFileLoadOptions: UNCOMPILED,
+    });
+
+    expect(result.status).toBe('failed');
+    expect(result.message).toBe('broken/a.json: a bare string');
+  });
+
   it('fails the fixture when the agent file cannot be loaded', async () => {
     await writeAgent('broken', 'throw new Error("boom while loading");', {
       'a.json': DICE_FIXTURE,
@@ -407,6 +603,7 @@ describe('runAgentTests', () => {
     await writeAgent('dice', REPLAY_AGENT_SOURCE, {
       'empty.json': {events: []},
       'mocked.json': {...DICE_FIXTURE, mocks: {'random.random': [0.5]}},
+      'no_events_key.json': {},
       'no_user.json': {
         events: [
           {
@@ -415,7 +612,22 @@ describe('runAgentTests', () => {
           },
         ],
       },
+      'user_without_text.json': {
+        events: [
+          {
+            author: 'user',
+            content: {
+              role: 'user',
+              parts: [{functionResponse: {name: 'roll_dice', response: {}}}],
+            },
+          },
+        ],
+      },
     });
+    await fs.writeFile(
+      path.join(tempDir, 'dice', 'tests', 'null.json'),
+      'null',
+    );
 
     const results = await runAgentTests({
       folder: tempDir,
@@ -423,22 +635,12 @@ describe('runAgentTests', () => {
     });
 
     expect(results).toEqual([
-      {
-        name: 'dice/empty.json',
-        status: 'skipped',
-        message: 'the fixture records no events',
-      },
-      {
-        name: 'dice/mocked.json',
-        status: 'skipped',
-        message:
-          'the fixture relies on recorded RNG mocks, which are not supported',
-      },
-      {
-        name: 'dice/no_user.json',
-        status: 'skipped',
-        message: 'the fixture does not open with a user text message',
-      },
+      skipped('dice/empty.json', 'the fixture records no events'),
+      skipped('dice/mocked.json', MOCKS_SKIP_REASON),
+      skipped('dice/no_events_key.json', 'the fixture records no events'),
+      skipped('dice/no_user.json', NO_OPENING_MESSAGE_SKIP_REASON),
+      skipped('dice/null.json', 'the fixture records no events'),
+      skipped('dice/user_without_text.json', NO_OPENING_MESSAGE_SKIP_REASON),
     ]);
   });
 
@@ -516,6 +718,62 @@ describe('rebuildAgentTests', () => {
     expect(logLines[0]).toContain('boom while loading');
     expect(logLines[1]).toContain('REBUILT');
     expect(logLines[1]).toContain('b.json');
+  });
+
+  it('reports a fixture whose function response answers no recorded call', async () => {
+    await writeAgent('scripted', REBUILD_AGENT_SOURCE, {
+      'resume.json': {
+        events: [
+          {author: 'agent'},
+          {
+            author: 'user',
+            content: {
+              role: 'user',
+              parts: [
+                {functionResponse: {id: 'fr-1', name: 'roll', response: {}}},
+              ],
+            },
+          },
+        ],
+      },
+    });
+    const fixturePath = path.join(tempDir, 'scripted', 'tests', 'resume.json');
+    const before = await fs.readFile(fixturePath, 'utf-8');
+
+    await rebuildAgentTests({
+      folder: tempDir,
+      agentFileLoadOptions: UNCOMPILED,
+    });
+
+    // A conversation cannot open with a tool result: the runner has no call to
+    // attach it to. The fixture must be left as it was.
+    expect(logLines).toEqual([
+      'FAILED scripted/resume.json: No function call event found for function' +
+        ' responses ids: fr-1',
+    ]);
+    expect(await fs.readFile(fixturePath, 'utf-8')).toBe(before);
+  });
+
+  it('skips a fixture with no events', async () => {
+    await writeAgent('scripted', REBUILD_AGENT_SOURCE, {
+      'a.json': {events: []},
+      'b.json': {},
+    });
+    await fs.writeFile(
+      path.join(tempDir, 'scripted', 'tests', 'c.json'),
+      'null',
+    );
+
+    await rebuildAgentTests({
+      folder: tempDir,
+      agentFileLoadOptions: UNCOMPILED,
+    });
+
+    expect(logLines).toEqual([
+      'SKIPPED scripted/a.json: the fixture records no events',
+      'SKIPPED scripted/b.json: the fixture records no events',
+      'SKIPPED scripted/c.json: the fixture records no events',
+    ]);
   });
 
   it('skips a fixture with no user messages', async () => {

@@ -94,7 +94,10 @@ export interface AgentTestOptions {
 }
 
 /** One event as recorded in a fixture: any field may be absent. */
-type RecordedEvent = Partial<Event>;
+export type RecordedEvent = Partial<Event>;
+
+/** A user turn read from a fixture. It always carries at least one part. */
+export type RecordedUserMessage = Content & {parts: Part[]};
 
 /**
  * A parsed fixture. Only `events` and `mocks` are interpreted; every other key
@@ -465,7 +468,7 @@ async function runTurn(
  * structured-output response that follows a `set_model_response` tool call,
  * and it raises the human-in-the-loop requests itself.
  */
-function buildRecordedResponses(
+export function buildRecordedResponses(
   events: readonly RecordedEvent[],
 ): LlmResponse[] {
   const responses: LlmResponse[] = [];
@@ -488,7 +491,10 @@ function buildRecordedResponses(
       continue;
     }
     if (!isFrameworkRequest(event, content)) {
-      responses.push({content});
+      // A copy, not the fixture's own object: the flow stamps generated ids
+      // onto the content it is given, which would edit the recorded side of
+      // the comparison into agreeing with the live one.
+      responses.push({content: structuredClone(content)});
     }
   }
   return responses;
@@ -529,7 +535,7 @@ function isFrameworkRequest(event: RecordedEvent, content: Content): boolean {
  * An agent-emitted user-role event carries a node path; re-feeding one to the
  * runner would trigger an extra model call, so it is not a user turn.
  */
-function extractUserContent(event: RecordedEvent): Content | undefined {
+export function extractUserContent(event: RecordedEvent): Content | undefined {
   if (event.author !== 'user' || event.nodeInfo?.path) {
     return undefined;
   }
@@ -589,8 +595,8 @@ class FunctionCallIdMapper {
   }
 
   /** Rewrites the response ids of a recorded user message, in place. */
-  remap(content: Content): void {
-    for (const part of content.parts ?? []) {
+  remap(content: RecordedUserMessage): void {
+    for (const part of content.parts) {
       const response = part.functionResponse;
       if (response?.id !== undefined) {
         response.id = this.idMap.get(response.id) ?? response.id;

@@ -213,6 +213,10 @@ describe('makeSortKey', () => {
     ]);
   });
 
+  it('treats a missing author and node path as empty strings', () => {
+    expect(makeSortKey({})).toEqual(['', '', '{}']);
+  });
+
   it('ignores key order but separates content', () => {
     const sameContentA: JsonObject = {author: 'a', first: 1, second: 2};
     const sameContentB: JsonObject = {author: 'a', second: 2, first: 1};
@@ -374,6 +378,40 @@ describe('normalizeIds', () => {
       originalFunctionCall: {id: 'fc-1', name: 'roll'},
       unrelated: ['random-1'],
     });
+  });
+
+  it('renumbers a call that carries no id, name or arguments', () => {
+    const event = createEvent({
+      author: 'agent',
+      content: {
+        role: 'model',
+        parts: [{functionCall: {}}, {functionCall: {id: 'random-1'}}],
+      },
+    });
+
+    normalizeIds([event]);
+
+    expect(event.content?.parts?.map((part) => part.functionCall)).toEqual([
+      {id: 'fc-1'},
+      {id: 'fc-2'},
+    ]);
+  });
+
+  it('leaves an unmapped isolationScope and response id alone', () => {
+    const scoped = createEvent({author: 'agent', isolationScope: 'unmapped'});
+    const orphan = responseEvent('never_called', 'unmapped-response');
+    const unnamed = createEvent({
+      author: 'agent',
+      content: {role: 'user', parts: [{functionResponse: {id: 'unmapped-id'}}]},
+    });
+
+    normalizeIds([scoped, orphan, unnamed]);
+
+    expect(scoped.isolationScope).toBe('unmapped');
+    expect(responseIds([orphan, unnamed])).toEqual([
+      'unmapped-response',
+      'unmapped-id',
+    ]);
   });
 
   it('remaps the keys of actions.requestedToolConfirmations', () => {

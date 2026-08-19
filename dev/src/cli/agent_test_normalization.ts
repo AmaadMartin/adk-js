@@ -258,8 +258,8 @@ export function sortKeysDeep(value: unknown): unknown {
   return sorted;
 }
 
-function stableStringify(value: unknown): string {
-  return JSON.stringify(sortKeysDeep(value)) ?? 'null';
+function stableStringify(value: JsonObject): string {
+  return JSON.stringify(sortKeysDeep(value));
 }
 
 /**
@@ -492,14 +492,9 @@ function remapToolConfirmations(
   event: Event,
   idMap: ReadonlyMap<string, string>,
 ): void {
-  const confirmations = event.actions?.requestedToolConfirmations;
-  if (!confirmations) {
-    return;
-  }
   event.actions.requestedToolConfirmations = Object.fromEntries(
-    Object.entries(confirmations).map(([id, confirmation]) => [
-      idMap.get(id) ?? id,
-      confirmation,
-    ]),
+    Object.entries(event.actions.requestedToolConfirmations).map(
+      ([id, confirmation]) => [idMap.get(id) ?? id, confirmation],
+    ),
   );
 }
