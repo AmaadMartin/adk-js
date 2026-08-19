@@ -519,13 +519,14 @@ describe('handleFunctionCallList', () => {
 
     await handleFunctionCallList({
       invocationContext,
-      functionCalls: [{id: randomIdForTestingOnly(), args: {}}],
+      functionCalls: [{id: randomIdForTestingOnly()}],
       toolsDict,
       beforeToolCallbacks: [],
       afterToolCallbacks: [],
     });
 
     expect(plugin.capturedParams?.tool.name).toBe('<unnamed>');
+    expect(plugin.capturedParams?.toolArgs).toEqual({});
   });
 
   it('should skip the after-tool callbacks for an unknown tool', async () => {

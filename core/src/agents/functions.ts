@@ -368,13 +368,11 @@ export async function handleFunctionCallList({
     });
     const functionArgs = functionCall.args ?? {};
 
-    let tool: BaseTool;
-    try {
-      tool = getTool(functionCall, toolsDict);
-    } catch (toolError: unknown) {
-      if (!(toolError instanceof Error)) {
-        throw toolError;
-      }
+    const tool = getTool(functionCall, toolsDict);
+    if (!tool) {
+      const toolError = new Error(
+        `Function ${functionCall.name} is not found in the toolsDict.`,
+      );
       const placeholder = new ToolNotFound(
         functionCall.name || UNNAMED_TOOL_NAME,
       );
@@ -582,14 +580,13 @@ function createToolContext({
   });
 }
 
+/** Returns the registered tool for a call, or `undefined` if there is none. */
 function getTool(
   functionCall: FunctionCall,
   toolsDict: Record<string, BaseTool>,
-): BaseTool {
-  if (!functionCall.name || !(functionCall.name in toolsDict)) {
-    throw new Error(
-      `Function ${functionCall.name} is not found in the toolsDict.`,
-    );
+): BaseTool | undefined {
+  if (!functionCall.name) {
+    return undefined;
   }
 
   return toolsDict[functionCall.name];
